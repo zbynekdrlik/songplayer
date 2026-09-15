@@ -158,6 +158,11 @@ pub async fn preprocess_vocals(
             return Ok(wav_out.to_path_buf());
         }
     }
+    // #162: acquire the process-global heavy-step slot BEFORE spawning (after
+    // the cache check, so a cache hit never waits) and hold it until the child
+    // exits — at most one heavy child (isolation / mtl / separation) runs
+    // process-wide, so two workers can never OOM the box together.
+    let _slot = crate::lyrics::heavy_slot::acquire_slot("isolation").await;
     let mut cmd = Command::new(python_path);
     cmd.args(preprocess_vocals_args(
         script_path,
@@ -201,6 +206,9 @@ pub async fn preprocess_vocals(
     );
 
     let mut child = cmd.spawn().context("failed to spawn preprocess-vocals")?;
+    // #162: cap the child's memory via a Windows Job Object so an OOM kills the
+    // child, not the host. Held (with the slot) until the child exits.
+    let _job = crate::lyrics::heavy_slot::assign_child_job(&child);
     let status = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => anyhow::bail!("preprocess-vocals wait failed: {e}"),

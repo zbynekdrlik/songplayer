@@ -413,6 +413,12 @@ impl LyricsWorker {
             Ok(SongOutcome::WaitingForWall) => {
                 debug!("worker: {youtube_id} deferred — wall in use (no backoff)");
             }
+            // #162: memory headroom fell below the floor before a heavy step —
+            // deferred with NO backoff (the WARN with the numbers already fired
+            // in `heavy_step_memory_ok`); the row re-runs the moment memory frees.
+            Ok(SongOutcome::WaitingForMemory) => {
+                debug!("worker: {youtube_id} deferred — memory headroom low (no backoff)");
+            }
             Err(e) => {
                 debug!("worker: processing failed for {youtube_id}: {e}");
                 let _ = crate::db::models::mark_video_lyrics(
@@ -595,18 +601,16 @@ impl LyricsWorker {
         .await;
 
         // #162: vocal isolation under the priority regime (details in
-        // `isolate_with_regime`). Only idle-only returns `Err(WallAbort)` → the
-        // song defers with NO backoff penalty; low-priority never Errs (it
-        // re-runs on CPU internally).
+        // `isolate_with_regime`). `Err(HeavyDefer)` → the song defers with NO
+        // backoff: idle-only wall-abort (WaitingForWall) or low memory
+        // (WaitingForMemory); low-priority otherwise never Errs (it re-runs on
+        // CPU internally). `defer_heavy` maps it to the right no-penalty outcome.
         let clean_vocal: Option<PathBuf> = match self
             .isolate_with_regime(&row, gpu_mem.as_deref(), mode)
             .await
         {
             Ok(v) => v,
-            Err(abort) => {
-                self.enter_wall_abort(&abort.detail).await;
-                return Ok(SongOutcome::WaitingForWall);
-            }
+            Err(d) => return Ok(self.defer_heavy(d).await),
         };
 
         self.broadcast_stage(
@@ -689,15 +693,11 @@ impl LyricsWorker {
             .await
         {
             Ok(t) => t,
-            Err(abort) => {
-                // #161: the wall went busy DURING mtl force-align — defer the
-                // whole song with no penalty. Never fall through to the g35t
-                // base tier (that would degrade the ★ mtl tier, owner's
-                // quality-first rule); the next idle pick re-runs mtl to
-                // byte-identical output.
-                self.enter_wall_abort(&abort.detail).await;
-                return Ok(SongOutcome::WaitingForWall);
-            }
+            // #161 wall-abort / #162 low memory during/before mtl → defer the
+            // whole song with NO penalty (defer_heavy). Never fall through to the
+            // g35t base tier (that would degrade the ★ mtl tier, owner's
+            // quality-first rule); the next pick re-runs mtl to byte-identical ★.
+            Err(d) => return Ok(self.defer_heavy(d).await),
         };
 
         // Tier 2 — v22 (#159) g35t base tier. The single fallback for every

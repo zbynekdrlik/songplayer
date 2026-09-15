@@ -59,6 +59,21 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   warnings`. Fix: `#[cfg_attr(not(windows), allow(dead_code))]` on the fn (see
   `HeavyStepPlan::creation_flags` in `lyrics/heavy_plan.rs`). Same idea for any
   item live only on one platform.
+- **An RAII guard field held ONLY for its Drop is `dead_code` "never read" — a
+  `_` prefix does NOT suppress it (that only silences `unused_variables` for
+  LOCALS, never `dead_code` for a FIELD).** A guard that holds a permit / handle
+  purely so its Drop fires (`_permit: OwnedSemaphorePermit`) needs an explicit
+  `#[allow(dead_code)]` ON THE FIELD (see `HeavySlotGuard._permit` in
+  `lyrics/heavy_slot.rs`). A field that IS read in the Drop body (e.g.
+  `ChildJobGuard.handle`) is fine without it.
+- **A guard held across `.await` in a SPAWNED (Send) worker future must itself be
+  `Send`.** A raw Windows `HANDLE` (`*mut c_void`) is `!Send`, so storing it in a
+  guard held across `child.wait().await` breaks `tokio::spawn`. Store the handle
+  as `isize` (Send) and cast back (`h as HANDLE`) only inside the Drop's `unsafe`
+  block (see `heavy_slot.rs::ChildJobGuard`). windows-sys (not `windows`) is the
+  lighter FFI for such cfg(windows) OS calls — primitive types (`u32`/`i32`/
+  `*mut c_void`), no Result/Param wrappers, so `== 0` / `.is_null()` checks and
+  `std::mem::zeroed()` POD structs (set `dwLength` yourself) are what compile.
 - **`clippy::duplicated_attributes`** (warn-by-default → error under `-D
   warnings`): adding `#[allow(clippy::too_many_arguments)]` to a fn that ALREADY
   had one makes the attribute appear twice → build fails. GREP for a pre-existing

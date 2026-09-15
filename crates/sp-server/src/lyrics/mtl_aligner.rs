@@ -149,6 +149,10 @@ async fn run_once(
     gpu_mem_setting: Option<&str>,
     plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
 ) -> Result<()> {
+    // #162: hold the process-global heavy-step slot for this mtl child's
+    // lifetime — one heavy child at a time process-wide (a CUDA-OOM `--no-cuda`
+    // retry re-acquires fresh, still ≤1 concurrent child).
+    let _slot = crate::lyrics::heavy_slot::acquire_slot("mtl align").await;
     let mut cmd = Command::new(&cfg.python);
     cmd.args(build_args(cfg, wav, text_json, out_json, no_cuda));
     // Python on Windows defaults stdio to the console codepage; #137 hit
@@ -180,6 +184,9 @@ async fn run_once(
     let mut child = cmd
         .spawn()
         .context("failed to spawn lyrics-alignment-mtl run.py")?;
+    // #162: cap the child's memory (Windows Job Object) so an OOM kills the
+    // child, not the host. Held (with the slot) until the child exits below.
+    let _job = crate::lyrics::heavy_slot::assign_child_job(&child);
     let mut stderr_buf = Vec::new();
     if let Some(mut stderr) = child.stderr.take() {
         // Best-effort capture; a read failure just leaves an empty tail.

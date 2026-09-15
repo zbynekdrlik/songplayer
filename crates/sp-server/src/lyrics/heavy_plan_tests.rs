@@ -120,9 +120,11 @@ fn creation_flags_gpu_is_create_no_window_plus_below_normal_class() {
 // ---- thread cap (pure) ---------------------------------------------------
 
 #[test]
-fn cpu_idle_threads_is_half_cores_at_least_one() {
-    assert_eq!(cpu_idle_threads_for(8), 4);
-    assert_eq!(cpu_idle_threads_for(16), 8);
+fn cpu_idle_threads_is_quarter_cores_at_least_one() {
+    // #162: a QUARTER of the cores (minimal load, not speed) — 3 on the 12-core box.
+    assert_eq!(cpu_idle_threads_for(12), 3);
+    assert_eq!(cpu_idle_threads_for(8), 2);
+    assert_eq!(cpu_idle_threads_for(16), 4);
     assert_eq!(cpu_idle_threads_for(3), 1);
     assert_eq!(cpu_idle_threads_for(1), 1);
     assert_eq!(cpu_idle_threads_for(0), 1);
