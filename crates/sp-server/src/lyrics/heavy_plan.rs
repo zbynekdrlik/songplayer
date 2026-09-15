@@ -259,6 +259,10 @@ pub(crate) enum HeavyDefer {
     /// #162: free RAM/commit below `HEAVY_STEP_MIN_FREE_BYTES` before the step
     /// (the WARN is already logged where the headroom was read) → `WaitingForMemory`.
     Memory,
+    /// #167: the engine started less than `HEAVY_STEP_STARTUP_FLOOR` ago — no
+    /// heavy step runs yet so the wall pipelines come up on a quiet box. No
+    /// backoff; the song is re-picked next tick.
+    StartupGrace,
 }
 
 impl crate::lyrics::worker::LyricsWorker {
@@ -346,6 +350,17 @@ impl crate::lyrics::worker::LyricsWorker {
         gpu_mem: Option<&str>,
         mode: ProcessingMode,
     ) -> Result<Option<PathBuf>, HeavyDefer> {
+        // #167: no heavy step for the first 60 s after engine start — the wall
+        // pipelines must come up on a quiet box. No backoff; the song is re-picked
+        // next tick.
+        if let Some(reg) = self.ndi_health_registry.as_ref()
+            && crate::lyrics::idle_gate::startup_floor_defers(reg.since_created())
+        {
+            tracing::info!(
+                "lyrics_worker: heavy step isolation deferred (wall unknown — startup grace)"
+            );
+            return Err(HeavyDefer::StartupGrace);
+        }
         // #162: memory-headroom guard BEFORE the slot (owner's order). Below the
         // 4 GiB floor → defer with no backoff (`WaitingForMemory`), re-check next
         // tick; the WARN with the numbers is logged in `heavy_step_memory_ok`.
@@ -405,6 +420,13 @@ impl crate::lyrics::worker::LyricsWorker {
             HeavyDefer::Memory => {
                 self.clear_processing().await;
                 SongOutcome::WaitingForMemory
+            }
+            HeavyDefer::StartupGrace => {
+                // #167: no-penalty defer, re-picked next tick once the 60 s floor
+                // elapses. Surface the same "waiting — wall in use" badge (the
+                // reading is UNKNOWN at startup, which reads as in-use).
+                self.enter_wall_wait("startup grace — wall unknown").await;
+                SongOutcome::WaitingForWall
             }
         }
     }

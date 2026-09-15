@@ -16,6 +16,7 @@ fn playing() -> WallActivity {
         any_playing: true,
         obs_streaming: false,
         obs_recording: false,
+        known: true,
     }
 }
 

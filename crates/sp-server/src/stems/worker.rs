@@ -15,7 +15,9 @@ use tracing::{error, info, warn};
 
 use crate::lyrics::aligner::isolation_timeout;
 use crate::lyrics::heavy_plan::{HeavyStepPlan, ProcessingMode};
-use crate::lyrics::idle_gate::{GateLog, WallActivity, should_defer, wall_activity_from};
+use crate::lyrics::idle_gate::{
+    GateLog, WallActivity, should_defer, startup_floor_defers, wall_activity_from,
+};
 use crate::lyrics::idle_gate_abort::run_with_wall_abort;
 
 /// #161: outcome of one stem-separation attempt run under the wall-abort
@@ -261,7 +263,10 @@ impl StemWorker {
         // long "warm-up" files pin the heavy child's memory near its ceiling
         // and are not songs anyway). Positive form via `stem_duration_too_long`
         // so no `!` sits at this seam; the decision is the unit-tested
-        // `stem_duration_supported`.
+        // `stem_duration_supported`. Done BEFORE the #167 startup floor: marking a
+        // row terminal-unsupported is a cheap DB write, not a heavy step, so it
+        // must not be deferred by the startup grace (it also skips the row for
+        // good, so deferring it just re-picks the same doomed row every tick).
         if stem_duration_too_long(job.duration_ms) {
             // Raw milliseconds on purpose: a `/ 1000` here is log-only
             // arithmetic that no test can pin (surviving mutants).
@@ -274,6 +279,21 @@ impl StemWorker {
                 STEM_MAX_DURATION_MS
             );
             let _ = crate::db::models_stems::mark_stems_unsupported(&self.pool, job.video_id).await;
+            return;
+        }
+
+        // #167: no HEAVY step for the first 60 s after engine start — the wall
+        // pipelines must come up on a fully quiet box (the post-deploy E2E samples
+        // the engine in exactly this window). Gated here, AFTER the terminal skip
+        // and before the actual separation; the row stays pending (no backoff),
+        // re-picked next tick.
+        if let Some(reg) = self.ndi_health_registry.as_ref()
+            && startup_floor_defers(reg.since_created())
+        {
+            info!(
+                video_id = job.video_id,
+                "stem worker: heavy step separation deferred (wall unknown — startup grace)"
+            );
             return;
         }
 

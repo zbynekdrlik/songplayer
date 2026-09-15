@@ -23,9 +23,11 @@ submitted to NDI:
 
 - `pipeline::decode_and_send` — offer right before `submitter.submit_nv12(...)`
   (the frame's `data` is moved into the submit call, so offer by `&data` first).
-- `pipeline_paced::decode_and_send_paced` — offer **inside the `pacer.prepare`
-  closure** (the decode-ahead step, BEFORE the boundary emit), so the sampling
-  is off the time-critical paced submit path.
+- `pipeline_paced::run_decode_producer` — offer **on the decode PRODUCER thread**
+  (#147 producer/consumer split), right after `decoder.next_synced()` and before
+  the frame is pushed to the bounded queue. This is off the emit/submit thread
+  entirely (even better than the old in-`prepare` offer), so the sampling never
+  touches the time-critical paced submit path.
 
 ## Iron rules
 

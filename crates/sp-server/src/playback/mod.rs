@@ -16,6 +16,7 @@ mod lyrics_loader;
 pub mod ndi_burn;
 pub mod ndi_health;
 pub mod pacer;
+pub mod pacer_queue; // #147 producer/consumer: pure bounded look-ahead frame queue
 pub mod pipeline;
 #[cfg(windows)]
 pub(crate) mod pipeline_paced;
@@ -335,11 +336,16 @@ impl PlaybackEngine {
         let genlock_pacing = self.genlock_pacing;
         let ndi_burn_registry = self.ndi_burn_registry.clone();
         let preview_registry = self.preview_registry.clone();
+        let ndi_health_registry = self.ndi_health_registry.clone();
         self.pipelines.entry(playlist_id).or_insert_with(|| {
             info!(
                 playlist_id,
                 ndi_name, genlock_pacing, "creating playback pipeline"
             );
+            // #167: count this created pipeline so the heavy-work startup grace
+            // knows how many outputs must report before the wall reading is
+            // trustworthy (runs once — this closure fires only on a vacant entry).
+            ndi_health_registry.register_pipeline();
             // #151: register this output's burn flag (default OFF, never
             // persisted) and hand the shared Arc to the pipeline's submitter.
             let burn_on = ndi_burn_registry.register(ndi_name, genlock_pacing);

@@ -70,6 +70,15 @@ impl LyricsWorker {
             return Ok(None);
         }
 
+        // #167: no heavy step for the first 60 s after engine start — the wall
+        // pipelines must come up on a quiet box. No backoff; re-picked next tick.
+        if let Some(reg) = self.ndi_health_registry.as_ref()
+            && crate::lyrics::idle_gate::startup_floor_defers(reg.since_created())
+        {
+            info!("lyrics_worker: heavy step mtl align deferred (wall unknown — startup grace)");
+            return Err(crate::lyrics::heavy_plan::HeavyDefer::StartupGrace);
+        }
+
         // #162: memory-headroom guard BEFORE the mtl heavy step (after the skip
         // conditions, so it only defers when mtl WILL run). Below the 4 GiB floor
         // → defer the whole song with no backoff (`WaitingForMemory`); the WARN
