@@ -167,8 +167,9 @@ async fn cpu_plan_hides_cuda_and_caps_threads() {
 
     assert_eq!(
         env_of(&cmd, "CUDA_VISIBLE_DEVICES"),
-        Some(Some(std::ffi::OsString::from(""))),
-        "cpu-idle plan must hide the GPU with CUDA_VISIBLE_DEVICES=\"\""
+        Some(Some(std::ffi::OsString::from("-1"))),
+        "cpu-idle plan must hide the GPU with CUDA_VISIBLE_DEVICES=\"-1\" \
+         (Windows drops an empty value, leaving the GPU visible)"
     );
     for k in ["OMP_NUM_THREADS", "MKL_NUM_THREADS", "TORCH_NUM_THREADS"] {
         assert!(env_of(&cmd, k).is_some(), "cpu-idle plan must cap {k}");
