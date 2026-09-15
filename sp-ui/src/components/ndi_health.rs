@@ -109,11 +109,22 @@ fn global_summary(health: &[NdiOutputHealth]) -> Option<(String, String)> {
     let live: Vec<&NdiOutputHealth> = enabled.iter().copied().filter(|o| o.is_live()).collect();
     let m = live.len();
     if m == 0 {
-        // Pacing enabled but nothing on the wall — clock-only, no error to shout.
-        return Some((
-            badge_class(LockState::Locked),
-            "● LOCKED (no live output)".to_string(),
-        ));
+        // Pacing enabled but nothing on the wall — the state comes from the
+        // clock only (LOCKED iff every output's clock is ok, else UNLOCKED),
+        // matching `sp_core::genlock::lock_state::summarize` and the post-deploy
+        // consistency oracle.
+        let clock_ok = enabled.iter().all(|o| o.clock.clock_ok);
+        let state = if clock_ok {
+            LockState::Locked
+        } else {
+            LockState::Unlocked
+        };
+        let text = if clock_ok {
+            "● LOCKED (no live output)".to_string()
+        } else {
+            "● UNLOCKED (no live output)".to_string()
+        };
+        return Some((badge_class(state), text));
     }
 
     let worst_state = live
