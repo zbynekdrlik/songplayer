@@ -59,9 +59,10 @@ pub struct RealReferenceStageBackend {
     /// backend, so this real backend's abort wrapper is never exercised there).
     pub ndi_health_registry: Option<std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>>,
     pub obs_state: Option<std::sync::Arc<tokio::sync::RwLock<crate::obs::ObsState>>>,
-    /// #161: the `lyrics_gate_when_playing` flag (read once per song by the
-    /// worker, passed in); `false` disables the mtl abort watcher.
-    pub gate_enabled: bool,
+    /// #162: the processing mode (read once per song by the worker, passed in).
+    /// Selects the mtl device/priority plan and whether the abort watcher is
+    /// armed (GPU jobs only — a CPU/IDLE job is never aborted).
+    pub mode: crate::lyrics::heavy_plan::ProcessingMode,
 }
 
 #[async_trait::async_trait]
@@ -75,6 +76,40 @@ impl ReferenceStageBackend for RealReferenceStageBackend {
         video_id: &str,
         lines: &[String],
     ) -> anyhow::Result<crate::lyrics::mtl_aligner::MtlOutput> {
+        use crate::lyrics::heavy_plan::{HeavyStepPlan, ProcessingMode};
+
+        let activity = crate::lyrics::idle_gate::wall_activity_from(
+            self.ndi_health_registry.as_ref(),
+            self.obs_state.as_ref(),
+        )
+        .await;
+        let plan = HeavyStepPlan::for_activity(self.mode, activity);
+        tracing::info!(
+            "lyrics_worker: heavy step mtl mode={} (wall {})",
+            plan.label(),
+            activity.reason().unwrap_or("idle")
+        );
+
+        // #162: the mtl align (a 2–5 min subprocess) runs under the chosen plan.
+        // The abort watcher is armed ONLY for a GPU-mode job (a CPU/IDLE job
+        // cannot disturb the wall, so it is never aborted). On a GPU abort in
+        // low-priority mode we re-run mtl IMMEDIATELY on CPU (no defer); in
+        // idle-only mode we surface the abort so the whole song defers.
+        if !plan.is_gpu() {
+            // CPU/IDLE plan: never watched, runs to completion.
+            return crate::lyrics::mtl_aligner::align(
+                &self.mtl_cfg,
+                vocals_wav,
+                video_id,
+                lines,
+                &self.work_dir,
+                self.gpu_mem_setting.as_deref(),
+                &plan,
+            )
+            .await;
+        }
+
+        // GPU plan: watch the wall and kill the child if it goes busy.
         let align_fut = crate::lyrics::mtl_aligner::align(
             &self.mtl_cfg,
             vocals_wav,
@@ -82,35 +117,52 @@ impl ReferenceStageBackend for RealReferenceStageBackend {
             lines,
             &self.work_dir,
             self.gpu_mem_setting.as_deref(),
+            &plan,
         );
-        // #161: watch the wall while mtl force-align (a 2–5 min GPU subprocess)
-        // runs; kill it if the wall goes busy. ONLY the mtl child is wrapped —
-        // the g35t HTTP verification that follows in `run_reference_stage` is
-        // remote and explicitly out of scope.
-        match crate::lyrics::idle_gate_abort::run_with_wall_abort(
-            align_fut,
-            self.gate_enabled,
-            || {
-                crate::lyrics::idle_gate::wall_activity_from(
-                    self.ndi_health_registry.as_ref(),
-                    self.obs_state.as_ref(),
-                )
-            },
-        )
+        match crate::lyrics::idle_gate_abort::run_with_wall_abort(align_fut, true, || {
+            crate::lyrics::idle_gate::wall_activity_from(
+                self.ndi_health_registry.as_ref(),
+                self.obs_state.as_ref(),
+            )
+        })
         .await
         {
             Ok(inner) => inner,
             Err(abort) => {
                 // Delete the aborted step's OWN scratch files (the partial
                 // output JSON + the input text JSON `align` wrote); the isolated
-                // vocal WAV (a completed intermediate) stays. Surface the abort
-                // as a downcastable error so `run_reference_stage` maps it to
-                // WallAborted, never a real mtl failure.
+                // vocal WAV (a completed intermediate) stays.
                 let out_json = self.work_dir.join(format!("{video_id}_mtl_out.json"));
                 let text_json = self.work_dir.join(format!("{video_id}_mtl_text.json"));
                 let _ = tokio::fs::remove_file(&out_json).await;
                 let _ = tokio::fs::remove_file(&text_json).await;
-                Err(anyhow::Error::new(abort))
+                match self.mode {
+                    ProcessingMode::LowPriority => {
+                        // #162: re-run mtl on CPU immediately — no defer, no idle
+                        // wait. Byte-identical ★ output (same aligner, CPU vs GPU).
+                        tracing::info!(
+                            "lyrics_worker: heavy step mtl re-run mode=cpu-idle \
+                             after GPU abort ({})",
+                            abort.detail
+                        );
+                        crate::lyrics::mtl_aligner::align(
+                            &self.mtl_cfg,
+                            vocals_wav,
+                            video_id,
+                            lines,
+                            &self.work_dir,
+                            self.gpu_mem_setting.as_deref(),
+                            &HeavyStepPlan::cpu_idle(),
+                        )
+                        .await
+                    }
+                    ProcessingMode::IdleOnly => {
+                        // Surface the abort as a downcastable error so
+                        // `run_reference_stage` maps it to WallAborted → the song
+                        // defers (today's idle-only semantics).
+                        Err(anyhow::Error::new(abort))
+                    }
+                }
             }
         }
     }

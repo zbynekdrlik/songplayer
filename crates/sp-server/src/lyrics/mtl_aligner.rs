@@ -147,6 +147,7 @@ async fn run_once(
     out_json: &Path,
     no_cuda: bool,
     gpu_mem_setting: Option<&str>,
+    plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
 ) -> Result<()> {
     let mut cmd = Command::new(&cfg.python);
     cmd.args(build_args(cfg, wav, text_json, out_json, no_cuda));
@@ -161,15 +162,11 @@ async fn run_once(
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::piped());
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW 0x08000000 | BELOW_NORMAL_PRIORITY_CLASS 0x00004000
-        // — same rationale as aligner.rs::preprocess_vocals: this is a
-        // shared event PC, leave CPU/GPU headroom for live playback and
-        // OBS/Resolume on the same box.
-        cmd.creation_flags(0x08000000 | 0x00004000);
-    }
+    // #162: stamp the priority-regime plan (CPU path hides the GPU + caps
+    // threads; Windows priority-class creation flags). The caller already
+    // forces `--no-cuda` for a CPU plan via `build_args`; hiding the GPU too is
+    // belt-and-suspenders. Replaces the old inline BELOW_NORMAL.
+    plan.apply(&mut cmd);
     cmd.kill_on_drop(true);
 
     debug!(
@@ -258,6 +255,7 @@ pub async fn align(
     lines: &[String],
     work_dir: &Path,
     gpu_mem_setting: Option<&str>,
+    plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
 ) -> Result<MtlOutput> {
     tokio::fs::create_dir_all(work_dir)
         .await
@@ -266,18 +264,25 @@ pub async fn align(
     let out_json = work_dir.join(format!("{video_id}_mtl_out.json"));
     write_text_json(&text_json, video_id, lines).await?;
 
+    // #162: a CPU plan runs `run.py --no-cuda` from the start (its `cuda=True`
+    // path would hard-error without a device — that raise is not a
+    // `CUDA out of memory`, so the OOM retry below would not catch it). A GPU
+    // plan keeps the existing behaviour: attempt CUDA, retry `--no-cuda` on OOM.
+    let force_no_cuda = !plan.is_gpu();
+
     match run_once(
         cfg,
         vocals_wav,
         &text_json,
         &out_json,
-        false,
+        force_no_cuda,
         gpu_mem_setting,
+        plan,
     )
     .await
     {
         Ok(()) => {}
-        Err(e) if is_cuda_oom(&e.to_string()) => {
+        Err(e) if !force_no_cuda && is_cuda_oom(&e.to_string()) => {
             warn!(
                 video_id,
                 error = %e,
@@ -290,6 +295,7 @@ pub async fn align(
                 &out_json,
                 true,
                 gpu_mem_setting,
+                plan,
             )
             .await?;
         }

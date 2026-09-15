@@ -34,6 +34,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (22, MIGRATION_V22),
     (23, MIGRATION_V23),
     (24, MIGRATION_V24),
+    (25, MIGRATION_V25),
 ];
 
 const MIGRATION_V1: &str = "
@@ -337,6 +338,19 @@ ALTER TABLE videos ADD COLUMN instrumental_file_path TEXT;
 ALTER TABLE videos ADD COLUMN stem_status TEXT;
 ALTER TABLE videos ADD COLUMN stem_attempts INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE videos ADD COLUMN stem_next_attempt_at TEXT;
+";
+
+// #162: replace the idle-ONLY lyrics gate with a priority regime. The single
+// operator switch is now `lyrics_processing_mode` (default `low-priority`); the
+// removed boolean `lyrics_gate_when_playing` is dropped here. Migration of its
+// old values folds to the low-priority default: an old `false` row was the
+// pre-#162 mitigation, and an old `true` row was the idle-only gate the owner
+// never approved as the default — BOTH become `low-priority` (i.e. no
+// `lyrics_processing_mode` row → the code default). So this migration only
+// deletes the stale key; an operator who wants the old behaviour sets
+// `lyrics_processing_mode = idle-only` explicitly.
+const MIGRATION_V25: &str = "
+DELETE FROM settings WHERE key = 'lyrics_gate_when_playing';
 ";
 
 /// Create a connection pool backed by a file.

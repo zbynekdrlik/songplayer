@@ -353,14 +353,13 @@ impl LyricsWorker {
             return;
         }
 
-        // #154 idle gate (loop level): heavy GPU/CPU stages (vocal isolation,
-        // dereverb, mtl alignment) run ONLY while the wall is idle — no
-        // playback pipeline Playing on program AND OBS not streaming/recording.
-        // While busy, skip the heavy pick, surface "waiting — wall in use" to
-        // the dashboard, and log once per state change. Cheap non-gated HTTP
-        // work (translation) STILL runs. No DB deferral/backoff — the row stays
-        // at the head of the queue and is picked the instant the wall goes idle.
-        let (defer, activity) = self.wall_gate_should_defer().await;
+        // #162 loop-level gate: only `idle-only` defers here (pre-#162 gate +
+        // idle-settle); `low-priority` (default) never defers — heavy steps run
+        // at reduced priority instead, so the queue drains continuously. On an
+        // idle-only defer, surface "waiting — wall in use" and keep the cheap
+        // non-gated translation moving; no DB deferral (row stays at the head).
+        let mode = self.processing_mode().await;
+        let (defer, activity) = self.loop_should_defer(mode).await;
         if defer {
             let detail = self.wall_busy_detail(activity).await;
             self.note_wall_gate(true, &detail);
@@ -371,7 +370,8 @@ impl LyricsWorker {
             self.retranslate_next_stale().await;
             return;
         }
-        // Wall is idle — log the resume transition (once) before picking work.
+        // Not deferring (low-priority always; idle-only when the wall is idle) —
+        // log the resume transition (once) before picking work.
         self.note_wall_gate(false, "");
 
         let row = match get_next_video_for_lyrics(&self.pool, LYRICS_PIPELINE_VERSION).await {
@@ -571,31 +571,35 @@ impl LyricsWorker {
 
         // v22 (#159): one regime. Every song with vocals + a text candidate
         // (≥4 lines) tries the v21 mtl reference stage below; songs it does
-        // not ship (no usable text, gate fail, mtl skip/error) take the g35t
-        // base tier. The old text-source eligibility gate that routed to the
-        // now-deleted asr_path / WhisperX routes is gone.
+        // not ship take the g35t base tier.
+        //
+        // #162: read the processing mode ONCE per song. `low-priority` (default)
+        // runs every heavy step at reduced priority (CPU-idle while the wall is
+        // in use, GPU when idle); `idle-only` keeps the pre-#162 defer/settle/
+        // abort gate. The badge suffix ` (cpu, wall in use)` surfaces the CPU
+        // regime; the idle-only "waiting" badge is separate.
+        let gpu_mem = self.gpu_mem_setting().await;
+        let mode = self.processing_mode().await;
+        let regime_activity = self.wall_activity().await;
+        let stage_suffix = Self::stage_regime_suffix(mode, regime_activity);
+
         self.broadcast_stage(
             video_id,
             &youtube_id,
             &song,
             &artist,
-            "preprocessing",
+            &format!("preprocessing{stage_suffix}"),
             None,
             started_at_unix_ms,
         )
         .await;
 
-        // Preprocess vocals (Mel-Roformer + anvuew); #154 passes the VRAM cap.
-        // #154/#161: read the wall gate ONCE per song — shared by the pre-mtl
-        // gate (`defer_before_mtl`) and the two mid-job abort watchers below.
-        let gpu_mem = self.gpu_mem_setting().await;
-        let gate_enabled = self.gate_when_playing_enabled().await;
-        // #161: vocal isolation runs under the mid-job abort watcher — if the
-        // wall goes busy while Demucs is running, the child is killed and the
-        // whole song defers with NO backoff penalty (the partial WAV is
-        // discarded; a cache-hit re-isolate on the next idle pick is identical).
+        // #162: vocal isolation under the priority regime (details in
+        // `isolate_with_regime`). Only idle-only returns `Err(WallAbort)` → the
+        // song defers with NO backoff penalty; low-priority never Errs (it
+        // re-runs on CPU internally).
         let clean_vocal: Option<PathBuf> = match self
-            .isolate_vocals(&row, gpu_mem.as_deref(), gate_enabled)
+            .isolate_with_regime(&row, gpu_mem.as_deref(), mode)
             .await
         {
             Ok(v) => v,
@@ -610,7 +614,7 @@ impl LyricsWorker {
             &youtube_id,
             &song,
             &artist,
-            "aligning",
+            &format!("aligning{stage_suffix}"),
             None,
             started_at_unix_ms,
         )
@@ -642,7 +646,7 @@ impl LyricsWorker {
         let best_candidate =
             crate::lyrics::claude_merge::best_authoritative_candidate(&candidates).cloned();
 
-        // #154 gate #2 (bound exposure to ONE stage). Isolation above may have
+        // #154 gate #2 (idle-only mode only, #162). Isolation above may have
         // started while the wall was idle and finished after it went busy — a
         // running subprocess is never killed (that would waste ~4 min of GPU
         // work), so the check goes here, BEFORE the next heavy spawn (mtl). If
@@ -650,9 +654,14 @@ impl LyricsWorker {
         // isolated vocal WAV is preserved on disk, so the next idle pick is a
         // cache-hit isolation + mtl with byte-identical output. We do NOT fall
         // through to the g35t base tier — that would degrade the ★ mtl tier
-        // (owner's quality-first rule). Only when mtl would run heavy work
-        // (a text candidate AND an isolated vocal WAV present).
-        if best_candidate.is_some() && clean_vocal.is_some() && self.defer_before_mtl().await {
+        // (owner's quality-first rule). In LOW-PRIORITY mode there is no gate #2:
+        // mtl runs at reduced priority instead (the backend picks the plan and
+        // re-runs on CPU if a GPU job is aborted).
+        if mode == crate::lyrics::heavy_plan::ProcessingMode::IdleOnly
+            && best_candidate.is_some()
+            && clean_vocal.is_some()
+            && self.defer_before_mtl().await
+        {
             return Ok(SongOutcome::WaitingForWall);
         }
 
@@ -662,12 +671,12 @@ impl LyricsWorker {
             http_client: self.client.clone(),
             gemini_keys: gemini_keys.clone(),
             gpu_mem_setting: gpu_mem.clone(),
-            // #161: the backend wraps ONLY the mtl subprocess in the abort
-            // watcher (never the g35t HTTP verification), using these handles +
-            // the once-read gate flag.
+            // #161/#162: the backend wraps ONLY the mtl subprocess (never the
+            // g35t HTTP verification), using these handles + the once-read
+            // processing mode (which selects the mtl plan + abort arming).
             ndi_health_registry: self.ndi_health_registry.clone(),
             obs_state: self.obs_state.clone(),
-            gate_enabled,
+            mode,
         };
         let mtl_track = match self
             .run_mtl_reference_stage(

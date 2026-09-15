@@ -116,27 +116,6 @@ fn should_defer_false_when_enabled_and_idle() {
     assert!(!should_defer(true, WallActivity::default()));
 }
 
-// ---- gate_setting_enabled ------------------------------------------------
-
-#[test]
-fn gate_setting_default_on_when_unset() {
-    assert!(gate_setting_enabled(None));
-}
-
-#[test]
-fn gate_setting_off_for_falsey_tokens() {
-    for v in ["false", "0", "off", "no", "FALSE", " Off "] {
-        assert!(!gate_setting_enabled(Some(v)), "expected {v:?} to disable");
-    }
-}
-
-#[test]
-fn gate_setting_on_for_truthy_tokens() {
-    for v in ["true", "1", "on", "yes", ""] {
-        assert!(gate_setting_enabled(Some(v)), "expected {v:?} to enable");
-    }
-}
-
 // ---- GateLog transition logging ------------------------------------------
 
 #[test]

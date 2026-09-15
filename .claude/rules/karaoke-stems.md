@@ -66,31 +66,45 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   `pipeline_paced.rs` in place of the bare audio open.
 - **Modes (`sp_core::playback::KaraokeMode`):** FullMix / KaraokeLow / VocalsOnly /
   InstrumentalOnly, with `stem_gains(vocal_gain) → (vg, ig)`.
+- **Priority regime (#162, `lyrics/heavy_plan.rs`) — supersedes the idle-ONLY
+  gate.** The single operator switch is `lyrics_processing_mode` = `low-priority`
+  (DEFAULT) | `idle-only` (the pre-#162 behaviour, operator option only). The old
+  `lyrics_gate_when_playing` boolean is REMOVED (both values folded to
+  low-priority by `MIGRATION_V25`). Owner ruling (2026-09-15): processing must
+  keep running during playback at a priority that cannot disturb the wall —
+  *stopping is not the solution* (the idle-only gate starved the queue because
+  SongPlayer/CG-OBS always play something). `HeavyStepPlan::for_activity(mode,
+  activity)` decides per step: **low-priority + wall in use → CPU-only** (`apply`
+  sets `CUDA_VISIBLE_DEVICES=""` so the script's torch builds every model on CPU,
+  byte-identical to the OOM→CPU fallback) **+ IDLE_PRIORITY_CLASS + thread cap
+  `OMP/MKL/TORCH_NUM_THREADS = max(1, cores/2)`** → the GPU is never touched, so
+  no fps drop / TDR; **low-priority + wall idle → GPU + BELOW_NORMAL** (fast);
+  **idle-only → GPU** (it defers instead of running on a busy wall).
 - **Worker (`crate::stems::StemWorker`)** mirrors the lyrics worker: a 10 s tick
-  that, ONLY while the wall is idle (reuses the #154 gate via
-  `idle_gate::wall_activity_from` + `GateLog::defer_settled`), separates the next
-  normalized song (`get_next_video_for_stems`, oldest-first, backoff-gated). Runs
-  `stem_worker.py` at BELOW_NORMAL WDDM priority + the `LYRICS_GPU_MEM_FRACTION`
-  VRAM cap + CUDA-OOM→CPU fallback (`gpu_policy`). Kill switch: `stem_worker_enabled`
-  (default ON, idle-gated anyway).
-- **Idle-settle hysteresis (2026-09-14 incident, `idle_gate.rs`):** a SINGLE idle
-  sample was the bug — OBS scene re-evaluation (E2E `afterAll`), an operator
-  scene switch or a song change flips every pipeline off `Playing` for a few
-  seconds, and both workers resumed a multi-minute GPU job during that gap. Heavy
-  work now resumes only after the wall reads idle continuously for
-  `WALL_IDLE_SETTLE = 30 s`. Both workers share the clock through
-  `GateLog::defer_settled` (the `GateLog` each already holds in a `Mutex`), so no
-  worker constructor changed; the pure `should_defer` stays for its own tests.
-- **Mid-job abort watcher (#161, `idle_gate_abort.rs`):** the settle gate only
-  decides BEFORE a heavy step; once separation is running (2–5 min GPU child)
-  it does nothing. `run_with_wall_abort` races the separation future against a
-  1 s wall poll and kills the child (`kill_on_drop`) after 2 consecutive busy
-  samples (~2 s debounce — NOT the 30 s settle, which guards resume, not run).
-  A wall abort re-queues with NO penalty (`StemStepResult::WallAborted`): the
-  partial stems are deleted and the DB row is left pending (`stem_status` NULL,
-  `stem_attempts` unchanged), so `get_next_video_for_stems` re-picks it the
-  moment the wall idles. A genuine separation failure still records the backoff
-  deferral. The lyrics worker wraps its isolation + mtl steps the same way.
+  that separates the next normalized song (`get_next_video_for_stems`,
+  oldest-first, backoff-gated) under the priority regime. In `low-priority` it
+  NEVER defers — it runs `stem_worker.py` on CPU-idle while the wall plays, GPU
+  when idle. In `idle-only` it defers on a busy wall (reuses
+  `idle_gate::wall_activity_from` + `GateLog::defer_settled`). VRAM cap
+  (`LYRICS_GPU_MEM_FRACTION`) + CUDA-OOM→CPU fallback (`gpu_policy`) unchanged.
+  Kill switch: `stem_worker_enabled` (default ON).
+- **Idle-settle hysteresis (2026-09-14 incident, `idle_gate.rs`) — IDLE-ONLY mode
+  only (#162):** a SINGLE idle sample was the bug — OBS scene re-evaluation (E2E
+  `afterAll`), an operator scene switch or a song change flips every pipeline off
+  `Playing` for a few seconds, and both workers resumed a multi-minute GPU job
+  during that gap. In idle-only mode heavy work now resumes only after the wall
+  reads idle continuously for `WALL_IDLE_SETTLE = 30 s` (shared clock via
+  `GateLog::defer_settled`). Low-priority mode has no settle — it never defers.
+- **Mid-job abort watcher (#161, `idle_gate_abort.rs`) — GPU jobs only (#162):**
+  once a GPU separation is running (2–5 min child) `run_with_wall_abort` races it
+  against a 1 s wall poll and kills the child (`kill_on_drop`) after 2 consecutive
+  busy samples (~2 s debounce — NOT the 30 s settle). A CPU-idle job is NEVER
+  aborted (it cannot disturb the wall). On abort: in `low-priority` the step
+  re-runs IMMEDIATELY on CPU (no defer); in `idle-only` it re-queues with NO
+  penalty (`StemStepResult::WallAborted` — partial stems deleted, DB row left
+  pending: `stem_status` NULL, `stem_attempts` unchanged, re-picked when idle). A
+  genuine separation failure still records the backoff deferral. The lyrics worker
+  wraps its isolation + mtl steps the same way.
 - **DB (V24):** `videos.{vocals_file_path, instrumental_file_path, stem_status,
   stem_attempts, stem_next_attempt_at}`. `stem_status` NULL=pending → done /
   failed (retryable) / unsupported (terminal). Paths are also derived

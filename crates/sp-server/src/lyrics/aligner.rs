@@ -104,6 +104,7 @@ pub fn isolation_timeout(duration_ms: Option<i64>) -> std::time::Duration {
 /// The Python prototype's `scripts/experiments/gemini_lyrics.py` also
 /// relied on caller-side caching of the vocals WAV.
 #[cfg_attr(test, mutants::skip)]
+#[allow(clippy::too_many_arguments)]
 pub async fn preprocess_vocals(
     python_path: &Path,
     script_path: &Path,
@@ -112,6 +113,7 @@ pub async fn preprocess_vocals(
     wav_out: &Path,
     timeout: std::time::Duration,
     gpu_mem_setting: Option<&str>,
+    plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
 ) -> Result<PathBuf> {
     // Cache check: reuse an existing vocals WAV if it looks complete.
     // 1 MB minimum avoids reusing truncated/aborted files from a previous
@@ -147,22 +149,18 @@ pub async fn preprocess_vocals(
             crate::lyrics::bootstrap::prepend_path_with(tools_dir),
         );
     }
-    // #154: carry the operator-tunable VRAM cap to the GPU child so vocal
-    // isolation leaves headroom for the live MF decoder on the shared PC.
+    // #154: carry the operator-tunable VRAM cap to the child (applied only on
+    // the GPU path by the script's `gpu_polite()`; harmless on the CPU path).
     for (k, v) in crate::lyrics::gpu_policy::env_for_child(gpu_mem_setting) {
         cmd.env(k, v);
     }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW 0x08000000 | BELOW_NORMAL_PRIORITY_CLASS 0x00004000.
-        // Below-normal priority means Demucs + PyTorch leave CPU cycles for
-        // the live video/audio path and for OBS/Resolume on the same PC.
-        // Without this, processing competes with playback and the shared
-        // event PC can overload (observed reboot on 2026-04-21).
-        cmd.creation_flags(0x08000000 | 0x00004000);
-    }
+    // #162: stamp the priority-regime plan — CPU path hides the GPU
+    // (`CUDA_VISIBLE_DEVICES=""`, so the script's torch builds every model on
+    // CPU, byte-identical to the OOM→CPU fallback) + caps CPU threads; and on
+    // Windows sets the priority-class creation flags (IDLE for cpu-idle,
+    // BELOW_NORMAL for gpu) OR'd with CREATE_NO_WINDOW. This replaces the old
+    // inline BELOW_NORMAL — leaving CPU/GPU headroom for the live wall.
+    plan.apply(&mut cmd);
     // Kill the Python child if the Command handle is dropped (worker
     // shutdown, error path, timeout). Prevents orphan Demucs processes
     // from holding ~1-2 GB of GPU model weights across SongPlayer

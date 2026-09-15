@@ -19,7 +19,7 @@ use tracing::{debug, warn};
 /// re-generated). `timeout` bounds the subprocess; callers pass
 /// `aligner::isolation_timeout(duration_ms)`.
 #[cfg_attr(test, mutants::skip)]
-#[allow(clippy::too_many_arguments)] // spawn helper: paths + timeout + cap, same shape as the lyrics workers
+#[allow(clippy::too_many_arguments)] // spawn helper: paths + timeout + cap + plan, same shape as the lyrics workers
 pub async fn separate_stems(
     python_path: &Path,
     script_path: &Path,
@@ -29,6 +29,7 @@ pub async fn separate_stems(
     instrumental_out: &Path,
     timeout: std::time::Duration,
     gpu_mem_setting: Option<&str>,
+    plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
 ) -> Result<()> {
     // Cache check: reuse an existing complete pair.
     if let (Ok(vm), Ok(im)) = (
@@ -68,18 +69,17 @@ pub async fn separate_stems(
             crate::lyrics::bootstrap::prepend_path_with(tools_dir),
         );
     }
-    // #154: carry the operator VRAM cap so separation leaves headroom for the
-    // live MF decoder on the shared box.
+    // #154: carry the operator VRAM cap (applied only on the GPU path by the
+    // script's `gpu_polite()`; harmless on the CPU path).
     for (k, v) in crate::lyrics::gpu_policy::env_for_child(gpu_mem_setting) {
         cmd.env(k, v);
     }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW 0x08000000 | BELOW_NORMAL_PRIORITY_CLASS 0x00004000.
-        cmd.creation_flags(0x08000000 | 0x00004000);
-    }
+    // #162: stamp the priority-regime plan — CPU path hides the GPU
+    // (`CUDA_VISIBLE_DEVICES=""` → the script's torch builds every model on CPU,
+    // byte-identical to the OOM→CPU fallback) + caps CPU threads; Windows
+    // priority-class creation flags (IDLE for cpu-idle, BELOW_NORMAL for gpu).
+    // Replaces the old inline BELOW_NORMAL.
+    plan.apply(&mut cmd);
     cmd.kill_on_drop(true);
     // Capture the child's traceback: inherited stdio drops the Python stderr, so
     // a live failure could not be diagnosed from the log (#14 follow-up).

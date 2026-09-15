@@ -157,7 +157,8 @@ impl crate::lyrics::worker::LyricsWorker {
         &self,
         row: &crate::db::models::VideoLyricsRow,
         gpu_mem: Option<&str>,
-        gate_enabled: bool,
+        plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
+        abort_enabled: bool,
     ) -> Result<Option<PathBuf>, WallAbort> {
         let venv_python = self.venv_python.read().await.clone();
         let (Some(python), Some(audio_path)) = (
@@ -180,8 +181,13 @@ impl crate::lyrics::worker::LyricsWorker {
             &wav_path,
             crate::lyrics::aligner::isolation_timeout(row.duration_ms),
             gpu_mem,
+            plan,
         );
-        match self.wall_abort(iso_fut, gate_enabled).await {
+        // #162: the abort watcher is armed ONLY for a GPU-mode job
+        // (`abort_enabled`). A CPU/IDLE job is never aborted — it cannot disturb
+        // the wall — so it runs to completion (`wall_abort` with the flag off
+        // simply awaits the future).
+        match self.wall_abort(iso_fut, abort_enabled).await {
             Ok(Ok(p)) => Ok(Some(p)),
             Ok(Err(e)) => {
                 tracing::warn!("worker: vocal isolation failed for {}: {e}", row.youtube_id);
