@@ -36,7 +36,7 @@ use tracing::{info, warn};
 /// heavy child spawns. 4 GiB clears one ~3.2 GB CPU-RoFormer working set with
 /// margin on the 16 GB box, so a heavy step never starts the box into a
 /// low-virtual-memory condition (the 07:40 crash).
-pub(crate) const HEAVY_STEP_MIN_FREE_BYTES: u64 = 0; // RED (#162): GREEN sets 4 GiB
+pub(crate) const HEAVY_STEP_MIN_FREE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 /// Per-child Windows Job Object memory ceiling. Above the single-child working
 /// set (~3.2 GB) with headroom, so a genuine runaway is killed at the CHILD,

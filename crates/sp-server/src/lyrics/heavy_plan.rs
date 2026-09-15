@@ -209,7 +209,7 @@ fn cpu_idle_threads() -> usize {
 /// so the 12-core box runs a heavy CPU step on 3 threads. Extracted so it is
 /// deterministic in tests.
 fn cpu_idle_threads_for(cores: usize) -> usize {
-    (cores / 2).max(1) // RED (#162): GREEN sets cores/4
+    (cores / 4).max(1)
 }
 
 // ---------------------------------------------------------------------------
