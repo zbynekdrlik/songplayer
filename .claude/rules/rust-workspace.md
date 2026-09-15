@@ -36,3 +36,15 @@ CI compiles everything else.)
 Root `cargo fmt --all` / `clippy` do NOT touch `sp-ui/` or `src-tauri/`, and CI
 has no fmt/clippy step for them (only `trunk build`). Never blanket-`cargo fmt`
 sp-ui (it rewrites long-drifted files) — see `.claude/rules/sp-ui-frontend.md`.
+
+## RED commit on the TIER-0 (no local compile) box
+You can't run tests locally, so a RED test must FAIL against a version of the
+code you can only reason about, without leaving warnings CI's clippy
+(`--all-targets -D warnings`) would reject. The clean pattern (used for #161's
+`idle_gate_abort`): make the RED commit ship the REAL logic but with ONE WRONG
+CONSTANT (e.g. `const ABORT_CONSECUTIVE_BUSY: u32 = u32::MAX;` → GREEN sets `2`).
+The logic still reads/writes every field, so nothing is dead_code, and the
+"must-abort" tests fail cleanly; a stub function body that ignores its fields
+would instead trip `dead_code`/`unused`. For timing tests (interval + sleep),
+use `#[tokio::test(start_paused = true)]` (tokio `test-util` is a dev-dep) so the
+1 s poll and a 30 s mock future advance deterministically with no real wait.
