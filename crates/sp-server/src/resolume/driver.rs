@@ -722,3 +722,7 @@ impl Eq for ClipInfo {}
 #[cfg(test)]
 #[path = "driver_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "driver_poll_tests.rs"]
+mod poll_tests;
