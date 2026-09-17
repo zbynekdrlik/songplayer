@@ -109,16 +109,55 @@ from position 0 so the position never advances (test 17's 0→0). This was the
 box log showed SongPlayer receiving and reacting to every switch, each ~2 s
 after the OBS switch).
 
-**Contract:** any E2E that switches OBS scenes must wait for the switch to
-actually apply, never a fixed sleep. `ObsDriver.switchScene` polls
-`GetCurrentProgramScene` until it equals the target (`e2e/obs-scene-wait.ts`
-`waitForProgramScene`, unit-tested in the mock suite `obs-scene-wait.spec.ts`),
-then a short settle, and **throws loudly** if the program scene never applies
-(a stuck transition / missing scene surfaces here, not as a mysterious
-downstream failure). This is transition-duration-agnostic — a 0 ms cut or a
-2 s fade both work. Do NOT "fix" scene-switch flake by bumping test timeouts
-(`no-timeout-band-aids.md`) or by mutating the shared live-wall OBS config
-(transition duration / studio mode).
+### Round 3 (#170): a name-only wait is NOT enough — same-scene switches DROP the next event
+
+The round-2 fix polled `GetCurrentProgramScene == target` only. Two studio-mode
+behaviours defeat that (reproduced live 3×, 17.9 02:06–02:09 UTC):
+
+1. **A SAME-scene `SetCurrentProgramScene` still runs a real 2 s transition**,
+   leaving `preview == program == that scene`. Test 17 opened with
+   `switchScene(baseline)` while OBS was already on `sp-slow` → an
+   `sp-slow→sp-slow` fade.
+2. **From that `preview==program` state OBS DROPS the next
+   `SetCurrentProgramScene`'s `CurrentProgramSceneChanged`** — `GetCurrentProgramScene`
+   reports the target but no event fires, so SongPlayer (event stream alive)
+   never learns of the switch; ytfast stays paused and the wall sits on a paused
+   source. A real transition to another scene first (so preview becomes the
+   *previous* program) restores normal behaviour.
+
+**Contract (round 3):** `ObsDriver.switchScene`
+(1) **skips when `program == target`** (`shouldSkipSceneSwitch` — never issue a
+same-scene switch); (2) in Studio Mode drives the transition the studio way —
+`SetCurrentPreviewScene(target)` + `TriggerStudioModeTransition` (which DOES emit
+the program-scene-changed event), else `SetCurrentProgramScene` (read
+`GetStudioModeEnabled` once); (3) waits until `GetCurrentProgramScene == target`
+**AND the transition has ENDED** (tracked via `SceneTransition{Started,Ended}`),
+then settles — `sceneSwitchSettled` / `waitForSceneSwitchApplied` in
+`e2e/obs-scene-wait.ts`, unit-tested in the mock suite `obs-scene-wait.spec.ts`.
+Throws loudly if the switch never settles. Transition-duration-agnostic (0 ms cut
+or 2 s fade). Do NOT "fix" scene-switch flake by bumping test timeouts
+(`no-timeout-band-aids.md`) or by mutating the shared live-wall OBS config.
+
+**Engine self-heal (the production bug the harness exposed):** a dropped
+`CurrentProgramSceneChanged` in daily studio-mode use is a dark wall for the
+operator, not just an E2E flake. `crates/sp-server/src/obs/` now polls
+`GetCurrentProgramScene` every ~2 s (`scene_poll::reconcile_program_scene`) and,
+on a mismatch with the last event-derived scene
+(`scene_poll::scene_poll_detects_change`), feeds the same `scene::apply_scene_change`
+path the event does (INFO log `obs: program scene changed without an event —
+reconciled by poll`).
+
+**afterAll read-back + afterEach restore:** the post-deploy suite restores the
+scene it started on and asserts `/api/v1/status.active_scene` (the engine's view)
+followed, retrying once and failing loudly — so a dropped switch never leaves the
+wall on the E2E baseline silently. `test.afterEach` restores the start scene after
+every test (pass OR fail), so a failed assertion that aborts a test's own trailing
+cleanup still returns the wall to the operator's scene.
+
+**Card honesty:** a `PlaybackStateChanged`-only store entry (video_id 0, empty
+song, zero duration) renders `np-idle` "Nothing playing", never a bogus
+`np-info` "0:00 / 0:00" (`sp-ui` `NowPlayingInfo::has_now_playing_content`) — so
+the position-advance check cannot be satisfied by an empty entry.
 
 ## A Deploy-job re-run only works while the run's artifacts exist (`dist` = 1 day)
 

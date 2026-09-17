@@ -28,5 +28,25 @@ Select the on-program output from `GET /api/v1/status` → `active_playlist_ids`
 ## Gotcha: `e2e/post-deploy-report/index.html` is a TRACKED artifact
 Playwright runs regenerate it; it shows up as ` M` in `git status`. `git checkout -- e2e/post-deploy-report/index.html` before committing so it never lands in your diff.
 
+## Studio Mode can DROP `CurrentProgramSceneChanged` — the ~2 s poll reconciles it (#170)
+
+OBS on win-resolume runs Studio Mode with a 2 s Fade. From a `preview == program`
+state (e.g. right after a same-scene transition) OBS **drops** the next program
+switch's `CurrentProgramSceneChanged` — `GetCurrentProgramScene` reports the new
+scene but no event fires, so the event-only path never learns of it and the wall
+sits on a paused source (a dark wall in daily operation, reproduced live 3×). The
+connection loop therefore ALSO polls `GetCurrentProgramScene` every
+`SCENE_POLL_INTERVAL` (~2 s) in `connect_and_run`'s `tokio::select!`
+(`obs/scene_poll.rs::reconcile_program_scene`); on a mismatch with the last
+event-derived `ObsState::current_scene`
+(`scene_poll::scene_poll_detects_change(last, polled) -> Option<scene>`) it feeds
+the SAME `scene::apply_scene_change` path the event does — so the reader arm and
+the poll arm share one scene-apply body (keeps `obs/mod.rs` ≤1000). A duplicate
+same-scene emit is harmless: `(Playing, SceneOn)` is a no-op in `state.rs`. The
+pure `scene_poll_detects_change` is Linux-unit-tested; `reconcile_program_scene`
+(I/O) is not (`obs/**` is excluded from the mutation gate). INFO log on a
+poll-caught switch: `obs: program scene changed without an event — reconciled by
+poll`.
+
 ## Reading the health snapshot's `state` — `Playing` already means "on program" (#154)
 `handle_health_snapshot` RECONCILES the pipeline-reported state before storing it: a pipeline that is `Playing` but whose scene is NOT on OBS program (`scene_active == false`) is stored as `Paused`, not `Playing`. So a consumer that reads `NdiHealthRegistry::snapshots()` and checks `state == PlaybackStateLabel::Playing` is already getting "an output is playing AND OBS is showing it" — you do NOT need to also cross-reference `active_playlist_ids`. The #154 lyrics idle gate relies on exactly this (`lyrics/idle_gate.rs::any_playing`): "any snapshot Playing" = "the wall is showing an output" = defer heavy GPU work. Read the registry in-process (the engine already holds the `Arc`); never HTTP-loop `/api/v1/ndi/health` back to your own server.
