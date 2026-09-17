@@ -127,6 +127,40 @@ test("row order stays alphabetical when a non-first playlist starts playing (#17
     .toBe(before.join("|"));
 });
 
+// #170 round 3: a playlist that has a live playback STATE but no NowPlaying
+// (the PlaybackStateChanged-only shape — video_id 0, empty song, zero
+// duration) must render the idle "Nothing playing" state, NOT a bogus
+// np-info "0:00 / 0:00" block. Otherwise the post-deploy position-advance
+// check reads that empty entry (0 → 0) as if a song were playing, and the
+// operator sees a card claiming playback for a paused source.
+test("an entry with no song and zero duration renders idle, not 0:00/0:00 (#170)", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  await waitForSelector12(page);
+
+  // Give a non-playing playlist (Playlist 08) a live state with NO preceding
+  // NowPlaying, so the store inserts the empty zero entry.
+  const set = await request.post("/__mock/set-playing", {
+    data: { playlist_id: 8, state: "WaitingForScene" },
+  });
+  expect(set.ok()).toBeTruthy();
+
+  // Select that playlist's work area.
+  await page
+    .getByTestId("playlist-selector-row")
+    .filter({ hasText: "Playlist 08" })
+    .click();
+  await expect(page.getByTestId("workspace-title")).toHaveText("Playlist 08");
+
+  const card = page.locator(".playlist-card");
+  // The empty entry must show the idle state, not a np-info counter.
+  await expect(card.locator(".np-idle")).toBeVisible();
+  await expect(card.locator(".np-info")).toHaveCount(0);
+  await expect(card).toContainText("Nothing playing");
+});
+
 test("clicking another row switches the work area and the URL (#165)", async ({
   page,
 }) => {
