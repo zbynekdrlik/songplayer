@@ -141,12 +141,18 @@ impl SharedHandoff {
     }
 
     /// Emit thread: signal end-of-song. `tail` is the EOS audio tail to submit
-    /// after the queue drains (or `None`). Wakes the submit thread.
+    /// after the queue drains (or `None`). Wakes the submit thread. IDEMPOTENT:
+    /// the FIRST stop wins the tail — a second call (e.g. the [`StopOnPanic`]
+    /// guard firing after a normal exit already stopped) never clobbers the tail
+    /// already handed over, it only re-notifies. This lets the panic guard call
+    /// it unconditionally (#168 review 🟡).
     #[cfg_attr(test, mutants::skip)]
     pub(crate) fn stop_with_tail(&self, tail: Option<(Vec<AudioFrame>, i64)>) {
         if let Ok(mut st) = self.inner.lock() {
-            st.eos_tail = tail;
-            st.stop = true;
+            if !st.stop {
+                st.eos_tail = tail;
+                st.stop = true;
+            }
             self.not_empty.notify_all();
         }
     }
@@ -155,6 +161,33 @@ impl SharedHandoff {
     #[cfg_attr(test, mutants::skip)]
     fn take_eos_tail(&self) -> Option<(Vec<AudioFrame>, i64)> {
         self.inner.lock().ok().and_then(|mut st| st.eos_tail.take())
+    }
+}
+
+/// RAII guard that signals the submit thread to stop if the emit loop UNWINDS
+/// (a panic in `pacer.service` / `sleep_to_boundary` / `event_tx.send`, none of
+/// which hold the handoff lock). Without it a panic would leave `stop` false, the
+/// submit thread parked forever in `not_empty.wait()`, and `thread::scope`'s join
+/// blocking on that parked consumer → the pipeline thread HANGS (a dark,
+/// non-recovering wall) instead of unwinding and letting the pipeline restart —
+/// exactly the regression the #168 review flagged. On the NORMAL path the emit
+/// loop already called `stop_with_tail(tail)` (which wins the tail, being first),
+/// so this guard's drop is an idempotent no-op that only re-notifies. Held for
+/// the whole `thread::scope` closure; its Drop runs during unwind BEFORE the
+/// scope joins the submit thread.
+pub(crate) struct StopOnPanic<'a> {
+    handoff: &'a SharedHandoff,
+}
+
+impl<'a> StopOnPanic<'a> {
+    pub(crate) fn new(handoff: &'a SharedHandoff) -> Self {
+        Self { handoff }
+    }
+}
+
+impl Drop for StopOnPanic<'_> {
+    fn drop(&mut self) {
+        self.handoff.stop_with_tail(None);
     }
 }
 

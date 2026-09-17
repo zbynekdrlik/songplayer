@@ -104,14 +104,17 @@ fn record_drop_bumps_dropped_only() {
 #[test]
 fn submit_p99_reports_worst_cost_us() {
     let mut c = SubmitCounters::new();
-    // 100 cheap submits (250 µs) + 1 spike (90 ms). p99 index = 99*101/100 = 99,
-    // which lands on the spike after sort.
-    for _ in 0..100 {
+    // 99 cheap submits (250 µs) + 1 spike (90 ms) = 100 samples, so the spike is
+    // the top 1 %. p99 index = (100 * 99) / 100 = 99 → the sorted ring is
+    // [250 ×99 (idx 0..=98), 90000 (idx 99)], so v[99] == 90000: the spike is
+    // reported. (A 1-in-101 spike would sit ABOVE the p99 rank and NOT be
+    // reported — the earlier off-by-one this fixes.)
+    for _ in 0..99 {
         c.record_submit(0, 2_500, 0); // 2_500 * 100ns = 250 µs
     }
     c.record_submit(0, 900_000, 0); // 900_000 * 100ns = 90_000 µs
     assert_eq!(c.submit_p99_us(), 90_000);
-    assert_eq!(c.submitted, 101);
+    assert_eq!(c.submitted, 100);
 }
 
 #[test]

@@ -21,7 +21,7 @@ use crate::playback::pipeline::{
     DecodeResult, PipelineCommand, PipelineEvent, should_run_heartbeat,
 };
 use crate::playback::pipeline_paced_submit::{
-    HandoffSink, SharedHandoff, emit_heartbeat_paced, run_submit_consumer,
+    HandoffSink, SharedHandoff, StopOnPanic, emit_heartbeat_paced, run_submit_consumer,
 };
 use crate::playback::submit_handoff::SUBMIT_HANDOFF_BOUND;
 use crate::playback::submitter::FrameSubmitter;
@@ -441,6 +441,11 @@ pub(crate) fn decode_and_send_paced(
     let result: DecodeResult = std::thread::scope(|s| {
         let sub: &mut FrameSubmitter<sp_ndi::RealNdiBackend> = submitter;
         let submit_join = s.spawn(move || run_submit_consumer(sub, handoff_ref, playlist_id));
+        // If the emit loop PANICS, unwind must still stop the submit thread or the
+        // scope's join deadlocks on the parked consumer (#168 review 🟡). On the
+        // normal path the explicit `stop_with_tail` below wins the tail and this
+        // drop is a no-op re-notify.
+        let _stop_guard = StopOnPanic::new(handoff_ref);
         let mut sink = HandoffSink::new(handoff_ref);
 
         // The emit loop returns the song's outcome plus the EOS audio tail (if
