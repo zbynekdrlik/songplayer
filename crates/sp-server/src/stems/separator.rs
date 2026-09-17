@@ -141,8 +141,14 @@ pub async fn separate_stems(
     // `child.wait()`, not `wait_with_output`, so we must drain the pipes
     // ourselves). Both tasks end when the child closes its pipes (normal exit,
     // or SIGKILL on a stall / `kill_on_drop`).
-    let stdout_task = child.stdout.take().map(drain_pipe);
-    let stderr_task = child.stderr.take().map(drain_pipe);
+    let stdout_task = child
+        .stdout
+        .take()
+        .map(crate::lyrics::child_output::drain_pipe);
+    let stderr_task = child
+        .stderr
+        .take()
+        .map(crate::lyrics::child_output::drain_pipe);
     // #171: bound the child by a STALL timeout — kill only when no new segment has
     // been written to work_dir for `stall_timeout` — NOT the whole-song ceiling
     // (a 10.5-min stem runs ~85 min on this CPU and the old ceiling killed it
@@ -168,11 +174,7 @@ pub async fn separate_stems(
     let stdout = String::from_utf8_lossy(&stdout);
     let status = status?;
     if !status.success() {
-        let tail = if stderr.trim().is_empty() {
-            tail_lines(&stdout, 20, 300)
-        } else {
-            tail_lines(&stderr, 20, 300)
-        };
+        let tail = crate::lyrics::child_output::failure_tail(&stderr, &stdout, 20, 300);
         warn!("separate-stems failed ({}); output tail:\n{}", status, tail);
         anyhow::bail!(
             "separate-stems exited with status {}; output tail:\n{}",
@@ -183,7 +185,7 @@ pub async fn separate_stems(
     // The script prints `gpu_polite:` diagnostics on stderr — keep the tail visible.
     debug!(
         "separate-stems ok; stderr tail:\n{}",
-        tail_lines(&stderr, 5, 300)
+        crate::lyrics::child_output::tail_lines(&stderr, 5, 300)
     );
 
     // Post-condition: both stems must exist and be non-trivial.
@@ -201,72 +203,8 @@ pub async fn separate_stems(
     Ok(())
 }
 
-/// Spawn a task that reads `pipe` to EOF into a byte buffer, returning its
-/// handle. Draining concurrently with the stall waiter keeps the child's stdio
-/// pipes from filling and deadlocking it (#171 — the waiter only calls
-/// `child.wait()`, not `wait_with_output`). I/O — `mutants::skip`.
-#[cfg_attr(test, mutants::skip)]
-fn drain_pipe<R>(mut pipe: R) -> tokio::task::JoinHandle<Vec<u8>>
-where
-    R: tokio::io::AsyncRead + Unpin + Send + 'static,
-{
-    tokio::spawn(async move {
-        use tokio::io::AsyncReadExt;
-        let mut buf = Vec::new();
-        let _ = pipe.read_to_end(&mut buf).await;
-        buf
-    })
-}
-
-/// Last `n` non-empty-trimmed lines of `s`, each truncated to `max_len` chars
-/// (append `…` when truncated), joined with `\n`. Pure — unit-tested.
-fn tail_lines(s: &str, n: usize, max_len: usize) -> String {
-    let lines: Vec<&str> = s.lines().collect();
-    let start = lines.len().saturating_sub(n);
-    lines[start..]
-        .iter()
-        .map(|line| {
-            if line.chars().count() > max_len {
-                let truncated: String = line.chars().take(max_len).collect();
-                format!("{truncated}…")
-            } else {
-                (*line).to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::tail_lines;
-
-    #[test]
-    fn keeps_only_the_last_n_lines() {
-        let input = (1..=25)
-            .map(|i| i.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let out = tail_lines(&input, 20, 300);
-        let out_lines: Vec<&str> = out.lines().collect();
-        assert_eq!(out_lines.len(), 20);
-        assert_eq!(out_lines.first(), Some(&"6"));
-        assert_eq!(out_lines.last(), Some(&"25"));
-    }
-
-    #[test]
-    fn truncates_a_long_line() {
-        let long = "x".repeat(500);
-        let out = tail_lines(&long, 20, 300);
-        assert_eq!(out.chars().count(), 301); // 300 + the ellipsis
-        assert!(out.ends_with('…'));
-    }
-
-    #[test]
-    fn empty_in_empty_out() {
-        assert_eq!(tail_lines("", 20, 300), "");
-    }
-
     // ---- #162: --force-cpu argv, NOT CUDA_VISIBLE_DEVICES ----------------
 
     fn separate_argv(plan: &crate::lyrics::heavy_plan::HeavyStepPlan) -> Vec<String> {
