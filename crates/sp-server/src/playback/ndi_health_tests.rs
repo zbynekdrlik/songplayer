@@ -108,10 +108,11 @@ async fn handle_health_snapshot_nudges_obs_on_prolonged_dark_wall() {
 }
 
 /// #173 round 2: a receiver that stays dark long enough for the ladder to walk
-/// clear+restore → toggle → recreate must ESCALATE to `RecreateInput` (the
-/// wedge remedy), and the snapshot must record it. This is the RED test for the
-/// escalation ladder — before the fix, the nudge repeated clear+restore forever
-/// and the wall stayed dark for ~20 min.
+/// clear+restore → toggle must ESCALATE past the first rung, and the snapshot
+/// must record the rung. (Rung 2, `RecreateInput`, is gated off since round 3 —
+/// `LADDER_RECREATE_ENABLED` — so the toggle is the highest rung today.) This is
+/// the RED test for the escalation ladder — before the fix, the nudge repeated
+/// clear+restore forever and the wall stayed dark for ~20 min.
 #[tokio::test]
 async fn handle_health_snapshot_escalates_to_recreate_on_sustained_dark_wall() {
     let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
@@ -135,14 +136,18 @@ async fn handle_health_snapshot_escalates_to_recreate_on_sustained_dark_wall() {
             last_step = Some(step);
         }
     }
+    // #173 round 3 gate: rung 2 (RecreateInput) is DISABLED until the executor
+    // creates-first-then-removes (it deleted sp-youth_video on the box on
+    // 17.9.2026), so the highest rung a sustained dark wall reaches is the toggle.
+    assert!(!crate::obs::ndi_recovery::LADDER_RECREATE_ENABLED);
     assert_eq!(
         last_step,
-        Some(crate::obs::ndi_recovery::RecoveryStep::RecreateInput),
-        "a sustained dark wall must escalate the ladder to RecreateInput",
+        Some(crate::obs::ndi_recovery::RecoveryStep::ToggleSceneItem),
+        "a sustained dark wall must escalate the ladder to the toggle rung (recreate is gated off)",
     );
     assert_eq!(
         registry.snapshots()[0].recovery_step,
-        Some(crate::obs::ndi_recovery::RecoveryStep::RecreateInput),
+        Some(crate::obs::ndi_recovery::RecoveryStep::ToggleSceneItem),
         "the snapshot must record the escalated rung",
     );
 }

@@ -74,6 +74,14 @@ pub const LADDER_STEP_SPACING_POLLS: u32 = 2;
 /// wall never sits dark for minutes without a fresh escalation.
 pub const LADDER_COOLDOWN_POLLS: u32 = 6;
 
+/// #173 round 3 gate: rung 2 (`RecreateInput`) is DISABLED until the executor
+/// creates-first-then-removes. On 17.9.2026 (0.54.0-dev.3, box verification)
+/// rung 2 removed `sp-youth_video` and its `CreateInput` failed, leaving the
+/// scene EMPTY — a production input deleted on a dark wall. While `false`, the
+/// ladder stops at rung 1 and cools down (`LADDER_COOLDOWN_POLLS`) before it
+/// restarts at `ClearRestore`.
+pub const LADDER_RECREATE_ENABLED: bool = false;
+
 /// One rung of the dark-wall recovery ladder (#173 round 2). Ordered by
 /// escalating disruption; `ClearRestore` is the round-1 nudge. Serialized onto
 /// the `/api/v1/ndi/health` snapshot so the dashboard / E2E can see which rung
@@ -135,8 +143,14 @@ pub fn next_step(state: &NudgeState, dark_polls_since_last_action: u32) -> Optio
         1 if dark_polls_since_last_action >= LADDER_STEP_SPACING_POLLS => {
             Some(RecoveryStep::ToggleSceneItem)
         }
-        2 if dark_polls_since_last_action >= LADDER_STEP_SPACING_POLLS => {
+        2 if LADDER_RECREATE_ENABLED
+            && dark_polls_since_last_action >= LADDER_STEP_SPACING_POLLS =>
+        {
             Some(RecoveryStep::RecreateInput)
+        }
+        // Rung 2 gated off: cool down after the toggle, then restart the ladder.
+        2 if dark_polls_since_last_action >= LADDER_COOLDOWN_POLLS => {
+            Some(RecoveryStep::ClearRestore)
         }
         3 if dark_polls_since_last_action >= LADDER_COOLDOWN_POLLS => {
             Some(RecoveryStep::ClearRestore)
@@ -314,9 +328,19 @@ mod tests {
             next_step(&recreate_pending, LADDER_STEP_SPACING_POLLS - 1),
             None
         );
+        // Rung 2 is GATED OFF (`LADDER_RECREATE_ENABLED = false`, #173 round 3):
+        // no recreate at the spacing; after the cool-down the ladder restarts.
+        assert!(
+            !LADDER_RECREATE_ENABLED,
+            "rung 2 stays off until create-first lands"
+        );
         assert_eq!(
             next_step(&recreate_pending, LADDER_STEP_SPACING_POLLS),
-            Some(RecoveryStep::RecreateInput)
+            None
+        );
+        assert_eq!(
+            next_step(&recreate_pending, LADDER_COOLDOWN_POLLS),
+            Some(RecoveryStep::ClearRestore)
         );
     }
 
@@ -364,11 +388,12 @@ mod tests {
             tracker.evaluate(pid, true, NUDGE_THRESHOLD_BAD_POLLS + 3, t),
             None
         );
-        // Two dark polls after Toggle → RecreateInput (the wedge remedy).
+        // Two dark polls after Toggle → NOTHING: rung 2 (RecreateInput) is gated
+        // off (#173 round 3) until the executor creates-first-then-removes.
         t += 1;
         assert_eq!(
             tracker.evaluate(pid, true, NUDGE_THRESHOLD_BAD_POLLS + 4, t),
-            Some(RecoveryStep::RecreateInput)
+            None
         );
     }
 
@@ -387,18 +412,14 @@ mod tests {
             tracker.evaluate(pid, true, NUDGE_THRESHOLD_BAD_POLLS + 2, t),
             Some(RecoveryStep::ToggleSceneItem)
         );
-        t += 1;
-        assert_eq!(
-            tracker.evaluate(pid, true, NUDGE_THRESHOLD_BAD_POLLS + 4, t),
-            Some(RecoveryStep::RecreateInput)
-        );
-        // Now in cool-down (rung 3). Below the cool-down → nothing.
+        // Rung 2 is gated off (#173 round 3): after the toggle the ladder cools
+        // down instead of recreating. Below the cool-down → nothing.
         t += 1;
         assert_eq!(
             tracker.evaluate(
                 pid,
                 true,
-                NUDGE_THRESHOLD_BAD_POLLS + 4 + LADDER_COOLDOWN_POLLS - 1,
+                NUDGE_THRESHOLD_BAD_POLLS + 2 + LADDER_COOLDOWN_POLLS - 1,
                 t
             ),
             None
@@ -409,7 +430,7 @@ mod tests {
             tracker.evaluate(
                 pid,
                 true,
-                NUDGE_THRESHOLD_BAD_POLLS + 4 + LADDER_COOLDOWN_POLLS,
+                NUDGE_THRESHOLD_BAD_POLLS + 2 + LADDER_COOLDOWN_POLLS,
                 t
             ),
             Some(RecoveryStep::ClearRestore)
