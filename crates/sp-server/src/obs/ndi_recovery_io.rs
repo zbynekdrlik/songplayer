@@ -369,9 +369,18 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
                         input_name = %input_name,
                         has_scene_item_id = new_item_id.is_some(),
                         listed_by_get_scene_item_list = listed,
-                        "ndi-recovery: rung 2 — replacement not proven (aborting BEFORE removing the old input); restoring the old name"
+                        "ndi-recovery: rung 2 — replacement not proven; aborting BEFORE removing the old input"
                     );
-                    restore_old(write, dispatcher, &temp_name, &input_name).await;
+                    // Restore the old input's original name ONLY when the create
+                    // did not return an id — then `input_name` is free and the
+                    // rename-back is race-free. If the create DID return an id but
+                    // the list read failed, the new input already occupies
+                    // `input_name`, so a restore would futilely 601; leave the new
+                    // in place (it is serving) and the old lingering under the temp
+                    // name (a logged duplicate) rather than churn OBS.
+                    if new_item_id.is_none() {
+                        restore_old(write, dispatcher, &temp_name, &input_name).await;
+                    }
                     return;
                 }
             }

@@ -260,9 +260,11 @@ pub fn get_scene_item_enabled_request(
     })
 }
 
-/// Build a `SetInputName` request — the final step of the create-first rung-2
-/// recreate (#173 round 3): rename the temporary `<input>_recover` input back to
-/// the original name AFTER the old input has been removed (so the name is free).
+/// Build a `SetInputName` request — used by the rename-first rung-2 recreate
+/// (#173 round 3) to rename the OLD input AWAY to a temp name (a synchronous
+/// rename that frees its name at once), and to restore that name on abort. Never
+/// rename INTO a name freed by a `RemoveInput` — that races DistroAV's async
+/// source teardown (obs-websocket 601).
 pub fn set_input_name_request(
     request_id: &str,
     input_name: &str,

@@ -80,9 +80,11 @@ pub const LADDER_COOLDOWN_POLLS: u32 = 6;
 /// #173 round 3: rung 2 (`RecreateInput`) is ENABLED. It was gated off in round 3
 /// after the round-2 executor removed `sp-youth_video` and then its `CreateInput`
 /// failed, leaving the scene EMPTY (0.54.0-dev.3, box verification 17.9.2026). The
-/// executor now CREATES the replacement under `<input>_recover` and PROVES it
-/// exists BEFORE removing the old input (`obs/ndi_recovery_io.rs::recreate_plan`),
-/// so a failed create can no longer empty the scene — the remedy is safe to run.
+/// executor now RENAMES the old input away (a synchronous rename that frees the
+/// original name), CREATES the replacement directly under the original name and
+/// PROVES it before removing the renamed-away old
+/// (`obs/ndi_recovery_io.rs::recreate_plan`), so a failed create can no longer
+/// empty the scene and no name freed by a remove is ever reused — safe to run.
 pub const LADDER_RECREATE_ENABLED: bool = true;
 
 /// One rung of the dark-wall recovery ladder (#173 round 2). Ordered by
