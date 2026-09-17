@@ -677,6 +677,31 @@ app.post("/__mock/lyrics-update", (req, res) => {
   res.json({ status: "sent", clients: sent });
 });
 
+// #170: flip a playlist's live playback state on demand so the dashboard-
+// selector spec can prove the selector row order + identity survive a state
+// change (a non-first playlist starting to play must NOT reorder to the top).
+// Body: { playlist_id: <number>, state?: "Playing" | "WaitingForScene" | "Idle" }.
+app.post("/__mock/set-playing", (req, res) => {
+  const data = req.body || {};
+  if (typeof data.playlist_id !== "number") {
+    res.status(400).json({ error: "expected a numeric playlist_id" });
+    return;
+  }
+  const state = typeof data.state === "string" ? data.state : "Playing";
+  const msg = JSON.stringify({
+    type: "PlaybackStateChanged",
+    data: { playlist_id: data.playlist_id, state, mode: "Continuous" },
+  });
+  let sent = 0;
+  for (const ws of wsClients) {
+    if (ws.readyState === ws.OPEN) {
+      ws.send(msg);
+      sent += 1;
+    }
+  }
+  res.json({ status: "sent", clients: sent });
+});
+
 // SPA fallback — serve index.html for unmatched routes
 app.get("*", (_req, res) => {
   res.sendFile(join(distPath, "index.html"));

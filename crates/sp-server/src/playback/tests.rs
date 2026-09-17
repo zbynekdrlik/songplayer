@@ -304,17 +304,31 @@ async fn pipeline_started_event_broadcasts_now_playing() {
 
 /// Direct test of `play_state_to_ws` across every variant — kills the
 /// `Default::default()` mutant which returns the wrong variant on
-/// non-Idle inputs.
+/// non-Idle inputs. #170: also covers the `scene_active` gate on Playing
+/// (kills the `!scene_active` guard mutants).
 #[test]
 fn play_state_to_ws_maps_all_variants() {
-    assert_eq!(play_state_to_ws(&PlayState::Idle), WsPlaybackState::Idle);
+    // Idle / WaitingForScene ignore scene_active.
     assert_eq!(
-        play_state_to_ws(&PlayState::WaitingForScene),
-        WsPlaybackState::WaitingForScene
+        play_state_to_ws(&PlayState::Idle, true),
+        WsPlaybackState::Idle
     );
     assert_eq!(
-        play_state_to_ws(&PlayState::Playing { video_id: 42 }),
+        play_state_to_ws(&PlayState::Idle, false),
+        WsPlaybackState::Idle
+    );
+    assert_eq!(
+        play_state_to_ws(&PlayState::WaitingForScene, true),
+        WsPlaybackState::WaitingForScene
+    );
+    // Playing on program -> Playing; off program -> WaitingForScene (#170).
+    assert_eq!(
+        play_state_to_ws(&PlayState::Playing { video_id: 42 }, true),
         WsPlaybackState::Playing
+    );
+    assert_eq!(
+        play_state_to_ws(&PlayState::Playing { video_id: 42 }, false),
+        WsPlaybackState::WaitingForScene
     );
 }
 

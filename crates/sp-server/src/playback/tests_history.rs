@@ -97,11 +97,15 @@ async fn handle_previous_pops_history_and_plays() {
     engine.ensure_pipeline(99, "TestNDI");
 
     // Simulate having played 10, 11, 12 in order. Current = 12, history = [10, 11].
+    // #170: scene on program so the Previous broadcast is Playing (the
+    // scene-aware `play_state_to_ws` maps Playing+off-program to WaitingForScene).
     if let Some(pp) = engine.pipelines.get_mut(&99) {
         pp.history.push_back(10);
         pp.history.push_back(11);
         pp.current_video_id = Some(12);
         pp.state = PlayState::Playing { video_id: 12 };
+        pp.scene_active
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 
     // First Previous: should play 11, leaving history = [10].

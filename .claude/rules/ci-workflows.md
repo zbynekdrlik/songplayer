@@ -86,3 +86,84 @@ in-flight run finish (or cancel it deliberately), THEN re-run the old one, THEN
 finished leaves that push range without a mutation verdict — re-run its failed
 jobs before trusting the diff, and expect the old commit's already-known
 survivors to fail again there (read only the shard you need).
+
+## Post-deploy E2E: OBS is in Studio Mode with a 2000ms Fade — never blind-sleep after a scene switch (#170)
+
+The `E2E Tests (win-resolume)` job restarts SongPlayer (`taskkill` + `schtasks
+/run /tn SongPlayer` + `Wait-SongPlayerUp`), then the Playwright post-deploy
+suite drives OBS scene switches via `e2e/obs-driver.ts`. **OBS on win-resolume
+runs Studio Mode with a `Fade` transition of `2000ms`** (verify:
+`obs-get-studio-mode`, `obs-get-current-transition`). In studio mode
+`SetCurrentProgramScene` only *starts* the fade; obs-websocket updates
+`GetCurrentProgramScene` and emits `CurrentProgramSceneChanged` — the event
+SongPlayer's OBS client reacts to (in <1 ms) — **only when the fade completes,
+~2 s later** (both come from OBS's `OBS_FRONTEND_EVENT_SCENE_CHANGED`, which
+fires at transition end).
+
+So a blind `sleep(300)` after `SetCurrentProgramScene` **races the 2 s fade**:
+`/api/v1/status.active_playlist_ids` still shows the old scene's playlist for
+~2 s, which fails a single-read assertion (test 15's baseline "ytfast NOT
+active" read) and, with back-to-back scene tests, re-triggers `SelectAndPlay`
+from position 0 so the position never advances (test 17's 0→0). This was the
+"post-restart window flake" in #170 — NOT an engine/scene-detection bug (the
+box log showed SongPlayer receiving and reacting to every switch, each ~2 s
+after the OBS switch).
+
+### Round 3 (#170): a name-only wait is NOT enough — same-scene switches DROP the next event
+
+The round-2 fix polled `GetCurrentProgramScene == target` only. Two studio-mode
+behaviours defeat that (reproduced live 3×, 17.9 02:06–02:09 UTC):
+
+1. **A SAME-scene `SetCurrentProgramScene` still runs a real 2 s transition**,
+   leaving `preview == program == that scene`. Test 17 opened with
+   `switchScene(baseline)` while OBS was already on `sp-slow` → an
+   `sp-slow→sp-slow` fade.
+2. **From that `preview==program` state OBS DROPS the next
+   `SetCurrentProgramScene`'s `CurrentProgramSceneChanged`** — `GetCurrentProgramScene`
+   reports the target but no event fires, so SongPlayer (event stream alive)
+   never learns of the switch; ytfast stays paused and the wall sits on a paused
+   source. A real transition to another scene first (so preview becomes the
+   *previous* program) restores normal behaviour.
+
+**Contract (round 3):** `ObsDriver.switchScene`
+(1) **skips when `program == target`** (`shouldSkipSceneSwitch` — never issue a
+same-scene switch); (2) in Studio Mode drives the transition the studio way —
+`SetCurrentPreviewScene(target)` + `TriggerStudioModeTransition` (which DOES emit
+the program-scene-changed event), else `SetCurrentProgramScene` (read
+`GetStudioModeEnabled` once); (3) waits until `GetCurrentProgramScene == target`
+**AND the transition has ENDED** (tracked via `SceneTransition{Started,Ended}`),
+then settles — `sceneSwitchSettled` / `waitForSceneSwitchApplied` in
+`e2e/obs-scene-wait.ts`, unit-tested in the mock suite `obs-scene-wait.spec.ts`.
+Throws loudly if the switch never settles. Transition-duration-agnostic (0 ms cut
+or 2 s fade). Do NOT "fix" scene-switch flake by bumping test timeouts
+(`no-timeout-band-aids.md`) or by mutating the shared live-wall OBS config.
+
+**Engine self-heal (the production bug the harness exposed):** a dropped
+`CurrentProgramSceneChanged` in daily studio-mode use is a dark wall for the
+operator, not just an E2E flake. `crates/sp-server/src/obs/` now polls
+`GetCurrentProgramScene` every ~2 s (`scene_poll::reconcile_program_scene`) and,
+on a mismatch with the last event-derived scene
+(`scene_poll::scene_poll_detects_change`), feeds the same `scene::apply_scene_change`
+path the event does (INFO log `obs: program scene changed without an event —
+reconciled by poll`).
+
+**afterAll read-back + afterEach restore:** the post-deploy suite restores the
+scene it started on and asserts `/api/v1/status.active_scene` (the engine's view)
+followed, retrying once and failing loudly — so a dropped switch never leaves the
+wall on the E2E baseline silently. `test.afterEach` restores the start scene after
+every test (pass OR fail), so a failed assertion that aborts a test's own trailing
+cleanup still returns the wall to the operator's scene.
+
+**Card honesty:** a `PlaybackStateChanged`-only store entry (video_id 0, empty
+song, zero duration) renders `np-idle` "Nothing playing", never a bogus
+`np-info` "0:00 / 0:00" (`sp-ui` `NowPlayingInfo::has_now_playing_content`) — so
+the position-advance check cannot be satisfied by an empty entry.
+
+## A Deploy-job re-run only works while the run's artifacts exist (`dist` = 1 day)
+
+`gh run rerun --job <Deploy>` of an older run is the sanctioned way to restart
+SongPlayer on the box (same build, Deploy + post-deploy E2E) — but the `dist`
+artifact has `retention-days: 1`, so a re-run of a run older than a day fails at
+"Download WASM frontend: Artifact not found for name: dist" BEFORE touching the
+box (17.9.2026, #170 acceptance). Past that window a post-restart suite needs a
+fresh push (a version bump is enough).

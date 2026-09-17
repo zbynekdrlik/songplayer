@@ -4,17 +4,31 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 
 use crate::db::models::VideoLyricsRow;
+use crate::lyrics::g35t_transcript::SOURCE_G35T_FULLMIX;
+
+/// #171: minimum age (seconds since `lyrics_processed_at`) before a full-mix
+/// base-tier row is re-attempted for the ★ tier. One day, so a song whose
+/// isolation still fails is not re-ground on every worker tick — it re-attempts
+/// at most once per day and, the moment resumable isolation finally yields a
+/// vocal, the ★/vocal result overwrites the full-mix source and the row leaves
+/// this bucket. Bound into the upgrade bucket's SQL so the no-compile-box RED
+/// test can flip it (RED ships a huge sentinel → the due-row test fails; GREEN
+/// sets one day).
+const FULLMIX_UPGRADE_MIN_AGE_SECS: i64 = 86_400; // 1 day
 
 /// Pick the next video the lyrics worker should process. Priority order:
 /// 1. Manual-priority songs (user clicked "Reprocess")
 /// 2. Null / failed lyrics (has_lyrics = 0): new songs + previously-failed
 /// 3. Stale pipeline version, worst-quality first (NULLS FIRST)
+/// 4. #171 full-mix upgrade: a `gemini-3-5-transcribe/fullmix` base-tier row at
+///    the CURRENT version (which buckets 2 + 3 both miss), re-attempted for the
+///    ★ tier at most once per day.
 ///
 /// Returns None when every active playlist song is current-version and
-/// no manual queue entry is pending.
-#[cfg_attr(test, mutants::skip)] // Priority ordering (manual > null > stale) exercised end-to-end by
-// `manual_priority_beats_null_beats_stale`; per-bucket filters are
-// individually mutation-tested via active/normalized/tiebreaker tests.
+/// no manual / upgrade entry is pending.
+#[cfg_attr(test, mutants::skip)] // Priority ordering (manual > null > stale > upgrade) exercised
+// end-to-end by `manual_priority_beats_null_beats_stale` + the upgrade-bucket
+// tests; per-bucket filters are individually mutation-tested.
 pub async fn get_next_video_for_lyrics(
     pool: &SqlitePool,
     current_version: u32,
@@ -25,7 +39,10 @@ pub async fn get_next_video_for_lyrics(
     if let Some(row) = fetch_bucket_null(pool, current_version).await? {
         return Ok(Some(row));
     }
-    fetch_bucket_stale(pool, current_version).await
+    if let Some(row) = fetch_bucket_stale(pool, current_version).await? {
+        return Ok(Some(row));
+    }
+    fetch_bucket_fullmix_upgrade(pool, current_version).await
 }
 
 async fn fetch_bucket_manual(
@@ -142,6 +159,50 @@ async fn fetch_bucket_stale(
          ORDER BY v.lyrics_quality_score ASC NULLS FIRST, RANDOM() LIMIT 1",
     )
     .bind(current_version as i64)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+#[cfg_attr(test, mutants::skip)] // Same as fetch_bucket_null/stale: behavior is SQL-string,
+// glue is bind/await/Ok tested by the upgrade-bucket unit tests below. Same
+// maintainer warning applies — if you add ANY non-SQL branch, REMOVE this skip.
+async fn fetch_bucket_fullmix_upgrade(
+    pool: &SqlitePool,
+    current_version: u32,
+) -> Result<Option<VideoLyricsRow>> {
+    // #171 gap-1: a `gemini-3-5-transcribe/fullmix` row is `has_lyrics = 1` at the
+    // CURRENT pipeline version, so it matches NEITHER the null bucket (needs
+    // has_lyrics = 0) NOR the stale bucket (needs version < current) — it would
+    // never be re-picked, so a song that fell back to the full mix while
+    // isolation was broken could never upgrade to the ★ tier once isolation
+    // works. This lowest-priority bucket re-attempts such a row for the ★ tier at
+    // most once per day (via `lyrics_processed_at`, which `mark_video_lyrics_complete`
+    // stamps on every write) so it never re-grinds the heavy slot every tick. A
+    // successful ★/vocal-g35t result overwrites `lyrics_source`, so the row
+    // leaves this bucket the moment isolation yields a vocal. `next_attempt_at`
+    // is still honoured so a deferred upgrade waits out its backoff.
+    let processed_before = format!("-{FULLMIX_UPGRADE_MIN_AGE_SECS} seconds");
+    let row = sqlx::query_as::<_, VideoLyricsRow>(
+        "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
+                COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
+                p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
+                v.spotify_track_id, v.spotify_resolved_at \
+         FROM videos v JOIN playlists p ON p.id = v.playlist_id \
+         WHERE v.has_lyrics = 1 \
+               AND v.lyrics_source = ? \
+               AND v.lyrics_pipeline_version >= ? \
+               AND v.lyrics_manual_priority = 0 \
+               AND p.is_active = 1 AND v.normalized = 1 \
+               AND (v.lyrics_next_attempt_at IS NULL \
+                    OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+               AND (v.lyrics_processed_at IS NULL \
+                    OR v.lyrics_processed_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)) \
+         ORDER BY v.lyrics_processed_at ASC NULLS FIRST, RANDOM() LIMIT 1",
+    )
+    .bind(SOURCE_G35T_FULLMIX)
+    .bind(current_version as i64)
+    .bind(processed_before)
     .fetch_optional(pool)
     .await?;
     Ok(row)
@@ -761,6 +822,95 @@ mod tests {
         assert!(
             next.is_none(),
             "unsupported_source row must NOT be picked from manual bucket even with priority=1"
+        );
+    }
+
+    // ---- #171: full-mix upgrade bucket (re-attempt the ★ tier once/day) -------
+
+    /// Insert a full-mix base-tier row processed `age_days` ago (current version
+    /// 2). `youtube_id` names it; no null/stale/manual work exists.
+    async fn insert_fullmix_row(pool: &SqlitePool, id: i64, youtube_id: &str, age_days: i64) {
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source, lyrics_pipeline_version, lyrics_manual_priority, lyrics_processed_at) \
+             VALUES (?, 1, ?, 1, 1, 'gemini-3-5-transcribe/fullmix', 2, 0, \
+                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?))",
+        )
+        .bind(id)
+        .bind(youtube_id)
+        .bind(format!("-{age_days} days"))
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn fullmix_upgrade_repicks_a_row_processed_over_a_day_ago() {
+        // A full-mix row (has_lyrics=1, source=fullmix, version=current) matches
+        // neither the null nor the stale bucket, so without this 4th bucket it
+        // would never re-attempt the ★ tier. Processed 2 days ago → due.
+        // (RED fails here: FULLMIX_UPGRADE_MIN_AGE_SECS starts at 9_000_000_000,
+        // so a 2-day-old row is not yet "old enough" and is never picked.)
+        let pool = setup().await;
+        insert_fullmix_row(&pool, 1, "fullmix_due", 2).await;
+        let row = get_next_video_for_lyrics(&pool, 2).await.unwrap();
+        assert_eq!(
+            row.map(|r| r.youtube_id),
+            Some("fullmix_due".to_string()),
+            "a full-mix row processed >1 day ago must be re-picked for the ★ tier"
+        );
+    }
+
+    #[tokio::test]
+    async fn fullmix_upgrade_waits_a_day_between_attempts() {
+        // A full-mix row processed only an hour ago must NOT be re-ground — the
+        // once/day gate stops the heavy slot being burned every tick.
+        let pool = setup().await;
+        // 0 days ago (just now) — well inside the 1-day gate.
+        insert_fullmix_row(&pool, 1, "fullmix_fresh", 0).await;
+        assert!(
+            get_next_video_for_lyrics(&pool, 2).await.unwrap().is_none(),
+            "a freshly-processed full-mix row must wait out the once/day gate"
+        );
+    }
+
+    #[tokio::test]
+    async fn fullmix_upgrade_is_lowest_priority() {
+        // A due full-mix upgrade must never beat real pending (null) work.
+        let pool = setup().await;
+        insert_fullmix_row(&pool, 1, "fullmix_due", 2).await;
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_pipeline_version, lyrics_manual_priority) \
+             VALUES (2, 1, 'null_pending', 1, 0, 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = get_next_video_for_lyrics(&pool, 2).await.unwrap().unwrap();
+        assert_eq!(
+            row.youtube_id, "null_pending",
+            "pending null work must beat the full-mix upgrade bucket"
+        );
+    }
+
+    #[tokio::test]
+    async fn fullmix_upgrade_ignores_non_fullmix_current_rows() {
+        // A current-version ★ row (source=mtl) is DONE — it must never be dragged
+        // back into processing by the upgrade bucket, however old.
+        let pool = setup().await;
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source, lyrics_pipeline_version, lyrics_manual_priority, lyrics_processed_at) \
+             VALUES (1, 1, 'mtl_done', 1, 1, 'mtl', 2, 0, \
+                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days'))",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            get_next_video_for_lyrics(&pool, 2).await.unwrap().is_none(),
+            "only full-mix rows upgrade; a current-version ★ row must be left alone"
         );
     }
 }

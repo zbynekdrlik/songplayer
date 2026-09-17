@@ -85,6 +85,82 @@ test("the playing playlist is preselected and marked ▶ (#165)", async ({
   });
 });
 
+// #170: the selector must NOT re-order when a playlist's playback state
+// changes. Rows are alphabetical and STABLE; the ▶ glyph marks the playing
+// one. Before the fix the selector sorted playing-first and full-re-rendered
+// on every now_playing tick, so a row that flipped to Playing jumped to the
+// top — the click race that failed post-deploy test 16.
+test("row order stays alphabetical when a non-first playlist starts playing (#170)", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  await waitForSelector12(page);
+
+  const rowNames = async () =>
+    page
+      .getByTestId("playlist-selector-row")
+      .evaluateAll((els) =>
+        els.map((e) => e.querySelector(".sel-name")?.textContent?.trim() ?? ""),
+      );
+
+  // Baseline order is the alphabetical Playlist 01..12 (playlist 1 already
+  // plays, but it is also first alphabetically, so the order is unambiguous).
+  const before = await rowNames();
+  expect(before).toEqual([...before].sort());
+
+  // Flip a NON-first playlist (Playlist 07) to Playing.
+  const set = await request.post("/__mock/set-playing", {
+    data: { playlist_id: 7 },
+  });
+  expect(set.ok()).toBeTruthy();
+
+  // Its row gains the ▶ glyph in place...
+  const playing07 = page
+    .getByTestId("playlist-selector-row")
+    .filter({ hasText: "Playlist 07" });
+  await expect(playing07).toContainText("▶", { timeout: 10000 });
+
+  // ...but the row ORDER is unchanged — Playlist 07 did NOT jump to the top.
+  await expect
+    .poll(async () => (await rowNames()).join("|"), { timeout: 5000 })
+    .toBe(before.join("|"));
+});
+
+// #170 round 3: a playlist that has a live playback STATE but no NowPlaying
+// (the PlaybackStateChanged-only shape — video_id 0, empty song, zero
+// duration) must render the idle "Nothing playing" state, NOT a bogus
+// np-info "0:00 / 0:00" block. Otherwise the post-deploy position-advance
+// check reads that empty entry (0 → 0) as if a song were playing, and the
+// operator sees a card claiming playback for a paused source.
+test("an entry with no song and zero duration renders idle, not 0:00/0:00 (#170)", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  await waitForSelector12(page);
+
+  // Give a non-playing playlist (Playlist 08) a live state with NO preceding
+  // NowPlaying, so the store inserts the empty zero entry.
+  const set = await request.post("/__mock/set-playing", {
+    data: { playlist_id: 8, state: "WaitingForScene" },
+  });
+  expect(set.ok()).toBeTruthy();
+
+  // Select that playlist's work area.
+  await page
+    .getByTestId("playlist-selector-row")
+    .filter({ hasText: "Playlist 08" })
+    .click();
+  await expect(page.getByTestId("workspace-title")).toHaveText("Playlist 08");
+
+  const card = page.locator(".playlist-card");
+  // The empty entry must show the idle state, not a np-info counter.
+  await expect(card.locator(".np-idle")).toBeVisible();
+  await expect(card.locator(".np-info")).toHaveCount(0);
+  await expect(card).toContainText("Nothing playing");
+});
+
 test("clicking another row switches the work area and the URL (#165)", async ({
   page,
 }) => {

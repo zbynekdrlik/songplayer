@@ -5,6 +5,7 @@ pub mod ndi_discovery;
 pub mod ndi_recovery;
 pub(crate) mod output_state;
 pub mod scene;
+pub mod scene_poll;
 pub mod text;
 
 use std::collections::{HashMap, HashSet};
@@ -25,8 +26,13 @@ use tracing::{debug, info, warn};
 
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
 use crate::obs::ndi_discovery::rebuild_ndi_source_map;
-use crate::obs::scene::check_scene_items;
 use crate::obs::text::get_current_scene_request;
+
+/// How often the connection loop polls `GetCurrentProgramScene` to reconcile a
+/// program-scene change that OBS dropped the `CurrentProgramSceneChanged` event
+/// for (#170). Studio Mode can drop that event; a cheap ~2 s poll on the
+/// existing WS catches the switch so the wall never sits on a paused source.
+const SCENE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Apply a rebuild result to the shared NDI source map.
 ///
@@ -473,20 +479,16 @@ async fn connect_and_run(
             if let Some(scene_name) =
                 response["d"]["responseData"]["currentProgramSceneName"].as_str()
             {
-                let sources = ndi_sources.read().await;
-                let active_ids = check_scene_items(&write, &dispatcher, scene_name, &sources).await;
-                drop(sources);
-
-                {
-                    let mut s = state.write().await;
-                    s.current_scene = Some(scene_name.to_string());
-                    s.active_playlist_ids = active_ids.clone();
-                }
-
-                let _ = event_tx.send(ObsEvent::SceneChanged {
-                    scene_name: scene_name.to_string(),
-                    active_playlist_ids: active_ids,
-                });
+                // Same seed-the-scene path the reader/poll arms use.
+                scene::apply_scene_change(
+                    &write,
+                    &dispatcher,
+                    ndi_sources,
+                    state,
+                    event_tx,
+                    scene_name.to_string(),
+                )
+                .await;
             } else {
                 debug!("initial GetCurrentProgramScene response had no scene name");
             }
@@ -513,6 +515,17 @@ async fn connect_and_run(
     // RecordStateChanged fires for it). Best-effort; see `output_state`.
     output_state::seed_output_state(&write, &dispatcher, state).await;
 
+    // Step 6c (#170): reconcile the program scene by polling
+    // `GetCurrentProgramScene` on a ~2 s cadence. In Studio Mode OBS can DROP a
+    // `CurrentProgramSceneChanged` — SongPlayer's event stream stays alive but
+    // never learns of the switch, leaving the wall on a paused source. Skip
+    // missed ticks so a slow round-trip does not burst catch-up requests.
+    let mut scene_poll = tokio::time::interval(SCENE_POLL_INTERVAL);
+    scene_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // #170: the poll's mismatch clock (polled scene, first seen) across ticks.
+    let scene_pending: std::sync::Arc<std::sync::Mutex<Option<(String, std::time::Instant)>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+
     // Step 7: main loop — thin router: each arm spawns a task to do
     // the work. The write half is shared via Arc<Mutex<>> so helper
     // tasks lock it briefly for the send and release before awaiting
@@ -529,22 +542,15 @@ async fn connect_and_run(
                         let state = std::sync::Arc::clone(state);
                         let event_tx = event_tx.clone();
                         spawned_tasks.spawn(async move {
-                            let sources = ndi_sources.read().await;
-                            let active_ids =
-                                check_scene_items(&write, &dispatcher, &scene_name, &sources)
-                                    .await;
-                            drop(sources);
-
-                            {
-                                let mut s = state.write().await;
-                                s.current_scene = Some(scene_name.clone());
-                                s.active_playlist_ids = active_ids.clone();
-                            }
-
-                            let _ = event_tx.send(ObsEvent::SceneChanged {
+                            scene::apply_scene_change(
+                                &write,
+                                &dispatcher,
+                                &ndi_sources,
+                                &state,
+                                &event_tx,
                                 scene_name,
-                                active_playlist_ids: active_ids,
-                            });
+                            )
+                            .await;
                         });
                     }
                     Some(ReaderMessage::OutputState { recording, active }) => {
@@ -667,6 +673,28 @@ async fn connect_and_run(
                         .await;
                     });
                 }
+            }
+            _ = scene_poll.tick() => {
+                // #170: reconcile a program-scene change OBS dropped the event
+                // for — read GetCurrentProgramScene and feed the same path the
+                // event does when it differs from the last event-derived scene.
+                let write = std::sync::Arc::clone(&write);
+                let dispatcher = dispatcher.clone();
+                let ndi_sources = std::sync::Arc::clone(ndi_sources);
+                let state = std::sync::Arc::clone(state);
+                let event_tx = event_tx.clone();
+                let scene_pending = std::sync::Arc::clone(&scene_pending);
+                spawned_tasks.spawn(async move {
+                    scene_poll::reconcile_program_scene(
+                        &write,
+                        &dispatcher,
+                        &ndi_sources,
+                        &state,
+                        &event_tx,
+                        &scene_pending,
+                    )
+                    .await;
+                });
             }
         }
     };

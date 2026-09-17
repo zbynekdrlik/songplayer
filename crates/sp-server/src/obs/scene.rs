@@ -1,13 +1,47 @@
 //! Scene change handler — detects which NDI sources are active in a scene.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
+use tokio::sync::{RwLock, broadcast};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, warn};
 
-use crate::obs::SharedWrite;
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
 use crate::obs::text::get_scene_items_request;
+use crate::obs::{NdiSourceMap, ObsEvent, ObsState, SharedWrite};
+
+/// Apply a program-scene change: query which NDI sources are on program for
+/// `scene_name`, write `current_scene` + `active_playlist_ids` into shared
+/// state, and emit `ObsEvent::SceneChanged` for the engine bridge.
+///
+/// Shared by BOTH the `CurrentProgramSceneChanged` reader path and the ~2 s
+/// poll-reconcile path (#170) so a dropped OBS event feeds the exact same
+/// downstream handling. A duplicate emit for the already-current scene is
+/// harmless — `(Playing, SceneOn)` is a no-op in the playback state machine.
+pub async fn apply_scene_change(
+    write: &SharedWrite,
+    dispatcher: &Dispatcher,
+    ndi_sources: &NdiSourceMap,
+    state: &Arc<RwLock<ObsState>>,
+    event_tx: &broadcast::Sender<ObsEvent>,
+    scene_name: String,
+) {
+    let sources = ndi_sources.read().await;
+    let active_ids = check_scene_items(write, dispatcher, &scene_name, &sources).await;
+    drop(sources);
+
+    {
+        let mut s = state.write().await;
+        s.current_scene = Some(scene_name.clone());
+        s.active_playlist_ids = active_ids.clone();
+    }
+
+    let _ = event_tx.send(ObsEvent::SceneChanged {
+        scene_name,
+        active_playlist_ids: active_ids,
+    });
+}
 
 /// Check which NDI sources are present in a given scene.
 ///

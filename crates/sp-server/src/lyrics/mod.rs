@@ -3,6 +3,7 @@ pub mod assembly;
 pub mod audit_ctx;
 pub mod backend;
 pub mod bootstrap;
+pub mod child_output;
 pub mod chunking;
 pub mod claude_merge;
 pub mod description_provider;

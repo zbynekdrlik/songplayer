@@ -11,9 +11,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use tokio::fs;
 use tokio::process::Command;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::lyrics::assembly::{AlignedWord, ChunkResult};
 use crate::lyrics::chunking::ChunkRequest;
@@ -100,6 +101,7 @@ fn preprocess_vocals_args(
     audio_in: &Path,
     wav_out: &Path,
     models_dir: &Path,
+    work_dir: &Path,
     plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
 ) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec![
@@ -111,6 +113,9 @@ fn preprocess_vocals_args(
         wav_out.as_os_str().to_owned(),
         "--models-dir".into(),
         models_dir.as_os_str().to_owned(),
+        // #171: per-segment scratch dir for resumable isolation.
+        "--work-dir".into(),
+        work_dir.as_os_str().to_owned(),
     ];
     for a in plan.script_cpu_args() {
         args.push((*a).into());
@@ -122,9 +127,12 @@ fn preprocess_vocals_args(
 /// resample on `audio_in`. Writes the clean WAV to `wav_out` and returns
 /// the same path on success.
 ///
-/// `timeout` bounds the isolation subprocess; callers pass
-/// [`isolation_timeout`]`(duration_ms)` so a long song gets a proportionally
-/// longer ceiling instead of the old fixed 600 s (#144).
+/// `work_dir` is the per-segment scratch dir for the resumable script (#171):
+/// each isolated segment WAV lands there and is skipped on resume, so a
+/// killed/timed-out run continues instead of discarding the whole song. The
+/// child is bounded by a STALL timeout (no new segment for
+/// [`heavy_plan::stall_timeout`]), NOT the whole-song `timeout` — which now
+/// survives only as the ETA in the log line.
 ///
 /// **Cache (v18):** if `wav_out` already exists and is larger than 1 MB,
 /// skip Demucs entirely and return the existing path. Demucs on a 10-min
@@ -140,6 +148,7 @@ pub async fn preprocess_vocals(
     models_dir: &Path,
     audio_in: &Path,
     wav_out: &Path,
+    work_dir: &Path,
     timeout: std::time::Duration,
     gpu_mem_setting: Option<&str>,
     plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
@@ -169,6 +178,7 @@ pub async fn preprocess_vocals(
         audio_in,
         wav_out,
         models_dir,
+        work_dir,
         plan,
     ));
     // audio-separator calls ffmpeg.exe without an absolute path, so the
@@ -197,6 +207,14 @@ pub async fn preprocess_vocals(
     // from holding ~1-2 GB of GPU model weights across SongPlayer
     // restarts.
     cmd.kill_on_drop(true);
+    // #171: pipe + drain the child's stdio so a failure's Python traceback
+    // reaches the log. Previously the child inherited SongPlayer's stdio, so the
+    // traceback was lost and the log carried only "exited with status exit code:
+    // 1" — the win-resolume isolation exit-1 could not be diagnosed. Drain
+    // concurrently (below): the stall waiter only calls `child.wait()`, so a full
+    // pipe would deadlock the child (same reason as `stems::separator`).
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
 
     debug!(
         "running preprocess-vocals: {} --audio {} --output {}",
@@ -209,18 +227,64 @@ pub async fn preprocess_vocals(
     // #162: cap the child's memory via a Windows Job Object so an OOM kills the
     // child, not the host. Held (with the slot) until the child exits.
     let _job = crate::lyrics::heavy_slot::assign_child_job(&child);
-    let status = match tokio::time::timeout(timeout, child.wait()).await {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => anyhow::bail!("preprocess-vocals wait failed: {e}"),
-        Err(_) => {
-            let _ = child.kill().await;
-            anyhow::bail!("preprocess-vocals timed out after {} s", timeout.as_secs());
-        }
+    // Drain stdout/stderr in the background so the pipes never fill and deadlock
+    // the child. Both tasks end when the child closes its pipes (normal exit, or
+    // SIGKILL on a stall / `kill_on_drop`).
+    let stdout_task = child
+        .stdout
+        .take()
+        .map(crate::lyrics::child_output::drain_pipe);
+    let stderr_task = child
+        .stderr
+        .take()
+        .map(crate::lyrics::child_output::drain_pipe);
+    // #171: bound the child by a STALL timeout (kill only when no new segment has
+    // been written to work_dir for `stall_timeout`), NOT the whole-song ceiling —
+    // a legitimate 3-10 min song runs 40-77 min on this CPU and the old ceiling
+    // killed it mid-run and discarded the work. A stall leaves work_dir intact so
+    // the next pick resumes from the segments already isolated.
+    let wait_res = crate::lyrics::heavy_plan::wait_with_stall_timeout(
+        &mut child,
+        work_dir,
+        plan,
+        "preprocess-vocals",
+        timeout,
+    )
+    .await;
+    let stdout = match stdout_task {
+        Some(t) => t.await.unwrap_or_default(),
+        None => Vec::new(),
     };
-    if !status.success() {
-        anyhow::bail!("preprocess-vocals exited with status {status}");
+    let stderr = match stderr_task {
+        Some(t) => t.await.unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let stdout = String::from_utf8_lossy(&stdout);
+    let stderr = String::from_utf8_lossy(&stderr);
+    match wait_res {
+        Ok(status) if status.success() => {
+            // The script prints `gpu_polite:`/`isolation chunk N/M done`
+            // diagnostics on stderr — keep the tail visible for a healthy run.
+            debug!(
+                "preprocess-vocals ok; stderr tail:\n{}",
+                crate::lyrics::child_output::tail_lines(&stderr, 5, 300)
+            );
+            Ok(wav_out.to_path_buf())
+        }
+        Ok(status) => {
+            // Non-zero exit (the exit-1 class): surface the Python traceback tail.
+            let tail = crate::lyrics::child_output::failure_tail(&stderr, &stdout, 30, 300);
+            warn!("preprocess-vocals failed ({status}); output tail:\n{tail}");
+            anyhow::bail!("preprocess-vocals exited with status {status}; output tail:\n{tail}");
+        }
+        Err(e) => {
+            // A stall kill (or a wait error): the child was killed, its work dir
+            // preserved for resume. Surface whatever it printed before dying.
+            let tail = crate::lyrics::child_output::failure_tail(&stderr, &stdout, 30, 300);
+            warn!("preprocess-vocals {e}; output tail:\n{tail}");
+            Err(e.context(format!("preprocess-vocals output tail:\n{tail}")))
+        }
     }
-    Ok(wav_out.to_path_buf())
 }
 
 // ---------------------------------------------------------------------------
@@ -460,11 +524,24 @@ mod tests {
             Path::new("/x/a.flac"),
             Path::new("/x/o.wav"),
             Path::new("/models"),
+            Path::new("/x/o_isolation"),
             plan,
         )
         .iter()
         .map(|s| s.to_string_lossy().into_owned())
         .collect()
+    }
+
+    #[test]
+    fn preprocess_vocals_args_carries_work_dir() {
+        // #171: --work-dir must be threaded to the resumable script, before the
+        // trailing --force-cpu (so the last-arg assertions below still hold).
+        let argv = preprocess_argv(&crate::lyrics::heavy_plan::HeavyStepPlan::cpu_idle());
+        let i = argv
+            .iter()
+            .position(|a| a == "--work-dir")
+            .expect("has --work-dir");
+        assert_eq!(argv[i + 1], "/x/o_isolation");
     }
 
     #[test]

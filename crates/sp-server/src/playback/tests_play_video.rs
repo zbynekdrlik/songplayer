@@ -65,6 +65,12 @@ async fn handle_play_video_updates_current_position_on_custom_playlist() {
         ),
     });
     engine.ensure_pipeline(ytlive_id, "SP-live");
+    // #170: scene on program so the PlayVideo broadcast is Playing (the
+    // scene-aware `play_state_to_ws` maps Playing+off-program to WaitingForScene).
+    if let Some(pp) = engine.pipelines.get(&ytlive_id) {
+        pp.scene_active
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
 
     // Jump to video 200 (position 1).
     engine.handle_play_video(ytlive_id, 200, None).await;
@@ -607,5 +613,108 @@ async fn handle_play_video_records_play_history() {
     assert!(
         unplayed_after.is_empty(),
         "manually-played video must no longer show up as unplayed"
+    );
+}
+
+/// #170 (pure mapping): a pipeline the engine holds as `Playing` but whose
+/// scene is OFF program (`scene_active = false`) must map to
+/// `WaitingForScene`, matching `handle_health_snapshot`'s
+/// `(Playing, Playing, false) → Paused` reconciliation that the WS replay is
+/// built from. On program it maps to `Playing`. `Idle`/`WaitingForScene` are
+/// unaffected by `scene_active`.
+#[test]
+fn paused_off_program_broadcasts_waiting_for_scene() {
+    // On program → Playing.
+    assert_eq!(
+        play_state_to_ws(&PlayState::Playing { video_id: 7 }, true),
+        WsPlaybackState::Playing
+    );
+    // Off program (paused, dark wall) → WaitingForScene (the #170 fix).
+    assert_eq!(
+        play_state_to_ws(&PlayState::Playing { video_id: 7 }, false),
+        WsPlaybackState::WaitingForScene
+    );
+    // Idle / WaitingForScene do not depend on scene_active.
+    assert_eq!(
+        play_state_to_ws(&PlayState::Idle, true),
+        WsPlaybackState::Idle
+    );
+    assert_eq!(
+        play_state_to_ws(&PlayState::Idle, false),
+        WsPlaybackState::Idle
+    );
+    assert_eq!(
+        play_state_to_ws(&PlayState::WaitingForScene, false),
+        WsPlaybackState::WaitingForScene
+    );
+}
+
+/// #170 (broadcast site): `handle_play_video` on an OFF-program playlist keeps
+/// the engine's internal `Playing` state but must broadcast `WaitingForScene`
+/// to the dashboard (never `Playing`) — otherwise a paused row flips to
+/// Playing, the selector re-orders it, and a click races the moving row.
+#[tokio::test]
+async fn play_video_off_program_broadcasts_waiting_for_scene() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url) VALUES (7, 'ytfast', 'https://yt.com/f')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, audio_file_path) \
+         VALUES (55, 7, 'yt55', 1, '/cache/f_video.mp4', '/cache/f_audio.flac')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, mut ws_rx) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
+        pool: pool.clone(),
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
+        resolume_tx,
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
+    engine.ensure_pipeline(7, "SP-fast");
+    // scene_active stays FALSE (off program, dark wall) — deliberately not set.
+
+    engine.handle_play_video(7, 55, None).await;
+
+    // The engine still tracks Playing internally...
+    let pp = engine.pipelines.get(&7).unwrap();
+    assert_eq!(pp.state, PlayState::Playing { video_id: 55 });
+
+    // ...but the dashboard broadcast must be WaitingForScene, not Playing.
+    let mut found = false;
+    while let Ok(msg) = ws_rx.try_recv() {
+        if let ServerMsg::PlaybackStateChanged {
+            playlist_id: 7,
+            state,
+            ..
+        } = msg
+        {
+            assert_eq!(
+                state,
+                WsPlaybackState::WaitingForScene,
+                "off-program PlayVideo must broadcast WaitingForScene, not Playing (#170)"
+            );
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "expected a PlaybackStateChanged broadcast for playlist 7"
     );
 }

@@ -25,6 +25,13 @@ use crate::lyrics::line_splitter::{SplitConfig, split_lyrics_lines};
 /// `lyrics_source` label stamped on rows produced by the g35t base tier.
 pub const SOURCE_G35T: &str = "gemini-3-5-transcribe";
 
+/// #171: `lyrics_source` for the FULL-MIX g35t fallback — a row transcribed
+/// from the normalized mix FLAC because vocal isolation never produced a vocal
+/// after several resumable attempts. Distinct from [`SOURCE_G35T`] so the
+/// dashboard shows it as the lower-quality base variant and a future re-run can
+/// upgrade it to the ★ / isolated-vocal tier.
+pub const SOURCE_G35T_FULLMIX: &str = "gemini-3-5-transcribe/fullmix";
+
 /// Build an un-translated line-level `LyricsTrack` from a g35t word stream.
 ///
 /// Returns `None` when the transcript yields no usable lines (blank/empty

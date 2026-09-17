@@ -126,14 +126,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests)
-        run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3
+      - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy + soundfile)
+        run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1 soundfile==0.12.1
       - name: Lint with ruff
-        run: ruff check eval/
+        run: ruff check eval/ scripts/tests/
       - name: Format check with ruff
-        run: ruff format --check eval/
+        run: ruff format --check eval/ scripts/tests/
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
+      - name: Run scripts pytest (#171 segment stitch / additivity)
+        run: pytest scripts/tests -v
 
   build-wasm:
     name: Build WASM (trunk)
@@ -1654,6 +1656,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: post-deploy-playwright-report
-          path: e2e/post-deploy-report/
+          # #170: include test-results/ so the FAILING suite's Playwright
+          # trace zip (console + network + DOM snapshots, retain-on-failure)
+          # is in the artifact, not just the html summary.
+          path: |
+            e2e/post-deploy-report/
+            e2e/test-results/
           retention-days: 7
           if-no-files-found: ignore
