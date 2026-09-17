@@ -43,9 +43,47 @@ matches by stream and the map looks fine.
   Confirm the advertised host with `$env:COMPUTERNAME` on the box (NOT `hostname`).
 - **Flap escalation (#173):** `obs/ndi_recovery.rs` `NdiRecoveryTracker` counts
   recover→re-dark-within-`FLAP_WINDOW_100NS` (30 s) flaps; after
-  `FLAP_ESCALATE_COUNT` (2) it forces a nudge once (bypassing the below-threshold
-  / cooldown skip) so the normalizing re-apply lands promptly, and logs
-  `ndi-recovery: receiver flapping ... escalating to case normalization`.
+  `FLAP_ESCALATE_COUNT` (2) it forces a `ClearRestore` once (bypassing the
+  below-threshold skip) so the normalizing re-apply lands promptly, and logs
+  `ndi-recovery: receiver flapping ... escalating to a clear+restore`.
+
+## Escalation ladder — recover a WEDGED DistroAV receiver (#173 round 2)
+Clear+restore fixes a mis-named / unmatched source, but a receiver **wedged**
+inside DistroAV after the sender was recreated several times (repeated SongPlayer
+restarts) **ignores it** — box 17.9.2026: on-program `SP-fast` (uppercase, healthy
+name) stayed `connections=0` for ~20 min through three `outcome=Applied`
+clear+restore nudges, while `SP-warmup` on the SAME sender process had 6 receivers
+(per-input wedge, camera-box#1096 class; NOT #60 sender/mDNS). So a sustained dark
+wall now ESCALATES a ladder (`obs/ndi_recovery.rs::next_step`, pure + unit-tested;
+executor `obs/ndi_recovery_io.rs`, I/O over the healthy OBS WebSocket):
+
+- **Rung 0 `ClearRestore`** — fires at the dark threshold (`NUDGE_THRESHOLD_BAD_POLLS`
+  = 6 polls ≈ 30 s): clear + restore `ndi_source_name` to the ADVERTISED name.
+- **Rung 1 `ToggleSceneItem`** — `LADDER_STEP_SPACING_POLLS` (2 polls ≈ 10 s) later:
+  `SetSceneItemEnabled` OFF→ON so DistroAV tears down + recreates the receiver.
+- **Rung 2 `RecreateInput`** — 2 more polls later: `RemoveInput` + `CreateInput`
+  with the identical `inputSettings` (advertised name), restoring the saved
+  scene-item transform + z-order index. The strongest receiver-side remedy short
+  of restarting OBS; ~sub-second black on that scene only.
+- **Cool-down** `LADDER_COOLDOWN_POLLS` (6 polls ≈ 30 s) after the recreate, then
+  the ladder restarts at rung 0. One action per rung per poll; the ladder resets
+  the moment the receiver re-attaches.
+
+The fired rung is surfaced on `/api/v1/ndi/health` as `recovery_step`
+(`ClearRestore` / `ToggleSceneItem` / `RecreateInput` / `null`) so the E2E / log
+can see which rung recovered a wall. NEVER a per-sender `RecreateSender` (#60).
+
+- **Manual equivalents (over obs-websocket / MCP), same order:**
+  1. clear+restore — `mcp__obs-resolume__obs-set-input-settings <input>_video {"ndi_source_name":""}` then the advertised `RESOLUME-SNV (SP-x)`.
+  2. toggle — `mcp__obs-resolume__obs-set-scene-item-enabled` (sceneName + sceneItemId, `false` then `true`; find the id with `obs-get-scene-items`).
+  3. recreate — `obs-get-input-settings` → `obs-remove-input` → `obs-create-input` (same scene, inputKind `ndi_source`, the advertised `ndi_source_name`) → `obs-set-scene-item-transform` / `obs-set-scene-item-transform` index.
+  Always end with OBS on `sp-fast`, engine `[7]`, `SP-fast Playing` with receivers.
+
+- **Inactive-output caveat:** `connections=0` on an INACTIVE output is NORMAL
+  (`ndi_behavior 0`, 1 s timeout — DistroAV drops an off-program source); only an
+  ON-PROGRAM output with `connections=0` is a dark wall worth a ladder rung (see
+  the dedicated section below — `handle_health_snapshot` maps Playing+inactive →
+  Paused so `is_dark` never fires off-program).
 
 ## `connections=0` on an INACTIVE output is NORMAL (not a dark wall)
 The `sp-*` NDI inputs run `ndi_behavior 0` with a 1 s `ndi_behavior_timeout`, so

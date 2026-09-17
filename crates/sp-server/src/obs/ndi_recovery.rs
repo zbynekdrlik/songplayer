@@ -63,11 +63,10 @@ pub const FLAP_ESCALATE_COUNT: u32 = 2;
 /// receiver is fully recreated within ~50 s of going dark instead of sitting
 /// dark for minutes behind the old 60 s clear+restore cooldown.
 ///
-/// RED ships this `u32::MAX` (the TIER-0 "one wrong constant" pattern,
-/// `.claude/rules/rust-workspace.md`): the ladder never advances past rung 0, so
-/// the escalation tests fail cleanly with no dead-code / clippy noise; GREEN
-/// sets it to `2`.
-pub const LADDER_STEP_SPACING_POLLS: u32 = u32::MAX;
+/// (RED shipped this `u32::MAX` — the TIER-0 "one wrong constant" pattern,
+/// `.claude/rules/rust-workspace.md` — so the ladder never advanced past rung 0
+/// and the escalation tests failed cleanly; GREEN sets it to `2`.)
+pub const LADDER_STEP_SPACING_POLLS: u32 = 2;
 
 /// #173 round 2: dark polls to wait after the ladder completes (`RecreateInput`)
 /// before it restarts at `ClearRestore`. 6 polls ≈ 30 s — long enough for a
