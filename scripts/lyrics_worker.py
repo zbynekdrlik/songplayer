@@ -285,7 +285,7 @@ def _atomic_write_wav(path, audio, sr):
     import soundfile as sf
 
     tmp = path + ".tmp"
-    sf.write(tmp, audio, sr, subtype="FLOAT")
+    sf.write(tmp, audio, sr, format="WAV", subtype="FLOAT")
     os.replace(tmp, path)
 
 

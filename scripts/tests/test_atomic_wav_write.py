@@ -49,6 +49,6 @@ def test_atomic_write_wav_is_atomic_replace(tmp_path):
     out = str(tmp_path / "seg.wav")
     lw._atomic_write_wav(out, np.zeros(800, dtype=np.float32), 16000)
     lw._atomic_write_wav(out, np.ones(1600, dtype=np.float32), 16000)
-    data, sr = sf.read(out, dtype="float32")
+    data, _ = sf.read(out, dtype="float32")
     assert data.shape[0] == 1600
     assert np.allclose(data, 1.0, atol=1e-4)
