@@ -243,6 +243,15 @@ pub(crate) const STALL_TIMEOUT_CPU_SECS: u64 = 900;
 /// catches a genuine hang.
 pub(crate) const STALL_TIMEOUT_GPU_SECS: u64 = 300;
 
+/// Extra idle allowance before the FIRST per-chunk write of a run, covering the
+/// one-time model load (two RoFormer checkpoints) + the first segment's
+/// inference — on BOTH a fresh run and a resume (the models reload before the
+/// next NEW segment). Without it a slow-but-healthy cold start (esp. a cold GPU
+/// checkpoint under the tighter GPU window) would be mistaken for a stall and
+/// killed, resumed, killed again — the exact kill-loop this ticket fixes. After
+/// the first write of the run the plain [`stall_timeout`] applies.
+pub(crate) const STALL_STARTUP_GRACE_SECS: u64 = 300;
+
 /// The stall window (max gap between chunk-progress writes) for `plan`. Pure —
 /// unit-tested.
 pub(crate) fn stall_timeout(plan: &HeavyStepPlan) -> Duration {
@@ -253,11 +262,30 @@ pub(crate) fn stall_timeout(plan: &HeavyStepPlan) -> Duration {
     }
 }
 
-/// True when `idle` (time since the last per-chunk progress write) has exceeded
-/// the plan's [`stall_timeout`] — the caller kills the resumable child, leaving
-/// its work dir intact for the next resume. Pure — unit-tested.
-pub(crate) fn stall_timeout_expired(idle: Duration, plan: &HeavyStepPlan) -> bool {
-    idle > stall_timeout(plan)
+/// The idle limit before a resumable child is killed: [`stall_timeout`] once the
+/// child has written at least one segment THIS run, plus
+/// [`STALL_STARTUP_GRACE_SECS`] while it has not (model load + first segment).
+/// Bounds BOTH a hang during model load AND a genuine mid-run stall, without
+/// killing a slow-but-healthy cold start. Pure — unit-tested.
+pub(crate) fn stall_limit(plan: &HeavyStepPlan, first_progress_seen: bool) -> Duration {
+    let base = stall_timeout(plan);
+    if first_progress_seen {
+        base
+    } else {
+        base + Duration::from_secs(STALL_STARTUP_GRACE_SECS)
+    }
+}
+
+/// True when `idle` (time since the last per-chunk progress write, or since the
+/// child started when none has been written yet) has exceeded the plan's
+/// [`stall_limit`] — the caller kills the resumable child, leaving its work dir
+/// intact for the next resume. Pure — unit-tested.
+pub(crate) fn stall_timeout_expired(
+    idle: Duration,
+    plan: &HeavyStepPlan,
+    first_progress_seen: bool,
+) -> bool {
+    idle > stall_limit(plan, first_progress_seen)
 }
 
 /// Newest mtime among files directly in `dir` (the resumable segment files), or
@@ -295,10 +323,15 @@ pub(crate) async fn wait_with_stall_timeout(
 ) -> anyhow::Result<std::process::ExitStatus> {
     let poll = Duration::from_secs(30);
     let mut last_progress = std::time::Instant::now();
+    // Baseline the newest mtime so a RESUME (work dir already has segments) still
+    // waits for a NEW segment this run — the models reload first either way, so
+    // the startup grace applies until the first NEW write, not just on a fresh run.
     let mut last_newest = newest_mtime(work_dir);
+    let mut first_progress_seen = false;
     tracing::debug!(
-        "{label}: stall-bounded wait (stall={}s, eta~{}s) watching {}",
+        "{label}: stall-bounded wait (stall={}s +{}s startup grace, eta~{}s) watching {}",
         stall_timeout(plan).as_secs(),
+        STALL_STARTUP_GRACE_SECS,
         eta.as_secs(),
         work_dir.display()
     );
@@ -314,13 +347,14 @@ pub(crate) async fn wait_with_stall_timeout(
                 if newest > last_newest {
                     last_newest = newest;
                     last_progress = std::time::Instant::now();
+                    first_progress_seen = true;
                 }
-                if stall_timeout_expired(last_progress.elapsed(), plan) {
+                if stall_timeout_expired(last_progress.elapsed(), plan, first_progress_seen) {
                     let _ = child.kill().await;
                     return Err(anyhow::anyhow!(
                         "{label} stalled — no chunk progress for {}s \
                          (work dir preserved for resume)",
-                        stall_timeout(plan).as_secs()
+                        stall_limit(plan, first_progress_seen).as_secs()
                     ));
                 }
             }
