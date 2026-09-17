@@ -28,25 +28,26 @@ pub fn is_playing(np: &HashMap<i64, NowPlayingInfo>, id: i64) -> bool {
     matches!(np.get(&id).map(|i| i.state), Some(PlaybackState::Playing))
 }
 
-/// Selector ordering: playing playlists first, then by name (case-insensitive).
-pub fn ordered(playlists: &[Playlist], np: &HashMap<i64, NowPlayingInfo>) -> Vec<Playlist> {
+/// Selector display order: STABLE, alphabetical (case-insensitive) by name.
+///
+/// #170: NOT playing-first. A row must never jump under the operator's cursor
+/// when a playlist's playback state changes — the ▶ glyph and the "Práve hrá"
+/// strip already mark the playing one, and the selector re-ordering on every
+/// `now_playing` tick was the click-race that failed post-deploy test 16.
+/// The order therefore depends only on the playlist set, never on `now_playing`.
+pub fn ordered(playlists: &[Playlist]) -> Vec<Playlist> {
     let mut v = playlists.to_vec();
-    v.sort_by(|a, b| {
-        let pa = is_playing(np, a.id);
-        let pb = is_playing(np, b.id);
-        // playing (true) sorts before non-playing (false)
-        pb.cmp(&pa)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
+    v.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     v
 }
 
-/// The default selection: the currently-playing playlist (first by name if
-/// several), else the first playlist by name. `ordered()` already puts a
-/// playing playlist at the head and sorts by name within each group, so its
-/// head is exactly that. `None` only for an empty list.
+/// The INITIAL default selection: the currently-playing playlist (first by
+/// name if several), else the first playlist alphabetically. #170: the
+/// selector order is no longer playing-first, so this preserves "preselect
+/// what's playing on a fresh load" explicitly via `first_playing`. `None`
+/// only for an empty list.
 pub fn choose_default(playlists: &[Playlist], np: &HashMap<i64, NowPlayingInfo>) -> Option<i64> {
-    ordered(playlists, np).first().map(|p| p.id)
+    first_playing(playlists, np).or_else(|| ordered(playlists).first().map(|p| p.id))
 }
 
 /// The first currently-playing playlist id (first by name if several).
