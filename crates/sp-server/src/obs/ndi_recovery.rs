@@ -330,10 +330,8 @@ mod tests {
         );
         // Rung 2 is GATED OFF (`LADDER_RECREATE_ENABLED = false`, #173 round 3):
         // no recreate at the spacing; after the cool-down the ladder restarts.
-        assert!(
-            !LADDER_RECREATE_ENABLED,
-            "rung 2 stays off until create-first lands"
-        );
+        // (rung 2 stays off until create-first lands)
+        const { assert!(!LADDER_RECREATE_ENABLED) };
         assert_eq!(
             next_step(&recreate_pending, LADDER_STEP_SPACING_POLLS),
             None

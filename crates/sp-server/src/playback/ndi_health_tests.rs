@@ -139,7 +139,7 @@ async fn handle_health_snapshot_escalates_to_recreate_on_sustained_dark_wall() {
     // #173 round 3 gate: rung 2 (RecreateInput) is DISABLED until the executor
     // creates-first-then-removes (it deleted sp-youth_video on the box on
     // 17.9.2026), so the highest rung a sustained dark wall reaches is the toggle.
-    assert!(!crate::obs::ndi_recovery::LADDER_RECREATE_ENABLED);
+    const { assert!(!crate::obs::ndi_recovery::LADDER_RECREATE_ENABLED) };
     assert_eq!(
         last_step,
         Some(crate::obs::ndi_recovery::RecoveryStep::ToggleSceneItem),
