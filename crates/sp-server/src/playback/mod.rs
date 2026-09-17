@@ -771,20 +771,21 @@ impl PlaybackEngine {
 
         // After the action (which may itself mutate the state to Playing),
         // broadcast the final state if it differs from the pre-transition state.
-        // #170: derive the wire state from `scene_active` too, so a pipeline
-        // the engine holds as Playing while its scene is off program is
-        // broadcast as WaitingForScene (matching the health-label replay).
-        let (final_state, scene_active) = self
-            .pipelines
-            .get(&playlist_id)
-            .map(|pp| (pp.state.clone(), pp.scene_active.load(Ordering::Acquire)))
-            .unwrap_or((new_state, false));
-        if old_state != final_state {
-            let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
-                playlist_id,
-                state: play_state_to_ws(&final_state, scene_active),
-                mode,
-            });
+        // The pipeline always exists here (`execute_action` never removes one;
+        // the no-pipeline case returned at the top of this method). #170: derive
+        // the wire state from `scene_active` too, so a pipeline the engine holds
+        // as Playing while its scene is off program is broadcast as
+        // WaitingForScene (matching the health-label replay).
+        if let Some(pp) = self.pipelines.get(&playlist_id) {
+            let final_state = pp.state.clone();
+            let scene_active = pp.scene_active.load(Ordering::Acquire);
+            if old_state != final_state {
+                let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
+                    playlist_id,
+                    state: play_state_to_ws(&final_state, scene_active),
+                    mode,
+                });
+            }
         }
     }
 
