@@ -5,6 +5,7 @@ pub mod ndi_discovery;
 pub mod ndi_recovery;
 pub(crate) mod output_state;
 pub mod scene;
+pub mod scene_poll;
 pub mod text;
 
 use std::collections::{HashMap, HashSet};
