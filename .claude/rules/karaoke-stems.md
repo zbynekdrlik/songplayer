@@ -129,9 +129,32 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
      segment of the run) prevents killing a slow cold start (esp. GPU) before its
      first segment → the kill-loop this ticket fixes. On a STALL the work dir is
      LEFT INTACT (never delete it — that is the resume state; only the final
-     output write is atomic). Wiring the stall waiter into a piped-stderr child
-     (separator) needs concurrent `drain_pipe` tasks so the pipe never deadlocks
-     the child; an inherited-stdio child (aligner isolation) needs no drain.
+     output write is atomic). Wiring the stall waiter into a child needs
+     concurrent `drain_pipe` tasks so the pipe never deadlocks the child —
+     BOTH `separate_stems` AND `preprocess_vocals` (isolation) now pipe+drain
+     their stdio (#171 fixed the latter; it used to inherit stdio and LOSE the
+     Python traceback). The shared draining/tail helpers live in
+     `lyrics/child_output.rs` (`drain_pipe`/`tail_lines`/`failure_tail`).
+  3. **Atomic segment write MUST pass `format="WAV"` (#171 — the exit-1 bug).**
+     The resumable path writes each segment (and the final stitch) via a
+     `<name>.wav.tmp` scratch + `os.replace`. `soundfile.write` infers the format
+     from the file EXTENSION, and `.tmp` is UNKNOWN → `TypeError: No format
+     specified and unable to get format from file extension` — so isolation ran
+     the full ~14.5 min mel+dereverb inference for segment 0 and then died at the
+     write, 0 segment files, EVERY song → full-mix base tier. `stem_worker` was
+     unaffected only because `_separate_one_segment` already passed
+     `format="WAV"`; the pre-#171 whole-song isolation wrote straight to a `.wav`
+     output (no `.tmp`). Fix: the shared `_atomic_write_wav(path, audio, sr)`
+     helper in `lyrics_worker.py` passes `format="WAV"`. Committed pytest:
+     `scripts/tests/test_atomic_wav_write.py` (needs `soundfile`, added to the
+     `eval-checks` CI deps) + `test_segment_stitch.py` (numpy-only).
+  4. **A full-mix base-tier row must re-attempt ★ (#171 gap-1,
+     `reprocess::fetch_bucket_fullmix_upgrade`).** A `gemini-3-5-transcribe/fullmix`
+     row is `has_lyrics=1` at the CURRENT version, so it matches neither the null
+     (has_lyrics=0) nor the stale (version<current) bucket — without a dedicated
+     bucket it would never upgrade once isolation works. The lowest-priority 4th
+     selector bucket re-picks it at most once/day (gated on `lyrics_processed_at`);
+     a successful ★/vocal result overwrites `lyrics_source` and it leaves the bucket.
 - **Sequential heavy-step guard (#162 07:40 crash, `lyrics/heavy_slot.rs`) — the
   box must NEVER be overloaded.** The lyrics worker (isolation + mtl) and the
   stem worker (separation) are two independent loops; once #162 removed the
