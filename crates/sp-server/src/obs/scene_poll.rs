@@ -9,7 +9,8 @@
 //! loop polls `GetCurrentProgramScene` on a ~2 s cadence and reconciles a
 //! mismatch through the same path `CurrentProgramSceneChanged` feeds.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use tokio::sync::{RwLock, broadcast};
 use tokio_tungstenite::tungstenite::Message;
@@ -33,6 +34,7 @@ pub async fn reconcile_program_scene(
     ndi_sources: &NdiSourceMap,
     state: &Arc<RwLock<ObsState>>,
     event_tx: &broadcast::Sender<ObsEvent>,
+    pending: &Mutex<Option<(String, Instant)>>,
 ) {
     let req_id = uuid::Uuid::new_v4().to_string();
     let req = get_current_scene_request(&req_id);
@@ -55,7 +57,22 @@ pub async fn reconcile_program_scene(
     };
 
     let last = { state.read().await.current_scene.clone() };
-    if let Some(scene) = scene_poll_detects_change(last.as_deref(), &polled) {
+    // The mismatch clock lives across ticks: `(polled scene, first seen)`.
+    let verdict = {
+        let mut guard = pending.lock().unwrap_or_else(|e| e.into_inner());
+        let elapsed = guard
+            .as_ref()
+            .filter(|(scene, _)| scene == &polled)
+            .map(|(_, since)| since.elapsed());
+        let verdict = scene_poll_verdict(last.as_deref(), &polled, elapsed, SCENE_POLL_CONFIRM);
+        *guard = match verdict {
+            PollVerdict::Pending if elapsed.is_none() => Some((polled.clone(), Instant::now())),
+            PollVerdict::Pending => guard.take(),
+            PollVerdict::InSync | PollVerdict::Reconcile(_) => None,
+        };
+        verdict
+    };
+    if let PollVerdict::Reconcile(scene) = verdict {
         info!(
             scene = %scene,
             "obs: program scene changed without an event — reconciled by poll"
@@ -77,6 +94,39 @@ pub fn scene_poll_detects_change(
     match last_event_scene {
         Some(s) if s == polled_scene => None,
         _ => Some(polled_scene.to_string()),
+    }
+}
+
+/// How long a polled mismatch must persist before the poll reconciles it —
+/// the `CurrentProgramSceneChanged` event fires at the END of the Studio-Mode
+/// transition (2000 ms fade on the box), while `GetCurrentProgramScene` reports
+/// the target at its START; acting earlier freezes the outgoing scene mid-fade.
+pub(crate) const SCENE_POLL_CONFIRM: Duration = Duration::from_millis(3000);
+
+/// The poll's verdict for one tick.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PollVerdict {
+    /// Event stream and poll agree — nothing to do.
+    InSync,
+    /// Mismatch seen, but the event still has time to arrive — wait.
+    Pending,
+    /// Mismatch persisted past the confirm window — reconcile to this scene.
+    Reconcile(String),
+}
+
+/// Decide the poll's action from the last event-derived scene, the polled
+/// scene, how long THIS mismatch has been pending (`None` = first sighting) and
+/// the confirm window. Pure — unit-tested.
+pub fn scene_poll_verdict(
+    last_event_scene: Option<&str>,
+    polled_scene: &str,
+    pending_for: Option<Duration>,
+    confirm: Duration,
+) -> PollVerdict {
+    let _ = (pending_for, confirm);
+    match scene_poll_detects_change(last_event_scene, polled_scene) {
+        None => PollVerdict::InSync,
+        Some(scene) => PollVerdict::Reconcile(scene),
     }
 }
 
@@ -108,5 +158,63 @@ mod tests {
             scene_poll_detects_change(None, "sp-fast"),
             Some("sp-fast".to_string()),
         );
+    }
+
+    // ---- confirm window (#170 round 4): the poll must not beat the event ----
+
+    #[test]
+    fn mismatch_first_sighting_is_pending() {
+        // First tick that sees a mismatch: the transition just started; the
+        // event fires at its END, so wait — never reconcile on first sight.
+        assert_eq!(
+            scene_poll_verdict(Some("sp-slow"), "sp-fast", None, Duration::from_secs(3)),
+            PollVerdict::Pending
+        );
+    }
+
+    #[test]
+    fn mismatch_inside_confirm_window_stays_pending() {
+        assert_eq!(
+            scene_poll_verdict(
+                Some("sp-slow"),
+                "sp-fast",
+                Some(Duration::from_millis(1000)),
+                Duration::from_secs(3)
+            ),
+            PollVerdict::Pending
+        );
+    }
+
+    #[test]
+    fn mismatch_past_confirm_window_reconciles() {
+        // The event never came (a dropped studio-mode switch) → reconcile.
+        assert_eq!(
+            scene_poll_verdict(
+                Some("sp-slow"),
+                "sp-fast",
+                Some(Duration::from_millis(3500)),
+                Duration::from_secs(3)
+            ),
+            PollVerdict::Reconcile("sp-fast".to_string())
+        );
+    }
+
+    #[test]
+    fn in_sync_is_in_sync_whatever_was_pending() {
+        assert_eq!(
+            scene_poll_verdict(
+                Some("sp-fast"),
+                "sp-fast",
+                Some(Duration::from_secs(9)),
+                Duration::from_secs(3)
+            ),
+            PollVerdict::InSync
+        );
+    }
+
+    #[test]
+    fn confirm_window_outlasts_the_studio_fade() {
+        // The box fade is 2000 ms; the event fires at its END.
+        assert!(SCENE_POLL_CONFIRM >= Duration::from_millis(2500));
     }
 }

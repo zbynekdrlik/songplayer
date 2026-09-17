@@ -522,6 +522,9 @@ async fn connect_and_run(
     // missed ticks so a slow round-trip does not burst catch-up requests.
     let mut scene_poll = tokio::time::interval(SCENE_POLL_INTERVAL);
     scene_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // #170: the poll's mismatch clock (polled scene, first seen) across ticks.
+    let scene_pending: std::sync::Arc<std::sync::Mutex<Option<(String, std::time::Instant)>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
 
     // Step 7: main loop — thin router: each arm spawns a task to do
     // the work. The write half is shared via Arc<Mutex<>> so helper
@@ -680,6 +683,7 @@ async fn connect_and_run(
                 let ndi_sources = std::sync::Arc::clone(ndi_sources);
                 let state = std::sync::Arc::clone(state);
                 let event_tx = event_tx.clone();
+                let scene_pending = std::sync::Arc::clone(&scene_pending);
                 spawned_tasks.spawn(async move {
                     scene_poll::reconcile_program_scene(
                         &write,
@@ -687,6 +691,7 @@ async fn connect_and_run(
                         &ndi_sources,
                         &state,
                         &event_tx,
+                        &scene_pending,
                     )
                     .await;
                 });

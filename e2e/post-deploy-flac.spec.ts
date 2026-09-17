@@ -311,11 +311,17 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       await rows.nth(i).click();
       const card = page.locator(".playlist-card").first();
       await expect(card).toBeVisible();
-      const idleText = card.locator(".np-idle");
-      if ((await idleText.count()) > 0) {
+      // #170: read the idle marker and the panel in ONE DOM pass. Two separate
+      // counts race a live state change (a playlist starting between the two
+      // reads showed np-idle first and a karaoke panel a moment later); the
+      // invariant is per-instant: an idle card never carries a panel.
+      const { idle, karaoke } = await card.evaluate((el) => ({
+        idle: el.querySelectorAll(".np-idle").length,
+        karaoke: el.querySelectorAll(".karaoke-panel").length,
+      }));
+      if (idle > 0) {
         // Idle playlist should not show karaoke panel
-        const karaoke = card.locator(".karaoke-panel");
-        expect(await karaoke.count()).toBe(0);
+        expect(karaoke).toBe(0);
       }
     }
   });
