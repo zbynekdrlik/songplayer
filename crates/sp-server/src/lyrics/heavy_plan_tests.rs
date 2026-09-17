@@ -174,6 +174,13 @@ fn stall_expires_only_past_the_window() {
         &cpu,
         true
     ));
+    // EXACTLY the window → still not stalled: the comparison is strict (`>`),
+    // an idle gap equal to the limit is the last healthy sample, not a kill.
+    assert!(!stall_timeout_expired(
+        std::time::Duration::from_secs(900),
+        &cpu,
+        true
+    ));
     // Past the window → stalled (kill the resumable child, keep its work dir).
     assert!(stall_timeout_expired(
         std::time::Duration::from_secs(901),
