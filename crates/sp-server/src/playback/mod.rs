@@ -75,13 +75,22 @@ fn should_send_position_update(elapsed_ms: u64) -> bool {
     elapsed_ms >= POSITION_BROADCAST_INTERVAL_MS
 }
 
-/// Map the internal server-side [`PlayState`] to the wire-level
-/// [`sp_core::playback::PlaybackState`] used by the dashboard.
-fn play_state_to_ws(state: &PlayState) -> WsPlaybackState {
+/// Map the internal server-side [`PlayState`] to the wire-level dashboard
+/// [`WsPlaybackState`]. #170: a pipeline the engine holds as `Playing` but
+/// whose scene is OFF program is paused (dark wall) — it must map to
+/// `WaitingForScene`, matching the WS replay built from `handle_health_snapshot`'s
+/// `(Playing, Playing, scene_active = false) → Paused` reconciliation. A live
+/// `Playing` for such a pipeline flips a paused selector row to Playing, the
+/// selector re-orders it to the top, and a click races the moving row.
+fn play_state_to_ws(state: &PlayState, scene_active: bool) -> WsPlaybackState {
     match state {
         PlayState::Idle => WsPlaybackState::Idle,
         PlayState::WaitingForScene => WsPlaybackState::WaitingForScene,
-        PlayState::Playing { .. } => WsPlaybackState::Playing,
+        // RED (#170): deliberately ignores `scene_active`. GREEN gates it.
+        PlayState::Playing { .. } => {
+            let _ = scene_active;
+            WsPlaybackState::Playing
+        }
     }
 }
 
@@ -574,9 +583,15 @@ impl PlaybackEngine {
                     });
 
                     // Broadcast the state change so the dashboard updates.
+                    // #170: gate on scene_active so a Previous on an
+                    // off-program playlist shows WaitingForScene, matching
+                    // the health-label replay.
                     let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
                         playlist_id,
-                        state: WsPlaybackState::Playing,
+                        state: play_state_to_ws(
+                            &PlayState::Playing { video_id },
+                            pp.scene_active.load(Ordering::Acquire),
+                        ),
                         mode: pp.mode,
                     });
                 }
@@ -699,9 +714,14 @@ impl PlaybackEngine {
                 warn!(playlist_id, video_id, %e, "PlayVideo: failed to record play");
             }
 
+            // #170: gate on scene_active so a PlayVideo on an off-program
+            // playlist shows WaitingForScene, matching the health-label replay.
             let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
                 playlist_id,
-                state: WsPlaybackState::Playing,
+                state: play_state_to_ws(
+                    &PlayState::Playing { video_id },
+                    pp.scene_active.load(Ordering::Acquire),
+                ),
                 mode: pp.mode,
             });
         } else {
@@ -752,15 +772,18 @@ impl PlaybackEngine {
 
         // After the action (which may itself mutate the state to Playing),
         // broadcast the final state if it differs from the pre-transition state.
-        let final_state = self
+        // #170: derive the wire state from `scene_active` too, so a pipeline
+        // the engine holds as Playing while its scene is off program is
+        // broadcast as WaitingForScene (matching the health-label replay).
+        let (final_state, scene_active) = self
             .pipelines
             .get(&playlist_id)
-            .map(|pp| pp.state.clone())
-            .unwrap_or(new_state);
+            .map(|pp| (pp.state.clone(), pp.scene_active.load(Ordering::Acquire)))
+            .unwrap_or((new_state, false));
         if old_state != final_state {
             let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
                 playlist_id,
-                state: play_state_to_ws(&final_state),
+                state: play_state_to_ws(&final_state, scene_active),
                 mode,
             });
         }
