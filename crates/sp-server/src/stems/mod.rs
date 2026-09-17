@@ -2,9 +2,9 @@
 //!
 //! - [`control`] — the process-global live karaoke mode + vocal gain the
 //!   dashboard drives and the playback pipeline reads.
-//! - [`reader`] — the playback seam: open a plain mix reader or a stem-mixing
-//!   [`sp_decoder::KaraokeAudioReader`], with a FullMix fallback when stems
-//!   are missing.
+//! - [`reader`] — the playback seam: open a plain mix reader or a live
+//!   [`sp_decoder::StemMixReader`] over all existing stems, with an original-mix
+//!   fallback when stems are missing (#186).
 //! - [`separator`] — the Rust wrapper around `scripts/stem_worker.py`.
 //! - [`worker`] — the background worker that separates the catalog under the
 //!   #154 idle gate.

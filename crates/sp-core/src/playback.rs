@@ -90,24 +90,6 @@ impl KaraokeMode {
         !matches!(self, Self::FullMix)
     }
 
-    /// Per-stem linear gains `(vocal_gain, instrumental_gain)` for this mode.
-    /// `user_vocal_gain` (clamped to `0.0..=1.0`) is the live slider value; it
-    /// only affects `KaraokeLow`. `FullMix` never mixes stems, so its gains are
-    /// unused (it returns the mix-equivalent `(1.0, 0.0)` for completeness).
-    pub fn stem_gains(&self, user_vocal_gain: f32) -> (f32, f32) {
-        let vg = if user_vocal_gain.is_finite() {
-            user_vocal_gain.clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        match self {
-            Self::FullMix => (1.0, 0.0),
-            Self::KaraokeLow => (vg, 1.0),
-            Self::VocalsOnly => (1.0, 0.0),
-            Self::InstrumentalOnly => (0.0, 1.0),
-        }
-    }
-
     /// Encode as a `u8` for the shared `Arc<AtomicU8>` the engine hands each
     /// playback pipeline (mirrors the `burn_on` atomic seam).
     pub fn as_u8(&self) -> u8 {
@@ -188,22 +170,6 @@ mod tests {
         assert!(KaraokeMode::KaraokeLow.needs_stems());
         assert!(KaraokeMode::VocalsOnly.needs_stems());
         assert!(KaraokeMode::InstrumentalOnly.needs_stems());
-    }
-
-    #[test]
-    fn stem_gains_per_mode() {
-        assert_eq!(KaraokeMode::KaraokeLow.stem_gains(0.3), (0.3, 1.0));
-        assert_eq!(KaraokeMode::VocalsOnly.stem_gains(0.3), (1.0, 0.0));
-        assert_eq!(KaraokeMode::InstrumentalOnly.stem_gains(0.3), (0.0, 1.0));
-        // KaraokeLow tracks the live vocal gain.
-        assert_eq!(KaraokeMode::KaraokeLow.stem_gains(0.8), (0.8, 1.0));
-    }
-
-    #[test]
-    fn stem_gains_clamps_and_guards_nan() {
-        assert_eq!(KaraokeMode::KaraokeLow.stem_gains(1.5), (1.0, 1.0));
-        assert_eq!(KaraokeMode::KaraokeLow.stem_gains(-0.5), (0.0, 1.0));
-        assert_eq!(KaraokeMode::KaraokeLow.stem_gains(f32::NAN), (0.0, 1.0));
     }
 
     #[test]
