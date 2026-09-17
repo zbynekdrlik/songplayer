@@ -244,6 +244,33 @@ fn preset_change_down_crossfades_no_click() {
 }
 
 #[test]
+fn ramp_snaps_to_a_partial_target_without_overshoot() {
+    // sr=200 → step=0.1. Ramp 0 → 0.25: 0.1, 0.2, then SNAP to 0.25 (the
+    // remaining 0.05 ≤ step), never overshooting to 0.3 and never snapping early.
+    // Pins the snap comparison + direction (kills the ramp-arithmetic mutants an
+    // even-division 0→1 ramp cannot distinguish).
+    let target = shared_gain(0.0);
+    let stream = mock(vec![vec![1.0; 20]], 200, 1, 1000);
+    let mut r = StemMixReader::new(vec![stream], vec![Arc::clone(&target)]).unwrap();
+    target.store(gain_to_bits(0.25), Ordering::Relaxed);
+    let out = drain(&mut r);
+    assert!((out[0] - 0.1).abs() < 1e-6, "frame0 = 0.1, got {}", out[0]);
+    assert!((out[1] - 0.2).abs() < 1e-6, "frame1 = 0.2, got {}", out[1]);
+    assert!(
+        (out[2] - 0.25).abs() < 1e-6,
+        "frame2 snaps to 0.25, got {}",
+        out[2]
+    );
+    for (idx, v) in out.iter().enumerate() {
+        assert!(
+            *v <= 0.25 + 1e-6,
+            "never overshoots the target at {idx}: {v}"
+        );
+    }
+    assert!((out[out.len() - 1] - 0.25).abs() < 1e-6, "holds the target");
+}
+
+#[test]
 fn song_opens_at_preset_no_fade_in() {
     // current initialises to the target at construction, so the FIRST sample is
     // already at full gain — no unwanted 50 ms fade-in at song start.

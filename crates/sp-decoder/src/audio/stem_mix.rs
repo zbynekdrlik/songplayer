@@ -257,12 +257,13 @@ impl AudioStream for StemMixReader {
             for k in 0..n_streams {
                 let tgt = gain_from_bits(self.targets[k].load(Ordering::Relaxed));
                 let cur = self.current[k];
-                self.current[k] = if (tgt - cur).abs() <= self.step {
+                let delta = tgt - cur;
+                // Snap once the target is within one step, else move one step in
+                // its direction (`copysign` — no separate up/down branch).
+                self.current[k] = if delta.abs() <= self.step {
                     tgt
-                } else if tgt > cur {
-                    cur + self.step
                 } else {
-                    cur - self.step
+                    cur + self.step.copysign(delta)
                 };
             }
             for _c in 0..ch {
