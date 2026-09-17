@@ -299,6 +299,12 @@ impl StemWorker {
 
         let audio_path = PathBuf::from(&job.audio_file_path);
         let (vocals_out, instrumental_out) = crate::stems::stem_paths(&audio_path);
+        // #171: resumable per-segment scratch dir beside the cached audio,
+        // preserved across a stall/kill so the next pick resumes.
+        let stem_work_dir = audio_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join(format!("{}_stemsep", job.youtube_id));
         let gpu_mem = crate::db::models::get_setting(&self.pool, "lyrics_gpu_mem_fraction")
             .await
             .ok()
@@ -362,6 +368,7 @@ impl StemWorker {
                     &audio_path,
                     &vocals_out,
                     &instrumental_out,
+                    &stem_work_dir,
                     timeout,
                     gpu_mem.as_deref(),
                     &plan,
@@ -394,6 +401,7 @@ impl StemWorker {
                             &audio_path,
                             &vocals_out,
                             &instrumental_out,
+                            &stem_work_dir,
                             cpu_timeout,
                             gpu_mem.as_deref(),
                             &cpu_plan,
@@ -417,6 +425,7 @@ impl StemWorker {
                 &audio_path,
                 &vocals_out,
                 &instrumental_out,
+                &stem_work_dir,
                 timeout,
                 gpu_mem.as_deref(),
                 &plan,

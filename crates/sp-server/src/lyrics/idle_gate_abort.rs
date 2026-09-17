@@ -188,12 +188,16 @@ impl crate::lyrics::worker::LyricsWorker {
         let wav_path = self
             .cache_dir
             .join(format!("{}_vocals16k.wav", row.youtube_id));
+        // #171: resumable per-segment scratch dir next to the cache. Preserved
+        // across a stall/kill so the next pick resumes from finished segments.
+        let work_dir = self.cache_dir.join(format!("{}_isolation", row.youtube_id));
         let iso_fut = crate::lyrics::aligner::preprocess_vocals(
             python,
             &self.script_path,
             &self.models_dir,
             &audio_path,
             &wav_path,
+            &work_dir,
             isolation_step_timeout(plan, row.duration_ms),
             gpu_mem,
             plan,

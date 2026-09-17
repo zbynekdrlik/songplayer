@@ -136,6 +136,105 @@ fn cpu_plan_timeout_saturates() {
     );
 }
 
+// ---- stall_timeout / stall_timeout_expired (#171, pure) ------------------
+
+#[test]
+fn stall_timeout_cpu_is_fifteen_minutes() {
+    // The CPU plan's per-chunk stall window is 15 min: a single ~30 s segment
+    // takes several minutes under the 3-thread cap, so a slow-but-progressing
+    // run must never be killed. (RED fails here: the constant starts u64::MAX.)
+    assert_eq!(
+        stall_timeout(&HeavyStepPlan::cpu_idle()),
+        std::time::Duration::from_secs(900),
+        "cpu-idle stall window is 15 min"
+    );
+}
+
+#[test]
+fn stall_timeout_gpu_is_shorter_than_cpu() {
+    let gpu = stall_timeout(&HeavyStepPlan::gpu_below_normal());
+    assert_eq!(
+        gpu,
+        std::time::Duration::from_secs(300),
+        "gpu stall window is 5 min"
+    );
+    assert!(
+        gpu < stall_timeout(&HeavyStepPlan::cpu_idle()),
+        "the GPU is faster, so its stall window is shorter than the CPU's"
+    );
+}
+
+#[test]
+fn stall_expires_only_past_the_window() {
+    let cpu = HeavyStepPlan::cpu_idle();
+    // AFTER the first segment (first_progress_seen = true) the plain window applies.
+    // Just inside → not stalled.
+    assert!(!stall_timeout_expired(
+        std::time::Duration::from_secs(899),
+        &cpu,
+        true
+    ));
+    // Past the window → stalled (kill the resumable child, keep its work dir).
+    assert!(stall_timeout_expired(
+        std::time::Duration::from_secs(901),
+        &cpu,
+        true
+    ));
+    // The GPU window is tighter: 301 s is a stall on GPU but not on CPU.
+    let gpu = HeavyStepPlan::gpu_below_normal();
+    assert!(stall_timeout_expired(
+        std::time::Duration::from_secs(301),
+        &gpu,
+        true
+    ));
+    assert!(!stall_timeout_expired(
+        std::time::Duration::from_secs(301),
+        &cpu,
+        true
+    ));
+}
+
+#[test]
+fn startup_grace_delays_the_first_kill() {
+    // BEFORE the first segment write (first_progress_seen = false) the model-load
+    // startup grace is added, so a slow cold start is NOT killed at the plain
+    // window — the exact kill-loop #171 fixes. GPU: 300 s + 300 s grace = 600 s.
+    let gpu = HeavyStepPlan::gpu_below_normal();
+    assert_eq!(
+        stall_limit(&gpu, false),
+        std::time::Duration::from_secs(600),
+        "before the first write, GPU gets stall + startup grace"
+    );
+    // 301 s IS a stall once progressing, but NOT during the pre-first-write grace.
+    assert!(stall_timeout_expired(
+        std::time::Duration::from_secs(301),
+        &gpu,
+        true
+    ));
+    assert!(!stall_timeout_expired(
+        std::time::Duration::from_secs(301),
+        &gpu,
+        false
+    ));
+    // CPU: 900 s + 300 s grace = 1200 s before the first write.
+    let cpu = HeavyStepPlan::cpu_idle();
+    assert_eq!(stall_limit(&cpu, true), std::time::Duration::from_secs(900));
+    assert_eq!(
+        stall_limit(&cpu, false),
+        std::time::Duration::from_secs(1200)
+    );
+    assert!(!stall_timeout_expired(
+        std::time::Duration::from_secs(1000),
+        &cpu,
+        false
+    ));
+    assert!(stall_timeout_expired(
+        std::time::Duration::from_secs(1300),
+        &cpu,
+        false
+    ));
+}
+
 // ---- creation_flags (pure, Windows constants) ----------------------------
 
 #[test]
