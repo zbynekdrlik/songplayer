@@ -72,6 +72,36 @@ paths:
   submit is also moved off the boundary-critical path (a dedicated NDI-submit
   thread) or the stems child's D3D/NDI-path impact is bounded. `iter_p99` ≫
   `prep_p99` is the signature of submit-side (not decode-side) lateness.
+- Submit-thread output split (#168, 0.54.0-dev.1): the symmetric twin of the
+  #147 decode split, moving the NDI submit OFF the emit thread. Diagnosis
+  (box-test-5 log, `paced: song summary`): `iter_p50_us` 25–31 ms MEDIAN with
+  `iter_p99_us` 87–93 ms while `prep_p99` 0.4 ms — a 25 ms MEDIAN cannot be the
+  ~sub-ms NV12 `to_vec()` copy, so the stall is `send_video_async` blocking on
+  the prior async frame (the SDK send thread starved by the resident child), NOT
+  the copy → the submit-thread fix, never a pre-converted pool. The emit thread
+  now emits through `HandoffSink` (`pipeline_paced_submit.rs`): it hands the
+  stamped frame to a BOUNDED handoff (`submit_handoff.rs::SubmitQueue`, depth
+  `SUBMIT_HANDOFF_BOUND=2`) in ~µs and stays on the grid; a dedicated submit
+  thread (`run_submit_consumer`) owns the `FrameSubmitter` for the song
+  (borrowed via `std::thread::scope` — SDK per-instance affinity + the async
+  double-buffer holdover stay single-threaded) and does the blocking
+  `send_audio`+`send_video_async`. It works BECAUSE median submit (25 ms) < the
+  33.3 ms grid slot: the submit thread's ~40 fps capacity vs 30 fps demand drains
+  the p99 spikes out of a shallow queue. `late_frames` is measured HONESTLY at
+  the submit thread (`submit_late_100ns` = stamp → submit-start, floored),
+  never at the handoff; a full handoff COALESCES to the freshest stamp
+  (`handoff_policy` — drop the stalest unsent job, count a submit-side `dropped`).
+  The health doc's `PacingStats` is `merge_pacing_stats`: late/max_late/iter_p99/
+  dropped from the submit thread, seq/repeats/resyncs/relatches/lag/prep from the
+  pacer (`/api/v1/ndi/health` shape unchanged); the paced heartbeat reads a
+  submit-side snapshot (`emit_heartbeat_paced`) since the submit thread owns the
+  submitter. The pure decisions (`submit_handoff.rs`) are Linux-tested +
+  mutation-scored; the `SharedHandoff`/consumer glue (`pipeline_paced_submit.rs`,
+  `#[cfg(windows)]`) is `mutants::skip`, box-verified. The NON-paced
+  `pipeline::decode_and_send` path is untouched. Acceptance = box test 6
+  (`genlock_pacing=true`, stems child resident, 60 s): `late_frames` < 1 % of
+  `seq`, `resyncs`/`dropped`/`audio.underruns` 0, `lock_state=LOCKED`; then the
+  flag stays ON and camera-box#1302 gets the receiver verdict.
 - Burn-id QR overlay (#151, run_id **911014**): the paced emit paints a QR of
   `P{run_id}.{frame_id}.{gen_ts_ns}.{crc32}` bottom-right (side `0.28·h`, margin
   `40/1080·h` — camera-box `payload.rs` + `burn-geom.hpp`, ported into

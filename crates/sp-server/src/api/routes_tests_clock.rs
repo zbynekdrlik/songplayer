@@ -45,6 +45,7 @@ async fn ndi_health_endpoint_includes_clock() {
         lock_state: sp_core::genlock::lock_state::LockState::Unlocked,
         lock_reason: "pacing disabled".to_string(),
         burn_on: false,
+        recovery_step: None,
     });
 
     let resp = app(state)

@@ -144,6 +144,7 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
         lock_state: LockState::Degraded,
         lock_reason: "late/repeats/resyncs in 60 s".to_string(),
         burn_on: false,
+        recovery_step: None,
     }
 }
 

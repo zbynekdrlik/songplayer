@@ -297,6 +297,7 @@ mod tests {
             lock_state: sp_core::genlock::lock_state::LockState::Unlocked,
             lock_reason: String::new(),
             burn_on: false,
+            recovery_step: None,
         }
     }
 

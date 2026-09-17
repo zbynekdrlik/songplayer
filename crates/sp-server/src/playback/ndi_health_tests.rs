@@ -79,7 +79,7 @@ fn dark_wall_event(now: Instant, consecutive_bad_polls: u32) -> PipelineEvent {
 /// dark-wall state SongPlayer already named.
 #[tokio::test]
 async fn handle_health_snapshot_nudges_obs_on_prolonged_dark_wall() {
-    let (mut engine, _registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
+    let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
     engine.ensure_pipeline(4, "SP-slow");
     engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
     engine.set_scene_active_for_test(4, true);
@@ -90,13 +90,106 @@ async fn handle_health_snapshot_nudges_obs_on_prolonged_dark_wall() {
         dark_wall_event(now, crate::obs::ndi_recovery::NUDGE_THRESHOLD_BAD_POLLS),
     );
 
+    // Rung 0 of the ladder (clear+restore) fires at the dark threshold.
     match obs_rx.try_recv() {
-        Ok(crate::obs::ObsCommand::NudgeNdiReceiver { ndi_name }) => {
+        Ok(crate::obs::ObsCommand::NudgeNdiReceiver { ndi_name, step }) => {
             assert_eq!(ndi_name, "SP-slow");
+            assert_eq!(step, crate::obs::ndi_recovery::RecoveryStep::ClearRestore);
         }
         Ok(other) => panic!("expected NudgeNdiReceiver, got a different ObsCommand: {other:?}"),
         Err(e) => panic!("expected a NudgeNdiReceiver command, got none: {e:?}"),
     }
+    // The fired rung is surfaced on the health snapshot for the dashboard / E2E.
+    assert_eq!(
+        registry.snapshots()[0].recovery_step,
+        Some(crate::obs::ndi_recovery::RecoveryStep::ClearRestore),
+        "the snapshot must record the rung that fired this poll",
+    );
+}
+
+/// #173: a receiver that stays dark long enough for the ladder to walk
+/// clear+restore → toggle → recreate must ESCALATE past the earlier rungs, and
+/// the snapshot must record the fired rung. Rung 2 (`RecreateInput`) is enabled
+/// again in round 3 (the executor creates-first-then-removes), so the highest
+/// rung a sustained dark wall reaches is the recreate. Before the round-2 fix the
+/// nudge repeated clear+restore forever and the wall stayed dark for ~20 min.
+#[tokio::test]
+async fn handle_health_snapshot_escalates_to_recreate_on_sustained_dark_wall() {
+    let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
+    engine.ensure_pipeline(7, "SP-fast");
+    engine.set_state_for_test(7, PlayState::Playing { video_id: 1 });
+    engine.set_scene_active_for_test(7, true);
+
+    let base = crate::obs::ndi_recovery::NUDGE_THRESHOLD_BAD_POLLS;
+    // Rung 0 (clear+restore) at the threshold, rung 1 (toggle) +2 dark polls
+    // later, rung 2 (recreate) +2 more. Each poll climbs consecutive_bad_polls.
+    let now = Instant::now();
+    engine.handle_health_snapshot(7, dark_wall_event(now, base)); // rung 0
+    engine.handle_health_snapshot(7, dark_wall_event(now, base + 2)); // rung 1
+    engine.handle_health_snapshot(7, dark_wall_event(now, base + 4)); // rung 2
+
+    // Drain the queued commands; the LAST one must be the recreate rung.
+    let mut last_step = None;
+    while let Ok(cmd) = obs_rx.try_recv() {
+        if let crate::obs::ObsCommand::NudgeNdiReceiver { ndi_name, step } = cmd {
+            assert_eq!(ndi_name, "SP-fast");
+            last_step = Some(step);
+        }
+    }
+    // #173 round 3: rung 2 (RecreateInput) is ENABLED — the executor now
+    // creates-first-then-removes (a failed CreateInput can no longer empty the
+    // scene), so a sustained dark wall escalates all the way to the recreate.
+    assert_eq!(
+        last_step,
+        Some(crate::obs::ndi_recovery::RecoveryStep::RecreateInput),
+        "a sustained dark wall must escalate the ladder to the recreate rung",
+    );
+    assert_eq!(
+        registry.snapshots()[0].recovery_step,
+        Some(crate::obs::ndi_recovery::RecoveryStep::RecreateInput),
+        "the snapshot must record the escalated rung",
+    );
+}
+
+/// A dark wall that recovers clears `recovery_step` back to `None` so the
+/// dashboard / E2E stops showing a stale recovery rung.
+#[tokio::test]
+async fn handle_health_snapshot_clears_recovery_step_on_recovery() {
+    let (mut engine, registry, _obs_rx) = fresh_engine_with_obs_cmd().await;
+    engine.ensure_pipeline(4, "SP-slow");
+    engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
+    engine.set_scene_active_for_test(4, true);
+
+    let now = Instant::now();
+    // Dark past threshold → rung 0 fires, recovery_step is Some.
+    engine.handle_health_snapshot(
+        4,
+        dark_wall_event(now, crate::obs::ndi_recovery::NUDGE_THRESHOLD_BAD_POLLS),
+    );
+    assert!(registry.snapshots()[0].recovery_step.is_some());
+
+    // Clean poll: receiver re-attached → recovery_step clears to None.
+    engine.handle_health_snapshot(
+        4,
+        PipelineEvent::HealthSnapshot {
+            connections: 2,
+            frames_submitted_total: 12_100,
+            frames_submitted_last_5s: 120,
+            observed_fps: 30.0,
+            nominal_fps: 30.0,
+            last_submit_ts: Some(now),
+            last_heartbeat_ts: now,
+            consecutive_bad_polls: 0,
+            reported_state: PlaybackStateLabel::Playing,
+            pacing: Default::default(),
+            audio: Default::default(),
+        },
+    );
+    assert_eq!(
+        registry.snapshots()[0].recovery_step,
+        None,
+        "a recovered receiver must clear the recovery_step",
+    );
 }
 
 /// A dark wall below the nudge threshold (degraded, but only a couple of
@@ -530,5 +623,6 @@ fn mk_reported_snapshot(playlist_id: i64) -> PipelineHealthSnapshot {
         lock_state: sp_core::genlock::lock_state::LockState::Unlocked,
         lock_reason: String::new(),
         burn_on: false,
+        recovery_step: None,
     }
 }

@@ -6,7 +6,7 @@
 //! Mirrors `playback/recovery.rs` precedent and `resolume::ResolumeRegistry`
 //! shape from PR #54.
 
-use crate::obs::ndi_recovery::NdiRecoveryTracker;
+use crate::obs::ndi_recovery::{NdiRecoveryTracker, RecoveryStep};
 use crate::playback::clock_health::ClockHealth;
 use crate::playback::lock_state::LOCK_WINDOW_100NS;
 use chrono::{DateTime, Utc};
@@ -76,6 +76,11 @@ pub struct PipelineHealthSnapshot {
     /// output. Default `false`; toggled via `POST /api/v1/ndi/burn`; the fleet's
     /// burn-leak guard sweeps this to confirm no QR was left on the LED wall.
     pub burn_on: bool,
+    /// #173 round 2: the dark-wall recovery ladder rung last fired in the current
+    /// dark outage (`ClearRestore` / `ToggleSceneItem` / `RecreateInput`), or
+    /// `None` when not recovering. Cleared to `None` the moment the receiver
+    /// re-attaches, so the dashboard / E2E can see which rung recovered a wall.
+    pub recovery_step: Option<RecoveryStep>,
 }
 
 /// Boundary-paced emission telemetry (#147), surfaced on
@@ -256,17 +261,18 @@ impl NdiHealthRegistry {
         self.created_at.elapsed()
     }
 
-    /// #127: evaluate the receiver-recovery trigger for one pipeline and apply
-    /// the state mutation. Returns `true` iff the engine should nudge OBS now.
-    /// `is_dark` is true iff the pipeline is Playing on program with the
-    /// dark-wall `degraded_reason` set (`connections == 0`).
+    /// #127 / #173: evaluate the receiver-recovery ladder for one pipeline and
+    /// apply the state mutation. Returns `Some(step)` iff the engine should
+    /// execute that OBS recovery rung now, else `None`. `is_dark` is true iff the
+    /// pipeline is Playing on program with the dark-wall `degraded_reason` set
+    /// (`connections == 0`).
     pub fn evaluate_recovery(
         &self,
         playlist_id: i64,
         is_dark: bool,
         consecutive_bad_polls: u32,
         now_100ns: i64,
-    ) -> bool {
+    ) -> Option<RecoveryStep> {
         self.recovery
             .evaluate(playlist_id, is_dark, consecutive_bad_polls, now_100ns)
     }
@@ -443,6 +449,27 @@ impl crate::playback::PlaybackEngine {
             resyncs_w,
         );
 
+        // #127 / #173 receiver-side recovery: evaluate the dark-wall ladder for
+        // this pipeline BEFORE building the snapshot, so the fired rung is
+        // recorded on it. `is_dark` = Playing on program with the dark-wall
+        // reason (connections == 0). The tracker enforces the dark-poll
+        // threshold, the rung spacing, and the flap escalation.
+        let is_dark = degraded_reason.as_deref() == Some(DARK_WALL_REASON);
+        let recovery_step_fired = self.ndi_health_registry.evaluate_recovery(
+            playlist_id,
+            is_dark,
+            consecutive_bad_polls,
+            heartbeat_100ns,
+        );
+        // Surface the ladder rung on the snapshot: the rung fired this poll, or
+        // the last rung still in flight this outage (carried from the previous
+        // snapshot); cleared to None the moment the receiver re-attaches.
+        let recovery_step = if is_dark {
+            recovery_step_fired.or_else(|| prev.as_ref().and_then(|s| s.recovery_step))
+        } else {
+            None
+        };
+
         let snapshot = PipelineHealthSnapshot {
             playlist_id,
             ndi_name: ndi_name.clone(),
@@ -464,6 +491,7 @@ impl crate::playback::PlaybackEngine {
             // #151: read the shared burn flag by output name so the health JSON
             // reflects the current toggle state (false unless the API set it).
             burn_on: self.ndi_burn_registry.is_on(&ndi_name),
+            recovery_step,
         };
 
         // Transition logging: connection-count change, degradation, recovery.
@@ -524,32 +552,26 @@ impl crate::playback::PlaybackEngine {
 
         self.ndi_health_registry.update(snapshot);
 
-        // #127 receiver-side recovery: when this pipeline is Playing on program
-        // with a dead NDI receiver (the dark-wall state SongPlayer already
-        // names), nudge OBS over its healthy WebSocket to re-subscribe the
-        // input. The tracker enforces a consecutive-poll threshold, a cooldown,
-        // and a per-outage attempt cap; a recovered pipeline resets it.
-        let is_dark = degraded_reason.as_deref() == Some(DARK_WALL_REASON);
-        if self.ndi_health_registry.evaluate_recovery(
-            playlist_id,
-            is_dark,
-            consecutive_bad_polls,
-            heartbeat_100ns,
-        ) {
+        // #127 / #173: if the ladder fired a recovery rung this poll, execute it
+        // over the healthy OBS WebSocket (clear+restore → toggle → recreate).
+        // The rung was chosen above by `evaluate_recovery`.
+        if let Some(step) = recovery_step_fired {
             match self.obs_cmd_tx.as_ref() {
                 Some(tx) => match tx.try_send(crate::obs::ObsCommand::NudgeNdiReceiver {
                     ndi_name: ndi_name.clone(),
+                    step,
                 }) {
                     Ok(()) => warn!(
                         playlist_id,
                         ndi_name = %ndi_name,
-                        "ndi-recovery: dark wall — nudging OBS to re-subscribe the receiver"
+                        ?step,
+                        "ndi-recovery: dark wall — running recovery rung over OBS"
                     ),
                     Err(e) => warn!(
                         playlist_id,
                         ndi_name = %ndi_name,
                         error = %e,
-                        "ndi-recovery: failed to queue OBS nudge"
+                        "ndi-recovery: failed to queue OBS recovery rung"
                     ),
                 },
                 None => warn!(

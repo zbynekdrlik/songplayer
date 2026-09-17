@@ -16,6 +16,174 @@ A SongPlayer restart tears down the NDI sender endpoint OBS's DistroAV receiver 
 - **NEVER** a per-sender `PipelineCommand::RecreateSender` — structurally cannot fix a receiver-side binding (CLAUDE.md "Disabled subsystems", #60).
 - To go from a health snapshot's bare `ndi_name` (e.g. `"SP-slow"`) to the OBS input (`sp-slow_video`), enumerate NDI inputs (`fetch_ndi_input_names`) and match `extract_ndi_stream_name(ndi_source_name) == ndi_name` — the machine-prefix split (`"MACHINE (stream)"`).
 
+## The stored `ndi_source_name` host case MUST equal the advertised name (#173)
+NDI advertises each SongPlayer sender as `"<HOST> (<stream>)"` where `<HOST>` is
+the box's computer name **as the NDI runtime announces it** = Windows
+`COMPUTERNAME` (`RESOLUME-SNV` on win-resolume), NOT `gethostname()`/`hostname`
+(lowercase `resolume-snv`). DistroAV's receiver re-match after a sender
+re-announce (every SongPlayer restart) is **case-sensitive**, so an OBS input
+whose stored `ndi_source_name` is the lowercase form never re-attaches → 0
+receivers while on program = dark wall, even though `extract_ndi_stream_name`
+matches by stream and the map looks fine.
+
+- **Code guard:** `obs/ndi_discovery.rs::canonical_sender_name(stored, advertised)`
+  returns `Some(advertised)` iff the stored value differs from
+  `"<COMPUTERNAME> (<stream>)"` in ASCII case ALONE. `rebuild_ndi_source_map`
+  (connect + rebuild signal) and the #127 nudge `reapply_ndi_input` both call it
+  and rewrite via `SetInputSettings`, logging INFO
+  `ndi: normalized input '<name>' sender host case → 'RESOLUME-SNV (SP-x)'`. The
+  nudge now restores the ADVERTISED name, never the stored lowercase one.
+  `advertised_ndi_host()` reads `COMPUTERNAME`; unset (Linux/CI) → normalization
+  is skipped (never a wrong-case rewrite). The rewrite can only change host
+  CASE toward the verified-correct advertised host, never rename to a different
+  sender.
+- **Manual remedy (over obs-websocket / MCP):** set the input's `ndi_source_name`
+  to the uppercase advertised host —
+  `mcp__obs-resolume__obs-set-input-settings <input>_video {"ndi_source_name":"RESOLUME-SNV (SP-x)"}`.
+  Confirm the advertised host with `$env:COMPUTERNAME` on the box (NOT `hostname`).
+- **Flap escalation (#173):** `obs/ndi_recovery.rs` `NdiRecoveryTracker` counts
+  recover→re-dark-within-`FLAP_WINDOW_100NS` (30 s) flaps; after
+  `FLAP_ESCALATE_COUNT` (2) it forces a `ClearRestore` once (bypassing the
+  below-threshold skip) so the normalizing re-apply lands promptly, and logs
+  `ndi-recovery: receiver flapping ... escalating to a clear+restore`.
+
+## Escalation ladder — recover a WEDGED DistroAV receiver (#173 round 2)
+Clear+restore fixes a mis-named / unmatched source, but a receiver **wedged**
+inside DistroAV after the sender was recreated several times (repeated SongPlayer
+restarts) **ignores it** — box 17.9.2026: on-program `SP-fast` (uppercase, healthy
+name) stayed `connections=0` for ~20 min through three `outcome=Applied`
+clear+restore nudges, while `SP-warmup` on the SAME sender process had 6 receivers
+(per-input wedge, camera-box#1096 class; NOT #60 sender/mDNS). So a sustained dark
+wall now ESCALATES a ladder (`obs/ndi_recovery.rs::next_step`, pure + unit-tested;
+executor `obs/ndi_recovery_io.rs`, I/O over the healthy OBS WebSocket):
+
+- **Rung 0 `ClearRestore`** — fires at the dark threshold (`NUDGE_THRESHOLD_BAD_POLLS`
+  = 6 polls ≈ 30 s): clear + restore `ndi_source_name` to the ADVERTISED name.
+- **Rung 1 `ToggleSceneItem`** — `LADDER_STEP_SPACING_POLLS` (2 polls ≈ 10 s) later:
+  `SetSceneItemEnabled` OFF→ON so DistroAV tears down + recreates the receiver.
+  **Round 3: read `GetSceneItemEnabled` back after the OFF→ON.** The two acks do
+  NOT prove the item is visible — an operator who hid the source on program
+  leaves it disabled, and the toggle "applied" while the wall stayed dark. If the
+  read-back is `false`, set it ON again and log
+  `ndi-recovery: rung 1 — item was disabled, re-enabled`. The ladder must never
+  leave an on-program item hidden.
+- **Rung 2 `RecreateInput`** — 2 more polls later, **RENAME-FIRST (round 3),
+  NEVER remove-then-reuse-a-name.** `SetInputName` the OLD input to a unique temp
+  (`<input>__recover_<uuid8>`) — a SYNCHRONOUS rename that frees the original name
+  — then `CreateInput` the replacement DIRECTLY under the original name (same
+  scene, identical `inputKind` + `inputSettings`, advertised name), PROVE it
+  exists (`CreateInput` returned a `sceneItemId` AND `GetSceneItemList` lists it),
+  restore the saved transform + z-order, THEN `RemoveInput` the renamed-away old.
+  On any pre-remove failure the old content is renamed back to the original name —
+  the scene is never emptied. At the START of the attempt any leftover
+  `<input>__recover_*` temps from an earlier interrupted recreate are swept
+  best-effort (`fetch_ndi_input_names` → `is_stale_recover_input` → `RemoveInput`,
+  counted in a WARN) — their unique-per-attempt names are never reused, so their
+  async teardown is harmless. The gate `LADDER_RECREATE_ENABLED`
+  (`obs/ndi_recovery.rs`) is a real switch: `false` makes the ladder cool down at
+  rung 1 instead. The pure step list `recreate_plan()` (`obs/ndi_recovery_io.rs`)
+  is unit-tested for BOTH invariants: never remove before verify, and never reuse
+  a name freed by a remove.
+- **Cool-down** `LADDER_COOLDOWN_POLLS` (6 polls ≈ 30 s) after the recreate, then
+  the ladder restarts at rung 0. One action per rung per poll; the ladder resets
+  the moment the receiver re-attaches.
+
+The fired rung is surfaced on `/api/v1/ndi/health` as `recovery_step`
+(`ClearRestore` / `ToggleSceneItem` / `RecreateInput` / `null`) so the E2E / log
+can see which rung recovered a wall. NEVER a per-sender `RecreateSender` (#60).
+
+- **Manual equivalents (over obs-websocket / MCP), same order:**
+  1. clear+restore — `mcp__obs-resolume__obs-set-input-settings <input>_video {"ndi_source_name":""}` then the advertised `RESOLUME-SNV (SP-x)`.
+  2. toggle — `mcp__obs-resolume__obs-set-scene-item-enabled` (sceneName + sceneItemId, `false` then `true`; find the id with `obs-get-scene-items`), then `obs-get-scene-items` again to confirm `sceneItemEnabled: true`.
+  3. recreate (rename-first) — `obs-get-input-settings` (capture `inputKind` + `inputSettings`) → `obs-set-input-name` the OLD input → `<input>__recover_x` (frees the original name) → `obs-create-input` under the ORIGINAL name (same scene, inputKind `ndi_source`, advertised `ndi_source_name`) → confirm it lists → `obs-set-scene-item-transform` + index → `obs-remove-input` the renamed-away old. NEVER create/rename INTO a name you just removed (601 async-teardown race). Or just fire the app path: `POST /api/v1/ndi/recover/{playlist_id}?step=recreate`.
+  Always end with OBS on `sp-fast`, engine `[7]`, `SP-fast Playing` with receivers.
+
+- **Inactive-output caveat:** `connections=0` on an INACTIVE output is NORMAL
+  (`ndi_behavior 0`, 1 s timeout — DistroAV drops an off-program source); only an
+  ON-PROGRAM output with `connections=0` is a dark wall worth a ladder rung (see
+  the dedicated section below — `handle_health_snapshot` maps Playing+inactive →
+  Paused so `is_dark` never fires off-program).
+
+- **Ladder limits — when receiver-side recovery CANNOT clear it (box 17.9.2026,
+  #173 round 5).** The whole ladder is receiver-side; a receiver that stays
+  `connections=0` through many `outcome=Applied` clear+restore nudges AND
+  `recreate` rungs AND a manual clear+restore with a long (~12 s) clear-hold is
+  **wedged deeper than any receiver-side action can reach** — only a SongPlayer
+  process restart (fresh NDI runtime) clears it (round 4 saw a restart bring dark
+  `SP-fast` back to `connections=2`; SongPlayer must NOT be force-restarted outside
+  a deploy). **Diagnostic: count the OTHER outputs.** If 8-of-9 senders from the
+  SAME SongPlayer process have receivers (`SP-presence`/`SP-worship`/… `connections
+  ≥ 2`) and only ONE on-program output is hard-`0`, it is a **per-input receiver
+  wedge**, NOT a process-global mDNS failure (#60) — do not chase it receiver-side;
+  a redeploy/restart is the fix. A per-restart-intermittent dark `SP-fast` right
+  after a deploy is this class (the E2E suite hammering `sp-fast`'s ladder just
+  after the restart can deepen the wedge); re-verify `SP-fast connections ≥ 1`
+  after the NEXT deploy rather than burning the lane on receiver-side attempts.
+
+## obs-websocket 5.x write-path gotchas (recreate/toggle a scene item, #173)
+When recreating or re-transforming an NDI input over obs-websocket 5.x
+(`obs/ndi_recovery_io.rs`):
+- **There is no "which scenes contain source X" request.** Resolve an input's
+  scene + `sceneItemId` + `sceneItemIndex` by scanning `GetSceneList` →
+  `GetSceneItemList` per scene and matching `sourceName`. `GetSceneItemList`
+  already embeds `sceneItemId`, `sceneItemIndex` AND `sceneItemTransform`.
+- **`GetInputSettings` returns both `inputSettings` AND `inputKind`** — capture
+  both so a `CreateInput` recreate is byte-identical (kind `ndi_source`).
+- **`CreateInput` adds the scene item at the TOP of the scene** (highest index)
+  and returns a NEW `sceneItemId`. Restore the original z-order with
+  `SetSceneItemIndex` and the transform with `SetSceneItemTransform`.
+- **A round-tripped `sceneItemTransform` carries read-only/derived fields**
+  (`width`, `height`, `sourceWidth`, `sourceHeight`) that OBS computes from the
+  scale/source and REJECTS as out-of-range on `SetSceneItemTransform` — STRIP
+  them before writing (keep position/scale/rotation/crop/bounds/alignment).
+- **`RemoveInput` deletes the input and EVERY scene item referencing it** across
+  all scenes; our `sp-*_video` inputs each live in exactly one scene, so the
+  single-scene recreate is safe. Recreate briefly blacks that scene (~sub-second)
+  — acceptable only because the ladder fires when the wall is ALREADY dark.
+- **Round 5 — a bare `RemoveInput` of a RECEIVING DistroAV `ndi_source` reports
+  success but does NOTHING.** The libobs source destroy blocks on the receiver
+  thread, which never joins while the sender is up, so the input + its scene item
+  LINGER as an operator-visible duplicate (box 17.9.2026 round 4:
+  `sp-youth_video__recover_f0831b7d` stayed listed 2.75+ min after a "successful"
+  `RemoveInput`; a second manual `RemoveInput` also "succeeded" without effect).
+  **The fix (`obs/ndi_remove.rs::remove_ndi_input_hard`):** `SetInputSettings`
+  clear `ndi_source_name` to `""` (overlay=true — DistroAV stops the receiver on
+  an empty source) → THEN `RemoveInput` → **READ BACK** `GetInputList` +
+  `GetSceneItemList` → still listed and a scene-item id is known →
+  `RemoveSceneItem(scene, id)` (a rename keeps the item id) → read back once more
+  → still present → loud WARN with both listings. **Never trust the `RemoveInput`
+  response code — read the removal back.** Both rung-2 removal call-sites (the
+  recreate's `RemoveRenamedOld` and the start-of-attempt stale-`__recover_*`
+  sweep) route through this hard remove, so rung 2 ends with exactly ONE input.
+  **Manual equivalent:** `obs-set-input-settings <temp> {"ndi_source_name":""}`
+  THEN `obs-remove-input <temp>` (+ `obs-remove-scene-item` if the item lingers).
+- **Round 3 — RENAME-FIRST, because `RemoveInput` frees the name ASYNCHRONOUSLY.**
+  DistroAV tears an `ndi_source` down on its own thread, so the OBS input NAME is
+  NOT free the instant `RemoveInput` returns — reusing that name immediately
+  (create OR `SetInputName`) races the teardown and returns obs-websocket
+  **`601 "a source already exists by that new input name"`**. Two box incidents:
+  (1) round-2 remove-then-create left the scene EMPTY when the create lost the
+  race; (2) the round-3 create-temp-then-**rename-back-to-original** left every
+  recreate named `<input>_recover` when the RENAME lost the SAME race
+  (17.9.2026). The fix is to never reuse a name freed by a remove: **rename the
+  old input away (a synchronous rename frees the original name at once), create
+  the replacement DIRECTLY under the original name, then remove the renamed-away
+  old** (its temp name is never reused, so its async teardown is harmless). And
+  ALWAYS log the full obs-websocket error on a failed write —
+  `d.requestStatus.code` + `d.requestStatus.comment` + the step name
+  (`log_obs_failure` / `send_ok_logged`); the round-2 executor swallowed the
+  CreateInput error, so the cause was unknown for a whole cycle.
+
+## `connections=0` on an INACTIVE output is NORMAL (not a dark wall)
+The `sp-*` NDI inputs run `ndi_behavior 0` with a 1 s `ndi_behavior_timeout`, so
+DistroAV **disconnects an inactive source** — an output that is NOT on OBS
+program legitimately reports `connections=0`. Only an **on-program** output with
+`connections=0` is the dark-wall failure. This is exactly why
+`handle_health_snapshot` maps `Playing + scene_inactive → Paused` (so
+`compute_degraded_reason` returns `None`) and why E2E test 12 cross-references
+`active_playlist_ids`: do NOT read a bare `connections=0` on an off-program
+output as a fault.
+
 ## Adding recovery/health state without touching `playback/mod.rs`
 `handle_health_snapshot` runs on the engine but the engine struct lives in `playback/mod.rs` (often owned by a parallel lane). Compose new per-pipeline state into `NdiHealthRegistry` (the `Arc` the engine already holds) instead of adding a `PlaybackEngine` field — the engine reaches it via `self.ndi_health_registry.<method>()`. `handle_health_snapshot` is sync + `mutants::skip`; send `ObsCommand` with `try_send` (channel cap 64).
 

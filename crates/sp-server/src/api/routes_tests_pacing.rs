@@ -59,6 +59,7 @@ async fn ndi_health_endpoint_includes_pacing() {
         lock_state: sp_core::genlock::lock_state::LockState::Locked,
         lock_reason: "locked".to_string(),
         burn_on: false,
+        recovery_step: None,
     });
 
     let resp = app(state)

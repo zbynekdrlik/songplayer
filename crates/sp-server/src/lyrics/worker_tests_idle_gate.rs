@@ -37,6 +37,7 @@ fn playing_snapshot(playlist_id: i64, ndi_name: &str) -> PipelineHealthSnapshot 
         lock_state: sp_core::genlock::lock_state::LockState::Unlocked,
         lock_reason: String::new(),
         burn_on: false,
+        recovery_step: None,
     }
 }
 
