@@ -85,6 +85,48 @@ test("the playing playlist is preselected and marked ▶ (#165)", async ({
   });
 });
 
+// #170: the selector must NOT re-order when a playlist's playback state
+// changes. Rows are alphabetical and STABLE; the ▶ glyph marks the playing
+// one. Before the fix the selector sorted playing-first and full-re-rendered
+// on every now_playing tick, so a row that flipped to Playing jumped to the
+// top — the click race that failed post-deploy test 16.
+test("row order stays alphabetical when a non-first playlist starts playing (#170)", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  await waitForSelector12(page);
+
+  const rowNames = async () =>
+    page
+      .getByTestId("playlist-selector-row")
+      .evaluateAll((els) =>
+        els.map((e) => e.querySelector(".sel-name")?.textContent?.trim() ?? ""),
+      );
+
+  // Baseline order is the alphabetical Playlist 01..12 (playlist 1 already
+  // plays, but it is also first alphabetically, so the order is unambiguous).
+  const before = await rowNames();
+  expect(before).toEqual([...before].sort());
+
+  // Flip a NON-first playlist (Playlist 07) to Playing.
+  const set = await request.post("/__mock/set-playing", {
+    data: { playlist_id: 7 },
+  });
+  expect(set.ok()).toBeTruthy();
+
+  // Its row gains the ▶ glyph in place...
+  const playing07 = page
+    .getByTestId("playlist-selector-row")
+    .filter({ hasText: "Playlist 07" });
+  await expect(playing07).toContainText("▶", { timeout: 10000 });
+
+  // ...but the row ORDER is unchanged — Playlist 07 did NOT jump to the top.
+  await expect
+    .poll(async () => (await rowNames()).join("|"), { timeout: 5000 })
+    .toBe(before.join("|"));
+});
+
 test("clicking another row switches the work area and the URL (#165)", async ({
   page,
 }) => {
