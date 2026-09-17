@@ -100,6 +100,38 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   threaded into `run_once`); the per-step INFO line logs the chosen `timeout=…s`.
   The abort→CPU re-run recomputes its OWN cpu-idle (×4) timeout, never the
   GPU-sized one it aborted under.
+- **#171 SUPERSEDES the ×4 whole-song ceiling for ISOLATION + SEPARATION with a
+  RESUMABLE + STALL-based timeout (mtl KEEPS the ×4 `heavy_step_timeout`).** The
+  ×4 ceiling still killed ordinary 3–10 min songs mid-run and DISCARDED 40–77 min
+  of work (a whole-song CPU run is 8–14× realtime, above the 8× budget). Fix, in
+  two coupled halves — do NOT ship one without the other:
+  1. **Resumable segments (Python).** `lyrics_worker.py preprocess-vocals` and
+     `stem_worker.py separate` take `--work-dir` and split the input into fixed
+     30 s / 2 s-overlap windows (`_segment_bounds`), isolate/separate each into
+     `<cache>/<id>_isolation|_stemsep/seg_*.wav`, SKIP windows already present on
+     start (logs `isolation resumed from chunk N/M`), load models ONCE, then
+     stitch (`_stitch_segments`, weight-normalised linear crossfade) + atomic
+     `os.replace` to the final output + remove the work dir. Stems stitch BOTH
+     stems with IDENTICAL crossfade weights so `vocals+instrumental==mix`
+     additivity holds by linearity. audio-separator exposes NO per-chunk resume
+     hook (verified on box — `Separator.separate()` returns whole stems only), so
+     the split/stitch is self-managed. The stitch/additivity math is pure numpy —
+     **unit-test it LOCALLY on dev1** (`numpy` is present even though `soundfile`
+     isn't): identity reconstruction + `v+i==mix` must be ~0.0 error before shipping
+     to the no-compile box.
+  2. **Stall timeout (Rust, `heavy_plan::stall_timeout`/`stall_limit`/`wait_with_stall_timeout`).**
+     The per-segment progress files ARE the stall signal: `preprocess_vocals` /
+     `separate_stems` no longer use `timeout(child.wait())` — they kill the child
+     only when NO new segment has been written to the work dir for `stall_timeout`
+     (CPU 900 s / GPU 300 s), NOT on total wall time; the whole-song figure
+     survives only as an ETA log. A **model-load startup grace** (`STALL_STARTUP_GRACE_SECS`
+     300 s, added by `stall_limit(plan, first_progress_seen)` until the first NEW
+     segment of the run) prevents killing a slow cold start (esp. GPU) before its
+     first segment → the kill-loop this ticket fixes. On a STALL the work dir is
+     LEFT INTACT (never delete it — that is the resume state; only the final
+     output write is atomic). Wiring the stall waiter into a piped-stderr child
+     (separator) needs concurrent `drain_pipe` tasks so the pipe never deadlocks
+     the child; an inherited-stdio child (aligner isolation) needs no drain.
 - **Sequential heavy-step guard (#162 07:40 crash, `lyrics/heavy_slot.rs`) — the
   box must NEVER be overloaded.** The lyrics worker (isolation + mtl) and the
   stem worker (separation) are two independent loops; once #162 removed the

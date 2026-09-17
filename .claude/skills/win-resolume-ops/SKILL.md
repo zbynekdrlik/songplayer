@@ -101,6 +101,16 @@ dev box — never echo or commit it.
   and backticks (a SQL `length(value)` became *"The term 'value' is not
   recognized as the name of a cmdlet"*). ALWAYS `FileWrite` a `.py` file, then
   run it with `Shell`.
+- **`mcp__win-resolume__Shell` STRIPS the PowerShell `$_` automatic variable from
+  the command string** (a `$_.Line` arrives as a bare `.Line` → *"Unexpected token
+  '.Line'"*; `'STATUS_ERR: ' + $_.Exception.Message` → *"You must provide a value
+  expression following the '+'"*, #171 2026-09-17). So NEVER use `$_` in a Shell
+  one-liner: emit a property directly (`(Select-String … -Pattern 'x').Line | Select -Last 6`,
+  not `… | %{ $_.Line }`), or `FileWrite` a `.ps1`/`.py` and run the file. Quick
+  read-only probes that DO survive: `curl.exe -s http://127.0.0.1:8920/api/v1/…`,
+  `Select-String -Path <log> -Pattern '…'`. Also: a RECURSIVE `Get-ChildItem` over
+  `C:\ProgramData\SongPlayer` times out (270k+ cache files) — target the log dir
+  (`songplayer.<date>.log`) or `-File` at the root directly.
 - **`mcp__win-resolume__FileRead` truncates around ~100,000 characters** (also
   undocumented) and per-file MCP round trips are slow. To pull a BATCH of files
   back, start a temporary `python -m http.server` on the box, `curl` them from
