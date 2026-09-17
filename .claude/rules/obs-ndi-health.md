@@ -124,6 +124,23 @@ When recreating or re-transforming an NDI input over obs-websocket 5.x
   all scenes; our `sp-*_video` inputs each live in exactly one scene, so the
   single-scene recreate is safe. Recreate briefly blacks that scene (~sub-second)
   — acceptable only because the ladder fires when the wall is ALREADY dark.
+- **Round 5 — a bare `RemoveInput` of a RECEIVING DistroAV `ndi_source` reports
+  success but does NOTHING.** The libobs source destroy blocks on the receiver
+  thread, which never joins while the sender is up, so the input + its scene item
+  LINGER as an operator-visible duplicate (box 17.9.2026 round 4:
+  `sp-youth_video__recover_f0831b7d` stayed listed 2.75+ min after a "successful"
+  `RemoveInput`; a second manual `RemoveInput` also "succeeded" without effect).
+  **The fix (`obs/ndi_remove.rs::remove_ndi_input_hard`):** `SetInputSettings`
+  clear `ndi_source_name` to `""` (overlay=true — DistroAV stops the receiver on
+  an empty source) → THEN `RemoveInput` → **READ BACK** `GetInputList` +
+  `GetSceneItemList` → still listed and a scene-item id is known →
+  `RemoveSceneItem(scene, id)` (a rename keeps the item id) → read back once more
+  → still present → loud WARN with both listings. **Never trust the `RemoveInput`
+  response code — read the removal back.** Both rung-2 removal call-sites (the
+  recreate's `RemoveRenamedOld` and the start-of-attempt stale-`__recover_*`
+  sweep) route through this hard remove, so rung 2 ends with exactly ONE input.
+  **Manual equivalent:** `obs-set-input-settings <temp> {"ndi_source_name":""}`
+  THEN `obs-remove-input <temp>` (+ `obs-remove-scene-item` if the item lingers).
 - **Round 3 — RENAME-FIRST, because `RemoveInput` frees the name ASYNCHRONOUSLY.**
   DistroAV tears an `ndi_source` down on its own thread, so the OBS input NAME is
   NOT free the instant `RemoveInput` returns — reusing that name immediately
