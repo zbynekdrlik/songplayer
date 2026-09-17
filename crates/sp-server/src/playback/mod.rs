@@ -86,11 +86,10 @@ fn play_state_to_ws(state: &PlayState, scene_active: bool) -> WsPlaybackState {
     match state {
         PlayState::Idle => WsPlaybackState::Idle,
         PlayState::WaitingForScene => WsPlaybackState::WaitingForScene,
-        // RED (#170): deliberately ignores `scene_active`. GREEN gates it.
-        PlayState::Playing { .. } => {
-            let _ = scene_active;
-            WsPlaybackState::Playing
-        }
+        // #170: Playing but scene off program == paused (dark wall) -> the
+        // dashboard's "waiting for scene", matching the health-label replay.
+        PlayState::Playing { .. } if !scene_active => WsPlaybackState::WaitingForScene,
+        PlayState::Playing { .. } => WsPlaybackState::Playing,
     }
 }
 
