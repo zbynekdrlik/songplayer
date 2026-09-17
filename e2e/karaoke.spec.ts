@@ -82,7 +82,9 @@ test("every stem preset enables the vocal-gain slider; Plný mix disables it (#1
   const slider = page.locator('[data-testid="karaoke-vocal-gain"]');
   const mode = page.locator('[data-testid="karaoke-mode"]');
 
-  // Default mode is full_mix → slider disabled, with a "no effect" hint.
+  // Explicitly start from Plný mix (an earlier test may have left another mode in
+  // the shared mock state) → slider disabled, with a "no effect" hint.
+  await mode.selectOption("full_mix");
   await expect(slider).toBeDisabled();
   await expect(
     page.locator('[data-testid="karaoke-fader-hint"]'),

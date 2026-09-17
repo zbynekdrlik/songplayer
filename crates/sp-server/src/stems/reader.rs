@@ -39,6 +39,27 @@ pub fn stream_roles(vocals_exist: bool, instrumental_exist: bool) -> &'static [S
     }
 }
 
+/// Which reader `open_audio_stream` will build for a given stem availability.
+/// Returned as an ENUM so the choice is observable in a unit test — both reader
+/// kinds share the 48 kHz stereo format, so the opened reader itself cannot be
+/// told apart through the `AudioStream` interface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioSourceKind {
+    /// Both stems exist → a live `[original, vocals, instrumental]` mix.
+    StemMix,
+    /// Stems missing / incomplete → the plain original mix (presets no-op, #177).
+    PlainMix,
+}
+
+/// Pure reader-choice: `StemMix` only when the mode-independent `stream_roles`
+/// is the full triple, else `PlainMix`.
+pub fn audio_source_kind(vocals_exist: bool, instrumental_exist: bool) -> AudioSourceKind {
+    match stream_roles(vocals_exist, instrumental_exist) {
+        [StemRole::Original, StemRole::Vocals, StemRole::Instrumental] => AudioSourceKind::StemMix,
+        _ => AudioSourceKind::PlainMix,
+    }
+}
+
 /// Open the audio stream for `audio_path` honouring the live karaoke control.
 /// Returns a boxed [`AudioStream`] ready to hand to `SplitSyncedDecoder::new`.
 pub fn open_audio_stream(
@@ -46,39 +67,35 @@ pub fn open_audio_stream(
     control: &KaraokeControl,
 ) -> Result<Box<dyn AudioStream>, DecoderError> {
     let (vpath, ipath) = crate::stems::stem_paths(audio_path);
-    // Match the exact stream SET (never a `len()` comparison — `len` is only ever
-    // 1 or 3, so a numeric check has equivalent mutants).
-    match stream_roles(vpath.exists(), ipath.exists()) {
+    match audio_source_kind(vpath.exists(), ipath.exists()) {
         // Both stems exist → open all three and mix live (a preset change writes
         // gains, never a reopen).
-        [StemRole::Original, StemRole::Vocals, StemRole::Instrumental] => {
-            match build_stem_reader(audio_path, &vpath, &ipath, control) {
-                Ok(reader) => {
-                    info!(
-                        original = %audio_path.display(),
-                        vocals = %vpath.display(),
-                        "karaoke: mixing stems (live preset, no reopen)"
-                    );
-                    Ok(reader)
-                }
-                Err(e) => {
-                    // Defence in depth: a stem may EXIST yet fail to open — a torn
-                    // file from a killed separator, a stem deleted between the
-                    // exists() check and here, or a rate/channel disagreement in
-                    // StemMixReader::new. Any such failure degrades to the original
-                    // mix (which always plays) rather than taking the wall dark.
-                    warn!(
-                        audio = %audio_path.display(),
-                        %e,
-                        "karaoke: stems present but unreadable — falling back to the original mix"
-                    );
-                    Ok(Box::new(SymphoniaAudioReader::open(audio_path)?))
-                }
+        AudioSourceKind::StemMix => match build_stem_reader(audio_path, &vpath, &ipath, control) {
+            Ok(reader) => {
+                info!(
+                    original = %audio_path.display(),
+                    vocals = %vpath.display(),
+                    "karaoke: mixing stems (live preset, no reopen)"
+                );
+                Ok(reader)
             }
-        }
+            Err(e) => {
+                // Defence in depth: a stem may EXIST yet fail to open — a torn
+                // file from a killed separator, a stem deleted between the
+                // exists() check and here, or a rate/channel disagreement in
+                // StemMixReader::new. Any such failure degrades to the original
+                // mix (which always plays) rather than taking the wall dark.
+                warn!(
+                    audio = %audio_path.display(),
+                    %e,
+                    "karaoke: stems present but unreadable — falling back to the original mix"
+                );
+                Ok(Box::new(SymphoniaAudioReader::open(audio_path)?))
+            }
+        },
         // No stems (or an incomplete pair): play the original mix. Presets are a
         // no-op for this song (#177) — the plain reader never sees the gains.
-        _ => Ok(Box::new(SymphoniaAudioReader::open(audio_path)?)),
+        AudioSourceKind::PlainMix => Ok(Box::new(SymphoniaAudioReader::open(audio_path)?)),
     }
 }
 
@@ -123,6 +140,16 @@ mod tests {
         assert_eq!(stream_roles(false, true), &[StemRole::Original]);
         assert_eq!(stream_roles(true, false), &[StemRole::Original]);
         assert_eq!(stream_roles(false, false), &[StemRole::Original]);
+    }
+
+    #[test]
+    fn audio_source_kind_is_stem_mix_only_with_both_stems() {
+        // The observable reader choice (both reader kinds share the 48 kHz stereo
+        // format, so the opened reader cannot be told apart directly).
+        assert_eq!(audio_source_kind(true, true), AudioSourceKind::StemMix);
+        assert_eq!(audio_source_kind(false, true), AudioSourceKind::PlainMix);
+        assert_eq!(audio_source_kind(true, false), AudioSourceKind::PlainMix);
+        assert_eq!(audio_source_kind(false, false), AudioSourceKind::PlainMix);
     }
 
     // ── open_audio_stream I/O behaviour (real decodable fixture) ──────────────
