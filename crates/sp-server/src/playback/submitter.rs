@@ -261,6 +261,38 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
     ) {
+        // Borrow variant: copy the caller's buffer into an owned Vec and delegate.
+        // Used by the pacer's `PacedSink` impl (tests) and any caller that keeps
+        // its own copy. The #168 submit thread uses the `_owned` variant to avoid
+        // this extra copy on the submit path.
+        self.submit_frame_at_boundary_owned(
+            width,
+            height,
+            stride,
+            video_data.to_vec(),
+            audio,
+            video_tc_100ns,
+            audio_tc_100ns,
+        );
+    }
+
+    /// Same as [`submit_frame_at_boundary`](Self::submit_frame_at_boundary) but
+    /// takes OWNED NV12 pixels, moved straight into the async double-buffer
+    /// holdover with NO extra copy (#168). The #168 submit thread already owns the
+    /// job's `Vec<u8>`, so this keeps the copy count identical to the pre-#168
+    /// path (one clone at handoff on the emit thread) while doing zero copies on
+    /// the SDK-blocking submit thread.
+    #[allow(clippy::too_many_arguments)]
+    pub fn submit_frame_at_boundary_owned(
+        &mut self,
+        width: u32,
+        height: u32,
+        stride: u32,
+        video_data: Vec<u8>,
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
         self.frames_submitted_total += 1;
         self.frames_in_window += 1;
         self.last_submit_ts = Some(std::time::Instant::now());
@@ -276,14 +308,14 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         // 2. Video async, stamped with the floored boundary.
         //
         // #151 burn-id overlay: paint the QR into OUR owned copy of the frame
-        // (the `to_vec` below), NEVER the decoder's / pacer's buffer — the pacer
-        // keeps its own clone for the starvation repeat, so mutating this copy is
-        // safe and re-derives a fresh payload every boundary. Paced path only;
-        // read the shared flag fresh so a toggle-off clears within one frame.
-        // `frame_id` = the pacing `seq` (== `frames_submitted_total`, bumped
-        // above); `gen_ts_ns` = the serviced boundary wall time in ns
+        // (the moved `video_data`), NEVER the decoder's / pacer's buffer — the
+        // pacer keeps its own clone for the starvation repeat, so mutating this
+        // owned copy is safe and re-derives a fresh payload every boundary. Paced
+        // path only; read the shared flag fresh so a toggle-off clears within one
+        // frame. `frame_id` = the pacing `seq` (== `frames_submitted_total`,
+        // bumped above); `gen_ts_ns` = the serviced boundary wall time in ns
         // (`video_tc_100ns` is in 100-ns units).
-        let mut data = video_data.to_vec();
+        let mut data = video_data;
         if self.burn_on.load(Ordering::Relaxed) {
             crate::playback::burn_overlay::paint_burn(
                 &mut data,

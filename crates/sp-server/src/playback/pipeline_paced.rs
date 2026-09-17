@@ -18,8 +18,12 @@ use crate::playback::ndi_health::{PacingStats, PlaybackStateLabel};
 use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome, Standby, plan_sleep_100ns};
 use crate::playback::pacer_queue::{ProducerAction, SharedQueue};
 use crate::playback::pipeline::{
-    DecodeResult, PipelineCommand, PipelineEvent, emit_heartbeat, should_run_heartbeat,
+    DecodeResult, PipelineCommand, PipelineEvent, should_run_heartbeat,
 };
+use crate::playback::pipeline_paced_submit::{
+    HandoffSink, SharedHandoff, emit_heartbeat_paced, run_submit_consumer,
+};
+use crate::playback::submit_handoff::SUBMIT_HANDOFF_BOUND;
 use crate::playback::submitter::FrameSubmitter;
 
 /// A frame handed from the decode producer to the emit consumer (#147): the paced
@@ -419,207 +423,244 @@ pub(crate) fn decode_and_send_paced(
     let mut last_decoded_ms: u64 = start_position_ms.unwrap_or(0);
     let mut last_position_report = Instant::now();
 
-    let result: DecodeResult = 'emit: loop {
-        // 1. Commands between boundaries (non-blocking).
-        match cmd_rx.try_recv() {
-            Ok(PipelineCommand::Shutdown) => {
-                log_song_summary(pacer, &summary_base, song_start, playlist_id, "shutdown");
-                submitter.flush();
-                break 'emit DecodeResult::Shutdown;
-            }
-            Ok(PipelineCommand::Stop) => {
-                log_song_summary(pacer, &summary_base, song_start, playlist_id, "stop");
-                submitter.flush();
-                break 'emit DecodeResult::Stopped;
-            }
-            Ok(PipelineCommand::Play {
-                video,
-                audio,
-                start_position_ms,
-            }) => {
-                log_song_summary(pacer, &summary_base, song_start, playlist_id, "next");
-                submitter.flush();
-                break 'emit DecodeResult::NewPlay {
+    // #168 output-side split: the NDI submit runs on a dedicated thread fed by a
+    // BOUNDED handoff, so a `send_video_async` stall never lands as a late
+    // boundary emit. The submit thread BORROWS the `FrameSubmitter` for the song
+    // via `thread::scope` (SDK per-instance affinity + the async double-buffer
+    // holdover stay single-threaded); it joins before this scope returns, so the
+    // buffer is flushed before the outer loop reuses the submitter for a black
+    // frame. The emit thread emits through a `HandoffSink` (hand off in ~µs) and
+    // reads a submit-side snapshot for the heartbeat.
+    let handoff = SharedHandoff::new(SUBMIT_HANDOFF_BOUND);
+    let handoff_ref = &handoff;
+    // Heartbeat window baselines: the honest observed fps is the SUBMIT-side
+    // frame count (frames that actually left the box), not the emit count.
+    let mut hb_prev_total: u64 = 0;
+    let mut hb_prev_instant = Instant::now();
+
+    let result: DecodeResult = std::thread::scope(|s| {
+        let sub: &mut FrameSubmitter<sp_ndi::RealNdiBackend> = submitter;
+        let submit_join = s.spawn(move || run_submit_consumer(sub, handoff_ref, playlist_id));
+        let mut sink = HandoffSink::new(handoff_ref);
+
+        // The emit loop returns the song's outcome plus the EOS audio tail (if
+        // any) for the submit thread to ship before it flushes.
+        let (outcome, eos_tail): (DecodeResult, Option<(Vec<sp_ndi::AudioFrame>, i64)>) = 'emit: loop {
+            // 1. Commands between boundaries (non-blocking).
+            match cmd_rx.try_recv() {
+                Ok(PipelineCommand::Shutdown) => {
+                    log_song_summary(pacer, &summary_base, song_start, playlist_id, "shutdown");
+                    break 'emit (DecodeResult::Shutdown, None);
+                }
+                Ok(PipelineCommand::Stop) => {
+                    log_song_summary(pacer, &summary_base, song_start, playlist_id, "stop");
+                    break 'emit (DecodeResult::Stopped, None);
+                }
+                Ok(PipelineCommand::Play {
                     video,
                     audio,
                     start_position_ms,
-                };
-            }
-            Ok(PipelineCommand::Pause) => {
-                *paused = true;
-                debug!(playlist_id, "paced: paused");
-            }
-            Ok(PipelineCommand::Resume) => {
-                *paused = false;
-                // Flush the audio buffer + reset the PLL (#148 rework, item 4):
-                // the pause backlog would otherwise overflow and leave audio
-                // seconds behind the video. The VIDEO anchor is left untouched —
-                // the frozen-standby held every boundary through the pause, so
-                // playback continues on the same wall grid.
-                pacer.audio_resume_reset();
-                debug!(playlist_id, "paced: resumed (audio buffer + PLL reset)");
-            }
-            Ok(PipelineCommand::Seek { position_ms }) => {
-                // Route the seek to the producer: it flushes the queue and bumps
-                // the epoch so any in-flight pre-seek frame is dropped, then seeks
-                // the decoder. Re-anchor the grid to the seek instant.
-                shared.request_seek(position_ms);
-                last_decoded_ms = position_ms;
-                pacer.anchor();
-            }
-            Err(TryRecvError::Empty) => {}
-            Err(TryRecvError::Disconnected) => {
-                log_song_summary(
-                    pacer,
-                    &summary_base,
-                    song_start,
-                    playlist_id,
-                    "disconnected",
-                );
-                submitter.flush();
-                break 'emit DecodeResult::Shutdown;
-            }
-        }
-
-        if *paused {
-            // Fill EVERY grid boundary with the frozen last real frame so the
-            // receiver stays `locked=` across a pause instead of dropping into
-            // holes/underruns — one on-grid stamped frame per boundary via the
-            // same Pacer sleep/emit machinery, no audio (#147 fix-lane-2,
-            // change 2). Commands are serviced at the loop top every iteration.
-            match pacer.service_standby(Standby::FrozenLast, submitter) {
-                ServiceOutcome::Wait { until_100ns } => sleep_to_boundary(pacer, until_100ns),
-                _ => pacer.tick_wall(),
-            }
-            if should_run_heartbeat(last_heartbeat.elapsed()) {
-                emit_heartbeat(
-                    submitter,
-                    event_tx,
-                    playlist_id,
-                    PlaybackStateLabel::Paused,
-                    last_heartbeat,
-                    consecutive_bad_polls,
-                    // Report the flag + accumulated counters, not default (#147
-                    // change 7): a paced pipeline is `enabled=true` while paused.
-                    pacer.stats(),
-                    pacer.audio_stats(),
-                );
-            }
-            continue;
-        }
-
-        // 2. Pop the frame the producer has ALREADY decoded ahead for the NEXT
-        //    boundary — NO decode on the emit thread (#147 box test 4 fix). An
-        //    empty queue (producer stall) pulls None, so the pacer repeats the
-        //    last frame (never a hole). `prepare` still applies the presentation
-        //    rule (drop-older / park-future) and pushes the audio grid.
-        let target = pacer.next_boundary_100ns();
-        pacer.prepare(target, || match shared.consumer_pop() {
-            Some((frame, decoded_ms)) => {
-                last_decoded_ms = decoded_ms;
-                Some(frame)
-            }
-            None => None,
-        });
-
-        // 3. Sleep to the boundary, then submit the pre-decoded frame. `service`
-        //    takes only the boundary audio chunk and submits audio-before-video
-        //    with the on-grid stamp — no decode on the critical path (`|| None`).
-        sleep_to_boundary(pacer, target);
-        let outcome = pacer.service(|| None, submitter);
-
-        match outcome {
-            ServiceOutcome::Wait { until_100ns } => {
-                // A backward clock step re-latched the boundary; sleep to it.
-                sleep_to_boundary(pacer, until_100ns);
-            }
-            ServiceOutcome::Reanchored {
-                lag_slots,
-                until_100ns,
-            } => {
-                // Playback fell irrecoverably behind (producer slower than the
-                // grid). The pacer re-anchored so the pre-decoded frame is due at
-                // `until_100ns`; sleep to it and continue (#147 lane 3, change 2).
-                warn!(playlist_id, lag_slots, "paced: lag exceeded — re-anchored");
-                sleep_to_boundary(pacer, until_100ns);
-            }
-            ServiceOutcome::Emitted | ServiceOutcome::Repeated | ServiceOutcome::Starved => {
-                pacer.tick_wall();
-
-                // One WARN per song when the audio buffer first overflows its 2 s
-                // cap (#148 rework, item 4) — kept in the pipeline layer so the
-                // buffer stays pure.
-                if pacer.audio_overflow_warn_needed() {
-                    warn!(
-                        playlist_id,
-                        "paced: audio buffer overflowed its 2 s cap — dropping oldest audio"
+                }) => {
+                    log_song_summary(pacer, &summary_base, song_start, playlist_id, "next");
+                    break 'emit (
+                        DecodeResult::NewPlay {
+                            video,
+                            audio,
+                            start_position_ms,
+                        },
+                        None,
                     );
                 }
+                Ok(PipelineCommand::Pause) => {
+                    *paused = true;
+                    debug!(playlist_id, "paced: paused");
+                }
+                Ok(PipelineCommand::Resume) => {
+                    *paused = false;
+                    // Flush the audio buffer + reset the PLL (#148 rework, item 4):
+                    // the pause backlog would otherwise overflow and leave audio
+                    // seconds behind the video. The VIDEO anchor is left untouched —
+                    // the frozen-standby held every boundary through the pause, so
+                    // playback continues on the same wall grid.
+                    pacer.audio_resume_reset();
+                    debug!(playlist_id, "paced: resumed (audio buffer + PLL reset)");
+                }
+                Ok(PipelineCommand::Seek { position_ms }) => {
+                    // Route the seek to the producer: it flushes the queue and bumps
+                    // the epoch so any in-flight pre-seek frame is dropped, then seeks
+                    // the decoder. Re-anchor the grid to the seek instant.
+                    shared.request_seek(position_ms);
+                    last_decoded_ms = position_ms;
+                    pacer.anchor();
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    log_song_summary(
+                        pacer,
+                        &summary_base,
+                        song_start,
+                        playlist_id,
+                        "disconnected",
+                    );
+                    break 'emit (DecodeResult::Shutdown, None);
+                }
+            }
 
+            if *paused {
+                // Fill EVERY grid boundary with the frozen last real frame so the
+                // receiver stays `locked=` across a pause instead of dropping into
+                // holes/underruns — one on-grid stamped frame per boundary via the
+                // same Pacer sleep/emit machinery, handed off to the submit thread,
+                // no audio (#147 fix-lane-2, change 2). Commands are serviced at the
+                // loop top every iteration.
+                match pacer.service_standby(Standby::FrozenLast, &mut sink) {
+                    ServiceOutcome::Wait { until_100ns } => sleep_to_boundary(pacer, until_100ns),
+                    _ => pacer.tick_wall(),
+                }
                 if should_run_heartbeat(last_heartbeat.elapsed()) {
-                    emit_heartbeat(
-                        submitter,
+                    emit_heartbeat_paced(
+                        handoff_ref,
                         event_tx,
                         playlist_id,
-                        PlaybackStateLabel::Playing,
+                        PlaybackStateLabel::Paused,
                         last_heartbeat,
                         consecutive_bad_polls,
+                        // Report the flag + accumulated counters, not default (#147
+                        // change 7): a paced pipeline is `enabled=true` while paused.
                         pacer.stats(),
                         pacer.audio_stats(),
+                        &mut hb_prev_total,
+                        &mut hb_prev_instant,
                     );
                 }
+                continue;
+            }
 
-                if last_position_report.elapsed() >= Duration::from_millis(500) {
-                    let _ = event_tx.send((
-                        playlist_id,
-                        PipelineEvent::Position {
-                            position_ms: last_decoded_ms,
-                            duration_ms,
-                        },
-                    ));
-                    last_position_report = Instant::now();
+            // 2. Pop the frame the producer has ALREADY decoded ahead for the NEXT
+            //    boundary — NO decode on the emit thread (#147 box test 4 fix). An
+            //    empty queue (producer stall) pulls None, so the pacer repeats the
+            //    last frame (never a hole). `prepare` still applies the presentation
+            //    rule (drop-older / park-future) and pushes the audio grid.
+            let target = pacer.next_boundary_100ns();
+            pacer.prepare(target, || match shared.consumer_pop() {
+                Some((frame, decoded_ms)) => {
+                    last_decoded_ms = decoded_ms;
+                    Some(frame)
                 }
+                None => None,
+            });
 
-                // End the song when EITHER the producer drained normally (EOS +
-                // empty queue) with nothing parked in the pacer — the last frame
-                // has been shown — OR the producer thread has EXITED without
-                // signalling EOS (a panic after the open phase). The latter is
-                // symmetric with the open-phase liveness check (`open_rx` →
-                // Disconnected): `SharedQueue` is an Arc<Mutex>, not a channel, so a
-                // dead producer would otherwise leave `is_drained()` false forever
-                // and freeze the wall on a repeat with no auto-advance. Ending
-                // (not erroring) lets the playlist move to the next song — the
-                // resilient choice on a box with a driver-timeout history.
-                let producer_dead = producer.is_finished() && !shared.is_drained();
-                if (shared.is_drained() && !pacer.has_pending()) || producer_dead {
-                    if producer_dead {
-                        error!(
+            // 3. Sleep to the boundary, then HAND OFF the pre-decoded frame to the
+            //    submit thread. `service` takes only the boundary audio chunk and
+            //    the `HandoffSink` enqueues audio-before-video with the on-grid
+            //    stamp — NO decode and NO blocking submit on this thread (#168).
+            sleep_to_boundary(pacer, target);
+            let outcome = pacer.service(|| None, &mut sink);
+
+            match outcome {
+                ServiceOutcome::Wait { until_100ns } => {
+                    // A backward clock step re-latched the boundary; sleep to it.
+                    sleep_to_boundary(pacer, until_100ns);
+                }
+                ServiceOutcome::Reanchored {
+                    lag_slots,
+                    until_100ns,
+                } => {
+                    // Playback fell irrecoverably behind (producer slower than the
+                    // grid). The pacer re-anchored so the pre-decoded frame is due at
+                    // `until_100ns`; sleep to it and continue (#147 lane 3, change 2).
+                    warn!(playlist_id, lag_slots, "paced: lag exceeded — re-anchored");
+                    sleep_to_boundary(pacer, until_100ns);
+                }
+                ServiceOutcome::Emitted | ServiceOutcome::Repeated | ServiceOutcome::Starved => {
+                    pacer.tick_wall();
+
+                    // One WARN per song when the audio buffer first overflows its 2 s
+                    // cap (#148 rework, item 4) — kept in the pipeline layer so the
+                    // buffer stays pure.
+                    if pacer.audio_overflow_warn_needed() {
+                        warn!(
                             playlist_id,
-                            "paced: decode producer exited without EOS — ending song"
+                            "paced: audio buffer overflowed its 2 s cap — dropping oldest audio"
                         );
-                    } else {
-                        info!(playlist_id, "paced: video decode complete");
                     }
-                    // Flush the remaining buffered audio as one final chunk
-                    // (zero-filled to a full boundary) with the raw wall timecode
-                    // before returning, so the last <1 boundary of audio is not
-                    // dropped (#148 rework, item 4).
-                    let tail = pacer.take_eos_tail();
-                    if !tail.is_empty() {
-                        submitter.submit_audio_tail(&tail, pacer.now_100ns());
+
+                    if should_run_heartbeat(last_heartbeat.elapsed()) {
+                        emit_heartbeat_paced(
+                            handoff_ref,
+                            event_tx,
+                            playlist_id,
+                            PlaybackStateLabel::Playing,
+                            last_heartbeat,
+                            consecutive_bad_polls,
+                            pacer.stats(),
+                            pacer.audio_stats(),
+                            &mut hb_prev_total,
+                            &mut hb_prev_instant,
+                        );
                     }
-                    let reason = if producer_dead {
-                        "producer-died"
-                    } else {
-                        "ended"
-                    };
-                    log_song_summary(pacer, &summary_base, song_start, playlist_id, reason);
-                    submitter.flush();
-                    break 'emit DecodeResult::Ended;
+
+                    if last_position_report.elapsed() >= Duration::from_millis(500) {
+                        let _ = event_tx.send((
+                            playlist_id,
+                            PipelineEvent::Position {
+                                position_ms: last_decoded_ms,
+                                duration_ms,
+                            },
+                        ));
+                        last_position_report = Instant::now();
+                    }
+
+                    // End the song when EITHER the producer drained normally (EOS +
+                    // empty queue) with nothing parked in the pacer — the last frame
+                    // has been shown — OR the producer thread has EXITED without
+                    // signalling EOS (a panic after the open phase). The latter is
+                    // symmetric with the open-phase liveness check (`open_rx` →
+                    // Disconnected): `SharedQueue` is an Arc<Mutex>, not a channel, so
+                    // a dead producer would otherwise leave `is_drained()` false
+                    // forever and freeze the wall on a repeat with no auto-advance.
+                    // Ending (not erroring) lets the playlist move to the next song —
+                    // the resilient choice on a box with a driver-timeout history.
+                    let producer_dead = producer.is_finished() && !shared.is_drained();
+                    if (shared.is_drained() && !pacer.has_pending()) || producer_dead {
+                        if producer_dead {
+                            error!(
+                                playlist_id,
+                                "paced: decode producer exited without EOS — ending song"
+                            );
+                        } else {
+                            info!(playlist_id, "paced: video decode complete");
+                        }
+                        // Hand the remaining buffered audio (zero-filled to a full
+                        // boundary, raw wall timecode) to the submit thread so the
+                        // last <1 boundary of audio is not dropped (#148 rework,
+                        // item 4). The submit thread ships it after draining.
+                        let tail = pacer.take_eos_tail();
+                        let tail_msg = if tail.is_empty() {
+                            None
+                        } else {
+                            Some((tail, pacer.now_100ns()))
+                        };
+                        let reason = if producer_dead {
+                            "producer-died"
+                        } else {
+                            "ended"
+                        };
+                        log_song_summary(pacer, &summary_base, song_start, playlist_id, reason);
+                        break 'emit (DecodeResult::Ended, tail_msg);
+                    }
                 }
             }
-        }
-    };
+        };
+
+        // Signal the submit thread: drain the handoff, ship the EOS tail, flush
+        // the async double-buffer, and exit. The scope JOINS it here, so the
+        // submitter's `prev_frame` is released before this function returns and
+        // the outer loop reuses the submitter (a black frame / the next song).
+        handoff_ref.stop_with_tail(eos_tail);
+        let _ = submit_join.join();
+        outcome
+    });
 
     // Stop the producer + join it so the decoder drops on its own STA thread
     // before this pipeline call returns (#147). A backpressured / post-EOS

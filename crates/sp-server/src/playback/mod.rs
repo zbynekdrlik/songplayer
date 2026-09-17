@@ -22,6 +22,8 @@ pub mod pipeline;
 pub(crate) mod pipeline_paced;
 #[cfg(windows)]
 pub(crate) mod pipeline_paced_idle;
+#[cfg(windows)]
+pub(crate) mod pipeline_paced_submit; // #168 output-side split: submit thread + handoff glue
 #[cfg(not(windows))]
 pub(crate) mod pipeline_stub;
 mod position_update;
