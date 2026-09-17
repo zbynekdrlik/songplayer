@@ -176,7 +176,7 @@ pub(crate) fn extract_ndi_stream_name(full: &str) -> &str {
 /// case-variant rewrite is disabled and the `canonical_sender_name` unit tests
 /// that expect a rewrite fail cleanly — the TIER-0 "one wrong constant" RED
 /// pattern (`.claude/rules/rust-workspace.md`), no dead-code / clippy noise.
-const REWRITE_CASE_VARIANTS: bool = false;
+const REWRITE_CASE_VARIANTS: bool = true;
 
 /// #173: decide whether an OBS NDI input's stored `ndi_source_name` should be
 /// rewritten to the sender name NDI actually advertises.
@@ -343,9 +343,30 @@ pub(crate) async fn reapply_ndi_input(
             continue;
         }
 
+        // #173: restore the ADVERTISED name (correct host case), never the
+        // stored value — which may be the lowercase form DistroAV fails to
+        // re-attach to. When COMPUTERNAME is known and its `"<host> (<stream>)"`
+        // form is a pure case variant of the stored name, restore that; else
+        // fall back to the stored value (host unknown / not a case variant).
+        let restore_to = match advertised_ndi_host() {
+            Some(host) => {
+                let advertised = format!("{host} ({target_stream})");
+                if advertised.eq_ignore_ascii_case(&sender_name) {
+                    advertised
+                } else {
+                    sender_name.clone()
+                }
+            }
+            None => sender_name.clone(),
+        };
+        if restore_to != sender_name {
+            info!("ndi: normalized input '{input_name}' sender host case → '{restore_to}'");
+        }
+
         info!(
             input_name = %input_name,
             sender_name = %sender_name,
+            restore_to = %restore_to,
             target = target_stream,
             "ndi-recovery: nudging stranded receiver (clear + restore ndi_source_name)"
         );
@@ -353,10 +374,9 @@ pub(crate) async fn reapply_ndi_input(
         // Clear the field — an empty ndi_source_name makes DistroAV drop the
         // dead subscription.
         let cleared = set_input_ndi_source_name(write, dispatcher, &input_name, "").await;
-        // Restore the original network-visible name so the receiver
-        // re-subscribes to the live sender.
-        let restored =
-            set_input_ndi_source_name(write, dispatcher, &input_name, &sender_name).await;
+        // Restore the ADVERTISED network-visible name so the receiver
+        // re-subscribes to the live sender (#173: not the stored lowercase one).
+        let restored = set_input_ndi_source_name(write, dispatcher, &input_name, &restore_to).await;
 
         if cleared && restored {
             info!(

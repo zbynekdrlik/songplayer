@@ -16,6 +16,47 @@ A SongPlayer restart tears down the NDI sender endpoint OBS's DistroAV receiver 
 - **NEVER** a per-sender `PipelineCommand::RecreateSender` — structurally cannot fix a receiver-side binding (CLAUDE.md "Disabled subsystems", #60).
 - To go from a health snapshot's bare `ndi_name` (e.g. `"SP-slow"`) to the OBS input (`sp-slow_video`), enumerate NDI inputs (`fetch_ndi_input_names`) and match `extract_ndi_stream_name(ndi_source_name) == ndi_name` — the machine-prefix split (`"MACHINE (stream)"`).
 
+## The stored `ndi_source_name` host case MUST equal the advertised name (#173)
+NDI advertises each SongPlayer sender as `"<HOST> (<stream>)"` where `<HOST>` is
+the box's computer name **as the NDI runtime announces it** = Windows
+`COMPUTERNAME` (`RESOLUME-SNV` on win-resolume), NOT `gethostname()`/`hostname`
+(lowercase `resolume-snv`). DistroAV's receiver re-match after a sender
+re-announce (every SongPlayer restart) is **case-sensitive**, so an OBS input
+whose stored `ndi_source_name` is the lowercase form never re-attaches → 0
+receivers while on program = dark wall, even though `extract_ndi_stream_name`
+matches by stream and the map looks fine.
+
+- **Code guard:** `obs/ndi_discovery.rs::canonical_sender_name(stored, advertised)`
+  returns `Some(advertised)` iff the stored value differs from
+  `"<COMPUTERNAME> (<stream>)"` in ASCII case ALONE. `rebuild_ndi_source_map`
+  (connect + rebuild signal) and the #127 nudge `reapply_ndi_input` both call it
+  and rewrite via `SetInputSettings`, logging INFO
+  `ndi: normalized input '<name>' sender host case → 'RESOLUME-SNV (SP-x)'`. The
+  nudge now restores the ADVERTISED name, never the stored lowercase one.
+  `advertised_ndi_host()` reads `COMPUTERNAME`; unset (Linux/CI) → normalization
+  is skipped (never a wrong-case rewrite). The rewrite can only change host
+  CASE toward the verified-correct advertised host, never rename to a different
+  sender.
+- **Manual remedy (over obs-websocket / MCP):** set the input's `ndi_source_name`
+  to the uppercase advertised host —
+  `mcp__obs-resolume__obs-set-input-settings <input>_video {"ndi_source_name":"RESOLUME-SNV (SP-x)"}`.
+  Confirm the advertised host with `$env:COMPUTERNAME` on the box (NOT `hostname`).
+- **Flap escalation (#173):** `obs/ndi_recovery.rs` `NdiRecoveryTracker` counts
+  recover→re-dark-within-`FLAP_WINDOW_100NS` (30 s) flaps; after
+  `FLAP_ESCALATE_COUNT` (2) it forces a nudge once (bypassing the below-threshold
+  / cooldown skip) so the normalizing re-apply lands promptly, and logs
+  `ndi-recovery: receiver flapping ... escalating to case normalization`.
+
+## `connections=0` on an INACTIVE output is NORMAL (not a dark wall)
+The `sp-*` NDI inputs run `ndi_behavior 0` with a 1 s `ndi_behavior_timeout`, so
+DistroAV **disconnects an inactive source** — an output that is NOT on OBS
+program legitimately reports `connections=0`. Only an **on-program** output with
+`connections=0` is the dark-wall failure. This is exactly why
+`handle_health_snapshot` maps `Playing + scene_inactive → Paused` (so
+`compute_degraded_reason` returns `None`) and why E2E test 12 cross-references
+`active_playlist_ids`: do NOT read a bare `connections=0` on an off-program
+output as a fault.
+
 ## Adding recovery/health state without touching `playback/mod.rs`
 `handle_health_snapshot` runs on the engine but the engine struct lives in `playback/mod.rs` (often owned by a parallel lane). Compose new per-pipeline state into `NdiHealthRegistry` (the `Arc` the engine already holds) instead of adding a `PlaybackEngine` field — the engine reaches it via `self.ndi_health_registry.<method>()`. `handle_health_snapshot` is sync + `mutants::skip`; send `ObsCommand` with `try_send` (channel cap 64).
 

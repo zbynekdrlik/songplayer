@@ -50,10 +50,10 @@ pub const FLAP_WINDOW_100NS: i64 = 30 * 10_000_000;
 /// nudge that bypasses the below-threshold / cooldown skip once (so a
 /// normalizing re-apply lands promptly instead of after the full 60 s cooldown).
 ///
-/// GREEN sets this to `2`. The RED commit ships a value the flap counter never
-/// reaches so escalation never fires and the escalation unit test fails cleanly
-/// (TIER-0 "one wrong constant" RED pattern, `.claude/rules/rust-workspace.md`).
-pub const FLAP_ESCALATE_COUNT: u32 = 1_000_000;
+/// Two consecutive flaps escalate: enough to distinguish a genuinely stuck
+/// (wrong-case) receiver from a single transient reconnect, without waiting out
+/// many cooldowns.
+pub const FLAP_ESCALATE_COUNT: u32 = 2;
 
 /// Per-pipeline recovery bookkeeping.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
