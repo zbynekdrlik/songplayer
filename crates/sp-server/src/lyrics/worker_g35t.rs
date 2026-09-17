@@ -27,7 +27,7 @@ use crate::lyrics::LYRICS_PIPELINE_VERSION;
 /// now resumable (it makes progress across picks), so we give it a few chances
 /// before the fallback; a song whose vocal never materialises still gets lyrics
 /// instead of looping on exponential backoff forever.
-const FULLMIX_MIN_ATTEMPTS: i64 = i64::MAX;
+const FULLMIX_MIN_ATTEMPTS: i64 = 3;
 
 /// True when the base tier should transcribe the FULL MIX because isolation has
 /// had its resumable chance (`attempts >= FULLMIX_MIN_ATTEMPTS`) and still

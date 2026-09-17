@@ -237,7 +237,7 @@ pub(crate) fn heavy_step_timeout(plan: &HeavyStepPlan, base: Duration) -> Durati
 /// Max gap between per-chunk progress writes before a resumable heavy child is
 /// killed, on the CPU plan (a single ~30 s segment takes several minutes under
 /// the 3-thread cap, so 15 min leaves generous headroom incl. model load).
-pub(crate) const STALL_TIMEOUT_CPU_SECS: u64 = u64::MAX;
+pub(crate) const STALL_TIMEOUT_CPU_SECS: u64 = 900;
 
 /// The GPU-plan stall window — the GPU is much faster, so a shorter window still
 /// catches a genuine hang.
