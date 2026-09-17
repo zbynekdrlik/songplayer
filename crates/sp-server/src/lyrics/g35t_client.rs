@@ -156,16 +156,17 @@ async fn send_with_retry(
 async fn upload_audio(
     client: &reqwest::Client,
     api_key: &str,
-    wav_bytes: &[u8],
+    audio_bytes: &[u8],
+    mime_type: &str,
 ) -> Result<Value, StepError> {
     let resp = send_with_retry("upload", Some(UPLOAD_TIMEOUT), || {
         client
             .post(format!("{API_ROOT}/upload/v1beta/files"))
             .header("x-goog-api-key", api_key)
             .header("X-Goog-Upload-Protocol", "raw")
-            .header("X-Goog-Upload-Header-Content-Type", AUDIO_MIME_TYPE)
-            .header("Content-Type", AUDIO_MIME_TYPE)
-            .body(wav_bytes.to_vec())
+            .header("X-Goog-Upload-Header-Content-Type", mime_type)
+            .header("Content-Type", mime_type)
+            .body(audio_bytes.to_vec())
     })
     .await?;
 
@@ -332,10 +333,11 @@ async fn transcribe_after_upload(
 async fn transcribe_with_key(
     client: &reqwest::Client,
     api_key: &str,
-    wav_bytes: &[u8],
+    audio_bytes: &[u8],
+    mime_type: &str,
     language_codes: &[String],
 ) -> Result<Vec<AsrWord>, StepError> {
-    let file = upload_audio(client, api_key, wav_bytes).await?;
+    let file = upload_audio(client, api_key, audio_bytes, mime_type).await?;
     let file_name = file
         .get("name")
         .and_then(|n| n.as_str())
@@ -348,9 +350,27 @@ async fn transcribe_with_key(
     result
 }
 
-/// Transcribe a mono 16 kHz WAV with Gemini 3.5 Transcribe, returning
-/// word-level timings. Tries `api_keys` in order (see module docs for the
-/// key-rotation / retry contract).
+/// The Gemini File-API upload MIME for `path`, inferred from its extension: a
+/// `.flac` uploads as `audio/flac`, everything else (the isolated-vocal `.wav`)
+/// as the default `audio/wav`. `run_interactions` re-reads the stored `mimeType`
+/// the upload set, so getting the upload header right is all that is needed for
+/// the full-mix FLAC path (#171). Pure — unit-tested.
+fn audio_mime_for_path(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("flac") => "audio/flac",
+        _ => AUDIO_MIME_TYPE,
+    }
+}
+
+/// Transcribe an audio file with Gemini 3.5 Transcribe, returning word-level
+/// timings. The upload MIME is inferred from the extension (`.wav` → audio/wav,
+/// `.flac` → audio/flac, #171). Tries `api_keys` in order (see module docs for
+/// the key-rotation / retry contract).
 #[cfg_attr(test, mutants::skip)]
 pub async fn transcribe_words(
     client: &reqwest::Client,
@@ -361,14 +381,15 @@ pub async fn transcribe_words(
     if api_keys.is_empty() {
         bail!("g35t_client: no Gemini API keys configured");
     }
-    let wav_bytes = tokio::fs::read(wav_path)
+    let audio_bytes = tokio::fs::read(wav_path)
         .await
         .with_context(|| format!("g35t_client: reading {}", wav_path.display()))?;
+    let mime_type = audio_mime_for_path(wav_path);
 
     let started = std::time::Instant::now();
     let mut last_err: Option<anyhow::Error> = None;
     for (key_idx, api_key) in api_keys.iter().enumerate() {
-        match transcribe_with_key(client, api_key, &wav_bytes, language_codes).await {
+        match transcribe_with_key(client, api_key, &audio_bytes, mime_type, language_codes).await {
             Ok(words) => {
                 tracing::info!(
                     key_index = key_idx,

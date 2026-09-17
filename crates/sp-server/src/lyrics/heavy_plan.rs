@@ -221,6 +221,113 @@ pub(crate) fn heavy_step_timeout(plan: &HeavyStepPlan, base: Duration) -> Durati
     }
 }
 
+// ---------------------------------------------------------------------------
+// #171 — STALL-based timeout for the RESUMABLE heavy audio steps.
+//
+// `heavy_step_timeout` above is a whole-song wall-clock ceiling (still used by
+// mtl). It CANNOT bound the resumable isolation / stem-separation steps: on this
+// CPU those run at ~8-14x realtime, so a legitimate 3-10 min song runs 40-77
+// min and the whole-song ceiling kills it mid-run and discards the work (#171).
+// Instead the scripts now write one segment WAV at a time into a work dir, and
+// the Rust side kills the child only when NO new segment has appeared for
+// `stall_timeout` — so a slow-but-progressing run is never killed and a hung one
+// still dies. The whole-song figure survives only as an ETA in the log line.
+// ---------------------------------------------------------------------------
+
+/// Max gap between per-chunk progress writes before a resumable heavy child is
+/// killed, on the CPU plan (a single ~30 s segment takes several minutes under
+/// the 3-thread cap, so 15 min leaves generous headroom incl. model load).
+pub(crate) const STALL_TIMEOUT_CPU_SECS: u64 = u64::MAX;
+
+/// The GPU-plan stall window — the GPU is much faster, so a shorter window still
+/// catches a genuine hang.
+pub(crate) const STALL_TIMEOUT_GPU_SECS: u64 = 300;
+
+/// The stall window (max gap between chunk-progress writes) for `plan`. Pure —
+/// unit-tested.
+pub(crate) fn stall_timeout(plan: &HeavyStepPlan) -> Duration {
+    if plan.is_gpu() {
+        Duration::from_secs(STALL_TIMEOUT_GPU_SECS)
+    } else {
+        Duration::from_secs(STALL_TIMEOUT_CPU_SECS)
+    }
+}
+
+/// True when `idle` (time since the last per-chunk progress write) has exceeded
+/// the plan's [`stall_timeout`] — the caller kills the resumable child, leaving
+/// its work dir intact for the next resume. Pure — unit-tested.
+pub(crate) fn stall_timeout_expired(idle: Duration, plan: &HeavyStepPlan) -> bool {
+    idle > stall_timeout(plan)
+}
+
+/// Newest mtime among files directly in `dir` (the resumable segment files), or
+/// `UNIX_EPOCH` when the dir is absent/empty/unreadable. I/O — `mutants::skip`.
+#[cfg_attr(test, mutants::skip)]
+fn newest_mtime(dir: &std::path::Path) -> std::time::SystemTime {
+    let mut newest = std::time::SystemTime::UNIX_EPOCH;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if let Ok(m) = entry.metadata().and_then(|meta| meta.modified())
+                && m > newest
+            {
+                newest = m;
+            }
+        }
+    }
+    newest
+}
+
+/// #171: wait for a resumable heavy child (`preprocess-vocals` / `separate`),
+/// killing it ONLY when its `work_dir` has gone [`stall_timeout`]-stale — no new
+/// segment file written for that long. Each segment write bumps the newest
+/// mtime and resets the clock, so a slow-but-progressing CPU run is never
+/// killed; a hung child still dies, and its work dir is LEFT INTACT so the next
+/// pick resumes. `eta` is the whole-song estimate, logged only. Returns the exit
+/// status on a normal exit, or `Err` on a stall. I/O orchestration —
+/// `mutants::skip`; the decision core [`stall_timeout_expired`] is unit-tested.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) async fn wait_with_stall_timeout(
+    child: &mut tokio::process::Child,
+    work_dir: &std::path::Path,
+    plan: &HeavyStepPlan,
+    label: &str,
+    eta: Duration,
+) -> anyhow::Result<std::process::ExitStatus> {
+    let poll = Duration::from_secs(30);
+    let mut last_progress = std::time::Instant::now();
+    let mut last_newest = newest_mtime(work_dir);
+    tracing::debug!(
+        "{label}: stall-bounded wait (stall={}s, eta~{}s) watching {}",
+        stall_timeout(plan).as_secs(),
+        eta.as_secs(),
+        work_dir.display()
+    );
+    loop {
+        // A per-poll timeout, NOT `select!` with `child.wait()` in one arm and
+        // `child.kill()` in another — that would need two simultaneous `&mut
+        // child` borrows. On timeout the (cancel-safe) wait future is dropped,
+        // freeing the borrow so we can kill.
+        match tokio::time::timeout(poll, child.wait()).await {
+            Ok(res) => return res.map_err(|e| anyhow::anyhow!("{label} wait failed: {e}")),
+            Err(_) => {
+                let newest = newest_mtime(work_dir);
+                if newest > last_newest {
+                    last_newest = newest;
+                    last_progress = std::time::Instant::now();
+                }
+                if stall_timeout_expired(last_progress.elapsed(), plan) {
+                    let _ = child.kill().await;
+                    return Err(anyhow::anyhow!(
+                        "{label} stalled — no chunk progress for {}s \
+                         (work dir preserved for resume)",
+                        stall_timeout(plan).as_secs()
+                    ));
+                }
+            }
+        }
+    }
+}
+
 /// CPU-idle thread cap: a quarter of the logical cores, at least 1. Reads the
 /// environment (`available_parallelism`) so it is integration-only; the pure
 /// rule it delegates to (`cpu_idle_threads_for`) is unit-tested.

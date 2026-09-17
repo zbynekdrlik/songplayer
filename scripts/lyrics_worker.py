@@ -23,6 +23,77 @@ import tempfile
 MEL_ROFORMER_MODEL = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
 DEREVERB_MODEL = "dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt"
 
+# #171 — resumable, segmented vocal isolation. The input is split into fixed
+# time windows and each window is isolated+dereverbed+resampled independently,
+# so a killed/timed-out run resumes from the segments already on disk instead of
+# discarding the whole song. 30 s segments with a 2 s overlap that is linearly
+# crossfaded on stitch (see `_stitch_segments`) smooth any per-window boundary
+# artifact — the isolation output is internal 16 kHz mono thrown at the ASR /
+# forced-aligner, so the exact crossfade shape is not audible-critical; the
+# window is small enough that one CPU segment finishes well inside the Rust
+# stall timeout (`heavy_plan::stall_timeout`), which is how a slow-but-
+# progressing run is distinguished from a hung one.
+ISOLATION_SEGMENT_SECONDS = 30.0
+ISOLATION_OVERLAP_SECONDS = 2.0
+
+
+def _segment_bounds(total_s, seg_s, overlap_s):
+    """List of (start_s, end_s) windows covering [0, total_s]: `seg_s`-long,
+    stepping by `seg_s - overlap_s`, the last window clamped to `total_s`.
+    Adjacent windows share `overlap_s`, crossfaded on stitch. Pure — no I/O."""
+    if total_s <= 0:
+        return []
+    step = max(1e-3, seg_s - overlap_s)
+    bounds = []
+    start = 0.0
+    while True:
+        end = min(start + seg_s, total_s)
+        bounds.append((start, end))
+        if end >= total_s - 1e-9:
+            break
+        start += step
+    return bounds
+
+
+def _stitch_segments(segments, step_samples, overlap_samples):
+    """Overlap-add stitch of equally-stepped float32 segments (mono 1-D or
+    (n, ch) 2-D) with a linear crossfade over `overlap_samples`. Segment i
+    starts at global sample `i * step_samples`. Weight-normalised, so two
+    adjacent linear ramps (fade-out + fade-in) sum to 1 and the crossfade region
+    reconstructs the source exactly — and, applied with IDENTICAL weights to two
+    additive stems (vocals + instrumental), preserves `v + i == mix`. Pure
+    numpy, no I/O — locally unit-testable."""
+    import numpy as np
+
+    if not segments:
+        return np.zeros(0, dtype=np.float32)
+    first = np.asarray(segments[0])
+    ch = first.shape[1] if first.ndim == 2 else 1
+    last_len = np.asarray(segments[-1]).shape[0]
+    total = (len(segments) - 1) * step_samples + last_len
+    out = np.zeros((total, ch) if ch > 1 else (total,), dtype=np.float64)
+    wsum = np.zeros(total, dtype=np.float64)
+    n = len(segments)
+    for i, seg in enumerate(segments):
+        seg = np.asarray(seg, dtype=np.float64)
+        length = seg.shape[0]
+        w = np.ones(length, dtype=np.float64)
+        if overlap_samples > 0:
+            f = min(overlap_samples, length)
+            if i > 0:
+                w[:f] = np.linspace(0.0, 1.0, f, endpoint=False)
+            if i < n - 1:
+                w[length - f:] = np.linspace(1.0, 0.0, f, endpoint=False)
+        s = i * step_samples
+        out[s:s + length] += seg * (w[:, None] if seg.ndim == 2 else w)
+        wsum[s:s + length] += w
+    nz = wsum > 1e-9
+    if out.ndim == 2:
+        out[nz] /= wsum[nz][:, None]
+    else:
+        out[nz] /= wsum[nz]
+    return out.astype(np.float32)
+
 
 def _pick_vocal_stem(out_files, fallback_dir):
     """Return the absolute path of the Vocals stem among `out_files`."""
@@ -200,10 +271,58 @@ def _force_cpu():
             os.environ["CUDA_VISIBLE_DEVICES"] = orig_env
 
 
-def cmd_preprocess_vocals(args):
-    """Mel-Roformer isolate → anvuew dereverb → 16 kHz mono float32 WAV.
+def _isolate_one_segment(sep_mel, sep_dereverb, full, in_sr, start_s, end_s, out_path, stem_dir):
+    """Isolate + dereverb ONE native-rate window `[start_s, end_s]` of `full`,
+    resample to 16 kHz mono float32, and write it ATOMICALLY to `out_path`.
 
-    Writes a FLOAT WAV to --output. Exits 0 on success.
+    `full` is (n,) mono or (ch, n) multi-channel at `in_sr`. `stem_dir` is a
+    scratch dir the two already-loaded separators write into; it is cleared
+    after each segment so it never grows across a long song."""
+    import numpy as np
+    import librosa
+    import soundfile as sf
+
+    s0 = max(0, int(round(start_s * in_sr)))
+    s1 = int(round(end_s * in_sr))
+    if full.ndim == 1:
+        data = full[s0:s1]
+    else:
+        data = full[:, s0:s1].T  # (n, ch) for soundfile
+    seg_in = os.path.join(stem_dir, "segin_" + os.path.basename(out_path))
+    sf.write(seg_in, data, in_sr, subtype="FLOAT")
+
+    # Step 1: Mel-Roformer vocal isolation. Step 2: anvuew dereverb on it.
+    vocal_path = _pick_vocal_stem(sep_mel.separate(seg_in), stem_dir)
+    dry_path = _pick_dereverbed_stem(sep_dereverb.separate(vocal_path), stem_dir)
+
+    # Step 3: resample to exactly 16 kHz mono float32, peak-clamp, atomic write.
+    audio, _ = librosa.load(dry_path, sr=16000, mono=True)
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak > 1.0:
+        audio = audio / peak
+    tmp = out_path + ".tmp"
+    sf.write(tmp, audio, 16000, subtype="FLOAT")
+    os.replace(tmp, out_path)
+
+    # Clear the scratch dir for the next segment (we keep only out_path, which
+    # lives in the work dir, not here).
+    for f in os.listdir(stem_dir):
+        with contextlib.suppress(OSError):
+            os.remove(os.path.join(stem_dir, f))
+
+
+def cmd_preprocess_vocals(args):
+    """Mel-Roformer isolate → anvuew dereverb → 16 kHz mono float32 WAV, done
+    RESUMABLY per segment (#171).
+
+    The input is split into `ISOLATION_SEGMENT_SECONDS` windows; each is
+    isolated+dereverbed+resampled and written to `--work-dir/seg_NNNN_of_MMMM.wav`.
+    Segments already present are SKIPPED on start (so a killed/timed-out run
+    resumes — logs `isolation resumed from chunk N/M`), the two models load once
+    and are reused across every remaining segment, and the final WAV is stitched
+    from the segment set (2 s linear crossfade over each overlap), written
+    atomically to `--output`, and the work dir is removed. Writes a FLOAT WAV to
+    --output. Exits 0 on success.
 
     GPU discipline (#154): `gpu_polite()` sets a BELOW_NORMAL WDDM scheduling
     priority + a per-process VRAM cap before any model loads. On a CUDA OOM the
@@ -220,42 +339,65 @@ def cmd_preprocess_vocals(args):
         print("lyrics_worker: forced CPU inference (--force-cpu)", file=sys.stderr)
     gpu_polite(force_cpu=args.force_cpu)
 
-    stem_dir = tempfile.mkdtemp(prefix="sp_stems_")
+    work_dir = args.work_dir
+    os.makedirs(work_dir, exist_ok=True)
 
-    def _isolate(force_cpu):
-        """Mel-Roformer isolate + anvuew dereverb, on GPU (force_cpu=False) or
-        CPU (force_cpu=True). Returns the dereverbed vocal path."""
+    # Native-rate load, so the separator sees the full-quality signal (the 16 kHz
+    # downsample happens only on each segment's dereverbed output).
+    full, in_sr = librosa.load(args.audio, sr=None, mono=False)
+    total_samples = full.shape[0] if full.ndim == 1 else full.shape[1]
+    total_s = total_samples / float(in_sr)
+    bounds = _segment_bounds(total_s, ISOLATION_SEGMENT_SECONDS, ISOLATION_OVERLAP_SECONDS)
+    n_seg = len(bounds)
+
+    def _seg_path(i):
+        return os.path.join(work_dir, f"seg_{i:04d}_of_{n_seg:04d}.wav")
+
+    done = [
+        os.path.exists(_seg_path(i)) and os.path.getsize(_seg_path(i)) > 0
+        for i in range(n_seg)
+    ]
+    if any(done) and not all(done):
+        print(f"isolation resumed from chunk {sum(done)}/{n_seg}", file=sys.stderr)
+
+    def _process_remaining(force_cpu):
+        """Load both models once and process every not-yet-done segment. Wrapped
+        so a CUDA OOM can retry the whole loop on CPU (resume skips finished
+        segments)."""
+        stem_dir = tempfile.mkdtemp(prefix="sp_stems_")
         cpu_ctx = _force_cpu() if force_cpu else contextlib.nullcontext()
-        with cpu_ctx:
-            # Step 1: Mel-Roformer vocal isolation. The soundfile writer avoids
-            # pydub's OOM on long 24-bit stems (pydub#135; 827-s song 2026-09-12).
-            sep = Separator(
-                model_file_dir=args.models_dir,
-                output_format="WAV",
-                output_dir=stem_dir,
-                use_soundfile=True,
-            )
-            sep.load_model(MEL_ROFORMER_MODEL)
-            out_files = sep.separate(args.audio)
-            vocal_path = _pick_vocal_stem(out_files, stem_dir)
-            _free_vram(sep)
-
-            # Step 2: anvuew mel-band roformer dereverb on the isolated vocal.
-            sep2 = Separator(
-                model_file_dir=args.models_dir,
-                output_format="WAV",
-                output_dir=stem_dir,
-                use_soundfile=True,
-            )
-            sep2.load_model(DEREVERB_MODEL)
-            out_files2 = sep2.separate(vocal_path)
-            dry_path = _pick_dereverbed_stem(out_files2, stem_dir)
-            _free_vram(sep2)
-        return dry_path
-
-    try:
         try:
-            dry_path = _isolate(force_cpu=args.force_cpu)
+            with cpu_ctx:
+                sep_mel = Separator(
+                    model_file_dir=args.models_dir,
+                    output_format="WAV",
+                    output_dir=stem_dir,
+                    use_soundfile=True,
+                )
+                sep_mel.load_model(MEL_ROFORMER_MODEL)
+                sep_dereverb = Separator(
+                    model_file_dir=args.models_dir,
+                    output_format="WAV",
+                    output_dir=stem_dir,
+                    use_soundfile=True,
+                )
+                sep_dereverb.load_model(DEREVERB_MODEL)
+                for i, (s_s, e_s) in enumerate(bounds):
+                    if done[i]:
+                        continue
+                    _isolate_one_segment(
+                        sep_mel, sep_dereverb, full, in_sr, s_s, e_s, _seg_path(i), stem_dir
+                    )
+                    done[i] = True
+                    print(f"isolation chunk {i + 1}/{n_seg} done", file=sys.stderr)
+                _free_vram(sep_mel)
+                _free_vram(sep_dereverb)
+        finally:
+            shutil.rmtree(stem_dir, ignore_errors=True)
+
+    if not all(done):
+        try:
+            _process_remaining(force_cpu=args.force_cpu)
         except Exception as e:
             # #162: the CUDA-OOM→CPU retry is for the GPU path only. A forced-CPU
             # run has no GPU to fall back from, so a failure there is a real error.
@@ -269,16 +411,25 @@ def cmd_preprocess_vocals(args):
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            dry_path = _isolate(force_cpu=True)
+            _process_remaining(force_cpu=True)
 
-        # Step 3: resample to exactly 16 kHz mono float32, peak-clamp.
-        audio, _ = librosa.load(dry_path, sr=16000, mono=True)
-        peak = float(np.max(np.abs(audio))) if audio.size else 0.0
-        if peak > 1.0:
-            audio = audio / peak
-        sf.write(args.output, audio, 16000, subtype="FLOAT")
-    finally:
-        shutil.rmtree(stem_dir, ignore_errors=True)
+    # Stitch every segment (all 16 kHz mono) into the final WAV.
+    step_samples = int(round((ISOLATION_SEGMENT_SECONDS - ISOLATION_OVERLAP_SECONDS) * 16000))
+    overlap_samples = int(round(ISOLATION_OVERLAP_SECONDS * 16000))
+    segs = []
+    for i in range(n_seg):
+        a, _ = sf.read(_seg_path(i), dtype="float32")
+        if a.ndim > 1:
+            a = np.mean(a, axis=1).astype("float32")
+        segs.append(a)
+    stitched = _stitch_segments(segs, step_samples, overlap_samples)
+    peak = float(np.max(np.abs(stitched))) if stitched.size else 0.0
+    if peak > 1.0:
+        stitched = stitched / peak
+    tmp_out = args.output + ".tmp"
+    sf.write(tmp_out, stitched, 16000, subtype="FLOAT")
+    os.replace(tmp_out, args.output)
+    shutil.rmtree(work_dir, ignore_errors=True)
 
     print(json.dumps({"output": args.output}))
 
@@ -448,6 +599,10 @@ def main():
     p_pre.add_argument("--audio", required=True)
     p_pre.add_argument("--output", required=True)
     p_pre.add_argument("--models-dir", required=True)
+    # #171: per-segment scratch dir for resumable isolation. Each segment WAV is
+    # written here and skipped on resume; removed once the final --output stitch
+    # lands.
+    p_pre.add_argument("--work-dir", required=True)
     # #162: force in-process CPU inference from the start (leaves the GPU
     # untouched for the live wall) instead of only as the CUDA-OOM fallback.
     p_pre.add_argument("--force-cpu", action="store_true")

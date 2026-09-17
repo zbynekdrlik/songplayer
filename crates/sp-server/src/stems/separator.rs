@@ -23,6 +23,7 @@ fn separate_stems_args(
     vocals_out: &Path,
     instrumental_out: &Path,
     models_dir: &Path,
+    work_dir: &Path,
     plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
 ) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec![
@@ -36,6 +37,9 @@ fn separate_stems_args(
         instrumental_out.as_os_str().to_owned(),
         "--models-dir".into(),
         models_dir.as_os_str().to_owned(),
+        // #171: per-segment scratch dir for resumable separation.
+        "--work-dir".into(),
+        work_dir.as_os_str().to_owned(),
     ];
     for a in plan.script_cpu_args() {
         args.push((*a).into());
@@ -59,6 +63,7 @@ pub async fn separate_stems(
     audio_in: &Path,
     vocals_out: &Path,
     instrumental_out: &Path,
+    work_dir: &Path,
     timeout: std::time::Duration,
     gpu_mem_setting: Option<&str>,
     plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
@@ -90,6 +95,7 @@ pub async fn separate_stems(
         vocals_out,
         instrumental_out,
         models_dir,
+        work_dir,
         plan,
     ));
     // audio-separator shells out to ffmpeg by bare name, so the bundled ffmpeg
@@ -126,35 +132,51 @@ pub async fn separate_stems(
         instrumental_out.display()
     );
 
-    let child = cmd.spawn().context("failed to spawn separate-stems")?;
+    let mut child = cmd.spawn().context("failed to spawn separate-stems")?;
     // #162: cap the child's memory (Windows Job Object) so an OOM kills the
     // child, not the host. Held (with the slot) until the child exits below.
     let _job = crate::lyrics::heavy_slot::assign_child_job(&child);
-    // `wait_with_output` takes the child BY VALUE and drains both pipes while it
-    // waits, so no timeout branch can `child.kill()` any more. That is fine:
-    // `kill_on_drop(true)` is set above, so when the timeout fires and we drop the
-    // future (hence the child), the runtime SIGKILLs the separator — the same
-    // no-orphan guarantee the old explicit `child.kill()` gave.
-    let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
-        Ok(Ok(o)) => o,
-        Ok(Err(e)) => anyhow::bail!("separate-stems wait failed: {e}"),
-        Err(_) => anyhow::bail!("separate-stems timed out after {} s", timeout.as_secs()),
+    // Drain stdout/stderr into buffers in the background so the pipes never fill
+    // and deadlock the child (#171: the stall waiter below only calls
+    // `child.wait()`, not `wait_with_output`, so we must drain the pipes
+    // ourselves). Both tasks end when the child closes its pipes (normal exit,
+    // or SIGKILL on a stall / `kill_on_drop`).
+    let stdout_task = child.stdout.take().map(drain_pipe);
+    let stderr_task = child.stderr.take().map(drain_pipe);
+    // #171: bound the child by a STALL timeout — kill only when no new segment has
+    // been written to work_dir for `stall_timeout` — NOT the whole-song ceiling
+    // (a 10.5-min stem runs ~85 min on this CPU and the old ceiling killed it
+    // mid-run and discarded the work). A stall leaves work_dir intact so the next
+    // pick resumes from the segments already separated.
+    let status = crate::lyrics::heavy_plan::wait_with_stall_timeout(
+        &mut child,
+        work_dir,
+        plan,
+        "separate-stems",
+        timeout,
+    )
+    .await;
+    let stdout = match stdout_task {
+        Some(t) => t.await.unwrap_or_default(),
+        None => Vec::new(),
     };
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !output.status.success() {
+    let stderr = match stderr_task {
+        Some(t) => t.await.unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let stderr = String::from_utf8_lossy(&stderr);
+    let stdout = String::from_utf8_lossy(&stdout);
+    let status = status?;
+    if !status.success() {
         let tail = if stderr.trim().is_empty() {
             tail_lines(&stdout, 20, 300)
         } else {
             tail_lines(&stderr, 20, 300)
         };
-        warn!(
-            "separate-stems failed ({}); output tail:\n{}",
-            output.status, tail
-        );
+        warn!("separate-stems failed ({}); output tail:\n{}", status, tail);
         anyhow::bail!(
             "separate-stems exited with status {}; output tail:\n{}",
-            output.status,
+            status,
             tail
         );
     }
@@ -177,6 +199,23 @@ pub async fn separate_stems(
         }
     }
     Ok(())
+}
+
+/// Spawn a task that reads `pipe` to EOF into a byte buffer, returning its
+/// handle. Draining concurrently with the stall waiter keeps the child's stdio
+/// pipes from filling and deadlocking it (#171 — the waiter only calls
+/// `child.wait()`, not `wait_with_output`). I/O — `mutants::skip`.
+#[cfg_attr(test, mutants::skip)]
+fn drain_pipe<R>(mut pipe: R) -> tokio::task::JoinHandle<Vec<u8>>
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        let _ = pipe.read_to_end(&mut buf).await;
+        buf
+    })
 }
 
 /// Last `n` non-empty-trimmed lines of `s`, each truncated to `max_len` chars
@@ -237,6 +276,7 @@ mod tests {
             std::path::Path::new("/x/v.flac"),
             std::path::Path::new("/x/i.flac"),
             std::path::Path::new("/models"),
+            std::path::Path::new("/x/a_stemsep"),
             plan,
         )
         .iter()

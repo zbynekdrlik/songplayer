@@ -40,3 +40,26 @@ fn parse_offset_ms_positive_and_negative_contract() {
     assert_eq!(parse_offset_ms("5.2s"), Some(5200));
     assert_eq!(parse_offset_ms("-1s"), None);
 }
+
+// -------------------------------------------------------------------------
+// audio_mime_for_path — #171 full-mix FLAC upload MIME
+// -------------------------------------------------------------------------
+
+/// A `.flac` (the full normalized mix) uploads as `audio/flac`; the isolated
+/// vocal `.wav` and anything else keep `audio/wav`. Case-insensitive on the
+/// extension. Gemini re-reads the stored mimeType, so the upload header is the
+/// only thing that must be right.
+#[test]
+fn audio_mime_for_path_maps_flac_and_wav() {
+    use std::path::Path;
+    assert_eq!(
+        audio_mime_for_path(Path::new("/c/mix_audio.flac")),
+        "audio/flac"
+    );
+    assert_eq!(
+        audio_mime_for_path(Path::new("/c/X_vocals16k.wav")),
+        "audio/wav"
+    );
+    assert_eq!(audio_mime_for_path(Path::new("/c/mix.FLAC")), "audio/flac");
+    assert_eq!(audio_mime_for_path(Path::new("/c/noext")), "audio/wav");
+}

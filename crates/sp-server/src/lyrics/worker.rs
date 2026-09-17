@@ -710,6 +710,8 @@ impl LyricsWorker {
             match self
                 .run_g35t_transcript_branch(
                     clean_vocal.as_deref(),
+                    // #171: mix FLAC — base-tier last resort when isolation never yields a vocal.
+                    row.audio_file_path.as_deref().map(std::path::Path::new),
                     &gemini_keys,
                     video_id,
                     &youtube_id,
