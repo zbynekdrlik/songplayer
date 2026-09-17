@@ -82,6 +82,17 @@ pub struct NowPlayingInfo {
     pub word_count: Option<usize>,
 }
 
+impl NowPlayingInfo {
+    /// True when this entry carries real now-playing content. The
+    /// `PlaybackStateChanged`-only shape (a live state with no preceding
+    /// `NowPlaying`) inserts a zero entry — empty song, zero duration — which
+    /// the card must render as idle, not as a "0:00 / 0:00" now-playing block
+    /// (#170).
+    pub fn has_now_playing_content(&self) -> bool {
+        !self.song.is_empty() || self.duration_ms > 0
+    }
+}
+
 /// A single item in the download queue.
 #[derive(Debug, Clone)]
 pub struct DownloadItem {

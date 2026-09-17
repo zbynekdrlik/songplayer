@@ -145,7 +145,10 @@ pub fn PlaylistCard(
                 }}
                 {move || {
                     let np = store.now_playing.get();
-                    if let Some(info) = np.get(&pid) {
+                    // #170: a PlaybackStateChanged-only entry (empty song, zero
+                    // duration) is not real playback — render the idle state,
+                    // never a bogus "0:00 / 0:00" np-info block.
+                    if let Some(info) = np.get(&pid).filter(|i| i.has_now_playing_content()) {
                         let pct = if info.duration_ms > 0 {
                             (info.position_ms as f64 / info.duration_ms as f64) * 100.0
                         } else {
