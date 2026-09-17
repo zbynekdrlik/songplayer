@@ -103,10 +103,26 @@ async function selectWorkspaceCard(
   await expect(page.getByTestId("playlist-workspace")).toBeVisible({
     timeout: 30_000,
   });
-  await page
+  const row = page
     .getByTestId("playlist-selector-row")
-    .filter({ hasText: name })
-    .click();
+    .filter({ hasText: name });
+  await row.click();
+  // #170: the click must actually take. Read back the work-area title; if a
+  // transient re-render/reorder moved the row and the click landed on a
+  // neighbour, retry once, then fail loudly with a message that names the
+  // wrong-row-click cause instead of the mysterious downstream "card never
+  // appeared".
+  try {
+    await expect(page.getByTestId("workspace-title")).toHaveText(name, {
+      timeout: 5_000,
+    });
+  } catch {
+    await row.click();
+    await expect(
+      page.getByTestId("workspace-title"),
+      `selecting "${name}" did not switch the work area after a retry — the selector row likely moved under the click (#170)`,
+    ).toHaveText(name, { timeout: 5_000 });
+  }
   const card = page.locator(".playlist-card", { hasText: name });
   await expect(card).toBeVisible();
   return card;

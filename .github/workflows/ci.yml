@@ -1654,6 +1654,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: post-deploy-playwright-report
-          path: e2e/post-deploy-report/
+          # #170: include test-results/ so the FAILING suite's Playwright
+          # trace zip (console + network + DOM snapshots, retain-on-failure)
+          # is in the artifact, not just the html summary.
+          path: |
+            e2e/post-deploy-report/
+            e2e/test-results/
           retention-days: 7
           if-no-files-found: ignore
