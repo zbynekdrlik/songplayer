@@ -118,6 +118,30 @@ fn submit_p99_reports_worst_cost_us() {
 }
 
 #[test]
+fn percentile_rank_is_nearest_rank_not_the_last_sample() {
+    // 200 distinct costs 1..=200 µs: the p99 rank is (200 * 99) / 100 = 198 →
+    // the sorted value 199 µs — NOT the last sample (200 µs). Pins the `/ 100`
+    // rank arithmetic (a `*` there would clamp to the last sample).
+    let mut c = SubmitCounters::new();
+    for us in 1..=200u64 {
+        c.record_submit(0, (us * 10) as i64, 0); // µs → 100 ns units
+    }
+    assert_eq!(c.cost_percentile_us(99), 199);
+    assert_eq!(c.cost_percentile_us(50), 101);
+}
+
+#[test]
+fn percentile_100_clamps_to_the_last_sample_without_panicking() {
+    // p = 100 → raw rank == len, which the `.min(len - 1)` clamp pulls back to
+    // the last (max) sample instead of indexing out of bounds.
+    let mut c = SubmitCounters::new();
+    for us in [7u64, 3, 11] {
+        c.record_submit(0, (us * 10) as i64, 0);
+    }
+    assert_eq!(c.cost_percentile_us(100), 11);
+}
+
+#[test]
 fn submit_p99_zero_when_empty() {
     let c = SubmitCounters::new();
     assert_eq!(c.submit_p99_us(), 0);
