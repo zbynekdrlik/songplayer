@@ -271,6 +271,24 @@ def _force_cpu():
             os.environ["CUDA_VISIBLE_DEVICES"] = orig_env
 
 
+def _atomic_write_wav(path, audio, sr):
+    """Write `audio` (mono or (n, ch)) to `path` atomically as a FLOAT WAV: write
+    a `<path>.tmp` scratch, then `os.replace` into place.
+
+    `format="WAV"` is REQUIRED — the `.tmp` scratch extension is unknown to
+    soundfile, which otherwise infers no format and raises
+    `TypeError: ... unable to get format from file extension` and kills every
+    isolation run before its first segment lands (#171, win-resolume 0.53.0-dev.2:
+    `seg_0000_of_0013.wav.tmp`). The whole-song path wrote straight to a `.wav`
+    output so it never hit this; `stem_worker._separate_one_segment` already
+    passes `format="WAV"`, which is why stem separation was unaffected."""
+    import soundfile as sf
+
+    tmp = path + ".tmp"
+    sf.write(tmp, audio, sr, subtype="FLOAT")
+    os.replace(tmp, path)
+
+
 def _isolate_one_segment(sep_mel, sep_dereverb, full, in_sr, start_s, end_s, out_path, stem_dir):
     """Isolate + dereverb ONE native-rate window `[start_s, end_s]` of `full`,
     resample to 16 kHz mono float32, and write it ATOMICALLY to `out_path`.
@@ -300,9 +318,7 @@ def _isolate_one_segment(sep_mel, sep_dereverb, full, in_sr, start_s, end_s, out
     peak = float(np.max(np.abs(audio))) if audio.size else 0.0
     if peak > 1.0:
         audio = audio / peak
-    tmp = out_path + ".tmp"
-    sf.write(tmp, audio, 16000, subtype="FLOAT")
-    os.replace(tmp, out_path)
+    _atomic_write_wav(out_path, audio, 16000)
 
     # Clear the scratch dir for the next segment (we keep only out_path, which
     # lives in the work dir, not here).
@@ -426,9 +442,7 @@ def cmd_preprocess_vocals(args):
     peak = float(np.max(np.abs(stitched))) if stitched.size else 0.0
     if peak > 1.0:
         stitched = stitched / peak
-    tmp_out = args.output + ".tmp"
-    sf.write(tmp_out, stitched, 16000, subtype="FLOAT")
-    os.replace(tmp_out, args.output)
+    _atomic_write_wav(args.output, stitched, 16000)
     shutil.rmtree(work_dir, ignore_errors=True)
 
     print(json.dumps({"output": args.output}))
