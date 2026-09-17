@@ -102,6 +102,7 @@ fn burn_health_snapshot(burn_on: bool) -> crate::playback::ndi_health::PipelineH
         lock_state: sp_core::genlock::lock_state::LockState::Locked,
         lock_reason: "locked".to_string(),
         burn_on,
+        recovery_step: None,
     }
 }
 

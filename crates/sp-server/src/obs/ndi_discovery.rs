@@ -206,7 +206,7 @@ pub(crate) fn canonical_sender_name(stored: &str, advertised: &str) -> Option<St
 /// #173 case mismatch. So we read `COMPUTERNAME`. When it is unset or empty
 /// (Linux CI, a non-Windows box) we return `None` and normalization is skipped
 /// (behaviour unchanged; never a wrong-case rewrite).
-fn advertised_ndi_host() -> Option<String> {
+pub(crate) fn advertised_ndi_host() -> Option<String> {
     std::env::var("COMPUTERNAME").ok().filter(|s| !s.is_empty())
 }
 
@@ -230,7 +230,7 @@ async fn load_playlist_ndi_names(pool: &SqlitePool) -> Result<HashMap<String, i6
 
 /// Issue `GetInputList` filtered to NDI sources and return the list of input
 /// names. Returns `None` if the request failed or the response was malformed.
-async fn fetch_ndi_input_names(
+pub(crate) async fn fetch_ndi_input_names(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
 ) -> Option<Vec<String>> {
@@ -267,7 +267,7 @@ async fn fetch_ndi_input_names(
 /// Issue `GetInputSettings` for a single input and extract the
 /// `ndi_source_name` setting (the NDI sender name that the OBS input receives
 /// from). Returns `None` if the setting is absent.
-async fn fetch_input_ndi_sender_name(
+pub(crate) async fn fetch_input_ndi_sender_name(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
     input_name: &str,

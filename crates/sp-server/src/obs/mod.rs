@@ -3,6 +3,7 @@
 pub mod dispatcher;
 pub mod ndi_discovery;
 pub mod ndi_recovery;
+pub mod ndi_recovery_io;
 pub(crate) mod output_state;
 pub mod scene;
 pub mod scene_poll;
@@ -116,13 +117,15 @@ pub enum ObsCommand {
         source_name: String,
         text: String,
     },
-    /// #127: nudge OBS to re-subscribe a stranded NDI receiver. The handler
-    /// finds the NDI input advertising `ndi_name` (the bare stream, e.g.
-    /// `"SP-slow"`) and clears + restores its `ndi_source_name` so DistroAV
-    /// re-runs discovery. Receiver-side over the healthy OBS WebSocket — never
-    /// a per-sender `RecreateSender` (CLAUDE.md "Disabled subsystems", #60).
+    /// #127 / #173: run one rung of the dark-wall recovery ladder for a stranded
+    /// NDI receiver. The handler finds the NDI input advertising `ndi_name` (the
+    /// bare stream, e.g. `"SP-slow"`) and executes `step` — clear+restore (rung
+    /// 0), toggle the scene item (rung 1), or remove+recreate the input (rung 2).
+    /// Receiver-side over the healthy OBS WebSocket — never a per-sender
+    /// `RecreateSender` (CLAUDE.md "Disabled subsystems", #60).
     NudgeNdiReceiver {
         ndi_name: String,
+        step: crate::obs::ndi_recovery::RecoveryStep,
     },
 }
 
@@ -621,26 +624,21 @@ async fn connect_and_run(
                             }
                         });
                     }
-                    ObsCommand::NudgeNdiReceiver { ndi_name } => {
-                        // #127: SongPlayer detected a stranded DistroAV receiver
-                        // (dark wall while Playing). Re-subscribe it by clearing
-                        // + restoring the matching input's ndi_source_name over
-                        // this healthy OBS WebSocket. Spawned so the main loop
-                        // does not block on the OBS round-trips.
+                    ObsCommand::NudgeNdiReceiver { ndi_name, step } => {
+                        // #127 / #173: SongPlayer detected a stranded DistroAV
+                        // receiver (dark wall while Playing). Execute the chosen
+                        // ladder rung over this healthy OBS WebSocket. Spawned so
+                        // the main loop does not block on the OBS round-trips.
                         let write = std::sync::Arc::clone(&write);
                         let dispatcher = dispatcher.clone();
                         spawned_tasks.spawn(async move {
-                            let outcome = crate::obs::ndi_discovery::reapply_ndi_input(
+                            crate::obs::ndi_recovery_io::execute(
                                 &write,
                                 &dispatcher,
                                 &ndi_name,
+                                step,
                             )
                             .await;
-                            debug!(
-                                ndi_name = %ndi_name,
-                                ?outcome,
-                                "ndi-recovery: nudge outcome"
-                            );
                         });
                     }
                 }
