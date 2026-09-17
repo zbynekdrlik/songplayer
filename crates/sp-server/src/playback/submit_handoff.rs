@@ -35,7 +35,7 @@ pub const SUBMIT_HANDOFF_BOUND: usize = 2;
 /// the pacer's emit-side `LATE_THRESHOLD_100NS` uses, so the two sides agree on
 /// what "late" means. Measured at the SUBMIT thread (frame left the box after its
 /// stamp), never at the handoff (#168).
-pub const SUBMIT_LATE_THRESHOLD_100NS: i64 = 1_000_000_000;
+pub const SUBMIT_LATE_THRESHOLD_100NS: i64 = 20_000;
 
 /// Submit-cost percentile ring capacity (µs).
 const SUBMIT_COST_RING: usize = 256;
