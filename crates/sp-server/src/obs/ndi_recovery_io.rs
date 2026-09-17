@@ -1,4 +1,4 @@
-//! #173 round 2: executor for the dark-wall recovery ladder.
+//! #173: executor for the dark-wall recovery ladder.
 //!
 //! The pure ladder (`obs/ndi_recovery.rs`) decides WHICH rung fires; this module
 //! performs the OBS-WebSocket I/O for each rung over SongPlayer's already-healthy
@@ -8,13 +8,20 @@
 //!   (`ndi_discovery::reapply_ndi_input`): clear + restore the input's
 //!   `ndi_source_name` to the ADVERTISED, case-correct value.
 //! * `ToggleSceneItem` — disable then re-enable the input's scene item, so
-//!   DistroAV tears down and recreates the receiver object.
-//! * `RecreateInput` — remove the input and recreate it with the identical
-//!   settings (advertised name), restoring the saved scene-item transform + index.
+//!   DistroAV tears down and recreates the receiver object; then read
+//!   `GetSceneItemEnabled` back and re-enable if an operator left it hidden
+//!   (round 3 — the toggle must never leave an on-program item dark).
+//! * `RecreateInput` — create-first-then-remove (round 3): create the
+//!   replacement under `<input>_recover` with the identical settings (advertised
+//!   name), PROVE it exists, restore the saved transform + index, THEN remove the
+//!   old input and rename the temp to the original name. A failed `CreateInput`
+//!   can no longer empty the scene (the box incident, 17.9.2026). The step ORDER
+//!   is `recreate_plan()`, whose safety invariant is unit-tested here.
 //!
 //! I/O only — `obs/` is excluded from the mutation gate; the rung SELECTION is
-//! unit-tested in `ndi_recovery.rs` and the whole ladder is exercised on the box
-//! by E2E test 12. The one pure helper here (`transform_for_set`) is unit-tested.
+//! unit-tested in `ndi_recovery.rs`, the ordering + pure helpers here are
+//! unit-tested, and the whole ladder is exercised on the box by E2E test 12 and
+//! the `POST /api/v1/ndi/recover/{id}?step=recreate` operator trigger.
 
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
@@ -68,14 +75,13 @@ pub(crate) enum RecreateStep {
 /// input is removed.
 pub(crate) fn recreate_plan() -> [RecreateStep; 5] {
     use RecreateStep::*;
-    // RED (#173 round 3): the TIER-0 "one wrong constant" — RemoveOld is ordered
-    // BEFORE VerifyExists, so `recreate_plan_never_removes_before_verify` fails
-    // cleanly. GREEN moves RemoveOld after VerifyExists/ApplyTransformIndex.
+    // The replacement is created and PROVEN before the old input is removed — the
+    // safety invariant `recreate_plan_never_removes_before_verify` locks.
     [
         CreateTemp,
-        RemoveOld,
         VerifyExists,
         ApplyTransformIndex,
+        RemoveOld,
         RenameTempToOriginal,
     ]
 }

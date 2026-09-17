@@ -61,10 +61,23 @@ executor `obs/ndi_recovery_io.rs`, I/O over the healthy OBS WebSocket):
   = 6 polls ≈ 30 s): clear + restore `ndi_source_name` to the ADVERTISED name.
 - **Rung 1 `ToggleSceneItem`** — `LADDER_STEP_SPACING_POLLS` (2 polls ≈ 10 s) later:
   `SetSceneItemEnabled` OFF→ON so DistroAV tears down + recreates the receiver.
-- **Rung 2 `RecreateInput`** — 2 more polls later: `RemoveInput` + `CreateInput`
-  with the identical `inputSettings` (advertised name), restoring the saved
-  scene-item transform + z-order index. The strongest receiver-side remedy short
-  of restarting OBS; ~sub-second black on that scene only.
+  **Round 3: read `GetSceneItemEnabled` back after the OFF→ON.** The two acks do
+  NOT prove the item is visible — an operator who hid the source on program
+  leaves it disabled, and the toggle "applied" while the wall stayed dark. If the
+  read-back is `false`, set it ON again and log
+  `ndi-recovery: rung 1 — item was disabled, re-enabled`. The ladder must never
+  leave an on-program item hidden.
+- **Rung 2 `RecreateInput`** — 2 more polls later, **create-first-then-remove
+  (round 3), NEVER remove-first.** Create the replacement under a TEMP name
+  `<input>_recover` (same scene, identical `inputKind` + `inputSettings`,
+  advertised name), PROVE it exists (`CreateInput` returned a `sceneItemId` AND
+  `GetSceneItemList` lists it), restore the saved transform + z-order onto the
+  temp, THEN `RemoveInput` the old input and `SetInputName` the temp back to the
+  original. On ANY failure the ORIGINAL input is left untouched and the temp is
+  removed — the scene is never emptied. The gate `LADDER_RECREATE_ENABLED`
+  (`obs/ndi_recovery.rs`) is a real switch: `false` makes the ladder cool down at
+  rung 1 instead. The pure step list `recreate_plan()`
+  (`obs/ndi_recovery_io.rs`) is unit-tested to never order Remove before Verify.
 - **Cool-down** `LADDER_COOLDOWN_POLLS` (6 polls ≈ 30 s) after the recreate, then
   the ladder restarts at rung 0. One action per rung per poll; the ladder resets
   the moment the receiver re-attaches.
@@ -75,8 +88,8 @@ can see which rung recovered a wall. NEVER a per-sender `RecreateSender` (#60).
 
 - **Manual equivalents (over obs-websocket / MCP), same order:**
   1. clear+restore — `mcp__obs-resolume__obs-set-input-settings <input>_video {"ndi_source_name":""}` then the advertised `RESOLUME-SNV (SP-x)`.
-  2. toggle — `mcp__obs-resolume__obs-set-scene-item-enabled` (sceneName + sceneItemId, `false` then `true`; find the id with `obs-get-scene-items`).
-  3. recreate — `obs-get-input-settings` → `obs-remove-input` → `obs-create-input` (same scene, inputKind `ndi_source`, the advertised `ndi_source_name`) → `obs-set-scene-item-transform` / `obs-set-scene-item-transform` index.
+  2. toggle — `mcp__obs-resolume__obs-set-scene-item-enabled` (sceneName + sceneItemId, `false` then `true`; find the id with `obs-get-scene-items`), then `obs-get-scene-items` again to confirm `sceneItemEnabled: true`.
+  3. recreate (create-first) — `obs-get-input-settings` (capture `inputKind` + `inputSettings`) → `obs-create-input` under `<input>_recover` (same scene, inputKind `ndi_source`, advertised `ndi_source_name`) → confirm it lists → `obs-set-scene-item-transform` + index onto the temp → `obs-remove-input` the OLD input → `obs-set-input-name` temp → original. NEVER remove the old input first. Or just fire the app path: `POST /api/v1/ndi/recover/{playlist_id}?step=recreate`.
   Always end with OBS on `sp-fast`, engine `[7]`, `SP-fast Playing` with receivers.
 
 - **Inactive-output caveat:** `connections=0` on an INACTIVE output is NORMAL
@@ -105,6 +118,19 @@ When recreating or re-transforming an NDI input over obs-websocket 5.x
   all scenes; our `sp-*_video` inputs each live in exactly one scene, so the
   single-scene recreate is safe. Recreate briefly blacks that scene (~sub-second)
   — acceptable only because the ladder fires when the wall is ALREADY dark.
+- **Round 3 — create-first-then-remove, and log the failure payload.** The
+  round-2 remove-first recreate deleted `sp-youth_video`, then its `CreateInput`
+  returned no `sceneItemId` and the input stayed gone → scene EMPTY, every later
+  rung `NoMatch` (box 17.9.2026). Cause: re-creating an `ndi_source` input under
+  the SAME name immediately after `RemoveInput` races DistroAV's async source
+  teardown → a name collision (`ResourceAlreadyExists`) with no `sceneItemId`.
+  Fix: create the replacement under a DISTINCT temp name (`<input>_recover`) so
+  the create never collides, prove it, then remove the old and rename. **Never
+  remove a live input before a proven replacement exists.** And ALWAYS log the
+  full obs-websocket error on a failed write — `d.requestStatus.code` +
+  `d.requestStatus.comment` + the step name (`log_obs_failure` /
+  `send_ok_logged`); the round-2 executor swallowed the CreateInput error, so the
+  cause was unknown for a whole cycle.
 
 ## `connections=0` on an INACTIVE output is NORMAL (not a dark wall)
 The `sp-*` NDI inputs run `ndi_behavior 0` with a 1 s `ndi_behavior_timeout`, so

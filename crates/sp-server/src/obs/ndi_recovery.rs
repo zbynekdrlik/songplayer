@@ -15,9 +15,11 @@
 //! * **Rung 1 — `ToggleSceneItem`**: disable then re-enable the input's scene
 //!   item, so DistroAV tears down and recreates the receiver object (what an
 //!   operator does by hiding/showing the source).
-//! * **Rung 2 — `RecreateInput`**: remove the input and recreate it with the
-//!   identical settings, restoring the scene-item transform/index — the
-//!   strongest receiver-side remedy short of restarting OBS.
+//! * **Rung 2 — `RecreateInput`**: create-first-then-remove (round 3) — create
+//!   the replacement under `<input>_recover`, prove it exists, restore the
+//!   scene-item transform/index, THEN remove the old input and rename the temp —
+//!   the strongest receiver-side remedy short of restarting OBS, and safe because
+//!   a failed create can never empty the scene.
 //!
 //! This is ALWAYS **receiver-side** over the OBS WebSocket, NEVER a per-sender
 //! `PipelineCommand::RecreateSender` (CLAUDE.md "Disabled subsystems", #60 —
@@ -74,13 +76,13 @@ pub const LADDER_STEP_SPACING_POLLS: u32 = 2;
 /// wall never sits dark for minutes without a fresh escalation.
 pub const LADDER_COOLDOWN_POLLS: u32 = 6;
 
-/// #173 round 3 gate: rung 2 (`RecreateInput`) is DISABLED until the executor
-/// creates-first-then-removes. On 17.9.2026 (0.54.0-dev.3, box verification)
-/// rung 2 removed `sp-youth_video` and its `CreateInput` failed, leaving the
-/// scene EMPTY — a production input deleted on a dark wall. While `false`, the
-/// ladder stops at rung 1 and cools down (`LADDER_COOLDOWN_POLLS`) before it
-/// restarts at `ClearRestore`.
-pub const LADDER_RECREATE_ENABLED: bool = false;
+/// #173 round 3: rung 2 (`RecreateInput`) is ENABLED. It was gated off in round 3
+/// after the round-2 executor removed `sp-youth_video` and then its `CreateInput`
+/// failed, leaving the scene EMPTY (0.54.0-dev.3, box verification 17.9.2026). The
+/// executor now CREATES the replacement under `<input>_recover` and PROVES it
+/// exists BEFORE removing the old input (`obs/ndi_recovery_io.rs::recreate_plan`),
+/// so a failed create can no longer empty the scene — the remedy is safe to run.
+pub const LADDER_RECREATE_ENABLED: bool = true;
 
 /// One rung of the dark-wall recovery ladder (#173 round 2). Ordered by
 /// escalating disruption; `ClearRestore` is the round-1 nudge. Serialized onto
@@ -92,7 +94,8 @@ pub enum RecoveryStep {
     ClearRestore,
     /// Toggle the input's scene item off → on.
     ToggleSceneItem,
-    /// Remove + recreate the input, restoring the scene-item transform/index.
+    /// Create-first-then-remove the input, restoring the scene-item
+    /// transform/index (the replacement is proven before the old is removed).
     RecreateInput,
 }
 
@@ -148,7 +151,8 @@ pub fn next_step(state: &NudgeState, dark_polls_since_last_action: u32) -> Optio
         {
             Some(RecoveryStep::RecreateInput)
         }
-        // Rung 2 gated off: cool down after the toggle, then restart the ladder.
+        // Fallback when rung 2 is gated off (`LADDER_RECREATE_ENABLED = false`):
+        // cool down after the toggle, then restart the ladder at `ClearRestore`.
         2 if dark_polls_since_last_action >= LADDER_COOLDOWN_POLLS => {
             Some(RecoveryStep::ClearRestore)
         }
