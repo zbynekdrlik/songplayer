@@ -96,6 +96,47 @@ mod tests {
     }
 
     #[test]
+    fn truncation_boundary_keeps_a_line_exactly_max_len() {
+        // The truncation test is `count > max_len`, NOT `>= max_len`: a line of
+        // EXACTLY max_len chars is kept verbatim; only a longer line is cut.
+        // (Kills the child_output.rs:41 `>`→`>=` mutant, which would truncate an
+        // exact-length line.)
+        let exact = "y".repeat(50);
+        let out = tail_lines(&exact, 20, 50);
+        assert_eq!(
+            out, exact,
+            "a line of exactly max_len must not be truncated"
+        );
+        assert!(!out.ends_with('…'));
+
+        let over = "y".repeat(51);
+        let out2 = tail_lines(&over, 20, 50);
+        assert_eq!(out2.chars().count(), 51, "max_len + the ellipsis");
+        assert!(out2.ends_with('…'));
+    }
+
+    #[test]
+    fn keeps_exactly_n_lines_then_drops_the_oldest() {
+        // Line-count boundary of `saturating_sub(n)`: exactly n lines are all
+        // kept; the (n+1)-th input drops the OLDEST.
+        let five = (1..=5)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(tail_lines(&five, 5, 300), five, "exactly n lines: all kept");
+
+        let six = (1..=6)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let out = tail_lines(&six, 5, 300);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines.first(), Some(&"2"), "oldest line dropped");
+        assert_eq!(lines.last(), Some(&"6"));
+    }
+
+    #[test]
     fn failure_tail_prefers_stderr_when_nonempty() {
         // The Python child writes its traceback to stderr; the tail MUST surface
         // it even when stdout also has content. (RED fails here:
