@@ -111,6 +111,14 @@ fn temp_recover_name(input_name: &str) -> String {
     format!("{input_name}__recover_{}", &suffix[..8])
 }
 
+/// True if `candidate` is a leftover temp name from an EARLIER interrupted
+/// recreate of `base` (`<base>__recover_<...>`), so it is safe to sweep
+/// best-effort at the START of a fresh attempt. Never matches `base` itself, so
+/// the live input can never be swept.
+fn is_stale_recover_input(candidate: &str, base: &str) -> bool {
+    candidate != base && candidate.starts_with(&format!("{base}__recover_"))
+}
+
 /// Execute one rung of the dark-wall recovery ladder for `target_stream` (the
 /// bare stream, e.g. `"SP-fast"`). Logs its own outcome; never panics.
 pub(crate) async fn execute(
@@ -242,6 +250,35 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
             return;
         }
     };
+
+    // Sweep any leftover `<input>__recover_*` temps from an earlier interrupted
+    // recreate BEFORE this attempt. Their names are unique-per-attempt and never
+    // reused, so their async teardown is harmless — this only clears
+    // operator-visible garbage that would otherwise accrue over failed attempts.
+    // Best-effort: a read/remove failure is logged, never fatal.
+    if let Some(inputs) = fetch_ndi_input_names(write, dispatcher).await {
+        let stale: Vec<String> = inputs
+            .into_iter()
+            .filter(|n| is_stale_recover_input(n, &input_name))
+            .collect();
+        if !stale.is_empty() {
+            warn!(
+                input_name = %input_name,
+                stale_count = stale.len(),
+                stale = ?stale,
+                "ndi-recovery: rung 2 — sweeping leftover <input>__recover_* temps from an earlier interrupted recreate"
+            );
+            for name in &stale {
+                send_ok_logged(
+                    write,
+                    dispatcher,
+                    "rung 2 RemoveInput(stale recover temp)",
+                    remove_input_request(&new_id(), name),
+                )
+                .await;
+            }
+        }
+    }
 
     // --- Read-only preconditions: everything below is captured BEFORE any
     // destructive op, so a failure here aborts with the original untouched. ---
