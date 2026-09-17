@@ -46,36 +46,39 @@ pub fn open_audio_stream(
     control: &KaraokeControl,
 ) -> Result<Box<dyn AudioStream>, DecoderError> {
     let (vpath, ipath) = crate::stems::stem_paths(audio_path);
-    let roles = stream_roles(vpath.exists(), ipath.exists());
-    if roles.len() < 3 {
+    // Match the exact stream SET (never a `len()` comparison — `len` is only ever
+    // 1 or 3, so a numeric check has equivalent mutants).
+    match stream_roles(vpath.exists(), ipath.exists()) {
+        // Both stems exist → open all three and mix live (a preset change writes
+        // gains, never a reopen).
+        [StemRole::Original, StemRole::Vocals, StemRole::Instrumental] => {
+            match build_stem_reader(audio_path, &vpath, &ipath, control) {
+                Ok(reader) => {
+                    info!(
+                        original = %audio_path.display(),
+                        vocals = %vpath.display(),
+                        "karaoke: mixing stems (live preset, no reopen)"
+                    );
+                    Ok(reader)
+                }
+                Err(e) => {
+                    // Defence in depth: a stem may EXIST yet fail to open — a torn
+                    // file from a killed separator, a stem deleted between the
+                    // exists() check and here, or a rate/channel disagreement in
+                    // StemMixReader::new. Any such failure degrades to the original
+                    // mix (which always plays) rather than taking the wall dark.
+                    warn!(
+                        audio = %audio_path.display(),
+                        %e,
+                        "karaoke: stems present but unreadable — falling back to the original mix"
+                    );
+                    Ok(Box::new(SymphoniaAudioReader::open(audio_path)?))
+                }
+            }
+        }
         // No stems (or an incomplete pair): play the original mix. Presets are a
         // no-op for this song (#177) — the plain reader never sees the gains.
-        return Ok(Box::new(SymphoniaAudioReader::open(audio_path)?));
-    }
-
-    // Both stems exist → open all three and mix live.
-    match build_stem_reader(audio_path, &vpath, &ipath, control) {
-        Ok(reader) => {
-            info!(
-                original = %audio_path.display(),
-                vocals = %vpath.display(),
-                "karaoke: mixing stems (live preset, no reopen)"
-            );
-            Ok(reader)
-        }
-        Err(e) => {
-            // Defence in depth: a stem may EXIST yet fail to open — a torn file
-            // from a killed separator, a stem deleted between the exists() check
-            // and here, or a rate/channel disagreement in StemMixReader::new. Any
-            // such failure degrades to the original mix (which always plays)
-            // rather than taking the wall dark for that song.
-            warn!(
-                audio = %audio_path.display(),
-                %e,
-                "karaoke: stems present but unreadable — falling back to the original mix"
-            );
-            Ok(Box::new(SymphoniaAudioReader::open(audio_path)?))
-        }
+        _ => Ok(Box::new(SymphoniaAudioReader::open(audio_path)?)),
     }
 }
 

@@ -204,9 +204,7 @@ impl MediaStream for StemMixReader {
         for b in &mut self.bufs {
             b.clear();
         }
-        for e in &mut self.eos {
-            *e = false;
-        }
+        self.eos.fill(false);
         // Re-anchor the output timestamp to the seek position.
         self.emitted_frames = position_ms.saturating_mul(self.sample_rate as u64) / 1000;
         Ok(())
