@@ -11,12 +11,15 @@
 //!   DistroAV tears down and recreates the receiver object; then read
 //!   `GetSceneItemEnabled` back and re-enable if an operator left it hidden
 //!   (round 3 — the toggle must never leave an on-program item dark).
-//! * `RecreateInput` — create-first-then-remove (round 3): create the
-//!   replacement under `<input>_recover` with the identical settings (advertised
-//!   name), PROVE it exists, restore the saved transform + index, THEN remove the
-//!   old input and rename the temp to the original name. A failed `CreateInput`
-//!   can no longer empty the scene (the box incident, 17.9.2026). The step ORDER
-//!   is `recreate_plan()`, whose safety invariant is unit-tested here.
+//! * `RecreateInput` — rename-first (round 3): rename the OLD input to a unique
+//!   temp name (a SYNCHRONOUS rename that frees the original name), create the
+//!   replacement DIRECTLY under the original name with the identical settings
+//!   (advertised name), PROVE it exists, restore the saved transform + index, THEN
+//!   remove the renamed-away old input. Never empties the scene AND never reuses a
+//!   name freed by a remove — so it dodges DistroAV's async-teardown `601` race
+//!   that left every create-first recreate named `<input>_recover` (box 17.9.2026).
+//!   The step ORDER is `recreate_plan()`, whose two safety invariants are
+//!   unit-tested here.
 //!
 //! I/O only — `obs/` is excluded from the mutation gate; the rung SELECTION is
 //! unit-tested in `ndi_recovery.rs`, the ordering + pure helpers here are
@@ -47,51 +50,65 @@ struct SceneItemLocation {
     scene_item_index: i64,
 }
 
-/// One ordered step of the create-first-then-remove rung-2 recreate (#173 round
-/// 3). The order is the SAFETY contract: the replacement input is created under a
-/// temporary name and PROVEN to exist before the old input is removed, so a
-/// failed `CreateInput` can never leave the scene empty (the box incident,
-/// 17.9.2026). Unit-tested by `recreate_plan_never_removes_before_verify`.
+/// One ordered step of the RENAME-FIRST rung-2 recreate (#173 round 3). The order
+/// is the SAFETY contract with TWO invariants, both unit-tested by
+/// `recreate_plan_is_race_free`:
+///
+/// 1. **Never empty the scene / prove before destroy** — the replacement is
+///    created and verified before the old input is removed.
+/// 2. **Never reuse a NAME freed by a REMOVE** — a `RemoveInput` frees the OBS
+///    input NAME only ASYNCHRONOUSLY (DistroAV tears the `ndi_source` down on its
+///    own thread), so creating / renaming-to a just-removed name races that
+///    teardown and hits obs-websocket `601 "a source already exists by that new
+///    input name"` (box 17.9.2026: the round-3 create-temp-then-rename executor
+///    left every recreate's input named `<input>_recover` because the rename-back
+///    to the just-removed original name lost that race). So the original name is
+///    freed by a SYNCHRONOUS `SetInputName` (rename), never by a remove, and the
+///    replacement is created DIRECTLY under it — no post-remove name reuse.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RecreateStep {
-    /// `CreateInput` the replacement under `<input>_recover` with the identical
-    /// kind + settings (advertised sender name), in the same scene.
-    CreateTemp,
-    /// Prove the temp input exists as a scene item (`GetSceneItemList` lists it
-    /// AND `CreateInput` returned a `sceneItemId`) before anything destructive.
+    /// `SetInputName` the OLD input to a unique temp name — a synchronous rename
+    /// that frees the original name immediately (no `ndi_source` destroy), so the
+    /// create below can reuse it without racing an async teardown.
+    RenameOldAway,
+    /// `CreateInput` the replacement DIRECTLY under the ORIGINAL name (now free)
+    /// with the identical kind + settings (advertised sender name), same scene.
+    CreateUnderOriginal,
+    /// Prove the new (original-named) input exists as a scene item (`CreateInput`
+    /// returned a `sceneItemId` AND `GetSceneItemList` lists it) before removing
+    /// anything.
     VerifyExists,
-    /// Restore the saved transform + z-order index onto the temp item.
+    /// Restore the saved transform + z-order index onto the new input.
     ApplyTransformIndex,
-    /// `RemoveInput` the old input — only reached after the replacement is proven.
-    RemoveOld,
-    /// `SetInputName` the temp `<input>_recover` back to the original name (the
-    /// name is free once the old input is removed).
-    RenameTempToOriginal,
+    /// `RemoveInput` the renamed-away OLD input — its temp name is never reused,
+    /// so its async teardown is harmless.
+    RemoveRenamedOld,
 }
 
 /// The ordered plan the recreate executor follows. Pure + `pub(crate)` so the
-/// executor consumes it (no dead code) and a unit test locks the ordering
-/// invariant — the replacement is always created and verified before the old
-/// input is removed.
+/// executor consumes it (no dead code) and a unit test locks BOTH ordering
+/// invariants (see `RecreateStep`).
 pub(crate) fn recreate_plan() -> [RecreateStep; 5] {
     use RecreateStep::*;
-    // The replacement is created and PROVEN before the old input is removed — the
-    // safety invariant `recreate_plan_never_removes_before_verify` locks.
+    // RED (#173 round 3 fix): the TIER-0 "one wrong constant" — CreateUnderOriginal
+    // is ordered BEFORE RenameOldAway (reuse the original name before it is freed),
+    // so `recreate_plan_is_race_free` fails cleanly. GREEN swaps them.
     [
-        CreateTemp,
+        CreateUnderOriginal,
+        RenameOldAway,
         VerifyExists,
         ApplyTransformIndex,
-        RemoveOld,
-        RenameTempToOriginal,
+        RemoveRenamedOld,
     ]
 }
 
-/// The temporary input name used while recreating `<input>`. Distinct from the
-/// original so `CreateInput` can never collide with the still-present old input
-/// (the same-name collision that made `CreateInput` return no `sceneItemId` on
-/// the box, 17.9.2026).
+/// A unique temp name the OLD input is renamed to while recreating `<input>`.
+/// UUID-suffixed so `RenameOldAway` can never collide with a leftover from a
+/// prior interrupted recreate, and so the create-under-original below never
+/// touches a name that any remove ever freed.
 fn temp_recover_name(input_name: &str) -> String {
-    format!("{input_name}_recover")
+    let suffix: String = uuid::Uuid::new_v4().simple().to_string();
+    format!("{input_name}__recover_{}", &suffix[..8])
 }
 
 /// Execute one rung of the dark-wall recovery ladder for `target_stream` (the
@@ -204,14 +221,16 @@ async fn toggle_scene_item(write: &SharedWrite, dispatcher: &Dispatcher, target_
     }
 }
 
-/// Rung 2 (#173 round 3): create-first-then-remove. Create the replacement input
-/// under a TEMPORARY name (`<input>_recover`) with the identical kind + settings
+/// Rung 2 (#173 round 3): rename-first recreate. Rename the OLD input to a unique
+/// temp name (a synchronous rename that frees the original name), create the
+/// replacement DIRECTLY under the ORIGINAL name with the identical kind + settings
 /// (advertised, case-correct `ndi_source_name`), PROVE it exists as a scene item,
-/// restore the saved transform + z-order, THEN remove the old input and rename
-/// the temp to the original name. On any failure the ORIGINAL input is left
-/// untouched (the scene is never emptied — the box incident, 17.9.2026) and the
-/// temp is cleaned up. The step ORDER is driven by `recreate_plan()`, whose
-/// safety invariant (never remove before verify) is unit-tested.
+/// restore the saved transform + z-order, THEN remove the renamed-away old input.
+/// On any pre-remove failure the OLD content is restored to its original name (the
+/// scene is never emptied — the box incident, 17.9.2026) and no name freed by a
+/// remove is ever reused (dodging DistroAV's async-teardown 601 race). The step
+/// ORDER is driven by `recreate_plan()`, whose two safety invariants are
+/// unit-tested.
 async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_stream: &str) {
     let input_name = match resolve_input_name(write, dispatcher, target_stream).await {
         Some(n) => n,
@@ -287,31 +306,39 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
         scene = %loc.scene_name,
         input_kind = %input_kind,
         restore_to = %restore_to,
-        "ndi-recovery: rung 2 — create-first recreate to clear a wedged receiver"
+        "ndi-recovery: rung 2 — rename-first recreate to clear a wedged receiver"
     );
 
-    // Defensive: remove any stale temp left by a prior interrupted recreate so the
-    // CreateTemp below can never collide with it (best-effort, result ignored — a
-    // 600 "not found" is the normal case).
-    let _ = send(
-        write,
-        dispatcher,
-        remove_input_request(&new_id(), &temp_name),
-    )
-    .await;
-
-    // --- Execute the ordered plan. The order is the SAFETY contract. ---
+    // --- Execute the ordered plan. The order is the SAFETY contract: rename the
+    // old away (frees the original name synchronously), create the replacement
+    // DIRECTLY under the original name, prove it, then remove the renamed-away
+    // old. No step ever reuses a name that a remove freed. ---
     let mut new_item_id: Option<i64> = None;
     for step in recreate_plan() {
         match step {
-            RecreateStep::CreateTemp => {
+            RecreateStep::RenameOldAway => {
+                // Synchronous rename — frees the ORIGINAL name immediately (no
+                // ndi_source destroy) so CreateUnderOriginal below can reuse it.
+                if !send_ok_logged(
+                    write,
+                    dispatcher,
+                    "rung 2 SetInputName(old→temp)",
+                    set_input_name_request(&new_id(), &input_name, &temp_name),
+                )
+                .await
+                {
+                    warn!(input_name = %input_name, "ndi-recovery: rung 2 — RenameOldAway failed; aborting recreate (original untouched)");
+                    return;
+                }
+            }
+            RecreateStep::CreateUnderOriginal => {
                 let resp = send(
                     write,
                     dispatcher,
                     create_input_request(
                         &new_id(),
                         &loc.scene_name,
-                        &temp_name,
+                        &input_name,
                         &input_kind,
                         &input_settings,
                         true,
@@ -324,24 +351,27 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
                 {
                     Some(id) => new_item_id = Some(id),
                     None => {
-                        log_obs_failure("rung 2 CreateTemp", &temp_name, resp.as_ref());
-                        // Original untouched; nothing created to clean up.
+                        log_obs_failure("rung 2 CreateUnderOriginal", &input_name, resp.as_ref());
+                        // Create failed → the original name is free (freed by the
+                        // rename, never by a remove), so rename the old input back to
+                        // it race-free; the scene keeps serving under the correct name.
+                        restore_old(write, dispatcher, &temp_name, &input_name).await;
                         return;
                     }
                 }
             }
             RecreateStep::VerifyExists => {
-                let listed = resolve_scene_item(write, dispatcher, &temp_name)
+                let listed = resolve_scene_item(write, dispatcher, &input_name)
                     .await
                     .is_some();
                 if new_item_id.is_none() || !listed {
                     warn!(
-                        temp_name = %temp_name,
+                        input_name = %input_name,
                         has_scene_item_id = new_item_id.is_some(),
                         listed_by_get_scene_item_list = listed,
-                        "ndi-recovery: rung 2 — replacement not proven (aborting BEFORE removing the old input; original untouched)"
+                        "ndi-recovery: rung 2 — replacement not proven (aborting BEFORE removing the old input); restoring the old name"
                     );
-                    cleanup_temp(write, dispatcher, &temp_name).await;
+                    restore_old(write, dispatcher, &temp_name, &input_name).await;
                     return;
                 }
             }
@@ -361,7 +391,7 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
                     )
                     .await
                     {
-                        warn!(temp_name = %temp_name, "ndi-recovery: rung 2 — restoring the transform did not apply (continuing)");
+                        warn!(input_name = %input_name, "ndi-recovery: rung 2 — restoring the transform did not apply (continuing)");
                     }
                 }
                 if !send_ok_logged(
@@ -377,45 +407,26 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
                 )
                 .await
                 {
-                    warn!(temp_name = %temp_name, "ndi-recovery: rung 2 — restoring the z-order index did not apply (continuing)");
+                    warn!(input_name = %input_name, "ndi-recovery: rung 2 — restoring the z-order index did not apply (continuing)");
                 }
             }
-            RecreateStep::RemoveOld => {
+            RecreateStep::RemoveRenamedOld => {
                 if !send_ok_logged(
                     write,
                     dispatcher,
-                    "rung 2 RemoveInput(old)",
-                    remove_input_request(&new_id(), &input_name),
+                    "rung 2 RemoveInput(renamed-old)",
+                    remove_input_request(&new_id(), &temp_name),
                 )
                 .await
                 {
-                    // The old input survived AND the temp exists — a duplicate.
-                    // Remove the temp so we do not leave two items; the original
-                    // (still present) keeps serving.
-                    warn!(input_name = %input_name, "ndi-recovery: rung 2 — RemoveInput(old) failed; removing the temp to avoid a duplicate (original untouched)");
-                    cleanup_temp(write, dispatcher, &temp_name).await;
-                    return;
-                }
-            }
-            RecreateStep::RenameTempToOriginal => {
-                if !send_ok_logged(
-                    write,
-                    dispatcher,
-                    "rung 2 SetInputName(temp→original)",
-                    set_input_name_request(&new_id(), &temp_name, &input_name),
-                )
-                .await
-                {
-                    // The old input is already gone and the temp carries the
-                    // advertised name, so the receiver is attached; only the input
-                    // NAME is wrong (still matched by stream on the next map
-                    // rebuild). Loud so an operator can rename it by hand.
+                    // The new input is already in place under the correct name; only
+                    // the renamed-away old input could not be removed, so a duplicate
+                    // (same NDI stream) lingers under the temp name. Loud but
+                    // non-fatal — the correct input is serving.
                     warn!(
                         temp_name = %temp_name,
-                        wanted = %input_name,
-                        "ndi-recovery: rung 2 — rename temp→original failed; the recovered input is still named '<input>_recover' (matched by stream, rename by hand)"
+                        "ndi-recovery: rung 2 — removing the renamed-away old input failed; a duplicate lingers (the new input under the correct name is serving)"
                     );
-                    return;
                 }
             }
         }
@@ -424,19 +435,34 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
     info!(
         input_name = %input_name,
         new_scene_item_id = new_item_id.unwrap_or(0),
-        "ndi-recovery: rung 2 (recreate) applied — replacement proven, old removed, renamed"
+        "ndi-recovery: rung 2 (recreate) applied — new input created under the original name, old removed"
     );
 }
 
-/// Best-effort removal of the temporary `<input>_recover` input on an aborted
-/// recreate. Result ignored — it is a cleanup, not part of the safety contract.
-async fn cleanup_temp(write: &SharedWrite, dispatcher: &Dispatcher, temp_name: &str) {
-    let _ = send(
+/// Restore the OLD input's original name after an aborted recreate: rename
+/// `temp_name` back to `input_name`. Race-free because the abort paths that call
+/// it reach it with `input_name` free (freed by the earlier synchronous rename,
+/// never by a remove). Best-effort — a failure is logged, not fatal.
+async fn restore_old(
+    write: &SharedWrite,
+    dispatcher: &Dispatcher,
+    temp_name: &str,
+    input_name: &str,
+) {
+    if !send_ok_logged(
         write,
         dispatcher,
-        remove_input_request(&new_id(), temp_name),
+        "rung 2 SetInputName(restore old→original)",
+        set_input_name_request(&new_id(), temp_name, input_name),
     )
-    .await;
+    .await
+    {
+        warn!(
+            temp_name = %temp_name,
+            wanted = %input_name,
+            "ndi-recovery: rung 2 — could not restore the old input's original name; it is still named with the temp suffix (matched by stream)"
+        );
+    }
 }
 
 /// Find the OBS NDI input whose `ndi_source_name` advertises `target_stream`.
@@ -615,47 +641,55 @@ async fn send_ok_logged(
 mod tests {
     use super::*;
 
-    // ---- create-first-then-remove ordering safety (#173 round 3) ----------
+    // ---- rename-first recreate ordering safety (#173 round 3) -------------
 
     #[test]
-    fn recreate_plan_never_removes_before_verify() {
+    fn recreate_plan_is_race_free() {
         let plan = recreate_plan();
         let pos = |s: RecreateStep| plan.iter().position(|&p| p == s).expect("step present");
-        // The whole plan must be exactly the safe order.
+        // The whole plan must be exactly the safe rename-first order.
         assert_eq!(
             plan,
             [
-                RecreateStep::CreateTemp,
+                RecreateStep::RenameOldAway,
+                RecreateStep::CreateUnderOriginal,
                 RecreateStep::VerifyExists,
                 RecreateStep::ApplyTransformIndex,
-                RecreateStep::RemoveOld,
-                RecreateStep::RenameTempToOriginal,
+                RecreateStep::RemoveRenamedOld,
             ],
-            "the recreate plan must create + verify the replacement before removing the old input",
+            "the recreate plan must free the original name by a rename, create+verify under it, then remove the renamed-away old",
         );
-        // The load-bearing invariant, asserted independently of the exact layout:
-        // the old input is NEVER removed before the replacement is proven to exist.
+        // Invariant 1 — never reuse a name freed by a REMOVE: the original name is
+        // freed by the synchronous RenameOldAway BEFORE CreateUnderOriginal reuses
+        // it (the async-teardown 601 race, box 17.9.2026).
         assert!(
-            pos(RecreateStep::CreateTemp) < pos(RecreateStep::VerifyExists),
-            "must create the temp before verifying it",
+            pos(RecreateStep::RenameOldAway) < pos(RecreateStep::CreateUnderOriginal),
+            "must free the original name (rename the old away) before creating under it",
+        );
+        // Invariant 2 — never empty the scene / prove before destroy: the
+        // replacement is created and verified before the old input is removed.
+        assert!(
+            pos(RecreateStep::CreateUnderOriginal) < pos(RecreateStep::VerifyExists),
+            "must create the replacement before verifying it",
         );
         assert!(
-            pos(RecreateStep::VerifyExists) < pos(RecreateStep::RemoveOld),
-            "must verify the replacement exists before removing the old input",
-        );
-        assert!(
-            pos(RecreateStep::RemoveOld) < pos(RecreateStep::RenameTempToOriginal),
-            "must remove the old input (freeing its name) before renaming the temp to it",
+            pos(RecreateStep::VerifyExists) < pos(RecreateStep::RemoveRenamedOld),
+            "must verify the replacement exists before removing the renamed-away old input",
         );
     }
 
     #[test]
-    fn temp_recover_name_is_distinct_from_the_original() {
-        assert_eq!(
-            temp_recover_name("sp-youth_video"),
-            "sp-youth_video_recover"
+    fn temp_recover_name_is_unique_and_distinct_from_the_original() {
+        let a = temp_recover_name("sp-youth_video");
+        let b = temp_recover_name("sp-youth_video");
+        assert!(
+            a.starts_with("sp-youth_video__recover_"),
+            "carries the base + recover marker: {a}"
         );
-        assert_ne!(temp_recover_name("sp-youth_video"), "sp-youth_video");
+        assert_ne!(a, "sp-youth_video");
+        // UUID-suffixed → two calls never collide (so RenameOldAway can never hit a
+        // leftover temp from a prior interrupted recreate).
+        assert_ne!(a, b, "temp names must be unique per call");
     }
 
     #[test]

@@ -15,11 +15,12 @@
 //! * **Rung 1 — `ToggleSceneItem`**: disable then re-enable the input's scene
 //!   item, so DistroAV tears down and recreates the receiver object (what an
 //!   operator does by hiding/showing the source).
-//! * **Rung 2 — `RecreateInput`**: create-first-then-remove (round 3) — create
-//!   the replacement under `<input>_recover`, prove it exists, restore the
-//!   scene-item transform/index, THEN remove the old input and rename the temp —
-//!   the strongest receiver-side remedy short of restarting OBS, and safe because
-//!   a failed create can never empty the scene.
+//! * **Rung 2 — `RecreateInput`**: rename-first recreate (round 3) — rename the
+//!   old input away, create the replacement directly under the original name,
+//!   prove it exists, restore the scene-item transform/index, THEN remove the
+//!   renamed-away old — the strongest receiver-side remedy short of restarting
+//!   OBS, safe because a failed create can never empty the scene and no name
+//!   freed by a remove is ever reused (dodging DistroAV's async-teardown race).
 //!
 //! This is ALWAYS **receiver-side** over the OBS WebSocket, NEVER a per-sender
 //! `PipelineCommand::RecreateSender` (CLAUDE.md "Disabled subsystems", #60 —
@@ -94,8 +95,9 @@ pub enum RecoveryStep {
     ClearRestore,
     /// Toggle the input's scene item off → on.
     ToggleSceneItem,
-    /// Create-first-then-remove the input, restoring the scene-item
-    /// transform/index (the replacement is proven before the old is removed).
+    /// Rename-first recreate: free the original name by a rename, create the
+    /// replacement under it, prove it, then remove the renamed-away old (the
+    /// replacement is proven before the old is removed; no removed name is reused).
     RecreateInput,
 }
 
