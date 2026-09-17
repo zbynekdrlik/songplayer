@@ -26,7 +26,6 @@ use tracing::{debug, info, warn};
 
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
 use crate::obs::ndi_discovery::rebuild_ndi_source_map;
-use crate::obs::scene::check_scene_items;
 use crate::obs::text::get_current_scene_request;
 
 /// How often the connection loop polls `GetCurrentProgramScene` to reconcile a
@@ -480,20 +479,16 @@ async fn connect_and_run(
             if let Some(scene_name) =
                 response["d"]["responseData"]["currentProgramSceneName"].as_str()
             {
-                let sources = ndi_sources.read().await;
-                let active_ids = check_scene_items(&write, &dispatcher, scene_name, &sources).await;
-                drop(sources);
-
-                {
-                    let mut s = state.write().await;
-                    s.current_scene = Some(scene_name.to_string());
-                    s.active_playlist_ids = active_ids.clone();
-                }
-
-                let _ = event_tx.send(ObsEvent::SceneChanged {
-                    scene_name: scene_name.to_string(),
-                    active_playlist_ids: active_ids,
-                });
+                // Same seed-the-scene path the reader/poll arms use.
+                scene::apply_scene_change(
+                    &write,
+                    &dispatcher,
+                    ndi_sources,
+                    state,
+                    event_tx,
+                    scene_name.to_string(),
+                )
+                .await;
             } else {
                 debug!("initial GetCurrentProgramScene response had no scene name");
             }

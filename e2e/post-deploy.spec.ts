@@ -209,12 +209,16 @@ test.describe("SongPlayer post-deploy feature verification", () => {
         initialScene ?? pickBaselineScene(await driver.listScenes());
       const ctx = await apiRequest.newContext({ baseURL: SONGPLAYER_URL });
       try {
-        let engineScene: string | null = null;
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          await driver.switchScene(target);
-          engineScene = await waitEngineActiveScene(ctx, target);
-          if (engineScene === target) break;
-        }
+        // Restore (afterEach may already have — switchScene no-ops if program
+        // is already on target) and PROVE the ENGINE ended on the start scene.
+        // The generous wait is the honest resilience: it covers the driver's
+        // own transition wait PLUS the ~2 s engine poll-reconcile (part C)
+        // catching a dropped event. An active_scene that never converges fails
+        // loudly with the scene names — a retry of the SWITCH would be a no-op
+        // here (program is already target), so the wait, not a re-drive, is
+        // what tolerates a lagging engine.
+        await driver.switchScene(target);
+        const engineScene = await waitEngineActiveScene(ctx, target, 8000);
         expect(
           engineScene,
           `afterAll must restore the wall to "${target}" (the scene the suite started on); the engine reported active_scene="${engineScene}". A dropped studio-mode scene event left the wall on a different scene — the poll-reconcile / driver studio-transition fix did not hold (#170).`,

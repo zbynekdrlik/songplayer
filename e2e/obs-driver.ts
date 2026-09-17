@@ -77,6 +77,13 @@ export class ObsDriver {
       if (await this.studioModeEnabled()) {
         await this.obs.call("SetCurrentPreviewScene", { sceneName });
         await this.obs.call("TriggerStudioModeTransition");
+        // We KNOW a transition is now running — mark it active synchronously so
+        // the settle check cannot fire before the SceneTransitionStarted frame
+        // arrives. In Studio Mode GetCurrentProgramScene can report the target
+        // near fade start, so relying on the async Started event to raise this
+        // flag would reinstate the round-2 name-only early return. The real
+        // SceneTransitionEnded frame (a 2s Fade always emits one) clears it.
+        transitionActive = true;
       } else {
         await this.obs.call("SetCurrentProgramScene", { sceneName });
       }
