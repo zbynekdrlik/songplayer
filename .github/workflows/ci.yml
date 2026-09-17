@@ -126,14 +126,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests)
-        run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3
+      - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy)
+        run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1
       - name: Lint with ruff
-        run: ruff check eval/
+        run: ruff check eval/ scripts/tests/
       - name: Format check with ruff
-        run: ruff format --check eval/
+        run: ruff format --check eval/ scripts/tests/
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
+      - name: Run scripts pytest (#171 segment stitch / additivity)
+        run: pytest scripts/tests -v
 
   build-wasm:
     name: Build WASM (trunk)
