@@ -54,11 +54,12 @@ pub(crate) enum RemovalStep {
 /// locks the order (`removal_plan_stops_the_receiver_before_removing`).
 pub(crate) fn removal_plan() -> [RemovalStep; 5] {
     use RemovalStep::*;
-    // NOTE(RED): StopReceiver must come FIRST — a bare RemoveInput before the
-    // receiver stops is the round-4 no-op. GREEN reorders StopReceiver first.
+    // StopReceiver FIRST — a bare RemoveInput before the receiver stops is the
+    // round-4 no-op (OBS reports success, the input persists). Every removal is
+    // then read back, never trusted from the response code.
     [
-        RemoveInput,
         StopReceiver,
+        RemoveInput,
         VerifyGone,
         RemoveSceneItemFallback,
         VerifyGoneFinal,
@@ -83,9 +84,9 @@ pub(crate) enum RemovalSite {
 pub(crate) fn uses_hard_remove_path(site: RemovalSite) -> bool {
     match site {
         RemovalSite::RecreateRemoveRenamedOld => true,
-        // NOTE(RED): the sweep must ALSO hard-remove, or orphans accrue one per
-        // attempt (the sweep used a bare RemoveInput before round 5). GREEN → true.
-        RemovalSite::StaleRecoverSweep => false,
+        // The sweep hard-removes too, or orphans accrue one per attempt (the
+        // sweep used a bare RemoveInput before round 5).
+        RemovalSite::StaleRecoverSweep => true,
     }
 }
 
