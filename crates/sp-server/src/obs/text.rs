@@ -260,6 +260,52 @@ pub fn get_scene_item_enabled_request(
     })
 }
 
+/// Build a `SetInputSettings` request that CLEARS an NDI input's
+/// `ndi_source_name` to `""` with `overlay: true` (merge — every OTHER input
+/// setting is kept). #173 round 5: clearing the source name stops the DistroAV
+/// receiver thread on an empty source, unblocking the libobs source destroy that
+/// a bare `RemoveInput` cannot force while the receiver is live (box 17.9.2026
+/// round 4 — a bare `RemoveInput` of an actively-receiving `ndi_source` reports
+/// success yet the input persists). `overlay: true` is passed explicitly so the
+/// clear can never be read as a full settings reset.
+pub fn clear_ndi_source_name_request(request_id: &str, input_name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "op": 6,
+        "d": {
+            "requestType": "SetInputSettings",
+            "requestId": request_id,
+            "requestData": {
+                "inputName": input_name,
+                "inputSettings": { "ndi_source_name": "" },
+                "overlay": true
+            }
+        }
+    })
+}
+
+/// Build a `RemoveSceneItem` request — the #173 round-5 hard-remove fallback.
+/// When a `RemoveInput` reports success but the input's scene item is still
+/// listed, removing the scene item directly clears the operator-visible
+/// duplicate. `sceneItemId` is the item's id in `sceneName` (a rename keeps the
+/// id — round 4 saw the renamed-away old keep item id 3).
+pub fn remove_scene_item_request(
+    request_id: &str,
+    scene_name: &str,
+    scene_item_id: i64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "op": 6,
+        "d": {
+            "requestType": "RemoveSceneItem",
+            "requestId": request_id,
+            "requestData": {
+                "sceneName": scene_name,
+                "sceneItemId": scene_item_id
+            }
+        }
+    })
+}
+
 /// Build a `SetInputName` request — used by the rename-first rung-2 recreate
 /// (#173 round 3) to rename the OLD input AWAY to a temp name (a synchronous
 /// rename that frees its name at once), and to restore that name on abort. Never
@@ -304,6 +350,34 @@ mod tests {
             "sp-youth_video_recover"
         );
         assert_eq!(req["d"]["requestData"]["newInputName"], "sp-youth_video");
+    }
+
+    #[test]
+    fn clear_ndi_source_name_request_structure() {
+        // #173 round 5: the empty-name SetInputSettings payload that stops the
+        // DistroAV receiver before a hard remove — {"ndi_source_name": ""},
+        // overlay: true (merge — never a full settings reset).
+        let req = clear_ndi_source_name_request("clear-req", "sp-youth_video__recover_ab12cd34");
+        assert_eq!(req["op"], 6);
+        assert_eq!(req["d"]["requestType"], "SetInputSettings");
+        assert_eq!(
+            req["d"]["requestData"]["inputName"],
+            "sp-youth_video__recover_ab12cd34"
+        );
+        assert_eq!(
+            req["d"]["requestData"]["inputSettings"]["ndi_source_name"],
+            ""
+        );
+        assert_eq!(req["d"]["requestData"]["overlay"], true);
+    }
+
+    #[test]
+    fn remove_scene_item_request_structure() {
+        let req = remove_scene_item_request("rm-item-req", "sp-youth", 3);
+        assert_eq!(req["op"], 6);
+        assert_eq!(req["d"]["requestType"], "RemoveSceneItem");
+        assert_eq!(req["d"]["requestData"]["sceneName"], "sp-youth");
+        assert_eq!(req["d"]["requestData"]["sceneItemId"], 3);
     }
 
     #[test]

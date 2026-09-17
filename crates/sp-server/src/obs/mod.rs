@@ -4,6 +4,7 @@ pub mod dispatcher;
 pub mod ndi_discovery;
 pub mod ndi_recovery;
 pub mod ndi_recovery_io;
+pub mod ndi_remove;
 pub(crate) mod output_state;
 pub mod scene;
 pub mod scene_poll;

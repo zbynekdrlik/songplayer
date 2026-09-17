@@ -36,11 +36,12 @@ use crate::obs::ndi_discovery::{
     fetch_ndi_input_names, reapply_ndi_input,
 };
 use crate::obs::ndi_recovery::RecoveryStep;
+use crate::obs::ndi_remove::{RemovalSite, remove_input_for_site};
 use crate::obs::text::{
     create_input_request, get_input_settings_request, get_scene_item_enabled_request,
     get_scene_item_transform_request, get_scene_items_request, get_scene_list_request,
-    remove_input_request, set_input_name_request, set_scene_item_enabled_request,
-    set_scene_item_index_request, set_scene_item_transform_request,
+    set_input_name_request, set_scene_item_enabled_request, set_scene_item_index_request,
+    set_scene_item_transform_request,
 };
 
 /// The resolved location of an NDI input's scene item.
@@ -269,11 +270,22 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
                 "ndi-recovery: rung 2 — sweeping leftover <input>__recover_* temps from an earlier interrupted recreate"
             );
             for name in &stale {
-                send_ok_logged(
+                // #173 round 5: HARD-remove — a bare RemoveInput is ineffective
+                // against a still-receiving temp (box round 4), so stop the
+                // receiver first, remove, then read back. Resolve the stale
+                // input's scene item for the RemoveSceneItem fallback; `None`
+                // (not a scene item) is fine — the fallback is then skipped.
+                let (scene, item) = match resolve_scene_item(write, dispatcher, name).await {
+                    Some(l) => (l.scene_name, Some(l.scene_item_id)),
+                    None => (String::new(), None),
+                };
+                remove_input_for_site(
                     write,
                     dispatcher,
-                    "rung 2 RemoveInput(stale recover temp)",
-                    remove_input_request(&new_id(), name),
+                    RemovalSite::StaleRecoverSweep,
+                    &scene,
+                    item,
+                    name,
                 )
                 .await;
             }
@@ -457,23 +469,22 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
                 }
             }
             RecreateStep::RemoveRenamedOld => {
-                if !send_ok_logged(
+                // #173 round 5: HARD-remove the renamed-away old input. A bare
+                // RemoveInput of a still-receiving DistroAV ndi_source reports
+                // success yet leaves the input + its scene item (box round 4), so
+                // stop the receiver (clear ndi_source_name) FIRST, remove, read
+                // back, and fall back to RemoveSceneItem. The rename kept the old
+                // item's id (`loc.scene_item_id`) in its original scene. The new
+                // input under the correct name is already serving regardless.
+                remove_input_for_site(
                     write,
                     dispatcher,
-                    "rung 2 RemoveInput(renamed-old)",
-                    remove_input_request(&new_id(), &temp_name),
+                    RemovalSite::RecreateRemoveRenamedOld,
+                    &loc.scene_name,
+                    Some(loc.scene_item_id),
+                    &temp_name,
                 )
-                .await
-                {
-                    // The new input is already in place under the correct name; only
-                    // the renamed-away old input could not be removed, so a duplicate
-                    // (same NDI stream) lingers under the temp name. Loud but
-                    // non-fatal — the correct input is serving.
-                    warn!(
-                        temp_name = %temp_name,
-                        "ndi-recovery: rung 2 — removing the renamed-away old input failed; a duplicate lingers (the new input under the correct name is serving)"
-                    );
-                }
+                .await;
             }
         }
     }
@@ -605,13 +616,13 @@ fn transform_for_set(mut xf: serde_json::Value) -> serde_json::Value {
     xf
 }
 
-fn new_id() -> String {
+pub(crate) fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
 /// Send a request and return the full response value, or `None` on transport
 /// failure.
-async fn send(
+pub(crate) async fn send(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
     req: serde_json::Value,
@@ -661,7 +672,7 @@ fn log_obs_failure(step: &str, name: &str, resp: Option<&serde_json::Value>) {
 
 /// Send a request, log the full obs-websocket error on failure, and return
 /// whether OBS acknowledged success.
-async fn send_ok_logged(
+pub(crate) async fn send_ok_logged(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
     step: &str,
