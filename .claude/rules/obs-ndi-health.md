@@ -85,6 +85,27 @@ can see which rung recovered a wall. NEVER a per-sender `RecreateSender` (#60).
   the dedicated section below — `handle_health_snapshot` maps Playing+inactive →
   Paused so `is_dark` never fires off-program).
 
+## obs-websocket 5.x write-path gotchas (recreate/toggle a scene item, #173)
+When recreating or re-transforming an NDI input over obs-websocket 5.x
+(`obs/ndi_recovery_io.rs`):
+- **There is no "which scenes contain source X" request.** Resolve an input's
+  scene + `sceneItemId` + `sceneItemIndex` by scanning `GetSceneList` →
+  `GetSceneItemList` per scene and matching `sourceName`. `GetSceneItemList`
+  already embeds `sceneItemId`, `sceneItemIndex` AND `sceneItemTransform`.
+- **`GetInputSettings` returns both `inputSettings` AND `inputKind`** — capture
+  both so a `CreateInput` recreate is byte-identical (kind `ndi_source`).
+- **`CreateInput` adds the scene item at the TOP of the scene** (highest index)
+  and returns a NEW `sceneItemId`. Restore the original z-order with
+  `SetSceneItemIndex` and the transform with `SetSceneItemTransform`.
+- **A round-tripped `sceneItemTransform` carries read-only/derived fields**
+  (`width`, `height`, `sourceWidth`, `sourceHeight`) that OBS computes from the
+  scale/source and REJECTS as out-of-range on `SetSceneItemTransform` — STRIP
+  them before writing (keep position/scale/rotation/crop/bounds/alignment).
+- **`RemoveInput` deletes the input and EVERY scene item referencing it** across
+  all scenes; our `sp-*_video` inputs each live in exactly one scene, so the
+  single-scene recreate is safe. Recreate briefly blacks that scene (~sub-second)
+  — acceptable only because the ladder fires when the wall is ALREADY dark.
+
 ## `connections=0` on an INACTIVE output is NORMAL (not a dark wall)
 The `sp-*` NDI inputs run `ndi_behavior 0` with a 1 s `ndi_behavior_timeout`, so
 DistroAV **disconnects an inactive source** — an output that is NOT on OBS
