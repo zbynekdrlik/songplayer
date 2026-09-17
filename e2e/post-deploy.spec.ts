@@ -28,7 +28,12 @@
  *     might leak into the browser console.
  */
 
-import { test, expect } from "@playwright/test";
+import {
+  test,
+  expect,
+  request as apiRequest,
+  type APIRequestContext,
+} from "@playwright/test";
 import { ObsDriver } from "./obs-driver";
 import {
   unhealthyOnProgramOutputs,
@@ -37,6 +42,39 @@ import {
 } from "./ndi-health-gate";
 
 const OBS_WS_URL = process.env.OBS_WS_URL || "ws://localhost:4455";
+const SONGPLAYER_URL = process.env.SONGPLAYER_URL || "http://localhost:8920";
+
+// #170: read the ENGINE's view of the on-program scene (`obs_state.current_scene`)
+// to prove SongPlayer actually followed a scene switch — not just that OBS
+// reports it. A dropped studio-mode event would leave these disagreeing.
+async function readEngineActiveScene(
+  ctx: APIRequestContext,
+): Promise<string | null> {
+  try {
+    const resp = await ctx.get("/api/v1/status");
+    if (!resp.ok()) return null;
+    const status = (await resp.json()) as { active_scene?: string | null };
+    return status.active_scene ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Poll the engine's active scene until it equals `target` (or a short deadline).
+async function waitEngineActiveScene(
+  ctx: APIRequestContext,
+  target: string,
+  timeoutMs = 5000,
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  let last: string | null = null;
+  for (;;) {
+    last = await readEngineActiveScene(ctx);
+    if (last === target) return last;
+    if (Date.now() >= deadline) return last;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
 
 // Playlists deployed to win-resolume have predictable names. These tests
 // expect at least one playlist called `ytfast` (id varies) with
@@ -143,22 +181,49 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     }
   });
 
-  test.afterAll(async () => {
-    if (obs) {
-      // Restore whatever scene was on program when the suite started.
-      // Avoids leaving the wall on whatever the last test happened to
-      // switch to (especially the QR-code/sync-tone test scene).
+  // #170: a failed assertion aborts the test body BEFORE its trailing
+  // "switch back" cleanup runs, which is how a failed test 17 left the wall on
+  // sp-slow. afterEach ALWAYS runs, pass or fail, so it restores the wall to
+  // the scene the suite started on (the operator's normal state) after every
+  // test — best-effort; the authoritative check is in afterAll.
+  test.afterEach(async () => {
+    const driver = obs;
+    if (driver && initialScene) {
       try {
-        if (initialScene) {
-          await obs.switchScene(initialScene);
-        } else {
-          const scenes = await obs.listScenes();
-          await obs.switchScene(pickBaselineScene(scenes));
-        }
+        await driver.switchScene(initialScene);
       } catch {
-        // ignore — best-effort restoration
+        // best-effort between tests; afterAll asserts the final state
       }
-      await obs.disconnect();
+    }
+  });
+
+  test.afterAll(async () => {
+    const driver = obs;
+    if (!driver) return;
+    try {
+      // Restore the scene the suite started on (never leave the wall on the
+      // E2E baseline) and PROVE the engine followed — a dropped studio-mode
+      // scene event would leave `active_scene` stuck on the baseline. Read back
+      // /api/v1/status.active_scene, retry the switch once, fail loudly.
+      const target =
+        initialScene ?? pickBaselineScene(await driver.listScenes());
+      const ctx = await apiRequest.newContext({ baseURL: SONGPLAYER_URL });
+      try {
+        let engineScene: string | null = null;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          await driver.switchScene(target);
+          engineScene = await waitEngineActiveScene(ctx, target);
+          if (engineScene === target) break;
+        }
+        expect(
+          engineScene,
+          `afterAll must restore the wall to "${target}" (the scene the suite started on); the engine reported active_scene="${engineScene}". A dropped studio-mode scene event left the wall on a different scene — the poll-reconcile / driver studio-transition fix did not hold (#170).`,
+        ).toBe(target);
+      } finally {
+        await ctx.dispose();
+      }
+    } finally {
+      await driver.disconnect();
     }
   });
 
