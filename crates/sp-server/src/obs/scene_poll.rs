@@ -123,10 +123,14 @@ pub fn scene_poll_verdict(
     pending_for: Option<Duration>,
     confirm: Duration,
 ) -> PollVerdict {
-    let _ = (pending_for, confirm);
     match scene_poll_detects_change(last_event_scene, polled_scene) {
         None => PollVerdict::InSync,
-        Some(scene) => PollVerdict::Reconcile(scene),
+        // A mismatch reconciles only once it has outlived the confirm window —
+        // the event still has the whole fade to arrive on its own.
+        Some(scene) => match pending_for {
+            Some(elapsed) if elapsed > confirm => PollVerdict::Reconcile(scene),
+            _ => PollVerdict::Pending,
+        },
     }
 }
 
