@@ -16,7 +16,7 @@
 /// back to stdout. Isolated as a constant so the RED test on the no-compile box
 /// can flip it (RED ships a huge sentinel → the "prefers stderr" test fails,
 /// GREEN sets `1`).
-pub(crate) const STDERR_PREFER_MIN_CHARS: usize = 1_000_000_000;
+pub(crate) const STDERR_PREFER_MIN_CHARS: usize = 1;
 
 /// The best failure tail for a heavy child: the last `n` lines of stderr when it
 /// carries any content (the Python traceback lands there), else stdout. Pure —
