@@ -81,3 +81,6 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
 - **`clippy::too_many_arguments` fires at 8+ args, not 7.** A 7-arg fn needs NO
   allow; adding one is a dead annotation (harmless, but don't add it "to be
   safe"). Count real params (free fns have no `&self`).
+- **`clippy::manual_slice_fill`** (rust 1.98, `-D warnings`): a `for x in &mut
+  slice { *x = <const> }` loop must be `slice.fill(<const>)`. The no-compile box
+  can't see it; it failed #186's Lint on `for e in &mut self.eos { *e = false }`.

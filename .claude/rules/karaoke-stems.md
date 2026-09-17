@@ -246,6 +246,29 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   persist + broadcast `KaraokeStateChanged`; NO reload on a mode change since
   #186). Dashboard: `components/karaoke_control.rs`.
 
+## TIER-0 mutation gotchas for the mixer (learned #186)
+
+The diff-scoped mutation gate caught two classes the no-compile box can't:
+
+- **A reader CHOICE that only differs by TYPE is not observable through
+  `AudioStream`** — `StemMixReader` and `SymphoniaAudioReader` both report 48 kHz
+  stereo, and the box fixtures are SILENT, so a test that opens a reader and reads
+  `sample_rate`/`channels`/output cannot tell which was chosen. Mutants on the
+  choice (`roles.len() < 3`, `delete match arm`) then SURVIVE. Fix: extract the
+  decision into a pure fn returning an OBSERVABLE enum
+  (`reader.rs::audio_source_kind -> {StemMix,PlainMix}`), unit-test it
+  exhaustively (kills delete-arm + fn-replacement — the enum return is
+  defaultable to a wrong variant, so the test catches it), and consume it via a
+  2-variant match with **no `_` wildcard** (deleting an arm → non-exhaustive →
+  unviable; a `_` would keep the delete viable). Never gate on a NUMERIC
+  comparison against a value whose domain is only 2 points (`len` ∈ {1,3}) —
+  `<`/`==`/`<=`/`>=` against 3 are equivalent mutants there.
+- **An even-division ramp can't distinguish snap-comparison mutants.** A 0→1 ramp
+  with step = 0.1 hits exact multiples, so `<=`/`<`/`>=` in the snap test read
+  identically. Add a PARTIAL-target test (0→0.25, step 0.1 → 0.1, 0.2, snap 0.25,
+  never 0.3). And `cur + step.copysign(tgt-cur)` (one branch) instead of
+  `if tgt > cur {…} else {…}` removes the `>` equivalent mutant for `>=`.
+
 ## Re-measuring a separator candidate (dev2)
 
 Never run heavy separation on win-resolume while anything plays (GPU contention
