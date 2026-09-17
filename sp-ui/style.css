@@ -516,6 +516,22 @@ body {
     margin-bottom: 6px;
 }
 
+/* Generic utility: hide an element while keeping it in the DOM tree. */
+.hidden { display: none !important; }
+
+/* #177: karaoke control panel — now-playing header + stems lock state. */
+.karaoke-control .karaoke-now-playing {
+    font-weight: 600;
+    margin: 4px 0;
+}
+.karaoke-control .karaoke-lock-reason {
+    color: #f0a020;
+    font-size: 0.85em;
+    margin: 2px 0 6px;
+}
+.karaoke-control label.disabled { opacity: 0.5; }
+.karaoke-control .karaoke-enqueue { margin-top: 6px; }
+
 /* Karaoke panel */
 .karaoke-panel {
     background: #0d1b2a;

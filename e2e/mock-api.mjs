@@ -111,6 +111,9 @@ const videos = [
     gemini_failed: false,
     download_attempts: 0,
     last_download_error: null,
+    // #177: stems-ready song → karaoke works; the list marker shows ● and the
+    // "len so stemami" filter keeps it.
+    stems_state: "ready",
   },
   {
     id: 2,
@@ -126,6 +129,8 @@ const videos = [
     // has failed and is backing off.
     download_attempts: 2,
     last_download_error: "yt-dlp exited with 1: Requested format is not available",
+    // #177: no stems yet → the filter hides it.
+    stems_state: "queued",
   },
   {
     // #136 T1: a row with the exact Gemini-failed swap shape the ytalex
@@ -144,6 +149,8 @@ const videos = [
     gemini_failed: true,
     download_attempts: 0,
     last_download_error: null,
+    // #177: terminal-unsupported stems.
+    stems_state: "unavailable",
   },
 ];
 
@@ -382,12 +389,31 @@ app.patch("/api/v1/settings", (req, res) => {
   res.json(settings);
 });
 
-// Karaoke (#14): live mode + vocal gain + stem progress. `/__mock/karaoke-last`
-// exposes the last POSTed body so specs can assert what the UI sent.
-let karaoke = { mode: "full_mix", vocal_gain: 0.3, stems_pending: 2, stems_done: 5 };
+// Karaoke (#14, #177): live mode + vocal gain + stem progress + per-song
+// now-playing stems state. `/__mock/karaoke-last` exposes the last POSTed body
+// so specs can assert what the UI sent. `now_playing[]` binds the panel to the
+// SELECTED playlist's song — default: playlist 1's song is stems-READY so the
+// mode/fader controls are enabled (the #14/#186 specs rely on that). The #177
+// spec flips it via `/__mock/karaoke-now-playing`.
+let karaokeNowPlaying = [
+  {
+    playlist_id: 1,
+    video_id: 1,
+    title: "Never Gonna Give You Up",
+    stems_state: "ready",
+    stems_error: null,
+    queue_position: null,
+  },
+];
+let karaoke = {
+  mode: "full_mix",
+  vocal_gain: 0.3,
+  stems_pending: 2,
+  stems_done: 5,
+};
 let lastKaraokePost = null;
 app.get("/api/v1/karaoke", (_req, res) => {
-  res.json(karaoke);
+  res.json({ ...karaoke, now_playing: karaokeNowPlaying });
 });
 app.post("/api/v1/karaoke", (req, res) => {
   lastKaraokePost = req.body || {};
@@ -398,6 +424,27 @@ app.post("/api/v1/karaoke", (req, res) => {
 });
 app.get("/__mock/karaoke-last", (_req, res) => {
   res.json(lastKaraokePost || {});
+});
+// #177 admin: replace the now_playing[] array so a spec can drive the disabled
+// controls + enqueue button for an unavailable / failed / queued song.
+app.post("/__mock/karaoke-now-playing", (req, res) => {
+  if (!Array.isArray(req.body)) {
+    res.status(400).json({ error: "expected a JSON array" });
+    return;
+  }
+  karaokeNowPlaying = req.body;
+  res.json({ status: "set", count: karaokeNowPlaying.length });
+});
+
+// #177: operator "Zaradiť do fronty" — re-enqueue a song for stem separation.
+// Records the last enqueued id so the spec can assert the backend effect.
+let lastEnqueuedVideoId = null;
+app.post("/api/v1/stems/:video_id/enqueue", (req, res) => {
+  lastEnqueuedVideoId = Number(req.params.video_id);
+  res.json({ status: "enqueued", queue_position: 1 });
+});
+app.get("/__mock/stems-enqueue-last", (_req, res) => {
+  res.json({ video_id: lastEnqueuedVideoId });
 });
 
 // Status

@@ -806,6 +806,8 @@ impl PlaybackEngine {
             None => return,
         };
 
+        crate::now_playing::global().set(playlist_id, video_id); // #177 bind panel
+
         let (song, artist) = match title::get_video_title_info(&self.pool, video_id).await {
             Ok(Some(pair)) => pair,
             _ => (String::new(), String::new()),
@@ -957,6 +959,7 @@ impl PlaybackEngine {
             }
 
             PlayAction::Stop => {
+                crate::now_playing::global().clear(playlist_id); // #177
                 if let Some(pp) = self.pipelines.get(&playlist_id) {
                     pp.pipeline.send(PipelineCommand::Stop);
                     debug!(playlist_id, "stopped pipeline");

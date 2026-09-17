@@ -246,6 +246,42 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   persist + broadcast `KaraokeStateChanged`; NO reload on a mode change since
   #186). Dashboard: `components/karaoke_control.rs`.
 
+## Per-song stems state contract (#177) — #181 D2 MUST keep it
+
+The dashboard karaoke panel binds to the SELECTED playlist's now-playing song and
+shows whether ITS stems are ready; the D2 modern mixer (#181) replaces the
+component's visuals but MUST preserve this state contract.
+
+- **State enum (`db::models_stems::StemsState`, pure `stems_state_of`):**
+  `Ready | Queued | Processing | Unavailable | Failed`, wire strings
+  `ready/queued/processing/unavailable/failed`. Precedence: **Processing**
+  (live) → **Ready** (both stem files on disk, regardless of recorded status) →
+  **Unavailable** (`stem_status='unsupported'`) → **Failed** (`'failed'`) →
+  **Queued** (NULL/pending). `stems_state_of` takes `is_processing` — NOT
+  `stem_next_attempt_at`: there is deliberately no DB `'processing'` status (a
+  crash would strand it), so the only honest source of ⚙ is the worker's live
+  in-flight id (`stems::progress` — a process-global set/cleared around the
+  separation child, mirror of `stems::control::global()`).
+- **Now-playing source:** `now_playing::global()` (a process-global registry the
+  engine writes on `Started`, clears on Stop/Pause) — read by
+  `GET /api/v1/karaoke`, which returns `now_playing: [{playlist_id, video_id,
+  title, stems_state, stems_error, queue_position}]`. `stems_error` is DERIVED
+  (there is no per-song stem error column) — a followup could add
+  `stem_last_error` if the owner wants the real text.
+- **Videos payload:** `Video.stems_state` is additive + `#[serde(default)]`;
+  populated by `api/videos.rs` (NOT `row_to_video`) from
+  `models_stems::stems_state_map`, which only marks stem-relevant rows
+  (normalized+audio, or already has a stem file).
+- **Enqueue:** `POST /api/v1/stems/{id}/enqueue` (`models_stems::enqueue_stems`)
+  resets the row to eligible (`stem_status=NULL, attempts=0, next_attempt=NULL`)
+  so the oldest-first worker picks it next tick. It does NOT jump the queue
+  (selector is oldest-first by id; manual priority is #182), so the UI button is
+  labelled **"Zaradiť do fronty"**, not "…teraz".
+- **UI gate:** the mode `<select>` + vocal-gain slider are `disabled` unless the
+  selected song's `stems_state == "ready"`; the enqueue button shows only for
+  `unavailable`/`failed`. The E2E mock drives every state via
+  `POST /__mock/karaoke-now-playing`.
+
 ## TIER-0 mutation gotchas for the mixer (learned #186)
 
 The diff-scoped mutation gate caught two classes the no-compile box can't:

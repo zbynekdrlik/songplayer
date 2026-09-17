@@ -160,6 +160,7 @@ fn row_to_video(r: &sqlx::sqlite::SqliteRow) -> Video {
         spotify_track_id: r.get("spotify_track_id"),
         download_attempts: r.get("download_attempts"),
         last_download_error: r.get("last_download_error"),
+        stems_state: None, // #177: populated by api/videos.rs, not here
     }
 }
 

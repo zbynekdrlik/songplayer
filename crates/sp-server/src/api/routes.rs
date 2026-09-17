@@ -364,15 +364,9 @@ pub async fn sync_playlist(
     }
 }
 
-pub async fn list_videos(State(state): State<AppState>, Path(id): Path<i64>) -> impl IntoResponse {
-    match crate::db::models::get_videos_for_playlist(&state.pool, id).await {
-        Ok(videos) => Json(videos).into_response(),
-        Err(e) => {
-            warn!("list_videos error: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
-    }
-}
+// `list_videos` moved to `api/videos.rs` (#177) so the videos payload can carry
+// the additive per-song `stems_state` marker without pushing this file over the
+// 1000-line cap.
 
 #[derive(Debug, Deserialize)]
 pub struct PatchVideoReq {

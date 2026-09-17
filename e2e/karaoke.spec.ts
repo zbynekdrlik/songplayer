@@ -33,7 +33,7 @@ test.afterEach(async () => {
   expect(real).toEqual([]);
 });
 
-test("karaoke control loads current state + stem progress (#14)", async ({
+test("karaoke control loads current state, now-playing song + stem progress tooltip (#14/#177)", async ({
   page,
 }) => {
   await page.goto("/");
@@ -44,10 +44,19 @@ test("karaoke control loads current state + stem progress (#14)", async ({
   await expect(page.locator('[data-testid="karaoke-mode"]')).toHaveValue(
     "full_mix",
   );
-  // Stem progress line shows the mock's counts (5 done, 2 pending).
+  // #177: the panel now names the SELECTED playlist's playing song + its stems
+  // state (the mock's playlist-1 song is ready).
   await expect(
-    page.locator('[data-testid="karaoke-stem-progress"]'),
-  ).toContainText("5");
+    page.locator('[data-testid="karaoke-now-playing"]'),
+  ).toContainText("Never Gonna Give You Up");
+  await expect(
+    page.locator('[data-testid="karaoke-now-playing"]'),
+  ).toContainText("pripravené");
+  // #177: the global done/pending counter moved into the panel-title tooltip.
+  await expect(page.locator('[data-testid="karaoke-title"]')).toHaveAttribute(
+    "title",
+    /5/,
+  );
 });
 
 test("selecting Instrumental-only POSTs the mode and the mock records it (#14)", async ({
@@ -55,6 +64,9 @@ test("selecting Instrumental-only POSTs the mode and the mock records it (#14)",
 }) => {
   await page.goto("/");
   await expect(page.locator(".karaoke-control")).toBeVisible({ timeout: 10000 });
+  // #177: controls are enabled only once the ready-state resolves for the
+  // selected playlist's song.
+  await expect(page.locator('[data-testid="karaoke-mode"]')).toBeEnabled();
 
   const postPromise = page.waitForRequest(
     (req) =>
@@ -81,6 +93,7 @@ test("every stem preset enables the vocal-gain slider; Plný mix disables it (#1
 
   const slider = page.locator('[data-testid="karaoke-vocal-gain"]');
   const mode = page.locator('[data-testid="karaoke-mode"]');
+  await expect(mode).toBeEnabled(); // #177: song is stems-ready
 
   // Explicitly start from Plný mix (an earlier test may have left another mode in
   // the shared mock state) → slider disabled, with a "no effect" hint.
@@ -108,9 +121,9 @@ test("KaraokeLow fader POSTs the gain and the mock records it (#14/#186)", async
   await expect(page.locator(".karaoke-control")).toBeVisible({ timeout: 10000 });
 
   const slider = page.locator('[data-testid="karaoke-vocal-gain"]');
-  await page
-    .locator('[data-testid="karaoke-mode"]')
-    .selectOption("karaoke_low");
+  const mode = page.locator('[data-testid="karaoke-mode"]');
+  await expect(mode).toBeEnabled(); // #177: song is stems-ready
+  await mode.selectOption("karaoke_low");
   await expect(slider).toBeEnabled();
 
   // Drag the slider to 20% and release; the UI POSTs the gain as 0.2.
@@ -134,4 +147,94 @@ test("KaraokeLow fader POSTs the gain and the mock records it (#14/#186)", async
   const body = await recorded.json();
   expect(body.mode).toBe("karaoke_low");
   expect(body.vocal_gain).toBeCloseTo(0.2, 5);
+});
+
+// #177: bind the panel to the now-playing song + show its stems state.
+
+const READY_NP = [
+  {
+    playlist_id: 1,
+    video_id: 1,
+    title: "Never Gonna Give You Up",
+    stems_state: "ready",
+    stems_error: null,
+    queue_position: null,
+  },
+];
+
+async function setNowPlaying(page, arr) {
+  await page.request.post("/__mock/karaoke-now-playing", { data: arr });
+}
+
+test.afterEach(async ({ page }) => {
+  // Restore the default ready fixture so the shared mock state does not leak
+  // into sibling specs that assume the controls are enabled.
+  await setNowPlaying(page, READY_NP);
+});
+
+test("#177: a song without stems disables the controls and offers re-enqueue", async ({
+  page,
+}) => {
+  await setNowPlaying(page, [
+    {
+      playlist_id: 1,
+      video_id: 1,
+      title: "Never Gonna Give You Up",
+      stems_state: "unavailable",
+      stems_error: "skladba je pridlhá alebo bez vokálov",
+      queue_position: null,
+    },
+  ]);
+  await page.goto("/");
+  await expect(page.locator(".karaoke-control")).toBeVisible({ timeout: 10000 });
+
+  // Header names the song + the "nedostupné" glyph.
+  await expect(
+    page.locator('[data-testid="karaoke-now-playing"]'),
+  ).toContainText("Never Gonna Give You Up");
+  await expect(
+    page.locator('[data-testid="karaoke-now-playing"]'),
+  ).toContainText("nedostupné");
+
+  // Controls locked, with a reason.
+  await expect(page.locator('[data-testid="karaoke-mode"]')).toBeDisabled();
+  await expect(page.locator('[data-testid="karaoke-vocal-gain"]')).toBeDisabled();
+  await expect(
+    page.locator('[data-testid="karaoke-lock-reason"]'),
+  ).toBeVisible();
+
+  // "Zaradiť do fronty" is shown; clicking it POSTs enqueue for video 1.
+  const enqueue = page.locator('[data-testid="karaoke-enqueue"]');
+  await expect(enqueue).toBeVisible();
+  const post = page.waitForRequest(
+    (r) => r.url().includes("/api/v1/stems/1/enqueue") && r.method() === "POST",
+  );
+  await enqueue.click();
+  await post;
+  // Backend effect: the mock recorded the enqueue for video 1.
+  const rec = await page.request.get("/__mock/stems-enqueue-last");
+  expect((await rec.json()).video_id).toBe(1);
+});
+
+test("#177: a queued song shows its queue position and no re-enqueue button", async ({
+  page,
+}) => {
+  await setNowPlaying(page, [
+    {
+      playlist_id: 1,
+      video_id: 1,
+      title: "Never Gonna Give You Up",
+      stems_state: "queued",
+      stems_error: null,
+      queue_position: 3,
+    },
+  ]);
+  await page.goto("/");
+  await expect(page.locator(".karaoke-control")).toBeVisible({ timeout: 10000 });
+  await expect(
+    page.locator('[data-testid="karaoke-now-playing"]'),
+  ).toContainText("vo fronte (3.)");
+  await expect(page.locator('[data-testid="karaoke-mode"]')).toBeDisabled();
+  // queued is not unavailable/failed → the enqueue button stays hidden.
+  await expect(page.locator('[data-testid="karaoke-enqueue"]')).toBeHidden();
 });

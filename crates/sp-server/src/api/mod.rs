@@ -8,6 +8,8 @@ pub mod lyrics_catalog;
 pub mod preview;
 pub mod routes;
 pub mod routes_ndi_recover;
+pub mod stems;
+pub mod videos;
 pub mod websocket;
 
 use std::path::PathBuf;
@@ -40,7 +42,7 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         )
         .route(
             "/api/v1/playlists/{id}/videos",
-            axum::routing::get(routes::list_videos),
+            axum::routing::get(videos::list_videos),
         )
         .route(
             "/api/v1/videos/{id}",
@@ -85,6 +87,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/karaoke",
             axum::routing::get(karaoke::get_karaoke).post(karaoke::set_karaoke),
+        )
+        // #177: operator re-enqueue of a song for stem separation.
+        .route(
+            "/api/v1/stems/{video_id}/enqueue",
+            axum::routing::post(stems::enqueue),
         )
         // Status
         .route("/api/v1/status", axum::routing::get(routes::status))

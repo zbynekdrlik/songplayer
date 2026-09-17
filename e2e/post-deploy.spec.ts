@@ -884,6 +884,70 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
+   * Issue #177 — the karaoke panel binds to the now-playing song and shows its
+   * stems state. Read-only: never switches the OBS program scene. Verifies the
+   * deployed `GET /api/v1/karaoke` returns the `now_playing[]` contract and that
+   * the dashboard panel renders a per-song header (a song title + a state glyph,
+   * or the honest "nič nehrá" when nothing is selected/playing).
+   */
+  test("karaoke panel names the now-playing song + shows its stems state (#177)", async ({
+    page,
+    request,
+  }) => {
+    const consoleMessages: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "error" || msg.type() === "warning") {
+        consoleMessages.push(`[${msg.type()}] ${msg.text()}`);
+      }
+    });
+    const allowedConsole = [
+      /favicon/i,
+      /WebSocket connection/i,
+      /\bwasm\b.*instantiate/i,
+      /module specifier/i,
+      /integrity.*attribute.*ignored/i,
+    ];
+
+    // The deployed API carries the now_playing[] contract with valid states.
+    const karaoke = (await (await request.get("/api/v1/karaoke")).json()) as {
+      now_playing?: Array<{
+        playlist_id: number;
+        video_id: number;
+        title: string;
+        stems_state: string;
+        queue_position: number | null;
+      }>;
+    };
+    expect(Array.isArray(karaoke.now_playing)).toBe(true);
+    const validStates = [
+      "ready",
+      "queued",
+      "processing",
+      "unavailable",
+      "failed",
+    ];
+    for (const e of karaoke.now_playing ?? []) {
+      expect(
+        validStates,
+        `now_playing entry ${e.video_id} state "${e.stems_state}" must be a known state`,
+      ).toContain(e.stems_state);
+      expect(typeof e.title).toBe("string");
+    }
+
+    await page.goto("/");
+    const header = page.locator('[data-testid="karaoke-now-playing"]');
+    await expect(header).toBeVisible({ timeout: 30_000 });
+    // The header always begins with the "Stemy — " binding prefix — either
+    // "Stemy — <song>: <glyph>" or the idle "Stemy — nič nehrá".
+    await expect(header).toContainText(/Stemy — /);
+
+    const realConsole = consoleMessages.filter(
+      (m) => !allowedConsole.some((r) => r.test(m)),
+    );
+    expect(realConsole).toEqual([]);
+  });
+
+  /**
    * Zero browser console errors/warnings. Runs last so it observes the
    * state after all other tests have interacted with the dashboard.
    *

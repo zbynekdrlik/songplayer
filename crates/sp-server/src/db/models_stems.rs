@@ -70,11 +70,8 @@ pub fn stems_state_of(
         return StemsState::Ready;
     }
     match stem_status {
-        // RED (TIER-0): unsupported/failed deliberately SWAPPED here; GREEN
-        // restores the correct mapping. Real logic, wrong constants — no
-        // dead_code (both variants are still constructed).
-        Some("unsupported") => StemsState::Failed,
-        Some("failed") => StemsState::Unavailable,
+        Some("unsupported") => StemsState::Unavailable,
+        Some("failed") => StemsState::Failed,
         _ => StemsState::Queued,
     }
 }
@@ -105,8 +102,7 @@ pub async fn queue_position(pool: &SqlitePool, video_id: i64) -> Result<Option<i
     .bind(video_id)
     .fetch_one(pool)
     .await?;
-    // RED (TIER-0): the 1-based `+ 1` is dropped here; GREEN restores it.
-    Ok(Some(before))
+    Ok(Some(before + 1))
 }
 
 /// One video's stems-related fields, plus its resolved [`StemsState`]. Feeds the
@@ -155,16 +151,21 @@ pub async fn video_stems_info(
     }))
 }
 
-/// Map every video in a playlist to its [`StemsState`] wire string, for the
-/// video-list marker. `processing_video_id` is the worker's live in-flight id
-/// (so a currently-separating row shows ⚙ in the list too).
+/// Map each STEM-RELEVANT video in a playlist to its [`StemsState`] wire string,
+/// for the video-list marker. A row is stem-relevant when it could carry stems —
+/// normalized with an audio sidecar, OR already having a stem file — so a
+/// not-yet-processed download shows no misleading "queued" marker. Rows that are
+/// not relevant are omitted (the videos payload leaves their `stems_state`
+/// `None`). `processing_video_id` is the worker's live in-flight id (so a
+/// currently-separating row shows ⚙ in the list too).
 pub async fn stems_state_map(
     pool: &SqlitePool,
     playlist_id: i64,
     processing_video_id: Option<i64>,
 ) -> Result<HashMap<i64, String>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT id, stem_status, vocals_file_path, instrumental_file_path \
+        "SELECT id, normalized, audio_file_path, stem_status, \
+                vocals_file_path, instrumental_file_path \
          FROM videos WHERE playlist_id = ?",
     )
     .bind(playlist_id)
@@ -172,18 +173,25 @@ pub async fn stems_state_map(
     .await?;
     Ok(rows
         .iter()
-        .map(|r| {
+        .filter_map(|r| {
             let id: i64 = r.get("id");
-            let stem_status: Option<String> = r.get("stem_status");
+            let normalized: bool = r.get::<i64, _>("normalized") != 0;
+            let has_audio: bool = r.get::<Option<String>, _>("audio_file_path").is_some();
             let vocals: Option<String> = r.get("vocals_file_path");
             let instrumental: Option<String> = r.get("instrumental_file_path");
+            let has_stem = vocals.is_some() || instrumental.is_some();
+            // Only stem-relevant rows get a marker.
+            if !(normalized && has_audio) && !has_stem {
+                return None;
+            }
+            let stem_status: Option<String> = r.get("stem_status");
             let state = stems_state_of(
                 stem_status.as_deref(),
                 vocals.is_some(),
                 instrumental.is_some(),
                 processing_video_id == Some(id),
             );
-            (id, state.as_str().to_string())
+            Some((id, state.as_str().to_string()))
         })
         .collect())
 }

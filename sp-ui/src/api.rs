@@ -307,6 +307,17 @@ pub async fn post_karaoke(mode: &str, vocal_gain: f32) -> Result<(), String> {
     .await
 }
 
+/// #177: re-enqueue a song for stem separation ("Zaradiť do fronty"). Replies
+/// `{status, queue_position}`; we only need success/failure here.
+pub async fn post_enqueue_stems(video_id: i64) -> Result<(), String> {
+    let path = format!("/api/v1/stems/{video_id}/enqueue");
+    let resp = Request::post(&path).send().await.map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        return Err(format!("POST {} → {}", path, resp.status()));
+    }
+    Ok(())
+}
+
 // ── Live playlist API helpers ─────────────────────────────────────────────────
 
 /// GET all set-list items for a custom playlist.
