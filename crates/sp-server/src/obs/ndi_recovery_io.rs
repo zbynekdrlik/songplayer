@@ -90,12 +90,12 @@ pub(crate) enum RecreateStep {
 /// invariants (see `RecreateStep`).
 pub(crate) fn recreate_plan() -> [RecreateStep; 5] {
     use RecreateStep::*;
-    // RED (#173 round 3 fix): the TIER-0 "one wrong constant" — CreateUnderOriginal
-    // is ordered BEFORE RenameOldAway (reuse the original name before it is freed),
-    // so `recreate_plan_is_race_free` fails cleanly. GREEN swaps them.
+    // The original name is freed by a synchronous rename BEFORE the replacement is
+    // created under it, and the old is removed only after the replacement is
+    // verified — `recreate_plan_is_race_free` locks both invariants.
     [
-        CreateUnderOriginal,
         RenameOldAway,
+        CreateUnderOriginal,
         VerifyExists,
         ApplyTransformIndex,
         RemoveRenamedOld,
