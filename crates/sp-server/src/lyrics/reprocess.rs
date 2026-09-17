@@ -14,7 +14,7 @@ use crate::lyrics::g35t_transcript::SOURCE_G35T_FULLMIX;
 /// this bucket. Bound into the upgrade bucket's SQL so the no-compile-box RED
 /// test can flip it (RED ships a huge sentinel → the due-row test fails; GREEN
 /// sets one day).
-const FULLMIX_UPGRADE_MIN_AGE_SECS: i64 = 9_000_000_000; // GREEN = 86_400 (1 day)
+const FULLMIX_UPGRADE_MIN_AGE_SECS: i64 = 86_400; // 1 day
 
 /// Pick the next video the lyrics worker should process. Priority order:
 /// 1. Manual-priority songs (user clicked "Reprocess")
