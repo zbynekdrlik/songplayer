@@ -15,10 +15,8 @@ use super::PlaybackEngine;
 /// [`sp_decoder::StemMixReader`] ramps toward them mid-song. Kept as a typed,
 /// unit-tested invariant so a regression that reintroduces the seconds-of-silence
 /// reload trips in CI.
-pub(crate) fn mode_change_needs_reload(old: KaraokeMode, new: KaraokeMode) -> bool {
-    // RED (#186): the pre-fix behaviour — a differing mode reloaded the pipeline.
-    // GREEN returns `false` (a preset change is applied live, never a reopen).
-    old != new
+pub(crate) fn mode_change_needs_reload(_old: KaraokeMode, _new: KaraokeMode) -> bool {
+    false
 }
 
 impl PlaybackEngine {

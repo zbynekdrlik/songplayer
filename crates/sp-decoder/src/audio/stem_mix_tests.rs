@@ -201,12 +201,23 @@ fn ramp_reaches_target_in_exactly_ramp_samples_no_overstep() {
     let out = drain(&mut r);
 
     // Reached the target at EXACTLY ramp_samples frames (index 9), not before.
-    assert!(out[8] < 1.0 - 1e-6, "not reached before ramp_samples: out[8]={}", out[8]);
-    assert!((out[9] - 1.0).abs() < 1e-6, "reached at ramp_samples: out[9]={}", out[9]);
+    assert!(
+        out[8] < 1.0 - 1e-6,
+        "not reached before ramp_samples: out[8]={}",
+        out[8]
+    );
+    assert!(
+        (out[9] - 1.0).abs() < 1e-6,
+        "reached at ramp_samples: out[9]={}",
+        out[9]
+    );
     // Monotonic, and no per-sample step exceeds 1/ramp_samples.
     let step = 1.0 / 10.0;
     for w in out.windows(2) {
-        assert!(w[1] - w[0] <= step + 1e-6, "max per-sample step ≤ 1/ramp_samples: {w:?}");
+        assert!(
+            w[1] - w[0] <= step + 1e-6,
+            "max per-sample step ≤ 1/ramp_samples: {w:?}"
+        );
         assert!(w[1] >= w[0] - 1e-6, "monotonic toward target: {w:?}");
     }
 }
@@ -219,9 +230,16 @@ fn preset_change_down_crossfades_no_click() {
     let mut r = StemMixReader::new(vec![stream], vec![Arc::clone(&target)]).unwrap();
     target.store(gain_to_bits(0.0), Ordering::Relaxed);
     let out = drain(&mut r);
-    assert!((out[9] - 0.0).abs() < 1e-6, "reached 0 at ramp_samples: out[9]={}", out[9]);
+    assert!(
+        (out[9] - 0.0).abs() < 1e-6,
+        "reached 0 at ramp_samples: out[9]={}",
+        out[9]
+    );
     for w in out.windows(2) {
-        assert!(w[0] - w[1] <= 0.1 + 1e-6, "no downward step > 1/ramp_samples: {w:?}");
+        assert!(
+            w[0] - w[1] <= 0.1 + 1e-6,
+            "no downward step > 1/ramp_samples: {w:?}"
+        );
     }
 }
 
@@ -312,7 +330,10 @@ fn seek_forwards_to_all_streams_clears_buffers_and_reanchors_ts() {
     assert_eq!(p0.load(Ordering::SeqCst), 5000, "seek position forwarded");
 
     let after = r.next_samples().unwrap().unwrap();
-    assert_eq!(after.timestamp_ms, 5000, "timestamp re-anchored to the seek");
+    assert_eq!(
+        after.timestamp_ms, 5000,
+        "timestamp re-anchored to the seek"
+    );
 }
 
 // ── construction guards ─────────────────────────────────────────────────────

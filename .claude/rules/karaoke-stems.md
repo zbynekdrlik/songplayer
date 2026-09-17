@@ -1,7 +1,8 @@
 ---
 paths:
   - "crates/sp-server/src/stems/**"
-  - "crates/sp-decoder/src/audio/karaoke*.rs"
+  - "crates/sp-decoder/src/audio/stem_mix*.rs"
+  - "crates/sp-server/src/playback/karaoke.rs"
   - "scripts/stem_worker.py"
 ---
 
@@ -50,22 +51,46 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
 
 ## Architecture
 
-- **Mixing (`sp_decoder::KaraokeAudioReader`)** wraps the two stem readers behind
-  ONE `AudioStream`, so `SplitSyncedDecoder` / pacer / genlock / NDI submit are
-  UNTOUCHED. `out = clamp(v*vg + i*ig, -1, 1)`, gains read from `Arc<AtomicU32>`
-  per chunk (slider is live mid-song). Buffers each stem (FLAC packet boundaries
-  differ); timestamps from a cumulative sample counter.
-- **Live control (`crate::stems::control`)** is a process-global `KaraokeControl`
-  (mode = `AtomicU8`, vocal_gain = shared `Arc<AtomicU32>`), seeded from the
-  `karaoke_mode` + `karaoke_vocal_gain` settings at startup. The pipeline reads it
-  at song open (mode) + per chunk (gain) — same spirit as the per-output `burn_on`
-  atomic, but global (one wall, one operator).
-- **Reader seam (`crate::stems::reader::open_audio_stream`)** picks a plain
-  `SymphoniaAudioReader` (FullMix, or a non-FullMix mode whose stems are missing —
-  the safe fallback) or a `KaraokeAudioReader`. Called from both `pipeline.rs` and
-  `pipeline_paced.rs` in place of the bare audio open.
+- **#186 — MODES ARE LIVE GAIN PRESETS, NEVER A REOPEN. The mixer opens every
+  stream that exists ONCE; a preset change only writes gain atomics.** This is the
+  load-bearing invariant: the pre-#186 design baked the mode into WHICH reader
+  opened, so a mode change sent `PipelineCommand::Play` at the cached position →
+  decoder teardown + A/V resync → seconds of silence on the wall (owner: "zvuk na
+  par sekund vypadne … neopuzitelne pre live"), and the fader only ever acted in
+  `KaraokeLow` (the one mode sharing a live atomic). NEVER reintroduce a reload on
+  a mode change; `set_karaoke` must not contain `PipelineCommand::Play`
+  (`playback/karaoke.rs::mode_change_needs_reload` is the unit-tested guard, always
+  `false`).
+- **Mixing (`sp_decoder::StemMixReader`, `audio/stem_mix.rs`)** wraps N
+  sample-aligned `AudioStream`s behind ONE `AudioStream`, so `SplitSyncedDecoder` /
+  pacer / genlock / NDI submit are UNTOUCHED. `out = clamp(Σ stream_k·gain_k, -1,
+  1)`; each stream's applied gain RAMPS linearly toward its live target atomic over
+  `ramp_samples = sample_rate/20` frames (**50 ms**, ≤ `1/ramp_samples` per frame),
+  so a preset change is a crossfade, never a click. A song opens at its current
+  preset (no fade-in). Buffers each stream (FLAC packet boundaries differ); an ended
+  stream mixes as silence; timestamps from a cumulative frame counter. #183 (dub)
+  and #181 (D2 UI) reuse the SAME type with different streams — do NOT add a second
+  mixer.
+- **Live control (`crate::stems::control::KaraokeControl`)** is a process-global
+  (mode = `AtomicU8`, `vocal_gain` = the stored fader position, `gains:
+  [Arc<AtomicU32>; 3]` = the LIVE `[original, vocals, instrumental]` target gains).
+  `set_mode` / `set_vocal_gain` publish `preset_gains(mode, vg)` to the triple; every
+  playing `StemMixReader` holds clones of those atomics (`gain_handles()`) and ramps
+  toward them — so a preset / fader change is heard mid-song with NO reopen.
+  `preset_gains`: FullMix `(1,0,0)` (bit-exact original, no separation artefacts),
+  KaraokeLow `(0,vg,1)`, VocalsOnly `(0,1,0)`, InstrumentalOnly `(0,0,1)`. `vg` only
+  scales KaraokeLow vocals; the UI enables the fader in every stem preset and
+  disables it only in Plný mix.
+- **Reader seam (`crate::stems::reader::open_audio_stream`)** is MODE-INDEPENDENT
+  (`stream_roles(vocals_exist, instrumental_exist)`): both stems present → open
+  `[original, vocals, instrumental]` in a `StemMixReader` fed the control's three
+  gain atomics; stems missing (or an incomplete pair) → a plain `SymphoniaAudioReader`
+  on the original, and presets are a no-op for that song (#177 "nedostupné"). A stem
+  present-but-unreadable degrades to the original mix (defence in depth). Called from
+  both `pipeline.rs` and `pipeline_paced.rs`.
 - **Modes (`sp_core::playback::KaraokeMode`):** FullMix / KaraokeLow / VocalsOnly /
-  InstrumentalOnly, with `stem_gains(vocal_gain) → (vg, ig)`.
+  InstrumentalOnly. The gain table lives in `stems::control::preset_gains` (3-tuple);
+  the old 2-tuple `KaraokeMode::stem_gains` was DELETED with the two-stream reader.
 - **Priority regime (#162, `lyrics/heavy_plan.rs`) — supersedes the idle-ONLY
   gate.** The single operator switch is `lyrics_processing_mode` = `low-priority`
   (DEFAULT) | `idle-only` (the pre-#162 behaviour, operator option only). The old
@@ -217,9 +242,9 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   failed (retryable) / unsupported (terminal). Paths are also derived
   deterministically by `stems::stem_paths` so the reader needs no DB round-trip.
 - **API:** `GET/POST /api/v1/karaoke` → `EngineCommand::SetKaraoke` →
-  `PlaybackEngine::set_karaoke` (persist + broadcast `KaraokeStateChanged` + reload
-  playing pipelines at position on a mode change). Dashboard:
-  `components/karaoke_control.rs`.
+  `PlaybackEngine::set_karaoke` (write the live gain atomics via the control +
+  persist + broadcast `KaraokeStateChanged`; NO reload on a mode change since
+  #186). Dashboard: `components/karaoke_control.rs`.
 
 ## Re-measuring a separator candidate (dev2)
 

@@ -44,9 +44,7 @@ use crate::types::DecodedAudioFrame;
 
 /// Ramp duration as a divisor of the sample rate: `sample_rate / 20` frames
 /// = 50 ms. The one place the ramp length is defined.
-// RED (#186): a wrong divisor (100 ms) — the ramp reaches its target in twice
-// ramp_samples and oversteps 1/ramp_samples. GREEN sets 20 (50 ms).
-const RAMP_DIVISOR: u32 = 40;
+const RAMP_DIVISOR: u32 = 20;
 
 /// Pack an `f32` gain into the shared atomic representation.
 pub fn gain_to_bits(g: f32) -> u32 {
@@ -220,7 +218,11 @@ impl AudioStream for StemMixReader {
         let ch = self.channels as usize;
         let n_streams = self.streams.len();
         for k in 0..n_streams {
-            Self::fill(self.streams[k].as_mut(), &mut self.bufs[k], &mut self.eos[k])?;
+            Self::fill(
+                self.streams[k].as_mut(),
+                &mut self.bufs[k],
+                &mut self.eos[k],
+            )?;
         }
 
         // How many interleaved samples we can emit: the overlap of the streams

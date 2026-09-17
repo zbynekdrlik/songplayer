@@ -32,10 +32,8 @@ pub enum StemRole {
 /// stems exist, else `[Original]` alone. Mode-INDEPENDENT — extracted so the
 /// branch is unit-tested without touching the filesystem.
 pub fn stream_roles(vocals_exist: bool, instrumental_exist: bool) -> &'static [StemRole] {
-    // RED (#186): both-stems branch in the WRONG order. GREEN returns
-    // [Original, Vocals, Instrumental] (the order build_stem_reader mixes in).
     if vocals_exist && instrumental_exist {
-        &[StemRole::Vocals, StemRole::Original, StemRole::Instrumental]
+        &[StemRole::Original, StemRole::Vocals, StemRole::Instrumental]
     } else {
         &[StemRole::Original]
     }
@@ -98,11 +96,7 @@ fn build_stem_reader(
     // streams are pushed below, so gain_k applies to stream_k.
     let gains = control.gain_handles();
     Ok(Box::new(StemMixReader::new(
-        vec![
-            Box::new(original),
-            Box::new(vocals),
-            Box::new(instrumental),
-        ],
+        vec![Box::new(original), Box::new(vocals), Box::new(instrumental)],
         gains.to_vec(),
     )?))
 }
@@ -185,8 +179,7 @@ mod tests {
         std::fs::write(&ipath, b"not a flac, torn write").unwrap();
 
         let ctrl = KaraokeControl::new_for_test(KaraokeMode::InstrumentalOnly, 0.3);
-        let stream =
-            open_audio_stream(&mix, &ctrl).expect("must fall back to the mix, not error");
+        let stream = open_audio_stream(&mix, &ctrl).expect("must fall back to the mix, not error");
         assert_eq!(stream.sample_rate(), 48_000);
         assert_eq!(stream.channels(), 2);
     }

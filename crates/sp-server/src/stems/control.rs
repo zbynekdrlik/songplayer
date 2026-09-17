@@ -54,8 +54,7 @@ pub fn preset_gains(mode: KaraokeMode, vocal_gain: f32) -> (f32, f32, f32) {
         KaraokeMode::FullMix => (1.0, 0.0, 0.0),
         KaraokeMode::KaraokeLow => (0.0, vg, 1.0),
         KaraokeMode::VocalsOnly => (0.0, 1.0, 0.0),
-        // RED (#186): wrong instrumental gain (silent). GREEN sets (0.0, 0.0, 1.0).
-        KaraokeMode::InstrumentalOnly => (0.0, 0.0, 0.0),
+        KaraokeMode::InstrumentalOnly => (0.0, 0.0, 1.0),
     }
 }
 
@@ -219,7 +218,10 @@ mod tests {
         assert_eq!(preset_gains(KaraokeMode::FullMix, 0.3), (1.0, 0.0, 0.0));
         assert_eq!(preset_gains(KaraokeMode::KaraokeLow, 0.3), (0.0, 0.3, 1.0));
         assert_eq!(preset_gains(KaraokeMode::VocalsOnly, 0.3), (0.0, 1.0, 0.0));
-        assert_eq!(preset_gains(KaraokeMode::InstrumentalOnly, 0.3), (0.0, 0.0, 1.0));
+        assert_eq!(
+            preset_gains(KaraokeMode::InstrumentalOnly, 0.3),
+            (0.0, 0.0, 1.0)
+        );
         // vg only scales the KaraokeLow vocals stream.
         assert_eq!(preset_gains(KaraokeMode::KaraokeLow, 0.8), (0.0, 0.8, 1.0));
     }
