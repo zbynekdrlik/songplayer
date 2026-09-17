@@ -238,9 +238,71 @@ pub fn create_input_request(
     })
 }
 
+/// Build a `GetSceneItemEnabled` request — the rung-1 read-back (#173 round 3).
+/// After a `SetSceneItemEnabled` OFF→ON toggle, the executor reads this back and,
+/// if the item is still disabled (an operator hid it), re-enables it so the
+/// ladder never leaves an on-program item hidden on a dark wall.
+pub fn get_scene_item_enabled_request(
+    request_id: &str,
+    scene_name: &str,
+    scene_item_id: i64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "op": 6,
+        "d": {
+            "requestType": "GetSceneItemEnabled",
+            "requestId": request_id,
+            "requestData": {
+                "sceneName": scene_name,
+                "sceneItemId": scene_item_id
+            }
+        }
+    })
+}
+
+/// Build a `SetInputName` request — the final step of the create-first rung-2
+/// recreate (#173 round 3): rename the temporary `<input>_recover` input back to
+/// the original name AFTER the old input has been removed (so the name is free).
+pub fn set_input_name_request(
+    request_id: &str,
+    input_name: &str,
+    new_input_name: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "op": 6,
+        "d": {
+            "requestType": "SetInputName",
+            "requestId": request_id,
+            "requestData": {
+                "inputName": input_name,
+                "newInputName": new_input_name
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn get_scene_item_enabled_request_structure() {
+        let req = get_scene_item_enabled_request("req-e", "sp-youth", 2);
+        assert_eq!(req["d"]["requestType"], "GetSceneItemEnabled");
+        assert_eq!(req["d"]["requestData"]["sceneName"], "sp-youth");
+        assert_eq!(req["d"]["requestData"]["sceneItemId"], 2);
+    }
+
+    #[test]
+    fn set_input_name_request_structure() {
+        let req = set_input_name_request("req-r", "sp-youth_video_recover", "sp-youth_video");
+        assert_eq!(req["d"]["requestType"], "SetInputName");
+        assert_eq!(
+            req["d"]["requestData"]["inputName"],
+            "sp-youth_video_recover"
+        );
+        assert_eq!(req["d"]["requestData"]["newInputName"], "sp-youth_video");
+    }
 
     #[test]
     fn test_set_text_request_structure() {

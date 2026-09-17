@@ -794,6 +794,10 @@ pub async fn start(
                         EngineCommand::SetKaraoke { mode, vocal_gain } => {
                             engine.set_karaoke(mode, vocal_gain).await; // #14
                         }
+                        EngineCommand::TriggerNdiRecovery { playlist_id, step } => {
+                            // #173: operator/verification one-shot recovery rung.
+                            engine.trigger_ndi_recovery(playlist_id, step).await;
+                        }
                     }
                 }
                 // Handle pipeline events (started, position, ended, error)

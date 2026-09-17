@@ -107,12 +107,12 @@ async fn handle_health_snapshot_nudges_obs_on_prolonged_dark_wall() {
     );
 }
 
-/// #173 round 2: a receiver that stays dark long enough for the ladder to walk
-/// clear+restore → toggle must ESCALATE past the first rung, and the snapshot
-/// must record the rung. (Rung 2, `RecreateInput`, is gated off since round 3 —
-/// `LADDER_RECREATE_ENABLED` — so the toggle is the highest rung today.) This is
-/// the RED test for the escalation ladder — before the fix, the nudge repeated
-/// clear+restore forever and the wall stayed dark for ~20 min.
+/// #173: a receiver that stays dark long enough for the ladder to walk
+/// clear+restore → toggle → recreate must ESCALATE past the earlier rungs, and
+/// the snapshot must record the fired rung. Rung 2 (`RecreateInput`) is enabled
+/// again in round 3 (the executor creates-first-then-removes), so the highest
+/// rung a sustained dark wall reaches is the recreate. Before the round-2 fix the
+/// nudge repeated clear+restore forever and the wall stayed dark for ~20 min.
 #[tokio::test]
 async fn handle_health_snapshot_escalates_to_recreate_on_sustained_dark_wall() {
     let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
@@ -136,18 +136,17 @@ async fn handle_health_snapshot_escalates_to_recreate_on_sustained_dark_wall() {
             last_step = Some(step);
         }
     }
-    // #173 round 3 gate: rung 2 (RecreateInput) is DISABLED until the executor
-    // creates-first-then-removes (it deleted sp-youth_video on the box on
-    // 17.9.2026), so the highest rung a sustained dark wall reaches is the toggle.
-    const { assert!(!crate::obs::ndi_recovery::LADDER_RECREATE_ENABLED) };
+    // #173 round 3: rung 2 (RecreateInput) is ENABLED — the executor now
+    // creates-first-then-removes (a failed CreateInput can no longer empty the
+    // scene), so a sustained dark wall escalates all the way to the recreate.
     assert_eq!(
         last_step,
-        Some(crate::obs::ndi_recovery::RecoveryStep::ToggleSceneItem),
-        "a sustained dark wall must escalate the ladder to the toggle rung (recreate is gated off)",
+        Some(crate::obs::ndi_recovery::RecoveryStep::RecreateInput),
+        "a sustained dark wall must escalate the ladder to the recreate rung",
     );
     assert_eq!(
         registry.snapshots()[0].recovery_step,
-        Some(crate::obs::ndi_recovery::RecoveryStep::ToggleSceneItem),
+        Some(crate::obs::ndi_recovery::RecoveryStep::RecreateInput),
         "the snapshot must record the escalated rung",
     );
 }

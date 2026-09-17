@@ -7,6 +7,7 @@ pub mod lyrics;
 pub mod lyrics_catalog;
 pub mod preview;
 pub mod routes;
+pub mod routes_ndi_recover;
 pub mod websocket;
 
 use std::path::PathBuf;
@@ -107,6 +108,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/ndi/burn",
             axum::routing::post(routes::set_ndi_burn),
+        )
+        // #173: operator/verification one-shot dark-wall recovery rung.
+        .route(
+            "/api/v1/ndi/recover/{playlist_id}",
+            axum::routing::post(routes_ndi_recover::post_ndi_recover),
         )
         // Lyrics
         .route(

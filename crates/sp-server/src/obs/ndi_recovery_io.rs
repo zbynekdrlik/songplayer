@@ -27,9 +27,10 @@ use crate::obs::ndi_discovery::{
 };
 use crate::obs::ndi_recovery::RecoveryStep;
 use crate::obs::text::{
-    create_input_request, get_input_settings_request, get_scene_item_transform_request,
-    get_scene_items_request, get_scene_list_request, remove_input_request,
-    set_scene_item_enabled_request, set_scene_item_index_request, set_scene_item_transform_request,
+    create_input_request, get_input_settings_request, get_scene_item_enabled_request,
+    get_scene_item_transform_request, get_scene_items_request, get_scene_list_request,
+    remove_input_request, set_input_name_request, set_scene_item_enabled_request,
+    set_scene_item_index_request, set_scene_item_transform_request,
 };
 
 /// The resolved location of an NDI input's scene item.
@@ -37,6 +38,54 @@ struct SceneItemLocation {
     scene_name: String,
     scene_item_id: i64,
     scene_item_index: i64,
+}
+
+/// One ordered step of the create-first-then-remove rung-2 recreate (#173 round
+/// 3). The order is the SAFETY contract: the replacement input is created under a
+/// temporary name and PROVEN to exist before the old input is removed, so a
+/// failed `CreateInput` can never leave the scene empty (the box incident,
+/// 17.9.2026). Unit-tested by `recreate_plan_never_removes_before_verify`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecreateStep {
+    /// `CreateInput` the replacement under `<input>_recover` with the identical
+    /// kind + settings (advertised sender name), in the same scene.
+    CreateTemp,
+    /// Prove the temp input exists as a scene item (`GetSceneItemList` lists it
+    /// AND `CreateInput` returned a `sceneItemId`) before anything destructive.
+    VerifyExists,
+    /// Restore the saved transform + z-order index onto the temp item.
+    ApplyTransformIndex,
+    /// `RemoveInput` the old input — only reached after the replacement is proven.
+    RemoveOld,
+    /// `SetInputName` the temp `<input>_recover` back to the original name (the
+    /// name is free once the old input is removed).
+    RenameTempToOriginal,
+}
+
+/// The ordered plan the recreate executor follows. Pure + `pub(crate)` so the
+/// executor consumes it (no dead code) and a unit test locks the ordering
+/// invariant — the replacement is always created and verified before the old
+/// input is removed.
+pub(crate) fn recreate_plan() -> [RecreateStep; 5] {
+    use RecreateStep::*;
+    // RED (#173 round 3): the TIER-0 "one wrong constant" — RemoveOld is ordered
+    // BEFORE VerifyExists, so `recreate_plan_never_removes_before_verify` fails
+    // cleanly. GREEN moves RemoveOld after VerifyExists/ApplyTransformIndex.
+    [
+        CreateTemp,
+        RemoveOld,
+        VerifyExists,
+        ApplyTransformIndex,
+        RenameTempToOriginal,
+    ]
+}
+
+/// The temporary input name used while recreating `<input>`. Distinct from the
+/// original so `CreateInput` can never collide with the still-present old input
+/// (the same-name collision that made `CreateInput` return no `sceneItemId` on
+/// the box, 17.9.2026).
+fn temp_recover_name(input_name: &str) -> String {
+    format!("{input_name}_recover")
 }
 
 /// Execute one rung of the dark-wall recovery ladder for `target_stream` (the
@@ -96,18 +145,46 @@ async fn toggle_scene_item(write: &SharedWrite, dispatcher: &Dispatcher, target_
         "ndi-recovery: rung 1 — toggling scene item OFF→ON to recreate the receiver"
     );
 
-    let off = send_ok(
+    let off = send_ok_logged(
         write,
         dispatcher,
+        "rung 1 SetSceneItemEnabled(off)",
         set_scene_item_enabled_request(&new_id(), &loc.scene_name, loc.scene_item_id, false),
     )
     .await;
-    let on = send_ok(
+    let on = send_ok_logged(
         write,
         dispatcher,
+        "rung 1 SetSceneItemEnabled(on)",
         set_scene_item_enabled_request(&new_id(), &loc.scene_name, loc.scene_item_id, true),
     )
     .await;
+
+    // #173 round 3: PROVE the item is enabled. An operator who hid the source on
+    // program leaves it disabled; the OFF→ON toggle above re-enables it, but read
+    // back to be sure — the ladder must never leave an on-program item hidden on a
+    // dark wall.
+    let enabled_now = send(
+        write,
+        dispatcher,
+        get_scene_item_enabled_request(&new_id(), &loc.scene_name, loc.scene_item_id),
+    )
+    .await
+    .and_then(|v| v["d"]["responseData"]["sceneItemEnabled"].as_bool());
+    if enabled_now == Some(false) {
+        let re_on = send_ok_logged(
+            write,
+            dispatcher,
+            "rung 1 SetSceneItemEnabled(re-enable)",
+            set_scene_item_enabled_request(&new_id(), &loc.scene_name, loc.scene_item_id, true),
+        )
+        .await;
+        info!(
+            input_name = %input_name,
+            re_enabled_ok = re_on,
+            "ndi-recovery: rung 1 — item was disabled, re-enabled"
+        );
+    }
 
     if off && on {
         info!(input_name = %input_name, "ndi-recovery: rung 1 (toggle) applied");
@@ -121,10 +198,14 @@ async fn toggle_scene_item(write: &SharedWrite, dispatcher: &Dispatcher, target_
     }
 }
 
-/// Rung 2: remove the input and recreate it with the identical settings
-/// (advertised, case-correct `ndi_source_name`), restoring the saved scene-item
-/// transform and z-order index — the strongest receiver-side remedy short of
-/// restarting OBS.
+/// Rung 2 (#173 round 3): create-first-then-remove. Create the replacement input
+/// under a TEMPORARY name (`<input>_recover`) with the identical kind + settings
+/// (advertised, case-correct `ndi_source_name`), PROVE it exists as a scene item,
+/// restore the saved transform + z-order, THEN remove the old input and rename
+/// the temp to the original name. On any failure the ORIGINAL input is left
+/// untouched (the scene is never emptied — the box incident, 17.9.2026) and the
+/// temp is cleaned up. The step ORDER is driven by `recreate_plan()`, whose
+/// safety invariant (never remove before verify) is unit-tested.
 async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_stream: &str) {
     let input_name = match resolve_input_name(write, dispatcher, target_stream).await {
         Some(n) => n,
@@ -137,6 +218,9 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
         }
     };
 
+    // --- Read-only preconditions: everything below is captured BEFORE any
+    // destructive op, so a failure here aborts with the original untouched. ---
+
     // Capture the current input settings + kind so the recreate is identical.
     let settings_resp = match send(
         write,
@@ -147,7 +231,7 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
     {
         Some(v) => v,
         None => {
-            warn!(input_name = %input_name, "ndi-recovery: rung 2 — GetInputSettings failed; aborting recreate");
+            warn!(input_name = %input_name, "ndi-recovery: rung 2 — GetInputSettings failed; aborting recreate (original untouched)");
             return;
         }
     };
@@ -171,13 +255,13 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
     let loc = match resolve_scene_item(write, dispatcher, &input_name).await {
         Some(l) => l,
         None => {
-            warn!(input_name = %input_name, "ndi-recovery: rung 2 — input is not a scene item in any scene; aborting recreate");
+            warn!(input_name = %input_name, "ndi-recovery: rung 2 — input is not a scene item in any scene; aborting recreate (original untouched)");
             return;
         }
     };
 
-    // Save the transform (best-effort — a missing transform still lets the
-    // recreate re-attach the receiver, which is the point).
+    // Save the OLD item's transform (best-effort — a missing transform still lets
+    // the recreate re-attach the receiver, which is the point).
     let transform = send(
         write,
         dispatcher,
@@ -189,90 +273,164 @@ async fn recreate_input(write: &SharedWrite, dispatcher: &Dispatcher, target_str
         if xf.is_null() { None } else { Some(xf) }
     });
 
+    let temp_name = temp_recover_name(&input_name);
+
     info!(
         input_name = %input_name,
+        temp_name = %temp_name,
         scene = %loc.scene_name,
         input_kind = %input_kind,
         restore_to = %restore_to,
-        "ndi-recovery: rung 2 — remove + recreate input to clear a wedged receiver"
+        "ndi-recovery: rung 2 — create-first recreate to clear a wedged receiver"
     );
 
-    if !send_ok(
+    // Defensive: remove any stale temp left by a prior interrupted recreate so the
+    // CreateTemp below can never collide with it (best-effort, result ignored — a
+    // 600 "not found" is the normal case).
+    let _ = send(
         write,
         dispatcher,
-        remove_input_request(&new_id(), &input_name),
-    )
-    .await
-    {
-        warn!(input_name = %input_name, "ndi-recovery: rung 2 — RemoveInput failed; aborting recreate");
-        return;
-    }
-
-    let create_resp = send(
-        write,
-        dispatcher,
-        create_input_request(
-            &new_id(),
-            &loc.scene_name,
-            &input_name,
-            &input_kind,
-            &input_settings,
-            true,
-        ),
+        remove_input_request(&new_id(), &temp_name),
     )
     .await;
-    let new_item_id = match create_resp
-        .as_ref()
-        .and_then(|v| v["d"]["responseData"]["sceneItemId"].as_i64())
-    {
-        Some(id) => id,
-        None => {
-            warn!(
-                input_name = %input_name,
-                "ndi-recovery: rung 2 — CreateInput did not return a sceneItemId; the input may be missing until the next OBS map rebuild"
-            );
-            return;
-        }
-    };
 
-    // Restore transform + z-order index (both best-effort; the receiver is
-    // already re-created at this point).
-    if let Some(xf) = transform {
-        let applied = send_ok(
-            write,
-            dispatcher,
-            set_scene_item_transform_request(
-                &new_id(),
-                &loc.scene_name,
-                new_item_id,
-                &transform_for_set(xf),
-            ),
-        )
-        .await;
-        if !applied {
-            warn!(input_name = %input_name, "ndi-recovery: rung 2 — restoring the scene-item transform did not apply");
+    // --- Execute the ordered plan. The order is the SAFETY contract. ---
+    let mut new_item_id: Option<i64> = None;
+    for step in recreate_plan() {
+        match step {
+            RecreateStep::CreateTemp => {
+                let resp = send(
+                    write,
+                    dispatcher,
+                    create_input_request(
+                        &new_id(),
+                        &loc.scene_name,
+                        &temp_name,
+                        &input_kind,
+                        &input_settings,
+                        true,
+                    ),
+                )
+                .await;
+                match resp
+                    .as_ref()
+                    .and_then(|v| v["d"]["responseData"]["sceneItemId"].as_i64())
+                {
+                    Some(id) => new_item_id = Some(id),
+                    None => {
+                        log_obs_failure("rung 2 CreateTemp", &temp_name, resp.as_ref());
+                        // Original untouched; nothing created to clean up.
+                        return;
+                    }
+                }
+            }
+            RecreateStep::VerifyExists => {
+                let listed = resolve_scene_item(write, dispatcher, &temp_name)
+                    .await
+                    .is_some();
+                if new_item_id.is_none() || !listed {
+                    warn!(
+                        temp_name = %temp_name,
+                        has_scene_item_id = new_item_id.is_some(),
+                        listed_by_get_scene_item_list = listed,
+                        "ndi-recovery: rung 2 — replacement not proven (aborting BEFORE removing the old input; original untouched)"
+                    );
+                    cleanup_temp(write, dispatcher, &temp_name).await;
+                    return;
+                }
+            }
+            RecreateStep::ApplyTransformIndex => {
+                let Some(id) = new_item_id else { continue };
+                if let Some(xf) = transform.clone() {
+                    if !send_ok_logged(
+                        write,
+                        dispatcher,
+                        "rung 2 SetSceneItemTransform",
+                        set_scene_item_transform_request(
+                            &new_id(),
+                            &loc.scene_name,
+                            id,
+                            &transform_for_set(xf),
+                        ),
+                    )
+                    .await
+                    {
+                        warn!(temp_name = %temp_name, "ndi-recovery: rung 2 — restoring the transform did not apply (continuing)");
+                    }
+                }
+                if !send_ok_logged(
+                    write,
+                    dispatcher,
+                    "rung 2 SetSceneItemIndex",
+                    set_scene_item_index_request(
+                        &new_id(),
+                        &loc.scene_name,
+                        id,
+                        loc.scene_item_index,
+                    ),
+                )
+                .await
+                {
+                    warn!(temp_name = %temp_name, "ndi-recovery: rung 2 — restoring the z-order index did not apply (continuing)");
+                }
+            }
+            RecreateStep::RemoveOld => {
+                if !send_ok_logged(
+                    write,
+                    dispatcher,
+                    "rung 2 RemoveInput(old)",
+                    remove_input_request(&new_id(), &input_name),
+                )
+                .await
+                {
+                    // The old input survived AND the temp exists — a duplicate.
+                    // Remove the temp so we do not leave two items; the original
+                    // (still present) keeps serving.
+                    warn!(input_name = %input_name, "ndi-recovery: rung 2 — RemoveInput(old) failed; removing the temp to avoid a duplicate (original untouched)");
+                    cleanup_temp(write, dispatcher, &temp_name).await;
+                    return;
+                }
+            }
+            RecreateStep::RenameTempToOriginal => {
+                if !send_ok_logged(
+                    write,
+                    dispatcher,
+                    "rung 2 SetInputName(temp→original)",
+                    set_input_name_request(&new_id(), &temp_name, &input_name),
+                )
+                .await
+                {
+                    // The old input is already gone and the temp carries the
+                    // advertised name, so the receiver is attached; only the input
+                    // NAME is wrong (still matched by stream on the next map
+                    // rebuild). Loud so an operator can rename it by hand.
+                    warn!(
+                        temp_name = %temp_name,
+                        wanted = %input_name,
+                        "ndi-recovery: rung 2 — rename temp→original failed; the recovered input is still named '<input>_recover' (matched by stream, rename by hand)"
+                    );
+                    return;
+                }
+            }
         }
-    }
-    let indexed = send_ok(
-        write,
-        dispatcher,
-        set_scene_item_index_request(
-            &new_id(),
-            &loc.scene_name,
-            new_item_id,
-            loc.scene_item_index,
-        ),
-    )
-    .await;
-    if !indexed {
-        warn!(input_name = %input_name, "ndi-recovery: rung 2 — restoring the scene-item index did not apply");
     }
 
     info!(
         input_name = %input_name,
-        new_scene_item_id = new_item_id,
-        "ndi-recovery: rung 2 (recreate) applied"
+        new_scene_item_id = new_item_id.unwrap_or(0),
+        "ndi-recovery: rung 2 (recreate) applied — replacement proven, old removed, renamed"
     );
+}
+
+/// Best-effort removal of the temporary `<input>_recover` input on an aborted
+/// recreate. Result ignored — it is a cleanup, not part of the safety contract.
+async fn cleanup_temp(write: &SharedWrite, dispatcher: &Dispatcher, temp_name: &str) {
+    let _ = send(
+        write,
+        dispatcher,
+        remove_input_request(&new_id(), temp_name),
+    )
+    .await;
 }
 
 /// Find the OBS NDI input whose `ndi_source_name` advertises `target_stream`.
@@ -401,17 +559,98 @@ async fn send(
     }
 }
 
-/// Send a request and return whether OBS acknowledged success.
-async fn send_ok(write: &SharedWrite, dispatcher: &Dispatcher, req: serde_json::Value) -> bool {
-    match send(write, dispatcher, req).await {
-        Some(v) => v["d"]["requestStatus"]["result"].as_bool().unwrap_or(false),
-        None => false,
+/// Log an obs-websocket write failure with the step name AND the full
+/// `requestStatus` code + comment (#173 round 3 — the box incident's CreateInput
+/// error payload was never logged, so the cause was unknown). `resp == None` is a
+/// transport failure (no reply); a present response with `result == false`
+/// carries OBS's own diagnostic.
+fn log_obs_failure(step: &str, name: &str, resp: Option<&serde_json::Value>) {
+    match resp {
+        Some(v) => {
+            let code = v["d"]["requestStatus"]["code"].as_u64().unwrap_or(0);
+            let comment = v["d"]["requestStatus"]["comment"].as_str().unwrap_or("");
+            warn!(
+                step,
+                name, code, comment, "ndi-recovery: OBS request reported failure"
+            );
+        }
+        None => warn!(
+            step,
+            name, "ndi-recovery: OBS request had no response (transport failure)"
+        ),
     }
+}
+
+/// Send a request, log the full obs-websocket error on failure, and return
+/// whether OBS acknowledged success.
+async fn send_ok_logged(
+    write: &SharedWrite,
+    dispatcher: &Dispatcher,
+    step: &str,
+    req: serde_json::Value,
+) -> bool {
+    let name = req["d"]["requestData"]["inputName"]
+        .as_str()
+        .or_else(|| req["d"]["requestData"]["sceneName"].as_str())
+        .unwrap_or("")
+        .to_string();
+    let resp = send(write, dispatcher, req).await;
+    let ok = resp
+        .as_ref()
+        .map(|v| v["d"]["requestStatus"]["result"].as_bool().unwrap_or(false))
+        .unwrap_or(false);
+    if !ok {
+        log_obs_failure(step, &name, resp.as_ref());
+    }
+    ok
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- create-first-then-remove ordering safety (#173 round 3) ----------
+
+    #[test]
+    fn recreate_plan_never_removes_before_verify() {
+        let plan = recreate_plan();
+        let pos = |s: RecreateStep| plan.iter().position(|&p| p == s).expect("step present");
+        // The whole plan must be exactly the safe order.
+        assert_eq!(
+            plan,
+            [
+                RecreateStep::CreateTemp,
+                RecreateStep::VerifyExists,
+                RecreateStep::ApplyTransformIndex,
+                RecreateStep::RemoveOld,
+                RecreateStep::RenameTempToOriginal,
+            ],
+            "the recreate plan must create + verify the replacement before removing the old input",
+        );
+        // The load-bearing invariant, asserted independently of the exact layout:
+        // the old input is NEVER removed before the replacement is proven to exist.
+        assert!(
+            pos(RecreateStep::CreateTemp) < pos(RecreateStep::VerifyExists),
+            "must create the temp before verifying it",
+        );
+        assert!(
+            pos(RecreateStep::VerifyExists) < pos(RecreateStep::RemoveOld),
+            "must verify the replacement exists before removing the old input",
+        );
+        assert!(
+            pos(RecreateStep::RemoveOld) < pos(RecreateStep::RenameTempToOriginal),
+            "must remove the old input (freeing its name) before renaming the temp to it",
+        );
+    }
+
+    #[test]
+    fn temp_recover_name_is_distinct_from_the_original() {
+        assert_eq!(
+            temp_recover_name("sp-youth_video"),
+            "sp-youth_video_recover"
+        );
+        assert_ne!(temp_recover_name("sp-youth_video"), "sp-youth_video");
+    }
 
     #[test]
     fn transform_for_set_strips_read_only_fields() {

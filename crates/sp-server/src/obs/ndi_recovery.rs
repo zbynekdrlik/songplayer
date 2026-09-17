@@ -328,17 +328,12 @@ mod tests {
             next_step(&recreate_pending, LADDER_STEP_SPACING_POLLS - 1),
             None
         );
-        // Rung 2 is GATED OFF (`LADDER_RECREATE_ENABLED = false`, #173 round 3):
-        // no recreate at the spacing; after the cool-down the ladder restarts.
-        // (rung 2 stays off until create-first lands)
-        const { assert!(!LADDER_RECREATE_ENABLED) };
+        // #173 round 3: rung 2 (RecreateInput) is ENABLED now that the executor
+        // creates-first-then-removes (proves the replacement before removing the
+        // old input) — the recreate fires at the spacing.
         assert_eq!(
             next_step(&recreate_pending, LADDER_STEP_SPACING_POLLS),
-            None
-        );
-        assert_eq!(
-            next_step(&recreate_pending, LADDER_COOLDOWN_POLLS),
-            Some(RecoveryStep::ClearRestore)
+            Some(RecoveryStep::RecreateInput)
         );
     }
 
@@ -386,12 +381,12 @@ mod tests {
             tracker.evaluate(pid, true, NUDGE_THRESHOLD_BAD_POLLS + 3, t),
             None
         );
-        // Two dark polls after Toggle → NOTHING: rung 2 (RecreateInput) is gated
-        // off (#173 round 3) until the executor creates-first-then-removes.
+        // Two dark polls after Toggle → RecreateInput: rung 2 is ENABLED (#173
+        // round 3) now that the executor creates-first-then-removes.
         t += 1;
         assert_eq!(
             tracker.evaluate(pid, true, NUDGE_THRESHOLD_BAD_POLLS + 4, t),
-            None
+            Some(RecoveryStep::RecreateInput)
         );
     }
 
@@ -400,7 +395,7 @@ mod tests {
         let tracker = NdiRecoveryTracker::new();
         let pid = 7;
         let mut t = 0i64;
-        // Drive to RecreateInput.
+        // Drive the full ladder: ClearRestore → ToggleSceneItem → RecreateInput.
         assert_eq!(
             tracker.evaluate(pid, true, NUDGE_THRESHOLD_BAD_POLLS, t),
             Some(RecoveryStep::ClearRestore)
@@ -410,14 +405,19 @@ mod tests {
             tracker.evaluate(pid, true, NUDGE_THRESHOLD_BAD_POLLS + 2, t),
             Some(RecoveryStep::ToggleSceneItem)
         );
-        // Rung 2 is gated off (#173 round 3): after the toggle the ladder cools
-        // down instead of recreating. Below the cool-down → nothing.
+        t += 1;
+        assert_eq!(
+            tracker.evaluate(pid, true, NUDGE_THRESHOLD_BAD_POLLS + 4, t),
+            Some(RecoveryStep::RecreateInput)
+        );
+        // After the recreate the ladder cools down (rung 3). Below the cool-down
+        // (measured from the recreate's dark-poll mark, base+4) → nothing.
         t += 1;
         assert_eq!(
             tracker.evaluate(
                 pid,
                 true,
-                NUDGE_THRESHOLD_BAD_POLLS + 2 + LADDER_COOLDOWN_POLLS - 1,
+                NUDGE_THRESHOLD_BAD_POLLS + 4 + LADDER_COOLDOWN_POLLS - 1,
                 t
             ),
             None
@@ -428,7 +428,7 @@ mod tests {
             tracker.evaluate(
                 pid,
                 true,
-                NUDGE_THRESHOLD_BAD_POLLS + 2 + LADDER_COOLDOWN_POLLS,
+                NUDGE_THRESHOLD_BAD_POLLS + 4 + LADDER_COOLDOWN_POLLS,
                 t
             ),
             Some(RecoveryStep::ClearRestore)
