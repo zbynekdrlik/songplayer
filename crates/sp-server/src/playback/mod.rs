@@ -22,6 +22,8 @@ pub mod pipeline;
 pub(crate) mod pipeline_paced;
 #[cfg(windows)]
 pub(crate) mod pipeline_paced_idle;
+#[cfg(windows)]
+pub(crate) mod pipeline_paced_submit; // #168 output-side split: submit thread + handoff glue
 #[cfg(not(windows))]
 pub(crate) mod pipeline_stub;
 mod position_update;
@@ -29,6 +31,7 @@ pub mod preview; // #15 part 2: live low-res video preview tap
 mod recovery;
 mod runtime_pipeline;
 pub mod state;
+pub mod submit_handoff; // #168 output-side split: pure emit->submit handoff decisions
 pub mod submitter;
 mod test_helpers;
 mod title;

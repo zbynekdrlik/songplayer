@@ -773,7 +773,7 @@ pub(crate) fn should_run_heartbeat(elapsed: std::time::Duration) -> bool {
 /// covered by `heartbeat_decision_tests::classify_bad_poll_*` so the
 /// mutation runner can validate every boundary.
 #[cfg(any(windows, test))]
-fn classify_bad_poll(
+pub(crate) fn classify_bad_poll(
     state: &crate::playback::ndi_health::PlaybackStateLabel,
     connections: i32,
     observed_fps: f32,
