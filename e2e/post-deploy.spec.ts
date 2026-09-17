@@ -769,6 +769,121 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
+   * Issue #186 — a karaoke preset change must NOT reload the pipeline.
+   *
+   * The pre-fix `set_karaoke` reopened every playing pipeline on a MODE change
+   * (`PipelineCommand::Play` at the cached position), so the wall went silent for
+   * the seconds the decoder reopen + A/V resync took. Now a mode is a live gain
+   * preset over the already-open streams: a change writes the gain atoms, no
+   * reopen. This drives a burst of preset + fader changes while ytfast plays
+   * on-program and asserts (a) `GET /api/v1/karaoke` reflects each within 500 ms
+   * and (b) the `.np-info` position keeps ADVANCING across the whole burst — a
+   * reload would reset/freeze it. Robust regardless of whether the playing song
+   * has stems: the no-reload guarantee is universal.
+   */
+  test("karaoke preset changes keep playback advancing — no reload (#186)", async ({
+    page,
+    request,
+  }) => {
+    expect(obs, "OBS WebSocket driver must be connected").not.toBeNull();
+
+    const consoleMessages: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "error" || msg.type() === "warning") {
+        consoleMessages.push(`[${msg.type()}] ${msg.text()}`);
+      }
+    });
+    const allowedConsole = [
+      /favicon/i,
+      /WebSocket connection/i,
+      /\bwasm\b.*instantiate/i,
+      /module specifier/i,
+      /integrity.*attribute.*ignored/i,
+    ];
+
+    const scenes = await obs!.listScenes();
+    expect(
+      scenes.includes(FAST_SCENE_NAME),
+      `deployed OBS must have an "${FAST_SCENE_NAME}" scene`,
+    ).toBe(true);
+
+    // Save the karaoke state so the test restores it afterwards.
+    const before = (await (await request.get("/api/v1/karaoke")).json()) as {
+      mode?: string;
+      vocal_gain?: number;
+    };
+
+    // Start clean, then switch to sp-fast so ytfast plays on-program.
+    await obs!.switchScene(pickBaselineScene(scenes));
+    await new Promise((r) => setTimeout(r, 500));
+    await obs!.switchScene(FAST_SCENE_NAME);
+
+    await page.goto("/");
+    const card = await selectWorkspaceCard(page, FAST_PLAYLIST_NAME);
+    await expect(
+      card.locator(".np-info"),
+      `card for ${FAST_PLAYLIST_NAME} must be Playing before the preset burst`,
+    ).toBeVisible({ timeout: 30_000 });
+
+    const readPosition = async () => {
+      const text = (await card.locator(".np-info").innerText()) ?? "";
+      const match = text.match(/(\d+):(\d+)\s*\/\s*\d+:\d+/);
+      if (!match) return -1;
+      return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+    };
+    const first = await readPosition();
+    expect(first, "position counter must be present").toBeGreaterThanOrEqual(0);
+
+    // A burst of preset + fader changes. Each must reflect within 500 ms, and —
+    // the #186 fix — must NOT reopen the pipeline.
+    const presets: Array<{ mode: string; vocal_gain?: number }> = [
+      { mode: "karaoke_low", vocal_gain: 0.2 },
+      { mode: "vocals_only" },
+      { mode: "instrumental_only" },
+      { mode: "karaoke_low", vocal_gain: 0.8 },
+      { mode: "full_mix" },
+      { mode: "karaoke_low", vocal_gain: 0.5 },
+    ];
+    for (const p of presets) {
+      const resp = await request.post("/api/v1/karaoke", { data: p });
+      expect(resp.status()).toBe(204);
+      await expect
+        .poll(
+          async () =>
+            (
+              (await (await request.get("/api/v1/karaoke")).json()) as {
+                mode?: string;
+              }
+            ).mode,
+          { timeout: 500, intervals: [50, 100, 100, 100, 100] },
+        )
+        .toBe(p.mode);
+    }
+
+    // The pipeline must have kept advancing across the whole burst — a reload
+    // would reset/freeze the position (the #186 seconds-of-silence dropout).
+    await page.waitForTimeout(2_500);
+    const second = await readPosition();
+    expect(
+      second,
+      `position must advance across karaoke preset changes (first=${first}s, second=${second}s) — a reload/dropout would freeze it`,
+    ).toBeGreaterThan(first);
+
+    // Restore karaoke state (the scene is restored by afterEach/afterAll).
+    await request.post("/api/v1/karaoke", {
+      data: {
+        mode: before.mode ?? "full_mix",
+        vocal_gain: before.vocal_gain ?? 0.3,
+      },
+    });
+
+    const realConsole = consoleMessages.filter(
+      (m) => !allowedConsole.some((r) => r.test(m)),
+    );
+    expect(realConsole).toEqual([]);
+  });
+
+  /**
    * Zero browser console errors/warnings. Runs last so it observes the
    * state after all other tests have interacted with the dashboard.
    *

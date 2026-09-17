@@ -321,3 +321,22 @@ once the runner has the ssh/bundle-state reader, camera-box#1294 Q10).
 `scripts/cg-chain-verify.sh` + `scripts/lib/cg-chain-verify.sh` with the
 `CG_CHAIN_<HOP>_LOG` reader seam (a full SHA is required for checkout's
 fetch-by-commit).
+
+## Box verification via MCP (no ssh) — gotchas (#186)
+
+- **`mcp__win-resolume__Shell` STRIPS PowerShell `$` variables** (a shell layer
+  pre-expands `$_`, `$f`, … to empty). `ForEach-Object { $_.Line }` fails with
+  "term '.Line' is not recognized"; `Write-Output ('x=' + $f.Name)` fails with
+  "value expression following '+'". Write PowerShell with NO `$` vars: use
+  `Select-Object -ExpandProperty Line` (not `ForEach-Object {$_...}`), and to
+  filter a log by time embed the timestamp IN the `Select-String -Pattern` regex
+  (`'2026-09-17T(21:59|22:00).*<msg>'`) instead of `Where-Object {$_.Line -gt …}`.
+  For anything non-trivial, `FileWrite` a `.ps1` to the box then `Shell` it.
+- **There is NO `GET /api/v1/playback/{id}`** — the playback routes are POST-only
+  (`/play`,`/pause`,`/skip`,`/previous`,`/mode`) + `GET …/preview.jpg`. To prove
+  a pipeline keeps advancing (e.g. #186 no-reload), read
+  `GET /api/v1/ndi/health`: `frames_submitted_total` is MONOTONIC and stalls/
+  resets on a decoder reopen, `observed_fps` dips on a dropout. Pair it with a log
+  grep for the absence of the reopen message and the presence of the feature's
+  own `info!` lines. curl to the box HTTP API (`http://10.77.9.201:8920/...`) is
+  the sanctioned read path (the post-deploy suite uses the same), not ssh.

@@ -101,7 +101,9 @@ pub fn KaraokeControl() -> impl IntoView {
                 </select>
             </label>
 
-            <label class:disabled=move || mode.get() != "karaoke_low">
+            // #186: the fader is live in every stem preset; only Plný mix (the
+            // original, no stems) disables it. #181 (D2) restyles this later.
+            <label class:disabled=move || mode.get() == "full_mix">
                 "Hlasitosť vokálov: "
                 {move || format!("{}%", (vocal_gain.get() * 100.0).round() as i32)}
                 <input
@@ -111,10 +113,19 @@ pub fn KaraokeControl() -> impl IntoView {
                     step="1"
                     data-testid="karaoke-vocal-gain"
                     prop:value=move || (vocal_gain.get() * 100.0).round() as i32
-                    prop:disabled=move || mode.get() != "karaoke_low"
+                    prop:disabled=move || mode.get() == "full_mix"
                     on:input=on_gain_input
                     on:change=on_gain_change
                 />
+                <span class="karaoke-fader-hint" data-testid="karaoke-fader-hint">
+                    {move || {
+                        if mode.get() == "full_mix" {
+                            " — v Plnom mixe bez efektu"
+                        } else {
+                            ""
+                        }
+                    }}
+                </span>
             </label>
 
             <p class="karaoke-stem-progress" data-testid="karaoke-stem-progress">

@@ -541,8 +541,8 @@ fn decode_and_send(
             ));
         }
     };
-    // #14: honour the live karaoke control — a plain mix reader, or a stem-mixing
-    // KaraokeAudioReader (with FullMix fallback when stems are missing).
+    // #14/#186: honour the live karaoke control — a plain mix reader, or a live
+    // stem-mixing StemMixReader (with original-mix fallback when stems are missing).
     let audio_stream =
         match crate::stems::reader::open_audio_stream(audio_path, &crate::stems::control::global())
         {

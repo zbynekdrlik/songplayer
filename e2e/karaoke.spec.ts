@@ -73,16 +73,41 @@ test("selecting Instrumental-only POSTs the mode and the mock records it (#14)",
   expect((await recorded.json()).mode).toBe("instrumental_only");
 });
 
-test("KaraokeLow enables the vocal-gain slider and POSTs the gain (#14)", async ({
+test("every stem preset enables the vocal-gain slider; Plný mix disables it (#186)", async ({
   page,
 }) => {
   await page.goto("/");
   await expect(page.locator(".karaoke-control")).toBeVisible({ timeout: 10000 });
 
   const slider = page.locator('[data-testid="karaoke-vocal-gain"]');
-  // The slider is disabled until KaraokeLow is selected.
-  await expect(slider).toBeDisabled();
+  const mode = page.locator('[data-testid="karaoke-mode"]');
 
+  // Explicitly start from Plný mix (an earlier test may have left another mode in
+  // the shared mock state) → slider disabled, with a "no effect" hint.
+  await mode.selectOption("full_mix");
+  await expect(slider).toBeDisabled();
+  await expect(
+    page.locator('[data-testid="karaoke-fader-hint"]'),
+  ).toContainText("bez efektu");
+
+  // #186: the fader is live in EVERY stem preset now — not karaoke_low only.
+  for (const preset of ["karaoke_low", "vocals_only", "instrumental_only"]) {
+    await mode.selectOption(preset);
+    await expect(slider, `slider must be enabled in ${preset}`).toBeEnabled();
+  }
+
+  // Back to full_mix → disabled again.
+  await mode.selectOption("full_mix");
+  await expect(slider).toBeDisabled();
+});
+
+test("KaraokeLow fader POSTs the gain and the mock records it (#14/#186)", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.locator(".karaoke-control")).toBeVisible({ timeout: 10000 });
+
+  const slider = page.locator('[data-testid="karaoke-vocal-gain"]');
   await page
     .locator('[data-testid="karaoke-mode"]')
     .selectOption("karaoke_low");

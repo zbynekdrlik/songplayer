@@ -182,7 +182,7 @@ fn run_decode_producer(
             return;
         }
     };
-    // #14: karaoke-aware audio source (plain mix or stem mix with FullMix fallback).
+    // #14/#186: karaoke-aware audio source (plain mix or live StemMixReader with mix fallback).
     let audio_stream = match crate::stems::reader::open_audio_stream(
         &audio_path,
         &crate::stems::control::global(),
