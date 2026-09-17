@@ -119,3 +119,12 @@ downstream failure). This is transition-duration-agnostic — a 0 ms cut or a
 2 s fade both work. Do NOT "fix" scene-switch flake by bumping test timeouts
 (`no-timeout-band-aids.md`) or by mutating the shared live-wall OBS config
 (transition duration / studio mode).
+
+## A Deploy-job re-run only works while the run's artifacts exist (`dist` = 1 day)
+
+`gh run rerun --job <Deploy>` of an older run is the sanctioned way to restart
+SongPlayer on the box (same build, Deploy + post-deploy E2E) — but the `dist`
+artifact has `retention-days: 1`, so a re-run of a run older than a day fails at
+"Download WASM frontend: Artifact not found for name: dist" BEFORE touching the
+box (17.9.2026, #170 acceptance). Past that window a post-restart suite needs a
+fresh push (a version bump is enough).
