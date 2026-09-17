@@ -1,15 +1,17 @@
 //! Process-global now-playing registry (#177).
 //!
 //! Holds, per playlist, the video id its pipeline is currently playing. Written
-//! by the playback engine (set when a song starts, cleared on stop / pause) and
-//! read by the karaoke API (`GET /api/v1/karaoke` → `now_playing[]`) WITHOUT
-//! going through the engine command channel — the same decoupling the NDI health
+//! by the playback engine (set when a song starts, cleared on Stop) and read by
+//! the karaoke API (`GET /api/v1/karaoke` → `now_playing[]`) WITHOUT going
+//! through the engine command channel — the same decoupling the NDI health
 //! registry uses. A process-global (like `stems::control::global()`) so neither
 //! the engine struct nor `AppState` needs a new field.
 //!
-//! Only currently-playing entries live here: `set` on a `Started`/replay, `clear`
-//! on Stop/Pause. Because the wall plays continuously, each new song's `Started`
-//! overwrites the entry, so the snapshot stays fresh.
+//! `set` on a `Started`/replay, `clear` on Stop. A PAUSE deliberately KEEPS the
+//! entry — a paused song is still the panel's current song (resumable via
+//! `paused_at`), so the karaoke controls still apply to it. Because the wall
+//! plays continuously, each new song's `Started` overwrites the entry, so the
+//! snapshot stays fresh; `get_karaoke` also skips any entry whose row vanished.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -29,7 +31,7 @@ impl NowPlayingRegistry {
         }
     }
 
-    /// Drop the entry for `playlist_id` (the pipeline stopped / paused).
+    /// Drop the entry for `playlist_id` (the pipeline stopped).
     pub fn clear(&self, playlist_id: i64) {
         if let Ok(mut g) = self.inner.write() {
             g.remove(&playlist_id);

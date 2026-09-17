@@ -263,7 +263,8 @@ component's visuals but MUST preserve this state contract.
   in-flight id (`stems::progress` — a process-global set/cleared around the
   separation child, mirror of `stems::control::global()`).
 - **Now-playing source:** `now_playing::global()` (a process-global registry the
-  engine writes on `Started`, clears on Stop/Pause) — read by
+  engine writes on `Started`, clears on Stop — a Pause KEEPS the entry, since a
+  paused song is still the panel's current song) — read by
   `GET /api/v1/karaoke`, which returns `now_playing: [{playlist_id, video_id,
   title, stems_state, stems_error, queue_position}]`. `stems_error` is DERIVED
   (there is no per-song stem error column) — a followup could add
