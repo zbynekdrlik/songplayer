@@ -75,7 +75,11 @@ executor `obs/ndi_recovery_io.rs`, I/O over the healthy OBS WebSocket):
   exists (`CreateInput` returned a `sceneItemId` AND `GetSceneItemList` lists it),
   restore the saved transform + z-order, THEN `RemoveInput` the renamed-away old.
   On any pre-remove failure the old content is renamed back to the original name —
-  the scene is never emptied. The gate `LADDER_RECREATE_ENABLED`
+  the scene is never emptied. At the START of the attempt any leftover
+  `<input>__recover_*` temps from an earlier interrupted recreate are swept
+  best-effort (`fetch_ndi_input_names` → `is_stale_recover_input` → `RemoveInput`,
+  counted in a WARN) — their unique-per-attempt names are never reused, so their
+  async teardown is harmless. The gate `LADDER_RECREATE_ENABLED`
   (`obs/ndi_recovery.rs`) is a real switch: `false` makes the ladder cool down at
   rung 1 instead. The pure step list `recreate_plan()` (`obs/ndi_recovery_io.rs`)
   is unit-tested for BOTH invariants: never remove before verify, and never reuse
