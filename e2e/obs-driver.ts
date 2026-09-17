@@ -6,9 +6,15 @@
  */
 
 import OBSWebSocket from "obs-websocket-js";
-import { waitForProgramScene } from "./obs-scene-wait";
+import {
+  shouldSkipSceneSwitch,
+  waitForSceneSwitchApplied,
+} from "./obs-scene-wait";
 
 export class ObsDriver {
+  // Cached once per driver (studio mode does not change mid-suite).
+  private studioMode: boolean | null = null;
+
   private constructor(private obs: OBSWebSocket) {}
 
   static async connect(url: string, password?: string): Promise<ObsDriver> {
@@ -27,20 +33,63 @@ export class ObsDriver {
     return (r as { scenes: { sceneName: string }[] }).scenes.map((s) => s.sceneName);
   }
 
+  private async studioModeEnabled(): Promise<boolean> {
+    if (this.studioMode === null) {
+      const r = await this.obs.call("GetStudioModeEnabled");
+      this.studioMode = (r as { studioModeEnabled: boolean }).studioModeEnabled;
+    }
+    return this.studioMode;
+  }
+
+  /**
+   * Switch the OBS program scene and wait until the switch has ACTUALLY taken
+   * effect (#170). On win-resolume OBS runs Studio Mode with a 2000ms Fade:
+   *
+   *  - Never issue a same-scene switch — it runs a pointless fade that leaves
+   *    `preview == program`, from which OBS then DROPS the next switch's
+   *    `CurrentProgramSceneChanged` event (reproduced live, round 3).
+   *  - In studio mode, drive the transition the studio way
+   *    (`SetCurrentPreviewScene` + `TriggerStudioModeTransition`) so OBS emits
+   *    the program-scene-changed event SongPlayer reacts to; fall back to
+   *    `SetCurrentProgramScene` when studio mode is off.
+   *  - Wait until the program scene equals the target AND the transition has
+   *    ENDED (a name-only read is satisfied mid-fade), then a short settle so
+   *    SongPlayer processes the post-transition event (its reaction is <1ms).
+   */
   async switchScene(sceneName: string): Promise<void> {
-    await this.obs.call("SetCurrentProgramScene", { sceneName });
-    // Wait for the switch to ACTUALLY take effect before returning. OBS on
-    // win-resolume runs Studio Mode with a 2000ms Fade, so the program scene
-    // — and the CurrentProgramSceneChanged event SongPlayer reacts to — only
-    // reports `sceneName` after the fade completes ~2s later. A blind sleep
-    // races that fade and made tests 15/17 flaky (#170). Poll
-    // GetCurrentProgramScene until it applies (throws loudly if it never
-    // does), then a short settle so SongPlayer processes the post-transition
-    // event (its reaction is <1ms, so 400ms is ample margin).
-    await waitForProgramScene(
-      () => this.currentProgramScene(),
-      sceneName,
-    );
+    const current = await this.currentProgramScene();
+    if (shouldSkipSceneSwitch(current, sceneName)) return;
+
+    // Track the transition so we can wait for it to END, not just for the
+    // program-scene name to flip (which happens mid-fade). Subscribe BEFORE
+    // triggering so the Started event is never missed.
+    let transitionActive = false;
+    const onStart = () => {
+      transitionActive = true;
+    };
+    const onEnd = () => {
+      transitionActive = false;
+    };
+    this.obs.on("SceneTransitionStarted", onStart);
+    this.obs.on("SceneTransitionEnded", onEnd);
+
+    try {
+      if (await this.studioModeEnabled()) {
+        await this.obs.call("SetCurrentPreviewScene", { sceneName });
+        await this.obs.call("TriggerStudioModeTransition");
+      } else {
+        await this.obs.call("SetCurrentProgramScene", { sceneName });
+      }
+      await waitForSceneSwitchApplied(
+        () => this.currentProgramScene(),
+        () => transitionActive,
+        sceneName,
+      );
+    } finally {
+      this.obs.off("SceneTransitionStarted", onStart);
+      this.obs.off("SceneTransitionEnded", onEnd);
+    }
+
     await new Promise((r) => setTimeout(r, 400));
   }
 

@@ -25,9 +25,7 @@
 /** True when the program scene is already the target — issuing the switch
  * would run a pointless same-scene transition, so the driver skips it. */
 export function shouldSkipSceneSwitch(current: string, target: string): boolean {
-  // RED: never skips — a same-scene switch still runs the disruptive
-  // studio-mode transition. GREEN skips when already on the target.
-  return false;
+  return current === target;
 }
 
 /** True once the switch has fully applied: the program scene equals the target
@@ -38,9 +36,7 @@ export function sceneSwitchSettled(
   target: string,
   transitionActive: boolean,
 ): boolean {
-  // RED: name-only — reports settled while the fade is still running (the
-  // round-2 bug). GREEN also requires the transition to have ended.
-  return programScene === target;
+  return programScene === target && !transitionActive;
 }
 
 export interface WaitForSceneSwitchOptions {
@@ -78,40 +74,6 @@ export async function waitForSceneSwitchApplied(
           `must reach the target AND the transition must end; a dropped/stuck ` +
           `transition or a missing scene surfaces here instead of as a ` +
           `mysterious downstream failure. (#170)`,
-      );
-    }
-    await new Promise((r) => setTimeout(r, pollMs));
-  }
-}
-
-export interface WaitForProgramSceneOptions {
-  /** Give up (throw) after this many ms. Default 8000 (covers the 2 s fade). */
-  timeoutMs?: number;
-  /** Delay between `getProgramScene` reads. Default 150 ms. */
-  pollMs?: number;
-}
-
-/**
- * Resolve once `getProgramScene()` returns `target`; throw if it never does
- * within `timeoutMs`. Superseded by `waitForSceneSwitchApplied` (name-only —
- * satisfied mid-fade); kept until the driver migrates.
- */
-export async function waitForProgramScene(
-  getProgramScene: () => Promise<string>,
-  target: string,
-  opts: WaitForProgramSceneOptions = {},
-): Promise<void> {
-  const timeoutMs = opts.timeoutMs ?? 8000;
-  const pollMs = opts.pollMs ?? 150;
-  const deadline = Date.now() + timeoutMs;
-
-  for (;;) {
-    const current = await getProgramScene();
-    if (current === target) return;
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `OBS program scene did not become "${target}" within ${timeoutMs}ms ` +
-          `(last saw "${current}"). (#170)`,
       );
     }
     await new Promise((r) => setTimeout(r, pollMs));
