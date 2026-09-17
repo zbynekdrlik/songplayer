@@ -702,6 +702,76 @@ mod tests {
     }
 
     #[test]
+    fn plan_never_reuses_a_removed_name() {
+        // Model each step's effect on the two input NAMES it can touch:
+        //  - `acquires`: the name this step `CreateInput`s or `SetInputName`s TO
+        //    (a name that MUST be free when the step runs).
+        //  - `removes`: the name this step `RemoveInput`s — DistroAV frees it only
+        //    ASYNCHRONOUSLY (the `ndi_source` teardown runs on its own thread), so
+        //    the name stays reserved for a while after the request returns.
+        // The race-free invariant (design round 4): no step may acquire a name a
+        // PRIOR step removed — that is exactly the 601 async-teardown race.
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        enum Name {
+            Original,
+            Temp,
+        }
+        fn effect(s: RecreateStep) -> (Option<Name>, Option<Name>) {
+            use RecreateStep::*;
+            match s {
+                // Original -> Temp: a synchronous rename; it ACQUIRES the temp name
+                // (frees the original synchronously, so `Original` is never a
+                // remove-freed name).
+                RenameOldAway => (Some(Name::Temp), None),
+                // CreateInput under the (now free) original name.
+                CreateUnderOriginal => (Some(Name::Original), None),
+                VerifyExists => (None, None),
+                ApplyTransformIndex => (None, None),
+                // RemoveInput the renamed-away old; frees `Temp` only async.
+                RemoveRenamedOld => (None, Some(Name::Temp)),
+            }
+        }
+        let mut removed: Vec<Name> = Vec::new();
+        for step in recreate_plan() {
+            let (acquires, removes) = effect(step);
+            if let Some(n) = acquires {
+                assert!(
+                    !removed.contains(&n),
+                    "step {step:?} acquires {n:?}, which a PRIOR step removed — \
+                     that reuses a remove-freed name and hits the 601 async-teardown race",
+                );
+            }
+            if let Some(n) = removes {
+                removed.push(n);
+            }
+        }
+    }
+
+    #[test]
+    fn is_stale_recover_input_matches_only_this_bases_recover_temps() {
+        let base = "sp-youth_video";
+        // A leftover temp from an earlier interrupted recreate of THIS base.
+        assert!(is_stale_recover_input(
+            "sp-youth_video__recover_ab12cd34",
+            base
+        ));
+        // The live input itself is never stale (must never be swept).
+        assert!(!is_stale_recover_input("sp-youth_video", base));
+        // A different base's recover temp is not ours.
+        assert!(!is_stale_recover_input(
+            "sp-slow_video__recover_ab12cd34",
+            base
+        ));
+        // A base that is a prefix of ours must not match our temp (no cross-scope).
+        assert!(!is_stale_recover_input(
+            "sp-youth_video__recover_ab12cd34",
+            "sp-youth"
+        ));
+        // An unrelated input.
+        assert!(!is_stale_recover_input("sp-fast_video", base));
+    }
+
+    #[test]
     fn transform_for_set_strips_read_only_fields() {
         let xf = serde_json::json!({
             "positionX": 10.0,
