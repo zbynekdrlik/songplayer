@@ -104,6 +104,22 @@ can see which rung recovered a wall. NEVER a per-sender `RecreateSender` (#60).
   the dedicated section below — `handle_health_snapshot` maps Playing+inactive →
   Paused so `is_dark` never fires off-program).
 
+- **Ladder limits — when receiver-side recovery CANNOT clear it (box 17.9.2026,
+  #173 round 5).** The whole ladder is receiver-side; a receiver that stays
+  `connections=0` through many `outcome=Applied` clear+restore nudges AND
+  `recreate` rungs AND a manual clear+restore with a long (~12 s) clear-hold is
+  **wedged deeper than any receiver-side action can reach** — only a SongPlayer
+  process restart (fresh NDI runtime) clears it (round 4 saw a restart bring dark
+  `SP-fast` back to `connections=2`; SongPlayer must NOT be force-restarted outside
+  a deploy). **Diagnostic: count the OTHER outputs.** If 8-of-9 senders from the
+  SAME SongPlayer process have receivers (`SP-presence`/`SP-worship`/… `connections
+  ≥ 2`) and only ONE on-program output is hard-`0`, it is a **per-input receiver
+  wedge**, NOT a process-global mDNS failure (#60) — do not chase it receiver-side;
+  a redeploy/restart is the fix. A per-restart-intermittent dark `SP-fast` right
+  after a deploy is this class (the E2E suite hammering `sp-fast`'s ladder just
+  after the restart can deepen the wedge); re-verify `SP-fast connections ≥ 1`
+  after the NEXT deploy rather than burning the lane on receiver-side attempts.
+
 ## obs-websocket 5.x write-path gotchas (recreate/toggle a scene item, #173)
 When recreating or re-transforming an NDI input over obs-websocket 5.x
 (`obs/ndi_recovery_io.rs`):
