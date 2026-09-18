@@ -127,3 +127,41 @@ paths:
   (`NdiBurnRegistry`), surfaced as `burn_on` in `/api/v1/ndi/health`. A QR must
   never reach the LED wall in production — a structural guard keeps the legacy
   `decode_and_send` path from ever referencing the overlay.
+- SDK-clocked wall-clock AUDIO emitter (#192): on the production SDK-clocked
+  path (`genlock_pacing=false`) the NDI audio stream is now clocked by the WALL
+  CLOCK, independent of the video submits. `run_loop_windows` spawns ONE
+  dedicated OS thread per pipeline (`playback/pipeline_audio.rs::spawn_audio_emitter`,
+  `THREAD_PRIORITY_TIME_CRITICAL` via `windows-sys`) that emits ONE 1600-sample
+  block (48 kHz stereo = 33.333 ms = one grid slot) every wall boundary
+  (`WallClock` QPC + coarse-sleep-to-2ms + spin, the `pipeline_paced.rs` pattern,
+  1 ms `timeBeginPeriod`), stamping the NDI audio timecode from the GRID (a clean
+  48 kHz clock — this is what kills the receiver servo's ±1500 ppm "rate swings",
+  NOT a receiver bug). WHY it exists: `decode_and_send` used to submit audio only
+  alongside each video frame, so a song transition (`video ended naturally` →
+  next `Play`, 200–400 ms) or a heavy-child model-load stall left the audio
+  stream SILENT → the genlock OBS's 3 ms-budget ASRC servo read the ≥1-block hole
+  as starvation → buffer collapse + re-lock ate ~1 s of the next song. Now
+  `decode_and_send` PUSHES decoded audio into the emitter's bounded ring
+  (`AudioRing`, ~250 ms, `push_blocking` — bounded, back-pressures the decoder,
+  never drops) BEFORE that frame's `send_video`; the emit thread pops a whole
+  block per slot or emits a FULL silence block when the ring is short (never a
+  partial block, never a skipped slot), so the stream never starves. The pure
+  core (ring + grid + telemetry + the generic `emit_one_block` send seam) is in
+  `playback/audio_emitter.rs`, cross-platform + Linux-tested + mutation-scored;
+  only the thread lifecycle (spawn/priority/sleep-spin/join-before-sender-drop)
+  is `pipeline_audio.rs` (`#[cfg(windows)]`, `mutants::skip`, box-verified).
+  A/V: audio leads/lags video by at most one block (33 ms) + ring residency
+  (~2 blocks) — box-verify it stays inside the DistroAV sync window. Cross-thread
+  NDI: video (decode thread) + audio (emit thread) submit on the SAME
+  `NdiSender` via `sp_ndi::AudioSink` (`{Arc<B>, handle}`, cloned from the
+  submitter) — NDI permits audio+video from separate threads on one instance;
+  the emit thread MUST be joined before the sender is destroyed (the
+  `AudioEmitterThread` guard is declared AFTER `submitter` so it drops first).
+  Telemetry: `AudioStats.emitter {enabled, mode:"sdk-video/wallclock-audio",
+  silence_blocks, ring_depth_ms, emit_jitter_p99_us, late_blocks}` on
+  `/api/v1/ndi/health` + the dashboard badge tooltip; the emit thread logs a
+  per-minute `audio-emitter: heartbeat` line + one line per silence→audio edge
+  (`audio resumed after silence`). `silence_blocks` should grow ONLY at
+  transitions/stalls; `late_blocks` ≈ 0 and `emit_jitter_p99_us` < 500 with the
+  TIME_CRITICAL thread. The PACED path (`pipeline_paced.rs`) keeps its own audio
+  clock (the Pacer's `AudioGridBuffer` + PLL) and is untouched.
