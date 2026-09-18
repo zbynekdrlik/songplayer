@@ -60,9 +60,17 @@ pub fn begin(video_id: i64) -> InFlightGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // The in-flight cell is a process-global; serialize the tests that assert an
+    // EXACT `Some(id)` so a parallel test cannot stomp the value between our set
+    // and our read. Also makes `begin(1)` a deterministic kill for the NONE
+    // sentinel mutant below.
+    static SERIAL: Mutex<()> = Mutex::new(());
 
     #[test]
     fn guard_sets_and_clears_in_flight() {
+        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
         // A distinctive id no other test uses, so the post-drop check is robust
         // against this process-global being touched by a parallel test (the
         // signal after our clear is never our own id again).
@@ -70,5 +78,21 @@ mod tests {
         assert_eq!(in_flight(), Some(4242));
         drop(g);
         assert_ne!(in_flight(), Some(4242));
+    }
+
+    /// #177 mutation: the `NONE = -1` sentinel. Video ids are positive row ids,
+    /// so a mutated `NONE = 1` would swallow the real id `1` as "nothing in
+    /// flight". `begin(1)` must be reported as `Some(1)`.
+    #[test]
+    fn begin_reports_positive_row_id_one() {
+        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let g = begin(1);
+        assert_eq!(
+            in_flight(),
+            Some(1),
+            "video id 1 must be in flight, not swallowed by the sentinel"
+        );
+        drop(g);
+        assert_eq!(in_flight(), None, "cleared once the guard drops");
     }
 }

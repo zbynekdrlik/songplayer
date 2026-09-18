@@ -144,6 +144,32 @@ async fn videos_payload_carries_stems_state_marker() {
     assert_eq!(state_of(unsup).as_deref(), Some("unavailable"));
 }
 
+/// #177 mutation: the `stems_error` reason mapping. The now-playing tests above
+/// only ever exercise ready/queued/failed, so the `Unavailable` arm and the
+/// no-reason default were never pinned — a deleted `Unavailable` arm silently
+/// falls through to `None`. This pure-function test covers every arm.
+#[test]
+fn stems_error_covers_unavailable_failed_and_none() {
+    use crate::db::models_stems::StemsState;
+    // Unavailable carries its OWN human reason — NOT the fall-through `None`.
+    let unavail = super::stems_error(StemsState::Unavailable, 0);
+    assert!(
+        unavail
+            .as_deref()
+            .is_some_and(|s| s.contains("nie sú dostupné")),
+        "unavailable song must carry its own reason, got {unavail:?}"
+    );
+    // Failed carries the attempt count.
+    assert_eq!(
+        super::stems_error(StemsState::Failed, 3).as_deref(),
+        Some("posledný pokus o spracovanie stemov zlyhal (pokusov: 3)"),
+    );
+    // Ready / Queued / Processing need no explanation.
+    assert!(super::stems_error(StemsState::Ready, 0).is_none());
+    assert!(super::stems_error(StemsState::Queued, 5).is_none());
+    assert!(super::stems_error(StemsState::Processing, 0).is_none());
+}
+
 #[tokio::test]
 async fn enqueue_endpoint_reopens_a_failed_song() {
     let state = test_state().await;

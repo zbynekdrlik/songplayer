@@ -333,6 +333,116 @@ async fn enqueue_stems_reopens_failed_and_unsupported() {
     assert_eq!(queue_position(&pool, unsup).await.unwrap(), Some(2));
 }
 
+/// #177 mutation: the song→title fallback in `video_stems_info` uses
+/// `song.filter(|s| !s.is_empty())`. The existing test only has rows with no
+/// `song` set, so the `!` (and the non-empty branch) was never pinned. Deleting
+/// the `!` would keep ONLY empty songs and drop real ones.
+#[tokio::test]
+async fn video_stems_info_prefers_nonempty_song_over_title() {
+    let pool = setup_pool().await;
+    // Non-empty song wins over the `title` column.
+    let with_song: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title, song, normalized, file_path, audio_file_path) \
+         VALUES (1, 'songttl', 'FallbackTitle', 'RealSong', 1, '/c/st_video.mp4', '/c/st_audio.flac') \
+         RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let info = video_stems_info(&pool, with_song, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        info.title, "RealSong",
+        "a non-empty song must win over the title column"
+    );
+
+    // Empty song falls back to the title column (locks the emptiness filter).
+    let empty_song: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title, song, normalized, file_path, audio_file_path) \
+         VALUES (1, 'emptysong', 'OnlyTitle', '', 1, '/c/es_video.mp4', '/c/es_audio.flac') \
+         RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let info = video_stems_info(&pool, empty_song, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        info.title, "OnlyTitle",
+        "an empty song must fall back to the title column"
+    );
+}
+
+/// #177 mutation: the stem-relevance predicate in `stems_state_map`
+/// (`if !(normalized && has_audio) && !has_stem { return None; }`). The existing
+/// map test only inserts normalized+audio rows, so the `has_stem` clause and the
+/// `normalized && has_audio` conjunction were never the deciding factor. These
+/// rows pin the `||`/`&&`/`!` operators on lines 182 and 184.
+#[tokio::test]
+async fn stems_state_map_relevance_predicate() {
+    let pool = setup_pool().await;
+
+    // A: normalized + audio, no stems → relevant baseline → "queued".
+    let a = insert_normalized(&pool, "rel_a").await;
+
+    // B: NOT normalized, NO audio, but ONE stem file present → relevant purely
+    //    via the has-stem clause. Kills `||`→`&&` (182:45) and the deletion of
+    //    `!` in `!has_stem` (184:46): both would drop this row.
+    let b: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title, normalized, vocals_file_path) \
+         VALUES (1, 'rel_b', 't', 0, '/c/rel_b_vocals.flac') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // C: normalized but NO audio and NO stems → NOT relevant. Kills `&&`→`||`
+    //    (184:29): under `||`, `normalized || has_audio` is true and the row
+    //    would wrongly be marked.
+    let c: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title, normalized) \
+         VALUES (1, 'rel_c', 't', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // D: un-normalized, no audio, no stems → NOT relevant (control).
+    let d: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title, normalized) \
+         VALUES (1, 'rel_d', 't', 0) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let map = stems_state_map(&pool, 1, None).await.unwrap();
+    assert_eq!(
+        map.get(&a).map(String::as_str),
+        Some("queued"),
+        "normalized+audio row is stem-relevant"
+    );
+    assert_eq!(
+        map.get(&b).map(String::as_str),
+        Some("queued"),
+        "a row with one stem file is relevant even when not normalized / no audio"
+    );
+    assert_eq!(
+        map.get(&c),
+        None,
+        "normalized but no audio and no stems is NOT relevant"
+    );
+    assert_eq!(
+        map.get(&d),
+        None,
+        "un-normalized, no audio, no stems is NOT relevant"
+    );
+}
+
 #[tokio::test]
 async fn count_stems_progress_counts_pending_and_done() {
     let pool = setup_pool().await;
