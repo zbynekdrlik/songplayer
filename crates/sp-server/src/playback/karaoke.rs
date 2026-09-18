@@ -80,15 +80,21 @@ impl PlaybackEngine {
     pub async fn set_dub_mix(&mut self, video_id: i64, ratio: f32) {
         let control = crate::stems::control::global();
         control.set_dub_ratio(ratio);
-        let (g_original, g_vocals, g_instrumental, g_dub) =
-            crate::stems::control::dub_gains(control.dub_ratio());
+        let r = control.dub_ratio();
+        let (g_original, g_vocals, g_instrumental, g_dub) = crate::stems::control::dub_gains(r);
+        // #183 round 2: also log the 2-stream no-stems gains, since a long,
+        // un-separable dub video plays the `[original, dub]` mix — this is the
+        // pair the box verification watches move live.
+        let (g2_original, g2_dub) = crate::stems::control::dub_over_original_gains(r);
         info!(
             video_id,
-            ratio = control.dub_ratio(),
+            ratio = r,
             g_original,
             g_vocals,
             g_instrumental,
             g_dub,
+            g2_original,
+            g2_dub,
             "dub mix changed (live gains, no reload)"
         );
     }

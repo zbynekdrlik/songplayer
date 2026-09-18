@@ -111,21 +111,31 @@ obsolete). Default mix for a dub video = **dub only** (r=1.0); no same-colour
 blend.
 
 ## Chain + state machine
-`dub_status`: `queued → stems (wait) → synth → ready | failed(+backoff)`. Live
-folds the EN/SK transcripts INTO the one session, so there is NO lyrics
-dependency (the `transcript`/`translation` `DubChainState` variants are unused by
-D4). `models_dabing.rs` D4 selectors: `get_next_dub_job` (dub_requested=1,
+`dub_status`: `queued → synth → ready | failed(+backoff)`. **Round 2 (#183): the
+dub chain NO LONGER waits for stems** — there is no `stems` park state on the
+happy path. Live folds the EN/SK transcripts INTO the one session, so there is NO
+lyrics dependency (the `transcript`/`translation` `DubChainState` variants are
+unused by D4). `models_dabing.rs` D4 selectors: `get_next_dub_job` (dub_requested=1,
 downloaded, not none/ready, past backoff, **newest `dub_requested_at` first** =
-the priority queue), `mark_dub_waiting_stems` (sets `stem_manual_priority=1`),
-`mark_dub_synth`, `mark_dub_ready`, `record_dub_deferral`, pure `dub_stems_ready`.
+the priority queue, now also selects `stem_status`), `mark_dub_synth`,
+`mark_dub_ready`, `record_dub_deferral`; pure `dub_stems_ready` /
+`dub_stems_state` / `synth_ready` (the proceed-without-stems decision) and
+`raise_dub_stem_priority` (sets `stem_manual_priority=1` WITHOUT parking at
+`stems`). The old `mark_dub_waiting_stems` (parked at `stems`) is RETIRED.
 
 ## Worker (`crates/sp-server/src/dabing/{mod,worker,child,chunk_plan}.rs`)
 Mirrors the stem worker: 10 s tick, `dub_worker_enabled` kill-switch, venv-python
 gate, `HeavyStepPlan::for_activity` (BELOW_NORMAL, never gates playback — owner:
 processing runs during playback at reduced priority), #167 startup floor, memory
-guard, one heavy child at a time (shared slot). Precondition = both stems present
-(the ambient bed + original-voice channels the 4-stream mix needs); while missing
-it parks at `stems` and raises `stem_manual_priority`. Live INPUT is the ORIGINAL
+guard, one heavy child at a time (shared slot). **Round 2 (#183): NO stems
+precondition** — the pure `synth_ready(downloaded, dub_stems_state, duration_ms)`
+decides `Proceed` / `ProceedRaisePriority` / `WaitForDownload`; the dub NEVER
+waits for stems. When stems are merely pending (absent but the duration is within
+the 15-min stem cap) the worker raises `stem_manual_priority` ONCE
+(`raise_dub_stem_priority`) so a later separation ENRICHES the mix (2-stream →
+4-stream on the next open) and proceeds to `synth` immediately; when
+`stem_status='unsupported'` (over the cap) or beyond the cap it proceeds without
+raising (separation would only be marked unsupported). Live INPUT is the ORIGINAL
 `audio_file_path` (not a stem). `dub_engine="gemini-live-translate"`.
 
 - **Chunk plan (Rust owns it):** the worker runs ffmpeg `silencedetect` (a light
@@ -156,14 +166,25 @@ ensure_genai` pins `google-genai==2.24.0`, idempotent, never triggers the heavy
 qwen/torch reinstall). Cost ~$0.037/min.
 
 ## Playback (`stems/reader.rs` + `stems/control.rs`)
-When `dub_path(audio)` (`<base>_dub.flac`) exists AND both stems exist,
-`open_audio_stream` opens a **4-stream** `StemMixReader` `[original, vocals,
-instrumental, dub]` fed `KaraokeControl::dub_gain_handles()`. `dub_gains(r) =
-(0, 1−r, 1, r)`: original full-mix silent, vocals = original voice, instrumental =
-ambient bed, dub = SK. Default r=1.0 (dub only). `PATCH /api/v1/videos/{id}/dub-mix`
-persists to DB AND sends `EngineCommand::SetDubMix{video_id, ratio}` →
-`engine.set_dub_mix` → `control.set_dub_ratio` (live, no pipeline reopen — the #186
-seam, one stream wider). Any 4-stream open failure degrades to the stem/plain mix.
+`open_audio_stream`'s pure `audio_source_kind(vocals, instrumental, dub)` chooses:
+- **`DubMix`** — dub + BOTH stems → a **4-stream** `StemMixReader` `[original,
+  vocals, instrumental, dub]` fed `dub_gain_handles()`. `dub_gains(r) =
+  (0, 1−r, 1, r)`: original full-mix silent, vocals = original voice,
+  instrumental = ambient bed, dub = SK.
+- **`DubOverOriginal` (#183 round 2)** — dub WITHOUT both stems → a **2-stream**
+  `StemMixReader` `[original, dub]` fed `dub_over_original_gain_handles()`.
+  `dub_over_original_gains(r) = (max(1−r, DUB_ORIGINAL_FLOOR), r)` with
+  `DUB_ORIGINAL_FLOOR = 0.125` (−18 dB): the FULL original (English speaker) is
+  the bed, floored so the room never goes dead under the dub; at r=0 the original
+  is full and the dub silent. This is what lets a long, un-separable video be
+  dubbed. Stems arriving later promote a fresh open to `DubMix`.
+
+Default r=1.0. `PATCH /api/v1/videos/{id}/dub-mix` persists to DB AND sends
+`EngineCommand::SetDubMix{video_id, ratio}` → `engine.set_dub_mix` →
+`control.set_dub_ratio`, which publishes BOTH the 4-stream quad AND the 2-stream
+pair from the same `r` (live, no pipeline reopen — the #186 seam; only one mix is
+ever open). `dub_gains_for(kind, r)` is the pure, unit-tested per-kind gain
+chooser. Any dub-reader open failure degrades to the stem/plain mix.
 
 ## Cap note
 `lib.rs` was at exactly 1000 lines, so the `EngineCommand` match was extracted to a
@@ -172,16 +193,15 @@ sibling `engine_dispatch.rs` (free `dispatch(&mut engine, cmd)`) before adding t
 
 ## Known gotchas (D4, verified on win-resolume 18.9.2026)
 
-- **A dub for a video > 15 min STALLS at `dub_status=stems`.** The 4-stream mix
-  precondition needs stems, but the stem worker caps separation at
-  `STEM_MAX_DURATION_MS` (15 min, `stems/worker.rs`) and marks a longer file
-  `stem_status=unsupported`, so the dub never leaves `stems`. Sermons are long by
-  nature — the sample "Morning Prayer & Devotion" (40 min, video 344) hit exactly
-  this. Open design question (main's call, filed on #183): the dub-only default
-  (r=1.0) does NOT need the vocals stem — degrade gracefully to a 2-stream
-  `[original, dub]` / dub-only mix when stems are unsupported/absent, so long
-  sermons are dubbable without a multi-hour (or capped-out) stem pass. Until then,
-  prove the chain on a SHORT (≤ 3 min) speech video.
+- **RESOLVED in round 2 (#183): a long video no longer stalls at
+  `dub_status=stems`.** The stems precondition was removed (`synth_ready` never
+  waits); a video without both stems plays the 2-stream `DubOverOriginal` mix
+  (`[original, dub]`, original bed floored at −18 dB). The 15-min
+  `STEM_MAX_DURATION_MS` cap still marks a 40-min file `stem_status=unsupported`,
+  but the dub now proceeds to `synth` regardless. The sample "Morning Prayer &
+  Devotion" (40 min, video 344) is the acceptance case: `stems → synth → ready`
+  on its own, playing the 2-stream mix. (Historical: round 1 required stems and
+  parked long videos forever — the owner's actual 40-min use case.)
 - **`dub_worker.py` is materialised only when a dub reaches the synth step.**
   `DubWorker::ensure_script` runs AFTER the stems precondition, so on a box whose
   only dub video is stuck at `stems`, `dub_worker.py` is NOT written to

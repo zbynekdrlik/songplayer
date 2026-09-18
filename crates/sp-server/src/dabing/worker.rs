@@ -149,21 +149,34 @@ impl DubWorker {
             }
         };
 
-        // Precondition: both stems must exist (the ambient bed + original-voice
-        // channels the 4-stream mix needs). While they are missing, park at
-        // `stems` and (re)raise the stems manual-priority so separation runs ahead.
-        if !models_dabing::dub_stems_ready(
+        // #183 round 2: the dub chain NEVER waits for stems — long videos the stem
+        // worker cannot separate (over the 15-min cap) must still be dubbed. The
+        // pure `synth_ready` decides: proceed now; if the stems are merely pending
+        // (absent but within the cap) raise their manual priority so a later
+        // separation enriches the mix (2-stream → 4-stream on the next open),
+        // without parking here.
+        let stems = models_dabing::dub_stems_state(
             job.vocals_file_path.as_deref(),
             job.instrumental_file_path.as_deref(),
-        ) {
-            if job.dub_status != "stems" {
-                let _ = models_dabing::mark_dub_waiting_stems(&self.pool, job.video_id).await;
-                info!(
-                    video_id = job.video_id,
-                    "dub worker: waiting for stems (raised stem_manual_priority)"
-                );
+            job.stem_status.as_deref(),
+        );
+        match models_dabing::synth_ready(true, stems, job.duration_ms) {
+            models_dabing::SynthDecision::WaitForDownload => {
+                // Defensive — `get_next_dub_job` already requires normalized+audio.
+                return;
             }
-            return;
+            models_dabing::SynthDecision::ProceedRaisePriority => {
+                // Raise the stems priority once, when first leaving the pre-synth
+                // state (the next tick sees `dub_status = 'synth'` and skips it).
+                if job.dub_status != "synth" {
+                    let _ = models_dabing::raise_dub_stem_priority(&self.pool, job.video_id).await;
+                    info!(
+                        video_id = job.video_id,
+                        "dub worker: stems pending — raised stem_manual_priority, proceeding to synth without waiting"
+                    );
+                }
+            }
+            models_dabing::SynthDecision::Proceed => {}
         }
 
         // #167 startup floor: no heavy step in the first 60 s so the wall pipelines
@@ -178,7 +191,7 @@ impl DubWorker {
             return;
         }
 
-        // Stems ready → advance to synth.
+        // Advance to synth (stems ready, unsupported, or pending-but-not-waited).
         if job.dub_status != "synth"
             && let Err(e) = models_dabing::mark_dub_synth(&self.pool, job.video_id).await
         {

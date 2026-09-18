@@ -531,6 +531,29 @@ app.patch("/api/v1/videos/:id/dub-mix", (req, res) => {
   res.status(200).json({ ratio });
 });
 
+// #183 round 2: push a fully-formed DubRow so a test can assert a terminal state
+// (e.g. a dub-ready video WITHOUT stems — stem_status stays null — still renders
+// `pripravené`, proving the 2-stream mix path is a first-class ready state).
+app.post("/__mock/dabing-add", (req, res) => {
+  const b = req.body || {};
+  const video_id = Number(b.video_id ?? nextDubId++);
+  const dub_status = b.dub_status ?? "ready";
+  const row = {
+    video_id,
+    playlist_id: DABING_PLAYLIST_ID,
+    title: b.title ?? `Dabing ${video_id}`,
+    dub_status,
+    dub_error: b.dub_error ?? null,
+    dub_mix_ratio: b.dub_mix_ratio ?? 1.0,
+    dub_file_path: b.dub_file_path ?? "/c/a_dub.flac",
+    stem_status: b.stem_status ?? null,
+    lyrics_present: !!b.lyrics_present,
+    chain_state: b.chain_state ?? chainStateFor(dub_status),
+  };
+  dubRows.unshift(row);
+  res.status(201).json(row);
+});
+
 app.post("/__mock/dabing-reset", (_req, res) => {
   dubRows = [];
   nextDubId = 9000;

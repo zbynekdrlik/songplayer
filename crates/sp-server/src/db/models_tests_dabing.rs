@@ -300,6 +300,82 @@ fn dub_stems_ready_needs_both_non_empty_paths() {
     assert!(!dub_stems_ready(None, None));
 }
 
+#[test]
+fn dub_stems_state_collapses_presence_and_status() {
+    // Both files present → Ready (regardless of a stale status).
+    assert_eq!(
+        dub_stems_state(Some("/v.flac"), Some("/i.flac"), Some("unsupported")),
+        DubStemsState::Ready
+    );
+    assert_eq!(
+        dub_stems_state(Some("/v.flac"), Some("/i.flac"), None),
+        DubStemsState::Ready
+    );
+    // Absent + unsupported → Unsupported (terminal; will never arrive).
+    assert_eq!(
+        dub_stems_state(None, None, Some("unsupported")),
+        DubStemsState::Unsupported
+    );
+    // Absent + any other status → Pending (a separation may still run).
+    assert_eq!(dub_stems_state(None, None, None), DubStemsState::Pending);
+    assert_eq!(
+        dub_stems_state(None, None, Some("failed")),
+        DubStemsState::Pending
+    );
+    // A half-pair is not Ready.
+    assert_eq!(
+        dub_stems_state(Some("/v.flac"), None, None),
+        DubStemsState::Pending
+    );
+}
+
+#[test]
+fn synth_ready_never_waits_for_stems() {
+    use SynthDecision::*;
+    // Not downloaded → wait for download (the ONLY wait state).
+    assert_eq!(
+        synth_ready(false, DubStemsState::Ready, Some(60_000)),
+        WaitForDownload
+    );
+    // Stems ready → proceed straight to synth.
+    assert_eq!(
+        synth_ready(true, DubStemsState::Ready, Some(60_000)),
+        Proceed
+    );
+    // Stems unsupported (over the 15-min cap) → proceed WITHOUT raising priority
+    // (this is the round-2 fix: the 40-min sample no longer stalls at `stems`).
+    assert_eq!(
+        synth_ready(true, DubStemsState::Unsupported, Some(2_400_000)),
+        Proceed
+    );
+    // Stems pending AND within the 15-min cap → proceed AND raise priority so a
+    // later separation enriches the mix.
+    assert_eq!(
+        synth_ready(true, DubStemsState::Pending, Some(60_000)),
+        ProceedRaisePriority
+    );
+    // Unknown duration is "supported" → still raise priority.
+    assert_eq!(
+        synth_ready(true, DubStemsState::Pending, None),
+        ProceedRaisePriority
+    );
+    // Stems pending but BEYOND the cap (separation would only be unsupported) →
+    // proceed WITHOUT raising priority (raising it would be pointless).
+    assert_eq!(
+        synth_ready(true, DubStemsState::Pending, Some(2_400_000)),
+        Proceed
+    );
+    // Boundary: exactly 15 min is supported (raise); one ms over is not (proceed).
+    assert_eq!(
+        synth_ready(true, DubStemsState::Pending, Some(900_000)),
+        ProceedRaisePriority
+    );
+    assert_eq!(
+        synth_ready(true, DubStemsState::Pending, Some(900_001)),
+        Proceed
+    );
+}
+
 #[tokio::test]
 async fn get_next_dub_job_picks_newest_requested_first() {
     let pool = setup().await;
@@ -369,8 +445,14 @@ async fn mark_dub_transitions_advance_status() {
     let id = insert_video(&pool, "vt", "T").await;
     make_dub_job(&pool, id, "queued", "2026-09-18T10:00:00.000Z").await;
 
-    mark_dub_waiting_stems(&pool, id).await.unwrap();
-    assert_eq!(col_str(&pool, id, "dub_status").await, "stems");
+    // #183 round 2: raising the stems priority does NOT park dub_status at
+    // `stems` — it only raises stem_manual_priority; the dub proceeds to synth.
+    raise_dub_stem_priority(&pool, id).await.unwrap();
+    assert_eq!(
+        col_str(&pool, id, "dub_status").await,
+        "queued",
+        "raising stem priority must NOT change dub_status"
+    );
     assert_eq!(col_i64(&pool, id, "stem_manual_priority").await, 1);
 
     mark_dub_synth(&pool, id).await.unwrap();

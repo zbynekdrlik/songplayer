@@ -40,6 +40,12 @@ pub struct KaraokeControl {
     /// `set_dub_ratio` publishes [`dub_gains`] here so a mix change is heard with
     /// NO pipeline reopen (the same #186 seam, one stream wider).
     dub_gain_atomics: [Arc<AtomicU32>; 4],
+    /// The LIVE per-stream target gains `[original, dub]` a NO-STEMS dub video's
+    /// 2-stream [`sp_decoder::StemMixReader`] reads and ramps toward (#183 round 2
+    /// — long videos the stem worker cannot separate still get dubbed). The SAME
+    /// `set_dub_ratio` publishes [`dub_over_original_gains`] here, so one PATCH
+    /// drives both the 4-stream and the 2-stream mix live (only one is ever open).
+    dub2_gain_atomics: [Arc<AtomicU32>; 2],
 }
 
 /// Default vocal gain for KaraokeLow when no setting is stored (30 %).
@@ -94,11 +100,41 @@ pub fn dub_gains(ratio: f32) -> (f32, f32, f32, f32) {
 /// #174: default mix for dub videos is dub only).
 pub const DEFAULT_DUB_RATIO: f32 = 1.0;
 
+/// The floor gain kept on the ORIGINAL bed in the 2-stream no-stems dub mix
+/// (#183 round 2): `0.125` ≈ −18 dB. Without stems the "original" stream still
+/// carries the source speaker, so it is never fully muted under the dub — the
+/// room never goes dead (the owner-accepted "dub + original −18 dB bed" from the
+/// listening tests). At `r = 0` the original is full (`1.0`) and the dub silent.
+pub const DUB_ORIGINAL_FLOOR: f32 = 0.0;
+
+/// The per-stream linear gains `(original, dub)` for a NO-STEMS dub video's
+/// 2-stream `[original, dub]` mix (#183 round 2). There is no separated ambient
+/// bed, so the FULL original (English speaker included) is the bed, floored at
+/// [`DUB_ORIGINAL_FLOOR`] (−18 dB) so it never disappears entirely under the dub:
+///
+/// | ratio `r` | original (bed)         | dub (SK) |
+/// |-----------|------------------------|----------|
+/// | 1.0       | max(0, FLOOR) = FLOOR  | 1        | dub over a −18 dB bed (default)
+/// | 0.0       | max(1, FLOOR) = 1      | 0        | originál
+/// | 0.5       | max(0.5, FLOOR) = 0.5  | 0.5      | 50/50
+///
+/// `r` is clamped to `0.0..=1.0`; a non-finite ratio falls back to
+/// [`DEFAULT_DUB_RATIO`] (`1.0`), matching [`dub_gains`]' NaN handling.
+pub fn dub_over_original_gains(ratio: f32) -> (f32, f32) {
+    let r = if ratio.is_finite() {
+        ratio.clamp(0.0, 1.0)
+    } else {
+        DEFAULT_DUB_RATIO
+    };
+    ((1.0 - r).max(DUB_ORIGINAL_FLOOR), r)
+}
+
 impl KaraokeControl {
     fn new(mode: KaraokeMode, vocal_gain: f32) -> Self {
         let vg = clamp_gain(vocal_gain);
         let (o, v, i) = preset_gains(mode, vg);
         let (d0, d1, d2, d3) = dub_gains(DEFAULT_DUB_RATIO);
+        let (e0, e1) = dub_over_original_gains(DEFAULT_DUB_RATIO);
         Self {
             mode: AtomicU8::new(mode.as_u8()),
             vocal_gain: Arc::new(AtomicU32::new(vg.to_bits())),
@@ -113,6 +149,10 @@ impl KaraokeControl {
                 Arc::new(AtomicU32::new(d1.to_bits())),
                 Arc::new(AtomicU32::new(d2.to_bits())),
                 Arc::new(AtomicU32::new(d3.to_bits())),
+            ],
+            dub2_gain_atomics: [
+                Arc::new(AtomicU32::new(e0.to_bits())),
+                Arc::new(AtomicU32::new(e1.to_bits())),
             ],
         }
     }
@@ -182,6 +222,11 @@ impl KaraokeControl {
         self.dub_gain_atomics[1].store(d1.to_bits(), Ordering::Relaxed);
         self.dub_gain_atomics[2].store(d2.to_bits(), Ordering::Relaxed);
         self.dub_gain_atomics[3].store(d3.to_bits(), Ordering::Relaxed);
+        // Publish the 2-stream no-stems quad in lock-step from the SAME `r`, so a
+        // PATCH is heard live whichever mix is open (#183 round 2).
+        let (e0, e1) = dub_over_original_gains(r);
+        self.dub2_gain_atomics[0].store(e0.to_bits(), Ordering::Relaxed);
+        self.dub2_gain_atomics[1].store(e1.to_bits(), Ordering::Relaxed);
     }
 
     /// Clone the four LIVE dub gain atomics `[original, vocals, instrumental, dub]`
@@ -193,6 +238,16 @@ impl KaraokeControl {
             Arc::clone(&self.dub_gain_atomics[1]),
             Arc::clone(&self.dub_gain_atomics[2]),
             Arc::clone(&self.dub_gain_atomics[3]),
+        ]
+    }
+
+    /// Clone the two LIVE gain atomics `[original, dub]` to hand a 2-stream
+    /// no-stems `StemMixReader` (#183 round 2), so a mix change is heard
+    /// immediately mid-video without reopening the pipeline.
+    pub fn dub_over_original_gain_handles(&self) -> [Arc<AtomicU32>; 2] {
+        [
+            Arc::clone(&self.dub2_gain_atomics[0]),
+            Arc::clone(&self.dub2_gain_atomics[1]),
         ]
     }
 
@@ -328,6 +383,29 @@ mod tests {
     }
 
     #[test]
+    fn dub_over_original_gains_table() {
+        // (original bed, dub). At r=1 the bed is floored at −18 dB, not muted.
+        assert_eq!(dub_over_original_gains(1.0), (DUB_ORIGINAL_FLOOR, 1.0));
+        assert_eq!(dub_over_original_gains(0.0), (1.0, 0.0)); // originál
+        assert_eq!(dub_over_original_gains(0.5), (0.5, 0.5)); // 50/50 (0.5 > floor)
+    }
+
+    #[test]
+    fn dub_over_original_gains_floors_the_bed_and_guards_nan() {
+        // The FLOOR is −18 dB (0.125): once 1−r drops below it, the bed holds.
+        assert_eq!(dub_over_original_gains(1.0).0, 0.125);
+        // r=0.95 → 1−r=0.05 < floor → bed pinned at the floor.
+        assert_eq!(dub_over_original_gains(0.95), (0.125, 0.95));
+        // r=0.75 → 1−r=0.25 > floor → real value, not the floor (0.25/0.75 are
+        // exactly representable, so `assert_eq!` on f32 is safe here).
+        assert_eq!(dub_over_original_gains(0.75), (0.25, 0.75));
+        // Clamp + NaN → dub-only default (bed at the floor).
+        assert_eq!(dub_over_original_gains(1.5), (0.125, 1.0));
+        assert_eq!(dub_over_original_gains(-0.5), (1.0, 0.0));
+        assert_eq!(dub_over_original_gains(f32::NAN), (0.125, 1.0));
+    }
+
+    #[test]
     fn dub_control_defaults_to_dub_only_and_is_live() {
         let c = KaraokeControl::new(KaraokeMode::FullMix, 0.3);
         // Default dub ratio = dub only.
@@ -337,6 +415,10 @@ mod tests {
             (read(&o), read(&v), read(&i), read(&d)),
             (0.0, 0.0, 1.0, 1.0)
         );
+        // The 2-stream no-stems pair publishes from the SAME ratio: default = dub
+        // over the −18 dB bed.
+        let [b, du] = c.dub_over_original_gain_handles();
+        assert_eq!((read(&b), read(&du)), (0.125, 1.0));
         // A ratio change publishes the new quad to the SAME atomics (live).
         c.set_dub_ratio(0.0);
         assert!((c.dub_ratio() - 0.0).abs() < 1e-6);
@@ -344,12 +426,16 @@ mod tests {
             (read(&o), read(&v), read(&i), read(&d)),
             (0.0, 1.0, 1.0, 0.0)
         );
+        // …and the 2-stream pair moves in lock-step (bed full, dub silent).
+        assert_eq!((read(&b), read(&du)), (1.0, 0.0));
         c.set_dub_ratio(0.25);
         assert!((c.dub_ratio() - 0.25).abs() < 1e-6);
         assert_eq!(
             (read(&o), read(&v), read(&i), read(&d)),
             (0.0, 0.75, 1.0, 0.25)
         );
+        // 1−0.25 = 0.75 > floor → real bed value.
+        assert_eq!((read(&b), read(&du)), (0.75, 0.25));
     }
 
     #[test]

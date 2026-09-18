@@ -211,6 +211,10 @@ pub struct DubJob {
     pub dub_mix_ratio: f64,
     pub vocals_file_path: Option<String>,
     pub instrumental_file_path: Option<String>,
+    /// The stems worker's terminal marker: `'unsupported'` means the video is over
+    /// the 15-min separation cap and stems will NEVER arrive — the dub proceeds
+    /// without them (2-stream mix) and does NOT raise the stems priority.
+    pub stem_status: Option<String>,
     pub dub_attempts: i64,
 }
 
@@ -221,6 +225,85 @@ pub fn dub_stems_ready(vocals: Option<&str>, instrumental: Option<&str>) -> bool
     vocals.is_some_and(|v| !v.is_empty()) && instrumental.is_some_and(|i| !i.is_empty())
 }
 
+/// The stems availability for the dub proceed decision (#183 round 2), collapsed
+/// to the three cases [`synth_ready`] branches on. Pure + observable so the
+/// decision is unit-tested exhaustively without the filesystem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DubStemsState {
+    /// Both stem files present → the 4-stream mix will be used.
+    Ready,
+    /// Stems not present yet, still separable (status pending / failed / none) —
+    /// a background separation may still produce them.
+    Pending,
+    /// `stem_status = 'unsupported'` — the video is over the 15-min cap, so stems
+    /// will NEVER arrive; the dub uses the 2-stream mix.
+    Unsupported,
+}
+
+/// Collapse the raw stem artefacts + status into a [`DubStemsState`]. Present
+/// files win over any status (a `Ready` mix is ready regardless of the recorded
+/// status); else `'unsupported'` is terminal; else `Pending`.
+pub fn dub_stems_state(
+    vocals: Option<&str>,
+    instrumental: Option<&str>,
+    stem_status: Option<&str>,
+) -> DubStemsState {
+    if dub_stems_ready(vocals, instrumental) {
+        DubStemsState::Ready
+    } else if stem_status == Some("unsupported") {
+        DubStemsState::Unsupported
+    } else {
+        DubStemsState::Pending
+    }
+}
+
+/// What the dub worker should do with a job, given whether the video is
+/// downloaded, its stems availability, and its duration (#183 round 2). The dub
+/// chain NEVER waits for stems (there is no `WaitForStems` — long videos the stem
+/// worker cannot separate must still be dubbed):
+///
+/// - not downloaded → [`SynthDecision::WaitForDownload`];
+/// - stems `Ready` or `Unsupported` → [`SynthDecision::Proceed`] (synthesize now);
+/// - stems `Pending` AND the duration is within the 15-min stem cap →
+///   [`SynthDecision::ProceedRaisePriority`] (synthesize now AND raise
+///   `stem_manual_priority` so a later separation enriches the mix);
+/// - stems `Pending` but the duration is BEYOND the cap → [`SynthDecision::Proceed`]
+///   (separation would only be marked unsupported, so raising its priority is
+///   pointless).
+///
+/// Pure — unit-tested for every combination.
+pub fn synth_ready(
+    downloaded: bool,
+    stems: DubStemsState,
+    duration_ms: Option<i64>,
+) -> SynthDecision {
+    if !downloaded {
+        return SynthDecision::WaitForDownload;
+    }
+    match stems {
+        DubStemsState::Ready | DubStemsState::Unsupported => SynthDecision::Proceed,
+        DubStemsState::Pending => {
+            if crate::stems::worker::stem_duration_supported(duration_ms) {
+                SynthDecision::ProceedRaisePriority
+            } else {
+                SynthDecision::Proceed
+            }
+        }
+    }
+}
+
+/// The dub worker's per-tick decision (#183 round 2). See [`synth_ready`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SynthDecision {
+    /// The video is not downloaded yet — nothing to synthesize.
+    WaitForDownload,
+    /// Synthesize now (stems ready, or will never arrive).
+    Proceed,
+    /// Synthesize now AND raise `stem_manual_priority` so a later separation
+    /// enriches the mix (stems absent but still within the separation cap).
+    ProceedRaisePriority,
+}
+
 /// Select the next dub-requested video needing work, NEWEST request first (the
 /// Dabing section is the owner's priority queue — a fresh add jumps ahead).
 /// Eligible: `dub_requested=1`, downloaded (`normalized=1` + `audio_file_path`),
@@ -229,7 +312,8 @@ pub fn dub_stems_ready(vocals: Option<&str>, instrumental: Option<&str>) -> bool
 pub async fn get_next_dub_job(pool: &SqlitePool) -> Result<Option<DubJob>, sqlx::Error> {
     let row = sqlx::query(
         "SELECT id, youtube_id, audio_file_path, duration_ms, dub_status, \
-                dub_mix_ratio, vocals_file_path, instrumental_file_path, dub_attempts \
+                dub_mix_ratio, vocals_file_path, instrumental_file_path, \
+                stem_status, dub_attempts \
          FROM videos \
          WHERE dub_requested = 1 \
            AND normalized = 1 \
@@ -252,22 +336,21 @@ pub async fn get_next_dub_job(pool: &SqlitePool) -> Result<Option<DubJob>, sqlx:
         dub_mix_ratio: r.get("dub_mix_ratio"),
         vocals_file_path: r.get("vocals_file_path"),
         instrumental_file_path: r.get("instrumental_file_path"),
+        stem_status: r.get("stem_status"),
         dub_attempts: r.get("dub_attempts"),
     }))
 }
 
-/// Move a dub job to the `stems` wait state and (re)raise `stem_manual_priority`
-/// so the stems worker runs this video's separation ahead of the oldest-first
-/// queue. Idempotent; clears any error. No backoff (waiting for stems is normal).
-pub async fn mark_dub_waiting_stems(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE videos \
-         SET dub_status = 'stems', stem_manual_priority = 1, dub_error = NULL \
-         WHERE id = ?",
-    )
-    .bind(video_id)
-    .execute(pool)
-    .await?;
+/// Raise `stem_manual_priority` for a dub job whose stems are not yet present but
+/// are still separable (#183 round 2). Unlike the retired `mark_dub_waiting_stems`
+/// this does NOT park `dub_status` at `stems` — the dub proceeds to `synth`
+/// immediately; a later separation only ENRICHES the mix (2-stream → 4-stream on
+/// the next open). Idempotent; clears any error. No backoff.
+pub async fn raise_dub_stem_priority(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE videos SET stem_manual_priority = 1, dub_error = NULL WHERE id = ?")
+        .bind(video_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
