@@ -107,6 +107,20 @@ paths:
   `40/1080·h` — camera-box `payload.rs` + `burn-geom.hpp`, ported into
   `sp_core::genlock::burn`; luma-only 16/235, chroma neutral 128) so the fleet's
   `recording-verdict` proves contiguity for SP-originated frames.
+- Dashboard genlock indicator (#150→#164→#176): the header `GlobalLockBadge`
+  (`sp-ui/src/components/ndi_health.rs`) is **ALWAYS visible** — grey
+  `● GENLOCK OFF` when NO output has pacing enabled (the production default
+  `genlock_pacing=false`), else `● LOCKED`/`● DEGRADED`/`● UNLOCKED` (green/amber/
+  red, `n/m` live-locked count + worst reason). #176 revised #164's "hide the
+  badge entirely while pacing is off" — the owner must always be able to tell at
+  a glance whether SongPlayer is genlocked, like the fleet OBS badge. The
+  whole-box state is decided by the ONE pure, unit-tested
+  `sp_core::genlock::lock_state::global_lock_summary` (`GlobalLock::Off|Locked|
+  Degraded|Unlocked`; sp-ui is outside the workspace = no unit-test job, so the
+  logic + tests live in sp-core and sp-ui calls it). The PER-CARD `LockBadge`
+  keeps #164's "only where actionable" rule (hidden while pacing off). `sp_core::
+  genlock::lock_state::summarize` stays a 3-state (no OFF) reference. Testid
+  `genlock-global-badge`.
 - The burn is **default OFF, NEVER persisted, paced-path ONLY**: toggled per
   output via `POST /api/v1/ndi/burn {output,on}` (204 / 404 / 409 "pacing
   disabled"), read fresh every boundary through a shared `Arc<AtomicBool>`
