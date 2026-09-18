@@ -13,6 +13,7 @@ use leptos::prelude::*;
 use sp_core::models::Video;
 
 use crate::api;
+use crate::components::dub_toggle::DubToggle;
 use crate::components::video_list_stems::{StemsMarker, passes_stems_filter};
 
 #[component]
@@ -67,6 +68,7 @@ pub fn VideoList(playlist_id: i64) -> impl IntoView {
                         <th>"Cached"</th>
                         <th>"Normalized"</th>
                         <th class="video-list-col-stems">"Stemy"</th>
+                        <th class="video-list-col-dub">"Dabing"</th>
                         <th class="video-list-col-edit"></th>
                     </tr>
                 </thead>
@@ -97,6 +99,7 @@ pub fn VideoList(playlist_id: i64) -> impl IntoView {
                         children=move |video| {
                             let video_id = video.id;
                             let normalized = video.normalized;
+                            let dub_requested = video.dub_requested;
                             let title = video.song.clone().unwrap_or_else(|| video.title.clone());
                             let orig_song = video.song.clone().unwrap_or_default();
                             let orig_artist = video.artist.clone().unwrap_or_default();
@@ -200,6 +203,9 @@ pub fn VideoList(playlist_id: i64) -> impl IntoView {
                                     <td>{if video.normalized { "Yes" } else { "No" }}</td>
                                     <td class="video-list-col-stems">
                                         <StemsMarker state=video.stems_state.clone() />
+                                    </td>
+                                    <td class="video-list-col-dub">
+                                        <DubToggle video_id=video_id initial=dub_requested />
                                     </td>
                                     <td class="video-list-col-edit">
                                         {

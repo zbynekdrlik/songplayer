@@ -94,6 +94,16 @@ pub struct Video {
     /// mapping in `db::models::row_to_video` leaves it `None`).
     #[serde(default)]
     pub stems_state: Option<String>,
+    /// #180 (V26): whether this video is flagged for the dubbing chain. Set by
+    /// the per-row Dabing toggle or a Dabing-section add. Additive +
+    /// `#[serde(default)]` so older payloads that omit it still deserialise.
+    #[serde(default)]
+    pub dub_requested: bool,
+    /// #180 (V26): the dub chain position (`none` / `queued` / `stems` /
+    /// `transcript` / `translation` / `synth` / `ready` / `failed`), for the
+    /// per-row dub marker. `None` on payloads that omit it (WASM store default).
+    #[serde(default)]
+    pub dub_status: Option<String>,
 }
 
 /// A record of a video that was played.

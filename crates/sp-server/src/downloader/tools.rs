@@ -501,10 +501,35 @@ pub(crate) async fn deno_version(deno: &Path) -> Option<String> {
     super::ytdlp_cmd::parse_deno_version(&String::from_utf8_lossy(&output.stdout))
 }
 
-#[cfg_attr(test, mutants::skip)] // subprocess I/O glue; pure logic (URL parse) is covered by extract_youtube_id tests
+/// The `yt-dlp --dump-json` arg list for a metadata fetch, with `--cookies
+/// <path>` inserted right before the URL when a cookie jar is given — the same
+/// rule as the download path's [`super::ytdlp_video_args`] (#141/#180 addendum).
+/// The URL always stays LAST. Pure + unit-tested so the cookie-gate fix is
+/// covered without spawning yt-dlp (the spawn glue in [`fetch_video_metadata`]
+/// stays `mutants::skip`).
+pub(crate) fn metadata_args(
+    url: &str,
+    cookies: Option<&std::path::Path>,
+) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = vec![
+        "--dump-json".into(),
+        "--no-playlist".into(),
+        "--skip-download".into(),
+        "--no-warnings".into(),
+    ];
+    if let Some(c) = cookies {
+        args.push("--cookies".into());
+        args.push(c.into());
+    }
+    args.push(url.into());
+    args
+}
+
+#[cfg_attr(test, mutants::skip)] // subprocess I/O glue; pure logic (URL parse + arg build) is covered by extract_youtube_id + metadata_args tests
 pub async fn fetch_video_metadata(
     ytdlp_path: &std::path::Path,
     url: &str,
+    cookies: Option<&std::path::Path>,
 ) -> anyhow::Result<ImportedVideo> {
     let youtube_id = extract_youtube_id(url)
         .ok_or_else(|| anyhow::anyhow!("could not parse YouTube id from URL: {url}"))?;
@@ -512,16 +537,13 @@ pub async fn fetch_video_metadata(
     // it through the shared builder so the bundled deno is on PATH (#189). The
     // builder also applies CREATE_NO_WINDOW + UTF-8 env (#136 T4), so the
     // `title` we read below is not mangled from the Windows ANSI codepage.
+    // `--cookies` (when the jar exists) clears the separate bot-check the same
+    // way `download_video_stream` does (#180 addendum) — without it the box's
+    // import fails "Sign in to confirm you're not a bot".
     let mut cmd = super::ytdlp_cmd::ytdlp_command(ytdlp_path);
-    cmd.args([
-        "--dump-json",
-        "--no-playlist",
-        "--skip-download",
-        "--no-warnings",
-        url,
-    ])
-    .stdout(std::process::Stdio::piped())
-    .stderr(std::process::Stdio::piped());
+    cmd.args(metadata_args(url, cookies))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     let output = cmd.output().await?;
     if !output.status.success() {
         anyhow::bail!(
@@ -734,6 +756,45 @@ mod tests {
                 "url = {url}"
             );
         }
+    }
+
+    #[test]
+    fn metadata_args_appends_cookies_before_url_when_present() {
+        // #180 addendum: the import metadata fetch must attach --cookies (the
+        // separate bot-check gate) the same way the download path does, with the
+        // URL still last.
+        let url = "https://youtu.be/AvWOCj48pGw";
+        let cookies = std::path::Path::new("/data/cookies.txt");
+        let args = super::metadata_args(url, Some(cookies));
+        let cookies_pos = args
+            .iter()
+            .position(|a| a.to_str() == Some("--cookies"))
+            .expect("--cookies flag present when a cookie file is given");
+        assert_eq!(
+            args[cookies_pos + 1].to_str(),
+            cookies.to_str(),
+            "the element right after --cookies must be the cookie file path"
+        );
+        assert_eq!(
+            args.last().and_then(|a| a.to_str()),
+            Some(url),
+            "the URL must remain the last argument even with --cookies inserted"
+        );
+        assert!(
+            args.iter().any(|a| a.to_str() == Some("--dump-json")),
+            "the metadata fetch is still a --dump-json call"
+        );
+    }
+
+    #[test]
+    fn metadata_args_omits_cookies_when_absent() {
+        let url = "https://youtu.be/AvWOCj48pGw";
+        let args = super::metadata_args(url, None);
+        assert!(
+            !args.iter().any(|a| a.to_str() == Some("--cookies")),
+            "no --cookies flag when no cookie file is given"
+        );
+        assert_eq!(args.last().and_then(|a| a.to_str()), Some(url));
     }
 
     #[test]

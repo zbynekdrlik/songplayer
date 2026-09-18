@@ -1123,3 +1123,41 @@ body {
 .lock-unlocked { color: var(--error); }
 /* #176: GENLOCK OFF — grey, the production default (pacing off), never hidden. */
 .lock-off { color: var(--text-dim); }
+
+/* #180 dubbing D1 — Dabing section + per-row toggle. */
+.dabing-page { padding: 16px; max-width: 900px; margin: 0 auto; }
+.dabing-import { margin-bottom: 16px; }
+.dabing-empty { color: var(--text-dim); font-style: italic; }
+.dabing-list { display: flex; flex-direction: column; gap: 8px; }
+.dabing-row {
+    border: 1px solid var(--border, #333);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--card-bg, #1c1c1c);
+}
+.dabing-row-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+}
+.dabing-title { font-weight: 600; }
+.dabing-play-btn {
+    min-height: 36px;
+    padding: 6px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.dabing-chain { font-size: 0.85rem; color: var(--text-dim); }
+.dabing-step-done { color: var(--success, #4caf50); font-weight: 600; }
+.dabing-chain-error { color: var(--error, #e05252); font-weight: 600; }
+.dub-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.video-list-col-dub { text-align: center; }

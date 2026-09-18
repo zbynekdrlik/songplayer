@@ -1,4 +1,6 @@
+pub mod dabing_list;
 pub mod download_queue;
+pub mod dub_toggle;
 pub mod import_url_box;
 pub mod live_catalog;
 pub mod live_setlist;
