@@ -486,7 +486,7 @@ pub struct ImportedVideo {
     pub duration_ms: Option<u64>,
 }
 
-#[cfg_attr(test, mutants::skip)] // subprocess I/O glue; pure logic (URL parse) is covered by extract_youtube_id tests
+#[cfg_attr(test, mutants::skip)] // subprocess I/O glue (deno --version probe); parse_deno_version is unit-tested
 /// Read `deno --version` and parse the semver (e.g. `2.9.7`). `None` when deno
 /// is missing or the probe fails. Used by the install skip-check and the
 /// startup JS-runtime self-check (#189).
@@ -501,6 +501,7 @@ pub(crate) async fn deno_version(deno: &Path) -> Option<String> {
     super::ytdlp_cmd::parse_deno_version(&String::from_utf8_lossy(&output.stdout))
 }
 
+#[cfg_attr(test, mutants::skip)] // subprocess I/O glue; pure logic (URL parse) is covered by extract_youtube_id tests
 pub async fn fetch_video_metadata(
     ytdlp_path: &std::path::Path,
     url: &str,

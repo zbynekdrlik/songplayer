@@ -4,7 +4,6 @@ use anyhow::Result;
 use serde::Deserialize;
 use sp_core::lyrics::{LyricsLine, LyricsTrack};
 use std::path::Path;
-use tokio::process::Command;
 use tracing::debug;
 
 // ---------------------------------------------------------------------------
@@ -49,7 +48,10 @@ pub async fn fetch_subtitles(
     let output_template = temp_dir.join(youtube_id).to_string_lossy().into_owned();
     let url = format!("https://www.youtube.com/watch?v={}", youtube_id);
 
-    let mut cmd = Command::new(ytdlp_path);
+    // Shared builder (#189): --write-subs still extracts the video (hits the
+    // n-challenge), so it needs the bundled deno on PATH + --js-runtimes deno,
+    // plus CREATE_NO_WINDOW + UTF-8 env.
+    let mut cmd = crate::downloader::ytdlp_cmd::ytdlp_command(ytdlp_path);
     cmd.args([
         "--write-subs",
         "--sub-format",
@@ -61,12 +63,6 @@ pub async fn fetch_subtitles(
         &output_template,
         &url,
     ]);
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
 
     let status = cmd.status().await;
 

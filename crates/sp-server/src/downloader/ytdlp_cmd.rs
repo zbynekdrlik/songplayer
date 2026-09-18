@@ -171,10 +171,12 @@ pub(crate) async fn run_selfcheck(
     deno_path: Option<&Path>,
     cookies: Option<&Path>,
 ) -> (JsRuntimeStatus, Option<String>) {
-    let deno_version = match deno_path {
-        Some(d) => super::tools::deno_version(d).await,
-        None => None,
+    // No deno → the verdict is Missing regardless; skip the needless network
+    // fetch and report it straight away.
+    let Some(deno_path) = deno_path else {
+        return (JsRuntimeStatus::Missing, None);
     };
+    let deno_version = super::tools::deno_version(deno_path).await;
     let mut cmd = ytdlp_command(ytdlp_path);
     cmd.arg("--simulate")
         .arg("--no-warnings")
@@ -208,6 +210,9 @@ pub(crate) async fn init_js_runtime(
     paths: &super::tools::ToolPaths,
     data_dir: &Path,
 ) -> (bool, Option<String>) {
+    // Detected from the CURRENT yt-dlp --help (before any later self-update).
+    // Belt-and-suspenders: even if an old yt-dlp lacks the flag, the tools dir
+    // is first on PATH so yt-dlp auto-enables the bundled deno anyway.
     let help = tools.ytdlp_help(&paths.ytdlp).await.unwrap_or_default();
     set_js_runtime_args(js_runtime_args(&help));
     let cookies_path = data_dir.join("cookies.txt");
