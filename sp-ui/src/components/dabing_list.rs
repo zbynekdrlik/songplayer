@@ -8,6 +8,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
+use crate::components::dub_mixer::DubMixer;
 
 /// The ordered chain steps + their Slovak labels. The index is the step's
 /// position; a row's `chain_state` resolves to the highest reached index.
@@ -103,7 +104,7 @@ pub fn DabingList() -> impl IntoView {
                                 view! {
                                     <div class="dabing-row" data-video-id=video_id.to_string()>
                                         <div class="dabing-row-head">
-                                            <span class="dabing-title">{title}</span>
+                                            <span class="dabing-title">{title.clone()}</span>
                                             <button
                                                 class="dabing-play-btn"
                                                 data-testid="dabing-play"
@@ -123,6 +124,16 @@ pub fn DabingList() -> impl IntoView {
                                             </button>
                                         </div>
                                         {chain_row(row.chain_state.clone(), row.dub_error.clone())}
+                                        // #181: the same modern mixer, bound to this
+                                        // dub video's blend ratio (inert + labelled
+                                        // until the dub is generated).
+                                        <DubMixer
+                                            video_id=video_id
+                                            title=title
+                                            dub_status=row.dub_status.clone()
+                                            dub_mix_ratio=row.dub_mix_ratio
+                                            stem_status=row.stem_status.clone()
+                                        />
                                     </div>
                                 }
                             }
