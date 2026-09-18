@@ -48,6 +48,8 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
             ytdlp_available: ts.ytdlp_available,
             ffmpeg_available: ts.ffmpeg_available,
             ytdlp_version: ts.ytdlp_version.clone(),
+            js_runtime_ok: ts.js_runtime_ok,
+            deno_version: ts.deno_version.clone(),
         };
         if let Ok(json) = serde_json::to_string(&tools_msg) {
             let _ = write.send(Message::Text(json.into())).await;

@@ -301,11 +301,15 @@ mod tests {
                 ytdlp_available: true,
                 ffmpeg_available: true,
                 ytdlp_version: Some("2025.01.15".into()),
+                js_runtime_ok: true,
+                deno_version: Some("2.9.7".into()),
             },
             ws::ServerMsg::ToolsStatus {
                 ytdlp_available: false,
                 ffmpeg_available: false,
                 ytdlp_version: None,
+                js_runtime_ok: false,
+                deno_version: None,
             },
             ws::ServerMsg::Error {
                 message: "something went wrong".into(),

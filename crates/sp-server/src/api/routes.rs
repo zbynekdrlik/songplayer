@@ -87,6 +87,12 @@ pub struct ToolsStatusResponse {
     pub ytdlp_available: bool,
     pub ffmpeg_available: bool,
     pub ytdlp_version: Option<String>,
+    /// yt-dlp has a working JS runtime (Deno) for YouTube's n-challenge (#189).
+    #[serde(default)]
+    pub js_runtime_ok: bool,
+    /// Bundled Deno version, when present.
+    #[serde(default)]
+    pub deno_version: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -732,6 +738,8 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
             ytdlp_available: tools.ytdlp_available,
             ffmpeg_available: tools.ffmpeg_available,
             ytdlp_version: tools.ytdlp_version.clone(),
+            js_runtime_ok: tools.js_runtime_ok,
+            deno_version: tools.deno_version.clone(),
         },
         playlist_count,
         lan_url: lan.lan_url.clone(),
