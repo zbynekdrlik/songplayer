@@ -272,3 +272,139 @@ fn dub_chain_state_wire_strings_are_stable() {
     assert_eq!(DubChainState::Ready.as_str(), "ready");
     assert_eq!(DubChainState::Failed.as_str(), "failed");
 }
+
+// ── D4 (#183): dub synthesis chain selectors ────────────────────────────────────
+
+/// Make `id` a downloaded, dub-requested job at `status` with a distinct
+/// `dub_requested_at` (later `req_at` = higher priority) and normalized audio.
+async fn make_dub_job(pool: &SqlitePool, id: i64, status: &str, req_at: &str) {
+    sqlx::query(
+        "UPDATE videos SET dub_requested = 1, normalized = 1, \
+             audio_file_path = '/c/a_audio.flac', dub_status = ?, dub_requested_at = ? \
+         WHERE id = ?",
+    )
+    .bind(status)
+    .bind(req_at)
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[test]
+fn dub_stems_ready_needs_both_non_empty_paths() {
+    assert!(dub_stems_ready(Some("/v.flac"), Some("/i.flac")));
+    assert!(!dub_stems_ready(None, Some("/i.flac")));
+    assert!(!dub_stems_ready(Some("/v.flac"), None));
+    assert!(!dub_stems_ready(Some(""), Some("/i.flac")));
+    assert!(!dub_stems_ready(None, None));
+}
+
+#[tokio::test]
+async fn get_next_dub_job_picks_newest_requested_first() {
+    let pool = setup().await;
+    let a = insert_video(&pool, "va", "A").await;
+    let b = insert_video(&pool, "vb", "B").await;
+    make_dub_job(&pool, a, "queued", "2026-09-18T10:00:00.000Z").await;
+    make_dub_job(&pool, b, "queued", "2026-09-18T11:00:00.000Z").await; // newer
+
+    let job = get_next_dub_job(&pool).await.unwrap().expect("a job");
+    assert_eq!(job.video_id, b, "newest dub_requested_at wins (priority queue)");
+    assert_eq!(job.dub_status, "queued");
+}
+
+#[tokio::test]
+async fn get_next_dub_job_skips_none_ready_and_undownloaded() {
+    let pool = setup().await;
+    let ready = insert_video(&pool, "vr", "ready").await;
+    let none = insert_video(&pool, "vn", "none").await;
+    let undl = insert_video(&pool, "vu", "undownloaded").await;
+    make_dub_job(&pool, ready, "ready", "2026-09-18T10:00:00.000Z").await;
+    let _ = none; // default dub_status='none' + not requested → ineligible
+    // requested but NOT normalized / no audio:
+    sqlx::query("UPDATE videos SET dub_requested = 1, dub_status = 'queued' WHERE id = ?")
+        .bind(undl)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert!(
+        get_next_dub_job(&pool).await.unwrap().is_none(),
+        "ready/none/undownloaded rows are not eligible"
+    );
+}
+
+#[tokio::test]
+async fn get_next_dub_job_respects_backoff() {
+    let pool = setup().await;
+    let id = insert_video(&pool, "vf", "failed").await;
+    make_dub_job(&pool, id, "failed", "2026-09-18T10:00:00.000Z").await;
+    sqlx::query(
+        "UPDATE videos SET dub_next_attempt_at = \
+             strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+3600 seconds') WHERE id = ?",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(get_next_dub_job(&pool).await.unwrap().is_none());
+
+    sqlx::query(
+        "UPDATE videos SET dub_next_attempt_at = \
+             strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 seconds') WHERE id = ?",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(get_next_dub_job(&pool).await.unwrap().unwrap().video_id, id);
+}
+
+#[tokio::test]
+async fn mark_dub_transitions_advance_status() {
+    let pool = setup().await;
+    let id = insert_video(&pool, "vt", "T").await;
+    make_dub_job(&pool, id, "queued", "2026-09-18T10:00:00.000Z").await;
+
+    mark_dub_waiting_stems(&pool, id).await.unwrap();
+    assert_eq!(col_str(&pool, id, "dub_status").await, "stems");
+    assert_eq!(col_i64(&pool, id, "stem_manual_priority").await, 1);
+
+    mark_dub_synth(&pool, id).await.unwrap();
+    assert_eq!(col_str(&pool, id, "dub_status").await, "synth");
+
+    mark_dub_ready(&pool, id, "/c/a_dub.flac", "gemini-live-translate")
+        .await
+        .unwrap();
+    assert_eq!(col_str(&pool, id, "dub_status").await, "ready");
+    assert_eq!(
+        col_opt_str(&pool, id, "dub_file_path").await,
+        Some("/c/a_dub.flac".to_string())
+    );
+    assert_eq!(
+        col_opt_str(&pool, id, "dub_engine").await,
+        Some("gemini-live-translate".to_string())
+    );
+    assert_eq!(col_i64(&pool, id, "dub_attempts").await, 0);
+}
+
+#[tokio::test]
+async fn record_dub_deferral_increments_and_marks_failed() {
+    let pool = setup().await;
+    let id = insert_video(&pool, "vd", "D").await;
+    make_dub_job(&pool, id, "synth", "2026-09-18T10:00:00.000Z").await;
+
+    let n1 = record_dub_deferral(&pool, id, "boom", std::time::Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert_eq!(n1, 1);
+    assert_eq!(col_str(&pool, id, "dub_status").await, "failed");
+    assert_eq!(
+        col_opt_str(&pool, id, "dub_error").await,
+        Some("boom".to_string())
+    );
+    let n2 = record_dub_deferral(&pool, id, "boom2", std::time::Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert_eq!(n2, 2);
+}

@@ -4,6 +4,8 @@ paths:
   - crates/sp-server/src/api/dabing.rs
   - crates/sp-server/src/api/routes_import.rs
   - crates/sp-server/src/startup_dabing.rs
+  - crates/sp-server/src/dabing/**
+  - scripts/dub_worker.py
   - sp-ui/src/pages/dabing.rs
   - sp-ui/src/components/dabing_list.rs
   - sp-ui/src/components/dub_toggle.rs
@@ -98,3 +100,72 @@ pripravené` (or `chyba: <krok>`) + a **Prehrať** button (reuses
 `cache_dir.parent()` instead (no new AppState field). Keep new server code in
 sibling `#[path]`/`pub mod` modules; never grow `routes.rs`/`models.rs`/`lib.rs`/
 `worker.rs`/`playback/mod.rs`.
+
+# Dabing D4 (#183) — SK dub synthesis via Gemini Live Translate (audio→audio)
+
+Owner ruling (#174): the ONLY dub engine is **Gemini Live Translate**
+(`gemini-3.5-live-translate-preview`, audio→audio) — it keeps the preacher's
+pacing, continuity and intensity. NO STT → translation → per-sentence TTS chain,
+NO `DubEngine` trait, NO voice-reference selection (the older D4 ticket text is
+obsolete). Default mix for a dub video = **dub only** (r=1.0); no same-colour
+blend.
+
+## Chain + state machine
+`dub_status`: `queued → stems (wait) → synth → ready | failed(+backoff)`. Live
+folds the EN/SK transcripts INTO the one session, so there is NO lyrics
+dependency (the `transcript`/`translation` `DubChainState` variants are unused by
+D4). `models_dabing.rs` D4 selectors: `get_next_dub_job` (dub_requested=1,
+downloaded, not none/ready, past backoff, **newest `dub_requested_at` first** =
+the priority queue), `mark_dub_waiting_stems` (sets `stem_manual_priority=1`),
+`mark_dub_synth`, `mark_dub_ready`, `record_dub_deferral`, pure `dub_stems_ready`.
+
+## Worker (`crates/sp-server/src/dabing/{mod,worker,child,chunk_plan}.rs`)
+Mirrors the stem worker: 10 s tick, `dub_worker_enabled` kill-switch, venv-python
+gate, `HeavyStepPlan::for_activity` (BELOW_NORMAL, never gates playback — owner:
+processing runs during playback at reduced priority), #167 startup floor, memory
+guard, one heavy child at a time (shared slot). Precondition = both stems present
+(the ambient bed + original-voice channels the 4-stream mix needs); while missing
+it parks at `stems` and raises `stem_manual_priority`. Live INPUT is the ORIGINAL
+`audio_file_path` (not a stem). `dub_engine="gemini-live-translate"`.
+
+- **Chunk plan (Rust owns it):** the worker runs ffmpeg `silencedetect` (a light
+  off-slot pass at BELOW_NORMAL), parses it with `chunk_plan::parse_silencedetect`,
+  and `chunk_plan::plan_chunks` cuts at pauses ≥ 700 ms into chunks ≤ 8 min (Live
+  session headroom), never mid-speech; the plan JSON is the child's `--chunk-plan`
+  INPUT. `placement_for(chunk_start, chunk_len, out_len, next_start)` decides the
+  atempo (≤ 1.08, only on overrun); the worker calls it per chunk AFTER the child
+  returns each `out_len` to LOG + verify drift ≤ 2 s (`DUB_MAX_DRIFT_MS`), and
+  warns if the child's applied tempo disagrees. `out_len` is only known at
+  runtime, so the child implements placement at runtime (Python) and the Rust
+  `placement_for` is the canonical decision + drift verifier.
+
+## Child (`scripts/dub_worker.py live-translate`)
+`--audio --out --transcripts --chunk-plan --work-dir --pace`. Reference:
+`eval/dubbing/engines/gemini_live_translate.py`. Per chunk (resumable — reuses
+`chunk_N.wav`+`.json`): ffmpeg-slice+resample to 16 kHz mono s16le, stream 100 ms
+chunks (real-time by default; `dub_pace` setting → `--pace`, 2× tested on box),
+`audio_stream_end`, collect 24 kHz PCM + input/output transcription (SK stamped by
+output-audio position), trim trailing silence, atempo if it would overrun the next
+chunk, write `chunk_N.wav`. **Heartbeats into `work_dir` every 5 s** so the
+`wait_with_stall_timeout` never kills a healthy mid-chunk stream (a chunk can be
+8 min with no other work-dir write). Assembles `<base>_dub.flac` at **48 kHz
+STEREO loudnorm -16** (must match the stem format `StemMixReader` requires), writes
+`<base>_dub_transcripts.json` (D3), and prints the summary JSON on stdout (the ONLY
+stdout line — logs go to stderr). Key ONLY via `GEMINI_API_KEY` env (`bootstrap::
+ensure_genai` pins `google-genai==2.24.0`, idempotent, never triggers the heavy
+qwen/torch reinstall). Cost ~$0.037/min.
+
+## Playback (`stems/reader.rs` + `stems/control.rs`)
+When `dub_path(audio)` (`<base>_dub.flac`) exists AND both stems exist,
+`open_audio_stream` opens a **4-stream** `StemMixReader` `[original, vocals,
+instrumental, dub]` fed `KaraokeControl::dub_gain_handles()`. `dub_gains(r) =
+(0, 1−r, 1, r)`: original full-mix silent, vocals = original voice, instrumental =
+ambient bed, dub = SK. Default r=1.0 (dub only). `PATCH /api/v1/videos/{id}/dub-mix`
+persists to DB AND sends `EngineCommand::SetDubMix{video_id, ratio}` →
+`engine.set_dub_mix` → `control.set_dub_ratio` (live, no pipeline reopen — the #186
+seam, one stream wider). Any 4-stream open failure degrades to the stem/plain mix.
+
+## Cap note
+`lib.rs` was at exactly 1000 lines, so the `EngineCommand` match was extracted to a
+sibling `engine_dispatch.rs` (free `dispatch(&mut engine, cmd)`) before adding the
+`SetDubMix` arm + the dub-worker spawn.

@@ -71,6 +71,27 @@ impl PlaybackEngine {
             vocal_gain: control.vocal_gain(),
         });
     }
+
+    /// #183 D4: apply a new dub mix ratio to the process-global control. The
+    /// playing 4-stream dub `StemMixReader` ramps toward the new blend live (the
+    /// #186 seam, one stream wider) — the pipeline is NEVER reopened. The DB value
+    /// is persisted by the API handler; this is the LIVE half.
+    #[cfg_attr(test, mutants::skip)]
+    pub async fn set_dub_mix(&mut self, video_id: i64, ratio: f32) {
+        let control = crate::stems::control::global();
+        control.set_dub_ratio(ratio);
+        let (g_original, g_vocals, g_instrumental, g_dub) =
+            crate::stems::control::dub_gains(control.dub_ratio());
+        info!(
+            video_id,
+            ratio = control.dub_ratio(),
+            g_original,
+            g_vocals,
+            g_instrumental,
+            g_dub,
+            "dub mix changed (live gains, no reload)"
+        );
+    }
 }
 
 #[cfg(test)]

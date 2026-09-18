@@ -75,6 +75,73 @@ pub fn venv_python_path(tools_dir: &Path) -> PathBuf {
     tools_dir.join("lyrics_venv").join("bin").join("python")
 }
 
+/// The pinned `google-genai` SDK spec for the dub worker (#183 D4). The Gemini
+/// Live Translate child imports `google.genai`; this is the version verified
+/// against `gemini-3.5-live-translate-preview`.
+pub const GENAI_PACKAGE: &str = "google-genai==2.24.0";
+
+/// Ensure `google-genai` is importable in the lyrics venv (#183 D4). Idempotent
+/// and LIGHT: probes `import google.genai` first (a fast subprocess) and only
+/// pip-installs [`GENAI_PACKAGE`] when it is missing — so it never triggers the
+/// heavy qwen/torch reinstall the `is_ready` gate does. Returns the SDK version
+/// string on success (logged as the design's startup self-check). Called by the
+/// dub worker before its first synthesis, not by the main bootstrap gate.
+#[cfg_attr(test, mutants::skip)]
+pub async fn ensure_genai(venv_python: &Path) -> anyhow::Result<String> {
+    use anyhow::Context;
+    use tokio::process::Command;
+
+    async fn probe_version(py: &Path) -> Option<String> {
+        let mut cmd = Command::new(py);
+        cmd.args([
+            "-c",
+            "import google.genai as g, sys; sys.stdout.write(getattr(g, '__version__', 'unknown'))",
+        ]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let out = cmd.output().await.ok()?;
+        if out.status.success() {
+            let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !v.is_empty() {
+                return Some(v);
+            }
+        }
+        None
+    }
+
+    if let Some(v) = probe_version(venv_python).await {
+        tracing::info!("dub worker: google-genai already present (v{v})");
+        return Ok(v);
+    }
+
+    tracing::info!("dub worker: installing {GENAI_PACKAGE} into the lyrics venv");
+    let mut pip = Command::new(venv_python);
+    pip.args(["-m", "pip", "install", "-U", GENAI_PACKAGE]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        pip.creation_flags(0x0800_0000);
+    }
+    let mut child = pip
+        .spawn()
+        .context("failed to spawn pip install google-genai")?;
+    let status = tokio::time::timeout(std::time::Duration::from_secs(300), child.wait())
+        .await
+        .context("pip install google-genai timed out")?
+        .context("pip install google-genai wait failed")?;
+    if !status.success() {
+        tracing::warn!(
+            "dub worker: pip install google-genai exited {status} (tolerated; the import probe decides)"
+        );
+    }
+    probe_version(venv_python)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("google-genai still not importable after install"))
+}
+
 /// Returns `true` if `python_path` exists AND `python_path -c "..."` confirms
 /// both `qwen_asr` is importable AND `torch.cuda.is_available()`. Used to
 /// decide whether bootstrap is needed. A venv with CPU-only torch fails this

@@ -196,6 +196,147 @@ pub async fn set_dub_mix_ratio(
     Ok((clamped, res.rows_affected()))
 }
 
+// ── D4 write-side: the dub synthesis chain (#183) ───────────────────────────────
+
+/// One unit of dub work: a dub-requested, downloaded video and the artefacts the
+/// worker needs to decide the next step. `vocals_file_path` / `instrumental_file_path`
+/// gate the stems precondition; `audio_file_path` is the Live-API input.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DubJob {
+    pub video_id: i64,
+    pub youtube_id: String,
+    pub audio_file_path: String,
+    pub duration_ms: Option<i64>,
+    pub dub_status: String,
+    pub dub_mix_ratio: f64,
+    pub vocals_file_path: Option<String>,
+    pub instrumental_file_path: Option<String>,
+    pub dub_attempts: i64,
+}
+
+/// Whether both stems are present for a dub job (the ambient bed + original-voice
+/// channels the 4-stream mix needs). Pure so the worker's precondition branch is
+/// unit-tested without the filesystem.
+pub fn dub_stems_ready(vocals: Option<&str>, instrumental: Option<&str>) -> bool {
+    vocals.is_some_and(|v| !v.is_empty()) && instrumental.is_some_and(|i| !i.is_empty())
+}
+
+/// Select the next dub-requested video needing work, NEWEST request first (the
+/// Dabing section is the owner's priority queue — a fresh add jumps ahead).
+/// Eligible: `dub_requested=1`, downloaded (`normalized=1` + `audio_file_path`),
+/// not terminal (`dub_status` not `none`/`ready`), and past any failure backoff.
+/// Returns `None` when nothing is due.
+pub async fn get_next_dub_job(pool: &SqlitePool) -> Result<Option<DubJob>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT id, youtube_id, audio_file_path, duration_ms, dub_status, \
+                dub_mix_ratio, vocals_file_path, instrumental_file_path, dub_attempts \
+         FROM videos \
+         WHERE dub_requested = 1 \
+           AND normalized = 1 \
+           AND audio_file_path IS NOT NULL \
+           AND dub_status NOT IN ('none', 'ready') \
+           AND (dub_next_attempt_at IS NULL \
+                OR dub_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+         ORDER BY dub_requested_at DESC, id DESC \
+         LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|r| DubJob {
+        video_id: r.get("id"),
+        youtube_id: r.get("youtube_id"),
+        audio_file_path: r.get("audio_file_path"),
+        duration_ms: r.get("duration_ms"),
+        dub_status: r.get("dub_status"),
+        dub_mix_ratio: r.get("dub_mix_ratio"),
+        vocals_file_path: r.get("vocals_file_path"),
+        instrumental_file_path: r.get("instrumental_file_path"),
+        dub_attempts: r.get("dub_attempts"),
+    }))
+}
+
+/// Move a dub job to the `stems` wait state and (re)raise `stem_manual_priority`
+/// so the stems worker runs this video's separation ahead of the oldest-first
+/// queue. Idempotent; clears any error. No backoff (waiting for stems is normal).
+pub async fn mark_dub_waiting_stems(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE videos \
+         SET dub_status = 'stems', stem_manual_priority = 1, dub_error = NULL \
+         WHERE id = ?",
+    )
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Advance a dub job to `synth` (stems ready, Live synthesis about to run).
+/// Clears any prior error. Idempotent.
+pub async fn mark_dub_synth(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE videos SET dub_status = 'synth', dub_error = NULL WHERE id = ?")
+        .bind(video_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Record a finished dub: store the track path + engine tag, mark `ready`, and
+/// reset the retry backoff. Playback picks the dub up on the next play.
+pub async fn mark_dub_ready(
+    pool: &SqlitePool,
+    video_id: i64,
+    dub_file_path: &str,
+    dub_engine: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE videos \
+         SET dub_file_path = ?, dub_engine = ?, dub_status = 'ready', \
+             dub_attempts = 0, dub_next_attempt_at = NULL, dub_error = NULL \
+         WHERE id = ?",
+    )
+    .bind(dub_file_path)
+    .bind(dub_engine)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Record a transient dub failure: mark `failed`, store the error tail, increment
+/// `dub_attempts`, and schedule `dub_next_attempt_at = now + backoff` (same
+/// `strftime` format `get_next_dub_job` compares against). Returns the new attempt
+/// count. Mirrors `models_stems::record_stem_deferral`.
+pub async fn record_dub_deferral(
+    pool: &SqlitePool,
+    video_id: i64,
+    error: &str,
+    backoff: std::time::Duration,
+) -> Result<u32, sqlx::Error> {
+    let secs = backoff.as_secs() as i64;
+    let current: i64 = sqlx::query_scalar("SELECT dub_attempts FROM videos WHERE id = ?")
+        .bind(video_id)
+        .fetch_one(pool)
+        .await?;
+    let new_attempts = current + 1;
+    // Keep the stored error short — it is display text, not a log.
+    let truncated: String = error.chars().take(500).collect();
+    sqlx::query(
+        "UPDATE videos \
+         SET dub_status = 'failed', dub_error = ?, dub_attempts = ?, \
+             dub_next_attempt_at = \
+                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)) \
+         WHERE id = ?",
+    )
+    .bind(truncated)
+    .bind(new_attempts)
+    .bind(secs)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(new_attempts as u32)
+}
+
 #[cfg(test)]
 #[path = "models_tests_dabing.rs"]
 mod tests;

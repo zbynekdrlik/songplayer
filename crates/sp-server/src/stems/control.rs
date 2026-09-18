@@ -31,6 +31,15 @@ pub struct KaraokeControl {
     /// `set_vocal_gain` write the preset triple here so a preset change reaches
     /// the playing mixer WITHOUT reopening the pipeline (#186).
     gains: [Arc<AtomicU32>; 3],
+    /// The stored dub mix ratio (`0.0..=1.0`, f32 bits) — the currently-playing
+    /// dub video's original↔dub blend (#183 D4). Global (one wall, one operator);
+    /// `PATCH /dub-mix` updates it live via `EngineCommand::SetDubMix`.
+    dub_ratio: Arc<AtomicU32>,
+    /// The LIVE per-stream target gains `[original, vocals, instrumental, dub]` a
+    /// dub video's 4-stream [`sp_decoder::StemMixReader`] reads and ramps toward.
+    /// `set_dub_ratio` publishes [`dub_gains`] here so a mix change is heard with
+    /// NO pipeline reopen (the same #186 seam, one stream wider).
+    dub_gain_atomics: [Arc<AtomicU32>; 4],
 }
 
 /// Default vocal gain for KaraokeLow when no setting is stored (30 %).
@@ -58,10 +67,38 @@ pub fn preset_gains(mode: KaraokeMode, vocal_gain: f32) -> (f32, f32, f32) {
     }
 }
 
+/// The per-stream linear gains `(original, vocals, instrumental, dub)` for a dub
+/// video (#183 D4). The mix cross-fades the ORIGINAL speaker (the `vocals` stem)
+/// against the Slovak `dub` track over the constant instrumental ambient bed;
+/// the full-mix `original` stream is always silent so the two voice tracks are
+/// never doubled by it:
+///
+/// | ratio `r` | original | vocals (orig voice) | instrumental (bed) | dub (SK) |
+/// |-----------|----------|---------------------|--------------------|----------|
+/// | 1.0       | 0        | 0                   | 1                  | 1        | dub only (default)
+/// | 0.0       | 0        | 1                   | 1                  | 0        | originál
+/// | 0.5       | 0        | 0.5                 | 1                  | 0.5      | 50/50
+///
+/// `r` is clamped to `0.0..=1.0`; a non-finite ratio falls back to `1.0` (the
+/// safe dub-only default), matching `set_dub_mix_ratio`'s NaN handling.
+pub fn dub_gains(ratio: f32) -> (f32, f32, f32, f32) {
+    let r = if ratio.is_finite() {
+        ratio.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    (0.0, 1.0 - r, 1.0, r)
+}
+
+/// Default dub mix ratio when none is stored: `1.0` = dub only (owner ruling
+/// #174: default mix for dub videos is dub only).
+pub const DEFAULT_DUB_RATIO: f32 = 1.0;
+
 impl KaraokeControl {
     fn new(mode: KaraokeMode, vocal_gain: f32) -> Self {
         let vg = clamp_gain(vocal_gain);
         let (o, v, i) = preset_gains(mode, vg);
+        let (d0, d1, d2, d3) = dub_gains(DEFAULT_DUB_RATIO);
         Self {
             mode: AtomicU8::new(mode.as_u8()),
             vocal_gain: Arc::new(AtomicU32::new(vg.to_bits())),
@@ -69,6 +106,13 @@ impl KaraokeControl {
                 Arc::new(AtomicU32::new(o.to_bits())),
                 Arc::new(AtomicU32::new(v.to_bits())),
                 Arc::new(AtomicU32::new(i.to_bits())),
+            ],
+            dub_ratio: Arc::new(AtomicU32::new(DEFAULT_DUB_RATIO.to_bits())),
+            dub_gain_atomics: [
+                Arc::new(AtomicU32::new(d0.to_bits())),
+                Arc::new(AtomicU32::new(d1.to_bits())),
+                Arc::new(AtomicU32::new(d2.to_bits())),
+                Arc::new(AtomicU32::new(d3.to_bits())),
             ],
         }
     }
@@ -118,6 +162,37 @@ impl KaraokeControl {
             Arc::clone(&self.gains[0]),
             Arc::clone(&self.gains[1]),
             Arc::clone(&self.gains[2]),
+        ]
+    }
+
+    /// Current dub mix ratio (`0.0..=1.0`).
+    pub fn dub_ratio(&self) -> f32 {
+        f32::from_bits(self.dub_ratio.load(Ordering::Relaxed))
+    }
+
+    /// Set the dub mix ratio (`0.0..=1.0`; non-finite → [`DEFAULT_DUB_RATIO`]) and
+    /// publish the new [`dub_gains`] quad to the live atomics — the playing dub
+    /// mixer ramps toward them with NO pipeline reopen (#183 D4, the #186 seam).
+    pub fn set_dub_ratio(&self, ratio: f32) {
+        let (d0, d1, d2, d3) = dub_gains(ratio);
+        // `dub_gains` already clamped/NaN-guarded — store the effective `r` back.
+        let r = 1.0 - d1; // (d1 == 1 - r) by construction
+        self.dub_ratio.store(r.to_bits(), Ordering::Relaxed);
+        self.dub_gain_atomics[0].store(d0.to_bits(), Ordering::Relaxed);
+        self.dub_gain_atomics[1].store(d1.to_bits(), Ordering::Relaxed);
+        self.dub_gain_atomics[2].store(d2.to_bits(), Ordering::Relaxed);
+        self.dub_gain_atomics[3].store(d3.to_bits(), Ordering::Relaxed);
+    }
+
+    /// Clone the four LIVE dub gain atomics `[original, vocals, instrumental, dub]`
+    /// to hand a 4-stream `StemMixReader`, so a mix change is heard immediately
+    /// mid-video without reopening the pipeline.
+    pub fn dub_gain_handles(&self) -> [Arc<AtomicU32>; 4] {
+        [
+            Arc::clone(&self.dub_gain_atomics[0]),
+            Arc::clone(&self.dub_gain_atomics[1]),
+            Arc::clone(&self.dub_gain_atomics[2]),
+            Arc::clone(&self.dub_gain_atomics[3]),
         ]
     }
 
@@ -234,6 +309,38 @@ mod tests {
             preset_gains(KaraokeMode::KaraokeLow, f32::NAN),
             (0.0, DEFAULT_VOCAL_GAIN, 1.0)
         );
+    }
+
+    #[test]
+    fn dub_gains_table() {
+        // (original, vocals=orig voice, instrumental=bed, dub=SK)
+        assert_eq!(dub_gains(1.0), (0.0, 0.0, 1.0, 1.0)); // dub only (default)
+        assert_eq!(dub_gains(0.0), (0.0, 1.0, 1.0, 0.0)); // originál
+        assert_eq!(dub_gains(0.5), (0.0, 0.5, 1.0, 0.5)); // 50/50
+    }
+
+    #[test]
+    fn dub_gains_clamps_and_guards_nan() {
+        assert_eq!(dub_gains(1.5), (0.0, 0.0, 1.0, 1.0));
+        assert_eq!(dub_gains(-0.5), (0.0, 1.0, 1.0, 0.0));
+        // Non-finite → dub-only default (1.0).
+        assert_eq!(dub_gains(f32::NAN), (0.0, 0.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn dub_control_defaults_to_dub_only_and_is_live() {
+        let c = KaraokeControl::new(KaraokeMode::FullMix, 0.3);
+        // Default dub ratio = dub only.
+        assert!((c.dub_ratio() - 1.0).abs() < 1e-6);
+        let [o, v, i, d] = c.dub_gain_handles();
+        assert_eq!((read(&o), read(&v), read(&i), read(&d)), (0.0, 0.0, 1.0, 1.0));
+        // A ratio change publishes the new quad to the SAME atomics (live).
+        c.set_dub_ratio(0.0);
+        assert!((c.dub_ratio() - 0.0).abs() < 1e-6);
+        assert_eq!((read(&o), read(&v), read(&i), read(&d)), (0.0, 1.0, 1.0, 0.0));
+        c.set_dub_ratio(0.25);
+        assert!((c.dub_ratio() - 0.25).abs() < 1e-6);
+        assert_eq!((read(&o), read(&v), read(&i), read(&d)), (0.0, 0.75, 1.0, 0.25));
     }
 
     #[test]
