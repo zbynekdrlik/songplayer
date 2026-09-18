@@ -10,6 +10,11 @@ pub struct ToolPaths {
     /// Path to a Python interpreter, if one is available on this machine.
     /// `None` when neither `python` nor `python3` is found on `PATH`.
     pub python: Option<PathBuf>,
+    /// Path to the bundled Deno JS runtime for yt-dlp's n-challenge solver
+    /// (#189). `None` when unavailable (non-Windows, or the download failed) —
+    /// new downloads then fail the n-challenge, which the startup self-check
+    /// surfaces loudly on the tools status.
+    pub deno: Option<PathBuf>,
 }
 
 /// Manages downloading and locating yt-dlp and FFmpeg binaries.
@@ -114,11 +119,125 @@ impl ToolsManager {
 
         let python = Self::detect_python().await;
 
+        // Ship Deno for yt-dlp's n-challenge solver (#189). Never fatal — a box
+        // without deno degrades (new downloads fail the n-challenge) rather than
+        // failing to start; the startup self-check reports it on the dashboard.
+        let deno = self.ensure_deno().await;
+
         Ok(ToolPaths {
             ytdlp,
             ffmpeg,
             python,
+            deno,
         })
+    }
+
+    /// Ensure a pinned `deno.exe` is present in the tools dir (Windows only).
+    ///
+    /// yt-dlp's EJS solver for YouTube's n-challenge needs a JavaScript runtime
+    /// and enables Deno by default when it is on `PATH` (#189). Mirrors the
+    /// yt-dlp/ffmpeg install shape: download the pinned release zip, verify its
+    /// SHA-256, extract `deno.exe`. Skips the download when the right version is
+    /// already present. Returns the path, or `None` on any failure (logged).
+    pub async fn ensure_deno(&self) -> Option<PathBuf> {
+        #[cfg(windows)]
+        {
+            match self.ensure_deno_windows().await {
+                Ok(path) => Some(path),
+                Err(e) => {
+                    tracing::error!(
+                        "deno install failed: {e} — new downloads will fail the \
+                         YouTube n-challenge until a JS runtime is available"
+                    );
+                    None
+                }
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            // The shipped target is Windows (project CLAUDE.md); on a Linux
+            // dev/CI box yt-dlp is exercised without the managed deno.
+            None
+        }
+    }
+
+    /// Windows deno install: pinned version, SHA-256-verified zip, extract
+    /// `deno.exe`. Skips re-download when the pinned version is already present.
+    #[cfg(windows)]
+    async fn ensure_deno_windows(&self) -> Result<PathBuf, anyhow::Error> {
+        use super::ytdlp_cmd::{DENO_SHA256, DENO_VERSION, deno_asset_url};
+
+        let deno = self.tools_dir.join("deno.exe");
+
+        // Already present with the pinned version → nothing to do.
+        if deno.exists() {
+            if let Some(ver) = deno_version(&deno).await {
+                if ver == DENO_VERSION {
+                    tracing::info!("deno {ver} already present at {}", deno.display());
+                    return Ok(deno);
+                }
+                tracing::info!(
+                    "deno {ver} present but pinned version is {DENO_VERSION}; re-downloading"
+                );
+            }
+            let _ = tokio::fs::remove_file(&deno).await;
+        }
+
+        let url = deno_asset_url(DENO_VERSION);
+        let zip_path = self.tools_dir.join("deno.zip");
+        tracing::info!("downloading deno {DENO_VERSION} from {url}");
+        Self::download_file(&url, &zip_path).await?;
+
+        // Verify the download against the pinned checksum before trusting it.
+        let actual = Self::sha256_hex(&zip_path).await?;
+        if !actual.eq_ignore_ascii_case(DENO_SHA256) {
+            let _ = tokio::fs::remove_file(&zip_path).await;
+            anyhow::bail!("deno zip SHA-256 mismatch: expected {DENO_SHA256}, got {actual}");
+        }
+
+        Self::extract_deno_from_zip(&zip_path, &deno).await?;
+        let _ = tokio::fs::remove_file(&zip_path).await;
+
+        match deno_version(&deno).await {
+            Some(ver) => tracing::info!("deno {ver} installed at {}", deno.display()),
+            None => tracing::warn!("deno installed but `deno --version` did not read back cleanly"),
+        }
+        Ok(deno)
+    }
+
+    /// SHA-256 of a file as lowercase hex (used to verify the deno download).
+    #[cfg(windows)]
+    async fn sha256_hex(path: &Path) -> Result<String, anyhow::Error> {
+        use sha2::{Digest, Sha256};
+        let bytes = tokio::fs::read(path).await?;
+        let digest = Sha256::digest(&bytes);
+        Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
+    }
+
+    /// Extract `deno.exe` from the downloaded release zip (root entry).
+    #[cfg(windows)]
+    async fn extract_deno_from_zip(zip_path: &Path, dest: &Path) -> Result<(), anyhow::Error> {
+        let zip_path = zip_path.to_path_buf();
+        let dest = dest.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let file = std::fs::File::open(&zip_path)?;
+            let mut archive = zip::ZipArchive::new(file)?;
+            for i in 0..archive.len() {
+                let mut entry = archive.by_index(i)?;
+                let name = entry.name().to_string();
+                if name.ends_with("/deno.exe") || name == "deno.exe" {
+                    let mut out = std::fs::File::create(&dest)?;
+                    std::io::copy(&mut entry, &mut out)?;
+                    tracing::info!(
+                        "extracted deno.exe from ZIP ({} bytes)",
+                        out.metadata()?.len()
+                    );
+                    return Ok(());
+                }
+            }
+            anyhow::bail!("deno.exe not found in ZIP archive");
+        })
+        .await?
     }
 
     /// Run `yt-dlp --update` to get the latest version.
@@ -153,6 +272,19 @@ impl ToolsManager {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// Capture `yt-dlp --help` text — used to detect whether the installed
+    /// yt-dlp advertises the `--js-runtimes` flag (#189). `None` on any error.
+    pub async fn ytdlp_help(&self, ytdlp: &Path) -> Option<String> {
+        let mut cmd = tokio::process::Command::new(ytdlp);
+        cmd.arg("--help");
+        super::hide_console_window(&mut cmd);
+        let output = cmd.output().await.ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
     /// Verify a file is a real executable by checking its magic bytes.
@@ -354,15 +486,33 @@ pub struct ImportedVideo {
     pub duration_ms: Option<u64>,
 }
 
+#[cfg_attr(test, mutants::skip)] // subprocess I/O glue (deno --version probe); parse_deno_version is unit-tested
+/// Read `deno --version` and parse the semver (e.g. `2.9.7`). `None` when deno
+/// is missing or the probe fails. Used by the install skip-check and the
+/// startup JS-runtime self-check (#189).
+pub(crate) async fn deno_version(deno: &Path) -> Option<String> {
+    let mut cmd = tokio::process::Command::new(deno);
+    cmd.arg("--version");
+    super::hide_console_window(&mut cmd);
+    let output = cmd.output().await.ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    super::ytdlp_cmd::parse_deno_version(&String::from_utf8_lossy(&output.stdout))
+}
+
 #[cfg_attr(test, mutants::skip)] // subprocess I/O glue; pure logic (URL parse) is covered by extract_youtube_id tests
 pub async fn fetch_video_metadata(
     ytdlp_path: &std::path::Path,
     url: &str,
 ) -> anyhow::Result<ImportedVideo> {
-    use tokio::process::Command;
     let youtube_id = extract_youtube_id(url)
         .ok_or_else(|| anyhow::anyhow!("could not parse YouTube id from URL: {url}"))?;
-    let mut cmd = Command::new(ytdlp_path);
+    // `--dump-json` extracts formats, so it hits YouTube's n-challenge — route
+    // it through the shared builder so the bundled deno is on PATH (#189). The
+    // builder also applies CREATE_NO_WINDOW + UTF-8 env (#136 T4), so the
+    // `title` we read below is not mangled from the Windows ANSI codepage.
+    let mut cmd = super::ytdlp_cmd::ytdlp_command(ytdlp_path);
     cmd.args([
         "--dump-json",
         "--no-playlist",
@@ -372,15 +522,6 @@ pub async fn fetch_video_metadata(
     ])
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-    // The `title` we read below comes straight from yt-dlp's `--dump-json`;
-    // force UTF-8 stdio so a non-ANSI-codepage title (e.g. "Vámonos") is not
-    // mangled before we parse it (#136 T4).
-    super::apply_utf8_env(&mut cmd);
     let output = cmd.output().await?;
     if !output.status.success() {
         anyhow::bail!(

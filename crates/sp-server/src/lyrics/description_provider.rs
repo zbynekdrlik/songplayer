@@ -120,17 +120,14 @@ pub(crate) async fn fetch_raw_description(
     }
 
     let url = format!("https://www.youtube.com/watch?v={youtube_id}");
-    let mut cmd = tokio::process::Command::new(ytdlp_path);
+    // Shared builder (#189): the tools dir goes first on PATH (bundled deno for
+    // the n-challenge) + CREATE_NO_WINDOW + UTF-8 env.
+    let mut cmd = crate::downloader::ytdlp_cmd::ytdlp_command(ytdlp_path);
     cmd.arg("--skip-download")
         .arg("--no-warnings")
         .arg("--print")
         .arg("%(description)s")
         .arg(&url);
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
     cmd.kill_on_drop(true);
 
     let output = match cmd.output().await {

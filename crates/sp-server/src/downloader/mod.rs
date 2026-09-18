@@ -11,6 +11,7 @@
 pub mod cache;
 pub mod normalize;
 pub mod tools;
+pub mod ytdlp_cmd;
 
 use crate::metadata::MetadataProvider;
 use sqlx::SqlitePool;
@@ -93,8 +94,6 @@ pub(crate) fn ytdlp_video_args(
         format_spec.into(),
         "--ffmpeg-location".into(),
         ffmpeg_dir.into(),
-        "--js-runtimes".into(),
-        "node".into(),
         "--socket-timeout".into(),
         DOWNLOAD_TIMEOUT.to_string().into(),
         "--remux-video".into(),
@@ -126,8 +125,6 @@ pub(crate) fn ytdlp_audio_args(
         "bestaudio".into(),
         "--ffmpeg-location".into(),
         ffmpeg_dir.into(),
-        "--js-runtimes".into(),
-        "node".into(),
         "--socket-timeout".into(),
         DOWNLOAD_TIMEOUT.to_string().into(),
         "--no-part".into(),
@@ -378,12 +375,12 @@ impl DownloadWorker {
         );
         let args = ytdlp_video_args(&format_spec, ffmpeg_dir, output, &url, cookies.as_deref());
 
-        let mut cmd = tokio::process::Command::new(&self.tools.ytdlp);
+        // ytdlp_command puts the tools dir first on PATH (bundled deno) + the
+        // `--js-runtimes deno` flag + CREATE_NO_WINDOW + UTF-8 env (#189).
+        let mut cmd = ytdlp_cmd::ytdlp_command(&self.tools.ytdlp);
         cmd.args(&args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-        hide_console_window(&mut cmd);
-        apply_utf8_env(&mut cmd);
         let child_output = cmd.output().await?;
 
         if !child_output.status.success() {
@@ -423,12 +420,11 @@ impl DownloadWorker {
         );
         let args = ytdlp_audio_args(ffmpeg_dir, &output_template, &url, cookies.as_deref());
 
-        let mut cmd = tokio::process::Command::new(&self.tools.ytdlp);
+        // Same n-challenge-aware builder as the video stream (#189).
+        let mut cmd = ytdlp_cmd::ytdlp_command(&self.tools.ytdlp);
         cmd.args(&args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-        hide_console_window(&mut cmd);
-        apply_utf8_env(&mut cmd);
         let child_output = cmd.output().await?;
 
         if !child_output.status.success() {
@@ -695,12 +691,19 @@ mod tests {
 
         let args = ytdlp_video_args(format_spec, ffmpeg_dir, output, url, None);
 
-        for flag in ["-f", "--js-runtimes", "node", "--no-part", "--remux-video"] {
+        for flag in ["-f", "--no-part", "--remux-video"] {
             assert!(
                 args.iter().any(|a| a.to_str() == Some(flag)),
                 "existing flag {flag} must still be present"
             );
         }
+        // The JS-runtime flag moved OUT of the per-call arg builder into
+        // `ytdlp_command` (#189) — and it must never be the old `node` value.
+        assert!(
+            !args.iter().any(|a| a.to_str() == Some("--js-runtimes")),
+            "the runtime flag now lives in ytdlp_command, not the arg builder"
+        );
+        assert!(!args.iter().any(|a| a.to_str() == Some("node")));
     }
 
     #[test]
@@ -743,8 +746,6 @@ mod tests {
         for flag in [
             "-f",
             "bestaudio",
-            "--js-runtimes",
-            "node",
             "--no-part",
             "--print",
             "after_move:filepath",
@@ -754,6 +755,13 @@ mod tests {
                 "existing flag {flag} must still be present"
             );
         }
+        // The JS-runtime flag moved OUT of the per-call arg builder into
+        // `ytdlp_command` (#189) — and it must never be the old `node` value.
+        assert!(
+            !args.iter().any(|a| a.to_str() == Some("--js-runtimes")),
+            "the runtime flag now lives in ytdlp_command, not the arg builder"
+        );
+        assert!(!args.iter().any(|a| a.to_str() == Some("node")));
     }
 
     // -----------------------------------------------------------------

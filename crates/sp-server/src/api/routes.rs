@@ -87,6 +87,10 @@ pub struct ToolsStatusResponse {
     pub ytdlp_available: bool,
     pub ffmpeg_available: bool,
     pub ytdlp_version: Option<String>,
+    #[serde(default)]
+    pub js_runtime_ok: bool,
+    #[serde(default)]
+    pub deno_version: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -732,6 +736,8 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
             ytdlp_available: tools.ytdlp_available,
             ffmpeg_available: tools.ffmpeg_available,
             ytdlp_version: tools.ytdlp_version.clone(),
+            js_runtime_ok: tools.js_runtime_ok,
+            deno_version: tools.deno_version.clone(),
         },
         playlist_count,
         lan_url: lan.lan_url.clone(),

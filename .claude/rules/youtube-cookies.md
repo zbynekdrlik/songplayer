@@ -37,6 +37,54 @@ to both yt-dlp calls whenever `C:\ProgramData\SongPlayer\cookies.txt` exists
 (re-checked per download, no restart needed). yt-dlp REWRITES the jar it is
 given, so any manual test must run on a COPY of the file.
 
+**Since ~2026-09 there is a SECOND gate on top of cookies — the JS "n-challenge"
+(#175 finding).** Even WITH valid cookies (which clear the bot-check), a fetch
+fails `n challenge solving failed … The page needs to be reloaded` on every
+`player_client` (tv/mweb/web_safari all tried). yt-dlp's EJS solver needs a
+JavaScript runtime; `yt-dlp --help` lists `--js-runtimes RUNTIME[:PATH]` with
+supported runtimes `deno, node, quickjs, bun` but **only `deno` enabled by
+default** — node is NOT the runtime the solver uses.
+
+**Shipped mechanism (#189).** SongPlayer ships its own pinned Deno so its
+production downloads solve the n-challenge without any manual box setup:
+
+- `downloader/tools.rs::ToolsManager::ensure_deno()` downloads the pinned
+  `DENO_VERSION` (`crates/sp-server/src/downloader/ytdlp_cmd.rs`), SHA-256-verified,
+  into `C:\ProgramData\SongPlayer\cache\tools\deno.exe` next to yt-dlp/ffmpeg —
+  skipped when already present with the right version. Bump `DENO_VERSION` +
+  `DENO_SHA256` together (the checksum must match that version's Windows zip).
+- **Every** yt-dlp spawn goes through the ONE builder `ytdlp_cmd::ytdlp_command()`,
+  which prepends the tools dir to the child's `PATH` (so the bundled deno is found
+  first) and adds `--js-runtimes deno` when yt-dlp advertises the flag (plus
+  `CREATE_NO_WINDOW` + UTF-8 env). Never re-add `--js-runtimes node` to a per-call
+  arg builder — the runtime flag lives in `ytdlp_command`.
+- At tools-ready a startup self-check (`ytdlp_cmd::run_selfcheck`) runs a
+  `yt-dlp --simulate -f bestaudio <public id>` (with cookies when present) and logs
+  `yt-dlp js-runtime: OK (deno <ver>)` or `yt-dlp js-runtime: MISSING — new
+  downloads will fail the n-challenge` (ERROR). `GET /api/v1/status` → `tools.js_runtime_ok`
+  + `tools.deno_version` expose it (also on the `ToolsStatus` WS message).
+
+**Manual debugging trick (only when the shipped deno is somehow absent):** put a
+`deno.exe` on PATH for the yt-dlp process (dev2/dev1 install Deno freely; on
+win-resolume drop it in a temp dir and prepend that dir to `$env:PATH`). The box's
+yt-dlp + `ffmpeg` live in `C:\ProgramData\SongPlayer\cache\tools`.
+
+**The IMPORT route's metadata fetch does NOT pass `--cookies` (separate from the
+n-challenge, #189 finding).** `downloader/tools.rs::fetch_video_metadata`
+(`POST /api/v1/videos/import` → `yt-dlp --dump-json`) routes through
+`ytdlp_command` (so it has deno/PATH), but it never attaches `--cookies`, so on the
+box it fails the bot-check first: `ERROR: [youtube] <id>: Sign in to confirm you're
+not a bot`. The DOWNLOAD path (`download_video_stream`/`download_audio_stream`),
+playlist sync (flat-playlist is not bot-checked) and `description_provider` are the
+authenticated paths; only the manual import's metadata fetch is cookie-blind. To
+prove the n-challenge fix end-to-end without the import route, run the download
+config directly on the box:
+`yt-dlp --cookies <copy-of-cookies.txt> --js-runtimes deno -f bestaudio --simulate
+--print "%(id)s %(format_id)s OK" <url>` (tools dir first on PATH) → a format id +
+`OK` means both the n-challenge AND the bot-check cleared. Fixing the import
+(thread the `data_dir/cookies.txt` into `fetch_video_metadata`, ~5 LoC) is #141
+cookie-gate work, tracked separately.
+
 **Producing the file on win-resolume (all via MCP GUI, no human at the PC):**
 
 1. Use a Chrome profile that is *currently* logged into YouTube — check with

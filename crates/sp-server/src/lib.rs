@@ -91,6 +91,10 @@ pub struct ToolsStatus {
     pub ytdlp_available: bool,
     pub ffmpeg_available: bool,
     pub ytdlp_version: Option<String>,
+    /// yt-dlp has a working JS runtime (Deno) for YouTube's n-challenge (#189).
+    pub js_runtime_ok: bool,
+    /// Bundled Deno version, when present.
+    pub deno_version: Option<String>,
 }
 
 // scene_change_commands and run_obs_engine_bridge live in obs_bridge.rs
@@ -385,14 +389,25 @@ pub async fn start(
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
                 let version = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
+
+                // #189: ship + wire the Deno JS runtime for YouTube's n-challenge
+                // and run the startup self-check (memoizes the runtime args for
+                // every yt-dlp spawn; logs OK/MISSING loudly).
+                let (js_runtime_ok, deno_ver) =
+                    downloader::ytdlp_cmd::init_js_runtime(&tools_mgr, &paths, &dl_data_dir).await;
+
                 let mut ts = tools_status_clone.write().await;
                 ts.ytdlp_available = true;
                 ts.ffmpeg_available = true;
                 ts.ytdlp_version = version.clone();
+                ts.js_runtime_ok = js_runtime_ok;
+                ts.deno_version = deno_ver.clone();
                 let _ = tools_event_tx.send(ServerMsg::ToolsStatus {
                     ytdlp_available: true,
                     ffmpeg_available: true,
                     ytdlp_version: version,
+                    js_runtime_ok,
+                    deno_version: deno_ver,
                 });
                 *tool_paths_clone.write().await = Some(paths.clone());
                 info!("tools ready: yt-dlp and FFmpeg available");

@@ -84,3 +84,15 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
 - **`clippy::manual_slice_fill`** (rust 1.98, `-D warnings`): a `for x in &mut
   slice { *x = <const> }` loop must be `slice.fill(<const>)`. The no-compile box
   can't see it; it failed #186's Lint on `for e in &mut self.eos { *e = false }`.
+
+## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
+The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,
+so EVERY `#[test]` in `crates/` runs on BOTH Linux (the `Test` job) and Windows.
+A test that bakes in a Unix-only literal passes on Linux and FAILS on Windows —
+and the no-compile box can't see it. The one that bit #189: a `path_with_tools`
+test asserting the joined PATH string `"/opt/tools:/usr/bin:/bin"` — on Windows
+`std::env::{split_paths,join_paths}` use `;`, not `:`, so the string differs
+(`1482 passed; 1 failed` on the Windows job only). Fix: assert the INVARIANT, not
+the platform string — round-trip the result through `std::env::split_paths` and
+check `parts[0] == tools_dir`, which holds on both separators. Same rule for any
+`MAIN_SEPARATOR` / line-ending / drive-letter / temp-path assumption in a test.

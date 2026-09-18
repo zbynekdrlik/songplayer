@@ -136,6 +136,8 @@ jobs:
         run: pytest eval/lyrics/tests -v
       - name: Run scripts pytest (#171 segment stitch / additivity)
         run: pytest scripts/tests -v
+      - name: Run dubbing eval pytest (#175 fit policy)
+        run: pytest eval/dubbing/tests -v
 
   build-wasm:
     name: Build WASM (trunk)

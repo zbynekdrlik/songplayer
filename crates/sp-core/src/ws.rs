@@ -89,6 +89,13 @@ pub enum ServerMsg {
         ytdlp_available: bool,
         ffmpeg_available: bool,
         ytdlp_version: Option<String>,
+        /// yt-dlp has a working JS runtime (Deno) for YouTube's n-challenge
+        /// (#189). `serde(default)` so older/mock clients that omit it decode.
+        #[serde(default)]
+        js_runtime_ok: bool,
+        /// Bundled Deno version, when present.
+        #[serde(default)]
+        deno_version: Option<String>,
     },
     Error {
         message: String,

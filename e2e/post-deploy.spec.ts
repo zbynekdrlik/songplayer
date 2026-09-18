@@ -260,6 +260,39 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
+   * Issue #189 — yt-dlp has a JS runtime (Deno) for YouTube's n-challenge.
+   *
+   * Since ~2026-09 every NEW download needs a JavaScript runtime to solve
+   * YouTube's n-challenge or it fails `n challenge solving failed`. The deploy
+   * ships a pinned `deno.exe` into the tools dir and the startup self-check
+   * publishes the result on `/api/v1/status`. A backend-state gate (no UI
+   * surface): `tools.js_runtime_ok` must be true and `tools.deno_version` set,
+   * else new downloads on the box are silently broken.
+   */
+  test("tools status reports a working JS runtime for the n-challenge (#189)", async ({
+    request,
+  }) => {
+    const statusResp = await request.get("/api/v1/status");
+    expect(statusResp.status()).toBe(200);
+    const status = (await statusResp.json()) as {
+      tools?: { js_runtime_ok?: boolean; deno_version?: string | null };
+    };
+    expect(
+      status.tools,
+      "backend /api/v1/status must include a tools object",
+    ).toBeTruthy();
+    expect(
+      status.tools?.js_runtime_ok,
+      "yt-dlp JS runtime (deno) must be present — else every new download " +
+        "fails YouTube's n-challenge",
+    ).toBe(true);
+    expect(
+      status.tools?.deno_version,
+      "backend must report the bundled deno version",
+    ).toBeTruthy();
+  });
+
+  /**
    * Issue #89 — Resolume Arena liveness gate.
    *
    * If Arena is hung, the LED wall is dark even though SongPlayer is

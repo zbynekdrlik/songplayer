@@ -13,22 +13,19 @@ pub async fn sync_playlist(
     youtube_url: &str,
     ytdlp_path: &Path,
 ) -> Result<usize, anyhow::Error> {
-    let mut cmd = tokio::process::Command::new(ytdlp_path);
+    // Shared builder (#189): tools dir first on PATH (bundled deno) +
+    // `--js-runtimes deno` when supported + CREATE_NO_WINDOW + UTF-8 env. The
+    // UTF-8 env matters here because `--dump-json` title text must not be
+    // mangled from the Windows ANSI codepage (#136 T4).
+    let mut cmd = crate::downloader::ytdlp_cmd::ytdlp_command(ytdlp_path);
     cmd.args([
         "--flat-playlist",
         "--dump-json",
         "--no-warnings",
-        "--js-runtimes",
-        "node",
         youtube_url,
     ])
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped());
-    crate::downloader::hide_console_window(&mut cmd);
-    // yt-dlp `--dump-json` title text must arrive as UTF-8, not the Windows
-    // ANSI codepage — otherwise titles like "Vámonos" reach the DB mangled
-    // and become wrong song/artist on the wall (#136 T4).
-    crate::downloader::apply_utf8_env(&mut cmd);
     let output = cmd.output().await?;
 
     if !output.status.success() {
