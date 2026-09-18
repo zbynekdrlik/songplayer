@@ -246,6 +246,43 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   persist + broadcast `KaraokeStateChanged`; NO reload on a mode change since
   #186). Dashboard: `components/karaoke_control.rs`.
 
+## Per-song stems state contract (#177) — #181 D2 MUST keep it
+
+The dashboard karaoke panel binds to the SELECTED playlist's now-playing song and
+shows whether ITS stems are ready; the D2 modern mixer (#181) replaces the
+component's visuals but MUST preserve this state contract.
+
+- **State enum (`db::models_stems::StemsState`, pure `stems_state_of`):**
+  `Ready | Queued | Processing | Unavailable | Failed`, wire strings
+  `ready/queued/processing/unavailable/failed`. Precedence: **Processing**
+  (live) → **Ready** (both stem files on disk, regardless of recorded status) →
+  **Unavailable** (`stem_status='unsupported'`) → **Failed** (`'failed'`) →
+  **Queued** (NULL/pending). `stems_state_of` takes `is_processing` — NOT
+  `stem_next_attempt_at`: there is deliberately no DB `'processing'` status (a
+  crash would strand it), so the only honest source of ⚙ is the worker's live
+  in-flight id (`stems::progress` — a process-global set/cleared around the
+  separation child, mirror of `stems::control::global()`).
+- **Now-playing source:** `now_playing::global()` (a process-global registry the
+  engine writes on `Started`, clears on Stop — a Pause KEEPS the entry, since a
+  paused song is still the panel's current song) — read by
+  `GET /api/v1/karaoke`, which returns `now_playing: [{playlist_id, video_id,
+  title, stems_state, stems_error, queue_position}]`. `stems_error` is DERIVED
+  (there is no per-song stem error column) — a followup could add
+  `stem_last_error` if the owner wants the real text.
+- **Videos payload:** `Video.stems_state` is additive + `#[serde(default)]`;
+  populated by `api/videos.rs` (NOT `row_to_video`) from
+  `models_stems::stems_state_map`, which only marks stem-relevant rows
+  (normalized+audio, or already has a stem file).
+- **Enqueue:** `POST /api/v1/stems/{id}/enqueue` (`models_stems::enqueue_stems`)
+  resets the row to eligible (`stem_status=NULL, attempts=0, next_attempt=NULL`)
+  so the oldest-first worker picks it next tick. It does NOT jump the queue
+  (selector is oldest-first by id; manual priority is #182), so the UI button is
+  labelled **"Zaradiť do fronty"**, not "…teraz".
+- **UI gate:** the mode `<select>` + vocal-gain slider are `disabled` unless the
+  selected song's `stems_state == "ready"`; the enqueue button shows only for
+  `unavailable`/`failed`. The E2E mock drives every state via
+  `POST /__mock/karaoke-now-playing`.
+
 ## TIER-0 mutation gotchas for the mixer (learned #186)
 
 The diff-scoped mutation gate caught two classes the no-compile box can't:
@@ -268,6 +305,22 @@ The diff-scoped mutation gate caught two classes the no-compile box can't:
   identically. Add a PARTIAL-target test (0→0.25, step 0.1 → 0.1, 0.2, snap 0.25,
   never 0.3). And `cur + step.copysign(tgt-cur)` (one branch) instead of
   `if tgt > cur {…} else {…}` removes the `>` equivalent mutant for `>=`.
+- **A sentinel-value mutant needs a test at the COLLIDING value (#177).** A
+  `const NONE: i64 = -1` in-flight signal has `delete -` → `NONE = 1`. A test
+  with a big distinctive id (`begin(4242)`) SURVIVES it (4242 ≠ both sentinels).
+  Kill it with the value that COLLIDES with the mutated sentinel: `begin(1)` must
+  report `Some(1)` — under `NONE = 1` the real id 1 is swallowed as "nothing".
+  Serialize such process-global tests with a module `static SERIAL: Mutex<()>`
+  (lock both the old and new test) so a parallel test can't stomp the exact read.
+- **A boolean-operator mutant in a FILTER predicate needs a row where inclusion
+  hinges on THAT operator (#177).** `stems_state_map`'s
+  `if !(normalized && has_audio) && !has_stem { return None }` had three mutants
+  (`||`→`&&` on `has_stem`, `&&`→`||` on `normalized && has_audio`, `delete !`)
+  survive because the existing test inserted only normalized+audio rows (the
+  `!(true)=false` short-circuit hid the has_stem clause). Fix: rows where the
+  operator decides — a one-stem-file / not-normalized / no-audio row must be
+  INCLUDED (kills `||`→`&&` and `delete !has_stem`); a normalized / no-audio /
+  no-stem row must be OMITTED (kills `&&`→`||`).
 
 ## Re-measuring a separator candidate (dev2)
 

@@ -15,6 +15,7 @@
 use std::path::{Path, PathBuf};
 
 pub mod control;
+pub mod progress;
 pub mod reader;
 pub mod separator;
 pub mod worker;

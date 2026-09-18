@@ -340,6 +340,10 @@ impl StemWorker {
         // (`kill_on_drop`); in `low-priority` we re-run IMMEDIATELY on CPU, in
         // `idle-only` we re-queue with NO penalty (`StemStepResult::WallAborted`
         // → `stem_status` stays NULL). `separate_stems` is remote-free.
+        // #177: publish the live in-flight signal for the karaoke panel's ⚙
+        // "spracúvam" state; the guard clears it when this scope ends (success,
+        // failure, or wall-abort).
+        let _in_flight = crate::stems::progress::begin(job.video_id);
         let plan = HeavyStepPlan::for_activity(mode, activity);
         // #162: the timeout for THIS plan — a cpu-idle plan gets the ×4 base so a
         // slow CPU separation is not killed mid-run and retried forever. The GPU

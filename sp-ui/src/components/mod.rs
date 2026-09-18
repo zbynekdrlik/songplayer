@@ -22,3 +22,4 @@ pub mod selection;
 pub mod resolume_hosts;
 pub mod settings_form;
 pub mod video_list;
+pub mod video_list_stems;

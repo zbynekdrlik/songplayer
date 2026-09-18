@@ -659,21 +659,22 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
-   * Issue #150 + #164 — genlock indicator consistency with pacing gating.
+   * Issue #150 + #164 + #176 — genlock indicator consistency with pacing gating.
    *
    * The dashboard's genlock badges must AGREE with whatever
    * `GET /api/v1/ndi/health` reports — a consistency check, NOT a hard-coded
-   * state. #164 changed the rendering rule: while `genlock_pacing` is OFF
-   * (`pacing.enabled == false`) — the production default today — NO badge is
-   * shown at all (per-card or header summary), because '● UNLOCKED — pacing
-   * disabled' on every card reads as many errors for one disabled feature.
-   * When pacing IS enabled the per-card badge shows only on live (Playing/
-   * Paused) outputs and the header shows one summary. This test recomputes the
-   * expectation from the live health and asserts the badges match, for either
-   * regime. No scene switching, no sleep loops (a single settle so the 1 s poll
-   * lands, per file style).
+   * state. #176 revised #164's rendering rule: the whole-box HEADER badge is now
+   * ALWAYS visible — while `genlock_pacing` is OFF (`pacing.enabled == false`,
+   * the production default today) it shows the explicit grey `● GENLOCK OFF`
+   * (never hidden), so the owner can always tell at a glance whether SongPlayer
+   * is genlocked. The PER-CARD badge keeps #164's "only where actionable" rule:
+   * hidden while pacing is off, shown only on live (Playing/Paused) pacing-
+   * enabled outputs when pacing is on; when pacing IS enabled the header shows
+   * the worst-of summary. This test recomputes the expectation from the live
+   * health and asserts the badges match, for either regime. No scene switching,
+   * no sleep loops (a single settle so the 1 s poll lands, per file style).
    */
-  test("genlock badges agree with /api/v1/ndi/health (#150/#164)", async ({
+  test("genlock badges agree with /api/v1/ndi/health (#150/#164/#176)", async ({
     page,
     request,
   }) => {
@@ -701,11 +702,18 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const enabled = health.filter((o) => o.pacing?.enabled === true);
 
     if (enabled.length === 0) {
-      // Pacing disabled everywhere (prod default): the owner must see ZERO
-      // genlock badges — no header summary, no per-card badge (#164).
-      await expect(page.locator(".lock-badge")).toHaveCount(0, {
-        timeout: 10_000,
-      });
+      // #176: pacing disabled everywhere (prod default) — the ALWAYS-visible
+      // header badge shows the explicit grey `● GENLOCK OFF`, derived from the
+      // live health (no pacing-enabled output), never hidden. The per-card badge
+      // stays hidden (#164 "only where actionable").
+      const globalBadge = page.getByTestId("genlock-global-badge");
+      await expect(globalBadge).toBeVisible({ timeout: 15_000 });
+      await expect(globalBadge).toContainText("GENLOCK OFF");
+      await expect(globalBadge).toHaveClass(/lock-off/);
+      // No per-card selector badge while pacing is off.
+      await expect(
+        page.locator(".playlist-selector-row .lock-badge"),
+      ).toHaveCount(0, { timeout: 10_000 });
       return;
     }
 
@@ -876,6 +884,70 @@ test.describe("SongPlayer post-deploy feature verification", () => {
         vocal_gain: before.vocal_gain ?? 0.3,
       },
     });
+
+    const realConsole = consoleMessages.filter(
+      (m) => !allowedConsole.some((r) => r.test(m)),
+    );
+    expect(realConsole).toEqual([]);
+  });
+
+  /**
+   * Issue #177 — the karaoke panel binds to the now-playing song and shows its
+   * stems state. Read-only: never switches the OBS program scene. Verifies the
+   * deployed `GET /api/v1/karaoke` returns the `now_playing[]` contract and that
+   * the dashboard panel renders a per-song header (a song title + a state glyph,
+   * or the honest "nič nehrá" when nothing is selected/playing).
+   */
+  test("karaoke panel names the now-playing song + shows its stems state (#177)", async ({
+    page,
+    request,
+  }) => {
+    const consoleMessages: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "error" || msg.type() === "warning") {
+        consoleMessages.push(`[${msg.type()}] ${msg.text()}`);
+      }
+    });
+    const allowedConsole = [
+      /favicon/i,
+      /WebSocket connection/i,
+      /\bwasm\b.*instantiate/i,
+      /module specifier/i,
+      /integrity.*attribute.*ignored/i,
+    ];
+
+    // The deployed API carries the now_playing[] contract with valid states.
+    const karaoke = (await (await request.get("/api/v1/karaoke")).json()) as {
+      now_playing?: Array<{
+        playlist_id: number;
+        video_id: number;
+        title: string;
+        stems_state: string;
+        queue_position: number | null;
+      }>;
+    };
+    expect(Array.isArray(karaoke.now_playing)).toBe(true);
+    const validStates = [
+      "ready",
+      "queued",
+      "processing",
+      "unavailable",
+      "failed",
+    ];
+    for (const e of karaoke.now_playing ?? []) {
+      expect(
+        validStates,
+        `now_playing entry ${e.video_id} state "${e.stems_state}" must be a known state`,
+      ).toContain(e.stems_state);
+      expect(typeof e.title).toBe("string");
+    }
+
+    await page.goto("/");
+    const header = page.locator('[data-testid="karaoke-now-playing"]');
+    await expect(header).toBeVisible({ timeout: 30_000 });
+    // The header always begins with the "Stemy — " binding prefix — either
+    // "Stemy — <song>: <glyph>" or the idle "Stemy — nič nehrá".
+    await expect(header).toContainText(/Stemy — /);
 
     const realConsole = consoleMessages.filter(
       (m) => !allowedConsole.some((r) => r.test(m)),

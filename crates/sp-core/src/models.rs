@@ -87,6 +87,13 @@ pub struct Video {
     /// in the UI as a `⚠` hint on un-normalized rows.
     #[serde(default)]
     pub last_download_error: Option<String>,
+    /// #177: per-song karaoke-stems state (`ready` / `queued` / `processing` /
+    /// `unavailable` / `failed`), populated by the videos-list endpoint from
+    /// `models_stems::stems_state_map`. Additive + `#[serde(default)]` so the
+    /// WASM store deserialises older/other payloads that omit it (the row-level
+    /// mapping in `db::models::row_to_video` leaves it `None`).
+    #[serde(default)]
+    pub stems_state: Option<String>,
 }
 
 /// A record of a video that was played.

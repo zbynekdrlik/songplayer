@@ -321,12 +321,13 @@ test("global genlock summary flips to LOCKED after an all-locked fixture (#164)"
   ).toBeVisible();
 });
 
-test("pacing disabled everywhere hides every genlock badge (#164)", async ({
+test("pacing disabled everywhere shows GENLOCK OFF in the header, no per-card badge (#176)", async ({
   page,
   request,
 }) => {
-  // Production reality: genlock_pacing OFF on every output. The owner must see
-  // ZERO badges — no per-card '● UNLOCKED — pacing disabled', no header summary.
+  // Production reality: genlock_pacing OFF on every output. #176 revises #164:
+  // the header now ALWAYS shows the explicit grey '● GENLOCK OFF' so the owner
+  // can tell at a glance the box is not genlocked; per-card badges stay hidden.
   const set = await request.post("/__mock/ndi-health", {
     data: GENLOCK_ALL_DISABLED_FIXTURE,
   });
@@ -337,10 +338,53 @@ test("pacing disabled everywhere hides every genlock badge (#164)", async ({
     timeout: 10000,
   });
 
-  // No badge anywhere on the page (header summary + every card). Retries while
-  // the 1 s poll settles; the first fetch already returns the disabled fixture,
-  // so the count is 0 the whole time.
-  await expect(page.locator(".lock-badge")).toHaveCount(0, { timeout: 6000 });
+  const global = page.getByTestId("genlock-global-badge");
+  await expect(global).toBeVisible({ timeout: 6000 });
+  await expect(global).toContainText("● GENLOCK OFF");
+  await expect(global).toHaveClass(/lock-off/);
+  // The OFF tooltip explains the free-running state.
+  await expect(global).toHaveAttribute("title", /pacing vypnuté/);
+
+  // No per-card badge anywhere while pacing is off (the header badge is the only
+  // one). Retries while the 1 s poll settles.
+  await expect(
+    page.locator(".playlist-selector-row .lock-badge"),
+  ).toHaveCount(0, { timeout: 6000 });
+});
+
+test("a live pacing-enabled UNLOCKED output turns the header badge red UNLOCKED (#176)", async ({
+  page,
+  request,
+}) => {
+  // A single live, pacing-enabled output whose clock is not ok → the worst-of
+  // global state is UNLOCKED (red), with the reason in the badge text.
+  const set = await request.post("/__mock/ndi-health", {
+    data: [
+      {
+        ndi_name: "SP-worship",
+        playlist_id: 1,
+        state: "Playing",
+        connections: 2,
+        lock_state: "UNLOCKED",
+        lock_reason: "clock not ok",
+        clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },
+        pacing: { enabled: true },
+        audio: {},
+      },
+    ],
+  });
+  expect(set.ok()).toBeTruthy();
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+    timeout: 10000,
+  });
+
+  const global = page.getByTestId("genlock-global-badge");
+  await expect(global).toBeVisible({ timeout: 6000 });
+  await expect(global).toContainText("UNLOCKED", { timeout: 6000 });
+  await expect(global).toContainText("clock not ok");
+  await expect(global).toHaveClass(/lock-unlocked/);
 });
 
 // ── #152: per-song SK translation gender toggle ───────────────────────────────

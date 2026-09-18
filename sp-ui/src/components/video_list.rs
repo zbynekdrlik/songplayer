@@ -13,11 +13,14 @@ use leptos::prelude::*;
 use sp_core::models::Video;
 
 use crate::api;
+use crate::components::video_list_stems::{StemsMarker, passes_stems_filter};
 
 #[component]
 pub fn VideoList(playlist_id: i64) -> impl IntoView {
     let videos = RwSignal::new(Vec::<Video>::new());
     let error_msg = RwSignal::new(String::new());
+    // #177: "len so stemami" filter — keep only stems-ready songs.
+    let only_stems = RwSignal::new(false);
 
     // Which row (video id) is currently being edited, and the working
     // song/artist buffers for that row. `None` == no row in edit mode.
@@ -46,6 +49,15 @@ pub fn VideoList(playlist_id: i64) -> impl IntoView {
                     view! { <div class="video-list-error">{err}</div> }.into_any()
                 }
             }}
+            <label class="video-list-stems-filter">
+                <input
+                    type="checkbox"
+                    data-testid="video-list-stems-filter"
+                    prop:checked=move || only_stems.get()
+                    on:change=move |ev| only_stems.set(event_target_checked(&ev))
+                />
+                "len so stemami"
+            </label>
             <table>
                 <thead>
                     <tr>
@@ -54,12 +66,20 @@ pub fn VideoList(playlist_id: i64) -> impl IntoView {
                         <th>"Artist"</th>
                         <th>"Cached"</th>
                         <th>"Normalized"</th>
+                        <th class="video-list-col-stems">"Stemy"</th>
                         <th class="video-list-col-edit"></th>
                     </tr>
                 </thead>
                 <tbody>
                     <For
-                        each=move || videos.get()
+                        each=move || {
+                            let os = only_stems.get();
+                            videos
+                                .get()
+                                .into_iter()
+                                .filter(|v| passes_stems_filter(os, v))
+                                .collect::<Vec<_>>()
+                        }
                         // Key on the fields this row RENDERS statically (id +
                         // the editable song/artist), not on id alone. `For`
                         // never re-runs `children` for an existing key, so an
@@ -178,6 +198,9 @@ pub fn VideoList(playlist_id: i64) -> impl IntoView {
                                     </td>
                                     <td>{if video.cached { "Yes" } else { "No" }}</td>
                                     <td>{if video.normalized { "Yes" } else { "No" }}</td>
+                                    <td class="video-list-col-stems">
+                                        <StemsMarker state=video.stems_state.clone() />
+                                    </td>
                                     <td class="video-list-col-edit">
                                         {
                                             let orig_song = orig_song.clone();

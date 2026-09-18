@@ -10,6 +10,7 @@ pub use engine_command::EngineCommand;
 pub mod lyrics;
 pub mod mdns;
 pub mod metadata;
+pub mod now_playing;
 pub mod obs;
 mod obs_bridge;
 pub mod panic_hook;
