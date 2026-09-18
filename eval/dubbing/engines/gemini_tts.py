@@ -19,8 +19,8 @@ REST surface (Gemini API `generateContent`, AUDIO modality):
     reply:   candidates[0].content.parts[0].inlineData
                  {mimeType:"audio/L16;rate=24000", data:"<base64 PCM>"}
 
-The PCM is wrapped to WAV via `wavutil.pcm_l16_to_wav`. Models under test:
-`gemini-3.1-flash-tts-preview` and `gemini-2.5-pro-preview-tts`.
+The PCM is wrapped to WAV via `wavutil.pcm_l16_to_wav`. Model under test (round-2
+newest-only ruling): `gemini-3.1-flash-tts-preview` (2.5-pro dropped as superseded).
 
 The API key is read from the `GEMINI_API_KEY` environment variable only — never
 logged, never on a command line, never written to a file. On the box it is the
@@ -42,7 +42,8 @@ from eval.dubbing.voices import GEMINI_STYLE
 logger = logging.getLogger("dubbing_eval.gemini_tts")
 
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models"
-DEFAULT_MODEL = "gemini-2.5-pro-preview-tts"
+# Newest-only (owner ruling): gemini-2.5-pro-preview-tts is dropped as superseded.
+DEFAULT_MODEL = "gemini-3.1-flash-tts-preview"
 SYNTH_TIMEOUT_S = 180.0
 DEFAULT_SAMPLE_RATE = 24000
 

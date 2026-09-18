@@ -130,6 +130,12 @@ class GeminiLiveTranslateEngine:
                         break
             if not send_task.done():
                 send_task.cancel()
+                try:
+                    await send_task
+                except asyncio.CancelledError:
+                    # airuleset:script-ok awaiting our own just-cancelled sender
+                    # is the standard clean-teardown idiom; nothing to log.
+                    pass
         return bytes(out), "".join(transcript), round(time.monotonic() - t0, 2)
 
     def to_wav(self, out_pcm: bytes) -> bytes:

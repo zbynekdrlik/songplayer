@@ -39,11 +39,12 @@ def classify(
     """Pure: label a sentence relative to the segment's own thresholds.
 
     `intense` = loud (>= rms_hi) OR wide pitch (>= f0_hi); `calm` = quiet
-    (<= rms_lo) AND narrow pitch; otherwise `neutral`.
+    (<= rms_lo, and — having passed the intense check — necessarily narrow
+    pitch); otherwise `neutral`.
     """
     if val.rms_db >= rms_hi or val.f0_semitones >= f0_hi:
         return "intense"
-    if val.rms_db <= rms_lo and val.f0_semitones < f0_hi:
+    if val.rms_db <= rms_lo:
         return "calm"
     return "neutral"
 
@@ -85,6 +86,8 @@ def thresholds(values: list[Intensity]) -> tuple[float, float, float]:
 
 def measure_window(samples, sr: int) -> Intensity:
     """Runtime (librosa): measure RMS dB + f0 spread of a mono float array."""
+    import logging
+
     import librosa
     import numpy as np
 
@@ -102,6 +105,12 @@ def measure_window(samples, sr: int) -> Intensity:
             semi = round(float(12.0 * np.log2((hi + 1e-6) / (lo + 1e-6))), 2)
         else:
             semi = 0.0
-    except Exception:
+    except (librosa.util.exceptions.ParameterError, ValueError, FloatingPointError):
+        # pyin can fail on a too-short / silent window; treat as no pitch spread.
+        logging.getLogger("dubbing_eval.intensity").warning(
+            "pyin failed for a %d-sample window; f0 spread set to 0",
+            a.size,
+            exc_info=True,
+        )
         semi = 0.0
     return Intensity(rms_db=rms_db, f0_semitones=semi, words_per_s=0.0)
