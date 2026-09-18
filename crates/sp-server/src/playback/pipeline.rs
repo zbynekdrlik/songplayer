@@ -55,6 +55,10 @@ pub enum PipelineCommand {
 }
 
 /// Events emitted by the pipeline thread back to the async engine.
+// `HealthSnapshot` carries the full NDI/genlock/audio telemetry (#192 added the
+// emitter stats) and is sent once per 5 s poll — its size is irrelevant on this
+// channel, so boxing it would only add an allocation per snapshot.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum PipelineEvent {
     /// Video playback started; duration is known.

@@ -112,11 +112,8 @@ impl AudioRing {
 
     /// Frames (samples-per-channel) currently buffered.
     pub fn len_frames(&self) -> usize {
-        if self.channels == 0 {
-            0
-        } else {
-            self.buf.len() / self.channels
-        }
+        // 0 channels (nothing pushed yet) → 0 frames, never a divide-by-zero.
+        self.buf.len().checked_div(self.channels).unwrap_or(0)
     }
 
     pub fn channels(&self) -> usize {
