@@ -19,7 +19,9 @@ pub(crate) async fn dispatch(engine: &mut PlaybackEngine, cmd: EngineCommand) {
             engine.handle_engine_play(playlist_id).await;
         }
         EngineCommand::Pause { playlist_id } => {
-            engine.handle_command(playlist_id, PlayEvent::SceneOff).await;
+            engine
+                .handle_command(playlist_id, PlayEvent::SceneOff)
+                .await;
         }
         EngineCommand::Skip { playlist_id } => {
             engine.handle_command(playlist_id, PlayEvent::Skip).await;

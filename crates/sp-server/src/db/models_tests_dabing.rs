@@ -309,7 +309,10 @@ async fn get_next_dub_job_picks_newest_requested_first() {
     make_dub_job(&pool, b, "queued", "2026-09-18T11:00:00.000Z").await; // newer
 
     let job = get_next_dub_job(&pool).await.unwrap().expect("a job");
-    assert_eq!(job.video_id, b, "newest dub_requested_at wins (priority queue)");
+    assert_eq!(
+        job.video_id, b,
+        "newest dub_requested_at wins (priority queue)"
+    );
     assert_eq!(job.dub_status, "queued");
 }
 

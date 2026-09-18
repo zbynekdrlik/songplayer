@@ -130,7 +130,7 @@ pub fn plan_chunks(silences: &[Silence], total_ms: u64, cfg: &ChunkPlanConfig) -
 /// The maximum speed-up applied to a chunk's translated output to fit before the
 /// next chunk (ffmpeg `atempo`). 1.08 keeps the voice natural; we NEVER slow
 /// down (tempo `>= 1.0`) and never exceed this.
-pub const MAX_TEMPO: f32 = 1.0; // RED: wrong on purpose — GREEN sets 1.08
+pub const MAX_TEMPO: f32 = 1.08;
 
 /// Where a chunk's translated output is placed, and how fast it plays.
 #[derive(Debug, Clone, Copy, PartialEq)]

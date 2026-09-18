@@ -78,7 +78,11 @@ pub fn dub_pace_from(raw: Option<&str>) -> f32 {
 /// The bundled ffmpeg path (next to the other tools). Mirrors
 /// `tools::ffmpeg_filename` without depending on its visibility.
 fn ffmpeg_path(tools_dir: &Path) -> PathBuf {
-    let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+    let name = if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    };
     tools_dir.join(name)
 }
 
@@ -186,7 +190,10 @@ impl DubWorker {
         let key = match self.first_gemini_key().await {
             Some(k) => k,
             None => {
-                warn!(video_id = job.video_id, "dub worker: gemini_api_key not set — deferring");
+                warn!(
+                    video_id = job.video_id,
+                    "dub worker: gemini_api_key not set — deferring"
+                );
                 let _ = models_dabing::record_dub_deferral(
                     &self.pool,
                     job.video_id,
@@ -243,12 +250,17 @@ impl DubWorker {
                         dub = %out_path.display(),
                         "dub worker: ready"
                     ),
-                    Err(e) => warn!(%e, video_id = job.video_id, "dub worker: mark_dub_ready failed"),
+                    Err(e) => {
+                        warn!(%e, video_id = job.video_id, "dub worker: mark_dub_ready failed")
+                    }
                 }
             }
             Err(e) => {
                 let msg = format!("{e:#}");
-                warn!(video_id = job.video_id, "dub worker: synthesis failed: {msg}");
+                warn!(
+                    video_id = job.video_id,
+                    "dub worker: synthesis failed: {msg}"
+                );
                 let _ =
                     models_dabing::record_dub_deferral(&self.pool, job.video_id, &msg, DUB_BACKOFF)
                         .await;
@@ -400,15 +412,14 @@ impl DubWorker {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x0800_0000 | 0x0000_4000); // CREATE_NO_WINDOW | BELOW_NORMAL
         }
-        let child = cmd.spawn().context("failed to spawn ffmpeg silencedetect")?;
+        let child = cmd
+            .spawn()
+            .context("failed to spawn ffmpeg silencedetect")?;
         // 20-minute ceiling — decoding a long file, but never the whole stream.
-        let out = tokio::time::timeout(
-            Duration::from_secs(1200),
-            child.wait_with_output(),
-        )
-        .await
-        .context("ffmpeg silencedetect timed out")?
-        .context("ffmpeg silencedetect wait failed")?;
+        let out = tokio::time::timeout(Duration::from_secs(1200), child.wait_with_output())
+            .await
+            .context("ffmpeg silencedetect timed out")?
+            .context("ffmpeg silencedetect wait failed")?;
         Ok(String::from_utf8_lossy(&out.stderr).into_owned())
     }
 
@@ -476,6 +487,11 @@ mod tests {
     fn ffmpeg_path_is_under_tools_dir() {
         let p = ffmpeg_path(Path::new("/c/tools"));
         assert!(p.starts_with("/c/tools"));
-        assert!(p.file_name().unwrap().to_string_lossy().starts_with("ffmpeg"));
+        assert!(
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("ffmpeg")
+        );
     }
 }

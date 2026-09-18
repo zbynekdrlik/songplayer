@@ -113,7 +113,10 @@ pub async fn run_live_translate(
     // The child shells out to ffmpeg by bare name (resample / atempo / mux), so the
     // bundled ffmpeg next to the script must be on PATH — same as the stem child.
     if let Some(tools_dir) = script_path.parent() {
-        cmd.env("PATH", crate::lyrics::bootstrap::prepend_path_with(tools_dir));
+        cmd.env(
+            "PATH",
+            crate::lyrics::bootstrap::prepend_path_with(tools_dir),
+        );
     }
     // Secret via ENV only — never argv, never logged.
     cmd.env("GEMINI_API_KEY", api_key);
@@ -204,10 +207,20 @@ mod tests {
             Path::new("/c/w"),
             1.0,
         );
-        let joined: Vec<String> = args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let joined: Vec<String> = args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(joined[0], "/t/dub_worker.py");
         assert_eq!(joined[1], "live-translate");
-        for flag in ["--audio", "--out", "--transcripts", "--chunk-plan", "--work-dir", "--pace"] {
+        for flag in [
+            "--audio",
+            "--out",
+            "--transcripts",
+            "--chunk-plan",
+            "--work-dir",
+            "--pace",
+        ] {
             assert!(joined.iter().any(|a| a == flag), "missing {flag}");
         }
         // No API key ever appears in argv.

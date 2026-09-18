@@ -216,9 +216,18 @@ mod tests {
     fn audio_source_kind_is_stem_mix_only_with_both_stems() {
         // The observable reader choice (both reader kinds share the 48 kHz stereo
         // format, so the opened reader cannot be told apart directly). No dub.
-        assert_eq!(audio_source_kind(true, true, false), AudioSourceKind::StemMix);
-        assert_eq!(audio_source_kind(false, true, false), AudioSourceKind::PlainMix);
-        assert_eq!(audio_source_kind(true, false, false), AudioSourceKind::PlainMix);
+        assert_eq!(
+            audio_source_kind(true, true, false),
+            AudioSourceKind::StemMix
+        );
+        assert_eq!(
+            audio_source_kind(false, true, false),
+            AudioSourceKind::PlainMix
+        );
+        assert_eq!(
+            audio_source_kind(true, false, false),
+            AudioSourceKind::PlainMix
+        );
         assert_eq!(
             audio_source_kind(false, false, false),
             AudioSourceKind::PlainMix
@@ -231,8 +240,14 @@ mod tests {
         // instrumental stem) → 4-stream DubMix; otherwise it degrades.
         assert_eq!(audio_source_kind(true, true, true), AudioSourceKind::DubMix);
         // Dub present but a stem missing → not a dub mix (falls back).
-        assert_eq!(audio_source_kind(false, true, true), AudioSourceKind::PlainMix);
-        assert_eq!(audio_source_kind(true, false, true), AudioSourceKind::PlainMix);
+        assert_eq!(
+            audio_source_kind(false, true, true),
+            AudioSourceKind::PlainMix
+        );
+        assert_eq!(
+            audio_source_kind(true, false, true),
+            AudioSourceKind::PlainMix
+        );
     }
 
     /// A dub track + both stems → the 4-stream dub reader opens and reports the

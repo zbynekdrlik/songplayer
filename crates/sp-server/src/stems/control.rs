@@ -333,14 +333,23 @@ mod tests {
         // Default dub ratio = dub only.
         assert!((c.dub_ratio() - 1.0).abs() < 1e-6);
         let [o, v, i, d] = c.dub_gain_handles();
-        assert_eq!((read(&o), read(&v), read(&i), read(&d)), (0.0, 0.0, 1.0, 1.0));
+        assert_eq!(
+            (read(&o), read(&v), read(&i), read(&d)),
+            (0.0, 0.0, 1.0, 1.0)
+        );
         // A ratio change publishes the new quad to the SAME atomics (live).
         c.set_dub_ratio(0.0);
         assert!((c.dub_ratio() - 0.0).abs() < 1e-6);
-        assert_eq!((read(&o), read(&v), read(&i), read(&d)), (0.0, 1.0, 1.0, 0.0));
+        assert_eq!(
+            (read(&o), read(&v), read(&i), read(&d)),
+            (0.0, 1.0, 1.0, 0.0)
+        );
         c.set_dub_ratio(0.25);
         assert!((c.dub_ratio() - 0.25).abs() < 1e-6);
-        assert_eq!((read(&o), read(&v), read(&i), read(&d)), (0.0, 0.75, 1.0, 0.25));
+        assert_eq!(
+            (read(&o), read(&v), read(&i), read(&d)),
+            (0.0, 0.75, 1.0, 0.25)
+        );
     }
 
     #[test]

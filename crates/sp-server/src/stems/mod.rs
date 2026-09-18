@@ -45,7 +45,10 @@ pub fn stem_paths(audio: &Path) -> (PathBuf, PathBuf) {
 /// `foo`. Pure so the dub worker (which writes) and the playback reader (which
 /// reads) agree without a DB round-trip.
 fn dub_base(audio: &Path) -> (PathBuf, String, String) {
-    let parent = audio.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
+    let parent = audio
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
     let stem = audio
         .file_stem()
         .and_then(|s| s.to_str())

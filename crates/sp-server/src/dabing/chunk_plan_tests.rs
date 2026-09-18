@@ -14,7 +14,13 @@ fn short_audio_is_a_single_chunk() {
     // Well under 8 min, with pauses that must be IGNORED (no split needed).
     let sils = [sil(60_000, 61_000), sil(120_000, 121_000)];
     let chunks = plan_chunks(&sils, 200_000, &cfg);
-    assert_eq!(chunks, vec![Chunk { start_ms: 0, end_ms: 200_000 }]);
+    assert_eq!(
+        chunks,
+        vec![Chunk {
+            start_ms: 0,
+            end_ms: 200_000
+        }]
+    );
 }
 
 #[test]
@@ -58,9 +64,27 @@ fn no_qualifying_pause_forces_a_ceiling_cut() {
     // 20 min, no pauses at all → hard cuts at the 8-min ceiling, last is remainder.
     let chunks = plan_chunks(&[], 1_200_000, &cfg);
     assert_eq!(chunks.len(), 3);
-    assert_eq!(chunks[0], Chunk { start_ms: 0, end_ms: 480_000 });
-    assert_eq!(chunks[1], Chunk { start_ms: 480_000, end_ms: 960_000 });
-    assert_eq!(chunks[2], Chunk { start_ms: 960_000, end_ms: 1_200_000 });
+    assert_eq!(
+        chunks[0],
+        Chunk {
+            start_ms: 0,
+            end_ms: 480_000
+        }
+    );
+    assert_eq!(
+        chunks[1],
+        Chunk {
+            start_ms: 480_000,
+            end_ms: 960_000
+        }
+    );
+    assert_eq!(
+        chunks[2],
+        Chunk {
+            start_ms: 960_000,
+            end_ms: 1_200_000
+        }
+    );
 }
 
 #[test]
@@ -81,7 +105,10 @@ fn every_chunk_stays_within_the_ceiling_and_covers_the_whole_timeline() {
         assert_eq!(w[0].end_ms, w[1].start_ms);
     }
     for c in &chunks {
-        assert!(c.len_ms() <= cfg.max_chunk_ms, "chunk {c:?} exceeds ceiling");
+        assert!(
+            c.len_ms() <= cfg.max_chunk_ms,
+            "chunk {c:?} exceeds ceiling"
+        );
         assert!(c.len_ms() > 0);
     }
 }
@@ -153,8 +180,20 @@ Input #0, wav, from 'a.flac':
     let (total, sils) = parse_silencedetect(stderr);
     assert_eq!(total, Some(125_500)); // 2:05.50
     assert_eq!(sils.len(), 2);
-    assert_eq!(sils[0], Silence { start_ms: 10_500, end_ms: 11_400 });
-    assert_eq!(sils[1], Silence { start_ms: 60_000, end_ms: 61_250 });
+    assert_eq!(
+        sils[0],
+        Silence {
+            start_ms: 10_500,
+            end_ms: 11_400
+        }
+    );
+    assert_eq!(
+        sils[1],
+        Silence {
+            start_ms: 60_000,
+            end_ms: 61_250
+        }
+    );
 }
 
 #[test]
@@ -165,7 +204,13 @@ fn parse_silencedetect_closes_trailing_silence_at_eof() {
 ";
     let (total, sils) = parse_silencedetect(stderr);
     assert_eq!(total, Some(30_000));
-    assert_eq!(sils, vec![Silence { start_ms: 28_000, end_ms: 30_000 }]);
+    assert_eq!(
+        sils,
+        vec![Silence {
+            start_ms: 28_000,
+            end_ms: 30_000
+        }]
+    );
 }
 
 #[test]
@@ -174,4 +219,3 @@ fn parse_silencedetect_handles_no_silences() {
     assert_eq!(total, Some(10_000));
     assert!(sils.is_empty());
 }
-
