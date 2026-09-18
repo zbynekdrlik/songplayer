@@ -169,3 +169,29 @@ seam, one stream wider). Any 4-stream open failure degrades to the stem/plain mi
 `lib.rs` was at exactly 1000 lines, so the `EngineCommand` match was extracted to a
 sibling `engine_dispatch.rs` (free `dispatch(&mut engine, cmd)`) before adding the
 `SetDubMix` arm + the dub-worker spawn.
+
+## Known gotchas (D4, verified on win-resolume 18.9.2026)
+
+- **A dub for a video > 15 min STALLS at `dub_status=stems`.** The 4-stream mix
+  precondition needs stems, but the stem worker caps separation at
+  `STEM_MAX_DURATION_MS` (15 min, `stems/worker.rs`) and marks a longer file
+  `stem_status=unsupported`, so the dub never leaves `stems`. Sermons are long by
+  nature — the sample "Morning Prayer & Devotion" (40 min, video 344) hit exactly
+  this. Open design question (main's call, filed on #183): the dub-only default
+  (r=1.0) does NOT need the vocals stem — degrade gracefully to a 2-stream
+  `[original, dub]` / dub-only mix when stems are unsupported/absent, so long
+  sermons are dubbable without a multi-hour (or capped-out) stem pass. Until then,
+  prove the chain on a SHORT (≤ 3 min) speech video.
+- **`dub_worker.py` is materialised only when a dub reaches the synth step.**
+  `DubWorker::ensure_script` runs AFTER the stems precondition, so on a box whose
+  only dub video is stuck at `stems`, `dub_worker.py` is NOT written to
+  `cache/tools/` and `google-genai` is NOT yet installed. To test the child
+  standalone, write the script + `pip install google-genai==2.24.0` yourself.
+- **Live-Translate core proof (real key, on-box):** a 20 s EN slice → 44 s of
+  24 kHz SK PCM (~real-time + drain); `google-genai==2.24.0` installs + imports in
+  the lyrics venv. 2× pacing (`dub_pace=2.0`) keeps the output complete and ~halves
+  the send time (the fixed drain window means elapsed drops < 2×).
+- **win-resolume console is cp1252 — a Python `print()` of Slovak (`ď` = ď)
+  raises `UnicodeEncodeError`.** The real child is fine (it writes UTF-8 JSON with
+  `ensure_ascii=False`); a debug probe must set `PYTHONIOENCODING=utf-8` or write to
+  a file, not print SK text to the box console.
