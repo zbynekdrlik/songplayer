@@ -141,3 +141,20 @@ The #164 genlock badge belongs ONLY in the selector rows + the header
 asserts on a specific playlist's card must SELECT it first (click its
 `playlist-selector-row`, or a mobile `playlist-select` option), then read the one
 `playlist-workspace` card — the old per-card grid locators no longer resolve.
+
+## A helper returning `impl IntoView` from a `&T` borrow fails E0515 inside `<For>`
+
+Edition 2024's `impl Trait` captures ALL in-scope lifetimes, so
+`fn row_view(row: &DubRow) -> impl IntoView` returns a view that BORROWS `row`
+for the `&DubRow` lifetime. Call it as `{row_view(&row)}` inside a `<For>`
+`children=move |row| view!{ … }` closure and rustc rejects it with
+`error[E0515]: cannot return value referencing function parameter 'row'` — the
+returned `view!` structure holds a reference to the closure's local `row`. The
+no-compile TIER-0 box can't see it; it failed #180's Build WASM job.
+
+Fix: pass the OWNED fields the helper needs instead of a borrow —
+`fn row_view(chain_state: String, dub_error: Option<String>) -> impl IntoView`,
+called `{row_view(row.chain_state.clone(), row.dub_error.clone())}`. The returned
+view is then `'static`. (Alternatively `-> impl IntoView + use<>` to opt out of
+lifetime capture, but owned args are clearer.) Same trap for any sp-ui helper
+that takes `&SomeRow`/`&str` and returns a view used in a `<For>`/list child.
