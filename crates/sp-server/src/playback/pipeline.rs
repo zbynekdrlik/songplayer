@@ -327,12 +327,14 @@ fn run_loop_windows(
     let audio_emitter = if genlock_pacing {
         None
     } else {
+        // spawn returns None on OS-thread-spawn failure → decode_and_send takes
+        // the legacy audio-with-video path (never a hung, undrained ring).
         let shared = crate::playback::audio_emitter::new_shared_emitter();
-        Some(crate::playback::pipeline_audio::spawn_audio_emitter(
+        crate::playback::pipeline_audio::spawn_audio_emitter(
             ndi_name,
             submitter.audio_sink(),
             shared,
-        ))
+        )
     };
 
     // The paced scheduler persists across songs (counters accumulate) and

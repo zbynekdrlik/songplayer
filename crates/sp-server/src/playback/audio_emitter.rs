@@ -308,8 +308,10 @@ impl AudioEmitter {
         }
         let mut v: Vec<u64> = self.jitter_us.iter().copied().collect();
         v.sort_unstable();
-        let idx = ((v.len() as f64) * 0.99).ceil() as usize;
-        let idx = idx.saturating_sub(1).min(v.len() - 1);
+        // `ceil(n · 0.99) − 1` is always a valid index in `[0, n−1]` for n ≥ 1
+        // (0.99 < 1 ⇒ ceil ≤ n ⇒ idx ≤ n−1; n·0.99 > 0 ⇒ ceil ≥ 1 ⇒ idx ≥ 0),
+        // so no clamp is needed.
+        let idx = ((v.len() as f64) * 0.99).ceil() as usize - 1;
         v[idx]
     }
 

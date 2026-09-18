@@ -91,28 +91,37 @@ impl Drop for AudioEmitterThread {
 }
 
 /// Spawn the wall-clock audio emitter thread for one pipeline's `sink`. Returns
-/// the guard that owns the thread + the shared ring the decode loop fills.
+/// the guard that owns the thread + the shared ring the decode loop fills, or
+/// `None` when the OS thread could not be spawned — in which case the caller
+/// leaves `audio_emitter = None` so `decode_and_send` takes the LEGACY
+/// audio-with-video path. Returning a guard with a dead (never-drained) ring
+/// would hang the decode thread once the ring filled — the sole drain is
+/// `run_emit_loop`, which never ran.
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn spawn_audio_emitter(
     ndi_name: &str,
     sink: AudioSink<RealNdiBackend>,
     shared: SharedEmitter,
-) -> AudioEmitterThread {
+) -> Option<AudioEmitterThread> {
     // 1 ms multimedia timer so the coarse sleep lands within the 2 ms spin
     // margin (ref-counted; the paced path requests the same).
     crate::playback::pipeline_paced::request_high_res_timer();
 
     let thread_shared = shared.clone();
     let name = ndi_name.to_string();
-    let join = std::thread::Builder::new()
+    match std::thread::Builder::new()
         .name(format!("audio-emit-{name}"))
         .spawn(move || run_emit_loop(&name, sink, thread_shared))
-        .map(Some)
-        .unwrap_or_else(|e| {
-            warn!(error = %e, "audio-emitter: failed to spawn thread — audio stays SDK-clocked");
+    {
+        Ok(join) => Some(AudioEmitterThread {
+            shared,
+            join: Some(join),
+        }),
+        Err(e) => {
+            warn!(error = %e, ndi_name, "audio-emitter: failed to spawn thread — falling back to legacy audio-with-video submit");
             None
-        });
-    AudioEmitterThread { shared, join }
+        }
+    }
 }
 
 /// The emit loop: one grid block every 33.333 ms on the wall-clock grid,

@@ -211,6 +211,19 @@ fn late_blocks_and_jitter_account_for_wall_lateness() {
 }
 
 #[test]
+fn emit_jitter_p99_is_the_exact_percentile_index() {
+    // 50 distinct jitter samples 0..49 (µs). ceil(50·0.99)−1 = 50−1 = 49 → the
+    // 49th (largest) value. Pins the p99 index formula: a floor (→48), a dropped
+    // `−1` (→ out-of-bounds panic), or a wrong 0.99 all diverge from 49.
+    let mut e = AudioEmitter::production();
+    for i in 0..50i64 {
+        let b = e.next_boundary_100ns(0); // slot i's boundary (origin anchored on first tick)
+        e.tick(b + i * 10); // jitter = i*10 (100ns) = i µs
+    }
+    assert_eq!(e.emit_jitter_p99_us(), 49, "p99 of 0..49 is the 49th value");
+}
+
+#[test]
 fn next_boundary_is_the_default_until_anchored_then_the_grid() {
     let mut e = AudioEmitter::production();
     // Before the first tick the origin is unset → the caller's `now` is used so
