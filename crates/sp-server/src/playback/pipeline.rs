@@ -333,8 +333,8 @@ fn run_loop_windows(
     } else {
         // spawn returns None on OS-thread-spawn failure → decode_and_send takes
         // the legacy audio-with-video path (never a hung, undrained ring).
-        let shared = crate::playback::audio_emitter::new_shared_emitter();
-        crate::playback::pipeline_audio::spawn_audio_emitter(
+        let shared = crate::playback::pipeline::audio_emitter::new_shared_emitter();
+        crate::playback::pipeline::pipeline_audio::spawn_audio_emitter(
             ndi_name,
             submitter.audio_sink(),
             shared,
@@ -553,7 +553,7 @@ fn decode_and_send(
     consecutive_bad_polls: &mut u32,
     start_position_ms: Option<u64>,
     preview_tap: &crate::playback::preview::PreviewTap,
-    audio_emitter: Option<&crate::playback::audio_emitter::SharedEmitter>,
+    audio_emitter: Option<&crate::playback::pipeline::audio_emitter::SharedEmitter>,
 ) -> DecodeResult {
     use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder};
 
@@ -705,7 +705,7 @@ fn decode_and_send(
                 // end / heavy-child stall no longer stops the audio stream;
                 // `submit_nv12` then carries video only. (Emitter absent → legacy
                 // audio-with-video fallback.) See `pipeline_audio`.
-                let ndi_audio = crate::playback::pipeline_audio::push_or_collect_audio(
+                let ndi_audio = crate::playback::pipeline::pipeline_audio::push_or_collect_audio(
                     audio_emitter,
                     audio_frames,
                 );
@@ -847,11 +847,11 @@ fn run_heartbeat_inner(
     playlist_id: i64,
     last_heartbeat: &mut std::time::Instant,
     consecutive_bad_polls: &mut u32,
-    audio_emitter: Option<&crate::playback::audio_emitter::SharedEmitter>,
+    audio_emitter: Option<&crate::playback::pipeline::audio_emitter::SharedEmitter>,
 ) {
     // #192: surface the wall-clock emitter telemetry under audio.emitter on
     // /api/v1/ndi/health (disabled default without an emitter).
-    let audio = crate::playback::audio_emitter::heartbeat_audio_stats(audio_emitter);
+    let audio = crate::playback::pipeline::audio_emitter::heartbeat_audio_stats(audio_emitter);
     emit_heartbeat(
         submitter,
         event_tx,
