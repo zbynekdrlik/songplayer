@@ -390,9 +390,35 @@ pub fn push_blocking(shared: &SharedEmitter, interleaved: &[f32], channels: usiz
         let accepted = guard.ring_mut().push_some(&interleaved[offset..], channels);
         offset += accepted;
         if offset < interleaved.len() {
-            // Ring full — wait for the emit thread to free a block.
-            guard = shared.space.wait(guard).unwrap();
+            // Ring full — wait for the emit thread to free a block. Bounded so a
+            // missed notify or a dead emit thread re-checks `shutdown` rather
+            // than hanging the decode thread forever (design: bounded wait).
+            let (g, _timeout) = shared
+                .space
+                .wait_timeout(guard, std::time::Duration::from_millis(250))
+                .unwrap();
+            guard = g;
         }
+    }
+}
+
+/// Read the lock-free telemetry into the health-document [`EmitterStats`] the
+/// pipeline heartbeat serialises. Cross-platform (the decode thread calls it on
+/// the SDK-clocked path).
+pub fn emitter_stats(shared: &SharedEmitter) -> crate::playback::ndi_health::EmitterStats {
+    let t = &shared.telemetry;
+    let enabled = t.enabled.load(Ordering::Relaxed);
+    crate::playback::ndi_health::EmitterStats {
+        enabled,
+        mode: if enabled {
+            EMITTER_MODE.to_string()
+        } else {
+            String::new()
+        },
+        silence_blocks: t.silence_blocks.load(Ordering::Relaxed),
+        ring_depth_ms: t.ring_depth_ms.load(Ordering::Relaxed),
+        emit_jitter_p99_us: t.emit_jitter_p99_us.load(Ordering::Relaxed),
+        late_blocks: t.late_blocks.load(Ordering::Relaxed),
     }
 }
 

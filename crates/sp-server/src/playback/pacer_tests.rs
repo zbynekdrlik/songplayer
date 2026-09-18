@@ -662,6 +662,10 @@ fn genlock_pacing_off_keeps_the_legacy_sdk_clocked_call_site() {
     // #15 part 2: the legacy call site now also passes the preview tap as its
     // final arg (an opportunistic sampler that never touches the NDI submit
     // path); the guard is updated to the new byte-exact call site.
+    // #192: the SDK-clocked path now also passes the wall-clock audio emitter
+    // (`audio_emitter.as_ref().map(|t| t.shared())`) as its final arg — audio is
+    // pushed into that emitter's ring instead of riding the video submit — so
+    // the byte-exact guard is updated to the new call site.
     let legacy_call_site = "\
                     } else {
                         decode_and_send(
@@ -676,6 +680,7 @@ fn genlock_pacing_off_keeps_the_legacy_sdk_clocked_call_site() {
                             &mut consecutive_bad_polls,
                             current_start_ms,
                             &preview_tap,
+                            audio_emitter.as_ref().map(|t| t.shared()),
                         )
                     };";
     assert!(

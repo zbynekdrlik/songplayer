@@ -210,9 +210,68 @@ fn late_blocks_and_jitter_account_for_wall_lateness() {
     );
 }
 
+#[test]
+fn next_boundary_is_the_default_until_anchored_then_the_grid() {
+    let mut e = AudioEmitter::production();
+    // Before the first tick the origin is unset → the caller's `now` is used so
+    // slot 0 fires immediately.
+    assert_eq!(
+        e.next_boundary_100ns(5000),
+        5000,
+        "unanchored → default now"
+    );
+    // First tick anchors origin at 1000; the NEXT slot's boundary is on the grid.
+    e.tick(1000);
+    assert_eq!(
+        e.next_boundary_100ns(999_999),
+        1000 + 333_333,
+        "anchored → origin + one grid block, independent of the passed now"
+    );
+}
+
+#[test]
+fn ring_depth_ms_tracks_buffered_audio() {
+    let mut e = AudioEmitter::production();
+    assert_eq!(e.ring_depth_ms(), 0, "empty ring is 0 ms");
+    // Two stereo blocks = 3200 frames @ 48 kHz = 66 ms.
+    e.ring_mut().push_some(&stereo_block(1.0), 2);
+    e.ring_mut().push_some(&stereo_block(2.0), 2);
+    assert_eq!(e.ring_depth_ms(), 66, "3200 frames @ 48 kHz = 66 ms");
+}
+
 // ---------------------------------------------------------------------------
 // Shared emitter + emit_one_block — the send seam (decode pushes, emitter sends)
 // ---------------------------------------------------------------------------
+
+#[test]
+fn emitter_uses_the_ring_channel_count_and_remembers_it_for_silence() {
+    let shared = new_shared_emitter();
+    let (backend, sink) = mock_sink();
+    // Mono block in → audio emitted at ch=1.
+    push_blocking(&shared, &vec![0.5f32; SPB], 1);
+    emit_one_block(&shared, &sink, 0);
+    assert!(
+        backend
+            .calls()
+            .iter()
+            .any(|c| c == "send_audio(42,sr=48000,ch=1,spc=1600)"),
+        "audio block uses the ring's mono channel count: {:?}",
+        backend.calls()
+    );
+    // Ring now empty → the silence block is sent at the REMEMBERED mono count,
+    // not the default stereo (proves channels_hint is carried across a gap).
+    emit_one_block(&shared, &sink, 0);
+    assert!(
+        backend
+            .calls()
+            .iter()
+            .filter(|c| c.as_str() == "send_audio(42,sr=48000,ch=1,spc=1600)")
+            .count()
+            >= 2,
+        "silence keeps the remembered mono channel count: {:?}",
+        backend.calls()
+    );
+}
 
 #[test]
 fn decode_side_push_does_not_send_audio_emitter_thread_does() {
@@ -328,6 +387,33 @@ fn push_blocking_blocks_when_full_and_never_drops_until_the_emitter_frees_space(
 // ---------------------------------------------------------------------------
 // EmitterStats serialisation on the health snapshot
 // ---------------------------------------------------------------------------
+
+#[test]
+fn emitter_stats_reads_the_telemetry_and_sets_the_mode_when_enabled() {
+    let shared = new_shared_emitter();
+    let (_backend, sink) = mock_sink();
+    // A silence emit bumps silence_blocks; ring_depth stays 0.
+    emit_one_block(&shared, &sink, 0);
+    let stats = emitter_stats(&shared);
+    assert!(stats.enabled, "a spawned emitter reports enabled");
+    assert_eq!(
+        stats.mode, "sdk-video/wallclock-audio",
+        "mode set when enabled"
+    );
+    assert_eq!(stats.silence_blocks, 1);
+    assert_eq!(stats.late_blocks, 0);
+
+    // A disabled telemetry reports an empty mode (paced / idle default).
+    let disabled = SharedEmitterInner {
+        emitter: std::sync::Mutex::new(AudioEmitter::production()),
+        space: std::sync::Condvar::new(),
+        telemetry: EmitterTelemetry::default(),
+        shutdown: std::sync::atomic::AtomicBool::new(false),
+    };
+    let ds = emitter_stats(&Arc::new(disabled));
+    assert!(!ds.enabled);
+    assert_eq!(ds.mode, "", "disabled emitter has no mode string");
+}
 
 #[test]
 fn audio_stats_emitter_serialises_under_the_emitter_key() {
