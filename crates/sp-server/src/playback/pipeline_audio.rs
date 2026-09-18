@@ -23,7 +23,9 @@ use std::time::Duration;
 use sp_ndi::{AudioSink, RealNdiBackend};
 use tracing::{info, warn};
 
-use crate::playback::pipeline::audio_emitter::{EmittedBlock, SharedEmitter, emit_one_block, push_blocking};
+use crate::playback::pipeline::audio_emitter::{
+    EmittedBlock, SharedEmitter, emit_one_block, push_blocking,
+};
 use crate::playback::wallclock::WallClock;
 
 /// The SDK-clocked decode loop's audio seam (#192): with the wall-clock emitter
