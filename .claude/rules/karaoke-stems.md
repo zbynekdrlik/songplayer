@@ -305,6 +305,22 @@ The diff-scoped mutation gate caught two classes the no-compile box can't:
   identically. Add a PARTIAL-target test (0→0.25, step 0.1 → 0.1, 0.2, snap 0.25,
   never 0.3). And `cur + step.copysign(tgt-cur)` (one branch) instead of
   `if tgt > cur {…} else {…}` removes the `>` equivalent mutant for `>=`.
+- **A sentinel-value mutant needs a test at the COLLIDING value (#177).** A
+  `const NONE: i64 = -1` in-flight signal has `delete -` → `NONE = 1`. A test
+  with a big distinctive id (`begin(4242)`) SURVIVES it (4242 ≠ both sentinels).
+  Kill it with the value that COLLIDES with the mutated sentinel: `begin(1)` must
+  report `Some(1)` — under `NONE = 1` the real id 1 is swallowed as "nothing".
+  Serialize such process-global tests with a module `static SERIAL: Mutex<()>`
+  (lock both the old and new test) so a parallel test can't stomp the exact read.
+- **A boolean-operator mutant in a FILTER predicate needs a row where inclusion
+  hinges on THAT operator (#177).** `stems_state_map`'s
+  `if !(normalized && has_audio) && !has_stem { return None }` had three mutants
+  (`||`→`&&` on `has_stem`, `&&`→`||` on `normalized && has_audio`, `delete !`)
+  survive because the existing test inserted only normalized+audio rows (the
+  `!(true)=false` short-circuit hid the has_stem clause). Fix: rows where the
+  operator decides — a one-stem-file / not-normalized / no-audio row must be
+  INCLUDED (kills `||`→`&&` and `delete !has_stem`); a normalized / no-audio /
+  no-stem row must be OMITTED (kills `&&`→`||`).
 
 ## Re-measuring a separator candidate (dev2)
 
