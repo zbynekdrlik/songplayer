@@ -135,7 +135,8 @@ pub async fn patch_dub_mix(
     Json(req): Json<DubMixReq>,
 ) -> impl IntoResponse {
     match models_dabing::set_dub_mix_ratio(&state.pool, id, req.ratio).await {
-        Ok(stored) => {
+        Ok((_, 0)) => StatusCode::NOT_FOUND.into_response(),
+        Ok((stored, _)) => {
             (StatusCode::OK, Json(serde_json::json!({ "ratio": stored }))).into_response()
         }
         Err(e) => {

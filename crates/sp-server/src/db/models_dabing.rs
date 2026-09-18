@@ -175,24 +175,25 @@ pub async fn list_dub_videos(pool: &SqlitePool) -> Result<Vec<DubRow>, sqlx::Err
 }
 
 /// Persist the mixer blend ratio for a video, clamped to `0.0..=1.0`. Returns
-/// the clamped value actually stored. A `NaN` clamps to `1.0` (dub-only, the
-/// safe default). 0 rows affected (no such id) still returns the clamped value.
+/// `(clamped_value, rows_affected)` so the handler can 404 when no such id
+/// (consistent with `set_dub_requested`/`patch_dub`). A `NaN` clamps to `1.0`
+/// (dub-only, the safe default).
 pub async fn set_dub_mix_ratio(
     pool: &SqlitePool,
     video_id: i64,
     ratio: f64,
-) -> Result<f64, sqlx::Error> {
+) -> Result<(f64, u64), sqlx::Error> {
     let clamped = if ratio.is_nan() {
         1.0
     } else {
         ratio.clamp(0.0, 1.0)
     };
-    sqlx::query("UPDATE videos SET dub_mix_ratio = ? WHERE id = ?")
+    let res = sqlx::query("UPDATE videos SET dub_mix_ratio = ? WHERE id = ?")
         .bind(clamped)
         .bind(video_id)
         .execute(pool)
         .await?;
-    Ok(clamped)
+    Ok((clamped, res.rows_affected()))
 }
 
 #[cfg(test)]

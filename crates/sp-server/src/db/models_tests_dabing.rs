@@ -159,7 +159,7 @@ async fn set_dub_mix_ratio_clamps_and_persists() {
     let pool = setup().await;
     let id = insert_video(&pool, "vr", "Ratio").await;
 
-    assert_eq!(set_dub_mix_ratio(&pool, id, 0.5).await.unwrap(), 0.5);
+    assert_eq!(set_dub_mix_ratio(&pool, id, 0.5).await.unwrap(), (0.5, 1));
     let stored: f64 = sqlx::query_scalar("SELECT dub_mix_ratio FROM videos WHERE id = ?")
         .bind(id)
         .fetch_one(&pool)
@@ -168,8 +168,8 @@ async fn set_dub_mix_ratio_clamps_and_persists() {
     assert_eq!(stored, 0.5);
 
     // Over-range clamps.
-    assert_eq!(set_dub_mix_ratio(&pool, id, 1.7).await.unwrap(), 1.0);
-    assert_eq!(set_dub_mix_ratio(&pool, id, -0.3).await.unwrap(), 0.0);
+    assert_eq!(set_dub_mix_ratio(&pool, id, 1.7).await.unwrap(), (1.0, 1));
+    assert_eq!(set_dub_mix_ratio(&pool, id, -0.3).await.unwrap(), (0.0, 1));
     let stored: f64 = sqlx::query_scalar("SELECT dub_mix_ratio FROM videos WHERE id = ?")
         .bind(id)
         .fetch_one(&pool)
@@ -178,7 +178,14 @@ async fn set_dub_mix_ratio_clamps_and_persists() {
     assert_eq!(stored, 0.0);
 
     // NaN falls back to the dub-only default.
-    assert_eq!(set_dub_mix_ratio(&pool, id, f64::NAN).await.unwrap(), 1.0);
+    assert_eq!(
+        set_dub_mix_ratio(&pool, id, f64::NAN).await.unwrap(),
+        (1.0, 1)
+    );
+
+    // A missing row reports 0 rows affected (so the handler can 404).
+    let (v, affected) = set_dub_mix_ratio(&pool, 9999, 0.5).await.unwrap();
+    assert_eq!((v, affected), (0.5, 0));
 }
 
 #[test]

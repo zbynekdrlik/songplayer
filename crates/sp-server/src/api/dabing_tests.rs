@@ -136,7 +136,7 @@ async fn patch_dub_mix_clamps_and_persists() {
     let pool = state.pool.clone();
     let vid = seed_video(&pool, 902, "dab3").await;
 
-    let resp = app(state)
+    let resp = app(state.clone())
         .oneshot(
             Request::builder()
                 .method("PATCH")
@@ -164,4 +164,18 @@ async fn patch_dub_mix_clamps_and_persists() {
         .await
         .unwrap();
     assert_eq!(stored, 1.0);
+
+    // Unknown id → 404 (consistent with the dub toggle).
+    let resp = app(state)
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/videos/999999/dub-mix")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"ratio":0.5}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }

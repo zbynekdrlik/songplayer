@@ -57,7 +57,12 @@ test("pasting a URL adds a queued row and Prehrať dispatches play (#180)", asyn
   // A queued row appears (import + poll refresh).
   const row = page.locator('[data-testid="dabing-list"] .dabing-row').first();
   await expect(row).toBeVisible({ timeout: 5000 });
-  await expect(row.locator('[data-testid="dabing-chain"]')).toContainText(
+  // A queued row renders the glyph chain (not an error) with the first step
+  // ("stiahnuté") marked done — the `.dabing-step-done` class is what actually
+  // conveys the queued state, so assert it rather than just the label text.
+  const chain = row.locator('[data-testid="dabing-chain"]');
+  await expect(chain.locator(".dabing-chain-error")).toHaveCount(0);
+  await expect(chain.locator(".dabing-step-done").first()).toHaveText(
     "stiahnuté",
   );
 
