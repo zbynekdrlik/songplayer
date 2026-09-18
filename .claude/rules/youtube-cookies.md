@@ -39,14 +39,35 @@ given, so any manual test must run on a COPY of the file.
 
 **Since ~2026-09 there is a SECOND gate on top of cookies — the JS "n-challenge"
 (#175 finding).** Even WITH valid cookies (which clear the bot-check), a fetch
-now fails `n challenge solving failed … The page needs to be reloaded` on every
+fails `n challenge solving failed … The page needs to be reloaded` on every
 `player_client` (tv/mweb/web_safari all tried). yt-dlp's EJS solver needs a
-JavaScript runtime — **Deno** (node is NOT wired). Fix for a manual pull: put a
+JavaScript runtime; `yt-dlp --help` lists `--js-runtimes RUNTIME[:PATH]` with
+supported runtimes `deno, node, quickjs, bun` but **only `deno` enabled by
+default** — node is NOT the runtime the solver uses.
+
+**Shipped mechanism (#189).** SongPlayer ships its own pinned Deno so its
+production downloads solve the n-challenge without any manual box setup:
+
+- `downloader/tools.rs::ToolsManager::ensure_deno()` downloads the pinned
+  `DENO_VERSION` (`crates/sp-server/src/downloader/ytdlp_cmd.rs`), SHA-256-verified,
+  into `C:\ProgramData\SongPlayer\cache\tools\deno.exe` next to yt-dlp/ffmpeg —
+  skipped when already present with the right version. Bump `DENO_VERSION` +
+  `DENO_SHA256` together (the checksum must match that version's Windows zip).
+- **Every** yt-dlp spawn goes through the ONE builder `ytdlp_cmd::ytdlp_command()`,
+  which prepends the tools dir to the child's `PATH` (so the bundled deno is found
+  first) and adds `--js-runtimes deno` when yt-dlp advertises the flag (plus
+  `CREATE_NO_WINDOW` + UTF-8 env). Never re-add `--js-runtimes node` to a per-call
+  arg builder — the runtime flag lives in `ytdlp_command`.
+- At tools-ready a startup self-check (`ytdlp_cmd::run_selfcheck`) runs a
+  `yt-dlp --simulate -f bestaudio <public id>` (with cookies when present) and logs
+  `yt-dlp js-runtime: OK (deno <ver>)` or `yt-dlp js-runtime: MISSING — new
+  downloads will fail the n-challenge` (ERROR). `GET /api/v1/status` → `tools.js_runtime_ok`
+  + `tools.deno_version` expose it (also on the `ToolsStatus` WS message).
+
+**Manual debugging trick (only when the shipped deno is somehow absent):** put a
 `deno.exe` on PATH for the yt-dlp process (dev2/dev1 install Deno freely; on
 win-resolume drop it in a temp dir and prepend that dir to `$env:PATH`). The box's
-yt-dlp + `ffmpeg` live in `C:\ProgramData\SongPlayer\cache\tools`. Implication:
-SongPlayer's OWN production downloads on win-resolume are also n-challenge-broken
-until the box has a JS runtime available to its yt-dlp.
+yt-dlp + `ffmpeg` live in `C:\ProgramData\SongPlayer\cache\tools`.
 
 **Producing the file on win-resolume (all via MCP GUI, no human at the PC):**
 

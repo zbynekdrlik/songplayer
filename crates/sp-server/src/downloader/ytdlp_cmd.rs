@@ -31,7 +31,7 @@ pub(crate) const DENO_SHA256: &str =
 
 /// yt-dlp runtime token we ship + prefer for the n-challenge solver. Deno is
 /// the only runtime yt-dlp enables by default and the one its EJS solver wants.
-const PREFERRED_JS_RUNTIME: &str = "node";
+const PREFERRED_JS_RUNTIME: &str = "deno";
 
 /// GitHub release URL for the pinned Deno Windows (x86_64-pc-windows-msvc) zip.
 #[cfg_attr(not(windows), allow(dead_code))]
