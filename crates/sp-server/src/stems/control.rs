@@ -105,7 +105,7 @@ pub const DEFAULT_DUB_RATIO: f32 = 1.0;
 /// carries the source speaker, so it is never fully muted under the dub — the
 /// room never goes dead (the owner-accepted "dub + original −18 dB bed" from the
 /// listening tests). At `r = 0` the original is full (`1.0`) and the dub silent.
-pub const DUB_ORIGINAL_FLOOR: f32 = 0.0;
+pub const DUB_ORIGINAL_FLOOR: f32 = 0.125;
 
 /// The per-stream linear gains `(original, dub)` for a NO-STEMS dub video's
 /// 2-stream `[original, dub]` mix (#183 round 2). There is no separated ambient
