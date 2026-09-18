@@ -34,6 +34,19 @@ exclude_re = [
   'sp-server/src/reprocess/',             # requires live Gemini API
   'sp-server/src/api/websocket',          # WS upgrade flow, integration-tested
   'sp-server/src/playlist/',              # shells out to yt-dlp
+  # dabing/worker.rs::process_next: the dub worker's per-tick orchestrator —
+  #   venv-python gate + google-genai probe + the Gemini Live-Translate child
+  #   (tokio::process) + a 60 s #167 startup floor + the heavy-slot memory guard.
+  #   None of that runs on the Linux mutation runner (no venv python, no Gemini
+  #   key, no wall registry past the floor), so every mutant in it lands in code
+  #   no terminating Linux unit test can exercise -> MISSED (same class as
+  #   downloader/reprocess). Its real DECISIONS are extracted to unit-tested pure
+  #   fns (models_dabing::{synth_ready, dub_stems_state}, worker::{worker_enabled,
+  #   dub_pace_from, dub_eta, ffmpeg_path} — those stay mutation-covered). Unlike
+  #   stems/worker.rs::process_next (whose cap decision precedes any subprocess,
+  #   so it IS integration-tested), dabing's proceed decision sits AFTER the
+  #   python gate, so process_next itself is integration-only. (#183 round 2)
+  'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::process_next',
   # sp-server/src/resolume/ is NOT excluded — handlers/driver have wiremock tests.
   # sp-server/src/playback/mod.rs is NOT excluded — title timer logic is unit-tested.
   # sp-ndi/, sp-decoder/reader.rs, sp-server/src/playback/pipeline.rs are NOT
