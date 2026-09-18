@@ -129,7 +129,9 @@ pub fn plan_chunks(silences: &[Silence], total_ms: u64, cfg: &ChunkPlanConfig) -
 
 /// The maximum speed-up applied to a chunk's translated output to fit before the
 /// next chunk (ffmpeg `atempo`). 1.08 keeps the voice natural; we NEVER slow
-/// down (tempo `>= 1.0`) and never exceed this.
+/// down (tempo `>= 1.0`) and never exceed this. KEEP IN SYNC with the Python
+/// child's `scripts/dub_worker.py::MAX_TEMPO` (the worker cross-checks the two
+/// per chunk and warns on disagreement, `worker.rs` drift check).
 pub const MAX_TEMPO: f32 = 1.08;
 
 /// Where a chunk's translated output is placed, and how fast it plays.

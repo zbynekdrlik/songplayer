@@ -392,6 +392,26 @@ async fn mark_dub_transitions_advance_status() {
 }
 
 #[tokio::test]
+async fn dub_ratio_if_ready_only_for_videos_with_a_dub_file() {
+    let pool = setup().await;
+    let ready = insert_video(&pool, "vready", "ready").await;
+    let nodub = insert_video(&pool, "vnodub", "no dub").await;
+    sqlx::query(
+        "UPDATE videos SET dub_file_path = '/c/a_dub.flac', dub_mix_ratio = 0.3 WHERE id = ?",
+    )
+    .bind(ready)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // A video with a finished dub → Some(stored ratio).
+    assert_eq!(dub_ratio_if_ready(&pool, ready).await.unwrap(), Some(0.3));
+    // A video without a dub file → None (play-start seeding is a no-op).
+    assert_eq!(dub_ratio_if_ready(&pool, nodub).await.unwrap(), None);
+    // A missing id → None.
+    assert_eq!(dub_ratio_if_ready(&pool, 99999).await.unwrap(), None);
+}
+
+#[tokio::test]
 async fn record_dub_deferral_increments_and_marks_failed() {
     let pool = setup().await;
     let id = insert_video(&pool, "vd", "D").await;

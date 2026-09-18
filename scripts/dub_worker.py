@@ -55,8 +55,9 @@ def pcm_pos_to_ms(byte_pos: int, sample_rate: int) -> int:
     return pcm_len_ms(byte_pos, sample_rate)
 
 
-def placement(chunk_start_ms: int, chunk_len_ms: int, out_len_ms: int,
-              next_start_ms: int | None) -> tuple[int, float]:
+def placement(
+    chunk_start_ms: int, chunk_len_ms: int, out_len_ms: int, next_start_ms: int | None
+) -> tuple[int, float]:
     """Where a chunk's output lands + its atempo factor. Mirrors the Rust
     `dabing::chunk_plan::placement_for`: start at the chunk start; speed up only to
     fit before `next_start_ms`, never faster than MAX_TEMPO, never slower than 1.0;
@@ -69,18 +70,31 @@ def placement(chunk_start_ms: int, chunk_len_ms: int, out_len_ms: int,
     return chunk_start_ms, tempo
 
 
-def slice_resample_args(ffmpeg: str, audio: str, start_ms: int, end_ms: int,
-                        out_pcm: str) -> list[str]:
+def slice_resample_args(
+    ffmpeg: str, audio: str, start_ms: int, end_ms: int, out_pcm: str
+) -> list[str]:
     """ffmpeg argv to cut `[start_ms,end_ms)` of `audio` and write 16 kHz mono
     s16le PCM to `out_pcm` (the Live-API input format). Output trimming (`-ss/-to`
     after `-i`) for sample-accurate chunk bounds."""
     return [
-        ffmpeg, "-hide_banner", "-nostdin", "-y",
-        "-i", audio,
-        "-ss", f"{start_ms / 1000.0:.3f}",
-        "-to", f"{end_ms / 1000.0:.3f}",
-        "-ac", "1", "-ar", str(INPUT_SR),
-        "-f", "s16le", "-acodec", "pcm_s16le",
+        ffmpeg,
+        "-hide_banner",
+        "-nostdin",
+        "-y",
+        "-i",
+        audio,
+        "-ss",
+        f"{start_ms / 1000.0:.3f}",
+        "-to",
+        f"{end_ms / 1000.0:.3f}",
+        "-ac",
+        "1",
+        "-ar",
+        str(INPUT_SR),
+        "-f",
+        "s16le",
+        "-acodec",
+        "pcm_s16le",
         out_pcm,
     ]
 
@@ -104,9 +118,7 @@ def build_mix_filter(placements: list[tuple[float, int]]) -> str:
     labels = []
     for i, (tempo, at_ms) in enumerate(placements):
         # atempo must be >= 1.0 here; adelay delays the (mono) stream to at_ms.
-        parts.append(
-            f"[{i}:a]atempo={tempo:.4f},adelay={int(at_ms)}:all=1[a{i}]"
-        )
+        parts.append(f"[{i}:a]atempo={tempo:.4f},adelay={int(at_ms)}:all=1[a{i}]")
         labels.append(f"[a{i}]")
     n = len(placements)
     mix = "".join(labels) + f"amix=inputs={n}:normalize=0,aresample={FINAL_SR}[mix]"
@@ -160,7 +172,9 @@ def _heartbeat(work_dir: str) -> None:
 # ── the Live translation of one chunk ───────────────────────────────────────────
 
 
-def _translate_pcm(pcm: bytes, pace: float, work_dir: str) -> tuple[bytes, str, str, list]:
+def _translate_pcm(
+    pcm: bytes, pace: float, work_dir: str
+) -> tuple[bytes, str, str, list]:
     """Stream 16 kHz mono s16le `pcm` into the Live API; return
     (out_pcm_24k, transcript_en, transcript_sk, sk_timed). `sk_timed` is a coarse
     list of `{t_ms, text}` stamped by the output-audio position at arrival — the D3
@@ -202,7 +216,7 @@ def _translate_pcm(pcm: bytes, pace: float, work_dir: str) -> tuple[bytes, str, 
                 for i in range(0, len(pcm), CHUNK_BYTES):
                     await session.send_realtime_input(
                         audio=types.Blob(
-                            data=bytes(pcm[i:i + CHUNK_BYTES]),
+                            data=bytes(pcm[i : i + CHUNK_BYTES]),
                             mime_type=f"audio/pcm;rate={INPUT_SR}",
                         )
                     )
@@ -233,7 +247,10 @@ def _translate_pcm(pcm: bytes, pace: float, work_dir: str) -> tuple[bytes, str, 
                     if oat is not None and getattr(oat, "text", None):
                         sk_parts.append(oat.text)
                         sk_timed.append(
-                            {"t_ms": pcm_pos_to_ms(len(out), OUTPUT_SR), "text": oat.text}
+                            {
+                                "t_ms": pcm_pos_to_ms(len(out), OUTPUT_SR),
+                                "text": oat.text,
+                            }
                         )
                     if getattr(sc, "turn_complete", False) and send_task.done():
                         break
@@ -250,8 +267,14 @@ def _translate_pcm(pcm: bytes, pace: float, work_dir: str) -> tuple[bytes, str, 
     return asyncio.run(run())
 
 
-def _process_chunk(idx: int, chunk: dict, next_start: int | None, audio: str,
-                   work_dir: str, pace: float) -> dict:
+def _process_chunk(
+    idx: int,
+    chunk: dict,
+    next_start: int | None,
+    audio: str,
+    work_dir: str,
+    pace: float,
+) -> dict:
     """Translate one chunk (resumable): returns the chunk result dict. Reuses an
     existing `chunk_N.json` + `chunk_N.wav` on a re-run."""
     result_path = os.path.join(work_dir, f"chunk_{idx}.json")
@@ -276,8 +299,19 @@ def _process_chunk(idx: int, chunk: dict, next_start: int | None, audio: str,
     out_pcm, en, sk, sk_timed = _translate_pcm(pcm, pace, work_dir)
     raw_wav = os.path.join(work_dir, f"chunk_{idx}.raw.wav")
     _write_wav_from_pcm(out_pcm, OUTPUT_SR, raw_wav)
-    _run([_ffmpeg(), "-hide_banner", "-nostdin", "-y", "-i", raw_wav,
-          "-af", trim_silence_af(), wav_path])
+    _run(
+        [
+            _ffmpeg(),
+            "-hide_banner",
+            "-nostdin",
+            "-y",
+            "-i",
+            raw_wav,
+            "-af",
+            trim_silence_af(),
+            wav_path,
+        ]
+    )
 
     # 3. Measured output length + placement.
     out_len_ms = _wav_duration_ms(wav_path)
@@ -326,7 +360,9 @@ def cmd_live_translate(args: argparse.Namespace) -> None:
     results = []
     for i, chunk in enumerate(chunks):
         next_start = int(chunks[i + 1]["start_ms"]) if i + 1 < len(chunks) else None
-        results.append(_process_chunk(i, chunk, next_start, args.audio, args.work_dir, args.pace))
+        results.append(
+            _process_chunk(i, chunk, next_start, args.audio, args.work_dir, args.pace)
+        )
 
     # Assemble the dub on the video timeline: place each chunk at its at_ms with
     # its atempo, mix, 48 kHz stereo, loudnorm -16 (owner-approved dub-only mix).
@@ -337,8 +373,14 @@ def cmd_live_translate(args: argparse.Namespace) -> None:
     for w in wavs:
         mix_args += ["-i", w]
     mix_args += [
-        "-filter_complex", f"{filt};[mix]loudnorm=I=-16:TP=-1.5:LRA=11[out]",
-        "-map", "[out]", "-ar", str(FINAL_SR), "-ac", "2",
+        "-filter_complex",
+        f"{filt};[mix]loudnorm=I=-16:TP=-1.5:LRA=11[out]",
+        "-map",
+        "[out]",
+        "-ar",
+        str(FINAL_SR),
+        "-ac",
+        "2",
         args.out,
     ]
     _run(mix_args)
@@ -383,7 +425,9 @@ def cmd_live_translate(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Slovak dub synthesis (Gemini Live Translate)")
+    parser = argparse.ArgumentParser(
+        description="Slovak dub synthesis (Gemini Live Translate)"
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
     lt = sub.add_parser("live-translate", help="translate a video's audio to a SK dub")
     lt.add_argument("--audio", required=True)
@@ -400,7 +444,13 @@ def main() -> None:
         else:
             raise RuntimeError(f"unknown command: {args.cmd}")
     except Exception as e:  # loud failure: JSON error on stderr + non-zero exit.
-        sys.stderr.write(json.dumps({"error": str(e)}) + "\n")
+        # Defensive: never let the key leak into the logged error tail, even if an
+        # SDK exception embedded it.
+        msg = str(e)
+        key = os.environ.get("GEMINI_API_KEY")
+        if key:
+            msg = msg.replace(key, "<redacted>")
+        sys.stderr.write(json.dumps({"error": msg}) + "\n")
         sys.exit(1)
 
 

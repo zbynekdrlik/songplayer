@@ -44,6 +44,9 @@ pub(crate) async fn dispatch(engine: &mut PlaybackEngine, cmd: EngineCommand) {
             engine
                 .handle_play_video(playlist_id, video_id, position_ms)
                 .await;
+            // #183 D4: if this video has a finished dub, restore its stored mix
+            // ratio to the process-global dub control (no-op for a normal video).
+            engine.seed_dub_ratio_for_video(video_id).await;
         }
         EngineCommand::SceneChanged {
             playlist_id,

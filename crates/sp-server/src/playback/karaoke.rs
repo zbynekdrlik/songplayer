@@ -92,6 +92,28 @@ impl PlaybackEngine {
             "dub mix changed (live gains, no reload)"
         );
     }
+
+    /// #183 D4: at play-start, restore the process-global dub control to THIS
+    /// video's stored `dub_mix_ratio` — but only when the video actually has a
+    /// finished dub (`dub_file_path` set), so playing a normal video never
+    /// disturbs the dub control. This is the design's "global, set per play"
+    /// half; PATCH still overrides it live afterward. A no-op for non-dub videos.
+    #[cfg_attr(test, mutants::skip)]
+    pub async fn seed_dub_ratio_for_video(&mut self, video_id: i64) {
+        match crate::db::models_dabing::dub_ratio_if_ready(&self.pool, video_id).await {
+            Ok(Some(ratio)) => {
+                let control = crate::stems::control::global();
+                control.set_dub_ratio(ratio as f32);
+                info!(
+                    video_id,
+                    ratio = control.dub_ratio(),
+                    "dub video play-start: seeded dub mix ratio from the stored value"
+                );
+            }
+            Ok(None) => {} // not a dub video — leave the control untouched
+            Err(e) => tracing::warn!(%e, video_id, "dub: play-start ratio seed query failed"),
+        }
+    }
 }
 
 #[cfg(test)]

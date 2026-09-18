@@ -303,6 +303,24 @@ pub async fn mark_dub_ready(
     Ok(())
 }
 
+/// The stored `dub_mix_ratio` for a video ONLY when it has a finished dub track
+/// (`dub_file_path` set) — i.e. a video that will actually play the 4-stream dub
+/// mix. `None` for a non-dub video (so play-start seeding is a no-op for it) or a
+/// missing id. Lets the engine restore the per-video blend to the process-global
+/// dub control at play-start (the design's "global, set per play").
+pub async fn dub_ratio_if_ready(
+    pool: &SqlitePool,
+    video_id: i64,
+) -> Result<Option<f64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT dub_mix_ratio FROM videos \
+         WHERE id = ? AND dub_file_path IS NOT NULL",
+    )
+    .bind(video_id)
+    .fetch_optional(pool)
+    .await
+}
+
 /// Record a transient dub failure: mark `failed`, store the error tail, increment
 /// `dub_attempts`, and schedule `dub_next_attempt_at = now + backoff` (same
 /// `strftime` format `get_next_dub_job` compares against). Returns the new attempt
