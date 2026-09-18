@@ -457,3 +457,7 @@ mod tests_v23;
 #[path = "mod_tests_v24.rs"]
 #[cfg(test)]
 mod tests_v24;
+
+#[path = "mod_tests_v26.rs"]
+#[cfg(test)]
+mod tests_v26;
