@@ -139,3 +139,60 @@ same 7 sentences (`seg_spec` items 2..8), plus an intensity layer.
   (`gemini-2.5-flash` generateContent) for the register translation instead.
 - `run_round2.py`: owner-approved mixes only — `dub only` + `dub + original −18 dB`
   (NO same-colour blend), loudnorm −16; windowed 7-sentence or full-34.
+
+## Round 3 (remaining open-weight SK candidates, verified live 2026-09-18)
+
+Round 3 renders the SK-capable open-weight models the round-2 discovery found but
+did not render, so the owner's verdict rests on a COMPLETE open-weight table. The
+dev2 synth driver is `ow_synth3.py` (mirrors `ow_synth.py`: measures load_s +
+total_synth_s + max VRAM, writes `line_XXX.wav` + `manifest.json`); dev1 mixing is
+`eval/dubbing/run_round3.py` (re-points the manifest via `localize_manifest`, then
+reuses `run_round2.process` — DRY). Committed engine modules mirror each recipe.
+
+### Reference clips — TRANSCRIBE, never assume
+- `clone.wav` is NOT the span of seg_spec lines 2..8 — it is a SEPARATE ~18 s
+  preacher span (its content: "A detestation… when you pray for the sick go to
+  another level when you hate sickness in somebody's body…"). `native_sk_ref.wav`
+  ≈ the SK of lines 2..8. F5/OmniVoice need the reference clip's TRANSCRIPTION
+  (`ref_text`); Chatterbox/XTTS do not. Transcribe with faster-whisper `small` on
+  CPU (dev1) — `en` for clone.wav, `sk` for native_sk_ref.wav; pass to `ow_synth3.py`
+  via `REF_TEXT_FILE` (never a shell arg — Slovak diacritics + apostrophes).
+
+### Rendered engines
+- **k2-fsa/OmniVoice** (`engines/omnivoice.py`): `pip install omnivoice` + torch
+  2.8.0+cu128. `OmniVoice.from_pretrained(id, device_map="cuda:0", dtype=fp16)`;
+  `generate(text=, ref_audio=, ref_text=)` → list of np.ndarray @ 24 kHz. Qwen3-0.6B
+  diffusion-LM, 600+ langs incl. `sk`, fits 8 GB. **LICENCE: model weights CC-BY-NC**
+  (code Apache-2.0) — open-weight data point, NOT a commercial prod winner.
+- **pekiskol/chatterbox-tts-slovak** (`engines/chatterbox_sk.py`): **MIT — code AND
+  weights (commercial-OK)**, the only such open SK TTS. Reuses `cbvenv` (round-2
+  chatterbox). Drop-in T3 swap: load base `ChatterboxMultilingualTTS`, hf_hub_download
+  `t3_sk_v2.2.safetensors` (~2 GB), reconcile vocab rows (`plan_vocab_reconcile` —
+  the SK fine-tune's `text_emb`/`text_head` vocab differs; trim or mean-pad),
+  `t3.load_state_dict(strict)`, register `sk` in SUPPORTED_LANGUAGES (base 23-lang
+  map omits it), `generate(text, language_id="sk", audio_prompt_path=ref)`. Refutes
+  round 1's "Chatterbox has no Slovak". ~3.9 GB VRAM, ~4.5 s/sentence.
+- **petercheben/F5_TTS_Slovak** (`engines/f5_sk.py`): **GPL**. `pip install f5-tts` +
+  torch cu128. `F5TTS(ckpt_file=model_30000.safetensors, vocab_file=model_30000.txt)`;
+  `infer(ref_file, ref_text, gen_text, remove_silence=True)`. EN/ZH base → the SK
+  fine-tune wants a NATIVE-SK reference (SK ref → SK gen); cross-lingual EN ref is
+  weaker. Card: "Numbers are not recognized, please use words instead."
+
+### Reason rows (verified blockers, not rendered)
+- **fishaudio/s2-pro** (`engines/fish_s2.py`): `sk` supported, but **Fish Audio
+  Research License = non-commercial** (commercial needs a separate licence) +
+  `fish_qwen3_omni` 2-shard model served via SGLang — not a plain 8 GB in-process load.
+- **bosonai/higgs-*** (`engines/higgs.py`): `sk` supported, but **Boson Research &
+  Non-Commercial License** + `higgs-tts-3-4b` weights index total_size = 8.49 GB
+  (7.91 GiB) leave only ~55 MiB below the RTX 5050's 8151 MiB — no room for the CUDA
+  context + audio tokenizer + activations. v2-3B / v3 need the full `boson_multimodal`
+  stack + a separate audio tokenizer.
+
+### Gotchas
+- Two concurrent torch-cu128 `pip install` on dev2 saturate bandwidth (~15–20 min);
+  `pip -q` hides progress — check `du -sh <venv>` (base venv ≈ 13 MB, torch ≈ 6–7.6 GB).
+- Long dev2 renders: a plain `ssh … python …` that the client times out MAY keep
+  running remotely (file-redirected stdout survives), but prefer `nohup … &` + poll
+  the log for `DONE`/`Traceback` so a killed ssh never orphans a half-render.
+- OmniVoice first run fetches 13 files (incl. the safetensors) unauthenticated —
+  slow; set `HF_HUB_DISABLE_XET=1`.
