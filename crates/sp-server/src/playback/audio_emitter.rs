@@ -48,9 +48,7 @@ use sp_ndi::{AudioFrame, AudioSink, NdiBackend};
 pub const EMIT_RATE_HZ: u32 = 48_000;
 /// Samples per channel in one grid block: 1600 @ 48 kHz = 33.333 ms = one
 /// 30 fps grid slot (matches `AUDIO_SAMPLES_PER_BOUNDARY` on the paced path).
-// [red] #192: deliberately WRONG (1601) so the block-size / grid-timecode /
-// full-ring-no-silence / stall-resume tests fail cleanly; GREEN sets 1600.
-pub const EMIT_SAMPLES_PER_BLOCK: usize = 1601;
+pub const EMIT_SAMPLES_PER_BLOCK: usize = 1600;
 /// Ring capacity in whole blocks (~250 ms of headroom): covers a decode stall
 /// up to ~200 ms (a heavy child's model-load burst) without starving the grid.
 pub const RING_CAPACITY_BLOCKS: usize = 8;
