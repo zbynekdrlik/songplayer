@@ -219,13 +219,9 @@ fn effective_global(o: &GlobalLockInput) -> LockState {
     }
 }
 
-/// The reason shown in the `● GENLOCK OFF` tooltip.
-///
-/// TIER-0 RED marker: the RED commit shipped `"pacing off"` here so
-/// `off_when_no_output_has_pacing_enabled` failed on the reason assert while the
-/// whole function still compiled and used every field; GREEN sets the correct
-/// Slovak string.
-const OFF_REASON: &str = "pacing off";
+/// The reason shown in the `● GENLOCK OFF` tooltip: the box free-runs on the
+/// NDI SDK clock because boundary pacing is off (`genlock_pacing=false`).
+const OFF_REASON: &str = "pacing vypnuté";
 
 /// Reduce the per-output genlock inputs into ONE whole-box GLOBAL state for the
 /// always-visible dashboard badge (#176):

@@ -1121,3 +1121,5 @@ body {
 .lock-locked { color: var(--success); }
 .lock-degraded { color: var(--warning); }
 .lock-unlocked { color: var(--error); }
+/* #176: GENLOCK OFF — grey, the production default (pacing off), never hidden. */
+.lock-off { color: var(--text-dim); }
