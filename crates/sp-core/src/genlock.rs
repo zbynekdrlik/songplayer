@@ -450,6 +450,10 @@ mod genlock_burn_tests;
 mod genlock_lock_state_tests;
 
 #[cfg(test)]
+#[path = "genlock_global_tests.rs"]
+mod genlock_global_tests;
+
+#[cfg(test)]
 #[path = "genlock_tests_mutants.rs"]
 mod genlock_tests_mutants;
 

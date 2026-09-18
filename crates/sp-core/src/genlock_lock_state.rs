@@ -167,3 +167,111 @@ pub fn summarize(outputs: &[OutputLock]) -> LockSummary {
         }
     }
 }
+
+// ── #176: always-visible whole-box GLOBAL genlock indicator, incl. OFF ────────
+
+/// The dashboard's always-visible global genlock state (#176). Adds a fourth
+/// state `Off` to the LOCKED / DEGRADED / UNLOCKED lock vocabulary: `Off` means
+/// NO output has boundary pacing enabled (`genlock_pacing=false`, the production
+/// default #147) — the box free-runs on the NDI SDK clock, a deliberate
+/// configuration, not a fault. Rendered grey; the other three keep their
+/// green / amber / red colours (camera-box#1298). This is the #176 revision of
+/// #164's "hide the badge entirely while pacing is off".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlobalLock {
+    Off,
+    Locked,
+    Degraded,
+    Unlocked,
+}
+
+/// One output's inputs to [`global_lock_summary`] (#176): its pacing-enabled
+/// flag (`Off` is derived from this across ALL outputs), whether it is LIVE on
+/// the wall, its derived [`LockState`], its box-clock-ok flag, and its reason
+/// string. WASM-safe and pure — the sp-ui `GlobalLockBadge` builds these from
+/// the `/api/v1/ndi/health` snapshot and renders the returned state (sp-ui has
+/// no unit-test job, so the logic + its tests live here).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GlobalLockInput {
+    pub pacing_enabled: bool,
+    pub live: bool,
+    pub state: LockState,
+    pub clock_ok: bool,
+    pub reason: String,
+}
+
+/// The whole-box global genlock summary (#176): the [`GlobalLock`] state plus a
+/// short reason string for the badge tooltip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GlobalLockSummary {
+    pub state: GlobalLock,
+    pub reason: String,
+}
+
+/// This output's effective [`LockState`] for the global summary: a LOCKED output
+/// whose box clock is not ok is demoted to UNLOCKED (mirrors [`summarize`] /
+/// [`effective_state`]).
+fn effective_global(o: &GlobalLockInput) -> LockState {
+    if o.state == LockState::Locked && !o.clock_ok {
+        LockState::Unlocked
+    } else {
+        o.state
+    }
+}
+
+/// The reason shown in the `● GENLOCK OFF` tooltip.
+///
+/// TIER-0 RED marker: the RED commit shipped `"pacing off"` here so
+/// `off_when_no_output_has_pacing_enabled` failed on the reason assert while the
+/// whole function still compiled and used every field; GREEN sets the correct
+/// Slovak string.
+const OFF_REASON: &str = "pacing off";
+
+/// Reduce the per-output genlock inputs into ONE whole-box GLOBAL state for the
+/// always-visible dashboard badge (#176):
+///
+/// - **No output has pacing enabled** → [`GlobalLock::Off`] (reason
+///   `"pacing vypnuté"`) — the production default; grey, never hidden.
+/// - **Pacing-enabled LIVE outputs** → the worst effective state over them
+///   (UNLOCKED > DEGRADED > LOCKED); a LOCKED-but-clock-not-ok output is demoted
+///   to UNLOCKED. The reason is the worst live output's reason (or `"locked"`).
+/// - **Pacing enabled but nothing live** → derived from the enabled set's clock
+///   only: LOCKED iff every enabled output's clock is ok, else UNLOCKED
+///   (mirrors [`summarize`]'s no-live branch).
+pub fn global_lock_summary(outputs: &[GlobalLockInput]) -> GlobalLockSummary {
+    let enabled: Vec<&GlobalLockInput> = outputs.iter().filter(|o| o.pacing_enabled).collect();
+    if enabled.is_empty() {
+        return GlobalLockSummary {
+            state: GlobalLock::Off,
+            reason: OFF_REASON.to_string(),
+        };
+    }
+
+    let live: Vec<&GlobalLockInput> = enabled.iter().copied().filter(|o| o.live).collect();
+    if live.is_empty() {
+        let clock_ok = enabled.iter().all(|o| o.clock_ok);
+        return if clock_ok {
+            GlobalLockSummary {
+                state: GlobalLock::Locked,
+                reason: "no live output".to_string(),
+            }
+        } else {
+            GlobalLockSummary {
+                state: GlobalLock::Unlocked,
+                reason: "clock not ok".to_string(),
+            }
+        };
+    }
+
+    let worst = live
+        .iter()
+        .copied()
+        .max_by_key(|o| severity(effective_global(o)))
+        .expect("live is non-empty");
+    let (state, reason) = match effective_global(worst) {
+        LockState::Locked => (GlobalLock::Locked, "locked".to_string()),
+        LockState::Degraded => (GlobalLock::Degraded, worst.reason.clone()),
+        LockState::Unlocked => (GlobalLock::Unlocked, worst.reason.clone()),
+    };
+    GlobalLockSummary { state, reason }
+}
