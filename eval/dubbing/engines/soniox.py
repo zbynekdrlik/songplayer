@@ -52,6 +52,14 @@ CLONE_POLL_TIMEOUT_S = 300.0
 SYNTH_TIMEOUT_S = 120.0
 
 
+# Soniox is fronted by Cloudflare, which blocks the default `python-urllib`/
+# generic User-Agent with `error code: 1010` ("banned by browser signature").
+# `requests` normally passes, but set an explicit UA on every call so the ban
+# never recurs (#175 round-2 finding). NOT a rate limit — no pacing needed.
+_UA = "songplayer-dubbing-eval/1.0"
+COMMON_HEADERS = {"User-Agent": _UA, "Accept": "*/*"}
+
+
 def _api_key() -> str:
     key = os.environ.get("SONIOX_API_KEY")
     if not key:
@@ -66,7 +74,7 @@ class SonioxEngine:
 
     def __init__(self, model: str = MODEL) -> None:
         self._model = model
-        self._auth = {"Authorization": f"Bearer {_api_key()}"}
+        self._auth = {"Authorization": f"Bearer {_api_key()}", **COMMON_HEADERS}
 
     def _model_status(self, voice: dict) -> str | None:
         for m in voice.get("models") or []:
@@ -171,7 +179,7 @@ def list_tts_models() -> dict:
     a 403/quota block verbatim in the report — the key is never in the body."""
     r = requests.get(
         TTS_MODELS_URL,
-        headers={"Authorization": f"Bearer {_api_key()}"},
+        headers={"Authorization": f"Bearer {_api_key()}", **COMMON_HEADERS},
         timeout=SYNTH_TIMEOUT_S,
     )
     if r.status_code >= 400:
