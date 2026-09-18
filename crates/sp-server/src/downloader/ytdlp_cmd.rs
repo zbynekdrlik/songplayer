@@ -248,11 +248,19 @@ mod tests {
     #[test]
     fn path_with_tools_prepends_tools_dir() {
         let tools = Path::new("/opt/tools");
-        let inherited = std::ffi::OsStr::new("/usr/bin:/bin");
-        let got = path_with_tools(tools, Some(inherited));
-        // On the Linux CI test host the PATH separator is `:`; the tools dir
-        // must come FIRST so the bundled deno wins over anything installed.
-        assert_eq!(got.to_str().unwrap(), "/opt/tools:/usr/bin:/bin");
+        // Build the inherited PATH with the platform separator (`;` on Windows,
+        // `:` on Unix) so this assertion is correct on BOTH — the Windows
+        // `cargo test` job runs it too.
+        let inherited = std::env::join_paths([Path::new("/usr/bin"), Path::new("/bin")]).unwrap();
+        let got = path_with_tools(tools, Some(inherited.as_os_str()));
+        let parts: Vec<_> = std::env::split_paths(&got).collect();
+        // The tools dir must come FIRST so the bundled deno wins over anything
+        // installed, and the inherited entries must be preserved after it.
+        assert_eq!(parts.first().map(|p| p.as_path()), Some(tools));
+        assert!(
+            parts.iter().any(|p| p == Path::new("/usr/bin")),
+            "inherited PATH entries must be preserved after the tools dir"
+        );
     }
 
     #[test]
