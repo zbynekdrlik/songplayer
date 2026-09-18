@@ -69,6 +69,22 @@ production downloads solve the n-challenge without any manual box setup:
 win-resolume drop it in a temp dir and prepend that dir to `$env:PATH`). The box's
 yt-dlp + `ffmpeg` live in `C:\ProgramData\SongPlayer\cache\tools`.
 
+**The IMPORT route's metadata fetch does NOT pass `--cookies` (separate from the
+n-challenge, #189 finding).** `downloader/tools.rs::fetch_video_metadata`
+(`POST /api/v1/videos/import` → `yt-dlp --dump-json`) routes through
+`ytdlp_command` (so it has deno/PATH), but it never attaches `--cookies`, so on the
+box it fails the bot-check first: `ERROR: [youtube] <id>: Sign in to confirm you're
+not a bot`. The DOWNLOAD path (`download_video_stream`/`download_audio_stream`),
+playlist sync (flat-playlist is not bot-checked) and `description_provider` are the
+authenticated paths; only the manual import's metadata fetch is cookie-blind. To
+prove the n-challenge fix end-to-end without the import route, run the download
+config directly on the box:
+`yt-dlp --cookies <copy-of-cookies.txt> --js-runtimes deno -f bestaudio --simulate
+--print "%(id)s %(format_id)s OK" <url>` (tools dir first on PATH) → a format id +
+`OK` means both the n-challenge AND the bot-check cleared. Fixing the import
+(thread the `data_dir/cookies.txt` into `fetch_video_metadata`, ~5 LoC) is #141
+cookie-gate work, tracked separately.
+
 **Producing the file on win-resolume (all via MCP GUI, no human at the PC):**
 
 1. Use a Chrome profile that is *currently* logged into YouTube — check with
