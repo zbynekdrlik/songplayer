@@ -68,3 +68,74 @@ torch 2.10 with chatterbox's pinned deps and broke transformers/`LlamaModel`).
   curl ON the box), model `claude-fable-5-1`.
 - Stems: `scripts/stem_worker.py separate` on dev2 (needs `audio-separator[gpu]`
   + `librosa` + `audioread`); Kim model ~913 MB downloads on first run.
+
+## Round 2 (native-Slovak + intensity, verified live 2026-09-18)
+
+Round 1 was rejected by ear ("slovenčina bez mäkčeňov"): a cross-lingual clone of
+an ENGLISH speaker leaks the source accent. Round 2 = native voices + audio-to-audio,
+same 7 sentences (`seg_spec` items 2..8), plus an intensity layer.
+
+### Cloud reference engines
+- **Gemini TTS** (`engines/gemini_tts.py`): `generateContent` AUDIO modality,
+  `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`; output `audio/L16`
+  24 kHz PCM → `wavutil.pcm_l16_to_wav`. Model `gemini-3.1-flash-tts-preview`
+  (owner dropped 2.5-pro as superseded). Native `sk`. **Tight free-tier quota**:
+  a single key 429s after ~1 candidate; ROTATE the 5 `gemini_api_key` entries
+  per-call (not per-engine — the engine reads the env once). 30 prebuilt voices.
+  `finishReason=OTHER` with no audio happens intermittently → retry. Price
+  $20/1M audio-out tokens.
+- **Soniox stock** (`engines/soniox.py` `SonioxStockEngine` + `stock_voices_for_language`):
+  the 403 is **Cloudflare `error code: 1010`** (banned browser signature on the
+  default UA), NOT a rate limit — set `User-Agent: songplayer-dubbing-eval/1.0`
+  (`COMMON_HEADERS`) on every request; no pacing needed. `GET /v1/tts-models`
+  lists 200+ cross-lingual stock voices (Adrian, Emma, …) all speaking `sk`.
+  Reference only — prod would need the owner's own key. ~$0.70/h.
+
+### Open-weight engines (dev2 GPU / CPU — the owner's priority)
+- **Felagund/XTTSv2-sk** (`engines/xtts_sk.py`, MIT/coqui): genuine SK fine-tune
+  (config lists `sk`, vocab has `[sk]`) but coqui's `VoiceBpeTokenizer.preprocess_text`
+  hard-raises for langs outside its 17-lang whitelist → route `sk` text-prep
+  through `cs` (`_patch_coqui_env`); `encode` still emits `[sk]`. transformers ≥5
+  removed `isin_mps_friendly` (tortoise import) → shim it (kwargs `elements,
+  test_elements`). transformers 5.x + coqui-tts 0.27.5 co-exist with those two
+  patches. ~2 GB VRAM, ~2.6 s/sentence, zero-shot clone. Card warns of artifacts.
+- **vsisik/speecht5_tts_SK** (MIT): SpeechT5 SK fine-tune; use the
+  `microsoft/speecht5_tts` processor (+`sentencepiece`) + `speecht5_hifigan`
+  vocoder + a 512-d x-vector (cmu-arctic dataset is script-based/unsupported now
+  → use a deterministic generic embedding; no cloning). 0.73 GB, very fast, 16 kHz.
+- **Piper sk_SK-lili-medium** (rhasspy, MIT): onnx, `piper-tts` `PiperVoice.load`
+  → `synthesize_wav`; native SK, CPU-only, ~0.2 s/sentence, 22 kHz. No cloning.
+  The cheapest local option by far.
+- **facebook/mms-tts-slk DOES NOT EXIST** — `mms-tts-pol` is 200 but `slk`/`ces`
+  are 401/not-found; MMS-TTS has no Slovak model.
+- HF is rate-limited for unauthenticated metadata calls (401) — set `HF_HUB_DISABLE_XET=1`
+  and expect occasional 401 bursts; snapshot_download still works unauthenticated.
+- More verified SK open-weights NOT yet rendered: `k2-fsa/OmniVoice`,
+  `pekiskol/chatterbox-tts-slovak`, `petercheben/F5_TTS_Slovak`,
+  `fishaudio/s2-pro`, `bosonai/higgs-*` (see `round2/hf_discovery.json`).
+
+### Audio-to-audio (prosody-preserving) — the round-2 top candidate
+- **Gemini Live Translate** (`engines/gemini_live_translate.py`,
+  `gemini-3.5-live-translate-preview`): stream EN audio (16 kHz mono s16le, 100 ms
+  chunks) into the Live API with `translation_config.target_language_code="sk"`,
+  `response_modalities=["AUDIO"]`; output 24 kHz PCM. WORKS and keeps the
+  speaker's own pacing/boundaries/continuity (per-sentence TTS cannot). The
+  session streams silence after speech until closed → bound the drain
+  (`drain_deadline_s`) and trim trailing silence (`trim_af`). ~1.2× real-time
+  incl. drain. Price ~$0.037/min (in $0.0053 + out $0.0315). `gemini-3.8-live`
+  with a translate *instruction* stops after ~1.4 s (turn-taking) — unusable for
+  continuous dubbing; use the dedicated `-live-translate-` model.
+- **SeamlessM4T v2 / Seamless Expressive**: NO Slovak SPEECH output (v2 = `slk`
+  speech input + text output only, 35 speech-output langs exclude it; Expressive =
+  en↔fr/de/it/zh/es). Reason rows, no GPU spent.
+
+### Intensity + register layer
+- `intensity.py` (pure mapping + librosa `measure_window`): per-sentence RMS dB,
+  f0 spread (semitones), words/s from the ORIGINAL voice window → `intense/neutral/
+  calm` label → Gemini per-sentence style instruction + Soniox `[emphatic]`/`[calm]`
+  audio tag. XTTS/Piper/SpeechT5 have no style control (noted).
+- Sermon-register SK translation: CLIProxy is localhost-only on win-resolume and
+  ssh to that box is banned in this lane → use the Gemini text API
+  (`gemini-2.5-flash` generateContent) for the register translation instead.
+- `run_round2.py`: owner-approved mixes only — `dub only` + `dub + original −18 dB`
+  (NO same-colour blend), loudnorm −16; windowed 7-sentence or full-34.
