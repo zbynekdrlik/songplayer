@@ -36,6 +36,10 @@ logger = logging.getLogger("dubbing_eval.soniox")
 VOICES_API_BASE = "https://api.soniox.com/v1"
 TTS_API_BASE = "https://tts-rt.soniox.com"
 
+# Stock (predefined) voice catalogue: `GET /v1/tts-models` returns `models[]`,
+# each with `languages[] {code,name}` and `voices[] {id,gender,description}`.
+TTS_MODELS_URL = f"{VOICES_API_BASE}/tts-models"
+
 MODEL = "tts-rt-v2"
 AUDIO_FORMAT = "wav"
 SAMPLE_RATE = 24000
@@ -157,6 +161,55 @@ class SonioxEngine:
             logger.warning(
                 "soniox voice %s delete failed (non-fatal)", voice_id, exc_info=True
             )
+
+
+def list_tts_models() -> dict:
+    """List Soniox TTS models with their languages + stock voices.
+
+    Returns the parsed `GET /v1/tts-models` JSON. Raises on HTTP >= 400 with the
+    exact status + body so the caller (round-2 stock-voice discovery) can record
+    a 403/quota block verbatim in the report — the key is never in the body."""
+    r = requests.get(
+        TTS_MODELS_URL,
+        headers={"Authorization": f"Bearer {_api_key()}"},
+        timeout=SYNTH_TIMEOUT_S,
+    )
+    if r.status_code >= 400:
+        raise RuntimeError(f"soniox list models {r.status_code}: {r.text[:400]}")
+    return r.json()
+
+
+def stock_voices_for_language(lang: str = "sk", model: str = MODEL) -> list[dict]:
+    """Return the stock voices of `model` when it advertises `lang`.
+
+    Each voice is `{id, gender, description}`. Empty list if the model does not
+    list the language. Raises (via `list_tts_models`) on an API error."""
+    data = list_tts_models()
+    for m in data.get("models") or []:
+        if m.get("id") == model or m.get("model") == model or m.get("name") == model:
+            langs = {
+                (lc.get("code") or lc.get("language") or "").lower()
+                for lc in (m.get("languages") or [])
+            }
+            if lang.lower() in langs or not langs:
+                return list(m.get("voices") or [])
+    return []
+
+
+class SonioxStockEngine(SonioxEngine):
+    """Soniox STOCK (predefined) voice — no cloning. `clone_voice` ignores the
+    sample and returns the fixed stock voice name; synthesis is the inherited
+    `/tts` call. Round 2 tests native `sk` stock voices as an alternative to the
+    accent-leaking cross-lingual clone rejected in round 1."""
+
+    name = "soniox_stock"
+
+    def __init__(self, voice: str, model: str = MODEL) -> None:
+        super().__init__(model=model)
+        self._stock_voice = voice
+
+    def clone_voice(self, sample_wav_path: str) -> str:
+        return self._stock_voice
 
 
 if __name__ == "__main__":
