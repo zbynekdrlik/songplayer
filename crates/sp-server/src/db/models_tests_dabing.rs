@@ -155,6 +155,32 @@ async fn list_dub_videos_row_carries_title_song_fallback_and_lyrics_flag() {
 }
 
 #[tokio::test]
+async fn videos_payload_reflects_dub_requested_flag() {
+    // Exercises `row_to_video`'s `dub_requested != 0` mapping: a requested video
+    // reads back true, an untouched one false. Kills the `!= 0` → `== 0` mutant.
+    let pool = setup().await;
+    let requested = insert_video(&pool, "vreq", "Requested").await;
+    let plain = insert_video(&pool, "vplain", "Plain").await;
+    set_dub_requested(&pool, requested, true).await.unwrap();
+
+    let videos = crate::db::models::get_videos_for_playlist(&pool, 7)
+        .await
+        .unwrap();
+    let req = videos.iter().find(|v| v.id == requested).unwrap();
+    let pl = videos.iter().find(|v| v.id == plain).unwrap();
+    assert!(
+        req.dub_requested,
+        "requested video must read dub_requested=true"
+    );
+    assert!(
+        !pl.dub_requested,
+        "untouched video must read dub_requested=false"
+    );
+    assert_eq!(req.dub_status.as_deref(), Some("queued"));
+    assert_eq!(pl.dub_status.as_deref(), Some("none"));
+}
+
+#[tokio::test]
 async fn set_dub_mix_ratio_clamps_and_persists() {
     let pool = setup().await;
     let id = insert_video(&pool, "vr", "Ratio").await;

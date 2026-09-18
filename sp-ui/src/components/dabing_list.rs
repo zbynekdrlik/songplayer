@@ -8,7 +8,6 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
-use crate::store::DubRow;
 
 /// The ordered chain steps + their Slovak labels. The index is the step's
 /// position; a row's `chain_state` resolves to the highest reached index.
@@ -35,10 +34,13 @@ fn reached_step(chain_state: &str) -> Option<usize> {
     }
 }
 
-fn chain_row(row: &DubRow) -> impl IntoView {
-    let is_failed = row.chain_state == "failed";
-    let reached = reached_step(&row.chain_state);
-    let err = row.dub_error.clone().unwrap_or_default();
+/// Owned inputs (no borrow of the row) so the returned view is `'static` and can
+/// be embedded in the `<For>` children view (edition-2024 `impl Trait` would
+/// otherwise capture a `&DubRow` lifetime → E0515).
+fn chain_row(chain_state: String, dub_error: Option<String>) -> impl IntoView {
+    let is_failed = chain_state == "failed";
+    let reached = reached_step(&chain_state);
+    let err = dub_error.unwrap_or_default();
     view! {
         <div class="dabing-chain" data-testid="dabing-chain">
             {if is_failed {
@@ -120,7 +122,7 @@ pub fn DabingList() -> impl IntoView {
                                                 "Prehrať"
                                             </button>
                                         </div>
-                                        {chain_row(&row)}
+                                        {chain_row(row.chain_state.clone(), row.dub_error.clone())}
                                     </div>
                                 }
                             }

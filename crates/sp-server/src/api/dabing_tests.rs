@@ -69,18 +69,33 @@ async fn get_json(app: axum::Router, uri: &str) -> serde_json::Value {
 async fn get_dabing_returns_seeded_playlist_and_requested_videos() {
     let state = test_state().await;
     let pool = state.pool.clone();
+    // Insert an unrelated playlist FIRST so the Dabing playlist does NOT get
+    // id 1 — this makes the returned playlist_id assertion kill a mutant that
+    // hardcodes Some(1)/Some(0)/Some(-1) for dabing_playlist_id.
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'other', '')")
+        .execute(&pool)
+        .await
+        .unwrap();
     crate::startup::ensure_dabing_playlist_exists(&pool)
         .await
         .unwrap();
+    // The exact id the seed created — the response must return THIS, not a
+    // constant.
+    let real_id: i64 = sqlx::query_scalar("SELECT id FROM playlists WHERE kind = 'dabing'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_ne!(real_id, 1, "Dabing playlist must not be id 1 in this test");
     let vid = seed_video(&pool, 900, "dab1").await;
     crate::db::models_dabing::set_dub_requested(&pool, vid, true)
         .await
         .unwrap();
 
     let json = get_json(app(state), "/api/v1/dabing").await;
-    assert!(
-        json["playlist_id"].as_i64().is_some(),
-        "the seeded Dabing playlist id must be present"
+    assert_eq!(
+        json["playlist_id"].as_i64(),
+        Some(real_id),
+        "the response must return the ACTUAL seeded Dabing playlist id"
     );
     let videos = json["videos"].as_array().unwrap();
     assert_eq!(videos.len(), 1);
