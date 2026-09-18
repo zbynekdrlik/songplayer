@@ -71,7 +71,9 @@ class OmniVoiceEngine:
             import torch
             from omnivoice import OmniVoice
 
-            device_map = f"{self._device}:0" if self._device == "cuda" else self._device
+            # Bare "cuda" -> "cuda:0"; an explicit "cuda:N" or "cpu" is used as-is
+            # (avoid a malformed "cuda:0:0").
+            device_map = "cuda:0" if self._device == "cuda" else self._device
             dtype = torch.float16 if self._device == "cuda" else torch.float32
             logger.info("omnivoice loading %s on %s", MODEL_ID, device_map)
             self._model = OmniVoice.from_pretrained(

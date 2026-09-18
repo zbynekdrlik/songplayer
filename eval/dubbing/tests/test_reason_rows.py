@@ -46,3 +46,5 @@ def test_higgs_engine_fails_loud():
     eng = higgs.HiggsEngine()
     with pytest.raises(RuntimeError, match="not rendered"):
         eng.clone_voice("/tmp/x.wav")
+    with pytest.raises(RuntimeError, match="not rendered"):
+        eng.synthesize("t", "/tmp/x.wav")
