@@ -172,6 +172,31 @@ async fn oldest_first_selection() {
     );
 }
 
+#[tokio::test]
+async fn manual_priority_jumps_the_queue() {
+    // A newer, manual-priority row (a dub-requested video, #183 D4) is picked
+    // BEFORE an older ordinary row; queue_position reflects the same order.
+    let pool = setup_pool().await;
+    let old = insert_normalized(&pool, "old").await;
+    let dub = insert_normalized(&pool, "dub").await; // newer id
+    sqlx::query("UPDATE videos SET stem_manual_priority = 1 WHERE id = ?")
+        .bind(dub)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        get_next_video_for_stems(&pool)
+            .await
+            .unwrap()
+            .map(|j| j.video_id),
+        Some(dub),
+        "manual-priority row is picked before the older ordinary row"
+    );
+    assert_eq!(queue_position(&pool, dub).await.unwrap(), Some(1));
+    assert_eq!(queue_position(&pool, old).await.unwrap(), Some(2));
+}
+
 // ── #177 per-song stems state ────────────────────────────────────────────────
 
 #[test]
