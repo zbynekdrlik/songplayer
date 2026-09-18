@@ -85,6 +85,8 @@ def test_room_clamped_to_zero_forces_a_zero_length_cut():
     assert p.disposition == "cut"
     assert p.placed_dur_ms == 0
     assert p.cut is True
+    # room (0) is not greater than the slot, so this cut does not overflow it.
+    assert p.overflow is False
 
 
 def test_zero_length_slot_skips_tempo_branch():
