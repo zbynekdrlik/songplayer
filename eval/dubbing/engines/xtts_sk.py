@@ -55,13 +55,28 @@ class XttsSkEngine:
         self._config = None
 
     @staticmethod
-    def _patch_sk_tokenizer() -> None:
-        """coqui's `VoiceBpeTokenizer.preprocess_text` hard-raises
-        NotImplementedError for any language outside its 17-lang whitelist, so a
-        Slovak fine-tune (whose config lists `sk` and whose vocab has the `[sk]`
-        token) cannot be used out of the box. Route `sk` TEXT normalization
-        through `cs` (Czech — the closest whitelisted Slavic language, same
-        diacritics), while `encode` still emits the `[sk]` model language token."""
+    def _patch_coqui_env() -> None:
+        """Two environment compatibility patches coqui-tts needs on a modern stack:
+
+        1. `sk` language — coqui's `VoiceBpeTokenizer.preprocess_text` hard-raises
+           NotImplementedError for any language outside its 17-lang whitelist, so
+           the Felagund SK fine-tune (whose config lists `sk` and whose vocab has
+           the `[sk]` token) is unusable out of the box. Route `sk` TEXT
+           normalization through `cs` (Czech — the closest whitelisted Slavic
+           language, same diacritics); `encode` still emits the `[sk]` model token.
+        2. transformers >= 5 removed `isin_mps_friendly`, which coqui's tortoise
+           layer imports; shim it back (torch.isin) with the real kwarg signature.
+        """
+        import torch
+        import transformers.pytorch_utils as ptu
+
+        if not hasattr(ptu, "isin_mps_friendly"):
+
+            def isin_mps_friendly(elements, test_elements):
+                return torch.isin(elements, test_elements)
+
+            ptu.isin_mps_friendly = isin_mps_friendly
+
         from TTS.tts.layers.xtts import tokenizer as xtok
 
         if getattr(xtok.VoiceBpeTokenizer, "_sk_patched", False):
@@ -76,11 +91,9 @@ class XttsSkEngine:
 
     def _load(self):
         if self._model is None:
-            import torch  # noqa: F401  (ensures torch/cuda is importable first)
+            self._patch_coqui_env()
             from TTS.tts.configs.xtts_config import XttsConfig
             from TTS.tts.models.xtts import Xtts
-
-            self._patch_sk_tokenizer()
 
             cfg_path = os.path.join(self._model_dir, "config.json")
             vocab_path = os.path.join(self._model_dir, "vocab.json")
