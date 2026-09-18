@@ -938,6 +938,14 @@ pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
     *last_heartbeat = now;
 }
 
+// #192: wall-clock audio emitter for the SDK-clocked path. The pure core (ring
+// + grid + telemetry) is cross-platform and Linux-tested; the Windows-only
+// thread lifecycle (TIME_CRITICAL spawn, sleep/spin loop, join-before-drop)
+// lives in the `pipeline_audio` sibling. Registered here (not in mod.rs) to
+// keep mod.rs off the 1000-line cap.
+#[path = "audio_emitter.rs"]
+pub mod audio_emitter;
+
 #[cfg(test)]
 #[path = "pipeline_inline_tests.rs"]
 mod tests;

@@ -279,6 +279,52 @@ impl<B: NdiBackend> NdiSender<B> {
     pub fn handle(&self) -> usize {
         self.handle
     }
+
+    /// A cheap, cloneable audio-only send handle over this sender's backend +
+    /// handle. NDI permits audio and video to be submitted from SEPARATE threads
+    /// on the same sender instance, so a dedicated wall-clock audio emitter
+    /// thread (#192, `sp_server::playback::audio_emitter`) can call
+    /// [`AudioSink::send_audio`] while the decode thread submits video through
+    /// the [`FrameSubmitter`], without sharing `&mut FrameSubmitter` across
+    /// threads. The sink holds an `Arc<B>` clone of the backend, so the backend
+    /// outlives it; the OWNER of the sink MUST be torn down before this
+    /// `NdiSender` is dropped (`send_destroy` invalidates the handle), which the
+    /// emitter-thread lifecycle guarantees (spawned at sender create, joined
+    /// before the submitter — and thus the sender — drops).
+    pub fn audio_sink(&self) -> AudioSink<B> {
+        AudioSink {
+            backend: self.backend.clone(),
+            handle: self.handle,
+        }
+    }
+}
+
+/// A cloneable audio-only send handle (see [`NdiSender::audio_sink`]). Sends
+/// interleaved-f32 audio frames on the same NDI sender instance from a
+/// different thread than the video submit path.
+#[derive(Clone)]
+pub struct AudioSink<B: NdiBackend> {
+    backend: Arc<B>,
+    handle: usize,
+}
+
+impl<B: NdiBackend> AudioSink<B> {
+    /// Send one interleaved-f32 audio frame. Mirrors [`NdiSender::send_audio`]:
+    /// a zero-channel frame is a no-op; the backend planarises to FLTP.
+    pub fn send_audio(&self, frame: &AudioFrame) {
+        if frame.channels == 0 {
+            return;
+        }
+        let samples_per_channel = frame.data.len() as i32 / frame.channels as i32;
+        self.backend.send_audio(
+            self.handle,
+            frame.sample_rate as i32,
+            frame.channels as i32,
+            samples_per_channel,
+            &frame.data,
+            frame.timecode_100ns,
+        );
+    }
 }
 
 impl<B: NdiBackend> Drop for NdiSender<B> {

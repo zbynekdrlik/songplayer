@@ -140,6 +140,7 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             underruns: 9,
             overflows: 0,
             buffer_ms: 66,
+            emitter: Default::default(),
         },
         lock_state: LockState::Degraded,
         lock_reason: "late/repeats/resyncs in 60 s".to_string(),
