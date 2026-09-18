@@ -24,6 +24,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - LAN sp.local mDNS advertisement → `.claude/rules/lan-mdns.md` (auto-loads on `crates/sp-server/src/mdns.rs`)
 - CI workflows: runner shell traps / mutation gate / push+PR de-dup → `.claude/rules/ci-workflows.md` (auto-loads on `.github/workflows/**`, `.cargo/mutants.toml`)
 - sermon dubbing eval (Soniox/Chatterbox engine gotchas) → `.claude/rules/dubbing-eval.md` (auto-loads on `eval/dubbing/**`)
+- Dabing feature (dub data model + section + import cookie gate) → `.claude/rules/dabing.md` (auto-loads on `db/models_dabing.rs`, `api/dabing.rs`, `api/routes_import.rs`, `startup_dabing.rs`, `sp-ui` dabing files)
 
 | Area | Skill | Load when |
 |------|-------|-----------|

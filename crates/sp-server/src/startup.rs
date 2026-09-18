@@ -20,6 +20,13 @@ use sqlx::{Row, SqlitePool};
 use crate::SyncRequest;
 use crate::downloader::cache;
 
+// #180 dubbing D1: the Dabing-section seed lives in a sibling module so this
+// file stays under the 1000-line airuleset cap; re-exported so the call site is
+// `startup::ensure_dabing_playlist_exists`.
+#[path = "startup_dabing.rs"]
+mod startup_dabing;
+pub use startup_dabing::ensure_dabing_playlist_exists;
+
 /// Ensures the single pre-created `ytlive` custom playlist exists.
 /// Idempotent: a no-op when the row is already present.
 ///

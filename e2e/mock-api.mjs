@@ -447,6 +447,100 @@ app.get("/__mock/stems-enqueue-last", (_req, res) => {
   res.json({ video_id: lastEnqueuedVideoId });
 });
 
+// --- Dabing (#180) ---
+// The seeded kind='dabing' playlist + an in-memory list of dub-requested
+// videos. Mirrors GET /api/v1/dabing → {playlist_id, videos:[DubRow…]} and the
+// import / toggle / mixer routes.
+const DABING_PLAYLIST_ID = 500;
+let dubRows = [];
+let nextDubId = 9000;
+let lastDubMix = null;
+
+function chainStateFor(dubStatus) {
+  // The mock only ever produces `queued` rows (the chain is D3/D4); the server
+  // derives the rest. Keep it in lockstep with the wire strings.
+  return dubStatus === "none" ? "queued" : dubStatus;
+}
+
+app.get("/api/v1/dabing", (_req, res) => {
+  res.json({ playlist_id: DABING_PLAYLIST_ID, videos: dubRows });
+});
+
+app.post("/api/v1/dabing/import", (req, res) => {
+  const url = (req.body && req.body.url) || "";
+  if (!url.trim()) {
+    res.status(400).end();
+    return;
+  }
+  const video_id = nextDubId++;
+  const row = {
+    video_id,
+    playlist_id: DABING_PLAYLIST_ID,
+    title: `Dabing ${video_id}`,
+    dub_status: "queued",
+    dub_error: null,
+    dub_mix_ratio: 1.0,
+    dub_file_path: null,
+    stem_status: null,
+    lyrics_present: false,
+    chain_state: "queued",
+  };
+  // Newest first.
+  dubRows.unshift(row);
+  res.status(201).json({
+    video_id,
+    youtube_id: "mockdab0001",
+    title: row.title,
+  });
+});
+
+let lastDubToggle = null;
+app.patch("/api/v1/videos/:id/dub", (req, res) => {
+  const id = Number(req.params.id);
+  const requested = !!(req.body && req.body.requested);
+  lastDubToggle = { video_id: id, requested };
+  if (requested) {
+    if (!dubRows.some((r) => r.video_id === id)) {
+      dubRows.unshift({
+        video_id: id,
+        playlist_id: DABING_PLAYLIST_ID,
+        title: `Video ${id}`,
+        dub_status: "queued",
+        dub_error: null,
+        dub_mix_ratio: 1.0,
+        dub_file_path: null,
+        stem_status: null,
+        lyrics_present: false,
+        chain_state: chainStateFor("queued"),
+      });
+    }
+  } else {
+    dubRows = dubRows.filter((r) => r.video_id !== id);
+  }
+  res.status(204).end();
+});
+app.get("/__mock/dub-toggle-last", (_req, res) => {
+  res.json({ toggle: lastDubToggle });
+});
+
+app.patch("/api/v1/videos/:id/dub-mix", (req, res) => {
+  let ratio = Number((req.body && req.body.ratio) ?? 1.0);
+  if (Number.isNaN(ratio)) ratio = 1.0;
+  ratio = Math.max(0, Math.min(1, ratio));
+  lastDubMix = { video_id: Number(req.params.id), ratio };
+  res.status(200).json({ ratio });
+});
+
+app.post("/__mock/dabing-reset", (_req, res) => {
+  dubRows = [];
+  nextDubId = 9000;
+  lastDubMix = null;
+  res.json({ ok: true });
+});
+app.get("/__mock/dub-mix-last", (_req, res) => {
+  res.json(lastDubMix || {});
+});
+
 // Status
 app.get("/api/v1/status", (_req, res) => {
   res.json({

@@ -1,6 +1,7 @@
 //! Database layer — SQLite pool creation and manual migration system.
 
 pub mod models;
+pub mod models_dabing; // #180 dubbing D1 queries (own module, 1000-line cap)
 pub mod models_stems; // #14 karaoke stem-separation queries (own module, 1000-line cap)
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -35,6 +36,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (23, MIGRATION_V23),
     (24, MIGRATION_V24),
     (25, MIGRATION_V25),
+    (26, MIGRATION_V26),
 ];
 
 const MIGRATION_V1: &str = "
@@ -351,6 +353,36 @@ ALTER TABLE videos ADD COLUMN stem_next_attempt_at TEXT;
 // `lyrics_processing_mode = idle-only` explicitly.
 const MIGRATION_V25: &str = "
 DELETE FROM settings WHERE key = 'lyrics_gate_when_playing';
+";
+
+// V26 (#180 — dubbing D1) — per-video dub bookkeeping, additive, no data loss.
+// The dubbing chain (stems → EN transcript → SK translation → SK synth) records
+// its position + artefacts here, mirroring the V24 stems / V22 lyrics-backoff
+// column pattern. `dub_status` values:
+//   none      = not requested (default)
+//   queued    = requested, waiting for the chain
+//   stems     = voice/ambient separation in progress/done
+//   transcript= EN transcript in progress/done
+//   translation = SK translation in progress/done
+//   synth     = SK dub synthesis in progress
+//   ready     = dub.flac written, playable through the mixer
+//   failed    = a step errored (retryable); `dub_error` carries the tail
+// `dub_mix_ratio` (0.0..=1.0, default 1.0) is the original-voice↔dub blend the
+// mixer applies. `stem_manual_priority` gives the stems worker a manual bucket
+// (D3 uses it) so a dub-requested video's stems run ahead of the oldest-first
+// queue. Existing rows default to (0, 'none', …, 1.0, …, 0) → no dub requested.
+const MIGRATION_V26: &str = "
+ALTER TABLE videos ADD COLUMN dub_requested INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN dub_status TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE videos ADD COLUMN dub_file_path TEXT;
+ALTER TABLE videos ADD COLUMN dub_engine TEXT;
+ALTER TABLE videos ADD COLUMN dub_voice_ref_path TEXT;
+ALTER TABLE videos ADD COLUMN dub_mix_ratio REAL NOT NULL DEFAULT 1.0;
+ALTER TABLE videos ADD COLUMN dub_error TEXT;
+ALTER TABLE videos ADD COLUMN dub_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN dub_next_attempt_at TEXT;
+ALTER TABLE videos ADD COLUMN dub_requested_at TEXT;
+ALTER TABLE videos ADD COLUMN stem_manual_priority INTEGER NOT NULL DEFAULT 0;
 ";
 
 /// Create a connection pool backed by a file.

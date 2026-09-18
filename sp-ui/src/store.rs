@@ -56,6 +56,34 @@ pub struct LyricsSongEntry {
     pub translation_gender: Option<String>,
 }
 
+/// One dub-requested video for the Dabing section (#180). Mirrors the server's
+/// `models_dabing::DubRow` JSON; `#[serde(default)]` throughout so a partial or
+/// newer payload still deserialises.
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
+pub struct DubRow {
+    pub video_id: i64,
+    #[serde(default)]
+    pub playlist_id: i64,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub dub_status: String,
+    #[serde(default)]
+    pub dub_error: Option<String>,
+    #[serde(default)]
+    pub dub_mix_ratio: f64,
+    #[serde(default)]
+    pub dub_file_path: Option<String>,
+    #[serde(default)]
+    pub stem_status: Option<String>,
+    #[serde(default)]
+    pub lyrics_present: bool,
+    /// Resolved chain-state wire string (`queued`/`stems`/`transcript`/
+    /// `translation`/`synth`/`ready`/`failed`) — the server derives it.
+    #[serde(default)]
+    pub chain_state: String,
+}
+
 /// Outcome of the most recent POST /api/v1/lyrics/reprocess (any flavor).
 /// Used to surface `blocked_by_asr_gap > 0` to the operator (#98).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -118,6 +146,9 @@ pub struct DashboardStore {
     pub lyrics_queue: RwSignal<Option<LyricsQueueInfo>>,
     pub lyrics_songs: RwSignal<Vec<LyricsSongEntry>>,
     pub last_reprocess: RwSignal<Option<ReprocessOutcome>>,
+    /// #180: dub-requested videos for the Dabing section, refreshed by a 2 s poll
+    /// (the Dabing page owns the loop, like the NDI-health poll).
+    pub dabing: RwSignal<Vec<DubRow>>,
     /// Per-output NDI genlock health (#150), refreshed ~1 Hz by the
     /// dashboard's `GlobalLockBadge` poll loop and read by every per-card
     /// `LockBadge`.
@@ -147,6 +178,7 @@ impl DashboardStore {
             lyrics_queue: RwSignal::new(None),
             lyrics_songs: RwSignal::new(vec![]),
             last_reprocess: RwSignal::new(None),
+            dabing: RwSignal::new(vec![]),
             ndi_health: RwSignal::new(vec![]),
             selected_playlist: RwSignal::new(None),
             selection_pinned: RwSignal::new(false),

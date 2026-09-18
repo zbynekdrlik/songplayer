@@ -440,6 +440,44 @@ pub async fn patch_video_metadata(video_id: i64, song: &str, artist: &str) -> Re
     patch_json_empty(&format!("/api/v1/videos/{video_id}"), &body).await
 }
 
+// ── Dabing (#180) ───────────────────────────────────────────────────────────
+
+/// GET the Dabing section: the seeded playlist id + every dub-requested video,
+/// newest first.
+pub async fn get_dabing() -> Result<serde_json::Value, String> {
+    get("/api/v1/dabing").await
+}
+
+/// POST a bare YouTube URL to the Dabing import endpoint — downloads into the
+/// Dabing playlist and flags it dub-requested. Returns 201 + the imported video.
+pub async fn import_dabing(url: String) -> Result<ImportedVideo, String> {
+    post_json("/api/v1/dabing/import", &serde_json::json!({ "url": url })).await
+}
+
+/// PATCH the per-video dub request flag (the row toggle). 204/404 → unit.
+pub async fn patch_dub(video_id: i64, requested: bool) -> Result<(), String> {
+    patch_json_empty(
+        &format!("/api/v1/videos/{video_id}/dub"),
+        &serde_json::json!({ "requested": requested }),
+    )
+    .await
+}
+
+/// PATCH the per-video mixer blend ratio (0.0..=1.0). Server replies 200 + the
+/// stored (clamped) value; we only need success/failure here.
+pub async fn patch_dub_mix(video_id: i64, ratio: f64) -> Result<(), String> {
+    let resp = Request::patch(&format!("/api/v1/videos/{video_id}/dub-mix"))
+        .json(&serde_json::json!({ "ratio": ratio }))
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        return Err(format!("PATCH dub-mix → {}", resp.status()));
+    }
+    Ok(())
+}
+
 /// PATCH JSON to `path` and discard the response body. Mirror of
 /// `put_json_empty` / `post_json_empty` for handlers that reply `204 No
 /// Content`.

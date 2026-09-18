@@ -103,7 +103,7 @@ pub async fn get_videos_for_playlist(
         "SELECT id, playlist_id, youtube_id, title, song, artist,
                 duration_ms, file_path, normalized, gemini_failed,
                 suppress_resolume_en, spotify_track_id,
-                download_attempts, last_download_error
+                download_attempts, last_download_error, dub_requested, dub_status
          FROM videos WHERE playlist_id = ? ORDER BY id",
     )
     .bind(playlist_id)
@@ -133,7 +133,7 @@ pub async fn upsert_video(
          RETURNING id, playlist_id, youtube_id, title, song, artist,
                    duration_ms, file_path, normalized, gemini_failed,
                    suppress_resolume_en, spotify_track_id,
-                   download_attempts, last_download_error",
+                   download_attempts, last_download_error, dub_requested, dub_status",
     )
     .bind(playlist_id)
     .bind(youtube_id)
@@ -161,6 +161,8 @@ fn row_to_video(r: &sqlx::sqlite::SqliteRow) -> Video {
         download_attempts: r.get("download_attempts"),
         last_download_error: r.get("last_download_error"),
         stems_state: None, // #177: populated by api/videos.rs, not here
+        dub_requested: r.get::<i64, _>("dub_requested") != 0, // #180 (V26)
+        dub_status: r.get("dub_status"), // #180 (V26)
     }
 }
 

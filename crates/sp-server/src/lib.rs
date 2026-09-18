@@ -164,6 +164,7 @@ pub async fn start(
     let pool = db::create_pool(&format!("sqlite:{}", config.db_path.display())).await?;
     db::run_migrations(&pool).await?;
     startup::ensure_live_playlist_exists(&pool).await?;
+    startup::ensure_dabing_playlist_exists(&pool).await?; // #180 dubbing D1
     info!("database ready");
 
     // Self-heal cache: delete legacy single-mp4s, delete orphans,

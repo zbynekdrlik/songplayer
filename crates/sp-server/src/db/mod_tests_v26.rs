@@ -55,23 +55,21 @@ async fn migration_v26_defaults_existing_rows() {
 
     run_migrations(&pool).await.unwrap();
 
-    let dub_requested: i64 =
-        sqlx::query_scalar("SELECT dub_requested FROM videos WHERE id = ?")
-            .bind(id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let dub_requested: i64 = sqlx::query_scalar("SELECT dub_requested FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     let dub_status: String = sqlx::query_scalar("SELECT dub_status FROM videos WHERE id = ?")
         .bind(id)
         .fetch_one(&pool)
         .await
         .unwrap();
-    let dub_mix_ratio: f64 =
-        sqlx::query_scalar("SELECT dub_mix_ratio FROM videos WHERE id = ?")
-            .bind(id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let dub_mix_ratio: f64 = sqlx::query_scalar("SELECT dub_mix_ratio FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     let stem_manual_priority: i64 =
         sqlx::query_scalar("SELECT stem_manual_priority FROM videos WHERE id = ?")
             .bind(id)
@@ -79,7 +77,10 @@ async fn migration_v26_defaults_existing_rows() {
             .await
             .unwrap();
     assert_eq!(dub_requested, 0, "existing rows default to dub_requested=0");
-    assert_eq!(dub_status, "none", "existing rows default to dub_status='none'");
+    assert_eq!(
+        dub_status, "none",
+        "existing rows default to dub_status='none'"
+    );
     assert_eq!(
         dub_mix_ratio, 1.0,
         "existing rows default to dub_mix_ratio=1.0"

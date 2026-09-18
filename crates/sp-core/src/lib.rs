@@ -175,6 +175,8 @@ mod tests {
             download_attempts: 0,
             last_download_error: None,
             stems_state: None,
+            dub_requested: false,
+            dub_status: None,
         };
         let json = serde_json::to_string(&v).unwrap();
         let back: models::Video = serde_json::from_str(&json).unwrap();

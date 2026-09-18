@@ -1,12 +1,14 @@
 //! HTTP API and WebSocket — Axum router, REST endpoints, and dashboard WebSocket.
 
 pub mod ai;
+pub mod dabing; // #180 dubbing D1
 pub mod karaoke;
 pub mod live;
 pub mod lyrics;
 pub mod lyrics_catalog;
 pub mod preview;
 pub mod routes;
+pub mod routes_import; // #180 shared bare-URL import core
 pub mod routes_ndi_recover;
 pub mod stems;
 pub mod videos;
@@ -51,6 +53,20 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/videos/import",
             axum::routing::post(routes::import_video),
+        )
+        // #180 dubbing D1 — Dabing section + per-video dub toggle/mixer.
+        .route("/api/v1/dabing", axum::routing::get(dabing::get_dabing))
+        .route(
+            "/api/v1/dabing/import",
+            axum::routing::post(dabing::import_dabing),
+        )
+        .route(
+            "/api/v1/videos/{id}/dub",
+            axum::routing::patch(dabing::patch_dub),
+        )
+        .route(
+            "/api/v1/videos/{id}/dub-mix",
+            axum::routing::patch(dabing::patch_dub_mix),
         )
         // Playback
         .route(

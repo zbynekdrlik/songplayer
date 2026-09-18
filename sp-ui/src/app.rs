@@ -12,6 +12,7 @@ pub enum Page {
     Live,
     Settings,
     Lyrics,
+    Dabing,
 }
 
 impl Default for Page {
@@ -28,6 +29,7 @@ impl Page {
             Self::Dashboard => "/",
             Self::Live => "/live",
             Self::Lyrics => "/lyrics",
+            Self::Dabing => "/dabing",
             Self::Settings => "/settings",
         }
     }
@@ -39,6 +41,7 @@ impl Page {
         match path {
             "/live" => Self::Live,
             "/lyrics" => Self::Lyrics,
+            "/dabing" => Self::Dabing,
             "/settings" => Self::Settings,
             _ => Self::Dashboard,
         }
@@ -118,6 +121,12 @@ pub fn App() -> impl IntoView {
                 "Lyrics"
             </button>
             <button
+                class:active=move || page.get() == Page::Dabing
+                on:click=move |_| go(Page::Dabing)
+            >
+                "Dabing"
+            </button>
+            <button
                 class:active=move || page.get() == Page::Settings
                 on:click=move |_| go(Page::Settings)
             >
@@ -149,6 +158,7 @@ pub fn App() -> impl IntoView {
                 Page::Live => pages::live::LivePage().into_any(),
                 Page::Settings => pages::settings::SettingsPage().into_any(),
                 Page::Lyrics => pages::lyrics::LyricsPage().into_any(),
+                Page::Dabing => pages::dabing::DabingPage().into_any(),
             }}
         </main>
     }
