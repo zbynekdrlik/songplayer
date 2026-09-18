@@ -320,12 +320,10 @@ fn run_loop_windows(
 
     // #192: on the SDK-clocked path a dedicated wall-clock audio emitter thread
     // clocks the NDI audio stream continuously (silence-filled across song
-    // transitions and heavy-child stalls), killing the per-song 300–370 ms holes
-    // and the ±1500 ppm servo swings. It lives as long as the sender; its guard
-    // is declared AFTER `submitter` so it drops (signals shutdown + joins the
-    // thread) BEFORE the submitter — and thus the sender — is destroyed, since
-    // `send_destroy` invalidates the handle the emitter's AudioSink holds. The
-    // paced path keeps its own audio clock (the Pacer's AudioGridBuffer + PLL).
+    // transitions / heavy-child stalls). Declared AFTER `submitter` so its guard
+    // drops (shutdown + JOIN) BEFORE the sender is destroyed — `send_destroy`
+    // invalidates the handle the emitter's AudioSink holds. Paced path keeps its
+    // own audio clock (the Pacer's AudioGridBuffer + PLL), so no emitter there.
     let audio_emitter = if genlock_pacing {
         None
     } else {
@@ -695,36 +693,16 @@ fn decode_and_send(
 
         match decoder.next_synced() {
             Ok(Some((video_frame, audio_frames))) => {
-                // #192: on the SDK-clocked path the audio no longer rides with
-                // the video submit — it is PUSHED into the wall-clock emitter's
-                // ring (BEFORE this frame's send_video, per the design's A/V
-                // alignment), and a dedicated TIME_CRITICAL thread clocks it out
-                // continuously. `submit_nv12` then carries video only, so a
-                // decode stall / song end no longer stops the audio stream.
-                // Fallback (emitter absent, e.g. spawn failed): submit audio the
-                // legacy way so audio is never silently dropped.
-                let ndi_audio: Vec<sp_ndi::AudioFrame> = match audio_emitter {
-                    Some(emitter) => {
-                        for af in &audio_frames {
-                            crate::playback::audio_emitter::push_blocking(
-                                emitter,
-                                &af.data,
-                                af.channels as usize,
-                            );
-                        }
-                        Vec::new()
-                    }
-                    None => audio_frames
-                        .into_iter()
-                        .map(|af| sp_ndi::AudioFrame {
-                            data: af.data,
-                            channels: af.channels,
-                            sample_rate: af.sample_rate,
-                            // Stamped by FrameSubmitter at submission time (#146).
-                            timecode_100ns: None,
-                        })
-                        .collect(),
-                };
+                // #192: on the SDK-clocked path audio is PUSHED into the
+                // wall-clock emitter's ring (before this frame's submit) and the
+                // TIME_CRITICAL emit thread clocks it out continuously, so a song
+                // end / heavy-child stall no longer stops the audio stream;
+                // `submit_nv12` then carries video only. (Emitter absent → legacy
+                // audio-with-video fallback.) See `pipeline_audio`.
+                let ndi_audio = crate::playback::pipeline_audio::push_or_collect_audio(
+                    audio_emitter,
+                    audio_frames,
+                );
 
                 let timestamp_ms = video_frame.timestamp_ms;
                 // #15 part 2: opportunistically offer this decoded frame to the
@@ -865,16 +843,9 @@ fn run_heartbeat_inner(
     consecutive_bad_polls: &mut u32,
     audio_emitter: Option<&crate::playback::audio_emitter::SharedEmitter>,
 ) {
-    // #192: the SDK-clocked path now has a wall-clock audio emitter — surface its
-    // telemetry (silence_blocks / ring_depth / jitter / late) under audio.emitter
-    // so /api/v1/ndi/health shows it. `enabled` stays false without one.
-    let audio = match audio_emitter {
-        Some(emitter) => crate::playback::ndi_health::AudioStats {
-            emitter: crate::playback::audio_emitter::emitter_stats(emitter),
-            ..Default::default()
-        },
-        None => crate::playback::ndi_health::AudioStats::default(),
-    };
+    // #192: surface the wall-clock emitter telemetry under audio.emitter on
+    // /api/v1/ndi/health (disabled default without an emitter).
+    let audio = crate::playback::audio_emitter::heartbeat_audio_stats(audio_emitter);
     emit_heartbeat(
         submitter,
         event_tx,

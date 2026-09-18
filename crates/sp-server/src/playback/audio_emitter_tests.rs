@@ -416,6 +416,22 @@ fn emitter_stats_reads_the_telemetry_and_sets_the_mode_when_enabled() {
 }
 
 #[test]
+fn heartbeat_audio_stats_carries_the_emitter_when_present_else_disabled_default() {
+    let shared = new_shared_emitter();
+    let (_backend, sink) = mock_sink();
+    emit_one_block(&shared, &sink, 0); // one silence block
+    let with = heartbeat_audio_stats(Some(&shared));
+    assert!(with.emitter.enabled, "present emitter → enabled telemetry");
+    assert_eq!(with.emitter.silence_blocks, 1);
+    // The pacing/PLL fields stay default on the SDK-clocked path.
+    assert!(!with.enabled);
+
+    let without = heartbeat_audio_stats(None);
+    assert!(!without.emitter.enabled, "no emitter → disabled default");
+    assert_eq!(without, crate::playback::ndi_health::AudioStats::default());
+}
+
+#[test]
 fn audio_stats_emitter_serialises_under_the_emitter_key() {
     use crate::playback::ndi_health::{AudioStats, EmitterStats};
     let stats = AudioStats {

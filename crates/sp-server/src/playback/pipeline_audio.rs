@@ -23,8 +23,41 @@ use std::time::Duration;
 use sp_ndi::{AudioSink, RealNdiBackend};
 use tracing::{info, warn};
 
-use crate::playback::audio_emitter::{EmittedBlock, SharedEmitter, emit_one_block};
+use crate::playback::audio_emitter::{EmittedBlock, SharedEmitter, emit_one_block, push_blocking};
 use crate::playback::wallclock::WallClock;
+
+/// The SDK-clocked decode loop's audio seam (#192): with the wall-clock emitter
+/// present, PUSH each decoded frame's interleaved audio into its bounded ring
+/// (before that video frame's submit) and hand `submit_nv12` NO audio — the
+/// emit thread clocks it out continuously. Without an emitter (spawn failed),
+/// fall back to the legacy behaviour so audio is never silently dropped: return
+/// the `AudioFrame`s for `submit_nv12` to send alongside the video. Kept here to
+/// hold `pipeline.rs` under the 1000-line cap. `mutants::skip` — the pure
+/// `push_blocking` it delegates to is Linux-tested.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn push_or_collect_audio(
+    emitter: Option<&SharedEmitter>,
+    audio_frames: Vec<sp_decoder::DecodedAudioFrame>,
+) -> Vec<sp_ndi::AudioFrame> {
+    match emitter {
+        Some(shared) => {
+            for af in &audio_frames {
+                push_blocking(shared, &af.data, af.channels as usize);
+            }
+            Vec::new()
+        }
+        None => audio_frames
+            .into_iter()
+            .map(|af| sp_ndi::AudioFrame {
+                data: af.data,
+                channels: af.channels,
+                sample_rate: af.sample_rate,
+                // Stamped by FrameSubmitter at submission time (#146).
+                timecode_100ns: None,
+            })
+            .collect(),
+    }
+}
 
 /// Spin the last ~2 ms to the grid boundary (matches the paced path's margin).
 const SPIN_MARGIN_100NS: i64 = 20_000;

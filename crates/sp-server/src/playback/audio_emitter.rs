@@ -402,6 +402,23 @@ pub fn push_blocking(shared: &SharedEmitter, interleaved: &[f32], channels: usiz
     }
 }
 
+/// The full [`AudioStats`](crate::playback::ndi_health::AudioStats) a
+/// SDK-clocked heartbeat reports: default pacing/PLL fields (unused on this
+/// path) with the wall-clock emitter telemetry filled from `emitter`. `None`
+/// (emitter absent) reports the all-default (disabled) stats. Keeps the seam
+/// out of `pipeline.rs` (1000-line cap).
+pub fn heartbeat_audio_stats(
+    emitter: Option<&SharedEmitter>,
+) -> crate::playback::ndi_health::AudioStats {
+    match emitter {
+        Some(e) => crate::playback::ndi_health::AudioStats {
+            emitter: emitter_stats(e),
+            ..Default::default()
+        },
+        None => crate::playback::ndi_health::AudioStats::default(),
+    }
+}
+
 /// Read the lock-free telemetry into the health-document [`EmitterStats`] the
 /// pipeline heartbeat serialises. Cross-platform (the decode thread calls it on
 /// the SDK-clocked path).
