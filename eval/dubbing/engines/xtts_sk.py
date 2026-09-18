@@ -54,11 +54,33 @@ class XttsSkEngine:
         self._model = None
         self._config = None
 
+    @staticmethod
+    def _patch_sk_tokenizer() -> None:
+        """coqui's `VoiceBpeTokenizer.preprocess_text` hard-raises
+        NotImplementedError for any language outside its 17-lang whitelist, so a
+        Slovak fine-tune (whose config lists `sk` and whose vocab has the `[sk]`
+        token) cannot be used out of the box. Route `sk` TEXT normalization
+        through `cs` (Czech — the closest whitelisted Slavic language, same
+        diacritics), while `encode` still emits the `[sk]` model language token."""
+        from TTS.tts.layers.xtts import tokenizer as xtok
+
+        if getattr(xtok.VoiceBpeTokenizer, "_sk_patched", False):
+            return
+        orig = xtok.VoiceBpeTokenizer.preprocess_text
+
+        def preprocess_text(self, txt, lang):
+            return orig(self, txt, "cs" if lang == "sk" else lang)
+
+        xtok.VoiceBpeTokenizer.preprocess_text = preprocess_text
+        xtok.VoiceBpeTokenizer._sk_patched = True
+
     def _load(self):
         if self._model is None:
             import torch  # noqa: F401  (ensures torch/cuda is importable first)
             from TTS.tts.configs.xtts_config import XttsConfig
             from TTS.tts.models.xtts import Xtts
+
+            self._patch_sk_tokenizer()
 
             cfg_path = os.path.join(self._model_dir, "config.json")
             vocab_path = os.path.join(self._model_dir, "vocab.json")

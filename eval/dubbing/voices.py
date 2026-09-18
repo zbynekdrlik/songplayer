@@ -17,8 +17,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Gemini TTS models under test (per the round-2 binding design).
-GEMINI_MODELS = ("gemini-3.1-flash-tts-preview", "gemini-2.5-pro-preview-tts")
+# Gemini TTS model under test. Round-2 third verdict: NEWEST-ONLY — the owner
+# dropped gemini-2.5-pro-preview-tts (a superseded model); only the newest
+# 3.1-flash preview is rendered as a cloud reference row.
+GEMINI_MODELS = ("gemini-3.1-flash-tts-preview",)
 
 # A male+female spread of Gemini prebuilt voices for the listening test.
 # (name, gender, documented character) — names verified against the Gemini
