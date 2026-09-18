@@ -87,10 +87,8 @@ pub struct ToolsStatusResponse {
     pub ytdlp_available: bool,
     pub ffmpeg_available: bool,
     pub ytdlp_version: Option<String>,
-    /// yt-dlp has a working JS runtime (Deno) for YouTube's n-challenge (#189).
     #[serde(default)]
     pub js_runtime_ok: bool,
-    /// Bundled Deno version, when present.
     #[serde(default)]
     pub deno_version: Option<String>,
 }

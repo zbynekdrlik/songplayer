@@ -390,38 +390,11 @@ pub async fn start(
             Ok(paths) => {
                 let version = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
 
-                // #189: detect the yt-dlp `--js-runtimes` flag once, memoize the
-                // deno runtime args for every yt-dlp spawn, then run the startup
-                // JS-runtime self-check so the dashboard + log show whether new
-                // downloads can solve YouTube's n-challenge.
-                let help = tools_mgr.ytdlp_help(&paths.ytdlp).await.unwrap_or_default();
-                downloader::ytdlp_cmd::set_js_runtime_args(downloader::ytdlp_cmd::js_runtime_args(
-                    &help,
-                ));
-                let cookies_path = dl_data_dir.join("cookies.txt");
-                let cookies_ref = cookies_path.exists().then_some(cookies_path.as_path());
-                let (verdict, deno_ver) = downloader::ytdlp_cmd::run_selfcheck(
-                    &paths.ytdlp,
-                    paths.deno.as_deref(),
-                    cookies_ref,
-                )
-                .await;
-                let js_runtime_ok =
-                    matches!(verdict, downloader::ytdlp_cmd::JsRuntimeStatus::Ok(_));
-                match &verdict {
-                    downloader::ytdlp_cmd::JsRuntimeStatus::Ok(v) => {
-                        info!("yt-dlp js-runtime: OK (deno {v})")
-                    }
-                    downloader::ytdlp_cmd::JsRuntimeStatus::Missing => tracing::error!(
-                        "yt-dlp js-runtime: MISSING — new downloads will fail the n-challenge"
-                    ),
-                    downloader::ytdlp_cmd::JsRuntimeStatus::SolverFailed(reason) => {
-                        tracing::error!(
-                            "yt-dlp js-runtime: MISSING — new downloads will fail the n-challenge \
-                         (solver failed: {reason})"
-                        )
-                    }
-                }
+                // #189: ship + wire the Deno JS runtime for YouTube's n-challenge
+                // and run the startup self-check (memoizes the runtime args for
+                // every yt-dlp spawn; logs OK/MISSING loudly).
+                let (js_runtime_ok, deno_ver) =
+                    downloader::ytdlp_cmd::init_js_runtime(&tools_mgr, &paths, &dl_data_dir).await;
 
                 let mut ts = tools_status_clone.write().await;
                 ts.ytdlp_available = true;

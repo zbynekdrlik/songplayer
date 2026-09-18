@@ -199,6 +199,33 @@ pub(crate) async fn run_selfcheck(
     (verdict, deno_version)
 }
 
+/// One-shot startup wiring of the JS runtime (#189): detect `--js-runtimes`
+/// support from `yt-dlp --help`, memoize the runtime args for every yt-dlp
+/// spawn, run the self-check (with the box cookies when present), and log the
+/// verdict loudly. Returns `(js_runtime_ok, deno_version)` for the tools status.
+pub(crate) async fn init_js_runtime(
+    tools: &super::tools::ToolsManager,
+    paths: &super::tools::ToolPaths,
+    data_dir: &Path,
+) -> (bool, Option<String>) {
+    let help = tools.ytdlp_help(&paths.ytdlp).await.unwrap_or_default();
+    set_js_runtime_args(js_runtime_args(&help));
+    let cookies_path = data_dir.join("cookies.txt");
+    let cookies = cookies_path.exists().then_some(cookies_path.as_path());
+    let (verdict, deno_version) = run_selfcheck(&paths.ytdlp, paths.deno.as_deref(), cookies).await;
+    match &verdict {
+        JsRuntimeStatus::Ok(v) => tracing::info!("yt-dlp js-runtime: OK (deno {v})"),
+        JsRuntimeStatus::Missing => {
+            tracing::error!("yt-dlp js-runtime: MISSING — new downloads will fail the n-challenge")
+        }
+        JsRuntimeStatus::SolverFailed(reason) => tracing::error!(
+            "yt-dlp js-runtime: MISSING — new downloads will fail the n-challenge \
+             (solver failed: {reason})"
+        ),
+    }
+    (matches!(verdict, JsRuntimeStatus::Ok(_)), deno_version)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
