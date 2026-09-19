@@ -42,8 +42,10 @@ async function assertHealthBar(page: Page) {
 
   await expect(page.getByTestId("health-ws")).toContainText("WS");
   await expect(page.getByTestId("health-obs")).toContainText("OBS:");
-  // The mock seeds ObsStatus{connected, scene:"sp-alex"} over WS.
+  // The mock seeds ObsStatus{connected, scene:"sp-alex"} over WS — the scene
+  // name must flow through into the OBS segment.
   await expect(page.getByTestId("health-obs")).toContainText("pripojené");
+  await expect(page.getByTestId("health-obs")).toContainText("sp-alex");
 
   const genlock = page.getByTestId("health-genlock");
   await expect(genlock).toBeVisible();
