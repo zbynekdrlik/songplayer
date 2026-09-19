@@ -11,6 +11,7 @@ pub mod mixer_model;
 pub mod models;
 pub mod playback;
 pub mod seek_model;
+pub mod status_chip;
 pub mod ws;
 
 #[cfg(test)]
