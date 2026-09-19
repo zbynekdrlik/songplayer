@@ -100,6 +100,24 @@ pub(crate) fn clear_if_present(emitter: Option<&SharedEmitter>) {
     }
 }
 
+/// Natural song end (#192 item 3): give the emit thread up to ~400 ms to drain
+/// the ring so the song's last partial block is emitted BEFORE the decoder
+/// returns and the next song's `clear_ring` wipes it. Polls the pure
+/// [`ring_is_drained`] every 5 ms; a no-op when no emitter is present (legacy
+/// path). Only the natural-end path calls this — Stop/Play/Shutdown clear the
+/// ring instead. `mutants::skip` glue over the Linux-tested `ring_is_drained`.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn drain_if_present(emitter: Option<&SharedEmitter>) {
+    let Some(shared) = emitter else { return };
+    let deadline = std::time::Instant::now() + Duration::from_millis(400);
+    while std::time::Instant::now() < deadline {
+        if crate::playback::pipeline::audio_emitter::ring_is_drained(shared) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 /// A running audio-emitter thread bound to one pipeline's NDI sender. Dropping
 /// it stops the emitter and joins — do this BEFORE the sender is destroyed.
 pub(crate) struct AudioEmitterThread {
@@ -226,7 +244,7 @@ fn run_emit_loop(ndi_name: &str, sink: AudioSink<RealNdiBackend>, shared: Shared
         let minute = emit_now / 600_000_000; // 100 ns units per minute
         if minute != last_log_minute {
             last_log_minute = minute;
-            let (slots, silence, late, jitter, ring_ms) = {
+            let (slots, silence, late, jitter, ring_ms, resyncs) = {
                 let g = shared.emitter.lock().unwrap();
                 (
                     g.emitted_slots(),
@@ -234,6 +252,7 @@ fn run_emit_loop(ndi_name: &str, sink: AudioSink<RealNdiBackend>, shared: Shared
                     g.late_blocks(),
                     g.emit_jitter_p99_us(),
                     g.ring_depth_ms(),
+                    g.resyncs(),
                 )
             };
             info!(
@@ -241,6 +260,7 @@ fn run_emit_loop(ndi_name: &str, sink: AudioSink<RealNdiBackend>, shared: Shared
                 slots,
                 silence,
                 late,
+                resyncs,
                 jitter_p99_us = jitter,
                 ring_ms,
                 spin_margin_us = spin.margin_100ns() / 10,

@@ -127,20 +127,29 @@ impl AudioRing {
 
     /// Append as much of `interleaved` (channel count `ch`) as fits under the
     /// cap; returns the number of interleaved samples ACCEPTED. Never overwrites
-    /// existing content — a full ring accepts 0 and drops nothing. The first
-    /// non-empty push fixes the channel count.
+    /// existing content — a full ring accepts 0 and drops nothing.
+    ///
+    /// The channel count is fixed by the first non-empty push. A LATER push
+    /// whose `ch` differs from the fixed layout CLEARS the buffered audio and
+    /// re-fixes the layout to `ch` (a mono song after a stereo one must not be
+    /// reinterpreted through the old frame size — #192 item 2). Only whole frames
+    /// of `ch` are ever accepted (never a split sample group — #192 item 1).
     pub fn push_some(&mut self, interleaved: &[f32], ch: usize) -> usize {
         if interleaved.is_empty() || ch == 0 {
             return 0;
         }
-        if self.channels == 0 {
-            self.channels = ch;
+        if self.channels != 0 && self.channels != ch {
+            // Layout change: the buffered samples are a different frame size and
+            // would desync the interleave — drop them and adopt the new layout.
+            self.buf.clear();
         }
-        // A whole number of frames only (never split a sample-pair).
-        let free_frames = self.free_interleaved() / self.channels;
-        let want_frames = interleaved.len() / self.channels;
+        self.channels = ch;
+        // A whole number of frames only, sized by the pushed layout `ch`
+        // (== self.channels after the re-fix above).
+        let free_frames = self.free_interleaved() / ch;
+        let want_frames = interleaved.len() / ch;
         let take_frames = free_frames.min(want_frames);
-        let take = take_frames * self.channels;
+        let take = take_frames * ch;
         self.buf.extend(interleaved[..take].iter().copied());
         take
     }
@@ -184,6 +193,8 @@ pub struct AudioEmitter {
     silence_blocks: u64,
     /// Emits that woke a whole block or more past their grid boundary.
     late_blocks: u64,
+    /// Grid re-anchors after a > 1 s stall (see [`REANCHOR_THRESHOLD_100NS`]).
+    resyncs: u64,
     /// Recent |emit − boundary| jitter samples (µs) for the p99 gauge.
     jitter_us: VecDeque<u64>,
     channels_hint: usize,
@@ -195,6 +206,12 @@ pub struct AudioEmitter {
 /// How many recent jitter samples the p99 gauge keeps (~30 s at 30 fps).
 const JITTER_WINDOW: usize = 900;
 
+/// A grid slot's boundary more than this far behind `now` (1 s, in 100 ns units)
+/// re-anchors the grid rather than firing a TIME_CRITICAL catch-up burst after a
+/// suspend/debugger stall (#192 item 4). Strictly greater — exactly 1 s late
+/// holds the grid.
+const REANCHOR_THRESHOLD_100NS: i64 = 10_000_000;
+
 impl AudioEmitter {
     pub fn new(samples_per_block: usize, capacity_blocks: usize, rate_hz: u32) -> Self {
         Self {
@@ -205,6 +222,7 @@ impl AudioEmitter {
             emitted_slots: 0,
             silence_blocks: 0,
             late_blocks: 0,
+            resyncs: 0,
             jitter_us: VecDeque::new(),
             channels_hint: 2,
             held: false,
@@ -228,14 +246,35 @@ impl AudioEmitter {
         Self::new(EMIT_SAMPLES_PER_BLOCK, RING_CAPACITY_BLOCKS, EMIT_RATE_HZ)
     }
 
-    /// Exact-rational grid boundary for `slot`: `origin + slot · block / rate`,
+    /// Grid units (100 ns) from the origin to `slot`: `slot · block / rate`,
     /// derived from the cumulative sample count so it never drifts (the block
     /// duration 1600/48000 s is not a whole number of 100 ns units). i128 math
-    /// then a checked cast keeps it exact and overflow-free over multi-day runs.
-    fn boundary_for(&self, origin_100ns: i64, slot: u64) -> i64 {
+    /// then a CHECKED cast keeps it exact and overflow-free over multi-day runs
+    /// (#192 item 5 — the old `units as i64` truncated silently). ONE formula so
+    /// both `boundary_for` and the re-anchor share the exact same cast.
+    fn units_for(&self, slot: u64) -> i64 {
         let samples = (slot as i128) * (self.samples_per_block as i128);
         let units = samples * 10_000_000i128 / (self.rate_hz as i128);
-        origin_100ns.saturating_add(units as i64)
+        i64::try_from(units).unwrap_or(i64::MAX)
+    }
+
+    /// Exact-rational grid boundary for `slot`: `origin + units_for(slot)`.
+    fn boundary_for(&self, origin_100ns: i64, slot: u64) -> i64 {
+        origin_100ns.saturating_add(self.units_for(slot))
+    }
+
+    /// True once the ring holds LESS than one whole block — nothing more for the
+    /// emit thread to pop as audio. The natural-end drain polls this so a song's
+    /// last partial block is emitted before the next song's `clear_ring` wipes
+    /// the ring (#192 item 3).
+    pub fn ring_drained(&self) -> bool {
+        self.ring.len_frames() < self.samples_per_block
+    }
+
+    /// Grid re-anchors so far (a long stall snapped the origin forward). Surfaced
+    /// only in the per-minute heartbeat log — no API/UI change (#192 item 4).
+    pub fn resyncs(&self) -> u64 {
+        self.resyncs
     }
 
     /// The grid boundary of the NEXT slot to emit (for the emit thread's
@@ -254,10 +293,22 @@ impl AudioEmitter {
     /// the wall reading at the emit instant, used only for lateness/jitter
     /// accounting; the block's timecode is the exact grid boundary.
     pub fn tick(&mut self, now_100ns: i64) -> Emitted {
-        let origin = *self.origin_100ns.get_or_insert(now_100ns);
-        let boundary = self.boundary_for(origin, self.emitted_slots);
+        let mut origin = *self.origin_100ns.get_or_insert(now_100ns);
+        let mut boundary = self.boundary_for(origin, self.emitted_slots);
 
-        // Lateness / jitter vs the ideal boundary.
+        // Re-anchor after a long stall (suspend / debugger): if THIS slot's grid
+        // boundary is more than 1 s behind `now`, snap the origin so this slot is
+        // due exactly now (`boundary == now`, the next boundary == now + one
+        // block). Without it the loop would emit thousands of catch-up blocks in
+        // one TIME_CRITICAL burst (#192 item 4).
+        if now_100ns.saturating_sub(boundary) > REANCHOR_THRESHOLD_100NS {
+            origin = now_100ns.saturating_sub(self.units_for(self.emitted_slots));
+            self.origin_100ns = Some(origin);
+            boundary = now_100ns;
+            self.resyncs += 1;
+        }
+
+        // Lateness / jitter vs the (possibly re-anchored) boundary.
         let block_100ns = self.boundary_for(0, 1);
         // 100 ns units → µs is a divide-by-10 (1 µs = 10 × 100 ns).
         let jitter = (now_100ns - boundary).unsigned_abs() / 10; // µs
@@ -274,11 +325,11 @@ impl AudioEmitter {
         } else {
             self.ring.pop_block()
         };
+        // `pop_block` already guarantees a whole block (or None), so no
+        // interleaved-vs-per-channel length guard is needed here (#192 item 6).
         let block = match popped {
-            Some(samples) if samples.len() >= self.samples_per_block => {
-                EmittedBlock::Audio(samples)
-            }
-            _ => {
+            Some(samples) => EmittedBlock::Audio(samples),
+            None => {
                 self.silence_blocks += 1;
                 EmittedBlock::Silence
             }
@@ -406,17 +457,34 @@ pub fn push_blocking(shared: &SharedEmitter, interleaved: &[f32], channels: usiz
     if interleaved.is_empty() || channels == 0 {
         return;
     }
+    // Only whole frames are ever pushed. A trailing partial-frame residual (an
+    // odd-length buffer against a stereo layout) is dropped with a single WARN —
+    // never retried, because retrying a residual that can never form a frame
+    // spun the decode thread in 250 ms `wait_timeout`s forever (#192 item 1).
+    let usable = (interleaved.len() / channels) * channels;
+    if usable < interleaved.len() {
+        tracing::warn!(
+            dropped = interleaved.len() - usable,
+            channels,
+            "audio-emitter: dropped a partial-frame audio residual"
+        );
+    }
+    if usable == 0 {
+        return;
+    }
     let mut offset = 0usize;
     let mut guard = shared.emitter.lock().unwrap();
     // New audio means the pipeline is running again — release a pause hold.
     guard.set_held(false);
-    while offset < interleaved.len() {
+    while offset < usable {
         if shared.shutdown.load(Ordering::Relaxed) {
             return;
         }
-        let accepted = guard.ring_mut().push_some(&interleaved[offset..], channels);
+        let accepted = guard
+            .ring_mut()
+            .push_some(&interleaved[offset..usable], channels);
         offset += accepted;
-        if offset < interleaved.len() {
+        if offset < usable {
             // Ring full — wait for the emit thread to free a block. Bounded so a
             // missed notify or a dead emit thread re-checks `shutdown` rather
             // than hanging the decode thread forever (design: bounded wait).
@@ -458,6 +526,13 @@ pub fn hold_ring(shared: &SharedEmitter) {
 pub fn clear_ring(shared: &SharedEmitter) {
     shared.emitter.lock().unwrap().clear_ring();
     shared.space.notify_all();
+}
+
+/// Whether the shared ring holds less than one whole block — the natural-end
+/// drain's poll predicate (#192 item 3). Delegates to the pure
+/// [`AudioEmitter::ring_drained`] under the ring lock.
+pub fn ring_is_drained(shared: &SharedEmitter) -> bool {
+    shared.emitter.lock().unwrap().ring_drained()
 }
 
 /// The full [`AudioStats`](crate::playback::ndi_health::AudioStats) a

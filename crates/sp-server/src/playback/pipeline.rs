@@ -317,8 +317,8 @@ fn run_loop_windows(
     // path updates it per-file in `decode_and_send`.
     let mut submitter = FrameSubmitter::new(sender, sp_core::genlock::GENLOCK_GRID_FPS as i32, 1);
     submitter.set_paced(genlock_pacing); // paced: stamp standby frames on-grid (#147)
-    // #151: install the shared burn flag so the runtime API toggle drives the
-    // paced-emit overlay. Default OFF; only the paced path ever paints.
+                                         // #151: install the shared burn flag so the runtime API toggle drives the
+                                         // paced-emit overlay. Default OFF; only the paced path ever paints.
     submitter.set_burn_flag(burn_on);
     submitter.send_black_bgra(1920, 1080);
 
@@ -756,6 +756,9 @@ fn decode_and_send(
             }
             Ok(None) => {
                 info!(playlist_id, frame_count, "video decode complete");
+                // #192 item 3: natural end only — let the emit thread drain the
+                // ring (≤ 400 ms) before the next song's clear_ring wipes its tail.
+                crate::playback::pipeline::pipeline_audio::drain_if_present(audio_emitter);
                 submitter.flush();
                 return DecodeResult::Ended;
             }
