@@ -985,11 +985,19 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     }
 
     await page.goto("/");
+    // #194: the Player's mixer slot collapses to one line ("Mixér — nič nehrá",
+    // testid player-mixer-idle) when the selected playlist has nothing playing;
+    // when a song plays it mounts the karaoke adapter whose state line
+    // ("Stemy — <song>: <state>", testid karaoke-now-playing) is the #177
+    // contract. The box may be idle during CI, so accept EITHER surface.
     const header = page.locator('[data-testid="karaoke-now-playing"]');
-    await expect(header).toBeVisible({ timeout: 30_000 });
-    // The header always begins with the "Stemy — " binding prefix — either
-    // "Stemy — <song>: <glyph>" or the idle "Stemy — nič nehrá".
-    await expect(header).toContainText(/Stemy — /);
+    const mixerIdle = page.locator('[data-testid="player-mixer-idle"]');
+    await expect(header.or(mixerIdle).first()).toBeVisible({ timeout: 30_000 });
+    if ((await header.count()) > 0) {
+      await expect(header).toContainText(/Stemy — /);
+    } else {
+      await expect(mixerIdle).toContainText("Mixér — nič nehrá");
+    }
 
     const realConsole = consoleMessages.filter(
       (m) => !allowedConsole.some((r) => r.test(m)),
