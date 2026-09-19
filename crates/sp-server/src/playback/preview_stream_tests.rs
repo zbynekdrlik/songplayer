@@ -353,3 +353,28 @@ fn to_stereo_drops_unexpected_channel_counts() {
     assert_eq!(to_stereo(&[1.0], 0), None);
     assert_eq!(to_stereo(&[1.0f32; 6], 6), None);
 }
+
+#[test]
+fn audio_preroll_samples_is_the_interleaved_stereo_silence_count() {
+    // (min(gap,5000)+lead_ms) ms of silence, 48 kHz stereo = 48*2 samples/ms.
+    // No preroll at all when neither the video nor the emitter is ahead.
+    assert_eq!(audio_preroll_samples(0, 0), 0);
+    // The canonical case from the design: a 250 ms connect gap + the 100 ms
+    // decode-seam lead → 350 ms → 350 * 48 * 2 interleaved f32 samples.
+    assert_eq!(audio_preroll_samples(250, 100), 33_600);
+    // Lead alone (paced path has 0), no connect gap.
+    assert_eq!(audio_preroll_samples(0, 100), 9_600);
+    // Connect gap alone (SDK path could be paced=false but a huge gap).
+    assert_eq!(audio_preroll_samples(250, 0), 24_000);
+}
+
+#[test]
+fn audio_preroll_samples_caps_the_connect_gap_at_5s() {
+    // A late-connecting audio input can never prepend more than 5 s (+lead) of
+    // silence. Exact boundary at the 5000 ms cap and well past it.
+    assert_eq!(audio_preroll_samples(5_000, 0), 480_000);
+    assert_eq!(audio_preroll_samples(5_001, 0), 480_000);
+    assert_eq!(audio_preroll_samples(9_000, 100), 489_600);
+    // The lead is NOT capped — only the connect gap is.
+    assert_eq!(audio_preroll_samples(9_000, 0), 480_000);
+}

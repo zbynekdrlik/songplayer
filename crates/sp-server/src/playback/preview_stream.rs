@@ -195,6 +195,20 @@ pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
         - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS) as u32
 }
 
+/// How many interleaved-stereo f32 samples of SILENCE the audio feeder prepends
+/// to align the preview's sample-count audio timeline with the video's
+/// wall-clock timeline (#178 round 3). `connect_gap_ms` is how long the video
+/// input had already been feeding when the audio input connected (feed-on-connect
+/// opens video first), capped at 5 s so a late-connecting audio input can never
+/// prepend an unbounded silence; `lead_ms` is the decode-seam A/V lead
+/// ([`lead_ms_for`]) that the SDK-clocked emitter's read-ahead introduces. At
+/// 48 kHz stereo each millisecond is `48 * 2` interleaved f32 samples. Replaces
+/// the box-unreliable `-itsoffset` lever (the box ffmpeg kept audio `start_time`
+/// at 0.000 regardless), aligning A/V deterministically on our side instead.
+pub fn audio_preroll_samples(connect_gap_ms: u64, lead_ms: u32) -> usize {
+    ((connect_gap_ms.min(5000) + lead_ms as u64) * 48) as usize
+}
+
 /// State shared between the decode-side taps, the WS viewers, and the encoder
 /// child. Held behind an `Arc` by [`StreamTap`].
 pub struct StreamShared {
