@@ -955,6 +955,85 @@ app.post("/__mock/now-playing", (req, res) => {
   res.json({ status: "sent", clients: sent });
 });
 
+// #194 hotfix: now-playing TICK mode. When enabled, the mock advances
+// `position_ms` for each configured item every 500 ms and broadcasts a
+// `NowPlaying`, so a spec can prove a live position tick does NOT tear down the
+// Player / preview or snatch a fader / seek out from under a drag (exactly what
+// the suite never exercised, so the owner's box regression went uncaught). OFF
+// by default — existing specs are unaffected — and a spec toggles it per test
+// via `POST /__mock/tick`, turning it OFF again in afterEach.
+let tickItems = [];
+let tickEnabled = false;
+
+function tickBroadcast(obj) {
+  const msg = JSON.stringify(obj);
+  for (const ws of wsClients) {
+    if (ws.readyState === ws.OPEN) ws.send(msg);
+  }
+}
+
+function tickNowPlaying(it) {
+  tickBroadcast({
+    type: "NowPlaying",
+    data: {
+      playlist_id: it.playlist_id,
+      video_id: it.video_id,
+      song: it.song,
+      artist: it.artist,
+      position_ms: it.position_ms,
+      duration_ms: it.duration_ms,
+    },
+  });
+}
+
+// Body: { enabled: bool, items?: [{playlist_id, video_id?, song?, artist?,
+// duration_ms?, position_ms?, step_ms?, state?}] }. Enabling with items also
+// pushes the initial PlaybackStateChanged + first NowPlaying immediately so
+// `is_decoding` / `has_content` flip without waiting for the first 500 ms tick.
+app.post("/__mock/tick", (req, res) => {
+  const b = req.body || {};
+  tickEnabled = !!b.enabled;
+  if (tickEnabled) {
+    if (Array.isArray(b.items)) {
+      tickItems = b.items.map((it) => ({
+        playlist_id: Number(it.playlist_id),
+        video_id: typeof it.video_id === "number" ? it.video_id : 0,
+        song: typeof it.song === "string" ? it.song : "",
+        artist: typeof it.artist === "string" ? it.artist : "",
+        duration_ms:
+          typeof it.duration_ms === "number" ? it.duration_ms : 200000,
+        position_ms: typeof it.position_ms === "number" ? it.position_ms : 0,
+        step_ms: typeof it.step_ms === "number" ? it.step_ms : 500,
+        state: typeof it.state === "string" ? it.state : "Playing",
+      }));
+    }
+    for (const it of tickItems) {
+      tickBroadcast({
+        type: "PlaybackStateChanged",
+        data: {
+          playlist_id: it.playlist_id,
+          state: it.state,
+          mode: "Continuous",
+        },
+      });
+      tickNowPlaying(it);
+    }
+  } else {
+    tickItems = [];
+  }
+  res.json({ status: "ok", enabled: tickEnabled, items: tickItems.length });
+});
+
+// The 500 ms position-advance broadcaster (module-global, started once). It is
+// a no-op unless a spec turned tick mode on.
+setInterval(() => {
+  if (!tickEnabled) return;
+  for (const it of tickItems) {
+    it.position_ms = Math.min(it.position_ms + it.step_ms, it.duration_ms);
+    tickNowPlaying(it);
+  }
+}, 500);
+
 // SPA fallback — serve index.html for unmatched routes
 app.get("*", (_req, res) => {
   res.sendFile(join(distPath, "index.html"));
