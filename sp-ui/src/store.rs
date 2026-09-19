@@ -7,7 +7,7 @@ use sp_core::models::*;
 use sp_core::playback::*;
 use sp_core::ws::ServerMsg;
 
-use crate::api::NdiOutputHealth;
+use crate::api::{HostHealth, NdiOutputHealth};
 
 /// Lyrics pipeline queue state reflected from server WebSocket updates.
 #[derive(Debug, Clone, PartialEq)]
@@ -121,6 +121,18 @@ impl NowPlayingInfo {
     }
 }
 
+/// #194 ROUND 3b: the external-tool availability last reported by
+/// `ServerMsg::ToolsStatus`. `None` until the first `ToolsStatus` arrives; the
+/// `HealthBar` shows a grey `Nástroje: —` until then.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolsInfo {
+    pub ytdlp_available: bool,
+    pub ffmpeg_available: bool,
+    pub ytdlp_version: Option<String>,
+    pub js_runtime_ok: bool,
+    pub deno_version: Option<String>,
+}
+
 /// A single item in the download queue.
 #[derive(Debug, Clone)]
 pub struct DownloadItem {
@@ -153,6 +165,12 @@ pub struct DashboardStore {
     /// dashboard's `GlobalLockBadge` poll loop and read by every per-card
     /// `LockBadge`.
     pub ndi_health: RwSignal<Vec<NdiOutputHealth>>,
+    /// #194 ROUND 3b: Resolume push-chain health, refreshed by the shared
+    /// `HealthBar`'s 5 s poll (was `resolume_health.rs`'s own loop).
+    pub resolume_health: RwSignal<Vec<HostHealth>>,
+    /// #194 ROUND 3b: external tool availability from `ServerMsg::ToolsStatus`
+    /// (previously discarded). Read by the `HealthBar` tools segment.
+    pub tools: RwSignal<Option<ToolsInfo>>,
     /// #165: which playlist the single dashboard work area shows. `None` until
     /// the first playlist load resolves it (persisted → playing → first).
     pub selected_playlist: RwSignal<Option<i64>>,
@@ -180,6 +198,8 @@ impl DashboardStore {
             last_reprocess: RwSignal::new(None),
             dabing: RwSignal::new(vec![]),
             ndi_health: RwSignal::new(vec![]),
+            resolume_health: RwSignal::new(vec![]),
+            tools: RwSignal::new(None),
             selected_playlist: RwSignal::new(None),
             selection_pinned: RwSignal::new(false),
         }
@@ -369,14 +389,91 @@ impl DashboardStore {
                     }
                 });
             }
+            ServerMsg::ToolsStatus {
+                ytdlp_available,
+                ffmpeg_available,
+                ytdlp_version,
+                js_runtime_ok,
+                deno_version,
+            } => {
+                self.tools.set(Some(ToolsInfo {
+                    ytdlp_available,
+                    ffmpeg_available,
+                    ytdlp_version,
+                    js_runtime_ok,
+                    deno_version,
+                }));
+            }
             ServerMsg::Pong
             | ServerMsg::QueueUpdate { .. }
             | ServerMsg::ResolumeStatus { .. }
-            | ServerMsg::ToolsStatus { .. }
             | ServerMsg::KaraokeStateChanged { .. } => {
                 // Informational; the karaoke control component owns its own
                 // mode/gain state via GET/POST, so no store update needed.
             }
         }
     }
+}
+
+/// #194 ROUND 3b: ONE cancellable polling helper.
+///
+/// Every hand-rolled poll loop (`ndi_health`, `resolume_health`, `dabing`)
+/// re-implemented the identical `cancelled` / `try_get_untracked` / `try_set`
+/// dance (`sp-ui-frontend.md`: a `spawn_local` task outlives its reactive owner,
+/// so a wake after navigation must NOT `get()` a disposed signal). This is that
+/// dance in one place.
+///
+/// `cancelled` is the caller's page-owned flag (flip it in `on_cleanup`).
+/// `target` receives each successful fetch via `try_set`; a disposed target
+/// (component unmounted mid-fetch) stops the loop instead of panicking.
+pub fn poll_into<T>(
+    endpoint: &'static str,
+    interval_ms: u32,
+    cancelled: RwSignal<bool>,
+    target: RwSignal<T>,
+) where
+    // `RwSignal<T>` uses the default `SyncStorage`, so `T: Send + Sync` is
+    // required for the signature itself to be well-formed (both call sites —
+    // `Vec<NdiOutputHealth>` / `Vec<HostHealth>` — satisfy it).
+    T: serde::de::DeserializeOwned + Send + Sync + 'static,
+{
+    leptos::task::spawn_local(async move {
+        loop {
+            // `cancelled` is page-owned: navigating away disposes it while the
+            // task is parked in the timer, so the next wake uses
+            // `try_get_untracked` (None on a disposed signal) and stops.
+            if cancelled.try_get_untracked() != Some(false) {
+                break;
+            }
+            if let Ok(data) = crate::api::get::<T>(endpoint).await
+                && target.try_set(data).is_some()
+            {
+                break; // target disposed — stop rather than panic on a later read
+            }
+            gloo_timers::future::TimeoutFuture::new(interval_ms).await;
+        }
+    });
+}
+
+/// Poll variant for endpoints whose JSON needs post-processing before it lands
+/// in one or more signals (e.g. the Dabing payload `{playlist_id, videos:[…]}`).
+/// `apply` receives each successful `serde_json::Value` and returns `true` to
+/// STOP the loop (a disposed target signal), mirroring `try_set`'s contract.
+pub fn poll_value<F>(endpoint: &'static str, interval_ms: u32, cancelled: RwSignal<bool>, apply: F)
+where
+    F: Fn(serde_json::Value) -> bool + 'static,
+{
+    leptos::task::spawn_local(async move {
+        loop {
+            if cancelled.try_get_untracked() != Some(false) {
+                break;
+            }
+            if let Ok(v) = crate::api::get::<serde_json::Value>(endpoint).await
+                && apply(v)
+            {
+                break;
+            }
+            gloo_timers::future::TimeoutFuture::new(interval_ms).await;
+        }
+    });
 }

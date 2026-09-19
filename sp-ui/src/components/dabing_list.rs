@@ -72,9 +72,10 @@ pub fn DabingList() -> impl IntoView {
                 let rows = dabing.get();
                 if rows.is_empty() {
                     view! {
-                        <p class="dabing-empty">
-                            "Zatiaľ žiadne dabingové videá — vlož URL vyššie."
-                        </p>
+                        <crate::components::state_block::StateBlock
+                            kind=crate::components::state_block::StateKind::Empty
+                            empty_label=Some("Zatiaľ žiadne dabingové videá — vlož URL vyššie.".to_string())
+                        />
                     }
                         .into_any()
                 } else {

@@ -12,6 +12,7 @@ use crate::components::live_catalog::LiveCatalog;
 use crate::components::live_setlist::LiveSetList;
 use crate::components::lyrics_scroller::LyricsScroller;
 use crate::components::player::Player;
+use crate::components::state_block::{StateBlock, StateKind};
 use crate::store::DashboardStore;
 
 #[component]
@@ -65,9 +66,24 @@ pub fn LivePage() -> impl IntoView {
 
     view! {
         <div class="live-page">
-            <div class="live-page-error">{move || error_msg.get()}</div>
+            <div class="live-page-error">
+                {move || {
+                    let e = error_msg.get();
+                    if e.is_empty() {
+                        view! { <span></span> }.into_any()
+                    } else {
+                        view! {
+                            <StateBlock kind=StateKind::Error(e) />
+                        }
+                        .into_any()
+                    }
+                }}
+            </div>
             {move || match ytlive_id.get() {
-                None => view! { <div>"Načítavam zoznam ytlive…"</div> }.into_any(),
+                None => view! {
+                    <StateBlock kind=StateKind::Loading />
+                }
+                .into_any(),
                 Some(id) => view! {
                     <>
                         // 1. Primary control surface: tap a song to play it,

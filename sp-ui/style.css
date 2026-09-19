@@ -1492,3 +1492,48 @@ body {
 }
 .import-btn:disabled { opacity: 0.6; cursor: default; }
 .import-status { flex-basis: 100%; color: var(--text-dim); font-size: 0.85em; }
+
+/* #194 r3b — ONE HealthBar strip on every page (WS/OBS/genlock/Resolume/tools/LAN/version). */
+.health-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+    row-gap: 6px;
+    padding: 6px 20px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+}
+.health-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+    cursor: default;
+}
+.health-bar .genlock-status { margin-left: 0; }
+.health-bar .version-label { margin-left: auto; }
+.health-bar .lan-link { color: var(--accent); text-decoration: none; }
+.health-bar .lan-link:hover { text-decoration: underline; }
+.health-bar .lan-fallback { color: var(--text-dim); }
+.health-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    display: inline-block;
+}
+/* Tone colours — one per state, everywhere (sp_core::health::HealthTone). */
+.health-ok { color: var(--success); }
+.health-warn { color: var(--warning); }
+.health-off { color: var(--text-dim); }
+
+/* #194 r3b — ONE loading / empty / error renderer (sp_core StateBlock). */
+.state-block {
+    padding: 12px 4px;
+    font-size: 0.9rem;
+}
+.state-loading { color: var(--text-dim); }
+.state-empty { color: var(--text-dim); }
+.state-error { color: var(--error); }

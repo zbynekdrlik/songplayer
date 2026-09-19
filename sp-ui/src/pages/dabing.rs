@@ -38,22 +38,16 @@ pub fn DabingPage() -> impl IntoView {
     // (None on a disposed signal) and stop rather than panic (sp-ui-frontend.md).
     let cancelled = RwSignal::new(false);
     on_cleanup(move || cancelled.set(true));
+    // #194 r3b: the once-hand-rolled 2 s loop now goes through the ONE shared
+    // `store::poll_value` helper. `apply` parses the `{playlist_id, videos:[…]}`
+    // payload into both signals and returns `true` (stop) when `dabing` is
+    // disposed — same disposal discipline as the other polls, in one place.
     let _poll = Effect::new(move |_| {
-        spawn_local(async move {
-            loop {
-                if cancelled.try_get_untracked() != Some(false) {
-                    break;
-                }
-                if let Ok(v) = api::get_dabing().await {
-                    if let Some(pid) = parse_dabing_pid(&v) {
-                        let _ = dabing_pid.try_set(Some(pid));
-                    }
-                    if dabing.try_set(parse_dabing(&v)).is_some() {
-                        break; // signal disposed
-                    }
-                }
-                gloo_timers::future::TimeoutFuture::new(2_000).await;
+        crate::store::poll_value("/api/v1/dabing", 2_000, cancelled, move |v| {
+            if let Some(pid) = parse_dabing_pid(&v) {
+                let _ = dabing_pid.try_set(Some(pid));
             }
+            dabing.try_set(parse_dabing(&v)).is_some()
         });
     });
 

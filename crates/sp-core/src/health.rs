@@ -26,23 +26,37 @@ pub enum HealthTone {
 impl HealthTone {
     /// CSS class for this tone (one colour per state, everywhere).
     pub fn css_class(self) -> &'static str {
-        todo!()
+        match self {
+            HealthTone::Ok => "health-ok",
+            HealthTone::Warn => "health-warn",
+            HealthTone::Off => "health-off",
+        }
     }
 }
 
 /// OBS segment: connection + active scene.
 /// `OBS: pripojené — <scene>` / `OBS: pripojené` / `OBS: odpojené`.
 pub fn obs_label(connected: bool, scene: Option<&str>) -> (HealthTone, String) {
-    let _ = (connected, scene);
-    todo!()
+    if !connected {
+        return (HealthTone::Warn, "OBS: odpojené".to_string());
+    }
+    match scene {
+        Some(s) if !s.is_empty() => (HealthTone::Ok, format!("OBS: pripojené — {s}")),
+        _ => (HealthTone::Ok, "OBS: pripojené".to_string()),
+    }
 }
 
 /// Resolume segment from the push-chain health snapshot: how many hosts are
 /// configured and how many have a problem.
 /// `Resolume: —` (no hosts) / `Resolume: OK` / `Resolume: neodpovedá`.
 pub fn resolume_label(host_count: usize, problem_count: usize) -> (HealthTone, String) {
-    let _ = (host_count, problem_count);
-    todo!()
+    if host_count == 0 {
+        (HealthTone::Off, "Resolume: —".to_string())
+    } else if problem_count == 0 {
+        (HealthTone::Ok, "Resolume: OK".to_string())
+    } else {
+        (HealthTone::Warn, "Resolume: neodpovedá".to_string())
+    }
 }
 
 /// Tools segment from the `ToolsStatus` payload. `known == false` means no
@@ -54,14 +68,36 @@ pub fn tools_label(
     ffmpeg: bool,
     js_runtime: bool,
 ) -> (HealthTone, String) {
-    let _ = (known, ytdlp, ffmpeg, js_runtime);
-    todo!()
+    if !known {
+        return (HealthTone::Off, "Nástroje: —".to_string());
+    }
+    if ytdlp && ffmpeg && js_runtime {
+        return (HealthTone::Ok, "Nástroje: OK".to_string());
+    }
+    let mut missing: Vec<&str> = Vec::new();
+    if !ytdlp {
+        missing.push("yt-dlp");
+    }
+    if !ffmpeg {
+        missing.push("ffmpeg");
+    }
+    if !js_runtime {
+        missing.push("JS runtime");
+    }
+    (
+        HealthTone::Warn,
+        format!("Nástroje: chýba {}", missing.join(", ")),
+    )
 }
 
 /// WebSocket segment. `WS` label, green when connected else amber.
 pub fn ws_label(connected: bool) -> (HealthTone, &'static str) {
-    let _ = connected;
-    todo!()
+    let tone = if connected {
+        HealthTone::Ok
+    } else {
+        HealthTone::Warn
+    };
+    (tone, "WS")
 }
 
 #[cfg(test)]

@@ -38,7 +38,7 @@ test("dashboard shows the LAN sp.local URL with the raw IP fallback", async ({
   // Wait for the app to mount.
   await expect(page.locator("text=SongPlayer")).toBeVisible({ timeout: 10000 });
 
-  const lan = page.getByTestId("lan-address");
+  const lan = page.getByTestId("health-lan");
   await expect(lan).toBeVisible({ timeout: 10000 });
 
   // Primary offline-LAN URL is a clickable link to the mDNS hostname.

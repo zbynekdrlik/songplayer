@@ -41,7 +41,7 @@ test("Dabing page renders with the nav entry and empty state (#180)", async ({
   await expect(page.locator(".dabing-page h2")).toHaveText("Dabing");
   // #194: the Dabing page uses the shared ImportBox (`import-input`/`import-btn`).
   await expect(page.locator('[data-testid="import-input"]')).toBeVisible();
-  await expect(page.locator(".dabing-empty")).toBeVisible();
+  await expect(page.getByTestId("state-empty")).toBeVisible();
 });
 
 test("pasting a URL adds a queued row and ▶ dispatches play (#180/#194)", async ({

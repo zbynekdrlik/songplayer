@@ -209,30 +209,16 @@ pub fn LockBadge(output: NdiOutputHealth) -> impl IntoView {
 pub fn GlobalLockBadge() -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
 
-    // Cancellation flag flipped on unmount so the spawn_local loop exits
+    // Cancellation flag flipped on unmount so the shared poll loop exits
     // instead of running for the lifetime of the wasm runtime.
     let cancelled = RwSignal::new(false);
     on_cleanup(move || cancelled.set(true));
 
+    // #194 r3b: the once-hand-rolled 1 Hz loop now goes through the ONE shared
+    // `store::poll_into` helper (same `try_get_untracked` / `try_set` disposal
+    // discipline, in one place).
     let _poll = Effect::new(move |_| {
-        leptos::task::spawn_local(async move {
-            loop {
-                // `cancelled` is page-owned: navigating away disposes it while
-                // this task is parked in the 1 s timer, so the next wake must
-                // use `try_get_untracked` (None on a disposed signal) and stop
-                // rather than panic. `store.ndi_health` is app-root-owned, but
-                // `try_set` is safe either way.
-                if cancelled.try_get_untracked() != Some(false) {
-                    break;
-                }
-                if let Ok(data) = crate::api::get_ndi_health().await
-                    && store.ndi_health.try_set(data).is_some()
-                {
-                    break;
-                }
-                gloo_timers::future::TimeoutFuture::new(1_000).await;
-            }
-        });
+        crate::store::poll_into("/api/v1/ndi/health", 1_000, cancelled, store.ndi_health);
     });
 
     view! {

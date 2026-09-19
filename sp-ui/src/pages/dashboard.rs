@@ -3,10 +3,7 @@
 
 use leptos::prelude::*;
 
-use crate::components::{
-    download_queue, lan_address, ndi_health, obs_status, playlist_selector, playlist_workspace,
-    resolume_health, selection,
-};
+use crate::components::{download_queue, playlist_selector, playlist_workspace, selection};
 use crate::store::DashboardStore;
 
 #[component]
@@ -47,11 +44,7 @@ pub fn DashboardPage() -> impl IntoView {
     view! {
         <div class="dashboard">
             <div class="dashboard-header">
-                <h1>"Playlists"</h1>
-                <lan_address::LanAddress />
-                <obs_status::ObsStatus />
-                <ndi_health::GlobalLockBadge />
-                <resolume_health::ResolumeHealthCard />
+                <h1>"Playlisty"</h1>
             </div>
 
             <div class="error-banner">
@@ -61,7 +54,10 @@ pub fn DashboardPage() -> impl IntoView {
                         view! { <span></span> }.into_any()
                     } else {
                         let last = errs.last().cloned().unwrap_or_default();
-                        view! { <div class="error-msg">{last}</div> }.into_any()
+                        view! {
+                            <crate::components::state_block::StateBlock kind=crate::components::state_block::StateKind::Error(last) />
+                        }
+                        .into_any()
                     }
                 }}
             </div>

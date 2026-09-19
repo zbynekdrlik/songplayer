@@ -146,26 +146,13 @@ pub fn App() -> impl IntoView {
             >
                 "Settings"
             </button>
-            <span class="ws-indicator">
-                {move || {
-                    if store.ws_connected.get() {
-                        "\u{1F7E2} WS"
-                    } else {
-                        "\u{1F534} WS"
-                    }
-                }}
-            </span>
-            // Version label on every route. Compile-time injected from
-            // sp_core::config::VERSION (CARGO_PKG_VERSION via the workspace
-            // VERSION file + scripts/sync-version.sh) so the displayed value
-            // matches the deployed binary AND the backend `/api/v1/status`
-            // `version` field — single git-tag source per
-            // version-on-dashboard.md. data-testid is the contract the
-            // Playwright assertion + post-deploy verification reads.
-            <span class="version-label" data-testid="version">
-                {format!("v{}", sp_core::config::VERSION)}
-            </span>
         </nav>
+        // #194 r3b: ONE status strip on EVERY page (WS, OBS, genlock, Resolume,
+        // tools, LAN, version). Mounted once here above the page switch so the
+        // same strip + same testids render everywhere. It carries the WS badge
+        // and the `version` testid (post-deploy + version-assertion contract)
+        // that used to live in the navbar.
+        <crate::components::health_bar::HealthBar />
         <main class="content">
             {move || match page.get() {
                 Page::Dashboard => pages::dashboard::DashboardPage().into_any(),

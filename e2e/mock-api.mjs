@@ -1017,6 +1017,31 @@ wss.on("connection", (ws) => {
   console.log("[mock-api] WebSocket client connected");
   wsClients.add(ws);
 
+  // #194 r3b: seed the shared HealthBar's OBS + tools segments so the strip
+  // shows real values in the E2E (the real server pushes these over WS).
+  try {
+    ws.send(
+      JSON.stringify({
+        type: "ObsStatus",
+        data: { connected: true, active_scene: "sp-alex" },
+      }),
+    );
+    ws.send(
+      JSON.stringify({
+        type: "ToolsStatus",
+        data: {
+          ytdlp_available: true,
+          ffmpeg_available: true,
+          ytdlp_version: "2026.09.01",
+          js_runtime_ok: true,
+          deno_version: "2.0.0",
+        },
+      }),
+    );
+  } catch {
+    // client vanished before the seed — ignore.
+  }
+
   // #15 part 2: mark playlist 1 as Playing so its card renders the live
   // video preview <img> (playlist 1's preview.jpg serves a real JPEG above).
   // `state`/`mode` are the serde-derived variant names (`ServerMsg` uses the

@@ -235,6 +235,56 @@ pub async fn get_ndi_health() -> Result<Vec<NdiOutputHealth>, String> {
     get("/api/v1/ndi/health").await
 }
 
+/// #194 ROUND 3b: one Resolume push-chain host's health, as returned by
+/// `GET /api/v1/resolume/health`. Moved here from `resolume_health.rs` (deleted
+/// in favour of the shared `HealthBar`) so `store.resolume_health` can hold it.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+pub struct HostHealth {
+    pub host: String,
+    #[serde(default)]
+    pub last_refresh_ts: Option<String>,
+    #[serde(default)]
+    pub last_refresh_ok: bool,
+    #[serde(default)]
+    pub consecutive_failures: u32,
+    #[serde(default)]
+    pub circuit_breaker_open: bool,
+    #[serde(default)]
+    pub clips_by_token: std::collections::BTreeMap<String, usize>,
+}
+
+impl HostHealth {
+    /// Short human reason this host is unhealthy, or `None` if healthy. Same
+    /// logic the old `ResolumeHealthCard` alert used — now folded into the
+    /// `HealthBar` Resolume segment's tooltip.
+    pub fn problem(&self) -> Option<String> {
+        if self.circuit_breaker_open {
+            return Some("okruh otvorený — Resolume nedostupné".into());
+        }
+        if self.consecutive_failures > 0 {
+            return Some(format!(
+                "obnova zlyháva ({} po sebe)",
+                self.consecutive_failures
+            ));
+        }
+        let missing: Vec<&str> = self
+            .clips_by_token
+            .iter()
+            .filter(|(_, n)| **n == 0)
+            .map(|(k, _)| k.as_str())
+            .collect();
+        if !missing.is_empty() {
+            return Some(format!("chýbajúce klipy: {}", missing.join(", ")));
+        }
+        None
+    }
+}
+
+/// GET the Resolume push-chain health snapshot (per configured host).
+pub async fn get_resolume_health() -> Result<Vec<HostHealth>, String> {
+    get("/api/v1/resolume/health").await
+}
+
 // ── Lyrics API helpers ────────────────────────────────────────────────────────
 
 /// GET the lyrics pipeline queue status.
