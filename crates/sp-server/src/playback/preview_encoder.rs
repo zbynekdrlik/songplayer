@@ -167,6 +167,13 @@ pub fn build_ffmpeg_args(
             "+frag_keyframe+empty_moov+default_base_moof",
             "-frag_duration",
             "500000",
+            // Flush every packet to the pipe. Without it ffmpeg's avio buffers
+            // the moof/mdat fragments on a NON-seekable pipe output — the init
+            // (empty_moov) flushes at header write so the browser reaches
+            // readyState 1, but no media fragment arrives, so it never plays
+            // (#178 box: to a FILE the same command produced 15 fragments).
+            "-flush_packets",
+            "1",
             "-f",
             "mp4",
             "pipe:1",

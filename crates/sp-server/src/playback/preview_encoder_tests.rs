@@ -100,6 +100,8 @@ fn ffmpeg_args_are_exact_for_libx264_with_low_latency_tuning() {
         "+frag_keyframe+empty_moov+default_base_moof",
         "-frag_duration",
         "500000",
+        "-flush_packets",
+        "1",
         "-f",
         "mp4",
         "pipe:1",
