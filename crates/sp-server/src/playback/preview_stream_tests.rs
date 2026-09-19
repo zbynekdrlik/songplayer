@@ -238,3 +238,64 @@ fn try_claim_encoder_admits_exactly_one() {
         "claimable again after release"
     );
 }
+
+#[test]
+fn shared_label_is_the_name_the_tap_was_built_with() {
+    // The label names the encoder thread + every encoder log line.
+    let tap = StreamTap::new("playlist-7".into());
+    assert_eq!(tap.shared().label(), "playlist-7");
+}
+
+#[test]
+fn a_viewer_guard_dropped_at_zero_viewers_stays_at_zero() {
+    let tap = StreamTap::new("t".into());
+    let guard = ViewerGuard::subscribe(&tap).0;
+    // Force the count to 0 behind the guard's back; its drop must saturate.
+    tap.shared()
+        .viewers
+        .store(0, std::sync::atomic::Ordering::Relaxed);
+    drop(guard);
+    assert_eq!(
+        tap.shared()
+            .viewers
+            .load(std::sync::atomic::Ordering::Relaxed),
+        0
+    );
+}
+
+#[test]
+fn offer_frame_feeds_the_stream_video_and_audio_taps() {
+    let stream = StreamTap::new("t".into());
+    let taps = DecodeTaps {
+        preview: crate::playback::preview::PreviewTap::new(Default::default(), "t".into()),
+        stream: stream.clone(),
+    };
+    let (_guard, _relay) = ViewerGuard::subscribe(&stream);
+    let video = sp_decoder::DecodedVideoFrame {
+        data: solid_nv12(64, 48, 64, 128, 128),
+        width: 64,
+        height: 48,
+        stride: 64,
+        timestamp_ms: 0,
+        pixel_format: sp_decoder::PixelFormat::Nv12,
+    };
+    let audio = [sp_decoder::DecodedAudioFrame {
+        data: vec![0.25f32, -0.25, 0.5, -0.5],
+        channels: 2,
+        sample_rate: 48_000,
+        timestamp_ms: 0,
+    }];
+    taps.offer_frame(&video, &audio);
+    let frame = stream
+        .shared()
+        .video_receiver()
+        .try_recv()
+        .expect("the video tap got the frame");
+    assert_eq!(frame.len(), OUT_NV12_LEN);
+    let got = stream
+        .shared()
+        .audio_receiver()
+        .try_recv()
+        .expect("the audio tap got the block");
+    assert_eq!(got, vec![0.25f32, -0.25, 0.5, -0.5]);
+}

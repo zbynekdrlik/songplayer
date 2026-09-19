@@ -346,19 +346,12 @@ impl ViewerGuard {
 
 impl Drop for ViewerGuard {
     fn drop(&mut self) {
-        // Saturating decrement — never wrap below zero.
-        let mut cur = self.shared.viewers.load(Ordering::Acquire);
-        while cur > 0 {
-            match self.shared.viewers.compare_exchange_weak(
-                cur,
-                cur - 1,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => break,
-                Err(actual) => cur = actual,
-            }
-        }
+        // Saturating decrement — never wrap below zero (`checked_sub` refuses at
+        // 0, so there is no comparison to get subtly wrong).
+        let _ = self
+            .shared
+            .viewers
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| v.checked_sub(1));
     }
 }
 
