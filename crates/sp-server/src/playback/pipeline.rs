@@ -555,7 +555,7 @@ fn decode_and_send(
     preview_tap: &crate::playback::preview::PreviewTap,
     audio_emitter: Option<&crate::playback::pipeline::audio_emitter::SharedEmitter>,
 ) -> DecodeResult {
-    use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder};
+    use sp_decoder::MediaFoundationVideoReader;
 
     let video_reader = match MediaFoundationVideoReader::open(video_path) {
         Ok(v) => v,
@@ -579,7 +579,11 @@ fn decode_and_send(
                 ));
             }
         };
-    let mut decoder = match SplitSyncedDecoder::new(Box::new(video_reader), audio_stream) {
+    let mut decoder = match crate::playback::pipeline::pipeline_audio::open_synced_decoder(
+        Box::new(video_reader),
+        audio_stream,
+        audio_emitter,
+    ) {
         Ok(d) => d,
         Err(e) => {
             return DecodeResult::Error(format!("SplitSyncedDecoder::new failed: {e}"));
@@ -658,6 +662,7 @@ fn decode_and_send(
                 if let Err(e) = decoder.seek(position_ms) {
                     tracing::warn!(?e, position_ms, "pipeline: seek failed");
                 }
+                crate::playback::pipeline::pipeline_audio::clear_if_present(audio_emitter);
             }
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
@@ -667,6 +672,7 @@ fn decode_and_send(
         }
 
         if *paused {
+            crate::playback::pipeline::pipeline_audio::hold_if_present(audio_emitter);
             submitter.send_black_bgra(1920, 1080);
             // #133: without this, /api/v1/ndi/health froze on the last
             // pre-pause HealthSnapshot (state=Playing, stale fps) for as

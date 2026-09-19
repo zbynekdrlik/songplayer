@@ -24,7 +24,8 @@ use sp_ndi::{AudioSink, RealNdiBackend};
 use tracing::{info, warn};
 
 use crate::playback::pipeline::audio_emitter::{
-    EmittedBlock, SharedEmitter, SpinMargin, emit_one_block, push_blocking,
+    EmittedBlock, SharedEmitter, SpinMargin, clear_ring, decoder_tolerance_ms, emit_one_block,
+    hold_ring, push_blocking,
 };
 use crate::playback::wallclock::WallClock;
 
@@ -58,6 +59,44 @@ pub(crate) fn push_or_collect_audio(
                 timecode_100ns: None,
             })
             .collect(),
+    }
+}
+
+/// Open the split A/V decoder for the SDK-clocked loop (#192 round 2). With the
+/// emitter present: drop stale ring audio left by an interrupted song, and pair
+/// audio AHEAD of the video by the cushion (`decoder_tolerance_ms`); without it,
+/// the plain pairing — audio then rides with the video frames.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn open_synced_decoder(
+    video: Box<dyn sp_decoder::VideoStream>,
+    audio: Box<dyn sp_decoder::AudioStream>,
+    emitter: Option<&SharedEmitter>,
+) -> Result<sp_decoder::SplitSyncedDecoder, sp_decoder::DecoderError> {
+    if let Some(shared) = emitter {
+        clear_ring(shared);
+    }
+    sp_decoder::SplitSyncedDecoder::with_tolerance(
+        video,
+        audio,
+        decoder_tolerance_ms(emitter.is_some()),
+    )
+}
+
+/// Pause: keep the ring cushion while the decode loop idles (released by the
+/// next audio push).
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn hold_if_present(emitter: Option<&SharedEmitter>) {
+    if let Some(shared) = emitter {
+        hold_ring(shared);
+    }
+}
+
+/// Seek: drop the stale pre-seek audio so it never queues ahead of the new
+/// position.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn clear_if_present(emitter: Option<&SharedEmitter>) {
+    if let Some(shared) = emitter {
+        clear_ring(shared);
     }
 }
 
@@ -136,6 +175,9 @@ fn run_emit_loop(ndi_name: &str, sink: AudioSink<RealNdiBackend>, shared: Shared
     // Adaptive spin margin: follows the coarse sleep's observed overshoot while
     // the pipeline carries audio (box finding: a fixed 2 ms left p99 at 2–5 ms).
     let mut spin = SpinMargin::default();
+    // Longest single emit call (ring lock + NDI send_audio) this minute: tells a
+    // late slot caused by the SDK/lock apart from one caused by the wake-up.
+    let mut emit_call_max_100ns: i64 = 0;
     info!(
         ndi_name,
         "audio-emitter: started (sdk-video/wallclock-audio, 48kHz/1600-block grid)"
@@ -159,6 +201,7 @@ fn run_emit_loop(ndi_name: &str, sink: AudioSink<RealNdiBackend>, shared: Shared
 
         let emit_now = clock.now_100ns();
         let emitted = emit_one_block(&shared, &sink, emit_now);
+        emit_call_max_100ns = emit_call_max_100ns.max(clock.now_100ns() - emit_now);
 
         // Transition log: one line per gap, on the silence→audio edge.
         match emitted.block {
@@ -201,8 +244,10 @@ fn run_emit_loop(ndi_name: &str, sink: AudioSink<RealNdiBackend>, shared: Shared
                 jitter_p99_us = jitter,
                 ring_ms,
                 spin_margin_us = spin.margin_100ns() / 10,
+                emit_call_max_us = emit_call_max_100ns / 10,
                 "audio-emitter: heartbeat"
             );
+            emit_call_max_100ns = 0;
         }
     }
     info!(ndi_name, "audio-emitter: loop exited (shutdown)");
