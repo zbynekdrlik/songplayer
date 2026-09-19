@@ -39,11 +39,11 @@ test("play button on a regular (non-live) playlist's song list dispatches play-v
   const card = page.locator(".playlist-card", { hasText: "Worship" });
   await expect(card).toBeVisible({ timeout: 10000 });
 
-  // Song list is collapsed by default — expand it.
-  await card.locator('[data-testid="playlist-songs-toggle"]').click();
+  // #194: the song list is OPEN by default for the selected playlist — the
+  // shared SongRow renders each song as `.song-row`, no `<table>`.
   await expect(card.locator(".video-list")).toBeVisible({ timeout: 5000 });
 
-  const row = card.locator(".video-list tbody tr", {
+  const row = card.locator(".song-row", {
     hasText: "Never Gonna Give You Up",
   });
   await expect(row).toBeVisible();
@@ -53,7 +53,7 @@ test("play button on a regular (non-live) playlist's song list dispatches play-v
       req.url().includes("/api/v1/playlists/1/play-video") &&
       req.method() === "POST",
   );
-  await row.locator('[data-testid="video-list-play"]').click();
+  await row.locator('[data-testid="song-row-play"]').click();
   const req = await postPromise;
   const body = JSON.parse(req.postData() ?? "{}");
   expect(body.video_id).toBe(1);
@@ -67,10 +67,10 @@ test("play button is disabled for a not-yet-normalized song (#134)", async ({
   const card = page.locator(".playlist-card", { hasText: "Worship" });
   await expect(card).toBeVisible({ timeout: 10000 });
 
-  await card.locator('[data-testid="playlist-songs-toggle"]').click();
-  const row = card.locator(".video-list tbody tr", {
+  await expect(card.locator(".video-list")).toBeVisible({ timeout: 5000 });
+  const row = card.locator(".song-row", {
     hasText: "Amazing Grace",
   });
   await expect(row).toBeVisible({ timeout: 5000 });
-  await expect(row.locator('[data-testid="video-list-play"]')).toBeDisabled();
+  await expect(row.locator('[data-testid="song-row-play"]')).toBeDisabled();
 });

@@ -70,7 +70,7 @@ test("mixer loads current state, the now-playing song + the stem counter (#14/#1
   // glyph (the mock's playlist-1 song is ready).
   const state = page.locator('[data-testid="karaoke-now-playing"]');
   await expect(state).toContainText("Never Gonna Give You Up");
-  await expect(state).toContainText("pripravené");
+  await expect(state).toContainText("hotové");
 
   // #177: the global done/pending counter is now visible in the mixer title.
   await expect(mixer.locator(".mixer-title")).toContainText("5");

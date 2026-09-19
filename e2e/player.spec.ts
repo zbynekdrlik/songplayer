@@ -145,7 +145,7 @@ test.describe("the Player mixer follows the playing item (#194)", () => {
     await expect(page.getByTestId("player")).toBeVisible({ timeout: 15000 });
     // Wait for the row to reach store.dabing (its list row renders).
     await expect(
-      page.locator('[data-testid="dabing-list"] .dabing-row[data-video-id="800"]'),
+      page.locator('[data-testid="dabing-list"] .song-row[data-video-id="800"]'),
     ).toBeVisible({ timeout: 10000 });
 
     // Before it plays, the mixer slot is the karaoke adapter (no dub fader).

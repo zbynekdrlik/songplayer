@@ -72,7 +72,7 @@ test.describe("Lyrics dashboard — reprocess triggers", () => {
         !req.url().includes("stale") &&
         req.method() === "POST",
     );
-    await page.locator(".lyrics-song-row button").filter({ hasText: "Reprocess" }).first().click();
+    await page.locator(".song-row button").filter({ hasText: "Preprac." }).first().click();
     const req = await postPromise;
     const body = JSON.parse(req.postData() ?? "{}");
     expect(body).toHaveProperty("video_ids");
@@ -106,8 +106,8 @@ test.describe("Lyrics dashboard — reprocess triggers", () => {
     try {
       await navigateToLyrics(page);
       await page
-        .locator(".lyrics-song-row button")
-        .filter({ hasText: "Reprocess" })
+        .locator(".song-row button")
+        .filter({ hasText: "Preprac." })
         .first()
         .click();
       await expect(page.locator(".reprocess-asr-gap-banner")).toBeVisible({
@@ -136,8 +136,8 @@ test.describe("Lyrics dashboard — reprocess triggers", () => {
     });
     await navigateToLyrics(page);
     await page
-      .locator(".lyrics-song-row button")
-      .filter({ hasText: "Reprocess" })
+      .locator(".song-row button")
+      .filter({ hasText: "Preprac." })
       .first()
       .click();
     // Give the response time to flow through; banner must NOT appear.
@@ -149,7 +149,7 @@ test.describe("Lyrics dashboard — reprocess triggers", () => {
 test.describe("Lyrics dashboard — song detail modal", () => {
   test("Details button opens modal with audit breakdown", async ({ page }) => {
     await navigateToLyrics(page);
-    await page.locator(".lyrics-song-row button").filter({ hasText: "Details" }).first().click();
+    await page.locator(".song-row button").filter({ hasText: "Detail" }).first().click();
     // <details><summary>Raw audit log</summary> — the summary is visible by default
     await expect(page.locator("details summary").filter({ hasText: "Raw audit log" })).toBeVisible({ timeout: 5000 });
     await expect(page.locator(".modal p")).toContainText("Source:");
@@ -160,40 +160,52 @@ test.describe("Lyrics dashboard — song detail modal", () => {
 
   test("close button dismisses the modal", async ({ page }) => {
     await navigateToLyrics(page);
-    await page.locator(".lyrics-song-row button").filter({ hasText: "Details" }).first().click();
+    await page.locator(".song-row button").filter({ hasText: "Detail" }).first().click();
     await expect(page.locator("details summary").filter({ hasText: "Raw audit log" })).toBeVisible({ timeout: 5000 });
     await page.locator(".modal-close").click();
     await expect(page.locator(".modal-backdrop")).toBeHidden({ timeout: 5000 });
   });
 });
 
-test.describe("Lyrics dashboard — status badges", () => {
-  test("song with lyrics shows status-ok; song without shows status-none", async ({ page }) => {
+test.describe("Lyrics dashboard — status chips", () => {
+  test("#194: song with lyrics shows the ★ text chip; song without shows chýba", async ({ page }) => {
     await navigateToLyrics(page);
-    // Wait for at least one row to render (async fetch from mock)
-    await expect(page.locator(".lyrics-song-row").first()).toBeVisible({ timeout: 10000 });
-    // The first row (has_lyrics: true) gets status-ok
-    await expect(page.locator(".lyrics-song-row").nth(0)).toHaveClass(/status-ok/);
-    // The second row (has_lyrics: false) gets status-none
-    await expect(page.locator(".lyrics-song-row").nth(1)).toHaveClass(/status-none/);
+    // #194: the row is the shared `.song-row` and its lyrics state is the shared
+    // `chip-text` (the old status-ok/status-none classes + status-icon are gone).
+    await expect(page.locator(".song-row").first()).toBeVisible({ timeout: 10000 });
+    // The first row (video 1 — has_lyrics + reference) reads "★ overený".
+    await expect(
+      page.locator(".song-row").nth(0).locator('[data-testid="chip-text"]'),
+    ).toHaveText("★ overený");
+    // The second row (video 2 — no lyrics) reads "chýba".
+    await expect(
+      page.locator(".song-row").nth(1).locator('[data-testid="chip-text"]'),
+    ).toHaveText("chýba");
   });
 });
 
-// #142: ★ reference marker badge + „Nesedí" feedback.
+// #142/#194: the ★ reference marker is now the `chip-text` "★ overený"; the
+// „Nesedí" reject button posts the note.
 test.describe("Lyrics dashboard — ★ reference marker", () => {
-  test("starred song shows ★ badge; Nesedí feedback posts a note and clears the star", async ({
+  test("starred song shows the ★ text chip; Nesedí feedback posts a note", async ({
     page,
   }) => {
     await navigateToLyrics(page);
-    await expect(page.locator(".lyrics-song-row").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator(".song-row").first()).toBeVisible({ timeout: 10000 });
 
-    // Mock video_id 1 ("Song One") carries lyrics_reference: true.
-    const starredRow = page.locator(".lyrics-song-row").nth(0);
-    await expect(starredRow.locator(".reference-badge")).toBeVisible();
+    // Mock video_id 1 ("Song One") carries lyrics_reference: true → chip-text
+    // "★ overený" (the old `.reference-badge` element is gone).
+    const starredRow = page.locator(".song-row").nth(0);
+    await expect(starredRow.locator('[data-testid="chip-text"]')).toHaveText(
+      "★ overený",
+    );
 
-    // The un-referenced row (video_id 2) must never show the star/button.
-    const otherRow = page.locator(".lyrics-song-row").nth(1);
-    await expect(otherRow.locator(".reference-badge")).toHaveCount(0);
+    // The un-referenced row (video_id 2) is never starred and never shows the
+    // reject button.
+    const otherRow = page.locator(".song-row").nth(1);
+    await expect(otherRow.locator('[data-testid="chip-text"]')).not.toHaveText(
+      "★ overený",
+    );
     await expect(otherRow.locator("button", { hasText: "Nesedí" })).toHaveCount(0);
 
     page.once("dialog", (dialog) => dialog.accept("refrén nesedí s videom"));
@@ -204,7 +216,5 @@ test.describe("Lyrics dashboard — ★ reference marker", () => {
     const req = await postPromise;
     const body = JSON.parse(req.postData() ?? "{}");
     expect(body.note).toBe("refrén nesedí s videom");
-
-    await expect(starredRow.locator(".reference-badge")).toHaveCount(0);
   });
 });

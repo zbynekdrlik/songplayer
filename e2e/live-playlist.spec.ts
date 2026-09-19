@@ -4,7 +4,7 @@
 //
 //   - navigation + page layout
 //   - catalog filter toggle changes visible row count
-//   - "+ Add" appends to the setlist (positions 1, then 2)
+//   - "+ Pridať" appends to the setlist (positions 1, then 2)
 //   - clicking ▶ on row 2 fires a POST /play-video for the right id
 //   - clicking ✕ on row 1 compacts row 2 down to position 1
 //   - global Skip button POSTs to /skip
@@ -74,9 +74,9 @@ async function addRow(
       req.method() === "POST",
   );
   await page
-    .locator(".live-catalog-table tbody tr")
+    .locator(".live-catalog .song-row")
     .nth(rowIndex)
-    .getByRole("button", { name: "+ Add" })
+    .getByRole("button", { name: "+ Pridať" })
     .click();
   const req = await postPromise;
   const body = JSON.parse(req.postData() ?? "{}");
@@ -94,12 +94,12 @@ test.describe("/live page — primary operator surface (#39)", () => {
     await openCatalog(page);
     // Mock catalog: 1 row with has_lyrics=true, 1 with has_lyrics=false.
     // Filter ON (default) → 1 visible row.
-    await expect(page.locator(".live-catalog-table tbody tr")).toHaveCount(1);
+    await expect(page.locator(".live-catalog .song-row")).toHaveCount(1);
     // Toggle OFF → both rows visible.
     await page
       .locator(".live-catalog-header input[type='checkbox']")
       .uncheck();
-    await expect(page.locator(".live-catalog-table tbody tr")).toHaveCount(2);
+    await expect(page.locator(".live-catalog .song-row")).toHaveCount(2);
   });
 
   test("adding two catalog rows produces setlist positions 1 and 2", async ({
@@ -115,7 +115,7 @@ test.describe("/live page — primary operator surface (#39)", () => {
     const vid1 = await addRow(page, request, 0);
     const vid2 = await addRow(page, request, 1);
     expect(vid1).not.toEqual(vid2);
-    await expect(page.locator(".live-setlist-table tbody tr")).toHaveCount(2, {
+    await expect(page.locator(".live-setlist .song-row")).toHaveCount(2, {
       timeout: 5000,
     });
   });
@@ -131,7 +131,7 @@ test.describe("/live page — primary operator surface (#39)", () => {
       .uncheck();
     const vid1 = await addRow(page, request, 0);
     const vid2 = await addRow(page, request, 1);
-    await expect(page.locator(".live-setlist-table tbody tr")).toHaveCount(2, {
+    await expect(page.locator(".live-setlist .song-row")).toHaveCount(2, {
       timeout: 5000,
     });
     const playPromise = page.waitForRequest(
@@ -141,9 +141,9 @@ test.describe("/live page — primary operator surface (#39)", () => {
     );
     // Row indexes are 0-based; the "row 2" in the setlist is index 1.
     await page
-      .locator(".live-setlist-table tbody tr")
+      .locator(".live-setlist .song-row")
       .nth(1)
-      .locator(".live-setlist-btn-play")
+      .locator('[data-testid="song-row-play"]')
       .click();
     const req = await playPromise;
     const body = JSON.parse(req.postData() ?? "{}");
@@ -162,21 +162,21 @@ test.describe("/live page — primary operator surface (#39)", () => {
       .uncheck();
     await addRow(page, request, 0);
     const vid2 = await addRow(page, request, 1);
-    await expect(page.locator(".live-setlist-table tbody tr")).toHaveCount(2);
+    await expect(page.locator(".live-setlist .song-row")).toHaveCount(2);
     // ✕ triggers `window.confirm()` so a stray tap during a live set
     // doesn't silently drop a song. Auto-accept once for this click.
     page.once("dialog", (d) => d.accept());
     await page
-      .locator(".live-setlist-table tbody tr")
+      .locator(".live-setlist .song-row")
       .nth(0)
-      .locator(".live-setlist-btn-remove")
+      .locator(".song-row-btn-remove")
       .click();
-    await expect(page.locator(".live-setlist-table tbody tr")).toHaveCount(1, {
+    await expect(page.locator(".live-setlist .song-row")).toHaveCount(1, {
       timeout: 5000,
     });
     // Verify the remaining row is the one we added second (vid2) — i.e.
     // row 1 was the deleted one, row 2 compacted into position 1.
-    const remaining = page.locator(".live-setlist-table tbody tr").first();
+    const remaining = page.locator(".live-setlist .song-row").first();
     await expect(remaining).toContainText(/.+/);
     // Backend-side confirmation: GET /items now returns one row with
     // position=1 and the surviving video_id.
@@ -212,12 +212,12 @@ test.describe("/live page — primary operator surface (#39)", () => {
       .uncheck();
     await addRow(page, request, 0);
     await addRow(page, request, 1);
-    await expect(page.locator(".live-setlist-table tbody tr")).toHaveCount(2);
+    await expect(page.locator(".live-setlist .song-row")).toHaveCount(2);
     await page.reload();
     await expect(page.locator(".live-section-setlist")).toBeVisible({
       timeout: 10000,
     });
-    await expect(page.locator(".live-setlist-table tbody tr")).toHaveCount(2, {
+    await expect(page.locator(".live-setlist .song-row")).toHaveCount(2, {
       timeout: 10000,
     });
   });

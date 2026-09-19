@@ -193,7 +193,7 @@ const DABING_PLAYLIST_ID = 500;
 async function playDubInPlayer(page, videoId, title) {
   await expect(
     page.locator(
-      `[data-testid="dabing-list"] .dabing-row[data-video-id="${videoId}"]`,
+      `[data-testid="dabing-list"] .song-row[data-video-id="${videoId}"]`,
     ),
   ).toBeVisible({ timeout: 10000 });
   await page.request.post("/__mock/now-playing", {

@@ -38,7 +38,7 @@ async function openWorshipList(page) {
   await page.goto("/");
   const card = page.locator(".playlist-card", { hasText: "Worship" });
   await expect(card).toBeVisible({ timeout: 10000 });
-  await card.locator('[data-testid="playlist-songs-toggle"]').click();
+  // #194: the song list is OPEN by default for the selected playlist.
   await expect(card.locator(".video-list")).toBeVisible({ timeout: 5000 });
   return card;
 }
@@ -47,7 +47,9 @@ test("inline edit corrects a swapped song+artist and persists on reload (#136 T1
   page,
 }) => {
   const card = await openWorshipList(page);
-  const row = card.locator('.video-list tbody tr[data-video-id="3"]');
+  // #194: rows are `.song-row`; the edit-mode row keeps the same data-video-id
+  // (as `.song-row.song-row-editing`), so this locator holds across the swap.
+  const row = card.locator('.song-row[data-video-id="3"]');
   await expect(row).toBeVisible();
 
   // Enter edit mode.
@@ -80,16 +82,19 @@ test("inline edit corrects a swapped song+artist and persists on reload (#136 T1
   await expect(row.locator('[data-testid="video-list-edit"]')).toBeVisible({
     timeout: 5000,
   });
-  await expect(row).toContainText("Break Every Chain");
-  const artistCell = row.locator("td").nth(2);
-  await expect(artistCell).toHaveText("planetboom");
+  // #194: the row is a flex `.song-row`, not a `<table>` — the corrected
+  // song + artist render together in the shared `song-row-title`
+  // ("Break Every Chain — planetboom").
+  const titleLine = row.locator('[data-testid="song-row-title"]');
+  await expect(titleLine).toContainText("Break Every Chain");
+  await expect(titleLine).toContainText("planetboom");
 });
 
 test("cancel leaves the stored song/artist unchanged (#136 T1)", async ({
   page,
 }) => {
   const card = await openWorshipList(page);
-  const row = card.locator('.video-list tbody tr[data-video-id="3"]');
+  const row = card.locator('.song-row[data-video-id="3"]');
   await expect(row).toBeVisible();
 
   await row.locator('[data-testid="video-list-edit"]').click();

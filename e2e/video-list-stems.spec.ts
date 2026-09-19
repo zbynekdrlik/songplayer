@@ -36,27 +36,28 @@ async function openSongList(page) {
   await page.goto("/");
   const card = page.locator(".playlist-card", { hasText: "Worship" });
   await expect(card).toBeVisible({ timeout: 10000 });
-  await card.locator('[data-testid="playlist-songs-toggle"]').click();
+  // #194: the song list is OPEN by default for the selected playlist.
   await expect(card.locator(".video-list")).toBeVisible({ timeout: 5000 });
   return card;
 }
 
-test("#177: the song list marks each song's stems state", async ({ page }) => {
+test("#177/#194: the song list marks each song's stems state via chip-stems", async ({
+  page,
+}) => {
   const card = await openSongList(page);
 
-  const readyRow = card.locator(".video-list tbody tr", {
-    hasText: "Never Gonna Give You Up",
-  });
-  await expect(
-    readyRow.locator('[data-testid="video-list-stems-marker"]'),
-  ).toHaveAttribute("data-stems-state", "ready");
+  // #194: the per-row stems marker is now the shared `chip-stems` inside the
+  // row's status chips, with the Slovak label from `sp_core::status_chip`.
+  const readyRow = card.locator('.song-row[data-video-id="1"]');
+  await expect(readyRow.locator('[data-testid="chip-stems"]')).toHaveText(
+    "hotové",
+  );
 
-  const unsupRow = card.locator(".video-list tbody tr", {
-    hasText: "Break Every Chain",
-  });
-  await expect(
-    unsupRow.locator('[data-testid="video-list-stems-marker"]'),
-  ).toHaveAttribute("data-stems-state", "unavailable");
+  // video_id 3 carries the terminal-unsupported stems state.
+  const unsupRow = card.locator('.song-row[data-video-id="3"]');
+  await expect(unsupRow.locator('[data-testid="chip-stems"]')).toHaveText(
+    "nedostupné",
+  );
 });
 
 test("#177: the 'len so stemami' filter keeps only stems-ready songs", async ({
@@ -64,17 +65,17 @@ test("#177: the 'len so stemami' filter keeps only stems-ready songs", async ({
 }) => {
   const card = await openSongList(page);
 
-  // All three rows visible before filtering.
-  await expect(card.locator(".video-list tbody tr")).toHaveCount(3);
+  // All three rows present before filtering.
+  await expect(card.locator(".song-list .song-row")).toHaveCount(3);
 
   await card.locator('[data-testid="video-list-stems-filter"]').check();
 
   // Only the stems-ready song (id=1) remains.
-  const rows = card.locator(".video-list tbody tr");
+  const rows = card.locator(".song-list .song-row");
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText("Never Gonna Give You Up");
 
   // Unchecking restores the full list.
   await card.locator('[data-testid="video-list-stems-filter"]').uncheck();
-  await expect(card.locator(".video-list tbody tr")).toHaveCount(3);
+  await expect(card.locator(".song-list .song-row")).toHaveCount(3);
 });
