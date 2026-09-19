@@ -68,8 +68,6 @@ fn ffmpeg_args_are_exact_for_libx264_with_low_latency_tuning() {
         "640x360",
         "-i",
         "tcp://127.0.0.1:5001",
-        "-use_wallclock_as_timestamps",
-        "1",
         "-f",
         "f32le",
         "-ar",
@@ -169,4 +167,27 @@ fn ffmpeg_args_omit_itsoffset_for_zero_lead() {
         !args.iter().any(|a| a == "-itsoffset"),
         "lead 0 → no -itsoffset"
     );
+}
+
+#[test]
+fn only_the_video_input_is_wall_clock_stamped() {
+    // The raw PCM input must keep its SAMPLE-COUNT timestamps: wall-clock stamps
+    // on bursty PCM made the box's ffmpeg (N-123867, 2026-04) emit ZERO audio
+    // packets — an fMP4 whose audio track stays empty never becomes playable in
+    // MSE (readyState 1 forever, #178 box) — and mangled the DTS on ffmpeg 6.1.
+    for lead in [0u32, 100] {
+        let args = build_ffmpeg_args(9001, 9002, "libx264", lead);
+        let stamps: Vec<usize> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| *a == "-use_wallclock_as_timestamps")
+            .map(|(i, _)| i)
+            .collect();
+        let video_i = args
+            .iter()
+            .position(|a| a == "tcp://127.0.0.1:9001")
+            .expect("video input URL present");
+        assert_eq!(stamps.len(), 1, "exactly one wall-clock-stamped input");
+        assert!(stamps[0] < video_i, "and it is the video input");
+    }
 }
