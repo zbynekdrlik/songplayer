@@ -156,6 +156,20 @@ pub trait NdiBackend: Send + Sync {
     /// synthetic address. Used to surface the name→port map on
     /// `/api/v1/ndi/health` so a restart's port shuffle is visible.
     fn send_get_source_url(&self, handle: usize) -> Option<String>;
+
+    /// #196: discover the advertised `(name, url)` of every local NDI source via
+    /// the SDK's own finder (`NDIlib_find`, `show_local_sources = true`), polling
+    /// up to `overall_timeout_ms` until every name in `want_names` (bare stream
+    /// names, e.g. `"SP-slow"`) has appeared, then returning the last snapshot.
+    /// This is how the sender's `host:port` is read — `send_get_source_url`
+    /// (`NDIlib_send_get_source_name`) leaves `p_url_address` EMPTY for a local
+    /// sender (#196 round-1 finding). The real backend opens/polls/destroys one
+    /// finder; the mock returns a configured (synthetic) list.
+    fn discover_local_sources(
+        &self,
+        want_names: &[String],
+        overall_timeout_ms: u32,
+    ) -> Vec<(String, String)>;
 }
 
 // ---------------------------------------------------------------------------
@@ -639,6 +653,44 @@ mod tests {
         backend.set_source_url(Some("10.77.9.201:5963".to_string()));
         let sender = NdiSender::new_with_clocking(backend.clone(), "U2", true, false).unwrap();
         assert_eq!(sender.source_url().as_deref(), Some("10.77.9.201:5963"));
+    }
+
+    #[test]
+    fn discover_local_sources_returns_configured_and_maps_to_urls() {
+        // The mock returns the injected (synthetic) sources; the pure matcher
+        // then maps our outputs to their advertised URLs. Proves the finder →
+        // match_source_urls path on Linux with no NDI runtime.
+        let backend = MockNdiBackend::new();
+        backend.set_discovered_sources(vec![
+            (
+                "RESOLUME-SNV (SP-slow)".to_string(),
+                "10.77.9.201:5963".to_string(),
+            ),
+            (
+                "RESOLUME-SNV (SP-fast)".to_string(),
+                "10.77.9.201:5964".to_string(),
+            ),
+        ]);
+        let discovered =
+            backend.discover_local_sources(&["SP-slow".to_string(), "SP-fast".to_string()], 3000);
+        let own = vec![(4, "SP-slow".to_string()), (7, "SP-fast".to_string())];
+        assert_eq!(
+            crate::find::match_source_urls(&discovered, &own),
+            vec![
+                (4, "10.77.9.201:5963".to_string()),
+                (7, "10.77.9.201:5964".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn discover_local_sources_default_is_empty() {
+        let backend = MockNdiBackend::new();
+        assert!(
+            backend
+                .discover_local_sources(&["SP-x".to_string()], 100)
+                .is_empty()
+        );
     }
 
     #[test]

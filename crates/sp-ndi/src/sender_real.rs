@@ -299,4 +299,91 @@ impl NdiBackend for RealNdiBackend {
         let raw = unsafe { std::ffi::CStr::from_ptr(url_ptr) }.to_string_lossy();
         crate::source_url::parse_source_url(&raw)
     }
+
+    // mutants::skip — opens/polls/destroys a real NDI finder over the network;
+    // not exercisable on the Linux mutation runner. The pure name→URL matching
+    // it feeds (`crate::find::{source_matches,match_source_urls}`) is unit-tested.
+    #[cfg_attr(test, mutants::skip)]
+    fn discover_local_sources(
+        &self,
+        want_names: &[String],
+        overall_timeout_ms: u32,
+    ) -> Vec<(String, String)> {
+        use std::time::{Duration, Instant};
+
+        let create = crate::types::NDIlib_find_create_t {
+            show_local_sources: true,
+            p_groups: ptr::null(),
+            p_extra_ips: ptr::null(),
+        };
+        // SAFETY: `create` lives across the call; the returned finder is owned
+        // by us and destroyed below.
+        let finder = unsafe { (self.lib.find_create_v2)(&create) };
+        if finder.is_null() {
+            tracing::warn!(
+                "ndi: NDIlib_find_create_v2 returned null — cannot discover sender URLs"
+            );
+            return Vec::new();
+        }
+
+        let deadline = Instant::now() + Duration::from_millis(overall_timeout_ms as u64);
+        let mut discovered: Vec<(String, String)> = Vec::new();
+        loop {
+            let slice_ms = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                .min(250) as u32;
+            // Block up to `slice_ms` for a source-list change (bounded by the
+            // deadline). SAFETY: valid finder handle.
+            unsafe {
+                (self.lib.find_wait_for_sources)(finder, slice_ms);
+            }
+            let mut count: u32 = 0;
+            // SAFETY: valid finder; the returned array is owned by the finder
+            // and valid until the next find call / destroy — we copy each
+            // string out immediately below.
+            let arr = unsafe { (self.lib.find_get_current_sources)(finder, &mut count) };
+            discovered.clear();
+            if !arr.is_null() {
+                for i in 0..count as isize {
+                    let src = unsafe { &*arr.offset(i) };
+                    let name = ptr_to_string(src.p_ndi_name);
+                    let url = ptr_to_string(src.p_url_address);
+                    discovered.push((name, url));
+                }
+            }
+            let all_present = want_names.iter().all(|n| {
+                discovered
+                    .iter()
+                    .any(|(dn, _)| crate::find::source_matches(dn, n))
+            });
+            if all_present || Instant::now() >= deadline {
+                break;
+            }
+        }
+        // SAFETY: valid finder handle, not used after this.
+        unsafe {
+            (self.lib.find_destroy)(finder);
+        }
+        discovered
+    }
+}
+
+/// Copy a possibly-null C string pointer into an owned `String` (empty on null).
+///
+/// # Safety
+/// `p`, if non-null, must point to a valid NUL-terminated C string owned by the
+/// caller for the duration of this call.
+///
+/// mutants::skip — reachable only from the `mutants::skip` finder driver
+/// (`discover_local_sources`), so no Linux unit test exercises it; a mutant
+/// here would be a structural MISSED, not a real gap (FFI-glue class).
+#[cfg_attr(test, mutants::skip)]
+fn ptr_to_string(p: *const std::ffi::c_char) -> String {
+    if p.is_null() {
+        return String::new();
+    }
+    unsafe { std::ffi::CStr::from_ptr(p) }
+        .to_string_lossy()
+        .into_owned()
 }

@@ -34,6 +34,10 @@ pub struct MockNdiBackend {
     /// derived from the handle; a set value is returned verbatim so tests can
     /// assert a specific advertised URL flows through to the health snapshot.
     source_url: StdMutex<Option<String>>,
+    /// #196: what `discover_local_sources` returns — the (synthetic) `(name,
+    /// url)` pairs a test injects to drive the finder → `match_source_urls`
+    /// path on Linux. Empty by default (no NDI runtime).
+    discovered_sources: StdMutex<Vec<(String, String)>>,
 }
 
 impl MockNdiBackend {
@@ -75,6 +79,12 @@ impl MockNdiBackend {
     /// leaving it unset yields a deterministic synthetic address.
     pub fn set_source_url(&self, url: Option<String>) {
         *self.source_url.lock().unwrap() = url;
+    }
+
+    /// #196: set the (synthetic) sources `discover_local_sources` returns, so a
+    /// Linux test can drive the finder → `find::match_source_urls` path.
+    pub fn set_discovered_sources(&self, sources: Vec<(String, String)>) {
+        *self.discovered_sources.lock().unwrap() = sources;
     }
 }
 
@@ -190,5 +200,17 @@ impl NdiBackend for MockNdiBackend {
             // Linux test can assert the URL threads through to the snapshot.
             None => Some(format!("127.0.0.1:59{:02}", handle % 100)),
         }
+    }
+
+    fn discover_local_sources(
+        &self,
+        want_names: &[String],
+        _overall_timeout_ms: u32,
+    ) -> Vec<(String, String)> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("discover_local_sources({})", want_names.len()));
+        self.discovered_sources.lock().unwrap().clone()
     }
 }

@@ -15,12 +15,16 @@
 //! creation order) — unit-tested on Linux with no NDI runtime — and, in
 //! `impl PlaybackEngine`, the orchestration that drives them on the box.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use sp_core::models::Playlist;
+use sp_ndi::NdiBackend;
 use tracing::{info, warn};
 
 use super::PlaybackEngine;
+use super::ndi_health::NdiHealthRegistry;
+use super::pipeline::SharedNdiBackend;
 
 /// Poll cadence for the startup port-availability wait.
 const PORT_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -29,6 +33,15 @@ const PORT_WAIT_MAX_POLLS: u32 = 40;
 /// How long to wait for one pipeline to report its sender ready before moving
 /// on to the next (bounded so a stuck sender never wedges startup).
 const SENDER_READY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// #196: how long ONE `NDIlib_find` discovery pass polls for every startup
+/// sender's advertised name→URL to appear (the ruling's ≤ 3 s).
+const FINDER_TIMEOUT_MS: u32 = 3000;
+
+/// #196: after the first discovery pass, retry ONCE at +30 s (together with the
+/// receiver self-check window) for any output whose URL had not yet appeared —
+/// the SDK finder can take a moment to see a freshly-created local sender.
+const SENDER_URL_RETRY_DELAY: Duration = Duration::from_secs(30);
 
 /// The first TCP port the NDI runtime assigns to a sender on this box. NDI
 /// hands out ports sequentially from here in sender-creation order, which is
@@ -112,6 +125,46 @@ pub fn ndi_ports_free(ports: &[u16]) -> bool {
         .all(|&p| std::net::TcpListener::bind(("0.0.0.0", p)).is_ok())
 }
 
+/// #196: read each startup sender's advertised `host:port` via ONE
+/// `NDIlib_find` discovery pass and record it in the health registry, so
+/// `/api/v1/ndi/health` carries the name→port map and the startup log prints
+/// one `ndi: sender ready name=… url=…` line per output. A name that never
+/// appears within the finder timeout gets a WARN. The blocking finder poll runs
+/// on `spawn_blocking` so the async startup / the +30 s retry task is not
+/// stalled. No-op when NDI is not configured (Linux/CI have no backend).
+///
+/// mutants::skip — I/O orchestration (spawn_blocking + the FFI finder); the
+/// pure name→URL matching (`sp_ndi::find::match_source_urls`) is unit-tested.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) async fn discover_and_record_sender_urls(
+    backend: Option<SharedNdiBackend>,
+    registry: Arc<NdiHealthRegistry>,
+    ordered: Vec<(i64, String)>,
+) {
+    let Some(backend) = backend else {
+        return;
+    };
+    if ordered.is_empty() {
+        return;
+    }
+    let names: Vec<String> = ordered.iter().map(|(_, n)| n.clone()).collect();
+    let discovered = tokio::task::spawn_blocking(move || {
+        backend.discover_local_sources(&names, FINDER_TIMEOUT_MS)
+    })
+    .await
+    .unwrap_or_default();
+    let matched = sp_ndi::find::match_source_urls(&discovered, &ordered);
+    for (id, name) in &ordered {
+        match matched.iter().find(|(mid, _)| mid == id) {
+            Some((_, url)) => {
+                registry.set_sender_url(*id, Some(url.clone()));
+                info!("ndi: sender ready name={name} url={url}");
+            }
+            None => warn!("ndi: sender {name} did not appear in NDI discovery within 3 s"),
+        }
+    }
+}
+
 impl PlaybackEngine {
     /// #196: create the NDI senders for all active playlists in DETERMINISTIC
     /// `playlist.id` order at startup, so the NDI runtime hands out the SAME
@@ -164,11 +217,23 @@ impl PlaybackEngine {
         }
 
         // Serialized, id-ordered creation: create sender i, wait for it to
-        // report ready (so its port is assigned + recorded) before creating
-        // sender i+1.
-        for (id, name) in ordered {
-            self.create_and_record_sender(id, &name).await;
+        // report ready (so its port is assigned) before creating sender i+1.
+        for (id, name) in &ordered {
+            self.create_and_record_sender(*id, name).await;
         }
+
+        // #196: now that every startup sender exists, read the advertised
+        // name→port map via ONE NDIlib_find discovery pass and record it on the
+        // health registry (the ruling — `NDIlib_send_get_source_name` leaves the
+        // URL empty for a local sender). Retry once at +30 s for any that had
+        // not yet appeared to the finder.
+        let backend = self.ndi_backend.clone();
+        let registry = self.ndi_health_registry.clone();
+        discover_and_record_sender_urls(backend.clone(), registry.clone(), ordered.clone()).await;
+        tokio::spawn(async move {
+            tokio::time::sleep(SENDER_URL_RETRY_DELAY).await;
+            discover_and_record_sender_urls(backend, registry, ordered).await;
+        });
     }
 
     /// #196: create one output's pipeline (idempotent) and, once its NDI sender

@@ -280,27 +280,15 @@ fn run_loop_windows(
         }
     };
 
-    // #196: read the advertised source URL (host:port) now, before the sender
-    // is moved into the submitter, so the startup log + `/api/v1/ndi/health`
-    // carry the name→port map and the serializer can proceed in order. The NDI
-    // runtime assigns the URL slightly AFTER `send_create`, so poll briefly
-    // (≤ ~2 s) until it is available rather than reporting `null`.
-    let mut sender_url = sender.source_url();
-    for _ in 0..10 {
-        if sender_url.is_some() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        sender_url = sender.source_url();
-    }
-    info!(
-        ndi_name,
-        url = sender_url.as_deref().unwrap_or("unknown"),
-        genlock_pacing,
-        "ndi: sender ready"
-    );
+    // #196: signal the startup serializer that this sender now exists, so it
+    // creates the next output in playlist.id order (deterministic port
+    // assignment). The advertised name→port URL is NOT read here —
+    // `NDIlib_send_get_source_name`'s `p_url_address` is empty for a local
+    // sender (#196 round-1 finding), so the startup finder pass
+    // (`startup_senders::discover_and_record_sender_urls`, via `NDIlib_find`)
+    // records it instead.
     if let Some(tx) = ready_tx.take() {
-        let _ = tx.send(sender_url);
+        let _ = tx.send(None);
     }
 
     // Initial black frame. Genlock path emits on the fixed integer grid
