@@ -138,7 +138,10 @@ fn cancel_title_timers_aborts_pending_handles() {
                         Default::default(),
                         "test".into(),
                     ),
-                    stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+                    stream: crate::playback::preview::preview_stream::StreamTap::new(
+                        "test".into(),
+                        0,
+                    ),
                 },
             ),
             state: PlayState::Idle,

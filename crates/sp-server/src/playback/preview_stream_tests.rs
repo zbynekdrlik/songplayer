@@ -161,7 +161,7 @@ fn letterbox_rejects_short_source_leaving_black_canvas() {
 
 #[test]
 fn offer_video_is_a_noop_with_no_viewer() {
-    let tap = StreamTap::new("t".into());
+    let tap = StreamTap::new("t".into(), 0);
     let src = solid_nv12(64, 48, 64, 128, 128);
     // No viewer → nothing queued for the feeder.
     tap.try_offer_video(64, 48, 64, &src);
@@ -173,7 +173,7 @@ fn offer_video_is_a_noop_with_no_viewer() {
 
 #[test]
 fn offer_video_queues_a_fixed_canvas_frame_with_a_viewer() {
-    let tap = StreamTap::new("t".into());
+    let tap = StreamTap::new("t".into(), 0);
     let (_guard, _relay) = ViewerGuard::subscribe(&tap);
     assert!(tap.shared().has_viewer());
     let src = solid_nv12(1920, 1080, 1920, 128, 128);
@@ -188,7 +188,7 @@ fn offer_video_queues_a_fixed_canvas_frame_with_a_viewer() {
 
 #[test]
 fn offer_audio_is_a_noop_with_no_viewer_and_queues_with_one() {
-    let tap = StreamTap::new("t".into());
+    let tap = StreamTap::new("t".into(), 0);
     let block = [0.1f32, -0.1, 0.2, -0.2];
     tap.try_offer_audio(&block, 48_000, 2);
     assert!(
@@ -208,7 +208,7 @@ fn offer_audio_is_a_noop_with_no_viewer_and_queues_with_one() {
 
 #[test]
 fn viewer_guard_counts_up_and_saturates_down() {
-    let tap = StreamTap::new("t".into());
+    let tap = StreamTap::new("t".into(), 0);
     assert!(!tap.shared().has_viewer());
     let g1 = ViewerGuard::subscribe(&tap).0;
     let g2 = ViewerGuard::subscribe(&tap).0;
@@ -229,7 +229,7 @@ fn viewer_guard_counts_up_and_saturates_down() {
 
 #[test]
 fn try_claim_encoder_admits_exactly_one() {
-    let tap = StreamTap::new("t".into());
+    let tap = StreamTap::new("t".into(), 0);
     assert!(tap.shared().try_claim_encoder(), "first claim wins");
     assert!(!tap.shared().try_claim_encoder(), "second claim blocked");
     tap.shared().release_encoder();
@@ -242,13 +242,13 @@ fn try_claim_encoder_admits_exactly_one() {
 #[test]
 fn shared_label_is_the_name_the_tap_was_built_with() {
     // The label names the encoder thread + every encoder log line.
-    let tap = StreamTap::new("playlist-7".into());
+    let tap = StreamTap::new("playlist-7".into(), 0);
     assert_eq!(tap.shared().label(), "playlist-7");
 }
 
 #[test]
 fn a_viewer_guard_dropped_at_zero_viewers_stays_at_zero() {
-    let tap = StreamTap::new("t".into());
+    let tap = StreamTap::new("t".into(), 0);
     let guard = ViewerGuard::subscribe(&tap).0;
     // Force the count to 0 behind the guard's back; its drop must saturate.
     tap.shared()
@@ -265,7 +265,7 @@ fn a_viewer_guard_dropped_at_zero_viewers_stays_at_zero() {
 
 #[test]
 fn offer_frame_feeds_the_stream_video_and_audio_taps() {
-    let stream = StreamTap::new("t".into());
+    let stream = StreamTap::new("t".into(), 0);
     let taps = DecodeTaps {
         preview: crate::playback::preview::PreviewTap::new(Default::default(), "t".into()),
         stream: stream.clone(),

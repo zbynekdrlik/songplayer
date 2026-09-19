@@ -18,7 +18,7 @@ fn pipeline_spawn_and_shutdown() {
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
-            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
     );
     pipeline.shutdown();
@@ -41,7 +41,7 @@ fn pipeline_drop_sends_shutdown() {
                     Default::default(),
                     "test".into(),
                 ),
-                stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+                stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
             },
         );
         // Pipeline dropped here — Drop impl should send Shutdown and join.
@@ -61,7 +61,7 @@ fn pipeline_send_command_before_shutdown() {
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
-            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
     );
     pipeline.send(PipelineCommand::Stop);
@@ -82,7 +82,7 @@ fn pipeline_play_emits_event_on_non_windows() {
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
-            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
     );
 
@@ -150,7 +150,7 @@ fn pipeline_send_seek_command() {
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
-            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
     );
     pipeline.send(PipelineCommand::Seek { position_ms: 5000 });
@@ -177,7 +177,7 @@ fn pipeline_processes_multiple_sequential_plays() {
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
-            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
     );
 
@@ -238,7 +238,7 @@ fn play_with_start_position_ms_is_accepted() {
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
-            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
     );
 

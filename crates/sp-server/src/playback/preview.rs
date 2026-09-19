@@ -446,15 +446,20 @@ impl PreviewRegistry {
 
     /// Register (or reuse) BOTH the JPEG tap and the #178 stream tap for
     /// `playlist_id`, returning the bundle the decode loops offer to. Idempotent.
-    pub fn register_taps(&self, playlist_id: i64) -> DecodeTaps {
+    /// `lead_ms` is the decode-seam A/V-sync lead for this pipeline's clocking
+    /// path (#178 round 2): 100 on the SDK-clocked path (the #192 lookahead), 0
+    /// on the paced path; it is stamped onto the stream tap at first register.
+    pub fn register_taps(&self, playlist_id: i64, lead_ms: u32) -> DecodeTaps {
         DecodeTaps {
             preview: self.register(playlist_id),
-            stream: self.register_stream(playlist_id),
+            stream: self.register_stream(playlist_id, lead_ms),
         }
     }
 
-    /// Register (or reuse) the #178 stream tap for `playlist_id`. Idempotent.
-    fn register_stream(&self, playlist_id: i64) -> StreamTap {
+    /// Register (or reuse) the #178 stream tap for `playlist_id`. Idempotent —
+    /// a re-register keeps the ORIGINAL `lead_ms` (the clocking path does not
+    /// change for the life of a pipeline).
+    fn register_stream(&self, playlist_id: i64, lead_ms: u32) -> StreamTap {
         if let Some(tap) = self
             .stream_taps
             .read()
@@ -463,7 +468,7 @@ impl PreviewRegistry {
         {
             return tap;
         }
-        let tap = StreamTap::new(format!("playlist-{playlist_id}"));
+        let tap = StreamTap::new(format!("playlist-{playlist_id}"), lead_ms);
         if let Ok(mut map) = self.stream_taps.write() {
             return map.entry(playlist_id).or_insert(tap).clone();
         }

@@ -171,14 +171,26 @@ pub fn letterbox_nv12_into(sw: u32, sh: u32, stride: u32, src: &[u8], dst: &mut 
 /// double); stereo (`channels == 2`) is forwarded verbatim; any other channel
 /// count returns `None` (the block is dropped — the child geometry is fixed
 /// stereo and cannot consume it).
-pub fn to_stereo(samples: &[f32], _channels: u32) -> Option<Vec<f32>> {
-    Some(samples.to_vec())
+pub fn to_stereo(samples: &[f32], channels: u32) -> Option<Vec<f32>> {
+    match channels {
+        // No `with_capacity` hint (its multiplier would be an equivalent mutant —
+        // capacity never changes the produced Vec); each mono sample becomes an
+        // interleaved L,R pair.
+        1 => Some(samples.iter().flat_map(|&s| [s, s]).collect()),
+        2 => Some(samples.to_vec()),
+        _ => None,
+    }
 }
 
 /// State shared between the decode-side taps, the WS viewers, and the encoder
 /// child. Held behind an `Arc` by [`StreamTap`].
 pub struct StreamShared {
     label: String,
+    /// #178 round 2 A/V-sync lead (ms): how far the decode-seam audio LEADS the
+    /// video on this pipeline's clocking path (100 on the SDK-clocked path from
+    /// the #192 lookahead, 0 on the paced path). The encoder child delays its
+    /// audio input by this much (`-itsoffset`) to bring preview A/V into sync.
+    lead_ms: u32,
     /// Number of connected WS viewers. `0` = the offer fast-path early-out.
     viewers: AtomicUsize,
     /// Whether an encoder child is currently running for this pipeline.
@@ -194,11 +206,12 @@ pub struct StreamShared {
 }
 
 impl StreamShared {
-    fn new(label: String) -> Self {
+    fn new(label: String, lead_ms: u32) -> Self {
         let (video_tx, video_rx) = bounded(VIDEO_CHANNEL_CAP);
         let (audio_tx, audio_rx) = bounded(AUDIO_CHANNEL_CAP);
         Self {
             label,
+            lead_ms,
             viewers: AtomicUsize::new(0),
             encoder_running: AtomicBool::new(false),
             video_tx,
@@ -292,6 +305,11 @@ impl StreamShared {
     pub fn label(&self) -> &str {
         &self.label
     }
+    /// The decode-seam A/V-sync lead in ms (see the field). The encoder child
+    /// delays its audio input by this to compensate (`build_ffmpeg_args`).
+    pub fn lead_ms(&self) -> u32 {
+        self.lead_ms
+    }
     /// Atomically claim the "encoder is running" flag; returns `true` iff THIS
     /// call transitioned it from stopped→running (so exactly one caller spawns).
     pub fn try_claim_encoder(&self) -> bool {
@@ -312,9 +330,11 @@ pub struct StreamTap {
 }
 
 impl StreamTap {
-    pub fn new(label: String) -> Self {
+    /// Build a stream tap. `lead_ms` is the decode-seam A/V-sync lead for this
+    /// pipeline's clocking path (see [`StreamShared::lead_ms`]).
+    pub fn new(label: String, lead_ms: u32) -> Self {
         Self {
-            shared: Arc::new(StreamShared::new(label)),
+            shared: Arc::new(StreamShared::new(label, lead_ms)),
         }
     }
 

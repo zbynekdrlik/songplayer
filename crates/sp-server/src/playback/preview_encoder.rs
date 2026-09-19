@@ -94,21 +94,35 @@ pub fn build_ffmpeg_args(
         format!("{OUT_W}x{OUT_H}"),
         "-i".into(),
         format!("tcp://127.0.0.1:{video_port}"),
+    ];
+    // #178 round 2 A/V-sync: on the SDK-clocked path the #192 decoder lookahead
+    // makes the tapped audio LEAD the video by `lead_ms`, so delay the audio
+    // input by that much with `-itsoffset` (an INPUT option, placed before the
+    // audio `-i`). Matched (not `> 0`) so no `!= 0` equivalent mutant survives:
+    // lead 0 (paced path) emits NO flag; any other value emits the seconds form.
+    match lead_ms {
+        0 => {}
+        ms => {
+            a.push("-itsoffset".into());
+            a.push(format!("{:.3}", ms as f64 / 1000.0));
+        }
+    }
+    a.extend([
         // Audio input: interleaved f32, 48 kHz stereo, wall-clock stamped.
-        "-use_wallclock_as_timestamps".into(),
-        "1".into(),
-        "-f".into(),
-        "f32le".into(),
-        "-ar".into(),
-        "48000".into(),
-        "-ac".into(),
-        "2".into(),
-        "-i".into(),
+        "-use_wallclock_as_timestamps".to_string(),
+        "1".to_string(),
+        "-f".to_string(),
+        "f32le".to_string(),
+        "-ar".to_string(),
+        "48000".to_string(),
+        "-ac".to_string(),
+        "2".to_string(),
+        "-i".to_string(),
         format!("tcp://127.0.0.1:{audio_port}"),
         // Video encode.
-        "-c:v".into(),
-        encoder.into(),
-    ];
+        "-c:v".to_string(),
+        encoder.to_string(),
+    ]);
     if encoder == "libx264" {
         a.push("-preset".into());
         a.push("ultrafast".into());
@@ -263,7 +277,7 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
         Err(_) => return RunOutcome::ChildExited,
     };
 
-    let args = build_ffmpeg_args(v_port, a_port, encoder, 0);
+    let args = build_ffmpeg_args(v_port, a_port, encoder, shared.lead_ms());
     let mut cmd = Command::new(ffmpeg);
     cmd.args(&args)
         .stdin(Stdio::null())
