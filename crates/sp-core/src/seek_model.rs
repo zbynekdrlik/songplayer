@@ -6,9 +6,31 @@
 //! diff-scoped mutation gate, so the boundary behaviour is verified once and
 //! reused everywhere instead of re-derived per call site.
 
-// NOTE (#194 RED): the implementations are added in the paired GREEN commit;
-// this module ships its exact-boundary tests FIRST so the fix is proven to
-// move them from red to green.
+/// New absolute position after nudging `current_ms` by `delta_ms`, clamped into
+/// `0..=duration_ms`. `delta_ms` is signed so the same helper serves the
+/// `−10 s` / `+10 s` buttons; passing `delta_ms = 0` clamps a raw position to
+/// the song's duration (the server route's use).
+pub fn seek_target_ms(current_ms: u64, delta_ms: i64, duration_ms: u64) -> u64 {
+    let target = (current_ms as i64).saturating_add(delta_ms).max(0) as u64;
+    target.min(duration_ms)
+}
+
+/// Progress fraction `pos_ms / dur_ms`, clamped to `0.0..=1.0`. Returns `0.0`
+/// for a zero duration (no divide-by-zero, no `NaN`).
+pub fn seek_fraction(pos_ms: u64, dur_ms: u64) -> f64 {
+    if dur_ms == 0 {
+        return 0.0;
+    }
+    (pos_ms as f64 / dur_ms as f64).clamp(0.0, 1.0)
+}
+
+/// Format a millisecond position as `M:SS` (seconds zero-padded to two digits).
+/// Minutes are not wrapped at 60 — a 61-minute song reads `61:01`, matching the
+/// operator's mental model of a single running counter.
+pub fn format_position(ms: u64) -> String {
+    let total_secs = ms / 1000;
+    format!("{}:{:02}", total_secs / 60, total_secs % 60)
+}
 
 #[cfg(test)]
 mod tests {

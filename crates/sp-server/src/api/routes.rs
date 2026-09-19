@@ -597,31 +597,8 @@ pub async fn set_mode(
     StatusCode::NO_CONTENT
 }
 
-#[derive(Debug, serde::Deserialize)]
-pub struct SeekReq {
-    pub position_ms: u64,
-}
-
-/// Jump playback of the given playlist to `position_ms`. Returns 204
-/// No Content on success. Always-ok for valid playlist ids — the pipeline
-/// drops the command when no song is loaded.
-pub async fn post_seek(
-    State(state): State<AppState>,
-    Path(playlist_id): Path<i64>,
-    Json(req): Json<SeekReq>,
-) -> impl IntoResponse {
-    match state
-        .engine_tx
-        .send(EngineCommand::Seek {
-            playlist_id,
-            position_ms: req.position_ms,
-        })
-        .await
-    {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
+// #194: the seek route moved to `api/routes_seek.rs` (unified onto the
+// `/api/v1/playback/{id}/…` family, with clamp / 404 / 409 hardening).
 
 // ---------------------------------------------------------------------------
 // Settings endpoints

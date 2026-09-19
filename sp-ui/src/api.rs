@@ -403,7 +403,7 @@ pub async fn post_live_play_video(
 pub async fn seek_playlist(playlist_id: i64, position_ms: u64) -> Result<(), String> {
     let body = serde_json::json!({ "position_ms": position_ms });
     post_json_empty(
-        &format!("/api/v1/playlists/{playlist_id}/seek"),
+        &format!("/api/v1/playback/{playlist_id}/seek"),
         &body,
     )
     .await
