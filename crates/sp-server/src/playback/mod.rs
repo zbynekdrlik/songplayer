@@ -31,6 +31,7 @@ mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 mod recovery;
 mod runtime_pipeline;
+pub mod startup_senders; // #196 deterministic restart-safe NDI sender startup (pure port-wait + order)
 pub mod state;
 pub mod submit_handoff; // #168 output-side split: pure emit->submit handoff decisions
 pub mod submitter;

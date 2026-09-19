@@ -24,6 +24,26 @@ use tracing::warn;
 /// the receiver-recovery trigger and the dashboard read the same string.
 pub(crate) const DARK_WALL_REASON: &str = "no NDI receiver — wall is dark";
 
+/// #196: the `degraded_reason` a Playing-on-program output gets when it is
+/// dark (`connections==0`) but NO OBS NDI input advertises its stream — the
+/// receiver-side recovery ladder is not the tool for this class (there is no
+/// input to nudge), so we set a distinct reason and skip the ladder entirely,
+/// which also stops the every-10 s degraded/recovered flap the incident saw
+/// for an output whose OBS scene did not exist yet (SP-dabing).
+pub(crate) const NO_OBS_INPUT_REASON: &str = "no OBS scene for this output";
+
+/// #196: choose the effective dark reason for a Playing-on-program output.
+/// When the base reason is the dark-wall reason but no OBS input advertises
+/// this output, return [`NO_OBS_INPUT_REASON`] instead — which is NOT the
+/// dark-wall reason, so the caller's `is_dark` is false and the ladder never
+/// runs. Any other base reason passes through unchanged. Pure so the branch
+/// is mutation-scored.
+pub(crate) fn effective_dark_reason(base: Option<String>, has_obs_input: bool) -> Option<String> {
+    // RED stub (#196) — real impl lands in the GREEN commit.
+    let _ = has_obs_input;
+    base
+}
+
 /// Per-pipeline NDI health. Serialized to the dashboard via
 /// `GET /api/v1/ndi/health`. Built by the engine from
 /// `PipelineEvent::HealthSnapshot` events emitted by the pipeline thread.

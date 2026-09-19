@@ -626,3 +626,34 @@ fn mk_reported_snapshot(playlist_id: i64) -> PipelineHealthSnapshot {
         recovery_step: None,
     }
 }
+
+// #196: effective_dark_reason — a dark output with NO OBS input advertising it
+// gets the no-input reason (not the dark-wall reason), so the ladder is skipped.
+#[test]
+fn effective_dark_reason_no_input_dark_wall_becomes_no_obs_input() {
+    assert_eq!(
+        effective_dark_reason(Some(DARK_WALL_REASON.to_string()), false).as_deref(),
+        Some(NO_OBS_INPUT_REASON)
+    );
+}
+
+#[test]
+fn effective_dark_reason_dark_wall_with_input_passes_through() {
+    assert_eq!(
+        effective_dark_reason(Some(DARK_WALL_REASON.to_string()), true).as_deref(),
+        Some(DARK_WALL_REASON)
+    );
+}
+
+#[test]
+fn effective_dark_reason_none_stays_none_even_without_input() {
+    assert_eq!(effective_dark_reason(None, false), None);
+}
+
+#[test]
+fn effective_dark_reason_other_reason_passes_through() {
+    assert_eq!(
+        effective_dark_reason(Some("stalled".to_string()), false).as_deref(),
+        Some("stalled")
+    );
+}
