@@ -8,6 +8,7 @@
 import OBSWebSocket from "obs-websocket-js";
 import {
   shouldSkipSceneSwitch,
+  waitForPreviewApplied,
   waitForSceneSwitchApplied,
 } from "./obs-scene-wait";
 
@@ -26,6 +27,11 @@ export class ObsDriver {
   async currentProgramScene(): Promise<string> {
     const r = await this.obs.call("GetCurrentProgramScene");
     return (r as { currentProgramSceneName: string }).currentProgramSceneName;
+  }
+
+  async currentPreviewScene(): Promise<string> {
+    const r = await this.obs.call("GetCurrentPreviewScene");
+    return (r as { currentPreviewSceneName: string }).currentPreviewSceneName;
   }
 
   async listScenes(): Promise<string[]> {
@@ -76,6 +82,9 @@ export class ObsDriver {
     try {
       if (await this.studioModeEnabled()) {
         await this.obs.call("SetCurrentPreviewScene", { sceneName });
+        // The preview change is applied asynchronously — trigger only once OBS
+        // reports it, else the transition fades the program scene to itself.
+        await waitForPreviewApplied(() => this.currentPreviewScene(), sceneName);
         await this.obs.call("TriggerStudioModeTransition");
         // We KNOW a transition is now running — mark it active synchronously so
         // the settle check cannot fire before the SceneTransitionStarted frame
