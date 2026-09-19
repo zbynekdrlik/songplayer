@@ -52,12 +52,13 @@ test.afterEach(async () => {
 });
 
 async function navigateToLyrics(page: Page) {
-  // A direct /lyrics deep link renders no sections (the page iterates
-  // store.playlists, seeded by the Dashboard's own fetch); always go via nav.
-  await page.goto("/");
+  // #194 r3: a direct /lyrics deep link now renders the sections — the page
+  // loads its own playlists via the app-level store, not the Dashboard's fetch.
+  await page.goto("/lyrics");
   await expect(page.locator("text=SongPlayer")).toBeVisible({ timeout: 10000 });
-  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
-  await expect(page.getByText("Lyrics Pipeline")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText("Spracovanie textov")).toBeVisible({
+    timeout: 10000,
+  });
 }
 
 async function seedDabingReady(request: APIRequestContext, videoId: number) {
@@ -104,6 +105,10 @@ test.describe("#194: the shared SongRow + StatusChips render on every page", () 
       data: { video_id: 1 },
     });
     await page.goto("/live");
+    // #194 r3: the set-list heading is Slovak ("Set list ytlive" is gone).
+    await expect(page.locator(".live-setlist h2")).toHaveText(
+      "Zoznam skladieb — ytlive",
+    );
     const row = page.locator(".live-setlist .song-row").first();
     await expect(row).toBeVisible({ timeout: 10000 });
     await expect(row.locator('[data-testid="status-chips"]')).toBeVisible();

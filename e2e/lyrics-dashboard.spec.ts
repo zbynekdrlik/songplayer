@@ -27,23 +27,49 @@ test.afterEach(async () => {
 });
 
 async function navigateToLyrics(page: Page) {
-  await page.goto("/");
+  // #194 r3: open /lyrics DIRECTLY (deep link) — the page must load its own
+  // playlists via the app-level store, not depend on the Dashboard having
+  // mounted first. Slovak pipeline heading = "Spracovanie textov".
+  await page.goto("/lyrics");
   await expect(page.locator("text=SongPlayer")).toBeVisible({ timeout: 10000 });
-  await page.getByRole("button", { name: "Lyrics" }).click();
-  await expect(page.getByText("Lyrics Pipeline")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText("Spracovanie textov")).toBeVisible({
+    timeout: 10000,
+  });
 }
+
+test.describe("Lyrics dashboard — direct deep link (#194 r3)", () => {
+  test("opened directly at /lyrics, playlist sections render SongRow + StatusChips", async ({
+    page,
+  }) => {
+    // Regression for the ROUND-2 REVIEW rework #2: the page must NOT depend on
+    // the Dashboard having filled store.playlists. A cold /lyrics deep link
+    // must show the per-playlist sections with the shared row + chips.
+    await page.goto("/lyrics");
+    await expect(page.getByText("Spracovanie textov")).toBeVisible({
+      timeout: 10000,
+    });
+    // At least one playlist section with at least one shared song row.
+    await expect(page.locator(".lyrics-playlist-section").first()).toBeVisible({
+      timeout: 10000,
+    });
+    const row = page.locator(".lyrics-playlist-section .song-row").first();
+    await expect(row).toBeVisible({ timeout: 10000 });
+    await expect(row.locator('[data-testid="status-chips"]')).toBeVisible();
+    await expect(row.locator('[data-testid="chip-text"]')).toBeVisible();
+  });
+});
 
 test.describe("Lyrics dashboard — queue visibility", () => {
   test("queue card renders all three bucket counts and pipeline version", async ({ page }) => {
     await navigateToLyrics(page);
     // Each list item contains label + value; match by containing text
-    await expect(page.locator(".lyrics-queue-counts li").nth(0)).toContainText("Manual:");
+    await expect(page.locator(".lyrics-queue-counts li").nth(0)).toContainText("Ručne:");
     await expect(page.locator(".lyrics-queue-counts li").nth(0)).toContainText("2");
-    await expect(page.locator(".lyrics-queue-counts li").nth(1)).toContainText("New:");
+    await expect(page.locator(".lyrics-queue-counts li").nth(1)).toContainText("Nové:");
     await expect(page.locator(".lyrics-queue-counts li").nth(1)).toContainText("12");
-    await expect(page.locator(".lyrics-queue-counts li").nth(2)).toContainText("Stale:");
+    await expect(page.locator(".lyrics-queue-counts li").nth(2)).toContainText("Zastarané:");
     await expect(page.locator(".lyrics-queue-counts li").nth(2)).toContainText("187");
-    await expect(page.locator(".lyrics-pipeline-version")).toContainText("Pipeline version:");
+    await expect(page.locator(".lyrics-pipeline-version")).toContainText("Verzia spracovania:");
     await expect(page.locator(".lyrics-pipeline-version")).toContainText("2");
   });
 
@@ -86,7 +112,7 @@ test.describe("Lyrics dashboard — reprocess triggers", () => {
         req.url().includes("/api/v1/lyrics/reprocess-all-stale") &&
         req.method() === "POST",
     );
-    await page.getByRole("button", { name: "Reprocess all stale" }).click();
+    await page.getByRole("button", { name: "Spracovať všetky zastarané" }).click();
     await postPromise;
   });
 
