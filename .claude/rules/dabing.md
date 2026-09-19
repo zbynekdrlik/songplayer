@@ -215,3 +215,69 @@ sibling `engine_dispatch.rs` (free `dispatch(&mut engine, cmd)`) before adding t
   raises `UnicodeEncodeError`.** The real child is fine (it writes UTF-8 JSON with
   `ensure_ascii=False`); a debug probe must set `PYTHONIOENCODING=utf-8` or write to
   a file, not print SK text to the box console.
+
+# Dabing D3 (#182) — EN/SK subtitles from the dub session (no second transcription)
+
+Owner verdict (18.9.2026): a dubbed video does NOT run a second STT/translation
+pass. The Gemini Live Translate session already returns the EN input
+transcription + the SK output transcription; the dub child saves them as
+`<base>_dub_transcripts.json`, and D3 turns that JSON into a normal
+`sp_core::lyrics::LyricsTrack` so the wall/dashboard render bilingual subtitles
+exactly like song lyrics.
+
+## Transcript JSON schema (`scripts/dub_worker.py::build_transcripts`)
+Each chunk of `<base>_dub_transcripts.json` carries:
+`{index, start_ms, end_ms, at_ms, tempo, en, sk, sk_timed:[{t_ms, text}]}`.
+- `en` = ONE untimed EN string per chunk; `sk` = the chunk's SK string.
+- `sk_timed` = coarse SK fragments stamped by the chunk-local OUTPUT-audio
+  position at arrival (`t_ms`).
+- `at_ms` = the video-timeline offset where the chunk's output lands; `tempo` =
+  the atempo the mix applied. **Both are computed at JSON-write time from the
+  SAME per-chunk result the mix uses** (cached/resumed chunks included — NO
+  re-synthesis, no extra API calls). Pinned by `test_build_transcripts_*`.
+
+## Subtitle builder (`crates/sp-server/src/dabing/subtitles.rs`, pure + tested)
+`transcripts_to_track(&DubTranscripts) -> LyricsTrack`:
+- Fragment `i` occupies the chunk-local output window `(t[i-1], t[i]]` (`t[-1]=0`).
+- Fragments group into LINES: close at sentence punctuation (`. ! ? …`), at 14
+  words (`MAX_WORDS_PER_LINE`), or on a `> 1500 ms` (`LINE_GAP_MS`) arrival gap.
+- Line video time = `at_ms + local_ms / tempo` (legacy JSON without `at_ms`/
+  `tempo` → `start_ms` and `1.0`); `start_ms` clamped ≥ the previous line's
+  `end_ms` (monotonic ACROSS chunks), `end_ms` ≥ `start_ms + 400 ms`
+  (`MIN_LINE_MS`).
+- EN per line = the words of the chunk's `en` covering the same cumulative
+  character fraction `[a,b)` the line covers of the chunk's SK, snapped to word
+  boundaries (deterministic, order-preserving; EN is a reference — exact
+  alignment not required). Empty `en` → empty EN lines; no `sk_timed` → no lines.
+- `words: None`, `source = "gemini-live-translate"` (`SOURCE_LIVE_TRANSLATE`).
+  Every branch is covered in `subtitles_tests.rs`.
+
+## Persist through the SHARED writer (no parallel writer)
+The lyrics worker's JSON-sidecar + DB persist was extracted to
+`lyrics/track_store.rs::persist_lyrics_track` (writes `{youtube_id}_lyrics.json`
++ `mark_video_lyrics_complete`). BOTH the lyrics worker AND
+`dabing/subtitles_store.rs::build_and_store_subtitles` call it — never a second
+writer. The dub worker (`dabing/worker.rs::synthesize`) builds + stores the
+subtitle track after the dub file is finalized and BEFORE `dub_status = ready`;
+a subtitle failure is a WARN log and NEVER fails the dub.
+
+## Lyrics queue skips dub videos
+Every selector bucket in `lyrics/reprocess.rs` (manual/null/stale/fullmix) ANDs
+in ONE shared predicate const `EXCLUDE_DUB_REQUESTED`
+(`AND (v.dub_requested IS NULL OR v.dub_requested = 0)`), and
+`db/models_dabing.rs::set_dub_requested` NO LONGER raises `lyrics_manual_priority`
+(keeps `stem_manual_priority`). A 40-min talk therefore never enters the ★/g35t
+song-lyrics pipeline. `LYRICS_PIPELINE_VERSION` is untouched.
+
+## UI (chain + mixer)
+- `components/dabing_list.rs`: the chain is the real engine chain
+  `stiahnuté → dabing → titulky → pripravené`; a `stemy` step is inserted when
+  the video has or is getting stems (`shows_stems_step`: shown unless
+  `stem_status = "unsupported"`). `prepis`/`preklad` are GONE.
+- `sp_core::mixer_model::dub_channel_labels(has_stems)` +
+  `components/dub_mixer.rs`: WITHOUT stems only 2 faders (`originál` / `dabing`,
+  ambient hidden — the 2-stream over-original mix); WITH stems the full 3-fader
+  strip (`originál hlas` / `dabing` / `ambient`). `has_stems = stem_status ==
+  "done"` for the mixer (current reality), broader for the chain (intent).
+  `e2e/mixer.spec.ts` asserts both fader shapes; `e2e/dabing.spec.ts` both chain
+  shapes; zero console errors.
