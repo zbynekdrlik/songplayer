@@ -141,8 +141,7 @@ pub fn dub_chip(status: Option<&str>) -> StatusChip {
 /// nothing on disk reads `chýba`.
 pub fn file_chip(cached: bool, normalized: bool) -> StatusChip {
     let (label, tone) = if normalized {
-        // TODO(#194 GREEN): normalized file is done → Ok.
-        ("stiahnuté".to_string(), ChipTone::Progress)
+        ("stiahnuté".to_string(), ChipTone::Ok)
     } else if cached {
         ("sťahuje sa".to_string(), ChipTone::Progress)
     } else {
