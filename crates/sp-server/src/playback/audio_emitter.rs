@@ -469,6 +469,61 @@ pub fn emit_one_block<B: NdiBackend>(
     emitted
 }
 
+/// Smallest spin margin before a grid slot (2 ms) — also the margin of a
+/// pipeline that carries no audio.
+pub const SPIN_MARGIN_MIN_100NS: i64 = 20_000;
+/// Largest spin margin (6 ms): a long stall must never become a long spin.
+pub const SPIN_MARGIN_MAX_100NS: i64 = 60_000;
+/// Headroom added on top of the worst recent coarse-sleep overshoot (0.5 ms).
+const SPIN_HEADROOM_100NS: i64 = 5_000;
+/// How many recent coarse sleeps the margin remembers (~30 s of slots).
+const SPIN_WINDOW: usize = 900;
+/// Silent slots after the last audio block during which the margin stays
+/// precise (~10 s) — a song transition is exactly when jitter matters.
+const AUDIO_HOLD_SLOTS: u32 = 300;
+
+/// Adaptive spin margin for the emit thread's sleep-until (#192 box finding).
+///
+/// On the mostly idle, Balanced-plan box the coarse sleep before a grid slot
+/// overshoots by several ms (parked cores), so a fixed 2 ms spin left the p99
+/// emit jitter at 0.4–5.5 ms. The margin follows the worst recent overshoot plus
+/// headroom, clamped — and only for a pipeline that carries audio; a silent idle
+/// pipeline keeps the cheap minimum so ten idle emitters do not spin.
+#[derive(Debug, Default)]
+pub struct SpinMargin {
+    overshoots_100ns: VecDeque<i64>,
+    /// Slots of precision left; refilled by every audio block, 0 = silent.
+    audio_hold_left: u32,
+}
+
+impl SpinMargin {
+    /// Record how far past its intended wake time one coarse sleep returned.
+    pub fn observe(&mut self, overshoot_100ns: i64) {
+        self.overshoots_100ns.push_back(overshoot_100ns.max(0));
+        while self.overshoots_100ns.len() > SPIN_WINDOW {
+            self.overshoots_100ns.pop_front();
+        }
+    }
+
+    /// Record whether the slot just emitted carried audio or silence.
+    pub fn note_block(&mut self, is_audio: bool) {
+        self.audio_hold_left = if is_audio {
+            AUDIO_HOLD_SLOTS
+        } else {
+            self.audio_hold_left.saturating_sub(1)
+        };
+    }
+
+    /// The spin margin to use for the next slot.
+    pub fn margin_100ns(&self) -> i64 {
+        if self.audio_hold_left == 0 {
+            return SPIN_MARGIN_MIN_100NS;
+        }
+        let worst = self.overshoots_100ns.iter().copied().max().unwrap_or(0);
+        (worst + SPIN_HEADROOM_100NS).clamp(SPIN_MARGIN_MIN_100NS, SPIN_MARGIN_MAX_100NS)
+    }
+}
+
 #[cfg(test)]
 #[path = "audio_emitter_tests.rs"]
 mod audio_emitter_tests;

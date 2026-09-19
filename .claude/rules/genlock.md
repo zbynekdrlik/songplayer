@@ -165,3 +165,14 @@ paths:
   transitions/stalls; `late_blocks` ≈ 0 and `emit_jitter_p99_us` < 500 with the
   TIME_CRITICAL thread. The PACED path (`pipeline_paced.rs`) keeps its own audio
   clock (the Pacer's `AudioGridBuffer` + PLL) and is untouched.
+  **Box finding 19.9.2026 (0.59.0-dev.6):** EVERY pipeline runs an emitter (idle
+  ones emit silence, so receivers never starve), and with the FIXED 2 ms spin the
+  per-minute p99 was 0.4–5.5 ms, not < 0.5 — on the 24-core, ~3 % busy,
+  Balanced-plan Win11 box the coarse `thread::sleep` overshoots by several ms
+  (parked cores), TIME_CRITICAL or not; SongPlayer used 0.10 cores total, so it
+  was NOT spin contention. Cure: `audio_emitter::SpinMargin` (pure, Linux-tested)
+  — margin = worst coarse-sleep overshoot of the last 900 slots + 0.5 ms, clamped
+  2–6 ms, and ONLY while the pipeline carried audio in the last 300 slots (a
+  song transition stays tight; ten silent idle emitters keep the cheap 2 ms).
+  `sleep_until` returns the overshoot; the heartbeat logs `spin_margin_us`.
+  Re-read p99 + SongPlayer CPU on the box after any change here.
