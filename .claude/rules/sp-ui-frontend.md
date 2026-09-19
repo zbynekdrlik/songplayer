@@ -293,6 +293,25 @@ it. Never re-implement a row, a status marker, or an import field per page.
   Slovak ("Pridať" / "Pridávam…" / "Vlož URL videa …"), parameterised only by
   `ImportTarget::{Playlist(id), Dabing}`. Live + Dabing use it identically.
 
+### Two round-2 CI traps (learned #194 r2)
+
+- **Gating the Player mixer slot on `has_content()` removes the
+  `karaoke-now-playing` state line when idle.** That line (the #177 contract read
+  by `post-deploy.spec.ts`) lives INSIDE the `KaraokeMixer`, which only mounts
+  when a song plays. When nothing plays the slot collapses to
+  `player-mixer-idle` ("Mixér — nič nehrá") and `karaoke-now-playing` is absent.
+  Any spec asserting that line must accept EITHER surface (`.or()` +
+  branch on `count()`), because the box is often idle during CI.
+- **A Playwright test that DELIBERATELY forces a non-2xx (e.g. `/__mock/fail-mode`
+  to 500 to exercise `player-error`) makes the browser log a
+  `"Failed to load resource: … 500"` console error.** The shared zero-console
+  `afterEach` then fails. Strip that intentional entry from the collected
+  messages in the test's `finally` (or add it to that test's allow-list) — it is
+  the point of the test, not a bug.
+- **`Option::<T>::new()` does not exist** — `Option` has no `new`; seed an
+  `RwSignal<Option<T>>` with `None::<T>`. The TIER-0 no-compile box can't catch
+  it; it fails Build WASM (`E0599`).
+
 ### Cross-page review checklist (run for every lane that touches `sp-ui`)
 
 Before a `sp-ui` lane is done, the integration review does a CROSS-PAGE pass, not
