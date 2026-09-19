@@ -249,6 +249,50 @@ Playing-but-off-program pipeline to `Paused`, so `state == "Playing"` means the
 wall shows this output) — no server change, no new field. A dub prepared on the
 Dabing playlist plays OFF-program and reads "○ Mimo programu".
 
+### The shared row / chips / import contracts (#194 round 2)
+
+One song looks and behaves the same on every page because ONE component renders
+it. Never re-implement a row, a status marker, or an import field per page.
+
+- **`components/song_row.rs::SongRow`** is the ONE row: a `<div class="song-row"
+  data-testid="song-row" data-video-id=…>` with an optional primary play action
+  (`data-testid="song-row-play"`, glyph `▶`, disabled via `play_ready=false`,
+  same Slovak tooltip everywhere), a `song-row-title` (title — artist), the shared
+  `StatusChips`, and a page-supplied actions slot (`children`). Every page passes
+  ONLY the chips it has data for and ONLY the actions it needs; the play action is
+  omitted where the page has none (the catalog uses "+ Pridať" instead). It is a
+  `<div>` flex row, not a `<table>` row — the Dashboard/Live/catalog lists that
+  used `<table>` are now `<div class="song-list">` of `SongRow`s.
+- **`components/status_chips.rs::StatusChips`** renders a `Vec<ChipView>` as
+  `<span class="status-chips" data-testid="status-chips">` with per-chip
+  `data-testid` = the kind (`chip-stems`/`chip-text`/`chip-dub`/`chip-file`) and
+  class `status-chip chip-<tone>`. A `ChipView` is a `StatusChip` + an optional
+  longer `title` tooltip (e.g. the dabing chain folds into the dub chip's tooltip;
+  the lyrics source+quality fold into the text chip's tooltip).
+- **The label/tone vocabulary is PURE, in `sp_core::status_chip`** (WASM-safe,
+  unit-tested, mutation-gated — sp-ui has no unit-test job). sp-ui builds chips
+  via `stems_chip` / `text_chip` / `dub_chip` / `file_chip` and renders whatever
+  they return. NEVER write a second glyph/word table in sp-ui (the old
+  `video_list_stems::stems_glyph` + `karaoke_mixer::state_label` did, and diverged
+  — both now defer to the shared model).
+
+  | Chip | Wire field(s) | States → Slovak label |
+  |---|---|---|
+  | `chip-file` | `cached`, `normalized` | normalized→`stiahnuté` · cached→`sťahuje sa` · else→`chýba` |
+  | `chip-stems` | `stems_state` (+ opt. queue pos) | ready→`hotové` · processing→`spracúva sa` · queued→`vo fronte (N.)` · unavailable/absent→`nedostupné` · failed→`chyba` |
+  | `chip-text` | lyrics `has_lyrics`/`lyrics_reference`/`is_stale` | reference→`★ overený` · stale→`zastaraný` · has-lyrics→`základný` · none→`chýba` |
+  | `chip-dub` | dub `chain_state`/`dub_status` | ready→`hotový` · failed→`chyba` · queued→`vo fronte` · none/absent→`—` · mid-chain→`beží` |
+
+  The Dashboard videos payload does NOT carry the lyrics text-state, so
+  `video_list` JOINS `GET /api/v1/lyrics/songs?playlist_id=<id>` by `video_id` to
+  build its `chip-text` (the same join `live_setlist` already does) — a frontend
+  join, no server change. Fold the join into the ONE `videos.set(...)` so the
+  `<For>` key can include the text fields (avoids the stale-`<For>` trap).
+- **`components/import_box.rs::ImportBox`** is the ONE paste-URL box
+  (`data-testid="import-box"` / `import-input` / `import-btn` / `import-status`),
+  Slovak ("Pridať" / "Pridávam…" / "Vlož URL videa …"), parameterised only by
+  `ImportTarget::{Playlist(id), Dabing}`. Live + Dabing use it identically.
+
 ### Cross-page review checklist (run for every lane that touches `sp-ui`)
 
 Before a `sp-ui` lane is done, the integration review does a CROSS-PAGE pass, not
