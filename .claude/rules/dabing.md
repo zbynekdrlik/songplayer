@@ -242,9 +242,22 @@ Each chunk of `<base>_dub_transcripts.json` carries:
 - Fragments group into LINES: close at sentence punctuation (`. ! ? …`), at 14
   words (`MAX_WORDS_PER_LINE`), or on a `> 1500 ms` (`LINE_GAP_MS`) arrival gap.
 - Line video time = `at_ms + local_ms / tempo` (legacy JSON without `at_ms`/
-  `tempo` → `start_ms` and `1.0`); `start_ms` clamped ≥ the previous line's
-  `end_ms` (monotonic ACROSS chunks), `end_ms` ≥ `start_ms + 400 ms`
-  (`MIN_LINE_MS`).
+  `tempo` → `start_ms` and `1.0`); `tempo` is clamped to `0.25..=4.0`
+  (NaN/∞/≤0 → 1.0) and `to_video_ms` uses `saturating_add` so a degenerate
+  tempo can't overflow the offset (#182 release-review item 8).
+- **Two-pass timing (#182 release-review item 7 — no MIN-extension drift).**
+  Pass 1 gives each line its TRUE `start` (monotonic — clamped to the PREVIOUS
+  line's START, never its extended end) and its TRUE end. Pass 2
+  (`finalize_line_ends`) sets the displayed `end = max(true_end,
+  start + MIN_LINE_MS)` TRIMMED back to the next line's start when that is
+  earlier (the last line keeps the untrimmed value; a same-start pair gets
+  `start + 1`). This fixes the old bug where clamping each `start` to the
+  previous MIN-EXTENDED `end` made a run of short lines push every later line
+  progressively later (accumulated drift). Result: starts monotonic, no
+  overlap, and a normal line after a run of 100 ms lines keeps its true start.
+- A fragment group whose joined SK is empty after trim produces NO line (#182
+  item 9); an all-blank transcript yields an empty track, so
+  `subtitles_store::build_and_store_subtitles` stores nothing and returns 0.
 - EN per line = the words of the chunk's `en` covering the same cumulative
   character fraction `[a,b)` the line covers of the chunk's SK, snapped to word
   boundaries (deterministic, order-preserving; EN is a reference — exact

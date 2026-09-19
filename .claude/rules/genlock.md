@@ -195,3 +195,18 @@ paths:
   line mid-song is ALWAYS a defect — grep the box log for it after any change.
   The heartbeat also logs `emit_call_max_us` (ring lock + NDI `send_audio`) to
   tell an SDK/lock-delayed slot from a late wake-up.
+  **Round 3 — release code review (0.59.0, #192 items 1–6):** `AudioRing::push_some`
+  now CLEARS + re-fixes the ring layout when a push's `ch` differs from the fixed
+  layout (a mono song after a stereo one must not be read through the old frame
+  size), and accepts only whole frames of the pushed `ch`; `push_blocking`
+  truncates to whole frames and drops a partial-frame residual with one WARN — it
+  can no longer loop forever with `accepted==0` while free space exists (the
+  odd-length-input 250 ms `wait_timeout` spin). At a NATURAL song end
+  `pipeline_audio::drain_if_present` polls the pure `ring_is_drained` (< one block
+  buffered) every 5 ms for ≤ 400 ms so the song's tail is emitted before the next
+  song's `clear_ring` wipes it (natural-end path ONLY — Stop/Play/Shutdown still
+  clear). `AudioEmitter::tick` RE-ANCHORS the grid when this slot's boundary is
+  > 1 s behind `now` (counts `resyncs`, logged in the per-minute heartbeat only)
+  so a suspend/debugger stall never fires a TIME_CRITICAL catch-up burst;
+  `boundary_for` uses a CHECKED `i64::try_from` via the shared `units_for` helper.
+  All Linux-unit-tested with exact boundaries; the drain glue stays `mutants::skip`.

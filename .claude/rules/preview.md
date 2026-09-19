@@ -161,6 +161,43 @@ fragments; a late joiner receives the cached init THEN the next fragment (every
 fragment is keyframe-aligned under `+frag_keyframe`), and a viewer that falls
 behind the broadcast backlog is dropped (never blocks the reader).
 
+## Release code review hardening (0.59.0, #178 items 11–17)
+
+- **`BoxSplitter` poisons above 16 MiB (item 14).** `parse_box_header` and the
+  init/fragment accumulators reject a declared size / accumulator over
+  `MAX_BOX_BYTES = 16 MiB` (32-bit AND `largesize`) via the shared
+  `exceeds_box_cap` — a corrupt/hostile stream can no longer make the splitter
+  allocate gigabytes. `is_poisoned()` exposes the state for tests. Exactly 16 MiB
+  is accepted; 16 MiB + 1 poisons.
+- **`FragmentRelay::reset()` and `close()` (items 17, 12).** `tx` is now a
+  `Mutex<broadcast::Sender>`. `reset()` clears the cached init and is called at
+  each child's START and STOP (so a late joiner after a reset waits for the NEW
+  init). `close()` clears the init AND drops the sender (replacing it with a
+  fresh channel), so every connected viewer's `recv()` returns `Closed` and its
+  WS handler closes the socket — the supervisor calls it when it gives up
+  restarting a dying child.
+- **Encoder-child restart budget + drop guards (`preview_encoder.rs`, items 11,
+  12).** The feeder/reader thread spawns return `io::Result` (no more `.expect`
+  panic); a `ChildGuard` kills+waits the ffmpeg child on every early return /
+  panic (std `Child::drop` does NOT), and an `EncoderReleaseGuard` releases the
+  `encoder_running` flag on every supervisor-thread exit incl. panic (so it can
+  never stick claimed and block future viewers). `supervise` respawns a child
+  that died with viewers connected, at most 3 restarts per rolling 60 s (pure
+  `RestartBudget`), else `relay.close()`.
+- **Preview audio continuity (item 15).** The audio feeder tracks written audio
+  duration vs wall-clock since its first live block and prepends silence (pure
+  `gap_fill_samples`, > 150 ms threshold, capped 10 s/gap) for dropped blocks /
+  pauses / song gaps, so preview audio never drifts EARLIER than the video for
+  the child's life.
+- **WS keepalive + idle deadline (`api/preview.rs`, item 16).** The WS `select!`
+  pings every 5 s and drops the viewer after 15 s of client silence (pure
+  `is_idle`) — a half-open client can no longer keep the encoder child alive.
+  Browsers auto-answer Ping with Pong, so the JS side needs no change.
+- **JS append-queue cap (`sp-ui/preview_player.js`, item 13).** The MSE shim caps
+  the append queue at 40 chunks (drops oldest, then clears the SourceBuffer range
+  and resyncs at the next keyframe fragment) and re-pumps/maintains on a 250 ms
+  interval, cleared in `destroy()`.
+
 ## MSE shim contract (sp-ui, #178 Round 2 + round-3 click-to-start)
 
 `preview_player.js` = a MediaSource + SourceBuffer shim,
