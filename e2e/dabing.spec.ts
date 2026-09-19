@@ -110,6 +110,67 @@ test("a dub-ready video WITHOUT stems renders pripravené (#183 round 2)", async
   );
 });
 
+test("the chain shows stemy + titulky and drops prepis/preklad with stems (#182)", async ({
+  page,
+  request,
+}) => {
+  // #182: the real engine chain. A video with stems shows the stemy step, the
+  // new titulky step, and NO prepis/preklad (subtitles come from the dub session).
+  await request.post("/__mock/dabing-add", {
+    data: {
+      video_id: 350,
+      title: "Kazen so stemami",
+      dub_status: "synth",
+      chain_state: "synth",
+      stem_status: "done",
+    },
+  });
+  await page.goto("/dabing");
+  await expect(page.locator(".dabing-page h2")).toBeVisible({ timeout: 10000 });
+
+  const steps = page
+    .locator('[data-testid="dabing-list"] .dabing-row')
+    .first()
+    .locator('[data-testid="dabing-chain"] .dabing-chain-steps');
+  await expect(steps).toBeVisible({ timeout: 5000 });
+  await expect(steps).toContainText("stemy");
+  await expect(steps).toContainText("titulky");
+  await expect(steps).not.toContainText("prepis");
+  await expect(steps).not.toContainText("preklad");
+});
+
+test("an over-cap dub (unsupported stems) shows no stemy step (#182)", async ({
+  page,
+  request,
+}) => {
+  // A long video the stem worker cannot separate (stem_status "unsupported") is
+  // dubbed over the original; its chain omits the stemy step entirely.
+  await request.post("/__mock/dabing-add", {
+    data: {
+      video_id: 351,
+      title: "Dlha kazen",
+      dub_status: "ready",
+      chain_state: "ready",
+      stem_status: "unsupported",
+      dub_file_path: "/c/dlha_dub.flac",
+    },
+  });
+  await page.goto("/dabing");
+  await expect(page.locator(".dabing-page h2")).toBeVisible({ timeout: 10000 });
+
+  const steps = page
+    .locator('[data-testid="dabing-list"] .dabing-row')
+    .first()
+    .locator('[data-testid="dabing-chain"] .dabing-chain-steps');
+  await expect(steps).toBeVisible({ timeout: 5000 });
+  await expect(steps).toContainText("stiahnuté");
+  await expect(steps).toContainText("titulky");
+  await expect(steps).toContainText("pripravené");
+  await expect(steps).not.toContainText("stemy");
+  await expect(steps).not.toContainText("prepis");
+  await expect(steps).not.toContainText("preklad");
+});
+
 test("the Dabing row toggle flips dub_requested via PATCH (#180)", async ({
   page,
   request,

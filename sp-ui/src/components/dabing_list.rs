@@ -1,8 +1,8 @@
-//! Dabing section list (#180). Renders every dub-requested video newest-first
-//! (from `store.dabing`) with the chain-state glyph row
-//! `stiahnuté → stemy → prepis → preklad → dabing → pripravené` (or
-//! `chyba: <krok>`) and a **Prehrať** button that plays the video on its own
-//! playlist output via the generic play-video endpoint.
+//! Dabing section list (#180, chain rework #182). Renders every dub-requested
+//! video newest-first (from `store.dabing`) with the real engine-chain glyph row
+//! `stiahnuté → dabing → titulky → pripravené` (a `stemy` step is inserted when
+//! the video has or is getting stems), or `chyba: <krok>`, plus a **Prehrať**
+//! button that plays the video on its own playlist output.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -10,27 +10,39 @@ use leptos::task::spawn_local;
 use crate::api;
 use crate::components::dub_mixer::DubMixer;
 
-/// The ordered chain steps + their Slovak labels. The index is the step's
-/// position; a row's `chain_state` resolves to the highest reached index.
-const CHAIN_LABELS: [&str; 6] = [
-    "stiahnuté",
-    "stemy",
-    "prepis",
-    "preklad",
-    "dabing",
-    "pripravené",
-];
+/// Whether the chain shows a `stemy` step — the video has stems or is getting
+/// them. Only an over-cap video (`stem_status = "unsupported"`) is dubbed without
+/// stems (the 2-stream over-original path) and shows no stems step.
+fn shows_stems_step(stem_status: Option<&str>) -> bool {
+    stem_status != Some("unsupported")
+}
 
-/// Map a `chain_state` wire string to the reached step index (0..=5), or `None`
-/// for `failed` (rendered as an error line instead of the glyph row).
-fn reached_step(chain_state: &str) -> Option<usize> {
+/// The ordered chain steps. The real engine chain is
+/// `stiahnuté → dabing → titulky → pripravené`; a `stemy` step is inserted after
+/// `stiahnuté` when the video has or is getting stems (#182 — the old
+/// `prepis`/`preklad` steps are gone, subtitles come from the dub session).
+fn chain_labels(with_stems: bool) -> Vec<&'static str> {
+    if with_stems {
+        vec!["stiahnuté", "stemy", "dabing", "titulky", "pripravené"]
+    } else {
+        vec!["stiahnuté", "dabing", "titulky", "pripravené"]
+    }
+}
+
+/// Map a `chain_state` wire string to the reached step index into
+/// `chain_labels(with_stems)`, or `None` for `failed` (rendered as an error line
+/// instead of the glyph row). `titulky` completes together with `ready`, so a
+/// live `synth` row highlights up to `dabing` and a `ready` row to the end.
+fn reached_step(chain_state: &str, with_stems: bool) -> Option<usize> {
+    let dabing_idx = if with_stems { 2 } else { 1 };
+    let ready_idx = if with_stems { 4 } else { 3 };
     match chain_state {
-        "queued" => Some(0),
-        "stems" => Some(1),
-        "transcript" => Some(2),
-        "translation" => Some(3),
-        "synth" => Some(4),
-        "ready" => Some(5),
+        "queued" => Some(0), // stiahnuté
+        "stems" => Some(if with_stems { 1 } else { 0 }),
+        // transcript/translation are legacy pre-transcript refinements; the dub is
+        // being synthesized (or about to be), so they map to the dabing step.
+        "synth" | "transcript" | "translation" => Some(dabing_idx),
+        "ready" => Some(ready_idx),
         _ => None, // failed / unknown
     }
 }
@@ -38,9 +50,10 @@ fn reached_step(chain_state: &str) -> Option<usize> {
 /// Owned inputs (no borrow of the row) so the returned view is `'static` and can
 /// be embedded in the `<For>` children view (edition-2024 `impl Trait` would
 /// otherwise capture a `&DubRow` lifetime → E0515).
-fn chain_row(chain_state: String, dub_error: Option<String>) -> impl IntoView {
+fn chain_row(chain_state: String, dub_error: Option<String>, with_stems: bool) -> impl IntoView {
     let is_failed = chain_state == "failed";
-    let reached = reached_step(&chain_state);
+    let reached = reached_step(&chain_state, with_stems);
+    let labels = chain_labels(with_stems);
     let err = dub_error.unwrap_or_default();
     view! {
         <div class="dabing-chain" data-testid="dabing-chain">
@@ -54,15 +67,15 @@ fn chain_row(chain_state: String, dub_error: Option<String>) -> impl IntoView {
             } else {
                 view! {
                     <span class="dabing-chain-steps">
-                        {CHAIN_LABELS
-                            .iter()
+                        {labels
+                            .into_iter()
                             .enumerate()
                             .map(|(i, label)| {
                                 let done = reached.map(|r| i <= r).unwrap_or(false);
                                 let sep = if i > 0 { " → " } else { "" };
                                 view! {
                                     <span>{sep}</span>
-                                    <span class=("dabing-step-done", done)>{*label}</span>
+                                    <span class=("dabing-step-done", done)>{label}</span>
                                 }
                             })
                             .collect_view()}
@@ -110,6 +123,7 @@ pub fn DabingList() -> impl IntoView {
                                 let playlist_id = row.playlist_id;
                                 let video_id = row.video_id;
                                 let title = row.title.clone();
+                                let with_stems = shows_stems_step(row.stem_status.as_deref());
                                 view! {
                                     <div class="dabing-row" data-video-id=video_id.to_string()>
                                         <div class="dabing-row-head">
@@ -132,7 +146,11 @@ pub fn DabingList() -> impl IntoView {
                                                 "Prehrať"
                                             </button>
                                         </div>
-                                        {chain_row(row.chain_state.clone(), row.dub_error.clone())}
+                                        {chain_row(
+                                            row.chain_state.clone(),
+                                            row.dub_error.clone(),
+                                            with_stems,
+                                        )}
                                         // #181: the same modern mixer, bound to this
                                         // dub video's blend ratio (inert + labelled
                                         // until the dub is generated).
