@@ -15,6 +15,7 @@
 
 pub mod child;
 pub mod chunk_plan;
+pub mod subtitles;
 pub mod worker;
 
 pub use worker::DubWorker;
