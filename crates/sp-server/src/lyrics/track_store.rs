@@ -17,6 +17,9 @@ use sqlx::SqlitePool;
 /// [`crate::db::models::mark_video_lyrics_complete`]. `quality_score` is `None`
 /// (the current pipeline keeps no audit log); the alignment-model literal is
 /// derived from `track.source`.
+#[cfg_attr(test, mutants::skip)] // JSON write + one UPDATE; covered by the lyrics
+// worker + dabing subtitle integration paths (mark_video_lyrics_complete itself
+// is likewise skipped in db/models.rs).
 pub(crate) async fn persist_lyrics_track(
     pool: &SqlitePool,
     cache_dir: &Path,

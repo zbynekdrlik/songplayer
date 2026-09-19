@@ -131,11 +131,12 @@ const DUB_ROW_SELECT: &str = "SELECT id, playlist_id, title, song, dub_status, \
 
 /// Set (or clear) the dub request on a video. Requesting flips `dub_requested`
 /// on, moves `dub_status` to `'queued'`, stamps `dub_requested_at`, and raises
-/// BOTH the stems and lyrics manual-priority buckets (`stem_manual_priority` /
-/// `lyrics_manual_priority` = 1) so the dub chain's inputs jump their queues
-/// (spec §4). Un-requesting flips `dub_requested` off and resets `dub_status`
-/// to `'none'`; it leaves the manual-priority flags alone (the video may still
-/// want stems/lyrics). Returns the number of rows affected (0 = no such id).
+/// the stems manual-priority bucket (`stem_manual_priority = 1`) so the ambient
+/// stem is separated first. It does NOT raise `lyrics_manual_priority` (#182): a
+/// dubbed talk's EN/SK subtitles come from the Live-session transcript, not the
+/// song-lyrics pipeline, which now skips every dub-requested video. Un-requesting
+/// flips `dub_requested` off and resets `dub_status` to `'none'`; it leaves the
+/// stems flag alone. Returns the number of rows affected (0 = no such id).
 pub async fn set_dub_requested(
     pool: &SqlitePool,
     video_id: i64,
@@ -146,7 +147,7 @@ pub async fn set_dub_requested(
             "UPDATE videos \
              SET dub_requested = 1, dub_status = 'queued', \
                  dub_requested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-                 stem_manual_priority = 1, lyrics_manual_priority = 1 \
+                 stem_manual_priority = 1 \
              WHERE id = ?",
         )
         .bind(video_id)

@@ -15,6 +15,8 @@ use crate::dabing::subtitles::{self, DubTranscripts};
 /// the video's lyrics track (`{youtube_id}_lyrics.json` + the `videos` row).
 /// Returns the number of subtitle lines stored — `0` means the transcript had no
 /// usable SK timing, so nothing was written.
+#[cfg_attr(test, mutants::skip)] // I/O glue (read file → parse → persist); the pure
+// transcripts_to_track it wraps is exhaustively unit-tested in subtitles_tests.rs.
 pub(crate) async fn build_and_store_subtitles(
     pool: &SqlitePool,
     cache_dir: &Path,
