@@ -202,8 +202,10 @@ mixer was "hrozne škaredý"; he wants ONE modern mixer everywhere).
   videos → `PATCH /api/v1/videos/{id}/dub-mix`; the `dabing` fader is the live ratio
   `r`, `originál hlas` is a read-only bed display `= ratio_to_faders(r,has_stems)[0]`
   synced by an `Effect`, `ambient` is fixed) renders per row in `dabing_list.rs`.
-- **Deferred (needs a server change, out of this lane's scope):** the design also
-  wants the dub mixer on a normal playlist card whose now-playing video has
+- **Deferred (needs a server change, out of this lane's scope — returned as a
+  #181 follow-up candidate for the supervisor to file):** the design also wants the
+  dub mixer on a normal playlist card whose now-playing video has
   `dub_status = ready`. The dashboard `now_playing` WS payload (`NowPlayingInfo`)
   does NOT carry `dub_status`, so that placement needs the server to add it to the
-  now-playing message first — the dub mixer ships on the Dabing page only until then.
+  now-playing message first (a `ServerMsg::NowPlaying` + `NowPlayingInfo.dub_status`
+  change). The dub mixer ships on the Dabing page only until that follow-up lands.

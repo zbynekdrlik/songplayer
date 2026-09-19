@@ -95,7 +95,16 @@ pub fn DabingList() -> impl IntoView {
                         <For
                             each=move || dabing.get()
                             key=|r| {
-                                (r.video_id, r.chain_state.clone(), r.dub_error.clone())
+                                // #181: include stem_status so a late stems arrival
+                                // (null → "done" while dub_status stays "ready")
+                                // recreates the row and its DubMixer, refreshing the
+                                // read-only originál-bed display (floored → 1−r).
+                                (
+                                    r.video_id,
+                                    r.chain_state.clone(),
+                                    r.dub_error.clone(),
+                                    r.stem_status.clone(),
+                                )
                             }
                             children=move |row| {
                                 let playlist_id = row.playlist_id;

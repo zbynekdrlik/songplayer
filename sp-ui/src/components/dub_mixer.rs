@@ -10,7 +10,8 @@
 
 use leptos::prelude::*;
 use sp_core::mixer_model::{
-    MixerKind, channel_labels, dub_preset_for_ratio, dub_ratio_for_preset, presets, ratio_to_faders,
+    MixerKind, channel_labels, faders_to_ratio, gains_for_preset, preset_for_gains, presets,
+    ratio_to_faders,
 };
 
 use crate::api;
@@ -97,15 +98,20 @@ pub fn DubMixer(
                 id,
                 label: p.label.to_string(),
                 on_select: Callback::new(move |_| {
-                    r.set(dub_ratio_for_preset(&pid));
+                    // The preset's ratio via the unified model: its fader set's
+                    // `dabing` channel (index 1) is the ratio.
+                    r.set(faders_to_ratio(&gains_for_preset(MixerKind::Dub, &pid, 0.0)));
                     patch_ratio(video_id, r, status);
                 }),
             }
         })
         .collect();
 
-    let active_preset =
-        Signal::derive(move || dub_preset_for_ratio(r.get()).map(str::to_string));
+    // The active preset via the unified model: match the current fader set back to
+    // a preset id (uses the same round-trip the pure model is tested on).
+    let active_preset = Signal::derive(move || {
+        preset_for_gains(MixerKind::Dub, &ratio_to_faders(r.get(), has_stems)).map(str::to_string)
+    });
     let state_line = Signal::derive(move || {
         if ready {
             "Dabing pripravený — nastav pomer dabing / originál".to_string()
