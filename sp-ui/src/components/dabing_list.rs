@@ -8,7 +8,6 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
-use crate::components::dub_mixer::DubMixer;
 
 /// Whether the chain shows a `stemy` step — the video has stems or is getting
 /// them. Only an over-cap video (`stem_status = "unsupported"`) is dubbed without
@@ -124,6 +123,13 @@ pub fn DabingList() -> impl IntoView {
                                 let video_id = row.video_id;
                                 let title = row.title.clone();
                                 let with_stems = shows_stems_step(row.stem_status.as_deref());
+                                // #194: the dub mixer moved to the shared Player at
+                                // the top of the page (one mixer location). A row
+                                // that is NOT the playing item shows its stored blend
+                                // ratio as read-only text instead.
+                                let ready = row.dub_status == "ready";
+                                let ratio_pct = (row.dub_mix_ratio.clamp(0.0, 1.0) * 100.0)
+                                    .round() as i64;
                                 view! {
                                     <div class="dabing-row" data-video-id=video_id.to_string()>
                                         <div class="dabing-row-head">
@@ -151,16 +157,21 @@ pub fn DabingList() -> impl IntoView {
                                             row.dub_error.clone(),
                                             with_stems,
                                         )}
-                                        // #181: the same modern mixer, bound to this
-                                        // dub video's blend ratio (inert + labelled
-                                        // until the dub is generated).
-                                        <DubMixer
-                                            video_id=video_id
-                                            title=title
-                                            dub_status=row.dub_status.clone()
-                                            dub_mix_ratio=row.dub_mix_ratio
-                                            stem_status=row.stem_status.clone()
-                                        />
+                                        {if ready {
+                                            view! {
+                                                <div
+                                                    class="dabing-row-ratio"
+                                                    data-testid="dabing-row-ratio"
+                                                >
+                                                    {format!(
+                                                        "Pomer dabingu: {ratio_pct} % (mix v prehrávači hore)",
+                                                    )}
+                                                </div>
+                                            }
+                                                .into_any()
+                                        } else {
+                                            view! { <span></span> }.into_any()
+                                        }}
                                     </div>
                                 }
                             }

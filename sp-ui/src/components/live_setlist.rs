@@ -1,29 +1,21 @@
 //! Primary control surface of `/live`: the current set list with per-row
-//! actions and the global playback bar. "Pause" + "Play" on the global bar
-//! remember the paused song+position client-side and resume via a single
-//! play-video request with `position_ms` — the server pipeline seeks
-//! atomically before frame submission (issue #88). The server state machine
-//! treats `SceneOff` as Stop, so a plain `/play` POST after `/pause` would
-//! select a fresh random song instead of resuming at the saved position.
+//! actions. #194: the global transport/mode bar that used to live here is gone —
+//! the shared `Player` (rendered by the Live page under the setlist) is the ONE
+//! playback surface. Per-row ▶ still plays a specific song from zero.
 
 use leptos::prelude::*;
 
 use crate::api;
-use crate::store::DashboardStore;
 
 #[component]
 pub fn LiveSetList(
     playlist_id: i64,
     #[prop(into)] refresh: Signal<u64>,
     on_changed: Callback<()>,
-    store: DashboardStore,
 ) -> impl IntoView {
     let items = RwSignal::new(Vec::<serde_json::Value>::new());
     let songs = RwSignal::new(Vec::<serde_json::Value>::new());
     let error_msg = RwSignal::new(String::new());
-    // `Some((video_id, position_ms))` after the operator pressed Pause;
-    // cleared on Play (resume) or on any per-row play click.
-    let paused_state = RwSignal::new(None::<(i64, u64)>);
 
     // Reload whenever `refresh` bumps (add/remove/initial mount).
     let _load = Effect::new(move |_| {
@@ -38,24 +30,6 @@ pub fn LiveSetList(
                 }
                 (Err(e), _) | (_, Err(e)) => error_msg.set(e),
             }
-        });
-    });
-
-    // On mount default the ytlive playlist to "single" so the engine stops
-    // after each song instead of auto-advancing — operators drive song
-    // transitions manually during worship/training sets. They can still
-    // flip the dropdown below to "continuous" or "loop" for a given song.
-    let _default_mode = Effect::new(move |prev_run: Option<()>| {
-        if prev_run.is_some() {
-            return;
-        }
-        leptos::task::spawn_local(async move {
-            let body = serde_json::json!({ "mode": "single" });
-            let _ = api::put_json_empty(
-                &format!("/api/v1/playback/{playlist_id}/mode"),
-                &body,
-            )
-            .await;
         });
     });
 
@@ -114,11 +88,7 @@ pub fn LiveSetList(
                                             class="live-setlist-btn live-setlist-btn-play"
                                             title="Play this song"
                                             on:click=move |_| {
-                                                // Per-row play starts a specific song from zero —
-                                                // clear any global pause state so the next global
-                                                // Play click doesn't try to resume the *previous*
-                                                // paused song instead.
-                                                paused_state.set(None);
+                                                // Per-row play starts a specific song from zero.
                                                 leptos::task::spawn_local(async move {
                                                     if let Err(e) = api::post_live_play_video(
                                                         playlist_id, video_id, None,
@@ -211,119 +181,6 @@ pub fn LiveSetList(
                     />
                 </tbody>
             </table>
-            <div class="live-setlist-controls">
-                <button
-                    class="live-setlist-control-btn"
-                    on:click=move |_| {
-                        // If we have a paused snapshot, resume that same song
-                        // at the recorded position. Otherwise fall through to
-                        // the legacy /play endpoint (fresh selection).
-                        let resume = paused_state.get();
-                        paused_state.set(None);
-                        leptos::task::spawn_local(async move {
-                            if let Some((video_id, position_ms)) = resume {
-                                // Atomic play-from-position (issue #88): send
-                                // video_id + position_ms in one request so the
-                                // pipeline seeks BEFORE frame submission. The old
-                                // play-video + 300ms delay + seek dance was racy —
-                                // seek landed in the outer-loop no-op arm when MF
-                                // preload exceeded 300ms.
-                                if let Err(e) = api::post_live_play_video(
-                                    playlist_id,
-                                    video_id,
-                                    Some(position_ms),
-                                )
-                                .await
-                                {
-                                    error_msg.set(e);
-                                }
-                            } else if let Err(e) = api::post_empty(
-                                &format!("/api/v1/playback/{playlist_id}/play"),
-                            )
-                            .await
-                            {
-                                error_msg.set(e);
-                            }
-                        });
-                    }
-                >"▶ Play"</button>
-                <button
-                    class="live-setlist-control-btn"
-                    on:click=move |_| {
-                        // Snapshot current video + position from the store
-                        // BEFORE we POST /pause — the server transitions to
-                        // WaitingForScene on pause and the NowPlaying stream
-                        // stops updating. Save first, pause after.
-                        //
-                        // If the POST fails (the silent-no-op case #94
-                        // surfaced), roll the snapshot back so the next ▶
-                        // Play click doesn't try to resume a song the
-                        // server never paused. Caught by review on PR #97.
-                        let snapshot = store.now_playing.with(|map| {
-                            map.get(&playlist_id).map(|np| (np.video_id, np.position_ms))
-                        });
-                        paused_state.set(snapshot);
-                        leptos::task::spawn_local(async move {
-                            if let Err(e) = api::post_empty(
-                                &format!("/api/v1/playback/{playlist_id}/pause"),
-                            ).await {
-                                error_msg.set(e);
-                                paused_state.set(None);
-                            }
-                        });
-                    }
-                >"⏸"</button>
-                <button
-                    class="live-setlist-control-btn"
-                    on:click=move |_| {
-                        leptos::task::spawn_local(async move {
-                            if let Err(e) = api::post_empty(
-                                &format!("/api/v1/playback/{playlist_id}/skip"),
-                            ).await {
-                                error_msg.set(e);
-                            }
-                        });
-                    }
-                >"⏭"</button>
-                <button
-                    class="live-setlist-control-btn"
-                    on:click=move |_| {
-                        leptos::task::spawn_local(async move {
-                            if let Err(e) = api::post_empty(
-                                &format!("/api/v1/playback/{playlist_id}/previous"),
-                            ).await {
-                                error_msg.set(e);
-                            }
-                        });
-                    }
-                >"⏮"</button>
-                // Playback mode: "single" stops the engine when the current
-                // song ends (no auto-advance to the next set-list row) —
-                // exactly what the operator wants during a training/worship
-                // set where they drive song flow manually. "continuous"
-                // auto-selects the next row. "loop" replays the current
-                // song until the operator intervenes.
-                <select
-                    class="live-setlist-mode"
-                    title="Playback mode (single = stop after current)"
-                    on:change=move |ev| {
-                        let val = event_target_value(&ev);
-                        leptos::task::spawn_local(async move {
-                            let body = serde_json::json!({ "mode": val });
-                            if let Err(e) = api::put_json_empty(
-                                &format!("/api/v1/playback/{playlist_id}/mode"),
-                                &body,
-                            ).await {
-                                error_msg.set(e);
-                            }
-                        });
-                    }
-                >
-                    <option value="single" selected=true>"Single (stop after)"</option>
-                    <option value="continuous">"Continuous (auto-next)"</option>
-                    <option value="loop">"Loop current"</option>
-                </select>
-            </div>
         </div>
     }
 }

@@ -1312,3 +1312,99 @@ body {
     cursor: pointer;
 }
 .video-list-col-dub { text-align: center; }
+
+/* ---- #194 unified Player (Dashboard / Live / Dabing) ---- */
+
+.player {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    margin-bottom: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.player-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.player-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.player-title { font-weight: 600; font-size: 1.05em; word-break: break-word; }
+.player-state { color: var(--text-dim); font-size: 0.85em; }
+
+.player-program-badge {
+    flex: none;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.8em;
+    white-space: nowrap;
+    color: var(--text-dim);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+}
+.player-program-badge.on {
+    color: #fff;
+    background: var(--success);
+    border-color: var(--success);
+}
+
+.player-seek-row { display: flex; flex-direction: column; gap: 6px; }
+.player-seek { width: 100%; accent-color: var(--accent); }
+.player-seek:disabled { opacity: 0.5; }
+
+.player-progress {
+    height: 4px;
+    background: var(--bg-input);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.player-progress-fill { height: 100%; background: var(--accent); }
+
+.player-seek-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+}
+.player-pos { font-variant-numeric: tabular-nums; color: var(--text-dim); min-width: 96px; text-align: center; }
+
+.player-transport {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.player-btn {
+    min-height: 40px;
+    padding: 8px 12px;
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+.player-btn:hover:not(:disabled) { border-color: var(--text-dim); }
+.player-btn:disabled { opacity: 0.5; cursor: default; }
+.player-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+.player-mode {
+    min-height: 40px;
+    margin-left: auto;
+    padding: 6px 8px;
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.player-preview { display: flex; flex-direction: column; }
+.player-mixer { display: flex; flex-direction: column; }
+
+.dabing-row-ratio { color: var(--text-dim); font-size: 0.85em; margin-top: 4px; }

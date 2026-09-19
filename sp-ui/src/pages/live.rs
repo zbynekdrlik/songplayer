@@ -11,7 +11,7 @@ use crate::components::import_url_box::ImportUrlBox;
 use crate::components::live_catalog::LiveCatalog;
 use crate::components::live_setlist::LiveSetList;
 use crate::components::lyrics_scroller::LyricsScroller;
-use crate::components::now_playing_card::NowPlayingCard;
+use crate::components::player::Player;
 use crate::store::DashboardStore;
 
 #[component]
@@ -34,6 +34,17 @@ pub fn LivePage() -> impl IntoView {
                     if let Some(p) = yt {
                         if let Some(id) = p["id"].as_i64() {
                             ytlive_id.set(Some(id));
+                            // #194: the forced "single" default (the engine stops
+                            // after each song so the operator drives transitions
+                            // manually) moved off the deleted setlist transport bar
+                            // to here — the page owns the mount-time behaviour, the
+                            // shared Player owns the mode control.
+                            let body = serde_json::json!({ "mode": "single" });
+                            let _ = api::put_json_empty(
+                                &format!("/api/v1/playback/{id}/mode"),
+                                &body,
+                            )
+                            .await;
                         }
                     } else {
                         error_msg.set(
@@ -67,15 +78,15 @@ pub fn LivePage() -> impl IntoView {
                                 playlist_id=id
                                 refresh=Signal::from(set_list_version)
                                 on_changed=bump
-                                store=store.clone()
                             />
                         </section>
 
-                        // 2. Compact player: now-playing metadata + current/next
-                        //    lyric line. Sits right under the setlist so the
-                        //    operator can glance up from a tap to see state.
+                        // 2. The ONE shared player (now-playing, badge, seek,
+                        //    transport, mode, preview, mixer) + the lyric line.
+                        //    Sits right under the setlist so the operator can
+                        //    glance up from a tap to see state.
                         <section class="live-section live-section-player">
-                            <NowPlayingCard playlist_id=id store=store.clone() />
+                            <Player playlist_id=id />
                             <LyricsScroller playlist_id=id store=store.clone() />
                         </section>
 
