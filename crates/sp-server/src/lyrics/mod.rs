@@ -29,6 +29,7 @@ pub mod reprocess;
 pub mod spotify_proxy;
 pub mod spotify_resolver;
 pub mod tier1;
+pub mod track_store;
 pub mod translator;
 pub mod worker;
 pub mod worker_g35t;

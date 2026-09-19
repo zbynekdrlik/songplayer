@@ -400,6 +400,37 @@ impl DubWorker {
         if meta.len() < 1_000 {
             anyhow::bail!("dub: produced a suspiciously small {}", out.display());
         }
+
+        // D3 (#182): the dub audio is finalized — build EN/SK subtitles from the
+        // Live-session transcripts and store them as the video's lyrics track
+        // (so the wall renders them), BEFORE the caller marks dub_status = ready.
+        // A subtitle failure must NEVER fail the dub: it is logged and swallowed.
+        let cache_dir = audio_path.parent().unwrap_or_else(|| Path::new("."));
+        match crate::dabing::subtitles_store::build_and_store_subtitles(
+            &self.pool,
+            cache_dir,
+            &job.youtube_id,
+            job.video_id,
+            &transcripts_path,
+        )
+        .await
+        {
+            Ok(0) => info!(
+                video_id = job.video_id,
+                "dub worker: transcript had no usable subtitles"
+            ),
+            Ok(n) => info!(
+                video_id = job.video_id,
+                lines = n,
+                "dub worker: stored EN/SK subtitles"
+            ),
+            Err(e) => warn!(
+                %e,
+                video_id = job.video_id,
+                "dub worker: subtitle build failed (dub unaffected)"
+            ),
+        }
+
         Ok(out)
     }
 

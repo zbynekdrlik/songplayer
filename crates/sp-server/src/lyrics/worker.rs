@@ -767,26 +767,17 @@ impl LyricsWorker {
         )
         .await;
 
-        // Persist JSON + DB row with pipeline_version.
-        // quality_score is None (no audit log in the new pipeline).
-        // Passing None writes SQL NULL — avoids poisoning ORDER BY
-        // lyrics_quality_score ASC NULLS FIRST in the queue selector.
-        let json_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
-        let json_bytes = serde_json::to_vec(&track)?;
-        tokio::fs::write(&json_path, &json_bytes).await?;
-
-        // Pick the alignment-model literal for this success path — see
-        // `alignment_model_for_source`'s doc comment for the precedence.
-        let alignment_model =
-            crate::lyrics::worker_reference::alignment_model_for_source(&track.source);
-
-        crate::db::models::mark_video_lyrics_complete(
+        // Persist JSON sidecar + DB row with pipeline_version, through the shared
+        // writer (#182) the dub subtitle store also uses. quality_score is None
+        // (no audit log in the new pipeline) — writes SQL NULL, avoiding poisoning
+        // ORDER BY lyrics_quality_score ASC NULLS FIRST in the queue selector.
+        crate::lyrics::track_store::persist_lyrics_track(
             &self.pool,
+            &self.cache_dir,
+            &youtube_id,
             video_id,
-            &track.source,
+            &track,
             LYRICS_PIPELINE_VERSION,
-            None,
-            alignment_model,
         )
         .await?;
 
