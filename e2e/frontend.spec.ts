@@ -175,7 +175,7 @@ test("navigating away from the Dashboard does not panic a disposed signal", asyn
   // surfaces via console_error_panic_hook as a console.error, which the
   // beforeEach/afterEach console collector asserts is absent.
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 10000,
   });
 
@@ -188,7 +188,7 @@ test("navigating away from the Dashboard does not panic a disposed signal", asyn
   await expect(page).toHaveURL(/\/lyrics$/);
 
   await page.getByRole("button", { name: "Dashboard", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 5000,
   });
 
@@ -259,7 +259,7 @@ test("global genlock summary reports the worst live pacing-enabled output (#164)
   expect(set.ok()).toBeTruthy();
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 10000,
   });
 
@@ -281,7 +281,7 @@ test("global genlock summary flips to LOCKED after an all-locked fixture (#164)"
   expect(start.ok()).toBeTruthy();
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 10000,
   });
 
@@ -376,7 +376,7 @@ test("a live pacing-enabled UNLOCKED output turns the header badge red UNLOCKED 
   expect(set.ok()).toBeTruthy();
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 10000,
   });
 
@@ -398,7 +398,7 @@ test("lyrics song row gender toggle cycles auto→♂→♀ and PATCHes (#152)",
   // deep link renders no sections (the page iterates store.playlists, seeded
   // by the Dashboard's own fetch — see .claude/rules/sp-ui-frontend.md).
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 10000,
   });
 
