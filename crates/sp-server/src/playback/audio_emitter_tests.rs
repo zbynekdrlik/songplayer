@@ -475,7 +475,7 @@ fn audio_stats_emitter_serialises_under_the_emitter_key() {
 
 /// A margin that has just seen an audio block (so precision is wanted).
 fn carrying() -> SpinMargin {
-    let mut m = SpinMargin::new();
+    let mut m = SpinMargin::default();
     m.note_block(true);
     m
 }
@@ -527,7 +527,7 @@ fn spin_margin_forgets_an_overshoot_after_the_window() {
 #[test]
 fn spin_margin_stays_minimal_on_a_silent_pipeline() {
     // Never carried audio → cheap minimum even with a large overshoot.
-    let mut m = SpinMargin::new();
+    let mut m = SpinMargin::default();
     m.observe(50_000);
     assert_eq!(m.margin_100ns(), 20_000);
     // Audio arrives → precision on.
