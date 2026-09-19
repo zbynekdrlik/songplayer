@@ -185,10 +185,10 @@ pub fn to_stereo(samples: &[f32], channels: u32) -> Option<Vec<f32>> {
 /// The decode-seam A/V-sync lead (ms) for a pipeline's clocking path (#178
 /// round 2). On the SDK-clocked path (`genlock_pacing == false`, so the #192
 /// wall-clock emitter carries the audio) the decoder opens with a 100 ms audio
-/// read-ahead, so at the decode seam the audio LEADS the video by that much;
-/// the encoder child delays its audio input by this to re-sync
-/// ([`build_ffmpeg_args`](super::preview_encoder::build_ffmpeg_args)). The paced
-/// path has no emitter and thus no lead (0).
+/// read-ahead, so at the decode seam the audio LEADS the video by that much; the
+/// encoder's audio feeder absorbs it into the silence preroll
+/// ([`audio_preroll_samples`]) to re-sync (round 3 — the box ffmpeg ignored the
+/// former `-itsoffset` lever). The paced path has no emitter and thus no lead (0).
 pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
     let emitter_present = !genlock_pacing;
     (crate::playback::pipeline::audio_emitter::decoder_tolerance_ms(emitter_present)
@@ -206,17 +206,18 @@ pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
 /// the box-unreliable `-itsoffset` lever (the box ffmpeg kept audio `start_time`
 /// at 0.000 regardless), aligning A/V deterministically on our side instead.
 pub fn audio_preroll_samples(connect_gap_ms: u64, lead_ms: u32) -> usize {
-    ((connect_gap_ms.min(5000) + lead_ms as u64) * 48) as usize
+    ((connect_gap_ms.min(5000) + lead_ms as u64) * 48 * 2) as usize
 }
 
 /// State shared between the decode-side taps, the WS viewers, and the encoder
 /// child. Held behind an `Arc` by [`StreamTap`].
 pub struct StreamShared {
     label: String,
-    /// #178 round 2 A/V-sync lead (ms): how far the decode-seam audio LEADS the
-    /// video on this pipeline's clocking path (100 on the SDK-clocked path from
-    /// the #192 lookahead, 0 on the paced path). The encoder child delays its
-    /// audio input by this much (`-itsoffset`) to bring preview A/V into sync.
+    /// #178 A/V-sync lead (ms): how far the decode-seam audio LEADS the video on
+    /// this pipeline's clocking path (100 on the SDK-clocked path from the #192
+    /// lookahead, 0 on the paced path). The encoder's audio feeder folds this
+    /// into its silence preroll ([`audio_preroll_samples`]) to bring preview A/V
+    /// into sync (round 3 — replaced the box-unreliable `-itsoffset`).
     lead_ms: u32,
     /// Number of connected WS viewers. `0` = the offer fast-path early-out.
     viewers: AtomicUsize,
@@ -332,8 +333,8 @@ impl StreamShared {
     pub fn label(&self) -> &str {
         &self.label
     }
-    /// The decode-seam A/V-sync lead in ms (see the field). The encoder child
-    /// delays its audio input by this to compensate (`build_ffmpeg_args`).
+    /// The decode-seam A/V-sync lead in ms (see the field). The encoder's audio
+    /// feeder folds this into its silence preroll ([`audio_preroll_samples`]).
     pub fn lead_ms(&self) -> u32 {
         self.lead_ms
     }

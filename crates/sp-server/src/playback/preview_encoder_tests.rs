@@ -52,8 +52,9 @@ fn parse_available_encoders_dedups_and_ignores_blank_lines() {
 
 #[test]
 fn ffmpeg_args_are_exact_for_libx264_with_low_latency_tuning() {
-    // lead_ms 0 (paced path) → no -itsoffset; the full vector is unchanged.
-    let args = build_ffmpeg_args(5001, 5002, "libx264", 0);
+    // #178 round 3: only the video input is wall-clock stamped; the f32le PCM
+    // input carries none (sample-count timestamps), and there is no -itsoffset.
+    let args = build_ffmpeg_args(5001, 5002, "libx264");
     let expected: Vec<String> = [
         "-hide_banner",
         "-loglevel",
@@ -112,7 +113,7 @@ fn ffmpeg_args_are_exact_for_libx264_with_low_latency_tuning() {
 
 #[test]
 fn ffmpeg_args_omit_libx264_tuning_for_hardware_encoders() {
-    let args = build_ffmpeg_args(1, 2, "h264_nvenc", 0);
+    let args = build_ffmpeg_args(1, 2, "h264_nvenc");
     // The hardware path uses the codec directly with no -preset/-tune.
     assert!(args.contains(&"h264_nvenc".to_string()));
     assert!(!args.contains(&"-preset".to_string()));
@@ -126,47 +127,17 @@ fn ffmpeg_args_omit_libx264_tuning_for_hardware_encoders() {
 }
 
 #[test]
-fn ffmpeg_args_insert_itsoffset_before_audio_input_for_nonzero_lead() {
-    // SDK-clocked path: the #192 lookahead makes tapped audio LEAD video by
-    // 100 ms, compensated by `-itsoffset 0.100` placed BEFORE the audio input
-    // (delaying audio back into sync). Exact-boundary: value is 0.100, exactly
-    // one occurrence, sitting after the video `-i` and before the audio input.
-    let args = build_ffmpeg_args(7001, 7002, "libx264", 100);
-    let off = args
-        .iter()
-        .position(|a| a == "-itsoffset")
-        .expect("lead 100 ms → -itsoffset present");
-    assert_eq!(args[off + 1], "0.100", "100 ms lead → 0.100 s offset");
-    assert_eq!(
-        args.iter().filter(|a| *a == "-itsoffset").count(),
-        1,
-        "exactly one -itsoffset (only the audio input)"
-    );
-    let video_i = args
-        .iter()
-        .position(|a| a == "tcp://127.0.0.1:7001")
-        .expect("video input URL present");
-    let audio_f = args
-        .iter()
-        .position(|a| a == "f32le")
-        .expect("audio -f f32le present");
-    let audio_i = args
-        .iter()
-        .position(|a| a == "tcp://127.0.0.1:7002")
-        .expect("audio input URL present");
-    assert!(video_i < off, "-itsoffset comes AFTER the video input");
-    assert!(off < audio_f, "-itsoffset comes BEFORE the audio -f f32le");
-    assert!(audio_f < audio_i, "audio format precedes its -i");
-}
-
-#[test]
-fn ffmpeg_args_omit_itsoffset_for_zero_lead() {
-    // Paced path (genlock_pacing=true): lead 0 → no compensation flag at all.
-    let args = build_ffmpeg_args(1, 2, "libx264", 0);
-    assert!(
-        !args.iter().any(|a| a == "-itsoffset"),
-        "lead 0 → no -itsoffset"
-    );
+fn ffmpeg_args_never_contain_itsoffset() {
+    // #178 round 3: `-itsoffset` is REMOVED (the box ffmpeg kept the audio
+    // start_time at 0.000 regardless of it, so it was not a dependable A/V lever
+    // — alignment is done with a silence preroll in the audio feeder instead).
+    for encoder in ["libx264", "h264_nvenc"] {
+        let args = build_ffmpeg_args(7001, 7002, encoder);
+        assert!(
+            !args.iter().any(|a| a == "-itsoffset"),
+            "no -itsoffset argument for {encoder}"
+        );
+    }
 }
 
 #[test]
@@ -175,19 +146,17 @@ fn only_the_video_input_is_wall_clock_stamped() {
     // on bursty PCM made the box's ffmpeg (N-123867, 2026-04) emit ZERO audio
     // packets — an fMP4 whose audio track stays empty never becomes playable in
     // MSE (readyState 1 forever, #178 box) — and mangled the DTS on ffmpeg 6.1.
-    for lead in [0u32, 100] {
-        let args = build_ffmpeg_args(9001, 9002, "libx264", lead);
-        let stamps: Vec<usize> = args
-            .iter()
-            .enumerate()
-            .filter(|(_, a)| *a == "-use_wallclock_as_timestamps")
-            .map(|(i, _)| i)
-            .collect();
-        let video_i = args
-            .iter()
-            .position(|a| a == "tcp://127.0.0.1:9001")
-            .expect("video input URL present");
-        assert_eq!(stamps.len(), 1, "exactly one wall-clock-stamped input");
-        assert!(stamps[0] < video_i, "and it is the video input");
-    }
+    let args = build_ffmpeg_args(9001, 9002, "libx264");
+    let stamps: Vec<usize> = args
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| *a == "-use_wallclock_as_timestamps")
+        .map(|(i, _)| i)
+        .collect();
+    let video_i = args
+        .iter()
+        .position(|a| a == "tcp://127.0.0.1:9001")
+        .expect("video input URL present");
+    assert_eq!(stamps.len(), 1, "exactly one wall-clock-stamped input");
+    assert!(stamps[0] < video_i, "and it is the video input");
 }
