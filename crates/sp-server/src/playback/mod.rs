@@ -317,9 +317,13 @@ impl PlaybackEngine {
     /// never suppressed without evidence. A poisoned lock also reads as `true`
     /// (safe direction — keep the existing ladder behaviour).
     pub(crate) fn output_has_obs_input(&self, playlist_id: i64) -> bool {
+        // `NdiSourceMap` is a tokio `RwLock`; `handle_health_snapshot` is sync,
+        // so use the non-blocking `try_read` (never `blocking_read`, which panics
+        // inside the async engine loop). Momentary writer contention reads as
+        // "unknown → has input" (the safe direction: don't suppress the ladder).
         match &self.ndi_source_map {
             None => true,
-            Some(map) => match map.read() {
+            Some(map) => match map.try_read() {
                 Ok(m) => m.values().any(|&pid| pid == playlist_id),
                 Err(_) => true,
             },
@@ -364,86 +368,6 @@ impl PlaybackEngine {
         handle: std::sync::Arc<std::sync::RwLock<crate::playback::clock_health::ClockHealth>>,
     ) {
         self.clock_health = handle;
-    }
-
-    /// Ensure a pipeline exists for the given playlist, creating one if needed.
-    pub fn ensure_pipeline(&mut self, playlist_id: i64, ndi_name: &str) {
-        self.ensure_pipeline_inner(playlist_id, ndi_name, None);
-    }
-
-    /// #196: like [`ensure_pipeline`], but with an optional one-shot the newly
-    /// spawned pipeline thread fires (carrying the sender's advertised URL) the
-    /// moment its NDI sender is created. `create_startup_senders` passes
-    /// `Some(tx)` and awaits it before creating the next output, which
-    /// serializes `send_create` in `playlist.id` order for a stable name→port
-    /// map. The lazy/runtime path passes `None`. If the pipeline already exists
-    /// (closure not run), the sender is dropped and the receiver sees a closed
-    /// channel — the caller treats that as "already ready".
-    pub(crate) fn ensure_pipeline_inner(
-        &mut self,
-        playlist_id: i64,
-        ndi_name: &str,
-        ready_tx: Option<tokio::sync::oneshot::Sender<Option<String>>>,
-    ) {
-        let event_tx = self.event_tx.clone();
-
-        #[cfg(windows)]
-        let ndi_backend = self.ndi_backend.clone();
-        #[cfg(not(windows))]
-        let ndi_backend: Option<()> = None;
-
-        let genlock_pacing = self.genlock_pacing;
-        let ndi_burn_registry = self.ndi_burn_registry.clone();
-        let preview_registry = self.preview_registry.clone();
-        let ndi_health_registry = self.ndi_health_registry.clone();
-        self.pipelines.entry(playlist_id).or_insert_with(|| {
-            info!(
-                playlist_id,
-                ndi_name, genlock_pacing, "creating playback pipeline"
-            );
-            // #167: count this created pipeline so the heavy-work startup grace
-            // knows how many outputs must report before the wall reading is
-            // trustworthy (runs once — this closure fires only on a vacant entry).
-            ndi_health_registry.register_pipeline();
-            // #151: register this output's burn flag (default OFF, never
-            // persisted) and hand the shared Arc to the pipeline's submitter.
-            let burn_on = ndi_burn_registry.register(ndi_name, genlock_pacing);
-            // #15/#178: register the JPEG + A/V-stream taps (lead = #178 A/V-sync, pure fn).
-            let lead_ms = crate::playback::preview::preview_stream::lead_ms_for(genlock_pacing);
-            let taps = preview_registry.register_taps(playlist_id, lead_ms);
-            let pipeline = PlaybackPipeline::spawn(
-                ndi_name.to_string(),
-                ndi_backend,
-                event_tx,
-                playlist_id,
-                genlock_pacing,
-                burn_on,
-                taps,
-                ready_tx,
-            );
-            PlaylistPipeline {
-                pipeline,
-                state: PlayState::Idle,
-                mode: PlaybackMode::default(),
-                current_video_id: None,
-                scene_active: Arc::new(AtomicBool::new(false)),
-                title_show_abort: None,
-                title_hide_abort: None,
-                cached_song: String::new(),
-                cached_artist: String::new(),
-                cached_duration_ms: 0,
-                cached_suppress_en: false,
-                cached_lyrics_reference: false,
-                last_now_playing_broadcast: None,
-                history: VecDeque::with_capacity(PREVIOUS_HISTORY_CAPACITY),
-                lyrics_state: None,
-                last_presenter_text: None,
-                last_resolume_subtitles_signature: None,
-                last_lyrics_ws_signature: None,
-                cached_position_ms: 0,
-                paused_at: None,
-            }
-        });
     }
 
     /// Receive the next pipeline event (for use in external select! loops).
