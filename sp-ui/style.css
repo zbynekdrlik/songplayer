@@ -254,6 +254,15 @@ body {
     color: var(--text, #eee);
 }
 .preview-btn:hover { filter: brightness(1.2); }
+/* #178 round 3: click-to-start CTA centred in the placeholder box (the preview
+   is on-demand — no encoder child until the operator asks for it). */
+.preview-start-btn {
+    font-size: 0.9rem;
+    padding: 6px 14px;
+    background: var(--accent, #2563eb);
+    color: #fff;
+    border-color: transparent;
+}
 .np-song { font-weight: 600; display: block; }
 .np-artist { color: var(--text-dim); display: block; margin-bottom: 6px; }
 .np-time { font-size: 0.8rem; color: var(--text-dim); }

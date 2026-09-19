@@ -20,15 +20,19 @@ const EVICT_BEHIND_S = 30;
 export class PreviewPlayer {
   // `video` is the <video> element; `path` is the app-relative WS path
   // (e.g. "/api/v1/playback/1/preview.ws") — the ws:// scheme + host are
-  // derived from window.location here.
-  constructor(video, path) {
+  // derived from window.location here. `startMuted` picks the initial mute
+  // state: the card mounts the player from a real click (a user gesture), so
+  // it starts UNMUTED (startMuted=false); if the browser still rejects the
+  // unmuted play(), `_maintain` falls back to muted and the unmute button
+  // remains for the user (#178 round 3).
+  constructor(video, path, startMuted) {
     this.video = video;
     this.queue = [];
     this.sb = null;
     this.ws = null;
     this.destroyed = false;
 
-    video.muted = true;
+    video.muted = !!startMuted;
     video.autoplay = true;
     video.playsInline = true;
 
@@ -102,7 +106,18 @@ export class PreviewPlayer {
     const v = this.video;
     const buf = v.buffered;
     if (buf.length === 0) return;
+    const start = buf.start(0);
     const end = buf.end(buf.length - 1);
+    // A live fMP4 fragment can begin at a non-zero media time, so the element's
+    // currentTime (0 at mount) can sit BEFORE the first buffered sample — MSE
+    // then never renders. Snap into the buffered range (#178 round 3).
+    if (v.currentTime < start) {
+      try {
+        v.currentTime = start + 0.01;
+      } catch (e) {
+        // currentTime may reject during a pending seek — retried next tick.
+      }
+    }
     // Live-edge chase: if we have drifted too far behind the newest buffered
     // media, jump to just behind the edge.
     if (end - v.currentTime > LIVE_EDGE_MAX_S) {
@@ -114,7 +129,17 @@ export class PreviewPlayer {
     }
     if (v.paused) {
       const p = v.play();
-      if (p && p.catch) p.catch(() => {});
+      if (p && p.catch) {
+        p.catch(() => {
+          // An unmuted autoplay can be rejected without a fresh gesture — fall
+          // back to muted playback and retry; the unmute button re-enables audio.
+          if (!v.muted) {
+            v.muted = true;
+            const p2 = v.play();
+            if (p2 && p2.catch) p2.catch(() => {});
+          }
+        });
+      }
     }
     this._evict(false);
   }

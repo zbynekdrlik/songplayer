@@ -30,16 +30,28 @@ pub fn PlaylistCard(
     let songs_open = RwSignal::new(false);
 
     // #178: a stable memo drives whether this card is Playing. While Playing the
-    // card mounts the live A/V preview `<video>` (`preview_video::PreviewVideo`,
-    // which opens the `preview.ws` stream on-demand); otherwise it shows the
-    // placeholder. The #15 JPEG `<img>` + its ~3 fps poll loop are gone — the
-    // stream is the single preview surface in the card (no dual path).
+    // card offers a "▶ Živý náhľad" start control; CLICKING it mounts the live
+    // A/V preview `<video>` (`preview_video::PreviewVideo`, which opens the
+    // `preview.ws` stream on-demand). The #15 JPEG `<img>` + its ~3 fps poll loop
+    // are gone — the stream is the single preview surface in the card (no dual
+    // path). #178 round 3: the preview is CLICK-to-start, not auto-mounted — the
+    // app's own hidden Tauri webview is a permanent viewer, so an auto-mounted
+    // preview ran an encoder child 24/7 while anything played.
     let is_playing = Memo::new(move |_| {
         store.now_playing.with(|m| {
             m.get(&pid)
                 .map(|i| matches!(i.state, PlaybackState::Playing))
                 .unwrap_or(false)
         })
+    });
+    // Whether the operator has started the live preview for this card. Reset
+    // whenever the card leaves the Playing state, so the stream (and its encoder
+    // child) is always torn down when playback stops.
+    let preview_on = RwSignal::new(false);
+    Effect::new(move |_| {
+        if !is_playing.get() {
+            preview_on.set(false);
+        }
     });
 
     view! {
@@ -71,17 +83,38 @@ pub fn PlaylistCard(
             </div>
 
             <div class="now-playing">
-                // #178: the live A/V preview. Mounted only while Playing (opens
-                // the on-demand `preview.ws` stream); the placeholder shows
-                // otherwise. Both share the 16:9 box geometry (style.css) so the
-                // mount/unmount never shifts layout (sp-ui-frontend.md).
+                // #178: the live A/V preview. While Playing the card shows a
+                // start control; clicking it mounts the on-demand `preview.ws`
+                // stream `<video>`. Not playing → the placeholder. All three
+                // share the 16:9 box geometry (style.css) so the transitions
+                // never shift layout (sp-ui-frontend.md).
                 {move || {
-                    if is_playing.get() {
-                        view! { <preview_video::PreviewVideo playlist_id=pid /> }.into_any()
-                    } else {
+                    if !is_playing.get() {
                         view! {
                             <div class="preview-placeholder" data-testid="preview-placeholder">
                                 "Bez náhľadu"
+                            </div>
+                        }
+                            .into_any()
+                    } else if preview_on.get() {
+                        view! {
+                            <preview_video::PreviewVideo
+                                playlist_id=pid
+                                on_stop=Callback::new(move |_| preview_on.set(false))
+                            />
+                        }
+                            .into_any()
+                    } else {
+                        view! {
+                            <div class="preview-placeholder" data-testid="preview-placeholder">
+                                <button
+                                    type="button"
+                                    class="preview-btn preview-start-btn"
+                                    data-testid="preview-start"
+                                    on:click=move |_| preview_on.set(true)
+                                >
+                                    "▶ Živý náhľad"
+                                </button>
                             </div>
                         }
                             .into_any()

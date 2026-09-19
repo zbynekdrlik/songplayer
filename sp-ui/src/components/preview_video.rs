@@ -1,11 +1,14 @@
 //! #178 live A/V preview `<video>` — the wasm_bindgen wrapper over
 //! `preview_player.js` (the MSE shim).
 //!
-//! This component is mounted by `playlist_card.rs` ONLY while the card is
-//! Playing (the placeholder shows otherwise), so the preview WebSocket +
-//! encoder child exist strictly on demand: mount opens the stream, unmount
-//! (playback stops, or navigation) fires `on_cleanup` which `destroy()`s the
-//! player and closes the socket.
+//! This component is mounted by `playlist_card.rs` only after the operator
+//! CLICKS the "▶ Živý náhľad" start control on a Playing card (round 3: the
+//! app's own hidden Tauri webview is a permanent viewer, so an auto-mounted
+//! preview ran an encoder child 24/7 while anything played — this keeps the
+//! "zero cost when nobody watches" contract). Mount opens the stream from that
+//! real click (a user gesture → the player starts UNMUTED); the stop control,
+//! leaving the Playing state, or navigation fires `on_cleanup` which
+//! `destroy()`s the player and closes the socket → the encoder child dies.
 //!
 //! Disposed-signal safety (sp-ui-frontend.md): the player is driven by an
 //! `Effect` that reads `video_ref.get()` — an Effect is torn down with its
@@ -28,7 +31,7 @@ extern "C" {
     type PreviewPlayer;
 
     #[wasm_bindgen(constructor)]
-    fn new(video: &web_sys::HtmlVideoElement, path: String) -> PreviewPlayer;
+    fn new(video: &web_sys::HtmlVideoElement, path: String, start_muted: bool) -> PreviewPlayer;
 
     #[wasm_bindgen(method)]
     fn unmute(this: &PreviewPlayer);
@@ -41,7 +44,13 @@ extern "C" {
 }
 
 #[component]
-pub fn PreviewVideo(playlist_id: i64) -> impl IntoView {
+pub fn PreviewVideo(
+    playlist_id: i64,
+    // Fired by the stop control (and — via the card — when the playlist leaves
+    // the Playing state) so the parent unmounts this component; the resulting
+    // `on_cleanup` tears the player + WebSocket + encoder child down.
+    #[prop(into)] on_stop: Callback<()>,
+) -> impl IntoView {
     let video_ref = NodeRef::<Video>::new();
     // `StoredValue<_, LocalStorage>` (Copy + Send handle, thread-local value)
     // holds the `!Send` player across the effect, the cleanup, and the handlers.
@@ -49,14 +58,17 @@ pub fn PreviewVideo(playlist_id: i64) -> impl IntoView {
 
     // Start the MSE player once the <video> element is actually in the DOM.
     // The effect re-runs when `video_ref` becomes populated; the `is_some`
-    // guard makes starting idempotent.
+    // guard makes starting idempotent. This component only exists after the
+    // operator clicked the start control, so the player starts UNMUTED (that
+    // click is the user gesture; the shim falls back to muted if the browser
+    // still rejects the unmuted play(), and the unmute button stays available).
     Effect::new(move |_| {
         if player.with_value(|p| p.is_some()) {
             return;
         }
         if let Some(el) = video_ref.get() {
             let path = format!("/api/v1/playback/{playlist_id}/preview.ws");
-            player.set_value(Some(PreviewPlayer::new(&el, path)));
+            player.set_value(Some(PreviewPlayer::new(&el, path, false)));
         }
     });
 
@@ -84,6 +96,8 @@ pub fn PreviewVideo(playlist_id: i64) -> impl IntoView {
             }
         });
     };
+    // Tell the parent to unmount us; `on_cleanup` then destroys the player.
+    let on_stop_click = move |_| on_stop.run(());
 
     view! {
         <div class="preview-video-box">
@@ -110,6 +124,14 @@ pub fn PreviewVideo(playlist_id: i64) -> impl IntoView {
                     on:click=on_fullscreen
                 >
                     "⛶ Celá obrazovka"
+                </button>
+                <button
+                    type="button"
+                    class="preview-btn"
+                    data-testid="preview-stop"
+                    on:click=on_stop_click
+                >
+                    "⏹ Zastaviť náhľad"
                 </button>
             </div>
         </div>
