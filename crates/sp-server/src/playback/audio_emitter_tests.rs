@@ -470,3 +470,75 @@ fn audio_stats_emitter_serialises_under_the_emitter_key() {
     let default_json = serde_json::to_value(AudioStats::default()).unwrap();
     assert_eq!(default_json["emitter"]["enabled"], false);
 }
+
+// ── Adaptive spin margin (#192 box finding: coarse-sleep overshoot) ──────────
+
+/// A margin that has just seen an audio block (so precision is wanted).
+fn carrying() -> SpinMargin {
+    let mut m = SpinMargin::new();
+    m.note_block(true);
+    m
+}
+
+#[test]
+fn spin_margin_starts_at_the_minimum() {
+    assert_eq!(carrying().margin_100ns(), 20_000); // 2 ms
+}
+
+#[test]
+fn spin_margin_follows_the_worst_recent_overshoot_plus_headroom() {
+    let mut m = carrying();
+    m.observe(10_000);
+    m.observe(30_000); // worst: 3 ms
+    m.observe(12_000);
+    assert_eq!(m.margin_100ns(), 35_000); // 3 ms + 0.5 ms headroom
+}
+
+#[test]
+fn spin_margin_is_clamped_to_min_and_max() {
+    let mut m = carrying();
+    m.observe(15_000); // 1.5 ms + 0.5 ms = exactly the 2 ms minimum
+    assert_eq!(m.margin_100ns(), 20_000);
+    m.observe(55_000); // 5.5 ms + 0.5 ms = exactly the 6 ms maximum
+    assert_eq!(m.margin_100ns(), 60_000);
+    m.observe(400_000); // a 40 ms stall must not turn into a 40 ms spin
+    assert_eq!(m.margin_100ns(), 60_000);
+}
+
+#[test]
+fn spin_margin_ignores_negative_overshoot() {
+    let mut m = carrying();
+    m.observe(-50_000);
+    assert_eq!(m.margin_100ns(), 20_000);
+}
+
+#[test]
+fn spin_margin_forgets_an_overshoot_after_the_window() {
+    let mut m = carrying();
+    m.observe(40_000);
+    for _ in 0..899 {
+        m.observe(0);
+    }
+    assert_eq!(m.margin_100ns(), 45_000); // still inside the 900-sample window
+    m.observe(0);
+    assert_eq!(m.margin_100ns(), 20_000); // evicted
+}
+
+#[test]
+fn spin_margin_stays_minimal_on_a_silent_pipeline() {
+    // Never carried audio → cheap minimum even with a large overshoot.
+    let mut m = SpinMargin::new();
+    m.observe(50_000);
+    assert_eq!(m.margin_100ns(), 20_000);
+    // Audio arrives → precision on.
+    m.note_block(true);
+    assert_eq!(m.margin_100ns(), 55_000);
+    // 299 silent slots (< 10 s) keep precision — a song transition must stay tight.
+    for _ in 0..299 {
+        m.note_block(false);
+    }
+    assert_eq!(m.margin_100ns(), 55_000);
+    // The 300th silent slot drops back to the minimum.
+    m.note_block(false);
+    assert_eq!(m.margin_100ns(), 20_000);
+}
