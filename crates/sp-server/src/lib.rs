@@ -19,6 +19,7 @@ pub mod panic_hook;
 pub mod playback;
 pub mod playlist;
 pub mod presenter;
+pub mod process_start; // #196: process-start instant for /api/v1/status.uptime_s
 pub mod reprocess;
 pub mod resolume;
 pub mod shutdown;
@@ -151,6 +152,10 @@ pub async fn start(
     config: ServerConfig,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), anyhow::Error> {
+    // #196: record the process start for `/api/v1/status.uptime_s` (the E2E job
+    // skips restarting a freshly-deployed process). Idempotent.
+    crate::process_start::mark_started();
+
     // Install the panic hook FIRST so any panic during startup or steady-state
     // is captured to a durable crash file before release `panic = "abort"`
     // kills the process (#156). Idempotent: the Tauri shell installs it earlier

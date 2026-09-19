@@ -86,6 +86,11 @@ pub struct StatusResponse {
     /// `None` (older clients / the mock stay ok).
     #[serde(default)]
     pub preview_encoder: Option<String>,
+    /// #196: seconds since this SongPlayer process started. The post-deploy E2E
+    /// job reads it to SKIP restarting a process the Deploy job started < 10 min
+    /// ago (item 6 — one restart per push). A missing key deserializes to `0`.
+    #[serde(default)]
+    pub uptime_s: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -674,6 +679,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         lan_url: lan.lan_url.clone(),
         lan_ip: lan.lan_ip.clone(),
         preview_encoder: crate::playback::preview::preview_encoder::chosen_encoder(),
+        uptime_s: crate::process_start::uptime_secs(),
     })
 }
 
