@@ -99,6 +99,20 @@ pub fn App() -> impl IntoView {
     // Start WebSocket connection.
     crate::ws::connect(store);
 
+    // #194 r3: load the playlist list ONCE at the app level so every page
+    // (Lyrics, Live, Dabing) has `store.playlists` — previously only the
+    // Dashboard fetched it, so a cold `/lyrics` / `/live` deep link showed no
+    // playlist sections at all. One shared load, no per-page duplication.
+    Effect::new(move |_| {
+        leptos::task::spawn_local(async move {
+            if let Ok(playlists) =
+                crate::api::get::<Vec<sp_core::models::Playlist>>("/api/v1/playlists").await
+            {
+                store.playlists.set(playlists);
+            }
+        });
+    });
+
     view! {
         <nav class="navbar">
             <span class="logo">"SongPlayer"</span>

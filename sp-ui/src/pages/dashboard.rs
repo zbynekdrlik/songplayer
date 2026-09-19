@@ -2,9 +2,7 @@
 //! playlist preselected) instead of a grid of every playlist card.
 
 use leptos::prelude::*;
-use sp_core::models::Playlist;
 
-use crate::api;
 use crate::components::{
     download_queue, lan_address, ndi_health, obs_status, playlist_selector, playlist_workspace,
     resolume_health, selection,
@@ -15,14 +13,9 @@ use crate::store::DashboardStore;
 pub fn DashboardPage() -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
 
-    // Fetch playlists on mount.
-    let _load = Effect::new(move |_| {
-        leptos::task::spawn_local(async move {
-            if let Ok(playlists) = api::get::<Vec<Playlist>>("/api/v1/playlists").await {
-                store.playlists.set(playlists);
-            }
-        });
-    });
+    // #194 r3: playlists are loaded once at the app level (`App`), so every
+    // page — not only the Dashboard — has `store.playlists`. The Dashboard no
+    // longer fetches them itself.
 
     // #165: auto-follow the playing playlist for the INITIAL selection. Runs
     // until the selection is pinned (a user click / `<select>` / "Prejsť", or a

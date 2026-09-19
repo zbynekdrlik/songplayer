@@ -47,12 +47,11 @@ pub fn LivePage() -> impl IntoView {
                             .await;
                         }
                     } else {
-                        error_msg.set(
-                            "ytlive playlist missing — migration V13 not applied?".to_string(),
-                        );
+                        error_msg
+                            .set("chýba zoznam ytlive — migrácia V13 nebola použitá?".to_string());
                     }
                 }
-                Err(e) => error_msg.set(format!("failed to load playlists: {e}")),
+                Err(e) => error_msg.set(format!("nepodarilo sa načítať zoznamy: {e}")),
             }
         });
     });
@@ -68,7 +67,7 @@ pub fn LivePage() -> impl IntoView {
         <div class="live-page">
             <div class="live-page-error">{move || error_msg.get()}</div>
             {move || match ytlive_id.get() {
-                None => view! { <div>"Loading ytlive playlist…"</div> }.into_any(),
+                None => view! { <div>"Načítavam zoznam ytlive…"</div> }.into_any(),
                 Some(id) => view! {
                     <>
                         // 1. Primary control surface: tap a song to play it,
@@ -100,9 +99,9 @@ pub fn LivePage() -> impl IntoView {
                                 on:click=move |_| add_open.update(|o| *o = !*o)
                             >
                                 {move || if add_open.get() {
-                                    "▾ Add songs to set list"
+                                    "▾ Pridať skladby do zoznamu"
                                 } else {
-                                    "▸ Add songs to set list"
+                                    "▸ Pridať skladby do zoznamu"
                                 }}
                             </button>
                             <div

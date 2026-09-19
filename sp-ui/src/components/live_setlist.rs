@@ -54,7 +54,7 @@ pub fn LiveSetList(
 
     view! {
         <div class="live-setlist">
-            <h2>"Set list ytlive"</h2>
+            <h2>"Zoznam skladieb — ytlive"</h2>
             <div class="live-setlist-error">{move || error_msg.get()}</div>
             <div class="song-list">
                 <For
