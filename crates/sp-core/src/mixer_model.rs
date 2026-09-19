@@ -81,6 +81,18 @@ pub fn channel_labels(kind: MixerKind) -> &'static [&'static str] {
     }
 }
 
+/// The VISIBLE dub channel labels for a video with or without stems (#182). With
+/// stems the full three-fader strip (`originál hlas` / `dabing` / `ambient`);
+/// without stems the ambient bed does not exist (the 2-stream `DubOverOriginal`
+/// mix), so only two faders are shown — the whole `originál` bed and `dabing`.
+pub fn dub_channel_labels(has_stems: bool) -> &'static [&'static str] {
+    if has_stems {
+        &["originál hlas", "dabing", "ambient"]
+    } else {
+        &["originál hlas", "dabing", "ambient"]
+    }
+}
+
 /// Song fader display gains `[vokál, inštrumentál]` for a karaoke preset.
 /// `vocal_gain` (0..=1) only scales the Karaoke (`karaoke_low`) preset's vocals.
 pub fn song_gains_for_preset(preset_id: &str, vocal_gain: f32) -> [f32; 2] {
@@ -213,6 +225,19 @@ mod tests {
             channel_labels(MixerKind::Dub),
             ["originál hlas", "dabing", "ambient"]
         );
+    }
+
+    #[test]
+    fn dub_channels_hide_ambient_without_stems() {
+        // With stems: the full three-fader strip.
+        assert_eq!(
+            dub_channel_labels(true),
+            ["originál hlas", "dabing", "ambient"]
+        );
+        // Without stems: only two faders — ambient is hidden.
+        assert_eq!(dub_channel_labels(false), ["originál", "dabing"]);
+        assert_eq!(dub_channel_labels(false).len(), 2);
+        assert_eq!(dub_channel_labels(true).len(), 3);
     }
 
     // ── Song preset → fader gains ─────────────────────────────────────────────
