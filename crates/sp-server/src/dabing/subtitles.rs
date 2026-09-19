@@ -26,7 +26,7 @@ use sp_core::lyrics::{LyricsLine, LyricsTrack};
 pub const SOURCE_LIVE_TRANSLATE: &str = "gemini-live-translate";
 
 /// Max words in one subtitle line (the wall reads about two lines).
-const MAX_WORDS_PER_LINE: usize = 100;
+const MAX_WORDS_PER_LINE: usize = 14;
 
 /// A larger arrival gap than this between consecutive SK fragments closes the
 /// line (a real speech pause).
@@ -220,7 +220,7 @@ fn en_slice(en_words: &[&str], en_word_chars: &[usize], total_en: usize, a: f64,
     }
     let mut selected: Vec<&str> = Vec::new();
     let mut cum = 0usize;
-    for (w, &wc) in en_words.iter().zip(en_word_chars.iter()) {
+    for (&w, &wc) in en_words.iter().zip(en_word_chars.iter()) {
         let start_frac = cum as f64 / total_en as f64;
         if start_frac >= a && start_frac < b {
             selected.push(w);

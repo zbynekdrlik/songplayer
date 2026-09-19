@@ -9,7 +9,13 @@ fn frag(t_ms: u64, text: &str) -> SkFragment {
     }
 }
 
-fn chunk(start_ms: u64, at_ms: Option<u64>, tempo: Option<f64>, en: &str, frags: Vec<SkFragment>) -> DubChunk {
+fn chunk(
+    start_ms: u64,
+    at_ms: Option<u64>,
+    tempo: Option<f64>,
+    en: &str,
+    frags: Vec<SkFragment>,
+) -> DubChunk {
     DubChunk {
         start_ms,
         at_ms,
@@ -27,7 +33,13 @@ fn build(chunks: Vec<DubChunk>) -> LyricsTrack {
 
 #[test]
 fn track_carries_the_live_translate_source_and_langs() {
-    let t = build(vec![chunk(0, Some(0), Some(1.0), "hello", vec![frag(500, "ahoj")])]);
+    let t = build(vec![chunk(
+        0,
+        Some(0),
+        Some(1.0),
+        "hello",
+        vec![frag(500, "ahoj")],
+    )]);
     assert_eq!(t.source, "gemini-live-translate");
     assert_eq!(t.source, SOURCE_LIVE_TRANSLATE);
     assert_eq!(t.language_source, "en");
@@ -75,16 +87,23 @@ fn ellipsis_and_bang_and_question_all_close_a_line() {
 
 #[test]
 fn line_closes_at_fourteen_words() {
-    // 20 single-word fragments, no punctuation, tight timing → the cap splits
-    // them into a 14-word line then a 6-word line.
+    // 20 single-word fragments (trailing space so the joined line is
+    // whitespace-separated), no punctuation, tight timing → the cap splits them
+    // into a 14-word line then a 6-word line.
     let frags: Vec<SkFragment> = (0..20)
-        .map(|i| frag(100 * (i as u64 + 1), &format!("slovo{i}")))
+        .map(|i| frag(100 * (i as u64 + 1), &format!("slovo{i} ")))
         .collect();
     let t = build(vec![chunk(0, Some(0), Some(1.0), "", frags)]);
     assert_eq!(t.lines.len(), 2);
-    // First line holds exactly 14 fragments/words.
-    assert_eq!(t.lines[0].sk.as_deref().unwrap().split_whitespace().count(), 14);
-    assert_eq!(t.lines[1].sk.as_deref().unwrap().split_whitespace().count(), 6);
+    // First line holds exactly 14 words, the second the remaining 6.
+    assert_eq!(
+        t.lines[0].sk.as_deref().unwrap().split_whitespace().count(),
+        14
+    );
+    assert_eq!(
+        t.lines[1].sk.as_deref().unwrap().split_whitespace().count(),
+        6
+    );
 }
 
 // ── Grouping: arrival-gap pause ──────────────────────────────────────────────
@@ -133,7 +152,13 @@ fn video_time_is_at_ms_plus_local_over_tempo() {
 #[test]
 fn end_is_at_least_min_line_ms_after_start() {
     // A 100 ms line is stretched to the 400 ms floor.
-    let t = build(vec![chunk(0, Some(0), Some(1.0), "hi", vec![frag(100, "ahoj")])]);
+    let t = build(vec![chunk(
+        0,
+        Some(0),
+        Some(1.0),
+        "hi",
+        vec![frag(100, "ahoj")],
+    )]);
     assert_eq!(t.lines[0].start_ms, 0);
     assert_eq!(t.lines[0].end_ms, 400);
 }
@@ -163,7 +188,12 @@ fn multi_chunk_timeline_is_monotonic() {
     assert_eq!(t.lines.len(), 3);
     let mut last = 0;
     for l in &t.lines {
-        assert!(l.start_ms >= last, "start {} < prev end {}", l.start_ms, last);
+        assert!(
+            l.start_ms >= last,
+            "start {} < prev end {}",
+            l.start_ms,
+            last
+        );
         assert!(l.end_ms > l.start_ms);
         last = l.end_ms;
     }
@@ -244,7 +274,13 @@ fn no_chunks_yields_an_empty_track() {
 #[test]
 fn legacy_chunk_uses_start_ms_and_unit_tempo() {
     // No at_ms / tempo (a pre-#182 transcripts JSON) → place at start_ms, tempo 1.
-    let t = build(vec![chunk(5000, None, None, "hi", vec![frag(1000, "ahoj.")])]);
+    let t = build(vec![chunk(
+        5000,
+        None,
+        None,
+        "hi",
+        vec![frag(1000, "ahoj.")],
+    )]);
     assert_eq!(t.lines.len(), 1);
     assert_eq!(t.lines[0].start_ms, 5000); // start_ms + 0/1.0
     assert_eq!(t.lines[0].end_ms, 6000); // start_ms + 1000/1.0
@@ -253,7 +289,13 @@ fn legacy_chunk_uses_start_ms_and_unit_tempo() {
 #[test]
 fn non_positive_tempo_falls_back_to_unit() {
     // A degenerate tempo (0 or NaN) must not divide-by-zero / poison the timeline.
-    let t = build(vec![chunk(0, Some(0), Some(0.0), "hi", vec![frag(1000, "ahoj.")])]);
+    let t = build(vec![chunk(
+        0,
+        Some(0),
+        Some(0.0),
+        "hi",
+        vec![frag(1000, "ahoj.")],
+    )]);
     assert_eq!(t.lines[0].end_ms, 1000);
 }
 
