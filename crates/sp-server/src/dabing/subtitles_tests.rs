@@ -207,18 +207,170 @@ fn end_is_at_least_min_line_ms_after_start() {
 }
 
 #[test]
-fn start_is_clamped_to_the_previous_line_end() {
-    // Two chunks whose raw windows overlap → the 2nd line is pushed after the 1st.
+fn overlapping_chunk_windows_trim_the_earlier_line_no_drift() {
+    // #182 item 7: two chunks whose raw windows overlap. The later line anchors
+    // to its TRUE start (300) — it is NOT pushed after the first line's
+    // MIN-extended end (the old drift semantics). The first line's displayed end
+    // is trimmed back to the second's start so they do not overlap.
+    // (Old behaviour was line0 [0,500], line1 [500,900] — the drift this fixes.)
     let t = build(vec![
         chunk(0, Some(0), Some(1.0), "one", vec![frag(500, "prve")]),
-        chunk(0, Some(0), Some(1.0), "two", vec![frag(300, "druhe")]),
+        chunk(0, Some(300), Some(1.0), "two", vec![frag(400, "druhe")]),
     ]);
     assert_eq!(t.lines.len(), 2);
     assert_eq!(t.lines[0].start_ms, 0);
-    assert_eq!(t.lines[0].end_ms, 500);
-    // Raw 2nd window is [0, 300] but is clamped to start at 500 and held ≥ 400 ms.
-    assert_eq!(t.lines[1].start_ms, 500);
-    assert_eq!(t.lines[1].end_ms, 900);
+    assert_eq!(
+        t.lines[0].end_ms, 300,
+        "trimmed to the next line's true start"
+    );
+    assert_eq!(
+        t.lines[1].start_ms, 300,
+        "anchored to its true start — no drift"
+    );
+    assert_eq!(t.lines[1].end_ms, 700);
+}
+
+// ── #182 review fixes (release code review, items 7–9) ───────────────────────
+
+#[test]
+fn a_run_of_short_lines_does_not_push_a_later_line_late() {
+    // Five 100 ms lines then a normal line. Under the old MIN-extension-feeds-
+    // prev_end logic each short line stretched to 400 ms and shoved the next
+    // later, accumulating > 1.5 s of drift by the 6th line. The two-pass timing
+    // anchors every line to its TRUE start, so the 6th line still starts at 500.
+    let t = build(vec![chunk(
+        0,
+        Some(0),
+        Some(1.0),
+        "",
+        vec![
+            frag(100, "a."),
+            frag(200, "b."),
+            frag(300, "c."),
+            frag(400, "d."),
+            frag(500, "e."),
+            frag(2000, "koniec."),
+        ],
+    )]);
+    assert_eq!(t.lines.len(), 6);
+    let starts: Vec<u64> = t.lines.iter().map(|l| l.start_ms).collect();
+    assert_eq!(
+        starts,
+        vec![0, 100, 200, 300, 400, 500],
+        "no accumulated drift"
+    );
+    // No overlap and monotonic starts.
+    for w in t.lines.windows(2) {
+        assert!(w[0].end_ms <= w[1].start_ms, "lines must not overlap");
+        assert!(w[1].start_ms >= w[0].start_ms, "starts monotonic");
+    }
+    assert_eq!(
+        t.lines[5].start_ms, 500,
+        "the normal line keeps its true start"
+    );
+    assert_eq!(t.lines[5].end_ms, 2000);
+}
+
+#[test]
+fn starts_stay_monotonic_when_a_later_chunk_goes_backwards() {
+    // A later chunk placed EARLIER on the video timeline must not produce a line
+    // starting before the previous line — the start is clamped up to the
+    // previous start (monotonic even when at_ms/t_ms goes backwards).
+    let t = build(vec![
+        chunk(0, Some(10_000), Some(1.0), "a", vec![frag(1000, "neskor.")]),
+        chunk(0, Some(0), Some(1.0), "b", vec![frag(500, "skor.")]),
+    ]);
+    assert_eq!(t.lines.len(), 2);
+    let starts: Vec<u64> = t.lines.iter().map(|l| l.start_ms).collect();
+    assert!(
+        starts[1] >= starts[0],
+        "starts monotonic even going backwards"
+    );
+    assert_eq!(starts[0], 10_000);
+    assert_eq!(
+        starts[1], 10_000,
+        "the backwards line clamps up to the prev start"
+    );
+    for l in &t.lines {
+        assert!(
+            l.end_ms > l.start_ms,
+            "every line shows for a positive duration"
+        );
+    }
+}
+
+#[test]
+fn a_blank_sk_group_is_skipped() {
+    // A pure-whitespace fragment group (closed by a > 1500 ms gap) yields no
+    // line; only the real group becomes a subtitle (#182 item 9).
+    let t = build(vec![chunk(
+        0,
+        Some(0),
+        Some(1.0),
+        "real words here",
+        vec![frag(500, "   "), frag(3000, "ozaj.")],
+    )]);
+    assert_eq!(t.lines.len(), 1);
+    assert_eq!(t.lines[0].sk.as_deref(), Some("ozaj."));
+}
+
+#[test]
+fn an_all_blank_transcript_yields_no_lines() {
+    // Every fragment blank → no subtitle lines (subtitles_store then stores
+    // nothing and returns 0).
+    let t = build(vec![chunk(
+        0,
+        Some(0),
+        Some(1.0),
+        "en text",
+        vec![frag(1000, "  "), frag(2000, "   ")],
+    )]);
+    assert!(t.lines.is_empty(), "all-blank SK → no subtitle lines");
+}
+
+#[test]
+fn tempo_is_clamped_to_the_supported_range() {
+    // tempo below 0.25 clamps to 0.25 (local/0.25 = local*4); above 4.0 to 4.0.
+    let below = build(vec![chunk(
+        0,
+        Some(0),
+        Some(0.1),
+        "a",
+        vec![frag(1000, "x.")],
+    )]);
+    // 1000 / 0.25 = 4000 (would be 1000/0.1 = 10000 unclamped).
+    assert_eq!(below.lines[0].end_ms, 4000, "tempo < 0.25 clamps to 0.25");
+    let at_low = build(vec![chunk(
+        0,
+        Some(0),
+        Some(0.25),
+        "a",
+        vec![frag(1000, "x.")],
+    )]);
+    assert_eq!(
+        at_low.lines[0].end_ms, 4000,
+        "0.25 is the low boundary, kept"
+    );
+    let above = build(vec![chunk(
+        0,
+        Some(0),
+        Some(10.0),
+        "a",
+        vec![frag(8000, "x.")],
+    )]);
+    // 8000 / 4.0 = 2000 (would be 8000/10 = 800 unclamped).
+    assert_eq!(above.lines[0].end_ms, 2000, "tempo > 4.0 clamps to 4.0");
+    let at_high = build(vec![chunk(
+        0,
+        Some(0),
+        Some(4.0),
+        "a",
+        vec![frag(8000, "x.")],
+    )]);
+    assert_eq!(
+        at_high.lines[0].end_ms, 2000,
+        "4.0 is the high boundary, kept"
+    );
 }
 
 #[test]
