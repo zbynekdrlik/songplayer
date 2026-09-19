@@ -13,7 +13,7 @@
 use leptos::prelude::*;
 use serde::Serialize;
 use sp_core::playback::{PlaybackMode, PlaybackState};
-use sp_core::seek_model::{format_position, seek_target_ms};
+use sp_core::seek_model::{format_position, seek_display_ms, seek_target_ms};
 
 use crate::api;
 use crate::components::dub_mixer::DubMixer;
@@ -33,7 +33,12 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
 
     // --- now-playing derivations (each subscribes to store.now_playing) ---
     let np = move || store.now_playing.get().get(&pid).cloned();
-    let has_content = move || np().map(|i| i.has_now_playing_content()).unwrap_or(false);
+    // #194 hotfix: a `Memo`, not a plain closure. A plain closure re-subscribes
+    // to `store.now_playing` and re-runs on EVERY position tick, so any slot
+    // closure that read `has_content()` (the mixer slot) re-created its child
+    // twice a second — resetting a mid-drag fader. A `Memo` only propagates when
+    // the boolean actually flips, so a position tick no longer touches the slot.
+    let has_content = Memo::new(move |_| np().map(|i| i.has_now_playing_content()).unwrap_or(false));
     let song = move || {
         np().map(|i| i.song)
             .filter(|s| !s.is_empty())
@@ -55,7 +60,7 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
         matches!(
             state(),
             PlaybackState::Playing | PlaybackState::WaitingForScene
-        ) && has_content()
+        ) && has_content.get()
     });
 
     // Playback-command errors (play / pause / skip / prev / seek / mode) surface
@@ -70,8 +75,9 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
 
     // On-program: the honest signal the store already has — the NDI-health
     // registry maps a Playing-but-off-program pipeline to `Paused`, so
-    // `state == "Playing"` means the wall shows this output.
-    let on_program = move || {
+    // `state == "Playing"` means the wall shows this output. #194 hotfix: a
+    // `Memo` so the 1 Hz health poll only re-renders the badge when it flips.
+    let on_program = Memo::new(move |_| {
         store
             .ndi_health
             .get()
@@ -79,7 +85,7 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
             .find(|o| o.playlist_id == pid)
             .map(|o| o.state == "Playing")
             .unwrap_or(false)
-    };
+    });
 
     // --- transport (each command reports failure into `player_error`) ---
     let report = move |ctx: &'static str, r: Result<(), String>| match r {
@@ -125,7 +131,12 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
         });
     };
 
-    // --- seek ---
+    // --- seek (with a drag gate) ---
+    // While the pointer is down the DRAGGED value is authoritative, so the
+    // twice-a-second position tick can't snap the thumb back mid-drag; exactly
+    // ONE seek POST fires on release (`on:change`). #194 hotfix.
+    let seek_dragging = RwSignal::new(false);
+    let seek_drag_ms = RwSignal::new(0_u64);
     let do_seek = move |ms: u64| {
         leptos::task::spawn_local(async move {
             let r = api::seek_playlist(pid, ms).await;
@@ -173,10 +184,10 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                 </div>
                 <span
                     class="player-program-badge"
-                    class:on=on_program
+                    class:on=move || on_program.get()
                     data-testid="player-program-badge"
                 >
-                    {move || if on_program() { "● Na programe" } else { "○ Mimo programu" }}
+                    {move || if on_program.get() { "● Na programe" } else { "○ Mimo programu" }}
                 </span>
             </div>
 
@@ -202,13 +213,32 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                     min="0"
                     max=move || duration().to_string()
                     step="1000"
-                    prop:value=move || position().to_string()
-                    prop:disabled=move || !has_content()
+                    prop:value=move || {
+                        seek_display_ms(seek_dragging.get(), seek_drag_ms.get(), position())
+                            .to_string()
+                    }
+                    prop:disabled=move || !has_content.get()
+                    on:pointerdown=move |_| {
+                        seek_drag_ms.set(position());
+                        seek_dragging.set(true);
+                    }
+                    on:touchstart=move |_| {
+                        seek_drag_ms.set(position());
+                        seek_dragging.set(true);
+                    }
+                    on:input=move |ev| {
+                        if let Ok(v) = event_target_value(&ev).parse::<u64>() {
+                            seek_drag_ms.set(v);
+                        }
+                    }
                     on:change=move |ev| {
                         if let Ok(v) = event_target_value(&ev).parse::<u64>() {
                             do_seek(v);
                         }
+                        seek_dragging.set(false);
                     }
+                    on:pointerup=move |_| seek_dragging.set(false)
+                    on:touchend=move |_| seek_dragging.set(false)
                 />
                 <div class="player-seek-controls">
                     <button
@@ -216,20 +246,27 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                         class="player-btn"
                         data-testid="player-back10"
                         title="Pretočiť o 10 s späť"
-                        prop:disabled=move || !has_content()
+                        prop:disabled=move || !has_content.get()
                         on:click=seek_back
                     >
                         "−10 s"
                     </button>
                     <span class="player-pos" data-testid="player-pos">
-                        {move || format!("{} / {}", format_position(position()), format_position(duration()))}
+                        {move || {
+                            let p = seek_display_ms(
+                                seek_dragging.get(),
+                                seek_drag_ms.get(),
+                                position(),
+                            );
+                            format!("{} / {}", format_position(p), format_position(duration()))
+                        }}
                     </span>
                     <button
                         type="button"
                         class="player-btn"
                         data-testid="player-fwd10"
                         title="Pretočiť o 10 s vpred"
-                        prop:disabled=move || !has_content()
+                        prop:disabled=move || !has_content.get()
                         on:click=seek_fwd
                     >
                         "+10 s"
@@ -321,7 +358,7 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
             // follows that item (dub row → dub mixer, else stems mixer) ---
             <div class="player-mixer">
                 {move || {
-                    if !has_content() {
+                    if !has_content.get() {
                         view! {
                             <div class="player-mixer-idle" data-testid="player-mixer-idle">
                                 "Mixér — nič nehrá"

@@ -45,11 +45,23 @@ pub fn DabingPage() -> impl IntoView {
     let _poll = Effect::new(move |_| {
         crate::store::poll_value("/api/v1/dabing", 2_000, cancelled, move |v| {
             if let Some(pid) = parse_dabing_pid(&v) {
-                let _ = dabing_pid.try_set(Some(pid));
+                // #194 hotfix: only SET when the id actually CHANGES. `RwSignal::
+                // set` fires subscribers unconditionally, so re-setting the same
+                // id every 2 s tick re-ran the `match dabing_pid.get()` view below
+                // and re-created the whole `<Player>` (tearing down its preview
+                // WebSocket right after it opened, and resetting a mid-drag mixer).
+                if dabing_pid.try_get_untracked().flatten() != Some(pid) {
+                    let _ = dabing_pid.try_set(Some(pid));
+                }
             }
             dabing.try_set(parse_dabing(&v)).is_some()
         });
     });
+
+    // #194 hotfix: mount the shared `Player` through a `Memo` so even if the id
+    // signal is ever fired with an unchanged value, the `Player` is created ONCE
+    // and a position tick can never re-create it (the preview + mixer stay live).
+    let player_pid = Memo::new(move |_| dabing_pid.get());
 
     // Refresh immediately after an import so the queued row shows without waiting
     // for the next poll tick.
@@ -57,7 +69,10 @@ pub fn DabingPage() -> impl IntoView {
         spawn_local(async move {
             if let Ok(v) = api::get_dabing().await {
                 if let Some(pid) = parse_dabing_pid(&v) {
-                    dabing_pid.set(Some(pid));
+                    // Same change-gate as the poll — never re-create the Player.
+                    if dabing_pid.get_untracked() != Some(pid) {
+                        dabing_pid.set(Some(pid));
+                    }
                 }
                 dabing.set(parse_dabing(&v));
             }
@@ -69,7 +84,7 @@ pub fn DabingPage() -> impl IntoView {
             <h2>"Dabing"</h2>
             // #194: the ONE shared player for the Dabing playlist output. The
             // rows' play action below start a video on this same output, shown here.
-            {move || match dabing_pid.get() {
+            {move || match player_pid.get() {
                 Some(id) => view! { <Player playlist_id=id /> }.into_any(),
                 None => view! { <span></span> }.into_any(),
             }}

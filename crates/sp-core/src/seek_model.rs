@@ -24,6 +24,15 @@ pub fn seek_fraction(pos_ms: u64, dur_ms: u64) -> f64 {
     (pos_ms as f64 / dur_ms as f64).clamp(0.0, 1.0)
 }
 
+/// The position a seek bar should DISPLAY (and bind to `prop:value`): while the
+/// operator is dragging the thumb, the dragged value is authoritative so a live
+/// position tick can't snap it back; otherwise the live position drives it.
+/// #194 — pins the drag against the twice-a-second now-playing tick. Pure so the
+/// gate's boundary behaviour is unit-tested (sp-ui has no unit-test job).
+pub fn seek_display_ms(dragging: bool, dragged_ms: u64, live_ms: u64) -> u64 {
+    if dragging { dragged_ms } else { live_ms }
+}
+
 /// Format a millisecond position as `M:SS` (seconds zero-padded to two digits).
 /// Minutes are not wrapped at 60 — a 61-minute song reads `61:01`, matching the
 /// operator's mental model of a single running counter.
@@ -110,6 +119,20 @@ mod tests {
     #[test]
     fn seek_fraction_past_end_clamps_to_one() {
         assert_eq!(seek_fraction(250_000, 200_000), 1.0);
+    }
+
+    // ---- seek_display_ms: dragged value while dragging, else the live value --
+
+    #[test]
+    fn seek_display_dragging_returns_the_dragged_value() {
+        // dragged != live so this also kills a "return live" mutant.
+        assert_eq!(seek_display_ms(true, 100_000, 5_000), 100_000);
+    }
+
+    #[test]
+    fn seek_display_not_dragging_returns_the_live_value() {
+        // dragged != live so this also kills a "return dragged" mutant.
+        assert_eq!(seek_display_ms(false, 100_000, 5_000), 5_000);
     }
 
     // ---- format_position: "M:SS", minutes may exceed 59 ----
