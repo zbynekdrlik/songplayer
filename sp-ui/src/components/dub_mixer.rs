@@ -10,7 +10,7 @@
 
 use leptos::prelude::*;
 use sp_core::mixer_model::{
-    MixerKind, channel_labels, faders_to_ratio, gains_for_preset, preset_for_gains, presets,
+    MixerKind, dub_channel_labels, faders_to_ratio, gains_for_preset, preset_for_gains, presets,
     ratio_to_faders,
 };
 
@@ -56,11 +56,13 @@ pub fn DubMixer(
         orig.set(ratio_to_faders(r.get(), has_stems)[0]);
     });
 
-    let labels = channel_labels(MixerKind::Dub);
+    // #182: with stems the full 3-fader strip; without stems the ambient bed does
+    // not exist (the 2-stream DubOverOriginal mix), so only originál + dabing show.
+    let labels = dub_channel_labels(has_stems);
     let ready_sig = Signal::derive(move || ready);
     let orig_note = if has_stems { "podklad" } else { "podklad (min.)" };
-    let channels = vec![
-        // originál hlas — read-only display of the resulting bed level.
+    let mut channels = vec![
+        // originál (hlas) — read-only display of the resulting bed level.
         ChannelSpec {
             label: labels[0].to_string(),
             gain: orig,
@@ -78,16 +80,18 @@ pub fn DubMixer(
             on_change: Callback::new(move |_v: f32| patch_ratio(video_id, r, status)),
             testid: Some("dub-mix-fader".to_string()),
         },
-        // ambient — fixed reference (1.0) until the API exposes a live gain.
-        ChannelSpec {
+    ];
+    if has_stems {
+        // ambient — fixed reference (1.0), meaningful only once stems exist.
+        channels.push(ChannelSpec {
             label: labels[2].to_string(),
             gain: ambient,
             enabled: Signal::derive(|| false),
             fixed_note: Some("pevné".to_string()),
             on_change: Callback::new(|_v: f32| {}),
             testid: None,
-        },
-    ];
+        });
+    }
 
     let preset_specs: Vec<PresetSpec> = presets(MixerKind::Dub)
         .iter()

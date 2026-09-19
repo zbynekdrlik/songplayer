@@ -89,7 +89,7 @@ pub fn dub_channel_labels(has_stems: bool) -> &'static [&'static str] {
     if has_stems {
         &["originál hlas", "dabing", "ambient"]
     } else {
-        &["originál hlas", "dabing", "ambient"]
+        &["originál", "dabing"]
     }
 }
 

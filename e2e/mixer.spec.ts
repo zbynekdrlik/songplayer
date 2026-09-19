@@ -187,11 +187,12 @@ test.describe("dub mixer", () => {
     await page.request.post("/__mock/dabing-reset");
   });
 
-  test("a dub-ready video shows the mixer and the dabing fader PATCHes the ratio (#181)", async ({
+  test("a dub-ready video WITHOUT stems shows two faders and the dabing fader PATCHes the ratio (#181/#182)", async ({
     page,
   }) => {
     // A dub-ready video WITHOUT stems (stem_status null → 2-stream mix) is a
-    // first-class ready state; the mixer must render + drive the ratio API.
+    // first-class ready state; the mixer renders TWO faders (ambient hidden) and
+    // drives the ratio API.
     await page.request.post("/__mock/dabing-add", {
       data: {
         video_id: 700,
@@ -204,8 +205,9 @@ test.describe("dub mixer", () => {
     await page.goto("/dabing");
     const mixer = page.locator(".mixer.mixer-dub").first();
     await expect(mixer).toBeVisible({ timeout: 10000 });
-    // Three channels (originál / dabing / ambient) + three presets.
-    await expect(mixer.locator(".mixer-channel")).toHaveCount(3);
+    // #182: without stems only originál + dabing (no ambient) — two channels +
+    // three presets.
+    await expect(mixer.locator(".mixer-channel")).toHaveCount(2);
     await expect(mixer.locator(".mixer-preset")).toHaveCount(3);
 
     const fader = mixer.locator('[data-testid="dub-mix-fader"]');
@@ -238,6 +240,9 @@ test.describe("dub mixer", () => {
     await page.goto("/dabing");
     const mixer = page.locator(".mixer.mixer-dub").first();
     await expect(mixer).toBeVisible({ timeout: 10000 });
+    // #182: WITH stems the full three-fader strip (originál hlas / dabing /
+    // ambient).
+    await expect(mixer.locator(".mixer-channel")).toHaveCount(3);
 
     const patchPromise = page.waitForRequest(
       (req) =>
