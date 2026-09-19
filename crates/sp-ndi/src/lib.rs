@@ -6,6 +6,7 @@
 
 pub mod deinterleave;
 pub mod error;
+pub mod find;
 pub mod ndi_sdk;
 pub(crate) mod network_ready;
 pub mod sender;
