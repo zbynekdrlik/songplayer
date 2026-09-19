@@ -600,6 +600,62 @@ fn reported_pipelines_counts_distinct_seeded_snapshots() {
     assert_eq!(reg.reported_pipelines(), 2);
 }
 
+// ---- #196 post-restart receiver self-check registry state ----------------
+
+#[test]
+fn seeded_pre_restart_count_is_read_back_else_zero() {
+    let reg = NdiHealthRegistry::new();
+    assert_eq!(reg.pre_restart_count(4), 0, "unseeded output reads 0");
+    let mut baseline = std::collections::HashMap::new();
+    baseline.insert(4, 2);
+    baseline.insert(9, 0);
+    reg.seed_pre_restart_counts(baseline);
+    assert_eq!(reg.pre_restart_count(4), 2, "seeded value read back");
+    assert_eq!(reg.pre_restart_count(9), 0);
+    assert_eq!(reg.pre_restart_count(99), 0, "unknown output still 0");
+}
+
+#[test]
+fn senders_ready_gates_elapsed_since_ready() {
+    let reg = NdiHealthRegistry::new();
+    assert!(
+        reg.elapsed_since_ready().is_none(),
+        "no elapsed before the senders are marked ready"
+    );
+    reg.mark_senders_ready();
+    assert!(
+        reg.elapsed_since_ready().is_some(),
+        "elapsed is Some once ready"
+    );
+}
+
+#[test]
+fn reconnected_latch_records_per_output() {
+    let reg = NdiHealthRegistry::new();
+    assert!(!reg.has_reconnected(4));
+    reg.mark_reconnected(4);
+    assert!(reg.has_reconnected(4));
+    assert!(!reg.has_reconnected(9), "a different output is independent");
+}
+
+#[test]
+fn warned_no_receiver_fires_once_then_clears() {
+    let reg = NdiHealthRegistry::new();
+    assert!(
+        reg.mark_warned_no_receiver(4),
+        "first WARN for an output returns true"
+    );
+    assert!(
+        !reg.mark_warned_no_receiver(4),
+        "a second WARN for the same output returns false (once per output)"
+    );
+    reg.clear_warned_no_receiver(4);
+    assert!(
+        reg.mark_warned_no_receiver(4),
+        "after recovery clears the latch, a new failure warns again"
+    );
+}
+
 /// Minimal seeded snapshot for the readiness-count tests — every field zeroed
 /// except the identity, so `reported_pipelines()` (a map-len read) can be
 /// exercised without the full engine heartbeat path.

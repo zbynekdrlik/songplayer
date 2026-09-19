@@ -94,6 +94,28 @@ pub fn HealthBar() -> impl IntoView {
             <span class="health-seg" data-testid="health-genlock">
                 <GlobalLockBadge />
             </span>
+            // #196: NDI post-restart self-check — how many outputs the server
+            // flagged as still without a receiver after a restart. Hidden when
+            // none (clears the moment they reconnect). `store.ndi_health` is
+            // filled by the GlobalLockBadge poll above.
+            {move || {
+                let n = store
+                    .ndi_health
+                    .get()
+                    .iter()
+                    .filter(|o| {
+                        o.degraded_reason.as_deref()
+                            == Some(health::NO_RECEIVER_AFTER_RESTART_REASON)
+                    })
+                    .count();
+                // `Option<impl IntoView>`: Leptos renders `Some` and nothing for
+                // `None`, so the segment appears only while an output is dark
+                // and clears the moment they reconnect.
+                health::ndi_label(n).map(|(tone, text)| {
+                    let cls = format!("health-seg {}", tone.css_class());
+                    view! { <span class=cls data-testid="health-ndi">{text}</span> }
+                })
+            }}
             // Resolume push-chain
             {move || {
                 let hosts = store.resolume_health.get();

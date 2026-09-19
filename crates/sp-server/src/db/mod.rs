@@ -2,6 +2,7 @@
 
 pub mod models;
 pub mod models_dabing; // #180 dubbing D1 queries (own module, 1000-line cap)
+pub mod models_ndi; // #196 per-output last-known NDI receiver count (own module, 1000-line cap)
 pub mod models_stems; // #14 karaoke stem-separation queries (own module, 1000-line cap)
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};

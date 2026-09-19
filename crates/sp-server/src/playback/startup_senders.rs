@@ -187,6 +187,16 @@ impl PlaybackEngine {
             return;
         }
 
+        // #196 item 4: seed the post-restart receiver self-check baseline from
+        // the settings table (the per-output receiver counts persisted before
+        // this process restarted) BEFORE any sender is created.
+        let baseline = crate::db::models_ndi::all_last_receiver_counts(&self.pool).await;
+        info!(
+            outputs = baseline.len(),
+            "ndi: seeded pre-restart receiver baseline for the post-restart self-check"
+        );
+        self.ndi_health_registry.seed_pre_restart_counts(baseline);
+
         // Port-availability wait — before creating the first sender. Runs on a
         // blocking thread so the ≤ 10 s poll (with real `thread::sleep`) never
         // stalls the async executor during startup.
@@ -221,6 +231,10 @@ impl PlaybackEngine {
         for (id, name) in &ordered {
             self.create_and_record_sender(*id, name).await;
         }
+
+        // #196 item 4: the senders are ready — start the +30 s post-restart
+        // receiver self-check clock.
+        self.ndi_health_registry.mark_senders_ready();
 
         // #196: now that every startup sender exists, read the advertised
         // name→port map via ONE NDIlib_find discovery pass and record it on the

@@ -11,7 +11,7 @@ use crate::playback::clock_health::ClockHealth;
 use crate::playback::lock_state::LOCK_WINDOW_100NS;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{
     RwLock,
     atomic::{AtomicUsize, Ordering},
@@ -265,6 +265,23 @@ pub struct NdiHealthRegistry {
     /// heartbeat (`snapshots` len). The gap is the "not proven idle yet" window
     /// that must read as wall-in-use.
     expected_pipelines: AtomicUsize,
+    /// #196: per-output receiver count read from the settings table at startup
+    /// — the PRE-restart snapshot the post-restart self-check compares against.
+    /// Seeded once (`seed_pre_restart_counts`) before senders are created; never
+    /// overwritten in memory (the live counts are persisted to the DB instead).
+    pre_restart_counts: RwLock<HashMap<i64, i32>>,
+    /// #196: outputs that have reached `connections >= 1` at least once since
+    /// this process started. Once an output reconnects, the restart-reconnect
+    /// succeeded and the self-check never flags it again this process (a later
+    /// legitimate off-program drop is not a restart failure).
+    reconnected: RwLock<HashSet<i64>>,
+    /// #196: outputs already WARN-logged for "no receiver after restart" — so
+    /// the WARN fires once per output, not once per 5 s poll. Cleared when the
+    /// output recovers, so a genuinely new failure re-warns.
+    warned_no_receiver: RwLock<HashSet<i64>>,
+    /// #196: when the startup senders became ready — the +30 s self-check clock.
+    /// `None` until `mark_senders_ready`.
+    senders_ready_at: RwLock<Option<Instant>>,
 }
 
 impl NdiHealthRegistry {
@@ -278,6 +295,98 @@ impl NdiHealthRegistry {
             recovery: NdiRecoveryTracker::new(),
             created_at: Instant::now(),
             expected_pipelines: AtomicUsize::new(0),
+            pre_restart_counts: RwLock::new(HashMap::new()),
+            reconnected: RwLock::new(HashSet::new()),
+            warned_no_receiver: RwLock::new(HashSet::new()),
+            senders_ready_at: RwLock::new(None),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // #196: post-restart receiver self-check state
+    // -----------------------------------------------------------------------
+
+    /// #196: seed the pre-restart per-output receiver baseline (read from the
+    /// settings table at startup). Called once before the startup senders are
+    /// created; a poisoned lock silently keeps the empty baseline.
+    pub fn seed_pre_restart_counts(&self, counts: HashMap<i64, i32>) {
+        if let Ok(mut m) = self.pre_restart_counts.write() {
+            *m = counts;
+        }
+    }
+
+    /// #196: the pre-restart receiver count recorded for `playlist_id`, or `0`
+    /// if none (unknown output, or a poisoned lock — the safe direction: an
+    /// unknown output is treated as "had no receiver", so it is not flagged
+    /// unless it is currently on program).
+    pub fn pre_restart_count(&self, playlist_id: i64) -> i32 {
+        self.pre_restart_counts
+            .read()
+            .ok()
+            .and_then(|m| m.get(&playlist_id).copied())
+            .unwrap_or(0)
+    }
+
+    /// #196: mark that the startup senders are ready — starts the +30 s
+    /// self-check clock. Idempotent: only the FIRST call sets the instant.
+    pub fn mark_senders_ready(&self) {
+        if let Ok(mut t) = self.senders_ready_at.write() {
+            if t.is_none() {
+                *t = Some(Instant::now());
+            }
+        }
+    }
+
+    /// #196: how long since the startup senders were ready, or `None` if they
+    /// are not ready yet (before which nothing is self-checked). A poisoned lock
+    /// reads as `None` (no self-check — the safe direction).
+    ///
+    /// mutants::skip — a wall-clock elapsed read (like `since_created`); a mutant
+    /// is catchable only by a wall-time assertion. The self-check DECISION it
+    /// feeds (`sp_core::health::no_receiver_after_restart`) is exhaustively
+    /// mutation-scored in sp-core.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn elapsed_since_ready(&self) -> Option<Duration> {
+        self.senders_ready_at
+            .read()
+            .ok()
+            .and_then(|t| t.map(|i| i.elapsed()))
+    }
+
+    /// #196: record that `playlist_id` has reached `connections >= 1` since the
+    /// restart (latches the self-check off for it this process).
+    pub fn mark_reconnected(&self, playlist_id: i64) {
+        if let Ok(mut s) = self.reconnected.write() {
+            s.insert(playlist_id);
+        }
+    }
+
+    /// #196: whether `playlist_id` has reconnected since the restart.
+    /// (`is_ok_and`: a poisoned lock reads as `false` inside std, so there is no
+    /// separate mutable fallback literal — the reachable `false` comes from the
+    /// set not containing the id, which the unit test exercises.)
+    pub fn has_reconnected(&self, playlist_id: i64) -> bool {
+        self.reconnected
+            .read()
+            .is_ok_and(|s| s.contains(&playlist_id))
+    }
+
+    /// #196: record the "no receiver after restart" WARN for `playlist_id`.
+    /// Returns `true` iff this is the FIRST time (so the caller logs exactly
+    /// once per output, not once per poll). A poisoned lock returns `false`
+    /// (skip the WARN rather than spam) — the `false` lives inside `is_ok_and`,
+    /// so the only observable return is the reachable `HashSet::insert` result.
+    pub fn mark_warned_no_receiver(&self, playlist_id: i64) -> bool {
+        self.warned_no_receiver
+            .write()
+            .is_ok_and(|mut s| s.insert(playlist_id))
+    }
+
+    /// #196: clear the "no receiver after restart" WARN latch when an output
+    /// recovers, so a genuinely new failure re-warns.
+    pub fn clear_warned_no_receiver(&self, playlist_id: i64) {
+        if let Ok(mut s) = self.warned_no_receiver.write() {
+            s.remove(&playlist_id);
         }
     }
 
@@ -496,6 +605,45 @@ impl crate::playback::PlaybackEngine {
         let has_obs_input = self.output_has_obs_input(playlist_id);
         let degraded_reason = effective_dark_reason(base_degraded_reason, has_obs_input);
 
+        // #196 item 4: post-restart receiver self-check. Once an output reaches
+        // a receiver, latch it as reconnected (and clear any earlier WARN); then
+        // — 30 s after the startup senders are ready — an output on program (or
+        // one that had a receiver before the restart) that still has none is
+        // flagged with a DISTINCT reason, so the receiver-side recovery ladder
+        // is NOT run for it (it cannot clear a restart wedge — only another
+        // restart re-rolls it). This is a NON-dark-wall reason, so `is_dark`
+        // below stays false. The whole decision is the pure, mutation-scored
+        // `sp_core::health::no_receiver_after_restart`.
+        let on_program = matches!(canonical_state, PlaybackStateLabel::Playing);
+        if connections >= 1 {
+            self.ndi_health_registry.mark_reconnected(playlist_id);
+            self.ndi_health_registry
+                .clear_warned_no_receiver(playlist_id);
+        }
+        let degraded_reason = if degraded_reason.as_deref() != Some(NO_OBS_INPUT_REASON)
+            && sp_core::health::no_receiver_after_restart(
+                self.ndi_health_registry.elapsed_since_ready(),
+                self.ndi_health_registry.has_reconnected(playlist_id),
+                on_program,
+                self.ndi_health_registry.pre_restart_count(playlist_id),
+                connections,
+            ) {
+            if self
+                .ndi_health_registry
+                .mark_warned_no_receiver(playlist_id)
+            {
+                warn!(
+                    playlist_id,
+                    ndi_name = %ndi_name,
+                    "ndi: {} — receiver did not return after the restart (self-check; NOT running the ladder)",
+                    sp_core::health::NO_RECEIVER_AFTER_RESTART_REASON,
+                );
+            }
+            Some(sp_core::health::NO_RECEIVER_AFTER_RESTART_REASON.to_string())
+        } else {
+            degraded_reason
+        };
+
         // Look up the previous snapshot from the registry to detect
         // connection-count changes and degraded transitions for logging.
         let prev = self
@@ -505,6 +653,22 @@ impl crate::playback::PlaybackEngine {
             .find(|s| s.playlist_id == playlist_id);
         let prev_connections = prev.as_ref().map(|s| s.connections);
         let prev_degraded = prev.as_ref().and_then(|s| s.degraded_reason.clone());
+
+        // #196: persist the current receiver count whenever it changes (incl.
+        // the first snapshot) so the NEXT restart's self-check baseline knows
+        // this output had (or lost) a receiver before it. Fire-and-forget on a
+        // task so the sync health handler never awaits the DB.
+        if prev_connections != Some(connections) {
+            let pool = self.pool.clone();
+            tokio::spawn(async move {
+                if let Err(e) =
+                    crate::db::models_ndi::set_last_receiver_count(&pool, playlist_id, connections)
+                        .await
+                {
+                    tracing::debug!(playlist_id, %e, "ndi: failed to persist receiver count");
+                }
+            });
+        }
 
         // Lock-state derivation (#149, Lane 1). Read the box-wide clock health,
         // push this heartbeat's cumulative pacing counters into the per-pipeline

@@ -221,6 +221,11 @@ pub struct NdiOutputHealth {
     pub pacing: PacingView,
     #[serde(default)]
     pub audio: AudioView,
+    /// #196: server-set health reason (e.g. the dark-wall reason, "no OBS scene
+    /// for this output", or "no receiver after restart"). The `HealthBar`
+    /// counts the last for its NDI badge. A missing key deserializes to `None`.
+    #[serde(default)]
+    pub degraded_reason: Option<String>,
 }
 
 impl NdiOutputHealth {
