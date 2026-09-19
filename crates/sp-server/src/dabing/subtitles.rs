@@ -83,8 +83,12 @@ pub struct DubTranscripts {
 /// `version` is left `0` here (the persistence layer stamps the real
 /// `LYRICS_PIPELINE_VERSION`); the timeline is monotonic across chunks.
 pub fn transcripts_to_track(t: &DubTranscripts) -> LyricsTrack {
+    // Pass 1 builds each line at its TRUE start (monotonic — never before the
+    // previous line's start) and TRUE end; pass 2 (below) derives the displayed
+    // end (`max(true_end, start + MIN)` trimmed to the next line's start) so a
+    // run of short lines can no longer push every later line later (#182 item 7).
     let mut lines: Vec<LyricsLine> = Vec::new();
-    let mut prev_end_ms: u64 = 0;
+    let mut prev_start_ms: u64 = 0;
 
     for chunk in &t.chunks {
         if chunk.sk_timed.is_empty() {
@@ -92,7 +96,9 @@ pub fn transcripts_to_track(t: &DubTranscripts) -> LyricsTrack {
         }
         let at_ms = chunk.at_ms.unwrap_or(chunk.start_ms);
         let tempo = match chunk.tempo {
-            Some(x) if x.is_finite() && x > 0.0 => x,
+            // Clamp to the supported atempo range (#182 item 8): a tiny tempo
+            // would overflow the local_ms/tempo cast + add.
+            Some(x) if x.is_finite() && x > 0.0 => x.clamp(0.25, 4.0),
             _ => 1.0,
         };
 
@@ -112,6 +118,19 @@ pub fn transcripts_to_track(t: &DubTranscripts) -> LyricsTrack {
         let total_en: usize = en_word_chars.iter().sum();
 
         for (lo, hi) in group_fragments(&chunk.sk_timed) {
+            // SK line text = the line's fragments joined.
+            let sk_text: String = chunk.sk_timed[lo..=hi]
+                .iter()
+                .map(|f| f.text.as_str())
+                .collect::<String>()
+                .trim()
+                .to_string();
+            // A group whose joined SK is empty after trim produces no line
+            // (#182 item 9). It does not advance the monotonic start anchor.
+            if sk_text.is_empty() {
+                continue;
+            }
+
             // Chunk-local output window of the line: (t[lo-1], t[hi]].
             let local_start = if lo == 0 {
                 0
@@ -120,20 +139,12 @@ pub fn transcripts_to_track(t: &DubTranscripts) -> LyricsTrack {
             };
             let local_end = chunk.sk_timed[hi].t_ms.max(local_start);
 
-            // Video time via the placement the mix applied.
-            // Monotonic: never start before the previous line ended, and hold each
-            // line on screen for at least MIN_LINE_MS.
-            let start_ms = to_video_ms(at_ms, local_start, tempo).max(prev_end_ms);
-            let end_ms = to_video_ms(at_ms, local_end, tempo).max(start_ms + MIN_LINE_MS);
-            prev_end_ms = end_ms;
-
-            // SK line text = the line's fragments joined.
-            let sk_text: String = chunk.sk_timed[lo..=hi]
-                .iter()
-                .map(|f| f.text.as_str())
-                .collect::<String>()
-                .trim()
-                .to_string();
+            // Pass 1 timing: the line's TRUE start (monotonic — never before the
+            // previous line's START, not its extended end) and TRUE end (never
+            // before its own start). The displayed end is finalised in pass 2.
+            let start_ms = to_video_ms(at_ms, local_start, tempo).max(prev_start_ms);
+            let true_end_ms = to_video_ms(at_ms, local_end, tempo).max(start_ms);
+            prev_start_ms = start_ms;
 
             // EN reference = the words covering the SAME cumulative character
             // fraction [a, b) the line covers of the SK.
@@ -151,13 +162,16 @@ pub fn transcripts_to_track(t: &DubTranscripts) -> LyricsTrack {
 
             lines.push(LyricsLine {
                 start_ms,
-                end_ms,
+                // Pass 1 stores the TRUE end here; pass 2 rewrites it.
+                end_ms: true_end_ms,
                 en: en_text,
                 sk: Some(sk_text),
                 words: None,
             });
         }
     }
+
+    finalize_line_ends(&mut lines);
 
     LyricsTrack {
         version: 0,
@@ -168,10 +182,37 @@ pub fn transcripts_to_track(t: &DubTranscripts) -> LyricsTrack {
     }
 }
 
+/// Pass 2 (#182 item 7): turn each line's TRUE end (currently in `end_ms`) into
+/// its DISPLAYED end — `max(true_end, start + MIN_LINE_MS)`, trimmed back to the
+/// NEXT line's start when that is earlier so lines never overlap. The last line
+/// keeps its untrimmed value. Trimming may push an end below MIN but the end is
+/// always kept strictly greater than its own start (if the next line starts at
+/// the same time, this line gets `start + 1`).
+fn finalize_line_ends(lines: &mut [LyricsLine]) {
+    for i in 0..lines.len() {
+        let start = lines[i].start_ms;
+        let true_end = lines[i].end_ms;
+        let mut end = true_end.max(start + MIN_LINE_MS);
+        if let Some(next_start) = lines.get(i + 1).map(|n| n.start_ms) {
+            if next_start < end {
+                end = if next_start > start {
+                    next_start
+                } else {
+                    start + 1
+                };
+            }
+        }
+        lines[i].end_ms = end;
+    }
+}
+
 /// Chunk-local output position → video-timeline ms through the placement the mix
 /// applied (`at_ms + local_ms / tempo`). ONE mapping for a line's start and end.
 fn to_video_ms(at_ms: u64, local_ms: u64, tempo: f64) -> u64 {
-    at_ms + (local_ms as f64 / tempo).round() as u64
+    // `as u64` saturates a huge/NaN float to u64::MAX (Rust ≥ 1.45), and
+    // `saturating_add` caps the offset — a degenerate tempo can never overflow
+    // (#182 item 8; tempo is already clamped to 0.25..=4.0 at the call site).
+    at_ms.saturating_add((local_ms as f64 / tempo).round() as u64)
 }
 
 /// Group consecutive SK fragments into lines. Closes a line after fragment `i`
