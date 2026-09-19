@@ -5,6 +5,7 @@
 pub mod clock_health;
 pub mod config;
 pub mod genlock;
+pub mod health;
 pub mod lyrics;
 pub mod metadata;
 pub mod mixer_model;
