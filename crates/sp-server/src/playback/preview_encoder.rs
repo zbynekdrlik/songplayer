@@ -17,6 +17,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -35,9 +36,26 @@ pub const VIEWER_TTL: Duration = Duration::from_secs(5);
 /// The encoder chosen for this process (probed once), exposed on `/api/v1/status`.
 static CHOSEN_ENCODER: OnceLock<String> = OnceLock::new();
 
-/// The encoder this process selected, once a preview child has been spawned.
+/// The encoder that actually WORKS at runtime, pinned once a hardware encoder
+/// has proven broken and we fell back to `libx264` (#178 box: the bundled
+/// ffmpeg's `h264_nvenc` needs an Nvidia driver newer than the box has — it
+/// selects at probe time but fails to open at encode time, producing 0 bytes).
+/// Once set it overrides the probe result for every subsequent child, so the
+/// broken hardware encoder is not retried on every viewer.
+static WORKING_ENCODER: Mutex<Option<String>> = Mutex::new(None);
+
+/// The runtime-pinned working encoder, if a fallback has happened.
+#[cfg_attr(test, mutants::skip)]
+fn pinned_encoder() -> Option<String> {
+    WORKING_ENCODER.lock().ok().and_then(|g| g.clone())
+}
+
+/// The encoder this process is using: the runtime-pinned working one if a
+/// hardware encoder proved broken, else the probe selection. Exposed on
+/// `/api/v1/status`.
+#[cfg_attr(test, mutants::skip)]
 pub fn chosen_encoder() -> Option<String> {
-    CHOSEN_ENCODER.get().cloned()
+    pinned_encoder().or_else(|| CHOSEN_ENCODER.get().cloned())
 }
 
 /// Pick the first ladder encoder present in `available`, else `libx264` (the
@@ -193,7 +211,9 @@ pub fn ensure_running(shared: Arc<StreamShared>, ffmpeg: std::path::PathBuf) {
     if !shared.try_claim_encoder() {
         return; // already running
     }
-    let encoder = probe_and_select(&ffmpeg);
+    // A previously-pinned working encoder (a hardware encoder proved broken and
+    // we fell back) skips the broken probe selection entirely (#178 box).
+    let encoder = pinned_encoder().unwrap_or_else(|| probe_and_select(&ffmpeg));
     let thread_shared = shared.clone();
     let spawned = std::thread::Builder::new()
         .name(format!("preview-enc-{}", shared.label()))
@@ -231,6 +251,12 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
                 );
                 encoder = "libx264".to_string();
                 allow_fallback = false;
+                // Pin libx264 so every subsequent child (this pipeline or any
+                // other) skips the broken hardware encoder instead of eating a
+                // failed attempt per viewer (#178 box: nvenc driver too old).
+                if let Ok(mut g) = WORKING_ENCODER.lock() {
+                    *g = Some("libx264".to_string());
+                }
             }
             RunOutcome::ChildExitedNoInit | RunOutcome::ChildExited => {
                 warn!(
@@ -333,9 +359,16 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
         }
     };
     let a_feeder = spawn_audio_feeder(shared.clone(), a_sock, shutdown.clone());
-    let reader = spawn_stdout_reader(shared.clone(), child.stdout.take());
+    // Per-child "did THIS child produce any stdout" — the relay's cached init
+    // segment persists across children, so it cannot be the failed-child signal:
+    // a broken hardware child (nvenc that never opens its encoder) produces ZERO
+    // bytes yet the relay still holds a prior working child's init, which made
+    // the old `relay().init().is_some()` check misread it as a clean exit and
+    // skip the libx264 fallback (#178 box).
+    let produced = Arc::new(AtomicBool::new(false));
+    let reader = spawn_stdout_reader(shared.clone(), child.stdout.take(), produced.clone());
 
-    let outcome = monitor_loop(shared, &mut child);
+    let outcome = monitor_loop(shared, &mut child, &produced);
 
     // Tear down: stop feeders, kill child, join everything.
     shutdown.store(true, Ordering::Relaxed);
@@ -350,12 +383,19 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
 /// Watch the viewer count + child liveness. Returns when the viewers have been
 /// gone past [`VIEWER_TTL`] or the child exits on its own.
 #[cfg_attr(test, mutants::skip)]
-fn monitor_loop(shared: &Arc<StreamShared>, child: &mut Child) -> RunOutcome {
+fn monitor_loop(
+    shared: &Arc<StreamShared>,
+    child: &mut Child,
+    produced: &Arc<AtomicBool>,
+) -> RunOutcome {
     let mut empty_since: Option<Instant> = None;
     loop {
         // Child exited on its own?
         if let Ok(Some(_)) = child.try_wait() {
-            return if shared.relay().init().is_some() {
+            // A child that emitted ANY stdout this run exited normally; one that
+            // produced nothing (a broken encoder) is a failure eligible for the
+            // libx264 fallback — regardless of the relay's cached init (#178).
+            return if produced.load(Ordering::Relaxed) {
                 RunOutcome::ChildExited
             } else {
                 RunOutcome::ChildExitedNoInit
@@ -462,6 +502,7 @@ fn spawn_audio_feeder(
 fn spawn_stdout_reader(
     shared: Arc<StreamShared>,
     stdout: Option<std::process::ChildStdout>,
+    produced: Arc<AtomicBool>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("preview-read".into())
@@ -477,6 +518,9 @@ fn spawn_stdout_reader(
                 match stdout.read(&mut buf) {
                     Ok(0) => break, // EOF: child gone
                     Ok(n) => {
+                        // Mark this child as having produced output — the
+                        // failed-child signal (see monitor_loop / #178).
+                        produced.store(true, Ordering::Relaxed);
                         for chunk in splitter.push(&buf[..n]) {
                             relay.ingest(chunk);
                         }
