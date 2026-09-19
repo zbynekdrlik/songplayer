@@ -940,6 +940,9 @@ impl Pacer {
             underruns: self.audio_buf.underruns(),
             overflows: self.audio_buf.overflows(),
             buffer_ms: self.audio_buf.buffer_ms(),
+            // The paced path has its own audio clock (AudioGridBuffer + PLL); the
+            // wall-clock emitter (#192) is the SDK-clocked path's tool, disabled here.
+            emitter: Default::default(),
         }
     }
 }

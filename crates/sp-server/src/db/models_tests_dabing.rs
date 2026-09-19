@@ -52,7 +52,7 @@ async fn col_opt_str(pool: &SqlitePool, id: i64, col: &str) -> Option<String> {
 }
 
 #[tokio::test]
-async fn set_dub_requested_true_raises_status_and_both_priority_flags() {
+async fn set_dub_requested_true_raises_status_and_stems_priority_only() {
     let pool = setup().await;
     let id = insert_video(&pool, "v1", "Testimony").await;
 
@@ -66,10 +66,13 @@ async fn set_dub_requested_true_raises_status_and_both_priority_flags() {
         1,
         "requesting a dub must raise the stems manual-priority bucket"
     );
+    // #182: requesting a dub must NOT raise the lyrics manual-priority bucket —
+    // a dubbed talk gets its EN/SK subtitles from the Live-session transcript,
+    // not the song-lyrics pipeline (which the reprocess buckets now also skip).
     assert_eq!(
         col_i64(&pool, id, "lyrics_manual_priority").await,
-        1,
-        "requesting a dub must raise the lyrics manual-priority bucket"
+        0,
+        "requesting a dub must NOT raise the lyrics manual-priority bucket (#182)"
     );
     assert!(
         col_opt_str(&pool, id, "dub_requested_at").await.is_some(),
@@ -271,4 +274,305 @@ fn dub_chain_state_wire_strings_are_stable() {
     assert_eq!(DubChainState::Synth.as_str(), "synth");
     assert_eq!(DubChainState::Ready.as_str(), "ready");
     assert_eq!(DubChainState::Failed.as_str(), "failed");
+}
+
+// ── D4 (#183): dub synthesis chain selectors ────────────────────────────────────
+
+/// Make `id` a downloaded, dub-requested job at `status` with a distinct
+/// `dub_requested_at` (later `req_at` = higher priority) and normalized audio.
+async fn make_dub_job(pool: &SqlitePool, id: i64, status: &str, req_at: &str) {
+    sqlx::query(
+        "UPDATE videos SET dub_requested = 1, normalized = 1, \
+             audio_file_path = '/c/a_audio.flac', dub_status = ?, dub_requested_at = ? \
+         WHERE id = ?",
+    )
+    .bind(status)
+    .bind(req_at)
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[test]
+fn dub_stems_ready_needs_both_non_empty_paths() {
+    assert!(dub_stems_ready(Some("/v.flac"), Some("/i.flac")));
+    assert!(!dub_stems_ready(None, Some("/i.flac")));
+    assert!(!dub_stems_ready(Some("/v.flac"), None));
+    assert!(!dub_stems_ready(Some(""), Some("/i.flac")));
+    assert!(!dub_stems_ready(None, None));
+}
+
+#[test]
+fn dub_stems_state_collapses_presence_and_status() {
+    // Both files present → Ready (regardless of a stale status).
+    assert_eq!(
+        dub_stems_state(Some("/v.flac"), Some("/i.flac"), Some("unsupported")),
+        DubStemsState::Ready
+    );
+    assert_eq!(
+        dub_stems_state(Some("/v.flac"), Some("/i.flac"), None),
+        DubStemsState::Ready
+    );
+    // Absent + unsupported → Unsupported (terminal; will never arrive).
+    assert_eq!(
+        dub_stems_state(None, None, Some("unsupported")),
+        DubStemsState::Unsupported
+    );
+    // Absent + any other status → Pending (a separation may still run).
+    assert_eq!(dub_stems_state(None, None, None), DubStemsState::Pending);
+    assert_eq!(
+        dub_stems_state(None, None, Some("failed")),
+        DubStemsState::Pending
+    );
+    // A half-pair is not Ready.
+    assert_eq!(
+        dub_stems_state(Some("/v.flac"), None, None),
+        DubStemsState::Pending
+    );
+}
+
+#[test]
+fn synth_ready_never_waits_for_stems() {
+    use SynthDecision::*;
+    // Not downloaded → wait for download (the ONLY wait state).
+    assert_eq!(
+        synth_ready(false, DubStemsState::Ready, Some(60_000)),
+        WaitForDownload
+    );
+    // Stems ready → proceed straight to synth.
+    assert_eq!(
+        synth_ready(true, DubStemsState::Ready, Some(60_000)),
+        Proceed
+    );
+    // Stems unsupported (over the 15-min cap) → proceed WITHOUT raising priority
+    // (this is the round-2 fix: the 40-min sample no longer stalls at `stems`).
+    assert_eq!(
+        synth_ready(true, DubStemsState::Unsupported, Some(2_400_000)),
+        Proceed
+    );
+    // Stems pending AND within the 15-min cap → proceed AND raise priority so a
+    // later separation enriches the mix.
+    assert_eq!(
+        synth_ready(true, DubStemsState::Pending, Some(60_000)),
+        ProceedRaisePriority
+    );
+    // Unknown duration is "supported" → still raise priority.
+    assert_eq!(
+        synth_ready(true, DubStemsState::Pending, None),
+        ProceedRaisePriority
+    );
+    // Stems pending but BEYOND the cap (separation would only be unsupported) →
+    // proceed WITHOUT raising priority (raising it would be pointless).
+    assert_eq!(
+        synth_ready(true, DubStemsState::Pending, Some(2_400_000)),
+        Proceed
+    );
+    // Boundary: exactly 15 min is supported (raise); one ms over is not (proceed).
+    assert_eq!(
+        synth_ready(true, DubStemsState::Pending, Some(900_000)),
+        ProceedRaisePriority
+    );
+    assert_eq!(
+        synth_ready(true, DubStemsState::Pending, Some(900_001)),
+        Proceed
+    );
+}
+
+#[tokio::test]
+async fn get_next_dub_job_picks_newest_requested_first() {
+    let pool = setup().await;
+    let a = insert_video(&pool, "va", "A").await;
+    let b = insert_video(&pool, "vb", "B").await;
+    make_dub_job(&pool, a, "queued", "2026-09-18T10:00:00.000Z").await;
+    make_dub_job(&pool, b, "queued", "2026-09-18T11:00:00.000Z").await; // newer
+
+    let job = get_next_dub_job(&pool).await.unwrap().expect("a job");
+    assert_eq!(
+        job.video_id, b,
+        "newest dub_requested_at wins (priority queue)"
+    );
+    assert_eq!(job.dub_status, "queued");
+}
+
+#[tokio::test]
+async fn get_next_dub_job_skips_none_ready_and_undownloaded() {
+    let pool = setup().await;
+    let ready = insert_video(&pool, "vr", "ready").await;
+    let none = insert_video(&pool, "vn", "none").await;
+    let undl = insert_video(&pool, "vu", "undownloaded").await;
+    make_dub_job(&pool, ready, "ready", "2026-09-18T10:00:00.000Z").await;
+    let _ = none; // default dub_status='none' + not requested → ineligible
+    // requested but NOT normalized / no audio:
+    sqlx::query("UPDATE videos SET dub_requested = 1, dub_status = 'queued' WHERE id = ?")
+        .bind(undl)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert!(
+        get_next_dub_job(&pool).await.unwrap().is_none(),
+        "ready/none/undownloaded rows are not eligible"
+    );
+}
+
+#[tokio::test]
+async fn get_next_dub_job_respects_backoff() {
+    let pool = setup().await;
+    let id = insert_video(&pool, "vf", "failed").await;
+    make_dub_job(&pool, id, "failed", "2026-09-18T10:00:00.000Z").await;
+    sqlx::query(
+        "UPDATE videos SET dub_next_attempt_at = \
+             strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+3600 seconds') WHERE id = ?",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(get_next_dub_job(&pool).await.unwrap().is_none());
+
+    sqlx::query(
+        "UPDATE videos SET dub_next_attempt_at = \
+             strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 seconds') WHERE id = ?",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(get_next_dub_job(&pool).await.unwrap().unwrap().video_id, id);
+}
+
+#[tokio::test]
+async fn mark_dub_transitions_advance_status() {
+    let pool = setup().await;
+    let id = insert_video(&pool, "vt", "T").await;
+    make_dub_job(&pool, id, "queued", "2026-09-18T10:00:00.000Z").await;
+
+    // #183 round 2: raising the stems priority does NOT park dub_status at
+    // `stems` — it only raises stem_manual_priority; the dub proceeds to synth.
+    raise_dub_stem_priority(&pool, id).await.unwrap();
+    assert_eq!(
+        col_str(&pool, id, "dub_status").await,
+        "queued",
+        "raising stem priority must NOT change dub_status"
+    );
+    assert_eq!(col_i64(&pool, id, "stem_manual_priority").await, 1);
+
+    mark_dub_synth(&pool, id).await.unwrap();
+    assert_eq!(col_str(&pool, id, "dub_status").await, "synth");
+
+    mark_dub_ready(&pool, id, "/c/a_dub.flac", "gemini-live-translate")
+        .await
+        .unwrap();
+    assert_eq!(col_str(&pool, id, "dub_status").await, "ready");
+    assert_eq!(
+        col_opt_str(&pool, id, "dub_file_path").await,
+        Some("/c/a_dub.flac".to_string())
+    );
+    assert_eq!(
+        col_opt_str(&pool, id, "dub_engine").await,
+        Some("gemini-live-translate".to_string())
+    );
+    assert_eq!(col_i64(&pool, id, "dub_attempts").await, 0);
+}
+
+#[tokio::test]
+async fn dub_ratio_if_ready_only_for_videos_with_a_dub_file() {
+    let pool = setup().await;
+    let ready = insert_video(&pool, "vready", "ready").await;
+    let nodub = insert_video(&pool, "vnodub", "no dub").await;
+    sqlx::query(
+        "UPDATE videos SET dub_file_path = '/c/a_dub.flac', dub_mix_ratio = 0.3 WHERE id = ?",
+    )
+    .bind(ready)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // A video with a finished dub → Some(stored ratio).
+    assert_eq!(dub_ratio_if_ready(&pool, ready).await.unwrap(), Some(0.3));
+    // A video without a dub file → None (play-start seeding is a no-op).
+    assert_eq!(dub_ratio_if_ready(&pool, nodub).await.unwrap(), None);
+    // A missing id → None.
+    assert_eq!(dub_ratio_if_ready(&pool, 99999).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn record_dub_deferral_increments_and_marks_failed() {
+    let pool = setup().await;
+    let id = insert_video(&pool, "vd", "D").await;
+    make_dub_job(&pool, id, "synth", "2026-09-18T10:00:00.000Z").await;
+
+    let n1 = record_dub_deferral(&pool, id, "boom", std::time::Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert_eq!(n1, 1);
+    assert_eq!(col_str(&pool, id, "dub_status").await, "failed");
+    assert_eq!(
+        col_opt_str(&pool, id, "dub_error").await,
+        Some("boom".to_string())
+    );
+    let n2 = record_dub_deferral(&pool, id, "boom2", std::time::Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert_eq!(n2, 2);
+}
+
+// ── #182 backfill: finished dubs that still lack the subtitle track ──────────
+
+/// Mark a video as a finished dub with the given lyrics source.
+async fn make_ready_dub(pool: &SqlitePool, id: i64, lyrics_source: Option<&str>) {
+    sqlx::query(
+        "UPDATE videos SET dub_requested = 1, dub_status = 'ready', \
+         audio_file_path = '/c/a_audio.flac', lyrics_source = ? WHERE id = ?",
+    )
+    .bind(lyrics_source)
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn backfill_lists_only_ready_dubs_without_the_subtitle_track() {
+    let pool = setup().await;
+    let no_track = insert_video(&pool, "yt_none", "no track").await;
+    let song_track = insert_video(&pool, "yt_song", "song lyrics").await;
+    let has_subs = insert_video(&pool, "yt_subs", "already has subtitles").await;
+    let synth = insert_video(&pool, "yt_synth", "still synthesizing").await;
+    let plain = insert_video(&pool, "yt_plain", "never dubbed").await;
+
+    make_ready_dub(&pool, no_track, None).await;
+    make_ready_dub(&pool, song_track, Some("mtl")).await;
+    make_ready_dub(&pool, has_subs, Some("gemini-live-translate")).await;
+    make_ready_dub(&pool, synth, None).await;
+    sqlx::query("UPDATE videos SET dub_status = 'synth' WHERE id = ?")
+        .bind(synth)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let _ = plain;
+
+    let got = list_ready_dubs_without_subtitles(&pool).await.unwrap();
+    let ids: Vec<i64> = got.iter().map(|b| b.video_id).collect();
+    assert_eq!(ids, vec![no_track, song_track]); // oldest first, nothing else
+    assert_eq!(got[0].youtube_id, "yt_none");
+    assert_eq!(got[0].audio_file_path, "/c/a_audio.flac");
+}
+
+#[tokio::test]
+async fn backfill_skips_a_ready_dub_without_an_audio_path() {
+    let pool = setup().await;
+    let id = insert_video(&pool, "yt_noaudio", "no audio path").await;
+    make_ready_dub(&pool, id, None).await;
+    sqlx::query("UPDATE videos SET audio_file_path = NULL WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        list_ready_dubs_without_subtitles(&pool)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

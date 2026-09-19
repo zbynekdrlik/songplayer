@@ -16,6 +16,12 @@ use crate::lyrics::g35t_transcript::SOURCE_G35T_FULLMIX;
 /// sets one day).
 const FULLMIX_UPGRADE_MIN_AGE_SECS: i64 = 86_400; // 1 day
 
+/// #182: the lyrics worker never processes a dub-requested video — a dubbed talk
+/// gets its EN/SK subtitles from the Live-session transcript
+/// (`dabing::subtitles`), not the song-lyrics pipeline. Every selector bucket
+/// ANDs in this one shared predicate (`v.` alias, matching the bucket queries).
+const EXCLUDE_DUB_REQUESTED: &str = " AND (v.dub_requested IS NULL OR v.dub_requested = 0) ";
+
 /// Pick the next video the lyrics worker should process. Priority order:
 /// 1. Manual-priority songs (user clicked "Reprocess")
 /// 2. Null / failed lyrics (has_lyrics = 0): new songs + previously-failed
@@ -54,7 +60,7 @@ async fn fetch_bucket_manual(
     // filter a failed manual-reprocess loops forever.
     // Exception: if a row's recorded failure is from an OLDER pipeline version,
     // allow it through — the worker may have new capability that succeeds now.
-    let row = sqlx::query_as::<_, VideoLyricsRow>(
+    let row = sqlx::query_as::<_, VideoLyricsRow>(&format!(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
@@ -64,11 +70,11 @@ async fn fetch_bucket_manual(
                AND (v.lyrics_source IS NULL \
                     OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap', 'unsupported_source') \
                     OR v.lyrics_pipeline_version < ?) \
-               AND p.is_active = 1 AND v.normalized = 1 \
+               AND p.is_active = 1 AND v.normalized = 1 {EXCLUDE_DUB_REQUESTED} \
                AND (v.lyrics_next_attempt_at IS NULL \
                     OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
          ORDER BY v.id ASC LIMIT 1",
-    )
+    ))
     .bind(current_version as i64)
     .fetch_optional(pool)
     .await?;
@@ -106,7 +112,7 @@ async fn fetch_bucket_null(
     // Seeded-earlier playlists drained entirely before any newer playlist
     // got a pickup. Uniform-random spreads coverage across playlists so a
     // live event has lyrics for all scenes, not just the oldest one.
-    let row = sqlx::query_as::<_, VideoLyricsRow>(
+    let row = sqlx::query_as::<_, VideoLyricsRow>(&format!(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
@@ -117,11 +123,11 @@ async fn fetch_bucket_null(
                     OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap', 'unsupported_source') \
                     OR v.lyrics_pipeline_version < ?) \
                AND v.lyrics_manual_priority = 0 \
-               AND p.is_active = 1 AND v.normalized = 1 \
+               AND p.is_active = 1 AND v.normalized = 1 {EXCLUDE_DUB_REQUESTED} \
                AND (v.lyrics_next_attempt_at IS NULL \
                     OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
          ORDER BY RANDOM() LIMIT 1",
-    )
+    ))
     .bind(current_version as i64)
     .fetch_optional(pool)
     .await?;
@@ -144,7 +150,7 @@ async fn fetch_bucket_stale(
     // row on the catalog is stale legacy output now, and must re-queue
     // under v21's Lever-2 reference regime like everything else instead of
     // being permanently protected from ever being touched again.
-    let row = sqlx::query_as::<_, VideoLyricsRow>(
+    let row = sqlx::query_as::<_, VideoLyricsRow>(&format!(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
@@ -153,11 +159,11 @@ async fn fetch_bucket_stale(
          WHERE v.has_lyrics = 1 \
                AND v.lyrics_pipeline_version < ? \
                AND v.lyrics_manual_priority = 0 \
-               AND p.is_active = 1 AND v.normalized = 1 \
+               AND p.is_active = 1 AND v.normalized = 1 {EXCLUDE_DUB_REQUESTED} \
                AND (v.lyrics_next_attempt_at IS NULL \
                     OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
          ORDER BY v.lyrics_quality_score ASC NULLS FIRST, RANDOM() LIMIT 1",
-    )
+    ))
     .bind(current_version as i64)
     .fetch_optional(pool)
     .await?;
@@ -183,7 +189,7 @@ async fn fetch_bucket_fullmix_upgrade(
     // leaves this bucket the moment isolation yields a vocal. `next_attempt_at`
     // is still honoured so a deferred upgrade waits out its backoff.
     let processed_before = format!("-{FULLMIX_UPGRADE_MIN_AGE_SECS} seconds");
-    let row = sqlx::query_as::<_, VideoLyricsRow>(
+    let row = sqlx::query_as::<_, VideoLyricsRow>(&format!(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
@@ -193,13 +199,13 @@ async fn fetch_bucket_fullmix_upgrade(
                AND v.lyrics_source = ? \
                AND v.lyrics_pipeline_version >= ? \
                AND v.lyrics_manual_priority = 0 \
-               AND p.is_active = 1 AND v.normalized = 1 \
+               AND p.is_active = 1 AND v.normalized = 1 {EXCLUDE_DUB_REQUESTED} \
                AND (v.lyrics_next_attempt_at IS NULL \
                     OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
                AND (v.lyrics_processed_at IS NULL \
                     OR v.lyrics_processed_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)) \
          ORDER BY v.lyrics_processed_at ASC NULLS FIRST, RANDOM() LIMIT 1",
-    )
+    ))
     .bind(SOURCE_G35T_FULLMIX)
     .bind(current_version as i64)
     .bind(processed_before)
@@ -287,6 +293,56 @@ mod tests {
         assert_eq!(
             row.youtube_id, "stale",
             "stale bucket wins when null is empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn dub_requested_videos_are_excluded_from_every_bucket() {
+        let pool = setup().await;
+        // A dub-requested candidate in the manual / null / stale buckets — none
+        // may be picked by the lyrics worker (#182: a dubbed talk's subtitles come
+        // from the Live-session transcript, not the song-lyrics pipeline).
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_pipeline_version, lyrics_quality_score, lyrics_manual_priority, dub_requested) \
+             VALUES \
+                 (1, 1, 'dub_manual', 1, 1, 2, 0.1, 1, 1), \
+                 (2, 1, 'dub_null',   1, 0, 0, NULL, 0, 1), \
+                 (3, 1, 'dub_stale',  1, 1, 1, 0.1, 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // The #171 full-mix upgrade bucket, too.
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source, lyrics_pipeline_version, lyrics_processed_at, dub_requested) \
+             VALUES (5, 1, 'dub_fullmix', 1, 1, ?, 2, NULL, 1)",
+        )
+        .bind(SOURCE_G35T_FULLMIX)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(
+            get_next_video_for_lyrics(&pool, 2).await.unwrap().is_none(),
+            "no dub-requested video may be returned by any lyrics bucket"
+        );
+
+        // A normal (non-dub) null-lyrics video IS still picked — the exclusion is
+        // surgical, not a blanket freeze of the queue.
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_pipeline_version, lyrics_manual_priority, dub_requested) \
+             VALUES (4, 1, 'normal_null', 1, 0, 0, 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = get_next_video_for_lyrics(&pool, 2).await.unwrap().unwrap();
+        assert_eq!(
+            row.youtube_id, "normal_null",
+            "a non-dub video is unaffected by the exclusion"
         );
     }
 

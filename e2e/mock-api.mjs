@@ -14,6 +14,53 @@ const __dirname = dirname(__filename);
 // dashboard version-label spec asserts the two are equal (#85).
 const SP_VERSION = readFileSync(join(__dirname, "..", "VERSION"), "utf8").trim();
 
+// #178: canned fragmented-MP4 fixture streamed over the preview WebSocket.
+// Split into the init segment (ftyp+moov) + one chunk per moof..next-moof
+// fragment, mirroring the real server's fMP4 relay (init first, then
+// keyframe-aligned fragments). Lets the chrome-channel preview E2E drive the
+// MSE <video> to readyState>=3 with an advancing currentTime.
+function splitFmp4(buf) {
+  const boxes = [];
+  let o = 0;
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  while (o + 8 <= buf.length) {
+    let size = dv.getUint32(o);
+    const type = String.fromCharCode(
+      buf[o + 4],
+      buf[o + 5],
+      buf[o + 6],
+      buf[o + 7],
+    );
+    let header = 8;
+    if (size === 1) {
+      size = Number(dv.getBigUint64(o + 8));
+      header = 16;
+    }
+    if (size < header || o + size > buf.length) break;
+    boxes.push({ type, start: o, end: o + size });
+    o += size;
+  }
+  const firstMoof = boxes.findIndex((b) => b.type === "moof");
+  if (firstMoof < 0) return [buf];
+  const init = buf.subarray(0, boxes[firstMoof].start);
+  const frags = [];
+  for (let i = firstMoof; i < boxes.length; i++) {
+    if (boxes[i].type !== "moof") continue;
+    let end = buf.length;
+    for (let j = i + 1; j < boxes.length; j++) {
+      if (boxes[j].type === "moof") {
+        end = boxes[j].start;
+        break;
+      }
+    }
+    frags.push(buf.subarray(boxes[i].start, end));
+  }
+  return [init, ...frags];
+}
+const PREVIEW_FMP4 = splitFmp4(
+  readFileSync(join(__dirname, "fixtures", "preview-fixture.mp4")),
+);
+
 const app = express();
 app.use(express.json());
 
@@ -531,6 +578,29 @@ app.patch("/api/v1/videos/:id/dub-mix", (req, res) => {
   res.status(200).json({ ratio });
 });
 
+// #183 round 2: push a fully-formed DubRow so a test can assert a terminal state
+// (e.g. a dub-ready video WITHOUT stems — stem_status stays null — still renders
+// `pripravené`, proving the 2-stream mix path is a first-class ready state).
+app.post("/__mock/dabing-add", (req, res) => {
+  const b = req.body || {};
+  const video_id = Number(b.video_id ?? nextDubId++);
+  const dub_status = b.dub_status ?? "ready";
+  const row = {
+    video_id,
+    playlist_id: DABING_PLAYLIST_ID,
+    title: b.title ?? `Dabing ${video_id}`,
+    dub_status,
+    dub_error: b.dub_error ?? null,
+    dub_mix_ratio: b.dub_mix_ratio ?? 1.0,
+    dub_file_path: b.dub_file_path ?? "/c/a_dub.flac",
+    stem_status: b.stem_status ?? null,
+    lyrics_present: !!b.lyrics_present,
+    chain_state: b.chain_state ?? chainStateFor(dub_status),
+  };
+  dubRows.unshift(row);
+  res.status(201).json(row);
+});
+
 app.post("/__mock/dabing-reset", (_req, res) => {
   dubRows = [];
   nextDubId = 9000;
@@ -852,7 +922,54 @@ app.get("*", (_req, res) => {
 
 const server = createServer(app);
 
-const wss = new WebSocketServer({ server, path: "/api/v1/ws" });
+// Two WebSocket endpoints share one HTTP server. `noServer` + a single manual
+// upgrade router dispatches by path — a path-scoped `{ server, path }` wss would
+// instead `abortHandshake(400)` every non-matching upgrade (killing the preview
+// socket before the second server could handle it). #178.
+const wss = new WebSocketServer({ noServer: true });
+const previewWss = new WebSocketServer({ noServer: true });
+const PREVIEW_WS_RE = /^\/api\/v1\/playback\/(\d+)\/preview\.ws$/;
+
+server.on("upgrade", (req, socket, head) => {
+  let pathname;
+  try {
+    pathname = new URL(req.url, "http://localhost").pathname;
+  } catch {
+    socket.destroy();
+    return;
+  }
+  if (pathname === "/api/v1/ws") {
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+  } else if (PREVIEW_WS_RE.test(pathname)) {
+    previewWss.handleUpgrade(req, socket, head, (ws) =>
+      previewWss.emit("connection", ws, req),
+    );
+  } else {
+    socket.destroy();
+  }
+});
+
+// #178: stream the canned fMP4 fixture — init segment first, then each fragment
+// with a small gap — so the card's MSE <video> reaches readyState>=3 and its
+// currentTime advances.
+previewWss.on("connection", (ws) => {
+  const [init, ...frags] = PREVIEW_FMP4;
+  try {
+    ws.send(init);
+  } catch {
+    return;
+  }
+  let i = 0;
+  const timer = setInterval(() => {
+    if (ws.readyState !== ws.OPEN || i >= frags.length) {
+      clearInterval(timer);
+      return;
+    }
+    ws.send(frags[i++]);
+  }, 120);
+  ws.on("close", () => clearInterval(timer));
+  ws.on("error", () => clearInterval(timer));
+});
 
 wss.on("connection", (ws) => {
   console.log("[mock-api] WebSocket client connected");

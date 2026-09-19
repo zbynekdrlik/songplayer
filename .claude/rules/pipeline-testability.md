@@ -43,3 +43,32 @@ carry `#[cfg_attr(test, mutants::skip)]` — kept as-is for those three
 not worth re-litigating per PR), but a NEW function you add and directly
 unit-test (like `run_heartbeat_paused`) should generally NOT carry
 `mutants::skip` if you're already asserting its exact output.
+
+## The #192 wall-clock audio emitter — pure core + generic send seam are Linux-tested
+
+`playback/audio_emitter.rs` is the model for keeping a genuinely Windows-bound
+feature (a TIME_CRITICAL OS thread that submits to the live NDI SDK) almost
+entirely Linux-testable. The split:
+
+- **Pure, cross-platform, `#[test]`-covered on Linux CI:** `AudioRing`
+  (bounded FIFO, never drops), `AudioEmitter::tick(now) -> Emitted` (the
+  wall-clock grid: one block or a full silence block per slot, grid timecodes,
+  silence/late/jitter accounting), `push_blocking` (bounded back-pressure via
+  `Mutex`/`Condvar` — driven with a real second thread in the test),
+  `emitter_stats`, and the generic **send seam** `emit_one_block<B: NdiBackend>`
+  which is exercised with `sp_ndi::test_util::MockNdiBackend` (assert the exact
+  `send_audio(42,sr=48000,ch=2,spc=1600)` call list — the same
+  `submitter_tests_timecode.rs` pattern). This is what lets a Linux test prove
+  "the decode-side push does NOT send_audio; the emitter thread does" and
+  "silence is a full 1600-sample block, not a gap".
+- **Windows-only, no Linux test path (`mutants::skip`, box-verified):** ONLY the
+  thread lifecycle in `pipeline_audio.rs` — the spawn +
+  `THREAD_PRIORITY_TIME_CRITICAL`, the `WallClock` sleep-until + spin loop, and
+  the `AudioEmitterThread` join-before-sender-drop guard. Nothing there decides
+  behaviour; it just drives the pure core on a real clock/thread/sender.
+
+The `sp_ndi::AudioSink` (a cloneable `{Arc<B>, handle}` audio-only send handle)
+is the seam that makes this possible: the pure `emit_one_block` takes an
+`AudioSink<B>`, so a `MockNdiBackend` sink drives it on Linux while a
+`RealNdiBackend` sink drives it on the box — never a `#[cfg(windows)]`-narrowed
+signature for logic that has no MediaFoundation dependency.

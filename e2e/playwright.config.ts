@@ -26,7 +26,23 @@ export default defineConfig({
     headless: true,
   },
   projects: [
-    { name: "chromium", use: { browserName: "chromium" } },
+    // Bundled Chromium runs every spec EXCEPT the preview one: preview.spec.ts
+    // needs H.264/AAC decode, which Playwright's bundled Chromium lacks.
+    {
+      name: "chromium",
+      use: { browserName: "chromium" },
+      // A project-level testIgnore REPLACES the global one, so the post-deploy
+      // exclusion must be repeated here alongside the preview exclusion.
+      testIgnore: ["**/post-deploy*.spec.ts", "**/preview.spec.ts"],
+    },
+    // The #178 live A/V preview MSE test needs branded Google Chrome (H.264 +
+    // AAC codecs). GitHub ubuntu runners ship google-chrome; CI installs it via
+    // `npx playwright install chrome`. Runs ONLY preview.spec.ts.
+    {
+      name: "chrome",
+      use: { browserName: "chromium", channel: "chrome" },
+      testMatch: ["**/preview.spec.ts"],
+    },
   ],
   reporter: [["html", { outputFolder: "playwright-report" }], ["list"]],
 });

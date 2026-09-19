@@ -55,6 +55,10 @@ pub enum PipelineCommand {
 }
 
 /// Events emitted by the pipeline thread back to the async engine.
+// `HealthSnapshot` carries the full NDI/genlock/audio telemetry (#192 added the
+// emitter stats) and is sent once per 5 s poll — its size is irrelevant on this
+// channel, so boxing it would only add an allocation per snapshot.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum PipelineEvent {
     /// Video playback started; duration is known.
@@ -126,7 +130,7 @@ impl PlaybackPipeline {
         playlist_id: i64,
         genlock_pacing: bool,
         burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        preview_tap: crate::playback::preview::PreviewTap,
+        taps: crate::playback::preview::preview_stream::DecodeTaps,
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
@@ -142,7 +146,7 @@ impl PlaybackPipeline {
                     playlist_id,
                     genlock_pacing,
                     burn_on,
-                    preview_tap,
+                    taps,
                 );
             })
             .expect("failed to spawn pipeline thread");
@@ -168,7 +172,7 @@ impl PlaybackPipeline {
         _burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
         // #15 part 2: the decode loop is a stub on non-Windows (no frames are
         // decoded), so the preview tap is never offered to here.
-        _preview_tap: crate::playback::preview::PreviewTap,
+        _taps: crate::playback::preview::preview_stream::DecodeTaps,
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
@@ -227,7 +231,7 @@ fn run_loop(
     playlist_id: i64,
     genlock_pacing: bool,
     burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    preview_tap: crate::playback::preview::PreviewTap,
+    taps: crate::playback::preview::preview_stream::DecodeTaps,
 ) {
     info!(
         ndi_name,
@@ -241,7 +245,7 @@ fn run_loop(
         playlist_id,
         genlock_pacing,
         burn_on,
-        preview_tap,
+        taps,
     );
     info!(playlist_id, "pipeline thread exited");
 }
@@ -265,7 +269,7 @@ fn run_loop_windows(
     playlist_id: i64,
     genlock_pacing: bool,
     burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    preview_tap: crate::playback::preview::PreviewTap,
+    taps: crate::playback::preview::preview_stream::DecodeTaps,
 ) {
     // 1 ms system timer for the boundary-paced sleep granularity (#147).
     if genlock_pacing {
@@ -317,6 +321,25 @@ fn run_loop_windows(
     // paced-emit overlay. Default OFF; only the paced path ever paints.
     submitter.set_burn_flag(burn_on);
     submitter.send_black_bgra(1920, 1080);
+
+    // #192: on the SDK-clocked path a dedicated wall-clock audio emitter thread
+    // clocks the NDI audio stream continuously (silence-filled across song
+    // transitions / heavy-child stalls). Declared AFTER `submitter` so its guard
+    // drops (shutdown + JOIN) BEFORE the sender is destroyed — `send_destroy`
+    // invalidates the handle the emitter's AudioSink holds. Paced path keeps its
+    // own audio clock (the Pacer's AudioGridBuffer + PLL), so no emitter there.
+    let audio_emitter = if genlock_pacing {
+        None
+    } else {
+        // spawn returns None on OS-thread-spawn failure → decode_and_send takes
+        // the legacy audio-with-video path (never a hung, undrained ring).
+        let shared = crate::playback::pipeline::audio_emitter::new_shared_emitter();
+        crate::playback::pipeline::pipeline_audio::spawn_audio_emitter(
+            ndi_name,
+            submitter.audio_sink(),
+            shared,
+        )
+    };
 
     // The paced scheduler persists across songs (counters accumulate) and
     // re-anchors per Play/Seek. Disabled + unused on the legacy path.
@@ -400,7 +423,7 @@ fn run_loop_windows(
                             &mut last_heartbeat,
                             &mut consecutive_bad_polls,
                             current_start_ms,
-                            &preview_tap,
+                            &taps,
                         )
                     } else {
                         decode_and_send(
@@ -414,7 +437,8 @@ fn run_loop_windows(
                             &mut last_heartbeat,
                             &mut consecutive_bad_polls,
                             current_start_ms,
-                            &preview_tap,
+                            &taps,
+                            audio_emitter.as_ref().map(|t| t.shared()),
                         )
                     };
                     match decode_result {
@@ -528,9 +552,10 @@ fn decode_and_send(
     last_heartbeat: &mut std::time::Instant,
     consecutive_bad_polls: &mut u32,
     start_position_ms: Option<u64>,
-    preview_tap: &crate::playback::preview::PreviewTap,
+    taps: &crate::playback::preview::preview_stream::DecodeTaps,
+    audio_emitter: Option<&crate::playback::pipeline::audio_emitter::SharedEmitter>,
 ) -> DecodeResult {
-    use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder};
+    use sp_decoder::MediaFoundationVideoReader;
 
     let video_reader = match MediaFoundationVideoReader::open(video_path) {
         Ok(v) => v,
@@ -554,7 +579,11 @@ fn decode_and_send(
                 ));
             }
         };
-    let mut decoder = match SplitSyncedDecoder::new(Box::new(video_reader), audio_stream) {
+    let mut decoder = match crate::playback::pipeline::pipeline_audio::open_synced_decoder(
+        Box::new(video_reader),
+        audio_stream,
+        audio_emitter,
+    ) {
         Ok(d) => d,
         Err(e) => {
             return DecodeResult::Error(format!("SplitSyncedDecoder::new failed: {e}"));
@@ -633,6 +662,7 @@ fn decode_and_send(
                 if let Err(e) = decoder.seek(position_ms) {
                     tracing::warn!(?e, position_ms, "pipeline: seek failed");
                 }
+                crate::playback::pipeline::pipeline_audio::clear_if_present(audio_emitter);
             }
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
@@ -642,6 +672,7 @@ fn decode_and_send(
         }
 
         if *paused {
+            crate::playback::pipeline::pipeline_audio::hold_if_present(audio_emitter);
             submitter.send_black_bgra(1920, 1080);
             // #133: without this, /api/v1/ndi/health froze on the last
             // pre-pause HealthSnapshot (state=Playing, stale fps) for as
@@ -674,28 +705,23 @@ fn decode_and_send(
 
         match decoder.next_synced() {
             Ok(Some((video_frame, audio_frames))) => {
-                let ndi_audio: Vec<sp_ndi::AudioFrame> = audio_frames
-                    .into_iter()
-                    .map(|af| sp_ndi::AudioFrame {
-                        data: af.data,
-                        channels: af.channels,
-                        sample_rate: af.sample_rate,
-                        // Stamped by FrameSubmitter at submission time (#146).
-                        timecode_100ns: None,
-                    })
-                    .collect();
+                // #15/#178: offer video + post-mix audio to BOTH preview taps
+                // BEFORE the NDI submit / audio-emitter push consume the frame.
+                // No viewer => a couple of relaxed atomic loads; never blocks,
+                // never adds latency to the NDI submit / genlock path.
+                taps.offer_frame(&video_frame, &audio_frames);
+                // #192: on the SDK-clocked path audio is PUSHED into the
+                // wall-clock emitter's ring (before this frame's submit) and the
+                // TIME_CRITICAL emit thread clocks it out continuously, so a song
+                // end / heavy-child stall no longer stops the audio stream;
+                // `submit_nv12` then carries video only. (Emitter absent → legacy
+                // audio-with-video fallback.) See `pipeline_audio`.
+                let ndi_audio = crate::playback::pipeline::pipeline_audio::push_or_collect_audio(
+                    audio_emitter,
+                    audio_frames,
+                );
 
                 let timestamp_ms = video_frame.timestamp_ms;
-                // #15 part 2: opportunistically offer this decoded frame to the
-                // preview tap BEFORE the NDI submit consumes `video_frame.data`.
-                // No viewer => a couple of relaxed atomic loads; never blocks,
-                // never adds latency to the NDI submit path.
-                preview_tap.try_offer(
-                    video_frame.width,
-                    video_frame.height,
-                    video_frame.stride,
-                    &video_frame.data,
-                );
                 submitter.submit_nv12(
                     video_frame.width,
                     video_frame.height,
@@ -711,6 +737,7 @@ fn decode_and_send(
                         playlist_id,
                         last_heartbeat,
                         consecutive_bad_polls,
+                        audio_emitter,
                     );
                 }
 
@@ -729,6 +756,9 @@ fn decode_and_send(
             }
             Ok(None) => {
                 info!(playlist_id, frame_count, "video decode complete");
+                // #192 item 3: natural end only — let the emit thread drain the
+                // ring (≤ 400 ms) before the next song's clear_ring wipes its tail.
+                crate::playback::pipeline::pipeline_audio::drain_if_present(audio_emitter);
                 submitter.flush();
                 return DecodeResult::Ended;
             }
@@ -821,7 +851,11 @@ fn run_heartbeat_inner(
     playlist_id: i64,
     last_heartbeat: &mut std::time::Instant,
     consecutive_bad_polls: &mut u32,
+    audio_emitter: Option<&crate::playback::pipeline::audio_emitter::SharedEmitter>,
 ) {
+    // #192: surface the wall-clock emitter telemetry under audio.emitter on
+    // /api/v1/ndi/health (disabled default without an emitter).
+    let audio = crate::playback::pipeline::audio_emitter::heartbeat_audio_stats(audio_emitter);
     emit_heartbeat(
         submitter,
         event_tx,
@@ -832,7 +866,7 @@ fn run_heartbeat_inner(
         // Idle / paused / SDK-clocked heartbeats carry no pacing telemetry; the
         // boundary-paced decode loop passes real `Pacer` stats (#147).
         crate::playback::ndi_health::PacingStats::default(),
-        crate::playback::ndi_health::AudioStats::default(),
+        audio,
     );
 }
 
@@ -937,6 +971,18 @@ pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
     ));
     *last_heartbeat = now;
 }
+
+// #192: wall-clock audio emitter for the SDK-clocked path. The pure core (ring
+// + grid + telemetry) is cross-platform and Linux-tested; the Windows-only
+// thread lifecycle (TIME_CRITICAL spawn, sleep/spin loop, join-before-drop)
+// lives in the `pipeline_audio` sibling. Registered here (not in mod.rs) to
+// keep mod.rs off the 1000-line cap.
+#[path = "audio_emitter.rs"]
+pub mod audio_emitter;
+
+#[cfg(windows)]
+#[path = "pipeline_audio.rs"]
+pub(crate) mod pipeline_audio;
 
 #[cfg(test)]
 #[path = "pipeline_inline_tests.rs"]

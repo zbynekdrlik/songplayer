@@ -67,8 +67,24 @@ fn badge_title(o: &NdiOutputHealth) -> String {
     } else {
         o.clock.mode.as_str()
     };
+    // #192: on the SDK-clocked path the wall-clock audio emitter carries the
+    // audio telemetry (silence/ring/jitter); the paced path shows ppm/underruns.
+    let audio = if o.audio.emitter.enabled {
+        format!(
+            "emitter[sdk-video/wallclock-audio] silence={} ring={}ms jitter_p99={}us late={}",
+            o.audio.emitter.silence_blocks,
+            o.audio.emitter.ring_depth_ms,
+            o.audio.emitter.emit_jitter_p99_us,
+            o.audio.emitter.late_blocks,
+        )
+    } else {
+        format!(
+            "{:+.1}ppm underruns={}",
+            o.audio.residual_ppm, o.audio.underruns,
+        )
+    };
     format!(
-        "clock: locked={} mode={} offset={} | pacing: late={} p99={}us repeats={} resyncs={} lag={} | audio: {:+.1}ppm underruns={} | receiver: connections={}",
+        "clock: locked={} mode={} offset={} | pacing: late={} p99={}us repeats={} resyncs={} lag={} | audio: {} | receiver: connections={}",
         o.clock.is_locked,
         mode,
         offset,
@@ -77,8 +93,7 @@ fn badge_title(o: &NdiOutputHealth) -> String {
         o.pacing.repeats,
         o.pacing.resyncs,
         o.pacing.lag_slots,
-        o.audio.residual_ppm,
-        o.audio.underruns,
+        audio,
         o.connections,
     )
 }

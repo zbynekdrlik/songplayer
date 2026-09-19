@@ -54,6 +54,7 @@ async fn ndi_health_endpoint_includes_pacing() {
             underruns: 4,
             overflows: 1,
             buffer_ms: 66,
+            emitter: Default::default(),
         },
         // #149 Lane 1: an enabled, receiver-connected, event-free pipeline is LOCKED.
         lock_state: sp_core::genlock::lock_state::LockState::Locked,

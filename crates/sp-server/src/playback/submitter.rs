@@ -363,6 +363,14 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         &self.sender
     }
 
+    /// A cloneable audio-only send handle over this submitter's sender (#192),
+    /// for the wall-clock audio emitter thread. NDI permits audio and video to
+    /// be submitted from separate threads on the same sender; see
+    /// [`sp_ndi::NdiSender::audio_sink`] for the teardown-ordering contract.
+    pub fn audio_sink(&self) -> sp_ndi::AudioSink<B> {
+        self.sender.audio_sink()
+    }
+
     /// Snapshot the rolling window counter and reset it. Returns the number
     /// of frames submitted since the last drain plus the wall-clock seconds
     /// over which they accumulated.

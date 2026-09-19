@@ -167,7 +167,7 @@ fn run_decode_producer(
     start_position_ms: Option<u64>,
     shared: Arc<SharedQueue<QueuedFrame>>,
     open_tx: crossbeam_channel::Sender<Result<u64, String>>,
-    preview_tap: crate::playback::preview::PreviewTap,
+    taps: crate::playback::preview::preview_stream::DecodeTaps,
     playlist_id: i64,
 ) {
     use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder};
@@ -233,15 +233,10 @@ fn run_decode_producer(
     loop {
         match decoder.next_synced() {
             Ok(Some((video_frame, audio_frames))) => {
-                // #15 part 2: offer to the preview tap on the PRODUCER thread —
-                // off the time-critical emit/submit path (`preview.md`). No viewer
-                // => a couple of relaxed atomic loads.
-                preview_tap.try_offer(
-                    video_frame.width,
-                    video_frame.height,
-                    video_frame.stride,
-                    &video_frame.data,
-                );
+                // #15/#178: offer video + post-mix audio to BOTH preview taps on
+                // the PRODUCER thread — off the time-critical emit/submit path
+                // (`preview.md`). No viewer => a couple of relaxed atomic loads.
+                taps.offer_frame(&video_frame, &audio_frames);
                 let decoded_ms = video_frame.timestamp_ms;
                 let item = (
                     to_paced_frame(video_frame, audio_frames, pts_offset_ms),
@@ -366,7 +361,7 @@ pub(crate) fn decode_and_send_paced(
     last_heartbeat: &mut Instant,
     consecutive_bad_polls: &mut u32,
     start_position_ms: Option<u64>,
-    preview_tap: &crate::playback::preview::PreviewTap,
+    taps: &crate::playback::preview::preview_stream::DecodeTaps,
 ) -> DecodeResult {
     // Spawn the decode producer — it owns the decoder on its own STA thread and
     // fills the bounded look-ahead queue.
@@ -374,7 +369,7 @@ pub(crate) fn decode_and_send_paced(
     let (open_tx, open_rx) = crossbeam_channel::bounded::<Result<u64, String>>(1);
     let producer = {
         let shared = shared.clone();
-        let preview_tap = preview_tap.clone();
+        let taps = taps.clone();
         let video_path = video_path.to_path_buf();
         let audio_path = audio_path.to_path_buf();
         std::thread::Builder::new()
@@ -386,7 +381,7 @@ pub(crate) fn decode_and_send_paced(
                     start_position_ms,
                     shared,
                     open_tx,
-                    preview_tap,
+                    taps,
                     playlist_id,
                 );
             })

@@ -159,6 +159,34 @@ pub struct AudioStats {
     /// Current buffered audio (ms) — the POST-take setpoint is ~66 ms
     /// (2 boundaries, `AUDIO_TARGET_BOUNDARIES`).
     pub buffer_ms: u64,
+    /// Wall-clock audio-emitter telemetry (#192) for the SDK-clocked path. The
+    /// paced path leaves this at `enabled=false`; the SDK-clocked path fills it
+    /// from the dedicated emitter thread (`playback/audio_emitter.rs`).
+    #[serde(default)]
+    pub emitter: EmitterStats,
+}
+
+/// Wall-clock NDI audio-emitter telemetry (#192), surfaced on
+/// `GET /api/v1/ndi/health` as `audio.emitter`. On the SDK-clocked path the
+/// emitter clocks the NDI audio stream off the wall clock (one 1600-sample
+/// block per 33.333 ms grid slot, silence when the ring is short) so the stream
+/// never starves at song transitions and the receiver's servo sees a clean
+/// 48 kHz rate. `enabled=false` + all-zero is the default (paced / idle path).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EmitterStats {
+    /// Whether the wall-clock audio emitter is active for this pipeline.
+    pub enabled: bool,
+    /// `"sdk-video/wallclock-audio"` when enabled, empty otherwise.
+    pub mode: String,
+    /// Silence blocks emitted (cumulative) — grows ONLY at transitions / stalls.
+    pub silence_blocks: u64,
+    /// Current ring depth (ms of buffered decoded audio ahead of the grid).
+    pub ring_depth_ms: u64,
+    /// 99th-percentile emit jitter (µs) — the emit thread's grid accuracy.
+    pub emit_jitter_p99_us: u64,
+    /// Emits that woke a whole block or more past their grid boundary
+    /// (cumulative) — should stay ≈ 0 with a TIME_CRITICAL emit thread.
+    pub late_blocks: u64,
 }
 
 /// Wire-level playback state used by the NDI health snapshot. Distinct from

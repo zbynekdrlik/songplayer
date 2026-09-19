@@ -86,3 +86,17 @@ async fn preview_returns_jpeg_when_a_frame_is_available() {
         "the exact published JPEG bytes are returned"
     );
 }
+
+// ── #178 item 16: WS idle deadline ───────────────────────────────────────────
+
+#[test]
+fn ws_viewer_is_idle_only_after_15s_of_silence() {
+    use super::is_idle;
+    // Exactly 15 s of silence is not yet idle; past 15 s is.
+    assert!(!is_idle(0, 15_000), "exactly 15 s is not yet idle");
+    assert!(is_idle(0, 15_001), "past 15 s of silence is idle");
+    // 10 s of silence is fine.
+    assert!(!is_idle(10_000, 20_000), "10 s of silence is not idle");
+    // 15.002 s of silence is idle.
+    assert!(is_idle(1_000, 16_002), "15.002 s of silence is idle");
+}

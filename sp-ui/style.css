@@ -215,9 +215,11 @@ body {
 .card-header .playlist-id { font-size: 0.8rem; color: var(--text-dim); }
 
 .now-playing { margin-bottom: 12px; }
-/* #15 part 2: live video preview inside the playlist card. 16:9, capped so it
-   never widens the ~340px card; black backdrop for letterboxed/loading state. */
-.preview-img,
+/* #178: live A/V preview <video> inside the playlist card. 16:9, capped so it
+   never widens the ~340px card; black backdrop for letterboxed/loading state.
+   Shares the box geometry with the placeholder so mount/unmount never shifts
+   layout (sp-ui-frontend.md). */
+.preview-video,
 .preview-placeholder {
     display: block;
     width: 100%;
@@ -234,6 +236,32 @@ body {
     justify-content: center;
     color: var(--text-dim);
     font-size: 0.8rem;
+}
+/* #178: unmute + fullscreen controls under the preview <video>. */
+.preview-controls {
+    display: flex;
+    gap: 6px;
+    max-width: 320px;
+    margin-bottom: 8px;
+}
+.preview-btn {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid var(--border, #444);
+    background: var(--surface, #222);
+    color: var(--text, #eee);
+}
+.preview-btn:hover { filter: brightness(1.2); }
+/* #178 round 3: click-to-start CTA centred in the placeholder box (the preview
+   is on-demand — no encoder child until the operator asks for it). */
+.preview-start-btn {
+    font-size: 0.9rem;
+    padding: 6px 14px;
+    background: var(--accent, #2563eb);
+    color: #fff;
+    border-color: transparent;
 }
 .np-song { font-weight: 600; display: block; }
 .np-artist { color: var(--text-dim); display: block; margin-bottom: 6px; }
@@ -519,18 +547,141 @@ body {
 /* Generic utility: hide an element while keeping it in the DOM tree. */
 .hidden { display: none !important; }
 
-/* #177: karaoke control panel — now-playing header + stems lock state. */
-.karaoke-control .karaoke-now-playing {
+/* #181: the ONE modern mixer — song stems (karaoke) + dub videos. A channel
+   strip of vertical faders in wells + a preset row; one accent for the active
+   preset; no fake VU meters (there is no live level to show). */
+.mixer {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px 16px;
+    margin-top: 8px;
+}
+.mixer-title {
+    font-size: 0.95rem;
     font-weight: 600;
-    margin: 4px 0;
+    color: var(--text);
+    margin-bottom: 2px;
 }
-.karaoke-control .karaoke-lock-reason {
-    color: #f0a020;
+.mixer-state {
+    font-weight: 600;
+    color: var(--text);
+    margin: 2px 0;
+    min-height: 1.2em; /* layout-stable across song changes */
+}
+.mixer-reason {
+    color: var(--warning);
     font-size: 0.85em;
-    margin: 2px 0 6px;
+    margin: 2px 0 8px;
 }
-.karaoke-control label.disabled { opacity: 0.5; }
-.karaoke-control .karaoke-enqueue { margin-top: 6px; }
+
+/* Channel strip: vertical faders side by side. */
+.mixer-channels {
+    display: flex;
+    gap: 20px;
+    align-items: flex-end;
+    padding: 10px 4px 4px;
+}
+.mixer-channel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    min-width: 56px; /* ≥44px touch column */
+}
+.mixer-channel-value {
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+    color: var(--text);
+    min-height: 1.1em;
+}
+.mixer-channel-label {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-align: center;
+}
+.mixer-channel-note {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    min-height: 0.9em; /* reserved slot — layout stable */
+}
+.mixer-channel.disabled { opacity: 0.55; }
+
+/* Vertical range fader (modern browsers: writing-mode makes it vertical). */
+.mixer-fader {
+    writing-mode: vertical-rl;
+    direction: rtl;
+    width: 44px; /* ≥44px touch target */
+    height: 144px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+.mixer-fader:disabled { cursor: not-allowed; }
+
+/* Preset row. */
+.mixer-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+.mixer-preset {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius);
+    padding: 7px 12px;
+    font-size: 0.85rem;
+    min-height: 40px;
+    cursor: pointer;
+}
+.mixer-preset:hover { border-color: var(--text-dim); }
+.mixer-preset.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+}
+
+/* Locked: dim + block the channels & presets, but NEVER the footer — the
+   "Zaradiť do fronty" button must stay usable for an unavailable song (#177). */
+.mixer-locked .mixer-channels,
+.mixer-locked .mixer-presets {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.mixer-footer {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.mixer-enqueue {
+    background: var(--bg-input);
+    border: 1px solid var(--accent);
+    color: var(--text);
+    border-radius: var(--radius);
+    padding: 7px 12px;
+    min-height: 40px;
+    cursor: pointer;
+}
+.mixer-enqueue:hover { border-color: #fff; }
+.mixer-status { color: var(--text-dim); font-size: 0.85rem; }
+
+/* The dub mixer sits inside a Dabing row. */
+.dabing-row .mixer { margin-top: 10px; }
+
+/* ≤700px: faders wrap to fit (they stay vertical but never overflow the card),
+   presets wrap. */
+@media (max-width: 700px) {
+    .mixer-channels {
+        flex-wrap: wrap;
+        gap: 14px;
+        justify-content: space-around;
+    }
+    .mixer-fader { height: 120px; }
+}
 
 /* Karaoke panel */
 .karaoke-panel {

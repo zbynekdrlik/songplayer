@@ -21,7 +21,7 @@ pub use error::NdiError;
 pub use ndi_sdk::NdiLib;
 #[cfg(any(test, feature = "test-util"))]
 pub use sender::test_util;
-pub use sender::{AudioFrame, NdiBackend, NdiSender, RealNdiBackend, Tally, VideoFrame};
+pub use sender::{AudioFrame, AudioSink, NdiBackend, NdiSender, RealNdiBackend, Tally, VideoFrame};
 #[cfg(any(test, feature = "test-util"))]
 pub use sender_mock::MockNdiBackend;
 pub use types::{

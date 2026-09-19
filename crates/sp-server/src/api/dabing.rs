@@ -127,8 +127,9 @@ pub async fn patch_dub(
 }
 
 /// `PATCH /api/v1/videos/{id}/dub-mix` — set the per-video mixer blend ratio
-/// (clamped 0.0..=1.0). 200 + the stored value on success. (D4 will also push
-/// the value to the live `DubControl`; D1 only persists it.)
+/// (clamped 0.0..=1.0). Persists to the DB AND (#183 D4) pushes the clamped value
+/// to the live dub control via `EngineCommand::SetDubMix`, so a playing dub video
+/// re-blends immediately with no pipeline reopen. 200 + the stored value.
 pub async fn patch_dub_mix(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -137,6 +138,14 @@ pub async fn patch_dub_mix(
     match models_dabing::set_dub_mix_ratio(&state.pool, id, req.ratio).await {
         Ok((_, 0)) => StatusCode::NOT_FOUND.into_response(),
         Ok((stored, _)) => {
+            // Live half: push the clamped ratio to the engine's dub control.
+            let _ = state
+                .engine_tx
+                .send(crate::EngineCommand::SetDubMix {
+                    video_id: id,
+                    ratio: stored as f32,
+                })
+                .await;
             (StatusCode::OK, Json(serde_json::json!({ "ratio": stored }))).into_response()
         }
         Err(e) => {

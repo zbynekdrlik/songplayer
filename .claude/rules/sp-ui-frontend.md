@@ -158,3 +158,54 @@ called `{row_view(row.chain_state.clone(), row.dub_error.clone())}`. The returne
 view is then `'static`. (Alternatively `-> impl IntoView + use<>` to opt out of
 lifetime capture, but owned args are clearer.) Same trap for any sp-ui helper
 that takes `&SomeRow`/`&str` and returns a view used in a `<For>`/list child.
+
+## The modern Mixer component (#181 D2) — ONE presentational widget + thin adapters
+
+The stems (karaoke) AND dub-video controls are ONE component, not two. Do NOT add
+a second mixer or restyle a per-domain panel in place (the owner: today's stems
+mixer was "hrozne škaredý"; he wants ONE modern mixer everywhere).
+
+- **`components/mixer.rs::Mixer`** is PRESENTATIONAL only: title, a state line
+  (`data-testid` via `state_testid`), a `disabled_reason`, a `Vec<ChannelSpec>`
+  channel strip, a `Vec<PresetSpec>` preset row (one accent on the active preset),
+  and an optional `children` footer slot. When `disabled_reason` is Some+non-empty
+  the root gets `mixer-locked`, which dims + `pointer-events:none` the channels and
+  presets but **NEVER the footer** (the "Zaradiť do fronty" button must stay
+  clickable for an unavailable song). The root class is ONE reactive closure
+  (`format!("mixer {extra_class}")` + `mixer-locked`) — do not mix a dynamic
+  `class=` with `class:` toggles.
+- **`components/mixer_channel.rs::MixerChannel`** is one vertical fader: a ≥44px
+  touch target (`writing-mode: vertical-rl; direction: rtl` — Chromium renders it
+  vertical; Playwright `.fill("20")` still sets the value regardless of
+  orientation), a live value readout, `on:input` updates the gain signal, `on:change`
+  commits via `on_change`. **`ChannelSpec.enabled` is a `Signal<bool>`, NOT a plain
+  bool** — a plain bool is captured once and would not re-disable the fader when the
+  active preset changes (the karaoke `vokál` fader is off only in Plný mix, #186).
+  A read-only display channel passes `enabled: Signal::derive(|| false)` + a
+  `fixed_note` ("pevné" / "podklad") so the UI is honest about what it does not
+  control.
+- **The pure preset/fader math lives in `sp_core::mixer_model`, NOT in sp-ui.**
+  sp-ui has **no unit-test job** (CI `Test` = `cargo test --workspace`, and sp-ui
+  is OUTSIDE the workspace; `test-wasm` is only `cargo check -p sp-core`). So the
+  mappings (`song_gains_for_preset`/`song_preset_for_gains`, dub
+  `ratio_to_faders`/`faders_to_ratio`/`dub_ratio_for_preset`/`dub_preset_for_ratio`,
+  the unified `gains_for_preset`/`preset_for_gains`, `channel_labels`, `presets`)
+  live in `crates/sp-core/src/mixer_model.rs` (WASM-safe, covered by the workspace
+  Test job + the diff-scoped mutation gate) and sp-ui imports them. Preset matching
+  quantises to integer permille so it tolerates the UI's integer-percent fader
+  rounding.
+- **Adapters** (thin, own the API wiring): `components/karaoke_mixer.rs` (songs →
+  `POST /api/v1/karaoke`; keeps the #177 state contract — the `karaoke-now-playing`
+  "Stemy — …" line the post-deploy spec reads, the `karaoke-mode` presets group,
+  the `karaoke-vocal-gain` fader, the "Zaradiť do fronty" enqueue) replaces the
+  deleted `karaoke_control.rs` on the dashboard; `components/dub_mixer.rs` (dub
+  videos → `PATCH /api/v1/videos/{id}/dub-mix`; the `dabing` fader is the live ratio
+  `r`, `originál hlas` is a read-only bed display `= ratio_to_faders(r,has_stems)[0]`
+  synced by an `Effect`, `ambient` is fixed) renders per row in `dabing_list.rs`.
+- **Deferred (needs a server change, out of this lane's scope — returned as a
+  #181 follow-up candidate for the supervisor to file):** the design also wants the
+  dub mixer on a normal playlist card whose now-playing video has
+  `dub_status = ready`. The dashboard `now_playing` WS payload (`NowPlayingInfo`)
+  does NOT carry `dub_status`, so that placement needs the server to add it to the
+  now-playing message first (a `ServerMsg::NowPlaying` + `NowPlayingInfo.dub_status`
+  change). The dub mixer ships on the Dabing page only until that follow-up lands.

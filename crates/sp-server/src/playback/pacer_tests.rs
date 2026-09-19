@@ -662,6 +662,14 @@ fn genlock_pacing_off_keeps_the_legacy_sdk_clocked_call_site() {
     // #15 part 2: the legacy call site now also passes the preview tap as its
     // final arg (an opportunistic sampler that never touches the NDI submit
     // path); the guard is updated to the new byte-exact call site.
+    // #192: the SDK-clocked path now also passes the wall-clock audio emitter
+    // (`audio_emitter.as_ref().map(|t| t.shared())`) as its final arg — audio is
+    // pushed into that emitter's ring instead of riding the video submit — so
+    // the byte-exact guard is updated to the new call site.
+    // #178: the preview arg is now a `DecodeTaps` bundle (JPEG tap + A/V stream
+    // tap) passed as `&taps` — one non-blocking `offer_frame` per decode loop,
+    // still off the NDI submit / genlock path; the byte-exact guard is updated
+    // to the renamed final-but-one arg.
     let legacy_call_site = "\
                     } else {
                         decode_and_send(
@@ -675,7 +683,8 @@ fn genlock_pacing_off_keeps_the_legacy_sdk_clocked_call_site() {
                             &mut last_heartbeat,
                             &mut consecutive_bad_polls,
                             current_start_ms,
-                            &preview_tap,
+                            &taps,
+                            audio_emitter.as_ref().map(|t| t.shared()),
                         )
                     };";
     assert!(

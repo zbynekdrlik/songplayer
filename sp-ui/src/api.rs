@@ -174,6 +174,25 @@ pub struct AudioView {
     pub residual_ppm: f64,
     #[serde(default)]
     pub underruns: u64,
+    /// #192 wall-clock audio emitter (SDK-clocked path).
+    #[serde(default)]
+    pub emitter: EmitterView,
+}
+
+/// Wall-clock audio-emitter telemetry (#192), the subset the badge tooltip
+/// shows for the SDK-clocked path.
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
+pub struct EmitterView {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub silence_blocks: u64,
+    #[serde(default)]
+    pub ring_depth_ms: u64,
+    #[serde(default)]
+    pub emit_jitter_p99_us: u64,
+    #[serde(default)]
+    pub late_blocks: u64,
 }
 
 /// One NDI output's health as consumed by the dashboard's genlock badges

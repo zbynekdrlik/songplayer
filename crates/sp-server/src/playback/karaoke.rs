@@ -71,6 +71,55 @@ impl PlaybackEngine {
             vocal_gain: control.vocal_gain(),
         });
     }
+
+    /// #183 D4: apply a new dub mix ratio to the process-global control. The
+    /// playing 4-stream dub `StemMixReader` ramps toward the new blend live (the
+    /// #186 seam, one stream wider) — the pipeline is NEVER reopened. The DB value
+    /// is persisted by the API handler; this is the LIVE half.
+    #[cfg_attr(test, mutants::skip)]
+    pub async fn set_dub_mix(&mut self, video_id: i64, ratio: f32) {
+        let control = crate::stems::control::global();
+        control.set_dub_ratio(ratio);
+        let r = control.dub_ratio();
+        let (g_original, g_vocals, g_instrumental, g_dub) = crate::stems::control::dub_gains(r);
+        // #183 round 2: also log the 2-stream no-stems gains, since a long,
+        // un-separable dub video plays the `[original, dub]` mix — this is the
+        // pair the box verification watches move live.
+        let (g2_original, g2_dub) = crate::stems::control::dub_over_original_gains(r);
+        info!(
+            video_id,
+            ratio = r,
+            g_original,
+            g_vocals,
+            g_instrumental,
+            g_dub,
+            g2_original,
+            g2_dub,
+            "dub mix changed (live gains, no reload)"
+        );
+    }
+
+    /// #183 D4: at play-start, restore the process-global dub control to THIS
+    /// video's stored `dub_mix_ratio` — but only when the video actually has a
+    /// finished dub (`dub_file_path` set), so playing a normal video never
+    /// disturbs the dub control. This is the design's "global, set per play"
+    /// half; PATCH still overrides it live afterward. A no-op for non-dub videos.
+    #[cfg_attr(test, mutants::skip)]
+    pub async fn seed_dub_ratio_for_video(&mut self, video_id: i64) {
+        match crate::db::models_dabing::dub_ratio_if_ready(&self.pool, video_id).await {
+            Ok(Some(ratio)) => {
+                let control = crate::stems::control::global();
+                control.set_dub_ratio(ratio as f32);
+                info!(
+                    video_id,
+                    ratio = control.dub_ratio(),
+                    "dub video play-start: seeded dub mix ratio from the stored value"
+                );
+            }
+            Ok(None) => {} // not a dub video — leave the control untouched
+            Err(e) => tracing::warn!(%e, video_id, "dub: play-start ratio seed query failed"),
+        }
+    }
 }
 
 #[cfg(test)]

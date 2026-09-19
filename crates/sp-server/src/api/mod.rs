@@ -94,6 +94,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/playback/{playlist_id}/preview.jpg",
             axum::routing::get(preview::get_playback_preview),
         )
+        // #178: live A/V preview STREAM (fragmented MP4 over WebSocket → MSE).
+        .route(
+            "/api/v1/playback/{playlist_id}/preview.ws",
+            axum::routing::get(preview::get_playback_preview_ws),
+        )
         // Settings
         .route(
             "/api/v1/settings",

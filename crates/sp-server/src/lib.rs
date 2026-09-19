@@ -3,9 +3,11 @@
 pub mod ai;
 mod ai_proxy_watchdog;
 pub mod api;
+pub mod dabing;
 pub mod db;
 pub mod downloader;
 mod engine_command;
+mod engine_dispatch;
 pub use engine_command::EngineCommand;
 pub mod lyrics;
 pub mod mdns;
@@ -386,6 +388,12 @@ pub async fn start(
     let stem_ndi_health = ndi_health_registry.clone();
     let stem_obs_state = obs_state.clone();
     let stem_shutdown = shutdown_tx.clone();
+    // #183 D4 dub worker: same tools dir + idle-gate handles as the stem worker.
+    let dub_pool = pool.clone();
+    let dub_tools_dir = lyrics_tools_dir.clone();
+    let dub_ndi_health = ndi_health_registry.clone();
+    let dub_obs_state = obs_state.clone();
+    let dub_shutdown = shutdown_tx.clone();
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -553,6 +561,17 @@ pub async fn start(
                 );
                 tokio::spawn(stem_worker.run(stem_shutdown.subscribe()));
                 // (StemWorker::run logs "stem worker started" once it is live.)
+
+                // #183 D4: dub-synthesis worker (Gemini Live Translate) — same
+                // tools dir + heavy slot, BELOW_NORMAL, never gating playback.
+                let dub_worker = crate::dabing::DubWorker::new(
+                    dub_pool,
+                    dub_tools_dir,
+                    dub_ndi_health,
+                    dub_obs_state,
+                );
+                tokio::spawn(dub_worker.run(dub_shutdown.subscribe()));
+                // (DubWorker::run logs "dub worker started" once it is live.)
             }
             Err(e) => {
                 tracing::error!("tools setup failed: {e}");
@@ -759,63 +778,9 @@ pub async fn start(
             tokio::select! {
                 // Handle API commands (play, pause, skip, etc.)
                 Some(cmd) = engine_rx.recv() => {
-                    match cmd {
-                        EngineCommand::Play { playlist_id } => {
-                            // Manual /play from the dashboard. Engine
-                            // dispatches resume-vs-scene-on based on
-                            // whether Pause captured a snapshot. #88.
-                            engine.handle_engine_play(playlist_id).await;
-                        }
-                        EngineCommand::Pause { playlist_id } => {
-                            engine.handle_command(playlist_id, playback::state::PlayEvent::SceneOff).await;
-                        }
-                        EngineCommand::Skip { playlist_id } => {
-                            engine.handle_command(playlist_id, playback::state::PlayEvent::Skip).await;
-                        }
-                        EngineCommand::Previous { playlist_id } => {
-                            // Pops one entry off the per-playlist history
-                            // stack and plays it. See
-                            // `PlaybackEngine::handle_previous` for the
-                            // full contract.
-                            engine.handle_previous(playlist_id).await;
-                        }
-                        EngineCommand::SetMode { playlist_id, mode } => {
-                            engine.handle_command(playlist_id, playback::state::PlayEvent::SetMode(mode)).await;
-                        }
-                        EngineCommand::PlayVideo { playlist_id, video_id, position_ms } => {
-                            engine.handle_play_video(playlist_id, video_id, position_ms).await;
-                        }
-                        EngineCommand::SceneChanged { playlist_id, on_program } => {
-                            // VideosAvailable + SceneOn (on program) or
-                            // SceneOff (off program) are folded into
-                            // handle_scene_change so every caller goes
-                            // through the same sequence.
-                            engine.handle_scene_change(playlist_id, on_program).await;
-                        }
-                        EngineCommand::Seek { playlist_id, position_ms } => {
-                            engine.seek(playlist_id, position_ms);
-                        }
-                        EngineCommand::ResolumeRecovered { host } => {
-                            engine.handle_resolume_recovery(&host).await;
-                        }
-                        EngineCommand::EnsurePipeline { playlist_id } => {
-                            // #132: a playlist created/activated at runtime
-                            // registers its pipeline the same way startup does.
-                            engine.ensure_pipeline_for_playlist(playlist_id).await;
-                        }
-                        EngineCommand::RemovePipeline { playlist_id } => {
-                            // #132: a playlist deleted/deactivated at runtime
-                            // tears its pipeline down symmetrically.
-                            engine.remove_pipeline(playlist_id);
-                        }
-                        EngineCommand::SetKaraoke { mode, vocal_gain } => {
-                            engine.set_karaoke(mode, vocal_gain).await; // #14
-                        }
-                        EngineCommand::TriggerNdiRecovery { playlist_id, step } => {
-                            // #173: operator/verification one-shot recovery rung.
-                            engine.trigger_ndi_recovery(playlist_id, step).await;
-                        }
-                    }
+                    // The full command match lives in `engine_dispatch` (extracted
+                    // for the 1000-line cap when #183 D4 added SetDubMix).
+                    engine_dispatch::dispatch(&mut engine, cmd).await;
                 }
                 // Handle pipeline events (started, position, ended, error)
                 Some((playlist_id, event)) = engine.recv_pipeline_event() => {

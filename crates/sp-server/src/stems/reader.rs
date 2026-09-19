@@ -16,7 +16,7 @@ use std::path::Path;
 use sp_decoder::{AudioStream, DecoderError, StemMixReader, SymphoniaAudioReader};
 use tracing::{info, warn};
 
-use crate::stems::control::KaraokeControl;
+use crate::stems::control::{KaraokeControl, dub_gains, dub_over_original_gains};
 
 /// One of the streams the decode loop can open — INDEPENDENT of the karaoke
 /// mode (#186). A song opens everything that exists once; the mode is a live
@@ -45,18 +45,62 @@ pub fn stream_roles(vocals_exist: bool, instrumental_exist: bool) -> &'static [S
 /// told apart through the `AudioStream` interface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioSourceKind {
+    /// A dub track AND both stems exist → a live 4-stream
+    /// `[original, vocals, instrumental, dub]` mix (#183 D4).
+    DubMix,
+    /// A dub track but NOT both stems → a live 2-stream `[original, dub]` mix
+    /// (#183 round 2). Long videos the stem worker cannot separate (over the
+    /// 15-min cap, or stems not yet done) still get dubbed: the FULL original is
+    /// the bed (floored at −18 dB), the Slovak dub over it, blended by the live
+    /// ratio. Stems, when they later arrive, promote a fresh open to `DubMix`.
+    DubOverOriginal,
     /// Both stems exist → a live `[original, vocals, instrumental]` mix.
     StemMix,
     /// Stems missing / incomplete → the plain original mix (presets no-op, #177).
     PlainMix,
 }
 
-/// Pure reader-choice: `StemMix` only when the mode-independent `stream_roles`
-/// is the full triple, else `PlainMix`.
-pub fn audio_source_kind(vocals_exist: bool, instrumental_exist: bool) -> AudioSourceKind {
+/// Pure reader-choice (#183). `DubMix` when a dub track AND both stems exist (the
+/// 4-stream mix); else `DubOverOriginal` when a dub track exists WITHOUT both
+/// stems (#183 round 2 — the 2-stream `[original, dub]` mix, so a long,
+/// un-separable video is still dubbed); else `StemMix` for the full stem triple;
+/// else `PlainMix`.
+pub fn audio_source_kind(
+    vocals_exist: bool,
+    instrumental_exist: bool,
+    dub_exist: bool,
+) -> AudioSourceKind {
+    if dub_exist {
+        return if vocals_exist && instrumental_exist {
+            AudioSourceKind::DubMix
+        } else {
+            AudioSourceKind::DubOverOriginal
+        };
+    }
     match stream_roles(vocals_exist, instrumental_exist) {
         [StemRole::Original, StemRole::Vocals, StemRole::Instrumental] => AudioSourceKind::StemMix,
         _ => AudioSourceKind::PlainMix,
+    }
+}
+
+/// Pure per-stream live gains a dub reader is fed for a given source kind and mix
+/// ratio (#183). `DubMix` → the 4-stream `(0, 1−r, 1, r)` (`dub_gains`);
+/// `DubOverOriginal` → the 2-stream `(max(1−r, floor), r)`
+/// (`dub_over_original_gains`); a non-dub kind has no dub gains (`[]`). Extracted
+/// as an OBSERVABLE `Vec<f32>` so the per-kind gain choice is unit-tested without
+/// opening a reader (both readers report 48 kHz stereo, so the choice is
+/// otherwise invisible — the #186 mutation gotcha).
+pub fn dub_gains_for(kind: AudioSourceKind, ratio: f32) -> Vec<f32> {
+    match kind {
+        AudioSourceKind::DubMix => {
+            let (o, v, i, d) = dub_gains(ratio);
+            vec![o, v, i, d]
+        }
+        AudioSourceKind::DubOverOriginal => {
+            let (o, d) = dub_over_original_gains(ratio);
+            vec![o, d]
+        }
+        AudioSourceKind::StemMix | AudioSourceKind::PlainMix => Vec::new(),
     }
 }
 
@@ -67,7 +111,59 @@ pub fn open_audio_stream(
     control: &KaraokeControl,
 ) -> Result<Box<dyn AudioStream>, DecoderError> {
     let (vpath, ipath) = crate::stems::stem_paths(audio_path);
-    match audio_source_kind(vpath.exists(), ipath.exists()) {
+    let dpath = crate::stems::dub_path(audio_path);
+    match audio_source_kind(vpath.exists(), ipath.exists(), dpath.exists()) {
+        // A dub track + both stems → open all four and mix live: original voice
+        // (vocals stem) ↔ Slovak dub over the ambient (instrumental) bed, blended
+        // by the live dub ratio (#183 D4). Any open failure degrades to the stem
+        // or plain mix so a dub video still plays.
+        AudioSourceKind::DubMix => {
+            match build_dub_reader(audio_path, &vpath, &ipath, &dpath, control) {
+                Ok(reader) => {
+                    info!(
+                        original = %audio_path.display(),
+                        dub = %dpath.display(),
+                        "dub: mixing 4 streams (live ratio, no reopen)"
+                    );
+                    Ok(reader)
+                }
+                Err(e) => {
+                    warn!(
+                        audio = %audio_path.display(),
+                        %e,
+                        "dub: track present but 4-stream open failed — falling back to the stem/plain mix"
+                    );
+                    // Fall back to the stem mixer (or plain) below.
+                    match build_stem_reader(audio_path, &vpath, &ipath, control) {
+                        Ok(r) => Ok(r),
+                        Err(_) => Ok(Box::new(SymphoniaAudioReader::open(audio_path)?)),
+                    }
+                }
+            }
+        }
+        // A dub track but NOT both stems (#183 round 2): open `[original, dub]` and
+        // mix live — the full original is the −18 dB bed, the Slovak dub over it.
+        // Any open failure degrades to the plain original mix so the video plays.
+        AudioSourceKind::DubOverOriginal => {
+            match build_dub_over_original_reader(audio_path, &dpath, control) {
+                Ok(reader) => {
+                    info!(
+                        original = %audio_path.display(),
+                        dub = %dpath.display(),
+                        "dub: mixing 2 streams (original bed + dub, live ratio, no reopen)"
+                    );
+                    Ok(reader)
+                }
+                Err(e) => {
+                    warn!(
+                        audio = %audio_path.display(),
+                        %e,
+                        "dub: track present but 2-stream open failed — falling back to the plain mix"
+                    );
+                    Ok(Box::new(SymphoniaAudioReader::open(audio_path)?))
+                }
+            }
+        }
         // Both stems exist → open all three and mix live (a preset change writes
         // gains, never a reopen).
         AudioSourceKind::StemMix => match build_stem_reader(audio_path, &vpath, &ipath, control) {
@@ -121,6 +217,57 @@ fn build_stem_reader(
     )?))
 }
 
+/// Open `[original, vocals, instrumental, dub]` and wrap them in a live 4-stream
+/// [`StemMixReader`] fed the control's four dub gain atomics (#183 D4). Any error
+/// (open failure, rate/channel mismatch — e.g. a dub not written at the stem 48
+/// kHz stereo format) is returned so [`open_audio_stream`] can fall back.
+fn build_dub_reader(
+    original_path: &Path,
+    vpath: &Path,
+    ipath: &Path,
+    dpath: &Path,
+    control: &KaraokeControl,
+) -> Result<Box<dyn AudioStream>, DecoderError> {
+    let original = SymphoniaAudioReader::open(original_path)?;
+    let vocals = SymphoniaAudioReader::open(vpath)?;
+    let instrumental = SymphoniaAudioReader::open(ipath)?;
+    let dub = SymphoniaAudioReader::open(dpath)?;
+    // dub_gain_handles() is [original, vocals, instrumental, dub] — the SAME order
+    // the streams are pushed below, so gain_k applies to stream_k.
+    let gains = control.dub_gain_handles();
+    Ok(Box::new(StemMixReader::new(
+        vec![
+            Box::new(original),
+            Box::new(vocals),
+            Box::new(instrumental),
+            Box::new(dub),
+        ],
+        gains.to_vec(),
+    )?))
+}
+
+/// Open `[original, dub]` and wrap them in a live 2-stream [`StemMixReader`] fed
+/// the control's two `[original, dub]` dub gain atomics (#183 round 2). Used when
+/// a dub exists WITHOUT both stems (a long, un-separable video); the FULL original
+/// is the bed (floored at −18 dB by [`dub_over_original_gains`]). Any error (open
+/// failure, rate/channel mismatch) is returned so [`open_audio_stream`] can fall
+/// back to the plain original mix.
+fn build_dub_over_original_reader(
+    original_path: &Path,
+    dpath: &Path,
+    control: &KaraokeControl,
+) -> Result<Box<dyn AudioStream>, DecoderError> {
+    let original = SymphoniaAudioReader::open(original_path)?;
+    let dub = SymphoniaAudioReader::open(dpath)?;
+    // dub_over_original_gain_handles() is [original, dub] — the SAME order the
+    // streams are pushed below, so gain_k applies to stream_k.
+    let gains = control.dub_over_original_gain_handles();
+    Ok(Box::new(StemMixReader::new(
+        vec![Box::new(original), Box::new(dub)],
+        gains.to_vec(),
+    )?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,11 +292,136 @@ mod tests {
     #[test]
     fn audio_source_kind_is_stem_mix_only_with_both_stems() {
         // The observable reader choice (both reader kinds share the 48 kHz stereo
-        // format, so the opened reader cannot be told apart directly).
-        assert_eq!(audio_source_kind(true, true), AudioSourceKind::StemMix);
-        assert_eq!(audio_source_kind(false, true), AudioSourceKind::PlainMix);
-        assert_eq!(audio_source_kind(true, false), AudioSourceKind::PlainMix);
-        assert_eq!(audio_source_kind(false, false), AudioSourceKind::PlainMix);
+        // format, so the opened reader cannot be told apart directly). No dub.
+        assert_eq!(
+            audio_source_kind(true, true, false),
+            AudioSourceKind::StemMix
+        );
+        assert_eq!(
+            audio_source_kind(false, true, false),
+            AudioSourceKind::PlainMix
+        );
+        assert_eq!(
+            audio_source_kind(true, false, false),
+            AudioSourceKind::PlainMix
+        );
+        assert_eq!(
+            audio_source_kind(false, false, false),
+            AudioSourceKind::PlainMix
+        );
+    }
+
+    #[test]
+    fn audio_source_kind_is_dub_mix_only_with_dub_and_both_stems() {
+        // #183 D4: a dub track + BOTH stems → 4-stream DubMix.
+        assert_eq!(audio_source_kind(true, true, true), AudioSourceKind::DubMix);
+    }
+
+    #[test]
+    fn audio_source_kind_is_dub_over_original_when_dub_but_not_both_stems() {
+        // #183 round 2: a dub track WITHOUT both stems → the 2-stream
+        // DubOverOriginal mix (a long, un-separable video is still dubbed) — it no
+        // longer falls back to PlainMix.
+        assert_eq!(
+            audio_source_kind(false, false, true),
+            AudioSourceKind::DubOverOriginal
+        );
+        assert_eq!(
+            audio_source_kind(false, true, true),
+            AudioSourceKind::DubOverOriginal
+        );
+        assert_eq!(
+            audio_source_kind(true, false, true),
+            AudioSourceKind::DubOverOriginal
+        );
+    }
+
+    #[test]
+    fn dub_gains_for_matches_the_source_kind() {
+        // 4-stream DubMix → (0, 1−r, 1, r).
+        assert_eq!(
+            dub_gains_for(AudioSourceKind::DubMix, 1.0),
+            vec![0.0, 0.0, 1.0, 1.0]
+        );
+        assert_eq!(
+            dub_gains_for(AudioSourceKind::DubMix, 0.0),
+            vec![0.0, 1.0, 1.0, 0.0]
+        );
+        assert_eq!(
+            dub_gains_for(AudioSourceKind::DubMix, 0.25),
+            vec![0.0, 0.75, 1.0, 0.25]
+        );
+        // 2-stream DubOverOriginal → (max(1−r, floor), r).
+        assert_eq!(
+            dub_gains_for(AudioSourceKind::DubOverOriginal, 1.0),
+            vec![0.125, 1.0]
+        );
+        assert_eq!(
+            dub_gains_for(AudioSourceKind::DubOverOriginal, 0.0),
+            vec![1.0, 0.0]
+        );
+        assert_eq!(
+            dub_gains_for(AudioSourceKind::DubOverOriginal, 0.5),
+            vec![0.5, 0.5]
+        );
+        // NaN → dub-only default on both kinds.
+        assert_eq!(
+            dub_gains_for(AudioSourceKind::DubMix, f32::NAN),
+            vec![0.0, 0.0, 1.0, 1.0]
+        );
+        assert_eq!(
+            dub_gains_for(AudioSourceKind::DubOverOriginal, f32::NAN),
+            vec![0.125, 1.0]
+        );
+        // Non-dub kinds have no dub gains.
+        assert!(dub_gains_for(AudioSourceKind::StemMix, 0.5).is_empty());
+        assert!(dub_gains_for(AudioSourceKind::PlainMix, 0.5).is_empty());
+    }
+
+    /// A dub track WITHOUT stems → the 2-stream `[original, dub]` reader opens and
+    /// reports the shared 48 kHz stereo format (#183 round 2).
+    #[test]
+    fn dub_present_without_stems_builds_two_stream_reader() {
+        let dir = tempfile::tempdir().unwrap();
+        let mix = dir.path().join("Song_Artist_id_normalized_audio.flac");
+        std::fs::copy(FIXTURE_FLAC, &mix).unwrap();
+        let dpath = crate::stems::dub_path(&mix);
+        std::fs::copy(FIXTURE_FLAC, &dpath).unwrap();
+        // No stems on disk.
+        let (vpath, ipath) = crate::stems::stem_paths(&mix);
+        assert!(!vpath.exists() && !ipath.exists());
+
+        assert_eq!(
+            audio_source_kind(vpath.exists(), ipath.exists(), dpath.exists()),
+            AudioSourceKind::DubOverOriginal
+        );
+        let ctrl = KaraokeControl::new_for_test(KaraokeMode::FullMix, 0.3);
+        let stream = open_audio_stream(&mix, &ctrl).expect("dub 2-stream should open");
+        assert_eq!(stream.sample_rate(), 48_000);
+        assert_eq!(stream.channels(), 2);
+    }
+
+    /// A dub track + both stems → the 4-stream dub reader opens and reports the
+    /// shared 48 kHz stereo format.
+    #[test]
+    fn dub_present_with_stems_builds_four_stream_reader() {
+        let dir = tempfile::tempdir().unwrap();
+        let mix = dir.path().join("Song_Artist_id_normalized_audio.flac");
+        std::fs::copy(FIXTURE_FLAC, &mix).unwrap();
+        let (vpath, ipath) = crate::stems::stem_paths(&mix);
+        std::fs::copy(FIXTURE_FLAC, &vpath).unwrap();
+        std::fs::copy(FIXTURE_FLAC, &ipath).unwrap();
+        let dpath = crate::stems::dub_path(&mix);
+        std::fs::copy(FIXTURE_FLAC, &dpath).unwrap();
+
+        assert_eq!(
+            audio_source_kind(vpath.exists(), ipath.exists(), dpath.exists()),
+            AudioSourceKind::DubMix
+        );
+        let ctrl = KaraokeControl::new_for_test(KaraokeMode::FullMix, 0.3);
+        let stream = open_audio_stream(&mix, &ctrl).expect("dub 4-stream should open");
+        assert_eq!(stream.sample_rate(), 48_000);
+        assert_eq!(stream.channels(), 2);
     }
 
     // ── open_audio_stream I/O behaviour (real decodable fixture) ──────────────

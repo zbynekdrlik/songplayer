@@ -80,6 +80,12 @@ pub struct StatusResponse {
     pub lan_url: Option<String>,
     /// The box's routable LAN IPv4 as a raw fallback for the dashboard (#51).
     pub lan_ip: Option<String>,
+    /// #178: the H.264 encoder the live preview stream selected for this
+    /// process (`h264_nvenc` / `h264_qsv` / `h264_amf` / `libx264`), or `None`
+    /// until a preview child has been spawned. A missing key deserializes to
+    /// `None` (older clients / the mock stay ok).
+    #[serde(default)]
+    pub preview_encoder: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -690,6 +696,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         playlist_count,
         lan_url: lan.lan_url.clone(),
         lan_ip: lan.lan_ip.clone(),
+        preview_encoder: crate::playback::preview::preview_encoder::chosen_encoder(),
     })
 }
 

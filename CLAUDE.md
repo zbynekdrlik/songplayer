@@ -15,7 +15,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - YouTube cookie file / bot-check → `.claude/rules/youtube-cookies.md` (auto-loads on `downloader/**`, `playlist/**`)
 - yt-dlp spawn env (UTF-8 titles + hide console) → `.claude/rules/yt-dlp-spawn-env.md` (auto-loads on `downloader/**`, `playlist/**`)
 - genlock / NDI timecodes / dantesync → `.claude/rules/genlock.md` (auto-loads on `sp-core genlock*`, `playback/{wallclock,clock_health,pacer,submitter}*`, `sp-ndi/**`)
-- live video preview (#15 part 2, never touch NDI submit path) → `.claude/rules/preview.md` (auto-loads on `playback/{preview,pipeline,pipeline_paced}*`, `sp-ui/.../playlist_card.rs`)
+- dashboard preview — #15 JPEG thumbnail + #178 live A/V stream (never touch NDI submit path) → `.claude/rules/preview.md` (auto-loads on `playback/{preview,preview_stream,preview_encoder,fmp4_relay,pipeline,pipeline_paced}*`, `api/preview.rs`, `sp-ui/.../playlist_card.rs`, `sp-ui/.../preview_video.rs`, `sp-ui/preview_player.js`)
 - karaoke stem separation → `.claude/rules/karaoke-stems.md` (auto-loads on `stems/**`, `audio/stem_mix*.rs`, `playback/karaoke.rs`, `scripts/stem_worker.py`)
 - OBS↔NDI health / dark-wall receiver recovery → `.claude/rules/obs-ndi-health.md` (auto-loads on `obs/**`, `playback/ndi_health.rs`, `e2e/post-deploy*`)
 - obs-mcp gateway watchdog → `.claude/rules/obs-mcp-gateway.md` (auto-loads on `scripts/obs-mcp/**`)
@@ -24,7 +24,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - LAN sp.local mDNS advertisement → `.claude/rules/lan-mdns.md` (auto-loads on `crates/sp-server/src/mdns.rs`)
 - CI workflows: runner shell traps / mutation gate / push+PR de-dup → `.claude/rules/ci-workflows.md` (auto-loads on `.github/workflows/**`, `.cargo/mutants.toml`)
 - sermon dubbing eval (Soniox/Chatterbox engine gotchas) → `.claude/rules/dubbing-eval.md` (auto-loads on `eval/dubbing/**`)
-- Dabing feature (dub data model + section + import cookie gate) → `.claude/rules/dabing.md` (auto-loads on `db/models_dabing.rs`, `api/dabing.rs`, `api/routes_import.rs`, `startup_dabing.rs`, `sp-ui` dabing files)
+- Dabing feature (dub data model + section + import cookie gate + D4 dub worker/Live-Translate child/4-stream mix) → `.claude/rules/dabing.md` (auto-loads on `db/models_dabing.rs`, `api/dabing.rs`, `api/routes_import.rs`, `startup_dabing.rs`, `dabing/**`, `scripts/dub_worker.py`, `sp-ui` dabing files)
 
 | Area | Skill | Load when |
 |------|-------|-----------|

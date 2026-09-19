@@ -6,7 +6,7 @@ use sp_core::models::Playlist;
 
 use crate::api;
 use crate::components::{
-    download_queue, karaoke_control, lan_address, ndi_health, obs_status, playlist_selector,
+    download_queue, karaoke_mixer, lan_address, ndi_health, obs_status, playlist_selector,
     playlist_workspace, resolume_health, selection,
 };
 use crate::store::DashboardStore;
@@ -78,7 +78,7 @@ pub fn DashboardPage() -> impl IntoView {
                 <playlist_workspace::PlaylistWorkspace />
             </div>
 
-            <karaoke_control::KaraokeControl />
+            <karaoke_mixer::KaraokeMixer />
 
             <download_queue::DownloadQueue />
         </div>

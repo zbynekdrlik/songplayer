@@ -76,11 +76,12 @@ pub fn stems_state_of(
     }
 }
 
-/// 1-based position of `video_id` in the stem worker's oldest-first queue, or
-/// `None` when the row is not queue-eligible (done / unsupported / not
-/// normalized / no audio / within its failure backoff). Mirrors
-/// [`get_next_video_for_stems`]'s eligibility predicate and its `ORDER BY id
-/// ASC`, so the number the panel shows matches the order the worker will pick.
+/// 1-based position of `video_id` in the stem worker's queue, or `None` when the
+/// row is not queue-eligible (done / unsupported / not normalized / no audio /
+/// within its failure backoff). Mirrors [`get_next_video_for_stems`]'s
+/// eligibility predicate and its `ORDER BY stem_manual_priority DESC, id ASC`, so
+/// the number the panel shows matches the order the worker will pick: a
+/// higher-priority row, or a same-priority lower-id row, comes before this one.
 pub async fn queue_position(pool: &SqlitePool, video_id: i64) -> Result<Option<i64>, sqlx::Error> {
     const ELIGIBLE_PRED: &str = "normalized = 1 AND audio_file_path IS NOT NULL \
          AND (stem_status IS NULL OR stem_status = 'failed') \
@@ -88,17 +89,22 @@ pub async fn queue_position(pool: &SqlitePool, video_id: i64) -> Result<Option<i
               OR stem_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
 
     let this: Option<i64> = sqlx::query_scalar(&format!(
-        "SELECT id FROM videos WHERE id = ? AND {ELIGIBLE_PRED}"
+        "SELECT stem_manual_priority FROM videos WHERE id = ? AND {ELIGIBLE_PRED}"
     ))
     .bind(video_id)
     .fetch_optional(pool)
     .await?;
-    if this.is_none() {
+    let Some(prio) = this else {
         return Ok(None);
-    }
+    };
     let before: i64 = sqlx::query_scalar(&format!(
-        "SELECT COUNT(*) FROM videos WHERE id < ? AND {ELIGIBLE_PRED}"
+        "SELECT COUNT(*) FROM videos \
+         WHERE {ELIGIBLE_PRED} \
+           AND (stem_manual_priority > ? \
+                OR (stem_manual_priority = ? AND id < ?))"
     ))
+    .bind(prio)
+    .bind(prio)
     .bind(video_id)
     .fetch_one(pool)
     .await?;
@@ -226,10 +232,12 @@ pub struct StemJob {
     pub artist: Option<String>,
 }
 
-/// Select the next song needing stem separation, oldest-first. Eligible rows are
-/// normalized, have an `audio_file_path`, are not already `done`/`unsupported`,
-/// and (if previously `failed`) have passed their backoff window. Returns `None`
-/// when nothing is due.
+/// Select the next song needing stem separation. Manual-priority rows first
+/// (`stem_manual_priority DESC` — a dub-requested video's stems jump the queue,
+/// #183 D4 / #182), then oldest-first (`id ASC`) within the same priority.
+/// Eligible rows are normalized, have an `audio_file_path`, are not already
+/// `done`/`unsupported`, and (if previously `failed`) have passed their backoff
+/// window. Returns `None` when nothing is due.
 pub async fn get_next_video_for_stems(pool: &SqlitePool) -> Result<Option<StemJob>, sqlx::Error> {
     let row = sqlx::query(
         "SELECT id, youtube_id, audio_file_path, duration_ms, song, artist \
@@ -239,7 +247,7 @@ pub async fn get_next_video_for_stems(pool: &SqlitePool) -> Result<Option<StemJo
            AND (stem_status IS NULL OR stem_status = 'failed') \
            AND (stem_next_attempt_at IS NULL \
                 OR stem_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-         ORDER BY id ASC \
+         ORDER BY stem_manual_priority DESC, id ASC \
          LIMIT 1",
     )
     .fetch_optional(pool)

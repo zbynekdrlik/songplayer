@@ -36,6 +36,18 @@ use std::time::Instant;
 
 use tracing::{debug, info};
 
+// #178 live A/V preview STREAM: the fMP4 relay, the stream tap, and the
+// bundled-ffmpeg encoder child. Nested under the (#15) preview module so the
+// near-1000-line `mod.rs` / `pipeline.rs` need no new `mod` lines.
+#[path = "fmp4_relay.rs"]
+pub mod fmp4_relay;
+#[path = "preview_encoder.rs"]
+pub mod preview_encoder;
+#[path = "preview_stream.rs"]
+pub mod preview_stream;
+
+use preview_stream::{DecodeTaps, StreamTap};
+
 /// Default max preview width in px. Height follows the source aspect ratio.
 pub const DEFAULT_MAX_WIDTH: u32 = 320;
 /// Default minimum interval between accepted frames (5 fps ingest ceiling).
@@ -414,6 +426,9 @@ pub fn encode_jpeg_rgb(frame: &RawPreviewFrame, quality: u8) -> Result<Vec<u8>, 
 pub struct PreviewRegistry {
     cfg: PreviewConfig,
     taps: RwLock<HashMap<i64, PreviewTap>>,
+    /// #178: per-playlist live A/V STREAM taps, registered alongside the JPEG
+    /// taps so no second registry has to be threaded through `mod.rs`/`lib.rs`.
+    stream_taps: RwLock<HashMap<i64, StreamTap>>,
 }
 
 impl PreviewRegistry {
@@ -425,7 +440,47 @@ impl PreviewRegistry {
         Self {
             cfg,
             taps: RwLock::new(HashMap::new()),
+            stream_taps: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Register (or reuse) BOTH the JPEG tap and the #178 stream tap for
+    /// `playlist_id`, returning the bundle the decode loops offer to. Idempotent.
+    /// `lead_ms` is the decode-seam A/V-sync lead for this pipeline's clocking
+    /// path (#178 round 2): 100 on the SDK-clocked path (the #192 lookahead), 0
+    /// on the paced path; it is stamped onto the stream tap at first register.
+    pub fn register_taps(&self, playlist_id: i64, lead_ms: u32) -> DecodeTaps {
+        DecodeTaps {
+            preview: self.register(playlist_id),
+            stream: self.register_stream(playlist_id, lead_ms),
+        }
+    }
+
+    /// Register (or reuse) the #178 stream tap for `playlist_id`. Idempotent —
+    /// a re-register keeps the ORIGINAL `lead_ms` (the clocking path does not
+    /// change for the life of a pipeline).
+    fn register_stream(&self, playlist_id: i64, lead_ms: u32) -> StreamTap {
+        if let Some(tap) = self
+            .stream_taps
+            .read()
+            .ok()
+            .and_then(|m| m.get(&playlist_id).cloned())
+        {
+            return tap;
+        }
+        let tap = StreamTap::new(format!("playlist-{playlist_id}"), lead_ms);
+        if let Ok(mut map) = self.stream_taps.write() {
+            return map.entry(playlist_id).or_insert(tap).clone();
+        }
+        tap
+    }
+
+    /// Look up the #178 stream tap for `playlist_id` (the WS route side).
+    pub fn stream(&self, playlist_id: i64) -> Option<StreamTap> {
+        self.stream_taps
+            .read()
+            .ok()
+            .and_then(|m| m.get(&playlist_id).cloned())
     }
 
     /// Register (or reuse) the tap for `playlist_id`. Idempotent — a
