@@ -3,11 +3,19 @@
 //! from already-decoded frames by `playback::preview::PreviewTap` and never
 //! touch the NDI submit / genlock / pacing path.
 
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use tracing::{debug, info};
 
 use crate::AppState;
+use crate::playback::preview::fmp4_relay::FragmentRelay;
+use crate::playback::preview::preview_encoder;
+use crate::playback::preview::preview_stream::{StreamTap, ViewerGuard};
 
 /// GET /api/v1/playback/{playlist_id}/preview.jpg — the live low-res video
 /// preview of the currently-playing song for one playlist.
@@ -38,6 +46,98 @@ pub async fn get_playback_preview(
         }
         None => StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+/// GET /api/v1/playback/{playlist_id}/preview.ws — the #178 live A/V preview
+/// STREAM. Upgrades to a WebSocket that first sends the fragmented-MP4 init
+/// segment (`ftyp`+`moov`) then each keyframe-aligned media fragment as a binary
+/// message, for an MSE `<video>` in the browser. Subscribing marks a viewer
+/// (spawning the encoder child on the first one, killing it after the last one
+/// leaves); `404` for an unknown playlist, `503` when ffmpeg is not ready yet.
+pub async fn get_playback_preview_ws(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    Path(playlist_id): Path<i64>,
+) -> impl IntoResponse {
+    let tap = match state.preview_registry.stream(playlist_id) {
+        Some(t) => t,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let ffmpeg = state
+        .tool_paths
+        .read()
+        .await
+        .as_ref()
+        .map(|t| t.ffmpeg.clone());
+    let ffmpeg = match ffmpeg {
+        Some(p) => p,
+        None => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    };
+    ws.on_upgrade(move |socket| handle_preview_ws(socket, tap, ffmpeg))
+        .into_response()
+}
+
+/// One preview-stream WebSocket connection: register a viewer, ensure the
+/// encoder child is running, send the init segment, then relay fragments until
+/// the client disconnects.
+async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::path::PathBuf) {
+    // Registering the viewer (RAII) keeps the encoder child alive for the
+    // duration of this connection; dropping `_guard` on return releases it.
+    let (_guard, relay) = ViewerGuard::subscribe(&tap);
+    preview_encoder::ensure_running(tap.shared().clone(), ffmpeg);
+    let mut frag_rx = relay.subscribe();
+
+    let init = match wait_for_init(&relay).await {
+        Some(i) => i,
+        None => {
+            info!("preview.ws: encoder produced no init segment, closing");
+            return;
+        }
+    };
+    if socket
+        .send(Message::Binary(init.to_vec().into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
+    debug!(bytes = init.len(), "preview.ws: sent init segment");
+
+    loop {
+        tokio::select! {
+            frag = frag_rx.recv() => match frag {
+                Ok(bytes) => {
+                    if socket.send(Message::Binary(bytes.to_vec().into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    // Viewer fell behind: skip the dropped fragments and resync
+                    // on the next keyframe-aligned fragment (never blocks).
+                    debug!(dropped = n, "preview.ws: viewer lagged, resyncing");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
+            msg = socket.recv() => match msg {
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Ok(Message::Ping(d))) => { let _ = socket.send(Message::Pong(d)).await; }
+                Some(Ok(_)) => {}
+                Some(Err(_)) => break,
+            },
+        }
+    }
+}
+
+/// Poll for the child's init segment (`ftyp`+`moov`) for up to ~10 s while the
+/// encoder starts and the first keyframe is produced.
+async fn wait_for_init(relay: &FragmentRelay) -> Option<Arc<[u8]>> {
+    for _ in 0..100 {
+        if let Some(init) = relay.init() {
+            return Some(init);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    relay.init()
 }
 
 #[cfg(test)]

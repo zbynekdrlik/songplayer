@@ -130,7 +130,7 @@ impl PlaybackPipeline {
         playlist_id: i64,
         genlock_pacing: bool,
         burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        preview_tap: crate::playback::preview::PreviewTap,
+        taps: crate::playback::preview::preview_stream::DecodeTaps,
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
@@ -146,7 +146,7 @@ impl PlaybackPipeline {
                     playlist_id,
                     genlock_pacing,
                     burn_on,
-                    preview_tap,
+                    taps,
                 );
             })
             .expect("failed to spawn pipeline thread");
@@ -172,7 +172,7 @@ impl PlaybackPipeline {
         _burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
         // #15 part 2: the decode loop is a stub on non-Windows (no frames are
         // decoded), so the preview tap is never offered to here.
-        _preview_tap: crate::playback::preview::PreviewTap,
+        _taps: crate::playback::preview::preview_stream::DecodeTaps,
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
@@ -231,7 +231,7 @@ fn run_loop(
     playlist_id: i64,
     genlock_pacing: bool,
     burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    preview_tap: crate::playback::preview::PreviewTap,
+    taps: crate::playback::preview::preview_stream::DecodeTaps,
 ) {
     info!(
         ndi_name,
@@ -245,7 +245,7 @@ fn run_loop(
         playlist_id,
         genlock_pacing,
         burn_on,
-        preview_tap,
+        taps,
     );
     info!(playlist_id, "pipeline thread exited");
 }
@@ -269,7 +269,7 @@ fn run_loop_windows(
     playlist_id: i64,
     genlock_pacing: bool,
     burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    preview_tap: crate::playback::preview::PreviewTap,
+    taps: crate::playback::preview::preview_stream::DecodeTaps,
 ) {
     // 1 ms system timer for the boundary-paced sleep granularity (#147).
     if genlock_pacing {
@@ -423,7 +423,7 @@ fn run_loop_windows(
                             &mut last_heartbeat,
                             &mut consecutive_bad_polls,
                             current_start_ms,
-                            &preview_tap,
+                            &taps,
                         )
                     } else {
                         decode_and_send(
@@ -437,7 +437,7 @@ fn run_loop_windows(
                             &mut last_heartbeat,
                             &mut consecutive_bad_polls,
                             current_start_ms,
-                            &preview_tap,
+                            &taps,
                             audio_emitter.as_ref().map(|t| t.shared()),
                         )
                     };
@@ -552,7 +552,7 @@ fn decode_and_send(
     last_heartbeat: &mut std::time::Instant,
     consecutive_bad_polls: &mut u32,
     start_position_ms: Option<u64>,
-    preview_tap: &crate::playback::preview::PreviewTap,
+    taps: &crate::playback::preview::preview_stream::DecodeTaps,
     audio_emitter: Option<&crate::playback::pipeline::audio_emitter::SharedEmitter>,
 ) -> DecodeResult {
     use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder};
@@ -699,6 +699,11 @@ fn decode_and_send(
 
         match decoder.next_synced() {
             Ok(Some((video_frame, audio_frames))) => {
+                // #15/#178: offer video + post-mix audio to BOTH preview taps
+                // BEFORE the NDI submit / audio-emitter push consume the frame.
+                // No viewer => a couple of relaxed atomic loads; never blocks,
+                // never adds latency to the NDI submit / genlock path.
+                taps.offer_frame(&video_frame, &audio_frames);
                 // #192: on the SDK-clocked path audio is PUSHED into the
                 // wall-clock emitter's ring (before this frame's submit) and the
                 // TIME_CRITICAL emit thread clocks it out continuously, so a song
@@ -711,16 +716,6 @@ fn decode_and_send(
                 );
 
                 let timestamp_ms = video_frame.timestamp_ms;
-                // #15 part 2: opportunistically offer this decoded frame to the
-                // preview tap BEFORE the NDI submit consumes `video_frame.data`.
-                // No viewer => a couple of relaxed atomic loads; never blocks,
-                // never adds latency to the NDI submit path.
-                preview_tap.try_offer(
-                    video_frame.width,
-                    video_frame.height,
-                    video_frame.stride,
-                    &video_frame.data,
-                );
                 submitter.submit_nv12(
                     video_frame.width,
                     video_frame.height,

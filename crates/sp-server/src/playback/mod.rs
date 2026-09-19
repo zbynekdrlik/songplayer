@@ -361,9 +361,9 @@ impl PlaybackEngine {
             // #151: register this output's burn flag (default OFF, never
             // persisted) and hand the shared Arc to the pipeline's submitter.
             let burn_on = ndi_burn_registry.register(ndi_name, genlock_pacing);
-            // #15 part 2: register this playlist's preview tap and hand the
-            // handle to the decode loops (they offer decoded frames to it).
-            let preview_tap = preview_registry.register(playlist_id);
+            // #15/#178: register this playlist's JPEG + A/V-stream taps and hand
+            // the bundle to the decode loops (they offer decoded frames to it).
+            let taps = preview_registry.register_taps(playlist_id);
             let pipeline = PlaybackPipeline::spawn(
                 ndi_name.to_string(),
                 ndi_backend,
@@ -371,7 +371,7 @@ impl PlaybackEngine {
                 playlist_id,
                 genlock_pacing,
                 burn_on,
-                preview_tap,
+                taps,
             );
             PlaylistPipeline {
                 pipeline,

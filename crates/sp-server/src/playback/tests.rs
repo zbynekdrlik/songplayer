@@ -133,7 +133,13 @@ fn cancel_title_timers_aborts_pending_handles() {
                 1,
                 false,
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+                crate::playback::preview::preview_stream::DecodeTaps {
+                    preview: crate::playback::preview::PreviewTap::new(
+                        Default::default(),
+                        "test".into(),
+                    ),
+                    stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+                },
             ),
             state: PlayState::Idle,
             mode: PlaybackMode::default(),

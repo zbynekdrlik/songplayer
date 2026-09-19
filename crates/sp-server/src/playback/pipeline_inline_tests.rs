@@ -16,7 +16,10 @@ fn pipeline_spawn_and_shutdown() {
         1,
         false,
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+        crate::playback::preview::preview_stream::DecodeTaps {
+            preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+        },
     );
     pipeline.shutdown();
     // If we get here, the thread joined successfully.
@@ -33,7 +36,13 @@ fn pipeline_drop_sends_shutdown() {
             2,
             false,
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+            crate::playback::preview::preview_stream::DecodeTaps {
+                preview: crate::playback::preview::PreviewTap::new(
+                    Default::default(),
+                    "test".into(),
+                ),
+                stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+            },
         );
         // Pipeline dropped here — Drop impl should send Shutdown and join.
     }
@@ -50,7 +59,10 @@ fn pipeline_send_command_before_shutdown() {
         3,
         false,
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+        crate::playback::preview::preview_stream::DecodeTaps {
+            preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+        },
     );
     pipeline.send(PipelineCommand::Stop);
     pipeline.send(PipelineCommand::Pause);
@@ -68,7 +80,10 @@ fn pipeline_play_emits_event_on_non_windows() {
         4,
         false,
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+        crate::playback::preview::preview_stream::DecodeTaps {
+            preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+        },
     );
 
     pipeline.send(PipelineCommand::Play {
@@ -133,7 +148,10 @@ fn pipeline_send_seek_command() {
         6,
         false,
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+        crate::playback::preview::preview_stream::DecodeTaps {
+            preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+        },
     );
     pipeline.send(PipelineCommand::Seek { position_ms: 5000 });
     pipeline.shutdown();
@@ -157,7 +175,10 @@ fn pipeline_processes_multiple_sequential_plays() {
         5,
         false,
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+        crate::playback::preview::preview_stream::DecodeTaps {
+            preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+        },
     );
 
     pipeline.send(PipelineCommand::Play {
@@ -215,7 +236,10 @@ fn play_with_start_position_ms_is_accepted() {
         7,
         false,
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+        crate::playback::preview::preview_stream::DecodeTaps {
+            preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
+            stream: crate::playback::preview::preview_stream::StreamTap::new("test".into()),
+        },
     );
 
     pipeline.send(PipelineCommand::Play {
