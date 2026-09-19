@@ -976,17 +976,20 @@ jobs:
           # version). Restarting it again here is a needless SECOND
           # receiver-lottery roll on the live wall. So SKIP the restart when the
           # running process is the version we just deployed AND it has been up
-          # < 10 min (uptime_s < 600) — i.e. it IS the fresh Deploy-started
-          # process. Otherwise fall through and restart. Log which branch we take.
+          # < 10 min (uptime_s < 600) AND it is already connected to OBS — i.e.
+          # it IS the fresh Deploy-started process AND does not need the restart
+          # this step exists for (to pick up OBS). Otherwise fall through and
+          # restart (a process still in OBS backoff DOES get restarted). Log the
+          # branch taken.
           $DeployedVersion = (Get-Content VERSION -Raw).Trim()
           try {
             $status = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status" -TimeoutSec 5
             $uptime = [int]$status.uptime_s
-            if (($status.version -eq $DeployedVersion) -and ($uptime -lt 600)) {
-              Write-Host "SKIP restart (#196 item 6): SongPlayer is the deployed version $DeployedVersion, up $uptime s (< 600) — the Deploy job just started it; not restarting again."
+            if (($status.version -eq $DeployedVersion) -and ($uptime -lt 600) -and ($status.obs_connected)) {
+              Write-Host "SKIP restart (#196 item 6): SongPlayer is the deployed version $DeployedVersion, up $uptime s (< 600), OBS connected — the Deploy job just started it; not restarting again."
               exit 0
             }
-            Write-Host "RESTART: running version '$($status.version)' vs deployed '$DeployedVersion', uptime ${uptime}s — restarting."
+            Write-Host "RESTART: version '$($status.version)' (deployed '$DeployedVersion'), uptime ${uptime}s, obs_connected=$($status.obs_connected) — restarting."
           } catch {
             Write-Host "RESTART: /api/v1/status not reachable yet ($($_.Exception.Message)) — restarting."
           }

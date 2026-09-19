@@ -620,10 +620,25 @@ impl crate::playback::PlaybackEngine {
             self.ndi_health_registry
                 .clear_warned_no_receiver(playlist_id);
         }
+        let elapsed_since_ready = self.ndi_health_registry.elapsed_since_ready();
+        let reconnected = self.ndi_health_registry.has_reconnected(playlist_id);
+        // #196: from the moment the senders are ready until an on-program output
+        // reconnects, the #173 receiver-side ladder is suppressed for it — the
+        // ladder cannot clear a restart wedge (it can deepen it), so it must
+        // NEVER run during the post-restart window (the self-check surfaces the
+        // failure at +30 s instead). This closes the ~10–30 s window where the
+        // dark-wall reason would otherwise arm the ladder before the +30 s
+        // `no_receiver_after_restart` reason takes over.
+        let ladder_suppressed = sp_core::health::ladder_suppressed_after_restart(
+            elapsed_since_ready,
+            reconnected,
+            on_program,
+            connections,
+        );
         let degraded_reason = if degraded_reason.as_deref() != Some(NO_OBS_INPUT_REASON)
             && sp_core::health::no_receiver_after_restart(
-                self.ndi_health_registry.elapsed_since_ready(),
-                self.ndi_health_registry.has_reconnected(playlist_id),
+                elapsed_since_ready,
+                reconnected,
                 on_program,
                 self.ndi_health_registry.pre_restart_count(playlist_id),
                 connections,
@@ -707,9 +722,9 @@ impl crate::playback::PlaybackEngine {
         // #127 / #173 receiver-side recovery: evaluate the dark-wall ladder for
         // this pipeline BEFORE building the snapshot, so the fired rung is
         // recorded on it. `is_dark` = Playing on program with the dark-wall
-        // reason (connections == 0). The tracker enforces the dark-poll
-        // threshold, the rung spacing, and the flap escalation.
-        let is_dark = degraded_reason.as_deref() == Some(DARK_WALL_REASON);
+        // reason (connections == 0) AND not in the #196 post-restart window
+        // (where the ladder must never run — it cannot clear a restart wedge).
+        let is_dark = degraded_reason.as_deref() == Some(DARK_WALL_REASON) && !ladder_suppressed;
         let recovery_step_fired = self.ndi_health_registry.evaluate_recovery(
             playlist_id,
             is_dark,

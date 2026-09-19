@@ -158,6 +158,25 @@ pub fn no_receiver_after_restart(
     on_program || pre_restart_count >= 1
 }
 
+/// #196 item 4: whether the #173 receiver-recovery LADDER must be suppressed
+/// for a dark output during the post-restart settling window. The ladder cannot
+/// clear a restart wedge — it can deepen it — so from the moment the senders are
+/// ready (`elapsed_since_ready` is `Some`) until an on-program output reconnects
+/// (`connections >= 1` at least once, the `reconnected` latch), the ladder must
+/// NOT run for it. The self-check (`no_receiver_after_restart`, at +30 s)
+/// surfaces the failure instead. Pure so the window boundary is unit-tested;
+/// unlike `no_receiver_after_restart` this has NO 30 s delay — the ladder is
+/// suppressed for the WHOLE window, closing the ~10–30 s gap where the dark-wall
+/// reason would otherwise arm the ladder before the +30 s reason takes over.
+pub fn ladder_suppressed_after_restart(
+    elapsed_since_ready: Option<Duration>,
+    reconnected: bool,
+    on_program: bool,
+    connections: i32,
+) -> bool {
+    elapsed_since_ready.is_some() && !reconnected && on_program && connections < 1
+}
+
 /// #196 item 4: Slovak plural noun for the NDI-badge count of outputs without a
 /// receiver — 1 `výstup`, 2–4 `výstupy`, else `výstupov`.
 pub fn ndi_output_word(n: usize) -> &'static str {
@@ -393,6 +412,40 @@ mod tests {
     fn self_check_negative_connections_counts_as_dark() {
         // -1 ("never polled") is < 1 → dark.
         assert!(no_receiver_after_restart(D(45), false, true, 0, -1));
+    }
+
+    // ---- ladder_suppressed_after_restart (#196 item 4) ----
+
+    #[test]
+    fn ladder_not_suppressed_before_senders_ready() {
+        // No elapsed → not in the window → ladder runs as normal (false).
+        assert!(!ladder_suppressed_after_restart(None, false, true, 0));
+    }
+
+    #[test]
+    fn ladder_suppressed_for_on_program_dark_in_window_from_the_start() {
+        // Immediately after ready (even 0 s, well before the +30 s reason):
+        // an on-program dark output suppresses the ladder.
+        assert!(ladder_suppressed_after_restart(D(0), false, true, 0));
+        assert!(ladder_suppressed_after_restart(D(15), false, true, 0));
+    }
+
+    #[test]
+    fn ladder_not_suppressed_once_reconnected() {
+        assert!(!ladder_suppressed_after_restart(D(15), true, true, 0));
+    }
+
+    #[test]
+    fn ladder_not_suppressed_with_a_receiver_boundary() {
+        // connections == 1 → not dark → ladder logic (which only fires on dark)
+        // is not suppressed by this.
+        assert!(!ladder_suppressed_after_restart(D(15), false, true, 1));
+    }
+
+    #[test]
+    fn ladder_not_suppressed_off_program() {
+        // Off program: the ladder never fires there anyway; this returns false.
+        assert!(!ladder_suppressed_after_restart(D(15), false, false, 0));
     }
 
     // ---- ndi_output_word + ndi_label (#196 item 4) ----
