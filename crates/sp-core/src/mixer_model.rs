@@ -285,10 +285,11 @@ mod tests {
 
     #[test]
     fn dub_faders_without_stems_floor_the_original_bed() {
-        // 1 − 0.95 = 0.05 < floor → the bed holds at DUB_ORIGINAL_FLOOR.
-        assert_eq!(ratio_to_faders(0.95, false), vec![0.125, 0.95, 1.0]);
-        // With stems the same ratio is NOT floored (proves the branch).
-        assert_eq!(ratio_to_faders(0.95, true), vec![0.05, 0.95, 1.0]);
+        // r = 0.9375 → 1 − r = 0.0625 (both f32-exact) < floor, so WITHOUT stems
+        // the bed holds at DUB_ORIGINAL_FLOOR (0.125)...
+        assert_eq!(ratio_to_faders(0.9375, false), vec![0.125, 0.9375, 1.0]);
+        // ...and WITH stems the same ratio is NOT floored (proves the branch).
+        assert_eq!(ratio_to_faders(0.9375, true), vec![0.0625, 0.9375, 1.0]);
     }
 
     #[test]
