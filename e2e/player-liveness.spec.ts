@@ -144,11 +144,14 @@ test("a fader drag holds its dragged value across ticks and commits exactly one 
   await expect(fader).toHaveValue("40");
 
   // Move to 70 % and release → exactly ONE PATCH carrying the final ratio.
+  // Real browsers fire `pointerup` BEFORE `change` on a slider release, so
+  // dispatch that order — it exercises the commit path that must read the drag
+  // signal (not the DOM, which `pointerup` may have snapped back to live gain).
   await fader.evaluate((el: HTMLInputElement) => {
     el.value = "70";
     el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
     el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
   await expect.poll(() => patches.length, { timeout: 5000 }).toBeGreaterThan(0);
@@ -190,10 +193,12 @@ test("a seek drag holds its dragged position across ticks and commits exactly on
   // snap the thumb back (the seek-bar regression).
   await expect(seek).toHaveValue("100000");
 
-  // Release → exactly ONE seek POST with the dragged value.
+  // Release → exactly ONE seek POST with the dragged value. Real browsers fire
+  // `pointerup` before `change`, so the commit must read the drag signal, not
+  // the DOM (which may have snapped back to the advancing live position).
   await seek.evaluate((el: HTMLInputElement) => {
-    el.dispatchEvent(new Event("change", { bubbles: true }));
     el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
   await expect.poll(() => seekBodies.length, { timeout: 5000 }).toBeGreaterThan(0);

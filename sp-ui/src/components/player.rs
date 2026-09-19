@@ -231,14 +231,18 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                             seek_drag_ms.set(v);
                         }
                     }
-                    on:change=move |ev| {
-                        if let Ok(v) = event_target_value(&ev).parse::<u64>() {
-                            do_seek(v);
-                        }
+                    on:change=move |_| {
+                        // Commit the PENDING dragged position, never the DOM value:
+                        // on a real release `pointerup` clears `dragging` BEFORE
+                        // `change`, so `prop:value` may have already snapped the DOM
+                        // back to the live position — `seek_drag_ms` is what was
+                        // actually dragged (and the last keyboard/programmatic value).
+                        do_seek(seek_drag_ms.get_untracked());
                         seek_dragging.set(false);
                     }
                     on:pointerup=move |_| seek_dragging.set(false)
                     on:touchend=move |_| seek_dragging.set(false)
+                    on:pointercancel=move |_| seek_dragging.set(false)
                 />
                 <div class="player-seek-controls">
                     <button

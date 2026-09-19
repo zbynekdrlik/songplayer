@@ -70,7 +70,11 @@ pub fn DabingPage() -> impl IntoView {
             if let Ok(v) = api::get_dabing().await {
                 if let Some(pid) = parse_dabing_pid(&v) {
                     // Same change-gate as the poll — never re-create the Player.
-                    if dabing_pid.get_untracked() != Some(pid) {
+                    // `try_get_untracked` (not `get_untracked`): this async runs
+                    // after the button click and the page may have been navigated
+                    // away, disposing the signal — a plain read would then panic
+                    // (sp-ui-frontend.md); `flatten()` folds disposed → None.
+                    if dabing_pid.try_get_untracked().flatten() != Some(pid) {
                         dabing_pid.set(Some(pid));
                     }
                 }
