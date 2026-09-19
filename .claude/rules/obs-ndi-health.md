@@ -218,3 +218,44 @@ poll`.
 
 ## Reading the health snapshot's `state` — `Playing` already means "on program" (#154)
 `handle_health_snapshot` RECONCILES the pipeline-reported state before storing it: a pipeline that is `Playing` but whose scene is NOT on OBS program (`scene_active == false`) is stored as `Paused`, not `Playing`. So a consumer that reads `NdiHealthRegistry::snapshots()` and checks `state == PlaybackStateLabel::Playing` is already getting "an output is playing AND OBS is showing it" — you do NOT need to also cross-reference `active_playlist_ids`. The #154 lyrics idle gate relies on exactly this (`lyrics/idle_gate.rs::any_playing`): "any snapshot Playing" = "the wall is showing an output" = defer heavy GPU work. Read the registry in-process (the engine already holds the `Arc`); never HTTP-loop `/api/v1/ndi/health` back to your own server.
+
+## A restart is a receiver lottery until camera-box re-resolves — pin the name→port map (#196)
+DistroAV's genlock build reconnects a stale source **BY URL with the PINNED
+previous port** (`reset_ndi_receiver: connect BY-URL '10.77.9.201:5970'`), and
+the NDI runtime hands each `send_create` the next free TCP port from ~5961 up in
+**creation order**. So if SongPlayer creates its senders in a non-deterministic
+order across a restart (the old lazy / thread-raced path), a stream name can
+move to a different port and the receiver's by-URL reconnect lands on the wrong
+or a dead sender → `connections=0` on the on-program output = dark wall, and the
+#173 receiver-side ladder CANNOT clear it (only another restart re-rolls it). Fix
+(round 1): **deterministic, restart-safe creation** in `playback/startup_senders.rs`
++ `runtime_pipeline.rs::ensure_pipeline_inner`:
+- **Port-availability wait first** (`wait_for_ports_free` + `ndi_ports_free`, ≤10 s
+  poll on 5960..=5960+N+1) so an immediate restart waits for the previous
+  instance's listeners to release before creating — same span, same assignment.
+- **Serialized id-order creation:** `create_startup_senders` creates each active
+  playlist's sender one at a time in `playlist.id` order, waiting for a per-pipeline
+  ready one-shot (fired by the pipeline thread right after `send_create`) before the
+  next — so `send_create` runs in a fixed order every restart, not OS-scheduler order.
+  Runs before the engine command loop drains scene events, so no lazy scene-triggered
+  creation preempts it.
+- Box-verified 2026-09-20: after a deploy restart, on-program SP-slow
+  `connections=2`, every output 2–4, no dark wall.
+- **No dark-wall ladder for an output with no OBS input** (`effective_dark_reason`
+  + `PlaybackEngine::output_has_obs_input`, tokio `try_read` on the shared
+  `NdiSourceMap`): a Playing-on-program output at `connections=0` whose stream is
+  advertised by NO OBS NDI input gets `degraded_reason = "no OBS scene for this
+  output"` (not the dark-wall reason), so `is_dark` is false and the every-10 s
+  degraded/recovered flap stops (the SP-dabing-before-its-scene case).
+
+**GOTCHA — `NDIlib_send_get_source_name().p_url_address` is EMPTY for a local
+sender (#196).** The plan was to surface each sender's advertised `host:port` as
+`sender_url` on `/api/v1/ndi/health` by reading `p_url_address` from
+`NDIlib_send_get_source_name`. On the real win-resolume NDI runtime that field is
+empty for a LOCAL sender (verified: `sender_url` null for all 10 outputs on a
+stable process, even with a ≤2 s post-create retry) — `send_get_source_name`
+returns the sender's NAME (`p_ndi_name`), not the URL a receiver connects to. The
+port ASSIGNMENT is still deterministic; only its DISPLAY via `sender_url` is
+unavailable this way. To surface the name→port map, use `NDIlib_find`
+receiver-side discovery or read SongPlayer's own listening ports (5960–5970) and
+correlate by creation order — NOT the sender-side `get_source_name`.
