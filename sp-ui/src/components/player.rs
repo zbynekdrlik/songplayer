@@ -13,7 +13,7 @@
 use leptos::prelude::*;
 use serde::Serialize;
 use sp_core::playback::{PlaybackMode, PlaybackState};
-use sp_core::seek_model::{format_position, seek_fraction, seek_target_ms};
+use sp_core::seek_model::{format_position, seek_target_ms};
 
 use crate::api;
 use crate::components::dub_mixer::DubMixer;
@@ -47,6 +47,21 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
 
     let is_playing = Memo::new(move |_| matches!(state(), PlaybackState::Playing));
 
+    // The pipeline is DECODING when it is Playing OR waiting off-program for its
+    // scene with a real current video. Preparing a dub on the Dabing page before
+    // cutting it in is exactly this off-program decoding state, so the preview +
+    // mixer follow "is decoding", not "is on the program".
+    let is_decoding = Memo::new(move |_| {
+        matches!(
+            state(),
+            PlaybackState::Playing | PlaybackState::WaitingForScene
+        ) && has_content()
+    });
+
+    // Playback-command errors (play / pause / skip / prev / seek / mode) surface
+    // here as Slovak text and clear on the next successful command.
+    let player_error = RwSignal::new(Option::<String>::new());
+
     let state_label = move || match state() {
         PlaybackState::Playing => "Hrá",
         PlaybackState::Idle => "Nehrá",
@@ -66,22 +81,36 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
             .unwrap_or(false)
     };
 
-    // --- transport ---
+    // --- transport (each command reports failure into `player_error`) ---
+    let report = move |ctx: &'static str, r: Result<(), String>| match r {
+        Ok(()) => player_error.set(None),
+        Err(e) => player_error.set(Some(format!("{ctx}: {e}"))),
+    };
     let do_play_pause = move |_| {
         let playing = is_playing.get_untracked();
         leptos::task::spawn_local(async move {
             let action = if playing { "pause" } else { "play" };
-            let _ = api::post_empty(&format!("/api/v1/playback/{pid}/{action}")).await;
+            let r = api::post_empty(&format!("/api/v1/playback/{pid}/{action}")).await;
+            report(
+                if playing {
+                    "Pauza zlyhala"
+                } else {
+                    "Prehrávanie zlyhalo"
+                },
+                r,
+            );
         });
     };
     let do_prev = move |_| {
         leptos::task::spawn_local(async move {
-            let _ = api::post_empty(&format!("/api/v1/playback/{pid}/previous")).await;
+            let r = api::post_empty(&format!("/api/v1/playback/{pid}/previous")).await;
+            report("Predošlá zlyhala", r);
         });
     };
     let do_skip = move |_| {
         leptos::task::spawn_local(async move {
-            let _ = api::post_empty(&format!("/api/v1/playback/{pid}/skip")).await;
+            let r = api::post_empty(&format!("/api/v1/playback/{pid}/skip")).await;
+            report("Ďalšia zlyhala", r);
         });
     };
     let on_mode = move |ev: leptos::ev::Event| {
@@ -91,23 +120,25 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
             mode: mode.as_str().to_string(),
         };
         leptos::task::spawn_local(async move {
-            let _ = api::put_json_empty(&format!("/api/v1/playback/{pid}/mode"), &body).await;
+            let r = api::put_json_empty(&format!("/api/v1/playback/{pid}/mode"), &body).await;
+            report("Zmena režimu zlyhala", r);
         });
     };
 
     // --- seek ---
     let do_seek = move |ms: u64| {
         leptos::task::spawn_local(async move {
-            let _ = api::seek_playlist(pid, ms).await;
+            let r = api::seek_playlist(pid, ms).await;
+            report("Pretáčanie zlyhalo", r);
         });
     };
     let seek_back = move |_| do_seek(seek_target_ms(position(), -10_000, duration()));
     let seek_fwd = move |_| do_seek(seek_target_ms(position(), 10_000, duration()));
 
-    // --- preview (click-to-start; torn down when playback stops) ---
+    // --- preview (click-to-start; torn down when the pipeline stops decoding) ---
     let preview_on = RwSignal::new(false);
     Effect::new(move |_| {
-        if !is_playing.get() {
+        if !is_decoding.get() {
             preview_on.set(false);
         }
     });
@@ -149,7 +180,20 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                 </span>
             </div>
 
-            // --- seek row ---
+            // --- error line: a failed command surfaces here, clears on success ---
+            {move || {
+                player_error
+                    .get()
+                    .map(|e| {
+                        view! {
+                            <div class="player-error" data-testid="player-error">
+                                {e}
+                            </div>
+                        }
+                    })
+            }}
+
+            // --- seek row (the range IS the progress; no second bar) ---
             <div class="player-seek-row">
                 <input
                     type="range"
@@ -166,12 +210,6 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                         }
                     }
                 />
-                <div class="player-progress">
-                    <div
-                        class="player-progress-fill"
-                        style:width=move || format!("{:.1}%", seek_fraction(position(), duration()) * 100.0)
-                    ></div>
-                </div>
                 <div class="player-seek-controls">
                     <button
                         type="button"
@@ -241,10 +279,11 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                 </select>
             </div>
 
-            // --- live A/V preview slot (click-to-start; behaviour unchanged) ---
+            // --- live A/V preview slot (click-to-start; available whenever the
+            // pipeline is decoding, incl. an off-program dub on the Dabing page) ---
             <div class="player-preview">
                 {move || {
-                    if !is_playing.get() {
+                    if !is_decoding.get() {
                         view! {
                             <div class="preview-placeholder" data-testid="preview-placeholder">
                                 "Bez náhľadu"
@@ -277,22 +316,35 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                 }}
             </div>
 
-            // --- mixer slot ---
+            // --- mixer slot: collapses to one line when nothing plays; the
+            // faders/presets appear only with a playing item, and the adapter
+            // follows that item (dub row → dub mixer, else stems mixer) ---
             <div class="player-mixer">
-                {move || match mixer_choice.get() {
-                    Some(row) => {
+                {move || {
+                    if !has_content() {
                         view! {
-                            <DubMixer
-                                video_id=row.video_id
-                                title=row.title.clone()
-                                dub_status=row.dub_status.clone()
-                                dub_mix_ratio=row.dub_mix_ratio
-                                stem_status=row.stem_status.clone()
-                            />
+                            <div class="player-mixer-idle" data-testid="player-mixer-idle">
+                                "Mixér — nič nehrá"
+                            </div>
                         }
                             .into_any()
+                    } else {
+                        match mixer_choice.get() {
+                            Some(row) => {
+                                view! {
+                                    <DubMixer
+                                        video_id=row.video_id
+                                        title=row.title.clone()
+                                        dub_status=row.dub_status.clone()
+                                        dub_mix_ratio=row.dub_mix_ratio
+                                        stem_status=row.stem_status.clone()
+                                    />
+                                }
+                                    .into_any()
+                            }
+                            None => view! { <KaraokeMixer playlist_id=pid /> }.into_any(),
+                        }
                     }
-                    None => view! { <KaraokeMixer playlist_id=pid /> }.into_any(),
                 }}
             </div>
         </div>

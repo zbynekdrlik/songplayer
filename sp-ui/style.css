@@ -1354,17 +1354,18 @@ body {
     border-color: var(--success);
 }
 
+.player-error {
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    font-size: 0.85em;
+    color: #fff;
+    background: var(--danger, #c0392b);
+    border: 1px solid var(--danger, #c0392b);
+}
+
 .player-seek-row { display: flex; flex-direction: column; gap: 6px; }
 .player-seek { width: 100%; accent-color: var(--accent); }
 .player-seek:disabled { opacity: 0.5; }
-
-.player-progress {
-    height: 4px;
-    background: var(--bg-input);
-    border-radius: 2px;
-    overflow: hidden;
-}
-.player-progress-fill { height: 100%; background: var(--accent); }
 
 .player-seek-controls {
     display: flex;
@@ -1406,5 +1407,13 @@ body {
 
 .player-preview { display: flex; flex-direction: column; }
 .player-mixer { display: flex; flex-direction: column; }
+.player-mixer-idle {
+    padding: 10px 12px;
+    color: var(--text-dim);
+    font-size: 0.9em;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
 
 .dabing-row-ratio { color: var(--text-dim); font-size: 0.85em; margin-top: 4px; }
