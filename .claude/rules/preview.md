@@ -89,6 +89,27 @@ equivalent, simpler, single-seam realization — see #178.)
   are Linux unit-tested. The child/TCP/feeder/monitor lifecycle is
   `mutants::skip` glue (box-verified) but compiles cross-platform.
 
+### A/V-sync lead (`-itsoffset`, #178 Round 2)
+
+The audio + video are tapped together at the ONE decode seam, but the merged #192
+emitter opens the SDK-clocked decoder with a 100 ms audio read-ahead
+(`decoder_tolerance_ms(true) == 140` vs `DEFAULT_TOLERANCE_MS == 40`), so at the
+seam the `audio_frames` LEAD `video_frame` by `lead_ms` on the SDK-clocked path
+(the wall is unaffected — the emitter ring absorbs it — but the preview stamps by
+arrival wall-clock). `ensure_pipeline` computes `lead_ms = decoder_tolerance_ms(
+!genlock_pacing) − DEFAULT_TOLERANCE_MS` (100 SDK path, 0 paced path), threads it
+`register_taps → StreamTap::new → StreamShared`, and `build_ffmpeg_args` inserts
+`-itsoffset <lead_s>` BEFORE the audio `-i` when `lead_ms > 0` (delaying the audio
+input to re-sync), omitting it at 0. Both cases are exact-boundary unit-tested.
+
+### Fixed-stereo audio input (`to_stereo`, #178 Round 2)
+
+The child's audio input is a FIXED 48 kHz STEREO f32 stream, so `offer_audio`
+routes every post-mix block through the pure `to_stereo(samples, channels)`:
+mono → each sample duplicated into L,R (a mono block forwarded verbatim would play
+at DOUBLE speed); stereo → verbatim; any other channel count → dropped. Upmix uses
+`flat_map` with no capacity hint (a hint multiplier would be an equivalent mutant).
+
 ## fMP4 relay late-join contract (`fmp4_relay.rs`)
 
 `BoxSplitter` (pure, Linux-tested: split reads across buffer boundaries, 64-bit
@@ -113,10 +134,22 @@ in the card).
 ## chrome-channel E2E note (#178 Round 2)
 
 H.264/AAC are ABSENT from Playwright's bundled Chromium, so the preview E2E runs
-in a Playwright project with `channel: 'chrome'` (GitHub ubuntu runners ship
-google-chrome). The mock (`e2e/mock-api.mjs`) serves a canned tiny fMP4 (init +
-fragments) over the WS; the test asserts `<video>` `readyState ≥ 3`, `currentTime`
-advances, the unmute click works, and zero console errors. Post-deploy: the
-`e2e/post-deploy*` spec asserts the card `<video>` reaches `readyState ≥ 3` and
-advances, following the suite's existing scene-restore discipline (never switch
-the OBS program scene beyond what the suite already does).
+under a SEPARATE browser-channel project (bundled Chromium runs everything else):
+
+- **Mock (`e2e/preview.spec.ts`, `playwright.config.ts` `chrome` project)** —
+  `channel: 'chrome'` (GitHub ubuntu runners ship google-chrome; the CI
+  `frontend-e2e` job also runs `npx playwright install chrome`). The mock
+  (`e2e/mock-api.mjs`) serves a canned tiny fMP4 (`e2e/fixtures/preview-fixture.mp4`,
+  init + 9 keyframe fragments) over the `preview.ws` WebSocket (a `noServer`
+  upgrade router dispatches `/api/v1/ws` vs `…/preview.ws`). The spec asserts the
+  card `<video>` reaches `readyState ≥ 3`, `currentTime` advances, the unmute
+  button flips `muted`, an idle card mounts NO `<video>`, and zero console errors.
+  **A project-level `testMatch`/`testIgnore` REPLACES the global one** — the
+  `chromium` project must repeat the `post-deploy*` ignore alongside `preview`.
+- **Post-deploy (`e2e/post-deploy-preview.spec.ts`, `post-deploy.config.ts` `edge`
+  project)** — `channel: 'msedge'` (Edge is always present on the Windows box and
+  carries the codecs; the box E2E job runs `npx playwright install msedge`). It
+  drives OBS to the SAME `sp-fast` scene the main suite already uses, selects the
+  ytfast card, and asserts the real box-encoded `<video>` reaches `readyState ≥ 3`
+  and advances — following the suite's scene-restore discipline (capture at start,
+  restore after every test AND at suite end; never a NEW scene on the wall).

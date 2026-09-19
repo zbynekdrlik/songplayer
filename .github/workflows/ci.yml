@@ -209,6 +209,8 @@ jobs:
         run: cd e2e && npm ci
       - name: Install Playwright browsers
         run: cd e2e && npx playwright install chromium --with-deps
+      - name: Install Google Chrome (H.264/AAC for the #178 preview MSE E2E)
+        run: cd e2e && npx playwright install chrome
       - name: Start mock API
         run: cd e2e && node mock-api.mjs &
       - name: Wait for mock API
@@ -1646,6 +1648,9 @@ jobs:
             exit 1
           }
           npx playwright install chromium 2>&1 | Select-Object -Last 3
+          # #178: the preview <video> spec runs under the msedge channel (Edge
+          # carries H.264/AAC, which bundled Chromium lacks). Register system Edge.
+          npx playwright install msedge 2>&1 | Select-Object -Last 3
           npx playwright test --config=post-deploy.config.ts --reporter=list 2>&1
           if ($LASTEXITCODE -ne 0) {
             Write-Error "FAIL: post-deploy Playwright suite failed"
