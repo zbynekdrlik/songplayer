@@ -299,3 +299,33 @@ fn offer_frame_feeds_the_stream_video_and_audio_taps() {
         .expect("the audio tap got the block");
     assert_eq!(got, vec![0.25f32, -0.25, 0.5, -0.5]);
 }
+
+#[test]
+fn to_stereo_upmixes_mono_by_duplicating_each_sample() {
+    // Mono → stereo: each sample becomes an L,R pair (correct speed, not double).
+    assert_eq!(
+        to_stereo(&[1.0, 2.0, 3.0], 1),
+        Some(vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0])
+    );
+    // The interleaved length is exactly doubled.
+    assert_eq!(to_stereo(&[0.5f32; 4], 1).map(|b| b.len()), Some(8));
+}
+
+#[test]
+fn to_stereo_forwards_stereo_verbatim() {
+    assert_eq!(
+        to_stereo(&[1.0, -1.0, 0.5, -0.5], 2),
+        Some(vec![1.0, -1.0, 0.5, -0.5])
+    );
+    // An empty stereo block stays empty (never panics).
+    assert_eq!(to_stereo(&[], 2), Some(vec![]));
+}
+
+#[test]
+fn to_stereo_drops_unexpected_channel_counts() {
+    // Exact-boundary around the two accepted counts (1 and 2): everything else
+    // is dropped rather than mis-fed into the fixed-stereo child input.
+    assert_eq!(to_stereo(&[1.0, 2.0, 3.0], 3), None);
+    assert_eq!(to_stereo(&[1.0], 0), None);
+    assert_eq!(to_stereo(&[1.0f32; 6], 6), None);
+}

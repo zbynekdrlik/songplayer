@@ -52,7 +52,8 @@ fn parse_available_encoders_dedups_and_ignores_blank_lines() {
 
 #[test]
 fn ffmpeg_args_are_exact_for_libx264_with_low_latency_tuning() {
-    let args = build_ffmpeg_args(5001, 5002, "libx264");
+    // lead_ms 0 (paced path) → no -itsoffset; the full vector is unchanged.
+    let args = build_ffmpeg_args(5001, 5002, "libx264", 0);
     let expected: Vec<String> = [
         "-hide_banner",
         "-loglevel",
@@ -111,7 +112,7 @@ fn ffmpeg_args_are_exact_for_libx264_with_low_latency_tuning() {
 
 #[test]
 fn ffmpeg_args_omit_libx264_tuning_for_hardware_encoders() {
-    let args = build_ffmpeg_args(1, 2, "h264_nvenc");
+    let args = build_ffmpeg_args(1, 2, "h264_nvenc", 0);
     // The hardware path uses the codec directly with no -preset/-tune.
     assert!(args.contains(&"h264_nvenc".to_string()));
     assert!(!args.contains(&"-preset".to_string()));
@@ -122,4 +123,48 @@ fn ffmpeg_args_omit_libx264_tuning_for_hardware_encoders() {
     assert!(args.contains(&"640x360".to_string()));
     // Still muxes fragmented MP4 to stdout.
     assert_eq!(args.last().unwrap(), "pipe:1");
+}
+
+#[test]
+fn ffmpeg_args_insert_itsoffset_before_audio_input_for_nonzero_lead() {
+    // SDK-clocked path: the #192 lookahead makes tapped audio LEAD video by
+    // 100 ms, compensated by `-itsoffset 0.100` placed BEFORE the audio input
+    // (delaying audio back into sync). Exact-boundary: value is 0.100, exactly
+    // one occurrence, sitting after the video `-i` and before the audio input.
+    let args = build_ffmpeg_args(7001, 7002, "libx264", 100);
+    let off = args
+        .iter()
+        .position(|a| a == "-itsoffset")
+        .expect("lead 100 ms → -itsoffset present");
+    assert_eq!(args[off + 1], "0.100", "100 ms lead → 0.100 s offset");
+    assert_eq!(
+        args.iter().filter(|a| *a == "-itsoffset").count(),
+        1,
+        "exactly one -itsoffset (only the audio input)"
+    );
+    let video_i = args
+        .iter()
+        .position(|a| a == "tcp://127.0.0.1:7001")
+        .expect("video input URL present");
+    let audio_f = args
+        .iter()
+        .position(|a| a == "f32le")
+        .expect("audio -f f32le present");
+    let audio_i = args
+        .iter()
+        .position(|a| a == "tcp://127.0.0.1:7002")
+        .expect("audio input URL present");
+    assert!(video_i < off, "-itsoffset comes AFTER the video input");
+    assert!(off < audio_f, "-itsoffset comes BEFORE the audio -f f32le");
+    assert!(audio_f < audio_i, "audio format precedes its -i");
+}
+
+#[test]
+fn ffmpeg_args_omit_itsoffset_for_zero_lead() {
+    // Paced path (genlock_pacing=true): lead 0 → no compensation flag at all.
+    let args = build_ffmpeg_args(1, 2, "libx264", 0);
+    assert!(
+        !args.iter().any(|a| a == "-itsoffset"),
+        "lead 0 → no -itsoffset"
+    );
 }

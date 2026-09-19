@@ -69,8 +69,16 @@ pub fn parse_available_encoders(encoders_stdout: &str) -> Vec<String> {
 /// Build the exact `ffmpeg` argument vector. `video_port` / `audio_port` are the
 /// loopback listeners the child connects back to; `encoder` is the `-c:v` codec.
 /// `libx264` additionally gets `-preset ultrafast -tune zerolatency` for the
-/// low-latency software path.
-pub fn build_ffmpeg_args(video_port: u16, audio_port: u16, encoder: &str) -> Vec<String> {
+/// low-latency software path. `lead_ms` compensates the decode-seam A/V offset
+/// (#178 round 2): on the SDK-clocked path the #192 lookahead makes tapped audio
+/// LEAD video by `lead_ms`, so `-itsoffset <lead_ms/1000>` is inserted BEFORE the
+/// audio input to delay it back into sync; `lead_ms == 0` (paced path) omits it.
+pub fn build_ffmpeg_args(
+    video_port: u16,
+    audio_port: u16,
+    encoder: &str,
+    lead_ms: u32,
+) -> Vec<String> {
     let mut a: Vec<String> = vec![
         "-hide_banner".into(),
         "-loglevel".into(),
@@ -255,7 +263,7 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
         Err(_) => return RunOutcome::ChildExited,
     };
 
-    let args = build_ffmpeg_args(v_port, a_port, encoder);
+    let args = build_ffmpeg_args(v_port, a_port, encoder, 0);
     let mut cmd = Command::new(ffmpeg);
     cmd.args(&args)
         .stdin(Stdio::null())

@@ -165,6 +165,16 @@ pub fn letterbox_nv12_into(sw: u32, sh: u32, stride: u32, src: &[u8], dst: &mut 
     }
 }
 
+/// Coerce an interleaved-f32 audio block into the encoder child's FIXED stereo
+/// f32 input (#178 round 2). Mono (`channels == 1`) is upmixed by duplicating
+/// each sample into the L and R lanes (so it plays at the correct speed, not
+/// double); stereo (`channels == 2`) is forwarded verbatim; any other channel
+/// count returns `None` (the block is dropped — the child geometry is fixed
+/// stereo and cannot consume it).
+pub fn to_stereo(samples: &[f32], _channels: u32) -> Option<Vec<f32>> {
+    Some(samples.to_vec())
+}
+
 /// State shared between the decode-side taps, the WS viewers, and the encoder
 /// child. Held behind an `Arc` by [`StreamTap`].
 pub struct StreamShared {
@@ -225,14 +235,17 @@ impl StreamShared {
     /// Emit/decode-thread hot path: offer one post-mix interleaved-f32 audio
     /// block (the wall mix — karaoke/dub included). No viewer = one relaxed
     /// load; a full channel drops the block. Never blocks the caller.
-    pub fn offer_audio(&self, samples: &[f32], _sample_rate: u32, _channels: u32) {
+    pub fn offer_audio(&self, samples: &[f32], _sample_rate: u32, channels: u32) {
         if !self.has_viewer() {
             return;
         }
-        // The child's audio input is a fixed 48 kHz stereo f32 stream; the FLAC
-        // pipeline normalises to exactly that, so the interleaved block is
-        // forwarded verbatim.
-        let _ = self.audio_tx.try_send(samples.to_vec());
+        // The child's audio input is a FIXED 48 kHz STEREO f32 stream, so the
+        // block must be stereo before it is forwarded (a mono block sent as-is
+        // would play at double speed). [`to_stereo`] upmixes mono and drops any
+        // unexpected channel count.
+        if let Some(block) = to_stereo(samples, channels) {
+            let _ = self.audio_tx.try_send(block);
+        }
     }
 
     // mutants::skip — a buffer-pool ALLOCATION optimization: every mutant here
