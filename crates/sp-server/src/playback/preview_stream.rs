@@ -392,10 +392,10 @@ impl DecodeTaps {
     }
 }
 
-/// Per-playlist stream taps live in the existing
-/// [`PreviewRegistry`](crate::playback::preview::PreviewRegistry) alongside the
-/// JPEG taps (`register_taps` / `stream`), so no second registry has to be
-/// threaded through the near-1000-line `mod.rs` / `lib.rs` seams.
+// Per-playlist stream taps live in the existing `PreviewRegistry` (see
+// `preview.rs`) alongside the JPEG taps (`register_taps` / `stream`), so no
+// second registry has to be threaded through the near-1000-line `mod.rs` /
+// `lib.rs` seams.
 
 #[cfg(test)]
 #[path = "preview_stream_tests.rs"]

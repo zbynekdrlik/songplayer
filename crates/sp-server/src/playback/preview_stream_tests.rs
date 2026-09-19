@@ -3,8 +3,9 @@
 
 use super::*;
 
-/// Solid NV12 frame of `sw×sh` (stride ≥ sw) with luma `y` and chroma `c`.
-fn solid_nv12(sw: usize, sh: usize, stride: usize, y: u8, c: u8) -> Vec<u8> {
+/// Solid NV12 frame of `sw×sh` (stride ≥ sw) with luma `y` and chroma `c`. The
+/// logical width `_sw` is documentation only — the buffer is sized by `stride`.
+fn solid_nv12(_sw: usize, sh: usize, stride: usize, y: u8, c: u8) -> Vec<u8> {
     let y_size = stride * sh;
     let uv_size = stride * (sh / 2);
     let mut v = vec![0u8; y_size + uv_size];
