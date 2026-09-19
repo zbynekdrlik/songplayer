@@ -7,8 +7,8 @@
 //! from the constant under test.
 
 use super::*;
-use sp_ndi::NdiSender;
 use sp_ndi::test_util::MockNdiBackend;
+use sp_ndi::NdiSender;
 use std::sync::Arc;
 
 /// Known-correct block size (the RED constant is deliberately 1601).
@@ -595,4 +595,117 @@ fn shared_hold_and_clear_reach_the_emitter_and_a_push_releases_the_hold() {
     );
     clear_ring(&shared);
     assert_eq!(shared.emitter.lock().unwrap().ring_depth_ms(), 0);
+}
+
+// ── #192 review fixes (release code review, items 1–6) ───────────────────────
+
+#[test]
+fn push_some_refixes_the_layout_on_a_channel_change_clearing_stale_audio() {
+    // A stereo song fills the ring; a mono song then pushes with ch=1. The ring
+    // must DROP the stereo remainder and re-fix to mono — never reinterpret the
+    // mono samples through the old 2-channel frame size (#192 item 2).
+    let mut ring = AudioRing::new(SPB, 8);
+    ring.push_some(&[1.0, 2.0, 3.0, 4.0], 2); // 2 stereo frames
+    assert_eq!(ring.channels(), 2);
+    assert_eq!(ring.len_frames(), 2);
+    // Mono push (ch=1) with a DIFFERENT layout → clears + re-fixes.
+    let accepted = ring.push_some(&[5.0, 6.0, 7.0], 1);
+    assert_eq!(ring.channels(), 1, "layout re-fixed to mono");
+    assert_eq!(accepted, 3, "all 3 mono samples accepted as whole frames");
+    assert_eq!(ring.len_frames(), 3, "stale stereo audio was cleared");
+    // Back to stereo → clears again and re-fixes.
+    ring.push_some(&[8.0, 9.0], 2);
+    assert_eq!(ring.channels(), 2);
+    assert_eq!(ring.len_frames(), 1);
+}
+
+#[test]
+fn push_some_accepts_only_whole_frames_of_the_pushed_layout() {
+    // Odd-length input against a stereo layout: only whole stereo frames land,
+    // the trailing single sample is NOT accepted (never splits a frame).
+    let mut ring = AudioRing::new(SPB, 8);
+    let accepted = ring.push_some(&[1.0, 2.0, 3.0], 2); // 1 frame + 1 residual
+    assert_eq!(
+        accepted, 2,
+        "one whole stereo frame accepted, residual left"
+    );
+    assert_eq!(ring.len_frames(), 1);
+}
+
+#[test]
+fn push_blocking_drops_a_partial_frame_residual_instead_of_spinning_forever() {
+    // Odd-length stereo input has a 1-sample residual that can NEVER form a
+    // frame. The old code looped in 250 ms waits forever (accepted==0 while free
+    // space existed); now push_blocking drops the residual and RETURNS. The test
+    // completing at all is the guard against the infinite loop (#192 item 1).
+    let shared = new_shared_emitter();
+    let (_backend, sink) = mock_sink();
+    // 3 samples, ch=2 → 1 whole frame usable, 1-sample residual dropped.
+    push_blocking(&shared, &[1.0, 2.0, 3.0], 2);
+    // The whole frame is buffered; the residual did not hang or corrupt it.
+    let g = shared.emitter.lock().unwrap();
+    assert_eq!(
+        g.ring_depth_ms(),
+        0,
+        "one frame is < a block → still sub-block"
+    );
+    drop(g);
+    // A full stereo block still emits as audio (proves the ring is usable).
+    push_blocking(&shared, &stereo_block(0.5), 2);
+    assert!(matches!(
+        emit_one_block(&shared, &sink, 0).block,
+        EmittedBlock::Audio(_)
+    ));
+}
+
+#[test]
+fn ring_drained_is_true_below_one_block_exact_boundary() {
+    let mut e = AudioEmitter::production();
+    assert!(e.ring_drained(), "empty ring is drained");
+    // One frame short of a full block → still drained.
+    e.ring_mut().push_some(&vec![1.0f32; (SPB - 1) * 2], 2);
+    assert!(e.ring_drained(), "one frame short of a block is drained");
+    // Exactly one full block → NOT drained (a block is still poppable).
+    e.ring_mut().push_some(&[1.0, 1.0], 2);
+    assert!(!e.ring_drained(), "exactly one full block is not drained");
+}
+
+#[test]
+fn ring_is_drained_reports_less_than_one_block_on_the_shared_emitter() {
+    let shared = new_shared_emitter();
+    assert!(ring_is_drained(&shared), "empty shared ring is drained");
+    push_blocking(&shared, &stereo_block(0.5), 2); // one full block
+    assert!(!ring_is_drained(&shared), "one full block is NOT drained");
+}
+
+#[test]
+fn tick_does_not_reanchor_at_exactly_one_second_late() {
+    let mut e = AudioEmitter::production();
+    e.tick(0); // origin = 0, emitted_slots → 1
+    let b1 = 333_333i64; // slot 1 boundary
+    let em = e.tick(b1 + 10_000_000); // exactly 1 s late
+    assert_eq!(em.timecode_100ns, b1, "the grid holds at exactly 1 s late");
+    assert_eq!(e.resyncs(), 0, "no resync at exactly 1 s");
+}
+
+#[test]
+fn tick_reanchors_when_more_than_one_second_late_snapping_this_slot_to_now() {
+    let mut e = AudioEmitter::production();
+    e.tick(0); // origin = 0, emitted_slots → 1
+    let b1 = 333_333i64;
+    let now = b1 + 10_000_000 + 100; // 1 s + 100 ns late (past the > threshold)
+    let em = e.tick(now);
+    assert_eq!(
+        em.timecode_100ns, now,
+        "resync snaps THIS slot's boundary to now"
+    );
+    assert_eq!(e.resyncs(), 1, "one resync counted");
+    // The following boundary is now + one block (units_for(2) − units_for(1)).
+    let next = e.tick(now);
+    assert_eq!(
+        next.timecode_100ns,
+        now + 333_333,
+        "the following boundary is now + one block"
+    );
+    assert_eq!(e.resyncs(), 1, "an on-time slot does not resync");
 }
