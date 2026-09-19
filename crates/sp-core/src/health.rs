@@ -119,7 +119,7 @@ pub const NO_RECEIVER_AFTER_RESTART_REASON: &str = "no receiver after restart";
 /// receiver self-check begins. Before this, an output that has not yet been
 /// (re)connected is not flagged (DistroAV needs a moment to re-discover the
 /// re-advertised senders after a SongPlayer restart).
-pub const SELF_CHECK_DELAY: Duration = Duration::from_secs(300);
+pub const SELF_CHECK_DELAY: Duration = Duration::from_secs(30);
 
 /// #196 item 4: decide whether an output should be flagged `NO_RECEIVER_AFTER_
 /// RESTART_REASON`. Pure so the exact boundaries (on-program vs not, previous
@@ -162,7 +162,7 @@ pub fn no_receiver_after_restart(
 /// receiver — 1 `výstup`, 2–4 `výstupy`, else `výstupov`.
 pub fn ndi_output_word(n: usize) -> &'static str {
     match n {
-        1 => "výstupov",
+        1 => "výstup",
         2..=4 => "výstupy",
         _ => "výstupov",
     }

@@ -25,7 +25,7 @@ pub fn source_matches(discovered_name: &str, own_bare: &str) -> bool {
     if n.is_empty() {
         return false;
     }
-    d == n
+    d == n || d.ends_with(&format!("({n})"))
 }
 
 /// Match discovered `(name, url)` sources to our outputs `(playlist_id, bare
