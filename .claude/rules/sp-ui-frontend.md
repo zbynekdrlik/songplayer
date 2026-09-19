@@ -325,3 +325,77 @@ only a code pass:
    page-local widget for an existing capability is a design REJECT).
 4. Zero console errors on every page.
 5. The verdict line: `🏛 Architektúra: <code area> — OK · UI-konzistencia — OK | REWORK`.
+
+## A live data tick must update TEXT ONLY — never re-create a child component (#194)
+
+The owner hit this on the box: a Dabing dub video "len pada a nespusta sa to"
+and the mixer faders "sa nedali normalne hybat". Both were the SAME class of
+bug — a now-playing POSITION tick (arriving ~2×/s over the WS) re-created a live
+child under the operator, tearing down its preview WebSocket and resetting a
+mid-drag fader. Two rules prevent it:
+
+### Rule 1 — a slot closure re-runs on every dependency it READS; read only Memos
+
+A `{move || …}` view closure re-runs whenever ANY signal it reads fires — and a
+signal fires on EVERY `.set()`, even to an unchanged value. So:
+
+- A **plain closure** derivation (`let has_content = move || store.now_playing.
+  get()…`) inlined into a slot closure makes that slot RE-SUBSCRIBE to
+  `store.now_playing` and RE-RUN on every position tick → its child is
+  re-created twice a second. `player.rs`'s mixer slot did exactly this and the
+  faders reset mid-drag.
+- Convert every bool/enum derivation a slot closure reads to a **`Memo`**
+  (`let has_content = Memo::new(move |_| …)`). A `Memo` only PROPAGATES when its
+  value actually changes, so a position tick (which flips nothing) never re-runs
+  the slot. The child re-creates ONLY when the identity it keys on changes (the
+  mixer keys on `mixer_choice: Memo<Option<DubRow>>` — a by-value `DubMixer`
+  MUST re-create when the playing video changes; `KaraokeMixer` takes only
+  `playlist_id` and reads now-playing reactively, so it stays mounted and just
+  updates its text).
+- The **preview** slot is keyed on the constant `playlist_id`, NOT the video id:
+  the preview WS/encoder child is per-PLAYLIST and continuous (preview.md), so it
+  must survive both position ticks AND song changes; it re-creates only when
+  `is_decoding`/`preview_on` flip (both `Memo`/intentional signals).
+- A parent that MOUNTS a shared child from a signal (`pages/dabing.rs` mounts
+  `<Player playlist_id=id>` from `dabing_pid`) must (a) only `.set()` that signal
+  when the value CHANGES (`if sig.get_untracked() != new { sig.set(new) }` — a
+  poll that re-sets an unchanged id every tick re-creates the whole child), AND
+  (b) mount through a `Memo<Option<i64>>` so an accidental same-value fire from
+  anywhere still can't re-create it.
+
+### Rule 2 — every draggable control needs a pointer DRAG GATE
+
+A live value binding (`prop:value=move || live()`) FIGHTS a drag: a tick
+re-applies the live value and snaps the thumb / fader back under the finger. Gate
+it with a `dragging` signal:
+
+- `dragging: RwSignal<bool>` set on `on:pointerdown`/`on:touchstart`, cleared on
+  `on:pointerup`/`on:touchend`/`on:pointercancel` AND `on:change`.
+- `prop:value` (and the readout) read a PURE gate helper —
+  `seek_model::seek_display_ms(dragging, dragged, live)` /
+  `mixer_model::fader_display_pct(dragging, dragged, live)` (`if dragging {
+  dragged } else { live }`) — so while dragging the DRAGGED value wins and no
+  live update (a store `Effect`, a re-load) can overwrite it.
+- `on:input` while dragging updates ONLY the local dragged signal (never the
+  shared `gain`/position — that's what an external sync would fight); commit
+  EXACTLY ONCE on release via `on:change` (which sets the shared signal + fires
+  the single POST/PATCH). The pure helpers live in `sp_core` (unit-tested +
+  mutation-gated — sp-ui has no unit-test job).
+- The pointer/touch pair can't share ONE closure — `on:pointerdown` gets a
+  `PointerEvent`, `on:touchstart` a `TouchEvent`, so a single `move |_|` closure
+  would fix its param type on first use and fail the second. Inline a separate
+  closure per event (they capture only `Copy` signals, so this is cheap).
+
+### Rule 3 — a real-user interaction spec MUST run with the mock TICKING
+
+The suite stayed green while the app felt broken because the mock never advanced
+now-playing DURING a drag/preview. Any spec that asserts an interaction
+(drag/seek/preview persistence) must turn on the mock's 500 ms position tick
+(`POST /__mock/tick {enabled, items:[{playlist_id, video_id, duration_ms,
+state:"Playing"}]}`) and turn it OFF in `afterEach` (it is global in-memory
+state; a single worker runs files serially, so a leaked ON breaks later specs).
+The preview WS only opens under branded `chrome` (bundled Chromium lacks
+H.264/AAC → the MSE shim's `addSourceBuffer` throws and `_openWs` is skipped), so
+the WS-opened-once/never-closed proof lives in `preview.spec.ts` (the `chrome`
+project); `player-liveness.spec.ts` (chromium) proves element-IDENTITY stability
+(`elementHandle().isConnected`) + the drag gates, which are codec-independent.
