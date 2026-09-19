@@ -215,9 +215,11 @@ body {
 .card-header .playlist-id { font-size: 0.8rem; color: var(--text-dim); }
 
 .now-playing { margin-bottom: 12px; }
-/* #15 part 2: live video preview inside the playlist card. 16:9, capped so it
-   never widens the ~340px card; black backdrop for letterboxed/loading state. */
-.preview-img,
+/* #178: live A/V preview <video> inside the playlist card. 16:9, capped so it
+   never widens the ~340px card; black backdrop for letterboxed/loading state.
+   Shares the box geometry with the placeholder so mount/unmount never shifts
+   layout (sp-ui-frontend.md). */
+.preview-video,
 .preview-placeholder {
     display: block;
     width: 100%;
@@ -235,6 +237,23 @@ body {
     color: var(--text-dim);
     font-size: 0.8rem;
 }
+/* #178: unmute + fullscreen controls under the preview <video>. */
+.preview-controls {
+    display: flex;
+    gap: 6px;
+    max-width: 320px;
+    margin-bottom: 8px;
+}
+.preview-btn {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid var(--border, #444);
+    background: var(--surface, #222);
+    color: var(--text, #eee);
+}
+.preview-btn:hover { filter: brightness(1.2); }
 .np-song { font-weight: 600; display: block; }
 .np-artist { color: var(--text-dim); display: block; margin-bottom: 6px; }
 .np-time { font-size: 0.8rem; color: var(--text-dim); }
