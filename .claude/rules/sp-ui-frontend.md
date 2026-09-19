@@ -381,6 +381,20 @@ it with a `dragging` signal:
   EXACTLY ONCE on release via `on:change` (which sets the shared signal + fires
   the single POST/PATCH). The pure helpers live in `sp_core` (unit-tested +
   mutation-gated — sp-ui has no unit-test job).
+- **`on:change` MUST commit the DRAG SIGNAL, never `event_target_value` (the
+  DOM).** A real browser fires `pointerup` (which clears `dragging`) BEFORE
+  `change` on a slider release, so by the time `change` runs, `prop:value` has
+  already re-applied the live value and SNAPPED the DOM back — reading the DOM
+  there commits the live position / pre-drag gain, silently losing the drag.
+  Read the pending drag signal (`seek_drag_ms.get_untracked()` /
+  `drag_pct.get_untracked()`) instead; make `on:input` record it on EVERY input
+  (drag and keyboard) so the same commit path serves both. **An e2e that
+  dispatches `change` while still "dragging" will pass on broken code** — the
+  drag specs MUST dispatch `pointerup` → `change` in that (real) order.
+- Clear `dragging` on `pointerup`/`touchend`/`pointercancel` (a no-move click
+  fires no `change`, so the release handlers are the only reliable un-stick), and
+  read a page-owned signal in any `spawn_local` follow-up with `try_get_untracked`
+  (a plain read after navigation panics).
 - The pointer/touch pair can't share ONE closure — `on:pointerdown` gets a
   `PointerEvent`, `on:touchstart` a `TouchEvent`, so a single `move |_|` closure
   would fix its param type on first use and fail the second. Inline a separate
