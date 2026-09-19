@@ -60,7 +60,7 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
 
     // Playback-command errors (play / pause / skip / prev / seek / mode) surface
     // here as Slovak text and clear on the next successful command.
-    let player_error = RwSignal::new(Option::<String>::new());
+    let player_error = RwSignal::new(None::<String>);
 
     let state_label = move || match state() {
         PlaybackState::Playing => "Hrá",
