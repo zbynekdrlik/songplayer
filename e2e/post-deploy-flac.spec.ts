@@ -50,6 +50,11 @@ test.describe("FLAC pipeline post-deploy verification", () => {
         const text = msg.text();
         // Chromium emits a benign SRI warning on the preloaded WASM bundle.
         if (/integrity.*attribute.*ignored/i.test(text)) return;
+        // #178: the on-demand preview <video> opens a WebSocket; a page that
+        // navigates/tears down mid-handshake makes Chrome log this benign
+        // "closed before established" warning. Not a product error.
+        if (/WebSocket is closed before the connection is established/i.test(text))
+          return;
         consoleErrors.push(`[${type}] ${text}`);
       }
     });

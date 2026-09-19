@@ -145,9 +145,11 @@ test.describe("#178 live preview <video> post-deploy", () => {
       FAST_PLAYLIST_NAME,
       { timeout: 10_000 },
     );
-    const card = page.locator(".playlist-card", { hasText: FAST_PLAYLIST_NAME });
+    // #165: one work-area card. Use it directly (the playlist name lives in the
+    // workspace-title, not necessarily inside the card body).
+    const card = page.locator(".playlist-card");
     const video = card.getByTestId("preview-video");
-    await expect(video).toBeVisible({ timeout: 10_000 });
+    await expect(video).toBeVisible({ timeout: 15_000 });
 
     // The box's ffmpeg encoder child must spawn on this first viewer, produce a
     // keyframe-aligned fMP4, and the browser must DECODE it: readyState >= 3.

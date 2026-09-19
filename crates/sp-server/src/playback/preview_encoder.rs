@@ -296,24 +296,42 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
         encoder, v_port, a_port, "preview-encoder: child started"
     );
 
-    // ffmpeg (as TCP client) connects back to both listeners at startup.
-    let v_sock = accept_with_deadline(&v_listener, Duration::from_secs(5));
-    let a_sock = accept_with_deadline(&a_listener, Duration::from_secs(5));
-    let (v_sock, a_sock) = match (v_sock, a_sock) {
-        (Some(v), Some(a)) => (v, a),
-        _ => {
+    // ffmpeg (as TCP client) opens its inputs SEQUENTIALLY: it connects input 0
+    // (the rawvideo tcp), and `find_stream_info` reads several frames from it
+    // BEFORE it opens and connects input 1 (the audio tcp). So the video feeder
+    // must start the MOMENT the video socket connects — otherwise ffmpeg blocks
+    // probing an empty video input, never connects the audio input, the audio
+    // accept times out, and the child produces no init segment. That was the box
+    // deadlock behind every "child did not connect its inputs" (#178, first live
+    // box run: both nvenc and libx264 failed identically at the 5 s accept).
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let v_sock = match accept_with_deadline(&v_listener, Duration::from_secs(5)) {
+        Some(s) => s,
+        None => {
             warn!(
                 label = shared.label(),
-                "preview-encoder: child did not connect its inputs"
+                "preview-encoder: child did not connect its video input"
             );
             let _ = child.kill();
             let _ = child.wait();
             return RunOutcome::ChildExitedNoInit;
         }
     };
-
-    let shutdown = Arc::new(AtomicBool::new(false));
     let v_feeder = spawn_video_feeder(shared.clone(), v_sock, shutdown.clone());
+    let a_sock = match accept_with_deadline(&a_listener, Duration::from_secs(5)) {
+        Some(s) => s,
+        None => {
+            warn!(
+                label = shared.label(),
+                "preview-encoder: child did not connect its audio input"
+            );
+            shutdown.store(true, Ordering::Relaxed);
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = v_feeder.join();
+            return RunOutcome::ChildExitedNoInit;
+        }
+    };
     let a_feeder = spawn_audio_feeder(shared.clone(), a_sock, shutdown.clone());
     let reader = spawn_stdout_reader(shared.clone(), child.stdout.take());
 
