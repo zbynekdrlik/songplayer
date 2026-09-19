@@ -49,6 +49,29 @@ frontend-e2e mock-API wait loop makes actionlint exit 1 — that is not your dif
 - Full-tree catch-up is `mutation-full.yml` (`workflow_dispatch` only, `/mutation-sweep`),
   survivors → ONE `test-quality` issue per run, fails only on a tooling error.
 
+### Write new pure code so it has NO equivalent mutants (#182 lesson)
+The no-compile box only learns about survivors ~15 min after the push, so shape
+pure code up front:
+- **Clamp with `.max()` / `.min()`, not `if a < b { a = b }`** — `<` → `<=` on
+  such a clamp is a provably EQUIVALENT mutant (the assignment is a no-op when
+  equal) and can never be killed; `.max()` leaves no comparison to mutate.
+- **One helper per formula.** Two copies of `at + x / tempo` (start + end) let the
+  copy whose result a later clamp masks survive `/` → `%`; one shared fn is
+  covered by whichever call site a test pins.
+- **Every `<` / `>` on a threshold needs an exact-boundary test** (gap == limit,
+  fraction == line boundary), not just a far-inside / far-outside pair.
+- A fn that only shells out (child process / ffmpeg) and is reachable only from
+  an already-excluded orchestrator gets its own STRUCTURAL `exclude_re` line with
+  a rationale naming the pure fns that carry its decisions.
+
+## A queued job on an OFFLINE self-hosted runner blocks the branch's concurrency group
+With win-resolume offline, `Deploy to win-resolume` stays `queued`, the run never
+completes, and the next dev push sits `pending` with ZERO jobs —
+`cancel-in-progress` and `gh run cancel` do NOT clear a run in that state
+(19.9.2026). It looks like a GitHub runner backlog; it is not. Clear it with
+`gh api -X POST repos/<owner>/<repo>/actions/runs/<old-run>/force-cancel`; the
+pending run starts within seconds.
+
 ## push + pull_request de-dup (#124)
 
 Shared build/test jobs run **once, on the `push` event** (`if: github.event_name ==
