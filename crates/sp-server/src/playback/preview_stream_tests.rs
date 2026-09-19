@@ -151,8 +151,8 @@ fn letterbox_4by3_paints_black_side_bars_and_grey_centre() {
 #[test]
 fn letterbox_rejects_short_source_leaving_black_canvas() {
     let mut dst = vec![7u8; OUT_NV12_LEN]; // pre-dirty
-                                           // Declares 1920x1080 but supplies far too few bytes → canvas painted black,
-                                           // no image blitted.
+    // Declares 1920x1080 but supplies far too few bytes → canvas painted black,
+    // no image blitted.
     letterbox_nv12_into(1920, 1080, 1920, &[0u8; 100], &mut dst);
     let y_plane = (OUT_W * OUT_H) as usize;
     assert!(dst[..y_plane].iter().all(|&b| b == BLACK_Y));

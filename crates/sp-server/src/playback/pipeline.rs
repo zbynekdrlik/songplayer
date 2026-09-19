@@ -317,8 +317,8 @@ fn run_loop_windows(
     // path updates it per-file in `decode_and_send`.
     let mut submitter = FrameSubmitter::new(sender, sp_core::genlock::GENLOCK_GRID_FPS as i32, 1);
     submitter.set_paced(genlock_pacing); // paced: stamp standby frames on-grid (#147)
-                                         // #151: install the shared burn flag so the runtime API toggle drives the
-                                         // paced-emit overlay. Default OFF; only the paced path ever paints.
+    // #151: install the shared burn flag so the runtime API toggle drives the
+    // paced-emit overlay. Default OFF; only the paced path ever paints.
     submitter.set_burn_flag(burn_on);
     submitter.send_black_bgra(1920, 1080);
 

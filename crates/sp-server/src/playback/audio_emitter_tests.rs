@@ -7,8 +7,8 @@
 //! from the constant under test.
 
 use super::*;
-use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::NdiSender;
+use sp_ndi::test_util::MockNdiBackend;
 use std::sync::Arc;
 
 /// Known-correct block size (the RED constant is deliberately 1601).

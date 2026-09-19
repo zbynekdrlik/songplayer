@@ -55,7 +55,7 @@ fn header_parses_32bit_size_and_fourcc_exactly() {
 #[test]
 fn header_parses_64bit_largesize() {
     let b = box64(b"mdat", &[1, 2, 3, 4, 5, 6]); // total 22
-                                                 // Only 15 bytes → still NeedMore (largesize occupies bytes 8..16).
+    // Only 15 bytes → still NeedMore (largesize occupies bytes 8..16).
     assert_eq!(parse_box_header(&b[..15]), BoxHeader::NeedMore);
     match parse_box_header(&b) {
         BoxHeader::Parsed {
