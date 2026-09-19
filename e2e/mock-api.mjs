@@ -387,6 +387,14 @@ app.put("/api/v1/playback/:id/mode", (_req, res) => {
   res.json({ status: "mode_changed" });
 });
 
+// #194: the shared Player + LyricsScroller seek to a position via
+// `POST /api/v1/playback/{id}/seek {position_ms}` (moved off the old
+// `/api/v1/playlists/{id}/seek` route). A no-op 204 for the mock — specs that
+// need the body intercept it with `page.route` before it reaches here.
+app.post("/api/v1/playback/:id/seek", (_req, res) => {
+  res.status(204).end();
+});
+
 // #15 part 2: live video preview. A minimal 1x1 JPEG so the dashboard <img>
 // gets a decodable image (non-zero naturalWidth) for playlist 1 (which the WS
 // stream marks Playing below); other playlists have no frame → 204 (idle).
@@ -902,6 +910,40 @@ app.post("/__mock/set-playing", (req, res) => {
   const msg = JSON.stringify({
     type: "PlaybackStateChanged",
     data: { playlist_id: data.playlist_id, state, mode: "Continuous" },
+  });
+  let sent = 0;
+  for (const ws of wsClients) {
+    if (ws.readyState === ws.OPEN) {
+      ws.send(msg);
+      sent += 1;
+    }
+  }
+  res.json({ status: "sent", clients: sent });
+});
+
+// #194: broadcast a `NowPlaying` for an ARBITRARY playlist so a spec can make a
+// dub video "play" on the Dabing playlist (id 500). The shared Player chooses
+// the dub mixer adapter when the now-playing `video_id` for the playlist matches
+// a row in `GET /api/v1/dabing` `videos[]` — so `player.spec.ts`/`mixer.spec.ts`
+// dabing-add a ready dub row, then broadcast its `video_id` here to surface the
+// `dub-mix-fader` inside the Dabing Player. Body IS the NowPlaying `data`
+// payload: `{playlist_id, video_id, song?, artist?, position_ms?, duration_ms?}`.
+app.post("/__mock/now-playing", (req, res) => {
+  const data = req.body || {};
+  if (typeof data.playlist_id !== "number") {
+    res.status(400).json({ error: "expected a numeric playlist_id" });
+    return;
+  }
+  const msg = JSON.stringify({
+    type: "NowPlaying",
+    data: {
+      playlist_id: data.playlist_id,
+      video_id: typeof data.video_id === "number" ? data.video_id : 0,
+      song: typeof data.song === "string" ? data.song : "",
+      artist: typeof data.artist === "string" ? data.artist : "",
+      position_ms: typeof data.position_ms === "number" ? data.position_ms : 0,
+      duration_ms: typeof data.duration_ms === "number" ? data.duration_ms : 0,
+    },
   });
   let sent = 0;
   for (const ws of wsClients) {

@@ -320,10 +320,16 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       // counts race a live state change (a playlist starting between the two
       // reads showed np-idle first and a karaoke panel a moment later); the
       // invariant is per-instant: an idle card never carries a panel.
-      const { idle, karaoke } = await card.evaluate((el) => ({
-        idle: el.querySelectorAll(".np-idle").length,
-        karaoke: el.querySelectorAll(".karaoke-panel").length,
-      }));
+      const { idle, karaoke } = await card.evaluate((el) => {
+        // #194: the idle marker is the shared Player's title reading the idle
+        // text "Nič nehrá" (the `.np-idle` block is gone); the karaoke lyrics
+        // panel renders only when there is real now-playing content.
+        const title = el.querySelector('[data-testid="player-title"]');
+        return {
+          idle: title && title.textContent.trim() === "Nič nehrá" ? 1 : 0,
+          karaoke: el.querySelectorAll(".karaoke-panel").length,
+        };
+      });
       if (idle > 0) {
         // Idle playlist should not show karaoke panel
         expect(karaoke).toBe(0);

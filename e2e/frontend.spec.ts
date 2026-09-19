@@ -451,8 +451,13 @@ test("karaoke panel keeps the card height stable across lyrics on/off (#163)", a
   });
   // Wait for the WS-driven now-playing block to arrive (playlist 1 is marked
   // Playing by the mock). This also proves the WebSocket is connected, so the
-  // /__mock/lyrics-update broadcast below actually reaches a client.
-  await expect(card.locator(".np-song")).toBeVisible({ timeout: 10000 });
+  // /__mock/lyrics-update broadcast below actually reaches a client. #194: the
+  // now-playing title lives in the shared Player (`player-title`); it flips from
+  // "Nič nehrá" to the song once the WS NowPlaying arrives.
+  await expect(card.getByTestId("player-title")).toContainText(
+    "Never Gonna Give You Up",
+    { timeout: 10000 },
+  );
 
   const panel = card.locator(".karaoke-panel");
 

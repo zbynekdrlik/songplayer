@@ -188,17 +188,16 @@ test.describe("/live page — primary operator surface (#39)", () => {
     expect(items[0].position).toBe(1);
   });
 
-  test("global ⏭ Skip posts to /skip", async ({ page }) => {
+  test("the shared Player ⏭ Ďalšia posts to /skip", async ({ page }) => {
+    // #194: transport moved off the deleted `.live-setlist-controls` bar to the
+    // shared Player under the setlist; driving `player-skip` posts to /skip.
     await gotoLive(page);
     const skipPromise = page.waitForRequest(
       (req) =>
         req.url().includes("/api/v1/playback/184/skip") &&
         req.method() === "POST",
     );
-    await page
-      .locator(".live-setlist-controls")
-      .getByRole("button", { name: "⏭" })
-      .click();
+    await page.getByTestId("player-skip").click();
     await skipPromise;
   });
 

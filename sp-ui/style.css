@@ -1382,7 +1382,7 @@ body {
 }
 
 .player-btn {
-    min-height: 40px;
+    min-height: 44px; /* phone touch target (#194) */
     padding: 8px 12px;
     background: var(--bg-input);
     color: var(--text);
@@ -1395,7 +1395,7 @@ body {
 .player-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 
 .player-mode {
-    min-height: 40px;
+    min-height: 44px;
     margin-left: auto;
     padding: 6px 8px;
     background: var(--bg-input);

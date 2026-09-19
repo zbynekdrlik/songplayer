@@ -155,10 +155,11 @@ test("an entry with no song and zero duration renders idle, not 0:00/0:00 (#170)
   await expect(page.getByTestId("workspace-title")).toHaveText("Playlist 08");
 
   const card = page.locator(".playlist-card");
-  // The empty entry must show the idle state, not a np-info counter.
-  await expect(card.locator(".np-idle")).toBeVisible();
-  await expect(card.locator(".np-info")).toHaveCount(0);
-  await expect(card).toContainText("Nothing playing");
+  // #194: the empty entry must render the idle Player — the title shows the
+  // "Nič nehrá" idle label and the seek bar is disabled (no now-playing
+  // content), NOT a bogus "0:00 / 0:00" now-playing block.
+  await expect(card.getByTestId("player-title")).toHaveText("Nič nehrá");
+  await expect(card.getByTestId("player-seek")).toBeDisabled();
 });
 
 test("clicking another row switches the work area and the URL (#165)", async ({
@@ -171,10 +172,9 @@ test("clicking another row switches the work area and the URL (#165)", async ({
   await expect(page.getByTestId("workspace-title")).toHaveText(PLAYING_NAME, {
     timeout: 10000,
   });
-  await expect(page.locator(".playlist-card .np-song")).toContainText(
-    PLAYING_SONG,
-    { timeout: 10000 },
-  );
+  await expect(
+    page.locator(".playlist-card").getByTestId("player-title"),
+  ).toContainText(PLAYING_SONG, { timeout: 10000 });
 
   // Click a different playlist row.
   await page
@@ -187,35 +187,14 @@ test("clicking another row switches the work area and the URL (#165)", async ({
   await expect(page).toHaveURL(/[?&]playlist=5\b/);
   // Playlist 05 is not playing, so its work-area card shows the idle state
   // (not the playing playlist's song).
-  await expect(page.locator(".playlist-card")).toContainText("Nothing playing");
+  await expect(page.locator(".playlist-card")).toContainText("Nič nehrá");
 });
 
-test("the Práve hrá strip leads back to the playing playlist (#165)", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await waitForSelector12(page);
-  await expect(page.getByTestId("workspace-title")).toHaveText(PLAYING_NAME, {
-    timeout: 10000,
-  });
-
-  // Select a DIFFERENT playlist so a different one is playing than selected.
-  await page
-    .getByTestId("playlist-selector-row")
-    .filter({ hasText: "Playlist 07" })
-    .click();
-  await expect(page.getByTestId("workspace-title")).toHaveText("Playlist 07");
-
-  // The strip now advertises the playing playlist + a "Prejsť" button.
-  const strip = page.getByTestId("now-playing-strip");
-  await expect(strip).toContainText(PLAYING_NAME);
-  await expect(strip).toContainText("▶");
-
-  // Clicking "Prejsť" selects the playing playlist.
-  await page.getByTestId("strip-goto").click();
-  await expect(page.getByTestId("workspace-title")).toHaveText(PLAYING_NAME);
-  await expect(page).toHaveURL(/[?&]playlist=1\b/);
-});
+// #194: the dashboard "Práve hrá" jump-strip (`now-playing-strip` + `strip-goto`
+// "Prejsť") is REMOVED — the playing playlist is auto-selected on load and the
+// shared Player shows what plays, so there is no separate jump-to-playing strip.
+// The auto-select + playing-song surfacing is covered by "clicking another row"
+// (player-title) and "the playing playlist is preselected and marked ▶" above.
 
 test("reload keeps the selected playlist (#165)", async ({ page }) => {
   await page.goto("/");

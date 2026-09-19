@@ -416,10 +416,17 @@ test.describe("SongPlayer post-deploy feature verification", () => {
 
     const card = await selectWorkspaceCard(page, pl.name);
 
+    // #194: the shared Player's transport is a single play-pause TOGGLE
+    // (player-playpause) — "▶ Prehrať" when not playing, "⏸ Pauza" when
+    // playing. Ensure the playlist is NOT playing first so the toggle posts
+    // /play (not /pause), matching this test's intent.
+    await request.post(`/api/v1/playback/${pl.id}/pause`);
+    await page.waitForTimeout(800);
+
     const expectedUrl = new RegExp(`/api/v1/playback/${pl.id}/play$`);
     const respPromise = page.waitForResponse((r) => expectedUrl.test(r.url()), { timeout: 10_000 });
 
-    await card.getByRole("button", { name: "Play" }).click();
+    await card.getByTestId("player-playpause").click();
 
     const resp = await respPromise;
     expect(resp.status()).toBeGreaterThanOrEqual(200);
@@ -458,14 +465,15 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     await page.goto("/");
     const card = await selectWorkspaceCard(page, pl.name);
 
-    // Within 10 s the card must show the `.np-info` block with a
-    // non-empty position counter (proves NowPlaying actually arrived).
-    const npInfo = card.locator(".np-info");
-    await expect(npInfo).toBeVisible({ timeout: 10_000 });
-    const npText = await npInfo.innerText();
+    // #194: the shared Player always renders the position row, so "content
+    // arrived" is proven by the title leaving the idle text "Nič nehrá" (it
+    // becomes "Song — Artist" only when a real NowPlaying arrives).
+    const title = card.getByTestId("player-title");
+    await expect(title).not.toHaveText("Nič nehrá", { timeout: 10_000 });
+    const npText = await title.innerText();
     expect(
       npText.length,
-      `.np-info must contain text (song/position), got empty string`,
+      `player-title must contain a song, got empty string`,
     ).toBeGreaterThan(0);
 
     // Cleanup.
@@ -604,10 +612,11 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     //  - Engine state machine advanced into Playing
     //  - Pipeline started decoding and emitted Started
     //  - NowPlaying reached the dashboard WebSocket
-    //  - Dashboard rendered .np-info
-    await expect(fastCard.locator(".np-info")).toBeVisible({
-      timeout: 15_000,
-    });
+    //  - Dashboard's shared Player left the idle title
+    await expect(fastCard.getByTestId("player-title")).not.toHaveText(
+      "Nič nehrá",
+      { timeout: 15_000 },
+    );
 
     // Cleanup: switch back to the baseline scene.
     await obs!.switchScene(baselineScene);
@@ -655,19 +664,19 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // #165: select ytfast in the work area (it is the on-program playlist).
     const card = await selectWorkspaceCard(page, FAST_PLAYLIST_NAME);
 
-    // 1. The `.np-info` block must appear within 30 s. If the engine
-    //    is stuck in WaitingForScene (the original bug), the card
-    //    stays "Nothing playing" and this times out.
+    // 1. The shared Player must leave the idle title within 30 s. If the
+    //    engine is stuck in WaitingForScene (the original bug), the card
+    //    stays "Nič nehrá" and this times out.
     await expect(
-      card.locator(".np-info"),
-      `card for ${FAST_PLAYLIST_NAME} must show .np-info after switching to ${FAST_SCENE_NAME}`,
-    ).toBeVisible({ timeout: 30_000 });
+      card.getByTestId("player-title"),
+      `card for ${FAST_PLAYLIST_NAME} must show a song after switching to ${FAST_SCENE_NAME}`,
+    ).not.toHaveText("Nič nehrá", { timeout: 30_000 });
 
     // 2. The position counter must advance. Read twice 2.5 s apart
     //    and assert strictly increasing — a frozen "0:00 / 4:44"
     //    proves the pipeline thread is dead.
     const readPosition = async () => {
-      const text = (await card.locator(".np-info").innerText()) ?? "";
+      const text = (await card.getByTestId("player-pos").innerText()) ?? "";
       const match = text.match(/(\d+):(\d+)\s*\/\s*\d+:\d+/);
       if (!match) return -1;
       return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
@@ -676,7 +685,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const first = await readPosition();
     expect(
       first,
-      `${FAST_PLAYLIST_NAME}: position counter not found in .np-info text`,
+      `${FAST_PLAYLIST_NAME}: position counter not found in player-pos text`,
     ).toBeGreaterThanOrEqual(0);
 
     await page.waitForTimeout(2_500);
@@ -862,12 +871,12 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     await page.goto("/");
     const card = await selectWorkspaceCard(page, FAST_PLAYLIST_NAME);
     await expect(
-      card.locator(".np-info"),
+      card.getByTestId("player-title"),
       `card for ${FAST_PLAYLIST_NAME} must be Playing before the preset burst`,
-    ).toBeVisible({ timeout: 30_000 });
+    ).not.toHaveText("Nič nehrá", { timeout: 30_000 });
 
     const readPosition = async () => {
-      const text = (await card.locator(".np-info").innerText()) ?? "";
+      const text = (await card.getByTestId("player-pos").innerText()) ?? "";
       const match = text.match(/(\d+):(\d+)\s*\/\s*\d+:\d+/);
       if (!match) return -1;
       return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);

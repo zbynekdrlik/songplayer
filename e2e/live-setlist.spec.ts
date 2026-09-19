@@ -1,122 +1,104 @@
 import { test, expect } from "@playwright/test";
 
-// Regression for #94: the /live global Pause / Skip / Previous / Play / Mode
-// buttons used to discard `Result::Err` from their POST helpers, so a failing
-// playback endpoint produced a silent no-op button. These tests arm the
-// mock-api `__mock/fail-mode` switch on a single endpoint at a time and
-// assert that the `.live-setlist-error` row surfaces the error to the
-// operator.
+// #194: the /live global transport bar (`.live-setlist-controls` / the
+// `.live-setlist-mode` select) is GONE — Pause / Skip / Previous / Play / Mode
+// moved to the ONE shared <Player/> that sits under the setlist. These specs
+// drive the Player's transport for the ytlive playlist (id 184) and assert each
+// control fires its playback endpoint.
 //
-// 500-resource console errors are expected in this file (we flip endpoints
-// into fail mode on purpose), so no shared zero-console-errors gate is
-// imposed here.
+// REGRESSION FLAGGED TO REVIEWERS: the deleted bar surfaced a FAILING playback
+// POST to `.live-setlist-error` (#94, "a failing endpoint must not be a silent
+// no-op"). The shared Player DISCARDS the POST result
+// (`let _ = api::post_empty(...)` in components/player.rs) and renders no error
+// surface, so the #94 error-visibility assertion no longer has a DOM target and
+// has been dropped from this file. Restoring it is a frontend change to
+// player.rs (out of the e2e migration's scope), not an e2e change.
 
-async function setFailMode(
-  request: import("@playwright/test").APIRequestContext,
-  kind: string,
-  enabled: boolean,
-) {
-  const resp = await request.post("/__mock/fail-mode", {
-    data: { kind, enabled },
-  });
-  expect(resp.ok()).toBeTruthy();
-}
+const ALLOWED_CONSOLE = [
+  /WebSocket connection/,
+  /favicon/,
+  /wasm.*instantiate/,
+  /module specifier/,
+  /integrity.*attribute.*ignored/,
+];
 
-test.describe("live setlist playback errors surface to operator", () => {
-  test.afterEach(async ({ request }) => {
-    // Always clear every fail-mode flag so a later test starts clean.
-    for (const kind of ["play", "pause", "skip", "previous", "mode"]) {
-      await setFailMode(request, kind, false);
+let consoleMessages: string[] = [];
+
+test.beforeEach(async ({ page }) => {
+  consoleMessages = [];
+  page.on("console", (msg) => {
+    if (msg.type() === "error" || msg.type() === "warning") {
+      consoleMessages.push(`[${msg.type()}] ${msg.text()}`);
     }
   });
+});
 
-  test("pause failure shows error in .live-setlist-error", async ({
+test.afterEach(async () => {
+  const real = consoleMessages.filter(
+    (m) => !ALLOWED_CONSOLE.some((r) => r.test(m)),
+  );
+  expect(real).toEqual([]);
+});
+
+test.describe("the shared Player transport drives /live playback (#194)", () => {
+  test("▶ Prehrať posts to /play (ytlive is not playing → play)", async ({
     page,
-    request,
   }) => {
-    await setFailMode(request, "pause", true);
-
     await page.goto("/live");
-    await expect(page.locator(".live-setlist-controls")).toBeVisible({
-      timeout: 10000,
-    });
-
-    await page.locator(".live-setlist-controls").getByRole("button", { name: "⏸" }).click();
-
-    await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
-      timeout: 5000,
-    });
+    const btn = page.getByTestId("player-playpause");
+    await expect(btn).toBeVisible({ timeout: 10000 });
+    // ytlive (184) has no now-playing/Playing state, so the toggle reads
+    // "▶ Prehrať" and clicking it posts /play.
+    await expect(btn).toContainText("Prehrať");
+    const post = page.waitForRequest(
+      (req) =>
+        req.url().includes("/api/v1/playback/184/play") &&
+        req.method() === "POST",
+    );
+    await btn.click();
+    await post;
   });
 
-  test("skip failure shows error in .live-setlist-error", async ({
-    page,
-    request,
-  }) => {
-    await setFailMode(request, "skip", true);
-
+  test("⏭ Ďalšia posts to /skip", async ({ page }) => {
     await page.goto("/live");
-    await expect(page.locator(".live-setlist-controls")).toBeVisible({
-      timeout: 10000,
-    });
-
-    await page.locator(".live-setlist-controls").getByRole("button", { name: "⏭" }).click();
-
-    await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
-      timeout: 5000,
-    });
+    const btn = page.getByTestId("player-skip");
+    await expect(btn).toBeVisible({ timeout: 10000 });
+    const post = page.waitForRequest(
+      (req) =>
+        req.url().includes("/api/v1/playback/184/skip") &&
+        req.method() === "POST",
+    );
+    await btn.click();
+    await post;
   });
 
-  test("previous failure shows error in .live-setlist-error", async ({
-    page,
-    request,
-  }) => {
-    await setFailMode(request, "previous", true);
-
+  test("⏮ Predošlá posts to /previous", async ({ page }) => {
     await page.goto("/live");
-    await expect(page.locator(".live-setlist-controls")).toBeVisible({
-      timeout: 10000,
-    });
-
-    await page.locator(".live-setlist-controls").getByRole("button", { name: "⏮" }).click();
-
-    await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
-      timeout: 5000,
-    });
+    const btn = page.getByTestId("player-prev");
+    await expect(btn).toBeVisible({ timeout: 10000 });
+    const post = page.waitForRequest(
+      (req) =>
+        req.url().includes("/api/v1/playback/184/previous") &&
+        req.method() === "POST",
+    );
+    await btn.click();
+    await post;
   });
 
-  test("global play (no resume) failure shows error", async ({
-    page,
-    request,
-  }) => {
-    await setFailMode(request, "play", true);
-
+  test("the mode select PUTs the chosen mode", async ({ page }) => {
     await page.goto("/live");
-    await expect(page.locator(".live-setlist-controls")).toBeVisible({
-      timeout: 10000,
-    });
-
-    await page.locator(".live-setlist-controls").getByRole("button", { name: "▶ Play" }).click();
-
-    await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
-      timeout: 5000,
-    });
-  });
-
-  test("mode-change failure shows error in .live-setlist-error", async ({
-    page,
-    request,
-  }) => {
-    await setFailMode(request, "mode", true);
-
-    await page.goto("/live");
-    await expect(page.locator(".live-setlist-controls")).toBeVisible({
-      timeout: 10000,
-    });
-
-    await page.locator(".live-setlist-mode").selectOption("continuous");
-
-    await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
-      timeout: 5000,
-    });
+    const sel = page.getByTestId("player-mode");
+    await expect(sel).toBeVisible({ timeout: 10000 });
+    // The select defaults to "continuous" (PlaybackMode::default); pick "loop"
+    // so a real change event fires. The predicate matches the body so it can't
+    // be satisfied by the page's mount-time `mode=single` PUT.
+    const put = page.waitForRequest(
+      (req) =>
+        req.url().includes("/api/v1/playback/184/mode") &&
+        req.method() === "PUT" &&
+        (req.postData() ?? "").includes("loop"),
+    );
+    await sel.selectOption("loop");
+    await put;
   });
 });

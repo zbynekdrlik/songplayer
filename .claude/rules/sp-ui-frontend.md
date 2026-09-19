@@ -209,3 +209,56 @@ mixer was "hrozne škaredý"; he wants ONE modern mixer everywhere).
   does NOT carry `dub_status`, so that placement needs the server to add it to the
   now-playing message first (a `ServerMsg::NowPlaying` + `NowPlayingInfo.dub_status`
   change). The dub mixer ships on the Dabing page only until that follow-up lands.
+
+## One capability = one component on every page (#194)
+
+The app is ONE application and must behave the same on every page. A capability
+that appears on more than one page is ONE shared component, rendered identically
+everywhere — never a page-local re-implementation. Three playback UIs, three
+transport vocabularies, seek-only-on-Live and preview-only-on-Dashboard were the
+exact divergence #194 fixed. The owner's rule: "je to jednotna aplikacia a mala
+by sa aj spravat jednotne".
+
+**The playback surface is `components/player.rs::Player(playlist_id)`** — the ONE
+composition of now-playing (title/artist/state), the on/off-program badge, the
+seek bar (`player-seek` + `player-back10`/`player-fwd10`, backed by the pure
+`sp_core::seek_model` helpers), transport (`player-prev`/`player-playpause`
+toggle/`player-skip`), the mode select (`player-mode`), the click-to-start live
+A/V preview slot (`PreviewVideo`, behaviour unchanged), and the mixer slot
+(the shared `Mixer` via the karaoke adapter for a song, the dub adapter for a
+dub video — chosen from the PLAYING item: the now-playing `video_id` looked up in
+`store.dabing`, dub row → `DubMixer`, else `KaraokeMixer`). It is rendered by the
+Dashboard card, the Live page and the Dabing page. There is no page-local
+now-playing / transport / seek / preview widget — deleting them (not keeping them
+beside the shared one) is part of adding the shared one.
+
+**Testid convention: `<component>-<part>`, set INSIDE the shared component,
+NEVER injected by the caller.** So every page that shows a capability exposes the
+SAME ids. The Player sets all `player-*` ids itself; the preview keeps its own
+`preview-*` ids; the mixer adapters keep `karaoke-*` / `dub-*` ids. A test that
+asserts on a capability locates it by the shared id and it resolves on every page
+that shows it.
+
+**Slovak is the ONE operator-UI language** — labels, buttons, tooltips,
+empty/error/loading text. The only exceptions are the fleet genlock vocabulary
+(`LOCKED`/`DEGRADED`/`UNLOCKED`/`GENLOCK OFF`) and proper names (OBS, NDI,
+Resolume, SongPlayer). Mixed English/Slovak in one surface is a review reject.
+
+**On/off-program is derived from `store.ndi_health`** (the health snapshot maps a
+Playing-but-off-program pipeline to `Paused`, so `state == "Playing"` means the
+wall shows this output) — no server change, no new field. A dub prepared on the
+Dabing playlist plays OFF-program and reads "○ Mimo programu".
+
+### Cross-page review checklist (run for every lane that touches `sp-ui`)
+
+Before a `sp-ui` lane is done, the integration review does a CROSS-PAGE pass, not
+only a code pass:
+
+1. Screenshots of ALL pages (Dashboard, Live, Lyrics, Dabing, Settings) from the
+   mock build (`trunk build` → `node e2e/mock-api.mjs` → Playwright at 1400×1000).
+2. Same capability = same component, same place, same testids, same labels, same
+   language on every page it appears.
+3. No page-local widget for a capability another page already renders (a new
+   page-local widget for an existing capability is a design REJECT).
+4. Zero console errors on every page.
+5. The verdict line: `🏛 Architektúra: <code area> — OK · UI-konzistencia — OK | REWORK`.
