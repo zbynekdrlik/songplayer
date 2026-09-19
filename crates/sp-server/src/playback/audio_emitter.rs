@@ -462,38 +462,45 @@ pub fn push_blocking(shared: &SharedEmitter, interleaved: &[f32], channels: usiz
     // never retried, because retrying a residual that can never form a frame
     // spun the decode thread in 250 ms `wait_timeout`s forever (#192 item 1).
     let usable = (interleaved.len() / channels) * channels;
-    if usable < interleaved.len() {
-        tracing::warn!(
-            dropped = interleaved.len() - usable,
-            channels,
-            "audio-emitter: dropped a partial-frame audio residual"
-        );
-    }
-    if usable == 0 {
-        return;
-    }
-    let mut offset = 0usize;
+    warn_dropped_residual(interleaved.len() - usable, channels);
     let mut guard = shared.emitter.lock().unwrap();
     // New audio means the pipeline is running again — release a pause hold.
     guard.set_held(false);
-    while offset < usable {
-        if shared.shutdown.load(Ordering::Relaxed) {
+    // `rest` shrinks by exactly what the ring accepted; the loop ends when it is
+    // empty (no offset arithmetic left to get subtly wrong — a redundant second
+    // comparison here used to be an infinite-wait mutant).
+    let mut rest = &interleaved[..usable];
+    loop {
+        if rest.is_empty() || shared.shutdown.load(Ordering::Relaxed) {
             return;
         }
-        let accepted = guard
-            .ring_mut()
-            .push_some(&interleaved[offset..usable], channels);
-        offset += accepted;
-        if offset < usable {
-            // Ring full — wait for the emit thread to free a block. Bounded so a
-            // missed notify or a dead emit thread re-checks `shutdown` rather
-            // than hanging the decode thread forever (design: bounded wait).
-            let (g, _timeout) = shared
-                .space
-                .wait_timeout(guard, std::time::Duration::from_millis(250))
-                .unwrap();
-            guard = g;
+        let accepted = guard.ring_mut().push_some(rest, channels);
+        rest = &rest[accepted..];
+        if rest.is_empty() {
+            return;
         }
+        // Ring full — wait for the emit thread to free a block. Bounded so a
+        // missed notify or a dead emit thread re-checks `shutdown` rather than
+        // hanging the decode thread forever (design: bounded wait).
+        let (g, _timeout) = shared
+            .space
+            .wait_timeout(guard, std::time::Duration::from_millis(250))
+            .unwrap();
+        guard = g;
+    }
+}
+
+/// One WARN when a push carried a partial-frame residual (an odd-length buffer
+/// against a stereo layout) that had to be dropped. Log-only — no behaviour
+/// hangs off the condition, so it is not mutation-scored.
+#[cfg_attr(test, mutants::skip)]
+fn warn_dropped_residual(dropped: usize, channels: usize) {
+    if dropped > 0 {
+        tracing::warn!(
+            dropped,
+            channels,
+            "audio-emitter: dropped a partial-frame audio residual"
+        );
     }
 }
 

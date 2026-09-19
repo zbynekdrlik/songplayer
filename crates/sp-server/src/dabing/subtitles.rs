@@ -194,13 +194,10 @@ fn finalize_line_ends(lines: &mut [LyricsLine]) {
         let true_end = lines[i].end_ms;
         let mut end = true_end.max(start + MIN_LINE_MS);
         if let Some(next_start) = lines.get(i + 1).map(|n| n.start_ms) {
-            if next_start < end {
-                end = if next_start > start {
-                    next_start
-                } else {
-                    start + 1
-                };
-            }
+            // Trim to the next line's start, but never to (or below) this line's
+            // own start. `min`/`max` instead of comparisons: `next_start == end`
+            // trims to the same value, so a `<` here was an equivalent mutant.
+            end = end.min(next_start.max(start + 1));
         }
         lines[i].end_ms = end;
     }

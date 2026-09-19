@@ -56,6 +56,13 @@ exclude_re = [
   #   placement_for}, child::live_translate_args + the summary JSON, and the D3 subtitle
   #   path subtitles::transcripts_to_track + subtitles_store (#182).
   'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::synthesize',
+  # api/preview.rs::handle_preview_ws: the WebSocket session of the live preview —
+  #   an upgraded socket + a running ffmpeg encoder child + the fragment relay.
+  #   No Linux unit test can drive it (same class as api/websocket above); its
+  #   decisions are pure + mutation-covered (api::preview::is_idle, the relay's
+  #   late-join/reset/close, RestartBudget), the flow is covered by the chrome-
+  #   channel mock E2E and the post-deploy preview spec (#178).
+  'api/preview\.rs:[0-9]+:[0-9]+:.*handle_preview_ws',
   # sp-server/src/resolume/ is NOT excluded — handlers/driver have wiremock tests.
   # sp-server/src/playback/mod.rs is NOT excluded — title timer logic is unit-tested.
   # sp-ndi/, sp-decoder/reader.rs, sp-server/src/playback/pipeline.rs are NOT
