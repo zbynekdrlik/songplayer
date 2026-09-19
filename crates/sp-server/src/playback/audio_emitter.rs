@@ -462,7 +462,7 @@ pub fn push_blocking(shared: &SharedEmitter, interleaved: &[f32], channels: usiz
     // never retried, because retrying a residual that can never form a frame
     // spun the decode thread in 250 ms `wait_timeout`s forever (#192 item 1).
     let usable = (interleaved.len() / channels) * channels;
-    warn_dropped_residual(interleaved.len() - usable, channels);
+    warn_dropped_residual(interleaved.len(), usable, channels);
     let mut guard = shared.emitter.lock().unwrap();
     // New audio means the pipeline is running again — release a pause hold.
     guard.set_held(false);
@@ -471,9 +471,10 @@ pub fn push_blocking(shared: &SharedEmitter, interleaved: &[f32], channels: usiz
     // comparison here used to be an infinite-wait mutant).
     let mut rest = &interleaved[..usable];
     loop {
-        if rest.is_empty() || shared.shutdown.load(Ordering::Relaxed) {
+        if shared.shutdown.load(Ordering::Relaxed) {
             return;
         }
+        // An empty `rest` (nothing usable) is accepted as 0 and returns below.
         let accepted = guard.ring_mut().push_some(rest, channels);
         rest = &rest[accepted..];
         if rest.is_empty() {
@@ -494,7 +495,8 @@ pub fn push_blocking(shared: &SharedEmitter, interleaved: &[f32], channels: usiz
 /// against a stereo layout) that had to be dropped. Log-only — no behaviour
 /// hangs off the condition, so it is not mutation-scored.
 #[cfg_attr(test, mutants::skip)]
-fn warn_dropped_residual(dropped: usize, channels: usize) {
+fn warn_dropped_residual(total: usize, usable: usize, channels: usize) {
+    let dropped = total - usable;
     if dropped > 0 {
         tracing::warn!(
             dropped,
