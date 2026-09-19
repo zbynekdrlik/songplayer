@@ -280,10 +280,19 @@ fn run_loop_windows(
         }
     };
 
-    // #196: read the advertised source URL now (right after create, before the
-    // sender is moved into the submitter) so the startup log carries the
-    // name→port map and the serializer can proceed to the next output in order.
-    let sender_url = sender.source_url();
+    // #196: read the advertised source URL (host:port) now, before the sender
+    // is moved into the submitter, so the startup log + `/api/v1/ndi/health`
+    // carry the name→port map and the serializer can proceed in order. The NDI
+    // runtime assigns the URL slightly AFTER `send_create`, so poll briefly
+    // (≤ ~2 s) until it is available rather than reporting `null`.
+    let mut sender_url = sender.source_url();
+    for _ in 0..10 {
+        if sender_url.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        sender_url = sender.source_url();
+    }
     info!(
         ndi_name,
         url = sender_url.as_deref().unwrap_or("unknown"),
