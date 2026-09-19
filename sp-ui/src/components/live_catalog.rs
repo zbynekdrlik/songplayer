@@ -1,10 +1,14 @@
 //! Left pane of /live: lists all songs from the catalog with an optional
-//! "has lyrics only" filter and a "+ Add" button per row that appends the
-//! song to the given custom playlist's set list.
+//! "len s textom" filter and a "+ Pridať" action per row that appends the song
+//! to the given custom playlist's set list. Uses the shared `SongRow` +
+//! `StatusChips` (#194) so a catalog song looks the same as everywhere else.
 
 use leptos::prelude::*;
+use sp_core::status_chip::text_chip;
 
 use crate::api;
+use crate::components::song_row::SongRow;
+use crate::components::status_chips::ChipView;
 
 #[component]
 pub fn LiveCatalog(
@@ -13,7 +17,8 @@ pub fn LiveCatalog(
     /// Bumped by the parent whenever the set list changes; the catalog
     /// currently ignores it but the signal is carried so future changes
     /// (e.g. per-row "already-added" badges) can observe the edit.
-    #[prop(into)] _set_list_version: Signal<u64>,
+    #[prop(into)]
+    _set_list_version: Signal<u64>,
     /// Callback fired with the video_id after a successful add. Lets the
     /// parent refresh the set-list view.
     on_added: Callback<i64>,
@@ -27,7 +32,7 @@ pub fn LiveCatalog(
         leptos::task::spawn_local(async move {
             match api::get_lyrics_songs(None).await {
                 Ok(list) => songs.set(list),
-                Err(e) => error_msg.set(format!("failed to load songs: {e}")),
+                Err(e) => error_msg.set(format!("načítanie skladieb zlyhalo: {e}")),
             }
         });
     });
@@ -49,7 +54,7 @@ pub fn LiveCatalog(
     view! {
         <div class="live-catalog">
             <div class="live-catalog-header">
-                <h2>"Catalog"</h2>
+                <h2>"Katalóg"</h2>
                 <label>
                     <input
                         type="checkbox"
@@ -59,52 +64,53 @@ pub fn LiveCatalog(
                             show_only_with_lyrics.set(checked);
                         }
                     />
-                    " Only songs with lyrics"
+                    " Len skladby s textom"
                 </label>
             </div>
             <div class="live-catalog-error">{move || error_msg.get()}</div>
-            <table class="live-catalog-table">
-                <thead>
-                    <tr>
-                        <th>"Song"</th>
-                        <th>"Artist"</th>
-                        <th>"Lyrics"</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <For
-                        each=visible
-                        key=|s| s["video_id"].as_i64().unwrap_or(0)
-                        children=move |song| {
-                            let video_id = song["video_id"].as_i64().unwrap_or(0);
-                            let title = song["song"].as_str().unwrap_or("—").to_string();
-                            let artist = song["artist"].as_str().unwrap_or("—").to_string();
-                            let has_lyrics = song["has_lyrics"].as_bool().unwrap_or(false);
-                            let badge = if has_lyrics { "✓" } else { "" };
-                            view! {
-                                <tr>
-                                    <td>{title}</td>
-                                    <td>{artist}</td>
-                                    <td>{badge}</td>
-                                    <td>
-                                        <button on:click=move |_| {
-                                            leptos::task::spawn_local(async move {
-                                                match api::post_live_add_item(
-                                                    target_playlist_id, video_id,
-                                                ).await {
-                                                    Ok(_) => on_added.run(video_id),
-                                                    Err(e) => error_msg.set(e),
-                                                }
-                                            });
-                                        }>"+ Add"</button>
-                                    </td>
-                                </tr>
-                            }
+            <div class="song-list">
+                <For
+                    each=visible
+                    key=|s| {
+                        (
+                            s["video_id"].as_i64().unwrap_or(0),
+                            s["has_lyrics"].as_bool().unwrap_or(false),
+                            s["is_stale"].as_bool().unwrap_or(false),
+                            s["lyrics_reference"].as_bool().unwrap_or(false),
+                        )
+                    }
+                    children=move |song| {
+                        let video_id = song["video_id"].as_i64().unwrap_or(0);
+                        let title = song["song"].as_str().unwrap_or("—").to_string();
+                        let artist = song["artist"].as_str().unwrap_or_default().to_string();
+                        let has_lyrics = song["has_lyrics"].as_bool().unwrap_or(false);
+                        let is_stale = song["is_stale"].as_bool().unwrap_or(false);
+                        let is_ref = song["lyrics_reference"].as_bool().unwrap_or(false);
+                        let chips = vec![ChipView::new(text_chip(has_lyrics, is_ref, is_stale))];
+                        view! {
+                            <SongRow video_id=video_id title=title artist=artist chips=chips>
+                                <button
+                                    type="button"
+                                    class="song-row-btn"
+                                    title="Pridať do set listu"
+                                    on:click=move |_| {
+                                        leptos::task::spawn_local(async move {
+                                            match api::post_live_add_item(target_playlist_id, video_id)
+                                                .await
+                                            {
+                                                Ok(_) => on_added.run(video_id),
+                                                Err(e) => error_msg.set(e),
+                                            }
+                                        });
+                                    }
+                                >
+                                    "+ Pridať"
+                                </button>
+                            </SongRow>
                         }
-                    />
-                </tbody>
-            </table>
+                    }
+                />
+            </div>
         </div>
     }
 }

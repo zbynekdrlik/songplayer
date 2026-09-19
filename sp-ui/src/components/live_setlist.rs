@@ -1,11 +1,13 @@
-//! Primary control surface of `/live`: the current set list with per-row
-//! actions. #194: the global transport/mode bar that used to live here is gone —
-//! the shared `Player` (rendered by the Live page under the setlist) is the ONE
-//! playback surface. Per-row ▶ still plays a specific song from zero.
+//! /live set list. Uses the shared `SongRow` + `StatusChips` (#194): each row is
+//! title/artist + the text chip + the primary play action, with the set-list
+//! actions (reorder, EN-suppress, remove) in the actions slot.
 
 use leptos::prelude::*;
+use sp_core::status_chip::text_chip;
 
 use crate::api;
+use crate::components::song_row::SongRow;
+use crate::components::status_chips::ChipView;
 
 #[component]
 pub fn LiveSetList(
@@ -52,135 +54,140 @@ pub fn LiveSetList(
 
     view! {
         <div class="live-setlist">
-            <h2>"ytlive set list"</h2>
+            <h2>"Set list ytlive"</h2>
             <div class="live-setlist-error">{move || error_msg.get()}</div>
-            <table class="live-setlist-table">
-                // Actions cell first (after #) so the primary ▶ / ✕ buttons
-                // stay pinned on the left edge of the screen and never overflow
-                // on narrow phones. EN-off + reorder arrows move to a
-                // secondary column that may scroll off on very narrow widths
-                // — losing them is cheap, losing ▶ is not.
-                <thead>
-                    <tr>
-                        <th>"#"</th>
-                        <th class="live-setlist-col-play">""</th>
-                        <th>"Song"</th>
-                        <th class="live-setlist-col-secondary"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <For
-                        each=enriched
-                        key=|(it, _)| it["video_id"].as_i64().unwrap_or(0)
-                        children=move |(item, meta)| {
-                            let position = item["position"].as_i64().unwrap_or(0);
-                            let video_id = item["video_id"].as_i64().unwrap_or(0);
-                            let song = meta["song"].as_str().unwrap_or("—").to_string();
-                            let song_for_confirm = song.clone();
-                            let suppress_initial = meta["suppress_resolume_en"]
-                                .as_bool()
-                                .unwrap_or(false);
-                            view! {
-                                <tr>
-                                    <td>{position + 1}</td>
-                                    <td class="live-setlist-col-play">
-                                        <button
-                                            class="live-setlist-btn live-setlist-btn-play"
-                                            title="Play this song"
-                                            on:click=move |_| {
-                                                // Per-row play starts a specific song from zero.
-                                                leptos::task::spawn_local(async move {
-                                                    if let Err(e) = api::post_live_play_video(
-                                                        playlist_id, video_id, None,
-                                                    )
+            <div class="song-list">
+                <For
+                    each=enriched
+                    key=|(it, meta)| {
+                        (
+                            it["video_id"].as_i64().unwrap_or(0),
+                            it["position"].as_i64().unwrap_or(0),
+                            meta["has_lyrics"].as_bool().unwrap_or(false),
+                            meta["is_stale"].as_bool().unwrap_or(false),
+                            meta["lyrics_reference"].as_bool().unwrap_or(false),
+                        )
+                    }
+                    children=move |(item, meta)| {
+                        let position = item["position"].as_i64().unwrap_or(0);
+                        let video_id = item["video_id"].as_i64().unwrap_or(0);
+                        let song = meta["song"].as_str().unwrap_or("—").to_string();
+                        let artist = meta["artist"].as_str().unwrap_or_default().to_string();
+                        let song_for_confirm = song.clone();
+                        let title = format!("{}. {}", position + 1, song);
+                        let suppress_initial = meta["suppress_resolume_en"]
+                            .as_bool()
+                            .unwrap_or(false);
+                        let has_lyrics = meta["has_lyrics"].as_bool().unwrap_or(false);
+                        let is_stale = meta["is_stale"].as_bool().unwrap_or(false);
+                        let is_ref = meta["lyrics_reference"].as_bool().unwrap_or(false);
+                        let chips = vec![ChipView::new(text_chip(has_lyrics, is_ref, is_stale))];
+                        let on_play = Callback::new(move |_| {
+                            leptos::task::spawn_local(async move {
+                                if let Err(e) = api::post_live_play_video(playlist_id, video_id, None)
+                                    .await
+                                {
+                                    error_msg.set(e);
+                                }
+                            });
+                        });
+                        view! {
+                            <SongRow
+                                video_id=video_id
+                                title=title
+                                artist=artist
+                                chips=chips
+                                on_play=on_play
+                                play_ready=true
+                            >
+                                <button
+                                    type="button"
+                                    class="song-row-btn"
+                                    title="Posunúť vyššie"
+                                    on:click=move |_| {
+                                        leptos::task::spawn_local(async move {
+                                            match api::post_live_move_item(playlist_id, video_id, "up")
+                                                .await
+                                            {
+                                                Ok(()) => on_changed.run(()),
+                                                Err(e) => error_msg.set(e),
+                                            }
+                                        });
+                                    }
+                                >
+                                    "▲"
+                                </button>
+                                <button
+                                    type="button"
+                                    class="song-row-btn"
+                                    title="Posunúť nižšie"
+                                    on:click=move |_| {
+                                        leptos::task::spawn_local(async move {
+                                            match api::post_live_move_item(playlist_id, video_id, "down")
+                                                .await
+                                            {
+                                                Ok(()) => on_changed.run(()),
+                                                Err(e) => error_msg.set(e),
+                                            }
+                                        });
+                                    }
+                                >
+                                    "▼"
+                                </button>
+                                <label
+                                    class="song-row-enoff"
+                                    title="Nevysielať anglický riadok textu do Resolume #sp-subs klipov"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        prop:checked=suppress_initial
+                                        on:change=move |ev| {
+                                            let checked = event_target_checked(&ev);
+                                            leptos::task::spawn_local(async move {
+                                                match api::patch_video_suppress_en(video_id, checked)
                                                     .await
-                                                    {
-                                                        error_msg.set(e);
-                                                    }
-                                                });
-                                            }
-                                        >"▶"</button>
-                                    </td>
-                                    <td class="live-setlist-song">{song}</td>
-                                    <td class="live-setlist-col-secondary live-setlist-secondary">
-                                        <button
-                                            class="live-setlist-btn live-setlist-btn-move"
-                                            title="Move up"
-                                            on:click=move |_| {
-                                                leptos::task::spawn_local(async move {
-                                                    match api::post_live_move_item(
-                                                        playlist_id, video_id, "up",
-                                                    ).await {
-                                                        Ok(()) => on_changed.run(()),
-                                                        Err(e) => error_msg.set(e),
-                                                    }
-                                                });
-                                            }
-                                        >"▲"</button>
-                                        <button
-                                            class="live-setlist-btn live-setlist-btn-move"
-                                            title="Move down"
-                                            on:click=move |_| {
-                                                leptos::task::spawn_local(async move {
-                                                    match api::post_live_move_item(
-                                                        playlist_id, video_id, "down",
-                                                    ).await {
-                                                        Ok(()) => on_changed.run(()),
-                                                        Err(e) => error_msg.set(e),
-                                                    }
-                                                });
-                                            }
-                                        >"▼"</button>
-                                        <label
-                                            class="live-setlist-enoff-inline"
-                                            title="Suppress pushing the English lyric line to Resolume #sp-subs clips"
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                prop:checked=suppress_initial
-                                                on:change=move |ev| {
-                                                    let checked = event_target_checked(&ev);
-                                                    leptos::task::spawn_local(async move {
-                                                        match api::patch_video_suppress_en(
-                                                            video_id, checked,
-                                                        ).await {
-                                                            Ok(()) => on_changed.run(()),
-                                                            Err(e) => error_msg.set(e),
-                                                        }
-                                                    });
+                                                {
+                                                    Ok(()) => on_changed.run(()),
+                                                    Err(e) => error_msg.set(e),
                                                 }
-                                            />
-                                            "EN"
-                                        </label>
-                                        <button
-                                            class="live-setlist-btn live-setlist-btn-remove"
-                                            title="Remove from set list"
-                                            on:click=move |_| {
-                                                // Confirm so a stray tap during a live set doesn't
-                                                // silently drop a song the band still needs.
-                                                let ok = web_sys::window()
-                                                    .and_then(|w| w.confirm_with_message(
-                                                        &format!("Remove \"{song_for_confirm}\" from the set list?"),
-                                                    ).ok())
-                                                    .unwrap_or(false);
-                                                if !ok { return; }
-                                                leptos::task::spawn_local(async move {
-                                                    match api::delete_live_item(
-                                                        playlist_id, video_id,
-                                                    ).await {
-                                                        Ok(()) => on_changed.run(()),
-                                                        Err(e) => error_msg.set(e),
-                                                    }
-                                                });
+                                            });
+                                        }
+                                    />
+                                    "EN"
+                                </label>
+                                <button
+                                    type="button"
+                                    class="song-row-btn song-row-btn-remove"
+                                    title="Odobrať zo set listu"
+                                    on:click=move |_| {
+                                        let ok = web_sys::window()
+                                            .and_then(|w| {
+                                                w.confirm_with_message(
+                                                        &format!(
+                                                            "Odobrať \"{song_for_confirm}\" zo set listu?",
+                                                        ),
+                                                    )
+                                                    .ok()
+                                            })
+                                            .unwrap_or(false);
+                                        if !ok {
+                                            return;
+                                        }
+                                        leptos::task::spawn_local(async move {
+                                            match api::delete_live_item(playlist_id, video_id).await {
+                                                Ok(()) => on_changed.run(()),
+                                                Err(e) => error_msg.set(e),
                                             }
-                                        >"✕"</button>
-                                    </td>
-                                </tr>
-                            }
+                                        });
+                                    }
+                                >
+                                    "✕"
+                                </button>
+                            </SongRow>
                         }
-                    />
-                </tbody>
-            </table>
+                    }
+                />
+            </div>
         </div>
     }
 }

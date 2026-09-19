@@ -27,19 +27,12 @@ struct NowPlayingStems {
     video_id: i64,
 }
 
-/// Header glyph + label for a stems state (#177).
+/// Header label for a stems state (#177). #194: reuses the ONE shared status
+/// vocabulary (`sp_core::status_chip::stems_chip`) instead of a private
+/// glyph+word table, so the mixer state line and the row chips never diverge.
 fn state_label(state: &str, queue_position: Option<i64>) -> String {
-    match state {
-        "ready" => "● pripravené".to_string(),
-        "processing" => "⚙ spracúvam".to_string(),
-        "queued" => match queue_position {
-            Some(n) => format!("⏳ vo fronte ({n}.)"),
-            None => "⏳ vo fronte".to_string(),
-        },
-        "unavailable" => "— nedostupné".to_string(),
-        "failed" => "✖ chyba".to_string(),
-        _ => "—".to_string(),
-    }
+    let pos = queue_position.map(|n| n.max(0) as u32);
+    sp_core::status_chip::stems_chip(Some(state), pos).label_sk
 }
 
 /// POST the current mode + vocal gain to the server (live — no pipeline reopen,

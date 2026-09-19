@@ -28,8 +28,10 @@ pub fn PlaylistCard(
     let ndi_name = playlist.ndi_output_name.clone();
     // #134: song list is collapsed by default — a busy playlist can have
     // dozens of cached videos, and most dashboard glances only care about
-    // now-playing + transport controls. Toggled open on demand.
-    let songs_open = RwSignal::new(false);
+    // now-playing + transport controls. #194: OPEN by default for the selected
+    // playlist so the operator sees the song list + status chips at a glance;
+    // still toggleable closed.
+    let songs_open = RwSignal::new(true);
 
     // The 4-line lyrics panel (a lyrics-preview surface, not a playback control)
     // still reads the selected playlist's now-playing entry.

@@ -7,7 +7,7 @@
 use leptos::prelude::*;
 
 use crate::api;
-use crate::components::import_url_box::ImportUrlBox;
+use crate::components::import_box::{ImportBox, ImportTarget};
 use crate::components::live_catalog::LiveCatalog;
 use crate::components::live_setlist::LiveSetList;
 use crate::components::lyrics_scroller::LyricsScroller;
@@ -109,9 +109,9 @@ pub fn LivePage() -> impl IntoView {
                                 class="live-add-body"
                                 class:open=move || add_open.get()
                             >
-                                <ImportUrlBox
-                                    playlist_id=id
-                                    on_imported=Callback::new(move |(_vid, _title)| {
+                                <ImportBox
+                                    target=ImportTarget::Playlist(id)
+                                    on_imported=Callback::new(move |_: (i64, String)| {
                                         set_list_version.update(|v| *v += 1);
                                     })
                                 />

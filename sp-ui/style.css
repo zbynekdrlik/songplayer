@@ -1417,3 +1417,78 @@ body {
 }
 
 .dabing-row-ratio { color: var(--text-dim); font-size: 0.85em; margin-top: 4px; }
+
+/* ---- #194 ROUND 2: shared SongRow / StatusChips / ImportBox ---- */
+
+.song-list { display: flex; flex-direction: column; gap: 6px; }
+.song-list-head {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 8px;
+    color: var(--text-dim);
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.song-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.song-row-title { flex: 1 1 160px; min-width: 0; font-weight: 500; word-break: break-word; }
+.song-row-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.song-row-btn {
+    min-height: 44px; /* phone touch target (#194) */
+    min-width: 44px;
+    padding: 6px 10px;
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+.song-row-btn:hover:not(:disabled) { border-color: var(--text-dim); }
+.song-row-btn:disabled { opacity: 0.5; cursor: default; }
+.song-row-btn-play { font-size: 1.05em; }
+.song-row-btn-remove { color: #e57373; }
+.song-row-enoff { display: inline-flex; align-items: center; gap: 4px; font-size: 0.85em; color: var(--text-dim); }
+.song-row-editing { gap: 6px; }
+.song-row-editing input { flex: 1 1 120px; min-width: 0; padding: 6px 8px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); }
+
+/* status chips — ONE vocabulary, one colour per state, everywhere */
+.status-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.status-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.78em;
+    white-space: nowrap;
+    border: 1px solid transparent;
+}
+.status-chip.chip-ok       { color: #1b5e20; background: #c8e6c9; }
+.status-chip.chip-progress { color: #0d47a1; background: #bbdefb; }
+.status-chip.chip-queued   { color: #7f5300; background: #ffe0a3; }
+.status-chip.chip-missing  { color: #555;    background: #e0e0e0; }
+.status-chip.chip-error    { color: #fff;    background: #c0392b; }
+
+/* import box — one Slovak paste-URL box everywhere */
+.import-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.import-input { flex: 1 1 220px; min-width: 0; padding: 8px 10px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); }
+.import-btn {
+    min-height: 44px;
+    padding: 8px 14px;
+    background: var(--accent);
+    color: #fff;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+.import-btn:disabled { opacity: 0.6; cursor: default; }
+.import-status { flex-basis: 100%; color: var(--text-dim); font-size: 0.85em; }

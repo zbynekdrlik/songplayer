@@ -23,8 +23,9 @@ pub fn SongRow(
     /// The status chips for this row (built from `sp_core::status_chip`).
     chips: Vec<ChipView>,
     /// Primary play action. `None` → no play button (e.g. the catalog, whose
-    /// primary action is "add to set list").
-    #[prop(optional)]
+    /// primary action is "add to set list"). `#[prop(into)]` so a caller can pass
+    /// a bare `Callback` (wrapped to `Some`) or omit it.
+    #[prop(optional, into)]
     on_play: Option<Callback<()>>,
     /// Whether the file is ready to play; the play button is disabled otherwise.
     #[prop(optional)]
