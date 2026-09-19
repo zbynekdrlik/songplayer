@@ -228,6 +228,12 @@ test.describe("#194: the shared Player mixer + error surface", () => {
       await request.post("/__mock/fail-mode", {
         data: { kind: "skip", enabled: false },
       });
+      // This test DELIBERATELY makes /skip return 500, so the browser logs a
+      // "Failed to load resource: … 500" console error — that is the point of
+      // the test, not a bug. Drop it so the shared zero-console afterEach passes.
+      consoleMessages = consoleMessages.filter(
+        (m) => !/Failed to load resource.*500/.test(m),
+      );
     }
   });
 });
