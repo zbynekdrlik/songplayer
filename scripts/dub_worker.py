@@ -132,6 +132,30 @@ def drain_deadline_s(input_pcm_bytes: int, drain_s: float = DRAIN_S) -> float:
     return round(input_s + drain_s, 2)
 
 
+def build_transcripts(results: list[dict]) -> dict:
+    """Assemble the EN/SK transcripts JSON (the D3 #182 subtitle source) from the
+    per-chunk results. Pure — unit-tested. Each chunk carries its video-timeline
+    placement so the Rust subtitle builder maps chunk-local SK positions onto the
+    video timeline WITHOUT a second transcription pass; the placement is read from
+    the SAME per-chunk result the mix uses (`_process_chunk`), so cached/resumed
+    chunks are included with no re-synthesis and no extra API calls."""
+    return {
+        "engine": "gemini-live-translate",
+        "target_lang": TARGET_LANG,
+        "chunks": [
+            {
+                "index": r["index"],
+                "start_ms": r["chunk_start_ms"],
+                "end_ms": r["chunk_end_ms"],
+                "en": r["transcript_en"],
+                "sk": r["transcript_sk"],
+                "sk_timed": r["sk_timed"],
+            }
+            for r in results
+        ],
+    }
+
+
 # ── I/O helpers ─────────────────────────────────────────────────────────────────
 
 
@@ -385,22 +409,8 @@ def cmd_live_translate(args: argparse.Namespace) -> None:
     ]
     _run(mix_args)
 
-    # Transcripts JSON for D3 (EN + SK, per-chunk with timeline offsets).
-    transcripts = {
-        "engine": "gemini-live-translate",
-        "target_lang": TARGET_LANG,
-        "chunks": [
-            {
-                "index": r["index"],
-                "start_ms": r["chunk_start_ms"],
-                "end_ms": r["chunk_end_ms"],
-                "en": r["transcript_en"],
-                "sk": r["transcript_sk"],
-                "sk_timed": r["sk_timed"],
-            }
-            for r in results
-        ],
-    }
+    # Transcripts JSON for D3 (EN + SK, per-chunk with timeline placement).
+    transcripts = build_transcripts(results)
     with open(args.transcripts, "w", encoding="utf-8") as f:
         json.dump(transcripts, f, ensure_ascii=False)
 

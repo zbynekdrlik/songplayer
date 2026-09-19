@@ -88,3 +88,63 @@ def test_build_mix_filter_places_and_mixes_each_chunk():
 def test_drain_deadline_is_input_seconds_plus_drain():
     # 16 kHz s16le mono: 32000 bytes/s. 320000 bytes = 10 s input.
     assert dw.drain_deadline_s(320_000, drain_s=5.0) == 15.0
+
+
+def _results_fixture() -> list:
+    """Two per-chunk results as `_process_chunk` returns them (cached or fresh):
+    each already carries `at_ms` + `tempo` from the placement the mix applied."""
+    return [
+        {
+            "index": 0,
+            "chunk_start_ms": 0,
+            "chunk_end_ms": 60_000,
+            "out_len_ms": 61_000,
+            "next_start_ms": 60_000,
+            "tempo": 1.05,
+            "at_ms": 0,
+            "transcript_en": "Hello there friends",
+            "transcript_sk": "Ahojte priatelia",
+            "sk_timed": [
+                {"t_ms": 500, "text": "Ahojte"},
+                {"t_ms": 1200, "text": " priatelia"},
+            ],
+        },
+        {
+            "index": 1,
+            "chunk_start_ms": 60_000,
+            "chunk_end_ms": 120_000,
+            "out_len_ms": 58_000,
+            "next_start_ms": None,
+            "tempo": 1.0,
+            "at_ms": 60_000,
+            "transcript_en": "Goodbye",
+            "transcript_sk": "Dovidenia",
+            "sk_timed": [{"t_ms": 400, "text": "Dovidenia"}],
+        },
+    ]
+
+
+def test_build_transcripts_includes_at_ms_and_tempo():
+    # D3 (#182): the transcripts JSON must carry each chunk's video-timeline
+    # placement (`at_ms`) + applied `tempo` so the Rust subtitle builder can map
+    # chunk-local SK positions onto the video timeline with NO second pass.
+    t = dw.build_transcripts(_results_fixture())
+    assert t["engine"] == "gemini-live-translate"
+    assert t["target_lang"] == "sk"
+    assert len(t["chunks"]) == 2
+
+    c0 = t["chunks"][0]
+    assert c0["index"] == 0
+    assert c0["start_ms"] == 0
+    assert c0["end_ms"] == 60_000
+    # The two D3 fields — read from the SAME placement the mix uses.
+    assert c0["at_ms"] == 0
+    assert c0["tempo"] == 1.05
+    assert c0["en"] == "Hello there friends"
+    assert c0["sk"] == "Ahojte priatelia"
+    assert c0["sk_timed"][0] == {"t_ms": 500, "text": "Ahojte"}
+
+    c1 = t["chunks"][1]
+    assert c1["at_ms"] == 60_000
+    assert c1["tempo"] == 1.0
+    assert c1["sk_timed"] == [{"t_ms": 400, "text": "Dovidenia"}]
