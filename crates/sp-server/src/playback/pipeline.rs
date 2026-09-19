@@ -10,8 +10,12 @@
 //! immediately reports an error (video decode requires Media Foundation).
 
 use crossbeam_channel::Sender;
-use std::path::PathBuf;
 use std::thread;
+// #196: since PipelineCommand::Play moved to pipeline_types.rs, PathBuf is now
+// referenced only by the cfg(windows) DecodeResult::NewPlay — gate the import so
+// the Linux clippy build doesn't see it as unused.
+#[cfg(windows)]
+use std::path::PathBuf;
 
 // Used in cfg(windows) blocks:
 // FrameSubmitter is also needed under `test` cfg — emit_heartbeat /
@@ -170,7 +174,11 @@ impl Drop for PlaybackPipeline {
 }
 
 /// Main loop for the pipeline thread (Windows).
+// mutants::skip — cfg(windows)-only delegation (log + call run_loop_windows);
+// dead on the Linux mutation runner, so a body-replacement mutant can never be
+// killed by a Linux unit test (same as run_loop_windows / decode_and_send).
 #[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
 #[allow(clippy::too_many_arguments)]
 fn run_loop(
     cmd_rx: Receiver<PipelineCommand>,
