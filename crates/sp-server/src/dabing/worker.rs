@@ -51,6 +51,8 @@ pub struct DubWorker {
     /// Set once `google-genai` has been confirmed importable in the venv, so the
     /// idempotent probe/install runs at most once per process (retried on failure).
     genai_ready: AtomicBool,
+    /// Set once the #182 startup subtitle backfill has run (once per process).
+    subtitles_backfilled: AtomicBool,
 }
 
 /// Parse the `dub_worker_enabled` setting. Default ON so a fresh deploy processes
@@ -102,6 +104,7 @@ impl DubWorker {
             obs_state: Some(obs_state),
             warned_no_python: AtomicBool::new(false),
             genai_ready: AtomicBool::new(false),
+            subtitles_backfilled: AtomicBool::new(false),
         }
     }
 
@@ -128,6 +131,12 @@ impl DubWorker {
             .flatten();
         if !worker_enabled(enabled.as_deref()) {
             return;
+        }
+
+        // #182: once per process, give every finished dub that still lacks the
+        // subtitle track (finished before D3 shipped) its EN/SK subtitles.
+        if !self.subtitles_backfilled.swap(true, Ordering::Relaxed) {
+            crate::dabing::subtitles_store::backfill_missing_subtitles(&self.pool).await;
         }
 
         let python = crate::lyrics::bootstrap::venv_python_path(&self.tools_dir);
