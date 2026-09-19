@@ -678,3 +678,27 @@ fn registry_set_sender_url_none_keeps_prior() {
     reg.set_sender_url(7, None);
     assert_eq!(reg.sender_url(7).as_deref(), Some("10.77.9.201:5963"));
 }
+
+// #196: output_has_obs_input reflects the shared OBS source map — no map wired
+// reads as "has input" (never suppress the ladder without evidence); a wired
+// map answers by playlist_id membership.
+#[tokio::test]
+async fn output_has_obs_input_reflects_source_map() {
+    let (mut engine, _reg) = fresh_engine().await;
+    // No map wired (OBS not configured) → treated as "has input".
+    assert!(engine.output_has_obs_input(7));
+
+    let map: crate::obs::NdiSourceMap =
+        std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+    map.write().await.insert("sp-fast_video".to_string(), 7);
+    engine.set_ndi_source_map(map);
+
+    assert!(
+        engine.output_has_obs_input(7),
+        "an OBS input advertises playlist 7"
+    );
+    assert!(
+        !engine.output_has_obs_input(999),
+        "no OBS input advertises playlist 999"
+    );
+}
