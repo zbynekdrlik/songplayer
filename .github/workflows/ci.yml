@@ -1670,14 +1670,16 @@ jobs:
               if (msg.type() === 'error') errors.push(msg.text());
             });
             await page.goto('http://localhost:8920/');
-            // Verify playlists are visible
-            await expect(page.getByRole('heading', { name: 'Playlists' })).toBeVisible({ timeout: 15000 });
+            // Verify playlists are visible (heading is Slovak since #194 r3b)
+            await expect(page.getByRole('heading', { name: 'Playlisty' })).toBeVisible({ timeout: 15000 });
             // At least one playlist card should be visible
             await expect(page.locator('.playlist-card').first()).toBeVisible({ timeout: 10000 });
-            // OBS status should connect within 30s (WebSocket handshake takes time after deploy)
-            await expect(page.locator('.obs-status')).not.toContainText('Disconnected', { timeout: 30000 });
-            // WebSocket indicator should be visible
-            await expect(page.locator('.ws-indicator')).toBeVisible({ timeout: 10000 });
+            // OBS status should connect within 30s (WebSocket handshake takes time after
+            // deploy). #194 r3b: OBS status now lives in the shared HealthBar
+            // (health-obs), Slovak: 'OBS: pripojené — <scene>' / 'OBS: odpojené'.
+            await expect(page.getByTestId('health-obs')).not.toContainText('odpojené', { timeout: 30000 });
+            // WebSocket indicator should be visible (HealthBar health-ws since #194 r3b)
+            await expect(page.getByTestId('health-ws')).toBeVisible({ timeout: 10000 });
             // Zero console errors
             expect(errors).toEqual([]);
           });
