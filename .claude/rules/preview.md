@@ -85,22 +85,63 @@ equivalent, simpler, single-seam realization — see #178.)
   before producing an init segment is retried once with `libx264`.
 - Child is `BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW` on Windows (never
   steal CPU from the NDI/emit threads; no console popup). NOT a heavy-slot member.
+- **ffmpeg stderr is LOGGED, never discarded (#178 round 3).** `run_child` uses
+  `Stdio::piped()` + a reader thread that logs each line at WARN with the stream
+  label, rate-limited to the first 20 lines/child + a final "N more suppressed";
+  args keep `-loglevel error`, so anything printed is a real error. Every box
+  failure in this feature was a single stderr line thrown away by the old
+  `Stdio::null()` — never re-add the null.
 - The pure parts — the arg builder, the ladder selection, the `-encoders` parse —
   are Linux unit-tested. The child/TCP/feeder/monitor lifecycle is
   `mutants::skip` glue (box-verified) but compiles cross-platform.
 
-### A/V-sync lead (`-itsoffset`, #178 Round 2)
+### Three earlier box findings — do NOT regress them (#178)
 
-The audio + video are tapped together at the ONE decode seam, but the merged #192
-emitter opens the SDK-clocked decoder with a 100 ms audio read-ahead
+1. **Sequential TCP inputs → feed video ON CONNECT.** ffmpeg (as TCP client)
+   opens its inputs sequentially: it connects input 0 (rawvideo) and
+   `find_stream_info` reads frames from it BEFORE it opens input 1 (audio). So
+   the video feeder must start the moment the video socket connects, THEN accept
+   audio — waiting for both accepts first deadlocks (ffmpeg blocks probing an
+   empty video input, the audio accept times out, no init segment).
+2. **nvenc needs Nvidia driver 570+ → libx264 pinned.** The box's bundled ffmpeg
+   `h264_nvenc` needs a newer driver than win-resolume has (`Required API 13.0,
+   Found 12.2`); it selects at probe time but fails to OPEN at encode time,
+   producing 0 stdout bytes. Fallback keys on a PER-CHILD "produced any stdout"
+   flag (the relay's init is cached across children, so it cannot be the signal)
+   and pins `libx264` process-wide once a fallback happens. The real fix is
+   updating the box driver to 570+ (owner/host call).
+3. **`-flush_packets 1`** — without it ffmpeg buffers the moof/mdat fragments on
+   the non-seekable pipe (the init flushes at header write, fragments don't).
+
+### A/V timestamps + alignment (#178 round 3) — PCM is NEVER wall-clock stamped
+
+**ONLY the video input carries `-use_wallclock_as_timestamps 1`. The raw f32le
+PCM input keeps its SAMPLE-COUNT timestamps.** This is the round-3 box root
+cause: fed the production args, the box's ffmpeg build (`N-123867`, 2026-04)
+muxes **ZERO audio packets** when the bursty PCM input is wall-clock stamped
+(every `moof` carries ONE `traf` — video only — though the `moov` declares two
+tracks). MSE's `buffered` is the INTERSECTION of the tracks, so an empty audio
+track = nothing playable, forever (`readyState 1`, empty `buffered` — the whole
+round-1/2 box symptom). Dropping the flag on the PCM input → 376 audio packets in
+8 s. So `build_ffmpeg_args` takes NO `lead_ms` and emits NO `-itsoffset` (on the
+box the audio `start_time` stayed 0.000 regardless of `-itsoffset`, so it was
+never a dependable lever). The `only_the_video_input_is_wall_clock_stamped` +
+exact-vector tests pin this — never add wall-clock stamps to the PCM input.
+
+**A/V is aligned on OUR side by a silence preroll.** The audio + video are tapped
+together at the ONE decode seam, but the merged #192 emitter opens the
+SDK-clocked decoder with a 100 ms audio read-ahead
 (`decoder_tolerance_ms(true) == 140` vs `DEFAULT_TOLERANCE_MS == 40`), so at the
 seam the `audio_frames` LEAD `video_frame` by `lead_ms` on the SDK-clocked path
-(the wall is unaffected — the emitter ring absorbs it — but the preview stamps by
-arrival wall-clock). `ensure_pipeline` computes `lead_ms = decoder_tolerance_ms(
-!genlock_pacing) − DEFAULT_TOLERANCE_MS` (100 SDK path, 0 paced path), threads it
-`register_taps → StreamTap::new → StreamShared`, and `build_ffmpeg_args` inserts
-`-itsoffset <lead_s>` BEFORE the audio `-i` when `lead_ms > 0` (delaying the audio
-input to re-sync), omitting it at 0. Both cases are exact-boundary unit-tested.
+(100 SDK / 0 paced; `lead_ms_for` / `StreamShared::lead_ms()`, threaded
+`ensure_pipeline → register_taps → StreamTap::new`). Because the video feeder
+starts on-connect BEFORE the audio input connects, the audio feeder measures how
+far the video wall-clock timeline is already ahead and PREPENDS silence to match:
+`audio_preroll_samples(connect_gap_ms, lead_ms) = (min(gap,5000)+lead_ms)*48*2`
+interleaved-stereo f32 samples (48 kHz stereo; gap capped at 5 s; exact-value
+unit-tested, no equivalent mutants). The feeders also DRAIN any stale queued
+frames/blocks on start so a previous viewer's backlog never front-runs the live
+edge; the video feeder stamps the wall-time of its first write for the gap.
 
 ### Fixed-stereo audio input (`to_stereo`, #178 Round 2)
 
@@ -120,16 +161,27 @@ fragments; a late joiner receives the cached init THEN the next fragment (every
 fragment is keyframe-aligned under `+frag_keyframe`), and a viewer that falls
 behind the broadcast backlog is dropped (never blocks the reader).
 
-## MSE shim contract (sp-ui, #178 Round 2)
+## MSE shim contract (sp-ui, #178 Round 2 + round-3 click-to-start)
 
 `preview_player.js` = a MediaSource + SourceBuffer shim,
 `video/mp4; codecs="avc1.42E01E, mp4a.40.2"`: append the init segment, then queue
-fragments; live-edge chase when `buffered.end − currentTime > 2 s`; evict > 30 s
-behind; start MUTED, one click to unmute (Chrome's autoplay gesture rule).
-Wrapped by `components/preview_video.rs`; `playlist_card.rs` shows the stream
-`<video data-testid="preview-video">` while Playing, with a fullscreen button.
-The JPEG `<img>` path is REMOVED from the card once the stream works (no dual path
-in the card).
+fragments; live-edge chase when `buffered.end − currentTime > 2 s`; snap into the
+buffered range when `currentTime < buffered.start(0)` (a live fragment can begin
+at a non-zero media time — round 3); evict > 30 s behind. `PreviewPlayer(video,
+path, startMuted)`. Wrapped by `components/preview_video.rs`.
+
+**Round 3 — CLICK-to-start (zero cost with nobody watching).** The app's own
+hidden Tauri webview is a PERMANENT viewer, so an auto-mounted preview ran an
+encoder child 24/7 whenever anything played. So `playlist_card.rs` no longer
+auto-mounts the `<video>` while Playing: a Playing card shows a `preview-start`
+control ("▶ Živý náhľad"); clicking it (a real user gesture) mounts the
+`<video data-testid="preview-video">` + player and starts it UNMUTED
+(`startMuted=false`; the shim falls back to muted and keeps the `preview-unmute`
+button if the browser still rejects the unmuted `play()`). A `preview-stop`
+control unmounts it, and leaving the Playing state resets the card's `preview_on`
+signal — both fire `on_cleanup` → `destroy()` → WS close → the encoder child
+dies. Fullscreen button kept. The JPEG `<img>` path stays REMOVED from the card
+(no dual path).
 
 ## chrome-channel E2E note (#178 Round 2)
 
@@ -140,16 +192,36 @@ under a SEPARATE browser-channel project (bundled Chromium runs everything else)
   `channel: 'chrome'` (GitHub ubuntu runners ship google-chrome; the CI
   `frontend-e2e` job also runs `npx playwright install chrome`). The mock
   (`e2e/mock-api.mjs`) serves a canned tiny fMP4 (`e2e/fixtures/preview-fixture.mp4`,
-  init + 9 keyframe fragments) over the `preview.ws` WebSocket (a `noServer`
-  upgrade router dispatches `/api/v1/ws` vs `…/preview.ws`). The spec asserts the
-  card `<video>` reaches `readyState ≥ 3`, `currentTime` advances, the unmute
-  button flips `muted`, an idle card mounts NO `<video>`, and zero console errors.
+  init + keyframe fragments, WITH an AAC track starting at pts 0.000) over the
+  `preview.ws` WebSocket (a `noServer` upgrade router dispatches `/api/v1/ws` vs
+  `…/preview.ws`). The spec CLICKS `preview-start` first (round 3), then asserts
+  the card `<video>` reaches `readyState ≥ 3`, `currentTime` advances, it ends up
+  UNMUTED (directly or via the unmute button), the stop control removes the
+  `<video>`, a Playing card mounts NO `<video>` before the click, an idle card has
+  no start control, and zero console errors.
   **A project-level `testMatch`/`testIgnore` REPLACES the global one** — the
   `chromium` project must repeat the `post-deploy*` ignore alongside `preview`.
 - **Post-deploy (`e2e/post-deploy-preview.spec.ts`, `post-deploy.config.ts` `edge`
   project)** — `channel: 'msedge'` (Edge is always present on the Windows box and
   carries the codecs; the box E2E job runs `npx playwright install msedge`). It
-  drives OBS to the SAME `sp-fast` scene the main suite already uses, selects the
-  ytfast card, and asserts the real box-encoded `<video>` reaches `readyState ≥ 3`
-  and advances — following the suite's scene-restore discipline (capture at start,
-  restore after every test AND at suite end; never a NEW scene on the wall).
+  does NOT drive OBS at all (safest for the shared live wall): it reads
+  `/api/v1/status.active_playlist_ids` to confirm a playlist is on program, then
+  on the auto-selected card CLICKS `preview-start`, asserts the real box-encoded
+  `<video>` reaches `readyState ≥ 3`, `currentTime` advances, AND
+  `webkitAudioDecodedByteCount` GROWS (the round-3 audio-track regression guard),
+  then clicks stop so no encoder child is left running.
+
+## Diagnosing a stuck preview (`readyState 1`, empty `buffered`) on the box
+
+The init (`ftyp`+`moov`) reaching the browser while NO media fragment plays is
+almost always an EMPTY track in the muxed fMP4 (MSE `buffered` is the track
+intersection). Capture + inspect OUTSIDE SongPlayer:
+- Capture the WS to a file (a tiny node/wscat client, or tee the child's stdout)
+  and `ffprobe -show_packets <file>` — count audio vs video packets. Zero of
+  either track = the empty-track bug.
+- `ffprobe -show_packets -select_streams a` for the audio packet count; per-`moof`
+  `traf` count must be **2** (one per track) — a single `traf` per `moof` while the
+  `moov` declares two tracks is the audio-less stream.
+- Reproduce with the BOX'S OWN ffmpeg binary fed the exact production args over
+  TCP — the box build can differ from dev1's (the round-3 root cause: the box
+  build muxed 0 audio packets only when the PCM input was `-use_wallclock_as_timestamps`).

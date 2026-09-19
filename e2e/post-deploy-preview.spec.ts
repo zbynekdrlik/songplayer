@@ -12,9 +12,11 @@
  * It does NOT drive OBS at all (safest for the shared live wall — no scene
  * change whatsoever): it verifies the preview for WHATEVER playlist is currently
  * on program. During the deploy the box runs its normal live wall, so a playlist
- * is playing and the dashboard auto-selects it; the card then mounts the preview
- * `<video>` on demand. If nothing is on program it fails loudly — a deployed live
- * wall is expected to be playing.
+ * is playing and the dashboard auto-selects it. Round 3: the preview is
+ * CLICK-to-start, so the test CLICKS the `preview-start` control to mount the
+ * `<video>` (opening `preview.ws` → the box's on-demand ffmpeg child), then
+ * clicks stop at the end so nothing keeps encoding. If nothing is on program it
+ * fails loudly — a deployed live wall is expected to be playing.
  */
 
 import { test, expect, request as apiRequest } from "@playwright/test";
@@ -48,7 +50,7 @@ test.describe("#178 live preview <video> post-deploy", () => {
     expect(real).toEqual([]);
   });
 
-  test("the playing card's preview <video> decodes on the box and advances", async ({
+  test("the playing card's preview <video> decodes video AND audio on the box and advances", async ({
     page,
   }) => {
     // A playlist must be on program (the live wall). No OBS is driven.
@@ -67,13 +69,15 @@ test.describe("#178 live preview <video> post-deploy", () => {
       "a playlist must be on program (the deployed live wall should be playing) for the preview <video> to exist",
     ).toBeGreaterThan(0);
 
-    // The dashboard auto-selects the playing playlist; its card mounts the live
-    // preview <video> on demand (opens preview.ws → the box's ffmpeg child).
+    // The dashboard auto-selects the playing playlist. Round 3: click its
+    // preview-start control to mount the <video> on demand (opens preview.ws →
+    // the box's ffmpeg child).
     await page.goto("/");
     await expect(page.getByTestId("playlist-workspace")).toBeVisible({
       timeout: 30_000,
     });
     const card = page.locator(".playlist-card");
+    await card.getByTestId("preview-start").click({ timeout: 20_000 });
     const video = card.getByTestId("preview-video");
     await expect(video).toBeVisible({ timeout: 20_000 });
 
@@ -92,8 +96,32 @@ test.describe("#178 live preview <video> post-deploy", () => {
       })
       .toBeGreaterThan(t0 + 0.05);
 
+    // AUDIO decodes too — the round-3 root cause was an audio-less fMP4 (PCM
+    // wall-clock stamps → zero audio packets → empty audio track → unplayable in
+    // MSE). webkitAudioDecodedByteCount must GROW, proving real audio frames.
+    const a0 = await video.evaluate(
+      (el: HTMLVideoElement) =>
+        (el as unknown as { webkitAudioDecodedByteCount: number })
+          .webkitAudioDecodedByteCount ?? 0,
+    );
+    await expect
+      .poll(
+        async () =>
+          video.evaluate(
+            (el: HTMLVideoElement) =>
+              (el as unknown as { webkitAudioDecodedByteCount: number })
+                .webkitAudioDecodedByteCount ?? 0,
+          ),
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(a0);
+
     // Real decoded geometry — the encoder outputs a fixed 640x360 canvas.
     const width = await video.evaluate((el: HTMLVideoElement) => el.videoWidth);
     expect(width).toBeGreaterThan(0);
+
+    // Stop the preview so the box's encoder child is not left running.
+    await card.getByTestId("preview-stop").click();
+    await expect(card.getByTestId("preview-video")).toHaveCount(0);
   });
 });
