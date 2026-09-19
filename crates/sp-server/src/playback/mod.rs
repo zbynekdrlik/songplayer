@@ -361,15 +361,8 @@ impl PlaybackEngine {
             // #151: register this output's burn flag (default OFF, never
             // persisted) and hand the shared Arc to the pipeline's submitter.
             let burn_on = ndi_burn_registry.register(ndi_name, genlock_pacing);
-            // #15/#178: register this playlist's JPEG + A/V-stream taps and hand
-            // the bundle to the decode loops (they offer decoded frames to it).
-            // #178 round 2 A/V-sync: the decode-seam audio LEADS video by the
-            // #192 emitter lookahead on the SDK-clocked path (emitter present =
-            // !genlock_pacing); the encoder child compensates with `-itsoffset`.
-            let emitter_present = !genlock_pacing;
-            let lead_ms =
-                (crate::playback::pipeline::audio_emitter::decoder_tolerance_ms(emitter_present)
-                    - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS) as u32;
+            // #15/#178: register the JPEG + A/V-stream taps (lead = #178 A/V-sync, pure fn).
+            let lead_ms = crate::playback::preview::preview_stream::lead_ms_for(genlock_pacing);
             let taps = preview_registry.register_taps(playlist_id, lead_ms);
             let pipeline = PlaybackPipeline::spawn(
                 ndi_name.to_string(),

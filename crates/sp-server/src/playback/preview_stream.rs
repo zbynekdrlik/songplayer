@@ -182,6 +182,19 @@ pub fn to_stereo(samples: &[f32], channels: u32) -> Option<Vec<f32>> {
     }
 }
 
+/// The decode-seam A/V-sync lead (ms) for a pipeline's clocking path (#178
+/// round 2). On the SDK-clocked path (`genlock_pacing == false`, so the #192
+/// wall-clock emitter carries the audio) the decoder opens with a 100 ms audio
+/// read-ahead, so at the decode seam the audio LEADS the video by that much;
+/// the encoder child delays its audio input by this to re-sync
+/// ([`build_ffmpeg_args`](super::preview_encoder::build_ffmpeg_args)). The paced
+/// path has no emitter and thus no lead (0).
+pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
+    let emitter_present = !genlock_pacing;
+    (crate::playback::pipeline::audio_emitter::decoder_tolerance_ms(emitter_present)
+        - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS) as u32
+}
+
 /// State shared between the decode-side taps, the WS viewers, and the encoder
 /// child. Held behind an `Arc` by [`StreamTap`].
 pub struct StreamShared {

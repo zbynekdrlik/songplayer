@@ -11,9 +11,13 @@
 //! `Effect` that reads `video_ref.get()` — an Effect is torn down with its
 //! reactive owner and never runs after disposal, so there is no
 //! `spawn_local`-loop-after-unmount hazard here.
-
-use std::cell::RefCell;
-use std::rc::Rc;
+//!
+//! `PreviewPlayer` is a `!Send` JsValue wrapper, but leptos 0.7's reactive
+//! runtime requires the values captured by `Effect`/`on_cleanup` to be `Send`.
+//! So the handle lives in a `StoredValue<_, LocalStorage>` (`new_local`): the
+//! stored value stays thread-local (single-threaded WASM), while the handle
+//! itself is `Copy + Send` and safely captured by the effect, the cleanup, and
+//! the two button handlers.
 
 use leptos::html::Video;
 use leptos::prelude::*;
@@ -39,53 +43,46 @@ extern "C" {
 #[component]
 pub fn PreviewVideo(playlist_id: i64) -> impl IntoView {
     let video_ref = NodeRef::<Video>::new();
-    // The JS player handle is `!Send` (a JsValue wrapper); an `Rc<RefCell<…>>`
-    // shared across the effect, the cleanup, and the two button handlers keeps
-    // it entirely on the single-threaded WASM runtime.
-    let player: Rc<RefCell<Option<PreviewPlayer>>> = Rc::new(RefCell::new(None));
+    // `StoredValue<_, LocalStorage>` (Copy + Send handle, thread-local value)
+    // holds the `!Send` player across the effect, the cleanup, and the handlers.
+    let player = StoredValue::new_local(None::<PreviewPlayer>);
 
     // Start the MSE player once the <video> element is actually in the DOM.
     // The effect re-runs when `video_ref` becomes populated; the `is_some`
     // guard makes starting idempotent.
-    {
-        let player = player.clone();
-        Effect::new(move |_| {
-            if player.borrow().is_some() {
-                return;
-            }
-            if let Some(el) = video_ref.get() {
-                let path = format!("/api/v1/playback/{playlist_id}/preview.ws");
-                *player.borrow_mut() = Some(PreviewPlayer::new(&el, path));
-            }
-        });
-    }
+    Effect::new(move |_| {
+        if player.with_value(|p| p.is_some()) {
+            return;
+        }
+        if let Some(el) = video_ref.get() {
+            let path = format!("/api/v1/playback/{playlist_id}/preview.ws");
+            player.set_value(Some(PreviewPlayer::new(&el, path)));
+        }
+    });
 
     // Unmount / navigation: tear the player down (closes the WS → the encoder
     // child dies after its TTL).
-    {
-        let player = player.clone();
-        on_cleanup(move || {
-            if let Some(p) = player.borrow_mut().take() {
-                p.destroy();
+    on_cleanup(move || {
+        player.update_value(|p| {
+            if let Some(pl) = p.take() {
+                pl.destroy();
             }
         });
-    }
+    });
 
-    let on_unmute = {
-        let player = player.clone();
-        move |_| {
-            if let Some(p) = player.borrow().as_ref() {
-                p.unmute();
+    let on_unmute = move |_| {
+        player.with_value(|p| {
+            if let Some(pl) = p {
+                pl.unmute();
             }
-        }
+        });
     };
-    let on_fullscreen = {
-        let player = player.clone();
-        move |_| {
-            if let Some(p) = player.borrow().as_ref() {
-                p.fullscreen();
+    let on_fullscreen = move |_| {
+        player.with_value(|p| {
+            if let Some(pl) = p {
+                pl.fullscreen();
             }
-        }
+        });
     };
 
     view! {

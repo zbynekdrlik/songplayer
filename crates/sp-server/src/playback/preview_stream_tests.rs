@@ -247,6 +247,30 @@ fn shared_label_is_the_name_the_tap_was_built_with() {
 }
 
 #[test]
+fn shared_reports_its_configured_lead_ms() {
+    // The getter must return the constructed lead verbatim — the encoder child
+    // reads it to place `-itsoffset`. Exact values kill a "return 0"/"return 1"
+    // mutant on the getter.
+    assert_eq!(StreamTap::new("t".into(), 100).shared().lead_ms(), 100);
+    assert_eq!(StreamTap::new("t".into(), 0).shared().lead_ms(), 0);
+}
+
+#[test]
+fn lead_ms_for_sdk_path_is_the_100ms_emitter_lookahead() {
+    // genlock_pacing == false → the #192 wall-clock emitter is present → the
+    // decoder opens with a 100 ms audio read-ahead → lead 140 − 40 = 100.
+    // Exact 100 kills the `!` delete, the `- → +` (180), and the `- → /` (3)
+    // mutants on the pure formula.
+    assert_eq!(lead_ms_for(false), 100);
+}
+
+#[test]
+fn lead_ms_for_paced_path_has_no_lead() {
+    // genlock_pacing == true → no emitter, plain 40 ms pairing → lead 0.
+    assert_eq!(lead_ms_for(true), 0);
+}
+
+#[test]
 fn a_viewer_guard_dropped_at_zero_viewers_stays_at_zero() {
     let tap = StreamTap::new("t".into(), 0);
     let guard = ViewerGuard::subscribe(&tap).0;
