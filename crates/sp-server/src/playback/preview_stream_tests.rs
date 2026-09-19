@@ -151,8 +151,8 @@ fn letterbox_4by3_paints_black_side_bars_and_grey_centre() {
 #[test]
 fn letterbox_rejects_short_source_leaving_black_canvas() {
     let mut dst = vec![7u8; OUT_NV12_LEN]; // pre-dirty
-    // Declares 1920x1080 but supplies far too few bytes → canvas painted black,
-    // no image blitted.
+                                           // Declares 1920x1080 but supplies far too few bytes → canvas painted black,
+                                           // no image blitted.
     letterbox_nv12_into(1920, 1080, 1920, &[0u8; 100], &mut dst);
     let y_plane = (OUT_W * OUT_H) as usize;
     assert!(dst[..y_plane].iter().all(|&b| b == BLACK_Y));
@@ -377,4 +377,34 @@ fn audio_preroll_samples_caps_the_connect_gap_at_5s() {
     assert_eq!(audio_preroll_samples(9_000, 100), 489_600);
     // The lead is NOT capped — only the connect gap is.
     assert_eq!(audio_preroll_samples(9_000, 0), 480_000);
+}
+
+// ── #178 item 15: preview audio-continuity gap fill ──────────────────────────
+
+#[test]
+fn gap_fill_is_zero_at_or_below_150ms_and_fills_above() {
+    // In sync (0 frames, 0 ms wall) → no gap.
+    assert_eq!(gap_fill_samples(0, 0), 0);
+    // Exactly 150 ms behind → still at the threshold, no fill.
+    assert_eq!(gap_fill_samples(150, 0), 0);
+    // 151 ms behind → fills 151 ms of interleaved-stereo silence (151*48*2).
+    assert_eq!(gap_fill_samples(151, 0), 151 * 48 * 2);
+    // Audio has kept up with the wall clock → no gap.
+    // 48_000 frames written = 1000 ms; wall 1000 ms → gap 0.
+    assert_eq!(gap_fill_samples(1000, 48_000), 0);
+    // A small drift under the threshold does not fill: 48_000 frames = 1000 ms,
+    // wall 1100 ms → 100 ms gap ≤ 150.
+    assert_eq!(gap_fill_samples(1100, 48_000), 0);
+    // Just over: wall 1151 ms → 151 ms gap → fill.
+    assert_eq!(gap_fill_samples(1151, 48_000), 151 * 48 * 2);
+}
+
+#[test]
+fn gap_fill_is_capped_at_10s_per_gap() {
+    // Exactly 10 s gap fills 10 s.
+    assert_eq!(gap_fill_samples(10_000, 0), 10_000 * 48 * 2);
+    // 10 s + 1 ms is capped to 10 s.
+    assert_eq!(gap_fill_samples(10_001, 0), 10_000 * 48 * 2);
+    // A 30 s gap still only fills 10 s.
+    assert_eq!(gap_fill_samples(30_000, 0), 10_000 * 48 * 2);
 }

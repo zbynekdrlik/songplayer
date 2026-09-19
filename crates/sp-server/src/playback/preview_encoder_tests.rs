@@ -160,3 +160,28 @@ fn only_the_video_input_is_wall_clock_stamped() {
     assert_eq!(stamps.len(), 1, "exactly one wall-clock-stamped input");
     assert!(stamps[0] < video_i, "and it is the video input");
 }
+
+// ── #178 item 12: encoder restart budget ─────────────────────────────────────
+
+#[test]
+fn restart_budget_allows_three_per_rolling_minute_then_denies() {
+    let mut b = RestartBudget::default();
+    assert!(b.allow(0), "1st restart allowed");
+    assert!(b.allow(1_000), "2nd allowed");
+    assert!(b.allow(2_000), "3rd allowed");
+    assert!(!b.allow(3_000), "4th within the minute is denied");
+}
+
+#[test]
+fn restart_budget_evicts_after_the_window_exactly() {
+    let mut b = RestartBudget::default();
+    assert!(b.allow(0));
+    assert!(b.allow(100));
+    assert!(b.allow(200));
+    // 59_999 ms after the first: still within the 60 s window (all 3 count) → denied.
+    assert!(!b.allow(59_999));
+    // Exactly 60_000 ms after the first: the first is evicted (>= window) → allowed.
+    assert!(b.allow(60_000));
+    // Now [100, 200, 60_000] are in-window → the next is denied.
+    assert!(!b.allow(60_050));
+}
