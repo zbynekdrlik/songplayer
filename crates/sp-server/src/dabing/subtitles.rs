@@ -121,17 +121,10 @@ pub fn transcripts_to_track(t: &DubTranscripts) -> LyricsTrack {
             let local_end = chunk.sk_timed[hi].t_ms.max(local_start);
 
             // Video time via the placement the mix applied.
-            let mut start_ms = at_ms + (local_start as f64 / tempo).round() as u64;
-            let mut end_ms = at_ms + (local_end as f64 / tempo).round() as u64;
-
             // Monotonic: never start before the previous line ended, and hold each
             // line on screen for at least MIN_LINE_MS.
-            if start_ms < prev_end_ms {
-                start_ms = prev_end_ms;
-            }
-            if end_ms < start_ms + MIN_LINE_MS {
-                end_ms = start_ms + MIN_LINE_MS;
-            }
+            let start_ms = to_video_ms(at_ms, local_start, tempo).max(prev_end_ms);
+            let end_ms = to_video_ms(at_ms, local_end, tempo).max(start_ms + MIN_LINE_MS);
             prev_end_ms = end_ms;
 
             // SK line text = the line's fragments joined.
@@ -173,6 +166,12 @@ pub fn transcripts_to_track(t: &DubTranscripts) -> LyricsTrack {
         language_translation: "sk".to_string(),
         lines,
     }
+}
+
+/// Chunk-local output position → video-timeline ms through the placement the mix
+/// applied (`at_ms + local_ms / tempo`). ONE mapping for a line's start and end.
+fn to_video_ms(at_ms: u64, local_ms: u64, tempo: f64) -> u64 {
+    at_ms + (local_ms as f64 / tempo).round() as u64
 }
 
 /// Group consecutive SK fragments into lines. Closes a line after fragment `i`

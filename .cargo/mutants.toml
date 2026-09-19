@@ -47,6 +47,15 @@ exclude_re = [
   #   so it IS integration-tested), dabing's proceed decision sits AFTER the
   #   python gate, so process_next itself is integration-only. (#183 round 2)
   'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::process_next',
+  # dabing/worker.rs::synthesize: called ONLY from process_next (excluded above)
+  #   and is itself the shell-out — ffmpeg silencedetect + the Gemini
+  #   Live-Translate python child (tokio::process) + the produced-file checks. No
+  #   Linux unit test can reach it, so its whole-fn mutant
+  #   (`-> Ok(Default::default())`) is structurally MISSED. Everything it DECIDES
+  #   is pure + mutation-covered: chunk_plan::{parse_silencedetect, plan_chunks,
+  #   placement_for}, child::live_translate_args + the summary JSON, and the D3 subtitle
+  #   path subtitles::transcripts_to_track + subtitles_store (#182).
+  'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::synthesize',
   # sp-server/src/resolume/ is NOT excluded — handlers/driver have wiremock tests.
   # sp-server/src/playback/mod.rs is NOT excluded — title timer logic is unit-tested.
   # sp-ndi/, sp-decoder/reader.rs, sp-server/src/playback/pipeline.rs are NOT

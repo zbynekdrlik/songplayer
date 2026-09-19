@@ -129,6 +129,28 @@ fn line_closes_on_a_gap_over_1500ms() {
     assert_eq!(t.lines[1].sk.as_deref(), Some("slovo cslovo d"));
 }
 
+#[test]
+fn a_gap_of_exactly_1500ms_keeps_the_line_open() {
+    // Boundary: the pause rule is STRICTLY greater than LINE_GAP_MS, so a
+    // 1500 ms gap stays on the line and 1501 ms closes it.
+    let at_limit = build(vec![chunk(
+        0,
+        Some(0),
+        Some(1.0),
+        "",
+        vec![frag(500, "a"), frag(2000, " b")],
+    )]);
+    assert_eq!(at_limit.lines.len(), 1);
+    let over = build(vec![chunk(
+        0,
+        Some(0),
+        Some(1.0),
+        "",
+        vec![frag(500, "a"), frag(2001, " b")],
+    )]);
+    assert_eq!(over.lines.len(), 2);
+}
+
 // ── Timing: tempo mapping ────────────────────────────────────────────────────
 
 #[test]
@@ -145,6 +167,27 @@ fn video_time_is_at_ms_plus_local_over_tempo() {
     assert_eq!(t.lines.len(), 1);
     assert_eq!(t.lines[0].start_ms, 100_000); // local_start 0 / 2 + at
     assert_eq!(t.lines[0].end_ms, 101_000); // local_end 2000 / 2 + at
+}
+
+#[test]
+fn a_later_line_starts_where_the_previous_fragment_ended() {
+    // Line 2 spans fragments 1..=2, so its window opens at t[0] (the fragment
+    // BEFORE its first one), not at its own first fragment's arrival.
+    let t = build(vec![chunk(
+        0,
+        Some(10_000),
+        Some(1.0),
+        "",
+        vec![
+            frag(1000, "Prvá."),
+            frag(1800, " druhá"),
+            frag(2600, " veta."),
+        ],
+    )]);
+    assert_eq!(t.lines.len(), 2);
+    assert_eq!(t.lines[0].end_ms, 11_000);
+    assert_eq!(t.lines[1].start_ms, 11_000);
+    assert_eq!(t.lines[1].end_ms, 12_600);
 }
 
 // ── Timing: clamping ─────────────────────────────────────────────────────────
@@ -218,6 +261,23 @@ fn en_reference_is_sliced_by_the_same_char_fraction_as_the_sk() {
     assert_eq!(t.lines.len(), 2);
     assert_eq!(t.lines[0].en, "Hello world");
     assert_eq!(t.lines[1].en, "how are you");
+}
+
+#[test]
+fn en_word_starting_exactly_on_the_line_boundary_goes_to_the_next_line() {
+    // SK splits 3 | 3 chars → boundary fraction 0.5; EN "xx yy" → "yy" starts at
+    // exactly 2/4 = 0.5. The slice is half-open `[a, b)`, so "yy" belongs to
+    // line 2 only — never duplicated into line 1.
+    let t = build(vec![chunk(
+        0,
+        Some(0),
+        Some(1.0),
+        "xx yy",
+        vec![frag(1000, "ab."), frag(2000, "cd.")],
+    )]);
+    assert_eq!(t.lines.len(), 2);
+    assert_eq!(t.lines[0].en, "xx");
+    assert_eq!(t.lines[1].en, "yy");
 }
 
 #[test]
