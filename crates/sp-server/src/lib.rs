@@ -635,6 +635,11 @@ pub async fn start(
     }
 
     let mut obs_cmd_tx: Option<tokio::sync::mpsc::Sender<obs::ObsCommand>> = None;
+    // #196: the OBS-input → playlist-id map, shared with the engine below so
+    // `handle_health_snapshot` can tell whether an OBS input advertises an
+    // output (item 5). `None` when OBS is not configured (never suppresses the
+    // dark-wall ladder in that case).
+    let mut ndi_sources_for_engine: Option<obs::NdiSourceMap> = None;
     let obs_url = db::models::get_setting(&pool, "obs_websocket_url")
         .await?
         .unwrap_or_default();
@@ -651,6 +656,7 @@ pub async fn start(
             },
         };
         let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
+        ndi_sources_for_engine = Some(ndi_sources.clone());
         let obs_client = obs::ObsClient::spawn(
             obs_config,
             pool.clone(),
@@ -733,16 +739,22 @@ pub async fn start(
     // #15 part 2: share the preview registry BEFORE pipelines spawn (each
     // pipeline registers a preview tap into it at spawn).
     engine.set_preview_registry(preview_registry.clone());
+    // #196: share the OBS-input → playlist-id map so the health handler can
+    // tell whether an OBS input advertises an output (skip the ladder + set a
+    // distinct reason when none does). Only when OBS is configured.
+    if let Some(map) = ndi_sources_for_engine {
+        engine.set_ndi_source_map(map);
+    }
 
-    // Pre-create pipelines for all active playlists so NDI sources appear immediately.
+    // #196: pre-create pipelines (= NDI senders) for all active playlists
+    // deterministically in playlist.id order, after waiting for the previous
+    // instance's ports to be released, so a restart yields the SAME name→port
+    // map (the dark-wall-after-restart fix). Runs before the engine command
+    // loop drains scene events, so no lazy scene-triggered creation preempts it.
     let active_playlists = db::models::get_active_playlists(&pool)
         .await
         .unwrap_or_default();
-    for pl in &active_playlists {
-        if !pl.ndi_output_name.is_empty() {
-            engine.ensure_pipeline(pl.id, &pl.ndi_output_name);
-        }
-    }
+    engine.create_startup_senders(&active_playlists).await;
     info!(
         count = active_playlists.len(),
         "playback pipelines created for active playlists"

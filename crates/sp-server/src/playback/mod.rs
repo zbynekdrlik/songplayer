@@ -220,6 +220,13 @@ pub struct PlaybackEngine {
     /// from it at spawn. Defaults to an empty registry until
     /// `set_preview_registry` shares the one `lib.rs::start` owns.
     preview_registry: std::sync::Arc<crate::playback::preview::PreviewRegistry>,
+    /// #196: the OBS-input → playlist-id map the OBS client rebuilds (shared
+    /// `Arc`, `lib.rs::start`). Read by `handle_health_snapshot` to tell whether
+    /// ANY OBS NDI input advertises an output's stream — a dark output with no
+    /// input gets the "no OBS scene for this output" reason and no recovery
+    /// ladder (item 5). `None` when OBS is not configured (never suppresses the
+    /// ladder in that case).
+    ndi_source_map: Option<crate::obs::NdiSourceMap>,
 }
 
 /// Construction-time configuration for [`PlaybackEngine`]. Bundling these
@@ -294,6 +301,28 @@ impl PlaybackEngine {
                 crate::playback::ndi_burn::NdiBurnRegistry::new(),
             ),
             preview_registry: std::sync::Arc::new(crate::playback::preview::PreviewRegistry::new()),
+            ndi_source_map: None,
+        }
+    }
+
+    /// #196: share the OBS-input → playlist-id map so `handle_health_snapshot`
+    /// can tell whether an OBS input advertises an output's stream. Called from
+    /// `lib.rs::start` with the same `Arc` the OBS client rebuilds.
+    pub fn set_ndi_source_map(&mut self, map: crate::obs::NdiSourceMap) {
+        self.ndi_source_map = Some(map);
+    }
+
+    /// #196: does ANY OBS NDI input currently advertise `playlist_id`'s output?
+    /// `true` when OBS is not configured (map absent) so the dark-wall ladder is
+    /// never suppressed without evidence. A poisoned lock also reads as `true`
+    /// (safe direction — keep the existing ladder behaviour).
+    pub(crate) fn output_has_obs_input(&self, playlist_id: i64) -> bool {
+        match &self.ndi_source_map {
+            None => true,
+            Some(map) => match map.read() {
+                Ok(m) => m.values().any(|&pid| pid == playlist_id),
+                Err(_) => true,
+            },
         }
     }
 
@@ -339,6 +368,23 @@ impl PlaybackEngine {
 
     /// Ensure a pipeline exists for the given playlist, creating one if needed.
     pub fn ensure_pipeline(&mut self, playlist_id: i64, ndi_name: &str) {
+        self.ensure_pipeline_inner(playlist_id, ndi_name, None);
+    }
+
+    /// #196: like [`ensure_pipeline`], but with an optional one-shot the newly
+    /// spawned pipeline thread fires (carrying the sender's advertised URL) the
+    /// moment its NDI sender is created. `create_startup_senders` passes
+    /// `Some(tx)` and awaits it before creating the next output, which
+    /// serializes `send_create` in `playlist.id` order for a stable name→port
+    /// map. The lazy/runtime path passes `None`. If the pipeline already exists
+    /// (closure not run), the sender is dropped and the receiver sees a closed
+    /// channel — the caller treats that as "already ready".
+    pub(crate) fn ensure_pipeline_inner(
+        &mut self,
+        playlist_id: i64,
+        ndi_name: &str,
+        ready_tx: Option<tokio::sync::oneshot::Sender<Option<String>>>,
+    ) {
         let event_tx = self.event_tx.clone();
 
         #[cfg(windows)]
@@ -373,6 +419,7 @@ impl PlaybackEngine {
                 genlock_pacing,
                 burn_on,
                 taps,
+                ready_tx,
             );
             PlaylistPipeline {
                 pipeline,

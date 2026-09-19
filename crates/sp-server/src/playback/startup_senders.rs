@@ -15,7 +15,20 @@
 //! creation order) — unit-tested on Linux with no NDI runtime — and, in
 //! `impl PlaybackEngine`, the orchestration that drives them on the box.
 
+use std::time::Duration;
+
 use sp_core::models::Playlist;
+use tracing::{info, warn};
+
+use super::PlaybackEngine;
+
+/// Poll cadence for the startup port-availability wait.
+const PORT_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// Max polls (≤ 10 s at 250 ms) before startup proceeds regardless (#196).
+const PORT_WAIT_MAX_POLLS: u32 = 40;
+/// How long to wait for one pipeline to report its sender ready before moving
+/// on to the next (bounded so a stuck sender never wedges startup).
+const SENDER_READY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The first TCP port the NDI runtime assigns to a sender on this box. NDI
 /// hands out ports sequentially from here in sender-creation order, which is
@@ -27,9 +40,8 @@ pub const NDI_PORT_BASE: u16 = 5960;
 /// so an immediate restart waits until the previous instance released the
 /// whole span it could have used.
 pub fn ndi_port_range(n_outputs: usize) -> Vec<u16> {
-    // RED stub (#196) — real impl lands in the GREEN commit.
-    let _ = n_outputs;
-    Vec::new()
+    let last = NDI_PORT_BASE + n_outputs as u16 + 1;
+    (NDI_PORT_BASE..=last).collect()
 }
 
 /// The active playlists to pre-create senders for, in DETERMINISTIC creation
@@ -37,9 +49,13 @@ pub fn ndi_port_range(n_outputs: usize) -> Vec<u16> {
 /// output name. `get_active_playlists` already orders by id, but sorting here
 /// makes the guarantee independent of the query and unit-testable.
 pub fn ordered_active_for_startup(playlists: &[Playlist]) -> Vec<(i64, String)> {
-    // RED stub (#196) — real impl lands in the GREEN commit.
-    let _ = playlists;
-    Vec::new()
+    let mut out: Vec<(i64, String)> = playlists
+        .iter()
+        .filter(|p| !p.ndi_output_name.is_empty())
+        .map(|p| (p.id, p.ndi_output_name.clone()))
+        .collect();
+    out.sort_by_key(|(id, _)| *id);
+    out
 }
 
 /// Outcome of [`wait_for_ports_free`], surfaced in the startup log.
@@ -69,9 +85,124 @@ where
     P: FnMut(&[u16]) -> bool,
     S: FnMut(),
 {
-    // RED stub (#196) — real impl lands in the GREEN commit.
-    let _ = (&mut prober, ports, max_polls, &mut sleep);
-    PortWaitOutcome::TimedOut(0)
+    if prober(ports) {
+        return PortWaitOutcome::FreeImmediately;
+    }
+    for attempt in 1..=max_polls {
+        sleep();
+        if prober(ports) {
+            return PortWaitOutcome::FreeAfter(attempt);
+        }
+    }
+    PortWaitOutcome::TimedOut(max_polls)
+}
+
+/// Real port prober: a port is "free" iff a TCP listener can bind it on all
+/// interfaces. Used before creating senders so an immediate restart waits for
+/// the previous instance's NDI listeners to be released (#196). Binds and
+/// immediately drops each listener.
+///
+/// mutants::skip — I/O over the real network stack; not exercised on the
+/// mutation runner. The pure wait loop it feeds (`wait_for_ports_free`) is
+/// unit-tested with a fake prober.
+#[cfg_attr(test, mutants::skip)]
+pub fn ndi_ports_free(ports: &[u16]) -> bool {
+    ports
+        .iter()
+        .all(|&p| std::net::TcpListener::bind(("0.0.0.0", p)).is_ok())
+}
+
+impl PlaybackEngine {
+    /// #196: create the NDI senders for all active playlists in DETERMINISTIC
+    /// `playlist.id` order at startup, so the NDI runtime hands out the SAME
+    /// name→port map on every restart (the fix for the dark-wall-after-restart
+    /// incident). First waits for the previous instance's ports to be released
+    /// (so an immediate restart gets the same assignment), then creates each
+    /// sender one at a time, waiting for it to report ready before the next —
+    /// serializing the `send_create` calls that otherwise raced across pipeline
+    /// threads and shuffled the ports.
+    ///
+    /// mutants::skip — orchestration (real ports, threads, timeouts); the pure
+    /// pieces (`ndi_port_range`, `ordered_active_for_startup`,
+    /// `wait_for_ports_free`) are unit-tested, and the box acceptance proves
+    /// the stable map end-to-end.
+    #[cfg_attr(test, mutants::skip)]
+    pub async fn create_startup_senders(&mut self, playlists: &[Playlist]) {
+        let ordered = ordered_active_for_startup(playlists);
+        if ordered.is_empty() {
+            info!("ndi: no active playlists with an NDI output name — no startup senders");
+            return;
+        }
+
+        // Port-availability wait — before creating the first sender. Runs on a
+        // blocking thread so the ≤ 10 s poll (with real `thread::sleep`) never
+        // stalls the async executor during startup.
+        let ports = ndi_port_range(ordered.len());
+        let outcome = {
+            let ports = ports.clone();
+            tokio::task::spawn_blocking(move || {
+                wait_for_ports_free(ndi_ports_free, &ports, PORT_WAIT_MAX_POLLS, || {
+                    std::thread::sleep(PORT_WAIT_POLL_INTERVAL)
+                })
+            })
+            .await
+            .unwrap_or(PortWaitOutcome::TimedOut(PORT_WAIT_MAX_POLLS))
+        };
+        match outcome {
+            PortWaitOutcome::FreeImmediately => {
+                info!(?ports, "ndi: startup NDI ports free — creating senders")
+            }
+            PortWaitOutcome::FreeAfter(polls) => info!(
+                ?ports,
+                polls, "ndi: startup NDI ports freed after waiting for the previous instance"
+            ),
+            PortWaitOutcome::TimedOut(polls) => warn!(
+                ?ports,
+                polls,
+                "ndi: startup NDI ports still busy after wait — proceeding (name→port map may shift this restart)"
+            ),
+        }
+
+        // Serialized, id-ordered creation: create sender i, wait for it to
+        // report ready (so its port is assigned + recorded) before creating
+        // sender i+1.
+        for (id, name) in ordered {
+            self.create_and_record_sender(id, &name).await;
+        }
+    }
+
+    /// #196: create one output's pipeline (idempotent) and, once its NDI sender
+    /// reports ready, record the advertised URL in the health registry so it
+    /// shows on `/api/v1/ndi/health`. Bounded wait — a stuck/absent sender never
+    /// blocks past [`SENDER_READY_TIMEOUT`]. Used by the startup serializer (in
+    /// id order) and by the runtime activate path. Returns the URL (if any).
+    ///
+    /// mutants::skip — I/O orchestration (oneshot + timeout + registry write);
+    /// the pure ordering/port pieces are unit-tested and the box acceptance
+    /// proves the recorded map end-to-end.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn create_and_record_sender(&mut self, id: i64, name: &str) -> Option<String> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.ensure_pipeline_inner(id, name, Some(tx));
+        let url = match tokio::time::timeout(SENDER_READY_TIMEOUT, rx).await {
+            Ok(Ok(u)) => u,
+            Ok(Err(_)) => {
+                // Pipeline already existed (closure not run) → URL already
+                // recorded on an earlier create; keep it.
+                return self.ndi_health_registry.sender_url(id);
+            }
+            Err(_) => {
+                warn!(
+                    playlist_id = id,
+                    ndi_name = %name,
+                    "ndi: sender did not report ready within timeout — continuing"
+                );
+                None
+            }
+        };
+        self.ndi_health_registry.set_sender_url(id, url.clone());
+        url
+    }
 }
 
 #[cfg(test)]

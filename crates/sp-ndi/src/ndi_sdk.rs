@@ -9,8 +9,8 @@ use tracing::{debug, error, info};
 use crate::error::NdiError;
 use crate::network_ready;
 use crate::types::{
-    NDIlib_audio_frame_v3_t, NDIlib_send_create_t, NDIlib_send_instance_t, NDIlib_tally_t,
-    NDIlib_video_frame_v2_t,
+    NDIlib_audio_frame_v3_t, NDIlib_send_create_t, NDIlib_send_instance_t, NDIlib_source_t,
+    NDIlib_tally_t, NDIlib_video_frame_v2_t,
 };
 
 // ---------------------------------------------------------------------------
@@ -31,6 +31,8 @@ type FnSendAudioV3 =
 type FnSendGetTally =
     unsafe extern "C" fn(*mut NDIlib_send_instance_t, *mut NDIlib_tally_t, u32) -> bool;
 type FnSendGetNoConnections = unsafe extern "C" fn(*mut NDIlib_send_instance_t, u32) -> i32;
+type FnSendGetSourceName =
+    unsafe extern "C" fn(*mut NDIlib_send_instance_t) -> *const NDIlib_source_t;
 
 // ---------------------------------------------------------------------------
 // NdiLib — owns the library handle and resolved function pointers
@@ -53,6 +55,7 @@ pub struct NdiLib {
     pub(crate) send_send_audio_v3: FnSendAudioV3,
     pub(crate) send_get_tally: FnSendGetTally,
     pub(crate) send_get_no_connections: FnSendGetNoConnections,
+    pub(crate) send_get_source_name: FnSendGetSourceName,
 }
 
 // SAFETY: The function pointers are loaded from a shared library and are
@@ -95,6 +98,8 @@ impl NdiLib {
                 &library,
                 b"NDIlib_send_get_no_connections\0",
             )?;
+            let send_get_source_name =
+                Self::resolve::<FnSendGetSourceName>(&library, b"NDIlib_send_get_source_name\0")?;
 
             // Gate NDIlib_initialize() on adapter readiness — the runtime
             // binds its mDNS announce socket once at init and never re-evaluates.
@@ -122,6 +127,7 @@ impl NdiLib {
                 send_send_audio_v3,
                 send_get_tally,
                 send_get_no_connections,
+                send_get_source_name,
             })
         }
     }

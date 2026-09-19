@@ -25,6 +25,7 @@ fn spawn_stores_ndi_name_for_accessor() {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
+        None, // #196: no startup-ready signal for this fixture
     );
     assert_eq!(
         pp.ndi_name(),

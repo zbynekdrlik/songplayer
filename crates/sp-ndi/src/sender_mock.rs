@@ -29,6 +29,11 @@ pub struct MockNdiBackend {
     video_timecodes: StdMutex<Vec<i64>>,
     /// Resolved audio timecodes, same convention as `video_timecodes`.
     audio_timecodes: StdMutex<Vec<i64>>,
+    /// Overrides what `send_get_source_url` returns (#196). `None` (default)
+    /// makes the getter return a deterministic synthetic `127.0.0.1:59<hh>`
+    /// derived from the handle; a set value is returned verbatim so tests can
+    /// assert a specific advertised URL flows through to the health snapshot.
+    source_url: StdMutex<Option<String>>,
 }
 
 impl MockNdiBackend {
@@ -63,6 +68,13 @@ impl MockNdiBackend {
     /// real NDI runtime.
     pub fn set_connection_count(&self, n: i32) {
         self.connection_count.store(n, Ordering::SeqCst);
+    }
+
+    /// Override what `send_get_source_url` returns (#196). Pass `Some(url)` to
+    /// assert a specific advertised `host:port` flows through the health path;
+    /// leaving it unset yields a deterministic synthetic address.
+    pub fn set_source_url(&self, url: Option<String>) {
+        *self.source_url.lock().unwrap() = url;
     }
 }
 
@@ -165,5 +177,18 @@ impl NdiBackend for MockNdiBackend {
             .unwrap()
             .push(format!("send_get_no_connections({handle},{timeout_ms})"));
         self.connection_count.load(Ordering::SeqCst)
+    }
+
+    fn send_get_source_url(&self, handle: usize) -> Option<String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("send_get_source_url({handle})"));
+        match &*self.source_url.lock().unwrap() {
+            Some(u) => Some(u.clone()),
+            // Deterministic synthetic address (handle 42 → 127.0.0.1:5942) so a
+            // Linux test can assert the URL threads through to the snapshot.
+            None => Some(format!("127.0.0.1:59{:02}", handle % 100)),
+        }
     }
 }

@@ -143,6 +143,7 @@ fn cancel_title_timers_aborts_pending_handles() {
                         0,
                     ),
                 },
+                None,
             ),
             state: PlayState::Idle,
             mode: PlaybackMode::default(),

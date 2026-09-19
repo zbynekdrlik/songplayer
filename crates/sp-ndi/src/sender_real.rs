@@ -276,4 +276,27 @@ impl NdiBackend for RealNdiBackend {
         };
         unsafe { (self.lib.send_get_no_connections)(state.ptr, timeout_ms) }
     }
+
+    // mutants::skip — dereferences NDI SDK function pointer; only exercised on
+    // the real Windows runtime. The `host:port` parsing it delegates to
+    // (`crate::source_url::parse_source_url`) is unit-tested on Linux.
+    #[cfg_attr(test, mutants::skip)]
+    fn send_get_source_url(&self, handle: usize) -> Option<String> {
+        let handles = self.handles.lock().unwrap();
+        let state = handles.get(&handle)?;
+        // SAFETY: `send_get_source_name` returns a pointer to a source
+        // descriptor owned by the SDK, valid until the next NDI call on this
+        // sender. We copy the URL string out immediately, before releasing the
+        // handles lock, and never retain the pointer.
+        let src_ptr = unsafe { (self.lib.send_get_source_name)(state.ptr) };
+        if src_ptr.is_null() {
+            return None;
+        }
+        let url_ptr = unsafe { (*src_ptr).p_url_address };
+        if url_ptr.is_null() {
+            return None;
+        }
+        let raw = unsafe { std::ffi::CStr::from_ptr(url_ptr) }.to_string_lossy();
+        crate::source_url::parse_source_url(&raw)
+    }
 }

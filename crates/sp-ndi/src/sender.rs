@@ -148,6 +148,14 @@ pub trait NdiBackend: Send + Sync {
     /// count immediately. With `> 0` the call blocks until the count changes
     /// or the timeout expires.
     fn send_get_no_connections(&self, handle: usize, timeout_ms: u32) -> i32;
+
+    /// Return the sender's advertised source URL as a canonical `host:port`
+    /// string (#196), or `None` if the SDK has not assigned one yet. The real
+    /// backend reads `NDIlib_send_get_source_name`'s `p_url_address` (the
+    /// address a DistroAV receiver reconnects to); the mock returns a
+    /// synthetic address. Used to surface the name→port map on
+    /// `/api/v1/ndi/health` so a restart's port shuffle is visible.
+    fn send_get_source_url(&self, handle: usize) -> Option<String>;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +286,14 @@ impl<B: NdiBackend> NdiSender<B> {
     /// Return the internal handle ID (useful for tests).
     pub fn handle(&self) -> usize {
         self.handle
+    }
+
+    /// The advertised source URL (`host:port`) the NDI runtime assigned to
+    /// this sender (#196), or `None` if not yet available. Surfaced on
+    /// `/api/v1/ndi/health` as `sender_url` so a restart's port shuffle —
+    /// the root cause of the dark-wall-after-restart incident — is visible.
+    pub fn source_url(&self) -> Option<String> {
+        self.backend.send_get_source_url(self.handle)
     }
 
     /// A cheap, cloneable audio-only send handle over this sender's backend +
@@ -607,6 +623,22 @@ mod tests {
             calls.iter().any(|c| c == "send_get_no_connections(42,50)"),
             "expected send_get_no_connections(handle=42, timeout=50) recorded: {calls:#?}"
         );
+    }
+
+    #[test]
+    fn source_url_returns_mock_synthetic_by_default() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "U", true, false).unwrap();
+        // Mock handle is 42 → synthetic 127.0.0.1:5942.
+        assert_eq!(sender.source_url().as_deref(), Some("127.0.0.1:5942"));
+    }
+
+    #[test]
+    fn source_url_honours_set_source_url_override() {
+        let backend = Arc::new(MockNdiBackend::new());
+        backend.set_source_url(Some("10.77.9.201:5963".to_string()));
+        let sender = NdiSender::new_with_clocking(backend.clone(), "U2", true, false).unwrap();
+        assert_eq!(sender.source_url().as_deref(), Some("10.77.9.201:5963"));
     }
 
     #[test]

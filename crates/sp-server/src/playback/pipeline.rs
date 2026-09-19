@@ -123,6 +123,7 @@ impl PlaybackPipeline {
     // Windows variant not exercised on Linux runner. Verified by spawn_stores_ndi_name_for_accessor.
     #[cfg(windows)]
     #[cfg_attr(test, mutants::skip)]
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         ndi_name: String,
         ndi_backend: Option<SharedNdiBackend>,
@@ -131,6 +132,10 @@ impl PlaybackPipeline {
         genlock_pacing: bool,
         burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
         taps: crate::playback::preview::preview_stream::DecodeTaps,
+        // #196: fired with the sender's advertised URL the moment the NDI sender
+        // is created, so `create_startup_senders` can serialize creation in id
+        // order for a stable name→port map.
+        ready_tx: Option<tokio::sync::oneshot::Sender<Option<String>>>,
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
@@ -147,6 +152,7 @@ impl PlaybackPipeline {
                     genlock_pacing,
                     burn_on,
                     taps,
+                    ready_tx,
                 );
             })
             .expect("failed to spawn pipeline thread");
@@ -163,6 +169,7 @@ impl PlaybackPipeline {
     // Correctness verified by spawn_stores_ndi_name_for_accessor.
     #[cfg(not(windows))]
     #[cfg_attr(test, mutants::skip)]
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         ndi_name: String,
         _ndi_backend: Option<()>,
@@ -173,7 +180,13 @@ impl PlaybackPipeline {
         // #15 part 2: the decode loop is a stub on non-Windows (no frames are
         // decoded), so the preview tap is never offered to here.
         _taps: crate::playback::preview::preview_stream::DecodeTaps,
+        // #196: no NDI sender exists on this platform — report "ready, no URL"
+        // at once so a startup serializer never blocks on the stub.
+        ready_tx: Option<tokio::sync::oneshot::Sender<Option<String>>>,
     ) -> Self {
+        if let Some(tx) = ready_tx {
+            let _ = tx.send(None);
+        }
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
         let ndi_name_for_self = ndi_name.clone();
@@ -232,6 +245,7 @@ fn run_loop(
     genlock_pacing: bool,
     burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
     taps: crate::playback::preview::preview_stream::DecodeTaps,
+    ready_tx: Option<tokio::sync::oneshot::Sender<Option<String>>>,
 ) {
     info!(
         ndi_name,
@@ -246,6 +260,7 @@ fn run_loop(
         genlock_pacing,
         burn_on,
         taps,
+        ready_tx,
     );
     info!(playlist_id, "pipeline thread exited");
 }
@@ -270,6 +285,7 @@ fn run_loop_windows(
     genlock_pacing: bool,
     burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
     taps: crate::playback::preview::preview_stream::DecodeTaps,
+    mut ready_tx: Option<tokio::sync::oneshot::Sender<Option<String>>>,
 ) {
     // 1 ms system timer for the boundary-paced sleep granularity (#147).
     if genlock_pacing {
@@ -280,6 +296,10 @@ fn run_loop_windows(
         Some(b) => b,
         None => {
             error!("no NDI backend provided");
+            // #196: unblock the startup serializer — this output has no sender.
+            if let Some(tx) = ready_tx.take() {
+                let _ = tx.send(None);
+            }
             let _ = event_tx.send((
                 playlist_id,
                 PipelineEvent::Error("NDI SDK not available".into()),
@@ -301,6 +321,10 @@ fn run_loop_windows(
         Ok(s) => s,
         Err(e) => {
             error!(%e, "failed to create NDI sender");
+            // #196: unblock the startup serializer — creation failed.
+            if let Some(tx) = ready_tx.take() {
+                let _ = tx.send(None);
+            }
             let _ = event_tx.send((
                 playlist_id,
                 PipelineEvent::Error(format!("Failed to create NDI sender: {e}")),
@@ -310,7 +334,19 @@ fn run_loop_windows(
         }
     };
 
-    info!(ndi_name, genlock_pacing, "NDI sender created");
+    // #196: read the advertised source URL now (right after create, before the
+    // sender is moved into the submitter) so the startup log carries the
+    // name→port map and the serializer can proceed to the next output in order.
+    let sender_url = sender.source_url();
+    info!(
+        ndi_name,
+        url = sender_url.as_deref().unwrap_or("unknown"),
+        genlock_pacing,
+        "ndi: sender ready"
+    );
+    if let Some(tx) = ready_tx.take() {
+        let _ = tx.send(sender_url);
+    }
 
     // Initial black frame. Genlock path emits on the fixed integer grid
     // (GENLOCK_GRID_FPS/1) and skips the per-file `set_frame_rate`; the legacy

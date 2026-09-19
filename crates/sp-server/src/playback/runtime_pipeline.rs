@@ -72,7 +72,9 @@ impl PlaybackEngine {
             playlist_id,
             ndi_name, "ensuring pipeline for runtime-created/activated playlist"
         );
-        self.ensure_pipeline(playlist_id, &ndi_name);
+        // #196: record the sender's advertised URL for `/api/v1/ndi/health`
+        // (idempotent; a no-op if the pipeline already exists).
+        self.create_and_record_sender(playlist_id, &ndi_name).await;
     }
 
     /// #132: Tear down a playlist's pipeline after a runtime delete/deactivate.

@@ -14,9 +14,24 @@
 /// defensively. Returns `None` when the input is empty, has no port, has an
 /// empty host, or has a non-numeric port.
 pub fn parse_source_url(raw: &str) -> Option<String> {
-    // RED stub (#196) — real impl lands in the GREEN commit.
-    let _ = raw;
-    None
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // Strip an optional `scheme://` prefix (defensive — the SDK normally hands
+    // us a bare `host:port`).
+    let after_scheme = match s.split_once("://") {
+        Some((_scheme, rest)) => rest,
+        None => s,
+    };
+    // The authority is everything up to the first `/`.
+    let authority = after_scheme.split('/').next().unwrap_or(after_scheme);
+    // Must split into a non-empty host and an all-digit, non-empty port.
+    let (host, port) = authority.rsplit_once(':')?;
+    if host.is_empty() || port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!("{host}:{port}"))
 }
 
 #[cfg(test)]

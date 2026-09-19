@@ -91,6 +91,32 @@ unsafe impl Send for NDIlib_send_create_t {}
 unsafe impl Sync for NDIlib_send_create_t {}
 
 // ---------------------------------------------------------------------------
+// Source descriptor
+// ---------------------------------------------------------------------------
+
+/// Source descriptor returned by `NDIlib_send_get_source_name` (#196).
+///
+/// The NDI SDK declares `p_url_address` inside an anonymous union with the
+/// deprecated `p_ip_address`; both are a single `*const c_char`, so a single
+/// pointer field is layout-compatible with the union. We only read
+/// `p_url_address` — the `host:port` a DistroAV receiver reconnects to.
+#[repr(C)]
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub struct NDIlib_source_t {
+    /// NDI source name (UTF-8, null-terminated), e.g. `"RESOLUME-SNV (SP-fast)"`.
+    pub p_ndi_name: *const c_char,
+    /// URL/IP address of the source (UTF-8, null-terminated), e.g.
+    /// `"10.77.9.201:5963"`, or null. Union with the deprecated `p_ip_address`.
+    pub p_url_address: *const c_char,
+}
+
+// SAFETY: raw pointers into SDK-owned, short-lived storage; the wrapper copies
+// the string out immediately and never retains the struct.
+unsafe impl Send for NDIlib_source_t {}
+unsafe impl Sync for NDIlib_source_t {}
+
+// ---------------------------------------------------------------------------
 // Video frame
 // ---------------------------------------------------------------------------
 

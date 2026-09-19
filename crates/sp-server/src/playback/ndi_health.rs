@@ -39,9 +39,11 @@ pub(crate) const NO_OBS_INPUT_REASON: &str = "no OBS scene for this output";
 /// runs. Any other base reason passes through unchanged. Pure so the branch
 /// is mutation-scored.
 pub(crate) fn effective_dark_reason(base: Option<String>, has_obs_input: bool) -> Option<String> {
-    // RED stub (#196) — real impl lands in the GREEN commit.
-    let _ = has_obs_input;
-    base
+    if base.as_deref() == Some(DARK_WALL_REASON) && !has_obs_input {
+        Some(NO_OBS_INPUT_REASON.to_string())
+    } else {
+        base
+    }
 }
 
 /// Per-pipeline NDI health. Serialized to the dashboard via
@@ -101,6 +103,11 @@ pub struct PipelineHealthSnapshot {
     /// `None` when not recovering. Cleared to `None` the moment the receiver
     /// re-attaches, so the dashboard / E2E can see which rung recovered a wall.
     pub recovery_step: Option<RecoveryStep>,
+    /// #196: the sender's advertised source URL (`host:port`) as the NDI runtime
+    /// assigned it, e.g. `"10.77.9.201:5963"`. `None` until the SDK reports one.
+    /// Makes a restart's name→port shuffle — the root cause of the
+    /// dark-wall-after-restart incident — visible on `/api/v1/ndi/health`.
+    pub sender_url: Option<String>,
 }
 
 /// Boundary-paced emission telemetry (#147), surfaced on
@@ -239,6 +246,12 @@ pub struct WindowStats {
 /// returned Vec is owned data, no lifetimes leak out.
 pub struct NdiHealthRegistry {
     snapshots: RwLock<HashMap<i64, PipelineHealthSnapshot>>,
+    /// #196: the advertised source URL (`host:port`) each output's sender was
+    /// assigned, recorded once at sender creation and read back onto every
+    /// health snapshot. Kept out of `snapshots` so it survives across heartbeat
+    /// rebuilds and is independent of which heartbeat path (SDK-clocked/paced)
+    /// runs.
+    sender_urls: RwLock<HashMap<i64, String>>,
     /// #127 receiver-recovery state. Composed here (rather than as a new
     /// `PlaybackEngine` field) so the engine reaches it through the `Arc` it
     /// already holds; the single writer is `handle_health_snapshot`.
@@ -261,10 +274,32 @@ impl NdiHealthRegistry {
     pub fn new() -> Self {
         Self {
             snapshots: RwLock::new(HashMap::new()),
+            sender_urls: RwLock::new(HashMap::new()),
             recovery: NdiRecoveryTracker::new(),
             created_at: Instant::now(),
             expected_pipelines: AtomicUsize::new(0),
         }
+    }
+
+    /// #196: record the advertised source URL a sender was assigned at creation.
+    /// `None` is ignored (keeps any previously-recorded URL rather than erasing
+    /// it — a stub/failed create should not clobber a known URL).
+    pub fn set_sender_url(&self, playlist_id: i64, url: Option<String>) {
+        let Some(url) = url else {
+            return;
+        };
+        if let Ok(mut map) = self.sender_urls.write() {
+            map.insert(playlist_id, url);
+        }
+    }
+
+    /// #196: the advertised source URL recorded for `playlist_id`, or `None` if
+    /// none has been recorded yet. A poisoned lock reads as `None`.
+    pub fn sender_url(&self, playlist_id: i64) -> Option<String> {
+        self.sender_urls
+            .read()
+            .ok()
+            .and_then(|m| m.get(&playlist_id).cloned())
     }
 
     /// #167: record that the engine created one more playback pipeline. Called
@@ -445,13 +480,21 @@ impl crate::playback::PlaybackEngine {
         };
 
         let ndi_name = pp.pipeline.ndi_name().to_string();
-        let degraded_reason = compute_degraded_reason(
+        let base_degraded_reason = compute_degraded_reason(
             &canonical_state,
             connections,
             observed_fps,
             nominal_fps,
             consecutive_bad_polls,
         );
+        // #196 item 5: if this output is dark (Playing on program, connections=0)
+        // but NO OBS NDI input advertises its stream, the receiver-side recovery
+        // ladder is not the tool for it — set a distinct reason and skip the
+        // ladder (`effective_dark_reason` returns a NON-dark-wall reason, so
+        // `is_dark` below is false). This stops the every-10 s degraded/recovered
+        // flap the incident saw for an output whose OBS scene did not exist yet.
+        let has_obs_input = self.output_has_obs_input(playlist_id);
+        let degraded_reason = effective_dark_reason(base_degraded_reason, has_obs_input);
 
         // Look up the previous snapshot from the registry to detect
         // connection-count changes and degraded transitions for logging.
@@ -540,6 +583,11 @@ impl crate::playback::PlaybackEngine {
             // reflects the current toggle state (false unless the API set it).
             burn_on: self.ndi_burn_registry.is_on(&ndi_name),
             recovery_step,
+            // #196: the advertised host:port this sender landed on, recorded in
+            // the registry at sender creation (`create_startup_senders` / the
+            // runtime ensure path), so it survives across heartbeats and both
+            // the SDK-clocked and paced heartbeat paths.
+            sender_url: self.ndi_health_registry.sender_url(playlist_id),
         };
 
         // Transition logging: connection-count change, degradation, recovery.

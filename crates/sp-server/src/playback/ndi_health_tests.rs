@@ -624,6 +624,7 @@ fn mk_reported_snapshot(playlist_id: i64) -> PipelineHealthSnapshot {
         lock_reason: String::new(),
         burn_on: false,
         recovery_step: None,
+        sender_url: None,
     }
 }
 
@@ -656,4 +657,24 @@ fn effective_dark_reason_other_reason_passes_through() {
         effective_dark_reason(Some("stalled".to_string()), false).as_deref(),
         Some("stalled")
     );
+}
+
+// #196: the registry records a sender's advertised URL at creation and reads
+// it back onto every snapshot.
+#[test]
+fn registry_records_and_reads_sender_url() {
+    let reg = NdiHealthRegistry::new();
+    assert_eq!(reg.sender_url(7), None);
+    reg.set_sender_url(7, Some("10.77.9.201:5963".to_string()));
+    assert_eq!(reg.sender_url(7).as_deref(), Some("10.77.9.201:5963"));
+    // A different id is independent.
+    assert_eq!(reg.sender_url(8), None);
+}
+
+#[test]
+fn registry_set_sender_url_none_keeps_prior() {
+    let reg = NdiHealthRegistry::new();
+    reg.set_sender_url(7, Some("10.77.9.201:5963".to_string()));
+    reg.set_sender_url(7, None);
+    assert_eq!(reg.sender_url(7).as_deref(), Some("10.77.9.201:5963"));
 }

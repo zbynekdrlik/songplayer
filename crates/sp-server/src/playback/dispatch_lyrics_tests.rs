@@ -90,6 +90,7 @@ fn install_pipeline(
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
+        None,
     );
     let pp = PlaylistPipeline {
         pipeline,
