@@ -12,6 +12,7 @@
 //! lifecycle is Windows-runtime glue (`mutants::skip`, box-verified), but is
 //! written cross-platform so it compiles and links on the Linux CI.
 
+use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
@@ -25,13 +26,80 @@ use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
 use super::fmp4_relay::BoxSplitter;
-use super::preview_stream::{OUT_H, OUT_W, StreamShared, audio_preroll_samples};
+use super::preview_stream::{OUT_H, OUT_W, StreamShared, audio_preroll_samples, gap_fill_samples};
 
 /// Encoder preference ladder: hardware first, software last.
 pub const ENCODER_LADDER: [&str; 4] = ["h264_nvenc", "h264_qsv", "h264_amf", "libx264"];
 
 /// How long after the last viewer leaves before the child is killed.
 pub const VIEWER_TTL: Duration = Duration::from_secs(5);
+
+/// Most encoder-child restarts allowed inside [`RESTART_WINDOW_MS`] (#178 item 12).
+const RESTART_MAX: usize = 3;
+/// Rolling window (ms) for the restart budget.
+const RESTART_WINDOW_MS: u64 = 60_000;
+
+/// Bounds encoder-child restarts to at most [`RESTART_MAX`] within a rolling
+/// [`RESTART_WINDOW_MS`] (#178 item 12). A child that dies while viewers are
+/// connected is respawned, but a crash LOOP (broken input, unusable encoder)
+/// must not spin ffmpeg forever — once the budget is spent the supervisor gives
+/// up and closes the stream so viewers see the end. Pure + Linux-unit-tested.
+#[derive(Debug, Default)]
+pub struct RestartBudget {
+    /// Monotonic ms timestamps of recent restarts, within the rolling window.
+    restarts_ms: VecDeque<u64>,
+}
+
+impl RestartBudget {
+    /// Record a restart at `now_ms` and return whether it is ALLOWED (still
+    /// within budget). Evicts restarts older than the rolling window first.
+    pub fn allow(&mut self, now_ms: u64) -> bool {
+        while let Some(&front) = self.restarts_ms.front() {
+            if now_ms.saturating_sub(front) >= RESTART_WINDOW_MS {
+                self.restarts_ms.pop_front();
+            } else {
+                break;
+            }
+        }
+        if self.restarts_ms.len() >= RESTART_MAX {
+            return false;
+        }
+        self.restarts_ms.push_back(now_ms);
+        true
+    }
+}
+
+/// Kills + waits the ffmpeg child on drop, so EVERY early return / propagated
+/// spawn error / panic path in `run_child` tears the child down — no orphaned
+/// ffmpeg process (#178 item 11).
+struct ChildGuard(Child);
+
+impl ChildGuard {
+    fn get(&mut self) -> &mut Child {
+        &mut self.0
+    }
+}
+
+impl Drop for ChildGuard {
+    #[cfg_attr(test, mutants::skip)]
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Releases the per-pipeline encoder-running flag on EVERY exit path of the
+/// supervisor thread — including a panic in `supervise` — so a crashed
+/// supervisor never leaves the flag stuck claimed (which would block every
+/// future viewer from starting a child, #178 item 11).
+struct EncoderReleaseGuard(Arc<StreamShared>);
+
+impl Drop for EncoderReleaseGuard {
+    #[cfg_attr(test, mutants::skip)]
+    fn drop(&mut self) {
+        self.0.release_encoder();
+    }
+}
 
 /// The encoder chosen for this process (probed once), exposed on `/api/v1/status`.
 static CHOSEN_ENCODER: OnceLock<String> = OnceLock::new();
@@ -215,8 +283,10 @@ pub fn ensure_running(shared: Arc<StreamShared>, ffmpeg: std::path::PathBuf) {
     let spawned = std::thread::Builder::new()
         .name(format!("preview-enc-{}", shared.label()))
         .spawn(move || {
-            supervise(thread_shared.clone(), &ffmpeg, &encoder);
-            thread_shared.release_encoder();
+            // Release the encoder flag on EVERY exit path — including a panic in
+            // supervise — so a crash never leaves it stuck claimed (#178 item 11).
+            let _flag = EncoderReleaseGuard(thread_shared.clone());
+            supervise(thread_shared, &ffmpeg, &encoder);
         });
     if let Err(e) = spawned {
         warn!(error = %e, "preview-encoder: failed to spawn supervisor thread");
@@ -231,6 +301,9 @@ pub fn ensure_running(shared: Arc<StreamShared>, ffmpeg: std::path::PathBuf) {
 fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
     let mut encoder = encoder.to_string();
     let mut allow_fallback = encoder != "libx264";
+    // #178 item 12: bound respawns so a crash loop cannot spin ffmpeg forever.
+    let mut budget = RestartBudget::default();
+    let budget_base = Instant::now();
     loop {
         match run_child(&shared, ffmpeg, &encoder) {
             RunOutcome::ViewersGone => {
@@ -238,6 +311,7 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
                     label = shared.label(),
                     "preview-encoder: last viewer gone, child stopped"
                 );
+                shared.relay().reset();
                 return;
             }
             RunOutcome::ChildExitedNoInit if allow_fallback => {
@@ -256,10 +330,22 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
                 }
             }
             RunOutcome::ChildExitedNoInit | RunOutcome::ChildExited => {
+                // #178 item 12: a child that died while viewers are watching is
+                // respawned within the restart budget; once the budget is spent
+                // (or nobody is watching) close the relay so viewers see `Closed`
+                // and their WS sockets close.
+                if shared.has_viewer() && budget.allow(budget_base.elapsed().as_millis() as u64) {
+                    warn!(
+                        label = shared.label(),
+                        "preview-encoder: child exited with viewers present — respawning"
+                    );
+                    continue;
+                }
                 warn!(
                     label = shared.label(),
-                    "preview-encoder: child exited, stopping"
+                    "preview-encoder: child exited, closing stream"
                 );
+                shared.relay().close();
                 return;
             }
         }
@@ -310,14 +396,29 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
         // failures were single stderr lines that this makes visible in the log.
         .stderr(Stdio::piped());
     apply_windows_flags(&mut cmd);
-    let mut child = match cmd.spawn() {
+    // ChildGuard kills + waits the child on EVERY exit path — including a panic
+    // between here and teardown (std `Child::drop` does NOT kill it) — so ffmpeg
+    // is never orphaned (#178 item 11).
+    let mut child = ChildGuard(match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             warn!(error = %e, "preview-encoder: ffmpeg spawn failed");
             return RunOutcome::ChildExited;
         }
-    };
-    let stderr_reader = spawn_stderr_reader(shared.label().to_string(), child.stderr.take());
+    });
+    // #178 item 17: clear any stale cached init from a previous child at THIS
+    // child's START, so a viewer joining now waits for the NEW init segment.
+    shared.relay().reset();
+    let stderr_reader =
+        match spawn_stderr_reader(shared.label().to_string(), child.get().stderr.take()) {
+            Ok(h) => h,
+            Err(e) => {
+                warn!(error = %e, "preview-encoder: failed to spawn stderr reader");
+                let _ = child.get().kill();
+                let _ = child.get().wait();
+                return RunOutcome::ChildExited;
+            }
+        };
     info!(
         label = shared.label(),
         encoder, v_port, a_port, "preview-encoder: child started"
@@ -347,19 +448,29 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
                 label = shared.label(),
                 "preview-encoder: child did not connect its video input"
             );
-            let _ = child.kill();
-            let _ = child.wait();
+            let _ = child.get().kill();
+            let _ = child.get().wait();
             let _ = stderr_reader.join();
             return RunOutcome::ChildExitedNoInit;
         }
     };
-    let v_feeder = spawn_video_feeder(
+    let v_feeder = match spawn_video_feeder(
         shared.clone(),
         v_sock,
         shutdown.clone(),
         clock_base,
         first_video_us.clone(),
-    );
+    ) {
+        Ok(h) => h,
+        Err(e) => {
+            warn!(error = %e, "preview-encoder: failed to spawn video feeder");
+            shutdown.store(true, Ordering::Relaxed);
+            let _ = child.get().kill();
+            let _ = child.get().wait();
+            let _ = stderr_reader.join();
+            return RunOutcome::ChildExited;
+        }
+    };
     let a_sock = match accept_with_deadline(&a_listener, Duration::from_secs(5)) {
         Some(s) => s,
         None => {
@@ -368,20 +479,31 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
                 "preview-encoder: child did not connect its audio input"
             );
             shutdown.store(true, Ordering::Relaxed);
-            let _ = child.kill();
-            let _ = child.wait();
+            let _ = child.get().kill();
+            let _ = child.get().wait();
             let _ = v_feeder.join();
             let _ = stderr_reader.join();
             return RunOutcome::ChildExitedNoInit;
         }
     };
-    let a_feeder = spawn_audio_feeder(
+    let a_feeder = match spawn_audio_feeder(
         shared.clone(),
         a_sock,
         shutdown.clone(),
         clock_base,
         first_video_us.clone(),
-    );
+    ) {
+        Ok(h) => h,
+        Err(e) => {
+            warn!(error = %e, "preview-encoder: failed to spawn audio feeder");
+            shutdown.store(true, Ordering::Relaxed);
+            let _ = child.get().kill();
+            let _ = child.get().wait();
+            let _ = v_feeder.join();
+            let _ = stderr_reader.join();
+            return RunOutcome::ChildExited;
+        }
+    };
     // Per-child "did THIS child produce any stdout" — the relay's cached init
     // segment persists across children, so it cannot be the failed-child signal:
     // a broken hardware child (nvenc that never opens its encoder) produces ZERO
@@ -389,19 +511,35 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
     // the old `relay().init().is_some()` check misread it as a clean exit and
     // skip the libx264 fallback (#178 box).
     let produced = Arc::new(AtomicBool::new(false));
-    let reader = spawn_stdout_reader(shared.clone(), child.stdout.take(), produced.clone());
+    let reader =
+        match spawn_stdout_reader(shared.clone(), child.get().stdout.take(), produced.clone()) {
+            Ok(h) => h,
+            Err(e) => {
+                warn!(error = %e, "preview-encoder: failed to spawn stdout reader");
+                shutdown.store(true, Ordering::Relaxed);
+                let _ = child.get().kill();
+                let _ = child.get().wait();
+                let _ = v_feeder.join();
+                let _ = a_feeder.join();
+                let _ = stderr_reader.join();
+                return RunOutcome::ChildExited;
+            }
+        };
 
-    let outcome = monitor_loop(shared, &mut child, &produced);
+    let outcome = monitor_loop(shared, child.get(), &produced);
 
     // Tear down: stop feeders, kill child, join everything (incl. the stderr
     // reader, which ends at the child's stderr EOF once the child is gone).
     shutdown.store(true, Ordering::Relaxed);
-    let _ = child.kill();
-    let _ = child.wait();
+    let _ = child.get().kill();
+    let _ = child.get().wait();
     let _ = v_feeder.join();
     let _ = a_feeder.join();
     let _ = reader.join();
     let _ = stderr_reader.join();
+    // #178 item 17: clear the cached init at child STOP so it is never served to
+    // a new child's late joiner.
+    shared.relay().reset();
     outcome
 }
 
@@ -473,7 +611,7 @@ fn spawn_video_feeder(
     shutdown: Arc<AtomicBool>,
     clock_base: Instant,
     first_video_us: Arc<AtomicU64>,
-) -> std::thread::JoinHandle<()> {
+) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new()
         .name("preview-vfeed".into())
         .spawn(move || {
@@ -498,7 +636,6 @@ fn spawn_video_feeder(
                 }
             }
         })
-        .expect("spawn preview video feeder")
 }
 
 /// Feed tapped interleaved-f32 audio to the child's audio socket (little-endian
@@ -514,7 +651,7 @@ fn spawn_audio_feeder(
     shutdown: Arc<AtomicBool>,
     clock_base: Instant,
     first_video_us: Arc<AtomicU64>,
-) -> std::thread::JoinHandle<()> {
+) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new()
         .name("preview-afeed".into())
         .spawn(move || {
@@ -534,10 +671,27 @@ fn spawn_audio_feeder(
             if preroll > 0 && !write_silence(&mut sock, preroll) {
                 return;
             }
+            // #178 item 15: the PCM audio is SAMPLE-COUNT timed but the video is
+            // WALL-CLOCK timed, so a dropped block / pause / song gap would shift
+            // preview audio earlier for the child's life. Track wall time vs the
+            // audio duration already written since the first live block and fill
+            // any gap > 150 ms with silence.
+            let mut written_frames: u64 = 0;
+            let mut first_block_at: Option<Instant> = None;
             let mut bytes: Vec<u8> = Vec::new();
             while !shutdown.load(Ordering::Relaxed) {
                 match rx.recv_timeout(Duration::from_millis(200)) {
                     Ok(block) => {
+                        let now = Instant::now();
+                        let base = *first_block_at.get_or_insert(now);
+                        let wall_ms = now.duration_since(base).as_millis() as u64;
+                        let fill = gap_fill_samples(wall_ms, written_frames);
+                        if fill > 0 {
+                            if !write_silence(&mut sock, fill) {
+                                break;
+                            }
+                            written_frames += (fill / 2) as u64; // interleaved stereo
+                        }
                         bytes.clear();
                         bytes.reserve(block.len() * 4);
                         for s in &block {
@@ -546,13 +700,13 @@ fn spawn_audio_feeder(
                         if sock.write_all(&bytes).is_err() {
                             break;
                         }
+                        written_frames += (block.len() / 2) as u64;
                     }
                     Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
                     Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 }
             }
         })
-        .expect("spawn preview audio feeder")
 }
 
 /// Write `samples` interleaved-f32 zero samples to the child's audio socket in
@@ -582,7 +736,7 @@ fn write_silence(sock: &mut TcpStream, samples: usize) -> bool {
 fn spawn_stderr_reader(
     label: String,
     stderr: Option<std::process::ChildStderr>,
-) -> std::thread::JoinHandle<()> {
+) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new()
         .name("preview-err".into())
         .spawn(move || {
@@ -616,7 +770,6 @@ fn spawn_stderr_reader(
                 );
             }
         })
-        .expect("spawn preview stderr reader")
 }
 
 /// Read the child's fragmented-MP4 stdout, split it into init + fragments, and
@@ -626,7 +779,7 @@ fn spawn_stdout_reader(
     shared: Arc<StreamShared>,
     stdout: Option<std::process::ChildStdout>,
     produced: Arc<AtomicBool>,
-) -> std::thread::JoinHandle<()> {
+) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new()
         .name("preview-read".into())
         .spawn(move || {
@@ -652,7 +805,6 @@ fn spawn_stdout_reader(
                 }
             }
         })
-        .expect("spawn preview stdout reader")
 }
 
 /// Apply Windows-only process flags: `CREATE_NO_WINDOW` (no console popup, per

@@ -53,6 +53,19 @@ enum BoxHeader {
     Corrupt,
 }
 
+/// A single box — or the init / fragment accumulator — larger than this is
+/// treated as corrupt (#178 item 14). The child's fMP4 boxes are tiny (a 640×360
+/// fragment is tens of KB), so a declared size above 16 MiB is a corrupt or
+/// hostile stream, never legitimate; poisoning stops the splitter rather than
+/// trusting a size up to 2^64 and allocating gigabytes.
+const MAX_BOX_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Whether `len` bytes exceed the 16 MiB box/accumulator cap (exactly the cap is
+/// accepted). One helper so the box-size and accumulator checks share the bound.
+fn exceeds_box_cap(len: u64) -> bool {
+    len > MAX_BOX_BYTES
+}
+
 /// Parse the box header at the front of `buf` without consuming it.
 fn parse_box_header(buf: &[u8]) -> BoxHeader {
     if buf.len() < 8 {
@@ -68,7 +81,7 @@ fn parse_box_header(buf: &[u8]) -> BoxHeader {
         let large = u64::from_be_bytes([
             buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15],
         ]);
-        if large < 16 {
+        if large < 16 || exceeds_box_cap(large) {
             return BoxHeader::Corrupt;
         }
         BoxHeader::Parsed {
@@ -78,6 +91,8 @@ fn parse_box_header(buf: &[u8]) -> BoxHeader {
         }
     } else if size32 < 8 {
         // 0 = "to EOF" (never in fragmented output); < 8 cannot hold a header.
+        BoxHeader::Corrupt
+    } else if exceeds_box_cap(size32 as u64) {
         BoxHeader::Corrupt
     } else {
         BoxHeader::Parsed {
@@ -107,6 +122,12 @@ pub struct BoxSplitter {
 impl BoxSplitter {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether the splitter has seen a corrupt / oversized box and stopped
+    /// emitting (#178 item 14).
+    pub fn is_poisoned(&self) -> bool {
+        self.poisoned
     }
 
     /// Feed the next raw read from the child. Returns the chunks that completed.
@@ -143,6 +164,13 @@ impl BoxSplitter {
         if !self.init_done {
             // Everything up to and including `moov` is the init segment.
             self.init.append(&mut box_bytes);
+            // An init accumulator larger than the cap (many boxes with no `moov`)
+            // is a corrupt stream — poison rather than grow unbounded (#178 item 14).
+            if exceeds_box_cap(self.init.len() as u64) {
+                self.poisoned = true;
+                self.init.clear();
+                return;
+            }
             if &four_cc == b"moov" {
                 self.init_done = true;
                 out.push(RelayChunk::Init(std::mem::take(&mut self.init)));
@@ -152,6 +180,12 @@ impl BoxSplitter {
         // Post-init: accumulate boxes into the current fragment; an `mdat`
         // closes it (a fragment is `[styp?] [sidx?] moof mdat`).
         self.frag.append(&mut box_bytes);
+        // A fragment accumulator over the cap (no `mdat` closing it) is corrupt.
+        if exceeds_box_cap(self.frag.len() as u64) {
+            self.poisoned = true;
+            self.frag.clear();
+            return;
+        }
         if &four_cc == b"mdat" {
             out.push(RelayChunk::Fragment(std::mem::take(&mut self.frag)));
         }
@@ -166,8 +200,12 @@ impl BoxSplitter {
 pub struct FragmentRelay {
     /// Cached init segment (`ftyp` + `moov`), set once the child emits it.
     init: Mutex<Option<Arc<[u8]>>>,
-    /// Broadcast of media fragments to all current viewers.
-    tx: broadcast::Sender<Arc<[u8]>>,
+    /// Broadcast of media fragments to all current viewers. Behind a `Mutex` so
+    /// [`close`](Self::close) can DROP and replace the sender, making every
+    /// current receiver see `Closed` (#178 item 12).
+    tx: Mutex<broadcast::Sender<Arc<[u8]>>>,
+    /// Backlog capacity, kept so `close` can build a fresh channel.
+    capacity: usize,
 }
 
 impl FragmentRelay {
@@ -175,10 +213,12 @@ impl FragmentRelay {
     /// behind is dropped (`RecvError::Lagged`) and resyncs on the next
     /// keyframe-aligned fragment — it never blocks the reader.
     pub fn new(capacity: usize) -> Arc<Self> {
-        let (tx, _rx) = broadcast::channel(capacity.max(1));
+        let cap = capacity.max(1);
+        let (tx, _rx) = broadcast::channel(cap);
         Arc::new(Self {
             init: Mutex::new(None),
-            tx,
+            tx: Mutex::new(tx),
+            capacity: cap,
         })
     }
 
@@ -194,7 +234,9 @@ impl FragmentRelay {
             RelayChunk::Fragment(bytes) => {
                 let arc: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
                 // Err = no current receivers; that is fine (nobody watching).
-                let _ = self.tx.send(arc);
+                if let Ok(tx) = self.tx.lock() {
+                    let _ = tx.send(arc);
+                }
             }
         }
     }
@@ -206,12 +248,36 @@ impl FragmentRelay {
 
     /// A fresh fragment receiver for a joining viewer.
     pub fn subscribe(&self) -> broadcast::Receiver<Arc<[u8]>> {
-        self.tx.subscribe()
+        self.tx.lock().unwrap().subscribe()
     }
 
     /// Number of current viewers (broadcast receivers).
     pub fn viewer_count(&self) -> usize {
-        self.tx.receiver_count()
+        self.tx.lock().unwrap().receiver_count()
+    }
+
+    /// Clear the cached init segment (#178 item 17) — called at each child's
+    /// START and STOP so a stale init from a previous child is never served to a
+    /// new child's late joiner (which must wait for the NEW init).
+    pub fn reset(&self) {
+        if let Ok(mut slot) = self.init.lock() {
+            *slot = None;
+        }
+    }
+
+    /// End the stream (#178 item 12): clear the cached init and DROP the current
+    /// broadcast sender so every connected viewer's `recv()` returns `Closed`
+    /// (their WS handler then closes the socket). A fresh sender takes any later
+    /// subscribers. Called by the supervisor when it gives up restarting a
+    /// repeatedly-dying child.
+    pub fn close(&self) {
+        if let Ok(mut slot) = self.init.lock() {
+            *slot = None;
+        }
+        let (tx, _rx) = broadcast::channel(self.capacity);
+        if let Ok(mut g) = self.tx.lock() {
+            *g = tx; // old sender dropped here → current receivers see Closed
+        }
     }
 }
 

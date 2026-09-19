@@ -4,7 +4,7 @@
 //! touch the NDI submit / genlock / pacing path.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
@@ -103,6 +103,16 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
     }
     debug!(bytes = init.len(), "preview.ws: sent init segment");
 
+    // #178 item 16: server-side keepalive + idle deadline. Ping every 5 s and
+    // track the wall-time of the last message FROM the client; a half-open
+    // client that never answers is dropped after 15 s of silence so it cannot
+    // keep the encoder child alive forever. Browsers auto-answer Ping with Pong,
+    // so the JS side needs no change.
+    let start = Instant::now();
+    let mut last_seen_ms: u64 = 0;
+    let mut ping = tokio::time::interval(Duration::from_secs(PING_INTERVAL_SECS));
+    ping.tick().await; // consume the immediate first tick
+
     loop {
         tokio::select! {
             frag = frag_rx.recv() => match frag {
@@ -120,12 +130,37 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
             },
             msg = socket.recv() => match msg {
                 Some(Ok(Message::Close(_))) | None => break,
-                Some(Ok(Message::Ping(d))) => { let _ = socket.send(Message::Pong(d)).await; }
-                Some(Ok(_)) => {}
+                Some(Ok(Message::Ping(d))) => {
+                    last_seen_ms = start.elapsed().as_millis() as u64;
+                    let _ = socket.send(Message::Pong(d)).await;
+                }
+                Some(Ok(_)) => { last_seen_ms = start.elapsed().as_millis() as u64; }
                 Some(Err(_)) => break,
             },
+            _ = ping.tick() => {
+                let now_ms = start.elapsed().as_millis() as u64;
+                if is_idle(last_seen_ms, now_ms) {
+                    info!("preview.ws: client idle > 15s with no frames, closing");
+                    break;
+                }
+                if socket.send(Message::Ping(Vec::<u8>::new().into())).await.is_err() {
+                    break;
+                }
+            }
         }
     }
+}
+
+/// Server-side ping interval for the preview WS (#178 item 16).
+const PING_INTERVAL_SECS: u64 = 5;
+/// A client that sends NO message for longer than this is dropped (half-open).
+const IDLE_TIMEOUT_MS: u64 = 15_000;
+
+/// Whether the client has been silent past the idle deadline (#178 item 16):
+/// strictly greater than [`IDLE_TIMEOUT_MS`] since its last message. Pure so the
+/// deadline is unit-tested without a live socket/runtime.
+fn is_idle(last_seen_ms: u64, now_ms: u64) -> bool {
+    now_ms.saturating_sub(last_seen_ms) > IDLE_TIMEOUT_MS
 }
 
 /// Poll for the child's init segment (`ftyp`+`moov`) for up to ~10 s while the

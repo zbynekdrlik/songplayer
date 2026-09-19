@@ -209,6 +209,32 @@ pub fn audio_preroll_samples(connect_gap_ms: u64, lead_ms: u32) -> usize {
     ((connect_gap_ms.min(5000) + lead_ms as u64) * 48 * 2) as usize
 }
 
+/// A gap larger than this (ms) between the video wall-clock timeline and the
+/// audio's written duration is filled with silence (#178 item 15).
+const GAP_FILL_THRESHOLD_MS: u64 = 150;
+/// Never fill more than this much silence for a single gap (a very long pause
+/// still resyncs, but does not write minutes of silence in one burst).
+const GAP_FILL_CAP_MS: u64 = 10_000;
+
+/// How many interleaved-stereo f32 SILENCE samples the audio feeder must write
+/// to close a gap between the wall-clock video timeline and the sample-count
+/// audio timeline (#178 item 15). The preview's PCM audio is SAMPLE-COUNT timed
+/// by ffmpeg while the video is WALL-CLOCK timed, so a dropped block, a pause,
+/// or a song gap leaves the audio stream shorter than the elapsed wall time and
+/// it would play EARLIER than the video for the rest of the child. When the
+/// wall time since the first live block exceeds the audio duration already
+/// written by more than [`GAP_FILL_THRESHOLD_MS`], write that much silence
+/// first (capped at [`GAP_FILL_CAP_MS`] per gap). `written_frames` is the
+/// stereo frames written so far; each ms is `48 * 2` interleaved samples.
+pub fn gap_fill_samples(wall_elapsed_ms: u64, written_frames: u64) -> usize {
+    let written_ms = written_frames * 1000 / 48_000;
+    let gap_ms = wall_elapsed_ms.saturating_sub(written_ms);
+    if gap_ms <= GAP_FILL_THRESHOLD_MS {
+        return 0;
+    }
+    (gap_ms.min(GAP_FILL_CAP_MS) * 48 * 2) as usize
+}
+
 /// State shared between the decode-side taps, the WS viewers, and the encoder
 /// child. Held behind an `Arc` by [`StreamTap`].
 pub struct StreamShared {
