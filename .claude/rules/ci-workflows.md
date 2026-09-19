@@ -49,6 +49,23 @@ frontend-e2e mock-API wait loop makes actionlint exit 1 — that is not your dif
 - Full-tree catch-up is `mutation-full.yml` (`workflow_dispatch` only, `/mutation-sweep`),
   survivors → ONE `test-quality` issue per run, fails only on a tooling error.
 
+### The mutation range + shard count are PLANNED per push (`mutation-plan` job, 19.9.2026)
+A single 1000-line push produced 131 mutants; 4 shards × 20 min tested ~33, the
+shards were cancelled at the bound, the Gate went red AND the next push would
+only have looked at its own `before..HEAD` — leaving the big range unverified
+forever. So `ci.yml` now has a `mutation-plan` job (dev pushes only):
+- **base** = the NEWEST ancestor (last 60 commits) whose `Mutation Testing*`
+  check-runs all concluded `success` (skipped ones ignored); fallback =
+  `github.event.before`. A cancelled / failed / timed-out mutation run is thereby
+  re-covered by the next push automatically — never re-run an over-budget shard.
+- **shards** = `ceil(mutants / 6)` clamped 4..24, fed to the matrix via
+  `fromJSON(needs.mutation-plan.outputs.shards)`; the 20-min per-shard bound is
+  unchanged (never raise it). Job names become `Mutation Testing (i/N)`.
+- The Gate needs `mutation-plan` too (a failed plan must not read as "skipped").
+A mutant that turns a loop infinite costs a 300 s TIMEOUT and fails the step
+(exit 3) — shape loops so no single comparison flip can spin (`rest.is_empty()`
+on a shrinking slice instead of two `offset < len` checks).
+
 ### Write new pure code so it has NO equivalent mutants (#182 lesson)
 The no-compile box only learns about survivors ~15 min after the push, so shape
 pure code up front:

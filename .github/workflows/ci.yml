@@ -484,8 +484,82 @@ jobs:
       - name: Run coverage
         run: cargo tarpaulin --workspace --exclude-files "src-tauri/*" --exclude-files "sp-ui/*" --fail-under 40 --skip-clean --timeout 300
 
+  mutation-plan:
+    name: Mutation Plan
+    # Decides WHAT the mutation gate covers and HOW WIDE it fans out, so the
+    # 20-min-per-shard bound holds for any push size and no range is ever left
+    # without a verdict:
+    #  - base   = the newest ancestor whose mutation shards ALL concluded success
+    #             (a cancelled / failed / timed-out mutation run used to leave its
+    #             pushed range permanently unverified — the next push only looked
+    #             at its own `before..HEAD`); falls back to `github.event.before`.
+    #  - shards = ceil(mutants / 6), clamped 4..24 ("split the unit" done
+    #             mechanically: a 131-mutant push overran 4 shards x 20 min).
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      base: ${{ steps.plan.outputs.base }}
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-mutants (prebuilt binary)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+      - name: Plan the mutation range and shard count
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BEFORE='${{ github.event.before }}'
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null \
+             || ! git merge-base --is-ancestor "$BEFORE" HEAD; then
+            echo "::warning::push range base unavailable ($BEFORE) — falling back to HEAD~1"
+            BEFORE="$(git rev-parse HEAD~1)"
+          fi
+          BASE="$BEFORE"
+          FOUND=""
+          for sha in $(git rev-list -n 60 HEAD~1); do
+            verdict=$(gh api "repos/${{ github.repository }}/commits/$sha/check-runs?per_page=100" \
+              --jq '[.check_runs[] | select(.name | startswith("Mutation Testing")) | select(.conclusion != "skipped") | .conclusion] | if length == 0 then "none" elif all(. == "success") then "green" else "red" end' \
+              2>/dev/null || echo "none")
+            echo "$sha mutation verdict: $verdict"
+            if [ "$verdict" = "green" ]; then
+              FOUND="$sha"
+              break
+            fi
+          done
+          if [ -n "$FOUND" ]; then
+            BASE="$FOUND"
+          else
+            echo "::warning::no ancestor with a complete green mutation verdict in the last 60 commits — using the pushed range base $BEFORE"
+          fi
+          echo "Mutation range: $BASE..${{ github.sha }}"
+          git diff "$BASE" HEAD > push.diff
+          COUNT=0
+          if [ -s push.diff ]; then
+            COUNT=$(cargo mutants --in-diff push.diff --list 2>/dev/null | grep -c . || true)
+          fi
+          N=$(( (COUNT + 5) / 6 ))
+          if [ "$N" -lt 4 ]; then N=4; fi
+          if [ "$N" -gt 24 ]; then N=24; fi
+          SHARDS=$(python3 -c "import json,sys; n=int(sys.argv[1]); print(json.dumps([f'{i}/{n}' for i in range(n)]))" "$N")
+          echo "mutants in range: $COUNT -> $N shards"
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          echo "shards=$SHARDS" >> "$GITHUB_OUTPUT"
+
   mutation-testing:
     name: Mutation Testing (${{ matrix.shard }})
+    needs: mutation-plan
     # Diff-scoped mutation gate on EVERY dev push, scoped to the pushed range
     # (each push = one integrated unit); HARD-bounded to 20 min per shard per
     # mutation-testing.md (#123). It does NOT run on the release pull_request:
@@ -499,7 +573,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ['0/4', '1/4', '2/4', '3/4']
+        shard: ${{ fromJSON(needs.mutation-plan.outputs.shards) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -514,16 +588,9 @@ jobs:
           tool: cargo-mutants@27.1.0,cargo-nextest@0.9.140
       - name: "Mutation testing: zero survivors in changed code"
         run: |
-          # The pushed range: github.event.before..github.sha. On a first push
-          # / force-push / unreachable `before` (all-zeros or not an ancestor)
-          # fall back LOUDLY to HEAD~1..HEAD — never a silent skip.
-          BEFORE='${{ github.event.before }}'
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
-             || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null \
-             || ! git merge-base --is-ancestor "$BEFORE" HEAD; then
-            echo "::warning::push range base unavailable ($BEFORE) — falling back to HEAD~1..HEAD"
-            BEFORE="$(git rev-parse HEAD~1)"
-          fi
+          # The range comes from the `mutation-plan` job: the newest ancestor
+          # with a complete green mutation verdict (or the pushed range base).
+          BEFORE='${{ needs.mutation-plan.outputs.base }}'
           echo "Mutation range: $BEFORE..${{ github.sha }}"
           git diff "$BEFORE" HEAD > push.diff
           if [ ! -s push.diff ]; then
@@ -570,6 +637,7 @@ jobs:
       - file-size
       - red-green-order
       - coverage
+      - mutation-plan
       - mutation-testing
     steps:
       - name: Check no needed job failed
