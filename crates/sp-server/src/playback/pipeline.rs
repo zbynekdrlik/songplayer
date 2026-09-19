@@ -12,9 +12,11 @@
 use crossbeam_channel::Sender;
 use std::thread;
 // #196: since PipelineCommand::Play moved to pipeline_types.rs, PathBuf is now
-// referenced only by the cfg(windows) DecodeResult::NewPlay — gate the import so
-// the Linux clippy build doesn't see it as unused.
-#[cfg(windows)]
+// referenced only by the cfg(windows) DecodeResult::NewPlay AND by the
+// `#[path]`-included test module (via `super::*`). Gate the import to
+// `any(windows, test)` so it is present in both, but not in the Linux non-test
+// lib build where it would be unused (same pattern as FrameSubmitter above).
+#[cfg(any(windows, test))]
 use std::path::PathBuf;
 
 // Used in cfg(windows) blocks:
