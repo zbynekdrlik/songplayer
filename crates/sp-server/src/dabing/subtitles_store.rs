@@ -48,3 +48,52 @@ pub(crate) async fn build_and_store_subtitles(
     .await?;
     Ok(lines)
 }
+
+/// One-shot startup backfill (#182): every finished dub that still lacks the
+/// Live-Translate subtitle track gets it built from its saved transcripts JSON —
+/// dubs that finished before D3 shipped never ran the builder. Runs ONCE per
+/// process (never per tick), so a permanently unusable JSON cannot loop; every
+/// failure is a WARN and never touches the dub itself.
+#[cfg_attr(test, mutants::skip)] // I/O glue over the unit-tested selector
+// (models_dabing::list_ready_dubs_without_subtitles) + build_and_store_subtitles.
+pub(crate) async fn backfill_missing_subtitles(pool: &SqlitePool) {
+    let pending = match crate::db::models_dabing::list_ready_dubs_without_subtitles(pool).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(%e, "dub subtitles backfill: listing failed");
+            return;
+        }
+    };
+    for job in pending {
+        let audio = std::path::PathBuf::from(&job.audio_file_path);
+        let transcripts = crate::stems::dub_transcripts_path(&audio);
+        if !transcripts.exists() {
+            tracing::info!(
+                video_id = job.video_id,
+                "dub subtitles backfill: no transcripts JSON — skipped"
+            );
+            continue;
+        }
+        let cache_dir = audio.parent().unwrap_or_else(|| Path::new("."));
+        match build_and_store_subtitles(
+            pool,
+            cache_dir,
+            &job.youtube_id,
+            job.video_id,
+            &transcripts,
+        )
+        .await
+        {
+            Ok(lines) => tracing::info!(
+                video_id = job.video_id,
+                lines,
+                "dub subtitles backfill: stored EN/SK subtitles"
+            ),
+            Err(e) => tracing::warn!(
+                %e,
+                video_id = job.video_id,
+                "dub subtitles backfill: build failed (dub unaffected)"
+            ),
+        }
+    }
+}

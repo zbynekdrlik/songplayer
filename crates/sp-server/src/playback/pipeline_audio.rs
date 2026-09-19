@@ -24,7 +24,8 @@ use sp_ndi::{AudioSink, RealNdiBackend};
 use tracing::{info, warn};
 
 use crate::playback::pipeline::audio_emitter::{
-    EmittedBlock, SharedEmitter, emit_one_block, push_blocking,
+    EmittedBlock, SharedEmitter, SpinMargin, clear_ring, decoder_tolerance_ms, emit_one_block,
+    hold_ring, push_blocking,
 };
 use crate::playback::wallclock::WallClock;
 
@@ -61,8 +62,43 @@ pub(crate) fn push_or_collect_audio(
     }
 }
 
-/// Spin the last ~2 ms to the grid boundary (matches the paced path's margin).
-const SPIN_MARGIN_100NS: i64 = 20_000;
+/// Open the split A/V decoder for the SDK-clocked loop (#192 round 2). With the
+/// emitter present: drop stale ring audio left by an interrupted song, and pair
+/// audio AHEAD of the video by the cushion (`decoder_tolerance_ms`); without it,
+/// the plain pairing — audio then rides with the video frames.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn open_synced_decoder(
+    video: Box<dyn sp_decoder::VideoStream>,
+    audio: Box<dyn sp_decoder::AudioStream>,
+    emitter: Option<&SharedEmitter>,
+) -> Result<sp_decoder::SplitSyncedDecoder, sp_decoder::DecoderError> {
+    if let Some(shared) = emitter {
+        clear_ring(shared);
+    }
+    sp_decoder::SplitSyncedDecoder::with_tolerance(
+        video,
+        audio,
+        decoder_tolerance_ms(emitter.is_some()),
+    )
+}
+
+/// Pause: keep the ring cushion while the decode loop idles (released by the
+/// next audio push).
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn hold_if_present(emitter: Option<&SharedEmitter>) {
+    if let Some(shared) = emitter {
+        hold_ring(shared);
+    }
+}
+
+/// Seek: drop the stale pre-seek audio so it never queues ahead of the new
+/// position.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn clear_if_present(emitter: Option<&SharedEmitter>) {
+    if let Some(shared) = emitter {
+        clear_ring(shared);
+    }
+}
 
 /// A running audio-emitter thread bound to one pipeline's NDI sender. Dropping
 /// it stops the emitter and joins — do this BEFORE the sender is destroyed.
@@ -136,6 +172,12 @@ fn run_emit_loop(ndi_name: &str, sink: AudioSink<RealNdiBackend>, shared: Shared
 
     let mut last_log_minute: i64 = i64::MIN;
     let mut silence_run: u64 = 0;
+    // Adaptive spin margin: follows the coarse sleep's observed overshoot while
+    // the pipeline carries audio (box finding: a fixed 2 ms left p99 at 2–5 ms).
+    let mut spin = SpinMargin::default();
+    // Longest single emit call (ring lock + NDI send_audio) this minute: tells a
+    // late slot caused by the SDK/lock apart from one caused by the wake-up.
+    let mut emit_call_max_100ns: i64 = 0;
     info!(
         ndi_name,
         "audio-emitter: started (sdk-video/wallclock-audio, 48kHz/1600-block grid)"
@@ -151,18 +193,24 @@ fn run_emit_loop(ndi_name: &str, sink: AudioSink<RealNdiBackend>, shared: Shared
             let g = shared.emitter.lock().unwrap();
             g.next_boundary_100ns(now)
         };
-        sleep_until(&clock, target);
+        let overshoot = sleep_until(&clock, target, spin.margin_100ns());
+        spin.observe(overshoot);
         if shared.shutdown.load(Ordering::Relaxed) {
             break;
         }
 
         let emit_now = clock.now_100ns();
         let emitted = emit_one_block(&shared, &sink, emit_now);
+        emit_call_max_100ns = emit_call_max_100ns.max(clock.now_100ns() - emit_now);
 
         // Transition log: one line per gap, on the silence→audio edge.
         match emitted.block {
-            EmittedBlock::Silence => silence_run += 1,
+            EmittedBlock::Silence => {
+                silence_run += 1;
+                spin.note_block(false);
+            }
             EmittedBlock::Audio(_) => {
+                spin.note_block(true);
                 if silence_run > 0 {
                     info!(
                         ndi_name,
@@ -195,26 +243,33 @@ fn run_emit_loop(ndi_name: &str, sink: AudioSink<RealNdiBackend>, shared: Shared
                 late,
                 jitter_p99_us = jitter,
                 ring_ms,
+                spin_margin_us = spin.margin_100ns() / 10,
+                emit_call_max_us = emit_call_max_100ns / 10,
                 "audio-emitter: heartbeat"
             );
+            emit_call_max_100ns = 0;
         }
     }
     info!(ndi_name, "audio-emitter: loop exited (shutdown)");
 }
 
-/// Coarse-sleep the monotonic clock to ~2 ms before `target_100ns`, then spin
-/// to the boundary. A target already in the past returns immediately (the emit
-/// thread catches up one slot per iteration — it never skips a slot, and the
-/// grid timecode stays correct, so a burst is absorbed by the receiver buffer).
+/// Coarse-sleep the monotonic clock to `margin_100ns` before `target_100ns`, then
+/// spin to the boundary. Returns how far past its intended wake time the coarse
+/// sleep came back (0 when no coarse sleep ran) — the input of [`SpinMargin`]. A
+/// target already in the past returns immediately (the emit thread catches up
+/// one slot per iteration — it never skips a slot, and the grid timecode stays
+/// correct, so a burst is absorbed by the receiver buffer).
 #[cfg_attr(test, mutants::skip)]
-fn sleep_until(clock: &WallClock, target_100ns: i64) {
+fn sleep_until(clock: &WallClock, target_100ns: i64, margin_100ns: i64) -> i64 {
     let delta = target_100ns - clock.now_100ns();
     if delta <= 0 {
-        return;
+        return 0;
     }
-    if delta > SPIN_MARGIN_100NS {
-        let coarse = delta - SPIN_MARGIN_100NS;
+    let mut overshoot = 0;
+    if delta > margin_100ns {
+        let coarse = delta - margin_100ns;
         std::thread::sleep(Duration::from_nanos((coarse * 100) as u64));
+        overshoot = clock.now_100ns() - (target_100ns - margin_100ns);
     }
     loop {
         if target_100ns - clock.now_100ns() <= 0 {
@@ -222,6 +277,7 @@ fn sleep_until(clock: &WallClock, target_100ns: i64) {
         }
         std::hint::spin_loop();
     }
+    overshoot
 }
 
 /// Raise the emit thread to `THREAD_PRIORITY_TIME_CRITICAL` so a heavy child's

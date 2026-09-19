@@ -145,6 +145,11 @@ impl AudioRing {
         take
     }
 
+    /// Drop all buffered audio; the established channel layout is kept.
+    pub fn clear(&mut self) {
+        self.buf.clear();
+    }
+
     /// Pop exactly one block (`samples_per_block` frames) of interleaved audio
     /// iff the ring holds at least that many frames; otherwise `None` (the
     /// caller emits silence). Never returns a partial block.
@@ -182,6 +187,9 @@ pub struct AudioEmitter {
     /// Recent |emit − boundary| jitter samples (µs) for the p99 gauge.
     jitter_us: VecDeque<u64>,
     channels_hint: usize,
+    /// Paused pipeline: emit silence WITHOUT popping, so the lookahead cushion
+    /// (and the A/V alignment it carries) survives a pause.
+    held: bool,
 }
 
 /// How many recent jitter samples the p99 gauge keeps (~30 s at 30 fps).
@@ -199,7 +207,20 @@ impl AudioEmitter {
             late_blocks: 0,
             jitter_us: VecDeque::new(),
             channels_hint: 2,
+            held: false,
         }
+    }
+
+    /// Hold (pause) or release the ring: a held emitter keeps ticking silence on
+    /// the grid but leaves the buffered audio untouched.
+    pub fn set_held(&mut self, held: bool) {
+        self.held = held;
+    }
+
+    /// Drop the buffered audio (seek / a new song interrupting the old one), so
+    /// stale audio never queues ahead of the new position.
+    pub fn clear_ring(&mut self) {
+        self.ring.clear();
     }
 
     /// A production emitter: stereo, 1600-sample blocks, ~250 ms ring, 48 kHz.
@@ -248,7 +269,12 @@ impl AudioEmitter {
             self.jitter_us.pop_front();
         }
 
-        let block = match self.ring.pop_block() {
+        let popped = if self.held {
+            None
+        } else {
+            self.ring.pop_block()
+        };
+        let block = match popped {
             Some(samples) if samples.len() >= self.samples_per_block => {
                 EmittedBlock::Audio(samples)
             }
@@ -382,6 +408,8 @@ pub fn push_blocking(shared: &SharedEmitter, interleaved: &[f32], channels: usiz
     }
     let mut offset = 0usize;
     let mut guard = shared.emitter.lock().unwrap();
+    // New audio means the pipeline is running again — release a pause hold.
+    guard.set_held(false);
     while offset < interleaved.len() {
         if shared.shutdown.load(Ordering::Relaxed) {
             return;
@@ -399,6 +427,37 @@ pub fn push_blocking(shared: &SharedEmitter, interleaved: &[f32], channels: usiz
             guard = g;
         }
     }
+}
+
+/// How far ahead of the video the decoder reads audio when the emitter is
+/// present (ms). This IS the ring cushion: with plain 40 ms pairing the ring sat
+/// at 24–55 ms on the box, so any decode hiccup became a 33 ms silence block
+/// mid-song (#192 round 2). Reading ahead fills the ring without delaying audio
+/// against video — the emitter starts the first block as the first frame goes
+/// out, and both then run in real time.
+pub const AUDIO_LOOKAHEAD_MS: u64 = 100;
+
+/// Pairing tolerance for `SplitSyncedDecoder`: the default, plus the lookahead
+/// when the wall-clock emitter carries the audio. Without an emitter the audio
+/// rides with the video frames and must not run ahead.
+pub fn decoder_tolerance_ms(emitter_present: bool) -> u64 {
+    if emitter_present {
+        sp_decoder::split_sync::DEFAULT_TOLERANCE_MS + AUDIO_LOOKAHEAD_MS
+    } else {
+        sp_decoder::split_sync::DEFAULT_TOLERANCE_MS
+    }
+}
+
+/// Pause: keep the cushion (see [`AudioEmitter::set_held`]). Released by the next
+/// [`push_blocking`].
+pub fn hold_ring(shared: &SharedEmitter) {
+    shared.emitter.lock().unwrap().set_held(true);
+}
+
+/// Seek / new playback: drop stale buffered audio and wake a blocked push.
+pub fn clear_ring(shared: &SharedEmitter) {
+    shared.emitter.lock().unwrap().clear_ring();
+    shared.space.notify_all();
 }
 
 /// The full [`AudioStats`](crate::playback::ndi_health::AudioStats) a
@@ -467,6 +526,61 @@ pub fn emit_one_block<B: NdiBackend>(
         sink.send_audio(&frame);
     }
     emitted
+}
+
+/// Smallest spin margin before a grid slot (2 ms) — also the margin of a
+/// pipeline that carries no audio.
+pub const SPIN_MARGIN_MIN_100NS: i64 = 20_000;
+/// Largest spin margin (6 ms): a long stall must never become a long spin.
+pub const SPIN_MARGIN_MAX_100NS: i64 = 60_000;
+/// Headroom added on top of the worst recent coarse-sleep overshoot (0.5 ms).
+const SPIN_HEADROOM_100NS: i64 = 5_000;
+/// How many recent coarse sleeps the margin remembers (~30 s of slots).
+const SPIN_WINDOW: usize = 900;
+/// Silent slots after the last audio block during which the margin stays
+/// precise (~10 s) — a song transition is exactly when jitter matters.
+const AUDIO_HOLD_SLOTS: u32 = 300;
+
+/// Adaptive spin margin for the emit thread's sleep-until (#192 box finding).
+///
+/// On the mostly idle, Balanced-plan box the coarse sleep before a grid slot
+/// overshoots by several ms (parked cores), so a fixed 2 ms spin left the p99
+/// emit jitter at 0.4–5.5 ms. The margin follows the worst recent overshoot plus
+/// headroom, clamped — and only for a pipeline that carries audio; a silent idle
+/// pipeline keeps the cheap minimum so ten idle emitters do not spin.
+#[derive(Debug, Default)]
+pub struct SpinMargin {
+    overshoots_100ns: VecDeque<i64>,
+    /// Slots of precision left; refilled by every audio block, 0 = silent.
+    audio_hold_left: u32,
+}
+
+impl SpinMargin {
+    /// Record how far past its intended wake time one coarse sleep returned.
+    pub fn observe(&mut self, overshoot_100ns: i64) {
+        self.overshoots_100ns.push_back(overshoot_100ns.max(0));
+        while self.overshoots_100ns.len() > SPIN_WINDOW {
+            self.overshoots_100ns.pop_front();
+        }
+    }
+
+    /// Record whether the slot just emitted carried audio or silence.
+    pub fn note_block(&mut self, is_audio: bool) {
+        self.audio_hold_left = if is_audio {
+            AUDIO_HOLD_SLOTS
+        } else {
+            self.audio_hold_left.saturating_sub(1)
+        };
+    }
+
+    /// The spin margin to use for the next slot.
+    pub fn margin_100ns(&self) -> i64 {
+        if self.audio_hold_left == 0 {
+            return SPIN_MARGIN_MIN_100NS;
+        }
+        let worst = self.overshoots_100ns.iter().copied().max().unwrap_or(0);
+        (worst + SPIN_HEADROOM_100NS).clamp(SPIN_MARGIN_MIN_100NS, SPIN_MARGIN_MAX_100NS)
+    }
 }
 
 #[cfg(test)]

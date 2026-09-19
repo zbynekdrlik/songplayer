@@ -470,3 +470,129 @@ fn audio_stats_emitter_serialises_under_the_emitter_key() {
     let default_json = serde_json::to_value(AudioStats::default()).unwrap();
     assert_eq!(default_json["emitter"]["enabled"], false);
 }
+
+// ── Adaptive spin margin (#192 box finding: coarse-sleep overshoot) ──────────
+
+/// A margin that has just seen an audio block (so precision is wanted).
+fn carrying() -> SpinMargin {
+    let mut m = SpinMargin::default();
+    m.note_block(true);
+    m
+}
+
+#[test]
+fn spin_margin_starts_at_the_minimum() {
+    assert_eq!(carrying().margin_100ns(), 20_000); // 2 ms
+}
+
+#[test]
+fn spin_margin_follows_the_worst_recent_overshoot_plus_headroom() {
+    let mut m = carrying();
+    m.observe(10_000);
+    m.observe(30_000); // worst: 3 ms
+    m.observe(12_000);
+    assert_eq!(m.margin_100ns(), 35_000); // 3 ms + 0.5 ms headroom
+}
+
+#[test]
+fn spin_margin_is_clamped_to_min_and_max() {
+    let mut m = carrying();
+    m.observe(15_000); // 1.5 ms + 0.5 ms = exactly the 2 ms minimum
+    assert_eq!(m.margin_100ns(), 20_000);
+    m.observe(55_000); // 5.5 ms + 0.5 ms = exactly the 6 ms maximum
+    assert_eq!(m.margin_100ns(), 60_000);
+    m.observe(400_000); // a 40 ms stall must not turn into a 40 ms spin
+    assert_eq!(m.margin_100ns(), 60_000);
+}
+
+#[test]
+fn spin_margin_ignores_negative_overshoot() {
+    let mut m = carrying();
+    m.observe(-50_000);
+    assert_eq!(m.margin_100ns(), 20_000);
+}
+
+#[test]
+fn spin_margin_forgets_an_overshoot_after_the_window() {
+    let mut m = carrying();
+    m.observe(40_000);
+    for _ in 0..899 {
+        m.observe(0);
+    }
+    assert_eq!(m.margin_100ns(), 45_000); // still inside the 900-sample window
+    m.observe(0);
+    assert_eq!(m.margin_100ns(), 20_000); // evicted
+}
+
+#[test]
+fn spin_margin_stays_minimal_on_a_silent_pipeline() {
+    // Never carried audio → cheap minimum even with a large overshoot.
+    let mut m = SpinMargin::default();
+    m.observe(50_000);
+    assert_eq!(m.margin_100ns(), 20_000);
+    // Audio arrives → precision on.
+    m.note_block(true);
+    assert_eq!(m.margin_100ns(), 55_000);
+    // 299 silent slots (< 10 s) keep precision — a song transition must stay tight.
+    for _ in 0..299 {
+        m.note_block(false);
+    }
+    assert_eq!(m.margin_100ns(), 55_000);
+    // The 300th silent slot drops back to the minimum.
+    m.note_block(false);
+    assert_eq!(m.margin_100ns(), 20_000);
+}
+
+// ── Ring cushion (#192 round 2: mid-song underruns on the box) ───────────────
+
+#[test]
+fn decoder_tolerance_adds_the_lookahead_only_with_an_emitter() {
+    // With the emitter the decoder reads audio 100 ms ahead of video (the ring
+    // cushion); without it (legacy audio-with-video) the plain 40 ms pairing.
+    assert_eq!(decoder_tolerance_ms(true), 140);
+    assert_eq!(decoder_tolerance_ms(false), 40);
+}
+
+#[test]
+fn a_held_emitter_emits_silence_without_consuming_the_ring() {
+    let mut e = AudioEmitter::production();
+    e.ring_mut().push_some(&stereo_block(0.5), 2);
+    e.set_held(true);
+    assert_eq!(e.tick(0).block, EmittedBlock::Silence);
+    assert_eq!(e.ring_depth_ms(), 33, "a paused pipeline keeps its cushion");
+    e.set_held(false);
+    assert_eq!(e.tick(0).block, EmittedBlock::Audio(stereo_block(0.5)));
+}
+
+#[test]
+fn clearing_the_ring_drops_the_buffered_audio_but_keeps_the_layout() {
+    let mut e = AudioEmitter::production();
+    e.ring_mut().push_some(&stereo_block(0.5), 2);
+    e.ring_mut().push_some(&stereo_block(0.6), 2);
+    e.clear_ring();
+    assert_eq!(e.ring_depth_ms(), 0);
+    assert_eq!(e.tick(0).block, EmittedBlock::Silence);
+    // The stereo layout survives: the next song's audio plays normally.
+    e.ring_mut().push_some(&stereo_block(0.7), 2);
+    assert_eq!(e.tick(0).block, EmittedBlock::Audio(stereo_block(0.7)));
+}
+
+#[test]
+fn shared_hold_and_clear_reach_the_emitter_and_a_push_releases_the_hold() {
+    let shared = new_shared_emitter();
+    push_blocking(&shared, &stereo_block(0.5), 2);
+    hold_ring(&shared);
+    assert_eq!(
+        shared.emitter.lock().unwrap().tick(0).block,
+        EmittedBlock::Silence,
+        "held: the cushion is not consumed"
+    );
+    // New audio (resume / next frame) releases the hold.
+    push_blocking(&shared, &stereo_block(0.6), 2);
+    assert_eq!(
+        shared.emitter.lock().unwrap().tick(0).block,
+        EmittedBlock::Audio(stereo_block(0.5))
+    );
+    clear_ring(&shared);
+    assert_eq!(shared.emitter.lock().unwrap().ring_depth_ms(), 0);
+}

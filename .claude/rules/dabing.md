@@ -261,6 +261,18 @@ writer. The dub worker (`dabing/worker.rs::synthesize`) builds + stores the
 subtitle track after the dub file is finalized and BEFORE `dub_status = ready`;
 a subtitle failure is a WARN log and NEVER fails the dub.
 
+## Startup backfill for dubs finished before D3 (#182)
+The builder runs only at the end of a synthesis, so a dub that was already
+`ready` (the 40-min acceptance sample) would never get subtitles. Once per
+process, `DubWorker::process_next` (after the `dub_worker_enabled` kill-switch)
+calls `subtitles_store::backfill_missing_subtitles`: the pure-SQL selector
+`models_dabing::list_ready_dubs_without_subtitles` (`dub_requested=1`,
+`dub_status='ready'`, `lyrics_source` NULL or != `gemini-live-translate`) → build
+from the saved `<base>_dub_transcripts.json` (a legacy JSON without `at_ms`/`tempo`
+falls back to `start_ms` / `1.0`). Once per process, never per tick — an unusable
+JSON must not loop; failures are WARN only. The call sits in `process_next`
+(structurally mutation-excluded), NOT in `run`, so it adds no whole-fn mutant.
+
 ## Lyrics queue skips dub videos
 Every selector bucket in `lyrics/reprocess.rs` (manual/null/stale/fullmix) ANDs
 in ONE shared predicate const `EXCLUDE_DUB_REQUESTED`

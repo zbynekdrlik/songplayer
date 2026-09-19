@@ -439,6 +439,40 @@ pub async fn record_dub_deferral(
     Ok(new_attempts as u32)
 }
 
+/// A finished dub that still lacks its subtitle track (#182 backfill).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DubSubtitleBackfill {
+    pub video_id: i64,
+    pub youtube_id: String,
+    pub audio_file_path: String,
+}
+
+/// Dub-ready videos whose lyrics track is NOT the Live-Translate subtitle track:
+/// dubs that finished before #182 shipped, or whose subtitle build failed.
+/// Oldest first.
+pub async fn list_ready_dubs_without_subtitles(
+    pool: &SqlitePool,
+) -> Result<Vec<DubSubtitleBackfill>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT id, youtube_id, audio_file_path FROM videos \
+         WHERE dub_requested = 1 AND dub_status = 'ready' \
+           AND audio_file_path IS NOT NULL \
+           AND (lyrics_source IS NULL OR lyrics_source != ?) \
+         ORDER BY id ASC",
+    )
+    .bind(crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| DubSubtitleBackfill {
+            video_id: r.get("id"),
+            youtube_id: r.get("youtube_id"),
+            audio_file_path: r.get("audio_file_path"),
+        })
+        .collect())
+}
+
 #[cfg(test)]
 #[path = "models_tests_dabing.rs"]
 mod tests;

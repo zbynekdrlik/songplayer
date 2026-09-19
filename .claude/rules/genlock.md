@@ -165,3 +165,33 @@ paths:
   transitions/stalls; `late_blocks` ≈ 0 and `emit_jitter_p99_us` < 500 with the
   TIME_CRITICAL thread. The PACED path (`pipeline_paced.rs`) keeps its own audio
   clock (the Pacer's `AudioGridBuffer` + PLL) and is untouched.
+  **Box finding 19.9.2026 (0.59.0-dev.6):** EVERY pipeline runs an emitter (idle
+  ones emit silence, so receivers never starve), and with the FIXED 2 ms spin the
+  per-minute p99 was 0.4–5.5 ms, not < 0.5 — on the 24-core, ~3 % busy,
+  Balanced-plan Win11 box the coarse `thread::sleep` overshoots by several ms
+  (parked cores), TIME_CRITICAL or not; SongPlayer used 0.10 cores total, so it
+  was NOT spin contention. Cure: `audio_emitter::SpinMargin` (pure, Linux-tested)
+  — margin = worst coarse-sleep overshoot of the last 900 slots + 0.5 ms, clamped
+  2–6 ms, and ONLY while the pipeline carried audio in the last 300 slots (a
+  song transition stays tight; ten silent idle emitters keep the cheap 2 ms).
+  `sleep_until` returns the overshoot; the heartbeat logs `spin_margin_us`.
+  Re-read p99 + SongPlayer CPU on the box after any change here.
+  **Round 2 — the ring needs a CUSHION (box 19.9.2026):** with the decoder's
+  plain 40 ms pairing the ring sat at 24–55 ms (FLAC chunks are ~85 ms, so the
+  depth saw-tooths to ~0) and any decode hiccup became a 33 ms SILENCE BLOCK
+  mid-song on the live output (`audio resumed after silence … silence_blocks=1`:
+  3× in 15 min unloaded, ~1/s while a second pipeline decoded) — and every
+  underrun shifted audio later for the rest of the song. Cure: the emitter path
+  opens the decoder through `pipeline_audio::open_synced_decoder` →
+  `SplitSyncedDecoder::with_tolerance(40 + AUDIO_LOOKAHEAD_MS=100)`, i.e. audio
+  is read ~100 ms AHEAD of video. That fills the ring to ≈ 98–225 ms (capacity
+  266) WITHOUT an A/V offset (the first block starts as the first frame goes
+  out; both then run in real time). Three rules ride with the lookahead: a
+  PAUSE must `hold_ring` (silence without popping — else the cushion plays out
+  past the pause point and audio leads after resume; released by the next
+  `push_blocking`), a SEEK and a new playback must `clear_ring` (else stale audio
+  queues ahead and audio lags), and the legacy no-emitter fallback keeps the
+  plain 40 ms (its audio rides the video frames). A `silence_blocks=1` resume
+  line mid-song is ALWAYS a defect — grep the box log for it after any change.
+  The heartbeat also logs `emit_call_max_us` (ring lock + NDI `send_audio`) to
+  tell an SDK/lock-delayed slot from a late wake-up.

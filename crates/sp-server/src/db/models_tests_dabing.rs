@@ -516,3 +516,63 @@ async fn record_dub_deferral_increments_and_marks_failed() {
         .unwrap();
     assert_eq!(n2, 2);
 }
+
+// ── #182 backfill: finished dubs that still lack the subtitle track ──────────
+
+/// Mark a video as a finished dub with the given lyrics source.
+async fn make_ready_dub(pool: &SqlitePool, id: i64, lyrics_source: Option<&str>) {
+    sqlx::query(
+        "UPDATE videos SET dub_requested = 1, dub_status = 'ready', \
+         audio_file_path = '/c/a_audio.flac', lyrics_source = ? WHERE id = ?",
+    )
+    .bind(lyrics_source)
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn backfill_lists_only_ready_dubs_without_the_subtitle_track() {
+    let pool = setup().await;
+    let no_track = insert_video(&pool, "yt_none", "no track").await;
+    let song_track = insert_video(&pool, "yt_song", "song lyrics").await;
+    let has_subs = insert_video(&pool, "yt_subs", "already has subtitles").await;
+    let synth = insert_video(&pool, "yt_synth", "still synthesizing").await;
+    let plain = insert_video(&pool, "yt_plain", "never dubbed").await;
+
+    make_ready_dub(&pool, no_track, None).await;
+    make_ready_dub(&pool, song_track, Some("mtl")).await;
+    make_ready_dub(&pool, has_subs, Some("gemini-live-translate")).await;
+    make_ready_dub(&pool, synth, None).await;
+    sqlx::query("UPDATE videos SET dub_status = 'synth' WHERE id = ?")
+        .bind(synth)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let _ = plain;
+
+    let got = list_ready_dubs_without_subtitles(&pool).await.unwrap();
+    let ids: Vec<i64> = got.iter().map(|b| b.video_id).collect();
+    assert_eq!(ids, vec![no_track, song_track]); // oldest first, nothing else
+    assert_eq!(got[0].youtube_id, "yt_none");
+    assert_eq!(got[0].audio_file_path, "/c/a_audio.flac");
+}
+
+#[tokio::test]
+async fn backfill_skips_a_ready_dub_without_an_audio_path() {
+    let pool = setup().await;
+    let id = insert_video(&pool, "yt_noaudio", "no audio path").await;
+    make_ready_dub(&pool, id, None).await;
+    sqlx::query("UPDATE videos SET audio_file_path = NULL WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        list_ready_dubs_without_subtitles(&pool)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
