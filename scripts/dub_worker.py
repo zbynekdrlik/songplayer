@@ -147,6 +147,12 @@ def build_transcripts(results: list[dict]) -> dict:
                 "index": r["index"],
                 "start_ms": r["chunk_start_ms"],
                 "end_ms": r["chunk_end_ms"],
+                # Video-timeline placement (D3 #182): `at_ms` = where the chunk's
+                # output lands, `tempo` = the atempo the mix applied. Read from the
+                # SAME per-chunk result the mix uses, so cached/resumed chunks are
+                # included with no re-synthesis.
+                "at_ms": r["at_ms"],
+                "tempo": r["tempo"],
                 "en": r["transcript_en"],
                 "sk": r["transcript_sk"],
                 "sk_timed": r["sk_timed"],
