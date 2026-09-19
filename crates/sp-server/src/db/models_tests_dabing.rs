@@ -52,7 +52,7 @@ async fn col_opt_str(pool: &SqlitePool, id: i64, col: &str) -> Option<String> {
 }
 
 #[tokio::test]
-async fn set_dub_requested_true_raises_status_and_both_priority_flags() {
+async fn set_dub_requested_true_raises_status_and_stems_priority_only() {
     let pool = setup().await;
     let id = insert_video(&pool, "v1", "Testimony").await;
 
@@ -66,10 +66,13 @@ async fn set_dub_requested_true_raises_status_and_both_priority_flags() {
         1,
         "requesting a dub must raise the stems manual-priority bucket"
     );
+    // #182: requesting a dub must NOT raise the lyrics manual-priority bucket —
+    // a dubbed talk gets its EN/SK subtitles from the Live-session transcript,
+    // not the song-lyrics pipeline (which the reprocess buckets now also skip).
     assert_eq!(
         col_i64(&pool, id, "lyrics_manual_priority").await,
-        1,
-        "requesting a dub must raise the lyrics manual-priority bucket"
+        0,
+        "requesting a dub must NOT raise the lyrics manual-priority bucket (#182)"
     );
     assert!(
         col_opt_str(&pool, id, "dub_requested_at").await.is_some(),

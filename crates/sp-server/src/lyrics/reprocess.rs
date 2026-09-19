@@ -291,6 +291,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dub_requested_videos_are_excluded_from_every_bucket() {
+        let pool = setup().await;
+        // A dub-requested candidate in the manual / null / stale buckets — none
+        // may be picked by the lyrics worker (#182: a dubbed talk's subtitles come
+        // from the Live-session transcript, not the song-lyrics pipeline).
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_pipeline_version, lyrics_quality_score, lyrics_manual_priority, dub_requested) \
+             VALUES \
+                 (1, 1, 'dub_manual', 1, 1, 2, 0.1, 1, 1), \
+                 (2, 1, 'dub_null',   1, 0, 0, NULL, 0, 1), \
+                 (3, 1, 'dub_stale',  1, 1, 1, 0.1, 0, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // The #171 full-mix upgrade bucket, too.
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_source, lyrics_pipeline_version, lyrics_processed_at, dub_requested) \
+             VALUES (5, 1, 'dub_fullmix', 1, 1, ?, 2, NULL, 1)",
+        )
+        .bind(SOURCE_G35T_FULLMIX)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(
+            get_next_video_for_lyrics(&pool, 2).await.unwrap().is_none(),
+            "no dub-requested video may be returned by any lyrics bucket"
+        );
+
+        // A normal (non-dub) null-lyrics video IS still picked — the exclusion is
+        // surgical, not a blanket freeze of the queue.
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+             lyrics_pipeline_version, lyrics_manual_priority, dub_requested) \
+             VALUES (4, 1, 'normal_null', 1, 0, 0, 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = get_next_video_for_lyrics(&pool, 2).await.unwrap().unwrap();
+        assert_eq!(
+            row.youtube_id, "normal_null",
+            "a non-dub video is unaffected by the exclusion"
+        );
+    }
+
+    #[tokio::test]
     async fn stale_bucket_orders_nulls_first_then_worst_quality() {
         let pool = setup().await;
         sqlx::query(
