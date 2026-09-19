@@ -146,6 +146,39 @@ async fn seek_forwards_clamped_position_to_engine() {
 }
 
 #[tokio::test]
+async fn seek_zero_duration_is_treated_as_unknown_no_clamp() {
+    // A duration of 0 means "unknown / not yet probed" — it must NOT clamp the
+    // requested position to 0 (that would make a video with no known duration
+    // unseekable). The route filters `duration_ms > 0`; a mutant relaxing it to
+    // `>= 0` would clamp to 0 here, so a nonzero position must be forwarded
+    // verbatim.
+    let pid = 940_005;
+    let vid = 9_400_051;
+    let (state, mut rx) = state_with_engine().await;
+    insert_playlist(&state.pool, pid).await;
+    insert_video(&state.pool, vid, pid, Some(0)).await;
+    crate::now_playing::global().set(pid, vid);
+
+    let resp = router(state, None)
+        .oneshot(seek_request(pid, 45_000))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    let cmd = rx.recv().await.expect("engine must receive a command");
+    match cmd {
+        crate::EngineCommand::Seek { position_ms, .. } => {
+            assert_eq!(
+                position_ms, 45_000,
+                "zero duration must be treated as unknown (no clamp)"
+            );
+        }
+        other => panic!("expected Seek, got {other:?}"),
+    }
+    crate::now_playing::global().clear(pid);
+}
+
+#[tokio::test]
 async fn seek_within_bounds_forwards_verbatim() {
     let pid = 940_004;
     let vid = 9_400_041;
