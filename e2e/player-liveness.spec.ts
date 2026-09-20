@@ -206,3 +206,51 @@ test("a seek drag holds its dragged position across ticks and commits exactly on
   expect(seekBodies.length).toBe(1);
   expect(seekBodies[0].position_ms).toBe(100000);
 });
+
+test("a bare change with no preceding input commits nothing — the drag-gate dirty latch (#198)", async ({
+  page,
+  request,
+}) => {
+  // #198 item 1: after #200 the pointer release commits the drag, but a bare
+  // `change` (a programmatic/stale dispatch, or a keyboard change that never
+  // had an `input` in THIS session) still ran commit_seek(seek_drag_ms) /
+  // commit(drag_pct) — and those signals start at 0, so it committed 0 ms / 0 %.
+  // A `dirty` latch set by `on:input` must make a `change` with no prior input a
+  // no-op. Here we dispatch a bare `change` on the seek bar and the dub fader
+  // WITHOUT any preceding `input`/drag and assert NEITHER commits.
+  const seekBodies: Array<{ position_ms?: number }> = [];
+  await page.route("**/api/v1/playback/*/seek", async (route) => {
+    try {
+      seekBodies.push(JSON.parse(route.request().postData() ?? "{}"));
+    } catch {
+      seekBodies.push({});
+    }
+    await route.fulfill({ status: 204 });
+  });
+  const patches: Array<{ ratio?: number }> = [];
+  await page.route("**/api/v1/videos/*/dub-mix", async (route) => {
+    if (route.request().method() === "PATCH") {
+      try {
+        patches.push(JSON.parse(route.request().postData() ?? "{}"));
+      } catch {
+        patches.push({});
+      }
+    }
+    await route.continue();
+  });
+
+  await setupDabingPlayer(page, request);
+  const seek = page.getByTestId("player-seek");
+  await expect(seek).toBeEnabled({ timeout: 15000 });
+  const fader = page.getByTestId("dub-mix-fader");
+  await expect(fader).toBeEnabled({ timeout: 15000 });
+
+  // A bare `change` on each control — no `pointerdown`, no `input`, no drag.
+  await seek.dispatchEvent("change");
+  await fader.dispatchEvent("change");
+
+  // Give any wrongly-fired request time to arrive, then assert none did.
+  await page.waitForTimeout(1500);
+  expect(seekBodies.length, "a bare change must not commit a seek").toBe(0);
+  expect(patches.length, "a bare change must not commit a fader PATCH").toBe(0);
+});
