@@ -15,16 +15,26 @@
 //! creation order) — unit-tested on Linux with no NDI runtime — and, in
 //! `impl PlaybackEngine`, the orchestration that drives them on the box.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use sp_core::models::Playlist;
-use sp_ndi::NdiBackend;
 use tracing::{info, warn};
 
 use super::PlaybackEngine;
+
+// #196: the finder pass needs the NDI backend, which — like `SharedNdiBackend`
+// and the engine's `ndi_backend` field — exists ONLY on Windows (Linux/CI has
+// no NDI runtime). These imports + the finder fn/const below are gated so the
+// Linux `clippy -D warnings` + `cargo test` jobs don't see an unused import or a
+// missing field.
+#[cfg(windows)]
 use super::ndi_health::NdiHealthRegistry;
+#[cfg(windows)]
 use super::pipeline::SharedNdiBackend;
+#[cfg(windows)]
+use sp_ndi::NdiBackend;
+#[cfg(windows)]
+use std::sync::Arc;
 
 /// Poll cadence for the startup port-availability wait.
 const PORT_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -35,12 +45,15 @@ const PORT_WAIT_MAX_POLLS: u32 = 40;
 const SENDER_READY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// #196: how long ONE `NDIlib_find` discovery pass polls for every startup
-/// sender's advertised name→URL to appear (the ruling's ≤ 3 s).
+/// sender's advertised name→URL to appear (the ruling's ≤ 3 s). Windows-only
+/// (the finder is a Windows NDI-runtime call).
+#[cfg(windows)]
 const FINDER_TIMEOUT_MS: u32 = 3000;
 
 /// #196: after the first discovery pass, retry ONCE at +30 s (together with the
 /// receiver self-check window) for any output whose URL had not yet appeared —
 /// the SDK finder can take a moment to see a freshly-created local sender.
+#[cfg(windows)]
 const SENDER_URL_RETRY_DELAY: Duration = Duration::from_secs(30);
 
 /// The first TCP port the NDI runtime assigns to a sender on this box. NDI
@@ -135,6 +148,8 @@ pub fn ndi_ports_free(ports: &[u16]) -> bool {
 ///
 /// mutants::skip — I/O orchestration (spawn_blocking + the FFI finder); the
 /// pure name→URL matching (`sp_ndi::find::match_source_urls`) is unit-tested.
+/// Windows-only (uses the Windows-only `SharedNdiBackend`).
+#[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 pub(crate) async fn discover_and_record_sender_urls(
     backend: Option<SharedNdiBackend>,
@@ -233,21 +248,27 @@ impl PlaybackEngine {
         }
 
         // #196 item 4: the senders are ready — start the +30 s post-restart
-        // receiver self-check clock.
+        // receiver self-check clock (cross-platform: the self-check runs off the
+        // health registry, no NDI backend needed).
         self.ndi_health_registry.mark_senders_ready();
 
         // #196: now that every startup sender exists, read the advertised
         // name→port map via ONE NDIlib_find discovery pass and record it on the
         // health registry (the ruling — `NDIlib_send_get_source_name` leaves the
         // URL empty for a local sender). Retry once at +30 s for any that had
-        // not yet appeared to the finder.
-        let backend = self.ndi_backend.clone();
-        let registry = self.ndi_health_registry.clone();
-        discover_and_record_sender_urls(backend.clone(), registry.clone(), ordered.clone()).await;
-        tokio::spawn(async move {
-            tokio::time::sleep(SENDER_URL_RETRY_DELAY).await;
-            discover_and_record_sender_urls(backend, registry, ordered).await;
-        });
+        // not yet appeared to the finder. WINDOWS ONLY — the NDI backend
+        // (`self.ndi_backend` / `SharedNdiBackend`) exists only on Windows.
+        #[cfg(windows)]
+        {
+            let backend = self.ndi_backend.clone();
+            let registry = self.ndi_health_registry.clone();
+            discover_and_record_sender_urls(backend.clone(), registry.clone(), ordered.clone())
+                .await;
+            tokio::spawn(async move {
+                tokio::time::sleep(SENDER_URL_RETRY_DELAY).await;
+                discover_and_record_sender_urls(backend, registry, ordered).await;
+            });
+        }
     }
 
     /// #196: create one output's pipeline (idempotent) and, once its NDI sender
