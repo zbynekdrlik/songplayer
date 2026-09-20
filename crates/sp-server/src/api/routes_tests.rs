@@ -136,6 +136,9 @@ async fn create_and_list_playlists() {
     let json: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
     assert_eq!(json.len(), 1);
     assert_eq!(json[0]["name"], "Test");
+    // #194 r3c: the list exposes `kind` (the shared PlaylistPicker filters by it);
+    // a freshly created playlist defaults to `youtube`.
+    assert_eq!(json[0]["kind"], "youtube");
 }
 
 #[tokio::test]

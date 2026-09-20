@@ -110,7 +110,7 @@ pub struct ToolsStatusResponse {
 
 pub async fn list_playlists(State(state): State<AppState>) -> impl IntoResponse {
     let rows = sqlx::query(
-        "SELECT id, name, youtube_url, ndi_output_name, playback_mode, is_active, created_at, updated_at
+        "SELECT id, name, youtube_url, ndi_output_name, playback_mode, is_active, created_at, updated_at, kind
          FROM playlists ORDER BY id",
     )
     .fetch_all(&state.pool)
@@ -130,6 +130,12 @@ pub async fn list_playlists(State(state): State<AppState>) -> impl IntoResponse 
                         "is_active": r.get::<i32, _>("is_active") != 0,
                         "created_at": r.get::<String, _>("created_at"),
                         "updated_at": r.get::<String, _>("updated_at"),
+                        // #194 r3c: expose `kind` so the shared PlaylistPicker can
+                        // filter by it (Live shows only the `custom` playlist) —
+                        // no hardcoded `name == "ytlive"` lookup. NULL-safe: an
+                        // old row with no kind reads as the default `youtube`.
+                        "kind": r.get::<Option<String>, _>("kind")
+                            .unwrap_or_else(|| "youtube".to_string()),
                     })
                 })
                 .collect();
