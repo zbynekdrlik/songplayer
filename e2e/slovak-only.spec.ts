@@ -59,6 +59,46 @@ const BANNED: string[] = [
   "Raw audit log",
   "+ Add",
   "Enabled",
+  // #198 item 4 — a DENYLIST EXTENSION, not the positive gate the design
+  // prefers. A positive "fail any pure-ASCII-alphabetic chrome word that is not
+  // in a product-name allowlist" gate is stronger, but its curated
+  // Slovak-without-diacritics allowlist (skladby, skladba, Interpret, adresa,
+  // osoba, Dabing, dabingu, Mix, Stemy, stemov, Info, Naživo, Texty,
+  // Nastavenia, …) cannot be bounded to ≤30 entries OR verified complete from
+  // the Tier-0 no-compile / no-mock-run box: static source extraction cannot
+  // tell rendered chrome text apart from comments / CSS class strings / testids
+  // / panic messages / format fragments, so a positive gate would false-positive
+  // on a missed Slovak word and red CI. Per the design's stated fallback we
+  // instead EXTEND the exact-match denylist with common English UI-chrome words
+  // that must never appear in the Slovak operator UI — each verified absent from
+  // the current view code. Exact-match keeps data (a song / playlist name that
+  // merely CONTAINS an English word) from tripping it. Product / technical names
+  // (OBS, NDI, Resolume, SongPlayer, WS, LAN, the genlock vocabulary) stay
+  // allowed and are deliberately NOT listed here.
+  "Search",
+  "Filter",
+  "Close",
+  "Submit",
+  "Remove",
+  "Update",
+  "Refresh",
+  "Retry",
+  "Status",
+  "Queue",
+  "Error",
+  "Warning",
+  "Start",
+  "Stop",
+  "Back",
+  "Next",
+  "Done",
+  "Home",
+  "Help",
+  "About",
+  "Enable",
+  "Disable",
+  "Preview",
+  "Export",
 ];
 
 // The navigation tabs (outside `main.content`) — translated in the round-3c
