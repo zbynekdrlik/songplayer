@@ -719,6 +719,13 @@ jobs:
       && needs.gate.result == 'success'
       && needs.build-tauri.result == 'success'
     runs-on: [self-hosted, windows, resolume]
+    # #198 item 2: publish the version the running SongPlayer actually reports
+    # after this deploy (verified == the checked-out VERSION here), so the E2E
+    # job's restart-skip compares against THIS run's deployed version rather than
+    # re-reading VERSION from its own checkout (which drifts on a re-run of an
+    # older run / a moved ref).
+    outputs:
+      deployed_version: ${{ steps.healthcheck.outputs.deployed_version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -884,6 +891,7 @@ jobs:
           Write-Host "SongPlayer started"
 
       - name: Health checks
+        id: healthcheck
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
@@ -923,6 +931,11 @@ jobs:
             exit 1
           }
           Write-Host "OK: Version matches ($VERSION)"
+
+          # #198 item 2: publish the version the deployed process actually reports
+          # (just verified == the checked-out VERSION) as a job output, so the E2E
+          # restart-skip compares against THIS deploy, not its own VERSION file.
+          "deployed_version=$($resp.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
           Write-Host "=== All health checks passed ==="
 
@@ -987,7 +1000,13 @@ jobs:
           # this step exists for (to pick up OBS). Otherwise fall through and
           # restart (a process still in OBS backoff DOES get restarted). Log the
           # branch taken.
-          $DeployedVersion = (Get-Content VERSION -Raw).Trim()
+          #
+          # #198 item 2: the deployed version is the one the Deploy job OBSERVED
+          # the running process report (verified == that run's VERSION), passed
+          # through a job output — NOT (Get-Content VERSION) from this job's
+          # checkout, which silently drifts on a re-run of an older run / a moved
+          # ref and flips the skip decision.
+          $DeployedVersion = "${{ needs.deploy-resolume.outputs.deployed_version }}".Trim()
           try {
             $status = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status" -TimeoutSec 5
             $uptime = [int]$status.uptime_s
