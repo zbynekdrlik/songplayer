@@ -485,3 +485,272 @@ async fn count_stems_progress_counts_pending_and_done() {
     assert_eq!(pending, 1, "one song still needs stems");
     assert_eq!(done, 1, "one song has stems");
 }
+
+// ── #195 in-use-first tiered stems queue ─────────────────────────────────────
+
+use crate::db::models_stems_priority as prio;
+use crate::stems::queue_tiers;
+
+/// Add a second (or third …) playlist so tier tests can put videos on distinct
+/// playlists. Playlist 1 is created by `setup_pool`.
+async fn insert_playlist(pool: &SqlitePool, id: i64) {
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url, is_active) VALUES (?, 'p', 'u', 1)")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// Insert a normalized, stem-eligible video on a specific playlist.
+async fn insert_normalized_on(pool: &SqlitePool, playlist_id: i64, youtube_id: &str) -> i64 {
+    sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title, normalized, file_path, audio_file_path) \
+         VALUES (?, ?, 't', 1, ?, ?) RETURNING id",
+    )
+    .bind(playlist_id)
+    .bind(youtube_id)
+    .bind(format!("/c/{youtube_id}_video.mp4"))
+    .bind(format!("/c/{youtube_id}_audio.flac"))
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// Record a `play_history` row `days_ago` days in the past (for the recency tier).
+async fn add_play_history(pool: &SqlitePool, playlist_id: i64, video_id: i64, days_ago: i64) {
+    sqlx::query(
+        "INSERT INTO play_history (playlist_id, video_id, played_at) \
+         VALUES (?, ?, datetime('now', ?))",
+    )
+    .bind(playlist_id)
+    .bind(video_id)
+    .bind(format!("-{days_ago} days"))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn on_program_playlist_beats_older_nonprogram_video() {
+    // Playlist 1 (non-program) has the OLDER video; playlist 2 (on program) the
+    // NEWER one. In-use-first must pick the on-program (newer-id) video anyway.
+    let pool = setup_pool().await;
+    insert_playlist(&pool, 2).await;
+    let old_off = insert_normalized_on(&pool, 1, "old_off").await;
+    let new_on = insert_normalized_on(&pool, 2, "new_on").await;
+    assert!(
+        new_on > old_off,
+        "sanity: on-program video has the newer id"
+    );
+
+    let job = prio::get_next_stem_job(&pool, &[2], &[]).await.unwrap();
+    assert_eq!(
+        job.map(|j| j.video_id),
+        Some(new_on),
+        "the on-program playlist's song jumps ahead of an older non-program one"
+    );
+}
+
+#[tokio::test]
+async fn manual_priority_wins_across_every_tier() {
+    // A manual-priority row on an UNUSED playlist beats the on-program tier.
+    let pool = setup_pool().await;
+    insert_playlist(&pool, 2).await;
+    insert_playlist(&pool, 3).await;
+    let _off = insert_normalized_on(&pool, 1, "m_off").await;
+    let _on = insert_normalized_on(&pool, 2, "m_on").await; // on program
+    let manual = insert_normalized_on(&pool, 3, "m_manual").await; // unused playlist
+    sqlx::query("UPDATE videos SET stem_manual_priority = 1 WHERE id = ?")
+        .bind(manual)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let job = prio::get_next_stem_job(&pool, &[2], &[3]).await.unwrap();
+    assert_eq!(
+        job.map(|j| j.video_id),
+        Some(manual),
+        "an explicit manual/dub priority ask wins on any playlist (tier 0)"
+    );
+}
+
+#[tokio::test]
+async fn recent_playlist_beats_old_nonrecent_video() {
+    // Playlist 1 (not recent, not on program) has the older video; playlist 2
+    // (recently played) the newer one. With no on-program tier, recency wins.
+    let pool = setup_pool().await;
+    insert_playlist(&pool, 2).await;
+    let old_stale = insert_normalized_on(&pool, 1, "old_stale").await;
+    let new_recent = insert_normalized_on(&pool, 2, "new_recent").await;
+
+    let job = prio::get_next_stem_job(&pool, &[], &[2]).await.unwrap();
+    assert_eq!(
+        job.map(|j| j.video_id),
+        Some(new_recent),
+        "a recently-played playlist's song jumps ahead of an older stale one"
+    );
+    let _ = old_stale;
+}
+
+#[tokio::test]
+async fn empty_tier_lists_fall_through_to_unrestricted_oldest_first() {
+    // No on-program, no recent → tier 3 = today's unrestricted oldest-first query.
+    let pool = setup_pool().await;
+    insert_playlist(&pool, 2).await;
+    let first = insert_normalized_on(&pool, 1, "ef_first").await;
+    let _second = insert_normalized_on(&pool, 2, "ef_second").await;
+
+    let job = prio::get_next_stem_job(&pool, &[], &[]).await.unwrap();
+    assert_eq!(
+        job.map(|j| j.video_id),
+        Some(first),
+        "empty tiers skip to the unrestricted oldest-first selector"
+    );
+}
+
+#[tokio::test]
+async fn a_tier_with_no_matching_row_is_skipped() {
+    // on-program names a playlist with NO eligible row → tier 1 yields nothing →
+    // recency (tier 2) decides. Proves an unmatched tier does not stall the queue.
+    let pool = setup_pool().await;
+    insert_playlist(&pool, 2).await;
+    insert_playlist(&pool, 3).await;
+    let _old = insert_normalized_on(&pool, 1, "sk_old").await;
+    let recent = insert_normalized_on(&pool, 3, "sk_recent").await;
+
+    let job = prio::get_next_stem_job(&pool, &[2], &[3]).await.unwrap();
+    assert_eq!(
+        job.map(|j| j.video_id),
+        Some(recent),
+        "an on-program playlist with no eligible row falls through to recency"
+    );
+}
+
+#[tokio::test]
+async fn next_stem_for_playlists_empty_list_returns_none() {
+    // An empty id list skips its tier (never emits `IN ()`), even with eligible rows.
+    let pool = setup_pool().await;
+    let _v = insert_normalized(&pool, "np_x").await;
+    assert!(
+        prio::next_stem_for_playlists(&pool, &[])
+            .await
+            .unwrap()
+            .is_none(),
+        "empty playlist list yields no job"
+    );
+}
+
+#[tokio::test]
+async fn next_stem_for_playlists_restricts_to_the_given_playlists() {
+    let pool = setup_pool().await;
+    insert_playlist(&pool, 2).await;
+    let _p1 = insert_normalized_on(&pool, 1, "r_p1").await;
+    let p2 = insert_normalized_on(&pool, 2, "r_p2").await;
+    assert_eq!(
+        prio::next_stem_for_playlists(&pool, &[2])
+            .await
+            .unwrap()
+            .map(|j| j.video_id),
+        Some(p2),
+        "only a video on a listed playlist is returned"
+    );
+}
+
+#[tokio::test]
+async fn recent_playlists_honours_the_day_window_both_sides() {
+    let pool = setup_pool().await;
+    insert_playlist(&pool, 2).await;
+    insert_playlist(&pool, 3).await;
+    let v2 = insert_normalized_on(&pool, 2, "rp_2").await;
+    let v3 = insert_normalized_on(&pool, 3, "rp_3").await;
+    add_play_history(&pool, 2, v2, 3).await; // 3 days ago
+    add_play_history(&pool, 3, v3, 10).await; // 10 days ago
+
+    let within7 = queue_tiers::recent_playlists(&pool, 7).await.unwrap();
+    assert!(
+        within7.contains(&2),
+        "played 3 days ago is inside the 7-day window"
+    );
+    assert!(
+        !within7.contains(&3),
+        "played 10 days ago is outside the 7-day window"
+    );
+
+    let within2 = queue_tiers::recent_playlists(&pool, 2).await.unwrap();
+    assert!(
+        !within2.contains(&2),
+        "played 3 days ago is outside a 2-day window"
+    );
+
+    // A just-cleared (empty) table tolerates the query — returns an empty list,
+    // never errors.
+    sqlx::query("DELETE FROM play_history")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let empty = queue_tiers::recent_playlists(&pool, 7).await.unwrap();
+    assert!(
+        empty.is_empty(),
+        "an empty play_history yields no recent playlists"
+    );
+}
+
+#[tokio::test]
+async fn tiered_queue_position_matches_the_selector_order() {
+    // Same layout as the on-program test: the on-program (newer) video ranks 1,
+    // the older non-program one ranks 2 — the tier rank the panel shows.
+    let pool = setup_pool().await;
+    insert_playlist(&pool, 2).await;
+    let old_off = insert_normalized_on(&pool, 1, "qp_old_off").await;
+    let new_on = insert_normalized_on(&pool, 2, "qp_new_on").await;
+
+    assert_eq!(
+        prio::queue_position(&pool, new_on, &[2], &[])
+            .await
+            .unwrap(),
+        Some(1),
+        "the on-program song is at the head of the queue"
+    );
+    assert_eq!(
+        prio::queue_position(&pool, old_off, &[2], &[])
+            .await
+            .unwrap(),
+        Some(2),
+        "the older non-program song trails the on-program one"
+    );
+}
+
+#[tokio::test]
+async fn tiered_queue_position_none_for_ineligible_row() {
+    let pool = setup_pool().await;
+    insert_playlist(&pool, 2).await;
+    let done = insert_normalized_on(&pool, 2, "qp_done").await;
+    mark_stems_done(&pool, done, "/c/qp_done_v.flac", "/c/qp_done_i.flac")
+        .await
+        .unwrap();
+    assert_eq!(
+        prio::queue_position(&pool, done, &[2], &[]).await.unwrap(),
+        None,
+        "a done row has no queue position under the tiered rank either"
+    );
+}
+
+#[tokio::test]
+async fn tiered_queue_position_empty_tiers_equal_unrestricted_oldest_first() {
+    // With no active tiers the tiered rank is the plain oldest-first order — the
+    // exact behaviour the legacy 2-arg `models_stems::queue_position` delegates to.
+    let pool = setup_pool().await;
+    let a = insert_normalized(&pool, "eqp_a").await;
+    let b = insert_normalized(&pool, "eqp_b").await;
+    assert_eq!(
+        prio::queue_position(&pool, a, &[], &[]).await.unwrap(),
+        Some(1)
+    );
+    assert_eq!(
+        prio::queue_position(&pool, b, &[], &[]).await.unwrap(),
+        Some(2)
+    );
+    // The delegating 2-arg form agrees.
+    assert_eq!(queue_position(&pool, a).await.unwrap(), Some(1));
+    assert_eq!(queue_position(&pool, b).await.unwrap(), Some(2));
+}

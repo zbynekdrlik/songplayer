@@ -78,37 +78,16 @@ pub fn stems_state_of(
 
 /// 1-based position of `video_id` in the stem worker's queue, or `None` when the
 /// row is not queue-eligible (done / unsupported / not normalized / no audio /
-/// within its failure backoff). Mirrors [`get_next_video_for_stems`]'s
-/// eligibility predicate and its `ORDER BY stem_manual_priority DESC, id ASC`, so
-/// the number the panel shows matches the order the worker will pick: a
-/// higher-priority row, or a same-priority lower-id row, comes before this one.
+/// within its failure backoff).
+///
+/// The in-use-first ranking (#195) lives in
+/// [`crate::db::models_stems_priority::queue_position`]; this 2-arg form is the
+/// UNRESTRICTED case (empty tier inputs → the plain `stem_manual_priority DESC,
+/// id ASC` order), still exercised by the oldest-first unit tests. Production
+/// (the karaoke panel / enqueue reply) reads the tiered form so the chip's "vo
+/// fronte (N.)" matches the order the worker actually picks in.
 pub async fn queue_position(pool: &SqlitePool, video_id: i64) -> Result<Option<i64>, sqlx::Error> {
-    const ELIGIBLE_PRED: &str = "normalized = 1 AND audio_file_path IS NOT NULL \
-         AND (stem_status IS NULL OR stem_status = 'failed') \
-         AND (stem_next_attempt_at IS NULL \
-              OR stem_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
-
-    let this: Option<i64> = sqlx::query_scalar(&format!(
-        "SELECT stem_manual_priority FROM videos WHERE id = ? AND {ELIGIBLE_PRED}"
-    ))
-    .bind(video_id)
-    .fetch_optional(pool)
-    .await?;
-    let Some(prio) = this else {
-        return Ok(None);
-    };
-    let before: i64 = sqlx::query_scalar(&format!(
-        "SELECT COUNT(*) FROM videos \
-         WHERE {ELIGIBLE_PRED} \
-           AND (stem_manual_priority > ? \
-                OR (stem_manual_priority = ? AND id < ?))"
-    ))
-    .bind(prio)
-    .bind(prio)
-    .bind(video_id)
-    .fetch_one(pool)
-    .await?;
-    Ok(Some(before + 1))
+    crate::db::models_stems_priority::queue_position(pool, video_id, &[], &[]).await
 }
 
 /// One video's stems-related fields, plus its resolved [`StemsState`]. Feeds the

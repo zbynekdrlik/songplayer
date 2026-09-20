@@ -39,6 +39,15 @@ pub async fn get_karaoke(State(state): State<AppState>) -> impl IntoResponse {
         .unwrap_or((0, 0));
 
     let in_flight = crate::stems::progress::in_flight();
+    // #195: build the tier inputs ONCE per request (setting read + one
+    // `play_history` query + a snapshot read), then rank each now-playing entry
+    // against them, so the chip's "vo fronte (N.)" matches the order the worker
+    // will actually pick — without re-deriving the tiers per entry.
+    let (on_program, recent) = crate::stems::queue_tiers::compute_tier_inputs(
+        Some(&state.ndi_health_registry),
+        &state.pool,
+    )
+    .await;
     let mut now_playing = Vec::new();
     for (playlist_id, video_id) in crate::now_playing::global().snapshot() {
         let info = match crate::db::models_stems::video_stems_info(
@@ -51,10 +60,15 @@ pub async fn get_karaoke(State(state): State<AppState>) -> impl IntoResponse {
             Ok(Some(info)) => info,
             _ => continue, // row vanished; skip rather than emit a half entry
         };
-        let queue_position = crate::db::models_stems::queue_position(&state.pool, video_id)
-            .await
-            .ok()
-            .flatten();
+        let queue_position = crate::db::models_stems_priority::queue_position(
+            &state.pool,
+            video_id,
+            &on_program,
+            &recent,
+        )
+        .await
+        .ok()
+        .flatten();
         now_playing.push(serde_json::json!({
             "playlist_id": playlist_id,
             "video_id": video_id,
