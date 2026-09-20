@@ -12,7 +12,7 @@
 
 use leptos::prelude::*;
 use serde::Serialize;
-use sp_core::playback::{PlaybackMode, PlaybackState};
+use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
 use sp_core::seek_model::{format_position, seek_display_ms, seek_target_ms};
 
 use crate::api;
@@ -49,9 +49,14 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     let position = move || np().map(|i| i.position_ms).unwrap_or(0);
     let duration = move || np().map(|i| i.duration_ms).unwrap_or(0);
     let state = move || np().map(|i| i.state).unwrap_or_default();
+    let transport = move || np().map(|i| i.transport).unwrap_or_default();
     let mode = move || np().map(|i| i.mode).unwrap_or_default();
 
-    let is_playing = Memo::new(move |_| matches!(state(), PlaybackState::Playing));
+    // #201: the play/pause label follows the pipeline's own TRANSPORT state, not
+    // the scene-aware `state` — a dub decoding OFF program (state
+    // WaitingForScene, transport Playing) reads `⏸ Pauza` and a click posts
+    // /pause. On/off-program shows only in the badge (from `ndi_health`).
+    let is_playing = Memo::new(move |_| matches!(transport(), TransportState::Playing));
 
     // The pipeline is DECODING when it is Playing OR waiting off-program for its
     // scene with a real current video. Preparing a dub on the Dabing page before

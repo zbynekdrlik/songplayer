@@ -21,10 +21,10 @@ use super::state::PlayState;
 /// Map the raw engine [`PlayState`] to the pipeline's own [`TransportState`].
 pub(crate) fn transport_from_play_state(state: &PlayState) -> TransportState {
     match state {
-        // RED (#201): deliberately wrong — GREEN maps a decoding pipeline to
-        // `Playing`. A decoding pipeline mapped to `Paused` is exactly the bug
-        // (an off-program dub reads `▶ Prehrať` while it plays).
-        PlayState::Playing { .. } => TransportState::Paused,
+        // A decoding pipeline is Playing regardless of whether its scene is on
+        // program — this is the whole point of #201 (an off-program dub reads
+        // `⏸ Pauza` while it plays).
+        PlayState::Playing { .. } => TransportState::Playing,
         PlayState::WaitingForScene => TransportState::Paused,
         PlayState::Idle => TransportState::Idle,
     }

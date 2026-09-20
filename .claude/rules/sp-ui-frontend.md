@@ -551,11 +551,41 @@ Rules now:
 
 ## Off-program pipelines: the Player label is NOT proof of playback (post-deploy specs)
 
-`ndi_health` maps a Playing-but-off-program pipeline to `Paused` (the #194
-"state == Playing means the wall shows this output" rule), and the Player's
-`is_playing` reads that mapping — so on the Dabing page an off-program dub can
-read `▶ Prehrať` while it decodes (bug ticket filed 20.9.2026). A box spec must
-prove playback by the BACKEND effect (`/api/v1/ndi/health`
+A box spec must prove playback by the BACKEND effect (`/api/v1/ndi/health`
 `frames_submitted_last_5s > 0` for the playlist), never by the toggle text —
-`e2e/post-deploy-dabing.spec.ts` is the pattern.
+`e2e/post-deploy-dabing.spec.ts` is the pattern. (Historically the toggle text
+was ALSO unreliable off program — the #201 fix below made the label honest, but
+frames-on-the-output stays the ground truth for "is it decoding".)
+
+## Transport vs program: the Player label follows the pipeline, the badge follows health (#201)
+
+Two orthogonal facts, two sources — never conflate them:
+
+- **The play/pause toggle (`player-playpause`) reads `NowPlayingInfo.transport`**
+  (`transport == Playing` → `⏸ Pauza`, else `▶ Prehrať`). `transport` is the
+  pipeline's OWN decoding state, INDEPENDENT of program. So a dub prepared OFF
+  program on the Dabing page (scene-aware `state` = `WaitingForScene`) reads
+  `⏸ Pauza` while it decodes, and a click posts `/pause`. `is_decoding`
+  (preview/mixer enablement) still reads `state` — unchanged.
+- **The on/off-program badge (`player-program-badge`) still reads
+  `store.ndi_health`** (`state == "Playing"` = the wall shows this output) →
+  `● Na programe` / `○ Mimo programu`. NEVER derive the badge from `transport`.
+
+Server: `ServerMsg::PlaybackStateChanged` carries `transport: TransportState`
+(`#[serde(default)]` = `Idle`), filled by the engine from the RAW `PlayState` via
+the pure `playback/transport_state.rs::transport_from_play_state`
+(`Playing`→Playing, `WaitingForScene`→Paused, `Idle`→Idle);
+`play_state_to_ws`/`WsPlaybackState` are UNCHANGED (the #170 scene-aware
+contract + its E2E keep working). The fresh-connect replay
+(`websocket.rs::playback_state_replay`) derives transport from the scene-reconciled
+health label (`transport_from_label`), so a dashboard RELOADED while an
+off-program dub decodes replays `Paused` until the next live update — a known
+limit (the health snapshot would need the raw decoding state to fix).
+
+Mock: a tick item carries `transport` (defaults to `Playing` when `state ==
+"Playing"`, else `Paused`); an off-program decoding item is
+`{state:"WaitingForScene", transport:"Playing"}`. The playlist-1 WS-open
+broadcast carries `transport:"Playing"` so the Dashboard toggle reads `⏸ Pauza`.
+`e2e/player-transport.spec.ts` pins both cases; a NEW required field on the WS
+message must be reflected in every mock `PlaybackStateChanged` a spec relies on.
 
