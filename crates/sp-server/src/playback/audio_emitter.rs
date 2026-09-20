@@ -532,9 +532,7 @@ pub const AUDIO_LOOKAHEAD_MS: u64 = 1500;
 /// `EMIT_RATE_HZ`⌉ = ⌈1600 / 48 kHz⌉ = ⌈33.333 ms⌉ = 34 ms. Rounded UP so a
 /// budget derived from it never falls short of a whole slot. Pure.
 pub const fn block_ms() -> u64 {
-    let num = EMIT_SAMPLES_PER_BLOCK as u64 * 1000;
-    let den = EMIT_RATE_HZ as u64;
-    (num + den - 1) / den
+    (EMIT_SAMPLES_PER_BLOCK as u64 * 1000).div_ceil(EMIT_RATE_HZ as u64)
 }
 
 /// Natural-end drain budget (ms): at a natural song end the ring still holds the
@@ -562,7 +560,7 @@ pub const fn ring_capacity_blocks(lookahead_ms: u64) -> usize {
     let num = depth_ms * EMIT_RATE_HZ as u64;
     let den = 1000 * EMIT_SAMPLES_PER_BLOCK as u64;
     // ceil(depth_ms / block_ms), in whole blocks, plus headroom.
-    let blocks = ((num + den - 1) / den) as usize;
+    let blocks = num.div_ceil(den) as usize;
     blocks + RING_HEADROOM_BLOCKS
 }
 

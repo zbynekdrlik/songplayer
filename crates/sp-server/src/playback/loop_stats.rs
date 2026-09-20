@@ -44,8 +44,7 @@ pub fn percentile_ceil(samples: &VecDeque<u64>, p: u64) -> u64 {
     v.sort_unstable();
     let n = v.len() as u64;
     // rank = ceil(n·p/100), clamped into [1, n]; index = rank − 1 in [0, n−1].
-    let rank = ((n * p) + 99) / 100;
-    let rank = rank.max(1).min(n);
+    let rank = (n * p).div_ceil(100).max(1).min(n);
     v[(rank - 1) as usize]
 }
 
