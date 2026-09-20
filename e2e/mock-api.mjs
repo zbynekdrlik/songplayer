@@ -845,17 +845,48 @@ app.get('/api/v1/lyrics/songs/:id', (req, res) => {
 // the Lyrics details modal fetches this). A small two-line track is enough for
 // the list + active-line highlight; a missing route would 404 and trip the
 // zero-console check.
+const lyricsTrack = {
+  version: 22,
+  source: 'gemini-3-5-transcribe',
+  language_source: 'en',
+  language_translation: 'sk',
+  lines: [
+    { start_ms: 0, end_ms: 2000, en: 'Line one', sk: 'Riadok jeden' },
+    { start_ms: 2000, end_ms: 4000, en: 'Line two', sk: 'Riadok dva' },
+  ],
+};
+
+// #198 item 3/9: drive the shared LyricsView's loading / error / empty states.
+//   "track" (default) → 200 + the 2-line track
+//   "empty"           → 204 (no lyrics; the real handler's no-lyrics reply)
+//   "error"           → 500
+//   "slow"            → 200 after a delay so the loading state is observable
+// Test-only; reset to "track" in each spec's afterEach (global in-memory state).
+let lyricsMode = 'track';
+app.post('/__mock/lyrics-mode', (req, res) => {
+  const mode = req.body?.mode;
+  if (!['track', 'empty', 'error', 'slow'].includes(mode)) {
+    res.status(400).json({ error: `unknown mode: ${mode}` });
+    return;
+  }
+  lyricsMode = mode;
+  res.json({ mode: lyricsMode });
+});
+
 app.get('/api/v1/videos/:id/lyrics', (_req, res) => {
-  res.json({
-    version: 22,
-    source: 'gemini-3-5-transcribe',
-    language_source: 'en',
-    language_translation: 'sk',
-    lines: [
-      { start_ms: 0, end_ms: 2000, en: 'Line one', sk: 'Riadok jeden' },
-      { start_ms: 2000, end_ms: 4000, en: 'Line two', sk: 'Riadok dva' },
-    ],
-  });
+  if (lyricsMode === 'empty') {
+    res.status(204).end();
+    return;
+  }
+  if (lyricsMode === 'error') {
+    res.status(500).json({ error: 'mock: lyrics fetch failed' });
+    return;
+  }
+  if (lyricsMode === 'slow') {
+    setTimeout(() => res.json(lyricsTrack), 2000);
+    return;
+  }
+  res.json(lyricsTrack);
 });
 
 // Mutable reprocess result so tests can drive the dashboard's banner
