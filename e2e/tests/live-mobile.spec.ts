@@ -86,7 +86,7 @@ test.describe('/live mobile (iPhone-SE viewport)', () => {
     // Wait for the scroller — it renders once NowPlayingInfo.video_id is
     // known from the WS NowPlaying message (or from whatever the mock API
     // returns for /playlists).
-    const scroller = page.locator('.lyrics-scroller');
+    const scroller = page.locator('.lyrics-view-scroll');
     await expect(scroller).toBeVisible({ timeout: 30_000 });
 
     // Tap the first available lyrics line. If the mock env has no NowPlaying
@@ -98,7 +98,7 @@ test.describe('/live mobile (iPhone-SE viewport)', () => {
     if (count === 0) {
       // Accept: no video playing means no lyrics. Scroller shows empty state.
       // This is a valid environment state, not a skip.
-      await expect(page.locator('.lyrics-empty, .lyrics-error')).toBeVisible();
+      await expect(page.locator('.state-empty, .state-error')).toBeVisible();
       return;
     }
 

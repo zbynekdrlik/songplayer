@@ -433,7 +433,7 @@ not re-create any of them beside the shared one.
 | status strip (every page) | `health_bar.rs::HealthBar` (pure `sp_core::health`) | `health-ws`/`health-obs`/`health-genlock`/`health-resolume`/`health-tools`/`health-lan`/`health-version` (nests `version`) |
 | loading / empty / error | `state_block.rs::StateBlock{Loading,Empty,Error}` | `state-loading`/`state-empty`/`state-error` |
 | playlist chooser (every page) | `playlist_picker.rs::PlaylistPicker(kinds?)` | `playlist-picker`, `playlist-picker-item`, `playlist-picker-select`, `playlist-picker-list` |
-| lyrics surface | `lyrics_view.rs::LyricsView(mode, playlist_id?, video_id?)` | `lyrics-view` |
+| lyrics surface | `lyrics_view.rs::LyricsView(playlist_id?, video_id?)` | `lyrics-view` |
 | one poll helper | `store::poll_into` / `store::poll_value` | — |
 
 ### `PlaylistPicker` — one chooser + one selection state (#194 r3c)
@@ -450,23 +450,31 @@ locators keep resolving) while the testids are `playlist-picker*`. Both `<For>`
 (desktop list + mobile `<select>`) read ONLY `store.playlists` (#170: a
 position tick never re-orders the rows).
 
-### `LyricsView` — one lyrics surface with a `mode` prop (#194 r3c)
+### `LyricsView` — ONE tappable lyrics surface everywhere (#194 r3c)
 
-`lyrics_view.rs::LyricsView` replaces `karaoke_panel.rs` AND `lyrics_scroller.rs`:
+`lyrics_view.rs::LyricsView` replaces BOTH `karaoke_panel.rs` (the Dashboard's
+4-line preview) AND `lyrics_scroller.rs` (the Live tappable list) with a SINGLE
+scrollable, tappable line list — one surface on every page (the "jednotná
+aplikácia" rule; a compact-vs-scroll `mode` split would itself be the per-page
+inconsistency the ticket fixes, and the Live tap-to-seek must not be lost —
+`tests/live-mobile.spec.ts` pins it).
 
-- `LyricsMode::Compact` — the 4-line karaoke word-highlight preview read from the
-  live WS now-playing lines for `playlist_id`. Rendered in the `Player`'s lyrics
-  slot (`.player-lyrics`), so it is identical on Dashboard, Live and Dabing (the
-  dub's subtitles arrive over the same WS `LyricsUpdate`). Reuses the
-  `.karaoke-*` CSS. The `lyrics-view` root is STABLE across ticks; only the word
-  spans re-render (the active WORD index is a `Memo`).
-- `LyricsMode::Scroll` — the full tappable line list from `api::get_video_lyrics`,
-  the CURRENT line highlighted by a `Memo` of the live position (the pure
-  `sp_core::lyrics::LyricsTrack::current_line_index` = last line whose
-  `start_ms <= pos`, held through gaps — RED→GREEN + mutation-gated), tap a line
-  to seek. Rendered by the Lyrics details view. The `<ol>` is built once per
-  track (reads only `track`); a position tick flips only the highlighted `<li>`
-  class — it never rebuilds the list.
+- It renders the song's `LyricsTrack` (from `api::get_video_lyrics`) as `<li>`
+  `.lyr-line` buttons; the CURRENT line is highlighted by a `Memo` of the live
+  position (the pure `sp_core::lyrics::LyricsTrack::current_line_index` = last
+  line whose `start_ms <= pos`, held through gaps — RED→GREEN + mutation-gated);
+  tapping a line seeks. Empty / no-track → the shared `StateBlock` (`Žiadny
+  text`). Root class `.lyrics-view-scroll`, `data-testid="lyrics-view"`.
+- Inputs: `playlist_id` (the Player passes it — the current video + seek target
+  come from `store.now_playing[playlist_id]`) OR `video_id` (the Lyrics details
+  view passes it explicitly; the seek target is whichever playlist plays it).
+- Reactivity: `effective_vid` is a `Memo` so the fetch Effect re-runs only when
+  the video changes (never per tick); the `<ol>` is built inside a closure that
+  reads only `track` (rebuilt on a song change, never on a tick); a position tick
+  flips only the highlighted `<li>` class. The `lyrics-view` root is stable.
+- Rendered in the `Player`'s lyrics slot (`.player-lyrics`) on Dashboard, Live and
+  Dabing (a dub's subtitles are just its `LyricsTrack`), and in the Lyrics details
+  view.
 
 ### One operator language: Slovak (the `slovak-only.spec.ts` gate, #194 r3c)
 

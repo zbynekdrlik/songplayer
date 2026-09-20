@@ -7,7 +7,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
-use crate::components::lyrics_view::{LyricsMode, LyricsView};
+use crate::components::lyrics_view::LyricsView;
 use crate::components::state_block::{StateBlock, StateKind};
 
 #[component]
@@ -63,7 +63,7 @@ pub fn LyricsSongDetailModal(video_id: i64, on_close: Callback<()>) -> impl Into
                                 "Zdroj: "<code>{source}</code>" | Kvalita: "{quality}
                             </p>
                             // #194: the song's lyric lines via the shared LyricsView.
-                            <LyricsView mode=LyricsMode::Scroll video_id=video_id />
+                            <LyricsView video_id=video_id />
                             <details>
                                 <summary>"Surový audit"</summary>
                                 <pre>{audit_pretty}</pre>
