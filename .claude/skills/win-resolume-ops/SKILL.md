@@ -197,6 +197,19 @@ healthy, rising/`null` when its REST is saturating) and `last_full_refresh_ts`
 every 10 s). `consecutive_failures`/`circuit_breaker_open` now trip on the light
 probe, so a wedged REST is detected without adding load.
 
+Arena can also be GONE (no process at all, no crash event, 20.9.2026): the
+AutoHotkey relaunch script only fires after a kill, not after a self-exit —
+launch it yourself via the MCP `App` tool (`C:\Program Files\Resolume
+Arena\Arena.exe`), poll `/api/v1/product` (≈8 s), then read
+`/api/v1/resolume/health` on SongPlayer (`clips_by_token` non-zero) before
+re-running the E2E job.
+
+**NTFS stale metadata trap:** `Get-ChildItem` shows a log file that a running
+process holds open with a FROZEN size/LastWriteTime (the directory entry is
+updated only on close). `songplayer.<date>.log` looked dead for 6 h after a
+restart; `Get-Content -Tail` / `Select-String` refreshes it. Never conclude
+"the process is not logging" from a listing — read the file.
+
 When E2E CI cancels mid-step: default first hypothesis is Resolume Arena stuck.
 Diagnose with `Get-Process Arena | Format-List Responding` and
 `curl 127.0.0.1:8090` before assuming SongPlayer code bug. Fix Resolume, then
