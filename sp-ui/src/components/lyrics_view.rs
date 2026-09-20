@@ -95,8 +95,10 @@ pub fn LyricsView(
             let _ = state.try_set(LyricsState::Loading);
             leptos::task::spawn_local(async move {
                 let next = match crate::api::get_video_lyrics(v).await {
-                    Ok(t) if t.lines.is_empty() => LyricsState::Empty,
-                    Ok(t) => LyricsState::Loaded(t),
+                    // #198 item 9: `Ok(None)` is the honest 204 no-lyrics case.
+                    Ok(None) => LyricsState::Empty,
+                    Ok(Some(t)) if t.lines.is_empty() => LyricsState::Empty,
+                    Ok(Some(t)) => LyricsState::Loaded(t),
                     Err(e) => LyricsState::Error(e),
                 };
                 let _ = state.try_set(next);
