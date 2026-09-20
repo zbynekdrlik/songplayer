@@ -1715,7 +1715,8 @@ jobs:
           test('settings page loads with fields', async ({ page }) => {
             await page.goto('http://localhost:8920/');
             await expect(page.locator('text=SongPlayer')).toBeVisible({ timeout: 15000 });
-            await page.click('text=Settings');
+            // #194: the nav tabs are Slovak — locate by testid, never by text.
+            await page.click('[data-testid="nav-settings"]');
             await expect(page.locator('text=OBS WebSocket')).toBeVisible({ timeout: 10000 });
             await expect(page.locator('text=Google Gemini')).toBeVisible();
           });
