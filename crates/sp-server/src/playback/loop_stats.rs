@@ -59,7 +59,10 @@ impl SubmitHist {
     /// Record one `send_video_async` call duration (µs).
     pub fn observe(&mut self, us: u64) {
         self.samples.push_back(us);
-        while self.samples.len() > SUBMIT_WINDOW {
+        // ONE push can overshoot the window by at most one, so a single
+        // conditional pop keeps the bound — never a `while` (a mutated
+        // comparison would spin forever on an empty deque; mutation timeout).
+        if self.samples.len() > SUBMIT_WINDOW {
             self.samples.pop_front();
         }
     }
