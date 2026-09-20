@@ -69,3 +69,18 @@ test("LyricsView shows the error state when the fetch fails (#198)", async ({
   await expect(page.getByTestId("state-error")).toBeVisible({ timeout: 15000 });
   await expect(page.getByTestId("lyrics-empty")).toHaveCount(0);
 });
+
+test("LyricsView 204 no-lyrics is the empty state, not an error (#198)", async ({
+  page,
+  request,
+}) => {
+  // #198 item 9: the server replies 204 for a video with no lyrics. The generic
+  // api::get() json-parsed the empty body and returned Err, which (after item 3)
+  // renders the ERROR block — a genuinely-empty song must render the empty
+  // surface instead. get_video_lyrics must map 204 to a clean None.
+  await request.post("/__mock/lyrics-mode", { data: { mode: "empty" } });
+  await page.goto("/");
+  await expect(page.getByTestId("player")).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId("lyrics-empty")).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId("state-error")).toHaveCount(0);
+});
