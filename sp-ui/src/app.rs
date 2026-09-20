@@ -118,33 +118,38 @@ pub fn App() -> impl IntoView {
             <span class="logo">"SongPlayer"</span>
             <button
                 class:active=move || page.get() == Page::Dashboard
+                data-testid="nav-dashboard"
                 on:click=move |_| go(Page::Dashboard)
             >
-                "Dashboard"
+                "Prehľad"
             </button>
             <button
                 class:active=move || page.get() == Page::Live
+                data-testid="nav-live"
                 on:click=move |_| go(Page::Live)
             >
-                "Live"
+                "Naživo"
             </button>
             <button
                 class:active=move || page.get() == Page::Lyrics
+                data-testid="nav-lyrics"
                 on:click=move |_| go(Page::Lyrics)
             >
-                "Lyrics"
+                "Texty"
             </button>
             <button
                 class:active=move || page.get() == Page::Dabing
+                data-testid="nav-dabing"
                 on:click=move |_| go(Page::Dabing)
             >
                 "Dabing"
             </button>
             <button
                 class:active=move || page.get() == Page::Settings
+                data-testid="nav-settings"
                 on:click=move |_| go(Page::Settings)
             >
-                "Settings"
+                "Nastavenia"
             </button>
         </nav>
         // #194 r3b: ONE status strip on EVERY page (WS, OBS, genlock, Resolume,

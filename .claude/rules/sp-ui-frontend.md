@@ -485,3 +485,10 @@ allowed product/technical names — OBS/NDI/Resolume/SongPlayer/WS/LAN + the
 genlock LOCKED/DEGRADED/UNLOCKED/GENLOCK OFF vocabulary). Exact-text matching
 keeps song titles / playlist names (data that merely CONTAINS an English word)
 from tripping it. When you add a new UI string, it is Slovak, or the gate fails.
+
+## Navigation tabs are part of the Slovak-only surface (#194 round-3c review)
+The `nav.navbar` buttons read `Prehľad · Naživo · Texty · Dabing · Nastavenia` and
+carry `data-testid="nav-dashboard|nav-live|nav-lyrics|nav-dabing|nav-settings"`.
+Specs click tabs by testid, never by text; `e2e/slovak-only.spec.ts` scans the
+tabs too (`BANNED_NAV`). Only product/technical names (OBS, NDI, Resolume,
+SongPlayer, WS, LAN, the genlock words) stay English anywhere in the chrome.
