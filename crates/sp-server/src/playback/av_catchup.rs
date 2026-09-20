@@ -38,10 +38,12 @@ pub enum Decision {
 ///
 /// `target_depth_ms` is the nominal ring depth
 /// (`DEFAULT_TOLERANCE_MS + AUDIO_LOOKAHEAD_MS`); the video lag IS
-/// `target_depth_ms − ring_depth_ms`. Never drops before priming (the initial
-/// ring fill at song start is not a stall) and never once caught up (lag within
-/// one frame). `saturating_sub` so a ring deeper than target (video ahead) reads
-/// zero lag, never an underflow.
+/// `target_depth_ms − ring_depth_ms`. Never drops below the 0.9·target prime
+/// threshold (so the whole initial fill / post-seek refill up to 90 % is safe —
+/// see [`CatchUp::note_depth`]) and never once caught up (lag within one frame);
+/// the top ~10 % of a fill that is still lagging may drop a few frames, which the
+/// SDK clock re-times harmlessly. `saturating_sub` so a ring deeper than target
+/// (video ahead) reads zero lag, never an underflow.
 pub fn decide(ring_depth_ms: u64, target_depth_ms: u64, frame_ms: u64, primed: bool) -> Decision {
     let lag_ms = target_depth_ms.saturating_sub(ring_depth_ms);
     if primed && lag_ms > frame_ms {
@@ -52,8 +54,9 @@ pub fn decide(ring_depth_ms: u64, target_depth_ms: u64, frame_ms: u64, primed: b
 }
 
 /// Per-song catch-up state for the SDK-clocked decode loop: the prime latch (so
-/// the initial fill is never mistaken for a stall) and the consecutive-drop cap.
-/// `Default` is the fresh, un-primed state a new song starts in.
+/// the fill below 0.9·target is never dropped as a stall) and the
+/// consecutive-drop cap. `Default` is the fresh, un-primed state a new song
+/// starts in.
 #[derive(Clone, Debug, Default)]
 pub struct CatchUp {
     primed: bool,
@@ -67,8 +70,8 @@ impl CatchUp {
     }
 
     /// New play / seek (a `clear_ring` site): forget the prime latch and the
-    /// drop run. The next fill re-primes before any drop can happen, so the
-    /// post-seek ring refill is never mistaken for a stall.
+    /// drop run, so the sub-0.9·target portion of the post-seek refill re-primes
+    /// from scratch and is never dropped as a stall.
     pub fn reset(&mut self) {
         self.primed = false;
         self.consecutive_drops = 0;
