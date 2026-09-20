@@ -263,7 +263,7 @@ fn lead_ms_for_sdk_path_is_the_emitter_lookahead() {
     // SAME constant the emitter uses so the preview preroll can never drift
     // from the cushion; the exact value kills the `!` delete, the `- → +` and
     // the `- → /` mutants on the pure formula.
-    let lookahead = crate::playback::audio_emitter::AUDIO_LOOKAHEAD_MS as u32;
+    let lookahead = crate::playback::pipeline::audio_emitter::AUDIO_LOOKAHEAD_MS as u32;
     assert_eq!(lookahead, 1500);
     assert_eq!(lead_ms_for(false), lookahead);
 }
