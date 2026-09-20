@@ -105,3 +105,18 @@ AUDIO_LOOKAHEAD_MS` (`audio_emitter::target_ring_depth_ms()`, never a literal).
 - **SDK-clocked path only.** The catch-up runs only when the wall-clock emitter
   exists — i.e. the `genlock_pacing == false` branch. The paced/genlock path has
   its own re-latch logic and is byte-for-byte untouched (see `genlock.md`).
+
+### Catch-up guards learned from the 0.61.0 release review (#192 r4)
+- **Audio EOF comes ~1.5 s before the last video frame** (the sync decoder
+  reads audio `tolerance + lookahead` ahead), so a shallow ring in the tail is
+  NOT a video lag: `CatchUp::step(.., at_end)` never drops when
+  `video_ts + target_ring_depth_ms() >= duration_ms` — without it the wall
+  froze for the final ~1.5 s of every song.
+- **A drop-cap trip UN-PRIMES.** A decoder that cannot beat real time must fall
+  back to smooth-but-offset video, never 1 frame per cap forever.
+- **Heartbeat / position report / `frame_count` run BEFORE the drop check** —
+  a `continue` on the drop path otherwise freezes the dashboard position and
+  under-reports the frame count.
+- `drain_budget_ms` = `DEFAULT_TOLERANCE_MS + lookahead + block_ms()` — the ring
+  holds the pairing tolerance too at a natural end.
+
