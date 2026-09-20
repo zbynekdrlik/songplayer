@@ -351,6 +351,26 @@ The diff-scoped mutation gate caught two classes the no-compile box can't:
   INCLUDED (kills `||`→`&&` and `delete !has_stem`); a normalized / no-audio /
   no-stem row must be OMITTED (kills `&&`→`||`).
 
+## Reading the live stems queue on win-resolume (no sqlite3 on the box)
+
+The box has **no `sqlite3.exe`**, and `songplayer.db` is locked by the running
+process — so verify the stems queue through the HTTP API (SongPlayer serves on
+port **8920**, `sp_core::config::DEFAULT_API_PORT`), never by opening the DB:
+
+- On-program playlist: `GET /api/v1/ndi/health` → the pipeline whose
+  `state == "Playing"` (already reconciled to "playing AND on program"; all
+  others read `Paused`/`Idle`). That id is tier 1.
+- Queue counts + now-playing positions: `GET /api/v1/karaoke` →
+  `stems_pending`/`stems_done` and `now_playing[].queue_position` (the tiered
+  position once #195 is deployed).
+- Per-playlist pending list: `GET /api/v1/playlists/{id}/videos` → filter
+  `stems_state == "queued"`; the lowest-id such row on the on-program playlist is
+  what the #195 tier-1 selector picks next.
+
+Run these from the box via `mcp__win-resolume__Shell`
+(`Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8920/...`). Reading the DB
+file directly is not an option here.
+
 ## Re-measuring a separator candidate (dev2)
 
 Never run heavy separation on win-resolume while anything plays (GPU contention
