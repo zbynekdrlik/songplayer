@@ -184,6 +184,29 @@ mod tests {
     }
 
     #[test]
+    fn the_frame_that_primes_the_latch_is_never_dropped() {
+        // Song-start fill: the ring grows 0 → target while the video is ON TIME
+        // (the SDK clock paces early frames), so the depth is NOT a lag yet.
+        // Priming must happen only once the ring is within one frame of the
+        // target, so the priming frame itself — and every fill frame before
+        // it — is submitted. (A 0.9·target latch dropped ~4 on-time frames at
+        // every song start; the SDK paces by frame COUNT, so those drops moved
+        // the video AHEAD of the audio for the rest of the song.)
+        let mut c = CatchUp::new();
+        for depth in (0..=1500).step_by(20) {
+            assert_eq!(
+                c.step(depth, TARGET, FRAME),
+                Decision::Submit,
+                "fill depth {depth} must submit"
+            );
+        }
+        assert!(c.primed(), "within one frame of target must be primed");
+        // Now a real stall: the ring drains → drops until caught up.
+        assert_eq!(c.step(700, TARGET, FRAME), Decision::Drop);
+        assert_eq!(c.step(1500, TARGET, FRAME), Decision::Submit);
+    }
+
+    #[test]
     fn prime_persists_after_the_ring_drains() {
         // Once primed by a full ring, a later stall (shallow ring) keeps primed
         // AND now Drops — the exact round-4 behaviour.
