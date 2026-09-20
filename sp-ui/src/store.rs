@@ -243,6 +243,7 @@ impl DashboardStore {
                 playlist_id,
                 state,
                 mode,
+                ..
             } => {
                 self.now_playing.update(|map| {
                     if let Some(entry) = map.get_mut(&playlist_id) {

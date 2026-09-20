@@ -1053,6 +1053,16 @@ app.post("/__mock/tick", (req, res) => {
         position_ms: typeof it.position_ms === "number" ? it.position_ms : 0,
         step_ms: typeof it.step_ms === "number" ? it.step_ms : 500,
         state: typeof it.state === "string" ? it.state : "Playing",
+        // #201: the pipeline's own transport, INDEPENDENT of `state`'s
+        // on/off-program folding. Defaults to Playing when the scene-aware
+        // `state` is Playing, else Paused — so an off-program decoding item is
+        // driven with {state:"WaitingForScene", transport:"Playing"}.
+        transport:
+          typeof it.transport === "string"
+            ? it.transport
+            : it.state === "Playing"
+              ? "Playing"
+              : "Paused",
       }));
     }
     for (const it of tickItems) {
@@ -1062,6 +1072,7 @@ app.post("/__mock/tick", (req, res) => {
           playlist_id: it.playlist_id,
           state: it.state,
           mode: "Continuous",
+          transport: it.transport,
         },
       });
       tickNowPlaying(it);
@@ -1178,7 +1189,15 @@ wss.on("connection", (ws) => {
       ws.send(
         JSON.stringify({
           type: "PlaybackStateChanged",
-          data: { playlist_id: 1, state: "Playing", mode: "Continuous" },
+          // #201: playlist 1 is on-program Playing → transport Playing so the
+          // shared Player toggle reads `⏸ Pauza` on the Dashboard (the label
+          // now follows transport, not the scene-aware `state`).
+          data: {
+            playlist_id: 1,
+            state: "Playing",
+            mode: "Continuous",
+            transport: "Playing",
+          },
         }),
       );
       // Playlist 2 gets now-playing info but stays Idle (no PlaybackStateChanged)

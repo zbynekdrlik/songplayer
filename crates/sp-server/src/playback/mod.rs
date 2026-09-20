@@ -39,6 +39,7 @@ pub mod submit_handoff; // #168 output-side split: pure emit->submit handoff dec
 pub mod submitter;
 mod test_helpers;
 mod title;
+mod transport_state; // #201 pure PlayState->TransportState mapping (Linux-tested)
 pub mod wallclock;
 
 use std::collections::{HashMap, VecDeque};
@@ -59,6 +60,7 @@ use crate::playlist::selector::VideoSelector;
 
 use pipeline::{PipelineCommand, PipelineEvent, PlaybackPipeline};
 use state::{PlayAction, PlayEvent, PlayState};
+use transport_state::transport_from_play_state;
 
 /// Minimum gap between `NowPlaying` position re-broadcasts per playlist.
 /// Keeps the WebSocket from flooding the dashboard on high-frequency
@@ -562,7 +564,8 @@ impl PlaybackEngine {
                     // Broadcast the state change so the dashboard updates.
                     // #170: gate on scene_active so a Previous on an
                     // off-program playlist shows WaitingForScene, matching
-                    // the health-label replay.
+                    // the health-label replay. #201: transport reports the raw
+                    // decoding state so the Player label follows the pipeline.
                     let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
                         playlist_id,
                         state: play_state_to_ws(
@@ -570,6 +573,7 @@ impl PlaybackEngine {
                             pp.scene_active.load(Ordering::Acquire),
                         ),
                         mode: pp.mode,
+                        transport: transport_from_play_state(&PlayState::Playing { video_id }),
                     });
                 }
             }
@@ -693,6 +697,8 @@ impl PlaybackEngine {
 
             // #170: gate on scene_active so a PlayVideo on an off-program
             // playlist shows WaitingForScene, matching the health-label replay.
+            // #201: transport reports the raw decoding state (Playing here) so
+            // an off-program dub reads `⏸ Pauza` while it plays.
             let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
                 playlist_id,
                 state: play_state_to_ws(
@@ -700,6 +706,7 @@ impl PlaybackEngine {
                     pp.scene_active.load(Ordering::Acquire),
                 ),
                 mode: pp.mode,
+                transport: transport_from_play_state(&PlayState::Playing { video_id }),
             });
         } else {
             warn!(playlist_id, video_id, "PlayVideo: no pipeline for playlist");
@@ -762,6 +769,7 @@ impl PlaybackEngine {
                     playlist_id,
                     state: play_state_to_ws(&final_state, scene_active),
                     mode,
+                    transport: transport_from_play_state(&final_state),
                 });
             }
         }

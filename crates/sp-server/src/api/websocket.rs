@@ -10,7 +10,7 @@ use futures::{SinkExt, StreamExt};
 use sqlx::Row;
 use tracing::{debug, info, warn};
 
-use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
+use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState, TransportState};
 use sp_core::ws::{ClientMsg, ServerMsg};
 
 use crate::playback::ndi_health::{PipelineHealthSnapshot, PlaybackStateLabel};
@@ -250,6 +250,25 @@ fn label_to_ws_state(label: &PlaybackStateLabel) -> WsPlaybackState {
     }
 }
 
+/// Map an NDI-health snapshot's [`PlaybackStateLabel`] to the wire
+/// [`TransportState`] carried alongside `state` in the initial replay (#201).
+///
+/// The label is already scene-reconciled (a Playing-off-program pipeline is
+/// stored as `Paused`), so this is the best a fresh-connect replay can do
+/// without a live `PlaybackStateChanged`: an on-program `Playing` replays as
+/// `Playing` (`⏸ Pauza`), everything not-decoding as `Paused`/`Idle`
+/// (`▶ Prehrať`). A dashboard reloaded WHILE an off-program dub decodes therefore
+/// replays `Paused` until the next live update — a known limitation tracked as a
+/// follow-up (the health snapshot would need to carry the raw decoding state).
+fn transport_from_label(label: &PlaybackStateLabel) -> TransportState {
+    match label {
+        PlaybackStateLabel::Playing => TransportState::Playing,
+        PlaybackStateLabel::Paused => TransportState::Paused,
+        PlaybackStateLabel::WaitingForScene => TransportState::Paused,
+        PlaybackStateLabel::Idle => TransportState::Idle,
+    }
+}
+
 /// Build the initial `PlaybackStateChanged` replay for a freshly connected
 /// dashboard: one message per pipeline snapshot whose state is NOT `Idle`
 /// (Idle is the dashboard default, so replaying it is pure noise). `modes` maps
@@ -266,6 +285,7 @@ fn playback_state_replay(
             playlist_id: s.playlist_id,
             state: label_to_ws_state(&s.state),
             mode: modes.get(&s.playlist_id).copied().unwrap_or_default(),
+            transport: transport_from_label(&s.state),
         })
         .collect()
 }
@@ -320,10 +340,13 @@ mod tests {
                 playlist_id,
                 state,
                 mode,
+                transport,
             } => {
                 assert_eq!(*playlist_id, 1);
                 assert_eq!(*state, WsPlaybackState::Playing);
                 assert_eq!(*mode, PlaybackMode::Loop);
+                // #201: an on-program Playing snapshot replays transport Playing.
+                assert_eq!(*transport, TransportState::Playing);
             }
             other => panic!("expected PlaybackStateChanged, got {other:?}"),
         }
@@ -336,12 +359,41 @@ mod tests {
         let msgs = playback_state_replay(&snaps, &HashMap::new());
         assert_eq!(msgs.len(), 1);
         match &msgs[0] {
-            ServerMsg::PlaybackStateChanged { state, mode, .. } => {
+            ServerMsg::PlaybackStateChanged {
+                state,
+                mode,
+                transport,
+                ..
+            } => {
                 assert_eq!(*state, WsPlaybackState::WaitingForScene);
                 assert_eq!(*mode, PlaybackMode::default());
+                // #201: a Paused label (a Playing-off-program pipeline the health
+                // registry reconciled) replays transport Paused.
+                assert_eq!(*transport, TransportState::Paused);
             }
             other => panic!("expected PlaybackStateChanged, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn transport_from_label_maps_all_variants() {
+        // #201: exact mapping for every label variant (mutation-clean).
+        assert_eq!(
+            transport_from_label(&PlaybackStateLabel::Playing),
+            TransportState::Playing
+        );
+        assert_eq!(
+            transport_from_label(&PlaybackStateLabel::Paused),
+            TransportState::Paused
+        );
+        assert_eq!(
+            transport_from_label(&PlaybackStateLabel::WaitingForScene),
+            TransportState::Paused
+        );
+        assert_eq!(
+            transport_from_label(&PlaybackStateLabel::Idle),
+            TransportState::Idle
+        );
     }
 
     #[test]
