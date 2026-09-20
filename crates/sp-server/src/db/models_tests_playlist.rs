@@ -152,8 +152,9 @@ async fn list_playlist_items_returns_rows_in_position_order() {
 
 /// Mutation-coverage: if the `playback_mode` assignment in
 /// `get_active_playlists` is deleted, this test catches it because the
-/// ytlive seed row has `playback_mode='continuous'` but the Default impl
-/// would produce an empty string. Also pins `current_position` read.
+/// ytlive seed row has `playback_mode='single'` (seeded server-side since the
+/// 0.60.0 review — the Live page no longer forces it per mount) but the
+/// Default impl would produce an empty string. Also pins `current_position`.
 #[tokio::test]
 async fn get_active_playlists_reads_playback_mode_from_row() {
     let pool = db::create_memory_pool().await.unwrap();
@@ -173,7 +174,7 @@ async fn get_active_playlists_reads_playback_mode_from_row() {
         .find(|p| p.name == "ytlive")
         .expect("ytlive must be active");
     assert_eq!(
-        ytlive.playback_mode, "continuous",
+        ytlive.playback_mode, "single",
         "get_active_playlists must read playback_mode from the row, not use Default"
     );
     assert_eq!(
