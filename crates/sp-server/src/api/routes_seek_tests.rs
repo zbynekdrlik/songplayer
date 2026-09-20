@@ -175,7 +175,7 @@ async fn seek_zero_duration_forwards_unclamped() {
     // and the decoder bound the seek), never refuse.
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     assert!(
-        matches!(rx.try_recv(), Ok(EngineCommand::Seek { position_ms: 45_000, .. })),
+        matches!(rx.try_recv(), Ok(crate::EngineCommand::Seek { position_ms: 45_000, .. })),
         "an unknown duration must forward the requested position unclamped"
     );
     crate::now_playing::global().clear(pid);
@@ -203,7 +203,7 @@ async fn seek_null_duration_forwards_unclamped() {
     // and the decoder bound the seek), never refuse.
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     assert!(
-        matches!(rx.try_recv(), Ok(EngineCommand::Seek { position_ms: 45_000, .. })),
+        matches!(rx.try_recv(), Ok(crate::EngineCommand::Seek { position_ms: 45_000, .. })),
         "an unknown duration must forward the requested position unclamped"
     );
     crate::now_playing::global().clear(pid);
