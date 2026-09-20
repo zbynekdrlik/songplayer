@@ -338,6 +338,10 @@ pub(crate) fn emit_heartbeat_paced(
             reported_state: state,
             pacing,
             audio,
+            // #192 round 3: the SDK-clocked decode loop's stage/submit gauges do
+            // not apply to the paced submit-thread path (genlock_pacing is OFF in
+            // production); default here.
+            loop_stats: crate::playback::loop_stats::LoopStats::default(),
         },
     ));
     *prev_total = total;

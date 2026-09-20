@@ -80,6 +80,8 @@ pub(crate) fn run_idle_wait(
             consecutive_bad_polls,
             pacer.stats(),
             pacer.audio_stats(),
+            // Idle: no SDK decode loop → no stage telemetry.
+            crate::playback::loop_stats::LoopStageStats::default(),
         );
         return;
     }
@@ -102,6 +104,8 @@ pub(crate) fn run_idle_wait(
                 // A paced pipeline is `enabled=true` while idle (#147 change 7).
                 pacer.stats(),
                 pacer.audio_stats(),
+                // Idle: no SDK decode loop → no stage telemetry.
+                crate::playback::loop_stats::LoopStageStats::default(),
             );
         }
     }

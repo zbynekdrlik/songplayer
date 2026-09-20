@@ -70,6 +70,7 @@ fn dark_wall_event(now: Instant, consecutive_bad_polls: u32) -> PipelineEvent {
         reported_state: PlaybackStateLabel::Playing,
         pacing: Default::default(),
         audio: Default::default(),
+        loop_stats: Default::default(),
     }
 }
 
@@ -183,6 +184,7 @@ async fn handle_health_snapshot_clears_recovery_step_on_recovery() {
             reported_state: PlaybackStateLabel::Playing,
             pacing: Default::default(),
             audio: Default::default(),
+            loop_stats: Default::default(),
         },
     );
     assert_eq!(
@@ -237,6 +239,7 @@ async fn handle_health_snapshot_populates_registry_for_known_pipeline() {
             reported_state: PlaybackStateLabel::Playing,
             pacing: Default::default(),
             audio: Default::default(),
+            loop_stats: Default::default(),
         },
     );
 
@@ -266,6 +269,7 @@ async fn handle_health_snapshot_drops_event_for_unknown_pipeline() {
             reported_state: PlaybackStateLabel::Idle,
             pacing: Default::default(),
             audio: Default::default(),
+            loop_stats: Default::default(),
         },
     );
     assert_eq!(registry.snapshots().len(), 0);
@@ -289,6 +293,7 @@ async fn registry_holds_one_entry_per_pipeline_with_health() {
         reported_state: state,
         pacing: Default::default(),
         audio: Default::default(),
+        loop_stats: Default::default(),
     };
     engine.handle_health_snapshot(1, mk_event(PlaybackStateLabel::Playing));
     engine.handle_health_snapshot(2, mk_event(PlaybackStateLabel::Idle));
@@ -320,6 +325,7 @@ async fn engine_overrides_idle_to_waiting_for_scene_when_canonical_state_says_so
             reported_state: PlaybackStateLabel::Idle,
             pacing: Default::default(),
             audio: Default::default(),
+            loop_stats: Default::default(),
         },
     );
 
@@ -353,6 +359,7 @@ async fn handle_health_snapshot_fills_degraded_reason_at_2_consecutive_bad_polls
             reported_state: PlaybackStateLabel::Playing,
             pacing: Default::default(),
             audio: Default::default(),
+            loop_stats: Default::default(),
         },
     );
     let snapshots = registry.snapshots();
@@ -433,6 +440,7 @@ async fn handle_health_snapshot_visibility_only_on_prolonged_dark_wall() {
             reported_state: PlaybackStateLabel::Playing,
             pacing: Default::default(),
             audio: Default::default(),
+            loop_stats: Default::default(),
         },
     );
 
@@ -473,6 +481,7 @@ async fn handle_health_snapshot_clears_degraded_reason_on_clean_poll() {
             reported_state: PlaybackStateLabel::Playing,
             pacing: Default::default(),
             audio: Default::default(),
+            loop_stats: Default::default(),
         },
     );
     assert_eq!(
@@ -495,6 +504,7 @@ async fn handle_health_snapshot_clears_degraded_reason_on_clean_poll() {
             reported_state: PlaybackStateLabel::Playing,
             pacing: Default::default(),
             audio: Default::default(),
+            loop_stats: Default::default(),
         },
     );
     let snap = &registry.snapshots()[0];
@@ -559,6 +569,7 @@ async fn handle_health_snapshot_skips_alert_when_scene_inactive() {
             reported_state: PlaybackStateLabel::Playing,
             pacing: Default::default(),
             audio: Default::default(),
+            loop_stats: Default::default(),
         },
     );
     let snapshots = registry.snapshots();

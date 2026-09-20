@@ -12,6 +12,7 @@ mod engine_play;
 mod handle_pipeline_event;
 mod karaoke; // #14 set_karaoke (impl PlaybackEngine, 1000-line cap split)
 pub mod lock_state;
+pub mod loop_stats; // #192 round 3: pipeline-loop stage timing + submit-call histogram (pure)
 mod lyrics_loader;
 pub mod ndi_burn;
 pub mod ndi_health;
