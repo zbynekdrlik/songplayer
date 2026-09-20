@@ -51,10 +51,16 @@ pub async fn get_karaoke(State(state): State<AppState>) -> impl IntoResponse {
             Ok(Some(info)) => info,
             _ => continue, // row vanished; skip rather than emit a half entry
         };
-        let queue_position = crate::db::models_stems::queue_position(&state.pool, video_id)
-            .await
-            .ok()
-            .flatten();
+        // #195: the tiered (in-use-first) position, so the chip's "vo fronte (N.)"
+        // matches the order the worker will actually pick this song in.
+        let queue_position = crate::stems::queue_tiers::queue_position_now(
+            Some(&state.ndi_health_registry),
+            &state.pool,
+            video_id,
+        )
+        .await
+        .ok()
+        .flatten();
         now_playing.push(serde_json::json!({
             "playlist_id": playlist_id,
             "video_id": video_id,

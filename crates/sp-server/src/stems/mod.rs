@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 pub mod control;
 pub mod progress;
+pub mod queue_tiers; // #195 in-use-first stems queue tier inputs
 pub mod reader;
 pub mod separator;
 pub mod worker;

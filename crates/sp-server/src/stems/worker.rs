@@ -250,7 +250,24 @@ impl StemWorker {
             return;
         }
 
-        let job = match crate::db::models_stems::get_next_video_for_stems(&self.pool).await {
+        // #195: serve the stems of what is actually IN USE first — the on-program
+        // playlist (tier 1), then playlists played in the last `stems_recent_days`
+        // days (tier 2), then today's unrestricted oldest-first query (tier 3);
+        // manual priority (tier 0) still wins on any playlist. The tier inputs come
+        // from the registry the worker already holds + one `play_history` query;
+        // an empty list skips its tier.
+        let (on_program, recent) = crate::stems::queue_tiers::compute_tier_inputs(
+            self.ndi_health_registry.as_ref(),
+            &self.pool,
+        )
+        .await;
+        let job = match crate::db::models_stems_priority::get_next_stem_job(
+            &self.pool,
+            &on_program,
+            &recent,
+        )
+        .await
+        {
             Ok(Some(j)) => j,
             Ok(None) => return, // nothing to separate
             Err(e) => {

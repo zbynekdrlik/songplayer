@@ -24,10 +24,15 @@ pub async fn enqueue(
         warn!(video_id, %e, "enqueue_stems failed");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
-    let queue_position = crate::db::models_stems::queue_position(&state.pool, video_id)
-        .await
-        .ok()
-        .flatten();
+    // #195: the tiered (in-use-first) position — matches the order the worker picks.
+    let queue_position = crate::stems::queue_tiers::queue_position_now(
+        Some(&state.ndi_health_registry),
+        &state.pool,
+        video_id,
+    )
+    .await
+    .ok()
+    .flatten();
     Json(serde_json::json!({
         "status": "enqueued",
         "queue_position": queue_position,
