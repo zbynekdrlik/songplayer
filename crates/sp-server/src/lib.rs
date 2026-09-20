@@ -772,7 +772,7 @@ pub async fn start(
                 "startup senders exceeded their budget — binding the API now"
             );
             // The +30 s self-check clock must still start (shared registry).
-            ndi_health_registry.mark_senders_ready();
+            state.ndi_health_registry.mark_senders_ready();
         }
     }
 
