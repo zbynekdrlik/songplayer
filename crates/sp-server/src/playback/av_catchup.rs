@@ -275,8 +275,7 @@ mod tests {
     #[test]
     fn reset_restarts_the_drop_run() {
         // reset() must clear the consecutive-drop count, not just the prime latch:
-        // a seek that lands where the ring is already at target − one frame (primes AND
-        // lags on the very first frame) must still get the FULL cap, not a short
+        // a stall right after a seek must still get the FULL cap, not a short
         // one carried over from before the seek.
         let mut c = CatchUp::new();
         c.step(TARGET, TARGET, FRAME); // prime
@@ -284,16 +283,18 @@ mod tests {
             c.step(150, TARGET, FRAME); // build the run up to 70 drops
         }
         c.reset();
-        // depth 1386 = target − one frame: primes on this first post-reset frame AND lags
-        // (1540 − 1386 = 154 > one frame), so the run restarts from zero here.
+        // Post-seek refill reaches the target (primes, Submit), then a stall
+        // drains the ring: the drop run must restart from ZERO here — the full
+        // cap applies, none of the pre-seek 70 drops carry over.
+        assert_eq!(c.step(TARGET, TARGET, FRAME), Decision::Submit);
         for i in 0..=MAX_CONSECUTIVE_DROPS {
             assert_eq!(
-                c.step(1386, TARGET, FRAME),
+                c.step(150, TARGET, FRAME),
                 Decision::Drop,
                 "post-reset drop {i} must Drop — the pre-seek run must not carry over"
             );
         }
-        assert_eq!(c.step(1386, TARGET, FRAME), Decision::Submit);
+        assert_eq!(c.step(150, TARGET, FRAME), Decision::Submit);
     }
 
     #[test]
