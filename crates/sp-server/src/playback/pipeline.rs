@@ -701,8 +701,7 @@ fn decode_and_send(
                         audio_frames,
                     )
                 });
-                // Heartbeat + position + frame count run for EVERY decoded frame,
-                // dropped or not (a drop run must not freeze the dashboard).
+                // Heartbeat/position/frame_count run for dropped frames too.
                 let timestamp_ms = video_frame.timestamp_ms;
                 let duration_ms = decoder.duration_ms();
                 frame_count += 1;
@@ -725,8 +724,7 @@ fn decode_and_send(
                     let _ = event_tx.send((playlist_id, ev));
                     last_position_report = Instant::now();
                 }
-                // #192 r4: drop this late frame's video while it lags the audio
-                // (never within the ring target of the end — audio EOF, not lag).
+                // #192 r4: drop a late frame's video (never near the end: audio EOF).
                 if pipeline_audio::is_late_frame(
                     &mut catchup,
                     audio_emitter,
