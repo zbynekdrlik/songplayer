@@ -39,7 +39,7 @@ pub async fn ensure_live_playlist_exists(pool: &SqlitePool) -> Result<(), sqlx::
     sqlx::query(
         "INSERT INTO playlists
             (name, youtube_url, ndi_output_name, playback_mode, is_active, kind)
-         SELECT 'ytlive', '', 'SP-live', 'continuous', 1, 'custom'
+         SELECT 'ytlive', '', 'SP-live', 'single', 1, 'custom'
          WHERE NOT EXISTS (SELECT 1 FROM playlists WHERE name = 'ytlive')",
     )
     .execute(pool)

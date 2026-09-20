@@ -90,7 +90,7 @@ pub fn LyricsView(
     // Active line = a Memo of the live position, so a tick flips only the
     // highlighted <li> class, never rebuilds the <ol>.
     let current_idx =
-        Memo::new(move |_| track.get().as_ref().and_then(|t| t.current_line_index(position())));
+        Memo::new(move |_| track.with(|t| t.as_ref().and_then(|t| t.current_line_index(position()))));
 
     let do_seek = move |ms: u64| {
         if let Some(pid) = seek_pid() {

@@ -53,6 +53,12 @@ pub fn PlaylistPicker(
             <select
                 class="playlist-select-mobile"
                 data-testid="playlist-picker-select"
+                // `selected` on an <option> is only honoured at parse time; the
+                // live selection (desktop row click, auto-follow, ?playlist=)
+                // must drive the select's VALUE property (0.60.0 review).
+                prop:value=move || {
+                    store.selected_playlist.get().map(|i| i.to_string()).unwrap_or_default()
+                }
                 on:change=move |ev| {
                     if let Ok(id) = event_target_value(&ev).parse::<i64>() {
                         selection::select(store, id);

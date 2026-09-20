@@ -11,8 +11,9 @@
 /// `−10 s` / `+10 s` buttons; passing `delta_ms = 0` clamps a raw position to
 /// the song's duration (the server route's use).
 pub fn seek_target_ms(current_ms: u64, delta_ms: i64, duration_ms: u64) -> u64 {
-    let target = (current_ms as i64).saturating_add(delta_ms).max(0) as u64;
-    target.min(duration_ms)
+    // u64 math throughout: a position above i64::MAX must clamp to the end,
+    // never wrap negative (`saturating_add_signed` floors at 0 on its own).
+    current_ms.saturating_add_signed(delta_ms).min(duration_ms)
 }
 
 /// Progress fraction `pos_ms / dur_ms`, clamped to `0.0..=1.0`. Returns `0.0`

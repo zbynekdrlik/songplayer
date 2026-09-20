@@ -10,7 +10,6 @@
 
 use leptos::prelude::*;
 
-use crate::api;
 use crate::components::import_box::{ImportBox, ImportTarget};
 use crate::components::live_catalog::LiveCatalog;
 use crate::components::live_setlist::LiveSetList;
@@ -39,17 +38,9 @@ pub fn LivePage() -> impl IntoView {
         )
     });
 
-    // Force "single" mode when the live playlist resolves (the engine stops after
-    // each song so the operator drives transitions manually). Fires once per
-    // resolved custom playlist (a `Memo` only propagates on a real change).
-    Effect::new(move |_| {
-        if let Some(id) = live_pid.get() {
-            leptos::task::spawn_local(async move {
-                let body = serde_json::json!({ "mode": "single" });
-                let _ = api::put_json_empty(&format!("/api/v1/playback/{id}/mode"), &body).await;
-            });
-        }
-    });
+    // The live playlist is seeded `single` server-side (startup.rs) — the page
+    // no longer forces the mode on every mount, so the operator's pick in the
+    // shared Player's mode select survives navigation (0.60.0 review).
 
     let bump: Callback<()> = Callback::new(move |_| {
         set_list_version.update(|v| *v += 1);
