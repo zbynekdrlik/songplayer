@@ -547,7 +547,13 @@ jobs:
           git diff "$BASE" HEAD > push.diff
           COUNT=0
           if [ -s push.diff ]; then
-            COUNT=$(cargo mutants --in-diff push.diff --list 2>/dev/null | grep -c . || true)
+            # A failed --list (bad diff, build error) must FAIL the plan, never
+            # silently default to 0 mutants = the smallest fan-out (0.60.0 review).
+            if ! cargo mutants --in-diff push.diff --list > mutants.list; then
+              echo "::error::mutant listing failed for $BASE..HEAD — refusing to plan shards from a default count"
+              exit 1
+            fi
+            COUNT=$(grep -c . mutants.list || true)
           fi
           N=$(( (COUNT + 5) / 6 ))
           if [ "$N" -lt 4 ]; then N=4; fi
