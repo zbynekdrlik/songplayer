@@ -127,3 +127,13 @@ a blank doc line or indentation — the Tier-0 box cannot see it, so it fails
 the Lint job (#195, three sites). After the last `- item` / `3. item`, insert a
 bare `//!` (or `///`) line before continuing prose.
 
+## Format BEFORE every commit, RED commits included
+
+The Lint job runs `cargo fmt --all -- --check` on the pushed HEAD, so a RED
+test commit formatted only at the GREEN step still leaves the tree dirty when
+the GREEN `git add` is selective — the later `cargo fmt --all` then formats
+the RED files as an unstaged change nobody commits (0.62.0 cut, `e151ca1`).
+Run `cargo fmt --all && git checkout -- crates/sp-server/src/db/models.rs`
+before EACH commit in a RED→GREEN chain, and commit with `git add -u crates/`
+(not a hand-picked file list) after formatting.
+
