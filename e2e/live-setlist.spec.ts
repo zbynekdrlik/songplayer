@@ -6,13 +6,12 @@ import { test, expect } from "@playwright/test";
 // drive the Player's transport for the ytlive playlist (id 184) and assert each
 // control fires its playback endpoint.
 //
-// REGRESSION FLAGGED TO REVIEWERS: the deleted bar surfaced a FAILING playback
-// POST to `.live-setlist-error` (#94, "a failing endpoint must not be a silent
-// no-op"). The shared Player DISCARDS the POST result
-// (`let _ = api::post_empty(...)` in components/player.rs) and renders no error
-// surface, so the #94 error-visibility assertion no longer has a DOM target and
-// has been dropped from this file. Restoring it is a frontend change to
-// player.rs (out of the e2e migration's scope), not an e2e change.
+// #94 ("a failing endpoint must not be a silent no-op") lives on: the shared
+// Player reports every failed transport POST into `[data-testid="player-error"]`
+// (`report(...)` in components/player.rs). The `#94 error surface` block below
+// drives each command through the mock's `/__mock/fail-mode` hook and asserts
+// the Slovak error line — play / previous / mode on /live (idle), pause on the
+// Dashboard where playlist 1 is Playing (the toggle reads "⏸ Pauza" there).
 
 const ALLOWED_CONSOLE = [
   /WebSocket connection/,
@@ -100,5 +99,71 @@ test.describe("the shared Player transport drives /live playback (#194)", () => 
     );
     await sel.selectOption("loop");
     await put;
+  });
+});
+
+// #94 error surface — every transport command that fails must show up.
+test.describe("#94: a failing transport POST surfaces in player-error", () => {
+  // The mock's fail-mode is global in-memory state; always reset it.
+  test.afterEach(async ({ request }) => {
+    for (const kind of ["play", "pause", "previous", "mode"]) {
+      await request.post("/__mock/fail-mode", { data: { kind, enabled: false } });
+    }
+  });
+
+  async function fail(request: import("@playwright/test").APIRequestContext, kind: string) {
+    await request.post("/__mock/fail-mode", { data: { kind, enabled: true } });
+  }
+
+  test("play fails → 'Prehrávanie zlyhalo'", async ({ page, request }) => {
+    await fail(request, "play");
+    await page.goto("/live");
+    const btn = page.getByTestId("player-playpause");
+    await expect(btn).toContainText("Prehrať", { timeout: 10000 });
+    await expect(page.locator('[data-testid="player-error"]')).toHaveCount(0);
+    await btn.click();
+    await expect(page.locator('[data-testid="player-error"]')).toContainText(
+      "Prehrávanie zlyhalo",
+      { timeout: 5000 },
+    );
+  });
+
+  test("previous fails → 'Predošlá zlyhala'", async ({ page, request }) => {
+    await fail(request, "previous");
+    await page.goto("/live");
+    const prev = page.getByTestId("player-prev");
+    await expect(prev).toBeVisible({ timeout: 10000 });
+    await prev.click();
+    await expect(page.locator('[data-testid="player-error"]')).toContainText(
+      "Predošlá zlyhala",
+      { timeout: 5000 },
+    );
+  });
+
+  test("mode change fails → 'Zmena režimu zlyhala'", async ({ page, request }) => {
+    await fail(request, "mode");
+    await page.goto("/live");
+    const mode = page.getByTestId("player-mode");
+    await expect(mode).toBeVisible({ timeout: 10000 });
+    await mode.selectOption("loop");
+    await expect(page.locator('[data-testid="player-error"]')).toContainText(
+      "Zmena režimu zlyhala",
+      { timeout: 5000 },
+    );
+  });
+
+  test("pause fails → 'Pauza zlyhala' (Dashboard, playlist 1 is Playing)", async ({
+    page,
+    request,
+  }) => {
+    await fail(request, "pause");
+    await page.goto("/");
+    const btn = page.getByTestId("player-playpause");
+    await expect(btn).toContainText("Pauza", { timeout: 15000 });
+    await btn.click();
+    await expect(page.locator('[data-testid="player-error"]')).toContainText(
+      "Pauza zlyhala",
+      { timeout: 5000 },
+    );
   });
 });

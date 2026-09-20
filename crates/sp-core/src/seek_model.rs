@@ -68,6 +68,14 @@ mod tests {
     }
 
     #[test]
+    fn seek_target_huge_position_clamps_to_duration_not_zero() {
+        // A client position above i64::MAX must clamp to the END, never wrap
+        // negative and land at 0 (release review 0.60.0).
+        assert_eq!(seek_target_ms(u64::MAX, 0, 200_000), 200_000);
+        assert_eq!(seek_target_ms(u64::MAX, -10_000, 200_000), 200_000);
+    }
+
+    #[test]
     fn seek_target_exact_zero_boundary() {
         assert_eq!(seek_target_ms(10_000, -10_000, 200_000), 0);
     }

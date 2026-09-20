@@ -859,7 +859,10 @@ mod sync_filter_tests {
         use sqlx::Row;
         assert_eq!(row.get::<String, _>("kind"), "custom");
         assert_eq!(row.get::<String, _>("ndi_output_name"), "SP-live");
-        assert_eq!(row.get::<String, _>("playback_mode"), "continuous");
+        // The live setlist is driven song by song: the server seeds `single`
+        // so the Live page never has to force it (and revert the operator's
+        // choice) on every mount.
+        assert_eq!(row.get::<String, _>("playback_mode"), "single");
     }
 }
 

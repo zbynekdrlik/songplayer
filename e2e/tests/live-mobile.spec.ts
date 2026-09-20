@@ -89,19 +89,11 @@ test.describe('/live mobile (iPhone-SE viewport)', () => {
     const scroller = page.locator('.lyrics-view-scroll');
     await expect(scroller).toBeVisible({ timeout: 30_000 });
 
-    // Tap the first available lyrics line. If the mock env has no NowPlaying
-    // video_id signal, the scroller stays empty — the test still asserts the
-    // scrubber + console are clean via the other two checks above, and we
-    // pass the seek-absence path only when the lyrics-list is genuinely empty.
+    // The mock always serves a two-line track for the playing video, so a
+    // missing line means the lyrics surface is broken — the test must fail,
+    // never fall through to an "empty is fine" branch.
     const lines = page.locator('.lyr-line');
-    const count = await lines.count();
-    if (count === 0) {
-      // Accept: no video playing means no lyrics. Scroller shows empty state.
-      // This is a valid environment state, not a skip.
-      await expect(page.locator('.lyrics-empty')).toBeVisible();
-      return;
-    }
-
+    await expect(lines.first()).toBeVisible({ timeout: 10_000 });
     await lines.first().click();
     await expect.poll(() => seekCalls.length, { timeout: 5_000 }).toBeGreaterThan(0);
     expect(seekCalls[0].body).toMatch(/"position_ms":\s*\d+/);
