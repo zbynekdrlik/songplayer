@@ -279,13 +279,6 @@ impl PlaybackEngine {
         }
     }
 
-    /// #196 (0.60.0 review): the caller bounds `create_startup_senders` with
-    /// [`STARTUP_SENDERS_BUDGET`]; when the budget expires mid-way the +30 s
-    /// self-check clock must still start, so the caller marks ready explicitly.
-    pub(crate) fn mark_startup_senders_ready(&self) {
-        self.ndi_health_registry.mark_senders_ready();
-    }
-
     /// #196: create one output's pipeline (idempotent) and, once its NDI sender
     /// reports ready, record the advertised URL in the health registry so it
     /// shows on `/api/v1/ndi/health`. Bounded wait — a stuck/absent sender never

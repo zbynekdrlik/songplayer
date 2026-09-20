@@ -771,7 +771,8 @@ pub async fn start(
                 budget_s = budget.as_secs(),
                 "startup senders exceeded their budget — binding the API now"
             );
-            engine.mark_startup_senders_ready();
+            // The +30 s self-check clock must still start (shared registry).
+            ndi_health_registry.mark_senders_ready();
         }
     }
 
