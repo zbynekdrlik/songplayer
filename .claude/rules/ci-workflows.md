@@ -231,3 +231,13 @@ holds just your pair. Write `test(#N): RED — …`. If a wrongly-formed RED com
 is already pushed (history rewrite is banned), a LATER commit carrying
 `[no-test: <fix-sha> RED test is <test-sha> — <reason>]` declares it.
 
+## Mutation-timeout trap: bounded windows pop with `if`, never `while`
+
+`while deque.len() > CAP { deque.pop_front(); }` is correct code that a
+`>`→`<` mutant turns into an infinite loop on an empty deque — cargo-mutants
+reports TIMEOUT (300 s), which fails the shard exactly like a MISSED mutant
+(#192 r3, `loop_stats.rs::SubmitHist::observe`). When one push can overshoot
+by at most one, write `if len > CAP { pop_front(); }`; for bulk trims use
+`truncate`/`drain(..n)` with a `saturating_sub` count. Any loop whose exit
+depends on a comparison a mutant can flip needs a structural bound.
+
