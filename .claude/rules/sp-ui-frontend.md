@@ -516,3 +516,13 @@ Rules now:
 - The preview inside the shared Player must not inherit the playlist-card
   `max-width: 320px` (`.player-preview … { max-width: none }`).
 
+## Off-program pipelines: the Player label is NOT proof of playback (post-deploy specs)
+
+`ndi_health` maps a Playing-but-off-program pipeline to `Paused` (the #194
+"state == Playing means the wall shows this output" rule), and the Player's
+`is_playing` reads that mapping — so on the Dabing page an off-program dub can
+read `▶ Prehrať` while it decodes (bug ticket filed 20.9.2026). A box spec must
+prove playback by the BACKEND effect (`/api/v1/ndi/health`
+`frames_submitted_last_5s > 0` for the playlist), never by the toggle text —
+`e2e/post-deploy-dabing.spec.ts` is the pattern.
+
