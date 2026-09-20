@@ -731,4 +731,3 @@ fn play_should_scene_on_only_when_not_already_playing() {
     assert!(play_should_scene_on(&PlayState::WaitingForScene));
     assert!(play_should_scene_on(&PlayState::Idle));
 }
-
