@@ -476,6 +476,39 @@ inconsistency the ticket fixes, and the Live tap-to-seek must not be lost —
   Dabing (a dub's subtitles are just its `LyricsTrack`), and in the Lyrics details
   view.
 
+#### LyricsView is a 4-way fetch state, and 204 = empty NOT error (#198 items 3 + 9)
+
+`lyrics_view.rs` holds `RwSignal<LyricsState>` = `Empty | Loading | Loaded(track)
+| Error(String)`, NOT `Option<LyricsTrack>`. Loading + error render the shared
+`StateBlock{Loading,Error}` (`state-loading` / `state-error`); only a genuinely-
+empty case (no effective video, no lines, or a 204) keeps the lyrics-surface
+`lyrics-empty` testid. The old `Option<LyricsTrack>` folded loading, a failed
+fetch and no-lyrics all into `lyrics-empty`, hiding real failures. `current_idx`
+reads the track via `state.with(|s| …)` by reference so a position tick still
+flips only the highlighted `<li>`, never rebuilds the `<ol>`.
+
+**`api::get_video_lyrics` returns `Result<Option<LyricsTrack>, String>`, and 204
+is special-cased to `Ok(None)`.** The server replies **204 No Content** for a
+video with no lyrics. The generic `api::get::<T>()` calls `resp.json::<T>()` on
+that EMPTY body → a serde error → `Err`, which now renders the ERROR block. So a
+status that needs distinct handling (204) must NOT go through `api::get()` — do
+the `Request` manually and branch on `resp.status()`. Mock: `/__mock/lyrics-mode`
+(`track`/`empty`(204)/`error`(500)/`slow`) drives `/api/v1/videos/:id/lyrics`;
+reset it to `track` in each spec's `afterEach` (global state), and strip the
+deliberate 500's `Failed to load resource` console entry in the error test.
+
+#### The slovak-only gate is a DENYLIST, positive gate deferred (#198 item 4)
+
+`slovak-only.spec.ts` is an exact-match denylist (`BANNED`/`BANNED_NAV`/
+`BANNED_PLACEHOLDERS`). A stronger POSITIVE gate ("fail any pure-ASCII chrome
+word not in a product-name allowlist") was deferred: the Slovak-without-diacritics
+allowlist (skladby, skladba, Interpret, adresa, osoba, Dabing, dabingu, Mix,
+Stemy, stemov, …) cannot be bounded ≤30 or verified complete from the Tier-0
+no-mock-run box — static source extraction can't separate rendered chrome from
+comments / CSS / testids / format fragments, so a positive gate would false-
+positive and red CI. New denylist entries must be verified ABSENT from the view
+code first (grep the string literal, exclude comment/class/testid lines).
+
 ### One operator language: Slovak (the `slovak-only.spec.ts` gate, #194 r3c)
 
 `e2e/slovak-only.spec.ts` asserts that NONE of the audit's English UI-chrome

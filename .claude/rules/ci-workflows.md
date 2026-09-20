@@ -241,3 +241,21 @@ by at most one, write `if len > CAP { pop_front(); }`; for bulk trims use
 `truncate`/`drain(..n)` with a `saturating_sub` count. Any loop whose exit
 depends on a comparison a mutant can flip needs a structural bound.
 
+## Post-deploy restart-skip compares the DEPLOY job's observed version (#198 item 2)
+
+The `e2e-resolume` "Restart SongPlayer" step's `#196 item 6` skip must compare
+`$status.version` against the version the DEPLOY job observed the running process
+report, NOT `(Get-Content VERSION -Raw)` from the E2E job's own checkout — on a
+re-run of an older run / a moved ref the checkout VERSION drifts and flips the
+skip silently. The `deploy-resolume` Health-checks step (id `healthcheck`, which
+already verified `$resp.version -eq VERSION`) publishes it as a job output
+`deployed_version`; the E2E step reads
+`${{ needs.deploy-resolume.outputs.deployed_version }}`.
+
+**PowerShell -> `$env:GITHUB_OUTPUT`: use `Add-Content`, NEVER `Out-File -Encoding
+utf8`.** Under WinPS 5.1 (`shell: powershell` on the runner) `-Encoding utf8`
+writes a UTF-8 BOM, which prefixes the key (`﻿key=value`) and can blank the
+output on a strict reader. `Add-Content -Path $env:GITHUB_OUTPUT -Value
+"key=$($val)"` writes the ASCII line with no BOM. (The bash steps' `>> $GITHUB_OUTPUT`
+have no such issue.)
+
