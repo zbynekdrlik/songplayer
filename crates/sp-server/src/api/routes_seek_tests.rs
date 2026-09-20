@@ -146,7 +146,7 @@ async fn seek_forwards_clamped_position_to_engine() {
 }
 
 #[tokio::test]
-async fn seek_zero_duration_is_409() {
+async fn seek_zero_duration_forwards_unclamped() {
     // #198 item 7: a duration of 0 means "unknown / not yet probed". The route
     // used to forward the requested position VERBATIM in that case (no upper
     // clamp bound), so an arbitrary client position reached EngineCommand::Seek
@@ -168,17 +168,21 @@ async fn seek_zero_duration_is_409() {
         .oneshot(seek_request(pid, 45_000))
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::CONFLICT);
-    // No command must reach the engine for a refused seek.
+    // 0.62.0 release review: `videos.duration_ms` is written only at import/sync
+    // (NULL for many playable videos) while the slider is enabled from the
+    // pipeline's live duration — a 409 here left an enabled seek bar whose every
+    // drag failed forever. Unknown DB duration → forward unclamped (the engine
+    // and the decoder bound the seek), never refuse.
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     assert!(
-        rx.try_recv().is_err(),
-        "a 409 (unknown duration) must not forward a Seek"
+        matches!(rx.try_recv(), Ok(EngineCommand::Seek { position_ms: 45_000, .. })),
+        "an unknown duration must forward the requested position unclamped"
     );
     crate::now_playing::global().clear(pid);
 }
 
 #[tokio::test]
-async fn seek_null_duration_is_409() {
+async fn seek_null_duration_forwards_unclamped() {
     // #198 item 7: a NULL `videos.duration_ms` (not yet probed) is also unknown —
     // no clamp bound, so refuse with 409 rather than forward an unbounded seek.
     let pid = 940_006;
@@ -192,10 +196,15 @@ async fn seek_null_duration_is_409() {
         .oneshot(seek_request(pid, 45_000))
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    // 0.62.0 release review: `videos.duration_ms` is written only at import/sync
+    // (NULL for many playable videos) while the slider is enabled from the
+    // pipeline's live duration — a 409 here left an enabled seek bar whose every
+    // drag failed forever. Unknown DB duration → forward unclamped (the engine
+    // and the decoder bound the seek), never refuse.
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     assert!(
-        rx.try_recv().is_err(),
-        "a 409 (unknown duration) must not forward a Seek"
+        matches!(rx.try_recv(), Ok(EngineCommand::Seek { position_ms: 45_000, .. })),
+        "an unknown duration must forward the requested position unclamped"
     );
     crate::now_playing::global().clear(pid);
 }

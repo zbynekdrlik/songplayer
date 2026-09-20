@@ -290,6 +290,38 @@ fn handle_health_snapshot_persists_without_a_tokio_reactor() {
     rt.block_on(async move { drop(engine) });
 }
 
+/// 0.62.0 release review: the drain → DB write in `handle_pipeline_event` had no
+/// test (deleting the loop kept the workspace green while the #196 self-check
+/// baseline was never written again). A changed count (None → 2) must land in
+/// `settings` through the ASYNC event path.
+#[tokio::test]
+async fn health_snapshot_event_persists_the_receiver_count_to_the_db() {
+    let (mut engine, _registry) = fresh_engine().await;
+    engine.ensure_pipeline(7, "SP-test");
+    let now = Instant::now();
+    engine
+        .handle_pipeline_event(
+            7,
+            PipelineEvent::HealthSnapshot {
+                connections: 2,
+                frames_submitted_total: 150,
+                frames_submitted_last_5s: 30,
+                observed_fps: 29.97,
+                nominal_fps: 29.97,
+                last_submit_ts: Some(now),
+                last_heartbeat_ts: now,
+                consecutive_bad_polls: 0,
+                reported_state: PlaybackStateLabel::Playing,
+                pacing: Default::default(),
+                audio: Default::default(),
+                loop_stats: Default::default(),
+            },
+        )
+        .await;
+    let counts = crate::db::models_ndi::all_last_receiver_counts(&engine.pool).await;
+    assert_eq!(counts.get(&7), Some(&2), "the changed count must be persisted");
+}
+
 /// #198 item 5: the pending receiver-count persist buffer debounces a flapping
 /// count to its latest value and `drain` CLEARS it (so a value is written at
 /// most once per drain). Kills the queue-noop / drain-empty / drain-no-clear
