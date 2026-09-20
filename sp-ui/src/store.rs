@@ -101,6 +101,9 @@ pub struct NowPlayingInfo {
     pub position_ms: u64,
     pub duration_ms: u64,
     pub state: PlaybackState,
+    /// #201: the pipeline's own transport state, independent of `state`'s
+    /// on/off-program folding. The Player's play/pause label reads this.
+    pub transport: TransportState,
     pub mode: PlaybackMode,
     pub line_en: Option<String>,
     pub line_sk: Option<String>,
@@ -224,6 +227,7 @@ impl DashboardStore {
                         position_ms: 0,
                         duration_ms: 0,
                         state: PlaybackState::default(),
+                        transport: TransportState::default(),
                         mode: PlaybackMode::default(),
                         line_en: None,
                         line_sk: None,
@@ -243,10 +247,12 @@ impl DashboardStore {
                 playlist_id,
                 state,
                 mode,
+                transport,
             } => {
                 self.now_playing.update(|map| {
                     if let Some(entry) = map.get_mut(&playlist_id) {
                         entry.state = state;
+                        entry.transport = transport;
                         entry.mode = mode;
                     } else {
                         map.insert(
@@ -258,6 +264,7 @@ impl DashboardStore {
                                 position_ms: 0,
                                 duration_ms: 0,
                                 state,
+                                transport,
                                 mode,
                                 line_en: None,
                                 line_sk: None,

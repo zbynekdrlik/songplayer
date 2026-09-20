@@ -42,6 +42,28 @@ pub enum PlaybackState {
     Playing,
 }
 
+/// The pipeline's OWN transport state, INDEPENDENT of whether its NDI output is
+/// on OBS program (#201). Orthogonal to [`PlaybackState`]: `PlaybackState` folds
+/// the on/off-program fact in (a decoding pipeline off program is reported as
+/// `WaitingForScene` so the wall-health / selector logic stays correct), while
+/// `TransportState` answers only "is the pipeline decoding right now?".
+///
+/// The shared Player reads `transport == Playing` for its play/pause label so a
+/// dub prepared OFF program on the Dabing page reads `⏸ Pauza` while it plays,
+/// and shows on/off-program only in the badge (from `ndi_health`). `serde(default)`
+/// (=`Idle`) so older/mock payloads that omit it still decode.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransportState {
+    /// The pipeline is actively decoding a video (on OR off program).
+    Playing,
+    /// The pipeline has content but is not decoding (paused / black-framed /
+    /// awaiting its scene).
+    Paused,
+    /// No video is loaded.
+    #[default]
+    Idle,
+}
+
 /// Karaoke playback mode (#14). Controls how the separated vocal / instrumental
 /// stems are mixed into the NDI audio output. `FullMix` (default) plays the
 /// original `{id}_audio.flac` unchanged — the current behaviour and the safe

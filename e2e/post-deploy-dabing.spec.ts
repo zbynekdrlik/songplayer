@@ -127,6 +127,16 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
       )
       .toBeGreaterThan(0);
 
+    // #201: while frames flow on the OFF-program Dabing output, the Player's
+    // transport label must read `⏸ Pauza` — it follows the pipeline's own
+    // decoding state, not the on/off-program state (the badge shows the latter).
+    await expect(page.getByTestId("player-playpause")).toContainText("⏸ Pauza", {
+      timeout: 10000,
+    });
+    await expect(page.getByTestId("player-program-badge")).toContainText(
+      "○ Mimo programu",
+    );
+
     // Dub fader: drag from the top (100 %) to ~40 % → ONE PATCH, fader stays.
     const fader = page.getByTestId("dub-mix-fader");
     await expect(fader).toBeEnabled({ timeout: 15000 });
@@ -150,5 +160,13 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     );
     await mouseDrag(page, '[data-testid="player-seek"]', 0.05, 0.3);
     expect((await seekResp).status()).toBe(204);
+
+    // #201: pausing the off-program dub flips the transport label to `▶ Prehrať`
+    // (the pipeline stops decoding), proving the label tracks the pipeline.
+    await request.post(`/api/v1/playback/${dabingPid}/pause`);
+    await expect(page.getByTestId("player-playpause")).toContainText(
+      "▶ Prehrať",
+      { timeout: 10000 },
+    );
   });
 });
