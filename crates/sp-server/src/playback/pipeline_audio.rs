@@ -50,7 +50,7 @@ pub(crate) fn is_late_frame(
     // emitter (legacy audio-with-video path) → `ring_depth_ms` is `None` → never
     // late (its audio rides with the video, so there is nothing to catch up to).
     let Some(depth_ms) = ring_depth_ms else {
-        return true;
+        return false;
     };
     let target_ms = crate::playback::pipeline::audio_emitter::target_ring_depth_ms();
     let frame_ms = sp_decoder::split_sync::DEFAULT_TOLERANCE_MS;
