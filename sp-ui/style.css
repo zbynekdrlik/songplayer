@@ -1426,7 +1426,9 @@ body {
 .player-lyrics { margin-top: 8px; }
 /* Compact mode reuses .karaoke-panel for the 4-line layout; the scroll mode is a
    bounded, scrollable tappable list (same idiom the old lyrics_scroller used). */
-.lyrics-view-scroll { max-height: 260px; overflow-y: auto; }
+/* Reserved min-height so the card never jumps when lyrics load/clear (#163). */
+.lyrics-view-scroll { max-height: 260px; min-height: 3rem; overflow-y: auto; }
 .lyrics-view-scroll .lyrics-list { list-style: none; margin: 0; padding: 0; }
+.lyrics-empty { color: var(--text-dim); font-style: italic; padding: 12px 0; }
 .preview-video-box { width: 100%; aspect-ratio: 16 / 9; background: #000; }
 .mixer-karaoke, .mixer-dub { display: block; }

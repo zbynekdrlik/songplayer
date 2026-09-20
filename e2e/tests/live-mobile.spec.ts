@@ -98,7 +98,7 @@ test.describe('/live mobile (iPhone-SE viewport)', () => {
     if (count === 0) {
       // Accept: no video playing means no lyrics. Scroller shows empty state.
       // This is a valid environment state, not a skip.
-      await expect(page.locator('.state-empty, .state-error')).toBeVisible();
+      await expect(page.locator('.lyrics-empty')).toBeVisible();
       return;
     }
 

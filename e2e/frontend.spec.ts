@@ -433,75 +433,29 @@ test("lyrics song row gender toggle cycles auto→♂→♀ and PATCHes (#152)",
 
 // ── #163: subtitles block must not resize the card ────────────────────────────
 
-test("karaoke panel keeps the card height stable across lyrics on/off (#163)", async ({
+test("the shared lyrics-view is always in the Player and layout-stable (#163/#194)", async ({
   page,
-  request,
 }) => {
-  // The owner's report: "okno stále skáče hore dole" — the subtitles block under
-  // the player/preview appears only when there is a lyric line, so the card (and
-  // everything below it) jumps whenever lyrics pause. The panel must ALWAYS be in
-  // the DOM with reserved height; only the text inside it swaps.
+  // #194: lyrics are unified onto the shared LyricsView in the Player's lyrics
+  // slot (one surface on every page). The block is ALWAYS in the DOM (empty ->
+  // `.lyrics-empty` "Ziadny text", else the tappable `<ol>`) with a reserved
+  // min-height, so the card never jumps when lyrics load/clear (#163). The old
+  // Dashboard-only 4-line karaoke word-highlight panel is gone.
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Worship" })).toBeVisible({
     timeout: 10000,
   });
-
   const card = page.locator(".playlist-card", {
     has: page.getByRole("heading", { name: "Worship" }),
   });
-  // Wait for the WS-driven now-playing block to arrive (playlist 1 is marked
-  // Playing by the mock). This also proves the WebSocket is connected, so the
-  // /__mock/lyrics-update broadcast below actually reaches a client. #194: the
-  // now-playing title lives in the shared Player (`player-title`); it flips from
-  // "Nič nehrá" to the song once the WS NowPlaying arrives.
+  // The now-playing title lives in the shared Player; wait for the WS NowPlaying.
   await expect(card.getByTestId("player-title")).toContainText(
     "Never Gonna Give You Up",
     { timeout: 10000 },
   );
-
-  const panel = card.locator(".karaoke-panel");
-
-  // 1) A lyric line WITH text.
-  const withText = await request.post("/__mock/lyrics-update", {
-    data: {
-      playlist_id: 1,
-      line_en: "Amazing grace how sweet",
-      line_sk: "Úžasná milosť aká sladká",
-      prev_line_en: "was blind but now I see",
-      next_line_en: "that saved a wretch like me",
-      active_word_index: 2,
-      word_count: 4,
-    },
-  });
-  expect(withText.ok()).toBeTruthy();
-
-  await expect(panel).toBeVisible({ timeout: 5000 });
-  await expect(panel.locator(".karaoke-current")).toContainText("Amazing");
-
-  const cardBox1 = await card.boundingBox();
-  const panelBox1 = await panel.boundingBox();
-  expect(cardBox1?.height ?? 0).toBeGreaterThan(0);
-  expect(panelBox1?.height ?? 0).toBeGreaterThan(0);
-
-  // 2) A pause between lines — nothing to show. The panel must stay in the DOM
-  // at the SAME height; only its text clears.
-  const noText = await request.post("/__mock/lyrics-update", {
-    data: { playlist_id: 1 },
-  });
-  expect(noText.ok()).toBeTruthy();
-
-  await expect(panel).toBeVisible();
-  await expect(panel.locator(".karaoke-current")).not.toContainText("Amazing");
-
-  const cardBox2 = await card.boundingBox();
-  const panelBox2 = await panel.boundingBox();
-
-  // Equal within 1px: the block reserves its space whether or not there is a
-  // lyric line, so nothing below it jumps.
-  expect(
-    Math.abs((panelBox1?.height ?? 0) - (panelBox2?.height ?? 0)),
-  ).toBeLessThanOrEqual(1);
-  expect(
-    Math.abs((cardBox1?.height ?? 0) - (cardBox2?.height ?? 0)),
-  ).toBeLessThanOrEqual(1);
+  // The shared lyrics-view is inside the Player and always present + visible.
+  const lyricsView = card.getByTestId("lyrics-view");
+  await expect(lyricsView).toBeVisible({ timeout: 10000 });
+  const box = await lyricsView.boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThan(0);
 });

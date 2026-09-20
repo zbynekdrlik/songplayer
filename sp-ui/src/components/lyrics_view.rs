@@ -20,7 +20,6 @@
 use leptos::prelude::*;
 use sp_core::lyrics::LyricsTrack;
 
-use crate::components::state_block::{StateBlock, StateKind};
 use crate::store::DashboardStore;
 
 #[component]
@@ -104,8 +103,11 @@ pub fn LyricsView(
     view! {
         <div class="lyrics-view lyrics-view-scroll" data-testid="lyrics-view">
             {move || match track.get() {
+                // A lyrics-surface-specific empty (its OWN testid) — NOT the page
+                // `state-empty`, which the Player would otherwise duplicate on
+                // every idle page (collides with a page's own empty state).
                 None => view! {
-                    <StateBlock kind=StateKind::Empty empty_label="Žiadny text".to_string() />
+                    <div class="lyrics-empty" data-testid="lyrics-empty">"Žiadny text"</div>
                 }
                 .into_any(),
                 Some(t) => {
