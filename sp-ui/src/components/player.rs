@@ -243,10 +243,12 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                     }
                     prop:disabled=move || !has_content.get()
                     on:pointerdown=move |_| {
+                        seek_committed.set(None); // a new drag may land on the old value
                         seek_drag_ms.set(position());
                         seek_dragging.set(true);
                     }
                     on:touchstart=move |_| {
+                        seek_committed.set(None);
                         seek_drag_ms.set(position());
                         seek_dragging.set(true);
                     }

@@ -111,10 +111,12 @@ pub fn MixerChannel(ch: ChannelSpec) -> impl IntoView {
                 prop:value=move || display_pct()
                 prop:disabled=move || !enabled.get()
                 on:pointerdown=move |_| {
+                    committed.set(None); // a new drag may land on the old value
                     drag_pct.set(pct());
                     dragging.set(true);
                 }
                 on:touchstart=move |_| {
+                    committed.set(None);
                     drag_pct.set(pct());
                     dragging.set(true);
                 }

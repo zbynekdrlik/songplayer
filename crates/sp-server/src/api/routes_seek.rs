@@ -89,14 +89,13 @@ pub async fn post_seek(
         }
     };
 
-    // #198 item 7: without a known duration there is no upper clamp bound, so an
-    // arbitrary client position would reach EngineCommand::Seek UNCLAMPED. Refuse
-    // with 409 rather than forward an unbounded seek — a playing, seekable song
-    // has a known duration; an un-probed one is not safely seekable.
-    let Some(duration_ms) = duration_ms else {
-        return StatusCode::CONFLICT.into_response();
-    };
-    let position_ms = sp_core::seek_model::seek_target_ms(req.position_ms, 0, duration_ms);
+    // `videos.duration_ms` is written only at import/sync (NULL for many playable
+    // videos) while the UI enables its slider from the pipeline's live duration,
+    // so an unknown DB duration must NOT refuse the seek (0.62.0 review: a 409
+    // here left an enabled seek bar whose every drag failed). Unknown → no upper
+    // clamp; the engine and the decoder bound the position.
+    let position_ms =
+        sp_core::seek_model::seek_target_ms(req.position_ms, 0, duration_ms.unwrap_or(u64::MAX));
 
     match state
         .engine_tx
