@@ -210,6 +210,41 @@ mod tests {
     }
 
     #[test]
+    fn near_the_end_of_the_song_nothing_is_dropped() {
+        // The sync decoder reads audio ~target ahead of the video, so the audio
+        // stream hits EOF ~1.5 s before the last video frame; from there the ring
+        // drains in real time although the video is ON TIME. A primed, lagging
+        // frame in that tail must still SUBMIT, or the wall freezes for the
+        // final ~1.5 s of every song (0.61.0 release review, critical).
+        let mut c = CatchUp::new();
+        assert_eq!(c.step(TARGET, TARGET, FRAME, false), Decision::Submit);
+        assert!(c.primed());
+        assert_eq!(c.step(150, TARGET, FRAME, true), Decision::Submit);
+        assert_eq!(c.step(0, TARGET, FRAME, true), Decision::Submit);
+        // Still primed and still dropping when NOT at the end.
+        assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Drop);
+    }
+
+    #[test]
+    fn a_cap_trip_unprimes_until_the_ring_refills() {
+        // A decoder that cannot beat real time must fall back to smooth-but-
+        // offset video (no drops) instead of 1 frame per cap forever
+        // (0.61.0 release review, important).
+        let mut c = CatchUp::new();
+        assert_eq!(c.step(TARGET, TARGET, FRAME, false), Decision::Submit);
+        for _ in 0..=MAX_CONSECUTIVE_DROPS {
+            assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Drop);
+        }
+        assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Submit, "cap trip");
+        assert!(!c.primed(), "the cap trip must un-prime");
+        assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Submit, "stays smooth");
+        // Refilled to within one frame → re-primed → a fresh stall drops again.
+        assert_eq!(c.step(1500, TARGET, FRAME, false), Decision::Submit);
+        assert!(c.primed());
+        assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Drop);
+    }
+
+    #[test]
     fn prime_persists_after_the_ring_drains() {
         // Once primed by a full ring, a later stall (shallow ring) keeps primed
         // AND now Drops — the exact round-4 behaviour.

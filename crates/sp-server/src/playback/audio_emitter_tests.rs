@@ -743,10 +743,15 @@ fn drain_budget_is_the_lookahead_plus_one_slot() {
     // so a +/-/* mutant on `lookahead + block_ms()` is killed.
     assert_eq!(drain_budget_ms(0), 34);
     assert_eq!(drain_budget_ms(100), 134);
-    assert_eq!(drain_budget_ms(1500), 1534);
+    // The ring holds up to target_ring_depth_ms() (tolerance + lookahead) at a
+    // natural end, so the budget must cover THAT plus one slot: 40 + 1500 + 34.
+    assert_eq!(drain_budget_ms(1500), 1574);
     // Derived from the LIVE cushion — the natural-end drain waits this long, and
     // it must exceed the round-2 fixed 400 ms so the last ~1.1 s is not cut.
-    assert_eq!(drain_budget_ms(AUDIO_LOOKAHEAD_MS), 1534);
+    assert_eq!(
+        drain_budget_ms(AUDIO_LOOKAHEAD_MS),
+        target_ring_depth_ms() + block_ms()
+    );
     assert!(
         drain_budget_ms(AUDIO_LOOKAHEAD_MS) > 400,
         "the round-3 drain budget must exceed the old 400 ms bound"
