@@ -104,3 +104,12 @@ test asserting the joined PATH string `"/opt/tools:/usr/bin:/bin"` — on Window
 the platform string — round-trip the result through `std::env::split_paths` and
 check `parts[0] == tools_dir`, which holds on both separators. Same rule for any
 `MAIN_SEPARATOR` / line-ending / drive-letter / temp-path assumption in a test.
+
+## Doc-comment lists: blank `//!`/`///` line before the paragraph that follows
+
+CI clippy runs with `-D warnings`, and `clippy::doc_lazy_continuation` (stable
+since 1.80) rejects a paragraph line that directly follows a list item without
+a blank doc line or indentation — the Tier-0 box cannot see it, so it fails
+the Lint job (#195, three sites). After the last `- item` / `3. item`, insert a
+bare `//!` (or `///`) line before continuing prose.
+
