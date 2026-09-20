@@ -68,15 +68,22 @@ pub fn MixerChannel(ch: ChannelSpec) -> impl IntoView {
             gain.set(pct_to_gain(p));
         }
     };
+    // #200: commit on RELEASE from the pending drag value — a real browser fires
+    // `pointerup` before `change`, and once the gate re-applies the live gain
+    // Chrome suppresses `change` entirely; `change` is only the keyboard path.
+    // Value-dedup keeps it to ONE PATCH per release.
+    let committed = RwSignal::new(None::<i32>);
+    let commit = move |p: i32| {
+        if committed.get_untracked() != Some(p) {
+            committed.set(Some(p));
+            let v = pct_to_gain(p);
+            gain.set(v);
+            on_change.run(v);
+        }
+    };
     let on_change_ev = move |_ev: leptos::ev::Event| {
-        // Commit the PENDING dragged value, never the DOM value: on a real
-        // release the browser fires `pointerup` (which clears `dragging`) BEFORE
-        // `change`, so `prop:value` may have already snapped the DOM back to the
-        // live gain — reading `drag_pct` commits what the operator actually set.
-        let v = pct_to_gain(drag_pct.get_untracked());
-        gain.set(v);
+        commit(drag_pct.get_untracked());
         dragging.set(false);
-        on_change.run(v);
     };
 
     let aria = label.clone();
@@ -103,8 +110,18 @@ pub fn MixerChannel(ch: ChannelSpec) -> impl IntoView {
                 }
                 on:input=on_input
                 on:change=on_change_ev
-                on:pointerup=move |_| dragging.set(false)
-                on:touchend=move |_| dragging.set(false)
+                on:pointerup=move |_| {
+                    if dragging.get_untracked() {
+                        commit(drag_pct.get_untracked());
+                    }
+                    dragging.set(false);
+                }
+                on:touchend=move |_| {
+                    if dragging.get_untracked() {
+                        commit(drag_pct.get_untracked());
+                    }
+                    dragging.set(false);
+                }
                 on:pointercancel=move |_| dragging.set(false)
             />
             <span class="mixer-channel-label">{label}</span>

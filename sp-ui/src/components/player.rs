@@ -138,11 +138,22 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // ONE seek POST fires on release (`on:change`). #194 hotfix.
     let seek_dragging = RwSignal::new(false);
     let seek_drag_ms = RwSignal::new(0_u64);
+    // #200: the commit happens on RELEASE (`pointerup`/`touchend`) from the pending
+    // drag value — a real browser fires `pointerup` before `change`, and once the
+    // gate re-applies the live value Chrome suppresses `change` entirely, so
+    // `change` is only the keyboard path. Value-dedup keeps it to ONE POST.
+    let seek_committed = RwSignal::new(None::<u64>);
     let do_seek = move |ms: u64| {
         leptos::task::spawn_local(async move {
             let r = api::seek_playlist(pid, ms).await;
             report("Pretáčanie zlyhalo", r);
         });
+    };
+    let commit_seek = move |ms: u64| {
+        if seek_committed.get_untracked() != Some(ms) {
+            seek_committed.set(Some(ms));
+            do_seek(ms);
+        }
     };
     let seek_back = move |_| do_seek(seek_target_ms(position(), -10_000, duration()));
     let seek_fwd = move |_| do_seek(seek_target_ms(position(), 10_000, duration()));
@@ -233,16 +244,23 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                         }
                     }
                     on:change=move |_| {
-                        // Commit the PENDING dragged position, never the DOM value:
-                        // on a real release `pointerup` clears `dragging` BEFORE
-                        // `change`, so `prop:value` may have already snapped the DOM
-                        // back to the live position — `seek_drag_ms` is what was
-                        // actually dragged (and the last keyboard/programmatic value).
-                        do_seek(seek_drag_ms.get_untracked());
+                        // Keyboard / programmatic path (a pointer release already
+                        // committed and the dedup makes this a no-op then).
+                        commit_seek(seek_drag_ms.get_untracked());
                         seek_dragging.set(false);
                     }
-                    on:pointerup=move |_| seek_dragging.set(false)
-                    on:touchend=move |_| seek_dragging.set(false)
+                    on:pointerup=move |_| {
+                        if seek_dragging.get_untracked() {
+                            commit_seek(seek_drag_ms.get_untracked());
+                        }
+                        seek_dragging.set(false);
+                    }
+                    on:touchend=move |_| {
+                        if seek_dragging.get_untracked() {
+                            commit_seek(seek_drag_ms.get_untracked());
+                        }
+                        seek_dragging.set(false);
+                    }
                     on:pointercancel=move |_| seek_dragging.set(false)
                 />
                 <div class="player-seek-controls">
