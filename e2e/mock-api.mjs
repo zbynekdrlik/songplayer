@@ -955,9 +955,18 @@ app.post("/__mock/set-playing", (req, res) => {
     return;
   }
   const state = typeof data.state === "string" ? data.state : "Playing";
+  // #201: carry transport too (default Playing when state is Playing, else
+  // Paused, mirroring the tick-item derivation) so a toggle assertion after
+  // this helper reads the honest label — the Player now reads transport.
+  const transport =
+    typeof data.transport === "string"
+      ? data.transport
+      : state === "Playing"
+        ? "Playing"
+        : "Paused";
   const msg = JSON.stringify({
     type: "PlaybackStateChanged",
-    data: { playlist_id: data.playlist_id, state, mode: "Continuous" },
+    data: { playlist_id: data.playlist_id, state, mode: "Continuous", transport },
   });
   let sent = 0;
   for (const ws of wsClients) {
