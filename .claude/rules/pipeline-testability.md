@@ -72,3 +72,36 @@ is the seam that makes this possible: the pure `emit_one_block` takes an
 `AudioSink<B>`, so a `MockNdiBackend` sink drives it on Linux while a
 `RealNdiBackend` sink drives it on the box — never a `#[cfg(windows)]`-narrowed
 signature for logic that has no MediaFoundation dependency.
+
+## #192 round 4 — video follows the audio clock (`av_catchup.rs`)
+
+Round 3's 1.5 s cushion stops a producer stall reaching the speakers but leaves a
+lasting A/V offset: the wall-clock emitter keeps its grid while the SDK-clocked
+video, submitted at decode time, resumes ~1.4 s late and the loop (≈ real time
+under a heavy child) never catches up. The ring depth IS the video's lag —
+`lag_ms = target_depth_ms − ring_depth_ms`, `target = DEFAULT_TOLERANCE_MS +
+AUDIO_LOOKAHEAD_MS` (`audio_emitter::target_ring_depth_ms()`, never a literal).
+
+- **Pure, Linux-tested, mutation-scored (`playback/av_catchup.rs`):** the free fn
+  `decide(ring_depth_ms, target_depth_ms, frame_ms, primed)` (Drop only when
+  primed AND lag > one frame) and `CatchUp{primed, consecutive_drops}` — the
+  0.9·target prime latch (integer `10·depth ≥ 9·target`; the initial fill is not a
+  stall) and the `MAX_CONSECUTIVE_DROPS` (75 ≈ 3 s) safety valve (submit one frame
+  anyway so a stuck decoder never blacks the wall). `CatchUp::reset()` clears BOTH
+  fields on the `clear_ring` sites (seek arm + new play). Exact-boundary tests on
+  every threshold; no `while`, `.max()`/`.min()`-clamp-friendly, so a flipped
+  comparison fails a mutant, never spins into a timeout.
+- **Windows-only glue (`pipeline_audio::is_late_frame`, `mutants::skip`):** locks
+  the ring, reads the live `AudioEmitter::ring_depth_ms()` (same helper the
+  heartbeat logs), and applies `CatchUp::step`. The decode loop (`pipeline.rs`)
+  has EXACTLY ONE `if` at the submit site: on `Drop` it still pushed the audio,
+  skips `submit_nv12`, and calls `loop_stage.observe_drop(decode_us, audio_us)`.
+- **Counter:** `catchup_dropped` accumulates per heartbeat window through
+  `LoopStageMax::observe_drop` → `LoopStageStats` → `LoopStats` → the
+  `pipeline: loop-stats` line (`catchup_dropped=N`) — the direct producer-stall
+  meter. Box acceptance: a stall that drains `ring_ms` < 700 is followed within
+  1 s by `ring_ms` ≥ 1400 and `catchup_dropped` > 0, with zero `silence_blocks`
+  mid-song.
+- **SDK-clocked path only.** The catch-up runs only when the wall-clock emitter
+  exists — i.e. the `genlock_pacing == false` branch. The paced/genlock path has
+  its own re-latch logic and is byte-for-byte untouched (see `genlock.md`).

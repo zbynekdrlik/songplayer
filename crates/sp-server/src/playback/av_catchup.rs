@@ -84,7 +84,7 @@ impl CatchUp {
     /// stays until [`reset`](Self::reset); a stall that drains the ring never
     /// un-primes it.
     fn note_depth(&mut self, ring_depth_ms: u64, target_depth_ms: u64) {
-        if !self.primed && ring_depth_ms * 10 >= target_depth_ms * 10 {
+        if !self.primed && ring_depth_ms * 10 >= target_depth_ms * 9 {
             self.primed = true;
         }
     }
@@ -241,5 +241,36 @@ mod tests {
             Decision::Submit,
             "post-reset refill Submits"
         );
+    }
+
+    #[test]
+    fn reset_restarts_the_drop_run() {
+        // reset() must clear the consecutive-drop count, not just the prime latch:
+        // a seek that lands where the ring is already at 0.9·target (primes AND
+        // lags on the very first frame) must still get the FULL cap, not a short
+        // one carried over from before the seek.
+        let mut c = CatchUp::new();
+        c.step(TARGET, TARGET, FRAME); // prime
+        for _ in 0..70 {
+            c.step(150, TARGET, FRAME); // build the run up to 70 drops
+        }
+        c.reset();
+        // depth 1386 = 0.9·target: primes on this first post-reset frame AND lags
+        // (1540 − 1386 = 154 > one frame), so the run restarts from zero here.
+        for i in 0..=MAX_CONSECUTIVE_DROPS {
+            assert_eq!(
+                c.step(1386, TARGET, FRAME),
+                Decision::Drop,
+                "post-reset drop {i} must Drop — the pre-seek run must not carry over"
+            );
+        }
+        assert_eq!(c.step(1386, TARGET, FRAME), Decision::Submit);
+    }
+
+    #[test]
+    fn max_consecutive_drops_is_about_three_seconds() {
+        // ≈ 3 s of 40 ms frames — a pinned invariant so the safety valve stays a
+        // few seconds, not a tunable that silently drifts.
+        assert_eq!(MAX_CONSECUTIVE_DROPS, 75);
     }
 }

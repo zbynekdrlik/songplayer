@@ -232,5 +232,13 @@ paths:
   so the A/B box test (same song ± a resident stems child) names the stalling
   stage. The paced (#168, genlock_pacing OFF in prod) submit-thread accumulates
   the gauge but does not surface it through its handoff snapshot yet (separable
-  follow-up). Round 4 = move the audio decode onto its own thread IF the stage
-  timer blames the submit call.
+  follow-up).
+- **Round 4 (`av_catchup.rs`): video follows the wall-clock audio, SDK-clocked
+  path only.** The round-3 measurement showed the stall's residue is not a
+  submit-call block but a lasting A/V offset (the ring stays ~150 ms for the rest
+  of the song). So round 4 drops LATE video frames (audio already queued) until
+  the video catches up — `pipeline.rs` gains exactly ONE `if` at the submit site
+  (`pipeline_audio::is_late_frame` → pure `CatchUp::step`), counted as
+  `catchup_dropped` in the `pipeline: loop-stats` line. This runs ONLY on the
+  `genlock_pacing == false` (wall-clock-emitter) branch; the paced/genlock path
+  keeps its own re-latch logic and is untouched. Full contract: `pipeline-testability.md`.
