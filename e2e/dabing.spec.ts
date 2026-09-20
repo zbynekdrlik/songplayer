@@ -37,7 +37,7 @@ test("Dabing page renders with the nav entry and empty state (#180)", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.locator(".navbar button", { hasText: "Dabing" }).click();
+  await page.locator('[data-testid="nav-dabing"]').click();
   await expect(page.locator(".dabing-page h2")).toHaveText("Dabing");
   // #194: the Dabing page uses the shared ImportBox (`import-input`/`import-btn`).
   await expect(page.locator('[data-testid="import-input"]')).toBeVisible();

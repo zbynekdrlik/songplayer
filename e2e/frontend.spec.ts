@@ -107,7 +107,7 @@ test("dashboard shows a selector row per playlist and one work area (#165)", asy
 test("settings tab navigates", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("text=SongPlayer")).toBeVisible({ timeout: 10000 });
-  await page.click("text=Settings");
+  await page.click('[data-testid="nav-settings"]');
   await expect(page.locator("text=OBS WebSocket")).toBeVisible({
     timeout: 5000,
   });
@@ -179,15 +179,15 @@ test("navigating away from the Dashboard does not panic a disposed signal", asyn
     timeout: 10000,
   });
 
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.locator('[data-testid="nav-settings"]').click();
   await expect(page.locator("text=OBS WebSocket")).toBeVisible({
     timeout: 5000,
   });
 
-  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  await page.locator('[data-testid="nav-lyrics"]').click();
   await expect(page).toHaveURL(/\/lyrics$/);
 
-  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await page.locator('[data-testid="nav-dashboard"]').click();
   await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 5000,
   });
@@ -402,7 +402,7 @@ test("lyrics song row gender toggle cycles auto→♂→♀ and PATCHes (#152)",
     timeout: 10000,
   });
 
-  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  await page.locator('[data-testid="nav-lyrics"]').click();
   await expect(page).toHaveURL(/\/lyrics$/);
 
   const toggle = page.locator(".translation-gender-btn").first();

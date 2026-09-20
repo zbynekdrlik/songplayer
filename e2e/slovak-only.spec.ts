@@ -61,6 +61,10 @@ const BANNED: string[] = [
   "Enabled",
 ];
 
+// The navigation tabs (outside `main.content`) — translated in the round-3c
+// review follow-up: Prehľad · Naživo · Texty · Dabing · Nastavenia.
+const BANNED_NAV: string[] = ["Dashboard", "Live", "Lyrics", "Settings"];
+
 // Banned English placeholder texts (the two import boxes + the resolume form).
 const BANNED_PLACEHOLDERS: string[] = [
   "Paste YouTube URL (e.g. https://youtu.be/…)",
@@ -95,6 +99,14 @@ async function assertSlovakOnly(page: Page) {
       main.getByText(term, { exact: true }),
       `English UI string "${term}" must not appear`,
     ).toHaveCount(0);
+  }
+  // The nav tabs are Slovak too (exact match on each tab's own text).
+  const navLabels = await page
+    .locator("nav.navbar button")
+    .evaluateAll((els) => els.map((e) => (e.textContent || "").trim()));
+  expect(navLabels.length, "the five nav tabs render").toBe(5);
+  for (const banned of BANNED_NAV) {
+    expect(navLabels, `English nav tab "${banned}" must not appear`).not.toContain(banned);
   }
   // No English placeholders on any input within the page content.
   const placeholders = await main.locator("[placeholder]").evaluateAll(

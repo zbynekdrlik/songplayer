@@ -34,7 +34,7 @@ test.describe('/live mobile (iPhone-SE viewport)', () => {
     // delivered 40px transport touch height, not 44 (flagged to reviewers as a
     // mild mobile touch-target regression from #194).
     await page.goto('/');
-    await page.getByRole('button', { name: 'Live', exact: true }).click();
+    await page.locator('[data-testid="nav-live"]').click();
     const seek = page.getByTestId('player-seek');
     await expect(seek).toBeVisible({ timeout: 30_000 });
     const playpause = page.getByTestId('player-playpause');
@@ -81,7 +81,7 @@ test.describe('/live mobile (iPhone-SE viewport)', () => {
     });
 
     await page.goto('/');
-    await page.getByRole('button', { name: 'Live', exact: true }).click();
+    await page.locator('[data-testid="nav-live"]').click();
 
     // Wait for the scroller — it renders once NowPlayingInfo.video_id is
     // known from the WS NowPlaying message (or from whatever the mock API
