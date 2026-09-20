@@ -85,7 +85,7 @@ AUDIO_LOOKAHEAD_MS` (`audio_emitter::target_ring_depth_ms()`, never a literal).
 - **Pure, Linux-tested, mutation-scored (`playback/av_catchup.rs`):** the free fn
   `decide(ring_depth_ms, target_depth_ms, frame_ms, primed)` (Drop only when
   primed AND lag > one frame) and `CatchUp{primed, consecutive_drops}` — the
-  0.9·target prime latch (integer `10·depth ≥ 9·target`; the initial fill is not a
+  prime latch at target − one frame (`depth + frame ≥ target` — exactly where `decide` already says Submit, so the priming frame is never dropped; the initial fill is not a
   stall) and the `MAX_CONSECUTIVE_DROPS` (75 ≈ 3 s) safety valve (submit one frame
   anyway so a stuck decoder never blacks the wall). `CatchUp::reset()` clears BOTH
   fields on the `clear_ring` sites (seek arm + new play). Exact-boundary tests on

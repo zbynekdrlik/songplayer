@@ -38,7 +38,7 @@ pub enum Decision {
 ///
 /// `target_depth_ms` is the nominal ring depth
 /// (`DEFAULT_TOLERANCE_MS + AUDIO_LOOKAHEAD_MS`); the video lag IS
-/// `target_depth_ms − ring_depth_ms`. Never drops below the 0.9·target prime
+/// `target_depth_ms − ring_depth_ms`. Never drops below the target − one frame prime
 /// threshold (so the whole initial fill / post-seek refill up to 90 % is safe —
 /// see [`CatchUp::note_depth`]) and never once caught up (lag within one frame);
 /// the top ~10 % of a fill that is still lagging may drop a few frames, which the
@@ -54,7 +54,7 @@ pub fn decide(ring_depth_ms: u64, target_depth_ms: u64, frame_ms: u64, primed: b
 }
 
 /// Per-song catch-up state for the SDK-clocked decode loop: the prime latch (so
-/// the fill below 0.9·target is never dropped as a stall) and the
+/// the fill below target − one frame is never dropped as a stall) and the
 /// consecutive-drop cap. `Default` is the fresh, un-primed state a new song
 /// starts in.
 #[derive(Clone, Debug, Default)]
@@ -70,7 +70,7 @@ impl CatchUp {
     }
 
     /// New play / seek (a `clear_ring` site): forget the prime latch and the
-    /// drop run, so the sub-0.9·target portion of the post-seek refill re-primes
+    /// drop run, so the sub-target − one frame portion of the post-seek refill re-primes
     /// from scratch and is never dropped as a stall.
     pub fn reset(&mut self) {
         self.primed = false;
@@ -82,12 +82,14 @@ impl CatchUp {
         self.primed
     }
 
-    /// Latch `primed` the first time the ring reaches 0.9·target in this song
-    /// (`10·depth ≥ 9·target`, integer form — no floating point). Once latched it
-    /// stays until [`reset`](Self::reset); a stall that drains the ring never
-    /// un-primes it.
-    fn note_depth(&mut self, ring_depth_ms: u64, target_depth_ms: u64) {
-        if !self.primed && ring_depth_ms * 10 >= target_depth_ms * 9 {
+    /// Latch `primed` the first time the ring is within ONE FRAME of the target
+    /// in this song (`depth + frame ≥ target`) — i.e. exactly when [`decide`]
+    /// would already say `Submit` for that depth, so the priming frame (and the
+    /// whole song-start fill, during which the video is on time and the depth is
+    /// not a lag) is never dropped. Once latched it stays until
+    /// [`reset`](Self::reset); a stall that drains the ring never un-primes it.
+    fn note_depth(&mut self, ring_depth_ms: u64, target_depth_ms: u64, frame_ms: u64) {
+        if !self.primed && ring_depth_ms.saturating_add(frame_ms) >= target_depth_ms {
             self.primed = true;
         }
     }
@@ -97,7 +99,7 @@ impl CatchUp {
     /// of drops, submit one frame anyway and restart the run so a stuck decoder
     /// never blacks the wall.
     pub fn step(&mut self, ring_depth_ms: u64, target_depth_ms: u64, frame_ms: u64) -> Decision {
-        self.note_depth(ring_depth_ms, target_depth_ms);
+        self.note_depth(ring_depth_ms, target_depth_ms, frame_ms);
         match decide(ring_depth_ms, target_depth_ms, frame_ms, self.primed) {
             Decision::Drop => {
                 if self.consecutive_drops > MAX_CONSECUTIVE_DROPS {
@@ -157,21 +159,22 @@ mod tests {
     }
 
     #[test]
-    fn prime_latches_at_exactly_0_9_target() {
-        // depth · 10 == target · 9 (1386 · 10 == 1540 · 9 == 13860) → primes.
+    fn prime_latches_at_exactly_target_minus_one_frame() {
+        // depth + frame == target (1500 + 40 == 1540) → primes, and the priming
+        // frame itself is submitted (lag == one frame).
         let mut c = CatchUp::new();
         assert!(!c.primed());
-        c.step(1386, TARGET, FRAME);
-        assert!(c.primed(), "0.9·target exactly must latch primed");
+        assert_eq!(c.step(1500, TARGET, FRAME), Decision::Submit);
+        assert!(c.primed(), "target − one frame exactly must latch primed");
     }
 
     #[test]
-    fn prime_does_not_latch_just_below_0_9_target() {
-        // 1385 · 10 = 13850 < 13860 → must NOT prime; a frame this shallow is the
+    fn prime_does_not_latch_just_below_target_minus_one_frame() {
+        // 1499 + 40 = 1539 < 1540 → must NOT prime; a frame this shallow is the
         // initial fill, not yet a stall — so it Submits (never Drops).
         let mut c = CatchUp::new();
-        assert_eq!(c.step(1385, TARGET, FRAME), Decision::Submit);
-        assert!(!c.primed(), "just below 0.9·target must not latch");
+        assert_eq!(c.step(1499, TARGET, FRAME), Decision::Submit);
+        assert!(!c.primed(), "just below target − one frame must not latch");
     }
 
     #[test]
@@ -189,7 +192,7 @@ mod tests {
         // (the SDK clock paces early frames), so the depth is NOT a lag yet.
         // Priming must happen only once the ring is within one frame of the
         // target, so the priming frame itself — and every fill frame before
-        // it — is submitted. (A 0.9·target latch dropped ~4 on-time frames at
+        // it — is submitted. (A target − one frame latch dropped ~4 on-time frames at
         // every song start; the SDK paces by frame COUNT, so those drops moved
         // the video AHEAD of the audio for the rest of the song.)
         let mut c = CatchUp::new();
@@ -272,7 +275,7 @@ mod tests {
     #[test]
     fn reset_restarts_the_drop_run() {
         // reset() must clear the consecutive-drop count, not just the prime latch:
-        // a seek that lands where the ring is already at 0.9·target (primes AND
+        // a seek that lands where the ring is already at target − one frame (primes AND
         // lags on the very first frame) must still get the FULL cap, not a short
         // one carried over from before the seek.
         let mut c = CatchUp::new();
@@ -281,7 +284,7 @@ mod tests {
             c.step(150, TARGET, FRAME); // build the run up to 70 drops
         }
         c.reset();
-        // depth 1386 = 0.9·target: primes on this first post-reset frame AND lags
+        // depth 1386 = target − one frame: primes on this first post-reset frame AND lags
         // (1540 − 1386 = 154 > one frame), so the run restarts from zero here.
         for i in 0..=MAX_CONSECUTIVE_DROPS {
             assert_eq!(
