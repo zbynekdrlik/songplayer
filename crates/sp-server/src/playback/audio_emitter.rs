@@ -245,7 +245,8 @@ impl AudioEmitter {
         self.ring.clear();
     }
 
-    /// A production emitter: stereo, 1600-sample blocks, ~250 ms ring, 48 kHz.
+    /// A production emitter: stereo, 1600-sample blocks, ~1.6 s ring
+    /// ([`RING_CAPACITY_BLOCKS`], the 1.5 s cushion + headroom), 48 kHz.
     pub fn production() -> Self {
         Self::new(EMIT_SAMPLES_PER_BLOCK, RING_CAPACITY_BLOCKS, EMIT_RATE_HZ)
     }
@@ -525,7 +526,7 @@ fn warn_dropped_residual(total: usize, usable: usize, channels: usize) {
 /// ([`ring_capacity_blocks`]) and the natural-end drain budget
 /// ([`drain_budget_ms`]) are both DERIVED from this one constant so they never
 /// drift. f32 stereo 48 kHz × 1.5 s ≈ 576 KB per pipeline.
-pub const AUDIO_LOOKAHEAD_MS: u64 = 100;
+pub const AUDIO_LOOKAHEAD_MS: u64 = 1500;
 
 /// One grid slot's whole-millisecond duration: ⌈`EMIT_SAMPLES_PER_BLOCK` /
 /// `EMIT_RATE_HZ`⌉ = ⌈1600 / 48 kHz⌉ = ⌈33.333 ms⌉ = 34 ms. Rounded UP so a
