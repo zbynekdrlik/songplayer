@@ -210,3 +210,27 @@ paths:
   so a suspend/debugger stall never fires a TIME_CRITICAL catch-up burst;
   `boundary_for` uses a CHECKED `i64::try_from` via the shared `units_for` helper.
   All Linux-unit-tested with exact boundaries; the drain glue stays `mutants::skip`.
+  **Round 3 — 1.5 s cushion + stage telemetry (#192, box 20.9.2026):** the owner
+  heard audible holes during the service — mid-song `silence_blocks` 9–14 (≈ 300–
+  466 ms) on the on-program output while `emit_call_max_us` was only 33–67 ms, i.e.
+  PRODUCER stalls (the ONE decode loop stalling ~1 s under a resident stems child),
+  NOT the SDK send. Cure: `AUDIO_LOOKAHEAD_MS` 100 → **1500**, and the two derived
+  quantities now track it via pure `const fn`s so they can never drift below the
+  cushion: `RING_CAPACITY_BLOCKS = ring_capacity_blocks(AUDIO_LOOKAHEAD_MS)` (= 49
+  blocks ≈ 1633 ms — a capacity BELOW the lookahead would cap the realised cushion,
+  because `push_blocking` back-pressures the decoder at the cap), and the natural-
+  end drain deadline = `drain_budget_ms(AUDIO_LOOKAHEAD_MS)` (= lookahead + one
+  slot = 1534 ms; a fixed 400 ms would cut the last ~1.1 s of every song at the
+  deeper cushion). So a natural song end now blocks the decode thread up to ~1.5 s
+  draining the buffered tail (breaks early on `ring_is_drained`). Attribution
+  telemetry: `playback/loop_stats.rs` (pure, Linux-tested, mutation-clean) — a
+  `SubmitHist` on `FrameSubmitter` times each `send_video_async` (both `submit_nv12`
+  and `submit_frame_at_boundary_owned`), surfaced via `WindowStats`/`drain_window`,
+  and a `LoopStageMax` in `decode_and_send` times the decode / submit / audio stage
+  of each loop iteration; both ride the `HealthSnapshot` event and log a third
+  grep-stable `pipeline: loop-stats` line beside `ndi: heartbeat` (per UTC minute)
+  so the A/B box test (same song ± a resident stems child) names the stalling
+  stage. The paced (#168, genlock_pacing OFF in prod) submit-thread accumulates
+  the gauge but does not surface it through its handoff snapshot yet (separable
+  follow-up). Round 4 = move the audio decode onto its own thread IF the stage
+  timer blames the submit call.
