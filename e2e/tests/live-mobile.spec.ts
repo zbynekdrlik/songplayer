@@ -44,7 +44,7 @@ test.describe('/live mobile (iPhone-SE viewport)', () => {
     expect(bb!.height).toBeGreaterThanOrEqual(40);
   });
 
-  test('tap a lyrics line fires a seek request', async ({ page }) => {
+  test('tap a lyrics line fires a seek request', async ({ page, request }) => {
     // Mock the NowPlaying and Lyrics API so the LyricsScroller is guaranteed
     // to render tappable lines in every environment (pre-deploy mock, post-
     // deploy live). The test always exercises the tap-to-seek path — no
@@ -80,22 +80,32 @@ test.describe('/live mobile (iPhone-SE viewport)', () => {
       await route.fulfill({ status: 204 });
     });
 
-    await page.goto('/');
-    await page.locator('[data-testid="nav-live"]').click();
+    // ytlive (184) is idle in the default fixture, so the LyricsView has no
+    // video to show. Drive a REAL Playing state through the mock's now-playing
+    // tick (video 1) — the lines must then render and the tap must seek; there
+    // is no "empty is fine" fallthrough (a missing line = broken surface).
+    await request.post('/__mock/tick', {
+      data: {
+        enabled: true,
+        items: [{ playlist_id: 184, video_id: 1, duration_ms: 213000, state: 'Playing' }],
+      },
+    });
+    try {
+      await page.goto('/');
+      await page.locator('[data-testid="nav-live"]').click();
 
-    // Wait for the scroller — it renders once NowPlayingInfo.video_id is
-    // known from the WS NowPlaying message (or from whatever the mock API
-    // returns for /playlists).
-    const scroller = page.locator('.lyrics-view-scroll');
-    await expect(scroller).toBeVisible({ timeout: 30_000 });
+      const scroller = page.locator('.lyrics-view-scroll');
+      await expect(scroller).toBeVisible({ timeout: 30_000 });
 
-    // The mock always serves a two-line track for the playing video, so a
-    // missing line means the lyrics surface is broken — the test must fail,
-    // never fall through to an "empty is fine" branch.
-    const lines = page.locator('.lyr-line');
-    await expect(lines.first()).toBeVisible({ timeout: 10_000 });
-    await lines.first().click();
-    await expect.poll(() => seekCalls.length, { timeout: 5_000 }).toBeGreaterThan(0);
-    expect(seekCalls[0].body).toMatch(/"position_ms":\s*\d+/);
+      const lines = page.locator('.lyr-line');
+      await expect(lines.first()).toBeVisible({ timeout: 10_000 });
+      await lines.first().click();
+      await expect.poll(() => seekCalls.length, { timeout: 5_000 }).toBeGreaterThan(0);
+      expect(seekCalls[0].playlist_id).toBe('184');
+      expect(seekCalls[0].body).toMatch(/"position_ms":\s*\d+/);
+    } finally {
+      // The tick is global mock state — never leak it into a sibling spec.
+      await request.post('/__mock/tick', { data: { enabled: false } });
+    }
   });
 });

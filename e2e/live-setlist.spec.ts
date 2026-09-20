@@ -111,59 +111,78 @@ test.describe("#94: a failing transport POST surfaces in player-error", () => {
     }
   });
 
-  async function fail(request: import("@playwright/test").APIRequestContext, kind: string) {
+  // Flip ONE endpoint to 500, run the assertion, then reset it and drop the
+  // browser's own "Failed to load resource: … 500" console entry — that 500 is
+  // the POINT of the test, not a bug (the shared zero-console afterEach stays).
+  async function withFail(
+    request: import("@playwright/test").APIRequestContext,
+    kind: string,
+    body: () => Promise<void>,
+  ) {
     await request.post("/__mock/fail-mode", { data: { kind, enabled: true } });
+    try {
+      await body();
+    } finally {
+      await request.post("/__mock/fail-mode", { data: { kind, enabled: false } });
+      consoleMessages = consoleMessages.filter(
+        (m) => !/Failed to load resource.*500/.test(m),
+      );
+    }
   }
 
   test("play fails → 'Prehrávanie zlyhalo'", async ({ page, request }) => {
-    await fail(request, "play");
-    await page.goto("/live");
-    const btn = page.getByTestId("player-playpause");
-    await expect(btn).toContainText("Prehrať", { timeout: 10000 });
-    await expect(page.locator('[data-testid="player-error"]')).toHaveCount(0);
-    await btn.click();
-    await expect(page.locator('[data-testid="player-error"]')).toContainText(
-      "Prehrávanie zlyhalo",
-      { timeout: 5000 },
-    );
+    await withFail(request, "play", async () => {
+      await page.goto("/live");
+      const btn = page.getByTestId("player-playpause");
+      await expect(btn).toContainText("Prehrať", { timeout: 10000 });
+      await expect(page.locator('[data-testid="player-error"]')).toHaveCount(0);
+      await btn.click();
+      await expect(page.locator('[data-testid="player-error"]')).toContainText(
+        "Prehrávanie zlyhalo",
+        { timeout: 5000 },
+      );
+    });
   });
 
   test("previous fails → 'Predošlá zlyhala'", async ({ page, request }) => {
-    await fail(request, "previous");
-    await page.goto("/live");
-    const prev = page.getByTestId("player-prev");
-    await expect(prev).toBeVisible({ timeout: 10000 });
-    await prev.click();
-    await expect(page.locator('[data-testid="player-error"]')).toContainText(
-      "Predošlá zlyhala",
-      { timeout: 5000 },
-    );
+    await withFail(request, "previous", async () => {
+      await page.goto("/live");
+      const prev = page.getByTestId("player-prev");
+      await expect(prev).toBeVisible({ timeout: 10000 });
+      await prev.click();
+      await expect(page.locator('[data-testid="player-error"]')).toContainText(
+        "Predošlá zlyhala",
+        { timeout: 5000 },
+      );
+    });
   });
 
   test("mode change fails → 'Zmena režimu zlyhala'", async ({ page, request }) => {
-    await fail(request, "mode");
-    await page.goto("/live");
-    const mode = page.getByTestId("player-mode");
-    await expect(mode).toBeVisible({ timeout: 10000 });
-    await mode.selectOption("loop");
-    await expect(page.locator('[data-testid="player-error"]')).toContainText(
-      "Zmena režimu zlyhala",
-      { timeout: 5000 },
-    );
+    await withFail(request, "mode", async () => {
+      await page.goto("/live");
+      const mode = page.getByTestId("player-mode");
+      await expect(mode).toBeVisible({ timeout: 10000 });
+      await mode.selectOption("loop");
+      await expect(page.locator('[data-testid="player-error"]')).toContainText(
+        "Zmena režimu zlyhala",
+        { timeout: 5000 },
+      );
+    });
   });
 
   test("pause fails → 'Pauza zlyhala' (Dashboard, playlist 1 is Playing)", async ({
     page,
     request,
   }) => {
-    await fail(request, "pause");
-    await page.goto("/");
-    const btn = page.getByTestId("player-playpause");
-    await expect(btn).toContainText("Pauza", { timeout: 15000 });
-    await btn.click();
-    await expect(page.locator('[data-testid="player-error"]')).toContainText(
-      "Pauza zlyhala",
-      { timeout: 5000 },
-    );
+    await withFail(request, "pause", async () => {
+      await page.goto("/");
+      const btn = page.getByTestId("player-playpause");
+      await expect(btn).toContainText("Pauza", { timeout: 15000 });
+      await btn.click();
+      await expect(page.locator('[data-testid="player-error"]')).toContainText(
+        "Pauza zlyhala",
+        { timeout: 5000 },
+      );
+    });
   });
 });
