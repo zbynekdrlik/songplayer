@@ -319,7 +319,40 @@ async fn health_snapshot_event_persists_the_receiver_count_to_the_db() {
         )
         .await;
     let counts = crate::db::models_ndi::all_last_receiver_counts(&engine.pool).await;
-    assert_eq!(counts.get(&7), Some(&2), "the changed count must be persisted");
+    assert_eq!(
+        counts.get(&7),
+        Some(&2),
+        "the changed count must be persisted"
+    );
+}
+
+/// #201 (0.62.0 review): a manual /play on a pipeline that is ALREADY Playing
+/// must be a no-op — the scene-on fallback would flag an off-program output as
+/// on program. Engine-level: kills the `delete !` mutant on the call-site guard
+/// (the pure helper's test cannot). Uses `fresh_engine` from this file.
+#[tokio::test]
+async fn engine_play_on_a_playing_pipeline_does_not_scene_on() {
+    let (mut engine, _registry) = fresh_engine().await;
+    engine.ensure_pipeline(7, "SP-test");
+    {
+        let pp = engine.pipelines.get_mut(&7).unwrap();
+        pp.state = crate::playback::state::PlayState::Playing { video_id: 42 };
+        pp.scene_active = false;
+    }
+    engine.handle_engine_play(7).await;
+    assert!(
+        !engine.pipelines.get(&7).unwrap().scene_active,
+        "a playing pipeline must not be flagged on program by /play"
+    );
+
+    // The opposite branch still reaches the scene-on dispatch.
+    engine.pipelines.get_mut(&7).unwrap().state =
+        crate::playback::state::PlayState::WaitingForScene;
+    engine.handle_engine_play(7).await;
+    assert!(
+        engine.pipelines.get(&7).unwrap().scene_active,
+        "a non-playing pipeline goes through the scene-on dispatch"
+    );
 }
 
 /// #198 item 5: the pending receiver-count persist buffer debounces a flapping
