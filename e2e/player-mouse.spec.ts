@@ -67,6 +67,8 @@ async function tickDabing(request: APIRequestContext) {
 
 /** Real mouse drag along a horizontal/vertical range input from `from` to `to` (fractions). */
 async function mouseDrag(page: Page, selector: string, from: number, to: number) {
+  // page.mouse has no auto-scroll: a control below the fold receives nothing.
+  await page.locator(selector).scrollIntoViewIfNeeded();
   const box = await page.locator(selector).boundingBox();
   if (!box) throw new Error(`no bounding box for ${selector}`);
   const vertical = box.height > box.width;
