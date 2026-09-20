@@ -542,7 +542,9 @@ pub const fn block_ms() -> u64 {
 /// of every song once the lookahead is 1500 ms. Derived from the SAME constant
 /// as the cushion so the two never drift. Pure.
 pub const fn drain_budget_ms(lookahead_ms: u64) -> u64 {
-    lookahead_ms + block_ms()
+    // The ring holds up to `tolerance + lookahead` at a natural end (the sync
+    // decoder's pairing tolerance is read ahead too), plus one slot of slack.
+    sp_decoder::split_sync::DEFAULT_TOLERANCE_MS + lookahead_ms + block_ms()
 }
 
 /// Extra ring headroom (whole blocks) above the decoder's audio-ahead depth so

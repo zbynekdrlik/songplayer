@@ -98,12 +98,31 @@ impl CatchUp {
     /// apply [`decide`], and enforce [`MAX_CONSECUTIVE_DROPS`] — after a full run
     /// of drops, submit one frame anyway and restart the run so a stuck decoder
     /// never blacks the wall.
-    pub fn step(&mut self, ring_depth_ms: u64, target_depth_ms: u64, frame_ms: u64) -> Decision {
+    ///
+    /// `at_end`: the video is within the ring target of the song's end — the audio
+    /// stream has (or is about to have) hit EOF, so a shallow ring there is NOT a
+    /// video lag; never drop (the wall would freeze for the final ~1.5 s).
+    ///
+    /// A cap trip UN-PRIMES: a decoder that cannot beat real time falls back to
+    /// smooth-but-offset video instead of one frame per cap forever; it re-primes
+    /// only once the ring genuinely refills to within one frame of the target.
+    pub fn step(
+        &mut self,
+        ring_depth_ms: u64,
+        target_depth_ms: u64,
+        frame_ms: u64,
+        at_end: bool,
+    ) -> Decision {
         self.note_depth(ring_depth_ms, target_depth_ms, frame_ms);
+        if at_end {
+            self.consecutive_drops = 0;
+            return Decision::Submit;
+        }
         match decide(ring_depth_ms, target_depth_ms, frame_ms, self.primed) {
             Decision::Drop => {
                 if self.consecutive_drops > MAX_CONSECUTIVE_DROPS {
                     self.consecutive_drops = 0;
+                    self.primed = false;
                     Decision::Submit
                 } else {
                     self.consecutive_drops += 1;
@@ -164,7 +183,7 @@ mod tests {
         // frame itself is submitted (lag == one frame).
         let mut c = CatchUp::new();
         assert!(!c.primed());
-        assert_eq!(c.step(1500, TARGET, FRAME), Decision::Submit);
+        assert_eq!(c.step(1500, TARGET, FRAME, false), Decision::Submit);
         assert!(c.primed(), "target − one frame exactly must latch primed");
     }
 
@@ -173,7 +192,7 @@ mod tests {
         // 1499 + 40 = 1539 < 1540 → must NOT prime; a frame this shallow is the
         // initial fill, not yet a stall — so it Submits (never Drops).
         let mut c = CatchUp::new();
-        assert_eq!(c.step(1499, TARGET, FRAME), Decision::Submit);
+        assert_eq!(c.step(1499, TARGET, FRAME, false), Decision::Submit);
         assert!(!c.primed(), "just below target − one frame must not latch");
     }
 
@@ -182,7 +201,7 @@ mod tests {
         // A full ring primes (kills a `>=` → `==` mutant on note_depth, which
         // would only match at the exact boundary).
         let mut c = CatchUp::new();
-        c.step(TARGET, TARGET, FRAME);
+        c.step(TARGET, TARGET, FRAME, false);
         assert!(c.primed());
     }
 
@@ -198,15 +217,15 @@ mod tests {
         let mut c = CatchUp::new();
         for depth in (0..=1500).step_by(20) {
             assert_eq!(
-                c.step(depth, TARGET, FRAME),
+                c.step(depth, TARGET, FRAME, false),
                 Decision::Submit,
                 "fill depth {depth} must submit"
             );
         }
         assert!(c.primed(), "within one frame of target must be primed");
         // Now a real stall: the ring drains → drops until caught up.
-        assert_eq!(c.step(700, TARGET, FRAME), Decision::Drop);
-        assert_eq!(c.step(1500, TARGET, FRAME), Decision::Submit);
+        assert_eq!(c.step(700, TARGET, FRAME, false), Decision::Drop);
+        assert_eq!(c.step(1500, TARGET, FRAME, false), Decision::Submit);
     }
 
     #[test]
@@ -235,9 +254,17 @@ mod tests {
         for _ in 0..=MAX_CONSECUTIVE_DROPS {
             assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Drop);
         }
-        assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Submit, "cap trip");
+        assert_eq!(
+            c.step(150, TARGET, FRAME, false),
+            Decision::Submit,
+            "cap trip"
+        );
         assert!(!c.primed(), "the cap trip must un-prime");
-        assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Submit, "stays smooth");
+        assert_eq!(
+            c.step(150, TARGET, FRAME, false),
+            Decision::Submit,
+            "stays smooth"
+        );
         // Refilled to within one frame → re-primed → a fresh stall drops again.
         assert_eq!(c.step(1500, TARGET, FRAME, false), Decision::Submit);
         assert!(c.primed());
@@ -249,8 +276,8 @@ mod tests {
         // Once primed by a full ring, a later stall (shallow ring) keeps primed
         // AND now Drops — the exact round-4 behaviour.
         let mut c = CatchUp::new();
-        assert_eq!(c.step(TARGET, TARGET, FRAME), Decision::Submit); // primes
-        assert_eq!(c.step(150, TARGET, FRAME), Decision::Drop); // stall → drop
+        assert_eq!(c.step(TARGET, TARGET, FRAME, false), Decision::Submit); // primes
+        assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Drop); // stall → drop
         assert!(c.primed());
     }
 
@@ -260,16 +287,16 @@ mod tests {
         // count so a LATER stall gets the full cap again (kills the Submit-arm
         // `consecutive_drops = 0` reset).
         let mut c = CatchUp::new();
-        c.step(TARGET, TARGET, FRAME); // prime
+        c.step(TARGET, TARGET, FRAME, false); // prime
         for _ in 0..50 {
-            assert_eq!(c.step(150, TARGET, FRAME), Decision::Drop);
+            assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Drop);
         }
-        assert_eq!(c.step(TARGET, TARGET, FRAME), Decision::Submit); // caught up → reset
+        assert_eq!(c.step(TARGET, TARGET, FRAME, false), Decision::Submit); // caught up → reset
         // A fresh stall now takes the full run again, not (cap − 50).
         for _ in 0..(MAX_CONSECUTIVE_DROPS + 1) {
-            assert_eq!(c.step(150, TARGET, FRAME), Decision::Drop);
+            assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Drop);
         }
-        assert_eq!(c.step(150, TARGET, FRAME), Decision::Submit); // forced by the cap
+        assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Submit); // forced by the cap
     }
 
     #[test]
@@ -278,30 +305,30 @@ mod tests {
         // anyway (so a decoder that cannot catch up never blacks the wall), and the
         // run restarts. Exact boundary pins the `>` cap comparison.
         let mut c = CatchUp::new();
-        c.step(TARGET, TARGET, FRAME); // prime
+        c.step(TARGET, TARGET, FRAME, false); // prime
         for i in 0..=MAX_CONSECUTIVE_DROPS {
             assert_eq!(
-                c.step(150, TARGET, FRAME),
+                c.step(150, TARGET, FRAME, false),
                 Decision::Drop,
                 "drop {i} of the run (up to and including MAX) must Drop"
             );
         }
         // One more consecutive late frame → the cap forces a Submit.
-        assert_eq!(c.step(150, TARGET, FRAME), Decision::Submit);
+        assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Submit);
         // The run restarted: the very next late frame Drops again.
-        assert_eq!(c.step(150, TARGET, FRAME), Decision::Drop);
+        assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Drop);
     }
 
     #[test]
     fn reset_clears_prime_and_the_drop_run() {
         // Seek / new play forgets everything: an un-primed shallow ring Submits.
         let mut c = CatchUp::new();
-        c.step(TARGET, TARGET, FRAME); // prime
-        c.step(150, TARGET, FRAME); // one drop
+        c.step(TARGET, TARGET, FRAME, false); // prime
+        c.step(150, TARGET, FRAME, false); // one drop
         c.reset();
         assert!(!c.primed());
         assert_eq!(
-            c.step(150, TARGET, FRAME),
+            c.step(150, TARGET, FRAME, false),
             Decision::Submit,
             "post-reset refill Submits"
         );
@@ -313,23 +340,23 @@ mod tests {
         // a stall right after a seek must still get the FULL cap, not a short
         // one carried over from before the seek.
         let mut c = CatchUp::new();
-        c.step(TARGET, TARGET, FRAME); // prime
+        c.step(TARGET, TARGET, FRAME, false); // prime
         for _ in 0..70 {
-            c.step(150, TARGET, FRAME); // build the run up to 70 drops
+            c.step(150, TARGET, FRAME, false); // build the run up to 70 drops
         }
         c.reset();
         // Post-seek refill reaches the target (primes, Submit), then a stall
         // drains the ring: the drop run must restart from ZERO here — the full
         // cap applies, none of the pre-seek 70 drops carry over.
-        assert_eq!(c.step(TARGET, TARGET, FRAME), Decision::Submit);
+        assert_eq!(c.step(TARGET, TARGET, FRAME, false), Decision::Submit);
         for i in 0..=MAX_CONSECUTIVE_DROPS {
             assert_eq!(
-                c.step(150, TARGET, FRAME),
+                c.step(150, TARGET, FRAME, false),
                 Decision::Drop,
                 "post-reset drop {i} must Drop — the pre-seek run must not carry over"
             );
         }
-        assert_eq!(c.step(150, TARGET, FRAME), Decision::Submit);
+        assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Submit);
     }
 
     #[test]

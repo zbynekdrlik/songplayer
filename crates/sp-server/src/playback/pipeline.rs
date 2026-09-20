@@ -701,24 +701,11 @@ fn decode_and_send(
                         audio_frames,
                     )
                 });
-                // #192 r4: drop this late frame's video while it lags the audio.
-                if pipeline_audio::is_late_frame(&mut catchup, audio_emitter) {
-                    loop_stage.observe_drop(decode_us, audio_us);
-                    continue;
-                }
-
+                // Heartbeat + position + frame count run for EVERY decoded frame,
+                // dropped or not (a drop run must not freeze the dashboard).
                 let timestamp_ms = video_frame.timestamp_ms;
-                let (_, submit_us) = crate::playback::loop_stats::timed(|| {
-                    submitter.submit_nv12(
-                        video_frame.width,
-                        video_frame.height,
-                        video_frame.stride,
-                        video_frame.data,
-                        &ndi_audio,
-                    )
-                });
-                loop_stage.observe(decode_us, submit_us, audio_us);
-
+                let duration_ms = decoder.duration_ms();
+                frame_count += 1;
                 if should_run_heartbeat(last_heartbeat.elapsed()) {
                     run_heartbeat_inner(
                         submitter,
@@ -730,24 +717,40 @@ fn decode_and_send(
                         loop_stage.drain(),
                     );
                 }
-
-                frame_count += 1;
-
                 if last_position_report.elapsed() >= std::time::Duration::from_millis(500) {
-                    let _ = event_tx.send((
-                        playlist_id,
-                        PipelineEvent::Position {
-                            position_ms: timestamp_ms,
-                            duration_ms: decoder.duration_ms(),
-                        },
-                    ));
+                    let ev = PipelineEvent::Position {
+                        position_ms: timestamp_ms,
+                        duration_ms,
+                    };
+                    let _ = event_tx.send((playlist_id, ev));
                     last_position_report = Instant::now();
                 }
+                // #192 r4: drop this late frame's video while it lags the audio
+                // (never within the ring target of the end — audio EOF, not lag).
+                if pipeline_audio::is_late_frame(
+                    &mut catchup,
+                    audio_emitter,
+                    timestamp_ms,
+                    duration_ms,
+                ) {
+                    loop_stage.observe_drop(decode_us, audio_us);
+                    continue;
+                }
+                let (_, submit_us) = crate::playback::loop_stats::timed(|| {
+                    submitter.submit_nv12(
+                        video_frame.width,
+                        video_frame.height,
+                        video_frame.stride,
+                        video_frame.data,
+                        &ndi_audio,
+                    )
+                });
+                loop_stage.observe(decode_us, submit_us, audio_us);
             }
             Ok(None) => {
                 info!(playlist_id, frame_count, "video decode complete");
-                // #192 item 3: natural end only — let the emit thread drain the
-                // ring (≤ 400 ms) before the next song's clear_ring wipes its tail.
+                // #192: natural end only — let the emit thread drain the ring
+                // (≤ drain_budget_ms ≈ 1.6 s; no command is serviced meanwhile).
                 crate::playback::pipeline::pipeline_audio::drain_if_present(audio_emitter);
                 submitter.flush();
                 return DecodeResult::Ended;

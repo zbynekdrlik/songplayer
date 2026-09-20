@@ -41,13 +41,18 @@ use crate::playback::wallclock::WallClock;
 pub(crate) fn is_late_frame(
     catchup: &mut crate::playback::av_catchup::CatchUp,
     emitter: Option<&SharedEmitter>,
+    video_ts_ms: u64,
+    duration_ms: u64,
 ) -> bool {
     let Some(shared) = emitter else { return false };
     let depth_ms = shared.emitter.lock().unwrap().ring_depth_ms();
     let target_ms = crate::playback::pipeline::audio_emitter::target_ring_depth_ms();
     let frame_ms = sp_decoder::split_sync::DEFAULT_TOLERANCE_MS;
+    // Within the ring target of the end the audio stream is at EOF: a shallow
+    // ring there is not a lag — never drop the tail.
+    let at_end = video_ts_ms.saturating_add(target_ms) >= duration_ms;
     matches!(
-        catchup.step(depth_ms, target_ms, frame_ms),
+        catchup.step(depth_ms, target_ms, frame_ms, at_end),
         crate::playback::av_catchup::Decision::Drop
     )
 }

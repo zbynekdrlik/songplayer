@@ -20,8 +20,9 @@
 
 use std::collections::VecDeque;
 
-/// How many recent submit-call samples the p99 gauge keeps (~30 s of 30 fps
-/// frames), matching the emitter's jitter window.
+/// Safety bound on the submit-call sample deque. `drain()` clears it on every
+/// heartbeat (≈ 5 s ≈ 150 frames), so the p99 is per heartbeat window; the bound
+/// only matters if a heartbeat is ever skipped.
 const SUBMIT_WINDOW: usize = 900;
 
 /// Run `f`, returning its result and the wall µs it took. A thin timing wrapper
