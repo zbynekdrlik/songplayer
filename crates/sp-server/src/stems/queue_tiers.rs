@@ -7,6 +7,7 @@
 //! `queue_position` both consume:
 //!   - tier 1: the playlist(s) ON OBS program right now, and
 //!   - tier 2: playlists played in the last `stems_recent_days` days.
+//!
 //! Kept free fns so the lyrics reprocess worker can adopt the same tiering later
 //! without either worker touching the other's module.
 

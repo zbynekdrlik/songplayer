@@ -11,6 +11,7 @@
 //!   1. the on-program playlist(s).
 //!   2. playlists played in the last `stems_recent_days` days.
 //!   3. today's unrestricted oldest-first query.
+//!
 //! Inner order inside every tier is unchanged (`stem_manual_priority DESC,
 //! id ASC`); an empty id list SKIPS its tier (never `IN ()`).
 //!
