@@ -313,9 +313,13 @@ mod tests {
                 "drop {i} of the run (up to and including MAX) must Drop"
             );
         }
-        // One more consecutive late frame → the cap forces a Submit.
+        // One more consecutive late frame → the cap forces a Submit AND un-primes
+        // (smooth-but-offset fallback): the next late frame Submits too, and only
+        // a refill to within one frame re-arms the drops.
         assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Submit);
-        // The run restarted: the very next late frame Drops again.
+        assert!(!c.primed());
+        assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Submit);
+        assert_eq!(c.step(1500, TARGET, FRAME, false), Decision::Submit);
         assert_eq!(c.step(150, TARGET, FRAME, false), Decision::Drop);
     }
 

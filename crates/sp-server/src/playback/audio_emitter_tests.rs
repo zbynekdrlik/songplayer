@@ -738,11 +738,11 @@ fn block_ms_is_one_grid_slot_rounded_up() {
 }
 
 #[test]
-fn drain_budget_is_the_lookahead_plus_one_slot() {
-    // Pure formula (constant-independent); exact boundaries pin the arithmetic
-    // so a +/-/* mutant on `lookahead + block_ms()` is killed.
-    assert_eq!(drain_budget_ms(0), 34);
-    assert_eq!(drain_budget_ms(100), 134);
+fn drain_budget_is_tolerance_plus_lookahead_plus_one_slot() {
+    // Pure formula; exact boundaries pin the arithmetic so a +/-/* mutant on
+    // `DEFAULT_TOLERANCE_MS + lookahead + block_ms()` is killed (40 + x + 34).
+    assert_eq!(drain_budget_ms(0), 74);
+    assert_eq!(drain_budget_ms(100), 174);
     // The ring holds up to target_ring_depth_ms() (tolerance + lookahead) at a
     // natural end, so the budget must cover THAT plus one slot: 40 + 1500 + 34.
     assert_eq!(drain_budget_ms(1500), 1574);
