@@ -682,9 +682,17 @@ async fn recent_playlists_honours_the_day_window_both_sides() {
         "played 3 days ago is outside a 2-day window"
     );
 
-    // An empty / just-cleared table tolerates the query.
+    // A just-cleared (empty) table tolerates the query — returns an empty list,
+    // never errors.
+    sqlx::query("DELETE FROM play_history")
+        .execute(&pool)
+        .await
+        .unwrap();
     let empty = queue_tiers::recent_playlists(&pool, 7).await.unwrap();
-    assert!(empty.contains(&2)); // still there until cleared
+    assert!(
+        empty.is_empty(),
+        "an empty play_history yields no recent playlists"
+    );
 }
 
 #[tokio::test]
