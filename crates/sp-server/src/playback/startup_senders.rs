@@ -43,6 +43,12 @@ const PORT_WAIT_MAX_POLLS: u32 = 40;
 /// How long to wait for one pipeline to report its sender ready before moving
 /// on to the next (bounded so a stuck sender never wedges startup).
 const SENDER_READY_TIMEOUT: Duration = Duration::from_secs(5);
+/// Whole-serializer budget enforced by `lib.rs` (0.60.0 review): a stuck NDI
+/// sender may delay NDI, never the HTTP listener bind — past this the remaining
+/// pipelines are created lazily on their first scene/play event. Worst case
+/// with every timeout hit is 10 s (port wait) + 5 s × outputs, so 45 s covers a
+/// healthy 10-output box several times over.
+pub(crate) const STARTUP_SENDERS_BUDGET: Duration = Duration::from_secs(45);
 
 /// #196: how long ONE `NDIlib_find` discovery pass polls for every startup
 /// sender's advertised name→URL to appear (the ruling's ≤ 3 s). Windows-only
@@ -66,7 +72,9 @@ pub const NDI_PORT_BASE: u16 = 5960;
 /// so an immediate restart waits until the previous instance released the
 /// whole span it could have used.
 pub fn ndi_port_range(n_outputs: usize) -> Vec<u16> {
-    let last = NDI_PORT_BASE + n_outputs as u16 + 1;
+    let last = NDI_PORT_BASE
+        .saturating_add(u16::try_from(n_outputs).unwrap_or(u16::MAX))
+        .saturating_add(1);
     (NDI_PORT_BASE..=last).collect()
 }
 
@@ -269,6 +277,13 @@ impl PlaybackEngine {
                 discover_and_record_sender_urls(backend, registry, ordered).await;
             });
         }
+    }
+
+    /// #196 (0.60.0 review): the caller bounds `create_startup_senders` with
+    /// [`STARTUP_SENDERS_BUDGET`]; when the budget expires mid-way the +30 s
+    /// self-check clock must still start, so the caller marks ready explicitly.
+    pub(crate) fn mark_startup_senders_ready(&self) {
+        self.ndi_health_registry.mark_senders_ready();
     }
 
     /// #196: create one output's pipeline (idempotent) and, once its NDI sender

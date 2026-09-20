@@ -759,11 +759,21 @@ pub async fn start(
     let active_playlists = db::models::get_active_playlists(&pool)
         .await
         .unwrap_or_default();
-    engine.create_startup_senders(&active_playlists).await;
-    info!(
-        count = active_playlists.len(),
-        "playback pipelines created for active playlists"
-    );
+    // Bounded (0.60.0 review): a stuck sender must never delay the HTTP bind.
+    let budget = playback::startup_senders::STARTUP_SENDERS_BUDGET;
+    match tokio::time::timeout(budget, engine.create_startup_senders(&active_playlists)).await {
+        Ok(()) => info!(
+            count = active_playlists.len(),
+            "playback pipelines created for active playlists"
+        ),
+        Err(_) => {
+            warn!(
+                budget_s = budget.as_secs(),
+                "startup senders exceeded their budget — binding the API now"
+            );
+            engine.mark_startup_senders_ready();
+        }
+    }
 
     // Subscribe to RecoveryEvent from the Resolume registry and forward to the
     // engine via EngineCommand::ResolumeRecovered so the engine can re-emit

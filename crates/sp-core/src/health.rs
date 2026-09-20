@@ -158,23 +158,34 @@ pub fn no_receiver_after_restart(
     on_program || pre_restart_count >= 1
 }
 
+/// #196 item 4: how long after the startup senders are ready the #173 ladder
+/// stays suppressed for a still-dark on-program output — the self-check has
+/// spoken at +30 s, and after this the ladder re-arms so an output that never
+/// had a receiver since boot (its OBS input enabled later) is not left without
+/// the receiver-side recovery for the life of the process (0.60.0 review).
+pub const LADDER_SUPPRESS_WINDOW: Duration = Duration::from_secs(60);
+
 /// #196 item 4: whether the #173 receiver-recovery LADDER must be suppressed
 /// for a dark output during the post-restart settling window. The ladder cannot
 /// clear a restart wedge — it can deepen it — so from the moment the senders are
 /// ready (`elapsed_since_ready` is `Some`) until an on-program output reconnects
-/// (`connections >= 1` at least once, the `reconnected` latch), the ladder must
-/// NOT run for it. The self-check (`no_receiver_after_restart`, at +30 s)
-/// surfaces the failure instead. Pure so the window boundary is unit-tested;
-/// unlike `no_receiver_after_restart` this has NO 30 s delay — the ladder is
-/// suppressed for the WHOLE window, closing the ~10–30 s gap where the dark-wall
-/// reason would otherwise arm the ladder before the +30 s reason takes over.
+/// (`connections >= 1` at least once, the `reconnected` latch) OR the bounded
+/// [`LADDER_SUPPRESS_WINDOW`] has passed, the ladder must NOT run for it. The
+/// self-check (`no_receiver_after_restart`, at +30 s) surfaces the failure
+/// instead. Pure so the window boundaries are unit-tested; unlike
+/// `no_receiver_after_restart` this has NO 30 s delay — the ladder is suppressed
+/// from 0 s, closing the ~10–30 s gap where the dark-wall reason would otherwise
+/// arm the ladder before the +30 s reason takes over.
 pub fn ladder_suppressed_after_restart(
     elapsed_since_ready: Option<Duration>,
     reconnected: bool,
     on_program: bool,
     connections: i32,
 ) -> bool {
-    elapsed_since_ready.is_some() && !reconnected && on_program && connections < 1
+    matches!(elapsed_since_ready, Some(e) if e < LADDER_SUPPRESS_WINDOW)
+        && !reconnected
+        && on_program
+        && connections < 1
 }
 
 /// #196 item 4: Slovak plural noun for the NDI-badge count of outputs without a
