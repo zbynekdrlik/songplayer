@@ -18,6 +18,7 @@ use sp_core::seek_model::{format_position, seek_display_ms, seek_target_ms};
 use crate::api;
 use crate::components::dub_mixer::DubMixer;
 use crate::components::karaoke_mixer::KaraokeMixer;
+use crate::components::lyrics_view::{LyricsMode, LyricsView};
 use crate::components::preview_video::PreviewVideo;
 use crate::store::DashboardStore;
 
@@ -387,6 +388,13 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                         }
                     }
                 }}
+            </div>
+
+            // --- lyrics slot: the ONE shared LyricsView (compact karaoke
+            // preview) — identical on Dashboard, Live and Dabing; the dub's
+            // subtitles arrive over the same now-playing WS lines (#194 r3c).
+            <div class="player-lyrics">
+                <LyricsView mode=LyricsMode::Compact playlist_id=pid />
             </div>
         </div>
     }

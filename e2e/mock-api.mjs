@@ -841,6 +841,23 @@ app.get('/api/v1/lyrics/songs/:id', (req, res) => {
   });
 });
 
+// #194 r3c: the song's full LyricsTrack (the shared LyricsView scroll mode in
+// the Lyrics details modal fetches this). A small two-line track is enough for
+// the list + active-line highlight; a missing route would 404 and trip the
+// zero-console check.
+app.get('/api/v1/videos/:id/lyrics', (_req, res) => {
+  res.json({
+    version: 22,
+    source: 'gemini-3-5-transcribe',
+    language_source: 'en',
+    language_translation: 'sk',
+    lines: [
+      { start_ms: 0, end_ms: 2000, en: 'Line one', sk: 'Riadok jeden' },
+      { start_ms: 2000, end_ms: 4000, en: 'Line two', sk: 'Riadok dva' },
+    ],
+  });
+});
+
 // Mutable reprocess result so tests can drive the dashboard's banner
 // path for #98 (blocked_by_asr_gap surfacing). Defaults to a no-block
 // outcome so existing specs keep their expectations. Both the targeted

@@ -75,7 +75,7 @@ pub fn SettingsForm() -> impl IntoView {
         settings.insert(config::SETTING_CACHE_DIR.to_string(), cache_dir.get());
 
         leptos::task::spawn_local(async move {
-            save_status.set("Saving...".into());
+            save_status.set("Ukladám…".into());
             match api::patch_json::<HashMap<String, String>, HashMap<String, String>>(
                 "/api/v1/settings",
                 &settings,
@@ -83,11 +83,11 @@ pub fn SettingsForm() -> impl IntoView {
             .await
             {
                 Ok(_) => {
-                    save_status.set("Saved".into());
+                    save_status.set("Uložené".into());
                     store.settings.set(settings);
                 }
                 Err(_) => {
-                    save_status.set("Error saving settings".into());
+                    save_status.set("Chyba pri ukladaní".into());
                 }
             }
         });
@@ -106,7 +106,7 @@ pub fn SettingsForm() -> impl IntoView {
                     />
                 </label>
                 <label>
-                    "Password"
+                    "Heslo"
                     <input
                         type="password"
                         prop:value=move || obs_password.get()
@@ -118,7 +118,7 @@ pub fn SettingsForm() -> impl IntoView {
             <fieldset>
                 <legend>"Google Gemini"</legend>
                 <label>
-                    "API Key"
+                    "API kľúč"
                     <input
                         type="password"
                         prop:value=move || gemini_key.get()
@@ -136,9 +136,9 @@ pub fn SettingsForm() -> impl IntoView {
             </fieldset>
 
             <fieldset>
-                <legend>"Cache"</legend>
+                <legend>"Vyrovnávacia pamäť"</legend>
                 <label>
-                    "Directory"
+                    "Priečinok"
                     <input
                         type="text"
                         prop:value=move || cache_dir.get()
@@ -148,7 +148,7 @@ pub fn SettingsForm() -> impl IntoView {
             </fieldset>
 
             <div class="form-actions">
-                <button type="submit">"Save Settings"</button>
+                <button type="submit">"Uložiť nastavenia"</button>
                 <span class="save-status">{move || save_status.get()}</span>
             </div>
         </form>

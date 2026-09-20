@@ -235,11 +235,6 @@ impl NdiOutputHealth {
     }
 }
 
-/// GET the per-output NDI genlock health snapshot.
-pub async fn get_ndi_health() -> Result<Vec<NdiOutputHealth>, String> {
-    get("/api/v1/ndi/health").await
-}
-
 /// #194 ROUND 3b: one Resolume push-chain host's health, as returned by
 /// `GET /api/v1/resolume/health`. Moved here from `resolume_health.rs` (deleted
 /// in favour of the shared `HealthBar`) so `store.resolume_health` can hold it.
@@ -283,11 +278,6 @@ impl HostHealth {
         }
         None
     }
-}
-
-/// GET the Resolume push-chain health snapshot (per configured host).
-pub async fn get_resolume_health() -> Result<Vec<HostHealth>, String> {
-    get("/api/v1/resolume/health").await
 }
 
 // ── Lyrics API helpers ────────────────────────────────────────────────────────
@@ -465,7 +455,7 @@ pub async fn seek_playlist(playlist_id: i64, position_ms: u64) -> Result<(), Str
 }
 
 /// GET the lyrics track for a video. Returns the full `LyricsTrack`
-/// JSON — used by the LyricsScroller on /live to render a tappable
+/// JSON — used by the shared LyricsView (scroll mode) to render a tappable
 /// line list. 404 signals "no lyrics yet", surfaced as an Err string
 /// so the UI can show an empty state.
 pub async fn get_video_lyrics(video_id: i64) -> Result<sp_core::lyrics::LyricsTrack, String> {

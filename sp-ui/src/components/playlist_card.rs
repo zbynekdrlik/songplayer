@@ -7,7 +7,6 @@
 use leptos::prelude::*;
 use sp_core::models::Playlist;
 
-use crate::components::karaoke_panel;
 use crate::components::ndi_health;
 use crate::components::player;
 use crate::components::video_list;
@@ -32,10 +31,6 @@ pub fn PlaylistCard(
     // playlist so the operator sees the song list + status chips at a glance;
     // still toggleable closed.
     let songs_open = RwSignal::new(true);
-
-    // The 4-line lyrics panel (a lyrics-preview surface, not a playback control)
-    // still reads the selected playlist's now-playing entry.
-    let np_info = move || store.now_playing.get().get(&pid).cloned();
 
     view! {
         <div class="playlist-card">
@@ -66,16 +61,10 @@ pub fn PlaylistCard(
 
             // #194: the ONE playback surface (now-playing, badge, seek, transport,
             // mode, preview, mixer) — identical to Live and Dabing.
+            // #194: the ONE playback surface — now-playing, badge, seek,
+            // transport, mode, preview, mixer AND the shared LyricsView (lyrics
+            // now live inside the Player, identical on Live and Dabing).
             <player::Player playlist_id=pid />
-
-            // Lyrics preview (unified in a later round; kept here so the dashboard
-            // does not lose its subtitle glance).
-            {move || match np_info() {
-                Some(info) if info.has_now_playing_content() => {
-                    view! { <karaoke_panel::KaraokePanel info=info /> }.into_any()
-                }
-                _ => view! { <span></span> }.into_any(),
-            }}
 
             <div class="playlist-songs">
                 <button

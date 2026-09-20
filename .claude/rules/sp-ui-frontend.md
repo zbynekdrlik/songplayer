@@ -413,3 +413,67 @@ H.264/AAC → the MSE shim's `addSourceBuffer` throws and `_openWs` is skipped),
 the WS-opened-once/never-closed proof lives in `preview.spec.ts` (the `chrome`
 project); `player-liveness.spec.ts` (chromium) proves element-IDENTITY stability
 (`elementHandle().isConnected`) + the drag gates, which are codec-independent.
+
+## The final #194 shared component set (round 3c) — this IS the reality
+
+The whole-app unification (#194) is complete. Every capability that appears on
+more than one page is ONE shared component; there are no page-local
+re-implementations left. The removed components (`now_playing_card.rs`,
+`playback_controls.rs`, `import_url_box.rs`, `video_list_stems`'s glyph table,
+`karaoke_control.rs`, `obs_status.rs`, `resolume_health.rs`, `lan_address.rs`,
+`playlist_selector.rs`, `karaoke_panel.rs`, `lyrics_scroller.rs`) are GONE — do
+not re-create any of them beside the shared one.
+
+| Capability | Shared component | Testid(s) |
+|---|---|---|
+| playback surface | `player.rs::Player(playlist_id)` | `player`, `player-*`, nests preview `preview-*` + mixer `karaoke-*`/`dub-*` + lyrics `lyrics-view` |
+| one song row | `song_row.rs::SongRow` | `song-row`, `song-row-title`, `song-row-play` |
+| status vocabulary | `status_chips.rs::StatusChips` (pure `sp_core::status_chip`) | `status-chips`, `chip-file`/`chip-stems`/`chip-text`/`chip-dub` |
+| paste-URL import | `import_box.rs::ImportBox(ImportTarget)` | `import-box`, `import-input`, `import-btn`, `import-status` |
+| status strip (every page) | `health_bar.rs::HealthBar` (pure `sp_core::health`) | `health-ws`/`health-obs`/`health-genlock`/`health-resolume`/`health-tools`/`health-lan`/`health-version` (nests `version`) |
+| loading / empty / error | `state_block.rs::StateBlock{Loading,Empty,Error}` | `state-loading`/`state-empty`/`state-error` |
+| playlist chooser (every page) | `playlist_picker.rs::PlaylistPicker(kinds?)` | `playlist-picker`, `playlist-picker-item`, `playlist-picker-select`, `playlist-picker-list` |
+| lyrics surface | `lyrics_view.rs::LyricsView(mode, playlist_id?, video_id?)` | `lyrics-view` |
+| one poll helper | `store::poll_into` / `store::poll_value` | — |
+
+### `PlaylistPicker` — one chooser + one selection state (#194 r3c)
+
+`playlist_picker.rs::PlaylistPicker` is the ONE playlist chooser, on Dashboard,
+Live and Lyrics. Selection lives in `store.selected_playlist` (+ the
+`components/selection.rs` helpers). An optional `kinds: Vec<String>` prop
+restricts the list by playlist `kind` — Live passes `["custom"]` so only the
+live-kind playlist shows and is pre-selected THROUGH the picker (via
+`selection::selection_or_first_of_kind` — never a hardcoded `name == "ytlive"`
+lookup). The CSS class names stay `playlist-selector-*` (so the historical
+`.playlist-selector-row .lock-badge` style + a couple of class-based post-deploy
+locators keep resolving) while the testids are `playlist-picker*`. Both `<For>`
+(desktop list + mobile `<select>`) read ONLY `store.playlists` (#170: a
+position tick never re-orders the rows).
+
+### `LyricsView` — one lyrics surface with a `mode` prop (#194 r3c)
+
+`lyrics_view.rs::LyricsView` replaces `karaoke_panel.rs` AND `lyrics_scroller.rs`:
+
+- `LyricsMode::Compact` — the 4-line karaoke word-highlight preview read from the
+  live WS now-playing lines for `playlist_id`. Rendered in the `Player`'s lyrics
+  slot (`.player-lyrics`), so it is identical on Dashboard, Live and Dabing (the
+  dub's subtitles arrive over the same WS `LyricsUpdate`). Reuses the
+  `.karaoke-*` CSS. The `lyrics-view` root is STABLE across ticks; only the word
+  spans re-render (the active WORD index is a `Memo`).
+- `LyricsMode::Scroll` — the full tappable line list from `api::get_video_lyrics`,
+  the CURRENT line highlighted by a `Memo` of the live position (the pure
+  `sp_core::lyrics::LyricsTrack::current_line_index` = last line whose
+  `start_ms <= pos`, held through gaps — RED→GREEN + mutation-gated), tap a line
+  to seek. Rendered by the Lyrics details view. The `<ol>` is built once per
+  track (reads only `track`); a position tick flips only the highlighted `<li>`
+  class — it never rebuilds the list.
+
+### One operator language: Slovak (the `slovak-only.spec.ts` gate, #194 r3c)
+
+`e2e/slovak-only.spec.ts` asserts that NONE of the audit's English UI-chrome
+strings appears as EXACT visible text inside `main.content` on all five pages
+(the navbar tabs + the HealthBar sit outside `main.content` and carry only the
+allowed product/technical names — OBS/NDI/Resolume/SongPlayer/WS/LAN + the
+genlock LOCKED/DEGRADED/UNLOCKED/GENLOCK OFF vocabulary). Exact-text matching
+keeps song titles / playlist names (data that merely CONTAINS an English word)
+from tripping it. When you add a new UI string, it is Slovak, or the gate fails.

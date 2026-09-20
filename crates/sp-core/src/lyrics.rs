@@ -60,7 +60,7 @@ impl LyricsTrack {
     /// on (a `Memo`, so a position tick updates only the highlighted `<li>`,
     /// never re-creates the list element).
     pub fn current_line_index(&self, position_ms: u64) -> Option<usize> {
-        self.lines.iter().position(|l| l.start_ms <= position_ms)
+        self.lines.iter().rposition(|l| l.start_ms <= position_ms)
     }
 }
 

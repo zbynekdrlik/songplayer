@@ -14,7 +14,6 @@ use crate::api;
 use crate::components::import_box::{ImportBox, ImportTarget};
 use crate::components::live_catalog::LiveCatalog;
 use crate::components::live_setlist::LiveSetList;
-use crate::components::lyrics_scroller::LyricsScroller;
 use crate::components::player::Player;
 use crate::components::playlist_picker::PlaylistPicker;
 use crate::components::selection;
@@ -80,8 +79,9 @@ pub fn LivePage() -> impl IntoView {
                         // 2. The ONE shared player (now-playing, badge, seek,
                         //    transport, mode, preview, mixer) + the lyric line.
                         <section class="live-section live-section-player">
+                            // The Player now carries the shared LyricsView in its
+                            // own slot — no separate lyric surface on the page.
                             <Player playlist_id=id />
-                            <LyricsScroller playlist_id=id store=store />
                         </section>
 
                         // 3. "Add songs" is tucked into a collapsible panel.

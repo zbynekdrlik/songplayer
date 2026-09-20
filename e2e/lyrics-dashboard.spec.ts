@@ -177,17 +177,17 @@ test.describe("Lyrics dashboard — song detail modal", () => {
     await navigateToLyrics(page);
     await page.locator(".song-row button").filter({ hasText: "Detail" }).first().click();
     // <details><summary>Raw audit log</summary> — the summary is visible by default
-    await expect(page.locator("details summary").filter({ hasText: "Raw audit log" })).toBeVisible({ timeout: 5000 });
-    await expect(page.locator(".modal p")).toContainText("Source:");
+    await expect(page.locator("details summary").filter({ hasText: "Surový audit" })).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(".modal p")).toContainText("Zdroj:");
     await expect(page.locator(".modal p")).toContainText("ensemble:qwen3+autosub");
-    await expect(page.locator(".modal p")).toContainText("Quality:");
+    await expect(page.locator(".modal p")).toContainText("Kvalita:");
     await expect(page.locator(".modal p")).toContainText("0.82");
   });
 
   test("close button dismisses the modal", async ({ page }) => {
     await navigateToLyrics(page);
     await page.locator(".song-row button").filter({ hasText: "Detail" }).first().click();
-    await expect(page.locator("details summary").filter({ hasText: "Raw audit log" })).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("details summary").filter({ hasText: "Surový audit" })).toBeVisible({ timeout: 5000 });
     await page.locator(".modal-close").click();
     await expect(page.locator(".modal-backdrop")).toBeHidden({ timeout: 5000 });
   });

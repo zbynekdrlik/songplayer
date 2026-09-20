@@ -16,7 +16,7 @@ pub fn DownloadQueue() -> impl IntoView {
                     view! { <span></span> }.into_any()
                 } else {
                     view! {
-                        <h2>"Downloads"</h2>
+                        <h2>"Sťahovanie"</h2>
                         <div class="queue-items">
                             <For
                                 each=move || store.download_queue.get()
