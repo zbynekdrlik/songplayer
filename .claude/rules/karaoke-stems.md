@@ -199,9 +199,38 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   `KILL_ON_JOB_CLOSE`) so an OOM kills the child, never the host. g35t /
   translation HTTP steps take NONE of these (not heavy). windows-sys is a
   cfg(windows) sp-server dep for the OS calls.
+- **In-use-first tiered queue (#195, `db/models_stems_priority.rs` +
+  `stems/queue_tiers.rs`).** The stem worker no longer picks by
+  `stem_manual_priority DESC, id ASC` alone — with ~110 songs queued and
+  ~40–60 min each, the playlist ON PROGRAM could wait days behind low-id videos
+  of unused playlists. `get_next_stem_job(pool, on_program, recent)` consults
+  tiers, first hit wins: **tier 0** manual/dub priority (`stem_manual_priority
+  > 0`, ANY playlist — an explicit ask always wins) → **tier 1** the on-program
+  playlist(s) → **tier 2** playlists played in the last `stems_recent_days` days
+  → **tier 3** today's unrestricted oldest-first query (`get_next_video_for_stems`).
+  Inner order inside every tier is unchanged (`stem_manual_priority DESC, id
+  ASC`); an **empty id list SKIPS its tier (never `IN ()`)**. The tier inputs are
+  built by the worker-agnostic free fns in `queue_tiers.rs`:
+  `on_program_playlists` (snapshots with `state == Playing` — already reconciled
+  to "playing AND on program", see the health-snapshot section in
+  `obs-ndi-health.md`); `tier_inputs` blanks tier 1 to EMPTY during the #167
+  startup grace (`!activity_known` or the heavy-step startup floor) so the first
+  ~60 s never mis-tier; `recent_playlists` = `SELECT DISTINCT playlist_id FROM
+  play_history WHERE played_at >= datetime('now', ?)`. The recency window is the
+  `settings` key **`stems_recent_days` (default 7)**, read like
+  `stem_worker_enabled` and parsed by the pure `recent_days_from` (default 7 on
+  absent/non-integer, clamped to ≥ 0). `queue_position` (the panel's "vo fronte
+  (N.)") gains the SAME tier rank (`(tier ASC, stem_manual_priority DESC, id
+  ASC)`) via the inlined `tier_case_sql` CASE, so the chip stays truthful; the
+  legacy 2-arg `models_stems::queue_position` delegates to it with empty tiers
+  (the unrestricted oldest-first order). RED-on-a-no-compile-box: the whole
+  feature ships behind the real const `RESTRICTED_TIERS` (RED `= 0` skips tiers
+  1+2, GREEN `= 2`) — the `idle_gate_abort` wrong-constant pattern. No schema
+  change, no `LYRICS_PIPELINE_VERSION` bump, no change to the separation itself.
 - **Worker (`crate::stems::StemWorker`)** mirrors the lyrics worker: a 10 s tick
-  that separates the next normalized song (`get_next_video_for_stems`,
-  oldest-first, backoff-gated) under the priority regime. In `low-priority` it
+  that separates the next normalized song (tiered `get_next_stem_job`, #195
+  in-use-first — was `get_next_video_for_stems` oldest-first — backoff-gated)
+  under the priority regime. In `low-priority` it
   NEVER defers — it runs `stem_worker.py` on CPU-idle while the wall plays, GPU
   when idle. In `idle-only` it defers on a busy wall (reuses
   `idle_gate::wall_activity_from` + `GateLog::defer_settled`). VRAM cap
