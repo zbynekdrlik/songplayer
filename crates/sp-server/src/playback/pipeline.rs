@@ -534,6 +534,7 @@ fn decode_and_send(
     taps: &crate::playback::preview::preview_stream::DecodeTaps,
     audio_emitter: Option<&crate::playback::pipeline::audio_emitter::SharedEmitter>,
 ) -> DecodeResult {
+    use crate::playback::pipeline::pipeline_audio;
     use sp_decoder::MediaFoundationVideoReader;
 
     let video_reader = match MediaFoundationVideoReader::open(video_path) {
@@ -607,6 +608,8 @@ fn decode_and_send(
     let mut frame_count: u64 = 0;
     // #192 round 3: per-window max decode/submit/audio, drained into the heartbeat.
     let mut loop_stage = crate::playback::loop_stats::LoopStageMax::default();
+    // #192 round 4: per-song catch-up (video follows the wall-clock audio).
+    let mut catchup = crate::playback::av_catchup::CatchUp::new();
 
     loop {
         // Check for commands between frames (non-blocking).
@@ -644,6 +647,7 @@ fn decode_and_send(
                     tracing::warn!(?e, position_ms, "pipeline: seek failed");
                 }
                 crate::playback::pipeline::pipeline_audio::clear_if_present(audio_emitter);
+                catchup.reset(); // #192 r4: the post-seek refill is not a stall
             }
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
@@ -688,23 +692,20 @@ fn decode_and_send(
         let (decoded, decode_us) = crate::playback::loop_stats::timed(|| decoder.next_synced());
         match decoded {
             Ok(Some((video_frame, audio_frames))) => {
-                // #15/#178: offer video + post-mix audio to BOTH preview taps
-                // BEFORE the NDI submit / audio-emitter push consume the frame.
-                // No viewer => a couple of relaxed atomic loads; never blocks,
-                // never adds latency to the NDI submit / genlock path.
+                // #15/#178: offer both preview taps before submit/push (preview.md).
                 taps.offer_frame(&video_frame, &audio_frames);
-                // #192: on the SDK-clocked path audio is PUSHED into the
-                // wall-clock emitter's ring (before this frame's submit) and the
-                // TIME_CRITICAL emit thread clocks it out continuously, so a song
-                // end / heavy-child stall no longer stops the audio stream;
-                // `submit_nv12` then carries video only. (Emitter absent → legacy
-                // audio-with-video fallback.) See `pipeline_audio`.
+                // #192: push audio into the emitter ring; submit_nv12 = video only.
                 let (ndi_audio, audio_us) = crate::playback::loop_stats::timed(|| {
                     crate::playback::pipeline::pipeline_audio::push_or_collect_audio(
                         audio_emitter,
                         audio_frames,
                     )
                 });
+                // #192 r4: drop this late frame's video while it lags the audio.
+                if pipeline_audio::is_late_frame(&mut catchup, audio_emitter) {
+                    loop_stage.observe_drop(decode_us, audio_us);
+                    continue;
+                }
 
                 let timestamp_ms = video_frame.timestamp_ms;
                 let (_, submit_us) = crate::playback::loop_stats::timed(|| {

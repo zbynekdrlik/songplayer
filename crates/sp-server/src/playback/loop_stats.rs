@@ -84,6 +84,7 @@ pub struct LoopStageMax {
     decode_us: u64,
     submit_us: u64,
     audio_us: u64,
+    catchup_dropped: u64,
 }
 
 impl LoopStageMax {
@@ -94,12 +95,21 @@ impl LoopStageMax {
         self.audio_us = self.audio_us.max(audio_us);
     }
 
+    /// Fold a #192-round-4 DROPPED iteration (video not submitted): the decode +
+    /// audio maxima with a zero submit cost, and bump the catch-up drop COUNT
+    /// (a sum over the window, not a max). Used only on the drop path.
+    pub fn observe_drop(&mut self, decode_us: u64, audio_us: u64) {
+        self.observe(decode_us, 0, audio_us);
+        self.catchup_dropped = self.catchup_dropped.saturating_add(1);
+    }
+
     /// Read the window's stage maxima and RESET (per-heartbeat drain).
     pub fn drain(&mut self) -> LoopStageStats {
         let out = LoopStageStats {
             decode_us_max: self.decode_us,
             submit_us_max: self.submit_us,
             audio_us_max: self.audio_us,
+            catchup_dropped: self.catchup_dropped,
         };
         *self = Self::default();
         out
@@ -112,6 +122,9 @@ pub struct LoopStageStats {
     pub decode_us_max: u64,
     pub submit_us_max: u64,
     pub audio_us_max: u64,
+    /// #192 round 4: video frames dropped by the catch-up in this window (a
+    /// count, not µs) — the direct producer-stall meter.
+    pub catchup_dropped: u64,
 }
 
 /// The #192-round-3 per-minute pipeline telemetry carried on the
@@ -127,6 +140,8 @@ pub struct LoopStats {
     pub decode_us_max: u64,
     pub submit_us_max: u64,
     pub audio_us_max: u64,
+    /// #192 round 4: catch-up video-frame drops this window (a count, not µs).
+    pub catchup_dropped: u64,
 }
 
 impl LoopStats {
@@ -144,6 +159,7 @@ impl LoopStats {
             decode_us_max: stage.decode_us_max,
             submit_us_max: stage.submit_us_max,
             audio_us_max: stage.audio_us_max,
+            catchup_dropped: stage.catchup_dropped,
         }
     }
 }
@@ -152,13 +168,14 @@ impl LoopStats {
 /// heartbeat` (the `format_genlock_line` precedent). Pure, exact-string tested.
 pub fn format_loop_stats_line(ndi_name: &str, s: &LoopStats) -> String {
     format!(
-        "pipeline: loop-stats ndi_name=\"{}\" submit_call_us_max={} submit_call_us_p99={} decode_us_max={} submit_us_max={} audio_us_max={}",
+        "pipeline: loop-stats ndi_name=\"{}\" submit_call_us_max={} submit_call_us_p99={} decode_us_max={} submit_us_max={} audio_us_max={} catchup_dropped={}",
         ndi_name,
         s.submit_call_us_max,
         s.submit_call_us_p99,
         s.decode_us_max,
         s.submit_us_max,
         s.audio_us_max,
+        s.catchup_dropped,
     )
 }
 
@@ -229,6 +246,7 @@ mod tests {
                 decode_us_max: 10,
                 submit_us_max: 40,
                 audio_us_max: 30,
+                catchup_dropped: 0, // no drops this window
             }
         );
         // Reset on drain: a fresh observe starts a new window.
@@ -239,8 +257,47 @@ mod tests {
                 decode_us_max: 1,
                 submit_us_max: 1,
                 audio_us_max: 1,
+                catchup_dropped: 0,
             }
         );
+    }
+
+    #[test]
+    fn observe_drop_counts_drops_with_zero_submit_and_folds_decode_audio() {
+        // A #192-round-4 dropped iteration: decode + audio maxima fold, the submit
+        // stage stays 0 (nothing submitted), and the drop COUNT accumulates.
+        let mut s = LoopStageMax::default();
+        s.observe_drop(12, 4);
+        s.observe_drop(9, 30); // audio spikes on a dropped frame too
+        s.observe_drop(20, 1); // decode spikes
+        let drained = s.drain();
+        assert_eq!(
+            drained,
+            LoopStageStats {
+                decode_us_max: 20,
+                submit_us_max: 0, // never submitted on a drop → stays 0
+                audio_us_max: 30,
+                catchup_dropped: 3, // three drops summed
+            }
+        );
+        // Reset on drain: the drop count starts over next window.
+        assert_eq!(s.drain().catchup_dropped, 0);
+    }
+
+    #[test]
+    fn observe_drop_and_observe_share_one_window() {
+        // Submitted frames keep their submit_us max; dropped frames add to the
+        // count without disturbing it.
+        let mut s = LoopStageMax::default();
+        s.observe(5, 22, 3); // a submitted frame
+        s.observe_drop(8, 6); // a dropped frame
+        let drained = s.drain();
+        assert_eq!(
+            drained.submit_us_max, 22,
+            "the submitted frame's cost survives"
+        );
+        assert_eq!(drained.decode_us_max, 8);
+        assert_eq!(drained.catchup_dropped, 1);
     }
 
     #[test]
@@ -249,6 +306,7 @@ mod tests {
             decode_us_max: 11,
             submit_us_max: 22,
             audio_us_max: 33,
+            catchup_dropped: 7,
         };
         let ls = LoopStats::from_parts(954_000, 88_000, stage);
         assert_eq!(
@@ -259,6 +317,7 @@ mod tests {
                 decode_us_max: 11,
                 submit_us_max: 22,
                 audio_us_max: 33,
+                catchup_dropped: 7, // carried through from the stage
             }
         );
     }
@@ -271,10 +330,11 @@ mod tests {
             decode_us_max: 11,
             submit_us_max: 22,
             audio_us_max: 33,
+            catchup_dropped: 5,
         };
         assert_eq!(
             format_loop_stats_line("SP-fast", &ls),
-            "pipeline: loop-stats ndi_name=\"SP-fast\" submit_call_us_max=954000 submit_call_us_p99=88000 decode_us_max=11 submit_us_max=22 audio_us_max=33"
+            "pipeline: loop-stats ndi_name=\"SP-fast\" submit_call_us_max=954000 submit_call_us_p99=88000 decode_us_max=11 submit_us_max=22 audio_us_max=33 catchup_dropped=5"
         );
     }
 }

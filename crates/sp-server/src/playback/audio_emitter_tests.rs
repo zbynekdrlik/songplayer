@@ -722,6 +722,15 @@ fn lookahead_is_the_round3_cushion() {
 }
 
 #[test]
+fn target_ring_depth_is_the_catchup_target() {
+    // #192 round 4: the catch-up target_depth_ms is the nominal audio-ahead depth
+    // (DEFAULT_TOLERANCE 40 + AUDIO_LOOKAHEAD 1500). Derived from the same
+    // constants as decoder_tolerance_ms(true), never a literal.
+    assert_eq!(target_ring_depth_ms(), 1540);
+    assert_eq!(target_ring_depth_ms(), decoder_tolerance_ms(true));
+}
+
+#[test]
 fn block_ms_is_one_grid_slot_rounded_up() {
     // 1600 samples @ 48 kHz = 33.333 ms → rounded UP to a whole 34 ms so a
     // budget derived from it never falls short of a whole slot.

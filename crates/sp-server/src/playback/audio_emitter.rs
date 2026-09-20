@@ -575,6 +575,17 @@ pub fn decoder_tolerance_ms(emitter_present: bool) -> u64 {
     }
 }
 
+/// The nominal ring depth (ms) the decoder keeps ahead of the emitter when the
+/// wall-clock emitter carries the audio: `DEFAULT_TOLERANCE_MS + AUDIO_LOOKAHEAD_MS`
+/// (= `decoder_tolerance_ms(true)`). This is the #192-round-4 catch-up
+/// `target_depth_ms`: the ring's shortfall below it IS the video's lag behind the
+/// emitted audio (`lag_ms = target − ring_depth_ms`). Derived from the SAME
+/// constants as `decoder_tolerance_ms` / `ring_capacity_blocks` so the three
+/// never drift. Pure `const fn`, no literal.
+pub const fn target_ring_depth_ms() -> u64 {
+    sp_decoder::split_sync::DEFAULT_TOLERANCE_MS + AUDIO_LOOKAHEAD_MS
+}
+
 /// Pause: keep the cushion (see [`AudioEmitter::set_held`]). Released by the next
 /// [`push_blocking`].
 pub fn hold_ring(shared: &SharedEmitter) {

@@ -5,6 +5,7 @@
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
 pub mod audio_grid;
+pub mod av_catchup; // #192 round 4: pure video-follows-audio catch-up decision (Linux-tested)
 pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;

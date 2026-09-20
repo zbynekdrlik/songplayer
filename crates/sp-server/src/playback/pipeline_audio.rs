@@ -29,6 +29,29 @@ use crate::playback::pipeline::audio_emitter::{
 };
 use crate::playback::wallclock::WallClock;
 
+/// #192 round 4: is THIS decoded video frame late enough to drop (its audio is
+/// already pushed) so the video catches up to the wall-clock audio position?
+/// Reads the LIVE ring depth (the same `AudioEmitter::ring_depth_ms()` the
+/// heartbeat logs) under the ring lock and applies the pure
+/// [`CatchUp::step`](crate::playback::av_catchup::CatchUp::step): the target is
+/// `target_ring_depth_ms()` and one-frame budget is the sync decoder's pairing
+/// tolerance. No emitter (legacy audio-with-video path) → never late. Windows-only
+/// glue (`mutants::skip`) over the Linux-tested pure decision.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn is_late_frame(
+    catchup: &mut crate::playback::av_catchup::CatchUp,
+    emitter: Option<&SharedEmitter>,
+) -> bool {
+    let Some(shared) = emitter else { return false };
+    let depth_ms = shared.emitter.lock().unwrap().ring_depth_ms();
+    let target_ms = crate::playback::pipeline::audio_emitter::target_ring_depth_ms();
+    let frame_ms = sp_decoder::split_sync::DEFAULT_TOLERANCE_MS;
+    matches!(
+        catchup.step(depth_ms, target_ms, frame_ms),
+        crate::playback::av_catchup::Decision::Drop
+    )
+}
+
 /// The SDK-clocked decode loop's audio seam (#192): with the wall-clock emitter
 /// present, PUSH each decoded frame's interleaved audio into its bounded ring
 /// (before that video frame's submit) and hand `submit_nv12` NO audio — the
