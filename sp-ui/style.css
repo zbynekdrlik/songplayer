@@ -1432,3 +1432,12 @@ body {
 .lyrics-empty { color: var(--text-dim); font-style: italic; padding: 12px 0; }
 .preview-video-box { width: 100%; aspect-ratio: 16 / 9; background: #000; }
 .mixer-karaoke, .mixer-dub { display: block; }
+
+/* #200: inside the shared Player the live preview fills the Player width — the
+   320px cap above is the playlist-card geometry only. */
+.player-preview .preview-video,
+.player-preview .preview-placeholder,
+.player-preview .preview-video-box {
+    max-width: none;
+}
+

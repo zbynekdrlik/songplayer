@@ -256,12 +256,16 @@ fn shared_reports_its_configured_lead_ms() {
 }
 
 #[test]
-fn lead_ms_for_sdk_path_is_the_100ms_emitter_lookahead() {
+fn lead_ms_for_sdk_path_is_the_emitter_lookahead() {
     // genlock_pacing == false → the #192 wall-clock emitter is present → the
-    // decoder opens with a 100 ms audio read-ahead → lead 140 − 40 = 100.
-    // Exact 100 kills the `!` delete, the `- → +` (180), and the `- → /` (3)
-    // mutants on the pure formula.
-    assert_eq!(lead_ms_for(false), 100);
+    // decoder opens with the AUDIO_LOOKAHEAD_MS audio read-ahead (1500 ms since
+    // #192 round 3) → lead = (40 + lookahead) − 40 = lookahead. Pinned to the
+    // SAME constant the emitter uses so the preview preroll can never drift
+    // from the cushion; the exact value kills the `!` delete, the `- → +` and
+    // the `- → /` mutants on the pure formula.
+    let lookahead = crate::playback::pipeline::audio_emitter::AUDIO_LOOKAHEAD_MS as u32;
+    assert_eq!(lookahead, 1500);
+    assert_eq!(lead_ms_for(false), lookahead);
 }
 
 #[test]

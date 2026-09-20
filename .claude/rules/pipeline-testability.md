@@ -72,3 +72,51 @@ is the seam that makes this possible: the pure `emit_one_block` takes an
 `AudioSink<B>`, so a `MockNdiBackend` sink drives it on Linux while a
 `RealNdiBackend` sink drives it on the box — never a `#[cfg(windows)]`-narrowed
 signature for logic that has no MediaFoundation dependency.
+
+## #192 round 4 — video follows the audio clock (`av_catchup.rs`)
+
+Round 3's 1.5 s cushion stops a producer stall reaching the speakers but leaves a
+lasting A/V offset: the wall-clock emitter keeps its grid while the SDK-clocked
+video, submitted at decode time, resumes ~1.4 s late and the loop (≈ real time
+under a heavy child) never catches up. The ring depth IS the video's lag —
+`lag_ms = target_depth_ms − ring_depth_ms`, `target = DEFAULT_TOLERANCE_MS +
+AUDIO_LOOKAHEAD_MS` (`audio_emitter::target_ring_depth_ms()`, never a literal).
+
+- **Pure, Linux-tested, mutation-scored (`playback/av_catchup.rs`):** the free fn
+  `decide(ring_depth_ms, target_depth_ms, frame_ms, primed)` (Drop only when
+  primed AND lag > one frame) and `CatchUp{primed, consecutive_drops}` — the
+  prime latch at target − one frame (`depth + frame ≥ target` — exactly where `decide` already says Submit, so the priming frame is never dropped; the initial fill is not a
+  stall) and the `MAX_CONSECUTIVE_DROPS` (75 ≈ 3 s) safety valve (submit one frame
+  anyway so a stuck decoder never blacks the wall). `CatchUp::reset()` clears BOTH
+  fields on the `clear_ring` sites (seek arm + new play). Exact-boundary tests on
+  every threshold; no `while`, `.max()`/`.min()`-clamp-friendly, so a flipped
+  comparison fails a mutant, never spins into a timeout.
+- **Windows-only glue (`pipeline_audio::is_late_frame`, `mutants::skip`):** locks
+  the ring, reads the live `AudioEmitter::ring_depth_ms()` (same helper the
+  heartbeat logs), and applies `CatchUp::step`. The decode loop (`pipeline.rs`)
+  has EXACTLY ONE `if` at the submit site: on `Drop` it still pushed the audio,
+  skips `submit_nv12`, and calls `loop_stage.observe_drop(decode_us, audio_us)`.
+- **Counter:** `catchup_dropped` accumulates per heartbeat window through
+  `LoopStageMax::observe_drop` → `LoopStageStats` → `LoopStats` → the
+  `pipeline: loop-stats` line (`catchup_dropped=N`) — the direct producer-stall
+  meter. Box acceptance: a stall that drains `ring_ms` < 700 is followed within
+  1 s by `ring_ms` ≥ 1400 and `catchup_dropped` > 0, with zero `silence_blocks`
+  mid-song.
+- **SDK-clocked path only.** The catch-up runs only when the wall-clock emitter
+  exists — i.e. the `genlock_pacing == false` branch. The paced/genlock path has
+  its own re-latch logic and is byte-for-byte untouched (see `genlock.md`).
+
+### Catch-up guards learned from the 0.61.0 release review (#192 r4)
+- **Audio EOF comes ~1.5 s before the last video frame** (the sync decoder
+  reads audio `tolerance + lookahead` ahead), so a shallow ring in the tail is
+  NOT a video lag: `CatchUp::step(.., at_end)` never drops when
+  `video_ts + target_ring_depth_ms() >= duration_ms` — without it the wall
+  froze for the final ~1.5 s of every song.
+- **A drop-cap trip UN-PRIMES.** A decoder that cannot beat real time must fall
+  back to smooth-but-offset video, never 1 frame per cap forever.
+- **Heartbeat / position report / `frame_count` run BEFORE the drop check** —
+  a `continue` on the drop path otherwise freezes the dashboard position and
+  under-reports the frame count.
+- `drain_budget_ms` = `DEFAULT_TOLERANCE_MS + lookahead + block_ms()` — the ring
+  holds the pairing tolerance too at a natural end.
+

@@ -219,3 +219,25 @@ artifact has `retention-days: 1`, so a re-run of a run older than a day fails at
 "Download WASM frontend: Artifact not found for name: dist" BEFORE touching the
 box (17.9.2026, #170 acceptance). Past that window a post-restart suite needs a
 fresh push (a version bump is enough).
+
+## RED commit subjects: `test(#N): …` only — `test[red](#N)` is NOT parsed
+
+`scripts/check-red-green-order.sh` (the RED-GREEN Commit Order CI job and the
+pre-push gate) accepts a RED commit only when its subject matches `test(#N)` /
+`test(<scope>): … (#N)`. The `test[red](#N): …` form passes unnoticed only while
+an OLDER `test(#N)` commit for the same ticket sits in the same range (that is
+how it slipped through the whole 0.60.0 cycle) and fails the moment the range
+holds just your pair. Write `test(#N): RED — …`. If a wrongly-formed RED commit
+is already pushed (history rewrite is banned), a LATER commit carrying
+`[no-test: <fix-sha> RED test is <test-sha> — <reason>]` declares it.
+
+## Mutation-timeout trap: bounded windows pop with `if`, never `while`
+
+`while deque.len() > CAP { deque.pop_front(); }` is correct code that a
+`>`→`<` mutant turns into an infinite loop on an empty deque — cargo-mutants
+reports TIMEOUT (300 s), which fails the shard exactly like a MISSED mutant
+(#192 r3, `loop_stats.rs::SubmitHist::observe`). When one push can overshoot
+by at most one, write `if len > CAP { pop_front(); }`; for bulk trims use
+`truncate`/`drain(..n)` with a `saturating_sub` count. Any loop whose exit
+depends on a comparison a mutant can flip needs a structural bound.
+

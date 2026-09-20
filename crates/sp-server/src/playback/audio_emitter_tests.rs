@@ -547,9 +547,10 @@ fn spin_margin_stays_minimal_on_a_silent_pipeline() {
 
 #[test]
 fn decoder_tolerance_adds_the_lookahead_only_with_an_emitter() {
-    // With the emitter the decoder reads audio 100 ms ahead of video (the ring
-    // cushion); without it (legacy audio-with-video) the plain 40 ms pairing.
-    assert_eq!(decoder_tolerance_ms(true), 140);
+    // With the emitter the decoder reads audio the whole cushion ahead of video
+    // (round 3: DEFAULT_TOLERANCE 40 + AUDIO_LOOKAHEAD_MS 1500 = 1540 ms); without
+    // it (legacy audio-with-video) the plain 40 ms pairing.
+    assert_eq!(decoder_tolerance_ms(true), 1540);
     assert_eq!(decoder_tolerance_ms(false), 40);
 }
 
@@ -708,4 +709,86 @@ fn tick_reanchors_when_more_than_one_second_late_snapping_this_slot_to_now() {
         "the following boundary is now + one block"
     );
     assert_eq!(e.resyncs(), 1, "an on-time slot does not resync");
+}
+
+// ── #192 round 3: 1.5 s cushion + derived drain budget + ring sizing ─────────
+
+#[test]
+fn lookahead_is_the_round3_cushion() {
+    // The round-3 cushion must cover the measured ~1 s producer stalls; the
+    // decoder then reads DEFAULT_TOLERANCE(40) + 1500 = 1540 ms of audio ahead.
+    assert_eq!(AUDIO_LOOKAHEAD_MS, 1500);
+    assert_eq!(decoder_tolerance_ms(true), 1540);
+}
+
+#[test]
+fn target_ring_depth_is_the_catchup_target() {
+    // #192 round 4: the catch-up target_depth_ms is the nominal audio-ahead depth
+    // (DEFAULT_TOLERANCE 40 + AUDIO_LOOKAHEAD 1500). Derived from the same
+    // constants as decoder_tolerance_ms(true), never a literal.
+    assert_eq!(target_ring_depth_ms(), 1540);
+    assert_eq!(target_ring_depth_ms(), decoder_tolerance_ms(true));
+}
+
+#[test]
+fn block_ms_is_one_grid_slot_rounded_up() {
+    // 1600 samples @ 48 kHz = 33.333 ms → rounded UP to a whole 34 ms so a
+    // budget derived from it never falls short of a whole slot.
+    assert_eq!(block_ms(), 34);
+}
+
+#[test]
+fn drain_budget_is_tolerance_plus_lookahead_plus_one_slot() {
+    // Pure formula; exact boundaries pin the arithmetic so a +/-/* mutant on
+    // `DEFAULT_TOLERANCE_MS + lookahead + block_ms()` is killed (40 + x + 34).
+    assert_eq!(drain_budget_ms(0), 74);
+    assert_eq!(drain_budget_ms(100), 174);
+    // The ring holds up to target_ring_depth_ms() (tolerance + lookahead) at a
+    // natural end, so the budget must cover THAT plus one slot: 40 + 1500 + 34.
+    assert_eq!(drain_budget_ms(1500), 1574);
+    // Derived from the LIVE cushion — the natural-end drain waits this long, and
+    // it must exceed the round-2 fixed 400 ms so the last ~1.1 s is not cut.
+    assert_eq!(
+        drain_budget_ms(AUDIO_LOOKAHEAD_MS),
+        target_ring_depth_ms() + block_ms()
+    );
+    assert!(
+        drain_budget_ms(AUDIO_LOOKAHEAD_MS) > 400,
+        "the round-3 drain budget must exceed the old 400 ms bound"
+    );
+}
+
+#[test]
+fn ring_capacity_blocks_holds_tolerance_plus_lookahead_with_headroom() {
+    // The ring must hold at least DEFAULT_TOLERANCE + lookahead ms for EVERY
+    // lookahead, else push_blocking caps the realised cushion below the lookahead.
+    for &la in &[0u64, 100, 1500, 3000] {
+        let blocks = ring_capacity_blocks(la);
+        let cap_ms = blocks as u64 * EMIT_SAMPLES_PER_BLOCK as u64 * 1000 / EMIT_RATE_HZ as u64;
+        let need = sp_decoder::split_sync::DEFAULT_TOLERANCE_MS + la;
+        assert!(cap_ms >= need, "la={la}: cap {cap_ms} ms < need {need} ms");
+    }
+    // Exact values pin the ceil + the 2-block headroom (kills off-by-one and
+    // ceil→floor mutants).
+    assert_eq!(ring_capacity_blocks(0), 4);
+    assert_eq!(ring_capacity_blocks(100), 7);
+    assert_eq!(ring_capacity_blocks(1500), 49);
+    assert_eq!(ring_capacity_blocks(3000), 94);
+}
+
+#[test]
+fn ring_capacity_holds_the_round3_cushion() {
+    // With the round-3 lookahead the production ring must HOLD ≥ tolerance +
+    // 1500 ms of audio — the old 8-block (266 ms) ring could not, so a ~1 s
+    // producer stall drained it and holed the on-program output.
+    let cap_ms =
+        RING_CAPACITY_BLOCKS as u64 * EMIT_SAMPLES_PER_BLOCK as u64 * 1000 / EMIT_RATE_HZ as u64;
+    assert!(
+        cap_ms >= 1540,
+        "the production ring holds {cap_ms} ms, need ≥ 1540 for the 1.5 s cushion"
+    );
+    assert_eq!(
+        RING_CAPACITY_BLOCKS, 49,
+        "49 blocks ≈ 1633 ms at the 1.5 s cushion"
+    );
 }

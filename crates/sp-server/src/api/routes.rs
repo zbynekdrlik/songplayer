@@ -828,7 +828,9 @@ pub async fn delete_resolume_host(
 
 /// GET /api/v1/videos/:id/lyrics
 ///
-/// Returns the cached lyrics JSON for a video. 404 if not available.
+/// Returns the cached lyrics JSON for a video. 204 when the song simply has no
+/// lyrics (a normal state — a 404 would log a browser console error on every
+/// idle Player, #194), 404 for an unknown video id or a missing sidecar.
 #[cfg_attr(test, mutants::skip)]
 pub async fn get_video_lyrics(
     State(state): State<AppState>,
@@ -851,7 +853,7 @@ pub async fn get_video_lyrics(
 
     let has_lyrics: i32 = row.get("has_lyrics");
     if has_lyrics == 0 {
-        return StatusCode::NOT_FOUND.into_response();
+        return StatusCode::NO_CONTENT.into_response();
     }
 
     let youtube_id: String = row.get("youtube_id");
@@ -941,3 +943,7 @@ mod tests_runtime_pipeline;
 #[cfg(test)]
 #[path = "routes_tests_patch_metadata.rs"]
 mod tests_patch_metadata;
+
+#[path = "routes_tests_lyrics_fetch.rs"]
+#[cfg(test)]
+mod tests_lyrics_fetch;

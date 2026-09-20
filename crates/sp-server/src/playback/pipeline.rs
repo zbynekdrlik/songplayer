@@ -534,6 +534,7 @@ fn decode_and_send(
     taps: &crate::playback::preview::preview_stream::DecodeTaps,
     audio_emitter: Option<&crate::playback::pipeline::audio_emitter::SharedEmitter>,
 ) -> DecodeResult {
+    use crate::playback::pipeline::pipeline_audio;
     use sp_decoder::MediaFoundationVideoReader;
 
     let video_reader = match MediaFoundationVideoReader::open(video_path) {
@@ -605,6 +606,10 @@ fn decode_and_send(
 
     let mut last_position_report = Instant::now();
     let mut frame_count: u64 = 0;
+    // #192 round 3: per-window max decode/submit/audio, drained into the heartbeat.
+    let mut loop_stage = crate::playback::loop_stats::LoopStageMax::default();
+    // #192 round 4: per-song catch-up (video follows the wall-clock audio).
+    let mut catchup = crate::playback::av_catchup::CatchUp::new();
 
     loop {
         // Check for commands between frames (non-blocking).
@@ -642,6 +647,7 @@ fn decode_and_send(
                     tracing::warn!(?e, position_ms, "pipeline: seek failed");
                 }
                 crate::playback::pipeline::pipeline_audio::clear_if_present(audio_emitter);
+                catchup.reset(); // #192 r4: the post-seek refill is not a stall
             }
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
@@ -682,33 +688,23 @@ fn decode_and_send(
             continue;
         }
 
-        match decoder.next_synced() {
+        // #192 round 3: time the decode stage (candidate stall under a heavy child).
+        let (decoded, decode_us) = crate::playback::loop_stats::timed(|| decoder.next_synced());
+        match decoded {
             Ok(Some((video_frame, audio_frames))) => {
-                // #15/#178: offer video + post-mix audio to BOTH preview taps
-                // BEFORE the NDI submit / audio-emitter push consume the frame.
-                // No viewer => a couple of relaxed atomic loads; never blocks,
-                // never adds latency to the NDI submit / genlock path.
+                // #15/#178: offer both preview taps before submit/push (preview.md).
                 taps.offer_frame(&video_frame, &audio_frames);
-                // #192: on the SDK-clocked path audio is PUSHED into the
-                // wall-clock emitter's ring (before this frame's submit) and the
-                // TIME_CRITICAL emit thread clocks it out continuously, so a song
-                // end / heavy-child stall no longer stops the audio stream;
-                // `submit_nv12` then carries video only. (Emitter absent → legacy
-                // audio-with-video fallback.) See `pipeline_audio`.
-                let ndi_audio = crate::playback::pipeline::pipeline_audio::push_or_collect_audio(
-                    audio_emitter,
-                    audio_frames,
-                );
-
+                // #192: push audio into the emitter ring; submit_nv12 = video only.
+                let (ndi_audio, audio_us) = crate::playback::loop_stats::timed(|| {
+                    crate::playback::pipeline::pipeline_audio::push_or_collect_audio(
+                        audio_emitter,
+                        audio_frames,
+                    )
+                });
+                // Heartbeat/position/frame_count run for dropped frames too.
                 let timestamp_ms = video_frame.timestamp_ms;
-                submitter.submit_nv12(
-                    video_frame.width,
-                    video_frame.height,
-                    video_frame.stride,
-                    video_frame.data,
-                    &ndi_audio,
-                );
-
+                let duration_ms = decoder.duration_ms();
+                frame_count += 1;
                 if should_run_heartbeat(last_heartbeat.elapsed()) {
                     run_heartbeat_inner(
                         submitter,
@@ -717,26 +713,42 @@ fn decode_and_send(
                         last_heartbeat,
                         consecutive_bad_polls,
                         audio_emitter,
+                        loop_stage.drain(),
                     );
                 }
-
-                frame_count += 1;
-
                 if last_position_report.elapsed() >= std::time::Duration::from_millis(500) {
-                    let _ = event_tx.send((
-                        playlist_id,
-                        PipelineEvent::Position {
-                            position_ms: timestamp_ms,
-                            duration_ms: decoder.duration_ms(),
-                        },
-                    ));
+                    let ev = PipelineEvent::Position {
+                        position_ms: timestamp_ms,
+                        duration_ms,
+                    };
+                    let _ = event_tx.send((playlist_id, ev));
                     last_position_report = Instant::now();
                 }
+                // #192 r4: drop a late frame's video (never near the end: audio EOF).
+                if pipeline_audio::is_late_frame(
+                    &mut catchup,
+                    audio_emitter,
+                    timestamp_ms,
+                    duration_ms,
+                ) {
+                    loop_stage.observe_drop(decode_us, audio_us);
+                    continue;
+                }
+                let (_, submit_us) = crate::playback::loop_stats::timed(|| {
+                    submitter.submit_nv12(
+                        video_frame.width,
+                        video_frame.height,
+                        video_frame.stride,
+                        video_frame.data,
+                        &ndi_audio,
+                    )
+                });
+                loop_stage.observe(decode_us, submit_us, audio_us);
             }
             Ok(None) => {
                 info!(playlist_id, frame_count, "video decode complete");
-                // #192 item 3: natural end only — let the emit thread drain the
-                // ring (≤ 400 ms) before the next song's clear_ring wipes its tail.
+                // #192: natural end only — let the emit thread drain the ring
+                // (≤ drain_budget_ms ≈ 1.6 s; no command is serviced meanwhile).
                 crate::playback::pipeline::pipeline_audio::drain_if_present(audio_emitter);
                 submitter.flush();
                 return DecodeResult::Ended;
@@ -831,6 +843,8 @@ fn run_heartbeat_inner(
     last_heartbeat: &mut std::time::Instant,
     consecutive_bad_polls: &mut u32,
     audio_emitter: Option<&crate::playback::pipeline::audio_emitter::SharedEmitter>,
+    // #192 round 3: the decode loop's per-window stage maxima (drained by caller).
+    stage: crate::playback::loop_stats::LoopStageStats,
 ) {
     // #192: surface the wall-clock emitter telemetry under audio.emitter on
     // /api/v1/ndi/health (disabled default without an emitter).
@@ -846,6 +860,7 @@ fn run_heartbeat_inner(
         // boundary-paced decode loop passes real `Pacer` stats (#147).
         crate::playback::ndi_health::PacingStats::default(),
         audio,
+        stage,
     );
 }
 
@@ -887,6 +902,7 @@ fn run_heartbeat_paused<B: sp_ndi::NdiBackend>(
         // boundary-paced decode loop passes real `Pacer` stats (#147).
         crate::playback::ndi_health::PacingStats::default(),
         crate::playback::ndi_health::AudioStats::default(),
+        crate::playback::loop_stats::LoopStageStats::default(), // paused: no decode loop
     );
 }
 
@@ -911,9 +927,16 @@ pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
     consecutive_bad_polls: &mut u32,
     pacing: crate::playback::ndi_health::PacingStats,
     audio: crate::playback::ndi_health::AudioStats,
+    // #192 round 3: decode-loop stage maxima; submit-call gauge rides drain_window.
+    stage: crate::playback::loop_stats::LoopStageStats,
 ) {
     let connections = submitter.sender().get_no_connections(0);
     let stats = submitter.drain_window();
+    let loop_stats = crate::playback::loop_stats::LoopStats::from_parts(
+        stats.submit_call_us_max,
+        stats.submit_call_us_p99,
+        stage,
+    );
     let observed_fps = stats.frames_in_window as f32 / stats.window_secs.max(0.001);
     let nominal_fps = submitter.nominal_fps();
 
@@ -946,6 +969,7 @@ pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
             reported_state: state,
             pacing,
             audio,
+            loop_stats,
         },
     ));
     *last_heartbeat = now;
