@@ -146,12 +146,17 @@ async fn seek_forwards_clamped_position_to_engine() {
 }
 
 #[tokio::test]
-async fn seek_zero_duration_is_treated_as_unknown_no_clamp() {
-    // A duration of 0 means "unknown / not yet probed" — it must NOT clamp the
-    // requested position to 0 (that would make a video with no known duration
-    // unseekable). The route filters `duration_ms > 0`; a mutant relaxing it to
-    // `>= 0` would clamp to 0 here, so a nonzero position must be forwarded
-    // verbatim.
+async fn seek_zero_duration_is_409() {
+    // #198 item 7: a duration of 0 means "unknown / not yet probed". The route
+    // used to forward the requested position VERBATIM in that case (no upper
+    // clamp bound), so an arbitrary client position reached EngineCommand::Seek
+    // unclamped — the vulnerability this fixes. Without a known duration there is
+    // no safe bound, so the route now refuses with 409 (a playing, seekable song
+    // has a known duration; an un-probed one is not safely seekable). This
+    // replaces the old `..._treated_as_unknown_no_clamp` test, which asserted the
+    // vulnerable forward-verbatim behaviour. The `duration_ms > 0` filter still
+    // guards the `>= 0` mutant: `>= 0` would make 0 a "known" duration and clamp
+    // to 0 → 204, so this 409 assertion kills it.
     let pid = 940_005;
     let vid = 9_400_051;
     let (state, mut rx) = state_with_engine().await;
@@ -163,18 +168,35 @@ async fn seek_zero_duration_is_treated_as_unknown_no_clamp() {
         .oneshot(seek_request(pid, 45_000))
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    // No command must reach the engine for a refused seek.
+    assert!(
+        rx.try_recv().is_err(),
+        "a 409 (unknown duration) must not forward a Seek"
+    );
+    crate::now_playing::global().clear(pid);
+}
 
-    let cmd = rx.recv().await.expect("engine must receive a command");
-    match cmd {
-        crate::EngineCommand::Seek { position_ms, .. } => {
-            assert_eq!(
-                position_ms, 45_000,
-                "zero duration must be treated as unknown (no clamp)"
-            );
-        }
-        other => panic!("expected Seek, got {other:?}"),
-    }
+#[tokio::test]
+async fn seek_null_duration_is_409() {
+    // #198 item 7: a NULL `videos.duration_ms` (not yet probed) is also unknown —
+    // no clamp bound, so refuse with 409 rather than forward an unbounded seek.
+    let pid = 940_006;
+    let vid = 9_400_061;
+    let (state, mut rx) = state_with_engine().await;
+    insert_playlist(&state.pool, pid).await;
+    insert_video(&state.pool, vid, pid, None).await;
+    crate::now_playing::global().set(pid, vid);
+
+    let resp = router(state, None)
+        .oneshot(seek_request(pid, 45_000))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    assert!(
+        rx.try_recv().is_err(),
+        "a 409 (unknown duration) must not forward a Seek"
+    );
     crate::now_playing::global().clear(pid);
 }
 

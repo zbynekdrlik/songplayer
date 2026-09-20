@@ -454,12 +454,30 @@ pub async fn seek_playlist(playlist_id: i64, position_ms: u64) -> Result<(), Str
     .await
 }
 
-/// GET the lyrics track for a video. Returns the full `LyricsTrack`
-/// JSON — used by the shared LyricsView (scroll mode) to render a tappable
-/// line list. 404 signals "no lyrics yet", surfaced as an Err string
-/// so the UI can show an empty state.
-pub async fn get_video_lyrics(video_id: i64) -> Result<sp_core::lyrics::LyricsTrack, String> {
-    get(&format!("/api/v1/videos/{video_id}/lyrics")).await
+/// GET the lyrics track for a video. Used by the shared LyricsView (scroll
+/// mode) to render a tappable line list.
+///
+/// #198 item 9: the server replies **204 No Content** for a video with no
+/// lyrics. The generic `get()` would json-parse that empty body and return an
+/// `Err`, which LyricsView renders as an ERROR — so a genuinely-empty song is
+/// special-cased to a clean `Ok(None)` here. `Ok(Some(track))` = has lyrics,
+/// `Ok(None)` = 204 no lyrics, `Err` = a real failure (network / non-2xx /
+/// malformed JSON).
+pub async fn get_video_lyrics(
+    video_id: i64,
+) -> Result<Option<sp_core::lyrics::LyricsTrack>, String> {
+    let path = format!("/api/v1/videos/{video_id}/lyrics");
+    let resp = Request::get(&path).send().await.map_err(|e| e.to_string())?;
+    if resp.status() == 204 {
+        return Ok(None);
+    }
+    if !resp.ok() {
+        return Err(format!("GET {} → {}", path, resp.status()));
+    }
+    resp.json::<sp_core::lyrics::LyricsTrack>()
+        .await
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 // ── Import (v0.22.0) ──────────────────────────────────────────────────────────

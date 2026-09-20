@@ -87,11 +87,17 @@ test.describe("the Player seek bar drives POST /playback/{id}/seek (#194)", () =
     // its NowPlaying arrives.
     await expect(seek).toBeEnabled({ timeout: 15000 });
 
-    // Drag to ~50% (a clean multiple of the 1000 ms step) and commit.
+    // Drag to ~50% (a clean multiple of the 1000 ms step) and commit. #198 item
+    // 6: Playwright's fill() already fires `input` + `change` on the input, so
+    // the previous explicit dispatchEvent('change') was a redundant SECOND commit
+    // path (masked before only by the value-dedup). Drop it and assert fill()
+    // commits EXACTLY ONE seek.
     await seek.fill("106000");
-    await seek.dispatchEvent("change");
 
     await expect.poll(() => seekBodies.length, { timeout: 5000 }).toBeGreaterThan(0);
+    // Give any spurious extra seek a chance to arrive, then assert exactly one.
+    await page.waitForTimeout(1000);
+    expect(seekBodies.length, "fill() must commit exactly one seek").toBe(1);
     // ~50% of the 213000 ms duration, with tolerance for the step + any tick.
     const EXPECTED = Math.round(213000 / 2); // 106500
     expect(seekBodies[0].position_ms).toBeGreaterThan(EXPECTED - 15000);

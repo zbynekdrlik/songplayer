@@ -13,6 +13,9 @@
 //! - `404 Not Found` when the playlist row does not exist.
 //! - `409 Conflict` when nothing is playing on that playlist (the pipeline's own
 //!   Seek handler is a no-op then, so a silent 204 would mislead the operator).
+//! - `409 Conflict` when the playing song's duration is unknown (NULL/0/errored
+//!   lookup): there is no upper clamp bound, so forwarding the client position
+//!   would scrub UNCLAMPED — refuse rather than seek unbounded (#198 item 7).
 //! - `position_ms` is clamped to `0..=duration` of the playing song via the pure
 //!   `sp_core::seek_model::seek_target_ms` helper (delta = 0), so a stale UI can
 //!   never scrub past the end.
@@ -66,8 +69,9 @@ pub async fn post_seek(
     };
 
     // Clamp to the playing song's duration (defence in depth — the UI already
-    // caps the slider). Unknown/absent duration → no upper clamp.
-    let duration_ms: u64 = match sqlx::query("SELECT duration_ms FROM videos WHERE id = ?")
+    // caps the slider). A known duration is `Some(d>0)`; a NULL/0/errored lookup
+    // is unknown.
+    let duration_ms: Option<u64> = match sqlx::query("SELECT duration_ms FROM videos WHERE id = ?")
         .bind(video_id)
         .fetch_optional(&state.pool)
         .await
@@ -77,13 +81,20 @@ pub async fn post_seek(
             .ok()
             .flatten()
             .filter(|d| *d > 0)
-            .map(|d| d as u64)
-            .unwrap_or(u64::MAX),
-        Ok(None) => u64::MAX,
+            .map(|d| d as u64),
+        Ok(None) => None,
         Err(e) => {
             tracing::warn!(video_id, %e, "post_seek: duration lookup failed");
-            u64::MAX
+            None
         }
+    };
+
+    // #198 item 7: without a known duration there is no upper clamp bound, so an
+    // arbitrary client position would reach EngineCommand::Seek UNCLAMPED. Refuse
+    // with 409 rather than forward an unbounded seek — a playing, seekable song
+    // has a known duration; an un-probed one is not safely seekable.
+    let Some(duration_ms) = duration_ms else {
+        return StatusCode::CONFLICT.into_response();
     };
     let position_ms = sp_core::seek_model::seek_target_ms(req.position_ms, 0, duration_ms);
 
