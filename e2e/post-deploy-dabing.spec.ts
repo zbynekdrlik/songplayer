@@ -102,16 +102,30 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
 
   test("real mouse: the dub fader and the seek bar commit on release", async ({
     page,
+    request,
   }) => {
     await page.goto("/dabing");
     const row = page.locator(`[data-testid="song-row"][data-video-id="${sampleVideoId}"]`);
     await expect(row).toBeVisible({ timeout: 15000 });
     await expect(row.getByTestId("chip-dub")).toContainText("hotový");
 
-    // Start the sample on the (off-program) Dabing output.
+    // Start the sample on the (off-program) Dabing output. The Player's
+    // play/pause label follows the on-program state (the health registry maps
+    // an off-program decoding pipeline to Paused), so the proof that playback
+    // started is the BACKEND effect: frames flowing on the Dabing output.
     await row.getByTestId("song-row-play").click();
-    const playpause = page.getByTestId("player-playpause");
-    await expect(playpause).toContainText("Pauza", { timeout: 20000 });
+    await expect
+      .poll(
+        async () => {
+          const h = (await (await request.get("/api/v1/ndi/health")).json()) as Array<{
+            playlist_id: number;
+            frames_submitted_last_5s: number;
+          }>;
+          return h.find((r) => r.playlist_id === dabingPid)?.frames_submitted_last_5s ?? 0;
+        },
+        { timeout: 30000, message: "the Dabing output must start submitting frames" },
+      )
+      .toBeGreaterThan(0);
 
     // Dub fader: drag from the top (100 %) to ~40 % → ONE PATCH, fader stays.
     const fader = page.getByTestId("dub-mix-fader");
