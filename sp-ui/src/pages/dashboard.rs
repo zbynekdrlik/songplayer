@@ -3,7 +3,7 @@
 
 use leptos::prelude::*;
 
-use crate::components::{download_queue, playlist_selector, playlist_workspace, selection};
+use crate::components::{download_queue, playlist_picker, playlist_workspace, selection};
 use crate::store::DashboardStore;
 
 #[component]
@@ -63,7 +63,7 @@ pub fn DashboardPage() -> impl IntoView {
             </div>
 
             <div class="dashboard-body">
-                <playlist_selector::PlaylistSelector />
+                <playlist_picker::PlaylistPicker />
                 <playlist_workspace::PlaylistWorkspace />
             </div>
 

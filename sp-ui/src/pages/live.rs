@@ -1,8 +1,12 @@
-//! /live page: mobile-first layout for operating the custom ytlive setlist
-//! from a phone during worship. Set list is up top (primary control surface),
-//! the compact player sits under it, and adding songs is tucked into a
-//! collapsible section at the bottom so it stays out of the way during
-//! performance.
+//! /live page: mobile-first layout for operating the live setlist from a phone
+//! during worship. The shared `PlaylistPicker` (live-kind only) is up top, the
+//! set list is the primary control surface, the compact `Player` sits under it,
+//! and adding songs is tucked into a collapsible section at the bottom.
+//!
+//! #194 ROUND 3c: the live playlist is chosen through the SHARED `PlaylistPicker`
+//! (filtered to the live-kind `"custom"` playlists) — no hardcoded
+//! `name == "ytlive"` lookup. The effective id is the shared selection when it
+//! points at a custom playlist, else the first custom playlist.
 
 use leptos::prelude::*;
 
@@ -12,49 +16,40 @@ use crate::components::live_catalog::LiveCatalog;
 use crate::components::live_setlist::LiveSetList;
 use crate::components::lyrics_scroller::LyricsScroller;
 use crate::components::player::Player;
+use crate::components::playlist_picker::PlaylistPicker;
+use crate::components::selection;
 use crate::components::state_block::{StateBlock, StateKind};
 use crate::store::DashboardStore;
 
 #[component]
 pub fn LivePage() -> impl IntoView {
     let store = expect_context::<DashboardStore>();
-    let ytlive_id = RwSignal::new(None::<i64>);
     let set_list_version = RwSignal::new(0u64);
-    let error_msg = RwSignal::new(String::new());
-    // Collapse the "Add songs" panel by default — during a live set the
-    // operator only needs the catalog/URL input occasionally, so keeping
-    // it folded leaves more room above the fold for the setlist + player.
+    // Collapse the "Add songs" panel by default — during a live set the operator
+    // only needs the catalog/URL input occasionally.
     let add_open = RwSignal::new(false);
 
-    // Resolve the ytlive playlist id on mount.
-    let _resolve = Effect::new(move |_| {
-        leptos::task::spawn_local(async move {
-            match api::get::<Vec<serde_json::Value>>("/api/v1/playlists").await {
-                Ok(all) => {
-                    let yt = all.iter().find(|p| p["name"] == "ytlive").cloned();
-                    if let Some(p) = yt {
-                        if let Some(id) = p["id"].as_i64() {
-                            ytlive_id.set(Some(id));
-                            // #194: the forced "single" default (the engine stops
-                            // after each song so the operator drives transitions
-                            // manually) moved off the deleted setlist transport bar
-                            // to here — the page owns the mount-time behaviour, the
-                            // shared Player owns the mode control.
-                            let body = serde_json::json!({ "mode": "single" });
-                            let _ = api::put_json_empty(
-                                &format!("/api/v1/playback/{id}/mode"),
-                                &body,
-                            )
-                            .await;
-                        }
-                    } else {
-                        error_msg
-                            .set("chýba zoznam ytlive — migrácia V13 nebola použitá?".to_string());
-                    }
-                }
-                Err(e) => error_msg.set(format!("nepodarilo sa načítať zoznamy: {e}")),
-            }
-        });
+    // The live playlist: the shared selection when it is a live-kind ("custom")
+    // playlist, else the first custom playlist. A `Memo` so a now-playing tick
+    // never re-mounts the page body — only a real change of the resolved id does.
+    let live_pid = Memo::new(move |_| {
+        selection::selection_or_first_of_kind(
+            &store.playlists.get(),
+            store.selected_playlist.get(),
+            "custom",
+        )
+    });
+
+    // Force "single" mode when the live playlist resolves (the engine stops after
+    // each song so the operator drives transitions manually). Fires once per
+    // resolved custom playlist (a `Memo` only propagates on a real change).
+    Effect::new(move |_| {
+        if let Some(id) = live_pid.get() {
+            leptos::task::spawn_local(async move {
+                let body = serde_json::json!({ "mode": "single" });
+                let _ = api::put_json_empty(&format!("/api/v1/playback/{id}/mode"), &body).await;
+            });
+        }
     });
 
     let bump: Callback<()> = Callback::new(move |_| {
@@ -66,24 +61,10 @@ pub fn LivePage() -> impl IntoView {
 
     view! {
         <div class="live-page">
-            <div class="live-page-error">
-                {move || {
-                    let e = error_msg.get();
-                    if e.is_empty() {
-                        view! { <span></span> }.into_any()
-                    } else {
-                        view! {
-                            <StateBlock kind=StateKind::Error(e) />
-                        }
-                        .into_any()
-                    }
-                }}
-            </div>
-            {move || match ytlive_id.get() {
-                None => view! {
-                    <StateBlock kind=StateKind::Loading />
-                }
-                .into_any(),
+            // #194 r3c: the ONE playlist chooser, filtered to live-kind playlists.
+            <PlaylistPicker kinds=vec!["custom".to_string()] />
+            {move || match live_pid.get() {
+                None => view! { <StateBlock kind=StateKind::Loading /> }.into_any(),
                 Some(id) => view! {
                     <>
                         // 1. Primary control surface: tap a song to play it,
@@ -98,17 +79,12 @@ pub fn LivePage() -> impl IntoView {
 
                         // 2. The ONE shared player (now-playing, badge, seek,
                         //    transport, mode, preview, mixer) + the lyric line.
-                        //    Sits right under the setlist so the operator can
-                        //    glance up from a tap to see state.
                         <section class="live-section live-section-player">
                             <Player playlist_id=id />
-                            <LyricsScroller playlist_id=id store=store.clone() />
+                            <LyricsScroller playlist_id=id store=store />
                         </section>
 
-                        // 3. "Add songs" is tucked into a collapsible panel at
-                        //    the bottom. Closed by default — during a live set
-                        //    the operator rarely needs the catalog, and when
-                        //    they do it's fine to scroll to the bottom + tap.
+                        // 3. "Add songs" is tucked into a collapsible panel.
                         <section class="live-section live-section-add">
                             <button
                                 class="live-add-toggle"

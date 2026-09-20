@@ -85,7 +85,12 @@ pub fn VideoList(playlist_id: i64) -> impl IntoView {
                 if err.is_empty() {
                     view! { <span></span> }.into_any()
                 } else {
-                    view! { <div class="video-list-error">{err}</div> }.into_any()
+                    view! {
+                        <crate::components::state_block::StateBlock
+                            kind=crate::components::state_block::StateKind::Error(err)
+                        />
+                    }
+                        .into_any()
                 }
             }}
             <label class="video-list-stems-filter">

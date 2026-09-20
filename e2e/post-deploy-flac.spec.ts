@@ -309,7 +309,7 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       timeout: 10_000,
     });
 
-    const rows = page.getByTestId("playlist-selector-row");
+    const rows = page.getByTestId("playlist-picker-item");
     const rowCount = await rows.count();
 
     for (let i = 0; i < rowCount; i++) {

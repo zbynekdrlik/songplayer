@@ -55,7 +55,21 @@ pub fn LiveSetList(
     view! {
         <div class="live-setlist">
             <h2>"Zoznam skladieb — ytlive"</h2>
-            <div class="live-setlist-error">{move || error_msg.get()}</div>
+            <div class="live-setlist-error">
+                {move || {
+                    let e = error_msg.get();
+                    if e.is_empty() {
+                        view! { <span></span> }.into_any()
+                    } else {
+                        view! {
+                            <crate::components::state_block::StateBlock
+                                kind=crate::components::state_block::StateKind::Error(e)
+                            />
+                        }
+                            .into_any()
+                    }
+                }}
+            </div>
             <div class="song-list">
                 <For
                     each=enriched

@@ -80,7 +80,12 @@ pub fn LyricsQueueCard() -> impl IntoView {
             <h2>"Spracovanie textov"</h2>
             {banner}
             {move || match queue.get() {
-                None => view! { <p>"Načítavam…"</p> }.into_any(),
+                None => view! {
+                    <crate::components::state_block::StateBlock
+                        kind=crate::components::state_block::StateKind::Loading
+                    />
+                }
+                .into_any(),
                 Some(q) => {
                     let proc_block = q.processing.as_ref().map(|p| {
                         let stage_label = match p.provider.as_ref() {

@@ -89,13 +89,13 @@ test("dashboard shows a selector row per playlist and one work area (#165)", asy
   });
   // A selector row exists for each of the 3 mock playlists.
   await expect(
-    page.getByTestId("playlist-selector-row").filter({ hasText: "Worship" }),
+    page.getByTestId("playlist-picker-item").filter({ hasText: "Worship" }),
   ).toBeVisible();
   await expect(
-    page.getByTestId("playlist-selector-row").filter({ hasText: "Background" }),
+    page.getByTestId("playlist-picker-item").filter({ hasText: "Background" }),
   ).toBeVisible();
   await expect(
-    page.getByTestId("playlist-selector-row").filter({ hasText: "ytlive" }),
+    page.getByTestId("playlist-picker-item").filter({ hasText: "ytlive" }),
   ).toBeVisible();
   // Exactly one work area, and it shows the playing playlist (Worship).
   await expect(page.getByTestId("playlist-workspace")).toHaveCount(1);
@@ -222,7 +222,7 @@ test("per-card lock badge shows only on live pacing-enabled outputs (#164)", asy
   // #165: the per-playlist badge now lives in the SELECTOR rows (not the single
   // work area). Same #164 gating rule applies.
   const worshipBadge = page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: "Worship" })
     .locator(".lock-badge");
   await expect(worshipBadge).toBeVisible({ timeout: 5000 });
@@ -230,7 +230,7 @@ test("per-card lock badge shows only on live pacing-enabled outputs (#164)", asy
   await expect(worshipBadge).toHaveClass(/lock-locked/);
 
   const bgBadge = page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: "Background" })
     .locator(".lock-badge");
   await expect(bgBadge).toBeVisible();
@@ -240,7 +240,7 @@ test("per-card lock badge shows only on live pacing-enabled outputs (#164)", asy
 
   // The pacing-disabled SP-live (ytlive) row carries NO badge at all.
   const liveBadge = page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: "ytlive" })
     .locator(".lock-badge");
   await expect(liveBadge).toHaveCount(0);
@@ -315,7 +315,7 @@ test("global genlock summary flips to LOCKED after an all-locked fixture (#164)"
   // Both live locked outputs also carry a per-row badge in the selector.
   await expect(
     page
-      .getByTestId("playlist-selector-row")
+      .getByTestId("playlist-picker-item")
       .filter({ hasText: "Worship" })
       .locator(".lock-badge"),
   ).toBeVisible();

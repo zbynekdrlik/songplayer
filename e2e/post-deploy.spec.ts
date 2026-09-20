@@ -142,7 +142,7 @@ async function selectWorkspaceCard(
     timeout: 30_000,
   });
   const row = page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: name });
   await row.click();
   // #170: the click must actually take. Read back the work-area title; if a
@@ -806,7 +806,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       // #165: the per-playlist badge lives in the SELECTOR row now, not the
       // single work area.
       const cardBadge = page
-        .getByTestId("playlist-selector-row")
+        .getByTestId("playlist-picker-item")
         .filter({ hasText: nameByNdi.get(matched.ndi_name)! })
         .locator(".lock-badge");
       await expect(cardBadge).toBeVisible({ timeout: 10_000 });

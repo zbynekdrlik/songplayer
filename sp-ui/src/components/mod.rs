@@ -22,7 +22,7 @@ pub mod ndi_health;
 pub mod player;
 pub mod playlist_card;
 pub mod preview_video;
-pub mod playlist_selector;
+pub mod playlist_picker;
 pub mod playlist_workspace;
 pub mod selection;
 pub mod resolume_hosts;

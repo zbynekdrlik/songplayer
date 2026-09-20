@@ -49,7 +49,7 @@ async function waitForSelector12(page: import("@playwright/test").Page) {
   await expect(page.getByTestId("playlist-workspace")).toBeVisible({
     timeout: 15000,
   });
-  await expect(page.getByTestId("playlist-selector-row")).toHaveCount(12, {
+  await expect(page.getByTestId("playlist-picker-item")).toHaveCount(12, {
     timeout: 15000,
   });
 }
@@ -73,7 +73,7 @@ test("the playing playlist is preselected and marked ▶ (#165)", async ({
   await waitForSelector12(page);
 
   const playingRow = page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: PLAYING_NAME });
   // The playing row is marked ▶ and selected once the WS Playing state lands.
   await expect(playingRow).toContainText("▶", { timeout: 10000 });
@@ -99,7 +99,7 @@ test("row order stays alphabetical when a non-first playlist starts playing (#17
 
   const rowNames = async () =>
     page
-      .getByTestId("playlist-selector-row")
+      .getByTestId("playlist-picker-item")
       .evaluateAll((els) =>
         els.map((e) => e.querySelector(".sel-name")?.textContent?.trim() ?? ""),
       );
@@ -117,7 +117,7 @@ test("row order stays alphabetical when a non-first playlist starts playing (#17
 
   // Its row gains the ▶ glyph in place...
   const playing07 = page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: "Playlist 07" });
   await expect(playing07).toContainText("▶", { timeout: 10000 });
 
@@ -149,7 +149,7 @@ test("an entry with no song and zero duration renders idle, not 0:00/0:00 (#170)
 
   // Select that playlist's work area.
   await page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: "Playlist 08" })
     .click();
   await expect(page.getByTestId("workspace-title")).toHaveText("Playlist 08");
@@ -178,7 +178,7 @@ test("clicking another row switches the work area and the URL (#165)", async ({
 
   // Click a different playlist row.
   await page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: "Playlist 05" })
     .click();
 
@@ -201,7 +201,7 @@ test("reload keeps the selected playlist (#165)", async ({ page }) => {
   await waitForSelector12(page);
 
   await page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: "Playlist 09" })
     .click();
   await expect(page.getByTestId("workspace-title")).toHaveText("Playlist 09");
@@ -213,7 +213,7 @@ test("reload keeps the selected playlist (#165)", async ({ page }) => {
   await waitForSelector12(page);
   await expect(page.getByTestId("workspace-title")).toHaveText("Playlist 09");
   await expect(
-    page.getByTestId("playlist-selector-row").filter({ hasText: "Playlist 09" }),
+    page.getByTestId("playlist-picker-item").filter({ hasText: "Playlist 09" }),
   ).toHaveClass(/selected/);
 });
 
@@ -227,10 +227,10 @@ test("at 400px the selector becomes a <select> above the work area (#165)", asyn
   });
 
   // The mobile dropdown is visible; the desktop row list is hidden.
-  const select = page.getByTestId("playlist-select");
+  const select = page.getByTestId("playlist-picker-select");
   await expect(select).toBeVisible({ timeout: 10000 });
   await expect(select.locator("option")).toHaveCount(12);
-  await expect(page.getByTestId("playlist-selector-list")).toBeHidden();
+  await expect(page.getByTestId("playlist-picker-list")).toBeHidden();
 
   // Picking another playlist in the dropdown switches the work area.
   await select.selectOption("6");

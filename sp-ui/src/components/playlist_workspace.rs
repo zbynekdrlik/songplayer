@@ -27,9 +27,10 @@ pub fn PlaylistWorkspace() -> impl IntoView {
                     }
                     None => {
                         view! {
-                            <div class="workspace-empty" data-testid="workspace-empty">
-                                "Žiadne playlisty"
-                            </div>
+                            <crate::components::state_block::StateBlock
+                                kind=crate::components::state_block::StateKind::Empty
+                                empty_label="Žiadne playlisty".to_string()
+                            />
                         }
                             .into_any()
                     }

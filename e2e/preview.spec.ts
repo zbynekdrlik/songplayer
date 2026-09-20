@@ -247,7 +247,7 @@ test("idle card shows the preview placeholder and no start control or <video>", 
     timeout: 10000,
   });
   await page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: "Background" })
     .click();
   await expect(page.getByTestId("workspace-title")).toHaveText("Background");

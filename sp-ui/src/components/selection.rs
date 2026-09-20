@@ -57,6 +57,37 @@ pub fn first_playing(playlists: &[Playlist], np: &HashMap<i64, NowPlayingInfo>) 
     playing.first().map(|p| p.id)
 }
 
+/// The id of the first playlist of the given `kind` (alphabetical, stable). #194
+/// ROUND 3c: the Live page pre-selects the live-kind (`"custom"`) playlist
+/// through the shared `PlaylistPicker` via this helper — no hardcoded
+/// `name == "ytlive"` lookup.
+pub fn first_of_kind(playlists: &[Playlist], kind: &str) -> Option<i64> {
+    ordered(playlists)
+        .into_iter()
+        .find(|p| p.kind == kind)
+        .map(|p| p.id)
+}
+
+/// The effective playlist id for a kind-scoped page (Live): the shared
+/// selection when it points at a playlist of `kind`, otherwise the first
+/// playlist of `kind`. Keeps the shared selection state working (a Live picker
+/// click carries to the Dashboard) while never showing a non-live playlist's
+/// set list on Live. #194 ROUND 3c.
+pub fn selection_or_first_of_kind(
+    playlists: &[Playlist],
+    selected: Option<i64>,
+    kind: &str,
+) -> Option<i64> {
+    let sel_is_kind = selected
+        .and_then(|id| playlists.iter().find(|p| p.id == id))
+        .is_some_and(|p| p.kind == kind);
+    if sel_is_kind {
+        selected
+    } else {
+        first_of_kind(playlists, kind)
+    }
+}
+
 // --------------------------- persistence (best-effort) ----------------------
 
 /// Read the persisted selection: URL `?playlist=<id>` first, else localStorage.
