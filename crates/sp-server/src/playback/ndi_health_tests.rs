@@ -290,6 +290,23 @@ fn handle_health_snapshot_persists_without_a_tokio_reactor() {
     rt.block_on(async move { drop(engine) });
 }
 
+/// #198 item 5: the pending receiver-count persist buffer debounces a flapping
+/// count to its latest value and `drain` CLEARS it (so a value is written at
+/// most once per drain). Kills the queue-noop / drain-empty / drain-no-clear
+/// mutants.
+#[test]
+fn pending_receiver_count_persist_debounces_to_latest_and_drain_clears() {
+    let reg = NdiHealthRegistry::new();
+    reg.queue_receiver_count_persist(7, 2);
+    reg.queue_receiver_count_persist(7, 0); // a flap within one drain — latest wins
+    reg.queue_receiver_count_persist(9, 3);
+    let mut drained = reg.drain_pending_persists();
+    drained.sort();
+    assert_eq!(drained, vec![(7, 0), (9, 3)]);
+    // A second drain is empty — the buffer was taken, not cloned.
+    assert!(reg.drain_pending_persists().is_empty());
+}
+
 #[tokio::test]
 async fn handle_health_snapshot_drops_event_for_unknown_pipeline() {
     let (mut engine, registry) = fresh_engine().await;

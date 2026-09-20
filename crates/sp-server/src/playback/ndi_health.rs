@@ -288,6 +288,13 @@ pub struct NdiHealthRegistry {
     /// #196: when the startup senders became ready — the +30 s self-check clock.
     /// `None` until `mark_senders_ready`.
     senders_ready_at: RwLock<Option<Instant>>,
+    /// #198 item 5: pending receiver-count DB writes, keyed by playlist so a
+    /// flapping count debounces to its LATEST value (a `HashMap` insert dedups).
+    /// The SYNC `handle_health_snapshot` only QUEUES here (no `tokio::spawn` — a
+    /// spawn from a sync caller with no reactor panics, and one detached task per
+    /// 5 s poll per output has no write ordering); the async pipeline-event
+    /// handler drains and awaits them in order.
+    pending_persist: RwLock<HashMap<i64, i32>>,
 }
 
 impl NdiHealthRegistry {
@@ -305,6 +312,30 @@ impl NdiHealthRegistry {
             reconnected: RwLock::new(HashSet::new()),
             warned_no_receiver: RwLock::new(HashSet::new()),
             senders_ready_at: RwLock::new(None),
+            pending_persist: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// #198 item 5: queue a receiver-count persist for `playlist_id` (the latest
+    /// value wins — a flapping count debounces). Sync + non-panicking (no
+    /// reactor needed); the async event handler drains it via
+    /// [`drain_pending_persists`](Self::drain_pending_persists). A poisoned lock
+    /// silently drops the write (the next change re-queues; a lost baseline only
+    /// affects the NEXT restart's self-check, never live playback).
+    pub fn queue_receiver_count_persist(&self, playlist_id: i64, connections: i32) {
+        if let Ok(mut m) = self.pending_persist.write() {
+            m.insert(playlist_id, connections);
+        }
+    }
+
+    /// #198 item 5: take (and clear) the pending receiver-count persists so the
+    /// async caller can write them in order. `mem::take` empties the buffer, so
+    /// a value is written at most once per drain regardless of how many polls
+    /// queued it.
+    pub fn drain_pending_persists(&self) -> Vec<(i64, i32)> {
+        match self.pending_persist.write() {
+            Ok(mut m) => std::mem::take(&mut *m).into_iter().collect(),
+            Err(_) => Vec::new(),
         }
     }
 
@@ -678,18 +709,14 @@ impl crate::playback::PlaybackEngine {
 
         // #196: persist the current receiver count whenever it changes (incl.
         // the first snapshot) so the NEXT restart's self-check baseline knows
-        // this output had (or lost) a receiver before it. Fire-and-forget on a
-        // task so the sync health handler never awaits the DB.
+        // this output had (or lost) a receiver before it. #198 item 5: only
+        // QUEUE it here — this handler is sync, and a `tokio::spawn` from a sync
+        // caller with no reactor panics (and a flapping count would spawn one
+        // detached, unordered task per 5 s poll). The async pipeline-event
+        // handler drains and awaits the queued writes.
         if prev_connections != Some(connections) {
-            let pool = self.pool.clone();
-            tokio::spawn(async move {
-                if let Err(e) =
-                    crate::db::models_ndi::set_last_receiver_count(&pool, playlist_id, connections)
-                        .await
-                {
-                    tracing::debug!(playlist_id, %e, "ndi: failed to persist receiver count");
-                }
-            });
+            self.ndi_health_registry
+                .queue_receiver_count_persist(playlist_id, connections);
         }
 
         // Lock-state derivation (#149, Lane 1). Read the box-wide clock health,
