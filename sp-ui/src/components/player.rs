@@ -143,6 +143,12 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // gate re-applies the live value Chrome suppresses `change` entirely, so
     // `change` is only the keyboard path. Value-dedup keeps it to ONE POST.
     let seek_committed = RwSignal::new(None::<u64>);
+    // #198 item 1: a `dirty` latch set by `on:input`, cleared on commit. A bare
+    // `change` with no preceding `input` in this session (a programmatic / stale
+    // dispatch, or a keyboard change that never moved the slider) must NOT commit
+    // the initial 0 ms — `seek_drag_ms` starts at 0. `on:change` reads this latch
+    // and is a no-op when it is false.
+    let seek_dirty = RwSignal::new(false);
     let do_seek = move |ms: u64| {
         leptos::task::spawn_local(async move {
             let r = api::seek_playlist(pid, ms).await;
@@ -150,6 +156,7 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
         });
     };
     let commit_seek = move |ms: u64| {
+        seek_dirty.set(false);
         if seek_committed.get_untracked() != Some(ms) {
             seek_committed.set(Some(ms));
             do_seek(ms);
@@ -241,12 +248,18 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                     on:input=move |ev| {
                         if let Ok(v) = event_target_value(&ev).parse::<u64>() {
                             seek_drag_ms.set(v);
+                            seek_dirty.set(true);
                         }
                     }
                     on:change=move |_| {
                         // Keyboard / programmatic path (a pointer release already
-                        // committed and the dedup makes this a no-op then).
-                        commit_seek(seek_drag_ms.get_untracked());
+                        // committed and the dedup makes this a no-op then). #198:
+                        // a bare `change` with no preceding `input` this session is
+                        // a no-op — the `dirty` latch gates it, so a stale/synthetic
+                        // change never commits the initial 0 ms.
+                        if seek_dirty.get_untracked() {
+                            commit_seek(seek_drag_ms.get_untracked());
+                        }
                         seek_dragging.set(false);
                     }
                     on:pointerup=move |_| {
