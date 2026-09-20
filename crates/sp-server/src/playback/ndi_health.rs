@@ -237,6 +237,12 @@ pub struct WindowStats {
     pub window_secs: f32,
     /// `Instant::now()` captured when `drain_window` ran.
     pub drained_at: Instant,
+    /// #192 round 3: the worst per-call `send_video_async` duration (µs) over the
+    /// drained window, from the submitter's `SubmitHist`. 0 with no submit.
+    pub submit_call_us_max: u64,
+    /// #192 round 3: the 99th-percentile per-call `send_video_async` duration
+    /// (µs) over the drained window. 0 with no submit.
+    pub submit_call_us_p99: u64,
 }
 
 /// Lock-free-read registry holding the latest health snapshot per pipeline.
@@ -555,6 +561,7 @@ impl crate::playback::PlaybackEngine {
             reported_state,
             pacing,
             audio,
+            loop_stats,
         } = event
         else {
             return;
@@ -822,6 +829,14 @@ impl crate::playback::PlaybackEngine {
                 // #149 item 2: a second, grep-stable genlock telemetry line
                 // beside the heartbeat, same once-per-UTC-minute cadence.
                 info!("{}", format_genlock_line(&snapshot));
+                // #192 round 3: a third grep-stable line — the pipeline-loop
+                // stage timing (decode / submit / audio max) + the raw
+                // send_video_async call max/p99, so the A/B box test names the
+                // stalling stage. Zero on the idle / paused / paced paths.
+                info!(
+                    "{}",
+                    crate::playback::loop_stats::format_loop_stats_line(&ndi_name, &loop_stats)
+                );
             }
         }
 

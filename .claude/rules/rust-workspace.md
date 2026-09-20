@@ -84,6 +84,14 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
 - **`clippy::manual_slice_fill`** (rust 1.98, `-D warnings`): a `for x in &mut
   slice { *x = <const> }` loop must be `slice.fill(<const>)`. The no-compile box
   can't see it; it failed #186's Lint on `for e in &mut self.eos { *e = false }`.
+- **`clippy::manual_div_ceil`** (warn-by-default → `-D warnings`): a hand-rolled
+  ceil-division `(a + b - 1) / b` (or the `(a * p + 99) / 100` form) must be
+  `a.div_ceil(b)`. `u64::div_ceil` is **const-fn since 1.73**, so it works inside
+  a `const fn` too — don't avoid it there. The no-compile box can't see it; it
+  cost #192 round 3 a whole review round (three ceil-divs in `audio_emitter.rs`
+  `block_ms`/`ring_capacity_blocks` + `loop_stats.rs` `percentile_ceil`). The tree
+  already uses `.div_ceil()` (`chunking.rs`, `burn_overlay.rs`) — grep before
+  hand-rolling a ceil.
 
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,

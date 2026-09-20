@@ -69,6 +69,10 @@ pub struct FrameSubmitter<B: NdiBackend> {
     /// takes effect within one frame. Default OFF; never persisted; only the
     /// paced path paints (the legacy `submit_nv12` path never reads it).
     burn_on: Arc<AtomicBool>,
+    /// #192 round 3: per-call `send_video_async` durations (µs), so the
+    /// heartbeat can tell a producer stall caused by the SDK video submit apart
+    /// from a decode / audio stall. Drained (max, p99) each `drain_window`.
+    submit_times: crate::playback::loop_stats::SubmitHist,
 }
 
 impl<B: NdiBackend> FrameSubmitter<B> {
@@ -100,6 +104,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             wall,
             paced: false,
             burn_on: Arc::new(AtomicBool::new(false)),
+            submit_times: crate::playback::loop_stats::SubmitHist::default(),
         }
     }
 
@@ -196,9 +201,12 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         // happens AFTER this async call returns. The async call is itself the
         // synchronising event that releases the SDK's pointer to the old
         // buffer, per NDIlib_send_send_video_async_v2's documented contract.
-        unsafe {
+        // #192 round 3: time the SDK call — it blocks on the prior async frame,
+        // so under a resident heavy child it is the candidate stalling stage.
+        let (_, submit_us) = crate::playback::loop_stats::timed(|| unsafe {
             self.sender.send_video_async(&frame);
-        }
+        });
+        self.submit_times.observe(submit_us);
 
         // Install the new frame — this drops whatever was in prev_frame.
         self.prev_frame = Some(frame.data);
@@ -339,9 +347,11 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         // SAFETY: `prev_frame` holds the previous async buffer until this
         // async call releases the SDK's pointer to it; the new buffer is
         // installed immediately after.
-        unsafe {
+        // #192 round 3: time the SDK call (same gauge as the SDK-clocked path).
+        let (_, submit_us) = crate::playback::loop_stats::timed(|| unsafe {
             self.sender.send_video_async(&frame);
-        }
+        });
+        self.submit_times.observe(submit_us);
         self.prev_frame = Some(frame.data);
     }
 
@@ -385,10 +395,14 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         let frames = self.frames_in_window;
         self.frames_in_window = 0;
         self.window_start = now;
+        // #192 round 3: drain the per-call send_video_async gauge for the window.
+        let (submit_call_us_max, submit_call_us_p99) = self.submit_times.drain();
         crate::playback::ndi_health::WindowStats {
             frames_in_window: frames,
             window_secs,
             drained_at: now,
+            submit_call_us_max,
+            submit_call_us_p99,
         }
     }
 

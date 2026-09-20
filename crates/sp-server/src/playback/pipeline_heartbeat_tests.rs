@@ -285,6 +285,7 @@ fn heartbeat_forwards_the_pacing_flag() {
         &mut consecutive_bad_polls,
         pacing.clone(),
         crate::playback::ndi_health::AudioStats::default(),
+        crate::playback::loop_stats::LoopStageStats::default(),
     );
 
     let (_pid, event) = event_rx.try_recv().expect("heartbeat must emit");

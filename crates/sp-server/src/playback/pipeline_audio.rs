@@ -24,8 +24,8 @@ use sp_ndi::{AudioSink, RealNdiBackend};
 use tracing::{info, warn};
 
 use crate::playback::pipeline::audio_emitter::{
-    EmittedBlock, SharedEmitter, SpinMargin, clear_ring, decoder_tolerance_ms, emit_one_block,
-    hold_ring, push_blocking,
+    AUDIO_LOOKAHEAD_MS, EmittedBlock, SharedEmitter, SpinMargin, clear_ring, decoder_tolerance_ms,
+    drain_budget_ms, emit_one_block, hold_ring, push_blocking,
 };
 use crate::playback::wallclock::WallClock;
 
@@ -100,16 +100,21 @@ pub(crate) fn clear_if_present(emitter: Option<&SharedEmitter>) {
     }
 }
 
-/// Natural song end (#192 item 3): give the emit thread up to ~400 ms to drain
-/// the ring so the song's last partial block is emitted BEFORE the decoder
-/// returns and the next song's `clear_ring` wipes it. Polls the pure
-/// [`ring_is_drained`] every 5 ms; a no-op when no emitter is present (legacy
-/// path). Only the natural-end path calls this — Stop/Play/Shutdown clear the
-/// ring instead. `mutants::skip` glue over the Linux-tested `ring_is_drained`.
+/// Natural song end (#192 item 3): give the emit thread up to
+/// [`drain_budget_ms`]`(AUDIO_LOOKAHEAD_MS)` to drain the ring so the song's
+/// buffered tail is emitted BEFORE the decoder returns and the next song's
+/// `clear_ring` wipes it. The budget tracks the cushion (round 3: 1500 ms + one
+/// slot) — a fixed 400 ms would cut the last ~1.1 s of every song once the
+/// lookahead is 1500 ms. Polls the pure [`ring_is_drained`] every 5 ms and
+/// breaks the moment the ring holds less than one block; a no-op when no emitter
+/// is present (legacy path). Only the natural-end path calls this —
+/// Stop/Play/Shutdown clear the ring instead. `mutants::skip` glue over the
+/// Linux-tested `ring_is_drained` + the pure `drain_budget_ms`.
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn drain_if_present(emitter: Option<&SharedEmitter>) {
     let Some(shared) = emitter else { return };
-    let deadline = std::time::Instant::now() + Duration::from_millis(400);
+    let deadline =
+        std::time::Instant::now() + Duration::from_millis(drain_budget_ms(AUDIO_LOOKAHEAD_MS));
     while std::time::Instant::now() < deadline {
         if crate::playback::pipeline::audio_emitter::ring_is_drained(shared) {
             break;

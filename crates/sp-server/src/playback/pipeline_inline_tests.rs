@@ -323,6 +323,7 @@ fn health_snapshot_variant_constructs_and_clones() {
         reported_state: PlaybackStateLabel::Playing,
         pacing: Default::default(),
         audio: Default::default(),
+        loop_stats: Default::default(),
     };
     let cloned = ev.clone();
     // Pattern-match to assert the variant exists and the fields round-trip.

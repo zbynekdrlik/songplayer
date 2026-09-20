@@ -49,9 +49,13 @@ pub const EMIT_RATE_HZ: u32 = 48_000;
 /// Samples per channel in one grid block: 1600 @ 48 kHz = 33.333 ms = one
 /// 30 fps grid slot (matches `AUDIO_SAMPLES_PER_BOUNDARY` on the paced path).
 pub const EMIT_SAMPLES_PER_BLOCK: usize = 1600;
-/// Ring capacity in whole blocks (~250 ms of headroom): covers a decode stall
-/// up to ~200 ms (a heavy child's model-load burst) without starving the grid.
-pub const RING_CAPACITY_BLOCKS: usize = 8;
+/// Ring capacity in whole blocks, DERIVED from [`AUDIO_LOOKAHEAD_MS`] via
+/// [`ring_capacity_blocks`] so it can never drift below the cushion: the ring
+/// must HOLD the whole lookahead the decoder reads ahead (else `push_blocking`
+/// caps the realised cushion at the capacity and a ~1 s producer stall still
+/// holes — #192 round 3). At the 1500 ms cushion that is 49 blocks ≈ 1633 ms
+/// (~627 KB/pipeline of f32 stereo).
+pub const RING_CAPACITY_BLOCKS: usize = ring_capacity_blocks(AUDIO_LOOKAHEAD_MS);
 /// The emitter mode string surfaced on `/api/v1/ndi/health` (`audio.emitter.mode`).
 pub const EMITTER_MODE: &str = "sdk-video/wallclock-audio";
 
@@ -241,7 +245,8 @@ impl AudioEmitter {
         self.ring.clear();
     }
 
-    /// A production emitter: stereo, 1600-sample blocks, ~250 ms ring, 48 kHz.
+    /// A production emitter: stereo, 1600-sample blocks, ~1.6 s ring
+    /// ([`RING_CAPACITY_BLOCKS`], the 1.5 s cushion + headroom), 48 kHz.
     pub fn production() -> Self {
         Self::new(EMIT_SAMPLES_PER_BLOCK, RING_CAPACITY_BLOCKS, EMIT_RATE_HZ)
     }
@@ -512,7 +517,52 @@ fn warn_dropped_residual(total: usize, usable: usize, channels: usize) {
 /// mid-song (#192 round 2). Reading ahead fills the ring without delaying audio
 /// against video — the emitter starts the first block as the first frame goes
 /// out, and both then run in real time.
-pub const AUDIO_LOOKAHEAD_MS: u64 = 100;
+///
+/// **Round 3 (#192): 100 → 1500.** A 100 ms cushion (ring ~266 ms) could not
+/// cover the ~1 s PRODUCER stalls a resident stems child causes (box 20.9.2026:
+/// `silence_blocks` up to 28 ≈ 930 ms on the on-program output while
+/// `emit_call_max_us` was only 43–76 ms — the decode loop, not the SDK send).
+/// 1500 ms covers every measured stall (≤ ~950 ms); the ring capacity
+/// ([`ring_capacity_blocks`]) and the natural-end drain budget
+/// ([`drain_budget_ms`]) are both DERIVED from this one constant so they never
+/// drift. f32 stereo 48 kHz × 1.5 s ≈ 576 KB per pipeline.
+pub const AUDIO_LOOKAHEAD_MS: u64 = 1500;
+
+/// One grid slot's whole-millisecond duration: ⌈`EMIT_SAMPLES_PER_BLOCK` /
+/// `EMIT_RATE_HZ`⌉ = ⌈1600 / 48 kHz⌉ = ⌈33.333 ms⌉ = 34 ms. Rounded UP so a
+/// budget derived from it never falls short of a whole slot. Pure.
+pub const fn block_ms() -> u64 {
+    (EMIT_SAMPLES_PER_BLOCK as u64 * 1000).div_ceil(EMIT_RATE_HZ as u64)
+}
+
+/// Natural-end drain budget (ms): at a natural song end the ring still holds the
+/// whole lookahead cushion, so the emit thread must be given up to
+/// `lookahead + one slot` to play the buffered tail out before the next song's
+/// `clear_ring` wipes it. The round-2 fixed ≤ 400 ms would cut the last ~1.1 s
+/// of every song once the lookahead is 1500 ms. Derived from the SAME constant
+/// as the cushion so the two never drift. Pure.
+pub const fn drain_budget_ms(lookahead_ms: u64) -> u64 {
+    lookahead_ms + block_ms()
+}
+
+/// Extra ring headroom (whole blocks) above the decoder's audio-ahead depth so
+/// `push_blocking` paces on the emit thread rather than sitting at the cap every
+/// frame (round 2: capacity 266 ms vs a ~225 ms max depth ≈ 1 block of slack).
+const RING_HEADROOM_BLOCKS: usize = 2;
+
+/// Ring capacity (whole blocks) sized to HOLD the decoder's full audio-ahead —
+/// `DEFAULT_TOLERANCE_MS + lookahead` — plus [`RING_HEADROOM_BLOCKS`]. A capacity
+/// below the lookahead would cap the realised cushion at the capacity, so a
+/// deeper lookahead alone would not cover a ~1 s producer stall (#192 round 3).
+/// Derived from the SAME constant as the cushion. Pure, exact-boundary tested.
+pub const fn ring_capacity_blocks(lookahead_ms: u64) -> usize {
+    let depth_ms = sp_decoder::split_sync::DEFAULT_TOLERANCE_MS + lookahead_ms;
+    let num = depth_ms * EMIT_RATE_HZ as u64;
+    let den = 1000 * EMIT_SAMPLES_PER_BLOCK as u64;
+    // ceil(depth_ms / block_ms), in whole blocks, plus headroom.
+    let blocks = num.div_ceil(den) as usize;
+    blocks + RING_HEADROOM_BLOCKS
+}
 
 /// Pairing tolerance for `SplitSyncedDecoder`: the default, plus the lookahead
 /// when the wall-clock emitter carries the audio. Without an emitter the audio
