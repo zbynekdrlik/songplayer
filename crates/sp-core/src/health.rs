@@ -431,6 +431,17 @@ mod tests {
     }
 
     #[test]
+    fn ladder_re_arms_once_the_suppression_window_has_passed() {
+        // The self-check speaks at +30 s; the ladder is suppressed only for the
+        // bounded window, never for the life of the process — an output that
+        // never had a receiver since boot (its OBS input enabled later) must
+        // get the #173 ladder back (release review 0.60.0).
+        assert!(ladder_suppressed_after_restart(D(59), false, true, 0));
+        assert!(!ladder_suppressed_after_restart(D(60), false, true, 0));
+        assert!(!ladder_suppressed_after_restart(D(600), false, true, 0));
+    }
+
+    #[test]
     fn ladder_not_suppressed_once_reconnected() {
         assert!(!ladder_suppressed_after_restart(D(15), true, true, 0));
     }

@@ -329,6 +329,13 @@ mod tests {
     }
 
     #[test]
+    fn port_range_saturates_instead_of_overflowing_u16() {
+        let ports = ndi_port_range(usize::MAX);
+        assert_eq!(ports.first(), Some(&NDI_PORT_BASE));
+        assert_eq!(ports.last(), Some(&u16::MAX));
+    }
+
+    #[test]
     fn ordered_active_sorts_by_id_regardless_of_input_order() {
         let playlists = vec![pl(3, "SP-c"), pl(1, "SP-a"), pl(2, "SP-b")];
         assert_eq!(
