@@ -20,7 +20,7 @@ use crate::playback::ndi_health::{NdiHealthRegistry, PipelineHealthSnapshot, Pla
 /// tier (0) and the unrestricted fallback (3): on-program (1) then recently
 /// played (2). Drives BOTH the selector loop and the `queue_position` tier CASE
 /// via [`restricted_tiers`].
-const RESTRICTED_TIERS: usize = 0;
+const RESTRICTED_TIERS: usize = 2;
 
 /// Default recency window (`stems_recent_days` setting) for tier 2.
 pub(crate) const STEMS_RECENT_DAYS_DEFAULT: i64 = 7;
