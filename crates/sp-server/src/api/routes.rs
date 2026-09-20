@@ -86,6 +86,11 @@ pub struct StatusResponse {
     /// `None` (older clients / the mock stay ok).
     #[serde(default)]
     pub preview_encoder: Option<String>,
+    /// #196: seconds since this SongPlayer process started. The post-deploy E2E
+    /// job reads it to SKIP restarting a process the Deploy job started < 10 min
+    /// ago (item 6 — one restart per push). A missing key deserializes to `0`.
+    #[serde(default)]
+    pub uptime_s: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -105,7 +110,7 @@ pub struct ToolsStatusResponse {
 
 pub async fn list_playlists(State(state): State<AppState>) -> impl IntoResponse {
     let rows = sqlx::query(
-        "SELECT id, name, youtube_url, ndi_output_name, playback_mode, is_active, created_at, updated_at
+        "SELECT id, name, youtube_url, ndi_output_name, playback_mode, is_active, created_at, updated_at, kind
          FROM playlists ORDER BY id",
     )
     .fetch_all(&state.pool)
@@ -125,6 +130,12 @@ pub async fn list_playlists(State(state): State<AppState>) -> impl IntoResponse 
                         "is_active": r.get::<i32, _>("is_active") != 0,
                         "created_at": r.get::<String, _>("created_at"),
                         "updated_at": r.get::<String, _>("updated_at"),
+                        // #194 r3c: expose `kind` so the shared PlaylistPicker can
+                        // filter by it (Live shows only the `custom` playlist) —
+                        // no hardcoded `name == "ytlive"` lookup. NULL-safe: an
+                        // old row with no kind reads as the default `youtube`.
+                        "kind": r.get::<Option<String>, _>("kind")
+                            .unwrap_or_else(|| "youtube".to_string()),
                     })
                 })
                 .collect();
@@ -597,31 +608,8 @@ pub async fn set_mode(
     StatusCode::NO_CONTENT
 }
 
-#[derive(Debug, serde::Deserialize)]
-pub struct SeekReq {
-    pub position_ms: u64,
-}
-
-/// Jump playback of the given playlist to `position_ms`. Returns 204
-/// No Content on success. Always-ok for valid playlist ids — the pipeline
-/// drops the command when no song is loaded.
-pub async fn post_seek(
-    State(state): State<AppState>,
-    Path(playlist_id): Path<i64>,
-    Json(req): Json<SeekReq>,
-) -> impl IntoResponse {
-    match state
-        .engine_tx
-        .send(EngineCommand::Seek {
-            playlist_id,
-            position_ms: req.position_ms,
-        })
-        .await
-    {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
+// #194: the seek route moved to `api/routes_seek.rs` (unified onto the
+// `/api/v1/playback/{id}/…` family, with clamp / 404 / 409 hardening).
 
 // ---------------------------------------------------------------------------
 // Settings endpoints
@@ -697,6 +685,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         lan_url: lan.lan_url.clone(),
         lan_ip: lan.lan_ip.clone(),
         preview_encoder: crate::playback::preview::preview_encoder::chosen_encoder(),
+        uptime_s: crate::process_start::uptime_secs(),
     })
 }
 

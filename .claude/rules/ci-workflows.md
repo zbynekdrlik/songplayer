@@ -178,6 +178,18 @@ Throws loudly if the switch never settles. Transition-duration-agnostic (0 ms cu
 or 2 s fade). Do NOT "fix" scene-switch flake by bumping test timeouts
 (`no-timeout-band-aids.md`) or by mutating the shared live-wall OBS config.
 
+### Round 4 (19.9.2026): wait for the PREVIEW to apply before `TriggerStudioModeTransition`
+Three red post-deploy runs in one day, all `OBS scene switch to "sp-fast" did not
+settle … (last program "sp-alex", transitionActive=false)`, with OBS left at
+`preview = sp-fast, program = sp-alex`. Cause: `SetCurrentPreviewScene` returns
+before OBS's UI thread applies it; a `TriggerStudioModeTransition` sent right
+behind it can still see the OLD preview, and when that equals the program scene
+OBS fades the scene to ITSELF (`SceneTransitionEnded` fires, the program never
+changes). `ObsDriver.switchScene` therefore polls `GetCurrentPreviewScene ==
+target` (`waitForPreviewApplied`, 3 s bound, throws "stale preview") BEFORE the
+trigger. Same rule for any future studio-mode automation (Companion-style
+control in the app): set preview → confirm preview → trigger.
+
 **Engine self-heal (the production bug the harness exposed):** a dropped
 `CurrentProgramSceneChanged` in daily studio-mode use is a dark wall for the
 operator, not just an E2E flake. `crates/sp-server/src/obs/` now polls

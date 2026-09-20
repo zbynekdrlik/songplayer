@@ -180,6 +180,16 @@ pub fn preset_for_gains(kind: MixerKind, gains: &[f32]) -> Option<&'static str> 
     }
 }
 
+/// The percent a mixer fader should DISPLAY (and bind to `prop:value`): while
+/// the operator is dragging the fader the dragged value is authoritative, so a
+/// live gain update from the store (an adapter `Effect`, a re-load) can't
+/// overwrite the fader out from under the finger; otherwise the live gain
+/// percent drives it. #194 — the fader half of the seek drag gate; pure so its
+/// boundary is unit-tested (sp-ui has no unit-test job).
+pub fn fader_display_pct(dragging: bool, dragged_pct: i32, live_pct: i32) -> i32 {
+    if dragging { dragged_pct } else { live_pct }
+}
+
 /// Clamp a gain/ratio to `0.0..=1.0`, mapping NaN to `0.0` (never propagate NaN
 /// into the DOM or the mix).
 fn clamp01(x: f32) -> f32 {
@@ -381,5 +391,19 @@ mod tests {
         );
         // Too few song faders → None rather than a panic.
         assert_eq!(preset_for_gains(MixerKind::Song, &[1.0]), None);
+    }
+
+    // ── fader_display_pct: dragged while dragging, else live ──────────────────
+
+    #[test]
+    fn fader_display_dragging_returns_the_dragged_pct() {
+        // dragged != live so this also kills a "return live" mutant.
+        assert_eq!(fader_display_pct(true, 40, 100), 40);
+    }
+
+    #[test]
+    fn fader_display_not_dragging_returns_the_live_pct() {
+        // dragged != live so this also kills a "return dragged" mutant.
+        assert_eq!(fader_display_pct(false, 40, 100), 100);
     }
 }

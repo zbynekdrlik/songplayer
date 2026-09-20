@@ -1,122 +1,188 @@
 import { test, expect } from "@playwright/test";
 
-// Regression for #94: the /live global Pause / Skip / Previous / Play / Mode
-// buttons used to discard `Result::Err` from their POST helpers, so a failing
-// playback endpoint produced a silent no-op button. These tests arm the
-// mock-api `__mock/fail-mode` switch on a single endpoint at a time and
-// assert that the `.live-setlist-error` row surfaces the error to the
-// operator.
+// #194: the /live global transport bar (`.live-setlist-controls` / the
+// `.live-setlist-mode` select) is GONE — Pause / Skip / Previous / Play / Mode
+// moved to the ONE shared <Player/> that sits under the setlist. These specs
+// drive the Player's transport for the ytlive playlist (id 184) and assert each
+// control fires its playback endpoint.
 //
-// 500-resource console errors are expected in this file (we flip endpoints
-// into fail mode on purpose), so no shared zero-console-errors gate is
-// imposed here.
+// #94 ("a failing endpoint must not be a silent no-op") lives on: the shared
+// Player reports every failed transport POST into `[data-testid="player-error"]`
+// (`report(...)` in components/player.rs). The `#94 error surface` block below
+// drives each command through the mock's `/__mock/fail-mode` hook and asserts
+// the Slovak error line — play / previous / mode on /live (idle), pause on the
+// Dashboard where playlist 1 is Playing (the toggle reads "⏸ Pauza" there).
 
-async function setFailMode(
-  request: import("@playwright/test").APIRequestContext,
-  kind: string,
-  enabled: boolean,
-) {
-  const resp = await request.post("/__mock/fail-mode", {
-    data: { kind, enabled },
+const ALLOWED_CONSOLE = [
+  /WebSocket connection/,
+  /favicon/,
+  /wasm.*instantiate/,
+  /module specifier/,
+  /integrity.*attribute.*ignored/,
+];
+
+let consoleMessages: string[] = [];
+
+test.beforeEach(async ({ page }) => {
+  consoleMessages = [];
+  page.on("console", (msg) => {
+    if (msg.type() === "error" || msg.type() === "warning") {
+      consoleMessages.push(`[${msg.type()}] ${msg.text()}`);
+    }
   });
-  expect(resp.ok()).toBeTruthy();
-}
+});
 
-test.describe("live setlist playback errors surface to operator", () => {
+test.afterEach(async () => {
+  const real = consoleMessages.filter(
+    (m) => !ALLOWED_CONSOLE.some((r) => r.test(m)),
+  );
+  expect(real).toEqual([]);
+});
+
+test.describe("the shared Player transport drives /live playback (#194)", () => {
+  test("▶ Prehrať posts to /play (ytlive is not playing → play)", async ({
+    page,
+  }) => {
+    await page.goto("/live");
+    const btn = page.getByTestId("player-playpause");
+    await expect(btn).toBeVisible({ timeout: 10000 });
+    // ytlive (184) has no now-playing/Playing state, so the toggle reads
+    // "▶ Prehrať" and clicking it posts /play.
+    await expect(btn).toContainText("Prehrať");
+    const post = page.waitForRequest(
+      (req) =>
+        req.url().includes("/api/v1/playback/184/play") &&
+        req.method() === "POST",
+    );
+    await btn.click();
+    await post;
+  });
+
+  test("⏭ Ďalšia posts to /skip", async ({ page }) => {
+    await page.goto("/live");
+    const btn = page.getByTestId("player-skip");
+    await expect(btn).toBeVisible({ timeout: 10000 });
+    const post = page.waitForRequest(
+      (req) =>
+        req.url().includes("/api/v1/playback/184/skip") &&
+        req.method() === "POST",
+    );
+    await btn.click();
+    await post;
+  });
+
+  test("⏮ Predošlá posts to /previous", async ({ page }) => {
+    await page.goto("/live");
+    const btn = page.getByTestId("player-prev");
+    await expect(btn).toBeVisible({ timeout: 10000 });
+    const post = page.waitForRequest(
+      (req) =>
+        req.url().includes("/api/v1/playback/184/previous") &&
+        req.method() === "POST",
+    );
+    await btn.click();
+    await post;
+  });
+
+  test("the mode select PUTs the chosen mode", async ({ page }) => {
+    await page.goto("/live");
+    const sel = page.getByTestId("player-mode");
+    await expect(sel).toBeVisible({ timeout: 10000 });
+    // The select defaults to "continuous" (PlaybackMode::default); pick "loop"
+    // so a real change event fires. The predicate matches the body so it can't
+    // be satisfied by the page's mount-time `mode=single` PUT.
+    const put = page.waitForRequest(
+      (req) =>
+        req.url().includes("/api/v1/playback/184/mode") &&
+        req.method() === "PUT" &&
+        (req.postData() ?? "").includes("loop"),
+    );
+    await sel.selectOption("loop");
+    await put;
+  });
+});
+
+// #94 error surface — every transport command that fails must show up.
+test.describe("#94: a failing transport POST surfaces in player-error", () => {
+  // The mock's fail-mode is global in-memory state; always reset it.
   test.afterEach(async ({ request }) => {
-    // Always clear every fail-mode flag so a later test starts clean.
-    for (const kind of ["play", "pause", "skip", "previous", "mode"]) {
-      await setFailMode(request, kind, false);
+    for (const kind of ["play", "pause", "previous", "mode"]) {
+      await request.post("/__mock/fail-mode", { data: { kind, enabled: false } });
     }
   });
 
-  test("pause failure shows error in .live-setlist-error", async ({
-    page,
-    request,
-  }) => {
-    await setFailMode(request, "pause", true);
+  // Flip ONE endpoint to 500, run the assertion, then reset it and drop the
+  // browser's own "Failed to load resource: … 500" console entry — that 500 is
+  // the POINT of the test, not a bug (the shared zero-console afterEach stays).
+  async function withFail(
+    request: import("@playwright/test").APIRequestContext,
+    kind: string,
+    body: () => Promise<void>,
+  ) {
+    await request.post("/__mock/fail-mode", { data: { kind, enabled: true } });
+    try {
+      await body();
+    } finally {
+      await request.post("/__mock/fail-mode", { data: { kind, enabled: false } });
+      consoleMessages = consoleMessages.filter(
+        (m) => !/Failed to load resource.*500/.test(m),
+      );
+    }
+  }
 
-    await page.goto("/live");
-    await expect(page.locator(".live-setlist-controls")).toBeVisible({
-      timeout: 10000,
-    });
-
-    await page.locator(".live-setlist-controls").getByRole("button", { name: "⏸" }).click();
-
-    await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
-      timeout: 5000,
-    });
-  });
-
-  test("skip failure shows error in .live-setlist-error", async ({
-    page,
-    request,
-  }) => {
-    await setFailMode(request, "skip", true);
-
-    await page.goto("/live");
-    await expect(page.locator(".live-setlist-controls")).toBeVisible({
-      timeout: 10000,
-    });
-
-    await page.locator(".live-setlist-controls").getByRole("button", { name: "⏭" }).click();
-
-    await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
-      timeout: 5000,
+  test("play fails → 'Prehrávanie zlyhalo'", async ({ page, request }) => {
+    await withFail(request, "play", async () => {
+      await page.goto("/live");
+      const btn = page.getByTestId("player-playpause");
+      await expect(btn).toContainText("Prehrať", { timeout: 10000 });
+      await expect(page.locator('[data-testid="player-error"]')).toHaveCount(0);
+      await btn.click();
+      await expect(page.locator('[data-testid="player-error"]')).toContainText(
+        "Prehrávanie zlyhalo",
+        { timeout: 5000 },
+      );
     });
   });
 
-  test("previous failure shows error in .live-setlist-error", async ({
-    page,
-    request,
-  }) => {
-    await setFailMode(request, "previous", true);
-
-    await page.goto("/live");
-    await expect(page.locator(".live-setlist-controls")).toBeVisible({
-      timeout: 10000,
-    });
-
-    await page.locator(".live-setlist-controls").getByRole("button", { name: "⏮" }).click();
-
-    await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
-      timeout: 5000,
+  test("previous fails → 'Predošlá zlyhala'", async ({ page, request }) => {
+    await withFail(request, "previous", async () => {
+      await page.goto("/live");
+      const prev = page.getByTestId("player-prev");
+      await expect(prev).toBeVisible({ timeout: 10000 });
+      await prev.click();
+      await expect(page.locator('[data-testid="player-error"]')).toContainText(
+        "Predošlá zlyhala",
+        { timeout: 5000 },
+      );
     });
   });
 
-  test("global play (no resume) failure shows error", async ({
-    page,
-    request,
-  }) => {
-    await setFailMode(request, "play", true);
-
-    await page.goto("/live");
-    await expect(page.locator(".live-setlist-controls")).toBeVisible({
-      timeout: 10000,
-    });
-
-    await page.locator(".live-setlist-controls").getByRole("button", { name: "▶ Play" }).click();
-
-    await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
-      timeout: 5000,
+  test("mode change fails → 'Zmena režimu zlyhala'", async ({ page, request }) => {
+    await withFail(request, "mode", async () => {
+      await page.goto("/live");
+      const mode = page.getByTestId("player-mode");
+      await expect(mode).toBeVisible({ timeout: 10000 });
+      await mode.selectOption("loop");
+      await expect(page.locator('[data-testid="player-error"]')).toContainText(
+        "Zmena režimu zlyhala",
+        { timeout: 5000 },
+      );
     });
   });
 
-  test("mode-change failure shows error in .live-setlist-error", async ({
+  test("pause fails → 'Pauza zlyhala' (Dashboard, playlist 1 is Playing)", async ({
     page,
     request,
   }) => {
-    await setFailMode(request, "mode", true);
-
-    await page.goto("/live");
-    await expect(page.locator(".live-setlist-controls")).toBeVisible({
-      timeout: 10000,
-    });
-
-    await page.locator(".live-setlist-mode").selectOption("continuous");
-
-    await expect(page.locator(".live-setlist-error")).toHaveText(/.+/, {
-      timeout: 5000,
+    await withFail(request, "pause", async () => {
+      await page.goto("/");
+      const btn = page.getByTestId("player-playpause");
+      await expect(btn).toContainText("Pauza", { timeout: 15000 });
+      await btn.click();
+      await expect(page.locator('[data-testid="player-error"]')).toContainText(
+        "Pauza zlyhala",
+        { timeout: 5000 },
+      );
     });
   });
 });

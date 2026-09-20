@@ -15,6 +15,7 @@ import {
   shouldSkipSceneSwitch,
   sceneSwitchSettled,
   waitForSceneSwitchApplied,
+  waitForPreviewApplied,
 } from "./obs-scene-wait";
 
 test.describe("OBS studio-mode scene-switch decisions (#170 round 3)", () => {
@@ -67,5 +68,25 @@ test.describe("OBS studio-mode scene-switch decisions (#170 round 3)", () => {
         { timeoutMs: 40, pollMs: 5 },
       ),
     ).rejects.toThrow(/sp-fast/);
+  });
+});
+
+test.describe("OBS studio-mode preview race (round 4, 19.9.2026)", () => {
+  test("waitForPreviewApplied returns only once OBS reports the target preview", async () => {
+    // SetCurrentPreviewScene is applied asynchronously: the first reads still
+    // show the OLD preview. Triggering then would fade program -> itself.
+    let calls = 0;
+    const getPreview = async () => {
+      calls++;
+      return calls >= 3 ? "sp-fast" : "sp-alex";
+    };
+    await waitForPreviewApplied(getPreview, "sp-fast", { timeoutMs: 2000, pollMs: 1 });
+    expect(calls).toBe(3);
+  });
+
+  test("waitForPreviewApplied refuses to trigger against a stale preview", async () => {
+    await expect(
+      waitForPreviewApplied(async () => "sp-alex", "sp-fast", { timeoutMs: 40, pollMs: 5 }),
+    ).rejects.toThrow(/stale preview/);
   });
 });

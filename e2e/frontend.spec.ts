@@ -89,13 +89,13 @@ test("dashboard shows a selector row per playlist and one work area (#165)", asy
   });
   // A selector row exists for each of the 3 mock playlists.
   await expect(
-    page.getByTestId("playlist-selector-row").filter({ hasText: "Worship" }),
+    page.getByTestId("playlist-picker-item").filter({ hasText: "Worship" }),
   ).toBeVisible();
   await expect(
-    page.getByTestId("playlist-selector-row").filter({ hasText: "Background" }),
+    page.getByTestId("playlist-picker-item").filter({ hasText: "Background" }),
   ).toBeVisible();
   await expect(
-    page.getByTestId("playlist-selector-row").filter({ hasText: "ytlive" }),
+    page.getByTestId("playlist-picker-item").filter({ hasText: "ytlive" }),
   ).toBeVisible();
   // Exactly one work area, and it shows the playing playlist (Worship).
   await expect(page.getByTestId("playlist-workspace")).toHaveCount(1);
@@ -107,7 +107,7 @@ test("dashboard shows a selector row per playlist and one work area (#165)", asy
 test("settings tab navigates", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("text=SongPlayer")).toBeVisible({ timeout: 10000 });
-  await page.click("text=Settings");
+  await page.click('[data-testid="nav-settings"]');
   await expect(page.locator("text=OBS WebSocket")).toBeVisible({
     timeout: 5000,
   });
@@ -175,20 +175,20 @@ test("navigating away from the Dashboard does not panic a disposed signal", asyn
   // surfaces via console_error_panic_hook as a console.error, which the
   // beforeEach/afterEach console collector asserts is absent.
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 10000,
   });
 
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.locator('[data-testid="nav-settings"]').click();
   await expect(page.locator("text=OBS WebSocket")).toBeVisible({
     timeout: 5000,
   });
 
-  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  await page.locator('[data-testid="nav-lyrics"]').click();
   await expect(page).toHaveURL(/\/lyrics$/);
 
-  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+  await page.locator('[data-testid="nav-dashboard"]').click();
+  await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 5000,
   });
 
@@ -222,7 +222,7 @@ test("per-card lock badge shows only on live pacing-enabled outputs (#164)", asy
   // #165: the per-playlist badge now lives in the SELECTOR rows (not the single
   // work area). Same #164 gating rule applies.
   const worshipBadge = page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: "Worship" })
     .locator(".lock-badge");
   await expect(worshipBadge).toBeVisible({ timeout: 5000 });
@@ -230,7 +230,7 @@ test("per-card lock badge shows only on live pacing-enabled outputs (#164)", asy
   await expect(worshipBadge).toHaveClass(/lock-locked/);
 
   const bgBadge = page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: "Background" })
     .locator(".lock-badge");
   await expect(bgBadge).toBeVisible();
@@ -240,7 +240,7 @@ test("per-card lock badge shows only on live pacing-enabled outputs (#164)", asy
 
   // The pacing-disabled SP-live (ytlive) row carries NO badge at all.
   const liveBadge = page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: "ytlive" })
     .locator(".lock-badge");
   await expect(liveBadge).toHaveCount(0);
@@ -259,7 +259,7 @@ test("global genlock summary reports the worst live pacing-enabled output (#164)
   expect(set.ok()).toBeTruthy();
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 10000,
   });
 
@@ -281,7 +281,7 @@ test("global genlock summary flips to LOCKED after an all-locked fixture (#164)"
   expect(start.ok()).toBeTruthy();
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 10000,
   });
 
@@ -315,7 +315,7 @@ test("global genlock summary flips to LOCKED after an all-locked fixture (#164)"
   // Both live locked outputs also carry a per-row badge in the selector.
   await expect(
     page
-      .getByTestId("playlist-selector-row")
+      .getByTestId("playlist-picker-item")
       .filter({ hasText: "Worship" })
       .locator(".lock-badge"),
   ).toBeVisible();
@@ -376,7 +376,7 @@ test("a live pacing-enabled UNLOCKED output turns the header badge red UNLOCKED 
   expect(set.ok()).toBeTruthy();
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 10000,
   });
 
@@ -398,11 +398,11 @@ test("lyrics song row gender toggle cycles auto→♂→♀ and PATCHes (#152)",
   // deep link renders no sections (the page iterates store.playlists, seeded
   // by the Dashboard's own fetch — see .claude/rules/sp-ui-frontend.md).
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Playlists" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Playlisty" })).toBeVisible({
     timeout: 10000,
   });
 
-  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  await page.locator('[data-testid="nav-lyrics"]').click();
   await expect(page).toHaveURL(/\/lyrics$/);
 
   const toggle = page.locator(".translation-gender-btn").first();
@@ -433,70 +433,29 @@ test("lyrics song row gender toggle cycles auto→♂→♀ and PATCHes (#152)",
 
 // ── #163: subtitles block must not resize the card ────────────────────────────
 
-test("karaoke panel keeps the card height stable across lyrics on/off (#163)", async ({
+test("the shared lyrics-view is always in the Player and layout-stable (#163/#194)", async ({
   page,
-  request,
 }) => {
-  // The owner's report: "okno stále skáče hore dole" — the subtitles block under
-  // the player/preview appears only when there is a lyric line, so the card (and
-  // everything below it) jumps whenever lyrics pause. The panel must ALWAYS be in
-  // the DOM with reserved height; only the text inside it swaps.
+  // #194: lyrics are unified onto the shared LyricsView in the Player's lyrics
+  // slot (one surface on every page). The block is ALWAYS in the DOM (empty ->
+  // `.lyrics-empty` "Ziadny text", else the tappable `<ol>`) with a reserved
+  // min-height, so the card never jumps when lyrics load/clear (#163). The old
+  // Dashboard-only 4-line karaoke word-highlight panel is gone.
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Worship" })).toBeVisible({
     timeout: 10000,
   });
-
   const card = page.locator(".playlist-card", {
     has: page.getByRole("heading", { name: "Worship" }),
   });
-  // Wait for the WS-driven now-playing block to arrive (playlist 1 is marked
-  // Playing by the mock). This also proves the WebSocket is connected, so the
-  // /__mock/lyrics-update broadcast below actually reaches a client.
-  await expect(card.locator(".np-song")).toBeVisible({ timeout: 10000 });
-
-  const panel = card.locator(".karaoke-panel");
-
-  // 1) A lyric line WITH text.
-  const withText = await request.post("/__mock/lyrics-update", {
-    data: {
-      playlist_id: 1,
-      line_en: "Amazing grace how sweet",
-      line_sk: "Úžasná milosť aká sladká",
-      prev_line_en: "was blind but now I see",
-      next_line_en: "that saved a wretch like me",
-      active_word_index: 2,
-      word_count: 4,
-    },
-  });
-  expect(withText.ok()).toBeTruthy();
-
-  await expect(panel).toBeVisible({ timeout: 5000 });
-  await expect(panel.locator(".karaoke-current")).toContainText("Amazing");
-
-  const cardBox1 = await card.boundingBox();
-  const panelBox1 = await panel.boundingBox();
-  expect(cardBox1?.height ?? 0).toBeGreaterThan(0);
-  expect(panelBox1?.height ?? 0).toBeGreaterThan(0);
-
-  // 2) A pause between lines — nothing to show. The panel must stay in the DOM
-  // at the SAME height; only its text clears.
-  const noText = await request.post("/__mock/lyrics-update", {
-    data: { playlist_id: 1 },
-  });
-  expect(noText.ok()).toBeTruthy();
-
-  await expect(panel).toBeVisible();
-  await expect(panel.locator(".karaoke-current")).not.toContainText("Amazing");
-
-  const cardBox2 = await card.boundingBox();
-  const panelBox2 = await panel.boundingBox();
-
-  // Equal within 1px: the block reserves its space whether or not there is a
-  // lyric line, so nothing below it jumps.
-  expect(
-    Math.abs((panelBox1?.height ?? 0) - (panelBox2?.height ?? 0)),
-  ).toBeLessThanOrEqual(1);
-  expect(
-    Math.abs((cardBox1?.height ?? 0) - (cardBox2?.height ?? 0)),
-  ).toBeLessThanOrEqual(1);
+  // The now-playing title lives in the shared Player; wait for the WS NowPlaying.
+  await expect(card.getByTestId("player-title")).toContainText(
+    "Never Gonna Give You Up",
+    { timeout: 10000 },
+  );
+  // The shared lyrics-view is inside the Player and always present + visible.
+  const lyricsView = card.getByTestId("lyrics-view");
+  await expect(lyricsView).toBeVisible({ timeout: 10000 });
+  const box = await lyricsView.boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThan(0);
 });

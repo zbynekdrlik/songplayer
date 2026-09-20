@@ -256,77 +256,60 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     }
   });
 
-  test("dashboard shows karaoke panel when playing with lyrics", async ({ page }) => {
+  test("dashboard shows the lyrics-view when playing with lyrics (#194)", async ({ page }) => {
     await page.goto("/");
     // #165: the playing playlist is preselected in the single work area.
     await page.waitForSelector('[data-testid="playlist-workspace"]', {
       timeout: 10_000,
     });
 
-    const karaokePanel = page.locator(".karaoke-panel");
-    const panelCount = await karaokePanel.count();
+    // #194: lyrics are the shared LyricsView (tappable scroll list) in the
+    // Player, replacing the old 4-line karaoke panel.
+    const lyricsView = page.locator('[data-testid="lyrics-view"]').first();
+    await expect(lyricsView).toBeVisible({ timeout: 10_000 });
 
-    if (panelCount > 0) {
-      const panel = karaokePanel.first();
-      await expect(panel.locator(".karaoke-current")).toBeVisible();
-
-      // Verify word-level highlighting classes exist
-      const words = panel.locator(".karaoke-word");
-      const wordCount = await words.count();
-      if (wordCount > 0) {
-        // At least one word should have the active class
-        const activeWords = panel.locator(".karaoke-word-active");
-        const pastWords = panel.locator(".karaoke-word-past");
-        const futureWords = panel.locator(".karaoke-word-future");
-        const totalHighlighted =
-          (await activeWords.count()) +
-          (await pastWords.count()) +
-          (await futureWords.count());
-        expect(totalHighlighted).toBeGreaterThan(0);
-      }
-
-      // Verify SK translation line is present (may or may not be visible)
-      const skLine = panel.locator(".karaoke-sk");
-      if ((await skLine.count()) > 0) {
-        const skText = await skLine.first().textContent();
-        expect(skText?.length).toBeGreaterThan(0);
-      }
+    const lines = lyricsView.locator(".lyr-line");
+    const lineCount = await lines.count();
+    if (lineCount > 0) {
+      // A playing song with lyrics renders tappable lines.
+      await expect(lines.first()).toBeVisible();
     } else {
+      // No lyrics for the current item -> the empty lyrics surface.
+      await expect(lyricsView.locator(".lyrics-empty")).toBeVisible();
       console.log(
-        "DIAGNOSTIC: No karaoke panel visible — no active playback or no lyrics",
+        "DIAGNOSTIC: no lyric lines for the current item — empty lyrics-view",
       );
     }
   });
 
-  test("karaoke panel hidden for idle playlists", async ({ page }) => {
-    // #165: only ONE work area is shown at a time, so walk the selector rows and
-    // bring each playlist into the work area to check the invariant for every
-    // playlist (an idle playlist — one with no now-playing, i.e. a `.np-idle`
-    // card — must not render a karaoke panel). Same coverage as the old
-    // per-card grid scan, now driven through the selector.
+  test("idle playlists show the empty lyrics-view, no lyric lines (#194)", async ({ page }) => {
+    // #165: only ONE work area at a time; walk the selector rows. #194: an idle
+    // playlist's Player shows the shared LyricsView in its empty state
+    // (`.lyrics-empty`), never any `.lyr-line`.
     await page.goto("/");
     await page.waitForSelector('[data-testid="playlist-workspace"]', {
       timeout: 10_000,
     });
 
-    const rows = page.getByTestId("playlist-selector-row");
+    const rows = page.getByTestId("playlist-picker-item");
     const rowCount = await rows.count();
 
     for (let i = 0; i < rowCount; i++) {
       await rows.nth(i).click();
       const card = page.locator(".playlist-card").first();
       await expect(card).toBeVisible();
-      // #170: read the idle marker and the panel in ONE DOM pass. Two separate
-      // counts race a live state change (a playlist starting between the two
-      // reads showed np-idle first and a karaoke panel a moment later); the
-      // invariant is per-instant: an idle card never carries a panel.
-      const { idle, karaoke } = await card.evaluate((el) => ({
-        idle: el.querySelectorAll(".np-idle").length,
-        karaoke: el.querySelectorAll(".karaoke-panel").length,
-      }));
+      // #170: read the idle marker and the lyric lines in ONE DOM pass (two
+      // separate reads race a live state change). The invariant is per-instant:
+      // an idle card renders no lyric lines.
+      const { idle, lines } = await card.evaluate((el) => {
+        const title = el.querySelector('[data-testid="player-title"]');
+        return {
+          idle: title && title.textContent.trim() === "Nič nehrá" ? 1 : 0,
+          lines: el.querySelectorAll(".lyr-line").length,
+        };
+      });
       if (idle > 0) {
-        // Idle playlist should not show karaoke panel
-        expect(karaoke).toBe(0);
+        expect(lines).toBe(0);
       }
     }
   });

@@ -22,10 +22,10 @@ pub fn SettingsPage() -> impl IntoView {
 
     view! {
         <div class="settings-page">
-            <h1>"Settings"</h1>
+            <h1>"Nastavenia"</h1>
             <settings_form::SettingsForm />
             <hr />
-            <h2>"Resolume Hosts"</h2>
+            <h2>"Hostitelia Resolume"</h2>
             <resolume_hosts::ResolumeHosts />
         </div>
     }

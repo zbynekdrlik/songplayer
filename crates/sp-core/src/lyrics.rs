@@ -51,6 +51,17 @@ impl LyricsTrack {
             .find(|(_, w)| w.start_ms <= position_ms)
             .map(|(idx, _)| idx)
     }
+
+    /// The index of the CURRENT line at `position_ms`: the LAST line whose
+    /// `start_ms <= position_ms`, so the highlight stays on a line through the
+    /// gap until the next line starts (unlike `line_at`, which is `None` in a
+    /// gap). `None` before the first line or for an empty track. #194: the pure
+    /// active-line-index the unified `LyricsView` scroll mode keys its highlight
+    /// on (a `Memo`, so a position tick updates only the highlighted `<li>`,
+    /// never re-creates the list element).
+    pub fn current_line_index(&self, position_ms: u64) -> Option<usize> {
+        self.lines.iter().rposition(|l| l.start_ms <= position_ms)
+    }
 }
 
 #[cfg(test)]
@@ -91,6 +102,34 @@ mod tests {
                 },
             ],
         }
+    }
+
+    // ---- current_line_index: the scroll-mode active-line highlight (#194) ----
+
+    #[test]
+    fn current_line_index_tracks_the_last_started_line() {
+        // sample_track lines start at 1000 and 3000 ms.
+        let t = sample_track();
+        // Before the first line's start → no current line.
+        assert_eq!(t.current_line_index(0), None);
+        assert_eq!(t.current_line_index(999), None);
+        // Exactly the first start, and within the first line.
+        assert_eq!(t.current_line_index(1000), Some(0));
+        assert_eq!(t.current_line_index(2500), Some(0));
+        // Exactly the second start, and within it.
+        assert_eq!(t.current_line_index(3000), Some(1));
+        assert_eq!(t.current_line_index(4500), Some(1));
+        // After the last line's start the highlight stays on the last line.
+        assert_eq!(t.current_line_index(9000), Some(1));
+        // An empty track has no current line.
+        let empty = LyricsTrack {
+            version: 1,
+            source: "x".into(),
+            language_source: String::new(),
+            language_translation: String::new(),
+            lines: vec![],
+        };
+        assert_eq!(empty.current_line_index(1000), None);
     }
 
     // ---- serde roundtrip with full data ----

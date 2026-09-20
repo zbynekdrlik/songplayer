@@ -1,10 +1,14 @@
-//! Modal showing detailed lyrics audit information for a single song.
+//! Modal showing detailed lyrics audit info + the song's lyric lines for one
+//! song. #194 r3c: renders the shared `LyricsView` (scroll mode) for the lyric
+//! lines; all text is Slovak.
 
 use leptos::callback::Callable;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
+use crate::components::lyrics_view::LyricsView;
+use crate::components::state_block::{StateBlock, StateKind};
 
 #[component]
 pub fn LyricsSongDetailModal(video_id: i64, on_close: Callback<()>) -> impl IntoView {
@@ -14,7 +18,7 @@ pub fn LyricsSongDetailModal(video_id: i64, on_close: Callback<()>) -> impl Into
         let detail = detail;
         async move {
             if let Ok(val) = api::get_lyrics_song_detail(video_id).await {
-                detail.set(Some(val));
+                let _ = detail.try_set(Some(val));
             }
         }
     });
@@ -26,7 +30,7 @@ pub fn LyricsSongDetailModal(video_id: i64, on_close: Callback<()>) -> impl Into
             <div class="modal" on:click=|e: leptos::ev::MouseEvent| e.stop_propagation()>
                 <button class="modal-close" on:click=on_close_click>"\u{00D7}"</button>
                 {move || match detail.get() {
-                    None => view! { <p>"Loading..."</p> }.into_any(),
+                    None => view! { <StateBlock kind=StateKind::Loading /> }.into_any(),
                     Some(d) => {
                         let audit_pretty = d
                             .get("audit_json")
@@ -56,10 +60,12 @@ pub fn LyricsSongDetailModal(video_id: i64, on_close: Callback<()>) -> impl Into
                         view! {
                             <h2>{song}" \u{2014} "{artist}</h2>
                             <p>
-                                "Source: "<code>{source}</code>" | Quality: "{quality}
+                                "Zdroj: "<code>{source}</code>" | Kvalita: "{quality}
                             </p>
+                            // #194: the song's lyric lines via the shared LyricsView.
+                            <LyricsView video_id=video_id />
                             <details>
-                                <summary>"Raw audit log"</summary>
+                                <summary>"Surový audit"</summary>
                                 <pre>{audit_pretty}</pre>
                             </details>
                         }

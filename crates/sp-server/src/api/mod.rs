@@ -10,6 +10,7 @@ pub mod preview;
 pub mod routes;
 pub mod routes_import; // #180 shared bare-URL import core
 pub mod routes_ndi_recover;
+pub mod routes_seek; // #194 unified seek route
 pub mod stems;
 pub mod videos;
 pub mod websocket;
@@ -88,6 +89,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/playback/{playlist_id}/mode",
             axum::routing::put(routes::set_mode),
+        )
+        // #194: unified seek — same playback family as play/pause/skip/mode.
+        .route(
+            "/api/v1/playback/{playlist_id}/seek",
+            axum::routing::post(routes_seek::post_seek),
         )
         // #15 part 2: live low-res video preview of the currently-playing song.
         .route(
@@ -236,10 +242,6 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/playlists/{id}/play-video",
             axum::routing::post(live::post_play_video),
-        )
-        .route(
-            "/api/v1/playlists/{id}/seek",
-            axum::routing::post(routes::post_seek),
         )
         // Middleware
         .layer(CorsLayer::permissive())

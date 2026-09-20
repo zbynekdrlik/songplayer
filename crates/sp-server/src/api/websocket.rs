@@ -300,6 +300,7 @@ mod tests {
             lock_reason: String::new(),
             burn_on: false,
             recovery_step: None,
+            sender_url: None,
         }
     }
 

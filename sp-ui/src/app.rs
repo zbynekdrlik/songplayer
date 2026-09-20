@@ -99,59 +99,65 @@ pub fn App() -> impl IntoView {
     // Start WebSocket connection.
     crate::ws::connect(store);
 
+    // #194 r3: load the playlist list ONCE at the app level so every page
+    // (Lyrics, Live, Dabing) has `store.playlists` — previously only the
+    // Dashboard fetched it, so a cold `/lyrics` / `/live` deep link showed no
+    // playlist sections at all. One shared load, no per-page duplication.
+    Effect::new(move |_| {
+        leptos::task::spawn_local(async move {
+            if let Ok(playlists) =
+                crate::api::get::<Vec<sp_core::models::Playlist>>("/api/v1/playlists").await
+            {
+                store.playlists.set(playlists);
+            }
+        });
+    });
+
     view! {
         <nav class="navbar">
             <span class="logo">"SongPlayer"</span>
             <button
                 class:active=move || page.get() == Page::Dashboard
+                data-testid="nav-dashboard"
                 on:click=move |_| go(Page::Dashboard)
             >
-                "Dashboard"
+                "Prehľad"
             </button>
             <button
                 class:active=move || page.get() == Page::Live
+                data-testid="nav-live"
                 on:click=move |_| go(Page::Live)
             >
-                "Live"
+                "Naživo"
             </button>
             <button
                 class:active=move || page.get() == Page::Lyrics
+                data-testid="nav-lyrics"
                 on:click=move |_| go(Page::Lyrics)
             >
-                "Lyrics"
+                "Texty"
             </button>
             <button
                 class:active=move || page.get() == Page::Dabing
+                data-testid="nav-dabing"
                 on:click=move |_| go(Page::Dabing)
             >
                 "Dabing"
             </button>
             <button
                 class:active=move || page.get() == Page::Settings
+                data-testid="nav-settings"
                 on:click=move |_| go(Page::Settings)
             >
-                "Settings"
+                "Nastavenia"
             </button>
-            <span class="ws-indicator">
-                {move || {
-                    if store.ws_connected.get() {
-                        "\u{1F7E2} WS"
-                    } else {
-                        "\u{1F534} WS"
-                    }
-                }}
-            </span>
-            // Version label on every route. Compile-time injected from
-            // sp_core::config::VERSION (CARGO_PKG_VERSION via the workspace
-            // VERSION file + scripts/sync-version.sh) so the displayed value
-            // matches the deployed binary AND the backend `/api/v1/status`
-            // `version` field — single git-tag source per
-            // version-on-dashboard.md. data-testid is the contract the
-            // Playwright assertion + post-deploy verification reads.
-            <span class="version-label" data-testid="version">
-                {format!("v{}", sp_core::config::VERSION)}
-            </span>
         </nav>
+        // #194 r3b: ONE status strip on EVERY page (WS, OBS, genlock, Resolume,
+        // tools, LAN, version). Mounted once here above the page switch so the
+        // same strip + same testids render everywhere. It carries the WS badge
+        // and the `version` testid (post-deploy + version-assertion contract)
+        // that used to live in the navbar.
+        <crate::components::health_bar::HealthBar />
         <main class="content">
             {move || match page.get() {
                 Page::Dashboard => pages::dashboard::DashboardPage().into_any(),

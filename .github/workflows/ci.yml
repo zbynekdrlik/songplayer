@@ -547,7 +547,13 @@ jobs:
           git diff "$BASE" HEAD > push.diff
           COUNT=0
           if [ -s push.diff ]; then
-            COUNT=$(cargo mutants --in-diff push.diff --list 2>/dev/null | grep -c . || true)
+            # A failed --list (bad diff, build error) must FAIL the plan, never
+            # silently default to 0 mutants = the smallest fan-out (0.60.0 review).
+            if ! cargo mutants --in-diff push.diff --list > mutants.list; then
+              echo "::error::mutant listing failed for $BASE..HEAD — refusing to plan shards from a default count"
+              exit 1
+            fi
+            COUNT=$(grep -c . mutants.list || true)
           fi
           N=$(( (COUNT + 5) / 6 ))
           if [ "$N" -lt 4 ]; then N=4; fi
@@ -970,6 +976,29 @@ jobs:
           # exists to prevent. The relaunch-verify logic below does not need
           # Stop: it uses explicit exit codes + try/catch.
           $ErrorActionPreference = "Continue"
+
+          # #196 item 6: ONE restart per push. The Deploy job already started
+          # this SongPlayer moments ago (and its health check confirmed the
+          # version). Restarting it again here is a needless SECOND
+          # receiver-lottery roll on the live wall. So SKIP the restart when the
+          # running process is the version we just deployed AND it has been up
+          # < 10 min (uptime_s < 600) AND it is already connected to OBS — i.e.
+          # it IS the fresh Deploy-started process AND does not need the restart
+          # this step exists for (to pick up OBS). Otherwise fall through and
+          # restart (a process still in OBS backoff DOES get restarted). Log the
+          # branch taken.
+          $DeployedVersion = (Get-Content VERSION -Raw).Trim()
+          try {
+            $status = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status" -TimeoutSec 5
+            $uptime = [int]$status.uptime_s
+            if (($status.version -eq $DeployedVersion) -and ($uptime -lt 600) -and ($status.obs_connected)) {
+              Write-Host "SKIP restart (#196 item 6): SongPlayer is the deployed version $DeployedVersion, up $uptime s (< 600), OBS connected - the Deploy job just started it; not restarting again."
+              exit 0
+            }
+            Write-Host "RESTART: version '$($status.version)' (deployed '$DeployedVersion'), uptime ${uptime}s, obs_connected=$($status.obs_connected) - restarting."
+          } catch {
+            Write-Host "RESTART: /api/v1/status not reachable yet ($($_.Exception.Message)) - restarting."
+          }
 
           # SongPlayer may have been started before OBS and be in backoff.
           # Restart it now that OBS is confirmed running so it connects immediately.
@@ -1670,21 +1699,24 @@ jobs:
               if (msg.type() === 'error') errors.push(msg.text());
             });
             await page.goto('http://localhost:8920/');
-            // Verify playlists are visible
-            await expect(page.getByRole('heading', { name: 'Playlists' })).toBeVisible({ timeout: 15000 });
+            // Verify playlists are visible (heading is Slovak since #194 r3b)
+            await expect(page.getByRole('heading', { name: 'Playlisty' })).toBeVisible({ timeout: 15000 });
             // At least one playlist card should be visible
             await expect(page.locator('.playlist-card').first()).toBeVisible({ timeout: 10000 });
-            // OBS status should connect within 30s (WebSocket handshake takes time after deploy)
-            await expect(page.locator('.obs-status')).not.toContainText('Disconnected', { timeout: 30000 });
-            // WebSocket indicator should be visible
-            await expect(page.locator('.ws-indicator')).toBeVisible({ timeout: 10000 });
+            // OBS status should connect within 30s (WebSocket handshake takes time after
+            // deploy). #194 r3b: OBS status now lives in the shared HealthBar
+            // (health-obs), Slovak: 'OBS: pripojené — <scene>' / 'OBS: odpojené'.
+            await expect(page.getByTestId('health-obs')).not.toContainText('odpojené', { timeout: 30000 });
+            // WebSocket indicator should be visible (HealthBar health-ws since #194 r3b)
+            await expect(page.getByTestId('health-ws')).toBeVisible({ timeout: 10000 });
             // Zero console errors
             expect(errors).toEqual([]);
           });
           test('settings page loads with fields', async ({ page }) => {
             await page.goto('http://localhost:8920/');
             await expect(page.locator('text=SongPlayer')).toBeVisible({ timeout: 15000 });
-            await page.click('text=Settings');
+            // #194: the nav tabs are Slovak — locate by testid, never by text.
+            await page.click('[data-testid="nav-settings"]');
             await expect(page.locator('text=OBS WebSocket')).toBeVisible({ timeout: 10000 });
             await expect(page.locator('text=Google Gemini')).toBeVisible();
           });

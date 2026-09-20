@@ -2,27 +2,17 @@
 //! playlist preselected) instead of a grid of every playlist card.
 
 use leptos::prelude::*;
-use sp_core::models::Playlist;
 
-use crate::api;
-use crate::components::{
-    download_queue, karaoke_mixer, lan_address, ndi_health, obs_status, playlist_selector,
-    playlist_workspace, resolume_health, selection,
-};
+use crate::components::{download_queue, playlist_picker, playlist_workspace, selection};
 use crate::store::DashboardStore;
 
 #[component]
 pub fn DashboardPage() -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
 
-    // Fetch playlists on mount.
-    let _load = Effect::new(move |_| {
-        leptos::task::spawn_local(async move {
-            if let Ok(playlists) = api::get::<Vec<Playlist>>("/api/v1/playlists").await {
-                store.playlists.set(playlists);
-            }
-        });
-    });
+    // #194 r3: playlists are loaded once at the app level (`App`), so every
+    // page — not only the Dashboard — has `store.playlists`. The Dashboard no
+    // longer fetches them itself.
 
     // #165: auto-follow the playing playlist for the INITIAL selection. Runs
     // until the selection is pinned (a user click / `<select>` / "Prejsť", or a
@@ -54,11 +44,7 @@ pub fn DashboardPage() -> impl IntoView {
     view! {
         <div class="dashboard">
             <div class="dashboard-header">
-                <h1>"Playlists"</h1>
-                <lan_address::LanAddress />
-                <obs_status::ObsStatus />
-                <ndi_health::GlobalLockBadge />
-                <resolume_health::ResolumeHealthCard />
+                <h1>"Playlisty"</h1>
             </div>
 
             <div class="error-banner">
@@ -68,17 +54,18 @@ pub fn DashboardPage() -> impl IntoView {
                         view! { <span></span> }.into_any()
                     } else {
                         let last = errs.last().cloned().unwrap_or_default();
-                        view! { <div class="error-msg">{last}</div> }.into_any()
+                        view! {
+                            <crate::components::state_block::StateBlock kind=crate::components::state_block::StateKind::Error(last) />
+                        }
+                        .into_any()
                     }
                 }}
             </div>
 
             <div class="dashboard-body">
-                <playlist_selector::PlaylistSelector />
+                <playlist_picker::PlaylistPicker />
                 <playlist_workspace::PlaylistWorkspace />
             </div>
-
-            <karaoke_mixer::KaraokeMixer />
 
             <download_queue::DownloadQueue />
         </div>

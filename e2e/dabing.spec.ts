@@ -37,54 +37,53 @@ test("Dabing page renders with the nav entry and empty state (#180)", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.locator(".navbar button", { hasText: "Dabing" }).click();
+  await page.locator('[data-testid="nav-dabing"]').click();
   await expect(page.locator(".dabing-page h2")).toHaveText("Dabing");
-  await expect(page.locator('[data-testid="dabing-import-input"]')).toBeVisible();
-  await expect(page.locator(".dabing-empty")).toBeVisible();
+  // #194: the Dabing page uses the shared ImportBox (`import-input`/`import-btn`).
+  await expect(page.locator('[data-testid="import-input"]')).toBeVisible();
+  await expect(page.getByTestId("state-empty")).toBeVisible();
 });
 
-test("pasting a URL adds a queued row and Prehrať dispatches play (#180)", async ({
+test("pasting a URL adds a queued row and ▶ dispatches play (#180/#194)", async ({
   page,
 }) => {
   await page.goto("/dabing");
   await expect(page.locator(".dabing-page h2")).toBeVisible({ timeout: 10000 });
 
   await page
-    .locator('[data-testid="dabing-import-input"]')
+    .locator('[data-testid="import-input"]')
     .fill("https://youtu.be/AvWOCj48pGw");
-  await page.locator('[data-testid="dabing-import-btn"]').click();
+  await page.locator('[data-testid="import-btn"]').click();
 
-  // A queued row appears (import + poll refresh).
-  const row = page.locator('[data-testid="dabing-list"] .dabing-row').first();
+  // A queued row appears (import + poll refresh) as the shared SongRow.
+  const row = page.locator('[data-testid="dabing-list"] [data-testid="song-row"]').first();
   await expect(row).toBeVisible({ timeout: 5000 });
-  // A queued row renders the glyph chain (not an error) with the first step
-  // ("stiahnuté") marked done — the `.dabing-step-done` class is what actually
-  // conveys the queued state, so assert it rather than just the label text.
-  const chain = row.locator('[data-testid="dabing-chain"]');
-  await expect(chain.locator(".dabing-chain-error")).toHaveCount(0);
-  await expect(chain.locator(".dabing-step-done").first()).toHaveText(
-    "stiahnuté",
-  );
+  // #194: the engine chain is gone from the DOM and lives in the dub chip's
+  // tooltip; a queued row's dub chip reads "vo fronte", and the chain path
+  // folds into its `title`.
+  const dubChip = row.locator('[data-testid="chip-dub"]');
+  await expect(dubChip).toHaveText("vo fronte");
+  await expect(dubChip).toHaveAttribute("title", /stiahnuté/);
 
-  // Prehrať dispatches a play-video POST to the Dabing playlist.
+  // ▶ dispatches a play-video POST to the Dabing playlist.
   const postPromise = page.waitForRequest(
     (req) =>
       /\/api\/v1\/playlists\/\d+\/play-video/.test(req.url()) &&
       req.method() === "POST",
   );
-  await row.locator('[data-testid="dabing-play"]').click();
+  await row.locator('[data-testid="song-row-play"]').click();
   const req = await postPromise;
   expect(req.url()).toMatch(/\/play-video$/);
 });
 
-test("a dub-ready video WITHOUT stems renders pripravené (#183 round 2)", async ({
+test("a dub-ready video WITHOUT stems renders the dub chip hotový (#183 round 2/#194)", async ({
   page,
   request,
 }) => {
   // Round 2: long videos the stem worker cannot separate are dubbed via the
-  // 2-stream mix and reach `ready` with NO stems. The Dabing page must render
-  // `pripravené` for such a row exactly like a stemmed one — the ready state is
-  // first-class regardless of stems.
+  // 2-stream mix and reach `ready` with NO stems. The Dabing row must render the
+  // ready dub chip ("hotový") for such a row exactly like a stemmed one — the
+  // ready state is first-class regardless of stems.
   await request.post("/__mock/dabing-add", {
     data: {
       video_id: 344,
@@ -99,23 +98,27 @@ test("a dub-ready video WITHOUT stems renders pripravené (#183 round 2)", async
   await page.goto("/dabing");
   await expect(page.locator(".dabing-page h2")).toBeVisible({ timeout: 10000 });
 
-  // The row appears via the 2 s poll; its glyph chain is NOT an error and its
-  // final step (`pripravené`) is marked done.
-  const row = page.locator('[data-testid="dabing-list"] .dabing-row').first();
+  // The row appears via the 2 s poll; #194: the ready state shows as the dub
+  // chip "hotový" and the chain path folds into its tooltip ("pripravené").
+  const row = page.locator('[data-testid="dabing-list"] [data-testid="song-row"]').first();
   await expect(row).toBeVisible({ timeout: 5000 });
-  const chain = row.locator('[data-testid="dabing-chain"]');
-  await expect(chain.locator(".dabing-chain-error")).toHaveCount(0);
-  await expect(chain.locator(".dabing-step-done").last()).toHaveText(
-    "pripravené",
+  const dubChip = row.locator('[data-testid="chip-dub"]');
+  await expect(dubChip).toHaveText("hotový");
+  await expect(dubChip).toHaveAttribute("title", /pripravené/);
+  // A ready row still shows the dub-mix ratio line.
+  await expect(row.locator('[data-testid="dabing-row-ratio"]')).toContainText(
+    "Pomer dabingu",
   );
 });
 
-test("the chain shows stemy + titulky and drops prepis/preklad with stems (#182)", async ({
+test("the chain tooltip shows stemy + titulky and drops prepis/preklad with stems (#182/#194)", async ({
   page,
   request,
 }) => {
   // #182: the real engine chain. A video with stems shows the stemy step, the
   // new titulky step, and NO prepis/preklad (subtitles come from the dub session).
+  // #194: the chain path is no longer its own DOM block — it lives in the dub
+  // chip's `title` tooltip.
   await request.post("/__mock/dabing-add", {
     data: {
       video_id: 350,
@@ -128,18 +131,18 @@ test("the chain shows stemy + titulky and drops prepis/preklad with stems (#182)
   await page.goto("/dabing");
   await expect(page.locator(".dabing-page h2")).toBeVisible({ timeout: 10000 });
 
-  const steps = page
-    .locator('[data-testid="dabing-list"] .dabing-row')
+  const dubChip = page
+    .locator('[data-testid="dabing-list"] [data-testid="song-row"]')
     .first()
-    .locator('[data-testid="dabing-chain"] .dabing-chain-steps');
-  await expect(steps).toBeVisible({ timeout: 5000 });
-  await expect(steps).toContainText("stemy");
-  await expect(steps).toContainText("titulky");
-  await expect(steps).not.toContainText("prepis");
-  await expect(steps).not.toContainText("preklad");
+    .locator('[data-testid="chip-dub"]');
+  await expect(dubChip).toBeVisible({ timeout: 5000 });
+  await expect(dubChip).toHaveAttribute("title", /stemy/);
+  await expect(dubChip).toHaveAttribute("title", /titulky/);
+  await expect(dubChip).not.toHaveAttribute("title", /prepis/);
+  await expect(dubChip).not.toHaveAttribute("title", /preklad/);
 });
 
-test("an over-cap dub (unsupported stems) shows no stemy step (#182)", async ({
+test("an over-cap dub (unsupported stems) shows no stemy step in the tooltip (#182/#194)", async ({
   page,
   request,
 }) => {
@@ -158,17 +161,17 @@ test("an over-cap dub (unsupported stems) shows no stemy step (#182)", async ({
   await page.goto("/dabing");
   await expect(page.locator(".dabing-page h2")).toBeVisible({ timeout: 10000 });
 
-  const steps = page
-    .locator('[data-testid="dabing-list"] .dabing-row')
+  const dubChip = page
+    .locator('[data-testid="dabing-list"] [data-testid="song-row"]')
     .first()
-    .locator('[data-testid="dabing-chain"] .dabing-chain-steps');
-  await expect(steps).toBeVisible({ timeout: 5000 });
-  await expect(steps).toContainText("stiahnuté");
-  await expect(steps).toContainText("titulky");
-  await expect(steps).toContainText("pripravené");
-  await expect(steps).not.toContainText("stemy");
-  await expect(steps).not.toContainText("prepis");
-  await expect(steps).not.toContainText("preklad");
+    .locator('[data-testid="chip-dub"]');
+  await expect(dubChip).toBeVisible({ timeout: 5000 });
+  await expect(dubChip).toHaveAttribute("title", /stiahnuté/);
+  await expect(dubChip).toHaveAttribute("title", /titulky/);
+  await expect(dubChip).toHaveAttribute("title", /pripravené/);
+  await expect(dubChip).not.toHaveAttribute("title", /stemy/);
+  await expect(dubChip).not.toHaveAttribute("title", /prepis/);
+  await expect(dubChip).not.toHaveAttribute("title", /preklad/);
 });
 
 test("the Dabing row toggle flips dub_requested via PATCH (#180)", async ({
@@ -179,11 +182,10 @@ test("the Dabing row toggle flips dub_requested via PATCH (#180)", async ({
   const card = page.locator(".playlist-card", { hasText: "Worship" });
   await expect(card).toBeVisible({ timeout: 10000 });
 
-  // Expand the song list.
-  await card.locator('[data-testid="playlist-songs-toggle"]').click();
+  // #194: the song list is OPEN by default; rows are `.song-row`.
   await expect(card.locator(".video-list")).toBeVisible({ timeout: 5000 });
 
-  const row = card.locator(".video-list tbody tr", {
+  const row = card.locator(".song-row", {
     hasText: "Never Gonna Give You Up",
   });
   await expect(row).toBeVisible();

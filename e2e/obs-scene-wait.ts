@@ -79,3 +79,39 @@ export async function waitForSceneSwitchApplied(
     await new Promise((r) => setTimeout(r, pollMs));
   }
 }
+
+/**
+ * Poll until OBS reports `target` as the PREVIEW scene, or throw (round 4,
+ * 19.9.2026 — three red post-deploy runs in one day).
+ *
+ * `SetCurrentPreviewScene` returns before OBS's UI thread has applied it. A
+ * `TriggerStudioModeTransition` sent right behind it can therefore still see the
+ * OLD preview; when that old preview equals the program scene OBS runs a real
+ * 2 s fade from the scene to ITSELF: `SceneTransitionEnded` fires, the program
+ * never changes, and the switch "did not settle" (last program = the old scene,
+ * `transitionActive=false`, preview = the target — exactly what the box showed).
+ * So the driver must see the preview applied BEFORE it triggers.
+ */
+export async function waitForPreviewApplied(
+  getPreviewScene: () => Promise<string>,
+  target: string,
+  opts: WaitForSceneSwitchOptions = {},
+): Promise<void> {
+  const timeoutMs = opts.timeoutMs ?? 3000;
+  const pollMs = opts.pollMs ?? 50;
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    const current = await getPreviewScene();
+    if (current === target) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `OBS preview scene did not become "${target}" within ${timeoutMs}ms ` +
+          `(last preview "${current}") — refusing to trigger the studio-mode ` +
+          `transition against a stale preview (it would fade the program scene ` +
+          `to itself).`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+}

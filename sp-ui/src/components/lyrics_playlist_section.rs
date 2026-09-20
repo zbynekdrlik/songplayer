@@ -51,7 +51,7 @@ pub fn LyricsPlaylistSection(
         <section class="lyrics-playlist-section">
             <h3>
                 {playlist_name.clone()}
-                <button on:click=on_reprocess_playlist>"Reprocess playlist"</button>
+                <button on:click=on_reprocess_playlist>"Znova spracovať celý zoznam"</button>
             </h3>
             <div class="lyrics-songs">
                 <For

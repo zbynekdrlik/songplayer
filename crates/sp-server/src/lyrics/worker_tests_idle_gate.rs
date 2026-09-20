@@ -38,6 +38,7 @@ fn playing_snapshot(playlist_id: i64, ndi_name: &str) -> PipelineHealthSnapshot 
         lock_reason: String::new(),
         burn_on: false,
         recovery_step: None,
+        sender_url: None,
     }
 }
 

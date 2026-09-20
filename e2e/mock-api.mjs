@@ -387,6 +387,14 @@ app.put("/api/v1/playback/:id/mode", (_req, res) => {
   res.json({ status: "mode_changed" });
 });
 
+// #194: the shared Player + LyricsScroller seek to a position via
+// `POST /api/v1/playback/{id}/seek {position_ms}` (moved off the old
+// `/api/v1/playlists/{id}/seek` route). A no-op 204 for the mock — specs that
+// need the body intercept it with `page.route` before it reaches here.
+app.post("/api/v1/playback/:id/seek", (_req, res) => {
+  res.status(204).end();
+});
+
 // #15 part 2: live video preview. A minimal 1x1 JPEG so the dashboard <img>
 // gets a decodable image (non-zero naturalWidth) for playlist 1 (which the WS
 // stream marks Playing below); other playlists have no frame → 204 (idle).
@@ -833,6 +841,23 @@ app.get('/api/v1/lyrics/songs/:id', (req, res) => {
   });
 });
 
+// #194 r3c: the song's full LyricsTrack (the shared LyricsView scroll mode in
+// the Lyrics details modal fetches this). A small two-line track is enough for
+// the list + active-line highlight; a missing route would 404 and trip the
+// zero-console check.
+app.get('/api/v1/videos/:id/lyrics', (_req, res) => {
+  res.json({
+    version: 22,
+    source: 'gemini-3-5-transcribe',
+    language_source: 'en',
+    language_translation: 'sk',
+    lines: [
+      { start_ms: 0, end_ms: 2000, en: 'Line one', sk: 'Riadok jeden' },
+      { start_ms: 2000, end_ms: 4000, en: 'Line two', sk: 'Riadok dva' },
+    ],
+  });
+});
+
 // Mutable reprocess result so tests can drive the dashboard's banner
 // path for #98 (blocked_by_asr_gap surfacing). Defaults to a no-block
 // outcome so existing specs keep their expectations. Both the targeted
@@ -913,6 +938,119 @@ app.post("/__mock/set-playing", (req, res) => {
   res.json({ status: "sent", clients: sent });
 });
 
+// #194: broadcast a `NowPlaying` for an ARBITRARY playlist so a spec can make a
+// dub video "play" on the Dabing playlist (id 500). The shared Player chooses
+// the dub mixer adapter when the now-playing `video_id` for the playlist matches
+// a row in `GET /api/v1/dabing` `videos[]` — so `player.spec.ts`/`mixer.spec.ts`
+// dabing-add a ready dub row, then broadcast its `video_id` here to surface the
+// `dub-mix-fader` inside the Dabing Player. Body IS the NowPlaying `data`
+// payload: `{playlist_id, video_id, song?, artist?, position_ms?, duration_ms?}`.
+app.post("/__mock/now-playing", (req, res) => {
+  const data = req.body || {};
+  if (typeof data.playlist_id !== "number") {
+    res.status(400).json({ error: "expected a numeric playlist_id" });
+    return;
+  }
+  const msg = JSON.stringify({
+    type: "NowPlaying",
+    data: {
+      playlist_id: data.playlist_id,
+      video_id: typeof data.video_id === "number" ? data.video_id : 0,
+      song: typeof data.song === "string" ? data.song : "",
+      artist: typeof data.artist === "string" ? data.artist : "",
+      position_ms: typeof data.position_ms === "number" ? data.position_ms : 0,
+      duration_ms: typeof data.duration_ms === "number" ? data.duration_ms : 0,
+    },
+  });
+  let sent = 0;
+  for (const ws of wsClients) {
+    if (ws.readyState === ws.OPEN) {
+      ws.send(msg);
+      sent += 1;
+    }
+  }
+  res.json({ status: "sent", clients: sent });
+});
+
+// #194 hotfix: now-playing TICK mode. When enabled, the mock advances
+// `position_ms` for each configured item every 500 ms and broadcasts a
+// `NowPlaying`, so a spec can prove a live position tick does NOT tear down the
+// Player / preview or snatch a fader / seek out from under a drag (exactly what
+// the suite never exercised, so the owner's box regression went uncaught). OFF
+// by default — existing specs are unaffected — and a spec toggles it per test
+// via `POST /__mock/tick`, turning it OFF again in afterEach.
+let tickItems = [];
+let tickEnabled = false;
+
+function tickBroadcast(obj) {
+  const msg = JSON.stringify(obj);
+  for (const ws of wsClients) {
+    if (ws.readyState === ws.OPEN) ws.send(msg);
+  }
+}
+
+function tickNowPlaying(it) {
+  tickBroadcast({
+    type: "NowPlaying",
+    data: {
+      playlist_id: it.playlist_id,
+      video_id: it.video_id,
+      song: it.song,
+      artist: it.artist,
+      position_ms: it.position_ms,
+      duration_ms: it.duration_ms,
+    },
+  });
+}
+
+// Body: { enabled: bool, items?: [{playlist_id, video_id?, song?, artist?,
+// duration_ms?, position_ms?, step_ms?, state?}] }. Enabling with items also
+// pushes the initial PlaybackStateChanged + first NowPlaying immediately so
+// `is_decoding` / `has_content` flip without waiting for the first 500 ms tick.
+app.post("/__mock/tick", (req, res) => {
+  const b = req.body || {};
+  tickEnabled = !!b.enabled;
+  if (tickEnabled) {
+    if (Array.isArray(b.items)) {
+      tickItems = b.items.map((it) => ({
+        playlist_id: Number(it.playlist_id),
+        video_id: typeof it.video_id === "number" ? it.video_id : 0,
+        song: typeof it.song === "string" ? it.song : "",
+        artist: typeof it.artist === "string" ? it.artist : "",
+        duration_ms:
+          typeof it.duration_ms === "number" ? it.duration_ms : 200000,
+        position_ms: typeof it.position_ms === "number" ? it.position_ms : 0,
+        step_ms: typeof it.step_ms === "number" ? it.step_ms : 500,
+        state: typeof it.state === "string" ? it.state : "Playing",
+      }));
+    }
+    for (const it of tickItems) {
+      tickBroadcast({
+        type: "PlaybackStateChanged",
+        data: {
+          playlist_id: it.playlist_id,
+          state: it.state,
+          mode: "Continuous",
+        },
+      });
+      tickNowPlaying(it);
+    }
+  } else {
+    tickItems = [];
+  }
+  res.json({ status: "ok", enabled: tickEnabled, items: tickItems.length });
+});
+
+// The 500 ms position-advance broadcaster (module-global, started once). It is
+// a no-op unless a spec turned tick mode on.
+setInterval(() => {
+  if (!tickEnabled) return;
+  for (const it of tickItems) {
+    it.position_ms = Math.min(it.position_ms + it.step_ms, it.duration_ms);
+    tickNowPlaying(it);
+  }
+}, 500);
+
 // SPA fallback — serve index.html for unmatched routes
 app.get("*", (_req, res) => {
   res.sendFile(join(distPath, "index.html"));
@@ -974,6 +1112,31 @@ previewWss.on("connection", (ws) => {
 wss.on("connection", (ws) => {
   console.log("[mock-api] WebSocket client connected");
   wsClients.add(ws);
+
+  // #194 r3b: seed the shared HealthBar's OBS + tools segments so the strip
+  // shows real values in the E2E (the real server pushes these over WS).
+  try {
+    ws.send(
+      JSON.stringify({
+        type: "ObsStatus",
+        data: { connected: true, active_scene: "sp-alex" },
+      }),
+    );
+    ws.send(
+      JSON.stringify({
+        type: "ToolsStatus",
+        data: {
+          ytdlp_available: true,
+          ffmpeg_available: true,
+          ytdlp_version: "2026.09.01",
+          js_runtime_ok: true,
+          deno_version: "2.0.0",
+        },
+      }),
+    );
+  } catch {
+    // client vanished before the seed — ignore.
+  }
 
   // #15 part 2: mark playlist 1 as Playing so its card renders the live
   // video preview <img> (playlist 1's preview.jpg serves a real JPEG above).

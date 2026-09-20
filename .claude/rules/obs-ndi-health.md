@@ -218,3 +218,117 @@ poll`.
 
 ## Reading the health snapshot's `state` — `Playing` already means "on program" (#154)
 `handle_health_snapshot` RECONCILES the pipeline-reported state before storing it: a pipeline that is `Playing` but whose scene is NOT on OBS program (`scene_active == false`) is stored as `Paused`, not `Playing`. So a consumer that reads `NdiHealthRegistry::snapshots()` and checks `state == PlaybackStateLabel::Playing` is already getting "an output is playing AND OBS is showing it" — you do NOT need to also cross-reference `active_playlist_ids`. The #154 lyrics idle gate relies on exactly this (`lyrics/idle_gate.rs::any_playing`): "any snapshot Playing" = "the wall is showing an output" = defer heavy GPU work. Read the registry in-process (the engine already holds the `Arc`); never HTTP-loop `/api/v1/ndi/health` back to your own server.
+
+## A restart is a receiver lottery until camera-box re-resolves — pin the name→port map (#196)
+DistroAV's genlock build reconnects a stale source **BY URL with the PINNED
+previous port** (`reset_ndi_receiver: connect BY-URL '10.77.9.201:5970'`), and
+the NDI runtime hands each `send_create` the next free TCP port from ~5961 up in
+**creation order**. So if SongPlayer creates its senders in a non-deterministic
+order across a restart (the old lazy / thread-raced path), a stream name can
+move to a different port and the receiver's by-URL reconnect lands on the wrong
+or a dead sender → `connections=0` on the on-program output = dark wall, and the
+#173 receiver-side ladder CANNOT clear it (only another restart re-rolls it). Fix
+(round 1): **deterministic, restart-safe creation** in `playback/startup_senders.rs`
++ `runtime_pipeline.rs::ensure_pipeline_inner`:
+- **Port-availability wait first** (`wait_for_ports_free` + `ndi_ports_free`, ≤10 s
+  poll on 5960..=5960+N+1) so an immediate restart waits for the previous
+  instance's listeners to release before creating — same span, same assignment.
+- **Serialized id-order creation:** `create_startup_senders` creates each active
+  playlist's sender one at a time in `playlist.id` order, waiting for a per-pipeline
+  ready one-shot (fired by the pipeline thread right after `send_create`) before the
+  next — so `send_create` runs in a fixed order every restart, not OS-scheduler order.
+  Runs before the engine command loop drains scene events, so no lazy scene-triggered
+  creation preempts it.
+- Box-verified 2026-09-20: after a deploy restart, on-program SP-slow
+  `connections=2`, every output 2–4, no dark wall.
+- **No dark-wall ladder for an output with no OBS input** (`effective_dark_reason`
+  + `PlaybackEngine::output_has_obs_input`, tokio `try_read` on the shared
+  `NdiSourceMap`): a Playing-on-program output at `connections=0` whose stream is
+  advertised by NO OBS NDI input gets `degraded_reason = "no OBS scene for this
+  output"` (not the dark-wall reason), so `is_dark` is false and the every-10 s
+  degraded/recovered flap stops (the SP-dabing-before-its-scene case).
+
+**GOTCHA — `NDIlib_send_get_source_name().p_url_address` is EMPTY for a local
+sender (#196).** The round-1 plan surfaced each sender's advertised `host:port`
+as `sender_url` on `/api/v1/ndi/health` by reading `p_url_address` from
+`NDIlib_send_get_source_name`. On the real win-resolume NDI runtime that field is
+empty for a LOCAL sender (verified: `sender_url` null for all 10 outputs on a
+stable process, even with a ≤2 s post-create retry) — `send_get_source_name`
+returns the sender's NAME (`p_ndi_name`), not the URL a receiver connects to. The
+port ASSIGNMENT is still deterministic; only its DISPLAY via `sender_url` was
+unavailable this way.
+
+## The name→port map is read via `NDIlib_find`, not the sender getter (#196 round 2)
+
+The ruling on the GOTCHA above: read each sender's advertised `host:port` from
+the SDK's OWN discovery, not the sender-side getter.
+`sp_ndi::NdiBackend::discover_local_sources` opens ONE `NDIlib_find_create_v2`
+(`show_local_sources = true`) AFTER the id-ordered startup senders exist, polls
+`NDIlib_find_get_current_sources` for ≤ 3 s until every own name appears, records
+`p_url_address` per output, then destroys the finder;
+`startup_senders::discover_and_record_sender_urls` matches the discovered
+`(name, url)` to our outputs with the pure `sp_ndi::find::{source_matches,
+match_source_urls}` (`"RESOLUME-SNV (SP-x)"` matches own bare `"SP-x"` by the
+`"(<bare>)"` suffix), writes them into `NdiHealthRegistry` (surfaced as
+`sender_url` on `/api/v1/ndi/health`), and logs one `ndi: sender ready
+name=SP-x url=10.77.9.201:5963` line per output (one WARN if a name never
+appears within 3 s). It retries ONCE at +30 s (the finder can take a moment to
+see a fresh local sender). `MockNdiBackend::set_discovered_sources` drives the
+whole match path on Linux; `send_get_source_name` stays only as the name check.
+
+## Post-restart receiver self-check — the ladder is NOT the tool for it (#196 round 2)
+
+The #173 receiver-side ladder CANNOT clear a restart wedge (only another restart
+re-rolls it), so a distinct, LADDER-FREE self-check makes a failed post-restart
+reconnect VISIBLE instead:
+
+- **Baseline:** each health poll persists the per-output receiver count in the
+  `settings` table (`db/models_ndi.rs`, key `ndi_last_receivers_<id>`, one row per
+  output — never `db/models.rs` at the 1000-line cap). At startup that map is read
+  back ONCE (`NdiHealthRegistry::seed_pre_restart_counts`) as the PRE-restart
+  baseline; the live counts keep being persisted for the NEXT restart.
+- **Decision (pure, in `sp_core::health::no_receiver_after_restart`,
+  exact-boundary + mutation tested):** 30 s after the senders are ready
+  (`mark_senders_ready` → `elapsed_since_ready`), an output that is on program OR
+  had `≥ 1` receiver before the restart, has NOT reconnected since (a one-time
+  latch — once it reaches `≥ 1` it is never flagged again this process, so a
+  later legitimate off-program drop is not a restart failure), and still has
+  `< 1` receiver → `degraded_reason = "no receiver after restart"`
+  (`sp_core::health::NO_RECEIVER_AFTER_RESTART_REASON`). This is a NON-dark-wall
+  reason, so `is_dark` is false and the ladder never runs; ONE WARN per output
+  (latched, cleared on recovery); the manual `POST /api/v1/ndi/recover/{id}`
+  stays. Precedence: the "no OBS scene for this output" reason (item 5) wins over
+  the self-check when there is genuinely no OBS input.
+- **HealthBar:** the shared `HealthBar` renders a `health-ndi` segment
+  `NDI: N výstup(y/ov) bez prijímača` (Slovak plural via
+  `sp_core::health::ndi_label`/`ndi_output_word`), hidden when N=0, clearing the
+  moment they reconnect. It counts snapshots whose `degraded_reason` equals the
+  shared reason string.
+- **Caveat:** a previously-connected output intentionally taken OFF program right
+  at the restart (and never re-subscribed) can read as flagged until it reconnects
+  once — accepted (the wall is a persistent installation where DistroAV keeps
+  off-program `sp-*` sources subscribed, so a previously-connected output that
+  stays 0 IS the anomaly worth surfacing).
+
+## One restart per push (#196 round 2)
+
+The Deploy job starts SongPlayer; the post-deploy E2E job then restarted it
+AGAIN, doubling the per-push receiver-lottery rolls. `/api/v1/status` now carries
+`uptime_s` (`crate::process_start`, marked at the top of `lib::start`), and the
+E2E "Restart SongPlayer" step SKIPS the restart (`exit 0`) when the running
+process reports the deployed `VERSION` (from the checkout) AND `uptime_s < 600` —
+i.e. it IS the fresh Deploy-started process — logging which branch it takes.
+The engine's OBS scene-poll reconcile + the OBS-client reconnect backoff cover
+the "pick up OBS after OBS start" case the restart used to serve.
+
+## A restart is a receiver lottery until camera-box re-resolves — SongPlayer keeps the map stable
+
+DistroAV's genlock build reconnects a stale source BY URL with the PINNED
+previous port; SongPlayer's job is to keep the name→port map IDENTICAL across
+restarts (round 1: port-availability wait + serialized id-order creation) so that
+by-URL reconnect lands on the right sender. SongPlayer now also MAKES the map
+visible (`sender_url` via `NDIlib_find`) and ESCALATES a failed reconnect
+(the self-check above) — but the receiver-side re-resolve after a sender restart
+is camera-box's (camera-box#1096/#1302). Read `sender_url` per output on
+`/api/v1/ndi/health` to confirm the map is stable across the 10-restart box
+acceptance.

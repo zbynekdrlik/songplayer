@@ -91,6 +91,63 @@ unsafe impl Send for NDIlib_send_create_t {}
 unsafe impl Sync for NDIlib_send_create_t {}
 
 // ---------------------------------------------------------------------------
+// Source descriptor
+// ---------------------------------------------------------------------------
+
+/// Source descriptor returned by `NDIlib_send_get_source_name` (#196).
+///
+/// The NDI SDK declares `p_url_address` inside an anonymous union with the
+/// deprecated `p_ip_address`; both are a single `*const c_char`, so a single
+/// pointer field is layout-compatible with the union. We only read
+/// `p_url_address` — the `host:port` a DistroAV receiver reconnects to.
+#[repr(C)]
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub struct NDIlib_source_t {
+    /// NDI source name (UTF-8, null-terminated), e.g. `"RESOLUME-SNV (SP-fast)"`.
+    pub p_ndi_name: *const c_char,
+    /// URL/IP address of the source (UTF-8, null-terminated), e.g.
+    /// `"10.77.9.201:5963"`, or null. Union with the deprecated `p_ip_address`.
+    pub p_url_address: *const c_char,
+}
+
+// SAFETY: raw pointers into SDK-owned, short-lived storage; the wrapper copies
+// the string out immediately and never retains the struct.
+unsafe impl Send for NDIlib_source_t {}
+unsafe impl Sync for NDIlib_source_t {}
+
+// ---------------------------------------------------------------------------
+// Source finder (#196)
+// ---------------------------------------------------------------------------
+
+/// Opaque handle returned by `NDIlib_find_create_v2` (#196). One finder
+/// discovers every NDI source on the network (and, with
+/// `show_local_sources = true`, this machine's own senders), so we can read the
+/// advertised `host:port` the sender-side `NDIlib_send_get_source_name` leaves
+/// empty for a local sender.
+#[allow(non_camel_case_types)]
+pub enum NDIlib_find_instance_t {}
+
+/// Passed to `NDIlib_find_create_v2` to configure a source finder (#196).
+#[repr(C)]
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub struct NDIlib_find_create_t {
+    /// If true, sources on THIS machine are discovered too — we need our own
+    /// senders' URLs, so this is always `true`.
+    pub show_local_sources: bool,
+    /// Comma-separated group list, or null for the default group.
+    pub p_groups: *const c_char,
+    /// Comma-separated extra IPs to search, or null.
+    pub p_extra_ips: *const c_char,
+}
+
+// SAFETY: raw pointers + a bool; the caller keeps the pointed-to strings (here
+// always null) alive for the duration of the `find_create` call.
+unsafe impl Send for NDIlib_find_create_t {}
+unsafe impl Sync for NDIlib_find_create_t {}
+
+// ---------------------------------------------------------------------------
 // Video frame
 // ---------------------------------------------------------------------------
 

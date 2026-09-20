@@ -20,6 +20,7 @@ fn pipeline_spawn_and_shutdown() {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
+        None,
     );
     pipeline.shutdown();
     // If we get here, the thread joined successfully.
@@ -43,6 +44,7 @@ fn pipeline_drop_sends_shutdown() {
                 ),
                 stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
             },
+            None,
         );
         // Pipeline dropped here — Drop impl should send Shutdown and join.
     }
@@ -63,6 +65,7 @@ fn pipeline_send_command_before_shutdown() {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
+        None,
     );
     pipeline.send(PipelineCommand::Stop);
     pipeline.send(PipelineCommand::Pause);
@@ -84,6 +87,7 @@ fn pipeline_play_emits_event_on_non_windows() {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
+        None,
     );
 
     pipeline.send(PipelineCommand::Play {
@@ -152,6 +156,7 @@ fn pipeline_send_seek_command() {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
+        None,
     );
     pipeline.send(PipelineCommand::Seek { position_ms: 5000 });
     pipeline.shutdown();
@@ -179,6 +184,7 @@ fn pipeline_processes_multiple_sequential_plays() {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
+        None,
     );
 
     pipeline.send(PipelineCommand::Play {
@@ -240,6 +246,7 @@ fn play_with_start_position_ms_is_accepted() {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
+        None,
     );
 
     pipeline.send(PipelineCommand::Play {

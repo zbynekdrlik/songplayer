@@ -9,8 +9,8 @@ use tracing::{debug, error, info};
 use crate::error::NdiError;
 use crate::network_ready;
 use crate::types::{
-    NDIlib_audio_frame_v3_t, NDIlib_send_create_t, NDIlib_send_instance_t, NDIlib_tally_t,
-    NDIlib_video_frame_v2_t,
+    NDIlib_audio_frame_v3_t, NDIlib_find_create_t, NDIlib_find_instance_t, NDIlib_send_create_t,
+    NDIlib_send_instance_t, NDIlib_source_t, NDIlib_tally_t, NDIlib_video_frame_v2_t,
 };
 
 // ---------------------------------------------------------------------------
@@ -31,6 +31,15 @@ type FnSendAudioV3 =
 type FnSendGetTally =
     unsafe extern "C" fn(*mut NDIlib_send_instance_t, *mut NDIlib_tally_t, u32) -> bool;
 type FnSendGetNoConnections = unsafe extern "C" fn(*mut NDIlib_send_instance_t, u32) -> i32;
+type FnSendGetSourceName =
+    unsafe extern "C" fn(*mut NDIlib_send_instance_t) -> *const NDIlib_source_t;
+// #196: NDI source finder — read each local sender's advertised `host:port`.
+type FnFindCreateV2 =
+    unsafe extern "C" fn(*const NDIlib_find_create_t) -> *mut NDIlib_find_instance_t;
+type FnFindWaitForSources = unsafe extern "C" fn(*mut NDIlib_find_instance_t, u32) -> bool;
+type FnFindGetCurrentSources =
+    unsafe extern "C" fn(*mut NDIlib_find_instance_t, *mut u32) -> *const NDIlib_source_t;
+type FnFindDestroy = unsafe extern "C" fn(*mut NDIlib_find_instance_t);
 
 // ---------------------------------------------------------------------------
 // NdiLib — owns the library handle and resolved function pointers
@@ -53,6 +62,12 @@ pub struct NdiLib {
     pub(crate) send_send_audio_v3: FnSendAudioV3,
     pub(crate) send_get_tally: FnSendGetTally,
     pub(crate) send_get_no_connections: FnSendGetNoConnections,
+    pub(crate) send_get_source_name: FnSendGetSourceName,
+    // #196: source finder.
+    pub(crate) find_create_v2: FnFindCreateV2,
+    pub(crate) find_wait_for_sources: FnFindWaitForSources,
+    pub(crate) find_get_current_sources: FnFindGetCurrentSources,
+    pub(crate) find_destroy: FnFindDestroy,
 }
 
 // SAFETY: The function pointers are loaded from a shared library and are
@@ -95,6 +110,18 @@ impl NdiLib {
                 &library,
                 b"NDIlib_send_get_no_connections\0",
             )?;
+            let send_get_source_name =
+                Self::resolve::<FnSendGetSourceName>(&library, b"NDIlib_send_get_source_name\0")?;
+            // #196: source finder — read each local sender's advertised URL.
+            let find_create_v2 =
+                Self::resolve::<FnFindCreateV2>(&library, b"NDIlib_find_create_v2\0")?;
+            let find_wait_for_sources =
+                Self::resolve::<FnFindWaitForSources>(&library, b"NDIlib_find_wait_for_sources\0")?;
+            let find_get_current_sources = Self::resolve::<FnFindGetCurrentSources>(
+                &library,
+                b"NDIlib_find_get_current_sources\0",
+            )?;
+            let find_destroy = Self::resolve::<FnFindDestroy>(&library, b"NDIlib_find_destroy\0")?;
 
             // Gate NDIlib_initialize() on adapter readiness — the runtime
             // binds its mDNS announce socket once at init and never re-evaluates.
@@ -122,6 +149,11 @@ impl NdiLib {
                 send_send_audio_v3,
                 send_get_tally,
                 send_get_no_connections,
+                send_get_source_name,
+                find_create_v2,
+                find_wait_for_sources,
+                find_get_current_sources,
+                find_destroy,
             })
         }
     }

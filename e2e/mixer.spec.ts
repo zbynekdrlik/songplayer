@@ -182,6 +182,30 @@ test.describe("song mixer", () => {
 
 // ── Dub mixer — Dabing page ─────────────────────────────────────────────────
 
+// #194: the dub mixer no longer renders per dabing ROW — it lives in the Dabing
+// page's shared <Player/> (top of the page) and appears only when the PLAYING
+// item on the Dabing playlist (id 500) is a dub video. The Player picks the dub
+// adapter when the now-playing `video_id` for the playlist matches a row in
+// `store.dabing`. Drive it: dabing-add the row, wait for it to land in
+// store.dabing (its list row renders), then broadcast a NowPlaying for the
+// Dabing playlist carrying that `video_id`.
+const DABING_PLAYLIST_ID = 500;
+async function playDubInPlayer(page, videoId, title) {
+  await expect(
+    page.locator(
+      `[data-testid="dabing-list"] .song-row[data-video-id="${videoId}"]`,
+    ),
+  ).toBeVisible({ timeout: 10000 });
+  await page.request.post("/__mock/now-playing", {
+    data: {
+      playlist_id: DABING_PLAYLIST_ID,
+      video_id: videoId,
+      song: title,
+      duration_ms: 200000,
+    },
+  });
+}
+
 test.describe("dub mixer", () => {
   test.beforeEach(async ({ page }) => {
     await page.request.post("/__mock/dabing-reset");
@@ -203,6 +227,7 @@ test.describe("dub mixer", () => {
       },
     });
     await page.goto("/dabing");
+    await playDubInPlayer(page, 700, "Svedectvo");
     const mixer = page.locator(".mixer.mixer-dub").first();
     await expect(mixer).toBeVisible({ timeout: 10000 });
     // #182: without stems only originál + dabing (no ambient) — two channels +
@@ -238,6 +263,7 @@ test.describe("dub mixer", () => {
       },
     });
     await page.goto("/dabing");
+    await playDubInPlayer(page, 701, "Svedectvo B");
     const mixer = page.locator(".mixer.mixer-dub").first();
     await expect(mixer).toBeVisible({ timeout: 10000 });
     // #182: WITH stems the full three-fader strip (originál hlas / dabing /
@@ -271,6 +297,7 @@ test.describe("dub mixer", () => {
       },
     });
     await page.goto("/dabing");
+    await playDubInPlayer(page, 702, "Svedectvo C");
     const mixer = page.locator(".mixer.mixer-dub").first();
     await expect(mixer).toBeVisible({ timeout: 10000 });
     await expect(mixer).toHaveClass(/mixer-locked/);

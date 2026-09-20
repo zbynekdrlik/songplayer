@@ -62,7 +62,7 @@ pub fn LyricsQueueCard() -> impl IntoView {
         last_reprocess.get().and_then(|r| {
             if r.blocked_by_asr_gap > 0 {
                 let msg = format!(
-                    "{} of {} blocked by asr_gap — bump LYRICS_PIPELINE_VERSION to retry",
+                    "{} z {} zablokovaných (asr_gap) — na zopakovanie zvýš LYRICS_PIPELINE_VERSION",
                     r.blocked_by_asr_gap,
                     r.queued + r.blocked_by_asr_gap,
                 );
@@ -77,10 +77,15 @@ pub fn LyricsQueueCard() -> impl IntoView {
 
     view! {
         <div class="lyrics-queue-card">
-            <h2>"Lyrics Pipeline"</h2>
+            <h2>"Spracovanie textov"</h2>
             {banner}
             {move || match queue.get() {
-                None => view! { <p>"Loading queue..."</p> }.into_any(),
+                None => view! {
+                    <crate::components::state_block::StateBlock
+                        kind=crate::components::state_block::StateKind::Loading
+                    />
+                }
+                .into_any(),
                 Some(q) => {
                     let proc_block = q.processing.as_ref().map(|p| {
                         let stage_label = match p.provider.as_ref() {
@@ -101,9 +106,9 @@ pub fn LyricsQueueCard() -> impl IntoView {
                         } else {
                             view! {
                                 <div class="lyrics-processing">
-                                    <strong>"Currently processing: "</strong>
+                                    <strong>"Práve sa spracúva: "</strong>
                                     {format!("{} \u{2014} {}", p.song, p.artist)}
-                                    <div>"Stage: "{stage_label}</div>
+                                    <div>"Fáza: "{stage_label}</div>
                                 </div>
                             }
                             .into_any()
@@ -113,18 +118,18 @@ pub fn LyricsQueueCard() -> impl IntoView {
                         <>
                             {proc_block}
                             <ul class="lyrics-queue-counts">
-                                <li>"Manual: "<b>{q.bucket0}</b></li>
-                                <li>"New: "<b>{q.bucket1}</b></li>
+                                <li>"Ručne: "<b>{q.bucket0}</b></li>
+                                <li>"Nové: "<b>{q.bucket1}</b></li>
                                 <li>
-                                    "Stale: "<b>{q.bucket2}</b>
+                                    "Zastarané: "<b>{q.bucket2}</b>
                                     <button on:click=on_reprocess_all>
-                                        "Reprocess all stale"
+                                        "Spracovať všetky zastarané"
                                     </button>
                                 </li>
                             </ul>
                             <div class="lyrics-pipeline-version">
-                                "Pipeline version: "<b>{q.pipeline_version}</b>
-                                <button on:click=on_clear_manual>"Clear manual queue"</button>
+                                "Verzia spracovania: "<b>{q.pipeline_version}</b>
+                                <button on:click=on_clear_manual>"Vyprázdniť ručnú frontu"</button>
                             </div>
                         </>
                     }

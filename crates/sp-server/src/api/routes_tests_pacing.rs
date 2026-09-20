@@ -61,6 +61,7 @@ async fn ndi_health_endpoint_includes_pacing() {
         lock_reason: "locked".to_string(),
         burn_on: false,
         recovery_step: None,
+        sender_url: None,
     });
 
     let resp = app(state)

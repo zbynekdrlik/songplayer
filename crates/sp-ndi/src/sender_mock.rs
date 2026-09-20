@@ -29,6 +29,15 @@ pub struct MockNdiBackend {
     video_timecodes: StdMutex<Vec<i64>>,
     /// Resolved audio timecodes, same convention as `video_timecodes`.
     audio_timecodes: StdMutex<Vec<i64>>,
+    /// Overrides what `send_get_source_url` returns (#196). `None` (default)
+    /// makes the getter return a deterministic synthetic `127.0.0.1:59<hh>`
+    /// derived from the handle; a set value is returned verbatim so tests can
+    /// assert a specific advertised URL flows through to the health snapshot.
+    source_url: StdMutex<Option<String>>,
+    /// #196: what `discover_local_sources` returns — the (synthetic) `(name,
+    /// url)` pairs a test injects to drive the finder → `match_source_urls`
+    /// path on Linux. Empty by default (no NDI runtime).
+    discovered_sources: StdMutex<Vec<(String, String)>>,
 }
 
 impl MockNdiBackend {
@@ -63,6 +72,19 @@ impl MockNdiBackend {
     /// real NDI runtime.
     pub fn set_connection_count(&self, n: i32) {
         self.connection_count.store(n, Ordering::SeqCst);
+    }
+
+    /// Override what `send_get_source_url` returns (#196). Pass `Some(url)` to
+    /// assert a specific advertised `host:port` flows through the health path;
+    /// leaving it unset yields a deterministic synthetic address.
+    pub fn set_source_url(&self, url: Option<String>) {
+        *self.source_url.lock().unwrap() = url;
+    }
+
+    /// #196: set the (synthetic) sources `discover_local_sources` returns, so a
+    /// Linux test can drive the finder → `find::match_source_urls` path.
+    pub fn set_discovered_sources(&self, sources: Vec<(String, String)>) {
+        *self.discovered_sources.lock().unwrap() = sources;
     }
 }
 
@@ -165,5 +187,30 @@ impl NdiBackend for MockNdiBackend {
             .unwrap()
             .push(format!("send_get_no_connections({handle},{timeout_ms})"));
         self.connection_count.load(Ordering::SeqCst)
+    }
+
+    fn send_get_source_url(&self, handle: usize) -> Option<String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("send_get_source_url({handle})"));
+        match &*self.source_url.lock().unwrap() {
+            Some(u) => Some(u.clone()),
+            // Deterministic synthetic address (handle 42 → 127.0.0.1:5942) so a
+            // Linux test can assert the URL threads through to the snapshot.
+            None => Some(format!("127.0.0.1:59{:02}", handle % 100)),
+        }
+    }
+
+    fn discover_local_sources(
+        &self,
+        want_names: &[String],
+        _overall_timeout_ms: u32,
+    ) -> Vec<(String, String)> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("discover_local_sources({})", want_names.len()));
+        self.discovered_sources.lock().unwrap().clone()
     }
 }

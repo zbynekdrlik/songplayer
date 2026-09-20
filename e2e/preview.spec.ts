@@ -56,29 +56,135 @@ async function startPreview(page: Page) {
 
 test("clicking start streams live A/V into an MSE <video> that decodes and advances", async ({
   page,
+  request,
 }) => {
   const { video } = await startPreview(page);
 
-  // readyState >= 3 (HAVE_FUTURE_DATA) proves the browser actually DECODED the
-  // streamed H.264+AAC — a broken stream or a codec-less browser never gets here.
-  await expect
-    .poll(async () => video.evaluate((el: HTMLVideoElement) => el.readyState), {
-      timeout: 15000,
-    })
-    .toBeGreaterThanOrEqual(3);
+  // #194: run the decode assertion WITH the 500 ms now-playing position tick
+  // flowing — a live position tick must never disturb the preview stream.
+  await request.post("/__mock/tick", {
+    data: {
+      enabled: true,
+      items: [
+        {
+          playlist_id: 1,
+          video_id: 1,
+          song: "Never Gonna Give You Up",
+          duration_ms: 213000,
+          position_ms: 0,
+          state: "Playing",
+        },
+      ],
+    },
+  });
+  try {
+    // readyState >= 3 (HAVE_FUTURE_DATA) proves the browser actually DECODED the
+    // streamed H.264+AAC — a broken stream or a codec-less browser never gets here.
+    await expect
+      .poll(
+        async () => video.evaluate((el: HTMLVideoElement) => el.readyState),
+        { timeout: 15000 },
+      )
+      .toBeGreaterThanOrEqual(3);
 
-  // Real decoded geometry (the fixture is 640x360).
-  const width = await video.evaluate((el: HTMLVideoElement) => el.videoWidth);
-  expect(width).toBeGreaterThan(0);
+    // Real decoded geometry (the fixture is 640x360).
+    const width = await video.evaluate((el: HTMLVideoElement) => el.videoWidth);
+    expect(width).toBeGreaterThan(0);
 
-  // currentTime advances — the media is actually playing, not just buffered.
-  const t0 = await video.evaluate((el: HTMLVideoElement) => el.currentTime);
-  await expect
-    .poll(
-      async () => video.evaluate((el: HTMLVideoElement) => el.currentTime),
-      { timeout: 10000 },
-    )
-    .toBeGreaterThan(t0 + 0.05);
+    // currentTime advances — the media is actually playing, not just buffered.
+    const t0 = await video.evaluate((el: HTMLVideoElement) => el.currentTime);
+    await expect
+      .poll(
+        async () => video.evaluate((el: HTMLVideoElement) => el.currentTime),
+        { timeout: 10000 },
+      )
+      .toBeGreaterThan(t0 + 0.05);
+  } finally {
+    await request.post("/__mock/tick", { data: { enabled: false } });
+  }
+});
+
+test("the Dabing Player preview survives position ticks — WS opened once, never closed (#194)", async ({
+  page,
+  request,
+}) => {
+  // The #194 box regression: the Dabing page re-set an unchanged playlist id
+  // every 2 s, re-creating the whole Player → the preview <video> unmounted and
+  // its WebSocket was torn down right after opening ("WebSocket is closed before
+  // the connection is established"). Here the preview WS actually opens (branded
+  // Chrome has the codecs), so we can prove it opens ONCE and never closes while
+  // the 500 ms position tick runs.
+  const previewSockets: { closed: boolean }[] = [];
+  page.on("websocket", (ws) => {
+    if (ws.url().includes("/preview.ws")) {
+      const rec = { closed: false };
+      ws.on("close", () => {
+        rec.closed = true;
+      });
+      previewSockets.push(rec);
+    }
+  });
+
+  await request.post("/__mock/dabing-reset");
+  await request.post("/__mock/dabing-add", {
+    data: {
+      video_id: 344,
+      title: "Morning Prayer",
+      dub_status: "ready",
+      stem_status: null,
+      dub_mix_ratio: 1.0,
+    },
+  });
+  await page.goto("/dabing");
+  await expect(page.getByTestId("player")).toBeVisible({ timeout: 15000 });
+  await request.post("/__mock/tick", {
+    data: {
+      enabled: true,
+      items: [
+        {
+          playlist_id: 500,
+          video_id: 344,
+          song: "Morning Prayer",
+          duration_ms: 200000,
+          position_ms: 0,
+          state: "Playing",
+        },
+      ],
+    },
+  });
+
+  try {
+    await page.getByTestId("preview-start").click();
+    const video = page.getByTestId("preview-video");
+    await expect(video).toBeVisible({ timeout: 10000 });
+    await expect
+      .poll(
+        async () => video.evaluate((el: HTMLVideoElement) => el.readyState),
+        { timeout: 15000 },
+      )
+      .toBeGreaterThanOrEqual(3);
+
+    const playerHandle = await page.getByTestId("player").elementHandle();
+    const videoHandle = await video.elementHandle();
+
+    // Let >= 8 s of 500 ms position ticks flow.
+    await page.waitForTimeout(8000);
+
+    // The regression proof: the SAME Player + <video> elements are still
+    // connected (the Player was NOT re-created by the ticks) and the preview WS
+    // opened exactly once and NEVER closed across the 8 s of ticks. (We do not
+    // re-assert readyState here — the mock streams a FINITE canned fMP4 fragment
+    // list, so after ~2 s the short clip has played out and readyState drops;
+    // the initial readyState>=3 above already proved it decoded, and a torn-down
+    // preview would have shown up as a closed/duplicate WS, which it did not.)
+    expect(await playerHandle!.evaluate((el) => el.isConnected)).toBe(true);
+    expect(await videoHandle!.evaluate((el) => el.isConnected)).toBe(true);
+    expect(previewSockets.length).toBe(1);
+    expect(previewSockets[0].closed).toBe(false);
+  } finally {
+    await request.post("/__mock/tick", { data: { enabled: false } });
+    await request.post("/__mock/dabing-reset");
+  }
 });
 
 test("the click-started <video> ends up audible (unmuted directly or via the unmute button)", async ({
@@ -141,7 +247,7 @@ test("idle card shows the preview placeholder and no start control or <video>", 
     timeout: 10000,
   });
   await page
-    .getByTestId("playlist-selector-row")
+    .getByTestId("playlist-picker-item")
     .filter({ hasText: "Background" })
     .click();
   await expect(page.getByTestId("workspace-title")).toHaveText("Background");

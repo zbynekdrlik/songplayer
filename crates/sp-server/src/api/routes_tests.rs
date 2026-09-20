@@ -136,6 +136,9 @@ async fn create_and_list_playlists() {
     let json: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
     assert_eq!(json.len(), 1);
     assert_eq!(json[0]["name"], "Test");
+    // #194 r3c: the list exposes `kind` (the shared PlaylistPicker filters by it);
+    // a freshly created playlist defaults to `youtube`.
+    assert_eq!(json[0]["kind"], "youtube");
 }
 
 #[tokio::test]
@@ -332,67 +335,10 @@ async fn playback_previous_returns_no_content() {
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 }
 
-#[tokio::test]
-async fn post_seek_returns_204_and_forwards_to_engine() {
-    let pool = db::create_memory_pool().await.unwrap();
-    db::run_migrations(&pool).await.unwrap();
-    let (event_tx, _) = broadcast::channel(16);
-    let (engine_tx, mut engine_rx) = mpsc::channel(16);
-    let (sync_tx, _) = mpsc::channel(16);
-    let (resolume_tx, _) = mpsc::channel(16);
-    let (obs_rebuild_tx, _) = broadcast::channel(4);
-    let state = AppState {
-        pool,
-        event_tx,
-        engine_tx,
-        obs_state: Arc::new(RwLock::new(crate::obs::ObsState::default())),
-        tools_status: Arc::new(RwLock::new(crate::ToolsStatus::default())),
-        tool_paths: Arc::new(RwLock::new(None)),
-        sync_tx,
-        resolume_tx,
-        obs_rebuild_tx,
-        cache_dir: std::path::PathBuf::from("/tmp/cache"),
-        ai_proxy: std::sync::Arc::new(crate::ai::proxy::ProxyManager::new(
-            std::path::PathBuf::from("/tmp/cache"),
-            crate::ai::proxy::ProxyManager::default_port(),
-        )),
-        ai_client: std::sync::Arc::new(crate::ai::client::AiClient::new(
-            crate::ai::AiSettings::default(),
-        )),
-        presenter_client: None,
-        resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
-        ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-        ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
-        preview_registry: Arc::new(crate::playback::preview::PreviewRegistry::new()),
-        lan_status: crate::mdns::new_status_handle(),
-    };
-
-    let body = serde_json::json!({"position_ms": 45000});
-    let req = Request::builder()
-        .method("POST")
-        .uri("/api/v1/playlists/42/seek")
-        .header("content-type", "application/json")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
-        .unwrap();
-
-    let resp = app(state).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-
-    let cmd = engine_rx
-        .recv()
-        .await
-        .expect("engine must receive a command");
-    match cmd {
-        crate::EngineCommand::Seek {
-            playlist_id,
-            position_ms,
-        } => {
-            assert_eq!(playlist_id, 42);
-            assert_eq!(position_ms, 45000);
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
-}
+// #194: the seek route + its tests moved to `api/routes_seek.rs` /
+// `routes_seek_tests.rs` (unified onto `/api/v1/playback/{id}/seek`, hardened
+// with clamp / 404 / 409). The old always-204 test at `/api/v1/playlists/…`
+// went with it.
 
 /// Regression for issue #8: the dashboard used to POST to
 /// `/api/v1/control` which does not exist on the server, returning 405

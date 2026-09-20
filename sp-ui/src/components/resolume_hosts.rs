@@ -71,10 +71,10 @@ pub fn ResolumeHosts() -> impl IntoView {
             <table>
                 <thead>
                     <tr>
-                        <th>"Name"</th>
+                        <th>"Názov"</th>
                         <th>"IP"</th>
                         <th>"Port"</th>
-                        <th>"Enabled"</th>
+                        <th>"Zapnuté"</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -89,10 +89,10 @@ pub fn ResolumeHosts() -> impl IntoView {
                                     <td>{host.label.clone()}</td>
                                     <td>{host.host.clone()}</td>
                                     <td>{host.port}</td>
-                                    <td>{if host.is_enabled { "Yes" } else { "No" }}</td>
+                                    <td>{if host.is_enabled { "Áno" } else { "Nie" }}</td>
                                     <td>
                                         <button class="delete-btn" on:click=move |_| on_delete(hid)>
-                                            "Delete"
+                                            "Zmazať"
                                         </button>
                                     </td>
                                 </tr>
@@ -105,13 +105,13 @@ pub fn ResolumeHosts() -> impl IntoView {
             <form class="add-host-form" on:submit=on_add>
                 <input
                     type="text"
-                    placeholder="Name"
+                    placeholder="Názov"
                     prop:value=move || name_input.get()
                     on:input=move |ev| name_input.set(event_target_value(&ev))
                 />
                 <input
                     type="text"
-                    placeholder="IP address"
+                    placeholder="IP adresa"
                     prop:value=move || ip_input.get()
                     on:input=move |ev| ip_input.set(event_target_value(&ev))
                 />
@@ -121,7 +121,7 @@ pub fn ResolumeHosts() -> impl IntoView {
                     prop:value=move || port_input.get()
                     on:input=move |ev| port_input.set(event_target_value(&ev))
                 />
-                <button type="submit">"Add Host"</button>
+                <button type="submit">"Pridať hostiteľa"</button>
             </form>
         </div>
     }

@@ -1,32 +1,64 @@
-//! #165: the playlist selector — the left panel (a `<select>` above the work
-//! area on ≤700 px) that lists every playlist and drives which one the single
-//! work area shows. Rows are ordered ALPHABETICALLY and STABLE (#170 — never
-//! playing-first, so a row never jumps under the operator's cursor); each row
-//! shows a playback glyph (▶ / ⏸ / –), the name, the NDI output/scene, and the
-//! #164 genlock badge (only where actionable). Both the desktop list and the
-//! mobile `<select>` are always in the DOM; CSS toggles which is visible.
+//! #194 ROUND 3c: the ONE playlist chooser + selection state, used on every
+//! page that picks a playlist (Dashboard, Live, Lyrics). It replaces the
+//! Dashboard-only `playlist_selector.rs`, the hardcoded `name == "ytlive"`
+//! lookup in `pages/live.rs`, and drives the per-playlist sections on
+//! `pages/lyrics.rs` — one chooser, one selection state
+//! (`store.selected_playlist`), rendered identically wherever a playlist is
+//! chosen.
 //!
-//! #170: both use a keyed `<For each=… key=…>` whose `each` reads ONLY
-//! `store.playlists` (never `store.now_playing`), so a 500 ms position tick
-//! does NOT recreate/re-order the rows — the glyph + `selected` class are
-//! per-row reactive and update in place. This removes the full-re-render +
-//! playing-first reorder that raced the Playwright click in post-deploy test 16.
+//! Testids (set INSIDE the component, never injected by a caller — #194 rule):
+//! `playlist-picker` (container), `playlist-picker-item` (each desktop row),
+//! `playlist-picker-select` (the ≤700 px mobile `<select>`), `playlist-picker-
+//! list` (the desktop list). The CSS class names are kept (`playlist-selector-*`)
+//! so the existing `.playlist-selector-row .lock-badge` style + locators resolve.
+//!
+//! #170: both the desktop list and the mobile `<select>` use a keyed `<For>`
+//! whose `each` reads ONLY `store.playlists` (never `store.now_playing`), so a
+//! 500 ms position tick does NOT recreate/re-order the rows — the glyph +
+//! `selected` class are per-row reactive and update in place.
 
 use leptos::prelude::*;
+use sp_core::models::Playlist;
 
 use crate::components::{ndi_health, selection};
 use crate::store::DashboardStore;
 
+/// The visible, ordered playlist set for the picker: filtered by `kinds` (when
+/// given, e.g. `["custom"]` on Live), then alphabetical + stable (#170).
+fn visible_playlists(all: Vec<Playlist>, kinds: &Option<Vec<String>>) -> Vec<Playlist> {
+    let filtered: Vec<Playlist> = match kinds {
+        Some(ks) => all.into_iter().filter(|p| ks.contains(&p.kind)).collect(),
+        None => all,
+    };
+    selection::ordered(&filtered)
+}
+
 #[component]
-pub fn PlaylistSelector() -> impl IntoView {
+pub fn PlaylistPicker(
+    /// Restrict the chooser to these playlist `kind`s (e.g. `["custom"]` on the
+    /// Live page so only live-kind playlists appear). Omit for every playlist
+    /// (Dashboard, Lyrics).
+    #[prop(optional)]
+    kinds: Option<Vec<String>>,
+) -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
+    // Each `<For each=…>` needs its OWN closure (a closure moved into the first
+    // `each` cannot be reused in the second), so clone the filter for each.
+    let kinds_mobile = kinds.clone();
+    let kinds_desktop = kinds;
 
     view! {
-        <div class="playlist-selector-panel">
+        <div class="playlist-selector-panel" data-testid="playlist-picker">
             // Mobile (≤700 px): a native dropdown above the work area.
             <select
                 class="playlist-select-mobile"
-                data-testid="playlist-select"
+                data-testid="playlist-picker-select"
+                // `selected` on an <option> is only honoured at parse time; the
+                // live selection (desktop row click, auto-follow, ?playlist=)
+                // must drive the select's VALUE property (0.60.0 review).
+                prop:value=move || {
+                    store.selected_playlist.get().map(|i| i.to_string()).unwrap_or_default()
+                }
                 on:change=move |ev| {
                     if let Ok(id) = event_target_value(&ev).parse::<i64>() {
                         selection::select(store, id);
@@ -34,7 +66,7 @@ pub fn PlaylistSelector() -> impl IntoView {
                 }
             >
                 <For
-                    each=move || selection::ordered(&store.playlists.get())
+                    each=move || visible_playlists(store.playlists.get(), &kinds_mobile)
                     key=|p| (p.id, p.name.clone(), p.ndi_output_name.clone())
                     children=move |p| {
                         let pid = p.id;
@@ -59,9 +91,9 @@ pub fn PlaylistSelector() -> impl IntoView {
             </select>
 
             // Desktop: a clickable list panel.
-            <div class="playlist-selector-list" data-testid="playlist-selector-list">
+            <div class="playlist-selector-list" data-testid="playlist-picker-list">
                 <For
-                    each=move || selection::ordered(&store.playlists.get())
+                    each=move || visible_playlists(store.playlists.get(), &kinds_desktop)
                     key=|p| (p.id, p.name.clone(), p.ndi_output_name.clone())
                     children=move |p| {
                         let pid = p.id;
@@ -71,7 +103,7 @@ pub fn PlaylistSelector() -> impl IntoView {
                         view! {
                             <button
                                 class="playlist-selector-row"
-                                data-testid="playlist-selector-row"
+                                data-testid="playlist-picker-item"
                                 data-playlist-id=pid.to_string()
                                 class:selected=move || {
                                     store.selected_playlist.get() == Some(pid)

@@ -5,6 +5,7 @@ use leptos::prelude::*;
 use crate::components::lyrics_playlist_section::LyricsPlaylistSection;
 use crate::components::lyrics_queue_card::LyricsQueueCard;
 use crate::components::lyrics_song_detail::LyricsSongDetailModal;
+use crate::components::playlist_picker::PlaylistPicker;
 use crate::store::DashboardStore;
 
 #[component]
@@ -17,6 +18,10 @@ pub fn LyricsPage() -> impl IntoView {
 
     view! {
         <div class="lyrics-page">
+            // #194 r3c: the ONE shared playlist chooser, present on every page.
+            // The per-playlist sections below are driven by the same playlist
+            // list (`store.playlists`) the picker uses.
+            <PlaylistPicker />
             <LyricsQueueCard />
             <For
                 each=move || store.playlists.get()

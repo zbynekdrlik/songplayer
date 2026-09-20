@@ -1,54 +1,43 @@
-//! A single row in the lyrics song list.
+//! A single row in the lyrics song list — the shared `SongRow` (#194) with the
+//! text chip (source + quality folded into its tooltip) and the lyrics actions
+//! (detail / reprocess / translation gender / reference reject).
 
 use leptos::callback::Callable;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use sp_core::status_chip::text_chip;
 
 use crate::api;
+use crate::components::song_row::SongRow;
+use crate::components::status_chips::ChipView;
 use crate::store::{DashboardStore, LyricsSongEntry, ReprocessOutcome};
 
 #[component]
-pub fn LyricsSongRow(
-    entry: LyricsSongEntry,
-    on_details: Callback<i64>,
-) -> impl IntoView {
+pub fn LyricsSongRow(entry: LyricsSongEntry, on_details: Callback<i64>) -> impl IntoView {
     let store = expect_context::<DashboardStore>();
     let last_reprocess = store.last_reprocess;
-    // #142: local reactive copy of the ★ reference flag. Seeded from the
-    // fetched entry; cleared optimistically the moment "Nesedí" feedback
-    // is recorded server-side, so the star disappears without needing a
-    // full re-fetch of the (non-reactive) parent song list.
-    let is_reference = RwSignal::new(entry.lyrics_reference);
     // #152: per-song SK translation gender override. Cycles auto → ♂ → ♀ →
     // auto; each click PATCHes and optimistically flips the glyph.
     let gender = RwSignal::new(entry.translation_gender.clone());
-    let status_class = if !entry.has_lyrics {
-        "status-none"
-    } else if entry.is_stale {
-        "status-stale"
-    } else if entry.quality_score.map(|q| q < 0.5).unwrap_or(false) {
-        "status-warn"
-    } else {
-        "status-ok"
-    };
-    let status_icon = match status_class {
-        "status-ok" => "\u{25CF}",
-        "status-stale" => "\u{25CF}",
-        "status-warn" => "\u{26A0}",
-        _ => "\u{2717}",
-    };
 
-    let display = format!(
-        "{} \u{2014} {}",
-        entry.song.clone().unwrap_or_else(|| entry.youtube_id.clone()),
-        entry.artist.clone().unwrap_or_default()
-    );
-    let source_text = entry.source.clone().unwrap_or_else(|| "\u{2014}".into());
-    let quality_text = entry
-        .quality_score
-        .map(|q| format!("q={q:.2}"))
-        .unwrap_or_default();
     let video_id = entry.video_id;
+    let title = entry
+        .song
+        .clone()
+        .unwrap_or_else(|| entry.youtube_id.clone());
+    let artist = entry.artist.clone().unwrap_or_default();
+
+    // The text chip carries the whole lyrics state; source + quality fold into
+    // its tooltip so the row no longer needs a separate source/quality chip.
+    let source_text = entry.source.clone().unwrap_or_else(|| "—".into());
+    let mut tip = format!("zdroj: {source_text}");
+    if let Some(q) = entry.quality_score {
+        tip.push_str(&format!(", q={q:.2}"));
+    }
+    let chips = vec![ChipView::with_tip(
+        text_chip(entry.has_lyrics, entry.lyrics_reference, entry.is_stale),
+        tip,
+    )];
 
     let on_reprocess = move |_| {
         spawn_local(async move {
@@ -86,61 +75,56 @@ pub fn LyricsSongRow(
         });
     };
 
+    let show_reject = entry.lyrics_reference;
+
     view! {
-        <div class={format!("lyrics-song-row {status_class}")}>
-            <span class="status-icon">{status_icon}</span>
-            <span class="song-display">{display}</span>
-            {move || {
-                is_reference
-                    .get()
-                    .then(|| view! { <span class="reference-badge">"\u{2605}"</span> })
-            }}
-            <span class="source-chip">{source_text}</span>
-            <span class="quality-text">{quality_text}</span>
-            <button on:click=on_details_click>"Details"</button>
-            <button on:click=on_reprocess>"Reprocess"</button>
+        <SongRow video_id=video_id title=title artist=artist chips=chips>
+            <button type="button" class="song-row-btn" on:click=on_details_click>
+                "Detail"
+            </button>
             <button
-                class="translation-gender-btn"
+                type="button"
+                class="song-row-btn"
+                title="Znova spracovať text"
+                on:click=on_reprocess
+            >
+                "Preprac."
+            </button>
+            <button
+                type="button"
+                class="song-row-btn translation-gender-btn"
                 title="Rod prekladu (prvá osoba)"
                 on:click=on_gender
             >
                 {gender_glyph}
             </button>
-            {move || {
-                is_reference
-                    .get()
-                    .then(|| {
-                        // #142: owner flags a starred song as wrong. Prompt
-                        // for a short note, POST it to the feedback
-                        // endpoint, and clear the star on success.
-                        view! {
-                            <button
-                                class="reference-reject-btn"
-                                on:click=move |_| {
-                                    let note = web_sys::window()
-                                        .and_then(|w| {
-                                            w.prompt_with_message("Prečo referenčný text nesedí?")
-                                                .ok()
-                                        })
-                                        .flatten();
-                                    let Some(note) = note.filter(|n| !n.trim().is_empty()) else {
-                                        return;
-                                    };
-                                    spawn_local(async move {
-                                        if api::post_reference_feedback(video_id, &note)
-                                            .await
-                                            .is_ok()
-                                        {
-                                            is_reference.set(false);
-                                        }
-                                    });
-                                }
-                            >
-                                "Nesedí"
-                            </button>
-                        }
-                    })
-            }}
-        </div>
+            {show_reject
+                .then(|| {
+                    // #142: owner flags a starred song as wrong. Prompt for a
+                    // short note, POST it to the feedback endpoint.
+                    view! {
+                        <button
+                            type="button"
+                            class="song-row-btn reference-reject-btn"
+                            title="Referenčný text nesedí"
+                            on:click=move |_| {
+                                let note = web_sys::window()
+                                    .and_then(|w| {
+                                        w.prompt_with_message("Prečo referenčný text nesedí?").ok()
+                                    })
+                                    .flatten();
+                                let Some(note) = note.filter(|n| !n.trim().is_empty()) else {
+                                    return;
+                                };
+                                spawn_local(async move {
+                                    let _ = api::post_reference_feedback(video_id, &note).await;
+                                });
+                            }
+                        >
+                            "Nesedí"
+                        </button>
+                    }
+                })}
+        </SongRow>
     }
 }

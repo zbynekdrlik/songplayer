@@ -10,8 +10,14 @@
 //! immediately reports an error (video decode requires Media Foundation).
 
 use crossbeam_channel::Sender;
-use std::path::PathBuf;
 use std::thread;
+// #196: since PipelineCommand::Play moved to pipeline_types.rs, PathBuf is now
+// referenced only by the cfg(windows) DecodeResult::NewPlay AND by the
+// `#[path]`-included test module (via `super::*`). Gate the import to
+// `any(windows, test)` so it is present in both, but not in the Linux non-test
+// lib build where it would be unused (same pattern as FrameSubmitter above).
+#[cfg(any(windows, test))]
+use std::path::PathBuf;
 
 // Used in cfg(windows) blocks:
 // FrameSubmitter is also needed under `test` cfg — emit_heartbeat /
@@ -28,76 +34,12 @@ use std::time::Instant;
 #[cfg(windows)]
 use tracing::{debug, error, info, warn};
 
-/// Commands sent from the async engine to the pipeline thread.
-#[derive(Debug)]
-pub enum PipelineCommand {
-    /// Start playing a song. Both the video sidecar (`.mp4`) and the audio
-    /// sidecar (`.flac`) must exist. When `start_position_ms` is `Some(ms)`,
-    /// the inner decode loop seeks to that offset BEFORE starting frame
-    /// submission — atomic play-from-position eliminating the race between
-    /// a separate Play+Seek dance (see issue #88).
-    Play {
-        video: PathBuf,
-        audio: PathBuf,
-        start_position_ms: Option<u64>,
-    },
-    /// Pause playback (send black frames).
-    Pause,
-    /// Resume playback after pause.
-    Resume,
-    /// Seek to the given ms offset within the current song. No-op if no
-    /// song is currently loaded.
-    Seek { position_ms: u64 },
-    /// Stop playback entirely (send black, clear reader).
-    Stop,
-    /// Shut down the thread.
-    Shutdown,
-}
-
-/// Events emitted by the pipeline thread back to the async engine.
-// `HealthSnapshot` carries the full NDI/genlock/audio telemetry (#192 added the
-// emitter stats) and is sent once per 5 s poll — its size is irrelevant on this
-// channel, so boxing it would only add an allocation per snapshot.
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone)]
-pub enum PipelineEvent {
-    /// Video playback started; duration is known.
-    Started { duration_ms: u64 },
-    /// Periodic position update.
-    Position { position_ms: u64, duration_ms: u64 },
-    /// Video reached its natural end.
-    Ended,
-    /// An error occurred during playback.
-    Error(String),
-    /// Per-pipeline NDI health heartbeat. Emitted every ~5 seconds by the
-    /// pipeline thread when running on Windows; consumed by
-    /// `PlaybackEngine::handle_health_snapshot` (impl in
-    /// `playback/ndi_health.rs`). The pipeline reports its locally-inferred
-    /// state (Idle / Playing / Paused); the engine reconciles it against
-    /// canonical `PlayState` before publishing to the dashboard.
-    HealthSnapshot {
-        connections: i32,
-        frames_submitted_total: u64,
-        frames_submitted_last_5s: u32,
-        observed_fps: f32,
-        nominal_fps: f32,
-        /// `Instant` is fine on the wire here because emitter and consumer
-        /// are in the same process. The engine maps it to `DateTime<Utc>`
-        /// using a fixed `Instant`-to-`SystemTime` reference before
-        /// publishing.
-        last_submit_ts: Option<std::time::Instant>,
-        last_heartbeat_ts: std::time::Instant,
-        consecutive_bad_polls: u32,
-        reported_state: crate::playback::ndi_health::PlaybackStateLabel,
-        /// Boundary-paced emission telemetry (#147). Default (disabled, zeros)
-        /// from the SDK-clocked / idle heartbeat paths; the paced decode loop
-        /// fills it from the `Pacer`.
-        pacing: crate::playback::ndi_health::PacingStats,
-        /// Audio clock-discipline telemetry (#148); default off the SDK-clocked /
-        /// idle paths, filled from the `Pacer`'s audio buffer + PLL when paced.
-        audio: crate::playback::ndi_health::AudioStats,
-    },
-}
+// #196: the PipelineCommand / PipelineEvent enums live in a sibling module to
+// keep this file under the 1000-line cap; re-exported so every existing
+// `pipeline::PipelineCommand` / `pipeline::PipelineEvent` path still resolves.
+#[path = "pipeline_types.rs"]
+mod pipeline_types;
+pub use pipeline_types::{PipelineCommand, PipelineEvent};
 
 /// Handle to a background decode-to-NDI pipeline thread.
 pub struct PlaybackPipeline {
@@ -123,6 +65,7 @@ impl PlaybackPipeline {
     // Windows variant not exercised on Linux runner. Verified by spawn_stores_ndi_name_for_accessor.
     #[cfg(windows)]
     #[cfg_attr(test, mutants::skip)]
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         ndi_name: String,
         ndi_backend: Option<SharedNdiBackend>,
@@ -131,6 +74,10 @@ impl PlaybackPipeline {
         genlock_pacing: bool,
         burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
         taps: crate::playback::preview::preview_stream::DecodeTaps,
+        // #196: fired with the sender's advertised URL the moment the NDI sender
+        // is created, so `create_startup_senders` can serialize creation in id
+        // order for a stable name→port map.
+        ready_tx: Option<tokio::sync::oneshot::Sender<Option<String>>>,
     ) -> Self {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
@@ -147,6 +94,7 @@ impl PlaybackPipeline {
                     genlock_pacing,
                     burn_on,
                     taps,
+                    ready_tx,
                 );
             })
             .expect("failed to spawn pipeline thread");
@@ -163,6 +111,7 @@ impl PlaybackPipeline {
     // Correctness verified by spawn_stores_ndi_name_for_accessor.
     #[cfg(not(windows))]
     #[cfg_attr(test, mutants::skip)]
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         ndi_name: String,
         _ndi_backend: Option<()>,
@@ -173,7 +122,13 @@ impl PlaybackPipeline {
         // #15 part 2: the decode loop is a stub on non-Windows (no frames are
         // decoded), so the preview tap is never offered to here.
         _taps: crate::playback::preview::preview_stream::DecodeTaps,
+        // #196: no NDI sender exists on this platform — report "ready, no URL"
+        // at once so a startup serializer never blocks on the stub.
+        ready_tx: Option<tokio::sync::oneshot::Sender<Option<String>>>,
     ) -> Self {
+        if let Some(tx) = ready_tx {
+            let _ = tx.send(None);
+        }
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
 
         let ndi_name_for_self = ndi_name.clone();
@@ -221,7 +176,11 @@ impl Drop for PlaybackPipeline {
 }
 
 /// Main loop for the pipeline thread (Windows).
+// mutants::skip — cfg(windows)-only delegation (log + call run_loop_windows);
+// dead on the Linux mutation runner, so a body-replacement mutant can never be
+// killed by a Linux unit test (same as run_loop_windows / decode_and_send).
 #[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
 #[allow(clippy::too_many_arguments)]
 fn run_loop(
     cmd_rx: Receiver<PipelineCommand>,
@@ -232,6 +191,7 @@ fn run_loop(
     genlock_pacing: bool,
     burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
     taps: crate::playback::preview::preview_stream::DecodeTaps,
+    ready_tx: Option<tokio::sync::oneshot::Sender<Option<String>>>,
 ) {
     info!(
         ndi_name,
@@ -246,6 +206,7 @@ fn run_loop(
         genlock_pacing,
         burn_on,
         taps,
+        ready_tx,
     );
     info!(playlist_id, "pipeline thread exited");
 }
@@ -270,6 +231,7 @@ fn run_loop_windows(
     genlock_pacing: bool,
     burn_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
     taps: crate::playback::preview::preview_stream::DecodeTaps,
+    mut ready_tx: Option<tokio::sync::oneshot::Sender<Option<String>>>,
 ) {
     // 1 ms system timer for the boundary-paced sleep granularity (#147).
     if genlock_pacing {
@@ -280,6 +242,10 @@ fn run_loop_windows(
         Some(b) => b,
         None => {
             error!("no NDI backend provided");
+            // #196: unblock the startup serializer — this output has no sender.
+            if let Some(tx) = ready_tx.take() {
+                let _ = tx.send(None);
+            }
             let _ = event_tx.send((
                 playlist_id,
                 PipelineEvent::Error("NDI SDK not available".into()),
@@ -301,6 +267,10 @@ fn run_loop_windows(
         Ok(s) => s,
         Err(e) => {
             error!(%e, "failed to create NDI sender");
+            // #196: unblock the startup serializer — creation failed.
+            if let Some(tx) = ready_tx.take() {
+                let _ = tx.send(None);
+            }
             let _ = event_tx.send((
                 playlist_id,
                 PipelineEvent::Error(format!("Failed to create NDI sender: {e}")),
@@ -310,7 +280,16 @@ fn run_loop_windows(
         }
     };
 
-    info!(ndi_name, genlock_pacing, "NDI sender created");
+    // #196: signal the startup serializer that this sender now exists, so it
+    // creates the next output in playlist.id order (deterministic port
+    // assignment). The advertised name→port URL is NOT read here —
+    // `NDIlib_send_get_source_name`'s `p_url_address` is empty for a local
+    // sender (#196 round-1 finding), so the startup finder pass
+    // (`startup_senders::discover_and_record_sender_urls`, via `NDIlib_find`)
+    // records it instead.
+    if let Some(tx) = ready_tx.take() {
+        let _ = tx.send(None);
+    }
 
     // Initial black frame. Genlock path emits on the fixed integer grid
     // (GENLOCK_GRID_FPS/1) and skips the per-file `set_frame_rate`; the legacy

@@ -103,6 +103,7 @@ fn burn_health_snapshot(burn_on: bool) -> crate::playback::ndi_health::PipelineH
         lock_reason: "locked".to_string(),
         burn_on,
         recovery_step: None,
+        sender_url: None,
     }
 }
 

@@ -6,10 +6,12 @@
 
 pub mod deinterleave;
 pub mod error;
+pub mod find;
 pub mod ndi_sdk;
 pub(crate) mod network_ready;
 pub mod sender;
 pub mod sender_real;
+pub mod source_url;
 pub mod types;
 
 // The mock backend is compiled only for tests / downstream test binaries.

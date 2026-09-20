@@ -600,6 +600,62 @@ fn reported_pipelines_counts_distinct_seeded_snapshots() {
     assert_eq!(reg.reported_pipelines(), 2);
 }
 
+// ---- #196 post-restart receiver self-check registry state ----------------
+
+#[test]
+fn seeded_pre_restart_count_is_read_back_else_zero() {
+    let reg = NdiHealthRegistry::new();
+    assert_eq!(reg.pre_restart_count(4), 0, "unseeded output reads 0");
+    let mut baseline = std::collections::HashMap::new();
+    baseline.insert(4, 2);
+    baseline.insert(9, 0);
+    reg.seed_pre_restart_counts(baseline);
+    assert_eq!(reg.pre_restart_count(4), 2, "seeded value read back");
+    assert_eq!(reg.pre_restart_count(9), 0);
+    assert_eq!(reg.pre_restart_count(99), 0, "unknown output still 0");
+}
+
+#[test]
+fn senders_ready_gates_elapsed_since_ready() {
+    let reg = NdiHealthRegistry::new();
+    assert!(
+        reg.elapsed_since_ready().is_none(),
+        "no elapsed before the senders are marked ready"
+    );
+    reg.mark_senders_ready();
+    assert!(
+        reg.elapsed_since_ready().is_some(),
+        "elapsed is Some once ready"
+    );
+}
+
+#[test]
+fn reconnected_latch_records_per_output() {
+    let reg = NdiHealthRegistry::new();
+    assert!(!reg.has_reconnected(4));
+    reg.mark_reconnected(4);
+    assert!(reg.has_reconnected(4));
+    assert!(!reg.has_reconnected(9), "a different output is independent");
+}
+
+#[test]
+fn warned_no_receiver_fires_once_then_clears() {
+    let reg = NdiHealthRegistry::new();
+    assert!(
+        reg.mark_warned_no_receiver(4),
+        "first WARN for an output returns true"
+    );
+    assert!(
+        !reg.mark_warned_no_receiver(4),
+        "a second WARN for the same output returns false (once per output)"
+    );
+    reg.clear_warned_no_receiver(4);
+    assert!(
+        reg.mark_warned_no_receiver(4),
+        "after recovery clears the latch, a new failure warns again"
+    );
+}
+
 /// Minimal seeded snapshot for the readiness-count tests — every field zeroed
 /// except the identity, so `reported_pipelines()` (a map-len read) can be
 /// exercised without the full engine heartbeat path.
@@ -624,5 +680,81 @@ fn mk_reported_snapshot(playlist_id: i64) -> PipelineHealthSnapshot {
         lock_reason: String::new(),
         burn_on: false,
         recovery_step: None,
+        sender_url: None,
     }
+}
+
+// #196: effective_dark_reason — a dark output with NO OBS input advertising it
+// gets the no-input reason (not the dark-wall reason), so the ladder is skipped.
+#[test]
+fn effective_dark_reason_no_input_dark_wall_becomes_no_obs_input() {
+    assert_eq!(
+        effective_dark_reason(Some(DARK_WALL_REASON.to_string()), false).as_deref(),
+        Some(NO_OBS_INPUT_REASON)
+    );
+}
+
+#[test]
+fn effective_dark_reason_dark_wall_with_input_passes_through() {
+    assert_eq!(
+        effective_dark_reason(Some(DARK_WALL_REASON.to_string()), true).as_deref(),
+        Some(DARK_WALL_REASON)
+    );
+}
+
+#[test]
+fn effective_dark_reason_none_stays_none_even_without_input() {
+    assert_eq!(effective_dark_reason(None, false), None);
+}
+
+#[test]
+fn effective_dark_reason_other_reason_passes_through() {
+    assert_eq!(
+        effective_dark_reason(Some("stalled".to_string()), false).as_deref(),
+        Some("stalled")
+    );
+}
+
+// #196: the registry records a sender's advertised URL at creation and reads
+// it back onto every snapshot.
+#[test]
+fn registry_records_and_reads_sender_url() {
+    let reg = NdiHealthRegistry::new();
+    assert_eq!(reg.sender_url(7), None);
+    reg.set_sender_url(7, Some("10.77.9.201:5963".to_string()));
+    assert_eq!(reg.sender_url(7).as_deref(), Some("10.77.9.201:5963"));
+    // A different id is independent.
+    assert_eq!(reg.sender_url(8), None);
+}
+
+#[test]
+fn registry_set_sender_url_none_keeps_prior() {
+    let reg = NdiHealthRegistry::new();
+    reg.set_sender_url(7, Some("10.77.9.201:5963".to_string()));
+    reg.set_sender_url(7, None);
+    assert_eq!(reg.sender_url(7).as_deref(), Some("10.77.9.201:5963"));
+}
+
+// #196: output_has_obs_input reflects the shared OBS source map — no map wired
+// reads as "has input" (never suppress the ladder without evidence); a wired
+// map answers by playlist_id membership.
+#[tokio::test]
+async fn output_has_obs_input_reflects_source_map() {
+    let (mut engine, _reg) = fresh_engine().await;
+    // No map wired (OBS not configured) → treated as "has input".
+    assert!(engine.output_has_obs_input(7));
+
+    let map: crate::obs::NdiSourceMap =
+        std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+    map.write().await.insert("sp-fast_video".to_string(), 7);
+    engine.set_ndi_source_map(map);
+
+    assert!(
+        engine.output_has_obs_input(7),
+        "an OBS input advertises playlist 7"
+    );
+    assert!(
+        !engine.output_has_obs_input(999),
+        "no OBS input advertises playlist 999"
+    );
 }

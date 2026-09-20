@@ -116,6 +116,7 @@ async fn ndi_health_endpoint_returns_seeded_pipeline() {
         lock_reason: "pacing disabled".to_string(),
         burn_on: false,
         recovery_step: None,
+        sender_url: None,
     });
     let resp = app(state)
         .oneshot(

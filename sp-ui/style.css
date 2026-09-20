@@ -263,9 +263,6 @@ body {
     color: #fff;
     border-color: transparent;
 }
-.np-song { font-weight: 600; display: block; }
-.np-artist { color: var(--text-dim); display: block; margin-bottom: 6px; }
-.np-time { font-size: 0.8rem; color: var(--text-dim); }
 .np-idle { color: var(--text-dim); font-style: italic; }
 
 /* ---- Per-card song list toggle (#134: play a specific song from any
@@ -321,15 +318,6 @@ body {
 .playback-controls button:hover { border-color: var(--accent); }
 .sync-btn { color: var(--warning) !important; }
 
-/* ---- OBS status ---- */
-
-.obs-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.9rem;
-}
-
 .status-dot {
     width: 10px;
     height: 10px;
@@ -339,20 +327,6 @@ body {
 }
 
 .status-dot.connected { background: var(--success); }
-
-/* ---- LAN sp.local address (#51) ---- */
-
-.lan-address {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.85rem;
-}
-
-.lan-address .lan-label { color: var(--text-dim); }
-.lan-address .lan-link { color: var(--accent); text-decoration: none; }
-.lan-address .lan-link:hover { text-decoration: underline; }
-.lan-address .lan-fallback { color: var(--text-dim); font-size: 0.8rem; }
 
 /* ---- Download queue ---- */
 
@@ -794,15 +768,6 @@ body {
 .reference-badge { color: #ffc857; font-size: 1.1em; }
 .reference-reject-btn { background: #3a2a00; color: #ffc857; border: 1px solid #ffc857; }
 
-/* ---- Live Page ---- */
-
-.live-page-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-    padding: 1rem;
-}
-
 .live-catalog-header {
     display: flex;
     align-items: center;
@@ -844,41 +809,6 @@ body {
     min-height: 1.2em;
 }
 
-/* --- v0.22.0 /live mobile styling -------------------------------- */
-
-.import-url-box {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-}
-
-.import-url-input {
-  flex: 1 1 220px;
-  padding: 0.75rem;
-  font-size: 1rem;
-  border: 1px solid #555;
-  border-radius: 4px;
-  background: #222;
-  color: #fff;
-}
-
-.import-url-btn {
-  min-width: 100px;
-  min-height: 44px;
-  font-size: 1rem;
-  border: 1px solid #7fb;
-  background: #2a4a3a;
-  color: #fff;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.import-url-btn:disabled {
-  opacity: 0.5;
-  cursor: wait;
-}
-
 .import-url-status {
   width: 100%;
   color: #fd7;
@@ -893,41 +823,10 @@ body {
   margin-bottom: 1rem;
 }
 
-.np-song {
-  font-size: 1.15rem;
-  font-weight: 600;
-}
-
-.np-artist {
-  font-size: 0.95rem;
-  color: #bbb;
-  margin-bottom: 0.5rem;
-}
-
-.np-time {
-  font-family: monospace;
-  color: #9cf;
-  margin-bottom: 0.25rem;
-}
-
 .np-scrubber {
   width: 100%;
   height: 44px;
   margin: 0.5rem 0;
-}
-
-.np-progress {
-  background: #333;
-  height: 4px;
-  border-radius: 2px;
-  overflow: hidden;
-  margin-bottom: 0.75rem;
-}
-
-.np-progress-bar {
-  background: #7fb;
-  height: 100%;
-  transition: width 250ms linear;
 }
 
 .np-controls {
@@ -1162,12 +1061,6 @@ body {
   padding: 0.6rem 0.5rem;
 }
 
-.live-setlist-suppress-en input[type="checkbox"] {
-  width: 28px;
-  height: 28px;
-  cursor: pointer;
-}
-
 @media (max-width: 768px) {
   .live-page-grid {
     grid-template-columns: 1fr !important;
@@ -1219,15 +1112,6 @@ body {
   }
 }
 
-/* ---- Resolume health alert (only rendered when a host has a problem) ---- */
-
-.resolume-health-alert {
-    margin-left: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
 .rh-alert {
     display: flex;
     align-items: center;
@@ -1277,7 +1161,6 @@ body {
 
 /* #180 dubbing D1 — Dabing section + per-row toggle. */
 .dabing-page { padding: 16px; max-width: 900px; margin: 0 auto; }
-.dabing-import { margin-bottom: 16px; }
 .dabing-empty { color: var(--text-dim); font-style: italic; }
 .dabing-list { display: flex; flex-direction: column; gap: 8px; }
 .dabing-row {
@@ -1312,3 +1195,240 @@ body {
     cursor: pointer;
 }
 .video-list-col-dub { text-align: center; }
+
+/* ---- #194 unified Player (Dashboard / Live / Dabing) ---- */
+
+.player {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    margin-bottom: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.player-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.player-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.player-title { font-weight: 600; font-size: 1.05em; word-break: break-word; }
+.player-state { color: var(--text-dim); font-size: 0.85em; }
+
+.player-program-badge {
+    flex: none;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.8em;
+    white-space: nowrap;
+    color: var(--text-dim);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+}
+.player-program-badge.on {
+    color: #fff;
+    background: var(--success);
+    border-color: var(--success);
+}
+
+.player-error {
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    font-size: 0.85em;
+    color: #fff;
+    background: var(--danger, #c0392b);
+    border: 1px solid var(--danger, #c0392b);
+}
+
+.player-seek-row { display: flex; flex-direction: column; gap: 6px; }
+.player-seek { width: 100%; accent-color: var(--accent); }
+.player-seek:disabled { opacity: 0.5; }
+
+.player-seek-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+}
+.player-pos { font-variant-numeric: tabular-nums; color: var(--text-dim); min-width: 96px; text-align: center; }
+
+.player-transport {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.player-btn {
+    min-height: 44px; /* phone touch target (#194) */
+    padding: 8px 12px;
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+.player-btn:hover:not(:disabled) { border-color: var(--text-dim); }
+.player-btn:disabled { opacity: 0.5; cursor: default; }
+.player-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+.player-mode {
+    min-height: 44px;
+    margin-left: auto;
+    padding: 6px 8px;
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.player-preview { display: flex; flex-direction: column; }
+.player-mixer { display: flex; flex-direction: column; }
+.player-mixer-idle {
+    padding: 10px 12px;
+    color: var(--text-dim);
+    font-size: 0.9em;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.dabing-row-ratio { color: var(--text-dim); font-size: 0.85em; margin-top: 4px; }
+
+/* ---- #194 ROUND 2: shared SongRow / StatusChips / ImportBox ---- */
+
+.song-list { display: flex; flex-direction: column; gap: 6px; }
+.song-list-head {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 8px;
+    color: var(--text-dim);
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.song-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.song-row-title { flex: 1 1 160px; min-width: 0; font-weight: 500; word-break: break-word; }
+.song-row-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.song-row-btn {
+    min-height: 44px; /* phone touch target (#194) */
+    min-width: 44px;
+    padding: 6px 10px;
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+.song-row-btn:hover:not(:disabled) { border-color: var(--text-dim); }
+.song-row-btn:disabled { opacity: 0.5; cursor: default; }
+.song-row-btn-play { font-size: 1.05em; }
+.song-row-btn-remove { color: #e57373; }
+.song-row-enoff { display: inline-flex; align-items: center; gap: 4px; font-size: 0.85em; color: var(--text-dim); }
+.song-row-editing { gap: 6px; }
+.song-row-editing input { flex: 1 1 120px; min-width: 0; padding: 6px 8px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); }
+
+/* status chips — ONE vocabulary, one colour per state, everywhere */
+.status-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.status-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.78em;
+    white-space: nowrap;
+    border: 1px solid transparent;
+}
+.status-chip.chip-ok       { color: #1b5e20; background: #c8e6c9; }
+.status-chip.chip-progress { color: #0d47a1; background: #bbdefb; }
+.status-chip.chip-queued   { color: #7f5300; background: #ffe0a3; }
+.status-chip.chip-missing  { color: #555;    background: #e0e0e0; }
+.status-chip.chip-error    { color: #fff;    background: #c0392b; }
+
+/* import box — one Slovak paste-URL box everywhere */
+.import-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.import-input { flex: 1 1 220px; min-width: 0; padding: 8px 10px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); }
+.import-btn {
+    min-height: 44px;
+    padding: 8px 14px;
+    background: var(--accent);
+    color: #fff;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+.import-btn:disabled { opacity: 0.6; cursor: default; }
+.import-status { flex-basis: 100%; color: var(--text-dim); font-size: 0.85em; }
+
+/* #194 r3b — ONE HealthBar strip on every page (WS/OBS/genlock/Resolume/tools/LAN/version). */
+.health-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+    row-gap: 6px;
+    padding: 6px 20px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+}
+.health-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+    cursor: default;
+}
+.health-bar .genlock-status { margin-left: 0; }
+.health-bar .version-label { margin-left: auto; }
+.health-bar .lan-link { color: var(--accent); text-decoration: none; }
+.health-bar .lan-link:hover { text-decoration: underline; }
+.health-bar .lan-fallback { color: var(--text-dim); }
+.health-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    display: inline-block;
+}
+/* Tone colours — one per state, everywhere (sp_core::health::HealthTone). */
+.health-ok { color: var(--success); }
+.health-warn { color: var(--warning); }
+.health-off { color: var(--text-dim); }
+
+/* #194 r3b — ONE loading / empty / error renderer (sp_core StateBlock). */
+.state-block {
+    padding: 12px 4px;
+    font-size: 0.9rem;
+}
+.state-loading { color: var(--text-dim); }
+.state-empty { color: var(--text-dim); }
+.state-error { color: var(--error); }
+
+/* #194 r3c: the shared LyricsView (Player lyrics slot + Lyrics details) and the
+   audit-D classes that were emitted without any CSS. One dark theme (the vars). */
+.player-lyrics { margin-top: 8px; }
+/* Compact mode reuses .karaoke-panel for the 4-line layout; the scroll mode is a
+   bounded, scrollable tappable list (same idiom the old lyrics_scroller used). */
+/* Reserved min-height so the card never jumps when lyrics load/clear (#163). */
+.lyrics-view-scroll { max-height: 260px; min-height: 3rem; overflow-y: auto; }
+.lyrics-view-scroll .lyrics-list { list-style: none; margin: 0; padding: 0; }
+.lyrics-empty { color: var(--text-dim); font-style: italic; padding: 12px 0; }
+.preview-video-box { width: 100%; aspect-ratio: 16 / 9; background: #000; }
+.mixer-karaoke, .mixer-dub { display: block; }

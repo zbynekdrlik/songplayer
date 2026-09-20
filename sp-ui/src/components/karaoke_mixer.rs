@@ -27,19 +27,12 @@ struct NowPlayingStems {
     video_id: i64,
 }
 
-/// Header glyph + label for a stems state (#177).
+/// Header label for a stems state (#177). #194: reuses the ONE shared status
+/// vocabulary (`sp_core::status_chip::stems_chip`) instead of a private
+/// glyph+word table, so the mixer state line and the row chips never diverge.
 fn state_label(state: &str, queue_position: Option<i64>) -> String {
-    match state {
-        "ready" => "● pripravené".to_string(),
-        "processing" => "⚙ spracúvam".to_string(),
-        "queued" => match queue_position {
-            Some(n) => format!("⏳ vo fronte ({n}.)"),
-            None => "⏳ vo fronte".to_string(),
-        },
-        "unavailable" => "— nedostupné".to_string(),
-        "failed" => "✖ chyba".to_string(),
-        _ => "—".to_string(),
-    }
+    let pos = queue_position.map(|n| n.max(0) as u32);
+    sp_core::status_chip::stems_chip(Some(state), pos).label_sk
 }
 
 /// POST the current mode + vocal gain to the server (live — no pipeline reopen,
@@ -55,8 +48,12 @@ fn post_state(mode: RwSignal<String>, vocal_gain: RwSignal<f32>, status: RwSigna
     });
 }
 
+/// #194: the karaoke mixer now lives inside the shared `Player`'s mixer slot, so
+/// it takes the player's `playlist_id` explicitly instead of reading
+/// `store.selected_playlist` — the mixer must follow the item playing on THIS
+/// playlist (Dashboard / Live), not whatever the dashboard has selected.
 #[component]
-pub fn KaraokeMixer() -> impl IntoView {
+pub fn KaraokeMixer(playlist_id: i64) -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
 
     let mode = RwSignal::new("full_mix".to_string());
@@ -114,21 +111,26 @@ pub fn KaraokeMixer() -> impl IntoView {
             }
         });
     };
-    // Reload on mount AND whenever the selected playlist's now-playing SONG
-    // changes (a `Memo` collapses the frequent position ticks to song changes).
+    // Reload on mount AND whenever THIS playlist's now-playing SONG changes
+    // (a `Memo` collapses the frequent position ticks to song changes).
     let selected_song = Memo::new(move |_| {
-        let sel = store.selected_playlist.get()?;
-        store.now_playing.get().get(&sel).map(|n| n.video_id)
+        store
+            .now_playing
+            .get()
+            .get(&playlist_id)
+            .map(|n| n.video_id)
     });
     Effect::new(move |_| {
         let _ = selected_song.get();
         load();
     });
 
-    // The now-playing stems entry for the SELECTED playlist (if any).
+    // The now-playing stems entry for THIS playlist (if any).
     let selected_entry = move || {
-        let sel = store.selected_playlist.get()?;
-        now_playing.get().into_iter().find(|e| e.playlist_id == sel)
+        now_playing
+            .get()
+            .into_iter()
+            .find(|e| e.playlist_id == playlist_id)
     };
     let is_ready = move || selected_entry().map(|e| e.stems_state == "ready").unwrap_or(false);
 

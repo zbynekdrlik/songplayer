@@ -221,6 +221,11 @@ pub struct NdiOutputHealth {
     pub pacing: PacingView,
     #[serde(default)]
     pub audio: AudioView,
+    /// #196: server-set health reason (e.g. the dark-wall reason, "no OBS scene
+    /// for this output", or "no receiver after restart"). The `HealthBar`
+    /// counts the last for its NDI badge. A missing key deserializes to `None`.
+    #[serde(default)]
+    pub degraded_reason: Option<String>,
 }
 
 impl NdiOutputHealth {
@@ -230,9 +235,49 @@ impl NdiOutputHealth {
     }
 }
 
-/// GET the per-output NDI genlock health snapshot.
-pub async fn get_ndi_health() -> Result<Vec<NdiOutputHealth>, String> {
-    get("/api/v1/ndi/health").await
+/// #194 ROUND 3b: one Resolume push-chain host's health, as returned by
+/// `GET /api/v1/resolume/health`. Moved here from `resolume_health.rs` (deleted
+/// in favour of the shared `HealthBar`) so `store.resolume_health` can hold it.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+pub struct HostHealth {
+    pub host: String,
+    #[serde(default)]
+    pub last_refresh_ts: Option<String>,
+    #[serde(default)]
+    pub last_refresh_ok: bool,
+    #[serde(default)]
+    pub consecutive_failures: u32,
+    #[serde(default)]
+    pub circuit_breaker_open: bool,
+    #[serde(default)]
+    pub clips_by_token: std::collections::BTreeMap<String, usize>,
+}
+
+impl HostHealth {
+    /// Short human reason this host is unhealthy, or `None` if healthy. Same
+    /// logic the old `ResolumeHealthCard` alert used — now folded into the
+    /// `HealthBar` Resolume segment's tooltip.
+    pub fn problem(&self) -> Option<String> {
+        if self.circuit_breaker_open {
+            return Some("okruh otvorený — Resolume nedostupné".into());
+        }
+        if self.consecutive_failures > 0 {
+            return Some(format!(
+                "obnova zlyháva ({} po sebe)",
+                self.consecutive_failures
+            ));
+        }
+        let missing: Vec<&str> = self
+            .clips_by_token
+            .iter()
+            .filter(|(_, n)| **n == 0)
+            .map(|(k, _)| k.as_str())
+            .collect();
+        if !missing.is_empty() {
+            return Some(format!("chýbajúce klipy: {}", missing.join(", ")));
+        }
+        None
+    }
 }
 
 // ── Lyrics API helpers ────────────────────────────────────────────────────────
@@ -397,20 +442,20 @@ pub async fn post_live_play_video(
     .await
 }
 
-/// POST seek to a playlist: `POST /api/v1/playlists/{id}/seek {"position_ms":...}`.
+/// POST seek to a playlist: `POST /api/v1/playback/{id}/seek {"position_ms":...}`.
 /// Server returns 204 on success. v0.22.0 addition for the /live scrubber +
 /// tap-a-line UI.
 pub async fn seek_playlist(playlist_id: i64, position_ms: u64) -> Result<(), String> {
     let body = serde_json::json!({ "position_ms": position_ms });
     post_json_empty(
-        &format!("/api/v1/playlists/{playlist_id}/seek"),
+        &format!("/api/v1/playback/{playlist_id}/seek"),
         &body,
     )
     .await
 }
 
 /// GET the lyrics track for a video. Returns the full `LyricsTrack`
-/// JSON — used by the LyricsScroller on /live to render a tappable
+/// JSON — used by the shared LyricsView (scroll mode) to render a tappable
 /// line list. 404 signals "no lyrics yet", surfaced as an Err string
 /// so the UI can show an empty state.
 pub async fn get_video_lyrics(video_id: i64) -> Result<sp_core::lyrics::LyricsTrack, String> {
