@@ -334,14 +334,20 @@ async fn health_snapshot_event_persists_the_receiver_count_to_the_db() {
 async fn engine_play_on_a_playing_pipeline_does_not_scene_on() {
     let (mut engine, _registry) = fresh_engine().await;
     engine.ensure_pipeline(7, "SP-test");
+    use std::sync::atomic::Ordering;
     {
         let pp = engine.pipelines.get_mut(&7).unwrap();
         pp.state = crate::playback::state::PlayState::Playing { video_id: 42 };
-        pp.scene_active = false;
+        pp.scene_active.store(false, Ordering::Release);
     }
     engine.handle_engine_play(7).await;
     assert!(
-        !engine.pipelines.get(&7).unwrap().scene_active,
+        !engine
+            .pipelines
+            .get(&7)
+            .unwrap()
+            .scene_active
+            .load(Ordering::Acquire),
         "a playing pipeline must not be flagged on program by /play"
     );
 
@@ -350,7 +356,12 @@ async fn engine_play_on_a_playing_pipeline_does_not_scene_on() {
         crate::playback::state::PlayState::WaitingForScene;
     engine.handle_engine_play(7).await;
     assert!(
-        engine.pipelines.get(&7).unwrap().scene_active,
+        engine
+            .pipelines
+            .get(&7)
+            .unwrap()
+            .scene_active
+            .load(Ordering::Acquire),
         "a non-playing pipeline goes through the scene-on dispatch"
     );
 }
