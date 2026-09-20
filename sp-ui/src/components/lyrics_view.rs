@@ -51,7 +51,7 @@ pub fn LyricsView(
     // video (the details view, when that song happens to be on air).
     let seek_pid = move || {
         playlist_id.or_else(|| {
-            effective_vid().and_then(|v| {
+            effective_vid.get().and_then(|v| {
                 store
                     .now_playing
                     .get()
