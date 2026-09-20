@@ -492,3 +492,27 @@ carry `data-testid="nav-dashboard|nav-live|nav-lyrics|nav-dabing|nav-settings"`.
 Specs click tabs by testid, never by text; `e2e/slovak-only.spec.ts` scans the
 tabs too (`BANNED_NAV`). Only product/technical names (OBS, NDI, Resolume,
 SongPlayer, WS, LAN, the genlock words) stay English anywhere in the chrome.
+
+## #200 — the drag gate commits on RELEASE; every drag control needs a REAL-pointer spec
+
+The #194 hotfix committed a drag only in `on:change`. In a real browser
+`pointerup` fires BEFORE `change`; the gate then re-applied the live
+`prop:value`, and Chrome SUPPRESSED `change` (value "unchanged" at commit time)
+— so a real mouse drag on the seek bar / dub fader never posted anything and the
+thumb snapped back (owner: "posúvať pozíciu sa nedá", reported repeatedly).
+The specs used `fill()` + synthetic `dispatchEvent('pointerup')`/`('change')`,
+which ALWAYS deliver `change`, so they were green on broken code.
+
+Rules now:
+- Commit on `pointerup`/`touchend` from the PENDING drag signal
+  (`seek_drag_ms` / `drag_pct`), with a value-dedup (`committed: Option<T>`)
+  so `change` (the keyboard path) never double-commits. `pointercancel` only
+  clears the flag.
+- Every draggable control ships a `page.mouse.down/move/up` spec
+  (`e2e/player-mouse.spec.ts` pattern: exactly ONE POST/PATCH per release, the
+  control stays where released). A synthetic-event spec is a supplement, never
+  the proof. The post-deploy suite drives the Dabing Player with the real mouse
+  on the box (`e2e/post-deploy-dabing.spec.ts`).
+- The preview inside the shared Player must not inherit the playlist-card
+  `max-width: 320px` (`.player-preview … { max-width: none }`).
+
