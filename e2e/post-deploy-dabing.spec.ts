@@ -78,12 +78,14 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     expect(dab.status()).toBe(200);
     const body = (await dab.json()) as {
       playlist_id: number;
-      videos: Array<{ id: number; dub_status: string; chain_state: string }>;
+      videos: Array<{ video_id?: number; id?: number; dub_status: string; chain_state: string }>;
     };
     dabingPid = body.playlist_id;
     const ready = body.videos.find((v) => v.dub_status === "ready");
     expect(ready, "at least one dub must be ready on the box").toBeTruthy();
-    sampleVideoId = ready!.id;
+    // DubRow carries the id as `video_id` (the row is keyed by the video).
+    sampleVideoId = Number(ready!.video_id ?? ready!.id);
+    expect(sampleVideoId, "the ready dub must carry a numeric video id").toBeGreaterThan(0);
 
     const health = await request.get("/api/v1/ndi/health");
     expect(health.status()).toBe(200);
