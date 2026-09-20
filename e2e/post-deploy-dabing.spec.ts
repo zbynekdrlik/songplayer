@@ -87,17 +87,27 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     sampleVideoId = Number(ready!.video_id ?? ready!.id);
     expect(sampleVideoId, "the ready dub must carry a numeric video id").toBeGreaterThan(0);
 
-    const health = await request.get("/api/v1/ndi/health");
-    expect(health.status()).toBe(200);
-    const rows = (await health.json()) as Array<{
-      playlist_id: number;
-      ndi_name: string;
-      connections: number;
-    }>;
-    const out = rows.find((r) => r.playlist_id === dabingPid);
-    expect(out, "SP-dabing must be advertised").toBeTruthy();
+    // The deploy restarts SongPlayer a couple of minutes before this suite; the
+    // OBS/DistroAV inputs re-attach within the +30 s self-check window, so poll
+    // (the "wall is not dark" test uses the same 60 s budget).
+    let out: { ndi_name: string; connections: number } | undefined;
+    await expect
+      .poll(
+        async () => {
+          const health = await request.get("/api/v1/ndi/health");
+          expect(health.status()).toBe(200);
+          const rows = (await health.json()) as Array<{
+            playlist_id: number;
+            ndi_name: string;
+            connections: number;
+          }>;
+          out = rows.find((r) => r.playlist_id === dabingPid);
+          return out?.connections ?? -1;
+        },
+        { timeout: 60000, message: "SP-dabing must be advertised with ≥ 1 receiver" },
+      )
+      .toBeGreaterThanOrEqual(1);
     expect(out!.ndi_name).toBe("SP-dabing");
-    expect(out!.connections).toBeGreaterThanOrEqual(1);
   });
 
   test("real mouse: the dub fader and the seek bar commit on release", async ({
