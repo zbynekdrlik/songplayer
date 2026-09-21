@@ -187,6 +187,9 @@ impl AudioRing {
         if self.buf.len() < need {
             return false;
         }
+        // Reuse the scratch: clear (keeps the allocation) then refill, so no
+        // 12.8 KB block is allocated per slot on the TIME_CRITICAL thread (#203).
+        self.block_buf.clear();
         self.block_buf.extend(self.buf.drain(..need));
         true
     }
