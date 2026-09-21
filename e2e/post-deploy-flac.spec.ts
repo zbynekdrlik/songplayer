@@ -286,12 +286,15 @@ test.describe("FLAC pipeline post-deploy verification", () => {
         { timeout: 15_000, message: "the lyrics-view must settle to lines or empty" },
       )
       .toMatch(/^(lines|empty)$/);
-    if ((await lines.count()) > 0) {
-      // A playing song with lyrics renders tappable lines.
-      await expect(lines.first()).toBeVisible();
-    } else {
-      // No lyrics for the current item -> the empty lyrics surface.
-      await expect(lyricsView.locator(".lyrics-empty")).toBeVisible();
+    // ONE retrying assertion over BOTH settled surfaces: the live box can
+    // transition mid-check (a song ends → the next one loads → lines/empty
+    // flip), so a branch decided from a stale `count()` and then asserted on the
+    // other surface races (`element(s) not found`, run 35606544776). `or()`
+    // keeps the assertion atomic with the state it observes.
+    await expect(
+      lines.first().or(lyricsView.locator(".lyrics-empty").first()),
+    ).toBeVisible();
+    if ((await lines.count()) === 0) {
       console.log(
         "DIAGNOSTIC: no lyric lines for the current item — empty lyrics-view",
       );

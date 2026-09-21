@@ -44,6 +44,8 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use sp_ndi::{AudioFrame, AudioSink, NdiBackend};
 
+use audio_edge_fade::EdgeFade;
+
 /// Nominal NDI audio rate — the FLAC pipeline is always 48 kHz.
 pub const EMIT_RATE_HZ: u32 = 48_000;
 /// Samples per channel in one grid block: 1600 @ 48 kHz = 33.333 ms = one
@@ -59,11 +61,15 @@ pub const RING_CAPACITY_BLOCKS: usize = ring_capacity_blocks(AUDIO_LOOKAHEAD_MS)
 /// The emitter mode string surfaced on `/api/v1/ndi/health` (`audio.emitter.mode`).
 pub const EMITTER_MODE: &str = "sdk-video/wallclock-audio";
 
-/// One block the emitter hands to NDI for a grid slot.
-#[derive(Clone, Debug, PartialEq)]
+/// Which block the emitter hands to NDI for a grid slot. A TAG only (#203): the
+/// actual samples live in a reusable buffer inside the emitter, read back via
+/// [`AudioEmitter::samples_for`], so no per-slot `Vec` is allocated on the
+/// TIME_CRITICAL emit thread.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EmittedBlock {
-    /// A full block of interleaved f32 audio popped from the ring.
-    Audio(Vec<f32>),
+    /// A full block of interleaved f32 audio was popped from the ring into the
+    /// emitter's reusable `block_buf`.
+    Audio,
     /// A full block of silence — the ring held fewer than a whole block.
     Silence,
 }
@@ -92,6 +98,11 @@ pub struct AudioRing {
     /// computed once the channel count is known).
     capacity_blocks: usize,
     samples_per_block: usize,
+    /// Reusable scratch for [`pop_block`](Self::pop_block): its allocation is
+    /// kept and refilled (`clear` + `extend`) every slot instead of a fresh
+    /// `Vec::with_capacity`, so the TIME_CRITICAL emit thread never allocates the
+    /// 12.8 KB block per slot (#203).
+    block_buf: Vec<f32>,
 }
 
 impl AudioRing {
@@ -101,6 +112,7 @@ impl AudioRing {
             channels: 0,
             capacity_blocks,
             samples_per_block,
+            block_buf: Vec::new(),
         }
     }
 
@@ -164,21 +176,36 @@ impl AudioRing {
     }
 
     /// Pop exactly one block (`samples_per_block` frames) of interleaved audio
-    /// iff the ring holds at least that many frames; otherwise `None` (the
-    /// caller emits silence). Never returns a partial block.
-    pub fn pop_block(&mut self) -> Option<Vec<f32>> {
+    /// into the reusable [`block_buf`](Self::block_buf), iff the ring holds at
+    /// least that many frames; returns `true` then (read via
+    /// [`block_buf`](Self::block_buf)). Returns `false` without touching the
+    /// scratch when the ring is short (the caller emits silence). Never returns a
+    /// partial block. Reuses the scratch allocation across slots (#203).
+    pub fn pop_block(&mut self) -> bool {
         if self.channels == 0 {
-            return None;
+            return false;
         }
         let need = self.samples_per_block * self.channels;
         if self.buf.len() < need {
-            return None;
+            return false;
         }
-        let mut out = Vec::with_capacity(need);
-        for _ in 0..need {
-            out.push(self.buf.pop_front().unwrap_or(0.0));
-        }
-        Some(out)
+        // Reuse the scratch: clear (keeps the allocation) then refill, so no
+        // 12.8 KB block is allocated per slot on the TIME_CRITICAL thread (#203).
+        self.block_buf.clear();
+        self.block_buf.extend(self.buf.drain(..need));
+        true
+    }
+
+    /// The samples filled by the most recent successful [`pop_block`](Self::pop_block).
+    pub fn block_buf(&self) -> &[f32] {
+        &self.block_buf
+    }
+
+    /// The scratch buffer's current capacity — test-only, proves the allocation
+    /// is reused (not re-grown) across pops.
+    #[cfg(test)]
+    pub(crate) fn block_buf_capacity(&self) -> usize {
+        self.block_buf.capacity()
     }
 }
 
@@ -205,6 +232,18 @@ pub struct AudioEmitter {
     /// Paused pipeline: emit silence WITHOUT popping, so the lookahead cushion
     /// (and the A/V alignment it carries) survives a pause.
     held: bool,
+    /// Reusable silence block (#203): a full block of zeros at the current
+    /// channel layout, returned BORROWED by [`samples_for`](Self::samples_for) so
+    /// an idle/silent slot allocates nothing on the TIME_CRITICAL emit thread.
+    /// Sized in [`tick`](Self::tick); never written non-zero, so a resize keeps
+    /// it all-zero.
+    silence: Vec<f32>,
+    /// Per-block edge fades applied in [`samples_for`](Self::samples_for): a
+    /// fade-out tail at the audio→silence edge and a fade-in at the silence→audio
+    /// edge (#192 round 5). Shapes only the sent samples — the ring, grid, silence
+    /// accounting and `Emitted.block` variant are untouched; faded slots use its
+    /// own reused scratch so the #203 per-slot allocation-free contract holds.
+    edge_fade: EdgeFade,
 }
 
 /// How many recent jitter samples the p99 gauge keeps (~30 s at 30 fps).
@@ -230,6 +269,8 @@ impl AudioEmitter {
             jitter_us: VecDeque::new(),
             channels_hint: 2,
             held: false,
+            silence: Vec::new(),
+            edge_fade: EdgeFade::new(samples_per_block),
         }
     }
 
@@ -326,21 +367,29 @@ impl AudioEmitter {
         }
 
         let popped = if self.held {
-            None
+            false
         } else {
             self.ring.pop_block()
         };
-        // `pop_block` already guarantees a whole block (or None), so no
+        // `pop_block` already guarantees a whole block (or false), so no
         // interleaved-vs-per-channel length guard is needed here (#192 item 6).
-        let block = match popped {
-            Some(samples) => EmittedBlock::Audio(samples),
-            None => {
-                self.silence_blocks += 1;
-                EmittedBlock::Silence
-            }
+        // The samples (or silence) are read back BORROWED via `samples_for` — no
+        // per-slot allocation on the TIME_CRITICAL thread (#203).
+        let block = if popped {
+            EmittedBlock::Audio
+        } else {
+            self.silence_blocks += 1;
+            EmittedBlock::Silence
         };
         if self.ring.channels() != 0 {
             self.channels_hint = self.ring.channels();
+        }
+        // Keep the reusable silence buffer sized to the current layout. It is
+        // never written non-zero, so a resize (grow with 0.0 / truncate) keeps it
+        // an all-zero block.
+        let want = self.samples_per_block * self.channels_hint;
+        if self.silence.len() != want {
+            self.silence.resize(want, 0.0);
         }
         self.emitted_slots += 1;
         Emitted {
@@ -349,17 +398,43 @@ impl AudioEmitter {
         }
     }
 
-    /// Build the interleaved samples for [`emit_one_block`] to hand NDI: the
-    /// audio block as-is, or a full block of silence at the current channel
-    /// count. Kept beside `tick` so the silence layout is unit-testable.
-    pub fn samples_for(&self, block: &EmittedBlock) -> (Vec<f32>, u32) {
+    /// The interleaved samples for [`emit_one_block`] to hand NDI, returned
+    /// BORROWED (#203) and edge-faded (#192 round 5). A full-gain audio block and a
+    /// plain silence block are still borrowed straight from the ring's reusable
+    /// `block_buf` / the reusable all-zero `silence` (no allocation per slot); the
+    /// FADED slots — the first blocks after a silence run, and the ONE fade-out
+    /// tail right after audio — are borrowed from the [`EdgeFade`]'s own reused
+    /// scratch. The `Emitted.block` variant, the grid timecode and the
+    /// `silence_blocks` accounting are UNCHANGED — only the sent samples are
+    /// reshaped, so the transition log and telemetry are untouched. Takes
+    /// `&mut self` because the fade is a per-slot state machine. Read right after
+    /// the [`tick`](Self::tick) that produced `block`.
+    pub fn samples_for(&mut self, block: &EmittedBlock) -> (&[f32], u32) {
+        let ch = self.channels_hint;
         match block {
-            EmittedBlock::Audio(s) => (s.clone(), self.channels_hint as u32),
-            EmittedBlock::Silence => (
-                vec![0.0f32; self.samples_per_block * self.channels_hint],
-                self.channels_hint as u32,
-            ),
+            EmittedBlock::Audio => {
+                // Borrow ring + edge_fade are DISJOINT fields; `on_audio` returns
+                // whether it wrote a fade-in ramp to its scratch (else full gain).
+                if self.edge_fade.on_audio(self.ring.block_buf(), ch) {
+                    (self.edge_fade.shaped(), ch as u32)
+                } else {
+                    (self.ring.block_buf(), ch as u32)
+                }
+            }
+            EmittedBlock::Silence => {
+                if self.edge_fade.on_silence(ch) {
+                    (self.edge_fade.shaped(), ch as u32)
+                } else {
+                    (&self.silence, ch as u32)
+                }
+            }
         }
+    }
+
+    /// Read-only ring access — test-only, for the #203 scratch-reuse checks.
+    #[cfg(test)]
+    pub(crate) fn ring(&self) -> &AudioRing {
+        &self.ring
     }
 
     pub fn silence_blocks(&self) -> u64 {
@@ -409,20 +484,23 @@ pub struct EmitterTelemetry {
     pub silence_blocks: AtomicU64,
     pub late_blocks: AtomicU64,
     pub ring_depth_ms: AtomicU64,
-    pub emit_jitter_p99_us: AtomicU64,
+    // NOTE (#203): the emit jitter p99 is NOT mirrored here. Computing it means
+    // sorting the 900-entry jitter ring — an O(n log n) alloc-and-sort that used
+    // to run on the TIME_CRITICAL emit thread every slot. It is now computed ON
+    // DEMAND in `emitter_stats` (heartbeat / health cadence).
 }
 
 impl EmitterTelemetry {
-    /// Copy the emitter's current gauges into the atomics (called by
-    /// [`emit_one_block`] under no lock — the emitter is already borrowed).
+    /// Copy the emitter's cheap per-slot gauges into the atomics (called by
+    /// [`emit_one_block`] under no lock — the emitter is already borrowed). The
+    /// jitter p99 is deliberately NOT mirrored (see the struct note): sorting the
+    /// ring per slot on the TIME_CRITICAL thread is exactly the cost #203 removes.
     pub fn mirror(&self, e: &AudioEmitter) {
         self.silence_blocks
             .store(e.silence_blocks(), Ordering::Relaxed);
         self.late_blocks.store(e.late_blocks(), Ordering::Relaxed);
         self.ring_depth_ms
             .store(e.ring_depth_ms(), Ordering::Relaxed);
-        self.emit_jitter_p99_us
-            .store(e.emit_jitter_p99_us(), Ordering::Relaxed);
     }
 }
 
@@ -624,12 +702,15 @@ pub fn heartbeat_audio_stats(
     }
 }
 
-/// Read the lock-free telemetry into the health-document [`EmitterStats`] the
-/// pipeline heartbeat serialises. Cross-platform (the decode thread calls it on
-/// the SDK-clocked path).
+/// Read the telemetry into the health-document [`EmitterStats`] the pipeline
+/// heartbeat serialises. The cheap per-slot gauges come from the lock-free
+/// atomics; the emit jitter p99 is computed ON DEMAND here (#203) — a brief ring
+/// lock + sort on the HEARTBEAT cadence (the decode thread on the SDK-clocked
+/// path), never per slot on the TIME_CRITICAL emit thread.
 pub fn emitter_stats(shared: &SharedEmitter) -> crate::playback::ndi_health::EmitterStats {
     let t = &shared.telemetry;
     let enabled = t.enabled.load(Ordering::Relaxed);
+    let emit_jitter_p99_us = shared.emitter.lock().unwrap().emit_jitter_p99_us();
     crate::playback::ndi_health::EmitterStats {
         enabled,
         mode: if enabled {
@@ -639,7 +720,7 @@ pub fn emitter_stats(shared: &SharedEmitter) -> crate::playback::ndi_health::Emi
         },
         silence_blocks: t.silence_blocks.load(Ordering::Relaxed),
         ring_depth_ms: t.ring_depth_ms.load(Ordering::Relaxed),
-        emit_jitter_p99_us: t.emit_jitter_p99_us.load(Ordering::Relaxed),
+        emit_jitter_p99_us,
         late_blocks: t.late_blocks.load(Ordering::Relaxed),
     }
 }
@@ -657,8 +738,13 @@ pub fn emit_one_block<B: NdiBackend>(
         let mut guard = shared.emitter.lock().unwrap();
         let emitted = guard.tick(now_100ns);
         let (samples, ch) = guard.samples_for(&emitted.block);
+        // Materialise the AudioFrame's owned buffer from the borrowed slice — the
+        // ONE remaining copy (AudioFrame owns its Vec; an audio slice-send seam
+        // is round 2b). The per-slot double alloc (pop_block Vec + samples_for
+        // clone) is gone: pop_block reuses `block_buf`, silence is borrowed (#203).
+        let data = samples.to_vec();
         shared.telemetry.mirror(&guard);
-        (emitted, samples, ch)
+        (emitted, data, ch)
     };
     // Freed a slot of ring headroom — wake a blocked decoder push.
     shared.space.notify_one();
@@ -729,6 +815,10 @@ impl SpinMargin {
         (worst + SPIN_HEADROOM_100NS).clamp(SPIN_MARGIN_MIN_100NS, SPIN_MARGIN_MAX_100NS)
     }
 }
+
+/// Pure per-block edge fades at the silence↔audio boundaries (#192 round 5).
+#[path = "audio_edge_fade.rs"]
+mod audio_edge_fade;
 
 #[cfg(test)]
 #[path = "audio_emitter_tests.rs"]

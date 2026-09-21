@@ -9,6 +9,7 @@
 use crate::obs::ndi_recovery::{NdiRecoveryTracker, RecoveryStep};
 use crate::playback::clock_health::ClockHealth;
 use crate::playback::lock_state::LOCK_WINDOW_100NS;
+use crate::playback::ndi_health_transport::transport_from_reported;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -54,6 +55,10 @@ pub struct PipelineHealthSnapshot {
     pub playlist_id: i64,
     pub ndi_name: String,
     pub state: PlaybackStateLabel,
+    /// #201 round 2: the pipeline's OWN transport, from the RAW `reported_state`
+    /// (before reconciliation), for the fresh-connect replay. Additive (= Idle).
+    #[serde(default)]
+    pub transport: sp_core::playback::TransportState,
     /// Connection count from `NDIlib_send_get_no_connections`. `-1` means
     /// the heartbeat has never run yet (e.g. pipeline just spawned).
     pub connections: i32,
@@ -156,6 +161,8 @@ pub struct PacingStats {
     /// re-anchor bounds it (the same signal `iter_p99_us` was, now measured where
     /// the decode actually happens).
     pub prep_p99_us: u64,
+    pub submit_call_us_max: u64,
+    pub submit_call_us_p99: u64,
 }
 
 /// Audio clock-discipline telemetry (#148), surfaced on `GET /api/v1/ndi/health`
@@ -778,6 +785,8 @@ impl crate::playback::PlaybackEngine {
             playlist_id,
             ndi_name: ndi_name.clone(),
             state: canonical_state.clone(),
+            // #201 round 2: raw transport (pre-reconciliation) for the replay.
+            transport: transport_from_reported(&reported_state),
             connections,
             frames_submitted_total,
             frames_submitted_last_5s,
@@ -856,10 +865,10 @@ impl crate::playback::PlaybackEngine {
                 // #149 item 2: a second, grep-stable genlock telemetry line
                 // beside the heartbeat, same once-per-UTC-minute cadence.
                 info!("{}", format_genlock_line(&snapshot));
-                // #192 round 3: a third grep-stable line — the pipeline-loop
-                // stage timing (decode / submit / audio max) + the raw
-                // send_video_async call max/p99, so the A/B box test names the
-                // stalling stage. Zero on the idle / paused / paced paths.
+                // #192 round 3 + #168 r2: a third grep-stable line — decode/submit/
+                // audio stage maxima (SDK-clocked path only) + the raw
+                // send_video_async call max/p99, populated on BOTH the SDK-clocked
+                // and paced paths, so the A/B / box-test-7 reads name the stall.
                 info!(
                     "{}",
                     crate::playback::loop_stats::format_loop_stats_line(&ndi_name, &loop_stats)

@@ -274,7 +274,7 @@ fn run_emit_loop(ndi_name: &str, sink: AudioSink<RealNdiBackend>, shared: Shared
                 silence_run += 1;
                 spin.note_block(false);
             }
-            EmittedBlock::Audio(_) => {
+            EmittedBlock::Audio => {
                 spin.note_block(true);
                 if silence_run > 0 {
                     info!(

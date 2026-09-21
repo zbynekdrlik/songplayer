@@ -115,10 +115,11 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     request,
   }) => {
     // The Player's transport label follows the live PlaybackStateChanged
-    // message; the on-connect replay derives from the health registry and
-    // cannot represent an off-program DECODING pipeline (#201 known limit), so
-    // a play clicked before the app WebSocket is open leaves the label at
-    // ▶ Prehrať. Wait for the app socket first (goto resolves on DOM load).
+    // message. #201 round 2 also made the on-connect replay carry the raw
+    // transport (the reload assertion below proves it), so a reload/late-socket
+    // dashboard now reads the honest label — but we still wait for the app
+    // socket before the first click for a deterministic start (goto resolves on
+    // DOM load, before the socket opens).
     const wsOpen = page.waitForEvent("websocket", {
       predicate: (ws) => !ws.url().includes("preview"),
       timeout: 15000,
@@ -181,6 +182,22 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     );
     await mouseDrag(page, '[data-testid="player-seek"]', 0.05, 0.3);
     expect((await seekResp).status()).toBe(204);
+
+    // #201 round 2: a reload WHILE the off-program dub still decodes must read
+    // ⏸ Pauza immediately — the on-connect replay now carries the pipeline's
+    // RAW transport (round 1 replayed the scene-reconciled Paused label, so a
+    // reload showed ▶ Prehrať until the next live message). Wait for the app
+    // socket after the reload so any follow-up reaches an open socket.
+    const wsAfterReload = page.waitForEvent("websocket", {
+      predicate: (ws) => !ws.url().includes("preview"),
+      timeout: 15000,
+    });
+    await page.reload();
+    await wsAfterReload;
+    await expect(page.getByTestId("player-playpause")).toContainText(
+      "⏸ Pauza",
+      { timeout: 15000 },
+    );
 
     // #201: pausing the off-program dub flips the transport label to `▶ Prehrať`
     // (the pipeline stops decoding), proving the label tracks the pipeline.

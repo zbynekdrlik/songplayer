@@ -73,6 +73,16 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   warnings`. Fix: `#[cfg_attr(not(windows), allow(dead_code))]` on the fn (see
   `HeavyStepPlan::creation_flags` in `lyrics/heavy_plan.rs`). Same idea for any
   item live only on one platform.
+- **Deleting a fn's ONLY non-test consumer orphans a TYPE import to test-only →
+  `unused_imports` in the lib target (#201 r2).** When you delete/replace the one
+  non-test caller of a helper (e.g. `websocket.rs` dropped `transport_from_label`
+  because the replay now reads `s.transport`), a type that was named only through
+  that helper (`TransportState`) is suddenly referenced ONLY inside
+  `#[cfg(test)] mod tests`. The top-level `use` is then unused in the LIB target
+  (tests don't count), so `clippy --all-targets -D warnings` fails — the
+  no-compile box can't see it. Fix: move that name into a test-only import
+  (`use …::TransportState;` INSIDE `mod tests`, not the top-level `use`). Grep the
+  non-test region for every name in a `use` you touched when deleting a consumer.
 - **An RAII guard field held ONLY for its Drop is `dead_code` "never read" — a
   `_` prefix does NOT suppress it (that only silences `unused_variables` for
   LOCALS, never `dead_code` for a FIELD).** A guard that holds a permit / handle
@@ -137,3 +147,125 @@ Run `cargo fmt --all && git checkout -- crates/sp-server/src/db/models.rs`
 before EACH commit in a RED→GREEN chain, and commit with `git add -u crates/`
 (not a hand-picked file list) after formatting.
 
+## Staying under the 1000-line cap when adding a big trait method (#203)
+
+Adding a method to a trait (e.g. `PacedSink::submit_shared`, an 8-arg method) to
+a file already near the cap pushes it over — and a trait DEFAULT method's body
+CANNOT move to a sibling `impl` block (a default lives in the trait def). The fix
+that worked: keep only a THIN delegating default in the trait
+(`fn m(..) { sibling::default_m(self, ..) }`) whose body is a free fn in a new
+sibling module, AND RELOCATE an unrelated pure item to the sibling to reclaim the
+lines the new signature costs (the #203 lane moved `SleepDecision` +
+`plan_sleep_100ns` from `pacer.rs` into a new `pacer_sink.rs` and re-exported them
+`pub use pacer_sink::{SleepDecision, plan_sleep_100ns};` so `pacer::…` paths + the
+test submodules' `super::*` stay valid). The sibling free fn that takes `self`
+needs `<S: TheTrait + ?Sized>(sink: &mut S, …)` — `Self` is `?Sized` inside a
+trait default, so a non-`?Sized` bound fails to compile. Verify `wc -l` after
+`cargo fmt` — an 8-arg signature reflows to ~10 lines.
+
+## `use super::*` in a `#[path]` test submodule does NOT import the parent's private `use` aliases
+
+A `#[cfg(test)] #[path = "x_tests.rs"] mod tests;` submodule reaches the parent's
+own items via `super::*`, but a PRIVATE `use crate::…::Foo;` in the parent is NOT
+re-exported by the glob (the parent files already import `sp_ndi::AudioFrame`
+explicitly for this reason). So when a test needs a type the parent imports
+privately (e.g. `SharedFrame`), add an explicit `use crate::playback::frame_buf::SharedFrame;`
+to the TEST file — there is no duplicate-import conflict because the glob never
+brought it. A `pub use` re-export in the parent IS visible via `super::*`.
+
+## RED on the no-compile box for a REFACTOR (not just a wrong constant) — #203
+
+The "ship real logic with ONE WRONG CONSTANT" pattern extends to structural
+refactors: ship the FULL structural change in the RED commit but make ONE spot
+behave wrong so the new characterization test fails, then fix only that spot in
+GREEN. Deterministic REDs that worked: `pop_block` extends its reuse scratch
+WITHOUT `clear()` (scratch grows → byte-identity test fails); `service_standby`
+submits `SharedFrame::new(video.to_vec())` (a fresh copy) instead of
+`video.clone()` (a `ptr_eq`-across-slots test fails); `submit_nv12` sends a
+throwaway copy while holding the original allocation (a holdover-identity test
+fails). Prefer a deterministic wrong (grow / different-length) over "allocate
+fresh" — a freed-then-reallocated buffer can land at the SAME address and make a
+pointer-equality RED pass by luck.
+
+## `-D warnings` rejects `temporary.as_ptr()` in tests — bind the value first (#203 r2b)
+
+`assert_eq!(take(cap).as_ptr(), p, …)` is a compile ERROR under CI's
+`clippy --all-targets -D warnings`: rustc's `dangling_pointers_from_temporaries`
+lint fires because the `Vec` temporary dies at the end of the statement while
+the pointer is compared. The no-compile box cannot see it (it is a lint of the
+lib TEST target). Write `let again = take(cap); assert_eq!(again.as_ptr(), p, …)`
+— any pointer-identity assertion on a fresh value needs the value bound to a
+local for the statement's lifetime. (`sub.prev_frame.as_ref().unwrap().as_ptr()`
+on a LIVE field is fine — only temporaries trip it.)
+
+## Diff-scoped mutation gate runs PER PACKAGE — a `test_util` accessor needs a test in ITS OWN crate (#203)
+
+`cargo mutants` tests each mutant with the mutated crate's OWN test target. A
+new accessor on `sp_ndi::test_util::MockNdiBackend` (e.g. `last_sync_video_len`)
+that is exercised only by a `crates/sp-server` test SURVIVES every mutant
+(`Some(0)` / `Some(1)` / `None` — "0s test", nothing in sp-ndi calls it) and
+fails the gate, even though sp-server's test would catch the wrong value. When
+you add a mock recorder for a downstream crate's test, ALSO assert it in an
+sp-ndi test (`None` before the first call, the exact recorded value after —
+never a constant that a `Some(0)`/`Some(1)` mutant could match). Same for any
+cross-crate test-only seam.
+
+## Diff-scoped mutation gate: a new `pub fn` reachable only from `#[cfg(windows)]` needs a direct Linux test (#203)
+
+The CI mutation gate is `--in-diff` and strict. A NEW `pub fn` whose ONLY caller
+is in a `#[cfg(windows)]` module (stripped on the Linux mutation runner) has no
+Linux test exercising it, so its whole-fn `-> ()` mutant SURVIVES and fails the
+gate — even though the function is "obviously" covered on Windows. `#203`'s
+`FrameSubmitter::submit_shared` (called only from the `#[cfg(windows)]` idle loop)
+needed an explicit Linux unit test calling it through `MockNdiBackend`. When you
+add a pub fn during a diff, ask "does a LINUX `#[test]` actually call this?" — if
+not, add one or the mutation gate reddens.
+
+## Inserting a `mod` before a `#[cfg(test)]` test module STEALS the gate (#192 r5)
+
+Attributes attach to the NEXT item. A `#[path] mod audio_emitter_tests;` at the
+bottom of a file is preceded by `#[cfg(test)]`; inserting a NEW production
+`#[path = "sibling.rs"] mod sibling;` right BEFORE it (e.g. to register a new
+pure module) lands the pre-existing `#[cfg(test)]` onto the NEW `mod` — gating a
+PRODUCTION module out of every non-test build — and leaves the tests module
+UNGATED (dragging `MockNdiBackend`/`#[test]` into the lib). `cargo test` passes
+(cfg(test) on) and `cargo fmt` cannot see it, so the no-compile box ships it;
+`cargo build` / the release Tauri compile / `clippy --workspace --all-targets`
+(lib target, cfg(test) OFF) then fail with `unresolved import`/`E0432`. Put the
+new `mod` AFTER the test module, or move the `#[cfg(test)]` explicitly back onto
+the test `mod` — and grep the insertion point for a `#[cfg(test)]` line directly
+above your `old_string` anchor before an Edit that adds a sibling `mod`.
+
+## A cross-crate test-only helper must be `#[doc(hidden)] pub`, NOT `#[cfg(test)]` (#203 2b)
+
+`#[cfg(test)]` is per-crate: an item gated `#[cfg(test)]` in crate A is NOT
+compiled when crate B's test target builds (each test binary is its own
+process/compilation). So a test-only peek/reset helper that BOTH the owning
+crate's tests AND a downstream crate's tests must call cannot be `#[cfg(test)]`.
+`sp_decoder::frame_pool::{pool_len, clear_pool}` are read by sp-decoder's own
+tests AND by sp-server's `frame_buf` recycle test, so they are `#[doc(hidden)]
+pub` (a `pub` fn in a lib crate is never `dead_code`, even with no non-test
+caller, so it passes `clippy -D warnings`). A `#[cfg(test)]` version would fail
+sp-server's compile with `unresolved import`.
+
+## Testing a process-global static pool shared across a whole test binary (#203 2b)
+
+`frame_pool`'s free-list is a `static`, so within ONE test binary EVERY test
+shares it and they run in parallel threads. Two safe patterns:
+
+- **Owning crate (sp-decoder):** serialise the global-state tests on a private
+  `static SERIAL: Mutex<()>` and `clear_pool()` at the start of each — the same
+  pattern the repo's other global-state tests use. `clear_pool` is safe there
+  because the serial lock makes the tests mutually exclusive.
+- **Downstream crate (sp-server), or any test that must NOT nuke siblings:** do
+  NOT call `clear_pool` (it would empty a concurrent test's buffers). Instead
+  pick a UNIQUE, LARGE capacity no other test allocates (e.g. `CAP =
+  1_500_007`) and assert `pool_len(CAP)` directly — the class is yours alone, so
+  concurrency is a non-issue and no serialisation is needed.
+
+A recycling-pool identity test is only deterministic if the recycled buffer
+stays ALIVE in the pool between `recycle` and `take` (a `BTreeMap`/`Vec`
+free-list keeps it), so `take(cap).as_ptr() == recycled_ptr` can never pass by
+address-reuse luck. A RED that FREES instead of recycling must be caught by a
+`pool_len` assertion (freeing never touches the pool, regardless of the
+allocator), NOT by a pointer-equality assertion (a freed address can be reused).

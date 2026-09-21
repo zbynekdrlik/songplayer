@@ -19,18 +19,23 @@
 //!     with NO backoff and re-checks next tick.
 //!  3. [`assign_child_job`] — a per-child Windows Job Object with a
 //!     `JOB_OBJECT_LIMIT_PROCESS_MEMORY` ceiling + `KILL_ON_JOB_CLOSE`, so an
-//!     OOM kills the CHILD, never the host.
+//!     OOM kills the CHILD, never the host. It also carries the #203 containment
+//!     ([`refresh_containment`] / [`current_containment`]): a CPU rate-control
+//!     HARD cap, `JOB_OBJECT_LIMIT_AFFINITY` to the upper cores, and the child's
+//!     `MEMORY_PRIORITY_LOW` — so a heavy child can never starve the wall.
 //!
 //! The pure decision core ([`headroom_ok`] / [`admission_from_headroom`] /
 //! [`memory_ok_for`]) is unit-tested with an INJECTED [`Headroom`] — the real
 //! read ([`read_headroom`]) and the Job Object ([`assign_child_job`]) are
 //! `#[cfg(windows)]` integration seams (no-ops off Windows).
 
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Instant;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{info, warn};
+
+use crate::lyrics::heavy_containment::{Containment, containment_from_settings};
 
 /// Free physical RAM AND free commit each required at or above this before any
 /// heavy child spawns. 4 GiB clears one ~3.2 GB CPU-RoFormer working set with
@@ -223,6 +228,66 @@ fn read_headroom() -> Option<Headroom> {
 }
 
 // ---------------------------------------------------------------------------
+// #203 — per-child OS containment (CPU hard cap + core affinity + memory
+// priority). The pure decision core is [`crate::lyrics::heavy_containment`]; the
+// live settings + core count are read here (like the #162 kill-switches) and
+// published to a process-global snapshot the Job Object seam reads at every
+// heavy-child spawn.
+// ---------------------------------------------------------------------------
+
+/// The live containment published by the heavy workers each tick, read by the
+/// Job Object seam ([`assign_child_job`]) at every heavy-child spawn. Initialised
+/// to the box's defaults (no override) so a spawn before the first refresh is
+/// still contained.
+static CONTAINMENT: LazyLock<Mutex<Containment>> =
+    LazyLock::new(|| Mutex::new(containment_from_settings(None, None, logical_cores())));
+
+/// The box's logical-processor count (`available_parallelism`, min 1). Reads the
+/// environment, so integration-only; the pure mask/cap rules it feeds are tested.
+/// Shared with the `/api/v1/status` handler so both resolve containment from the
+/// SAME core count.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn logical_cores() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+}
+
+/// Resolve the live [`Containment`] from the `heavy_cpu_cap_pct` /
+/// `heavy_cpu_affinity_mask` settings + the box's core count and publish it for
+/// the next heavy child. Each heavy worker (stems / lyrics / dub) calls this each
+/// tick, exactly like it reads the kill-switches — so a dashboard change takes
+/// effect on the next child spawned, no restart. Returns the resolved value.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment {
+    let cap = crate::db::models::get_setting(pool, "heavy_cpu_cap_pct")
+        .await
+        .ok()
+        .flatten();
+    let mask = crate::db::models::get_setting(pool, "heavy_cpu_affinity_mask")
+        .await
+        .ok()
+        .flatten();
+    let c = containment_from_settings(cap.as_deref(), mask.as_deref(), logical_cores());
+    if let Ok(mut g) = CONTAINMENT.lock() {
+        *g = c;
+    }
+    c
+}
+
+/// The currently published containment (applied by the Job Object seam). Read
+/// only inside the `#[cfg(windows)]` spawn path; falls back to the box default if
+/// the lock is poisoned.
+#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(test, mutants::skip)]
+fn current_containment() -> Containment {
+    CONTAINMENT
+        .lock()
+        .map(|g| *g)
+        .unwrap_or_else(|_| containment_from_settings(None, None, logical_cores()))
+}
+
+// ---------------------------------------------------------------------------
 // Layer 3 — per-child Windows Job Object (memory ceiling, kill-on-job-close).
 // ---------------------------------------------------------------------------
 
@@ -255,15 +320,22 @@ impl Drop for ChildJobGuard {
     }
 }
 
-/// Put a freshly-spawned heavy `child` under a Job Object capped at
-/// [`CHILD_JOB_MEMORY_LIMIT_BYTES`] so an OOM kills the child, not the host.
-/// Best-effort: any failure logs at DEBUG and returns a no-op guard (the child
-/// still has `kill_on_drop` as its own net). Non-Windows: a no-op guard.
+/// Put a freshly-spawned heavy `child` under a Job Object with the
+/// [`CHILD_JOB_MEMORY_LIMIT_BYTES`] ceiling (an OOM kills the child, not the
+/// host) PLUS the #203 containment currently published by the workers
+/// ([`current_containment`]): the CPU hard cap, the core affinity, and the
+/// child's lowered memory priority. Best-effort: any failure logs and returns a
+/// no-op guard (the child still has `kill_on_drop` as its own net). Non-Windows:
+/// a no-op guard.
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn assign_child_job(child: &tokio::process::Child) -> ChildJobGuard {
     let handle = match child.id() {
-        Some(pid) => assign_win_job(pid, CHILD_JOB_MEMORY_LIMIT_BYTES as usize),
+        Some(pid) => assign_win_job(
+            pid,
+            CHILD_JOB_MEMORY_LIMIT_BYTES as usize,
+            current_containment(),
+        ),
         None => None,
     };
     ChildJobGuard { handle }
@@ -281,28 +353,40 @@ pub(crate) fn assign_child_job(_child: &tokio::process::Child) -> ChildJobGuard 
 /// child's lifetime. `None` on any failure (handles closed). Integration-only.
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
-fn assign_win_job(pid: u32, limit_bytes: usize) -> Option<isize> {
+fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Option<isize> {
+    use crate::lyrics::heavy_containment::cpu_rate_from_pct;
     use core::ffi::c_void;
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOB_OBJECT_LIMIT_PROCESS_MEMORY, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JobObjectExtendedLimitInformation, SetInformationJobObject,
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_CPU_RATE_CONTROL_ENABLE,
+        JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP, JOB_OBJECT_LIMIT_AFFINITY,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY,
+        JOBOBJECT_CPU_RATE_CONTROL_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JobObjectCpuRateControlInformation, JobObjectExtendedLimitInformation,
+        SetInformationJobObject,
     };
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+        MEMORY_PRIORITY_INFORMATION, MEMORY_PRIORITY_LOW, OpenProcess, PROCESS_SET_INFORMATION,
+        PROCESS_SET_QUOTA, PROCESS_TERMINATE, ProcessMemoryPriority, SetProcessInformation,
     };
 
     // SAFETY: every handle is null-checked; on any failure we close what we
-    // opened and return None. The struct is zero-initialised then fully set.
+    // opened and return None. Each struct is zero-initialised then fully set;
+    // the CpuRate union write and the info-class SetInformationJobObject calls
+    // pass a correctly sized struct as the API requires.
     unsafe {
         let job: HANDLE = CreateJobObjectW(std::ptr::null(), std::ptr::null());
         if job.is_null() {
             return None;
         }
+        // #203: ONE extended-limit struct carries the memory ceiling,
+        // kill-on-close AND the core affinity (the wall keeps its cores) — a
+        // single SetInformationJobObject call, extending the #162 job.
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-        info.BasicLimitInformation.LimitFlags =
-            JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_PROCESS_MEMORY
+            | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            | JOB_OBJECT_LIMIT_AFFINITY;
+        info.BasicLimitInformation.Affinity = containment.affinity_mask as usize;
         info.ProcessMemoryLimit = limit_bytes;
         if SetInformationJobObject(
             job,
@@ -314,10 +398,46 @@ fn assign_win_job(pid: u32, limit_bytes: usize) -> Option<isize> {
             CloseHandle(job);
             return None;
         }
-        let proc: HANDLE = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+        // #203: CPU hard cap — a separate rate-control info class on the same
+        // job. Best-effort: a failure keeps the already-applied memory +
+        // affinity limits rather than dropping the whole job.
+        let mut rate: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION = std::mem::zeroed();
+        rate.ControlFlags =
+            JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP;
+        rate.Anonymous.CpuRate = cpu_rate_from_pct(containment.cpu_cap_pct);
+        if SetInformationJobObject(
+            job,
+            JobObjectCpuRateControlInformation,
+            &rate as *const _ as *const c_void,
+            std::mem::size_of::<JOBOBJECT_CPU_RATE_CONTROL_INFORMATION>() as u32,
+        ) == 0
+        {
+            tracing::warn!("heavy child CPU rate cap not applied (pid {pid})");
+        }
+        let proc: HANDLE = OpenProcess(
+            PROCESS_SET_QUOTA | PROCESS_TERMINATE | PROCESS_SET_INFORMATION,
+            0,
+            pid,
+        );
         if proc.is_null() {
             CloseHandle(job);
             return None;
+        }
+        // #203: lower the child's process MEMORY priority so the wall's working
+        // set is never trimmed for it. Best-effort (needs PROCESS_SET_INFORMATION).
+        if containment.memory_priority_low {
+            let mem = MEMORY_PRIORITY_INFORMATION {
+                MemoryPriority: MEMORY_PRIORITY_LOW,
+            };
+            if SetProcessInformation(
+                proc,
+                ProcessMemoryPriority,
+                &mem as *const _ as *const c_void,
+                std::mem::size_of::<MEMORY_PRIORITY_INFORMATION>() as u32,
+            ) == 0
+            {
+                tracing::warn!("heavy child memory priority not lowered (pid {pid})");
+            }
         }
         let assigned = AssignProcessToJobObject(job, proc);
         CloseHandle(proc);
@@ -325,7 +445,13 @@ fn assign_win_job(pid: u32, limit_bytes: usize) -> Option<isize> {
             CloseHandle(job);
             return None;
         }
-        tracing::debug!("heavy step child job memory limit set to {limit_bytes} bytes (pid {pid})");
+        // #203: log the applied containment once per child.
+        tracing::info!(
+            "heavy child contained (pid {pid}): mem_limit={limit_bytes}B cpu_cap={}% affinity=0x{:x} mem_priority_low={}",
+            containment.cpu_cap_pct,
+            containment.affinity_mask,
+            containment.memory_priority_low
+        );
         Some(job as isize)
     }
 }

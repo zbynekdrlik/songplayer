@@ -1,7 +1,9 @@
 //! Linux tests for the pure #168 emit→submit handoff decision layer.
 
 use super::*;
+use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::PacingStats;
+use crate::playback::pacer::PacedFrame;
 
 // ---- handoff_policy: bounded queue + coalesce-to-freshest ----
 
@@ -166,11 +168,17 @@ fn merge_takes_late_from_submit_and_schedule_from_pacer() {
         lag_slots: 4,
         iter_p99_us: 0,
         prep_p99_us: 400,
+        ..Default::default()
     };
     let mut submit = SubmitCounters::new();
     submit.record_submit(50_000, 300_000, 0); // 1 late, cost 30_000 µs
     submit.record_drop(); // 1 handoff-coalesce drop
-    let merged = merge_pacing_stats(pacer, &submit);
+    // #168 r2: the paced submit-call gauge (worst send_video_async max/p99 µs).
+    let paced_submit = PacedSubmitStats {
+        submit_call_us_max: 90_000,
+        submit_call_us_p99: 75_000,
+    };
+    let merged = merge_pacing_stats(pacer, &submit, paced_submit);
 
     // Honest output-side fields come from the submit thread.
     assert_eq!(merged.late_frames, 1);
@@ -187,6 +195,38 @@ fn merge_takes_late_from_submit_and_schedule_from_pacer() {
     assert_eq!(merged.jitter_p99_us, 7);
     assert_eq!(merged.prep_p99_us, 400);
     assert!(merged.enabled);
+    // #168 r2: the submit-call gauge is carried straight from the paced submit
+    // thread's drained window (max and p99 are NOT swapped).
+    assert_eq!(merged.submit_call_us_max, 90_000);
+    assert_eq!(merged.submit_call_us_p99, 75_000);
+}
+
+// ---- paced_submit_snapshot: worst-of fold over a heartbeat window (#168 r2) ----
+
+#[test]
+fn paced_submit_snapshot_keeps_the_worst_of_each() {
+    // The submit thread drains `FrameSubmitter.submit_times` on its ~1 s
+    // connection-poll cadence and folds each `(max, p99)` sub-window into the
+    // per-heartbeat gauge, keeping the WORST of each so a spike is never diluted
+    // by a following quiet sub-window (the heartbeat resets it on read).
+    let start = PacedSubmitStats::default();
+    // A big spike sub-window, then a quiet one: the worst must survive both.
+    let after_spike = paced_submit_snapshot(start, 90_000, 75_000);
+    assert_eq!(after_spike.submit_call_us_max, 90_000);
+    assert_eq!(after_spike.submit_call_us_p99, 75_000);
+    let after_quiet = paced_submit_snapshot(after_spike, 10, 5);
+    assert_eq!(
+        after_quiet.submit_call_us_max, 90_000,
+        "a later quiet sub-window must NOT lower the window max"
+    );
+    assert_eq!(
+        after_quiet.submit_call_us_p99, 75_000,
+        "a later quiet sub-window must NOT lower the window p99"
+    );
+    // A yet bigger spike raises it.
+    let after_bigger = paced_submit_snapshot(after_quiet, 954_000, 120_000);
+    assert_eq!(after_bigger.submit_call_us_max, 954_000);
+    assert_eq!(after_bigger.submit_call_us_p99, 120_000);
 }
 
 // ---- SubmitJob stamp deadline ----
@@ -197,10 +237,42 @@ fn submit_job_stamp_boundary_is_the_video_tc() {
         width: 1920,
         height: 1080,
         stride: 1920,
-        video: vec![0u8; 8],
+        video: SharedFrame::new(vec![0u8; 8]),
         audio: Vec::new(),
         video_tc_100ns: 3_333_300,
         audio_tc_100ns: 3_333_311,
     };
     assert_eq!(job.stamp_boundary_100ns(), 3_333_300);
+}
+
+#[test]
+fn from_paced_arc_clones_the_frame_without_copying_pixels() {
+    // #203 2b (D6): the emit->submit handoff takes the frame by `Arc` CLONE, so
+    // `SubmitJob.video` is the SAME allocation as the paced frame — the pacer's
+    // starvation-repeat clone and the submit holdover all share it.
+    let video = SharedFrame::new(vec![9u8; 12]);
+    let src_ptr = video.as_ptr();
+    let paced = PacedFrame {
+        pts_ns: 0,
+        width: 4,
+        height: 2,
+        stride: 4,
+        video,
+        audio: Vec::new(),
+    };
+    let job = SubmitJob::from_paced(&paced, &[], 3_333_300, 3_333_311);
+    assert_eq!(
+        job.video.as_ptr(),
+        src_ptr,
+        "handoff is an Arc clone, not a pixel copy"
+    );
+    assert!(
+        paced.video.ptr_eq(&job.video),
+        "the paced frame and the submit job share the SAME allocation"
+    );
+    assert_eq!(job.width, 4, "width propagated");
+    assert_eq!(job.height, 2, "height propagated");
+    assert_eq!(job.stride, 4, "stride propagated");
+    assert_eq!(job.stamp_boundary_100ns(), 3_333_300);
+    assert_eq!(job.audio_tc_100ns, 3_333_311);
 }

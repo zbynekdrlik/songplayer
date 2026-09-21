@@ -30,7 +30,8 @@ use crate::playback::ndi_health::{AudioStats, PacingStats, PlaybackStateLabel};
 use crate::playback::pacer::{PacedFrame, PacedSink};
 use crate::playback::pipeline::{PipelineEvent, classify_bad_poll};
 use crate::playback::submit_handoff::{
-    HandoffOutcome, SubmitCounters, SubmitJob, SubmitQueue, merge_pacing_stats, submit_late_100ns,
+    HandoffOutcome, PacedSubmitStats, SubmitCounters, SubmitJob, SubmitQueue, merge_pacing_stats,
+    paced_submit_snapshot, submit_late_100ns,
 };
 use crate::playback::submitter::FrameSubmitter;
 use crate::playback::wallclock::WallClock;
@@ -44,6 +45,11 @@ const CONN_POLL_EVERY: u32 = 30;
 struct HandoffState {
     queue: SubmitQueue<SubmitJob>,
     counters: SubmitCounters,
+    /// #168 r2: the worst per-call `send_video_async` `(max, p99)` (µs) the submit
+    /// thread has drained from its `FrameSubmitter.submit_times` since the last
+    /// heartbeat — folded worst-of on the connection-poll cadence, drained +
+    /// reset by `snapshot()` so it is a per-heartbeat window.
+    paced_submit: PacedSubmitStats,
     /// Latest receiver connection count (the submit thread polls it off the SDK).
     connections: i32,
     /// `Instant` of the last real submit, for the heartbeat's staleness check
@@ -72,6 +78,7 @@ impl SharedHandoff {
             inner: Mutex::new(HandoffState {
                 queue: SubmitQueue::new(bound),
                 counters: SubmitCounters::new(),
+                paced_submit: PacedSubmitStats::default(),
                 connections: 0,
                 last_submit_instant: None,
                 stop: false,
@@ -130,13 +137,35 @@ impl SharedHandoff {
         }
     }
 
-    /// Emit thread (heartbeat): snapshot the submit counters, connection count,
-    /// and last-submit instant for the merged health doc. Poison → defaults.
+    /// Submit thread: fold one drained `(max, p99)` submit-call sub-window into
+    /// the per-heartbeat gauge (worst-of, `paced_submit_snapshot`). Called on the
+    /// connection-poll cadence right after draining `FrameSubmitter.submit_times`
+    /// (#168 r2). Poison → no-op.
     #[cfg_attr(test, mutants::skip)]
-    fn snapshot(&self) -> (SubmitCounters, i32, Option<Instant>) {
+    fn observe_submit_call(&self, max: u64, p99: u64) {
+        if let Ok(mut st) = self.inner.lock() {
+            st.paced_submit = paced_submit_snapshot(st.paced_submit, max, p99);
+        }
+    }
+
+    /// Emit thread (heartbeat): snapshot the submit counters, connection count,
+    /// last-submit instant, and the per-window submit-call gauge for the merged
+    /// health doc. The submit-call gauge is DRAINED (reset to default) so each
+    /// heartbeat sees the window since the last one (#168 r2). Poison → defaults.
+    #[cfg_attr(test, mutants::skip)]
+    fn snapshot(&self) -> (SubmitCounters, i32, Option<Instant>, PacedSubmitStats) {
         match self.inner.lock() {
-            Ok(st) => (st.counters.clone(), st.connections, st.last_submit_instant),
-            Err(_) => (SubmitCounters::new(), 0, None),
+            Ok(mut st) => {
+                let paced = st.paced_submit;
+                st.paced_submit = PacedSubmitStats::default();
+                (
+                    st.counters.clone(),
+                    st.connections,
+                    st.last_submit_instant,
+                    paced,
+                )
+            }
+            Err(_) => (SubmitCounters::new(), 0, None, PacedSubmitStats::default()),
         }
     }
 
@@ -216,15 +245,12 @@ impl PacedSink for HandoffSink<'_> {
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
     ) {
-        self.handoff.offer(SubmitJob {
-            width: video.width,
-            height: video.height,
-            stride: video.stride,
-            video: video.video.clone(),
-            audio: audio.to_vec(),
+        self.handoff.offer(SubmitJob::from_paced(
+            video,
+            audio,
             video_tc_100ns,
             audio_tc_100ns,
-        });
+        ));
     }
 }
 
@@ -246,6 +272,9 @@ pub(crate) fn run_submit_consumer(
     while let Some(job) = handoff.take_blocking() {
         let submit_start = wall.now_100ns();
         let late = submit_late_100ns(job.stamp_boundary_100ns(), submit_start);
+        // `job.video` is already the shared frame the emit thread Arc-cloned at
+        // the handoff (#203 2b) — move it straight into the submitter's async
+        // holdover (a refcount hold, no copy anywhere on the paced path).
         submitter.submit_frame_at_boundary_owned(
             job.width,
             job.height,
@@ -262,6 +291,12 @@ pub(crate) fn run_submit_consumer(
         since_conn_poll += 1;
         if since_conn_poll >= CONN_POLL_EVERY {
             handoff.set_connections(submitter.sender().get_no_connections(0));
+            // #168 r2: drain this ~1 s window's per-call send_video_async gauge
+            // off the submitter we own and fold it worst-of into the snapshot, so
+            // the heartbeat's PacingStats + `pipeline: loop-stats` line name the
+            // per-frame SDK submit cost the pacing-ON box test needs.
+            let (call_max, call_p99) = submitter.drain_submit_call_us();
+            handoff.observe_submit_call(call_max, call_p99);
             since_conn_poll = 0;
         }
         wall.tick();
@@ -300,8 +335,8 @@ pub(crate) fn emit_heartbeat_paced(
     prev_total: &mut u64,
     prev_instant: &mut Instant,
 ) {
-    let (submit, connections, last_submit_ts) = handoff.snapshot();
-    let pacing = merge_pacing_stats(pacer_stats, &submit);
+    let (submit, connections, last_submit_ts, paced_submit) = handoff.snapshot();
+    let pacing = merge_pacing_stats(pacer_stats, &submit, paced_submit);
 
     let total = submit.submitted;
     let now = Instant::now();
@@ -338,10 +373,17 @@ pub(crate) fn emit_heartbeat_paced(
             reported_state: state,
             pacing,
             audio,
-            // #192 round 3: the SDK-clocked decode loop's stage/submit gauges do
-            // not apply to the paced submit-thread path (genlock_pacing is OFF in
-            // production); default here.
-            loop_stats: crate::playback::loop_stats::LoopStats::default(),
+            // #168 r2: the paced path has no SDK-clocked decode loop, so its
+            // decode/submit/audio STAGE maxima stay 0 — but the per-call
+            // send_video_async gauge DOES apply, so carry it into the SAME
+            // `submit_call_us_max`/`_p99` fields the SDK-clocked `pipeline:
+            // loop-stats` line uses (identical naming), so a pacing-ON box test
+            // reads the per-frame SDK submit cost per minute from that line.
+            loop_stats: crate::playback::loop_stats::LoopStats {
+                submit_call_us_max: paced_submit.submit_call_us_max,
+                submit_call_us_p99: paced_submit.submit_call_us_p99,
+                ..Default::default()
+            },
         },
     ));
     *prev_total = total;

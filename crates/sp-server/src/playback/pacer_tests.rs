@@ -13,6 +13,7 @@
 //! (scheduling read + a fresh emit read after decode), and deletes the guard.
 
 use super::*;
+use crate::playback::frame_buf::SharedFrame;
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::AudioFrame;
 
@@ -30,7 +31,7 @@ fn mk_frame(pts_ns: i64) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: vec![0u8; 12],
+        video: SharedFrame::new(vec![0u8; 12]),
         audio: vec![],
     }
 }
@@ -41,7 +42,7 @@ fn mk_frame_with_audio(pts_ns: i64) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: vec![0u8; 12],
+        video: SharedFrame::new(vec![0u8; 12]),
         audio: vec![AudioFrame {
             data: vec![0.1, 0.2, 0.3, 0.4],
             channels: 2,
@@ -766,11 +767,17 @@ fn standby_black_fills_boundaries_without_a_last_frame() {
     // Black fills the boundary with the supplied black frame instead.
     let (mut pacer, clk) = anchored_pacer();
     let mut sink = RecordingSink::default();
-    let black = mk_frame(0);
+    let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
 
     for k in 1..=50i64 {
         clk.set(b(k));
-        let out = pacer.service_standby(Standby::Black(&black), &mut sink);
+        let standby = Standby::Black {
+            width: 4,
+            height: 2,
+            stride: 4,
+            video: &black,
+        };
+        let out = pacer.service_standby(standby, &mut sink);
         assert_eq!(out, ServiceOutcome::Emitted, "black idle frame is emitted");
     }
     assert_eq!(sink.video_tcs.len(), 50);
@@ -786,6 +793,104 @@ fn standby_black_fills_boundaries_without_a_last_frame() {
     );
     // Black idle frames are NOT frozen-frame repeats.
     assert_eq!(pacer.stats().repeats, 0);
+}
+
+/// A sink that RECORDS each frame's shared handle (for #203 identity checks):
+/// `submit_shared` frames (the idle Black path) into `shared`, and `emit` frames
+/// (the play + FrozenLast repeat path) into `emitted`.
+#[derive(Default)]
+struct SharedRecordingSink {
+    shared: Vec<SharedFrame>,
+    emitted: Vec<SharedFrame>,
+}
+
+impl PacedSink for SharedRecordingSink {
+    fn emit(&mut self, v: &PacedFrame, _a: &[AudioFrame], _vtc: i64, _atc: i64) {
+        self.emitted.push(v.video.clone());
+    }
+
+    fn submit_shared(
+        &mut self,
+        _width: u32,
+        _height: u32,
+        _stride: u32,
+        video: SharedFrame,
+        _audio: &[AudioFrame],
+        _video_tc_100ns: i64,
+        _audio_tc_100ns: i64,
+    ) {
+        self.shared.push(video);
+    }
+}
+
+#[test]
+fn service_standby_black_submits_the_same_allocation_every_slot() {
+    // #203: idle Black is submitted by shared reference — the SAME allocation on
+    // every boundary (a refcount bump, never a per-slot copy). A sink that
+    // implements `submit_shared` records the frames and proves `ptr_eq`.
+    let (mut pacer, clk) = anchored_pacer();
+    let mut sink = SharedRecordingSink::default();
+    let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
+
+    for k in 1..=4i64 {
+        clk.set(b(k));
+        let standby = Standby::Black {
+            width: 4,
+            height: 2,
+            stride: 4,
+            video: &black,
+        };
+        assert_eq!(
+            pacer.service_standby(standby, &mut sink),
+            ServiceOutcome::Emitted
+        );
+    }
+    assert_eq!(sink.shared.len(), 4, "one submit per idle boundary");
+    for f in &sink.shared {
+        assert!(
+            f.ptr_eq(&black),
+            "every idle Black submit is the SAME allocation as the source, no copy"
+        );
+    }
+    // Transitively identical across all four slots.
+    assert!(sink.shared[0].ptr_eq(&sink.shared[3]));
+}
+
+#[test]
+fn service_standby_frozen_last_repeats_the_same_allocation_every_slot() {
+    // #203 2b: the paused paced output repeats the last real frame by HOLDING
+    // its `SharedFrame` (an Arc), so every FrozenLast slot re-emits the SAME
+    // allocation — no per-slot pixel copy (D13/E3).
+    let (mut pacer, clk) = anchored_pacer();
+    let mut sink = SharedRecordingSink::default();
+
+    // Play one real frame -> it becomes the pacer's `last_frame`.
+    let real = frame_due_at(b(1));
+    let src_ptr = real.video.as_ptr();
+    clk.set(b(1));
+    let mut first = Some(real);
+    assert_eq!(
+        pacer.service(|| first.take(), &mut sink),
+        ServiceOutcome::Emitted
+    );
+
+    // Then FrozenLast for several slots.
+    for k in 2..=5i64 {
+        clk.set(b(k));
+        assert_eq!(
+            pacer.service_standby(Standby::FrozenLast, &mut sink),
+            ServiceOutcome::Repeated
+        );
+    }
+
+    assert_eq!(sink.emitted.len(), 5, "1 play + 4 frozen repeats recorded");
+    for f in &sink.emitted {
+        assert_eq!(
+            f.as_ptr(),
+            src_ptr,
+            "every repeat is the SAME allocation as the original frame, no copy"
+        );
+    }
 }
 
 #[test]

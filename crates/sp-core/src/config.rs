@@ -14,12 +14,19 @@ pub const SETTING_GEMINI_MODEL: &str = "gemini_model";
 pub const SETTING_CACHE_DIR: &str = "cache_dir";
 pub const SETTING_MAX_RESOLUTION: &str = "max_resolution";
 pub const SETTING_API_PORT: &str = "api_port";
+/// #184 round C: the pinned Gemini Live Translate output voice for dubs. One
+/// stable voice per video (the owner-selectable catalogue voice); read per tick
+/// by the dub worker and set from the Nastavenia page.
+pub const SETTING_DUB_VOICE: &str = "dub_voice";
 
 // Default values for settings that have sensible defaults.
 pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
 pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
 pub const DEFAULT_CACHE_DIR: &str = "cache";
 pub const DEFAULT_MAX_RESOLUTION: u32 = 1440;
+/// The default dub voice — `Charon`, a male, matter-of-fact voice from the vetted
+/// catalogue (`eval/dubbing/voices.py`); the on-screen speaker is male.
+pub const DEFAULT_DUB_VOICE: &str = "Charon";
 
 // AI settings (CLIProxyAPI → Claude Opus)
 pub const SETTING_AI_API_URL: &str = "ai_api_url";
@@ -62,5 +69,11 @@ mod tests {
             DEFAULT_AI_MODEL, "claude-opus-4-20250514",
             "must not use the retired opus-4 snapshot"
         );
+    }
+
+    #[test]
+    fn dub_voice_setting_key_and_default() {
+        assert_eq!(SETTING_DUB_VOICE, "dub_voice");
+        assert_eq!(DEFAULT_DUB_VOICE, "Charon");
     }
 }

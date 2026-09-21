@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, TryRecvError};
 use tracing::{debug, error, info, warn};
 
+use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::{PacingStats, PlaybackStateLabel};
 use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome, Standby, plan_sleep_100ns};
 use crate::playback::pacer_queue::{ProducerAction, SharedQueue};
@@ -81,7 +82,10 @@ fn to_paced_frame(
         width: video.width,
         height: video.height,
         stride: video.stride,
-        video: video.data,
+        // Wrap the decoded NV12 buffer ONCE on the producer thread (#203 2b);
+        // every downstream hop (pacer repeat, handoff, submit holdover) is an
+        // `Arc` bump of this allocation, recycled to the frame pool on last drop.
+        video: SharedFrame::new(video.data),
         audio: ndi_audio,
     }
 }

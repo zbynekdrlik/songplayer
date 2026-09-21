@@ -102,6 +102,9 @@ pub struct DubRow {
     /// Resolved [`DubChainState::as_str`] so the UI does not duplicate the
     /// derivation logic — computed server-side from the three inputs above.
     pub chain_state: String,
+    /// The pinned dub voice (#184 round C), read from the repurposed
+    /// `dub_voice_ref_path` column. `None` until the worker resolves one.
+    pub dub_voice: Option<String>,
 }
 
 /// Build a [`DubRow`] from a selected `videos` row (shared by every query here).
@@ -123,11 +126,13 @@ fn row_to_dub_row(r: &sqlx::sqlite::SqliteRow) -> DubRow {
         stem_status,
         lyrics_present,
         chain_state: chain_state.to_string(),
+        dub_voice: r.get("dub_voice_ref_path"),
     }
 }
 
 const DUB_ROW_SELECT: &str = "SELECT id, playlist_id, title, song, dub_status, \
-     dub_error, dub_mix_ratio, dub_file_path, stem_status, has_lyrics FROM videos";
+     dub_error, dub_mix_ratio, dub_file_path, stem_status, has_lyrics, \
+     dub_voice_ref_path FROM videos";
 
 /// Set (or clear) the dub request on a video. Requesting flips `dub_requested`
 /// on, moves `dub_status` to `'queued'`, stamps `dub_requested_at`, and raises
@@ -179,22 +184,48 @@ pub async fn list_dub_videos(pool: &SqlitePool) -> Result<Vec<DubRow>, sqlx::Err
 /// `(clamped_value, rows_affected)` so the handler can 404 when no such id
 /// (consistent with `set_dub_requested`/`patch_dub`). A `NaN` clamps to `1.0`
 /// (dub-only, the safe default).
+/// Clamp a dub-mix ratio to the mixer's `0.0..=1.0` range, mapping NaN to the
+/// dub-only default `1.0`. Pure so the live push (`api/dabing.rs::patch_dub_mix`)
+/// and the DB persist ([`set_dub_mix_ratio`]) apply the SAME clamped value
+/// (#184 round A — the push must carry exactly what gets stored).
+pub fn clamp_dub_ratio(ratio: f64) -> f64 {
+    if ratio.is_nan() {
+        1.0
+    } else {
+        ratio.clamp(0.0, 1.0)
+    }
+}
+
 pub async fn set_dub_mix_ratio(
     pool: &SqlitePool,
     video_id: i64,
     ratio: f64,
 ) -> Result<(f64, u64), sqlx::Error> {
-    let clamped = if ratio.is_nan() {
-        1.0
-    } else {
-        ratio.clamp(0.0, 1.0)
-    };
+    let clamped = clamp_dub_ratio(ratio);
     let res = sqlx::query("UPDATE videos SET dub_mix_ratio = ? WHERE id = ?")
         .bind(clamped)
         .bind(video_id)
         .execute(pool)
         .await?;
     Ok((clamped, res.rows_affected()))
+}
+
+/// Persist the resolved dub voice for a video (#184 round C). The voice name is
+/// stored in the EXISTING nullable `dub_voice_ref_path` TEXT column — REPURPOSED
+/// as the voice name (it was dead plumbing from the abandoned clone lane, so no
+/// schema change is needed). Returns the rows affected so a caller can tell a
+/// missing id (0). Idempotent.
+pub async fn set_dub_voice(
+    pool: &SqlitePool,
+    video_id: i64,
+    voice: &str,
+) -> Result<u64, sqlx::Error> {
+    let res = sqlx::query("UPDATE videos SET dub_voice_ref_path = ? WHERE id = ?")
+        .bind(voice)
+        .bind(video_id)
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected())
 }
 
 // ── D4 write-side: the dub synthesis chain (#183) ───────────────────────────────

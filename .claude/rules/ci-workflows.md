@@ -89,6 +89,34 @@ completes, and the next dev push sits `pending` with ZERO jobs —
 `gh api -X POST repos/<owner>/<repo>/actions/runs/<old-run>/force-cancel`; the
 pending run starts within seconds.
 
+## `Build WASM (trunk)` red with "error downloading archive file: 504" = trunk's wasm-bindgen fetch, not our code (21.9.2026)
+
+trunk downloads `wasm-bindgen` from the OLD `rustwasm/wasm-bindgen` release
+URL, which now only 301-redirects to `wasm-bindgen/wasm-bindgen`; GitHub's
+release edge answered that redirect with 504 on two consecutive runs
+(35614160178 + its `--failed` re-run) while the same asset downloaded fine from
+dev1. A second failure of the same shape is NOT a transient to re-run again —
+`ci.yml` now pre-seeds the exact locked version (parsed from
+`sp-ui/Cargo.lock`, never hard-coded) onto `$HOME/.cargo/bin` (trunk uses a
+matching PATH binary before downloading) and into `~/.cache/trunk/wasm-bindgen-<v>/`
+with a 6-attempt retrying `curl` from the new org. If the step itself fails,
+check the new-org URL for that version from dev1 first (`curl -sIL …`), then
+whether the lock's `wasm-bindgen` version changed.
+
+## NEVER delete `songplayer.db-wal` / `-shm` in a deploy or restart step (#184 round A, 21.9.2026)
+
+`db/mod.rs::pool_tuning()` runs SQLite in **WAL mode** since #184 round A. In WAL
+mode every committed write lives in `songplayer.db-wal` until a checkpoint
+(auto at ~1000 pages / graceful close); SQLite replays it on the next open. The
+deploy/E2E restart step used to `Remove-Item songplayer.db-wal / -shm` after
+`taskkill` — a rollback-journal-era leftover that was harmless before and, under
+WAL, **silently reverted the database on every restart** (a dub that reached
+`ready` at 16:06Z was back in `synth` after the 16:11Z restart; the E2E "a READY
+dub is listed" then failed twice). A `taskkill /F` needs NO cleanup: the WAL is
+on disk and recovered; the `-shm` is recreated. If a step ever needs a compact
+DB, call `PRAGMA wal_checkpoint(TRUNCATE)` through the running app — never
+delete the files.
+
 ## push + pull_request de-dup (#124)
 
 Shared build/test jobs run **once, on the `push` event** (`if: github.event_name ==
@@ -258,4 +286,15 @@ writes a UTF-8 BOM, which prefixes the key (`﻿key=value`) and can blank the
 output on a strict reader. `Add-Content -Path $env:GITHUB_OUTPUT -Value
 "key=$($val)"` writes the ASCII line with no BOM. (The bash steps' `>> $GITHUB_OUTPUT`
 have no such issue.)
+
+## Restarting SongPlayer via the Deploy job: `gh run rerun --job <job-id>` (no run id)
+
+`gh run rerun <run-id> --job <id>` is rejected ("specify only one of <run-id> or
+--job") and prints the usage text — a `| tail -1` swallowed that and box test 7
+sampled 30 min with the flag still OFF (21.9.2026). The working form is
+`gh run rerun --job <job-id>` alone; it creates run ATTEMPT 2 whose Deploy job
+has a NEW job id, so poll `gh api repos/<r>/actions/runs/<run>/jobs?filter=latest`
+(or `jobs/<new-id>`) — polling the old id reports the old attempt's success.
+Confirm the restart with `/api/v1/status` `uptime_s` before sampling anything
+that depends on a startup-read setting (`genlock_pacing`).
 

@@ -82,6 +82,10 @@ pub struct DubRow {
     /// `translation`/`synth`/`ready`/`failed`) — the server derives it.
     #[serde(default)]
     pub chain_state: String,
+    /// The pinned dub voice (#184 round C), from the repurposed
+    /// `dub_voice_ref_path` column. `None` until the worker resolves one.
+    #[serde(default)]
+    pub dub_voice: Option<String>,
 }
 
 /// Outcome of the most recent POST /api/v1/lyrics/reprocess (any flavor).
@@ -161,9 +165,16 @@ pub struct DashboardStore {
     pub lyrics_queue: RwSignal<Option<LyricsQueueInfo>>,
     pub lyrics_songs: RwSignal<Vec<LyricsSongEntry>>,
     pub last_reprocess: RwSignal<Option<ReprocessOutcome>>,
-    /// #180: dub-requested videos for the Dabing section, refreshed by a 2 s poll
-    /// (the Dabing page owns the loop, like the NDI-health poll).
+    /// #180: dub-requested videos for the Dabing section. #184: refreshed by a
+    /// 2 s poll owned by `App` (not the Dabing page), so `store.dabing` exists on
+    /// every page and the shared Player's mixer slot can pick the dub mixer for a
+    /// playing dub video on the Dashboard / Live too, not only after visiting
+    /// /dabing.
     pub dabing: RwSignal<Vec<DubRow>>,
+    /// #184: the seeded Dabing playlist id, resolved from the `/api/v1/dabing`
+    /// payload by the App-level poll. The Dabing page reads it to mount the
+    /// shared Player for that output. `None` until the first payload arrives.
+    pub dabing_playlist_id: RwSignal<Option<i64>>,
     /// Per-output NDI genlock health (#150), refreshed ~1 Hz by the
     /// dashboard's `GlobalLockBadge` poll loop and read by every per-card
     /// `LockBadge`.
@@ -200,6 +211,7 @@ impl DashboardStore {
             lyrics_songs: RwSignal::new(vec![]),
             last_reprocess: RwSignal::new(None),
             dabing: RwSignal::new(vec![]),
+            dabing_playlist_id: RwSignal::new(None),
             ndi_health: RwSignal::new(vec![]),
             resolume_health: RwSignal::new(vec![]),
             tools: RwSignal::new(None),

@@ -24,6 +24,7 @@
 //!     be `len+1` or `len/1` with no change.
 
 use super::*;
+use crate::playback::frame_buf::SharedFrame;
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::AudioFrame;
 
@@ -41,7 +42,7 @@ fn mk_frame(pts_ns: i64) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: vec![0u8; 12],
+        video: SharedFrame::new(vec![0u8; 12]),
         audio: vec![],
     }
 }
@@ -331,9 +332,17 @@ fn service_buffered_frame_catches_up_never_resyncs() {
 fn service_standby_on_grid_step_is_not_a_relatch() {
     let (mut pacer, clk) = anchored_pacer();
     let mut sink = RecordingSink::default();
-    let black = mk_frame(0);
+    let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
     clk.set(b(1)); // sched_now == next_boundary == latched boundary (boundary == nb)
-    let out = pacer.service_standby(Standby::Black(&black), &mut sink);
+    let out = pacer.service_standby(
+        Standby::Black {
+            width: 4,
+            height: 2,
+            stride: 4,
+            video: &black,
+        },
+        &mut sink,
+    );
     assert_eq!(out, ServiceOutcome::Emitted);
     assert_eq!(
         pacer.stats().relatches,
@@ -351,10 +360,18 @@ fn service_standby_backward_step_relatches_once() {
     clk.set(b(100));
     pacer.anchor(); // next_boundary = strict_next(b(100))
     let mut sink = RecordingSink::default();
-    let black = mk_frame(0);
+    let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
     // Backward step far below the latched standby boundary.
     clk.set(b(50));
-    let out = pacer.service_standby(Standby::Black(&black), &mut sink);
+    let out = pacer.service_standby(
+        Standby::Black {
+            width: 4,
+            height: 2,
+            stride: 4,
+            video: &black,
+        },
+        &mut sink,
+    );
     assert!(
         matches!(out, ServiceOutcome::Wait { .. }),
         "a backward standby step waits, never emits a future-dated frame"
@@ -375,11 +392,19 @@ fn service_standby_backward_step_relatches_once() {
 fn service_standby_services_a_late_boundary_by_emitting() {
     let (mut pacer, clk) = anchored_pacer();
     let mut sink = RecordingSink::default();
-    let black = mk_frame(0);
+    let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
     // First on-grid standby advances next_boundary to b(2).
     clk.set(b(1));
     assert_eq!(
-        pacer.service_standby(Standby::Black(&black), &mut sink),
+        pacer.service_standby(
+            Standby::Black {
+                width: 4,
+                height: 2,
+                stride: 4,
+                video: &black,
+            },
+            &mut sink
+        ),
         ServiceOutcome::Emitted
     );
     // Late standby step: sched_now (b(5)) > boundary (b(2)); `emit_now < boundary`
@@ -387,7 +412,15 @@ fn service_standby_services_a_late_boundary_by_emitting() {
     // would instead re-latch and Wait.
     clk.set(b(5));
     assert_eq!(
-        pacer.service_standby(Standby::Black(&black), &mut sink),
+        pacer.service_standby(
+            Standby::Black {
+                width: 4,
+                height: 2,
+                stride: 4,
+                video: &black,
+            },
+            &mut sink
+        ),
         ServiceOutcome::Emitted,
         "a late standby boundary is emitted, never a Wait"
     );

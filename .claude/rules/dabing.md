@@ -306,3 +306,96 @@ song-lyrics pipeline. `LYRICS_PIPELINE_VERSION` is untouched.
   "done"` for the mixer (current reality), broader for the chain (intent).
   `e2e/mixer.spec.ts` asserts both fader shapes; `e2e/dabing.spec.ts` both chain
   shapes; zero console errors.
+
+# Dabing round A+B (#184) — instant mix apply + one mixer rule on every page
+
+## `DubRow.stem_status` is the RAW stems-worker column, NOT the `stems_state` wire vocab
+`DubRow.stem_status` (server `db/models_dabing.rs::row_to_dub_row`) is the raw
+`videos.stem_status` COLUMN: `NULL` (pending) / `'done'` (ready) / `'failed'` /
+`'unsupported'`. This is a DIFFERENT vocabulary from the derived `stems_state`
+wire strings (`ready`/`queued`/`processing`/`failed`/`unavailable`) that
+`stems::models_stems::stems_state_of` produces for the karaoke/videos payloads.
+So `dub_mixer.rs` uses `stem_status == "done"` for `has_stems`, and
+`sp_core::mixer_model::mixer_controls`'s stems-capable set MUST include `"done"`
+(the real value a dub row carries) — the wire strings alone would make a
+stems-ready dub (`stem_status='done'`) fail the karaoke gate on the real box
+while passing under a mock that feeds `"ready"`. Never assume the two columns
+share a vocabulary.
+
+## Dub-mix applies live-first: push the engine command BEFORE the DB persist
+`api/dabing.rs::patch_dub_mix` awaits `EngineCommand::SetDubMix` FIRST, then
+`set_dub_mix_ratio` (the persist), via the pure seam
+`api/dabing_apply.rs::apply_dub_mix(push, persist)`. The old order (persist then
+push) let the DB `acquire()` park up to sqlx's **30 s** default before the live
+gains moved — the owner's "~30 s to apply" report. Clamp once via
+`models_dabing::clamp_dub_ratio` so the push carries exactly what gets stored; a
+persist failure is logged + 500 while the live change already happened. Pairs
+with `db/mod.rs::pool_tuning()` (WAL + NORMAL sync + 5 s busy + **2 s** acquire),
+applied only to the FILE pool (`create_memory_pool` stays plain — WAL needs a
+file). No schema change.
+
+## The `/api/v1/dabing` poll lives in `App`, not the Dabing page (#184 B1)
+`store.dabing` (and `store.dabing_playlist_id`) are filled by an App-level
+`store::poll_value` loop (`app.rs`, next to the playlists load), so the shared
+Player picks the dub mixer for a playing dub video on EVERY page — not only after
+visiting `/dabing`. `pages/dabing.rs` just READS the store now. `player.rs`
+renders `<DubMixer>` and/or `<KaraokeMixer>` from `mixer_controls(dub_status,
+stem_status)`, with `show_karaoke = controls.karaoke || !controls.dub` (a non-dub
+song always keeps the karaoke default; a dub video shows karaoke only when
+stems-capable). `e2e/dabing-mixer.spec.ts` proves it on Prehľad + Naživo without
+a `/dabing` visit.
+
+# Dabing round C (#184) — one stable dub voice per video (pinned Gemini voice)
+
+The dub used to change voice every few sentences (female → male → another male,
+one speaker on screen) because `dub_worker.py` built the Live config with NO
+`speech_config`, so Gemini re-rolled the output voice per Live session and per
+turn. Round C PINS one voice per video.
+
+## The voice is PINNED via `speech_config` (probe-verified)
+`dub_worker.py::_translate_pcm` now sets
+`speech_config=SpeechConfig(voice_config=VoiceConfig(prebuilt_voice_config=
+PrebuiltVoiceConfig(voice_name=<voice>)))` on the `LiveConnectConfig`, ALONGSIDE
+the existing `translation_config`. The translate model `gemini-3.5-live-translate-
+preview` ACCEPTS `speech_config` (probe 2026-09-21: two runs, same voice, f0
+median spread 1.4 st ≤ 2 st) — the abandoned fallback (one session per video, no
+pin) is NOT needed. Full probe recipe: `.claude/rules/dubbing-eval.md`.
+
+## Setting → worker → child, mirroring `dub_pace`
+`dub_voice` setting (default `sp_core::config::DEFAULT_DUB_VOICE` = `Charon`),
+read per tick in `dabing/worker.rs::synthesize` via the pure
+`dub_voice_from(setting) -> String` (absent/blank → default, any non-blank name
+trimmed + passed through — the catalogue is NOT enforced in the worker, so a new
+voice needs no code change), threaded into `child.rs::live_translate_args`
+(`--voice`). The six catalogue voices live in `eval/dubbing/voices.py` and are
+mirrored in the Nastavenia select (`sp-ui/components/settings_form.rs::DUB_VOICES`,
+Slovak labels).
+
+## Voice-keyed resume + persisted voice (repurposed column, NO schema change)
+- The child records `"voice"` in each `chunk_N.json`; the pure
+  `dub_worker.py::chunk_reusable(meta, voice)` reuses a cached chunk ONLY when its
+  recorded voice matches the requested one (a legacy chunk with no `voice`, or one
+  under another voice, is re-synthesized) — so a voice change re-does the dub in
+  one voice.
+- The resolved voice is persisted per video in the EXISTING nullable
+  `dub_voice_ref_path` TEXT column REPURPOSED as the voice name (it was dead
+  clone-lane plumbing; no migration, documented in the `db/mod.rs` V26 comment),
+  via `models_dabing::set_dub_voice`; exposed as `DubRow.dub_voice` on the
+  `GET /api/v1/dabing` payload and shown in the Dabing row as `hlas: <voice>`.
+
+## `scripts/dub_voice_check.py` — objective consistency check (box/dev1 tool)
+Reads a dub FLAC/WAV, per-window (30 s) f0 median, exits 1 when the
+INTERQUARTILE spread of the window medians (in semitones vs the file median)
+exceeds `MAX_IQR_ST = 8` — the rotating-voice symptom (alternating voices an
+octave apart = IQR 12 st). **Do not use the max spread as the gate:** measured
+21.9.2026 on the 36-min re-dubbed sample, ONE pinned voice has IQR 4.5 st but a
+max spread of 14.7 st (natural intonation + the odd octave-error window), so the
+original 3 st max-spread limit (set from a 20 s same-sentence probe) flagged a
+single voice; the max spread is printed for information only. A female↔male
+rotation puts whole windows in the ~200 Hz band; a single male voice stays in
+80–145 Hz. It is NOT executed in CI but IS ruff-lint-scoped
+(`ci.yml` eval-checks). Its pure helpers run in CI eval-checks WITHOUT librosa —
+the f0 measurement prefers `librosa.pyin` but falls back to a dependency-free
+numpy autocorrelation (`f0_autocorr`), and the pytest forces the fallback
+(`use_librosa=False`) so it RUNS, never skips (CI installs numpy + soundfile, not
+librosa).

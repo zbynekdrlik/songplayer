@@ -102,6 +102,29 @@ paths:
   (`genlock_pacing=true`, stems child resident, 60 s): `late_frames` < 1 % of
   `seq`, `resyncs`/`dropped`/`audio.underruns` 0, `lock_state=LOCKED`; then the
   flag stays ON and camera-box#1302 gets the receiver verdict.
+- Submit-call cost gauge on the paced path (#168 round 2, 0.63.0-dev.1): box
+  test 6 FAILED (17.9.: 94.5 % late, `iter_p99` 75.8 ms) because the NDI SDK
+  `send_video_async` itself costs ~25 ms median / 75 ms p99 per 2560×1440 frame
+  with the stems child resident (the 20.9. event showed up to 954 ms) — the
+  decode + emit are off the critical path, the remaining wall is the SDK call.
+  To decide (SDK cost intrinsic at 1440p → 1080p-genlocked vs 1440p-unlocked, or
+  load-induced → policy) this round PLUMBS the per-frame SDK cost onto the paced
+  heartbeat, plumbing only, no behaviour change. The submit thread already timed
+  every `send_video_async` into `FrameSubmitter.submit_times` (the round-3
+  `loop_stats::SubmitHist`) but never surfaced it; now `run_submit_consumer`
+  drains that SAME histogram on its ~1 s connection-poll cadence and folds the
+  `(max, p99)` worst-of into the handoff snapshot (pure
+  `submit_handoff::paced_submit_snapshot` + `PacedSubmitStats`), the heartbeat
+  `snapshot()` drains-and-resets it per window, and `emit_heartbeat_paced`
+  carries it BOTH into `PacingStats` (`submit_call_us_max`/`submit_call_us_p99`,
+  on `/api/v1/ndi/health` `pacing`) AND into the existing `pipeline: loop-stats`
+  log line (the SAME field names the SDK-clocked path uses). **Box test 7 reads
+  these:** with `genlock_pacing=true` + a stems child resident, the per-minute
+  `pipeline: loop-stats … submit_call_us_max=… submit_call_us_p99=…` line (and
+  the `/api/v1/ndi/health` `pacing` block) now names the paced per-frame SDK
+  submit cost, cross-read against `late %`; then the stems worker OFF for the
+  A/B. The `ndi: genlock` line was NOT touched (ndi_health.rs is at the 1000
+  cap); the number rides the loop-stats line + the health API instead.
 - Burn-id QR overlay (#151, run_id **911014**): the paced emit paints a QR of
   `P{run_id}.{frame_id}.{gen_ts_ns}.{crc32}` bottom-right (side `0.28·h`, margin
   `40/1080·h` — camera-box `payload.rs` + `burn-geom.hpp`, ported into
@@ -230,9 +253,12 @@ paths:
   of each loop iteration; both ride the `HealthSnapshot` event and log a third
   grep-stable `pipeline: loop-stats` line beside `ndi: heartbeat` (per UTC minute)
   so the A/B box test (same song ± a resident stems child) names the stalling
-  stage. The paced (#168, genlock_pacing OFF in prod) submit-thread accumulates
-  the gauge but does not surface it through its handoff snapshot yet (separable
-  follow-up).
+  stage. The paced (#168, genlock_pacing OFF in prod) submit-thread also surfaces
+  this gauge now (#168 round 2, 0.63.0-dev.1): it drains the SAME
+  `FrameSubmitter.submit_times` through its handoff snapshot into
+  `emit_heartbeat_paced`, carried into `PacingStats` + the paced `pipeline:
+  loop-stats` line — see the "Submit-call cost gauge on the paced path" bullet
+  above.
 - **Round 4 (`av_catchup.rs`): video follows the wall-clock audio, SDK-clocked
   path only.** The round-3 measurement showed the stall's residue is not a
   submit-call block but a lasting A/V offset (the ring stays ~150 ms for the rest
@@ -242,3 +268,83 @@ paths:
   `catchup_dropped` in the `pipeline: loop-stats` line. This runs ONLY on the
   `genlock_pacing == false` (wall-clock-emitter) branch; the paced/genlock path
   keeps its own re-latch logic and is untouched. Full contract: `pipeline-testability.md`.
+- Allocation-free steady state (#203, round 2a): the wall's page-fault storm
+  under a resident heavy child was the per-frame `Vec<u8>` alloc/free (VirtualAlloc
+  demand-zero faults + VirtualFree TLB shootbacks). The submit holdover is now a
+  `playback::frame_buf::SharedFrame` (`Arc<Vec<u8>>`, NEVER `Arc<[u8]>` which
+  copies) — `FrameSubmitter.prev_frame: Option<SharedFrame>`, sent via the new
+  additive `NdiSender::send_video_async_slice(&[u8])`, so the holdover is a
+  refcount hold with ZERO pixel copy. Rules for anyone touching `submitter.rs` /
+  `pacer.rs`: the field-order SAFETY note still holds (sender drops before
+  `prev_frame`); the paced burn overlay paints via `SharedFrame::make_mut` (in
+  place while sole owner — it IS the sole owner on the submit path, since the pacer
+  keeps its own `last_frame` clone); idle Black is submitted by shared reference
+  through `PacedSink::submit_shared` (`Standby::Black{dims, &SharedFrame}`,
+  `service_standby` clones the Arc = a refcount bump per idle slot, the idle loop
+  owns one black `SharedFrame`); `send_black_bgra` reuses a `black_bgra` buffer
+  keyed by size (send is synchronous, so it is reclaimed the instant the call
+  returns). The NV12 decoder/handoff/pacer-repeat pool (a cross-crate `sp-decoder`
+  change) is round 2b, built on this `SharedFrame` seam. The audio emitter
+  (`audio_emitter.rs`) is also allocation-free per slot now: `EmittedBlock` is a
+  TAG enum, `pop_block` fills a reused `block_buf`, `samples_for` returns a borrow
+  (+ a reusable `silence` block), and the jitter-p99 sort moved OFF the
+  TIME_CRITICAL thread into `emitter_stats()` (on-demand, heartbeat cadence).
+- **Round 5 (#192): a SEEK must not break the cushion + click-free edges.** A seek
+  forwarded a keyframe-aligned video seek, so `MediaFoundationVideoReader` landed
+  on the PREVIOUS keyframe (`< target`) and `SplitSyncedDecoder::next_synced`
+  delivered those pre-target frames — the SDK-clocked sender paced them out (the
+  visible jump-back) and the pairing deadline pinned the ring depth ≈ 0 for the
+  REST of the song (audio led the picture). Fix (pure, Linux-tested): `seek`
+  records `pending_video_target_ms`; `next_synced` decode-and-DISCARDS video
+  frames `< target` (bounded by `MAX_SEEK_DISCARD_FRAMES = 600`, never spins)
+  before pairing, so the first delivered frame is `>= pos` and the cushion refills
+  like a fresh Play. `pipeline.rs` seek arm + the position report are UNTOUCHED
+  (same `decoder.seek(pos)` signature; the first reported ts is already `>= pos`).
+  Plus a pure `audio_edge_fade::EdgeFade` (sp-server): a fade-out TAIL (last block
+  ramped 1→0) at the audio→silence edge and a fade-in (0→1 over `FADE_IN_BLOCKS=3`)
+  at the silence→audio edge, removing the clicks a `clear_ring` / stall / song
+  transition otherwise produced. TWO design rules that kept every existing test
+  green: (1) shape the samples in `samples_for`, NOT `tick` — `tick`/`Emitted.block`
+  /`silence_blocks` stay RAW, so the transition log + the tick-asserting tests are
+  untouched; only the SENT samples change. (2) the fade-in fires ONLY on a genuine
+  silence→audio edge (`fade_in_pos` starts AT `FADE_IN_BLOCKS`, reset to 0 by
+  `on_silence`) — a COLD `samples_for(&Audio)` with no preceding silence stays
+  full gain, so the many dev tests that push+tick+`samples_for` and assert exact
+  samples keep passing; in production the emit thread always emits silence while
+  the ring fills, so the first real audio still fades in. Keep the #203
+  allocation-free contract: full-gain audio + plain silence are borrowed straight
+  from `block_buf` / the reusable `silence`; only faded slots use EdgeFade`s reused
+  `out` scratch, and `samples_for` borrows disjoint fields (`&mut edge_fade` +
+  `&ring`) so it stays zero-copy. The FIRST post-audio silence slot is now the tail
+  (not zeros) — a test asserting that slot is all-zeros must expect the tail + read
+  the SECOND slot for the zero block.
+
+## Allocation-free playing steady state — the recycling frame pool (#203 2b)
+
+The per-frame `VirtualAlloc`/`VirtualFree` churn that stalls the wall under a
+resident heavy child is removed by recycling NV12 buffers, NOT by a custom
+allocator (3–8 MB blocks take the large-object path in every mainstream malloc,
+so the OS fault + TLB-shootdown cost is unchanged):
+
+- `sp_decoder::frame_pool` is the SINGLE recycler: a process-global free-list
+  keyed by exact `Vec::capacity()` (one frame resolution = one size class),
+  `POOL_CAP_PER_CLASS = 6`, `take(len)`/`recycle(buf)`, and `PooledBuf(Vec<u8>)`
+  whose `Drop` recycles. It lives in sp-decoder (no sp-core dep) so BOTH the MF
+  reader and sp-server use it. The `mf_reader` fills `frame_pool::take(len)` via
+  `extend_from_slice` into retained capacity (no fault after the first frame).
+- `sp-server`'s `SharedFrame = Arc<PooledBuf>` is the SINGLE sharing handle. One
+  allocation flows the whole playing path by Arc bump: `to_paced_frame` wraps
+  once → `PacedFrame.video` → the pacer's `last_frame` starvation repeat →
+  `SubmitJob::from_paced` (the handoff, `frame.video.clone()`) → the submitter's
+  `prev_frame` holdover. No pixel copy anywhere; the burn overlay's
+  `SharedFrame::make_mut` (`Arc::make_mut` → a fresh `PooledBuf` copy) is the
+  only cloner and burn is default OFF.
+- **SDK-holdover safety invariant (unchanged from 2a):** a recycled buffer may
+  be reused ONLY after every `Arc` is gone. Recycling fires exactly in
+  `PooledBuf::Drop`, which the `Arc` runs only on the LAST holder drop — the
+  submitter installs the new `prev_frame` (dropping the old Arc) AFTER the async
+  call returns, so the buffer the SDK still points at is never recycled early.
+  Keep `FrameSubmitter.sender` declared BEFORE `prev_frame` (field drop order).
+- The idle black and the cached BGRA black stay OUT of the pool as takers (built
+  from their own buffers, never `take`); the idle black's single end-of-loop
+  drop recycling one bounded black buffer is harmless.

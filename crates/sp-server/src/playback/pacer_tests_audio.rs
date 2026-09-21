@@ -9,6 +9,7 @@
 //! direction. `super::*` resolves to the `pacer` module under test.
 
 use super::*;
+use crate::playback::frame_buf::SharedFrame;
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::AudioFrame;
 use std::cell::{Cell, RefCell};
@@ -34,7 +35,7 @@ fn frame_due_with_audio(target_100ns: i64, n: usize) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: vec![0u8; 12],
+        video: SharedFrame::new(vec![0u8; 12]),
         audio: vec![AudioFrame {
             data,
             channels: 2,

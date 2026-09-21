@@ -12,6 +12,14 @@ use crate::types::{DecodedAudioFrame, DecodedVideoFrame};
 /// Default tolerance for pairing audio chunks to a video frame (ms).
 pub const DEFAULT_TOLERANCE_MS: u64 = 40;
 
+/// Maximum number of video frames [`SplitSyncedDecoder::next_synced`] will
+/// decode-and-discard chasing a post-seek target before it gives up and delivers
+/// whatever frame it has. A YouTube AV1 keyframe interval is ~150–300 frames; 600
+/// (~20 s at 30 fps) covers the worst real case with headroom while BOUNDING the
+/// discard so a target past end-of-stream can never spin the decode loop (#192
+/// round 5).
+pub const MAX_SEEK_DISCARD_FRAMES: u32 = 600;
+
 /// Maximum duration disagreement between video and audio sidecars before
 /// [`SplitSyncedDecoder::new`] warns.
 pub const DURATION_MISMATCH_WARN_MS: u64 = 100;
@@ -35,6 +43,14 @@ pub struct SplitSyncedDecoder {
     pending_audio: VecDeque<DecodedAudioFrame>,
     tolerance_ms: u64,
     duration_ms: u64,
+    /// After a seek, the sample-accurate audio target the video must fast-forward
+    /// to. `SplitSyncedDecoder::seek` seeks the MF video reader keyframe-aligned,
+    /// so it lands on the PREVIOUS keyframe (`< target`); `next_synced` then
+    /// decodes-and-discards video frames below `target` before pairing, so the
+    /// first delivered frame is at `>= target` and the cushion refills and A/V
+    /// realign exactly like a fresh Play (#192 round 5). Cleared on the first
+    /// delivered frame.
+    pending_video_target_ms: Option<u64>,
 }
 
 impl std::fmt::Debug for SplitSyncedDecoder {
@@ -100,6 +116,7 @@ impl SplitSyncedDecoder {
             pending_audio: VecDeque::new(),
             tolerance_ms,
             duration_ms: a_dur,
+            pending_video_target_ms: None,
         })
     }
 
@@ -125,10 +142,17 @@ impl SplitSyncedDecoder {
 
     /// Forward a seek to both readers. Audio first (sample-accurate), video
     /// second (keyframe-aligned).
+    ///
+    /// The video reader lands on the previous keyframe (`< position_ms`), so
+    /// record `position_ms` as a fast-forward target: [`next_synced`](Self::next_synced)
+    /// decodes-and-discards the pre-target video frames before pairing, so the
+    /// first delivered frame is at `>= position_ms` and the cushion refills like a
+    /// fresh Play (#192 round 5).
     pub fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
         self.audio.seek(position_ms)?;
         self.video.seek(position_ms)?;
         self.pending_audio.clear();
+        self.pending_video_target_ms = Some(position_ms);
         Ok(())
     }
 
@@ -144,7 +168,7 @@ impl SplitSyncedDecoder {
     pub fn next_synced(
         &mut self,
     ) -> Result<Option<(DecodedVideoFrame, Vec<DecodedAudioFrame>)>, DecoderError> {
-        let video = match self.video.next_frame()? {
+        let video = match self.next_target_video_frame()? {
             Some(v) => v,
             None => return Ok(None),
         };
@@ -176,6 +200,35 @@ impl SplitSyncedDecoder {
         );
 
         Ok(Some((video, audio_frames)))
+    }
+
+    /// Pull the next video frame to DELIVER, honouring a pending post-seek target.
+    ///
+    /// After a seek the MF reader lands on the previous keyframe, so decode-and-
+    /// discard every frame whose `timestamp_ms < target` (bounded by
+    /// [`MAX_SEEK_DISCARD_FRAMES`] so a target past end-of-stream can never spin),
+    /// then deliver the first frame at `>= target`. A seek that lands exactly on
+    /// the target discards nothing (the boundary is inclusive). End-of-stream
+    /// during the fast-forward returns `Ok(None)`. With no pending target the plain
+    /// next frame is returned. The target is cleared once consumed.
+    fn next_target_video_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
+        let Some(target) = self.pending_video_target_ms else {
+            return self.video.next_frame();
+        };
+        // Consume the target now; the frame we return below is the first at or past
+        // it (or the bound-exhausted frame, or end-of-stream).
+        self.pending_video_target_ms = None;
+        for _ in 0..MAX_SEEK_DISCARD_FRAMES {
+            match self.video.next_frame()? {
+                Some(v) if v.timestamp_ms >= target => return Ok(Some(v)),
+                // A pre-target frame (a keyframe-landing artefact) — discard it.
+                Some(_) => continue,
+                // End-of-stream before reaching the target: nothing left to play.
+                None => return Ok(None),
+            }
+        }
+        // Bound reached: deliver whatever comes next rather than spinning.
+        self.video.next_frame()
     }
 }
 
@@ -679,5 +732,254 @@ mod tests {
         let (_f, frames) = dec.next_synced().unwrap().unwrap();
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].timestamp_ms, 150);
+    }
+
+    // ---------------------------------------------------------------
+    // #192 round 5 — post-seek video fast-forward (Approach 1a)
+    // ---------------------------------------------------------------
+
+    /// A cursor-based video mock whose `seek` lands on the latest KEYFRAME at or
+    /// before the target (models MF landing on the previous keyframe) and whose
+    /// `next_frame` yields frames from the cursor forward.
+    struct SeekMockVideo {
+        frames: Vec<u64>,
+        keyframes: Vec<u64>,
+        cursor: usize,
+    }
+
+    impl SeekMockVideo {
+        fn new(frames: Vec<u64>, keyframes: Vec<u64>) -> Self {
+            Self {
+                frames,
+                keyframes,
+                cursor: 0,
+            }
+        }
+    }
+
+    impl MediaStream for SeekMockVideo {
+        fn duration_ms(&self) -> u64 {
+            *self.frames.last().unwrap_or(&0)
+        }
+        fn seek(&mut self, pos: u64) -> Result<(), DecoderError> {
+            // Latest keyframe at or before `pos` (keyframe-aligned, like MF).
+            let kf = self
+                .keyframes
+                .iter()
+                .copied()
+                .filter(|&k| k <= pos)
+                .max()
+                .unwrap_or(0);
+            self.cursor = self
+                .frames
+                .iter()
+                .position(|&t| t >= kf)
+                .unwrap_or(self.frames.len());
+            Ok(())
+        }
+    }
+
+    impl VideoStream for SeekMockVideo {
+        fn next_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
+            let out = self.frames.get(self.cursor).map(|&ts| DecodedVideoFrame {
+                data: vec![0u8; 6],
+                width: 2,
+                height: 2,
+                stride: 2,
+                timestamp_ms: ts,
+                pixel_format: crate::types::PixelFormat::Nv12,
+            });
+            if out.is_some() {
+                self.cursor += 1;
+            }
+            Ok(out)
+        }
+        fn width(&self) -> u32 {
+            2
+        }
+        fn height(&self) -> u32 {
+            2
+        }
+        fn frame_rate(&self) -> (u32, u32) {
+            (30, 1)
+        }
+    }
+
+    /// A cursor-based audio mock whose `seek` repositions SAMPLE-ACCURATELY to the
+    /// first chunk at or after the target (models the FLAC reader).
+    struct SeekMockAudio {
+        chunks: Vec<u64>,
+        cursor: usize,
+        duration_ms: u64,
+    }
+
+    impl SeekMockAudio {
+        fn new(chunks: Vec<u64>, duration_ms: u64) -> Self {
+            Self {
+                chunks,
+                cursor: 0,
+                duration_ms,
+            }
+        }
+    }
+
+    impl MediaStream for SeekMockAudio {
+        fn duration_ms(&self) -> u64 {
+            self.duration_ms
+        }
+        fn seek(&mut self, pos: u64) -> Result<(), DecoderError> {
+            self.cursor = self
+                .chunks
+                .iter()
+                .position(|&t| t >= pos)
+                .unwrap_or(self.chunks.len());
+            Ok(())
+        }
+    }
+
+    impl AudioStream for SeekMockAudio {
+        fn next_samples(&mut self) -> Result<Option<DecodedAudioFrame>, DecoderError> {
+            let out = self.chunks.get(self.cursor).map(|&ts| DecodedAudioFrame {
+                data: vec![0.0; 4],
+                channels: 2,
+                sample_rate: 48_000,
+                timestamp_ms: ts,
+            });
+            if out.is_some() {
+                self.cursor += 1;
+            }
+            Ok(out)
+        }
+        fn sample_rate(&self) -> u32 {
+            48_000
+        }
+        fn channels(&self) -> u16 {
+            2
+        }
+    }
+
+    #[test]
+    fn seek_fast_forwards_video_to_the_target_and_pairs_audio_from_the_target() {
+        // Video keyframe at 0, frames every 33 ms up to ~5.28 s; audio chunks every
+        // 85 ms. A seek to 5000 lands the video on keyframe 0 (as MF does) but the
+        // first DELIVERED frame must be >= 5000, and it must pair only audio at
+        // >= 5000 up to `frame_ts + tolerance`.
+        let vframes: Vec<u64> = (0..=160).map(|k| k * 33).collect(); // 0..5280
+        let achunks: Vec<u64> = (0..=70).map(|k| k * 85).collect(); // 0..5950
+        let v = Box::new(SeekMockVideo::new(vframes, vec![0]));
+        let a = Box::new(SeekMockAudio::new(achunks, 6000));
+        let mut dec = SplitSyncedDecoder::new(v, a).unwrap();
+
+        dec.seek(5000).unwrap();
+        let (frame, audio) = dec.next_synced().unwrap().unwrap();
+        assert!(
+            frame.timestamp_ms >= 5000,
+            "first delivered frame must be at or past the seek target, got {}",
+            frame.timestamp_ms
+        );
+        // 33 * 152 = 5016 is the first frame >= 5000.
+        assert_eq!(frame.timestamp_ms, 5016);
+        assert!(
+            !audio.is_empty(),
+            "the cushion must refill — audio pairs from the target"
+        );
+        assert!(
+            audio.iter().all(|a| a.timestamp_ms >= 5000),
+            "no pre-seek audio may pair: {:?}",
+            audio.iter().map(|a| a.timestamp_ms).collect::<Vec<_>>()
+        );
+        let deadline = 5016 + DEFAULT_TOLERANCE_MS;
+        assert!(
+            audio.iter().all(|a| a.timestamp_ms <= deadline),
+            "paired audio must be within tolerance of the delivered frame"
+        );
+    }
+
+    #[test]
+    fn seek_discard_is_bounded_and_then_delivers() {
+        // A pathological target beyond every frame: the discard must stop at
+        // MAX_SEEK_DISCARD_FRAMES and DELIVER the next frame, never spin. 702 frames
+        // at ts == index (all far below the 5000 target) → after 600 discards the
+        // 601st frame (ts == 600) is delivered.
+        let vframes: Vec<u64> = (0..702).collect();
+        let v = Box::new(SeekMockVideo::new(vframes, vec![0]));
+        let a = Box::new(SeekMockAudio::new(vec![0, 100, 200], 700));
+        let mut dec = SplitSyncedDecoder::new(v, a).unwrap();
+
+        dec.seek(5000).unwrap();
+        let (frame, _audio) = dec
+            .next_synced()
+            .unwrap()
+            .expect("the bounded discard must deliver a frame, never spin or None here");
+        assert_eq!(
+            frame.timestamp_ms, 600,
+            "after MAX_SEEK_DISCARD_FRAMES (600) discards, the 601st frame is delivered"
+        );
+    }
+
+    #[test]
+    fn seek_landing_exactly_on_the_target_discards_nothing() {
+        // A keyframe AT the target: the video seek lands exactly on it, so the first
+        // delivered frame IS the target — nothing is discarded (>= is inclusive).
+        let vframes = vec![0, 1000, 2000, 3000, 4000, 5000];
+        let v = Box::new(SeekMockVideo::new(vframes, vec![0, 3000]));
+        let a = Box::new(SeekMockAudio::new(
+            vec![0, 1000, 2000, 3000, 4000, 5000],
+            5000,
+        ));
+        let mut dec = SplitSyncedDecoder::new(v, a).unwrap();
+
+        dec.seek(3000).unwrap();
+        let (frame, _audio) = dec.next_synced().unwrap().unwrap();
+        assert_eq!(
+            frame.timestamp_ms, 3000,
+            "a seek landing on a keyframe == target delivers that frame, discarding nothing"
+        );
+    }
+
+    #[test]
+    fn seek_forward_then_backward_both_realign() {
+        // A forward seek then a backward seek must EACH deliver a first frame at
+        // >= its target and pair audio from >= that target — the backward seek must
+        // not replay the frames before it.
+        let vframes: Vec<u64> = (0..=10).map(|k| k * 1000).collect(); // 0..10000
+        let achunks: Vec<u64> = (0..=20).map(|k| k * 500).collect(); // 0..10000
+        let v = Box::new(SeekMockVideo::new(vframes, vec![0]));
+        let a = Box::new(SeekMockAudio::new(achunks, 10000));
+        let mut dec = SplitSyncedDecoder::new(v, a).unwrap();
+
+        dec.seek(5000).unwrap();
+        let (f_fwd, a_fwd) = dec.next_synced().unwrap().unwrap();
+        assert_eq!(
+            f_fwd.timestamp_ms, 5000,
+            "forward seek delivers the target frame"
+        );
+        assert!(a_fwd.iter().all(|a| a.timestamp_ms >= 5000));
+
+        dec.seek(2000).unwrap();
+        let (f_back, a_back) = dec.next_synced().unwrap().unwrap();
+        assert_eq!(
+            f_back.timestamp_ms, 2000,
+            "backward seek realigns to its target, not the last-played position"
+        );
+        assert!(a_back.iter().all(|a| a.timestamp_ms >= 2000));
+    }
+
+    #[test]
+    fn seek_past_end_of_stream_returns_none_and_clears_the_target() {
+        // A seek target beyond the last frame: the fast-forward hits end-of-stream
+        // (within the bound) and returns None — the pending target is cleared so a
+        // subsequent pull is not stuck fast-forwarding.
+        let v = Box::new(SeekMockVideo::new(vec![0, 33, 66], vec![0]));
+        let a = Box::new(SeekMockAudio::new(vec![0, 40], 100));
+        let mut dec = SplitSyncedDecoder::new(v, a).unwrap();
+
+        dec.seek(5000).unwrap();
+        assert!(
+            dec.next_synced().unwrap().is_none(),
+            "a seek past end-of-stream delivers None, not a spin"
+        );
+        // Target already cleared — the exhausted stream still returns None.
+        assert!(dec.next_synced().unwrap().is_none());
     }
 }

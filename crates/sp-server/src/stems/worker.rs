@@ -326,6 +326,9 @@ impl StemWorker {
             .await
             .ok()
             .flatten();
+        // #203: publish the live containment (CPU cap + affinity + memory
+        // priority) so the Job Object seam applies it to this heavy child.
+        crate::lyrics::heavy_slot::refresh_containment(&self.pool).await;
         info!(
             video_id = job.video_id,
             youtube_id = %job.youtube_id,
