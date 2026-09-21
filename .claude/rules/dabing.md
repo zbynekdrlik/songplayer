@@ -306,3 +306,41 @@ song-lyrics pipeline. `LYRICS_PIPELINE_VERSION` is untouched.
   "done"` for the mixer (current reality), broader for the chain (intent).
   `e2e/mixer.spec.ts` asserts both fader shapes; `e2e/dabing.spec.ts` both chain
   shapes; zero console errors.
+
+# Dabing round A+B (#184) — instant mix apply + one mixer rule on every page
+
+## `DubRow.stem_status` is the RAW stems-worker column, NOT the `stems_state` wire vocab
+`DubRow.stem_status` (server `db/models_dabing.rs::row_to_dub_row`) is the raw
+`videos.stem_status` COLUMN: `NULL` (pending) / `'done'` (ready) / `'failed'` /
+`'unsupported'`. This is a DIFFERENT vocabulary from the derived `stems_state`
+wire strings (`ready`/`queued`/`processing`/`failed`/`unavailable`) that
+`stems::models_stems::stems_state_of` produces for the karaoke/videos payloads.
+So `dub_mixer.rs` uses `stem_status == "done"` for `has_stems`, and
+`sp_core::mixer_model::mixer_controls`'s stems-capable set MUST include `"done"`
+(the real value a dub row carries) — the wire strings alone would make a
+stems-ready dub (`stem_status='done'`) fail the karaoke gate on the real box
+while passing under a mock that feeds `"ready"`. Never assume the two columns
+share a vocabulary.
+
+## Dub-mix applies live-first: push the engine command BEFORE the DB persist
+`api/dabing.rs::patch_dub_mix` awaits `EngineCommand::SetDubMix` FIRST, then
+`set_dub_mix_ratio` (the persist), via the pure seam
+`api/dabing_apply.rs::apply_dub_mix(push, persist)`. The old order (persist then
+push) let the DB `acquire()` park up to sqlx's **30 s** default before the live
+gains moved — the owner's "~30 s to apply" report. Clamp once via
+`models_dabing::clamp_dub_ratio` so the push carries exactly what gets stored; a
+persist failure is logged + 500 while the live change already happened. Pairs
+with `db/mod.rs::pool_tuning()` (WAL + NORMAL sync + 5 s busy + **2 s** acquire),
+applied only to the FILE pool (`create_memory_pool` stays plain — WAL needs a
+file). No schema change.
+
+## The `/api/v1/dabing` poll lives in `App`, not the Dabing page (#184 B1)
+`store.dabing` (and `store.dabing_playlist_id`) are filled by an App-level
+`store::poll_value` loop (`app.rs`, next to the playlists load), so the shared
+Player picks the dub mixer for a playing dub video on EVERY page — not only after
+visiting `/dabing`. `pages/dabing.rs` just READS the store now. `player.rs`
+renders `<DubMixer>` and/or `<KaraokeMixer>` from `mixer_controls(dub_status,
+stem_status)`, with `show_karaoke = controls.karaoke || !controls.dub` (a non-dub
+song always keeps the karaoke default; a dub video shows karaoke only when
+stems-capable). `e2e/dabing-mixer.spec.ts` proves it on Prehľad + Naživo without
+a `/dabing` visit.
