@@ -100,3 +100,15 @@ fn ws_viewer_is_idle_only_after_15s_of_silence() {
     // 15.002 s of silence is idle.
     assert!(is_idle(1_000, 16_002), "15.002 s of silence is idle");
 }
+
+// ── #184 round F: preview lag beacon frame ───────────────────────────────────
+
+#[test]
+fn beacon_frame_is_exact_produced_ms_json() {
+    use super::beacon_frame;
+    // The shim parses this exact shape; the key MUST be `produced_ms` and the
+    // value the raw ms. Exact strings kill any body-replacement / wrong-key mutant.
+    assert_eq!(beacon_frame(0), r#"{"produced_ms":0}"#);
+    assert_eq!(beacon_frame(500), r#"{"produced_ms":500}"#);
+    assert_eq!(beacon_frame(33_900), r#"{"produced_ms":33900}"#);
+}

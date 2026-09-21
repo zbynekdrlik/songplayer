@@ -113,6 +113,13 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
     let mut ping = tokio::time::interval(Duration::from_secs(PING_INTERVAL_SECS));
     ping.tick().await; // consume the immediate first tick
 
+    // #184 round F: a 1 Hz lag beacon. Each tick sends the media time the child
+    // has produced since its Init (`FragmentRelay::produced_ms`) as a text frame;
+    // the browser shim subtracts its buffered end to show how far the PICTURE is
+    // behind the wall (vs a control that already applied on the wall in ~100 ms).
+    let mut beacon = tokio::time::interval(Duration::from_secs(BEACON_INTERVAL_SECS));
+    beacon.tick().await; // consume the immediate first tick
+
     loop {
         tokio::select! {
             frag = frag_rx.recv() => match frag {
@@ -147,6 +154,17 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
                     break;
                 }
             }
+            _ = beacon.tick() => {
+                // #184 round F: 1 Hz lag beacon (see above).
+                let produced = relay.produced_ms();
+                if socket
+                    .send(Message::Text(beacon_frame(produced).into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
         }
     }
 }
@@ -155,6 +173,17 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
 const PING_INTERVAL_SECS: u64 = 5;
 /// A client that sends NO message for longer than this is dropped (half-open).
 const IDLE_TIMEOUT_MS: u64 = 15_000;
+/// Interval of the #184 round-F preview lag beacon (1 Hz).
+const BEACON_INTERVAL_SECS: u64 = 1;
+
+/// The #184 round-F preview lag beacon frame: a JSON text message carrying how
+/// many ms of media the encoder has produced since the child's Init
+/// ([`FragmentRelay::produced_ms`]). The browser shim parses it and computes
+/// `produced_ms/1000 − buffered_end` = how far the picture is behind the wall.
+/// Pure so the exact JSON shape is unit-tested without a live socket / runtime.
+fn beacon_frame(produced_ms: u64) -> String {
+    format!("{{\"produced\":{produced_ms}}}")
+}
 
 /// Whether the client has been silent past the idle deadline (#178 item 16):
 /// strictly greater than [`IDLE_TIMEOUT_MS`] since its last message. Pure so the
