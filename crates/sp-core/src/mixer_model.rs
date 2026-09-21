@@ -206,9 +206,13 @@ pub struct MixerControls {
 /// - `dub` when the video has a dub row in any state other than `none`/absent —
 ///   the `DubMixer` renders its own locked/ready state text per status, so any
 ///   real dub row shows the dub panel.
-/// - `karaoke` when the song is stems-capable: `stems_state` is one of
-///   `ready`/`queued`/`processing`/`failed`/`unavailable` (today's
-///   `KaraokeMixer` gate). `unsupported`/absent → not stems-capable.
+/// - `karaoke` when the song is stems-capable. The caller (`player.rs`) feeds
+///   the `DubRow.stem_status` COLUMN, whose raw stems-worker value `done` means
+///   stems are ready (mirrors `dub_mixer.rs`'s `has_stems`); the derived
+///   `stems_state` wire strings `ready`/`queued`/`processing`/`failed`/
+///   `unavailable` (today's `KaraokeMixer` gate) are accepted too, so the
+///   predicate is correct whichever representation reaches it. `unsupported`/
+///   absent → not stems-capable.
 ///
 /// BOTH may hold (a stems-ready dub video). The caller still falls back to the
 /// karaoke panel for a plain non-dub song (see `player.rs`); this predicate only
@@ -219,7 +223,7 @@ pub fn mixer_controls(dub_status: Option<&str>, stems_state: Option<&str>) -> Mi
     let dub = matches!(dub_status, Some(s) if !s.is_empty() && s != "none");
     let karaoke = matches!(
         stems_state,
-        Some("ready" | "queued" | "processing" | "failed" | "unavailable")
+        Some("done" | "ready" | "queued" | "processing" | "failed" | "unavailable")
     );
     MixerControls { dub, karaoke }
 }
