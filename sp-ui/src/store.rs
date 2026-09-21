@@ -71,8 +71,6 @@ pub struct DubRow {
     #[serde(default)]
     pub dub_error: Option<String>,
     #[serde(default)]
-    pub dub_mix_ratio: f64,
-    #[serde(default)]
     pub dub_file_path: Option<String>,
     #[serde(default)]
     pub stem_status: Option<String>,

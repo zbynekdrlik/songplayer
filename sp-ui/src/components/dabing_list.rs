@@ -90,7 +90,6 @@ pub fn DabingList() -> impl IntoView {
                                         r.dub_error.clone(),
                                         r.stem_status.clone(),
                                         r.lyrics_present,
-                                        (r.dub_mix_ratio * 1000.0) as i64,
                                         r.dub_voice.clone(),
                                     )
                                 }
@@ -99,10 +98,7 @@ pub fn DabingList() -> impl IntoView {
                                     let video_id = row.video_id;
                                     let title = row.title.clone();
                                     let with_stems = shows_stems_step(row.stem_status.as_deref());
-                                    let ready = row.dub_status == "ready";
                                     let voice = row.dub_voice.clone();
-                                    let ratio_pct = (row.dub_mix_ratio.clamp(0.0, 1.0) * 100.0)
-                                        .round() as i64;
                                     let detail = chain_detail(
                                         &row.chain_state,
                                         row.dub_error.as_deref(),
@@ -142,19 +138,6 @@ pub fn DabingList() -> impl IntoView {
                                                             data-testid="dabing-row-voice"
                                                         >
                                                             {format!("hlas: {v}")}
-                                                        </span>
-                                                    }
-                                                })}
-                                            {ready
-                                                .then(|| {
-                                                    view! {
-                                                        <span
-                                                            class="dabing-row-ratio"
-                                                            data-testid="dabing-row-ratio"
-                                                        >
-                                                            {format!(
-                                                                "Pomer dabingu: {ratio_pct} % (mix v prehrávači hore)",
-                                                            )}
                                                         </span>
                                                     }
                                                 })}
