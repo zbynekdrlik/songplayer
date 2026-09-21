@@ -341,6 +341,9 @@ impl DubWorker {
             crate::lyrics::heavy_plan::ProcessingMode::LowPriority,
             activity,
         );
+        // #203: publish the live containment for the dub child (CPU cap +
+        // affinity + memory priority), applied by the shared Job Object seam.
+        crate::lyrics::heavy_slot::refresh_containment(&self.pool).await;
         info!(
             video_id = job.video_id,
             pace,

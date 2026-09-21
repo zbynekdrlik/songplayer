@@ -105,4 +105,30 @@ test.describe("the Player label follows transport, not program (#201)", () => {
       "○ Mimo programu",
     );
   });
+
+  test("a reload while an off-program dub decodes replays ⏸ Pauza (on-connect replay carries the raw transport)", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/dabing");
+    const toggle = page.getByTestId("player-playpause");
+    await expect(toggle).toBeVisible({ timeout: 15000 });
+
+    // Live: the off-program dub decodes → ⏸ Pauza (a live PlaybackStateChanged).
+    await drive(request, "Playing");
+    await expect(toggle).toContainText("⏸ Pauza", { timeout: 10000 });
+
+    // #201 round 2: reload the page. The app reconnects and receives ONLY the
+    // on-connect replay — no new live PlaybackStateChanged. That replay now
+    // carries the pipeline's RAW transport (round 1 replayed the scene-
+    // reconciled Paused label → ▶ Prehrať), so the label reads ⏸ Pauza at once.
+    await page.reload();
+    await expect(page.getByTestId("player-playpause")).toContainText(
+      "⏸ Pauza",
+      { timeout: 10000 },
+    );
+    await expect(page.getByTestId("player-program-badge")).toContainText(
+      "○ Mimo programu",
+    );
+  });
 });

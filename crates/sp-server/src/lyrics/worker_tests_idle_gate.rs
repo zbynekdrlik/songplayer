@@ -39,6 +39,7 @@ fn playing_snapshot(playlist_id: i64, ndi_name: &str) -> PipelineHealthSnapshot 
         burn_on: false,
         recovery_step: None,
         sender_url: None,
+        transport: sp_core::playback::TransportState::Idle,
     }
 }
 

@@ -156,6 +156,10 @@ pub async fn start(
     // skips restarting a freshly-deployed process). Idempotent.
     crate::process_start::mark_started();
 
+    // #203: raise SongPlayer to HIGH_PRIORITY_CLASS so the NDI SDK compression
+    // threads pre-empt the contained heavy children (stems / lyrics / dub).
+    crate::process_start::set_high_priority_class();
+
     // Install the panic hook FIRST so any panic during startup or steady-state
     // is captured to a durable crash file before release `panic = "abort"`
     // kills the process (#156). Idempotent: the Tauri shell installs it earlier

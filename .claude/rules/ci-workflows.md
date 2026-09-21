@@ -259,3 +259,14 @@ output on a strict reader. `Add-Content -Path $env:GITHUB_OUTPUT -Value
 "key=$($val)"` writes the ASCII line with no BOM. (The bash steps' `>> $GITHUB_OUTPUT`
 have no such issue.)
 
+## Restarting SongPlayer via the Deploy job: `gh run rerun --job <job-id>` (no run id)
+
+`gh run rerun <run-id> --job <id>` is rejected ("specify only one of <run-id> or
+--job") and prints the usage text — a `| tail -1` swallowed that and box test 7
+sampled 30 min with the flag still OFF (21.9.2026). The working form is
+`gh run rerun --job <job-id>` alone; it creates run ATTEMPT 2 whose Deploy job
+has a NEW job id, so poll `gh api repos/<r>/actions/runs/<run>/jobs?filter=latest`
+(or `jobs/<new-id>`) — polling the old id reports the old attempt's success.
+Confirm the restart with `/api/v1/status` `uptime_s` before sampling anything
+that depends on a startup-read setting (`genlock_pacing`).
+

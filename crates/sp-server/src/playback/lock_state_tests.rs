@@ -131,6 +131,7 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             lag_slots: 4,
             iter_p99_us: 4200,
             prep_p99_us: 3800,
+            ..Default::default()
         },
         audio: AudioStats {
             enabled: true,
@@ -147,6 +148,7 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
         burn_on: false,
         recovery_step: None,
         sender_url: None,
+        transport: sp_core::playback::TransportState::Idle,
     }
 }
 

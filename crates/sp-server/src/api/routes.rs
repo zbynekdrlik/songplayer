@@ -91,6 +91,26 @@ pub struct StatusResponse {
     /// ago (item 6 — one restart per push). A missing key deserializes to `0`.
     #[serde(default)]
     pub uptime_s: u64,
+    /// #203: the OS-level containment applied to every heavy background child
+    /// (stems / lyrics / dub) — the live `heavy_cpu_cap_pct` +
+    /// `heavy_cpu_affinity_mask` settings resolved against the box's core count,
+    /// plus SongPlayer's own priority class. A missing key deserializes to the
+    /// zero value (older clients / the mock stay ok).
+    #[serde(default)]
+    pub heavy_containment: HeavyContainmentStatus,
+}
+
+/// #203: the containment applied to the heavy children, surfaced on `/status` so
+/// the dashboard health + the next box measurement can read the effective cap.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct HeavyContainmentStatus {
+    /// Job Object CPU hard-cap, percent of TOTAL machine CPU time.
+    pub cap_pct: u8,
+    /// Job Object affinity mask (lowercase hex, no `0x`) — the cores the heavy
+    /// children may run on.
+    pub affinity_mask: String,
+    /// SongPlayer's own scheduling priority class (`high` on the Windows box).
+    pub priority_class: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -669,6 +689,23 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
 
     let lan = state.lan_status.read().await;
 
+    // #203: resolve the live containment (same pure decision the Job Object seam
+    // applies) from the two settings + the box's core count.
+    let heavy_cap = crate::db::models::get_setting(&state.pool, "heavy_cpu_cap_pct")
+        .await
+        .ok()
+        .flatten();
+    let heavy_mask = crate::db::models::get_setting(&state.pool, "heavy_cpu_affinity_mask")
+        .await
+        .ok()
+        .flatten();
+    let heavy_cores = crate::lyrics::heavy_slot::logical_cores();
+    let containment = crate::lyrics::heavy_containment::containment_from_settings(
+        heavy_cap.as_deref(),
+        heavy_mask.as_deref(),
+        heavy_cores,
+    );
+
     Json(StatusResponse {
         version: sp_core::config::VERSION.to_string(),
         obs_connected: obs.connected,
@@ -686,6 +723,13 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         lan_ip: lan.lan_ip.clone(),
         preview_encoder: crate::playback::preview::preview_encoder::chosen_encoder(),
         uptime_s: crate::process_start::uptime_secs(),
+        heavy_containment: HeavyContainmentStatus {
+            cap_pct: containment.cpu_cap_pct,
+            affinity_mask: crate::lyrics::heavy_containment::affinity_mask_hex(
+                containment.affinity_mask,
+            ),
+            priority_class: crate::process_start::priority_class_label().to_string(),
+        },
     })
 }
 

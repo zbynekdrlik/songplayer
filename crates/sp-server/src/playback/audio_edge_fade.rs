@@ -12,12 +12,16 @@
 //! - **fade-in** — the first [`FADE_IN_BLOCKS`] audio blocks after a silence run
 //!   ramp `0 → 1`, continuous across the blocks (100 ms).
 //!
-//! It is PURE and single-threaded — the emitter calls [`shape_audio`](EdgeFade::shape_audio)
-//! for every audio block and [`shape_silence`](EdgeFade::shape_silence) for every
-//! silence block, in slot order, inside `AudioEmitter::samples_for`. The ring, the
-//! grid timecodes, the `silence_blocks` accounting and the `Emitted.block` variant
-//! (so the transition log stays correct) are all UNTOUCHED — the fade only reshapes
-//! the interleaved samples handed to NDI.
+//! It is PURE and single-threaded — [`AudioEmitter::samples_for`] calls
+//! [`on_audio`](EdgeFade::on_audio) for every audio block and
+//! [`on_silence`](EdgeFade::on_silence) for every silence block, in slot order.
+//! To keep the #203 allocation-free contract on the TIME_CRITICAL emit thread the
+//! shaped samples go into a REUSED [`out`](EdgeFade) scratch (read back BORROWED
+//! via [`shaped`](EdgeFade::shaped)) and only the FADED slots use it — a full-gain
+//! audio block and a plain silence block are still returned borrowed straight from
+//! the ring's `block_buf` / the emitter's reusable `silence` (no scratch touched).
+//! The ring, the grid timecodes and the `silence_blocks` accounting are all
+//! UNTOUCHED — the fade only reshapes the interleaved samples handed to NDI.
 
 /// Audio blocks over which the post-silence fade-IN ramps `0 → 1` (3 × 33.3 ms ≈
 /// 100 ms, continuous across the three blocks).
@@ -35,11 +39,19 @@ pub struct EdgeFade {
     /// In a silence run — the next audio block restarts the fade-in.
     in_silence: bool,
     /// Audio blocks into the current post-silence run; `< FADE_IN_BLOCKS` while the
-    /// fade-in ramp is active, then clamped there (full gain).
+    /// fade-in ramp is active, then clamped there (full gain). Starts AT
+    /// `FADE_IN_BLOCKS` so a cold start with no preceding silence run plays at full
+    /// gain (the fade-in fires only on a genuine silence→audio edge, `on_audio`
+    /// resetting it to 0); in production the emitter always emits silence while the
+    /// ring fills, so the first real audio still fades in.
     fade_in_pos: u32,
     /// A verbatim copy of the last audio block emitted (pre-fade), reused as the
     /// fade-out tail source. Empty until audio has flowed.
     last_block: Vec<f32>,
+    /// Reused shaped-output scratch: holds the fade-in or fade-out block so
+    /// [`samples_for`](super::AudioEmitter::samples_for) can return it BORROWED
+    /// with no per-slot allocation on the TIME_CRITICAL thread (#203).
+    out: Vec<f32>,
     /// The previous slot emitted audio → the next empty slot is the single
     /// fade-out tail, not a hard cut.
     tail_pending: bool,
@@ -51,70 +63,80 @@ impl EdgeFade {
             samples_per_block,
             seen_audio: false,
             in_silence: false,
-            fade_in_pos: 0,
+            // Full gain until a silence run precedes an audio block (see the field
+            // doc): a cold start with no preceding silence does not fade in.
+            fade_in_pos: FADE_IN_BLOCKS,
             last_block: Vec::new(),
+            out: Vec::new(),
             tail_pending: false,
         }
     }
 
-    /// Shape one AUDIO block the emitter is about to send: a fade-in ramp for the
-    /// first [`FADE_IN_BLOCKS`] blocks after a silence run, else full gain. Saves
-    /// the block (pre-fade) as the fade-out source and arms the tail.
-    pub fn shape_audio(&mut self, samples: &[f32], channels: usize) -> Vec<f32> {
+    /// Update state for one AUDIO slot whose raw samples are `raw`. Records the
+    /// block (pre-fade) as the fade-out tail source and arms the tail. When the
+    /// block falls in the first [`FADE_IN_BLOCKS`] after a silence run, write its
+    /// fade-in ramp into the reused `out` scratch and return `true` (read via
+    /// [`shaped`](Self::shaped)); otherwise leave `out` untouched and return
+    /// `false` — the caller sends `raw` unchanged (full gain, still borrowed from
+    /// the ring).
+    pub fn on_audio(&mut self, raw: &[f32], channels: usize) -> bool {
         self.seen_audio = true;
         if self.in_silence {
             // Silence → audio edge: restart the fade-in from block 0.
             self.in_silence = false;
             self.fade_in_pos = 0;
         }
-        // Save a verbatim copy (reused buffer) for a possible fade-out tail.
+        // Save a verbatim copy (reused buffer) as the fade-out tail source.
         self.last_block.clear();
-        self.last_block.extend_from_slice(samples);
+        self.last_block.extend_from_slice(raw);
         self.tail_pending = true;
 
         let fading = channels > 0 && self.fade_in_pos < FADE_IN_BLOCKS;
-        let out = if fading {
+        if fading {
             let base = self.fade_in_pos as usize * self.samples_per_block;
             let total = FADE_IN_BLOCKS as usize * self.samples_per_block;
-            let frames = samples.len() / channels;
-            let mut out = Vec::with_capacity(samples.len());
+            let frames = raw.len() / channels;
+            self.out.clear();
             for f in 0..frames {
                 let gain = fade_in_gain(base + f, total);
                 for c in 0..channels {
-                    out.push(samples[f * channels + c] * gain);
+                    self.out.push(raw[f * channels + c] * gain);
                 }
             }
-            out
-        } else {
-            samples.to_vec()
-        };
+        }
         if self.fade_in_pos < FADE_IN_BLOCKS {
             self.fade_in_pos += 1;
         }
-        out
+        fading
     }
 
-    /// Shape one SILENCE slot: the FIRST empty slot right after audio is the single
-    /// fade-out tail (last audio block ramped `1 → 0`); every later empty slot, and
-    /// a silence-only start, is plain zero silence. Enters a silence run.
-    pub fn shape_silence(&mut self, channels: usize) -> Vec<f32> {
+    /// Update state for one SILENCE slot. When it is the FIRST empty slot right
+    /// after audio, write the fade-out tail (the last audio block ramped `1 → 0`)
+    /// into the reused `out` scratch and return `true` (read via
+    /// [`shaped`](Self::shaped)); otherwise return `false` — the caller sends plain
+    /// zero silence. Enters a silence run.
+    pub fn on_silence(&mut self, channels: usize) -> bool {
         let want_tail =
             self.tail_pending && self.seen_audio && channels > 0 && !self.last_block.is_empty();
         self.tail_pending = false;
         self.in_silence = true;
         if want_tail {
             let frames = self.last_block.len() / channels;
-            let mut out = Vec::with_capacity(self.last_block.len());
+            self.out.clear();
             for f in 0..frames {
                 let gain = fade_out_gain(f, frames);
                 for c in 0..channels {
-                    out.push(self.last_block[f * channels + c] * gain);
+                    self.out.push(self.last_block[f * channels + c] * gain);
                 }
             }
-            out
-        } else {
-            vec![0.0f32; self.samples_per_block * channels]
         }
+        want_tail
+    }
+
+    /// The shaped block written by the most recent `on_audio` / `on_silence` that
+    /// returned `true`. Only valid immediately after such a call.
+    pub fn shaped(&self) -> &[f32] {
+        &self.out
     }
 }
 
@@ -216,12 +238,7 @@ mod tests {
     fn silence_only_history_emits_pure_silence_no_tail() {
         let mut ef = EdgeFade::new(SPB);
         for _ in 0..5 {
-            let s = ef.shape_silence(2);
-            assert_eq!(s.len(), SPB * 2);
-            assert!(
-                s.iter().all(|&x| x == 0.0),
-                "no tail before any audio played"
-            );
+            assert!(!ef.on_silence(2), "no tail before any audio played");
         }
     }
 
@@ -229,67 +246,74 @@ mod tests {
     fn fade_out_tail_after_audio_then_plain_silence() {
         let mut ef = EdgeFade::new(SPB);
         // One audio block establishes the last-block source.
-        ef.shape_audio(&stereo(1.0), 2);
-        // The first empty slot is the fade-out tail: full-content first frame,
-        // silent last frame, from the raw (pre-fade) last block.
-        let tail = ef.shape_silence(2);
+        ef.on_audio(&stereo(1.0), 2);
+        // The first empty slot is the fade-out tail (from the raw, pre-fade block).
+        assert!(ef.on_silence(2), "first empty slot after audio is the tail");
+        let tail = ef.shaped();
         assert_eq!(tail.len(), SPB * 2);
         assert_eq!(tail[0], 1.0, "tail first frame ≈ 1.0× content");
         assert_eq!(tail[1], 1.0, "both channels of the first frame");
         assert_eq!(tail[(SPB - 1) * 2], 0.0, "tail last frame → 0");
         assert_eq!(tail[(SPB - 1) * 2 + 1], 0.0);
-        // A middle frame is between the endpoints (a real ramp, not a cut).
         let midv = tail[(SPB / 2) * 2];
         assert!(midv > 0.0 && midv < 1.0, "linear ramp midpoint, got {midv}");
-        // Every later empty slot is plain zero silence.
-        let after = ef.shape_silence(2);
-        assert!(after.iter().all(|&x| x == 0.0), "only one tail block");
+        // Every later empty slot is plain zero silence (no tail).
+        assert!(!ef.on_silence(2), "only one tail block");
     }
 
     #[test]
     fn fade_in_ramps_the_first_three_blocks_after_silence_then_full_gain() {
         let mut ef = EdgeFade::new(SPB);
         // Enter a silence run so the next audio starts a fade-in.
-        ef.shape_silence(2);
-        let out0 = ef.shape_audio(&stereo(1.0), 2);
-        let out1 = ef.shape_audio(&stereo(1.0), 2);
-        let out2 = ef.shape_audio(&stereo(1.0), 2);
-        let out3 = ef.shape_audio(&stereo(1.0), 2);
+        ef.on_silence(2);
 
-        // Block 0 starts at silence.
-        assert_eq!(out0[0], 0.0, "fade-in starts at 0");
-        // Blocks 1 and 2 are still ramping (< full gain) — this is what fails when
-        // FADE_IN_BLOCKS is too small.
-        assert!(out1[0] < 1.0, "block 1 is still ramping in");
-        assert!(out2[0] < 1.0, "block 2 is still ramping in");
-        // Exact ramp values (content 1.0 × gain), continuous across the 3 blocks.
-        assert!((out1[0] - (1600.0f32 / 4799.0f32)).abs() < 1e-6);
-        assert!((out2[0] - (3200.0f32 / 4799.0f32)).abs() < 1e-6);
-        // The ramp reaches exactly 1.0 at the end of block 3.
+        // Block 0 — fades in, starting at silence.
+        assert!(ef.on_audio(&stereo(1.0), 2), "block 0 fades in");
+        assert_eq!(ef.shaped()[0], 0.0, "fade-in starts at 0");
+
+        // Block 1 — still ramping (this is what fails when FADE_IN_BLOCKS is small).
+        assert!(ef.on_audio(&stereo(1.0), 2), "block 1 is still ramping in");
+        let out1_first = ef.shaped()[0];
+        assert!(out1_first < 1.0, "block 1 below full gain");
+        assert!((out1_first - (1600.0f32 / 4799.0f32)).abs() < 1e-6);
+
+        // Block 2 — still ramping, and the ramp reaches exactly 1.0 at its end.
+        assert!(ef.on_audio(&stereo(1.0), 2), "block 2 is still ramping in");
+        let out2_first = ef.shaped()[0];
+        let out2_last = ef.shaped()[(SPB - 1) * 2];
+        assert!(out2_first < 1.0, "block 2 below full gain at its start");
+        assert!((out2_first - (3200.0f32 / 4799.0f32)).abs() < 1e-6);
         assert_eq!(
-            out2[(SPB - 1) * 2],
-            1.0,
-            "cumulative ramp is 1.0 at the end"
+            out2_last, 1.0,
+            "cumulative ramp is 1.0 at the end of block 3"
         );
-        // Block 4 (past the fade-in) is full gain.
+
+        // Block 3 — past the fade-in: full gain (pass-through, no scratch).
         assert!(
-            out3.iter().all(|&x| x == 1.0),
+            !ef.on_audio(&stereo(1.0), 2),
             "past the fade-in = full gain"
         );
     }
 
     #[test]
-    fn a_channel_change_worth_of_audio_re_arms_a_fresh_tail_and_fade_in() {
+    fn a_resumed_run_re_arms_a_fresh_tail_and_fade_in() {
         let mut ef = EdgeFade::new(SPB);
         // audio → tail → silence, then audio again gets a NEW fade-in + tail.
-        ef.shape_audio(&stereo(1.0), 2);
-        let tail1 = ef.shape_silence(2);
-        assert_eq!(tail1[0], 1.0);
-        ef.shape_silence(2); // plain silence
+        ef.on_audio(&stereo(1.0), 2);
+        assert!(ef.on_silence(2));
+        assert_eq!(ef.shaped()[0], 1.0);
+        assert!(!ef.on_silence(2)); // plain silence
         // Resume: a fresh fade-in (block 0 starts at 0) and a fresh tail.
-        let resumed = ef.shape_audio(&stereo(0.5), 2);
-        assert_eq!(resumed[0], 0.0, "the resumed run fades in again from 0");
-        let tail2 = ef.shape_silence(2);
-        assert_eq!(tail2[0], 0.5, "the new tail uses the most recent block");
+        assert!(
+            ef.on_audio(&stereo(0.5), 2),
+            "the resumed run fades in again"
+        );
+        assert_eq!(ef.shaped()[0], 0.0, "resumed fades in from 0");
+        assert!(ef.on_silence(2));
+        assert_eq!(
+            ef.shaped()[0],
+            0.5,
+            "the new tail uses the most recent block"
+        );
     }
 }

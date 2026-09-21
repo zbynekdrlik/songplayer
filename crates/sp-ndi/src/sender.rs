@@ -258,6 +258,54 @@ impl<B: NdiBackend> NdiSender<B> {
         }
     }
 
+    /// Schedule a video frame for async send from a BORROWED pixel slice (#203).
+    ///
+    /// Identical to [`send_video_async`](Self::send_video_async) but takes the
+    /// pixels as a `&[u8]` the CALLER owns, instead of a [`VideoFrame`] that
+    /// owns its `Vec<u8>`. This lets the submitter keep the previous frame's
+    /// bytes alive in a shared `Arc<Vec<u8>>` (the zero-copy async holdover,
+    /// #203) instead of moving a fresh `Vec` into a throwaway `VideoFrame` every
+    /// frame — removing the per-frame `VirtualAlloc`/`VirtualFree` churn that
+    /// drives the wall's page-fault storm.
+    ///
+    /// # Safety
+    ///
+    /// The caller must keep `data` valid AND unmodified until the next
+    /// synchronising call on this sender — another `send_video_async*`, a
+    /// `send_video`, `send_video_flush`, or when the sender is dropped. If the
+    /// buffer is freed or mutated before that point, the NDI SDK will
+    /// dereference freed / changed memory (UB).
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn send_video_async_slice(
+        &self,
+        width: u32,
+        height: u32,
+        stride: u32,
+        frame_rate_n: i32,
+        frame_rate_d: i32,
+        pixel_format: PixelFormat,
+        timecode_100ns: Option<i64>,
+        data: &[u8],
+    ) {
+        let four_cc = match pixel_format {
+            PixelFormat::Bgra => FourCCVideoType::BGRA,
+            PixelFormat::Nv12 => FourCCVideoType::NV12,
+        };
+        unsafe {
+            self.backend.send_video_async(
+                self.handle,
+                four_cc,
+                width as i32,
+                height as i32,
+                stride as i32,
+                frame_rate_n,
+                frame_rate_d,
+                data,
+                timecode_100ns,
+            );
+        }
+    }
+
     /// Release any pending async frame. Must be called before dropping the
     /// buffer of the last async frame.
     pub fn send_video_flush(&self) {
@@ -471,6 +519,30 @@ mod tests {
         assert_eq!(calls[1], "send_video_async(42,NV12,4x2,stride=4,30/1)");
         assert_eq!(calls[2], "send_video_async(42,NV12,4x2,stride=4,30/1)");
         assert_eq!(calls[3], "send_video_flush(42)");
+    }
+
+    #[test]
+    fn send_video_async_slice_forwards_the_exact_borrowed_slice() {
+        // #203: the borrowed-slice async send must hand the backend the EXACT
+        // pixels the caller owns — same pointer, same length — with no hidden
+        // copy or re-slice, so the zero-copy `Arc<Vec<u8>>` holdover is sound.
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "SL", false, false).unwrap();
+
+        let data = [7u8; 4 * 2 * 3 / 2];
+        let slice: &[u8] = &data[..];
+        // SAFETY: `data` outlives this call and a flush happens on drop.
+        unsafe {
+            sender.send_video_async_slice(4, 2, 4, 30, 1, PixelFormat::Nv12, None, slice);
+        }
+        assert_eq!(
+            backend.last_async_video_slice(),
+            Some((slice.as_ptr() as usize, slice.len())),
+            "the backend must receive the caller's exact slice pointer + length"
+        );
+        // It is still an async video send with the right descriptor.
+        let calls = backend.calls();
+        assert_eq!(calls[1], "send_video_async(42,NV12,4x2,stride=4,30/1)");
     }
 
     #[test]
