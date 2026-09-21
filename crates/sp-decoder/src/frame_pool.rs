@@ -75,7 +75,7 @@ pub fn recycle(buf: Vec<u8>) {
         return; // no allocation to recycle
     }
     let mut pool = pool();
-    let class = pool.entry(cap + 1).or_default();
+    let class = pool.entry(cap).or_default();
     if class.len() < POOL_CAP_PER_CLASS {
         class.push(buf);
     }
