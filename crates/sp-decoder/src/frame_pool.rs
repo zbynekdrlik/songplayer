@@ -54,16 +54,16 @@ fn pool() -> MutexGuard<'static, FreeList> {
 /// if one is free (removing it from the pool), else a fresh
 /// `Vec::with_capacity(len)`.
 pub fn take(len: usize) -> Vec<u8> {
-    {
-        let mut pool = pool();
-        if let Some(class) = pool.get_mut(&len) {
-            if let Some(mut buf) = class.pop() {
-                buf.clear();
-                return buf;
-            }
+    // Pop under the lock, then drop the guard at the `let` semicolon so a fresh
+    // allocation never holds it. `recycled` owns the popped buffer (or `None`).
+    let recycled = pool().get_mut(&len).and_then(Vec::pop);
+    match recycled {
+        Some(mut buf) => {
+            buf.clear();
+            buf
         }
+        None => Vec::with_capacity(len),
     }
-    Vec::with_capacity(len)
 }
 
 /// Return a buffer to its exact-capacity size class for reuse. Keeps at most
