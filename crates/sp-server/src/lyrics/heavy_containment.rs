@@ -78,9 +78,13 @@ fn clamp_cap_pct(raw: Option<&str>) -> u8 {
 /// Parse the `heavy_cpu_affinity_mask` setting (a hex string, optional `0x`/`0X`
 /// prefix) into a core mask. An absent, unparseable, or ZERO value falls back to
 /// [`default_affinity_mask`] for `logical_cores` (a zero mask would pin the child
-/// to no cores). A well-formed non-zero override is honoured verbatim. Pure.
+/// to no cores). A well-formed override is CLAMPED to the cores that exist
+/// ([`existing_cores_mask`]) — a bit beyond the processor count would make the
+/// single extended-limit `SetInformationJobObject` call fail and drop the
+/// memory ceiling with it; an override with no valid bit falls back too. Pure.
 fn parse_affinity_mask(raw: Option<&str>, logical_cores: usize) -> u64 {
     let default = default_affinity_mask(logical_cores);
+    let valid = existing_cores_mask(logical_cores);
     match raw {
         Some(s) => {
             let t = s.trim();
@@ -89,11 +93,20 @@ fn parse_affinity_mask(raw: Option<&str>, logical_cores: usize) -> u64 {
                 .or_else(|| t.strip_prefix("0X"))
                 .unwrap_or(t);
             match u64::from_str_radix(hex, 16) {
-                Ok(m) if m != 0 => m,
+                Ok(m) if m & valid != 0 => m & valid,
                 _ => default,
             }
         }
         None => default,
+    }
+}
+
+/// The mask of ALL cores that exist on a box with `logical_cores` logical
+/// processors (≥ 64 → every bit; 0 → treated as 1). Pure.
+pub(crate) fn existing_cores_mask(logical_cores: usize) -> u64 {
+    match logical_cores.max(1) {
+        n if n >= 64 => u64::MAX,
+        n => (1u64 << n) - 1,
     }
 }
 
