@@ -865,10 +865,10 @@ impl crate::playback::PlaybackEngine {
                 // #149 item 2: a second, grep-stable genlock telemetry line
                 // beside the heartbeat, same once-per-UTC-minute cadence.
                 info!("{}", format_genlock_line(&snapshot));
-                // #192 round 3: a third grep-stable line — the pipeline-loop
-                // stage timing (decode / submit / audio max) + the raw
-                // send_video_async call max/p99, so the A/B box test names the
-                // stalling stage. Zero on the idle / paused / paced paths.
+                // #192 round 3 + #168 r2: a third grep-stable line — decode/submit/
+                // audio stage maxima (SDK-clocked path only) + the raw
+                // send_video_async call max/p99, populated on BOTH the SDK-clocked
+                // and paced paths, so the A/B / box-test-7 reads name the stall.
                 info!(
                     "{}",
                     crate::playback::loop_stats::format_loop_stats_line(&ndi_name, &loop_stats)
