@@ -115,10 +115,11 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     request,
   }) => {
     // The Player's transport label follows the live PlaybackStateChanged
-    // message; the on-connect replay derives from the health registry and
-    // cannot represent an off-program DECODING pipeline (#201 known limit), so
-    // a play clicked before the app WebSocket is open leaves the label at
-    // ▶ Prehrať. Wait for the app socket first (goto resolves on DOM load).
+    // message. #201 round 2 also made the on-connect replay carry the raw
+    // transport (the reload assertion below proves it), so a reload/late-socket
+    // dashboard now reads the honest label — but we still wait for the app
+    // socket before the first click for a deterministic start (goto resolves on
+    // DOM load, before the socket opens).
     const wsOpen = page.waitForEvent("websocket", {
       predicate: (ws) => !ws.url().includes("preview"),
       timeout: 15000,

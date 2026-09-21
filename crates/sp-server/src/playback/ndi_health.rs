@@ -12,7 +12,6 @@ use crate::playback::lock_state::LOCK_WINDOW_100NS;
 use crate::playback::ndi_health_transport::transport_from_reported;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sp_core::playback::TransportState;
 use std::collections::{HashMap, HashSet};
 use std::sync::{
     RwLock,
@@ -56,13 +55,10 @@ pub struct PipelineHealthSnapshot {
     pub playlist_id: i64,
     pub ndi_name: String,
     pub state: PlaybackStateLabel,
-    /// #201 round 2: the pipeline's OWN transport (from the RAW `reported_state`,
-    /// BEFORE scene reconciliation), so a dashboard connecting while an
-    /// off-program pipeline decodes replays the honest decoding state. `state`
-    /// above stays scene-reconciled (a Playing-off-program pipeline reads
-    /// `Paused`); `transport` reads `Playing`. Additive (`serde(default)` = Idle).
+    /// #201 round 2: the pipeline's OWN transport, from the RAW `reported_state`
+    /// (before reconciliation), for the fresh-connect replay. Additive (= Idle).
     #[serde(default)]
-    pub transport: TransportState,
+    pub transport: sp_core::playback::TransportState,
     /// Connection count from `NDIlib_send_get_no_connections`. `-1` means
     /// the heartbeat has never run yet (e.g. pipeline just spawned).
     pub connections: i32,
@@ -787,10 +783,7 @@ impl crate::playback::PlaybackEngine {
             playlist_id,
             ndi_name: ndi_name.clone(),
             state: canonical_state.clone(),
-            // #201 round 2: the pipeline's OWN transport, from the RAW
-            // `reported_state` (before the scene reconciliation that maps a
-            // Playing-off-program pipeline to `Paused`). The on-connect replay
-            // reads this so a reload/late-socket dashboard shows `⏸ Pauza`.
+            // #201 round 2: raw transport (pre-reconciliation) for the replay.
             transport: transport_from_reported(&reported_state),
             connections,
             frames_submitted_total,

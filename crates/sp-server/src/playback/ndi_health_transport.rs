@@ -4,11 +4,10 @@
 //!
 //! Round 1 carried `transport` on the LIVE `PlaybackStateChanged` message. The
 //! on-connect replay, though, derived transport from the health registry's
-//! SCENE-RECONCILED label (`websocket.rs::transport_from_label`), and
-//! `handle_health_snapshot` maps a Playing-but-off-program pipeline to `Paused`
-//! — so a dashboard that CONNECTED while an off-program dub decoded (a reload,
-//! or a play clicked before the app socket opened) replayed `▶ Prehrať` for a
-//! playing dub until the next live message.
+//! SCENE-RECONCILED label, and `handle_health_snapshot` maps a Playing-but-off-
+//! program pipeline to `Paused` — so a dashboard that CONNECTED while an
+//! off-program dub decoded (a reload, or a play clicked before the app socket
+//! opened) replayed `▶ Prehrať` for a playing dub until the next live message.
 //!
 //! Round 2 stores the transport derived from the RAW `reported_state` on the
 //! snapshot, and the replay reads it directly — no second mapping in
@@ -23,11 +22,16 @@ use super::ndi_health::PlaybackStateLabel;
 /// [`TransportState`], INDEPENDENTLY of whether its scene is on OBS program.
 pub(crate) fn transport_from_reported(state: &PlaybackStateLabel) -> TransportState {
     match state {
-        // RED: wrong arm — GREEN maps Playing -> Playing so an off-program
-        // decoding pipeline replays `transport: Playing` (`⏸ Pauza`).
-        PlaybackStateLabel::Playing => TransportState::Idle,
+        // A decoding pipeline is Playing regardless of whether its scene is on
+        // OBS program — so an off-program decoding dub replays `transport:
+        // Playing` and a reloaded dashboard reads `⏸ Pauza`.
+        PlaybackStateLabel::Playing => TransportState::Playing,
+        // A Playing-off-program pipeline the registry reconciled to `Paused`,
+        // and `WaitingForScene` (black-framed / awaiting its scene), are both
+        // not decoding — paused.
         PlaybackStateLabel::Paused => TransportState::Paused,
         PlaybackStateLabel::WaitingForScene => TransportState::Paused,
+        // No video loaded.
         PlaybackStateLabel::Idle => TransportState::Idle,
     }
 }

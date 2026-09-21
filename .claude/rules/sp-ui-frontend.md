@@ -576,16 +576,33 @@ Server: `ServerMsg::PlaybackStateChanged` carries `transport: TransportState`
 the pure `playback/transport_state.rs::transport_from_play_state`
 (`Playing`→Playing, `WaitingForScene`→Paused, `Idle`→Idle);
 `play_state_to_ws`/`WsPlaybackState` are UNCHANGED (the #170 scene-aware
-contract + its E2E keep working). The fresh-connect replay
-(`websocket.rs::playback_state_replay`) derives transport from the scene-reconciled
-health label (`transport_from_label`), so a dashboard RELOADED while an
-off-program dub decodes replays `Paused` until the next live update — a known
-limit (the health snapshot would need the raw decoding state to fix).
+contract + its E2E keep working).
+
+**Round 2 (#201) closed the on-connect-replay limit — the replay now carries the
+RAW transport, so a reload / late-socket / second-tab dashboard reads the honest
+label immediately (round 1 replayed the scene-reconciled `Paused` label until the
+next live message).** `PipelineHealthSnapshot` gained an additive `transport:
+TransportState` field (`#[serde(default)]` = `Idle`, also on `GET
+/api/v1/ndi/health`), set in `handle_health_snapshot` from the pipeline's RAW
+`reported_state` via the pure sibling `playback/ndi_health_transport.rs::
+transport_from_reported` (`Playing`→Playing, `Paused`→Paused,
+`WaitingForScene`→Paused, `Idle`→Idle — `ndi_health.rs` is at the 1000-line cap,
+so ONE assignment there + everything else in the sibling). The fresh-connect
+replay (`websocket.rs::playback_state_replay`) reads `s.transport` directly; the
+old `transport_from_label` second mapping was DELETED (one source of truth). Note
+`state` stays scene-reconciled (`WaitingForScene` off program) while `transport`
+carries `Playing` — the two diverge for an off-program decoding pipeline, which
+is the whole point.
 
 Mock: a tick item carries `transport` (defaults to `Playing` when `state ==
 "Playing"`, else `Paused`); an off-program decoding item is
 `{state:"WaitingForScene", transport:"Playing"}`. The playlist-1 WS-open
 broadcast carries `transport:"Playing"` so the Dashboard toggle reads `⏸ Pauza`.
-`e2e/player-transport.spec.ts` pins both cases; a NEW required field on the WS
-message must be reflected in every mock `PlaybackStateChanged` a spec relies on.
+The ndiHealth fixture rows and the on-connect replay (round 2: the WS handler
+replays the current tick items' `state`+`transport` on every (re)connect) both
+carry `transport`, so a page reload while an off-program dub decodes reads
+`⏸ Pauza` with NO live message. `e2e/player-transport.spec.ts` pins the live
+cases AND the reload case; `e2e/post-deploy-dabing.spec.ts` proves the reload on
+the box. A NEW required field on the WS message must be reflected in every mock
+`PlaybackStateChanged` a spec relies on.
 

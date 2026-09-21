@@ -678,6 +678,8 @@ let ndiHealth = [
     ndi_name: "SP-worship",
     playlist_id: 1,
     state: "Playing",
+    // #201 round 2: the raw transport the API now exposes (default from state).
+    transport: "Playing",
     connections: 2,
     lock_state: "LOCKED",
     lock_reason: "locked",
@@ -696,6 +698,7 @@ let ndiHealth = [
     ndi_name: "SP-background",
     playlist_id: 2,
     state: "Playing",
+    transport: "Playing",
     connections: 0,
     lock_state: "DEGRADED",
     lock_reason: "no receiver",
@@ -714,6 +717,7 @@ let ndiHealth = [
     ndi_name: "SP-live",
     playlist_id: 184,
     state: "Idle",
+    transport: "Idle",
     connections: 0,
     lock_state: "UNLOCKED",
     lock_reason: "pacing disabled",
@@ -1227,6 +1231,30 @@ wss.on("connection", (ws) => {
     }
   }, 100);
 
+  // #201 round 2: the on-connect replay. The real server rebuilds a
+  // `PlaybackStateChanged` per pipeline snapshot on connect, now carrying the
+  // snapshot's RAW `transport`. Model it for the tick-driven off-program dub:
+  // if a spec has enabled the tick, replay each item's state + transport on
+  // (re)connect — with NO subsequent live message — so a page reload while an
+  // off-program dub decodes reads its honest transport at once.
+  const replayTimer = setTimeout(() => {
+    if (ws.readyState === ws.OPEN && tickEnabled) {
+      for (const it of tickItems) {
+        ws.send(
+          JSON.stringify({
+            type: "PlaybackStateChanged",
+            data: {
+              playlist_id: it.playlist_id,
+              state: it.state,
+              mode: "Continuous",
+              transport: it.transport,
+            },
+          }),
+        );
+      }
+    }
+  }, 120);
+
   // #154: one-shot LyricsQueueUpdate carrying the "waiting — wall in use"
   // worker state (a song-less processing entry). Delayed so it lands after the
   // card's initial HTTP fetch; buckets match /api/v1/lyrics/queue so the
@@ -1290,6 +1318,7 @@ wss.on("connection", (ws) => {
     clearInterval(interval);
     clearTimeout(badgeTimer);
     clearTimeout(playingTimer);
+    clearTimeout(replayTimer);
     wsClients.delete(ws);
     console.log("[mock-api] WebSocket client disconnected");
   });
