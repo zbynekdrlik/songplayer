@@ -182,7 +182,7 @@ const BEACON_INTERVAL_SECS: u64 = 1;
 /// `produced_ms/1000 − buffered_end` = how far the picture is behind the wall.
 /// Pure so the exact JSON shape is unit-tested without a live socket / runtime.
 fn beacon_frame(produced_ms: u64) -> String {
-    format!("{{\"produced\":{produced_ms}}}")
+    format!("{{\"produced_ms\":{produced_ms}}}")
 }
 
 /// Whether the client has been silent past the idle deadline (#178 item 16):
