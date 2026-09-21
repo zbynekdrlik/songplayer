@@ -138,6 +138,13 @@ impl EdgeFade {
     pub fn shaped(&self) -> &[f32] {
         &self.out
     }
+
+    /// Test-only: how many fade-in blocks have been consumed since the last
+    /// silence run (saturates at [`FADE_IN_BLOCKS`] — never counts past it).
+    #[cfg(test)]
+    pub(crate) fn fade_in_pos(&self) -> u32 {
+        self.fade_in_pos
+    }
 }
 
 /// Linear fade-IN gain for frame `g` (0-based) of a `total`-frame ramp: `0.0` at
@@ -314,6 +321,74 @@ mod tests {
             ef.shaped()[0],
             0.5,
             "the new tail uses the most recent block"
+        );
+    }
+
+    // ── exact per-sample shaping on DISTINCT stereo data ────────────────────
+    // A constant block hides every index mutant (`f * ch + c` vs `f + ch + c`
+    // …) — these blocks carry a different value in every sample, so each
+    // shaped sample must equal ITS OWN raw sample × ITS OWN frame's gain.
+
+    /// A stereo block whose sample `i` is `i` (plus 1, so no sample is 0).
+    fn distinct_stereo() -> Vec<f32> {
+        (0..SPB * 2).map(|i| (i + 1) as f32).collect()
+    }
+
+    #[test]
+    fn fade_in_shapes_every_sample_by_its_own_frame_gain() {
+        let mut ef = EdgeFade::new(SPB);
+        assert!(!ef.on_silence(2)); // a silence run arms the fade-in
+        let raw = distinct_stereo();
+        assert!(ef.on_audio(&raw, 2), "first block after silence fades in");
+        let out = ef.shaped();
+        assert_eq!(out.len(), raw.len());
+        let total = FADE_IN_BLOCKS as usize * SPB;
+        for (i, (&got, &r)) in out.iter().zip(raw.iter()).enumerate() {
+            let expected = r * fade_in_gain(i / 2, total);
+            assert_eq!(got, expected, "sample {i}: raw {r} × gain(frame {})", i / 2);
+        }
+    }
+
+    #[test]
+    fn fade_out_tail_shapes_every_sample_of_the_last_block_by_its_own_frame_gain() {
+        let mut ef = EdgeFade::new(SPB);
+        let raw = distinct_stereo();
+        assert!(!ef.on_audio(&raw, 2), "no silence run before → full gain");
+        assert!(
+            ef.on_silence(2),
+            "the first silence after audio is the tail"
+        );
+        let out = ef.shaped();
+        assert_eq!(out.len(), raw.len());
+        for (i, (&got, &r)) in out.iter().zip(raw.iter()).enumerate() {
+            let expected = r * fade_out_gain(i / 2, SPB);
+            assert_eq!(got, expected, "sample {i}: raw {r} × gain(frame {})", i / 2);
+        }
+    }
+
+    #[test]
+    fn zero_channels_is_a_no_op_for_both_edges() {
+        // A zero channel count must never be divided by — both calls report
+        // "not shaped" and leave the scratch untouched.
+        let mut ef = EdgeFade::new(SPB);
+        assert!(!ef.on_silence(2));
+        assert!(!ef.on_audio(&distinct_stereo(), 0));
+        assert!(ef.shaped().is_empty());
+        assert!(!ef.on_silence(0));
+        assert!(ef.shaped().is_empty());
+    }
+
+    #[test]
+    fn fade_in_counter_saturates_at_fade_in_blocks() {
+        let mut ef = EdgeFade::new(SPB);
+        assert!(!ef.on_silence(2));
+        for _ in 0..(FADE_IN_BLOCKS + 3) {
+            ef.on_audio(&stereo(1.0), 2);
+        }
+        assert_eq!(
+            ef.fade_in_pos(),
+            FADE_IN_BLOCKS,
+            "the counter stops exactly at FADE_IN_BLOCKS, never counts past it"
         );
     }
 }
