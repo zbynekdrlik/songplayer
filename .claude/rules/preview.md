@@ -309,3 +309,12 @@ area. Do NOT regress them:
   `post-deploy-preview.spec.ts` (edge/msedge — Chromium codecs + CDP
   `Network.emulateNetworkConditions`), following `post-deploy-dabing.spec.ts` to
   drive the off-program Dabing dub for the `mixer-preset-original` dub-mix check.
+- **The throttled box test is a BOUNDED, early-exit `expect.poll` — NEVER a fixed
+  soak.** `post-deploy.config.ts` runs on the GATING post-deploy path (ci.yml
+  `exit 1` on failure), and the repo forbids sleep-dominated gating CI ("no
+  sleep-based CI jobs; a soak window goes to cron", CLAUDE.md). Proving "the media
+  reaches `t0 + 15 s` within ~25 s wall" distinguishes the fix (tracks real time)
+  from the bug (plateaued ~33 s behind) WITHOUT a `waitForTimeout(60_000)`. The
+  full 60 s throttled soak is a MANUAL box verification (`probe-preview-throttled.mjs
+  1000 100 150`), not a gating spec — do not re-add a fixed multi-second
+  `waitForTimeout` to any post-deploy spec.
