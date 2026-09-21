@@ -740,7 +740,7 @@ mod tests {
         test_worker(pool, dir.to_path_buf())
     }
 
-    /// A 20-minute row (over the 15-min `STEM_MAX_DURATION_MS` cap) must be
+    /// A 121-minute row (over the 120-min `STEM_MAX_DURATION_MS` cap) must be
     /// marked terminal `unsupported`, with no backoff bookkeeping touched —
     /// mirrors the exact-boundary coverage in `stem_duration_supported`'s pure
     /// tests (`worker_plan_tests.rs`), but proves the worker's real spawn seam
@@ -751,7 +751,7 @@ mod tests {
         crate::db::run_migrations(&pool).await.unwrap();
         seed_pending_stem_row(&pool, 1).await;
         sqlx::query("UPDATE videos SET duration_ms = ? WHERE id = 1")
-            .bind(1_200_000i64) // 20 min
+            .bind(7_260_000i64) // 121 min
             .execute(&pool)
             .await
             .unwrap();
@@ -768,7 +768,7 @@ mod tests {
         assert_eq!(
             status.as_deref(),
             Some("unsupported"),
-            "a 20-min song must be marked terminal unsupported"
+            "a 121-min song must be marked terminal unsupported"
         );
         assert_eq!(
             attempts, 0,
@@ -780,7 +780,7 @@ mod tests {
     /// No stub venv is provided here — `process_next` stops at the missing
     /// venv-python gate before reaching the duration check at all (same as
     /// `missing_venv_python_warns_and_skips_without_touching_db`); that is
-    /// fine, since the exact 15-min boundary is already proven by the pure
+    /// fine, since the exact 120-min boundary is already proven by the pure
     /// `stem_duration_supported` tests. This just proves a normal row is left
     /// pending, never spuriously marked unsupported.
     #[tokio::test]
