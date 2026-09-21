@@ -8,26 +8,36 @@
 //! shootdown to every core) — the memory-manager contention that stalls the LED
 //! wall under a resident heavy child (#203, box test 8).
 //!
-//! `Arc<Vec<u8>>` — NEVER `Arc<[u8]>`: converting a `Vec<u8>` into an `Arc<[u8]>`
-//! COPIES every pixel. The `Arc` refcount is EXACTLY the lifetime the NDI SDK's
-//! `send_send_video_async_v2` holdover needs — "the previous buffer stays alive
-//! until the next async call returns": the submitter keeps the last
+//! `Arc<PooledBuf>` — NEVER `Arc<[u8]>`: converting a `Vec<u8>` into an
+//! `Arc<[u8]>` COPIES every pixel. The `Arc` refcount is EXACTLY the lifetime the
+//! NDI SDK's `send_send_video_async_v2` holdover needs — "the previous buffer
+//! stays alive until the next async call returns": the submitter keeps the last
 //! [`SharedFrame`] in `prev_frame`, so the bytes the SDK still points at are
 //! freed only after the next submit installs a new one, and the idle standby
 //! submits the SAME black allocation every boundary (a refcount bump, no copy).
+//!
+//! #203 round 2b: the inner buffer is a [`PooledBuf`], so when the LAST owner
+//! drops (holdover replacement, pacer-repeat replacement, handoff coalesce, seek
+//! flush) the allocation is RECYCLED into `sp_decoder::frame_pool` for the next
+//! decoded frame instead of freed — removing the per-frame `VirtualAlloc`/
+//! `VirtualFree` churn. The recycle happens exactly in `PooledBuf`'s `Drop`,
+//! which the `Arc` fires only once every holder is gone, so a buffer the SDK may
+//! still point at is never reused early.
 
+use sp_decoder::frame_pool::PooledBuf;
+use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
 
 /// A reference-counted pixel buffer shared without copying (see the module doc).
 #[derive(Clone)]
-pub struct SharedFrame(Arc<Vec<u8>>);
+pub struct SharedFrame(Arc<PooledBuf>);
 
 impl SharedFrame {
     /// Wrap owned pixels. One small `Arc` header allocation; the pixel buffer is
     /// MOVED in, never copied.
     pub fn new(data: Vec<u8>) -> Self {
-        Self(Arc::new(data))
+        Self(Arc::new(PooledBuf::from(data)))
     }
 
     /// The pixel buffer length in bytes.
@@ -54,7 +64,10 @@ impl SharedFrame {
     /// exists so the paced burn-id overlay can paint into our own copy without
     /// disturbing any other holder.
     pub fn make_mut(&mut self) -> &mut Vec<u8> {
-        Arc::make_mut(&mut self.0)
+        // `Arc::make_mut` forks the `PooledBuf` (a fresh copy, via its `Clone`)
+        // only when this is not the sole owner; `as_vec_mut` exposes the inner
+        // `Vec` the overlay needs (`DerefMut` targets `[u8]`, not `Vec<u8>`).
+        Arc::make_mut(&mut self.0).as_vec_mut()
     }
 }
 
@@ -62,6 +75,16 @@ impl Deref for SharedFrame {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
         &self.0
+    }
+}
+
+impl fmt::Debug for SharedFrame {
+    /// Print only the length — never the pixels (multi-MB) — so a `PacedFrame`
+    /// (which derives `Debug` and holds a `SharedFrame`) stays cheap to format.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SharedFrame")
+            .field("len", &self.0.len())
+            .finish()
     }
 }
 
@@ -118,6 +141,14 @@ mod tests {
             !f.ptr_eq(&g),
             "make_mut on a shared handle forks the allocation"
         );
+    }
+
+    #[test]
+    fn debug_prints_the_length_not_the_pixels() {
+        let f = SharedFrame::new(vec![0u8; 42]);
+        let s = format!("{f:?}");
+        assert!(s.contains("SharedFrame"), "{s}");
+        assert!(s.contains("42"), "the length is shown: {s}");
     }
 
     #[test]
