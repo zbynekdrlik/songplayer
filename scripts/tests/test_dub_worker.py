@@ -164,3 +164,43 @@ def test_chunk_reusable_different_voice_resynth():
 def test_chunk_reusable_missing_voice_resynth():
     # A legacy chunk (pre-round-C) has no `voice` key → not reusable.
     assert dw.chunk_reusable({"index": 0}, "Charon") is False
+
+
+# ── #184 round E: the per-chunk voice-band guard (pure helpers) ──────────────────
+
+
+def test_chunk_voice_drift_drifted_over_steady_input():
+    # The output jumps an octave up for the last windows while the input stays
+    # steady → those windows are drift, not source-following. 3 of 9 voiced.
+    drifted, voiced = dw.chunk_voice_drift(
+        [100, 100, 100, 100, 100, 100, 220, 220, 220], [110] * 9
+    )
+    assert (drifted, voiced) == (3, 9)
+    assert drifted / voiced > 0.20
+
+
+def test_chunk_voice_drift_source_following_rise_is_not_drift():
+    # The output rises WITH the source (the correct high-source case) → not drift.
+    out = [100, 100, 100, 220, 220]
+    assert dw.chunk_voice_drift(out, out) == (0, 5)
+
+
+def test_chunk_voice_drift_empty_and_unvoiced():
+    assert dw.chunk_voice_drift([], []) == (0, 0)
+    assert dw.chunk_voice_drift([0, 0, 0], [100, 100]) == (0, 0)
+
+
+def test_chunk_voice_drift_aligns_mismatched_window_counts():
+    # The input has fewer windows (tempo compressed it); a high output stretch
+    # over a steady input still counts as drift after fraction-alignment.
+    drifted, voiced = dw.chunk_voice_drift([100] * 7 + [220] * 3, [110] * 5)
+    assert (drifted, voiced) == (3, 10)
+
+
+def test_chunk_is_drifted_threshold():
+    # Drifted when drifted/voiced > 0.20; the boundary and zero-voiced cases.
+    assert dw._chunk_is_drifted(3, 9) is True  # 0.33
+    assert dw._chunk_is_drifted(2, 10) is False  # exactly 0.20, not > 0.20
+    assert dw._chunk_is_drifted(3, 10) is True  # 0.30
+    assert dw._chunk_is_drifted(0, 0) is False
+    assert dw._chunk_is_drifted(0, 8) is False
