@@ -18,7 +18,7 @@ pub const DEFAULT_TOLERANCE_MS: u64 = 40;
 /// (~20 s at 30 fps) covers the worst real case with headroom while BOUNDING the
 /// discard so a target past end-of-stream can never spin the decode loop (#192
 /// round 5).
-pub const MAX_SEEK_DISCARD_FRAMES: u32 = 0;
+pub const MAX_SEEK_DISCARD_FRAMES: u32 = 600;
 
 /// Maximum duration disagreement between video and audio sidecars before
 /// [`SplitSyncedDecoder::new`] warns.
