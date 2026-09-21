@@ -150,20 +150,53 @@ def test_build_transcripts_includes_at_ms_and_tempo():
     assert c1["sk_timed"] == [{"t_ms": 400, "text": "Dovidenia"}]
 
 
-def test_chunk_reusable_same_voice_reuses():
-    # #184 round C: a cached chunk recorded under the SAME voice is reused.
-    assert dw.chunk_reusable({"index": 0, "voice": "Charon"}, "Charon") is True
+def _cached(voice="Charon", start_ms=0, end_ms=120_000):
+    return {
+        "index": 0,
+        "voice": voice,
+        "chunk_start_ms": start_ms,
+        "chunk_end_ms": end_ms,
+    }
+
+
+def test_chunk_reusable_same_voice_same_bounds_reuses():
+    # #184 round C: a cached chunk recorded under the SAME voice (and, round E,
+    # the SAME chunk boundaries) is reused.
+    assert dw.chunk_reusable(_cached(), "Charon", 0, 120_000) is True
 
 
 def test_chunk_reusable_different_voice_resynth():
     # A cached chunk recorded under ANOTHER voice must NOT be reused — the whole
     # dub must speak in one voice, so it is re-synthesized with the new one.
-    assert dw.chunk_reusable({"index": 0, "voice": "Kore"}, "Charon") is False
+    assert dw.chunk_reusable(_cached(voice="Kore"), "Charon", 0, 120_000) is False
 
 
 def test_chunk_reusable_missing_voice_resynth():
     # A legacy chunk (pre-round-C) has no `voice` key → not reusable.
-    assert dw.chunk_reusable({"index": 0}, "Charon") is False
+    assert dw.chunk_reusable({"index": 0}, "Charon", 0, 120_000) is False
+
+
+def test_chunk_reusable_other_bounds_resynth():
+    # #184 round E: the chunk plan changed (an 8-min session ceiling became 2 min),
+    # so `chunk_0.json` on disk covers 0–480 s while slot 0 now covers 0–120 s. Same
+    # voice, other boundaries → NOT reusable, or the final mix would lay the old
+    # 8-min audio over the new 2-min chunks that follow it.
+    old = _cached(start_ms=0, end_ms=480_000)
+    assert dw.chunk_reusable(old, "Charon", 0, 120_000) is False
+    assert (
+        dw.chunk_reusable(
+            _cached(start_ms=120_000, end_ms=240_000), "Charon", 0, 120_000
+        )
+        is False
+    )
+
+
+def test_chunk_reusable_legacy_meta_without_bounds_resynth():
+    # A pre-round-E chunk recorded no boundaries → not reusable (never guess).
+    assert (
+        dw.chunk_reusable({"index": 0, "voice": "Charon"}, "Charon", 0, 120_000)
+        is False
+    )
 
 
 # ── #184 round E: the per-chunk voice-band guard (pure helpers) ──────────────────
