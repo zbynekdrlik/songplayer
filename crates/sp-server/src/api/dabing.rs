@@ -139,11 +139,12 @@ pub async fn patch_dub_mix(
     Json(req): Json<DubMixReq>,
 ) -> impl IntoResponse {
     // Same clamp the persist applies, computed up front so the live push carries
-    // exactly what gets stored.
+    // exactly what gets stored. A cloned Sender keeps the push future independent
+    // of `state.pool`, which the persist borrows.
     let clamped = models_dabing::clamp_dub_ratio(req.ratio);
-    let push = async {
-        let _ = state
-            .engine_tx
+    let engine_tx = state.engine_tx.clone();
+    let push = async move {
+        let _ = engine_tx
             .send(crate::EngineCommand::SetDubMix {
                 video_id: id,
                 ratio: clamped as f32,
