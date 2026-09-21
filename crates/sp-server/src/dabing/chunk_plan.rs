@@ -46,7 +46,7 @@ pub const MIN_PAUSE_MS: u64 = 700;
 /// validated stable point (one pinned 120 s session = 0 drift) and ~7 min is where
 /// the drift appeared. The worker reads the `dub_session_max_s` setting per tick and
 /// passes it as the ceiling; this is the fallback when the setting is absent/blank.
-pub const DUB_SESSION_MAX_MS: u64 = 480_000;
+pub const DUB_SESSION_MAX_MS: u64 = 120_000;
 
 /// The maximum chunk length — the default Live-session ceiling
 /// ([`DUB_SESSION_MAX_MS`]). Kept as the ceiling `ChunkPlanConfig::default` uses.
