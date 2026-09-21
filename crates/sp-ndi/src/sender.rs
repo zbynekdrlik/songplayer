@@ -559,9 +559,13 @@ mod tests {
             pixel_format: PixelFormat::Bgra,
             timecode_100ns: None,
         };
+        // #203: the mock records the sync frame's exact byte length (None before
+        // the first send, then the real length — never a constant).
+        assert_eq!(backend.last_sync_video_len(), None);
         sender.send_video(&frame);
         let calls = backend.calls();
         assert_eq!(calls[1], "send_video(42,BGRA,1x1,stride=4,30/1)");
+        assert_eq!(backend.last_sync_video_len(), Some(4));
     }
 
     #[test]
