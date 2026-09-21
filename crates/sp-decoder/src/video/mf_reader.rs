@@ -159,7 +159,20 @@ impl MediaFoundationVideoReader {
         let nv12: Vec<u8> = if current_len == 0 {
             Vec::new()
         } else {
-            unsafe { std::slice::from_raw_parts(data_ptr, current_len as usize).to_vec() }
+            let len = current_len as usize;
+            // Fill a RECYCLED buffer (capacity >= len, cleared) via
+            // `extend_from_slice` into retained capacity — no demand-zero page
+            // fault after the first frame of a resolution (#203 2b). The
+            // SDK-clocked path wraps this Vec in `SharedFrame::new` at
+            // `submit_nv12` and the paced path in `to_paced_frame`, so its
+            // last-owner drop returns the allocation to `frame_pool` for reuse.
+            let mut buf = crate::frame_pool::take(len);
+            // SAFETY: `data_ptr .. data_ptr + len` is the MF-locked buffer,
+            // valid until `Unlock` below; `extend_from_slice` copies out of it.
+            unsafe {
+                buf.extend_from_slice(std::slice::from_raw_parts(data_ptr, len));
+            }
+            buf
         };
 
         unsafe {
