@@ -439,3 +439,14 @@ one line is logged per chunk. Output medians come from the trimmed WAV
 numpy-only helpers. `DubWorker::ensure_script` now ships `dub_voice_check.py`
 alongside `dub_worker.py` (the pure `embedded_tool_scripts()`, mutation-covered;
 the I/O `ensure_script` is mutation-excluded like `synthesize`).
+
+**The guard is BEST-EFFORT — it must never fail the dub it decorates.** It adds
+the FIRST numpy / `dub_voice_check` import onto the dub critical path (the shared
+lyrics venv carries numpy, so the import normally succeeds), so the whole scan +
+re-synth lives in `_apply_voice_band_guard`'s `try/except`: any failure (numpy
+absent, a truncated/unreadable output wav) is logged and falls through with
+`voice_band_ok=None` and no re-synth. Do NOT unwrap it — a decorative quality
+check killing an unattended job is a regression (round-E review MAJOR). Also note
+the guard shares the file-check's base-dominant assumption: a truly balanced 50/50
+octave rotation INSIDE one chunk is not detected (the chunk median sits between
+the two voices, neither clears +6 st) — that is not the observed symptom.
