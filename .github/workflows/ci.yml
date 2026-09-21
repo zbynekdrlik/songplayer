@@ -156,6 +156,30 @@ jobs:
         # breaks our CI: cssparser 0.37.0 broke lightningcss 1.0.0-alpha.65
         # on 2026-08-05 and took build-wasm red with no change on our side.
         run: cargo install trunk --version 0.21.14 --locked
+      - name: Pre-seed wasm-bindgen (locked version) so trunk never downloads it
+        # trunk fetches wasm-bindgen from the OLD `rustwasm/wasm-bindgen` release
+        # URL, which now only redirects to `wasm-bindgen/wasm-bindgen` and 504'd
+        # twice in a row on 2026-09-21 (run 35614160178 + its re-run) with no
+        # change on our side. Put the exact locked version on PATH (trunk uses a
+        # matching PATH binary before downloading) via a retrying download from
+        # the new org; the version comes from sp-ui/Cargo.lock so it can never
+        # drift from the crate.
+        run: |
+          set -euo pipefail
+          V=$(grep -A1 '^name = "wasm-bindgen"$' sp-ui/Cargo.lock | grep '^version' | sed -E 's/.*"([^"]+)".*/\1/')
+          test -n "$V"
+          URL="https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$V/wasm-bindgen-$V-x86_64-unknown-linux-musl.tar.gz"
+          TMP=$(mktemp -d)
+          ok=0
+          for i in 1 2 3 4 5 6; do
+            if curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 "$URL" | tar xz --strip-components=1 -C "$TMP"; then ok=1; break; fi
+            echo "wasm-bindgen $V download attempt $i failed"; sleep 15
+          done
+          test "$ok" = 1
+          install -m 0755 "$TMP/wasm-bindgen" "$HOME/.cargo/bin/wasm-bindgen"
+          mkdir -p "$HOME/.cache/trunk/wasm-bindgen-$V"
+          cp "$TMP/wasm-bindgen" "$HOME/.cache/trunk/wasm-bindgen-$V/wasm-bindgen"
+          wasm-bindgen --version
       - name: Build WASM frontend
         run: cd sp-ui && trunk build --release
       - name: Upload dist artifact
