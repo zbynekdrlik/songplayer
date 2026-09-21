@@ -24,14 +24,24 @@
 
 use leptos::html::Video;
 use leptos::prelude::*;
+use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(module = "/preview_player.js")]
 extern "C" {
     type PreviewPlayer;
 
+    // #184 round F: `on_lag` is a JS function the shim calls each pump tick with
+    // the measured picture lag in seconds (produced_ms/1000 − buffered_end). It
+    // is a wasm-bindgen `Closure` passed by its `JsValue` handle (sp-ui has no
+    // `js_sys` dep); the Rust closure must be kept alive as long as the player is.
     #[wasm_bindgen(constructor)]
-    fn new(video: &web_sys::HtmlVideoElement, path: String, start_muted: bool) -> PreviewPlayer;
+    fn new(
+        video: &web_sys::HtmlVideoElement,
+        path: String,
+        start_muted: bool,
+        on_lag: &JsValue,
+    ) -> PreviewPlayer;
 
     #[wasm_bindgen(method)]
     fn unmute(this: &PreviewPlayer);
@@ -50,11 +60,16 @@ pub fn PreviewVideo(
     // the Playing state) so the parent unmounts this component; the resulting
     // `on_cleanup` tears the player + WebSocket + encoder child down.
     #[prop(into)] on_stop: Callback<()>,
+    // #184 round F: called each pump tick with the picture lag in seconds. The
+    // parent (`Player`) holds it in a signal and renders the "náhľad mešká N s"
+    // readout when it reaches the threshold.
+    #[prop(into)] on_lag: Callback<f64>,
 ) -> impl IntoView {
     let video_ref = NodeRef::<Video>::new();
     // `StoredValue<_, LocalStorage>` (Copy + Send handle, thread-local value)
-    // holds the `!Send` player across the effect, the cleanup, and the handlers.
-    let player = StoredValue::new_local(None::<PreviewPlayer>);
+    // holds the `!Send` player AND the `!Send` lag `Closure` (kept alive for as
+    // long as the player) across the effect, the cleanup, and the handlers.
+    let player = StoredValue::new_local(None::<(PreviewPlayer, Closure<dyn Fn(f64)>)>);
 
     // Start the MSE player once the <video> element is actually in the DOM.
     // The effect re-runs when `video_ref` becomes populated; the `is_some`
@@ -68,15 +83,21 @@ pub fn PreviewVideo(
         }
         if let Some(el) = video_ref.get() {
             let path = format!("/api/v1/playback/{playlist_id}/preview.ws");
-            player.set_value(Some(PreviewPlayer::new(&el, path, false)));
+            // The lag callback: the shim invokes it (as a JS function) each pump
+            // tick. Held in the StoredValue so it outlives every JS call and is
+            // dropped only with the player at cleanup.
+            let cb = Closure::wrap(Box::new(move |lag: f64| on_lag.run(lag)) as Box<dyn Fn(f64)>);
+            let pl = PreviewPlayer::new(&el, path, false, cb.as_ref());
+            player.set_value(Some((pl, cb)));
         }
     });
 
     // Unmount / navigation: tear the player down (closes the WS → the encoder
-    // child dies after its TTL).
+    // child dies after its TTL). `destroy()` clears the pump interval before the
+    // lag `Closure` drops, so no callback fires after teardown.
     on_cleanup(move || {
         player.update_value(|p| {
-            if let Some(pl) = p.take() {
+            if let Some((pl, _cb)) = p.take() {
                 pl.destroy();
             }
         });
@@ -84,14 +105,14 @@ pub fn PreviewVideo(
 
     let on_unmute = move |_| {
         player.with_value(|p| {
-            if let Some(pl) = p {
+            if let Some((pl, _)) = p {
                 pl.unmute();
             }
         });
     };
     let on_fullscreen = move |_| {
         player.with_value(|p| {
-            if let Some(pl) = p {
+            if let Some((pl, _)) = p {
                 pl.fullscreen();
             }
         });

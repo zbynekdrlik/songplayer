@@ -14,6 +14,7 @@ use leptos::prelude::*;
 use serde::Serialize;
 use sp_core::mixer_model::mixer_controls;
 use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
+use sp_core::preview_lag::preview_lag_display;
 use sp_core::seek_model::{format_position, seek_display_ms, seek_target_ms};
 
 use crate::api;
@@ -173,6 +174,9 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
 
     // --- preview (click-to-start; torn down when the pipeline stops decoding) ---
     let preview_on = RwSignal::new(false);
+    // #184 round F: the latest picture lag (seconds behind the wall) the preview
+    // shim reported over the 1 Hz beacon; the readout shows only at ≥ 3 s.
+    let preview_lag = RwSignal::new(0.0_f64);
     Effect::new(move |_| {
         if !is_decoding.get() {
             preview_on.set(false);
@@ -377,6 +381,7 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                             <PreviewVideo
                                 playlist_id=pid
                                 on_stop=Callback::new(move |_| preview_on.set(false))
+                                on_lag=Callback::new(move |s: f64| preview_lag.set(s))
                             />
                         }
                             .into_any()
@@ -387,7 +392,10 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                                     type="button"
                                     class="preview-btn preview-start-btn"
                                     data-testid="preview-start"
-                                    on:click=move |_| preview_on.set(true)
+                                    on:click=move |_| {
+                                        preview_lag.set(0.0);
+                                        preview_on.set(true);
+                                    }
                                 >
                                     "▶ Živý náhľad"
                                 </button>
@@ -395,6 +403,23 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                         }
                             .into_any()
                     }
+                }}
+                // #184 round F: the lag readout — shown only while the preview is
+                // mounted AND the picture is ≥ 3 s behind the wall (the pure
+                // sp_core threshold), so the owner sees at a glance that the
+                // PICTURE is late, not the control he just moved.
+                {move || {
+                    preview_on
+                        .get()
+                        .then(|| preview_lag_display(preview_lag.get()))
+                        .flatten()
+                        .map(|n| {
+                            view! {
+                                <span class="preview-lag" data-testid="preview-lag">
+                                    {format!("náhľad mešká {n} s")}
+                                </span>
+                            }
+                        })
                 }}
             </div>
 
