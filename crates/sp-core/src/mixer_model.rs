@@ -54,8 +54,7 @@ impl MixFaders {
 /// the voices are never doubled.
 pub fn stream_gains_song(f: MixFaders) -> [f32; 3] {
     if f.vokaly == 1.0 && f.podklad == 1.0 {
-        // RED(#184): bit-exact branch wrong (0,0,0) — GREEN restores [1,0,0].
-        [0.0, 0.0, 0.0]
+        [1.0, 0.0, 0.0]
     } else {
         [0.0, f.vokaly, f.podklad]
     }
