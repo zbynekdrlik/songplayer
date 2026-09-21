@@ -300,7 +300,7 @@ impl<B: NdiBackend> NdiSender<B> {
                 stride as i32,
                 frame_rate_n,
                 frame_rate_d,
-                &data[..data.len().saturating_sub(1)],
+                data,
                 timecode_100ns,
             );
         }
