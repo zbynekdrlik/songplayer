@@ -140,13 +140,19 @@ def drain_deadline_s(input_pcm_bytes: int, drain_s: float = DRAIN_S) -> float:
     return round(input_s + drain_s, 2)
 
 
-def chunk_reusable(meta: dict, voice: str) -> bool:
-    """#184 round C: a resumed chunk (`chunk_N.json`) may be reused ONLY if it was
-    synthesized with the SAME voice as the one now requested. A chunk recorded
-    under a different voice, or a legacy chunk with no `voice` key (pre-round-C),
-    is NOT reusable — it is re-synthesized so a video's dub speaks in one voice.
-    Pure — unit-tested."""
-    return meta.get("voice") == voice
+def chunk_reusable(meta: dict, voice: str, start_ms: int, end_ms: int) -> bool:
+    """#184 round C + E: a resumed chunk (`chunk_N.json`) may be reused ONLY if it
+    was synthesized with the SAME voice as the one now requested AND covers the
+    SAME `[start_ms, end_ms)` slice of the source. A chunk recorded under a
+    different voice, a legacy chunk with no `voice` / boundary keys, or a chunk
+    from an OLDER chunk plan (the session ceiling changed, so slot N now covers a
+    different slice) is NOT reusable — it is re-synthesized, otherwise the final
+    mix would lay the old audio over the chunks that follow it. Pure — unit-tested."""
+    return (
+        meta.get("voice") == voice
+        and meta.get("chunk_start_ms") == start_ms
+        and meta.get("chunk_end_ms") == end_ms
+    )
 
 
 def _semitones(hz: float, ref: float) -> float:
@@ -503,20 +509,25 @@ def _process_chunk(
 ) -> dict:
     """Translate one chunk (resumable): returns the chunk result dict. Reuses an
     existing `chunk_N.json` + `chunk_N.wav` on a re-run ONLY when it was made with
-    the SAME `voice` (#184 round C — a chunk recorded under another voice, or a
-    legacy chunk with no `voice`, is re-synthesized so the whole dub is one voice)."""
+    the SAME `voice` and the SAME chunk boundaries (#184 round C + E — a chunk
+    recorded under another voice, a legacy chunk with no `voice`, or a chunk from
+    an older chunk plan is re-synthesized so the whole dub is one voice laid at
+    the right offsets)."""
+    start_ms = int(chunk["start_ms"])
+    end_ms = int(chunk["end_ms"])
     result_path = os.path.join(work_dir, f"chunk_{idx}.json")
     wav_path = os.path.join(work_dir, f"chunk_{idx}.wav")
     if os.path.exists(result_path) and os.path.exists(wav_path):
         with open(result_path, encoding="utf-8") as f:
             meta = json.load(f)
-        if chunk_reusable(meta, voice):
+        if chunk_reusable(meta, voice, start_ms, end_ms):
             _log(f"chunk {idx}: resume (already done, voice {voice})")
             return meta
-        _log(f"chunk {idx}: re-synthesizing (voice changed to {voice})")
+        _log(
+            f"chunk {idx}: re-synthesizing (voice {voice}, {start_ms}-{end_ms} ms; "
+            f"cached {meta.get('voice')}, {meta.get('chunk_start_ms')}-{meta.get('chunk_end_ms')} ms)"
+        )
 
-    start_ms = int(chunk["start_ms"])
-    end_ms = int(chunk["end_ms"])
     chunk_len = end_ms - start_ms
     _heartbeat(work_dir)
 
