@@ -246,11 +246,15 @@ pub(crate) fn run_submit_consumer(
     while let Some(job) = handoff.take_blocking() {
         let submit_start = wall.now_100ns();
         let late = submit_late_100ns(job.stamp_boundary_100ns(), submit_start);
+        // Wrap the handoff's owned pixels in a `SharedFrame` (a small Arc header,
+        // no pixel copy) so the submitter's holdover is a refcount hold (#203).
+        // The handoff clone itself (`HandoffSink::emit`) stays a Vec — the
+        // cross-crate NV12 pool that removes it is round 2b.
         submitter.submit_frame_at_boundary_owned(
             job.width,
             job.height,
             job.stride,
-            job.video,
+            crate::playback::frame_buf::SharedFrame::new(job.video),
             &job.audio,
             job.video_tc_100ns,
             job.audio_tc_100ns,
