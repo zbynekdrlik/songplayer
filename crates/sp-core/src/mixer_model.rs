@@ -214,9 +214,9 @@ pub struct MixerControls {
 /// karaoke panel for a plain non-dub song (see `player.rs`); this predicate only
 /// classifies what the two per-video states say.
 pub fn mixer_controls(dub_status: Option<&str>, stems_state: Option<&str>) -> MixerControls {
-    // RED (#184): only a "ready" dub counts, so a queued dub wrongly hides the
-    // dub panel. GREEN: any non-`none` dub row.
-    let dub = matches!(dub_status, Some("ready"));
+    // Any real dub row (a non-empty status other than "none") shows the dub
+    // panel; the `DubMixer` renders its own locked/ready state text per status.
+    let dub = matches!(dub_status, Some(s) if !s.is_empty() && s != "none");
     let karaoke = matches!(
         stems_state,
         Some("ready" | "queued" | "processing" | "failed" | "unavailable")
