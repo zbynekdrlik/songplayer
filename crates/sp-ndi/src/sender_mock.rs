@@ -38,6 +38,12 @@ pub struct MockNdiBackend {
     /// url)` pairs a test injects to drive the finder → `match_source_urls`
     /// path on Linux. Empty by default (no NDI runtime).
     discovered_sources: StdMutex<Vec<(String, String)>>,
+    /// #203: the `(data.as_ptr() as usize, data.len())` of the LAST
+    /// `send_video_async` call. Lets a Linux test prove
+    /// `NdiSender::send_video_async_slice` hands the backend the EXACT borrowed
+    /// slice (same pointer + length), i.e. no hidden copy / re-slice. `None`
+    /// until the first async video send.
+    last_async_video_slice: StdMutex<Option<(usize, usize)>>,
 }
 
 impl MockNdiBackend {
@@ -61,6 +67,13 @@ impl MockNdiBackend {
     /// Resolved audio timecodes recorded so far (one per audio send).
     pub fn audio_timecodes(&self) -> Vec<i64> {
         self.audio_timecodes.lock().unwrap().clone()
+    }
+
+    /// #203: `(ptr, len)` of the pixel slice the backend received on the LAST
+    /// `send_video_async`, or `None` if none happened. Proves a borrowed-slice
+    /// send forwards the caller's bytes without a copy or re-slice.
+    pub fn last_async_video_slice(&self) -> Option<(usize, usize)> {
+        *self.last_async_video_slice.lock().unwrap()
     }
 
     pub fn set_tally(&self, on_program: bool, on_preview: bool) {
@@ -136,7 +149,7 @@ impl NdiBackend for MockNdiBackend {
         stride: i32,
         frame_rate_n: i32,
         frame_rate_d: i32,
-        _data: &[u8],
+        data: &[u8],
         timecode_100ns: Option<i64>,
     ) {
         self.calls.lock().unwrap().push(format!(
@@ -144,6 +157,8 @@ impl NdiBackend for MockNdiBackend {
         ));
         let tc = timecode_100ns.unwrap_or(NDI_SEND_TIMECODE_SYNTHESIZE);
         self.video_timecodes.lock().unwrap().push(tc);
+        // #203: record the exact borrowed slice the backend received.
+        *self.last_async_video_slice.lock().unwrap() = Some((data.as_ptr() as usize, data.len()));
     }
 
     fn send_video_flush(&self, handle: usize) {
