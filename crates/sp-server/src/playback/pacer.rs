@@ -726,7 +726,7 @@ impl Pacer {
                     width,
                     height,
                     stride,
-                    SharedFrame::new(video.to_vec()),
+                    video.clone(),
                     &[],
                     stamp_boundary,
                     audio_tc,
