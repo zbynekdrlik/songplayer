@@ -415,6 +415,14 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         self.submit_times.drain()
     }
 
+    /// Test seam: feed a known call duration into the gauge (the real samples
+    /// come from `Instant` timing around `send_video_async`, which a unit test
+    /// cannot pin to an exact value).
+    #[cfg(test)]
+    pub(crate) fn observe_submit_call_us(&mut self, us: u64) {
+        self.submit_times.observe(us);
+    }
+
     pub fn frames_submitted_total(&self) -> u64 {
         self.frames_submitted_total
     }
@@ -478,6 +486,22 @@ mod tests {
             sample_rate: 48000,
             timecode_100ns: None,
         }
+    }
+
+    #[test]
+    fn drain_submit_call_us_returns_exact_max_and_p99_then_clears() {
+        // #168 r2: the paced heartbeat reads this gauge; exact values kill the
+        // `(0, 1)` / `(1, 0)` / `(1, 1)` replacement mutants.
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend, "S", true, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+        sub.observe_submit_call_us(500);
+        sub.observe_submit_call_us(900);
+        assert_eq!(sub.drain_submit_call_us(), (900, 900));
+        // Drained: an empty window reads (0, 0).
+        assert_eq!(sub.drain_submit_call_us(), (0, 0));
+        sub.observe_submit_call_us(120);
+        assert_eq!(sub.drain_submit_call_us(), (120, 120));
     }
 
     #[test]
