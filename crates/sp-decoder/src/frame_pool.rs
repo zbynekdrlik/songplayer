@@ -150,6 +150,7 @@ pub fn clear_pool() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
 
     // The pool is a process-global static, so global-state tests serialise on
     // one lock and clear the pool first (the same pattern the repo's other
