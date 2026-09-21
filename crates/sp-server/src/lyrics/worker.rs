@@ -586,6 +586,9 @@ impl LyricsWorker {
         // regime; the idle-only "waiting" badge is separate.
         let gpu_mem = self.gpu_mem_setting().await;
         let mode = self.processing_mode().await;
+        // #203: publish the live containment for this song's heavy steps
+        // (isolation + mtl), so the Job Object seam caps + pins each child.
+        crate::lyrics::heavy_slot::refresh_containment(&self.pool).await;
         let regime_activity = self.wall_activity().await;
         let stage_suffix = Self::stage_regime_suffix(mode, regime_activity);
 

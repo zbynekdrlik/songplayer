@@ -23,9 +23,7 @@ pub(crate) const CPU_CAP_MIN_PCT: u8 = 5;
 pub(crate) const CPU_CAP_MAX_PCT: u8 = 100;
 /// Default CPU hard-cap when the setting is absent/unparseable: 25 % of TOTAL
 /// machine CPU time, chosen for the wall (SongPlayer/OBS/Resolume always win).
-// RED sentinel (99) — the GREEN commit sets the real 25 % default; the box
-// read (24 cores, wall on the lower half) confirmed 25 % as the chosen cap.
-pub(crate) const CPU_CAP_DEFAULT_PCT: u8 = 99;
+pub(crate) const CPU_CAP_DEFAULT_PCT: u8 = 25;
 
 /// The applied OS-level containment for one heavy child.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,12 +35,17 @@ pub(crate) struct Containment {
     pub(crate) affinity_mask: u64,
     /// Whether the child's process memory priority is lowered to
     /// `MEMORY_PRIORITY_LOW`. Always `true` today; kept as a field for the
-    /// applied-containment log line and the `/api/v1/status` surface.
+    /// applied-containment log line. Read only by the `#[cfg(windows)]` Job
+    /// Object seam, so it is dead in the non-Windows lib target.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) memory_priority_low: bool,
 }
 
 /// The Job Object `CpuRate` unit for a cap percentage: hundredths of a percent,
-/// so 100 % CPU maps to 10000 and 25 % to 2500. `pct * 100`. Pure.
+/// so 100 % CPU maps to 10000 and 25 % to 2500. `pct * 100`. Pure. Consumed only
+/// by the `#[cfg(windows)]` Job Object seam, so it is dead in the non-Windows lib
+/// target (still exercised by the unit tests).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn cpu_rate_from_pct(pct: u8) -> u32 {
     pct as u32 * 100
 }
