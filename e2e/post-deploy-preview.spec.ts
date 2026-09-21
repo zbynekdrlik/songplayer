@@ -135,7 +135,15 @@ test.describe("#178 live preview <video> post-deploy", () => {
     // wall, and a control change (the dub mixer 'Originál' preset) must still land
     // fast with the picture uninterrupted. Driven on the OFF-program Dabing output
     // (never the live wall), following post-deploy-dabing.spec.ts.
-    test.setTimeout(150_000);
+    //
+    // The liveness is proven by a BOUNDED, early-exit `expect.poll` (media reaches
+    // t0 + 15 s within ~20 s wall), NOT a fixed 60 s soak — the project's CLAUDE.md
+    // hard rule forbids a sleep-dominated test on the gating post-deploy path; a
+    // ~15 s window already distinguishes the fix (media tracks real time) from the
+    // bug (the backlog plateaued ~33 s behind and the media barely advanced). The
+    // full 60 s throttled soak is the supervisor's manual box verification
+    // (design acceptance item 4: probe-preview-throttled.mjs 1000 100 150).
+    test.setTimeout(120_000);
 
     const dab = await request.get("/api/v1/dabing");
     expect(dab.status()).toBe(200);
@@ -196,17 +204,23 @@ test.describe("#178 live preview <video> post-deploy", () => {
         })
         .toBeGreaterThanOrEqual(3);
 
-      // Hold 60 s under the throttle: the 500k stream fits 1 Mb/s, so the media
-      // must advance ~real time — at least 50 of the 60 s (lag ≤ 5 s incl. the
-      // startup ramp). Before round F this plateaued 33–38 s behind and the media
-      // barely advanced.
+      // Bounded, early-exit liveness poll (NOT a fixed soak): the 500k stream
+      // fits 1 Mb/s, so under the throttle the media tracks ~real time and reaches
+      // t0 + 15 s within ~20 s wall — the poll resolves the moment it does. Before
+      // round F the backlog plateaued 33–38 s behind and the media barely advanced,
+      // so it would never reach t0 + 15 s and the poll times out (fail). This
+      // proves the plateau is gone without a sleep-dominated gating test.
       const t0 = await video.evaluate((el: HTMLVideoElement) => el.currentTime);
-      await page.waitForTimeout(60_000);
-      const t1 = await video.evaluate((el: HTMLVideoElement) => el.currentTime);
-      expect(
-        t1 - t0,
-        "the throttled preview must stay near real time (≤ 5 s behind)",
-      ).toBeGreaterThanOrEqual(50);
+      await expect
+        .poll(
+          async () => video.evaluate((el: HTMLVideoElement) => el.currentTime),
+          {
+            timeout: 25_000,
+            message:
+              "the throttled preview must track real time — the media must keep advancing, not plateau behind the wall",
+          },
+        )
+        .toBeGreaterThanOrEqual(t0 + 15);
 
       // The lag readout must be absent or under 5 s.
       const lag = page.getByTestId("preview-lag");
@@ -226,13 +240,19 @@ test.describe("#178 live preview <video> post-deploy", () => {
       await page.getByTestId("mixer-preset-original").click();
       expect((await patch).status()).toBe(200);
 
+      // Poll (≤ 3 s, early-exit) that the picture advances after the mix change —
+      // proves no stall > 3 s, without a fixed sleep.
       const before = await video.evaluate((el: HTMLVideoElement) => el.currentTime);
-      await page.waitForTimeout(4000);
-      const after = await video.evaluate((el: HTMLVideoElement) => el.currentTime);
-      expect(
-        after - before,
-        "the picture must keep advancing after the mix change (no stall > 3 s)",
-      ).toBeGreaterThan(0.5);
+      await expect
+        .poll(
+          async () => video.evaluate((el: HTMLVideoElement) => el.currentTime),
+          {
+            timeout: 3000,
+            message:
+              "the picture must keep advancing after the mix change (no stall > 3 s)",
+          },
+        )
+        .toBeGreaterThan(before + 0.5);
     } finally {
       // Restore: dub-only mix, stop the preview, pause the off-program output.
       await request

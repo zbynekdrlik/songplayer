@@ -177,6 +177,17 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // #184 round F: the latest picture lag (seconds behind the wall) the preview
     // shim reported over the 1 Hz beacon; the readout shows only at ≥ 3 s.
     let preview_lag = RwSignal::new(0.0_f64);
+    // Fold the raw shim reports (which arrive ~4×/s from the pump tick) into the
+    // DISPLAYED readout (Option<i64>). A Memo only propagates when that value
+    // changes, so the span re-renders on a real change, not on every tick — the
+    // shared sp-ui rule that a slot closure reads a Memo, not a chatty signal.
+    let preview_lag_readout = Memo::new(move |_| {
+        if preview_on.get() {
+            preview_lag_display(preview_lag.get())
+        } else {
+            None
+        }
+    });
     Effect::new(move |_| {
         if !is_decoding.get() {
             preview_on.set(false);
@@ -409,10 +420,8 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                 // sp_core threshold), so the owner sees at a glance that the
                 // PICTURE is late, not the control he just moved.
                 {move || {
-                    preview_on
+                    preview_lag_readout
                         .get()
-                        .then(|| preview_lag_display(preview_lag.get()))
-                        .flatten()
                         .map(|n| {
                             view! {
                                 <span class="preview-lag" data-testid="preview-lag">

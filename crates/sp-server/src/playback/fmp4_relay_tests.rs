@@ -345,9 +345,14 @@ fn fragment_accumulator_over_16mib_poisons() {
 fn reset_clears_cached_init_so_a_late_joiner_waits_for_the_new_one() {
     let relay = FragmentRelay::new(8);
     relay.ingest(RelayChunk::Init(b"INIT_A".to_vec()));
+    relay.ingest(RelayChunk::Fragment(vec![1]));
+    relay.ingest(RelayChunk::Fragment(vec![2]));
     assert_eq!(relay.init().as_deref(), Some(&b"INIT_A"[..]));
+    assert_eq!(relay.produced_ms(), 1000);
     relay.reset();
     assert!(relay.init().is_none(), "reset clears the cached init");
+    // #184 round F: reset also clears the media-time counter at the boundary.
+    assert_eq!(relay.produced_ms(), 0, "reset zeroes produced_ms");
     // A new child's init replaces it (a late joiner now gets the NEW one).
     relay.ingest(RelayChunk::Init(b"INIT_B".to_vec()));
     assert_eq!(relay.init().as_deref(), Some(&b"INIT_B"[..]));
@@ -358,10 +363,14 @@ fn close_drops_the_sender_so_viewers_see_closed_and_clears_init() {
     use tokio::sync::broadcast::error::TryRecvError;
     let relay = FragmentRelay::new(8);
     relay.ingest(RelayChunk::Init(vec![1, 2, 3]));
+    relay.ingest(RelayChunk::Fragment(vec![4]));
     let mut rx = relay.subscribe();
     assert!(relay.init().is_some());
+    assert_eq!(relay.produced_ms(), 500);
     relay.close();
     assert!(relay.init().is_none(), "close clears the cached init");
+    // #184 round F: close also clears the media-time counter.
+    assert_eq!(relay.produced_ms(), 0, "close zeroes produced_ms");
     // The connected viewer's receiver now reports Closed (its sender dropped).
     match rx.try_recv() {
         Err(TryRecvError::Closed) => {}

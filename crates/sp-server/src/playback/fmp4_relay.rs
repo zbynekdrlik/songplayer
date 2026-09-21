@@ -290,6 +290,11 @@ impl FragmentRelay {
         if let Ok(mut slot) = self.init.lock() {
             *slot = None;
         }
+        // #184 round F: clear the media-time counter at the child boundary too, so
+        // the `frags_since_init` invariant holds at every reset (not only via the
+        // next `Init`). A late joiner during the dead window then reads produced_ms
+        // = 0 until the new child's init.
+        self.frags_since_init.store(0, Ordering::Relaxed);
     }
 
     /// End the stream (#178 item 12): clear the cached init and DROP the current
@@ -301,6 +306,8 @@ impl FragmentRelay {
         if let Ok(mut slot) = self.init.lock() {
             *slot = None;
         }
+        // #184 round F: the stream is ending — clear the media-time counter too.
+        self.frags_since_init.store(0, Ordering::Relaxed);
         let (tx, _rx) = broadcast::channel(self.capacity);
         if let Ok(mut g) = self.tx.lock() {
             *g = tx; // old sender dropped here → current receivers see Closed
