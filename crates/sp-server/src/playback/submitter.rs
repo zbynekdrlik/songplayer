@@ -462,6 +462,31 @@ impl<B: NdiBackend> crate::playback::pacer::PacedSink for FrameSubmitter<B> {
             audio_tc_100ns,
         );
     }
+
+    /// Zero-copy standby submit (#203): move the shared handle straight into the
+    /// async holdover — a refcount hold, no `to_vec`. Overrides the trait default
+    /// (which copies via `emit`) so the idle Black loop submits the SAME
+    /// allocation every boundary.
+    fn submit_shared(
+        &mut self,
+        width: u32,
+        height: u32,
+        stride: u32,
+        video: SharedFrame,
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        self.submit_frame_at_boundary_owned(
+            width,
+            height,
+            stride,
+            video,
+            audio,
+            video_tc_100ns,
+            audio_tc_100ns,
+        );
+    }
 }
 
 #[cfg(test)]

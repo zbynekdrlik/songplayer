@@ -4,6 +4,8 @@
 //! `#[cfg(test)] #[path = "submitter_tests_timecode.rs"] mod submitter_tests_timecode;`.
 
 use super::*;
+use crate::playback::frame_buf::SharedFrame;
+use crate::playback::pacer::PacedSink;
 use crate::playback::wallclock::WallClock;
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns};
 use sp_ndi::test_util::MockNdiBackend;
@@ -215,4 +217,37 @@ fn holdover_keeps_the_submitted_frame_alive_across_the_async_call() {
         recv_ptr2,
         "the holdover now tracks the second frame's allocation"
     );
+}
+
+#[test]
+fn frame_submitter_submit_shared_is_zero_copy_via_the_owned_path() {
+    // #203: FrameSubmitter overrides PacedSink::submit_shared to MOVE the shared
+    // handle into the async holdover — the SDK receives that exact allocation and
+    // it becomes prev_frame, with no to_vec copy.
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), "SS", false, false).unwrap();
+    let mut sub = FrameSubmitter::new(sender, 30, 1);
+
+    let frame = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
+    let src_ptr = frame.as_ptr() as usize;
+    sub.submit_shared(4, 2, 4, frame, &[], 333_333, 333_333);
+
+    let calls = backend.calls();
+    assert!(
+        calls
+            .iter()
+            .any(|c| c == "send_video_async(42,NV12,4x2,stride=4,30/1)"),
+        "submit_shared must send an NV12 async video frame: {calls:#?}"
+    );
+    assert_eq!(
+        backend.last_async_video_slice().unwrap().0,
+        src_ptr,
+        "the SDK receives the SAME allocation — no copy"
+    );
+    assert_eq!(
+        sub.prev_frame.as_ref().unwrap().as_ptr() as usize,
+        src_ptr,
+        "and the holdover keeps that same allocation"
+    );
+    assert_eq!(sub.frames_submitted_total(), 1);
 }
