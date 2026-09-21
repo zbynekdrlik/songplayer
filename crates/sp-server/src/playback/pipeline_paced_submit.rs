@@ -245,15 +245,12 @@ impl PacedSink for HandoffSink<'_> {
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
     ) {
-        self.handoff.offer(SubmitJob {
-            width: video.width,
-            height: video.height,
-            stride: video.stride,
-            video: video.video.clone(),
-            audio: audio.to_vec(),
+        self.handoff.offer(SubmitJob::from_paced(
+            video,
+            audio,
             video_tc_100ns,
             audio_tc_100ns,
-        });
+        ));
     }
 }
 
@@ -275,15 +272,14 @@ pub(crate) fn run_submit_consumer(
     while let Some(job) = handoff.take_blocking() {
         let submit_start = wall.now_100ns();
         let late = submit_late_100ns(job.stamp_boundary_100ns(), submit_start);
-        // Wrap the handoff's owned pixels in a `SharedFrame` (a small Arc header,
-        // no pixel copy) so the submitter's holdover is a refcount hold (#203).
-        // The handoff clone itself (`HandoffSink::emit`) stays a Vec — the
-        // cross-crate NV12 pool that removes it is round 2b.
+        // `job.video` is already the shared frame the emit thread Arc-cloned at
+        // the handoff (#203 2b) — move it straight into the submitter's async
+        // holdover (a refcount hold, no copy anywhere on the paced path).
         submitter.submit_frame_at_boundary_owned(
             job.width,
             job.height,
             job.stride,
-            crate::playback::frame_buf::SharedFrame::new(job.video),
+            job.video,
             &job.audio,
             job.video_tc_100ns,
             job.audio_tc_100ns,

@@ -42,7 +42,7 @@ fn mk_frame(pts_ns: i64) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: vec![0u8; 12],
+        video: SharedFrame::new(vec![0u8; 12]),
         audio: vec![],
     }
 }

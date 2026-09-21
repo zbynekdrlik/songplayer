@@ -23,6 +23,7 @@
 //! compile-failure RED, the same accepted shape as the lane-1 RED).
 
 use super::*;
+use crate::playback::frame_buf::SharedFrame;
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::AudioFrame;
 
@@ -40,7 +41,7 @@ fn mk_frame(pts_ns: i64) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: vec![0u8; 12],
+        video: SharedFrame::new(vec![0u8; 12]),
         audio: vec![],
     }
 }

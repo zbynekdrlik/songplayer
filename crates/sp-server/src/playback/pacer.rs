@@ -75,8 +75,8 @@ pub struct PacedFrame {
     pub width: u32,
     pub height: u32,
     pub stride: u32,
-    /// NV12 pixel data.
-    pub video: Vec<u8>,
+    /// NV12 pixel data, shared without copying (#203 2b: repeat + handoff bump).
+    pub video: SharedFrame,
     /// Audio chunk(s) belonging to this frame. PUSHED into the pacer's
     /// wall-clock `AudioGridBuffer` when the frame is CONSUMED (emitted OR
     /// dropped/decimated) — audio is then delivered on the audio grid (exactly
