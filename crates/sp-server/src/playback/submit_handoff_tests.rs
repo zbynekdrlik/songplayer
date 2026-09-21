@@ -1,7 +1,9 @@
 //! Linux tests for the pure #168 emit→submit handoff decision layer.
 
 use super::*;
+use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::PacingStats;
+use crate::playback::pacer::PacedFrame;
 
 // ---- handoff_policy: bounded queue + coalesce-to-freshest ----
 
@@ -235,10 +237,42 @@ fn submit_job_stamp_boundary_is_the_video_tc() {
         width: 1920,
         height: 1080,
         stride: 1920,
-        video: vec![0u8; 8],
+        video: SharedFrame::new(vec![0u8; 8]),
         audio: Vec::new(),
         video_tc_100ns: 3_333_300,
         audio_tc_100ns: 3_333_311,
     };
     assert_eq!(job.stamp_boundary_100ns(), 3_333_300);
+}
+
+#[test]
+fn from_paced_arc_clones_the_frame_without_copying_pixels() {
+    // #203 2b (D6): the emit->submit handoff takes the frame by `Arc` CLONE, so
+    // `SubmitJob.video` is the SAME allocation as the paced frame — the pacer's
+    // starvation-repeat clone and the submit holdover all share it.
+    let video = SharedFrame::new(vec![9u8; 12]);
+    let src_ptr = video.as_ptr();
+    let paced = PacedFrame {
+        pts_ns: 0,
+        width: 4,
+        height: 2,
+        stride: 4,
+        video,
+        audio: Vec::new(),
+    };
+    let job = SubmitJob::from_paced(&paced, &[], 3_333_300, 3_333_311);
+    assert_eq!(
+        job.video.as_ptr(),
+        src_ptr,
+        "handoff is an Arc clone, not a pixel copy"
+    );
+    assert!(
+        paced.video.ptr_eq(&job.video),
+        "the paced frame and the submit job share the SAME allocation"
+    );
+    assert_eq!(job.width, 4, "width propagated");
+    assert_eq!(job.height, 2, "height propagated");
+    assert_eq!(job.stride, 4, "stride propagated");
+    assert_eq!(job.stamp_boundary_100ns(), 3_333_300);
+    assert_eq!(job.audio_tc_100ns, 3_333_311);
 }

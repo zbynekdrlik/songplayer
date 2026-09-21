@@ -67,7 +67,9 @@ pub(crate) fn default_submit_shared<S: PacedSink + ?Sized>(
         width,
         height,
         stride,
-        video: video.to_vec(),
+        // Move the shared handle in — the default delegates to `emit` by
+        // reference, so no pixel copy is needed (#203 2b).
+        video,
         audio: Vec::new(),
     };
     sink.emit(&frame, audio, video_tc_100ns, audio_tc_100ns);

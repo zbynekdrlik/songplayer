@@ -21,7 +21,9 @@ use std::collections::VecDeque;
 
 use sp_ndi::AudioFrame;
 
+use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::PacingStats;
+use crate::playback::pacer::PacedFrame;
 
 /// Handoff depth (grid slots the submit thread may fall behind before a
 /// coalesce). Box test 5: median submit 25 ms < the 33.3 ms slot, p99 ~90 ms
@@ -49,9 +51,10 @@ pub struct SubmitJob {
     pub width: u32,
     pub height: u32,
     pub stride: u32,
-    /// Owned NV12 pixels — moved into the submitter's async double-buffer
-    /// holdover on the submit thread (no extra copy there).
-    pub video: Vec<u8>,
+    /// The NV12 frame, shared by `Arc` — Arc-cloned from the paced frame at the
+    /// handoff (no pixel copy, #203 2b) and moved into the submitter's async
+    /// double-buffer holdover on the submit thread.
+    pub video: SharedFrame,
     /// The boundary's audio chunk (0 or 1 frame of exactly
     /// `samples_per_boundary` samples, #148).
     pub audio: Vec<AudioFrame>,
@@ -66,6 +69,27 @@ impl SubmitJob {
     /// stamped video boundary.
     pub fn stamp_boundary_100ns(&self) -> i64 {
         self.video_tc_100ns
+    }
+
+    /// Build a submit job from a paced frame + its boundary audio, taking the
+    /// video by `Arc` CLONE — a refcount bump, NO pixel copy (#203 2b, D6). The
+    /// pacer keeps its own clone of the SAME allocation for the starvation
+    /// repeat, so the handoff no longer needs to copy the pixels off it.
+    pub fn from_paced(
+        frame: &PacedFrame,
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) -> Self {
+        Self {
+            width: frame.width,
+            height: frame.height,
+            stride: frame.stride,
+            video: frame.video.clone(),
+            audio: audio.to_vec(),
+            video_tc_100ns,
+            audio_tc_100ns,
+        }
     }
 }
 
