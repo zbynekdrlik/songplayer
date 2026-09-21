@@ -4,6 +4,8 @@
 //! `#[cfg(test)] #[path = "submitter_tests_timecode.rs"] mod submitter_tests_timecode;`.
 
 use super::*;
+use crate::playback::frame_buf::SharedFrame;
+use crate::playback::pacer::PacedSink;
 use crate::playback::wallclock::WallClock;
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns};
 use sp_ndi::test_util::MockNdiBackend;
@@ -175,4 +177,77 @@ fn paced_black_frame_is_stamped_on_grid_legacy_is_synthesize() {
         sp_ndi::NDI_SEND_TIMECODE_SYNTHESIZE,
         "the on-grid stamp must not collide with SYNTHESIZE"
     );
+}
+
+#[test]
+fn holdover_keeps_the_submitted_frame_alive_across_the_async_call() {
+    // #203: the async submit sends by borrowed slice and keeps the SAME
+    // allocation in `prev_frame` so the SDK's retained pointer stays valid until
+    // the next submit. The holdover buffer's pointer MUST equal the exact slice
+    // the backend received — sending one allocation while holding another is the
+    // use-after-free this test guards against.
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), "HO", false, false).unwrap();
+    let mut sub = FrameSubmitter::new(sender, 30, 1);
+
+    let data = vec![3u8; 4 * 2 * 3 / 2];
+    sub.submit_nv12(4, 2, 4, data, &[]);
+
+    let (recv_ptr, recv_len) = backend
+        .last_async_video_slice()
+        .expect("an async video send happened");
+    let held = sub
+        .prev_frame
+        .as_ref()
+        .expect("the holdover retained the submitted frame");
+    assert_eq!(
+        held.as_ptr() as usize,
+        recv_ptr,
+        "prev_frame must hold the EXACT buffer the SDK still points at"
+    );
+    assert_eq!(held.len(), recv_len, "and its full length");
+
+    // A second submit releases the first allocation and holds the second.
+    let data2 = vec![9u8; 4 * 2 * 3 / 2];
+    sub.submit_nv12(4, 2, 4, data2, &[]);
+    let (recv_ptr2, _) = backend.last_async_video_slice().unwrap();
+    let held2 = sub.prev_frame.as_ref().unwrap();
+    assert_eq!(
+        held2.as_ptr() as usize,
+        recv_ptr2,
+        "the holdover now tracks the second frame's allocation"
+    );
+}
+
+#[test]
+fn frame_submitter_submit_shared_is_zero_copy_via_the_owned_path() {
+    // #203: FrameSubmitter overrides PacedSink::submit_shared to MOVE the shared
+    // handle into the async holdover — the SDK receives that exact allocation and
+    // it becomes prev_frame, with no to_vec copy.
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), "SS", false, false).unwrap();
+    let mut sub = FrameSubmitter::new(sender, 30, 1);
+
+    let frame = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
+    let src_ptr = frame.as_ptr() as usize;
+    sub.submit_shared(4, 2, 4, frame, &[], 333_333, 333_333);
+
+    let calls = backend.calls();
+    assert!(
+        calls
+            .iter()
+            .any(|c| c == "send_video_async(42,NV12,4x2,stride=4,30/1)"),
+        "submit_shared must send an NV12 async video frame: {calls:#?}"
+    );
+    assert_eq!(
+        backend.last_async_video_slice().unwrap().0,
+        src_ptr,
+        "the SDK receives the SAME allocation — no copy"
+    );
+    assert_eq!(
+        sub.prev_frame.as_ref().unwrap().as_ptr() as usize,
+        src_ptr,
+        "and the holdover keeps that same allocation"
+    );
+    assert_eq!(sub.frames_submitted_total(), 1);
 }

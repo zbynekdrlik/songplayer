@@ -13,6 +13,7 @@
 //! (scheduling read + a fresh emit read after decode), and deletes the guard.
 
 use super::*;
+use crate::playback::frame_buf::SharedFrame;
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::AudioFrame;
 
@@ -766,11 +767,17 @@ fn standby_black_fills_boundaries_without_a_last_frame() {
     // Black fills the boundary with the supplied black frame instead.
     let (mut pacer, clk) = anchored_pacer();
     let mut sink = RecordingSink::default();
-    let black = mk_frame(0);
+    let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
 
     for k in 1..=50i64 {
         clk.set(b(k));
-        let out = pacer.service_standby(Standby::Black(&black), &mut sink);
+        let standby = Standby::Black {
+            width: 4,
+            height: 2,
+            stride: 4,
+            video: &black,
+        };
+        let out = pacer.service_standby(standby, &mut sink);
         assert_eq!(out, ServiceOutcome::Emitted, "black idle frame is emitted");
     }
     assert_eq!(sink.video_tcs.len(), 50);
@@ -786,6 +793,63 @@ fn standby_black_fills_boundaries_without_a_last_frame() {
     );
     // Black idle frames are NOT frozen-frame repeats.
     assert_eq!(pacer.stats().repeats, 0);
+}
+
+/// A sink that RECORDS each `submit_shared` frame (for #203 identity checks) and
+/// ignores `emit`.
+#[derive(Default)]
+struct SharedRecordingSink {
+    shared: Vec<SharedFrame>,
+}
+
+impl PacedSink for SharedRecordingSink {
+    fn emit(&mut self, _v: &PacedFrame, _a: &[AudioFrame], _vtc: i64, _atc: i64) {}
+
+    fn submit_shared(
+        &mut self,
+        _width: u32,
+        _height: u32,
+        _stride: u32,
+        video: SharedFrame,
+        _audio: &[AudioFrame],
+        _video_tc_100ns: i64,
+        _audio_tc_100ns: i64,
+    ) {
+        self.shared.push(video);
+    }
+}
+
+#[test]
+fn service_standby_black_submits_the_same_allocation_every_slot() {
+    // #203: idle Black is submitted by shared reference — the SAME allocation on
+    // every boundary (a refcount bump, never a per-slot copy). A sink that
+    // implements `submit_shared` records the frames and proves `ptr_eq`.
+    let (mut pacer, clk) = anchored_pacer();
+    let mut sink = SharedRecordingSink::default();
+    let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
+
+    for k in 1..=4i64 {
+        clk.set(b(k));
+        let standby = Standby::Black {
+            width: 4,
+            height: 2,
+            stride: 4,
+            video: &black,
+        };
+        assert_eq!(
+            pacer.service_standby(standby, &mut sink),
+            ServiceOutcome::Emitted
+        );
+    }
+    assert_eq!(sink.shared.len(), 4, "one submit per idle boundary");
+    for f in &sink.shared {
+        assert!(
+            f.ptr_eq(&black),
+            "every idle Black submit is the SAME allocation as the source, no copy"
+        );
+    }
+    // Transitively identical across all four slots.
+    assert!(sink.shared[0].ptr_eq(&sink.shared[3]));
 }
 
 #[test]

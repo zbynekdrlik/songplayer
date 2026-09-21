@@ -19,29 +19,28 @@ use std::time::Instant;
 
 use crossbeam_channel::Receiver;
 
+use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::PlaybackStateLabel;
-use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome, Standby};
+use crate::playback::pacer::{Pacer, ServiceOutcome, Standby};
 use crate::playback::pipeline::{
     PipelineCommand, PipelineEvent, emit_heartbeat, should_run_heartbeat,
 };
 use crate::playback::pipeline_paced::sleep_to_boundary;
 use crate::playback::submitter::FrameSubmitter;
 
-/// A neutral-black NV12 frame (Y = studio black 16, interleaved UV = 128) used
-/// as the idle/no-song standby picture. Matches the black `send_black_bgra`
+/// The idle/no-song standby resolution (1080p). The idle black frame is built
+/// ONCE at this size and submitted by shared reference every boundary (#203).
+const IDLE_W: u32 = 1920;
+const IDLE_H: u32 = 1080;
+
+/// Neutral-black NV12 pixel bytes (Y = studio black 16, interleaved UV = 128)
+/// for the idle/no-song standby picture. Matches the black `send_black_bgra`
 /// standby visually, but is NV12 so it rides the paced submit path.
-fn black_nv12(width: u32, height: u32) -> PacedFrame {
+fn black_nv12_bytes(width: u32, height: u32) -> Vec<u8> {
     let y = (width as usize) * (height as usize);
     let mut data = vec![16u8; y];
     data.resize(y + y / 2, 128u8);
-    PacedFrame {
-        pts_ns: 0,
-        width,
-        height,
-        stride: width,
-        video: data,
-        audio: Vec::new(),
-    }
+    data
 }
 
 /// The outer-loop idle wait (no song loaded). With `genlock_pacing` ON, fill
@@ -86,10 +85,18 @@ pub(crate) fn run_idle_wait(
         return;
     }
 
-    let black = black_nv12(1920, 1080);
+    // Build the idle black frame ONCE as a shared handle; every boundary submits
+    // it by reference (a refcount bump, zero pixel copies) — #203.
+    let black = SharedFrame::new(black_nv12_bytes(IDLE_W, IDLE_H));
     // Fill boundaries until a command is queued; the caller then receives it.
     while cmd_rx.is_empty() {
-        match pacer.service_standby(Standby::Black(&black), submitter) {
+        let standby = Standby::Black {
+            width: IDLE_W,
+            height: IDLE_H,
+            stride: IDLE_W,
+            video: &black,
+        };
+        match pacer.service_standby(standby, submitter) {
             ServiceOutcome::Wait { until_100ns } => sleep_to_boundary(pacer, until_100ns),
             _ => pacer.tick_wall(),
         }

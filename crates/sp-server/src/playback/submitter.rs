@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns};
 use sp_ndi::{AudioFrame, NdiBackend, NdiSender, PixelFormat, VideoFrame};
 
+use crate::playback::frame_buf::SharedFrame;
 use crate::playback::wallclock::WallClock;
 
 /// Owns an `NdiSender` plus the previous frame's buffer for the async
@@ -30,17 +31,20 @@ use crate::playback::wallclock::WallClock;
 /// `sender` MUST be declared before `prev_frame` so that on `Drop` Rust
 /// destroys the sender first (which calls `NdiSender::Drop` →
 /// `send_video_flush` → releases NDI's retained pointer to
-/// `prev_frame`'s bytes), THEN drops `prev_frame`, freeing the `Vec<u8>`
-/// only after NDI has confirmed it no longer needs it. Reversing the
-/// order would drop the `Vec<u8>` while NDI still held a pointer to it —
-/// silent use-after-free in the SDK. See `NdiSender::Drop` in
-/// `crates/sp-ndi/src/sender.rs`.
+/// `prev_frame`'s bytes), THEN drops `prev_frame`, releasing the shared
+/// buffer's last `Arc` reference only after NDI has confirmed it no longer
+/// needs it. Reversing the order would drop the pixels while NDI still held a
+/// pointer to them — silent use-after-free in the SDK. See `NdiSender::Drop`
+/// in `crates/sp-ndi/src/sender.rs`.
 pub struct FrameSubmitter<B: NdiBackend> {
     // NOTE: do not reorder these fields — see the SAFETY-CRITICAL note above.
     sender: NdiSender<B>,
-    /// Keeps the previous async frame's `Vec<u8>` alive until NDI releases
-    /// its pointer (which happens when the next submit / flush call fires).
-    prev_frame: Option<Vec<u8>>,
+    /// Keeps the previous async frame's pixels alive until NDI releases its
+    /// pointer (which happens when the next submit / flush call fires). A
+    /// [`SharedFrame`] (`Arc<Vec<u8>>`) so the holdover is a refcount hold with
+    /// ZERO pixel copy (#203) — the buffer the SDK still points at survives
+    /// exactly until the next submit installs a new one.
+    prev_frame: Option<SharedFrame>,
     frame_rate_n: i32,
     frame_rate_d: i32,
     /// Monotonic count of `submit_nv12` calls. `send_black_bgra` does not
@@ -73,6 +77,13 @@ pub struct FrameSubmitter<B: NdiBackend> {
     /// heartbeat can tell a producer stall caused by the SDK video submit apart
     /// from a decode / audio stall. Drained (max, p99) each `drain_window`.
     submit_times: crate::playback::loop_stats::SubmitHist,
+    /// #203: the standby BGRA black buffer, REUSED across `send_black_bgra` calls
+    /// keyed by size. `send_video` is synchronous, so the buffer is free the
+    /// moment the call returns and can be handed to the next standby frame with
+    /// no re-alloc — removing the paused-branch 8.3 MB `VirtualAlloc`/`VirtualFree`
+    /// churn (~83 MB/s per paused output). Reallocated only on a `(width,height)`
+    /// change.
+    black_bgra: Option<Vec<u8>>,
 }
 
 impl<B: NdiBackend> FrameSubmitter<B> {
@@ -105,6 +116,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             paced: false,
             burn_on: Arc::new(AtomicBool::new(false)),
             submit_times: crate::playback::loop_stats::SubmitHist::default(),
+            black_bgra: None,
         }
     }
 
@@ -185,17 +197,11 @@ impl<B: NdiBackend> FrameSubmitter<B> {
 
         // 2. Video async — may block on clock_video pacing, returns once NDI
         //    has taken ownership of our pointer. Pacing stays SDK-clocked in
-        //    #146; #147 replaces it with boundary-paced emission.
-        let frame = VideoFrame {
-            data: video_data,
-            width,
-            height,
-            stride,
-            frame_rate_n: self.frame_rate_n,
-            frame_rate_d: self.frame_rate_d,
-            pixel_format: PixelFormat::Nv12,
-            timecode_100ns: video_tc,
-        };
+        //    #146; #147 replaces it with boundary-paced emission. Wrap the owned
+        //    pixels ONCE in a `SharedFrame` (a small Arc header, NO pixel copy)
+        //    and send by borrowed slice so the holdover is a refcount hold
+        //    (#203).
+        let video = SharedFrame::new(video_data);
         // SAFETY: the previous async frame's buffer is held in `prev_frame`
         // below; it will not be dropped until we install the new frame, which
         // happens AFTER this async call returns. The async call is itself the
@@ -204,12 +210,21 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         // #192 round 3: time the SDK call — it blocks on the prior async frame,
         // so under a resident heavy child it is the candidate stalling stage.
         let (_, submit_us) = crate::playback::loop_stats::timed(|| unsafe {
-            self.sender.send_video_async(&frame);
+            self.sender.send_video_async_slice(
+                width,
+                height,
+                stride,
+                self.frame_rate_n,
+                self.frame_rate_d,
+                PixelFormat::Nv12,
+                video_tc,
+                &video[..],
+            );
         });
         self.submit_times.observe(submit_us);
 
         // Install the new frame — this drops whatever was in prev_frame.
-        self.prev_frame = Some(frame.data);
+        self.prev_frame = Some(video);
     }
 
     /// Release any pending async frame. Call this on every playback exit path
@@ -221,9 +236,21 @@ impl<B: NdiBackend> FrameSubmitter<B> {
 
     /// Send a solid-colour BGRA frame synchronously — used for idle /
     /// paused states. Internally flushes any pending async frame first.
+    ///
+    /// #203: reuses the [`black_bgra`](Self::black_bgra) buffer across calls of
+    /// the same size (black BGRA is all zeros, so a reused buffer is already
+    /// zeroed and a fresh one is zero-initialised); `send_video` is synchronous,
+    /// so the buffer returns to us the instant the call ends.
     pub fn send_black_bgra(&mut self, width: u32, height: u32) {
         self.flush();
-        let data = vec![0u8; (width * height * 4) as usize];
+        let needed = (width * height * 4) as usize;
+        // Reuse the cached standby buffer when the size matches (black BGRA is all
+        // zeros, so a reused buffer is already zeroed); reallocate only on a size
+        // change.
+        let data = match self.black_bgra.take() {
+            Some(buf) if buf.len() == needed => buf,
+            _ => vec![0u8; needed],
+        };
         // Paced (#147): a real send is never SYNTHESIZE — stamp the standby
         // frame with the floored on-grid boundary at the send instant (§4.3), so
         // an idle→play transition does not drop the receiver out of `locked=`.
@@ -247,6 +274,16 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             timecode_100ns,
         };
         self.sender.send_video(&frame);
+        // Reclaim the buffer for the next standby frame (send_video is sync).
+        self.black_bgra = Some(frame.data);
+    }
+
+    /// The current standby BGRA buffer's start pointer (`as usize`), or `None`
+    /// before the first `send_black_bgra`. Test-only: proves the buffer is REUSED
+    /// (same pointer) across same-size calls and reallocated on a size change.
+    #[cfg(test)]
+    fn black_bgra_ptr(&self) -> Option<usize> {
+        self.black_bgra.as_ref().map(|b| b.as_ptr() as usize)
     }
 
     /// Submit one boundary-paced frame at EXPLICIT genlock timecodes (#147).
@@ -269,15 +306,15 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
     ) {
-        // Borrow variant: copy the caller's buffer into an owned Vec and delegate.
-        // Used by the pacer's `PacedSink` impl (tests) and any caller that keeps
-        // its own copy. The #168 submit thread uses the `_owned` variant to avoid
-        // this extra copy on the submit path.
+        // Borrow variant: copy the caller's buffer into an owned SharedFrame and
+        // delegate. Used by the pacer's `PacedSink` impl (tests) and any caller
+        // that keeps its own copy. The #168 submit thread uses the `_owned`
+        // variant to avoid this extra copy on the submit path.
         self.submit_frame_at_boundary_owned(
             width,
             height,
             stride,
-            video_data.to_vec(),
+            SharedFrame::new(video_data.to_vec()),
             audio,
             video_tc_100ns,
             audio_tc_100ns,
@@ -285,10 +322,11 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     }
 
     /// Same as [`submit_frame_at_boundary`](Self::submit_frame_at_boundary) but
-    /// takes OWNED NV12 pixels, moved straight into the async double-buffer
-    /// holdover with NO extra copy (#168). The #168 submit thread already owns the
-    /// job's `Vec<u8>`, so this keeps the copy count identical to the pre-#168
-    /// path (one clone at handoff on the emit thread) while doing zero copies on
+    /// takes a [`SharedFrame`] whose `Arc` is MOVED straight into the async
+    /// double-buffer holdover with NO pixel copy (#168 + #203). The #168 submit
+    /// thread already owns the job's pixels, so wrapping them in a `SharedFrame`
+    /// is one small Arc header; the send is by borrowed slice and the same handle
+    /// becomes `prev_frame`, so the SDK's pointer stays valid with zero copies on
     /// the SDK-blocking submit thread.
     #[allow(clippy::too_many_arguments)]
     pub fn submit_frame_at_boundary_owned(
@@ -296,7 +334,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         width: u32,
         height: u32,
         stride: u32,
-        video_data: Vec<u8>,
+        video: SharedFrame,
         audio: &[AudioFrame],
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
@@ -315,18 +353,19 @@ impl<B: NdiBackend> FrameSubmitter<B> {
 
         // 2. Video async, stamped with the floored boundary.
         //
-        // #151 burn-id overlay: paint the QR into OUR owned copy of the frame
-        // (the moved `video_data`), NEVER the decoder's / pacer's buffer — the
-        // pacer keeps its own clone for the starvation repeat, so mutating this
-        // owned copy is safe and re-derives a fresh payload every boundary. Paced
-        // path only; read the shared flag fresh so a toggle-off clears within one
+        // #151 burn-id overlay: paint the QR into OUR OWN copy of the frame
+        // (`SharedFrame::make_mut` — in place while this handle is the sole owner,
+        // which it is on the submit path), NEVER the decoder's / pacer's buffer —
+        // the pacer keeps its own clone for the starvation repeat, so mutating our
+        // copy is safe and re-derives a fresh payload every boundary. Paced path
+        // only; read the shared flag fresh so a toggle-off clears within one
         // frame. `frame_id` = the pacing `seq` (== `frames_submitted_total`,
         // bumped above); `gen_ts_ns` = the serviced boundary wall time in ns
         // (`video_tc_100ns` is in 100-ns units).
-        let mut data = video_data;
+        let mut video = video;
         if self.burn_on.load(Ordering::Relaxed) {
             crate::playback::burn_overlay::paint_burn(
-                &mut data,
+                video.make_mut(),
                 width,
                 height,
                 stride,
@@ -334,25 +373,24 @@ impl<B: NdiBackend> FrameSubmitter<B> {
                 video_tc_100ns.saturating_mul(100),
             );
         }
-        let frame = VideoFrame {
-            data,
-            width,
-            height,
-            stride,
-            frame_rate_n: self.frame_rate_n,
-            frame_rate_d: self.frame_rate_d,
-            pixel_format: PixelFormat::Nv12,
-            timecode_100ns: Some(video_tc_100ns),
-        };
-        // SAFETY: `prev_frame` holds the previous async buffer until this
-        // async call releases the SDK's pointer to it; the new buffer is
-        // installed immediately after.
+        // SAFETY: `prev_frame` holds the previous async buffer's Arc until this
+        // async call releases the SDK's pointer to it; the new SharedFrame is
+        // installed immediately after — the holdover is a refcount hold, zero copy.
         // #192 round 3: time the SDK call (same gauge as the SDK-clocked path).
         let (_, submit_us) = crate::playback::loop_stats::timed(|| unsafe {
-            self.sender.send_video_async(&frame);
+            self.sender.send_video_async_slice(
+                width,
+                height,
+                stride,
+                self.frame_rate_n,
+                self.frame_rate_d,
+                PixelFormat::Nv12,
+                Some(video_tc_100ns),
+                &video[..],
+            );
         });
         self.submit_times.observe(submit_us);
-        self.prev_frame = Some(frame.data);
+        self.prev_frame = Some(video);
     }
 
     /// Submit an audio-only tail chunk at an explicit timecode (#148 rework,
@@ -466,6 +504,31 @@ impl<B: NdiBackend> crate::playback::pacer::PacedSink for FrameSubmitter<B> {
             video.height,
             video.stride,
             &video.video,
+            audio,
+            video_tc_100ns,
+            audio_tc_100ns,
+        );
+    }
+
+    /// Zero-copy standby submit (#203): move the shared handle straight into the
+    /// async holdover — a refcount hold, no `to_vec`. Overrides the trait default
+    /// (which copies via `emit`) so the idle Black loop submits the SAME
+    /// allocation every boundary.
+    fn submit_shared(
+        &mut self,
+        width: u32,
+        height: u32,
+        stride: u32,
+        video: SharedFrame,
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        self.submit_frame_at_boundary_owned(
+            width,
+            height,
+            stride,
+            video,
             audio,
             video_tc_100ns,
             audio_tc_100ns,
@@ -761,6 +824,32 @@ mod tests {
         sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
         assert_eq!(sub.frames_submitted_total(), 1);
         assert!(sub.last_submit_ts().is_some());
+    }
+
+    #[test]
+    fn send_black_bgra_reuses_its_buffer_across_same_size_calls() {
+        // #203: the standby BGRA buffer is reused across same-size calls (the send
+        // is synchronous, so the buffer is free the instant it returns) and
+        // reallocated only when the size changes.
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend, "BB", false, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+
+        sub.send_black_bgra(320, 240);
+        let ptr1 = sub
+            .black_bgra_ptr()
+            .expect("buffer retained after the first standby frame");
+        sub.send_black_bgra(320, 240);
+        let ptr2 = sub.black_bgra_ptr().unwrap();
+        assert_eq!(
+            ptr1, ptr2,
+            "a same-size standby frame reuses the SAME allocation, no re-alloc"
+        );
+
+        // A size change reallocates (the buffer must match the new dimensions).
+        sub.send_black_bgra(640, 480);
+        let ptr3 = sub.black_bgra_ptr().unwrap();
+        assert_ne!(ptr2, ptr3, "a size change reallocates the standby buffer");
     }
 
     #[test]

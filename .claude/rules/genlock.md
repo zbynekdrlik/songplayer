@@ -268,3 +268,24 @@ paths:
   `catchup_dropped` in the `pipeline: loop-stats` line. This runs ONLY on the
   `genlock_pacing == false` (wall-clock-emitter) branch; the paced/genlock path
   keeps its own re-latch logic and is untouched. Full contract: `pipeline-testability.md`.
+- Allocation-free steady state (#203, round 2a): the wall's page-fault storm
+  under a resident heavy child was the per-frame `Vec<u8>` alloc/free (VirtualAlloc
+  demand-zero faults + VirtualFree TLB shootbacks). The submit holdover is now a
+  `playback::frame_buf::SharedFrame` (`Arc<Vec<u8>>`, NEVER `Arc<[u8]>` which
+  copies) — `FrameSubmitter.prev_frame: Option<SharedFrame>`, sent via the new
+  additive `NdiSender::send_video_async_slice(&[u8])`, so the holdover is a
+  refcount hold with ZERO pixel copy. Rules for anyone touching `submitter.rs` /
+  `pacer.rs`: the field-order SAFETY note still holds (sender drops before
+  `prev_frame`); the paced burn overlay paints via `SharedFrame::make_mut` (in
+  place while sole owner — it IS the sole owner on the submit path, since the pacer
+  keeps its own `last_frame` clone); idle Black is submitted by shared reference
+  through `PacedSink::submit_shared` (`Standby::Black{dims, &SharedFrame}`,
+  `service_standby` clones the Arc = a refcount bump per idle slot, the idle loop
+  owns one black `SharedFrame`); `send_black_bgra` reuses a `black_bgra` buffer
+  keyed by size (send is synchronous, so it is reclaimed the instant the call
+  returns). The NV12 decoder/handoff/pacer-repeat pool (a cross-crate `sp-decoder`
+  change) is round 2b, built on this `SharedFrame` seam. The audio emitter
+  (`audio_emitter.rs`) is also allocation-free per slot now: `EmittedBlock` is a
+  TAG enum, `pop_block` fills a reused `block_buf`, `samples_for` returns a borrow
+  (+ a reusable `silence` block), and the jitter-p99 sort moved OFF the
+  TIME_CRITICAL thread into `emitter_stats()` (on-demand, heartbeat cadence).

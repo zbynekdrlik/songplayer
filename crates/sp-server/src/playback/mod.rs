@@ -10,6 +10,7 @@ pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;
 mod engine_play;
+pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
 mod handle_pipeline_event;
 mod karaoke; // #14 set_karaoke (impl PlaybackEngine, 1000-line cap split)
 pub mod lock_state;
@@ -21,6 +22,7 @@ mod ndi_health_transport; // #201 round 2: pure reported-label -> TransportState
 mod ndi_recovery_trigger; // #173 operator recover trigger (impl PlaybackEngine, 1000-line cap split)
 pub mod pacer;
 pub mod pacer_queue; // #147 producer/consumer: pure bounded look-ahead frame queue
+pub mod pacer_sink; // #203 pacer scheduling + shared-frame standby submit helpers
 pub mod pipeline;
 #[cfg(windows)]
 pub(crate) mod pipeline_paced;
