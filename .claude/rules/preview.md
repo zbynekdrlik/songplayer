@@ -262,3 +262,50 @@ intersection). Capture + inspect OUTSIDE SongPlayer:
 - Reproduce with the BOX'S OWN ffmpeg binary fed the exact production args over
   TCP — the box build can differ from dev1's (the round-3 root cause: the box
   build muxed 0 audio packets only when the PCM input was `-use_wallclock_as_timestamps`).
+
+## #184 round F — remote-uplink lag budget + the lag beacon
+
+The owner watches the preview over the internet, and it sat ~30 s behind the
+wall (every ratio/fader/seek looked 30 s late because the PICTURE was late, not
+the control). Two independent defects + a missing diagnostic, all in this file's
+area. Do NOT regress them:
+
+- **`RELAY_CAPACITY = 4` fragments (2 s), NOT 64 (32 s)** (`preview_stream.rs`).
+  64 × `-frag_duration 500000` = a 32-s per-viewer backlog: a viewer on a link
+  slower than the stream filled it and sat a full 32 s behind FOREVER (the
+  broadcast relay drops the OLDEST fragments, so the buffered end WAS the stale
+  data — the shim's live-edge chase can't help, `behind` stays ~0). At 4 the slow
+  viewer drops fragments and resyncs on the next keyframe fragment — choppy but
+  LIVE. Never raise it back without a lag-budget reason.
+- **Encoder fits ~1 Mb/s** (`preview_encoder.rs::build_ffmpeg_args`): `-b:v 500k
+  -maxrate 500k -bufsize 500k` + `-b:a 64k` ≈ 0.6 Mb/s (was `1200k` + `128k` ≈
+  1.35 Mb/s, which did not fit and made the remote back-pressure). 640×360 @ 25
+  fps stays — it is a monitor, not a viewing screen. `-maxrate/-bufsize = the
+  bitrate` bounds the keyframe overshoot so a GOP can't burst the link.
+- **The "exactly two fragments per second" invariant is load-bearing.** Under
+  `-r 25 -g 25 -frag_duration 500000` every GOP is 1 s and every media fragment
+  is 0.5 s, so `FragmentRelay::produced_ms()` = `(fragments since Init) × 500`
+  is the media time produced. If you change `-r` / `-g` / `-frag_duration`, the
+  `FRAGMENT_MS = 500` constant in `fmp4_relay.rs` AND the beacon math break —
+  change them together. The counter resets on `Init` (a new child restarts the
+  media timeline), increments per `Fragment`.
+- **The lag beacon** (`api/preview.rs::handle_preview_ws`): a 1 Hz `select!` arm
+  (next to the ping arm — both inside the `mutants::skip`-excluded fn) sends the
+  text frame `{"produced_ms":N}` (`beacon_frame`, a pure tested helper). The MSE
+  shim (`preview_player.js`) branches on `typeof ev.data`: a STRING is the beacon
+  (`JSON.parse`, non-JSON ignored — never a console error), BINARY is a fragment.
+  It computes `lag_s = produced_ms/1000 − buffered_end` each pump tick and reports
+  it through the `onLag` callback → `preview_video.rs` (`on_lag` prop, the wasm
+  `Closure` held beside the player) → `player.rs` renders
+  `<span data-testid="preview-lag">náhľad mešká N s</span>` ONLY at lag ≥ 3 s. The
+  ≥ 3 s threshold + whole-second rounding is the pure `sp_core::preview_lag::
+  preview_lag_display` (WASM-safe → workspace-tested + mutation-gated; sp-ui has
+  no unit-test job — never inline a threshold/rounding constant in sp-ui).
+- **Mock lag knob** (`e2e/mock-api.mjs` `previewWss`): sends the same beacon
+  (`fragments sent × 500`) and honours `?lag_ms=<N>` on the upgrade url. The
+  production `preview.ws` url stays unchanged — the shim forwards `lag_ms` ONLY
+  when it is present in the PAGE's own `location.search`, and the E2E navigates
+  with `/?lag_ms=30000`. The throttled box proof is
+  `post-deploy-preview.spec.ts` (edge/msedge — Chromium codecs + CDP
+  `Network.emulateNetworkConditions`), following `post-deploy-dabing.spec.ts` to
+  drive the off-program Dabing dub for the `mixer-preset-original` dub-mix check.
