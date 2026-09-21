@@ -45,7 +45,7 @@ impl SharedFrame {
     /// standby submits the same black allocation every slot and the holdover
     /// keeps the previous frame's exact allocation.
     pub fn ptr_eq(&self, other: &Self) -> bool {
-        self.0.len() == other.0.len()
+        Arc::ptr_eq(&self.0, &other.0)
     }
 
     /// Exclusive mutable access to the pixels, cloning ONLY if this handle is not
