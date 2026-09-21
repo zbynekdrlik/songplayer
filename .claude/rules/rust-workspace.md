@@ -137,3 +137,54 @@ Run `cargo fmt --all && git checkout -- crates/sp-server/src/db/models.rs`
 before EACH commit in a RED→GREEN chain, and commit with `git add -u crates/`
 (not a hand-picked file list) after formatting.
 
+## Staying under the 1000-line cap when adding a big trait method (#203)
+
+Adding a method to a trait (e.g. `PacedSink::submit_shared`, an 8-arg method) to
+a file already near the cap pushes it over — and a trait DEFAULT method's body
+CANNOT move to a sibling `impl` block (a default lives in the trait def). The fix
+that worked: keep only a THIN delegating default in the trait
+(`fn m(..) { sibling::default_m(self, ..) }`) whose body is a free fn in a new
+sibling module, AND RELOCATE an unrelated pure item to the sibling to reclaim the
+lines the new signature costs (the #203 lane moved `SleepDecision` +
+`plan_sleep_100ns` from `pacer.rs` into a new `pacer_sink.rs` and re-exported them
+`pub use pacer_sink::{SleepDecision, plan_sleep_100ns};` so `pacer::…` paths + the
+test submodules' `super::*` stay valid). The sibling free fn that takes `self`
+needs `<S: TheTrait + ?Sized>(sink: &mut S, …)` — `Self` is `?Sized` inside a
+trait default, so a non-`?Sized` bound fails to compile. Verify `wc -l` after
+`cargo fmt` — an 8-arg signature reflows to ~10 lines.
+
+## `use super::*` in a `#[path]` test submodule does NOT import the parent's private `use` aliases
+
+A `#[cfg(test)] #[path = "x_tests.rs"] mod tests;` submodule reaches the parent's
+own items via `super::*`, but a PRIVATE `use crate::…::Foo;` in the parent is NOT
+re-exported by the glob (the parent files already import `sp_ndi::AudioFrame`
+explicitly for this reason). So when a test needs a type the parent imports
+privately (e.g. `SharedFrame`), add an explicit `use crate::playback::frame_buf::SharedFrame;`
+to the TEST file — there is no duplicate-import conflict because the glob never
+brought it. A `pub use` re-export in the parent IS visible via `super::*`.
+
+## RED on the no-compile box for a REFACTOR (not just a wrong constant) — #203
+
+The "ship real logic with ONE WRONG CONSTANT" pattern extends to structural
+refactors: ship the FULL structural change in the RED commit but make ONE spot
+behave wrong so the new characterization test fails, then fix only that spot in
+GREEN. Deterministic REDs that worked: `pop_block` extends its reuse scratch
+WITHOUT `clear()` (scratch grows → byte-identity test fails); `service_standby`
+submits `SharedFrame::new(video.to_vec())` (a fresh copy) instead of
+`video.clone()` (a `ptr_eq`-across-slots test fails); `submit_nv12` sends a
+throwaway copy while holding the original allocation (a holdover-identity test
+fails). Prefer a deterministic wrong (grow / different-length) over "allocate
+fresh" — a freed-then-reallocated buffer can land at the SAME address and make a
+pointer-equality RED pass by luck.
+
+## Diff-scoped mutation gate: a new `pub fn` reachable only from `#[cfg(windows)]` needs a direct Linux test (#203)
+
+The CI mutation gate is `--in-diff` and strict. A NEW `pub fn` whose ONLY caller
+is in a `#[cfg(windows)]` module (stripped on the Linux mutation runner) has no
+Linux test exercising it, so its whole-fn `-> ()` mutant SURVIVES and fails the
+gate — even though the function is "obviously" covered on Windows. `#203`'s
+`FrameSubmitter::submit_shared` (called only from the `#[cfg(windows)]` idle loop)
+needed an explicit Linux unit test calling it through `MockNdiBackend`. When you
+add a pub fn during a diff, ask "does a LINUX `#[test]` actually call this?" — if
+not, add one or the mutation gate reddens.
+
