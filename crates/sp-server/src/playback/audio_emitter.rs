@@ -816,10 +816,10 @@ impl SpinMargin {
     }
 }
 
-#[cfg(test)]
 /// Pure per-block edge fades at the silence↔audio boundaries (#192 round 5).
 #[path = "audio_edge_fade.rs"]
 mod audio_edge_fade;
 
+#[cfg(test)]
 #[path = "audio_emitter_tests.rs"]
 mod audio_emitter_tests;
