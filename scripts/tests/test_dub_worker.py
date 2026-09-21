@@ -204,3 +204,27 @@ def test_chunk_is_drifted_threshold():
     assert dw._chunk_is_drifted(3, 10) is True  # 0.30
     assert dw._chunk_is_drifted(0, 0) is False
     assert dw._chunk_is_drifted(0, 8) is False
+
+
+def test_voice_band_guard_degrades_when_the_scan_fails(tmp_path):
+    # Best-effort: the voice-band guard must NEVER fail the dub it decorates. A
+    # scan failure (here a missing output WAV → a real wave error) is caught: the
+    # guard returns voice_band_ok=None with no drift, leaves the transcripts
+    # untouched, and does not re-synthesize.
+    import os
+
+    missing = os.path.join(tmp_path, "gone.wav")
+    ok, drifted, voiced, en, sk, sk_timed = dw._apply_voice_band_guard(
+        0,
+        b"",
+        1.0,
+        str(tmp_path),
+        "Charon",
+        missing,
+        "EN",
+        "SK",
+        [{"t_ms": 1, "text": "x"}],
+    )
+    assert ok is None
+    assert (drifted, voiced) == (0, 0)
+    assert (en, sk, sk_timed) == ("EN", "SK", [{"t_ms": 1, "text": "x"}])
