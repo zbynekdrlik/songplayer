@@ -33,22 +33,20 @@ fn stereo_block(v: f32) -> Vec<f32> {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn ring_pop_block_returns_none_until_a_full_block_is_present() {
+fn ring_pop_block_returns_false_until_a_full_block_is_present() {
     let mut ring = AudioRing::new(SPB, 8);
     // One sample short of a full stereo block.
     ring.push_some(&vec![1.0f32; SPB * 2 - 2], 2);
-    assert!(
-        ring.pop_block().is_none(),
-        "partial ring must not pop a block"
-    );
+    assert!(!ring.pop_block(), "partial ring must not pop a block");
     // Add the missing frame.
     ring.push_some(&[1.0, 1.0], 2);
-    let block = ring.pop_block().expect("full block now available");
-    assert_eq!(block.len(), SPB * 2, "block is exactly 1600 frames stereo");
-    assert!(
-        ring.pop_block().is_none(),
-        "ring drained after the one block"
+    assert!(ring.pop_block(), "full block now available");
+    assert_eq!(
+        ring.block_buf().len(),
+        SPB * 2,
+        "block is exactly 1600 frames stereo"
     );
+    assert!(!ring.pop_block(), "ring drained after the one block");
 }
 
 #[test]
@@ -68,9 +66,9 @@ fn ring_push_some_never_drops_and_accepts_zero_when_full() {
         "content unchanged — never drops"
     );
     // The buffered content is still the original 7.0 samples, in order.
-    let b0 = ring.pop_block().unwrap();
+    assert!(ring.pop_block());
     assert!(
-        b0.iter().all(|&s| s == 7.0),
+        ring.block_buf().iter().all(|&s| s == 7.0),
         "no foreign (9.0) samples leaked in"
     );
 }
@@ -144,7 +142,7 @@ fn full_ring_emits_zero_silence() {
     for _ in 0..4 {
         let em = e.tick(0);
         assert!(
-            matches!(em.block, EmittedBlock::Audio(_)),
+            matches!(em.block, EmittedBlock::Audio),
             "audio, not silence"
         );
     }
@@ -162,7 +160,7 @@ fn decode_stall_inserts_silence_for_missing_slots_then_resumes_without_dropping(
         e.ring_mut().push_some(&stereo_block(10.0 + k as f32), 2);
     }
     for _ in 0..3 {
-        assert!(matches!(e.tick(0).block, EmittedBlock::Audio(_)));
+        assert!(matches!(e.tick(0).block, EmittedBlock::Audio));
     }
     // ~300 ms decode stall = 9 grid slots with nothing pushed → 9 silence.
     for _ in 0..9 {
@@ -177,14 +175,23 @@ fn decode_stall_inserts_silence_for_missing_slots_then_resumes_without_dropping(
     // by the stall) with the marker value preserved.
     e.ring_mut().push_some(&stereo_block(42.0), 2);
     e.ring_mut().push_some(&stereo_block(43.0), 2);
-    match e.tick(0).block {
-        EmittedBlock::Audio(s) => assert!(s.iter().all(|&x| x == 42.0), "resumed audio intact"),
-        EmittedBlock::Silence => panic!("audio must resume after the stall"),
-    }
-    match e.tick(0).block {
-        EmittedBlock::Audio(s) => assert!(s.iter().all(|&x| x == 43.0)),
-        EmittedBlock::Silence => panic!("second resumed block must be audio"),
-    }
+    let em = e.tick(0);
+    assert_eq!(
+        em.block,
+        EmittedBlock::Audio,
+        "audio must resume after the stall"
+    );
+    assert!(
+        e.samples_for(&em.block).0.iter().all(|&x| x == 42.0),
+        "resumed audio intact"
+    );
+    let em = e.tick(0);
+    assert_eq!(
+        em.block,
+        EmittedBlock::Audio,
+        "second resumed block must be audio"
+    );
+    assert!(e.samples_for(&em.block).0.iter().all(|&x| x == 43.0));
     assert_eq!(e.silence_blocks(), 9, "no extra silence after resume");
 }
 
@@ -303,7 +310,7 @@ fn decode_side_push_does_not_send_audio_emitter_thread_does() {
     // The emitter thread's per-slot send DOES call send_audio, with a full
     // 1600-sample block and the grid timecode.
     let em = emit_one_block(&shared, &sink, 0);
-    assert!(matches!(em.block, EmittedBlock::Audio(_)));
+    assert!(matches!(em.block, EmittedBlock::Audio));
     let calls = backend.calls();
     assert!(
         calls
@@ -350,7 +357,7 @@ fn push_blocking_blocks_when_full_and_never_drops_until_the_emitter_frees_space(
     use std::time::Duration;
 
     let shared = new_shared_emitter();
-    let (_backend, sink) = mock_sink();
+    let (backend, sink) = mock_sink();
 
     // Fill the ring to capacity (8 blocks) then hand the pusher 4 MORE blocks:
     // it must block until the emitter drains, and every sample must survive.
@@ -378,8 +385,10 @@ fn push_blocking_blocks_when_full_and_never_drops_until_the_emitter_frees_space(
     // Drain every block; each drain frees a slot and wakes the pusher.
     let mut seen: Vec<f32> = Vec::new();
     for _ in 0..total_blocks {
-        if let EmittedBlock::Audio(s) = emit_one_block(&shared, &sink, 0).block {
-            seen.push(s[0]);
+        if emit_one_block(&shared, &sink, 0).block == EmittedBlock::Audio {
+            // The block's samples went to the sink; read the first back from the
+            // mock (a uniform block, so planar[0] is its marker value).
+            seen.push(backend.last_audio_planar()[0]);
         }
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -562,7 +571,9 @@ fn a_held_emitter_emits_silence_without_consuming_the_ring() {
     assert_eq!(e.tick(0).block, EmittedBlock::Silence);
     assert_eq!(e.ring_depth_ms(), 33, "a paused pipeline keeps its cushion");
     e.set_held(false);
-    assert_eq!(e.tick(0).block, EmittedBlock::Audio(stereo_block(0.5)));
+    let em = e.tick(0);
+    assert_eq!(em.block, EmittedBlock::Audio);
+    assert_eq!(e.samples_for(&em.block).0, &stereo_block(0.5)[..]);
 }
 
 #[test]
@@ -575,7 +586,9 @@ fn clearing_the_ring_drops_the_buffered_audio_but_keeps_the_layout() {
     assert_eq!(e.tick(0).block, EmittedBlock::Silence);
     // The stereo layout survives: the next song's audio plays normally.
     e.ring_mut().push_some(&stereo_block(0.7), 2);
-    assert_eq!(e.tick(0).block, EmittedBlock::Audio(stereo_block(0.7)));
+    let em = e.tick(0);
+    assert_eq!(em.block, EmittedBlock::Audio);
+    assert_eq!(e.samples_for(&em.block).0, &stereo_block(0.7)[..]);
 }
 
 #[test]
@@ -590,10 +603,14 @@ fn shared_hold_and_clear_reach_the_emitter_and_a_push_releases_the_hold() {
     );
     // New audio (resume / next frame) releases the hold.
     push_blocking(&shared, &stereo_block(0.6), 2);
-    assert_eq!(
-        shared.emitter.lock().unwrap().tick(0).block,
-        EmittedBlock::Audio(stereo_block(0.5))
-    );
+    let (block, samples) = {
+        let mut g = shared.emitter.lock().unwrap();
+        let em = g.tick(0);
+        let s = g.samples_for(&em.block).0.to_vec();
+        (em.block, s)
+    };
+    assert_eq!(block, EmittedBlock::Audio);
+    assert_eq!(samples, stereo_block(0.5));
     clear_ring(&shared);
     assert_eq!(shared.emitter.lock().unwrap().ring_depth_ms(), 0);
 }
@@ -655,7 +672,7 @@ fn push_blocking_drops_a_partial_frame_residual_instead_of_spinning_forever() {
     push_blocking(&shared, &stereo_block(0.5), 2);
     assert!(matches!(
         emit_one_block(&shared, &sink, 0).block,
-        EmittedBlock::Audio(_)
+        EmittedBlock::Audio
     ));
 }
 
@@ -791,4 +808,57 @@ fn ring_capacity_holds_the_round3_cushion() {
         RING_CAPACITY_BLOCKS, 49,
         "49 blocks ≈ 1633 ms at the 1.5 s cushion"
     );
+}
+
+#[test]
+fn pop_block_reuses_the_scratch_and_samples_for_is_byte_identical() {
+    // #203: pop_block fills a REUSED scratch buffer (no per-slot alloc) and
+    // samples_for returns it borrowed, byte-identical to the popped audio; a
+    // silent slot returns the reusable all-zero silence block.
+    let mut e = AudioEmitter::production();
+    e.ring_mut().push_some(&stereo_block(0.25), 2);
+    e.ring_mut().push_some(&stereo_block(0.5), 2);
+
+    let em0 = e.tick(0);
+    assert_eq!(em0.block, EmittedBlock::Audio);
+    let (s0, ch0) = e.samples_for(&em0.block);
+    assert_eq!(ch0, 2);
+    assert_eq!(
+        s0,
+        &stereo_block(0.25)[..],
+        "first block byte-identical to input"
+    );
+    let ptr_after_first = e.ring().block_buf().as_ptr() as usize;
+    let cap_after_first = e.ring().block_buf_capacity();
+
+    let em1 = e.tick(0);
+    assert_eq!(em1.block, EmittedBlock::Audio);
+    let (s1, _) = e.samples_for(&em1.block);
+    assert_eq!(
+        s1,
+        &stereo_block(0.5)[..],
+        "second block byte-identical — the scratch was cleared, not appended"
+    );
+    assert_eq!(
+        e.ring().block_buf().as_ptr() as usize,
+        ptr_after_first,
+        "the scratch allocation is REUSED across pops (same pointer)"
+    );
+    assert_eq!(
+        e.ring().block_buf_capacity(),
+        cap_after_first,
+        "and its capacity is not re-grown"
+    );
+
+    // Ring now empty → a full reusable silence block of zeros.
+    let em2 = e.tick(0);
+    assert_eq!(em2.block, EmittedBlock::Silence);
+    let (sil, ch) = e.samples_for(&em2.block);
+    assert_eq!(ch, 2);
+    assert_eq!(
+        sil.len(),
+        SPB * 2,
+        "silence is a full 1600-sample stereo block"
+    );
+    assert!(sil.iter().all(|&x| x == 0.0), "silence is all zeros");
 }
