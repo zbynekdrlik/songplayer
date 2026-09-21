@@ -45,6 +45,7 @@ async fn ndi_health_endpoint_includes_pacing() {
             lag_slots: 3,
             iter_p99_us: 4200,
             prep_p99_us: 210,
+            ..Default::default()
         },
         audio: AudioStats {
             enabled: true,

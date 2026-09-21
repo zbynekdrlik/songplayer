@@ -804,6 +804,9 @@ impl Pacer {
             lag_slots: self.last_lag_slots,
             iter_p99_us: self.iter_p99_us(),
             prep_p99_us: self.prep_p99_us(),
+            // #168 r2: the pacer does not submit — the paced submit thread fills
+            // `submit_call_us_max`/`_p99` via `merge_pacing_stats`; 0 here.
+            ..Default::default()
         }
     }
 

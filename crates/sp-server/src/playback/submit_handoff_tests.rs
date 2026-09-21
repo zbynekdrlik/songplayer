@@ -166,11 +166,17 @@ fn merge_takes_late_from_submit_and_schedule_from_pacer() {
         lag_slots: 4,
         iter_p99_us: 0,
         prep_p99_us: 400,
+        ..Default::default()
     };
     let mut submit = SubmitCounters::new();
     submit.record_submit(50_000, 300_000, 0); // 1 late, cost 30_000 µs
     submit.record_drop(); // 1 handoff-coalesce drop
-    let merged = merge_pacing_stats(pacer, &submit);
+    // #168 r2: the paced submit-call gauge (worst send_video_async max/p99 µs).
+    let paced_submit = PacedSubmitStats {
+        submit_call_us_max: 90_000,
+        submit_call_us_p99: 75_000,
+    };
+    let merged = merge_pacing_stats(pacer, &submit, paced_submit);
 
     // Honest output-side fields come from the submit thread.
     assert_eq!(merged.late_frames, 1);
@@ -187,6 +193,38 @@ fn merge_takes_late_from_submit_and_schedule_from_pacer() {
     assert_eq!(merged.jitter_p99_us, 7);
     assert_eq!(merged.prep_p99_us, 400);
     assert!(merged.enabled);
+    // #168 r2: the submit-call gauge is carried straight from the paced submit
+    // thread's drained window (max and p99 are NOT swapped).
+    assert_eq!(merged.submit_call_us_max, 90_000);
+    assert_eq!(merged.submit_call_us_p99, 75_000);
+}
+
+// ---- paced_submit_snapshot: worst-of fold over a heartbeat window (#168 r2) ----
+
+#[test]
+fn paced_submit_snapshot_keeps_the_worst_of_each() {
+    // The submit thread drains `FrameSubmitter.submit_times` on its ~1 s
+    // connection-poll cadence and folds each `(max, p99)` sub-window into the
+    // per-heartbeat gauge, keeping the WORST of each so a spike is never diluted
+    // by a following quiet sub-window (the heartbeat resets it on read).
+    let start = PacedSubmitStats::default();
+    // A big spike sub-window, then a quiet one: the worst must survive both.
+    let after_spike = paced_submit_snapshot(start, 90_000, 75_000);
+    assert_eq!(after_spike.submit_call_us_max, 90_000);
+    assert_eq!(after_spike.submit_call_us_p99, 75_000);
+    let after_quiet = paced_submit_snapshot(after_spike, 10, 5);
+    assert_eq!(
+        after_quiet.submit_call_us_max, 90_000,
+        "a later quiet sub-window must NOT lower the window max"
+    );
+    assert_eq!(
+        after_quiet.submit_call_us_p99, 75_000,
+        "a later quiet sub-window must NOT lower the window p99"
+    );
+    // A yet bigger spike raises it.
+    let after_bigger = paced_submit_snapshot(after_quiet, 954_000, 120_000);
+    assert_eq!(after_bigger.submit_call_us_max, 954_000);
+    assert_eq!(after_bigger.submit_call_us_p99, 120_000);
 }
 
 // ---- SubmitJob stamp deadline ----
