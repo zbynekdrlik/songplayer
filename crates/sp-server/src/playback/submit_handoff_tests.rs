@@ -270,6 +270,9 @@ fn from_paced_arc_clones_the_frame_without_copying_pixels() {
         paced.video.ptr_eq(&job.video),
         "the paced frame and the submit job share the SAME allocation"
     );
+    assert_eq!(job.width, 4, "width propagated");
+    assert_eq!(job.height, 2, "height propagated");
+    assert_eq!(job.stride, 4, "stride propagated");
     assert_eq!(job.stamp_boundary_100ns(), 3_333_300);
     assert_eq!(job.audio_tc_100ns, 3_333_311);
 }

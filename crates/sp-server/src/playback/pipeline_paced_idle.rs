@@ -86,7 +86,10 @@ pub(crate) fn run_idle_wait(
     }
 
     // Build the idle black frame ONCE as a shared handle; every boundary submits
-    // it by reference (a refcount bump, zero pixel copies) — #203.
+    // it by reference (a refcount bump, zero pixel copies) — #203. It is built
+    // from its OWN buffer (`black_nv12_bytes`), never `frame_pool::take`, so it
+    // draws nothing from the pool; its single end-of-loop drop recycles one
+    // black NV12 buffer into the pool, which is bounded and harmless (2b).
     let black = SharedFrame::new(black_nv12_bytes(IDLE_W, IDLE_H));
     // Fill boundaries until a command is queued; the caller then receives it.
     while cmd_rx.is_empty() {

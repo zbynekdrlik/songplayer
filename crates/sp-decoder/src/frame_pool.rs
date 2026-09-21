@@ -53,6 +53,14 @@ fn pool() -> MutexGuard<'static, FreeList> {
 /// with no page fault. Returns a recycled buffer from the exact `len` size class
 /// if one is free (removing it from the pool), else a fresh
 /// `Vec::with_capacity(len)`.
+///
+/// The size-class key round-trips because [`take`] keys by `len` while
+/// [`recycle`] keys by `Vec::capacity`, and on the Global allocator
+/// `Vec::with_capacity(len).capacity() == len` while filling EXACTLY `len` bytes
+/// (`extend_from_slice`) never grows the capacity — so a buffer this fn hands out
+/// comes back under the same key. If an exotic allocator ever over-allocated,
+/// the only effect is a recycle that misses its class (a perf no-op, never a
+/// correctness bug — the wall pixels are always the caller's own bytes).
 pub fn take(len: usize) -> Vec<u8> {
     // Pop under the lock, then drop the guard at the `let` semicolon so a fresh
     // allocation never holds it. `recycled` owns the popped buffer (or `None`).
