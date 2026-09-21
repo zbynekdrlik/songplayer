@@ -176,6 +176,7 @@ mod tests {
             1,
             "the last-owner drop recycled the allocation"
         );
-        assert_eq!(take(cap).as_ptr(), ptr, "recycled the SAME allocation");
+        let again = take(cap);
+        assert_eq!(again.as_ptr(), ptr, "recycled the SAME allocation");
     }
 }

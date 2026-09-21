@@ -187,6 +187,17 @@ fails). Prefer a deterministic wrong (grow / different-length) over "allocate
 fresh" — a freed-then-reallocated buffer can land at the SAME address and make a
 pointer-equality RED pass by luck.
 
+## `-D warnings` rejects `temporary.as_ptr()` in tests — bind the value first (#203 r2b)
+
+`assert_eq!(take(cap).as_ptr(), p, …)` is a compile ERROR under CI's
+`clippy --all-targets -D warnings`: rustc's `dangling_pointers_from_temporaries`
+lint fires because the `Vec` temporary dies at the end of the statement while
+the pointer is compared. The no-compile box cannot see it (it is a lint of the
+lib TEST target). Write `let again = take(cap); assert_eq!(again.as_ptr(), p, …)`
+— any pointer-identity assertion on a fresh value needs the value bound to a
+local for the statement's lifetime. (`sub.prev_frame.as_ref().unwrap().as_ptr()`
+on a LIVE field is fine — only temporaries trip it.)
+
 ## Diff-scoped mutation gate runs PER PACKAGE — a `test_util` accessor needs a test in ITS OWN crate (#203)
 
 `cargo mutants` tests each mutant with the mutated crate's OWN test target. A

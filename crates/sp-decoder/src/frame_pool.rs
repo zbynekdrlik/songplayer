@@ -240,7 +240,8 @@ mod tests {
         assert_eq!(pool_len(cap), 0, "still owned, not yet recycled");
         drop(pooled);
         assert_eq!(pool_len(cap), 1, "Drop recycled it");
-        assert_eq!(take(cap).as_ptr(), p, "the recycled allocation is reused");
+        let again = take(cap);
+        assert_eq!(again.as_ptr(), p, "the recycled allocation is reused");
     }
 
     #[test]
