@@ -373,11 +373,16 @@ mirrored in the Nastavenia select (`sp-ui/components/settings_form.rs::DUB_VOICE
 Slovak labels).
 
 ## Voice-keyed resume + persisted voice (repurposed column, NO schema change)
-- The child records `"voice"` in each `chunk_N.json`; the pure
-  `dub_worker.py::chunk_reusable(meta, voice)` reuses a cached chunk ONLY when its
-  recorded voice matches the requested one (a legacy chunk with no `voice`, or one
-  under another voice, is re-synthesized) — so a voice change re-does the dub in
-  one voice.
+- The child records `"voice"` + `chunk_start_ms`/`chunk_end_ms` in each
+  `chunk_N.json`; the pure `dub_worker.py::chunk_reusable(meta, voice, start_ms,
+  end_ms)` reuses a cached chunk ONLY when its recorded voice matches the requested
+  one AND its boundaries equal the current slot (a legacy chunk with no `voice` /
+  bounds, one under another voice, or one from an OLDER chunk plan is
+  re-synthesized) — so a voice change re-does the dub in one voice, and a changed
+  session ceiling (round E: 8 → 2 min) never lays old 8-min chunks under the new
+  plan (the round-E integration bug caught on video 344's work dir: `chunk_0..4`
+  from round C would have been reused for the 2-min slots 0–4 and the `amix` would
+  have doubled the speech from ~10 min on).
 - The resolved voice is persisted per video in the EXISTING nullable
   `dub_voice_ref_path` TEXT column REPURPOSED as the voice name (it was dead
   clone-lane plumbing; no migration, documented in the `db/mod.rs` V26 comment),
