@@ -119,4 +119,32 @@ mod tests {
             "make_mut on a shared handle forks the allocation"
         );
     }
+
+    #[test]
+    fn last_owner_drop_returns_the_allocation_to_the_pool() {
+        // #203 2b: `SharedFrame` wraps `Arc<PooledBuf>`, so when the LAST owner
+        // drops, the pixel buffer is RECYCLED into the pool (for the next
+        // decoded frame) instead of freed. A unique, large capacity isolates
+        // this from every other test's pool traffic — no clear_pool needed.
+        use sp_decoder::frame_pool::{pool_len, take};
+        const CAP: usize = 1_500_007;
+        let f = SharedFrame::new(vec![0u8; CAP]);
+        let cap = f.len(); // == CAP == the PooledBuf's capacity (keys the class)
+        let clone = f.clone();
+        assert_eq!(pool_len(cap), 0, "two owners alive — nothing recycled yet");
+        drop(clone);
+        assert_eq!(
+            pool_len(cap),
+            0,
+            "one owner still alive — still not recycled"
+        );
+        let ptr = f.as_ptr();
+        drop(f);
+        assert_eq!(
+            pool_len(cap),
+            1,
+            "the last-owner drop recycled the allocation"
+        );
+        assert_eq!(take(cap).as_ptr(), ptr, "recycled the SAME allocation");
+    }
 }
