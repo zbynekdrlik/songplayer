@@ -33,15 +33,20 @@ enum StemStepResult {
     WallAborted(String),
 }
 
-/// Songs longer than this are not separated; marked terminal (`unsupported`).
-/// Lowered from 30 min to 15 min (2026-09-15, live finding on win-resolume):
-/// a 10-minute "warm-up" file pinned the heavy child's memory near its Job
-/// Object ceiling (see `heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES`) and
-/// crawled for 20+ minutes before timing out — such long files are not songs
-/// and karaoke stems for them are pointless.
-// Literal, not `15 * 60 * 1000` — cfg-independent arithmetic on a const is
+/// Videos longer than this are not separated; marked terminal (`unsupported`).
+/// Raised from 15 min to 120 min (round G0, owner ruling 21.9.2026: every video,
+/// incl. long dub videos, gets podklad/vokály stems — "na vsetko sa dava
+/// rozdelenie"). The old 15-min rationale no longer holds: it assumed whole-file
+/// separation that pinned the heavy child's memory near its Job Object ceiling,
+/// plus a single GPU-sized timeout. Since #171 separation runs in resumable 30 s
+/// windows (memory is per-segment, not per-file) and since #162 the timeout is
+/// duration-scaled (×4 on a CPU plan) with heavy work at reduced priority during
+/// playback — so a 36-min video is ~5-12 min of low-priority, resumable work. The
+/// 120-min ceiling is a sanity bound (a multi-hour livestream stays excluded), not
+/// a "songs only" limit.
+// Literal, not `120 * 60 * 1000` — cfg-independent arithmetic on a const is
 // invisible to the mutation runner (same reasoning as heavy_slot.rs's ceiling).
-pub(crate) const STEM_MAX_DURATION_MS: i64 = 900_000; // 15 min
+pub(crate) const STEM_MAX_DURATION_MS: i64 = 7_200_000; // 120 min
 
 /// How often the worker looks for the next song to separate.
 const TICK: Duration = Duration::from_secs(10);
@@ -276,21 +281,21 @@ impl StemWorker {
             }
         };
 
-        // Terminal skip: a song too long for a sane stem pass (2026-09-15 —
-        // long "warm-up" files pin the heavy child's memory near its ceiling
-        // and are not songs anyway). Positive form via `stem_duration_too_long`
-        // so no `!` sits at this seam; the decision is the unit-tested
-        // `stem_duration_supported`. Done BEFORE the #167 startup floor: marking a
-        // row terminal-unsupported is a cheap DB write, not a heavy step, so it
-        // must not be deferred by the startup grace (it also skips the row for
-        // good, so deferring it just re-picks the same doomed row every tick).
+        // Terminal skip: a video past the 120-min sanity ceiling (round G0 — a
+        // multi-hour livestream would hold the heavy slot too long). Positive
+        // form via `stem_duration_too_long` so no `!` sits at this seam; the
+        // decision is the unit-tested `stem_duration_supported`. Done BEFORE the
+        // #167 startup floor: marking a row terminal-unsupported is a cheap DB
+        // write, not a heavy step, so it must not be deferred by the startup
+        // grace (it also skips the row for good, so deferring it just re-picks
+        // the same doomed row every tick).
         if stem_duration_too_long(job.duration_ms) {
             // Raw milliseconds on purpose: a `/ 1000` here is log-only
             // arithmetic that no test can pin (surviving mutants).
             info!(
                 video_id = job.video_id,
                 duration_ms = job.duration_ms,
-                "stem worker: skipping video_id={} ({} ms > {} ms) — stems only for songs up to 15 min",
+                "stem worker: skipping video_id={} ({} ms > {} ms) — stems only for videos up to 120 min",
                 job.video_id,
                 job.duration_ms.unwrap_or(0),
                 STEM_MAX_DURATION_MS
