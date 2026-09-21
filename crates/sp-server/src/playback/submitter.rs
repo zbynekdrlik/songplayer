@@ -244,7 +244,13 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     pub fn send_black_bgra(&mut self, width: u32, height: u32) {
         self.flush();
         let needed = (width * height * 4) as usize;
-        let data = vec![0u8; needed];
+        // Reuse the cached standby buffer when the size matches (black BGRA is all
+        // zeros, so a reused buffer is already zeroed); reallocate only on a size
+        // change.
+        let data = match self.black_bgra.take() {
+            Some(buf) if buf.len() == needed => buf,
+            _ => vec![0u8; needed],
+        };
         // Paced (#147): a real send is never SYNTHESIZE — stamp the standby
         // frame with the floored on-grid boundary at the send instant (§4.3), so
         // an idle→play transition does not drop the receiver out of `locked=`.
