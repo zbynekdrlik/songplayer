@@ -263,8 +263,8 @@ pub struct PacedSubmitStats {
 /// bounded `.max()` fold, never a running `while`.
 pub fn paced_submit_snapshot(prev: PacedSubmitStats, max: u64, p99: u64) -> PacedSubmitStats {
     PacedSubmitStats {
-        submit_call_us_max: prev.submit_call_us_max.min(max),
-        submit_call_us_p99: prev.submit_call_us_p99.min(p99),
+        submit_call_us_max: prev.submit_call_us_max.max(max),
+        submit_call_us_p99: prev.submit_call_us_p99.max(p99),
     }
 }
 
