@@ -14,14 +14,13 @@
 //! never future-dated — so there is no `floor(now)` at emission and no
 //! monotonicity guard.
 //!
-//! I/O is kept thin: the pacer OWNS its [`WallClock`] and reads it when it needs
-//! it (a scheduling read at entry, an emit read right before the send so
-//! lateness includes decode time). The caller supplies a way to pull the next
-//! decoded frame (`pull`) and a [`PacedSink`] that performs the actual
-//! audio-before-video submission. In production the sink is `FrameSubmitter` and
-//! `pull` is the MediaFoundation decoder; in tests they are a recording fake + a
-//! synthetic frame stream over a settable clock, so every
-//! emit/repeat/drop/catch-up/resync/re-latch decision is Linux-testable.
+//! I/O is kept thin: the pacer OWNS its [`WallClock`] (a scheduling read at
+//! entry, an emit read right before the send so lateness includes decode time);
+//! the caller supplies `pull` (the next decoded frame) and a [`PacedSink`]
+//! (audio-before-video submission) — `FrameSubmitter` + the MF decoder in
+//! production, a recording fake + a synthetic stream over a settable clock in
+//! tests, so every emit/repeat/drop/catch-up/resync/re-latch decision is
+//! Linux-testable.
 
 use sp_core::genlock::audio::{
     AUDIO_PLL_UPDATE_100NS, AudioPll, LevelAverager, rate_residual_ppm, samples_per_boundary,
@@ -36,11 +35,9 @@ use sp_ndi::AudioFrame;
 /// (`split_sync.rs`); the audio buffer + PLL run at this fixed rate (#148).
 const AUDIO_GRID_RATE_HZ: u32 = 48_000;
 
-/// The audio buffer's steady POST-take setpoint, in whole grid boundaries. 2
-/// boundaries (3200 samples @ 1600/boundary ≈ 66 ms) is the level the PLL servos
-/// toward — measured AFTER each take, so `buffer_ms` reports ~66 ms at steady
-/// state (#148 rework, item 3). Gives the fractional reader slack against decode
-/// jitter without adding audible latency.
+/// The audio buffer's steady POST-take setpoint, in whole grid boundaries: 2
+/// (3200 samples ≈ 66 ms) is what the PLL servos toward, measured AFTER each take
+/// (#148 rework, item 3) — slack against decode jitter without audible latency.
 const AUDIO_TARGET_BOUNDARIES: usize = 2;
 
 /// Windows for the same-phase level averager: 60 s of boundaries per window,
