@@ -198,3 +198,17 @@ needed an explicit Linux unit test calling it through `MockNdiBackend`. When you
 add a pub fn during a diff, ask "does a LINUX `#[test]` actually call this?" — if
 not, add one or the mutation gate reddens.
 
+## Inserting a `mod` before a `#[cfg(test)]` test module STEALS the gate (#192 r5)
+
+Attributes attach to the NEXT item. A `#[path] mod audio_emitter_tests;` at the
+bottom of a file is preceded by `#[cfg(test)]`; inserting a NEW production
+`#[path = "sibling.rs"] mod sibling;` right BEFORE it (e.g. to register a new
+pure module) lands the pre-existing `#[cfg(test)]` onto the NEW `mod` — gating a
+PRODUCTION module out of every non-test build — and leaves the tests module
+UNGATED (dragging `MockNdiBackend`/`#[test]` into the lib). `cargo test` passes
+(cfg(test) on) and `cargo fmt` cannot see it, so the no-compile box ships it;
+`cargo build` / the release Tauri compile / `clippy --workspace --all-targets`
+(lib target, cfg(test) OFF) then fail with `unresolved import`/`E0432`. Put the
+new `mod` AFTER the test module, or move the `#[cfg(test)]` explicitly back onto
+the test `mod` — and grep the insertion point for a `#[cfg(test)]` line directly
+above your `old_string` anchor before an Edit that adds a sibling `mod`.
