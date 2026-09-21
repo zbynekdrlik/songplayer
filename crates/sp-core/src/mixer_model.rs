@@ -498,6 +498,29 @@ mod tests {
     }
 
     #[test]
+    fn mixer_controls_treats_the_raw_done_stem_status_as_stems_capable() {
+        // The `DubRow.stem_status` COLUMN (what player.rs feeds this predicate)
+        // uses the raw stems-worker vocabulary — `done`/`failed`/`unsupported`/
+        // absent — NOT the derived `stems_state` wire strings. `done` is the
+        // stems-ready value (mirrors `dub_mixer.rs`'s `has_stems`), so a
+        // stems-ready dub (`stem_status == "done"`) must show BOTH panels.
+        assert_eq!(
+            mixer_controls(None, Some("done")),
+            MixerControls {
+                dub: false,
+                karaoke: true
+            }
+        );
+        assert_eq!(
+            mixer_controls(Some("ready"), Some("done")),
+            MixerControls {
+                dub: true,
+                karaoke: true
+            }
+        );
+    }
+
+    #[test]
     fn mixer_controls_neither_for_none_absent_or_unknown() {
         // No dub row, no stems.
         assert_eq!(
