@@ -89,6 +89,20 @@ completes, and the next dev push sits `pending` with ZERO jobs —
 `gh api -X POST repos/<owner>/<repo>/actions/runs/<old-run>/force-cancel`; the
 pending run starts within seconds.
 
+## `Build WASM (trunk)` red with "error downloading archive file: 504" = trunk's wasm-bindgen fetch, not our code (21.9.2026)
+
+trunk downloads `wasm-bindgen` from the OLD `rustwasm/wasm-bindgen` release
+URL, which now only 301-redirects to `wasm-bindgen/wasm-bindgen`; GitHub's
+release edge answered that redirect with 504 on two consecutive runs
+(35614160178 + its `--failed` re-run) while the same asset downloaded fine from
+dev1. A second failure of the same shape is NOT a transient to re-run again —
+`ci.yml` now pre-seeds the exact locked version (parsed from
+`sp-ui/Cargo.lock`, never hard-coded) onto `$HOME/.cargo/bin` (trunk uses a
+matching PATH binary before downloading) and into `~/.cache/trunk/wasm-bindgen-<v>/`
+with a 6-attempt retrying `curl` from the new org. If the step itself fails,
+check the new-org URL for that version from dev1 first (`curl -sIL …`), then
+whether the lock's `wasm-bindgen` version changed.
+
 ## push + pull_request de-dup (#124)
 
 Shared build/test jobs run **once, on the `push` event** (`if: github.event_name ==
