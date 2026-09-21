@@ -529,7 +529,7 @@ mod tests {
         let backend = Arc::new(MockNdiBackend::new());
         let sender = NdiSender::new_with_clocking(backend.clone(), "SL", false, false).unwrap();
 
-        let data = vec![7u8; 4 * 2 * 3 / 2];
+        let data = [7u8; 4 * 2 * 3 / 2];
         let slice: &[u8] = &data[..];
         // SAFETY: `data` outlives this call and a flush happens on drop.
         unsafe {

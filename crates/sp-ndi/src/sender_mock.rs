@@ -44,6 +44,10 @@ pub struct MockNdiBackend {
     /// slice (same pointer + length), i.e. no hidden copy / re-slice. `None`
     /// until the first async video send.
     last_async_video_slice: StdMutex<Option<(usize, usize)>>,
+    /// #203: `data.len()` of the LAST synchronous `send_video` call — lets a
+    /// Linux test pin the standby BGRA frame's exact byte length
+    /// (`width * height * 4`) so a wrong size arithmetic cannot survive.
+    last_sync_video_len: StdMutex<Option<usize>>,
 }
 
 impl MockNdiBackend {
@@ -74,6 +78,11 @@ impl MockNdiBackend {
     /// send forwards the caller's bytes without a copy or re-slice.
     pub fn last_async_video_slice(&self) -> Option<(usize, usize)> {
         *self.last_async_video_slice.lock().unwrap()
+    }
+
+    /// `data.len()` of the last synchronous `send_video`, `None` before the first.
+    pub fn last_sync_video_len(&self) -> Option<usize> {
+        *self.last_sync_video_len.lock().unwrap()
     }
 
     pub fn set_tally(&self, on_program: bool, on_preview: bool) {
@@ -130,7 +139,7 @@ impl NdiBackend for MockNdiBackend {
         stride: i32,
         frame_rate_n: i32,
         frame_rate_d: i32,
-        _data: &[u8],
+        data: &[u8],
         timecode_100ns: Option<i64>,
     ) {
         self.calls.lock().unwrap().push(format!(
@@ -138,6 +147,7 @@ impl NdiBackend for MockNdiBackend {
         ));
         let tc = timecode_100ns.unwrap_or(NDI_SEND_TIMECODE_SYNTHESIZE);
         self.video_timecodes.lock().unwrap().push(tc);
+        *self.last_sync_video_len.lock().unwrap() = Some(data.len());
     }
 
     unsafe fn send_video_async(

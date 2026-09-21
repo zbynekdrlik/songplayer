@@ -832,10 +832,13 @@ mod tests {
         // is synchronous, so the buffer is free the instant it returns) and
         // reallocated only when the size changes.
         let backend = Arc::new(MockNdiBackend::new());
-        let sender = NdiSender::new_with_clocking(backend, "BB", false, false).unwrap();
+        let sender = NdiSender::new_with_clocking(backend.clone(), "BB", false, false).unwrap();
         let mut sub = FrameSubmitter::new(sender, 30, 1);
 
         sub.send_black_bgra(320, 240);
+        // The standby frame is EXACTLY width * height * 4 BGRA bytes — a wrong
+        // size arithmetic (w + h, w * h + 4, w * h / 4) would send a torn frame.
+        assert_eq!(backend.last_sync_video_len(), Some(320 * 240 * 4));
         let ptr1 = sub
             .black_bgra_ptr()
             .expect("buffer retained after the first standby frame");
@@ -848,6 +851,7 @@ mod tests {
 
         // A size change reallocates (the buffer must match the new dimensions).
         sub.send_black_bgra(640, 480);
+        assert_eq!(backend.last_sync_video_len(), Some(640 * 480 * 4));
         let ptr3 = sub.black_bgra_ptr().unwrap();
         assert_ne!(ptr2, ptr3, "a size change reallocates the standby buffer");
     }
