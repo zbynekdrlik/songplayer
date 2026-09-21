@@ -161,6 +161,8 @@ pub struct PacingStats {
     /// re-anchor bounds it (the same signal `iter_p99_us` was, now measured where
     /// the decode actually happens).
     pub prep_p99_us: u64,
+    pub submit_call_us_max: u64,
+    pub submit_call_us_p99: u64,
 }
 
 /// Audio clock-discipline telemetry (#148), surfaced on `GET /api/v1/ndi/health`

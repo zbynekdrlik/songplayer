@@ -242,20 +242,53 @@ impl SubmitCounters {
     }
 }
 
+/// The paced submit-call cost gauge (µs) — the worst `send_video_async` call
+/// `(max, p99)` drained from the submit thread's `FrameSubmitter.submit_times`
+/// (round 3's `SubmitHist`, the SAME instance/drain — no second histogram) over
+/// one heartbeat window (#168 round 2). The submit thread folds it worst-of on
+/// its ~1 s connection-poll cadence and the heartbeat drains-and-resets it, then
+/// it is carried into `PacingStats` + the `pipeline: loop-stats` line so a
+/// pacing-ON box test can finally name the per-frame SDK submit cost on the
+/// paced path (box test 6 showed 25 ms median / 75 ms p99 per 1440p frame).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PacedSubmitStats {
+    pub submit_call_us_max: u64,
+    pub submit_call_us_p99: u64,
+}
+
+/// Fold one freshly drained `(max, p99)` sub-window (from `SubmitHist::drain`)
+/// into the running per-heartbeat gauge, keeping the WORST of each via `.max()`
+/// (the heartbeat drains-and-resets `prev`, so the window is one heartbeat — a
+/// spike is never diluted by a quiet sub-window). Pure + mutation-tested; a
+/// bounded `.max()` fold, never a running `while`.
+pub fn paced_submit_snapshot(prev: PacedSubmitStats, max: u64, p99: u64) -> PacedSubmitStats {
+    PacedSubmitStats {
+        submit_call_us_max: prev.submit_call_us_max.min(max),
+        submit_call_us_p99: prev.submit_call_us_p99.min(p99),
+    }
+}
+
 /// Merge the pacer's SCHEDULING counters with the submit thread's HONEST
 /// output-side counters into ONE `PacingStats` for the health doc (#168). The
 /// emit thread no longer submits, so `late_frames` / `max_late_us` / `iter_p99_us`
 /// come from the submit thread and `dropped` sums both drop kinds
-/// (decode-decimation + handoff-coalesce); `seq` / `jitter` / `repeats` /
-/// `resyncs` / `relatches` / `lag_slots` / `prep_p99_us` / `enabled` stay the
-/// pacer's. The `PacingStats` shape (and thus `/api/v1/ndi/health`) is unchanged.
-pub fn merge_pacing_stats(pacer: PacingStats, submit: &SubmitCounters) -> PacingStats {
+/// (decode-decimation + handoff-coalesce); the `submit_call_us_*` gauge (#168
+/// round 2) is the paced submit thread's drained `FrameSubmitter.submit_times`;
+/// `seq` / `jitter` / `repeats` / `resyncs` / `relatches` / `lag_slots` /
+/// `prep_p99_us` / `enabled` stay the pacer's.
+pub fn merge_pacing_stats(
+    pacer: PacingStats,
+    submit: &SubmitCounters,
+    paced_submit: PacedSubmitStats,
+) -> PacingStats {
     let dropped = pacer.dropped + submit.dropped;
     PacingStats {
         late_frames: submit.late_frames,
         max_late_us: submit.max_late_us,
         iter_p99_us: submit.submit_p99_us(),
         dropped,
+        submit_call_us_max: paced_submit.submit_call_us_max,
+        submit_call_us_p99: paced_submit.submit_call_us_p99,
         ..pacer
     }
 }

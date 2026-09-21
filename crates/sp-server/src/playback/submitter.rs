@@ -406,6 +406,15 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         }
     }
 
+    /// Drain the per-call `send_video_async` gauge — the SAME `SubmitHist`
+    /// `drain_window` reads on the SDK-clocked path, but WITHOUT touching the
+    /// frame-count window (the #168 submit thread owns this submitter and the
+    /// paced heartbeat counts frames via `SubmitCounters`, not `drain_window`).
+    /// Returns `(max, p99)` µs for the drained window and clears it.
+    pub fn drain_submit_call_us(&mut self) -> (u64, u64) {
+        self.submit_times.drain()
+    }
+
     pub fn frames_submitted_total(&self) -> u64 {
         self.frames_submitted_total
     }
