@@ -131,3 +131,24 @@ fn affinity_mask_hex_is_lowercase_no_prefix() {
     assert_eq!(affinity_mask_hex(0xFFF000), "fff000");
     assert_eq!(affinity_mask_hex(0xF0), "f0");
 }
+
+/// 0.63.0 integration review: an operator override with bits beyond the box's
+/// logical cores would fail the single extended-limit SetInformationJobObject
+/// call on Windows (and drop the memory ceiling with it) — the override is
+/// clamped to the cores that exist; an override with NO valid bit falls back
+/// to the default mask.
+#[test]
+fn affinity_override_is_clamped_to_the_existing_cores() {
+    // 8 cores: bits 0..=7 exist; 0xF0F0 keeps only 0xF0 (= the default upper half).
+    let c = containment_from_settings(None, Some("0xF0F0"), 8);
+    assert_eq!(c.affinity_mask, 0xF0);
+    // A partly-valid override keeps its valid bits only.
+    let c = containment_from_settings(None, Some("0x10C"), 8);
+    assert_eq!(c.affinity_mask, 0x0C);
+    // Entirely beyond the core count → the default (upper half of 8 = 0xF0).
+    let c = containment_from_settings(None, Some("0xF00"), 8);
+    assert_eq!(c.affinity_mask, 0xF0);
+    // 64+ cores: every bit is valid, the override is honoured verbatim.
+    let c = containment_from_settings(None, Some("0xFFFFFFFFFFFFFFFF"), 64);
+    assert_eq!(c.affinity_mask, u64::MAX);
+}
