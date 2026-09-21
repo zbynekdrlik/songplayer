@@ -103,6 +103,20 @@ with a 6-attempt retrying `curl` from the new org. If the step itself fails,
 check the new-org URL for that version from dev1 first (`curl -sIL …`), then
 whether the lock's `wasm-bindgen` version changed.
 
+## NEVER delete `songplayer.db-wal` / `-shm` in a deploy or restart step (#184 round A, 21.9.2026)
+
+`db/mod.rs::pool_tuning()` runs SQLite in **WAL mode** since #184 round A. In WAL
+mode every committed write lives in `songplayer.db-wal` until a checkpoint
+(auto at ~1000 pages / graceful close); SQLite replays it on the next open. The
+deploy/E2E restart step used to `Remove-Item songplayer.db-wal / -shm` after
+`taskkill` — a rollback-journal-era leftover that was harmless before and, under
+WAL, **silently reverted the database on every restart** (a dub that reached
+`ready` at 16:06Z was back in `synth` after the 16:11Z restart; the E2E "a READY
+dub is listed" then failed twice). A `taskkill /F` needs NO cleanup: the WAL is
+on disk and recovered; the `-shm` is recreated. If a step ever needs a compact
+DB, call `PRAGMA wal_checkpoint(TRUNCATE)` through the running app — never
+delete the files.
+
 ## push + pull_request de-dup (#124)
 
 Shared build/test jobs run **once, on the `push` event** (`if: github.event_name ==

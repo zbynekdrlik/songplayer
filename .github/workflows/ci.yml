@@ -844,8 +844,12 @@ jobs:
           }
 
           $DataDir = "C:\ProgramData\SongPlayer"
-          Remove-Item "$DataDir\songplayer.db-wal" -Force -ErrorAction SilentlyContinue
-          Remove-Item "$DataDir\songplayer.db-shm" -Force -ErrorAction SilentlyContinue
+          # NEVER delete songplayer.db-wal / -shm here (#184 round A, 2026-09-21):
+          # the pool runs SQLite in WAL mode now, so the -wal file HOLDS every
+          # committed write since the last checkpoint — deleting it after a kill
+          # silently reverted the DB (a finished dub went back to `synth`, a
+          # setting change vanished). SQLite recovers the WAL itself on the next
+          # open; the -shm is recreated. A rollback-journal-era leftover.
 
           $timeout = 30
           $elapsed = 0
