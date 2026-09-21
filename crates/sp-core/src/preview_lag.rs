@@ -9,7 +9,7 @@
 /// Show the "náhľad mešká N s" readout only once the picture is at least this
 /// far behind the wall. Below it the preview is effectively live (a ~2 s
 /// live-edge chase is normal) and a readout would be noise.
-pub const PREVIEW_LAG_MIN_VISIBLE_S: f64 = f64::INFINITY;
+pub const PREVIEW_LAG_MIN_VISIBLE_S: f64 = 3.0;
 
 /// The lag readout to render for a measured `lag_s`, or `None` when the preview
 /// is live enough to hide it. Once the lag reaches
