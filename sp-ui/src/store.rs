@@ -426,9 +426,9 @@ impl DashboardStore {
             ServerMsg::Pong
             | ServerMsg::QueueUpdate { .. }
             | ServerMsg::ResolumeStatus { .. }
-            | ServerMsg::KaraokeStateChanged { .. } => {
-                // Informational; the karaoke control component owns its own
-                // mode/gain state via GET/POST, so no store update needed.
+            | ServerMsg::MixChanged { .. } => {
+                // Informational; the LiveMixer owns its own fader state via
+                // GET/PATCH /api/v1/mix, so no store update needed.
             }
         }
     }

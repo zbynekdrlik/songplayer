@@ -1,18 +1,18 @@
-//! Order tests for the live-first dub-mix apply seam (#184 round A).
+//! Order tests for the live-first mix apply seam (#184 round A/G).
 
-use super::apply_dub_mix;
+use super::apply_mix;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// The push (live engine command) MUST be awaited BEFORE the persist (DB write)
-/// — the whole reason the seam exists (#184: the mix must change in ~1.6 s, not
-/// wait behind a contended pool acquire).
+/// The push (live engine command) MUST be awaited BEFORE the persist (settings
+/// write) — the whole reason the seam exists (#184: the mix must change in ~1.6 s,
+/// not wait behind a contended pool acquire).
 #[tokio::test]
 async fn push_is_awaited_before_persist() {
     let order: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
     let op = order.clone();
     let os = order.clone();
-    let res: Result<(), ()> = apply_dub_mix(
+    let res: Result<(), ()> = apply_mix(
         async move {
             op.borrow_mut().push("push");
         },
@@ -33,7 +33,7 @@ async fn push_happens_even_when_persist_errors() {
     let order: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
     let op = order.clone();
     let os = order.clone();
-    let res: Result<(), &'static str> = apply_dub_mix(
+    let res: Result<(), &'static str> = apply_mix(
         async move {
             op.borrow_mut().push("push");
         },

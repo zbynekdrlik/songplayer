@@ -95,7 +95,6 @@ pub struct DubRow {
     pub title: String,
     pub dub_status: String,
     pub dub_error: Option<String>,
-    pub dub_mix_ratio: f64,
     pub dub_file_path: Option<String>,
     pub stem_status: Option<String>,
     pub lyrics_present: bool,
@@ -121,7 +120,6 @@ fn row_to_dub_row(r: &sqlx::sqlite::SqliteRow) -> DubRow {
         title: song.filter(|s| !s.is_empty()).or(title).unwrap_or_default(),
         dub_status,
         dub_error: r.get("dub_error"),
-        dub_mix_ratio: r.get("dub_mix_ratio"),
         dub_file_path: r.get("dub_file_path"),
         stem_status,
         lyrics_present,
@@ -131,7 +129,7 @@ fn row_to_dub_row(r: &sqlx::sqlite::SqliteRow) -> DubRow {
 }
 
 const DUB_ROW_SELECT: &str = "SELECT id, playlist_id, title, song, dub_status, \
-     dub_error, dub_mix_ratio, dub_file_path, stem_status, has_lyrics, \
+     dub_error, dub_file_path, stem_status, has_lyrics, \
      dub_voice_ref_path FROM videos";
 
 /// Set (or clear) the dub request on a video. Requesting flips `dub_requested`
@@ -180,36 +178,6 @@ pub async fn list_dub_videos(pool: &SqlitePool) -> Result<Vec<DubRow>, sqlx::Err
     Ok(rows.iter().map(row_to_dub_row).collect())
 }
 
-/// Persist the mixer blend ratio for a video, clamped to `0.0..=1.0`. Returns
-/// `(clamped_value, rows_affected)` so the handler can 404 when no such id
-/// (consistent with `set_dub_requested`/`patch_dub`). A `NaN` clamps to `1.0`
-/// (dub-only, the safe default).
-/// Clamp a dub-mix ratio to the mixer's `0.0..=1.0` range, mapping NaN to the
-/// dub-only default `1.0`. Pure so the live push (`api/dabing.rs::patch_dub_mix`)
-/// and the DB persist ([`set_dub_mix_ratio`]) apply the SAME clamped value
-/// (#184 round A — the push must carry exactly what gets stored).
-pub fn clamp_dub_ratio(ratio: f64) -> f64 {
-    if ratio.is_nan() {
-        1.0
-    } else {
-        ratio.clamp(0.0, 1.0)
-    }
-}
-
-pub async fn set_dub_mix_ratio(
-    pool: &SqlitePool,
-    video_id: i64,
-    ratio: f64,
-) -> Result<(f64, u64), sqlx::Error> {
-    let clamped = clamp_dub_ratio(ratio);
-    let res = sqlx::query("UPDATE videos SET dub_mix_ratio = ? WHERE id = ?")
-        .bind(clamped)
-        .bind(video_id)
-        .execute(pool)
-        .await?;
-    Ok((clamped, res.rows_affected()))
-}
-
 /// Persist the resolved dub voice for a video (#184 round C). The voice name is
 /// stored in the EXISTING nullable `dub_voice_ref_path` TEXT column — REPURPOSED
 /// as the voice name (it was dead plumbing from the abandoned clone lane, so no
@@ -240,7 +208,6 @@ pub struct DubJob {
     pub audio_file_path: String,
     pub duration_ms: Option<i64>,
     pub dub_status: String,
-    pub dub_mix_ratio: f64,
     pub vocals_file_path: Option<String>,
     pub instrumental_file_path: Option<String>,
     /// The stems worker's terminal marker: `'unsupported'` means the video is over
@@ -344,7 +311,7 @@ pub enum SynthDecision {
 pub async fn get_next_dub_job(pool: &SqlitePool) -> Result<Option<DubJob>, sqlx::Error> {
     let row = sqlx::query(
         "SELECT id, youtube_id, audio_file_path, duration_ms, dub_status, \
-                dub_mix_ratio, vocals_file_path, instrumental_file_path, \
+                vocals_file_path, instrumental_file_path, \
                 stem_status, dub_attempts \
          FROM videos \
          WHERE dub_requested = 1 \
@@ -365,7 +332,6 @@ pub async fn get_next_dub_job(pool: &SqlitePool) -> Result<Option<DubJob>, sqlx:
         audio_file_path: r.get("audio_file_path"),
         duration_ms: r.get("duration_ms"),
         dub_status: r.get("dub_status"),
-        dub_mix_ratio: r.get("dub_mix_ratio"),
         vocals_file_path: r.get("vocals_file_path"),
         instrumental_file_path: r.get("instrumental_file_path"),
         stem_status: r.get("stem_status"),
@@ -416,24 +382,6 @@ pub async fn mark_dub_ready(
     .execute(pool)
     .await?;
     Ok(())
-}
-
-/// The stored `dub_mix_ratio` for a video ONLY when it has a finished dub track
-/// (`dub_file_path` set) — i.e. a video that will actually play the 4-stream dub
-/// mix. `None` for a non-dub video (so play-start seeding is a no-op for it) or a
-/// missing id. Lets the engine restore the per-video blend to the process-global
-/// dub control at play-start (the design's "global, set per play").
-pub async fn dub_ratio_if_ready(
-    pool: &SqlitePool,
-    video_id: i64,
-) -> Result<Option<f64>, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT dub_mix_ratio FROM videos \
-         WHERE id = ? AND dub_file_path IS NOT NULL",
-    )
-    .bind(video_id)
-    .fetch_optional(pool)
-    .await
 }
 
 /// Record a transient dub failure: mark `failed`, store the error tail, increment

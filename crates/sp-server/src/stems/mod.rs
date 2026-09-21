@@ -21,7 +21,7 @@ pub mod reader;
 pub mod separator;
 pub mod worker;
 
-pub use control::KaraokeControl;
+pub use control::MixControl;
 pub use worker::StemWorker;
 
 /// Derive the two stem sidecar paths from a mix audio path. Deterministic and
