@@ -318,3 +318,33 @@ paths:
   `&ring`) so it stays zero-copy. The FIRST post-audio silence slot is now the tail
   (not zeros) — a test asserting that slot is all-zeros must expect the tail + read
   the SECOND slot for the zero block.
+
+## Allocation-free playing steady state — the recycling frame pool (#203 2b)
+
+The per-frame `VirtualAlloc`/`VirtualFree` churn that stalls the wall under a
+resident heavy child is removed by recycling NV12 buffers, NOT by a custom
+allocator (3–8 MB blocks take the large-object path in every mainstream malloc,
+so the OS fault + TLB-shootdown cost is unchanged):
+
+- `sp_decoder::frame_pool` is the SINGLE recycler: a process-global free-list
+  keyed by exact `Vec::capacity()` (one frame resolution = one size class),
+  `POOL_CAP_PER_CLASS = 6`, `take(len)`/`recycle(buf)`, and `PooledBuf(Vec<u8>)`
+  whose `Drop` recycles. It lives in sp-decoder (no sp-core dep) so BOTH the MF
+  reader and sp-server use it. The `mf_reader` fills `frame_pool::take(len)` via
+  `extend_from_slice` into retained capacity (no fault after the first frame).
+- `sp-server`'s `SharedFrame = Arc<PooledBuf>` is the SINGLE sharing handle. One
+  allocation flows the whole playing path by Arc bump: `to_paced_frame` wraps
+  once → `PacedFrame.video` → the pacer's `last_frame` starvation repeat →
+  `SubmitJob::from_paced` (the handoff, `frame.video.clone()`) → the submitter's
+  `prev_frame` holdover. No pixel copy anywhere; the burn overlay's
+  `SharedFrame::make_mut` (`Arc::make_mut` → a fresh `PooledBuf` copy) is the
+  only cloner and burn is default OFF.
+- **SDK-holdover safety invariant (unchanged from 2a):** a recycled buffer may
+  be reused ONLY after every `Arc` is gone. Recycling fires exactly in
+  `PooledBuf::Drop`, which the `Arc` runs only on the LAST holder drop — the
+  submitter installs the new `prev_frame` (dropping the old Arc) AFTER the async
+  call returns, so the buffer the SDK still points at is never recycled early.
+  Keep `FrameSubmitter.sender` declared BEFORE `prev_frame` (field drop order).
+- The idle black and the cached BGRA black stay OUT of the pool as takers (built
+  from their own buffers, never `take`); the idle black's single end-of-loop
+  drop recycling one bounded black buffer is harmless.

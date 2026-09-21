@@ -224,3 +224,37 @@ UNGATED (dragging `MockNdiBackend`/`#[test]` into the lib). `cargo test` passes
 new `mod` AFTER the test module, or move the `#[cfg(test)]` explicitly back onto
 the test `mod` — and grep the insertion point for a `#[cfg(test)]` line directly
 above your `old_string` anchor before an Edit that adds a sibling `mod`.
+
+## A cross-crate test-only helper must be `#[doc(hidden)] pub`, NOT `#[cfg(test)]` (#203 2b)
+
+`#[cfg(test)]` is per-crate: an item gated `#[cfg(test)]` in crate A is NOT
+compiled when crate B's test target builds (each test binary is its own
+process/compilation). So a test-only peek/reset helper that BOTH the owning
+crate's tests AND a downstream crate's tests must call cannot be `#[cfg(test)]`.
+`sp_decoder::frame_pool::{pool_len, clear_pool}` are read by sp-decoder's own
+tests AND by sp-server's `frame_buf` recycle test, so they are `#[doc(hidden)]
+pub` (a `pub` fn in a lib crate is never `dead_code`, even with no non-test
+caller, so it passes `clippy -D warnings`). A `#[cfg(test)]` version would fail
+sp-server's compile with `unresolved import`.
+
+## Testing a process-global static pool shared across a whole test binary (#203 2b)
+
+`frame_pool`'s free-list is a `static`, so within ONE test binary EVERY test
+shares it and they run in parallel threads. Two safe patterns:
+
+- **Owning crate (sp-decoder):** serialise the global-state tests on a private
+  `static SERIAL: Mutex<()>` and `clear_pool()` at the start of each — the same
+  pattern the repo's other global-state tests use. `clear_pool` is safe there
+  because the serial lock makes the tests mutually exclusive.
+- **Downstream crate (sp-server), or any test that must NOT nuke siblings:** do
+  NOT call `clear_pool` (it would empty a concurrent test's buffers). Instead
+  pick a UNIQUE, LARGE capacity no other test allocates (e.g. `CAP =
+  1_500_007`) and assert `pool_len(CAP)` directly — the class is yours alone, so
+  concurrency is a non-issue and no serialisation is needed.
+
+A recycling-pool identity test is only deterministic if the recycled buffer
+stays ALIVE in the pool between `recycle` and `take` (a `BTreeMap`/`Vec`
+free-list keeps it), so `take(cap).as_ptr() == recycled_ptr` can never pass by
+address-reuse luck. A RED that FREES instead of recycling must be caught by a
+`pool_len` assertion (freeing never touches the pool, regardless of the
+allocator), NOT by a pointer-equality assertion (a freed address can be reused).
