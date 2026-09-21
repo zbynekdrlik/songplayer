@@ -393,6 +393,30 @@ fn relay_drops_a_lagging_viewer_rather_than_blocking() {
 }
 
 #[test]
+fn produced_ms_advances_500_per_fragment_and_resets_on_init() {
+    // #184 round F: produced_ms = (fragments since the last Init) × 500 ms — the
+    // media time the child has produced, for the lag beacon. Exact values kill
+    // the ×N multiplier mutant AND the reset-on-Init mutant.
+    let relay = FragmentRelay::new(4);
+    assert_eq!(
+        relay.produced_ms(),
+        0,
+        "nothing produced before any fragment"
+    );
+    relay.ingest(RelayChunk::Init(vec![1]));
+    assert_eq!(relay.produced_ms(), 0, "Init leaves the counter at 0");
+    relay.ingest(RelayChunk::Fragment(vec![9]));
+    assert_eq!(relay.produced_ms(), 500, "one fragment = 500 ms of media");
+    relay.ingest(RelayChunk::Fragment(vec![9]));
+    assert_eq!(relay.produced_ms(), 1000, "two fragments = 1000 ms");
+    // A new child's Init resets the media timeline (and the counter) to 0.
+    relay.ingest(RelayChunk::Init(vec![2]));
+    assert_eq!(relay.produced_ms(), 0, "a new Init resets produced_ms");
+    relay.ingest(RelayChunk::Fragment(vec![9]));
+    assert_eq!(relay.produced_ms(), 500, "and counting resumes from 0");
+}
+
+#[test]
 fn relay_at_the_production_backlog_lags_a_viewer_five_behind() {
     // #184 round F: at the shipped backlog of 4 fragments (RELAY_CAPACITY, = 2 s),
     // a viewer that falls 5 fragments behind without draining is dropped
