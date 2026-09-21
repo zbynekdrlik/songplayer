@@ -44,6 +44,8 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use sp_ndi::{AudioFrame, AudioSink, NdiBackend};
 
+use audio_edge_fade::EdgeFade;
+
 /// Nominal NDI audio rate — the FLAC pipeline is always 48 kHz.
 pub const EMIT_RATE_HZ: u32 = 48_000;
 /// Samples per channel in one grid block: 1600 @ 48 kHz = 33.333 ms = one
@@ -205,6 +207,11 @@ pub struct AudioEmitter {
     /// Paused pipeline: emit silence WITHOUT popping, so the lookahead cushion
     /// (and the A/V alignment it carries) survives a pause.
     held: bool,
+    /// Per-block edge fades applied in [`samples_for`](Self::samples_for): a
+    /// fade-out tail at the audio→silence edge and a fade-in at the silence→audio
+    /// edge (#192 round 5). Shapes only the sent samples — the ring, grid, silence
+    /// accounting and `Emitted.block` variant are untouched.
+    edge_fade: EdgeFade,
 }
 
 /// How many recent jitter samples the p99 gauge keeps (~30 s at 30 fps).
@@ -230,6 +237,7 @@ impl AudioEmitter {
             jitter_us: VecDeque::new(),
             channels_hint: 2,
             held: false,
+            edge_fade: EdgeFade::new(samples_per_block),
         }
     }
 
@@ -349,16 +357,19 @@ impl AudioEmitter {
         }
     }
 
-    /// Build the interleaved samples for [`emit_one_block`] to hand NDI: the
-    /// audio block as-is, or a full block of silence at the current channel
-    /// count. Kept beside `tick` so the silence layout is unit-testable.
-    pub fn samples_for(&self, block: &EmittedBlock) -> (Vec<f32>, u32) {
+    /// Build the interleaved samples for [`emit_one_block`] to hand NDI, applying
+    /// the per-block [`EdgeFade`]: an audio block carries a fade-in ramp for the
+    /// first blocks after a silence run (else full gain), and the FIRST silence
+    /// slot right after audio is the fade-out tail (else plain zero silence). The
+    /// `Emitted.block` variant, the grid timecode, and the `silence_blocks`
+    /// accounting are all UNCHANGED — only the sent samples are reshaped, so the
+    /// transition log and telemetry are untouched (#192 round 5). Takes `&mut self`
+    /// because the fade is a per-slot state machine.
+    pub fn samples_for(&mut self, block: &EmittedBlock) -> (Vec<f32>, u32) {
+        let ch = self.channels_hint;
         match block {
-            EmittedBlock::Audio(s) => (s.clone(), self.channels_hint as u32),
-            EmittedBlock::Silence => (
-                vec![0.0f32; self.samples_per_block * self.channels_hint],
-                self.channels_hint as u32,
-            ),
+            EmittedBlock::Audio(s) => (self.edge_fade.shape_audio(s, ch), ch as u32),
+            EmittedBlock::Silence => (self.edge_fade.shape_silence(ch), ch as u32),
         }
     }
 
@@ -729,6 +740,10 @@ impl SpinMargin {
         (worst + SPIN_HEADROOM_100NS).clamp(SPIN_MARGIN_MIN_100NS, SPIN_MARGIN_MAX_100NS)
     }
 }
+
+/// Pure per-block edge fades at the silence↔audio boundaries (#192 round 5).
+#[path = "audio_edge_fade.rs"]
+mod audio_edge_fade;
 
 #[cfg(test)]
 #[path = "audio_emitter_tests.rs"]
