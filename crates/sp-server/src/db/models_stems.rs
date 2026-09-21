@@ -223,7 +223,7 @@ pub async fn requeue_unsupported_within_cap(
          SET stem_status = NULL, stem_attempts = 0, stem_next_attempt_at = NULL \
          WHERE stem_status = 'unsupported' \
            AND duration_ms IS NOT NULL \
-           AND duration_ms > ?",
+           AND duration_ms <= ?",
     )
     .bind(cap_ms)
     .execute(pool)
