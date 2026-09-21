@@ -65,7 +65,7 @@ const MAX_BOX_BYTES: u64 = 16 * 1024 * 1024;
 /// two 0.5-s fragments per second under `-r 25 -g 25 -frag_duration 500000` (the
 /// invariant documented in `preview_encoder::build_ffmpeg_args`), so the media
 /// time produced since a child's `Init` = `(fragments since Init) × FRAGMENT_MS`.
-const FRAGMENT_MS: u64 = 250;
+const FRAGMENT_MS: u64 = 500;
 
 /// Whether `len` bytes exceed the 16 MiB box/accumulator cap (exactly the cap is
 /// accepted). One helper so the box-size and accumulator checks share the bound.
