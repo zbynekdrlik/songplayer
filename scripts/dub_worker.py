@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
 import time
 import wave
+from statistics import median
 
 INPUT_SR = 16000
 OUTPUT_SR = 24000
@@ -38,6 +40,11 @@ TARGET_LANG = "sk"
 DRAIN_S = 27.0  # keep receiving this long after audio_stream_end (silence trail)
 HEARTBEAT_EVERY_S = 5.0
 DEFAULT_VOICE = "Charon"  # #184 round C: a male, matter-of-fact catalogue voice
+
+# #184 round E: per-chunk voice-band guard tuning.
+VOICE_WINDOW_S = 5.0  # the f0-median window for the drift scan
+VOICE_ST_ABOVE = 6.0  # semitones above the chunk median that count as "high"
+VOICE_DRIFT_FRAC = 0.20  # a chunk is drifted when drifted/voiced exceeds this
 
 
 # ── pure helpers (unit-tested; no I/O, no heavy imports) ─────────────────────────
@@ -142,6 +149,55 @@ def chunk_reusable(meta: dict, voice: str) -> bool:
     return meta.get("voice") == voice
 
 
+def _semitones(hz: float, ref: float) -> float:
+    """Signed semitone interval of `hz` above `ref` (both > 0)."""
+    return 12.0 * math.log2(hz / ref)
+
+
+def chunk_voice_drift(
+    out_medians: list, in_medians: list, st_above: float = VOICE_ST_ABOVE
+) -> tuple[int, int]:
+    """(#184 round E) Count the DRIFTED and VOICED 5-s windows of one synthesized
+    chunk. A window is DRIFTED when its OUTPUT median is > `st_above` semitones
+    above the OUTPUT chunk median AND the aligned INPUT window is NOT > `st_above`
+    above the INPUT chunk median — so a genuine high stretch in the SOURCE (the
+    dub correctly following a raised voice) is NOT counted, only a voice the model
+    invented. Input windows are aligned to output windows by fraction of duration
+    (the chunk's atempo may have changed the count). `voiced` = the output windows
+    with a voiced pitch. Pure — unit-tested."""
+    out_voiced = [m for m in out_medians if m > 0]
+    if not out_voiced:
+        return (0, 0)
+    out_med = median(out_voiced)
+    in_voiced = [m for m in in_medians if m > 0]
+    in_med = median(in_voiced) if in_voiced else 0.0
+    n_out = len(out_medians)
+    n_in = len(in_medians)
+    drifted = 0
+    voiced = 0
+    for i, out_m in enumerate(out_medians):
+        if out_m <= 0:
+            continue
+        voiced += 1
+        if _semitones(out_m, out_med) <= st_above:
+            continue
+        # The output window is high — a drift UNLESS the aligned source is high too.
+        in_high = False
+        if n_in > 0 and in_med > 0:
+            j = min(int(i * n_in / n_out), n_in - 1)
+            in_m = in_medians[j]
+            in_high = in_m > 0 and _semitones(in_m, in_med) > st_above
+        if not in_high:
+            drifted += 1
+    return (drifted, voiced)
+
+
+def _chunk_is_drifted(drifted: int, voiced: int) -> bool:
+    """A chunk is drifted when more than `VOICE_DRIFT_FRAC` of its voiced windows
+    drifted (a handful of estimator-noise windows do not trip it). Pure."""
+    return voiced > 0 and drifted / voiced > VOICE_DRIFT_FRAC
+
+
 def build_transcripts(results: list[dict]) -> dict:
     """Assemble the EN/SK transcripts JSON (the D3 #182 subtitle source) from the
     per-chunk results. Pure — unit-tested. Each chunk carries its video-timeline
@@ -207,6 +263,65 @@ def _heartbeat(work_dir: str) -> None:
             f.write(str(time.time()))
     except OSError:
         pass
+
+
+def _voice_medians_from_wav(wav_path: str) -> list:
+    """5-s-window f0 medians of a 16-bit mono WAV (the trimmed dub output), read
+    via `wave` + numpy (no soundfile) and estimated with the dependency-free
+    autocorrelation path of `dub_voice_check`. `[]` when it can't be scanned."""
+    import numpy as np
+
+    import dub_voice_check as dvc
+
+    with wave.open(wav_path, "rb") as w:
+        sr = w.getframerate()
+        if w.getsampwidth() != 2 or w.getnchannels() != 1 or sr <= 0:
+            return []
+        raw = w.readframes(w.getnframes())
+    if not raw:
+        return []
+    x = np.frombuffer(raw, dtype="<i2").astype("float32") / 32768.0
+    return dvc.window_medians(x, sr, VOICE_WINDOW_S, use_librosa=False)
+
+
+def _voice_medians_from_pcm(pcm: bytes, sr: int) -> list:
+    """5-s-window f0 medians of 16 kHz s16le mono INPUT PCM held in memory."""
+    import numpy as np
+
+    import dub_voice_check as dvc
+
+    if not pcm or sr <= 0:
+        return []
+    x = np.frombuffer(pcm, dtype="<i2").astype("float32") / 32768.0
+    return dvc.window_medians(x, sr, VOICE_WINDOW_S, use_librosa=False)
+
+
+def _render_and_trim(
+    pcm: bytes, pace: float, work_dir: str, voice: str, raw_wav: str, out_wav: str
+) -> tuple[str, str, list]:
+    """Translate one chunk's `pcm` to a trailing-silence-trimmed WAV at `out_wav`;
+    return `(transcript_en, transcript_sk, sk_timed)`. Writes then removes the raw
+    24 kHz WAV. Shared by the first synthesis and the round-E re-synthesis."""
+    out_pcm, en, sk, sk_timed = _translate_pcm(pcm, pace, work_dir, voice)
+    _write_wav_from_pcm(out_pcm, OUTPUT_SR, raw_wav)
+    _run(
+        [
+            _ffmpeg(),
+            "-hide_banner",
+            "-nostdin",
+            "-y",
+            "-i",
+            raw_wav,
+            "-af",
+            trim_silence_af(),
+            out_wav,
+        ]
+    )
+    try:
+        os.remove(raw_wav)
+    except OSError:
+        pass
+    return en, sk, sk_timed
 
 
 # ── the Live translation of one chunk ───────────────────────────────────────────
@@ -349,22 +464,41 @@ def _process_chunk(
         pcm = f.read()
 
     # 2. Translate (audio->audio) and trim the trailing silence.
-    out_pcm, en, sk, sk_timed = _translate_pcm(pcm, pace, work_dir, voice)
     raw_wav = os.path.join(work_dir, f"chunk_{idx}.raw.wav")
-    _write_wav_from_pcm(out_pcm, OUTPUT_SR, raw_wav)
-    _run(
-        [
-            _ffmpeg(),
-            "-hide_banner",
-            "-nostdin",
-            "-y",
-            "-i",
-            raw_wav,
-            "-af",
-            trim_silence_af(),
-            wav_path,
-        ]
-    )
+    en, sk, sk_timed = _render_and_trim(pcm, pace, work_dir, voice, raw_wav, wav_path)
+
+    # #184 round E: scan the synthesized chunk for a drifted voice band. A chunk
+    # whose output invents a high voice the source never had is re-synthesized
+    # ONCE (new session, same pin); the candidate with fewer drifted windows wins.
+    in_medians = _voice_medians_from_pcm(pcm, INPUT_SR)
+    drifted, voiced = chunk_voice_drift(_voice_medians_from_wav(wav_path), in_medians)
+    if _chunk_is_drifted(drifted, voiced):
+        _log(
+            f"chunk {idx}: voice drift {drifted}/{voiced} windows -> re-synthesizing once"
+        )
+        cand_raw = os.path.join(work_dir, f"chunk_{idx}.cand.raw.wav")
+        cand_wav = os.path.join(work_dir, f"chunk_{idx}.cand.wav")
+        en2, sk2, sk_timed2 = _render_and_trim(
+            pcm, pace, work_dir, voice, cand_raw, cand_wav
+        )
+        drifted2, voiced2 = chunk_voice_drift(
+            _voice_medians_from_wav(cand_wav), in_medians
+        )
+        if drifted2 < drifted:
+            os.replace(cand_wav, wav_path)
+            en, sk, sk_timed = en2, sk2, sk_timed2
+            drifted, voiced = drifted2, voiced2
+            _log(f"chunk {idx}: kept re-synth candidate ({drifted2}/{voiced2} drifted)")
+        else:
+            try:
+                os.remove(cand_wav)
+            except OSError:
+                pass
+            _log(
+                f"chunk {idx}: kept original ({drifted}/{voiced} drifted; "
+                f"candidate {drifted2}/{voiced2})"
+            )
+    voice_band_ok = not _chunk_is_drifted(drifted, voiced)
 
     # 3. Measured output length + placement.
     out_len_ms = _wav_duration_ms(wav_path)
@@ -381,19 +515,25 @@ def _process_chunk(
         # #184 round C: record the voice so a later re-run reuses this chunk only
         # when the requested voice is unchanged (see `chunk_reusable`).
         "voice": voice,
+        # #184 round E: the per-chunk voice-band verdict + counts.
+        "voice_band_ok": voice_band_ok,
+        "voice_drifted_windows": drifted,
+        "voice_windows": voiced,
         "transcript_en": en,
         "transcript_sk": sk,
         "sk_timed": sk_timed,
     }
     with open(result_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False)
-    # Clean the big intermediates (keep chunk_N.wav + .json for resume/mix).
-    for p in (pcm_path, raw_wav):
-        try:
-            os.remove(p)
-        except OSError:
-            pass
-    _log(f"chunk {idx}: {chunk_len} ms in -> {out_len_ms} ms out, tempo {tempo:.3f}")
+    # Clean the big input PCM (keep chunk_N.wav + .json for resume/mix).
+    try:
+        os.remove(pcm_path)
+    except OSError:
+        pass
+    _log(
+        f"chunk {idx}: {chunk_len} ms in -> {out_len_ms} ms out, tempo {tempo:.3f}, "
+        f"voice_band_ok={voice_band_ok} ({drifted}/{voiced})"
+    )
     return result
 
 
