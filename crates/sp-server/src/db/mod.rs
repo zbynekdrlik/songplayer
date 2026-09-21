@@ -6,9 +6,10 @@ pub mod models_ndi; // #196 per-output last-known NDI receiver count (own module
 pub mod models_stems; // #14 karaoke stem-separation queries (own module, 1000-line cap)
 pub mod models_stems_priority; // #195 tiered in-use-first stems selector (own module, 1000-line cap)
 
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
+use std::time::Duration;
 
 /// All migrations as (version, SQL) tuples.
 /// Each SQL string may contain multiple statements separated by semicolons.
@@ -387,13 +388,49 @@ ALTER TABLE videos ADD COLUMN dub_requested_at TEXT;
 ALTER TABLE videos ADD COLUMN stem_manual_priority INTEGER NOT NULL DEFAULT 0;
 ";
 
-/// Create a connection pool backed by a file.
+/// Connection-pool tuning for the FILE-backed pool (#184 round A).
+///
+/// WAL + NORMAL synchronous remove reader/writer blocking for this
+/// single-process app, a 5 s busy timeout lets a contended writer WAIT instead
+/// of erroring, and a 2 s acquire timeout BOUNDS every handler's worst case
+/// (sqlx defaults `acquire_timeout` to 30 s — the reported dub-mix stall, where
+/// the workers + polls held connections and the DB write parked in `acquire()`).
+/// Pure so the exact values are unit-tested. Not applicable to `:memory:` (WAL
+/// needs a file), so [`create_memory_pool`] does NOT use it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoolTuning {
+    pub journal_mode: SqliteJournalMode,
+    pub synchronous: SqliteSynchronous,
+    pub busy_timeout: Duration,
+    pub acquire_timeout: Duration,
+}
+
+/// The tuning [`create_pool`] applies. See [`PoolTuning`].
+pub fn pool_tuning() -> PoolTuning {
+    PoolTuning {
+        journal_mode: SqliteJournalMode::Wal,
+        synchronous: SqliteSynchronous::Normal,
+        busy_timeout: Duration::from_secs(5),
+        // Bounded — never sqlx's 30 s default (the dub-mix stall).
+        acquire_timeout: Duration::from_secs(2),
+    }
+}
+
+/// Create a connection pool backed by a file, hardened per [`pool_tuning`]:
+/// WAL + NORMAL synchronous + a 5 s busy timeout on the connection, and a 2 s
+/// acquire timeout on the pool — so a contended write never parks a request for
+/// 30 s (#184 round A).
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
+    let t = pool_tuning();
     let opts = SqliteConnectOptions::from_str(path)?
         .create_if_missing(true)
-        .foreign_keys(true);
+        .foreign_keys(true)
+        .journal_mode(t.journal_mode)
+        .synchronous(t.synchronous)
+        .busy_timeout(t.busy_timeout);
     SqlitePoolOptions::new()
         .max_connections(5)
+        .acquire_timeout(t.acquire_timeout)
         .connect_with(opts)
         .await
 }
@@ -495,3 +532,7 @@ mod tests_v24;
 #[path = "mod_tests_v26.rs"]
 #[cfg(test)]
 mod tests_v26;
+
+#[path = "mod_tests_pool.rs"]
+#[cfg(test)]
+mod tests_pool;

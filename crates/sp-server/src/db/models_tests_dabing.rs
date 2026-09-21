@@ -218,6 +218,19 @@ async fn set_dub_mix_ratio_clamps_and_persists() {
 }
 
 #[test]
+fn clamp_dub_ratio_bounds_and_nan_default() {
+    // In-range passes through.
+    assert_eq!(clamp_dub_ratio(0.0), 0.0);
+    assert_eq!(clamp_dub_ratio(0.5), 0.5);
+    assert_eq!(clamp_dub_ratio(1.0), 1.0);
+    // Over/under-range clamp to the unit interval.
+    assert_eq!(clamp_dub_ratio(1.7), 1.0);
+    assert_eq!(clamp_dub_ratio(-0.3), 0.0);
+    // NaN maps to the dub-only default, never propagates.
+    assert_eq!(clamp_dub_ratio(f64::NAN), 1.0);
+}
+
+#[test]
 fn dub_chain_state_maps_explicit_statuses() {
     assert_eq!(
         dub_chain_state("failed", Some("done"), true),

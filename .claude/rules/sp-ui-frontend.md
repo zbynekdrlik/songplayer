@@ -606,3 +606,26 @@ cases AND the reload case; `e2e/post-deploy-dabing.spec.ts` proves the reload on
 the box. A NEW required field on the WS message must be reflected in every mock
 `PlaybackStateChanged` a spec relies on.
 
+
+## The Player mixer slot renders from `mixer_controls`, and `store.dabing` is app-wide (#184)
+
+The mixer slot in `player.rs` no longer does an either/or `match` on the dub row.
+It computes `sp_core::mixer_model::mixer_controls(dub_status, stem_status)` from
+the playing item's `DubRow` (looked up in `store.dabing`) and renders
+`<DubMixer>` and/or `<KaraokeMixer>`:
+
+- `show_dub = controls.dub` (any dub row that isn't `none`/absent).
+- `show_karaoke = controls.karaoke || !controls.dub` — a NON-dub song always
+  keeps the karaoke default (KaraokeMixer self-locks with no stems); a dub video
+  shows karaoke only when stems-capable.
+
+Two gotchas that bit #184:
+- **`store.dabing` is now filled by an App-level poll** (`app.rs`, next to the
+  playlists load), NOT the Dabing page. That is what makes the dub mixer appear
+  on the Dashboard/Live for a playing dub video without a `/dabing` visit. The
+  Dabing page reads `store.dabing` + `store.dabing_playlist_id`; do not re-add a
+  page-local poll.
+- **`mixer_controls`' stems-capable set includes `"done"`**, because `player.rs`
+  feeds the raw `DubRow.stem_status` column (`done`/`failed`/`unsupported`/null),
+  NOT the `stems_state` wire vocabulary — see `.claude/rules/dabing.md`. A mock
+  that feeds a wire string (`"ready"`) hides this; the box carries `"done"`.

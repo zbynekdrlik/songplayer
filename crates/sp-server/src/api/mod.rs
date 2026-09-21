@@ -2,6 +2,7 @@
 
 pub mod ai;
 pub mod dabing; // #180 dubbing D1
+pub mod dabing_apply; // #184 live-first dub-mix apply seam
 pub mod karaoke;
 pub mod live;
 pub mod lyrics;

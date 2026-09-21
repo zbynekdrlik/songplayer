@@ -190,6 +190,44 @@ pub fn fader_display_pct(dragging: bool, dragged_pct: i32, live_pct: i32) -> i32
     if dragging { dragged_pct } else { live_pct }
 }
 
+/// Which mixer panel(s) the shared `Player` renders for the PLAYING item
+/// (#184 B2). Both may be true — the #194 one-app rule, identical on every page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MixerControls {
+    /// Show the dub mixer (the video has a dub row).
+    pub dub: bool,
+    /// Show the karaoke stem mixer (the song is stems-capable).
+    pub karaoke: bool,
+}
+
+/// Decide the mixer panel(s) from the two per-video state strings the store
+/// already carries for the playing item.
+///
+/// - `dub` when the video has a dub row in any state other than `none`/absent —
+///   the `DubMixer` renders its own locked/ready state text per status, so any
+///   real dub row shows the dub panel.
+/// - `karaoke` when the song is stems-capable. The caller (`player.rs`) feeds
+///   the `DubRow.stem_status` COLUMN, whose raw stems-worker value `done` means
+///   stems are ready (mirrors `dub_mixer.rs`'s `has_stems`); the derived
+///   `stems_state` wire strings `ready`/`queued`/`processing`/`failed`/
+///   `unavailable` (today's `KaraokeMixer` gate) are accepted too, so the
+///   predicate is correct whichever representation reaches it. `unsupported`/
+///   absent → not stems-capable.
+///
+/// BOTH may hold (a stems-ready dub video). The caller still falls back to the
+/// karaoke panel for a plain non-dub song (see `player.rs`); this predicate only
+/// classifies what the two per-video states say.
+pub fn mixer_controls(dub_status: Option<&str>, stems_state: Option<&str>) -> MixerControls {
+    // Any real dub row (a non-empty status other than "none") shows the dub
+    // panel; the `DubMixer` renders its own locked/ready state text per status.
+    let dub = matches!(dub_status, Some(s) if !s.is_empty() && s != "none");
+    let karaoke = matches!(
+        stems_state,
+        Some("done" | "ready" | "queued" | "processing" | "failed" | "unavailable")
+    );
+    MixerControls { dub, karaoke }
+}
+
 /// Clamp a gain/ratio to `0.0..=1.0`, mapping NaN to `0.0` (never propagate NaN
 /// into the DOM or the mix).
 fn clamp01(x: f32) -> f32 {
@@ -405,5 +443,120 @@ mod tests {
     fn fader_display_not_dragging_returns_the_live_pct() {
         // dragged != live so this also kills a "return dragged" mutant.
         assert_eq!(fader_display_pct(false, 40, 100), 100);
+    }
+
+    // ── mixer_controls: dub / karaoke panel selection (#184 B2) ───────────────
+
+    #[test]
+    fn mixer_controls_dub_only_for_a_dub_row_without_stems() {
+        // A ready dub, no stems → only the dub panel.
+        assert_eq!(
+            mixer_controls(Some("ready"), None),
+            MixerControls {
+                dub: true,
+                karaoke: false
+            }
+        );
+        // A QUEUED dub (mid-chain) STILL shows the dub panel — its own state text
+        // reads the status. This is the case the RED gate (`== "ready"`) misses.
+        assert_eq!(
+            mixer_controls(Some("queued"), None),
+            MixerControls {
+                dub: true,
+                karaoke: false
+            }
+        );
+        // stem_status "unsupported" is not stems-capable.
+        assert_eq!(
+            mixer_controls(Some("ready"), Some("unsupported")),
+            MixerControls {
+                dub: true,
+                karaoke: false
+            }
+        );
+    }
+
+    #[test]
+    fn mixer_controls_karaoke_only_for_a_stems_song_without_a_dub() {
+        for st in ["ready", "queued", "processing", "failed", "unavailable"] {
+            assert_eq!(
+                mixer_controls(None, Some(st)),
+                MixerControls {
+                    dub: false,
+                    karaoke: true
+                },
+                "stems_state {st} is stems-capable"
+            );
+        }
+    }
+
+    #[test]
+    fn mixer_controls_both_for_a_stems_ready_dub() {
+        assert_eq!(
+            mixer_controls(Some("ready"), Some("ready")),
+            MixerControls {
+                dub: true,
+                karaoke: true
+            }
+        );
+    }
+
+    #[test]
+    fn mixer_controls_treats_the_raw_done_stem_status_as_stems_capable() {
+        // The `DubRow.stem_status` COLUMN (what player.rs feeds this predicate)
+        // uses the raw stems-worker vocabulary — `done`/`failed`/`unsupported`/
+        // absent — NOT the derived `stems_state` wire strings. `done` is the
+        // stems-ready value (mirrors `dub_mixer.rs`'s `has_stems`), so a
+        // stems-ready dub (`stem_status == "done"`) must show BOTH panels.
+        assert_eq!(
+            mixer_controls(None, Some("done")),
+            MixerControls {
+                dub: false,
+                karaoke: true
+            }
+        );
+        assert_eq!(
+            mixer_controls(Some("ready"), Some("done")),
+            MixerControls {
+                dub: true,
+                karaoke: true
+            }
+        );
+    }
+
+    #[test]
+    fn mixer_controls_neither_for_none_absent_or_unknown() {
+        // No dub row, no stems.
+        assert_eq!(
+            mixer_controls(None, None),
+            MixerControls {
+                dub: false,
+                karaoke: false
+            }
+        );
+        // An explicit "none" dub status is NOT a dub row.
+        assert_eq!(
+            mixer_controls(Some("none"), None),
+            MixerControls {
+                dub: false,
+                karaoke: false
+            }
+        );
+        // An empty dub status is absent, not a dub row.
+        assert_eq!(
+            mixer_controls(Some(""), None),
+            MixerControls {
+                dub: false,
+                karaoke: false
+            }
+        );
+        // An unknown stems state is not stems-capable.
+        assert_eq!(
+            mixer_controls(None, Some("bogus")),
+            MixerControls {
+                dub: false,
+                karaoke: false
+            }
+        );
     }
 }
