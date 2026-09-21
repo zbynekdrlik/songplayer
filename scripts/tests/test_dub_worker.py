@@ -148,3 +148,19 @@ def test_build_transcripts_includes_at_ms_and_tempo():
     assert c1["at_ms"] == 60_000
     assert c1["tempo"] == 1.0
     assert c1["sk_timed"] == [{"t_ms": 400, "text": "Dovidenia"}]
+
+
+def test_chunk_reusable_same_voice_reuses():
+    # #184 round C: a cached chunk recorded under the SAME voice is reused.
+    assert dw.chunk_reusable({"index": 0, "voice": "Charon"}, "Charon") is True
+
+
+def test_chunk_reusable_different_voice_resynth():
+    # A cached chunk recorded under ANOTHER voice must NOT be reused — the whole
+    # dub must speak in one voice, so it is re-synthesized with the new one.
+    assert dw.chunk_reusable({"index": 0, "voice": "Kore"}, "Charon") is False
+
+
+def test_chunk_reusable_missing_voice_resynth():
+    # A legacy chunk (pre-round-C) has no `voice` key → not reusable.
+    assert dw.chunk_reusable({"index": 0}, "Charon") is False

@@ -102,6 +102,9 @@ pub struct DubRow {
     /// Resolved [`DubChainState::as_str`] so the UI does not duplicate the
     /// derivation logic — computed server-side from the three inputs above.
     pub chain_state: String,
+    /// The pinned dub voice (#184 round C), read from the repurposed
+    /// `dub_voice_ref_path` column. `None` until the worker resolves one.
+    pub dub_voice: Option<String>,
 }
 
 /// Build a [`DubRow`] from a selected `videos` row (shared by every query here).
@@ -123,11 +126,13 @@ fn row_to_dub_row(r: &sqlx::sqlite::SqliteRow) -> DubRow {
         stem_status,
         lyrics_present,
         chain_state: chain_state.to_string(),
+        dub_voice: r.get("dub_voice_ref_path"),
     }
 }
 
 const DUB_ROW_SELECT: &str = "SELECT id, playlist_id, title, song, dub_status, \
-     dub_error, dub_mix_ratio, dub_file_path, stem_status, has_lyrics FROM videos";
+     dub_error, dub_mix_ratio, dub_file_path, stem_status, has_lyrics, \
+     dub_voice_ref_path FROM videos";
 
 /// Set (or clear) the dub request on a video. Requesting flips `dub_requested`
 /// on, moves `dub_status` to `'queued'`, stamps `dub_requested_at`, and raises
@@ -203,6 +208,24 @@ pub async fn set_dub_mix_ratio(
         .execute(pool)
         .await?;
     Ok((clamped, res.rows_affected()))
+}
+
+/// Persist the resolved dub voice for a video (#184 round C). The voice name is
+/// stored in the EXISTING nullable `dub_voice_ref_path` TEXT column — REPURPOSED
+/// as the voice name (it was dead plumbing from the abandoned clone lane, so no
+/// schema change is needed). Returns the rows affected so a caller can tell a
+/// missing id (0). Idempotent.
+pub async fn set_dub_voice(
+    pool: &SqlitePool,
+    video_id: i64,
+    voice: &str,
+) -> Result<u64, sqlx::Error> {
+    let res = sqlx::query("UPDATE videos SET dub_voice_ref_path = ? WHERE id = ?")
+        .bind(voice)
+        .bind(video_id)
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected())
 }
 
 // ── D4 write-side: the dub synthesis chain (#183) ───────────────────────────────

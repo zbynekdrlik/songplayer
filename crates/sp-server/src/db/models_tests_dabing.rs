@@ -217,6 +217,54 @@ async fn set_dub_mix_ratio_clamps_and_persists() {
     assert_eq!((v, affected), (0.5, 0));
 }
 
+#[tokio::test]
+async fn set_dub_voice_persists_into_repurposed_column() {
+    // #184 round C: the resolved voice is stored in the repurposed
+    // `dub_voice_ref_path` TEXT column (no schema change).
+    let pool = setup().await;
+    let id = insert_video(&pool, "vv", "Voice").await;
+
+    // Before: unused column is NULL.
+    assert_eq!(col_opt_str(&pool, id, "dub_voice_ref_path").await, None);
+
+    assert_eq!(set_dub_voice(&pool, id, "Charon").await.unwrap(), 1);
+    assert_eq!(
+        col_opt_str(&pool, id, "dub_voice_ref_path").await,
+        Some("Charon".to_string())
+    );
+
+    // A voice change overwrites it.
+    assert_eq!(set_dub_voice(&pool, id, "Kore").await.unwrap(), 1);
+    assert_eq!(
+        col_opt_str(&pool, id, "dub_voice_ref_path").await,
+        Some("Kore".to_string())
+    );
+
+    // A missing row reports 0 rows affected.
+    assert_eq!(set_dub_voice(&pool, 9999, "Charon").await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn list_dub_videos_row_carries_pinned_voice() {
+    // The Dabing payload exposes the pinned voice (from the repurposed column) so
+    // the row can show `hlas: <voice>`.
+    let pool = setup().await;
+    let id = insert_video(&pool, "vpv", "Voiced").await;
+    set_dub_requested(&pool, id, true).await.unwrap();
+    set_dub_voice(&pool, id, "Orus").await.unwrap();
+
+    let rows = list_dub_videos(&pool).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].dub_voice.as_deref(), Some("Orus"));
+
+    // A video with no resolved voice reads back None.
+    let bare = insert_video(&pool, "vbare", "Bare").await;
+    set_dub_requested(&pool, bare, true).await.unwrap();
+    let rows = list_dub_videos(&pool).await.unwrap();
+    let bare_row = rows.iter().find(|r| r.video_id == bare).unwrap();
+    assert_eq!(bare_row.dub_voice, None);
+}
+
 #[test]
 fn clamp_dub_ratio_bounds_and_nan_default() {
     // In-range passes through.

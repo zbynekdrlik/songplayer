@@ -374,6 +374,10 @@ DELETE FROM settings WHERE key = 'lyrics_gate_when_playing';
 // mixer applies. `stem_manual_priority` gives the stems worker a manual bucket
 // (D3 uses it) so a dub-requested video's stems run ahead of the oldest-first
 // queue. Existing rows default to (0, 'none', …, 1.0, …, 0) → no dub requested.
+// #184 round C: `dub_voice_ref_path` is REPURPOSED as the pinned dub voice NAME
+// (e.g. 'Charon') — it was dead plumbing from the abandoned clone lane (no voice
+// reference selection, owner ruling #174), so no schema change; it now stores the
+// resolved Gemini Live Translate voice per video (see `models_dabing::set_dub_voice`).
 const MIGRATION_V26: &str = "
 ALTER TABLE videos ADD COLUMN dub_requested INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE videos ADD COLUMN dub_status TEXT NOT NULL DEFAULT 'none';

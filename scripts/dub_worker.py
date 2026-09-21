@@ -37,6 +37,7 @@ MODEL = "gemini-3.5-live-translate-preview"
 TARGET_LANG = "sk"
 DRAIN_S = 27.0  # keep receiving this long after audio_stream_end (silence trail)
 HEARTBEAT_EVERY_S = 5.0
+DEFAULT_VOICE = "Charon"  # #184 round C: a male, matter-of-fact catalogue voice
 
 
 # ── pure helpers (unit-tested; no I/O, no heavy imports) ─────────────────────────
@@ -132,6 +133,15 @@ def drain_deadline_s(input_pcm_bytes: int, drain_s: float = DRAIN_S) -> float:
     return round(input_s + drain_s, 2)
 
 
+def chunk_reusable(meta: dict, voice: str) -> bool:
+    """#184 round C: a resumed chunk (`chunk_N.json`) may be reused ONLY if it was
+    synthesized with the SAME voice as the one now requested. A chunk recorded
+    under a different voice, or a legacy chunk with no `voice` key (pre-round-C),
+    is NOT reusable — it is re-synthesized so a video's dub speaks in one voice.
+    Pure — unit-tested."""
+    return meta.get("voice") == voice
+
+
 def build_transcripts(results: list[dict]) -> dict:
     """Assemble the EN/SK transcripts JSON (the D3 #182 subtitle source) from the
     per-chunk results. Pure — unit-tested. Each chunk carries its video-timeline
@@ -203,13 +213,15 @@ def _heartbeat(work_dir: str) -> None:
 
 
 def _translate_pcm(
-    pcm: bytes, pace: float, work_dir: str
+    pcm: bytes, pace: float, work_dir: str, voice: str
 ) -> tuple[bytes, str, str, list]:
     """Stream 16 kHz mono s16le `pcm` into the Live API; return
     (out_pcm_24k, transcript_en, transcript_sk, sk_timed). `sk_timed` is a coarse
     list of `{t_ms, text}` stamped by the output-audio position at arrival — the D3
-    subtitle seed. Heartbeats into `work_dir` so the Rust stall timeout sees a live
-    stream even mid-chunk."""
+    subtitle seed. `voice` PINS the output voice via `speech_config` so a video's
+    dub stays one voice (#184 round C — the probe confirmed the translate model
+    accepts `speech_config` and renders it stably). Heartbeats into `work_dir` so
+    the Rust stall timeout sees a live stream even mid-chunk."""
     import asyncio
 
     import google.genai as genai
@@ -228,6 +240,11 @@ def _translate_pcm(
             translation_config=types.TranslationConfig(
                 target_language_code=TARGET_LANG,
                 echo_target_language=True,
+            ),
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice)
+                )
             ),
         )
         out = bytearray()
@@ -304,15 +321,21 @@ def _process_chunk(
     audio: str,
     work_dir: str,
     pace: float,
+    voice: str,
 ) -> dict:
     """Translate one chunk (resumable): returns the chunk result dict. Reuses an
-    existing `chunk_N.json` + `chunk_N.wav` on a re-run."""
+    existing `chunk_N.json` + `chunk_N.wav` on a re-run ONLY when it was made with
+    the SAME `voice` (#184 round C — a chunk recorded under another voice, or a
+    legacy chunk with no `voice`, is re-synthesized so the whole dub is one voice)."""
     result_path = os.path.join(work_dir, f"chunk_{idx}.json")
     wav_path = os.path.join(work_dir, f"chunk_{idx}.wav")
     if os.path.exists(result_path) and os.path.exists(wav_path):
-        _log(f"chunk {idx}: resume (already done)")
         with open(result_path, encoding="utf-8") as f:
-            return json.load(f)
+            meta = json.load(f)
+        if chunk_reusable(meta, voice):
+            _log(f"chunk {idx}: resume (already done, voice {voice})")
+            return meta
+        _log(f"chunk {idx}: re-synthesizing (voice changed to {voice})")
 
     start_ms = int(chunk["start_ms"])
     end_ms = int(chunk["end_ms"])
@@ -326,7 +349,7 @@ def _process_chunk(
         pcm = f.read()
 
     # 2. Translate (audio->audio) and trim the trailing silence.
-    out_pcm, en, sk, sk_timed = _translate_pcm(pcm, pace, work_dir)
+    out_pcm, en, sk, sk_timed = _translate_pcm(pcm, pace, work_dir, voice)
     raw_wav = os.path.join(work_dir, f"chunk_{idx}.raw.wav")
     _write_wav_from_pcm(out_pcm, OUTPUT_SR, raw_wav)
     _run(
@@ -355,6 +378,9 @@ def _process_chunk(
         "next_start_ms": next_start,
         "tempo": round(tempo, 4),
         "at_ms": start_ms,
+        # #184 round C: record the voice so a later re-run reuses this chunk only
+        # when the requested voice is unchanged (see `chunk_reusable`).
+        "voice": voice,
         "transcript_en": en,
         "transcript_sk": sk,
         "sk_timed": sk_timed,
@@ -391,7 +417,9 @@ def cmd_live_translate(args: argparse.Namespace) -> None:
     for i, chunk in enumerate(chunks):
         next_start = int(chunks[i + 1]["start_ms"]) if i + 1 < len(chunks) else None
         results.append(
-            _process_chunk(i, chunk, next_start, args.audio, args.work_dir, args.pace)
+            _process_chunk(
+                i, chunk, next_start, args.audio, args.work_dir, args.pace, args.voice
+            )
         )
 
     # Assemble the dub on the video timeline: place each chunk at its at_ms with
@@ -452,6 +480,7 @@ def main() -> None:
     lt.add_argument("--chunk-plan", dest="chunk_plan", required=True)
     lt.add_argument("--work-dir", dest="work_dir", required=True)
     lt.add_argument("--pace", type=float, default=1.0)
+    lt.add_argument("--voice", default=DEFAULT_VOICE)
     args = parser.parse_args()
 
     try:

@@ -16,6 +16,18 @@ fn setting_value(settings: &HashMap<String, String>, key: &str, default: &str) -
         .unwrap_or_else(|| default.to_string())
 }
 
+/// The six catalogue dub voices (#184 round C): the Gemini prebuilt voice name
+/// (the stored value) with its Slovak descriptive label. Mirrors the vetted
+/// catalogue `eval/dubbing/voices.py`.
+const DUB_VOICES: &[(&str, &str)] = &[
+    ("Charon", "Charon — muž, vecný"),
+    ("Orus", "Orus — muž, pevný"),
+    ("Puck", "Puck — muž, energický"),
+    ("Kore", "Kore — žena, pevná"),
+    ("Aoede", "Aoede — žena, ľahká"),
+    ("Leda", "Leda — žena, mladá"),
+];
+
 #[component]
 pub fn SettingsForm() -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
@@ -25,6 +37,7 @@ pub fn SettingsForm() -> impl IntoView {
     let gemini_key = RwSignal::new(String::new());
     let gemini_model = RwSignal::new(String::new());
     let cache_dir = RwSignal::new(String::new());
+    let dub_voice = RwSignal::new(config::DEFAULT_DUB_VOICE.to_string());
     let save_status = RwSignal::new(String::new());
 
     // Populate fields from store settings when they change.
@@ -51,6 +64,11 @@ pub fn SettingsForm() -> impl IntoView {
             config::SETTING_CACHE_DIR,
             config::DEFAULT_CACHE_DIR,
         ));
+        dub_voice.set(setting_value(
+            &settings,
+            config::SETTING_DUB_VOICE,
+            config::DEFAULT_DUB_VOICE,
+        ));
     });
 
     let on_save = move |ev: leptos::ev::SubmitEvent| {
@@ -73,6 +91,7 @@ pub fn SettingsForm() -> impl IntoView {
             gemini_model.get(),
         );
         settings.insert(config::SETTING_CACHE_DIR.to_string(), cache_dir.get());
+        settings.insert(config::SETTING_DUB_VOICE.to_string(), dub_voice.get());
 
         leptos::task::spawn_local(async move {
             save_status.set("Ukladám…".into());
@@ -132,6 +151,25 @@ pub fn SettingsForm() -> impl IntoView {
                         prop:value=move || gemini_model.get()
                         on:input=move |ev| gemini_model.set(event_target_value(&ev))
                     />
+                </label>
+            </fieldset>
+
+            <fieldset>
+                <legend>"Dabing"</legend>
+                <label>
+                    "Hlas dabingu"
+                    <select
+                        data-testid="settings-dub-voice"
+                        prop:value=move || dub_voice.get()
+                        on:change=move |ev| dub_voice.set(event_target_value(&ev))
+                    >
+                        {DUB_VOICES
+                            .iter()
+                            .map(|(value, label)| {
+                                view! { <option value=*value>{*label}</option> }
+                            })
+                            .collect_view()}
+                    </select>
                 </label>
             </fieldset>
 

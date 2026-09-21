@@ -77,6 +77,17 @@ pub fn dub_pace_from(raw: Option<&str>) -> f32 {
     }
 }
 
+/// Parse the `dub_voice` setting — the pinned Gemini Live Translate output voice
+/// (#184 round C). Absent/blank → the catalogue default (`Charon`); any non-blank
+/// name is trimmed and passed through (the catalogue is not enforced here, so a
+/// future voice needs no code change). Pure — unit-tested.
+pub fn dub_voice_from(raw: Option<&str>) -> String {
+    match raw.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(v) => v.to_string(),
+        None => sp_core::config::DEFAULT_DUB_VOICE.to_string(),
+    }
+}
+
 /// The bundled ffmpeg path (next to the other tools). Mirrors
 /// `tools::ffmpeg_filename` without depending on its visibility.
 fn ffmpeg_path(tools_dir: &Path) -> PathBuf {
@@ -335,6 +346,20 @@ impl DubWorker {
                 .flatten()
                 .as_deref(),
         );
+        // #184 round C: resolve + PIN one voice for this video. Persist it in the
+        // repurposed `dub_voice_ref_path` column so a resume/re-run reproduces the
+        // same voice and the dashboard can show it. A persist error is non-fatal —
+        // the synthesis proceeds with the resolved voice regardless.
+        let voice = dub_voice_from(
+            crate::db::models::get_setting(&self.pool, sp_core::config::SETTING_DUB_VOICE)
+                .await
+                .ok()
+                .flatten()
+                .as_deref(),
+        );
+        if let Err(e) = models_dabing::set_dub_voice(&self.pool, job.video_id, &voice).await {
+            warn!(%e, video_id = job.video_id, "dub worker: set_dub_voice failed (non-fatal)");
+        }
         let activity =
             wall_activity_from(self.ndi_health_registry.as_ref(), self.obs_state.as_ref()).await;
         let plan = HeavyStepPlan::for_activity(
@@ -362,6 +387,7 @@ impl DubWorker {
             &work_dir,
             key,
             pace,
+            &voice,
             dub_eta(total_ms),
             &plan,
         )
@@ -532,6 +558,17 @@ mod tests {
         assert!((dub_pace_from(Some("0")) - 1.0).abs() < 1e-6);
         assert!((dub_pace_from(Some("9")) - 4.0).abs() < 1e-6); // clamp high
         assert!((dub_pace_from(Some("0.1")) - 0.5).abs() < 1e-6); // clamp low
+    }
+
+    #[test]
+    fn dub_voice_defaults_to_charon_and_passes_through() {
+        // Absent / blank / whitespace-only → the catalogue default.
+        assert_eq!(dub_voice_from(None), "Charon");
+        assert_eq!(dub_voice_from(Some("")), "Charon");
+        assert_eq!(dub_voice_from(Some("   ")), "Charon");
+        // Any non-blank name passes through, trimmed.
+        assert_eq!(dub_voice_from(Some("Kore")), "Kore");
+        assert_eq!(dub_voice_from(Some("  Orus  ")), "Orus");
     }
 
     #[test]

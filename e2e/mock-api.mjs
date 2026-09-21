@@ -207,6 +207,8 @@ const settings = {
   gemini_api_key: "",
   gemini_model: "gemini-2.5-flash",
   cache_dir: "./cache",
+  // #184 round C: the pinned dub voice (Nastavenia "Hlas dabingu" select).
+  dub_voice: "Charon",
 };
 
 const resolumeHosts = [];
@@ -539,6 +541,7 @@ app.post("/api/v1/dabing/import", (req, res) => {
     stem_status: null,
     lyrics_present: false,
     chain_state: "queued",
+    dub_voice: null,
   };
   // Newest first.
   dubRows.unshift(row);
@@ -567,6 +570,7 @@ app.patch("/api/v1/videos/:id/dub", (req, res) => {
         stem_status: null,
         lyrics_present: false,
         chain_state: chainStateFor("queued"),
+        dub_voice: null,
       });
     }
   } else {
@@ -604,6 +608,7 @@ app.post("/__mock/dabing-add", (req, res) => {
     stem_status: b.stem_status ?? null,
     lyrics_present: !!b.lyrics_present,
     chain_state: b.chain_state ?? chainStateFor(dub_status),
+    dub_voice: b.dub_voice ?? null,
   };
   dubRows.unshift(row);
   res.status(201).json(row);
