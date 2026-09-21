@@ -22,7 +22,7 @@ import sys
 import numpy as np
 
 WINDOW_S = 30.0  # window length for the per-window f0 median
-MAX_SPREAD_ST = 999.0  # RED: fail when the f0 spread exceeds this many semitones
+MAX_SPREAD_ST = 3.0  # fail when the f0 spread exceeds this many semitones
 FMIN = 70.0
 FMAX = 350.0
 FRAME_LEN = 2048
