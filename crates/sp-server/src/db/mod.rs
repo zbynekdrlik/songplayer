@@ -414,7 +414,7 @@ INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_vokaly',
 INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_podklad',
   CASE (SELECT value FROM settings WHERE key = 'karaoke_mode')
     WHEN 'vocals_only' THEN '0'
-    ELSE '0'
+    ELSE '1'
   END);
 INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_dabing', '1');
 DELETE FROM settings WHERE key IN ('karaoke_mode', 'karaoke_vocal_gain');
