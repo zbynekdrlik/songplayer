@@ -139,7 +139,7 @@ def chunk_reusable(meta: dict, voice: str) -> bool:
     under a different voice, or a legacy chunk with no `voice` key (pre-round-C),
     is NOT reusable — it is re-synthesized so a video's dub speaks in one voice.
     Pure — unit-tested."""
-    return meta.get("voice") is not None
+    return meta.get("voice") == voice
 
 
 def build_transcripts(results: list[dict]) -> dict:
