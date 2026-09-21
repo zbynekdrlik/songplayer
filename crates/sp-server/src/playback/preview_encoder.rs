@@ -207,8 +207,22 @@ pub fn build_ffmpeg_args(video_port: u16, audio_port: u16, encoder: &str) -> Vec
     }
     a.extend(
         [
+            // #184 round F: fit a ~1 Mb/s remote (internet) uplink. 500k video +
+            // 64k audio ≈ 0.6 Mb/s, with a bounded keyframe overshoot
+            // (-maxrate/-bufsize = the bitrate, so a GOP cannot burst the link).
+            // Was 1200k + 128k ≈ 1.35 Mb/s, which did not fit and made the remote
+            // preview back-pressure and fall a full backlog behind the wall.
             "-b:v",
-            "1200k",
+            "500k",
+            "-maxrate",
+            "500k",
+            "-bufsize",
+            "500k",
+            // INVARIANT (the #184 lag beacon relies on it): with -r 25 -g 25
+            // -frag_duration 500000, every GOP is 25 frames = 1 s of media and
+            // each media fragment is 0.5 s, so the child emits EXACTLY two
+            // fragments per second — that is why FragmentRelay::produced_ms()
+            // can read the media time produced as (fragments since Init) × 500 ms.
             "-g",
             "25",
             "-fps_mode",
@@ -219,7 +233,7 @@ pub fn build_ffmpeg_args(video_port: u16, audio_port: u16, encoder: &str) -> Vec
             "-c:a",
             "aac",
             "-b:a",
-            "128k",
+            "64k",
             // Fragmented MP4 to stdout — keyframe-aligned fragments for MSE.
             "-movflags",
             "+frag_keyframe+empty_moov+default_base_moof",
