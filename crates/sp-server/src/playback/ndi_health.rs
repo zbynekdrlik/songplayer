@@ -9,6 +9,7 @@
 use crate::obs::ndi_recovery::{NdiRecoveryTracker, RecoveryStep};
 use crate::playback::clock_health::ClockHealth;
 use crate::playback::lock_state::LOCK_WINDOW_100NS;
+use crate::playback::ndi_health_transport::transport_from_reported;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -54,6 +55,10 @@ pub struct PipelineHealthSnapshot {
     pub playlist_id: i64,
     pub ndi_name: String,
     pub state: PlaybackStateLabel,
+    /// #201 round 2: the pipeline's OWN transport, from the RAW `reported_state`
+    /// (before reconciliation), for the fresh-connect replay. Additive (= Idle).
+    #[serde(default)]
+    pub transport: sp_core::playback::TransportState,
     /// Connection count from `NDIlib_send_get_no_connections`. `-1` means
     /// the heartbeat has never run yet (e.g. pipeline just spawned).
     pub connections: i32,
@@ -778,6 +783,8 @@ impl crate::playback::PlaybackEngine {
             playlist_id,
             ndi_name: ndi_name.clone(),
             state: canonical_state.clone(),
+            // #201 round 2: raw transport (pre-reconciliation) for the replay.
+            transport: transport_from_reported(&reported_state),
             connections,
             frames_submitted_total,
             frames_submitted_last_5s,

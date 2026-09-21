@@ -10,7 +10,7 @@ use futures::{SinkExt, StreamExt};
 use sqlx::Row;
 use tracing::{debug, info, warn};
 
-use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState, TransportState};
+use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
 use sp_core::ws::{ClientMsg, ServerMsg};
 
 use crate::playback::ndi_health::{PipelineHealthSnapshot, PlaybackStateLabel};
@@ -250,30 +250,18 @@ fn label_to_ws_state(label: &PlaybackStateLabel) -> WsPlaybackState {
     }
 }
 
-/// Map an NDI-health snapshot's [`PlaybackStateLabel`] to the wire
-/// [`TransportState`] carried alongside `state` in the initial replay (#201).
-///
-/// The label is already scene-reconciled (a Playing-off-program pipeline is
-/// stored as `Paused`), so this is the best a fresh-connect replay can do
-/// without a live `PlaybackStateChanged`: an on-program `Playing` replays as
-/// `Playing` (`⏸ Pauza`), everything not-decoding as `Paused`/`Idle`
-/// (`▶ Prehrať`). A dashboard reloaded WHILE an off-program dub decodes therefore
-/// replays `Paused` until the next live update — a known limitation tracked as a
-/// follow-up (the health snapshot would need to carry the raw decoding state).
-fn transport_from_label(label: &PlaybackStateLabel) -> TransportState {
-    match label {
-        PlaybackStateLabel::Playing => TransportState::Playing,
-        PlaybackStateLabel::Paused => TransportState::Paused,
-        PlaybackStateLabel::WaitingForScene => TransportState::Paused,
-        PlaybackStateLabel::Idle => TransportState::Idle,
-    }
-}
-
 /// Build the initial `PlaybackStateChanged` replay for a freshly connected
 /// dashboard: one message per pipeline snapshot whose state is NOT `Idle`
 /// (Idle is the dashboard default, so replaying it is pure noise). `modes` maps
 /// `playlist_id` → configured [`PlaybackMode`]; a snapshot for a playlist not
 /// in the map falls back to `PlaybackMode::default()`.
+///
+/// #201 round 2: `state` is the scene-reconciled label (a Playing-off-program
+/// pipeline reads `WaitingForScene`), while `transport` is read DIRECTLY from
+/// the snapshot's raw `transport` field (`handle_health_snapshot` derives it
+/// from the pipeline's own `reported_state`). So a dashboard that connects while
+/// an off-program dub decodes replays `transport: Playing` (`⏸ Pauza`) at once,
+/// instead of the paused label — no second label→transport mapping here.
 fn playback_state_replay(
     snapshots: &[PipelineHealthSnapshot],
     modes: &HashMap<i64, PlaybackMode>,
@@ -285,7 +273,7 @@ fn playback_state_replay(
             playlist_id: s.playlist_id,
             state: label_to_ws_state(&s.state),
             mode: modes.get(&s.playlist_id).copied().unwrap_or_default(),
-            transport: transport_from_label(&s.state),
+            transport: s.transport,
         })
         .collect()
 }
@@ -297,13 +285,22 @@ fn playback_state_replay(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // #201 round 2: `transport_from_label` was deleted (the replay reads the
+    // snapshot's raw `transport`), so `TransportState` is now only named in the
+    // tests — import it here to avoid an unused-import in the lib target.
+    use sp_core::playback::TransportState;
 
-    fn snapshot(playlist_id: i64, state: PlaybackStateLabel) -> PipelineHealthSnapshot {
+    fn snapshot(
+        playlist_id: i64,
+        state: PlaybackStateLabel,
+        transport: TransportState,
+    ) -> PipelineHealthSnapshot {
         use crate::playback::ndi_health::{AudioStats, PacingStats};
         PipelineHealthSnapshot {
             playlist_id,
             ndi_name: format!("SP-{playlist_id}"),
             state,
+            transport,
             connections: 1,
             frames_submitted_total: 0,
             frames_submitted_last_5s: 0,
@@ -327,8 +324,8 @@ mod tests {
     #[test]
     fn replay_maps_playing_and_skips_idle() {
         let snaps = vec![
-            snapshot(1, PlaybackStateLabel::Playing),
-            snapshot(2, PlaybackStateLabel::Idle),
+            snapshot(1, PlaybackStateLabel::Playing, TransportState::Playing),
+            snapshot(2, PlaybackStateLabel::Idle, TransportState::Idle),
         ];
         let mut modes = HashMap::new();
         modes.insert(1, PlaybackMode::Loop);
@@ -354,7 +351,11 @@ mod tests {
 
     #[test]
     fn replay_unknown_playlist_uses_default_mode_and_paused_maps_to_waiting() {
-        let snaps = vec![snapshot(7, PlaybackStateLabel::Paused)];
+        let snaps = vec![snapshot(
+            7,
+            PlaybackStateLabel::Paused,
+            TransportState::Paused,
+        )];
         // No mode entry for playlist 7 → default mode.
         let msgs = playback_state_replay(&snaps, &HashMap::new());
         assert_eq!(msgs.len(), 1);
@@ -376,24 +377,30 @@ mod tests {
     }
 
     #[test]
-    fn transport_from_label_maps_all_variants() {
-        // #201: exact mapping for every label variant (mutation-clean).
-        assert_eq!(
-            transport_from_label(&PlaybackStateLabel::Playing),
-            TransportState::Playing
-        );
-        assert_eq!(
-            transport_from_label(&PlaybackStateLabel::Paused),
-            TransportState::Paused
-        );
-        assert_eq!(
-            transport_from_label(&PlaybackStateLabel::WaitingForScene),
-            TransportState::Paused
-        );
-        assert_eq!(
-            transport_from_label(&PlaybackStateLabel::Idle),
-            TransportState::Idle
-        );
+    fn replay_reads_snapshot_transport_not_label() {
+        // #201 round 2: the on-connect replay must read the snapshot's RAW
+        // transport, NOT a second mapping from the scene-reconciled label. An
+        // off-program decoding pipeline is stored `state: Paused` (reconciled)
+        // but `transport: Playing` (raw) — the replay must carry
+        // `transport: Playing` so a reloaded dashboard reads `⏸ Pauza` at once.
+        let snaps = vec![snapshot(
+            9,
+            PlaybackStateLabel::Paused,
+            TransportState::Playing,
+        )];
+        let msgs = playback_state_replay(&snaps, &HashMap::new());
+        assert_eq!(msgs.len(), 1);
+        match &msgs[0] {
+            ServerMsg::PlaybackStateChanged {
+                state, transport, ..
+            } => {
+                // The scene-reconciled label still maps to WaitingForScene …
+                assert_eq!(*state, WsPlaybackState::WaitingForScene);
+                // … but the transport is the RAW decoding state on the snapshot.
+                assert_eq!(*transport, TransportState::Playing);
+            }
+            other => panic!("expected PlaybackStateChanged, got {other:?}"),
+        }
     }
 
     #[test]

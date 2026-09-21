@@ -147,6 +147,7 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
         burn_on: false,
         recovery_step: None,
         sender_url: None,
+        transport: sp_core::playback::TransportState::Idle,
     }
 }
 

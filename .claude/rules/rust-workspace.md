@@ -73,6 +73,16 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   warnings`. Fix: `#[cfg_attr(not(windows), allow(dead_code))]` on the fn (see
   `HeavyStepPlan::creation_flags` in `lyrics/heavy_plan.rs`). Same idea for any
   item live only on one platform.
+- **Deleting a fn's ONLY non-test consumer orphans a TYPE import to test-only →
+  `unused_imports` in the lib target (#201 r2).** When you delete/replace the one
+  non-test caller of a helper (e.g. `websocket.rs` dropped `transport_from_label`
+  because the replay now reads `s.transport`), a type that was named only through
+  that helper (`TransportState`) is suddenly referenced ONLY inside
+  `#[cfg(test)] mod tests`. The top-level `use` is then unused in the LIB target
+  (tests don't count), so `clippy --all-targets -D warnings` fails — the
+  no-compile box can't see it. Fix: move that name into a test-only import
+  (`use …::TransportState;` INSIDE `mod tests`, not the top-level `use`). Grep the
+  non-test region for every name in a `use` you touched when deleting a consumer.
 - **An RAII guard field held ONLY for its Drop is `dead_code` "never read" — a
   `_` prefix does NOT suppress it (that only silences `unused_variables` for
   LOCALS, never `dead_code` for a FIELD).** A guard that holds a permit / handle
