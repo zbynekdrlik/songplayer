@@ -184,13 +184,13 @@ pub async fn start(
         tracing::warn!("self-heal cache failed (non-fatal): {e}");
     }
 
-    // Self-heal stored metadata: re-run the emoji sanitizer over stored data (#135). Non-fatal.
+    // Self-heal stored metadata: re-run the emoji sanitizer over stored data. Non-fatal.
     if let Err(e) = startup::self_heal_emoji_metadata(&pool).await {
         tracing::warn!("self-heal emoji metadata failed (non-fatal): {e}");
     }
 
     // Self-heal stored metadata: repair rows whose `song` was written empty by a
-    // since-fixed metadata bug (#136) — re-derive from the title. Non-fatal.
+    // since-fixed metadata bug — re-derive from the title. Non-fatal.
     if let Err(e) = startup::self_heal_empty_song_metadata(&pool).await {
         tracing::warn!("self-heal empty-song metadata failed (non-fatal): {e}");
     }

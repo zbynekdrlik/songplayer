@@ -269,11 +269,11 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   - **Round G0 (#184, 2026-09-21): 15 → 120 min.** Owner ruling
     ("na vsetko sa dava rozdelenie podklady a vocaly co davame aj na songy") —
     EVERY video, incl. long dub videos, gets `podklad`/`vokály` stems. The old
-    15-min rationale no longer holds: #171 made separation SEGMENTED (30 s
-    resumable windows, memory is per-segment not per-file) and #162 made the
-    timeout DURATION-SCALED (×4 on a CPU plan) with heavy work at reduced
-    priority during playback — so a 36-min video is ~5-12 min of low-priority,
-    resumable work. 120 min is now a SANITY ceiling (a multi-hour livestream
+    15-min rationale no longer holds: separation is now SEGMENTED (30 s
+    resumable windows, memory is per-segment not per-file) and the timeout is
+    DURATION-SCALED (×4 on a CPU plan) with heavy work at reduced priority
+    during playback — so a 36-min video is ~5-12 min of low-priority, resumable
+    work. 120 min is now a SANITY ceiling (a multi-hour livestream
     stays excluded), not a "songs only" limit. The literal stays a literal
     (`7_200_000`) so the mutation runner sees it. A boot one-shot
     `startup::requeue_unsupported_stems` → `models_stems::requeue_unsupported_within_cap`

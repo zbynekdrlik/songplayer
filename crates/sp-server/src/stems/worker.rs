@@ -37,13 +37,12 @@ enum StemStepResult {
 /// Raised from 15 min to 120 min (round G0, owner ruling 21.9.2026: every video,
 /// incl. long dub videos, gets podklad/vokály stems — "na vsetko sa dava
 /// rozdelenie"). The old 15-min rationale no longer holds: it assumed whole-file
-/// separation that pinned the heavy child's memory near its Job Object ceiling,
-/// plus a single GPU-sized timeout. Since #171 separation runs in resumable 30 s
-/// windows (memory is per-segment, not per-file) and since #162 the timeout is
-/// duration-scaled (×4 on a CPU plan) with heavy work at reduced priority during
-/// playback — so a 36-min video is ~5-12 min of low-priority, resumable work. The
-/// 120-min ceiling is a sanity bound (a multi-hour livestream stays excluded), not
-/// a "songs only" limit.
+/// separation that pinned the heavy child's memory near its Job Object ceiling
+/// plus a single GPU-sized timeout. Separation now runs in resumable 30 s windows
+/// (memory is per-segment, not per-file) and the timeout is duration-scaled (×4 on
+/// a CPU plan) with heavy work at reduced priority during playback — so a 36-min
+/// video is ~5-12 min of low-priority, resumable work. The 120-min ceiling is a
+/// sanity bound (a multi-hour livestream stays excluded), not a "songs only" limit.
 // Literal, not `120 * 60 * 1000` — cfg-independent arithmetic on a const is
 // invisible to the mutation runner (same reasoning as heavy_slot.rs's ceiling).
 pub(crate) const STEM_MAX_DURATION_MS: i64 = 7_200_000; // 120 min
@@ -285,7 +284,7 @@ impl StemWorker {
         // multi-hour livestream would hold the heavy slot too long). Positive
         // form via `stem_duration_too_long` so no `!` sits at this seam; the
         // decision is the unit-tested `stem_duration_supported`. Done BEFORE the
-        // #167 startup floor: marking a row terminal-unsupported is a cheap DB
+        // startup floor: marking a row terminal-unsupported is a cheap DB
         // write, not a heavy step, so it must not be deferred by the startup
         // grace (it also skips the row for good, so deferring it just re-picks
         // the same doomed row every tick).
