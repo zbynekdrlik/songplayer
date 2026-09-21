@@ -13,10 +13,10 @@
 
 use std::future::Future;
 
-/// Await `push` (the live engine command) and `persist` (the DB write) and
-/// return the persist result.
-///
-/// RED (#184): this awaits **persist first** — the order the GREEN commit flips.
+/// Await `push` (the live engine command) FIRST, then `persist` (the DB write),
+/// returning the persist result. The order — push before persist — is the whole
+/// point of the seam: the live change is heard immediately and never blocks on a
+/// contended pool acquire.
 pub async fn apply_dub_mix<T, E, PushFut, PersistFut>(
     push: PushFut,
     persist: PersistFut,
@@ -25,9 +25,8 @@ where
     PushFut: Future<Output = ()>,
     PersistFut: Future<Output = Result<T, E>>,
 {
-    let out = persist.await;
     push.await;
-    out
+    persist.await
 }
 
 #[cfg(test)]

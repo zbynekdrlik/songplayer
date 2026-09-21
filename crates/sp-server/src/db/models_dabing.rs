@@ -179,16 +179,24 @@ pub async fn list_dub_videos(pool: &SqlitePool) -> Result<Vec<DubRow>, sqlx::Err
 /// `(clamped_value, rows_affected)` so the handler can 404 when no such id
 /// (consistent with `set_dub_requested`/`patch_dub`). A `NaN` clamps to `1.0`
 /// (dub-only, the safe default).
+/// Clamp a dub-mix ratio to the mixer's `0.0..=1.0` range, mapping NaN to the
+/// dub-only default `1.0`. Pure so the live push (`api/dabing.rs::patch_dub_mix`)
+/// and the DB persist ([`set_dub_mix_ratio`]) apply the SAME clamped value
+/// (#184 round A — the push must carry exactly what gets stored).
+pub fn clamp_dub_ratio(ratio: f64) -> f64 {
+    if ratio.is_nan() {
+        1.0
+    } else {
+        ratio.clamp(0.0, 1.0)
+    }
+}
+
 pub async fn set_dub_mix_ratio(
     pool: &SqlitePool,
     video_id: i64,
     ratio: f64,
 ) -> Result<(f64, u64), sqlx::Error> {
-    let clamped = if ratio.is_nan() {
-        1.0
-    } else {
-        ratio.clamp(0.0, 1.0)
-    };
+    let clamped = clamp_dub_ratio(ratio);
     let res = sqlx::query("UPDATE videos SET dub_mix_ratio = ? WHERE id = ?")
         .bind(clamped)
         .bind(video_id)
