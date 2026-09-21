@@ -82,6 +82,10 @@ pub struct DubRow {
     /// `translation`/`synth`/`ready`/`failed`) — the server derives it.
     #[serde(default)]
     pub chain_state: String,
+    /// The pinned dub voice (#184 round C), from the repurposed
+    /// `dub_voice_ref_path` column. `None` until the worker resolves one.
+    #[serde(default)]
+    pub dub_voice: Option<String>,
 }
 
 /// Outcome of the most recent POST /api/v1/lyrics/reprocess (any flavor).

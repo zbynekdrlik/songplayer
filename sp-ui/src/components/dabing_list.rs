@@ -91,6 +91,7 @@ pub fn DabingList() -> impl IntoView {
                                         r.stem_status.clone(),
                                         r.lyrics_present,
                                         (r.dub_mix_ratio * 1000.0) as i64,
+                                        r.dub_voice.clone(),
                                     )
                                 }
                                 children=move |row| {
@@ -99,6 +100,7 @@ pub fn DabingList() -> impl IntoView {
                                     let title = row.title.clone();
                                     let with_stems = shows_stems_step(row.stem_status.as_deref());
                                     let ready = row.dub_status == "ready";
+                                    let voice = row.dub_voice.clone();
                                     let ratio_pct = (row.dub_mix_ratio.clamp(0.0, 1.0) * 100.0)
                                         .round() as i64;
                                     let detail = chain_detail(
@@ -131,6 +133,18 @@ pub fn DabingList() -> impl IntoView {
                                             on_play=on_play
                                             play_ready=true
                                         >
+                                            {voice
+                                                .filter(|v| !v.is_empty())
+                                                .map(|v| {
+                                                    view! {
+                                                        <span
+                                                            class="dabing-row-voice"
+                                                            data-testid="dabing-row-voice"
+                                                        >
+                                                            {format!("hlas: {v}")}
+                                                        </span>
+                                                    }
+                                                })}
                                             {ready
                                                 .then(|| {
                                                     view! {
