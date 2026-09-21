@@ -44,6 +44,8 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use sp_ndi::{AudioFrame, AudioSink, NdiBackend};
 
+use audio_edge_fade::EdgeFade;
+
 /// Nominal NDI audio rate — the FLAC pipeline is always 48 kHz.
 pub const EMIT_RATE_HZ: u32 = 48_000;
 /// Samples per channel in one grid block: 1600 @ 48 kHz = 33.333 ms = one
@@ -236,6 +238,12 @@ pub struct AudioEmitter {
     /// Sized in [`tick`](Self::tick); never written non-zero, so a resize keeps
     /// it all-zero.
     silence: Vec<f32>,
+    /// Per-block edge fades applied in [`samples_for`](Self::samples_for): a
+    /// fade-out tail at the audio→silence edge and a fade-in at the silence→audio
+    /// edge (#192 round 5). Shapes only the sent samples — the ring, grid, silence
+    /// accounting and `Emitted.block` variant are untouched; faded slots use its
+    /// own reused scratch so the #203 per-slot allocation-free contract holds.
+    edge_fade: EdgeFade,
 }
 
 /// How many recent jitter samples the p99 gauge keeps (~30 s at 30 fps).
@@ -262,6 +270,7 @@ impl AudioEmitter {
             channels_hint: 2,
             held: false,
             silence: Vec::new(),
+            edge_fade: EdgeFade::new(samples_per_block),
         }
     }
 
@@ -390,13 +399,35 @@ impl AudioEmitter {
     }
 
     /// The interleaved samples for [`emit_one_block`] to hand NDI, returned
-    /// BORROWED (#203): the audio block popped into the ring's reusable
-    /// `block_buf`, or the reusable all-zero `silence` block — neither allocates
-    /// per slot. Read right after the [`tick`](Self::tick) that produced `block`.
-    pub fn samples_for(&self, block: &EmittedBlock) -> (&[f32], u32) {
+    /// BORROWED (#203) and edge-faded (#192 round 5). A full-gain audio block and a
+    /// plain silence block are still borrowed straight from the ring's reusable
+    /// `block_buf` / the reusable all-zero `silence` (no allocation per slot); the
+    /// FADED slots — the first blocks after a silence run, and the ONE fade-out
+    /// tail right after audio — are borrowed from the [`EdgeFade`]'s own reused
+    /// scratch. The `Emitted.block` variant, the grid timecode and the
+    /// `silence_blocks` accounting are UNCHANGED — only the sent samples are
+    /// reshaped, so the transition log and telemetry are untouched. Takes
+    /// `&mut self` because the fade is a per-slot state machine. Read right after
+    /// the [`tick`](Self::tick) that produced `block`.
+    pub fn samples_for(&mut self, block: &EmittedBlock) -> (&[f32], u32) {
+        let ch = self.channels_hint;
         match block {
-            EmittedBlock::Audio => (self.ring.block_buf(), self.channels_hint as u32),
-            EmittedBlock::Silence => (&self.silence, self.channels_hint as u32),
+            EmittedBlock::Audio => {
+                // Borrow ring + edge_fade are DISJOINT fields; `on_audio` returns
+                // whether it wrote a fade-in ramp to its scratch (else full gain).
+                if self.edge_fade.on_audio(self.ring.block_buf(), ch) {
+                    (self.edge_fade.shaped(), ch as u32)
+                } else {
+                    (self.ring.block_buf(), ch as u32)
+                }
+            }
+            EmittedBlock::Silence => {
+                if self.edge_fade.on_silence(ch) {
+                    (self.edge_fade.shaped(), ch as u32)
+                } else {
+                    (&self.silence, ch as u32)
+                }
+            }
         }
     }
 
@@ -784,6 +815,10 @@ impl SpinMargin {
         (worst + SPIN_HEADROOM_100NS).clamp(SPIN_MARGIN_MIN_100NS, SPIN_MARGIN_MAX_100NS)
     }
 }
+
+/// Pure per-block edge fades at the silence↔audio boundaries (#192 round 5).
+#[path = "audio_edge_fade.rs"]
+mod audio_edge_fade;
 
 #[cfg(test)]
 #[path = "audio_emitter_tests.rs"]

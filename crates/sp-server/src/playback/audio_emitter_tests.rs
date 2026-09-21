@@ -850,11 +850,25 @@ fn pop_block_reuses_the_scratch_and_samples_for_is_byte_identical() {
         "and its capacity is not re-grown"
     );
 
-    // Ring now empty → a full reusable silence block of zeros.
+    // Ring now empty right after audio → the FIRST empty slot is the #192-r5
+    // fade-out TAIL (the last audio block ramped 1 → 0), a full 1600-sample block
+    // — not a hard cut, and not the zero block yet.
     let em2 = e.tick(0);
     assert_eq!(em2.block, EmittedBlock::Silence);
-    let (sil, ch) = e.samples_for(&em2.block);
+    let (tail, ch) = e.samples_for(&em2.block);
     assert_eq!(ch, 2);
+    assert_eq!(
+        tail.len(),
+        SPB * 2,
+        "tail is a full 1600-sample stereo block"
+    );
+    assert_eq!(tail[0], 0.5, "tail first frame is the last audio content");
+    assert_eq!(tail[(SPB - 1) * 2], 0.0, "tail last frame fades to silence");
+
+    // The NEXT empty slot is the plain reusable all-zero silence block (#203).
+    let em3 = e.tick(0);
+    assert_eq!(em3.block, EmittedBlock::Silence);
+    let (sil, _) = e.samples_for(&em3.block);
     assert_eq!(
         sil.len(),
         SPB * 2,
@@ -884,5 +898,60 @@ fn emitter_stats_computes_jitter_p99_on_demand_from_the_ring() {
         emitter_stats(&shared).emit_jitter_p99_us,
         direct,
         "emitter_stats reports the same p99, computed on demand from the ring"
+    );
+}
+
+// ── #192 round 5: samples_for applies the edge fades (wiring) ─────────────────
+
+#[test]
+fn samples_for_fades_in_the_first_audio_after_a_silence_run() {
+    let mut e = AudioEmitter::production();
+    // A silence slot first (via samples_for) enters a silence run.
+    let em = e.tick(0);
+    assert_eq!(em.block, EmittedBlock::Silence);
+    let _ = e.samples_for(&em.block);
+    // Push audio and tick → block_buf filled; the resumed block fades in from 0.
+    e.ring_mut().push_some(&stereo_block(1.0), 2);
+    let em = e.tick(0);
+    assert_eq!(em.block, EmittedBlock::Audio);
+    let (s, ch) = e.samples_for(&em.block);
+    assert_eq!(ch, 2, "stereo layout preserved");
+    assert_eq!(s.len(), SPB * 2, "still a full 1600-frame stereo block");
+    assert_eq!(
+        s[0], 0.0,
+        "the first audio after a silence run fades in from 0"
+    );
+}
+
+#[test]
+fn samples_for_emits_a_fade_out_tail_then_plain_silence() {
+    let mut e = AudioEmitter::production();
+    // One audio block (cold, full gain) establishes the fade-out source.
+    e.ring_mut().push_some(&stereo_block(1.0), 2);
+    let em = e.tick(0);
+    assert_eq!(em.block, EmittedBlock::Audio);
+    let _ = e.samples_for(&em.block);
+    // Ring empty → the first silence slot is the fade-out tail (not a hard cut).
+    let em = e.tick(0);
+    assert_eq!(em.block, EmittedBlock::Silence);
+    let (tail, ch) = e.samples_for(&em.block);
+    assert_eq!(ch, 2);
+    assert_eq!(tail[0], 1.0, "tail first frame is full content");
+    assert_eq!(tail[(SPB - 1) * 2], 0.0, "tail last frame is silence");
+    // The next silence slot is plain zeros.
+    let em = e.tick(0);
+    let (after, _) = e.samples_for(&em.block);
+    assert!(after.iter().all(|&x| x == 0.0), "only one tail block");
+}
+
+#[test]
+fn samples_for_silence_only_start_is_pure_zeros() {
+    let mut e = AudioEmitter::production();
+    let em = e.tick(0);
+    assert_eq!(em.block, EmittedBlock::Silence);
+    let (s, _) = e.samples_for(&em.block);
+    assert!(
+        s.iter().all(|&x| x == 0.0),
+        "no tail before any audio played"
     );
 }

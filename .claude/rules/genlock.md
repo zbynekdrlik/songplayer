@@ -289,3 +289,32 @@ paths:
   TAG enum, `pop_block` fills a reused `block_buf`, `samples_for` returns a borrow
   (+ a reusable `silence` block), and the jitter-p99 sort moved OFF the
   TIME_CRITICAL thread into `emitter_stats()` (on-demand, heartbeat cadence).
+- **Round 5 (#192): a SEEK must not break the cushion + click-free edges.** A seek
+  forwarded a keyframe-aligned video seek, so `MediaFoundationVideoReader` landed
+  on the PREVIOUS keyframe (`< target`) and `SplitSyncedDecoder::next_synced`
+  delivered those pre-target frames — the SDK-clocked sender paced them out (the
+  visible jump-back) and the pairing deadline pinned the ring depth ≈ 0 for the
+  REST of the song (audio led the picture). Fix (pure, Linux-tested): `seek`
+  records `pending_video_target_ms`; `next_synced` decode-and-DISCARDS video
+  frames `< target` (bounded by `MAX_SEEK_DISCARD_FRAMES = 600`, never spins)
+  before pairing, so the first delivered frame is `>= pos` and the cushion refills
+  like a fresh Play. `pipeline.rs` seek arm + the position report are UNTOUCHED
+  (same `decoder.seek(pos)` signature; the first reported ts is already `>= pos`).
+  Plus a pure `audio_edge_fade::EdgeFade` (sp-server): a fade-out TAIL (last block
+  ramped 1→0) at the audio→silence edge and a fade-in (0→1 over `FADE_IN_BLOCKS=3`)
+  at the silence→audio edge, removing the clicks a `clear_ring` / stall / song
+  transition otherwise produced. TWO design rules that kept every existing test
+  green: (1) shape the samples in `samples_for`, NOT `tick` — `tick`/`Emitted.block`
+  /`silence_blocks` stay RAW, so the transition log + the tick-asserting tests are
+  untouched; only the SENT samples change. (2) the fade-in fires ONLY on a genuine
+  silence→audio edge (`fade_in_pos` starts AT `FADE_IN_BLOCKS`, reset to 0 by
+  `on_silence`) — a COLD `samples_for(&Audio)` with no preceding silence stays
+  full gain, so the many dev tests that push+tick+`samples_for` and assert exact
+  samples keep passing; in production the emit thread always emits silence while
+  the ring fills, so the first real audio still fades in. Keep the #203
+  allocation-free contract: full-gain audio + plain silence are borrowed straight
+  from `block_buf` / the reusable `silence`; only faded slots use EdgeFade`s reused
+  `out` scratch, and `samples_for` borrows disjoint fields (`&mut edge_fade` +
+  `&ring`) so it stays zero-copy. The FIRST post-audio silence slot is now the tail
+  (not zeros) — a test asserting that slot is all-zeros must expect the tail + read
+  the SECOND slot for the zero block.
