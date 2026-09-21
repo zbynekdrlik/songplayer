@@ -476,6 +476,39 @@ inconsistency the ticket fixes, and the Live tap-to-seek must not be lost —
   Dabing (a dub's subtitles are just its `LyricsTrack`), and in the Lyrics details
   view.
 
+#### LyricsView is a 4-way fetch state, and 204 = empty NOT error (#198 items 3 + 9)
+
+`lyrics_view.rs` holds `RwSignal<LyricsState>` = `Empty | Loading | Loaded(track)
+| Error(String)`, NOT `Option<LyricsTrack>`. Loading + error render the shared
+`StateBlock{Loading,Error}` (`state-loading` / `state-error`); only a genuinely-
+empty case (no effective video, no lines, or a 204) keeps the lyrics-surface
+`lyrics-empty` testid. The old `Option<LyricsTrack>` folded loading, a failed
+fetch and no-lyrics all into `lyrics-empty`, hiding real failures. `current_idx`
+reads the track via `state.with(|s| …)` by reference so a position tick still
+flips only the highlighted `<li>`, never rebuilds the `<ol>`.
+
+**`api::get_video_lyrics` returns `Result<Option<LyricsTrack>, String>`, and 204
+is special-cased to `Ok(None)`.** The server replies **204 No Content** for a
+video with no lyrics. The generic `api::get::<T>()` calls `resp.json::<T>()` on
+that EMPTY body → a serde error → `Err`, which now renders the ERROR block. So a
+status that needs distinct handling (204) must NOT go through `api::get()` — do
+the `Request` manually and branch on `resp.status()`. Mock: `/__mock/lyrics-mode`
+(`track`/`empty`(204)/`error`(500)/`slow`) drives `/api/v1/videos/:id/lyrics`;
+reset it to `track` in each spec's `afterEach` (global state), and strip the
+deliberate 500's `Failed to load resource` console entry in the error test.
+
+#### The slovak-only gate is a DENYLIST, positive gate deferred (#198 item 4)
+
+`slovak-only.spec.ts` is an exact-match denylist (`BANNED`/`BANNED_NAV`/
+`BANNED_PLACEHOLDERS`). A stronger POSITIVE gate ("fail any pure-ASCII chrome
+word not in a product-name allowlist") was deferred: the Slovak-without-diacritics
+allowlist (skladby, skladba, Interpret, adresa, osoba, Dabing, dabingu, Mix,
+Stemy, stemov, …) cannot be bounded ≤30 or verified complete from the Tier-0
+no-mock-run box — static source extraction can't separate rendered chrome from
+comments / CSS / testids / format fragments, so a positive gate would false-
+positive and red CI. New denylist entries must be verified ABSENT from the view
+code first (grep the string literal, exclude comment/class/testid lines).
+
 ### One operator language: Slovak (the `slovak-only.spec.ts` gate, #194 r3c)
 
 `e2e/slovak-only.spec.ts` asserts that NONE of the audit's English UI-chrome
@@ -492,3 +525,67 @@ carry `data-testid="nav-dashboard|nav-live|nav-lyrics|nav-dabing|nav-settings"`.
 Specs click tabs by testid, never by text; `e2e/slovak-only.spec.ts` scans the
 tabs too (`BANNED_NAV`). Only product/technical names (OBS, NDI, Resolume,
 SongPlayer, WS, LAN, the genlock words) stay English anywhere in the chrome.
+
+## #200 — the drag gate commits on RELEASE; every drag control needs a REAL-pointer spec
+
+The #194 hotfix committed a drag only in `on:change`. In a real browser
+`pointerup` fires BEFORE `change`; the gate then re-applied the live
+`prop:value`, and Chrome SUPPRESSED `change` (value "unchanged" at commit time)
+— so a real mouse drag on the seek bar / dub fader never posted anything and the
+thumb snapped back (owner: "posúvať pozíciu sa nedá", reported repeatedly).
+The specs used `fill()` + synthetic `dispatchEvent('pointerup')`/`('change')`,
+which ALWAYS deliver `change`, so they were green on broken code.
+
+Rules now:
+- Commit on `pointerup`/`touchend` from the PENDING drag signal
+  (`seek_drag_ms` / `drag_pct`), with a value-dedup (`committed: Option<T>`)
+  so `change` (the keyboard path) never double-commits. `pointercancel` only
+  clears the flag.
+- Every draggable control ships a `page.mouse.down/move/up` spec
+  (`e2e/player-mouse.spec.ts` pattern: exactly ONE POST/PATCH per release, the
+  control stays where released). A synthetic-event spec is a supplement, never
+  the proof. The post-deploy suite drives the Dabing Player with the real mouse
+  on the box (`e2e/post-deploy-dabing.spec.ts`).
+- The preview inside the shared Player must not inherit the playlist-card
+  `max-width: 320px` (`.player-preview … { max-width: none }`).
+
+## Off-program pipelines: the Player label is NOT proof of playback (post-deploy specs)
+
+A box spec must prove playback by the BACKEND effect (`/api/v1/ndi/health`
+`frames_submitted_last_5s > 0` for the playlist), never by the toggle text —
+`e2e/post-deploy-dabing.spec.ts` is the pattern. (Historically the toggle text
+was ALSO unreliable off program — the #201 fix below made the label honest, but
+frames-on-the-output stays the ground truth for "is it decoding".)
+
+## Transport vs program: the Player label follows the pipeline, the badge follows health (#201)
+
+Two orthogonal facts, two sources — never conflate them:
+
+- **The play/pause toggle (`player-playpause`) reads `NowPlayingInfo.transport`**
+  (`transport == Playing` → `⏸ Pauza`, else `▶ Prehrať`). `transport` is the
+  pipeline's OWN decoding state, INDEPENDENT of program. So a dub prepared OFF
+  program on the Dabing page (scene-aware `state` = `WaitingForScene`) reads
+  `⏸ Pauza` while it decodes, and a click posts `/pause`. `is_decoding`
+  (preview/mixer enablement) still reads `state` — unchanged.
+- **The on/off-program badge (`player-program-badge`) still reads
+  `store.ndi_health`** (`state == "Playing"` = the wall shows this output) →
+  `● Na programe` / `○ Mimo programu`. NEVER derive the badge from `transport`.
+
+Server: `ServerMsg::PlaybackStateChanged` carries `transport: TransportState`
+(`#[serde(default)]` = `Idle`), filled by the engine from the RAW `PlayState` via
+the pure `playback/transport_state.rs::transport_from_play_state`
+(`Playing`→Playing, `WaitingForScene`→Paused, `Idle`→Idle);
+`play_state_to_ws`/`WsPlaybackState` are UNCHANGED (the #170 scene-aware
+contract + its E2E keep working). The fresh-connect replay
+(`websocket.rs::playback_state_replay`) derives transport from the scene-reconciled
+health label (`transport_from_label`), so a dashboard RELOADED while an
+off-program dub decodes replays `Paused` until the next live update — a known
+limit (the health snapshot would need the raw decoding state to fix).
+
+Mock: a tick item carries `transport` (defaults to `Playing` when `state ==
+"Playing"`, else `Paused`); an off-program decoding item is
+`{state:"WaitingForScene", transport:"Playing"}`. The playlist-1 WS-open
+broadcast carries `transport:"Playing"` so the Dashboard toggle reads `⏸ Pauza`.
+`e2e/player-transport.spec.ts` pins both cases; a NEW required field on the WS
+message must be reflected in every mock `PlaybackStateChanged` a spec relies on.
+

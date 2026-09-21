@@ -40,12 +40,18 @@ use crate::playback::wallclock::WallClock;
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn is_late_frame(
     catchup: &mut crate::playback::av_catchup::CatchUp,
-    emitter: Option<&SharedEmitter>,
+    ring_depth_ms: Option<u64>,
     video_ts_ms: u64,
     duration_ms: u64,
 ) -> bool {
-    let Some(shared) = emitter else { return false };
-    let depth_ms = shared.emitter.lock().unwrap().ring_depth_ms();
+    // #198 item 8: the ring depth is read ONCE, under the lock
+    // `push_or_collect_audio` already holds, and passed in here — this function
+    // no longer takes the emitter mutex a SECOND time per decoded frame. No
+    // emitter (legacy audio-with-video path) → `ring_depth_ms` is `None` → never
+    // late (its audio rides with the video, so there is nothing to catch up to).
+    let Some(depth_ms) = ring_depth_ms else {
+        return false;
+    };
     let target_ms = crate::playback::pipeline::audio_emitter::target_ring_depth_ms();
     let frame_ms = sp_decoder::split_sync::DEFAULT_TOLERANCE_MS;
     // Within the ring target of the end the audio stream is at EOF: a shallow
@@ -69,24 +75,32 @@ pub(crate) fn is_late_frame(
 pub(crate) fn push_or_collect_audio(
     emitter: Option<&SharedEmitter>,
     audio_frames: Vec<sp_decoder::DecodedAudioFrame>,
-) -> Vec<sp_ndi::AudioFrame> {
+) -> (Vec<sp_ndi::AudioFrame>, Option<u64>) {
     match emitter {
         Some(shared) => {
             for af in &audio_frames {
                 push_blocking(shared, &af.data, af.channels as usize);
             }
-            Vec::new()
+            // #198 item 8: read the live ring depth ONCE here, under the emitter
+            // lock this function already deals with, and return it so
+            // `is_late_frame` consumes it instead of taking the mutex a second
+            // time per frame.
+            let ring_depth_ms = shared.emitter.lock().unwrap().ring_depth_ms();
+            (Vec::new(), Some(ring_depth_ms))
         }
-        None => audio_frames
-            .into_iter()
-            .map(|af| sp_ndi::AudioFrame {
-                data: af.data,
-                channels: af.channels,
-                sample_rate: af.sample_rate,
-                // Stamped by FrameSubmitter at submission time (#146).
-                timecode_100ns: None,
-            })
-            .collect(),
+        None => (
+            audio_frames
+                .into_iter()
+                .map(|af| sp_ndi::AudioFrame {
+                    data: af.data,
+                    channels: af.channels,
+                    sample_rate: af.sample_rate,
+                    // Stamped by FrameSubmitter at submission time (#146).
+                    timecode_100ns: None,
+                })
+                .collect(),
+            None,
+        ),
     }
 }
 
@@ -350,5 +364,31 @@ fn raise_thread_priority(ndi_name: &str) {
         );
     } else {
         info!(ndi_name, "audio-emitter: thread priority = TIME_CRITICAL");
+    }
+}
+
+// This module is `#[cfg(windows)]`, so these tests run on the Windows CI job's
+// `cargo test --workspace`. `is_late_frame` is now PURE (it takes the ring depth
+// as a parameter instead of locking the emitter), so its decision is testable.
+#[cfg(test)]
+mod tests {
+    use super::is_late_frame;
+    use crate::playback::av_catchup::CatchUp;
+    use crate::playback::pipeline::audio_emitter::target_ring_depth_ms;
+
+    #[test]
+    fn is_late_frame_uses_the_supplied_ring_depth() {
+        let mut c = CatchUp::new();
+        // No emitter → the ring depth is `None` → never late (legacy path: the
+        // audio rides with the video, nothing to catch up to).
+        assert!(!is_late_frame(&mut c, None, 0, u64::MAX));
+
+        let target = target_ring_depth_ms();
+        // A full ring primes the catch-up and is on time (not late)…
+        assert!(!is_late_frame(&mut c, Some(target), 0, u64::MAX));
+        // …then a drained ring (deep lag) once primed → drop this frame's video.
+        assert!(is_late_frame(&mut c, Some(0), 0, u64::MAX));
+        // Near the song end a shallow ring is EOF, not a lag → never late.
+        assert!(!is_late_frame(&mut c, Some(0), 100, 100));
     }
 }

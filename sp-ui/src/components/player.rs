@@ -12,7 +12,7 @@
 
 use leptos::prelude::*;
 use serde::Serialize;
-use sp_core::playback::{PlaybackMode, PlaybackState};
+use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
 use sp_core::seek_model::{format_position, seek_display_ms, seek_target_ms};
 
 use crate::api;
@@ -49,9 +49,14 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     let position = move || np().map(|i| i.position_ms).unwrap_or(0);
     let duration = move || np().map(|i| i.duration_ms).unwrap_or(0);
     let state = move || np().map(|i| i.state).unwrap_or_default();
+    let transport = move || np().map(|i| i.transport).unwrap_or_default();
     let mode = move || np().map(|i| i.mode).unwrap_or_default();
 
-    let is_playing = Memo::new(move |_| matches!(state(), PlaybackState::Playing));
+    // #201: the play/pause label follows the pipeline's own TRANSPORT state, not
+    // the scene-aware `state` — a dub decoding OFF program (state
+    // WaitingForScene, transport Playing) reads `⏸ Pauza` and a click posts
+    // /pause. On/off-program shows only in the badge (from `ndi_health`).
+    let is_playing = Memo::new(move |_| matches!(transport(), TransportState::Playing));
 
     // The pipeline is DECODING when it is Playing OR waiting off-program for its
     // scene with a real current video. Preparing a dub on the Dabing page before
@@ -143,6 +148,12 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // gate re-applies the live value Chrome suppresses `change` entirely, so
     // `change` is only the keyboard path. Value-dedup keeps it to ONE POST.
     let seek_committed = RwSignal::new(None::<u64>);
+    // #198 item 1: a `dirty` latch set by `on:input`, cleared on commit. A bare
+    // `change` with no preceding `input` in this session (a programmatic / stale
+    // dispatch, or a keyboard change that never moved the slider) must NOT commit
+    // the initial 0 ms — `seek_drag_ms` starts at 0. `on:change` reads this latch
+    // and is a no-op when it is false.
+    let seek_dirty = RwSignal::new(false);
     let do_seek = move |ms: u64| {
         leptos::task::spawn_local(async move {
             let r = api::seek_playlist(pid, ms).await;
@@ -150,6 +161,7 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
         });
     };
     let commit_seek = move |ms: u64| {
+        seek_dirty.set(false);
         if seek_committed.get_untracked() != Some(ms) {
             seek_committed.set(Some(ms));
             do_seek(ms);
@@ -231,22 +243,30 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                     }
                     prop:disabled=move || !has_content.get()
                     on:pointerdown=move |_| {
+                        seek_committed.set(None); // a new drag may land on the old value
                         seek_drag_ms.set(position());
                         seek_dragging.set(true);
                     }
                     on:touchstart=move |_| {
+                        seek_committed.set(None);
                         seek_drag_ms.set(position());
                         seek_dragging.set(true);
                     }
                     on:input=move |ev| {
                         if let Ok(v) = event_target_value(&ev).parse::<u64>() {
                             seek_drag_ms.set(v);
+                            seek_dirty.set(true);
                         }
                     }
                     on:change=move |_| {
                         // Keyboard / programmatic path (a pointer release already
-                        // committed and the dedup makes this a no-op then).
-                        commit_seek(seek_drag_ms.get_untracked());
+                        // committed and the dedup makes this a no-op then). #198:
+                        // a bare `change` with no preceding `input` this session is
+                        // a no-op — the `dirty` latch gates it, so a stale/synthetic
+                        // change never commits the initial 0 ms.
+                        if seek_dirty.get_untracked() {
+                            commit_seek(seek_drag_ms.get_untracked());
+                        }
                         seek_dragging.set(false);
                     }
                     on:pointerup=move |_| {

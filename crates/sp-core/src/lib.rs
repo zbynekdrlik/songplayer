@@ -278,6 +278,7 @@ mod tests {
                 playlist_id: 1,
                 state: playback::PlaybackState::Playing,
                 mode: playback::PlaybackMode::Continuous,
+                transport: playback::TransportState::Playing,
             },
             ws::ServerMsg::QueueUpdate {
                 playlist_id: 1,

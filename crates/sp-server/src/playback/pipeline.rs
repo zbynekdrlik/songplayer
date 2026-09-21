@@ -695,7 +695,7 @@ fn decode_and_send(
                 // #15/#178: offer both preview taps before submit/push (preview.md).
                 taps.offer_frame(&video_frame, &audio_frames);
                 // #192: push audio into the emitter ring; submit_nv12 = video only.
-                let (ndi_audio, audio_us) = crate::playback::loop_stats::timed(|| {
+                let (audio_out, audio_us) = crate::playback::loop_stats::timed(|| {
                     crate::playback::pipeline::pipeline_audio::push_or_collect_audio(
                         audio_emitter,
                         audio_frames,
@@ -727,7 +727,7 @@ fn decode_and_send(
                 // #192 r4: drop a late frame's video (never near the end: audio EOF).
                 if pipeline_audio::is_late_frame(
                     &mut catchup,
-                    audio_emitter,
+                    audio_out.1,
                     timestamp_ms,
                     duration_ms,
                 ) {
@@ -740,7 +740,7 @@ fn decode_and_send(
                         video_frame.height,
                         video_frame.stride,
                         video_frame.data,
-                        &ndi_audio,
+                        &audio_out.0,
                     )
                 });
                 loop_stage.observe(decode_us, submit_us, audio_us);

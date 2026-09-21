@@ -845,17 +845,48 @@ app.get('/api/v1/lyrics/songs/:id', (req, res) => {
 // the Lyrics details modal fetches this). A small two-line track is enough for
 // the list + active-line highlight; a missing route would 404 and trip the
 // zero-console check.
+const lyricsTrack = {
+  version: 22,
+  source: 'gemini-3-5-transcribe',
+  language_source: 'en',
+  language_translation: 'sk',
+  lines: [
+    { start_ms: 0, end_ms: 2000, en: 'Line one', sk: 'Riadok jeden' },
+    { start_ms: 2000, end_ms: 4000, en: 'Line two', sk: 'Riadok dva' },
+  ],
+};
+
+// #198 item 3/9: drive the shared LyricsView's loading / error / empty states.
+//   "track" (default) → 200 + the 2-line track
+//   "empty"           → 204 (no lyrics; the real handler's no-lyrics reply)
+//   "error"           → 500
+//   "slow"            → 200 after a delay so the loading state is observable
+// Test-only; reset to "track" in each spec's afterEach (global in-memory state).
+let lyricsMode = 'track';
+app.post('/__mock/lyrics-mode', (req, res) => {
+  const mode = req.body?.mode;
+  if (!['track', 'empty', 'error', 'slow'].includes(mode)) {
+    res.status(400).json({ error: `unknown mode: ${mode}` });
+    return;
+  }
+  lyricsMode = mode;
+  res.json({ mode: lyricsMode });
+});
+
 app.get('/api/v1/videos/:id/lyrics', (_req, res) => {
-  res.json({
-    version: 22,
-    source: 'gemini-3-5-transcribe',
-    language_source: 'en',
-    language_translation: 'sk',
-    lines: [
-      { start_ms: 0, end_ms: 2000, en: 'Line one', sk: 'Riadok jeden' },
-      { start_ms: 2000, end_ms: 4000, en: 'Line two', sk: 'Riadok dva' },
-    ],
-  });
+  if (lyricsMode === 'empty') {
+    res.status(204).end();
+    return;
+  }
+  if (lyricsMode === 'error') {
+    res.status(500).json({ error: 'mock: lyrics fetch failed' });
+    return;
+  }
+  if (lyricsMode === 'slow') {
+    setTimeout(() => res.json(lyricsTrack), 2000);
+    return;
+  }
+  res.json(lyricsTrack);
 });
 
 // Mutable reprocess result so tests can drive the dashboard's banner
@@ -924,9 +955,18 @@ app.post("/__mock/set-playing", (req, res) => {
     return;
   }
   const state = typeof data.state === "string" ? data.state : "Playing";
+  // #201: carry transport too (default Playing when state is Playing, else
+  // Paused, mirroring the tick-item derivation) so a toggle assertion after
+  // this helper reads the honest label — the Player now reads transport.
+  const transport =
+    typeof data.transport === "string"
+      ? data.transport
+      : state === "Playing"
+        ? "Playing"
+        : "Paused";
   const msg = JSON.stringify({
     type: "PlaybackStateChanged",
-    data: { playlist_id: data.playlist_id, state, mode: "Continuous" },
+    data: { playlist_id: data.playlist_id, state, mode: "Continuous", transport },
   });
   let sent = 0;
   for (const ws of wsClients) {
@@ -1022,6 +1062,16 @@ app.post("/__mock/tick", (req, res) => {
         position_ms: typeof it.position_ms === "number" ? it.position_ms : 0,
         step_ms: typeof it.step_ms === "number" ? it.step_ms : 500,
         state: typeof it.state === "string" ? it.state : "Playing",
+        // #201: the pipeline's own transport, INDEPENDENT of `state`'s
+        // on/off-program folding. Defaults to Playing when the scene-aware
+        // `state` is Playing, else Paused — so an off-program decoding item is
+        // driven with {state:"WaitingForScene", transport:"Playing"}.
+        transport:
+          typeof it.transport === "string"
+            ? it.transport
+            : it.state === "Playing"
+              ? "Playing"
+              : "Paused",
       }));
     }
     for (const it of tickItems) {
@@ -1031,6 +1081,7 @@ app.post("/__mock/tick", (req, res) => {
           playlist_id: it.playlist_id,
           state: it.state,
           mode: "Continuous",
+          transport: it.transport,
         },
       });
       tickNowPlaying(it);
@@ -1147,7 +1198,15 @@ wss.on("connection", (ws) => {
       ws.send(
         JSON.stringify({
           type: "PlaybackStateChanged",
-          data: { playlist_id: 1, state: "Playing", mode: "Continuous" },
+          // #201: playlist 1 is on-program Playing → transport Playing so the
+          // shared Player toggle reads `⏸ Pauza` on the Dashboard (the label
+          // now follows transport, not the scene-aware `state`).
+          data: {
+            playlist_id: 1,
+            state: "Playing",
+            mode: "Continuous",
+            transport: "Playing",
+          },
         }),
       );
       // Playlist 2 gets now-playing info but stays Idle (no PlaybackStateChanged)

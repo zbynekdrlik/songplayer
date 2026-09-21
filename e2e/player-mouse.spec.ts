@@ -110,6 +110,30 @@ test.describe("#200: real mouse drags commit exactly once", () => {
     expect(seeks.length).toBe(1);
   });
 
+  test("seek bar: dragging back to a previously committed position posts again", async ({
+    page,
+    request,
+  }) => {
+    // The value-dedup must only stop the pointerup+change double commit of ONE
+    // release — a NEW drag that lands on the same 1 s step must post again
+    // (0.62.0 release review: the stale `committed` value swallowed it).
+    const seeks: number[] = [];
+    await page.route("**/api/v1/playback/*/seek", async (route) => {
+      seeks.push(JSON.parse(route.request().postData() || "{}").position_ms);
+      await route.fulfill({ status: 204 });
+    });
+    await tickDabing(request);
+    await page.goto("/dabing");
+    const seek = page.getByTestId("player-seek");
+    await expect(seek).toBeEnabled({ timeout: 15000 });
+    await mouseDrag(page, '[data-testid="player-seek"]', 0.1, 0.7);
+    await expect.poll(() => seeks.length, { timeout: 5000 }).toBe(1);
+    await page.waitForTimeout(1500);
+    await mouseDrag(page, '[data-testid="player-seek"]', 0.1, 0.7);
+    await expect.poll(() => seeks.length, { timeout: 5000 }).toBe(2);
+    expect(seeks[1]).toBe(seeks[0]);
+  });
+
   test("dub fader: a mouse drag PATCHes the dragged ratio and the fader stays there", async ({
     page,
     request,

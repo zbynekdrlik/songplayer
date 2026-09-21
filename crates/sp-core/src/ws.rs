@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::playback::{KaraokeMode, PlaybackMode, PlaybackState};
+use crate::playback::{KaraokeMode, PlaybackMode, PlaybackState, TransportState};
 
 /// State of a song currently being processed by the lyrics pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -64,6 +64,11 @@ pub enum ServerMsg {
         playlist_id: i64,
         state: PlaybackState,
         mode: PlaybackMode,
+        /// The pipeline's own transport state (#201), independent of `state`'s
+        /// on/off-program folding. `serde(default)` (=`Idle`) so older/mock
+        /// payloads that omit it still decode.
+        #[serde(default)]
+        transport: TransportState,
     },
     QueueUpdate {
         playlist_id: i64,

@@ -56,6 +56,11 @@ pub fn MixerChannel(ch: ChannelSpec) -> impl IntoView {
             .clamp(0.0, 100.0) as i32
     };
     let pct_to_gain = |p: i32| -> f32 { (p as f32 / 100.0).clamp(0.0, 1.0) };
+    // #198 item 1: a `dirty` latch set by `on:input`, cleared on commit. A bare
+    // `change` with no preceding `input` this session (a programmatic / stale
+    // dispatch, or a keyboard change that never moved the fader) must NOT commit
+    // the initial 0 % — `drag_pct` starts at 0. `on:change` is a no-op when unset.
+    let dirty = RwSignal::new(false);
     let on_input = move |ev: leptos::ev::Event| {
         // Every input (drag or keyboard) records the pending value in `drag_pct`,
         // which the commit reads on release. During a drag we do NOT touch `gain`
@@ -64,6 +69,7 @@ pub fn MixerChannel(ch: ChannelSpec) -> impl IntoView {
         // pointer session) also updates `gain` so its readout follows live.
         let p = read_pct(&ev);
         drag_pct.set(p);
+        dirty.set(true);
         if !dragging.get_untracked() {
             gain.set(pct_to_gain(p));
         }
@@ -74,6 +80,7 @@ pub fn MixerChannel(ch: ChannelSpec) -> impl IntoView {
     // Value-dedup keeps it to ONE PATCH per release.
     let committed = RwSignal::new(None::<i32>);
     let commit = move |p: i32| {
+        dirty.set(false);
         if committed.get_untracked() != Some(p) {
             committed.set(Some(p));
             let v = pct_to_gain(p);
@@ -82,7 +89,10 @@ pub fn MixerChannel(ch: ChannelSpec) -> impl IntoView {
         }
     };
     let on_change_ev = move |_ev: leptos::ev::Event| {
-        commit(drag_pct.get_untracked());
+        // #198: a bare `change` with no preceding `input` is a no-op (dirty latch).
+        if dirty.get_untracked() {
+            commit(drag_pct.get_untracked());
+        }
         dragging.set(false);
     };
 
@@ -101,10 +111,12 @@ pub fn MixerChannel(ch: ChannelSpec) -> impl IntoView {
                 prop:value=move || display_pct()
                 prop:disabled=move || !enabled.get()
                 on:pointerdown=move |_| {
+                    committed.set(None); // a new drag may land on the old value
                     drag_pct.set(pct());
                     dragging.set(true);
                 }
                 on:touchstart=move |_| {
+                    committed.set(None);
                     drag_pct.set(pct());
                     dragging.set(true);
                 }

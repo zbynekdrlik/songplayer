@@ -22,6 +22,9 @@ impl PlaybackEngine {
     }
 
     /// Manual /play: resume paused video if snapshot present, else scene-on. #88.
+    /// A pipeline that is ALREADY Playing (e.g. an off-program dub after a page
+    /// reload showed ▶ Prehrať) is a no-op — the scene-on fallback would flag an
+    /// off-program output as on program and re-push its title to the wall.
     pub async fn handle_engine_play(&mut self, playlist_id: i64) {
         match self.take_paused_snapshot(playlist_id) {
             Some((video_id, position_ms)) => {
@@ -29,8 +32,22 @@ impl PlaybackEngine {
                     .await;
             }
             None => {
+                let already_playing = self
+                    .pipelines
+                    .get(&playlist_id)
+                    .is_some_and(|pp| !play_should_scene_on(&pp.state));
+                if already_playing {
+                    tracing::debug!(playlist_id, "engine: /play on a playing pipeline — no-op");
+                    return;
+                }
                 self.handle_scene_change(playlist_id, true).await;
             }
         }
     }
+}
+
+/// Whether a manual /play with no pause snapshot may fall through to the
+/// scene-on dispatch: only when the pipeline is NOT already playing. Pure.
+pub(super) fn play_should_scene_on(state: &super::state::PlayState) -> bool {
+    !matches!(state, super::state::PlayState::Playing { .. })
 }

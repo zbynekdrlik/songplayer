@@ -251,6 +251,138 @@ async fn handle_health_snapshot_populates_registry_for_known_pipeline() {
     assert!(snapshots[0].last_submit_ts.is_some());
 }
 
+/// #198 item 5: the SYNC health handler must not `tokio::spawn` the receiver-
+/// count DB persist — a spawn from a sync caller with no running reactor panics
+/// ("there is no reactor running"). Build the engine (async, for the pool), then
+/// call the sync handler OUTSIDE any runtime context: the pre-fix
+/// `tokio::spawn(persist)` panicked here, so this is the RED test. A
+/// connection-count change (None -> 2) is exactly the persist trigger.
+#[test]
+fn handle_health_snapshot_persists_without_a_tokio_reactor() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut engine = rt.block_on(async {
+        let (mut engine, _registry) = fresh_engine().await;
+        engine.ensure_pipeline(7, "SP-test");
+        engine
+    });
+
+    let now = Instant::now();
+    // NOT inside `rt` — no reactor is running here.
+    engine.handle_health_snapshot(
+        7,
+        PipelineEvent::HealthSnapshot {
+            connections: 2,
+            frames_submitted_total: 150,
+            frames_submitted_last_5s: 30,
+            observed_fps: 29.97,
+            nominal_fps: 29.97,
+            last_submit_ts: Some(now),
+            last_heartbeat_ts: now,
+            consecutive_bad_polls: 0,
+            reported_state: PlaybackStateLabel::Playing,
+            pacing: Default::default(),
+            audio: Default::default(),
+            loop_stats: Default::default(),
+        },
+    );
+    // Reaching here without a panic IS the assertion. Drop the engine (and its
+    // sqlx pool) back inside the runtime so the pool teardown has a reactor.
+    rt.block_on(async move { drop(engine) });
+}
+
+/// 0.62.0 release review: the drain → DB write in `handle_pipeline_event` had no
+/// test (deleting the loop kept the workspace green while the #196 self-check
+/// baseline was never written again). A changed count (None → 2) must land in
+/// `settings` through the ASYNC event path.
+#[tokio::test]
+async fn health_snapshot_event_persists_the_receiver_count_to_the_db() {
+    let (mut engine, _registry) = fresh_engine().await;
+    engine.ensure_pipeline(7, "SP-test");
+    let now = Instant::now();
+    engine
+        .handle_pipeline_event(
+            7,
+            PipelineEvent::HealthSnapshot {
+                connections: 2,
+                frames_submitted_total: 150,
+                frames_submitted_last_5s: 30,
+                observed_fps: 29.97,
+                nominal_fps: 29.97,
+                last_submit_ts: Some(now),
+                last_heartbeat_ts: now,
+                consecutive_bad_polls: 0,
+                reported_state: PlaybackStateLabel::Playing,
+                pacing: Default::default(),
+                audio: Default::default(),
+                loop_stats: Default::default(),
+            },
+        )
+        .await;
+    let counts = crate::db::models_ndi::all_last_receiver_counts(&engine.pool).await;
+    assert_eq!(
+        counts.get(&7),
+        Some(&2),
+        "the changed count must be persisted"
+    );
+}
+
+/// #201 (0.62.0 review): a manual /play on a pipeline that is ALREADY Playing
+/// must be a no-op — the scene-on fallback would flag an off-program output as
+/// on program. Engine-level: kills the `delete !` mutant on the call-site guard
+/// (the pure helper's test cannot). Uses `fresh_engine` from this file.
+#[tokio::test]
+async fn engine_play_on_a_playing_pipeline_does_not_scene_on() {
+    let (mut engine, _registry) = fresh_engine().await;
+    engine.ensure_pipeline(7, "SP-test");
+    use std::sync::atomic::Ordering;
+    {
+        let pp = engine.pipelines.get_mut(&7).unwrap();
+        pp.state = crate::playback::state::PlayState::Playing { video_id: 42 };
+        pp.scene_active.store(false, Ordering::Release);
+    }
+    engine.handle_engine_play(7).await;
+    assert!(
+        !engine
+            .pipelines
+            .get(&7)
+            .unwrap()
+            .scene_active
+            .load(Ordering::Acquire),
+        "a playing pipeline must not be flagged on program by /play"
+    );
+
+    // The opposite branch still reaches the scene-on dispatch.
+    engine.pipelines.get_mut(&7).unwrap().state =
+        crate::playback::state::PlayState::WaitingForScene;
+    engine.handle_engine_play(7).await;
+    assert!(
+        engine
+            .pipelines
+            .get(&7)
+            .unwrap()
+            .scene_active
+            .load(Ordering::Acquire),
+        "a non-playing pipeline goes through the scene-on dispatch"
+    );
+}
+
+/// #198 item 5: the pending receiver-count persist buffer debounces a flapping
+/// count to its latest value and `drain` CLEARS it (so a value is written at
+/// most once per drain). Kills the queue-noop / drain-empty / drain-no-clear
+/// mutants.
+#[test]
+fn pending_receiver_count_persist_debounces_to_latest_and_drain_clears() {
+    let reg = NdiHealthRegistry::new();
+    reg.queue_receiver_count_persist(7, 2);
+    reg.queue_receiver_count_persist(7, 0); // a flap within one drain — latest wins
+    reg.queue_receiver_count_persist(9, 3);
+    let mut drained = reg.drain_pending_persists();
+    drained.sort();
+    assert_eq!(drained, vec![(7, 0), (9, 3)]);
+    // A second drain is empty — the buffer was taken, not cloned.
+    assert!(reg.drain_pending_persists().is_empty());
+}
+
 #[tokio::test]
 async fn handle_health_snapshot_drops_event_for_unknown_pipeline() {
     let (mut engine, registry) = fresh_engine().await;

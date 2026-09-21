@@ -193,6 +193,18 @@ impl PlaybackEngine {
             }
             ev @ PipelineEvent::HealthSnapshot { .. } => {
                 self.handle_health_snapshot(playlist_id, ev.clone());
+                // #198 item 5: the sync handler only QUEUES a changed receiver
+                // count; drain and persist it here in the async context (in
+                // order, one write per changed output), replacing the per-poll
+                // detached `tokio::spawn` that could panic for a sync caller.
+                for (pid, connections) in self.ndi_health_registry.drain_pending_persists() {
+                    if let Err(e) =
+                        crate::db::models_ndi::set_last_receiver_count(&self.pool, pid, connections)
+                            .await
+                    {
+                        tracing::debug!(playlist_id = pid, %e, "ndi: failed to persist receiver count");
+                    }
+                }
             }
         }
     }

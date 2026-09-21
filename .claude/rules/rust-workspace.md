@@ -19,6 +19,20 @@ established split patterns:
 - **Test split:** move a `#[cfg(test)] mod` out to `<file>_tests.rs` and include
   it via `#[path = "<file>_tests.rs"] #[cfg(test)] mod tests;`.
 
+## A wider `let` binding in a file AT the 1000-line cap can push it over via rustfmt (#198 item 8)
+
+Changing a call site in a file already at exactly 1000 lines is only safe if it
+adds NO line — and a wider `let` pattern can force rustfmt to re-wrap the block
+and ADD one, which the no-compile box only learns at the CI cap check. `pipeline.rs`
+(1000/1000): widening `let (ndi_audio, audio_us) = …timed(|| …)` to
+`let ((ndi_audio, ring_depth), audio_us) = …` pushed the `let` line past ~100
+cols, and rustfmt re-indented the whole closure body (a diff, and a risk of an
+extra line). Fix: keep the binding SHORT — bind the tuple once
+(`let (audio_out, audio_us) = …`) and use `audio_out.0` / `audio_out.1` at the use
+sites, instead of destructuring in the `let`. Verify with
+`awk 'NR==<line>{print length($0)}'` + `cargo fmt --all --check` (both Tier-0-allowed)
+and re-`wc -l` before committing.
+
 ## `cargo fmt --all` reorders `crates/sp-server/src/db/models.rs` — REVERT it
 The box's local rustfmt is OLDER than CI's `dtolnay/rust-toolchain@stable`, and
 the two disagree on `reorder_modules` for `models.rs`'s no-blank-line `#[path]
@@ -112,4 +126,14 @@ since 1.80) rejects a paragraph line that directly follows a list item without
 a blank doc line or indentation — the Tier-0 box cannot see it, so it fails
 the Lint job (#195, three sites). After the last `- item` / `3. item`, insert a
 bare `//!` (or `///`) line before continuing prose.
+
+## Format BEFORE every commit, RED commits included
+
+The Lint job runs `cargo fmt --all -- --check` on the pushed HEAD, so a RED
+test commit formatted only at the GREEN step still leaves the tree dirty when
+the GREEN `git add` is selective — the later `cargo fmt --all` then formats
+the RED files as an unstaged change nobody commits (0.62.0 cut, `e151ca1`).
+Run `cargo fmt --all && git checkout -- crates/sp-server/src/db/models.rs`
+before EACH commit in a RED→GREEN chain, and commit with `git add -u crates/`
+(not a hand-picked file list) after formatting.
 
