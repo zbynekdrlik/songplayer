@@ -391,3 +391,23 @@ fn relay_drops_a_lagging_viewer_rather_than_blocking() {
     // After the lag it resyncs to the most recent fragments still buffered.
     assert!(rx.try_recv().is_ok());
 }
+
+#[test]
+fn relay_at_the_production_backlog_lags_a_viewer_five_behind() {
+    // #184 round F: at the shipped backlog of 4 fragments (RELAY_CAPACITY, = 2 s),
+    // a viewer that falls 5 fragments behind without draining is dropped
+    // (`Lagged`) and resyncs — it can never sit a full 32-s backlog behind the
+    // wall. Same shape as the `new(2)` tiny-backlog test above, at the real cap.
+    use tokio::sync::broadcast::error::TryRecvError;
+    let relay = FragmentRelay::new(4);
+    let mut rx = relay.subscribe();
+    for i in 0..5u8 {
+        relay.ingest(RelayChunk::Fragment(vec![i]));
+    }
+    match rx.try_recv() {
+        Err(TryRecvError::Lagged(n)) => assert!(n >= 1, "at least one fragment dropped"),
+        other => panic!("expected Lagged at cap 4 with 5 sent, got {other:?}"),
+    }
+    // It resyncs to the newest fragments still in the 4-deep backlog.
+    assert!(rx.try_recv().is_ok());
+}
