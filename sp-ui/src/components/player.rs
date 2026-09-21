@@ -12,6 +12,7 @@
 
 use leptos::prelude::*;
 use serde::Serialize;
+use sp_core::mixer_model::mixer_controls;
 use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
 use sp_core::seek_model::{format_position, seek_display_ms, seek_target_ms};
 
@@ -181,8 +182,9 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // --- mixer slot: chosen from the PLAYING item, collapsed to a Memo so the
     // frequent position ticks do NOT remount the mixer (only a change of the
     // playing video, or of its dub row, re-renders it). A dub row → the dub
-    // adapter; otherwise the karaoke adapter for this playlist. `store.dabing`
-    // is empty on non-Dabing pages, so those always get the karaoke mixer.
+    // adapter; a stems-capable song → the karaoke adapter; BOTH when both apply
+    // (#184 B2). `store.dabing` is now app-polled, so the dub adapter appears on
+    // every page — Dashboard / Live too, not only after visiting /dabing.
     let mixer_choice = Memo::new(move |_| {
         let vid = store.now_playing.get().get(&pid).map(|i| i.video_id);
         vid.and_then(|v| store.dabing.get().into_iter().find(|r| r.video_id == v))
@@ -409,21 +411,35 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                         }
                             .into_any()
                     } else {
-                        match mixer_choice.get() {
-                            Some(row) => {
+                        // #184 B2: render the dub mixer and/or the karaoke mixer
+                        // from the pure predicate. A dub video shows the dub
+                        // mixer; the karaoke mixer shows for a stems-capable dub
+                        // AND for any non-dub song (the plain-song default —
+                        // KaraokeMixer self-locks when the song has no stems).
+                        let choice = mixer_choice.get();
+                        let controls = mixer_controls(
+                            choice.as_ref().map(|r| r.dub_status.as_str()),
+                            choice.as_ref().and_then(|r| r.stem_status.as_deref()),
+                        );
+                        let show_karaoke = controls.karaoke || !controls.dub;
+                        let dub_panel = choice
+                            .filter(|_| controls.dub)
+                            .map(|row| {
                                 view! {
                                     <DubMixer
                                         video_id=row.video_id
-                                        title=row.title.clone()
-                                        dub_status=row.dub_status.clone()
+                                        title=row.title
+                                        dub_status=row.dub_status
                                         dub_mix_ratio=row.dub_mix_ratio
-                                        stem_status=row.stem_status.clone()
+                                        stem_status=row.stem_status
                                     />
                                 }
-                                    .into_any()
-                            }
-                            None => view! { <KaraokeMixer playlist_id=pid /> }.into_any(),
+                            });
+                        view! {
+                            {dub_panel}
+                            {show_karaoke.then(|| view! { <KaraokeMixer playlist_id=pid /> })}
                         }
+                            .into_any()
                     }
                 }}
             </div>

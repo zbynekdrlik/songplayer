@@ -20,13 +20,23 @@ use crate::components::mixer_channel::ChannelSpec;
 
 /// PATCH the current ratio to the server (live for the playing video; persisted
 /// otherwise). Signals are `Copy`, so each callback captures them independently.
-fn patch_ratio(video_id: i64, r: RwSignal<f32>, status: RwSignal<String>) {
+/// #184 A3: `in_flight` is raised before the request and cleared when it
+/// resolves, so a poll-driven re-seed can't snap the bed display back to the old
+/// persisted value while the change is still landing.
+fn patch_ratio(
+    video_id: i64,
+    r: RwSignal<f32>,
+    status: RwSignal<String>,
+    in_flight: RwSignal<bool>,
+) {
     let ratio = r.get_untracked() as f64;
+    in_flight.set(true);
     leptos::task::spawn_local(async move {
         match api::patch_dub_mix(video_id, ratio).await {
             Ok(()) => status.set("Uložené".into()),
             Err(e) => status.set(format!("Chyba: {e}")),
         }
+        in_flight.set(false);
     });
 }
 
@@ -50,9 +60,18 @@ pub fn DubMixer(
     let orig = RwSignal::new(ratio_to_faders(init_r, has_stems)[0]);
     let ambient = RwSignal::new(1.0_f32);
     let status = RwSignal::new(String::new());
+    // #184 A3: true while a dub-mix PATCH is in flight.
+    let in_flight = RwSignal::new(false);
 
-    // Keep the read-only original-bed display in sync with the live ratio.
+    // Keep the read-only original-bed display in sync with the live ratio — but
+    // NOT while a PATCH is in flight (#184 A3): a re-render from the 2 s poll
+    // could otherwise re-seed the bed from the stale persisted value under the
+    // operator, a visible snap-back. Once the PATCH resolves the poll shows the
+    // persisted value.
     Effect::new(move |_| {
+        if in_flight.get() {
+            return;
+        }
         orig.set(ratio_to_faders(r.get(), has_stems)[0]);
     });
 
@@ -77,7 +96,7 @@ pub fn DubMixer(
             gain: r,
             enabled: ready_sig,
             fixed_note: None,
-            on_change: Callback::new(move |_v: f32| patch_ratio(video_id, r, status)),
+            on_change: Callback::new(move |_v: f32| patch_ratio(video_id, r, status, in_flight)),
             testid: Some("dub-mix-fader".to_string()),
         },
     ];
@@ -105,7 +124,7 @@ pub fn DubMixer(
                     // The preset's ratio via the unified model: its fader set's
                     // `dabing` channel (index 1) is the ratio.
                     r.set(faders_to_ratio(&gains_for_preset(MixerKind::Dub, &pid, 0.0)));
-                    patch_ratio(video_id, r, status);
+                    patch_ratio(video_id, r, status, in_flight);
                 }),
             }
         })

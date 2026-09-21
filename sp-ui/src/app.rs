@@ -113,6 +113,28 @@ pub fn App() -> impl IntoView {
         });
     });
 
+    // #184: poll the Dabing list at the app level too, so `store.dabing` (and the
+    // Dabing playlist id) exist on EVERY page — the shared Player's mixer slot
+    // must pick the dub mixer for a playing dub video on the Dashboard / Live,
+    // not only after visiting /dabing (defect B). Same `poll_value` helper + 2 s
+    // cadence the Dabing page used; the cancel flag never fires (the app root
+    // never unmounts), and every store write is `try_set` (disposal-safe).
+    let dabing_cancel = RwSignal::new(false);
+    Effect::new(move |_| {
+        crate::store::poll_value("/api/v1/dabing", 2_000, dabing_cancel, move |v| {
+            if let Some(pid) = v.get("playlist_id").and_then(|p| p.as_i64())
+                && store.dabing_playlist_id.try_get_untracked().flatten() != Some(pid)
+            {
+                let _ = store.dabing_playlist_id.try_set(Some(pid));
+            }
+            let rows = v
+                .get("videos")
+                .and_then(|a| serde_json::from_value::<Vec<crate::store::DubRow>>(a.clone()).ok())
+                .unwrap_or_default();
+            store.dabing.try_set(rows).is_some()
+        });
+    });
+
     view! {
         <nav class="navbar">
             <span class="logo">"SongPlayer"</span>
