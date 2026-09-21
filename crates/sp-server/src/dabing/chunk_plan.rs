@@ -40,8 +40,17 @@ impl Silence {
 /// speech pause, not the micro-gaps between words).
 pub const MIN_PAUSE_MS: u64 = 700;
 
-/// The maximum chunk length (8 minutes) — headroom under the Live session limit.
-pub const MAX_CHUNK_MS: u64 = 8 * 60 * 1000;
+/// The default dub Live-session ceiling — 2 minutes (#184 round E). The pinned
+/// voice (round C) HOLDS at a session start but the model DRIFTS to another voice
+/// inside a long session; the 120 s vs 30 s experiment showed ~2 min is the
+/// validated stable point (one pinned 120 s session = 0 drift) and ~7 min is where
+/// the drift appeared. The worker reads the `dub_session_max_s` setting per tick and
+/// passes it as the ceiling; this is the fallback when the setting is absent/blank.
+pub const DUB_SESSION_MAX_MS: u64 = 480_000;
+
+/// The maximum chunk length — the default Live-session ceiling
+/// ([`DUB_SESSION_MAX_MS`]). Kept as the ceiling `ChunkPlanConfig::default` uses.
+pub const MAX_CHUNK_MS: u64 = DUB_SESSION_MAX_MS;
 
 /// Chunk-plan tuning. Defaults are [`MIN_PAUSE_MS`] / [`MAX_CHUNK_MS`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -88,6 +88,18 @@ pub fn dub_voice_from(raw: Option<&str>) -> String {
     }
 }
 
+/// Parse the `dub_session_max_s` setting — the dub Live-session length cap in
+/// SECONDS (#184 round E), returned in MILLISECONDS for `plan_chunks`. Absent /
+/// blank / non-numeric → the default ceiling ([`chunk_plan::DUB_SESSION_MAX_MS`]);
+/// a numeric value is clamped to `60..=480` seconds so a session is never shorter
+/// than a minute nor longer than the old 8-min ceiling. Pure — unit-tested.
+pub fn dub_session_max_ms_from(raw: Option<&str>) -> u64 {
+    match raw.and_then(|v| v.trim().parse::<u64>().ok()) {
+        Some(secs) => secs.clamp(60, 480) * 1000,
+        None => chunk_plan::DUB_SESSION_MAX_MS,
+    }
+}
+
 /// The bundled ffmpeg path (next to the other tools). Mirrors
 /// `tools::ffmpeg_filename` without depending on its visibility.
 fn ffmpeg_path(tools_dir: &Path) -> PathBuf {
@@ -327,7 +339,20 @@ impl DubWorker {
             .or_else(|| job.duration_ms.map(|d| d.max(0) as u64))
             .filter(|&t| t > 0)
             .ok_or_else(|| anyhow::anyhow!("dub: could not determine audio duration"))?;
-        let chunks = chunk_plan::plan_chunks(&silences, total_ms, &ChunkPlanConfig::default());
+        // #184 round E: cap the Live session at the `dub_session_max_s` setting
+        // (default 120 s) so the pinned voice does not drift inside a long session.
+        let session_max_ms = dub_session_max_ms_from(
+            crate::db::models::get_setting(&self.pool, sp_core::config::SETTING_DUB_SESSION_MAX_S)
+                .await
+                .ok()
+                .flatten()
+                .as_deref(),
+        );
+        let plan_cfg = ChunkPlanConfig {
+            min_pause_ms: chunk_plan::MIN_PAUSE_MS,
+            max_chunk_ms: session_max_ms,
+        };
+        let chunks = chunk_plan::plan_chunks(&silences, total_ms, &plan_cfg);
         let plan_json_path = work_dir.join("chunk_plan.json");
         tokio::fs::write(&plan_json_path, serde_json::to_vec(&chunks)?).await?;
         info!(
@@ -569,6 +594,21 @@ mod tests {
         // Any non-blank name passes through, trimmed.
         assert_eq!(dub_voice_from(Some("Kore")), "Kore");
         assert_eq!(dub_voice_from(Some("  Orus  ")), "Orus");
+    }
+
+    #[test]
+    fn dub_session_max_ms_defaults_and_clamps() {
+        // Absent / blank / non-numeric → the default 2-minute ceiling (round E).
+        assert_eq!(dub_session_max_ms_from(None), 120_000);
+        assert_eq!(dub_session_max_ms_from(Some("")), 120_000);
+        assert_eq!(dub_session_max_ms_from(Some("   ")), 120_000);
+        assert_eq!(dub_session_max_ms_from(Some("bad")), 120_000);
+        // A valid value is seconds → ms.
+        assert_eq!(dub_session_max_ms_from(Some("60")), 60_000);
+        assert_eq!(dub_session_max_ms_from(Some(" 90 ")), 90_000);
+        // Clamped: below 60 s → 60 s, above 480 s → 480 s.
+        assert_eq!(dub_session_max_ms_from(Some("10")), 60_000);
+        assert_eq!(dub_session_max_ms_from(Some("999")), 480_000);
     }
 
     #[test]
