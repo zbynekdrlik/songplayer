@@ -85,7 +85,7 @@ impl SubmitJob {
             width: frame.width,
             height: frame.height,
             stride: frame.stride,
-            video: SharedFrame::new(frame.video.to_vec()),
+            video: frame.video.clone(),
             audio: audio.to_vec(),
             video_tc_100ns,
             audio_tc_100ns,
