@@ -862,3 +862,27 @@ fn pop_block_reuses_the_scratch_and_samples_for_is_byte_identical() {
     );
     assert!(sil.iter().all(|&x| x == 0.0), "silence is all zeros");
 }
+
+#[test]
+fn emitter_stats_computes_jitter_p99_on_demand_from_the_ring() {
+    // #203: the emit jitter p99 is computed ON DEMAND in emitter_stats (the
+    // heartbeat/health cadence), NEVER mirrored per slot on the TIME_CRITICAL
+    // thread. Driving ticks DIRECTLY on the emitter (never emit_one_block, the
+    // only mirror site) means a per-slot mirror would leave the reported p99 at
+    // 0; emitter_stats must instead read the LIVE ring.
+    let shared = new_shared_emitter();
+    {
+        let mut g = shared.emitter.lock().unwrap();
+        for i in 0..50i64 {
+            let b = g.next_boundary_100ns(0);
+            g.tick(b + i * 10); // jitter = i µs
+        }
+    }
+    let direct = shared.emitter.lock().unwrap().emit_jitter_p99_us();
+    assert_eq!(direct, 49, "the ring's p99 of jitter 0..49 is 49");
+    assert_eq!(
+        emitter_stats(&shared).emit_jitter_p99_us,
+        direct,
+        "emitter_stats reports the same p99, computed on demand from the ring"
+    );
+}
