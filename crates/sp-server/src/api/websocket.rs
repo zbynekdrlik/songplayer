@@ -298,12 +298,17 @@ fn playback_state_replay(
 mod tests {
     use super::*;
 
-    fn snapshot(playlist_id: i64, state: PlaybackStateLabel) -> PipelineHealthSnapshot {
+    fn snapshot(
+        playlist_id: i64,
+        state: PlaybackStateLabel,
+        transport: TransportState,
+    ) -> PipelineHealthSnapshot {
         use crate::playback::ndi_health::{AudioStats, PacingStats};
         PipelineHealthSnapshot {
             playlist_id,
             ndi_name: format!("SP-{playlist_id}"),
             state,
+            transport,
             connections: 1,
             frames_submitted_total: 0,
             frames_submitted_last_5s: 0,
@@ -327,8 +332,8 @@ mod tests {
     #[test]
     fn replay_maps_playing_and_skips_idle() {
         let snaps = vec![
-            snapshot(1, PlaybackStateLabel::Playing),
-            snapshot(2, PlaybackStateLabel::Idle),
+            snapshot(1, PlaybackStateLabel::Playing, TransportState::Playing),
+            snapshot(2, PlaybackStateLabel::Idle, TransportState::Idle),
         ];
         let mut modes = HashMap::new();
         modes.insert(1, PlaybackMode::Loop);
@@ -354,7 +359,11 @@ mod tests {
 
     #[test]
     fn replay_unknown_playlist_uses_default_mode_and_paused_maps_to_waiting() {
-        let snaps = vec![snapshot(7, PlaybackStateLabel::Paused)];
+        let snaps = vec![snapshot(
+            7,
+            PlaybackStateLabel::Paused,
+            TransportState::Paused,
+        )];
         // No mode entry for playlist 7 → default mode.
         let msgs = playback_state_replay(&snaps, &HashMap::new());
         assert_eq!(msgs.len(), 1);
@@ -370,6 +379,33 @@ mod tests {
                 // #201: a Paused label (a Playing-off-program pipeline the health
                 // registry reconciled) replays transport Paused.
                 assert_eq!(*transport, TransportState::Paused);
+            }
+            other => panic!("expected PlaybackStateChanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn replay_reads_snapshot_transport_not_label() {
+        // #201 round 2: the on-connect replay must read the snapshot's RAW
+        // transport, NOT a second mapping from the scene-reconciled label. An
+        // off-program decoding pipeline is stored `state: Paused` (reconciled)
+        // but `transport: Playing` (raw) — the replay must carry
+        // `transport: Playing` so a reloaded dashboard reads `⏸ Pauza` at once.
+        let snaps = vec![snapshot(
+            9,
+            PlaybackStateLabel::Paused,
+            TransportState::Playing,
+        )];
+        let msgs = playback_state_replay(&snaps, &HashMap::new());
+        assert_eq!(msgs.len(), 1);
+        match &msgs[0] {
+            ServerMsg::PlaybackStateChanged {
+                state, transport, ..
+            } => {
+                // The scene-reconciled label still maps to WaitingForScene …
+                assert_eq!(*state, WsPlaybackState::WaitingForScene);
+                // … but the transport is the RAW decoding state on the snapshot.
+                assert_eq!(*transport, TransportState::Playing);
             }
             other => panic!("expected PlaybackStateChanged, got {other:?}"),
         }

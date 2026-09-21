@@ -182,6 +182,22 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     await mouseDrag(page, '[data-testid="player-seek"]', 0.05, 0.3);
     expect((await seekResp).status()).toBe(204);
 
+    // #201 round 2: a reload WHILE the off-program dub still decodes must read
+    // ⏸ Pauza immediately — the on-connect replay now carries the pipeline's
+    // RAW transport (round 1 replayed the scene-reconciled Paused label, so a
+    // reload showed ▶ Prehrať until the next live message). Wait for the app
+    // socket after the reload so any follow-up reaches an open socket.
+    const wsAfterReload = page.waitForEvent("websocket", {
+      predicate: (ws) => !ws.url().includes("preview"),
+      timeout: 15000,
+    });
+    await page.reload();
+    await wsAfterReload;
+    await expect(page.getByTestId("player-playpause")).toContainText(
+      "⏸ Pauza",
+      { timeout: 15000 },
+    );
+
     // #201: pausing the off-program dub flips the transport label to `▶ Prehrať`
     // (the pipeline stops decoding), proving the label tracks the pipeline.
     await request.post(`/api/v1/playback/${dabingPid}/pause`);

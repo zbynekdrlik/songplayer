@@ -104,6 +104,7 @@ fn burn_health_snapshot(burn_on: bool) -> crate::playback::ndi_health::PipelineH
         burn_on,
         recovery_step: None,
         sender_url: None,
+        transport: sp_core::playback::TransportState::Idle,
     }
 }
 
