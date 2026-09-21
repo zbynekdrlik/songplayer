@@ -140,8 +140,9 @@ raising (separation would only be marked unsupported). Live INPUT is the ORIGINA
 
 - **Chunk plan (Rust owns it):** the worker runs ffmpeg `silencedetect` (a light
   off-slot pass at BELOW_NORMAL), parses it with `chunk_plan::parse_silencedetect`,
-  and `chunk_plan::plan_chunks` cuts at pauses ≥ 700 ms into chunks ≤ 8 min (Live
-  session headroom), never mid-speech; the plan JSON is the child's `--chunk-plan`
+  and `chunk_plan::plan_chunks` cuts at pauses ≥ 700 ms into chunks ≤ the session
+  cap (round E: 2 min default, the `dub_session_max_s` setting), never mid-speech;
+  the plan JSON is the child's `--chunk-plan`
   INPUT. `placement_for(chunk_start, chunk_len, out_len, next_start)` decides the
   atempo (≤ 1.08, only on overrun); the worker calls it per chunk AFTER the child
   returns each `out_len` to LOG + verify drift ≤ 2 s (`DUB_MAX_DRIFT_MS`), and
@@ -157,8 +158,8 @@ chunks (real-time by default; `dub_pace` setting → `--pace`, 2× tested on box
 `audio_stream_end`, collect 24 kHz PCM + input/output transcription (SK stamped by
 output-audio position), trim trailing silence, atempo if it would overrun the next
 chunk, write `chunk_N.wav`. **Heartbeats into `work_dir` every 5 s** so the
-`wait_with_stall_timeout` never kills a healthy mid-chunk stream (a chunk can be
-8 min with no other work-dir write). Assembles `<base>_dub.flac` at **48 kHz
+`wait_with_stall_timeout` never kills a healthy mid-chunk stream (a chunk can run
+its full session cap with no other work-dir write). Assembles `<base>_dub.flac` at **48 kHz
 STEREO loudnorm -16** (must match the stem format `StemMixReader` requires), writes
 `<base>_dub_transcripts.json` (D3), and prints the summary JSON on stdout (the ONLY
 stdout line — logs go to stderr). Key ONLY via `GEMINI_API_KEY` env (`bootstrap::
@@ -384,18 +385,57 @@ Slovak labels).
   `GET /api/v1/dabing` payload and shown in the Dabing row as `hlas: <voice>`.
 
 ## `scripts/dub_voice_check.py` — objective consistency check (box/dev1 tool)
-Reads a dub FLAC/WAV, per-window (30 s) f0 median, exits 1 when the
-INTERQUARTILE spread of the window medians (in semitones vs the file median)
-exceeds `MAX_IQR_ST = 8` — the rotating-voice symptom (alternating voices an
-octave apart = IQR 12 st). **Do not use the max spread as the gate:** measured
-21.9.2026 on the 36-min re-dubbed sample, ONE pinned voice has IQR 4.5 st but a
-max spread of 14.7 st (natural intonation + the odd octave-error window), so the
-original 3 st max-spread limit (set from a 20 s same-sentence probe) flagged a
-single voice; the max spread is printed for information only. A female↔male
-rotation puts whole windows in the ~200 Hz band; a single male voice stays in
-80–145 Hz. It is NOT executed in CI but IS ruff-lint-scoped
-(`ci.yml` eval-checks). Its pure helpers run in CI eval-checks WITHOUT librosa —
-the f0 measurement prefers `librosa.pyin` but falls back to a dependency-free
-numpy autocorrelation (`f0_autocorr`), and the pytest forces the fallback
+**Round E replaced the round-C IQR rule (it verified nothing).** Reads a dub
+FLAC/WAV, per-window (**5 s**, was 30) f0 median, and exits 1 when the FRACTION of
+voiced windows more than **6 st ABOVE the file median** exceeds
+`MAX_HIGH_BAND_FRACTION = 0.05` — the rotating-voice symptom (recurring female
+stretches above a base male voice). The max spread and IQR are still printed but
+are **information only**: measured 21.9.2026 on the 36-min sample, ONE pinned
+voice has IQR 4.5 st / max spread 14.7 st (natural intonation + an octave-error
+window), so the round-C IQR gate diluted 100-s female stretches into a passing
+number. A female↔male rotation puts whole 5-s windows in the ~200 Hz band; a
+single male voice stays in 80–145 Hz. NB a *balanced* 50/50 octave alternation is
+NOT flagged (by definition ≤ 50 % of windows exceed the median, and the arithmetic
+median of an equal split sits too close to the high voice) — that is not the real
+symptom. It is NOT executed in CI but IS ruff-lint-scoped (`ci.yml` eval-checks).
+Its pure helpers (`high_band_fraction`, `f0_autocorr`, `window_medians`) run in CI
+eval-checks WITHOUT librosa — the f0 measurement prefers `librosa.pyin` but falls
+back to a dependency-free numpy autocorrelation, and the pytest forces the fallback
 (`use_librosa=False`) so it RUNS, never skips (CI installs numpy + soundfile, not
 librosa).
+
+# Dabing round E (#184) — the pinned voice drifts inside a long session: cap it + a per-chunk guard
+
+Round C pins the voice via `speech_config`, and the pin HOLDS at a session start —
+but the model DRIFTS to another voice INSIDE a long session (video 344, 5 sessions
+of ~430 s: 55/431 5-s windows landed in a 200–224 Hz female band while the SOURCE
+at those seconds was a steady male 116–134 Hz; where the source itself rose to
+~200 Hz the dub correctly followed). The 120 s vs 30 s experiment: one pinned 120 s
+session = 0 drifted windows; the same slice as four 30 s sessions = 3 (11 %); ~7 min
+is where drift showed. So **~2 min is the validated stable point.**
+
+## (a) Session cap — `chunk_plan.rs` + `dub_session_max_s` setting
+`chunk_plan::DUB_SESSION_MAX_MS = 120_000` is the default ceiling
+`ChunkPlanConfig::default` uses (`MAX_CHUNK_MS` is kept as its alias). The
+`dub_session_max_s` setting (`sp_core::config::SETTING_DUB_SESSION_MAX_S`, default
+120, clamped 60..=480 s) is read per tick in `worker.rs::synthesize` via the pure
+`dub_session_max_ms_from(setting) -> u64` (mirrors `dub_pace_from`/`dub_voice_from`)
+and passed as the plan ceiling. `plan_chunks` still cuts only at pauses ≥ 700 ms,
+never mid-speech; a 36-min talk is ~18 sessions (the ~27 s drain per session adds
+~8 min, ≈ 1.4× realtime, accepted).
+
+## (b) Per-chunk voice-band guard — `dub_worker.py::_process_chunk`
+After a chunk is synthesized + trimmed, it is scanned in 5-s windows. Pure
+`chunk_voice_drift(out_medians, in_medians) -> (drifted, voiced)`: a window is
+DRIFTED when its OUTPUT median is > 6 st above the OUTPUT chunk median AND the
+aligned INPUT window (same 5-s index, aligned by fraction of duration when the
+atempo changed the count) is NOT > 6 st above the INPUT chunk median — so a
+genuine high stretch in the SOURCE is not counted. `_chunk_is_drifted` flags a
+chunk at drifted/voiced > 0.20; a flagged chunk is re-synthesized ONCE (new
+session, same pin) and the candidate with fewer drifted windows is kept.
+`chunk_N.json` records `voice_band_ok` / `voice_drifted_windows` / `voice_windows`;
+one line is logged per chunk. Output medians come from the trimmed WAV
+(wave + numpy), input from the in-memory 16 kHz PCM, both via `dub_voice_check`'s
+numpy-only helpers. `DubWorker::ensure_script` now ships `dub_voice_check.py`
+alongside `dub_worker.py` (the pure `embedded_tool_scripts()`, mutation-covered;
+the I/O `ensure_script` is mutation-excluded like `synthesize`).
