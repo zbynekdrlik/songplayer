@@ -411,18 +411,26 @@ pub fn pool_tuning() -> PoolTuning {
         journal_mode: SqliteJournalMode::Wal,
         synchronous: SqliteSynchronous::Normal,
         busy_timeout: Duration::from_secs(5),
-        // RED (#184): 30 s is sqlx's unbounded default — the bug. GREEN sets 2 s.
-        acquire_timeout: Duration::from_secs(30),
+        // Bounded — never sqlx's 30 s default (the dub-mix stall).
+        acquire_timeout: Duration::from_secs(2),
     }
 }
 
-/// Create a connection pool backed by a file.
+/// Create a connection pool backed by a file, hardened per [`pool_tuning`]:
+/// WAL + NORMAL synchronous + a 5 s busy timeout on the connection, and a 2 s
+/// acquire timeout on the pool — so a contended write never parks a request for
+/// 30 s (#184 round A).
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {
+    let t = pool_tuning();
     let opts = SqliteConnectOptions::from_str(path)?
         .create_if_missing(true)
-        .foreign_keys(true);
+        .foreign_keys(true)
+        .journal_mode(t.journal_mode)
+        .synchronous(t.synchronous)
+        .busy_timeout(t.busy_timeout);
     SqlitePoolOptions::new()
         .max_connections(5)
+        .acquire_timeout(t.acquire_timeout)
         .connect_with(opts)
         .await
 }
