@@ -140,6 +140,17 @@ same 7 sentences (`seg_spec` items 2..8), plus an intensity layer.
   `google-genai==2.24.0`; add `librosa soundfile numpy` for the f0 read); the key
   is read INSIDE Python from `GET http://10.77.9.201:8920/api/v1/settings`
   `gemini_api_key` (csv, first entry), never on a command line / log / commit.
+- **Session-length drift (#184 round E, verified 2026-09-21).** The pin HOLDS at a
+  session START but the model DRIFTS inside a LONG session. Experiment on the same
+  120 s EN slice (`seg.wav`, key read inside python from the box settings): ONE
+  pinned 120 s session → 0 windows > 150 Hz, 0 band flips (5-s scan, median 93 Hz);
+  the SAME slice as four 30 s pinned sessions → 3 windows (11 %), 3 flips — so
+  shorter is NOT automatically better, ~2 min is the validated point and ~7 min is
+  where the drift showed on video 344. Script:
+  `scratchpad/voice_session_experiment.py` (reuses the eval venv
+  `.venv-live` + `dub_voice_check.window_medians`). Prod fix: cap the Live session
+  at `dub_session_max_s` (default 120 s) + a per-chunk voice-band guard in
+  `dub_worker.py` (`.claude/rules/dabing.md` round E).
 - **SeamlessM4T v2 / Seamless Expressive**: NO Slovak SPEECH output (v2 = `slk`
   speech input + text output only, 35 speech-output langs exclude it; Expressive =
   en↔fr/de/it/zh/es). Reason rows, no GPU spent.
