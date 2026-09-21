@@ -453,20 +453,23 @@ pub struct EmitterTelemetry {
     pub silence_blocks: AtomicU64,
     pub late_blocks: AtomicU64,
     pub ring_depth_ms: AtomicU64,
-    pub emit_jitter_p99_us: AtomicU64,
+    // NOTE (#203): the emit jitter p99 is NOT mirrored here. Computing it means
+    // sorting the 900-entry jitter ring — an O(n log n) alloc-and-sort that used
+    // to run on the TIME_CRITICAL emit thread every slot. It is now computed ON
+    // DEMAND in `emitter_stats` (heartbeat / health cadence).
 }
 
 impl EmitterTelemetry {
-    /// Copy the emitter's current gauges into the atomics (called by
-    /// [`emit_one_block`] under no lock — the emitter is already borrowed).
+    /// Copy the emitter's cheap per-slot gauges into the atomics (called by
+    /// [`emit_one_block`] under no lock — the emitter is already borrowed). The
+    /// jitter p99 is deliberately NOT mirrored (see the struct note): sorting the
+    /// ring per slot on the TIME_CRITICAL thread is exactly the cost #203 removes.
     pub fn mirror(&self, e: &AudioEmitter) {
         self.silence_blocks
             .store(e.silence_blocks(), Ordering::Relaxed);
         self.late_blocks.store(e.late_blocks(), Ordering::Relaxed);
         self.ring_depth_ms
             .store(e.ring_depth_ms(), Ordering::Relaxed);
-        self.emit_jitter_p99_us
-            .store(e.emit_jitter_p99_us(), Ordering::Relaxed);
     }
 }
 
@@ -668,12 +671,15 @@ pub fn heartbeat_audio_stats(
     }
 }
 
-/// Read the lock-free telemetry into the health-document [`EmitterStats`] the
-/// pipeline heartbeat serialises. Cross-platform (the decode thread calls it on
-/// the SDK-clocked path).
+/// Read the telemetry into the health-document [`EmitterStats`] the pipeline
+/// heartbeat serialises. The cheap per-slot gauges come from the lock-free
+/// atomics; the emit jitter p99 is computed ON DEMAND here (#203) — a brief ring
+/// lock + sort on the HEARTBEAT cadence (the decode thread on the SDK-clocked
+/// path), never per slot on the TIME_CRITICAL emit thread.
 pub fn emitter_stats(shared: &SharedEmitter) -> crate::playback::ndi_health::EmitterStats {
     let t = &shared.telemetry;
     let enabled = t.enabled.load(Ordering::Relaxed);
+    let emit_jitter_p99_us = shared.emitter.lock().unwrap().emit_jitter_p99_us();
     crate::playback::ndi_health::EmitterStats {
         enabled,
         mode: if enabled {
@@ -683,7 +689,7 @@ pub fn emitter_stats(shared: &SharedEmitter) -> crate::playback::ndi_health::Emi
         },
         silence_blocks: t.silence_blocks.load(Ordering::Relaxed),
         ring_depth_ms: t.ring_depth_ms.load(Ordering::Relaxed),
-        emit_jitter_p99_us: t.emit_jitter_p99_us.load(Ordering::Relaxed),
+        emit_jitter_p99_us,
         late_blocks: t.late_blocks.load(Ordering::Relaxed),
     }
 }
