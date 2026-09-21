@@ -184,18 +184,20 @@ pub async fn start(
         tracing::warn!("self-heal cache failed (non-fatal): {e}");
     }
 
-    // Self-heal stored metadata: re-run the emoji sanitizer over every
-    // song/artist value written before it was centralized in
-    // metadata::get_metadata (#135). Non-fatal on error.
+    // Self-heal stored metadata: re-run the emoji sanitizer over stored data. Non-fatal.
     if let Err(e) = startup::self_heal_emoji_metadata(&pool).await {
         tracing::warn!("self-heal emoji metadata failed (non-fatal): {e}");
     }
 
-    // Self-heal stored metadata: repair rows whose `song` was written
-    // empty by a since-fixed metadata bug (#136) — re-derive song+artist
-    // from the stored title. Non-fatal on error.
+    // Self-heal stored metadata: repair rows whose `song` was written empty by a
+    // since-fixed metadata bug — re-derive from the title. Non-fatal.
     if let Err(e) = startup::self_heal_empty_song_metadata(&pool).await {
         tracing::warn!("self-heal empty-song metadata failed (non-fatal): {e}");
+    }
+
+    // Round G0 (#184): re-open unsupported stem rows within the raised 120-min cap. Non-fatal.
+    if let Err(e) = startup::requeue_unsupported_stems(&pool).await {
+        tracing::warn!("stems re-queue within cap failed (non-fatal): {e}");
     }
 
     // 2. Channels

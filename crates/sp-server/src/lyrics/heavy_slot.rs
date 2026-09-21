@@ -57,8 +57,8 @@ pub(crate) const HEAVY_STEP_MIN_FREE_BYTES: u64 = 4_294_967_296; // 4 GiB
 /// child crawls at 0.2 cores with ~200k page faults/s for 20+ minutes before
 /// timing out. 10 GiB clears that working set with margin. Paired with the
 /// stems worker's own `STEM_MAX_DURATION_MS` cap (`stems/worker.rs`), which
-/// now skips separation entirely past 15 minutes — such long files are not
-/// songs and karaoke stems for them are pointless — this ceiling is for the
+/// skips separation only past 120 minutes (a multi-hour livestream) — this
+/// ceiling is for the
 /// lyrics-worker heavy steps (isolation / mtl), which have no duration cap.
 // Platform-independent literal (no arithmetic: the cfg(windows) product was
 // invisible to the Linux mutation runner) — pinned by `child_job_limit_is_ten_gib`.

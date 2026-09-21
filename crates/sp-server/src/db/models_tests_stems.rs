@@ -39,6 +39,104 @@ async fn backdate(pool: &SqlitePool, id: i64) {
         .unwrap();
 }
 
+async fn set_duration(pool: &SqlitePool, id: i64, ms: Option<i64>) {
+    sqlx::query("UPDATE videos SET duration_ms = ? WHERE id = ?")
+        .bind(ms)
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn stem_status_of(pool: &SqlitePool, id: i64) -> Option<String> {
+    sqlx::query_scalar("SELECT stem_status FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// Round G0: the boot re-queue flips only KNOWN, within-cap `'unsupported'` rows
+/// back to pending (the `enqueue_stems` reset), leaves over-cap / unknown-duration
+/// / non-unsupported rows alone, and returns the exact flipped count.
+#[tokio::test]
+async fn requeue_unsupported_within_cap_flips_only_known_within_cap_rows() {
+    let pool = setup_pool().await;
+    const CAP: i64 = 7_200_000; // 120 min
+
+    // Row A: unsupported, 36 min (well within cap) → must flip. Give it a stale
+    // failure backoff so the reset (attempts→0, next→NULL) is proven too.
+    let a = insert_normalized(&pool, "a36").await;
+    set_duration(&pool, a, Some(36 * 60_000)).await;
+    mark_stems_unsupported(&pool, a).await.unwrap();
+    sqlx::query("UPDATE videos SET stem_attempts = 3, stem_next_attempt_at = '2000-01-01T00:00:00.000Z' WHERE id = ?")
+        .bind(a)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Row B: unsupported, exactly at the cap → must flip (the `<=` boundary).
+    let b = insert_normalized(&pool, "bcap").await;
+    set_duration(&pool, b, Some(CAP)).await;
+    mark_stems_unsupported(&pool, b).await.unwrap();
+
+    // Row C: unsupported, 121 min (over cap) → untouched.
+    let c = insert_normalized(&pool, "c121").await;
+    set_duration(&pool, c, Some(121 * 60_000)).await;
+    mark_stems_unsupported(&pool, c).await.unwrap();
+
+    // Row D: unsupported, duration unknown (NULL by default) → untouched.
+    let d = insert_normalized(&pool, "dnull").await;
+    mark_stems_unsupported(&pool, d).await.unwrap();
+
+    // Row E: done, 36 min → untouched (not unsupported).
+    let e = insert_normalized(&pool, "edone").await;
+    set_duration(&pool, e, Some(36 * 60_000)).await;
+    mark_stems_done(&pool, e, "/c/e_vocals.flac", "/c/e_instrumental.flac")
+        .await
+        .unwrap();
+
+    let flipped = requeue_unsupported_within_cap(&pool, CAP).await.unwrap();
+    assert_eq!(
+        flipped, 2,
+        "only the 36-min and the exactly-at-cap unsupported rows flip"
+    );
+
+    // A and B are back to pending, with the failure backoff reset.
+    for id in [a, b] {
+        let (status, attempts, next): (Option<String>, i64, Option<String>) = sqlx::query_as(
+            "SELECT stem_status, stem_attempts, stem_next_attempt_at FROM videos WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            status.is_none(),
+            "row {id} must be pending (NULL) after re-queue"
+        );
+        assert_eq!(attempts, 0, "row {id} backoff attempts must be reset");
+        assert!(next.is_none(), "row {id} next-attempt must be cleared");
+    }
+
+    // C, D, E untouched.
+    assert_eq!(
+        stem_status_of(&pool, c).await.as_deref(),
+        Some("unsupported"),
+        "an over-cap row stays unsupported"
+    );
+    assert_eq!(
+        stem_status_of(&pool, d).await.as_deref(),
+        Some("unsupported"),
+        "an unknown-duration row stays unsupported"
+    );
+    assert_eq!(
+        stem_status_of(&pool, e).await.as_deref(),
+        Some("done"),
+        "a done row is never touched"
+    );
+}
+
 #[tokio::test]
 async fn selects_normalized_song_with_audio_and_no_stems() {
     let pool = setup_pool().await;

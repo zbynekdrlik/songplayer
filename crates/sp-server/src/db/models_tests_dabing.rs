@@ -406,16 +406,17 @@ fn synth_ready_never_waits_for_stems() {
         synth_ready(true, DubStemsState::Ready, Some(60_000)),
         Proceed
     );
-    // Stems unsupported (over the 15-min cap) → proceed WITHOUT raising priority
-    // (this is the round-2 fix: the 40-min sample no longer stalls at `stems`).
+    // Stems already marked terminal `unsupported` → proceed WITHOUT raising
+    // priority (round-2 fix: a long video no longer stalls at `stems`).
     assert_eq!(
-        synth_ready(true, DubStemsState::Unsupported, Some(2_400_000)),
+        synth_ready(true, DubStemsState::Unsupported, Some(121 * 60_000)),
         Proceed
     );
-    // Stems pending AND within the 15-min cap → proceed AND raise priority so a
-    // later separation enriches the mix.
+    // Stems pending AND within the 120-min cap (round G0) → proceed AND raise
+    // priority so a later separation enriches the mix. A 36-min dub video (344)
+    // is now within the cap.
     assert_eq!(
-        synth_ready(true, DubStemsState::Pending, Some(60_000)),
+        synth_ready(true, DubStemsState::Pending, Some(36 * 60_000)),
         ProceedRaisePriority
     );
     // Unknown duration is "supported" → still raise priority.
@@ -423,19 +424,19 @@ fn synth_ready_never_waits_for_stems() {
         synth_ready(true, DubStemsState::Pending, None),
         ProceedRaisePriority
     );
-    // Stems pending but BEYOND the cap (separation would only be unsupported) →
-    // proceed WITHOUT raising priority (raising it would be pointless).
+    // Stems pending but BEYOND the 120-min cap (separation would only be
+    // unsupported) → proceed WITHOUT raising priority (raising it would be pointless).
     assert_eq!(
-        synth_ready(true, DubStemsState::Pending, Some(2_400_000)),
+        synth_ready(true, DubStemsState::Pending, Some(121 * 60_000)),
         Proceed
     );
-    // Boundary: exactly 15 min is supported (raise); one ms over is not (proceed).
+    // Boundary: exactly 120 min is supported (raise); one ms over is not (proceed).
     assert_eq!(
-        synth_ready(true, DubStemsState::Pending, Some(900_000)),
+        synth_ready(true, DubStemsState::Pending, Some(7_200_000)),
         ProceedRaisePriority
     );
     assert_eq!(
-        synth_ready(true, DubStemsState::Pending, Some(900_001)),
+        synth_ready(true, DubStemsState::Pending, Some(7_200_001)),
         Proceed
     );
 }
