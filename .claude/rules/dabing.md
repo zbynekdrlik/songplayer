@@ -384,8 +384,16 @@ Slovak labels).
   `GET /api/v1/dabing` payload and shown in the Dabing row as `hlas: <voice>`.
 
 ## `scripts/dub_voice_check.py` — objective consistency check (box/dev1 tool)
-Reads a dub FLAC/WAV, per-window f0 median, exits 1 when the spread > 3 semitones
-(the rotating-voice symptom). It is NOT executed in CI but IS ruff-lint-scoped
+Reads a dub FLAC/WAV, per-window (30 s) f0 median, exits 1 when the
+INTERQUARTILE spread of the window medians (in semitones vs the file median)
+exceeds `MAX_IQR_ST = 8` — the rotating-voice symptom (alternating voices an
+octave apart = IQR 12 st). **Do not use the max spread as the gate:** measured
+21.9.2026 on the 36-min re-dubbed sample, ONE pinned voice has IQR 4.5 st but a
+max spread of 14.7 st (natural intonation + the odd octave-error window), so the
+original 3 st max-spread limit (set from a 20 s same-sentence probe) flagged a
+single voice; the max spread is printed for information only. A female↔male
+rotation puts whole windows in the ~200 Hz band; a single male voice stays in
+80–145 Hz. It is NOT executed in CI but IS ruff-lint-scoped
 (`ci.yml` eval-checks). Its pure helpers run in CI eval-checks WITHOUT librosa —
 the f0 measurement prefers `librosa.pyin` but falls back to a dependency-free
 numpy autocorrelation (`f0_autocorr`), and the pytest forces the fallback

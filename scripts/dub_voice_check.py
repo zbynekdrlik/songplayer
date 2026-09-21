@@ -22,7 +22,12 @@ import sys
 import numpy as np
 
 WINDOW_S = 30.0  # window length for the per-window f0 median
-MAX_SPREAD_ST = 3.0  # fail when the f0 spread exceeds this many semitones
+# Fail when the INTERQUARTILE spread of the per-window f0 medians (in semitones
+# vs the file median) exceeds this. Measured 2026-09-21 on the 36-min re-dubbed
+# sample: ONE pinned voice = IQR 4.5 st (max spread 14.7 st — natural intonation
+# + estimator noise), alternating voices an octave apart = IQR 12 st. The old
+# max-spread rule at 3 st (set from a 20 s probe) flagged a single voice.
+MAX_IQR_ST = 8.0
 FMIN = 70.0
 FMAX = 350.0
 FRAME_LEN = 2048
@@ -36,6 +41,20 @@ def spread_semitones(medians: list[float]) -> float:
     if len(vals) < 2:
         return 0.0
     return 12.0 * math.log2(max(vals) / min(vals))
+
+
+def iqr_semitones(medians: list[float]) -> float:
+    """Pure: the interquartile spread (p75 − p25) of the per-window f0 medians
+    expressed in semitones relative to the file median — robust to the odd
+    mis-estimated window (an octave error, a near-silent window), unlike the max
+    spread. Windows with no voiced pitch (<= 0) are ignored; < 2 usable windows
+    means no spread."""
+    vals = [m for m in medians if m > 0]
+    if len(vals) < 2:
+        return 0.0
+    arr = np.asarray(vals, dtype=np.float64)
+    st = 12.0 * np.log2(arr / np.median(arr))
+    return float(np.percentile(st, 75) - np.percentile(st, 25))
 
 
 def f0_autocorr(frame, sr: int, fmin: float = FMIN, fmax: float = FMAX) -> float | None:
@@ -123,13 +142,15 @@ def _read_audio(path: str):
 
 def check(
     path: str, win_s: float = WINDOW_S, use_librosa: bool = True
-) -> tuple[list[float], float, bool]:
-    """Read `path`, return (per-window f0 medians, max spread in semitones,
-    exceeded) where `exceeded` is True when the spread is over the limit."""
+) -> tuple[list[float], float, float, bool]:
+    """Read `path`, return (per-window f0 medians, max spread in semitones, IQR
+    spread in semitones, exceeded) where `exceeded` is True when the IQR spread
+    is over [`MAX_IQR_ST`] (the max spread is reported for information only)."""
     samples, sr = _read_audio(path)
     medians = window_medians(samples, sr, win_s, use_librosa)
     spread = spread_semitones(medians)
-    return medians, spread, spread > MAX_SPREAD_ST
+    iqr = iqr_semitones(medians)
+    return medians, spread, iqr, iqr > MAX_IQR_ST
 
 
 def main() -> None:
@@ -140,12 +161,13 @@ def main() -> None:
     parser.add_argument("--window", type=float, default=WINDOW_S)
     args = parser.parse_args()
 
-    medians, spread, exceeded = check(args.audio, args.window)
+    medians, spread, iqr, exceeded = check(args.audio, args.window)
     for i, m in enumerate(medians):
         print(f"window {i}: f0 median {m:.1f} Hz")
-    print(f"max spread: {spread:.2f} semitones (limit {MAX_SPREAD_ST})")
+    print(f"max spread: {spread:.2f} semitones (information only)")
+    print(f"IQR spread: {iqr:.2f} semitones (limit {MAX_IQR_ST})")
     if exceeded:
-        print("FAIL: dub voice is not consistent (spread exceeds the limit)")
+        print("FAIL: dub voice is not consistent (IQR spread exceeds the limit)")
         sys.exit(1)
     print("OK: dub voice is consistent")
 
