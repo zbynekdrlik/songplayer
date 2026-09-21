@@ -268,9 +268,25 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     const lyricsView = page.locator('[data-testid="lyrics-view"]').first();
     await expect(lyricsView).toBeVisible({ timeout: 10_000 });
 
+    // #198 item 3: the fetch-in-flight state is a `state-loading` block now (it
+    // used to render `.lyrics-empty`), so let the view SETTLE before branching:
+    // either tappable lines or the genuine `.lyrics-empty` surface — never the
+    // loading block (a settled error block fails the assertion below).
     const lines = lyricsView.locator(".lyr-line");
-    const lineCount = await lines.count();
-    if (lineCount > 0) {
+    await expect
+      .poll(
+        async () =>
+          (await lines.count()) > 0
+            ? "lines"
+            : (await lyricsView.locator(".lyrics-empty").count()) > 0
+              ? "empty"
+              : (await lyricsView.locator('[data-testid="state-error"]').count()) > 0
+                ? "error"
+                : "loading",
+        { timeout: 15_000, message: "the lyrics-view must settle to lines or empty" },
+      )
+      .toMatch(/^(lines|empty)$/);
+    if ((await lines.count()) > 0) {
       // A playing song with lyrics renders tappable lines.
       await expect(lines.first()).toBeVisible();
     } else {
