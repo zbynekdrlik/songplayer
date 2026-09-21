@@ -52,6 +52,7 @@ pub struct DubSummary {
 /// Build the `live-translate` argv (script + flags), in order. NO SECRET here —
 /// the Gemini key is carried in the child's env by [`run_live_translate`]. Pure,
 /// unit-tested.
+#[allow(clippy::too_many_arguments)] // argv builder: six paths + pace + voice
 pub fn live_translate_args(
     script_path: &Path,
     audio_in: &Path,
@@ -60,6 +61,7 @@ pub fn live_translate_args(
     chunk_plan: &Path,
     work_dir: &Path,
     pace: f32,
+    voice: &str,
 ) -> Vec<OsString> {
     vec![
         script_path.as_os_str().to_owned(),
@@ -76,6 +78,9 @@ pub fn live_translate_args(
         work_dir.as_os_str().to_owned(),
         "--pace".into(),
         format!("{pace}").into(),
+        // #184 round C: pin the output voice so the whole dub speaks in one voice.
+        "--voice".into(),
+        voice.into(),
     ]
 }
 
@@ -93,6 +98,7 @@ pub async fn run_live_translate(
     work_dir: &Path,
     api_key: &str,
     pace: f32,
+    voice: &str,
     eta: std::time::Duration,
     plan: &HeavyStepPlan,
 ) -> Result<DubSummary> {
@@ -109,6 +115,7 @@ pub async fn run_live_translate(
         chunk_plan,
         work_dir,
         pace,
+        voice,
     ));
     // The child shells out to ffmpeg by bare name (resample / atempo / mux), so the
     // bundled ffmpeg next to the script must be on PATH — same as the stem child.
@@ -206,6 +213,7 @@ mod tests {
             Path::new("/c/w/chunk_plan.json"),
             Path::new("/c/w"),
             1.0,
+            "Charon",
         );
         let joined: Vec<String> = args
             .iter()
@@ -220,9 +228,13 @@ mod tests {
             "--chunk-plan",
             "--work-dir",
             "--pace",
+            "--voice",
         ] {
             assert!(joined.iter().any(|a| a == flag), "missing {flag}");
         }
+        // The pinned voice follows its flag as a value.
+        let vi = joined.iter().position(|a| a == "--voice").unwrap();
+        assert_eq!(joined[vi + 1], "Charon");
         // No API key ever appears in argv.
         assert!(
             !joined.iter().any(|a| a.contains("GEMINI") || a.len() == 39),
