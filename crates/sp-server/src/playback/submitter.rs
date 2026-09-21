@@ -77,6 +77,13 @@ pub struct FrameSubmitter<B: NdiBackend> {
     /// heartbeat can tell a producer stall caused by the SDK video submit apart
     /// from a decode / audio stall. Drained (max, p99) each `drain_window`.
     submit_times: crate::playback::loop_stats::SubmitHist,
+    /// #203: the standby BGRA black buffer, REUSED across `send_black_bgra` calls
+    /// keyed by size. `send_video` is synchronous, so the buffer is free the
+    /// moment the call returns and can be handed to the next standby frame with
+    /// no re-alloc — removing the paused-branch 8.3 MB `VirtualAlloc`/`VirtualFree`
+    /// churn (~83 MB/s per paused output). Reallocated only on a `(width,height)`
+    /// change.
+    black_bgra: Option<Vec<u8>>,
 }
 
 impl<B: NdiBackend> FrameSubmitter<B> {
@@ -109,6 +116,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             paced: false,
             burn_on: Arc::new(AtomicBool::new(false)),
             submit_times: crate::playback::loop_stats::SubmitHist::default(),
+            black_bgra: None,
         }
     }
 
@@ -228,9 +236,15 @@ impl<B: NdiBackend> FrameSubmitter<B> {
 
     /// Send a solid-colour BGRA frame synchronously — used for idle /
     /// paused states. Internally flushes any pending async frame first.
+    ///
+    /// #203: reuses the [`black_bgra`](Self::black_bgra) buffer across calls of
+    /// the same size (black BGRA is all zeros, so a reused buffer is already
+    /// zeroed and a fresh one is zero-initialised); `send_video` is synchronous,
+    /// so the buffer returns to us the instant the call ends.
     pub fn send_black_bgra(&mut self, width: u32, height: u32) {
         self.flush();
-        let data = vec![0u8; (width * height * 4) as usize];
+        let needed = (width * height * 4) as usize;
+        let data = vec![0u8; needed];
         // Paced (#147): a real send is never SYNTHESIZE — stamp the standby
         // frame with the floored on-grid boundary at the send instant (§4.3), so
         // an idle→play transition does not drop the receiver out of `locked=`.
@@ -254,6 +268,16 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             timecode_100ns,
         };
         self.sender.send_video(&frame);
+        // Reclaim the buffer for the next standby frame (send_video is sync).
+        self.black_bgra = Some(frame.data);
+    }
+
+    /// The current standby BGRA buffer's start pointer (`as usize`), or `None`
+    /// before the first `send_black_bgra`. Test-only: proves the buffer is REUSED
+    /// (same pointer) across same-size calls and reallocated on a size change.
+    #[cfg(test)]
+    fn black_bgra_ptr(&self) -> Option<usize> {
+        self.black_bgra.as_ref().map(|b| b.as_ptr() as usize)
     }
 
     /// Submit one boundary-paced frame at EXPLICIT genlock timecodes (#147).
@@ -761,6 +785,32 @@ mod tests {
         sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
         assert_eq!(sub.frames_submitted_total(), 1);
         assert!(sub.last_submit_ts().is_some());
+    }
+
+    #[test]
+    fn send_black_bgra_reuses_its_buffer_across_same_size_calls() {
+        // #203: the standby BGRA buffer is reused across same-size calls (the send
+        // is synchronous, so the buffer is free the instant it returns) and
+        // reallocated only when the size changes.
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend, "BB", false, false).unwrap();
+        let mut sub = FrameSubmitter::new(sender, 30, 1);
+
+        sub.send_black_bgra(320, 240);
+        let ptr1 = sub
+            .black_bgra_ptr()
+            .expect("buffer retained after the first standby frame");
+        sub.send_black_bgra(320, 240);
+        let ptr2 = sub.black_bgra_ptr().unwrap();
+        assert_eq!(
+            ptr1, ptr2,
+            "a same-size standby frame reuses the SAME allocation, no re-alloc"
+        );
+
+        // A size change reallocates (the buffer must match the new dimensions).
+        sub.send_black_bgra(640, 480);
+        let ptr3 = sub.black_bgra_ptr().unwrap();
+        assert_ne!(ptr2, ptr3, "a size change reallocates the standby buffer");
     }
 
     #[test]
