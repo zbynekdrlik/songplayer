@@ -114,7 +114,18 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     page,
     request,
   }) => {
+    // The Player's transport label follows the live PlaybackStateChanged
+    // message; the on-connect replay derives from the health registry and
+    // cannot represent an off-program DECODING pipeline (#201 known limit), so
+    // a play clicked before the app WebSocket is open leaves the label at
+    // ▶ Prehrať. Wait for the app socket first (goto resolves on DOM load).
+    const wsOpen = page.waitForEvent("websocket", {
+      predicate: (ws) => !ws.url().includes("preview"),
+      timeout: 15000,
+    });
     await page.goto("/dabing");
+    await wsOpen;
+    await page.waitForTimeout(500);
     const row = page.locator(`[data-testid="song-row"][data-video-id="${sampleVideoId}"]`);
     await expect(row).toBeVisible({ timeout: 15000 });
     await expect(row.getByTestId("chip-dub")).toContainText("hotový");
@@ -141,7 +152,7 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     // transport label must read `⏸ Pauza` — it follows the pipeline's own
     // decoding state, not the on/off-program state (the badge shows the latter).
     await expect(page.getByTestId("player-playpause")).toContainText("⏸ Pauza", {
-      timeout: 10000,
+      timeout: 20000,
     });
     await expect(page.getByTestId("player-program-badge")).toContainText(
       "○ Mimo programu",
