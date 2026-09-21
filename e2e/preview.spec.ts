@@ -224,6 +224,44 @@ test("the stop control tears the <video> down", async ({ page }) => {
   await expect(card.getByTestId("preview-start")).toBeVisible();
 });
 
+test("with the lag knob the started preview shows the 'náhľad mešká N s' readout (#184)", async ({
+  page,
+}) => {
+  // #184 round F: a page-level `?lag_ms=30000` flag is forwarded to the preview
+  // WS, where the mock inflates the produced_ms beacon by 30 s. The shim then
+  // reports a big picture lag and the Player shows the readout (≥ 3 s).
+  await page.goto("/?lag_ms=30000");
+  await expect(page.getByTestId("workspace-title")).toHaveText("Worship", {
+    timeout: 10000,
+  });
+  const card = page.locator(".playlist-card");
+  await card.getByTestId("preview-start").click();
+  const video = card.getByTestId("preview-video");
+  await expect(video).toBeVisible({ timeout: 10000 });
+
+  const lag = card.getByTestId("preview-lag");
+  await expect(lag).toBeVisible({ timeout: 15000 });
+  await expect(lag).toContainText("mešká");
+  const n = Number((await lag.textContent())?.match(/\d+/)?.[0] ?? "0");
+  expect(n, "the readout must show a lag of at least 3 s").toBeGreaterThanOrEqual(3);
+});
+
+test("without the lag knob the live preview shows no lag readout (#184)", async ({
+  page,
+}) => {
+  // No page flag → the mock beacon's produced_ms tracks the streamed media, so
+  // the picture is live (< 3 s behind) and the readout stays absent.
+  const { card, video } = await startPreview(page);
+  await expect
+    .poll(async () => video.evaluate((el: HTMLVideoElement) => el.readyState), {
+      timeout: 15000,
+    })
+    .toBeGreaterThanOrEqual(3);
+  // Let a couple of 1 Hz beacon cycles flow, then confirm the readout is absent.
+  await page.waitForTimeout(2500);
+  await expect(card.getByTestId("preview-lag")).toHaveCount(0);
+});
+
 test("a playing card mounts no <video> until start is clicked", async ({
   page,
 }) => {

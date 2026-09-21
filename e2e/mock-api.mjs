@@ -1150,23 +1150,52 @@ server.on("upgrade", (req, socket, head) => {
 // #178: stream the canned fMP4 fixture — init segment first, then each fragment
 // with a small gap — so the card's MSE <video> reaches readyState>=3 and its
 // currentTime advances.
-previewWss.on("connection", (ws) => {
+previewWss.on("connection", (ws, req) => {
   const [init, ...frags] = PREVIEW_FMP4;
+  // #184 round F: an optional `?lag_ms=<N>` knob on the upgrade url inflates the
+  // beacon so the lag-readout E2E can force the "picture behind the wall" state.
+  // Mock-only — the production dashboard never adds the flag to preview.ws.
+  let lagMs = 0;
+  try {
+    const q = new URL(req.url, "http://localhost").searchParams.get("lag_ms");
+    if (q !== null && /^\d+$/.test(q)) lagMs = Number(q);
+  } catch {
+    // malformed upgrade url — no knob
+  }
   try {
     ws.send(init);
   } catch {
     return;
   }
   let i = 0;
+  let fragsSent = 0;
+  // #184 round F: the SAME 1 Hz lag beacon the real server sends — produced
+  // media time = (fragments sent) × 500 ms, plus the mock lag knob. Send one
+  // immediately so the readout appears without waiting a full second.
+  const sendBeacon = () => {
+    if (ws.readyState !== ws.OPEN) return;
+    try {
+      ws.send(JSON.stringify({ produced_ms: fragsSent * 500 + lagMs }));
+    } catch {
+      // client vanished mid-send — ignore.
+    }
+  };
+  sendBeacon();
   const timer = setInterval(() => {
     if (ws.readyState !== ws.OPEN || i >= frags.length) {
       clearInterval(timer);
       return;
     }
     ws.send(frags[i++]);
+    fragsSent++;
   }, 120);
-  ws.on("close", () => clearInterval(timer));
-  ws.on("error", () => clearInterval(timer));
+  const beacon = setInterval(sendBeacon, 1000);
+  const stop = () => {
+    clearInterval(timer);
+    clearInterval(beacon);
+  };
+  ws.on("close", stop);
+  ws.on("error", stop);
 });
 
 wss.on("connection", (ws) => {
