@@ -88,6 +88,28 @@ child resident UNDER the cap: `submit_call_us` p99 ≤ 20 ms, pacer lateness p99
 `silence_blocks ≥ 3` mid-song. If not met at 25 %, lower `heavy_cpu_cap_pct`
 (settings, no restart needed) and repeat; record the numbers on #203.
 
+## Box test 8 verdict (21.9.2026) — the containment is live, the stall is NOT CPU
+
+The cap/affinity/memory-priority were confirmed applied (`heavy child contained
+(pid …): cpu_cap=25% affinity=0xfff000 mem_priority_low=true`, child
+`BelowNormal` on 0xFFF000, SongPlayer `High`) and the acceptance still FAILED:
+`submit_call_us_max` 45–64 ms with the capped child at 0.39 core on a 5 %-busy
+box, 7–26 ms without any child, 49 ms again when the child returned. Ruled out
+by measurement on the box: CPU share, SongPlayer's priority class (High↔Normal
+A/B), timer resolution, core parking, a bare CUDA context, held RAM, GPU.
+
+**The mechanism is kernel memory-manager contention from page-fault churn:**
+SongPlayer itself runs at 430–500k demand-zero page faults/s on the paced path
+(≈ 2 GB/s of fresh pages — per-slot standby `to_vec()` at `submitter.rs:280`
+for every idle pipeline + per-frame decoder/handoff clones), the heavy child adds
+~136k/s, OBS's own faults go 3k → 33k/s, interrupts 72k → 105k/s. Every process
+that touches fresh pages (the NDI SDK's send, DistroAV in OBS, the child) then
+serializes on the MM locks / TLB-shootdown IPIs. **A CPU cap cannot reach this**
+— the lever is an allocation-free steady state in SongPlayer (own the standby
+frame once, recycle the decoder/handoff/SDK-holdover `Vec<u8>` through a pool).
+Read `\Process(songplayer)\Page Faults/sec` BEFORE and AFTER any change on this
+path; the target is a flat, near-zero steady state while playing.
+
 ## Reading the applied containment on win-resolume (no DB access)
 
 - `GET http://127.0.0.1:8920/api/v1/status` → `heavy_containment` (the cap +

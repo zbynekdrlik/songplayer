@@ -277,6 +277,33 @@ labels are unknown. Launch GUI apps that need a working directory via
 (OBS needs `bin\64bit`); the MCP `Shell` sometimes returns "(no output)" for
 longer commands — redirect to a log file and read that instead.
 
+## MCP `Shell` / `App` gotchas (box test 8, 21.9.2026)
+
+- **A `Shell` call that runs > ~25 s is killed with "Command timed out after
+  28s" and NO partial output.** `Get-CimInstance Win32_Process` (10+ s),
+  `Start-Process` + a long `Start-Sleep`, and a TCP peer lookup per connection
+  all blew it. Keep every call to ONE thing; put multi-step probes in a `.ps1`
+  under `C:\ProgramData\SongPlayer\cache\tools\` (`FileWrite`, then
+  `powershell -NoProfile -ExecutionPolicy Bypass -File …`). Existing probes
+  there: `threads.ps1` (per-thread CPU/priority/state of a PID),
+  `timerres.ps1` (timer resolution + PowerThrottling + window visibility),
+  `hold_cuda.py` / `hold_mem.py` / `hold_cpu.py` (controlled load children).
+- **A child launched from the MCP `Shell` (`Start-Process`) is CPU-THROTTLED to
+  ~0.4 core** (it inherits the MCP server's job object) — `hold_cpu.py` with 3
+  spinning threads measured 0.38 core, threads in `Ready`. A load experiment
+  that needs real CPU must be launched via a scheduled task, never from the MCP
+  shell. Memory-only / CUDA-context-only holds are unaffected.
+- **Arena relaunched through the MCP `App` tool inherits `BelowNormal`
+  priority class** (pid 20176 on 20.9. ran at BelowNormal for 22 h). After any
+  MCP relaunch: `(Get-Process Arena).PriorityClass` → set `'Normal'` at runtime
+  (`$p.PriorityClass = 'Normal'`, no restart).
+- `ProcessThread.IdealProcessor` is WRITE-ONLY in PowerShell — reading it throws
+  per thread and empties the row set; use `BasePriority`/`CurrentPriority`/
+  `ThreadState`/`WaitReason` only.
+- Per-process page faults, the box-wide demand-zero rate and interrupts are the
+  first counters to read when "everything is slow but the CPU is idle":
+  `Get-Counter '\Process(*)\Page Faults/sec','\Memory\Demand Zero Faults/sec','\Processor(_Total)\Interrupts/sec' -SampleInterval 2 -MaxSamples 2`.
+
 ## win-resolume is always free when user prompts
 
 When the user gives a new prompt, win-resolume is ALWAYS free. Never defer
