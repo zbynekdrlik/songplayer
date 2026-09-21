@@ -12,6 +12,7 @@ pub mod g35t_transcript;
 pub mod gather;
 pub mod genius;
 pub mod gpu_policy;
+pub mod heavy_containment;
 pub mod heavy_plan;
 pub mod heavy_slot;
 pub mod idle_gate;
