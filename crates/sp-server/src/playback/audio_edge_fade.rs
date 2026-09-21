@@ -21,7 +21,7 @@
 
 /// Audio blocks over which the post-silence fade-IN ramps `0 → 1` (3 × 33.3 ms ≈
 /// 100 ms, continuous across the three blocks).
-pub const FADE_IN_BLOCKS: u32 = 1;
+pub const FADE_IN_BLOCKS: u32 = 3;
 
 /// The per-slot edge-fade state machine. Pure and single-threaded.
 #[derive(Debug)]
@@ -135,7 +135,7 @@ fn fade_out_gain(f: usize, frames: usize) -> f32 {
     if frames <= 1 {
         return 0.0;
     }
-    (frames - 1 - f) as f32 / frames as f32
+    (frames - 1 - f) as f32 / (frames - 1) as f32
 }
 
 #[cfg(test)]
