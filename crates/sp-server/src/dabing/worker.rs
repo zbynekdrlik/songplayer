@@ -199,7 +199,7 @@ impl DubWorker {
         };
 
         // #183 round 2: the dub chain NEVER waits for stems — long videos the stem
-        // worker cannot separate (over the 15-min cap) must still be dubbed. The
+        // worker cannot separate (over the 120-min cap) must still be dubbed. The
         // pure `synth_ready` decides: proceed now; if the stems are merely pending
         // (absent but within the cap) raise their manual priority so a later
         // separation enriches the mix (2-stream → 4-stream on the next open),

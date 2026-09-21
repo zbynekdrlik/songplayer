@@ -50,7 +50,7 @@ pub enum AudioSourceKind {
     DubMix,
     /// A dub track but NOT both stems → a live 2-stream `[original, dub]` mix
     /// (#183 round 2). Long videos the stem worker cannot separate (over the
-    /// 15-min cap, or stems not yet done) still get dubbed: the FULL original is
+    /// 120-min cap, or stems not yet done) still get dubbed: the FULL original is
     /// the bed (floored at −18 dB), the Slovak dub over it, blended by the live
     /// ratio. Stems, when they later arrive, promote a fresh open to `DubMix`.
     DubOverOriginal,

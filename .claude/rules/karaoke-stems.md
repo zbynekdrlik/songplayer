@@ -253,19 +253,35 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   pending: `stem_status` NULL, `stem_attempts` unchanged, re-picked when idle). A
   genuine separation failure still records the backoff deferral. The lyrics worker
   wraps its isolation + mtl steps the same way.
-- **Duration cap (2026-09-15) — stems only up to 15 min
-  (`STEM_MAX_DURATION_MS`, `stems/worker.rs`).** A 10-minute "warm-up" file
-  pinned the heavy child's private bytes at ~5.0 GB against the (then) 6 GiB
-  Job Object ceiling (`heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES` — CUDA
-  context + several float32 copies of the whole mix), so allocations failed
-  and the child crawled at 0.2 cores / ~200k page faults/s for 20+ minutes
-  before timing out. Fix was two-part: the ceiling went 6→10 GiB (clears a
-  normal long-song working set with margin), AND the stem worker now skips
-  separation entirely for anything over 15 min — `process_next` checks
-  `stem_duration_too_long(job.duration_ms)` right after picking the job,
-  before the heavy-slot/memory-guard/spawn, and marks the row terminal
-  `stem_status = 'unsupported'` (no retry, no backoff). Such long files are
-  not songs; karaoke stems for them are pointless regardless of ceiling size.
+- **Duration cap (`STEM_MAX_DURATION_MS`, `stems/worker.rs`) — cap history
+  15 → 120 min.** `process_next` checks `stem_duration_too_long(job.duration_ms)`
+  right after picking the job, before the heavy-slot/memory-guard/spawn, and
+  marks an over-cap row terminal `stem_status = 'unsupported'` (no retry, no
+  backoff).
+  - **2026-09-15: 30 → 15 min.** A 10-minute "warm-up" file pinned the heavy
+    child's private bytes at ~5.0 GB against the (then) 6 GiB Job Object ceiling
+    (`heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES` — CUDA context + several
+    float32 copies of the whole mix), so allocations failed and the child crawled
+    at 0.2 cores / ~200k page faults/s for 20+ min before timing out. Fixed in
+    two parts: the ceiling went 6 → 10 GiB, AND the worker skipped anything over
+    15 min. Rationale then: whole-file separation (memory pinned per file) + a
+    single GPU-sized timeout that killed a long CPU run mid-way.
+  - **Round G0 (#184, 2026-09-21): 15 → 120 min.** Owner ruling
+    ("na vsetko sa dava rozdelenie podklady a vocaly co davame aj na songy") —
+    EVERY video, incl. long dub videos, gets `podklad`/`vokály` stems. The old
+    15-min rationale no longer holds: #171 made separation SEGMENTED (30 s
+    resumable windows, memory is per-segment not per-file) and #162 made the
+    timeout DURATION-SCALED (×4 on a CPU plan) with heavy work at reduced
+    priority during playback — so a 36-min video is ~5-12 min of low-priority,
+    resumable work. 120 min is now a SANITY ceiling (a multi-hour livestream
+    stays excluded), not a "songs only" limit. The literal stays a literal
+    (`7_200_000`) so the mutation runner sees it. A boot one-shot
+    `startup::requeue_unsupported_stems` → `models_stems::requeue_unsupported_within_cap`
+    re-opens every `unsupported` row now within the cap (the SAME reset
+    `enqueue_stems` uses; over-cap / unknown-duration / non-unsupported rows are
+    left alone). NB the ONLY production caller of `mark_stems_unsupported` is this
+    duration gate, so every `unsupported` row is a too-long row — there is no
+    per-row error text to tell "too long" from "no vocals" apart.
 - **DB (V24):** `videos.{vocals_file_path, instrumental_file_path, stem_status,
   stem_attempts, stem_next_attempt_at}`. `stem_status` NULL=pending → done /
   failed (retryable) / unsupported (terminal). Paths are also derived

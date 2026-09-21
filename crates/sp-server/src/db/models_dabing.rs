@@ -244,7 +244,7 @@ pub struct DubJob {
     pub vocals_file_path: Option<String>,
     pub instrumental_file_path: Option<String>,
     /// The stems worker's terminal marker: `'unsupported'` means the video is over
-    /// the 15-min separation cap and stems will NEVER arrive — the dub proceeds
+    /// the 120-min separation cap and stems will NEVER arrive — the dub proceeds
     /// without them (2-stream mix) and does NOT raise the stems priority.
     pub stem_status: Option<String>,
     pub dub_attempts: i64,
@@ -267,7 +267,7 @@ pub enum DubStemsState {
     /// Stems not present yet, still separable (status pending / failed / none) —
     /// a background separation may still produce them.
     Pending,
-    /// `stem_status = 'unsupported'` — the video is over the 15-min cap, so stems
+    /// `stem_status = 'unsupported'` — the video is over the 120-min cap, so stems
     /// will NEVER arrive; the dub uses the 2-stream mix.
     Unsupported,
 }
@@ -296,7 +296,7 @@ pub fn dub_stems_state(
 ///
 /// - not downloaded → [`SynthDecision::WaitForDownload`];
 /// - stems `Ready` or `Unsupported` → [`SynthDecision::Proceed`] (synthesize now);
-/// - stems `Pending` AND the duration is within the 15-min stem cap →
+/// - stems `Pending` AND the duration is within the 120-min stem cap →
 ///   [`SynthDecision::ProceedRaisePriority`] (synthesize now AND raise
 ///   `stem_manual_priority` so a later separation enriches the mix);
 /// - stems `Pending` but the duration is BEYOND the cap → [`SynthDecision::Proceed`]
