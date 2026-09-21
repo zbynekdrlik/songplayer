@@ -201,7 +201,6 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         // buffer, per NDIlib_send_send_video_async_v2's documented contract.
         // #192 round 3: time the SDK call — it blocks on the prior async frame,
         // so under a resident heavy child it is the candidate stalling stage.
-        let sent = SharedFrame::new(video.to_vec());
         let (_, submit_us) = crate::playback::loop_stats::timed(|| unsafe {
             self.sender.send_video_async_slice(
                 width,
@@ -211,7 +210,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
                 self.frame_rate_d,
                 PixelFormat::Nv12,
                 video_tc,
-                &sent[..],
+                &video[..],
             );
         });
         self.submit_times.observe(submit_us);
