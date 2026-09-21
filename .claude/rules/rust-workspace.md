@@ -187,6 +187,18 @@ fails). Prefer a deterministic wrong (grow / different-length) over "allocate
 fresh" — a freed-then-reallocated buffer can land at the SAME address and make a
 pointer-equality RED pass by luck.
 
+## Diff-scoped mutation gate runs PER PACKAGE — a `test_util` accessor needs a test in ITS OWN crate (#203)
+
+`cargo mutants` tests each mutant with the mutated crate's OWN test target. A
+new accessor on `sp_ndi::test_util::MockNdiBackend` (e.g. `last_sync_video_len`)
+that is exercised only by a `crates/sp-server` test SURVIVES every mutant
+(`Some(0)` / `Some(1)` / `None` — "0s test", nothing in sp-ndi calls it) and
+fails the gate, even though sp-server's test would catch the wrong value. When
+you add a mock recorder for a downstream crate's test, ALSO assert it in an
+sp-ndi test (`None` before the first call, the exact recorded value after —
+never a constant that a `Some(0)`/`Some(1)` mutant could match). Same for any
+cross-crate test-only seam.
+
 ## Diff-scoped mutation gate: a new `pub fn` reachable only from `#[cfg(windows)]` needs a direct Linux test (#203)
 
 The CI mutation gate is `--in-diff` and strict. A NEW `pub fn` whose ONLY caller
