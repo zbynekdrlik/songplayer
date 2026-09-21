@@ -84,7 +84,7 @@ pub fn dub_pace_from(raw: Option<&str>) -> f32 {
 pub fn dub_voice_from(raw: Option<&str>) -> String {
     match raw.map(str::trim).filter(|v| !v.is_empty()) {
         Some(v) => v.to_string(),
-        None => String::new(),
+        None => sp_core::config::DEFAULT_DUB_VOICE.to_string(),
     }
 }
 
