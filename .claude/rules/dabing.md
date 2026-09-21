@@ -344,3 +344,50 @@ stem_status)`, with `show_karaoke = controls.karaoke || !controls.dub` (a non-du
 song always keeps the karaoke default; a dub video shows karaoke only when
 stems-capable). `e2e/dabing-mixer.spec.ts` proves it on Prehľad + Naživo without
 a `/dabing` visit.
+
+# Dabing round C (#184) — one stable dub voice per video (pinned Gemini voice)
+
+The dub used to change voice every few sentences (female → male → another male,
+one speaker on screen) because `dub_worker.py` built the Live config with NO
+`speech_config`, so Gemini re-rolled the output voice per Live session and per
+turn. Round C PINS one voice per video.
+
+## The voice is PINNED via `speech_config` (probe-verified)
+`dub_worker.py::_translate_pcm` now sets
+`speech_config=SpeechConfig(voice_config=VoiceConfig(prebuilt_voice_config=
+PrebuiltVoiceConfig(voice_name=<voice>)))` on the `LiveConnectConfig`, ALONGSIDE
+the existing `translation_config`. The translate model `gemini-3.5-live-translate-
+preview` ACCEPTS `speech_config` (probe 2026-09-21: two runs, same voice, f0
+median spread 1.4 st ≤ 2 st) — the abandoned fallback (one session per video, no
+pin) is NOT needed. Full probe recipe: `.claude/rules/dubbing-eval.md`.
+
+## Setting → worker → child, mirroring `dub_pace`
+`dub_voice` setting (default `sp_core::config::DEFAULT_DUB_VOICE` = `Charon`),
+read per tick in `dabing/worker.rs::synthesize` via the pure
+`dub_voice_from(setting) -> String` (absent/blank → default, any non-blank name
+trimmed + passed through — the catalogue is NOT enforced in the worker, so a new
+voice needs no code change), threaded into `child.rs::live_translate_args`
+(`--voice`). The six catalogue voices live in `eval/dubbing/voices.py` and are
+mirrored in the Nastavenia select (`sp-ui/components/settings_form.rs::DUB_VOICES`,
+Slovak labels).
+
+## Voice-keyed resume + persisted voice (repurposed column, NO schema change)
+- The child records `"voice"` in each `chunk_N.json`; the pure
+  `dub_worker.py::chunk_reusable(meta, voice)` reuses a cached chunk ONLY when its
+  recorded voice matches the requested one (a legacy chunk with no `voice`, or one
+  under another voice, is re-synthesized) — so a voice change re-does the dub in
+  one voice.
+- The resolved voice is persisted per video in the EXISTING nullable
+  `dub_voice_ref_path` TEXT column REPURPOSED as the voice name (it was dead
+  clone-lane plumbing; no migration, documented in the `db/mod.rs` V26 comment),
+  via `models_dabing::set_dub_voice`; exposed as `DubRow.dub_voice` on the
+  `GET /api/v1/dabing` payload and shown in the Dabing row as `hlas: <voice>`.
+
+## `scripts/dub_voice_check.py` — objective consistency check (box/dev1 tool)
+Reads a dub FLAC/WAV, per-window f0 median, exits 1 when the spread > 3 semitones
+(the rotating-voice symptom). It is NOT executed in CI but IS ruff-lint-scoped
+(`ci.yml` eval-checks). Its pure helpers run in CI eval-checks WITHOUT librosa —
+the f0 measurement prefers `librosa.pyin` but falls back to a dependency-free
+numpy autocorrelation (`f0_autocorr`), and the pytest forces the fallback
+(`use_librosa=False`) so it RUNS, never skips (CI installs numpy + soundfile, not
+librosa).

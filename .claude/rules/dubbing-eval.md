@@ -125,6 +125,21 @@ same 7 sentences (`seg_spec` items 2..8), plus an intensity layer.
   incl. drain. Price ~$0.037/min (in $0.0053 + out $0.0315). `gemini-3.8-live`
   with a translate *instruction* stops after ~1.4 s (turn-taking) — unusable for
   continuous dubbing; use the dedicated `-live-translate-` model.
+- **Voice pinning WORKS on the translate model (#184 round C, verified 2026-09-21).**
+  `gemini-3.5-live-translate-preview` ACCEPTS `speech_config=SpeechConfig(
+  voice_config=VoiceConfig(prebuilt_voice_config=PrebuiltVoiceConfig(
+  voice_name="Charon")))` ALONGSIDE `translation_config` — the same field
+  `gemini_tts.py:85-86` uses for `generateContent`. Probe: one 20 s EN slice
+  (`seg.wav [15,35)` → 16 kHz mono s16le PCM) streamed twice with the pin →
+  both runs accepted, f0 median (librosa pyin voiced frames) 99.0 Hz vs 107.3 Hz
+  = **1.4 semitones spread**, i.e. the SAME voice (male, consistent with Charon).
+  So the prod dub child pins one voice per video via `speech_config`
+  (`scripts/dub_worker.py`, `.claude/rules/dabing.md` round C); the "one Live
+  session per video, no pin" fallback was NOT needed. Reuse the eval venv
+  (`~/.claude/work-products/songplayer/dubbing-test/.venv-live`, has
+  `google-genai==2.24.0`; add `librosa soundfile numpy` for the f0 read); the key
+  is read INSIDE Python from `GET http://10.77.9.201:8920/api/v1/settings`
+  `gemini_api_key` (csv, first entry), never on a command line / log / commit.
 - **SeamlessM4T v2 / Seamless Expressive**: NO Slovak SPEECH output (v2 = `slk`
   speech input + text output only, 35 speech-output langs exclude it; Expressive =
   en↔fr/de/it/zh/es). Reason rows, no GPU spent.
