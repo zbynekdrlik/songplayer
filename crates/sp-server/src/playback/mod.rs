@@ -10,6 +10,7 @@ pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;
 mod engine_play;
+pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
 mod handle_pipeline_event;
 mod karaoke; // #14 set_karaoke (impl PlaybackEngine, 1000-line cap split)
 pub mod lock_state;
