@@ -10,7 +10,7 @@ use futures::{SinkExt, StreamExt};
 use sqlx::Row;
 use tracing::{debug, info, warn};
 
-use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState, TransportState};
+use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
 use sp_core::ws::{ClientMsg, ServerMsg};
 
 use crate::playback::ndi_health::{PipelineHealthSnapshot, PlaybackStateLabel};
@@ -285,6 +285,10 @@ fn playback_state_replay(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // #201 round 2: `transport_from_label` was deleted (the replay reads the
+    // snapshot's raw `transport`), so `TransportState` is now only named in the
+    // tests — import it here to avoid an unused-import in the lib target.
+    use sp_core::playback::TransportState;
 
     fn snapshot(
         playlist_id: i64,
