@@ -15,6 +15,15 @@ fn solid_nv12(_sw: usize, sh: usize, stride: usize, y: u8, c: u8) -> Vec<u8> {
 }
 
 #[test]
+fn relay_capacity_is_four_fragments() {
+    // #184 round F: the broadcast backlog is 4 fragments (= 2 s at
+    // -frag_duration 500000), NOT 64 (= 32 s). A slow remote viewer drops
+    // fragments and resyncs on the next keyframe-aligned fragment instead of
+    // sitting a full 32 s behind the wall. Exact value kills any off-by-N mutant.
+    assert_eq!(RELAY_CAPACITY, 4);
+}
+
+#[test]
 fn placement_16by9_fills_canvas_exactly() {
     let p = placement_for(1920, 1080);
     assert_eq!(

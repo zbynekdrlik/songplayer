@@ -18,6 +18,7 @@
 //!   viewer that falls behind is dropped by the broadcast channel rather than
 //!   ever blocking the reader.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::broadcast;
@@ -59,6 +60,12 @@ enum BoxHeader {
 /// hostile stream, never legitimate; poisoning stops the splitter rather than
 /// trusting a size up to 2^64 and allocating gigabytes.
 const MAX_BOX_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Media milliseconds per fMP4 fragment (#184 round F). The encoder emits EXACTLY
+/// two 0.5-s fragments per second under `-r 25 -g 25 -frag_duration 500000` (the
+/// invariant documented in `preview_encoder::build_ffmpeg_args`), so the media
+/// time produced since a child's `Init` = `(fragments since Init) × FRAGMENT_MS`.
+const FRAGMENT_MS: u64 = 500;
 
 /// Whether `len` bytes exceed the 16 MiB box/accumulator cap (exactly the cap is
 /// accepted). One helper so the box-size and accumulator checks share the bound.
@@ -206,6 +213,10 @@ pub struct FragmentRelay {
     tx: Mutex<broadcast::Sender<Arc<[u8]>>>,
     /// Backlog capacity, kept so `close` can build a fresh channel.
     capacity: usize,
+    /// #184 round F: media fragments ingested since the last `Init`. Reset to 0
+    /// on `Init`; incremented per `Fragment`. Read by [`produced_ms`](Self::produced_ms)
+    /// (the reader thread ingests; the WS handler reads), so it is atomic.
+    frags_since_init: AtomicU64,
 }
 
 impl FragmentRelay {
@@ -219,6 +230,7 @@ impl FragmentRelay {
             init: Mutex::new(None),
             tx: Mutex::new(tx),
             capacity: cap,
+            frags_since_init: AtomicU64::new(0),
         })
     }
 
@@ -230,15 +242,30 @@ impl FragmentRelay {
                 if let Ok(mut slot) = self.init.lock() {
                     *slot = Some(arc);
                 }
+                // #184 round F: a NEW child's init restarts the media timeline, so
+                // the fragment counter (and thus produced_ms) resets to 0.
+                self.frags_since_init.store(0, Ordering::Relaxed);
             }
             RelayChunk::Fragment(bytes) => {
                 let arc: Arc<[u8]> = Arc::from(bytes.into_boxed_slice());
+                // #184 round F: one more 0.5-s media fragment produced this child.
+                self.frags_since_init.fetch_add(1, Ordering::Relaxed);
                 // Err = no current receivers; that is fine (nobody watching).
                 if let Ok(tx) = self.tx.lock() {
                     let _ = tx.send(arc);
                 }
             }
         }
+    }
+
+    /// #184 round F: how many milliseconds of media the child has produced since
+    /// its last `Init`, for the preview lag beacon. Exact under the encoder's
+    /// `-r 25 -g 25 -frag_duration 500000` invariant (documented in
+    /// `preview_encoder::build_ffmpeg_args`): each media fragment is 0.5 s, so
+    /// this is `(fragments since Init) × 500`. The browser shim compares it to
+    /// its buffered end to show how far the picture is behind the wall.
+    pub fn produced_ms(&self) -> u64 {
+        self.frags_since_init.load(Ordering::Relaxed) * FRAGMENT_MS
     }
 
     /// The cached init segment, if the child has produced its `moov` yet.
@@ -263,6 +290,11 @@ impl FragmentRelay {
         if let Ok(mut slot) = self.init.lock() {
             *slot = None;
         }
+        // #184 round F: clear the media-time counter at the child boundary too, so
+        // the `frags_since_init` invariant holds at every reset (not only via the
+        // next `Init`). A late joiner during the dead window then reads produced_ms
+        // = 0 until the new child's init.
+        self.frags_since_init.store(0, Ordering::Relaxed);
     }
 
     /// End the stream (#178 item 12): clear the cached init and DROP the current
@@ -274,6 +306,8 @@ impl FragmentRelay {
         if let Ok(mut slot) = self.init.lock() {
             *slot = None;
         }
+        // #184 round F: the stream is ending — clear the media-time counter too.
+        self.frags_since_init.store(0, Ordering::Relaxed);
         let (tx, _rx) = broadcast::channel(self.capacity);
         if let Ok(mut g) = self.tx.lock() {
             *g = tx; // old sender dropped here → current receivers see Closed

@@ -32,7 +32,7 @@ export class PreviewPlayer {
   // it starts UNMUTED (startMuted=false); if the browser still rejects the
   // unmuted play(), `_maintain` falls back to muted and the unmute button
   // remains for the user (#178 round 3).
-  constructor(video, path, startMuted) {
+  constructor(video, path, startMuted, onLag) {
     this.video = video;
     this.queue = [];
     this.sb = null;
@@ -43,6 +43,10 @@ export class PreviewPlayer {
     // clears the stale buffered range before appending the next keyframe
     // fragment, so the timeline resyncs cleanly (#178 item 13).
     this._needResync = false;
+    // #184 round F: the server's produced media time (ms) from the latest 1 Hz
+    // beacon, and the callback that reports the picture lag to the Rust side.
+    this._producedMs = null;
+    this.onLag = typeof onLag === 'function' ? onLag : null;
 
     video.muted = !!startMuted;
     video.autoplay = true;
@@ -86,7 +90,20 @@ export class PreviewPlayer {
 
   _openWs(path) {
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = scheme + '//' + location.host + path;
+    let wsPath = path;
+    // #184 round F test seam: forward a `lag_ms` flag from the PAGE url to the
+    // preview WS so the mock E2E can inflate the beacon. A normally-loaded
+    // dashboard never carries the flag, so the production preview.ws url is
+    // unchanged; the mock reads `?lag_ms=<N>` off the upgrade url.
+    try {
+      const pageLag = new URLSearchParams(location.search).get('lag_ms');
+      if (pageLag !== null && /^\d+$/.test(pageLag)) {
+        wsPath += (wsPath.includes('?') ? '&' : '?') + 'lag_ms=' + pageLag;
+      }
+    } catch (e) {
+      // No URLSearchParams / a malformed search — use the plain path.
+    }
+    const url = scheme + '//' + location.host + wsPath;
     try {
       this.ws = new WebSocket(url);
     } catch (e) {
@@ -95,6 +112,20 @@ export class PreviewPlayer {
     this.ws.binaryType = 'arraybuffer';
     this.ws.onmessage = (ev) => {
       if (this.destroyed || !this.sb) return;
+      // #184 round F: TEXT frames are the 1 Hz lag beacon ({"produced_ms":N});
+      // BINARY frames are fMP4 fragments. Never push a text frame into the
+      // append queue, and never let a non-JSON string reach the console.
+      if (typeof ev.data === 'string') {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg && typeof msg.produced_ms === 'number') {
+            this._producedMs = msg.produced_ms;
+          }
+        } catch (e) {
+          // Not JSON — ignore.
+        }
+        return;
+      }
       this.queue.push(new Uint8Array(ev.data));
       if (this.queue.length > MAX_QUEUE) {
         // Drop the oldest fragments; they will never be appended fast enough.
@@ -142,6 +173,16 @@ export class PreviewPlayer {
     if (buf.length === 0) return;
     const start = buf.start(0);
     const end = buf.end(buf.length - 1);
+    // #184 round F: report how far the PICTURE is behind the wall — the media
+    // the encoder has produced (from the beacon) minus what we have buffered.
+    // Only once we know both; a torn-down callback must never reach the console.
+    if (this.onLag && this._producedMs != null) {
+      try {
+        this.onLag(this._producedMs / 1000 - end);
+      } catch (e) {
+        // callback gone — ignore.
+      }
+    }
     // A live fMP4 fragment can begin at a non-zero media time, so the element's
     // currentTime (0 at mount) can sit BEFORE the first buffered sample — MSE
     // then never renders. Snap into the buffered range (#178 round 3).

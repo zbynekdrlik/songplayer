@@ -41,7 +41,11 @@ const VIDEO_CHANNEL_CAP: usize = 4;
 /// Bounded audio backlog (small f32 blocks; drop-on-full so the emit path never waits).
 const AUDIO_CHANNEL_CAP: usize = 48;
 /// Broadcast backlog of fMP4 fragments per viewer before it is dropped + resynced.
-const RELAY_CAPACITY: usize = 64;
+/// #184 round F: 4 fragments = 2 s at `-frag_duration 500000` (was 64 = 32 s). A
+/// slow remote (internet) viewer that back-pressures now drops fragments and
+/// resyncs on the next keyframe-aligned fragment instead of sitting a full 32-s
+/// backlog behind the wall — the "reakcia 30 s" the owner saw over the internet.
+const RELAY_CAPACITY: usize = 4;
 /// Max recycled video buffers kept in the pool.
 const POOL_MAX: usize = 6;
 

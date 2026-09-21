@@ -124,4 +124,145 @@ test.describe("#178 live preview <video> post-deploy", () => {
     await card.getByTestId("preview-stop").click();
     await expect(card.getByTestId("preview-video")).toHaveCount(0);
   });
+
+  test("throttled to 1 Mb/s the preview stays live and the dub mixer preset is responsive (#184)", async ({
+    page,
+    request,
+  }) => {
+    // #184 round F: the owner's actual condition — watching the preview over a
+    // ~1 Mb/s internet link — reproduced with CDP network emulation. The 500k
+    // stream + 4-fragment (2 s) backlog must keep the picture within ~5 s of the
+    // wall, and a control change (the dub mixer 'Originál' preset) must still land
+    // fast with the picture uninterrupted. Driven on the OFF-program Dabing output
+    // (never the live wall), following post-deploy-dabing.spec.ts.
+    //
+    // The liveness is proven by a BOUNDED, early-exit `expect.poll` (media reaches
+    // t0 + 15 s within ~20 s wall), NOT a fixed 60 s soak — the project's CLAUDE.md
+    // hard rule forbids a sleep-dominated test on the gating post-deploy path; a
+    // ~15 s window already distinguishes the fix (media tracks real time) from the
+    // bug (the backlog plateaued ~33 s behind and the media barely advanced). The
+    // full 60 s throttled soak is the supervisor's manual box verification
+    // (design acceptance item 4: probe-preview-throttled.mjs 1000 100 150).
+    test.setTimeout(120_000);
+
+    const dab = await request.get("/api/v1/dabing");
+    expect(dab.status()).toBe(200);
+    const body = (await dab.json()) as {
+      playlist_id: number;
+      videos: Array<{ video_id?: number; id?: number; dub_status: string }>;
+    };
+    const dabingPid = body.playlist_id;
+    const ready = body.videos.find((v) => v.dub_status === "ready");
+    expect(
+      ready,
+      "a ready dub must exist on the box for the throttled preview test",
+    ).toBeTruthy();
+    const sampleVideoId = Number(ready!.video_id ?? ready!.id);
+    expect(sampleVideoId).toBeGreaterThan(0);
+
+    await page.goto("/dabing");
+    await expect(page.getByTestId("player")).toBeVisible({ timeout: 30_000 });
+
+    // Start the dub on the off-program Dabing output; prove playback by frames.
+    const row = page.locator(
+      `[data-testid="song-row"][data-video-id="${sampleVideoId}"]`,
+    );
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await row.getByTestId("song-row-play").click();
+    await expect
+      .poll(
+        async () => {
+          const h = (await (await request.get("/api/v1/ndi/health")).json()) as Array<{
+            playlist_id: number;
+            frames_submitted_last_5s: number;
+          }>;
+          return (
+            h.find((r) => r.playlist_id === dabingPid)?.frames_submitted_last_5s ?? 0
+          );
+        },
+        { timeout: 30_000, message: "the Dabing output must start decoding" },
+      )
+      .toBeGreaterThan(0);
+
+    // Throttle to ~1 Mb/s / 100 ms RTT BEFORE starting the preview.
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Network.enable");
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: false,
+      downloadThroughput: 1_000_000 / 8,
+      uploadThroughput: 1_000_000 / 8,
+      latency: 100,
+    });
+
+    try {
+      await page.getByTestId("preview-start").click({ timeout: 20_000 });
+      const video = page.getByTestId("preview-video");
+      await expect(video).toBeVisible({ timeout: 20_000 });
+      await expect
+        .poll(async () => video.evaluate((el: HTMLVideoElement) => el.readyState), {
+          timeout: 40_000,
+        })
+        .toBeGreaterThanOrEqual(3);
+
+      // Bounded, early-exit liveness poll (NOT a fixed soak): the 500k stream
+      // fits 1 Mb/s, so under the throttle the media tracks ~real time and reaches
+      // t0 + 15 s within ~20 s wall — the poll resolves the moment it does. Before
+      // round F the backlog plateaued 33–38 s behind and the media barely advanced,
+      // so it would never reach t0 + 15 s and the poll times out (fail). This
+      // proves the plateau is gone without a sleep-dominated gating test.
+      const t0 = await video.evaluate((el: HTMLVideoElement) => el.currentTime);
+      await expect
+        .poll(
+          async () => video.evaluate((el: HTMLVideoElement) => el.currentTime),
+          {
+            timeout: 25_000,
+            message:
+              "the throttled preview must track real time — the media must keep advancing, not plateau behind the wall",
+          },
+        )
+        .toBeGreaterThanOrEqual(t0 + 15);
+
+      // The lag readout must be absent or under 5 s.
+      const lag = page.getByTestId("preview-lag");
+      if ((await lag.count()) > 0) {
+        const n = Number((await lag.textContent())?.match(/\d+/)?.[0] ?? "0");
+        expect(n, "if shown, the picture lag must be < 5 s").toBeLessThan(5);
+      }
+
+      // The dub mixer 'Originál' preset must respond fast even under the throttle:
+      // the PATCH lands ≤ 2 s and the picture keeps advancing (no stall > 3 s).
+      const patch = page.waitForResponse(
+        (r) =>
+          r.url().includes(`/api/v1/videos/${sampleVideoId}/dub-mix`) &&
+          r.request().method() === "PATCH",
+        { timeout: 2000 },
+      );
+      await page.getByTestId("mixer-preset-original").click();
+      expect((await patch).status()).toBe(200);
+
+      // Poll (≤ 3 s, early-exit) that the picture advances after the mix change —
+      // proves no stall > 3 s, without a fixed sleep.
+      const before = await video.evaluate((el: HTMLVideoElement) => el.currentTime);
+      await expect
+        .poll(
+          async () => video.evaluate((el: HTMLVideoElement) => el.currentTime),
+          {
+            timeout: 3000,
+            message:
+              "the picture must keep advancing after the mix change (no stall > 3 s)",
+          },
+        )
+        .toBeGreaterThan(before + 0.5);
+    } finally {
+      // Restore: dub-only mix, stop the preview, pause the off-program output.
+      await request
+        .patch(`/api/v1/videos/${sampleVideoId}/dub-mix`, { data: { ratio: 1.0 } })
+        .catch(() => {});
+      await page
+        .getByTestId("preview-stop")
+        .click()
+        .catch(() => {});
+      await request.post(`/api/v1/playback/${dabingPid}/pause`).catch(() => {});
+    }
+  });
 });
