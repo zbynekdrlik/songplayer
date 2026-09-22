@@ -160,10 +160,7 @@ pub(crate) fn set_dub_slot_wanted(wanted: bool) {
 /// now HOLDS the slot, so nothing needs to yield for it any more (the semaphore
 /// serialises the rest). Unit-tested exactly so the name coupling cannot drift.
 pub(crate) fn acquire_clears_dub_want(name: &str) -> bool {
-    // RED (#184 G0.1): inverted — a NON-dub acquire would wrongly clear a queued
-    // dub's flag while the dub's own acquire would not. GREEN pins it to the dub
-    // step name (`== DUB_STEP_NAME`).
-    name != DUB_STEP_NAME
+    name == DUB_STEP_NAME
 }
 
 /// RAII "a dub wants the heavy slot" signal from [`dub_slot_want_guard`]: its
