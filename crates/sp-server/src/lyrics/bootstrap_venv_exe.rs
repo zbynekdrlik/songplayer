@@ -69,13 +69,13 @@ pub fn needs_recopy(src: FileStamp, dst: Option<FileStamp>) -> bool {
 
 /// Pure: whether to `minject` the mimalloc override into the venv interpreter.
 /// Skip when the staged resources are missing (nothing to inject) or when the
-/// override is already the first import (idempotent — `minject -l` decides);
-/// otherwise inject.
+/// override already loads in the venv exe (idempotent — the `GetModuleHandleW`
+/// probe decides); otherwise inject.
 pub fn inject_plan(resources_present: bool, already_injected: bool) -> InjectPlan {
     if !resources_present {
         InjectPlan::Skip("mimalloc resources not staged")
     } else if already_injected {
-        InjectPlan::Skip("mimalloc.dll already the first import")
+        InjectPlan::Skip("mimalloc.dll already loads in the venv interpreter")
     } else {
         InjectPlan::Inject
     }
@@ -124,12 +124,12 @@ async fn materialize_and_inject(tools_dir: &Path, venv_python: &Path) -> anyhow:
         .with_context(|| format!("no `home =` in {}/pyvenv.cfg", venv_dir.display()))?;
 
     // Locate the staged mimalloc resources and whether the current venv exe is
-    // already our injected interpreter (the steady state).
+    // already our injected interpreter (the steady state). "Already injected"
+    // means the override actually LOADS in the current venv exe (the vendor
+    // probe) — never a parse of `minject -l` output whose format we do not own:
+    // a false "yes" there would skip the inject forever on a fresh exe.
     let resources = locate_mimalloc_resources(tools_dir);
-    let injected = match resources.as_ref() {
-        Some(dir) => already_injected(&dir.join(MINJECT_EXE), venv_python).await,
-        None => false,
-    };
+    let injected = resources.is_some() && probe_mimalloc_active(venv_python).await == Some(true);
 
     // Refresh the interpreter's DLLs from `home` (idempotent — these are never
     // patched by minject, so a copy makes dst byte-identical to src; a system
@@ -280,22 +280,6 @@ fn locate_mimalloc_resources(tools_dir: &Path) -> Option<PathBuf> {
         return Some(fallback);
     }
     None
-}
-
-/// Whether `mimalloc.dll` is already in the venv exe's import table
-/// (`minject -l`). Any failure → `false` (attempt the inject; `--force` makes it
-/// idempotent).
-#[cfg(windows)]
-#[cfg_attr(test, mutants::skip)]
-async fn already_injected(minject: &Path, venv_python: &Path) -> bool {
-    let mut cmd = tokio::process::Command::new(minject);
-    cmd.arg("-l").arg(venv_python);
-    match run_capture(&mut cmd, 30).await {
-        Some(o) => String::from_utf8_lossy(&o.stdout)
-            .to_ascii_lowercase()
-            .contains("mimalloc"),
-        None => false,
-    }
 }
 
 /// Run `minject --force --inplace <exe>` (force = no interactive prompt in a
