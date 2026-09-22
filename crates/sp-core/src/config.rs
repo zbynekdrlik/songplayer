@@ -23,14 +23,18 @@ pub const SETTING_DUB_VOICE: &str = "dub_voice";
 /// session holds the pinned voice; it drifts inside a long one. Read per tick
 /// by the dub worker and set from the Nastavenia page.
 pub const SETTING_DUB_SESSION_MAX_S: &str = "dub_session_max_s";
-/// #184 round G: the ONE global live mixer console — three independent faders
-/// `[vokály, podklad, dabing]` (each an f32 `0.0..=1.0` stored as its decimal
-/// string). Persisted here and restored at boot by `stems::control::MixControl`;
-/// they supersede the old `karaoke_mode` + `karaoke_vocal_gain` + per-video
-/// `videos.dub_mix_ratio`, which migration V27 folds into these keys and drops.
-pub const SETTING_MIX_VOKALY: &str = "mix_vokaly";
-pub const SETTING_MIX_PODKLAD: &str = "mix_podklad";
-pub const SETTING_MIX_DABING: &str = "mix_dabing";
+/// #184 round G1: the ONE mixer console with TWO remembered fader triples,
+/// selected by the KIND of the playing item — a SONG memory (`vokály` / `podklad`;
+/// its `dabing` is unused) and a DUB memory (`vokály` / `podklad` / `dabing`).
+/// Each fader is an f32 `0.0..=1.0` stored as its decimal string, persisted here
+/// and restored at boot by `stems::control::MixControl`. Migration V28 derives the
+/// song pair from round-G's single `mix_vokaly` / `mix_podklad` and seeds the dub
+/// triple with the `Len dabing` default `(0, 1, 1)`.
+pub const SETTING_MIX_SONG_VOKALY: &str = "mix_song_vokaly";
+pub const SETTING_MIX_SONG_PODKLAD: &str = "mix_song_podklad";
+pub const SETTING_MIX_DUB_VOKALY: &str = "mix_dub_vokaly";
+pub const SETTING_MIX_DUB_PODKLAD: &str = "mix_dub_podklad";
+pub const SETTING_MIX_DUB_DABING: &str = "mix_dub_dabing";
 
 // Default values for settings that have sensible defaults.
 pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
@@ -97,8 +101,10 @@ mod tests {
 
     #[test]
     fn mix_fader_setting_keys() {
-        assert_eq!(SETTING_MIX_VOKALY, "mix_vokaly");
-        assert_eq!(SETTING_MIX_PODKLAD, "mix_podklad");
-        assert_eq!(SETTING_MIX_DABING, "mix_dabing");
+        assert_eq!(SETTING_MIX_SONG_VOKALY, "mix_song_vokaly");
+        assert_eq!(SETTING_MIX_SONG_PODKLAD, "mix_song_podklad");
+        assert_eq!(SETTING_MIX_DUB_VOKALY, "mix_dub_vokaly");
+        assert_eq!(SETTING_MIX_DUB_PODKLAD, "mix_dub_podklad");
+        assert_eq!(SETTING_MIX_DUB_DABING, "mix_dub_dabing");
     }
 }
