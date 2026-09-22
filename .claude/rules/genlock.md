@@ -348,3 +348,40 @@ so the OS fault + TLB-shootdown cost is unchanged):
 - The idle black and the cached BGRA black stay OUT of the pool as takers (built
   from their own buffers, never `take`); the idle black's single end-of-loop
   drop recycling one bounded black buffer is harmless.
+
+## Paced measurement session (#168 round-4 recipe)
+
+How to run a paced grid-stall measurement on win-resolume (the check behind the
+#168 round-5 default `heavy_cpu_affinity_mask` and #147's production flip). A
+90-minute investigation is now a 10-minute read.
+
+- **Toggle pacing.** `genlock_pacing` is read ONLY at startup (`lib.rs::start` →
+  `engine.set_genlock_pacing`), so a paced test = `PATCH /api/v1/settings` with
+  the FLAT body `{"genlock_pacing":"true"}`, THEN restart the app. Restart via
+  `gh run rerun --job <LATEST Deploy job id>` — look the id up each time
+  (`gh run view <run> --json jobs`; a rerun mints a NEW job id). The dependent
+  E2E re-runs and FAILS under pacing ON on the dabing 12–16 kHz spectral test —
+  EXPECTED — so END every session with the flag back to `false` + another
+  Deploy-job rerun to a green run.
+- **Change containment mid-session.** `heavy_cpu_cap_pct` /
+  `heavy_cpu_affinity_mask` apply at the NEXT child spawn (`refresh_containment`
+  per tick), NOT to the running child — so after a settings change, kill the venv
+  python (`Stop-Process -Id <pid>`) to force a respawn. That video takes one
+  `stem_attempts` + backoff; its already-written segments are intact.
+- **The no-child control:** `stem_worker_enabled=false` + `lyrics_worker_enabled=false`.
+- **Read the grid per minute** from `C:\ProgramData\SongPlayer\songplayer.<date>.log`:
+  `pipeline: loop-stats ndi_name="SP-slow" … submit_call_us_max` (the raw
+  `send_video_async` call cost) and `ndi: genlock … late=` (lateness/min).
+- **Trust the window only if the child is PRODUCTIVE.** `TotalProcessorTime`
+  delta over 6 s must be > 0 — a starved child (a 2-logical-core block, W3) gives
+  a false-clean grid because it is doing no work, not because placement is safe.
+
+### MCP-shell traps (learned the hard way, round 4)
+
+- Keep each `mcp__win-resolume__Shell` call ≤ ~12 s (e.g. 2 × 4-s `Get-Counter`
+  samples). Longer calls time out and lose the output.
+- A detached sampler launched via `Start-Process` NEVER wrote its output file —
+  run the sampler inline in the (bounded) shell call instead.
+- NEVER `Stop-Process` by a `CommandLine -like '<text>'` filter whose text also
+  matches YOUR OWN command — it kills your own shell (exit -1, no output). Target
+  the child by `-Id <pid>` read from a prior listing.
