@@ -781,6 +781,7 @@ impl PlaybackEngine {
     /// Cache the video's song/artist/duration and broadcast `NowPlaying`
     /// with `position_ms: 0`. Called when a pipeline reports a `Started`
     /// event (i.e. playback just began).
+    #[cfg_attr(test, mutants::skip)] // DB/WS glue; the kind decision is unit-tested in `mix_kind_for_dub`
     async fn broadcast_now_playing_on_start(&mut self, playlist_id: i64, duration_ms: u64) {
         let video_id = match self
             .pipelines
@@ -792,6 +793,8 @@ impl PlaybackEngine {
         };
 
         crate::now_playing::global().set(playlist_id, video_id); // #177 bind panel
+        // #184 round G1: point the ONE mixer console at this item's KIND memory.
+        self.select_mix_kind_for_video(video_id).await;
 
         let (song, artist) = match title::get_video_title_info(&self.pool, video_id).await {
             Ok(Some(pair)) => pair,
