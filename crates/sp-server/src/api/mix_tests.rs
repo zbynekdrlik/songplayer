@@ -163,8 +163,10 @@ async fn patch_edits_the_active_dub_memory_only() {
     let pool = state.pool.clone();
 
     crate::stems::control::global().select_kind(sp_core::mixer_model::MixKind::Dub);
-    let (status, _) = patch_mix(app(state.clone()), r#"{"vokaly":0.3}"#).await;
+    let (status, patch_json) = patch_mix(app(state.clone()), r#"{"vokaly":0.3}"#).await;
     assert_eq!(status, StatusCode::OK);
+    // The PATCH response echoes the active kind it edited (parity with GET).
+    assert_eq!(patch_json["kind"], "dub");
 
     // GET reflects the active dub console.
     let json = get_json(app(state.clone()), "/api/v1/mix").await;

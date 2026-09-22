@@ -201,6 +201,8 @@ pub async fn patch_mix(
                 "vokaly": f.vokaly,
                 "podklad": f.podklad,
                 "dabing": f.dabing,
+                // Parity with GET /mix: echo the active kind this PATCH edited.
+                "kind": kind_str(kind),
             })),
         )
             .into_response(),
