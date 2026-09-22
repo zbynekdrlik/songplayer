@@ -1,4 +1,36 @@
 import { test, expect, Page } from "@playwright/test";
+import { audibleStreak, averageDb } from "./audio-helpers.mjs";
+
+// ── #206: pure audio-assertion helpers (run on ubuntu, no box) ────────────────
+// The two content/state-dependent post-deploy audio assertions used to read ONE
+// live sample and flaked on luck (3 red jobs on 22.9.2026). The determinism now
+// lives in two pure helpers, unit-tested here with exact values.
+
+test("audibleStreak — a run of N samples strictly above the threshold (#206)", () => {
+  // Reached: index 1,2,3 are each > 0.01 → the 3-streak completes at index 3.
+  expect(audibleStreak([0, 0.02, 0.03, 0.02], 0.01, 3)).toBe(3);
+  // Reached as early as possible: the earliest qualifying streak wins.
+  expect(audibleStreak([0.5, 0.5, 0.5, 0.5], 0.01, 3)).toBe(2);
+  // n = 1 completes at the first audible sample.
+  expect(audibleStreak([0, 0, 0.5], 0.01, 1)).toBe(2);
+  // Never reached: a silent sample keeps breaking the run before it hits 3.
+  expect(audibleStreak([0.02, 0, 0.02, 0, 0.02], 0.01, 3)).toBe(-1);
+  // Threshold is STRICT: samples EQUAL to the threshold do not count.
+  expect(audibleStreak([0.01, 0.01, 0.01], 0.01, 3)).toBe(-1);
+  expect(audibleStreak([0.011, 0.011, 0.011], 0.01, 3)).toBe(2);
+  // Empty input never reaches a streak.
+  expect(audibleStreak([], 0.01, 3)).toBe(-1);
+});
+
+test("averageDb — mean of finite dB samples, non-finite dropped (#206)", () => {
+  expect(averageDb([-10, -20, -30])).toBe(-20);
+  // null / NaN / -Infinity (a codec-less runner or an empty spectral band) drop.
+  expect(averageDb([-10, null, -30])).toBe(-20);
+  expect(averageDb([-10, Number.NEGATIVE_INFINITY, -30, Number.NaN])).toBe(-20);
+  // No finite entries → null (never NaN).
+  expect(averageDb([])).toBeNull();
+  expect(averageDb([null, Number.NEGATIVE_INFINITY, Number.NaN])).toBeNull();
+});
 
 const ALLOWED_CONSOLE = [
   /WebSocket connection/, // WS reconnect messages are expected
