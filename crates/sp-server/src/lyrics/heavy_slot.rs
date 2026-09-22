@@ -365,6 +365,17 @@ fn current_containment() -> Containment {
         .unwrap_or_else(|_| containment_from_settings(None, None, logical_cores()))
 }
 
+/// The logical-core count of the currently published affinity block — the
+/// `count_ones()` of the live containment's mask. Read by the cpu-idle thread
+/// cap ([`crate::lyrics::heavy_plan`]) so a heavy child never gets more torch
+/// threads than the core block it is confined to (#168 round 5: a 4-logical-core
+/// default block caps the #162 quarter-cores rule). Integration-only — reads the
+/// published global, like [`current_containment`].
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn current_affinity_block_cores() -> usize {
+    current_containment().affinity_mask.count_ones() as usize
+}
+
 // ---------------------------------------------------------------------------
 // Layer 3 — per-child Windows Job Object (memory ceiling, kill-on-job-close).
 // ---------------------------------------------------------------------------

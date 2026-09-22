@@ -362,23 +362,31 @@ pub(crate) async fn wait_with_stall_timeout(
     }
 }
 
-/// CPU-idle thread cap: a quarter of the logical cores, at least 1. Reads the
-/// environment (`available_parallelism`) so it is integration-only; the pure
-/// rule it delegates to (`cpu_idle_threads_for`) is unit-tested.
+/// CPU-idle thread cap: a quarter of the logical cores, BOUNDED by the affinity
+/// block the child is confined to, at least 1. Reads the environment
+/// (`available_parallelism`) AND the live published affinity block
+/// (`heavy_slot::current_affinity_block_cores`, the popcount of the resolved
+/// affinity mask), so it is integration-only; the pure rule it delegates to
+/// (`cpu_idle_threads_for`) is unit-tested.
 #[cfg_attr(test, mutants::skip)]
 fn cpu_idle_threads() -> usize {
     cpu_idle_threads_for(
         std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1),
+        crate::lyrics::heavy_slot::current_affinity_block_cores(),
     )
 }
 
-/// Pure quarter-cores rule (#162 — minimal load, not speed): `max(1, cores/4)`,
-/// so the 12-core box runs a heavy CPU step on 3 threads. Extracted so it is
-/// deterministic in tests.
-fn cpu_idle_threads_for(cores: usize) -> usize {
-    (cores / 4).max(1)
+/// Pure cpu-idle thread cap (#162 — minimal load, not speed): the quarter-cores
+/// rule `cores / 4` BOUNDED by the affinity `block` the child runs on (the
+/// popcount of the resolved affinity mask), at least 1. On the 24-core box the
+/// #168 round-5 default confines the child to a 4-logical-core block, so the 6
+/// threads the quarter rule would pick are capped to 4 — 6 torch threads on 4
+/// logical cores oversubscribe. A wide `block` (an explicit whole-machine mask)
+/// lets the quarter rule win. Extracted so it is deterministic in tests.
+fn cpu_idle_threads_for(cores: usize, block: usize) -> usize {
+    (cores / 8).min(block).max(1) // RED: GREEN sets the quarter rule via `/ 4`
 }
 
 // ---------------------------------------------------------------------------
