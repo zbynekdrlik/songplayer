@@ -4,7 +4,9 @@
 //! Extracted from `mod.rs` to keep that file under the 1000-line cap. As a child
 //! module of `playback`, it can access the engine's private fields.
 
-use sp_core::mixer_model::MixFaders;
+use std::path::Path;
+
+use sp_core::mixer_model::{MixFaders, mix_kind_for_dub};
 use sp_core::ws::ServerMsg;
 use tracing::info;
 
@@ -21,6 +23,32 @@ pub(crate) fn fader_change_needs_reload() -> bool {
 }
 
 impl PlaybackEngine {
+    /// At each item open, point the ONE mixer console at the memory for the playing
+    /// item's KIND (#184 round G1): `Dub` when the item has a READY dub, else
+    /// `Song`. Dub readiness is the SAME signal the reader uses to pick a dub
+    /// `AudioSourceKind` — the dub track file on disk
+    /// (`stems::dub_path(audio).exists()`) — so the console kind and the opened
+    /// reader always agree. The remembered faders are untouched; only the active
+    /// memory (and the republished gains) change. The engine calls this from
+    /// `broadcast_now_playing_on_start` (the `Started` event).
+    #[cfg_attr(test, mutants::skip)] // DB + filesystem glue; the pure decision is `mix_kind_for_dub`
+    pub(crate) async fn select_mix_kind_for_video(&self, video_id: i64) {
+        let has_ready_dub = match crate::db::models::get_song_paths(&self.pool, video_id).await {
+            Ok(Some((_video, audio))) => crate::stems::dub_path(Path::new(&audio)).exists(),
+            _ => false,
+        };
+        let kind = mix_kind_for_dub(has_ready_dub);
+        let control = crate::stems::control::global();
+        if control.kind() != kind {
+            control.select_kind(kind);
+            info!(
+                video_id,
+                ?kind,
+                "mixer console switched to the playing item's kind"
+            );
+        }
+    }
+
     /// Apply the ONE global live mixer console — the three fader positions
     /// `[vokály, podklad, dabing]`. Writes them to the process-global
     /// [`crate::stems::control::MixControl`] (which publishes the derived

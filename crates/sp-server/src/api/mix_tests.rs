@@ -76,9 +76,17 @@ async fn get_setting(pool: &sqlx::SqlitePool, key: &str) -> Option<String> {
     crate::db::models::get_setting(pool, key).await.unwrap()
 }
 
+/// Re-seed the process-global console to its default (song `(1,1,·)`, dub
+/// `(0,1,1)`, active Song) so a kind-touching test starts from a known state
+/// regardless of what a sibling left behind. Call under the `SERIAL` lock.
+fn reset_console() {
+    let _ = crate::stems::control::init(sp_core::mixer_model::MixConsole::default());
+}
+
 #[tokio::test]
-async fn patch_mix_sets_all_three_faders_and_persists() {
+async fn patch_mix_sets_both_song_faders_and_persists() {
     let _g = SERIAL.lock().unwrap();
+    reset_console(); // active Song
     let state = test_state().await;
     let pool = state.pool.clone();
 
@@ -87,14 +95,14 @@ async fn patch_mix_sets_all_three_faders_and_persists() {
     assert_eq!(status, StatusCode::OK);
     assert!((json["vokaly"].as_f64().unwrap() - 0.3).abs() < 1e-6);
     assert!((json["podklad"].as_f64().unwrap() - 1.0).abs() < 1e-6);
-    assert!((json["dabing"].as_f64().unwrap() - 0.5).abs() < 1e-6);
 
-    // The three settings are persisted (restored at boot by init_from_settings).
+    // The active SONG pair is persisted (restored at boot by init_from_settings);
+    // the song memory's dabing is unused, so no song-dabing key is written.
     assert_eq!(
-        get_setting(&pool, sp_core::config::SETTING_MIX_PODKLAD).await,
+        get_setting(&pool, sp_core::config::SETTING_MIX_SONG_PODKLAD).await,
         Some("1".to_string())
     );
-    let v: f32 = get_setting(&pool, sp_core::config::SETTING_MIX_VOKALY)
+    let v: f32 = get_setting(&pool, sp_core::config::SETTING_MIX_SONG_VOKALY)
         .await
         .unwrap()
         .parse()
@@ -105,6 +113,7 @@ async fn patch_mix_sets_all_three_faders_and_persists() {
 #[tokio::test]
 async fn patch_mix_partial_keeps_the_unspecified_faders() {
     let _g = SERIAL.lock().unwrap();
+    reset_console();
     let state = test_state().await;
 
     // Seed a known console, then PATCH ONLY vokaly — podklad/dabing must survive.
@@ -123,6 +132,67 @@ async fn patch_mix_partial_keeps_the_unspecified_faders() {
         "an omitted podklad keeps its current value"
     );
     assert!((json["dabing"].as_f64().unwrap() - 0.2).abs() < 1e-6);
+}
+
+/// `GET /api/v1/mix` reports the ACTIVE console's kind, and switching the kind
+/// flips it (#184 round G1).
+#[tokio::test]
+async fn get_mix_reports_the_active_kind() {
+    let _g = SERIAL.lock().unwrap();
+    reset_console(); // active Song
+    let state = test_state().await;
+
+    let json = get_json(app(state.clone()), "/api/v1/mix").await;
+    assert_eq!(json["kind"], "song");
+
+    crate::stems::control::global().select_kind(sp_core::mixer_model::MixKind::Dub);
+    let json = get_json(app(state), "/api/v1/mix").await;
+    assert_eq!(json["kind"], "dub");
+
+    reset_console();
+}
+
+/// A PATCH edits the ACTIVE (dub) console only: `GET` returns `kind:"dub"` with the
+/// dub value, the dub key is persisted, and switching back to Song returns the
+/// untouched song memory (#184 round G1).
+#[tokio::test]
+async fn patch_edits_the_active_dub_memory_only() {
+    let _g = SERIAL.lock().unwrap();
+    reset_console();
+    let state = test_state().await;
+    let pool = state.pool.clone();
+
+    crate::stems::control::global().select_kind(sp_core::mixer_model::MixKind::Dub);
+    let (status, patch_json) = patch_mix(app(state.clone()), r#"{"vokaly":0.3}"#).await;
+    assert_eq!(status, StatusCode::OK);
+    // The PATCH response echoes the active kind it edited (parity with GET).
+    assert_eq!(patch_json["kind"], "dub");
+
+    // GET reflects the active dub console.
+    let json = get_json(app(state.clone()), "/api/v1/mix").await;
+    assert_eq!(json["kind"], "dub");
+    assert!((json["vokaly"].as_f64().unwrap() - 0.3).abs() < 1e-6);
+    // The dub key is persisted; the song key is NOT touched by a dub edit.
+    let dv: f32 = get_setting(&pool, sp_core::config::SETTING_MIX_DUB_VOKALY)
+        .await
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((dv - 0.3).abs() < 1e-6);
+    // The song key keeps its V28-seeded value (1) — a dub edit never writes it.
+    assert_eq!(
+        get_setting(&pool, sp_core::config::SETTING_MIX_SONG_VOKALY).await,
+        Some("1".to_string()),
+        "a dub edit must not persist a song key"
+    );
+
+    // Switching back to Song shows the untouched song memory (default full mix).
+    crate::stems::control::global().select_kind(sp_core::mixer_model::MixKind::Song);
+    let json = get_json(app(state), "/api/v1/mix").await;
+    assert_eq!(json["kind"], "song");
+    assert!((json["vokaly"].as_f64().unwrap() - 1.0).abs() < 1e-6);
+
+    reset_console();
 }
 
 #[tokio::test]

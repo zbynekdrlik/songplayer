@@ -4,7 +4,7 @@
 //! for the 1000-line cap; uses the shared `apply_first_n` / `column_names`.
 
 use super::MIGRATIONS;
-use super::test_helpers::{apply_first_n, column_names};
+use super::test_helpers::{apply_first_n, apply_upto, column_names};
 use super::*;
 
 async fn get_setting(pool: &SqlitePool, key: &str) -> Option<String> {
@@ -37,7 +37,9 @@ async fn derive(
             .await
             .unwrap();
     }
-    run_migrations(&pool).await.unwrap();
+    // Fire ONLY V27 (not V28, which would split + delete these three global keys),
+    // so this test asserts V27's derivation in isolation.
+    apply_upto(&pool, 27).await;
     (
         get_setting(&pool, "mix_vokaly").await,
         get_setting(&pool, "mix_podklad").await,

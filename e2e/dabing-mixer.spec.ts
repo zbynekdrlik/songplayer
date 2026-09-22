@@ -158,3 +158,121 @@ test.describe("a dub preset click issues exactly one PATCH", () => {
     expect(patchCount, "one preset click = one PATCH").toBe(1);
   });
 });
+
+// #184 round G1: the ONE strip remembers its faders PER ITEM KIND (song vs dub).
+// A dub mixed to a custom value survives a song played in between and comes back;
+// a song at full mix never drags the next dub video's vokály. The console keeps
+// TWO memories, selected by the playing item's kind — proven on Dashboard AND Live.
+test.describe("the strip snaps to the other memory when the item's kind flips", () => {
+  const npReady = (playlist_id: number, video_id: number, title: string) => [
+    {
+      playlist_id,
+      video_id,
+      title,
+      stems_state: "ready",
+      stems_error: null,
+      queue_position: null,
+    },
+  ];
+
+  test("Dashboard: a dub mix survives a song and comes back", async ({
+    page,
+    request,
+  }) => {
+    // Play a dub (the Dashboard's playlist-1 item is video 1): add its ready dub
+    // row and tell /mix the playing item is that dub.
+    await request.post("/__mock/dabing-add", {
+      data: { video_id: 1, title: "Kázeň", dub_status: "ready", stem_status: null },
+    });
+    await request.post("/__mock/karaoke-now-playing", {
+      data: npReady(1, 1, "Kázeň"),
+    });
+
+    await page.goto("/");
+    await expect(page.getByTestId("player")).toBeVisible({ timeout: 15000 });
+    // Kind = dub → the dabing fader is present and the dub default is (0,1,1).
+    await expect(page.getByTestId("mix-dabing")).toBeVisible({ timeout: 15000 });
+    const vokaly = page.getByTestId("mix-vokaly");
+    await expect(vokaly).toHaveValue("0", { timeout: 15000 });
+
+    // Mix the dub: vokály → 30 %.
+    await vokaly.fill("30");
+    await vokaly.dispatchEvent("change");
+    await expect
+      .poll(
+        async () => (await (await request.get("/__mock/mix-last")).json()).vokaly,
+        { timeout: 5000 },
+      )
+      .toBeCloseTo(0.3, 5);
+
+    // Play a song in between: drop the dub row so the item's kind flips to song.
+    await request.post("/__mock/dabing-reset");
+    await request.post("/__mock/karaoke-now-playing", {
+      data: npReady(1, 1, "Pieseň"),
+    });
+    // The strip snaps to the SONG memory (1,1) with no dabing fader.
+    await expect(page.getByTestId("mix-dabing")).toHaveCount(0, {
+      timeout: 15000,
+    });
+    await expect(vokaly).toHaveValue("100", { timeout: 15000 });
+
+    // Play the dub again → the dub memory (0.3,1,1) is restored, untouched by
+    // the song in between.
+    await request.post("/__mock/dabing-add", {
+      data: { video_id: 1, title: "Kázeň", dub_status: "ready", stem_status: null },
+    });
+    await request.post("/__mock/karaoke-now-playing", {
+      data: npReady(1, 1, "Kázeň"),
+    });
+    await expect(page.getByTestId("mix-dabing")).toBeVisible({ timeout: 15000 });
+    await expect(vokaly).toHaveValue("30", { timeout: 15000 });
+  });
+
+  test("Live: a dub mix survives a song and comes back", async ({
+    page,
+    request,
+  }) => {
+    await request.post("/__mock/dabing-add", {
+      data: { video_id: 700, title: "Kázeň", dub_status: "ready", stem_status: null },
+    });
+
+    await page.goto("/live");
+    await expect(page.getByTestId("player")).toBeVisible({ timeout: 15000 });
+
+    // Play a given video on the live playlist (184), driving BOTH the WS
+    // now-playing (store) and the /mix now-playing (kind), like a real open.
+    const play = async (video_id: number, title: string) => {
+      await request.post("/__mock/now-playing", {
+        data: { playlist_id: 184, video_id, song: title, duration_ms: 200000 },
+      });
+      await request.post("/__mock/karaoke-now-playing", {
+        data: npReady(184, video_id, title),
+      });
+    };
+
+    await play(700, "Kázeň");
+    await expect(page.getByTestId("mix-dabing")).toBeVisible({ timeout: 15000 });
+    const vokaly = page.getByTestId("mix-vokaly");
+    await expect(vokaly).toHaveValue("0", { timeout: 15000 });
+    await vokaly.fill("30");
+    await vokaly.dispatchEvent("change");
+    await expect
+      .poll(
+        async () => (await (await request.get("/__mock/mix-last")).json()).vokaly,
+        { timeout: 5000 },
+      )
+      .toBeCloseTo(0.3, 5);
+
+    // Play a plain song (video 999, no dub row) → the song memory (1,1), no dabing.
+    await play(999, "Pieseň");
+    await expect(page.getByTestId("mix-dabing")).toHaveCount(0, {
+      timeout: 15000,
+    });
+    await expect(vokaly).toHaveValue("100", { timeout: 15000 });
+
+    // Back to the dub → its memory (0.3,1,1) is restored.
+    await play(700, "Kázeň");
+    await expect(page.getByTestId("mix-dabing")).toBeVisible({ timeout: 15000 });
+    await expect(vokaly).toHaveValue("30", { timeout: 15000 });
+  });
+});

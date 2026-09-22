@@ -13,9 +13,17 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
-use sp_core::mixer_model::MixFaders;
+use sp_core::mixer_model::{MixFaders, MixKind};
 
 use crate::{AppState, EngineCommand};
+
+/// The wire string for a [`MixKind`] — the `"kind"` field of `GET /api/v1/mix`.
+fn kind_str(kind: MixKind) -> &'static str {
+    match kind {
+        MixKind::Song => "song",
+        MixKind::Dub => "dub",
+    }
+}
 
 /// GET the live mixer state + stem progress for the dashboard.
 ///
@@ -25,7 +33,9 @@ use crate::{AppState, EngineCommand};
 /// are ready. The set comes from the process-global now-playing registry; per-song
 /// stems state is read from the same DB the stem worker writes (never re-derived).
 pub async fn get_mix(State(state): State<AppState>) -> impl IntoResponse {
-    let f = crate::stems::control::global().faders();
+    let control = crate::stems::control::global();
+    let f = control.faders();
+    let kind = kind_str(control.kind());
     let (pending, done) = crate::db::models_stems::count_stems_progress(&state.pool)
         .await
         .unwrap_or((0, 0));
@@ -71,6 +81,7 @@ pub async fn get_mix(State(state): State<AppState>) -> impl IntoResponse {
         "vokaly": f.vokaly,
         "podklad": f.podklad,
         "dabing": f.dabing,
+        "kind": kind,
         "stems_pending": pending,
         "stems_done": done,
         "now_playing": now_playing,
@@ -115,7 +126,11 @@ pub async fn patch_mix(
     State(state): State<AppState>,
     Json(body): Json<SetMixRequest>,
 ) -> impl IntoResponse {
-    let cur = crate::stems::control::global().faders();
+    let control = crate::stems::control::global();
+    let cur = control.faders();
+    // The kind whose memory this PATCH edits + persists — the ACTIVE console
+    // (#184 round G1). Read once so the live push and the persist agree.
+    let kind = control.kind();
     // The SAME clamped/NaN-guarded target the live push and the persist both use.
     let target = MixFaders::new(
         body.vokaly.unwrap_or(cur.vokaly),
@@ -137,24 +152,45 @@ pub async fn patch_mix(
     };
     let pool = state.pool.clone();
     let persist = async move {
-        crate::db::models::set_setting(
-            &pool,
-            sp_core::config::SETTING_MIX_VOKALY,
-            &target.vokaly.to_string(),
-        )
-        .await?;
-        crate::db::models::set_setting(
-            &pool,
-            sp_core::config::SETTING_MIX_PODKLAD,
-            &target.podklad.to_string(),
-        )
-        .await?;
-        crate::db::models::set_setting(
-            &pool,
-            sp_core::config::SETTING_MIX_DABING,
-            &target.dabing.to_string(),
-        )
-        .await?;
+        // Persist ONLY the active kind's keys: a SONG edit writes the song pair (its
+        // `dabing` is unused), a DUB edit writes the dub triple. The other memory's
+        // settings are untouched, so it survives a restart (#184 round G1).
+        match kind {
+            MixKind::Song => {
+                crate::db::models::set_setting(
+                    &pool,
+                    sp_core::config::SETTING_MIX_SONG_VOKALY,
+                    &target.vokaly.to_string(),
+                )
+                .await?;
+                crate::db::models::set_setting(
+                    &pool,
+                    sp_core::config::SETTING_MIX_SONG_PODKLAD,
+                    &target.podklad.to_string(),
+                )
+                .await?;
+            }
+            MixKind::Dub => {
+                crate::db::models::set_setting(
+                    &pool,
+                    sp_core::config::SETTING_MIX_DUB_VOKALY,
+                    &target.vokaly.to_string(),
+                )
+                .await?;
+                crate::db::models::set_setting(
+                    &pool,
+                    sp_core::config::SETTING_MIX_DUB_PODKLAD,
+                    &target.podklad.to_string(),
+                )
+                .await?;
+                crate::db::models::set_setting(
+                    &pool,
+                    sp_core::config::SETTING_MIX_DUB_DABING,
+                    &target.dabing.to_string(),
+                )
+                .await?;
+            }
+        }
         Ok::<MixFaders, sqlx::Error>(target)
     };
 
@@ -165,6 +201,8 @@ pub async fn patch_mix(
                 "vokaly": f.vokaly,
                 "podklad": f.podklad,
                 "dabing": f.dabing,
+                // Parity with GET /mix: echo the active kind this PATCH edited.
+                "kind": kind_str(kind),
             })),
         )
             .into_response(),

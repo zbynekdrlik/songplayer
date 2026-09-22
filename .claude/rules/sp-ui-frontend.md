@@ -159,6 +159,29 @@ view is then `'static`. (Alternatively `-> impl IntoView + use<>` to opt out of
 lifetime capture, but owned args are clearer.) Same trap for any sp-ui helper
 that takes `&SomeRow`/`&str` and returns a view used in a `<For>`/list child.
 
+## #184 round G1 — kind-scoped mixer memory + the mock's two now-playing channels
+
+The `LiveMixer` strip must snap to the OTHER remembered memory when the playing
+item's kind flips (song ↔ dub). The reload Effect keys on BOTH `selected_song`
+(video id) AND an `is_dub` Memo (`dub_row.dub_status == "ready"`) — a kind flip
+whose video id is CONSTANT (the Dashboard's pinned video 1) would NOT reload if the
+Effect tracked only `selected_song`. Both deps are Memos, so a position tick never
+reloads (Rule 1). The active memory + faders always come from `GET /mix`; the UI
+never re-derives them per kind.
+
+**Mock gotcha — the mock has TWO now-playing channels that must be driven
+consistently.** `GET /api/v1/mix`'s `kind` derives from `karaokeNowPlaying` (the
+`/mix` now_playing array, set by `/__mock/karaoke-now-playing`) matched against
+`dubRows` (a READY dub row for the played video → kind `dub`). But the UI's
+`is_dub` / dab-fader visibility read `store.now_playing` (the WS channel, set by
+`/__mock/now-playing`) + `store.dabing`. So an E2E that "plays a dub" must set BOTH
+the WS now-playing AND `karaoke-now-playing` to the same video (and add its ready
+dub row), or the mock's `kind` and the UI's `is_dub` diverge (dab fader shown but
+song-memory values read). `/__mock/mix-reset` resets BOTH memories (song `(1,1,1)`,
+dub `(0,1,1)`). The Dashboard's playing item is PINNED to video 1 by the 2 s WS
+interval, so a Dashboard kind-flip test flips video 1's readiness (dabing-add /
+dabing-reset) rather than switching the video.
+
 ## #184 round G — ONE `LiveMixer` (SUPERSEDES the two-adapter split below)
 
 `components/karaoke_mixer.rs` + `components/dub_mixer.rs` are **DELETED**. There is
