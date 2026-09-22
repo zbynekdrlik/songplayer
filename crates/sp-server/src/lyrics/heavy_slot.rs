@@ -380,12 +380,20 @@ fn current_containment() -> Containment {
 pub(crate) struct ChildJobGuard {
     #[cfg(windows)]
     handle: Option<isize>,
+    // #168: the page-fault-rate sampler for this child, aborted when the child
+    // exits (this guard drops). Read in Drop, so never `dead_code`.
+    #[cfg(windows)]
+    sampler: Option<tokio::task::AbortHandle>,
 }
 
 #[cfg(windows)]
 impl Drop for ChildJobGuard {
     #[cfg_attr(test, mutants::skip)] // closes an OS Job handle — only the kernel can observe it (KILL_ON_JOB_CLOSE); no in-process oracle
     fn drop(&mut self) {
+        // #168: stop sampling this child's page faults (it is exiting).
+        if let Some(s) = &self.sampler {
+            s.abort();
+        }
         if let Some(h) = self.handle {
             use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
             // SAFETY: `h` is a Job Object handle we created and still solely own;
@@ -408,7 +416,8 @@ impl Drop for ChildJobGuard {
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn assign_child_job(child: &tokio::process::Child) -> ChildJobGuard {
-    let handle = match child.id() {
+    let pid = child.id();
+    let handle = match pid {
         Some(pid) => assign_win_job(
             pid,
             CHILD_JOB_MEMORY_LIMIT_BYTES as usize,
@@ -416,7 +425,10 @@ pub(crate) fn assign_child_job(child: &tokio::process::Child) -> ChildJobGuard {
         ),
         None => None,
     };
-    ChildJobGuard { handle }
+    // #168: start logging this child's page-fault rate (`heavy child faults/s`),
+    // aborted by the guard's Drop when the child exits.
+    let sampler = pid.map(crate::lyrics::heavy_faults::spawn_fault_sampler);
+    ChildJobGuard { handle, sampler }
 }
 
 /// Non-Windows: no Job Object, no-op guard.
