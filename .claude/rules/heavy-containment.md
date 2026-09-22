@@ -35,13 +35,30 @@ with a stems child resident (grid slot 33 ms) → genlock pacing collapse + the
 | key | default | format |
 |---|---|---|
 | `heavy_cpu_cap_pct` | **25** | integer, clamped `5..=100` (absent/invalid → 25) |
-| `heavy_cpu_affinity_mask` | **upper half of the logical cores** (24-core box → `fff000`) | hex string, optional `0x`; zero/invalid → default |
+| `heavy_cpu_affinity_mask` | **top 4 logical cores** (24-core box → `f00000`; #168 round 5) | hex string, optional `0x`; zero/invalid → default |
 
 The default affinity mask is DERIVED from the live core count
-(`default_affinity_mask`), never a literal: the wall processes keep the LOWER
-half (24 cores → `fff` = cores 0–11), the heavy children the UPPER half
-(`fff000` = cores 12–23). `heavy_cpu_cap_pct = 100` + all-cores mask = today's
-behaviour (no containment).
+(`default_affinity_mask`), never a literal: the child gets the **TOP 4 logical
+cores** (24 cores → `f00000` = cores 20–23), the wall processes (SongPlayer /
+OBS / Resolume) keep the rest; a box with < 4 cores gets all of them.
+`heavy_cpu_cap_pct = 100` + all-cores mask = today's behaviour (no containment).
+
+**Why 4 logical cores, not the upper half (#168 round 5 — the measured fix).**
+Round 4's paced measurement (issue #168 comment 5779505749, 22.9.2026) isolated
+the channel that stalls the NDI `send_video_async` call while a separation child
+is resident: core PLACEMENT, not CPU share or page-fault churn. Same child, same
+work, different mask:
+
+- **`fff000` (upper 12 logical cores)** — grid stall 30–105 ms/min, **0/12
+  minutes ≤ 20 ms** (W1).
+- **`f00000` (top 4 logical cores = 2 physical)** — grid held **3.8–19.3 ms,
+  10/10 minutes** (W3b), child at ~1.0 core (no throughput loss vs ~0.6 on 12).
+- **`c00000` (2 logical = 1 physical)** — STARVES the child (80 CPU-s in 12 min),
+  so 4 logical cores is the floor.
+
+Mechanism: the NDI SDK's unpinned compress/send threads (HIGH class) otherwise
+land on a physical core whose SMT sibling runs an AVX-saturating RoFormer thread;
+a 2-physical-core block leaves 10 of 12 physical cores free of the child.
 
 ## Architecture — where each piece lives
 
@@ -59,7 +76,12 @@ behaviour (no containment).
   `refresh_containment(&self.pool)` each tick BEFORE the heavy spawn — that is
   what makes a dashboard change take effect with no restart. A new heavy worker
   MUST call `refresh_containment` before its spawn, or its child runs on the last
-  published (or default) containment.
+  published (or default) containment. `current_affinity_block_cores()` exposes
+  the popcount of the published mask so the cpu-idle thread cap
+  (`heavy_plan::cpu_idle_threads_for(cores, block)` = `min(cores/4, block)`,
+  never 0) never gives a child more torch threads than its core block — #168
+  round 5: the 4-logical-core default block caps the 24-core box's quarter rule
+  (6) to 4.
 - **`GET /api/v1/status`** gains `heavy_containment { cap_pct, affinity_mask
   (hex), priority_class }`, resolved live from the same pure fn.
 
@@ -76,19 +98,35 @@ behaviour (no containment).
   (single field); `HIGH_PRIORITY_CLASS` is a `PROCESS_CREATION_FLAGS`;
   `SetPriorityClass`/`SetProcessInformation` return `BOOL` (`== 0` = failure).
 - **Redundant outer parens** around a return expression trip `unused_parens`
-  under `-D warnings` (the mask expr is `((1 << upper_count) - 1) << lower_half`,
-  no outer wrap; the inner parens ARE precedence-required — Rust `-` binds
-  tighter than `<<`).
+  under `-D warnings` (the mask expr is `((1 << top) - 1) << shift`, no outer
+  wrap; the inner parens ARE precedence-required — Rust `-` binds tighter than
+  `<<`). The shift RHS is bound to a `let shift = cores - top;` rather than
+  inlined as `<< (cores - top)` precisely to avoid a redundant-paren warning
+  (#168 round 5).
 
-## Acceptance — box test 8 (supervisor, after integration; #168 protocol)
+## Acceptance — round 5 (supervisor, after integration; #168 protocol)
 
-Same as box test 7. With `genlock_pacing=true`, SP-slow on program and a stems
-child resident UNDER the cap: `submit_call_us` p99 ≤ 20 ms, pacer lateness p99
-< 1 ms, no new drops over 30 min; and on the SDK-clocked path zero
-`silence_blocks ≥ 3` mid-song. If not met at 25 %, lower `heavy_cpu_cap_pct`
-(settings, no restart needed) and repeat; record the numbers on #203.
+With `heavy_cpu_affinity_mask` DELETED/cleared so the new default applies:
+boot/status `heavy_containment.affinity_mask == "f00000"` (no setting), the next
+`heavy child contained (pid …): cpu_cap=25% affinity=0xf00000` log line, and a
+paced re-check window (pacing ON via the `genlock.md` recipe, child resident and
+PRODUCTIVE ≥ 0.5 core): `submit_call_us_max ≤ 20 ms` in ≥ 8/10 minutes and `late`
+≤ 100/min; then pacing OFF again (the production flip is #147's decision with a
+wall soak). Verify the child is productive (`TotalProcessorTime` delta over 6 s >
+0) before trusting a window — a starved child gives a false-clean grid.
 
-## Box test 8 verdict (21.9.2026) — the containment is live, the stall is NOT CPU
+## Box test 8 verdict (21.9.2026) — the containment is live [SUPERSEDED by round 4]
+
+> **Superseded by round 4 (22.9.2026).** This section was round 3's page-fault
+> theory, measured on the old `fff000` (upper-12) default. Round 4's paced
+> session (see "Why 4 logical cores" above + issue #168 comment 5779505749)
+> re-tested placement directly and found the stall channel is core PLACEMENT:
+> confining the child to 4 logical cores (`f00000`) holds the grid (3.8–19.3 ms,
+> 10/10 min) with SongPlayer's OWN page faults still at 118–160k/s in every
+> window — the control window W0 (no child) held the grid WITH that churn, so
+> SongPlayer's page-fault churn is NOT the stall channel. The recycling frame
+> pool (#203 2b, `genlock.md`) shipped anyway (it is a real allocation win) but
+> was not the fix. Keep the text below as the round-3 record.
 
 The cap/affinity/memory-priority were confirmed applied (`heavy child contained
 (pid …): cpu_cap=25% affinity=0xfff000 mem_priority_low=true`, child
@@ -118,7 +156,7 @@ path; the target is a flat, near-zero steady state while playing.
   (once per child spawn).
 - Live OS truth while a child runs (`mcp__win-resolume__Shell`, ≤ 30 s):
   `Get-Process python | Select ProcessorAffinity, PriorityClass` — affinity
-  should be the upper-half mask (24-core box → `16773120` = `0xFFF000`), class
-  `BelowNormal`; `Get-Process SongPlayer | Select PriorityClass` → `High`.
-  (Baseline before #203: children ran affinity `16777215` = all cores, SongPlayer
-  `Normal`.)
+  should be the 4-core block (24-core box → `15728640` = `0xF00000`; #168 round
+  5, was `16773120` = `0xFFF000`), class `BelowNormal`; `Get-Process SongPlayer |
+  Select PriorityClass` → `High`. (Baseline before #203: children ran affinity
+  `16777215` = all cores, SongPlayer `Normal`.)

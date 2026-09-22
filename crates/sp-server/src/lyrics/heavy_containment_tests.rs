@@ -18,40 +18,41 @@ fn cpu_rate_is_pct_times_100() {
 }
 
 // ---------------------------------------------------------------------------
-// default_affinity_mask — the upper half of the logical cores.
+// default_affinity_mask — the TOP 4 logical cores (#168 round 5).
 // ---------------------------------------------------------------------------
 
 #[test]
-fn default_mask_is_upper_half_even_cores() {
-    // 8 cores → upper half = cores 4..7 = 0b1111_0000.
+fn default_mask_is_the_top_4_logical_cores() {
+    // 24 cores (the win-resolume box) → cores 20..23 = 0xF00000 (the measured
+    // grid-holding block; was 0xFFF000 before round 5).
+    assert_eq!(default_affinity_mask(24), 0xF00000);
+    // 8 cores → cores 4..7 = 0xF0 (unchanged from the old upper-half of 8).
     assert_eq!(default_affinity_mask(8), 0xF0);
-    // 24 cores (the win-resolume box) → cores 12..23 = 0xFFF000.
-    assert_eq!(default_affinity_mask(24), 0xFFF000);
-    // 12 cores → cores 6..11 = 0xFC0.
-    assert_eq!(default_affinity_mask(12), 0xFC0);
+    // 6 cores → cores 2..5 = 0x3C.
+    assert_eq!(default_affinity_mask(6), 0x3C);
+    // 12 cores → cores 8..11 = 0xF00.
+    assert_eq!(default_affinity_mask(12), 0xF00);
 }
 
 #[test]
-fn default_mask_odd_cores_gives_upper_the_extra_core() {
-    // 9 cores → lower half = 4 (cores 0..3), upper = 5 (cores 4..8) = 0x1F0.
-    assert_eq!(default_affinity_mask(9), 0x1F0);
+fn default_mask_boxes_with_4_or_fewer_cores_get_all_of_them() {
+    // 4 cores → all four (top 4 of 4) = 0xF.
+    assert_eq!(default_affinity_mask(4), 0xF);
+    // 2 cores → both cores (< 4, so all) = 0x3.
+    assert_eq!(default_affinity_mask(2), 0x3);
+    // 1 core → the single core. 0 (unreported) clamps up to 1 → same.
+    assert_eq!(default_affinity_mask(1), 0x1);
+    assert_eq!(default_affinity_mask(0), 0x1);
 }
 
 #[test]
-fn default_mask_tiny_and_zero_core_counts() {
-    // 1 core → the single core (bit 0). 0 (unreported) clamps up to 1 → same.
-    assert_eq!(default_affinity_mask(1), 0b1);
-    assert_eq!(default_affinity_mask(0), 0b1);
-    // 2 cores → upper core only (bit 1).
-    assert_eq!(default_affinity_mask(2), 0b10);
-}
-
-#[test]
-fn default_mask_clamps_above_64_cores() {
-    // > 64 clamps to 64 (one processor group): upper 32 = 0xFFFFFFFF00000000.
-    assert_eq!(default_affinity_mask(64), 0xFFFFFFFF_00000000);
-    assert_eq!(default_affinity_mask(65), 0xFFFFFFFF_00000000);
-    assert_eq!(default_affinity_mask(1000), 0xFFFFFFFF_00000000);
+fn default_mask_clamps_above_64_cores_to_the_top_4() {
+    // > 64 clamps to 64 (one processor group): top 4 = cores 60..63 =
+    // 0xF000_0000_0000_0000.
+    assert_eq!(default_affinity_mask(64), 0xF000_0000_0000_0000);
+    assert_eq!(default_affinity_mask(65), 0xF000_0000_0000_0000);
+    assert_eq!(default_affinity_mask(100), 0xF000_0000_0000_0000);
+    assert_eq!(default_affinity_mask(1000), 0xF000_0000_0000_0000);
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +65,7 @@ fn default_mask_clamps_above_64_cores() {
 fn defaults_when_both_settings_absent() {
     let c = containment_from_settings(None, None, 24);
     assert_eq!(c.cpu_cap_pct, 25); // RED sentinel 99 fails here → GREEN 25
-    assert_eq!(c.affinity_mask, 0xFFF000);
+    assert_eq!(c.affinity_mask, 0xF00000); // #168 round 5: top 4 logical cores
     assert!(c.memory_priority_low);
 }
 
@@ -106,7 +107,7 @@ fn mask_parses_hex_with_and_without_prefix() {
 
 #[test]
 fn mask_absent_zero_or_garbage_falls_back_to_default() {
-    // 8 cores → default upper half = 0xF0.
+    // 8 cores → default (top 4 of 8) = 0xF0.
     assert_eq!(parse_affinity_mask(None, 8), 0xF0);
     // A zero mask is invalid (no cores) → default (kills the `m != 0` mutant).
     assert_eq!(parse_affinity_mask(Some("0"), 8), 0xF0);
@@ -128,7 +129,7 @@ fn containment_honours_explicit_overrides() {
 
 #[test]
 fn affinity_mask_hex_is_lowercase_no_prefix() {
-    assert_eq!(affinity_mask_hex(0xFFF000), "fff000");
+    assert_eq!(affinity_mask_hex(0xF00000), "f00000");
     assert_eq!(affinity_mask_hex(0xF0), "f0");
 }
 
@@ -139,13 +140,13 @@ fn affinity_mask_hex_is_lowercase_no_prefix() {
 /// to the default mask.
 #[test]
 fn affinity_override_is_clamped_to_the_existing_cores() {
-    // 8 cores: bits 0..=7 exist; 0xF0F0 keeps only 0xF0 (= the default upper half).
+    // 8 cores: bits 0..=7 exist; 0xF0F0 keeps only 0xF0 (= the 8-core default).
     let c = containment_from_settings(None, Some("0xF0F0"), 8);
     assert_eq!(c.affinity_mask, 0xF0);
     // A partly-valid override keeps its valid bits only.
     let c = containment_from_settings(None, Some("0x10C"), 8);
     assert_eq!(c.affinity_mask, 0x0C);
-    // Entirely beyond the core count → the default (upper half of 8 = 0xF0).
+    // Entirely beyond the core count → the default (top 4 of 8 = 0xF0).
     let c = containment_from_settings(None, Some("0xF00"), 8);
     assert_eq!(c.affinity_mask, 0xF0);
     // 64+ cores: every bit is valid, the override is honoured verbatim.

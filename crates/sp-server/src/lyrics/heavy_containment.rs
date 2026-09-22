@@ -31,7 +31,8 @@ pub(crate) struct Containment {
     /// Job Object CPU hard-cap, percent of TOTAL machine CPU time (`5..=100`).
     pub(crate) cpu_cap_pct: u8,
     /// Job Object affinity mask — which logical cores the child may run on. The
-    /// default is the UPPER half of the cores (the wall keeps the lower half).
+    /// default is the TOP 4 logical cores (#168 round 5 — the measured
+    /// grid-holding block; the wall keeps the rest).
     pub(crate) affinity_mask: u64,
     /// Whether the child's process memory priority is lowered to
     /// `MEMORY_PRIORITY_LOW`. Always `true` today; kept as a field for the
@@ -51,18 +52,34 @@ pub(crate) fn cpu_rate_from_pct(pct: u8) -> u32 {
 }
 
 /// The DEFAULT affinity mask for a box with `logical_cores` logical processors:
-/// the UPPER half of the cores (the wall processes keep the lower half), derived
-/// from the count — never a literal. `logical_cores` is clamped to `1..=64` (a
-/// Windows affinity mask is one processor group, ≤ 64 bits; a reported `0` is
-/// treated as `1`). E.g. 8 cores → `0xF0` (cores 4–7), 24 cores → `0xFFF000`
-/// (cores 12–23). Pure.
+/// the TOP 4 logical cores, derived from the count — never a literal.
+/// `logical_cores` is clamped to `1..=64` (a Windows affinity mask is one
+/// processor group, ≤ 64 bits; a reported `0` is treated as `1`); a box with
+/// fewer than 4 logical cores simply gets all of them.
+///
+/// #168 round 5 — was the UPPER HALF of the cores (24 → `fff000`). Round 4's
+/// paced measurement (issue #168 comment 5779505749) isolated the stall channel
+/// as core PLACEMENT: the SAME separation child stalls the NDI `send_video_async`
+/// call to 30–105 ms/min while it may run on the upper 12 logical cores (the old
+/// `fff000` default — W1: 0/12 minutes ≤ 20 ms) and holds the SP-slow grid at
+/// 3.8–19.3 ms in 10/10 minutes when confined to 4 logical cores (`f00000` —
+/// W3b). The NDI SDK's unpinned compress/send threads (HIGH class) otherwise
+/// land on a physical core whose SMT sibling runs an AVX-saturating RoFormer
+/// thread; a 2-physical-core (4-logical) block leaves 10 of 12 physical cores
+/// free of the child, while a 1-physical-core block (`c00000` — W3) starves it.
+/// An explicit `heavy_cpu_affinity_mask` setting still overrides this default
+/// (see [`parse_affinity_mask`]).
+///
+/// E.g. 24 cores → `0xF00000` (cores 20–23), 8 cores → `0xF0` (cores 4–7),
+/// 6 → `0x3C`, 4 → `0xF`, 2 → `0x3`. Pure.
 pub(crate) fn default_affinity_mask(logical_cores: usize) -> u64 {
     let cores = logical_cores.clamp(1, 64);
-    let lower_half = cores / 2; // cores reserved for the wall processes
-    let upper_count = cores - lower_half; // heavy children get the upper half (the extra core when odd)
-    // `upper_count` is 1..=32 for `cores` 1..=64, so `1u64 << upper_count` never
-    // overflows and no all-bits special case is reachable.
-    ((1u64 << upper_count) - 1) << lower_half
+    // The child gets the TOP `top` logical cores; a box with < 4 gets all of
+    // them. `top <= cores`, so `shift = cores - top` never underflows and the
+    // mask's highest set bit is `cores - 1` (≤ 63) — no shift overflow.
+    let top = cores.min(4); // the top 4 logical cores — the measured grid-holding block
+    let shift = cores - top; // the lower cores reserved for the wall/OBS/Resolume
+    ((1u64 << top) - 1) << shift
 }
 
 /// Parse + clamp the `heavy_cpu_cap_pct` setting into `5..=100`. An
