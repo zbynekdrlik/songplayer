@@ -464,29 +464,46 @@ and passed as the plan ceiling. `plan_chunks` still cuts only at pauses ≥ 700 
 never mid-speech; a 36-min talk is ~18 sessions (the ~27 s drain per session adds
 ~8 min, ≈ 1.4× realtime, accepted).
 
-## (b) Per-chunk voice-band guard — `dub_worker.py::_process_chunk`
-After a chunk is synthesized + trimmed, it is scanned in 5-s windows. Pure
-`chunk_voice_drift(out_medians, in_medians) -> (drifted, voiced)`: a window is
-DRIFTED when its OUTPUT median is > 6 st above the OUTPUT chunk median AND the
-aligned INPUT window (same 5-s index, aligned by fraction of duration when the
-atempo changed the count) is NOT > 6 st above the INPUT chunk median — so a
-genuine high stretch in the SOURCE is not counted. `_chunk_is_drifted` flags a
-chunk at drifted/voiced > 0.20; a flagged chunk is re-synthesized ONCE (new
-session, same pin) and the candidate with fewer drifted windows is kept.
-`chunk_N.json` records `voice_band_ok` / `voice_drifted_windows` / `voice_windows`;
-one line is logged per chunk. Output medians come from the trimmed WAV
-(wave + numpy), input from the in-memory 16 kHz PCM, both via `dub_voice_check`'s
-numpy-only helpers. `DubWorker::ensure_script` now ships `dub_voice_check.py`
-alongside `dub_worker.py` (the pure `embedded_tool_scripts()`, mutation-covered;
-the I/O `ensure_script` is mutation-excluded like `synthesize`).
+## (b) Per-chunk voice-band guard — round E2 (`dub_worker.py`)
+Round E measured each output window against the CHUNK's OWN median with a 0.20
+re-synth trigger, and on video 344 it still left 7.3 % true-drift windows (file
+gate 5 %). Two defects: (1) **the whole-chunk blind spot** — a chunk high
+THROUGHOUT (chunk 10) has a high chunk median, so 0 windows clear +6 st and it
+falsely passes; (2) **the trigger was 4× laxer than the gate** — 0.20 vs the file
+gate's 0.05, so chunk 5 at 18 % passed the guard while failing the file. Round E2:
 
-**The guard is BEST-EFFORT — it must never fail the dub it decorates.** It adds
-the FIRST numpy / `dub_voice_check` import onto the dub critical path (the shared
-lyrics venv carries numpy, so the import normally succeeds), so the whole scan +
-re-synth lives in `_apply_voice_band_guard`'s `try/except`: any failure (numpy
-absent, a truncated/unreadable output wav) is logged and falls through with
-`voice_band_ok=None` and no re-synth. Do NOT unwrap it — a decorative quality
-check killing an unattended job is a regression (round-E review MAJOR). Also note
-the guard shares the file-check's base-dominant assumption: a truly balanced 50/50
-octave rotation INSIDE one chunk is not detected (the chunk median sits between
-the two voices, neither clears +6 st) — that is not the observed symptom.
+- **Baseline-relative, not chunk-relative.** `chunk_voice_drift(out_medians,
+  in_medians, out_baseline, in_baseline)` measures each output window against the
+  RUNNING **pinned-voice baseline** (the median of the voiced OUTPUT windows of the
+  chunks ACCEPTED so far) and discounts source-following against the RUNNING
+  **source baseline** (the running median of the input windows) — NOT the chunk's
+  own medians, so a chunk high throughout is caught. It delegates to the ONE shared
+  `dub_voice_check.drift_windows`, so the guard and the file gate measure the SAME
+  thing. Baselines accumulate in `cmd_live_translate` order; each `chunk_N.json`
+  persists `voice_medians` + `voice_in_medians` so a resumed run rebuilds them
+  (`baseline_from_meta`). A still-drifted or guard-skipped chunk NEVER feeds them.
+- **Trigger as strict as the file gate.** `_chunk_is_drifted` fires at `>= 2`
+  true-drift windows OR fraction `> VOICE_DRIFT_FRAC = 0.05` — the SAME 0.05 as
+  `dub_voice_check.MAX_HIGH_BAND_FRACTION`, pinned equal by a unit test.
+- **Seed (chunk 0).** With no baseline yet, chunk 0 is checked against the pinned
+  voice's expected `VOICE_F0_BAND` (measured by `eval/dubbing/voice_band_measure.py`
+  with the SAME `use_librosa=False` autocorrelation the runtime uses, widened to a
+  coarse per-voice band; an unknown voice → seed as-is). A wrong seed would poison
+  every later baseline, so an out-of-band seed is treated as drifted.
+- **Up to 2 re-synths** (`VOICE_RESYNTH_ATTEMPTS`, new session, same pin), keeping
+  the fewest-drift take; a chunk still drifted after 2 ships with
+  `voice_band_ok=false` (logged, never fails the dub).
+- **File gate `--source`.** `dub_voice_check.py --source <original>` reports the
+  true-drift fraction (source-following discounted, same shared definition) and
+  gates on IT; without `--source` round-E behaviour is unchanged. This is the
+  acceptance number: `--source orig344.flac` true-drift ≤ 0.05.
+
+**The guard stays BEST-EFFORT — it must never fail the dub it decorates.** The
+whole scan + re-synth lives in `_apply_voice_band_guard`'s `try/except`: any
+failure (numpy/`dub_voice_check` import, a truncated/unreadable wav) is logged and
+falls through with `voice_band_ok=None`, empty medians (no baseline update), no
+re-synth. Do NOT unwrap it (round-E review MAJOR). Two known blind spots persist:
+autocorrelation octave-collapse makes `VOICE_F0_BAND` a coarse seed gate (not a
+fine voice discriminator — the window guard + the pyin `--source` gate are the
+real detectors), and a truly balanced 50/50 octave rotation inside one chunk is
+still not the observed symptom.
