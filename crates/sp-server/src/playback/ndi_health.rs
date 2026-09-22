@@ -8,7 +8,6 @@
 
 use crate::obs::ndi_recovery::{NdiRecoveryTracker, RecoveryStep};
 use crate::playback::clock_health::ClockHealth;
-use crate::playback::lock_state::LOCK_WINDOW_100NS;
 use crate::playback::ndi_health_transport::transport_from_reported;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -741,23 +740,20 @@ impl crate::playback::PlaybackEngine {
             .saturating_duration_since(self.instant_origin.0)
             .as_nanos()
             / 100) as i64;
-        let (late_w, repeats_w, resyncs_w) = {
-            let window = self.lock_windows.entry(playlist_id).or_default();
-            window.push(
-                heartbeat_100ns,
-                pacing.late_frames,
-                pacing.repeats,
-                pacing.resyncs,
-            );
-            window.counts_in_window(heartbeat_100ns, LOCK_WINDOW_100NS)
-        };
-        let (lock_state, lock_reason) = sp_core::genlock::lock_state::derive(
+        // #168 round 6: push this heartbeat's cumulative pacing counters into
+        // the 60 s window, difference the window (slots + late/repeats/resyncs),
+        // and derive the rate-normalised three-state lock. `source_fps` is the
+        // playing file's nominal fps; `grid_fps` the pacer's fixed grid
+        // (`GENLOCK_GRID_FPS`, reused — never a second literal). One call keeps
+        // this 999/1000-line file line-neutral.
+        let (lock_state, lock_reason) = crate::playback::lock_state::lock_for_heartbeat(
+            self.lock_windows.entry(playlist_id).or_default(),
+            heartbeat_100ns,
+            &pacing,
             clock.clock_ok,
-            pacing.enabled,
             connections.max(0) as u32,
-            late_w,
-            repeats_w,
-            resyncs_w,
+            nominal_fps,
+            sp_core::genlock::GENLOCK_GRID_FPS as u32,
         );
 
         // #127 / #173 receiver-side recovery: evaluate the dark-wall ladder for

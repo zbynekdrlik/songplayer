@@ -385,3 +385,34 @@ How to run a paced grid-stall measurement on win-resolume (the check behind the
 - NEVER `Stop-Process` by a `CommandLine -like '<text>'` filter whose text also
   matches YOUR OWN command — it kills your own shell (exit -1, no output). Target
   the child by `-Id <pid>` read from a prior listing.
+
+### The calibrated LOCKED/DEGRADED rule (#168 round 6, #149 classifier)
+
+`sp_core::genlock::lock_state::derive` no longer degrades on ANY late/repeat in
+the 60 s window (the old rule-4 `> 0`). It rate-normalises the window counts
+against the emitted slots (`seq` differenced by `EventWindow`, fed via
+`playback/lock_state.rs::lock_for_heartbeat`), so 24/25-fps content on the 30-fps
+grid reads LOCKED, not DEGRADED. Precedence (first match wins): `!clock_ok` →
+UNLOCKED "clock not ok"; `!pacing` → UNLOCKED "pacing disabled"; `connections==0`
+→ DEGRADED "no receiver"; `resyncs_w>0` → DEGRADED "resync in 60 s"; `slots_w==0`
+(paused/idle, no grid) → LOCKED; then the two rate checks; else LOCKED.
+
+- **Late threshold** `LATE_DEGRADED_PERMILLE = 250` (25 % of slots): DEGRADED
+  "late > 25 % of slots in 60 s" once `late_w * 1000 > 250 * slots_w`.
+- **Repeat threshold** `expected_repeat_permille(source_fps, grid) + REPEAT_MARGIN_PERMILLE(100)`:
+  DEGRADED "repeats above the fps conversion in 60 s" once repeats exceed the
+  structural conversion + 10 %. `expected_repeat_permille = 1000 − source/grid×1000`
+  (24/30 → 200 ‰ = 20 % of slots; 25/30 → 167; 30/30 & 60/30 → 0). Integer
+  permille, no float in the rule; `grid` is the pacer's `GENLOCK_GRID_FPS` (30),
+  `source_fps` the snapshot's `nominal_fps`.
+- **Calibration (22.9.2026, SP-slow 24 fps on the 30-fps grid, 1 800 slots/min):**
+  clean grid late ≤ 6 % of slots (0–100/min), stalled 42 % (W1 ~750/min,
+  30–105 ms); repeats a constant 20 % (= 1 − 24/30) in EVERY window; resyncs 0.
+
+**Reading the badge during a soak:** LOCKED with late ≤ 100/min on 24-fps content
+= the grid is HOLDING (the round-4/5 clean span). DEGRADED "late > 25 % of slots"
+= the sender-side stall (submit-call block, the box-test-6 failure). DEGRADED
+"repeats above the fps conversion" = decoder/producer starvation on a 30-fps
+source (a 24-fps source's structural 20 % never trips it). The
+`/api/v1/ndi/health` `lock_state`/`reason`, the `ndi: genlock` log line and the
+dashboard `GlobalLockBadge` all read this one derivation.
