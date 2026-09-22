@@ -5,54 +5,69 @@
 //! `PipelineHealthSnapshot` fields, and `ndi_health::format_genlock_line`, none
 //! of which exist until the GREEN commit — a documented compile-failure RED.
 
-use crate::playback::lock_state::{EVENT_WINDOW_CAP, EventWindow};
+use crate::playback::lock_state::{EVENT_WINDOW_CAP, EventWindow, lock_for_heartbeat};
 
 /// 100-ns units per second — the sample-timestamp unit (mirrors sp-core).
 const U: i64 = sp_core::genlock::UNITS_PER_SECOND;
 
+// `push` / `counts_in_window` carry the cumulative `seq` (boundaries serviced)
+// as the rate base (#168 round 6): `push(ts, seq, late, repeats, resyncs)`,
+// `counts_in_window -> (slots, late, repeats, resyncs)`.
+
 #[test]
 fn empty_window_reports_zero() {
     let w = EventWindow::new();
-    assert_eq!(w.counts_in_window(0, 60 * U), (0, 0, 0));
+    assert_eq!(w.counts_in_window(0, 60 * U), (0, 0, 0, 0));
     assert!(w.is_empty());
     assert_eq!(w.len(), 0);
 }
 
 #[test]
 fn cold_start_diffs_against_first_sample() {
-    // Only 5 s of history (< 60 s) → baseline is the FIRST sample so the single
-    // late event since startup is not missed.
+    // Only 5 s of history (< 60 s) → baseline is the FIRST sample so the 150
+    // slots + single late since startup are not missed.
     let mut w = EventWindow::new();
-    w.push(0, 0, 0, 0);
-    w.push(5 * U, 1, 0, 0);
-    assert_eq!(w.counts_in_window(5 * U, 60 * U), (1, 0, 0));
+    w.push(0, 0, 0, 0, 0);
+    w.push(5 * U, 150, 1, 0, 0);
+    assert_eq!(w.counts_in_window(5 * U, 60 * U), (150, 1, 0, 0));
 }
 
 #[test]
 fn counts_difference_over_full_window() {
     let mut w = EventWindow::new();
-    w.push(0, 0, 0, 0);
-    w.push(20 * U, 0, 0, 0);
-    w.push(40 * U, 2, 1, 0);
-    w.push(60 * U, 2, 1, 3);
-    // window [0, 60]: baseline = oldest sample not older than 60 s = t0 (0,0,0);
-    // newest = (2,1,3).
-    assert_eq!(w.counts_in_window(60 * U, 60 * U), (2, 1, 3));
+    w.push(0, 0, 0, 0, 0);
+    w.push(20 * U, 600, 0, 0, 0);
+    w.push(40 * U, 1200, 2, 1, 0);
+    w.push(60 * U, 1800, 2, 1, 3);
+    // window [0, 60]: baseline = oldest sample not older than 60 s = t0; newest
+    // seq 1800 → slots 1800, events (2,1,3).
+    assert_eq!(w.counts_in_window(60 * U, 60 * U), (1800, 2, 1, 3));
+}
+
+#[test]
+fn slots_difference_over_full_window() {
+    // A clean minute: 1800 slots emitted, no events.
+    let mut w = EventWindow::new();
+    w.push(0, 1000, 0, 0, 0);
+    w.push(60 * U, 2800, 0, 0, 0);
+    assert_eq!(w.counts_in_window(60 * U, 60 * U), (1800, 0, 0, 0));
 }
 
 #[test]
 fn aging_slides_baseline_forward() {
     let mut w = EventWindow::new();
-    w.push(0, 0, 0, 0);
-    w.push(20 * U, 0, 0, 0);
-    w.push(40 * U, 2, 1, 0);
-    w.push(60 * U, 2, 1, 3);
-    // now=80 s, window [20, 80]: baseline = t20 (0,0,0) → events still counted.
-    w.push(80 * U, 2, 1, 3);
-    assert_eq!(w.counts_in_window(80 * U, 60 * U), (2, 1, 3));
-    // now=105 s, window [45, 105]: baseline = t60 (2,1,3) → all events aged out.
-    w.push(105 * U, 2, 1, 3);
-    assert_eq!(w.counts_in_window(105 * U, 60 * U), (0, 0, 0));
+    w.push(0, 0, 0, 0, 0);
+    w.push(20 * U, 600, 0, 0, 0);
+    w.push(40 * U, 1200, 2, 1, 0);
+    w.push(60 * U, 1800, 2, 1, 3);
+    // now=80 s, window [20, 80]: baseline = t20 (seq600) → slots 2400-600=1800,
+    // events still counted.
+    w.push(80 * U, 2400, 2, 1, 3);
+    assert_eq!(w.counts_in_window(80 * U, 60 * U), (1800, 2, 1, 3));
+    // now=105 s, window [45, 105]: baseline = t60 (seq1800,2,1,3) → slots
+    // 2550-1800=750, all events aged out.
+    w.push(105 * U, 2550, 2, 1, 3);
+    assert_eq!(w.counts_in_window(105 * U, 60 * U), (750, 0, 0, 0));
 }
 
 #[test]
@@ -60,11 +75,11 @@ fn boundary_sample_is_inclusive_at_exactly_60s() {
     // A sample exactly 60 s old is "not older than 60 s" → it is the inclusive
     // baseline; one tick later it leaves the window and the baseline advances.
     let mut w = EventWindow::new();
-    w.push(0, 0, 0, 0);
-    w.push(30 * U, 3, 0, 0);
-    w.push(60 * U, 3, 0, 0);
-    assert_eq!(w.counts_in_window(60 * U, 60 * U), (3, 0, 0));
-    assert_eq!(w.counts_in_window(60 * U + 1, 60 * U), (0, 0, 0));
+    w.push(0, 0, 0, 0, 0);
+    w.push(30 * U, 900, 3, 0, 0);
+    w.push(60 * U, 1800, 3, 0, 0);
+    assert_eq!(w.counts_in_window(60 * U, 60 * U), (1800, 3, 0, 0));
+    assert_eq!(w.counts_in_window(60 * U + 1, 60 * U), (900, 0, 0, 0));
 }
 
 #[test]
@@ -72,22 +87,63 @@ fn counter_reset_after_anchor_restarts_window() {
     // The pacer zeroes its cumulative counters on anchor() (play/seek/new song);
     // a cumulative DECREASE is a reset → the ring restarts from that sample.
     let mut w = EventWindow::new();
-    w.push(0, 5, 2, 1);
-    w.push(5 * U, 6, 2, 1);
-    w.push(10 * U, 0, 0, 0); // decrease → reset
-    assert_eq!(w.counts_in_window(10 * U, 60 * U), (0, 0, 0));
-    w.push(15 * U, 1, 0, 0); // a late after the reset
-    assert_eq!(w.counts_in_window(15 * U, 60 * U), (1, 0, 0));
+    w.push(0, 100, 5, 2, 1);
+    w.push(5 * U, 130, 6, 2, 1);
+    w.push(10 * U, 0, 0, 0, 0); // seq + late decrease → reset
+    assert_eq!(w.counts_in_window(10 * U, 60 * U), (0, 0, 0, 0));
+    w.push(15 * U, 150, 1, 0, 0); // slots + a late after the reset
+    assert_eq!(w.counts_in_window(15 * U, 60 * U), (150, 1, 0, 0));
 }
 
 #[test]
 fn memory_is_bounded() {
     let mut w = EventWindow::new();
     for i in 0..200 {
-        w.push(i * 5 * U, 0, 0, 0);
+        w.push(i * 5 * U, i as u64, 0, 0, 0);
     }
     assert!(w.len() <= EVENT_WINDOW_CAP, "ring must stay bounded");
     assert!(!w.is_empty());
+}
+
+// ---- lock_for_heartbeat: the engine seam (push → difference → derive) ----
+
+fn paced(
+    seq: u64,
+    late: u64,
+    repeats: u64,
+    resyncs: u64,
+) -> crate::playback::ndi_health::PacingStats {
+    crate::playback::ndi_health::PacingStats {
+        enabled: true,
+        seq,
+        late_frames: late,
+        repeats,
+        resyncs,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn lock_for_heartbeat_holds_locked_on_a_clean_grid() {
+    use sp_core::genlock::lock_state::LockState;
+    let mut w = EventWindow::new();
+    // Two heartbeats 60 s apart: 1800 slots, 100 late (≈ 5.6 %), 360 structural
+    // 24→30 repeats — a holding 24-fps grid → LOCKED.
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 24.0, 30);
+    let (s, r) = lock_for_heartbeat(&mut w, 60 * U, &paced(1800, 100, 360, 0), true, 2, 24.0, 30);
+    assert_eq!(s, LockState::Locked);
+    assert_eq!(r, "locked");
+}
+
+#[test]
+fn lock_for_heartbeat_degrades_on_a_stall() {
+    use sp_core::genlock::lock_state::LockState;
+    let mut w = EventWindow::new();
+    // 750 late / 1800 slots ≈ 42 % → the sender-side stall → DEGRADED (late).
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 24.0, 30);
+    let (s, r) = lock_for_heartbeat(&mut w, 60 * U, &paced(1800, 750, 360, 0), true, 2, 24.0, 30);
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "late > 25 % of slots in 60 s");
 }
 
 // ---- format_genlock_line + structural guard ----
@@ -144,7 +200,7 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             emitter: Default::default(),
         },
         lock_state: LockState::Degraded,
-        lock_reason: "late/repeats/resyncs in 60 s".to_string(),
+        lock_reason: "late > 25 % of slots in 60 s".to_string(),
         burn_on: false,
         recovery_step: None,
         sender_url: None,
@@ -173,7 +229,7 @@ fn format_genlock_line_contains_every_key_token() {
         "underruns=9",
         "clock_ok=true",
         "lock=DEGRADED",
-        "reason=\"late/repeats/resyncs in 60 s\"",
+        "reason=\"late > 25 % of slots in 60 s\"",
     ] {
         assert!(line.contains(tok), "missing token `{tok}` in line: {line}");
     }
