@@ -393,7 +393,19 @@ app.put("/api/v1/playback/:id/mode", (_req, res) => {
 // `POST /api/v1/playback/{id}/seek {position_ms}` (moved off the old
 // `/api/v1/playlists/{id}/seek` route). A no-op 204 for the mock — specs that
 // need the body intercept it with `page.route` before it reaches here.
-app.post("/api/v1/playback/:id/seek", (_req, res) => {
+//
+// #184: when `seek_hold_ms` (a `/__mock/tick` knob) is > 0 AND the tick is
+// running, a seek does NOT snap the tick position — instead the tick keeps
+// broadcasting the STALE (pre-seek) position for `seek_hold_ms` and only THEN
+// jumps to the requested target, mirroring the pipeline's real post-seek
+// fast-forward latency. This lets a spec prove the seek bar DISPLAYS the target
+// across that latency window instead of jumping back to the stale live position.
+app.post("/api/v1/playback/:id/seek", (req, res) => {
+  const pid = Number(req.params.id);
+  const target = Number(req.body?.position_ms);
+  if (seekHoldMs > 0 && Number.isFinite(target)) {
+    pendingSeek = { playlist_id: pid, target_ms: target, applyAt: Date.now() + seekHoldMs };
+  }
   res.status(204).end();
 });
 
@@ -1055,6 +1067,12 @@ app.post("/__mock/now-playing", (req, res) => {
 // via `POST /__mock/tick`, turning it OFF again in afterEach.
 let tickItems = [];
 let tickEnabled = false;
+// #184: the post-seek fast-forward latency knob. When > 0, a `POST …/seek`
+// schedules `pendingSeek` and the tick keeps broadcasting the STALE position for
+// `seekHoldMs` before jumping to the requested target (see the seek handler +
+// the interval below). Default 0 = the seek applies on the next tick.
+let seekHoldMs = 0;
+let pendingSeek = null;
 
 function tickBroadcast(obj) {
   const msg = JSON.stringify(obj);
@@ -1084,6 +1102,10 @@ function tickNowPlaying(it) {
 app.post("/__mock/tick", (req, res) => {
   const b = req.body || {};
   tickEnabled = !!b.enabled;
+  // #184: the post-seek stale-position hold (0 = off). Reset any in-flight held
+  // seek on every tick toggle so no state leaks between specs.
+  seekHoldMs = typeof b.seek_hold_ms === "number" ? b.seek_hold_ms : 0;
+  pendingSeek = null;
   if (tickEnabled) {
     if (Array.isArray(b.items)) {
       tickItems = b.items.map((it) => ({
@@ -1130,6 +1152,13 @@ app.post("/__mock/tick", (req, res) => {
 // a no-op unless a spec turned tick mode on.
 setInterval(() => {
   if (!tickEnabled) return;
+  // #184: apply a held seek once its latency window elapses — the tick position
+  // jumps to the requested target (the pipeline's fast-forward has caught up).
+  if (pendingSeek && Date.now() >= pendingSeek.applyAt) {
+    const it = tickItems.find((t) => t.playlist_id === pendingSeek.playlist_id);
+    if (it) it.position_ms = Math.min(pendingSeek.target_ms, it.duration_ms);
+    pendingSeek = null;
+  }
   for (const it of tickItems) {
     it.position_ms = Math.min(it.position_ms + it.step_ms, it.duration_ms);
     tickNowPlaying(it);
