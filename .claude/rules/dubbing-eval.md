@@ -151,6 +151,21 @@ same 7 sentences (`seg_spec` items 2..8), plus an intensity layer.
   `.venv-live` + `dub_voice_check.window_medians`). Prod fix: cap the Live session
   at `dub_session_max_s` (default 120 s) + a per-chunk voice-band guard in
   `dub_worker.py` (`.claude/rules/dabing.md` round E).
+- **Voice-band measurement (#184 round E2, 2026-09-22).** `eval/dubbing/
+  voice_band_measure.py` renders `seg.wav` through one pinned Live session per
+  catalogue voice and prints the voiced 5-s f0 band. Two traps: (1) run it as a
+  MODULE from the repo root (`python -m eval.dubbing.voice_band_measure`) — a
+  direct `python eval/dubbing/voice_band_measure.py` dies on `from eval.dubbing.
+  voices import` (only `eval/dubbing/` lands on `sys.path`). (2) Measure with
+  `use_librosa=False` (autocorrelation) to match the RUNTIME seed median
+  (`dub_worker._*_window_medians` force it); pyin bands would be a different unit
+  and mis-seed. Autocorrelation octave-collapses all six voices to ~87–94 Hz, so
+  `VOICE_F0_BAND` is a coarse seed gate, not a voice discriminator. Local verify:
+  the eval venv `.venv-live` carries **ruff 0.5.7** (== the `ci.yml` eval-checks
+  pin) + numpy/soundfile/pytest, so `.venv-live/bin/ruff` and `-m pytest scripts/
+  tests` reproduce the CI eval-checks gate exactly without a push. `sync-version.
+  sh` bumps the Cargo.toml versions but NOT `Cargo.lock` (already lags, e.g. 0.49
+  vs 0.64) — harmless, the workspace build is not `--locked`.
 - **SeamlessM4T v2 / Seamless Expressive**: NO Slovak SPEECH output (v2 = `slk`
   speech input + text output only, 35 speech-output langs exclude it; Expressive =
   en↔fr/de/it/zh/es). Reason rows, no GPU spent.
