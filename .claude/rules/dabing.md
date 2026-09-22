@@ -166,6 +166,34 @@ stdout line — logs go to stderr). Key ONLY via `GEMINI_API_KEY` env (`bootstra
 ensure_genai` pins `google-genai==2.24.0`, idempotent, never triggers the heavy
 qwen/torch reinstall). Cost ~$0.037/min.
 
+## #184 round G — the dub mix is now the ONE global fader console (SUPERSEDES the per-video ratio below)
+
+The per-video `videos.dub_mix_ratio` column, `set_dub_mix_ratio` / `clamp_dub_ratio`
+/ `dub_ratio_if_ready`, `dub_gains` / `dub_over_original_gains` / `DUB_ORIGINAL_FLOOR`,
+`PATCH /api/v1/videos/{id}/dub-mix`, `EngineCommand::SetDubMix`, and the
+`components/dub_mixer.rs` adapter are **DELETED**. The mixer is now the ONE global
+three-fader console (`vokaly` / `podklad` / `dabing`) — see
+`.claude/rules/karaoke-stems.md` "#184 round G". Key deltas for dub playback:
+
+- The reader gain sets are DERIVED from `sp_core::mixer_model::stream_gains_*`, not
+  a ratio: `DubMix` uses `stream_gains_dub(f)` (`[1,0,0,dabing]` when vokaly &
+  podklad full, else `[0,vokaly,podklad,dabing]`); `DubOverOriginal` uses
+  `stream_gains_dub_no_stems(f)` = `[vokaly, dabing]` — the whole original at the
+  `vokaly` fader, **NO −18 dB floor**. `MixControl` publishes both from
+  `set_faders(f)`; `reader::dub_gains_for(kind, MixFaders)` is the pure per-kind
+  gain (still unit-tested).
+- The mix is set via `PATCH /api/v1/mix {vokaly?, podklad?, dabing?}` →
+  `EngineCommand::SetMix(MixFaders)` → `engine.set_mix` → `control.set_faders`; the
+  persist (settings `mix_*`) is done by the API handler AFTER the live push
+  (`api/mix_apply.rs::apply_mix`, the round-A order). The dub video's readiness
+  (its `DubRow.dub_status` / `stem_status`) drives which faders are LIVE, but the
+  mix VALUES are global, not per-video.
+- The dabing list (`dabing_list.rs`) no longer shows a per-row ratio; the console
+  lives in the shared Player above.
+
+Everything below is the pre-round-G per-video-ratio history — treat `dub_mix_ratio`
+/ `dub_gains(r)` / `DUB_ORIGINAL_FLOOR` / `/dub-mix` / `SetDubMix` as DELETED.
+
 ## Playback (`stems/reader.rs` + `stems/control.rs`)
 `open_audio_stream`'s pure `audio_source_kind(vocals, instrumental, dub)` chooses:
 - **`DubMix`** — dub + BOTH stems → a **4-stream** `StemMixReader` `[original,

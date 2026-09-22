@@ -159,6 +159,26 @@ view is then `'static`. (Alternatively `-> impl IntoView + use<>` to opt out of
 lifetime capture, but owned args are clearer.) Same trap for any sp-ui helper
 that takes `&SomeRow`/`&str` and returns a view used in a `<For>`/list child.
 
+## #184 round G — ONE `LiveMixer` (SUPERSEDES the two-adapter split below)
+
+`components/karaoke_mixer.rs` + `components/dub_mixer.rs` are **DELETED**. There is
+ONE adapter `components/live_mixer.rs::LiveMixer(playlist_id)` over the shared
+presentational `Mixer` — three independent faders (`mix-vokaly` / `mix-podklad` /
+`mix-dabing`) driven by `GET/PATCH /api/v1/mix`. The pure math is
+`sp_core::mixer_model` (`MixFaders`, `stream_gains_*`, `presets`,
+`apply_preset`, `preset_for_faders`, `fader_availability`) — NOT the old
+`song_gains_for_preset`/`ratio_to_faders`/`gains_for_preset`/`mixer_controls`
+(all deleted). Which faders are LIVE follows the playing item's stems + dub
+readiness (`fader_availability(stems_ready, dub_ready)`): `vokaly` with stems OR a
+no-stems dub; `podklad` only with stems (else locked "po separácii"); `dabing`
+shown+live only for a READY dub. A song preset PATCHes `{vokaly, podklad}` (dabing
+untouched); a dub preset PATCHes all three. `player.rs` renders ONE `<LiveMixer>`
+(the old `mixer_controls` + DubMixer/KaraokeMixer selection is gone). The #177
+`karaoke-now-playing` state-line id + the round-B in-flight drag guard are kept.
+The channel SHAPE (2 vs 3 faders) is Memo-gated inside `LiveMixer` so a position
+tick never rebuilds the strip. Read the historical section below only for the
+shared `Mixer`/`MixerChannel` presentational contract (still current).
+
 ## The modern Mixer component (#181 D2) — ONE presentational widget + thin adapters
 
 The stems (karaoke) AND dub-video controls are ONE component, not two. Do NOT add
