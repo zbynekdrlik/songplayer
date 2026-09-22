@@ -62,9 +62,12 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
   });
 
   test.afterAll(async ({ request }) => {
-    // Leave the box as found: the full default console, Dabing output paused.
+    // Leave the box as found: the full default DUB memory, Dabing output paused
+    // (#184 round G2: kind required; the Dabing player edits the dub memory).
     await request
-      .patch("/api/v1/mix", { data: { vokaly: 1.0, podklad: 1.0, dabing: 1.0 } })
+      .patch("/api/v1/mix", {
+        data: { kind: "dub", vokaly: 1.0, podklad: 1.0, dabing: 1.0 },
+      })
       .catch(() => {});
     if (dabingPid) {
       await request.post(`/api/v1/playback/${dabingPid}/pause`);
@@ -219,13 +222,11 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     await page.waitForTimeout(1500);
     // The fader stays where it was released (no snap-back).
     expect(Number(await vokaly.inputValue())).toBeLessThan(15);
-    // GET /api/v1/mix reports the change (the console persisted).
+    // GET /api/v1/mix reports the change in the DUB memory (#184 round G2).
     const mix = (await (await request.get("/api/v1/mix")).json()) as {
-      vokaly: number;
-      podklad: number;
-      dabing: number;
+      dub: { vokaly: number; podklad: number; dabing: number };
     };
-    expect(mix.vokaly).toBeLessThan(0.15);
+    expect(mix.dub.vokaly).toBeLessThan(0.15);
 
     // Best-effort HF band drop (skips on a codec-less runner where audio can't be
     // captured — the wall audio is the owner's real acceptance).
@@ -242,11 +243,10 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     await page.getByTestId("mixer-preset-original").click();
     await page.waitForTimeout(1000);
     const restored = (await (await request.get("/api/v1/mix")).json()) as {
-      vokaly: number;
-      dabing: number;
+      dub: { vokaly: number; dabing: number };
     };
-    expect(restored.vokaly).toBeCloseTo(1, 1);
-    expect(restored.dabing).toBeCloseTo(0, 1);
+    expect(restored.dub.vokaly).toBeCloseTo(1, 1);
+    expect(restored.dub.dabing).toBeCloseTo(0, 1);
 
     // Seek bar: drag to ~30 % → a seek is posted (204) and the position follows.
     const seek = page.getByTestId("player-seek");
