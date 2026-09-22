@@ -29,7 +29,7 @@ pub const ENV_RESERVE_OS_MEMORY: &str = "MIMALLOC_RESERVE_OS_MEMORY";
 
 /// The reserved-arena size. One arena reserved + committed at start pays the
 /// first-touch fault cost once; under the 10 GiB per-child job cap.
-pub const RESERVE_OS_MEMORY: &str = "2GiB";
+pub const RESERVE_OS_MEMORY: &str = "4GiB";
 
 /// The three env pairs that make the injected mimalloc heap RETAIN memory for
 /// the heavy separation child. Pure — no I/O. Applied verbatim next to the VRAM

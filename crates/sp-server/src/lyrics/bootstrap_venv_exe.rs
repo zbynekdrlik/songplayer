@@ -42,7 +42,7 @@ pub enum InjectPlan {
 pub fn needs_recopy(src: FileStamp, dst: Option<FileStamp>) -> bool {
     match dst {
         None => true,
-        Some(d) => d.len != src.len && d.mtime != src.mtime,
+        Some(d) => d.len != src.len || d.mtime != src.mtime,
     }
 }
 
@@ -53,7 +53,7 @@ pub fn needs_recopy(src: FileStamp, dst: Option<FileStamp>) -> bool {
 pub fn inject_plan(resources_present: bool, already_injected: bool) -> InjectPlan {
     if !resources_present {
         InjectPlan::Skip("mimalloc resources not staged")
-    } else if !already_injected {
+    } else if already_injected {
         InjectPlan::Skip("mimalloc.dll already the first import")
     } else {
         InjectPlan::Inject

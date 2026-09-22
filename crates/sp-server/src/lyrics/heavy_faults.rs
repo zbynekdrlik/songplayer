@@ -28,7 +28,7 @@ pub fn faults_per_sec(prev: u64, now: u64, elapsed: Duration) -> u64 {
         return 0;
     }
     let delta = now.saturating_sub(prev);
-    (delta as f64 / secs / 2.0) as u64
+    (delta as f64 / secs) as u64
 }
 
 #[cfg(test)]
