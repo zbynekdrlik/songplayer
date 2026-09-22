@@ -333,3 +333,98 @@ def test_voice_band_guard_degrades_when_the_scan_fails(tmp_path):
     assert (drifted, voiced) == (0, 0)
     assert (out_meds, in_meds) == ([], [])
     assert (en, sk, sk_timed) == ("EN", "SK", [{"t_ms": 1, "text": "x"}])
+
+
+def test_score_candidate_baseline_vs_seed():
+    # With a running baseline: window drift against it (a whole-chunk-high take).
+    assert dw._score_candidate([220] * 4, [110] * 4, 108, 131, "Charon") == (4, 4, True)
+    # A clean take against the baseline is not drifted.
+    assert dw._score_candidate([108] * 4, [110] * 4, 108, 131, "Charon") == (
+        0,
+        4,
+        False,
+    )
+    # Seed take (no baseline): in-band median → not drifted.
+    assert dw._score_candidate([108] * 4, [110] * 4, None, None, "Charon") == (
+        0,
+        4,
+        False,
+    )
+    # Seed take: out-of-band median (a female-band render under a male pin) → the
+    # whole seed scores as drifted so an in-band re-synth is kept over it.
+    assert dw._score_candidate([200] * 4, [110] * 4, None, None, "Charon") == (
+        4,
+        4,
+        True,
+    )
+    # Seed take with an unknown voice → no band check, not drifted.
+    assert dw._score_candidate([300] * 4, [110] * 4, None, None, "Nope") == (
+        0,
+        4,
+        False,
+    )
+
+
+def test_apply_voice_band_guard_keeps_clean_resynth(tmp_path, monkeypatch):
+    # The core round-E2 control flow: a drifted chunk against a running baseline is
+    # re-synthesized and the CLEANER candidate is kept (its transcripts + medians),
+    # so the chunk ships accepted (voice_band_ok True) and feeds the baselines.
+    work = str(tmp_path)
+    wav_path = os.path.join(work, "chunk_0.wav")
+    open(wav_path, "w").close()
+    in_steady = [110] * 10
+
+    def fake_wav_medians(path):
+        # The original take is high throughout (drifted); the candidate is clean.
+        return [108] * 10 if path.endswith(".cand.wav") else [220] * 10
+
+    def fake_render(pcm, pace, work_dir, voice, raw_wav, out_wav):
+        open(out_wav, "w").close()  # create the candidate file for os.replace
+        return "EN2", "SK2", [{"t_ms": 2, "text": "y"}]
+
+    monkeypatch.setattr(dw, "_pcm_window_medians", lambda pcm, sr: in_steady)
+    monkeypatch.setattr(dw, "_wav_window_medians", fake_wav_medians)
+    monkeypatch.setattr(dw, "_render_and_trim", fake_render)
+
+    ok, drifted, voiced, out_meds, in_meds, en, sk, sk_timed = (
+        dw._apply_voice_band_guard(
+            0, b"pcm", 1.0, work, "Charon", wav_path, 108, 131, "EN", "SK", [{"t": 1}]
+        )
+    )
+    assert ok is True  # the clean re-synth candidate was kept
+    assert (drifted, voiced) == (0, 10)
+    assert out_meds == [108] * 10 and in_meds == in_steady
+    assert (en, sk, sk_timed) == ("EN2", "SK2", [{"t_ms": 2, "text": "y"}])
+
+
+def test_apply_voice_band_guard_ships_still_drifted(tmp_path, monkeypatch):
+    # When every re-synth is still drifted, the chunk ships voice_band_ok=False
+    # after VOICE_RESYNTH_ATTEMPTS attempts (never fails the dub) and does NOT feed
+    # the baselines (baseline_from_meta excludes it).
+    work = str(tmp_path)
+    wav_path = os.path.join(work, "chunk_0.wav")
+    open(wav_path, "w").close()
+    calls = {"n": 0}
+
+    def fake_render(pcm, pace, work_dir, voice, raw_wav, out_wav):
+        calls["n"] += 1
+        open(out_wav, "w").close()
+        return "EN2", "SK2", [{"t_ms": 2, "text": "y"}]
+
+    monkeypatch.setattr(dw, "_pcm_window_medians", lambda pcm, sr: [110] * 10)
+    monkeypatch.setattr(dw, "_wav_window_medians", lambda path: [220] * 10)
+    monkeypatch.setattr(dw, "_render_and_trim", fake_render)
+
+    ok, drifted, voiced, out_meds, in_meds, en, sk, sk_timed = (
+        dw._apply_voice_band_guard(
+            0, b"pcm", 1.0, work, "Charon", wav_path, 108, 131, "EN", "SK", [{"t": 1}]
+        )
+    )
+    assert ok is False
+    assert (drifted, voiced) == (10, 10)
+    assert calls["n"] == dw.VOICE_RESYNTH_ATTEMPTS  # exactly 2 re-synth attempts
+    # The original transcripts are kept (no candidate improved).
+    assert (en, sk) == ("EN", "SK")
+    # A still-drifted chunk contributes nothing to the baselines.
+    meta = {"voice_band_ok": ok, "voice_medians": out_meds, "voice_in_medians": in_meds}
+    assert dw.baseline_from_meta(meta) == ([], [])

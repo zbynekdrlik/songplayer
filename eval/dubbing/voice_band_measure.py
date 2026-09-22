@@ -16,10 +16,11 @@ prod guard uses). The Gemini key is read INSIDE python from the box settings
 endpoint (`GET .../api/v1/settings`, `gemini_api_key` csv, first entry) and is
 NEVER printed, logged, put on a command line, or committed.
 
-Run once in the eval venv (has google-genai + numpy + soundfile; add librosa for
-a sharper f0 read):
+Run once, as a MODULE from the repo root, in the eval venv (has google-genai +
+numpy + soundfile; add librosa for a sharper f0 read) — the module form puts the
+repo root on `sys.path` so the `eval.dubbing.voices` import resolves:
     ~/.claude/work-products/songplayer/dubbing-test/.venv-live/bin/python \
-        eval/dubbing/voice_band_measure.py --voices Charon,Orus
+        -m eval.dubbing.voice_band_measure --voices Charon,Orus
 """
 
 from __future__ import annotations
@@ -206,7 +207,10 @@ def main() -> None:
         try:
             r = measure_voice(pcm16k, voice, key, dvc)
         except Exception as e:  # a per-voice failure must not lose the others
-            print(f"{voice}: ERROR {type(e).__name__}: {e}", file=sys.stderr)
+            # Defensive: never let the key leak into a logged error, even if an
+            # SDK exception embedded it (mirrors dub_worker.main's redaction).
+            msg = str(e).replace(key, "<redacted>") if key else str(e)
+            print(f"{voice}: ERROR {type(e).__name__}: {msg}", file=sys.stderr)
             continue
         if not r.get("voiced"):
             print(f"{voice}: no voiced windows ({r['windows']} total)")
