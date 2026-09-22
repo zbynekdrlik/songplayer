@@ -49,6 +49,34 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   **48 kHz stereo**, so `stem_worker.py` resamples every stem to 48 kHz stereo
   before writing FLAC (PCM_24).
 
+## #184 round G1 — the console remembers its faders PER ITEM KIND (SUPERSEDES round G's single memory)
+
+The ONE console keeps **TWO** remembered fader triples, selected by the KIND of
+the playing item — a SONG memory and a DUB memory (`sp_core::mixer_model::
+MixConsole { song, dub, active: MixKind }`). Defaults: song `(1,1,·)` (Plný mix;
+its `dabing` is unused), dub `(0,1,1)` (Len dabing — dub-only), active Song.
+`set_faders` writes the ACTIVE memory only; `select_kind(kind)` switches + republishes.
+
+- **Why:** one global memory made a dub mixed to `Len dabing` leave the next song
+  instrumental-only (`stream_gains_song((0,1,1)) = [0,0,1]`), and a song at
+  `Plný mix` double a dub video's voices (`stream_gains_dub((1,1,1)) = [1,0,0,1]`).
+- **`MixControl`** now holds `song_faders[3]` + `dub_faders[3]` + an `active`
+  atomic; the derived gain sets are always published from the ACTIVE memory.
+  `kind()` / `console()` / `select_kind()` are the new accessors; boot reads FIVE
+  settings `mix_song_vokaly` / `mix_song_podklad` / `mix_dub_vokaly` /
+  `mix_dub_podklad` / `mix_dub_dabing` (V28 splits round-G's `mix_vokaly` /
+  `mix_podklad` into the song pair + seeds the dub triple; the three old globals
+  are deleted).
+- **Kind selection at item open:** `playback/mix.rs::select_mix_kind_for_video`
+  (called from `broadcast_now_playing_on_start`) → `Dub` when the dub track file is
+  on disk (`stems::dub_path(audio).exists()` — the SAME readiness the reader uses),
+  else `Song`. The pure decision is `mixer_model::mix_kind_for_dub`.
+- **API:** `GET /api/v1/mix` adds `"kind":"song"|"dub"` (the active console);
+  `PATCH` edits + persists ONLY the active kind's keys (song pair, or dub triple).
+- **UI:** `live_mixer.rs`'s reload Effect also tracks an `is_dub` Memo, so the
+  strip re-reads `GET /mix` and snaps to the other memory when the playing item's
+  kind flips (not only when the video id changes).
+
 ## #184 round G — ONE mixer console (SUPERSEDES the karaoke-MODE model below)
 
 The karaoke MODE + `KaraokeControl` + `preset_gains` + `KaraokeMode` enum +

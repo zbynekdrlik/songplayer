@@ -17,3 +17,29 @@ One terse line per issue/round: decisions, key commits, verification.
   different mechanism (NDIlib_find / own listen ports) — folded into round 2.
   REMAINING: round 2 (item 4 self-check, item 6 E2E one-restart, HealthBar,
   playbook), the sender_url mechanism revision, and the 10-restart box acceptance.
+
+## #184 round G1 — the mixer console remembers faders PER ITEM KIND (song vs dub)
+- Problem: round G's ONE global fader memory made a dub mixed to `Len dabing`
+  (0,1,1) mute the next SONG's vocals (`stream_gains_song((0,1,1))=[0,0,1]`), and
+  a song at `Plný mix` (1,1) double the next DUB's voices
+  (`stream_gains_dub((1,1,1))=[1,0,0,1]`). Fix (design comment 5769481895,
+  Approach 1): two remembered consoles selected by the playing item's KIND, same
+  strip / same API.
+- `sp_core::mixer_model`: `MixKind{Song,Dub}`, `MixConsole{song,dub,active}` +
+  `active_faders`/`with_active_faders`/`select` + `mix_kind_for_dub` (pure, exact-
+  value tests). RED (dub default 1,1,1) → GREEN (0,1,1).
+- `stems/control.rs::MixControl`: two fader-atomic triples + an `active` atomic;
+  `set_faders` writes the active memory, `select_kind`/`kind`/`console` new; boot
+  reads five `mix_song_*`/`mix_dub_*` keys. RED (set_faders wrote song always) →
+  GREEN (match on active kind).
+- `playback/mix.rs::select_mix_kind_for_video` (from `broadcast_now_playing_on_start`)
+  = Dub when `stems::dub_path(audio).exists()` (the reader's own readiness), else Song.
+- DB V28 (mod.rs + mod_tests_v28.rs): derive `mix_song_*` from round-G `mix_*`,
+  seed `mix_dub_*` = (0,1,1), delete the old globals; `apply_upto` test helper keeps
+  V27's test isolated. RED (dub vokaly seeded 1) → GREEN (0).
+- `api/mix.rs`: `GET /mix` adds `"kind"`, `PATCH` persists the active kind's keys.
+  RED (`kind_str` swapped) → GREEN. mix_tests.rs: reset_console + kind tests.
+- UI `live_mixer.rs`: reload Effect also tracks an `is_dub` Memo so the strip snaps
+  to the other memory on a kind flip. E2E `dabing-mixer.spec.ts`: Dashboard + Live
+  scenarios (dub mix survives a song); mock carries two memories + `kind`.
+- Version 0.64.0-dev.4. Ships with round G in ONE deploy (base 34dfd28, unpushed).

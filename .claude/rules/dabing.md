@@ -184,10 +184,17 @@ three-fader console (`vokaly` / `podklad` / `dabing`) — see
   gain (still unit-tested).
 - The mix is set via `PATCH /api/v1/mix {vokaly?, podklad?, dabing?}` →
   `EngineCommand::SetMix(MixFaders)` → `engine.set_mix` → `control.set_faders`; the
-  persist (settings `mix_*`) is done by the API handler AFTER the live push
+  persist is done by the API handler AFTER the live push
   (`api/mix_apply.rs::apply_mix`, the round-A order). The dub video's readiness
-  (its `DubRow.dub_status` / `stem_status`) drives which faders are LIVE, but the
-  mix VALUES are global, not per-video.
+  (its `DubRow.dub_status` / `stem_status`) drives which faders are LIVE.
+- **Round G1 — the mix VALUES are remembered PER ITEM KIND, not globally.** The
+  console keeps a SONG memory and a DUB memory (`MixConsole`), selected at each
+  item open by the playing item's dub readiness (`select_kind`): a dub video starts
+  at the DUB memory (default `(0,1,1)` = dub only), a song at the SONG memory
+  (`(1,1)`), and each survives the other — mixing a dub no longer instrumental-mutes
+  the next song, and a song no longer doubles the next dub's voices. `PATCH /mix`
+  edits + persists only the active kind's keys (`mix_song_*` / `mix_dub_*`); `GET
+  /mix` carries `"kind"`. See `.claude/rules/karaoke-stems.md` "#184 round G1".
 - The dabing list (`dabing_list.rs`) no longer shows a per-row ratio; the console
   lives in the shared Player above.
 
