@@ -107,7 +107,7 @@ fn mask_parses_hex_with_and_without_prefix() {
 
 #[test]
 fn mask_absent_zero_or_garbage_falls_back_to_default() {
-    // 8 cores → default upper half = 0xF0.
+    // 8 cores → default (top 4 of 8) = 0xF0.
     assert_eq!(parse_affinity_mask(None, 8), 0xF0);
     // A zero mask is invalid (no cores) → default (kills the `m != 0` mutant).
     assert_eq!(parse_affinity_mask(Some("0"), 8), 0xF0);
@@ -129,7 +129,7 @@ fn containment_honours_explicit_overrides() {
 
 #[test]
 fn affinity_mask_hex_is_lowercase_no_prefix() {
-    assert_eq!(affinity_mask_hex(0xFFF000), "fff000");
+    assert_eq!(affinity_mask_hex(0xF00000), "f00000");
     assert_eq!(affinity_mask_hex(0xF0), "f0");
 }
 
