@@ -43,3 +43,5 @@ One terse line per issue/round: decisions, key commits, verification.
   to the other memory on a kind flip. E2E `dabing-mixer.spec.ts`: Dashboard + Live
   scenarios (dub mix survives a song); mock carries two memories + `kind`.
 - Version 0.64.0-dev.4. Ships with round G in ONE deploy (base 34dfd28, unpushed).
+
+- 2026-09-22 · #185 (Dabing D6 cross-worker priority gate) — delivered by #184 round G0.1 (merge 4b8731b), released in 0.64.0 via PR #205 (merge 6916856); box: dub wait 2.9 h → ~13 s. #200 closed as overcome (fix 435b3ac in 0.63.0). #184 stays open on the owner's wall re-acceptance (validator PARTIAL).
