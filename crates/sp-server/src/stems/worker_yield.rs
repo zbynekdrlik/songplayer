@@ -43,13 +43,10 @@ pub(crate) fn yield_reason(
     wall_busy: bool,
     plan: &HeavyStepPlan,
 ) -> Option<Yield> {
-    // RED (#184 G0.1): reversed precedence — the wall arm is checked BEFORE the
-    // dub arm, so a dub queued behind a busy-wall GPU separation wrongly yields to
-    // the wall instead of the dub. GREEN swaps the order back so the dub wins.
-    if wall_busy && plan.is_gpu() {
-        Some(Yield::Wall)
-    } else if dub_wanted {
+    if dub_wanted {
         Some(Yield::Dub)
+    } else if wall_busy && plan.is_gpu() {
+        Some(Yield::Wall)
     } else {
         None
     }
