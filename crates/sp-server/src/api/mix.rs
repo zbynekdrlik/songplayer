@@ -125,6 +125,12 @@ pub async fn patch_mix(
 
     let engine_tx = state.engine_tx.clone();
     let push = async move {
+        // Apply the live console update DIRECTLY here (idempotent with the engine's
+        // own `set_faders`) so a following PARTIAL PATCH reads a fresh `cur` from
+        // the global control — the partial-merge must not race the async engine
+        // loop (and must work even where no engine drains the channel). The engine
+        // `SetMix` push additionally broadcasts `MixChanged` + logs.
+        crate::stems::control::global().set_faders(target);
         let _ = engine_tx
             .send(EngineCommand::SetMix { faders: target })
             .await;

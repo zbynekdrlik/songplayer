@@ -500,12 +500,13 @@ mod tests {
 
     #[test]
     fn preset_for_faders_tolerates_the_integer_percent_rounding() {
-        // 0.301 is within 0.01 of the karaoke band membership (podklad ~1).
+        // podklad 0.995 (a 99->100 % round) still matches half's podklad==1 within
+        // 0.01 when vokály + dabing are on the half snapshot.
         assert_eq!(
-            preset_for_faders(MixFaders::new(0.5, 0.995, 1.0), true),
+            preset_for_faders(MixFaders::new(0.5, 0.995, 0.5), true),
             Some("half")
         );
-        // dabing off by 0.02 → no dub match, falls to the song reading.
+        // dabing off by 0.02 → no dub match, falls to the song reading (karaoke).
         assert_eq!(
             preset_for_faders(MixFaders::new(0.5, 1.0, 0.52), true),
             Some("karaoke_low")
