@@ -55,8 +55,8 @@ pub const SEEK_HOLD_MS: u64 = 5000;
 /// The position a seek bar should DISPLAY (and bind to `prop:value`).
 ///
 /// - While the operator is dragging the thumb, the dragged value is
-///   authoritative so a live position tick can't snap it back (#194) — dragging
-///   wins over everything, including a pending seek.
+///   authoritative so a live position tick can't snap it back — dragging wins
+///   over everything, including a pending seek.
 /// - Otherwise, while a committed `pending` seek is still catching up — the live
 ///   position is more than `SEEK_CATCH_UP_MS` behind the target AND fewer than
 ///   `SEEK_HOLD_MS` have elapsed since the commit — the committed TARGET is
