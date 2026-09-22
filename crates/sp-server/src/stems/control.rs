@@ -158,9 +158,10 @@ impl MixControl {
     /// other.
     pub fn set_faders(&self, f: MixFaders) {
         let f = MixFaders::new(f.vokaly, f.podklad, f.dabing);
-        // RED: writes the SONG memory regardless of the active kind — GREEN matches
-        // on `self.kind()`.
-        store_triple(&self.song_faders, f);
+        match self.kind() {
+            MixKind::Song => store_triple(&self.song_faders, f),
+            MixKind::Dub => store_triple(&self.dub_faders, f),
+        }
         self.publish_gains(f);
     }
 
