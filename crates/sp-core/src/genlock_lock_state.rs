@@ -71,7 +71,7 @@ pub struct LockInputs {
 /// slots (0–100/min, stems child resident); a sender-side STALL ran late ≈ 42 %
 /// of slots (W1: ~750/min, 30–105 ms). 25 % sits well above clean, well below
 /// stalled.
-pub const LATE_DEGRADED_PERMILLE: u64 = 25;
+pub const LATE_DEGRADED_PERMILLE: u64 = 250;
 
 /// Repeat-fraction MARGIN above the structural fps-conversion rate: DEGRADED
 /// once repeats exceed `expected_repeat_permille + 10 %` (100 ‰) of the slots.
