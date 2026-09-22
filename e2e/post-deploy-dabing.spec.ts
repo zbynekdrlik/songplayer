@@ -144,9 +144,9 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
   // wait until the reported live position has actually landed AND played ~1 s
   // past it, so both band measurements read the SAME audio window. Position is
   // WS-pushed onto the seek bar (there is no position endpoint — preview.md), so
-  // we read the bar: phase 1 waits for the position to drop to/near T (proving a
-  // backward seek landed — a forward seek is already below T), phase 2 waits for
-  // it to advance to T + 1 s. Never a blind timeout.
+  // we read the bar: phase 1 waits for the position to land near T (the decoder
+  // snaps to the next keyframe, so "near" allows the GOP length), phase 2 waits
+  // for it to advance 1 s past the landing point. Never a blind timeout.
   async function seekAndSettle(
     request: APIRequestContext,
     seekBar: Locator,
@@ -157,22 +157,35 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
       data: { position_ms: targetMs },
     });
     expect(resp.status(), `seek to ${targetMs} ms must be accepted`).toBe(204);
-    // Phase 1: the seek landed — the reported position is at/near T.
+    // Phase 1: the seek landed. The decoder snaps a seek to the NEXT keyframe
+    // (YouTube AV1/H.264 GOPs run up to ~20 s — a seek to 645 482 ms landed at
+    // 665 000 ms on the box), so "landed" = the reported position is inside
+    // [T − 0.5 s, T + KEYFRAME_SNAP_MAX_MS]. The same T snaps to the same
+    // keyframe both times, so both band windows still read the same audio.
+    const KEYFRAME_SNAP_MAX_MS = 30000;
+    const landDeadline = Date.now() + 20000;
+    let landed = Number.NaN;
+    for (;;) {
+      const pos = Number(await seekBar.inputValue());
+      if (pos >= targetMs - 500 && pos <= targetMs + KEYFRAME_SNAP_MAX_MS) {
+        landed = pos;
+        break;
+      }
+      expect(
+        Date.now() < landDeadline,
+        `the seek to ${targetMs} ms must land within [T − 0.5 s, T + ${KEYFRAME_SNAP_MAX_MS} ms] in 20 s — last position ${pos} ms`,
+      ).toBe(true);
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    // Phase 2: play ~1 s past the landing point so the sampling window is the
+    // same both times (same keyframe → same landing → same window).
     await expect
       .poll(async () => Number(await seekBar.inputValue()), {
         timeout: 20000,
         intervals: [150],
-        message: `the seek to ${targetMs} ms must land (position drops to ~T)`,
+        message: `the dub must play to ${landed + 1000} ms after the seek landed at ${landed} ms`,
       })
-      .toBeLessThanOrEqual(targetMs + 500);
-    // Phase 2: play ~1 s past T so the sampling window is the same both times.
-    await expect
-      .poll(async () => Number(await seekBar.inputValue()), {
-        timeout: 20000,
-        intervals: [150],
-        message: `the dub must play to ${targetMs + 1000} ms after the seek`,
-      })
-      .toBeGreaterThanOrEqual(targetMs + 1000);
+      .toBeGreaterThanOrEqual(landed + 1000);
   }
 
   test("a READY dub is listed and SP-dabing has a receiver", async ({ request }) => {
