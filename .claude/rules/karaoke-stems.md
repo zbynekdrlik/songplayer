@@ -93,6 +93,18 @@ Everything below is the pre-round-G history; read it for the #186 seam mechanics
 but treat `KaraokeControl`/`preset_gains`/`KaraokeMode`/`/api/v1/karaoke` as
 DELETED names.
 
+**Round-G gotchas (cost a review round):**
+- **A partial `PATCH /api/v1/mix` reads the UNSPECIFIED faders from the
+  process-global `MixControl`.** So the handler must APPLY `control.set_faders(target)`
+  DIRECTLY (idempotent with the engine's own `set_faders`), not rely ONLY on the
+  async `EngineCommand::SetMix` loop — otherwise a rapid 2nd partial PATCH reads a
+  stale console (race), AND the axum test harness (`routes_tests::test_state` DROPS
+  the engine receiver) never updates the global, so a partial-merge test can't pass.
+- **A `preset_for_faders` test for a DUB preset MUST set `dabing` to the snapshot's
+  pinned value** (`half` = `(0.5, 1, 0.5)`): dub presets match all three within
+  0.01, so `(0.5, 0.995, 1.0)` does NOT match `half` (dabing 1.0≠0.5) — it falls to
+  the song reading (`karaoke_low`). Song presets ignore `dabing`; dub presets pin it.
+
 ## Architecture
 
 - **#186 — MODES ARE LIVE GAIN PRESETS, NEVER A REOPEN. The mixer opens every
