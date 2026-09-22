@@ -130,10 +130,6 @@ pub fn LiveMixer(playlist_id: i64) -> impl IntoView {
             .get(&playlist_id)
             .map(|n| n.video_id)
     });
-    Effect::new(move |_| {
-        let _ = selected_song.get();
-        load();
-    });
 
     // The now-playing stems entry for THIS playlist (if any).
     let selected_entry = move || {
@@ -169,6 +165,25 @@ pub fn LiveMixer(playlist_id: i64) -> impl IntoView {
             .unwrap_or(false)
     };
     let has_dub_row = move || dub_row.get().is_some();
+
+    // #184 round G1: the playing item's KIND (a READY dub → the dub console, else
+    // the song console). The server switches the active memory at the item's open,
+    // so the strip must RE-READ GET /mix when the kind flips — a Memo<bool> so the
+    // reload fires only on a real kind change, never on a position tick.
+    let is_dub = Memo::new(move |_| {
+        dub_row
+            .get()
+            .map(|r| r.dub_status == "ready")
+            .unwrap_or(false)
+    });
+    // Reload GET /mix on mount, whenever THIS playlist's playing SONG changes, AND
+    // whenever the item's KIND flips — so the faders snap to the active (song/dub)
+    // memory. Both deps are Memos, so a position tick never triggers a reload.
+    Effect::new(move |_| {
+        let _ = selected_song.get();
+        let _ = is_dub.get();
+        load();
+    });
 
     // Reactive text/lock signals passed to the shared Mixer (update without a
     // channel rebuild).

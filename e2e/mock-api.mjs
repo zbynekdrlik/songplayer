@@ -462,16 +462,32 @@ let karaokeNowPlaying = [
     queue_position: null,
   },
 ];
-// #184 round G: the ONE live mixer console. GET returns the three fader positions
-// + stem progress + the per-song now-playing block; PATCH sets any subset of the
-// faders. `/__mock/mix-last` exposes the last PATCH body so specs can assert which
-// fields the UI sent; `/__mock/mix-reset` restores the default (1,1,1) console.
-let mix = { vokaly: 1.0, podklad: 1.0, dabing: 1.0 };
+// #184 round G1: the ONE mixer console with TWO kind-scoped memories — a SONG
+// memory and a DUB memory. The ACTIVE kind mirrors the server's select_kind at
+// item open: 'dub' when the playing item (a now_playing entry) has a READY dub
+// row, else 'song'. GET returns the ACTIVE memory's faders + "kind"; PATCH writes
+// the ACTIVE memory. `/__mock/mix-last` exposes the last PATCH body; `/__mock/
+// mix-reset` restores both memories (song (1,1,1), dub (0,1,1)).
+let mixSong = { vokaly: 1.0, podklad: 1.0, dabing: 1.0 };
+let mixDub = { vokaly: 0.0, podklad: 1.0, dabing: 1.0 };
 let lastMixPatch = null;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
+// The active kind follows the PLAYING item's dub readiness (a ready dub row for a
+// video shown in now_playing) — exactly the signal the server's reader uses.
+function mixKind() {
+  return karaokeNowPlaying.some((np) =>
+    dubRows.some((r) => r.video_id === np.video_id && r.dub_status === "ready"),
+  )
+    ? "dub"
+    : "song";
+}
+function activeMix() {
+  return mixKind() === "dub" ? mixDub : mixSong;
+}
 app.get("/api/v1/mix", (_req, res) => {
   res.json({
-    ...mix,
+    ...activeMix(),
+    kind: mixKind(),
     stems_pending: 2,
     stems_done: 5,
     now_playing: karaokeNowPlaying,
@@ -480,16 +496,18 @@ app.get("/api/v1/mix", (_req, res) => {
 app.patch("/api/v1/mix", (req, res) => {
   const b = req.body || {};
   lastMixPatch = b;
+  const m = activeMix();
   for (const k of ["vokaly", "podklad", "dabing"]) {
-    if (typeof b[k] === "number" && !Number.isNaN(b[k])) mix[k] = clamp01(b[k]);
+    if (typeof b[k] === "number" && !Number.isNaN(b[k])) m[k] = clamp01(b[k]);
   }
-  res.status(200).json({ ...mix });
+  res.status(200).json({ ...m, kind: mixKind() });
 });
 app.get("/__mock/mix-last", (_req, res) => {
   res.json(lastMixPatch || {});
 });
 app.post("/__mock/mix-reset", (_req, res) => {
-  mix = { vokaly: 1.0, podklad: 1.0, dabing: 1.0 };
+  mixSong = { vokaly: 1.0, podklad: 1.0, dabing: 1.0 };
+  mixDub = { vokaly: 0.0, podklad: 1.0, dabing: 1.0 };
   lastMixPatch = null;
   res.json({ ok: true });
 });
