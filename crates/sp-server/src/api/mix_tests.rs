@@ -148,7 +148,9 @@ async fn patch_dub_edits_only_the_dub_memory_and_dub_keys() {
     );
 
     // All THREE dub keys are persisted with their OWN values (not just vokaly), so a
-    // swapped fader→key persist is caught; the song keys are never written.
+    // swapped fader→key persist is caught; the song keys keep their V28-seeded
+    // values (the migration seeds every mix key, so "never written" is not
+    // `None` — it is "unchanged": song vokaly seeded '1').
     let dv = setting_f32(&pool, sp_core::config::SETTING_MIX_DUB_VOKALY).await;
     let dp = setting_f32(&pool, sp_core::config::SETTING_MIX_DUB_PODKLAD).await;
     let dd = setting_f32(&pool, sp_core::config::SETTING_MIX_DUB_DABING).await;
@@ -157,8 +159,8 @@ async fn patch_dub_edits_only_the_dub_memory_and_dub_keys() {
     assert!((dd - 0.5).abs() < 1e-6);
     assert_eq!(
         get_setting(&pool, sp_core::config::SETTING_MIX_SONG_VOKALY).await,
-        None,
-        "a dub edit must not persist a song key"
+        Some("1".to_string()),
+        "a dub edit must not persist a song key (the V28 seed stays)"
     );
 
     reset_console();
@@ -194,7 +196,8 @@ async fn patch_song_edits_only_the_song_memory_and_song_keys() {
         "a song edit must not touch the dub memory"
     );
 
-    // Both song keys are persisted with their own values; no dub key is written.
+    // Both song keys are persisted with their own values; the dub keys keep their
+    // V28-seeded values (dub vokaly seeded '0' — "never written" means unchanged).
     assert!(
         (setting_f32(&pool, sp_core::config::SETTING_MIX_SONG_VOKALY).await - 0.3).abs() < 1e-6
     );
@@ -203,8 +206,8 @@ async fn patch_song_edits_only_the_song_memory_and_song_keys() {
     );
     assert_eq!(
         get_setting(&pool, sp_core::config::SETTING_MIX_DUB_VOKALY).await,
-        None,
-        "a song edit must not persist a dub key"
+        Some("0".to_string()),
+        "a song edit must not persist a dub key (the V28 seed stays)"
     );
 
     reset_console();
