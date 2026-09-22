@@ -20,6 +20,7 @@
  */
 
 import { test, expect, request as apiRequest, Locator, Page } from "@playwright/test";
+import { audibleStreak } from "./audio-helpers.mjs";
 
 const SONGPLAYER_URL = process.env.SONGPLAYER_URL || "http://localhost:8920";
 
@@ -425,16 +426,44 @@ test.describe("#178 live preview <video> post-deploy", () => {
         "the preview must be playing (media advancing) before pause",
       ).toBeGreaterThan(ct0 + 0.1);
 
+      // #206: the preview audio must be provably FLOWING before we take the
+      // baseline. This test row-plays the dub (restart from 0 s) and mounts its
+      // OWN viewer, but a viewer that joins right after a song restart receives
+      // the encoder's silence padding for its first seconds (near-zero RMS) — so
+      // reading one early sample (the old max-of-six) measured luck and went red
+      // twice on 22.9.2026 (RMS 0.0005 / 0.0016). Instead poll RMS every 150 ms
+      // for up to 10 s until it reads > 0.01 for THREE samples in a row (the pure
+      // `audibleStreak` guard, unit-tested in frontend.spec.ts), then use that as
+      // the audible baseline. The 150 ms wait is only the sample spacing — the
+      // synchronisation is the streak, not a blind timeout. If the audio never
+      // becomes audible, fail with the observed max RMS: that is a real
+      // preview-audio defect, not a race.
+      const AUDIBLE_THRESHOLD = 0.01;
+      const AUDIBLE_STREAK = 3;
+      const rmsSamples: number[] = [];
       let baseRms = 0;
-      for (let i = 0; i < 6; i++) {
-        baseRms = Math.max(baseRms, await audioRms(video));
+      const audibleDeadline = Date.now() + 10_000;
+      // Sample once, then keep sampling (spaced 150 ms) until the streak lands or
+      // the 10 s budget is spent.
+      for (;;) {
+        const r = await audioRms(video);
+        rmsSamples.push(r);
+        baseRms = Math.max(baseRms, r);
+        if (audibleStreak(rmsSamples, AUDIBLE_THRESHOLD, AUDIBLE_STREAK) >= 0) break;
+        if (Date.now() >= audibleDeadline) break;
         await page.waitForTimeout(150);
       }
-      console.log(`[#184] preview baseline audio RMS while playing: ${baseRms.toFixed(4)}`);
+      const streakEnd = audibleStreak(rmsSamples, AUDIBLE_THRESHOLD, AUDIBLE_STREAK);
+      console.log(
+        `[#184/#206] preview audible after ${rmsSamples.length} samples ` +
+          `(streak completes at index ${streakEnd}); max RMS ${baseRms.toFixed(4)}`,
+      );
       expect(
-        baseRms,
-        "the preview audio must be audible before pause (proves the RMS tap works)",
-      ).toBeGreaterThan(0.01);
+        streakEnd,
+        `the preview audio must become audible (RMS > ${AUDIBLE_THRESHOLD} for ` +
+          `${AUDIBLE_STREAK} samples in a row) within 10 s — observed max RMS ` +
+          `${baseRms.toFixed(4)}`,
+      ).toBeGreaterThanOrEqual(0);
 
       // Pause the pipeline via the Player toggle.
       await page.getByTestId("player-playpause").click();

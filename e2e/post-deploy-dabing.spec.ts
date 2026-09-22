@@ -1,4 +1,5 @@
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, Page, APIRequestContext, Locator } from "@playwright/test";
+import { averageDb } from "./audio-helpers.mjs";
 
 /**
  * Post-deploy Dabing checks on the REAL box (#184 D5 item 2 + #200).
@@ -74,48 +75,104 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     }
   });
 
-  // Best-effort 12–16 kHz band energy (dB) of the preview <video>'s audio via a
-  // Web Audio AnalyserNode. Returns null when audio cannot be captured (a
-  // codec-less runner) so the mechanical console checks still run (#184 G item 3).
-  async function bandDb(page: Page): Promise<number | null> {
-    return page.evaluate(async () => {
-      const video = document.querySelector(
-        '[data-testid="preview-video"] video, video',
-      ) as HTMLVideoElement | null;
-      if (!video) return null;
-      try {
-        const stream =
-          (video as unknown as { captureStream?: () => MediaStream }).captureStream?.() ?? null;
-        if (!stream || stream.getAudioTracks().length === 0) return null;
-        const Ctx =
-          (window as unknown as { AudioContext?: typeof AudioContext }).AudioContext ||
-          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (!Ctx) return null;
-        const ctx = new Ctx();
-        const src = ctx.createMediaStreamSource(stream);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 2048;
-        src.connect(analyser);
-        await new Promise((r) => setTimeout(r, 800));
-        const bins = new Float32Array(analyser.frequencyBinCount);
-        analyser.getFloatFrequencyData(bins);
-        const nyquist = ctx.sampleRate / 2;
-        const binHz = nyquist / bins.length;
-        let sum = 0;
-        let n = 0;
-        for (let i = 0; i < bins.length; i++) {
-          const hz = i * binHz;
-          if (hz >= 12000 && hz <= 16000 && Number.isFinite(bins[i])) {
-            sum += bins[i];
-            n += 1;
+  // #206: N best-effort 12–16 kHz band-energy (dB) samples of the preview
+  // <video>'s audio, spread over `spanMs`, from ONE AnalyserNode. Each entry is
+  // the mean of the 12–16 kHz bins at that instant, or null when audio cannot be
+  // captured (a codec-less runner) — averaged by `averageDb` so one snapshot
+  // never decides the sign (the old single `getFloatFrequencyData` compared two
+  // different live moments and went red on 22.9.2026). Returns `count` entries.
+  async function collectBandSamples(
+    page: Page,
+    count: number,
+    spanMs: number,
+  ): Promise<Array<number | null>> {
+    return page.evaluate(
+      async ({ count, spanMs }) => {
+        const video = document.querySelector(
+          '[data-testid="preview-video"] video, video',
+        ) as HTMLVideoElement | null;
+        const nulls = (): Array<number | null> => new Array(count).fill(null);
+        if (!video) return nulls();
+        try {
+          const stream =
+            (video as unknown as { captureStream?: () => MediaStream }).captureStream?.() ?? null;
+          if (!stream || stream.getAudioTracks().length === 0) return nulls();
+          const Ctx =
+            (window as unknown as { AudioContext?: typeof AudioContext }).AudioContext ||
+            (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+          if (!Ctx) return nulls();
+          const ctx = new Ctx();
+          const src = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 2048;
+          src.connect(analyser);
+          const bins = new Float32Array(analyser.frequencyBinCount);
+          const nyquist = ctx.sampleRate / 2;
+          const binHz = nyquist / bins.length;
+          const bandAt = (): number | null => {
+            analyser.getFloatFrequencyData(bins);
+            let sum = 0;
+            let n = 0;
+            for (let i = 0; i < bins.length; i++) {
+              const hz = i * binHz;
+              if (hz >= 12000 && hz <= 16000 && Number.isFinite(bins[i])) {
+                sum += bins[i];
+                n += 1;
+              }
+            }
+            return n > 0 ? sum / n : null;
+          };
+          // Warm the analyser, then take `count` samples spread across `spanMs`.
+          await new Promise((r) => setTimeout(r, 200));
+          const step = Math.max(1, Math.floor(spanMs / count));
+          const out: Array<number | null> = [];
+          for (let s = 0; s < count; s++) {
+            out.push(bandAt());
+            if (s < count - 1) await new Promise((r) => setTimeout(r, step));
           }
+          await ctx.close();
+          return out;
+        } catch {
+          return nulls();
         }
-        await ctx.close();
-        return n > 0 ? sum / n : null;
-      } catch {
-        return null;
-      }
+      },
+      { count, spanMs },
+    );
+  }
+
+  // #206: seek the (off-program) dub to a fixed audio position via the API and
+  // wait until the reported live position has actually landed AND played ~1 s
+  // past it, so both band measurements read the SAME audio window. Position is
+  // WS-pushed onto the seek bar (there is no position endpoint — preview.md), so
+  // we read the bar: phase 1 waits for the position to drop to/near T (proving a
+  // backward seek landed — a forward seek is already below T), phase 2 waits for
+  // it to advance to T + 1 s. Never a blind timeout.
+  async function seekAndSettle(
+    request: APIRequestContext,
+    seekBar: Locator,
+    pid: number,
+    targetMs: number,
+  ): Promise<void> {
+    const resp = await request.post(`/api/v1/playback/${pid}/seek`, {
+      data: { position_ms: targetMs },
     });
+    expect(resp.status(), `seek to ${targetMs} ms must be accepted`).toBe(204);
+    // Phase 1: the seek landed — the reported position is at/near T.
+    await expect
+      .poll(async () => Number(await seekBar.inputValue()), {
+        timeout: 20000,
+        intervals: [150],
+        message: `the seek to ${targetMs} ms must land (position drops to ~T)`,
+      })
+      .toBeLessThanOrEqual(targetMs + 500);
+    // Phase 2: play ~1 s past T so the sampling window is the same both times.
+    await expect
+      .poll(async () => Number(await seekBar.inputValue()), {
+        timeout: 20000,
+        intervals: [150],
+        message: `the dub must play to ${targetMs + 1000} ms after the seek`,
+      })
+      .toBeGreaterThanOrEqual(targetMs + 1000);
   }
 
   test("a READY dub is listed and SP-dabing has a receiver", async ({ request }) => {
@@ -159,6 +216,12 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     page,
     request,
   }) => {
+    // #206: the content-matched band compare adds two API seeks + two ~2 s
+    // sampling windows over the default 90 s post-deploy budget; give this
+    // real-box test the same 120 s wall-clock budget the sibling preview tests
+    // use (a budget, not a loosened assertion — every gate below is unchanged).
+    test.setTimeout(120_000);
+
     // The Player's transport label follows the live PlaybackStateChanged
     // message. #201 round 2 also made the on-connect replay carry the raw
     // transport (the reload assertion below proves it), so a reload/late-socket
@@ -204,39 +267,81 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
       "○ Mimo programu",
     );
 
-    // #184 round G item 3: the ONE mixer console. Start the live preview so the
-    // audio band can be measured (best-effort), then drag mix-vokaly to 0 and
-    // prove the original voice leaves the mix — the 12–16 kHz band drops ≥ 8 dB.
+    // #184 round G item 3 + #206: the ONE mixer console. Start the live preview
+    // so the audio band can be measured, then prove that removing the original
+    // voice drops the 12–16 kHz band ≥ 8 dB — measured CONTENT-MATCHED: seek to a
+    // fixed audio position T, average the band over ~2 s; drag mix-vokaly to 0;
+    // seek to the SAME T, average again. Comparing the same audio (only the
+    // original voice removed) makes the sign deterministic — the old single
+    // snapshot before/after straddled ~5 s of DIFFERENT live content and read the
+    // band LOUDER (−9.3 dB) on 22.9.2026.
     await page.getByTestId("preview-start").click().catch(() => {});
-    await page.waitForTimeout(2000);
-    const before = await bandDb(page);
+
+    // A fixed audio position (~30 % in, deep enough for vocals — reuses where the
+    // seek-bar drag below already goes), used for BOTH measurements.
+    const seekBar = page.getByTestId("player-seek");
+    await expect(seekBar).toBeEnabled({ timeout: 15000 });
+    const duration = Number(await seekBar.getAttribute("max"));
+    const T = Math.min(
+      Math.max(Math.round(duration * 0.3), 60000),
+      Math.max(60000, duration - 60000),
+    );
 
     const vokaly = page.getByTestId("mix-vokaly");
     await expect(vokaly).toBeEnabled({ timeout: 15000 });
-    const patch = page.waitForResponse(
-      (r) => r.url().includes("/api/v1/mix") && r.request().method() === "PATCH",
-      { timeout: 10000 },
-    );
-    await mouseDrag(page, '[data-testid="mix-vokaly"]', 0.98, 0.02);
-    expect((await patch).status()).toBe(200);
-    await page.waitForTimeout(1500);
-    // The fader stays where it was released (no snap-back).
-    expect(Number(await vokaly.inputValue())).toBeLessThan(15);
-    // GET /api/v1/mix reports the change in the DUB memory (#184 round G2).
-    const mix = (await (await request.get("/api/v1/mix")).json()) as {
-      dub: { vokaly: number; podklad: number; dabing: number };
-    };
-    expect(mix.dub.vokaly).toBeLessThan(0.15);
+    // Read the fader so the shared box console is left as found (#206).
+    const originalVokaly = (
+      (await (await request.get("/api/v1/mix")).json()) as { dub: { vokaly: number } }
+    ).dub.vokaly;
 
-    // Best-effort HF band drop (skips on a codec-less runner where audio can't be
-    // captured — the wall audio is the owner's real acceptance).
-    await page.waitForTimeout(3000);
-    const after = await bandDb(page);
-    if (before !== null && after !== null) {
+    try {
+      // BEFORE: the original voice present. Seek to T, play ~1 s past it, average.
+      await seekAndSettle(request, seekBar, dabingPid, T);
+      const before = averageDb(await collectBandSamples(page, 8, 2000));
+
+      // Remove the original voice with a REAL mouse (the #200 acceptance: the
+      // control is not dead), and prove the PATCH landed to exactly 0.
+      const patch = page.waitForResponse(
+        (r) => r.url().includes("/api/v1/mix") && r.request().method() === "PATCH",
+        { timeout: 10000 },
+      );
+      await mouseDrag(page, '[data-testid="mix-vokaly"]', 0.98, 0);
+      expect((await patch).status()).toBe(200);
+      await page.waitForTimeout(500);
+      // The fader stays where it was released (no snap-back).
+      expect(Number(await vokaly.inputValue())).toBeLessThan(15);
+      // GET /api/v1/mix shows the original voice fully removed (#200 intent).
+      const mix = (await (await request.get("/api/v1/mix")).json()) as {
+        dub: { vokaly: number; podklad: number; dabing: number };
+      };
       expect(
-        before - after,
-        "removing the original voice must drop the 12–16 kHz band ≥ 8 dB",
-      ).toBeGreaterThanOrEqual(8);
+        mix.dub.vokaly,
+        "dragging mix-vokaly to the bottom must set dub.vokaly to 0 (the PATCH landed)",
+      ).toBe(0);
+
+      // AFTER: the SAME audio (seek back to the same T), original voice removed.
+      await seekAndSettle(request, seekBar, dabingPid, T);
+      const after = averageDb(await collectBandSamples(page, 8, 2000));
+
+      console.log(
+        `[#206] dabing 12–16 kHz band before=${before} dB after=${after} dB (T=${T} ms)`,
+      );
+      // Best-effort HF band drop — skips only on a codec-less runner where audio
+      // cannot be captured (the wall audio is the owner's real acceptance). On the
+      // box (Edge, real codecs) both reads are numeric and the drop is asserted.
+      if (before !== null && after !== null) {
+        expect(
+          before - after,
+          "removing the original voice must drop the 12–16 kHz band ≥ 8 dB on the SAME audio (seek T twice)",
+        ).toBeGreaterThanOrEqual(8);
+      }
+    } finally {
+      // Leave the shared dub console + preview as found: restore the original
+      // fader and stop the preview this test started.
+      await request
+        .patch("/api/v1/mix", { data: { kind: "dub", vokaly: originalVokaly } })
+        .catch(() => {});
+      await page.getByTestId("preview-stop").click().catch(() => {});
     }
 
     // The Originál preset restores the original voice (vokály 1) and mutes dabing.

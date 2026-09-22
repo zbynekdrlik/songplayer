@@ -10,6 +10,9 @@ paths:
   - "sp-ui/src/components/playlist_card.rs"
   - "sp-ui/src/components/preview_video.rs"
   - "sp-ui/preview_player.js"
+  - "e2e/post-deploy-preview.spec.ts"
+  - "e2e/post-deploy-dabing.spec.ts"
+  - "e2e/audio-helpers.mjs"
 ---
 
 # Dashboard preview — the JPEG thumbnail (#15) AND the live A/V stream (#178)
@@ -344,3 +347,37 @@ the owner's actual complaint path every deploy, with all timings PRINTED:
 - Bounded, early-exit `expect.poll`s only (the no-soak rule above). The 2 s
   frame-hash stability window is a measurement, not a soak — it early-exits the
   moment a ≥ 2 s stable run is confirmed.
+
+## #206 — never assert on ONE live-audio sample; control the moment + content
+
+The post-deploy suite reads real audio off the preview `<video>` (RMS on the
+`<video>` element, or a 12–16 kHz band via `captureStream`). Two assertions
+sampled ONE moment of live content and went red on audio LUCK — 3 red E2E jobs
+on 22.9.2026, same code passing and failing alternately, the deploy green each
+time. The discipline, for EVERY audio assertion (`e2e/post-deploy-preview.spec.ts`,
+`e2e/post-deploy-dabing.spec.ts`, and any new one):
+
+- **Own the session + poll until AUDIBLE — never a fixed wait for "audio is
+  present".** A viewer that joins a running encoder session right after a song
+  restart (`switching to new song`) gets the emitter's silence padding for its
+  first seconds (RMS ~0). Sample RMS on a bounded loop until it reads above the
+  floor for a STREAK of N samples (`audibleStreak` in `e2e/audio-helpers.mjs`),
+  then take the baseline; fail with the observed max if never audible — that is a
+  real defect, not a race. The per-sample wait is only spacing; the streak is the
+  synchronisation.
+- **Average a band over a window — one snapshot never decides the sign.** A
+  single `getFloatFrequencyData` is content luck; take N samples over ~2 s and
+  average them (`averageDb` drops non-finite bins so a codec-less runner reads
+  null, not NaN).
+- **Content-match a before/after compare by SEEKING to the same position.**
+  Comparing the band "before" and "~5 s after" a mixer change measures two
+  DIFFERENT moments of live content (post-G0 a dub has stems, so vokály=0 leaves
+  instrumental+dub, not dub-only). Instead: seek to a fixed T, play ~1 s past it,
+  measure; make the change; assert the API shows it landed (`GET /api/v1/mix`
+  `dub.vokaly === 0`); seek to the SAME T, measure again; assert the drop on the
+  SAME audio. Position is WS-pushed onto `player-seek` (no position endpoint), so
+  after an API seek wait two-phase: the position drops to ~T (a backward seek
+  landed), THEN advances to T + 1 s — never a stale read, never a blind timeout.
+- The pure decision helpers (`audibleStreak`, `averageDb`) live in
+  `e2e/audio-helpers.mjs` and are unit-tested on ubuntu in `frontend.spec.ts`
+  (mock-free), so the determinism is proven without the box.
