@@ -1,10 +1,10 @@
 //! #162 pure tests for the stem-worker decision seams.
 //!
-//! These cover both `stem_defer_decision` mode arms and both
-//! `separation_abort_armed` device cases, killing the surviving
-//! `process_next` mutants (`==`/`!=` on the mode branch, `!` deletion on the
-//! abort-arming branch) by testing the extracted decisions directly. Pure — no
-//! DB, no worker instance, no async.
+//! These cover both `stem_defer_decision` mode arms (killing the surviving
+//! `process_next` mutants — `==`/`!=` on the mode branch) by testing the
+//! extracted decisions directly. Pure — no DB, no worker instance, no async.
+//! (The mid-job wall-abort arming is now folded into the #184 G0.1
+//! `worker_yield::yield_reason`, unit-tested there.)
 
 use super::*;
 use crate::lyrics::idle_gate::WALL_IDLE_SETTLE;
@@ -89,20 +89,6 @@ fn idle_only_idle_past_settle_window_proceeds() {
         stem_defer_decision(ProcessingMode::IdleOnly, true, idle(), &mut log, later),
         None,
         "after WALL_IDLE_SETTLE of continuous idle, idle-only stops deferring"
-    );
-}
-
-// ---- separation_abort_armed — both device cases --------------------------
-
-#[test]
-fn abort_armed_only_for_gpu_plan() {
-    assert!(
-        !separation_abort_armed(&HeavyStepPlan::cpu_idle()),
-        "a CPU-idle plan is never aborted — it cannot disturb the wall"
-    );
-    assert!(
-        separation_abort_armed(&HeavyStepPlan::gpu_below_normal()),
-        "a GPU plan runs under the mid-job wall-abort watcher"
     );
 }
 
