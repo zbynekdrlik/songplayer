@@ -218,6 +218,10 @@ pub async fn ensure_ready(
                 "lyrics bootstrap: venv already ready at {}",
                 venv_python.display()
             );
+            // #168: replace the venv redirector with an app-owned interpreter
+            // and inject the retained mimalloc heap (idempotent; WARN-and-continue).
+            crate::lyrics::bootstrap_venv_exe::prepare_heavy_interpreter(tools_dir, &venv_python)
+                .await;
             return Ok(Some(venv_python));
         }
 
@@ -448,6 +452,9 @@ pub async fn ensure_ready(
         }
 
         tracing::info!("lyrics bootstrap: ready");
+        // #168: replace the venv redirector with an app-owned interpreter and
+        // inject the retained mimalloc heap (idempotent; WARN-and-continue).
+        crate::lyrics::bootstrap_venv_exe::prepare_heavy_interpreter(tools_dir, &venv_python).await;
         Ok(Some(venv_python))
     }
 }
