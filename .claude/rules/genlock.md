@@ -411,6 +411,12 @@ UNLOCKED "clock not ok"; `!pacing` → UNLOCKED "pacing disabled"; `connections=
   as the source made a 23.976-fps output expect 0 % repeats and falsely DEGRADE on
   the structural 20 % conversion (box read 22.9.2026 17:56 UTC). The event +
   snapshot carry both: `nominal_fps` (output nominal) and `source_fps` (decoder).
+  **Sourcing `source_fps`:** SDK-clocked path = `submitter.nominal_fps()` (the
+  submitter is `set_frame_rate`'d to the decoder there). PACED path = threaded
+  from the decode PRODUCER via `open_tx` (`run_decode_producer` reads
+  `decoder.frame_rate()`; the submit thread owns the submitter, and the paced
+  submitter is NEVER `set_frame_rate`'d so `submitter.nominal_fps()` there is the
+  grid, not the source).
 - **Calibration (22.9.2026, SP-slow 24 fps on the 30-fps grid, 1 800 slots/min):**
   clean grid late ≤ 6 % of slots (0–100/min), stalled 42 % (W1 ~750/min,
   30–105 ms); repeats a constant 20 % (= 1 − 24/30) in EVERY window; resyncs 0.
