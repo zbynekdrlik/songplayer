@@ -413,13 +413,16 @@ Slovak labels).
 - The child records `"voice"` + `chunk_start_ms`/`chunk_end_ms` in each
   `chunk_N.json`; the pure `dub_worker.py::chunk_reusable(meta, voice, start_ms,
   end_ms)` reuses a cached chunk ONLY when its recorded voice matches the requested
-  one AND its boundaries equal the current slot (a legacy chunk with no `voice` /
-  bounds, one under another voice, or one from an OLDER chunk plan is
-  re-synthesized) — so a voice change re-does the dub in one voice, and a changed
-  session ceiling (round E: 8 → 2 min) never lays old 8-min chunks under the new
-  plan (the round-E integration bug caught on video 344's work dir: `chunk_0..4`
-  from round C would have been reused for the 2-min slots 0–4 and the `amix` would
-  have doubled the speech from ~10 min on).
+  one AND its boundaries equal the current slot AND it carries the round-E2
+  voice-guard record (`voice_medians`, non-empty) (a legacy chunk with no `voice` /
+  bounds, one under another voice, one from an OLDER chunk plan, or an UNGUARDED
+  chunk is re-synthesized) — so a voice change re-does the dub in one voice, a
+  changed session ceiling (round E: 8 → 2 min) never lays old 8-min chunks under
+  the new plan (the round-E integration bug caught on video 344's work dir:
+  `chunk_0..4` from round C would have been reused for the 2-min slots 0–4 and the
+  `amix` would have doubled the speech from ~10 min on), and a re-dub requested to
+  FIX drift never silently keeps pre-guard audio (the E2 acceptance re-dub of 344
+  reused all 19 round-E chunks — the new guard never ran — until this rule).
 - The resolved voice is persisted per video in the EXISTING nullable
   `dub_voice_ref_path` TEXT column REPURPOSED as the voice name (it was dead
   clone-lane plumbing; no migration, documented in the `db/mod.rs` V26 comment),
