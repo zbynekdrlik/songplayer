@@ -168,6 +168,13 @@ pub(crate) fn acquire_clears_dub_want(name: &str) -> bool {
 /// out of the dub `synthesize` before the acquire (the acquire itself clears the
 /// flag the instant it succeeds, in [`acquire_on`], so the flag means precisely
 /// "queued, not yet acquired").
+///
+/// INVARIANT: the flag is a bool, not a refcount, and Drop clears it
+/// UNCONDITIONALLY — safe only because dub synthesis is STRICTLY SERIAL (one
+/// `DubWorker::run` loop awaits `synthesize` fully before the next tick, so at
+/// most one guard exists at a time). If a second concurrent dub `synthesize` is
+/// ever introduced, one guard's Drop would clear another's still-queued want —
+/// make the flag a counter (or key it per-dub) BEFORE going concurrent.
 pub(crate) struct DubSlotWant;
 
 impl Drop for DubSlotWant {
