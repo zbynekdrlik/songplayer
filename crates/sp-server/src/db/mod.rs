@@ -434,7 +434,7 @@ INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_song_vokaly',
   COALESCE((SELECT value FROM settings WHERE key = 'mix_vokaly'), '1'));
 INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_song_podklad',
   COALESCE((SELECT value FROM settings WHERE key = 'mix_podklad'), '1'));
-INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_dub_vokaly', '1');
+INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_dub_vokaly', '0');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_dub_podklad', '1');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_dub_dabing', '1');
 DELETE FROM settings WHERE key IN ('mix_vokaly', 'mix_podklad', 'mix_dabing');
