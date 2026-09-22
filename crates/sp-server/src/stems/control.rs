@@ -312,6 +312,57 @@ mod tests {
     }
 
     #[test]
+    fn reset_replaces_both_memories_the_active_kind_and_republishes() {
+        // `init` on an already-initialised global goes through `reset`; a reset
+        // that does nothing would leave the previous console (and its gains).
+        let c = MixControl::new_for_test_console(MixConsole {
+            song: MixFaders::new(1.0, 1.0, 1.0),
+            dub: MixFaders::new(0.0, 1.0, 1.0),
+            active: MixKind::Song,
+        });
+        let next = MixConsole {
+            song: MixFaders::new(0.4, 0.9, 1.0),
+            dub: MixFaders::new(0.2, 0.8, 0.6),
+            active: MixKind::Dub,
+        };
+        c.reset(next);
+        assert_eq!(c.console(), next);
+        assert_eq!(c.kind(), MixKind::Dub);
+        // Republished from the ACTIVE (dub) memory: [0, vokaly, podklad, dabing].
+        let [d0, d1, d2, d3] = c.dub_gain_handles();
+        assert_eq!(
+            (read(&d0), read(&d1), read(&d2), read(&d3)),
+            (0.0, 0.2, 0.8, 0.6)
+        );
+    }
+
+    #[tokio::test]
+    async fn read_fader_parses_trims_and_falls_back_to_the_default() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        // Absent key → the caller's default (a value no mutant constant equals).
+        assert_eq!(read_fader(&pool, "mix_test_absent", 0.6).await, 0.6);
+        // Stored values are parsed (with surrounding whitespace trimmed).
+        crate::db::models::set_setting(&pool, "mix_test_a", "0.4")
+            .await
+            .unwrap();
+        crate::db::models::set_setting(&pool, "mix_test_b", " 0.7 ")
+            .await
+            .unwrap();
+        assert_eq!(read_fader(&pool, "mix_test_a", 0.6).await, 0.4);
+        assert_eq!(read_fader(&pool, "mix_test_b", 0.6).await, 0.7);
+        // Non-numeric / non-finite → the default, never a poisoned console.
+        crate::db::models::set_setting(&pool, "mix_test_c", "abc")
+            .await
+            .unwrap();
+        crate::db::models::set_setting(&pool, "mix_test_d", "NaN")
+            .await
+            .unwrap();
+        assert_eq!(read_fader(&pool, "mix_test_c", 0.6).await, 0.6);
+        assert_eq!(read_fader(&pool, "mix_test_d", 0.6).await, 0.6);
+    }
+
+    #[test]
     fn new_control_holds_the_active_faders() {
         let c = MixControl::new_for_test(MixFaders::new(0.3, 0.6, 0.5));
         assert_eq!(c.faders(), MixFaders::new(0.3, 0.6, 0.5));

@@ -14,7 +14,9 @@ use crate::api::routes::tests::{app, test_state};
 
 /// The process-global `MixControl` is shared across parallel tests, so the two
 /// fader tests serialize on this lock to keep their reads/writes deterministic.
-static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// An async-aware mutex: the guard is held across the handlers' `.await`s
+/// (`clippy::await_holding_lock` rejects a `std::sync::MutexGuard` there).
+static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn insert_playlist(pool: &sqlx::SqlitePool, id: i64) {
     sqlx::query("INSERT INTO playlists (id, name, youtube_url, is_active) VALUES (?, 'p', 'u', 1)")
@@ -85,7 +87,7 @@ fn reset_console() {
 
 #[tokio::test]
 async fn patch_mix_sets_both_song_faders_and_persists() {
-    let _g = SERIAL.lock().unwrap();
+    let _g = SERIAL.lock().await;
     reset_console(); // active Song
     let state = test_state().await;
     let pool = state.pool.clone();
@@ -112,7 +114,7 @@ async fn patch_mix_sets_both_song_faders_and_persists() {
 
 #[tokio::test]
 async fn patch_mix_partial_keeps_the_unspecified_faders() {
-    let _g = SERIAL.lock().unwrap();
+    let _g = SERIAL.lock().await;
     reset_console();
     let state = test_state().await;
 
@@ -138,7 +140,7 @@ async fn patch_mix_partial_keeps_the_unspecified_faders() {
 /// flips it (#184 round G1).
 #[tokio::test]
 async fn get_mix_reports_the_active_kind() {
-    let _g = SERIAL.lock().unwrap();
+    let _g = SERIAL.lock().await;
     reset_console(); // active Song
     let state = test_state().await;
 
@@ -157,7 +159,7 @@ async fn get_mix_reports_the_active_kind() {
 /// untouched song memory (#184 round G1).
 #[tokio::test]
 async fn patch_edits_the_active_dub_memory_only() {
-    let _g = SERIAL.lock().unwrap();
+    let _g = SERIAL.lock().await;
     reset_console();
     let state = test_state().await;
     let pool = state.pool.clone();

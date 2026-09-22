@@ -29,6 +29,11 @@ test_tool = "nextest"
 exclude_re = [
   # -- integration-only orchestration / external shell-outs / HTTP --
   'sp-server/src/lib.rs',                 # orchestration glue, integration-tested only
+  # engine_dispatch.rs::dispatch: the EngineCommand match extracted out of lib.rs
+  #   for the 1000-line cap — every arm is a one-line delegation to a
+  #   PlaybackEngine method; the decisions live in those methods (unit-tested)
+  #   and the API tests drive the commands end to end. Same class as lib.rs.
+  'sp-server/src/engine_dispatch\.rs',    # orchestration glue (the lib.rs match, relocated)
   'sp-server/src/obs/',                   # requires live OBS WebSocket
   'sp-server/src/downloader/',            # shells out to yt-dlp
   'sp-server/src/reprocess/',             # requires live Gemini API
