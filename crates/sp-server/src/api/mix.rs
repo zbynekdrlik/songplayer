@@ -19,11 +19,9 @@ use crate::{AppState, EngineCommand};
 
 /// The wire string for a [`MixKind`] — the `"kind"` field of `GET /api/v1/mix`.
 fn kind_str(kind: MixKind) -> &'static str {
-    // RED: the mapping is swapped (Song→"dub", Dub→"song") — GREEN returns the
-    // honest string.
     match kind {
-        MixKind::Song => "dub",
-        MixKind::Dub => "song",
+        MixKind::Song => "song",
+        MixKind::Dub => "dub",
     }
 }
 
