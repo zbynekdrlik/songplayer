@@ -89,6 +89,11 @@ async fn gate_worker(
 /// `low_priority_mode_does_not_defer_while_playing`).
 #[tokio::test]
 async fn idle_only_mode_defers_heavy_work_while_playing() {
+    // Calls `process_next`, which reads the process-global #184 G0.1 dub flag at
+    // the top; serialize + clear it so a parallel flag test can't make this tick
+    // defer for a (phantom) dub instead of the wall.
+    let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
+    crate::lyrics::heavy_slot::set_dub_slot_wanted(false);
     let registry = registry_with(vec![playing_snapshot(7, "SP-fast")]);
     let (worker, pool) = gate_worker(registry, ObsState::default()).await;
     crate::db::models::set_setting(&pool, "lyrics_processing_mode", "idle-only")

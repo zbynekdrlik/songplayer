@@ -63,6 +63,13 @@ would instead trip `dead_code`/`unused`. For timing tests (interval + sleep),
 use `#[tokio::test(start_paused = true)]` (tokio `test-util` is a dev-dep) so the
 1 s poll and a 30 s mock future advance deterministically with no real wait.
 
+Pick the WRONG constant so it is NOT an arithmetic identity: shipping a RED
+`produced_ms() = count * 1` (GREEN `* 500`) trips `clippy::identity_op` under
+`-D warnings` (the Lint job the no-compile box can't see), reddening the RED
+commit itself. Use a wrong NON-identity value (a named const `FRAGMENT_MS = 250`
+→ GREEN `500`, or a different literal) so the exact-value test still fails but
+the RED tree is clippy-clean.
+
 ## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these
 compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
@@ -269,3 +276,15 @@ free-list keeps it), so `take(cap).as_ptr() == recycled_ptr` can never pass by
 address-reuse luck. A RED that FREES instead of recycling must be caught by a
 `pool_len` assertion (freeing never touches the pool, regardless of the
 allocator), NOT by a pointer-equality assertion (a freed address can be reused).
+
+## A test-only serial lock held across `.await` must be a `tokio::sync::Mutex` (#184 G2 + G0.1, twice in one night)
+
+`clippy --all-targets -D warnings` runs `clippy::await_holding_lock` on the lib
+TEST target too: a `static SERIAL: std::sync::Mutex<()>` guard taken at the top
+of a `#[tokio::test]` and held across the handler's/worker's `.await`s is a
+compile ERROR the no-compile box cannot see (it reddened `api/mix_tests.rs`
+and then `heavy_slot_tests.rs` + `worker_tests_idle_gate.rs` + the
+`stems/worker.rs` test module the same night). Declare the serializer as
+`static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());`
+and take it with `let _g = SERIAL.lock().await;`. Keep the `std::sync::Mutex`
+form only for a PLAIN `#[test]` with no await (e.g. `frame_pool`'s serial).

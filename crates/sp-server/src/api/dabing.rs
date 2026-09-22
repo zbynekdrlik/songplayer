@@ -4,10 +4,11 @@
 //! - `POST /api/v1/dabing/import {url}`   → import the URL into the seeded
 //!   Dabing playlist (shared core, cookie-gated) then mark it dub-requested.
 //! - `PATCH /api/v1/videos/{id}/dub {requested}`    → per-video dub toggle.
-//! - `PATCH /api/v1/videos/{id}/dub-mix {ratio}`    → per-video mixer blend.
 //!
-//! The dub CHAIN (stems/transcript/translation/synth) is D3/D4 — this lane only
-//! records the request + serves the state for display.
+//! The mixer blend is now the ONE global console (`PATCH /api/v1/mix`, #184 round
+//! G) — the per-video `dub-mix` route was deleted here. The dub CHAIN
+//! (stems/transcript/translation/synth) is D3/D4 — this lane only records the
+//! request + serves the state for display.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -29,12 +30,6 @@ pub struct DabingImportReq {
 #[derive(Debug, Deserialize)]
 pub struct DubToggleReq {
     pub requested: bool,
-}
-
-/// `PATCH /api/v1/videos/{id}/dub-mix` body — the mixer blend ratio (0.0..=1.0).
-#[derive(Debug, Deserialize)]
-pub struct DubMixReq {
-    pub ratio: f64,
 }
 
 /// `GET /api/v1/dabing` response.
@@ -122,45 +117,6 @@ pub async fn patch_dub(
         Err(e) => {
             warn!("patch_dub error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
-        }
-    }
-}
-
-/// `PATCH /api/v1/videos/{id}/dub-mix` — set the per-video mixer blend ratio
-/// (clamped 0.0..=1.0). #184 round A: the live `EngineCommand::SetDubMix` push is
-/// awaited FIRST (so a playing dub re-blends in ~1.6 s), THEN the DB persist —
-/// the reverse of the old order, where the persist's pool `acquire()` could park
-/// for up to sqlx's 30 s default before the live gains were touched. A persist
-/// failure is logged + returned as 500, but the live change already happened.
-/// 200 + the stored value on success.
-pub async fn patch_dub_mix(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-    Json(req): Json<DubMixReq>,
-) -> impl IntoResponse {
-    // Same clamp the persist applies, computed up front so the live push carries
-    // exactly what gets stored. A cloned Sender keeps the push future independent
-    // of `state.pool`, which the persist borrows.
-    let clamped = models_dabing::clamp_dub_ratio(req.ratio);
-    let engine_tx = state.engine_tx.clone();
-    let push = async move {
-        let _ = engine_tx
-            .send(crate::EngineCommand::SetDubMix {
-                video_id: id,
-                ratio: clamped as f32,
-            })
-            .await;
-    };
-    let persist = models_dabing::set_dub_mix_ratio(&state.pool, id, req.ratio);
-    match super::dabing_apply::apply_dub_mix(push, persist).await {
-        Ok((_, 0)) => StatusCode::NOT_FOUND.into_response(),
-        Ok((stored, _)) => {
-            (StatusCode::OK, Json(serde_json::json!({ "ratio": stored }))).into_response()
-        }
-        Err(e) => {
-            // The live change already applied; only the persist failed.
-            warn!("patch_dub_mix persist error (live change applied): {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
         }
     }
 }

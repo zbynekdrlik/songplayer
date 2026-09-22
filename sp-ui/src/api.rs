@@ -355,20 +355,31 @@ pub async fn patch_translation_gender(video_id: i64, gender: Option<&str>) -> Re
     .await
 }
 
-// ── Karaoke live control (#14) ────────────────────────────────────────────────
+// ── Live mixer control (#14 / #184) ───────────────────────────────────────────
 
-/// GET the live karaoke state: `{mode, vocal_gain, stems_pending, stems_done}`.
-pub async fn get_karaoke() -> Result<serde_json::Value, String> {
-    get("/api/v1/karaoke").await
+/// GET the ONE live mixer console — BOTH kind-scoped memories (#184 round G2):
+/// `{song:{vokaly,podklad}, dub:{vokaly,podklad,dabing}, stems_pending, stems_done,
+/// now_playing:[…]}`. There is no global "active kind"; each strip reads the object
+/// for ITS item's kind.
+pub async fn get_mix() -> Result<serde_json::Value, String> {
+    get("/api/v1/mix").await
 }
 
-/// POST a new karaoke mode + vocal gain (`0.0..=1.0`). Replies 204 No Content.
-pub async fn post_karaoke(mode: &str, vocal_gain: f32) -> Result<(), String> {
-    post_json_empty(
-        "/api/v1/karaoke",
-        &serde_json::json!({ "mode": mode, "vocal_gain": vocal_gain }),
-    )
-    .await
+/// PATCH one memory of the mixer: `{kind:"song"|"dub", vokaly?, podklad?, dabing?}`
+/// (each fader `0.0..=1.0`; `kind` REQUIRED, `dabing` only on `dub`). Server replies
+/// 200 + that memory + `kind`; we only need success/failure here (the adapter set
+/// the faders optimistically).
+pub async fn patch_mix(body: serde_json::Value) -> Result<(), String> {
+    let resp = Request::patch("/api/v1/mix")
+        .json(&body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        return Err(format!("PATCH mix → {}", resp.status()));
+    }
+    Ok(())
 }
 
 /// #177: re-enqueue a song for stem separation ("Zaradiť do fronty"). Replies
@@ -543,21 +554,6 @@ pub async fn patch_dub(video_id: i64, requested: bool) -> Result<(), String> {
         &serde_json::json!({ "requested": requested }),
     )
     .await
-}
-
-/// PATCH the per-video mixer blend ratio (0.0..=1.0). Server replies 200 + the
-/// stored (clamped) value; we only need success/failure here.
-pub async fn patch_dub_mix(video_id: i64, ratio: f64) -> Result<(), String> {
-    let resp = Request::patch(&format!("/api/v1/videos/{video_id}/dub-mix"))
-        .json(&serde_json::json!({ "ratio": ratio }))
-        .map_err(|e| e.to_string())?
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.ok() {
-        return Err(format!("PATCH dub-mix → {}", resp.status()));
-    }
-    Ok(())
 }
 
 /// PATCH JSON to `path` and discard the response body. Mirror of

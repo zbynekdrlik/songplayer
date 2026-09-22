@@ -84,7 +84,11 @@ fn ffmpeg_args_are_exact_for_libx264_with_low_latency_tuning() {
         "-tune",
         "zerolatency",
         "-b:v",
-        "1200k",
+        "500k",
+        "-maxrate",
+        "500k",
+        "-bufsize",
+        "500k",
         "-g",
         "25",
         "-fps_mode",
@@ -94,7 +98,7 @@ fn ffmpeg_args_are_exact_for_libx264_with_low_latency_tuning() {
         "-c:a",
         "aac",
         "-b:a",
-        "128k",
+        "64k",
         "-movflags",
         "+frag_keyframe+empty_moov+default_base_moof",
         "-frag_duration",
@@ -109,6 +113,31 @@ fn ffmpeg_args_are_exact_for_libx264_with_low_latency_tuning() {
     .map(|s| s.to_string())
     .collect();
     assert_eq!(args, expected);
+}
+
+#[test]
+fn ffmpeg_args_fit_a_1mbps_remote_uplink() {
+    // #184 round F: the ~1.35 Mb/s stream (-b:v 1200k + -b:a 128k) did not fit a
+    // ~1 Mb/s internet uplink, so the remote preview back-pressured and fell
+    // permanently behind. Video is capped at 500k with a bounded overshoot
+    // (-maxrate 500k -bufsize 500k) and audio at 64k -> ~0.6 Mb/s, and the old
+    // 1200k / 128k values must be gone entirely (hardware AND software paths).
+    for encoder in ["libx264", "h264_nvenc"] {
+        let args = build_ffmpeg_args(6001, 6002, encoder);
+        let has = |flag: &str, val: &str| args.windows(2).any(|w| w[0] == flag && w[1] == val);
+        assert!(has("-b:v", "500k"), "video bitrate 500k for {encoder}");
+        assert!(has("-maxrate", "500k"), "-maxrate 500k for {encoder}");
+        assert!(has("-bufsize", "500k"), "-bufsize 500k for {encoder}");
+        assert!(has("-b:a", "64k"), "audio bitrate 64k for {encoder}");
+        assert!(
+            !args.iter().any(|a| a == "1200k"),
+            "the old 1200k video bitrate is gone for {encoder}"
+        );
+        assert!(
+            !args.iter().any(|a| a == "128k"),
+            "the old 128k audio bitrate is gone for {encoder}"
+        );
+    }
 }
 
 #[test]

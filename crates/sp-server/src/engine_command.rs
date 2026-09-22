@@ -1,6 +1,7 @@
 //! Commands the API/OBS/Resolume layers send to the playback engine — moved out of lib.rs for the 1000-line cap.
 
-use sp_core::playback::{KaraokeMode, PlaybackMode};
+use sp_core::mixer_model::{MixFaders, MixKind};
+use sp_core::playback::PlaybackMode;
 
 /// Commands sent from the API layer to the playback engine.
 #[derive(Debug, Clone)]
@@ -76,22 +77,14 @@ pub enum EngineCommand {
         playlist_id: i64,
         step: crate::obs::ndi_recovery::RecoveryStep,
     },
-    /// #14: Set the process-global karaoke mode + vocal gain. The engine updates
-    /// the live control, persists both to settings, broadcasts the new state,
-    /// and — when the MODE changed — reloads every playing pipeline at its
-    /// current position so the change is heard on the wall immediately (the
-    /// vocal-gain slider is already live per audio chunk, no reload needed).
-    SetKaraoke {
-        mode: KaraokeMode,
-        vocal_gain: f32,
-    },
-    /// #183 D4: set the live dub mix ratio (`0.0` original voice … `1.0` dub only)
-    /// for the currently-playing dub video. The engine updates the process-global
-    /// dub control so the playing 4-stream mixer ramps toward the new blend with
-    /// NO pipeline reopen; the DB value is persisted by the API handler. `video_id`
-    /// identifies which row the operator changed (for the log).
-    SetDubMix {
-        video_id: i64,
-        ratio: f32,
+    /// #184 round G/G2: set ONE memory of the live mixer console — the three fader
+    /// positions `[vokály, podklad, dabing]` for `kind` (song or dub). The engine
+    /// writes them to the process-global `MixControl`, which republishes ONLY that
+    /// kind's reader family's gains with NO pipeline reopen (the #186 seam), and
+    /// broadcasts `MixChanged`. The persist is done by the API handler after this
+    /// live push. Supersedes `SetKaraoke` + `SetDubMix`.
+    SetMix {
+        kind: MixKind,
+        faders: MixFaders,
     },
 }

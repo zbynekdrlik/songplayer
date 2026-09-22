@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::playback::{KaraokeMode, PlaybackMode, PlaybackState, TransportState};
+use crate::playback::{PlaybackMode, PlaybackState, TransportState};
 
 /// State of a song currently being processed by the lyrics pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -136,10 +136,12 @@ pub enum ServerMsg {
         provider_count: u8,
         duration_ms: u64,
     },
-    /// #14: the live karaoke mode + vocal gain changed (dashboard broadcast).
-    KaraokeStateChanged {
-        mode: KaraokeMode,
-        vocal_gain: f32,
+    /// #184 round G: the ONE global live mixer console changed (dashboard
+    /// broadcast) — the three fader positions `[vokály, podklad, dabing]`.
+    MixChanged {
+        vokaly: f32,
+        podklad: f32,
+        dabing: f32,
     },
 }
 
@@ -215,10 +217,11 @@ mod tests {
     }
 
     #[test]
-    fn karaoke_state_changed_roundtrip() {
-        let msg = ServerMsg::KaraokeStateChanged {
-            mode: KaraokeMode::KaraokeLow,
-            vocal_gain: 0.3,
+    fn mix_changed_roundtrip() {
+        let msg = ServerMsg::MixChanged {
+            vokaly: 0.3,
+            podklad: 1.0,
+            dabing: 0.5,
         };
         let json = serde_json::to_string(&msg).unwrap();
         let decoded: ServerMsg = serde_json::from_str(&json).unwrap();

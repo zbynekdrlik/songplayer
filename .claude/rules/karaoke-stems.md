@@ -49,6 +49,94 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   **48 kHz stereo**, so `stem_worker.py` resamples every stem to 48 kHz stereo
   before writing FLAC (PCM_24).
 
+## #184 round G2 — each reader FAMILY owns its memory; NO global "active kind" (SUPERSEDES round G1)
+
+The ONE console keeps **TWO** remembered fader triples (`sp_core::mixer_model::
+MixConsole { song, dub }`, defaults song `(1,1,·)` Plný mix / dub `(0,1,1)` Len
+dabing). The **invariant**: each reader family is fed from its OWN memory, ALWAYS —
+the 3-stream song reader (`gains[3]`) from the SONG memory, the dub readers
+(`dub_gain_atomics[4]` + `dub2_gain_atomics[2]`) from the DUB memory. The strip edits
+the memory of ITS item's kind.
+
+- **Why G1's global "active kind" was wrong:** the wall runs SEVERAL pipelines at
+  once, so "the playing item's kind" is NOT a single value. G1 published ALL THREE
+  gain sets from the ONE active memory, so a song opening ANYWHERE re-published the
+  dub readers' atomics from the SONG memory (`stream_gains_dub((1,1,1)) = [1,0,0,1]`
+  = doubled voices on SP-dabing), and `select_mix_kind_for_video` only re-selected on
+  a fresh open, so `play 344 → PATCH → play a song elsewhere → play 344 again` left
+  the kind stale and the API edited the wrong memory.
+- **`MixControl`** holds `song_faders[3]` + `dub_faders[3]` + the derived gain
+  atomics, NO `active`. `set_faders(kind, f)` writes ONE memory and republishes ONLY
+  that kind's family (`publish_song` / `publish_dub`); `faders(kind)` / `console()`
+  (both memories). `kind()` / `select_kind` and `mixer_model::mix_kind_for_dub` +
+  `playback/mix.rs::select_mix_kind_for_video` (the item-open hook) are **DELETED**.
+  Boot still reads the five V28 settings (`mix_song_*` / `mix_dub_*`); no migration
+  change. `EngineCommand::SetMix { kind, faders }`.
+- **API:** `GET /api/v1/mix` → `{song:{vokaly,podklad}, dub:{vokaly,podklad,dabing},
+  …}` (no `kind`, no flat faders). `PATCH {kind:"song"|"dub", vokaly?, podklad?,
+  dabing?}` — `kind` REQUIRED (400 without it; `dabing` on `song` → 400), applies
+  `control.set_faders(kind, target)` directly (the round-G race rule) + persists ONLY
+  that kind's keys after the live push.
+- **UI:** `live_mixer.rs` — the strip's kind is its `is_dub` Memo; `load` reads its
+  memory from the GET's `song`/`dub` object, every PATCH carries `kind`, the kind-flip
+  reload Effect stays.
+
+## #184 round G — ONE mixer console (SUPERSEDES the karaoke-MODE model below)
+
+The karaoke MODE + `KaraokeControl` + `preset_gains` + `KaraokeMode` enum +
+`GET/POST /api/v1/karaoke` + `EngineCommand::SetKaraoke` + `KaraokeStateChanged`
+are **DELETED**. The mixer is now THREE independent faders that ARE the state:
+
+- **Model = `sp_core::mixer_model`** — `MixFaders { vokaly, podklad, dabing }`
+  (each `0..=1`, clamped; ANY non-finite → the default `(1,1,1)`). The per-stream
+  gains are DERIVED, not preset-shaped:
+  - `stream_gains_song(f) -> [original, vocals, instrumental]` = `[1,0,0]` when
+    `vokaly==1 && podklad==1` (bit-exact original, the old FullMix) else
+    `[0, vokaly, podklad]`.
+  - `stream_gains_dub(f) -> [original, vocals, instrumental, dub]` = `[1,0,0,dabing]`
+    when both full else `[0, vokaly, podklad, dabing]`.
+  - `stream_gains_dub_no_stems(f) -> [original, dub]` = `[vokaly, dabing]` — the
+    `vokaly` fader IS the whole original bed, **NO floor** (the −18 dB
+    `DUB_ORIGINAL_FLOOR` is GONE).
+  - Presets are fader SNAPSHOTS (`SONG_PRESETS` always, `DUB_PRESETS` only with a
+    ready dub); `preset_for_faders(f, has_dub)` highlights within 0.01
+    (`karaoke_low`: `vokaly<1 && podklad==1`), dub presets win when a dub is
+    present. `fader_availability(stems_ready, dub_ready)` → which faders are live.
+- **Live control = `stems::control::MixControl`** (was `KaraokeControl`): three
+  fader atomics + the three DERIVED gain sets (`gains[3]`, `dub_gain_atomics[4]`,
+  `dub2_gain_atomics[2]`). `set_faders(f)` recomputes ALL THREE in lock-step from
+  the pure `stream_gains_*`; `gain_handles` / `dub_gain_handles` /
+  `dub_over_original_gain_handles` keep their stream orders. The #186 no-reopen
+  seam is unchanged. Restored at boot from settings `mix_vokaly`/`mix_podklad`/
+  `mix_dabing` (`init_from_settings`).
+- **API = `GET/PATCH /api/v1/mix`** (`api/mix.rs`): GET returns the three faders +
+  stem progress + the #177 now-playing block; PATCH takes any subset
+  `{vokaly?, podklad?, dabing?}` (live push FIRST via `EngineCommand::SetMix` +
+  `engine.set_mix`, THEN the settings persist — the round-A order in
+  `api/mix_apply.rs::apply_mix`). Broadcast is `ServerMsg::MixChanged`.
+- **UI = `components/live_mixer.rs`** (ONE strip over the shared `Mixer`) —
+  replaces `karaoke_mixer.rs` + `dub_mixer.rs`. Test ids `mix-vokaly` /
+  `mix-podklad` / `mix-dabing`, presets `mixer-preset-<id>`, state line
+  `karaoke-now-playing` (kept). Migration V27 folds the old
+  `karaoke_mode`/`karaoke_vocal_gain` settings into `mix_*` and DROPs
+  `videos.dub_mix_ratio`.
+
+Everything below is the pre-round-G history; read it for the #186 seam mechanics
+but treat `KaraokeControl`/`preset_gains`/`KaraokeMode`/`/api/v1/karaoke` as
+DELETED names.
+
+**Round-G gotchas (cost a review round):**
+- **A partial `PATCH /api/v1/mix` reads the UNSPECIFIED faders from the
+  process-global `MixControl`.** So the handler must APPLY `control.set_faders(target)`
+  DIRECTLY (idempotent with the engine's own `set_faders`), not rely ONLY on the
+  async `EngineCommand::SetMix` loop — otherwise a rapid 2nd partial PATCH reads a
+  stale console (race), AND the axum test harness (`routes_tests::test_state` DROPS
+  the engine receiver) never updates the global, so a partial-merge test can't pass.
+- **A `preset_for_faders` test for a DUB preset MUST set `dabing` to the snapshot's
+  pinned value** (`half` = `(0.5, 1, 0.5)`): dub presets match all three within
+  0.01, so `(0.5, 0.995, 1.0)` does NOT match `half` (dabing 1.0≠0.5) — it falls to
+  the song reading (`karaoke_low`). Song presets ignore `dabing`; dub presets pin it.
+
 ## Architecture
 
 - **#186 — MODES ARE LIVE GAIN PRESETS, NEVER A REOPEN. The mixer opens every
@@ -199,6 +287,29 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   `KILL_ON_JOB_CLOSE`) so an OOM kills the child, never the host. g35t /
   translation HTTP steps take NONE of these (not heavy). windows-sys is a
   cfg(windows) sp-server dep for the OS calls.
+- **Heavy-slot priority — a dub job preempts a background separation (#184
+  G0.1, `lyrics/heavy_slot.rs` + `stems/worker_yield.rs`).** The slot is fair
+  FIFO, but a dub is an explicit operator request with a deadline while a stem
+  separation is not, so a dub must NOT wait tens of minutes behind a cpu-idle
+  separation. A process-global `DUB_SLOT_WANTED` flag (`dub_slot_wanted()` /
+  `dub_slot_want_guard()`): the dub worker publishes it TRUE via the RAII guard
+  right before `run_live_translate` (its Drop is the early-return safety net),
+  and `acquire_on` clears it FALSE the instant the DUB step acquires the slot
+  (gated by the pure `acquire_clears_dub_want(name)` — ONLY `"dub
+  live-translate"`; a stem/isolation/mtl acquire never touches it), so the flag
+  means precisely "a dub is queued behind the slot". While it is set: (a) the
+  stem worker AND the lyrics worker DEFER their next heavy tick
+  (`stem_tick_defers_to_dub` / a direct flag read) — start no new heavy step, no
+  backoff, no DB write; (b) a RUNNING stem separation YIELDS between segments —
+  `run_with_dub_yield` (reusing the #161 `AbortPolicy` 1 s poll) kills the child
+  (`kill_on_drop`) and returns `StemStepResult::YieldedToDub`, which leaves the
+  #171 resumable work dir + partial stems INTACT and the DB row pending (no
+  backoff, `stem_attempts` unchanged) — so the dub acquires within ~1 s and the
+  separation resumes from its segments later. The pure `yield_reason(dub_wanted,
+  wall_busy, plan)`: a dub wins for ANY plan; a busy wall still wins for a GPU
+  plan only (the #161 rule — a cpu-idle separation is never wall-yielded). mtl is
+  NOT mid-run yielded (not resumable — it defers at the tick and finishes within
+  its bound). No schema change, no `LYRICS_PIPELINE_VERSION` bump.
 - **In-use-first tiered queue (#195, `db/models_stems_priority.rs` +
   `stems/queue_tiers.rs`).** The stem worker no longer picks by
   `stem_manual_priority DESC, id ASC` alone — with ~110 songs queued and
@@ -253,19 +364,35 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   pending: `stem_status` NULL, `stem_attempts` unchanged, re-picked when idle). A
   genuine separation failure still records the backoff deferral. The lyrics worker
   wraps its isolation + mtl steps the same way.
-- **Duration cap (2026-09-15) — stems only up to 15 min
-  (`STEM_MAX_DURATION_MS`, `stems/worker.rs`).** A 10-minute "warm-up" file
-  pinned the heavy child's private bytes at ~5.0 GB against the (then) 6 GiB
-  Job Object ceiling (`heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES` — CUDA
-  context + several float32 copies of the whole mix), so allocations failed
-  and the child crawled at 0.2 cores / ~200k page faults/s for 20+ minutes
-  before timing out. Fix was two-part: the ceiling went 6→10 GiB (clears a
-  normal long-song working set with margin), AND the stem worker now skips
-  separation entirely for anything over 15 min — `process_next` checks
-  `stem_duration_too_long(job.duration_ms)` right after picking the job,
-  before the heavy-slot/memory-guard/spawn, and marks the row terminal
-  `stem_status = 'unsupported'` (no retry, no backoff). Such long files are
-  not songs; karaoke stems for them are pointless regardless of ceiling size.
+- **Duration cap (`STEM_MAX_DURATION_MS`, `stems/worker.rs`) — cap history
+  15 → 120 min.** `process_next` checks `stem_duration_too_long(job.duration_ms)`
+  right after picking the job, before the heavy-slot/memory-guard/spawn, and
+  marks an over-cap row terminal `stem_status = 'unsupported'` (no retry, no
+  backoff).
+  - **2026-09-15: 30 → 15 min.** A 10-minute "warm-up" file pinned the heavy
+    child's private bytes at ~5.0 GB against the (then) 6 GiB Job Object ceiling
+    (`heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES` — CUDA context + several
+    float32 copies of the whole mix), so allocations failed and the child crawled
+    at 0.2 cores / ~200k page faults/s for 20+ min before timing out. Fixed in
+    two parts: the ceiling went 6 → 10 GiB, AND the worker skipped anything over
+    15 min. Rationale then: whole-file separation (memory pinned per file) + a
+    single GPU-sized timeout that killed a long CPU run mid-way.
+  - **Round G0 (#184, 2026-09-21): 15 → 120 min.** Owner ruling
+    ("na vsetko sa dava rozdelenie podklady a vocaly co davame aj na songy") —
+    EVERY video, incl. long dub videos, gets `podklad`/`vokály` stems. The old
+    15-min rationale no longer holds: separation is now SEGMENTED (30 s
+    resumable windows, memory is per-segment not per-file) and the timeout is
+    DURATION-SCALED (×4 on a CPU plan) with heavy work at reduced priority
+    during playback — so a 36-min video is ~5-12 min of low-priority, resumable
+    work. 120 min is now a SANITY ceiling (a multi-hour livestream
+    stays excluded), not a "songs only" limit. The literal stays a literal
+    (`7_200_000`) so the mutation runner sees it. A boot one-shot
+    `startup::requeue_unsupported_stems` → `models_stems::requeue_unsupported_within_cap`
+    re-opens every `unsupported` row now within the cap (the SAME reset
+    `enqueue_stems` uses; over-cap / unknown-duration / non-unsupported rows are
+    left alone). NB the ONLY production caller of `mark_stems_unsupported` is this
+    duration gate, so every `unsupported` row is a too-long row — there is no
+    per-row error text to tell "too long" from "no vocals" apart.
 - **DB (V24):** `videos.{vocals_file_path, instrumental_file_path, stem_status,
   stem_attempts, stem_next_attempt_at}`. `stem_status` NULL=pending → done /
   failed (retryable) / unsupported (terminal). Paths are also derived

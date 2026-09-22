@@ -45,6 +45,52 @@ pub(crate) async fn apply_first_n(pool: &SqlitePool, n: usize) {
     }
 }
 
+/// Apply every not-yet-applied migration whose version is `<= max_version`,
+/// leaving anything newer unapplied. Unlike `run_migrations` (which runs ALL
+/// pending migrations), this lets a per-version test fire exactly its own
+/// migration without a later migration (e.g. V28) also running and mutating the
+/// rows the test asserts. Assumes the `schema_version` table already exists
+/// (created by an earlier `apply_first_n`).
+pub(crate) async fn apply_upto(pool: &SqlitePool, max_version: i32) {
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+
+    for &(version, sql) in MIGRATIONS {
+        if version > max_version {
+            break;
+        }
+        let already = sqlx::query("SELECT version FROM schema_version WHERE version = ?")
+            .bind(version)
+            .fetch_optional(pool)
+            .await
+            .unwrap()
+            .is_some();
+        if already {
+            continue;
+        }
+        let mut tx = pool.begin().await.unwrap();
+        for stmt in sql.split(';') {
+            let s = stmt.trim();
+            if !s.is_empty() {
+                sqlx::query(s).execute(&mut *tx).await.unwrap();
+            }
+        }
+        sqlx::query("INSERT INTO schema_version (version) VALUES (?)")
+            .bind(version)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+    }
+}
+
 /// Fetch the column names of `table` via `PRAGMA table_info(<table>)`.
 /// Used by migration tests asserting a new column exists.
 pub(crate) async fn column_names(pool: &SqlitePool, table: &str) -> Vec<String> {

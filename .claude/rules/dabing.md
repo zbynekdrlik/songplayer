@@ -140,8 +140,9 @@ raising (separation would only be marked unsupported). Live INPUT is the ORIGINA
 
 - **Chunk plan (Rust owns it):** the worker runs ffmpeg `silencedetect` (a light
   off-slot pass at BELOW_NORMAL), parses it with `chunk_plan::parse_silencedetect`,
-  and `chunk_plan::plan_chunks` cuts at pauses ≥ 700 ms into chunks ≤ 8 min (Live
-  session headroom), never mid-speech; the plan JSON is the child's `--chunk-plan`
+  and `chunk_plan::plan_chunks` cuts at pauses ≥ 700 ms into chunks ≤ the session
+  cap (round E: 2 min default, the `dub_session_max_s` setting), never mid-speech;
+  the plan JSON is the child's `--chunk-plan`
   INPUT. `placement_for(chunk_start, chunk_len, out_len, next_start)` decides the
   atempo (≤ 1.08, only on overrun); the worker calls it per chunk AFTER the child
   returns each `out_len` to LOG + verify drift ≤ 2 s (`DUB_MAX_DRIFT_MS`), and
@@ -157,13 +158,50 @@ chunks (real-time by default; `dub_pace` setting → `--pace`, 2× tested on box
 `audio_stream_end`, collect 24 kHz PCM + input/output transcription (SK stamped by
 output-audio position), trim trailing silence, atempo if it would overrun the next
 chunk, write `chunk_N.wav`. **Heartbeats into `work_dir` every 5 s** so the
-`wait_with_stall_timeout` never kills a healthy mid-chunk stream (a chunk can be
-8 min with no other work-dir write). Assembles `<base>_dub.flac` at **48 kHz
+`wait_with_stall_timeout` never kills a healthy mid-chunk stream (a chunk can run
+its full session cap with no other work-dir write). Assembles `<base>_dub.flac` at **48 kHz
 STEREO loudnorm -16** (must match the stem format `StemMixReader` requires), writes
 `<base>_dub_transcripts.json` (D3), and prints the summary JSON on stdout (the ONLY
 stdout line — logs go to stderr). Key ONLY via `GEMINI_API_KEY` env (`bootstrap::
 ensure_genai` pins `google-genai==2.24.0`, idempotent, never triggers the heavy
 qwen/torch reinstall). Cost ~$0.037/min.
+
+## #184 round G — the dub mix is now the ONE global fader console (SUPERSEDES the per-video ratio below)
+
+The per-video `videos.dub_mix_ratio` column, `set_dub_mix_ratio` / `clamp_dub_ratio`
+/ `dub_ratio_if_ready`, `dub_gains` / `dub_over_original_gains` / `DUB_ORIGINAL_FLOOR`,
+`PATCH /api/v1/videos/{id}/dub-mix`, `EngineCommand::SetDubMix`, and the
+`components/dub_mixer.rs` adapter are **DELETED**. The mixer is now the ONE global
+three-fader console (`vokaly` / `podklad` / `dabing`) — see
+`.claude/rules/karaoke-stems.md` "#184 round G". Key deltas for dub playback:
+
+- The reader gain sets are DERIVED from `sp_core::mixer_model::stream_gains_*`, not
+  a ratio: `DubMix` uses `stream_gains_dub(f)` (`[1,0,0,dabing]` when vokaly &
+  podklad full, else `[0,vokaly,podklad,dabing]`); `DubOverOriginal` uses
+  `stream_gains_dub_no_stems(f)` = `[vokaly, dabing]` — the whole original at the
+  `vokaly` fader, **NO −18 dB floor**. `MixControl` publishes both from
+  `set_faders(f)`; `reader::dub_gains_for(kind, MixFaders)` is the pure per-kind
+  gain (still unit-tested).
+- The mix is set via `PATCH /api/v1/mix {kind, vokaly?, podklad?, dabing?}` →
+  `EngineCommand::SetMix{kind, faders}` → `engine.set_mix` → `control.set_faders(kind, f)`;
+  the persist is done by the API handler AFTER the live push
+  (`api/mix_apply.rs::apply_mix`, the round-A order). The dub video's readiness
+  (its `DubRow.dub_status` / `stem_status`) drives which faders are LIVE.
+- **Round G2 (SUPERSEDES G1) — the mix VALUES are remembered PER ITEM KIND, and each
+  reader FAMILY is fed from its OWN memory; there is NO global "active kind".** The
+  console keeps a SONG memory and a DUB memory (`MixConsole { song, dub }`, default
+  song `(1,1)` / dub `(0,1,1)`); the dub readers always ramp toward the DUB memory,
+  the song reader toward the SONG memory, so a song starting on ANY other output no
+  longer doubles a playing dub's voices (and a dub never instrumental-mutes the next
+  song). `PATCH /mix` NAMES the memory it edits (`kind` required) + persists only that
+  kind's keys (`mix_song_*` / `mix_dub_*`); `GET /mix` returns BOTH memories
+  `{song, dub}`. The G1 global `active`/`select_kind`/item-open hook are DELETED. See
+  `.claude/rules/karaoke-stems.md` "#184 round G2".
+- The dabing list (`dabing_list.rs`) no longer shows a per-row ratio; the console
+  lives in the shared Player above.
+
+Everything below is the pre-round-G per-video-ratio history — treat `dub_mix_ratio`
+/ `dub_gains(r)` / `DUB_ORIGINAL_FLOOR` / `/dub-mix` / `SetDubMix` as DELETED.
 
 ## Playback (`stems/reader.rs` + `stems/control.rs`)
 `open_audio_stream`'s pure `audio_source_kind(vocals, instrumental, dub)` chooses:
@@ -372,11 +410,19 @@ mirrored in the Nastavenia select (`sp-ui/components/settings_form.rs::DUB_VOICE
 Slovak labels).
 
 ## Voice-keyed resume + persisted voice (repurposed column, NO schema change)
-- The child records `"voice"` in each `chunk_N.json`; the pure
-  `dub_worker.py::chunk_reusable(meta, voice)` reuses a cached chunk ONLY when its
-  recorded voice matches the requested one (a legacy chunk with no `voice`, or one
-  under another voice, is re-synthesized) — so a voice change re-does the dub in
-  one voice.
+- The child records `"voice"` + `chunk_start_ms`/`chunk_end_ms` in each
+  `chunk_N.json`; the pure `dub_worker.py::chunk_reusable(meta, voice, start_ms,
+  end_ms)` reuses a cached chunk ONLY when its recorded voice matches the requested
+  one AND its boundaries equal the current slot AND it carries the round-E2
+  voice-guard record (`voice_medians`, non-empty) (a legacy chunk with no `voice` /
+  bounds, one under another voice, one from an OLDER chunk plan, or an UNGUARDED
+  chunk is re-synthesized) — so a voice change re-does the dub in one voice, a
+  changed session ceiling (round E: 8 → 2 min) never lays old 8-min chunks under
+  the new plan (the round-E integration bug caught on video 344's work dir:
+  `chunk_0..4` from round C would have been reused for the 2-min slots 0–4 and the
+  `amix` would have doubled the speech from ~10 min on), and a re-dub requested to
+  FIX drift never silently keeps pre-guard audio (the E2 acceptance re-dub of 344
+  reused all 19 round-E chunks — the new guard never ran — until this rule).
 - The resolved voice is persisted per video in the EXISTING nullable
   `dub_voice_ref_path` TEXT column REPURPOSED as the voice name (it was dead
   clone-lane plumbing; no migration, documented in the `db/mod.rs` V26 comment),
@@ -384,18 +430,85 @@ Slovak labels).
   `GET /api/v1/dabing` payload and shown in the Dabing row as `hlas: <voice>`.
 
 ## `scripts/dub_voice_check.py` — objective consistency check (box/dev1 tool)
-Reads a dub FLAC/WAV, per-window (30 s) f0 median, exits 1 when the
-INTERQUARTILE spread of the window medians (in semitones vs the file median)
-exceeds `MAX_IQR_ST = 8` — the rotating-voice symptom (alternating voices an
-octave apart = IQR 12 st). **Do not use the max spread as the gate:** measured
-21.9.2026 on the 36-min re-dubbed sample, ONE pinned voice has IQR 4.5 st but a
-max spread of 14.7 st (natural intonation + the odd octave-error window), so the
-original 3 st max-spread limit (set from a 20 s same-sentence probe) flagged a
-single voice; the max spread is printed for information only. A female↔male
-rotation puts whole windows in the ~200 Hz band; a single male voice stays in
-80–145 Hz. It is NOT executed in CI but IS ruff-lint-scoped
-(`ci.yml` eval-checks). Its pure helpers run in CI eval-checks WITHOUT librosa —
-the f0 measurement prefers `librosa.pyin` but falls back to a dependency-free
-numpy autocorrelation (`f0_autocorr`), and the pytest forces the fallback
+**Round E replaced the round-C IQR rule (it verified nothing).** Reads a dub
+FLAC/WAV, per-window (**5 s**, was 30) f0 median, and exits 1 when the FRACTION of
+voiced windows more than **6 st ABOVE the file median** exceeds
+`MAX_HIGH_BAND_FRACTION = 0.05` — the rotating-voice symptom (recurring female
+stretches above a base male voice). The max spread and IQR are still printed but
+are **information only**: measured 21.9.2026 on the 36-min sample, ONE pinned
+voice has IQR 4.5 st / max spread 14.7 st (natural intonation + an octave-error
+window), so the round-C IQR gate diluted 100-s female stretches into a passing
+number. A female↔male rotation puts whole 5-s windows in the ~200 Hz band; a
+single male voice stays in 80–145 Hz. NB a *balanced* 50/50 octave alternation is
+NOT flagged (by definition ≤ 50 % of windows exceed the median, and the arithmetic
+median of an equal split sits too close to the high voice) — that is not the real
+symptom. It is NOT executed in CI but IS ruff-lint-scoped (`ci.yml` eval-checks).
+Its pure helpers (`high_band_fraction`, `f0_autocorr`, `window_medians`) run in CI
+eval-checks WITHOUT librosa — the f0 measurement prefers `librosa.pyin` but falls
+back to a dependency-free numpy autocorrelation, and the pytest forces the fallback
 (`use_librosa=False`) so it RUNS, never skips (CI installs numpy + soundfile, not
 librosa).
+
+# Dabing round E (#184) — the pinned voice drifts inside a long session: cap it + a per-chunk guard
+
+Round C pins the voice via `speech_config`, and the pin HOLDS at a session start —
+but the model DRIFTS to another voice INSIDE a long session (video 344, 5 sessions
+of ~430 s: 55/431 5-s windows landed in a 200–224 Hz female band while the SOURCE
+at those seconds was a steady male 116–134 Hz; where the source itself rose to
+~200 Hz the dub correctly followed). The 120 s vs 30 s experiment: one pinned 120 s
+session = 0 drifted windows; the same slice as four 30 s sessions = 3 (11 %); ~7 min
+is where drift showed. So **~2 min is the validated stable point.**
+
+## (a) Session cap — `chunk_plan.rs` + `dub_session_max_s` setting
+`chunk_plan::DUB_SESSION_MAX_MS = 120_000` is the default ceiling
+`ChunkPlanConfig::default` uses (`MAX_CHUNK_MS` is kept as its alias). The
+`dub_session_max_s` setting (`sp_core::config::SETTING_DUB_SESSION_MAX_S`, default
+120, clamped 60..=480 s) is read per tick in `worker.rs::synthesize` via the pure
+`dub_session_max_ms_from(setting) -> u64` (mirrors `dub_pace_from`/`dub_voice_from`)
+and passed as the plan ceiling. `plan_chunks` still cuts only at pauses ≥ 700 ms,
+never mid-speech; a 36-min talk is ~18 sessions (the ~27 s drain per session adds
+~8 min, ≈ 1.4× realtime, accepted).
+
+## (b) Per-chunk voice-band guard — round E2 (`dub_worker.py`)
+Round E measured each output window against the CHUNK's OWN median with a 0.20
+re-synth trigger, and on video 344 it still left 7.3 % true-drift windows (file
+gate 5 %). Two defects: (1) **the whole-chunk blind spot** — a chunk high
+THROUGHOUT (chunk 10) has a high chunk median, so 0 windows clear +6 st and it
+falsely passes; (2) **the trigger was 4× laxer than the gate** — 0.20 vs the file
+gate's 0.05, so chunk 5 at 18 % passed the guard while failing the file. Round E2:
+
+- **Baseline-relative, not chunk-relative.** `chunk_voice_drift(out_medians,
+  in_medians, out_baseline, in_baseline)` measures each output window against the
+  RUNNING **pinned-voice baseline** (the median of the voiced OUTPUT windows of the
+  chunks ACCEPTED so far) and discounts source-following against the RUNNING
+  **source baseline** (the running median of the input windows) — NOT the chunk's
+  own medians, so a chunk high throughout is caught. It delegates to the ONE shared
+  `dub_voice_check.drift_windows`, so the guard and the file gate measure the SAME
+  thing. Baselines accumulate in `cmd_live_translate` order; each `chunk_N.json`
+  persists `voice_medians` + `voice_in_medians` so a resumed run rebuilds them
+  (`baseline_from_meta`). A still-drifted or guard-skipped chunk NEVER feeds them.
+- **Trigger as strict as the file gate.** `_chunk_is_drifted` fires at `>= 2`
+  true-drift windows OR fraction `> VOICE_DRIFT_FRAC = 0.05` — the SAME 0.05 as
+  `dub_voice_check.MAX_HIGH_BAND_FRACTION`, pinned equal by a unit test.
+- **Seed (chunk 0).** With no baseline yet, chunk 0 is checked against the pinned
+  voice's expected `VOICE_F0_BAND` (measured by `eval/dubbing/voice_band_measure.py`
+  with the SAME `use_librosa=False` autocorrelation the runtime uses, widened to a
+  coarse per-voice band; an unknown voice → seed as-is). A wrong seed would poison
+  every later baseline, so an out-of-band seed is treated as drifted.
+- **Up to 2 re-synths** (`VOICE_RESYNTH_ATTEMPTS`, new session, same pin), keeping
+  the fewest-drift take; a chunk still drifted after 2 ships with
+  `voice_band_ok=false` (logged, never fails the dub).
+- **File gate `--source`.** `dub_voice_check.py --source <original>` reports the
+  true-drift fraction (source-following discounted, same shared definition) and
+  gates on IT; without `--source` round-E behaviour is unchanged. This is the
+  acceptance number: `--source orig344.flac` true-drift ≤ 0.05.
+
+**The guard stays BEST-EFFORT — it must never fail the dub it decorates.** The
+whole scan + re-synth lives in `_apply_voice_band_guard`'s `try/except`: any
+failure (numpy/`dub_voice_check` import, a truncated/unreadable wav) is logged and
+falls through with `voice_band_ok=None`, empty medians (no baseline update), no
+re-synth. Do NOT unwrap it (round-E review MAJOR). Two known blind spots persist:
+autocorrelation octave-collapse makes `VOICE_F0_BAND` a coarse seed gate (not a
+fine voice discriminator — the window guard + the pyin `--source` gate are the
+real detectors), and a truly balanced 50/50 octave rotation inside one chunk is
+still not the observed symptom.

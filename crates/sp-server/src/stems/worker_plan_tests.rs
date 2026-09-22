@@ -1,10 +1,10 @@
 //! #162 pure tests for the stem-worker decision seams.
 //!
-//! These cover both `stem_defer_decision` mode arms and both
-//! `separation_abort_armed` device cases, killing the surviving
-//! `process_next` mutants (`==`/`!=` on the mode branch, `!` deletion on the
-//! abort-arming branch) by testing the extracted decisions directly. Pure — no
-//! DB, no worker instance, no async.
+//! These cover both `stem_defer_decision` mode arms (killing the surviving
+//! `process_next` mutants — `==`/`!=` on the mode branch) by testing the
+//! extracted decisions directly. Pure — no DB, no worker instance, no async.
+//! (The mid-job wall-abort arming is now folded into the #184 G0.1
+//! `worker_yield::yield_reason`, unit-tested there.)
 
 use super::*;
 use crate::lyrics::idle_gate::WALL_IDLE_SETTLE;
@@ -92,20 +92,6 @@ fn idle_only_idle_past_settle_window_proceeds() {
     );
 }
 
-// ---- separation_abort_armed — both device cases --------------------------
-
-#[test]
-fn abort_armed_only_for_gpu_plan() {
-    assert!(
-        !separation_abort_armed(&HeavyStepPlan::cpu_idle()),
-        "a CPU-idle plan is never aborted — it cannot disturb the wall"
-    );
-    assert!(
-        separation_abort_armed(&HeavyStepPlan::gpu_below_normal()),
-        "a GPU plan runs under the mid-job wall-abort watcher"
-    );
-}
-
 // ---- separation_timeout — the CPU ×4 scaling reaches the spawn seam -------
 
 #[test]
@@ -128,7 +114,16 @@ fn separation_timeout_scales_only_the_cpu_plan() {
 
 // ---- stem_defer_fallback — the poisoned-lock path, all four cases ---------
 
-// ---- stem_duration_supported / stem_duration_too_long — the 15-min cap ---
+// ---- stem_duration_supported / stem_duration_too_long — the 120-min cap ---
+
+#[test]
+fn cap_is_120_min() {
+    // Round G0 (owner ruling 21.9.2026): every video, incl. a long dub video,
+    // gets podklad/vokály stems — the cap is now a 120-min sanity ceiling.
+    // Asserted against the exact literal (worker.rs keeps the const a literal so
+    // the mutation runner can see it).
+    assert_eq!(STEM_MAX_DURATION_MS, 7_200_000);
+}
 
 #[test]
 fn duration_unknown_is_always_supported() {
@@ -141,16 +136,18 @@ fn duration_unknown_is_always_supported() {
 
 #[test]
 fn duration_at_and_under_the_cap_is_supported() {
-    assert!(stem_duration_supported(Some(899_999)));
+    // A 36-min dub video (e.g. video 344) is separated now.
+    assert!(stem_duration_supported(Some(36 * 60_000)));
     assert!(stem_duration_supported(Some(STEM_MAX_DURATION_MS)));
-    assert!(!stem_duration_too_long(Some(899_999)));
+    assert!(!stem_duration_too_long(Some(36 * 60_000)));
     assert!(!stem_duration_too_long(Some(STEM_MAX_DURATION_MS)));
 }
 
 #[test]
-fn duration_one_ms_over_the_cap_is_unsupported() {
-    assert!(!stem_duration_supported(Some(900_001)));
-    assert!(stem_duration_too_long(Some(900_001)));
+fn duration_over_the_cap_is_unsupported() {
+    // 121 min is past the 120-min ceiling → still skipped.
+    assert!(!stem_duration_supported(Some(121 * 60_000)));
+    assert!(stem_duration_too_long(Some(121 * 60_000)));
 }
 
 #[test]

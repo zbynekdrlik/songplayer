@@ -12,10 +12,10 @@ pub mod clock_health;
 mod engine_play;
 pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
 mod handle_pipeline_event;
-mod karaoke; // #14 set_karaoke (impl PlaybackEngine, 1000-line cap split)
 pub mod lock_state;
 pub mod loop_stats; // #192 round 3: pipeline-loop stage timing + submit-call histogram (pure)
 mod lyrics_loader;
+mod mix; // #184 round G set_mix (impl PlaybackEngine, 1000-line cap split)
 pub mod ndi_burn;
 pub mod ndi_health;
 mod ndi_health_transport; // #201 round 2: pure reported-label -> TransportState (Linux-tested)
@@ -781,6 +781,7 @@ impl PlaybackEngine {
     /// Cache the video's song/artist/duration and broadcast `NowPlaying`
     /// with `position_ms: 0`. Called when a pipeline reports a `Started`
     /// event (i.e. playback just began).
+    #[cfg_attr(test, mutants::skip)] // DB/WS glue
     async fn broadcast_now_playing_on_start(&mut self, playlist_id: i64, duration_ms: u64) {
         let video_id = match self
             .pipelines

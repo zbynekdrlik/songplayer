@@ -175,6 +175,26 @@ pub async fn self_heal_emoji_metadata(pool: &SqlitePool) -> Result<usize, sqlx::
     Ok(healed)
 }
 
+/// Round G0 one-shot: re-open every terminal `unsupported` stem row now within
+/// the raised [`crate::stems::worker::STEM_MAX_DURATION_MS`] cap, so the stem
+/// worker re-separates the long dub videos the old 15-min ceiling wrongly
+/// parked. Delegates the flip to
+/// [`crate::db::models_stems::requeue_unsupported_within_cap`] and logs the
+/// count. Non-fatal (called like the other self-heal one-shots). Returns the
+/// number of rows re-queued.
+pub async fn requeue_unsupported_stems(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
+    let requeued = crate::db::models_stems::requeue_unsupported_within_cap(
+        pool,
+        crate::stems::worker::STEM_MAX_DURATION_MS,
+    )
+    .await?;
+    tracing::info!(
+        requeued,
+        "self-heal: re-opened unsupported stem rows within the raised 120-min cap"
+    );
+    Ok(requeued)
+}
+
 /// Repair stored rows whose `song` was written empty/whitespace-only, or
 /// left NULL despite processing having finished — re-derive song+artist
 /// from the stored `title` via the regex title parser
@@ -969,3 +989,7 @@ mod emoji_self_heal_tests {
         assert_eq!(artist, None, "artist must stay NULL, never coerced to \"\"");
     }
 }
+
+#[cfg(test)]
+#[path = "startup_requeue_tests.rs"]
+mod requeue_tests;

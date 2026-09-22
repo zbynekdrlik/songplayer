@@ -88,6 +88,18 @@ pub fn dub_voice_from(raw: Option<&str>) -> String {
     }
 }
 
+/// Parse the `dub_session_max_s` setting — the dub Live-session length cap in
+/// SECONDS (#184 round E), returned in MILLISECONDS for `plan_chunks`. Absent /
+/// blank / non-numeric → the default ceiling ([`chunk_plan::DUB_SESSION_MAX_MS`]);
+/// a numeric value is clamped to `60..=480` seconds so a session is never shorter
+/// than a minute nor longer than the old 8-min ceiling. Pure — unit-tested.
+pub fn dub_session_max_ms_from(raw: Option<&str>) -> u64 {
+    match raw.and_then(|v| v.trim().parse::<u64>().ok()) {
+        Some(secs) => secs.clamp(60, 480) * 1000,
+        None => chunk_plan::DUB_SESSION_MAX_MS,
+    }
+}
+
 /// The bundled ffmpeg path (next to the other tools). Mirrors
 /// `tools::ffmpeg_filename` without depending on its visibility.
 fn ffmpeg_path(tools_dir: &Path) -> PathBuf {
@@ -97,6 +109,23 @@ fn ffmpeg_path(tools_dir: &Path) -> PathBuf {
         "ffmpeg"
     };
     tools_dir.join(name)
+}
+
+/// The Python tool scripts the dub worker materialises into `tools_dir` (embedded
+/// at compile time): the worker itself PLUS `dub_voice_check.py`, which the child
+/// imports for the #184 round-E per-chunk voice-band guard. Pure — unit-tested so
+/// the guard's helper module can never silently stop shipping to the box.
+fn embedded_tool_scripts() -> [(&'static str, &'static str); 2] {
+    [
+        (
+            "dub_worker.py",
+            include_str!("../../../../scripts/dub_worker.py"),
+        ),
+        (
+            "dub_voice_check.py",
+            include_str!("../../../../scripts/dub_voice_check.py"),
+        ),
+    ]
 }
 
 impl DubWorker {
@@ -170,7 +199,7 @@ impl DubWorker {
         };
 
         // #183 round 2: the dub chain NEVER waits for stems — long videos the stem
-        // worker cannot separate (over the 15-min cap) must still be dubbed. The
+        // worker cannot separate (over the 120-min cap) must still be dubbed. The
         // pure `synth_ready` decides: proceed now; if the stems are merely pending
         // (absent but within the cap) raise their manual priority so a later
         // separation enriches the mix (2-stream → 4-stream on the next open),
@@ -327,7 +356,20 @@ impl DubWorker {
             .or_else(|| job.duration_ms.map(|d| d.max(0) as u64))
             .filter(|&t| t > 0)
             .ok_or_else(|| anyhow::anyhow!("dub: could not determine audio duration"))?;
-        let chunks = chunk_plan::plan_chunks(&silences, total_ms, &ChunkPlanConfig::default());
+        // #184 round E: cap the Live session at the `dub_session_max_s` setting
+        // (default 120 s) so the pinned voice does not drift inside a long session.
+        let session_max_ms = dub_session_max_ms_from(
+            crate::db::models::get_setting(&self.pool, sp_core::config::SETTING_DUB_SESSION_MAX_S)
+                .await
+                .ok()
+                .flatten()
+                .as_deref(),
+        );
+        let plan_cfg = ChunkPlanConfig {
+            min_pause_ms: chunk_plan::MIN_PAUSE_MS,
+            max_chunk_ms: session_max_ms,
+        };
+        let chunks = chunk_plan::plan_chunks(&silences, total_ms, &plan_cfg);
         let plan_json_path = work_dir.join("chunk_plan.json");
         tokio::fs::write(&plan_json_path, serde_json::to_vec(&chunks)?).await?;
         info!(
@@ -377,6 +419,12 @@ impl DubWorker {
             chunks.len(),
             total_ms / 1000
         );
+        // #184 G0.1: signal that a dub is queued behind the heavy slot so a
+        // running stem separation yields it (and the stem/lyrics workers defer
+        // their next heavy tick). The flag is cleared the instant this dub's
+        // `acquire_slot` succeeds (inside heavy_slot::acquire_on); this guard's
+        // Drop is the early-return safety net for the paths before the acquire.
+        let _dub_want = crate::lyrics::heavy_slot::dub_slot_want_guard();
         let summary = crate::dabing::child::run_live_translate(
             python,
             script_path,
@@ -517,20 +565,23 @@ impl DubWorker {
             .next()
     }
 
-    /// Materialise `dub_worker.py` into `tools_dir` (embedded at compile time),
-    /// rewriting only when stale. Mirrors `StemWorker::ensure_script`.
+    /// Materialise the dub tool scripts into `tools_dir` (embedded at compile
+    /// time), rewriting only the stale ones. Mirrors `StemWorker::ensure_script`;
+    /// ships `dub_worker.py` AND `dub_voice_check.py` (the child imports the latter
+    /// for the round-E voice-band guard). Returns the worker script path.
     async fn ensure_script(&self) -> anyhow::Result<PathBuf> {
-        const EMBEDDED: &str = include_str!("../../../../scripts/dub_worker.py");
-        if let Some(parent) = self.script_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        let stale = match tokio::fs::read_to_string(&self.script_path).await {
-            Ok(existing) => existing != EMBEDDED,
-            Err(_) => true,
-        };
-        if stale {
-            tokio::fs::write(&self.script_path, EMBEDDED).await?;
-            info!("dub_worker: wrote {}", self.script_path.display());
+        let tools_dir = self.script_path.parent().unwrap_or_else(|| Path::new("."));
+        tokio::fs::create_dir_all(tools_dir).await?;
+        for (name, content) in embedded_tool_scripts() {
+            let path = tools_dir.join(name);
+            let stale = match tokio::fs::read_to_string(&path).await {
+                Ok(existing) => existing != content,
+                Err(_) => true,
+            };
+            if stale {
+                tokio::fs::write(&path, content).await?;
+                info!("dub_worker: wrote {}", path.display());
+            }
         }
         Ok(self.script_path.clone())
     }
@@ -572,8 +623,42 @@ mod tests {
     }
 
     #[test]
+    fn dub_session_max_ms_defaults_and_clamps() {
+        // Absent / blank / non-numeric → the default 2-minute ceiling (round E).
+        assert_eq!(dub_session_max_ms_from(None), 120_000);
+        assert_eq!(dub_session_max_ms_from(Some("")), 120_000);
+        assert_eq!(dub_session_max_ms_from(Some("   ")), 120_000);
+        assert_eq!(dub_session_max_ms_from(Some("bad")), 120_000);
+        // A valid value is seconds → ms.
+        assert_eq!(dub_session_max_ms_from(Some("60")), 60_000);
+        assert_eq!(dub_session_max_ms_from(Some(" 90 ")), 90_000);
+        // Clamped: below 60 s → 60 s, above 480 s → 480 s.
+        assert_eq!(dub_session_max_ms_from(Some("10")), 60_000);
+        assert_eq!(dub_session_max_ms_from(Some("999")), 480_000);
+    }
+
+    #[test]
     fn dub_eta_is_audio_plus_drain() {
         assert_eq!(dub_eta(60_000), Duration::from_secs(180));
+    }
+
+    #[test]
+    fn embedded_tool_scripts_ship_worker_and_voice_check() {
+        let scripts = embedded_tool_scripts();
+        let names: Vec<&str> = scripts.iter().map(|(n, _)| *n).collect();
+        assert_eq!(names, vec!["dub_worker.py", "dub_voice_check.py"]);
+        for (name, content) in scripts {
+            assert!(!content.is_empty(), "{name} embedded empty");
+        }
+        // The shipped scripts really are the round-E modules the guard needs.
+        assert!(
+            scripts[0].1.contains("chunk_voice_drift"),
+            "dub_worker.py missing the round-E guard helper"
+        );
+        assert!(
+            scripts[1].1.contains("MAX_HIGH_BAND_FRACTION"),
+            "dub_voice_check.py is not the round-E high-band module"
+        );
     }
 
     #[test]

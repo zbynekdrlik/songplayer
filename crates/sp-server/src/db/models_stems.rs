@@ -199,6 +199,38 @@ pub async fn enqueue_stems(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx:
     Ok(())
 }
 
+/// One-shot boot re-queue (round G0): flip every terminal `'unsupported'` row
+/// whose duration is KNOWN and within `cap_ms` back to the pending/queued state
+/// the worker picks up — the SAME reset [`enqueue_stems`] uses (`stem_status =
+/// NULL, stem_attempts = 0, stem_next_attempt_at = NULL`), never a second
+/// status vocabulary. Rows over the cap, rows with an unknown `duration_ms`, and
+/// non-`'unsupported'` rows are left untouched. Returns the number of rows
+/// flipped.
+///
+/// The only production caller of [`mark_stems_unsupported`] is the duration gate
+/// (`stems::worker::process_next`), so today every `'unsupported'` row is a
+/// too-long row and there is no per-row error text to tell "too long" from "no
+/// vocals" apart — hence every known ≤-cap row flips (a row that genuinely had
+/// no vocals would simply re-mark itself after one pass). Run once at boot next
+/// to the other self-heal one-shots so a cap raise re-opens the videos the old
+/// ceiling wrongly parked.
+pub async fn requeue_unsupported_within_cap(
+    pool: &SqlitePool,
+    cap_ms: i64,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE videos \
+         SET stem_status = NULL, stem_attempts = 0, stem_next_attempt_at = NULL \
+         WHERE stem_status = 'unsupported' \
+           AND duration_ms IS NOT NULL \
+           AND duration_ms <= ?",
+    )
+    .bind(cap_ms)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 /// One unit of stem-separation work: a normalized song whose `{id}_audio.flac`
 /// exists but whose stems are not yet generated.
 #[derive(Debug, Clone, PartialEq)]

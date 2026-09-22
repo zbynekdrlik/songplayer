@@ -20,8 +20,9 @@ pub mod queue_tiers; // #195 in-use-first stems queue tier inputs
 pub mod reader;
 pub mod separator;
 pub mod worker;
+mod worker_yield; // #184 G0.1 dub-priority tick-defer + mid-run yield decisions
 
-pub use control::KaraokeControl;
+pub use control::MixControl;
 pub use worker::StemWorker;
 
 /// Derive the two stem sidecar paths from a mix audio path. Deterministic and

@@ -393,7 +393,19 @@ app.put("/api/v1/playback/:id/mode", (_req, res) => {
 // `POST /api/v1/playback/{id}/seek {position_ms}` (moved off the old
 // `/api/v1/playlists/{id}/seek` route). A no-op 204 for the mock — specs that
 // need the body intercept it with `page.route` before it reaches here.
-app.post("/api/v1/playback/:id/seek", (_req, res) => {
+//
+// #184: when `seek_hold_ms` (a `/__mock/tick` knob) is > 0 AND the tick is
+// running, a seek does NOT snap the tick position — instead the tick keeps
+// broadcasting the STALE (pre-seek) position for `seek_hold_ms` and only THEN
+// jumps to the requested target, mirroring the pipeline's real post-seek
+// fast-forward latency. This lets a spec prove the seek bar DISPLAYS the target
+// across that latency window instead of jumping back to the stale live position.
+app.post("/api/v1/playback/:id/seek", (req, res) => {
+  const pid = Number(req.params.id);
+  const target = Number(req.body?.position_ms);
+  if (seekHoldMs > 0 && Number.isFinite(target)) {
+    pendingSeek = { playlist_id: pid, target_ms: target, applyAt: Date.now() + seekHoldMs };
+  }
   res.status(204).end();
 });
 
@@ -447,12 +459,12 @@ app.patch("/api/v1/settings", (req, res) => {
 });
 
 // Karaoke (#14, #177): live mode + vocal gain + stem progress + per-song
-// now-playing stems state. `/__mock/karaoke-last` exposes the last POSTed body
+// now-playing stems state. `/__mock/mix-last` exposes the last PATCH body
 // so specs can assert what the UI sent. `now_playing[]` binds the panel to the
 // SELECTED playlist's song — default: playlist 1's song is stems-READY so the
 // mode/fader controls are enabled (the #14/#186 specs rely on that). The #177
 // spec flips it via `/__mock/karaoke-now-playing`.
-let karaokeNowPlaying = [
+const DEFAULT_KARAOKE_NOW_PLAYING = [
   {
     playlist_id: 1,
     video_id: 1,
@@ -462,25 +474,64 @@ let karaokeNowPlaying = [
     queue_position: null,
   },
 ];
-let karaoke = {
-  mode: "full_mix",
-  vocal_gain: 0.3,
-  stems_pending: 2,
-  stems_done: 5,
-};
-let lastKaraokePost = null;
-app.get("/api/v1/karaoke", (_req, res) => {
-  res.json({ ...karaoke, now_playing: karaokeNowPlaying });
+let karaokeNowPlaying = DEFAULT_KARAOKE_NOW_PLAYING.map((e) => ({ ...e }));
+// #184 round G2: the ONE mixer console with TWO kind-scoped memories — a SONG
+// memory and a DUB memory. There is NO global "active kind": GET returns BOTH
+// memories as nested objects, and PATCH NAMES the memory it edits (`kind`,
+// required). Each strip (in the UI) reads the object for ITS item's kind, so
+// several outputs render different memories at once. `/__mock/mix-last` exposes the
+// last PATCH body; `/__mock/mix-reset` restores both memories (song (1,1,1), dub
+// (0,1,1)).
+let mixSong = { vokaly: 1.0, podklad: 1.0, dabing: 1.0 };
+let mixDub = { vokaly: 0.0, podklad: 1.0, dabing: 1.0 };
+let lastMixPatch = null;
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+app.get("/api/v1/mix", (_req, res) => {
+  res.json({
+    // The SONG memory (its dabing is unused, so it is not sent).
+    song: { vokaly: mixSong.vokaly, podklad: mixSong.podklad },
+    // The DUB memory (all three faders live).
+    dub: { vokaly: mixDub.vokaly, podklad: mixDub.podklad, dabing: mixDub.dabing },
+    stems_pending: 2,
+    stems_done: 5,
+    now_playing: karaokeNowPlaying,
+  });
 });
-app.post("/api/v1/karaoke", (req, res) => {
-  lastKaraokePost = req.body || {};
-  if (typeof lastKaraokePost.mode === "string") karaoke.mode = lastKaraokePost.mode;
-  if (typeof lastKaraokePost.vocal_gain === "number")
-    karaoke.vocal_gain = lastKaraokePost.vocal_gain;
-  res.status(204).end();
+app.patch("/api/v1/mix", (req, res) => {
+  const b = req.body || {};
+  // `kind` is required (400 without it); `dabing` is not a song fader.
+  if (b.kind !== "song" && b.kind !== "dub") {
+    res.status(400).json({ error: 'kind is required ("song" | "dub")' });
+    return;
+  }
+  if (b.kind === "song" && typeof b.dabing === "number") {
+    res.status(400).json({ error: "dabing is not a song fader" });
+    return;
+  }
+  lastMixPatch = b;
+  const m = b.kind === "dub" ? mixDub : mixSong;
+  for (const k of ["vokaly", "podklad", "dabing"]) {
+    if (typeof b[k] === "number" && !Number.isNaN(b[k])) m[k] = clamp01(b[k]);
+  }
+  const echo =
+    b.kind === "dub"
+      ? { kind: "dub", vokaly: m.vokaly, podklad: m.podklad, dabing: m.dabing }
+      : { kind: "song", vokaly: m.vokaly, podklad: m.podklad };
+  res.status(200).json(echo);
 });
-app.get("/__mock/karaoke-last", (_req, res) => {
-  res.json(lastKaraokePost || {});
+app.get("/__mock/mix-last", (_req, res) => {
+  res.json(lastMixPatch || {});
+});
+app.post("/__mock/mix-reset", (_req, res) => {
+  mixSong = { vokaly: 1.0, podklad: 1.0, dabing: 1.0 };
+  mixDub = { vokaly: 0.0, podklad: 1.0, dabing: 1.0 };
+  lastMixPatch = null;
+  // Also restore the default now_playing[] (playlist 1's stems-READY song): the
+  // kind-flip specs replace it with dub items, and a later spec file (karaoke.spec)
+  // reads the state line before its own afterEach restore — a leaked dub-only
+  // array made it show "Stemy — nič nehrá" (#184 round G1 CI).
+  karaokeNowPlaying = DEFAULT_KARAOKE_NOW_PLAYING.map((e) => ({ ...e }));
+  res.json({ ok: true });
 });
 // #177 admin: replace the now_playing[] array so a spec can drive the disabled
 // controls + enqueue button for an unavailable / failed / queued song.
@@ -511,7 +562,6 @@ app.get("/__mock/stems-enqueue-last", (_req, res) => {
 const DABING_PLAYLIST_ID = 500;
 let dubRows = [];
 let nextDubId = 9000;
-let lastDubMix = null;
 
 function chainStateFor(dubStatus) {
   // The mock only ever produces `queued` rows (the chain is D3/D4); the server
@@ -582,13 +632,8 @@ app.get("/__mock/dub-toggle-last", (_req, res) => {
   res.json({ toggle: lastDubToggle });
 });
 
-app.patch("/api/v1/videos/:id/dub-mix", (req, res) => {
-  let ratio = Number((req.body && req.body.ratio) ?? 1.0);
-  if (Number.isNaN(ratio)) ratio = 1.0;
-  ratio = Math.max(0, Math.min(1, ratio));
-  lastDubMix = { video_id: Number(req.params.id), ratio };
-  res.status(200).json({ ratio });
-});
+// #184 round G: the per-video dub-mix route is DELETED — the mixer is now the ONE
+// global console (`PATCH /api/v1/mix`, above).
 
 // #183 round 2: push a fully-formed DubRow so a test can assert a terminal state
 // (e.g. a dub-ready video WITHOUT stems — stem_status stays null — still renders
@@ -617,11 +662,7 @@ app.post("/__mock/dabing-add", (req, res) => {
 app.post("/__mock/dabing-reset", (_req, res) => {
   dubRows = [];
   nextDubId = 9000;
-  lastDubMix = null;
   res.json({ ok: true });
-});
-app.get("/__mock/dub-mix-last", (_req, res) => {
-  res.json(lastDubMix || {});
 });
 
 // Status
@@ -992,7 +1033,7 @@ app.post("/__mock/set-playing", (req, res) => {
 // the dub mixer adapter when the now-playing `video_id` for the playlist matches
 // a row in `GET /api/v1/dabing` `videos[]` — so `player.spec.ts`/`mixer.spec.ts`
 // dabing-add a ready dub row, then broadcast its `video_id` here to surface the
-// `dub-mix-fader` inside the Dabing Player. Body IS the NowPlaying `data`
+// mix faders inside the Dabing Player. Body IS the NowPlaying `data`
 // payload: `{playlist_id, video_id, song?, artist?, position_ms?, duration_ms?}`.
 app.post("/__mock/now-playing", (req, res) => {
   const data = req.body || {};
@@ -1030,6 +1071,12 @@ app.post("/__mock/now-playing", (req, res) => {
 // via `POST /__mock/tick`, turning it OFF again in afterEach.
 let tickItems = [];
 let tickEnabled = false;
+// #184: the post-seek fast-forward latency knob. When > 0, a `POST …/seek`
+// schedules `pendingSeek` and the tick keeps broadcasting the STALE position for
+// `seekHoldMs` before jumping to the requested target (see the seek handler +
+// the interval below). Default 0 = the seek applies on the next tick.
+let seekHoldMs = 0;
+let pendingSeek = null;
 
 function tickBroadcast(obj) {
   const msg = JSON.stringify(obj);
@@ -1059,6 +1106,10 @@ function tickNowPlaying(it) {
 app.post("/__mock/tick", (req, res) => {
   const b = req.body || {};
   tickEnabled = !!b.enabled;
+  // #184: the post-seek stale-position hold (0 = off). Reset any in-flight held
+  // seek on every tick toggle so no state leaks between specs.
+  seekHoldMs = typeof b.seek_hold_ms === "number" ? b.seek_hold_ms : 0;
+  pendingSeek = null;
   if (tickEnabled) {
     if (Array.isArray(b.items)) {
       tickItems = b.items.map((it) => ({
@@ -1105,6 +1156,13 @@ app.post("/__mock/tick", (req, res) => {
 // a no-op unless a spec turned tick mode on.
 setInterval(() => {
   if (!tickEnabled) return;
+  // #184: apply a held seek once its latency window elapses — the tick position
+  // jumps to the requested target (the pipeline's fast-forward has caught up).
+  if (pendingSeek && Date.now() >= pendingSeek.applyAt) {
+    const it = tickItems.find((t) => t.playlist_id === pendingSeek.playlist_id);
+    if (it) it.position_ms = Math.min(pendingSeek.target_ms, it.duration_ms);
+    pendingSeek = null;
+  }
   for (const it of tickItems) {
     it.position_ms = Math.min(it.position_ms + it.step_ms, it.duration_ms);
     tickNowPlaying(it);
@@ -1150,23 +1208,52 @@ server.on("upgrade", (req, socket, head) => {
 // #178: stream the canned fMP4 fixture — init segment first, then each fragment
 // with a small gap — so the card's MSE <video> reaches readyState>=3 and its
 // currentTime advances.
-previewWss.on("connection", (ws) => {
+previewWss.on("connection", (ws, req) => {
   const [init, ...frags] = PREVIEW_FMP4;
+  // #184 round F: an optional `?lag_ms=<N>` knob on the upgrade url inflates the
+  // beacon so the lag-readout E2E can force the "picture behind the wall" state.
+  // Mock-only — the production dashboard never adds the flag to preview.ws.
+  let lagMs = 0;
+  try {
+    const q = new URL(req.url, "http://localhost").searchParams.get("lag_ms");
+    if (q !== null && /^\d+$/.test(q)) lagMs = Number(q);
+  } catch {
+    // malformed upgrade url — no knob
+  }
   try {
     ws.send(init);
   } catch {
     return;
   }
   let i = 0;
+  let fragsSent = 0;
+  // #184 round F: the SAME 1 Hz lag beacon the real server sends — produced
+  // media time = (fragments sent) × 500 ms, plus the mock lag knob. Send one
+  // immediately so the readout appears without waiting a full second.
+  const sendBeacon = () => {
+    if (ws.readyState !== ws.OPEN) return;
+    try {
+      ws.send(JSON.stringify({ produced_ms: fragsSent * 500 + lagMs }));
+    } catch {
+      // client vanished mid-send — ignore.
+    }
+  };
+  sendBeacon();
   const timer = setInterval(() => {
     if (ws.readyState !== ws.OPEN || i >= frags.length) {
       clearInterval(timer);
       return;
     }
     ws.send(frags[i++]);
+    fragsSent++;
   }, 120);
-  ws.on("close", () => clearInterval(timer));
-  ws.on("error", () => clearInterval(timer));
+  const beacon = setInterval(sendBeacon, 1000);
+  const stop = () => {
+    clearInterval(timer);
+    clearInterval(beacon);
+  };
+  ws.on("close", stop);
+  ws.on("error", stop);
 });
 
 wss.on("connection", (ws) => {

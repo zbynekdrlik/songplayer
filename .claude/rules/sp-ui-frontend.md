@@ -159,6 +159,51 @@ view is then `'static`. (Alternatively `-> impl IntoView + use<>` to opt out of
 lifetime capture, but owned args are clearer.) Same trap for any sp-ui helper
 that takes `&SomeRow`/`&str` and returns a view used in a `<For>`/list child.
 
+## #184 round G2 — the strip edits the memory of ITS item's kind (SUPERSEDES G1's active kind)
+
+Round G2 removes the server's global "active kind": `GET /api/v1/mix` returns BOTH
+memories `{song, dub}`, and the `LiveMixer` strip reads the object for ITS OWN kind
+(its `is_dub` Memo, `dub_row.dub_status == "ready"`) and PATCHes with that `kind`.
+Several outputs render different memories at the same time; the UI never derives an
+"active" kind. `load` reads `v["dub"|"song"]` by `is_dub.get_untracked()`; the reload
+Effect still keys on BOTH `selected_song` AND `is_dub` (a kind flip whose video id is
+CONSTANT — the Dashboard's pinned video 1 — must still reload); both deps are Memos so
+a position tick never reloads (Rule 1). `send_patch` injects `kind` from `is_dub`.
+
+**Mock — TWO independent memories, no derived kind.** `GET /api/v1/mix` returns
+`{song:{vokaly,podklad}, dub:{vokaly,podklad,dabing}, …}`; `PATCH` REQUIRES `kind`
+(400 without; `dabing` on `song` → 400) and writes only the named memory (`mixKind()`
+/`activeMix()` are DELETED). The UI's `is_dub` / dab-fader visibility still read
+`store.now_playing` (the WS channel, `/__mock/now-playing`) + `store.dabing`, so an
+E2E that "plays a dub" sets the WS now-playing AND adds the ready dub row — but it no
+longer needs `karaoke-now-playing` to match for the mix `kind` (the UI picks the
+memory, the server no longer derives one). `/__mock/mix-reset` resets BOTH memories
+(song `(1,1,1)`, dub `(0,1,1)`). The Dashboard's item is PINNED to video 1 by the 2 s
+WS interval, so a Dashboard kind-flip test flips video 1's readiness (dabing-add /
+dabing-reset). The multi-output scenario in `dabing-mixer.spec.ts` opens a Dashboard
+(song) page and a Dabing (dub) page at once and proves a song PATCH leaves the dub
+strip untouched.
+
+## #184 round G — ONE `LiveMixer` (SUPERSEDES the two-adapter split below)
+
+`components/karaoke_mixer.rs` + `components/dub_mixer.rs` are **DELETED**. There is
+ONE adapter `components/live_mixer.rs::LiveMixer(playlist_id)` over the shared
+presentational `Mixer` — three independent faders (`mix-vokaly` / `mix-podklad` /
+`mix-dabing`) driven by `GET/PATCH /api/v1/mix`. The pure math is
+`sp_core::mixer_model` (`MixFaders`, `stream_gains_*`, `presets`,
+`apply_preset`, `preset_for_faders`, `fader_availability`) — NOT the old
+`song_gains_for_preset`/`ratio_to_faders`/`gains_for_preset`/`mixer_controls`
+(all deleted). Which faders are LIVE follows the playing item's stems + dub
+readiness (`fader_availability(stems_ready, dub_ready)`): `vokaly` with stems OR a
+no-stems dub; `podklad` only with stems (else locked "po separácii"); `dabing`
+shown+live only for a READY dub. A song preset PATCHes `{vokaly, podklad}` (dabing
+untouched); a dub preset PATCHes all three. `player.rs` renders ONE `<LiveMixer>`
+(the old `mixer_controls` + DubMixer/KaraokeMixer selection is gone). The #177
+`karaoke-now-playing` state-line id + the round-B in-flight drag guard are kept.
+The channel SHAPE (2 vs 3 faders) is Memo-gated inside `LiveMixer` so a position
+tick never rebuilds the strip. Read the historical section below only for the
+shared `Mixer`/`MixerChannel` presentational contract (still current).
+
 ## The modern Mixer component (#181 D2) — ONE presentational widget + thin adapters
 
 The stems (karaoke) AND dub-video controls are ONE component, not two. Do NOT add
@@ -629,3 +674,36 @@ Two gotchas that bit #184:
   feeds the raw `DubRow.stem_status` column (`done`/`failed`/`unsupported`/null),
   NOT the `stems_state` wire vocabulary — see `.claude/rules/dabing.md`. A mock
   that feeds a wire string (`"ready"`) hides this; the box carries `"done"`.
+
+## The seek bar holds the committed target until the live position catches up (#184)
+
+After a seek COMMIT the WS now-playing position is still the PRE-seek position
+for ~2-3 s until the pipeline's post-seek fast-forward delivers a frame near the
+target, so a display that reads the raw live position snaps the seek bar BACK to
+the stale position and then forward (the owner's "skocil spat a potom na
+miesto"). The fix is a pending-target DISPLAY HOLD:
+
+- The pure rule is `sp_core::seek_model::seek_display_ms(dragging, dragged, live,
+  pending: Option<PendingSeek{target_ms, committed_at_ms}>, now_ms)` (workspace-
+  tested + mutation-gated — sp-ui has no unit-test job). While a pending seek
+  exists AND `live < target − SEEK_CATCH_UP_MS` (1500) AND `now − committed_at <
+  SEEK_HOLD_MS` (5000) it returns the TARGET; otherwise `live`. Dragging still
+  wins over everything. Both boundaries are exclusive (`live == target − 1500` →
+  live; `now − committed_at == 5000` → live).
+- `player.rs`: `seek_pending: RwSignal<Option<PendingSeek>>` set at the commit
+  (`commit_seek`, once the value-dedup passes) with `now_ms()`, read by the
+  `prop:value` binding AND the position readout, and cleared by an Effect on the
+  live position + video id that applies the SAME pure rule (releases the hold
+  once live is within 1500 ms of the target or the 5 s hold expires) and abandons
+  it outright on a song change (its target belongs to the previous song). The
+  Effect reads `pending` UNTRACKED so neither the commit nor its own clear
+  re-triggers it.
+- **Clock without a new dependency:** `now_ms()` reads the already-present
+  `web-sys` `Performance` monotonic clock (`window().performance().now()` — the
+  `Performance` feature is enabled on web-sys). sp-ui has NO `js-sys` dep — never
+  reach for `js_sys::Date`; use the existing `web-sys` clock.
+- The mock proof is `e2e/player-seek-display.spec.ts` (chromium): the
+  `/__mock/tick` `seek_hold_ms` knob keeps the tick position STALE for N ms after
+  a seek POST, then jumps to the target; a real `page.mouse` drag asserts the
+  displayed value never drops below the target during the hold, then follows
+  live. The box proof is in `post-deploy-preview.spec.ts` (see `preview.md`).

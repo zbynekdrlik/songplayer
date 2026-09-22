@@ -18,7 +18,7 @@ use crate::lyrics::heavy_plan::{HeavyStepPlan, ProcessingMode};
 use crate::lyrics::idle_gate::{
     GateLog, WallActivity, should_defer, startup_floor_defers, wall_activity_from,
 };
-use crate::lyrics::idle_gate_abort::run_with_wall_abort;
+use crate::stems::worker_yield::{SepResult, Yield, run_separation_watched};
 
 /// #161: outcome of one stem-separation attempt run under the wall-abort
 /// watcher. Distinguishes a genuine failure (backoff-deferred) from a wall
@@ -31,17 +31,27 @@ enum StemStepResult {
     /// The wall became busy mid-run and the separator was killed — delete any
     /// partial stems and leave the DB row pending (no penalty).
     WallAborted(String),
+    /// A dub job needed the heavy slot and this separation yielded it (#184
+    /// G0.1) — the child was killed, but the #171 resumable work dir + any
+    /// partial stems are LEFT INTACT (the resume state), and the DB row is left
+    /// pending (no backoff), so it resumes from its segments the next tick no dub
+    /// is queued. Distinct from `WallAborted`, which DELETES the partial stems.
+    YieldedToDub(String),
 }
 
-/// Songs longer than this are not separated; marked terminal (`unsupported`).
-/// Lowered from 30 min to 15 min (2026-09-15, live finding on win-resolume):
-/// a 10-minute "warm-up" file pinned the heavy child's memory near its Job
-/// Object ceiling (see `heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES`) and
-/// crawled for 20+ minutes before timing out — such long files are not songs
-/// and karaoke stems for them are pointless.
-// Literal, not `15 * 60 * 1000` — cfg-independent arithmetic on a const is
+/// Videos longer than this are not separated; marked terminal (`unsupported`).
+/// Raised from 15 min to 120 min (round G0, owner ruling 21.9.2026: every video,
+/// incl. long dub videos, gets podklad/vokály stems — "na vsetko sa dava
+/// rozdelenie"). The old 15-min rationale no longer holds: it assumed whole-file
+/// separation that pinned the heavy child's memory near its Job Object ceiling
+/// plus a single GPU-sized timeout. Separation now runs in resumable 30 s windows
+/// (memory is per-segment, not per-file) and the timeout is duration-scaled (×4 on
+/// a CPU plan) with heavy work at reduced priority during playback — so a 36-min
+/// video is ~5-12 min of low-priority, resumable work. The 120-min ceiling is a
+/// sanity bound (a multi-hour livestream stays excluded), not a "songs only" limit.
+// Literal, not `120 * 60 * 1000` — cfg-independent arithmetic on a const is
 // invisible to the mutation runner (same reasoning as heavy_slot.rs's ceiling).
-pub(crate) const STEM_MAX_DURATION_MS: i64 = 900_000; // 15 min
+pub(crate) const STEM_MAX_DURATION_MS: i64 = 7_200_000; // 120 min
 
 /// How often the worker looks for the next song to separate.
 const TICK: Duration = Duration::from_secs(10);
@@ -114,14 +124,6 @@ pub(crate) fn stem_defer_decision(
             }
         }
     }
-}
-
-/// #162: whether the mid-job wall-abort watcher is armed for `plan`. Only a GPU
-/// plan is aborted mid-run — a CPU/IDLE separation cannot disturb the live wall,
-/// so it always runs to completion. Positive form (no `!` at the call site,
-/// whose deletion was a surviving mutant) so the decision is directly tested.
-pub(crate) fn separation_abort_armed(plan: &HeavyStepPlan) -> bool {
-    plan.is_gpu()
 }
 
 /// #162: the stem-separation subprocess timeout for `plan`. The base ceiling
@@ -221,6 +223,17 @@ impl StemWorker {
             return;
         }
 
+        // #184 G0.1: a dub job has priority on the heavy slot. While one is queued
+        // behind it, skip this tick — start no new separation (the row stays
+        // pending, no backoff, no DB write). The dub acquires within ~1 s, then
+        // the flag clears and the stem queue resumes.
+        if crate::stems::worker_yield::stem_tick_defers_to_dub(
+            crate::lyrics::heavy_slot::dub_slot_wanted(),
+        ) {
+            info!("stem worker: a dub job is waiting for the heavy slot — deferring this tick");
+            return;
+        }
+
         // #162 priority regime (same `lyrics_processing_mode` switch as the
         // lyrics worker). `idle-only` defers heavy separation while the wall is
         // in use (with idle-settle hysteresis); `low-priority` (default) NEVER
@@ -276,21 +289,21 @@ impl StemWorker {
             }
         };
 
-        // Terminal skip: a song too long for a sane stem pass (2026-09-15 —
-        // long "warm-up" files pin the heavy child's memory near its ceiling
-        // and are not songs anyway). Positive form via `stem_duration_too_long`
-        // so no `!` sits at this seam; the decision is the unit-tested
-        // `stem_duration_supported`. Done BEFORE the #167 startup floor: marking a
-        // row terminal-unsupported is a cheap DB write, not a heavy step, so it
-        // must not be deferred by the startup grace (it also skips the row for
-        // good, so deferring it just re-picks the same doomed row every tick).
+        // Terminal skip: a video past the 120-min sanity ceiling (round G0 — a
+        // multi-hour livestream would hold the heavy slot too long). Positive
+        // form via `stem_duration_too_long` so no `!` sits at this seam; the
+        // decision is the unit-tested `stem_duration_supported`. Done BEFORE the
+        // startup floor: marking a row terminal-unsupported is a cheap DB
+        // write, not a heavy step, so it must not be deferred by the startup
+        // grace (it also skips the row for good, so deferring it just re-picks
+        // the same doomed row every tick).
         if stem_duration_too_long(job.duration_ms) {
             // Raw milliseconds on purpose: a `/ 1000` here is log-only
             // arithmetic that no test can pin (surviving mutants).
             info!(
                 video_id = job.video_id,
                 duration_ms = job.duration_ms,
-                "stem worker: skipping video_id={} ({} ms > {} ms) — stems only for songs up to 15 min",
+                "stem worker: skipping video_id={} ({} ms > {} ms) — stems only for videos up to 120 min",
                 job.video_id,
                 job.duration_ms.unwrap_or(0),
                 STEM_MAX_DURATION_MS
@@ -353,22 +366,13 @@ impl StemWorker {
             return;
         }
 
-        // #162: separate under the priority regime. In `low-priority` while the
-        // wall is in use the plan is CPU-idle — it is NEVER aborted (a CPU/IDLE
-        // job cannot disturb the wall). A GPU plan (wall idle, or idle-only) runs
-        // under the mid-job abort watcher: on a busy wall the child is killed
-        // (`kill_on_drop`); in `low-priority` we re-run IMMEDIATELY on CPU, in
-        // `idle-only` we re-queue with NO penalty (`StemStepResult::WallAborted`
-        // → `stem_status` stays NULL). `separate_stems` is remote-free.
         // #177: publish the live in-flight signal for the karaoke panel's ⚙
         // "spracúvam" state; the guard clears it when this scope ends (success,
-        // failure, or wall-abort).
+        // failure, wall-abort, or dub-yield).
         let _in_flight = crate::stems::progress::begin(job.video_id);
         let plan = HeavyStepPlan::for_activity(mode, activity);
         // #162: the timeout for THIS plan — a cpu-idle plan gets the ×4 base so a
-        // slow CPU separation is not killed mid-run and retried forever. The GPU
-        // branch and the cpu-idle-direct branch both run under `plan`; the
-        // abort→CPU re-run below recomputes its own cpu-idle timeout.
+        // slow CPU separation is not killed mid-run and retried forever.
         let timeout = separation_timeout(&plan, job.duration_ms);
         info!(
             video_id = job.video_id,
@@ -381,68 +385,13 @@ impl StemWorker {
                 "idle"
             }
         );
-        let step = if separation_abort_armed(&plan) {
-            // GPU plan: run under the mid-job wall-abort watcher (positive form —
-            // the arming decision is the unit-tested `separation_abort_armed`).
-            match run_with_wall_abort(
-                crate::stems::separator::separate_stems(
-                    &python,
-                    &script_path,
-                    &self.models_dir,
-                    &audio_path,
-                    &vocals_out,
-                    &instrumental_out,
-                    &stem_work_dir,
-                    timeout,
-                    gpu_mem.as_deref(),
-                    &plan,
-                ),
-                true,
-                || wall_activity_from(self.ndi_health_registry.as_ref(), self.obs_state.as_ref()),
-            )
-            .await
-            {
-                Ok(Ok(())) => StemStepResult::Done,
-                Ok(Err(e)) => StemStepResult::Failed(e),
-                Err(abort) => match mode {
-                    ProcessingMode::LowPriority => {
-                        // The GPU spawn aborted; re-run on CPU. The cpu-idle plan
-                        // is several times slower, so it needs the ×4 timeout, NOT
-                        // the GPU-sized `timeout` bound above (#162).
-                        let cpu_plan = HeavyStepPlan::cpu_idle();
-                        let cpu_timeout = separation_timeout(&cpu_plan, job.duration_ms);
-                        info!(
-                            video_id = job.video_id,
-                            "stem worker: heavy step separation re-run mode=cpu-idle \
-                             timeout={}s after GPU abort ({})",
-                            cpu_timeout.as_secs(),
-                            abort.detail
-                        );
-                        match crate::stems::separator::separate_stems(
-                            &python,
-                            &script_path,
-                            &self.models_dir,
-                            &audio_path,
-                            &vocals_out,
-                            &instrumental_out,
-                            &stem_work_dir,
-                            cpu_timeout,
-                            gpu_mem.as_deref(),
-                            &cpu_plan,
-                        )
-                        .await
-                        {
-                            Ok(()) => StemStepResult::Done,
-                            Err(e) => StemStepResult::Failed(e),
-                        }
-                    }
-                    ProcessingMode::IdleOnly => StemStepResult::WallAborted(abort.detail),
-                },
-            }
-        } else {
-            // CPU-idle plan: never aborted (a CPU/IDLE job cannot disturb the
-            // wall), so run the separator directly to completion.
-            match crate::stems::separator::separate_stems(
+        // #184 G0.1: run the separation under the dub-yield watcher for EVERY plan
+        // — a queued dub preempts ANY plan (within ~1 s), and a busy wall still
+        // preempts a GPU plan (#161, 2-consecutive-busy debounce; a cpu-idle plan
+        // cannot disturb the wall so it is never wall-yielded). `separate_stems`
+        // is remote-free.
+        let step = match run_separation_watched(
+            crate::stems::separator::separate_stems(
                 &python,
                 &script_path,
                 &self.models_dir,
@@ -453,12 +402,68 @@ impl StemWorker {
                 timeout,
                 gpu_mem.as_deref(),
                 &plan,
-            )
-            .await
-            {
-                Ok(()) => StemStepResult::Done,
-                Err(e) => StemStepResult::Failed(e),
-            }
+            ),
+            plan,
+            || wall_activity_from(self.ndi_health_registry.as_ref(), self.obs_state.as_ref()),
+        )
+        .await
+        {
+            SepResult::Done => StemStepResult::Done,
+            SepResult::Failed(e) => StemStepResult::Failed(e),
+            // A dub needed the slot — leave the row + resume state intact (#171).
+            SepResult::Yielded {
+                reason: Yield::Dub,
+                detail,
+            } => StemStepResult::YieldedToDub(detail),
+            // A GPU separation aborted because the wall went busy (only a GPU plan
+            // yields Wall). Low-priority re-runs on CPU (also watched, so a dub can
+            // still preempt); idle-only re-queues with NO penalty (#161).
+            SepResult::Yielded {
+                reason: Yield::Wall,
+                detail,
+            } => match mode {
+                ProcessingMode::LowPriority => {
+                    let cpu_plan = HeavyStepPlan::cpu_idle();
+                    let cpu_timeout = separation_timeout(&cpu_plan, job.duration_ms);
+                    info!(
+                        video_id = job.video_id,
+                        "stem worker: heavy step separation re-run mode=cpu-idle \
+                         timeout={}s after GPU abort ({})",
+                        cpu_timeout.as_secs(),
+                        detail
+                    );
+                    match run_separation_watched(
+                        crate::stems::separator::separate_stems(
+                            &python,
+                            &script_path,
+                            &self.models_dir,
+                            &audio_path,
+                            &vocals_out,
+                            &instrumental_out,
+                            &stem_work_dir,
+                            cpu_timeout,
+                            gpu_mem.as_deref(),
+                            &cpu_plan,
+                        ),
+                        cpu_plan,
+                        || {
+                            wall_activity_from(
+                                self.ndi_health_registry.as_ref(),
+                                self.obs_state.as_ref(),
+                            )
+                        },
+                    )
+                    .await
+                    {
+                        SepResult::Done => StemStepResult::Done,
+                        SepResult::Failed(e) => StemStepResult::Failed(e),
+                        // A cpu-idle re-run can only yield to a dub (`yield_reason`
+                        // never returns Wall for a CPU plan); resume no-penalty.
+                        SepResult::Yielded { detail, .. } => StemStepResult::YieldedToDub(detail),
+                    }
+                }
+                ProcessingMode::IdleOnly => StemStepResult::WallAborted(detail),
+            },
         };
         self.record_stem_result(&job, &vocals_out, &instrumental_out, step)
             .await;
@@ -529,6 +534,19 @@ impl StemWorker {
                     video_id = job.video_id,
                     detail = %detail,
                     "stem worker: aborted heavy step — wall became busy — re-queued no-penalty (#161)"
+                );
+            }
+            StemStepResult::YieldedToDub(detail) => {
+                // #184 G0.1: leave EVERYTHING as-is — the #171 resumable segments
+                // in the work dir are the resume state, and the DB row stays
+                // pending (stem_status NULL, stem_attempts unchanged, no
+                // stem_next_attempt_at), so the selector re-picks it the moment no
+                // dub is queued. Distinct from WallAborted, which DELETES the
+                // partial stems.
+                info!(
+                    video_id = job.video_id,
+                    detail = %detail,
+                    "stem worker: yielded the heavy slot to a dub job"
                 );
             }
         }
@@ -691,6 +709,67 @@ mod tests {
         );
     }
 
+    /// #184 G0.1: a dub-yield leaves the RESUME STATE intact — partial stems +
+    /// the #171 work dir are KEPT, and the DB row stays pending (stem_status
+    /// NULL, stem_attempts unchanged, no stem_next_attempt_at) so the selector
+    /// re-picks it. Distinct from WallAborted, which DELETES the partial stems.
+    #[tokio::test]
+    async fn yield_to_dub_keeps_resume_state_and_leaves_row_pending() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        seed_pending_stem_row(&pool, 1).await;
+        let dir = tempfile::tempdir().unwrap();
+        // Partial stem outputs + a resumable work dir the yield must PRESERVE.
+        let vocals = dir.path().join("v.flac");
+        let instr = dir.path().join("i.flac");
+        std::fs::write(&vocals, b"partial").unwrap();
+        std::fs::write(&instr, b"partial").unwrap();
+        let work_dir = dir.path().join("yt_stem_stemsep");
+        std::fs::create_dir_all(&work_dir).unwrap();
+        std::fs::write(work_dir.join("seg_000.wav"), b"seg").unwrap();
+        let worker = test_worker(pool.clone(), dir.path().to_path_buf());
+
+        worker
+            .record_stem_result(
+                &stem_job(1),
+                &vocals,
+                &instr,
+                StemStepResult::YieldedToDub("dub job waiting for the heavy slot".into()),
+            )
+            .await;
+
+        let (status, attempts, next): (Option<String>, i64, Option<String>) = sqlx::query_as(
+            "SELECT stem_status, stem_attempts, stem_next_attempt_at FROM videos WHERE id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(status.is_none(), "a dub-yield must leave stem_status NULL");
+        assert_eq!(attempts, 0, "a dub-yield must not increment stem_attempts");
+        assert!(
+            next.is_none(),
+            "a dub-yield must set no stem_next_attempt_at (no backoff)"
+        );
+        assert!(
+            vocals.exists(),
+            "the partial vocals stem must be KEPT — the #171 resume state"
+        );
+        assert!(instr.exists(), "the partial instrumental stem must be KEPT");
+        assert!(
+            work_dir.join("seg_000.wav").exists(),
+            "the resumable work dir must be KEPT"
+        );
+
+        let next_job = crate::db::models_stems::get_next_video_for_stems(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            next_job.map(|j| j.video_id),
+            Some(1),
+            "the yielded row must be re-picked (still pending)"
+        );
+    }
+
     /// A GENUINE separation failure still records the backoff deferral —
     /// distinct from a wall abort.
     #[tokio::test]
@@ -740,18 +819,23 @@ mod tests {
         test_worker(pool, dir.to_path_buf())
     }
 
-    /// A 20-minute row (over the 15-min `STEM_MAX_DURATION_MS` cap) must be
+    /// A 121-minute row (over the 120-min `STEM_MAX_DURATION_MS` cap) must be
     /// marked terminal `unsupported`, with no backoff bookkeeping touched —
     /// mirrors the exact-boundary coverage in `stem_duration_supported`'s pure
     /// tests (`worker_plan_tests.rs`), but proves the worker's real spawn seam
     /// (`stem_duration_too_long`) actually gates on it.
     #[tokio::test]
     async fn process_next_marks_overlong_song_unsupported() {
+        // This test reaches the #184 G0.1 dub tick-defer (stub venv passes the
+        // venv gate), so serialize + clear the process-global dub flag so a
+        // parallel flag test can't make it defer instead of marking the row.
+        let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
+        crate::lyrics::heavy_slot::set_dub_slot_wanted(false);
         let pool = crate::db::create_memory_pool().await.unwrap();
         crate::db::run_migrations(&pool).await.unwrap();
         seed_pending_stem_row(&pool, 1).await;
         sqlx::query("UPDATE videos SET duration_ms = ? WHERE id = 1")
-            .bind(1_200_000i64) // 20 min
+            .bind(7_260_000i64) // 121 min
             .execute(&pool)
             .await
             .unwrap();
@@ -768,7 +852,7 @@ mod tests {
         assert_eq!(
             status.as_deref(),
             Some("unsupported"),
-            "a 20-min song must be marked terminal unsupported"
+            "a 121-min song must be marked terminal unsupported"
         );
         assert_eq!(
             attempts, 0,
@@ -780,7 +864,7 @@ mod tests {
     /// No stub venv is provided here — `process_next` stops at the missing
     /// venv-python gate before reaching the duration check at all (same as
     /// `missing_venv_python_warns_and_skips_without_touching_db`); that is
-    /// fine, since the exact 15-min boundary is already proven by the pure
+    /// fine, since the exact 120-min boundary is already proven by the pure
     /// `stem_duration_supported` tests. This just proves a normal row is left
     /// pending, never spuriously marked unsupported.
     #[tokio::test]

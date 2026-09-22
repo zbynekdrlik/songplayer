@@ -345,9 +345,14 @@ fn fragment_accumulator_over_16mib_poisons() {
 fn reset_clears_cached_init_so_a_late_joiner_waits_for_the_new_one() {
     let relay = FragmentRelay::new(8);
     relay.ingest(RelayChunk::Init(b"INIT_A".to_vec()));
+    relay.ingest(RelayChunk::Fragment(vec![1]));
+    relay.ingest(RelayChunk::Fragment(vec![2]));
     assert_eq!(relay.init().as_deref(), Some(&b"INIT_A"[..]));
+    assert_eq!(relay.produced_ms(), 1000);
     relay.reset();
     assert!(relay.init().is_none(), "reset clears the cached init");
+    // #184 round F: reset also clears the media-time counter at the boundary.
+    assert_eq!(relay.produced_ms(), 0, "reset zeroes produced_ms");
     // A new child's init replaces it (a late joiner now gets the NEW one).
     relay.ingest(RelayChunk::Init(b"INIT_B".to_vec()));
     assert_eq!(relay.init().as_deref(), Some(&b"INIT_B"[..]));
@@ -358,10 +363,14 @@ fn close_drops_the_sender_so_viewers_see_closed_and_clears_init() {
     use tokio::sync::broadcast::error::TryRecvError;
     let relay = FragmentRelay::new(8);
     relay.ingest(RelayChunk::Init(vec![1, 2, 3]));
+    relay.ingest(RelayChunk::Fragment(vec![4]));
     let mut rx = relay.subscribe();
     assert!(relay.init().is_some());
+    assert_eq!(relay.produced_ms(), 500);
     relay.close();
     assert!(relay.init().is_none(), "close clears the cached init");
+    // #184 round F: close also clears the media-time counter.
+    assert_eq!(relay.produced_ms(), 0, "close zeroes produced_ms");
     // The connected viewer's receiver now reports Closed (its sender dropped).
     match rx.try_recv() {
         Err(TryRecvError::Closed) => {}
@@ -389,5 +398,49 @@ fn relay_drops_a_lagging_viewer_rather_than_blocking() {
         other => panic!("expected Lagged, got {other:?}"),
     }
     // After the lag it resyncs to the most recent fragments still buffered.
+    assert!(rx.try_recv().is_ok());
+}
+
+#[test]
+fn produced_ms_advances_500_per_fragment_and_resets_on_init() {
+    // #184 round F: produced_ms = (fragments since the last Init) × 500 ms — the
+    // media time the child has produced, for the lag beacon. Exact values kill
+    // the ×N multiplier mutant AND the reset-on-Init mutant.
+    let relay = FragmentRelay::new(4);
+    assert_eq!(
+        relay.produced_ms(),
+        0,
+        "nothing produced before any fragment"
+    );
+    relay.ingest(RelayChunk::Init(vec![1]));
+    assert_eq!(relay.produced_ms(), 0, "Init leaves the counter at 0");
+    relay.ingest(RelayChunk::Fragment(vec![9]));
+    assert_eq!(relay.produced_ms(), 500, "one fragment = 500 ms of media");
+    relay.ingest(RelayChunk::Fragment(vec![9]));
+    assert_eq!(relay.produced_ms(), 1000, "two fragments = 1000 ms");
+    // A new child's Init resets the media timeline (and the counter) to 0.
+    relay.ingest(RelayChunk::Init(vec![2]));
+    assert_eq!(relay.produced_ms(), 0, "a new Init resets produced_ms");
+    relay.ingest(RelayChunk::Fragment(vec![9]));
+    assert_eq!(relay.produced_ms(), 500, "and counting resumes from 0");
+}
+
+#[test]
+fn relay_at_the_production_backlog_lags_a_viewer_five_behind() {
+    // #184 round F: at the shipped backlog of 4 fragments (RELAY_CAPACITY, = 2 s),
+    // a viewer that falls 5 fragments behind without draining is dropped
+    // (`Lagged`) and resyncs — it can never sit a full 32-s backlog behind the
+    // wall. Same shape as the `new(2)` tiny-backlog test above, at the real cap.
+    use tokio::sync::broadcast::error::TryRecvError;
+    let relay = FragmentRelay::new(4);
+    let mut rx = relay.subscribe();
+    for i in 0..5u8 {
+        relay.ingest(RelayChunk::Fragment(vec![i]));
+    }
+    match rx.try_recv() {
+        Err(TryRecvError::Lagged(n)) => assert!(n >= 1, "at least one fragment dropped"),
+        other => panic!("expected Lagged at cap 4 with 5 sent, got {other:?}"),
+    }
+    // It resyncs to the newest fragments still in the 4-deep backlog.
     assert!(rx.try_recv().is_ok());
 }

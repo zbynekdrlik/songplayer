@@ -40,6 +40,8 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (24, MIGRATION_V24),
     (25, MIGRATION_V25),
     (26, MIGRATION_V26),
+    (27, MIGRATION_V27),
+    (28, MIGRATION_V28),
 ];
 
 const MIGRATION_V1: &str = "
@@ -392,6 +394,52 @@ ALTER TABLE videos ADD COLUMN dub_requested_at TEXT;
 ALTER TABLE videos ADD COLUMN stem_manual_priority INTEGER NOT NULL DEFAULT 0;
 ";
 
+// V27 (#184 round G) — the ONE global live mixer console supersedes the old
+// karaoke MODE + per-video dub ratio. Three new `settings` faders `mix_vokaly` /
+// `mix_podklad` / `mix_dabing` are DERIVED from the old `karaoke_mode` +
+// `karaoke_vocal_gain` settings (full_mix → (1,1,1); karaoke_low → (vg,1,1);
+// vocals_only → (1,0,1); instrumental_only → (0,1,1); dabing always 1), then the
+// two old keys are deleted and the per-video `videos.dub_mix_ratio` column is
+// dropped (SQLite ≥ 3.35 `DROP COLUMN`; bundled libsqlite3-sys is ≥ 3.46). The WASM
+// UI is the only client, so the in-repo API/column break is acceptable
+// (mvp-philosophy). No existing data other than the two keys + the one column is
+// touched.
+const MIGRATION_V27: &str = "
+INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_vokaly',
+  CASE (SELECT value FROM settings WHERE key = 'karaoke_mode')
+    WHEN 'karaoke_low' THEN COALESCE((SELECT value FROM settings WHERE key = 'karaoke_vocal_gain'), '0.3')
+    WHEN 'vocals_only' THEN '1'
+    WHEN 'instrumental_only' THEN '0'
+    ELSE '1'
+  END);
+INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_podklad',
+  CASE (SELECT value FROM settings WHERE key = 'karaoke_mode')
+    WHEN 'vocals_only' THEN '0'
+    ELSE '1'
+  END);
+INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_dabing', '1');
+DELETE FROM settings WHERE key IN ('karaoke_mode', 'karaoke_vocal_gain');
+ALTER TABLE videos DROP COLUMN dub_mix_ratio;
+";
+
+// V28 (#184 round G1) — the ONE mixer console gains a per-KIND memory: the single
+// global `mix_vokaly` / `mix_podklad` / `mix_dabing` (V27) split into a SONG memory
+// and a DUB memory. The SONG pair is DERIVED from V27's `mix_vokaly` / `mix_podklad`
+// (the operator's last global mix becomes the song mix); the DUB triple is SEEDED
+// with the `Len dabing` default `(0, 1, 1)` — a dub video starts dub-only until
+// mixed otherwise, and never doubles the original voice. The three old global keys
+// are then deleted. Only settings rows are touched.
+const MIGRATION_V28: &str = "
+INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_song_vokaly',
+  COALESCE((SELECT value FROM settings WHERE key = 'mix_vokaly'), '1'));
+INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_song_podklad',
+  COALESCE((SELECT value FROM settings WHERE key = 'mix_podklad'), '1'));
+INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_dub_vokaly', '0');
+INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_dub_podklad', '1');
+INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_dub_dabing', '1');
+DELETE FROM settings WHERE key IN ('mix_vokaly', 'mix_podklad', 'mix_dabing');
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -536,6 +584,14 @@ mod tests_v24;
 #[path = "mod_tests_v26.rs"]
 #[cfg(test)]
 mod tests_v26;
+
+#[path = "mod_tests_v27.rs"]
+#[cfg(test)]
+mod tests_v27;
+
+#[path = "mod_tests_v28.rs"]
+#[cfg(test)]
+mod tests_v28;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

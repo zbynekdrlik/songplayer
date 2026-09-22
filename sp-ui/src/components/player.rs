@@ -12,13 +12,12 @@
 
 use leptos::prelude::*;
 use serde::Serialize;
-use sp_core::mixer_model::mixer_controls;
 use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
-use sp_core::seek_model::{format_position, seek_display_ms, seek_target_ms};
+use sp_core::preview_lag::preview_lag_display;
+use sp_core::seek_model::{PendingSeek, format_position, seek_display_ms, seek_target_ms};
 
 use crate::api;
-use crate::components::dub_mixer::DubMixer;
-use crate::components::karaoke_mixer::KaraokeMixer;
+use crate::components::live_mixer::LiveMixer;
 use crate::components::lyrics_view::LyricsView;
 use crate::components::preview_video::PreviewVideo;
 use crate::store::DashboardStore;
@@ -26,6 +25,19 @@ use crate::store::DashboardStore;
 #[derive(Serialize)]
 struct SetModeBody {
     mode: String,
+}
+
+/// Current wall-clock time in ms from the browser's monotonic `performance`
+/// clock (immune to system-clock jumps), used to age out a pending seek's
+/// display hold (#184). sp-ui has no `js-sys` dep, so this reads the already-
+/// present `web-sys` `Performance` clock; `0` if the clock is unavailable (never
+/// in the running CSR app — the display rule just falls back to the live
+/// position, which is the safe default).
+fn now_ms() -> u64 {
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| p.now())
+        .unwrap_or(0.0) as u64
 }
 
 #[component]
@@ -48,6 +60,9 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     };
     let artist = move || np().map(|i| i.artist).unwrap_or_default();
     let position = move || np().map(|i| i.position_ms).unwrap_or(0);
+    // #184: the currently-playing video id — a song change abandons a pending
+    // seek (its target belongs to the previous song).
+    let video_id = move || np().map(|i| i.video_id).unwrap_or(0);
     let duration = move || np().map(|i| i.duration_ms).unwrap_or(0);
     let state = move || np().map(|i| i.state).unwrap_or_default();
     let transport = move || np().map(|i| i.transport).unwrap_or_default();
@@ -155,6 +170,12 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // the initial 0 ms — `seek_drag_ms` starts at 0. `on:change` reads this latch
     // and is a no-op when it is false.
     let seek_dirty = RwSignal::new(false);
+    // #184: the committed-but-not-yet-honoured seek. Set on the commit below;
+    // the seek bar DISPLAYS its target (never the stale live position) until the
+    // pipeline's post-seek fast-forward catches up, so the bar no longer jumps
+    // back to the pre-seek position and then forward (the owner's "skocil spat a
+    // potom na miesto"). Cleared by the Effect below.
+    let seek_pending = RwSignal::new(None::<PendingSeek>);
     let do_seek = move |ms: u64| {
         leptos::task::spawn_local(async move {
             let r = api::seek_playlist(pid, ms).await;
@@ -165,30 +186,63 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
         seek_dirty.set(false);
         if seek_committed.get_untracked() != Some(ms) {
             seek_committed.set(Some(ms));
+            // #184: remember the target + when we committed so the display holds
+            // it while the live position is still stale.
+            seek_pending.set(Some(PendingSeek {
+                target_ms: ms,
+                committed_at_ms: now_ms(),
+            }));
             do_seek(ms);
         }
     };
+    // #184: release the pending display hold the moment the SAME pure rule the
+    // display uses stops returning the target — the live position has caught up
+    // to within SEEK_CATCH_UP_MS of it, or the 5 s hold expired (a seek the
+    // pipeline could not honour, e.g. at EOS). A song change abandons the pending
+    // seek outright (its target belongs to the previous song). Reads `pending`
+    // untracked so neither the commit nor this Effect's own clear re-triggers it;
+    // it tracks only the live position + video id (both fire on the WS tick).
+    Effect::new(move |prev_vid: Option<i64>| -> i64 {
+        let vid = video_id();
+        let live = position();
+        if prev_vid.is_some_and(|p| p != vid) {
+            seek_pending.set(None);
+        } else if let Some(p) = seek_pending.get_untracked() {
+            if seek_display_ms(false, 0, live, Some(p), now_ms()) != p.target_ms {
+                seek_pending.set(None);
+            }
+        }
+        vid
+    });
     let seek_back = move |_| do_seek(seek_target_ms(position(), -10_000, duration()));
     let seek_fwd = move |_| do_seek(seek_target_ms(position(), 10_000, duration()));
 
     // --- preview (click-to-start; torn down when the pipeline stops decoding) ---
     let preview_on = RwSignal::new(false);
+    // #184 round F: the latest picture lag (seconds behind the wall) the preview
+    // shim reported over the 1 Hz beacon; the readout shows only at ≥ 3 s.
+    let preview_lag = RwSignal::new(0.0_f64);
+    // Fold the raw shim reports (which arrive ~4×/s from the pump tick) into the
+    // DISPLAYED readout (Option<i64>). A Memo only propagates when that value
+    // changes, so the span re-renders on a real change, not on every tick — the
+    // shared sp-ui rule that a slot closure reads a Memo, not a chatty signal.
+    let preview_lag_readout = Memo::new(move |_| {
+        if preview_on.get() {
+            preview_lag_display(preview_lag.get())
+        } else {
+            None
+        }
+    });
     Effect::new(move |_| {
         if !is_decoding.get() {
             preview_on.set(false);
         }
     });
 
-    // --- mixer slot: chosen from the PLAYING item, collapsed to a Memo so the
-    // frequent position ticks do NOT remount the mixer (only a change of the
-    // playing video, or of its dub row, re-renders it). A dub row → the dub
-    // adapter; a stems-capable song → the karaoke adapter; BOTH when both apply
-    // (#184 B2). `store.dabing` is now app-polled, so the dub adapter appears on
-    // every page — Dashboard / Live too, not only after visiting /dabing.
-    let mixer_choice = Memo::new(move |_| {
-        let vid = store.now_playing.get().get(&pid).map(|i| i.video_id);
-        vid.and_then(|v| store.dabing.get().into_iter().find(|r| r.video_id == v))
-    });
+    // --- mixer slot: the ONE LiveMixer (#184 round G). It reads the playing item
+    // (its stems + dub readiness) from `store.now_playing` + the app-wide
+    // `store.dabing` itself, so it renders identically on every page and stays
+    // mounted across position ticks (its channel shape is Memo-gated internally).
 
     view! {
         <div class="player" data-testid="player">
@@ -240,7 +294,13 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                     max=move || duration().to_string()
                     step="1000"
                     prop:value=move || {
-                        seek_display_ms(seek_dragging.get(), seek_drag_ms.get(), position())
+                        seek_display_ms(
+                            seek_dragging.get(),
+                            seek_drag_ms.get(),
+                            position(),
+                            seek_pending.get(),
+                            now_ms(),
+                        )
                             .to_string()
                     }
                     prop:disabled=move || !has_content.get()
@@ -302,6 +362,8 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                                 seek_dragging.get(),
                                 seek_drag_ms.get(),
                                 position(),
+                                seek_pending.get(),
+                                now_ms(),
                             );
                             format!("{} / {}", format_position(p), format_position(duration()))
                         }}
@@ -377,6 +439,7 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                             <PreviewVideo
                                 playlist_id=pid
                                 on_stop=Callback::new(move |_| preview_on.set(false))
+                                on_lag=Callback::new(move |s: f64| preview_lag.set(s))
                             />
                         }
                             .into_any()
@@ -387,7 +450,10 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                                     type="button"
                                     class="preview-btn preview-start-btn"
                                     data-testid="preview-start"
-                                    on:click=move |_| preview_on.set(true)
+                                    on:click=move |_| {
+                                        preview_lag.set(0.0);
+                                        preview_on.set(true);
+                                    }
                                 >
                                     "▶ Živý náhľad"
                                 </button>
@@ -395,6 +461,21 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                         }
                             .into_any()
                     }
+                }}
+                // #184 round F: the lag readout — shown only while the preview is
+                // mounted AND the picture is ≥ 3 s behind the wall (the pure
+                // sp_core threshold), so the owner sees at a glance that the
+                // PICTURE is late, not the control he just moved.
+                {move || {
+                    preview_lag_readout
+                        .get()
+                        .map(|n| {
+                            view! {
+                                <span class="preview-lag" data-testid="preview-lag">
+                                    {format!("náhľad mešká {n} s")}
+                                </span>
+                            }
+                        })
                 }}
             </div>
 
@@ -411,35 +492,9 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                         }
                             .into_any()
                     } else {
-                        // #184 B2: render the dub mixer and/or the karaoke mixer
-                        // from the pure predicate. A dub video shows the dub
-                        // mixer; the karaoke mixer shows for a stems-capable dub
-                        // AND for any non-dub song (the plain-song default —
-                        // KaraokeMixer self-locks when the song has no stems).
-                        let choice = mixer_choice.get();
-                        let controls = mixer_controls(
-                            choice.as_ref().map(|r| r.dub_status.as_str()),
-                            choice.as_ref().and_then(|r| r.stem_status.as_deref()),
-                        );
-                        let show_karaoke = controls.karaoke || !controls.dub;
-                        let dub_panel = choice
-                            .filter(|_| controls.dub)
-                            .map(|row| {
-                                view! {
-                                    <DubMixer
-                                        video_id=row.video_id
-                                        title=row.title
-                                        dub_status=row.dub_status
-                                        dub_mix_ratio=row.dub_mix_ratio
-                                        stem_status=row.stem_status
-                                    />
-                                }
-                            });
-                        view! {
-                            {dub_panel}
-                            {show_karaoke.then(|| view! { <KaraokeMixer playlist_id=pid /> })}
-                        }
-                            .into_any()
+                        // #184 round G: the ONE LiveMixer follows the playing item
+                        // (song stems / dub) itself — one strip, every page.
+                        view! { <LiveMixer playlist_id=pid /> }.into_any()
                     }
                 }}
             </div>

@@ -29,6 +29,11 @@ test_tool = "nextest"
 exclude_re = [
   # -- integration-only orchestration / external shell-outs / HTTP --
   'sp-server/src/lib.rs',                 # orchestration glue, integration-tested only
+  # engine_dispatch.rs::dispatch: the EngineCommand match extracted out of lib.rs
+  #   for the 1000-line cap — every arm is a one-line delegation to a
+  #   PlaybackEngine method; the decisions live in those methods (unit-tested)
+  #   and the API tests drive the commands end to end. Same class as lib.rs.
+  'sp-server/src/engine_dispatch\.rs',    # orchestration glue (the lib.rs match, relocated)
   'sp-server/src/obs/',                   # requires live OBS WebSocket
   'sp-server/src/downloader/',            # shells out to yt-dlp
   'sp-server/src/reprocess/',             # requires live Gemini API
@@ -56,6 +61,13 @@ exclude_re = [
   #   placement_for}, child::live_translate_args + the summary JSON, and the D3 subtitle
   #   path subtitles::transcripts_to_track + subtitles_store (#182).
   'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::synthesize',
+  # dabing/worker.rs::ensure_script: materialises the embedded Python tool scripts
+  #   (dub_worker.py + dub_voice_check.py) into the box's cache/tools dir — pure
+  #   async fs I/O, no Linux unit test constructs a DubWorker to drive it (same
+  #   class as synthesize). The one DECISION it carries — WHICH scripts ship — is
+  #   the pure free fn `embedded_tool_scripts()`, which stays mutation-covered by
+  #   `embedded_tool_scripts_ship_worker_and_voice_check` (#184 round E).
+  'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::ensure_script',
   # api/preview.rs::handle_preview_ws: the WebSocket session of the live preview —
   #   an upgraded socket + a running ffmpeg encoder child + the fragment relay.
   #   No Linux unit test can drive it (same class as api/websocket above); its

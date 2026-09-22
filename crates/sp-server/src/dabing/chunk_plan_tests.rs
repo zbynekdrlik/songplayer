@@ -6,11 +6,21 @@ fn sil(start_ms: u64, end_ms: u64) -> Silence {
     Silence { start_ms, end_ms }
 }
 
+/// The pre-round-E 8-minute ceiling — these scenarios exercise the splitting
+/// algorithm at a large ceiling and pass it explicitly so they are independent
+/// of the default (which round E lowered to a 2-minute session cap).
+fn cfg_8min() -> ChunkPlanConfig {
+    ChunkPlanConfig {
+        min_pause_ms: MIN_PAUSE_MS,
+        max_chunk_ms: 480_000,
+    }
+}
+
 // ── plan_chunks ───────────────────────────────────────────────────────────────
 
 #[test]
 fn short_audio_is_a_single_chunk() {
-    let cfg = ChunkPlanConfig::default();
+    let cfg = cfg_8min();
     // Well under 8 min, with pauses that must be IGNORED (no split needed).
     let sils = [sil(60_000, 61_000), sil(120_000, 121_000)];
     let chunks = plan_chunks(&sils, 200_000, &cfg);
@@ -30,7 +40,7 @@ fn empty_audio_is_no_chunks() {
 
 #[test]
 fn splits_at_the_latest_qualifying_pause_within_the_ceiling() {
-    let cfg = ChunkPlanConfig::default(); // max 480_000, min pause 700
+    let cfg = cfg_8min(); // max 480_000, min pause 700
     // 12 min of audio with pauses at 5 min and 7 min. From start=0 the latest
     // pause <= 480_000 is the one at 420_000 (7 min), so the first cut is its
     // midpoint. (The 5-min pause is eligible but earlier, so not chosen.)
@@ -50,7 +60,7 @@ fn splits_at_the_latest_qualifying_pause_within_the_ceiling() {
 
 #[test]
 fn a_pause_shorter_than_min_is_not_a_cut_point() {
-    let cfg = ChunkPlanConfig::default();
+    let cfg = cfg_8min();
     // The only pause within the ceiling is 500 ms (< 700) → NOT eligible, so the
     // cut falls back to the hard ceiling at 480_000.
     let sils = [sil(400_000, 400_500)]; // 500 ms
@@ -60,7 +70,7 @@ fn a_pause_shorter_than_min_is_not_a_cut_point() {
 
 #[test]
 fn no_qualifying_pause_forces_a_ceiling_cut() {
-    let cfg = ChunkPlanConfig::default();
+    let cfg = cfg_8min();
     // 20 min, no pauses at all → hard cuts at the 8-min ceiling, last is remainder.
     let chunks = plan_chunks(&[], 1_200_000, &cfg);
     assert_eq!(chunks.len(), 3);
@@ -89,7 +99,7 @@ fn no_qualifying_pause_forces_a_ceiling_cut() {
 
 #[test]
 fn every_chunk_stays_within_the_ceiling_and_covers_the_whole_timeline() {
-    let cfg = ChunkPlanConfig::default();
+    let cfg = cfg_8min();
     let sils = [
         sil(200_000, 201_000),
         sil(450_000, 451_500),
@@ -111,6 +121,58 @@ fn every_chunk_stays_within_the_ceiling_and_covers_the_whole_timeline() {
         );
         assert!(c.len_ms() > 0);
     }
+}
+
+#[test]
+fn default_ceiling_is_the_two_minute_session_cap() {
+    // #184 round E: the default Live-session ceiling is 2 minutes (not the old
+    // 8-min headroom), and `MAX_CHUNK_MS` remains the default the config uses.
+    assert_eq!(DUB_SESSION_MAX_MS, 120_000);
+    assert_eq!(MAX_CHUNK_MS, DUB_SESSION_MAX_MS);
+    let cfg = ChunkPlanConfig::default();
+    assert_eq!(cfg.max_chunk_ms, 120_000);
+    assert_eq!(cfg.min_pause_ms, MIN_PAUSE_MS);
+}
+
+#[test]
+fn a_121s_run_splits_at_its_latest_pause_under_the_default_cap() {
+    // Just over the 2-min cap with a single qualifying 700 ms pause at 100 s:
+    // it splits there (never mid-speech), not at a hard ceiling.
+    let cfg = ChunkPlanConfig::default();
+    let sils = [sil(100_000, 100_700)]; // 700 ms == MIN_PAUSE_MS, mid 100_350
+    let chunks = plan_chunks(&sils, 121_000, &cfg);
+    assert_eq!(chunks.len(), 2);
+    assert_eq!(
+        chunks[0],
+        Chunk {
+            start_ms: 0,
+            end_ms: 100_350
+        }
+    );
+    assert_eq!(
+        chunks[1],
+        Chunk {
+            start_ms: 100_350,
+            end_ms: 121_000
+        }
+    );
+    // The cut lands inside the real pause — never mid-speech.
+    assert!(chunks[0].end_ms >= 100_000 && chunks[0].end_ms <= 100_700);
+}
+
+#[test]
+fn an_exact_120s_run_is_a_single_chunk_under_the_default_cap() {
+    // Exactly at the ceiling: one chunk, no split even though a pause exists.
+    let cfg = ChunkPlanConfig::default();
+    let sils = [sil(60_000, 61_000)];
+    let chunks = plan_chunks(&sils, 120_000, &cfg);
+    assert_eq!(
+        chunks,
+        vec![Chunk {
+            start_ms: 0,
+            end_ms: 120_000
+        }]
+    );
 }
 
 #[test]
