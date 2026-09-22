@@ -505,3 +505,60 @@ crashes the box). Copy FLACs off the box via a temporary `python -m http.server`
 in the cache dir, curl them to dev2, and run in a `--system-site-packages` venv
 (reuse dev2's CUDA torch) with `audio-separator` + `audioread`. Match stems by the
 parenthesized token; resample to 48 kHz for any additivity metric.
+
+## #168 — bounding the separation child's page-fault storm (retained mimalloc heap)
+
+The paced NDI grid (#147/#168) missed its ≤ 20 ms submit budget with a
+separation child resident because the child hammered the kernel memory manager:
+desktop torch has NO CPU caching allocator, so every activation tensor is an
+`_aligned_malloc`/`_aligned_free` on the UCRT heap, blocks over ~1 MiB go
+straight to `VirtualAlloc`/`VirtualFree`, and every freed page is decommitted and
+demand-zero-faulted again on the next inference step (~193k page faults/s on the
+box). Round 3 caps that at the source with a RETAINED mimalloc heap, injected
+into an APP-OWNED venv interpreter.
+
+- **The venv interpreter is an APP-OWNED COPY, never the system exe.** On the box
+  `lyrics_venv\Scripts\python.exe` is CPython's venv REDIRECTOR; the process that
+  actually runs torch is the shared `C:\Program Files\Python312\python.exe`. You
+  must NEVER patch/inject the system exe (six other processes share it). Instead
+  `bootstrap_venv_exe.rs` copies `python.exe` + `python3*.dll` + `vcruntime140*.dll`
+  from `pyvenv.cfg`'s `home` INTO `Scripts\` (the pre-3.7.2 "copies" layout, which
+  CPython's getpath still honours via `pyvenv.cfg`), replacing the redirector, then
+  runs `minject --force --inplace` on that copy. It runs from `bootstrap.rs` after
+  `is_ready`, is idempotent (an already-injected interpreter is left untouched —
+  re-copying a pristine exe over an injected one would wipe the injection every
+  boot), and is WARN-and-continue (a missing DLL / failed inject never blocks the
+  bootstrap; the child just runs unretained).
+
+- **The MIMALLOC env trio (`heavy_alloc_env.rs`), applied to the SEPARATION child
+  only** (next to `gpu_policy::env_for_child` in `stems/separator.rs`; the dub
+  child is light, the mtl venv untouched): `MIMALLOC_PURGE_DELAY=-1` (never
+  decommit freed pages back to the OS — the load-bearing knob; `0` brings the
+  storm back), `MIMALLOC_ARENA_EAGER_COMMIT=1`, `MIMALLOC_RESERVE_OS_MEMORY=4GiB`
+  (reserve+commit one arena up front so the first-touch fault cost is paid ONCE).
+  Fits under the 10 GiB per-child Job Object cap; numerically invisible to the
+  model. These are env NO-OPS unless the interpreter carries the mimalloc override.
+
+- **`mimalloc.dll`, NOT `mimalloc-override.dll`.** The CMake **Release** output of
+  the shared override target at the pinned tag (v2.2.7) is `mimalloc.dll`
+  (`mi_libname = "mimalloc"`), which is ALSO minject's DEFAULT injection target.
+  The CI `build-tauri` step builds it from the pinned tag with
+  `-DMI_OVERRIDE=ON -DMI_BUILD_STATIC=OFF -DMI_BUILD_OBJECT=OFF -DMI_BUILD_TESTS=OFF`
+  and stages `mimalloc.dll` + the repo's prebuilt `bin/mimalloc-redirect.dll` +
+  `bin/minject.exe` into `src-tauri/resources/mimalloc/`; `bundle.resources`
+  ships them next to `SongPlayer.exe` (`resources\mimalloc\`), where the bootstrap
+  resolves them from `current_exe()`'s dir (sp-server is embedded in
+  `SongPlayer.exe`, so `current_exe()` IS `SongPlayer.exe`). Re-pin: list
+  `microsoft/mimalloc` v2.2.x tags, then READ that tag's `CMakeLists.txt`
+  (`mi_libname`) + `bin/readme.md` (minject default) — the DLL name is not a
+  constant to assume.
+
+- **Reading `heavy child faults/s`.** `heavy_faults.rs` samples the heavy child's
+  cumulative `PageFaultCount` (`GetProcessMemoryInfo`) every 5 s and logs
+  `heavy child faults/s=N (pid …)`; the sampler is spawned by
+  `heavy_slot.rs::assign_child_job` and aborted by the `ChildJobGuard`'s Drop when
+  the child exits. The counter reads the RIGHT process only BECAUSE the venv now
+  spawns the real interpreter (not the redirector). Acceptance: during a cpu-idle
+  separation this line — and `Get-Counter '\Process(python*)\Page Faults/sec'` —
+  should read ≤ 20k (down from ~193k) with the boot log showing
+  `mimalloc override active`.
