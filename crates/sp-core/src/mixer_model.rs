@@ -255,10 +255,11 @@ pub fn fader_display_pct(dragging: bool, dragged_pct: i32, live_pct: i32) -> i32
     if dragging { dragged_pct } else { live_pct }
 }
 
-/// The KIND of the currently-playing item, which picks WHICH remembered console
-/// the ONE strip shows (#184 round G1). Songs and dub videos want opposite
-/// `vokály` positions almost always, so a single global memory is wrong for a live
-/// wall — the console keeps TWO memories, selected by this kind at item open.
+/// Which remembered memory a fader write targets and a `GET`/`PATCH /api/v1/mix`
+/// call names (#184 round G1/G2). Songs and dub videos want opposite `vokály`
+/// positions almost always, so the console keeps TWO memories — and round G2 drops
+/// the GLOBAL "active kind": each reader family is fed from its OWN memory, and the
+/// strip edits the memory of ITS item's kind (the API PATCH carries the kind).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MixKind {
     /// A plain song (stems or not) — the song memory.
@@ -267,23 +268,11 @@ pub enum MixKind {
     Dub,
 }
 
-/// The kind a playing item selects, from whether it has a READY dub — the SAME
-/// readiness the reader uses to pick a dub `AudioSourceKind` (the dub track file
-/// on disk). Pure so the decision is unit-tested and mutation-gated; the engine's
-/// item-open path computes `has_ready_dub` and calls this.
-pub fn mix_kind_for_dub(has_ready_dub: bool) -> MixKind {
-    if has_ready_dub {
-        MixKind::Dub
-    } else {
-        MixKind::Song
-    }
-}
-
-/// The ONE mixer console with TWO remembered fader triples, selected by the KIND
-/// of the playing item (#184 round G1). The strip and the API are unchanged — this
-/// only decides WHICH memory `set_faders` writes and `active_faders` returns, so a
-/// dub video mixed to `Len dabing` never leaves the next song instrumental-only,
-/// and a song at `Plný mix` never doubles a dub video's voices.
+/// The ONE mixer console with TWO remembered fader triples (#184 round G1/G2). Each
+/// memory feeds its OWN reader family — there is NO global "active kind" (round G2):
+/// a dub video mixed to `Len dabing` never leaves the next song instrumental-only,
+/// and a song at `Plný mix` never doubles a dub video's voices, regardless of what
+/// starts on any other output.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MixConsole {
     /// The song memory. Its `dabing` component is UNUSED (a song has no dub
@@ -291,50 +280,16 @@ pub struct MixConsole {
     pub song: MixFaders,
     /// The dub memory (all three faders live).
     pub dub: MixFaders,
-    /// Which memory the strip currently shows.
-    pub active: MixKind,
 }
 
 impl Default for MixConsole {
     /// Song `(1, 1, ·)` = `Plný mix` (bit-exact original), dub `(0, 1, 1)` =
     /// `Len dabing` (dub only by default — the operator raises `vokály` to bring
-    /// the original back), active Song.
+    /// the original back).
     fn default() -> Self {
         Self {
             song: MixFaders::new(1.0, 1.0, 1.0),
             dub: MixFaders::new(0.0, 1.0, 1.0),
-            active: MixKind::Song,
-        }
-    }
-}
-
-impl MixConsole {
-    /// The faders of the ACTIVE memory — what the strip shows and the gains derive
-    /// from.
-    pub fn active_faders(&self) -> MixFaders {
-        match self.active {
-            MixKind::Song => self.song,
-            MixKind::Dub => self.dub,
-        }
-    }
-
-    /// Replace the ACTIVE memory's faders (clamped + NaN-guarded), leaving the
-    /// OTHER memory untouched — an operator's song mix and dub mix each survive the
-    /// other.
-    pub fn with_active_faders(&self, f: MixFaders) -> MixConsole {
-        let f = MixFaders::new(f.vokaly, f.podklad, f.dabing);
-        match self.active {
-            MixKind::Song => MixConsole { song: f, ..*self },
-            MixKind::Dub => MixConsole { dub: f, ..*self },
-        }
-    }
-
-    /// Switch the active memory WITHOUT touching either remembered triple — the
-    /// republish input when the playing item's kind flips.
-    pub fn select(&self, kind: MixKind) -> MixConsole {
-        MixConsole {
-            active: kind,
-            ..*self
         }
     }
 }
@@ -659,78 +614,31 @@ mod tests {
         assert_eq!(fader_display_pct(false, 40, 100), 100);
     }
 
-    // ── MixKind + MixConsole (kind-scoped memories, #184 round G1) ────────────
+    // ── MixKind + MixConsole (two kind-scoped memories, no active kind) ───────
 
     #[test]
-    fn mix_kind_for_dub_picks_dub_only_for_a_ready_dub() {
-        assert_eq!(mix_kind_for_dub(true), MixKind::Dub);
-        assert_eq!(mix_kind_for_dub(false), MixKind::Song);
-    }
-
-    #[test]
-    fn mix_console_default_is_song_full_dub_len_dabing_active_song() {
+    fn mix_console_default_is_song_full_and_dub_len_dabing() {
+        // Round G2: two memories, no active kind.
         let c = MixConsole::default();
         assert_eq!(c.song, MixFaders::new(1.0, 1.0, 1.0));
         assert_eq!(c.dub, MixFaders::new(0.0, 1.0, 1.0));
-        assert_eq!(c.active, MixKind::Song);
     }
 
     #[test]
-    fn active_faders_returns_the_selected_memory() {
+    fn mix_kind_is_song_and_dub_and_compares_by_value() {
+        // The two API/control selectors are distinct and Eq-comparable.
+        assert_eq!(MixKind::Song, MixKind::Song);
+        assert_eq!(MixKind::Dub, MixKind::Dub);
+        assert_ne!(MixKind::Song, MixKind::Dub);
+    }
+
+    #[test]
+    fn mix_console_holds_both_memories_independently() {
         let c = MixConsole {
             song: MixFaders::new(0.7, 0.6, 1.0),
             dub: MixFaders::new(0.2, 0.9, 0.4),
-            active: MixKind::Song,
         };
-        assert_eq!(c.active_faders(), MixFaders::new(0.7, 0.6, 1.0));
-        assert_eq!(
-            c.select(MixKind::Dub).active_faders(),
-            MixFaders::new(0.2, 0.9, 0.4)
-        );
-    }
-
-    #[test]
-    fn with_active_faders_edits_only_the_active_memory() {
-        let c = MixConsole::default(); // active Song
-        // Editing the SONG memory leaves the dub memory (0,1,1) untouched.
-        let edited = c.with_active_faders(MixFaders::new(0.3, 0.5, 0.9));
-        assert_eq!(edited.song, MixFaders::new(0.3, 0.5, 0.9));
-        assert_eq!(edited.dub, MixFaders::new(0.0, 1.0, 1.0));
-        assert_eq!(edited.active, MixKind::Song);
-
-        // Now on the DUB memory: editing it leaves the song memory untouched.
-        let on_dub = edited.select(MixKind::Dub);
-        let edited2 = on_dub.with_active_faders(MixFaders::new(0.3, 1.0, 1.0));
-        assert_eq!(edited2.dub, MixFaders::new(0.3, 1.0, 1.0));
-        assert_eq!(
-            edited2.song,
-            MixFaders::new(0.3, 0.5, 0.9),
-            "editing the dub memory must not touch the song memory"
-        );
-    }
-
-    #[test]
-    fn with_active_faders_clamps_and_nan_guards() {
-        let c = MixConsole::default().select(MixKind::Dub);
-        // A raw NaN literal → the active memory falls back to the (1,1,1) default.
-        let edited = c.with_active_faders(MixFaders {
-            vokaly: f32::NAN,
-            podklad: 0.5,
-            dabing: 0.5,
-        });
-        assert_eq!(edited.dub, MixFaders::default());
-    }
-
-    #[test]
-    fn select_switches_active_without_touching_either_memory() {
-        let c = MixConsole {
-            song: MixFaders::new(0.4, 0.5, 1.0),
-            dub: MixFaders::new(0.1, 0.2, 0.3),
-            active: MixKind::Song,
-        };
-        let d = c.select(MixKind::Dub);
-        assert_eq!(d.active, MixKind::Dub);
-        assert_eq!(d.song, MixFaders::new(0.4, 0.5, 1.0));
-        assert_eq!(d.dub, MixFaders::new(0.1, 0.2, 0.3));
+        assert_eq!(c.song, MixFaders::new(0.7, 0.6, 1.0));
+        assert_eq!(c.dub, MixFaders::new(0.2, 0.9, 0.4));
     }
 }

@@ -1,23 +1,21 @@
-//! Process-global live mixer control (#184 round G/G1, was #14/#186 `KaraokeControl`).
+//! Process-global live mixer control (#184 round G/G1/G2, was #14/#186 `KaraokeControl`).
 //!
 //! The mixer is ONE app-wide live console (one wall, one operator) — three
-//! independent faders `[vokály, podklad, dabing]`. Round G1 gives it TWO
-//! remembered fader triples (`sp_core::mixer_model::MixConsole`), selected by the
-//! KIND of the playing item: a SONG memory and a DUB memory. Songs and dub videos
-//! want opposite `vokály` positions almost always, so a single global memory made
-//! a dub video mixed to `Len dabing` leave the next song instrumental-only (and a
-//! song at `Plný mix` double a dub video's voices). The strip and the API are
-//! unchanged — only WHICH memory a fader write lands in changes.
+//! independent faders `[vokály, podklad, dabing]`. It keeps TWO remembered fader
+//! triples (`sp_core::mixer_model::MixConsole`): a SONG memory and a DUB memory.
+//! Songs and dub videos want opposite `vokály` positions almost always, so a
+//! single global memory made a dub video mixed to `Len dabing` leave the next song
+//! instrumental-only (and a song at `Plný mix` double a dub video's voices).
 //!
-//! Since #186 a fader change is a live GAIN write, not a choice of which files to
-//! open: the control holds the two remembered fader triples PLUS three DERIVED
-//! per-stream gain sets — `[original, vocals, instrumental]` (a song), `[original,
-//! vocals, instrumental, dub]` (a dub with stems), and `[original, dub]` (a dub
-//! without stems). `set_faders` writes the ACTIVE memory and recomputes ALL THREE
-//! gain sets in lock-step from the pure `sp_core::mixer_model::stream_gains_*`, and
-//! every playing [`sp_decoder::StemMixReader`] reads and ramps toward whichever set
-//! applies — so a fader move is heard immediately with NO pipeline reopen (the #186
-//! seam). `select_kind` switches the active memory at each item open and republishes.
+//! Round G2 removes the GLOBAL "active kind": the wall runs SEVERAL pipelines at
+//! once, so "the playing item's kind" is not a single value. Each reader FAMILY is
+//! fed from its OWN memory, ALWAYS — the 3-stream song reader from the song memory
+//! (`gains[3]`), the dub readers from the dub memory (`dub_gain_atomics[4]` +
+//! `dub2_gain_atomics[2]`). `set_faders(kind, f)` writes ONE memory and republishes
+//! ONLY that memory's gain set(s), so a song opening anywhere never re-publishes the
+//! dub readers' atomics (and vice versa). A fader move is still a live GAIN write, not
+//! a choice of which files to open (#186): every playing [`sp_decoder::StemMixReader`]
+//! reads and ramps toward whichever set applies, with NO pipeline reopen.
 
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -27,37 +25,26 @@ use sp_core::mixer_model::{
     MixConsole, MixFaders, MixKind, stream_gains_dub, stream_gains_dub_no_stems, stream_gains_song,
 };
 
-/// The `active` atomic's encoding of [`MixKind`].
-const KIND_SONG: u32 = 0;
-const KIND_DUB: u32 = 1;
-
-fn kind_code(k: MixKind) -> u32 {
-    match k {
-        MixKind::Song => KIND_SONG,
-        MixKind::Dub => KIND_DUB,
-    }
-}
-
 /// Live mixer console (two kind-scoped fader memories) + the derived per-stream
 /// gain atomics, shared between the API/engine (writers) and every playback
-/// pipeline (reader).
+/// pipeline (reader). There is NO global "active kind" (round G2): each memory
+/// feeds its OWN reader family.
 pub struct MixControl {
     /// The SONG memory's three fader positions (f32 bits), `0.0..=1.0`. Its `dabing`
     /// component is unused (a song has no dub stream).
     song_faders: [Arc<AtomicU32>; 3],
     /// The DUB memory's three fader positions (f32 bits), `0.0..=1.0`.
     dub_faders: [Arc<AtomicU32>; 3],
-    /// Which memory is active — [`KIND_SONG`] / [`KIND_DUB`]. Selected by the
-    /// playing item's kind at each open ([`MixControl::select_kind`]).
-    active: Arc<AtomicU32>,
     /// The LIVE per-stream target gains `[original, vocals, instrumental]` a song's
-    /// 3-stream [`sp_decoder::StemMixReader`] reads and ramps toward.
+    /// 3-stream [`sp_decoder::StemMixReader`] reads and ramps toward — ALWAYS derived
+    /// from the SONG memory.
     gains: [Arc<AtomicU32>; 3],
     /// The LIVE per-stream target gains `[original, vocals, instrumental, dub]` a
-    /// dub video's 4-stream reader reads and ramps toward.
+    /// dub video's 4-stream reader reads and ramps toward — ALWAYS from the DUB memory.
     dub_gain_atomics: [Arc<AtomicU32>; 4],
     /// The LIVE per-stream target gains `[original, dub]` a NO-STEMS dub video's
-    /// 2-stream reader reads and ramps toward (only one of the three ever open).
+    /// 2-stream reader reads and ramps toward (only one of the three ever open) —
+    /// ALWAYS from the DUB memory.
     dub2_gain_atomics: [Arc<AtomicU32>; 2],
 }
 
@@ -92,7 +79,6 @@ impl MixControl {
         let ctrl = Self {
             song_faders: triple_atomics(c.song),
             dub_faders: triple_atomics(c.dub),
-            active: Arc::new(bits_u32(kind_code(c.active))),
             gains: triple_atomics(MixFaders::default()),
             dub_gain_atomics: [
                 Arc::new(bits(0.0)),
@@ -102,46 +88,41 @@ impl MixControl {
             ],
             dub2_gain_atomics: [Arc::new(bits(0.0)), Arc::new(bits(0.0))],
         };
-        ctrl.publish_gains(c.active_faders());
+        ctrl.publish_song(c.song);
+        ctrl.publish_dub(c.dub);
         ctrl
     }
 
-    /// The current active [`MixKind`].
-    pub fn kind(&self) -> MixKind {
-        if self.active.load(Ordering::Relaxed) == KIND_DUB {
-            MixKind::Dub
-        } else {
-            MixKind::Song
-        }
-    }
-
-    /// A snapshot of BOTH memories + the active kind.
+    /// A snapshot of BOTH memories (round G2 — no active kind).
     pub fn console(&self) -> MixConsole {
         MixConsole {
             song: read_triple(&self.song_faders),
             dub: read_triple(&self.dub_faders),
-            active: self.kind(),
         }
     }
 
-    /// The ACTIVE memory's fader positions — what the API returns and the strip
-    /// shows.
-    pub fn faders(&self) -> MixFaders {
-        match self.kind() {
+    /// The fader positions of ONE memory — what `GET /api/v1/mix` returns per kind
+    /// and the strip shows for its item.
+    pub fn faders(&self, kind: MixKind) -> MixFaders {
+        match kind {
             MixKind::Song => read_triple(&self.song_faders),
             MixKind::Dub => read_triple(&self.dub_faders),
         }
     }
 
-    /// Publish ALL THREE derived gain sets from `f` to the live atomics IN
-    /// LOCK-STEP — the seam that makes a fader change audible with no pipeline
-    /// reopen (#186). Every playing `StemMixReader` (song / dub-with-stems /
-    /// dub-without-stems) ramps toward whichever set it holds.
-    fn publish_gains(&self, f: MixFaders) {
+    /// Publish the SONG reader's live gain set `[original, vocals, instrumental]` from
+    /// the song faders `f`. The dub atomics are NOT touched (round G2).
+    fn publish_song(&self, f: MixFaders) {
         let s = stream_gains_song(f);
         for (a, v) in self.gains.iter().zip(s) {
             a.store(v.to_bits(), Ordering::Relaxed);
         }
+    }
+
+    /// Publish BOTH dub reader gain sets (`[original, vocals, instrumental, dub]` and
+    /// the no-stems `[original, dub]`) from the dub faders `f`. The song atomics are
+    /// NOT touched (round G2).
+    fn publish_dub(&self, f: MixFaders) {
         let d = stream_gains_dub(f);
         for (a, v) in self.dub_gain_atomics.iter().zip(d) {
             a.store(v.to_bits(), Ordering::Relaxed);
@@ -152,25 +133,22 @@ impl MixControl {
         }
     }
 
-    /// Set the ACTIVE memory's three faders (clamped + NaN-guarded by
-    /// [`MixFaders::new`]) and republish the derived gain sets from them. The OTHER
-    /// memory is untouched — an operator's song mix and dub mix each survive the
-    /// other.
-    pub fn set_faders(&self, f: MixFaders) {
+    /// Set ONE memory's three faders (clamped + NaN-guarded by [`MixFaders::new`]) and
+    /// republish ONLY that memory's derived gain set(s). The OTHER memory — and the
+    /// reader family it feeds — is untouched, so a song set never corrupts a dub
+    /// output and vice versa (the round G2 invariant).
+    pub fn set_faders(&self, kind: MixKind, f: MixFaders) {
         let f = MixFaders::new(f.vokaly, f.podklad, f.dabing);
-        match self.kind() {
+        match kind {
             MixKind::Song => store_triple(&self.song_faders, f),
             MixKind::Dub => store_triple(&self.dub_faders, f),
         }
-        self.publish_gains(f);
-    }
-
-    /// Switch the active memory to `kind` and republish the derived gain sets from
-    /// the newly-active memory — called by the engine when an item opens (Dub when
-    /// the item has a ready dub, else Song). The remembered faders are untouched.
-    pub fn select_kind(&self, kind: MixKind) {
-        self.active.store(kind_code(kind), Ordering::Relaxed);
-        self.publish_gains(self.faders());
+        // RED (#184 G2): publishes BOTH reader families from the just-written faders,
+        // so a song set corrupts the dub readers' atomics and a dub set the song
+        // reader's — the G1 cross-contamination bug. GREEN scopes the publish to the
+        // written kind's OWN family.
+        self.publish_song(f);
+        self.publish_dub(f);
     }
 
     /// Clone the three LIVE song gain atomics `[original, vocals, instrumental]`
@@ -204,24 +182,20 @@ impl MixControl {
         ]
     }
 
-    /// Overwrite BOTH memories + the active kind from a console and republish
-    /// (idempotent re-seed used by [`init`]).
+    /// Overwrite BOTH memories from a console and republish each reader family from
+    /// its OWN memory (idempotent re-seed used by [`init`]).
     fn reset(&self, c: MixConsole) {
         store_triple(&self.song_faders, c.song);
         store_triple(&self.dub_faders, c.dub);
-        self.active.store(kind_code(c.active), Ordering::Relaxed);
-        self.publish_gains(c.active_faders());
+        self.publish_song(c.song);
+        self.publish_dub(c.dub);
     }
 
     /// Construct a standalone control for tests (not the process global). Both
-    /// memories seed from `f`, active Song.
+    /// memories seed from `f`.
     #[cfg(test)]
     pub(crate) fn new_for_test(f: MixFaders) -> Self {
-        Self::new(MixConsole {
-            song: f,
-            dub: f,
-            active: MixKind::Song,
-        })
+        Self::new(MixConsole { song: f, dub: f })
     }
 
     /// Construct a standalone control for tests from a full console.
@@ -231,15 +205,10 @@ impl MixControl {
     }
 }
 
-fn bits_u32(v: u32) -> AtomicU32 {
-    AtomicU32::new(v)
-}
-
 static GLOBAL: OnceLock<Arc<MixControl>> = OnceLock::new();
 
 /// Initialise the process-global control from a stored console. Idempotent — the
-/// first call wins; a later call re-seeds the existing control's two memories +
-/// active kind.
+/// first call wins; a later call re-seeds the existing control's two memories.
 pub fn init(c: MixConsole) -> Arc<MixControl> {
     let ctrl = GLOBAL.get_or_init(|| Arc::new(MixControl::new(c)));
     ctrl.reset(c);
@@ -247,8 +216,8 @@ pub fn init(c: MixConsole) -> Arc<MixControl> {
 }
 
 /// The process-global mixer control, lazily defaulting to the [`MixConsole`]
-/// default (song `(1,1,·)`, dub `(0,1,1)`, active Song) if `init` was never called
-/// (unit tests, degraded boot).
+/// default (song `(1,1,·)`, dub `(0,1,1)`) if `init` was never called (unit tests,
+/// degraded boot).
 pub fn global() -> Arc<MixControl> {
     Arc::clone(GLOBAL.get_or_init(|| Arc::new(MixControl::new(MixConsole::default()))))
 }
@@ -296,11 +265,7 @@ pub async fn init_from_settings(pool: &sqlx::SqlitePool) -> Arc<MixControl> {
         .await,
         read_fader(pool, sp_core::config::SETTING_MIX_DUB_DABING, d.dub.dabing).await,
     );
-    init(MixConsole {
-        song,
-        dub,
-        active: MixKind::Song,
-    })
+    init(MixConsole { song, dub })
 }
 
 #[cfg(test)]
@@ -312,23 +277,23 @@ mod tests {
     }
 
     #[test]
-    fn reset_replaces_both_memories_the_active_kind_and_republishes() {
+    fn reset_replaces_both_memories_and_republishes_each_family() {
         // `init` on an already-initialised global goes through `reset`; a reset
         // that does nothing would leave the previous console (and its gains).
         let c = MixControl::new_for_test_console(MixConsole {
             song: MixFaders::new(1.0, 1.0, 1.0),
             dub: MixFaders::new(0.0, 1.0, 1.0),
-            active: MixKind::Song,
         });
         let next = MixConsole {
             song: MixFaders::new(0.4, 0.9, 1.0),
             dub: MixFaders::new(0.2, 0.8, 0.6),
-            active: MixKind::Dub,
         };
         c.reset(next);
         assert_eq!(c.console(), next);
-        assert_eq!(c.kind(), MixKind::Dub);
-        // Republished from the ACTIVE (dub) memory: [0, vokaly, podklad, dabing].
+        // The song reader is republished from the SONG memory: [0, vokaly, podklad].
+        let [o, v, i] = c.gain_handles();
+        assert_eq!((read(&o), read(&v), read(&i)), (0.0, 0.4, 0.9));
+        // The dub reader from the DUB memory: [0, vokaly, podklad, dabing].
         let [d0, d1, d2, d3] = c.dub_gain_handles();
         assert_eq!(
             (read(&d0), read(&d1), read(&d2), read(&d3)),
@@ -363,16 +328,19 @@ mod tests {
     }
 
     #[test]
-    fn new_control_holds_the_active_faders() {
-        let c = MixControl::new_for_test(MixFaders::new(0.3, 0.6, 0.5));
-        assert_eq!(c.faders(), MixFaders::new(0.3, 0.6, 0.5));
-        assert_eq!(c.kind(), MixKind::Song);
+    fn new_control_holds_both_memories_faders() {
+        let c = MixControl::new_for_test_console(MixConsole {
+            song: MixFaders::new(0.3, 0.6, 1.0),
+            dub: MixFaders::new(0.1, 0.9, 0.4),
+        });
+        assert_eq!(c.faders(MixKind::Song), MixFaders::new(0.3, 0.6, 1.0));
+        assert_eq!(c.faders(MixKind::Dub), MixFaders::new(0.1, 0.9, 0.4));
     }
 
     #[test]
-    fn set_faders_publishes_all_three_gain_sets_in_lock_step() {
+    fn new_control_publishes_each_family_from_its_own_memory() {
+        // Both memories at the both-full corner via new_for_test → bit-exact original.
         let c = MixControl::new_for_test(MixFaders::default());
-        // Both full → the bit-exact original everywhere (song/dub); dub carries 1.
         let [o, v, i] = c.gain_handles();
         assert_eq!((read(&o), read(&v), read(&i)), (1.0, 0.0, 0.0));
         let [d0, d1, d2, d3] = c.dub_gain_handles();
@@ -382,90 +350,97 @@ mod tests {
         );
         let [e0, e1] = c.dub_over_original_gain_handles();
         assert_eq!((read(&e0), read(&e1)), (1.0, 1.0));
-
-        // A move off the both-full corner publishes all three sets from the SAME
-        // faders to the SAME atomics (live, no reopen).
-        c.set_faders(MixFaders::new(0.3, 1.0, 0.5));
-        assert_eq!(c.faders(), MixFaders::new(0.3, 1.0, 0.5));
-        // Song: original silent, stems at the fader positions.
-        assert_eq!((read(&o), read(&v), read(&i)), (0.0, 0.3, 1.0));
-        // Dub (with stems): the same pair + the dub gain.
-        assert_eq!(
-            (read(&d0), read(&d1), read(&d2), read(&d3)),
-            (0.0, 0.3, 1.0, 0.5)
-        );
-        // Dub (no stems): vokály is the whole original bed, dabing the dub.
-        assert_eq!((read(&e0), read(&e1)), (0.3, 0.5));
     }
 
     #[test]
-    fn set_faders_guards_nan_to_the_default_console() {
-        let c = MixControl::new_for_test(MixFaders::new(0.2, 0.2, 0.2));
-        // A RAW struct literal carrying a NaN (bypasses `MixFaders::new`) exercises
-        // set_faders' OWN re-guard.
-        c.set_faders(MixFaders {
-            vokaly: f32::NAN,
-            podklad: 0.5,
-            dabing: 0.5,
-        });
-        // Any non-finite input → the (1,1,1) default console.
-        assert_eq!(c.faders(), MixFaders::default());
-        let [o, v, i] = c.gain_handles();
-        assert_eq!((read(&o), read(&v), read(&i)), (1.0, 0.0, 0.0));
-    }
-
-    #[test]
-    fn set_faders_writes_only_the_active_memory() {
-        // Active DUB: a set writes the DUB memory and leaves the SONG memory as
-        // seeded.
+    fn set_faders_dub_updates_only_the_dub_reader_gains() {
+        // song memory (1,1,1) → song reader stays bit-exact [1,0,0]; dub memory
+        // starts (0,1,1) → dub reader [0,0,1,1], no-stems [0,1].
         let c = MixControl::new_for_test_console(MixConsole {
             song: MixFaders::new(1.0, 1.0, 1.0),
             dub: MixFaders::new(0.0, 1.0, 1.0),
-            active: MixKind::Dub,
         });
-        c.set_faders(MixFaders::new(0.3, 1.0, 1.0));
-        let console = c.console();
-        assert_eq!(
-            console.dub,
-            MixFaders::new(0.3, 1.0, 1.0),
-            "a set on the active DUB memory writes the dub memory"
-        );
-        assert_eq!(
-            console.song,
-            MixFaders::new(1.0, 1.0, 1.0),
-            "editing the dub memory must not touch the song memory"
-        );
-        assert_eq!(c.faders(), MixFaders::new(0.3, 1.0, 1.0));
-    }
 
-    #[test]
-    fn select_kind_switches_active_and_republishes_from_that_memory() {
-        let c = MixControl::new_for_test_console(MixConsole {
-            song: MixFaders::new(1.0, 1.0, 1.0),
-            dub: MixFaders::new(0.0, 1.0, 1.0),
-            active: MixKind::Song,
-        });
-        // Song active → the song gain set (bit-exact original).
-        let [o, v, i] = c.gain_handles();
-        assert_eq!((read(&o), read(&v), read(&i)), (1.0, 0.0, 0.0));
+        c.set_faders(MixKind::Dub, MixFaders::new(0.3, 1.0, 1.0));
 
-        c.select_kind(MixKind::Dub);
-        assert_eq!(c.kind(), MixKind::Dub);
-        assert_eq!(c.faders(), MixFaders::new(0.0, 1.0, 1.0));
-        // Dub memory (0,1,1) republished: song gains now [0, vokaly=0, podklad=1],
-        // dub (with stems) [0, 0, 1, dabing=1], no-stems [vokaly=0, dabing=1].
-        assert_eq!((read(&o), read(&v), read(&i)), (0.0, 0.0, 1.0));
+        // The dub reader gains follow the dub memory.
         let [d0, d1, d2, d3] = c.dub_gain_handles();
         assert_eq!(
             (read(&d0), read(&d1), read(&d2), read(&d3)),
-            (0.0, 0.0, 1.0, 1.0)
+            (0.0, 0.3, 1.0, 1.0)
+        );
+        let [e0, e1] = c.dub_over_original_gain_handles();
+        assert_eq!((read(&e0), read(&e1)), (0.3, 1.0));
+        // The SONG reader is UNTOUCHED by a dub set — the round G2 invariant.
+        let [o, v, i] = c.gain_handles();
+        assert_eq!(
+            (read(&o), read(&v), read(&i)),
+            (1.0, 0.0, 0.0),
+            "a dub set must not republish the song reader's atomics"
+        );
+    }
+
+    #[test]
+    fn set_faders_song_updates_only_the_song_reader_gains() {
+        let c = MixControl::new_for_test_console(MixConsole {
+            song: MixFaders::new(1.0, 1.0, 1.0),
+            dub: MixFaders::new(0.0, 1.0, 1.0),
+        });
+
+        c.set_faders(MixKind::Song, MixFaders::new(0.3, 1.0, 1.0));
+
+        // The song reader gains follow the song memory: [0, vokaly, podklad].
+        let [o, v, i] = c.gain_handles();
+        assert_eq!((read(&o), read(&v), read(&i)), (0.0, 0.3, 1.0));
+        // The DUB reader is UNTOUCHED by a song set (dub memory still (0,1,1)).
+        let [d0, d1, d2, d3] = c.dub_gain_handles();
+        assert_eq!(
+            (read(&d0), read(&d1), read(&d2), read(&d3)),
+            (0.0, 0.0, 1.0, 1.0),
+            "a song set must not republish the dub reader's atomics"
         );
         let [e0, e1] = c.dub_over_original_gain_handles();
         assert_eq!((read(&e0), read(&e1)), (0.0, 1.0));
+    }
 
-        // Back to Song → the song memory (1,1) is intact.
-        c.select_kind(MixKind::Song);
-        assert_eq!(c.faders(), MixFaders::new(1.0, 1.0, 1.0));
+    #[test]
+    fn set_faders_writes_only_its_own_memory() {
+        let c = MixControl::new_for_test_console(MixConsole {
+            song: MixFaders::new(1.0, 1.0, 1.0),
+            dub: MixFaders::new(0.0, 1.0, 1.0),
+        });
+        c.set_faders(MixKind::Dub, MixFaders::new(0.3, 1.0, 1.0));
+        assert_eq!(c.console().dub, MixFaders::new(0.3, 1.0, 1.0));
+        assert_eq!(
+            c.console().song,
+            MixFaders::new(1.0, 1.0, 1.0),
+            "editing the dub memory must not touch the song memory"
+        );
+        c.set_faders(MixKind::Song, MixFaders::new(0.2, 0.5, 1.0));
+        assert_eq!(c.console().song, MixFaders::new(0.2, 0.5, 1.0));
+        assert_eq!(
+            c.console().dub,
+            MixFaders::new(0.3, 1.0, 1.0),
+            "editing the song memory must not touch the dub memory"
+        );
+    }
+
+    #[test]
+    fn set_faders_guards_nan_to_the_default() {
+        let c = MixControl::new_for_test(MixFaders::new(0.2, 0.2, 0.2));
+        // A RAW struct literal carrying a NaN (bypasses `MixFaders::new`) exercises
+        // set_faders' OWN re-guard.
+        c.set_faders(
+            MixKind::Song,
+            MixFaders {
+                vokaly: f32::NAN,
+                podklad: 0.5,
+                dabing: 0.5,
+            },
+        );
+        // Any non-finite input → the (1,1,1) default memory.
+        assert_eq!(c.faders(MixKind::Song), MixFaders::default());
+        let [o, v, i] = c.gain_handles();
         assert_eq!((read(&o), read(&v), read(&i)), (1.0, 0.0, 0.0));
     }
 }

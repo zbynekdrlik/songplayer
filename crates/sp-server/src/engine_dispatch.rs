@@ -73,8 +73,8 @@ pub(crate) async fn dispatch(engine: &mut PlaybackEngine, cmd: EngineCommand) {
             // down symmetrically.
             engine.remove_pipeline(playlist_id);
         }
-        EngineCommand::SetMix { faders } => {
-            engine.set_mix(faders).await; // #184 round G
+        EngineCommand::SetMix { kind, faders } => {
+            engine.set_mix(kind, faders).await; // #184 round G/G2
         }
         EngineCommand::TriggerNdiRecovery { playlist_id, step } => {
             // #173: operator/verification one-shot recovery rung.

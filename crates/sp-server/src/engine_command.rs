@@ -1,6 +1,6 @@
 //! Commands the API/OBS/Resolume layers send to the playback engine — moved out of lib.rs for the 1000-line cap.
 
-use sp_core::mixer_model::MixFaders;
+use sp_core::mixer_model::{MixFaders, MixKind};
 use sp_core::playback::PlaybackMode;
 
 /// Commands sent from the API layer to the playback engine.
@@ -77,13 +77,14 @@ pub enum EngineCommand {
         playlist_id: i64,
         step: crate::obs::ndi_recovery::RecoveryStep,
     },
-    /// #184 round G: set the ONE global live mixer console — the three fader
-    /// positions `[vokály, podklad, dabing]`. The engine writes them to the
-    /// process-global `MixControl` (every playing `StemMixReader` — song, dub with
-    /// stems, or dub without stems — ramps toward the derived gains with NO
-    /// pipeline reopen, the #186 seam), persists the three settings, and
-    /// broadcasts `MixChanged`. Supersedes `SetKaraoke` + `SetDubMix`.
+    /// #184 round G/G2: set ONE memory of the live mixer console — the three fader
+    /// positions `[vokály, podklad, dabing]` for `kind` (song or dub). The engine
+    /// writes them to the process-global `MixControl`, which republishes ONLY that
+    /// kind's reader family's gains with NO pipeline reopen (the #186 seam), and
+    /// broadcasts `MixChanged`. The persist is done by the API handler after this
+    /// live push. Supersedes `SetKaraoke` + `SetDubMix`.
     SetMix {
+        kind: MixKind,
         faders: MixFaders,
     },
 }
