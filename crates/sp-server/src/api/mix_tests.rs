@@ -78,6 +78,12 @@ async fn get_setting(pool: &sqlx::SqlitePool, key: &str) -> Option<String> {
     crate::db::models::get_setting(pool, key).await.unwrap()
 }
 
+/// Read a persisted mixer setting as f32 (panics if absent/unparseable — the tests
+/// only call it on keys they just wrote).
+async fn setting_f32(pool: &sqlx::SqlitePool, key: &str) -> f32 {
+    get_setting(pool, key).await.unwrap().parse().unwrap()
+}
+
 /// Re-seed the process-global console to its default (song `(1,1,·)`, dub
 /// `(0,1,1)`) so a kind-touching test starts from a known state regardless of what
 /// a sibling left behind (round G2 — no active kind). Call under the `SERIAL` lock.
@@ -119,26 +125,36 @@ async fn patch_dub_edits_only_the_dub_memory_and_dub_keys() {
     let state = test_state().await;
     let pool = state.pool.clone();
 
-    let (status, json) = patch_mix(app(state.clone()), r#"{"kind":"dub","vokaly":0.3}"#).await;
+    // Distinct values per fader so a swapped fader→key persist would be caught.
+    let (status, json) = patch_mix(
+        app(state.clone()),
+        r#"{"kind":"dub","vokaly":0.3,"podklad":0.4,"dabing":0.5}"#,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["kind"], "dub");
     assert!((json["vokaly"].as_f64().unwrap() - 0.3).abs() < 1e-6);
+    assert!((json["podklad"].as_f64().unwrap() - 0.4).abs() < 1e-6);
+    assert!((json["dabing"].as_f64().unwrap() - 0.5).abs() < 1e-6);
 
     // GET: only the dub memory changed; the song memory is untouched.
     let g = get_json(app(state), "/api/v1/mix").await;
     assert!((g["dub"]["vokaly"].as_f64().unwrap() - 0.3).abs() < 1e-6);
+    assert!((g["dub"]["podklad"].as_f64().unwrap() - 0.4).abs() < 1e-6);
+    assert!((g["dub"]["dabing"].as_f64().unwrap() - 0.5).abs() < 1e-6);
     assert!(
         (g["song"]["vokaly"].as_f64().unwrap() - 1.0).abs() < 1e-6,
         "a dub edit must not touch the song memory"
     );
 
-    // Only the dub key is persisted; the song key is never written by a dub edit.
-    let dv: f32 = get_setting(&pool, sp_core::config::SETTING_MIX_DUB_VOKALY)
-        .await
-        .unwrap()
-        .parse()
-        .unwrap();
+    // All THREE dub keys are persisted with their OWN values (not just vokaly), so a
+    // swapped fader→key persist is caught; the song keys are never written.
+    let dv = setting_f32(&pool, sp_core::config::SETTING_MIX_DUB_VOKALY).await;
+    let dp = setting_f32(&pool, sp_core::config::SETTING_MIX_DUB_PODKLAD).await;
+    let dd = setting_f32(&pool, sp_core::config::SETTING_MIX_DUB_DABING).await;
     assert!((dv - 0.3).abs() < 1e-6);
+    assert!((dp - 0.4).abs() < 1e-6);
+    assert!((dd - 0.5).abs() < 1e-6);
     assert_eq!(
         get_setting(&pool, sp_core::config::SETTING_MIX_SONG_VOKALY).await,
         None,
@@ -157,30 +173,34 @@ async fn patch_song_edits_only_the_song_memory_and_song_keys() {
     let state = test_state().await;
     let pool = state.pool.clone();
 
+    // Distinct vokaly/podklad so a swapped fader→key persist would be caught.
     let (status, json) = patch_mix(
         app(state.clone()),
-        r#"{"kind":"song","vokaly":0.3,"podklad":1.0}"#,
+        r#"{"kind":"song","vokaly":0.3,"podklad":0.4}"#,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["kind"], "song");
     assert!((json["vokaly"].as_f64().unwrap() - 0.3).abs() < 1e-6);
+    assert!((json["podklad"].as_f64().unwrap() - 0.4).abs() < 1e-6);
     // A song echo omits the unused dabing.
     assert!(json.get("dabing").is_none(), "song memory has no dabing");
 
     let g = get_json(app(state), "/api/v1/mix").await;
     assert!((g["song"]["vokaly"].as_f64().unwrap() - 0.3).abs() < 1e-6);
+    assert!((g["song"]["podklad"].as_f64().unwrap() - 0.4).abs() < 1e-6);
     assert!(
         (g["dub"]["vokaly"].as_f64().unwrap() - 0.0).abs() < 1e-6,
         "a song edit must not touch the dub memory"
     );
 
-    let sv: f32 = get_setting(&pool, sp_core::config::SETTING_MIX_SONG_VOKALY)
-        .await
-        .unwrap()
-        .parse()
-        .unwrap();
-    assert!((sv - 0.3).abs() < 1e-6);
+    // Both song keys are persisted with their own values; no dub key is written.
+    assert!(
+        (setting_f32(&pool, sp_core::config::SETTING_MIX_SONG_VOKALY).await - 0.3).abs() < 1e-6
+    );
+    assert!(
+        (setting_f32(&pool, sp_core::config::SETTING_MIX_SONG_PODKLAD).await - 0.4).abs() < 1e-6
+    );
     assert_eq!(
         get_setting(&pool, sp_core::config::SETTING_MIX_DUB_VOKALY).await,
         None,
