@@ -829,9 +829,7 @@ mod tests {
         // This test reaches the #184 G0.1 dub tick-defer (stub venv passes the
         // venv gate), so serialize + clear the process-global dub flag so a
         // parallel flag test can't make it defer instead of marking the row.
-        let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
         crate::lyrics::heavy_slot::set_dub_slot_wanted(false);
         let pool = crate::db::create_memory_pool().await.unwrap();
         crate::db::run_migrations(&pool).await.unwrap();

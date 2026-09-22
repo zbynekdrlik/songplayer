@@ -165,7 +165,7 @@ fn acquire_clears_dub_want_only_for_the_dub_step() {
 
 #[tokio::test]
 async fn dub_slot_want_guard_sets_true_and_drop_clears() {
-    let _lk = DUB_FLAG_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let _lk = DUB_FLAG_SERIAL.lock().await;
     set_dub_slot_wanted(false);
     assert!(!dub_slot_wanted(), "the flag starts clear");
     {
@@ -190,7 +190,7 @@ async fn dub_acquire_clears_the_flag_but_a_stem_acquire_does_not() {
     use std::sync::Arc;
     use tokio::sync::Semaphore;
 
-    let _lk = DUB_FLAG_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let _lk = DUB_FLAG_SERIAL.lock().await;
     let slot = Arc::new(Semaphore::new(1));
 
     // Job picked, slot not yet acquired → flag TRUE.

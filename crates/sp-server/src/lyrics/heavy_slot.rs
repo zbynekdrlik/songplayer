@@ -196,7 +196,7 @@ pub(crate) fn dub_slot_want_guard() -> DubSlotWant {
 /// tests + the stem/lyrics `process_next` tick-defer tests), so parallel test
 /// threads never stomp each other's flag reads.
 #[cfg(test)]
-pub(crate) static DUB_FLAG_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static DUB_FLAG_SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 // ---------------------------------------------------------------------------
 // Layer 2 — memory-headroom guard (pure core + Windows read).
