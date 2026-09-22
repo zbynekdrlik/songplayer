@@ -139,16 +139,18 @@ impl MixControl {
     /// output and vice versa (the round G2 invariant).
     pub fn set_faders(&self, kind: MixKind, f: MixFaders) {
         let f = MixFaders::new(f.vokaly, f.podklad, f.dabing);
+        // Write ONE memory and republish ONLY that kind's reader family — a song set
+        // never touches the dub readers' atomics and vice versa (the G2 invariant).
         match kind {
-            MixKind::Song => store_triple(&self.song_faders, f),
-            MixKind::Dub => store_triple(&self.dub_faders, f),
+            MixKind::Song => {
+                store_triple(&self.song_faders, f);
+                self.publish_song(f);
+            }
+            MixKind::Dub => {
+                store_triple(&self.dub_faders, f);
+                self.publish_dub(f);
+            }
         }
-        // RED (#184 G2): publishes BOTH reader families from the just-written faders,
-        // so a song set corrupts the dub readers' atomics and a dub set the song
-        // reader's — the G1 cross-contamination bug. GREEN scopes the publish to the
-        // written kind's OWN family.
-        self.publish_song(f);
-        self.publish_dub(f);
     }
 
     /// Clone the three LIVE song gain atomics `[original, vocals, instrumental]`
