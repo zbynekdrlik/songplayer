@@ -672,3 +672,36 @@ Two gotchas that bit #184:
   feeds the raw `DubRow.stem_status` column (`done`/`failed`/`unsupported`/null),
   NOT the `stems_state` wire vocabulary — see `.claude/rules/dabing.md`. A mock
   that feeds a wire string (`"ready"`) hides this; the box carries `"done"`.
+
+## The seek bar holds the committed target until the live position catches up (#184)
+
+After a seek COMMIT the WS now-playing position is still the PRE-seek position
+for ~2-3 s until the pipeline's post-seek fast-forward delivers a frame near the
+target, so a display that reads the raw live position snaps the seek bar BACK to
+the stale position and then forward (the owner's "skocil spat a potom na
+miesto"). The fix is a pending-target DISPLAY HOLD:
+
+- The pure rule is `sp_core::seek_model::seek_display_ms(dragging, dragged, live,
+  pending: Option<PendingSeek{target_ms, committed_at_ms}>, now_ms)` (workspace-
+  tested + mutation-gated — sp-ui has no unit-test job). While a pending seek
+  exists AND `live < target − SEEK_CATCH_UP_MS` (1500) AND `now − committed_at <
+  SEEK_HOLD_MS` (5000) it returns the TARGET; otherwise `live`. Dragging still
+  wins over everything. Both boundaries are exclusive (`live == target − 1500` →
+  live; `now − committed_at == 5000` → live).
+- `player.rs`: `seek_pending: RwSignal<Option<PendingSeek>>` set at the commit
+  (`commit_seek`, once the value-dedup passes) with `now_ms()`, read by the
+  `prop:value` binding AND the position readout, and cleared by an Effect on the
+  live position + video id that applies the SAME pure rule (releases the hold
+  once live is within 1500 ms of the target or the 5 s hold expires) and abandons
+  it outright on a song change (its target belongs to the previous song). The
+  Effect reads `pending` UNTRACKED so neither the commit nor its own clear
+  re-triggers it.
+- **Clock without a new dependency:** `now_ms()` reads the already-present
+  `web-sys` `Performance` monotonic clock (`window().performance().now()` — the
+  `Performance` feature is enabled on web-sys). sp-ui has NO `js-sys` dep — never
+  reach for `js_sys::Date`; use the existing `web-sys` clock.
+- The mock proof is `e2e/player-seek-display.spec.ts` (chromium): the
+  `/__mock/tick` `seek_hold_ms` knob keeps the tick position STALE for N ms after
+  a seek POST, then jumps to the target; a real `page.mouse` drag asserts the
+  displayed value never drops below the target during the hold, then follows
+  live. The box proof is in `post-deploy-preview.spec.ts` (see `preview.md`).

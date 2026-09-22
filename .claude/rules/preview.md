@@ -318,3 +318,29 @@ area. Do NOT regress them:
   full 60 s throttled soak is a MANUAL box verification (`probe-preview-throttled.mjs
   1000 100 150`), not a gating spec — do not re-add a fixed multi-second
   `waitForTimeout` to any post-deploy spec.
+
+## #184 — per-deploy pause/seek latency proof of the owner's path
+
+`post-deploy-preview.spec.ts` (edge/msedge, off-program Dabing output) re-proves
+the owner's actual complaint path every deploy, with all timings PRINTED:
+
+- **Pause freezes the preview.** Clicking the Player's `player-playpause` posts
+  `/pause`, which stops the pipeline decode → the encoder child starves → the WS
+  stops → the `<video>` drains its (≤ 2 s) buffer and freezes. The proof taps the
+  DECODED output directly, not the toggle text: a small offscreen-canvas
+  frame-hash must go STABLE (last change within 3 s of pause, then held ≥ 2 s),
+  AND a Web Audio `AnalyserNode` RMS tap on the `<video>` must drop below a quiet
+  floor within 3 s (a logged audible baseline first proves the tap works). The
+  `<video>` is MSE (same-origin blob), so drawing it to a canvas does NOT taint
+  it — `getImageData` works; `createMediaElementSource` reads real samples.
+- **A real seek lands on the target.** A `page.mouse` drag on `player-seek`
+  (~+60 s) must land the bar on the committed target (the #184 pending display
+  hold shows it immediately) and never drop below the pre-drag value after the
+  commit. The BACKEND fast-forward is proven WITHOUT a position endpoint (none
+  exists — position is WS-pushed): the bar can only EXCEED the target once the
+  pending hold releases to the real live WS-fed position, so "the bar passes the
+  target" is the honest backend proof (a failed seek lets the 5 s hold expire and
+  the bar drops back to the stale position, never exceeding the target).
+- Bounded, early-exit `expect.poll`s only (the no-soak rule above). The 2 s
+  frame-hash stability window is a measurement, not a soak — it early-exits the
+  moment a ≥ 2 s stable run is confirmed.
