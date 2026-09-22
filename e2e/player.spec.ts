@@ -128,7 +128,7 @@ test.describe("the Player mixer follows the playing item (#194)", () => {
     await expect(page.getByTestId("karaoke-now-playing")).toBeVisible({
       timeout: 15000,
     });
-    await expect(page.getByTestId("dub-mix-fader")).toHaveCount(0);
+    await expect(page.getByTestId("mix-dabing")).toHaveCount(0);
   });
 
   test("Dabing shows the dub mixer once a dub video plays", async ({
@@ -155,7 +155,7 @@ test.describe("the Player mixer follows the playing item (#194)", () => {
     ).toBeVisible({ timeout: 10000 });
 
     // Before it plays, the mixer slot is the karaoke adapter (no dub fader).
-    await expect(page.getByTestId("dub-mix-fader")).toHaveCount(0);
+    await expect(page.getByTestId("mix-dabing")).toHaveCount(0);
 
     // Make the dub video the playing item → the Player picks the dub adapter.
     await request.post("/__mock/now-playing", {
@@ -167,7 +167,7 @@ test.describe("the Player mixer follows the playing item (#194)", () => {
       },
     });
 
-    await expect(page.getByTestId("dub-mix-fader")).toBeVisible({
+    await expect(page.getByTestId("mix-dabing")).toBeVisible({
       timeout: 10000,
     });
   });
