@@ -170,17 +170,21 @@ def drain_deadline_s(input_pcm_bytes: int, drain_s: float = DRAIN_S) -> float:
 
 
 def chunk_reusable(meta: dict, voice: str, start_ms: int, end_ms: int) -> bool:
-    """#184 round C + E: a resumed chunk (`chunk_N.json`) may be reused ONLY if it
-    was synthesized with the SAME voice as the one now requested AND covers the
-    SAME `[start_ms, end_ms)` slice of the source. A chunk recorded under a
-    different voice, a legacy chunk with no `voice` / boundary keys, or a chunk
-    from an OLDER chunk plan (the session ceiling changed, so slot N now covers a
-    different slice) is NOT reusable — it is re-synthesized, otherwise the final
-    mix would lay the old audio over the chunks that follow it. Pure — unit-tested."""
+    """#184 round C + E + E2: a resumed chunk (`chunk_N.json`) may be reused ONLY
+    if it was synthesized with the SAME voice as the one now requested, covers the
+    SAME `[start_ms, end_ms)` slice of the source, AND carries the voice-guard
+    record (`voice_medians`, non-empty). A chunk recorded under a different voice,
+    a legacy chunk with no `voice` / boundary keys, a chunk from an OLDER chunk
+    plan (the session ceiling changed, so slot N now covers a different slice), or
+    a chunk that was never voice-guarded (pre-E2, or the guard was skipped) is NOT
+    reusable — it is re-synthesized: reusing an unguarded chunk on a re-dub would
+    silently keep exactly the drifted audio the re-dub was requested to fix. Pure —
+    unit-tested."""
     return (
         meta.get("voice") == voice
         and meta.get("chunk_start_ms") == start_ms
         and meta.get("chunk_end_ms") == end_ms
+        and bool(meta.get("voice_medians"))
     )
 
 
