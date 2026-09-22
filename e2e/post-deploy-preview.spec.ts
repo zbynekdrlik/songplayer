@@ -19,7 +19,7 @@
  * fails loudly — a deployed live wall is expected to be playing.
  */
 
-import { test, expect, request as apiRequest } from "@playwright/test";
+import { test, expect, request as apiRequest, Locator, Page } from "@playwright/test";
 
 const SONGPLAYER_URL = process.env.SONGPLAYER_URL || "http://localhost:8920";
 
@@ -30,6 +30,87 @@ const ALLOWED_CONSOLE = [
   /module specifier/,
   /integrity.*attribute.*ignored/,
 ];
+
+// #184 owner-path probes (canvas frame-hash + Web Audio RMS + real-mouse drag).
+// The preview <video> is MSE (same-origin blob) so drawing it to a canvas does
+// NOT taint it and getImageData works.
+
+/** A cheap FNV-1a hash of a downscaled preview frame — a stable hash across
+ *  samples means the picture is frozen. */
+async function frameHash(video: Locator): Promise<number> {
+  return video.evaluate((el: HTMLVideoElement) => {
+    const c = document.createElement("canvas");
+    c.width = 64;
+    c.height = 36;
+    const ctx = c.getContext("2d")!;
+    ctx.drawImage(el, 0, 0, 64, 36);
+    const d = ctx.getImageData(0, 0, 64, 36).data;
+    let h = 2166136261;
+    for (let i = 0; i < d.length; i += 4) {
+      h = (h ^ (d[i] + d[i + 1] * 3 + d[i + 2] * 7)) >>> 0;
+      h = (h * 16777619) >>> 0;
+    }
+    return h;
+  });
+}
+
+/** Install a one-time Web Audio RMS tap on the preview <video>. */
+async function installAudioTap(video: Locator): Promise<void> {
+  await video.evaluate((el: HTMLVideoElement) => {
+    const w = window as unknown as {
+      __rmsAnalyser?: AnalyserNode;
+      __rmsBuf?: Float32Array;
+      AudioContext: typeof AudioContext;
+      webkitAudioContext?: typeof AudioContext;
+    };
+    if (w.__rmsAnalyser) return;
+    const AC = w.AudioContext || w.webkitAudioContext!;
+    const ctx = new AC();
+    const src = ctx.createMediaElementSource(el);
+    const an = ctx.createAnalyser();
+    an.fftSize = 2048;
+    src.connect(an);
+    an.connect(ctx.destination);
+    w.__rmsAnalyser = an;
+    w.__rmsBuf = new Float32Array(an.fftSize);
+    void ctx.resume();
+  });
+}
+
+/** Current RMS amplitude of the preview <video>'s audio (0 = silence). */
+async function audioRms(video: Locator): Promise<number> {
+  return video.evaluate(() => {
+    const w = window as unknown as {
+      __rmsAnalyser?: AnalyserNode;
+      __rmsBuf?: Float32Array;
+    };
+    const an = w.__rmsAnalyser;
+    const buf = w.__rmsBuf;
+    if (!an || !buf) return 0;
+    an.getFloatTimeDomainData(buf);
+    let s = 0;
+    for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+    return Math.sqrt(s / buf.length);
+  });
+}
+
+async function currentTime(video: Locator): Promise<number> {
+  return video.evaluate((el: HTMLVideoElement) => el.currentTime);
+}
+
+/** Real mouse drag along a horizontal range input from `from` to `to` (fractions). */
+async function mouseDragRange(page: Page, selector: string, from: number, to: number): Promise<void> {
+  await page.locator(selector).scrollIntoViewIfNeeded();
+  const box = await page.locator(selector).boundingBox();
+  if (!box) throw new Error(`no bounding box for ${selector}`);
+  const pt = (f: number) => ({ x: box.x + box.width * f, y: box.y + box.height / 2 });
+  const a = pt(from);
+  const b = pt(to);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 8 });
+  await page.mouse.up();
+}
 
 test.describe("#178 live preview <video> post-deploy", () => {
   let consoleMessages: string[] = [];
@@ -261,6 +342,235 @@ test.describe("#178 live preview <video> post-deploy", () => {
         .getByTestId("preview-stop")
         .click()
         .catch(() => {});
+      await request.post(`/api/v1/playback/${dabingPid}/pause`).catch(() => {});
+    }
+  });
+
+  test("pause freezes the preview picture + audio within 3 s, and a real-mouse seek lands on target — the owner's path (#184)", async ({
+    page,
+    request,
+  }) => {
+    // #184: the owner's actual complaint path, proven per deploy on the box —
+    // (1) clicking the Player's pause freezes the preview PICTURE (canvas
+    // frame-hash stable >= 2 s) AND its AUDIO (Web Audio RMS goes quiet) within
+    // 3 s; (2) resuming and a REAL-mouse seek lands the seek bar on the target
+    // and the pipeline actually fast-forwards there. Driven on the OFF-program
+    // Dabing output (never the live wall), following the throttled test above.
+    // All timings are printed. Bounded, early-exit polls only — no fixed soak.
+    test.setTimeout(120_000);
+
+    const dab = await request.get("/api/v1/dabing");
+    expect(dab.status()).toBe(200);
+    const body = (await dab.json()) as {
+      playlist_id: number;
+      videos: Array<{ video_id?: number; id?: number; dub_status: string }>;
+    };
+    const dabingPid = body.playlist_id;
+    const ready = body.videos.find((v) => v.dub_status === "ready");
+    expect(
+      ready,
+      "a ready dub must exist on the box for the pause/seek proof",
+    ).toBeTruthy();
+    const sampleVideoId = Number(ready!.video_id ?? ready!.id);
+    expect(sampleVideoId).toBeGreaterThan(0);
+
+    await page.goto("/dabing");
+    await expect(page.getByTestId("player")).toBeVisible({ timeout: 30_000 });
+
+    const row = page.locator(
+      `[data-testid="song-row"][data-video-id="${sampleVideoId}"]`,
+    );
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await row.getByTestId("song-row-play").click();
+    await expect
+      .poll(
+        async () => {
+          const h = (await (await request.get("/api/v1/ndi/health")).json()) as Array<{
+            playlist_id: number;
+            frames_submitted_last_5s: number;
+          }>;
+          return (
+            h.find((r) => r.playlist_id === dabingPid)?.frames_submitted_last_5s ?? 0
+          );
+        },
+        { timeout: 30_000, message: "the Dabing output must start decoding" },
+      )
+      .toBeGreaterThan(0);
+
+    // Mount the live preview and let it decode.
+    await page.getByTestId("preview-start").click({ timeout: 20_000 });
+    const video = page.getByTestId("preview-video");
+    await expect(video).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => video.evaluate((el: HTMLVideoElement) => el.readyState), {
+        timeout: 40_000,
+      })
+      .toBeGreaterThanOrEqual(3);
+
+    // Unmute + install the Web Audio RMS tap (the preview started from a real
+    // user gesture, so the AudioContext resumes).
+    await page.getByTestId("preview-unmute").click().catch(() => {});
+    await installAudioTap(video);
+
+    try {
+      // --- (1) PAUSE: the picture freezes AND the audio goes quiet within 3 s ---
+      // Prove it is PLAYING first: the preview media clock advances + audible.
+      const ct0 = await currentTime(video);
+      await page.waitForTimeout(1000);
+      expect(
+        await currentTime(video),
+        "the preview must be playing (media advancing) before pause",
+      ).toBeGreaterThan(ct0 + 0.1);
+
+      let baseRms = 0;
+      for (let i = 0; i < 6; i++) {
+        baseRms = Math.max(baseRms, await audioRms(video));
+        await page.waitForTimeout(150);
+      }
+      console.log(`[#184] preview baseline audio RMS while playing: ${baseRms.toFixed(4)}`);
+      expect(
+        baseRms,
+        "the preview audio must be audible before pause (proves the RMS tap works)",
+      ).toBeGreaterThan(0.01);
+
+      // Pause the pipeline via the Player toggle.
+      await page.getByTestId("player-playpause").click();
+      const pauseAt = Date.now();
+
+      // Frame-hash freeze: track the last frame change; it must be within 3 s of
+      // pause and the picture must then stay stable >= 2 s. Bounded, early-exit.
+      let lastHash = await frameHash(video);
+      let lastChangeMs = Date.now() - pauseAt;
+      let freezeStableMs = 0;
+      const freezeDeadline = Date.now() + 6000;
+      while (Date.now() < freezeDeadline) {
+        await page.waitForTimeout(250);
+        const nowMs = Date.now() - pauseAt;
+        const h = await frameHash(video);
+        if (h !== lastHash) {
+          lastChangeMs = nowMs;
+          lastHash = h;
+        } else if (nowMs - lastChangeMs >= 2000) {
+          freezeStableMs = nowMs - lastChangeMs;
+          break;
+        }
+      }
+      console.log(
+        `[#184] preview picture last changed ${lastChangeMs} ms after pause, then stable ${freezeStableMs} ms`,
+      );
+      expect(
+        lastChangeMs,
+        "the preview picture must freeze within 3 s of pause",
+      ).toBeLessThanOrEqual(3000);
+      expect(
+        freezeStableMs,
+        "the frozen picture must stay stable >= 2 s",
+      ).toBeGreaterThanOrEqual(2000);
+
+      // Audio goes quiet within 3 s of pause (early-exit poll).
+      let silenceMs: number | null = null;
+      await expect
+        .poll(
+          async () => {
+            const r = await audioRms(video);
+            if (r < 0.005 && silenceMs === null) silenceMs = Date.now() - pauseAt;
+            return r;
+          },
+          {
+            timeout: 3500,
+            intervals: [200],
+            message: "the preview audio must go quiet within 3 s of pause",
+          },
+        )
+        .toBeLessThan(0.005);
+      console.log(`[#184] preview audio went quiet ${silenceMs} ms after pause`);
+
+      // --- (2) RESUME + a real-mouse seek lands on the target ---
+      await page.getByTestId("player-playpause").click();
+      const seek = page.getByTestId("player-seek");
+      await expect(seek).toBeEnabled({ timeout: 15_000 });
+      // Resume is proven by the WS-fed position (the seek bar) advancing again —
+      // independent of the preview <video> re-buffering.
+      const posResume0 = Number(await seek.inputValue());
+      await expect
+        .poll(async () => Number(await seek.inputValue()), {
+          timeout: 15_000,
+          message: "playback must resume (the live position advances) after unpause",
+        })
+        .toBeGreaterThan(posResume0 + 500);
+
+      const duration = Number(await seek.getAttribute("max"));
+      const preDrag = Number(await seek.inputValue());
+      // ~ +60 s ahead, clamped below the end.
+      const target = Math.min(
+        preDrag + 60000,
+        Math.max(duration - 5000, preDrag + 20000),
+      );
+      expect(target).toBeGreaterThan(preDrag + 1500);
+
+      let committed: number | null = null;
+      await page.route("**/api/v1/playback/*/seek", async (route) => {
+        const b = JSON.parse(route.request().postData() || "{}");
+        if (typeof b.position_ms === "number") committed = b.position_ms;
+        await route.continue();
+      });
+      await mouseDragRange(
+        page,
+        '[data-testid="player-seek"]',
+        preDrag / duration,
+        target / duration,
+      );
+      await expect
+        .poll(() => committed, {
+          timeout: 5000,
+          message: "the seek must commit exactly one POST",
+        })
+        .not.toBeNull();
+      const seekTarget = committed as number;
+      console.log(
+        `[#184] seek: preDrag ${preDrag} ms, committed target ${seekTarget} ms, duration ${duration} ms`,
+      );
+
+      // The bar DISPLAYS >= the committed target immediately (the pending hold)
+      // and never drops below the pre-drag value after the commit.
+      await expect
+        .poll(async () => Number(await seek.inputValue()), {
+          timeout: 5000,
+          message: "the bar must display >= the committed target during the fast-forward",
+        })
+        .toBeGreaterThanOrEqual(seekTarget);
+      let minAfter = Number.POSITIVE_INFINITY;
+      const dipT0 = Date.now();
+      while (Date.now() - dipT0 < 3000) {
+        minAfter = Math.min(minAfter, Number(await seek.inputValue()));
+        await page.waitForTimeout(200);
+      }
+      console.log(
+        `[#184] min displayed position after commit: ${minAfter} ms (pre-drag ${preDrag} ms)`,
+      );
+      expect(
+        minAfter,
+        "the bar must never drop below the pre-drag value after the commit",
+      ).toBeGreaterThanOrEqual(preDrag);
+
+      // Backend proof: the bar can only EXCEED the target once the pending hold
+      // releases to the real live WS-fed position — i.e. the pipeline actually
+      // fast-forwarded to the target. A failed seek would let the 5 s hold expire
+      // and the bar drop back to the stale position, never exceeding the target.
+      const ffStart = Date.now();
+      await expect
+        .poll(async () => Number(await seek.inputValue()), {
+          timeout: 10_000,
+          intervals: [400],
+          message:
+            "the backend must fast-forward: the live position (once the hold releases) must pass the seek target",
+        })
+        .toBeGreaterThan(seekTarget);
+      console.log(
+        `[#184] backend position reached (and passed) the seek target in ~${Date.now() - ffStart} ms`,
+      );
+    } finally {
+      await page.getByTestId("preview-stop").click().catch(() => {});
       await request.post(`/api/v1/playback/${dabingPid}/pause`).catch(() => {});
     }
   });

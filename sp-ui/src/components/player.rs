@@ -14,7 +14,7 @@ use leptos::prelude::*;
 use serde::Serialize;
 use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
 use sp_core::preview_lag::preview_lag_display;
-use sp_core::seek_model::{format_position, seek_display_ms, seek_target_ms};
+use sp_core::seek_model::{PendingSeek, format_position, seek_display_ms, seek_target_ms};
 
 use crate::api;
 use crate::components::live_mixer::LiveMixer;
@@ -25,6 +25,19 @@ use crate::store::DashboardStore;
 #[derive(Serialize)]
 struct SetModeBody {
     mode: String,
+}
+
+/// Current wall-clock time in ms from the browser's monotonic `performance`
+/// clock (immune to system-clock jumps), used to age out a pending seek's
+/// display hold (#184). sp-ui has no `js-sys` dep, so this reads the already-
+/// present `web-sys` `Performance` clock; `0` if the clock is unavailable (never
+/// in the running CSR app — the display rule just falls back to the live
+/// position, which is the safe default).
+fn now_ms() -> u64 {
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| p.now())
+        .unwrap_or(0.0) as u64
 }
 
 #[component]
@@ -47,6 +60,9 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     };
     let artist = move || np().map(|i| i.artist).unwrap_or_default();
     let position = move || np().map(|i| i.position_ms).unwrap_or(0);
+    // #184: the currently-playing video id — a song change abandons a pending
+    // seek (its target belongs to the previous song).
+    let video_id = move || np().map(|i| i.video_id).unwrap_or(0);
     let duration = move || np().map(|i| i.duration_ms).unwrap_or(0);
     let state = move || np().map(|i| i.state).unwrap_or_default();
     let transport = move || np().map(|i| i.transport).unwrap_or_default();
@@ -154,6 +170,12 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // the initial 0 ms — `seek_drag_ms` starts at 0. `on:change` reads this latch
     // and is a no-op when it is false.
     let seek_dirty = RwSignal::new(false);
+    // #184: the committed-but-not-yet-honoured seek. Set on the commit below;
+    // the seek bar DISPLAYS its target (never the stale live position) until the
+    // pipeline's post-seek fast-forward catches up, so the bar no longer jumps
+    // back to the pre-seek position and then forward (the owner's "skocil spat a
+    // potom na miesto"). Cleared by the Effect below.
+    let seek_pending = RwSignal::new(None::<PendingSeek>);
     let do_seek = move |ms: u64| {
         leptos::task::spawn_local(async move {
             let r = api::seek_playlist(pid, ms).await;
@@ -164,9 +186,34 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
         seek_dirty.set(false);
         if seek_committed.get_untracked() != Some(ms) {
             seek_committed.set(Some(ms));
+            // #184: remember the target + when we committed so the display holds
+            // it while the live position is still stale.
+            seek_pending.set(Some(PendingSeek {
+                target_ms: ms,
+                committed_at_ms: now_ms(),
+            }));
             do_seek(ms);
         }
     };
+    // #184: release the pending display hold the moment the SAME pure rule the
+    // display uses stops returning the target — the live position has caught up
+    // to within SEEK_CATCH_UP_MS of it, or the 5 s hold expired (a seek the
+    // pipeline could not honour, e.g. at EOS). A song change abandons the pending
+    // seek outright (its target belongs to the previous song). Reads `pending`
+    // untracked so neither the commit nor this Effect's own clear re-triggers it;
+    // it tracks only the live position + video id (both fire on the WS tick).
+    Effect::new(move |prev_vid: Option<i64>| -> i64 {
+        let vid = video_id();
+        let live = position();
+        if prev_vid.is_some_and(|p| p != vid) {
+            seek_pending.set(None);
+        } else if let Some(p) = seek_pending.get_untracked() {
+            if seek_display_ms(false, 0, live, Some(p), now_ms()) != p.target_ms {
+                seek_pending.set(None);
+            }
+        }
+        vid
+    });
     let seek_back = move |_| do_seek(seek_target_ms(position(), -10_000, duration()));
     let seek_fwd = move |_| do_seek(seek_target_ms(position(), 10_000, duration()));
 
@@ -247,7 +294,13 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                     max=move || duration().to_string()
                     step="1000"
                     prop:value=move || {
-                        seek_display_ms(seek_dragging.get(), seek_drag_ms.get(), position())
+                        seek_display_ms(
+                            seek_dragging.get(),
+                            seek_drag_ms.get(),
+                            position(),
+                            seek_pending.get(),
+                            now_ms(),
+                        )
                             .to_string()
                     }
                     prop:disabled=move || !has_content.get()
@@ -309,6 +362,8 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                                 seek_dragging.get(),
                                 seek_drag_ms.get(),
                                 position(),
+                                seek_pending.get(),
+                                now_ms(),
                             );
                             format!("{} / {}", format_position(p), format_position(duration()))
                         }}
