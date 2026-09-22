@@ -44,7 +44,7 @@ pub struct PendingSeek {
 /// Once the live position gets within this window of a pending seek's target the
 /// pipeline has essentially caught up, so the honest live position drives the
 /// display again (the pending hold releases).
-pub const SEEK_CATCH_UP_MS: u64 = 3000;
+pub const SEEK_CATCH_UP_MS: u64 = 1500;
 
 /// A pending seek's display hold expires this long after the commit, so a seek
 /// the pipeline cannot honour (e.g. at EOS, where the fast-forward never reaches
