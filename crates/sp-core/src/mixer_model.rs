@@ -302,7 +302,7 @@ impl Default for MixConsole {
     fn default() -> Self {
         Self {
             song: MixFaders::new(1.0, 1.0, 1.0),
-            dub: MixFaders::new(1.0, 1.0, 1.0),
+            dub: MixFaders::new(0.0, 1.0, 1.0),
             active: MixKind::Song,
         }
     }
