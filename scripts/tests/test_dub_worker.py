@@ -165,19 +165,36 @@ def test_build_transcripts_includes_at_ms_and_tempo():
     assert c1["sk_timed"] == [{"t_ms": 400, "text": "Dovidenia"}]
 
 
-def _cached(voice="Charon", start_ms=0, end_ms=120_000):
-    return {
+def _cached(voice="Charon", start_ms=0, end_ms=120_000, guarded=True):
+    meta = {
         "index": 0,
         "voice": voice,
         "chunk_start_ms": start_ms,
         "chunk_end_ms": end_ms,
     }
+    if guarded:
+        # #184 round E2: a guarded chunk carries its per-window medians.
+        meta["voice_medians"] = [108.0, 110.0]
+    return meta
 
 
 def test_chunk_reusable_same_voice_same_bounds_reuses():
     # #184 round C: a cached chunk recorded under the SAME voice (and, round E,
-    # the SAME chunk boundaries) is reused.
+    # the SAME chunk boundaries; round E2, voice-guarded) is reused.
     assert dw.chunk_reusable(_cached(), "Charon", 0, 120_000) is True
+
+
+def test_chunk_reusable_unguarded_chunk_resynth():
+    # #184 round E2: a chunk synthesized BEFORE the baseline-relative guard has no
+    # `voice_medians` record — it was never checked against the pinned voice, so a
+    # re-dub must re-synthesize it (reusing it would silently keep drifted audio,
+    # which is exactly what the re-dub was requested to fix). Same voice, same
+    # bounds, but unguarded → NOT reusable.
+    assert dw.chunk_reusable(_cached(guarded=False), "Charon", 0, 120_000) is False
+    # An empty medians list (guard skipped: scan failure) is unguarded too.
+    meta = _cached()
+    meta["voice_medians"] = []
+    assert dw.chunk_reusable(meta, "Charon", 0, 120_000) is False
 
 
 def test_chunk_reusable_different_voice_resynth():
