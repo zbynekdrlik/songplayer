@@ -64,6 +64,7 @@ fn dark_wall_event(now: Instant, consecutive_bad_polls: u32) -> PipelineEvent {
         frames_submitted_last_5s: 120,
         observed_fps: 30.0,
         nominal_fps: 30.0,
+        source_fps: 30.0,
         last_submit_ts: Some(now),
         last_heartbeat_ts: now,
         consecutive_bad_polls,
@@ -178,6 +179,7 @@ async fn handle_health_snapshot_clears_recovery_step_on_recovery() {
             frames_submitted_last_5s: 120,
             observed_fps: 30.0,
             nominal_fps: 30.0,
+            source_fps: 30.0,
             last_submit_ts: Some(now),
             last_heartbeat_ts: now,
             consecutive_bad_polls: 0,
@@ -233,6 +235,7 @@ async fn handle_health_snapshot_populates_registry_for_known_pipeline() {
             frames_submitted_last_5s: 30,
             observed_fps: 29.97,
             nominal_fps: 29.97,
+            source_fps: 29.97,
             last_submit_ts: Some(now),
             last_heartbeat_ts: now,
             consecutive_bad_polls: 0,
@@ -276,6 +279,7 @@ fn handle_health_snapshot_persists_without_a_tokio_reactor() {
             frames_submitted_last_5s: 30,
             observed_fps: 29.97,
             nominal_fps: 29.97,
+            source_fps: 29.97,
             last_submit_ts: Some(now),
             last_heartbeat_ts: now,
             consecutive_bad_polls: 0,
@@ -308,6 +312,7 @@ async fn health_snapshot_event_persists_the_receiver_count_to_the_db() {
                 frames_submitted_last_5s: 30,
                 observed_fps: 29.97,
                 nominal_fps: 29.97,
+                source_fps: 29.97,
                 last_submit_ts: Some(now),
                 last_heartbeat_ts: now,
                 consecutive_bad_polls: 0,
@@ -395,6 +400,7 @@ async fn handle_health_snapshot_drops_event_for_unknown_pipeline() {
             frames_submitted_last_5s: 0,
             observed_fps: 0.0,
             nominal_fps: 30.0,
+            source_fps: 30.0,
             last_submit_ts: None,
             last_heartbeat_ts: now,
             consecutive_bad_polls: 0,
@@ -419,6 +425,7 @@ async fn registry_holds_one_entry_per_pipeline_with_health() {
         frames_submitted_last_5s: 0,
         observed_fps: 0.0,
         nominal_fps: 30.0,
+        source_fps: 30.0,
         last_submit_ts: None,
         last_heartbeat_ts: now,
         consecutive_bad_polls: 0,
@@ -451,6 +458,7 @@ async fn engine_overrides_idle_to_waiting_for_scene_when_canonical_state_says_so
             frames_submitted_last_5s: 0,
             observed_fps: 0.0,
             nominal_fps: 30.0,
+            source_fps: 30.0,
             last_submit_ts: None,
             last_heartbeat_ts: now,
             consecutive_bad_polls: 0,
@@ -485,6 +493,7 @@ async fn handle_health_snapshot_fills_degraded_reason_at_2_consecutive_bad_polls
             frames_submitted_last_5s: 30,
             observed_fps: 30.0,
             nominal_fps: 30.0,
+            source_fps: 30.0,
             last_submit_ts: Some(now),
             last_heartbeat_ts: now,
             consecutive_bad_polls: 2,
@@ -566,6 +575,7 @@ async fn handle_health_snapshot_visibility_only_on_prolonged_dark_wall() {
             frames_submitted_last_5s: 120,
             observed_fps: 24.0,
             nominal_fps: 24.0,
+            source_fps: 24.0,
             last_submit_ts: Some(now),
             last_heartbeat_ts: now,
             consecutive_bad_polls: 100,
@@ -607,6 +617,7 @@ async fn handle_health_snapshot_clears_degraded_reason_on_clean_poll() {
             frames_submitted_last_5s: 120,
             observed_fps: 24.0,
             nominal_fps: 24.0,
+            source_fps: 24.0,
             last_submit_ts: Some(now),
             last_heartbeat_ts: now,
             consecutive_bad_polls: 5,
@@ -630,6 +641,7 @@ async fn handle_health_snapshot_clears_degraded_reason_on_clean_poll() {
             frames_submitted_last_5s: 120,
             observed_fps: 24.0,
             nominal_fps: 24.0,
+            source_fps: 24.0,
             last_submit_ts: Some(now),
             last_heartbeat_ts: now,
             consecutive_bad_polls: 0,
@@ -695,6 +707,7 @@ async fn handle_health_snapshot_skips_alert_when_scene_inactive() {
             frames_submitted_last_5s: 30,
             observed_fps: 30.0,
             nominal_fps: 30.0,
+            source_fps: 30.0,
             last_submit_ts: Some(now),
             last_heartbeat_ts: now,
             consecutive_bad_polls: 5,
@@ -710,6 +723,86 @@ async fn handle_health_snapshot_skips_alert_when_scene_inactive() {
         snapshots[0].degraded_reason.is_none(),
         "scene_active=false must not produce a degraded_reason even with connections=0"
     );
+}
+
+/// #168 r6b — a paced HealthSnapshot event with distinct `nominal_fps` (grid) + `source_fps` (decoder).
+fn paced_lock_event(
+    ts: Instant,
+    nominal: f32,
+    source: f32,
+    seq: u64,
+    late: u64,
+    reps: u64,
+) -> PipelineEvent {
+    PipelineEvent::HealthSnapshot {
+        connections: 2,
+        frames_submitted_total: seq,
+        frames_submitted_last_5s: 30,
+        observed_fps: 30.0,
+        nominal_fps: nominal,
+        source_fps: source,
+        last_submit_ts: Some(ts),
+        last_heartbeat_ts: ts,
+        consecutive_bad_polls: 0,
+        reported_state: PlaybackStateLabel::Playing,
+        pacing: PacingStats {
+            enabled: true,
+            seq,
+            late_frames: late,
+            repeats: reps,
+            resyncs: 0,
+            ..Default::default()
+        },
+        audio: Default::default(),
+        loop_stats: Default::default(),
+    }
+}
+
+/// #168 r6b — the fix at the engine seam. A paced 23.976-fps output on the 30-grid
+/// (box read: slots 1803, late 3, repeats 362) reports `nominal_fps = 30` but
+/// `source_fps = 23.976`; `handle_health_snapshot` must copy `source_fps` onto the
+/// snapshot AND feed it (not the grid nominal) to the lock rule → LOCKED.
+#[tokio::test]
+async fn handle_health_snapshot_locks_on_source_fps_not_grid_nominal() {
+    let (mut engine, registry) = fresh_engine().await;
+    // Box clock LOCKED (NANO) so the lock rule reaches the rate checks.
+    let clock = crate::playback::clock_health::evaluate(Some(
+        &crate::playback::clock_health::DantesyncStatus {
+            is_locked: Some(true),
+            mode: Some("NANO".to_string()),
+            offset_ns: None,
+            ntp_failed: None,
+            ntp_age_s: None,
+        },
+    ));
+    engine.set_clock_health(Arc::new(std::sync::RwLock::new(clock)));
+    engine.ensure_pipeline(4, "SP-slow");
+    engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
+    engine.set_scene_active_for_test(4, true);
+
+    // Two heartbeats 60 s apart build the differenced window: baseline then counts.
+    let t0 = Instant::now();
+    let t1 = t0 + std::time::Duration::from_secs(60);
+    engine.handle_health_snapshot(4, paced_lock_event(t0, 30.0, 23.976, 0, 0, 0));
+    engine.handle_health_snapshot(4, paced_lock_event(t1, 30.0, 23.976, 1803, 3, 362));
+
+    let snap = &registry.snapshots()[0];
+    // (a) source_fps survives event → snapshot; nominal_fps stays the grid.
+    assert_eq!(
+        snap.source_fps, 23.976,
+        "source_fps must survive event → snapshot"
+    );
+    assert_eq!(
+        snap.nominal_fps, 30.0,
+        "nominal_fps stays the OUTPUT nominal (grid)"
+    );
+    // (b) the lock rule reads source_fps (23.976) → LOCKED; nominal_fps (30) would DEGRADE.
+    assert_eq!(
+        snap.lock_state,
+        sp_core::genlock::lock_state::LockState::Locked,
+        "24-fps structural repeats must read LOCKED via source_fps, not grid nominal_fps"
+    );
+    assert_eq!(snap.lock_reason, "locked");
 }
 
 // ---- #167 registry readiness signals -------------------------------------
@@ -812,6 +905,7 @@ fn mk_reported_snapshot(playlist_id: i64) -> PipelineHealthSnapshot {
         frames_submitted_last_5s: 0,
         observed_fps: 0.0,
         nominal_fps: 0.0,
+        source_fps: 0.0,
         last_submit_ts: None,
         last_heartbeat_ts: None,
         consecutive_bad_polls: 0,

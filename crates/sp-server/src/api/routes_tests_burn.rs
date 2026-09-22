@@ -89,6 +89,7 @@ fn burn_health_snapshot(burn_on: bool) -> crate::playback::ndi_health::PipelineH
         frames_submitted_last_5s: 1,
         observed_fps: 30.0,
         nominal_fps: 30.0,
+        source_fps: 30.0,
         last_submit_ts: None,
         last_heartbeat_ts: None,
         consecutive_bad_polls: 0,

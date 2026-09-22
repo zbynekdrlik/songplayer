@@ -404,7 +404,19 @@ UNLOCKED "clock not ok"; `!pacing` → UNLOCKED "pacing disabled"; `connections=
   structural conversion + 10 %. `expected_repeat_permille = 1000 − source/grid×1000`
   (24/30 → 200 ‰ = 20 % of slots; 25/30 → 167; 30/30 & 60/30 → 0). Integer
   permille, no float in the rule; `grid` is the pacer's `GENLOCK_GRID_FPS` (30),
-  `source_fps` the snapshot's `nominal_fps`.
+  and `source_fps` is the snapshot's **`source_fps`** — the DECODER's rate
+  (`decoder.frame_rate()`), path-independent. **#168 r6b: NEVER use `nominal_fps`
+  as the source rate.** `nominal_fps` is the OUTPUT nominal — the fixed grid (30)
+  on the paced path, the decoder rate only on the SDK-clocked path — so feeding it
+  as the source made a 23.976-fps output expect 0 % repeats and falsely DEGRADE on
+  the structural 20 % conversion (box read 22.9.2026 17:56 UTC). The event +
+  snapshot carry both: `nominal_fps` (output nominal) and `source_fps` (decoder).
+  **Sourcing `source_fps`:** SDK-clocked path = `submitter.nominal_fps()` (the
+  submitter is `set_frame_rate`'d to the decoder there). PACED path = threaded
+  from the decode PRODUCER via `open_tx` (`run_decode_producer` reads
+  `decoder.frame_rate()`; the submit thread owns the submitter, and the paced
+  submitter is NEVER `set_frame_rate`'d so `submitter.nominal_fps()` there is the
+  grid, not the source).
 - **Calibration (22.9.2026, SP-slow 24 fps on the 30-fps grid, 1 800 slots/min):**
   clean grid late ≤ 6 % of slots (0–100/min), stalled 42 % (W1 ~750/min,
   30–105 ms); repeats a constant 20 % (= 1 − 24/30) in EVERY window; resyncs 0.

@@ -34,6 +34,7 @@ async fn ndi_health_endpoint_includes_clock() {
         frames_submitted_last_5s: 3,
         observed_fps: 29.97,
         nominal_fps: 29.97,
+        source_fps: 29.97,
         last_submit_ts: None,
         last_heartbeat_ts: None,
         consecutive_bad_polls: 0,

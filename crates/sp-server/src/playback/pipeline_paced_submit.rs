@@ -320,7 +320,10 @@ pub(crate) fn run_submit_consumer(
 /// `pipeline::emit_heartbeat`, but `late_frames` / `max_late_us` / `iter_p99` /
 /// `dropped` come from the merged pacer+submit stats, and the frame / connection
 /// / last-submit fields come from the submit snapshot. `nominal_fps` is the fixed
-/// genlock grid (the paced submitter carries `GENLOCK_GRID_FPS/1`).
+/// genlock grid (the paced submitter carries `GENLOCK_GRID_FPS/1`); `source_fps`
+/// is the DECODER's rate (#168 r6b), passed in by the caller because the submit
+/// thread owns the submitter here — the lock rule reads `source_fps`, not the
+/// grid-valued `nominal_fps`.
 #[cfg_attr(test, mutants::skip)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_heartbeat_paced(
@@ -332,6 +335,7 @@ pub(crate) fn emit_heartbeat_paced(
     consecutive_bad_polls: &mut u32,
     pacer_stats: PacingStats,
     audio: AudioStats,
+    source_fps: f32,
     prev_total: &mut u64,
     prev_instant: &mut Instant,
 ) {
@@ -367,6 +371,7 @@ pub(crate) fn emit_heartbeat_paced(
             frames_submitted_last_5s: window_frames as u32,
             observed_fps,
             nominal_fps,
+            source_fps,
             last_submit_ts,
             last_heartbeat_ts: now,
             consecutive_bad_polls: *consecutive_bad_polls,

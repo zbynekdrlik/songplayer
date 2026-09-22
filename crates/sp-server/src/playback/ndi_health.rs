@@ -65,6 +65,8 @@ pub struct PipelineHealthSnapshot {
     pub frames_submitted_last_5s: u32,
     pub observed_fps: f32,
     pub nominal_fps: f32,
+    /// #168 r6b: file SOURCE fps (decoder rate), path-independent; the lock rule reads THIS, not grid-valued `nominal_fps`.
+    pub source_fps: f32,
     pub last_submit_ts: Option<DateTime<Utc>>,
     pub last_heartbeat_ts: Option<DateTime<Utc>>,
     pub consecutive_bad_polls: u32,
@@ -592,6 +594,7 @@ impl crate::playback::PlaybackEngine {
             frames_submitted_last_5s,
             observed_fps,
             nominal_fps,
+            source_fps,
             last_submit_ts,
             last_heartbeat_ts,
             consecutive_bad_polls,
@@ -740,19 +743,18 @@ impl crate::playback::PlaybackEngine {
             .saturating_duration_since(self.instant_origin.0)
             .as_nanos()
             / 100) as i64;
-        // #168 round 6: push this heartbeat's cumulative pacing counters into
-        // the 60 s window, difference the window (slots + late/repeats/resyncs),
-        // and derive the rate-normalised three-state lock. `source_fps` is the
-        // playing file's nominal fps; `grid_fps` the pacer's fixed grid
-        // (`GENLOCK_GRID_FPS`, reused — never a second literal). One call keeps
-        // this 999/1000-line file line-neutral.
+        // #168 r6b: push this heartbeat's cumulative pacing counters into the 60 s
+        // window, difference it (slots + late/repeats/resyncs), and derive the
+        // rate-normalised lock. Feed `source_fps` (the DECODER rate, path-independent)
+        // — NOT `nominal_fps` (the grid on the paced path, which falsely degraded a
+        // 24-fps output) — with `grid_fps` the pacer's fixed `GENLOCK_GRID_FPS`.
         let (lock_state, lock_reason) = crate::playback::lock_state::lock_for_heartbeat(
             self.lock_windows.entry(playlist_id).or_default(),
             heartbeat_100ns,
             &pacing,
             clock.clock_ok,
             connections.max(0) as u32,
-            nominal_fps,
+            source_fps,
             sp_core::genlock::GENLOCK_GRID_FPS as u32,
         );
 
@@ -788,6 +790,7 @@ impl crate::playback::PlaybackEngine {
             frames_submitted_last_5s,
             observed_fps,
             nominal_fps,
+            source_fps,
             last_submit_ts: last_submit_ts.map(|t| self.instant_to_utc(t)),
             last_heartbeat_ts: Some(self.instant_to_utc(last_heartbeat_ts)),
             consecutive_bad_polls,

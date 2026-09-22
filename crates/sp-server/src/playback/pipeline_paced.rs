@@ -170,7 +170,7 @@ fn run_decode_producer(
     audio_path: std::path::PathBuf,
     start_position_ms: Option<u64>,
     shared: Arc<SharedQueue<QueuedFrame>>,
-    open_tx: crossbeam_channel::Sender<Result<u64, String>>,
+    open_tx: crossbeam_channel::Sender<Result<(u64, f32), String>>,
     taps: crate::playback::preview::preview_stream::DecodeTaps,
     playlist_id: i64,
 ) {
@@ -229,7 +229,18 @@ fn run_decode_producer(
     }
 
     let duration_ms = decoder.duration_ms();
-    if open_tx.send(Ok(duration_ms)).is_err() {
+    // #168 r6b: report the DECODER's source fps alongside the duration so the
+    // paced heartbeat can carry a path-independent `source_fps` to the lock rule
+    // (the paced submitter carries the grid rate, so `submitter.nominal_fps()`
+    // there is the grid, never the source). `(num, den)` is the same pair the
+    // SDK path reads at `pipeline.rs` before `set_frame_rate`.
+    let (num, den) = decoder.frame_rate();
+    let source_fps = if den == 0 {
+        0.0
+    } else {
+        num as f32 / den as f32
+    };
+    if open_tx.send(Ok((duration_ms, source_fps))).is_err() {
         return; // the emit thread is already gone
     }
 
@@ -370,7 +381,7 @@ pub(crate) fn decode_and_send_paced(
     // Spawn the decode producer — it owns the decoder on its own STA thread and
     // fills the bounded look-ahead queue.
     let shared: Arc<SharedQueue<QueuedFrame>> = Arc::new(SharedQueue::new(DECODE_QUEUE_BOUND));
-    let (open_tx, open_rx) = crossbeam_channel::bounded::<Result<u64, String>>(1);
+    let (open_tx, open_rx) = crossbeam_channel::bounded::<Result<(u64, f32), String>>(1);
     let producer = {
         let shared = shared.clone();
         let taps = taps.clone();
@@ -394,8 +405,8 @@ pub(crate) fn decode_and_send_paced(
 
     // Block until the producer has opened the decoder and reported the duration
     // (or an open error). A dead producer (Disconnected) is an open failure.
-    let duration_ms = match open_rx.recv() {
-        Ok(Ok(d)) => d,
+    let (duration_ms, source_fps) = match open_rx.recv() {
+        Ok(Ok(pair)) => pair,
         Ok(Err(msg)) => {
             let _ = producer.join();
             return DecodeResult::Error(msg);
@@ -533,6 +544,7 @@ pub(crate) fn decode_and_send_paced(
                         // change 7): a paced pipeline is `enabled=true` while paused.
                         pacer.stats(),
                         pacer.audio_stats(),
+                        source_fps,
                         &mut hb_prev_total,
                         &mut hb_prev_instant,
                     );
@@ -599,6 +611,7 @@ pub(crate) fn decode_and_send_paced(
                             consecutive_bad_polls,
                             pacer.stats(),
                             pacer.audio_stats(),
+                            source_fps,
                             &mut hb_prev_total,
                             &mut hb_prev_instant,
                         );

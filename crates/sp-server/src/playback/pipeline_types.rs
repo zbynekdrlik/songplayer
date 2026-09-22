@@ -59,6 +59,14 @@ pub enum PipelineEvent {
         frames_submitted_last_5s: u32,
         observed_fps: f32,
         nominal_fps: f32,
+        /// #168 round 6b: the decoder's SOURCE frame rate (`decoder.frame_rate()`
+        /// as fps), path-INDEPENDENT. Distinct from `nominal_fps`, which is the
+        /// OUTPUT nominal — the fixed genlock grid on the paced path, the decoder
+        /// rate on the SDK-clocked path. The lock rule needs the source rate to
+        /// know the structural fps-conversion repeat fraction, so it reads THIS,
+        /// never `nominal_fps` (which reads the grid 30 on the paced path and
+        /// falsely degraded a 24-fps output).
+        source_fps: f32,
         /// `Instant` is fine on the wire here because emitter and consumer
         /// are in the same process. The engine maps it to `DateTime<Utc>`
         /// using a fixed `Instant`-to-`SystemTime` reference before
