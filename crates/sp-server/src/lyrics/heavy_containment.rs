@@ -77,7 +77,7 @@ pub(crate) fn default_affinity_mask(logical_cores: usize) -> u64 {
     // The child gets the TOP `top` logical cores; a box with < 4 gets all of
     // them. `top <= cores`, so `shift = cores - top` never underflows and the
     // mask's highest set bit is `cores - 1` (≤ 63) — no shift overflow.
-    let top = cores.min(6); // RED: GREEN sets the 4-core block via `.min(4)`
+    let top = cores.min(4); // the top 4 logical cores — the measured grid-holding block
     let shift = cores - top; // the lower cores reserved for the wall/OBS/Resolume
     ((1u64 << top) - 1) << shift
 }

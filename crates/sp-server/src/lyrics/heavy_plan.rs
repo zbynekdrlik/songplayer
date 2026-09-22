@@ -386,7 +386,7 @@ fn cpu_idle_threads() -> usize {
 /// logical cores oversubscribe. A wide `block` (an explicit whole-machine mask)
 /// lets the quarter rule win. Extracted so it is deterministic in tests.
 fn cpu_idle_threads_for(cores: usize, block: usize) -> usize {
-    (cores / 8).min(block).max(1) // RED: GREEN sets the quarter rule via `/ 4`
+    (cores / 4).min(block).max(1) // the #162 quarter rule, capped to the block
 }
 
 // ---------------------------------------------------------------------------
