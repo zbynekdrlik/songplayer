@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import subprocess
 import sys
@@ -41,10 +40,40 @@ DRAIN_S = 27.0  # keep receiving this long after audio_stream_end (silence trail
 HEARTBEAT_EVERY_S = 5.0
 DEFAULT_VOICE = "Charon"  # #184 round C: a male, matter-of-fact catalogue voice
 
-# #184 round E: per-chunk voice-band guard tuning.
+# #184 round E2: per-chunk voice-band guard tuning.
 VOICE_WINDOW_S = 5.0  # the f0-median window for the drift scan
-VOICE_ST_ABOVE = 6.0  # semitones above the chunk median that count as "high"
-VOICE_DRIFT_FRAC = 0.20  # a chunk is drifted when drifted/voiced exceeds this
+VOICE_ST_ABOVE = 6.0  # semitones above the RUNNING baseline that count as "high"
+# A chunk needs re-synthesis when it has >= VOICE_DRIFT_MIN_WINDOWS true-drift
+# windows OR a true-drift FRACTION over VOICE_DRIFT_FRAC. VOICE_DRIFT_FRAC is the
+# SAME 0.05 the file gate (`dub_voice_check.MAX_HIGH_BAND_FRACTION`) fails a file
+# at — a unit test pins the equality so the chunk trigger can never sit laxer than
+# the gate it protects (round E's bug: the trigger was 0.20, 4x the gate, so a
+# chunk at 4/22 = 18 % passed the guard while failing the file).
+VOICE_DRIFT_MIN_WINDOWS = 2
+VOICE_DRIFT_FRAC = 0.05
+VOICE_RESYNTH_ATTEMPTS = 2  # up to N re-synths (new session, same pin) per chunk
+
+# #184 round E2: the SEED chunk (chunk 0, no running baseline yet) is checked
+# against the pinned voice's EXPECTED f0 band — a coarse "chunk 0 is roughly the
+# right voice" gate so a wrong seed does not poison the running baseline for every
+# later chunk. Measured 2026-09-22 by `eval/dubbing/voice_band_measure.py` on the
+# 120-s seg.wav with the autocorrelation estimator (`use_librosa=False`, the SAME
+# path the runtime seed median uses — librosa/pyin would be a different unit), then
+# WIDENED to `median × [0.80, 1.55]` so a legit content-driven shift still seeds
+# (e.g. video 344's Charon dub median ~108 Hz) while a clear octave jump (×2) is
+# rejected. Autocorrelation collapses octaves (all six voices measure ~87–94 Hz),
+# so this is a COARSE seed gate, NOT a fine voice discriminator — the
+# baseline-relative window guard + the on-box `--source` file gate (pyin) are the
+# real drift detectors. An unknown voice → no seed check (seed as-is).
+#                        seg p10–p90 / median (Hz, autocorrelation)
+VOICE_F0_BAND = {
+    "Charon": (73, 142),  # 84.9–100.8 / 91.3  (contains 344's ~108 Hz dub)
+    "Orus": (75, 146),  # 90.3–103.0 / 94.1
+    "Puck": (74, 144),  # 89.0–99.5 / 92.8
+    "Kore": (72, 139),  # 81.3–105.3 / 89.9
+    "Aoede": (70, 135),  # 81.3–98.2 / 87.3
+    "Leda": (72, 139),  # 83.7–100.7 / 89.9
+}
 
 
 # ── pure helpers (unit-tested; no I/O, no heavy imports) ─────────────────────────
@@ -155,56 +184,76 @@ def chunk_reusable(meta: dict, voice: str, start_ms: int, end_ms: int) -> bool:
     )
 
 
-def _semitones(hz: float, ref: float) -> float:
-    """Signed semitone interval of `hz` above `ref` (both > 0)."""
-    return 12.0 * math.log2(hz / ref)
-
-
 def chunk_voice_drift(
-    out_medians: list, in_medians: list, st_above: float = VOICE_ST_ABOVE
+    out_medians: list,
+    in_medians: list,
+    out_baseline: float | None,
+    in_baseline: float | None,
+    st_above: float = VOICE_ST_ABOVE,
 ) -> tuple[int, int]:
-    """(#184 round E) Count the DRIFTED and VOICED 5-s windows of one synthesized
-    chunk. A window is DRIFTED when its OUTPUT median is > `st_above` semitones
-    above the OUTPUT chunk median AND the aligned INPUT window is NOT > `st_above`
-    above the INPUT chunk median — so a genuine high stretch in the SOURCE (the
-    dub correctly following a raised voice) is NOT counted, only a voice the model
-    invented. Input windows are aligned to output windows by fraction of duration
-    (the chunk's atempo may have changed the count). `voiced` = the output windows
-    with a voiced pitch. Like the file-level `dub_voice_check`, this shares the
-    base-dominant assumption: a truly balanced 50/50 rotation inside one chunk is
-    NOT detected (the chunk median sits between the two voices, so neither clears
-    +6 st) — that is not the observed symptom. Pure — unit-tested."""
-    out_voiced = [m for m in out_medians if m > 0]
-    if not out_voiced:
-        return (0, 0)
-    out_med = median(out_voiced)
-    in_voiced = [m for m in in_medians if m > 0]
-    in_med = median(in_voiced) if in_voiced else 0.0
-    n_out = len(out_medians)
-    n_in = len(in_medians)
-    drifted = 0
-    voiced = 0
-    for i, out_m in enumerate(out_medians):
-        if out_m <= 0:
-            continue
-        voiced += 1
-        if _semitones(out_m, out_med) <= st_above:
-            continue
-        # The output window is high — a drift UNLESS the aligned source is high too.
-        in_high = False
-        if n_in > 0 and in_med > 0:
-            j = min(int(i * n_in / n_out), n_in - 1)
-            in_m = in_medians[j]
-            in_high = in_m > 0 and _semitones(in_m, in_med) > st_above
-        if not in_high:
-            drifted += 1
-    return (drifted, voiced)
+    """(#184 round E2) Count the (DRIFTED, VOICED) 5-s windows of one synthesized
+    chunk against the RUNNING baselines — the pinned-voice OUTPUT baseline (median
+    of the voiced output windows of the chunks accepted so far) and the SOURCE
+    INPUT baseline (running median of the input windows) — NOT the chunk's own
+    medians. This is the round-E2 fix for the whole-chunk blind spot: a chunk that
+    is high THROUGHOUT (round E's chunk 10) has a high chunk median, so round E saw
+    0 drift; measured against the running voice baseline those windows are high and
+    counted, unless the aligned SOURCE window is also high above the source
+    baseline (source-following, discounted). Delegates to the ONE shared drift
+    definition in `dub_voice_check.drift_windows` so the guard and the file check
+    measure the same thing. `out_baseline` None/<=0 (the seed chunk, no baseline
+    yet) → (0, voiced). Pure — unit-tested."""
+    import dub_voice_check as dvc
+
+    return dvc.drift_windows(
+        out_medians, in_medians, out_baseline, in_baseline, st_above
+    )
 
 
 def _chunk_is_drifted(drifted: int, voiced: int) -> bool:
-    """A chunk is drifted when more than `VOICE_DRIFT_FRAC` of its voiced windows
-    drifted (a handful of estimator-noise windows do not trip it). Pure."""
-    return voiced > 0 and drifted / voiced > VOICE_DRIFT_FRAC
+    """(#184 round E2) A chunk needs re-synthesis when it has at least
+    `VOICE_DRIFT_MIN_WINDOWS` true-drift windows OR a true-drift FRACTION over
+    `VOICE_DRIFT_FRAC` (== the file gate's `MAX_HIGH_BAND_FRACTION`). The absolute
+    floor catches a couple of drifted windows a small chunk's fraction would miss;
+    the fraction matches the file gate exactly (round E's 0.20 was 4x too lax).
+    Pure."""
+    if voiced <= 0:
+        return False
+    return drifted >= VOICE_DRIFT_MIN_WINDOWS or drifted / voiced > VOICE_DRIFT_FRAC
+
+
+def voice_band_for(voice: str) -> tuple | None:
+    """(#184 round E2) The `(lo, hi)` expected f0 band for `voice`, or None when
+    the voice is not in the measured `VOICE_F0_BAND` table (an unknown voice gets
+    no seed check — it seeds the baseline as-is). Pure."""
+    return VOICE_F0_BAND.get(voice)
+
+
+def seed_median_ok(median_hz: float, voice: str) -> bool | None:
+    """(#184 round E2) Is the SEED chunk's voiced f0 median inside `voice`'s
+    expected band? True/False when the voice is known, None when it is not (no
+    check). A seed outside its band is a wrong-voice seed that would poison the
+    running baseline for every later chunk, so it is treated as drifted. Pure."""
+    band = voice_band_for(voice)
+    if band is None:
+        return None
+    lo, hi = band
+    return lo <= median_hz <= hi
+
+
+def baseline_from_meta(meta: dict) -> tuple[list, list]:
+    """(#184 round E2) The `(output_medians, input_medians)` a chunk contributes to
+    the running pinned-voice / source baselines, read from its persisted
+    `chunk_N.json`. Only an ACCEPTED chunk contributes: a chunk that shipped still
+    drifted (`voice_band_ok is False`) or a legacy chunk with no persisted medians
+    contributes nothing, so the baseline is never poisoned and a resumed run
+    rebuilds the same baseline from the reused chunks. Pure — unit-tested."""
+    if meta.get("voice_band_ok") is False:
+        return ([], [])
+    return (
+        list(meta.get("voice_medians") or []),
+        list(meta.get("voice_in_medians") or []),
+    )
 
 
 def build_transcripts(results: list[dict]) -> dict:
@@ -328,6 +377,33 @@ def _render_and_trim(
     return en, sk, sk_timed
 
 
+def _score_candidate(
+    out_medians: list,
+    in_medians: list,
+    out_baseline: float | None,
+    in_baseline: float | None,
+    voice: str,
+) -> tuple[int, int, bool]:
+    """(#184 round E2) Score one synthesized take: `(drifted, voiced, is_drifted)`.
+    With a running baseline it is the window-drift against that baseline
+    (`chunk_voice_drift` + `_chunk_is_drifted`). For the SEED take (no baseline
+    yet) it is the band check: an in-band / unknown-voice seed scores `(0, voiced,
+    False)`; an out-of-band seed scores `(voiced, voiced, True)` so a re-synth that
+    lands in band (0 drifted) is kept over it. Pure-ish — calls chunk_voice_drift."""
+    voiced_meds = [m for m in out_medians if m > 0]
+    voiced = len(voiced_meds)
+    if out_baseline and out_baseline > 0:
+        drifted, voiced = chunk_voice_drift(
+            out_medians, in_medians, out_baseline, in_baseline
+        )
+        return drifted, voiced, _chunk_is_drifted(drifted, voiced)
+    # Seed take (no running baseline yet): check the median against the voice band.
+    med = median(voiced_meds) if voiced_meds else 0.0
+    if seed_median_ok(med, voice) is False:
+        return voiced, voiced, True  # whole seed is the wrong voice
+    return 0, voiced, False
+
+
 def _apply_voice_band_guard(
     idx: int,
     pcm: bytes,
@@ -335,41 +411,58 @@ def _apply_voice_band_guard(
     work_dir: str,
     voice: str,
     wav_path: str,
+    out_baseline: float | None,
+    in_baseline: float | None,
     en: str,
     sk: str,
     sk_timed: list,
 ) -> tuple:
-    """#184 round E: scan the just-synthesized chunk `wav_path` for a drifted voice
-    band and re-synthesize ONCE (new session, same pin) when drifted, keeping the
-    candidate with fewer drifted windows. Returns
-    `(voice_band_ok, drifted, voiced, en, sk, sk_timed)` (the transcripts of
-    whichever take was kept).
+    """#184 round E2: scan the just-synthesized chunk `wav_path` against the
+    RUNNING pinned-voice output baseline + source input baseline (the seed chunk,
+    with no baseline yet, against the voice's expected band) and re-synthesize up
+    to `VOICE_RESYNTH_ATTEMPTS` times (new session, same pin) when it drifts,
+    keeping the take with the fewest true-drift windows. Returns
+    `(voice_band_ok, drifted, voiced, out_medians, in_medians, en, sk, sk_timed)`
+    of the kept take — the medians so the caller can feed the running baselines
+    (only when accepted; a still-drifted chunk must NOT poison them).
 
     BEST-EFFORT: this decorates the dub, it must never FAIL it. Any scan failure
     (numpy/dub_voice_check import, a truncated/unreadable output wav) is caught,
-    logged, and falls through with `voice_band_ok=None` and no re-synthesis — the
-    dub is shipped as-is."""
+    logged, and falls through with `voice_band_ok=None`, empty medians (no baseline
+    update) and no re-synthesis — the dub is shipped as-is (round-E rule)."""
     try:
         in_medians = _pcm_window_medians(pcm, INPUT_SR)
-        drifted, voiced = chunk_voice_drift(_wav_window_medians(wav_path), in_medians)
-        if _chunk_is_drifted(drifted, voiced):
+        out_medians = _wav_window_medians(wav_path)
+        drifted, voiced, is_drifted = _score_candidate(
+            out_medians, in_medians, out_baseline, in_baseline, voice
+        )
+        attempt = 0
+        while is_drifted and attempt < VOICE_RESYNTH_ATTEMPTS:
+            attempt += 1
             _log(
-                f"chunk {idx}: voice drift {drifted}/{voiced} windows -> re-synthesizing once"
+                f"chunk {idx}: voice drift {drifted}/{voiced} windows -> "
+                f"re-synth {attempt}/{VOICE_RESYNTH_ATTEMPTS}"
             )
             cand_raw = os.path.join(work_dir, f"chunk_{idx}.cand.raw.wav")
             cand_wav = os.path.join(work_dir, f"chunk_{idx}.cand.wav")
             en2, sk2, sk_timed2 = _render_and_trim(
                 pcm, pace, work_dir, voice, cand_raw, cand_wav
             )
-            drifted2, voiced2 = chunk_voice_drift(
-                _wav_window_medians(cand_wav), in_medians
+            out2 = _wav_window_medians(cand_wav)
+            drifted2, voiced2, is_drifted2 = _score_candidate(
+                out2, in_medians, out_baseline, in_baseline, voice
             )
             if drifted2 < drifted:
                 os.replace(cand_wav, wav_path)
                 en, sk, sk_timed = en2, sk2, sk_timed2
-                drifted, voiced = drifted2, voiced2
+                out_medians, drifted, voiced, is_drifted = (
+                    out2,
+                    drifted2,
+                    voiced2,
+                    is_drifted2,
+                )
                 _log(
-                    f"chunk {idx}: kept re-synth candidate ({drifted2}/{voiced2} drifted)"
+                    f"chunk {idx}: kept re-synth candidate ({drifted}/{voiced} drifted)"
                 )
             else:
                 try:
@@ -377,20 +470,26 @@ def _apply_voice_band_guard(
                 except OSError:
                     pass
                 _log(
-                    f"chunk {idx}: kept original ({drifted}/{voiced} drifted; "
+                    f"chunk {idx}: kept previous take ({drifted}/{voiced} drifted; "
                     f"candidate {drifted2}/{voiced2})"
                 )
+        voice_band_ok = not is_drifted
+        # The medians are persisted for transparency + baseline rebuild on resume;
+        # `baseline_from_meta` excludes a still-drifted chunk (voice_band_ok False)
+        # from the running baselines, so a drifted chunk never poisons them.
         return (
-            not _chunk_is_drifted(drifted, voiced),
+            voice_band_ok,
             drifted,
             voiced,
+            out_medians,
+            in_medians,
             en,
             sk,
             sk_timed,
         )
     except Exception as e:  # best-effort guard — a scan failure must NOT fail the dub
         _log(f"chunk {idx}: voice-band guard skipped ({type(e).__name__}: {e})")
-        return (None, 0, 0, en, sk, sk_timed)
+        return (None, 0, 0, [], [], en, sk, sk_timed)
 
 
 # ── the Live translation of one chunk ───────────────────────────────────────────
@@ -506,13 +605,17 @@ def _process_chunk(
     work_dir: str,
     pace: float,
     voice: str,
+    out_baseline: float | None = None,
+    in_baseline: float | None = None,
 ) -> dict:
     """Translate one chunk (resumable): returns the chunk result dict. Reuses an
     existing `chunk_N.json` + `chunk_N.wav` on a re-run ONLY when it was made with
     the SAME `voice` and the SAME chunk boundaries (#184 round C + E — a chunk
     recorded under another voice, a legacy chunk with no `voice`, or a chunk from
     an older chunk plan is re-synthesized so the whole dub is one voice laid at
-    the right offsets)."""
+    the right offsets). `out_baseline` / `in_baseline` (#184 round E2) are the
+    running pinned-voice / source medians of the chunks accepted so far, passed to
+    the voice-band guard; the seed chunk gets `None`."""
     start_ms = int(chunk["start_ms"])
     end_ms = int(chunk["end_ms"])
     result_path = os.path.join(work_dir, f"chunk_{idx}.json")
@@ -541,11 +644,25 @@ def _process_chunk(
     raw_wav = os.path.join(work_dir, f"chunk_{idx}.raw.wav")
     en, sk, sk_timed = _render_and_trim(pcm, pace, work_dir, voice, raw_wav, wav_path)
 
-    # #184 round E: scan the synthesized chunk for a drifted voice band and, if
-    # drifted, re-synthesize it once — best-effort (a scan failure never fails
-    # the dub, `voice_band_ok` then comes back None).
-    voice_band_ok, drifted, voiced, en, sk, sk_timed = _apply_voice_band_guard(
-        idx, pcm, pace, work_dir, voice, wav_path, en, sk, sk_timed
+    # #184 round E2: scan the synthesized chunk against the running pinned-voice /
+    # source baselines (seed chunk against the voice band) and re-synthesize up to
+    # 2 times if it drifts — best-effort (a scan failure never fails the dub,
+    # `voice_band_ok` then comes back None). `out_medians`/`in_medians` feed the
+    # running baselines (only when accepted; see `baseline_from_meta`).
+    voice_band_ok, drifted, voiced, out_medians, in_medians, en, sk, sk_timed = (
+        _apply_voice_band_guard(
+            idx,
+            pcm,
+            pace,
+            work_dir,
+            voice,
+            wav_path,
+            out_baseline,
+            in_baseline,
+            en,
+            sk,
+            sk_timed,
+        )
     )
 
     # 3. Measured output length + placement.
@@ -563,10 +680,14 @@ def _process_chunk(
         # #184 round C: record the voice so a later re-run reuses this chunk only
         # when the requested voice is unchanged (see `chunk_reusable`).
         "voice": voice,
-        # #184 round E: the per-chunk voice-band verdict + counts.
+        # #184 round E2: the per-chunk voice-band verdict + counts, plus the
+        # output/input 5-s medians so a resumed run rebuilds the running baselines
+        # from the reused chunks (`baseline_from_meta`).
         "voice_band_ok": voice_band_ok,
         "voice_drifted_windows": drifted,
         "voice_windows": voiced,
+        "voice_medians": out_medians,
+        "voice_in_medians": in_medians,
         "transcript_en": en,
         "transcript_sk": sk,
         "sk_timed": sk_timed,
@@ -601,14 +722,36 @@ def cmd_live_translate(args: argparse.Namespace) -> None:
     if not chunks:
         raise RuntimeError("empty chunk plan")
 
+    # #184 round E2: the running PINNED-VOICE (output) + SOURCE (input) baselines,
+    # accumulated in chunk order from the voiced medians of the chunks ACCEPTED so
+    # far. The first chunk seeds them (checked against the voice band); every later
+    # chunk's guard measures drift against the median of what accumulated BEFORE it.
+    accepted_out: list = []
+    accepted_in: list = []
     results = []
     for i, chunk in enumerate(chunks):
         next_start = int(chunks[i + 1]["start_ms"]) if i + 1 < len(chunks) else None
-        results.append(
-            _process_chunk(
-                i, chunk, next_start, args.audio, args.work_dir, args.pace, args.voice
-            )
+        out_baseline = median(accepted_out) if accepted_out else None
+        in_baseline = median(accepted_in) if accepted_in else None
+        result = _process_chunk(
+            i,
+            chunk,
+            next_start,
+            args.audio,
+            args.work_dir,
+            args.pace,
+            args.voice,
+            out_baseline,
+            in_baseline,
         )
+        results.append(result)
+        # Feed the running baselines with this chunk's medians — but only when it
+        # was ACCEPTED (a still-drifted or legacy/guard-skipped chunk contributes
+        # nothing, so it never poisons the pinned-voice baseline). Resume-safe: a
+        # reused chunk contributes its persisted medians the same way.
+        fed_out, fed_in = baseline_from_meta(result)
+        accepted_out.extend(fed_out)
+        accepted_in.extend(fed_in)
 
     # Assemble the dub on the video timeline: place each chunk at its at_ms with
     # its atempo, mix, 48 kHz stereo, loudnorm -16 (owner-approved dub-only mix).

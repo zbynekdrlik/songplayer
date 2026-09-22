@@ -81,6 +81,83 @@ def high_band_fraction(medians: list[float], st_above: float = HIGH_BAND_ST) -> 
     return float(np.mean(st > st_above))
 
 
+def _semitones_above(hz: float, ref: float) -> float:
+    """Pure: signed semitone interval of `hz` above `ref` (both > 0)."""
+    return 12.0 * math.log2(hz / ref)
+
+
+def drift_windows(
+    out_medians: list[float],
+    src_medians: list[float],
+    out_baseline: float | None,
+    src_baseline: float | None,
+    st_above: float = HIGH_BAND_ST,
+) -> tuple[int, int]:
+    """Pure (#184 round E2): count the (DRIFTED, VOICED) output windows against
+    EXPLICIT baselines — the ONE shared drift definition the file check and the
+    per-chunk guard both use. A window is DRIFTED when it is voiced AND its median
+    is > `st_above` semitones above `out_baseline` AND the aligned SOURCE window is
+    NOT > `st_above` above `src_baseline` (a genuine high stretch in the SOURCE is
+    discounted — the dub correctly following a raised voice is not drift). Source
+    windows are aligned to output windows by fraction of duration (an atempo may
+    have changed the count). `voiced` = output windows with a voiced pitch (> 0).
+
+    Unlike round E's `chunk_voice_drift`, the reference is a caller-supplied
+    baseline (the running PINNED-VOICE / SOURCE median), NOT the chunk's own
+    median — so a chunk that is high THROUGHOUT (round E's whole-chunk blind spot)
+    is measured against the true voice, not its own raised median. When
+    `out_baseline` is missing / <= 0 nothing can drift yet (no reference): returns
+    `(0, voiced)`. `src_baseline` missing / <= 0 → no source discount (every high
+    output window counts)."""
+    out_voiced = [m for m in out_medians if m > 0]
+    voiced = len(out_voiced)
+    if voiced == 0 or not out_baseline or out_baseline <= 0:
+        return (0, voiced)
+    n_out = len(out_medians)
+    n_src = len(src_medians)
+    src_has = bool(src_baseline and src_baseline > 0)
+    drifted = 0
+    for i, out_m in enumerate(out_medians):
+        if out_m <= 0:
+            continue
+        if _semitones_above(out_m, out_baseline) <= st_above:
+            continue
+        # The output window is high — a drift UNLESS the aligned source is high too.
+        src_high = False
+        if src_has and n_src > 0 and n_out > 0:
+            j = min(int(i * n_src / n_out), n_src - 1)
+            src_m = src_medians[j]
+            src_high = src_m > 0 and _semitones_above(src_m, src_baseline) > st_above
+        if not src_high:
+            drifted += 1
+    return (drifted, voiced)
+
+
+def true_drift_fraction(
+    out_medians: list[float],
+    src_medians: list[float],
+    st_above: float = HIGH_BAND_ST,
+) -> float:
+    """Pure (#184 round E2): the FRACTION of voiced output windows that TRULY
+    drift — more than `st_above` semitones above the OUTPUT file median, with
+    source-following windows DISCOUNTED (the aligned source window more than
+    `st_above` above the SOURCE file median). The baselines are the file medians
+    of the voiced windows. `< 2` voiced output windows → `0.0`. This is the
+    source-aware sibling of `high_band_fraction`: it is what the `--source` gate
+    reports, and it shares `drift_windows` with the per-chunk guard so the file
+    check and the guard measure the SAME thing."""
+    out_voiced = [m for m in out_medians if m > 0]
+    if len(out_voiced) < 2:
+        return 0.0
+    out_base = float(np.median(out_voiced))
+    src_voiced = [m for m in src_medians if m > 0]
+    src_base = float(np.median(src_voiced)) if src_voiced else 0.0
+    drifted, voiced = drift_windows(
+        out_medians, src_medians, out_base, src_base, st_above
+    )
+    return drifted / voiced if voiced else 0.0
+
+
 def f0_autocorr(frame, sr: int, fmin: float = FMIN, fmax: float = FMAX) -> float | None:
     """Pure: estimate the f0 (Hz) of one mono float frame by autocorrelation, or
     None when the frame is too quiet / has no clear peak in [fmin, fmax] (treated
@@ -165,18 +242,40 @@ def _read_audio(path: str):
 
 
 def check(
-    path: str, win_s: float = WINDOW_S, use_librosa: bool = True
-) -> tuple[list[float], float, float, float, bool]:
+    path: str,
+    win_s: float = WINDOW_S,
+    use_librosa: bool = True,
+    source: str | None = None,
+) -> tuple[list[float], float, float, float, float | None, bool]:
     """Read `path`, return (per-window f0 medians, max spread in semitones, IQR
-    spread in semitones, high-band fraction, exceeded) where `exceeded` is True
-    when the high-band fraction is over [`MAX_HIGH_BAND_FRACTION`] (the spread /
-    IQR are reported for information only)."""
+    spread in semitones, high-band fraction, true-drift fraction, exceeded).
+
+    Without `source` (#184 round E behaviour, unchanged): `true_drift` is `None`
+    and `exceeded` gates on the plain high-band fraction. With `source` (#184
+    round E2): the SOURCE audio's per-window medians discount source-following
+    high stretches, `true_drift` is the source-aware fraction, and `exceeded`
+    gates on IT instead. The spread / IQR stay information only."""
     samples, sr = _read_audio(path)
     medians = window_medians(samples, sr, win_s, use_librosa)
     spread = spread_semitones(medians)
     iqr = iqr_semitones(medians)
     high_fraction = high_band_fraction(medians)
-    return medians, spread, iqr, high_fraction, high_fraction > MAX_HIGH_BAND_FRACTION
+    if source is None:
+        gated = high_fraction
+        true_drift = None
+    else:
+        src_samples, src_sr = _read_audio(source)
+        src_medians = window_medians(src_samples, src_sr, win_s, use_librosa)
+        true_drift = true_drift_fraction(medians, src_medians)
+        gated = true_drift
+    return (
+        medians,
+        spread,
+        iqr,
+        high_fraction,
+        true_drift,
+        gated > MAX_HIGH_BAND_FRACTION,
+    )
 
 
 def main() -> None:
@@ -185,9 +284,17 @@ def main() -> None:
     )
     parser.add_argument("audio", help="dub audio file (FLAC/WAV)")
     parser.add_argument("--window", type=float, default=WINDOW_S)
+    parser.add_argument(
+        "--source",
+        default=None,
+        help="original audio: discount source-following high stretches and gate "
+        "on the resulting true-drift fraction (#184 round E2)",
+    )
     args = parser.parse_args()
 
-    medians, spread, iqr, high_fraction, exceeded = check(args.audio, args.window)
+    medians, spread, iqr, high_fraction, true_drift, exceeded = check(
+        args.audio, args.window, source=args.source
+    )
     for i, m in enumerate(medians):
         print(f"window {i}: f0 median {m:.1f} Hz")
     print(f"max spread: {spread:.2f} semitones (information only)")
@@ -196,10 +303,15 @@ def main() -> None:
         f"high-band fraction: {high_fraction:.3f} "
         f"(>{HIGH_BAND_ST:.0f} st above median; limit {MAX_HIGH_BAND_FRACTION})"
     )
-    if exceeded:
+    if true_drift is not None:
+        # The GATED number when --source is given: source-following discounted.
         print(
-            "FAIL: dub voice is not consistent (high-band fraction exceeds the limit)"
+            f"true-drift fraction: {true_drift:.3f} "
+            f"(source-following discounted; limit {MAX_HIGH_BAND_FRACTION})"
         )
+    if exceeded:
+        gate = "true-drift" if true_drift is not None else "high-band"
+        print(f"FAIL: dub voice is not consistent ({gate} fraction exceeds the limit)")
         sys.exit(1)
     print("OK: dub voice is consistent")
 
