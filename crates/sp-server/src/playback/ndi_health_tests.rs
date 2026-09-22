@@ -725,26 +725,22 @@ async fn handle_health_snapshot_skips_alert_when_scene_inactive() {
     );
 }
 
-// ---- #168 r6b: source_fps flows event → snapshot AND feeds the lock rule ----
-
-/// Build a paced HealthSnapshot event with a distinct `nominal_fps` (the OUTPUT
-/// nominal = the grid on the paced path) and `source_fps` (the DECODER rate),
-/// plus the given cumulative pacing counters, at heartbeat instant `ts`.
+/// #168 r6b — a paced HealthSnapshot event with distinct `nominal_fps` (grid) + `source_fps` (decoder).
 fn paced_lock_event(
     ts: Instant,
-    nominal_fps: f32,
-    source_fps: f32,
+    nominal: f32,
+    source: f32,
     seq: u64,
     late: u64,
-    repeats: u64,
+    reps: u64,
 ) -> PipelineEvent {
     PipelineEvent::HealthSnapshot {
         connections: 2,
         frames_submitted_total: seq,
         frames_submitted_last_5s: 30,
         observed_fps: 30.0,
-        nominal_fps,
-        source_fps,
+        nominal_fps: nominal,
+        source_fps: source,
         last_submit_ts: Some(ts),
         last_heartbeat_ts: ts,
         consecutive_bad_polls: 0,
@@ -753,7 +749,7 @@ fn paced_lock_event(
             enabled: true,
             seq,
             late_frames: late,
-            repeats,
+            repeats: reps,
             resyncs: 0,
             ..Default::default()
         },
@@ -762,13 +758,10 @@ fn paced_lock_event(
     }
 }
 
-/// #168 round 6b: the WHOLE fix, at the engine seam. A paced 23.976-fps output
-/// on the 30-fps grid (the box read: slots 1803, late 3, repeats 362, resyncs 0)
-/// reports `nominal_fps = 30` (the grid) but `source_fps = 23.976` (the decoder).
-/// `handle_health_snapshot` must (a) copy `source_fps` onto the snapshot verbatim
-/// and (b) feed `source_fps` — NOT the grid-valued `nominal_fps` — to the lock
-/// rule, so the 20 % structural conversion repeats read LOCKED. Feeding
-/// `nominal_fps` (the pre-6b bug) makes the same counts falsely DEGRADE.
+/// #168 r6b — the fix at the engine seam. A paced 23.976-fps output on the 30-grid
+/// (box read: slots 1803, late 3, repeats 362) reports `nominal_fps = 30` but
+/// `source_fps = 23.976`; `handle_health_snapshot` must copy `source_fps` onto the
+/// snapshot AND feed it (not the grid nominal) to the lock rule → LOCKED.
 #[tokio::test]
 async fn handle_health_snapshot_locks_on_source_fps_not_grid_nominal() {
     let (mut engine, registry) = fresh_engine().await;
@@ -787,24 +780,14 @@ async fn handle_health_snapshot_locks_on_source_fps_not_grid_nominal() {
     engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
     engine.set_scene_active_for_test(4, true);
 
-    // Two heartbeats 60 s apart build the differenced window: baseline (zeros)
-    // then the box counts. `nominal_fps = 30` (grid), `source_fps = 23.976`.
+    // Two heartbeats 60 s apart build the differenced window: baseline then counts.
     let t0 = Instant::now();
+    let t1 = t0 + std::time::Duration::from_secs(60);
     engine.handle_health_snapshot(4, paced_lock_event(t0, 30.0, 23.976, 0, 0, 0));
-    engine.handle_health_snapshot(
-        4,
-        paced_lock_event(
-            t0 + std::time::Duration::from_secs(60),
-            30.0,
-            23.976,
-            1803,
-            3,
-            362,
-        ),
-    );
+    engine.handle_health_snapshot(4, paced_lock_event(t1, 30.0, 23.976, 1803, 3, 362));
 
     let snap = &registry.snapshots()[0];
-    // (a) source_fps survives the event → snapshot copy verbatim.
+    // (a) source_fps survives event → snapshot; nominal_fps stays the grid.
     assert_eq!(
         snap.source_fps, 23.976,
         "source_fps must survive event → snapshot"
@@ -813,13 +796,11 @@ async fn handle_health_snapshot_locks_on_source_fps_not_grid_nominal() {
         snap.nominal_fps, 30.0,
         "nominal_fps stays the OUTPUT nominal (grid)"
     );
-    // (b) the lock rule reads source_fps (23.976) → the structural conversion is
-    // expected → LOCKED. Passing nominal_fps (30) would expect 0 % → DEGRADED.
+    // (b) the lock rule reads source_fps (23.976) → LOCKED; nominal_fps (30) would DEGRADE.
     assert_eq!(
         snap.lock_state,
         sp_core::genlock::lock_state::LockState::Locked,
-        "a 24-fps source's structural repeats must read LOCKED — the lock rule \
-         must use source_fps (23.976), never the grid-valued nominal_fps (30)"
+        "24-fps structural repeats must read LOCKED via source_fps, not grid nominal_fps"
     );
     assert_eq!(snap.lock_reason, "locked");
 }
