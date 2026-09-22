@@ -111,6 +111,14 @@ pub async fn separate_stems(
     for (k, v) in crate::lyrics::gpu_policy::env_for_child(gpu_mem_setting) {
         cmd.env(k, v);
     }
+    // #168: retain the injected mimalloc heap for the separation child — never
+    // decommit freed pages, reserve+commit one arena up front, so the per-step
+    // page-fault storm is paid once, not per inference step. Effective only when
+    // the venv interpreter carries the mimalloc override (`bootstrap_venv_exe`);
+    // an env no-op otherwise, and numerically invisible to the model.
+    for (k, v) in crate::lyrics::heavy_alloc_env::heavy_alloc_env() {
+        cmd.env(k, v);
+    }
     // #162: stamp the priority-regime plan — caps CPU threads
     // (`OMP|MKL|TORCH_NUM_THREADS`) + Windows priority-class creation flags (IDLE
     // for cpu-idle, BELOW_NORMAL for gpu). The CPU force is carried in argv

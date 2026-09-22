@@ -31,6 +31,72 @@ pub fn faults_per_sec(prev: u64, now: u64, elapsed: Duration) -> u64 {
     (delta as f64 / secs) as u64
 }
 
+/// Spawn a background task that samples the child `pid`'s cumulative
+/// `PageFaultCount` every [`FAULT_SAMPLE_INTERVAL`] and logs the per-second
+/// delta at INFO (`heavy child faults/s=N`). The returned [`AbortHandle`] stops
+/// it — the job guard aborts it when the heavy child exits. Sampling ends by
+/// itself once the process can no longer be read (it exited).
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+pub fn spawn_fault_sampler(pid: u32) -> tokio::task::AbortHandle {
+    let task = tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(FAULT_SAMPLE_INTERVAL);
+        ticker.tick().await; // consume the immediate first tick
+        let mut prev: Option<u64> = None;
+        let mut last = std::time::Instant::now();
+        loop {
+            ticker.tick().await;
+            let now = std::time::Instant::now();
+            let elapsed = now.duration_since(last);
+            last = now;
+            match read_page_fault_count(pid) {
+                Some(count) => {
+                    if let Some(p) = prev {
+                        let rate = faults_per_sec(p, count, elapsed);
+                        tracing::info!("heavy child faults/s={rate} (pid {pid})");
+                    }
+                    prev = Some(count);
+                }
+                // Process gone / unreadable — stop sampling.
+                None => break,
+            }
+        }
+    });
+    task.abort_handle()
+}
+
+/// Read a process's cumulative `PageFaultCount` via `GetProcessMemoryInfo`.
+/// `None` if the process cannot be opened or queried (e.g. it already exited).
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+fn read_page_fault_count(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+    };
+
+    // SAFETY: the process is opened for query only; the handle is closed on
+    // every path; `counters` is a correctly-sized, zero-initialised POD that
+    // GetProcessMemoryInfo only writes into (returns 0 on failure).
+    unsafe {
+        let proc: HANDLE = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+        if proc.is_null() {
+            return None;
+        }
+        let mut counters: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+        counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        let ok = GetProcessMemoryInfo(proc, &mut counters, counters.cb);
+        CloseHandle(proc);
+        if ok == 0 {
+            return None;
+        }
+        Some(counters.PageFaultCount as u64)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
