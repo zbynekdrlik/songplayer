@@ -452,7 +452,7 @@ app.patch("/api/v1/settings", (req, res) => {
 // SELECTED playlist's song — default: playlist 1's song is stems-READY so the
 // mode/fader controls are enabled (the #14/#186 specs rely on that). The #177
 // spec flips it via `/__mock/karaoke-now-playing`.
-let karaokeNowPlaying = [
+const DEFAULT_KARAOKE_NOW_PLAYING = [
   {
     playlist_id: 1,
     video_id: 1,
@@ -462,6 +462,7 @@ let karaokeNowPlaying = [
     queue_position: null,
   },
 ];
+let karaokeNowPlaying = DEFAULT_KARAOKE_NOW_PLAYING.map((e) => ({ ...e }));
 // #184 round G1: the ONE mixer console with TWO kind-scoped memories — a SONG
 // memory and a DUB memory. The ACTIVE kind mirrors the server's select_kind at
 // item open: 'dub' when the playing item (a now_playing entry) has a READY dub
@@ -509,6 +510,11 @@ app.post("/__mock/mix-reset", (_req, res) => {
   mixSong = { vokaly: 1.0, podklad: 1.0, dabing: 1.0 };
   mixDub = { vokaly: 0.0, podklad: 1.0, dabing: 1.0 };
   lastMixPatch = null;
+  // Also restore the default now_playing[] (playlist 1's stems-READY song): the
+  // kind-flip specs replace it with dub items, and a later spec file (karaoke.spec)
+  // reads the state line before its own afterEach restore — a leaked dub-only
+  // array made it show "Stemy — nič nehrá" (#184 round G1 CI).
+  karaokeNowPlaying = DEFAULT_KARAOKE_NOW_PLAYING.map((e) => ({ ...e }));
   res.json({ ok: true });
 });
 // #177 admin: replace the now_playing[] array so a spec can drive the disabled
