@@ -49,33 +49,37 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   **48 kHz stereo**, so `stem_worker.py` resamples every stem to 48 kHz stereo
   before writing FLAC (PCM_24).
 
-## #184 round G1 — the console remembers its faders PER ITEM KIND (SUPERSEDES round G's single memory)
+## #184 round G2 — each reader FAMILY owns its memory; NO global "active kind" (SUPERSEDES round G1)
 
-The ONE console keeps **TWO** remembered fader triples, selected by the KIND of
-the playing item — a SONG memory and a DUB memory (`sp_core::mixer_model::
-MixConsole { song, dub, active: MixKind }`). Defaults: song `(1,1,·)` (Plný mix;
-its `dabing` is unused), dub `(0,1,1)` (Len dabing — dub-only), active Song.
-`set_faders` writes the ACTIVE memory only; `select_kind(kind)` switches + republishes.
+The ONE console keeps **TWO** remembered fader triples (`sp_core::mixer_model::
+MixConsole { song, dub }`, defaults song `(1,1,·)` Plný mix / dub `(0,1,1)` Len
+dabing). The **invariant**: each reader family is fed from its OWN memory, ALWAYS —
+the 3-stream song reader (`gains[3]`) from the SONG memory, the dub readers
+(`dub_gain_atomics[4]` + `dub2_gain_atomics[2]`) from the DUB memory. The strip edits
+the memory of ITS item's kind.
 
-- **Why:** one global memory made a dub mixed to `Len dabing` leave the next song
-  instrumental-only (`stream_gains_song((0,1,1)) = [0,0,1]`), and a song at
-  `Plný mix` double a dub video's voices (`stream_gains_dub((1,1,1)) = [1,0,0,1]`).
-- **`MixControl`** now holds `song_faders[3]` + `dub_faders[3]` + an `active`
-  atomic; the derived gain sets are always published from the ACTIVE memory.
-  `kind()` / `console()` / `select_kind()` are the new accessors; boot reads FIVE
-  settings `mix_song_vokaly` / `mix_song_podklad` / `mix_dub_vokaly` /
-  `mix_dub_podklad` / `mix_dub_dabing` (V28 splits round-G's `mix_vokaly` /
-  `mix_podklad` into the song pair + seeds the dub triple; the three old globals
-  are deleted).
-- **Kind selection at item open:** `playback/mix.rs::select_mix_kind_for_video`
-  (called from `broadcast_now_playing_on_start`) → `Dub` when the dub track file is
-  on disk (`stems::dub_path(audio).exists()` — the SAME readiness the reader uses),
-  else `Song`. The pure decision is `mixer_model::mix_kind_for_dub`.
-- **API:** `GET /api/v1/mix` adds `"kind":"song"|"dub"` (the active console);
-  `PATCH` edits + persists ONLY the active kind's keys (song pair, or dub triple).
-- **UI:** `live_mixer.rs`'s reload Effect also tracks an `is_dub` Memo, so the
-  strip re-reads `GET /mix` and snaps to the other memory when the playing item's
-  kind flips (not only when the video id changes).
+- **Why G1's global "active kind" was wrong:** the wall runs SEVERAL pipelines at
+  once, so "the playing item's kind" is NOT a single value. G1 published ALL THREE
+  gain sets from the ONE active memory, so a song opening ANYWHERE re-published the
+  dub readers' atomics from the SONG memory (`stream_gains_dub((1,1,1)) = [1,0,0,1]`
+  = doubled voices on SP-dabing), and `select_mix_kind_for_video` only re-selected on
+  a fresh open, so `play 344 → PATCH → play a song elsewhere → play 344 again` left
+  the kind stale and the API edited the wrong memory.
+- **`MixControl`** holds `song_faders[3]` + `dub_faders[3]` + the derived gain
+  atomics, NO `active`. `set_faders(kind, f)` writes ONE memory and republishes ONLY
+  that kind's family (`publish_song` / `publish_dub`); `faders(kind)` / `console()`
+  (both memories). `kind()` / `select_kind` and `mixer_model::mix_kind_for_dub` +
+  `playback/mix.rs::select_mix_kind_for_video` (the item-open hook) are **DELETED**.
+  Boot still reads the five V28 settings (`mix_song_*` / `mix_dub_*`); no migration
+  change. `EngineCommand::SetMix { kind, faders }`.
+- **API:** `GET /api/v1/mix` → `{song:{vokaly,podklad}, dub:{vokaly,podklad,dabing},
+  …}` (no `kind`, no flat faders). `PATCH {kind:"song"|"dub", vokaly?, podklad?,
+  dabing?}` — `kind` REQUIRED (400 without it; `dabing` on `song` → 400), applies
+  `control.set_faders(kind, target)` directly (the round-G race rule) + persists ONLY
+  that kind's keys after the live push.
+- **UI:** `live_mixer.rs` — the strip's kind is its `is_dub` Memo; `load` reads its
+  memory from the GET's `song`/`dub` object, every PATCH carries `kind`, the kind-flip
+  reload Effect stays.
 
 ## #184 round G — ONE mixer console (SUPERSEDES the karaoke-MODE model below)
 

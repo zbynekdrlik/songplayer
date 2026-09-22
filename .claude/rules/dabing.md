@@ -182,19 +182,21 @@ three-fader console (`vokaly` / `podklad` / `dabing`) — see
   `vokaly` fader, **NO −18 dB floor**. `MixControl` publishes both from
   `set_faders(f)`; `reader::dub_gains_for(kind, MixFaders)` is the pure per-kind
   gain (still unit-tested).
-- The mix is set via `PATCH /api/v1/mix {vokaly?, podklad?, dabing?}` →
-  `EngineCommand::SetMix(MixFaders)` → `engine.set_mix` → `control.set_faders`; the
-  persist is done by the API handler AFTER the live push
+- The mix is set via `PATCH /api/v1/mix {kind, vokaly?, podklad?, dabing?}` →
+  `EngineCommand::SetMix{kind, faders}` → `engine.set_mix` → `control.set_faders(kind, f)`;
+  the persist is done by the API handler AFTER the live push
   (`api/mix_apply.rs::apply_mix`, the round-A order). The dub video's readiness
   (its `DubRow.dub_status` / `stem_status`) drives which faders are LIVE.
-- **Round G1 — the mix VALUES are remembered PER ITEM KIND, not globally.** The
-  console keeps a SONG memory and a DUB memory (`MixConsole`), selected at each
-  item open by the playing item's dub readiness (`select_kind`): a dub video starts
-  at the DUB memory (default `(0,1,1)` = dub only), a song at the SONG memory
-  (`(1,1)`), and each survives the other — mixing a dub no longer instrumental-mutes
-  the next song, and a song no longer doubles the next dub's voices. `PATCH /mix`
-  edits + persists only the active kind's keys (`mix_song_*` / `mix_dub_*`); `GET
-  /mix` carries `"kind"`. See `.claude/rules/karaoke-stems.md` "#184 round G1".
+- **Round G2 (SUPERSEDES G1) — the mix VALUES are remembered PER ITEM KIND, and each
+  reader FAMILY is fed from its OWN memory; there is NO global "active kind".** The
+  console keeps a SONG memory and a DUB memory (`MixConsole { song, dub }`, default
+  song `(1,1)` / dub `(0,1,1)`); the dub readers always ramp toward the DUB memory,
+  the song reader toward the SONG memory, so a song starting on ANY other output no
+  longer doubles a playing dub's voices (and a dub never instrumental-mutes the next
+  song). `PATCH /mix` NAMES the memory it edits (`kind` required) + persists only that
+  kind's keys (`mix_song_*` / `mix_dub_*`); `GET /mix` returns BOTH memories
+  `{song, dub}`. The G1 global `active`/`select_kind`/item-open hook are DELETED. See
+  `.claude/rules/karaoke-stems.md` "#184 round G2".
 - The dabing list (`dabing_list.rs`) no longer shows a per-row ratio; the console
   lives in the shared Player above.
 
