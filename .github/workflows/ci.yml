@@ -205,6 +205,38 @@ jobs:
           path: dist/
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2.0.0" --locked
+      - name: Build and stage mimalloc override DLLs (#168)
+        # Build mimalloc's Windows dynamic override from a PINNED tag and stage
+        # the override DLL + the repo's prebuilt redirect DLL + minject.exe into
+        # resources/mimalloc/, which tauri.conf.json's bundle.resources ships in
+        # the NSIS installer next to SongPlayer.exe. The step FAILS if any of the
+        # three files is missing (no continue-on-error, no "|| true").
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # microsoft/mimalloc, pinned to the newest v2.2.x tag.
+          $tag = 'v2.2.7'  # commit 6a53d72d46a1a641d8e5793db37cb2da60e04192
+          git clone --depth 1 --branch $tag https://github.com/microsoft/mimalloc.git mimalloc-src
+          if ($LASTEXITCODE -ne 0) { throw "git clone mimalloc $tag failed" }
+          cmake -S mimalloc-src -B mimalloc-build -A x64 -DMI_OVERRIDE=ON -DMI_BUILD_STATIC=OFF -DMI_BUILD_OBJECT=OFF -DMI_BUILD_TESTS=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'cmake configure failed' }
+          cmake --build mimalloc-build --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'cmake build failed' }
+          $dest = 'src-tauri/resources/mimalloc'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          # CMake Release output name of the shared override target is mimalloc.dll
+          # (mi_libname = "mimalloc"), which is ALSO minject's default target.
+          $built = Get-ChildItem -Path mimalloc-build -Recurse -Filter 'mimalloc.dll' |
+            Where-Object { $_.FullName -like '*Release*' } | Select-Object -First 1
+          if (-not $built) { throw 'mimalloc.dll (override) was not built' }
+          Copy-Item $built.FullName (Join-Path $dest 'mimalloc.dll') -Force
+          Copy-Item 'mimalloc-src/bin/mimalloc-redirect.dll' (Join-Path $dest 'mimalloc-redirect.dll') -Force
+          Copy-Item 'mimalloc-src/bin/minject.exe' (Join-Path $dest 'minject.exe') -Force
+          foreach ($f in @('mimalloc.dll', 'mimalloc-redirect.dll', 'minject.exe')) {
+            if (-not (Test-Path (Join-Path $dest $f))) { throw "staged mimalloc file missing: $f" }
+          }
+          Write-Host 'Staged mimalloc override resources:'
+          Get-ChildItem $dest | Format-Table Name, Length
       - name: Build Tauri app
         run: cargo tauri build
       - name: Upload NSIS installer
