@@ -334,9 +334,12 @@ test.describe("#178 live preview <video> post-deploy", () => {
         )
         .toBeGreaterThan(before + 0.5);
     } finally {
-      // Restore: full console (dub-only default), stop the preview, pause output.
+      // Restore: full DUB memory, stop the preview, pause output (#184 round G2:
+      // the Dabing player edits the dub memory; kind is required).
       await request
-        .patch("/api/v1/mix", { data: { vokaly: 1.0, podklad: 1.0, dabing: 1.0 } })
+        .patch("/api/v1/mix", {
+          data: { kind: "dub", vokaly: 1.0, podklad: 1.0, dabing: 1.0 },
+        })
         .catch(() => {});
       await page
         .getByTestId("preview-stop")

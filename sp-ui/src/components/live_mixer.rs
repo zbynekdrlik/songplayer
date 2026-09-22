@@ -38,8 +38,15 @@ fn state_label(state: &str, queue_position: Option<i64>) -> String {
 }
 
 /// PATCH a partial mix body live; raise `in_flight` so the reload Effect can't
-/// snap a fader back while the change is landing (#184 round B).
-fn send_patch(body: serde_json::Value, in_flight: RwSignal<bool>, status: RwSignal<String>) {
+/// snap a fader back while the change is landing (#184 round B). Round G2: every
+/// PATCH names the memory it edits (`kind`), injected here from the strip's `is_dub`.
+fn send_patch(
+    mut body: serde_json::Value,
+    is_dub: Memo<bool>,
+    in_flight: RwSignal<bool>,
+    status: RwSignal<String>,
+) {
+    body["kind"] = serde_json::json!(if is_dub.get_untracked() { "dub" } else { "song" });
     in_flight.set(true);
     leptos::task::spawn_local(async move {
         match api::patch_mix(body).await {
@@ -65,6 +72,28 @@ pub fn LiveMixer(playlist_id: i64) -> impl IntoView {
     // #184 round B: true while a PATCH is in flight — the reload must not overwrite.
     let in_flight = RwSignal::new(false);
 
+    // The playing DubRow (from the app-wide store.dabing, matched to the playing
+    // video). A dub row present means the item is a dub video.
+    let dub_row = Memo::new(move |_| {
+        let vid = store
+            .now_playing
+            .get()
+            .get(&playlist_id)
+            .map(|i| i.video_id);
+        vid.and_then(|v| store.dabing.get().into_iter().find(|r| r.video_id == v))
+    });
+
+    // #184 round G1/G2: THIS strip's KIND — a READY dub → the dub memory, else the
+    // song memory. The strip edits the memory of ITS item's kind: `load` reads the
+    // matching GET object and every PATCH carries this kind. A Memo<bool> so a kind
+    // flip (not a position tick) drives the reload Effect and the read.
+    let is_dub = Memo::new(move |_| {
+        dub_row
+            .get()
+            .map(|r| r.dub_status == "ready")
+            .unwrap_or(false)
+    });
+
     let load = move || {
         leptos::task::spawn_local(async move {
             if let Ok(v) = api::get_mix().await {
@@ -77,14 +106,20 @@ pub fn LiveMixer(playlist_id: i64) -> impl IntoView {
                 };
                 // Do not overwrite the faders mid-PATCH (avoids a snap-back).
                 if !patch_in_flight {
-                    if let Some(x) = v.get("vokaly").and_then(|x| x.as_f64()) {
-                        vokaly.set(x as f32);
-                    }
-                    if let Some(x) = v.get("podklad").and_then(|x| x.as_f64()) {
-                        podklad.set(x as f32);
-                    }
-                    if let Some(x) = v.get("dabing").and_then(|x| x.as_f64()) {
-                        dabing.set(x as f32);
+                    // #184 round G2: read THIS strip's memory from the GET's per-kind
+                    // object (`song` or `dub`) — there is no global active kind; the
+                    // strip shows the memory of ITS item's kind.
+                    let key = if is_dub.get_untracked() { "dub" } else { "song" };
+                    if let Some(mem) = v.get(key) {
+                        if let Some(x) = mem.get("vokaly").and_then(|x| x.as_f64()) {
+                            vokaly.set(x as f32);
+                        }
+                        if let Some(x) = mem.get("podklad").and_then(|x| x.as_f64()) {
+                            podklad.set(x as f32);
+                        }
+                        if let Some(x) = mem.get("dabing").and_then(|x| x.as_f64()) {
+                            dabing.set(x as f32);
+                        }
                     }
                 }
                 if let Some(d) = v.get("stems_done").and_then(|x| x.as_i64()) {
@@ -146,17 +181,6 @@ pub fn LiveMixer(playlist_id: i64) -> impl IntoView {
             .find(|e| e.playlist_id == playlist_id)
     };
 
-    // The playing DubRow (from the app-wide store.dabing, matched to the playing
-    // video). A dub row present means the item is a dub video.
-    let dub_row = Memo::new(move |_| {
-        let vid = store
-            .now_playing
-            .get()
-            .get(&playlist_id)
-            .map(|i| i.video_id);
-        vid.and_then(|v| store.dabing.get().into_iter().find(|r| r.video_id == v))
-    });
-
     // Readiness: a dub video reads its DubRow; a plain song reads the mix
     // now-playing stems state (the #177 contract).
     let stems_ready = move || match dub_row.get() {
@@ -173,18 +197,8 @@ pub fn LiveMixer(playlist_id: i64) -> impl IntoView {
     };
     let has_dub_row = move || dub_row.get().is_some();
 
-    // #184 round G1: the playing item's KIND (a READY dub → the dub console, else
-    // the song console). The server switches the active memory at the item's open,
-    // so the strip must RE-READ GET /mix when the kind flips — a Memo<bool> so the
-    // reload fires only on a real kind change, never on a position tick.
-    let is_dub = Memo::new(move |_| {
-        dub_row
-            .get()
-            .map(|r| r.dub_status == "ready")
-            .unwrap_or(false)
-    });
     // Reload GET /mix on mount, whenever THIS playlist's playing SONG changes, AND
-    // whenever the item's KIND flips — so the faders snap to the active (song/dub)
+    // whenever the item's KIND flips — so the faders snap to this strip's (song/dub)
     // memory. Both deps are Memos, so a position tick never triggers a reload.
     Effect::new(move |_| {
         let _ = selected_song.get();
@@ -275,7 +289,7 @@ pub fn LiveMixer(playlist_id: i64) -> impl IntoView {
                     enabled: Signal::derive(move || avail.vokaly),
                     fixed_note: None,
                     on_change: Callback::new(move |v: f32| {
-                        send_patch(serde_json::json!({ "vokaly": v }), in_flight, status)
+                        send_patch(serde_json::json!({ "vokaly": v }), is_dub, in_flight, status)
                     }),
                     testid: Some("mix-vokaly".to_string()),
                 };
@@ -289,7 +303,7 @@ pub fn LiveMixer(playlist_id: i64) -> impl IntoView {
                         Some("po separácii".to_string())
                     },
                     on_change: Callback::new(move |v: f32| {
-                        send_patch(serde_json::json!({ "podklad": v }), in_flight, status)
+                        send_patch(serde_json::json!({ "podklad": v }), is_dub, in_flight, status)
                     }),
                     testid: Some("mix-podklad".to_string()),
                 };
@@ -301,7 +315,7 @@ pub fn LiveMixer(playlist_id: i64) -> impl IntoView {
                         enabled: Signal::derive(move || avail.dabing),
                         fixed_note: None,
                         on_change: Callback::new(move |v: f32| {
-                            send_patch(serde_json::json!({ "dabing": v }), in_flight, status)
+                            send_patch(serde_json::json!({ "dabing": v }), is_dub, in_flight, status)
                         }),
                         testid: Some("mix-dabing".to_string()),
                     });
@@ -331,7 +345,7 @@ pub fn LiveMixer(playlist_id: i64) -> impl IntoView {
                             } else {
                                 serde_json::json!({ "vokaly": nf.vokaly, "podklad": nf.podklad })
                             };
-                            send_patch(body, in_flight, status);
+                            send_patch(body, is_dub, in_flight, status);
                         }),
                     })
                     .collect();

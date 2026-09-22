@@ -355,18 +355,20 @@ pub async fn patch_translation_gender(video_id: i64, gender: Option<&str>) -> Re
     .await
 }
 
-// ── Karaoke live control (#14) ────────────────────────────────────────────────
+// ── Live mixer control (#14 / #184) ───────────────────────────────────────────
 
-/// GET the live karaoke state: `{mode, vocal_gain, stems_pending, stems_done}`.
-/// GET the ONE live mixer console: `{vokaly, podklad, dabing, stems_pending,
-/// stems_done, now_playing:[…]}` (#184 round G).
+/// GET the ONE live mixer console — BOTH kind-scoped memories (#184 round G2):
+/// `{song:{vokaly,podklad}, dub:{vokaly,podklad,dabing}, stems_pending, stems_done,
+/// now_playing:[…]}`. There is no global "active kind"; each strip reads the object
+/// for ITS item's kind.
 pub async fn get_mix() -> Result<serde_json::Value, String> {
     get("/api/v1/mix").await
 }
 
-/// PATCH any subset of the three mixer faders (`{vokaly?, podklad?, dabing?}`,
-/// each `0.0..=1.0`). Server replies 200 + the full clamped triple; we only need
-/// success/failure here (the adapter set the faders optimistically).
+/// PATCH one memory of the mixer: `{kind:"song"|"dub", vokaly?, podklad?, dabing?}`
+/// (each fader `0.0..=1.0`; `kind` REQUIRED, `dabing` only on `dub`). Server replies
+/// 200 + that memory + `kind`; we only need success/failure here (the adapter set
+/// the faders optimistically).
 pub async fn patch_mix(body: serde_json::Value) -> Result<(), String> {
     let resp = Request::patch("/api/v1/mix")
         .json(&body)

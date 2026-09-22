@@ -857,11 +857,10 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       `deployed OBS must have an "${FAST_SCENE_NAME}" scene`,
     ).toBe(true);
 
-    // Save the mixer console so the test restores it afterwards.
+    // Save the SONG memory so the test restores it afterwards (ytfast plays a song;
+    // #184 round G2 GET carries both `song` and `dub` objects).
     const before = (await (await request.get("/api/v1/mix")).json()) as {
-      vokaly?: number;
-      podklad?: number;
-      dabing?: number;
+      song?: { vokaly?: number; podklad?: number };
     };
 
     // Start clean, then switch to sp-fast so ytfast plays on-program.
@@ -889,16 +888,19 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // 500 ms, and — the #186 fix — must NOT reopen the pipeline.
     const vokalyBurst = [0.2, 1.0, 0.6, 0.8, 1.0, 0.5];
     for (const v of vokalyBurst) {
-      const resp = await request.patch("/api/v1/mix", { data: { vokaly: v } });
+      // ytfast is a SONG → edit the SONG memory (#184 round G2: kind is required).
+      const resp = await request.patch("/api/v1/mix", {
+        data: { kind: "song", vokaly: v },
+      });
       expect(resp.status()).toBe(200);
       await expect
         .poll(
           async () =>
             (
               (await (await request.get("/api/v1/mix")).json()) as {
-                vokaly?: number;
+                song?: { vokaly?: number };
               }
-            ).vokaly,
+            ).song?.vokaly,
           { timeout: 500, intervals: [50, 100, 100, 100, 100] },
         )
         .toBeCloseTo(v, 2);
@@ -913,12 +915,12 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       `position must advance across mixer fader changes (first=${first}s, second=${second}s) — a reload/dropout would freeze it`,
     ).toBeGreaterThan(first);
 
-    // Restore the console (the scene is restored by afterEach/afterAll).
+    // Restore the SONG memory (the scene is restored by afterEach/afterAll).
     await request.patch("/api/v1/mix", {
       data: {
-        vokaly: before.vokaly ?? 1.0,
-        podklad: before.podklad ?? 1.0,
-        dabing: before.dabing ?? 1.0,
+        kind: "song",
+        vokaly: before.song?.vokaly ?? 1.0,
+        podklad: before.song?.podklad ?? 1.0,
       },
     });
 

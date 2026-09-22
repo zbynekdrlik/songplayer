@@ -475,32 +475,23 @@ const DEFAULT_KARAOKE_NOW_PLAYING = [
   },
 ];
 let karaokeNowPlaying = DEFAULT_KARAOKE_NOW_PLAYING.map((e) => ({ ...e }));
-// #184 round G1: the ONE mixer console with TWO kind-scoped memories — a SONG
-// memory and a DUB memory. The ACTIVE kind mirrors the server's select_kind at
-// item open: 'dub' when the playing item (a now_playing entry) has a READY dub
-// row, else 'song'. GET returns the ACTIVE memory's faders + "kind"; PATCH writes
-// the ACTIVE memory. `/__mock/mix-last` exposes the last PATCH body; `/__mock/
-// mix-reset` restores both memories (song (1,1,1), dub (0,1,1)).
+// #184 round G2: the ONE mixer console with TWO kind-scoped memories — a SONG
+// memory and a DUB memory. There is NO global "active kind": GET returns BOTH
+// memories as nested objects, and PATCH NAMES the memory it edits (`kind`,
+// required). Each strip (in the UI) reads the object for ITS item's kind, so
+// several outputs render different memories at once. `/__mock/mix-last` exposes the
+// last PATCH body; `/__mock/mix-reset` restores both memories (song (1,1,1), dub
+// (0,1,1)).
 let mixSong = { vokaly: 1.0, podklad: 1.0, dabing: 1.0 };
 let mixDub = { vokaly: 0.0, podklad: 1.0, dabing: 1.0 };
 let lastMixPatch = null;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
-// The active kind follows the PLAYING item's dub readiness (a ready dub row for a
-// video shown in now_playing) — exactly the signal the server's reader uses.
-function mixKind() {
-  return karaokeNowPlaying.some((np) =>
-    dubRows.some((r) => r.video_id === np.video_id && r.dub_status === "ready"),
-  )
-    ? "dub"
-    : "song";
-}
-function activeMix() {
-  return mixKind() === "dub" ? mixDub : mixSong;
-}
 app.get("/api/v1/mix", (_req, res) => {
   res.json({
-    ...activeMix(),
-    kind: mixKind(),
+    // The SONG memory (its dabing is unused, so it is not sent).
+    song: { vokaly: mixSong.vokaly, podklad: mixSong.podklad },
+    // The DUB memory (all three faders live).
+    dub: { vokaly: mixDub.vokaly, podklad: mixDub.podklad, dabing: mixDub.dabing },
     stems_pending: 2,
     stems_done: 5,
     now_playing: karaokeNowPlaying,
@@ -508,12 +499,25 @@ app.get("/api/v1/mix", (_req, res) => {
 });
 app.patch("/api/v1/mix", (req, res) => {
   const b = req.body || {};
+  // `kind` is required (400 without it); `dabing` is not a song fader.
+  if (b.kind !== "song" && b.kind !== "dub") {
+    res.status(400).json({ error: 'kind is required ("song" | "dub")' });
+    return;
+  }
+  if (b.kind === "song" && typeof b.dabing === "number") {
+    res.status(400).json({ error: "dabing is not a song fader" });
+    return;
+  }
   lastMixPatch = b;
-  const m = activeMix();
+  const m = b.kind === "dub" ? mixDub : mixSong;
   for (const k of ["vokaly", "podklad", "dabing"]) {
     if (typeof b[k] === "number" && !Number.isNaN(b[k])) m[k] = clamp01(b[k]);
   }
-  res.status(200).json({ ...m, kind: mixKind() });
+  const echo =
+    b.kind === "dub"
+      ? { kind: "dub", vokaly: m.vokaly, podklad: m.podklad, dabing: m.dabing }
+      : { kind: "song", vokaly: m.vokaly, podklad: m.podklad };
+  res.status(200).json(echo);
 });
 app.get("/__mock/mix-last", (_req, res) => {
   res.json(lastMixPatch || {});

@@ -276,3 +276,93 @@ test.describe("the strip snaps to the other memory when the item's kind flips", 
     await expect(vokaly).toHaveValue("30", { timeout: 15000 });
   });
 });
+
+// #184 round G2: NO global "active kind" — the wall runs SEVERAL outputs at once,
+// each fed from its OWN memory. Two players open at the SAME TIME (Dashboard = a
+// plain song → the song memory; Dabing = a ready dub → the dub memory) render
+// DIFFERENT memories, and a song-side PATCH leaves the dub output's strip untouched.
+test.describe("two outputs render different memories at the same time", () => {
+  const DABING_PLAYLIST_ID = 500;
+
+  test("a song-side PATCH leaves the dub output's memory intact", async ({
+    page,
+    request,
+  }) => {
+    // A ready dub for the Dabing item (701); video 1 stays a plain song (no dub row).
+    await request.post("/__mock/dabing-add", {
+      data: {
+        video_id: 701,
+        title: "Kázeň",
+        dub_status: "ready",
+        stem_status: "done",
+      },
+    });
+
+    // Page A — Dashboard: playlist 1 plays the plain song (video 1) → the SONG strip
+    // (default (1,1), no dabing fader).
+    await page.goto("/");
+    await expect(page.getByTestId("player")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("mix-dabing")).toHaveCount(0, {
+      timeout: 15000,
+    });
+    const songVokaly = page.getByTestId("mix-vokaly");
+    await expect(songVokaly).toHaveValue("100", { timeout: 15000 });
+
+    // Page B — Dabing: the dub item plays on playlist 500 → the DUB strip (0,1,1).
+    const pageB = await page.context().newPage();
+    pageB.on("console", (msg) => {
+      if (msg.type() === "error" || msg.type() === "warning") {
+        consoleMessages.push(`[B ${msg.type()}] ${msg.text()}`);
+      }
+    });
+    await pageB.goto("/dabing");
+    await expect(
+      pageB.locator(
+        `[data-testid="dabing-list"] .song-row[data-video-id="701"]`,
+      ),
+    ).toBeVisible({ timeout: 15000 });
+    await request.post("/__mock/now-playing", {
+      data: {
+        playlist_id: DABING_PLAYLIST_ID,
+        video_id: 701,
+        song: "Kázeň",
+        duration_ms: 200000,
+      },
+    });
+    const dubVokaly = pageB.getByTestId("mix-vokaly");
+    await expect(pageB.getByTestId("mix-dabing")).toBeVisible({ timeout: 15000 });
+    await expect(dubVokaly).toHaveValue("0", { timeout: 15000 });
+
+    // Mix the DUB output (page B): vokály → 40 % (writes ONLY the dub memory).
+    await dubVokaly.fill("40");
+    await dubVokaly.dispatchEvent("change");
+    await expect
+      .poll(
+        async () => (await (await request.get("/__mock/mix-last")).json()).kind,
+        { timeout: 5000 },
+      )
+      .toBe("dub");
+
+    // Now a SONG PATCH on the OTHER output (page A): vokály → 60 %.
+    await songVokaly.fill("60");
+    await songVokaly.dispatchEvent("change");
+    await expect
+      .poll(
+        async () => (await (await request.get("/__mock/mix-last")).json()).kind,
+        { timeout: 5000 },
+      )
+      .toBe("song");
+
+    // The dub output's strip is UNTOUCHED by the song edit — its memory is its own.
+    await expect(dubVokaly).toHaveValue("40", { timeout: 15000 });
+    // The server holds two independent memories: the song moved, the dub did not.
+    const mix = (await (await request.get("/api/v1/mix")).json()) as {
+      song: { vokaly: number };
+      dub: { vokaly: number };
+    };
+    expect(mix.dub.vokaly).toBeCloseTo(0.4, 5);
+    expect(mix.song.vokaly).toBeCloseTo(0.6, 5);
+
+    await pageB.close();
+  });
+});
