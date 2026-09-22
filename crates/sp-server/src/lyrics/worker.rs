@@ -353,6 +353,13 @@ impl LyricsWorker {
             return;
         }
 
+        // #184 G0.1: a dub owns the heavy slot — skip this heavy lyrics tick while
+        // one is queued (isolation/mtl are not mid-run yielded; they defer here).
+        if crate::lyrics::heavy_slot::dub_slot_wanted() {
+            debug!("worker: dub waiting for the heavy slot — deferring this lyrics tick");
+            return;
+        }
+
         // #162 loop-level gate: only `idle-only` defers here (pre-#162 gate +
         // idle-settle); `low-priority` (default) never defers — heavy steps run
         // at reduced priority instead, so the queue drains continuously. On an

@@ -287,6 +287,29 @@ DELETED names.
   `KILL_ON_JOB_CLOSE`) so an OOM kills the child, never the host. g35t /
   translation HTTP steps take NONE of these (not heavy). windows-sys is a
   cfg(windows) sp-server dep for the OS calls.
+- **Heavy-slot priority — a dub job preempts a background separation (#184
+  G0.1, `lyrics/heavy_slot.rs` + `stems/worker_yield.rs`).** The slot is fair
+  FIFO, but a dub is an explicit operator request with a deadline while a stem
+  separation is not, so a dub must NOT wait tens of minutes behind a cpu-idle
+  separation. A process-global `DUB_SLOT_WANTED` flag (`dub_slot_wanted()` /
+  `dub_slot_want_guard()`): the dub worker publishes it TRUE via the RAII guard
+  right before `run_live_translate` (its Drop is the early-return safety net),
+  and `acquire_on` clears it FALSE the instant the DUB step acquires the slot
+  (gated by the pure `acquire_clears_dub_want(name)` — ONLY `"dub
+  live-translate"`; a stem/isolation/mtl acquire never touches it), so the flag
+  means precisely "a dub is queued behind the slot". While it is set: (a) the
+  stem worker AND the lyrics worker DEFER their next heavy tick
+  (`stem_tick_defers_to_dub` / a direct flag read) — start no new heavy step, no
+  backoff, no DB write; (b) a RUNNING stem separation YIELDS between segments —
+  `run_with_dub_yield` (reusing the #161 `AbortPolicy` 1 s poll) kills the child
+  (`kill_on_drop`) and returns `StemStepResult::YieldedToDub`, which leaves the
+  #171 resumable work dir + partial stems INTACT and the DB row pending (no
+  backoff, `stem_attempts` unchanged) — so the dub acquires within ~1 s and the
+  separation resumes from its segments later. The pure `yield_reason(dub_wanted,
+  wall_busy, plan)`: a dub wins for ANY plan; a busy wall still wins for a GPU
+  plan only (the #161 rule — a cpu-idle separation is never wall-yielded). mtl is
+  NOT mid-run yielded (not resumable — it defers at the tick and finishes within
+  its bound). No schema change, no `LYRICS_PIPELINE_VERSION` bump.
 - **In-use-first tiered queue (#195, `db/models_stems_priority.rs` +
   `stems/queue_tiers.rs`).** The stem worker no longer picks by
   `stem_manual_priority DESC, id ASC` alone — with ~110 songs queued and

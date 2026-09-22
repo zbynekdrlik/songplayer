@@ -149,6 +149,77 @@ async fn slot_serializes_two_heavy_steps() {
     );
 }
 
+// ---- #184 G0.1: dub-priority slot flag ----------------------------------
+
+#[test]
+fn acquire_clears_dub_want_only_for_the_dub_step() {
+    // Only the dub step's acquire clears the flag; a stem / isolation / mtl
+    // acquire must NOT (a queued dub is still waiting behind them).
+    assert!(acquire_clears_dub_want("dub live-translate"));
+    assert!(!acquire_clears_dub_want("stem separation"));
+    assert!(!acquire_clears_dub_want("isolation"));
+    assert!(!acquire_clears_dub_want("mtl align"));
+    // Pinned to the exact name the dub child's `acquire_slot` uses.
+    assert_eq!(DUB_STEP_NAME, "dub live-translate");
+}
+
+#[tokio::test]
+async fn dub_slot_want_guard_sets_true_and_drop_clears() {
+    let _lk = DUB_FLAG_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    set_dub_slot_wanted(false);
+    assert!(!dub_slot_wanted(), "the flag starts clear");
+    {
+        let _want = dub_slot_want_guard();
+        assert!(
+            dub_slot_wanted(),
+            "the guard publishes the flag while a dub is queued"
+        );
+    }
+    assert!(
+        !dub_slot_wanted(),
+        "the guard's Drop clears the flag (early-return safety net)"
+    );
+    set_dub_slot_wanted(false);
+}
+
+/// Acceptance #1 fake-timeline test (injected local `Arc<Semaphore>`): the flag
+/// is TRUE between "a dub is queued" and "the dub acquires the slot", and FALSE
+/// the instant the DUB step acquires; a non-dub acquire never clears it.
+#[tokio::test]
+async fn dub_acquire_clears_the_flag_but_a_stem_acquire_does_not() {
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
+
+    let _lk = DUB_FLAG_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let slot = Arc::new(Semaphore::new(1));
+
+    // Job picked, slot not yet acquired → flag TRUE.
+    set_dub_slot_wanted(false);
+    let _want = dub_slot_want_guard();
+    assert!(
+        dub_slot_wanted(),
+        "TRUE while the dub is queued behind the slot"
+    );
+
+    // The DUB step's acquire clears it the instant it acquires → FALSE after.
+    let g = acquire_on(slot.clone(), DUB_STEP_NAME).await;
+    assert!(
+        !dub_slot_wanted(),
+        "the dub's acquire clears the flag (FALSE right after acquiring)"
+    );
+    drop(g);
+
+    // A non-dub (stem) acquire must leave a queued dub's flag alone.
+    set_dub_slot_wanted(true);
+    let g2 = acquire_on(slot.clone(), "stem separation").await;
+    assert!(
+        dub_slot_wanted(),
+        "a stem acquire must not clear a queued dub's flag"
+    );
+    drop(g2);
+    set_dub_slot_wanted(false);
+}
+
 // ---- pinned constants (literals; the cfg(windows) product was un-mutatable) ----
 
 #[test]

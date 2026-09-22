@@ -419,6 +419,12 @@ impl DubWorker {
             chunks.len(),
             total_ms / 1000
         );
+        // #184 G0.1: signal that a dub is queued behind the heavy slot so a
+        // running stem separation yields it (and the stem/lyrics workers defer
+        // their next heavy tick). The flag is cleared the instant this dub's
+        // `acquire_slot` succeeds (inside heavy_slot::acquire_on); this guard's
+        // Drop is the early-return safety net for the paths before the acquire.
+        let _dub_want = crate::lyrics::heavy_slot::dub_slot_want_guard();
         let summary = crate::dabing::child::run_live_translate(
             python,
             script_path,

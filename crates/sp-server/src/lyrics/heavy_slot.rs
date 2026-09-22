@@ -29,6 +29,7 @@
 //! read ([`read_headroom`]) and the Job Object ([`assign_child_job`]) are
 //! `#[cfg(windows)]` integration seams (no-ops off Windows).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Instant;
 
@@ -97,6 +98,13 @@ async fn acquire_on(slot: Arc<Semaphore>, name: &'static str) -> HeavySlotGuard 
         .expect("heavy-step slot semaphore is never closed");
     let waited_ms = start.elapsed().as_millis();
     info!("heavy step {name} slot acquired (waited {waited_ms} ms)");
+    // #184 G0.1: the dub step's acquire means a queued dub now HOLDS the slot —
+    // clear the "dub wants the slot" flag so the stem/lyrics workers stop
+    // yielding for it (the semaphore serialises the rest). The pure, unit-tested
+    // `acquire_clears_dub_want` gates it so no other step touches the flag.
+    if acquire_clears_dub_want(name) {
+        set_dub_slot_wanted(false);
+    }
     HeavySlotGuard {
         _permit: permit,
         name,
@@ -119,6 +127,76 @@ impl Drop for HeavySlotGuard {
         info!("heavy step {} slot released", self.name);
     }
 }
+
+// ---------------------------------------------------------------------------
+// #184 G0.1 — dub-priority flag. A dub job about to take the heavy slot sets
+// this TRUE (via `dub_slot_want_guard`) so a running stem separation yields the
+// slot (the stem worker's mid-run watcher checks it) and the stem/lyrics workers
+// defer their next heavy tick; it is cleared the instant the dub step acquires
+// the slot (in `acquire_on`), so it means precisely "a dub is queued behind the
+// slot".
+// ---------------------------------------------------------------------------
+
+/// The heavy-slot step name the dub child's `acquire_slot` uses
+/// (`dabing/child.rs`). The ONE step whose acquire clears [`DUB_SLOT_WANTED`].
+pub(crate) const DUB_STEP_NAME: &str = "dub live-translate";
+
+/// Process-global "a dub job is queued behind the heavy slot" flag.
+static DUB_SLOT_WANTED: AtomicBool = AtomicBool::new(false);
+
+/// Whether a dub job is currently queued behind the heavy slot — read by the
+/// stem worker (tick-defer + mid-run yield) and the lyrics worker (tick-defer).
+pub(crate) fn dub_slot_wanted() -> bool {
+    DUB_SLOT_WANTED.load(Ordering::Relaxed)
+}
+
+/// Publish the "a dub is queued behind the slot" flag.
+pub(crate) fn set_dub_slot_wanted(wanted: bool) {
+    DUB_SLOT_WANTED.store(wanted, Ordering::Relaxed);
+}
+
+/// Pure: whether acquiring the heavy slot under step `name` should clear
+/// [`DUB_SLOT_WANTED`]. TRUE only for the dub step — its acquire means the dub
+/// now HOLDS the slot, so nothing needs to yield for it any more (the semaphore
+/// serialises the rest). Unit-tested exactly so the name coupling cannot drift.
+pub(crate) fn acquire_clears_dub_want(name: &str) -> bool {
+    name == DUB_STEP_NAME
+}
+
+/// RAII "a dub wants the heavy slot" signal from [`dub_slot_want_guard`]: its
+/// Drop clears [`DUB_SLOT_WANTED`] — the early-return safety net for every path
+/// out of the dub `synthesize` before the acquire (the acquire itself clears the
+/// flag the instant it succeeds, in [`acquire_on`], so the flag means precisely
+/// "queued, not yet acquired").
+///
+/// INVARIANT: the flag is a bool, not a refcount, and Drop clears it
+/// UNCONDITIONALLY — safe only because dub synthesis is STRICTLY SERIAL (one
+/// `DubWorker::run` loop awaits `synthesize` fully before the next tick, so at
+/// most one guard exists at a time). If a second concurrent dub `synthesize` is
+/// ever introduced, one guard's Drop would clear another's still-queued want —
+/// make the flag a counter (or key it per-dub) BEFORE going concurrent.
+pub(crate) struct DubSlotWant;
+
+impl Drop for DubSlotWant {
+    fn drop(&mut self) {
+        set_dub_slot_wanted(false);
+    }
+}
+
+/// Publish "a dub is queued behind the heavy slot" (flag TRUE) and return the
+/// RAII guard whose Drop clears it. Created immediately before the dub's
+/// `acquire_slot` (`dabing/worker.rs::synthesize`).
+pub(crate) fn dub_slot_want_guard() -> DubSlotWant {
+    set_dub_slot_wanted(true);
+    DubSlotWant
+}
+
+/// Test-only serialization for the process-global [`DUB_SLOT_WANTED`] flag —
+/// shared by EVERY test in the crate that sets or reads it (heavy_slot flag
+/// tests + the stem/lyrics `process_next` tick-defer tests), so parallel test
+/// threads never stomp each other's flag reads.
+#[cfg(test)]
+pub(crate) static DUB_FLAG_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 // ---------------------------------------------------------------------------
 // Layer 2 — memory-headroom guard (pure core + Windows read).
