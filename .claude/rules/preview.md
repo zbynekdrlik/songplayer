@@ -350,6 +350,13 @@ the owner's actual complaint path every deploy, with all timings PRINTED:
 
 ## #206 — never assert on ONE live-audio sample; control the moment + content
 
+**The preview is 64 kb/s AAC (`preview_encoder.rs`, round F) — it carries NO
+usable energy above ~12 kHz.** A "12–16 kHz band drops when the original voice
+leaves" assertion read the analyser floor both times (−184 / −172 dB, random
+sign) on the box. Assert a full-band RMS level change instead, and remove BOTH
+voices (the original via the control under test, the dub via the API) so the
+compare is speech vs the instrumental bed, not two overlapping speech tracks.
+
 The post-deploy suite reads real audio off the preview `<video>` (RMS on the
 `<video>` element, or a 12–16 kHz band via `captureStream`). Two assertions
 sampled ONE moment of live content and went red on audio LUCK — 3 red E2E jobs

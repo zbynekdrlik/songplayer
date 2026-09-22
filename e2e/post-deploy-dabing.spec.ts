@@ -75,13 +75,13 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     }
   });
 
-  // #206: N best-effort 12–16 kHz band-energy (dB) samples of the preview
-  // <video>'s audio, spread over `spanMs`, from ONE AnalyserNode. Each entry is
-  // the mean of the 12–16 kHz bins at that instant, or null when audio cannot be
-  // captured (a codec-less runner) — averaged by `averageDb` so one snapshot
-  // never decides the sign (the old single `getFloatFrequencyData` compared two
-  // different live moments and went red on 22.9.2026). Returns `count` entries.
-  async function collectBandSamples(
+  // #206 (round 2): full-band RMS (dBFS) of the preview <video>'s audio, `count`
+  // samples spread over `spanMs`. The 12–16 kHz band is NOT measurable on the
+  // preview: its audio is 64 kb/s AAC (preview_encoder.rs, round F), which
+  // low-passes well below 12 kHz — both band reads sat at the analyser floor
+  // (−184 / −172 dB) with a random sign. A voice leaving the mix is a full-band
+  // level change, so RMS is the honest quantity.
+  async function collectRmsSamples(
     page: Page,
     count: number,
     spanMs: number,
@@ -106,28 +106,19 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
           const analyser = ctx.createAnalyser();
           analyser.fftSize = 2048;
           src.connect(analyser);
-          const bins = new Float32Array(analyser.frequencyBinCount);
-          const nyquist = ctx.sampleRate / 2;
-          const binHz = nyquist / bins.length;
-          const bandAt = (): number | null => {
-            analyser.getFloatFrequencyData(bins);
+          const buf = new Float32Array(analyser.fftSize);
+          const rmsDb = (): number | null => {
+            analyser.getFloatTimeDomainData(buf);
             let sum = 0;
-            let n = 0;
-            for (let i = 0; i < bins.length; i++) {
-              const hz = i * binHz;
-              if (hz >= 12000 && hz <= 16000 && Number.isFinite(bins[i])) {
-                sum += bins[i];
-                n += 1;
-              }
-            }
-            return n > 0 ? sum / n : null;
+            for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+            const rms = Math.sqrt(sum / buf.length);
+            return rms > 0 ? 20 * Math.log10(rms) : null;
           };
-          // Warm the analyser, then take `count` samples spread across `spanMs`.
           await new Promise((r) => setTimeout(r, 200));
           const step = Math.max(1, Math.floor(spanMs / count));
           const out: Array<number | null> = [];
           for (let s = 0; s < count; s++) {
-            out.push(bandAt());
+            out.push(rmsDb());
             if (s < count - 1) await new Promise((r) => setTimeout(r, step));
           }
           await ctx.close();
@@ -303,14 +294,18 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     const vokaly = page.getByTestId("mix-vokaly");
     await expect(vokaly).toBeEnabled({ timeout: 15000 });
     // Read the fader so the shared box console is left as found (#206).
-    const originalVokaly = (
-      (await (await request.get("/api/v1/mix")).json()) as { dub: { vokaly: number } }
-    ).dub.vokaly;
+    const found = (
+      (await (await request.get("/api/v1/mix")).json()) as {
+        dub: { vokaly: number; dabing: number };
+      }
+    ).dub;
+    const originalVokaly = found.vokaly;
+    const originalDabing = found.dabing;
 
     try {
-      // BEFORE: the original voice present. Seek to T, play ~1 s past it, average.
+      // BEFORE: voices as found. Seek to T, play ~1 s past it, average the RMS.
       await seekAndSettle(request, seekBar, dabingPid, T);
-      const before = averageDb(await collectBandSamples(page, 8, 2000));
+      const before = averageDb(await collectRmsSamples(page, 8, 2000));
 
       // Remove the original voice with a REAL mouse (the #200 acceptance: the
       // control is not dead), and prove the PATCH landed to exactly 0.
@@ -332,27 +327,38 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
         "dragging mix-vokaly to the bottom must set dub.vokaly to 0 (the PATCH landed)",
       ).toBe(0);
 
-      // AFTER: the SAME audio (seek back to the same T), original voice removed.
+      // The dub voice overlaps the original voice in spectrum AND time, so the
+      // audible proof that the vokaly fader reached the ENGINE is the level of
+      // the mix with BOTH voices removed (only the instrumental bed left) versus
+      // the mix as found, on the SAME audio: the dub goes off via the API (not
+      // under test), the original went off via the real-mouse drag above. If the
+      // drag had not reached the engine, the original voice would keep the level up.
+      const dubOff = await request.patch("/api/v1/mix", { data: { kind: "dub", dabing: 0 } });
+      expect(dubOff.status(), "muting the dub voice via the API must be accepted").toBe(200);
+
+      // AFTER: the SAME audio (seek back to the same T), both voices removed.
       await seekAndSettle(request, seekBar, dabingPid, T);
-      const after = averageDb(await collectBandSamples(page, 8, 2000));
+      const after = averageDb(await collectRmsSamples(page, 8, 2000));
 
       console.log(
-        `[#206] dabing 12–16 kHz band before=${before} dB after=${after} dB (T=${T} ms)`,
+        `[#206] dabing full-band RMS before=${before} dBFS (voices as found) after=${after} dBFS (original + dub removed) (T=${T} ms)`,
       );
-      // Best-effort HF band drop — skips only on a codec-less runner where audio
+      // Best-effort level drop — skips only on a codec-less runner where audio
       // cannot be captured (the wall audio is the owner's real acceptance). On the
       // box (Edge, real codecs) both reads are numeric and the drop is asserted.
       if (before !== null && after !== null) {
         expect(
           before - after,
-          "removing the original voice must drop the 12–16 kHz band ≥ 8 dB on the SAME audio (seek T twice)",
-        ).toBeGreaterThanOrEqual(8);
+          "removing the original voice (real mouse) and the dub voice (API) must drop the full-band RMS ≥ 6 dB on the SAME audio (seek T twice)",
+        ).toBeGreaterThanOrEqual(6);
       }
     } finally {
       // Leave the shared dub console + preview as found: restore the original
       // fader and stop the preview this test started.
       await request
-        .patch("/api/v1/mix", { data: { kind: "dub", vokaly: originalVokaly } })
+        .patch("/api/v1/mix", {
+          data: { kind: "dub", vokaly: originalVokaly, dabing: originalDabing },
+        })
         .catch(() => {});
       await page.getByTestId("preview-stop").click().catch(() => {});
     }
