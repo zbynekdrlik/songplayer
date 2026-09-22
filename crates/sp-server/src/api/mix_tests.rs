@@ -1,7 +1,8 @@
-//! Axum integration tests (#177) for the karaoke now-playing payload, the
-//! videos-list `stems_state` marker, and the stem re-enqueue endpoint. Included
-//! from `api/karaoke.rs` via `#[path]` so the handler file stays lean. Reuses
-//! the shared `routes::tests` AppState + router harness.
+//! Axum integration tests (#184 round G) for the ONE mixer console: the fader
+//! PATCH + persist, the now-playing stems payload (#177, moved from karaoke.rs),
+//! the videos-list `stems_state` marker, the stem re-enqueue endpoint, and the
+//! 404 of the deleted karaoke / dub-mix routes. Included from `api/mix.rs` via
+//! `#[path]`. Reuses the shared `routes::tests` AppState + router harness.
 
 #![allow(unused_imports)]
 
@@ -10,6 +11,10 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
 use crate::api::routes::tests::{app, test_state};
+
+/// The process-global `MixControl` is shared across parallel tests, so the two
+/// fader tests serialize on this lock to keep their reads/writes deterministic.
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 async fn insert_playlist(pool: &sqlx::SqlitePool, id: i64) {
     sqlx::query("INSERT INTO playlists (id, name, youtube_url, is_active) VALUES (?, 'p', 'u', 1)")
@@ -47,21 +52,93 @@ async fn get_json(app: axum::Router, uri: &str) -> serde_json::Value {
     serde_json::from_slice(&body).unwrap()
 }
 
+async fn patch_mix(app: axum::Router, body: &str) -> (StatusCode, serde_json::Value) {
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/mix")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let json = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, json)
+}
+
+async fn get_setting(pool: &sqlx::SqlitePool, key: &str) -> Option<String> {
+    crate::db::models::get_setting(pool, key).await.unwrap()
+}
+
 #[tokio::test]
-async fn karaoke_now_playing_carries_per_song_stems_state() {
+async fn patch_mix_sets_all_three_faders_and_persists() {
+    let _g = SERIAL.lock().unwrap();
     let state = test_state().await;
     let pool = state.pool.clone();
-    // A distinct playlist id so this test's now-playing entry is isolated from
-    // any set by a parallel test (the registry is process-global).
+
+    let (status, json) =
+        patch_mix(app(state), r#"{"vokaly":0.3,"podklad":1.0,"dabing":0.5}"#).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!((json["vokaly"].as_f64().unwrap() - 0.3).abs() < 1e-6);
+    assert!((json["podklad"].as_f64().unwrap() - 1.0).abs() < 1e-6);
+    assert!((json["dabing"].as_f64().unwrap() - 0.5).abs() < 1e-6);
+
+    // The three settings are persisted (restored at boot by init_from_settings).
+    assert_eq!(
+        get_setting(&pool, sp_core::config::SETTING_MIX_PODKLAD).await,
+        Some("1".to_string())
+    );
+    let v: f32 = get_setting(&pool, sp_core::config::SETTING_MIX_VOKALY)
+        .await
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((v - 0.3).abs() < 1e-6);
+}
+
+#[tokio::test]
+async fn patch_mix_partial_keeps_the_unspecified_faders() {
+    let _g = SERIAL.lock().unwrap();
+    let state = test_state().await;
+
+    // Seed a known console, then PATCH ONLY vokaly — podklad/dabing must survive.
+    let (s1, _) = patch_mix(
+        app(state.clone()),
+        r#"{"vokaly":1.0,"podklad":0.4,"dabing":0.2}"#,
+    )
+    .await;
+    assert_eq!(s1, StatusCode::OK);
+
+    let (s2, json) = patch_mix(app(state), r#"{"vokaly":0.0}"#).await;
+    assert_eq!(s2, StatusCode::OK);
+    assert!((json["vokaly"].as_f64().unwrap() - 0.0).abs() < 1e-6);
+    assert!(
+        (json["podklad"].as_f64().unwrap() - 0.4).abs() < 1e-6,
+        "an omitted podklad keeps its current value"
+    );
+    assert!((json["dabing"].as_f64().unwrap() - 0.2).abs() < 1e-6);
+}
+
+#[tokio::test]
+async fn mix_now_playing_carries_per_song_stems_state() {
+    let state = test_state().await;
+    let pool = state.pool.clone();
+    // A distinct playlist id so this test's now-playing entry is isolated from any
+    // set by a parallel test (the registry is process-global).
     insert_playlist(&pool, 771).await;
     let vid = insert_video(&pool, 771, "np_ready").await;
-    // Both stems present → Ready.
     crate::db::models_stems::mark_stems_done(&pool, vid, "/c/v.flac", "/c/i.flac")
         .await
         .unwrap();
     crate::now_playing::global().set(771, vid);
 
-    let json = get_json(app(state), "/api/v1/karaoke").await;
+    let json = get_json(app(state), "/api/v1/mix").await;
     let np = json["now_playing"].as_array().expect("now_playing array");
     let entry = np
         .iter()
@@ -80,14 +157,14 @@ async fn karaoke_now_playing_carries_per_song_stems_state() {
 }
 
 #[tokio::test]
-async fn karaoke_now_playing_reports_queued_position_and_failed_error() {
+async fn mix_now_playing_reports_queued_position_and_failed_error() {
     let state = test_state().await;
     let pool = state.pool.clone();
     insert_playlist(&pool, 772).await;
     let queued = insert_video(&pool, 772, "np_queued").await;
     crate::now_playing::global().set(772, queued);
 
-    let json = get_json(app(state.clone()), "/api/v1/karaoke").await;
+    let json = get_json(app(state.clone()), "/api/v1/mix").await;
     let np = json["now_playing"].as_array().unwrap();
     let entry = np.iter().find(|e| e["playlist_id"] == 772).unwrap();
     assert_eq!(entry["stems_state"], "queued");
@@ -101,7 +178,7 @@ async fn karaoke_now_playing_reports_queued_position_and_failed_error() {
     )
     .await
     .unwrap();
-    let json = get_json(app(state), "/api/v1/karaoke").await;
+    let json = get_json(app(state), "/api/v1/mix").await;
     let entry = json["now_playing"]
         .as_array()
         .unwrap()
@@ -144,14 +221,10 @@ async fn videos_payload_carries_stems_state_marker() {
     assert_eq!(state_of(unsup).as_deref(), Some("unavailable"));
 }
 
-/// #177 mutation: the `stems_error` reason mapping. The now-playing tests above
-/// only ever exercise ready/queued/failed, so the `Unavailable` arm and the
-/// no-reason default were never pinned — a deleted `Unavailable` arm silently
-/// falls through to `None`. This pure-function test covers every arm.
+/// #177 mutation: the `stems_error` reason mapping — every arm.
 #[test]
 fn stems_error_covers_unavailable_failed_and_none() {
     use crate::db::models_stems::StemsState;
-    // Unavailable carries its OWN human reason — NOT the fall-through `None`.
     let unavail = super::stems_error(StemsState::Unavailable, 0);
     assert!(
         unavail
@@ -159,12 +232,10 @@ fn stems_error_covers_unavailable_failed_and_none() {
             .is_some_and(|s| s.contains("nie sú dostupné")),
         "unavailable song must carry its own reason, got {unavail:?}"
     );
-    // Failed carries the attempt count.
     assert_eq!(
         super::stems_error(StemsState::Failed, 3).as_deref(),
         Some("posledný pokus o spracovanie stemov zlyhal (pokusov: 3)"),
     );
-    // Ready / Queued / Processing need no explanation.
     assert!(super::stems_error(StemsState::Ready, 0).is_none());
     assert!(super::stems_error(StemsState::Queued, 5).is_none());
     assert!(super::stems_error(StemsState::Processing, 0).is_none());
@@ -179,7 +250,6 @@ async fn enqueue_endpoint_reopens_a_failed_song() {
     crate::db::models_stems::mark_stems_unsupported(&pool, vid)
         .await
         .unwrap();
-    // Terminal → not selectable.
     assert!(
         crate::db::models_stems::get_next_video_for_stems(&pool)
             .await
@@ -205,7 +275,6 @@ async fn enqueue_endpoint_reopens_a_failed_song() {
     assert_eq!(json["status"], "enqueued");
     assert_eq!(json["queue_position"], 1);
 
-    // Now selectable again.
     assert_eq!(
         crate::db::models_stems::get_next_video_for_stems(&pool)
             .await
@@ -213,4 +282,33 @@ async fn enqueue_endpoint_reopens_a_failed_song() {
             .map(|j| j.video_id),
         Some(vid)
     );
+}
+
+/// The old karaoke + per-video dub-mix routes are DELETED — they now 404.
+#[tokio::test]
+async fn deleted_karaoke_and_dub_mix_routes_are_gone() {
+    let state = test_state().await;
+    let get_karaoke = app(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/karaoke")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(get_karaoke.status(), StatusCode::NOT_FOUND);
+
+    let dub_mix = app(state)
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/videos/1/dub-mix")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"ratio":1.0}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(dub_mix.status(), StatusCode::NOT_FOUND);
 }

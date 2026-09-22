@@ -1,202 +1,109 @@
-//! Process-global live karaoke control (#14, #186).
+//! Process-global live mixer control (#184 round G, was #14/#186 `KaraokeControl`).
 //!
-//! The karaoke mode + vocal gain are a single app-wide live setting (one wall,
-//! one operator flipping it during a service), so — unlike the per-output
-//! `burn_on` registry — they live in ONE process-global [`KaraokeControl`].
+//! The mixer is ONE app-wide live console (one wall, one operator) — three
+//! independent faders `[vokály, podklad, dabing]`. Unlike the per-output `burn_on`
+//! registry it lives in ONE process-global [`MixControl`].
 //!
-//! Since #186 a karaoke MODE is a live gain PRESET, not a choice of which files
-//! to open. The control holds three LIVE target-gain atomics
-//! `[original, vocals, instrumental]`; `set_mode` / `set_vocal_gain` publish the
-//! preset triple to them, and every playing [`sp_decoder::StemMixReader`] reads
-//! and ramps toward them — so a preset change is heard immediately, with NO
-//! pipeline reopen (the seconds-of-silence dropout #186 fixes).
+//! Since #186 a fader change is a live GAIN write, not a choice of which files to
+//! open: the control holds the three fader positions PLUS three DERIVED per-stream
+//! gain sets — `[original, vocals, instrumental]` (a song), `[original, vocals,
+//! instrumental, dub]` (a dub with stems), and `[original, dub]` (a dub without
+//! stems). `set_faders` recomputes ALL THREE in lock-step from the pure
+//! `sp_core::mixer_model::stream_gains_*`, and every playing
+//! [`sp_decoder::StemMixReader`] reads and ramps toward whichever set applies — so
+//! a fader move is heard immediately with NO pipeline reopen (the #186 seam).
 
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
-use sp_core::playback::KaraokeMode;
+use sp_core::mixer_model::{
+    MixFaders, stream_gains_dub, stream_gains_dub_no_stems, stream_gains_song,
+};
 
-/// Live karaoke mode + vocal gain, shared between the API/engine (writers) and
-/// every playback pipeline (reader).
-pub struct KaraokeControl {
-    /// `KaraokeMode::as_u8` — the active preset (read when a song opens, and to
-    /// re-derive the gain triple on a fader move).
-    mode: AtomicU8,
-    /// f32 bits, `0.0..=1.0` — the operator's stored vocal-fader POSITION (the
-    /// `vg` input to the KaraokeLow preset), NOT a gain handed to the mixer.
-    vocal_gain: Arc<AtomicU32>,
-    /// The LIVE per-stream target gains `[original, vocals, instrumental]` every
-    /// [`sp_decoder::StemMixReader`] reads and ramps toward. `set_mode` /
-    /// `set_vocal_gain` write the preset triple here so a preset change reaches
-    /// the playing mixer WITHOUT reopening the pipeline (#186).
+/// Live mixer faders + the derived per-stream gain atomics, shared between the
+/// API/engine (writers) and every playback pipeline (reader).
+pub struct MixControl {
+    /// The three live fader positions (f32 bits), `0.0..=1.0`.
+    faders: [Arc<AtomicU32>; 3],
+    /// The LIVE per-stream target gains `[original, vocals, instrumental]` a song's
+    /// 3-stream [`sp_decoder::StemMixReader`] reads and ramps toward.
     gains: [Arc<AtomicU32>; 3],
-    /// The stored dub mix ratio (`0.0..=1.0`, f32 bits) — the currently-playing
-    /// dub video's original↔dub blend (#183 D4). Global (one wall, one operator);
-    /// `PATCH /dub-mix` updates it live via `EngineCommand::SetDubMix`.
-    dub_ratio: Arc<AtomicU32>,
     /// The LIVE per-stream target gains `[original, vocals, instrumental, dub]` a
-    /// dub video's 4-stream [`sp_decoder::StemMixReader`] reads and ramps toward.
-    /// `set_dub_ratio` publishes [`dub_gains`] here so a mix change is heard with
-    /// NO pipeline reopen (the same #186 seam, one stream wider).
+    /// dub video's 4-stream reader reads and ramps toward.
     dub_gain_atomics: [Arc<AtomicU32>; 4],
     /// The LIVE per-stream target gains `[original, dub]` a NO-STEMS dub video's
-    /// 2-stream [`sp_decoder::StemMixReader`] reads and ramps toward (#183 round 2
-    /// — long videos the stem worker cannot separate still get dubbed). The SAME
-    /// `set_dub_ratio` publishes [`dub_over_original_gains`] here, so one PATCH
-    /// drives both the 4-stream and the 2-stream mix live (only one is ever open).
+    /// 2-stream reader reads and ramps toward (only one of the three ever open).
     dub2_gain_atomics: [Arc<AtomicU32>; 2],
 }
 
-/// Default vocal gain for KaraokeLow when no setting is stored (30 %).
-pub const DEFAULT_VOCAL_GAIN: f32 = 0.3;
-
-/// The per-stream linear gains `(original, vocals, instrumental)` for a karaoke
-/// mode PRESET (#186). `vocal_gain` (clamped) only scales the KaraokeLow vocals:
-///
-/// | mode              | original | vocals | instrumental |
-/// |-------------------|----------|--------|--------------|
-/// | FullMix           | 1        | 0      | 0            |
-/// | KaraokeLow        | 0        | vg     | 1            |
-/// | VocalsOnly        | 0        | 1      | 0            |
-/// | InstrumentalOnly  | 0        | 0      | 1            |
-///
-/// FullMix plays the ORIGINAL alone (bit-exact, no separation artefacts); every
-/// non-FullMix preset drops the original and mixes the two stems.
-pub fn preset_gains(mode: KaraokeMode, vocal_gain: f32) -> (f32, f32, f32) {
-    let vg = clamp_gain(vocal_gain);
-    match mode {
-        KaraokeMode::FullMix => (1.0, 0.0, 0.0),
-        KaraokeMode::KaraokeLow => (0.0, vg, 1.0),
-        KaraokeMode::VocalsOnly => (0.0, 1.0, 0.0),
-        KaraokeMode::InstrumentalOnly => (0.0, 0.0, 1.0),
-    }
+fn bits(v: f32) -> AtomicU32 {
+    AtomicU32::new(v.to_bits())
 }
 
-/// The per-stream linear gains `(original, vocals, instrumental, dub)` for a dub
-/// video (#183 D4). The mix cross-fades the ORIGINAL speaker (the `vocals` stem)
-/// against the Slovak `dub` track over the constant instrumental ambient bed;
-/// the full-mix `original` stream is always silent so the two voice tracks are
-/// never doubled by it:
-///
-/// | ratio `r` | original | vocals (orig voice) | instrumental (bed) | dub (SK) |
-/// |-----------|----------|---------------------|--------------------|----------|
-/// | 1.0       | 0        | 0                   | 1                  | 1        | dub only (default)
-/// | 0.0       | 0        | 1                   | 1                  | 0        | originál
-/// | 0.5       | 0        | 0.5                 | 1                  | 0.5      | 50/50
-///
-/// `r` is clamped to `0.0..=1.0`; a non-finite ratio falls back to `1.0` (the
-/// safe dub-only default), matching `set_dub_mix_ratio`'s NaN handling.
-pub fn dub_gains(ratio: f32) -> (f32, f32, f32, f32) {
-    let r = if ratio.is_finite() {
-        ratio.clamp(0.0, 1.0)
-    } else {
-        1.0
-    };
-    (0.0, 1.0 - r, 1.0, r)
-}
-
-/// Default dub mix ratio when none is stored: `1.0` = dub only (owner ruling
-/// #174: default mix for dub videos is dub only).
-pub const DEFAULT_DUB_RATIO: f32 = 1.0;
-
-/// The floor gain kept on the ORIGINAL bed in the 2-stream no-stems dub mix
-/// (#183 round 2): `0.125` ≈ −18 dB. Without stems the "original" stream still
-/// carries the source speaker, so it is never fully muted under the dub — the
-/// room never goes dead (the owner-accepted "dub + original −18 dB bed" from the
-/// listening tests). At `r = 0` the original is full (`1.0`) and the dub silent.
-pub const DUB_ORIGINAL_FLOOR: f32 = 0.125;
-
-/// The per-stream linear gains `(original, dub)` for a NO-STEMS dub video's
-/// 2-stream `[original, dub]` mix (#183 round 2). There is no separated ambient
-/// bed, so the FULL original (English speaker included) is the bed, floored at
-/// [`DUB_ORIGINAL_FLOOR`] (−18 dB) so it never disappears entirely under the dub:
-///
-/// | ratio `r` | original (bed)         | dub (SK) |
-/// |-----------|------------------------|----------|
-/// | 1.0       | max(0, FLOOR) = FLOOR  | 1        | dub over a −18 dB bed (default)
-/// | 0.0       | max(1, FLOOR) = 1      | 0        | originál
-/// | 0.5       | max(0.5, FLOOR) = 0.5  | 0.5      | 50/50
-///
-/// `r` is clamped to `0.0..=1.0`; a non-finite ratio falls back to
-/// [`DEFAULT_DUB_RATIO`] (`1.0`), matching [`dub_gains`]' NaN handling.
-pub fn dub_over_original_gains(ratio: f32) -> (f32, f32) {
-    let r = if ratio.is_finite() {
-        ratio.clamp(0.0, 1.0)
-    } else {
-        DEFAULT_DUB_RATIO
-    };
-    ((1.0 - r).max(DUB_ORIGINAL_FLOOR), r)
-}
-
-impl KaraokeControl {
-    fn new(mode: KaraokeMode, vocal_gain: f32) -> Self {
-        let vg = clamp_gain(vocal_gain);
-        let (o, v, i) = preset_gains(mode, vg);
-        let (d0, d1, d2, d3) = dub_gains(DEFAULT_DUB_RATIO);
-        let (e0, e1) = dub_over_original_gains(DEFAULT_DUB_RATIO);
+impl MixControl {
+    fn new(f: MixFaders) -> Self {
+        let s = stream_gains_song(f);
+        let d = stream_gains_dub(f);
+        let e = stream_gains_dub_no_stems(f);
         Self {
-            mode: AtomicU8::new(mode.as_u8()),
-            vocal_gain: Arc::new(AtomicU32::new(vg.to_bits())),
+            faders: [
+                Arc::new(bits(f.vokaly)),
+                Arc::new(bits(f.podklad)),
+                Arc::new(bits(f.dabing)),
+            ],
             gains: [
-                Arc::new(AtomicU32::new(o.to_bits())),
-                Arc::new(AtomicU32::new(v.to_bits())),
-                Arc::new(AtomicU32::new(i.to_bits())),
+                Arc::new(bits(s[0])),
+                Arc::new(bits(s[1])),
+                Arc::new(bits(s[2])),
             ],
-            dub_ratio: Arc::new(AtomicU32::new(DEFAULT_DUB_RATIO.to_bits())),
             dub_gain_atomics: [
-                Arc::new(AtomicU32::new(d0.to_bits())),
-                Arc::new(AtomicU32::new(d1.to_bits())),
-                Arc::new(AtomicU32::new(d2.to_bits())),
-                Arc::new(AtomicU32::new(d3.to_bits())),
+                Arc::new(bits(d[0])),
+                Arc::new(bits(d[1])),
+                Arc::new(bits(d[2])),
+                Arc::new(bits(d[3])),
             ],
-            dub2_gain_atomics: [
-                Arc::new(AtomicU32::new(e0.to_bits())),
-                Arc::new(AtomicU32::new(e1.to_bits())),
-            ],
+            dub2_gain_atomics: [Arc::new(bits(e[0])), Arc::new(bits(e[1]))],
         }
     }
 
-    /// Current karaoke mode.
-    pub fn mode(&self) -> KaraokeMode {
-        KaraokeMode::from_u8(self.mode.load(Ordering::Relaxed))
+    /// Current fader positions.
+    pub fn faders(&self) -> MixFaders {
+        MixFaders::new(
+            f32::from_bits(self.faders[0].load(Ordering::Relaxed)),
+            f32::from_bits(self.faders[1].load(Ordering::Relaxed)),
+            f32::from_bits(self.faders[2].load(Ordering::Relaxed)),
+        )
     }
 
-    /// Set the karaoke mode and publish the new preset triple to the live gain
-    /// atomics — a preset change the playing mixer picks up with no reopen (#186).
-    pub fn set_mode(&self, mode: KaraokeMode) {
-        self.mode.store(mode.as_u8(), Ordering::Relaxed);
-        self.write_preset(mode, self.vocal_gain());
+    /// Set the three faders (clamped + NaN-guarded by [`MixFaders::new`]) and
+    /// publish ALL THREE derived gain sets to the live atomics IN LOCK-STEP — the
+    /// seam that makes a fader change audible with no pipeline reopen (#186). Every
+    /// playing `StemMixReader` (song / dub-with-stems / dub-without-stems) ramps
+    /// toward whichever set it holds.
+    pub fn set_faders(&self, f: MixFaders) {
+        let f = MixFaders::new(f.vokaly, f.podklad, f.dabing);
+        self.faders[0].store(f.vokaly.to_bits(), Ordering::Relaxed);
+        self.faders[1].store(f.podklad.to_bits(), Ordering::Relaxed);
+        self.faders[2].store(f.dabing.to_bits(), Ordering::Relaxed);
+
+        let s = stream_gains_song(f);
+        for (a, v) in self.gains.iter().zip(s) {
+            a.store(v.to_bits(), Ordering::Relaxed);
+        }
+        let d = stream_gains_dub(f);
+        for (a, v) in self.dub_gain_atomics.iter().zip(d) {
+            a.store(v.to_bits(), Ordering::Relaxed);
+        }
+        let e = stream_gains_dub_no_stems(f);
+        for (a, v) in self.dub2_gain_atomics.iter().zip(e) {
+            a.store(v.to_bits(), Ordering::Relaxed);
+        }
     }
 
-    /// Current vocal gain (`0.0..=1.0`) — the stored fader position.
-    pub fn vocal_gain(&self) -> f32 {
-        f32::from_bits(self.vocal_gain.load(Ordering::Relaxed))
-    }
-
-    /// Set the vocal fader (clamped to `0.0..=1.0`) and re-derive the live gain
-    /// triple. Takes effect live — the playing `StemMixReader` ramps toward the
-    /// new `vocals` gain. (The fader only changes the KaraokeLow preset; for the
-    /// other presets re-publishing the triple is a harmless no-op.)
-    pub fn set_vocal_gain(&self, gain: f32) {
-        let vg = clamp_gain(gain);
-        self.vocal_gain.store(vg.to_bits(), Ordering::Relaxed);
-        self.write_preset(self.mode(), vg);
-    }
-
-    /// Recompute the preset gain triple and publish it to the live `gains`
-    /// atomics the mixer reads — the seam that makes a preset / fader change
-    /// audible with no pipeline reopen (#186).
-    fn write_preset(&self, mode: KaraokeMode, vocal_gain: f32) {
-        let (o, v, i) = preset_gains(mode, vocal_gain);
-        self.gains[0].store(o.to_bits(), Ordering::Relaxed);
-        self.gains[1].store(v.to_bits(), Ordering::Relaxed);
-        self.gains[2].store(i.to_bits(), Ordering::Relaxed);
-    }
-
-    /// Clone the three LIVE gain atomics `[original, vocals, instrumental]` to
-    /// hand a `StemMixReader`, so a preset / fader change is heard immediately
-    /// mid-song without reopening the pipeline.
+    /// Clone the three LIVE song gain atomics `[original, vocals, instrumental]`
+    /// to hand a `StemMixReader`, so a fader change is heard immediately mid-song
+    /// without reopening the pipeline.
     pub fn gain_handles(&self) -> [Arc<AtomicU32>; 3] {
         [
             Arc::clone(&self.gains[0]),
@@ -205,33 +112,8 @@ impl KaraokeControl {
         ]
     }
 
-    /// Current dub mix ratio (`0.0..=1.0`).
-    pub fn dub_ratio(&self) -> f32 {
-        f32::from_bits(self.dub_ratio.load(Ordering::Relaxed))
-    }
-
-    /// Set the dub mix ratio (`0.0..=1.0`; non-finite → [`DEFAULT_DUB_RATIO`]) and
-    /// publish the new [`dub_gains`] quad to the live atomics — the playing dub
-    /// mixer ramps toward them with NO pipeline reopen (#183 D4, the #186 seam).
-    pub fn set_dub_ratio(&self, ratio: f32) {
-        let (d0, d1, d2, d3) = dub_gains(ratio);
-        // `dub_gains` already clamped/NaN-guarded — store the effective `r` back.
-        let r = 1.0 - d1; // (d1 == 1 - r) by construction
-        self.dub_ratio.store(r.to_bits(), Ordering::Relaxed);
-        self.dub_gain_atomics[0].store(d0.to_bits(), Ordering::Relaxed);
-        self.dub_gain_atomics[1].store(d1.to_bits(), Ordering::Relaxed);
-        self.dub_gain_atomics[2].store(d2.to_bits(), Ordering::Relaxed);
-        self.dub_gain_atomics[3].store(d3.to_bits(), Ordering::Relaxed);
-        // Publish the 2-stream no-stems quad in lock-step from the SAME `r`, so a
-        // PATCH is heard live whichever mix is open (#183 round 2).
-        let (e0, e1) = dub_over_original_gains(r);
-        self.dub2_gain_atomics[0].store(e0.to_bits(), Ordering::Relaxed);
-        self.dub2_gain_atomics[1].store(e1.to_bits(), Ordering::Relaxed);
-    }
-
     /// Clone the four LIVE dub gain atomics `[original, vocals, instrumental, dub]`
-    /// to hand a 4-stream `StemMixReader`, so a mix change is heard immediately
-    /// mid-video without reopening the pipeline.
+    /// to hand a 4-stream `StemMixReader`.
     pub fn dub_gain_handles(&self) -> [Arc<AtomicU32>; 4] {
         [
             Arc::clone(&self.dub_gain_atomics[0]),
@@ -242,8 +124,7 @@ impl KaraokeControl {
     }
 
     /// Clone the two LIVE gain atomics `[original, dub]` to hand a 2-stream
-    /// no-stems `StemMixReader` (#183 round 2), so a mix change is heard
-    /// immediately mid-video without reopening the pipeline.
+    /// no-stems `StemMixReader` (#183 round 2).
     pub fn dub_over_original_gain_handles(&self) -> [Arc<AtomicU32>; 2] {
         [
             Arc::clone(&self.dub2_gain_atomics[0]),
@@ -253,203 +134,105 @@ impl KaraokeControl {
 
     /// Construct a standalone control for tests (not the process global).
     #[cfg(test)]
-    pub(crate) fn new_for_test(mode: KaraokeMode, vocal_gain: f32) -> Self {
-        Self::new(mode, vocal_gain)
+    pub(crate) fn new_for_test(f: MixFaders) -> Self {
+        Self::new(f)
     }
 }
 
-fn clamp_gain(g: f32) -> f32 {
-    if g.is_finite() {
-        g.clamp(0.0, 1.0)
-    } else {
-        DEFAULT_VOCAL_GAIN
-    }
-}
+static GLOBAL: OnceLock<Arc<MixControl>> = OnceLock::new();
 
-static GLOBAL: OnceLock<Arc<KaraokeControl>> = OnceLock::new();
-
-/// Initialise the process-global control from the stored settings. Idempotent —
-/// the first call wins; later calls just set the values on the existing control.
-pub fn init(mode: KaraokeMode, vocal_gain: f32) -> Arc<KaraokeControl> {
-    let ctrl = GLOBAL.get_or_init(|| Arc::new(KaraokeControl::new(mode, vocal_gain)));
-    // If the global already existed (e.g. a test set it first), reconcile.
-    ctrl.set_mode(mode);
-    ctrl.set_vocal_gain(vocal_gain);
+/// Initialise the process-global control from the stored faders. Idempotent — the
+/// first call wins; a later call just sets the faders on the existing control.
+pub fn init(f: MixFaders) -> Arc<MixControl> {
+    let ctrl = GLOBAL.get_or_init(|| Arc::new(MixControl::new(f)));
+    ctrl.set_faders(f);
     Arc::clone(ctrl)
 }
 
-/// The process-global karaoke control, lazily defaulting to `FullMix` + the
-/// default vocal gain if `init` was never called (unit tests, degraded boot).
-pub fn global() -> Arc<KaraokeControl> {
-    Arc::clone(GLOBAL.get_or_init(|| {
-        Arc::new(KaraokeControl::new(
-            KaraokeMode::FullMix,
-            DEFAULT_VOCAL_GAIN,
-        ))
-    }))
+/// The process-global mixer control, lazily defaulting to all-full faders if
+/// `init` was never called (unit tests, degraded boot).
+pub fn global() -> Arc<MixControl> {
+    Arc::clone(GLOBAL.get_or_init(|| Arc::new(MixControl::new(MixFaders::default()))))
 }
 
-/// Seed the process-global control from the `karaoke_mode` + `karaoke_vocal_gain`
-/// DB settings, so a restart restores the operator's last choice and pipelines
-/// pick it up at song open.
-pub async fn init_from_settings(pool: &sqlx::SqlitePool) -> Arc<KaraokeControl> {
-    let mode = crate::db::models::get_setting(pool, "karaoke_mode")
-        .await
-        .ok()
-        .flatten()
-        .map(|s| KaraokeMode::from_str_lossy(&s))
-        .unwrap_or(KaraokeMode::FullMix);
-    let gain = crate::db::models::get_setting(pool, "karaoke_vocal_gain")
+/// Read one f32 mixer-fader setting, defaulting to `1.0` (full) when absent or
+/// unparseable.
+async fn read_fader(pool: &sqlx::SqlitePool, key: &str) -> f32 {
+    crate::db::models::get_setting(pool, key)
         .await
         .ok()
         .flatten()
         .and_then(|s| s.trim().parse::<f32>().ok())
-        .unwrap_or(DEFAULT_VOCAL_GAIN);
-    init(mode, gain)
+        .filter(|v| v.is_finite())
+        .unwrap_or(1.0)
+}
+
+/// Seed the process-global control from the `mix_vokaly` / `mix_podklad` /
+/// `mix_dabing` settings (migration V27 derives these from the old karaoke /
+/// dub-ratio settings), so a restart restores the operator's last console.
+pub async fn init_from_settings(pool: &sqlx::SqlitePool) -> Arc<MixControl> {
+    let vokaly = read_fader(pool, sp_core::config::SETTING_MIX_VOKALY).await;
+    let podklad = read_fader(pool, sp_core::config::SETTING_MIX_PODKLAD).await;
+    let dabing = read_fader(pool, sp_core::config::SETTING_MIX_DABING).await;
+    init(MixFaders::new(vokaly, podklad, dabing))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn new_control_holds_mode_and_gain() {
-        let c = KaraokeControl::new(KaraokeMode::KaraokeLow, 0.4);
-        assert_eq!(c.mode(), KaraokeMode::KaraokeLow);
-        assert!((c.vocal_gain() - 0.4).abs() < 1e-6);
-    }
-
-    #[test]
-    fn set_mode_and_gain_update() {
-        let c = KaraokeControl::new(KaraokeMode::FullMix, 0.3);
-        c.set_mode(KaraokeMode::InstrumentalOnly);
-        c.set_vocal_gain(0.75);
-        assert_eq!(c.mode(), KaraokeMode::InstrumentalOnly);
-        assert!((c.vocal_gain() - 0.75).abs() < 1e-6);
-    }
-
-    #[test]
-    fn vocal_gain_is_clamped_and_nan_guarded() {
-        let c = KaraokeControl::new(KaraokeMode::FullMix, 0.3);
-        c.set_vocal_gain(2.0);
-        assert!((c.vocal_gain() - 1.0).abs() < 1e-6);
-        c.set_vocal_gain(-1.0);
-        assert!((c.vocal_gain() - 0.0).abs() < 1e-6);
-        c.set_vocal_gain(f32::NAN);
-        assert!((c.vocal_gain() - DEFAULT_VOCAL_GAIN).abs() < 1e-6);
-    }
-
     fn read(a: &Arc<AtomicU32>) -> f32 {
         f32::from_bits(a.load(Ordering::Relaxed))
     }
 
     #[test]
-    fn preset_gains_table() {
-        assert_eq!(preset_gains(KaraokeMode::FullMix, 0.3), (1.0, 0.0, 0.0));
-        assert_eq!(preset_gains(KaraokeMode::KaraokeLow, 0.3), (0.0, 0.3, 1.0));
-        assert_eq!(preset_gains(KaraokeMode::VocalsOnly, 0.3), (0.0, 1.0, 0.0));
-        assert_eq!(
-            preset_gains(KaraokeMode::InstrumentalOnly, 0.3),
-            (0.0, 0.0, 1.0)
-        );
-        // vg only scales the KaraokeLow vocals stream.
-        assert_eq!(preset_gains(KaraokeMode::KaraokeLow, 0.8), (0.0, 0.8, 1.0));
+    fn new_control_holds_the_faders() {
+        let c = MixControl::new_for_test(MixFaders::new(0.3, 0.6, 0.5));
+        assert_eq!(c.faders(), MixFaders::new(0.3, 0.6, 0.5));
     }
 
     #[test]
-    fn preset_gains_clamps_and_guards_nan() {
-        assert_eq!(preset_gains(KaraokeMode::KaraokeLow, 1.5), (0.0, 1.0, 1.0));
-        assert_eq!(preset_gains(KaraokeMode::KaraokeLow, -0.5), (0.0, 0.0, 1.0));
-        assert_eq!(
-            preset_gains(KaraokeMode::KaraokeLow, f32::NAN),
-            (0.0, DEFAULT_VOCAL_GAIN, 1.0)
-        );
-    }
-
-    #[test]
-    fn dub_gains_table() {
-        // (original, vocals=orig voice, instrumental=bed, dub=SK)
-        assert_eq!(dub_gains(1.0), (0.0, 0.0, 1.0, 1.0)); // dub only (default)
-        assert_eq!(dub_gains(0.0), (0.0, 1.0, 1.0, 0.0)); // originál
-        assert_eq!(dub_gains(0.5), (0.0, 0.5, 1.0, 0.5)); // 50/50
-    }
-
-    #[test]
-    fn dub_gains_clamps_and_guards_nan() {
-        assert_eq!(dub_gains(1.5), (0.0, 0.0, 1.0, 1.0));
-        assert_eq!(dub_gains(-0.5), (0.0, 1.0, 1.0, 0.0));
-        // Non-finite → dub-only default (1.0).
-        assert_eq!(dub_gains(f32::NAN), (0.0, 0.0, 1.0, 1.0));
-    }
-
-    #[test]
-    fn dub_over_original_gains_table() {
-        // (original bed, dub). At r=1 the bed is floored at −18 dB, not muted.
-        assert_eq!(dub_over_original_gains(1.0), (DUB_ORIGINAL_FLOOR, 1.0));
-        assert_eq!(dub_over_original_gains(0.0), (1.0, 0.0)); // originál
-        assert_eq!(dub_over_original_gains(0.5), (0.5, 0.5)); // 50/50 (0.5 > floor)
-    }
-
-    #[test]
-    fn dub_over_original_gains_floors_the_bed_and_guards_nan() {
-        // The FLOOR is −18 dB (0.125): once 1−r drops below it, the bed holds.
-        assert_eq!(dub_over_original_gains(1.0).0, 0.125);
-        // r=0.95 → 1−r=0.05 < floor → bed pinned at the floor.
-        assert_eq!(dub_over_original_gains(0.95), (0.125, 0.95));
-        // r=0.75 → 1−r=0.25 > floor → real value, not the floor (0.25/0.75 are
-        // exactly representable, so `assert_eq!` on f32 is safe here).
-        assert_eq!(dub_over_original_gains(0.75), (0.25, 0.75));
-        // Clamp + NaN → dub-only default (bed at the floor).
-        assert_eq!(dub_over_original_gains(1.5), (0.125, 1.0));
-        assert_eq!(dub_over_original_gains(-0.5), (1.0, 0.0));
-        assert_eq!(dub_over_original_gains(f32::NAN), (0.125, 1.0));
-    }
-
-    #[test]
-    fn dub_control_defaults_to_dub_only_and_is_live() {
-        let c = KaraokeControl::new(KaraokeMode::FullMix, 0.3);
-        // Default dub ratio = dub only.
-        assert!((c.dub_ratio() - 1.0).abs() < 1e-6);
-        let [o, v, i, d] = c.dub_gain_handles();
-        assert_eq!(
-            (read(&o), read(&v), read(&i), read(&d)),
-            (0.0, 0.0, 1.0, 1.0)
-        );
-        // The 2-stream no-stems pair publishes from the SAME ratio: default = dub
-        // over the −18 dB bed.
-        let [b, du] = c.dub_over_original_gain_handles();
-        assert_eq!((read(&b), read(&du)), (0.125, 1.0));
-        // A ratio change publishes the new quad to the SAME atomics (live).
-        c.set_dub_ratio(0.0);
-        assert!((c.dub_ratio() - 0.0).abs() < 1e-6);
-        assert_eq!(
-            (read(&o), read(&v), read(&i), read(&d)),
-            (0.0, 1.0, 1.0, 0.0)
-        );
-        // …and the 2-stream pair moves in lock-step (bed full, dub silent).
-        assert_eq!((read(&b), read(&du)), (1.0, 0.0));
-        c.set_dub_ratio(0.25);
-        assert!((c.dub_ratio() - 0.25).abs() < 1e-6);
-        assert_eq!(
-            (read(&o), read(&v), read(&i), read(&d)),
-            (0.0, 0.75, 1.0, 0.25)
-        );
-        // 1−0.25 = 0.75 > floor → real bed value.
-        assert_eq!((read(&b), read(&du)), (0.75, 0.25));
-    }
-
-    #[test]
-    fn gain_handles_publish_preset_and_are_live() {
-        let c = KaraokeControl::new(KaraokeMode::FullMix, 0.3);
+    fn set_faders_publishes_all_three_gain_sets_in_lock_step() {
+        let c = MixControl::new_for_test(MixFaders::default());
+        // Both full → the bit-exact original everywhere (song/dub); dub carries 1.
         let [o, v, i] = c.gain_handles();
-        // FullMix preset: original alone.
         assert_eq!((read(&o), read(&v), read(&i)), (1.0, 0.0, 0.0));
-        // A mode change publishes the new triple to the SAME atomics (live).
-        c.set_mode(KaraokeMode::InstrumentalOnly);
-        assert_eq!((read(&o), read(&v), read(&i)), (0.0, 0.0, 1.0));
-        // KaraokeLow + a fader move: vocals scale live, original stays 0.
-        c.set_mode(KaraokeMode::KaraokeLow);
-        c.set_vocal_gain(0.6);
-        assert_eq!((read(&o), read(&v), read(&i)), (0.0, 0.6, 1.0));
+        let [d0, d1, d2, d3] = c.dub_gain_handles();
+        assert_eq!(
+            (read(&d0), read(&d1), read(&d2), read(&d3)),
+            (1.0, 0.0, 0.0, 1.0)
+        );
+        let [e0, e1] = c.dub_over_original_gain_handles();
+        assert_eq!((read(&e0), read(&e1)), (1.0, 1.0));
+
+        // A move off the both-full corner publishes all three sets from the SAME
+        // faders to the SAME atomics (live, no reopen).
+        c.set_faders(MixFaders::new(0.3, 1.0, 0.5));
+        assert_eq!(c.faders(), MixFaders::new(0.3, 1.0, 0.5));
+        // Song: original silent, stems at the fader positions.
+        assert_eq!((read(&o), read(&v), read(&i)), (0.0, 0.3, 1.0));
+        // Dub (with stems): the same pair + the dub gain.
+        assert_eq!(
+            (read(&d0), read(&d1), read(&d2), read(&d3)),
+            (0.0, 0.3, 1.0, 0.5)
+        );
+        // Dub (no stems): vokály is the whole original bed, dabing the dub.
+        assert_eq!((read(&e0), read(&e1)), (0.3, 0.5));
+    }
+
+    #[test]
+    fn set_faders_guards_nan_to_the_default_console() {
+        let c = MixControl::new_for_test(MixFaders::new(0.2, 0.2, 0.2));
+        // A RAW struct literal carrying a NaN (bypasses `MixFaders::new`) exercises
+        // set_faders' OWN re-guard.
+        c.set_faders(MixFaders {
+            vokaly: f32::NAN,
+            podklad: 0.5,
+            dabing: 0.5,
+        });
+        // Any non-finite input → the (1,1,1) default console.
+        assert_eq!(c.faders(), MixFaders::default());
+        let [o, v, i] = c.gain_handles();
+        assert_eq!((read(&o), read(&v), read(&i)), (1.0, 0.0, 0.0));
     }
 }

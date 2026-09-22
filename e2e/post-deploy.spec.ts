@@ -826,12 +826,12 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    * the seconds the decoder reopen + A/V resync took. Now a mode is a live gain
    * preset over the already-open streams: a change writes the gain atoms, no
    * reopen. This drives a burst of preset + fader changes while ytfast plays
-   * on-program and asserts (a) `GET /api/v1/karaoke` reflects each within 500 ms
+   * on-program and asserts (a) `GET /api/v1/mix` reflects each within 500 ms
    * and (b) the `.np-info` position keeps ADVANCING across the whole burst — a
    * reload would reset/freeze it. Robust regardless of whether the playing song
    * has stems: the no-reload guarantee is universal.
    */
-  test("karaoke preset changes keep playback advancing — no reload (#186)", async ({
+  test("mixer fader changes keep playback advancing — no reload (#186)", async ({
     page,
     request,
   }) => {
@@ -857,10 +857,11 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       `deployed OBS must have an "${FAST_SCENE_NAME}" scene`,
     ).toBe(true);
 
-    // Save the karaoke state so the test restores it afterwards.
-    const before = (await (await request.get("/api/v1/karaoke")).json()) as {
-      mode?: string;
-      vocal_gain?: number;
+    // Save the mixer console so the test restores it afterwards.
+    const before = (await (await request.get("/api/v1/mix")).json()) as {
+      vokaly?: number;
+      podklad?: number;
+      dabing?: number;
     };
 
     // Start clean, then switch to sp-fast so ytfast plays on-program.
@@ -884,30 +885,23 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const first = await readPosition();
     expect(first, "position counter must be present").toBeGreaterThanOrEqual(0);
 
-    // A burst of preset + fader changes. Each must reflect within 500 ms, and —
-    // the #186 fix — must NOT reopen the pipeline.
-    const presets: Array<{ mode: string; vocal_gain?: number }> = [
-      { mode: "karaoke_low", vocal_gain: 0.2 },
-      { mode: "vocals_only" },
-      { mode: "instrumental_only" },
-      { mode: "karaoke_low", vocal_gain: 0.8 },
-      { mode: "full_mix" },
-      { mode: "karaoke_low", vocal_gain: 0.5 },
-    ];
-    for (const p of presets) {
-      const resp = await request.post("/api/v1/karaoke", { data: p });
-      expect(resp.status()).toBe(204);
+    // A burst of fader changes on the ONE mixer console. Each must reflect within
+    // 500 ms, and — the #186 fix — must NOT reopen the pipeline.
+    const vokalyBurst = [0.2, 1.0, 0.6, 0.8, 1.0, 0.5];
+    for (const v of vokalyBurst) {
+      const resp = await request.patch("/api/v1/mix", { data: { vokaly: v } });
+      expect(resp.status()).toBe(200);
       await expect
         .poll(
           async () =>
             (
-              (await (await request.get("/api/v1/karaoke")).json()) as {
-                mode?: string;
+              (await (await request.get("/api/v1/mix")).json()) as {
+                vokaly?: number;
               }
-            ).mode,
+            ).vokaly,
           { timeout: 500, intervals: [50, 100, 100, 100, 100] },
         )
-        .toBe(p.mode);
+        .toBeCloseTo(v, 2);
     }
 
     // The pipeline must have kept advancing across the whole burst — a reload
@@ -916,14 +910,15 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const second = await readPosition();
     expect(
       second,
-      `position must advance across karaoke preset changes (first=${first}s, second=${second}s) — a reload/dropout would freeze it`,
+      `position must advance across mixer fader changes (first=${first}s, second=${second}s) — a reload/dropout would freeze it`,
     ).toBeGreaterThan(first);
 
-    // Restore karaoke state (the scene is restored by afterEach/afterAll).
-    await request.post("/api/v1/karaoke", {
+    // Restore the console (the scene is restored by afterEach/afterAll).
+    await request.patch("/api/v1/mix", {
       data: {
-        mode: before.mode ?? "full_mix",
-        vocal_gain: before.vocal_gain ?? 0.3,
+        vokaly: before.vokaly ?? 1.0,
+        podklad: before.podklad ?? 1.0,
+        dabing: before.dabing ?? 1.0,
       },
     });
 
@@ -936,7 +931,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   /**
    * Issue #177 — the karaoke panel binds to the now-playing song and shows its
    * stems state. Read-only: never switches the OBS program scene. Verifies the
-   * deployed `GET /api/v1/karaoke` returns the `now_playing[]` contract and that
+   * deployed `GET /api/v1/mix` returns the `now_playing[]` contract and that
    * the dashboard panel renders a per-song header (a song title + a state glyph,
    * or the honest "nič nehrá" when nothing is selected/playing).
    */
@@ -959,7 +954,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     ];
 
     // The deployed API carries the now_playing[] contract with valid states.
-    const karaoke = (await (await request.get("/api/v1/karaoke")).json()) as {
+    const karaoke = (await (await request.get("/api/v1/mix")).json()) as {
       now_playing?: Array<{
         playlist_id: number;
         video_id: number;

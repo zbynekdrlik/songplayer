@@ -14,7 +14,10 @@ async fn setup() -> SqlitePool {
 
 #[tokio::test]
 async fn migration_v26_adds_all_dub_columns() {
-    let pool = setup().await;
+    // Apply only through V26 — V27 (#184 round G) later DROPS `dub_mix_ratio`, so
+    // the full chain would no longer show it; V26's own additions are the subject.
+    let pool = create_memory_pool().await.unwrap();
+    apply_first_n(&pool, 26).await;
     let cols = column_names(&pool, "videos").await;
     for c in [
         "dub_requested",
@@ -53,7 +56,14 @@ async fn migration_v26_defaults_existing_rows() {
     .await
     .unwrap();
 
-    run_migrations(&pool).await.unwrap();
+    // Apply ONLY V26 (not V27, which drops dub_mix_ratio) so the V26 default is
+    // observable on the pre-existing row.
+    for stmt in super::MIGRATION_V26.split(';') {
+        let s = stmt.trim();
+        if !s.is_empty() {
+            sqlx::query(s).execute(&pool).await.unwrap();
+        }
+    }
 
     let dub_requested: i64 = sqlx::query_scalar("SELECT dub_requested FROM videos WHERE id = ?")
         .bind(id)

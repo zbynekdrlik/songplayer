@@ -44,9 +44,6 @@ pub(crate) async fn dispatch(engine: &mut PlaybackEngine, cmd: EngineCommand) {
             engine
                 .handle_play_video(playlist_id, video_id, position_ms)
                 .await;
-            // #183 D4: if this video has a finished dub, restore its stored mix
-            // ratio to the process-global dub control (no-op for a normal video).
-            engine.seed_dub_ratio_for_video(video_id).await;
         }
         EngineCommand::SceneChanged {
             playlist_id,
@@ -76,11 +73,8 @@ pub(crate) async fn dispatch(engine: &mut PlaybackEngine, cmd: EngineCommand) {
             // down symmetrically.
             engine.remove_pipeline(playlist_id);
         }
-        EngineCommand::SetKaraoke { mode, vocal_gain } => {
-            engine.set_karaoke(mode, vocal_gain).await; // #14
-        }
-        EngineCommand::SetDubMix { video_id, ratio } => {
-            engine.set_dub_mix(video_id, ratio).await; // #183 D4
+        EngineCommand::SetMix { faders } => {
+            engine.set_mix(faders).await; // #184 round G
         }
         EngineCommand::TriggerNdiRecovery { playlist_id, step } => {
             // #173: operator/verification one-shot recovery rung.

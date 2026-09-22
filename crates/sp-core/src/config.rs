@@ -23,6 +23,14 @@ pub const SETTING_DUB_VOICE: &str = "dub_voice";
 /// session holds the pinned voice; it drifts inside a long one. Read per tick
 /// by the dub worker and set from the Nastavenia page.
 pub const SETTING_DUB_SESSION_MAX_S: &str = "dub_session_max_s";
+/// #184 round G: the ONE global live mixer console — three independent faders
+/// `[vokály, podklad, dabing]` (each an f32 `0.0..=1.0` stored as its decimal
+/// string). Persisted here and restored at boot by `stems::control::MixControl`;
+/// they supersede the old `karaoke_mode` + `karaoke_vocal_gain` + per-video
+/// `videos.dub_mix_ratio`, which migration V27 folds into these keys and drops.
+pub const SETTING_MIX_VOKALY: &str = "mix_vokaly";
+pub const SETTING_MIX_PODKLAD: &str = "mix_podklad";
+pub const SETTING_MIX_DABING: &str = "mix_dabing";
 
 // Default values for settings that have sensible defaults.
 pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
@@ -85,5 +93,12 @@ mod tests {
     #[test]
     fn dub_session_max_s_setting_key() {
         assert_eq!(SETTING_DUB_SESSION_MAX_S, "dub_session_max_s");
+    }
+
+    #[test]
+    fn mix_fader_setting_keys() {
+        assert_eq!(SETTING_MIX_VOKALY, "mix_vokaly");
+        assert_eq!(SETTING_MIX_PODKLAD, "mix_podklad");
+        assert_eq!(SETTING_MIX_DABING, "mix_dabing");
     }
 }

@@ -1,254 +1,377 @@
-//! Pure mapping functions for the modern mixer UI (#181 D2).
+//! Pure fader/preset model for the ONE mixer (#184 round G).
 //!
-//! ONE mixer widget serves two domains: song stems (karaoke) and dub videos.
-//! These functions translate between a domain's live control values (a karaoke
-//! mode + vocal gain, or a dub mix ratio) and the mixer's fader/preset display,
-//! with no I/O. They live in `sp-core` (WASM-safe) because sp-ui has no unit-test
-//! job of its own — the workspace `Test` job (`cargo test --workspace`) covers
-//! them here, and sp-ui re-exports them for the presentational component.
+//! The mixer is FADER-shaped, not preset-shaped: three independent faders
+//! `[vokály, podklad, dabing]` ARE the state, and the per-stream mix gains are
+//! DERIVED from them (`stream_gains_*`). Presets are just fader snapshots. This
+//! module is pure (no I/O), WASM-safe, and unit-tested in the workspace — sp-ui
+//! has no unit-test job of its own, so this is where the exact-value behaviour is
+//! pinned and mutation-gated. sp-ui re-exports these for the `LiveMixer` adapter,
+//! and the server derives its live gain atomics from the SAME `stream_gains_*`.
 
-/// Which domain a mixer instance drives.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MixerKind {
-    /// Song stems: two faders (vokál / inštrumentál), karaoke-mode presets.
-    Song,
-    /// Dub video: three faders (originál hlas / dabing / ambient), ratio presets.
-    Dub,
+/// The three live faders, each `0.0..=1.0`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MixFaders {
+    /// The vocal / original-voice fader (with stems: the vocals stem; a no-stems
+    /// dub: the whole original bed).
+    pub vokaly: f32,
+    /// The instrumental / backing-track fader (needs stems).
+    pub podklad: f32,
+    /// The Slovak dub fader (only meaningful for a dub video).
+    pub dabing: f32,
 }
 
-/// A selectable preset button: a stable wire id + a Slovak label.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+impl Default for MixFaders {
+    /// The safe default: everything full — the bit-exact original mix, dub full.
+    fn default() -> Self {
+        Self {
+            vokaly: 1.0,
+            podklad: 1.0,
+            dabing: 1.0,
+        }
+    }
+}
+
+impl MixFaders {
+    /// Build clamped faders. If ANY component is non-finite the WHOLE triple falls
+    /// back to the default `(1, 1, 1)` — never propagate a NaN into the mix gains
+    /// or the DOM.
+    pub fn new(vokaly: f32, podklad: f32, dabing: f32) -> Self {
+        if !vokaly.is_finite() || !podklad.is_finite() || !dabing.is_finite() {
+            return Self::default();
+        }
+        Self {
+            vokaly: vokaly.clamp(0.0, 1.0),
+            podklad: podklad.clamp(0.0, 1.0),
+            dabing: dabing.clamp(0.0, 1.0),
+        }
+    }
+}
+
+/// Per-stream gains `[original, vocals, instrumental]` for a SONG (both stems
+/// present). When BOTH `vokály` and `podklad` are full the ORIGINAL mix plays
+/// bit-exact (`[1, 0, 0]` — no separation artefacts, today's FullMix); otherwise
+/// the two stems are mixed at the fader positions and the original is silent so
+/// the voices are never doubled.
+pub fn stream_gains_song(f: MixFaders) -> [f32; 3] {
+    if f.vokaly == 1.0 && f.podklad == 1.0 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, f.vokaly, f.podklad]
+    }
+}
+
+/// Per-stream gains `[original, vocals, instrumental, dub]` for a dub video WITH
+/// both stems. Same bit-exact-original rule for the voice/bed pair as
+/// [`stream_gains_song`]; the `dabing` fader is ALWAYS the dub-stream gain, so the
+/// Slovak dub is domixed over whatever the original pair plays.
+pub fn stream_gains_dub(f: MixFaders) -> [f32; 4] {
+    if f.vokaly == 1.0 && f.podklad == 1.0 {
+        [1.0, 0.0, 0.0, f.dabing]
+    } else {
+        [0.0, f.vokaly, f.podklad, f.dabing]
+    }
+}
+
+/// Per-stream gains `[original, dub]` for a dub video WITHOUT stems (not yet
+/// separated). There is no split, so the `vokály` fader IS the whole original bed
+/// (no floor — "stiahnuť originál na 0" = vokály 0) and `dabing` is the dub.
+pub fn stream_gains_dub_no_stems(f: MixFaders) -> [f32; 2] {
+    [f.vokaly, f.dabing]
+}
+
+/// A preset button: a stable wire id (never shown), a Slovak label, the
+/// `vokály`/`podklad` snapshot, and — for a DUB preset — a pinned `dabing`. A song
+/// preset leaves `dabing` untouched (`dabing: None`); a dub preset pins all three.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Preset {
-    /// Stable wire id (never shown to the operator).
+    /// Stable wire id (matches the `mixer-preset-<id>` test id).
     pub id: &'static str,
     /// Slovak button label.
     pub label: &'static str,
+    /// The `vokály` snapshot.
+    pub vokaly: f32,
+    /// The `podklad` snapshot.
+    pub podklad: f32,
+    /// `Some(d)` pins the `dabing` fader (dub presets); `None` leaves it untouched
+    /// (song presets — `·` in the design).
+    pub dabing: Option<f32>,
 }
 
-/// Song presets — ids match `sp_core::playback::KaraokeMode::as_str`.
+/// The four SONG presets (always shown). `dabing: None` = leave the dub fader.
 pub const SONG_PRESETS: [Preset; 4] = [
     Preset {
         id: "full_mix",
         label: "Plný mix",
+        vokaly: 1.0,
+        podklad: 1.0,
+        dabing: None,
     },
     Preset {
         id: "karaoke_low",
         label: "Karaoke",
+        vokaly: 0.3,
+        podklad: 1.0,
+        dabing: None,
     },
     Preset {
         id: "vocals_only",
         label: "Iba vokály",
+        vokaly: 1.0,
+        podklad: 0.0,
+        dabing: None,
     },
     Preset {
         id: "instrumental_only",
         label: "Iba hudba",
+        vokaly: 0.0,
+        podklad: 1.0,
+        dabing: None,
     },
 ];
 
-/// Dub presets — mix ratios 1.0 / 0.5 / 0.0.
+/// The three DUB presets (shown only when the playing item has a ready dub). Each
+/// pins all three faders.
 pub const DUB_PRESETS: [Preset; 3] = [
     Preset {
         id: "dub_only",
         label: "Len dabing",
+        vokaly: 0.0,
+        podklad: 1.0,
+        dabing: Some(1.0),
     },
     Preset {
         id: "half",
         label: "50 : 50",
+        vokaly: 0.5,
+        podklad: 1.0,
+        dabing: Some(0.5),
     },
     Preset {
         id: "original",
         label: "Originál",
+        vokaly: 1.0,
+        podklad: 1.0,
+        dabing: Some(0.0),
     },
 ];
 
-/// Floor for the original bed under a dub WITHOUT stems (−18 dB), so the room
-/// never goes dead. Mirrors the server's `stems::control::DUB_ORIGINAL_FLOOR`.
-pub const DUB_ORIGINAL_FLOOR: f32 = 0.125;
-
-/// The preset buttons for a mixer kind.
-pub fn presets(kind: MixerKind) -> &'static [Preset] {
-    match kind {
-        MixerKind::Song => &SONG_PRESETS,
-        MixerKind::Dub => &DUB_PRESETS,
+/// The preset buttons to show: always the four song presets, plus the three dub
+/// presets when the playing item has a ready dub.
+pub fn presets(has_dub: bool) -> Vec<Preset> {
+    let mut v = SONG_PRESETS.to_vec();
+    if has_dub {
+        v.extend_from_slice(&DUB_PRESETS);
     }
+    v
 }
 
-/// The channel (fader) labels for a mixer kind, in fader order.
-pub fn channel_labels(kind: MixerKind) -> &'static [&'static str] {
-    match kind {
-        MixerKind::Song => &["vokál", "inštrumentál"],
-        MixerKind::Dub => &["originál hlas", "dabing", "ambient"],
-    }
+/// Apply a preset snapshot on top of the current faders: `vokály`/`podklad` come
+/// from the preset; `dabing` from the preset when it pins one (dub presets), else
+/// the CURRENT dabing is kept (song presets leave the dub fader untouched).
+pub fn apply_preset(preset: &Preset, current: MixFaders) -> MixFaders {
+    MixFaders::new(
+        preset.vokaly,
+        preset.podklad,
+        preset.dabing.unwrap_or(current.dabing),
+    )
 }
 
-/// The VISIBLE dub channel labels for a video with or without stems (#182). With
-/// stems the full three-fader strip (`originál hlas` / `dabing` / `ambient`);
-/// without stems the ambient bed does not exist (the 2-stream `DubOverOriginal`
-/// mix), so only two faders are shown — the whole `originál` bed and `dabing`.
-pub fn dub_channel_labels(has_stems: bool) -> &'static [&'static str] {
-    if has_stems {
-        &["originál hlas", "dabing", "ambient"]
-    } else {
-        &["originál", "dabing"]
-    }
+/// Matching tolerance for the preset highlight — the UI's integer-percent faders
+/// round, so a snapshot matches "within 0.01".
+const PRESET_TOL: f32 = 0.01;
+
+fn approx(a: f32, b: f32) -> bool {
+    (a - b).abs() <= PRESET_TOL
 }
 
-/// Song fader display gains `[vokál, inštrumentál]` for a karaoke preset.
-/// `vocal_gain` (0..=1) only scales the Karaoke (`karaoke_low`) preset's vocals.
-pub fn song_gains_for_preset(preset_id: &str, vocal_gain: f32) -> [f32; 2] {
-    let vg = clamp01(vocal_gain);
-    match preset_id {
-        "karaoke_low" => [vg, 1.0],
-        "vocals_only" => [1.0, 0.0],
-        "instrumental_only" => [0.0, 1.0],
-        // full_mix (default): the untouched original — both channels full.
-        _ => [1.0, 1.0],
-    }
-}
-
-/// Inverse of [`song_gains_for_preset`]: the karaoke-mode id best matching a pair
-/// of `[vokál, inštrumentál]` fader gains, or `None` if nothing matches.
-pub fn song_preset_for_gains(gains: [f32; 2]) -> Option<&'static str> {
-    match (permille(gains[0]), permille(gains[1])) {
-        (1000, 1000) => Some("full_mix"),
-        (1000, 0) => Some("vocals_only"),
-        (0, 1000) => Some("instrumental_only"),
-        // Vocals reduced below full while the instrumental is full → Karaoke.
-        (_, 1000) => Some("karaoke_low"),
-        _ => None,
-    }
-}
-
-/// Dub fader display gains `[originál hlas, dabing, ambient]` for a mix ratio `r`.
-/// With stems the original *voice* is `1−r`; without stems the original *bed* is
-/// floored at [`DUB_ORIGINAL_FLOOR`]. Ambient is a fixed reference (`1.0`).
-pub fn ratio_to_faders(r: f32, has_stems: bool) -> Vec<f32> {
-    let r = clamp01(r);
-    let orig = if has_stems {
-        1.0 - r
-    } else {
-        (1.0 - r).max(DUB_ORIGINAL_FLOOR)
-    };
-    vec![orig, r, 1.0]
-}
-
-/// Inverse of [`ratio_to_faders`]: the dub mix ratio is the `dabing` channel
-/// (index 1) — the only fader the operator drives.
-pub fn faders_to_ratio(faders: &[f32]) -> f32 {
-    clamp01(faders.get(1).copied().unwrap_or(1.0))
-}
-
-/// The mix ratio a dub preset selects.
-pub fn dub_ratio_for_preset(preset_id: &str) -> f32 {
-    match preset_id {
-        "original" => 0.0,
-        "half" => 0.5,
-        // dub_only (default).
-        _ => 1.0,
-    }
-}
-
-/// Inverse: the dub preset id best matching a ratio, or `None` between points.
-pub fn dub_preset_for_ratio(r: f32) -> Option<&'static str> {
-    match permille(r) {
-        1000 => Some("dub_only"),
-        500 => Some("half"),
-        0 => Some("original"),
-        _ => None,
-    }
-}
-
-/// Unified: fader display gains for a preset of the given kind.
-pub fn gains_for_preset(kind: MixerKind, preset_id: &str, vocal_gain: f32) -> Vec<f32> {
-    match kind {
-        MixerKind::Song => song_gains_for_preset(preset_id, vocal_gain).to_vec(),
-        MixerKind::Dub => ratio_to_faders(dub_ratio_for_preset(preset_id), true),
-    }
-}
-
-/// Unified: the preset id best matching a set of fader gains, or `None`.
-pub fn preset_for_gains(kind: MixerKind, gains: &[f32]) -> Option<&'static str> {
-    match kind {
-        MixerKind::Song => {
-            if gains.len() >= 2 {
-                song_preset_for_gains([gains[0], gains[1]])
-            } else {
-                None
+/// The preset id whose snapshot matches the current faders, or `None` (a custom
+/// mix). A dub preset (which pins all three) is the MORE SPECIFIC match, so when a
+/// dub is present those are checked first; otherwise the song presets match on
+/// `[vokály, podklad]` alone (`dabing` ignored — `karaoke_low`: `vokály < 1 &&
+/// podklad == 1`).
+pub fn preset_for_faders(f: MixFaders, has_dub: bool) -> Option<&'static str> {
+    if has_dub {
+        for p in &DUB_PRESETS {
+            if approx(f.vokaly, p.vokaly)
+                && approx(f.podklad, p.podklad)
+                && approx(f.dabing, p.dabing.unwrap_or(1.0))
+            {
+                return Some(p.id);
             }
         }
-        MixerKind::Dub => dub_preset_for_ratio(faders_to_ratio(gains)),
+    }
+    song_preset_for_faders(f.vokaly, f.podklad)
+}
+
+/// The song preset id for a `[vokály, podklad]` pair (dabing ignored). The
+/// instrumental (`podklad`) must be full; then `vokály` picks the preset —
+/// full → `full_mix`, muted → `instrumental_only`, in-between → `karaoke_low`;
+/// or `vocals_only` when the instrumental is muted and vocals full.
+fn song_preset_for_faders(vokaly: f32, podklad: f32) -> Option<&'static str> {
+    if approx(podklad, 1.0) {
+        if approx(vokaly, 1.0) {
+            Some("full_mix")
+        } else if approx(vokaly, 0.0) {
+            Some("instrumental_only")
+        } else {
+            Some("karaoke_low")
+        }
+    } else if approx(podklad, 0.0) && approx(vokaly, 1.0) {
+        Some("vocals_only")
+    } else {
+        None
     }
 }
 
-/// The percent a mixer fader should DISPLAY (and bind to `prop:value`): while
-/// the operator is dragging the fader the dragged value is authoritative, so a
-/// live gain update from the store (an adapter `Effect`, a re-load) can't
-/// overwrite the fader out from under the finger; otherwise the live gain
-/// percent drives it. #194 — the fader half of the seek drag gate; pure so its
-/// boundary is unit-tested (sp-ui has no unit-test job).
+/// Which of the three faders are live for the PLAYING item. `vokály` is live when
+/// stems are ready OR a not-yet-separated dub is playing (its `vokály` fader IS
+/// the whole original); `podklad` is live only with stems (else locked, note
+/// `po separácii`); `dabing` is shown + live only when the item has a ready dub.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FaderAvailability {
+    /// The `vokály` fader is interactive.
+    pub vokaly: bool,
+    /// The `podklad` fader is interactive (else locked "po separácii").
+    pub podklad: bool,
+    /// The `dabing` fader is shown AND interactive.
+    pub dabing: bool,
+}
+
+/// Which faders are live from the playing item's stems + dub readiness.
+pub fn fader_availability(stems_ready: bool, dub_ready: bool) -> FaderAvailability {
+    FaderAvailability {
+        vokaly: stems_ready || dub_ready,
+        podklad: stems_ready,
+        dabing: dub_ready,
+    }
+}
+
+/// The percent a mixer fader should DISPLAY (and bind to `prop:value`): while the
+/// operator is dragging the fader the dragged value is authoritative, so a live
+/// gain update from the store (an adapter `Effect`, a re-load) can't overwrite the
+/// fader out from under the finger; otherwise the live gain percent drives it.
+/// Pure so its boundary is unit-tested (sp-ui has no unit-test job).
 pub fn fader_display_pct(dragging: bool, dragged_pct: i32, live_pct: i32) -> i32 {
     if dragging { dragged_pct } else { live_pct }
-}
-
-/// Which mixer panel(s) the shared `Player` renders for the PLAYING item
-/// (#184 B2). Both may be true — the #194 one-app rule, identical on every page.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MixerControls {
-    /// Show the dub mixer (the video has a dub row).
-    pub dub: bool,
-    /// Show the karaoke stem mixer (the song is stems-capable).
-    pub karaoke: bool,
-}
-
-/// Decide the mixer panel(s) from the two per-video state strings the store
-/// already carries for the playing item.
-///
-/// - `dub` when the video has a dub row in any state other than `none`/absent —
-///   the `DubMixer` renders its own locked/ready state text per status, so any
-///   real dub row shows the dub panel.
-/// - `karaoke` when the song is stems-capable. The caller (`player.rs`) feeds
-///   the `DubRow.stem_status` COLUMN, whose raw stems-worker value `done` means
-///   stems are ready (mirrors `dub_mixer.rs`'s `has_stems`); the derived
-///   `stems_state` wire strings `ready`/`queued`/`processing`/`failed`/
-///   `unavailable` (today's `KaraokeMixer` gate) are accepted too, so the
-///   predicate is correct whichever representation reaches it. `unsupported`/
-///   absent → not stems-capable.
-///
-/// BOTH may hold (a stems-ready dub video). The caller still falls back to the
-/// karaoke panel for a plain non-dub song (see `player.rs`); this predicate only
-/// classifies what the two per-video states say.
-pub fn mixer_controls(dub_status: Option<&str>, stems_state: Option<&str>) -> MixerControls {
-    // Any real dub row (a non-empty status other than "none") shows the dub
-    // panel; the `DubMixer` renders its own locked/ready state text per status.
-    let dub = matches!(dub_status, Some(s) if !s.is_empty() && s != "none");
-    let karaoke = matches!(
-        stems_state,
-        Some("done" | "ready" | "queued" | "processing" | "failed" | "unavailable")
-    );
-    MixerControls { dub, karaoke }
-}
-
-/// Clamp a gain/ratio to `0.0..=1.0`, mapping NaN to `0.0` (never propagate NaN
-/// into the DOM or the mix).
-fn clamp01(x: f32) -> f32 {
-    if x.is_nan() { 0.0 } else { x.clamp(0.0, 1.0) }
-}
-
-/// Quantise a `0..=1` gain to integer permille (`0..=1000`) for exact preset
-/// matching that tolerates the f32 rounding of the UI's integer-percent faders.
-fn permille(x: f32) -> i32 {
-    (clamp01(x) * 1000.0).round() as i32
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // ── Preset / label tables ────────────────────────────────────────────────
+    // ── MixFaders construction (clamp + NaN → default) ───────────────────────
 
     #[test]
-    fn song_presets_are_the_four_karaoke_modes_in_order() {
-        let ids: Vec<&str> = presets(MixerKind::Song).iter().map(|p| p.id).collect();
+    fn mix_faders_default_is_all_full() {
+        assert_eq!(
+            MixFaders::default(),
+            MixFaders {
+                vokaly: 1.0,
+                podklad: 1.0,
+                dabing: 1.0
+            }
+        );
+    }
+
+    #[test]
+    fn mix_faders_new_clamps_each_component() {
+        assert_eq!(
+            MixFaders::new(1.5, -0.5, 0.4),
+            MixFaders {
+                vokaly: 1.0,
+                podklad: 0.0,
+                dabing: 0.4
+            }
+        );
+    }
+
+    #[test]
+    fn mix_faders_new_any_non_finite_defaults_to_one_one_one() {
+        let def = MixFaders::default();
+        assert_eq!(MixFaders::new(f32::NAN, 0.2, 0.3), def);
+        assert_eq!(MixFaders::new(0.2, f32::INFINITY, 0.3), def);
+        assert_eq!(MixFaders::new(0.2, 0.3, f32::NEG_INFINITY), def);
+    }
+
+    // ── stream_gains_song ────────────────────────────────────────────────────
+
+    #[test]
+    fn stream_gains_song_both_full_is_bit_exact_original() {
+        // Both faders full → the untouched original (no separation artefacts).
+        assert_eq!(
+            stream_gains_song(MixFaders::new(1.0, 1.0, 0.7)),
+            [1.0, 0.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn stream_gains_song_mixes_stems_off_the_bit_exact_corner() {
+        assert_eq!(
+            stream_gains_song(MixFaders::new(0.3, 1.0, 1.0)),
+            [0.0, 0.3, 1.0]
+        );
+        assert_eq!(
+            stream_gains_song(MixFaders::new(0.0, 0.6, 1.0)),
+            [0.0, 0.0, 0.6]
+        );
+        // vokály full but podklad reduced → still the mixed branch (not bit-exact).
+        assert_eq!(
+            stream_gains_song(MixFaders::new(1.0, 0.5, 1.0)),
+            [0.0, 1.0, 0.5]
+        );
+    }
+
+    // ── stream_gains_dub ─────────────────────────────────────────────────────
+
+    #[test]
+    fn stream_gains_dub_both_full_is_bit_exact_original_plus_dub() {
+        assert_eq!(
+            stream_gains_dub(MixFaders::new(1.0, 1.0, 1.0)),
+            [1.0, 0.0, 0.0, 1.0]
+        );
+        // The dub fader is carried even at the bit-exact corner.
+        assert_eq!(
+            stream_gains_dub(MixFaders::new(1.0, 1.0, 0.5)),
+            [1.0, 0.0, 0.0, 0.5]
+        );
+    }
+
+    #[test]
+    fn stream_gains_dub_mixes_stems_plus_dub_off_the_corner() {
+        assert_eq!(
+            stream_gains_dub(MixFaders::new(0.0, 1.0, 1.0)),
+            [0.0, 0.0, 1.0, 1.0]
+        );
+        assert_eq!(
+            stream_gains_dub(MixFaders::new(0.3, 1.0, 1.0)),
+            [0.0, 0.3, 1.0, 1.0]
+        );
+    }
+
+    // ── stream_gains_dub_no_stems (no floor) ─────────────────────────────────
+
+    #[test]
+    fn stream_gains_dub_no_stems_is_vokaly_and_dabing_with_no_floor() {
+        // Original fully silent at vokály 0 — NO −18 dB floor (round G removes it).
+        assert_eq!(
+            stream_gains_dub_no_stems(MixFaders::new(0.0, 1.0, 1.0)),
+            [0.0, 1.0]
+        );
+        assert_eq!(
+            stream_gains_dub_no_stems(MixFaders::new(1.0, 1.0, 0.0)),
+            [1.0, 0.0]
+        );
+        assert_eq!(
+            stream_gains_dub_no_stems(MixFaders::new(0.5, 1.0, 0.5)),
+            [0.5, 0.5]
+        );
+    }
+
+    // ── presets (which buttons show) ─────────────────────────────────────────
+
+    #[test]
+    fn presets_are_song_only_without_a_dub() {
+        let ids: Vec<&str> = presets(false).iter().map(|p| p.id).collect();
         assert_eq!(
             ids,
             [
@@ -261,302 +384,194 @@ mod tests {
     }
 
     #[test]
-    fn dub_presets_are_the_three_ratio_points_in_order() {
-        let ids: Vec<&str> = presets(MixerKind::Dub).iter().map(|p| p.id).collect();
-        assert_eq!(ids, ["dub_only", "half", "original"]);
+    fn presets_add_the_dub_snapshots_with_a_dub() {
+        let ids: Vec<&str> = presets(true).iter().map(|p| p.id).collect();
+        assert_eq!(
+            ids,
+            [
+                "full_mix",
+                "karaoke_low",
+                "vocals_only",
+                "instrumental_only",
+                "dub_only",
+                "half",
+                "original"
+            ]
+        );
     }
 
+    // ── apply_preset (song presets keep dabing, dub presets pin it) ───────────
+
     #[test]
-    fn channel_labels_differ_by_kind() {
-        assert_eq!(channel_labels(MixerKind::Song), ["vokál", "inštrumentál"]);
+    fn apply_song_preset_keeps_the_current_dabing() {
+        let cur = MixFaders::new(0.9, 0.1, 0.42);
+        // instrumental_only = (0, 1, ·) — dabing untouched.
+        let p = SONG_PRESETS[3];
+        assert_eq!(apply_preset(&p, cur), MixFaders::new(0.0, 1.0, 0.42));
+        // karaoke_low snapshot is (0.3, 1, ·).
         assert_eq!(
-            channel_labels(MixerKind::Dub),
-            ["originál hlas", "dabing", "ambient"]
+            apply_preset(&SONG_PRESETS[1], cur),
+            MixFaders::new(0.3, 1.0, 0.42)
         );
     }
 
     #[test]
-    fn dub_channels_hide_ambient_without_stems() {
-        // With stems: the full three-fader strip.
+    fn apply_dub_preset_pins_all_three() {
+        let cur = MixFaders::new(0.9, 0.1, 0.42);
+        // dub_only (0,1,1), half (0.5,1,0.5), original (1,1,0).
         assert_eq!(
-            dub_channel_labels(true),
-            ["originál hlas", "dabing", "ambient"]
-        );
-        // Without stems: only two faders — ambient is hidden.
-        assert_eq!(dub_channel_labels(false), ["originál", "dabing"]);
-        assert_eq!(dub_channel_labels(false).len(), 2);
-        assert_eq!(dub_channel_labels(true).len(), 3);
-    }
-
-    // ── Song preset → fader gains ─────────────────────────────────────────────
-
-    #[test]
-    fn song_full_mix_is_both_channels_full() {
-        assert_eq!(song_gains_for_preset("full_mix", 0.3), [1.0, 1.0]);
-    }
-
-    #[test]
-    fn song_karaoke_low_scales_only_the_vocal_channel() {
-        assert_eq!(song_gains_for_preset("karaoke_low", 0.2), [0.2, 1.0]);
-        assert_eq!(song_gains_for_preset("karaoke_low", 0.8), [0.8, 1.0]);
-    }
-
-    #[test]
-    fn song_vocals_only_mutes_the_instrumental() {
-        assert_eq!(song_gains_for_preset("vocals_only", 0.5), [1.0, 0.0]);
-    }
-
-    #[test]
-    fn song_instrumental_only_mutes_the_vocal() {
-        assert_eq!(song_gains_for_preset("instrumental_only", 0.5), [0.0, 1.0]);
-    }
-
-    #[test]
-    fn song_unknown_preset_defaults_to_full_mix() {
-        assert_eq!(song_gains_for_preset("bogus", 0.4), [1.0, 1.0]);
-    }
-
-    #[test]
-    fn song_vocal_gain_is_clamped_into_unit_range() {
-        assert_eq!(song_gains_for_preset("karaoke_low", 1.5), [1.0, 1.0]);
-        assert_eq!(song_gains_for_preset("karaoke_low", -0.5), [0.0, 1.0]);
-    }
-
-    #[test]
-    fn song_vocal_gain_nan_clamps_to_zero_not_nan() {
-        let [v, i] = song_gains_for_preset("karaoke_low", f32::NAN);
-        assert_eq!(v, 0.0);
-        assert_eq!(i, 1.0);
-    }
-
-    // ── Song fader gains → preset (round-trip) ────────────────────────────────
-
-    #[test]
-    fn song_preset_for_gains_round_trips_every_preset() {
-        assert_eq!(song_preset_for_gains([1.0, 1.0]), Some("full_mix"));
-        assert_eq!(song_preset_for_gains([1.0, 0.0]), Some("vocals_only"));
-        assert_eq!(song_preset_for_gains([0.0, 1.0]), Some("instrumental_only"));
-        // Vocals reduced below full with the instrumental still full → Karaoke.
-        assert_eq!(song_preset_for_gains([0.3, 1.0]), Some("karaoke_low"));
-    }
-
-    #[test]
-    fn song_preset_for_gains_is_none_when_nothing_matches() {
-        // Both channels partially down: not any named preset.
-        assert_eq!(song_preset_for_gains([0.5, 0.5]), None);
-        assert_eq!(song_preset_for_gains([0.0, 0.0]), None);
-    }
-
-    // ── Dub ratio → faders ────────────────────────────────────────────────────
-
-    #[test]
-    fn dub_faders_with_stems_split_original_and_dub() {
-        assert_eq!(ratio_to_faders(0.3, true), vec![0.7, 0.3, 1.0]);
-        assert_eq!(ratio_to_faders(1.0, true), vec![0.0, 1.0, 1.0]);
-        assert_eq!(ratio_to_faders(0.0, true), vec![1.0, 0.0, 1.0]);
-    }
-
-    #[test]
-    fn dub_faders_without_stems_floor_the_original_bed() {
-        // r = 0.9375 → 1 − r = 0.0625 (both f32-exact) < floor, so WITHOUT stems
-        // the bed holds at DUB_ORIGINAL_FLOOR (0.125)...
-        assert_eq!(ratio_to_faders(0.9375, false), vec![0.125, 0.9375, 1.0]);
-        // ...and WITH stems the same ratio is NOT floored (proves the branch).
-        assert_eq!(ratio_to_faders(0.9375, true), vec![0.0625, 0.9375, 1.0]);
-    }
-
-    #[test]
-    fn dub_ratio_is_clamped_into_unit_range() {
-        assert_eq!(ratio_to_faders(2.0, true), vec![0.0, 1.0, 1.0]);
-        assert_eq!(ratio_to_faders(-1.0, true), vec![1.0, 0.0, 1.0]);
-    }
-
-    // ── Dub faders → ratio (round-trip) ───────────────────────────────────────
-
-    #[test]
-    fn dub_faders_to_ratio_reads_the_dabing_channel() {
-        assert_eq!(faders_to_ratio(&[0.2, 0.7, 1.0]), 0.7);
-        // Round-trip through ratio_to_faders.
-        assert_eq!(faders_to_ratio(&ratio_to_faders(0.42, true)), 0.42);
-    }
-
-    #[test]
-    fn dub_faders_to_ratio_defaults_to_full_dub_when_empty() {
-        assert_eq!(faders_to_ratio(&[]), 1.0);
-    }
-
-    // ── Dub preset ↔ ratio ────────────────────────────────────────────────────
-
-    #[test]
-    fn dub_ratio_for_preset_maps_each_button() {
-        assert_eq!(dub_ratio_for_preset("dub_only"), 1.0);
-        assert_eq!(dub_ratio_for_preset("half"), 0.5);
-        assert_eq!(dub_ratio_for_preset("original"), 0.0);
-        assert_eq!(dub_ratio_for_preset("bogus"), 1.0); // default = dub only
-    }
-
-    #[test]
-    fn dub_preset_for_ratio_round_trips_each_point() {
-        assert_eq!(dub_preset_for_ratio(1.0), Some("dub_only"));
-        assert_eq!(dub_preset_for_ratio(0.5), Some("half"));
-        assert_eq!(dub_preset_for_ratio(0.0), Some("original"));
-        assert_eq!(dub_preset_for_ratio(0.25), None);
-    }
-
-    // ── Unified wrappers ──────────────────────────────────────────────────────
-
-    #[test]
-    fn unified_gains_for_preset_dispatches_by_kind() {
-        assert_eq!(
-            gains_for_preset(MixerKind::Song, "karaoke_low", 0.2),
-            vec![0.2, 1.0]
+            apply_preset(&DUB_PRESETS[0], cur),
+            MixFaders::new(0.0, 1.0, 1.0)
         );
         assert_eq!(
-            gains_for_preset(MixerKind::Dub, "half", 0.0),
-            vec![0.5, 0.5, 1.0]
+            apply_preset(&DUB_PRESETS[1], cur),
+            MixFaders::new(0.5, 1.0, 0.5)
+        );
+        assert_eq!(
+            apply_preset(&DUB_PRESETS[2], cur),
+            MixFaders::new(1.0, 1.0, 0.0)
         );
     }
 
+    // ── preset_for_faders (highlight) ────────────────────────────────────────
+
     #[test]
-    fn unified_preset_for_gains_dispatches_by_kind() {
+    fn preset_for_faders_song_presets_ignore_dabing() {
+        // Every song snapshot round-trips (dabing arbitrary).
         assert_eq!(
-            preset_for_gains(MixerKind::Song, &[1.0, 0.0]),
+            preset_for_faders(MixFaders::new(1.0, 1.0, 0.2), false),
+            Some("full_mix")
+        );
+        assert_eq!(
+            preset_for_faders(MixFaders::new(0.3, 1.0, 1.0), false),
+            Some("karaoke_low")
+        );
+        assert_eq!(
+            preset_for_faders(MixFaders::new(1.0, 0.0, 0.7), false),
             Some("vocals_only")
         );
         assert_eq!(
-            preset_for_gains(MixerKind::Dub, &[0.0, 1.0, 1.0]),
-            Some("dub_only")
+            preset_for_faders(MixFaders::new(0.0, 1.0, 0.5), false),
+            Some("instrumental_only")
         );
-        // Too few song faders → None rather than a panic.
-        assert_eq!(preset_for_gains(MixerKind::Song, &[1.0]), None);
     }
 
-    // ── fader_display_pct: dragged while dragging, else live ──────────────────
+    #[test]
+    fn preset_for_faders_karaoke_low_is_the_vokaly_below_one_band() {
+        // vokály < 1 && podklad == 1 → karaoke_low (the design's rule).
+        assert_eq!(
+            preset_for_faders(MixFaders::new(0.3, 1.0, 1.0), true),
+            Some("karaoke_low")
+        );
+        // A custom mix (podklad off full) → None.
+        assert_eq!(preset_for_faders(MixFaders::new(0.3, 0.7, 1.0), true), None);
+    }
+
+    #[test]
+    fn preset_for_faders_dub_presets_win_when_a_dub_is_present() {
+        // A dub present: the pinned-dabing snapshot is the more specific match.
+        assert_eq!(
+            preset_for_faders(MixFaders::new(0.0, 1.0, 1.0), true),
+            Some("dub_only")
+        );
+        assert_eq!(
+            preset_for_faders(MixFaders::new(0.5, 1.0, 0.5), true),
+            Some("half")
+        );
+        assert_eq!(
+            preset_for_faders(MixFaders::new(1.0, 1.0, 0.0), true),
+            Some("original")
+        );
+        // Same faders but WITHOUT a dub → the song reading (dabing ignored).
+        assert_eq!(
+            preset_for_faders(MixFaders::new(0.0, 1.0, 1.0), false),
+            Some("instrumental_only")
+        );
+    }
+
+    #[test]
+    fn preset_for_faders_none_for_a_custom_mix() {
+        assert_eq!(preset_for_faders(MixFaders::new(0.5, 0.5, 1.0), true), None);
+        assert_eq!(
+            preset_for_faders(MixFaders::new(0.0, 0.0, 1.0), false),
+            None
+        );
+    }
+
+    #[test]
+    fn preset_for_faders_tolerates_the_integer_percent_rounding() {
+        // podklad 0.995 (a 99->100 % round) still matches half's podklad==1 within
+        // 0.01 when vokály + dabing are on the half snapshot.
+        assert_eq!(
+            preset_for_faders(MixFaders::new(0.5, 0.995, 0.5), true),
+            Some("half")
+        );
+        // dabing off by 0.02 → no dub match, falls to the song reading (karaoke).
+        assert_eq!(
+            preset_for_faders(MixFaders::new(0.5, 1.0, 0.52), true),
+            Some("karaoke_low")
+        );
+    }
+
+    // ── fader_availability ───────────────────────────────────────────────────
+
+    #[test]
+    fn fader_availability_plain_song_no_stems_locks_both() {
+        assert_eq!(
+            fader_availability(false, false),
+            FaderAvailability {
+                vokaly: false,
+                podklad: false,
+                dabing: false
+            }
+        );
+    }
+
+    #[test]
+    fn fader_availability_stems_song_opens_vokaly_and_podklad() {
+        assert_eq!(
+            fader_availability(true, false),
+            FaderAvailability {
+                vokaly: true,
+                podklad: true,
+                dabing: false
+            }
+        );
+    }
+
+    #[test]
+    fn fader_availability_no_stems_dub_opens_vokaly_and_dabing_not_podklad() {
+        assert_eq!(
+            fader_availability(false, true),
+            FaderAvailability {
+                vokaly: true,
+                podklad: false,
+                dabing: true
+            }
+        );
+    }
+
+    #[test]
+    fn fader_availability_stems_dub_opens_all_three() {
+        assert_eq!(
+            fader_availability(true, true),
+            FaderAvailability {
+                vokaly: true,
+                podklad: true,
+                dabing: true
+            }
+        );
+    }
+
+    // ── fader_display_pct ────────────────────────────────────────────────────
 
     #[test]
     fn fader_display_dragging_returns_the_dragged_pct() {
-        // dragged != live so this also kills a "return live" mutant.
         assert_eq!(fader_display_pct(true, 40, 100), 40);
     }
 
     #[test]
     fn fader_display_not_dragging_returns_the_live_pct() {
-        // dragged != live so this also kills a "return dragged" mutant.
         assert_eq!(fader_display_pct(false, 40, 100), 100);
-    }
-
-    // ── mixer_controls: dub / karaoke panel selection (#184 B2) ───────────────
-
-    #[test]
-    fn mixer_controls_dub_only_for_a_dub_row_without_stems() {
-        // A ready dub, no stems → only the dub panel.
-        assert_eq!(
-            mixer_controls(Some("ready"), None),
-            MixerControls {
-                dub: true,
-                karaoke: false
-            }
-        );
-        // A QUEUED dub (mid-chain) STILL shows the dub panel — its own state text
-        // reads the status. This is the case the RED gate (`== "ready"`) misses.
-        assert_eq!(
-            mixer_controls(Some("queued"), None),
-            MixerControls {
-                dub: true,
-                karaoke: false
-            }
-        );
-        // stem_status "unsupported" is not stems-capable.
-        assert_eq!(
-            mixer_controls(Some("ready"), Some("unsupported")),
-            MixerControls {
-                dub: true,
-                karaoke: false
-            }
-        );
-    }
-
-    #[test]
-    fn mixer_controls_karaoke_only_for_a_stems_song_without_a_dub() {
-        for st in ["ready", "queued", "processing", "failed", "unavailable"] {
-            assert_eq!(
-                mixer_controls(None, Some(st)),
-                MixerControls {
-                    dub: false,
-                    karaoke: true
-                },
-                "stems_state {st} is stems-capable"
-            );
-        }
-    }
-
-    #[test]
-    fn mixer_controls_both_for_a_stems_ready_dub() {
-        assert_eq!(
-            mixer_controls(Some("ready"), Some("ready")),
-            MixerControls {
-                dub: true,
-                karaoke: true
-            }
-        );
-    }
-
-    #[test]
-    fn mixer_controls_treats_the_raw_done_stem_status_as_stems_capable() {
-        // The `DubRow.stem_status` COLUMN (what player.rs feeds this predicate)
-        // uses the raw stems-worker vocabulary — `done`/`failed`/`unsupported`/
-        // absent — NOT the derived `stems_state` wire strings. `done` is the
-        // stems-ready value (mirrors `dub_mixer.rs`'s `has_stems`), so a
-        // stems-ready dub (`stem_status == "done"`) must show BOTH panels.
-        assert_eq!(
-            mixer_controls(None, Some("done")),
-            MixerControls {
-                dub: false,
-                karaoke: true
-            }
-        );
-        assert_eq!(
-            mixer_controls(Some("ready"), Some("done")),
-            MixerControls {
-                dub: true,
-                karaoke: true
-            }
-        );
-    }
-
-    #[test]
-    fn mixer_controls_neither_for_none_absent_or_unknown() {
-        // No dub row, no stems.
-        assert_eq!(
-            mixer_controls(None, None),
-            MixerControls {
-                dub: false,
-                karaoke: false
-            }
-        );
-        // An explicit "none" dub status is NOT a dub row.
-        assert_eq!(
-            mixer_controls(Some("none"), None),
-            MixerControls {
-                dub: false,
-                karaoke: false
-            }
-        );
-        // An empty dub status is absent, not a dub row.
-        assert_eq!(
-            mixer_controls(Some(""), None),
-            MixerControls {
-                dub: false,
-                karaoke: false
-            }
-        );
-        // An unknown stems state is not stems-capable.
-        assert_eq!(
-            mixer_controls(None, Some("bogus")),
-            MixerControls {
-                dub: false,
-                karaoke: false
-            }
-        );
     }
 }

@@ -12,14 +12,12 @@
 
 use leptos::prelude::*;
 use serde::Serialize;
-use sp_core::mixer_model::mixer_controls;
 use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
 use sp_core::preview_lag::preview_lag_display;
 use sp_core::seek_model::{format_position, seek_display_ms, seek_target_ms};
 
 use crate::api;
-use crate::components::dub_mixer::DubMixer;
-use crate::components::karaoke_mixer::KaraokeMixer;
+use crate::components::live_mixer::LiveMixer;
 use crate::components::lyrics_view::LyricsView;
 use crate::components::preview_video::PreviewVideo;
 use crate::store::DashboardStore;
@@ -194,16 +192,10 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
         }
     });
 
-    // --- mixer slot: chosen from the PLAYING item, collapsed to a Memo so the
-    // frequent position ticks do NOT remount the mixer (only a change of the
-    // playing video, or of its dub row, re-renders it). A dub row → the dub
-    // adapter; a stems-capable song → the karaoke adapter; BOTH when both apply
-    // (#184 B2). `store.dabing` is now app-polled, so the dub adapter appears on
-    // every page — Dashboard / Live too, not only after visiting /dabing.
-    let mixer_choice = Memo::new(move |_| {
-        let vid = store.now_playing.get().get(&pid).map(|i| i.video_id);
-        vid.and_then(|v| store.dabing.get().into_iter().find(|r| r.video_id == v))
-    });
+    // --- mixer slot: the ONE LiveMixer (#184 round G). It reads the playing item
+    // (its stems + dub readiness) from `store.now_playing` + the app-wide
+    // `store.dabing` itself, so it renders identically on every page and stays
+    // mounted across position ticks (its channel shape is Memo-gated internally).
 
     view! {
         <div class="player" data-testid="player">
@@ -445,35 +437,9 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                         }
                             .into_any()
                     } else {
-                        // #184 B2: render the dub mixer and/or the karaoke mixer
-                        // from the pure predicate. A dub video shows the dub
-                        // mixer; the karaoke mixer shows for a stems-capable dub
-                        // AND for any non-dub song (the plain-song default —
-                        // KaraokeMixer self-locks when the song has no stems).
-                        let choice = mixer_choice.get();
-                        let controls = mixer_controls(
-                            choice.as_ref().map(|r| r.dub_status.as_str()),
-                            choice.as_ref().and_then(|r| r.stem_status.as_deref()),
-                        );
-                        let show_karaoke = controls.karaoke || !controls.dub;
-                        let dub_panel = choice
-                            .filter(|_| controls.dub)
-                            .map(|row| {
-                                view! {
-                                    <DubMixer
-                                        video_id=row.video_id
-                                        title=row.title
-                                        dub_status=row.dub_status
-                                        dub_mix_ratio=row.dub_mix_ratio
-                                        stem_status=row.stem_status
-                                    />
-                                }
-                            });
-                        view! {
-                            {dub_panel}
-                            {show_karaoke.then(|| view! { <KaraokeMixer playlist_id=pid /> })}
-                        }
-                            .into_any()
+                        // #184 round G: the ONE LiveMixer follows the playing item
+                        // (song stems / dub) itself — one strip, every page.
+                        view! { <LiveMixer playlist_id=pid /> }.into_any()
                     }
                 }}
             </div>

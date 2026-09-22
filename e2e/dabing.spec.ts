@@ -105,10 +105,9 @@ test("a dub-ready video WITHOUT stems renders the dub chip hotový (#183 round 2
   const dubChip = row.locator('[data-testid="chip-dub"]');
   await expect(dubChip).toHaveText("hotový");
   await expect(dubChip).toHaveAttribute("title", /pripravené/);
-  // A ready row still shows the dub-mix ratio line.
-  await expect(row.locator('[data-testid="dabing-row-ratio"]')).toContainText(
-    "Pomer dabingu",
-  );
+  // #184 round G: the per-row ratio line is gone — the mix is the ONE console in
+  // the Player above (no `dabing-row-ratio`).
+  await expect(row.locator('[data-testid="dabing-row-ratio"]')).toHaveCount(0);
 });
 
 test("the chain tooltip shows stemy + titulky and drops prepis/preklad with stems (#182/#194)", async ({

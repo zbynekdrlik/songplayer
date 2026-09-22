@@ -2,11 +2,11 @@
 
 pub mod ai;
 pub mod dabing; // #180 dubbing D1
-pub mod dabing_apply; // #184 live-first dub-mix apply seam
-pub mod karaoke;
 pub mod live;
 pub mod lyrics;
 pub mod lyrics_catalog;
+pub mod mix; // #184 round G — the ONE live mixer console
+pub mod mix_apply; // #184 live-first mix apply seam
 pub mod preview;
 pub mod routes;
 pub mod routes_import; // #180 shared bare-URL import core
@@ -66,10 +66,6 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/videos/{id}/dub",
             axum::routing::patch(dabing::patch_dub),
         )
-        .route(
-            "/api/v1/videos/{id}/dub-mix",
-            axum::routing::patch(dabing::patch_dub_mix),
-        )
         // Playback
         .route(
             "/api/v1/playback/{playlist_id}/play",
@@ -111,10 +107,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/settings",
             axum::routing::get(routes::get_settings).patch(routes::update_settings),
         )
-        // Karaoke (#14) — live mode + vocal gain
+        // #184 round G — the ONE global live mixer console (GET faders + now-
+        // playing stems; PATCH any subset of the three faders).
         .route(
-            "/api/v1/karaoke",
-            axum::routing::get(karaoke::get_karaoke).post(karaoke::set_karaoke),
+            "/api/v1/mix",
+            axum::routing::get(mix::get_mix).patch(mix::patch_mix),
         )
         // #177: operator re-enqueue of a song for stem separation.
         .route(

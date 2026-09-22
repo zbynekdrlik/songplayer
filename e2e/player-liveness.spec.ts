@@ -39,6 +39,7 @@ const DUB_VIDEO_ID = 344;
 // 500 ms position tick running, so the shared Player mounts the dub mixer.
 async function setupDabingPlayer(page: Page, request: APIRequestContext) {
   await request.post("/__mock/dabing-reset");
+  await request.post("/__mock/mix-reset");
   await request.post("/__mock/dabing-add", {
     data: {
       video_id: DUB_VIDEO_ID,
@@ -114,8 +115,8 @@ test("a fader drag holds its dragged value across ticks and commits exactly one 
   page,
   request,
 }) => {
-  const patches: Array<{ ratio?: number }> = [];
-  await page.route("**/api/v1/videos/*/dub-mix", async (route) => {
+  const patches: Array<{ dabing?: number }> = [];
+  await page.route("**/api/v1/mix", async (route) => {
     if (route.request().method() === "PATCH") {
       try {
         patches.push(JSON.parse(route.request().postData() ?? "{}"));
@@ -127,7 +128,7 @@ test("a fader drag holds its dragged value across ticks and commits exactly one 
   });
 
   await setupDabingPlayer(page, request);
-  const fader = page.getByTestId("dub-mix-fader");
+  const fader = page.getByTestId("mix-dabing");
   await expect(fader).toBeEnabled({ timeout: 15000 });
 
   // Begin a real pointer drag and move the fader to 40 %. `input` is the LAST
@@ -158,7 +159,7 @@ test("a fader drag holds its dragged value across ticks and commits exactly one 
   // Give any spurious extra PATCH a chance to arrive, then assert exactly one.
   await page.waitForTimeout(1500);
   expect(patches.length).toBe(1);
-  expect(patches[0].ratio).toBeCloseTo(0.7, 2);
+  expect(patches[0].dabing).toBeCloseTo(0.7, 2);
   await expect(fader).toHaveValue("70");
 });
 
@@ -227,8 +228,8 @@ test("a bare change with no preceding input commits nothing — the drag-gate di
     }
     await route.fulfill({ status: 204 });
   });
-  const patches: Array<{ ratio?: number }> = [];
-  await page.route("**/api/v1/videos/*/dub-mix", async (route) => {
+  const patches: Array<{ dabing?: number }> = [];
+  await page.route("**/api/v1/mix", async (route) => {
     if (route.request().method() === "PATCH") {
       try {
         patches.push(JSON.parse(route.request().postData() ?? "{}"));
@@ -242,7 +243,7 @@ test("a bare change with no preceding input commits nothing — the drag-gate di
   await setupDabingPlayer(page, request);
   const seek = page.getByTestId("player-seek");
   await expect(seek).toBeEnabled({ timeout: 15000 });
-  const fader = page.getByTestId("dub-mix-fader");
+  const fader = page.getByTestId("mix-dabing");
   await expect(fader).toBeEnabled({ timeout: 15000 });
 
   // A bare `change` on each control — no `pointerdown`, no `input`, no drag.

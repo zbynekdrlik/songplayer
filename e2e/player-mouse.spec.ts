@@ -41,6 +41,7 @@ test.afterEach(async ({ request }) => {
 
 async function tickDabing(request: APIRequestContext) {
   await request.post("/__mock/dabing-reset");
+  await request.post("/__mock/mix-reset");
   await request.post("/__mock/dabing-add", {
     data: {
       video_id: DUB_VIDEO_ID,
@@ -134,27 +135,31 @@ test.describe("#200: real mouse drags commit exactly once", () => {
     expect(seeks[1]).toBe(seeks[0]);
   });
 
-  test("dub fader: a mouse drag PATCHes the dragged ratio and the fader stays there", async ({
+  test("dub fader: a mouse drag PATCHes the dragged dabing and the fader stays there", async ({
     page,
     request,
   }) => {
     const ratios: number[] = [];
-    await page.route("**/api/v1/videos/*/dub-mix", async (route) => {
-      ratios.push(JSON.parse(route.request().postData() || "{}").ratio);
+    await page.route("**/api/v1/mix", async (route) => {
+      if (route.request().method() !== "PATCH") {
+        await route.continue();
+        return;
+      }
+      ratios.push(JSON.parse(route.request().postData() || "{}").dabing);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ ratio: ratios[ratios.length - 1] }),
+        body: JSON.stringify({ vokaly: 1, podklad: 1, dabing: ratios[ratios.length - 1] }),
       });
     });
     await tickDabing(request);
     await page.goto("/dabing");
-    const fader = page.getByTestId("dub-mix-fader");
+    const fader = page.getByTestId("mix-dabing");
     await expect(fader).toBeEnabled({ timeout: 15000 });
     await expect(fader).toHaveValue("100");
 
     // Vertical fader: drag from the top (100 %) down to ~30 %.
-    await mouseDrag(page, '[data-testid="dub-mix-fader"]', 0.98, 0.3);
+    await mouseDrag(page, '[data-testid="mix-dabing"]', 0.98, 0.3);
 
     await expect.poll(() => ratios.length, { timeout: 5000 }).toBe(1);
     expect(ratios[0]).toBeGreaterThan(0.15);

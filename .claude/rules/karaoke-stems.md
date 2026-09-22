@@ -49,6 +49,62 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   **48 kHz stereo**, so `stem_worker.py` resamples every stem to 48 kHz stereo
   before writing FLAC (PCM_24).
 
+## #184 round G — ONE mixer console (SUPERSEDES the karaoke-MODE model below)
+
+The karaoke MODE + `KaraokeControl` + `preset_gains` + `KaraokeMode` enum +
+`GET/POST /api/v1/karaoke` + `EngineCommand::SetKaraoke` + `KaraokeStateChanged`
+are **DELETED**. The mixer is now THREE independent faders that ARE the state:
+
+- **Model = `sp_core::mixer_model`** — `MixFaders { vokaly, podklad, dabing }`
+  (each `0..=1`, clamped; ANY non-finite → the default `(1,1,1)`). The per-stream
+  gains are DERIVED, not preset-shaped:
+  - `stream_gains_song(f) -> [original, vocals, instrumental]` = `[1,0,0]` when
+    `vokaly==1 && podklad==1` (bit-exact original, the old FullMix) else
+    `[0, vokaly, podklad]`.
+  - `stream_gains_dub(f) -> [original, vocals, instrumental, dub]` = `[1,0,0,dabing]`
+    when both full else `[0, vokaly, podklad, dabing]`.
+  - `stream_gains_dub_no_stems(f) -> [original, dub]` = `[vokaly, dabing]` — the
+    `vokaly` fader IS the whole original bed, **NO floor** (the −18 dB
+    `DUB_ORIGINAL_FLOOR` is GONE).
+  - Presets are fader SNAPSHOTS (`SONG_PRESETS` always, `DUB_PRESETS` only with a
+    ready dub); `preset_for_faders(f, has_dub)` highlights within 0.01
+    (`karaoke_low`: `vokaly<1 && podklad==1`), dub presets win when a dub is
+    present. `fader_availability(stems_ready, dub_ready)` → which faders are live.
+- **Live control = `stems::control::MixControl`** (was `KaraokeControl`): three
+  fader atomics + the three DERIVED gain sets (`gains[3]`, `dub_gain_atomics[4]`,
+  `dub2_gain_atomics[2]`). `set_faders(f)` recomputes ALL THREE in lock-step from
+  the pure `stream_gains_*`; `gain_handles` / `dub_gain_handles` /
+  `dub_over_original_gain_handles` keep their stream orders. The #186 no-reopen
+  seam is unchanged. Restored at boot from settings `mix_vokaly`/`mix_podklad`/
+  `mix_dabing` (`init_from_settings`).
+- **API = `GET/PATCH /api/v1/mix`** (`api/mix.rs`): GET returns the three faders +
+  stem progress + the #177 now-playing block; PATCH takes any subset
+  `{vokaly?, podklad?, dabing?}` (live push FIRST via `EngineCommand::SetMix` +
+  `engine.set_mix`, THEN the settings persist — the round-A order in
+  `api/mix_apply.rs::apply_mix`). Broadcast is `ServerMsg::MixChanged`.
+- **UI = `components/live_mixer.rs`** (ONE strip over the shared `Mixer`) —
+  replaces `karaoke_mixer.rs` + `dub_mixer.rs`. Test ids `mix-vokaly` /
+  `mix-podklad` / `mix-dabing`, presets `mixer-preset-<id>`, state line
+  `karaoke-now-playing` (kept). Migration V27 folds the old
+  `karaoke_mode`/`karaoke_vocal_gain` settings into `mix_*` and DROPs
+  `videos.dub_mix_ratio`.
+
+Everything below is the pre-round-G history; read it for the #186 seam mechanics
+but treat `KaraokeControl`/`preset_gains`/`KaraokeMode`/`/api/v1/karaoke` as
+DELETED names.
+
+**Round-G gotchas (cost a review round):**
+- **A partial `PATCH /api/v1/mix` reads the UNSPECIFIED faders from the
+  process-global `MixControl`.** So the handler must APPLY `control.set_faders(target)`
+  DIRECTLY (idempotent with the engine's own `set_faders`), not rely ONLY on the
+  async `EngineCommand::SetMix` loop — otherwise a rapid 2nd partial PATCH reads a
+  stale console (race), AND the axum test harness (`routes_tests::test_state` DROPS
+  the engine receiver) never updates the global, so a partial-merge test can't pass.
+- **A `preset_for_faders` test for a DUB preset MUST set `dabing` to the snapshot's
+  pinned value** (`half` = `(0.5, 1, 0.5)`): dub presets match all three within
+  0.01, so `(0.5, 0.995, 1.0)` does NOT match `half` (dabing 1.0≠0.5) — it falls to
+  the song reading (`karaoke_low`). Song presets ignore `dabing`; dub presets pin it.
+
 ## Architecture
 
 - **#186 — MODES ARE LIVE GAIN PRESETS, NEVER A REOPEN. The mixer opens every

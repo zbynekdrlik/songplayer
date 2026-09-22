@@ -229,12 +229,11 @@ test.describe("#178 live preview <video> post-deploy", () => {
         expect(n, "if shown, the picture lag must be < 5 s").toBeLessThan(5);
       }
 
-      // The dub mixer 'Originál' preset must respond fast even under the throttle:
-      // the PATCH lands ≤ 2 s and the picture keeps advancing (no stall > 3 s).
+      // The mixer 'Originál' preset must respond fast even under the throttle:
+      // the PATCH /api/v1/mix lands ≤ 2 s and the picture keeps advancing (#184 G).
       const patch = page.waitForResponse(
         (r) =>
-          r.url().includes(`/api/v1/videos/${sampleVideoId}/dub-mix`) &&
-          r.request().method() === "PATCH",
+          r.url().includes("/api/v1/mix") && r.request().method() === "PATCH",
         { timeout: 2000 },
       );
       await page.getByTestId("mixer-preset-original").click();
@@ -254,9 +253,9 @@ test.describe("#178 live preview <video> post-deploy", () => {
         )
         .toBeGreaterThan(before + 0.5);
     } finally {
-      // Restore: dub-only mix, stop the preview, pause the off-program output.
+      // Restore: full console (dub-only default), stop the preview, pause output.
       await request
-        .patch(`/api/v1/videos/${sampleVideoId}/dub-mix`, { data: { ratio: 1.0 } })
+        .patch("/api/v1/mix", { data: { vokaly: 1.0, podklad: 1.0, dabing: 1.0 } })
         .catch(() => {});
       await page
         .getByTestId("preview-stop")

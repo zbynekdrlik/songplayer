@@ -447,7 +447,7 @@ app.patch("/api/v1/settings", (req, res) => {
 });
 
 // Karaoke (#14, #177): live mode + vocal gain + stem progress + per-song
-// now-playing stems state. `/__mock/karaoke-last` exposes the last POSTed body
+// now-playing stems state. `/__mock/mix-last` exposes the last PATCH body
 // so specs can assert what the UI sent. `now_playing[]` binds the panel to the
 // SELECTED playlist's song — default: playlist 1's song is stems-READY so the
 // mode/fader controls are enabled (the #14/#186 specs rely on that). The #177
@@ -462,25 +462,36 @@ let karaokeNowPlaying = [
     queue_position: null,
   },
 ];
-let karaoke = {
-  mode: "full_mix",
-  vocal_gain: 0.3,
-  stems_pending: 2,
-  stems_done: 5,
-};
-let lastKaraokePost = null;
-app.get("/api/v1/karaoke", (_req, res) => {
-  res.json({ ...karaoke, now_playing: karaokeNowPlaying });
+// #184 round G: the ONE live mixer console. GET returns the three fader positions
+// + stem progress + the per-song now-playing block; PATCH sets any subset of the
+// faders. `/__mock/mix-last` exposes the last PATCH body so specs can assert which
+// fields the UI sent; `/__mock/mix-reset` restores the default (1,1,1) console.
+let mix = { vokaly: 1.0, podklad: 1.0, dabing: 1.0 };
+let lastMixPatch = null;
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+app.get("/api/v1/mix", (_req, res) => {
+  res.json({
+    ...mix,
+    stems_pending: 2,
+    stems_done: 5,
+    now_playing: karaokeNowPlaying,
+  });
 });
-app.post("/api/v1/karaoke", (req, res) => {
-  lastKaraokePost = req.body || {};
-  if (typeof lastKaraokePost.mode === "string") karaoke.mode = lastKaraokePost.mode;
-  if (typeof lastKaraokePost.vocal_gain === "number")
-    karaoke.vocal_gain = lastKaraokePost.vocal_gain;
-  res.status(204).end();
+app.patch("/api/v1/mix", (req, res) => {
+  const b = req.body || {};
+  lastMixPatch = b;
+  for (const k of ["vokaly", "podklad", "dabing"]) {
+    if (typeof b[k] === "number" && !Number.isNaN(b[k])) mix[k] = clamp01(b[k]);
+  }
+  res.status(200).json({ ...mix });
 });
-app.get("/__mock/karaoke-last", (_req, res) => {
-  res.json(lastKaraokePost || {});
+app.get("/__mock/mix-last", (_req, res) => {
+  res.json(lastMixPatch || {});
+});
+app.post("/__mock/mix-reset", (_req, res) => {
+  mix = { vokaly: 1.0, podklad: 1.0, dabing: 1.0 };
+  lastMixPatch = null;
+  res.json({ ok: true });
 });
 // #177 admin: replace the now_playing[] array so a spec can drive the disabled
 // controls + enqueue button for an unavailable / failed / queued song.
@@ -511,7 +522,6 @@ app.get("/__mock/stems-enqueue-last", (_req, res) => {
 const DABING_PLAYLIST_ID = 500;
 let dubRows = [];
 let nextDubId = 9000;
-let lastDubMix = null;
 
 function chainStateFor(dubStatus) {
   // The mock only ever produces `queued` rows (the chain is D3/D4); the server
@@ -582,13 +592,8 @@ app.get("/__mock/dub-toggle-last", (_req, res) => {
   res.json({ toggle: lastDubToggle });
 });
 
-app.patch("/api/v1/videos/:id/dub-mix", (req, res) => {
-  let ratio = Number((req.body && req.body.ratio) ?? 1.0);
-  if (Number.isNaN(ratio)) ratio = 1.0;
-  ratio = Math.max(0, Math.min(1, ratio));
-  lastDubMix = { video_id: Number(req.params.id), ratio };
-  res.status(200).json({ ratio });
-});
+// #184 round G: the per-video dub-mix route is DELETED — the mixer is now the ONE
+// global console (`PATCH /api/v1/mix`, above).
 
 // #183 round 2: push a fully-formed DubRow so a test can assert a terminal state
 // (e.g. a dub-ready video WITHOUT stems — stem_status stays null — still renders
@@ -617,11 +622,7 @@ app.post("/__mock/dabing-add", (req, res) => {
 app.post("/__mock/dabing-reset", (_req, res) => {
   dubRows = [];
   nextDubId = 9000;
-  lastDubMix = null;
   res.json({ ok: true });
-});
-app.get("/__mock/dub-mix-last", (_req, res) => {
-  res.json(lastDubMix || {});
 });
 
 // Status
@@ -992,7 +993,7 @@ app.post("/__mock/set-playing", (req, res) => {
 // the dub mixer adapter when the now-playing `video_id` for the playlist matches
 // a row in `GET /api/v1/dabing` `videos[]` — so `player.spec.ts`/`mixer.spec.ts`
 // dabing-add a ready dub row, then broadcast its `video_id` here to surface the
-// `dub-mix-fader` inside the Dabing Player. Body IS the NowPlaying `data`
+// mix faders inside the Dabing Player. Body IS the NowPlaying `data`
 // payload: `{playlist_id, video_id, song?, artist?, position_ms?, duration_ms?}`.
 app.post("/__mock/now-playing", (req, res) => {
   const data = req.body || {};

@@ -9,7 +9,7 @@ import { test, expect, Page } from "@playwright/test";
  *  1. the Dabing section lists a READY dub (the 40-min acceptance sample) and
  *     the SP-dabing NDI output carries at least one receiver;
  *  2. the shared Player on /dabing is driven by a REAL mouse: a drag on the
- *     dub fader PATCHes the ratio and stays put, a drag on the seek bar posts a
+ *     mix-vokaly fader PATCHes the console and stays put, a drag on the seek bar posts a
  *     seek — the two controls the owner found dead on 20.9.2026 (#200);
  *  3. zero console errors throughout.
  */
@@ -62,16 +62,58 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
   });
 
   test.afterAll(async ({ request }) => {
-    // Leave the box as found: dub-only mix, Dabing output paused.
-    if (sampleVideoId) {
-      await request.patch(`/api/v1/videos/${sampleVideoId}/dub-mix`, {
-        data: { ratio: 1.0 },
-      });
-    }
+    // Leave the box as found: the full default console, Dabing output paused.
+    await request
+      .patch("/api/v1/mix", { data: { vokaly: 1.0, podklad: 1.0, dabing: 1.0 } })
+      .catch(() => {});
     if (dabingPid) {
       await request.post(`/api/v1/playback/${dabingPid}/pause`);
     }
   });
+
+  // Best-effort 12–16 kHz band energy (dB) of the preview <video>'s audio via a
+  // Web Audio AnalyserNode. Returns null when audio cannot be captured (a
+  // codec-less runner) so the mechanical console checks still run (#184 G item 3).
+  async function bandDb(page: Page): Promise<number | null> {
+    return page.evaluate(async () => {
+      const video = document.querySelector(
+        '[data-testid="preview-video"] video, video',
+      ) as HTMLVideoElement | null;
+      if (!video) return null;
+      try {
+        const stream =
+          (video as unknown as { captureStream?: () => MediaStream }).captureStream?.() ?? null;
+        if (!stream || stream.getAudioTracks().length === 0) return null;
+        const Ctx =
+          (window as unknown as { AudioContext?: typeof AudioContext }).AudioContext ||
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctx) return null;
+        const ctx = new Ctx();
+        const src = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 2048;
+        src.connect(analyser);
+        await new Promise((r) => setTimeout(r, 800));
+        const bins = new Float32Array(analyser.frequencyBinCount);
+        analyser.getFloatFrequencyData(bins);
+        const nyquist = ctx.sampleRate / 2;
+        const binHz = nyquist / bins.length;
+        let sum = 0;
+        let n = 0;
+        for (let i = 0; i < bins.length; i++) {
+          const hz = i * binHz;
+          if (hz >= 12000 && hz <= 16000 && Number.isFinite(bins[i])) {
+            sum += bins[i];
+            n += 1;
+          }
+        }
+        await ctx.close();
+        return n > 0 ? sum / n : null;
+      } catch {
+        return null;
+      }
+    });
+  }
 
   test("a READY dub is listed and SP-dabing has a receiver", async ({ request }) => {
     const dab = await request.get("/api/v1/dabing");
@@ -159,19 +201,52 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
       "○ Mimo programu",
     );
 
-    // Dub fader: drag from the top (100 %) to ~40 % → ONE PATCH, fader stays.
-    const fader = page.getByTestId("dub-mix-fader");
-    await expect(fader).toBeEnabled({ timeout: 15000 });
+    // #184 round G item 3: the ONE mixer console. Start the live preview so the
+    // audio band can be measured (best-effort), then drag mix-vokaly to 0 and
+    // prove the original voice leaves the mix — the 12–16 kHz band drops ≥ 8 dB.
+    await page.getByTestId("preview-start").click().catch(() => {});
+    await page.waitForTimeout(2000);
+    const before = await bandDb(page);
+
+    const vokaly = page.getByTestId("mix-vokaly");
+    await expect(vokaly).toBeEnabled({ timeout: 15000 });
     const patch = page.waitForResponse(
-      (r) => r.url().includes(`/api/v1/videos/${sampleVideoId}/dub-mix`) && r.request().method() === "PATCH",
+      (r) => r.url().includes("/api/v1/mix") && r.request().method() === "PATCH",
       { timeout: 10000 },
     );
-    await mouseDrag(page, '[data-testid="dub-mix-fader"]', 0.98, 0.4);
+    await mouseDrag(page, '[data-testid="mix-vokaly"]', 0.98, 0.02);
     expect((await patch).status()).toBe(200);
     await page.waitForTimeout(1500);
-    const v = Number(await fader.inputValue());
-    expect(v).toBeGreaterThan(20);
-    expect(v).toBeLessThan(60);
+    // The fader stays where it was released (no snap-back).
+    expect(Number(await vokaly.inputValue())).toBeLessThan(15);
+    // GET /api/v1/mix reports the change (the console persisted).
+    const mix = (await (await request.get("/api/v1/mix")).json()) as {
+      vokaly: number;
+      podklad: number;
+      dabing: number;
+    };
+    expect(mix.vokaly).toBeLessThan(0.15);
+
+    // Best-effort HF band drop (skips on a codec-less runner where audio can't be
+    // captured — the wall audio is the owner's real acceptance).
+    await page.waitForTimeout(3000);
+    const after = await bandDb(page);
+    if (before !== null && after !== null) {
+      expect(
+        before - after,
+        "removing the original voice must drop the 12–16 kHz band ≥ 8 dB",
+      ).toBeGreaterThanOrEqual(8);
+    }
+
+    // The Originál preset restores the original voice (vokály 1) and mutes dabing.
+    await page.getByTestId("mixer-preset-original").click();
+    await page.waitForTimeout(1000);
+    const restored = (await (await request.get("/api/v1/mix")).json()) as {
+      vokaly: number;
+      dabing: number;
+    };
+    expect(restored.vokaly).toBeCloseTo(1, 1);
+    expect(restored.dabing).toBeCloseTo(0, 1);
 
     // Seek bar: drag to ~30 % → a seek is posted (204) and the position follows.
     const seek = page.getByTestId("player-seek");
