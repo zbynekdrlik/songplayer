@@ -173,6 +173,7 @@ mod tests {
             frames_submitted_last_5s: 0,
             observed_fps: 0.0,
             nominal_fps: 0.0,
+            source_fps: 0.0,
             last_submit_ts: None,
             last_heartbeat_ts: None,
             consecutive_bad_polls: 0,

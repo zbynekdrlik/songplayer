@@ -146,6 +146,41 @@ fn lock_for_heartbeat_degrades_on_a_stall() {
     assert_eq!(r, "late > 25 % of slots in 60 s");
 }
 
+// #168 round 6b regression pair — the EXACT box read (22.9.2026 17:56 UTC,
+// SP-slow, a 23.976-fps NTSC-24 file on the 30-fps grid): slots 1803, late 3,
+// repeats 362 (= 20.1 % ≈ the structural 1 − 24/30 conversion), resyncs 0, clock
+// ok, pacing on, 2 receivers. With the DECODER's `source_fps` (23.976) the
+// 20.1 % repeats are the by-design conversion → LOCKED; with the paced path's
+// grid-valued `nominal_fps` (30.0) the rule expects 0 % → the same repeats
+// falsely DEGRADE. Same counts, different `source_fps` → the whole fix.
+
+#[test]
+fn lock_for_heartbeat_source_fps_23976_holds_locked() {
+    use sp_core::genlock::lock_state::LockState;
+    let mut w = EventWindow::new();
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 23.976, 30);
+    let (s, r) = lock_for_heartbeat(&mut w, 60 * U, &paced(1803, 3, 362, 0), true, 2, 23.976, 30);
+    assert_eq!(
+        s,
+        LockState::Locked,
+        "24-fps structural repeats must stay LOCKED"
+    );
+    assert_eq!(r, "locked");
+}
+
+#[test]
+fn lock_for_heartbeat_grid_source_fps_falsely_degrades() {
+    use sp_core::genlock::lock_state::LockState;
+    let mut w = EventWindow::new();
+    // Feeding the grid rate (30.0, what the paced `nominal_fps` reads) as the
+    // source is the BUG: expected repeat 0 % → the 20.1 % structural repeats trip
+    // the margin → DEGRADED. This pins WHY `source_fps` must be the decoder rate.
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 30.0, 30);
+    let (s, r) = lock_for_heartbeat(&mut w, 60 * U, &paced(1803, 3, 362, 0), true, 2, 30.0, 30);
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "repeats above the fps conversion in 60 s");
+}
+
 // ---- format_genlock_line + structural guard ----
 
 fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
@@ -169,6 +204,7 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
         frames_submitted_last_5s: 30,
         observed_fps: 30.0,
         nominal_fps: 30.0,
+        source_fps: 30.0,
         last_submit_ts: None,
         last_heartbeat_ts: None,
         consecutive_bad_polls: 0,

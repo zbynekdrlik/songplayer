@@ -275,6 +275,11 @@ fn expected_repeat_permille_values() {
     assert_eq!(expected_repeat_permille(25.0, 30), 167);
     assert_eq!(expected_repeat_permille(30.0, 30), 0);
     assert_eq!(expected_repeat_permille(60.0, 30), 0);
+    // #168 r6b: the box read a 23.976-fps file (NTSC 24) on the 30 grid. Integer
+    // permille: 23976/30 = 799 → 1000 − 799 = 201. This is the source rate that
+    // must reach the rule (the paced snapshot's `nominal_fps` reads the grid 30 →
+    // expected 0 → the 20 % structural repeats falsely degrade).
+    assert_eq!(expected_repeat_permille(23.976, 30), 201);
 }
 
 #[test]

@@ -727,6 +727,8 @@ let ndiHealth = [
     // #201 round 2: the raw transport the API now exposes (default from state).
     transport: "Playing",
     connections: 2,
+    // #168 r6b: decoder source fps, additive; the UI ignores it (30-fps fixture).
+    source_fps: 30,
     lock_state: "LOCKED",
     lock_reason: "locked",
     clock: { is_locked: true, mode: "LOCK", offset_ns: 1200, clock_ok: true },
@@ -746,6 +748,7 @@ let ndiHealth = [
     state: "Playing",
     transport: "Playing",
     connections: 0,
+    source_fps: 30,
     lock_state: "DEGRADED",
     lock_reason: "no receiver",
     clock: { is_locked: true, mode: "LOCK", offset_ns: 950, clock_ok: true },
@@ -765,6 +768,7 @@ let ndiHealth = [
     state: "Idle",
     transport: "Idle",
     connections: 0,
+    source_fps: 30,
     lock_state: "UNLOCKED",
     lock_reason: "pacing disabled",
     clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },

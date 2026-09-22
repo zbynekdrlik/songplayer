@@ -939,7 +939,6 @@ pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
     );
     let observed_fps = stats.frames_in_window as f32 / stats.window_secs.max(0.001);
     let nominal_fps = submitter.nominal_fps();
-
     let now = std::time::Instant::now();
     let bad = classify_bad_poll(
         &state,
@@ -963,6 +962,7 @@ pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
             frames_submitted_last_5s: stats.frames_in_window,
             observed_fps,
             nominal_fps,
+            source_fps: nominal_fps, // #168 r6b: SDK path — submitter carries the decoder rate
             last_submit_ts: submitter.last_submit_ts(),
             last_heartbeat_ts: now,
             consecutive_bad_polls: *consecutive_bad_polls,
