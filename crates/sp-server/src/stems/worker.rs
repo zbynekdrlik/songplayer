@@ -225,6 +225,17 @@ impl StemWorker {
             return;
         }
 
+        // #184 G0.1: a dub job has priority on the heavy slot. While one is queued
+        // behind it, skip this tick — start no new separation (the row stays
+        // pending, no backoff, no DB write). The dub acquires within ~1 s, then
+        // the flag clears and the stem queue resumes.
+        if crate::stems::worker_yield::stem_tick_defers_to_dub(
+            crate::lyrics::heavy_slot::dub_slot_wanted(),
+        ) {
+            info!("stem worker: a dub job is waiting for the heavy slot — deferring this tick");
+            return;
+        }
+
         // #162 priority regime (same `lyrics_processing_mode` switch as the
         // lyrics worker). `idle-only` defers heavy separation while the wall is
         // in use (with idle-settle hysteresis); `low-priority` (default) NEVER
@@ -751,6 +762,13 @@ mod tests {
     /// (`stem_duration_too_long`) actually gates on it.
     #[tokio::test]
     async fn process_next_marks_overlong_song_unsupported() {
+        // This test reaches the #184 G0.1 dub tick-defer (stub venv passes the
+        // venv gate), so serialize + clear the process-global dub flag so a
+        // parallel flag test can't make it defer instead of marking the row.
+        let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        crate::lyrics::heavy_slot::set_dub_slot_wanted(false);
         let pool = crate::db::create_memory_pool().await.unwrap();
         crate::db::run_migrations(&pool).await.unwrap();
         seed_pending_stem_row(&pool, 1).await;
