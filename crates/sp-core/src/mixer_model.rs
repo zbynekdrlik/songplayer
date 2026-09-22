@@ -297,8 +297,8 @@ pub struct MixConsole {
 
 impl Default for MixConsole {
     /// Song `(1, 1, ·)` = `Plný mix` (bit-exact original), dub `(0, 1, 1)` =
-    /// `Len dabing` (the #174 default — dub only, the operator raises `vokály` to
-    /// bring the original back), active Song.
+    /// `Len dabing` (dub only by default — the operator raises `vokály` to bring
+    /// the original back), active Song.
     fn default() -> Self {
         Self {
             song: MixFaders::new(1.0, 1.0, 1.0),
