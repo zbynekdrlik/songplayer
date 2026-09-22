@@ -68,8 +68,15 @@ pub fn LiveMixer(playlist_id: i64) -> impl IntoView {
     let load = move || {
         leptos::task::spawn_local(async move {
             if let Ok(v) = api::get_mix().await {
+                // The strip may have been disposed while the request was in flight
+                // (navigation) — a plain read of a page-owned signal then panics
+                // ("access a reactive value that has already been disposed"), so
+                // read with `try_*` and bail out when it is gone.
+                let Some(patch_in_flight) = in_flight.try_get_untracked() else {
+                    return;
+                };
                 // Do not overwrite the faders mid-PATCH (avoids a snap-back).
-                if !in_flight.get_untracked() {
+                if !patch_in_flight {
                     if let Some(x) = v.get("vokaly").and_then(|x| x.as_f64()) {
                         vokaly.set(x as f32);
                     }
