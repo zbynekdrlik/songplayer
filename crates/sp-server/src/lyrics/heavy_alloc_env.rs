@@ -27,6 +27,20 @@
 //! Numerically invisible to the model; applied to the separation child only
 //! (next to `gpu_policy::env_for_child` in `stems/separator.rs`) — the dub child
 //! is light and the mtl aligner venv is untouched.
+//!
+//! **#207 round 3b — mimalloc self-report.** Three purge-delay variants left
+//! the child's measured commit identical across RETAINED runs (~8973–8977 MB,
+//! phase-2), which leaves two open explanations: either the `MIMALLOC_*` env
+//! is silently not reaching the injected allocator (a wrong var name/value is
+//! a no-op, never an error), or the ~9 GB really is live workload memory.
+//! mimalloc can answer this itself: `MIMALLOC_VERBOSE=1` prints the effective
+//! options it read at init, and `MIMALLOC_SHOW_STATS=1` prints
+//! reserved/committed/peak stats at process exit — both to stderr, both
+//! emitted in EVERY mode (RETAINED and LAZY), so the next box run's
+//! `separate-stems ok; stderr tail:` log line carries the evidence with no
+//! rebuild. Costs a few extra stderr lines per child; see
+//! `stems::separator::SEPARATION_STDERR_TAIL_LINES` for the enlarged tail that
+//! keeps them, and `.claude/rules/heavy-containment.md` for how to read them.
 
 /// Env var: mimalloc purge delay (ms). `-1` = never purge/decommit.
 pub const ENV_PURGE_DELAY: &str = "MIMALLOC_PURGE_DELAY";
@@ -34,6 +48,17 @@ pub const ENV_PURGE_DELAY: &str = "MIMALLOC_PURGE_DELAY";
 pub const ENV_ARENA_EAGER_COMMIT: &str = "MIMALLOC_ARENA_EAGER_COMMIT";
 /// Env var: reserve N of OS memory (one arena) up front.
 pub const ENV_RESERVE_OS_MEMORY: &str = "MIMALLOC_RESERVE_OS_MEMORY";
+/// Env var (#207 r3b): print mimalloc's effective init options to stderr —
+/// confirms the `MIMALLOC_*` env below was actually read, not silently
+/// ignored (a wrong var name/value is a no-op, never an error).
+pub const ENV_VERBOSE: &str = "MIMALLOC_VERBOSE";
+/// Env var (#207 r3b): print mimalloc's reserved/committed/peak stats to
+/// stderr at process exit — the ground truth for whether the ~9 GB commit is
+/// the arena reservation or live workload allocation.
+pub const ENV_SHOW_STATS: &str = "MIMALLOC_SHOW_STATS";
+/// Value for both diagnostic env vars — "on" in either mimalloc's boolean env
+/// parser.
+const DIAGNOSTIC_ON: &str = "1";
 
 /// The reserved-arena size. One arena reserved (RETAINED: + committed) at start;
 /// under the 10 GiB per-child job cap. Same reserve in both modes — LAZY only
@@ -110,9 +135,9 @@ fn lazy_purge_delay(purge_delay_ms: i64) -> String {
     }
 }
 
-/// The three mimalloc env pairs for the heavy separation child, in
-/// `[purge, eager-commit, reserve]` order. Pure — no I/O. Applied verbatim next
-/// to the VRAM cap from `gpu_policy::env_for_child`.
+/// The five mimalloc env pairs for the heavy separation child, in
+/// `[purge, eager-commit, reserve, verbose, show-stats]` order. Pure — no I/O.
+/// Applied verbatim next to the VRAM cap from `gpu_policy::env_for_child`.
 ///
 /// `mode` + `purge_delay_ms` are the live operator settings
 /// (`heavy_alloc_mode` / `heavy_purge_delay_ms`, via
@@ -120,6 +145,9 @@ fn lazy_purge_delay(purge_delay_ms: i64) -> String {
 /// #168 eager-committed heap (`purge_delay_ms` `-1` = never decommit); `Lazy`
 /// turns eager commit OFF so the box can return the child's ~9 GB commit, with
 /// a negative delay defaulting to 10 s (a never-purge lazy heap only grows).
+/// The trailing `MIMALLOC_VERBOSE`/`MIMALLOC_SHOW_STATS` pair (#207 r3b) is
+/// identical in both modes — a pure diagnostic, never varies with the mode or
+/// delay.
 pub(crate) fn heavy_alloc_env(mode: AllocMode, purge_delay_ms: i64) -> Vec<(String, String)> {
     let (purge, eager) = match mode {
         AllocMode::Retained => (emit_purge_delay(purge_delay_ms), RETAINED_EAGER_COMMIT),
@@ -132,6 +160,8 @@ pub(crate) fn heavy_alloc_env(mode: AllocMode, purge_delay_ms: i64) -> Vec<(Stri
             ENV_RESERVE_OS_MEMORY.to_string(),
             RESERVE_OS_MEMORY.to_string(),
         ),
+        (ENV_VERBOSE.to_string(), DIAGNOSTIC_ON.to_string()),
+        (ENV_SHOW_STATS.to_string(), DIAGNOSTIC_ON.to_string()),
     ]
 }
 
