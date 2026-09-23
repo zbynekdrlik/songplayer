@@ -12,6 +12,14 @@ use std::process::Stdio;
 use tokio::process::Command;
 use tracing::{debug, warn};
 
+/// #207 round 3b: how many trailing stderr lines the separation child's
+/// success AND failure logs keep. mimalloc's `MIMALLOC_SHOW_STATS=1` (see
+/// `lyrics::heavy_alloc_env`) prints a ~40-line reserved/committed/peak block
+/// at child exit; the prior 5/20-line tails truncated it before the stats
+/// ever reached the log. 60 leaves headroom above the stats block plus the
+/// `gpu_polite:`/verbose-option lines already logged today.
+pub(crate) const SEPARATION_STDERR_TAIL_LINES: usize = 60;
+
 /// Build the `separate` argv (script + flags), in order. `#162`: a CPU plan
 /// appends `--force-cpu` so the script forces in-process CPU inference
 /// (`_force_cpu()`), leaving the GPU untouched WITHOUT hiding it via
@@ -191,7 +199,12 @@ pub async fn separate_stems(
     let stdout = String::from_utf8_lossy(&stdout);
     let status = status?;
     if !status.success() {
-        let tail = crate::lyrics::child_output::failure_tail(&stderr, &stdout, 20, 300);
+        let tail = crate::lyrics::child_output::failure_tail(
+            &stderr,
+            &stdout,
+            SEPARATION_STDERR_TAIL_LINES,
+            300,
+        );
         warn!("separate-stems failed ({}); output tail:\n{}", status, tail);
         anyhow::bail!(
             "separate-stems exited with status {}; output tail:\n{}",
@@ -202,7 +215,7 @@ pub async fn separate_stems(
     // The script prints `gpu_polite:` diagnostics on stderr — keep the tail visible.
     debug!(
         "separate-stems ok; stderr tail:\n{}",
-        crate::lyrics::child_output::tail_lines(&stderr, 5, 300)
+        crate::lyrics::child_output::tail_lines(&stderr, SEPARATION_STDERR_TAIL_LINES, 300)
     );
 
     // Post-condition: both stems must exist and be non-trivial.
