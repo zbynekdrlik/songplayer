@@ -26,8 +26,8 @@ pub const FOLLOW_PAUSE_MS: f64 = 5000.0;
 /// the bottom to the last scrollable position, and content shorter than the view
 /// never scrolls.
 pub fn centered_scroll_top(line_top: f64, line_h: f64, view_h: f64, content_h: f64) -> f64 {
-    let _ = (line_top, line_h, view_h, content_h);
-    todo!("#184 round F RED")
+    let max_top = (content_h - view_h).max(0.0);
+    (line_top + line_h / 2.0 - view_h / 2.0).clamp(0.0, max_top)
 }
 
 /// Whether auto-follow is still suspended at `now_ms` by a manual scroll
@@ -35,16 +35,14 @@ pub fn centered_scroll_top(line_top: f64, line_h: f64, view_h: f64, content_h: f
 /// paused. The window is half-open: paused while `now − paused_at <
 /// FOLLOW_PAUSE_MS`, following again from exactly `FOLLOW_PAUSE_MS` on.
 pub fn follow_paused(now_ms: f64, paused_at_ms: Option<f64>) -> bool {
-    let _ = (now_ms, paused_at_ms);
-    todo!("#184 round F RED")
+    paused_at_ms.is_some_and(|at| now_ms - at < FOLLOW_PAUSE_MS)
 }
 
 /// Whether the scroller must move from `current_top` to reach `target_top` —
 /// a sub-pixel difference (browsers round `scrollTop`) is not worth a smooth
 /// scroll, so it is skipped.
 pub fn needs_scroll(current_top: f64, target_top: f64) -> bool {
-    let _ = (current_top, target_top);
-    todo!("#184 round F RED")
+    (target_top - current_top).abs() >= 1.0
 }
 
 #[cfg(test)]
