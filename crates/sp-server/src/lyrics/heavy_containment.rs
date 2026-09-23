@@ -31,8 +31,8 @@ pub(crate) struct Containment {
     /// Job Object CPU hard-cap, percent of TOTAL machine CPU time (`5..=100`).
     pub(crate) cpu_cap_pct: u8,
     /// Job Object affinity mask — which logical cores the child may run on. The
-    /// default is the TOP 4 logical cores (#168 round 5 — the measured
-    /// grid-holding block; the wall keeps the rest).
+    /// default is the TOP 3 logical cores (#168 round 8 — the measured best
+    /// resident-child block; the wall keeps the rest).
     pub(crate) affinity_mask: u64,
     /// Whether the child's process memory priority is lowered to
     /// `MEMORY_PRIORITY_LOW`. Always `true` today; kept as a field for the
@@ -52,32 +52,45 @@ pub(crate) fn cpu_rate_from_pct(pct: u8) -> u32 {
 }
 
 /// The DEFAULT affinity mask for a box with `logical_cores` logical processors:
-/// the TOP 4 logical cores, derived from the count — never a literal.
+/// the TOP 3 logical cores, derived from the count — never a literal.
 /// `logical_cores` is clamped to `1..=64` (a Windows affinity mask is one
 /// processor group, ≤ 64 bits; a reported `0` is treated as `1`); a box with
-/// fewer than 4 logical cores simply gets all of them.
+/// fewer than 3 logical cores simply gets all of them.
 ///
-/// #168 round 5 — was the UPPER HALF of the cores (24 → `fff000`). Round 4's
-/// paced measurement (issue #168 comment 5779505749) isolated the stall channel
-/// as core PLACEMENT: the SAME separation child stalls the NDI `send_video_async`
-/// call to 30–105 ms/min while it may run on the upper 12 logical cores (the old
-/// `fff000` default — W1: 0/12 minutes ≤ 20 ms) and holds the SP-slow grid at
-/// 3.8–19.3 ms in 10/10 minutes when confined to 4 logical cores (`f00000` —
-/// W3b). The NDI SDK's unpinned compress/send threads (HIGH class) otherwise
-/// land on a physical core whose SMT sibling runs an AVX-saturating RoFormer
-/// thread; a 2-physical-core (4-logical) block leaves 10 of 12 physical cores
-/// free of the child, while a 1-physical-core block (`c00000` — W3) starves it.
-/// An explicit `heavy_cpu_affinity_mask` setting still overrides this default
-/// (see [`parse_affinity_mask`]).
+/// #168 round 8 — was the TOP 4 logical cores (round 5, 24 → `f00000`). Round
+/// 7's paced measurement (issue #147 comment 5786765465, 22./23.9.2026) held
+/// one variable per 15-minute window with the live wall on program and found
+/// the receiver's residual `dropped_due` scales with the resident separation
+/// child's CPU intensity, not its phase or memory pressure:
 ///
-/// E.g. 24 cores → `0xF00000` (cores 20–23), 8 cores → `0xF0` (cores 4–7),
-/// 6 → `0x3C`, 4 → `0xF`, 2 → `0x3`. Pure.
+/// - **`f00000` (top 4 logical cores, 4 threads ≈ 1.5–2.0 cores)** — receiver
+///   `dropped_due` 0.9–1.35/min, sender `submit_call_us_max` ≤ 20 ms in only
+///   10–15 of 16 minutes (W1, W4).
+/// - **`e00000` (top 3 logical cores, 3 threads ≈ 1.0–1.1 core)** — receiver
+///   `dropped_due` 0.27–0.5/min, sender ≤ 20 ms in **16/16** minutes (W5:
+///   3.2–13.2 ms), measured twice (W3, W5) with no observed wall-time slowdown
+///   on the separations.
+/// - **`c00000` (2 logical = 1 physical)** — STARVES the child under
+///   `BELOW_NORMAL` (round 4 W3: 80 CPU-s in 12 min), so 3 logical cores is the
+///   floor.
+///
+/// The receiver reaches contract-§8 zero only with NO child resident; the
+/// 3-core block is the best a resident child can have. Four AVX RoFormer threads
+/// over 2 full physical cores (both SMT siblings busy) run ≈ 1.5–2.0 cores and
+/// press the shared L3/DRAM the NDI SDK's compress threads need; three threads
+/// on one SMT pair + one half pair run ≈ 1.0–1.1 core and roughly halve-to-
+/// quarter the residual. An explicit `heavy_cpu_affinity_mask=f00000` setting
+/// still overrides this default (see [`parse_affinity_mask`]) if a full-video
+/// separation ever slows > 1.5×.
+///
+/// E.g. 24 cores → `0xE00000` (cores 21–23), 8 cores → `0xE0` (cores 5–7),
+/// 6 → `0x38`, 4 → `0xE`, 3 → `0x7`, 2 → `0x3`. Pure.
 pub(crate) fn default_affinity_mask(logical_cores: usize) -> u64 {
     let cores = logical_cores.clamp(1, 64);
-    // The child gets the TOP `top` logical cores; a box with < 4 gets all of
+    // The child gets the TOP `top` logical cores; a box with < 3 gets all of
     // them. `top <= cores`, so `shift = cores - top` never underflows and the
     // mask's highest set bit is `cores - 1` (≤ 63) — no shift overflow.
-    let top = cores.min(4); // the top 4 logical cores — the measured grid-holding block
+    let top = cores.min(3); // the top 3 logical cores — the measured best resident-child block
     let shift = cores - top; // the lower cores reserved for the wall/OBS/Resolume
     ((1u64 << top) - 1) << shift
 }
