@@ -693,8 +693,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
 
     let lan = state.lan_status.read().await;
 
-    // #203: resolve the live containment (same pure decision the Job Object seam
-    // applies) from the two settings + the box's core count.
+    // #203/#207/#207r3c: resolve the live containment; purge delay/alloc mode/reserve_gib are internal-only, not surfaced here.
     let heavy_cap = crate::db::models::get_setting(&state.pool, "heavy_cpu_cap_pct")
         .await
         .ok()
@@ -707,8 +706,9 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
     let containment = crate::lyrics::heavy_containment::containment_from_settings(
         heavy_cap.as_deref(),
         heavy_mask.as_deref(),
-        None, // #207: purge delay is not surfaced on /status (heavy_containment only)
-        None, // #207: alloc mode is not surfaced on /status (heavy_containment only)
+        None,
+        None,
+        None,
         heavy_cores,
     );
 

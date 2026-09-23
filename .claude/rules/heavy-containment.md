@@ -39,7 +39,8 @@ with a stems child resident (grid slot 33 ms) → genlock pacing collapse + the
 | `heavy_cpu_cap_pct` | **25** | integer, clamped `5..=100` (absent/invalid → 25) |
 | `heavy_cpu_affinity_mask` | **top 3 logical cores** (24-core box → `e00000`; #168 round 8) | hex string, optional `0x`; zero/invalid → default |
 | `heavy_purge_delay_ms` (#207) | **-1** (never decommit — the #168 retained-heap default) | integer ms; `-1` or `0..=600000` (absent / unparseable / out-of-range → -1 in RETAINED; in LAZY a negative value substitutes 10000, a never-purge lazy heap only grows). Applied to the SEPARATION child's `MIMALLOC_PURGE_DELAY` at spawn via `heavy_alloc_env(mode, purge_delay_ms)`. Visible in the `heavy child contained (pid …): … purge_delay_ms=<v> alloc_mode=<mode>` line at the next spawn. |
-| `heavy_alloc_mode` (#207 phase-3) | **retained** | `retained` \| `lazy` (unrecognised → retained, WARN). RETAINED = today's #168 heap (`MIMALLOC_ARENA_EAGER_COMMIT=1`, reserve 4GiB, purge per `heavy_purge_delay_ms`). LAZY = `MIMALLOC_ARENA_EAGER_COMMIT=0` (reserve stays reserved-not-committed, commit grows with touch, purged after the delay — default 10 s). Applied to the SEPARATION child at spawn; visible as `alloc_mode=` in the contained line. |
+| `heavy_alloc_mode` (#207 phase-3) | **retained** | `retained` \| `lazy` (unrecognised → retained, WARN). RETAINED = today's #168 heap (`MIMALLOC_ARENA_EAGER_COMMIT=1`, reserve `heavy_alloc_reserve_gib`, purge per `heavy_purge_delay_ms`). LAZY = `MIMALLOC_ARENA_EAGER_COMMIT=0` (reserve stays reserved-not-committed, commit grows with touch, purged after the delay — default 10 s). Applied to the SEPARATION child at spawn; visible as `alloc_mode=` in the contained line. |
+| `heavy_alloc_reserve_gib` (#207 round-3c) | **4** | integer GiB, `1..=8` (absent/unparseable/out-of-range → 4, WARN). Sizes `MIMALLOC_RESERVE_OS_MEMORY` for BOTH modes — round-3b's mimalloc self-report (issue #207 comment 5793008637) showed the eager-committed 4 GiB arena IS the ~4 GiB piece of the child's 8.7 GiB peak commit (`reserved: 4.0 GiB / committed: 4.0 GiB / commits: 0`), so a smaller reserve directly cuts commit by the difference — **as long as the report's `commits` counter stays 0** at the new size (see below). Applied via `heavy_alloc_env(mode, purge_delay_ms, reserve_gib)`; visible as `reserve_gib=<n>` after `alloc_mode=` in the contained line. |
 
 The default affinity mask is DERIVED from the live core count
 (`default_affinity_mask`), never a literal: the child gets the **TOP 3 logical
@@ -86,10 +87,11 @@ owner's parked decision on #147.
 
 - **`lyrics/heavy_containment.rs`** is PURE + unit-tested + mutation-clean:
   `Containment { cpu_cap_pct, affinity_mask, memory_priority_low, purge_delay_ms
-  (#207), alloc_mode (#207 phase-3) }`,
-  `containment_from_settings(cap_str, mask_str, purge_str, alloc_str, logical_cores)`,
-  `default_affinity_mask(cores)` (clamped `1..=64`), `clamp_cap_pct`,
-  `parse_purge_delay_ms`, `parse_alloc_mode`, `cpu_rate_from_pct(pct) = pct*100`,
+  (#207), alloc_mode (#207 phase-3), reserve_gib (#207 round-3c) }`,
+  `containment_from_settings(cap_str, mask_str, purge_str, alloc_str, reserve_str,
+  logical_cores)`, `default_affinity_mask(cores)` (clamped `1..=64`),
+  `clamp_cap_pct`, `parse_purge_delay_ms`, `parse_alloc_mode`,
+  `parse_reserve_gib` (`1..=8`, default 4), `cpu_rate_from_pct(pct) = pct*100`,
   `affinity_mask_hex`. No loops, exact boundaries. **Do NOT add DB/Win32/globals
   here — it must stay pure** (`AllocMode` lives in the pure `heavy_alloc_env.rs`).
 - **`lyrics/heavy_slot.rs`** holds the impure seam: a process-global
@@ -221,7 +223,27 @@ path; the target is a flat, near-zero steady state while playing.
 (`SEPARATION_STDERR_TAIL_LINES`) to keep them. **Verbose options block present**
 = the env is applied (a wrong var name/value is a silent no-op, never an
 error). **Exit stats block** (`reserved`/`committed`/`peak`): `reserved` ≈ the
-4 GiB arena; `committed`/`peak` near the ~9 GB figure in RETAINED means the
-arena reservation IS the ~9 GB, not live workload memory — a LAZY run with
-`committed` well below that (and shrinking after the purge delay) confirms
-lazy commit is doing its job.
+`heavy_alloc_reserve_gib` arena; `committed`/`peak` near the ~9 GB figure in
+RETAINED means the arena reservation IS the ~9 GB, not live workload memory —
+a LAZY run with `committed` well below that (and shrinking after the purge
+delay) confirms lazy commit is doing its job.
+
+## #207 round 3c — reading `commits` when sizing `heavy_alloc_reserve_gib`
+
+The exit stats block also prints a `commits` counter (allocations that missed
+the reserved arena and went to a NEW arena/OS allocation): round-3b's 4 GiB
+run showed `commits: 0`, meaning EVERY mimalloc allocation fit inside the
+eager-committed 4 GiB arena — the arena reservation itself, not live workload,
+is that ~4 GiB slice of the child's 8.7 GiB peak commit (the rest is native
+torch/oneDNN/MKL allocation mimalloc-redirect never sees). After lowering
+`heavy_alloc_reserve_gib` and re-running a separation, read the SAME block:
+
+- **`commits: 0` at the new size** — the workload's real mimalloc need is
+  BELOW the new reserve too; the process's peak commit should drop by roughly
+  `(old_reserve_gib − new_reserve_gib)` GiB. Safe to go smaller still, or pin
+  this size as the new default.
+- **`commits > 0`** — the reserve is now TOO SMALL: mimalloc spilled beyond
+  the arena into extra OS allocations (extra churn, possibly extra page
+  faults). Step back up to the last `commits: 0` size.
+
+`committed`/`peak` at the new size directly measure the commit actually saved.

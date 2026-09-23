@@ -72,7 +72,7 @@ fn default_mask_clamps_above_64_cores_to_the_top_3() {
 
 #[test]
 fn defaults_when_both_settings_absent() {
-    let c = containment_from_settings(None, None, None, None, 24);
+    let c = containment_from_settings(None, None, None, None, None, 24);
     assert_eq!(c.cpu_cap_pct, 25); // RED sentinel 99 fails here → GREEN 25
     assert_eq!(c.affinity_mask, 0xE00000); // #168 round 8: top 3 logical cores
     assert!(c.memory_priority_low);
@@ -126,12 +126,12 @@ fn mask_absent_zero_or_garbage_falls_back_to_default() {
 
 #[test]
 fn containment_honours_explicit_overrides() {
-    let c = containment_from_settings(Some("50"), Some("f000"), None, None, 24);
+    let c = containment_from_settings(Some("50"), Some("f000"), None, None, None, 24);
     assert_eq!(c.cpu_cap_pct, 50);
     assert_eq!(c.affinity_mask, 0xF000);
     assert!(c.memory_priority_low);
     // Clamp + zero-mask fallback compose through the seam (default = top 3 of 8).
-    let c2 = containment_from_settings(Some("3"), Some("0"), None, None, 8);
+    let c2 = containment_from_settings(Some("3"), Some("0"), None, None, None, 8);
     assert_eq!(c2.cpu_cap_pct, 5);
     assert_eq!(c2.affinity_mask, 0xE0);
 }
@@ -151,16 +151,16 @@ fn affinity_mask_hex_is_lowercase_no_prefix() {
 fn affinity_override_is_clamped_to_the_existing_cores() {
     // 8 cores: bits 0..=7 exist; 0xF0F0 keeps only its valid low bits 0xF0
     // (an explicit override keeps its valid bits verbatim — NOT the default).
-    let c = containment_from_settings(None, Some("0xF0F0"), None, None, 8);
+    let c = containment_from_settings(None, Some("0xF0F0"), None, None, None, 8);
     assert_eq!(c.affinity_mask, 0xF0);
     // A partly-valid override keeps its valid bits only.
-    let c = containment_from_settings(None, Some("0x10C"), None, None, 8);
+    let c = containment_from_settings(None, Some("0x10C"), None, None, None, 8);
     assert_eq!(c.affinity_mask, 0x0C);
     // Entirely beyond the core count → the default (top 3 of 8 = 0xE0).
-    let c = containment_from_settings(None, Some("0xF00"), None, None, 8);
+    let c = containment_from_settings(None, Some("0xF00"), None, None, None, 8);
     assert_eq!(c.affinity_mask, 0xE0);
     // 64+ cores: every bit is valid, the override is honoured verbatim.
-    let c = containment_from_settings(None, Some("0xFFFFFFFFFFFFFFFF"), None, None, 64);
+    let c = containment_from_settings(None, Some("0xFFFFFFFFFFFFFFFF"), None, None, None, 64);
     assert_eq!(c.affinity_mask, u64::MAX);
 }
 
@@ -198,11 +198,11 @@ fn purge_delay_out_of_range_falls_back_to_never() {
 fn containment_carries_the_parsed_purge_delay() {
     // Absent → never-decommit default; explicit in-range → verbatim.
     assert_eq!(
-        containment_from_settings(None, None, None, None, 24).purge_delay_ms,
+        containment_from_settings(None, None, None, None, None, 24).purge_delay_ms,
         -1
     );
     assert_eq!(
-        containment_from_settings(None, None, Some("1000"), None, 24).purge_delay_ms,
+        containment_from_settings(None, None, Some("1000"), None, None, 24).purge_delay_ms,
         1000
     );
 }
@@ -232,11 +232,55 @@ fn alloc_mode_lazy_is_lazy_and_trimmed() {
 fn containment_carries_the_parsed_alloc_mode() {
     // Absent → Retained default; explicit "lazy" → Lazy.
     assert_eq!(
-        containment_from_settings(None, None, None, None, 24).alloc_mode,
+        containment_from_settings(None, None, None, None, None, 24).alloc_mode,
         AllocMode::Retained
     );
     assert_eq!(
-        containment_from_settings(None, None, None, Some("lazy"), 24).alloc_mode,
+        containment_from_settings(None, None, None, Some("lazy"), None, 24).alloc_mode,
         AllocMode::Lazy
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #207 round-3c — parse_reserve_gib (heavy_alloc_reserve_gib setting) + the
+// Containment reserve_gib field. Valid = 1..=8; else fall back to 4 (ROZHODNUTÉ
+// 3c, comment 5793008637: round-3b's mimalloc self-report showed the
+// eager-committed 4 GiB arena IS the ~4 GiB piece of the child's peak commit).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reserve_gib_absent_or_garbage_is_default_4() {
+    assert_eq!(parse_reserve_gib(None), 4);
+    assert_eq!(parse_reserve_gib(Some("abc")), 4);
+    assert_eq!(parse_reserve_gib(Some("")), 4);
+}
+
+#[test]
+fn reserve_gib_valid_values_pass_through() {
+    assert_eq!(parse_reserve_gib(Some("1")), 1);
+    assert_eq!(parse_reserve_gib(Some("2")), 2);
+    assert_eq!(parse_reserve_gib(Some("8")), 8);
+    // A `delete .trim()` mutant leaves the spaces → parse fails → default.
+    assert_eq!(parse_reserve_gib(Some(" 3 ")), 3);
+}
+
+#[test]
+fn reserve_gib_out_of_range_falls_back_to_default() {
+    // Below the 1 GiB floor or above the 8 GiB ceiling → default (4).
+    assert_eq!(parse_reserve_gib(Some("0")), 4);
+    assert_eq!(parse_reserve_gib(Some("9")), 4);
+    assert_eq!(parse_reserve_gib(Some("-1")), 4);
+}
+
+#[test]
+fn containment_carries_the_parsed_reserve_gib() {
+    // Absent → the default (4); explicit in-range → verbatim.
+    assert_eq!(
+        containment_from_settings(None, None, None, None, None, 24).reserve_gib,
+        4
+    );
+    assert_eq!(
+        containment_from_settings(None, None, None, None, Some("2"), 24).reserve_gib,
+        2
     );
 }
