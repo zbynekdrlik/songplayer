@@ -159,16 +159,20 @@ def sk_timed_from(parts: list, t0_s: float, latency_ms: int) -> list[dict]:
     """The SK output-transcription fragments `(arrival_s, text, conn)` in
     connection order, stamped on the video timeline (`t_ms`, non-decreasing —
     the D3 subtitle builder reads them as consecutive windows). A connection's
-    fragments that arrived after the NEXT connection's first fragment (its
-    trailing translation during the overlap) are capped at that time, so the
-    next connection's subtitles keep their own arrival times — its audio is
-    placed at its arrival too — instead of being pushed later."""
+    fragments that arrived after a LATER connection's first fragment (its
+    trailing translation during the overlap) are capped at the earliest such
+    first fragment, so later connections' subtitles keep their own arrival
+    times — their audio is placed at its arrival too — instead of being pushed
+    later."""
     first_of: dict[int, float] = {}
     for arrival_s, text, conn in parts:
         if text and conn not in first_of:
             first_of[conn] = arrival_s
     conns = sorted(first_of)
-    next_first = {c: first_of[n] for c, n in zip(conns, conns[1:])}
+    next_first = {
+        c: min(first_of[later] for later in conns[i + 1 :])
+        for i, c in enumerate(conns[:-1])
+    }
     out = []
     last = 0
     for arrival_s, text, conn in _by_connection(parts, lambda p: p[2]):

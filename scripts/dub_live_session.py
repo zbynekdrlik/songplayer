@@ -516,13 +516,11 @@ class ContinuousSession:
             sender.cancel()
         if self._opening is not None and not self._opening.done():
             self._opening.cancel()
+        # A connection still CONNECTING never looks at `stop` (only once open)
+        # and the SDK's setup wait has no timeout of its own: cancelling
+        # `_opening` above makes `_open` cancel that connect task too.
         for c in self.conns:
             c.stop.set()
-            # A connection still CONNECTING never looks at `stop` (it only does
-            # once open), and the SDK's setup wait has no timeout of its own:
-            # cancel it, or the teardown waits for that connect forever.
-            if c.session is None and c.task is not None and not c.task.done():
-                c.task.cancel()
         tasks = [sender] + [c.task for c in self.conns if c.task is not None]
         if self._opening is not None:
             tasks.append(self._opening)
@@ -560,10 +558,12 @@ class ContinuousSession:
         try:
             await asyncio.wait_for(asyncio.shield(opened), self.opts.connect_timeout_s)
         except asyncio.CancelledError:
-            # The reconnect itself was cancelled (teardown): take the pending
-            # connect down with it — it would otherwise outlive the session.
+            # The (re)connect itself was cancelled (teardown, or the whole run):
+            # take the pending connect down with it — a connect never looks at
+            # `stop` and would otherwise outlive the session.
             conn.task.cancel()
             await asyncio.gather(conn.task, return_exceptions=True)
+            conn.closed = True
             raise
         except Exception as e:  # refused / timed out: the dub cannot continue
             conn.task.cancel()
@@ -759,8 +759,11 @@ class ContinuousSession:
                 self._drop_connection(conn, _err(e, self.secret))
 
     def _drop_connection(self, conn: _Conn, error: str) -> None:
-        """A send failed or stuck: the connection is dead for input. Any output it
-        still delivers is overlap (not the active stream), and it is closed."""
+        """A send failed or stuck: the connection is dead for input and is closed.
+        Marked draining so a message recorded after this point (one the receiver
+        already had in hand) is not counted as the active stream and its
+        resumption handle is not taken; output that arrived BEFORE the failure
+        was noticed is genuinely the active stream."""
         conn.draining = True
         self._mark_closed(conn, error)
         conn.stop.set()  # leave the connection's context
