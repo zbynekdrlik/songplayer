@@ -103,7 +103,7 @@ pub(crate) fn default_affinity_mask(logical_cores: usize) -> u64 {
 
 /// #207 default when `heavy_purge_delay_ms` is absent / unparseable / out of the
 /// valid range: `-1` (never decommit — the #168 retained-heap behaviour).
-pub(crate) const PURGE_DELAY_DEFAULT_MS: i64 = 0;
+pub(crate) const PURGE_DELAY_DEFAULT_MS: i64 = -1;
 
 /// Parse the `heavy_purge_delay_ms` setting into a mimalloc purge delay (ms).
 /// Valid values are `-1` (never decommit) or `0..=600_000`; anything missing,

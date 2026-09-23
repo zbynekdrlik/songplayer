@@ -187,7 +187,7 @@ impl LoopStats {
 /// heartbeat` (the `format_genlock_line` precedent). Pure, exact-string tested.
 pub fn format_loop_stats_line(ndi_name: &str, s: &LoopStats) -> String {
     format!(
-        "pipeline: loop-stats ndi_name=\"{}\" submit_call_us_max={} submit_call_us_p99={} decode_us_max={} submit_us_max={} audio_us_max={} catchup_dropped={} frames_alloc_dropped={}",
+        "pipeline: loop-stats ndi_name=\"{}\" submit_call_us_max={} submit_call_us_p99={} decode_us_max={} submit_us_max={} audio_us_max={} catchup_dropped={} frames_dropped_alloc={}",
         ndi_name,
         s.submit_call_us_max,
         s.submit_call_us_p99,

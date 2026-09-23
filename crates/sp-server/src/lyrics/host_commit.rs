@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bytes per mebibyte — the divisor turning a raw byte figure into the integer
 /// MB the log line + status field report (a MiB, matching Task Manager's "MB").
-const BYTES_PER_MB: u64 = 1_000_000;
+const BYTES_PER_MB: u64 = 1_048_576;
 
 /// One byte figure as integer MB (`bytes / 1_048_576`). Pure — shared by the log
 /// line and the status field so both round identically.
