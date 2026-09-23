@@ -131,3 +131,113 @@ def test_replace_file_off_windows_never_touches_the_win32_path(tmp_path, monkeyp
     src.write_text("NEW", encoding="utf-8")
     wr.replace_file(str(src), str(dst))
     assert dst.read_text(encoding="utf-8") == "NEW"
+
+
+# ── _posix_rename_windows against a fake kernel32 (no Win32 on the Linux CI) ──
+
+INVALID_HANDLE = 0xFFFF_FFFF_FFFF_FFFF  # INVALID_HANDLE_VALUE as restype=HANDLE
+
+
+class _FakeKernel32:
+    """Stands in for `ctypes.WinDLL("kernel32", use_last_error=True)`: records
+    every call (a ctypes buffer is snapshotted as bytes) and returns canned
+    results. `argtypes` / `restype` assignments land as plain attributes."""
+
+    def __init__(self, handle=0x1234, set_ok=1):
+        self.calls = []
+        outer = self
+
+        class _Fn:
+            def __init__(self, name, ret):
+                self.name, self.ret = name, ret
+
+            def __call__(self, *args):
+                snap = tuple(
+                    bytes(a) if isinstance(a, ctypes.Array) else a for a in args
+                )
+                outer.calls.append((self.name, snap))
+                return self.ret
+
+        self.CreateFileW = _Fn("CreateFileW", handle)
+        self.SetFileInformationByHandle = _Fn("SetFileInformationByHandle", set_ok)
+        self.CloseHandle = _Fn("CloseHandle", 1)
+
+    def names(self):
+        return [name for name, _ in self.calls]
+
+
+def _fake_win32(monkeypatch, kernel):
+    opened = []
+
+    def win_dll(name, use_last_error=False):
+        opened.append((name, use_last_error))
+        return kernel
+
+    # WinDLL / get_last_error / FormatError exist only on Windows builds of ctypes.
+    monkeypatch.setattr(ctypes, "WinDLL", win_dll, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(
+        ctypes, "FormatError", lambda code: f"winerr {code}", raising=False
+    )
+    return opened
+
+
+def test_posix_rename_windows_renames_the_source_handle_over_dst(monkeypatch):
+    kernel = _FakeKernel32()
+    opened = _fake_win32(monkeypatch, kernel)
+    src, dst = "C:\\c\\x_dub.part.flac", "C:\\c\\x_dub.flac"
+
+    wr._posix_rename_windows(src, dst)
+
+    assert opened == [("kernel32", True)]
+    assert kernel.names() == [
+        "CreateFileW",
+        "SetFileInformationByHandle",
+        "CloseHandle",
+    ]
+    create_args = kernel.calls[0][1]
+    # The SOURCE is opened for rename only, sharing everything; it must exist.
+    assert create_args[0] == src
+    assert create_args[1] == 0x00010000 | 0x00100000  # DELETE | SYNCHRONIZE
+    assert create_args[2] == 0x7  # FILE_SHARE_READ | _WRITE | _DELETE
+    assert create_args[4] == 3  # OPEN_EXISTING
+    handle, info_class, raw, size = kernel.calls[1][1]
+    assert handle == 0x1234
+    assert info_class == 22  # FileRenameInfoEx
+    expected, expected_size = wr.build_rename_info(os.path.abspath(dst))
+    assert raw == bytes(expected) and size == expected_size
+    assert kernel.calls[2][1] == (0x1234,)
+
+
+def test_posix_rename_windows_open_failure_raises_with_both_paths(monkeypatch):
+    kernel = _FakeKernel32(handle=INVALID_HANDLE)
+    _fake_win32(monkeypatch, kernel)
+    with pytest.raises(OSError) as e:
+        wr._posix_rename_windows("a.part", "a")
+    assert e.value.filename == "a.part" and e.value.filename2 == "a"
+    assert "CreateFileW" in e.value.strerror and "winerr 5" in e.value.strerror
+    # Nothing was opened, so nothing is renamed or closed.
+    assert kernel.names() == ["CreateFileW"]
+
+
+def test_posix_rename_windows_null_handle_is_a_failure_too(monkeypatch):
+    kernel = _FakeKernel32(handle=None)
+    _fake_win32(monkeypatch, kernel)
+    with pytest.raises(OSError):
+        wr._posix_rename_windows("a.part", "a")
+    assert kernel.names() == ["CreateFileW"]
+
+
+def test_posix_rename_windows_rename_failure_raises_and_closes(monkeypatch):
+    kernel = _FakeKernel32(set_ok=0)
+    _fake_win32(monkeypatch, kernel)
+    with pytest.raises(OSError) as e:
+        wr._posix_rename_windows("a.part", "a")
+    assert e.value.filename == "a.part" and e.value.filename2 == "a"
+    assert "SetFileInformationByHandle" in e.value.strerror
+    # The handle is closed even though the rename failed.
+    assert kernel.names() == [
+        "CreateFileW",
+        "SetFileInformationByHandle",
+        "CloseHandle",
+    ]
