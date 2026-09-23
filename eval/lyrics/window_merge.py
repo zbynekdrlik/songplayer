@@ -23,11 +23,12 @@ Invariants (the project rule: never synthesized / evenly distributed timing):
   starting inside the overlap it shares with window k-1 is the SAME sung line
   as an earlier-window line reaching into that overlap when (one-to-one, the
   closest start wins):
-    * `later_longer` — the earlier copy was cut at its window's END (its text
-      is a word-prefix of the later one, or it reaches window k-1's end and
-      is similar — a mid-word cut) and the later copy is longer, starts close
-      -> the earlier, incomplete copy is dropped and the complete later one
-      kept (checked FIRST, so a similar-but-cut copy never wins);
+    * `later_longer` — the earlier copy was CUT at its window's end (it
+      reaches window k-1's end) and its text is a word-prefix of, or similar
+      to (a mid-word cut), the longer later copy starting close -> the
+      earlier, incomplete copy is dropped and the complete later one kept
+      (checked FIRST, so a similar-but-cut copy never wins; an earlier copy
+      that ended before its window's end is complete and never replaced);
     * `full` — normalized text ratio >= DUP_TEXT_RATIO and the starts within
       DUP_MAX_START_DELTA_MS -> the later copy is dropped;
     * `later_fragment` — the later copy was cut at its window's START (its
@@ -143,7 +144,10 @@ def same_line_kind(
         earlier_window_end_ms is not None
         and earlier["end_ms"] >= earlier_window_end_ms - DUP_REACH_SLACK_MS
     )
-    if close and len(a) > len(b) and (word_prefix or (similar and earlier_cut)):
+    # Only a CUT earlier copy is ever replaced: a complete earlier line
+    # followed by a longer rendering (a chant growing "Hallelujah" ->
+    # "Hallelujah, hallelujah") keeps the earlier line and its start.
+    if close and len(a) > len(b) and earlier_cut and (word_prefix or similar):
         return "later_longer"
     if close and similar:
         return "full"

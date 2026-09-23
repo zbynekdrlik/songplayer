@@ -244,8 +244,10 @@ Remove-Item Env:\GEMINI_API_KEY
 Exit 1 = a re-run can still fill a gap (error rows / lost windows) → re-run the
 same line, it retries only those, at most 3 runs per fixture
 (`metadata.attempt`; a fixture still failing after that is deterministic — left
-as is, its errors shown in scoring). Exit 0 with `missing input: 2` is the
-expected end state (`vpwDdb8r9Bk`, `fHYLw-2tTx4` have no WAV). Pull
+as is, printed as `exhausted=N`, its errors shown in scoring). Exit 0 means
+nothing a re-run can fix remains — read the summary line: the expected end
+state is `missing input: 2` (`vpwDdb8r9Bk`, `fHYLw-2tTx4` have no WAV) and
+`exhausted=0`; any exhausted fixture is named in the report. Pull
 `$root\raw\*.json` back with the `python -m http.server` trick above into
 `eval/lyrics/reports/2026-09-2x-one-call-raw/`.
 

@@ -21,9 +21,11 @@ MAX_ATTEMPTS runs per fixture (`metadata.attempt`); a fixture still failing
 after that fails deterministically and is left as is, its errors visible in
 scoring. `--force` re-runs everything.
 
-Exit status: 0 when every fixture is complete except permanent input gaps
-(`metadata.error_kind == "missing_input"` — no cached vocal WAV, e.g.
-`vpwDdb8r9Bk` / `fHYLw-2tTx4`), 1 when a re-run can still help, 2 without a key.
+Exit status: 0 when nothing a re-run could fix remains — every fixture is
+complete, a permanent input gap (`metadata.error_kind == "missing_input"`, no
+cached vocal WAV, e.g. `vpwDdb8r9Bk` / `fHYLw-2tTx4`) or `exhausted` (attempt
+cap reached; printed in the summary line, never counted complete); 1 when a
+re-run can still help; 2 without a key.
 
 The poisoned fixture (`Xvm4_fWkXe8`) is run like any other — the scorers
 exclude it from the pooled aggregate and report it on its own.
@@ -76,7 +78,8 @@ def _existing_state(path: Path) -> tuple[bool, int]:
 
 def exit_code(summary: dict[str, int]) -> int:
     """1 while a re-run can still fill a gap; permanent missing inputs don't
-    count (they fail identically on every run)."""
+    count (they fail identically on every run), and neither do `exhausted`
+    fixtures (attempt cap reached — printed, never counted as complete)."""
     return 1 if summary["errors"] - summary["missing_input"] > 0 else 0
 
 
@@ -97,22 +100,31 @@ def run_all(
             raise ValueError(f"--only ids not in the manifest: {unknown}")
     video_ids = [vid for vid in fixtures if not only or vid in only]
     raw_dir.mkdir(parents=True, exist_ok=True)
-    summary = {"written": 0, "skipped": 0, "errors": 0, "missing_input": 0}
+    summary = {
+        "written": 0,
+        "skipped": 0,
+        "errors": 0,
+        "missing_input": 0,
+        "exhausted": 0,
+    }
 
     for n, vid in enumerate(video_ids, start=1):
         out = raw_dir / f"{label}_{vid}.json"
         complete, attempts = _existing_state(out)
-        if not force and (complete or attempts >= MAX_ATTEMPTS):
-            logger.info(
-                "[%d/%d] %s: %s — skipped",
+        if not force and complete:
+            logger.info("[%d/%d] %s: complete — skipped", n, len(video_ids), vid)
+            summary["skipped"] += 1
+            continue
+        if not force and attempts >= MAX_ATTEMPTS:
+            logger.warning(
+                "[%d/%d] %s: still failing after %d attempts — left as is "
+                "(exhausted; its error / window errors show in scoring)",
                 n,
                 len(video_ids),
                 vid,
-                "complete output exists"
-                if complete
-                else f"still failing after {attempts} attempts, left as is",
+                attempts,
             )
-            summary["skipped"] += 1
+            summary["exhausted"] += 1
             continue
         try:
             row = run_one(vid)
@@ -193,7 +205,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"{label}: written={summary['written']} skipped={summary['skipped']} "
         f"errors={summary['errors']} (of which missing input: "
-        f"{summary['missing_input']}) -> {args.raw_dir}"
+        f"{summary['missing_input']}) exhausted={summary['exhausted']} "
+        f"-> {args.raw_dir}"
     )
     return exit_code(summary)
 
