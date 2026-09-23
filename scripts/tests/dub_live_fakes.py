@@ -126,6 +126,9 @@ class FakeSession:
         n = len(self.frames) + 1
         if self.server.fail_at.get(self.index) == n:
             raise ConnectionError("send failed: websocket closed 1006")
+        if self.server.hang_at.get(self.index) == n:
+            # A send stuck on flow control: never returns, the frame never lands.
+            await asyncio.Event().wait()
         self.send_times.append(self.server.clock.now())
         self.global_indices.append(len(self.server.all_frames))
         self.frames.append(audio)
@@ -149,7 +152,11 @@ class FakeServer:
     """A scripted Live service: one `on_frame` behaviour per connection, or the
     string "refuse" to make that connect attempt fail. `open_after_frames[n]`
     keeps connection n's connect pending until the server has received that
-    many MORE frames (on the still-active old connection)."""
+    many MORE frames (on the still-active old connection). `connect_delay_s`
+    (real seconds) delays every RE-connect; `connect_advance_s` moves the
+    VIRTUAL clock by that much on every re-connect (the time a reconnect takes,
+    as the pacer sees it); `hang_at[n] = k` makes the k-th send on connection n
+    never return."""
 
     def __init__(
         self,
@@ -158,12 +165,18 @@ class FakeServer:
         clock=None,
         fail_at=None,
         open_after_frames=None,
+        connect_delay_s=0.0,
+        connect_advance_s=0.0,
+        hang_at=None,
     ):
         self.scripts = list(scripts)
         self.on_stream_end = on_stream_end
         self.clock = clock or RealClock()
         self.fail_at = fail_at or {}
         self.open_after_frames = open_after_frames or {}
+        self.connect_delay_s = connect_delay_s
+        self.connect_advance_s = connect_advance_s
+        self.hang_at = hang_at or {}
         self.configs: list[dict] = []
         self.sessions: list[FakeSession] = []
         self.all_frames: list[bytes] = []
@@ -178,6 +191,10 @@ class FakeServer:
 
         @contextlib.asynccontextmanager
         async def cm():
+            if n > 1 and self.connect_delay_s:
+                await asyncio.sleep(self.connect_delay_s)
+            if n > 1 and self.connect_advance_s:
+                self.clock.t += self.connect_advance_s
             if wait_frames:
                 target = len(self.all_frames) + wait_frames
                 while len(self.all_frames) < target:
@@ -201,10 +218,11 @@ def echo_frame(session, n):
     session.queue.put_nowait(live_msg(data=b"\x00\x10" * 2400))
 
 
-def run_fake(server, frames, opts, redact_word=None):
+def run_fake(server, frames, opts, redact_word=None, sink=None, on_progress=None):
     events = dls.EventLog(None)
-    sink = dls.MemorySink()
+    sink = sink if sink is not None else dls.MemorySink()
     lines: list[str] = []
+    extra = {} if on_progress is None else {"on_progress": on_progress}
     session = dls.ContinuousSession(
         frames,
         server.connect,
@@ -214,6 +232,7 @@ def run_fake(server, frames, opts, redact_word=None):
         sink,
         secret=redact_word,
         log=lines.append,
+        **extra,
     )
     # A loop that never ends is a FAILURE, never a hung CI job.
     state = asyncio.run(asyncio.wait_for(session.run(), timeout=RUN_TIMEOUT_S))

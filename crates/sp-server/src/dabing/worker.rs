@@ -544,6 +544,14 @@ mod tests {
     }
 
     #[test]
+    fn dub_voice_speaker_is_recognised_in_any_case() {
+        // The child treats `Speaker` as the speaker's own voice; the stored value
+        // (and so the row's `hlas: rečník` label) must agree (review round 1).
+        assert_eq!(dub_voice_from(Some("Speaker")), "speaker");
+        assert_eq!(dub_voice_from(Some(" SPEAKER ")), "speaker");
+    }
+
+    #[test]
     fn dub_model_defaults_to_the_live_translate_preview_and_passes_through() {
         assert_eq!(dub_model_from(None), "gemini-3.5-live-translate-preview");
         assert_eq!(

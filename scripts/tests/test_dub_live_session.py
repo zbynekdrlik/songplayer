@@ -156,9 +156,11 @@ def test_transcriptions_are_recorded_with_their_arrival_times():
             )
 
     _, state, _, _ = run_fake(FakeServer([script]), pcm_frame_list(3), fast_opts())
-    assert "".join(state.input_parts) == "Hello "
-    assert [t for _, t in state.output_parts] == ["Ahoj ", "svet"]
-    times = [a for a, _ in state.output_parts]
+    # Each part carries the connection it arrived on (review round 1: the
+    # overlap's two connections are ordered by connection, not interleaved).
+    assert state.input_parts == [(1, "Hello ")]
+    assert [(t, c) for _, t, c in state.output_parts] == [("Ahoj ", 1), ("svet", 1)]
+    times = [a for a, _, _ in state.output_parts]
     assert times == sorted(times)
     assert all(a >= 0 for a in times)
 
@@ -471,3 +473,138 @@ def test_summary_ratio_counts_the_stream_not_the_overlap_silence():
     assert s["first_voiced_latency_s"] == 3.0
     assert s["first_output_latency_s"] == 3.0
     assert s["drain_end_reason"] == "quiet"
+
+
+# ── review round 1 ─────────────────────────────────────────────────────────────
+
+
+class _FullDiskSink(dls.MemorySink):
+    """Fails like a full disk on the 3rd output chunk (a LOCAL error)."""
+
+    def append(self, data: bytes) -> int:
+        if len(self.data) >= 2 * 4800:
+            raise OSError(28, "No space left on device")
+        return super().append(data)
+
+
+def test_a_local_error_while_recording_fails_the_session_not_the_connection():
+    # A sink/record bug is NOT a closed websocket: reconnecting would hit it again
+    # on every connection and end as a misleading "max connections" after 50.
+    server = FakeServer([echo_frame, echo_frame])
+    with pytest.raises(OSError, match="No space left"):
+        run_fake(server, pcm_frame_list(50), fast_opts(), sink=_FullDiskSink())
+    assert len(server.configs) == 1
+
+
+def test_a_send_that_hangs_is_a_close_and_the_frame_goes_to_the_next_connection():
+    server = FakeServer([echo_frame, echo_frame], hang_at={1: 3})
+    frames = pcm_frame_list(8)
+    events, state, _, _ = run_fake(server, frames, fast_opts(send_timeout_s=0.05))
+    rec = [e for e in events.events if e["kind"] == "reconnect"]
+    assert [e["reason"] for e in rec] == ["closed"]
+    closed = [e for e in events.events if e["kind"] == "closed" and e["error"]]
+    assert "send timed out" in closed[0]["error"]
+    assert server.all_frames == frames
+    assert state.frames_sent == 8
+
+
+def test_the_heartbeat_fires_only_when_the_session_made_progress():
+    markers = []
+    holder = {}
+
+    def on_progress():
+        st = holder["state"]
+        markers.append((st.frames_sent, len(st.chunks)))
+
+    server = FakeServer([echo_frame])
+    frames = pcm_frame_list(5)
+    events = dls.EventLog(None)
+    session = dls.ContinuousSession(
+        frames,
+        server.connect,
+        lambda b: b,
+        fast_opts(quiet_s=0.4),  # several supervisor ticks with nothing moving
+        events,
+        dls.MemorySink(),
+        on_progress=on_progress,
+    )
+    holder["state"] = session.state
+    asyncio.run(asyncio.wait_for(session.run(), timeout=RUN_TIMEOUT_S))
+    assert markers, "no heartbeat at all"
+    assert all(a != b for a, b in zip(markers, markers[1:])), markers
+    assert markers[-1] == (5, 5)
+
+
+def _last_frame_go_away(total):
+    def first(session, n):
+        session.queue.put_nowait(live_msg(data=b"\x00\x10" * 240))
+        if n == total:
+            session.queue.put_nowait(go_away("50s"))
+
+    return first
+
+
+def test_a_reconnect_refused_after_the_stream_end_does_not_fail_the_dub():
+    # A GoAway on the LAST frame starts a reconnect; audio_stream_end goes out on
+    # the old connection before it completes. Its refusal must not throw away a
+    # fully sent dub — there is nothing left to send on it.
+    total = 6
+    server = FakeServer([_last_frame_go_away(total), "refuse"], connect_delay_s=0.05)
+    events, state, _, _ = run_fake(
+        server, pcm_frame_list(total), fast_opts(quiet_s=0.2)
+    )
+    assert state.stream_end_sent is True
+    assert state.drain_end_reason in ("quiet", "closed")
+    assert "reconnect_failed" in kinds(events)
+    assert server.stream_ends == 1
+
+
+def test_a_reconnect_that_opens_after_the_stream_end_is_closed_not_used():
+    total = 6
+    server = FakeServer([_last_frame_go_away(total), None], connect_delay_s=0.05)
+    events, state, _, _ = run_fake(
+        server, pcm_frame_list(total), fast_opts(quiet_s=0.3)
+    )
+    assert "switch" not in kinds(events)
+    assert len(server.sessions) == 2
+    assert server.sessions[1].frames == [] and server.sessions[1].stream_end == 0
+    assert server.sessions[0].stream_end == 1
+    assert any(e["kind"] == "closed" and e["connection"] == 2 for e in events.events)
+
+
+def test_owed_frames_catch_up_and_the_schedule_is_never_re_anchored():
+    # Connection 1 dies at its 5th frame; the reconnect takes 0.35 s (virtual).
+    # The owed frames go out at once, later frames sit EXACTLY on t0 + k*fs —
+    # a per-connection re-anchor would shift every later frame by the gap.
+    fs = 0.1
+    vc = VirtualClock()
+
+    def first(session, n):
+        if n == 5:
+            session.queue.put_nowait(CLOSE)
+
+    server = FakeServer([first, None], clock=vc, connect_advance_s=0.35)
+    frames = pcm_frame_list(20)
+    opts = fast_opts(frame_s=fs, quiet_s=0.05, clock=vc.now, sleep=vc.sleep)
+    run_fake(server, frames, opts)
+    old, new = server.sessions
+    t0 = old.send_times[0]
+    for k, t in zip(old.global_indices, old.send_times):
+        assert abs(t - (t0 + k * fs)) < 1e-9
+    resumed = new.send_times[0]
+    for k, t in zip(new.global_indices, new.send_times):
+        assert abs(t - max(resumed, t0 + k * fs)) < 1e-9, f"frame {k}"
+    assert any(t0 + k * fs > resumed for k in new.global_indices)
+    assert server.all_frames == frames
+
+
+def test_a_connect_that_never_completes_says_so():
+    def first(session, n):
+        if n == 2:
+            session.queue.put_nowait(CLOSE)
+
+    server = FakeServer([first, None], open_after_frames={2: 10_000})
+    err, _, _ = _run_expect_failure(
+        server, pcm_frame_list(20), fast_opts(connect_timeout_s=0.05)
+    )
+    assert "did not complete within 0.05 s" in str(err)

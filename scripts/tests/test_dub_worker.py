@@ -188,7 +188,13 @@ def test_connections_keep_separate_cursors_so_the_overlap_never_shifts_later_aud
 
 
 def test_sk_timed_is_on_the_video_timeline_and_monotonic():
-    parts = [(104.0, "Ahoj "), (104.0, ""), (103.5, "svet."), (108.2, "Ďalej")]
+    # (arrival_s, text, connection) — the connection field since review round 1.
+    parts = [
+        (104.0, "Ahoj ", 1),
+        (104.0, "", 1),
+        (103.5, "svet.", 1),
+        (108.2, "Ďalej", 1),
+    ]
     got = dw.sk_timed_from(parts, 100.0, 3000)
     assert got == [
         {"t_ms": 1000, "text": "Ahoj "},
@@ -336,8 +342,8 @@ def test_live_translate_places_the_stream_and_writes_the_d3_transcripts(
                     active=True,
                 )
             )
-        state.input_parts = ["Hello ", "world"]
-        state.output_parts = [(14.0, "Ahoj "), (14.5, "svet.")]
+        state.input_parts = [(1, "Hello "), (1, "world")]
+        state.output_parts = [(14.0, "Ahoj ", 1), (14.5, "svet.", 1)]
         events.log("connect", connection=1)
         return state
 
@@ -428,3 +434,95 @@ def test_live_translate_with_no_voiced_output_fails_loudly(tmp_path, monkeypatch
     with pytest.raises(RuntimeError, match="no voiced output"):
         dw.cmd_live_translate(args)
     assert not os.path.exists(tmp_path / "o.flac")
+
+
+# ── review round 1 ─────────────────────────────────────────────────────────────
+
+
+def test_the_overlap_transcripts_are_ordered_by_connection_not_interleaved():
+    # During the overlap the OLD connection's trailing fragments arrive after
+    # the NEW one's first fragments; the old connection translates EARLIER
+    # input, so its text comes first. Times stay non-decreasing.
+    parts = [
+        (110.0, "Koniec ", 1),
+        (110.4, "Nová ", 2),
+        (110.6, "vety.", 1),
+        (111.0, "veta.", 2),
+    ]
+    assert dw.sk_timed_from(parts, 100.0, 3000) == [
+        {"t_ms": 7000, "text": "Koniec "},
+        {"t_ms": 7600, "text": "vety."},
+        {"t_ms": 7600, "text": "Nová "},
+        {"t_ms": 8000, "text": "veta."},
+    ]
+    joined = dw.joined_by_connection([(2, "B"), (1, "a "), (2, "C"), (1, "b ")])
+    assert joined == "a b BC"
+
+
+def test_placement_drops_streamed_silence_until_a_stream_that_ran_ahead_is_back():
+    sr = 24000
+    # A 2 s voiced burst arrives at once at 105.0 (video 2.0 s), then the
+    # stream continues in real time: silence, then speech. The burst leaves the
+    # cursor 2 s AHEAD of arrival; the silence chunks are dropped until the lead
+    # is within the tolerance, so the next speech is not 2 s late.
+    burst = [chunk(105.0, n_samples=4800) for _ in range(10)]  # 10 x 0.2 s
+    silence = [chunk(105.2 + i * 0.2, n_samples=4800, voiced=False) for i in range(9)]
+    speech = [chunk(107.0, n_samples=2400)]
+    starts = dw.place_output(burst + silence + speech, 100.0, 3000, sr)
+    # The burst is one continuous stream: voiced audio is NEVER dropped.
+    assert starts[:10] == [48_000 + i * 4800 for i in range(10)]
+    kept_silence = [s for s in starts[10:19] if s is not None]
+    assert len(kept_silence) < 9  # some streamed silence was skipped
+    # The next speech lands within the tolerance of its arrival (4.0 s).
+    lead_ms = (starts[19] - 96_000) * 1000 // sr
+    assert 0 <= lead_ms <= dw.CATCH_UP_TOLERANCE_MS
+
+
+def test_placement_keeps_silence_when_the_stream_is_on_time():
+    chunks = [chunk(103.0 + i * 0.1, voiced=(i % 2 == 0)) for i in range(6)]
+    starts = dw.place_output(chunks, 100.0, 3000, 24000)
+    assert starts == [i * 2400 for i in range(6)]
+
+
+def test_render_skips_dropped_chunks(tmp_path):
+    import numpy as np
+
+    raw = tmp_path / "raw"
+    raw.write_bytes(np.array([7, 7, 9, 9], dtype="<i2").tobytes())
+    chunks = [
+        chunk(0.0, n_samples=2, offset=0),
+        chunk(0.0, n_samples=2, offset=4, voiced=False),
+    ]
+    wav = tmp_path / "placed.wav"
+    dw.render_placed_wav(str(raw), chunks, [0, None], 4, str(wav))
+    with wave.open(str(wav), "rb") as w:
+        got = np.frombuffer(w.readframes(4), dtype="<i2").tolist()
+    assert got == [7, 7, 0, 0]
+
+
+def test_a_failed_run_removes_the_raw_output(tmp_path, monkeypatch):
+    import numpy as np
+
+    monkeypatch.setattr(
+        dw, "_decode_input", lambda audio: np.full(1600, 4000, "<i2").tobytes()
+    )
+
+    def dies_mid_session(frames, model, voice, work_dir, sink, events):
+        sink.append(b"\x00\x10" * 2400)
+        raise RuntimeError("the Live session was refused (1008)")
+
+    monkeypatch.setattr(dw, "_run_session", dies_mid_session)
+    work = tmp_path / "w"
+    args = SimpleNamespace(
+        audio="a.flac",
+        out=str(tmp_path / "o.flac"),
+        transcripts=str(tmp_path / "t.json"),
+        work_dir=str(work),
+        model=dw.MODEL,
+        voice="speaker",
+    )
+    with pytest.raises(RuntimeError, match="refused"):
+        dw.cmd_live_translate(args)
+    assert not (work / dw.RAW_OUTPUT).exists()
+    assert not (work / dw.PLACED_WAV).exists()
+    assert (work / "events.jsonl").exists()  # the evidence stays
