@@ -531,21 +531,32 @@ the dub 1.6 LU quieter than the voice next to it.
 clamped to −24…−10 LUFS, applied with a two-pass LINEAR loudnorm (TP −1.5, LRA 11).**
 `--audio` is `job.audio_file_path`, the video's normalized ORIGINAL (not the vocals
 stem — the child never receives the stem). For speech the two measure the same (344:
-−14.5 / −14.5). `dub_worker.py::_assemble_dub` makes three ffmpeg calls:
+−14.5 / −14.5). The pure rules live in **`scripts/dub_loudness.py`**, which ships
+next to the worker: it is the 3rd entry of `dabing::worker::embedded_tool_scripts`,
+`dub_worker.py` imports it at module load, and it is in the CI ruff scope. If it is
+missing on the box, every dub fails. `dub_worker.py::_assemble_dub` heartbeats
+before each pass and makes three ffmpeg calls:
 1. `loudness_measure_args(ff, audio)` does a loudnorm analysis of the input (null
    muxer), then `loudness_target(input_i)` applies the clamp (`-inf` clamps to −24,
    `NaN` raises).
 2. `assembly_args(…, loudnorm_analysis_filter(target), None)` analyses the
    assembled mix (the same `build_mix_filter` graph) to null.
-3. `assembly_args(…, build_loudnorm_second_pass(mix, target), out)` writes the dub
-   with `measured_I/LRA/TP/thresh` + `offset`, `linear=true`, `print_format=json`.
+3. `assembly_args(…, build_loudnorm_second_pass(mix, target), part, 48000)` writes
+   `<base>_dub.part.flac` (`partial_out_path`) with `measured_I/LRA/TP/thresh` +
+   `offset`, `linear=true`, `print_format=json`. It is `os.replace`d over the dub
+   ONLY after ffmpeg exits 0 AND its loudness report parses. On any failure the
+   partial is deleted and the PREVIOUS good dub stays. On Windows a replace blocked
+   by an open handle fails the run loudly: the old dub stays, and the dub row
+   records the error and retries after the backoff.
 
 `parse_loudnorm_json` reads the last `{…}` block carrying `input_i` (CRLF-safe) and
 raises if the block is missing or incomplete. The stats (`source_i`, `target_i`,
-`mix_i`, `output_i`, `normalization_type`) go to `<work_dir>/loudness.json` and to
-the `dub loudness: …` stderr line, which is the last child log line, so it shows in
+`mix_i`, `output_i`, `normalization_type`) go to `<work_dir>/loudness.json` as
+strict JSON (`json_safe_stats`: a non-finite value becomes `null`) and to the
+`dub loudness: …` stderr line. That line is the last child log line, so it shows in
 the sp-server "dub live-translate ok; stderr tail". ffmpeg silently falls back to
 DYNAMIC mode when the linear gain would breach TP −1.5 or the mix LRA exceeds 11.
+The child then logs a `dub loudness: WARNING … fell back to dynamic` line, and
 `normalization_type` records which mode actually ran, so read it before trusting a
 level. Local real-ffmpeg 6.1 smoke: source −14.75 → output −14.73 (linear), ebur128
 orig −14.7 / dub −14.7. The mono mix → `-ac 2` upmix keeps the loudness (swr's
@@ -568,8 +579,8 @@ orig −14.7 / dub −14.7. The mono mix → `-ac 2` upmix keeps the loudness (s
 4. Only `_assemble_dub` runs again (plus the transcripts JSON + subtitles store),
    then `mark_dub_ready`.
 
-The request needs the NEW `dub_worker.py` on the box. The worker re-materialises the
-embedded script (`ensure_script`), so deploy first. Verify with the
+The request needs the NEW `dub_worker.py` + `dub_loudness.py` on the box. The worker
+re-materialises the embedded scripts (`ensure_script`), so deploy first. Verify with the
 `<cache>/<youtube_id>_dub/loudness.json` next to the chunks, then an ebur128 of the
 new `<base>_dub.flac` against the vocals stem on the same slice (±1 LU acceptance).
 Caveat: a chunk whose guard was skipped (`voice_medians` empty) IS re-synthesized,
