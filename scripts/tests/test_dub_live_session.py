@@ -644,3 +644,53 @@ def test_the_drain_ends_while_a_reconnect_is_still_connecting():
     state = asyncio.run(asyncio.wait_for(session.run(), timeout=10.0))
     assert state.drain_end_reason == "quiet"
     assert len(server.configs) == 2 and len(server.sessions) == 1
+
+
+# ── review round 3: pins for the round-2 fixes ─────────────────────────────────
+
+
+class _FatalDuringTeardown(dls.ContinuousSession):
+    """A local failure recorded while the teardown ran (a queued message
+    recorded between the drain end and the connections closing)."""
+
+    async def _teardown(self, sender):
+        await super()._teardown(sender)
+        self._fatal = OSError(28, "No space left on device")
+
+
+def test_a_local_failure_recorded_during_the_teardown_is_raised_not_a_success():
+    server = FakeServer([echo_frame])
+    session = _FatalDuringTeardown(
+        pcm_frame_list(3),
+        server.connect,
+        lambda b: b,
+        fast_opts(),
+        dls.EventLog(None),
+        dls.MemorySink(),
+    )
+    with pytest.raises(OSError, match="No space left"):
+        asyncio.run(asyncio.wait_for(session.run(), timeout=RUN_TIMEOUT_S))
+
+
+def test_cancelling_the_run_during_the_first_connect_cancels_that_connect():
+    server = FakeServer([None], never_open=True)
+    session = dls.ContinuousSession(
+        pcm_frame_list(3),
+        server.connect,
+        lambda b: b,
+        fast_opts(connect_timeout_s=30.0),
+        dls.EventLog(None),
+        dls.MemorySink(),
+    )
+
+    async def cancel_while_connecting():
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(session.run(), 0.2)
+        await asyncio.sleep(0.01)
+        # Checked INSIDE the loop: asyncio.run() would cancel a leaked task at
+        # shutdown and hide the leak.
+        assert server.connects_cancelled == 1
+        assert session.conns[0].task.done()
+        assert session.conns[0].closed
+
+    asyncio.run(cancel_while_connecting())

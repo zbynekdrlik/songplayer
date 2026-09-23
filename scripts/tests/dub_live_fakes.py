@@ -169,6 +169,7 @@ class FakeServer:
         connect_advance_s=0.0,
         hang_at=None,
         open_after_stream_end=False,
+        never_open=False,
     ):
         self.scripts = list(scripts)
         self.on_stream_end = on_stream_end
@@ -178,6 +179,9 @@ class FakeServer:
         self.connect_delay_s = connect_delay_s
         self.connect_advance_s = connect_advance_s
         self.hang_at = hang_at or {}
+        # Every connect (the FIRST included) stays pending forever.
+        self.never_open = never_open
+        self.connects_cancelled = 0
         # Hold every RE-connect until audio_stream_end arrived (deterministic
         # "a reconnect still in flight at the stream end", no real-clock race).
         self.open_after_stream_end = open_after_stream_end
@@ -195,6 +199,12 @@ class FakeServer:
 
         @contextlib.asynccontextmanager
         async def cm():
+            if self.never_open:
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    self.connects_cancelled += 1
+                    raise
             if n > 1 and self.connect_delay_s:
                 await asyncio.sleep(self.connect_delay_s)
             if n > 1 and self.connect_advance_s:

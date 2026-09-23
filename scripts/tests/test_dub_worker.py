@@ -559,3 +559,37 @@ def test_a_cleanup_failure_never_hides_the_real_error(tmp_path, monkeypatch):
     )
     with pytest.raises(RuntimeError, match="the real failure"):
         dw.cmd_live_translate(args)
+
+
+# ── review round 3 ─────────────────────────────────────────────────────────────
+
+
+def test_the_failed_cleanup_is_logged(tmp_path, monkeypatch, capsys):
+    path = tmp_path / dw.PLACED_WAV
+    path.write_bytes(b"x")
+
+    def locked(p):
+        raise PermissionError(13, "The process cannot access the file", p)
+
+    monkeypatch.setattr(dw.os, "remove", locked)
+    dw._remove_intermediates(str(path))
+    assert "could not remove the intermediate" in capsys.readouterr().err
+
+
+def test_the_overlap_cap_covers_every_later_connection():
+    # Connection 3's first text arrives before connection 2's (a middle
+    # connection that only spoke late): every earlier connection's fragments
+    # are capped at the EARLIEST later first-arrival, so connection 3 keeps its
+    # own time (7500 ms) instead of being pushed to 8000 ms.
+    parts = [
+        (110.0, "a ", 1),
+        (111.0, "b ", 1),
+        (110.5, "N3 ", 3),
+        (112.0, "late2 ", 2),
+    ]
+    assert dw.sk_timed_from(parts, 100.0, 3000) == [
+        {"t_ms": 7000, "text": "a "},
+        {"t_ms": 7500, "text": "b "},
+        {"t_ms": 7500, "text": "late2 "},
+        {"t_ms": 7500, "text": "N3 "},
+    ]
