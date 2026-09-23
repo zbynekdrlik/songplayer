@@ -501,7 +501,11 @@ feeder's timing model. Do NOT regress:
   block). `align_timeout(wall, written)` pads up to the wall on every 200 ms
   receive timeout, so the encoder is NEVER starved. Result: |written − wall| ≤
   300 ms forever (the 1000-step property test pins it). A trimmed burst loses
-  audio from the PREVIEW only — the wall/NDI path never sees this code.
+  audio from the PREVIEW only — the wall/NDI path never sees this code. The
+  block's written part is the pure `block_tail_range(skip_frames,
+  block_samples)` — whole frames only (a lone trailing sample would swap L/R
+  for the rest of the child); the feeder's frames ↔ interleaved-samples
+  arithmetic lives there, not in the `mutants::skip` glue.
 - **The feeder logs its alignment** at INFO every 10 s:
   `preview-afeed: ahead_ms=<written−wall> padded_ms=<cum> skipped_ms=<cum>` —
   on the box this is the first thing to read when preview audio is late/early.
@@ -516,7 +520,11 @@ feeder's timing model. Do NOT regress:
   is still CONNECTING is closed on `open` (`closeQuietly`) — `close()` on a
   CONNECTING socket logs "WebSocket is closed before the connection is
   established", which the owner's console showed every 12 s. Table tests in
-  `e2e/preview.spec.ts` (node-side).
+  `e2e/preview.spec.ts` (node-side), plus a mock behaviour test that pins the
+  counter WIRING: `/__mock/preview-fault {sequence:[…]}` queues one fault per
+  next connection, and five sockets (hold_init, hold_init, init-then-close,
+  init+2 fragments-then-close, healthy) must open 12 s, 12 s, 24 s, 12 s apart
+  (an init alone does not reset the backoff; a media fragment does).
 - **The owner's path is the ACCEPTANCE for every preview / mixer change**
   (owner ROZHODNUTÉ 2026-09-23: "akceptácia každého ďalšieho kola =
   post-deploy Playwright test na SKUTOČNOM boxe cestou ownera", not a mock).
@@ -535,6 +543,9 @@ feeder's timing model. Do NOT regress:
   counts a missing read as silent. The 180 s window is the owner-ruled
   acceptance MEASUREMENT (every sample asserted, fail on the first violation),
   not a sleep-soak — it is the one sanctioned exception to the no-soak rule
-  above; do not add other fixed soaks. It never touches OBS scenes; `finally`
-  restores the dub memory (vokály 1, podklad 1, dabing as found), stops the
-  preview and pauses the Dabing output.
+  above; do not add other fixed soaks. The soak runs with vokály, podklad AND
+  dabing dragged back up (the ready dub is mostly speech — a pause on a thin bed
+  must not read as a frozen preview). It never touches OBS scenes; `afterEach`
+  (runs even when the body timed out — a body `finally` does not) restores the
+  dub memory (vokály 1, podklad 1, dabing as found), stops the preview, pauses
+  the Dabing output, and then asserts (f) as the last assertion.
