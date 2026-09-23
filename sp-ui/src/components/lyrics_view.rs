@@ -18,7 +18,9 @@
 //! text only").
 //!
 //! #184 round F — auto-follow: when the active line changes, ONLY the panel's
-//! own scroller (`.lyrics-view-scroll`) scrolls, smoothly, so the active line
+//! own scroller (`.lyrics-view-scroll`) scrolls (instantly — a smooth animation
+//! still in flight would override the operator's own wheel), measured in the
+//! next animation frame (the list is laid out by then), so the active line
 //! sits in its middle (`sp_core::lyrics_follow::centered_scroll_top`). Never
 //! `scroll_into_view` — it also scrolls the page (the phone "Naživo" layout
 //! would jump). A manual wheel / touch / pointer-down on the panel pauses the
@@ -36,7 +38,7 @@ use crate::components::player::now_ms;
 use crate::components::state_block::{StateBlock, StateKind};
 use crate::store::DashboardStore;
 
-/// Smoothly scroll ONLY `scroller` (never the page) so its `idx`-th line sits in
+/// Scroll ONLY `scroller` (never the page), instantly, so its `idx`-th line sits in
 /// the middle. The line is found by position (`nth-child`), not by the
 /// `lyr-current` class, so it does not depend on the class binding having
 /// re-rendered first. A missing line (list not rendered yet) is a no-op.
@@ -62,7 +64,10 @@ fn follow_line(scroller: &web_sys::Element, idx: usize) {
     }
     let opts = web_sys::ScrollToOptions::new();
     opts.set_top(target);
-    opts.set_behavior(web_sys::ScrollBehavior::Smooth);
+    // Instant, not Smooth: an in-flight smooth animation kept running after the
+    // operator's wheel and overrode it (CI run 35857770291: 543 → 578 px after a
+    // -300 wheel). An instant jump has nothing in flight to race.
+    opts.set_behavior(web_sys::ScrollBehavior::Instant);
     scroller.scroll_to_with_scroll_to_options(&opts);
 }
 
@@ -197,16 +202,29 @@ pub fn LyricsView(
     Effect::new(move |_| {
         follow_resume.track();
         list_ref.track();
-        let Some(idx) = current_idx.get() else {
+        if current_idx.get().is_none() {
             return;
-        };
+        }
         let Some(scroller) = scroll_ref.get() else {
             return;
         };
         if follow_paused(now_ms() as f64, paused_at.get_value()) {
             return;
         }
-        follow_line(&scroller, idx);
+        // Measure in the NEXT animation frame: when the list (re)mounts, this
+        // Effect can run before its `<li>`s are laid out (CI run 35857770291:
+        // a paused track never showed its line), and a track sitting still
+        // produces no later line change to retry. By the next frame layout is
+        // done; the index/pause are re-read there so a newer state wins.
+        request_animation_frame(move || {
+            let Some(idx) = current_idx.try_get_untracked().flatten() else {
+                return;
+            };
+            if follow_paused(now_ms() as f64, paused_at.try_get_value().flatten()) {
+                return;
+            }
+            follow_line(&scroller, idx);
+        });
     });
 
     let do_seek = move |ms: u64| {

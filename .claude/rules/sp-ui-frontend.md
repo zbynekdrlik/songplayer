@@ -534,8 +534,14 @@ of ITS OWN scroller:
   `lyr-current` class, which may not have re-rendered yet). It computes the line's
   content-coordinate top from the two `getBoundingClientRect`s plus
   `scrollTop − clientTop`, and calls `scroll_to_with_scroll_to_options`
-  (`ScrollBehavior::Smooth`) with the pure `sp_core::lyrics_follow::
+  (`ScrollBehavior::Instant`) with the pure `sp_core::lyrics_follow::
   centered_scroll_top` (clamped). A sub-pixel move is skipped (`needs_scroll`).
+  **Instant, never Smooth:** a smooth animation still in flight kept running after
+  the operator's own wheel and overrode it (CI run 35857770291: 543 → 578 px after
+  a −300 wheel). **Measured in `request_animation_frame`:** the Effect can run
+  before the `<li>`s are laid out even with the tracked `NodeRef<Ol>` (same run: a
+  paused track never showed its line); the index + pause are re-read in the frame
+  (`try_get_untracked` / `try_get_value`) so a newer state wins.
   **Why the `NodeRef<Ol>` is tracked:** in reactive_graph a re-subscribed
   subscriber goes to the BACK of the list. So on a (re)fetch the Memo can wake the
   follow Effect BEFORE the render effect has built the `<ol>`, and the
