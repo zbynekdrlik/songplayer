@@ -108,6 +108,11 @@ struct OutFile {
 
 /// Build the `run.py` argv, in order. `no_cuda` appends `--no-cuda` — used
 /// only on the CUDA-OOM retry.
+///
+/// #144 r3: `-X faulthandler` leads the argv, before the script path, for
+/// BOTH plans, so a future access violation in the child (e.g. the torch CPU
+/// conv2d fault that killed long songs before inference-mode) prints the
+/// Python stack to the stderr tail `run_once` already captures.
 fn build_args(
     cfg: &MtlConfig,
     wav: &Path,
@@ -116,6 +121,8 @@ fn build_args(
     no_cuda: bool,
 ) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec![
+        "-X".into(),
+        "faulthandler".into(),
         cfg.run_py.clone().into_os_string(),
         "--wav".into(),
         wav.as_os_str().to_owned(),
