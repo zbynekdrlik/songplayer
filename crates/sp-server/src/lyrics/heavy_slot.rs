@@ -352,6 +352,7 @@ static CONTAINMENT: LazyLock<Mutex<Containment>> = LazyLock::new(|| {
         None,
         None,
         None,
+        None,
         logical_cores(),
     ))
 });
@@ -397,11 +398,20 @@ pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment 
         .await
         .ok()
         .flatten();
+    // #207 round-3c: the operator reserve-size knob (GiB), read the same way.
+    // A present but out-of-range value collapses to the default 4; WARN once
+    // so the operator sees the setting was ignored (the pure parse fn stays
+    // silent).
+    let reserve = crate::db::models::get_setting(pool, "heavy_alloc_reserve_gib")
+        .await
+        .ok()
+        .flatten();
     let c = containment_from_settings(
         cap.as_deref(),
         mask.as_deref(),
         purge.as_deref(),
         alloc.as_deref(),
+        reserve.as_deref(),
         logical_cores(),
     );
     if c.purge_delay_ms == -1 && purge.as_deref().is_some_and(|r| r.trim() != "-1") {
@@ -415,6 +425,15 @@ pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment 
     {
         warn!("heavy_alloc_mode={alloc:?} is unrecognised (retained or lazy) — using retained");
     }
+    if reserve
+        .as_deref()
+        .is_some_and(|r| !r.trim().parse::<i64>().is_ok_and(|v| (1..=8).contains(&v)))
+    {
+        warn!(
+            "heavy_alloc_reserve_gib={reserve:?} is invalid or out of range (1..=8 GiB) — using {}",
+            crate::lyrics::heavy_alloc_env::RESERVE_GIB_DEFAULT
+        );
+    }
     if let Ok(mut g) = CONTAINMENT.lock() {
         *g = c;
     }
@@ -427,26 +446,26 @@ pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment 
 /// the box default if the lock is poisoned.
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn current_containment() -> Containment {
-    CONTAINMENT
-        .lock()
-        .map(|g| *g)
-        .unwrap_or_else(|_| containment_from_settings(None, None, None, None, logical_cores()))
+    CONTAINMENT.lock().map(|g| *g).unwrap_or_else(|_| {
+        containment_from_settings(None, None, None, None, None, logical_cores())
+    })
 }
 
 /// The `heavy child contained (pid …)` INFO line for a spawned child. Pure, so
 /// it is exact-string tested cross-platform (#207); emitted once per child by
 /// the `#[cfg(windows)]` Job Object seam, so it is dead in the non-Windows lib
 /// target. Gains ` alloc_mode=<retained|lazy>` after `purge_delay_ms=` (#207
-/// phase-3).
+/// phase-3) and ` reserve_gib=<n>` after `alloc_mode=` (#207 round-3c).
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn contained_line(pid: u32, limit_bytes: usize, c: &Containment) -> String {
     format!(
-        "heavy child contained (pid {pid}): mem_limit={limit_bytes}B cpu_cap={}% affinity=0x{:x} mem_priority_low={} purge_delay_ms={} alloc_mode={}",
+        "heavy child contained (pid {pid}): mem_limit={limit_bytes}B cpu_cap={}% affinity=0x{:x} mem_priority_low={} purge_delay_ms={} alloc_mode={} reserve_gib={}",
         c.cpu_cap_pct,
         c.affinity_mask,
         c.memory_priority_low,
         c.purge_delay_ms,
         c.alloc_mode.as_str(),
+        c.reserve_gib,
     )
 }
 

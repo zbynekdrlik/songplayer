@@ -337,17 +337,24 @@ fn child_job_limit_is_ten_gib() {
 /// so an interpolation-swap mutant diverges.
 #[test]
 fn contained_line_is_grep_stable_with_alloc_mode() {
-    // cap 25, mask 0xE00000 (top-3 of 24), purge 1000, alloc lazy.
-    let c = containment_from_settings(Some("25"), Some("e00000"), Some("1000"), Some("lazy"), 24);
+    // cap 25, mask 0xE00000 (top-3 of 24), purge 1000, alloc lazy, reserve absent (default 4).
+    let c = containment_from_settings(
+        Some("25"),
+        Some("e00000"),
+        Some("1000"),
+        Some("lazy"),
+        None,
+        24,
+    );
     assert_eq!(
         contained_line(42, 1_073_741_824, &c),
-        "heavy child contained (pid 42): mem_limit=1073741824B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=1000 alloc_mode=lazy"
+        "heavy child contained (pid 42): mem_limit=1073741824B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=1000 alloc_mode=lazy reserve_gib=4"
     );
     // The default (retained) mode renders `alloc_mode=retained`.
-    let c = containment_from_settings(Some("50"), Some("f0"), None, None, 8);
+    let c = containment_from_settings(Some("50"), Some("f0"), None, None, None, 8);
     assert_eq!(
         contained_line(7, 2048, &c),
-        "heavy child contained (pid 7): mem_limit=2048B cpu_cap=50% affinity=0xf0 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained"
+        "heavy child contained (pid 7): mem_limit=2048B cpu_cap=50% affinity=0xf0 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained reserve_gib=4"
     );
 }
 

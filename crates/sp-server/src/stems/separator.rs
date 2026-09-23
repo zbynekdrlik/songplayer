@@ -129,13 +129,15 @@ pub async fn separate_stems(
     // the live containment published by `refresh_containment` this tick) into the
     // mimalloc env so the box can measure returning the child's ~9 GB commit
     // without a rebuild. Phase-3: `lazy` turns eager commit OFF — the lever.
+    // Round-3c: `heavy_alloc_reserve_gib` sizes the arena itself — round-3b's
+    // mimalloc self-report showed the eager-committed 4 GiB arena IS the ~4 GiB
+    // piece of the child's 8.7 GiB peak commit (`commits: 0`), so a smaller
+    // reserve is a second, independent commit lever.
     let containment = crate::lyrics::heavy_slot::current_containment();
     for (k, v) in crate::lyrics::heavy_alloc_env::heavy_alloc_env(
         containment.alloc_mode,
         containment.purge_delay_ms,
-        // #207 round-3c: TEMPORARY literal default until the next lane wires
-        // the operator `heavy_alloc_reserve_gib` setting through Containment.
-        crate::lyrics::heavy_alloc_env::RESERVE_GIB_DEFAULT,
+        containment.reserve_gib,
     ) {
         cmd.env(k, v);
     }

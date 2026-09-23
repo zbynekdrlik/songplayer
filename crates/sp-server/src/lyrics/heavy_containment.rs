@@ -54,6 +54,13 @@ pub(crate) struct Containment {
     /// eager commit, not the purge delay, is the lever, comment 5791417188).
     /// Read cross-platform by `stems/separator.rs` at separation spawn.
     pub(crate) alloc_mode: AllocMode,
+    /// #207 round-3c: the `MIMALLOC_RESERVE_OS_MEMORY` arena size in GiB
+    /// (`heavy_alloc_reserve_gib`, `1..=8`, default 4) — round-3b's mimalloc
+    /// self-report showed the eager-committed 4 GiB arena IS the ~4 GiB piece
+    /// of the child's 8.7 GiB peak commit (`commits: 0`), so a smaller reserve
+    /// is the lever ROZHODNUTÉ 3c measures. Read cross-platform by
+    /// `stems/separator.rs` at separation spawn.
+    pub(crate) reserve_gib: u8,
 }
 
 /// The Job Object `CpuRate` unit for a cap percentage: hundredths of a percent,
@@ -140,6 +147,19 @@ fn parse_alloc_mode(raw: Option<&str>) -> AllocMode {
     }
 }
 
+/// #207 round-3c: parse the `heavy_alloc_reserve_gib` setting into the
+/// `MIMALLOC_RESERVE_OS_MEMORY` arena size, GiB. Valid values are `1..=8`;
+/// anything missing, unparseable, or out of range falls back to
+/// [`crate::lyrics::heavy_alloc_env::RESERVE_GIB_DEFAULT`] (4). Pure — the WARN
+/// on an out-of-range value lives in the impure caller
+/// (`heavy_slot::refresh_containment`), never here.
+fn parse_reserve_gib(raw: Option<&str>) -> u8 {
+    match raw.and_then(|s| s.trim().parse::<i64>().ok()) {
+        Some(v) if (1..=8).contains(&v) => v as u8,
+        _ => crate::lyrics::heavy_alloc_env::RESERVE_GIB_DEFAULT,
+    }
+}
+
 /// Parse + clamp the `heavy_cpu_cap_pct` setting into `5..=100`. An
 /// absent/unparseable value falls back to [`CPU_CAP_DEFAULT_PCT`]; a valid
 /// integer below 5 clamps up to 5, above 100 clamps down to 100. Pure.
@@ -185,16 +205,17 @@ pub(crate) fn existing_cores_mask(logical_cores: usize) -> u64 {
     }
 }
 
-/// Resolve the live [`Containment`] from the four operator settings
+/// Resolve the live [`Containment`] from the five operator settings
 /// (`heavy_cpu_cap_pct`, `heavy_cpu_affinity_mask`, `heavy_purge_delay_ms`,
-/// `heavy_alloc_mode`) + the box's logical-core count. The impure caller
-/// ([`crate::lyrics::heavy_slot`]) reads the settings + core count and calls
-/// this pure fn. Pure.
+/// `heavy_alloc_mode`, `heavy_alloc_reserve_gib` (#207 round-3c)) + the box's
+/// logical-core count. The impure caller ([`crate::lyrics::heavy_slot`]) reads
+/// the settings + core count and calls this pure fn. Pure.
 pub(crate) fn containment_from_settings(
     cap_str: Option<&str>,
     mask_str: Option<&str>,
     purge_str: Option<&str>,
     alloc_str: Option<&str>,
+    reserve_str: Option<&str>,
     logical_cores: usize,
 ) -> Containment {
     Containment {
@@ -203,6 +224,7 @@ pub(crate) fn containment_from_settings(
         memory_priority_low: true,
         purge_delay_ms: parse_purge_delay_ms(purge_str),
         alloc_mode: parse_alloc_mode(alloc_str),
+        reserve_gib: parse_reserve_gib(reserve_str),
     }
 }
 

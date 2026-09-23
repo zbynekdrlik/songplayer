@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn heavy_alloc_env_emits_verbose_and_show_stats_in_both_modes() {
         for mode in [AllocMode::Retained, AllocMode::Lazy] {
-            let env = heavy_alloc_env(mode, -1);
+            let env = heavy_alloc_env(mode, -1, 4);
             assert_eq!(
                 env[3],
                 ("MIMALLOC_VERBOSE".to_string(), "1".to_string()),
