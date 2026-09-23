@@ -6,6 +6,8 @@ paths:
   - crates/sp-server/src/startup_dabing.rs
   - crates/sp-server/src/dabing/**
   - scripts/dub_worker.py
+  - scripts/dub_loudness.py
+  - scripts/tests/test_dub_worker*.py
   - sp-ui/src/pages/dabing.rs
   - sp-ui/src/components/dabing_list.rs
   - sp-ui/src/components/dub_toggle.rs
