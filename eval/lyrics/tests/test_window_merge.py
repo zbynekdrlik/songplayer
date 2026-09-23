@@ -292,6 +292,43 @@ def test_merge_drops_the_tail_of_a_line_cut_at_the_window_start() -> None:
     assert res.n_duplicates_dropped == 1
 
 
+@pytest.mark.parametrize(
+    ("cut", "complete"),
+    [
+        # word-prefix cut, text ratio >= 0.8 (0.816)
+        ("Holy is the Lord God", "Holy is the Lord God Almighty"),
+        # mid-word cut at the window end
+        ("Holy is the Lord Go", "Holy is the Lord God"),
+    ],
+)
+def test_merge_keeps_the_complete_copy_even_when_the_cut_one_is_similar(
+    cut: str, complete: str
+) -> None:
+    per_window = [
+        (0, [_line(cut, 58_500, 60_000)]),  # touches window 0's end (60 s)
+        (55_000, [_line(complete, 3_600, 7_000)]),  # 58.6 s
+    ]
+    res = window_merge.merge_window_lines(
+        per_window, audio_end_ms=115_000, overlap_ms=5_000
+    )
+    assert [(ln["text"], ln["start_ms"]) for ln in res.lines] == [(complete, 58_600)]
+    assert res.duplicates[0]["kind"] == "later_longer"
+
+
+def test_merge_full_duplicate_away_from_the_window_end_keeps_the_earlier() -> None:
+    """A complete earlier copy (ends well before its window end) wins over a
+    slightly longer later rendering — only a CUT copy is replaced."""
+    per_window = [
+        (0, [_line("Holy is the Lord", 55_500, 57_000)]),
+        (55_000, [_line("Holy is the Lord!!", 600, 2_100)]),
+    ]
+    res = window_merge.merge_window_lines(
+        per_window, audio_end_ms=115_000, overlap_ms=5_000
+    )
+    assert [ln["start_ms"] for ln in res.lines] == [55_500]
+    assert res.duplicates[0]["kind"] == "full"
+
+
 def test_window_merge_shares_the_scorer_normalization() -> None:
     from eval.lyrics import score_one_call
 

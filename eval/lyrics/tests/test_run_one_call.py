@@ -172,6 +172,39 @@ def test_run_all_counts_missing_input_separately(tmp_path: Path) -> None:
     assert summary == {"written": 2, "skipped": 0, "errors": 2, "missing_input": 1}
 
 
+def test_run_all_records_attempts_and_gives_up_after_the_cap(tmp_path: Path) -> None:
+    """A deterministic failure (e.g. a RECITATION block on one clip) must not
+    keep the re-run loop alive forever: attempts are recorded and a fixture
+    that failed MAX_ATTEMPTS times is left as is (still visible in scoring)."""
+    manifest = _manifest(tmp_path, ["v1"])
+    raw = tmp_path / "raw"
+    calls: list[str] = []
+
+    def run_one(video_id: str) -> dict:
+        calls.append(video_id)
+        return _row("gemini38-flash-whole", video_id, error="RECITATION")
+
+    for _ in range(run_one_call.MAX_ATTEMPTS + 2):
+        summary = run_one_call.run_all(
+            manifest_path=manifest,
+            mode="whole",
+            raw_dir=raw,
+            run_one=run_one,
+            force=False,
+        )
+    assert len(calls) == run_one_call.MAX_ATTEMPTS
+    data = json.loads((raw / "gemini38-flash-whole_v1.json").read_text("utf-8"))
+    assert data["metadata"]["attempt"] == run_one_call.MAX_ATTEMPTS
+    assert summary == {"written": 0, "skipped": 1, "errors": 0, "missing_input": 0}
+    assert run_one_call.exit_code(summary) == 0
+
+    # --force re-runs it anyway
+    run_one_call.run_all(
+        manifest_path=manifest, mode="whole", raw_dir=raw, run_one=run_one, force=True
+    )
+    assert len(calls) == run_one_call.MAX_ATTEMPTS + 1
+
+
 def test_exit_code_ignores_missing_inputs() -> None:
     assert run_one_call.exit_code({"errors": 2, "missing_input": 2}) == 0
     assert run_one_call.exit_code({"errors": 3, "missing_input": 2}) == 1
