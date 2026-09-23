@@ -52,7 +52,7 @@ pub const AUDIO_WRITE_AHEAD_MS: u64 = 200;
 /// content blocks never opens a gap; after silence there is nothing to stay
 /// contiguous with, and without the snap the whole stream would start up to
 /// 150 ms early and stay there (#184 round-G3 review: −133 ms at 30 fps).
-pub const SNAP_TOLERANCE_MS: u64 = 150;
+pub const SNAP_TOLERANCE_MS: u64 = 10;
 
 /// Most blocks held at once — a safety bound only: the normal hold is one lead
 /// (~1.3 s ≈ 15-80 seam blocks, by packet size). Past it the OLDEST held block
