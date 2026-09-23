@@ -252,8 +252,8 @@ pub struct AlignAction {
 /// Silence (stereo frames) to write when NO block arrived within the feeder's
 /// poll (#184 round G2 — 200 ms then, 30 ms since round G3): everything up to
 /// the wall clock once the written audio lags it by more than
-/// [`ALIGN_PAD_THRESHOLD_MS`], else
-/// nothing. `wall_frames` is the target position on the audio timeline (the
+/// [`ALIGN_PAD_THRESHOLD_MS`], else nothing. `wall_frames` is the target
+/// position on the audio timeline (the
 /// elapsed wall time since the feeder started, plus its start preroll), and
 /// `written_frames` the stereo frames already written. Never negative.
 pub fn align_timeout(wall_frames: u64, written_frames: u64) -> usize {

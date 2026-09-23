@@ -511,8 +511,8 @@ feeder's timing model. Do NOT regress:
   than `MAX_AHEAD_MS` (300) ahead, skip its OLDEST frames so it ends
   `ALIGN_TARGET_AHEAD_MS` (100) ahead (never negative, never more than the
   block). `align_timeout(wall, written)` pads up to the wall on every 200 ms
-  receive timeout (30 ms poll since round G3), so the encoder is NEVER starved. Result: |written − wall| ≤
-  300 ms forever (the 1000-step property test pins it). A trimmed burst loses
+  receive timeout (30 ms poll since round G3), so the encoder is NEVER
+  starved. Result: |written − wall| ≤ 300 ms forever (the 1000-step property test pins it). A trimmed burst loses
   audio from the PREVIEW only — the wall/NDI path never sees this code. The
   block's written part is the pure `block_tail_range(skip_frames,
   block_samples)` — whole frames only (a lone trailing sample would swap L/R
@@ -583,7 +583,7 @@ silence media time − the video media time of T (A/V placement; design = the
 | ffmpeg 6.1.1, OS-default socket (2.6 MB effective SO_SNDBUF) | emit 2.04, shift 1.52 | emit 2.04, shift 1.53 |
 | ffmpeg N-126782 (BtbN, the box's family), default socket | emit 1.90, shift 1.51 | emit 1.90, shift 1.53 |
 | N-126782, 64 KB / 64 KB (≈ Windows loopback defaults) | emit 2.41, shift 2.07; channel 0-48 deep; padded 8.1 s + skipped 6.9 s | emit 1.90, shift 1.53; channel empty; nothing skipped |
-| N-126782, 16 KB / 16 KB | **silence not out by the end of the run (> 12 s)**; channel 29-48, 1121 blocks dropped; a 60 s run with T = 20 s: **emit 36.4, shift 36.1** | emit 1.90, shift 1.53 |
+| N-126782, 16 KB / 16 KB | **silence not out in the 15 s after T**; channel 29-48, 1121 blocks dropped; a 60 s run with T = 20 s: **emit 36.4, shift 36.1** | emit 1.90, shift 1.53 |
 | N-126782, 128 KB / 256 KB | emit 1.90, shift 1.51 | emit 1.90, shift 1.53 |
 | N-126782, 256 KB / 512 KB | emit 1.90, shift 1.51 | emit 1.90, shift 1.53 |
 | 64 KB / 64 KB + seam stall 700 ms every 3 s + nice-19 child + 3 CPU hogs | emit 2.19, shift 1.93; channel 0-48; padded 22.6 s + skipped 8.8 s | emit 1.97, shift 1.77 (the burst band, see below); channel empty at every sample; padded 6.1 s + skipped 4.3 s |
@@ -615,7 +615,8 @@ starves, the MSE buffer drains in ~2-3.75 s) — it never exercises this queue.
   preroll is `audio_preroll_samples(gap, 0)`. The socket carries only the
   write-ahead (~77 KB + one seam block in steady state; + the 300 ms band right
   after a seam burst), so its buffer size is irrelevant.
-  The write-ahead is capped at the lead (paced path: lead 0 → write on arrival at the wall).
+  The write-ahead is capped at the lead (paced path: lead 0 → write on
+  arrival at the wall).
 - **Place a block by its ARRIVAL, never by its dequeue.** `offer_audio` stamps
   `AudioBlock { arrival, samples }` (only with a viewer, after the one-load
   fast path); `take_writes` aligns each due block against
@@ -625,7 +626,8 @@ starves, the MSE buffer drains in ~2-3.75 s) — it never exercises this queue.
   `align_timeout` pads up to `position_at(now) = base + (now + write_ahead) × 48`
   (encoder never starved; the feeder polls every 30 ms — `AFEED_POLL_US`,
   test-pinned under write-ahead − pad threshold minus a 15.6 ms Windows timer
-  slack — so the written audio stays ahead of the video). `position_at(due_us(a)) == block_target(a)` by
+  slack — so the written audio stays ahead of the video).
+  `position_at(due_us(a)) == block_target(a)` by
   construction.
 - **After SILENCE a block snaps onto its exact target** (`SNAP_TOLERANCE_MS` =
   10: more than 10 ms short → exactly that much silence first). The G2 150 ms
@@ -641,8 +643,8 @@ starves, the MSE buffer drains in ~2-3.75 s) — it never exercises this queue.
   decoder packet (FLAC 85-96 ms) with its video frame's arrival, so a block's
   start jitters by up to a packet. The jitter-safe fix is a WINDOWED minimum
   (all blocks in ≥ 500 ms late/early by > ~100 ms → drop/pad that much) — not
-  built blind; tune it against the box's afeed log (`skipped_ms`, `queued`) if
-  bursts show up there.
+  built blind: it is warranted only if the box's afeed log shows bursts (a
+  growing `skipped_ms` / `queued`) — the #184 G3 post-deploy check reads it.
 - `MAX_HELD_BLOCKS = 512` is a safety cap only (a normal hold is ~15-80 seam
   blocks, by packet size); overflow drops the OLDEST held block (`dropped`).
 - The feeder glue (`preview_encoder.rs::spawn_audio_feeder` / `write_audio`,

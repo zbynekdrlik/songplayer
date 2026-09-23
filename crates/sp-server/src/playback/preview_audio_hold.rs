@@ -28,8 +28,9 @@
 //! trimmed to <= 300 ms past its target, whole frames only), so seam jitter
 //! never opens a gap. A burst can therefore leave the audio up to ~300 ms late
 //! (and missing content up to ~150 ms early) until the next silence — a
-//! windowed-minimum drift correction could re-sync that, to be tuned against
-//! the box's real seam packet sizes (the afeed log's `skipped_ms`/`queued`).
+//! windowed-minimum drift correction could re-sync that; it is warranted only
+//! if the box's afeed log shows bursts (a growing `skipped_ms` / `queued`),
+//! which the #184 G3 post-deploy check reads.
 //!
 //! Units: times are µs since the feeder started; positions are stereo frames on
 //! the encoder's sample-count audio timeline ([`PREVIEW_AUDIO_FRAMES_PER_MS`]).
