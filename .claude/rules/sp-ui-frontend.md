@@ -521,6 +521,39 @@ inconsistency the ticket fixes, and the Live tap-to-seek must not be lost —
   Dabing (a dub's subtitles are just its `LyricsTrack`), and in the Lyrics details
   view.
 
+#### LyricsView auto-follows the active line — panel-only scroll (#184 round F)
+
+The owner had to scroll by hand to find the spoken line, because the 260 px
+scroller was never scrolled. `LyricsView` now keeps the active line in the middle
+of ITS OWN scroller:
+
+- An `Effect` on the `current_idx` Memo (plus a `follow_resume` bump) finds the
+  line by position (`.lyrics-list > li:nth-child(idx+1)`, never by the
+  `lyr-current` class, which may not have re-rendered yet). It computes the line's
+  content-coordinate top from the two `getBoundingClientRect`s plus
+  `scrollTop − clientTop`, and calls `scroll_to_with_scroll_to_options`
+  (`ScrollBehavior::Smooth`) with the pure `sp_core::lyrics_follow::
+  centered_scroll_top` (clamped). A sub-pixel move is skipped (`needs_scroll`).
+- **NEVER `scroll_into_view`.** It scrolls every scrollable ancestor including the
+  window, so the phone Naživo page would jump.
+- `wheel` / `touchstart` / `pointerdown` on the scroller pause follow for
+  `FOLLOW_PAUSE_MS` (5 s, `follow_paused`; the timestamp is a `StoredValue`, read
+  only at follow time). Each gesture arms a `set_timeout`; only the newest
+  gesture's timer (a `pause_gen` match) bumps `follow_resume`, so the panel catches
+  up even when the line did not change meanwhile. The timer reads with `try_*`
+  because it can outlive the view.
+- The pure rules live in `sp_core::lyrics_follow` (workspace-tested and
+  mutation-gated; sp-ui has no unit-test job). The clock is `player::now_ms`
+  (`pub(crate)`, the `web-sys` `Performance` clock). The web-sys features are
+  `Element`, `HtmlElement`, `ScrollToOptions`, `ScrollBehavior`, `DomRect`,
+  `DomRectReadOnly`.
+- Proof: `e2e/lyrics-follow.spec.ts` (chromium). The mock `/__mock/lyrics-mode`
+  `"long"` serves a 100-line track (one line every 2 s). The Dabing Player's tick
+  (`step_ms: 2000`) advances one line per 500 ms tick. The spec asserts that the
+  `.lyr-current` rect is inside the scroller rect and that `window.scrollY` does not
+  change. A real `page.mouse.wheel` holds `scrollTop` for about 3.5 s, and follow
+  resumes after 5 s. Reset `lyrics-mode` to `track` in `afterEach`.
+
 #### LyricsView is a 4-way fetch state, and 204 = empty NOT error (#198 items 3 + 9)
 
 `lyrics_view.rs` holds `RwSignal<LyricsState>` = `Empty | Loading | Loaded(track)

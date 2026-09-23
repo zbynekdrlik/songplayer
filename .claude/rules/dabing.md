@@ -162,7 +162,9 @@ output-audio position), trim trailing silence, atempo if it would overrun the ne
 chunk, write `chunk_N.wav`. **Heartbeats into `work_dir` every 5 s** so the
 `wait_with_stall_timeout` never kills a healthy mid-chunk stream (a chunk can run
 its full session cap with no other work-dir write). Assembles `<base>_dub.flac` at **48 kHz
-STEREO loudnorm -16** (must match the stem format `StemMixReader` requires), writes
+STEREO** (must match the stem format `StemMixReader` requires), **loudness-matched to
+the translated input — two-pass LINEAR loudnorm, see "round F" below** (was a fixed
+single-pass `loudnorm -16` until 0.65.0-dev.9), writes
 `<base>_dub_transcripts.json` (D3), and prints the summary JSON on stdout (the ONLY
 stdout line — logs go to stderr). Key ONLY via `GEMINI_API_KEY` env (`bootstrap::
 ensure_genai` pins `google-genai==2.24.0`, idempotent, never triggers the heavy
@@ -514,3 +516,62 @@ autocorrelation octave-collapse makes `VOICE_F0_BAND` a coarse seed gate (not a
 fine voice discriminator — the window guard + the pyin `--source` gate are the
 real detectors), and a truly balanced 50/50 octave rotation inside one chunk is
 still not the observed symptom.
+
+# Dabing round F (#184) — the dub is loudness-matched to the audio it translates
+
+Owner verdict 2026-09-23 (#184 comment 5793796815): "ked su pomery rovnake tak
+dabingovi hlas je tichsi ako orginal!". Measured on video 344 (5–15 min, ebur128):
+original −14.5, vocals −14.5, **dub −16.1 LUFS**. The old assembly used a fixed
+single-pass DYNAMIC `loudnorm=I=-16`, while the original is two-pass `I=-14`
+(`downloader/normalize.rs`). The stems are never re-normalized (`karaoke-stems.md`),
+and the mixer applies faders as plain linear gains, so the same fader value played
+the dub 1.6 LU quieter than the voice next to it.
+
+**Rule: dub loudness = the MEASURED integrated loudness of the child's `--audio`,
+clamped to −24…−10 LUFS, applied with a two-pass LINEAR loudnorm (TP −1.5, LRA 11).**
+`--audio` is `job.audio_file_path`, the video's normalized ORIGINAL (not the vocals
+stem — the child never receives the stem). For speech the two measure the same (344:
+−14.5 / −14.5). `dub_worker.py::_assemble_dub` makes three ffmpeg calls:
+1. `loudness_measure_args(ff, audio)` does a loudnorm analysis of the input (null
+   muxer), then `loudness_target(input_i)` applies the clamp (`-inf` clamps to −24,
+   `NaN` raises).
+2. `assembly_args(…, loudnorm_analysis_filter(target), None)` analyses the
+   assembled mix (the same `build_mix_filter` graph) to null.
+3. `assembly_args(…, build_loudnorm_second_pass(mix, target), out)` writes the dub
+   with `measured_I/LRA/TP/thresh` + `offset`, `linear=true`, `print_format=json`.
+
+`parse_loudnorm_json` reads the last `{…}` block carrying `input_i` (CRLF-safe) and
+raises if the block is missing or incomplete. The stats (`source_i`, `target_i`,
+`mix_i`, `output_i`, `normalization_type`) go to `<work_dir>/loudness.json` and to
+the `dub loudness: …` stderr line, which is the last child log line, so it shows in
+the sp-server "dub live-translate ok; stderr tail". ffmpeg silently falls back to
+DYNAMIC mode when the linear gain would breach TP −1.5 or the mix LRA exceeds 11.
+`normalization_type` records which mode actually ran, so read it before trusting a
+level. Local real-ffmpeg 6.1 smoke: source −14.75 → output −14.73 (linear), ebur128
+orig −14.7 / dub −14.7. The mono mix → `-ac 2` upmix keeps the loudness (swr's
+−3 dB centre gain). Tests: `scripts/tests/test_dub_worker_loudness.py` (pure helpers
++ the 3-call orchestration with `_run_stderr` faked; no ffmpeg in eval-checks).
+
+## Rebuild an existing dub so ONLY the assembly reruns (e.g. video 344 after deploy)
+
+`PATCH /api/v1/videos/344/dub` with body `{"requested": true}` (204):
+1. `models_dabing::set_dub_requested(true)` sets `dub_status='queued'`, bumps
+   `dub_requested_at` (the top of the newest-first queue) and sets
+   `stem_manual_priority=1` (harmless).
+2. The dub worker (10 s tick) picks it up: `get_next_dub_job` selects
+   `dub_status NOT IN ('none','ready')`. It runs `mark_dub_synth`, then the same
+   `silencedetect` → the same chunk plan (unchanged `dub_session_max_s`) and the same
+   pinned voice (`dub_voice` setting unchanged).
+3. The child reuses every `chunk_N.wav`/`.json` for which `chunk_reusable` holds
+   (same voice, same `[start,end)`, non-empty `voice_medians`); the log shows
+   `chunk N: resume`. No Gemini session is opened for a reused chunk.
+4. Only `_assemble_dub` runs again (plus the transcripts JSON + subtitles store),
+   then `mark_dub_ready`.
+
+The request needs the NEW `dub_worker.py` on the box. The worker re-materialises the
+embedded script (`ensure_script`), so deploy first. Verify with the
+`<cache>/<youtube_id>_dub/loudness.json` next to the chunks, then an ebur128 of the
+new `<base>_dub.flac` against the vocals stem on the same slice (±1 LU acceptance).
+Caveat: a chunk whose guard was skipped (`voice_medians` empty) IS re-synthesized,
+per the round-E2 reuse rule. That costs Gemini time, but it is correct.
+
