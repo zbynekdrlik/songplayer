@@ -55,7 +55,11 @@ box `lyrics_venv`; wheel read 2026-09-23, `google/genai/types.py` + `live.py`):
     inline audio); `LiveServerContent{input_transcription, output_transcription,
     turn_complete, generation_complete, interrupted}`;
     `LiveServerGoAway{time_left}`; `LiveServerSessionResumptionUpdate{new_handle,
-    resumable, last_consumed_client_message_index}`.
+    resumable, last_consumed_client_message_index}` — the index is only sent
+    when `SessionResumptionConfig.transparent` is set, which this probe does NOT
+    set (the design resumes by handle only), so it is expected to log `None`
+    and `frames_since_handle` is the probe's own estimate of the input the
+    resumed state may miss.
   - `AsyncSession.send_realtime_input(audio=Blob | audio_stream_end=True)`.
   - `AsyncSession.receive()` ENDS its iteration once an interaction completes
     (`live.py::_is_interaction_complete`: `interaction_status == IDLE` when the
@@ -396,18 +400,23 @@ def _set_fields(obj: Any) -> dict[str, Any]:
     }
 
 
-def _other_fields(msg: Any) -> list[str]:
-    """Message fields the probe has no dedicated event for (dotted for
-    server_content subfields), so an unexpected message kind is never silent."""
-    names = [n for n in _set_fields(msg) if n not in _KNOWN_FIELDS]
+def _other_fields(msg: Any) -> dict[str, Any]:
+    """Message fields the probe has no dedicated event for, name -> value
+    (dotted for server_content subfields and for model_turn parts other than the
+    inline audio), so an unexpected message kind is never silent."""
+    other = {n: v for n, v in _set_fields(msg).items() if n not in _KNOWN_FIELDS}
     sc = getattr(msg, "server_content", None)
-    if sc is not None:
-        names += [
-            f"server_content.{n}"
-            for n in _set_fields(sc)
-            if n not in _KNOWN_CONTENT_FIELDS
-        ]
-    return names
+    if sc is None:
+        return other
+    for n, v in _set_fields(sc).items():
+        if n not in _KNOWN_CONTENT_FIELDS:
+            other[f"server_content.{n}"] = v
+    turn = getattr(sc, "model_turn", None)
+    for part in getattr(turn, "parts", None) or []:
+        for n, v in _set_fields(part).items():
+            if n != "inline_data":  # the audio, captured through `.data`
+                other[f"server_content.model_turn.parts.{n}"] = v
+    return other
 
 
 def record_message(msg: Any, state: ProbeState, events: EventLog) -> Any:
@@ -427,8 +436,8 @@ def record_message(msg: Any, state: ProbeState, events: EventLog) -> Any:
     if other:
         events.log(
             "other_fields",
-            fields=other,
-            detail={n: str(_field_value(msg, n))[:300] for n in other},
+            fields=list(other),
+            detail={n: str(v)[:300] for n, v in other.items()},
         )
     sc = getattr(msg, "server_content", None)
     if sc is not None:
@@ -453,6 +462,8 @@ def record_message(msg: Any, state: ProbeState, events: EventLog) -> Any:
             "session_resumption_update",
             handle_present=bool(handle),
             resumable=getattr(sru, "resumable", None),
+            # Only sent with SessionResumptionConfig.transparent (not set here):
+            # logged anyway so a server that sends it regardless is visible.
             last_consumed_client_message_index=getattr(
                 sru, "last_consumed_client_message_index", None
             ),
@@ -470,13 +481,6 @@ def record_message(msg: Any, state: ProbeState, events: EventLog) -> Any:
         time_left = getattr(ga, "time_left", None)
         events.log("go_away", time_left=None if time_left is None else str(time_left))
     return ga
-
-
-def _field_value(msg: Any, dotted: str) -> Any:
-    obj = msg
-    for part in dotted.split("."):
-        obj = getattr(obj, part, None)
-    return obj
 
 
 # ── the session loop (network-agnostic: `connect` / `make_blob` are injected) ───
