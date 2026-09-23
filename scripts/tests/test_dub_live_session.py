@@ -249,7 +249,10 @@ def test_go_away_opens_the_new_connection_while_the_old_one_is_still_fed():
     rec = next(e for e in events.events if e["kind"] == "reconnect")
     assert rec["reason"] == "go_away"
     assert rec["handle_present"] is True
-    assert rec["frame_index"] >= 10
+    # `frame_index` counts CONFIRMED sends: the GoAway rides frame 10's send, and
+    # on Python 3.11 `wait_for` runs that send as a task, so the GoAway can be
+    # handled before frame 10 is counted.
+    assert rec["frame_index"] >= 9
     # The old connection was stopped once drained, not left open.
     assert any(e["kind"] == "drained" and e["connection"] == 1 for e in events.events)
     # Output of both connections merged in arrival order, tagged per connection.
