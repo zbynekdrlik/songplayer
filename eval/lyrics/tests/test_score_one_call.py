@@ -436,3 +436,177 @@ def test_rank_fixtures_excludes_errored_and_unmatched() -> None:
     best, worst = score_one_call.rank_fixtures(scores, n=3)
     assert [s["video_id"] for s in best] == ["aaaaaaaaaaa"]
     assert [s["video_id"] for s in worst] == ["aaaaaaaaaaa"]
+
+
+# ── #144 one-call arms: labels, error rows, lines past the audio end ────────
+
+
+def test_one_call_arm_labels_are_the_default_backends() -> None:
+    assert score_one_call.ONE_CALL_ARMS == [
+        "gemini38-flash-whole",
+        "gemini38-flash-win60",
+    ]
+    assert score_one_call.DEFAULT_BACKENDS == score_one_call.ONE_CALL_ARMS
+
+
+def test_produced_error_reads_the_backend_error_row() -> None:
+    assert score_one_call.produced_error({"lines": [], "error": "RECITATION"}) == (
+        "backend error: RECITATION"
+    )
+    assert score_one_call.produced_error({"lines": [], "error": None}) is None
+    assert score_one_call.produced_error({"lines": []}) is None
+
+
+def test_score_fixture_reports_lines_past_audio_end_from_metadata() -> None:
+    gold = [{"text": "holy is the lord", "start_ms": 1000, "end_ms": 2000}]
+    produced = {
+        "lines": [
+            {"text": "holy is the lord", "start_ms": 1100, "end_ms": 2000},
+            # a line still in `lines` past the recorded audio end counts too
+            {"text": "ghost", "start_ms": 12_000, "end_ms": 13_000},
+        ],
+        "metadata": {"audio_duration_ms": 10_000, "n_lines_past_audio_end": 3},
+    }
+    s = score_one_call.score_fixture(
+        backend="gemini38-flash-whole",
+        video_id="v",
+        category="clean_pop",
+        produced=produced,
+        gold_lines=gold,
+    )
+    assert s["n_lines_past_audio_end"] == 4
+
+
+def test_score_fixture_past_audio_end_unknown_without_metadata() -> None:
+    s = score_one_call.score_fixture(
+        backend="lyrics-alignment-mtl",
+        video_id="v",
+        category="clean_pop",
+        produced={"lines": []},
+        gold_lines=[{"text": "a", "start_ms": 0, "end_ms": 1}],
+    )
+    assert s["n_lines_past_audio_end"] is None
+
+
+def test_pooled_aggregate_sums_lines_past_audio_end() -> None:
+    base = {
+        "error": None,
+        "raw_deltas_ms": [],
+        "n_produced": 0,
+        "n_gold": 1,
+        "n_matched": 0,
+        "sk_ok_pct": None,
+        "pct_gt32_chars_en": None,
+        "pct_gt32_chars_sk": None,
+        "has_word_timings": False,
+    }
+    agg = score_one_call.pooled_aggregate(
+        [
+            {**base, "n_lines_past_audio_end": 2},
+            {**base, "n_lines_past_audio_end": 0},
+            {**base, "n_lines_past_audio_end": None},
+        ]
+    )
+    assert agg["total_lines_past_audio_end"] == 2
+    unknown = score_one_call.pooled_aggregate(
+        [{**base, "n_lines_past_audio_end": None}]
+    )
+    assert unknown["total_lines_past_audio_end"] is None
+
+
+def test_main_scores_one_call_arms_and_keeps_error_rows_in_denominator(
+    tmp_path, capsys
+) -> None:
+    import json
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "fixtures": [
+                    {
+                        "video_id": "okvid",
+                        "category": "clean_pop",
+                        "gold_lines": [
+                            {
+                                "text": "holy is the lord",
+                                "start_ms": 1000,
+                                "end_ms": 2000,
+                            }
+                        ],
+                    },
+                    {
+                        "video_id": "badvid",
+                        "category": "clean_pop",
+                        "gold_lines": [
+                            {"text": "worthy is the lamb", "start_ms": 0, "end_ms": 1},
+                            {"text": "forever and ever", "start_ms": 2, "end_ms": 3},
+                        ],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    for arm in score_one_call.ONE_CALL_ARMS:
+        ok_row = {
+            "lines": [{"text": "holy is the lord", "start_ms": 1100, "end_ms": 2000}],
+            "error": None,
+            "metadata": {"audio_duration_ms": 5000, "n_lines_past_audio_end": 1},
+        }
+        (raw / f"{arm}_okvid.json").write_text(json.dumps(ok_row), encoding="utf-8")
+        (raw / f"{arm}_badvid.json").write_text(
+            json.dumps({"lines": [], "error": "RECITATION", "metadata": {}}),
+            encoding="utf-8",
+        )
+    out = tmp_path / "scores.json"
+    rc = score_one_call.main(
+        ["--manifest", str(manifest), "--raw-dir", str(raw), "--out", str(out)]
+    )
+    assert rc == 0
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert set(data) == set(score_one_call.ONE_CALL_ARMS)
+    for arm in score_one_call.ONE_CALL_ARMS:
+        agg = data[arm]["aggregate"]
+        assert agg["n_fixtures"] == 1
+        assert agg["n_fixtures_errored"] == 1
+        assert agg["total_gold_lines_all_fixtures"] == 3
+        assert agg["pct_gold_within_400ms_all_fixtures"] == round(100 / 3, 1)
+        assert agg["total_lines_past_audio_end"] == 1
+        bad = [s for s in data[arm]["per_fixture"] if s["video_id"] == "badvid"][0]
+        assert bad["error"] == "backend error: RECITATION"
+        assert bad["n_gold"] == 2
+    printed = capsys.readouterr().out
+    assert "lines past audio end: 1" in printed
+
+
+def test_window_errors_are_surfaced_per_fixture_and_pooled() -> None:
+    """A win60 row that lost a window is scored (its good windows count) but
+    the lost window must be visible — never a silent gap in the arm."""
+    gold = [{"text": "holy is the lord", "start_ms": 1000, "end_ms": 2000}]
+    partial = {
+        "lines": [{"text": "holy is the lord", "start_ms": 1100, "end_ms": 2000}],
+        "metadata": {"n_window_errors": 2, "n_windows": 5},
+    }
+    s = score_one_call.score_fixture(
+        backend="gemini38-flash-win60",
+        video_id="v",
+        category="clean_pop",
+        produced=partial,
+        gold_lines=gold,
+    )
+    assert s["n_window_errors"] == 2
+    whole = score_one_call.score_fixture(
+        backend="gemini38-flash-whole",
+        video_id="v",
+        category="clean_pop",
+        produced={"lines": [], "metadata": {}},
+        gold_lines=gold,
+    )
+    assert whole["n_window_errors"] is None
+    agg = score_one_call.pooled_aggregate([s, whole])
+    assert agg["total_window_errors"] == 2
+    assert agg["fixtures_with_window_errors"] == 1

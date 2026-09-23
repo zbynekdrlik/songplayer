@@ -325,3 +325,91 @@ def test_score_backend_missing_poisoned_fixture_reports_error(
     }
     report = score_aligner.score_backend(backend, manifest, raw_dir)
     assert "error" in report["poisoned_fixture"]
+
+
+# ── #144: one-call arms re-scored beside mtl on the identical denominator ────
+
+
+def _two_fixture_manifest() -> dict:
+    return {
+        "okvid": {
+            "video_id": "okvid",
+            "category": "clean_pop",
+            "gold_lines": [
+                {"text": "hello world today", "start_ms": 0, "end_ms": 1000}
+            ],
+        },
+        "badvid": {
+            "video_id": "badvid",
+            "category": "clean_pop",
+            "gold_lines": [
+                {"text": "line one of three", "start_ms": 0, "end_ms": 1000},
+                {"text": "line two of three", "start_ms": 1000, "end_ms": 2000},
+                {"text": "line three of three", "start_ms": 2000, "end_ms": 3000},
+            ],
+        },
+    }
+
+
+def test_score_backend_one_call_error_row_is_errored_and_keeps_gold(
+    tmp_path: Path,
+) -> None:
+    backend = "gemini38-flash-win60"
+    (tmp_path / f"{backend}_okvid.json").write_text(
+        json.dumps(
+            {
+                "lines": [_line("hello world today", 50, 1000)],
+                "error": None,
+                "metadata": {"audio_duration_ms": 5000, "n_lines_past_audio_end": 2},
+            }
+        )
+    )
+    (tmp_path / f"{backend}_badvid.json").write_text(
+        json.dumps({"lines": [], "error": "RECITATION", "metadata": {}})
+    )
+    report = score_aligner.score_backend(backend, _two_fixture_manifest(), tmp_path)
+    agg = report["aggregate"]
+    assert agg["n_fixtures"] == 1
+    assert agg["n_fixtures_errored"] == 1
+    assert agg["total_gold_lines_all_fixtures"] == 4
+    assert agg["pct_gold_within_400ms_all_fixtures"] == 25.0
+    assert agg["total_lines_past_audio_end"] == 2
+    bad = [s for s in report["per_fixture"] if s["video_id"] == "badvid"][0]
+    assert bad["error"] == "backend error: RECITATION"
+    assert bad["n_gold"] == 3
+
+
+def test_main_prints_the_all_fixtures_gold_normalized_figure(
+    tmp_path: Path, capsys
+) -> None:
+    """The decision rule compares arms and mtl on the SAME gold denominator —
+    incl. the fixtures a backend produced nothing for (mtl has 2 such on the
+    current manifest). The summary must print that figure, not only the
+    scored-fixtures one."""
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps({"version": 1, "fixtures": list(_two_fixture_manifest().values())})
+    )
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "lyrics-alignment-mtl_okvid.json").write_text(
+        json.dumps({"lines": [_line("hello world today", 50, 1000)]})
+    )
+    out = tmp_path / "scores.json"
+    rc = score_aligner.main(
+        [
+            "--manifest",
+            str(manifest_path),
+            "--raw-dir",
+            str(raw),
+            "--backends",
+            "lyrics-alignment-mtl",
+            "--out",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "gold_within400_all=  25.0% of 4 gold lines" in printed
+    assert "lines past audio end: n/a" in printed
+    assert "window errors: n/a" in printed
