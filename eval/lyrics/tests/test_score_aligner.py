@@ -412,3 +412,4 @@ def test_main_prints_the_all_fixtures_gold_normalized_figure(
     printed = capsys.readouterr().out
     assert "gold_within400_all=  25.0% of 4 gold lines" in printed
     assert "lines past audio end: n/a" in printed
+    assert "window errors: n/a" in printed

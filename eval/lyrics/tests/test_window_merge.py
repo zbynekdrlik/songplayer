@@ -212,3 +212,87 @@ def test_merge_empty_windows() -> None:
 def test_text_similarity_is_normalized() -> None:
     assert window_merge.text_similarity("Holy, HOLY!", "holy holy") == 1.0
     assert window_merge.text_similarity("abc", "xyz") < 0.8
+
+
+# ── review round 1 (#144) ────────────────────────────────────────────────────
+
+
+def test_split_windows_never_emits_a_sliver_tail() -> None:
+    """A tail with less new audio than the overlap is folded into the previous
+    window (<= win + overlap long) instead of a near-empty extra call."""
+    assert window_merge.split_windows(60_001) == [(0, 60_001)]
+    assert window_merge.split_windows(117_000) == [(0, 60_000), (55_000, 117_000)]
+    # exactly `overlap` of new audio is still its own window
+    assert window_merge.split_windows(120_000)[-1] == (110_000, 120_000)
+    for duration in range(1_000, 400_000, 997):
+        wins = window_merge.split_windows(duration)
+        assert wins[0][0] == 0 and wins[-1][1] == duration
+        assert all(end - start <= 65_000 for start, end in wins)
+        for (_, prev_end), (start, end) in zip(wins, wins[1:]):
+            assert end - prev_end >= 5_000  # every extra window adds real audio
+
+
+def test_merge_keeps_a_real_repeat_inside_the_overlap() -> None:
+    """Chant repetition: the same text sung twice 3.5 s apart, both copies in
+    the overlap region — the second is a real repetition, not a duplicate."""
+    per_window = [
+        (0, [_line("Holy holy", 54_000, 55_500)]),
+        (55_000, [_line("Holy holy", 2_500, 4_000)]),  # 57.5 s
+    ]
+    res = window_merge.merge_window_lines(
+        per_window, audio_end_ms=115_000, overlap_ms=5_000
+    )
+    assert [ln["start_ms"] for ln in res.lines] == [54_000, 57_500]
+    assert res.n_duplicates_dropped == 0
+
+
+def test_merge_matches_one_to_one() -> None:
+    """Two later copies cannot both be absorbed by ONE earlier line."""
+    per_window = [
+        (0, [_line("Holy holy", 56_000, 57_000)]),
+        (
+            55_000,
+            [_line("Holy holy", 1_100, 2_000), _line("Holy holy", 2_300, 3_000)],
+        ),  # 56.1 s (the same line) and 57.3 s (the next repetition)
+    ]
+    res = window_merge.merge_window_lines(
+        per_window, audio_end_ms=115_000, overlap_ms=5_000
+    )
+    assert [ln["start_ms"] for ln in res.lines] == [56_000, 57_300]
+    assert res.n_duplicates_dropped == 1
+
+
+def test_merge_prefers_the_complete_copy_of_a_line_cut_at_the_window_end() -> None:
+    """Window k-1 heard only the start of a line that crosses its end; window
+    k heard it whole — keep ONE line, the longer one, with window k's time."""
+    per_window = [
+        (0, [_line("holy is", 58_000, 60_000)]),
+        (55_000, [_line("Holy is the Lord", 3_100, 6_500)]),  # 58.1 s
+    ]
+    res = window_merge.merge_window_lines(
+        per_window, audio_end_ms=115_000, overlap_ms=5_000
+    )
+    assert [(ln["text"], ln["start_ms"]) for ln in res.lines] == [
+        ("Holy is the Lord", 58_100)
+    ]
+    assert res.n_duplicates_dropped == 1
+
+
+def test_merge_drops_the_tail_of_a_line_cut_at_the_window_start() -> None:
+    """Window k starts mid-line and hears only its end — that fragment is a
+    duplicate of window k-1's complete line."""
+    per_window = [
+        (0, [_line("Holy is the Lord", 53_500, 57_000)]),
+        (55_000, [_line("the Lord", 0, 2_000)]),  # 55.0 s, inside 53.5-57.0
+    ]
+    res = window_merge.merge_window_lines(
+        per_window, audio_end_ms=115_000, overlap_ms=5_000
+    )
+    assert [ln["text"] for ln in res.lines] == ["Holy is the Lord"]
+    assert res.n_duplicates_dropped == 1
+
+
+def test_window_merge_shares_the_scorer_normalization() -> None:
+    from eval.lyrics import score_one_call
+
+    assert window_merge.normalize_text is score_one_call.normalize_text

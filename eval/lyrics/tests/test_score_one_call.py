@@ -581,3 +581,32 @@ def test_main_scores_one_call_arms_and_keeps_error_rows_in_denominator(
         assert bad["n_gold"] == 2
     printed = capsys.readouterr().out
     assert "lines past audio end: 1" in printed
+
+
+def test_window_errors_are_surfaced_per_fixture_and_pooled() -> None:
+    """A win60 row that lost a window is scored (its good windows count) but
+    the lost window must be visible — never a silent gap in the arm."""
+    gold = [{"text": "holy is the lord", "start_ms": 1000, "end_ms": 2000}]
+    partial = {
+        "lines": [{"text": "holy is the lord", "start_ms": 1100, "end_ms": 2000}],
+        "metadata": {"n_window_errors": 2, "n_windows": 5},
+    }
+    s = score_one_call.score_fixture(
+        backend="gemini38-flash-win60",
+        video_id="v",
+        category="clean_pop",
+        produced=partial,
+        gold_lines=gold,
+    )
+    assert s["n_window_errors"] == 2
+    whole = score_one_call.score_fixture(
+        backend="gemini38-flash-whole",
+        video_id="v",
+        category="clean_pop",
+        produced={"lines": [], "metadata": {}},
+        gold_lines=gold,
+    )
+    assert whole["n_window_errors"] is None
+    agg = score_one_call.pooled_aggregate([s, whole])
+    assert agg["total_window_errors"] == 2
+    assert agg["fixtures_with_window_errors"] == 1

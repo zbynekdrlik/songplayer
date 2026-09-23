@@ -404,3 +404,316 @@ def test_ffmpeg_slice_command_uses_atrim() -> None:
     af = cmd[cmd.index("-af") + 1]
     assert af == "atrim=start=55.000:end=115.000,asetpts=PTS-STARTPTS"
     assert cmd[-1] == "out.wav"
+
+
+# ── review round 1 (#144) ────────────────────────────────────────────────────
+#
+# The google-genai SDK is an EXTERNAL network client and is absent from CI, so
+# the transport tests install a minimal stand-in under `google.genai` (only
+# the names the backend touches) — the backend's own code runs unmodified.
+
+
+class _FakeClientError(Exception):
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(f"{code} {message}")
+        self.code = code
+
+
+class _Kw:
+    def __init__(self, **kw) -> None:
+        self.kw = kw
+
+
+def _install_fake_genai(monkeypatch, generate):
+    """`generate(api_key, contents, config) -> response`; returns the log."""
+    import types as pytypes
+
+    log: dict[str, list] = {"clients": [], "uploads": [], "gets": [], "deletes": []}
+
+    class Part:
+        @staticmethod
+        def from_bytes(*, data: bytes, mime_type: str):
+            return ("inline", mime_type, len(data))
+
+        @staticmethod
+        def from_uri(*, file_uri: str, mime_type: str):
+            return ("uri", file_uri, mime_type)
+
+    class Files:
+        def upload(self, *, file, config):
+            log["uploads"].append((file, config))
+            return pytypes.SimpleNamespace(
+                name="files/abc", state="PROCESSING", uri=None, mime_type=None
+            )
+
+        def get(self, *, name):
+            log["gets"].append(name)
+            return pytypes.SimpleNamespace(
+                name=name, state="ACTIVE", uri="gs://u/abc", mime_type="audio/wav"
+            )
+
+        def delete(self, *, name):
+            log["deletes"].append(name)
+
+    class Client:
+        def __init__(self, *, api_key, http_options):
+            log["clients"].append((api_key, http_options.kw))
+            self.files = Files()
+            key = api_key
+
+            class Models:
+                def generate_content(self, *, model, contents, config):
+                    return generate(key, contents, config)
+
+            self.models = Models()
+
+    google = pytypes.ModuleType("google")
+    genai = pytypes.ModuleType("google.genai")
+    gtypes = pytypes.ModuleType("google.genai.types")
+    gerrors = pytypes.ModuleType("google.genai.errors")
+    gtypes.HttpOptions = _Kw
+    gtypes.GenerateContentConfig = _Kw
+    gtypes.ThinkingConfig = _Kw
+    gtypes.Part = Part
+    gerrors.ClientError = _FakeClientError
+    genai.Client = Client
+    genai.types = gtypes
+    genai.errors = gerrors
+    google.genai = genai
+    for name, mod in [
+        ("google", google),
+        ("google.genai", genai),
+        ("google.genai.types", gtypes),
+        ("google.genai.errors", gerrors),
+    ]:
+        monkeypatch.setitem(sys.modules, name, mod)
+    monkeypatch.setattr(g38.time, "sleep", lambda s: None)
+    return log
+
+
+def _resp(text: str | None, finish: str = "STOP", block: str | None = None):
+    import types as pytypes
+
+    class _Enum:
+        def __init__(self, value: str) -> None:
+            self.value = value
+
+    class _Usage:
+        def model_dump(self, **kw):
+            return {"prompt_token_count": 7}
+
+    return pytypes.SimpleNamespace(
+        candidates=[pytypes.SimpleNamespace(finish_reason=_Enum(finish))],
+        prompt_feedback=pytypes.SimpleNamespace(
+            block_reason=_Enum(block) if block else None
+        ),
+        usage_metadata=_Usage(),
+        text=text,
+    )
+
+
+def test_caller_rotates_past_invalid_key_and_429_then_sticks(
+    tmp_path: Path, monkeypatch
+) -> None:
+    wav = _write_wav(tmp_path / "a.wav", 1.0)
+    tried: list[str] = []
+
+    def generate(key, contents, config):
+        tried.append(key)
+        if key == "KEYONE":
+            raise _FakeClientError(400, "API key not valid. KEYONE")
+        if key == "KEYTWO":
+            raise _FakeClientError(429, "RESOURCE_EXHAUSTED")
+        return _resp('{"lines": []}')
+
+    _install_fake_genai(monkeypatch, generate)
+    c = g38.GeminiCaller(model="m", keys=["KEYONE", "KEYTWO", "KEYTHREE"])
+    assert c(wav).text == '{"lines": []}'
+    assert tried == ["KEYONE", "KEYTWO", "KEYTHREE"]
+    tried.clear()
+    c(wav)
+    assert tried == ["KEYTHREE"]  # the working key sticks
+
+
+def test_caller_non_rotatable_error_is_raised_redacted(
+    tmp_path: Path, monkeypatch
+) -> None:
+    wav = _write_wav(tmp_path / "a.wav", 1.0)
+
+    def generate(key, contents, config):
+        raise _FakeClientError(400, f"schema rejected for {key}")
+
+    _install_fake_genai(monkeypatch, generate)
+    c = g38.GeminiCaller(model="m", keys=["SECRETKEY"])
+    with pytest.raises(RuntimeError) as exc:
+        c(wav)
+    assert "schema rejected" in str(exc.value)
+    assert "SECRETKEY" not in str(exc.value)
+
+
+def test_caller_all_keys_exhausted_is_raised_redacted(
+    tmp_path: Path, monkeypatch
+) -> None:
+    wav = _write_wav(tmp_path / "a.wav", 1.0)
+
+    def generate(key, contents, config):
+        raise _FakeClientError(429, f"quota {key}")
+
+    _install_fake_genai(monkeypatch, generate)
+    c = g38.GeminiCaller(model="m", keys=["SECRETA", "SECRETB"])
+    with pytest.raises(RuntimeError, match="all 2 Gemini keys failed") as exc:
+        c(wav)
+    assert "SECRET" not in str(exc.value)
+
+
+def test_caller_other_exception_is_redacted(tmp_path: Path, monkeypatch) -> None:
+    wav = _write_wav(tmp_path / "a.wav", 1.0)
+
+    def generate(key, contents, config):
+        raise ConnectionError(f"reset while sending key={key}")
+
+    _install_fake_genai(monkeypatch, generate)
+    with pytest.raises(RuntimeError) as exc:
+        g38.GeminiCaller(model="m", keys=["SECRETZ"])(wav)
+    assert "ConnectionError" in str(exc.value)
+    assert "SECRETZ" not in str(exc.value)
+
+
+def test_caller_request_shape_inline_structured_output(
+    tmp_path: Path, monkeypatch
+) -> None:
+    wav = _write_wav(tmp_path / "a.wav", 1.0)
+    seen: dict = {}
+
+    def generate(key, contents, config):
+        seen["contents"] = contents
+        seen["config"] = config.kw
+        return _resp("{}")
+
+    log = _install_fake_genai(monkeypatch, generate)
+    result = g38.GeminiCaller(model="m", keys=["K"])(wav)
+    assert log["clients"] == [("K", {"timeout": g38.REQUEST_TIMEOUT_MS})]
+    assert seen["contents"][0] == ("inline", "audio/wav", wav.stat().st_size)
+    assert seen["contents"][1] == g38.USER_TURN
+    assert seen["config"]["response_mime_type"] == "application/json"
+    assert seen["config"]["response_json_schema"] is g38.RESPONSE_JSON_SCHEMA
+    assert seen["config"]["system_instruction"] == g38.load_prompt()
+    assert seen["config"]["thinking_config"] is None  # model as designed
+    assert log["uploads"] == []
+    assert result.finish_reason == "STOP"
+    assert result.usage == {"prompt_token_count": 7}
+
+
+def test_caller_thinking_level_is_passed_upper_case(
+    tmp_path: Path, monkeypatch
+) -> None:
+    wav = _write_wav(tmp_path / "a.wav", 1.0)
+    seen: dict = {}
+
+    def generate(key, contents, config):
+        seen["thinking"] = config.kw["thinking_config"].kw
+        return _resp("{}")
+
+    _install_fake_genai(monkeypatch, generate)
+    g38.GeminiCaller(model="m", keys=["K"], thinking_level="low")(wav)
+    assert seen["thinking"] == {"thinking_level": "LOW"}
+
+
+def test_caller_large_audio_goes_through_files_api_and_is_deleted(
+    tmp_path: Path, monkeypatch
+) -> None:
+    wav = _write_wav(tmp_path / "a.wav", 1.0)
+    seen: dict = {}
+
+    def generate(key, contents, config):
+        seen["part"] = contents[0]
+        raise _FakeClientError(500, "boom")  # cleanup must still run
+
+    log = _install_fake_genai(monkeypatch, generate)
+    monkeypatch.setattr(g38, "INLINE_LIMIT_BYTES", 10)
+    with pytest.raises(RuntimeError):
+        g38.GeminiCaller(model="m", keys=["K"])(wav)
+    assert log["uploads"] == [(str(wav), {"mime_type": "audio/wav"})]
+    assert log["gets"] == ["files/abc"]
+    assert seen["part"] == ("uri", "gs://u/abc", "audio/wav")
+    assert log["deletes"] == ["files/abc"]
+
+
+def test_inline_limit_leaves_room_for_base64_overhead() -> None:
+    # inline bytes travel base64-encoded (x 4/3) inside a <= 20 MB request
+    assert g38.INLINE_LIMIT_BYTES * 4 / 3 < 19 * 1024 * 1024
+
+
+def test_to_call_result_reads_block_reason_and_finish() -> None:
+    r = g38._to_call_result(_resp(None, finish="SAFETY", block="PROHIBITED_CONTENT"))
+    assert r.finish_reason == "SAFETY"
+    assert r.block_reason == "PROHIBITED_CONTENT"
+    with pytest.raises(g38.ResponseError, match="PROHIBITED_CONTENT"):
+        g38.interpret_call(r)
+
+
+def test_load_prompt_ignores_inline_marker_mentions(tmp_path: Path) -> None:
+    """REGRESSION: the 2026-08-05 loader matched a header's inline mention of
+    the markers and sent '` / `' as the whole system prompt."""
+    f = tmp_path / "p.md"
+    f.write_text(
+        "Header: the text between `<!-- PROMPT-START -->` / `<!-- PROMPT-END -->`\n"
+        "is sent.\n\n<!-- PROMPT-START -->\nReal prompt body.\n<!-- PROMPT-END -->\n",
+        encoding="utf-8",
+    )
+    assert g38.load_prompt(f) == "Real prompt body."
+
+
+def test_run_fixture_missing_audio_is_marked_missing_input(tmp_path: Path) -> None:
+    row = g38.run_fixture(
+        video_id="vid",
+        mode="win60",
+        audio=tmp_path / "nope.wav",
+        caller=lambda p: _ok([]),
+        slicer=lambda *a: None,
+        work_dir=tmp_path,
+        model="m",
+    )
+    assert row["error"]
+    assert row["metadata"]["error_kind"] == "missing_input"
+
+
+def test_run_fixture_win60_all_lines_past_end_is_a_scored_row(tmp_path: Path) -> None:
+    """Every line past the audio end must stay COUNTED on a normal row (the
+    scorer pools past-end only from non-error rows) — exactly like `whole`."""
+    wav = _write_wav(tmp_path / "v.wav", 50.0)
+
+    def slicer(src: Path, dst: Path, start_ms: int, end_ms: int) -> None:
+        dst.write_bytes(b"x")
+
+    row = g38.run_fixture(
+        video_id="vid",
+        mode="win60",
+        audio=wav,
+        caller=lambda p: _ok(
+            [{"text": "ghost", "start_ms": 70_000, "end_ms": 71_000, "text_sk": "x"}]
+        ),
+        slicer=slicer,
+        work_dir=tmp_path,
+        model="m",
+    )
+    assert row["error"] is None
+    assert row["lines"] == []
+    assert row["metadata"]["n_lines_past_audio_end"] == 1
+
+
+def test_ffmpeg_slicer_decodes_stderr_as_utf8(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+
+    seen: dict = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="chyba ž")
+
+    monkeypatch.setattr(g38.subprocess, "run", fake_run)
+    slicer = g38.make_ffmpeg_slicer("ffmpeg")
+    with pytest.raises(RuntimeError, match="chyba ž"):
+        slicer(tmp_path / "in.wav", tmp_path / "out.wav", 0, 1000)
+    assert seen["encoding"] == "utf-8"
+    assert seen["errors"] == "replace"
