@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import math
 import pathlib
 import struct
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -51,12 +53,15 @@ def test_frame_deadline_is_drift_free_over_15000_frames():
 
 
 def test_frame_deadline_does_not_accumulate_like_a_summed_sleep():
-    # Summing 0.1 15 000 times drifts (float accumulation); the deadline must not.
+    # Summing 0.1 15 000 times drifts (float accumulation, ~2.7e-10 here); the
+    # deadline is the single product k*frame_s, bit-exact — an accumulating
+    # schedule cannot hit it.
     acc = 0.0
     for _ in range(15000):
         acc += 0.1
-    assert acc != 1500.0
-    assert probe.frame_deadline(0.0, 15000) == pytest.approx(1500.0, abs=1e-9)
+    assert acc != 15000 * 0.1
+    assert probe.frame_deadline(0.0, 15000) == 15000 * 0.1
+    assert probe.frame_deadline(2.0, 12345) == 2.0 + 12345 * 0.1
 
 
 def test_frame_deadline_honours_custom_frame_length():
@@ -153,6 +158,32 @@ def test_place_output_offsets_are_monotonic_cumulative_buffer_positions():
     assert [p[2] for p in placed] == pytest.approx([0.0, 0.1, 0.3])
     offsets = [p[2] for p in placed]
     assert offsets == sorted(offsets)
+
+
+def test_pcm_dbfs_levels():
+    assert probe.pcm_dbfs(_s16([16384] * 100)) == pytest.approx(-6.02, abs=0.05)
+    assert probe.pcm_dbfs(_s16([0] * 100)) == probe.SILENCE_DBFS
+    assert probe.pcm_dbfs(b"") == probe.SILENCE_DBFS
+
+
+def test_voiced_threshold_separates_speech_from_streamed_silence():
+    assert probe.pcm_dbfs(_s16([3000, -3000] * 50)) > probe.VOICED_DBFS
+    assert probe.pcm_dbfs(_s16([30, -30] * 50)) < probe.VOICED_DBFS
+
+
+@pytest.mark.parametrize(
+    ("time_left", "quiet_s", "expected"),
+    [
+        ("10s", 8.0, 8.0),  # capped at the quiet window
+        ("3s", 8.0, 2.0),  # leave 1 s before the server drops us
+        ("2.500s", 8.0, 1.5),
+        ("0.5s", 8.0, 0.0),
+        (None, 8.0, 8.0),  # unknown -> the quiet window
+        ("junk", 8.0, 8.0),
+    ],
+)
+def test_go_away_grace(time_left, quiet_s, expected):
+    assert probe.go_away_grace_s(time_left, quiet_s) == pytest.approx(expected)
 
 
 def test_redact_replaces_the_key_everywhere():
@@ -304,6 +335,44 @@ def test_build_summary_without_output():
     assert s["first_output_latency_s"] is None
     assert s["max_output_gap_s"] == 0.0
     assert s["rms_per_5min"] == []
+    assert s["voiced_output_s"] == 0.0
+    assert s["max_voiced_gap_s"] == 0.0
+    assert s["first_voiced_latency_s"] is None
+    assert s["drain_end_reason"] is None
+
+
+def test_build_summary_voiced_fields_ignore_streamed_silence():
+    sr = 24000
+    events = [
+        {"t": 0.0, "kind": "connect"},
+        {"t": 0.5, "kind": "send_start"},
+        {"t": 1.0, "kind": "audio", "n_bytes": 4800, "voiced": False},
+        {"t": 2.0, "kind": "audio", "n_bytes": 4800, "voiced": True},
+        {"t": 2.1, "kind": "audio", "n_bytes": 4800, "voiced": False},
+        {"t": 5.0, "kind": "audio", "n_bytes": 9600, "voiced": True},
+        {"t": 5.1, "kind": "audio", "n_bytes": 4800, "voiced": False},
+        {"t": 9.0, "kind": "drain_end", "reason": "quiet"},
+    ]
+    s = probe.build_summary(
+        events,
+        model="m",
+        api_version="v1beta",
+        voice=None,
+        compression=True,
+        resumption=True,
+        slice_s=10.0,
+        frames_sent=100,
+        frames_total=100,
+        output_pcm=b"",
+        output_sr=sr,
+        errors=[],
+    )
+    assert s["voiced_output_s"] == pytest.approx(0.3)
+    assert s["max_voiced_gap_s"] == pytest.approx(3.0)
+    assert s["max_output_gap_s"] == pytest.approx(2.9)
+    assert s["first_output_latency_s"] == pytest.approx(0.5)
+    assert s["first_voiced_latency_s"] == pytest.approx(1.5)
+    assert s["drain_end_reason"] == "quiet"
 
 
 # ── the session loop against a fake Live server ─────────────────────────────────
@@ -357,6 +426,7 @@ class FakeSession:
         self.on_frame = on_frame
         self.queue: asyncio.Queue = asyncio.Queue()
         self.frames: list[bytes] = []
+        self.send_times: list[float] = []  # monotonic time each frame arrived
         self.stream_end = 0
         self.setup_complete = SimpleNamespace(session_id="s")
 
@@ -365,10 +435,15 @@ class FakeSession:
             self.stream_end += 1
             self.server.stream_ends += 1
             return
+        self.send_times.append(time.monotonic())
         self.frames.append(audio)
         self.server.all_frames.append(audio)
         if self.on_frame is not None:
             self.on_frame(self, len(self.frames))
+        if self.server.send_latency_s:
+            # A real websocket send takes time; a fixed-sleep pacer would add it
+            # on top of every frame period, the drift-corrected one must not.
+            await asyncio.sleep(self.server.send_latency_s)
 
     async def receive(self):
         while True:
@@ -385,19 +460,24 @@ class FakeServer:
     """A scripted Live service: one `on_frame` behaviour per connection, or the
     string "refuse" to make that connect attempt fail."""
 
-    def __init__(self, scripts):
+    def __init__(self, scripts, send_latency_s=0.0, reconnect_delay_s=0.0):
         self.scripts = list(scripts)
         self.configs: list[dict] = []
         self.sessions: list[FakeSession] = []
         self.all_frames: list[bytes] = []
         self.stream_ends = 0
+        self.send_latency_s = send_latency_s
+        self.reconnect_delay_s = reconnect_delay_s
 
     def connect(self, cfg):
         self.configs.append(cfg)
         script = self.scripts[len(self.configs) - 1]
+        delay = self.reconnect_delay_s if len(self.configs) > 1 else 0.0
 
         @contextlib.asynccontextmanager
         async def cm():
+            if delay:
+                await asyncio.sleep(delay)
             if script == "refuse":
                 raise ConnectionError("handle rejected: 1008 policy violation")
             s = FakeSession(self, script)
@@ -449,7 +529,10 @@ def test_single_connection_streams_every_frame_once_then_drains_quietly():
     kinds = [e["kind"] for e in events.events]
     assert kinds.count("connect") == 1
     assert "reconnect" not in kinds
-    assert "drain_end" in kinds
+    ends = [e for e in events.events if e["kind"] == "drain_end"]
+    assert [e["reason"] for e in ends] == ["quiet"]
+    audio = [e for e in events.events if e["kind"] == "audio"]
+    assert all(e["voiced"] is True for e in audio)
 
 
 def test_transcriptions_and_flags_are_recorded():
@@ -631,3 +714,194 @@ def test_tail_cap_ends_a_receive_that_never_goes_quiet():
     server.sessions[0].spam.cancel()
     ends = [e for e in events.events if e["kind"] == "drain_end"]
     assert ends and ends[0]["reason"] == "tail_cap"
+
+
+# ── review round 1: pacing, silence-aware drain, GoAway grace, unknown fields ───
+
+
+def test_send_loop_paces_at_real_time_without_drift_or_bursts():
+    # 40 frames at 20 ms with a 5 ms send latency: a drift-corrected pacer sends
+    # frame j at t_first + j*frame_s (never earlier) and finishes in ~39 periods;
+    # a fixed sleep(frame_s) adds the latency to every period (+~195 ms) and an
+    # unpaced loop sends everything at once.
+    fs = 0.02
+    server = FakeServer([None], send_latency_s=0.005)
+    frames = _frames(40)
+    opts = _opts(frame_s=fs, quiet_s=0.05, tail_cap_s=1.0)
+    _run(server, frames, opts)
+    times = server.sessions[0].send_times
+    assert len(times) == 40
+    t_first = times[0]
+    for j, t in enumerate(times):
+        assert t >= t_first + j * fs - 0.002, f"frame {j} sent early"
+    assert times[-1] - t_first <= 39 * fs + 0.1
+
+
+def test_pacing_is_re_anchored_on_each_connection():
+    # The second connection opens 0.3 s late: without re-anchoring the frames it
+    # still owes would all burst out at once to "catch up".
+    fs = 0.02
+
+    def first(session, n):
+        if n == 10:
+            session.queue.put_nowait(_msg(go_away=SimpleNamespace(time_left="0.5s")))
+
+    server = FakeServer([first, None], reconnect_delay_s=0.3)
+    frames = _frames(30)
+    opts = _opts(frame_s=fs, quiet_s=0.05, tail_cap_s=1.0)
+    _run(server, frames, opts)
+    assert len(server.sessions) == 2
+    times = server.sessions[1].send_times
+    assert len(times) >= 10
+    t2 = times[0]
+    for j, t in enumerate(times):
+        assert t >= t2 + j * fs - 0.002, f"frame {j} of connection 2 burst"
+    assert server.all_frames == frames
+
+
+def test_streamed_silence_does_not_hold_the_drain_open():
+    # The Live session streams SILENCE after speech until closed; the drain must
+    # end on "quiet" (no VOICED output for quiet_s), not wait for the tail cap.
+    def script(session, n):
+        session.queue.put_nowait(_msg(data=b"\x10" * 480))
+        if n == 3:
+
+            async def silence():
+                while True:
+                    session.queue.put_nowait(_msg(data=b"\x00" * 480))
+                    await asyncio.sleep(0.005)
+
+            session.silence = asyncio.get_running_loop().create_task(silence())
+
+    server = FakeServer([script])
+    opts = _opts(frame_s=0.001, quiet_s=0.1, tail_cap_s=3.0)
+    events, state = _run(server, _frames(3), opts)
+    ends = [e for e in events.events if e["kind"] == "drain_end"]
+    assert [e["reason"] for e in ends] == ["quiet"]
+    audio = [e for e in events.events if e["kind"] == "audio"]
+    assert any(e["voiced"] is False for e in audio)
+    assert state.last_voiced_t is not None
+
+
+def test_go_away_keeps_receiving_the_old_connection_output_before_reconnecting():
+    late = b"\x20" * 960
+
+    def first(session, n):
+        session.queue.put_nowait(_msg(data=b"\x10" * 480))
+        if n == 2:
+            session.queue.put_nowait(_resumption("h1"))
+        if n == 10:
+            session.queue.put_nowait(_msg(go_away=SimpleNamespace(time_left="10s")))
+
+            async def trailing_translation():
+                await asyncio.sleep(0.02)
+                session.queue.put_nowait(_msg(data=late))
+
+            session.late = asyncio.get_running_loop().create_task(
+                trailing_translation()
+            )
+
+    server = FakeServer([first, _echo])
+    frames = _frames(200)
+    opts = _opts(frame_s=0.001, quiet_s=0.2, tail_cap_s=2.0)
+    events, state = _run(server, frames, opts)
+    # The old connection's trailing output arrived BEFORE the reconnect.
+    kinds = [e["kind"] for e in events.events]
+    late_idx = next(
+        i
+        for i, e in enumerate(events.events)
+        if e["kind"] == "audio" and e["n_bytes"] == len(late)
+    )
+    assert late_idx < kinds.index("reconnect")
+    assert late in bytes(state.out)
+    # The sender stopped at a frame boundary once the GoAway arrived.
+    assert len(server.sessions[0].frames) <= 11
+    assert server.all_frames == frames
+    rec = next(e for e in events.events if e["kind"] == "reconnect")
+    assert rec["frames_since_handle"] == len(server.sessions[0].frames) - 2
+    grace = next(e for e in events.events if e["kind"] == "go_away_grace")
+    assert grace["grace_s"] == pytest.approx(0.2)
+
+
+def test_go_away_during_the_drain_never_resends_audio_stream_end():
+    def only(session, n):
+        session.queue.put_nowait(_msg(data=b"\x10" * 480))
+
+    server = FakeServer([only, None])
+    frames = _frames(3)
+
+    async def scenario():
+        events = probe.EventLog(None)
+        state = probe.ProbeState()
+
+        async def go_away_after_end():
+            while server.stream_ends == 0:
+                await asyncio.sleep(0.001)
+            server.sessions[0].queue.put_nowait(
+                _msg(go_away=SimpleNamespace(time_left="1.2s"))
+            )
+
+        task = asyncio.create_task(go_away_after_end())
+        opts = _opts(frame_s=0.001, quiet_s=0.5, tail_cap_s=2.0)
+        await probe.run_probe(frames, server.connect, lambda b: b, opts, events, state)
+        await task
+        return events
+
+    events = asyncio.run(scenario())
+    assert server.stream_ends == 1
+    assert server.all_frames == frames
+    assert any(e["kind"] == "go_away" for e in events.events)
+
+
+def test_unrecognised_message_fields_are_recorded():
+    def script(session, n):
+        if n == 1:
+            session.queue.put_nowait(
+                _msg(voice_activity=SimpleNamespace(voice_activity_type="START"))
+            )
+            session.queue.put_nowait(
+                _msg(
+                    server_content=_content(
+                        interim_input_transcription=SimpleNamespace(text="he"),
+                        waiting_for_input=True,
+                    )
+                )
+            )
+
+    events, _ = _run(FakeServer([script]), _frames(2), _fast())
+    other = [e for e in events.events if e["kind"] == "other_fields"]
+    names = {n for e in other for n in e["fields"]}
+    assert "voice_activity" in names
+    assert "server_content.interim_input_transcription" in names
+    assert "server_content.waiting_for_input" in names
+
+
+def test_main_stdout_is_one_ascii_json_line_and_the_key_is_redacted(
+    tmp_path, monkeypatch, capsys
+):
+    word = "ghostword"
+    monkeypatch.setenv("GEMINI_API_KEY", word)
+    missing = str(tmp_path / f"no-ffmpég-{word}")
+    out_dir = tmp_path / "out"
+    rc = probe.main(
+        ["--audio", "in.flac", "--ffmpeg", missing, "--out-dir", str(out_dir)]
+    )
+    assert rc == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1
+    assert lines[0].isascii()
+    summary = json.loads(lines[0])
+    assert summary["connections"] == 0
+    assert summary["errors"]
+    assert word not in lines[0]
+    assert "<redacted>" in summary["errors"][0]
+    for name in (
+        "output.wav",
+        "summary.json",
+        "events.jsonl",
+        "input_text.txt",
+        "output_text.txt",
+    ):
+        path = out_dir / name
+        assert path.exists(), name
+        assert word not in path.read_bytes().decode("utf-8", "replace")
