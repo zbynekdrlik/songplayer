@@ -2,7 +2,9 @@
 paths:
   - "crates/sp-server/src/lyrics/heavy_containment*.rs"
   - "crates/sp-server/src/lyrics/heavy_slot.rs"
+  - "crates/sp-server/src/lyrics/heavy_alloc_env.rs"
   - "crates/sp-server/src/process_start.rs"
+  - "crates/sp-server/src/stems/separator.rs"
 ---
 # Heavy-child OS containment (#203) — Job Object CPU cap + affinity + memory priority
 
@@ -211,3 +213,15 @@ path; the target is a flat, near-zero steady state while playing.
   Prints commit / processes (top-12 private commit) / gap (`non_process_commit_MB`)
   / zombies (0-thread + parent-alive + the `handle64.exe -a -p <pid>` operator
   hint) / python children (WS > 200 MB). No kills, no writes, no downloads.
+
+## #207 round 3b — reading mimalloc's self-report in the separation log
+
+`heavy_alloc_env` now also emits `MIMALLOC_VERBOSE=1` + `MIMALLOC_SHOW_STATS=1`
+(both modes), and `separate-stems ok; stderr tail:` grew to 60 lines
+(`SEPARATION_STDERR_TAIL_LINES`) to keep them. **Verbose options block present**
+= the env is applied (a wrong var name/value is a silent no-op, never an
+error). **Exit stats block** (`reserved`/`committed`/`peak`): `reserved` ≈ the
+4 GiB arena; `committed`/`peak` near the ~9 GB figure in RETAINED means the
+arena reservation IS the ~9 GB, not live workload memory — a LAZY run with
+`committed` well below that (and shrinking after the purge delay) confirms
+lazy commit is doing its job.
