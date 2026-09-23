@@ -464,17 +464,35 @@ and 5797708129 (freeze this state, the model is a setting).
   until `time_left − 1 s` or 8 s without voiced output (`drained` event). The
   probe paused input ≤ 8 s per GoAway — its 13 s output gap. A handle arriving on
   a DRAINING connection is ignored (it would rewind to before the switch). A close
-  without GoAway reconnects the same way; a failed send marks the connection
-  closed and retries the frame on the next one. No reconnect after
-  `audio_stream_end` (nothing left to send). **A refused (re)connect, a connect
-  that does not complete in 30 s, or 50 connections raise `SessionFailed` → the
-  child exits 1 with `Live reconnect (connection N) refused: …`** and the Rust
-  backoff retries the job. UNVERIFIED until the first box run: that the server
-  accepts a resume while the old connection is still open (the probe only resumed
-  after its grace).
-- **Drain:** `audio_stream_end` once after the last frame, then until 8 s without
-  VOICED output (a chunk above −50 dBFS — the session streams silence after
-  speech), or 60 s, or every connection closed.
+  without GoAway reconnects the same way; a failed send — or one stuck longer than
+  `send_timeout_s` (30 s) — closes that connection and retries the frame on the
+  next one. **No reconnect once every frame is sent** (a new connection would
+  carry nothing; the old one drains what it got): a reconnect already in flight
+  then is ignored if refused and closed if it opens (`reconnect_ignored`), so a
+  GoAway on the last frames never fails a fully sent dub. **A refused (re)connect
+  while input is unsent, a connect that does not complete in 30 s (`did not
+  complete within 30 s`), or 50 connections raise `SessionFailed` → the child
+  exits 1 with `Live reconnect (connection N) refused: …`** and the Rust backoff
+  retries the job. A LOCAL error while recording (a full disk in the raw sink, a
+  bug in `_record`) is fatal too — only the transport is guarded in `_receive`, so
+  it can never pose as a closed websocket and reconnect into the same error.
+  UNVERIFIED until the first box run: that the server accepts a resume while the
+  old connection is still open (the probe only resumed after its grace).
+- **Drain:** `audio_stream_end` once after the last frame (one best-effort send on
+  the active connection), then until 8 s without VOICED output (a chunk above
+  −50 dBFS — the session streams silence after speech), or 60 s, or every
+  connection closed.
+- **Heartbeat on progress only:** `on_progress` fires from a supervisor poll only
+  when frames were sent or output arrived since the last call (the child writes
+  `heartbeat` at most every 5 s from it), so a stuck session goes stale for the
+  Rust stall timeout instead of looking alive because the loop still ticks.
+- **Python 3.11 teardown trap:** `asyncio.wait_for` (the send timeout) can
+  swallow a cancellation that lands as its inner send completes; a cancelled
+  sender then waited forever on the cleared ready event (a failing session never
+  returned — caught only by running the suite under 3.11, the eval-checks
+  version). While stopping, the ready event stays set (`_not_ready`) and the
+  sender returns on `_stopping`. Run the scripts suite under 3.11 locally
+  (`uv venv --python 3.11`) when touching the session loop.
 - Output chunks carry `arrival_s`, `conn`, `offset` (into the raw sink), `voiced`,
   `active` (arrived while its connection was the active one).
 
@@ -489,10 +507,17 @@ and 5797708129 (freeze this state, the model is a setting).
   itself, a stall re-syncs to arrival). Connections keep SEPARATE cursors and
   `render_placed_wav` SUMS them (clipped): the old connection's trailing
   translation overlaps the new one's start; one cursor across both would push
-  every later second late by the overlap on each reconnect. The WAV is at least
-  the input's length; the body is a memmap and the raw file is read per chunk (a
-  36-min talk never sits in memory).
-- `sk_timed` = output-transcription arrival − t0 − latency, clamped ≥ 0 and made
+  every later second late by the overlap on each reconnect. When a connection's
+  stream runs AHEAD of its arrival by more than `CATCH_UP_TOLERANCE_MS` (500 ms —
+  a burst, output slightly faster than real time), its streamed SILENCE chunks are
+  dropped (start `None`) until it is back; voiced audio is never dropped
+  (`dropped_silence_s` in the summary). The WAV is at least the input's length;
+  the body is a memmap and the raw file is read per chunk (a 36-min talk never
+  sits in memory). A failed run removes `live_output.raw` / `dub_placed.wav`.
+- Transcriptions carry their connection; EN, SK and `sk_timed` are ordered BY
+  CONNECTION (the old connection's trailing text arrives after the new one's first
+  text but translates earlier input — never interleaved). `sk_timed` =
+  output-transcription arrival − t0 − latency, clamped ≥ 0 and made
   non-decreasing.
 
 ## Log lines the box acceptance reads (stderr → sp-server log)
@@ -503,7 +528,8 @@ drained (quiet|deadline)`, `live: frame K/N output Xs` (every 600 frames),
 `live: audio_stream_end after frame N/N`, `live: drain end (quiet|tail_cap|
 closed)`, then the summary `dub session: connections C, reconnects R,
 output/input X, max voiced gap Gs, latency L ms (measured M ms, input onset O ms),
-drain …`, then the round-F `dub loudness: …` line (the last one).
+dropped silence Ds, drain …`, then the round-F `dub loudness: …` line (the last
+one).
 `output_to_input_ratio` counts the active stream + VOICED draining output — the
 silence a draining connection keeps streaming during the overlap would inflate it
 by ~8 s per reconnect (`overlap_output_s` reports all draining output).
@@ -514,7 +540,12 @@ by ~8 s per reconnect (`overlap_output_s` reports all draining output).
 eval-checks job has no google-genai). The overlap proof: `FakeServer(...,
 open_after_frames={2: 5})` holds connection 2's connect until the server received
 5 MORE frames, which only the still-fed OLD connection can deliver — a pause would
-hang the test into its 60 s `wait_for` failure. `test_dub_worker.py`: placement,
+hang the test into its 60 s `wait_for` failure. Other fake knobs:
+`connect_delay_s` (a slow real reconnect), `connect_advance_s` (the reconnect
+time on the VIRTUAL clock — proves owed frames catch up and the schedule is never
+re-anchored), `hang_at` (a send that never returns). A GoAway meant to be seen
+BEFORE the stream end must ride the second-to-last frame: on the last one it is
+recorded only after `audio_stream_end`. `test_dub_worker.py`: placement,
 latency, transcripts shape, render, argv defaults, legacy cleanup and the whole
 `cmd_live_translate` with the session + ffmpeg seams faked. Rust: `worker.rs`
 tests (`dub_model_from`, `dub_voice_from`, `dub_input_audio`), `child.rs` (argv,
@@ -528,7 +559,12 @@ When a newer Live Translate model ships: set `dub_model` (Nastavenia → Dabing 
 `Model dabingu`, or `PATCH /api/v1/settings {"dub_model": "<id>"}`), run the round-H
 probe with `--model <id>` on the box (`.claude/rules/dubbing-eval.md`, same slice
 of video 344), re-dub ONE video (below) and compare the new `session_summary.json`
-+ a listen against the current dub. No code change, no new tuning round.
++ a listen against the current dub. No code change, no new tuning round. The
+probe is only the capability pre-check (does the model accept compression /
+resumption / GoAway, its latency and voice); it keeps its OWN loop, which pauses
+input on GoAway (eval and production are deliberately decoupled — the dispatch
+decision for step 2). The JUDGEMENT of a new model is the production re-dub's
+`session_summary.json` + a listen, never the probe's gap numbers.
 
 # Dabing round F (#184) — the dub is loudness-matched to the audio it translates
 
