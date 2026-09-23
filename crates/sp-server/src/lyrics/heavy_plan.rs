@@ -381,8 +381,8 @@ fn cpu_idle_threads() -> usize {
 /// Pure cpu-idle thread cap (#162 — minimal load, not speed): the quarter-cores
 /// rule `cores / 4` BOUNDED by the affinity `block` the child runs on (the
 /// popcount of the resolved affinity mask), at least 1. On the 24-core box the
-/// #168 round-5 default confines the child to a 4-logical-core block, so the 6
-/// threads the quarter rule would pick are capped to 4 — 6 torch threads on 4
+/// #147 round-8 default confines the child to a 3-logical-core block, so the 6
+/// threads the quarter rule would pick are capped to 3 — 6 torch threads on 3
 /// logical cores oversubscribe. A wide `block` (an explicit whole-machine mask)
 /// lets the quarter rule win. Extracted so it is deterministic in tests.
 fn cpu_idle_threads_for(cores: usize, block: usize) -> usize {
