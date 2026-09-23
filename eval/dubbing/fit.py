@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """fit.py — pure timing placement of synthesized dub lines onto the source timeline.
 
-Given the source (English) sentence spans of the dabing recording segment and the NATURAL
+Given the source (English) sentence spans of the dabing segment and the NATURAL
 duration of each synthesized Slovak line, decide where and how each line is laid
 onto the dub track. This module is PURE (no audio, no I/O, no external deps) so
 every branch is unit-tested on any box — the runner (`run_listening_test.py`)
