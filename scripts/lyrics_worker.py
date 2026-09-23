@@ -3,11 +3,11 @@
 lyrics_worker.py — narrow Python entry points for the lyrics pipeline.
 
 Commands:
-  preprocess-vocals  Mel-Roformer + anvuew dereverb + 16 kHz mono float32 WAV
+  preprocess-vocals  anvuew dereverb + 16 kHz mono float32 WAV of the stems
+                     worker's vocals sidecar (--vocals-in); no isolation pass
   align-chunks       Chunked Qwen3-ForcedAligner alignment (loads model once,
                      loops over all chunks from a JSON request file)
-  preload            Warm Mel-Roformer + anvuew + Qwen3-ForcedAligner at boot
-  isolate-vocals     Diagnostic: Mel-Roformer only, 16 kHz mono float32 WAV
+  preload            Warm anvuew dereverb + Qwen3-ForcedAligner at boot
 """
 
 import argparse
@@ -20,7 +20,9 @@ import sys
 import tempfile
 
 
-MEL_ROFORMER_MODEL = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+# #144: one separation per video — the mtl aligner's vocals come from the stems
+# worker's Kim vocals sidecar (`{base}_audio_vocals.flac`, #184 G0). The second
+# BS-RoFormer isolation model is deleted; `preprocess-vocals` only dereverbs.
 DEREVERB_MODEL = "dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt"
 
 # #171 — resumable, segmented vocal isolation. The input is split into fixed
@@ -93,24 +95,6 @@ def _stitch_segments(segments, step_samples, overlap_samples):
     else:
         out[nz] /= wsum[nz]
     return out.astype(np.float32)
-
-
-def _pick_vocal_stem(out_files, fallback_dir):
-    """Return the absolute path of the Vocals stem among `out_files`."""
-    def _abs(p):
-        return p if os.path.isabs(p) else os.path.join(fallback_dir, p)
-
-    vocal = [p for p in out_files if "Vocals" in p or "vocals" in p]
-    if vocal:
-        return _abs(vocal[0])
-    non_inst = [
-        p for p in out_files if "Instrumental" not in p and "instrumental" not in p
-    ]
-    if len(non_inst) == 1:
-        return _abs(non_inst[0])
-    raise RuntimeError(
-        f"audio-separator did not produce an identifiable Vocals stem (got: {out_files})"
-    )
 
 
 def _pick_dereverbed_stem(out_files, fallback_dir):
@@ -289,13 +273,15 @@ def _atomic_write_wav(path, audio, sr):
     os.replace(tmp, path)
 
 
-def _isolate_one_segment(sep_mel, sep_dereverb, full, in_sr, start_s, end_s, out_path, stem_dir):
-    """Isolate + dereverb ONE native-rate window `[start_s, end_s]` of `full`,
-    resample to 16 kHz mono float32, and write it ATOMICALLY to `out_path`.
+def _dereverb_one_segment(sep_dereverb, full, in_sr, start_s, end_s, out_path, stem_dir):
+    """Dereverb ONE native-rate window `[start_s, end_s]` of `full`, resample to
+    16 kHz mono float32, and write it ATOMICALLY to `out_path`.
 
-    `full` is (n,) mono or (ch, n) multi-channel at `in_sr`. `stem_dir` is a
-    scratch dir the two already-loaded separators write into; it is cleared
-    after each segment so it never grows across a long song."""
+    #144: `full` is the stems worker's VOCALS sidecar (already isolated by the
+    Kim Mel-Band RoFormer), so there is no second isolation pass — just anvuew
+    dereverb + resample. `full` is (n,) mono or (ch, n) multi-channel at `in_sr`.
+    `stem_dir` is a scratch dir the already-loaded separator writes into; it is
+    cleared after each segment so it never grows across a long song."""
     import numpy as np
     import librosa
     import soundfile as sf
@@ -309,11 +295,10 @@ def _isolate_one_segment(sep_mel, sep_dereverb, full, in_sr, start_s, end_s, out
     seg_in = os.path.join(stem_dir, "segin_" + os.path.basename(out_path))
     sf.write(seg_in, data, in_sr, subtype="FLOAT")
 
-    # Step 1: Mel-Roformer vocal isolation. Step 2: anvuew dereverb on it.
-    vocal_path = _pick_vocal_stem(sep_mel.separate(seg_in), stem_dir)
-    dry_path = _pick_dereverbed_stem(sep_dereverb.separate(vocal_path), stem_dir)
+    # anvuew dereverb on the supplied vocals window (one pass, no isolation).
+    dry_path = _pick_dereverbed_stem(sep_dereverb.separate(seg_in), stem_dir)
 
-    # Step 3: resample to exactly 16 kHz mono float32, peak-clamp, atomic write.
+    # Resample to exactly 16 kHz mono float32, peak-clamp, atomic write.
     audio, _ = librosa.load(dry_path, sr=16000, mono=True)
     peak = float(np.max(np.abs(audio))) if audio.size else 0.0
     if peak > 1.0:
@@ -328,21 +313,25 @@ def _isolate_one_segment(sep_mel, sep_dereverb, full, in_sr, start_s, end_s, out
 
 
 def cmd_preprocess_vocals(args):
-    """Mel-Roformer isolate → anvuew dereverb → 16 kHz mono float32 WAV, done
-    RESUMABLY per segment (#171).
+    """anvuew dereverb → 16 kHz mono float32 WAV of the stems worker's vocals
+    sidecar (`--vocals-in`), done RESUMABLY per segment (#171).
 
-    The input is split into `ISOLATION_SEGMENT_SECONDS` windows; each is
-    isolated+dereverbed+resampled and written to `--work-dir/seg_NNNN_of_MMMM.wav`.
+    #144: the mtl aligner's vocals come from the stems worker's Kim vocals
+    sidecar (`{base}_audio_vocals.flac`, #184 G0), so this ONLY dereverbs +
+    resamples — the second BS-RoFormer isolation pass is deleted (it stalled on
+    the contained-CPU box; one separation per video, the owner's one-thing
+    doctrine). The input is split into `ISOLATION_SEGMENT_SECONDS` windows; each
+    is dereverbed+resampled and written to `--work-dir/seg_NNNN_of_MMMM.wav`.
     Segments already present are SKIPPED on start (so a killed/timed-out run
-    resumes — logs `isolation resumed from chunk N/M`), the two models load once
-    and are reused across every remaining segment, and the final WAV is stitched
-    from the segment set (2 s linear crossfade over each overlap), written
-    atomically to `--output`, and the work dir is removed. Writes a FLOAT WAV to
-    --output. Exits 0 on success.
+    resumes — logs `isolation resumed from chunk N/M`), the dereverb model loads
+    once and is reused across every remaining segment, and the final WAV is
+    stitched from the segment set (2 s linear crossfade over each overlap),
+    written atomically to `--output`, and the work dir is removed. Writes a FLOAT
+    WAV to --output. Exits 0 on success.
 
     GPU discipline (#154): `gpu_polite()` sets a BELOW_NORMAL WDDM scheduling
     priority + a per-process VRAM cap before any model loads. On a CUDA OOM the
-    isolation re-runs on CPU (same model + parameters → identical output, only
+    dereverb re-runs on CPU (same model + parameters → identical output, only
     slower) — the separator's model parameters are never changed.
     """
     import numpy as np
@@ -358,9 +347,14 @@ def cmd_preprocess_vocals(args):
     work_dir = args.work_dir
     os.makedirs(work_dir, exist_ok=True)
 
-    # Native-rate load, so the separator sees the full-quality signal (the 16 kHz
-    # downsample happens only on each segment's dereverbed output).
-    full, in_sr = librosa.load(args.audio, sr=None, mono=False)
+    print(
+        f"preprocess-vocals: vocals from stems sidecar {args.vocals_in}",
+        file=sys.stderr,
+    )
+    # Native-rate load of the stems worker's vocals sidecar, so the dereverb sees
+    # the full-quality signal (the 16 kHz downsample happens only on each
+    # segment's dereverbed output).
+    full, in_sr = librosa.load(args.vocals_in, sr=None, mono=False)
     total_samples = full.shape[0] if full.ndim == 1 else full.shape[1]
     total_s = total_samples / float(in_sr)
     bounds = _segment_bounds(total_s, ISOLATION_SEGMENT_SECONDS, ISOLATION_OVERLAP_SECONDS)
@@ -377,20 +371,13 @@ def cmd_preprocess_vocals(args):
         print(f"isolation resumed from chunk {sum(done)}/{n_seg}", file=sys.stderr)
 
     def _process_remaining(force_cpu):
-        """Load both models once and process every not-yet-done segment. Wrapped
-        so a CUDA OOM can retry the whole loop on CPU (resume skips finished
-        segments)."""
+        """Load the dereverb model once and process every not-yet-done segment.
+        Wrapped so a CUDA OOM can retry the whole loop on CPU (resume skips
+        finished segments)."""
         stem_dir = tempfile.mkdtemp(prefix="sp_stems_")
         cpu_ctx = _force_cpu() if force_cpu else contextlib.nullcontext()
         try:
             with cpu_ctx:
-                sep_mel = Separator(
-                    model_file_dir=args.models_dir,
-                    output_format="WAV",
-                    output_dir=stem_dir,
-                    use_soundfile=True,
-                )
-                sep_mel.load_model(MEL_ROFORMER_MODEL)
                 sep_dereverb = Separator(
                     model_file_dir=args.models_dir,
                     output_format="WAV",
@@ -401,12 +388,11 @@ def cmd_preprocess_vocals(args):
                 for i, (s_s, e_s) in enumerate(bounds):
                     if done[i]:
                         continue
-                    _isolate_one_segment(
-                        sep_mel, sep_dereverb, full, in_sr, s_s, e_s, _seg_path(i), stem_dir
+                    _dereverb_one_segment(
+                        sep_dereverb, full, in_sr, s_s, e_s, _seg_path(i), stem_dir
                     )
                     done[i] = True
                     print(f"isolation chunk {i + 1}/{n_seg} done", file=sys.stderr)
-                _free_vram(sep_mel)
                 _free_vram(sep_dereverb)
         finally:
             shutil.rmtree(stem_dir, ignore_errors=True)
@@ -535,17 +521,15 @@ def cmd_align_chunks(args):
 
 
 def cmd_preload(args):
-    """Warm Mel-Roformer + anvuew dereverb + Qwen3-ForcedAligner at bootstrap.
+    """Warm anvuew dereverb + Qwen3-ForcedAligner at bootstrap.
 
-    Surfaces model-download failures before any real song is processed.
+    Surfaces model-download failures before any real song is processed. #144:
+    the BS-RoFormer isolation model is no longer warmed — the mtl vocals come
+    from the stems worker's sidecar, so `preprocess-vocals` only dereverbs.
     """
     import torch
     from audio_separator.separator import Separator
     from qwen_asr import Qwen3ForcedAligner
-
-    mel = Separator(model_file_dir=args.models_dir, output_format="WAV")
-    mel.load_model(MEL_ROFORMER_MODEL)
-    _free_vram(mel)
 
     dereverb = Separator(model_file_dir=args.models_dir, output_format="WAV")
     dereverb.load_model(DEREVERB_MODEL)
@@ -566,43 +550,10 @@ def cmd_preload(args):
             {
                 "loaded": True,
                 "device": device_map,
-                "mel_roformer": MEL_ROFORMER_MODEL,
                 "dereverb": DEREVERB_MODEL,
             }
         )
     )
-
-
-def cmd_isolate_vocals(args):
-    """Diagnostic: Mel-Roformer only, 16 kHz mono float32 WAV path printed."""
-    import numpy as np
-    import librosa
-    import soundfile as sf
-    from audio_separator.separator import Separator
-
-    stem_dir = tempfile.mkdtemp(prefix="sp_diag_")
-    try:
-        sep = Separator(
-            model_file_dir=args.models_dir,
-            output_format="WAV",
-            output_dir=stem_dir,
-        )
-        sep.load_model(MEL_ROFORMER_MODEL)
-        out_files = sep.separate(args.audio)
-        vocal_path = _pick_vocal_stem(out_files, stem_dir)
-        _free_vram(sep)
-
-        audio, _ = librosa.load(vocal_path, sr=16000, mono=True)
-        peak = float(np.max(np.abs(audio))) if audio.size else 0.0
-        if peak > 1.0:
-            audio = audio / peak
-
-        fd, resampled = tempfile.mkstemp(suffix="_vocals16k.wav")
-        os.close(fd)
-        sf.write(resampled, audio, 16000, subtype="FLOAT")
-    finally:
-        shutil.rmtree(stem_dir, ignore_errors=True)
-    print(json.dumps({"vocal_path": resampled}))
 
 
 def main():
@@ -610,7 +561,10 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     p_pre = subparsers.add_parser("preprocess-vocals")
-    p_pre.add_argument("--audio", required=True)
+    # #144: the input is the stems worker's vocals sidecar, not the mix — the
+    # BS-RoFormer isolation pass is deleted, so `preprocess-vocals` only dereverbs
+    # + resamples this already-isolated vocals track.
+    p_pre.add_argument("--vocals-in", dest="vocals_in", required=True)
     p_pre.add_argument("--output", required=True)
     p_pre.add_argument("--models-dir", required=True)
     # #171: per-segment scratch dir for resumable isolation. Each segment WAV is
@@ -629,16 +583,11 @@ def main():
     p_pl = subparsers.add_parser("preload")
     p_pl.add_argument("--models-dir", required=True)
 
-    p_iv = subparsers.add_parser("isolate-vocals")
-    p_iv.add_argument("--audio", required=True)
-    p_iv.add_argument("--models-dir", required=True)
-
     args = parser.parse_args()
     dispatch = {
         "preprocess-vocals": cmd_preprocess_vocals,
         "align-chunks": cmd_align_chunks,
         "preload": cmd_preload,
-        "isolate-vocals": cmd_isolate_vocals,
     }
     try:
         dispatch[args.command](args)

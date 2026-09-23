@@ -68,17 +68,19 @@ fn preprocess_vocals_takes_timeout_parameter_no_magic_600() {
     );
 }
 
-/// Structural: `cmd_preprocess_vocals` must write both isolation stems via
-/// the soundfile writer, not pydub — pydub's writer runs out of memory on
-/// long 24-bit stems (pydub#135; observed on an 827-s song 2026-09-12).
-/// Exactly two occurrences: the two `Separator(...)` calls in that function
-/// (the script's other Separators keep the default writer). CRLF-normalised.
+/// Structural: `cmd_preprocess_vocals` must write its stems via the soundfile
+/// writer, not pydub — pydub's writer runs out of memory on long 24-bit stems
+/// (pydub#135; observed on an 827-s song 2026-09-12). #144: the second
+/// BS-RoFormer isolation Separator is deleted (one separation per video — the
+/// mtl vocals come from the stems worker's sidecar), so exactly ONE occurrence
+/// remains: the dereverb `Separator(...)` in `_process_remaining`. The preload
+/// Separators keep the default writer (they never `.separate()`). CRLF-normalised.
 #[test]
-fn preprocess_vocals_script_uses_soundfile_writer_twice() {
+fn preprocess_vocals_script_uses_soundfile_writer_for_the_dereverb_separator() {
     let src = include_str!("../../../../scripts/lyrics_worker.py").replace("\r\n", "\n");
     let count = src.matches("use_soundfile=True").count();
     assert_eq!(
-        count, 2,
-        "cmd_preprocess_vocals must set the soundfile writer on both Separator() calls (found {count})"
+        count, 1,
+        "cmd_preprocess_vocals must set the soundfile writer on its dereverb Separator() call (found {count})"
     );
 }

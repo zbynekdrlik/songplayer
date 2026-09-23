@@ -189,3 +189,92 @@ async fn stale_bucket_honours_backoff() {
         .unwrap();
     assert!(row.is_none(), "deferred stale-bucket row must be skipped");
 }
+
+#[tokio::test]
+async fn record_lyrics_wait_leaves_attempts_unchanged_and_sets_future_recheck() {
+    let pool = setup_pool().await;
+    let id = insert_video(&pool, "stemwait1", 0, 1).await;
+
+    // Prime a known NON-ZERO attempt count so "unchanged" is meaningful (a
+    // zeroing bug would not slip past a 0 == 0 check).
+    record_lyrics_deferral(&pool, id, Duration::from_secs(1))
+        .await
+        .unwrap();
+    let before: i64 = sqlx::query_scalar("SELECT lyrics_attempts FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(before, 1, "priming deferral set attempts to 1");
+
+    // A stems wait must NOT accrue the failure penalty.
+    record_lyrics_wait(&pool, id, Duration::from_secs(600))
+        .await
+        .unwrap();
+    let after: i64 = sqlx::query_scalar("SELECT lyrics_attempts FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        after, before,
+        "a stems wait must NOT increment lyrics_attempts"
+    );
+
+    // …but it DOES schedule a future recheck (same strftime format as the
+    // backoff, so it compares lexically against SQLite's own `now`).
+    let next: Option<String> =
+        sqlx::query_scalar("SELECT lyrics_next_attempt_at FROM videos WHERE id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let next = next.expect("lyrics_next_attempt_at must be set by a stems wait");
+    let now: String = sqlx::query_scalar("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(
+        next > now,
+        "the recheck must be in the future (next={next} now={now})"
+    );
+}
+
+#[tokio::test]
+async fn stems_wait_removes_row_from_selector_until_due() {
+    let pool = setup_pool().await;
+    let id = insert_video(&pool, "stemwait2", 0, 0).await;
+
+    let row = get_next_video_for_lyrics(&pool, LYRICS_PIPELINE_VERSION)
+        .await
+        .unwrap();
+    assert_eq!(
+        row.map(|r| r.id),
+        Some(id),
+        "row is selected before the wait"
+    );
+
+    // No-penalty stems wait → excluded until due, so the selector moves on
+    // instead of re-picking this stems-blocked row every tick.
+    record_lyrics_wait(&pool, id, Duration::from_secs(600))
+        .await
+        .unwrap();
+    let row = get_next_video_for_lyrics(&pool, LYRICS_PIPELINE_VERSION)
+        .await
+        .unwrap();
+    assert!(
+        row.is_none(),
+        "a stems-waiting row must NOT be selected before due"
+    );
+
+    // Past its recheck → eligible again (no attempts penalty barred it).
+    set_next_attempt_past(&pool, id).await;
+    let row = get_next_video_for_lyrics(&pool, LYRICS_PIPELINE_VERSION)
+        .await
+        .unwrap();
+    assert_eq!(
+        row.map(|r| r.id),
+        Some(id),
+        "row past its recheck must be selected again"
+    );
+}

@@ -108,10 +108,36 @@ no lyrics.
 Do NOT use output-level heuristics (gap size, line count, density) to detect
 failure — calm instrumental passages are legitimate.
 
-## Vocal isolation (`preprocess-vocals`) — measured facts (2026-09-12, #144)
+## Vocal preprocessing (`preprocess-vocals`) — #144 fix round: one separation per video
+
+**The mtl aligner's vocals come from the stems worker's vocals sidecar
+(`stems::stem_paths(audio).0` = `{base}_audio_vocals.flac`, Mel-Band RoFormer
+"Kim", #184 G0) — NOT a second isolation pass.** `preprocess-vocals` now takes
+`--vocals-in <that sidecar>` and runs anvuew dereverb + 16 kHz mono float32
+resample ONLY; the BS-RoFormer `model_bs_roformer_ep_317…` isolation model is
+DELETED (it stalled indefinitely under the contained-CPU regime — see #144's
+finding, `vocal isolation failed … stalled 1200s`), and `preload` no longer
+warms it. Why: two RoFormer separations of the same song, one of which never
+finished; the stems worker already separates every video once.
+
+**The ★ isolation input is decided BEFORE any heavy child**
+(`idle_gate_abort::isolation_input`, keyed on the row's raw `stem_status`):
+`'done'` + the sidecar exists → feed it to the dereverb step; `'unsupported'` →
+no isolation path exists any more, take the g35t base tier; anything else
+(pending / failed / not-yet-on-disk) → `HeavyDefer::WaitForStems`
+(`SongOutcome::WaitingForStems` → `defer_for_stems` → `record_lyrics_wait`: a
+NO-PENALTY recheck `STEMS_WAIT_RECHECK` = 600 s ahead, `lyrics_attempts`
+UNTOUCHED, so the selector moves to the next song instead of re-picking this
+stems-blocked row every tick). NO `LYRICS_PIPELINE_VERSION` bump — ★ rows already produced
+stand; only pending / isolation-failed rows use the new path (they can only
+improve). Whether to bump v23 (full re-run through the stems-fed path) is the
+owner's call on #144, asked separately.
+
+### Measured facts (2026-09-12, dereverb-only path)
 
 - ≈ 1× realtime on the RTX 3070 Ti at BELOW_NORMAL (240 s song → 233 s;
-  Mel-Roformer pass 0.75×, dereverb 0.16×). Timeout is
+  dereverb 0.16×; the deleted Mel-Roformer isolation pass was the ~0.75× half).
+  Timeout is
   `aligner::isolation_timeout` = clamp(2 × duration, 600 s, 3600 s); videos
   over `MAX_LYRICS_DURATION_MS` (30 min) are stamped `unsupported_source`.
 - Stems are written with `use_soundfile=True` — audio-separator's pydub
