@@ -584,8 +584,9 @@ impl DubWorker {
 
     /// Materialise the dub tool scripts into `tools_dir` (embedded at compile
     /// time), rewriting only the stale ones. Mirrors `StemWorker::ensure_script`;
-    /// ships `dub_worker.py` AND `dub_voice_check.py` (the child imports the latter
-    /// for the round-E voice-band guard). Returns the worker script path.
+    /// ships `dub_worker.py` plus the helpers it imports: `dub_voice_check.py`
+    /// (the round-E voice-band guard) and `dub_loudness.py` (the round-F
+    /// loudness-matched assembly). Returns the worker script path.
     async fn ensure_script(&self) -> anyhow::Result<PathBuf> {
         let tools_dir = self.script_path.parent().unwrap_or_else(|| Path::new("."));
         tokio::fs::create_dir_all(tools_dir).await?;

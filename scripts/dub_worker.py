@@ -758,6 +758,12 @@ def _assemble_dub(
     ffmpeg failure or unparseable measurement raises — the dub fails loudly
     rather than shipping at an unknown level."""
     ff = _ffmpeg()
+    part = dl.partial_out_path(out)
+    # A child hard-killed mid final pass (stall timeout, server exit) never ran
+    # the cleanup below — clear its leftover partial before anything else.
+    if os.path.exists(part):
+        _log(f"dub loudness: removing a stale partial {part} (an earlier run died)")
+        os.remove(part)
     _heartbeat(work_dir)
     source = dl.parse_loudnorm_json(_run_stderr(dl.loudness_measure_args(ff, audio)))
     target = dl.loudness_target(source["input_i"])
@@ -768,7 +774,6 @@ def _assemble_dub(
         _run_stderr(dl.assembly_args(ff, wavs, mix_filter, analysis, None, FINAL_SR))
     )
     second = dl.build_loudnorm_second_pass(mix, target)
-    part = dl.partial_out_path(out)
     _heartbeat(work_dir)
     try:
         applied = dl.parse_loudnorm_json(
@@ -776,10 +781,13 @@ def _assemble_dub(
         )
         os.replace(part, out)
     except BaseException:
-        try:
-            os.remove(part)
-        except OSError:
-            pass
+        # The previous good dub stays; drop the half-written partial, then
+        # re-raise the ORIGINAL failure (a cleanup error is logged, not raised).
+        if os.path.exists(part):
+            try:
+                os.remove(part)
+            except OSError as e:
+                _log(f"dub loudness: could not remove partial {part}: {e}")
         raise
     stats = {
         "source_i": source["input_i"],
