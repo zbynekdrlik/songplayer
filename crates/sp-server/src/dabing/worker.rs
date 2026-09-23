@@ -658,7 +658,10 @@ mod tests {
     fn embedded_tool_scripts_ship_worker_and_voice_check() {
         let scripts = embedded_tool_scripts();
         let names: Vec<&str> = scripts.iter().map(|(n, _)| *n).collect();
-        assert_eq!(names, vec!["dub_worker.py", "dub_voice_check.py"]);
+        assert_eq!(
+            names,
+            vec!["dub_worker.py", "dub_voice_check.py", "dub_loudness.py"]
+        );
         for (name, content) in scripts {
             assert!(!content.is_empty(), "{name} embedded empty");
         }
@@ -670,6 +673,21 @@ mod tests {
         assert!(
             scripts[1].1.contains("MAX_HIGH_BAND_FRACTION"),
             "dub_voice_check.py is not the round-E high-band module"
+        );
+        // #184 round F: the worker imports `dub_loudness` for the loudness-matched
+        // assembly, so it must ship next to it (a missing module = every dub fails).
+        let loudness = scripts
+            .iter()
+            .find(|(n, _)| *n == "dub_loudness.py")
+            .map(|(_, c)| *c)
+            .unwrap_or("");
+        assert!(
+            loudness.contains("def build_loudnorm_second_pass"),
+            "dub_loudness.py (round-F loudness rules) is not shipped"
+        );
+        assert!(
+            scripts[0].1.contains("import dub_loudness"),
+            "dub_worker.py does not import the shipped dub_loudness module"
         );
     }
 
