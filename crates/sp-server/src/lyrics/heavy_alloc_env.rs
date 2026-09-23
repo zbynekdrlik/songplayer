@@ -169,6 +169,36 @@ pub(crate) fn heavy_alloc_env(mode: AllocMode, purge_delay_ms: i64) -> Vec<(Stri
 mod tests {
     use super::*;
 
+    /// #207 round-3c: `reserve_value` is the pure size-string helper behind
+    /// `MIMALLOC_RESERVE_OS_MEMORY` — the operator `heavy_alloc_reserve_gib`
+    /// knob (round-3b mimalloc self-report: `reserved: 4.0 GiB / committed:
+    /// 4.0 GiB / commits: 0` — the eager-committed arena, not live workload,
+    /// is the ~4 GiB piece of the child's 8.7 GiB peak commit; ROZHODNUTÉ 3c
+    /// measures whether a smaller reserve still suffices).
+    #[test]
+    fn reserve_value_formats_gib() {
+        assert_eq!(reserve_value(4), "4GiB");
+        assert_eq!(reserve_value(2), "2GiB");
+        assert_eq!(reserve_value(1), "1GiB");
+        assert_eq!(reserve_value(8), "8GiB");
+    }
+
+    /// #207 round-3c: `heavy_alloc_env` takes the operator reserve size and
+    /// carries it verbatim into the `MIMALLOC_RESERVE_OS_MEMORY` pair (index
+    /// 2, unchanged position) — a smaller reserve is the lever the box will
+    /// measure via mimalloc's own `commits` counter in its exit report.
+    #[test]
+    fn heavy_alloc_env_carries_the_operator_reserve_gib() {
+        let env = heavy_alloc_env(AllocMode::Retained, -1, 2);
+        assert_eq!(
+            env[2],
+            (
+                "MIMALLOC_RESERVE_OS_MEMORY".to_string(),
+                "2GiB".to_string()
+            )
+        );
+    }
+
     /// RETAINED at the `-1` (never-purge) default must be EXACTLY these five
     /// pairs, in order — a wrong var name or value is silently ignored by
     /// mimalloc (no effect), so the exact set is pinned. The heap trio is
