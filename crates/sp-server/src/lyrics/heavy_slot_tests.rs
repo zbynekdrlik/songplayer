@@ -350,3 +350,22 @@ fn contained_line_is_grep_stable_with_alloc_mode() {
         "heavy child contained (pid 7): mem_limit=2048B cpu_cap=50% affinity=0xf0 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained"
     );
 }
+
+/// #207 round-3c: the contained line gains ` reserve_gib=<n>` after
+/// `alloc_mode=` — the operator `heavy_alloc_reserve_gib` size (GiB) applied
+/// to the separation child's `MIMALLOC_RESERVE_OS_MEMORY` at spawn.
+#[test]
+fn contained_line_carries_reserve_gib_after_alloc_mode() {
+    let c = containment_from_settings(
+        Some("25"),
+        Some("e00000"),
+        Some("1000"),
+        Some("lazy"),
+        Some("2"),
+        24,
+    );
+    assert_eq!(
+        contained_line(42, 1_073_741_824, &c),
+        "heavy child contained (pid 42): mem_limit=1073741824B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=1000 alloc_mode=lazy reserve_gib=2"
+    );
+}

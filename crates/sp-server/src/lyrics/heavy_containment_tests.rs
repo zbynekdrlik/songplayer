@@ -240,3 +240,47 @@ fn containment_carries_the_parsed_alloc_mode() {
         AllocMode::Lazy
     );
 }
+
+// ---------------------------------------------------------------------------
+// #207 round-3c — parse_reserve_gib (heavy_alloc_reserve_gib setting) + the
+// Containment reserve_gib field. Valid = 1..=8; else fall back to 4 (ROZHODNUTÉ
+// 3c, comment 5793008637: round-3b's mimalloc self-report showed the
+// eager-committed 4 GiB arena IS the ~4 GiB piece of the child's peak commit).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reserve_gib_absent_or_garbage_is_default_4() {
+    assert_eq!(parse_reserve_gib(None), 4);
+    assert_eq!(parse_reserve_gib(Some("abc")), 4);
+    assert_eq!(parse_reserve_gib(Some("")), 4);
+}
+
+#[test]
+fn reserve_gib_valid_values_pass_through() {
+    assert_eq!(parse_reserve_gib(Some("1")), 1);
+    assert_eq!(parse_reserve_gib(Some("2")), 2);
+    assert_eq!(parse_reserve_gib(Some("8")), 8);
+    // A `delete .trim()` mutant leaves the spaces → parse fails → default.
+    assert_eq!(parse_reserve_gib(Some(" 3 ")), 3);
+}
+
+#[test]
+fn reserve_gib_out_of_range_falls_back_to_default() {
+    // Below the 1 GiB floor or above the 8 GiB ceiling → default (4).
+    assert_eq!(parse_reserve_gib(Some("0")), 4);
+    assert_eq!(parse_reserve_gib(Some("9")), 4);
+    assert_eq!(parse_reserve_gib(Some("-1")), 4);
+}
+
+#[test]
+fn containment_carries_the_parsed_reserve_gib() {
+    // Absent → the default (4); explicit in-range → verbatim.
+    assert_eq!(
+        containment_from_settings(None, None, None, None, None, 24).reserve_gib,
+        4
+    );
+    assert_eq!(
+        containment_from_settings(None, None, None, None, Some("2"), 24).reserve_gib,
+        2
+    );
+}
