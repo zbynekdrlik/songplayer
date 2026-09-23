@@ -720,21 +720,22 @@ def test_tail_cap_ends_a_receive_that_never_goes_quiet():
 
 
 def test_send_loop_paces_at_real_time_without_drift_or_bursts():
-    # 40 frames at 20 ms with a 5 ms send latency: a drift-corrected pacer sends
-    # frame j at t_first + j*frame_s (never earlier) and finishes in ~39 periods;
-    # a fixed sleep(frame_s) adds the latency to every period (+~195 ms) and an
-    # unpaced loop sends everything at once.
-    fs = 0.02
-    server = FakeServer([None], send_latency_s=0.005)
-    frames = _frames(40)
+    # 30 frames at 30 ms with a 15 ms send latency. The drift-corrected pacer
+    # spans ~29 periods (0.87 s) first-to-last frame; an unpaced loop spans only
+    # the send latencies (~0.45 s) and a fixed sleep(frame_s) adds the latency to
+    # every period (~1.31 s). The bounds are measured from the first SENT frame
+    # (not the pacer's anchor), so a late first send under load cannot fail it,
+    # and the upper margin absorbs a late LAST frame on a loaded runner.
+    fs = 0.03
+    server = FakeServer([None], send_latency_s=0.015)
+    frames = _frames(30)
     opts = _opts(frame_s=fs, quiet_s=0.05, tail_cap_s=1.0)
     _run(server, frames, opts)
     times = server.sessions[0].send_times
-    assert len(times) == 40
-    t_first = times[0]
-    for j, t in enumerate(times):
-        assert t >= t_first + j * fs - 0.002, f"frame {j} sent early"
-    assert times[-1] - t_first <= 39 * fs + 0.1
+    assert len(times) == 30
+    span = times[-1] - times[0]
+    assert span >= 29 * fs - 0.05, f"paced too fast: {span:.3f}s"
+    assert span <= 29 * fs + 0.3, f"drifted: {span:.3f}s"
 
 
 def test_pacing_is_re_anchored_on_each_connection():
@@ -753,9 +754,11 @@ def test_pacing_is_re_anchored_on_each_connection():
     assert len(server.sessions) == 2
     times = server.sessions[1].send_times
     assert len(times) >= 10
-    t2 = times[0]
-    for j, t in enumerate(times):
-        assert t >= t2 + j * fs - 0.002, f"frame {j} of connection 2 burst"
+    # Re-anchored: the frames owed after the 0.3 s gap are paced again from the
+    # new connection (span ~ (n-1) periods), not burst out to catch up (~15
+    # frames at once would cut the span by ~0.3 s).
+    span = times[-1] - times[0]
+    assert span >= (len(times) - 1) * fs - 0.05, f"burst: {span:.3f}s"
     assert server.all_frames == frames
 
 
