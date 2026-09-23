@@ -434,8 +434,10 @@ class FakeSession:
         if audio_stream_end:
             self.stream_end += 1
             self.server.stream_ends += 1
+            if self.server.on_stream_end is not None:
+                self.server.on_stream_end(self)
             return
-        self.send_times.append(time.monotonic())
+        self.send_times.append(self.server.clock.now())
         self.frames.append(audio)
         self.server.all_frames.append(audio)
         if self.on_frame is not None:
@@ -443,7 +445,7 @@ class FakeSession:
         if self.server.send_latency_s:
             # A real websocket send takes time; a fixed-sleep pacer would add it
             # on top of every frame period, the drift-corrected one must not.
-            await asyncio.sleep(self.server.send_latency_s)
+            await self.server.clock.sleep(self.server.send_latency_s)
 
     async def receive(self):
         while True:
@@ -456,12 +458,43 @@ class FakeSession:
                 break
 
 
+class RealClock:
+    now = staticmethod(time.monotonic)
+    sleep = staticmethod(asyncio.sleep)
+
+
+class VirtualClock:
+    """A deterministic clock for the pacer: `sleep(d)` advances virtual time by
+    exactly `d` (and yields once), so pacing assertions are exact and immune to
+    a loaded test runner."""
+
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def now(self) -> float:
+        return self.t
+
+    async def sleep(self, d: float) -> None:
+        self.t += d
+        await asyncio.sleep(0)
+
+
 class FakeServer:
     """A scripted Live service: one `on_frame` behaviour per connection, or the
-    string "refuse" to make that connect attempt fail."""
+    string "refuse" to make that connect attempt fail. Send latency and the
+    reconnect delay run on `clock` (real by default, virtual for pacing)."""
 
-    def __init__(self, scripts, send_latency_s=0.0, reconnect_delay_s=0.0):
+    def __init__(
+        self,
+        scripts,
+        send_latency_s=0.0,
+        reconnect_delay_s=0.0,
+        on_stream_end=None,
+        clock=None,
+    ):
         self.scripts = list(scripts)
+        self.on_stream_end = on_stream_end
+        self.clock = clock or RealClock()
         self.configs: list[dict] = []
         self.sessions: list[FakeSession] = []
         self.all_frames: list[bytes] = []
@@ -477,7 +510,7 @@ class FakeServer:
         @contextlib.asynccontextmanager
         async def cm():
             if delay:
-                await asyncio.sleep(delay)
+                await self.clock.sleep(delay)
             if script == "refuse":
                 raise ConnectionError("handle rejected: 1008 policy violation")
             s = FakeSession(self, script)
@@ -630,25 +663,12 @@ def test_closed_after_everything_is_sent_does_not_reconnect():
     def only(session, n):
         session.queue.put_nowait(_msg(data=b"\x01" * 480))
 
-    server = FakeServer([only])
+    server = FakeServer(
+        [only], on_stream_end=lambda session: session.queue.put_nowait(_CLOSE)
+    )
     frames = _frames(3)
-
-    async def closer():
-        events = probe.EventLog(None)
-        state = probe.ProbeState()
-
-        async def close_after_end():
-            while server.stream_ends == 0:
-                await asyncio.sleep(0.001)
-            server.sessions[0].queue.put_nowait(_CLOSE)
-
-        task = asyncio.create_task(close_after_end())
-        opts = _opts(frame_s=0.001, quiet_s=5.0, tail_cap_s=5.0)
-        await probe.run_probe(frames, server.connect, lambda b: b, opts, events, state)
-        await task
-        return events
-
-    events = asyncio.run(closer())
+    opts = _opts(frame_s=0.001, quiet_s=5.0, tail_cap_s=5.0)
+    events, _ = _run(server, frames, opts)
     assert len(server.configs) == 1
     kinds = [e["kind"] for e in events.events]
     assert "closed" in kinds
@@ -720,45 +740,42 @@ def test_tail_cap_ends_a_receive_that_never_goes_quiet():
 
 
 def test_send_loop_paces_at_real_time_without_drift_or_bursts():
-    # 30 frames at 30 ms with a 15 ms send latency. The drift-corrected pacer
-    # spans ~29 periods (0.87 s) first-to-last frame; an unpaced loop spans only
-    # the send latencies (~0.45 s) and a fixed sleep(frame_s) adds the latency to
-    # every period (~1.31 s). The bounds are measured from the first SENT frame
-    # (not the pacer's anchor), so a late first send under load cannot fail it,
-    # and the upper margin absorbs a late LAST frame on a loaded runner.
-    fs = 0.03
-    server = FakeServer([None], send_latency_s=0.015)
-    frames = _frames(30)
-    opts = _opts(frame_s=fs, quiet_s=0.05, tail_cap_s=1.0)
+    # On a virtual clock with a 15 ms send latency, the drift-corrected pacer
+    # sends frame j at EXACTLY t0 + j*frame_s: the latency is absorbed by the
+    # next (shorter) sleep. A fixed sleep(frame_s) would put frame j at
+    # t0 + j*(frame_s + latency), an unpaced loop at t0 + j*latency.
+    fs = 0.1
+    vc = VirtualClock()
+    server = FakeServer([None], send_latency_s=0.015, clock=vc)
+    frames = _frames(200)
+    opts = _opts(frame_s=fs, quiet_s=0.05, tail_cap_s=1.0, clock=vc.now, sleep=vc.sleep)
     _run(server, frames, opts)
     times = server.sessions[0].send_times
-    assert len(times) == 30
-    span = times[-1] - times[0]
-    assert span >= 29 * fs - 0.05, f"paced too fast: {span:.3f}s"
-    assert span <= 29 * fs + 0.3, f"drifted: {span:.3f}s"
+    assert len(times) == 200
+    for j, t in enumerate(times):
+        assert abs(t - (times[0] + j * fs)) < 1e-9, f"frame {j} off schedule"
 
 
 def test_pacing_is_re_anchored_on_each_connection():
-    # The second connection opens 0.3 s late: without re-anchoring the frames it
-    # still owes would all burst out at once to "catch up".
+    # The second connection opens 0.3 s (virtual) late: re-anchored, the frames
+    # it still owes are paced again from its own start; a schedule kept on the
+    # first connection's anchor would burst them out at once to "catch up".
     fs = 0.02
 
     def first(session, n):
         if n == 10:
             session.queue.put_nowait(_msg(go_away=SimpleNamespace(time_left="0.5s")))
 
-    server = FakeServer([first, None], reconnect_delay_s=0.3)
+    vc = VirtualClock()
+    server = FakeServer([first, None], reconnect_delay_s=0.3, clock=vc)
     frames = _frames(30)
-    opts = _opts(frame_s=fs, quiet_s=0.05, tail_cap_s=1.0)
+    opts = _opts(frame_s=fs, quiet_s=0.05, tail_cap_s=1.0, clock=vc.now, sleep=vc.sleep)
     _run(server, frames, opts)
     assert len(server.sessions) == 2
     times = server.sessions[1].send_times
     assert len(times) >= 10
-    # Re-anchored: the frames owed after the 0.3 s gap are paced again from the
-    # new connection (span ~ (n-1) periods), not burst out to catch up (~15
-    # frames at once would cut the span by ~0.3 s).
-    span = times[-1] - times[0]
-    assert span >= (len(times) - 1) * fs - 0.05, f"burst: {span:.3f}s"
+    for j, t in enumerate(times):
+        assert abs(t - (times[0] + j * fs)) < 1e-9, f"frame {j} of conn 2 burst"
     assert server.all_frames == frames
 
 
@@ -777,7 +794,7 @@ def test_streamed_silence_does_not_hold_the_drain_open():
             session.silence = asyncio.get_running_loop().create_task(silence())
 
     server = FakeServer([script])
-    opts = _opts(frame_s=0.001, quiet_s=0.1, tail_cap_s=3.0)
+    opts = _opts(frame_s=0.001, quiet_s=0.3, tail_cap_s=2.0)
     events, state = _run(server, _frames(3), opts)
     ends = [e for e in events.events if e["kind"] == "drain_end"]
     assert [e["reason"] for e in ends] == ["quiet"]
@@ -797,7 +814,7 @@ def test_go_away_keeps_receiving_the_old_connection_output_before_reconnecting()
             session.queue.put_nowait(_msg(go_away=SimpleNamespace(time_left="10s")))
 
             async def trailing_translation():
-                await asyncio.sleep(0.02)
+                await asyncio.sleep(0.35)  # > one supervisor poll (0.2 s)
                 session.queue.put_nowait(_msg(data=late))
 
             session.late = asyncio.get_running_loop().create_task(
@@ -806,7 +823,7 @@ def test_go_away_keeps_receiving_the_old_connection_output_before_reconnecting()
 
     server = FakeServer([first, _echo])
     frames = _frames(200)
-    opts = _opts(frame_s=0.001, quiet_s=0.2, tail_cap_s=2.0)
+    opts = _opts(frame_s=0.001, quiet_s=0.8, tail_cap_s=2.0)
     events, state = _run(server, frames, opts)
     # The old connection's trailing output arrived BEFORE the reconnect.
     kinds = [e["kind"] for e in events.events]
@@ -823,37 +840,28 @@ def test_go_away_keeps_receiving_the_old_connection_output_before_reconnecting()
     rec = next(e for e in events.events if e["kind"] == "reconnect")
     assert rec["frames_since_handle"] == len(server.sessions[0].frames) - 2
     grace = next(e for e in events.events if e["kind"] == "go_away_grace")
-    assert grace["grace_s"] == pytest.approx(0.2)
+    assert grace["grace_s"] == pytest.approx(0.8)
 
 
 def test_go_away_during_the_drain_never_resends_audio_stream_end():
     def only(session, n):
         session.queue.put_nowait(_msg(data=b"\x10" * 480))
 
-    server = FakeServer([only, None])
+    def go_away_at_stream_end(session):
+        # The GoAway lands in the same instant as audio_stream_end: its 0.2 s
+        # grace ends long before the 1 s drain goes quiet, so the probe
+        # reconnects with nothing left to send.
+        session.queue.put_nowait(_msg(go_away=SimpleNamespace(time_left="1.2s")))
+
+    server = FakeServer([only, None], on_stream_end=go_away_at_stream_end)
     frames = _frames(3)
-
-    async def scenario():
-        events = probe.EventLog(None)
-        state = probe.ProbeState()
-
-        async def go_away_after_end():
-            while server.stream_ends == 0:
-                await asyncio.sleep(0.001)
-            server.sessions[0].queue.put_nowait(
-                _msg(go_away=SimpleNamespace(time_left="1.2s"))
-            )
-
-        task = asyncio.create_task(go_away_after_end())
-        opts = _opts(frame_s=0.001, quiet_s=0.5, tail_cap_s=2.0)
-        await probe.run_probe(frames, server.connect, lambda b: b, opts, events, state)
-        await task
-        return events
-
-    events = asyncio.run(scenario())
+    opts = _opts(frame_s=0.001, quiet_s=1.0, tail_cap_s=3.0)
+    events, _ = _run(server, frames, opts)
+    assert any(e["kind"] == "go_away" for e in events.events)
+    assert len(server.sessions) == 2
+    assert server.sessions[1].frames == []
     assert server.stream_ends == 1
     assert server.all_frames == frames
-    assert any(e["kind"] == "go_away" for e in events.events)
 
 
 def test_unrecognised_message_fields_are_recorded():
