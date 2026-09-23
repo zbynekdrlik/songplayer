@@ -139,9 +139,11 @@ fn pong_frame_echoes_a_float_ping_verbatim() {
         pong_frame(r#"{"ping":1234.5678}"#).as_deref(),
         Some(r#"{"pong":1234.5678}"#)
     );
+    // A long-tail value as `performance.now()` really produces (JS prints the
+    // shortest round-trip form, which serde_json's ryu reproduces exactly).
     assert_eq!(
-        pong_frame(r#"{"ping":98765.60000000009}"#).as_deref(),
-        Some(r#"{"pong":98765.60000000009}"#)
+        pong_frame(r#"{"ping":4321.300000000047}"#).as_deref(),
+        Some(r#"{"pong":4321.300000000047}"#)
     );
 }
 
