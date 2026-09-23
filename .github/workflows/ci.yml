@@ -129,12 +129,12 @@ jobs:
       - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy + soundfile)
         run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1 soundfile==0.12.1
       - name: Lint with ruff
-        run: ruff check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_voice_check.py
+        run: ruff check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_voice_check.py scripts/analyze_minidump.py
       - name: Format check with ruff
-        run: ruff format --check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_voice_check.py
+        run: ruff format --check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_voice_check.py scripts/analyze_minidump.py
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
-      - name: Run scripts pytest (#171 segment stitch / additivity)
+      - name: Run scripts pytest (#171 segment stitch / additivity, #156 minidump helpers)
         run: pytest scripts/tests -v
       - name: Run dubbing eval pytest (#175 fit policy)
         run: pytest eval/dubbing/tests -v
@@ -245,6 +245,13 @@ jobs:
           name: tauri-installer
           path: src-tauri/target/release/bundle/nsis/*.exe
           retention-days: 5
+      - name: Upload SongPlayer PDB (symbols for the next WER dump, #156)
+        uses: actions/upload-artifact@v4
+        with:
+          name: songplayer-pdb
+          path: src-tauri/target/release/SongPlayer.pdb
+          if-no-files-found: error
+          retention-days: 30
 
   frontend-e2e:
     name: Frontend E2E Tests
