@@ -389,9 +389,14 @@ class ContinuousSession:
                     st.drain_end_reason = reason
                     self.events.log("drain_end", reason=reason)
                     self._say(f"live: drain end ({reason})")
-                    return st
+                    break
         finally:
             await self._teardown(sender)
+        # A queued message can still be recorded between the drain end and the
+        # teardown: a local failure there is not a successful run either.
+        if self._fatal is not None:
+            raise self._fatal
+        return st
 
     def _maybe_reconnect(self) -> None:
         """Start opening the next connection the moment the active one got a
@@ -513,6 +518,11 @@ class ContinuousSession:
             self._opening.cancel()
         for c in self.conns:
             c.stop.set()
+            # A connection still CONNECTING never looks at `stop` (it only does
+            # once open), and the SDK's setup wait has no timeout of its own:
+            # cancel it, or the teardown waits for that connect forever.
+            if c.session is None and c.task is not None and not c.task.done():
+                c.task.cancel()
         tasks = [sender] + [c.task for c in self.conns if c.task is not None]
         if self._opening is not None:
             tasks.append(self._opening)
@@ -549,6 +559,12 @@ class ContinuousSession:
         self.conns.append(conn)
         try:
             await asyncio.wait_for(asyncio.shield(opened), self.opts.connect_timeout_s)
+        except asyncio.CancelledError:
+            # The reconnect itself was cancelled (teardown): take the pending
+            # connect down with it — it would otherwise outlive the session.
+            conn.task.cancel()
+            await asyncio.gather(conn.task, return_exceptions=True)
+            raise
         except Exception as e:  # refused / timed out: the dub cannot continue
             conn.task.cancel()
             await asyncio.gather(conn.task, return_exceptions=True)
@@ -738,11 +754,16 @@ class ContinuousSession:
                 )
                 return
             except (asyncio.TimeoutError, TimeoutError):
-                self._mark_closed(conn, f"send timed out after {timeout:g} s")
-                conn.stop.set()  # leave the stuck connection's context
+                self._drop_connection(conn, f"send timed out after {timeout:g} s")
             except Exception as e:  # the websocket died under this send
-                self._mark_closed(conn, _err(e, self.secret))
-                conn.stop.set()
+                self._drop_connection(conn, _err(e, self.secret))
+
+    def _drop_connection(self, conn: _Conn, error: str) -> None:
+        """A send failed or stuck: the connection is dead for input. Any output it
+        still delivers is overlap (not the active stream), and it is closed."""
+        conn.draining = True
+        self._mark_closed(conn, error)
+        conn.stop.set()  # leave the connection's context
 
     async def _send_all(self) -> None:
         st = self.state

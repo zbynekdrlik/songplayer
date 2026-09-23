@@ -158,13 +158,24 @@ def joined_by_connection(parts: list) -> str:
 def sk_timed_from(parts: list, t0_s: float, latency_ms: int) -> list[dict]:
     """The SK output-transcription fragments `(arrival_s, text, conn)` in
     connection order, stamped on the video timeline (`t_ms`, non-decreasing —
-    the D3 subtitle builder reads them as consecutive windows)."""
+    the D3 subtitle builder reads them as consecutive windows). A connection's
+    fragments that arrived after the NEXT connection's first fragment (its
+    trailing translation during the overlap) are capped at that time, so the
+    next connection's subtitles keep their own arrival times — its audio is
+    placed at its arrival too — instead of being pushed later."""
+    first_of: dict[int, float] = {}
+    for arrival_s, text, conn in parts:
+        if text and conn not in first_of:
+            first_of[conn] = arrival_s
+    conns = sorted(first_of)
+    next_first = {c: first_of[n] for c, n in zip(conns, conns[1:])}
     out = []
     last = 0
-    for arrival_s, text, _ in _by_connection(parts, lambda p: p[2]):
+    for arrival_s, text, conn in _by_connection(parts, lambda p: p[2]):
         if not text:
             continue
-        last = max(last, timeline_ms(arrival_s, t0_s, latency_ms))
+        capped = min(arrival_s, next_first.get(conn, arrival_s))
+        last = max(last, timeline_ms(capped, t0_s, latency_ms))
         out.append({"t_ms": last, "text": text})
     return out
 
@@ -293,19 +304,23 @@ def render_placed_wav(
     out = np.memmap(
         wav_path, dtype="<i2", mode="r+", offset=len(header), shape=(total_samples,)
     )
-    with open(raw_path, "rb") as raw:
-        for c, pos in zip(chunks, starts):
-            if pos is None:
-                continue
-            raw.seek(c.offset)
-            data = np.frombuffer(raw.read(c.n_bytes), dtype="<i2")
-            end = min(pos + data.size, total_samples)
-            if end <= pos:
-                continue
-            acc = out[pos:end].astype(np.int32) + data[: end - pos]
-            out[pos:end] = np.clip(acc, -32768, 32767).astype("<i2")
-    out.flush()
-    del out
+    try:
+        with open(raw_path, "rb") as raw:
+            for c, pos in zip(chunks, starts):
+                if pos is None:
+                    continue
+                raw.seek(c.offset)
+                data = np.frombuffer(raw.read(c.n_bytes), dtype="<i2")
+                end = min(pos + data.size, total_samples)
+                if end <= pos:
+                    continue
+                acc = out[pos:end].astype(np.int32) + data[: end - pos]
+                out[pos:end] = np.clip(acc, -32768, 32767).astype("<i2")
+        out.flush()
+    finally:
+        # Unmap even on a failure: Windows cannot delete a mapped file, and the
+        # cleanup of a failed run must be able to remove it.
+        del out
 
 
 def _assemble_dub(audio: str, wav: str, out: str, work_dir: str) -> dict:
@@ -433,10 +448,16 @@ def _run_session(
 
 def _remove_intermediates(*paths: str) -> None:
     """Delete the raw + placed intermediates (~100 MB each for a 36-min talk);
-    `events.jsonl` / `session_summary.json` / `loudness.json` stay as evidence."""
+    `events.jsonl` / `session_summary.json` / `loudness.json` stay as evidence.
+    A file that cannot be removed is logged, never raised: this runs in a
+    `finally`, and its error must not replace the run's real one."""
     for path in paths:
-        if os.path.exists(path):
+        if not os.path.exists(path):
+            continue
+        try:
             os.remove(path)
+        except OSError as e:
+            _log(f"could not remove the intermediate {path}: {e}")
 
 
 def _translate(args: argparse.Namespace, raw_path: str, wav_path: str) -> dict:
