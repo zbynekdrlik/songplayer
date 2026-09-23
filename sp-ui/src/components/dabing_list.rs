@@ -137,7 +137,7 @@ pub fn DabingList() -> impl IntoView {
                                                             class="dabing-row-voice"
                                                             data-testid="dabing-row-voice"
                                                         >
-                                                            {format!("hlas: {v}")}
+                                                            {sp_core::config::dub_voice_label(&v)}
                                                         </span>
                                                     }
                                                 })}

@@ -129,9 +129,9 @@ jobs:
       - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy + soundfile)
         run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1 soundfile==0.12.1
       - name: Lint with ruff
-        run: ruff check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py
+        run: ruff check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py
       - name: Format check with ruff
-        run: ruff format --check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py
+        run: ruff format --check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
       - name: Run scripts pytest (#171 segment stitch / additivity, #156 minidump helpers)

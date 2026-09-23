@@ -14,15 +14,15 @@ pub const SETTING_GEMINI_MODEL: &str = "gemini_model";
 pub const SETTING_CACHE_DIR: &str = "cache_dir";
 pub const SETTING_MAX_RESOLUTION: &str = "max_resolution";
 pub const SETTING_API_PORT: &str = "api_port";
-/// #184 round C: the pinned Gemini Live Translate output voice for dubs. One
-/// stable voice per video (the owner-selectable catalogue voice); read per tick
-/// by the dub worker and set from the Nastavenia page.
+/// #184 round H step 2: the dub output voice. `speaker` (the default,
+/// [`DUB_VOICE_SPEAKER`]) = the model speaks in the speaker's OWN voice (no
+/// `speech_config`, owner decision #184 5797691198); any other value pins that
+/// Gemini prebuilt voice. Read per job by the dub worker, set from Nastavenia.
 pub const SETTING_DUB_VOICE: &str = "dub_voice";
-/// #184 round E: the dub Live-session length cap in SECONDS (default 120,
-/// clamped 60..=480 by `dabing::worker::dub_session_max_ms_from`). A shorter
-/// session holds the pinned voice; it drifts inside a long one. Read per tick
-/// by the dub worker and set from the Nastavenia page.
-pub const SETTING_DUB_SESSION_MAX_S: &str = "dub_session_max_s";
+/// #184 round H step 2: the Gemini Live Translate model the dub session uses —
+/// upgrading to a newer model is a setting change + one probe run, not a rebuild
+/// (owner directive #184 5797708129). Read per job by the dub worker.
+pub const SETTING_DUB_MODEL: &str = "dub_model";
 /// #184 round G1: the ONE mixer console with TWO remembered fader triples,
 /// selected by the KIND of the playing item — a SONG memory (`vokály` / `podklad`;
 /// its `dabing` is unused) and a DUB memory (`vokály` / `podklad` / `dabing`).
@@ -41,9 +41,22 @@ pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
 pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
 pub const DEFAULT_CACHE_DIR: &str = "cache";
 pub const DEFAULT_MAX_RESOLUTION: u32 = 1440;
-/// The default dub voice — `Charon`, a male, matter-of-fact voice from the vetted
-/// catalogue (`eval/dubbing/voices.py`); the on-screen speaker is male.
-pub const DEFAULT_DUB_VOICE: &str = "Charon";
+/// The `dub_voice` value meaning "the speaker's own voice" (no `speech_config`).
+pub const DUB_VOICE_SPEAKER: &str = "speaker";
+/// The default dub voice — the speaker's own voice (#184 round H step 2).
+pub const DEFAULT_DUB_VOICE: &str = DUB_VOICE_SPEAKER;
+/// The default dub model — the Live Translate model the round-H probe verified.
+pub const DEFAULT_DUB_MODEL: &str = "gemini-3.5-live-translate-preview";
+
+/// The Dabing row's voice line for a stored `dub_voice`: the speaker's own voice
+/// reads `hlas: rečník`, a pinned prebuilt voice `hlas: <name>`.
+pub fn dub_voice_label(voice: &str) -> String {
+    if voice == DUB_VOICE_SPEAKER {
+        "hlas: rečník".to_string()
+    } else {
+        format!("hlas: {voice}")
+    }
+}
 
 // AI settings (CLIProxyAPI → Claude Opus)
 pub const SETTING_AI_API_URL: &str = "ai_api_url";
@@ -89,14 +102,23 @@ mod tests {
     }
 
     #[test]
-    fn dub_voice_setting_key_and_default() {
+    fn dub_voice_setting_key_and_default_is_the_speaker() {
         assert_eq!(SETTING_DUB_VOICE, "dub_voice");
-        assert_eq!(DEFAULT_DUB_VOICE, "Charon");
+        assert_eq!(DUB_VOICE_SPEAKER, "speaker");
+        assert_eq!(DEFAULT_DUB_VOICE, "speaker");
     }
 
     #[test]
-    fn dub_session_max_s_setting_key() {
-        assert_eq!(SETTING_DUB_SESSION_MAX_S, "dub_session_max_s");
+    fn dub_model_setting_key_and_default() {
+        assert_eq!(SETTING_DUB_MODEL, "dub_model");
+        assert_eq!(DEFAULT_DUB_MODEL, "gemini-3.5-live-translate-preview");
+    }
+
+    #[test]
+    fn dub_voice_label_names_the_speaker_in_slovak() {
+        assert_eq!(dub_voice_label("speaker"), "hlas: rečník");
+        assert_eq!(dub_voice_label("Charon"), "hlas: Charon");
+        assert_eq!(dub_voice_label("Kore"), "hlas: Kore");
     }
 
     #[test]

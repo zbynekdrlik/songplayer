@@ -1,23 +1,28 @@
-"""Pure-helper tests for scripts/dub_worker.py (#183 D4).
+"""Tests for scripts/dub_worker.py (#183 D4, #184 round H step 2).
 
-The dub child's runtime work (Live API, ffmpeg) cannot run in CI, but its pure
-helpers can: PCM position/length math, the placement/atempo decision (which must
-match the Rust `dabing::chunk_plan::placement_for`), the ffmpeg slice/resample
-argv, the trailing-silence filter, and the mix filter_complex builder. stdlib
-only — no google.genai, no ffmpeg — so it runs in the `eval-checks` CI job.
-
-The module body of dub_worker.py is import-safe: all heavy imports (google.genai)
-are inside the command functions, so importing it by path here is safe.
+The dub child's runtime work (the Live API, ffmpeg) cannot run in CI, but its
+decisions can: the input decode argv, the latency measure + clamp, the placement
+of the ONE continuous output stream on the video timeline (per-connection
+cursors), the SK subtitle timing, the transcripts JSON in the shape the Rust
+`dabing::subtitles::DubTranscripts` reads, the placed-WAV render, the argv
+defaults (speaker voice, the verified model), the removal of the superseded
+per-chunk work files, and the whole `live-translate` orchestration with the
+session + ffmpeg seams faked. numpy + stdlib only (the eval-checks CI job has no
+google-genai and no ffmpeg).
 """
 
 import importlib.util
+import json
 import os
 import sys
+import wave
+from types import SimpleNamespace
+
+import pytest
 
 _SCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# `scripts/` on the path so `dub_worker`'s `import dub_voice_check` (inside
-# `chunk_voice_drift`) resolves the same way it does on the box (the child's
-# own dir is on sys.path there). Also lets this test import the shared helpers.
+# `scripts/` on the path so `dub_worker`'s module-level imports (`dub_loudness`,
+# `dub_live_session`, `win_replace`) resolve the same way they do on the box.
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
@@ -30,418 +35,561 @@ def _load_dub_worker():
     return mod
 
 
-def _load_dub_voice_check():
-    path = os.path.join(_SCRIPTS_DIR, "dub_voice_check.py")
-    spec = importlib.util.spec_from_file_location("dub_voice_check", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
 dw = _load_dub_worker()
-dvc = _load_dub_voice_check()
+dls = dw.dls
 
 
-def test_pcm_len_ms_and_pos():
-    # 24 kHz s16le mono: 48000 bytes = 24000 samples = 1000 ms.
-    assert dw.pcm_len_ms(48000, 24000) == 1000
-    assert dw.pcm_pos_to_ms(24000, 24000) == 500
-    assert dw.pcm_len_ms(0, 24000) == 0
-    assert dw.pcm_len_ms(100, 0) == 0
+def chunk(arrival_s, conn=1, n_samples=2400, offset=0, voiced=True, active=True):
+    return dls.OutputChunk(
+        arrival_s=arrival_s,
+        conn=conn,
+        offset=offset,
+        n_bytes=n_samples * 2,
+        voiced=voiced,
+        active=active,
+    )
 
 
-def test_placement_matches_rust_spec():
-    # Fits before the next chunk -> no tempo change, placed at chunk start.
-    at, tempo = dw.placement(120_000, 60_000, 55_000, 180_000)
-    assert at == 120_000
-    assert abs(tempo - 1.0) < 1e-6
-
-    # Slight overrun -> speed up just enough, under the cap.
-    _, tempo = dw.placement(0, 60_000, 63_000, 60_000)
-    assert abs(tempo - 1.05) < 1e-3
-    assert tempo <= dw.MAX_TEMPO
-
-    # Big overrun -> clamp to MAX_TEMPO.
-    _, tempo = dw.placement(0, 60_000, 90_000, 60_000)
-    assert abs(tempo - dw.MAX_TEMPO) < 1e-6
-
-    # Last chunk (no next) is never sped up.
-    at, tempo = dw.placement(600_000, 120_000, 130_000, None)
-    assert at == 600_000
-    assert abs(tempo - 1.0) < 1e-6
+# ── argv ───────────────────────────────────────────────────────────────────────
 
 
-def test_slice_resample_args_target_16k_mono_s16le():
-    args = dw.slice_resample_args("ffmpeg", "/c/a.flac", 10_000, 70_000, "/w/c0.pcm")
+def test_decode_args_target_16k_mono_s16le_on_stdout():
+    args = dw.decode_args("ffmpeg", "/c/a_audio_vocals.flac")
     assert args[0] == "ffmpeg"
-    assert "-i" in args and "/c/a.flac" in args
-    # Cut bounds present as seconds.
-    assert "10.000" in args
-    assert "70.000" in args
-    # Live-API input format: 16 kHz mono s16le.
-    assert "16000" in args
+    assert args[args.index("-i") + 1] == "/c/a_audio_vocals.flac"
+    assert args[args.index("-ar") + 1] == "16000"
     assert args[args.index("-ac") + 1] == "1"
-    assert "s16le" in args
-    assert args[-1] == "/w/c0.pcm"
+    assert args[args.index("-f") + 1] == "s16le"
+    assert args[-1] == "-"
 
 
-def test_trim_silence_af_reverses_around_silenceremove():
-    af = dw.trim_silence_af()
-    assert af.startswith("areverse,silenceremove=")
-    assert af.endswith(",areverse")
+def test_cli_defaults_are_the_speaker_voice_and_the_verified_model():
+    args = dw.parse_args(
+        [
+            "live-translate",
+            "--audio",
+            "a.flac",
+            "--out",
+            "o.flac",
+            "--transcripts",
+            "t.json",
+            "--work-dir",
+            "w",
+        ]
+    )
+    assert args.voice == "speaker"
+    assert args.model == "gemini-3.5-live-translate-preview"
+    # `speaker` pins nothing: the session config carries NO speech_config.
+    assert dls.voice_for_config(args.voice) is None
+    cfg = dls.live_config(
+        dls.SessionOptions(voice=dls.voice_for_config(args.voice)), None
+    )
+    assert "speech_config" not in cfg
 
 
-def test_build_mix_filter_places_and_mixes_each_chunk():
-    filt = dw.build_mix_filter([(1.0, 0), (1.05, 60_000)])
-    # One atempo+adelay per input, at its at_ms.
-    assert "[0:a]atempo=1.0000,adelay=0:all=1[a0]" in filt
-    assert "[1:a]atempo=1.0500,adelay=60000:all=1[a1]" in filt
-    # A single amix of both, resampled to 48 kHz, labelled [mix].
-    assert "[a0][a1]amix=inputs=2:normalize=0,aresample=48000[mix]" in filt
+def test_cli_passes_model_and_a_pinned_voice_through():
+    args = dw.parse_args(
+        [
+            "live-translate",
+            "--audio",
+            "a.flac",
+            "--out",
+            "o.flac",
+            "--transcripts",
+            "t.json",
+            "--work-dir",
+            "w",
+            "--model",
+            "gemini-4-live-translate",
+            "--voice",
+            "Charon",
+        ]
+    )
+    assert args.model == "gemini-4-live-translate"
+    assert dls.voice_for_config(args.voice) == "Charon"
 
 
-def test_drain_deadline_is_input_seconds_plus_drain():
-    # 16 kHz s16le mono: 32000 bytes/s. 320000 bytes = 10 s input.
-    assert dw.drain_deadline_s(320_000, drain_s=5.0) == 15.0
+def test_the_superseded_chunk_plan_flag_is_gone():
+    with pytest.raises(SystemExit):
+        dw.parse_args(
+            [
+                "live-translate",
+                "--audio",
+                "a",
+                "--out",
+                "o",
+                "--transcripts",
+                "t",
+                "--work-dir",
+                "w",
+                "--chunk-plan",
+                "p.json",
+            ]
+        )
 
 
-def _results_fixture() -> list:
-    """Two per-chunk results as `_process_chunk` returns them (cached or fresh):
-    each already carries `at_ms` + `tempo` from the placement the mix applied."""
-    return [
-        {
-            "index": 0,
-            "chunk_start_ms": 0,
-            "chunk_end_ms": 60_000,
-            "out_len_ms": 61_000,
-            "next_start_ms": 60_000,
-            "tempo": 1.05,
-            "at_ms": 0,
-            "transcript_en": "Hello there friends",
-            "transcript_sk": "Ahojte priatelia",
-            "sk_timed": [
-                {"t_ms": 500, "text": "Ahojte"},
-                {"t_ms": 1200, "text": " priatelia"},
-            ],
-        },
-        {
-            "index": 1,
-            "chunk_start_ms": 60_000,
-            "chunk_end_ms": 120_000,
-            "out_len_ms": 58_000,
-            "next_start_ms": None,
-            "tempo": 1.0,
-            "at_ms": 60_000,
-            "transcript_en": "Goodbye",
-            "transcript_sk": "Dovidenia",
-            "sk_timed": [{"t_ms": 400, "text": "Dovidenia"}],
-        },
+# ── latency ────────────────────────────────────────────────────────────────────
+
+
+def test_latency_is_clamped_to_one_to_six_seconds():
+    assert dw.clamp_latency_ms(3100) == 3100
+    assert dw.clamp_latency_ms(200) == 1000
+    assert dw.clamp_latency_ms(-500) == 1000
+    assert dw.clamp_latency_ms(13_000) == 6000
+    assert dw.clamp_latency_ms(1000) == 1000
+    assert dw.clamp_latency_ms(6000) == 6000
+
+
+def test_measured_latency_discounts_the_input_onset():
+    # First voiced output 13.1 s after frame 0; the speech starts 10 s in.
+    assert dw.measure_latency_ms(113.1, 100.0, 10_000) == 3100
+    # No onset known -> measured from frame 0.
+    assert dw.measure_latency_ms(103.1, 100.0, None) == 3100
+    # No voiced output / no send -> unknown.
+    assert dw.measure_latency_ms(None, 100.0, 0) is None
+    assert dw.measure_latency_ms(103.0, None, 0) is None
+
+
+# ── placement on the video timeline ────────────────────────────────────────────
+
+
+def test_timeline_ms_is_arrival_minus_t0_minus_latency_never_negative():
+    assert dw.timeline_ms(105.0, 100.0, 3000) == 2000
+    assert dw.timeline_ms(101.0, 100.0, 3000) == 0
+
+
+def test_one_connection_is_one_continuous_stream_anchored_at_arrival():
+    sr = 24000
+    # t0 = 100 s, latency 3 s. Chunk 1 arrives at 103.5 s -> 0.5 s on the video.
+    chunks = [
+        chunk(103.5),  # 0.1 s each (2400 samples)
+        chunk(103.5),  # a burst: same arrival -> right after the first
+        chunk(103.6),  # arrival 0.6 s, but the stream is already at 0.7 s
+        chunk(110.0),  # a stall: re-syncs to arrival (7.0 s)
+    ]
+    starts = dw.place_output(chunks, 100.0, 3000, sr)
+    assert starts == [12_000, 14_400, 16_800, 168_000]
+
+
+def test_connections_keep_separate_cursors_so_the_overlap_never_shifts_later_audio():
+    sr = 24000
+    # Connection 1 drains 1 s of trailing translation arriving at 110.0..110.9
+    # while connection 2 starts at 110.2: with ONE cursor connection 2 would be
+    # pushed 1 s late; with a cursor per connection it lands at its arrival.
+    old = [chunk(110.0 + i * 0.1, conn=1) for i in range(10)]
+    new = [chunk(110.2 + i * 0.1, conn=2) for i in range(3)]
+    merged = sorted(old + new, key=lambda c: c.arrival_s)
+    starts = dw.place_output(merged, 100.0, 3000, sr)
+    by_conn = {1: [], 2: []}
+    for c, s in zip(merged, starts):
+        by_conn[c.conn].append(s)
+    assert by_conn[1] == [168_000 + i * 2400 for i in range(10)]
+    assert by_conn[2] == [172_800 + i * 2400 for i in range(3)]
+
+
+def test_sk_timed_is_on_the_video_timeline_and_monotonic():
+    # (arrival_s, text, connection) — the connection field since review round 1.
+    parts = [
+        (104.0, "Ahoj ", 1),
+        (104.0, "", 1),
+        (103.5, "svet.", 1),
+        (108.2, "Ďalej", 1),
+    ]
+    got = dw.sk_timed_from(parts, 100.0, 3000)
+    assert got == [
+        {"t_ms": 1000, "text": "Ahoj "},
+        {"t_ms": 1000, "text": "svet."},  # never earlier than the previous one
+        {"t_ms": 5200, "text": "Ďalej"},
     ]
 
 
-def test_build_transcripts_includes_at_ms_and_tempo():
-    # D3 (#182): the transcripts JSON must carry each chunk's video-timeline
-    # placement (`at_ms`) + applied `tempo` so the Rust subtitle builder can map
-    # chunk-local SK positions onto the video timeline with NO second pass.
-    t = dw.build_transcripts(_results_fixture())
+# ── the transcripts JSON (the D3 contract) ──────────────────────────────────────
+
+
+def test_transcripts_are_one_chunk_on_the_video_timeline():
+    t = dw.build_transcripts(
+        "Hello world",
+        "Ahoj svet.",
+        [{"t_ms": 1000, "text": "Ahoj svet."}],
+        2_160_000,
+    )
     assert t["engine"] == "gemini-live-translate"
     assert t["target_lang"] == "sk"
-    assert len(t["chunks"]) == 2
-
-    c0 = t["chunks"][0]
-    assert c0["index"] == 0
-    assert c0["start_ms"] == 0
-    assert c0["end_ms"] == 60_000
-    # The two D3 fields — read from the SAME placement the mix uses.
-    assert c0["at_ms"] == 0
-    assert c0["tempo"] == 1.05
-    assert c0["en"] == "Hello there friends"
-    assert c0["sk"] == "Ahojte priatelia"
-    assert c0["sk_timed"][0] == {"t_ms": 500, "text": "Ahojte"}
-
-    c1 = t["chunks"][1]
-    assert c1["at_ms"] == 60_000
-    assert c1["tempo"] == 1.0
-    assert c1["sk_timed"] == [{"t_ms": 400, "text": "Dovidenia"}]
+    assert t["chunks"] == [
+        {
+            "index": 0,
+            "start_ms": 0,
+            "end_ms": 2_160_000,
+            "at_ms": 0,
+            "tempo": 1.0,
+            "en": "Hello world",
+            "sk": "Ahoj svet.",
+            "sk_timed": [{"t_ms": 1000, "text": "Ahoj svet."}],
+        }
+    ]
+    json.dumps(t, allow_nan=False)
 
 
-def _cached(voice="Charon", start_ms=0, end_ms=120_000, guarded=True):
-    meta = {
-        "index": 0,
-        "voice": voice,
-        "chunk_start_ms": start_ms,
-        "chunk_end_ms": end_ms,
-    }
-    if guarded:
-        # #184 round E2: a guarded chunk carries its per-window medians.
-        meta["voice_medians"] = [108.0, 110.0]
-    return meta
+# ── the placed WAV ─────────────────────────────────────────────────────────────
 
 
-def test_chunk_reusable_same_voice_same_bounds_reuses():
-    # #184 round C: a cached chunk recorded under the SAME voice (and, round E,
-    # the SAME chunk boundaries; round E2, voice-guarded) is reused.
-    assert dw.chunk_reusable(_cached(), "Charon", 0, 120_000) is True
+def test_wav_header_is_a_16_bit_mono_pcm_header(tmp_path):
+    path = tmp_path / "h.wav"
+    path.write_bytes(dw.wav_header(3, 24000) + b"\x01\x00\x02\x00\x03\x00")
+    with wave.open(str(path), "rb") as w:
+        assert w.getnchannels() == 1
+        assert w.getsampwidth() == 2
+        assert w.getframerate() == 24000
+        assert w.getnframes() == 3
+        assert w.readframes(3) == b"\x01\x00\x02\x00\x03\x00"
 
 
-def test_chunk_reusable_unguarded_chunk_resynth():
-    # #184 round E2: a chunk synthesized BEFORE the baseline-relative guard has no
-    # `voice_medians` record — it was never checked against the pinned voice, so a
-    # re-dub must re-synthesize it (reusing it would silently keep drifted audio,
-    # which is exactly what the re-dub was requested to fix). Same voice, same
-    # bounds, but unguarded → NOT reusable.
-    assert dw.chunk_reusable(_cached(guarded=False), "Charon", 0, 120_000) is False
-    # An empty medians list (guard skipped: scan failure) is unguarded too.
-    meta = _cached()
-    meta["voice_medians"] = []
-    assert dw.chunk_reusable(meta, "Charon", 0, 120_000) is False
+def test_render_places_sums_overlaps_clips_and_drops_past_the_end(tmp_path):
+    import numpy as np
+
+    raw = tmp_path / "raw"
+    a = np.array([1000, 2000], dtype="<i2").tobytes()
+    b = np.array([31000, 30000, 5], dtype="<i2").tobytes()
+    raw.write_bytes(a + b)
+    chunks = [
+        chunk(0.0, conn=1, n_samples=2, offset=0),
+        chunk(0.0, conn=2, n_samples=3, offset=len(a)),
+    ]
+    wav = tmp_path / "placed.wav"
+    dw.render_placed_wav(str(raw), chunks, [1, 2], 4, str(wav))
+    with wave.open(str(wav), "rb") as w:
+        assert w.getnframes() == 4
+        got = np.frombuffer(w.readframes(4), dtype="<i2").tolist()
+    # [0, a0, a1+b0 (clipped), b1] — b2 falls past the end and is dropped.
+    assert got == [0, 1000, 32767, 30000]
 
 
-def test_chunk_reusable_different_voice_resynth():
-    # A cached chunk recorded under ANOTHER voice must NOT be reused — the whole
-    # dub must speak in one voice, so it is re-synthesized with the new one.
-    assert dw.chunk_reusable(_cached(voice="Kore"), "Charon", 0, 120_000) is False
+def test_render_an_empty_output_is_a_valid_empty_wav(tmp_path):
+    raw = tmp_path / "raw"
+    raw.write_bytes(b"")
+    wav = tmp_path / "placed.wav"
+    dw.render_placed_wav(str(raw), [], [], 0, str(wav))
+    with wave.open(str(wav), "rb") as w:
+        assert w.getnframes() == 0
 
 
-def test_chunk_reusable_missing_voice_resynth():
-    # A legacy chunk (pre-round-C) has no `voice` key → not reusable.
-    assert dw.chunk_reusable({"index": 0}, "Charon", 0, 120_000) is False
+def test_stream_filter_resamples_the_one_input_into_mix():
+    assert dw.stream_filter() == "[0:a]aresample=48000[mix]"
 
 
-def test_chunk_reusable_other_bounds_resynth():
-    # #184 round E: the chunk plan changed (an 8-min session ceiling became 2 min),
-    # so `chunk_0.json` on disk covers 0–480 s while slot 0 now covers 0–120 s. Same
-    # voice, other boundaries → NOT reusable, or the final mix would lay the old
-    # 8-min audio over the new 2-min chunks that follow it.
-    old = _cached(start_ms=0, end_ms=480_000)
-    assert dw.chunk_reusable(old, "Charon", 0, 120_000) is False
-    assert (
-        dw.chunk_reusable(
-            _cached(start_ms=120_000, end_ms=240_000), "Charon", 0, 120_000
-        )
-        is False
+# ── the superseded per-chunk work files ────────────────────────────────────────
+
+
+def test_legacy_work_files_are_the_round_c_to_e2_chunk_cache():
+    names = [
+        "chunk_0.wav",
+        "chunk_0.json",
+        "chunk_12.in.pcm",
+        "chunk_plan.json",
+        "loudness.json",
+        "heartbeat",
+        "events.jsonl",
+    ]
+    assert dw.legacy_work_files(names) == [
+        "chunk_0.json",
+        "chunk_0.wav",
+        "chunk_12.in.pcm",
+        "chunk_plan.json",
+    ]
+
+
+def test_remove_legacy_work_files_deletes_only_them(tmp_path):
+    for n in ("chunk_0.wav", "chunk_plan.json", "loudness.json"):
+        (tmp_path / n).write_text("x")
+    dw._remove_legacy_work_files(str(tmp_path))
+    assert sorted(os.listdir(tmp_path)) == ["loudness.json"]
+
+
+# ── the whole live-translate run, the session + ffmpeg seams faked ─────────────
+
+
+def test_live_translate_places_the_stream_and_writes_the_d3_transcripts(
+    tmp_path, monkeypatch, capsys
+):
+    import numpy as np
+
+    work = tmp_path / "w"
+    work.mkdir()
+    (work / "chunk_3.wav").write_text("old")  # a superseded resume leftover
+    out = tmp_path / "x_dub.flac"
+    transcripts = tmp_path / "x_dub_transcripts.json"
+
+    # 3 s of input: 1 s of silence, then speech (the onset is at 1.0 s).
+    silence = np.zeros(16000, dtype="<i2").tobytes()
+    speech = np.full(32000, 4000, dtype="<i2").tobytes()
+    monkeypatch.setattr(dw, "_decode_input", lambda audio: silence + speech)
+
+    seen = {}
+
+    def fake_session(frames, model, voice, work_dir, sink, events):
+        seen.update(model=model, voice=voice, frames=len(frames))
+        state = dls.SessionState(frames_sent=len(frames), t0_s=10.0)
+        state.drain_end_reason = "quiet"
+        for i, arrival in enumerate((14.0, 14.1)):  # first voiced 4.0 s after t0
+            data = np.full(2400, 1000 + i, dtype="<i2").tobytes()
+            state.chunks.append(
+                dls.OutputChunk(
+                    arrival_s=arrival,
+                    conn=1,
+                    offset=sink.append(data),
+                    n_bytes=len(data),
+                    voiced=True,
+                    active=True,
+                )
+            )
+        state.input_parts = [(1, "Hello "), (1, "world")]
+        state.output_parts = [(14.0, "Ahoj ", 1), (14.5, "svet.", 1)]
+        events.log("connect", connection=1)
+        return state
+
+    assembled = {}
+
+    def fake_assemble(audio, wav, out_path, work_dir):
+        with wave.open(wav, "rb") as w:
+            assembled["frames"] = np.frombuffer(
+                w.readframes(w.getnframes()), dtype="<i2"
+            ).copy()
+            assembled["rate"] = w.getframerate()
+        assembled["audio"] = audio
+        with open(out_path, "w") as f:
+            f.write("DUB")
+        return {}
+
+    monkeypatch.setattr(dw, "_run_session", fake_session)
+    monkeypatch.setattr(dw, "_assemble_dub", fake_assemble)
+    args = dw.parse_args(
+        [
+            "live-translate",
+            "--audio",
+            "vocals.flac",
+            "--out",
+            str(out),
+            "--transcripts",
+            str(transcripts),
+            "--work-dir",
+            str(work),
+        ]
+    )
+    dw.cmd_live_translate(args)
+
+    assert seen == {"model": dw.MODEL, "voice": None, "frames": 30}
+    # latency = (14.0 - 10.0) s - the 1.0 s input onset = 3000 ms.
+    placed = assembled["frames"]
+    assert assembled["rate"] == 24000
+    assert assembled["audio"] == "vocals.flac"
+    assert placed.size == 3 * 24000  # the input length
+    assert (placed[:24000] == 0).all()  # (14.0-10.0)s - 3 s = 1.0 s on the video
+    assert (placed[24000:26400] == 1000).all()
+    assert (placed[26400:28800] == 1001).all()
+    assert (placed[28800:] == 0).all()
+    # The raw + placed intermediates and the superseded chunk cache are gone.
+    assert sorted(os.listdir(work)) == [
+        "events.jsonl",
+        "heartbeat",
+        "session_summary.json",
+    ]
+    summary = json.loads((work / "session_summary.json").read_text())
+    assert summary["latency_ms"] == 3000
+    assert summary["measured_latency_ms"] == 3000
+    assert summary["input_onset_ms"] == 1000
+    assert summary["connections"] == 1
+    t = json.loads(transcripts.read_text(encoding="utf-8"))
+    assert t["chunks"][0]["en"] == "Hello world"
+    assert t["chunks"][0]["sk"] == "Ahoj svet."
+    assert t["chunks"][0]["end_ms"] == 3000
+    assert t["chunks"][0]["sk_timed"] == [
+        {"t_ms": 1000, "text": "Ahoj "},
+        {"t_ms": 1500, "text": "svet."},
+    ]
+    stdout = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert stdout["out_path"] == str(out)
+    assert stdout["transcripts_path"] == str(transcripts)
+    assert stdout["session"]["latency_ms"] == 3000
+
+
+def test_live_translate_with_no_voiced_output_fails_loudly(tmp_path, monkeypatch):
+    import numpy as np
+
+    monkeypatch.setattr(
+        dw, "_decode_input", lambda audio: np.full(1600, 4000, "<i2").tobytes()
+    )
+    monkeypatch.setattr(
+        dw,
+        "_run_session",
+        lambda *a: dls.SessionState(frames_sent=1, t0_s=1.0),
+    )
+    args = SimpleNamespace(
+        audio="a.flac",
+        out=str(tmp_path / "o.flac"),
+        transcripts=str(tmp_path / "t.json"),
+        work_dir=str(tmp_path / "w"),
+        model=dw.MODEL,
+        voice="speaker",
+    )
+    with pytest.raises(RuntimeError, match="no voiced output"):
+        dw.cmd_live_translate(args)
+    assert not os.path.exists(tmp_path / "o.flac")
+
+
+# ── review round 1 ─────────────────────────────────────────────────────────────
+
+
+def test_the_overlap_transcripts_are_ordered_by_connection_not_interleaved():
+    # During the overlap the OLD connection's trailing fragments arrive after
+    # the NEW one's first fragments; the old connection translates EARLIER
+    # input, so its text comes first. Times stay non-decreasing — by capping
+    # the OLD connection's late fragments at the new connection's first
+    # fragment (review round 2), never by pushing the new connection's
+    # subtitles later than its audio (its audio is placed at its arrival).
+    parts = [
+        (110.0, "Koniec ", 1),
+        (110.4, "Nová ", 2),
+        (110.6, "vety.", 1),
+        (111.0, "veta.", 2),
+    ]
+    assert dw.sk_timed_from(parts, 100.0, 3000) == [
+        {"t_ms": 7000, "text": "Koniec "},
+        {"t_ms": 7400, "text": "vety."},
+        {"t_ms": 7400, "text": "Nová "},
+        {"t_ms": 8000, "text": "veta."},
+    ]
+    joined = dw.joined_by_connection([(2, "B"), (1, "a "), (2, "C"), (1, "b ")])
+    assert joined == "a b BC"
+
+
+def test_placement_drops_streamed_silence_until_a_stream_that_ran_ahead_is_back():
+    sr = 24000
+    # A 2 s voiced burst arrives at once at 105.0 (video 2.0 s), then the
+    # stream continues in real time: silence, then speech. The burst leaves the
+    # cursor 2 s AHEAD of arrival; the silence chunks are dropped until the lead
+    # is within the tolerance, so the next speech is not 2 s late.
+    burst = [chunk(105.0, n_samples=4800) for _ in range(10)]  # 10 x 0.2 s
+    silence = [chunk(105.2 + i * 0.2, n_samples=4800, voiced=False) for i in range(9)]
+    speech = [chunk(107.0, n_samples=2400)]
+    starts = dw.place_output(burst + silence + speech, 100.0, 3000, sr)
+    # The burst is one continuous stream: voiced audio is NEVER dropped.
+    assert starts[:10] == [48_000 + i * 4800 for i in range(10)]
+    kept_silence = [s for s in starts[10:19] if s is not None]
+    assert len(kept_silence) < 9  # some streamed silence was skipped
+    # The next speech lands within the tolerance of its arrival (4.0 s).
+    lead_ms = (starts[19] - 96_000) * 1000 // sr
+    assert 0 <= lead_ms <= dw.CATCH_UP_TOLERANCE_MS
+
+
+def test_placement_keeps_silence_when_the_stream_is_on_time():
+    chunks = [chunk(103.0 + i * 0.1, voiced=(i % 2 == 0)) for i in range(6)]
+    starts = dw.place_output(chunks, 100.0, 3000, 24000)
+    assert starts == [i * 2400 for i in range(6)]
+
+
+def test_render_skips_dropped_chunks(tmp_path):
+    import numpy as np
+
+    raw = tmp_path / "raw"
+    raw.write_bytes(np.array([7, 7, 9, 9], dtype="<i2").tobytes())
+    chunks = [
+        chunk(0.0, n_samples=2, offset=0),
+        chunk(0.0, n_samples=2, offset=4, voiced=False),
+    ]
+    wav = tmp_path / "placed.wav"
+    dw.render_placed_wav(str(raw), chunks, [0, None], 4, str(wav))
+    with wave.open(str(wav), "rb") as w:
+        got = np.frombuffer(w.readframes(4), dtype="<i2").tolist()
+    assert got == [7, 7, 0, 0]
+
+
+def test_a_failed_run_removes_the_raw_output(tmp_path, monkeypatch):
+    import numpy as np
+
+    monkeypatch.setattr(
+        dw, "_decode_input", lambda audio: np.full(1600, 4000, "<i2").tobytes()
     )
 
+    def dies_mid_session(frames, model, voice, work_dir, sink, events):
+        sink.append(b"\x00\x10" * 2400)
+        raise RuntimeError("the Live session was refused (1008)")
 
-def test_chunk_reusable_legacy_meta_without_bounds_resynth():
-    # A pre-round-E chunk recorded no boundaries → not reusable (never guess).
-    assert (
-        dw.chunk_reusable({"index": 0, "voice": "Charon"}, "Charon", 0, 120_000)
-        is False
+    monkeypatch.setattr(dw, "_run_session", dies_mid_session)
+    work = tmp_path / "w"
+    args = SimpleNamespace(
+        audio="a.flac",
+        out=str(tmp_path / "o.flac"),
+        transcripts=str(tmp_path / "t.json"),
+        work_dir=str(work),
+        model=dw.MODEL,
+        voice="speaker",
     )
+    with pytest.raises(RuntimeError, match="refused"):
+        dw.cmd_live_translate(args)
+    assert not (work / dw.RAW_OUTPUT).exists()
+    assert not (work / dw.PLACED_WAV).exists()
+    assert (work / "events.jsonl").exists()  # the evidence stays
 
 
-# ── #184 round E2: baseline-relative, source-discounted voice guard ──────────────
+# ── review round 2 ─────────────────────────────────────────────────────────────
 
 
-def test_chunk_voice_drift_whole_chunk_high_vs_running_baseline():
-    # The round-E whole-chunk blind spot: a chunk that is high THROUGHOUT has a
-    # high chunk median, so round E saw 0 drift. Measured against the RUNNING
-    # pinned-voice baseline (108) with a steady source below the source baseline
-    # (131), every voiced window is drift.
-    assert dw.chunk_voice_drift([220] * 10, [110] * 10, 108, 131) == (10, 10)
+def test_a_cleanup_failure_never_hides_the_real_error(tmp_path, monkeypatch):
+    # On Windows a file still mapped by a failing render cannot be removed: the
+    # PermissionError of the cleanup must not replace the ORIGINAL error.
+    work = tmp_path / "w"
+    work.mkdir()
+    (work / dw.PLACED_WAV).write_bytes(b"x")
 
+    def fails(args, raw_path, wav_path):
+        raise RuntimeError("the real failure")
 
-def test_chunk_voice_drift_source_following_is_not_drift():
-    # The output is high AND the source is high at the same index (both above
-    # their baselines) → the dub is following the source, not drifting.
-    assert dw.chunk_voice_drift([220] * 5, [220] * 5, 108, 108) == (0, 5)
+    def locked(path):
+        raise PermissionError(13, "The process cannot access the file", path)
 
-
-def test_chunk_voice_drift_seed_has_no_baseline():
-    # No running baseline yet (the seed chunk) → nothing can drift.
-    assert dw.chunk_voice_drift([220] * 5, [110] * 5, None, 131) == (0, 5)
-    assert dw.chunk_voice_drift([], [], 108, 131) == (0, 0)
-
-
-def test_chunk_voice_drift_aligns_mismatched_window_counts():
-    # The input has fewer windows (tempo compressed it); a high output stretch
-    # over a steady input still counts as drift after fraction-alignment.
-    drifted, voiced = dw.chunk_voice_drift([100] * 7 + [220] * 3, [110] * 5, 108, 110)
-    assert (drifted, voiced) == (3, 10)
-
-
-def test_chunk_is_drifted_min_windows_and_fraction():
-    # Round E2 trigger: >= 2 true-drift windows OR fraction > 0.05 (the file gate).
-    assert dw._chunk_is_drifted(1, 24) is False  # 1 window, 1/24 = 0.042 < 0.05
-    assert dw._chunk_is_drifted(2, 24) is True  # >= 2 windows floor
-    assert dw._chunk_is_drifted(1, 15) is True  # 1/15 = 0.067 > 0.05
-    assert dw._chunk_is_drifted(1, 20) is False  # 1/20 = 0.05 exactly, not > 0.05
-    assert dw._chunk_is_drifted(0, 0) is False
-    assert dw._chunk_is_drifted(0, 8) is False
-
-
-def test_voice_drift_frac_equals_the_file_gate():
-    # The chunk trigger's fraction is the SAME 0.05 the file check fails a file at,
-    # so the guard can never sit laxer than the gate it protects (round E's 0.20
-    # was 4x too lax — chunk 5 at 18 % passed the guard while failing the file).
-    assert dw.VOICE_DRIFT_FRAC == dvc.MAX_HIGH_BAND_FRACTION
-
-
-def test_chunk_voice_drift_shares_the_file_definition():
-    # The guard delegates to the ONE shared drift definition (dub_voice_check),
-    # so the guard and the file check measure the same thing.
-    assert dw.chunk_voice_drift([220] * 4, [110] * 4, 108, 131) == dvc.drift_windows(
-        [220] * 4, [110] * 4, 108, 131
+    monkeypatch.setattr(dw, "_translate", fails)
+    monkeypatch.setattr(dw.os, "remove", locked)
+    args = SimpleNamespace(
+        audio="a.flac",
+        out=str(tmp_path / "o.flac"),
+        transcripts=str(tmp_path / "t.json"),
+        work_dir=str(work),
+        model=dw.MODEL,
+        voice="speaker",
     )
+    with pytest.raises(RuntimeError, match="the real failure"):
+        dw.cmd_live_translate(args)
 
 
-def test_voice_f0_band_charon_contains_measured_dub_median():
-    # The measured band for Charon must contain 108 Hz — the measured median of
-    # video 344's Charon dub (the acceptance case).
-    lo, hi = dw.VOICE_F0_BAND["Charon"]
-    assert lo <= 108 <= hi
-    # Every catalogue voice has a (lo, hi) with lo < hi.
-    for voice, (blo, bhi) in dw.VOICE_F0_BAND.items():
-        assert blo < bhi, voice
+# ── review round 3 ─────────────────────────────────────────────────────────────
 
 
-def test_seed_median_ok_band_check():
-    # In-band seed → True, out-of-band → False, unknown voice → None (no check).
-    assert dw.seed_median_ok(108, "Charon") is True
-    assert dw.seed_median_ok(200, "Charon") is False  # a female-band render
-    assert dw.seed_median_ok(50, "Charon") is False  # sub-bass
-    assert dw.seed_median_ok(108, "NoSuchVoice") is None
+def test_the_failed_cleanup_is_logged(tmp_path, monkeypatch, capsys):
+    path = tmp_path / dw.PLACED_WAV
+    path.write_bytes(b"x")
+
+    def locked(p):
+        raise PermissionError(13, "The process cannot access the file", p)
+
+    monkeypatch.setattr(dw.os, "remove", locked)
+    dw._remove_intermediates(str(path))
+    assert "could not remove the intermediate" in capsys.readouterr().err
 
 
-def test_baseline_from_meta_rebuilds_from_persisted_medians():
-    # A resumed run rebuilds the running baselines from the persisted medians.
-    meta = {
-        "voice_band_ok": True,
-        "voice_medians": [108, 110],
-        "voice_in_medians": [130],
-    }
-    assert dw.baseline_from_meta(meta) == ([108, 110], [130])
-    # A still-drifted chunk (voice_band_ok False) contributes nothing.
-    drifted = {
-        "voice_band_ok": False,
-        "voice_medians": [220],
-        "voice_in_medians": [110],
-    }
-    assert dw.baseline_from_meta(drifted) == ([], [])
-    # A guard-skipped chunk (None) with no medians contributes nothing.
-    assert dw.baseline_from_meta({"voice_band_ok": None}) == ([], [])
-    # A legacy chunk (no keys at all) contributes nothing.
-    assert dw.baseline_from_meta({"index": 0}) == ([], [])
-
-
-def test_voice_band_guard_degrades_when_the_scan_fails(tmp_path):
-    # Best-effort: the voice-band guard must NEVER fail the dub it decorates. A
-    # scan failure (here a missing output WAV → a real wave error) is caught: the
-    # guard returns voice_band_ok=None with no drift, empty medians (no baseline
-    # update), leaves the transcripts untouched, and does not re-synthesize.
-    missing = os.path.join(tmp_path, "gone.wav")
-    ok, drifted, voiced, out_meds, in_meds, en, sk, sk_timed = (
-        dw._apply_voice_band_guard(
-            0,
-            b"",
-            1.0,
-            str(tmp_path),
-            "Charon",
-            missing,
-            None,
-            None,
-            "EN",
-            "SK",
-            [{"t_ms": 1, "text": "x"}],
-        )
-    )
-    assert ok is None
-    assert (drifted, voiced) == (0, 0)
-    assert (out_meds, in_meds) == ([], [])
-    assert (en, sk, sk_timed) == ("EN", "SK", [{"t_ms": 1, "text": "x"}])
-
-
-def test_score_candidate_baseline_vs_seed():
-    # With a running baseline: window drift against it (a whole-chunk-high take).
-    assert dw._score_candidate([220] * 4, [110] * 4, 108, 131, "Charon") == (4, 4, True)
-    # A clean take against the baseline is not drifted.
-    assert dw._score_candidate([108] * 4, [110] * 4, 108, 131, "Charon") == (
-        0,
-        4,
-        False,
-    )
-    # Seed take (no baseline): in-band median → not drifted.
-    assert dw._score_candidate([108] * 4, [110] * 4, None, None, "Charon") == (
-        0,
-        4,
-        False,
-    )
-    # Seed take: out-of-band median (a female-band render under a male pin) → the
-    # whole seed scores as drifted so an in-band re-synth is kept over it.
-    assert dw._score_candidate([200] * 4, [110] * 4, None, None, "Charon") == (
-        4,
-        4,
-        True,
-    )
-    # Seed take with an unknown voice → no band check, not drifted.
-    assert dw._score_candidate([300] * 4, [110] * 4, None, None, "Nope") == (
-        0,
-        4,
-        False,
-    )
-
-
-def test_apply_voice_band_guard_keeps_clean_resynth(tmp_path, monkeypatch):
-    # The core round-E2 control flow: a drifted chunk against a running baseline is
-    # re-synthesized and the CLEANER candidate is kept (its transcripts + medians),
-    # so the chunk ships accepted (voice_band_ok True) and feeds the baselines.
-    work = str(tmp_path)
-    wav_path = os.path.join(work, "chunk_0.wav")
-    open(wav_path, "w").close()
-    in_steady = [110] * 10
-
-    def fake_wav_medians(path):
-        # The original take is high throughout (drifted); the candidate is clean.
-        return [108] * 10 if path.endswith(".cand.wav") else [220] * 10
-
-    def fake_render(pcm, pace, work_dir, voice, raw_wav, out_wav):
-        open(out_wav, "w").close()  # create the candidate file for os.replace
-        return "EN2", "SK2", [{"t_ms": 2, "text": "y"}]
-
-    monkeypatch.setattr(dw, "_pcm_window_medians", lambda pcm, sr: in_steady)
-    monkeypatch.setattr(dw, "_wav_window_medians", fake_wav_medians)
-    monkeypatch.setattr(dw, "_render_and_trim", fake_render)
-
-    ok, drifted, voiced, out_meds, in_meds, en, sk, sk_timed = (
-        dw._apply_voice_band_guard(
-            0, b"pcm", 1.0, work, "Charon", wav_path, 108, 131, "EN", "SK", [{"t": 1}]
-        )
-    )
-    assert ok is True  # the clean re-synth candidate was kept
-    assert (drifted, voiced) == (0, 10)
-    assert out_meds == [108] * 10 and in_meds == in_steady
-    assert (en, sk, sk_timed) == ("EN2", "SK2", [{"t_ms": 2, "text": "y"}])
-
-
-def test_apply_voice_band_guard_ships_still_drifted(tmp_path, monkeypatch):
-    # When every re-synth is still drifted, the chunk ships voice_band_ok=False
-    # after VOICE_RESYNTH_ATTEMPTS attempts (never fails the dub) and does NOT feed
-    # the baselines (baseline_from_meta excludes it).
-    work = str(tmp_path)
-    wav_path = os.path.join(work, "chunk_0.wav")
-    open(wav_path, "w").close()
-    calls = {"n": 0}
-
-    def fake_render(pcm, pace, work_dir, voice, raw_wav, out_wav):
-        calls["n"] += 1
-        open(out_wav, "w").close()
-        return "EN2", "SK2", [{"t_ms": 2, "text": "y"}]
-
-    monkeypatch.setattr(dw, "_pcm_window_medians", lambda pcm, sr: [110] * 10)
-    monkeypatch.setattr(dw, "_wav_window_medians", lambda path: [220] * 10)
-    monkeypatch.setattr(dw, "_render_and_trim", fake_render)
-
-    ok, drifted, voiced, out_meds, in_meds, en, sk, sk_timed = (
-        dw._apply_voice_band_guard(
-            0, b"pcm", 1.0, work, "Charon", wav_path, 108, 131, "EN", "SK", [{"t": 1}]
-        )
-    )
-    assert ok is False
-    assert (drifted, voiced) == (10, 10)
-    assert calls["n"] == dw.VOICE_RESYNTH_ATTEMPTS  # exactly 2 re-synth attempts
-    # The original transcripts are kept (no candidate improved).
-    assert (en, sk) == ("EN", "SK")
-    # A still-drifted chunk contributes nothing to the baselines.
-    meta = {"voice_band_ok": ok, "voice_medians": out_meds, "voice_in_medians": in_meds}
-    assert dw.baseline_from_meta(meta) == ([], [])
+def test_the_overlap_cap_covers_every_later_connection():
+    # Connection 3's first text arrives before connection 2's (a middle
+    # connection that only spoke late): every earlier connection's fragments
+    # are capped at the EARLIEST later first-arrival, so connection 3 keeps its
+    # own time (7500 ms) instead of being pushed to 8000 ms.
+    parts = [
+        (110.0, "a ", 1),
+        (111.0, "b ", 1),
+        (110.5, "N3 ", 3),
+        (112.0, "late2 ", 2),
+    ]
+    assert dw.sk_timed_from(parts, 100.0, 3000) == [
+        {"t_ms": 7000, "text": "a "},
+        {"t_ms": 7500, "text": "b "},
+        {"t_ms": 7500, "text": "late2 "},
+        {"t_ms": 7500, "text": "N3 "},
+    ]

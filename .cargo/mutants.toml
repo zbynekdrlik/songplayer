@@ -47,27 +47,29 @@ exclude_re = [
   #   no terminating Linux unit test can exercise -> MISSED (same class as
   #   downloader/reprocess). Its real DECISIONS are extracted to unit-tested pure
   #   fns (models_dabing::{synth_ready, dub_stems_state}, worker::{worker_enabled,
-  #   dub_pace_from, dub_eta, ffmpeg_path} — those stay mutation-covered). Unlike
+  #   dub_voice_from, dub_model_from, dub_input_audio, dub_eta} — those stay
+  #   mutation-covered). Unlike
   #   stems/worker.rs::process_next (whose cap decision precedes any subprocess,
   #   so it IS integration-tested), dabing's proceed decision sits AFTER the
   #   python gate, so process_next itself is integration-only. (#183 round 2)
   'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::process_next',
   # dabing/worker.rs::synthesize: called ONLY from process_next (excluded above)
-  #   and is itself the shell-out — ffmpeg silencedetect + the Gemini
-  #   Live-Translate python child (tokio::process) + the produced-file checks. No
+  #   and is itself the shell-out — the Gemini Live-Translate python child
+  #   (tokio::process) + the settings/stem-file reads + the produced-file checks. No
   #   Linux unit test can reach it, so its whole-fn mutant
   #   (`-> Ok(Default::default())`) is structurally MISSED. Everything it DECIDES
-  #   is pure + mutation-covered: chunk_plan::{parse_silencedetect, plan_chunks,
-  #   placement_for}, child::live_translate_args + the summary JSON, and the D3 subtitle
-  #   path subtitles::transcripts_to_track + subtitles_store (#182).
+  #   is pure + mutation-covered: worker::{dub_input_audio, dub_model_from,
+  #   dub_voice_from} (#184 round H step 2), child::live_translate_args + the summary
+  #   JSON, and the D3 subtitle path subtitles::transcripts_to_track + subtitles_store
+  #   (#182).
   'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::synthesize',
   # dabing/worker.rs::ensure_script: materialises the embedded Python tool scripts
-  #   (dub_worker.py + dub_voice_check.py + dub_loudness.py + win_replace.py) into
+  #   (dub_worker.py + dub_live_session.py + dub_loudness.py + win_replace.py) into
   #   the box's cache/tools dir — pure async fs I/O, no Linux unit test constructs a
   #   DubWorker to drive it (same class as synthesize). The one DECISION it carries
   #   — WHICH scripts ship — is the pure free fn `embedded_tool_scripts()`, which
   #   stays mutation-covered by `embedded_tool_scripts_ship_worker_and_helpers`
-  #   (#184 rounds E/F/F2).
+  #   (#184 rounds F/F2/H).
   'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::ensure_script',
   # api/preview.rs::handle_preview_ws: the WebSocket session of the live preview —
   #   an upgraded socket + a running ffmpeg encoder child + the fragment relay.
