@@ -36,7 +36,8 @@ with a stems child resident (grid slot 33 ms) → genlock pacing collapse + the
 |---|---|---|
 | `heavy_cpu_cap_pct` | **25** | integer, clamped `5..=100` (absent/invalid → 25) |
 | `heavy_cpu_affinity_mask` | **top 3 logical cores** (24-core box → `e00000`; #168 round 8) | hex string, optional `0x`; zero/invalid → default |
-| `heavy_purge_delay_ms` (#207) | **-1** (never decommit — the #168 retained-heap default) | integer ms; `-1` or `0..=600000` (absent / unparseable / out-of-range → -1). Applied to the SEPARATION child's `MIMALLOC_PURGE_DELAY` at spawn via `heavy_alloc_env(current_containment().purge_delay_ms)`. A finite delay lets the box measure returning the child's ~9 GB commit without the #168 r3 fault storm; visible in the `heavy child contained (pid …): … purge_delay_ms=<v>` line at the next spawn. |
+| `heavy_purge_delay_ms` (#207) | **-1** (never decommit — the #168 retained-heap default) | integer ms; `-1` or `0..=600000` (absent / unparseable / out-of-range → -1 in RETAINED; in LAZY a negative value substitutes 10000, a never-purge lazy heap only grows). Applied to the SEPARATION child's `MIMALLOC_PURGE_DELAY` at spawn via `heavy_alloc_env(mode, purge_delay_ms)`. Visible in the `heavy child contained (pid …): … purge_delay_ms=<v> alloc_mode=<mode>` line at the next spawn. |
+| `heavy_alloc_mode` (#207 phase-3) | **retained** | `retained` \| `lazy` (unrecognised → retained, WARN). RETAINED = today's #168 heap (`MIMALLOC_ARENA_EAGER_COMMIT=1`, reserve 4GiB, purge per `heavy_purge_delay_ms`). LAZY = `MIMALLOC_ARENA_EAGER_COMMIT=0` (reserve stays reserved-not-committed, commit grows with touch, purged after the delay — default 10 s). Applied to the SEPARATION child at spawn; visible as `alloc_mode=` in the contained line. |
 
 The default affinity mask is DERIVED from the live core count
 (`default_affinity_mask`), never a literal: the child gets the **TOP 3 logical
@@ -182,3 +183,29 @@ path; the target is a flat, near-zero steady state while playing.
   8, was `15728640` = `0xF00000` round 5), class `BelowNormal`; `Get-Process SongPlayer |
   Select PriorityClass` → `High`. (Baseline before #203: children ran affinity
   `16777215` = all cores, SongPlayer `Normal`.)
+
+## #207 phase-3 — lazy alloc mode, commit_over_ram, the box audit script
+
+- **Purge delay is NOT the commit lever; eager commit is (phase-2 measurement,
+  issue #207 comment 5791417188).** `heavy_purge_delay_ms` variants `-1` and
+  `10000` both held the child at 8973–8977 MB commit (WS ~3 GB): `RESERVE_OS_MEMORY=4GiB`
+  \+ `ARENA_EAGER_COMMIT=1` commit the arena up front, and a purge over an
+  eager-committed arena does not return commit on Windows. So `heavy_alloc_mode=lazy`
+  turns `ARENA_EAGER_COMMIT=0` — the 4 GiB reserve stays reserved-not-committed
+  and commit grows with touch, returned after the (10 s default) purge delay.
+  Default stays `retained` until the box measures lazy (commit_MB, faults/s
+  median/p90, sender submit max, receiver dropped_due) at commit ≤ 5 GB / faults/s
+  ≤ 5k. `heavy_alloc_env(mode, purge_delay_ms)` in `lyrics/heavy_alloc_env.rs` is
+  pure + unit-tested for both modes.
+- **`commit_over_ram` (was `pagefile_used`) — honest naming (`lyrics/host_commit.rs`).**
+  The derived `committed − (total_phys − free_phys)` is commit NOT backed by
+  resident RAM (pagefile-backed sections + reserved-committed arenas), NOT
+  pagefile usage: the box read 48.5 GB derived vs 33.4 GB real `Win32_PageFileUsage`.
+  The `host: commit …` log key and the `/api/v1/status.commit` JSON key are both
+  `commit_over_ram_mb` now (no shim — one day old).
+- **On-box audit (`scripts/box_commit_audit.ps1`).** Read-only; copy to
+  `C:\ProgramData\SongPlayer\verify\` and run
+  `powershell -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\SongPlayer\verify\box_commit_audit.ps1`.
+  Prints commit / processes (top-12 private commit) / gap (`non_process_commit_MB`)
+  / zombies (0-thread + parent-alive + the `handle64.exe -a -p <pid>` operator
+  hint) / python children (WS > 200 MB). No kills, no writes, no downloads.
