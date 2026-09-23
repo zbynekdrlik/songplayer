@@ -6,9 +6,12 @@ paths:
   - crates/sp-server/src/startup_dabing.rs
   - crates/sp-server/src/dabing/**
   - scripts/dub_worker.py
+  - scripts/dub_live_session.py
   - scripts/dub_loudness.py
   - scripts/win_replace.py
   - scripts/tests/test_dub_worker*.py
+  - scripts/tests/test_dub_live_session.py
+  - scripts/tests/dub_live_fakes.py
   - sp-ui/src/pages/dabing.rs
   - sp-ui/src/components/dabing_list.rs
   - sp-ui/src/components/dub_toggle.rs
@@ -126,7 +129,7 @@ the priority queue, now also selects `stem_status`), `mark_dub_synth`,
 `raise_dub_stem_priority` (sets `stem_manual_priority=1` WITHOUT parking at
 `stems`). The old `mark_dub_waiting_stems` (parked at `stems`) is RETIRED.
 
-## Worker (`crates/sp-server/src/dabing/{mod,worker,child,chunk_plan}.rs`)
+## Worker (`crates/sp-server/src/dabing/{mod,worker,child}.rs`)
 Mirrors the stem worker: 10 s tick, `dub_worker_enabled` kill-switch, venv-python
 gate, `HeavyStepPlan::for_activity` (BELOW_NORMAL, never gates playback — owner:
 processing runs during playback at reduced priority), #167 startup floor, memory
@@ -138,40 +141,56 @@ the 15-min stem cap) the worker raises `stem_manual_priority` ONCE
 (`raise_dub_stem_priority`) so a later separation ENRICHES the mix (2-stream →
 4-stream on the next open) and proceeds to `synth` immediately; when
 `stem_status='unsupported'` (over the cap) or beyond the cap it proceeds without
-raising (separation would only be marked unsupported). Live INPUT is the ORIGINAL
-`audio_file_path` (not a stem). `dub_engine="gemini-live-translate"`.
+raising (separation would only be marked unsupported). `dub_engine=
+"gemini-live-translate"`.
 
-- **Chunk plan (Rust owns it):** the worker runs ffmpeg `silencedetect` (a light
-  BELOW_NORMAL pass; #144 r2: the dub now holds the heavy slot across it — the
-  acquire moved to `process_next` before `synthesize`, so it no longer overlaps
-  another heavy child), parses it with `chunk_plan::parse_silencedetect`,
-  and `chunk_plan::plan_chunks` cuts at pauses ≥ 700 ms into chunks ≤ the session
-  cap (round E: 2 min default, the `dub_session_max_s` setting), never mid-speech;
-  the plan JSON is the child's `--chunk-plan`
-  INPUT. `placement_for(chunk_start, chunk_len, out_len, next_start)` decides the
-  atempo (≤ 1.08, only on overrun); the worker calls it per chunk AFTER the child
-  returns each `out_len` to LOG + verify drift ≤ 2 s (`DUB_MAX_DRIFT_MS`), and
-  warns if the child's applied tempo disagrees. `out_len` is only known at
-  runtime, so the child implements placement at runtime (Python) and the Rust
-  `placement_for` is the canonical decision + drift verifier.
+**Round H step 2 (the FROZEN state, see the round-H section below):**
+`synthesize` resolves three things per job and runs the child once:
+- **Input** — the pure `worker::dub_input_audio(original, vocals, stem_status,
+  vocals_exists)` returns the VOCALS stem (`<base>_audio_vocals.flac`, the DB
+  `vocals_file_path`) only when `stem_status == 'done'` (the RAW column vocab, see
+  round A+B) AND the path is non-empty AND the file exists; else the normalized
+  original `audio_file_path`. A cleaner input at no extra cost (the stem already
+  exists).
+- **Model** — `dub_model_from(setting dub_model)`: blank → `sp_core::config::
+  DEFAULT_DUB_MODEL` (`gemini-3.5-live-translate-preview`); any non-blank id passes
+  through (an upgrade = a setting change).
+- **Voice** — `dub_voice_from(setting dub_voice)`: blank → `DEFAULT_DUB_VOICE` =
+  `DUB_VOICE_SPEAKER` = `speaker` (the speaker's own voice, NO `speech_config`); any
+  other non-blank name passes through as a pinned prebuilt voice. Persisted per
+  video in the repurposed `dub_voice_ref_path` column (`set_dub_voice`, NO schema
+  change) → `DubRow.dub_voice` → the Dabing row shows `sp_core::config::
+  dub_voice_label` (`hlas: rečník` / `hlas: <name>`).
+The child's stdout summary carries a `session` object (`child::DubSessionStats`:
+connections, reconnects, output/input ratio, max voiced gap, latency, drain
+reason) which the worker logs at info (`dub worker: live-translate session done`);
+the child's last 8 stderr lines are logged at info on success
+(`dub live-translate ok; stderr tail`). The eta passed to the stall wait is
+`duration_ms + 120 s` (log only).
 
-## Child (`scripts/dub_worker.py live-translate`)
-`--audio --out --transcripts --chunk-plan --work-dir --pace`. Reference:
-`eval/dubbing/engines/gemini_live_translate.py`. Per chunk (resumable — reuses
-`chunk_N.wav`+`.json`): ffmpeg-slice+resample to 16 kHz mono s16le, stream 100 ms
-chunks (real-time by default; `dub_pace` setting → `--pace`, 2× tested on box),
-`audio_stream_end`, collect 24 kHz PCM + input/output transcription (SK stamped by
-output-audio position), trim trailing silence, atempo if it would overrun the next
-chunk, write `chunk_N.wav`. **Heartbeats into `work_dir` every 5 s** so the
-`wait_with_stall_timeout` never kills a healthy mid-chunk stream (a chunk can run
-its full session cap with no other work-dir write). Assembles `<base>_dub.flac` at **48 kHz
-STEREO** (must match the stem format `StemMixReader` requires), **loudness-matched to
-the translated input — two-pass LINEAR loudnorm, see "round F" below** (was a fixed
-single-pass `loudnorm -16` until 0.65.0-dev.9), writes
-`<base>_dub_transcripts.json` (D3), and prints the summary JSON on stdout (the ONLY
-stdout line — logs go to stderr). Key ONLY via `GEMINI_API_KEY` env (`bootstrap::
+## Child (`scripts/dub_worker.py live-translate` + `scripts/dub_live_session.py`)
+`--audio --out --transcripts --work-dir --model --voice` (no `--chunk-plan`, no
+`--pace` — both DELETED). Key ONLY via `GEMINI_API_KEY` env (`bootstrap::
 ensure_genai` pins `google-genai==2.24.0`, idempotent, never triggers the heavy
-qwen/torch reinstall). Cost ~$0.037/min.
+qwen/torch reinstall). The Rust worker ships FOUR scripts
+(`embedded_tool_scripts`): `dub_worker.py`, `dub_live_session.py`,
+`dub_loudness.py`, `win_replace.py` — all imported at module load, so a missing
+one fails every dub (pinned by `embedded_tool_scripts_ship_worker_and_helpers`).
+One run: removes the superseded `chunk_*` work files (round C–E2 resume cache) →
+decodes `--audio` to 16 kHz mono s16le → ONE continuous Live session (round H
+below) with the output PCM appended to `<work_dir>/live_output.raw` → places it on
+the video timeline into `<work_dir>/dub_placed.wav` (24 kHz mono) → `_assemble_dub`
+(round F loudness + round F2 POSIX replace, UNCHANGED, over that ONE WAV via
+`stream_filter()` = `[0:a]aresample=48000[mix]`) → deletes the raw + placed
+intermediates → writes the one-chunk transcripts JSON (D3) → prints the summary
+JSON (the ONLY stdout line; logs go to stderr). Box evidence left in the work dir:
+`events.jsonl` (every server message + decision, flushed per line),
+`session_summary.json`, `loudness.json`, `heartbeat`. Heartbeats every 5 s from the
+session's supervisor tick (+ before each assembly pass), so the #171
+`wait_with_stall_timeout` never kills a healthy real-time stream. A crashed job
+restarts from the beginning (no partial resume — the dub is produced ahead of
+playback; resumption handles are only used across connections of ONE run).
+Cost ~$0.037/min.
 
 ## #184 round G — the dub mix is now the ONE global fader console (SUPERSEDES the per-video ratio below)
 
@@ -254,8 +273,8 @@ sibling `engine_dispatch.rs` (free `dispatch(&mut engine, cmd)`) before adding t
   standalone, write the script + `pip install google-genai==2.24.0` yourself.
 - **Live-Translate core proof (real key, on-box):** a 20 s EN slice → 44 s of
   24 kHz SK PCM (~real-time + drain); `google-genai==2.24.0` installs + imports in
-  the lyrics venv. 2× pacing (`dub_pace=2.0`) keeps the output complete and ~halves
-  the send time (the fixed drain window means elapsed drops < 2×).
+  the lyrics venv. (The old `dub_pace` 2× input pacing is DELETED in round H —
+  the continuous session is paced at exactly 1.0×.)
 - **win-resolume console is cp1252 — a Python `print()` of Slovak (`ď` = ď)
   raises `UnicodeEncodeError`.** The real child is fine (it writes UTF-8 JSON with
   `ensure_ascii=False`); a debug probe must set `PYTHONIOENCODING=utf-8` or write to
@@ -271,15 +290,17 @@ transcription + the SK output transcription; the dub child saves them as
 exactly like song lyrics.
 
 ## Transcript JSON schema (`scripts/dub_worker.py::build_transcripts`)
-Each chunk of `<base>_dub_transcripts.json` carries:
-`{index, start_ms, end_ms, at_ms, tempo, en, sk, sk_timed:[{t_ms, text}]}`.
-- `en` = ONE untimed EN string per chunk; `sk` = the chunk's SK string.
-- `sk_timed` = coarse SK fragments stamped by the chunk-local OUTPUT-audio
-  position at arrival (`t_ms`).
-- `at_ms` = the video-timeline offset where the chunk's output lands; `tempo` =
-  the atempo the mix applied. **Both are computed at JSON-write time from the
-  SAME per-chunk result the mix uses** (cached/resumed chunks included — NO
-  re-synthesis, no extra API calls). Pinned by `test_build_transcripts_*`.
+`{engine, target_lang, chunks:[{index, start_ms, end_ms, at_ms, tempo, en, sk,
+sk_timed:[{t_ms, text}]}]}`. **Round H step 2: exactly ONE chunk** —
+`{index: 0, start_ms: 0, end_ms: <input length>, at_ms: 0, tempo: 1.0}` — whose
+`en` = the joined input transcription, `sk` = the joined output transcription and
+`sk_timed` = the SK fragments stamped on the VIDEO timeline (output-transcription
+arrival − t0 − latency, non-decreasing). With `at_ms` 0 / `tempo` 1.0 the builder
+below maps `t_ms` straight to video time, so D3 needed no change (pinned by
+`subtitles_tests.rs::one_continuous_session_chunk_builds_a_monotonic_bilingual_track`
++ `test_dub_worker.py::test_transcripts_are_one_chunk_on_the_video_timeline`). The
+multi-chunk form (per-chunk `at_ms`/`tempo`, a legacy JSON without them) is still
+read correctly — dubs made before round H keep their subtitles.
 
 ## Subtitle builder (`crates/sp-server/src/dabing/subtitles.rs`, pure + tested)
 `transcripts_to_track(&DubTranscripts) -> LyricsTrack`:
@@ -390,135 +411,124 @@ song always keeps the karaoke default; a dub video shows karaoke only when
 stems-capable). `e2e/dabing-mixer.spec.ts` proves it on Prehľad + Naživo without
 a `/dabing` visit.
 
-# Dabing round C (#184) — one stable dub voice per video (pinned Gemini voice)
+# Dabing rounds C / E / E2 (#184) — DELETED by round H step 2 (history only)
 
-The dub used to change voice every few sentences (female → male → another male,
-one speaker on screen) because `dub_worker.py` built the Live config with NO
-`speech_config`, so Gemini re-rolled the output voice per Live session and per
-turn. Round C PINS one voice per video.
+Round C pinned one prebuilt voice per video via `speech_config` (default `Charon`)
+because the old per-chunk sessions re-rolled the voice. Round E found the pinned
+voice DRIFTS inside a long session and capped each Live session at 2 min
+(`chunk_plan.rs`, `dub_session_max_s`, ffmpeg `silencedetect` pause cuts) plus a
+per-chunk voice-band guard; round E2 made that guard baseline-relative with up to 2
+re-synths (`chunk_voice_drift`, `_chunk_is_drifted`, `VOICE_F0_BAND`,
+`baseline_from_meta`), a voice-keyed per-chunk resume (`chunk_reusable`) and an
+`atempo`/`adelay`/`amix` placement (`build_mix_filter`, ≤ 1.08×). The #184 audit
+(comment 5794017528) traced the root cause to the MACHINERY itself: every one of
+the ~18 session starts per talk re-rolls voice/prosody right after a pause — the
+model's documented limitation ("voices might shift after long pauses") — so the
+chunking, re-synth and pinning were fighting a symptom they created. The round-H
+probe (5797563445) proved the designed usage instead, and the owner chose the
+speaker's own voice + deleting the chunking (5797691198) and froze the result
+(5797708129). ALL of the above is DELETED (owner rule: superseded paths are
+deleted, never kept as a fallback): `chunk_plan.rs` + tests, `dub_pace`,
+`dub_session_max_s`, the silencedetect pre-pass, the per-chunk drift check
+(`DUB_MAX_DRIFT_MS`), the resume, the guard + re-synth, the atempo placement and
+the pinned default voice. `scripts/dub_voice_check.py` (the f0 drift file check)
+is NOT shipped with the dub any more, but the file stays: the eval harness uses it
+(`eval/dubbing/voice_band_measure.py`, `dub_voice_check.py --source` on a probe
+output — `.claude/rules/dubbing-eval.md`). A pinned prebuilt voice is still
+possible (`dub_voice=<name>` adds `speech_config`), but no longer the default.
 
-## The voice is PINNED via `speech_config` (probe-verified)
-`dub_worker.py::_translate_pcm` now sets
-`speech_config=SpeechConfig(voice_config=VoiceConfig(prebuilt_voice_config=
-PrebuiltVoiceConfig(voice_name=<voice>)))` on the `LiveConnectConfig`, ALONGSIDE
-the existing `translation_config`. The translate model `gemini-3.5-live-translate-
-preview` ACCEPTS `speech_config` (probe 2026-09-21: two runs, same voice, f0
-median spread 1.4 st ≤ 2 st) — the abandoned fallback (one session per video, no
-pin) is NOT needed. Full probe recipe: `.claude/rules/dubbing-eval.md`.
+# Dabing round H step 2 (#184) — the FROZEN dub path: ONE continuous Live session in the speaker's own voice
 
-## Setting → worker → child, mirroring `dub_pace`
-`dub_voice` setting (default `sp_core::config::DEFAULT_DUB_VOICE` = `Charon`),
-read per tick in `dabing/worker.rs::synthesize` via the pure
-`dub_voice_from(setting) -> String` (absent/blank → default, any non-blank name
-trimmed + passed through — the catalogue is NOT enforced in the worker, so a new
-voice needs no code change), threaded into `child.rs::live_translate_args`
-(`--voice`). The six catalogue voices live in `eval/dubbing/voices.py` and are
-mirrored in the Nastavenia select (`sp-ui/components/settings_form.rs::DUB_VOICES`,
-Slovak labels).
+Design record 5798586079 (main); probe evidence 5797563445 (arm A, 25 min of video
+344: 3 connections via GoAway + resumption handle, 0 reconnect failures, context
+compression past the 15-min limit, output/input 1.0017, first output ~3.1 s, stable
+level); owner decisions 5797691198 (no TTS path, speaker voice, delete chunking)
+and 5797708129 (freeze this state, the model is a setting).
 
-## Voice-keyed resume + persisted voice (repurposed column, NO schema change)
-- The child records `"voice"` + `chunk_start_ms`/`chunk_end_ms` in each
-  `chunk_N.json`; the pure `dub_worker.py::chunk_reusable(meta, voice, start_ms,
-  end_ms)` reuses a cached chunk ONLY when its recorded voice matches the requested
-  one AND its boundaries equal the current slot AND it carries the round-E2
-  voice-guard record (`voice_medians`, non-empty) (a legacy chunk with no `voice` /
-  bounds, one under another voice, one from an OLDER chunk plan, or an UNGUARDED
-  chunk is re-synthesized) — so a voice change re-does the dub in one voice, a
-  changed session ceiling (round E: 8 → 2 min) never lays old 8-min chunks under
-  the new plan (the round-E integration bug caught on video 344's work dir:
-  `chunk_0..4` from round C would have been reused for the 2-min slots 0–4 and the
-  `amix` would have doubled the speech from ~10 min on), and a re-dub requested to
-  FIX drift never silently keeps pre-guard audio (the E2 acceptance re-dub of 344
-  reused all 19 round-E chunks — the new guard never ran — until this rule).
-- The resolved voice is persisted per video in the EXISTING nullable
-  `dub_voice_ref_path` TEXT column REPURPOSED as the voice name (it was dead
-  clone-lane plumbing; no migration, documented in the `db/mod.rs` V26 comment),
-  via `models_dabing::set_dub_voice`; exposed as `DubRow.dub_voice` on the
-  `GET /api/v1/dabing` payload and shown in the Dabing row as `hlas: <voice>`.
+## The session (`scripts/dub_live_session.py::ContinuousSession`)
+- ONE logical session: `translation_config{target_language_code: sk,
+  echo_target_language: False}`, input + output transcription,
+  `context_window_compression` (trigger 25 000 / sliding target 8 000 tokens),
+  `session_resumption`; `speech_config` ONLY for a pinned prebuilt voice
+  (`live_config`, `voice_for_config`: `speaker`/blank → none). Model from `--model`.
+- **Pacing:** 100 ms frames at 1.0× on ONE wall-clock anchor (frame k at
+  `anchor + k·0.1`, computed, never a summed sleep; the pacer's clock/sleep are
+  injectable so tests assert it exactly on a virtual clock). One anchor for the
+  whole run — NOT re-anchored per connection like the probe — so a frame's video
+  position is its index: after an unannounced close the owed frames go out at
+  catch-up speed instead of shifting everything later.
+- **GoAway = overlap, never a pause.** The GoAway handler immediately opens the
+  next connection with the ACTIVE connection's latest resumption handle while the
+  sender KEEPS feeding the old one; once the new one is open the sender switches at
+  the next frame boundary, and the old one only drains its trailing translation
+  until `time_left − 1 s` or 8 s without voiced output (`drained` event). The
+  probe paused input ≤ 8 s per GoAway — its 13 s output gap. A handle arriving on
+  a DRAINING connection is ignored (it would rewind to before the switch). A close
+  without GoAway reconnects the same way; a failed send marks the connection
+  closed and retries the frame on the next one. No reconnect after
+  `audio_stream_end` (nothing left to send). **A refused (re)connect, a connect
+  that does not complete in 30 s, or 50 connections raise `SessionFailed` → the
+  child exits 1 with `Live reconnect (connection N) refused: …`** and the Rust
+  backoff retries the job. UNVERIFIED until the first box run: that the server
+  accepts a resume while the old connection is still open (the probe only resumed
+  after its grace).
+- **Drain:** `audio_stream_end` once after the last frame, then until 8 s without
+  VOICED output (a chunk above −50 dBFS — the session streams silence after
+  speech), or 60 s, or every connection closed.
+- Output chunks carry `arrival_s`, `conn`, `offset` (into the raw sink), `voiced`,
+  `active` (arrived while its connection was the active one).
 
-## `scripts/dub_voice_check.py` — objective consistency check (box/dev1 tool)
-**Round E replaced the round-C IQR rule (it verified nothing).** Reads a dub
-FLAC/WAV, per-window (**5 s**, was 30) f0 median, and exits 1 when the FRACTION of
-voiced windows more than **6 st ABOVE the file median** exceeds
-`MAX_HIGH_BAND_FRACTION = 0.05` — the rotating-voice symptom (recurring female
-stretches above a base male voice). The max spread and IQR are still printed but
-are **information only**: measured 21.9.2026 on the 36-min sample, ONE pinned
-voice has IQR 4.5 st / max spread 14.7 st (natural intonation + an octave-error
-window), so the round-C IQR gate diluted 100-s female stretches into a passing
-number. A female↔male rotation puts whole 5-s windows in the ~200 Hz band; a
-single male voice stays in 80–145 Hz. NB a *balanced* 50/50 octave alternation is
-NOT flagged (by definition ≤ 50 % of windows exceed the median, and the arithmetic
-median of an equal split sits too close to the high voice) — that is not the real
-symptom. It is NOT executed in CI but IS ruff-lint-scoped (`ci.yml` eval-checks).
-Its pure helpers (`high_band_fraction`, `f0_autocorr`, `window_medians`) run in CI
-eval-checks WITHOUT librosa — the f0 measurement prefers `librosa.pyin` but falls
-back to a dependency-free numpy autocorrelation, and the pytest forces the fallback
-(`use_librosa=False`) so it RUNS, never skips (CI installs numpy + soundfile, not
-librosa).
+## Placement (`dub_worker.py`, pure + tested)
+- `latency_ms = clamp_latency_ms(measure_latency_ms(first voiced output arrival,
+  t0, input onset))`: first voiced output arrival − t0 (frame 0 sent) − the first
+  voiced INPUT frame's position (`first_voiced_frame`, so a silent/instrumental
+  intro is not counted as model latency), clamped to 1000–6000 ms. Raw + clamped
+  values are logged and kept in `session_summary.json`.
+- `place_output`: every chunk lands at `max(cursor, arrival − t0 − latency)` —
+  ONE continuous stream per connection in arrival order (a burst never overlaps
+  itself, a stall re-syncs to arrival). Connections keep SEPARATE cursors and
+  `render_placed_wav` SUMS them (clipped): the old connection's trailing
+  translation overlaps the new one's start; one cursor across both would push
+  every later second late by the overlap on each reconnect. The WAV is at least
+  the input's length; the body is a memmap and the raw file is read per chunk (a
+  36-min talk never sits in memory).
+- `sk_timed` = output-transcription arrival − t0 − latency, clamped ≥ 0 and made
+  non-decreasing.
 
-# Dabing round E (#184) — the pinned voice drifts inside a long session: cap it + a per-chunk guard
+## Log lines the box acceptance reads (stderr → sp-server log)
+`live: connect N (handle_present=…, frame K)`, `live: go_away time_left 50s on
+connection N at frame K`, `live: reconnect (go_away|closed) handle_present=…
+frame_index=K`, `live: switch to connection N at frame K`, `live: connection N
+drained (quiet|deadline)`, `live: frame K/N output Xs` (every 600 frames),
+`live: audio_stream_end after frame N/N`, `live: drain end (quiet|tail_cap|
+closed)`, then the summary `dub session: connections C, reconnects R,
+output/input X, max voiced gap Gs, latency L ms (measured M ms, input onset O ms),
+drain …`, then the round-F `dub loudness: …` line (the last one).
+`output_to_input_ratio` counts the active stream + VOICED draining output — the
+silence a draining connection keeps streaming during the overlap would inflate it
+by ~8 s per reconnect (`overlap_output_s` reports all draining output).
 
-Round C pins the voice via `speech_config`, and the pin HOLDS at a session start —
-but the model DRIFTS to another voice INSIDE a long session (video 344, 5 sessions
-of ~430 s: 55/431 5-s windows landed in a 200–224 Hz female band while the SOURCE
-at those seconds was a steady male 116–134 Hz; where the source itself rose to
-~200 Hz the dub correctly followed). The 120 s vs 30 s experiment: one pinned 120 s
-session = 0 drifted windows; the same slice as four 30 s sessions = 3 (11 %); ~7 min
-is where drift showed. So **~2 min is the validated stable point.**
+## Tests
+`scripts/tests/test_dub_live_session.py` against `scripts/tests/dub_live_fakes.py`
+(a copy of the probe's fake-Live pattern — eval and production stay decoupled; the
+eval-checks job has no google-genai). The overlap proof: `FakeServer(...,
+open_after_frames={2: 5})` holds connection 2's connect until the server received
+5 MORE frames, which only the still-fed OLD connection can deliver — a pause would
+hang the test into its 60 s `wait_for` failure. `test_dub_worker.py`: placement,
+latency, transcripts shape, render, argv defaults, legacy cleanup and the whole
+`cmd_live_translate` with the session + ffmpeg seams faked. Rust: `worker.rs`
+tests (`dub_model_from`, `dub_voice_from`, `dub_input_audio`), `child.rs` (argv,
+session stats), `sp-core config` (keys, defaults, `dub_voice_label`),
+`subtitles_tests.rs::one_continuous_session_chunk_builds_a_monotonic_bilingual_track`.
+Trap: the staging secret-scan blocks a test literal `secret="…"` — the fake runner
+takes `redact_word=`.
 
-## (a) Session cap — `chunk_plan.rs` + `dub_session_max_s` setting
-`chunk_plan::DUB_SESSION_MAX_MS = 120_000` is the default ceiling
-`ChunkPlanConfig::default` uses (`MAX_CHUNK_MS` is kept as its alias). The
-`dub_session_max_s` setting (`sp_core::config::SETTING_DUB_SESSION_MAX_S`, default
-120, clamped 60..=480 s) is read per tick in `worker.rs::synthesize` via the pure
-`dub_session_max_ms_from(setting) -> u64` (mirrors `dub_pace_from`/`dub_voice_from`)
-and passed as the plan ceiling. `plan_chunks` still cuts only at pauses ≥ 700 ms,
-never mid-speech; a 36-min talk is ~18 sessions (the ~27 s drain per session adds
-~8 min, ≈ 1.4× realtime, accepted).
-
-## (b) Per-chunk voice-band guard — round E2 (`dub_worker.py`)
-Round E measured each output window against the CHUNK's OWN median with a 0.20
-re-synth trigger, and on video 344 it still left 7.3 % true-drift windows (file
-gate 5 %). Two defects: (1) **the whole-chunk blind spot** — a chunk high
-THROUGHOUT (chunk 10) has a high chunk median, so 0 windows clear +6 st and it
-falsely passes; (2) **the trigger was 4× laxer than the gate** — 0.20 vs the file
-gate's 0.05, so chunk 5 at 18 % passed the guard while failing the file. Round E2:
-
-- **Baseline-relative, not chunk-relative.** `chunk_voice_drift(out_medians,
-  in_medians, out_baseline, in_baseline)` measures each output window against the
-  RUNNING **pinned-voice baseline** (the median of the voiced OUTPUT windows of the
-  chunks ACCEPTED so far) and discounts source-following against the RUNNING
-  **source baseline** (the running median of the input windows) — NOT the chunk's
-  own medians, so a chunk high throughout is caught. It delegates to the ONE shared
-  `dub_voice_check.drift_windows`, so the guard and the file gate measure the SAME
-  thing. Baselines accumulate in `cmd_live_translate` order; each `chunk_N.json`
-  persists `voice_medians` + `voice_in_medians` so a resumed run rebuilds them
-  (`baseline_from_meta`). A still-drifted or guard-skipped chunk NEVER feeds them.
-- **Trigger as strict as the file gate.** `_chunk_is_drifted` fires at `>= 2`
-  true-drift windows OR fraction `> VOICE_DRIFT_FRAC = 0.05` — the SAME 0.05 as
-  `dub_voice_check.MAX_HIGH_BAND_FRACTION`, pinned equal by a unit test.
-- **Seed (chunk 0).** With no baseline yet, chunk 0 is checked against the pinned
-  voice's expected `VOICE_F0_BAND` (measured by `eval/dubbing/voice_band_measure.py`
-  with the SAME `use_librosa=False` autocorrelation the runtime uses, widened to a
-  coarse per-voice band; an unknown voice → seed as-is). A wrong seed would poison
-  every later baseline, so an out-of-band seed is treated as drifted.
-- **Up to 2 re-synths** (`VOICE_RESYNTH_ATTEMPTS`, new session, same pin), keeping
-  the fewest-drift take; a chunk still drifted after 2 ships with
-  `voice_band_ok=false` (logged, never fails the dub).
-- **File gate `--source`.** `dub_voice_check.py --source <original>` reports the
-  true-drift fraction (source-following discounted, same shared definition) and
-  gates on IT; without `--source` round-E behaviour is unchanged. This is the
-  acceptance number: `--source orig344.flac` true-drift ≤ 0.05.
-
-**The guard stays BEST-EFFORT — it must never fail the dub it decorates.** The
-whole scan + re-synth lives in `_apply_voice_band_guard`'s `try/except`: any
-failure (numpy/`dub_voice_check` import, a truncated/unreadable wav) is logged and
-falls through with `voice_band_ok=None`, empty medians (no baseline update), no
-re-synth. Do NOT unwrap it (round-E review MAJOR). Two known blind spots persist:
-autocorrelation octave-collapse makes `VOICE_F0_BAND` a coarse seed gate (not a
-fine voice discriminator — the window guard + the pyin `--source` gate are the
-real detectors), and a truly balanced 50/50 octave rotation inside one chunk is
-still not the observed symptom.
+## Upgrade path (the ONLY sanctioned change to this frozen path)
+When a newer Live Translate model ships: set `dub_model` (Nastavenia → Dabing →
+`Model dabingu`, or `PATCH /api/v1/settings {"dub_model": "<id>"}`), run the round-H
+probe with `--model <id>` on the box (`.claude/rules/dubbing-eval.md`, same slice
+of video 344), re-dub ONE video (below) and compare the new `session_summary.json`
++ a listen against the current dub. No code change, no new tuning round.
 
 # Dabing round F (#184) — the dub is loudness-matched to the audio it translates
 
@@ -532,9 +542,10 @@ the dub 1.6 LU quieter than the voice next to it.
 
 **Rule: dub loudness = the MEASURED integrated loudness of the child's `--audio`,
 clamped to −24…−10 LUFS, applied with a two-pass LINEAR loudnorm (TP −1.5, LRA 11).**
-`--audio` is `job.audio_file_path`, the video's normalized ORIGINAL (not the vocals
-stem — the child never receives the stem). For speech the two measure the same (344:
-−14.5 / −14.5). The pure rules live in **`scripts/dub_loudness.py`**, which ships
+`--audio` is what the session translates: since round H step 2 the VOCALS stem when
+stems are done (`worker::dub_input_audio`), else the normalized ORIGINAL — so the
+dub is matched to the voice it replaces in the 4-stream mix. For speech the two
+measure the same (344: −14.5 / −14.5). The pure rules live in **`scripts/dub_loudness.py`**, which ships
 next to the worker: it is the 3rd entry of `dabing::worker::embedded_tool_scripts`,
 `dub_worker.py` imports it at module load, and it is in the CI ruff scope. If it is
 missing on the box, every dub fails. `dub_worker.py::_assemble_dub` heartbeats
@@ -543,7 +554,7 @@ before each pass and makes three ffmpeg calls:
    muxer), then `loudness_target(input_i)` applies the clamp (`-inf` clamps to −24,
    `NaN` raises).
 2. `assembly_args(…, loudnorm_analysis_filter(target), None)` analyses the
-   assembled mix (the same `build_mix_filter` graph) to null.
+   placed output (round H: the ONE `dub_placed.wav`, `stream_filter()`) to null.
 3. `assembly_args(…, build_loudnorm_second_pass(mix, target), part, 48000)` writes
    `<base>_dub.part.flac` (`partial_out_path`) with `measured_I/LRA/TP/thresh` +
    `offset`, `linear=true`, `print_format=json`. It is promoted over the dub
@@ -583,8 +594,6 @@ every retry while the video stayed loaded.
   and both paths.
   The old dub stays, and the dub row records the error and retries after the
   backoff.
-- The chunk-wav `os.replace` in the per-chunk synth stays: SongPlayer never opens
-  chunk wavs.
 
 `parse_loudnorm_json` reads the last `{…}` block carrying `input_i` (CRLF-safe) and
 raises if the block is missing or incomplete. The stats (`source_i`, `target_i`,
@@ -596,31 +605,29 @@ DYNAMIC mode when the linear gain would breach TP −1.5 or the mix LRA exceeds 
 The child then logs a `dub loudness: WARNING … fell back to dynamic` line, and
 `normalization_type` records which mode actually ran, so read it before trusting a
 level. Local real-ffmpeg 6.1 smoke: source −14.75 → output −14.73 (linear), ebur128
-orig −14.7 / dub −14.7. The mono mix → `-ac 2` upmix keeps the loudness (swr's
+orig −14.7 / dub −14.7. The mono stream → `-ac 2` upmix keeps the loudness (swr's
 −3 dB centre gain). Tests: `scripts/tests/test_dub_worker_loudness.py` (pure helpers
 + the 3-call orchestration with `_run_stderr` faked; no ffmpeg in eval-checks).
 
-## Rebuild an existing dub so ONLY the assembly reruns (e.g. video 344 after deploy)
+## Re-dub a video (e.g. the video 344 acceptance after deploy)
 
 `PATCH /api/v1/videos/344/dub` with body `{"requested": true}` (204):
 1. `models_dabing::set_dub_requested(true)` sets `dub_status='queued'`, bumps
    `dub_requested_at` (the top of the newest-first queue) and sets
    `stem_manual_priority=1` (harmless).
-2. The dub worker (10 s tick) picks it up: `get_next_dub_job` selects
-   `dub_status NOT IN ('none','ready')`. It runs `mark_dub_synth`, then the same
-   `silencedetect` → the same chunk plan (unchanged `dub_session_max_s`) and the same
-   pinned voice (`dub_voice` setting unchanged).
-3. The child reuses every `chunk_N.wav`/`.json` for which `chunk_reusable` holds
-   (same voice, same `[start,end)`, non-empty `voice_medians`); the log shows
-   `chunk N: resume`. No Gemini session is opened for a reused chunk.
-4. Only `_assemble_dub` runs again (plus the transcripts JSON + subtitles store),
-   then `mark_dub_ready`.
+2. The dub worker (10 s tick) picks it up (`get_next_dub_job` selects
+   `dub_status NOT IN ('none','ready')`), runs `mark_dub_synth` and ONE full
+   continuous session over the whole video (a 36-min talk = ~36 min + drain;
+   there is no partial reuse). The old `chunk_*` files are removed first.
+3. `_assemble_dub` (round F), the transcripts JSON + subtitles store, then
+   `mark_dub_ready`.
 
-The request needs the NEW `dub_worker.py` + `dub_loudness.py` + `win_replace.py` on
-the box. The worker
-re-materialises the embedded scripts (`ensure_script`), so deploy first. Verify with the
-`<cache>/<youtube_id>_dub/loudness.json` next to the chunks, then an ebur128 of the
-new `<base>_dub.flac` against the vocals stem on the same slice (±1 LU acceptance).
-Caveat: a chunk whose guard was skipped (`voice_medians` empty) IS re-synthesized,
-per the round-E2 reuse rule. That costs Gemini time, but it is correct.
-
+Before it: deploy (the worker re-materialises the four embedded scripts via
+`ensure_script`), and CHECK `GET /api/v1/settings` — the Nastavenia form saves
+`dub_voice` on every save, so a box that saved settings during round C still holds
+`dub_voice=Charon` (a pinned voice). Set `{"dub_voice": "speaker"}` (or pick
+`Hlas rečníka` in Nastavenia) for the frozen speaker-voice state. Verify in
+`<cache>/<youtube_id>_dub/`: `session_summary.json` (connections, reconnects 0
+failures, output/input 0.98–1.02, max voiced gap, latency), `events.jsonl`,
+`loudness.json`; then an ebur128 of the new `<base>_dub.flac` against the vocals
+stem on the same slice (±1 LU, round F) and the stored EN/SK subtitle line count.

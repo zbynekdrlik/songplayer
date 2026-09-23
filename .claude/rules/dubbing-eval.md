@@ -133,9 +133,10 @@ same 7 sentences (`seg_spec` items 2..8), plus an intensity layer.
   (`seg.wav [15,35)` → 16 kHz mono s16le PCM) streamed twice with the pin →
   both runs accepted, f0 median (librosa pyin voiced frames) 99.0 Hz vs 107.3 Hz
   = **1.4 semitones spread**, i.e. the SAME voice (male, consistent with Charon).
-  So the prod dub child pins one voice per video via `speech_config`
-  (`scripts/dub_worker.py`, `.claude/rules/dabing.md` round C); the "one Live
-  session per video, no pin" fallback was NOT needed. Reuse the eval venv
+  Round C pinned one voice per video in prod this way. SUPERSEDED by round H step
+  2: the prod dub is now ONE continuous session in the speaker's own voice (no
+  `speech_config` unless the `dub_voice` setting names a prebuilt voice) —
+  `.claude/rules/dabing.md` "round H step 2". Reuse the eval venv
   (`~/.claude/work-products/songplayer/dubbing-test/.venv-live`, has
   `google-genai==2.24.0`; add `librosa soundfile numpy` for the f0 read); the key
   is read INSIDE Python from `GET http://10.77.9.201:8920/api/v1/settings`
@@ -148,9 +149,9 @@ same 7 sentences (`seg_spec` items 2..8), plus an intensity layer.
   shorter is NOT automatically better, ~2 min is the validated point and ~7 min is
   where the drift showed on video 344. Script:
   `scratchpad/voice_session_experiment.py` (reuses the eval venv
-  `.venv-live` + `dub_voice_check.window_medians`). Prod fix: cap the Live session
-  at `dub_session_max_s` (default 120 s) + a per-chunk voice-band guard in
-  `dub_worker.py` (`.claude/rules/dabing.md` round E).
+  `.venv-live` + `dub_voice_check.window_medians`). The round-E prod fix (a 2-min
+  session cap + a per-chunk voice-band guard) is DELETED by round H step 2 — the
+  session starts it multiplied were the drift trigger (`.claude/rules/dabing.md`).
 - **Voice-band measurement (#184 round E2, 2026-09-22).** `eval/dubbing/
   voice_band_measure.py` renders `seg.wav` through one pinned Live session per
   catalogue voice and prints the voiced 5-s f0 band. Two traps: (1) run it as a
@@ -193,8 +194,10 @@ receiving the old connection's trailing translation for `min(time_left − 1 s, 
 then reconnects with the latest handle and resumes from the next unsent frame (an
 early close reconnects the same way) — the input feed PAUSES for that grace (≤ 8 s
 per GoAway; `go_away_grace` → `reconnect` in `events.jsonl`), so a voiced gap right
-after a GoAway is the probe's own pause, not the model (step 2 should overlap the
-new connection instead); `audio_stream_end` once at the end. The
+after a GoAway is the probe's own pause, not the model (production — round H step 2,
+`scripts/dub_live_session.py` — overlaps the new connection instead and keeps its
+own copy of this loop; the probe stays the eval tool for a new `dub_model`);
+`audio_stream_end` once at the end. The
 session streams SILENCE after speech, so the drain ends after 8 s without VOICED
 output (a chunk above −50 dBFS), cap 60 s. Arms: `--voice none` (no
 `speech_config` — the model copies the speaker) vs `--voice Charon` (pinned
