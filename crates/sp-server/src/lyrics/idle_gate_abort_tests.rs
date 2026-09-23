@@ -146,6 +146,60 @@ async fn run_with_wall_abort_scripted_busy_idle_busy_does_not_abort() {
     assert!(completed.load(Ordering::SeqCst));
 }
 
+// ---- isolation_input — #144 stems-fed ★ vocals decision -------------------
+
+#[test]
+fn isolation_input_done_with_vocals_uses_the_stems_sidecar() {
+    let p = std::path::Path::new("/cache/foo_audio_vocals.flac");
+    assert_eq!(
+        isolation_input(Some("done"), p, true),
+        IsolationInput::Stems(p.to_path_buf()),
+        "stems done + vocals on disk → feed the sidecar into dereverb+resample"
+    );
+}
+
+#[test]
+fn isolation_input_done_but_vocals_missing_waits() {
+    let p = std::path::Path::new("/cache/foo_audio_vocals.flac");
+    assert_eq!(
+        isolation_input(Some("done"), p, false),
+        IsolationInput::WaitForStems,
+        "status done but the vocals file is not (yet) on disk → wait, never isolate"
+    );
+}
+
+#[test]
+fn isolation_input_pending_or_failed_waits_for_stems() {
+    let p = std::path::Path::new("/cache/foo_audio_vocals.flac");
+    // NULL/pending, and a retryable 'failed' the stems worker will re-run.
+    assert_eq!(
+        isolation_input(None, p, false),
+        IsolationInput::WaitForStems
+    );
+    assert_eq!(
+        isolation_input(Some("failed"), p, false),
+        IsolationInput::WaitForStems
+    );
+    // Even if a vocals file somehow exists while the status is not 'done', the
+    // step waits for the worker's terminal 'done' before trusting the sidecar.
+    assert_eq!(isolation_input(None, p, true), IsolationInput::WaitForStems);
+}
+
+#[test]
+fn isolation_input_unsupported_is_base_tier_only() {
+    let p = std::path::Path::new("/cache/foo_audio_vocals.flac");
+    assert_eq!(
+        isolation_input(Some("unsupported"), p, false),
+        IsolationInput::BaseTierOnly,
+        "terminal 'unsupported' → no isolation path exists; take the base tier"
+    );
+    // Terminal even if a stray vocals file exists on disk.
+    assert_eq!(
+        isolation_input(Some("unsupported"), p, true),
+        IsolationInput::BaseTierOnly
+    );
+}
+
 // ---- isolation_step_timeout — the CPU ×4 scaling reaches the spawn seam ----
 
 #[test]

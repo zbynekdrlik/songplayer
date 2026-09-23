@@ -129,6 +129,55 @@ pub(crate) fn isolation_step_timeout(
     )
 }
 
+/// #144: what the ★ isolation step should do for a song, decided from the
+/// stems worker's state instead of running a second (BS-RoFormer) isolation
+/// pass. Every video already gets a vocals sidecar from the stems worker
+/// (#184 G0, `{base}_audio_vocals.flac`), so the mtl aligner's vocals come from
+/// THAT — `preprocess-vocals` is now only anvuew dereverb + 16 kHz resample.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum IsolationInput {
+    /// The stems worker finished and the vocals sidecar exists on disk — feed
+    /// this path into the dereverb + resample step.
+    Stems(PathBuf),
+    /// The stems worker has not produced the vocals sidecar yet — defer the
+    /// song to the queue with NO penalty (no heavy child spawned); the stems
+    /// worker drains the whole catalogue, so it will get there.
+    WaitForStems,
+    /// The stems worker will NEVER produce vocals for this song (terminal
+    /// `'unsupported'` — too long / no vocals). No isolation path exists any
+    /// more, so the song takes the g35t base tier without spawning a child.
+    BaseTierOnly,
+}
+
+/// Pure decision for [`IsolationInput`] from the row's raw `stem_status`
+/// (`crate::db::models_stems` vocabulary: NULL = pending, `'done'`, `'failed'`,
+/// `'unsupported'`) and whether the vocals sidecar is on disk.
+///
+/// - `'unsupported'` → [`IsolationInput::BaseTierOnly`] (terminal; no stems ever).
+/// - `'done'` AND the vocals file exists → [`IsolationInput::Stems`].
+/// - anything else (pending / failed / done-but-file-missing) →
+///   [`IsolationInput::WaitForStems`].
+///
+/// Keyed on the RAW status (not the collapsed display `StemsState`, which folds
+/// in instrumental-file existence) so the mtl step depends only on the ONE
+/// track it consumes — the vocals.
+pub(crate) fn isolation_input(
+    stem_status: Option<&str>,
+    vocals_path: &std::path::Path,
+    vocals_exists: bool,
+) -> IsolationInput {
+    // RED (#144): the 'done'/else arms are SWAPPED so the `isolation_input_*`
+    // tests fail; the GREEN commit un-swaps them to the real decision. Every
+    // variant is still constructed and every field read, so the RED tree stays
+    // clippy `-D warnings` clean (no dead_code / unused) — the no-compile-box
+    // RED pattern from `.claude/rules/rust-workspace.md`.
+    match stem_status {
+        Some("unsupported") => IsolationInput::BaseTierOnly,
+        Some("done") if vocals_exists => IsolationInput::WaitForStems,
+        _ => IsolationInput::Stems(vocals_path.to_path_buf()),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Live-handle seam for the lyrics worker — reads its in-process wall handles to
 // drive the abort watcher, and surfaces the abort to the dashboard. I/O only;
