@@ -353,25 +353,44 @@ a `buffered.end` that is itself stale, and the lag beacon rides the same backlog
 - **The reconnect rule** (`shouldReconnect`, exported pure, table-tested in
   `e2e/preview.spec.ts` node-side): reconnect when the last 2 rtts both exceed
   `RTT_RECONNECT_MS = 3000`, or a ping has waited > `NO_PONG_RECONNECT_MS = 5000`,
-  and never within `MIN_RECONNECT_GAP_MS = 10000` of the last reconnect. "No pong
-  for 5 s" is measured from the oldest UNANSWERED ping, never from the last pong
-  — a background tab whose timers are throttled to one tick a minute would
-  otherwise read "no pong for 60 s" and reconnect for nothing.
-- **`_reconnect()`** closes the old socket (handlers nulled first), clears the
-  append queue, sets `_needResync` (the buffered range is cleared right before
-  the NEXT fragment, so the old picture plays until new data arrives), reports
-  lag 0, and re-opens through the ONE connect path `_connect(path)` — a new
-  WebSocket is a new tunnel stream at the live edge; the old backlog is
-  discarded. The encoder child survives (the new viewer subscribes well inside
-  `VIEWER_TTL`). `_maintain` also snaps a playhead left AHEAD of everything
-  buffered back into the range (a reconnect onto a restarted media timeline).
-- **Mock seam `pong_delay_ms`** (`e2e/mock-api.mjs`): the shim forwards
-  `?pong_delay_ms=<N>` from the PAGE url onto the preview WS (like `lag_ms`); the
-  mock then delivers every post-init frame — fragments, beacon AND pong — N ms
-  late (a tunnel backlog). The mock always echoes `{"ping":N}` → `{"pong":N}`.
-  `preview.spec.ts` proves: with `pong_delay_ms=6000` the badge shows on the
-  first socket and a second preview socket opens within ~15 s; without it ONE
-  socket, no badge and ≥ 15 ping/pong pairs over 20 s.
+  or the socket is LOST (`socketLost` — it closed on its own, e.g. a server
+  restart / relay close, or delivered no init within `INIT_TIMEOUT_MS = 12000`;
+  the server itself gives up on the init after ~10 s), and never within
+  `MIN_RECONNECT_GAP_MS = 10000` of the last reconnect (a server that is down is
+  retried every 10 s, never hammered). "No pong for 5 s" is measured from the
+  oldest UNANSWERED ping, never from the last pong — a background tab whose
+  timers are throttled to one tick a minute would otherwise read "no pong for
+  60 s" and reconnect for nothing. The 1 Hz health/ping timer runs for each
+  socket's whole life (started in `_connect`); it only SENDS pings after the init.
+- **`_reconnect()`** closes the old socket (`onmessage`/`onerror`/`onclose`
+  nulled first, so a late frame or close from it is ignored), clears the append
+  queue, sets `_needResync`, reports lag 0, and re-opens through the ONE connect
+  path `_connect(path)` — a new WebSocket is a new tunnel stream at the live
+  edge; the old backlog is discarded. The encoder child survives (the new viewer
+  subscribes well inside `VIEWER_TTL`). `_needResync` is consumed right before
+  the next queued frame is appended — after a reconnect that is the new socket's
+  INIT segment, so the old media plays until the new socket delivers, then the
+  picture holds its last frame until the first new fragment (~0.5 s). The clear
+  sets `_snapToStart`: the next `_maintain` with media buffered puts the playhead
+  on the FIRST new sample unconditionally (a reconnect can land on a restarted
+  media timeline — a new encoder child starts at 0 — behind the old playhead).
+- **Server log (`api/preview.rs`)**: every viewer session logs INFO on connect
+  (init sent) and on disconnect with `secs` + `pongs` answered — a viewer the
+  shim keeps reconnecting on a slow link shows up in the box log as a stream of
+  ~10-s sessions (the shim itself may not log).
+- **Mock seams** (`e2e/mock-api.mjs`): the shim forwards `?pong_delay_ms=<N>`
+  from the PAGE url onto the preview WS (like `lag_ms`); the mock then delivers
+  every post-init frame — fragments, beacon AND pong — N ms late (a tunnel
+  backlog) on EVERY socket. The mock always echoes `{"ping":N}` → `{"pong":N}`.
+  For "the first socket is bad, the reconnected one is healthy", the one-shot
+  `POST /__mock/preview-fault {delay_ms?, close_after_frags?}` applies to the
+  NEXT preview connection only (`{}` clears it; always clear it in `finally`).
+  `preview.spec.ts` proves: `pong_delay_ms=6000` → the badge shows on the first
+  socket and a second socket opens within ~15 s (the no-pong rule); a 4 s
+  one-shot backlog → reconnect via the rtt rule (no ping can wait > 5 s), the
+  video plays again and the badge clears; a server-closed first socket → a
+  second socket and the video plays again; no knob → ONE socket, no badge and
+  ≥ 15 ping/pong pairs over 20 s.
 
 ## #184 — per-deploy pause/seek latency proof of the owner's path
 
