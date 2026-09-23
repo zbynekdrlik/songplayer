@@ -429,6 +429,74 @@ def test_assemble_dub_failed_final_pass_keeps_the_previous_dub(tmp_path, monkeyp
     assert not os.path.exists(dl.partial_out_path(out))
 
 
+def _three_passes(monkeypatch):
+    return _fake_ffmpeg(
+        monkeypatch,
+        [
+            _loudnorm_stderr(SOURCE_BLOCK),
+            _loudnorm_stderr(MIX_BLOCK),
+            _loudnorm_stderr(APPLIED_BLOCK),
+        ],
+    )
+
+
+def test_assemble_dub_promotes_the_partial_with_the_posix_rename(tmp_path, monkeypatch):
+    # #184 round F2 (box 2026-09-23, comment 5795075881): `os.replace` =
+    # MoveFileExW(REPLACE_EXISTING) fails with WinError 5 while SongPlayer holds
+    # `_dub.flac` open (the video loaded in SP-dabing). The partial is promoted by
+    # `win_replace.replace_file` (a POSIX-semantics rename on Windows), never by
+    # `os.replace`.
+    work = str(tmp_path)
+    out = os.path.join(work, "x_dub.flac")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("OLD")
+    _three_passes(monkeypatch)
+    promoted = []
+
+    def spy_replace_file(src, dst):
+        promoted.append((src, dst))
+        os.rename(src, dst)
+
+    def no_os_replace(src, dst):
+        raise AssertionError(f"os.replace({src!r}, {dst!r}) used for the dub")
+
+    monkeypatch.setattr(dw.wr, "replace_file", spy_replace_file)
+    monkeypatch.setattr(dw.os, "replace", no_os_replace)
+
+    dw._assemble_dub(
+        "orig.flac", [os.path.join(work, "chunk_0.wav")], [(1.0, 0)], out, work
+    )
+    monkeypatch.undo()
+
+    assert promoted == [(dl.partial_out_path(out), out)]
+    with open(out, encoding="utf-8") as f:
+        assert f.read() == "NEW"
+    assert not os.path.exists(dl.partial_out_path(out))
+
+
+def test_assemble_dub_failed_promotion_keeps_the_previous_dub(tmp_path, monkeypatch):
+    # The replace itself fails (e.g. a pre-1709 Windows without FileRenameInfoEx, or
+    # a reader opened WITHOUT FILE_SHARE_DELETE): the run fails loudly with that
+    # error, the previous good dub stays and the partial is removed.
+    work = str(tmp_path)
+    out = os.path.join(work, "x_dub.flac")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("OLD")
+    _three_passes(monkeypatch)
+
+    def denied(src, dst):
+        raise PermissionError(13, "Access is denied", src, None, dst)
+
+    monkeypatch.setattr(dw.wr, "replace_file", denied)
+    with pytest.raises(PermissionError):
+        dw._assemble_dub(
+            "orig.flac", [os.path.join(work, "chunk_0.wav")], [(1.0, 0)], out, work
+        )
+    with open(out, encoding="utf-8") as f:
+        assert f.read() == "OLD"
+    assert not os.path.exists(dl.partial_out_path(out))
+
+
 def test_assemble_dub_unparseable_final_report_keeps_the_previous_dub(
     tmp_path, monkeypatch
 ):

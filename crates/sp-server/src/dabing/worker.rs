@@ -666,7 +666,12 @@ mod tests {
         let names: Vec<&str> = scripts.iter().map(|(n, _)| *n).collect();
         assert_eq!(
             names,
-            vec!["dub_worker.py", "dub_voice_check.py", "dub_loudness.py"]
+            vec![
+                "dub_worker.py",
+                "dub_voice_check.py",
+                "dub_loudness.py",
+                "win_replace.py"
+            ]
         );
         for (name, content) in scripts {
             assert!(!content.is_empty(), "{name} embedded empty");
@@ -694,6 +699,22 @@ mod tests {
         assert!(
             scripts[0].1.contains("import dub_loudness"),
             "dub_worker.py does not import the shipped dub_loudness module"
+        );
+        // #184 round F2: the dub is promoted with a POSIX-semantics rename
+        // (`win_replace.replace_file`) so a dub SongPlayer holds open can still be
+        // replaced; the worker imports it at module load, so it must ship too.
+        let replace = scripts
+            .iter()
+            .find(|(n, _)| *n == "win_replace.py")
+            .map(|(_, c)| *c)
+            .unwrap_or("");
+        assert!(
+            replace.contains("FILE_RENAME_FLAG_POSIX_SEMANTICS"),
+            "win_replace.py (round-F2 POSIX rename) is not shipped"
+        );
+        assert!(
+            scripts[0].1.contains("import win_replace"),
+            "dub_worker.py does not import the shipped win_replace module"
         );
     }
 
