@@ -352,8 +352,13 @@ so the OS fault + TLB-shootdown cost is unchanged):
 ## Paced measurement session (#168 round-4 recipe)
 
 How to run a paced grid-stall measurement on win-resolume (the check behind the
-#168 round-5 default `heavy_cpu_affinity_mask` and #147's production flip). A
-90-minute investigation is now a 10-minute read.
+#168 default `heavy_cpu_affinity_mask` and #147's production flip). A 90-minute
+investigation is now a 10-minute read.
+
+- **The default heavy block is now 3 logical cores** (`e00000` on the 24-core
+  box; #168 round 8 — round 7 measured it at receiver `dropped_due` 0.27–0.5/min
+  vs 0.9–1.35/min for 4 cores). `f00000` (the round-5 4-core block) is now the
+  operator experiment/override, no longer the default.
 
 - **Toggle pacing.** `genlock_pacing` is read ONLY at startup (`lib.rs::start` →
   `engine.set_genlock_pacing`), so a paced test = `PATCH /api/v1/settings` with

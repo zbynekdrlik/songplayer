@@ -273,6 +273,9 @@ fn cpu_idle_threads_is_quarter_cores_bounded_by_the_block() {
     // #168 round 5: the 4-logical-core default block CAPS the quarter rule.
     // 24-core box, 4-core block → 24/4 = 6 threads capped to 4.
     assert_eq!(cpu_idle_threads_for(24, 4), 4);
+    // #168 round 8: the default block is now 3 logical cores.
+    // 24-core box, 3-core block → 24/4 = 6 threads capped to 3.
+    assert_eq!(cpu_idle_threads_for(24, 3), 3);
     // 24-core box, wide 12-core block → the quarter rule wins (6).
     assert_eq!(cpu_idle_threads_for(24, 12), 6);
     // 8-core box, 4-core block → 8/4 = 2 is already below the block, so 2.
