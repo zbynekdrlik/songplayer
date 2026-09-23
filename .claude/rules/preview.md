@@ -393,8 +393,11 @@ a `buffered.end` that is itself stale, and the lag beacon rides the same backlog
   every post-init frame — fragments, beacon AND pong — N ms late (a tunnel
   backlog) on EVERY socket. The mock always echoes `{"ping":N}` → `{"pong":N}`.
   For "the first socket is bad, the reconnected one is healthy", the one-shot
-  `POST /__mock/preview-fault {delay_ms?, close_after_frags?}` applies to the
-  NEXT preview connection only (`{}` clears it; always clear it in `finally`).
+  `POST /__mock/preview-fault {delay_ms?, close_after_frags?, hold_init?}`
+  applies to the NEXT preview connection only; round G2 adds
+  `{sequence: [fault, …]}` — one fault per next connection, in order (`{}` in
+  the list = a healthy socket). `{}` clears any pending fault(s); always clear
+  it in `finally`.
   `preview.spec.ts` proves: `pong_delay_ms=6000` → the badge shows on the first
   socket and a second socket opens within ~15 s (the no-pong rule); a 4 s
   one-shot backlog → reconnect via the rtt rule (no ping can wait > 5 s), the
