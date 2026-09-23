@@ -438,7 +438,10 @@ export class PreviewPlayer {
     // unconditionally: a #184 round-G reconnect can land on a RESTARTED media
     // timeline (a new encoder child starts at 0) whose times are BEHIND the old
     // playhead, which would otherwise stall past the end of everything buffered.
-    if (this._snapToStart || v.currentTime < start) {
+    // Never while the clearing remove() is still pending: `buffered` would
+    // still show the OLD range and the flag would be spent on its stale start.
+    const clearing = !!(this.sb && this.sb.updating);
+    if ((this._snapToStart && !clearing) || v.currentTime < start) {
       try {
         v.currentTime = start + 0.01;
         this._snapToStart = false;
