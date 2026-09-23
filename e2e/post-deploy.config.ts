@@ -31,22 +31,24 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   projects: [
-    // Bundled Chromium runs every post-deploy spec EXCEPT the #178 preview one
+    // Bundled Chromium runs every post-deploy spec EXCEPT the two preview ones
     // (bundled Chromium lacks H.264/AAC). A project-level testIgnore REPLACES
     // the global testMatch's effect for this project, so it is the only filter
     // needed to drop the preview spec here.
     {
       name: "chromium",
       use: { browserName: "chromium" },
-      testIgnore: ["**/post-deploy-preview.spec.ts"],
+      testIgnore: ["**/post-deploy-preview.spec.ts", "**/post-deploy-owner-path.spec.ts"],
     },
     // The #178 live preview <video> must decode real H.264/AAC on the box.
     // Edge is always present on the Windows runner and carries the proprietary
-    // codecs. Runs ONLY post-deploy-preview.spec.ts.
+    // codecs. Runs ONLY the two preview specs: post-deploy-preview.spec.ts and
+    // the #184 round-G2 owner-path acceptance (post-deploy-owner-path.spec.ts —
+    // it listens to the preview audio, so it needs the codecs too).
     {
       name: "edge",
       use: { browserName: "chromium", channel: "msedge" },
-      testMatch: ["**/post-deploy-preview.spec.ts"],
+      testMatch: ["**/post-deploy-preview.spec.ts", "**/post-deploy-owner-path.spec.ts"],
     },
   ],
 });
