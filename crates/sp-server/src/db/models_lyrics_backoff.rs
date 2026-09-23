@@ -46,3 +46,35 @@ pub async fn record_lyrics_deferral(
     .await?;
     Ok(new_attempts as u32)
 }
+
+/// #144: record a NO-PENALTY recheck for `video_id` — schedule
+/// `lyrics_next_attempt_at = now + wait` WITHOUT touching `lyrics_attempts`.
+///
+/// Used when the ★ isolation step's stems vocals sidecar is not ready yet: the
+/// row is a legitimate future-work item (the stems worker will produce the
+/// sidecar), NOT a failed attempt, so it must not accrue the exponential-backoff
+/// penalty `record_lyrics_deferral` applies. The timestamp uses the same
+/// `strftime('%Y-%m-%dT%H:%M:%fZ')` format so the reprocess bucket queries
+/// compare it lexically, exactly like `record_lyrics_deferral`.
+pub async fn record_lyrics_wait(
+    pool: &SqlitePool,
+    video_id: i64,
+    wait: std::time::Duration,
+) -> Result<(), sqlx::Error> {
+    let secs = wait.as_secs() as i64;
+    // RED (#144): this bumps `lyrics_attempts` — WRONG for a no-penalty stems
+    // wait. The GREEN commit drops the `lyrics_attempts = lyrics_attempts + 1`
+    // clause so `record_lyrics_wait_leaves_attempts_unchanged…` passes.
+    sqlx::query(
+        "UPDATE videos \
+         SET lyrics_attempts = lyrics_attempts + 1, \
+             lyrics_next_attempt_at = \
+                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)) \
+         WHERE id = ?",
+    )
+    .bind(secs)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
