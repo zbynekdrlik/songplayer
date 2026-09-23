@@ -1239,13 +1239,46 @@ previewWss.on("connection", (ws, req) => {
   // #184 round F: an optional `?lag_ms=<N>` knob on the upgrade url inflates the
   // beacon so the lag-readout E2E can force the "picture behind the wall" state.
   // Mock-only — the production dashboard never adds the flag to preview.ws.
+  // #184 round G: an optional `?pong_delay_ms=<N>` knob emulates a tunnel
+  // BACKLOG (the owner's Cloudflare-hairpin defect): every server→client frame
+  // AFTER the init segment — media fragments, the lag beacon AND the pong answer
+  // to the shim's `{"ping":N}` — is delivered N ms late, exactly like frames
+  // queued behind a stalled `cloudflared` stream. The init goes out at once (the
+  // backlog builds while the stream runs). Mock-only, forwarded from the PAGE
+  // url by the shim like `lag_ms`.
   let lagMs = 0;
+  let pongDelayMs = 0;
   try {
-    const q = new URL(req.url, "http://localhost").searchParams.get("lag_ms");
-    if (q !== null && /^\d+$/.test(q)) lagMs = Number(q);
+    const q = new URL(req.url, "http://localhost").searchParams;
+    const lag = q.get("lag_ms");
+    if (lag !== null && /^\d+$/.test(lag)) lagMs = Number(lag);
+    const delay = q.get("pong_delay_ms");
+    if (delay !== null && /^\d+$/.test(delay)) pongDelayMs = Number(delay);
   } catch {
     // malformed upgrade url — no knob
   }
+  // Deliver one frame through the (optionally delayed) "tunnel". A frame whose
+  // socket closed while it sat in the backlog is dropped silently.
+  const pending = new Set();
+  const deliver = (payload) => {
+    const send = () => {
+      if (ws.readyState !== ws.OPEN) return;
+      try {
+        ws.send(payload);
+      } catch {
+        // client vanished mid-send — ignore.
+      }
+    };
+    if (pongDelayMs <= 0) {
+      send();
+      return;
+    }
+    const t = setTimeout(() => {
+      pending.delete(t);
+      send();
+    }, pongDelayMs);
+    pending.add(t);
+  };
   try {
     ws.send(init);
   } catch {
@@ -1258,11 +1291,7 @@ previewWss.on("connection", (ws, req) => {
   // immediately so the readout appears without waiting a full second.
   const sendBeacon = () => {
     if (ws.readyState !== ws.OPEN) return;
-    try {
-      ws.send(JSON.stringify({ produced_ms: fragsSent * 500 + lagMs }));
-    } catch {
-      // client vanished mid-send — ignore.
-    }
+    deliver(JSON.stringify({ produced_ms: fragsSent * 500 + lagMs }));
   };
   sendBeacon();
   const timer = setInterval(() => {
@@ -1270,13 +1299,30 @@ previewWss.on("connection", (ws, req) => {
       clearInterval(timer);
       return;
     }
-    ws.send(frags[i++]);
+    deliver(frags[i++]);
     fragsSent++;
   }, 120);
   const beacon = setInterval(sendBeacon, 1000);
+  // #184 round G: answer the shim's application-level `{"ping":N}` with
+  // `{"pong":N}` (the same echo `api/preview.rs::pong_frame` does), queued
+  // behind the same (optionally delayed) tunnel as the media.
+  ws.on("message", (data, isBinary) => {
+    if (isBinary) return;
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return; // not JSON — ignore, like the real server
+    }
+    if (msg && typeof msg.ping === "number" && Number.isFinite(msg.ping)) {
+      deliver(JSON.stringify({ pong: msg.ping }));
+    }
+  });
   const stop = () => {
     clearInterval(timer);
     clearInterval(beacon);
+    for (const t of pending) clearTimeout(t);
+    pending.clear();
   };
   ws.on("close", stop);
   ws.on("error", stop);

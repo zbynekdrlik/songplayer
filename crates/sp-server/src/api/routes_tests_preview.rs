@@ -112,3 +112,67 @@ fn beacon_frame_is_exact_produced_ms_json() {
     assert_eq!(beacon_frame(500), r#"{"produced_ms":500}"#);
     assert_eq!(beacon_frame(33_900), r#"{"produced_ms":33900}"#);
 }
+
+// ── #184 round G: application-level ping/pong (transport round trip) ─────────
+
+#[test]
+fn pong_frame_echoes_an_integer_ping_verbatim() {
+    use super::pong_frame;
+    // The shim computes rtt = performance.now() − pong, so the echoed number
+    // MUST be exactly the one it sent, under the key `pong`.
+    assert_eq!(
+        pong_frame(r#"{"ping":12345}"#).as_deref(),
+        Some(r#"{"pong":12345}"#)
+    );
+    assert_eq!(
+        pong_frame(r#"{"ping":0}"#).as_deref(),
+        Some(r#"{"pong":0}"#)
+    );
+}
+
+#[test]
+fn pong_frame_echoes_a_float_ping_verbatim() {
+    use super::pong_frame;
+    // performance.now() is a fractional ms value — it must survive the echo
+    // exactly (no truncation to an integer, no rounding).
+    assert_eq!(
+        pong_frame(r#"{"ping":1234.5678}"#).as_deref(),
+        Some(r#"{"pong":1234.5678}"#)
+    );
+    assert_eq!(
+        pong_frame(r#"{"ping":98765.60000000009}"#).as_deref(),
+        Some(r#"{"pong":98765.60000000009}"#)
+    );
+}
+
+#[test]
+fn pong_frame_ignores_extra_fields() {
+    use super::pong_frame;
+    assert_eq!(
+        pong_frame(r#"{"ping":7,"note":"x","n":2}"#).as_deref(),
+        Some(r#"{"pong":7}"#)
+    );
+}
+
+#[test]
+fn pong_frame_rejects_everything_that_is_not_a_numeric_ping() {
+    use super::pong_frame;
+    for text in [
+        "",
+        "garbage",
+        "ping",
+        "7",
+        "[1,2]",
+        "null",
+        "{}",
+        r#"{"ping":"7"}"#,
+        r#"{"ping":null}"#,
+        r#"{"ping":true}"#,
+        r#"{"ping":[1]}"#,
+        r#"{"pong":7}"#,
+        r#"{"produced_ms":500}"#,
+        r#"{"ping":7"#,
+    ] {
+        assert_eq!(pong_frame(text), None, "must not answer {text:?}");
+    }
+}
