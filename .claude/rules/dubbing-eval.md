@@ -188,17 +188,26 @@ whole talk slice, the way the model is documented to run long: 100 ms 16 kHz fra
 at 1.0× real time with WALL-CLOCK drift correction (frame k at `anchor + k·0.1`,
 re-anchored per connection), `echo_target_language=False`, sliding-window
 `context_window_compression` (trigger 25 000 / target 8 000 tokens) +
-`session_resumption`; on GoAway or an early close it reconnects with the latest
-handle and resumes from the next unsent frame; `audio_stream_end` once at the end,
-then drains until 8 s quiet (cap 60 s). Arms: `--voice none` (no `speech_config` —
-the model copies the speaker) vs `--voice Charon` (pinned prebuilt voice).
-Outputs in `--out-dir`: `output.wav` (24 kHz, arrival order), `output_chunks.json`
-(`[arrival_s, n_bytes, buffer_offset_s]`), `input_text.txt`, `output_text.txt`,
-`events.jsonl` (every server message kind + probe decision, flushed per line),
-`summary.json` (= the only stdout line: connections, resumptions_offered, go_aways,
-reconnect_failures, output/input ratio, max output gap, first-output latency,
-per-5-min output RMS dBFS, errors). Exit 1 when nothing connected or on a crash;
-a refused RE-connect is a recorded finding (exit 0, `reconnect_failures ≥ 1`).
+`session_resumption`. On GoAway it stops sending at a frame boundary, keeps
+receiving the old connection's trailing translation for `min(time_left − 1 s, 8 s)`,
+then reconnects with the latest handle and resumes from the next unsent frame (an
+early close reconnects the same way); `audio_stream_end` once at the end. The
+session streams SILENCE after speech, so the drain ends after 8 s without VOICED
+output (a chunk above −50 dBFS), cap 60 s. Arms: `--voice none` (no
+`speech_config` — the model copies the speaker) vs `--voice Charon` (pinned
+prebuilt voice). Outputs in `--out-dir`: `output.wav` (24 kHz, arrival order),
+`output_chunks.json` (`[arrival_s, n_bytes, buffer_offset_s]`), `input_text.txt`,
+`output_text.txt`, `events.jsonl` (every server message field + probe decision —
+fields without a dedicated event land in `other_fields`; `audio` events carry
+`dbfs`/`voiced`; `reconnect` carries `frames_since_handle`; flushed per line),
+`summary.json` (= the only stdout line, ASCII: connections, resumptions_offered,
+go_aways, reconnect_failures, output/input ratio, max output gap (all chunks) +
+max VOICED gap, voiced_output_s, first output / first voiced latency,
+drain_end_reason, per-5-min output RMS dBFS, errors). Exit 1 when nothing
+connected or on a crash; a refused RE-connect is a recorded finding (exit 0,
+`reconnect_failures ≥ 1`). Tests: the pacer's clock/sleep are injectable
+(`ProbeOptions.clock/.sleep`), so the 1.0× schedule is asserted exactly on a
+virtual clock — never assert pacing with wall-clock bounds (flaky on a loaded box).
 
 **The UNVERIFIED capabilities it exists to answer** (the translate docs do not
 mention them; the session-management examples are for `gemini-3.8-live`):
@@ -211,7 +220,8 @@ Charon. Read the answers from `summary.json` + `events.jsonl` (`connect` /
 run `scripts/dub_voice_check.py --source` on each `output.wav` for drift windows.
 
 **SDK traps (google-genai 2.24.0, read from source).** `session.receive()` ENDS
-after every `turn_complete` → a continuous session must re-enter it in a loop; a
+once an interaction completes (`interaction_status == IDLE` when set, else
+`turn_complete`) → a continuous session must re-enter it in a loop; a
 closed websocket raises `errors.APIError` (code = close code); `setup_complete` is
 consumed by `connect()` (read `session.setup_complete`), never seen in `receive()`;
 the SDK models are `extra='forbid'`, so a mistyped config field fails at build;
@@ -238,7 +248,10 @@ Start-Process -FilePath $py -WindowStyle Hidden `
 ```
 
 `Start-Process` inherits `$env:GEMINI_API_KEY` from that shell; the key never
-appears in argv, a log or the transcript. Arm B = the same with `--voice Charon`
+appears in argv, a log or the transcript. UNVERIFIED until the first box run:
+that a process started this way survives the MCP `Shell` call returning (job-object
+teardown) — confirm `stderr.log` keeps growing a minute later; if it died, launch
+it through a scheduled task instead. Arm B = the same with `--voice Charon`
 and `$out = ...\probe_h\voice_charon` (run the arms one after the other, not in
 parallel — two concurrent Live sessions on one key muddy the quota picture).
 Progress: `stderr.log` gets one line per minute of input; `events.jsonl` grows live.
