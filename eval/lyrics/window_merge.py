@@ -19,19 +19,32 @@ Invariants (the project rule: never synthesized / evenly distributed timing):
 - A line that starts inside the audio but whose `end_ms` runs past it is kept
   UNCHANGED and counted separately (`n_end_overrun`) — the scored field is the
   start, and the end is reported as-is rather than clamped.
-- A line of window k (k >= 1) whose start falls inside the overlap it shares
-  with window k-1 is dropped as a DUPLICATE only when window k-1 already
-  produced a near-identical line (normalized text ratio >= DUP_TEXT_RATIO)
-  that reaches into that overlap. A repeated chorus elsewhere in the song is a
-  real second occurrence and is never dropped. The earlier window's copy wins.
+- Overlap de-duplication (`merge_window_lines`): a line of window k (k >= 1)
+  starting inside the overlap it shares with window k-1 is the SAME sung line
+  as an earlier-window line reaching into that overlap when (one-to-one, the
+  closest start wins):
+    * `full` — normalized text ratio >= DUP_TEXT_RATIO and the starts within
+      DUP_MAX_START_DELTA_MS -> the later copy is dropped;
+    * `later_longer` — the earlier copy was cut at its window's END (its text
+      is a word-prefix of the later one) and the starts are close -> the
+      earlier, incomplete copy is dropped and the complete later one kept;
+    * `later_fragment` — the later copy was cut at its window's START (its
+      text is a word-substring of the earlier one) and it starts inside the
+      earlier line's span -> the fragment is dropped.
+  A same-text line further away in time is a real repetition (worship choruses
+  repeat within seconds) and is kept.
 """
 
 from __future__ import annotations
 
 import difflib
-import re
 from dataclasses import dataclass, field
 from typing import Any
+
+# One normalization for de-dup and scoring (lowercase, punctuation stripped,
+# whitespace collapsed) — `score_one_call` is stdlib-only, so importing it
+# keeps this module pure.
+from eval.lyrics.score_one_call import normalize_text
 
 DEFAULT_WIN_MS = 60_000
 DEFAULT_OVERLAP_MS = 5_000
@@ -40,22 +53,16 @@ DEFAULT_OVERLAP_MS = 5_000
 # the same sung line heard by both windows (design record 5801233778: >= 0.8).
 DUP_TEXT_RATIO = 0.8
 
+# Two windows hearing the same sung line put its start within this distance of
+# each other; the same text further apart is a real repetition (a chant
+# "Holy holy" repeats every ~2-4 s).
+DUP_MAX_START_DELTA_MS = 1_500
+
 # An earlier-window line is a duplicate candidate only if it reaches into the
 # shared overlap (its end at or after `overlap_start - DUP_REACH_SLACK_MS`) —
 # a line sung just before the boundary may end a little early in the model's
 # timing, but a line ending tens of seconds earlier is a chorus repeat.
 DUP_REACH_SLACK_MS = 1_000
-
-_PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
-_WS_RE = re.compile(r"\s+")
-
-
-def normalize_text(s: str) -> str:
-    """Same normalization as `score_one_call.normalize_text` (lowercase,
-    punctuation stripped, whitespace collapsed) — duplicated rather than
-    imported so this module stays dependency-free and pure."""
-    s = _PUNCT_RE.sub("", s.lower())
-    return _WS_RE.sub(" ", s).strip()
 
 
 def text_similarity(a: str, b: str) -> float:
@@ -70,7 +77,9 @@ def split_windows(
     """Cover [0, duration_ms) with windows of `win_ms` that each overlap the
     previous one by `overlap_ms`. The last window ends exactly at
     `duration_ms` and may be shorter; a song no longer than one window is a
-    single window. Never emits a zero-length window."""
+    single window. A tail that would add LESS new audio than `overlap_ms` is
+    folded into the previous window (at most `win_ms + overlap_ms` long)
+    instead of a sliver call on a clip lying almost entirely in the overlap."""
     if duration_ms <= 0:
         raise ValueError(f"duration_ms must be > 0, got {duration_ms}")
     if overlap_ms < 0:
@@ -84,6 +93,8 @@ def split_windows(
     start = 0
     while True:
         end = min(start + win_ms, duration_ms)
+        if duration_ms - end < overlap_ms:
+            end = duration_ms
         windows.append((start, end))
         if end >= duration_ms:
             return windows
@@ -108,6 +119,28 @@ def clip_past_end(lines: list[dict[str, Any]], end_ms: int) -> ClipResult:
     )
 
 
+def same_line_kind(later: dict[str, Any], earlier: dict[str, Any]) -> str | None:
+    """How `later` (window k) duplicates `earlier` (window k-1), or None.
+    See the module docstring for the three kinds."""
+    a = normalize_text(later["text"])
+    b = normalize_text(earlier["text"])
+    if not a or not b:
+        return None
+    close = abs(later["start_ms"] - earlier["start_ms"]) <= DUP_MAX_START_DELTA_MS
+    if close and difflib.SequenceMatcher(None, a, b).ratio() >= DUP_TEXT_RATIO:
+        return "full"
+    if close and len(a) > len(b) and (a + " ").startswith(b + " "):
+        return "later_longer"
+    inside = (
+        earlier["start_ms"]
+        <= later["start_ms"]
+        <= earlier["end_ms"] + DUP_REACH_SLACK_MS
+    )
+    if inside and a != b and f" {a} " in f" {b} ":
+        return "later_fragment"
+    return None
+
+
 @dataclass
 class MergeResult:
     lines: list[dict[str, Any]]
@@ -127,36 +160,57 @@ def merge_window_lines(
 
     `per_window` is `[(offset_ms, lines), ...]` in window order. Each line's
     `start_ms`/`end_ms` gets its window's offset added (copies — the input is
-    never mutated); overlap duplicates are dropped per the module docstring;
-    the result is sorted by start (stable) and every line starting at or after
+    never mutated); overlap duplicates are resolved per the module docstring
+    (every dropped copy is returned in `duplicates`, with its `kind`); the
+    result is sorted by start (stable) and every line starting at or after
     `audio_end_ms` is removed and counted."""
     merged: list[tuple[int, dict[str, Any]]] = []  # (window index, line)
     duplicates: list[dict[str, Any]] = []
 
     for k, (offset, lines) in enumerate(per_window):
-        shifted = [
-            {**ln, "start_ms": ln["start_ms"] + offset, "end_ms": ln["end_ms"] + offset}
-            for ln in lines
+        shifted = sorted(
+            (
+                {
+                    **ln,
+                    "start_ms": ln["start_ms"] + offset,
+                    "end_ms": ln["end_ms"] + offset,
+                }
+                for ln in lines
+            ),
+            key=lambda ln: ln["start_ms"],
+        )
+        if k == 0:
+            merged.extend((k, ln) for ln in shifted)
+            continue
+        overlap_end = offset + overlap_ms
+        prev_idx = [
+            i
+            for i, (w, ln) in enumerate(merged)
+            if w == k - 1 and ln["end_ms"] >= offset - DUP_REACH_SLACK_MS
         ]
-        if k > 0:
-            overlap_end = offset + overlap_ms
-            prev = [
-                ln
-                for w, ln in merged
-                if w == k - 1 and ln["end_ms"] >= offset - DUP_REACH_SLACK_MS
-            ]
-            kept: list[dict[str, Any]] = []
-            for ln in shifted:
-                in_overlap = offset <= ln["start_ms"] < overlap_end
-                if in_overlap and any(
-                    text_similarity(ln["text"], p["text"]) >= DUP_TEXT_RATIO
-                    for p in prev
-                ):
-                    duplicates.append(ln)
-                    continue
-                kept.append(ln)
-            shifted = kept
-        merged.extend((k, ln) for ln in shifted)
+        consumed: set[int] = set()
+        for ln in shifted:
+            match: tuple[int, str] | None = None
+            if offset <= ln["start_ms"] < overlap_end:
+                candidates = [
+                    (abs(ln["start_ms"] - merged[i][1]["start_ms"]), i, kind)
+                    for i in prev_idx
+                    if i not in consumed
+                    and (kind := same_line_kind(ln, merged[i][1])) is not None
+                ]
+                if candidates:
+                    _, i, kind = min(candidates)
+                    match = (i, kind)
+            if match is None:
+                merged.append((k, ln))
+                continue
+            i, kind = match
+            consumed.add(i)
+            if kind == "later_longer":
+                duplicates.append({**merged[i][1], "kind": kind})
+                merged[i] = (k, ln)
+            else:
+                duplicates.append({**ln, "kind": kind})
 
     ordered = sorted((ln for _, ln in merged), key=lambda ln: ln["start_ms"])
     clip = clip_past_end(ordered, audio_end_ms)

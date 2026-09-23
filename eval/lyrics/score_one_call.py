@@ -360,6 +360,9 @@ def score_fixture(
         "has_word_timings": has_word_timings,
         "word_count": word_count if has_word_timings else None,
         "n_lines_past_audio_end": lines_past_audio_end(produced),
+        # win60 windows that failed on this (still scored) fixture — their
+        # audio produced no lines; None = not a windowed output
+        "n_window_errors": (produced.get("metadata") or {}).get("n_window_errors"),
         "raw_deltas_ms": deltas,
         "error": None,
     }
@@ -406,6 +409,9 @@ def pooled_aggregate(fixture_scores: list[dict[str, Any]]) -> dict[str, Any]:
         s["n_lines_past_audio_end"]
         for s in ok_scores
         if s.get("n_lines_past_audio_end") is not None
+    ]
+    window_errors = [
+        s["n_window_errors"] for s in ok_scores if s.get("n_window_errors") is not None
     ]
 
     within_400 = sum(1 for d in all_deltas if d <= WALL_TOLERANCE_MS)
@@ -474,6 +480,10 @@ def pooled_aggregate(fixture_scores: list[dict[str, Any]]) -> dict[str, Any]:
         # #144 decision rule: an arm wins only with 0 here. None = no fixture
         # recorded it (unknown, e.g. the mtl raw files), never silently 0.
         "total_lines_past_audio_end": sum(past_end) if past_end else None,
+        # A win60 fixture that lost a window is scored on its remaining lines;
+        # the lost audio must stay visible next to the numbers (re-run first).
+        "total_window_errors": sum(window_errors) if window_errors else None,
+        "fixtures_with_window_errors": sum(1 for n in window_errors if n),
     }
 
 
@@ -684,6 +694,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  sk_ok_pct: {agg['sk_ok_pct']}%")
         past = agg["total_lines_past_audio_end"]
         print(f"  lines past audio end: {'n/a' if past is None else past}")
+        werr = agg["total_window_errors"]
+        print(
+            f"  window errors: {'n/a' if werr is None else werr} "
+            f"(in {agg['fixtures_with_window_errors']} fixtures)"
+        )
         print(
             f"  fixtures with word timings: {agg['fixtures_with_word_timings']}/{agg['n_fixtures']}"
         )

@@ -196,9 +196,17 @@ raw outputs re-scored on the SAME manifest.
 - Code: `backends/gemini38_flash.py` (google-genai 2.24.0 structured output,
   `response_json_schema`, lazy import), `window_merge.py` (pure window math),
   `run_one_call.py` (manifest loop), prompt `prompts/one_call_karaoke.md` rev 2.
-  Raw files `<raw-dir>\gemini38-flash-{whole,win60}_<video_id>.json`; a failed
-  fixture/window is an ERROR ROW, never synthesized timing; re-running retries
-  only error rows (`--force` re-runs all).
+  Raw files `<raw-dir>\gemini38-flash-{whole,win60}_<video_id>.json`. A failed
+  fixture is an ERROR ROW (never synthesized timing); a `win60` fixture that
+  lost only some windows keeps the good windows' lines and records
+  `metadata.n_window_errors` (both scorers print `window errors`). A re-run
+  skips only complete files and retries error rows + partial rows (`--force`
+  re-runs all).
+- Overlap de-dup is one-to-one and needs the starts within 1.5 s (a chant
+  repeating every few seconds stays two lines); a line cut at a window edge
+  keeps its COMPLETE copy. A tail with < 5 s of new audio is folded into the
+  previous window (no sliver calls). Inline audio up to 14 MB raw (base64 must
+  fit the 20 MB request), longer songs go through the Files API.
 - **Prompt-marker trap:** the prompt loader only accepts the PROMPT-START /
   PROMPT-END markers alone on their own line. The 2026-08-05 loader matched the
   header's inline mention and sent `` "` / `" `` as the system prompt — that
@@ -224,14 +232,20 @@ $repo = (Get-ChildItem "$root\src" -Directory | Select-Object -First 1).FullName
 $py = 'C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe'
 $env:GEMINI_API_KEY = (Invoke-RestMethod 'http://10.77.9.201:8920/api/v1/settings').gemini_api_key
 Set-Location $repo
+# smoke ONE fixture per arm first (catches a request-shape 400 before 40 calls)
+& $py -m eval.lyrics.run_one_call --mode whole --raw-dir "$root\raw" --only 5JW87KKDTcU
+& $py -m eval.lyrics.run_one_call --mode win60 --raw-dir "$root\raw" --only 5JW87KKDTcU
+# then the whole manifest (the smoke files are complete -> skipped)
 & $py -m eval.lyrics.run_one_call --mode whole --raw-dir "$root\raw"
 & $py -m eval.lyrics.run_one_call --mode win60 --raw-dir "$root\raw"
 Remove-Item Env:\GEMINI_API_KEY
 ```
 
-Exit 1 = some fixtures are still error rows → re-run the same line (retries
-only those). Pull `$root\raw\*.json` back with the `python -m http.server` trick
-above into `eval/lyrics/reports/2026-09-2x-one-call-raw/`.
+Exit 1 = a re-run can still fill a gap (error rows / lost windows) → re-run the
+same line, it retries only those. Exit 0 with `missing input: 2` is the
+expected end state (`vpwDdb8r9Bk`, `fHYLw-2tTx4` have no WAV). Pull
+`$root\raw\*.json` back with the `python -m http.server` trick above into
+`eval/lyrics/reports/2026-09-2x-one-call-raw/`.
 
 **Score (dev side, repo root)** — both arms AND mtl through `score_aligner.py`
 (identical views), plus `score_one_call.py` for the SK / past-end columns:
@@ -252,8 +266,11 @@ included) is ≥ mtl's same figure AND `lines past audio end: 0`. Otherwise mtl
 stays for timing and only the translation moves. Quote the conditional and
 monotonic views beside it, never alone. mtl baseline re-scored 2026-09-23 on
 the current manifest (17 fixtures scored, 2 errored): **31.2 % of all 1414**
-gold lines (`same-denom` — the bar), 35.3 % of the 1249 scored ones, monotonic
-31.3 %, conditional 49.8 %.
+gold lines (`same-denom` — the bar), 35.3 % of the 1249 gold lines in its 17
+scored fixtures, monotonic 31.3 % (also over those 1249), conditional 49.8 %
+(over its 885 matched+timed lines) — only the first is comparable to an arm's
+`same-denom` figure. An arm with `window errors` > 0 is re-run before its
+numbers are quoted.
 
 ## mtl aligner memory + on-box probe (#144 r3)
 

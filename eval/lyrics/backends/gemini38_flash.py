@@ -85,9 +85,12 @@ THINKING_LEVELS = ("low", "medium", "high")
 DEFAULT_CACHE_DIR = Path(r"C:\ProgramData\SongPlayer\eval-cache")
 DEFAULT_TOOLS_DIR = r"C:\ProgramData\SongPlayer\cache\tools"
 
-# Above this the WAV goes through the Files API instead of inline bytes
-# (the 20 MB inline-request limit the deleted gemini36_flash.py also used).
-INLINE_LIMIT_BYTES = 20 * 1024 * 1024
+# Above this the WAV goes through the Files API instead of inline bytes. The
+# inline request is capped at 20 MB and inline bytes travel base64-encoded
+# (x 4/3), so 14 MB raw (~18.7 MB encoded) leaves room for the prompt. A 16 kHz
+# mono s16 WAV is ~1.9 MB/min: songs over ~7.3 min (e.g. cej4vn4sWtE, 533 s)
+# take the Files API path in the `whole` arm.
+INLINE_LIMIT_BYTES = 14 * 1024 * 1024
 AUDIO_MIME_TYPE = "audio/wav"
 # HttpOptions.timeout is MILLISECONDS (types.py: "Timeout for the request in
 # milliseconds"). A whole-song transcribe+translate can run for minutes.
@@ -238,7 +241,11 @@ def make_ffmpeg_slicer(ffmpeg: str) -> Slicer:
         if sys.platform == "win32":
             kwargs["creationflags"] = _CREATE_NO_WINDOW
         logger.debug("ffmpeg slice %s [%d, %d) -> %s", src, start_ms, end_ms, dst)
-        proc = subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+        # explicit UTF-8 + replacement: the Windows locale codec would raise on
+        # non-ASCII ffmpeg stderr (see .claude/rules/yt-dlp-spawn-env.md)
+        proc = subprocess.run(
+            cmd, capture_output=True, encoding="utf-8", errors="replace", **kwargs
+        )
         if proc.returncode != 0 or not dst.exists():
             raise RuntimeError(
                 f"ffmpeg slice [{start_ms}, {end_ms}) failed "
@@ -599,14 +606,17 @@ def _run_win60(
         n_window_errors=len(errors),
         n_duplicates_dropped=merged.n_duplicates_dropped,
         duplicates_dropped=[
-            {"text": d["text"], "start_ms": d["start_ms"]} for d in merged.duplicates
+            {"text": d["text"], "start_ms": d["start_ms"], "kind": d["kind"]}
+            for d in merged.duplicates
         ],
         n_lines_past_audio_end=past_window_end + merged.n_past_end,
         n_end_overrun=overrun + merged.n_end_overrun,
     )
     if errors and len(errors) == len(windows):
         raise ResponseError(f"all {len(windows)} windows failed; first: {errors[0]}")
-    if not merged.lines:
+    if not merged.lines and not md["n_lines_past_audio_end"]:
+        # nothing at all came back. Lines that all fell past the audio end
+        # are NOT this case: they stay a scored row so the count is pooled.
         raise ResponseError("the model returned no lines in any window")
     return merged.lines
 
@@ -633,6 +643,9 @@ def run_fixture(
     t0 = time.time()
     try:
         if not audio.exists():
+            # a permanent input gap (no cached vocal WAV), not a model failure:
+            # the runner counts it apart so exit 1 means "re-run helps"
+            md["error_kind"] = "missing_input"
             raise FileNotFoundError(f"audio not found: {audio}")
         md["audio_duration_ms"] = wav_duration_ms(audio)
         if mode == "whole":

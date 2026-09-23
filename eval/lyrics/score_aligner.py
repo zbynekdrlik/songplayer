@@ -364,11 +364,13 @@ def main(argv: list[str] | None = None) -> int:
         # two such on the current manifest). The #144 decision rule compares
         # arms and mtl on THIS number.
         past = agg.get("total_lines_past_audio_end")
+        werr = agg.get("total_window_errors")
         print(
             f"  same-denom   : gold_within400_all="
             f"{agg['pct_gold_within_400ms_all_fixtures']!s:>6}% of "
             f"{agg['total_gold_lines_all_fixtures']} gold lines   "
-            f"lines past audio end: {'n/a' if past is None else past}"
+            f"lines past audio end: {'n/a' if past is None else past}   "
+            f"window errors: {'n/a' if werr is None else werr}"
         )
         print(
             f"  conservative : within400={cons['pct_within_400ms']!s:>6}%  "

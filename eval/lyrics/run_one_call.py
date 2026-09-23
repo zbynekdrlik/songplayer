@@ -12,9 +12,16 @@ with `score_aligner.py` / `score_one_call.py` (pure algorithmic scorers).
 
 Every fixture ALWAYS gets a file: a failure (the model call, ffmpeg, a missing
 WAV) is written as an error row (`error` set, `lines: []`) so the fixture keeps
-its gold lines in the scorer's honest denominator. A re-run skips fixtures that
-already have an OK file and retries only error rows / missing files (a 429 or a
-transient 5xx mid-run never freezes a gap); `--force` re-runs everything.
+its gold lines in the scorer's honest denominator. A `win60` fixture that lost
+only SOME windows keeps its good windows' lines on a normal row and records
+`metadata.n_window_errors` (both scorers print it). A re-run skips only COMPLETE
+files — no `error`, no window errors — and retries error rows, partial rows and
+missing files (a 429 or a transient 5xx mid-run never freezes a gap); `--force`
+re-runs everything.
+
+Exit status: 0 when every fixture is complete except permanent input gaps
+(`metadata.error_kind == "missing_input"` — no cached vocal WAV, e.g.
+`vpwDdb8r9Bk` / `fHYLw-2tTx4`), 1 when a re-run can still help, 2 without a key.
 
 The poisoned fixture (`Xvm4_fWkXe8`) is run like any other — the scorers
 exclude it from the pooled aggregate and report it on its own.
@@ -40,8 +47,9 @@ RunOne = Callable[[str], dict[str, Any]]
 
 
 def _existing_ok(path: Path) -> bool:
-    """An existing raw file counts as done only if it parses and carries no
-    error — error rows and corrupt files are retried."""
+    """An existing raw file counts as done only if it parses, carries no
+    error and lost no window — error rows, partial win60 rows and corrupt
+    files are retried."""
     if not path.exists():
         return False
     try:
@@ -49,7 +57,15 @@ def _existing_ok(path: Path) -> bool:
     except (OSError, json.JSONDecodeError) as e:
         logger.warning("existing %s unreadable (%s) — re-running", path.name, e)
         return False
-    return isinstance(data, dict) and data.get("error") is None
+    if not isinstance(data, dict) or data.get("error") is not None:
+        return False
+    return not (data.get("metadata") or {}).get("n_window_errors")
+
+
+def exit_code(summary: dict[str, int]) -> int:
+    """1 while a re-run can still fill a gap; permanent missing inputs don't
+    count (they fail identically on every run)."""
+    return 1 if summary["errors"] - summary["missing_input"] > 0 else 0
 
 
 def run_all(
@@ -69,7 +85,7 @@ def run_all(
             raise ValueError(f"--only ids not in the manifest: {unknown}")
     video_ids = [vid for vid in fixtures if not only or vid in only]
     raw_dir.mkdir(parents=True, exist_ok=True)
-    summary = {"written": 0, "skipped": 0, "errors": 0}
+    summary = {"written": 0, "skipped": 0, "errors": 0, "missing_input": 0}
 
     for n, vid in enumerate(video_ids, start=1):
         out = raw_dir / f"{label}_{vid}.json"
@@ -87,9 +103,11 @@ def run_all(
             json.dumps(row, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
         summary["written"] += 1
+        md = row.get("metadata") or {}
         if row.get("error"):
             summary["errors"] += 1
-        md = row.get("metadata") or {}
+            if md.get("error_kind") == "missing_input":
+                summary["missing_input"] += 1
         logger.info(
             "[%d/%d] %s %s: lines=%d past_audio_end=%s window_errors=%s error=%s",
             n,
@@ -154,11 +172,10 @@ def main(argv: list[str] | None = None) -> int:
     label = gemini38_flash.backend_label(args.mode)
     print(
         f"{label}: written={summary['written']} skipped={summary['skipped']} "
-        f"errors={summary['errors']} -> {args.raw_dir}"
+        f"errors={summary['errors']} (of which missing input: "
+        f"{summary['missing_input']}) -> {args.raw_dir}"
     )
-    # Non-zero while any fixture is still an error row, so a re-run is visibly
-    # needed (it retries exactly those).
-    return 1 if summary["errors"] else 0
+    return exit_code(summary)
 
 
 if __name__ == "__main__":
