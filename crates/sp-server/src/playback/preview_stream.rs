@@ -21,6 +21,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 
@@ -188,11 +189,12 @@ pub fn to_stereo(samples: &[f32], channels: u32) -> Option<Vec<f32>> {
 
 /// The decode-seam A/V-sync lead (ms) for a pipeline's clocking path (#178
 /// round 2). On the SDK-clocked path (`genlock_pacing == false`, so the #192
-/// wall-clock emitter carries the audio) the decoder opens with a 100 ms audio
+/// wall-clock emitter carries the audio) the decoder opens with a 1500 ms audio
 /// read-ahead, so at the decode seam the audio LEADS the video by that much; the
-/// encoder's audio feeder absorbs it into the silence preroll
-/// ([`audio_preroll_samples`]) to re-sync (round 3 — the box ffmpeg ignored the
-/// former `-itsoffset` lever). The paced path has no emitter and thus no lead (0).
+/// encoder's audio feeder re-syncs by HOLDING each block that long before
+/// writing it (#184 round G3, `preview_audio_hold::AudioHold` — round 3 folded
+/// it into a silence preroll, which parked the whole lead in the socket). The
+/// paced path has no emitter and thus no lead (0).
 pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
     let emitter_present = !genlock_pacing;
     (crate::playback::pipeline::audio_emitter::decoder_tolerance_ms(emitter_present)
@@ -205,7 +207,9 @@ pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
 /// input had already been feeding when the audio input connected (feed-on-connect
 /// opens video first), capped at 5 s so a late-connecting audio input can never
 /// prepend an unbounded silence; `lead_ms` is the decode-seam A/V lead
-/// ([`lead_ms_for`]) that the SDK-clocked emitter's read-ahead introduces. At
+/// ([`lead_ms_for`]) that the SDK-clocked emitter's read-ahead introduces —
+/// since #184 round G3 the feeder passes 0 here and HOLDS the lead instead
+/// (`preview_audio_hold`), so the socket never carries it. At
 /// 48 kHz stereo each millisecond is `48 * 2` interleaved f32 samples. Replaces
 /// the box-unreliable `-itsoffset` lever (the box ffmpeg kept audio `start_time`
 /// at 0.000 regardless), aligning A/V deterministically on our side instead.
@@ -218,9 +222,9 @@ pub const PREVIEW_AUDIO_FRAMES_PER_MS: u64 = 48;
 
 /// Pad threshold (#184 round G2): when the audio written so far lags the wall
 /// clock by MORE than this, the feeder writes silence up to the wall — on a
-/// block AND on every 200 ms receive timeout, so ffmpeg (which interleaves the
-/// wall-clock video with the sample-count audio by timestamp) is never starved
-/// of audio and never stops emitting fragments.
+/// block AND on every feeder poll (200 ms in G2, 30 ms since round G3), so
+/// ffmpeg (which interleaves the wall-clock video with the sample-count audio by
+/// timestamp) is never starved of audio and never stops emitting fragments.
 pub const ALIGN_PAD_THRESHOLD_MS: u64 = 150;
 
 /// Ahead bound (#184 round G2): a block that would push the written audio MORE
@@ -246,9 +250,10 @@ pub struct AlignAction {
 }
 
 /// Silence (stereo frames) to write when NO block arrived within the feeder's
-/// 200 ms receive timeout (#184 round G2): everything up to the wall clock
-/// once the written audio lags it by more than [`ALIGN_PAD_THRESHOLD_MS`], else
-/// nothing. `wall_frames` is the target position on the audio timeline (the
+/// poll (#184 round G2 — 200 ms then, 30 ms since round G3): everything up to
+/// the wall clock once the written audio lags it by more than
+/// [`ALIGN_PAD_THRESHOLD_MS`], else nothing. `wall_frames` is the target
+/// position on the audio timeline (the
 /// elapsed wall time since the feeder started, plus its start preroll), and
 /// `written_frames` the stereo frames already written. Never negative.
 pub fn align_timeout(wall_frames: u64, written_frames: u64) -> usize {
@@ -299,15 +304,27 @@ pub fn align_block(wall_frames: u64, written_frames: u64, block_frames: usize) -
     }
 }
 
+/// One post-mix audio block on its way to the encoder's audio feeder (#184
+/// round G3): the interleaved-stereo samples plus WHEN the decode seam offered
+/// them. The feeder places a block by this ARRIVAL time, so however long it
+/// waited in the bounded channel (the feeder blocked on a full socket) can never
+/// shift the preview audio later — that invisible wait was the ~10 s fader lag.
+#[derive(Debug)]
+pub struct AudioBlock {
+    pub arrival: Instant,
+    pub samples: Vec<f32>,
+}
+
 /// State shared between the decode-side taps, the WS viewers, and the encoder
 /// child. Held behind an `Arc` by [`StreamTap`].
 pub struct StreamShared {
     label: String,
     /// #178 A/V-sync lead (ms): how far the decode-seam audio LEADS the video on
-    /// this pipeline's clocking path (100 on the SDK-clocked path from the #192
-    /// lookahead, 0 on the paced path). The encoder's audio feeder folds this
-    /// into its silence preroll ([`audio_preroll_samples`]) to bring preview A/V
-    /// into sync (round 3 — replaced the box-unreliable `-itsoffset`).
+    /// this pipeline's clocking path (1500 on the SDK-clocked path from the #192
+    /// lookahead, 0 on the paced path). The encoder's audio feeder HOLDS each
+    /// block this long (#184 round G3, `preview_audio_hold::AudioHold`) to bring
+    /// preview A/V into sync (round 3 used a silence preroll; before it the
+    /// box-unreliable `-itsoffset`).
     lead_ms: u32,
     /// Number of connected WS viewers. `0` = the offer fast-path early-out.
     viewers: AtomicUsize,
@@ -315,8 +332,8 @@ pub struct StreamShared {
     encoder_running: AtomicBool,
     video_tx: Sender<Vec<u8>>,
     video_rx: Receiver<Vec<u8>>,
-    audio_tx: Sender<Vec<f32>>,
-    audio_rx: Receiver<Vec<f32>>,
+    audio_tx: Sender<AudioBlock>,
+    audio_rx: Receiver<AudioBlock>,
     /// Recycled 640×360 NV12 buffers (avoids a per-frame alloc while watched).
     pool: Mutex<Vec<Vec<u8>>>,
     /// fMP4 fragment relay the child's reader thread feeds and viewers read.
@@ -365,7 +382,8 @@ impl StreamShared {
 
     /// Emit/decode-thread hot path: offer one post-mix interleaved-f32 audio
     /// block (the wall mix — karaoke/dub included). No viewer = one relaxed
-    /// load; a full channel drops the block. Never blocks the caller.
+    /// load; a full channel drops the block. Never blocks the caller. With a
+    /// viewer the block is stamped with its arrival time (#184 round G3).
     pub fn offer_audio(&self, samples: &[f32], _sample_rate: u32, channels: u32) {
         if !self.has_viewer() {
             return;
@@ -375,7 +393,10 @@ impl StreamShared {
         // would play at double speed). [`to_stereo`] upmixes mono and drops any
         // unexpected channel count.
         if let Some(block) = to_stereo(samples, channels) {
-            let _ = self.audio_tx.try_send(block);
+            let _ = self.audio_tx.try_send(AudioBlock {
+                arrival: Instant::now(),
+                samples: block,
+            });
         }
     }
 
@@ -412,7 +433,7 @@ impl StreamShared {
     pub fn video_receiver(&self) -> Receiver<Vec<u8>> {
         self.video_rx.clone()
     }
-    pub fn audio_receiver(&self) -> Receiver<Vec<f32>> {
+    pub fn audio_receiver(&self) -> Receiver<AudioBlock> {
         self.audio_rx.clone()
     }
     /// The fragment relay (reader thread feeds it, WS viewers read it).
@@ -424,7 +445,7 @@ impl StreamShared {
         &self.label
     }
     /// The decode-seam A/V-sync lead in ms (see the field). The encoder's audio
-    /// feeder folds this into its silence preroll ([`audio_preroll_samples`]).
+    /// feeder holds each tapped block this long (#184 round G3).
     pub fn lead_ms(&self) -> u32 {
         self.lead_ms
     }

@@ -206,13 +206,18 @@ fn offer_audio_is_a_noop_with_no_viewer_and_queues_with_one() {
     );
 
     let (_g, _r) = ViewerGuard::subscribe(&tap);
+    let before = std::time::Instant::now();
     tap.try_offer_audio(&block, 48_000, 2);
+    let after = std::time::Instant::now();
     let got = tap
         .shared()
         .audio_receiver()
         .try_recv()
         .expect("audio queued");
-    assert_eq!(got, block.to_vec());
+    assert_eq!(got.samples, block.to_vec());
+    // #184 round G3: the block carries WHEN it was offered (the feeder places
+    // it by this arrival, never by when it was dequeued).
+    assert!(got.arrival >= before && got.arrival <= after);
 }
 
 #[test]
@@ -334,7 +339,7 @@ fn offer_frame_feeds_the_stream_video_and_audio_taps() {
         .audio_receiver()
         .try_recv()
         .expect("the audio tap got the block");
-    assert_eq!(got, vec![0.25f32, -0.25, 0.5, -0.5]);
+    assert_eq!(got.samples, vec![0.25f32, -0.25, 0.5, -0.5]);
 }
 
 #[test]

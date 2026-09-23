@@ -41,6 +41,8 @@ use tracing::{debug, info};
 // near-1000-line `mod.rs` / `pipeline.rs` need no new `mod` lines.
 #[path = "fmp4_relay.rs"]
 pub mod fmp4_relay;
+#[path = "preview_audio_hold.rs"]
+pub mod preview_audio_hold;
 #[path = "preview_encoder.rs"]
 pub mod preview_encoder;
 #[path = "preview_stream.rs"]

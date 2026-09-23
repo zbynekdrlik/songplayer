@@ -26,9 +26,9 @@ use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
 use super::fmp4_relay::BoxSplitter;
+use super::preview_audio_hold::{AudioHold, AudioWrite};
 use super::preview_stream::{
-    OUT_H, OUT_W, PREVIEW_AUDIO_FRAMES_PER_MS, StreamShared, align_block, align_timeout,
-    audio_preroll_samples, block_tail_range,
+    OUT_H, OUT_W, PREVIEW_AUDIO_FRAMES_PER_MS, StreamShared, audio_preroll_samples,
 };
 
 /// Encoder preference ladder: hardware first, software last.
@@ -669,22 +669,30 @@ fn spawn_video_feeder(
 
 /// How often the audio feeder logs its wall-clock alignment (#184 round G2).
 const AFEED_LOG_EVERY: Duration = Duration::from_secs(10);
+/// Longest the audio feeder blocks waiting for a tapped block (µs) — a silence
+/// pad still runs this often while the decode seam is quiet. It must stay under
+/// the write-ahead (200 ms) minus the pad threshold (150 ms) with room for a
+/// Windows timer oversleep (~15.6 ms), so the written audio stays ahead of the
+/// wall-clock video and ffmpeg never waits for audio (#184 round-G3 review;
+/// G2 polled every 200 ms and could fall 150 ms behind).
+const AFEED_POLL_US: u64 = 30_000;
 
 /// Feed tapped interleaved-f32 audio to the child's audio socket (little-endian
 /// f32 bytes) until shutdown or a write error. On start it DRAINS any stale
 /// queued blocks, then PREPENDS silence equal to how far the video timeline is
-/// already ahead (`audio_preroll_samples(connect_gap_ms, lead_ms)`) so the PCM
+/// already ahead (`audio_preroll_samples(connect_gap_ms, 0)`) so the PCM
 /// sample-count timeline starts where the video wall-clock timeline started
 /// (#178 round 3 — replaces the box-unreliable `-itsoffset`).
 ///
-/// From there on (#184 round G2) the written audio is kept on the WALL CLOCK in
-/// both directions: the target is `wall_frames = preroll + elapsed since the
-/// feeder started × 48 000`, and every block goes through [`align_block`] (pad
-/// silence up to the wall when late, trim the OLDEST frames of a burst that
-/// would run > 300 ms ahead), every 200 ms receive timeout through
-/// [`align_timeout`] (silence up to the wall — ffmpeg is never starved of audio,
-/// so it never stops emitting fragments while the decode seam is quiet). Logs
-/// `preview-afeed: ahead_ms padded_ms skipped_ms` at INFO every 10 s.
+/// #184 round G3: the decode-seam LEAD (`lead_ms`) is no longer written up
+/// front as silence — it is HELD here. Every tapped block goes into an
+/// [`AudioHold`] with its arrival stamp and is written `lead − write_ahead`
+/// after it arrived, placed by that arrival (a block that waited is trimmed,
+/// never delayed); the socket carries only the write-ahead, whatever its buffer
+/// size. The round-G2 wall-clock rules (silence when nothing arrives, bursts
+/// trimmed) live in [`AudioHold::take_writes`]. Logs the effective timing at
+/// start and `preview-afeed: ahead_ms padded_ms skipped_ms held_ms queued
+/// dropped` at INFO every 10 s.
 #[cfg_attr(test, mutants::skip)]
 fn spawn_audio_feeder(
     shared: Arc<StreamShared>,
@@ -700,80 +708,88 @@ fn spawn_audio_feeder(
             // Drop any audio blocks queued before this child connected.
             while rx.try_recv().is_ok() {}
             // Silence preroll: how long the video feeder has been running before
-            // this audio input connected, plus the decode-seam lead. 0 if no
-            // video frame has been written yet (nothing to align against).
+            // this audio input connected. 0 if no video frame has been written
+            // yet (nothing to align against). The seam lead is NOT in it (G3).
             let v_us = first_video_us.load(Ordering::Relaxed);
             let gap_ms = if v_us == 0 {
                 0
             } else {
                 (clock_base.elapsed().as_micros() as u64).saturating_sub(v_us) / 1000
             };
-            let preroll = audio_preroll_samples(gap_ms, shared.lead_ms());
-            // The wall target starts where the preroll ends: right after it is
-            // written, written == wall (the round-3 start alignment is kept).
+            let preroll = audio_preroll_samples(gap_ms, 0);
             let start = Instant::now();
-            let base_frames = (preroll / 2) as u64; // interleaved stereo
-            let wall_frames = || {
-                base_frames
-                    + start.elapsed().as_micros() as u64 * PREVIEW_AUDIO_FRAMES_PER_MS / 1000
-            };
+            let us = |t: Instant| t.saturating_duration_since(start).as_micros() as u64;
+            let mut hold = AudioHold::new((preroll / 2) as u64, shared.lead_ms());
+            info!(
+                stream = %shared.label(),
+                lead_ms = shared.lead_ms(),
+                write_ahead_ms = hold.write_ahead_ms(),
+                preroll_ms = (preroll / 2) as u64 / PREVIEW_AUDIO_FRAMES_PER_MS,
+                "preview-afeed: start — seam lead held in the feeder, socket carries only the write-ahead"
+            );
             if preroll > 0 && !write_silence(&mut sock, preroll) {
                 return;
             }
-            let mut written_frames: u64 = base_frames;
-            let mut padded_frames: u64 = 0;
-            let mut skipped_frames: u64 = 0;
             let mut last_log = Instant::now();
             let mut bytes: Vec<u8> = Vec::new();
             while !shutdown.load(Ordering::Relaxed) {
-                let (pad, block) = match rx.recv_timeout(Duration::from_millis(200)) {
-                    Ok(block) => {
-                        let a = align_block(wall_frames(), written_frames, block.len() / 2);
-                        (a.pad_frames, Some((block, a.skip_frames)))
-                    }
-                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                        (align_timeout(wall_frames(), written_frames), None)
-                    }
+                let wait = hold.wait_us(us(Instant::now()), AFEED_POLL_US);
+                match rx.recv_timeout(Duration::from_micros(wait)) {
+                    Ok(b) => hold.push(us(b.arrival), b.samples),
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
                     Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
-                };
-                if pad > 0 {
-                    if !write_silence(&mut sock, pad * 2) {
-                        break;
-                    }
-                    written_frames += pad as u64;
-                    padded_frames += pad as u64;
                 }
-                if let Some((block, skip)) = block {
-                    // Drop the block's OLDEST `skip` frames (a late burst is
-                    // trimmed, never appended behind silence); whole frames only.
-                    let tail = &block[block_tail_range(skip, block.len())];
-                    if !tail.is_empty() {
-                        bytes.clear();
-                        bytes.reserve(tail.len() * 4);
-                        for s in tail {
-                            bytes.extend_from_slice(&s.to_le_bytes());
-                        }
-                        if sock.write_all(&bytes).is_err() {
-                            break;
-                        }
-                    }
-                    written_frames += (tail.len() / 2) as u64;
-                    skipped_frames += skip as u64;
+                while let Ok(b) = rx.try_recv() {
+                    hold.push(us(b.arrival), b.samples);
+                }
+                if !write_audio(&mut sock, hold.take_writes(us(Instant::now())), &mut bytes) {
+                    break;
                 }
                 if last_log.elapsed() >= AFEED_LOG_EVERY {
-                    let ahead = written_frames as i64 - wall_frames() as i64;
-                    let per_ms = PREVIEW_AUDIO_FRAMES_PER_MS as i64;
+                    let pos = hold.position_at(us(Instant::now()));
+                    let ahead = hold.written_frames() as i64 - pos as i64;
+                    let per_ms = PREVIEW_AUDIO_FRAMES_PER_MS;
                     info!(
                         stream = %shared.label(),
-                        "preview-afeed: ahead_ms={} padded_ms={} skipped_ms={}",
-                        ahead / per_ms,
-                        padded_frames / PREVIEW_AUDIO_FRAMES_PER_MS,
-                        skipped_frames / PREVIEW_AUDIO_FRAMES_PER_MS
+                        "preview-afeed: ahead_ms={} padded_ms={} skipped_ms={} held_ms={} queued={} dropped={}",
+                        ahead / per_ms as i64,
+                        hold.padded_frames() / per_ms,
+                        hold.skipped_frames() / per_ms,
+                        hold.held_frames() / per_ms,
+                        rx.len(),
+                        hold.dropped_blocks()
                     );
                     last_log = Instant::now();
                 }
             }
         })
+}
+
+/// Perform the feeder's [`AudioWrite`]s on the child's audio socket (silence in
+/// 32 KB chunks, samples as little-endian f32). `false` on a write error (the
+/// child is gone), so the caller aborts the feeder.
+#[cfg_attr(test, mutants::skip)]
+fn write_audio(sock: &mut TcpStream, writes: Vec<AudioWrite>, bytes: &mut Vec<u8>) -> bool {
+    for w in writes {
+        match w {
+            AudioWrite::Silence(frames) => {
+                if !write_silence(sock, frames * 2) {
+                    return false;
+                }
+            }
+            AudioWrite::Samples(samples) => {
+                bytes.clear();
+                bytes.reserve(samples.len() * 4);
+                for s in &samples {
+                    bytes.extend_from_slice(&s.to_le_bytes());
+                }
+                if sock.write_all(bytes.as_slice()).is_err() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 /// Write `samples` interleaved-f32 zero samples to the child's audio socket in
