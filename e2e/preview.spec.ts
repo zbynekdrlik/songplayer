@@ -7,7 +7,10 @@ import {
   previewLagS,
   RTT_RECONNECT_MS,
   NO_PONG_RECONNECT_MS,
-  MIN_RECONNECT_GAP_MS,
+  RECONNECT_BACKOFF_BASE_MS,
+  RECONNECT_BACKOFF_MAX_MS,
+  reconnectGapMs,
+  socketLost,
   INIT_TIMEOUT_MS,
 } from "../sp-ui/preview_player.js";
 
@@ -279,7 +282,10 @@ test("shouldReconnect: the round-G reconnect decision table (#184)", () => {
   // The constants the design fixed — a change here is a design change.
   expect(RTT_RECONNECT_MS).toBe(3000);
   expect(NO_PONG_RECONNECT_MS).toBe(5000);
-  expect(MIN_RECONNECT_GAP_MS).toBe(10000);
+  // #184 round G2: the fixed 10 s gap became an exponential backoff whose
+  // FIRST step is 12 s (see the backoff table test below).
+  expect(RECONNECT_BACKOFF_BASE_MS).toBe(12000);
+  expect(RECONNECT_BACKOFF_MAX_MS).toBe(60000);
   const never = null; // no reconnect has happened yet on this player
   const rows: {
     name: string;
@@ -299,9 +305,9 @@ test("shouldReconnect: the round-G reconnect decision table (#184)", () => {
     { name: "no pong for > 5 s", rtts: [], msAwaitingPong: 5001, msSinceLastReconnect: never, want: true },
     { name: "no pong for exactly 5 s", rtts: [], msAwaitingPong: 5000, msSinceLastReconnect: never, want: false },
     { name: "no pong after good rtts", rtts: [40, 50], msAwaitingPong: 7000, msSinceLastReconnect: never, want: true },
-    { name: "2x slow but within 10 s of the last reconnect", rtts: [4000, 4000], msAwaitingPong: 0, msSinceLastReconnect: 9999, want: false },
-    { name: "no pong but within 10 s of the last reconnect", rtts: [], msAwaitingPong: 6000, msSinceLastReconnect: 5000, want: false },
-    { name: "2x slow, exactly 10 s after the last reconnect", rtts: [4000, 4000], msAwaitingPong: 0, msSinceLastReconnect: 10000, want: true },
+    { name: "2x slow but within 12 s of the last reconnect", rtts: [4000, 4000], msAwaitingPong: 0, msSinceLastReconnect: 11999, want: false },
+    { name: "no pong but within 12 s of the last reconnect", rtts: [], msAwaitingPong: 6000, msSinceLastReconnect: 5000, want: false },
+    { name: "2x slow, exactly 12 s after the last reconnect", rtts: [4000, 4000], msAwaitingPong: 0, msSinceLastReconnect: 12000, want: true },
     { name: "no pong, long after the last reconnect", rtts: [], msAwaitingPong: 6000, msSinceLastReconnect: 60000, want: true },
   ];
   for (const r of rows) {
@@ -435,11 +441,97 @@ test("shouldReconnect: a lost socket is replaced, but never within the reconnect
   ).toBe(true);
   expect(
     shouldReconnect({ rtts: [], msAwaitingPong: 0, msSinceLastReconnect: 3000, socketLost: true }),
-    "lost, but within 10 s of the last reconnect",
+    "lost, but within 12 s of the last reconnect",
   ).toBe(false);
   expect(
     shouldReconnect({ rtts: [40], msAwaitingPong: 0, msSinceLastReconnect: null, socketLost: false }),
     "a live, healthy socket",
+  ).toBe(false);
+});
+
+test("reconnectGapMs: reconnect attempts back off 12 s → 24 s → 48 s, capped at 60 s (#184 round G2)", () => {
+  // `reconnectsWithoutMedia` = reconnects made since a socket last delivered a
+  // media fragment. 0 (a healthy socket just reset it) and 1 (the first retry)
+  // both wait the base 12 s; every further fruitless retry doubles, max 60 s —
+  // round G retried every 12 s forever against an encoder with no init.
+  expect(reconnectGapMs(0)).toBe(12000);
+  expect(reconnectGapMs(1)).toBe(12000);
+  expect(reconnectGapMs(2)).toBe(24000);
+  expect(reconnectGapMs(3)).toBe(48000);
+  expect(reconnectGapMs(4)).toBe(60000);
+  expect(reconnectGapMs(5)).toBe(60000);
+  expect(reconnectGapMs(1000)).toBe(60000);
+  // Missing / garbage input is the base step, never NaN (never a tight loop).
+  expect(reconnectGapMs(undefined)).toBe(12000);
+  expect(reconnectGapMs(-3)).toBe(12000);
+});
+
+test("shouldReconnect: a lost socket waits the backoff for its retry count (#184 round G2)", () => {
+  const lost = (reconnectsWithoutMedia: number, msSinceLastReconnect: number) =>
+    shouldReconnect({
+      rtts: [],
+      msAwaitingPong: 0,
+      msSinceLastReconnect,
+      socketLost: true,
+      reconnectsWithoutMedia,
+    });
+  // 1st retry: 12 s.
+  expect(lost(1, 11999), "1st retry, 12 s not yet up").toBe(false);
+  expect(lost(1, 12000), "1st retry at 12 s").toBe(true);
+  // 2nd fruitless retry: 24 s.
+  expect(lost(2, 23999), "2nd retry, 24 s not yet up").toBe(false);
+  expect(lost(2, 24000), "2nd retry at 24 s").toBe(true);
+  // 3rd: 48 s.
+  expect(lost(3, 47999), "3rd retry, 48 s not yet up").toBe(false);
+  expect(lost(3, 48000), "3rd retry at 48 s").toBe(true);
+  // 4th and later: capped at 60 s.
+  expect(lost(4, 59999), "4th retry, 60 s not yet up").toBe(false);
+  expect(lost(4, 60000), "4th retry at the 60 s cap").toBe(true);
+  expect(lost(9, 60000), "9th retry still capped at 60 s").toBe(true);
+  // A socket that delivered media reset the count: back to the 12 s base.
+  expect(lost(0, 12000), "after media arrived, the base 12 s again").toBe(true);
+  // The backoff also gates the transport-lag rules, not only a lost socket.
+  expect(
+    shouldReconnect({
+      rtts: [4000, 4000],
+      msAwaitingPong: 0,
+      msSinceLastReconnect: 30000,
+      socketLost: false,
+      reconnectsWithoutMedia: 3,
+    }),
+    "2x slow rtt, but the 3rd retry's 48 s are not up",
+  ).toBe(false);
+  // The very first reconnect of a player is never delayed.
+  expect(
+    shouldReconnect({ rtts: [], msAwaitingPong: 0, msSinceLastReconnect: null, socketLost: true, reconnectsWithoutMedia: 0 }),
+    "first reconnect ever",
+  ).toBe(true);
+});
+
+test("socketLost: waiting for the first init is never 'lost' inside its first 12 s (#184 round G2)", () => {
+  const s = (o: Partial<{ hasSocket: boolean; wsClosed: boolean; gotInit: boolean; msSinceConnect: number }>) =>
+    socketLost({ hasSocket: true, wsClosed: false, gotInit: false, msSinceConnect: 0, ...o });
+  // An encoder cold start / the libx264 fallback takes seconds: no init yet is
+  // NOT a lost socket (and never transport lag) until the 12 s deadline passes.
+  expect(s({ msSinceConnect: 0 }), "just opened").toBe(false);
+  expect(s({ msSinceConnect: 11999 }), "no init after 11.999 s").toBe(false);
+  expect(s({ msSinceConnect: 12000 }), "no init at exactly 12 s").toBe(false);
+  expect(s({ msSinceConnect: 12001 }), "no init past 12 s").toBe(true);
+  // Once the init arrived the deadline no longer applies.
+  expect(s({ gotInit: true, msSinceConnect: 600000 }), "init arrived long ago").toBe(false);
+  // A socket that closed on its own, or none at all, is lost at once.
+  expect(s({ wsClosed: true }), "closed by the server").toBe(true);
+  expect(s({ hasSocket: false }), "no socket object").toBe(true);
+  // And a pre-init socket inside its first 12 s never triggers a reconnect.
+  expect(
+    shouldReconnect({
+      rtts: [],
+      msAwaitingPong: 0,
+      msSinceLastReconnect: null,
+      socketLost: s({ msSinceConnect: 11000 }),
+      reconnectsWithoutMedia: 0,
+    }),
+    "pre-init, 11 s: keep waiting",
   ).toBe(false);
 });
 
@@ -605,6 +697,59 @@ test("a socket that never delivers its init is replaced after the init timeout (
     expect(sockets[0].pings, "no pings before an init").toBe(0);
     await expectSteadyPlayback(page);
     expect(sockets.length, "one reconnect, no churn").toBe(2);
+  } finally {
+    await request.post("/__mock/preview-fault", { data: {} });
+  }
+});
+
+test("fruitless reconnects back off 12 → 24 s; only a MEDIA fragment resets the backoff (#184 round G2 review)", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(150000);
+  // Five sockets, one fault each (the mock's `sequence`):
+  //  1 hold_init            → lost at the 12 s init timeout, 1st reconnect at once
+  //  2 hold_init            → lost at 12 s; retry #1's gap is 12 s → reconnect
+  //  3 init, then closed    → an INIT alone is not media: the count stays, so
+  //                           retry #2 waits its 24 s (a reset-on-init would
+  //                           reconnect after 12 s, a missing increment too)
+  //  4 init + 2 fragments,  → media arrived: the count resets, so the next
+  //    then closed            reconnect waits the 12 s BASE (without the reset
+  //                           retry #3 would wait 48 s)
+  //  5 healthy              → plays.
+  await request.post("/__mock/preview-fault", {
+    data: {
+      sequence: [
+        { hold_init: true },
+        { hold_init: true },
+        { close_after_frags: 0 },
+        { close_after_frags: 2 },
+      ],
+    },
+  });
+  try {
+    const sockets = watchPreviewSockets(page);
+    await startPreview(page);
+    await expect
+      .poll(() => sockets.length, { timeout: 100000, intervals: [250] })
+      .toBeGreaterThanOrEqual(5);
+    const gap = (i: number) => sockets[i].openedAt - sockets[i - 1].openedAt;
+    const gaps = [1, 2, 3, 4].map(gap);
+    console.log(`[#184 G2] preview socket gaps (ms): ${gaps.join(", ")}`);
+    // 1 → 2: the init timeout (first reconnect is never delayed).
+    expect(gaps[0], "socket 1 replaced at its init timeout").toBeGreaterThanOrEqual(INIT_TIMEOUT_MS - 500);
+    expect(gaps[0]).toBeLessThanOrEqual(INIT_TIMEOUT_MS + 2500);
+    // 2 → 3: retry #1 waits the 12 s base (= the init timeout).
+    expect(gaps[1], "retry #1 waits 12 s").toBeGreaterThanOrEqual(RECONNECT_BACKOFF_BASE_MS - 500);
+    expect(gaps[1]).toBeLessThanOrEqual(RECONNECT_BACKOFF_BASE_MS + 2500);
+    // 3 → 4: an init without media does NOT reset — retry #2 waits 24 s.
+    expect(gaps[2], "retry #2 backs off to 24 s").toBeGreaterThanOrEqual(2 * RECONNECT_BACKOFF_BASE_MS - 500);
+    expect(gaps[2]).toBeLessThanOrEqual(2 * RECONNECT_BACKOFF_BASE_MS + 2500);
+    // 4 → 5: socket 4 delivered media → reset → the 12 s base again, not 48 s.
+    expect(gaps[3], "after media the backoff is back to 12 s").toBeGreaterThanOrEqual(RECONNECT_BACKOFF_BASE_MS - 500);
+    expect(gaps[3]).toBeLessThanOrEqual(RECONNECT_BACKOFF_BASE_MS + 2500);
+    await expectSteadyPlayback(page);
+    expect(sockets.length, "no further churn once a socket is healthy").toBe(5);
   } finally {
     await request.post("/__mock/preview-fault", { data: {} });
   }

@@ -32,6 +32,14 @@ struct — or before wiring a previously-unused component into a page for the
 first time — grep `e2e/mock-api.mjs` for that struct's fixtures and update
 them.**
 
+## Vertical faders: 0 at the BOTTOM — drag them with the real mouse at ≥ 1600×1000
+
+`.mixer-fader` is `writing-mode: vertical-rl; direction: rtl`, so value 0 is at
+the bottom and 100 at the top; the default Playwright viewport hides the fader
+strip, so a real-mouse fader spec runs at ≥ 1600×1000 and drags by fractions of
+the slider HEIGHT (e.g. 10 % → 99 % = to 0), never `fill()` (#184 round G2,
+`e2e/post-deploy-owner-path.spec.ts`).
+
 ## A `spawn_local` poll loop must read page-owned signals with `try_*`
 
 `spawn_local` tasks are NOT tied to the reactive owner: a poll loop keeps
@@ -770,3 +778,9 @@ from a shim can be imported node-side in a spec (`import { f } from
 "../sp-ui/preview_player.js"`); the class touches browser globals only inside
 methods. The mock hardcodes port 8920 — if another session's stale mock holds
 it, run a port-substituted scratch copy with a config override of `baseURL`.
+In a fresh worktree run `cd e2e && npm ci && npx playwright install chromium`
+first (the cached browser build may not match the lockfile's Playwright). Stop
+the scratch mock by PID (`ss -ltnp | grep :<port>`), never `pkill -f <name>` —
+the pattern also matches the invoking shell's own command line and kills it.
+To prove a JS test really guards a line, patch a MUTANT of the shim into the
+scratch `dist/` snippet (+ recomputed SRI), watch the test go red, restore.

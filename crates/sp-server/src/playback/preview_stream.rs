@@ -213,30 +213,90 @@ pub fn audio_preroll_samples(connect_gap_ms: u64, lead_ms: u32) -> usize {
     ((connect_gap_ms.min(5000) + lead_ms as u64) * 48 * 2) as usize
 }
 
-/// A gap larger than this (ms) between the video wall-clock timeline and the
-/// audio's written duration is filled with silence (#178 item 15).
-const GAP_FILL_THRESHOLD_MS: u64 = 150;
-/// Never fill more than this much silence for a single gap (a very long pause
-/// still resyncs, but does not write minutes of silence in one burst).
-const GAP_FILL_CAP_MS: u64 = 10_000;
+/// Stereo frames per millisecond of the preview audio input (fixed 48 kHz).
+pub const PREVIEW_AUDIO_FRAMES_PER_MS: u64 = 48;
 
-/// How many interleaved-stereo f32 SILENCE samples the audio feeder must write
-/// to close a gap between the wall-clock video timeline and the sample-count
-/// audio timeline (#178 item 15). The preview's PCM audio is SAMPLE-COUNT timed
-/// by ffmpeg while the video is WALL-CLOCK timed, so a dropped block, a pause,
-/// or a song gap leaves the audio stream shorter than the elapsed wall time and
-/// it would play EARLIER than the video for the rest of the child. When the
-/// wall time since the first live block exceeds the audio duration already
-/// written by more than [`GAP_FILL_THRESHOLD_MS`], write that much silence
-/// first (capped at [`GAP_FILL_CAP_MS`] per gap). `written_frames` is the
-/// stereo frames written so far; each ms is `48 * 2` interleaved samples.
-pub fn gap_fill_samples(wall_elapsed_ms: u64, written_frames: u64) -> usize {
-    let written_ms = written_frames * 1000 / 48_000;
-    let gap_ms = wall_elapsed_ms.saturating_sub(written_ms);
-    if gap_ms <= GAP_FILL_THRESHOLD_MS {
-        return 0;
+/// Pad threshold (#184 round G2): when the audio written so far lags the wall
+/// clock by MORE than this, the feeder writes silence up to the wall — on a
+/// block AND on every 200 ms receive timeout, so ffmpeg (which interleaves the
+/// wall-clock video with the sample-count audio by timestamp) is never starved
+/// of audio and never stops emitting fragments.
+pub const ALIGN_PAD_THRESHOLD_MS: u64 = 150;
+
+/// Ahead bound (#184 round G2): a block that would push the written audio MORE
+/// than this ahead of the wall clock is trimmed. Round G's add-only gap fill
+/// padded silence while the decode-seam blocks were late and then APPENDED the
+/// late catch-up burst behind that silence, so every hiccup permanently shifted
+/// the preview audio later than its video — the ~70 s "fader heard a minute
+/// later" lag the owner reported. Trimming bounds the lag for good.
+pub const MAX_AHEAD_MS: u64 = 300;
+
+/// Where a trimmed burst lands (#184 round G2): its OLDEST frames are dropped
+/// so the written audio ends this far ahead of the wall clock (a little headroom
+/// for the next on-time block, well inside [`MAX_AHEAD_MS`]).
+pub const ALIGN_TARGET_AHEAD_MS: u64 = 100;
+
+/// What the preview audio feeder does with one incoming block (#184 round G2):
+/// first write `pad_frames` stereo frames of silence, then the block MINUS its
+/// first (oldest) `skip_frames` frames. `skip_frames` never exceeds the block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlignAction {
+    pub pad_frames: usize,
+    pub skip_frames: usize,
+}
+
+/// Silence (stereo frames) to write when NO block arrived within the feeder's
+/// 200 ms receive timeout (#184 round G2): everything up to the wall clock
+/// once the written audio lags it by more than [`ALIGN_PAD_THRESHOLD_MS`], else
+/// nothing. `wall_frames` is the target position on the audio timeline (the
+/// elapsed wall time since the feeder started, plus its start preroll), and
+/// `written_frames` the stereo frames already written. Never negative.
+pub fn align_timeout(wall_frames: u64, written_frames: u64) -> usize {
+    let threshold = ALIGN_PAD_THRESHOLD_MS * PREVIEW_AUDIO_FRAMES_PER_MS;
+    if written_frames + threshold < wall_frames {
+        (wall_frames - written_frames) as usize
+    } else {
+        0
     }
-    (gap_ms.min(GAP_FILL_CAP_MS) * 48 * 2) as usize
+}
+
+/// The part of an interleaved-stereo block the feeder writes after
+/// [`align_block`] asked it to drop the block's first `skip_frames` frames
+/// (#184 round G2): an index range into the block's `block_samples` f32
+/// samples that starts on a frame boundary and covers only WHOLE frames. A
+/// trailing lone sample (an odd-length block) is never written — it would swap
+/// L/R for the rest of the child — so the frames written are exactly
+/// `range.len() / 2`. A skip past the block yields an empty range at its end.
+pub fn block_tail_range(skip_frames: usize, block_samples: usize) -> std::ops::Range<usize> {
+    let whole = block_samples - block_samples % 2;
+    let start = skip_frames.saturating_mul(2).min(whole);
+    start..whole
+}
+
+/// Keep the preview's SAMPLE-COUNT audio timeline on the video's WALL-CLOCK
+/// timeline in BOTH directions for one block of `block_frames` stereo frames
+/// (#184 round G2, replacing the add-only #178 item-15 gap fill): pad up to the
+/// wall when behind by more than [`ALIGN_PAD_THRESHOLD_MS`] (exactly like
+/// [`align_timeout`]); then, if the block would end more than [`MAX_AHEAD_MS`]
+/// ahead of the wall, skip its OLDEST frames so it ends
+/// [`ALIGN_TARGET_AHEAD_MS`] ahead (at most the whole block — a block that
+/// cannot reach the target is dropped entirely, never a negative write). The
+/// trimmed audio is lost from the PREVIEW only; the wall / NDI path never sees
+/// this code.
+pub fn align_block(wall_frames: u64, written_frames: u64, block_frames: usize) -> AlignAction {
+    let pad_frames = align_timeout(wall_frames, written_frames);
+    let block_end = written_frames + pad_frames as u64 + block_frames as u64;
+    let max_end = wall_frames + MAX_AHEAD_MS * PREVIEW_AUDIO_FRAMES_PER_MS;
+    let skip_frames = if block_end > max_end {
+        let target_end = wall_frames + ALIGN_TARGET_AHEAD_MS * PREVIEW_AUDIO_FRAMES_PER_MS;
+        ((block_end - target_end) as usize).min(block_frames)
+    } else {
+        0
+    };
+    AlignAction {
+        pad_frames,
+        skip_frames,
+    }
 }
 
 /// State shared between the decode-side taps, the WS viewers, and the encoder
