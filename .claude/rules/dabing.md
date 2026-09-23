@@ -576,8 +576,11 @@ every retry while the video stayed loaded.
 - **Shipping.** `win_replace.py` is the 4th entry of `embedded_tool_scripts`, and
   `dub_worker.py` imports it at module load (`import win_replace as wr`). It is in
   the CI ruff scope.
-- **When the rename itself fails** (a reader opened WITHOUT share-delete, or a
-  pre-1709 Windows), the run fails loudly with the Win32 error and both paths.
+- **When the rename itself fails** (a reader opened WITHOUT share-delete, a
+  pre-1709 Windows, or a cache dir on a non-NTFS/network volume that lacks
+  `FileRenameInfoEx`; there is deliberately no fallback to plain `FileRenameInfo`,
+  because the box cache is on NTFS `C:`), the run fails loudly with the Win32 error
+  and both paths.
   The old dub stays, and the dub row records the error and retries after the
   backoff.
 - The chunk-wav `os.replace` in the per-chunk synth stays: SongPlayer never opens
