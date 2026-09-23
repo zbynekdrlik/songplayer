@@ -44,15 +44,15 @@ pub const DEFAULT_MAX_RESOLUTION: u32 = 1440;
 /// The `dub_voice` value meaning "the speaker's own voice" (no `speech_config`).
 pub const DUB_VOICE_SPEAKER: &str = "speaker";
 /// The default dub voice — the speaker's own voice (#184 round H step 2).
-pub const DEFAULT_DUB_VOICE: &str = "Charon";
+pub const DEFAULT_DUB_VOICE: &str = DUB_VOICE_SPEAKER;
 /// The default dub model — the Live Translate model the round-H probe verified.
-pub const DEFAULT_DUB_MODEL: &str = "gemini-live-translate";
+pub const DEFAULT_DUB_MODEL: &str = "gemini-3.5-live-translate-preview";
 
 /// The Dabing row's voice line for a stored `dub_voice`: the speaker's own voice
 /// reads `hlas: rečník`, a pinned prebuilt voice `hlas: <name>`.
 pub fn dub_voice_label(voice: &str) -> String {
     if voice == DUB_VOICE_SPEAKER {
-        "hlas: speaker".to_string()
+        "hlas: rečník".to_string()
     } else {
         format!("hlas: {voice}")
     }

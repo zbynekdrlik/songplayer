@@ -95,7 +95,7 @@ pub fn dub_input_audio(
     vocals_exists: bool,
 ) -> PathBuf {
     match vocals {
-        Some(v) if !v.is_empty() && stem_status == Some("ready") && vocals_exists => {
+        Some(v) if !v.is_empty() && stem_status == Some("done") && vocals_exists => {
             PathBuf::from(v)
         }
         _ => PathBuf::from(original),
@@ -116,8 +116,8 @@ fn embedded_tool_scripts() -> [(&'static str, &'static str); 4] {
             include_str!("../../../../scripts/dub_worker.py"),
         ),
         (
-            "dub_voice_check.py",
-            include_str!("../../../../scripts/dub_voice_check.py"),
+            "dub_live_session.py",
+            include_str!("../../../../scripts/dub_live_session.py"),
         ),
         (
             "dub_loudness.py",

@@ -77,9 +77,9 @@ pub fn live_translate_args(
         // #184 round H step 2: the model is a setting (an upgrade = a setting
         // change); `speaker` = the speaker's own voice, else a pinned prebuilt.
         "--model".into(),
-        voice.into(),
-        "--voice".into(),
         model.into(),
+        "--voice".into(),
+        voice.into(),
     ]
 }
 
