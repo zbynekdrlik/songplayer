@@ -521,3 +521,20 @@ def test_assemble_dub_writes_strict_json_for_a_silent_source(tmp_path, monkeypat
     got = json.loads(text)
     assert got["source_i"] is None
     assert got["target_i"] == -24.0
+
+
+def test_assemble_dub_clears_a_stale_partial_first(tmp_path, monkeypatch):
+    # A child hard-killed mid final pass (stall timeout, server exit) never runs
+    # the cleanup, leaving `<base>_dub.part.flac` behind; the next assembly must
+    # remove it up front, even when that assembly itself fails early.
+    work = str(tmp_path)
+    out = os.path.join(work, "x_dub.flac")
+    part = dl.partial_out_path(out)
+    with open(part, "w", encoding="utf-8") as f:
+        f.write("STALE")
+    _fake_ffmpeg(monkeypatch, [], fail_on=1)
+    with pytest.raises(RuntimeError):
+        dw._assemble_dub(
+            "orig.flac", [os.path.join(work, "chunk_0.wav")], [(1.0, 0)], out, work
+        )
+    assert not os.path.exists(part)

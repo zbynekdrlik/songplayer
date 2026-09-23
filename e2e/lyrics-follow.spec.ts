@@ -86,8 +86,13 @@ async function panelState(page: Page) {
 }
 
 /** The Dabing Player with a ready dub PLAYING, the long lyrics track, and the
- *  tick advancing one line per 500 ms tick. */
-async function setupFollowingPanel(page: Page, request: APIRequestContext) {
+ *  tick advancing one line per 500 ms tick (or, with `stepMs: 0`, a track that
+ *  sits still at `positionMs` — a paused track). */
+async function setupFollowingPanel(
+  page: Page,
+  request: APIRequestContext,
+  { positionMs = 0, stepMs = LINE_MS }: { positionMs?: number; stepMs?: number } = {},
+) {
   await request.post("/__mock/dabing-reset");
   await request.post("/__mock/mix-reset");
   await request.post("/__mock/lyrics-mode", { data: { mode: "long" } });
@@ -111,8 +116,8 @@ async function setupFollowingPanel(page: Page, request: APIRequestContext) {
           video_id: DUB_VIDEO_ID,
           song: "Morning Prayer",
           duration_ms: DURATION_MS,
-          position_ms: 0,
-          step_ms: LINE_MS,
+          position_ms: positionMs,
+          step_ms: stepMs,
           state: "Playing",
         },
       ],
@@ -229,5 +234,29 @@ test.describe("#184 round F: the lyrics panel follows the spoken line", () => {
       .toBe(true);
     const resumed = (await panelState(page))!;
     expect(resumed.scrollTop).toBeGreaterThan(held.scrollTop + 50);
+  });
+
+  test("a track paused mid-way opens with its active line already in view", async ({
+    page,
+    request,
+  }) => {
+    // Round-F review: the first follow after a lyrics (re)load can race the
+    // `<ol>` render (the active-line Memo wakes the follow before the list is
+    // in the DOM). A PLAYING track recovers at its next line change; a track
+    // sitting still never produces one — so the follow must also re-run when
+    // the list mounts. Line 31 (60 s in) is far below the first screenful.
+    test.setTimeout(45_000);
+    await setupFollowingPanel(page, request, { positionMs: 30 * LINE_MS, stepMs: 0 });
+    await expect
+      .poll(async () => (await panelState(page))?.idx ?? -1, { timeout: 15000 })
+      .toBe(30);
+    await expect
+      .poll(async () => (await panelState(page))?.inside ?? false, {
+        timeout: 5000,
+      })
+      .toBe(true);
+    const s = (await panelState(page))!;
+    expect(s.idx).toBe(30);
+    expect(s.scrollTop).toBeGreaterThan(0);
   });
 });

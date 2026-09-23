@@ -660,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_tool_scripts_ship_worker_and_voice_check() {
+    fn embedded_tool_scripts_ship_worker_and_helpers() {
         let scripts = embedded_tool_scripts();
         let names: Vec<&str> = scripts.iter().map(|(n, _)| *n).collect();
         assert_eq!(
