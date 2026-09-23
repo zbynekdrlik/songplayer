@@ -22,8 +22,11 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   instrumental 17.32 vs 17.17 — Kim is marginally *ahead*), but Kim is **MIT**
   while viperx has no published license (Boosty paywall, "dev-build only, no
   commercial grant"). Karaoke stems go into the NDI/broadcast output, so a clean
-  commercial license matters — unlike the lyric-alignment vocal isolation, whose
-  16 kHz mono output is internal + throwaway and still uses viperx.
+  commercial license matters. **#144: the lyric-alignment mtl step now consumes
+  THIS Kim vocals sidecar too** (one separation per video — its `preprocess-vocals`
+  dereverbs + 16 kHz-resamples the `{base}_audio_vocals.flac` this worker writes;
+  the old separate viperx BS-RoFormer isolation pass in the lyrics worker is
+  deleted, so viperx is no longer loaded anywhere).
 - Higher-SDR options exist (MVSep 124-band, becruily "deux") but are blocked by
   "no public weights" / "non-commercial" — do NOT chase them.
 - Loads via `audio-separator` (already on the box in `lyrics_venv`), auto-downloads
