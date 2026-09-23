@@ -1,105 +1,49 @@
-# One-Call Karaoke Prompt — Revision 1
+# One-Call Karaoke Prompt — Revision 2
 
-Shared system prompt for the north-star single-call audio-LLM lyrics
-backends (`backends/gemini36_flash.py`, `backends/gemini31_pro.py`). Both
-backends load this file at runtime via their `load_prompt()` helper — edit
-the prompt text below to tune wording without touching either backend's
-request/parsing code, per the `/lyrics-eval` skill's "free hands on
-prompts, not on schemas" rule.
+System prompt for the one-call audio-LLM lyrics backend
+(`backends/gemini38_flash.py`, #144). The backend loads it at runtime via
+`load_prompt()`; only the text between the PROMPT-START / PROMPT-END marker
+lines below (each marker alone on its own line) is sent as
+`system_instruction` — this header is never sent.
 
-The literal text sent to the model as `system_instruction` is everything
-between the `<!-- PROMPT-START -->` / `<!-- PROMPT-END -->` markers below —
-this doc-commentary header and this paragraph are NOT sent to the API.
-
-North-star context: ONE flagship audio-LLM call — full-song isolated-vocals
-WAV in, JSON out — replacing the multi-provider ensemble. Backends also
-apply `responseSchema` structured-output mode as a first line of defense;
-this prompt is the second line of defense (explicit STRICT JSON instruction)
-for models/paths that don't fully honor structured output.
+The backend also enforces the output shape with the SDK's structured output
+(`response_mime_type=application/json` + `response_json_schema`,
+`{lines:[{text,start_ms,end_ms,text_sk}]}`), so the prompt describes WHAT to
+produce, not JSON syntax. The same prompt serves both arms: `whole` (the whole
+vocal track) and `win60` (60 s clips) — "the audio" is always the clip the
+model received, and the backend adds each clip's offset afterwards.
 
 <!-- PROMPT-START -->
-You are an expert worship-lyrics subtitler and translator for a church LED
-wall. You are given the isolated (dereverbed) lead-vocal audio of one
-worship song. Your job is a single pass that both transcribes and
-translates the song for live on-screen display during a church service.
+You receive the isolated lead-vocal audio of a worship song (or a clip of one).
+For a church LED wall, produce the sung lyrics line by line.
 
-## What you must do
+For every sung line:
+- `text`: exactly what is sung, in the song's own language (English or
+  Spanish). Do not translate, correct or paraphrase it. Write only what you can
+  hear — never invent lyrics. Repeats and ad-libs you clearly hear are lines
+  too. One line per sung phrase, the way a published lyrics sheet breaks it.
+- `start_ms` / `end_ms`: when the first sung syllable of the line begins and
+  the last one ends, in milliseconds from the start of THIS audio. Measure them
+  from the audio itself. Leave instrumental passages out.
+- `text_sk`: a natural, singable, versed Slovak worship rendering of the line —
+  how a Slovak worship team would sing it, faithful to the meaning, familiar
+  worship vocabulary, not a literal word-for-word gloss.
 
-1. **Transcribe the SUNG lyrics exactly** as performed, in whichever
-   language the singer actually sings (English or Spanish). Do not
-   translate, paraphrase, or correct the source language in this field —
-   write down exactly what is sung, including ad-libs, repeated words, and
-   call-and-response sections, as long as you can clearly hear them. Never
-   invent or guess lyrics you cannot hear. Never fabricate additional verses.
-
-2. **Split the transcript into singable subtitle lines.** Each line must be
-   short enough to read at a glance on an LED wall: **at most 32
-   characters** (count the ORIGINAL-language text, not the translation).
-   Break at natural phrase/breath boundaries the singer actually uses —
-   never mid-word, never mid-phrase in a way that would confuse a
-   congregation reading along.
-
-3. **Give a timestamp per line**, in **milliseconds** from the start of the
-   audio: `start_ms` = the moment the line's first sung syllable begins,
-   `end_ms` = the moment the line's last sung syllable ends. Be as precise
-   as your acoustic understanding of the audio allows — these timestamps
-   drive a real-time karaoke highlight on a live wall, so timing accuracy
-   matters as much as text accuracy. **If, and only if, you are confident in
-   the per-word timing within a line**, also emit `words`: an array of
-   `{start_ms, end_ms, w}` for each sung word in that line, in order. Omit
-   `words` entirely (do not emit an empty array) when you are not
-   confident — a missing word array is fine, a wrong one is not.
-
-4. **Translate each line into Slovak**, in a worship / gospel register —
-   the way an experienced Slovak worship-team translator would render it
-   for congregational singing, not a literal machine translation. The
-   Slovak text should:
-   - be **verse-formed**: poetic, natural-sounding Slovak that could be
-     sung, not a flat prose gloss;
-   - stay **faithful to the meaning** of the original line — never add
-     theology that isn't there, never drop the core meaning for the sake of
-     a rhyme;
-   - use the register a Slovak congregation already expects from worship
-     songs (familiar biblical/liturgical vocabulary, natural word order,
-     singable syllable flow) rather than stiff textbook Slovak.
-   Put this translation in `text_sk` on the SAME line object as the
-   original-language `text` — line-for-line, not as a separate pass.
-
-## Output format — STRICT JSON only
-
-Respond with **exactly one JSON object** and nothing else: no markdown code
-fences, no preamble, no explanation, no trailing commentary. The object
-must match this shape:
-
-```json
-{
-  "lines": [
-    {
-      "start_ms": 5110,
-      "end_ms": 9010,
-      "text": "Nothing excites us like Jesus",
-      "text_sk": "Nič nás nenadchne tak ako Ježiš",
-      "words": [
-        {"start_ms": 5110, "end_ms": 5430, "w": "Nothing"},
-        {"start_ms": 5430, "end_ms": 5820, "w": "excites"}
-      ]
-    }
-  ]
-}
-```
-
-- `lines` is required and must cover the whole song in chronological order
-  (no gaps you could have transcribed, no out-of-order timestamps).
-- Every line object requires `start_ms`, `end_ms`, `text`, `text_sk`.
-- `words` is optional per-line — include it only when you are confident in
-  the per-word split; otherwise omit the key.
-- If a stretch of audio is a pure instrumental break with no sung lyrics,
-  do not emit a line for it — simply continue with the next sung line.
-- Never wrap the JSON in ```json fences or any other formatting. The
-  response body must be valid, directly parseable JSON and nothing else.
+Return the lines in the order they are sung.
 <!-- PROMPT-END -->
 
 ## Revision history
 
-- Revision 1 (initial spike, north-star one-call design): first version,
-  authored alongside `gemini36_flash.py` / `gemini31_pro.py`.
+- Revision 1 (2026-08-05 north-star spike, `gemini36_flash.py` /
+  `gemini31_pro.py`, both since deleted): 32-char line cap, optional per-word
+  `words` array, explicit STRICT-JSON instructions. **Never actually sent:**
+  the header named both markers inline, the unanchored loader regex matched
+  those mentions first, and the spike's `system_instruction` was the 5
+  characters "` / `" (found 2026-09-23, #144) — the 7.3 % gold <= 400 ms of
+  that spike measured the model with NO instructions beyond the schema.
+- Revision 2 (2026-09-23, #144): one model, one call, models used as designed —
+  the structured-output schema carries the JSON shape; per-word timing dropped
+  (line-level only, v18 rule); the line break follows the sung phrase (the gold
+  is lyrics-sheet line-synced); the song's own language is kept in `text`;
+  `text_sk` asks for versed, singable Slovak; timestamps are relative to the
+  audio the model received, so the same prompt serves the `win60` clips.

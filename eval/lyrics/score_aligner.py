@@ -100,7 +100,12 @@ def score_one_fixture(
     """Returns (official_score_dict, conservative_match_list) for one
     fixture. official_score_dict has the same shape as
     `score_one_call.score_fixture` output, plus untimed-line bookkeeping."""
-    if produced is None:
+    error = (
+        "output file missing or unparseable"
+        if produced is None
+        else score_one_call.produced_error(produced)
+    )
+    if error is not None:
         return (
             {
                 "backend": backend,
@@ -116,11 +121,12 @@ def score_one_fixture(
                 # p74PDWAFk0A instead of writing its honest all-untimed file,
                 # its coverage would read 72.8% instead of 66.9% — above MTL.
                 "n_gold": len(gold_lines),
-                "error": "output file missing or unparseable",
+                # a missing/unparseable file, or (#144) the backend's own
+                # error row — both errored, both keep their gold lines
+                "error": error,
             },
             [],
         )
-
     produced_lines = produced.get("lines") or []
     scoreable, n_untimed = to_scoreable_lines(produced_lines)
 
@@ -128,7 +134,8 @@ def score_one_fixture(
         backend=backend,
         video_id=video_id,
         category=category,
-        produced={"lines": scoreable},
+        # metadata carried so the one-call arms' past-audio-end count survives
+        produced={"lines": scoreable, "metadata": produced.get("metadata")},
         gold_lines=gold_lines,
     )
     score["n_lines_untimed"] = n_untimed
@@ -351,6 +358,17 @@ def main(argv: list[str] | None = None) -> int:
             f"p90={agg['p90_abs_delta_ms']!s:>8}ms  "
             f"coverage={agg['gold_coverage_pct']!s:>6}% "
             f"({agg['gold_coverage_pct_all_fixtures']}% of all gold)"
+        )
+        # The identical-denominator figure: every non-poisoned gold line of the
+        # manifest, incl. fixtures this backend produced nothing for (mtl has
+        # two such on the current manifest). The #144 decision rule compares
+        # arms and mtl on THIS number.
+        past = agg.get("total_lines_past_audio_end")
+        print(
+            f"  same-denom   : gold_within400_all="
+            f"{agg['pct_gold_within_400ms_all_fixtures']!s:>6}% of "
+            f"{agg['total_gold_lines_all_fixtures']} gold lines   "
+            f"lines past audio end: {'n/a' if past is None else past}"
         )
         print(
             f"  conservative : within400={cons['pct_within_400ms']!s:>6}%  "

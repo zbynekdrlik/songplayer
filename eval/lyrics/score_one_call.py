@@ -54,12 +54,22 @@ comparable figure. `*_all_fixtures` variants additionally count the gold lines
 of fixtures the backend produced no output for at all, so a silent crash never
 outscores an honest all-untimed output.
 
+#144 (2026-09-23): the one-call Gemini 3.8 Flash arms `gemini38-flash-whole` /
+`gemini38-flash-win60` (`backends/gemini38_flash.py`, raw files written by
+`run_one_call.py`) are the default `--backends`. Their raw files add two things
+this scorer reads: a top-level `error` (an ERROR ROW — scored as an errored
+fixture that keeps its gold lines in the `*_all_fixtures` denominator, never as
+an empty success) and `metadata.n_lines_past_audio_end` /
+`metadata.audio_duration_ms` (lines the backend clipped out because they
+started after the audio the call received) — surfaced per fixture and pooled as
+`total_lines_past_audio_end`, because the #144 decision rule requires 0.
+
 Usage:
-    python3 eval/lyrics/score_one_call.py \\
+    python3 -m eval.lyrics.score_one_call \\
         --manifest eval/lyrics/manifest.json \\
-        --raw-dir eval/lyrics/reports/2026-08-05-raw \\
-        --backends gemini36-flash aai-u35-translate \\
-        --out eval/lyrics/reports/2026-08-05-scores.json
+        --raw-dir <raw dir written by run_one_call.py> \\
+        --backends gemini38-flash-whole gemini38-flash-win60 \\
+        --out <scores.json>
 
 Prints a compact aggregate summary to stdout (mean/median/p90 start delta,
 %<=400ms, %<=1000ms, line-count ratio, >32-char %, sk_ok_pct — overall and
@@ -99,9 +109,12 @@ _PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _WS_RE = re.compile(r"\s+")
 _SK_DIACRITIC_RE = re.compile(r"[áäčďéíĺľňóôŕšťúýž]", re.IGNORECASE)
 
-# The gemini36-flash / aai-u35-translate zoo was retired in #159; the surviving
-# ASR backend is gemini-3-5-transcribe. Override with --backends as needed.
-DEFAULT_BACKENDS = ["gemini-3-5-transcribe"]
+# The gemini36-flash / aai-u35-translate zoo was retired in #159. The #144
+# decisive eval scores the two one-call Gemini 3.8 Flash arms (labels =
+# `backends/gemini38_flash.backend_label(mode)`); any other backend label
+# (e.g. `gemini-3-5-transcribe`) is still accepted via --backends.
+ONE_CALL_ARMS = ["gemini38-flash-whole", "gemini38-flash-win60"]
+DEFAULT_BACKENDS = ONE_CALL_ARMS
 
 
 def normalize_text(s: str) -> str:
@@ -151,6 +164,34 @@ def load_produced(raw_dir: Path, backend: str, video_id: str) -> dict[str, Any] 
             exc,
         )
         return None
+
+
+def produced_error(produced: dict[str, Any]) -> str | None:
+    """The backend's own error row (`{"error": "...", "lines": []}`) -> the
+    errored-fixture message; None for a normal output. An error row is an
+    errored fixture, never an empty success."""
+    err = produced.get("error")
+    return f"backend error: {err}" if err else None
+
+
+def lines_past_audio_end(produced: dict[str, Any]) -> int | None:
+    """Lines past the end of the audio: the ones the backend already clipped
+    out and counted (`metadata.n_lines_past_audio_end`) plus any still in
+    `lines` starting at/after `metadata.audio_duration_ms`. None when the
+    output records neither (e.g. the mtl aligner raw files) — unknown, not 0."""
+    md = produced.get("metadata") or {}
+    clipped = md.get("n_lines_past_audio_end")
+    duration = md.get("audio_duration_ms")
+    if clipped is None and duration is None:
+        return None
+    remaining = 0
+    if duration is not None:
+        remaining = sum(
+            1
+            for line in produced.get("lines") or []
+            if line.get("start_ms") is not None and line["start_ms"] >= duration
+        )
+    return int(clipped or 0) + remaining
 
 
 def _match(
@@ -318,6 +359,7 @@ def score_fixture(
         "sk_ok_pct": round(sk_ok / n_produced * 100.0, 1) if n_produced else None,
         "has_word_timings": has_word_timings,
         "word_count": word_count if has_word_timings else None,
+        "n_lines_past_audio_end": lines_past_audio_end(produced),
         "raw_deltas_ms": deltas,
         "error": None,
     }
@@ -360,6 +402,11 @@ def pooled_aggregate(fixture_scores: list[dict[str, Any]]) -> dict[str, Any]:
         if s["n_produced"]
     )
     n_with_words = sum(1 for s in ok_scores if s["has_word_timings"])
+    past_end = [
+        s["n_lines_past_audio_end"]
+        for s in ok_scores
+        if s.get("n_lines_past_audio_end") is not None
+    ]
 
     within_400 = sum(1 for d in all_deltas if d <= WALL_TOLERANCE_MS)
     within_1000 = sum(1 for d in all_deltas if d <= LOOSE_TOLERANCE_MS)
@@ -424,6 +471,9 @@ def pooled_aggregate(fixture_scores: list[dict[str, Any]]) -> dict[str, Any]:
         if total_produced
         else None,
         "fixtures_with_word_timings": n_with_words,
+        # #144 decision rule: an arm wins only with 0 here. None = no fixture
+        # recorded it (unknown, e.g. the mtl raw files), never silently 0.
+        "total_lines_past_audio_end": sum(past_end) if past_end else None,
     }
 
 
@@ -556,7 +606,12 @@ def main(argv: list[str] | None = None) -> int:
         fixture_scores: list[dict[str, Any]] = []
         for video_id, fixture in fixtures_by_id.items():
             produced = load_produced(args.raw_dir, backend, video_id)
-            if produced is None:
+            error = (
+                "output file missing or unparseable"
+                if produced is None
+                else produced_error(produced)
+            )
+            if error is not None:
                 fixture_scores.append(
                     {
                         "backend": backend,
@@ -565,7 +620,7 @@ def main(argv: list[str] | None = None) -> int:
                         # kept so the fixture still counts toward the honest
                         # gold denominator (pooled_aggregate's *_all_fixtures)
                         "n_gold": len(fixture["gold_lines"]),
-                        "error": "output file missing or unparseable",
+                        "error": error,
                     }
                 )
                 continue
@@ -627,6 +682,8 @@ def main(argv: list[str] | None = None) -> int:
             f"  >32 chars: en={agg['pct_gt32_chars_en']}%  sk={agg['pct_gt32_chars_sk']}%"
         )
         print(f"  sk_ok_pct: {agg['sk_ok_pct']}%")
+        past = agg["total_lines_past_audio_end"]
+        print(f"  lines past audio end: {'n/a' if past is None else past}")
         print(
             f"  fixtures with word timings: {agg['fixtures_with_word_timings']}/{agg['n_fixtures']}"
         )
