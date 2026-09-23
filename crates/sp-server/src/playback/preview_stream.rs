@@ -222,9 +222,9 @@ pub const PREVIEW_AUDIO_FRAMES_PER_MS: u64 = 48;
 
 /// Pad threshold (#184 round G2): when the audio written so far lags the wall
 /// clock by MORE than this, the feeder writes silence up to the wall — on a
-/// block AND on every 200 ms receive timeout, so ffmpeg (which interleaves the
-/// wall-clock video with the sample-count audio by timestamp) is never starved
-/// of audio and never stops emitting fragments.
+/// block AND on every feeder poll (200 ms in G2, 30 ms since round G3), so
+/// ffmpeg (which interleaves the wall-clock video with the sample-count audio by
+/// timestamp) is never starved of audio and never stops emitting fragments.
 pub const ALIGN_PAD_THRESHOLD_MS: u64 = 150;
 
 /// Ahead bound (#184 round G2): a block that would push the written audio MORE
@@ -250,8 +250,9 @@ pub struct AlignAction {
 }
 
 /// Silence (stereo frames) to write when NO block arrived within the feeder's
-/// 200 ms receive timeout (#184 round G2): everything up to the wall clock
-/// once the written audio lags it by more than [`ALIGN_PAD_THRESHOLD_MS`], else
+/// poll (#184 round G2 — 200 ms then, 30 ms since round G3): everything up to
+/// the wall clock once the written audio lags it by more than
+/// [`ALIGN_PAD_THRESHOLD_MS`], else
 /// nothing. `wall_frames` is the target position on the audio timeline (the
 /// elapsed wall time since the feeder started, plus its start preroll), and
 /// `written_frames` the stereo frames already written. Never negative.

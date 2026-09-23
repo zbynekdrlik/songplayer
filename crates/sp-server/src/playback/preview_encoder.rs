@@ -670,11 +670,12 @@ fn spawn_video_feeder(
 /// How often the audio feeder logs its wall-clock alignment (#184 round G2).
 const AFEED_LOG_EVERY: Duration = Duration::from_secs(10);
 /// Longest the audio feeder blocks waiting for a tapped block (µs) — a silence
-/// pad still runs this often while the decode seam is quiet. 50 ms = the
-/// write-ahead (200) minus the pad threshold (150): the written audio never
-/// drops behind the wall-clock video, so ffmpeg never waits for audio (#184
-/// round-G3 review; G2 polled every 200 ms and could fall 150 ms behind).
-const AFEED_POLL_US: u64 = 50_000;
+/// pad still runs this often while the decode seam is quiet. It must stay under
+/// the write-ahead (200 ms) minus the pad threshold (150 ms) with room for a
+/// Windows timer oversleep (~15.6 ms), so the written audio stays ahead of the
+/// wall-clock video and ffmpeg never waits for audio (#184 round-G3 review;
+/// G2 polled every 200 ms and could fall 150 ms behind).
+const AFEED_POLL_US: u64 = 30_000;
 
 /// Feed tapped interleaved-f32 audio to the child's audio socket (little-endian
 /// f32 bytes) until shutdown or a write error. On start it DRAINS any stale

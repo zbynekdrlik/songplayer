@@ -19,14 +19,17 @@
 //! `lead − write_ahead` after it ARRIVED at the seam (its [`AudioBlock`]
 //! stamp) and is placed by that arrival — `align_block` against
 //! `arrival + lead` — so the audio in flight is bounded to
-//! [`AUDIO_WRITE_AHEAD_MS`] plus one block whatever the socket buffers are, and
+//! [`AUDIO_WRITE_AHEAD_MS`] plus one block in steady state (right after a seam
+//! burst: plus the 300 ms band) whatever the socket buffers are, and
 //! a block that waited more than the round-G2 300 ms band is trimmed, never
 //! appended late. After silence (start, a seam stall) a block is snapped onto
 //! its exact target; between contiguous blocks the G2 band stays (silence up
 //! to the wall when no audio comes — the encoder is never starved — a burst
 //! trimmed to <= 300 ms past its target, whole frames only), so seam jitter
 //! never opens a gap. A burst can therefore leave the audio up to ~300 ms late
-//! until the next silence.
+//! (and missing content up to ~150 ms early) until the next silence — a
+//! windowed-minimum drift correction could re-sync that, to be tuned against
+//! the box's real seam packet sizes (the afeed log's `skipped_ms`/`queued`).
 //!
 //! Units: times are µs since the feeder started; positions are stereo frames on
 //! the encoder's sample-count audio timeline ([`PREVIEW_AUDIO_FRAMES_PER_MS`]).
@@ -41,10 +44,10 @@ use super::preview_stream::{
 
 /// How far ahead of the wall-clock video the written audio runs (ms), capped at
 /// the seam lead. Enough that ffmpeg never waits for audio (a silence pad fires
-/// once the written audio is 150 ms behind its target and the feeder polls at
-/// least every 50 ms, so the audio stays ahead of the video), small enough
-/// (~77 KB of f32 stereo + one seam block) to fit any loopback socket buffer —
-/// the whole point of round G3.
+/// once the written audio is 150 ms behind its target and the feeder polls
+/// every 30 ms, so the audio stays ahead of the video), small enough (~77 KB of
+/// f32 stereo + one seam block in steady state) to fit any loopback socket
+/// buffer — the whole point of round G3.
 pub const AUDIO_WRITE_AHEAD_MS: u64 = 200;
 
 /// A block that follows SILENCE (the stream start, a seam stall) is snapped
