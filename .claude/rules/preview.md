@@ -3,6 +3,8 @@ paths:
   - "crates/sp-server/src/playback/preview.rs"
   - "crates/sp-server/src/playback/preview_stream.rs"
   - "crates/sp-server/src/playback/preview_encoder.rs"
+  - "crates/sp-server/src/playback/preview_audio_hold*.rs"
+  - "scripts/preview_latency_repro.py"
   - "crates/sp-server/src/playback/fmp4_relay.rs"
   - "crates/sp-server/src/playback/pipeline.rs"
   - "crates/sp-server/src/playback/pipeline_paced.rs"
@@ -146,6 +148,10 @@ interleaved-stereo f32 samples (48 kHz stereo; gap capped at 5 s; exact-value
 unit-tested, no equivalent mutants). The feeders also DRAIN any stale queued
 frames/blocks on start so a previous viewer's backlog never front-runs the live
 edge; the video feeder stamps the wall-time of its first write for the gap.
+**Since #184 round G3 the feeder calls it with `lead_ms = 0`** — the preroll is
+the connect gap only and the lead (now 1500 ms, `AUDIO_LOOKAHEAD_MS`) is HELD in
+the feeder (see "#184 round G3" below); a lead-long silence preroll parked the
+whole lead in the loopback socket.
 
 ### Fixed-stereo audio input (`to_stereo`, #178 Round 2)
 
@@ -494,6 +500,9 @@ feeder's timing model. Do NOT regress:
   `Ok(block)` arm), so ffmpeg — which interleaves by timestamp — waited for audio,
   emitted no fragments, the WS dropped the idle client, and the browser looped.
 - **The aligner (`preview_stream.rs`, pure + unit-tested + mutation-gated).**
+  (Round G3 keeps `align_block` / `align_timeout` / `block_tail_range` but
+  feeds them a block's ARRIVAL target instead of the dequeue-time wall — see
+  "#184 round G3".)
   `wall_frames = preroll_frames + elapsed_since_feeder_start × 48` (per ms; the
   round-3 start preroll — connect gap + decode-seam lead — is kept, so
   written == wall right after it). `align_block(wall, written, block)` →
@@ -552,3 +561,77 @@ feeder's timing model. Do NOT regress:
   (runs even when the body timed out — a body `finally` does not) restores the
   dub memory (vokály 1, podklad 1, dabing as found), stops the preview, pauses
   the Dabing output, and then asserts (f) as the last assertion.
+
+## #184 round G3 — the seam lead is HELD in the feeder, never parked in the socket
+
+After G2 the box still heard a fader change in the preview ~10-12 s late
+(`post-deploy-owner-path.spec.ts` (b) red, the G2 log read `ahead_ms=0`). Round
+G3 MEASURED it locally before touching code — `scripts/preview_latency_repro.py`
+runs the exact `build_ffmpeg_args` (libx264) command over two loopback TCP
+inputs with a synthetic seam (NV12 30 fps + f32 stereo, the same bounded
+drop-on-full channels), a 1:1 port of the feeder, and a tone that turns to
+silence at wall T; it reports when the silence reaches the fMP4 output
+(fragment arrival − T; by design ≈ the 1.5 s lead + ~0.4 s encoder):
+
+| variant (lead 1500 ms) | G2 feeder | G3 feeder |
+|---|---|---|
+| ffmpeg 6.1.1, OS-default socket (Linux, 2.6 MB SO_SNDBUF) | 1.58 s | 2.05 s |
+| ffmpeg N-126782 (BtbN, the box's family), default socket | 1.89 s | 1.50 s |
+| N-126782, 128 KB send / 128 KB ffmpeg recv (≈ Windows loopback) | 2.41 s at T, channel 0-48 deep, padded 8.1 s + skipped 6.9 s / 40 s | 1.87 s, channel empty |
+| N-126782, 32 KB / 16 KB | **36.4 s and growing**, channel pinned at 48, audio = blips | 1.50 s |
+| N-126782, 256 KB / 256 KB and 512 KB / 1 MB | 1.90 s | 1.54 / 1.50 s |
+| 128 KB/128 KB + seam stall 700 ms every 3 s + nice-19 child + 3 CPU hogs | channel 0-48, padded 22.6 s / 40 s | 1.77 s, no drops |
+
+(Linux dev1; the box is Windows with ffmpeg N-123867 — the socket-size variants
+emulate its loopback buffers via `--sndbuf` / `recv_buffer_size`.)
+
+**The mechanism.** The seam audio LEADS the video by `lead_ms` (1500 ms,
+`AUDIO_LOOKAHEAD_MS`). G2 put that lead INTO the encoder's audio input (a
+lead-long silence preroll, then each block the moment it arrived). ffmpeg
+consumes audio only in step with its wall-clock video, so ~1.5 s ≈ 576 KB of PCM
+had to sit in flight — our send buffer + ffmpeg's receive buffer + its input
+queue. Linux's multi-MB loopback buffers hold it (so nothing reproduced with
+defaults); Windows-sized ones do not: `write_all` blocks, the feeder stops
+draining the crossbeam channel, the channel fills to 48 blocks and STAYS full
+(the seam drops the NEWEST, the channel keeps the OLDEST), and the aligner — which
+placed a block by when it was DEQUEUED — pads silence to the wall and then writes
+a block that already waited 48 iterations. `ahead_ms` reads 0 while the content
+is seconds stale. Pause is a different path (the decode stops, the encoder
+starves, the MSE buffer drains in ~2-3.75 s) — it never exercises this queue.
+
+**The rule (do NOT regress):**
+
+- **Never park the lead in the socket.** `preview_audio_hold.rs::AudioHold`
+  (pure, Linux-tested, mutation-gated) holds each block and writes it
+  `lead − AUDIO_WRITE_AHEAD_MS` (1500 − 200 = 1300 ms) after it ARRIVED; the
+  preroll is `audio_preroll_samples(gap, 0)`. The socket carries only the
+  write-ahead (~77 KB), so its buffer size is irrelevant. The write-ahead is
+  capped at the lead (paced path: lead 0 → write on arrival at the wall).
+- **Place a block by its ARRIVAL, never by its dequeue.** `offer_audio` stamps
+  `AudioBlock { arrival, samples }` (only with a viewer, after the one-load
+  fast path); `take_writes` aligns each due block against
+  `block_target(arrival) = base + (arrival + lead) × 48` with the G2
+  `align_block` (pad when > 150 ms behind, trim when it would end > 300 ms past —
+  a block that waited is trimmed, never delayed), then `align_timeout` pads up
+  to `position_at(now) = base + (now + write_ahead) × 48` (encoder never
+  starved). `position_at(due_us(a)) == block_target(a)` by construction.
+- `MAX_HELD_BLOCKS = 512` is a safety cap only (a normal hold is ~40-80 seam
+  blocks); overflow drops the OLDEST held block.
+- The feeder glue (`preview_encoder.rs::spawn_audio_feeder` / `write_audio`,
+  `mutants::skip`) only moves bytes: it waits `hold.wait_us(now, 200 ms)`, pushes
+  every received block, and executes `take_writes`. It logs at start
+  `preview-afeed: start … lead_ms write_ahead_ms preroll_ms` and every 10 s
+  `preview-afeed: ahead_ms padded_ms skipped_ms held_ms queued` — on the box
+  `queued` (the crossbeam channel depth) must stay ~0 and `held_ms` ≈ 1300; a
+  `queued` near 48 or a steadily growing `padded_ms` while audio is present is
+  THE G3 regression (the socket cannot take what we write).
+- **Latency budget after G3:** fader → preview audio ≈ lead 1.5 s (inherent — the
+  WALL hears it 1.5 s later too) + encoder/fragment ~0.4-0.5 s + transport +
+  the MSE playhead's distance to the live edge (≤ `LIVE_EDGE_MAX_S` = 2 s; the
+  box's pause→silent 2-3.75 s is this part). The owner-path acceptance (b) is
+  ≤ 4 s after the last PATCH — only the browser part is left to squeeze if the
+  box measures above it.
+- Repro recipe: `python3 scripts/preview_latency_repro.py --ffmpeg <ffmpeg>
+  --feeder g2|g3 [--sndbuf 65536 --audio-url-query recv_buffer_size=65536]
+  [--stall-every 3 --stall-ms 700 --nice --cpu-hogs 3] --duration 40
+  --switch-at 25` (BtbN linux64 master builds match the box's ffmpeg family).
