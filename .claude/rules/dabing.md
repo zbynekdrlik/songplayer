@@ -545,7 +545,9 @@ before each pass and makes three ffmpeg calls:
    `<base>_dub.part.flac` (`partial_out_path`) with `measured_I/LRA/TP/thresh` +
    `offset`, `linear=true`, `print_format=json`. It is `os.replace`d over the dub
    ONLY after ffmpeg exits 0 AND its loudness report parses. On any failure the
-   partial is deleted and the PREVIOUS good dub stays. On Windows a replace blocked
+   partial is deleted and the PREVIOUS good dub stays. A partial left behind by a
+   hard-killed child (stall timeout, server exit) is removed, with a log line, at
+   the start of the next assembly. On Windows a replace blocked
    by an open handle fails the run loudly: the old dub stays, and the dub row
    records the error and retries after the backoff.
 
