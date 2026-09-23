@@ -910,8 +910,26 @@ const lyricsTrack = {
   ],
 };
 
+// #184 round F: a LONG track (100 lines, one every 2 s) so the shared
+// LyricsView's auto-follow can be proven — the active line has to travel far
+// past the 260 px panel. `lyrics-follow.spec.ts` selects it via `mode: "long"`.
+const LONG_LINE_MS = 2000;
+const longLyricsTrack = {
+  version: 22,
+  source: 'gemini-3-5-transcribe',
+  language_source: 'en',
+  language_translation: 'sk',
+  lines: Array.from({ length: 100 }, (_, i) => ({
+    start_ms: i * LONG_LINE_MS,
+    end_ms: (i + 1) * LONG_LINE_MS,
+    en: `Line ${i + 1}`,
+    sk: `Riadok ${i + 1}`,
+  })),
+};
+
 // #198 item 3/9: drive the shared LyricsView's loading / error / empty states.
 //   "track" (default) → 200 + the 2-line track
+//   "long"            → 200 + the 100-line track (#184 round F auto-follow)
 //   "empty"           → 204 (no lyrics; the real handler's no-lyrics reply)
 //   "error"           → 500
 //   "slow"            → 200 after a delay so the loading state is observable
@@ -919,7 +937,7 @@ const lyricsTrack = {
 let lyricsMode = 'track';
 app.post('/__mock/lyrics-mode', (req, res) => {
   const mode = req.body?.mode;
-  if (!['track', 'empty', 'error', 'slow'].includes(mode)) {
+  if (!['track', 'long', 'empty', 'error', 'slow'].includes(mode)) {
     res.status(400).json({ error: `unknown mode: ${mode}` });
     return;
   }
@@ -938,6 +956,10 @@ app.get('/api/v1/videos/:id/lyrics', (_req, res) => {
   }
   if (lyricsMode === 'slow') {
     setTimeout(() => res.json(lyricsTrack), 2000);
+    return;
+  }
+  if (lyricsMode === 'long') {
+    res.json(longLyricsTrack);
     return;
   }
   res.json(lyricsTrack);
