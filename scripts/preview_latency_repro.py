@@ -243,7 +243,7 @@ def audio_feeder(sh: Shared, sock: socket.socket, aq: queue.Queue, lead_ms: int)
 # --- #184 round G3: 1:1 port of `preview_audio_hold.rs` + the G3 feeder ------
 AUDIO_WRITE_AHEAD_MS = 200
 SNAP_TOLERANCE_MS = 10
-AFEED_POLL_S = 0.05
+AFEED_POLL_S = 0.03
 
 
 class AudioTimeline:
