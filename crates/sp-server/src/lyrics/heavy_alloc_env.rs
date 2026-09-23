@@ -139,9 +139,11 @@ pub(crate) fn heavy_alloc_env(mode: AllocMode, purge_delay_ms: i64) -> Vec<(Stri
 mod tests {
     use super::*;
 
-    /// RETAINED at the `-1` (never-purge) default must be EXACTLY these three
+    /// RETAINED at the `-1` (never-purge) default must be EXACTLY these five
     /// pairs, in order — a wrong var name or value is silently ignored by
-    /// mimalloc (no effect), so the exact set is pinned. Today's #168 output.
+    /// mimalloc (no effect), so the exact set is pinned. The heap trio is
+    /// today's #168 output; `MIMALLOC_VERBOSE`/`MIMALLOC_SHOW_STATS` are the
+    /// #207 round-3b diagnostic addition (both modes).
     #[test]
     fn retained_alloc_env_is_exactly_the_retained_heap_trio() {
         assert_eq!(
@@ -150,14 +152,38 @@ mod tests {
                 ("MIMALLOC_PURGE_DELAY".to_string(), "-1".to_string()),
                 ("MIMALLOC_ARENA_EAGER_COMMIT".to_string(), "1".to_string()),
                 ("MIMALLOC_RESERVE_OS_MEMORY".to_string(), "4GiB".to_string()),
+                ("MIMALLOC_VERBOSE".to_string(), "1".to_string()),
+                ("MIMALLOC_SHOW_STATS".to_string(), "1".to_string()),
             ]
         );
     }
 
     #[test]
-    fn heavy_alloc_env_has_exactly_three_pairs() {
-        assert_eq!(heavy_alloc_env(AllocMode::Retained, -1).len(), 3);
-        assert_eq!(heavy_alloc_env(AllocMode::Lazy, -1).len(), 3);
+    fn heavy_alloc_env_has_exactly_five_pairs() {
+        assert_eq!(heavy_alloc_env(AllocMode::Retained, -1).len(), 5);
+        assert_eq!(heavy_alloc_env(AllocMode::Lazy, -1).len(), 5);
+    }
+
+    /// #207 round-3b: both modes emit `MIMALLOC_VERBOSE=1` +
+    /// `MIMALLOC_SHOW_STATS=1` as the trailing pair — the separation child
+    /// prints its effective options at init and its reserved/committed/peak
+    /// stats at exit, both to stderr, so the box can confirm the env was
+    /// actually applied without a rebuild.
+    #[test]
+    fn heavy_alloc_env_emits_verbose_and_show_stats_in_both_modes() {
+        for mode in [AllocMode::Retained, AllocMode::Lazy] {
+            let env = heavy_alloc_env(mode, -1);
+            assert_eq!(
+                env[3],
+                ("MIMALLOC_VERBOSE".to_string(), "1".to_string()),
+                "mode {mode:?}"
+            );
+            assert_eq!(
+                env[4],
+                ("MIMALLOC_SHOW_STATS".to_string(), "1".to_string()),
+                "mode {mode:?}"
+            );
+        }
     }
 
     /// RETAINED keeps eager-commit=1 + reserve=4GiB regardless of the delay —
@@ -211,8 +237,8 @@ mod tests {
 
     /// #207 phase-3: LAZY at the `-1` (never-purge) default — eager commit OFF,
     /// the same 4 GiB reserve, and the 10 s LAZY default purge delay (a
-    /// never-purge lazy heap only grows, so `-1` substitutes 10000). The whole
-    /// trio is pinned.
+    /// never-purge lazy heap only grows, so `-1` substitutes 10000), plus the
+    /// #207 round-3b diagnostic pair. The whole five-pair vector is pinned.
     #[test]
     fn lazy_alloc_env_turns_eager_commit_off_and_defaults_purge_to_10s() {
         assert_eq!(
@@ -221,6 +247,8 @@ mod tests {
                 ("MIMALLOC_PURGE_DELAY".to_string(), "10000".to_string()),
                 ("MIMALLOC_ARENA_EAGER_COMMIT".to_string(), "0".to_string()),
                 ("MIMALLOC_RESERVE_OS_MEMORY".to_string(), "4GiB".to_string()),
+                ("MIMALLOC_VERBOSE".to_string(), "1".to_string()),
+                ("MIMALLOC_SHOW_STATS".to_string(), "1".to_string()),
             ]
         );
     }
