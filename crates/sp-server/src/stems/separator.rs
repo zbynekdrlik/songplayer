@@ -133,6 +133,9 @@ pub async fn separate_stems(
     for (k, v) in crate::lyrics::heavy_alloc_env::heavy_alloc_env(
         containment.alloc_mode,
         containment.purge_delay_ms,
+        // #207 round-3c: TEMPORARY literal default until the next lane wires
+        // the operator `heavy_alloc_reserve_gib` setting through Containment.
+        crate::lyrics::heavy_alloc_env::RESERVE_GIB_DEFAULT,
     ) {
         cmd.env(k, v);
     }
