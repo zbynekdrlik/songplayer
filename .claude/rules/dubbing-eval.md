@@ -201,7 +201,8 @@ output (a chunk above −50 dBFS), cap 60 s. Arms: `--voice none` (no
 prebuilt voice). Outputs in `--out-dir`: `output.wav` (24 kHz, arrival order),
 `output_chunks.json` (`[arrival_s, n_bytes, buffer_offset_s]`), `input_text.txt`,
 `output_text.txt`, `events.jsonl` (every server message field + probe decision —
-fields without a dedicated event land in `other_fields`; `audio` events carry
+fields without a dedicated event, incl. non-audio `model_turn` parts such as text,
+land in `other_fields`; `audio` events carry
 `dbfs`/`voiced`; `reconnect` carries `frames_since_handle`; flushed per line),
 `summary.json` (= the only stdout line, ASCII: connections, resumptions_offered,
 go_aways, reconnect_failures, output/input ratio, max output gap (all chunks) +
@@ -221,6 +222,13 @@ speaker-copy voice stay stable over 25 min with no `speech_config`, vs a pinned
 Charon. Read the answers from `summary.json` + `events.jsonl` (`connect` /
 `reconnect` / `reconnect_failed` / `go_away` / `usage_metadata` token counts), then
 run `scripts/dub_voice_check.py --source` on each `output.wav` for drift windows.
+A drift window right next to a `reconnect` event may be caused by the probe's OWN
+input pause (up to 8 s of GoAway grace — the model's documented trigger is
+"voices might shift after long pauses"), not by long-session drift: judge (3)
+from windows away from reconnects. `last_consumed_client_message_index` stays
+`None` (only sent with `SessionResumptionConfig.transparent`, which the design
+does not set); `frames_since_handle` on `reconnect` is the probe's own estimate
+of the input the resumed state may miss.
 
 **SDK traps (google-genai 2.24.0, read from source).** `session.receive()` ENDS
 once an interaction completes (`interaction_status == IDLE` when set, else
