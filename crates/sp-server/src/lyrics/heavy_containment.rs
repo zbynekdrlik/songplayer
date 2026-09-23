@@ -15,6 +15,8 @@
 //! Pure + unit-tested + mutation-clean; the Win32 calls live in `heavy_slot.rs`
 //! (cfg(windows), `mutants::skip`).
 
+use crate::lyrics::heavy_alloc_env::AllocMode;
+
 /// The CPU hard-cap percentage is clamped into this inclusive range; an
 /// absent/unparseable setting falls back to [`CPU_CAP_DEFAULT_PCT`].
 pub(crate) const CPU_CAP_MIN_PCT: u8 = 5;
@@ -46,6 +48,12 @@ pub(crate) struct Containment {
     /// the child's ~9 GB commit. Read cross-platform by
     /// [`crate::lyrics::heavy_slot::current_containment`] at separation spawn.
     pub(crate) purge_delay_ms: i64,
+    /// #207 phase-3: the separation child's mimalloc commit mode
+    /// (`heavy_alloc_mode`): `Retained` (today's eager-committed heap) or `Lazy`
+    /// (reserve-not-commit, so the box can return the child's ~9 GB commit —
+    /// eager commit, not the purge delay, is the lever, comment 5791417188).
+    /// Read cross-platform by `stems/separator.rs` at separation spawn.
+    pub(crate) alloc_mode: AllocMode,
 }
 
 /// The Job Object `CpuRate` unit for a cap percentage: hundredths of a percent,
@@ -120,6 +128,18 @@ fn parse_purge_delay_ms(raw: Option<&str>) -> i64 {
     }
 }
 
+/// #207 phase-3: parse the `heavy_alloc_mode` setting into an [`AllocMode`].
+/// A trimmed `"lazy"` selects [`AllocMode::Lazy`]; anything else — absent,
+/// `"retained"`, or unrecognised — is [`AllocMode::Retained`] (the default,
+/// today's eager-committed heap). Pure — the impure caller may WARN on an
+/// unrecognised non-empty value.
+fn parse_alloc_mode(raw: Option<&str>) -> AllocMode {
+    match raw.map(str::trim) {
+        Some("lazy") => AllocMode::Lazy,
+        _ => AllocMode::Retained,
+    }
+}
+
 /// Parse + clamp the `heavy_cpu_cap_pct` setting into `5..=100`. An
 /// absent/unparseable value falls back to [`CPU_CAP_DEFAULT_PCT`]; a valid
 /// integer below 5 clamps up to 5, above 100 clamps down to 100. Pure.
@@ -165,15 +185,16 @@ pub(crate) fn existing_cores_mask(logical_cores: usize) -> u64 {
     }
 }
 
-/// Resolve the live [`Containment`] from the three operator settings
-/// (`heavy_cpu_cap_pct`, `heavy_cpu_affinity_mask`, `heavy_purge_delay_ms`) +
-/// the box's logical-core count. The impure caller
+/// Resolve the live [`Containment`] from the four operator settings
+/// (`heavy_cpu_cap_pct`, `heavy_cpu_affinity_mask`, `heavy_purge_delay_ms`,
+/// `heavy_alloc_mode`) + the box's logical-core count. The impure caller
 /// ([`crate::lyrics::heavy_slot`]) reads the settings + core count and calls
 /// this pure fn. Pure.
 pub(crate) fn containment_from_settings(
     cap_str: Option<&str>,
     mask_str: Option<&str>,
     purge_str: Option<&str>,
+    alloc_str: Option<&str>,
     logical_cores: usize,
 ) -> Containment {
     Containment {
@@ -181,6 +202,7 @@ pub(crate) fn containment_from_settings(
         affinity_mask: parse_affinity_mask(mask_str, logical_cores),
         memory_priority_low: true,
         purge_delay_ms: parse_purge_delay_ms(purge_str),
+        alloc_mode: parse_alloc_mode(alloc_str),
     }
 }
 

@@ -3,6 +3,9 @@
 //! memory (the headroom is injected) and never touches the DB.
 
 use super::*;
+// `super::*` does NOT re-export the parent's private `use containment_from_settings`
+// alias, so name it explicitly for the #207 contained-line test (rust-workspace.md).
+use crate::lyrics::heavy_containment::containment_from_settings;
 
 const GIB: u64 = 1024 * 1024 * 1024;
 
@@ -324,4 +327,26 @@ fn child_job_limit_is_ten_gib() {
             "a child may use more than the admission floor, never less"
         );
     }
+}
+
+// ---- contained_line (pure #207 formatter, exact-string) --------------------
+
+/// The `heavy child contained` line is grep-stable and carries every applied
+/// field — cpu cap, affinity (lowercase hex), memory priority, purge delay, and
+/// (#207 phase-3) `alloc_mode=` after `purge_delay_ms=`. Distinct field values
+/// so an interpolation-swap mutant diverges.
+#[test]
+fn contained_line_is_grep_stable_with_alloc_mode() {
+    // cap 25, mask 0xE00000 (top-3 of 24), purge 1000, alloc lazy.
+    let c = containment_from_settings(Some("25"), Some("e00000"), Some("1000"), Some("lazy"), 24);
+    assert_eq!(
+        contained_line(42, 1_073_741_824, &c),
+        "heavy child contained (pid 42): mem_limit=1073741824B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=1000 alloc_mode=lazy"
+    );
+    // The default (retained) mode renders `alloc_mode=retained`.
+    let c = containment_from_settings(Some("50"), Some("f0"), None, None, 8);
+    assert_eq!(
+        contained_line(7, 2048, &c),
+        "heavy child contained (pid 7): mem_limit=2048B cpu_cap=50% affinity=0xf0 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained"
+    );
 }

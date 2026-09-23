@@ -346,8 +346,15 @@ fn read_headroom() -> Option<Headroom> {
 /// Job Object seam ([`assign_child_job`]) at every heavy-child spawn. Initialised
 /// to the box's defaults (no override) so a spawn before the first refresh is
 /// still contained.
-static CONTAINMENT: LazyLock<Mutex<Containment>> =
-    LazyLock::new(|| Mutex::new(containment_from_settings(None, None, None, logical_cores())));
+static CONTAINMENT: LazyLock<Mutex<Containment>> = LazyLock::new(|| {
+    Mutex::new(containment_from_settings(
+        None,
+        None,
+        None,
+        None,
+        logical_cores(),
+    ))
+});
 
 /// The box's logical-processor count (`available_parallelism`, min 1). Reads the
 /// environment, so integration-only; the pure mask/cap rules it feeds are tested.
@@ -382,16 +389,31 @@ pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment 
         .await
         .ok()
         .flatten();
+    // #207 phase-3: the operator alloc-mode knob (retained | lazy), read the
+    // same way. An unrecognised non-empty value collapses to retained; WARN once
+    // so the operator sees the setting was ignored (the pure parse fn stays
+    // silent).
+    let alloc = crate::db::models::get_setting(pool, "heavy_alloc_mode")
+        .await
+        .ok()
+        .flatten();
     let c = containment_from_settings(
         cap.as_deref(),
         mask.as_deref(),
         purge.as_deref(),
+        alloc.as_deref(),
         logical_cores(),
     );
     if c.purge_delay_ms == -1 && purge.as_deref().is_some_and(|r| r.trim() != "-1") {
         warn!(
             "heavy_purge_delay_ms={purge:?} is invalid or out of range (-1 or 0..=600000 ms) — using -1 (never decommit)"
         );
+    }
+    if alloc
+        .as_deref()
+        .is_some_and(|r| !matches!(r.trim(), "" | "retained" | "lazy"))
+    {
+        warn!("heavy_alloc_mode={alloc:?} is unrecognised (retained or lazy) — using retained");
     }
     if let Ok(mut g) = CONTAINMENT.lock() {
         *g = c;
@@ -408,7 +430,24 @@ pub(crate) fn current_containment() -> Containment {
     CONTAINMENT
         .lock()
         .map(|g| *g)
-        .unwrap_or_else(|_| containment_from_settings(None, None, None, logical_cores()))
+        .unwrap_or_else(|_| containment_from_settings(None, None, None, None, logical_cores()))
+}
+
+/// The `heavy child contained (pid …)` INFO line for a spawned child. Pure, so
+/// it is exact-string tested cross-platform (#207); emitted once per child by
+/// the `#[cfg(windows)]` Job Object seam, so it is dead in the non-Windows lib
+/// target. Gains ` alloc_mode=<retained|lazy>` after `purge_delay_ms=` (#207
+/// phase-3).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn contained_line(pid: u32, limit_bytes: usize, c: &Containment) -> String {
+    format!(
+        "heavy child contained (pid {pid}): mem_limit={limit_bytes}B cpu_cap={}% affinity=0x{:x} mem_priority_low={} purge_delay_ms={} alloc_mode={}",
+        c.cpu_cap_pct,
+        c.affinity_mask,
+        c.memory_priority_low,
+        c.purge_delay_ms,
+        c.alloc_mode.as_str(),
+    )
 }
 
 /// The logical-core count of the currently published affinity block — the
@@ -592,14 +631,9 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
             CloseHandle(job);
             return None;
         }
-        // #203: log the applied containment once per child.
-        tracing::info!(
-            "heavy child contained (pid {pid}): mem_limit={limit_bytes}B cpu_cap={}% affinity=0x{:x} mem_priority_low={} purge_delay_ms={}",
-            containment.cpu_cap_pct,
-            containment.affinity_mask,
-            containment.memory_priority_low,
-            containment.purge_delay_ms
-        );
+        // #203 / #207: log the applied containment once per child (pure
+        // formatter, so the line is exact-string tested cross-platform).
+        tracing::info!("{}", contained_line(pid, limit_bytes, &containment));
         Some(job as isize)
     }
 }

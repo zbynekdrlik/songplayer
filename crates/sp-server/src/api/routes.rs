@@ -708,6 +708,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         heavy_cap.as_deref(),
         heavy_mask.as_deref(),
         None, // #207: purge delay is not surfaced on /status (heavy_containment only)
+        None, // #207: alloc mode is not surfaced on /status (heavy_containment only)
         heavy_cores,
     );
 

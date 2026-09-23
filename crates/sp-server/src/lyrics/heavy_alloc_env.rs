@@ -1,4 +1,4 @@
-//! #168 — the retained-heap environment for the heavy SEPARATION child.
+//! #168 / #207 — the allocator environment for the heavy SEPARATION child.
 //!
 //! Desktop torch has no CPU caching allocator: every activation tensor is an
 //! `_aligned_malloc`/`_aligned_free` on the UCRT heap, and blocks over the NT
@@ -6,15 +6,23 @@
 //! `VirtualFree` — each freed page is decommitted and demand-zero-faulted again
 //! on the next inference step (~193k page faults/s on the box, #168 round 2b).
 //! With a mimalloc override injected into the venv interpreter
-//! (`bootstrap_venv_exe`), these three options turn that per-step churn into a
-//! one-time cost:
+//! (`bootstrap_venv_exe`), the mimalloc env turns that per-step churn into a
+//! one-time cost. Two MODES ([`AllocMode`], the operator `heavy_alloc_mode`):
 //!
-//! - `MIMALLOC_PURGE_DELAY=-1` — never decommit freed memory back to the OS
-//!   (so a freed arena page is reused, not re-faulted).
-//! - `MIMALLOC_ARENA_EAGER_COMMIT=1` — commit an arena's pages up front.
-//! - `MIMALLOC_RESERVE_OS_MEMORY=4GiB` — reserve + commit one arena at start, so
-//!   the first-touch fault storm is paid ONCE, not once per step. Fits under the
-//!   10 GiB per-child Job Object cap (`heavy_slot::CHILD_JOB_MEMORY_LIMIT_BYTES`).
+//! - **`Retained`** (today's #168 default) — commit the reserved arena UP FRONT
+//!   (`MIMALLOC_ARENA_EAGER_COMMIT=1`), never/rarely decommit
+//!   (`MIMALLOC_PURGE_DELAY=<purge_delay_ms>`, `-1` = never), reserve one 4 GiB
+//!   arena (`MIMALLOC_RESERVE_OS_MEMORY=4GiB`). The first-touch fault storm is
+//!   paid ONCE — at the price of ~9 GB commit held for the child's whole run.
+//! - **`Lazy`** (#207 phase-3) — do NOT commit the arena up front
+//!   (`MIMALLOC_ARENA_EAGER_COMMIT=0`): the 4 GiB reserve stays reserved-not-
+//!   committed and commit grows with first touch, returned to the OS after the
+//!   purge delay. The phase-2 box measurement (issue #207 comment 5791417188)
+//!   showed the purge delay is NOT the commit lever over an EAGER-committed
+//!   arena (both `-1` and `10000` held 8973–8977 MB) — EAGER COMMIT is. A
+//!   "never purge" delay makes no sense with lazy commit (commit would only
+//!   grow), so a negative `purge_delay_ms` substitutes
+//!   [`LAZY_DEFAULT_PURGE_DELAY_MS`] (10 s).
 //!
 //! Numerically invisible to the model; applied to the separation child only
 //! (next to `gpu_policy::env_for_child` in `stems/separator.rs`) — the dub child
@@ -27,19 +35,61 @@ pub const ENV_ARENA_EAGER_COMMIT: &str = "MIMALLOC_ARENA_EAGER_COMMIT";
 /// Env var: reserve N of OS memory (one arena) up front.
 pub const ENV_RESERVE_OS_MEMORY: &str = "MIMALLOC_RESERVE_OS_MEMORY";
 
-/// The reserved-arena size. One arena reserved + committed at start pays the
-/// first-touch fault cost once; under the 10 GiB per-child job cap.
+/// The reserved-arena size. One arena reserved (RETAINED: + committed) at start;
+/// under the 10 GiB per-child job cap. Same reserve in both modes — LAZY only
+/// changes whether it is committed up front.
 pub const RESERVE_OS_MEMORY: &str = "4GiB";
 
-/// Upper bound (ms) of an explicit `MIMALLOC_PURGE_DELAY`. Above it — or below
-/// `-1` — [`emit_purge_delay`] falls back to `-1` (never purge, today's default).
-/// 10 minutes is well past any decommit cadence worth measuring on the box.
+/// `MIMALLOC_ARENA_EAGER_COMMIT` for RETAINED mode — commit the reserved arena
+/// up front (today's #168 behaviour): the first-touch fault storm is paid once.
+pub const RETAINED_EAGER_COMMIT: &str = "1";
+/// `MIMALLOC_ARENA_EAGER_COMMIT` for LAZY mode — do NOT commit the reserved arena
+/// up front; it stays reserved-not-committed and commit grows with first touch,
+/// returned after the purge delay (#207 phase-2: eager commit, not the purge
+/// delay, is the lever that holds the child's ~9 GB commit).
+pub const LAZY_EAGER_COMMIT: &str = "1";
+
+/// The LAZY-mode purge delay (ms) substituted when the operator setting is
+/// "never purge" (`purge_delay_ms < 0`). A never-purge lazy heap would grow
+/// commit without ever returning it — defeating lazy mode — so 10 s is used.
+pub const LAZY_DEFAULT_PURGE_DELAY_MS: i64 = 10_000;
+
+/// Upper bound (ms) of an explicit RETAINED `MIMALLOC_PURGE_DELAY`. Above it — or
+/// below `-1` — [`emit_purge_delay`] falls back to `-1` (never purge, today's
+/// default). 10 minutes is well past any decommit cadence worth measuring.
 pub const PURGE_DELAY_MAX_MS: i64 = 600_000;
 
-/// #207: the `MIMALLOC_PURGE_DELAY` value string for a requested delay. `-1`
-/// (never decommit — today's default) stays `-1`; a value in `0..=600_000` ms
-/// emits that number; any other value (`< -1` or `> 600_000`) falls back to `-1`.
-/// Pure — the out-of-range WARN lives in the settings/parse layer, never here.
+/// #207: how the heavy separation child's injected mimalloc heap manages OS
+/// commit. The operator `heavy_alloc_mode` setting parses into this
+/// ([`crate::lyrics::heavy_containment::parse_alloc_mode`]); `Retained` is the
+/// default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AllocMode {
+    /// Commit the arena up front, hold it (today's #168 retained heap).
+    Retained,
+    /// Reserve-not-commit the arena; commit grows with touch, purged after the
+    /// delay (#207 phase-3).
+    Lazy,
+}
+
+impl AllocMode {
+    /// The lowercase token for the `alloc_mode=` field in the `heavy child
+    /// contained` line and the value the operator setting carries. Read by the
+    /// `heavy child contained` formatter, which is dead in the non-Windows lib
+    /// target.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            AllocMode::Retained => "retained",
+            AllocMode::Lazy => "lazy",
+        }
+    }
+}
+
+/// #207: the RETAINED `MIMALLOC_PURGE_DELAY` value string for a requested delay.
+/// `-1` (never decommit — today's default) stays `-1`; a value in `0..=600_000`
+/// ms emits that number; any other value (`< -1` or `> 600_000`) falls back to
+/// `-1`. Pure — the out-of-range WARN lives in the settings/parse layer.
 fn emit_purge_delay(purge_delay_ms: i64) -> String {
     if (0..=PURGE_DELAY_MAX_MS).contains(&purge_delay_ms) {
         purge_delay_ms.to_string()
@@ -48,21 +98,36 @@ fn emit_purge_delay(purge_delay_ms: i64) -> String {
     }
 }
 
-/// The three env pairs that make the injected mimalloc heap RETAIN memory for
-/// the heavy separation child. Pure — no I/O. Applied verbatim next to the VRAM
-/// cap from `gpu_policy::env_for_child`.
+/// #207: the LAZY `MIMALLOC_PURGE_DELAY` value string. A non-negative delay is
+/// used verbatim; a negative delay (e.g. the `-1` "never purge" default, which
+/// makes no sense with lazy commit) substitutes [`LAZY_DEFAULT_PURGE_DELAY_MS`]
+/// (10 s). Pure.
+fn lazy_purge_delay(purge_delay_ms: i64) -> String {
+    if purge_delay_ms >= 0 {
+        purge_delay_ms.to_string()
+    } else {
+        LAZY_DEFAULT_PURGE_DELAY_MS.to_string()
+    }
+}
+
+/// The three mimalloc env pairs for the heavy separation child, in
+/// `[purge, eager-commit, reserve]` order. Pure — no I/O. Applied verbatim next
+/// to the VRAM cap from `gpu_policy::env_for_child`.
 ///
-/// #207: `purge_delay_ms` is the operator `heavy_purge_delay_ms` setting
-/// (via [`crate::lyrics::heavy_slot::current_containment`]): `-1` keeps the
-/// retained-heap default, `0..=600_000` sets a finite decommit delay so the box
-/// can measure returning the child's ~9 GB commit without the fault storm.
-pub fn heavy_alloc_env(purge_delay_ms: i64) -> Vec<(String, String)> {
+/// `mode` + `purge_delay_ms` are the live operator settings
+/// (`heavy_alloc_mode` / `heavy_purge_delay_ms`, via
+/// [`crate::lyrics::heavy_slot::current_containment`]). `Retained` keeps the
+/// #168 eager-committed heap (`purge_delay_ms` `-1` = never decommit); `Lazy`
+/// turns eager commit OFF so the box can return the child's ~9 GB commit, with
+/// a negative delay defaulting to 10 s (a never-purge lazy heap only grows).
+pub(crate) fn heavy_alloc_env(mode: AllocMode, purge_delay_ms: i64) -> Vec<(String, String)> {
+    let (purge, eager) = match mode {
+        AllocMode::Retained => (emit_purge_delay(purge_delay_ms), RETAINED_EAGER_COMMIT),
+        AllocMode::Lazy => (lazy_purge_delay(purge_delay_ms), LAZY_EAGER_COMMIT),
+    };
     vec![
-        (
-            ENV_PURGE_DELAY.to_string(),
-            emit_purge_delay(purge_delay_ms),
-        ),
-        (ENV_ARENA_EAGER_COMMIT.to_string(), "1".to_string()),
+        (ENV_PURGE_DELAY.to_string(), purge),
+        (ENV_ARENA_EAGER_COMMIT.to_string(), eager.to_string()),
         (
             ENV_RESERVE_OS_MEMORY.to_string(),
             RESERVE_OS_MEMORY.to_string(),
@@ -74,13 +139,13 @@ pub fn heavy_alloc_env(purge_delay_ms: i64) -> Vec<(String, String)> {
 mod tests {
     use super::*;
 
-    /// The retained-heap env at the `-1` (never-purge) default must be EXACTLY
-    /// these three pairs, in order — a wrong var name or value is silently
-    /// ignored by mimalloc (no effect), so the exact set is pinned.
+    /// RETAINED at the `-1` (never-purge) default must be EXACTLY these three
+    /// pairs, in order — a wrong var name or value is silently ignored by
+    /// mimalloc (no effect), so the exact set is pinned. Today's #168 output.
     #[test]
-    fn heavy_alloc_env_is_exactly_the_retained_heap_trio() {
+    fn retained_alloc_env_is_exactly_the_retained_heap_trio() {
         assert_eq!(
-            heavy_alloc_env(-1),
+            heavy_alloc_env(AllocMode::Retained, -1),
             vec![
                 ("MIMALLOC_PURGE_DELAY".to_string(), "-1".to_string()),
                 ("MIMALLOC_ARENA_EAGER_COMMIT".to_string(), "1".to_string()),
@@ -91,14 +156,15 @@ mod tests {
 
     #[test]
     fn heavy_alloc_env_has_exactly_three_pairs() {
-        assert_eq!(heavy_alloc_env(-1).len(), 3);
+        assert_eq!(heavy_alloc_env(AllocMode::Retained, -1).len(), 3);
+        assert_eq!(heavy_alloc_env(AllocMode::Lazy, -1).len(), 3);
     }
 
-    /// The two retained-heap knobs (eager-commit + reserve) never change with
-    /// the purge delay — only `MIMALLOC_PURGE_DELAY` varies.
+    /// RETAINED keeps eager-commit=1 + reserve=4GiB regardless of the delay —
+    /// only `MIMALLOC_PURGE_DELAY` varies.
     #[test]
-    fn heavy_alloc_env_keeps_the_reserve_and_eager_commit_pairs() {
-        let env = heavy_alloc_env(1000);
+    fn retained_keeps_the_reserve_and_eager_commit_pairs() {
+        let env = heavy_alloc_env(AllocMode::Retained, 1000);
         assert_eq!(
             env[1],
             ("MIMALLOC_ARENA_EAGER_COMMIT".to_string(), "1".to_string())
@@ -109,37 +175,86 @@ mod tests {
         );
     }
 
-    /// #207: `-1` keeps the never-decommit default (the load-bearing knob — `0`
-    /// would decommit on free and bring the fault storm back).
+    /// #207: RETAINED `-1` keeps the never-decommit default (the load-bearing
+    /// knob — `0` would decommit on free and bring the fault storm back).
     #[test]
-    fn purge_delay_minus_one_is_never_decommit() {
-        assert_eq!(heavy_alloc_env(-1)[0].1, "-1");
+    fn retained_purge_delay_minus_one_is_never_decommit() {
+        assert_eq!(heavy_alloc_env(AllocMode::Retained, -1)[0].1, "-1");
     }
 
-    /// #207: `0` emits `0` (immediate decommit — an explicit operator choice).
+    /// #207: RETAINED `0` emits `0` (immediate decommit — an explicit choice).
     #[test]
-    fn purge_delay_zero_emits_zero() {
-        let env = heavy_alloc_env(0);
+    fn retained_purge_delay_zero_emits_zero() {
+        let env = heavy_alloc_env(AllocMode::Retained, 0);
         assert_eq!(env[0].0, "MIMALLOC_PURGE_DELAY");
         assert_eq!(env[0].1, "0");
     }
 
-    /// #207: a finite in-range delay emits that number of ms verbatim.
+    /// #207: RETAINED finite in-range delay emits that number of ms verbatim.
     #[test]
-    fn purge_delay_finite_emits_the_number() {
-        assert_eq!(heavy_alloc_env(1000)[0].1, "1000");
-        assert_eq!(heavy_alloc_env(600_000)[0].1, "600000");
+    fn retained_purge_delay_finite_emits_the_number() {
+        assert_eq!(heavy_alloc_env(AllocMode::Retained, 1000)[0].1, "1000");
+        assert_eq!(heavy_alloc_env(AllocMode::Retained, 600_000)[0].1, "600000");
     }
 
-    /// #207: above the 600 000 ms cap falls back to `-1` (never decommit).
+    /// #207: RETAINED above the 600 000 ms cap falls back to `-1`.
     #[test]
-    fn purge_delay_above_cap_falls_back_to_never() {
-        assert_eq!(heavy_alloc_env(600_001)[0].1, "-1");
+    fn retained_purge_delay_above_cap_falls_back_to_never() {
+        assert_eq!(heavy_alloc_env(AllocMode::Retained, 600_001)[0].1, "-1");
     }
 
-    /// #207: a value below `-1` is invalid and falls back to `-1`.
+    /// #207: RETAINED below `-1` is invalid and falls back to `-1`.
     #[test]
-    fn purge_delay_below_minus_one_falls_back_to_never() {
-        assert_eq!(heavy_alloc_env(-5)[0].1, "-1");
+    fn retained_purge_delay_below_minus_one_falls_back_to_never() {
+        assert_eq!(heavy_alloc_env(AllocMode::Retained, -5)[0].1, "-1");
+    }
+
+    /// #207 phase-3: LAZY at the `-1` (never-purge) default — eager commit OFF,
+    /// the same 4 GiB reserve, and the 10 s LAZY default purge delay (a
+    /// never-purge lazy heap only grows, so `-1` substitutes 10000). The whole
+    /// trio is pinned.
+    #[test]
+    fn lazy_alloc_env_turns_eager_commit_off_and_defaults_purge_to_10s() {
+        assert_eq!(
+            heavy_alloc_env(AllocMode::Lazy, -1),
+            vec![
+                ("MIMALLOC_PURGE_DELAY".to_string(), "10000".to_string()),
+                ("MIMALLOC_ARENA_EAGER_COMMIT".to_string(), "0".to_string()),
+                ("MIMALLOC_RESERVE_OS_MEMORY".to_string(), "4GiB".to_string()),
+            ]
+        );
+    }
+
+    /// #207 phase-3: LAZY with a non-negative delay uses it verbatim (eager
+    /// still OFF, reserve still 4 GiB).
+    #[test]
+    fn lazy_alloc_env_uses_a_positive_delay_verbatim() {
+        let env = heavy_alloc_env(AllocMode::Lazy, 2500);
+        assert_eq!(
+            env[0],
+            ("MIMALLOC_PURGE_DELAY".to_string(), "2500".to_string())
+        );
+        assert_eq!(
+            env[1],
+            ("MIMALLOC_ARENA_EAGER_COMMIT".to_string(), "0".to_string())
+        );
+        assert_eq!(
+            env[2],
+            ("MIMALLOC_RESERVE_OS_MEMORY".to_string(), "4GiB".to_string())
+        );
+    }
+
+    /// #207 phase-3: LAZY at exactly `0` emits `0` (immediate purge) — the
+    /// `>= 0` boundary (a `> 0` mutant would substitute 10000 here).
+    #[test]
+    fn lazy_alloc_env_delay_zero_emits_zero() {
+        assert_eq!(heavy_alloc_env(AllocMode::Lazy, 0)[0].1, "0");
+    }
+
+    /// #207: `alloc_mode` renders the lowercase operator token.
+    #[test]
+    fn alloc_mode_as_str_is_the_lowercase_token() {
+        assert_eq!(AllocMode::Retained.as_str(), "retained");
+        assert_eq!(AllocMode::Lazy.as_str(), "lazy");
     }
 }

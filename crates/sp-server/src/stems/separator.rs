@@ -117,11 +117,15 @@ pub async fn separate_stems(
     // page-fault storm is paid once, not per inference step. Effective only when
     // the venv interpreter carries the mimalloc override (`bootstrap_venv_exe`);
     // an env no-op otherwise, and numerically invisible to the model.
-    // #207: carry the operator `heavy_purge_delay_ms` (from the live containment
-    // published by `refresh_containment` this tick) into the purge-delay knob so
-    // the box can measure returning the child's ~9 GB commit without a rebuild.
-    let purge_delay_ms = crate::lyrics::heavy_slot::current_containment().purge_delay_ms;
-    for (k, v) in crate::lyrics::heavy_alloc_env::heavy_alloc_env(purge_delay_ms) {
+    // #207: carry the operator `heavy_alloc_mode` + `heavy_purge_delay_ms` (from
+    // the live containment published by `refresh_containment` this tick) into the
+    // mimalloc env so the box can measure returning the child's ~9 GB commit
+    // without a rebuild. Phase-3: `lazy` turns eager commit OFF — the lever.
+    let containment = crate::lyrics::heavy_slot::current_containment();
+    for (k, v) in crate::lyrics::heavy_alloc_env::heavy_alloc_env(
+        containment.alloc_mode,
+        containment.purge_delay_ms,
+    ) {
         cmd.env(k, v);
     }
     // #162: stamp the priority-regime plan — caps CPU threads

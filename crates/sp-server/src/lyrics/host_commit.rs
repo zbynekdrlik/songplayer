@@ -1,4 +1,4 @@
-//! #207 — box-wide commit / pagefile observability.
+//! #207 — box-wide commit / commit-over-RAM observability.
 //!
 //! The `0xc0000409` aborts (#156 dump) are host allocation failures under
 //! commit pressure: the box lives just under its commit limit (59 528 MB of
@@ -25,12 +25,12 @@ pub fn to_mb(bytes: u64) -> u64 {
     bytes / BYTES_PER_MB
 }
 
-/// A box-wide commit / pagefile / physical-memory snapshot, all in BYTES.
+/// A box-wide commit / physical-memory snapshot, all in BYTES.
 ///
 /// Read once a minute (Windows) via `GlobalMemoryStatusEx`
 /// (`ullTotalPageFile` = commit limit, `ullAvailPageFile` = free commit,
 /// `ullTotalPhys`, `ullAvailPhys`) + `GetPerformanceInfo`
-/// (`CommitTotal * PageSize` = committed bytes). `pagefile_used` has no direct
+/// (`CommitTotal * PageSize` = committed bytes). `commit_over_ram` has no direct
 /// field, so it is `committed − (total_phys − free_phys)` clamped at 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HostCommit {
@@ -42,11 +42,14 @@ pub struct HostCommit {
     pub free_commit_bytes: u64,
     /// Free physical RAM (`ullAvailPhys`).
     pub free_phys_bytes: u64,
-    /// Total physical RAM (`ullTotalPhys`) — used to derive `pagefile_used`.
+    /// Total physical RAM (`ullTotalPhys`) — used to derive `commit_over_ram`.
     pub total_phys_bytes: u64,
-    /// Approx pagefile bytes in use: `committed − (total_phys − free_phys)`,
-    /// clamped at 0 (no direct Win32 field).
-    pub pagefile_used_bytes: u64,
+    /// #207: committed bytes NOT backed by resident RAM — `committed −
+    /// (total_phys − free_phys)`, clamped at 0. This is "commit beyond RAM"
+    /// (pagefile-backed sections / reserved-committed arenas), NOT pagefile
+    /// usage: on the box it read 48.5 GB derived vs 33.4 GB real
+    /// `Win32_PageFileUsage`, so the honest name is `commit_over_ram`.
+    pub commit_over_ram_bytes: u64,
 }
 
 /// The grep-stable per-minute host line logged beside `pipeline: loop-stats`.
@@ -57,7 +60,7 @@ pub fn format_host_commit_line(c: &HostCommit) -> String {
         to_mb(c.committed_bytes),
         to_mb(c.commit_limit_bytes),
         to_mb(c.free_commit_bytes),
-        to_mb(c.pagefile_used_bytes),
+        to_mb(c.commit_over_ram_bytes),
         to_mb(c.free_phys_bytes),
     )
 }
@@ -71,7 +74,7 @@ pub struct HostCommitStatus {
     pub committed_mb: u64,
     pub limit_mb: u64,
     pub free_mb: u64,
-    pub pagefile_used_mb: u64,
+    pub commit_over_ram_mb: u64,
     pub free_phys_mb: u64,
 }
 
@@ -81,7 +84,7 @@ impl From<HostCommit> for HostCommitStatus {
             committed_mb: to_mb(c.committed_bytes),
             limit_mb: to_mb(c.commit_limit_bytes),
             free_mb: to_mb(c.free_commit_bytes),
-            pagefile_used_mb: to_mb(c.pagefile_used_bytes),
+            commit_over_ram_mb: to_mb(c.commit_over_ram_bytes),
             free_phys_mb: to_mb(c.free_phys_bytes),
         }
     }
@@ -120,16 +123,17 @@ fn read_host_commit() -> Option<HostCommit> {
         let committed_bytes = (perf.CommitTotal as u64).saturating_mul(perf.PageSize as u64);
         let total_phys_bytes = status.ullTotalPhys;
         let free_phys_bytes = status.ullAvailPhys;
-        // pagefile_used ≈ committed − (physical in use); no direct field.
+        // commit_over_ram ≈ committed − (physical in use); no direct field. This
+        // is commit NOT backed by resident RAM, not pagefile usage (#207).
         let phys_in_use = total_phys_bytes.saturating_sub(free_phys_bytes);
-        let pagefile_used_bytes = committed_bytes.saturating_sub(phys_in_use);
+        let commit_over_ram_bytes = committed_bytes.saturating_sub(phys_in_use);
         Some(HostCommit {
             committed_bytes,
             commit_limit_bytes: status.ullTotalPageFile,
             free_commit_bytes: status.ullAvailPageFile,
             free_phys_bytes,
             total_phys_bytes,
-            pagefile_used_bytes,
+            commit_over_ram_bytes,
         })
     }
 }
@@ -166,12 +170,12 @@ mod tests {
 
     fn sample() -> HostCommit {
         HostCommit {
-            committed_bytes: 8_589_934_592,     // 8192 MiB
-            commit_limit_bytes: 66_571_993_088, // 63488 MiB
-            free_commit_bytes: 4_294_967_296,   // 4096 MiB
-            free_phys_bytes: 2_147_483_648,     // 2048 MiB
-            total_phys_bytes: 17_179_869_184,   // 16384 MiB (not in the line)
-            pagefile_used_bytes: 3_221_225_472, // 3072 MiB
+            committed_bytes: 8_589_934_592,       // 8192 MiB
+            commit_limit_bytes: 66_571_993_088,   // 63488 MiB
+            free_commit_bytes: 4_294_967_296,     // 4096 MiB
+            free_phys_bytes: 2_147_483_648,       // 2048 MiB
+            total_phys_bytes: 17_179_869_184,     // 16384 MiB (not in the line)
+            commit_over_ram_bytes: 3_221_225_472, // 3072 MiB
         }
     }
 
@@ -187,7 +191,7 @@ mod tests {
     fn format_host_commit_line_is_grep_stable() {
         assert_eq!(
             format_host_commit_line(&sample()),
-            "host: commit committed_mb=8192 limit_mb=63488 free_mb=4096 pagefile_used_mb=3072 free_phys_mb=2048"
+            "host: commit committed_mb=8192 limit_mb=63488 free_mb=4096 commit_over_ram_mb=3072 free_phys_mb=2048"
         );
     }
 
@@ -200,7 +204,7 @@ mod tests {
                 committed_mb: 8192,
                 limit_mb: 63488,
                 free_mb: 4096,
-                pagefile_used_mb: 3072,
+                commit_over_ram_mb: 3072,
                 free_phys_mb: 2048,
             }
         );
@@ -212,10 +216,14 @@ mod tests {
             committed_mb: 8192,
             limit_mb: 63488,
             free_mb: 4096,
-            pagefile_used_mb: 3072,
+            commit_over_ram_mb: 3072,
             free_phys_mb: 2048,
         };
         let json = serde_json::to_string(&s).unwrap();
+        // #207: the status JSON key is the honest `commit_over_ram_mb`, not the
+        // old `pagefile_used_mb`.
+        assert!(json.contains("\"commit_over_ram_mb\":3072"), "{json}");
+        assert!(!json.contains("pagefile_used_mb"), "{json}");
         let back: HostCommitStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(s, back);
     }
