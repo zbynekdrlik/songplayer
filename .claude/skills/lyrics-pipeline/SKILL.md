@@ -125,8 +125,10 @@ finished; the stems worker already separates every video once.
 `'done'` + the sidecar exists → feed it to the dereverb step; `'unsupported'` →
 no isolation path exists any more, take the g35t base tier; anything else
 (pending / failed / not-yet-on-disk) → `HeavyDefer::WaitForStems`
-(`SongOutcome::WaitingForStems`, no-penalty defer, re-picked once the stems
-worker gets there). NO `LYRICS_PIPELINE_VERSION` bump — ★ rows already produced
+(`SongOutcome::WaitingForStems` → `defer_for_stems` → `record_lyrics_wait`: a
+NO-PENALTY recheck `STEMS_WAIT_RECHECK` = 600 s ahead, `lyrics_attempts`
+UNTOUCHED, so the selector moves to the next song instead of re-picking this
+stems-blocked row every tick). NO `LYRICS_PIPELINE_VERSION` bump — ★ rows already produced
 stand; only pending / isolation-failed rows use the new path (they can only
 improve). Whether to bump v23 (full re-run through the stems-fed path) is the
 owner's call on #144, asked separately.
