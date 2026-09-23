@@ -79,7 +79,7 @@ import sys
 import time
 import wave
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 import numpy as np
 
@@ -239,6 +239,10 @@ class ProbeOptions:
     quiet_s: float = QUIET_S
     tail_cap_s: float = TAIL_CAP_S
     max_connections: int = MAX_CONNECTIONS
+    # The pacer's clock + sleep (injectable so the 1.0x schedule is testable on a
+    # virtual clock; the drain / GoAway timers always use the real event log).
+    clock: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
 
 
 def live_config(opts: ProbeOptions, handle: str | None) -> dict:
@@ -491,16 +495,16 @@ async def _run_connection(
     `go_away` (after the old connection's grace), `closed` or `done` (drained
     after the whole slice was sent)."""
     k0 = state.frames_sent
-    anchor = time.monotonic()  # re-anchored per connection: 1.0x from here on
+    anchor = opts.clock()  # re-anchored per connection: 1.0x from here on
     stop_send = asyncio.Event()  # checked at every frame boundary
     go_away_deadline: list[float] = []  # set once, by the receiver
 
     async def send() -> None:
         for k in range(k0, len(frames)):
-            delay = frame_deadline(anchor, k - k0, opts.frame_s) - time.monotonic()
+            delay = frame_deadline(anchor, k - k0, opts.frame_s) - opts.clock()
             # Always yield (sleep(0) when behind schedule) so the receiver keeps
             # running even if a send never blocks.
-            await asyncio.sleep(max(0.0, delay))
+            await opts.sleep(max(0.0, delay))
             if stop_send.is_set():
                 return
             await session.send_realtime_input(audio=make_blob(frames[k]))
