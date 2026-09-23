@@ -43,6 +43,12 @@ pub(crate) enum SongOutcome {
     /// at the head and re-runs the instant memory frees; distinct from
     /// `Deferred` so `process_next` skips the exponential backoff.
     WaitingForMemory,
+    /// #144: the ★ isolation step's vocals come from the stems worker's vocals
+    /// sidecar, which is not ready for this song yet. Deferred with NO backoff
+    /// penalty — like `WaitingForWall`/`WaitingForMemory`, the row re-runs once
+    /// the stems worker produces the sidecar; distinct from `Deferred` so
+    /// `process_next` skips the exponential backoff.
+    WaitingForStems,
 }
 
 impl LyricsWorker {

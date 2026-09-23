@@ -420,11 +420,12 @@ impl LyricsWorker {
             Ok(SongOutcome::WaitingForWall) => {
                 debug!("worker: {youtube_id} deferred — wall in use (no backoff)");
             }
-            // #162: memory headroom fell below the floor before a heavy step —
-            // deferred with NO backoff (the WARN with the numbers already fired
-            // in `heavy_step_memory_ok`); the row re-runs the moment memory frees.
-            Ok(SongOutcome::WaitingForMemory) => {
-                debug!("worker: {youtube_id} deferred — memory headroom low (no backoff)");
+            // #162 memory below the floor, or #144 the stems vocals sidecar is
+            // not ready — both deferred with NO backoff (the WARN/INFO already
+            // fired in `heavy_step_memory_ok` / `defer_heavy`); re-runs when the
+            // cause clears.
+            Ok(SongOutcome::WaitingForMemory | SongOutcome::WaitingForStems) => {
+                debug!("worker: {youtube_id} heavy step deferred — no backoff (memory/stems)");
             }
             Err(e) => {
                 debug!("worker: processing failed for {youtube_id}: {e}");

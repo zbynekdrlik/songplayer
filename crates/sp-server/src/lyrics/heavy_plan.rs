@@ -412,6 +412,11 @@ pub(crate) enum HeavyDefer {
     /// heavy step runs yet so the wall pipelines come up on a quiet box. No
     /// backoff; the song is re-picked next tick.
     StartupGrace,
+    /// #144: the mtl aligner's vocals come from the stems worker's vocals
+    /// sidecar, which is not ready for this song yet. No heavy child is spawned
+    /// and no penalty is taken — the song returns to the queue and is re-picked
+    /// once its stems exist (the stems worker drains the whole catalogue).
+    WaitForStems { video_id: i64 },
 }
 
 impl crate::lyrics::worker::LyricsWorker {
@@ -479,7 +484,14 @@ impl crate::lyrics::worker::LyricsWorker {
         }
     }
 
-    /// Run vocal isolation under the #162 priority regime.
+    /// Run vocal preprocessing (anvuew dereverb + 16 kHz resample) under the
+    /// #162 priority regime.
+    ///
+    /// #144: the vocals come from the stems worker's sidecar, so before any
+    /// heavy child this resolves [`resolve_isolation_input`]: `BaseTierOnly`
+    /// (stems `'unsupported'`) → `Ok(None)` (take the g35t base tier); not ready
+    /// → `Err(HeavyDefer::WaitForStems)` (no-penalty defer); ready → feed the
+    /// sidecar into the dereverb step below.
     ///
     /// - `LowPriority` + wall idle → GPU with the abort watcher armed; if the
     ///   wall goes busy mid-isolation the GPU child is killed and isolation
@@ -510,6 +522,21 @@ impl crate::lyrics::worker::LyricsWorker {
             );
             return Err(HeavyDefer::StartupGrace);
         }
+        // #144: the ★ vocals come from the stems worker's sidecar. Decide before
+        // any heavy child whether that sidecar is ready.
+        let vocals_in = match self.resolve_isolation_input(row).await {
+            crate::lyrics::idle_gate_abort::IsolationInput::Stems(p) => p,
+            crate::lyrics::idle_gate_abort::IsolationInput::BaseTierOnly => {
+                tracing::info!(
+                    "lyrics: isolation base-tier only (stems unsupported) video_id={}",
+                    row.id
+                );
+                return Ok(None);
+            }
+            crate::lyrics::idle_gate_abort::IsolationInput::WaitForStems => {
+                return Err(HeavyDefer::WaitForStems { video_id: row.id });
+            }
+        };
         // #162: memory-headroom guard BEFORE the slot (owner's order). Below the
         // 4 GiB floor → defer with no backoff (`WaitingForMemory`), re-check next
         // tick; the WARN with the numbers is logged in `heavy_step_memory_ok`.
@@ -528,7 +555,10 @@ impl crate::lyrics::worker::LyricsWorker {
         );
         let result = match (mode, plan.is_gpu()) {
             (ProcessingMode::LowPriority, true) => {
-                match self.isolate_vocals(row, gpu_mem, &plan, true).await {
+                match self
+                    .isolate_vocals(row, &vocals_in, gpu_mem, &plan, true)
+                    .await
+                {
                     Ok(v) => Ok(v),
                     Err(abort) => {
                         let cpu = HeavyStepPlan::cpu_idle();
@@ -543,14 +573,19 @@ impl crate::lyrics::worker::LyricsWorker {
                             abort.detail
                         );
                         // abort_enabled=false → runs to completion, never Err.
-                        self.isolate_vocals(row, gpu_mem, &cpu, false).await
+                        self.isolate_vocals(row, &vocals_in, gpu_mem, &cpu, false)
+                            .await
                     }
                 }
             }
             (ProcessingMode::LowPriority, false) => {
-                self.isolate_vocals(row, gpu_mem, &plan, false).await
+                self.isolate_vocals(row, &vocals_in, gpu_mem, &plan, false)
+                    .await
             }
-            (ProcessingMode::IdleOnly, _) => self.isolate_vocals(row, gpu_mem, &plan, true).await,
+            (ProcessingMode::IdleOnly, _) => {
+                self.isolate_vocals(row, &vocals_in, gpu_mem, &plan, true)
+                    .await
+            }
         };
         result.map_err(HeavyDefer::WallAbort)
     }
@@ -576,6 +611,15 @@ impl crate::lyrics::worker::LyricsWorker {
                 // reading is UNKNOWN at startup, which reads as in-use).
                 self.enter_wall_wait("startup grace — wall unknown").await;
                 SongOutcome::WaitingForWall
+            }
+            HeavyDefer::WaitForStems { video_id } => {
+                // #144: no-penalty defer — the stems worker has not produced this
+                // song's vocals sidecar yet. Clear the in-flight marker so the
+                // selector re-evaluates next tick (mirrors `Memory`); the row's
+                // backoff is never touched. Logged once per pass, at INFO.
+                tracing::info!("lyrics: isolation waits for stems video_id={video_id}");
+                self.clear_processing().await;
+                SongOutcome::WaitingForStems
             }
         }
     }
