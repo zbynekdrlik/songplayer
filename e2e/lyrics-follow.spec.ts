@@ -51,9 +51,12 @@ test.beforeEach(async ({ page, request }) => {
 });
 
 test.afterEach(async ({ request }) => {
-  // Global mock state: tick OFF, lyrics back to the default 2-line track.
+  // Global mock state: tick OFF, lyrics back to the default 2-line track, the
+  // added dub row + the mix memories back to their defaults.
   await request.post("/__mock/tick", { data: { enabled: false } });
   await request.post("/__mock/lyrics-mode", { data: { mode: "track" } });
+  await request.post("/__mock/dabing-reset");
+  await request.post("/__mock/mix-reset");
   const real = consoleMessages.filter(
     (m) => !ALLOWED_CONSOLE.some((r) => r.test(m)),
   );
@@ -134,6 +137,16 @@ test.describe("#184 round F: the lyrics panel follows the spoken line", () => {
   }) => {
     test.setTimeout(45_000);
     await setupFollowingPanel(page, request);
+    // Make the PAGE scrollable no matter how tall the Dabing layout renders at
+    // this viewport, so a `scrollIntoView`-style regression (which scrolls the
+    // window too) would really move `window.scrollY` — the guard below must be
+    // able to fail.
+    const scrollable = await page.evaluate(() => {
+      document.body.style.paddingBottom = "3000px";
+      const el = document.scrollingElement ?? document.documentElement;
+      return el.scrollHeight > window.innerHeight;
+    });
+    expect(scrollable).toBe(true);
     const start = await panelState(page);
     expect(start).not.toBeNull();
     const windowY = start!.windowScrollY;
@@ -174,27 +187,34 @@ test.describe("#184 round F: the lyrics panel follows the spoken line", () => {
         timeout: 3000,
       })
       .toBe(true);
-    const beforeWheel = (await panelState(page))!.scrollTop;
-    expect(beforeWheel).toBeGreaterThan(150);
-
-    // The operator scrolls the panel UP with the real mouse wheel.
+    // The operator scrolls the panel UP with the real mouse wheel. The
+    // pre-wheel scrollTop is read right before the wheel, and the wheel (-300)
+    // is far larger than one in-flight follow step (~1 line), so the net upward
+    // move is unambiguous.
     const box = await panel.boundingBox();
     if (!box) throw new Error("no bounding box for the lyrics panel");
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.wheel(0, -150);
+    const beforeWheel = (await panelState(page))!.scrollTop;
+    expect(beforeWheel).toBeGreaterThan(150);
+    const t0 = Date.now();
+    await page.mouse.wheel(0, -300);
     await page.waitForTimeout(500);
     const held = (await panelState(page))!;
-    expect(held.scrollTop).toBeLessThan(beforeWheel - 50);
+    expect(held.scrollTop).toBeLessThan(beforeWheel - 100);
     const idxAtWheel = held.idx;
 
-    // (3a) For ~3.5 s the panel stays exactly where the operator left it, even
-    // though the active line keeps advancing (2 lines / s).
-    for (let i = 0; i < 14; i++) {
+    // (3a) Until 3.5 s after the wheel the panel stays exactly where the
+    // operator left it, even though the active line keeps advancing
+    // (2 lines / s). Time-bounded (not a fixed sample count) so slow
+    // `page.evaluate` round-trips can never run the window past the 5 s pause.
+    while (Date.now() - t0 < 3500) {
       await page.waitForTimeout(250);
       const s = (await panelState(page))!;
       expect(Math.abs(s.scrollTop - held.scrollTop)).toBeLessThanOrEqual(1);
     }
     const duringPause = (await panelState(page))!;
+    // Still inside the pause window when the hold was last read.
+    expect(Date.now() - t0).toBeLessThan(4500);
     expect(duringPause.idx).toBeGreaterThan(idxAtWheel + 4);
     // The hold was real: the advancing line left the view and the panel did
     // NOT chase it.
