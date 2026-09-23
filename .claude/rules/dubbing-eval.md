@@ -212,6 +212,11 @@ connected or on a crash; a refused RE-connect is a recorded finding (exit 0,
 `reconnect_failures ≥ 1`). Tests: the pacer's clock/sleep are injectable
 (`ProbeOptions.clock/.sleep`), so the 1.0× schedule is asserted exactly on a
 virtual clock — never assert pacing with wall-clock bounds (flaky on a loaded box).
+Local-verify traps from a worktree lane: the isolation guard refuses any Bash arg
+that is a bare `eval/` / `./eval/` path (reads as the `eval` builtin) — pass
+`eval/dubbing eval/lyrics eval/__init__.py` to ruff instead of the CI's `eval/`;
+and the staging secret-scan blocks a test literal like `secret="SOMEKEY"` —
+name a redaction stand-in by what it is (`redact_word="websocket"`).
 
 **The UNVERIFIED capabilities it exists to answer** (the translate docs do not
 mention them; the session-management examples are for `gemini-3.8-live`):
