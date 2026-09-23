@@ -319,3 +319,24 @@ fn in_flight_never_exceeds_the_write_ahead_plus_one_block() {
         );
     }
 }
+
+#[test]
+fn a_block_after_a_mid_stream_pad_snaps_onto_its_target() {
+    // A pause in the seam mid-stream: the timeout pad makes the stream
+    // non-contiguous again, so the next block is snapped exactly like the
+    // first one (without the reset in `pad` it would follow 2 400 frames —
+    // 50 ms — early and stay there).
+    let mut h = AudioHold::new(0, LEAD);
+    h.push(0, block(1_600, 0.5));
+    let _ = h.take_writes(1_300_000); // Silence(72 000) + block → 73 600
+    h.push(250_000, block(1_600, 0.25)); // target 84 000, due 1.55 s
+    assert_eq!(h.take_writes(1_500_000), vec![AudioWrite::Silence(8_000)]);
+    assert_eq!(
+        h.take_writes(1_550_000),
+        vec![
+            AudioWrite::Silence(2_400),
+            AudioWrite::Samples(block(1_600, 0.25)),
+        ]
+    );
+    assert_eq!(h.written_frames(), 84_000 + 1_600);
+}

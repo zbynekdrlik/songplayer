@@ -214,3 +214,23 @@ fn restart_budget_evicts_after_the_window_exactly() {
     // Now [100, 200, 60_000] are in-window → the next is denied.
     assert!(!b.allow(60_050));
 }
+
+#[test]
+fn feeder_poll_keeps_the_written_audio_ahead_of_the_video() {
+    // #184 round G3: the feeder pads silence once the written audio is
+    // ALIGN_PAD_THRESHOLD_MS behind its write-ahead position, and only as often
+    // as it polls. So the poll interval — plus a Windows timer oversleep of
+    // ~15.6 ms — must stay under write-ahead − pad threshold (50 ms), or the
+    // written audio drops behind the wall-clock video and ffmpeg waits for it.
+    use crate::playback::preview::preview_audio_hold::AUDIO_WRITE_AHEAD_MS;
+    use crate::playback::preview::preview_stream::ALIGN_PAD_THRESHOLD_MS;
+    const TIMER_SLACK_US: u64 = 15_600;
+    let margin_us = (AUDIO_WRITE_AHEAD_MS - ALIGN_PAD_THRESHOLD_MS) * 1_000;
+    // black_box: a runtime value, not a constant assertion.
+    let poll_us = std::hint::black_box(AFEED_POLL_US);
+    assert_eq!(poll_us, 30_000);
+    assert!(
+        poll_us + TIMER_SLACK_US < margin_us,
+        "poll {poll_us} µs + slack must stay under {margin_us} µs"
+    );
+}
