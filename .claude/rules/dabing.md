@@ -483,12 +483,15 @@ and 5797708129 (freeze this state, the model is a setting).
   old connection is still open (the probe only resumed after its grace).
 - **Teardown never waits for a connect.** A connection still CONNECTING never
   looks at its `stop` event, and the SDK's setup wait has no timeout of its own
-  (google-genai 2.24.0 `live.py` awaits the setup reply bare): teardown cancels
-  every connection whose session is not open yet, and a cancelled `_open` takes
-  its pending connect with it. Without that, a drain that ended while a
-  reconnect was connecting hung the child until the Rust stall kill (review
-  round 2, reproduced on 3.11 + 3.12). A connection dropped by a failed/stuck
-  send is marked draining: its late output is overlap, not the active stream.
+  (google-genai 2.24.0 `live.py` awaits the setup reply bare). ONE guard: a
+  cancelled `_open` (teardown cancelling the in-flight reconnect, or the whole run
+  cancelled during the first connect) cancels its connect task and marks it
+  closed. Without it, a drain that ended while a reconnect was connecting hung
+  the child until the Rust stall kill (review round 2, reproduced on 3.11 +
+  3.12; pinned by `test_the_drain_ends_while_a_reconnect_is_still_connecting` +
+  `test_cancelling_the_run_during_the_first_connect_cancels_that_connect`). A
+  connection dropped by a failed/stuck send is marked draining, so a message
+  recorded after the drop is not counted as the active stream nor resumed from.
 - **Drain:** `audio_stream_end` once after the last frame (one best-effort send on
   the active connection), then until 8 s without VOICED output (a chunk above
   −50 dBFS — the session streams silence after speech), or 60 s, or every
@@ -529,9 +532,9 @@ and 5797708129 (freeze this state, the model is a setting).
   CONNECTION (the old connection's trailing text arrives after the new one's first
   text but translates earlier input — never interleaved). `sk_timed` =
   output-transcription arrival − t0 − latency, clamped ≥ 0 and made
-  non-decreasing — by CAPPING a connection's late (overlap) fragments at the next
-  connection's first fragment, never by pushing the next connection's subtitles
-  past its audio (review round 2). The placed-WAV memmap is released even on a
+  non-decreasing — by CAPPING a connection's late (overlap) fragments at the
+  EARLIEST first fragment of any later connection, never by pushing a later
+  connection's subtitles past its audio (review rounds 2–3). The placed-WAV memmap is released even on a
   failed render, and the intermediate cleanup logs a removal failure instead of
   masking the run's real error (Windows cannot delete a mapped file).
 
