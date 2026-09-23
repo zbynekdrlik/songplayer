@@ -31,8 +31,10 @@ use wasm_bindgen::prelude::*;
 extern "C" {
     type PreviewPlayer;
 
-    // #184 round F: `on_lag` is a JS function the shim calls each pump tick with
-    // the measured picture lag in seconds (produced_ms/1000 − buffered_end). It
+    // #184 round F/G: `on_lag` is a JS function the shim calls each pump tick
+    // with the measured picture lag in seconds — the worst of the beacon lag
+    // (produced_ms/1000 − buffered_end) and the ping/pong transport lag (the
+    // last round trip / an unanswered ping; `previewLagS` in the shim). It
     // is a wasm-bindgen `Closure` passed by its `JsValue` handle (sp-ui has no
     // `js_sys` dep); the Rust closure must be kept alive as long as the player is.
     #[wasm_bindgen(constructor)]

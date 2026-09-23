@@ -141,6 +141,19 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
                     last_seen_ms = start.elapsed().as_millis() as u64;
                     let _ = socket.send(Message::Pong(d)).await;
                 }
+                Some(Ok(Message::Text(t))) => {
+                    last_seen_ms = start.elapsed().as_millis() as u64;
+                    // #184 round G: echo the shim's `{"ping":N}` at once on THIS
+                    // socket, so the pong queues behind exactly the backlog the
+                    // media is stuck in — the browser's round trip then measures
+                    // the real transport lag (a tunnel backlog the beacon can't
+                    // see). Any other text is ignored, as before.
+                    if let Some(pong) = pong_frame(&t)
+                        && socket.send(Message::Text(pong.into())).await.is_err()
+                    {
+                        break;
+                    }
+                }
                 Some(Ok(_)) => { last_seen_ms = start.elapsed().as_millis() as u64; }
                 Some(Err(_)) => break,
             },
@@ -183,6 +196,28 @@ const BEACON_INTERVAL_SECS: u64 = 1;
 /// Pure so the exact JSON shape is unit-tested without a live socket / runtime.
 fn beacon_frame(produced_ms: u64) -> String {
     format!("{{\"produced_ms\":{produced_ms}}}")
+}
+
+/// The #184 round-G answer to the browser shim's application-level ping: a
+/// text frame `{"ping":N}` (N = the shim's own `performance.now()` ms, integer
+/// or float) is answered with `{"pong":N}` carrying the SAME number verbatim,
+/// so the shim's `rtt = now − pong` is clock-skew free. The number is echoed as
+/// its RAW JSON text, byte-for-byte (serde_json's default float parsing is
+/// best-effort, so a parse → re-serialize could shift a long-tail
+/// `performance.now()` value by an ULP). Extra fields are ignored; anything that
+/// is not a JSON object with a numeric `ping` → `None` (not answered). Browsers
+/// expose no WS control-frame ping to JS, hence the application-level echo.
+/// Pure so the exact shape is unit-tested.
+fn pong_frame(text: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Ping<'a> {
+        #[serde(borrow)]
+        ping: &'a serde_json::value::RawValue,
+    }
+    let raw = serde_json::from_str::<Ping>(text).ok()?.ping.get();
+    // Only a JSON number is a ping (not a string / null / bool / array).
+    serde_json::from_str::<serde_json::Number>(raw).ok()?;
+    Some(format!("{{\"pong\":{raw}}}"))
 }
 
 /// Whether the client has been silent past the idle deadline (#178 item 16):

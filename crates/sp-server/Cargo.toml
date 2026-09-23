@@ -20,7 +20,9 @@ tower-http = { workspace = true }
 sqlx = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+# #184 round G: `raw_value` lets `api/preview.rs::pong_frame` echo the ping number
+# byte-for-byte (default float parsing is best-effort, not round-trip exact).
+serde_json = { workspace = true, features = ["raw_value"] }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
