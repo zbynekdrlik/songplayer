@@ -40,10 +40,11 @@ use super::preview_stream::{
 };
 
 /// How far ahead of the wall-clock video the written audio runs (ms), capped at
-/// the seam lead. Enough that ffmpeg never waits for audio (a silence pad only
-/// fires once the written audio is 150 ms behind its target, so the audio stays
-/// ≥ 50 ms ahead of the video), small enough (~77 KB of f32 stereo) to fit any
-/// loopback socket buffer — the whole point of round G3.
+/// the seam lead. Enough that ffmpeg never waits for audio (a silence pad fires
+/// once the written audio is 150 ms behind its target and the feeder polls at
+/// least every 50 ms, so the audio stays ahead of the video), small enough
+/// (~77 KB of f32 stereo + one seam block) to fit any loopback socket buffer —
+/// the whole point of round G3.
 pub const AUDIO_WRITE_AHEAD_MS: u64 = 200;
 
 /// A block that follows SILENCE (the stream start, a seam stall) is snapped

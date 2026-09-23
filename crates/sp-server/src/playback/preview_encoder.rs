@@ -670,8 +670,11 @@ fn spawn_video_feeder(
 /// How often the audio feeder logs its wall-clock alignment (#184 round G2).
 const AFEED_LOG_EVERY: Duration = Duration::from_secs(10);
 /// Longest the audio feeder blocks waiting for a tapped block (µs) — a silence
-/// pad still runs this often while the decode seam is quiet (#184 round G2).
-const AFEED_POLL_US: u64 = 200_000;
+/// pad still runs this often while the decode seam is quiet. 50 ms = the
+/// write-ahead (200) minus the pad threshold (150): the written audio never
+/// drops behind the wall-clock video, so ffmpeg never waits for audio (#184
+/// round-G3 review; G2 polled every 200 ms and could fall 150 ms behind).
+const AFEED_POLL_US: u64 = 50_000;
 
 /// Feed tapped interleaved-f32 audio to the child's audio socket (little-endian
 /// f32 bytes) until shutdown or a write error. On start it DRAINS any stale
@@ -687,8 +690,8 @@ const AFEED_POLL_US: u64 = 200_000;
 /// never delayed); the socket carries only the write-ahead, whatever its buffer
 /// size. The round-G2 wall-clock rules (silence when nothing arrives, bursts
 /// trimmed) live in [`AudioHold::take_writes`]. Logs the effective timing at
-/// start and `preview-afeed: ahead_ms padded_ms skipped_ms held_ms queued` at
-/// INFO every 10 s.
+/// start and `preview-afeed: ahead_ms padded_ms skipped_ms held_ms queued
+/// dropped` at INFO every 10 s.
 #[cfg_attr(test, mutants::skip)]
 fn spawn_audio_feeder(
     shared: Arc<StreamShared>,
@@ -747,12 +750,13 @@ fn spawn_audio_feeder(
                     let per_ms = PREVIEW_AUDIO_FRAMES_PER_MS;
                     info!(
                         stream = %shared.label(),
-                        "preview-afeed: ahead_ms={} padded_ms={} skipped_ms={} held_ms={} queued={}",
+                        "preview-afeed: ahead_ms={} padded_ms={} skipped_ms={} held_ms={} queued={} dropped={}",
                         ahead / per_ms as i64,
                         hold.padded_frames() / per_ms,
                         hold.skipped_frames() / per_ms,
                         hold.held_frames() / per_ms,
-                        rx.len()
+                        rx.len(),
+                        hold.dropped_blocks()
                     );
                     last_log = Instant::now();
                 }
