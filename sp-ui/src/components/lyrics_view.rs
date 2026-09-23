@@ -27,7 +27,7 @@
 
 use std::time::Duration;
 
-use leptos::html::Div;
+use leptos::html::{Div, Ol};
 use leptos::prelude::*;
 use sp_core::lyrics::LyricsTrack;
 use sp_core::lyrics_follow::{FOLLOW_PAUSE_MS, centered_scroll_top, follow_paused, needs_scroll};
@@ -162,10 +162,14 @@ pub fn LyricsView(
     // #184 round F: auto-follow. `paused_at` = the monotonic time of the last
     // manual scroll gesture on the panel (non-reactive: read only at follow
     // time). Each gesture also arms a one-shot timer for the end of the pause;
-    // only the NEWEST gesture's timer (matching `pause_gen`) bumps
-    // `follow_resume`, which re-runs the follow Effect so the panel catches up
-    // with the active line even when the line did not change meanwhile.
+    // only the NEWEST gesture's timer (matching `pause_gen`) ends the pause —
+    // it clears `paused_at` itself (a coarsened `performance.now()` can read a
+    // hair under the window when the timer fires, which would otherwise leave a
+    // stopped track paused for good) and bumps `follow_resume`, which re-runs
+    // the follow Effect so the panel catches up with the active line even when
+    // the line did not change meanwhile.
     let scroll_ref = NodeRef::<Div>::new();
+    let list_ref = NodeRef::<Ol>::new();
     let paused_at = StoredValue::new(None::<f64>);
     let pause_gen = StoredValue::new(0u32);
     let follow_resume = RwSignal::new(0u32);
@@ -177,6 +181,7 @@ pub fn LyricsView(
             move || {
                 // `try_*`: the timer can outlive the view (navigation).
                 if pause_gen.try_get_value() == Some(generation) {
+                    let _ = paused_at.try_set_value(None);
                     let _ = follow_resume.try_update(|n| *n = n.wrapping_add(1));
                 }
             },
@@ -184,10 +189,14 @@ pub fn LyricsView(
         );
     };
     // Re-runs on an active-line change (a Memo — a position tick that keeps the
-    // same line never fires it), on the scroller mounting, and when a manual
-    // pause ends.
+    // same line never fires it), on the scroller mounting, when a manual pause
+    // ends, AND when the line list (re)mounts: on a fetch the `current_idx` Memo
+    // can wake this Effect BEFORE the render effect has built the `<ol>` (the
+    // lookup then misses), and a paused track produces no later line change —
+    // tracking `list_ref` re-runs the follow once the list is in the DOM.
     Effect::new(move |_| {
         follow_resume.track();
+        list_ref.track();
         let Some(idx) = current_idx.get() else {
             return;
         };
@@ -256,7 +265,7 @@ pub fn LyricsView(
                             }
                         })
                         .collect_view();
-                    view! { <ol class="lyrics-list">{items}</ol> }.into_any()
+                    view! { <ol class="lyrics-list" node_ref=list_ref>{items}</ol> }.into_any()
                 }
             }}
         </div>

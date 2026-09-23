@@ -113,9 +113,10 @@ fn ffmpeg_path(tools_dir: &Path) -> PathBuf {
 
 /// The Python tool scripts the dub worker materialises into `tools_dir` (embedded
 /// at compile time): the worker itself PLUS `dub_voice_check.py`, which the child
-/// imports for the #184 round-E per-chunk voice-band guard. Pure — unit-tested so
-/// the guard's helper module can never silently stop shipping to the box.
-fn embedded_tool_scripts() -> [(&'static str, &'static str); 2] {
+/// imports for the #184 round-E per-chunk voice-band guard, and `dub_loudness.py`
+/// (#184 round F), the loudness rules the assembly imports at module load. Pure —
+/// unit-tested so a helper module can never silently stop shipping to the box.
+fn embedded_tool_scripts() -> [(&'static str, &'static str); 3] {
     [
         (
             "dub_worker.py",
@@ -124,6 +125,10 @@ fn embedded_tool_scripts() -> [(&'static str, &'static str); 2] {
         (
             "dub_voice_check.py",
             include_str!("../../../../scripts/dub_voice_check.py"),
+        ),
+        (
+            "dub_loudness.py",
+            include_str!("../../../../scripts/dub_loudness.py"),
         ),
     ]
 }
