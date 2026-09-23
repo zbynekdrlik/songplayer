@@ -40,8 +40,15 @@ export const RTT_RECONNECT_MS = 3000;
 export const NO_PONG_RECONNECT_MS = 5000;
 // Never reconnect again sooner than this after the last reconnect.
 export const MIN_RECONNECT_GAP_MS = 10000;
+// A socket that has not delivered its init segment this long after it was
+// opened is lost (the server itself gives up waiting for the encoder's init
+// after ~10 s and closes).
+export const INIT_TIMEOUT_MS = 12000;
 // How many recent round trips are kept.
 const RTT_HISTORY = 5;
+// A pong settles every pending ping sent up to this much after its own stamp
+// (the server echoes the number verbatim; this only absorbs float noise).
+const PONG_MATCH_TOLERANCE_MS = 0.5;
 
 // Pure reconnect decision (#184 round G), exported for the node-side table test
 // in e2e/preview.spec.ts.
@@ -54,10 +61,15 @@ const RTT_HISTORY = 5;
 //   rule cannot fire before a ping has been out for 5 s.
 // - `msSinceLastReconnect`: ms since this player last reconnected, or null when
 //   it never has.
-export function shouldReconnect({ rtts, msAwaitingPong, msSinceLastReconnect }) {
+// - `socketLost`: the socket closed on its own (a server restart, a relay
+//   close) or never delivered its init within INIT_TIMEOUT_MS — there is
+//   nothing left to measure, it is simply replaced (still rate-limited, so a
+//   server that is down is retried every MIN_RECONNECT_GAP_MS, never hammered).
+export function shouldReconnect({ rtts, msAwaitingPong, msSinceLastReconnect, socketLost }) {
   if (msSinceLastReconnect != null && msSinceLastReconnect < MIN_RECONNECT_GAP_MS) {
     return false;
   }
+  if (socketLost) return true;
   const n = rtts ? rtts.length : 0;
   if (n >= 2 && rtts[n - 1] > RTT_RECONNECT_MS && rtts[n - 2] > RTT_RECONNECT_MS) {
     return true;
@@ -104,13 +116,23 @@ export class PreviewPlayer {
     this._producedMs = null;
     this.onLag = typeof onLag === 'function' ? onLag : null;
     // #184 round G: transport-lag state — the WS path (for reconnects), the 1 Hz
-    // ping timer, the send times of pings still waiting for their pong (oldest
-    // first), the recent round trips, and when this player last reconnected.
+    // health/ping timer, the send times of pings still waiting for their pong
+    // (oldest first), the recent round trips, when this player last
+    // reconnected, and the current socket's lifecycle (when it was opened,
+    // whether its init arrived, whether it closed on its own).
     this._path = null;
     this._pingTimer = null;
     this._pendingPings = [];
     this._rtts = [];
     this._lastReconnectAt = null;
+    this._connectedAt = null;
+    this._gotInit = false;
+    this._wsClosed = false;
+    // Set when a resync cleared the buffered range: the next time media is
+    // buffered the playhead jumps to its START — the first sample after the
+    // drop (a reconnect may land on a restarted media timeline, e.g. a new
+    // encoder child, whose times are BEHIND the old playhead).
+    this._snapToStart = false;
 
     video.muted = !!startMuted;
     video.autoplay = true;
@@ -155,12 +177,17 @@ export class PreviewPlayer {
   }
 
   // Open the preview WebSocket (the ONE connect path — the first open and every
-  // #184 round-G reconnect). Per-socket transport state starts fresh here.
+  // #184 round-G reconnect). Per-socket transport state starts fresh here, and
+  // the 1 Hz health/ping timer runs for the socket's whole life (it replaces a
+  // socket that dies or never delivers its init, and pings once the init came).
   _connect(path) {
-    this._stopPinging();
     this._pendingPings = [];
     this._rtts = [];
     this._producedMs = null;
+    this._connectedAt = performance.now();
+    this._gotInit = false;
+    this._wsClosed = false;
+    this._startPinging();
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     let wsPath = path;
     // Mock-E2E test seams: forward the #184 round-F `lag_ms` (inflates the
@@ -183,9 +210,17 @@ export class PreviewPlayer {
     try {
       this.ws = new WebSocket(url);
     } catch (e) {
+      // No socket at all — the health tick treats it as lost and retries.
+      this.ws = null;
       return;
     }
     this.ws.binaryType = 'arraybuffer';
+    // A socket that closes on its own (server restart, relay close, the
+    // server's init timeout) is marked lost; the health tick replaces it. A
+    // socket WE replace or tear down has this handler nulled first.
+    this.ws.onclose = () => {
+      this._wsClosed = true;
+    };
     this.ws.onmessage = (ev) => {
       if (this.destroyed || !this.sb) return;
       // TEXT frames are control messages — the #184 round-F 1 Hz lag beacon
@@ -212,7 +247,7 @@ export class PreviewPlayer {
       // at socket open — the server sends the init only after the encoder child
       // produced one (a cold start / the libx264 fallback can take seconds), and
       // that startup must never read as transport lag and trigger a reconnect.
-      if (!this._pingTimer) this._startPinging();
+      this._gotInit = true;
       this.queue.push(new Uint8Array(ev.data));
       if (this.queue.length > MAX_QUEUE) {
         // Drop the oldest fragments; they will never be appended fast enough.
@@ -228,9 +263,10 @@ export class PreviewPlayer {
     this.ws.onerror = () => {};
   }
 
-  // #184 round G: the 1 Hz ping loop. Each tick first asks whether the link is
-  // hopelessly backlogged (reconnect), else sends `{"ping": performance.now()}`
-  // and remembers its send time until the pong comes back.
+  // #184 round G: the 1 Hz health/ping loop. Each tick first asks whether the
+  // socket must be replaced (hopelessly backlogged, or dead), else — once the
+  // init arrived — sends `{"ping": performance.now()}` and remembers its send
+  // time until the pong comes back.
   _startPinging() {
     this._stopPinging();
     this._pingTimer = setInterval(() => this._pingTick(), PING_INTERVAL_MS);
@@ -244,9 +280,10 @@ export class PreviewPlayer {
   }
 
   _pingTick() {
-    if (this.destroyed || !this.ws) return;
+    if (this.destroyed) return;
     if (this._maybeReconnect()) return;
-    if (this.ws.readyState !== WebSocket.OPEN) return;
+    // No pings before the init (see onmessage) or on a socket that is not open.
+    if (!this._gotInit || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const now = performance.now();
     try {
       this.ws.send(JSON.stringify({ ping: now }));
@@ -260,7 +297,9 @@ export class PreviewPlayer {
     const now = performance.now();
     // Pongs come back in order on one socket, so this pong also settles every
     // older ping still pending (their answers can only be behind it).
-    this._pendingPings = this._pendingPings.filter((t) => t > sentAt);
+    this._pendingPings = this._pendingPings.filter(
+      (t) => t > sentAt + PONG_MATCH_TOLERANCE_MS,
+    );
     this._rtts.push(now - sentAt);
     if (this._rtts.length > RTT_HISTORY) this._rtts.shift();
     this._maybeReconnect();
@@ -271,6 +310,13 @@ export class PreviewPlayer {
     return this._pendingPings.length ? now - this._pendingPings[0] : 0;
   }
 
+  // The current socket is gone for good: never created, closed on its own, or
+  // silent past INIT_TIMEOUT_MS without an init segment.
+  _socketLost(now) {
+    if (!this.ws || this._wsClosed) return true;
+    return !this._gotInit && now - this._connectedAt > INIT_TIMEOUT_MS;
+  }
+
   _maybeReconnect() {
     const now = performance.now();
     const decide = shouldReconnect({
@@ -278,26 +324,28 @@ export class PreviewPlayer {
       msAwaitingPong: this._msAwaitingPong(now),
       msSinceLastReconnect:
         this._lastReconnectAt == null ? null : now - this._lastReconnectAt,
+      socketLost: this._socketLost(now),
     });
     if (decide) this._reconnect(now);
     return decide;
   }
 
-  // Drop a backlog the link can never catch up with: close the old socket (its
-  // handlers nulled first so a late frame from it is ignored), discard the
-  // queued fragments, reset the buffered range on the next fragment (the
+  // Replace the socket — to drop a backlog the link can never catch up with, or
+  // because it died: close the old socket (its handlers nulled first so a late
+  // frame / close from it is ignored), discard the queued fragments, mark the
+  // buffered range for a reset before the new socket's first frame (the
   // existing resync path), and open a fresh socket on the same path — a new
   // tunnel stream that starts at the live edge. The lag readout drops to 0: the
   // stale backlog it measured is gone; the new socket's pings re-measure it.
   _reconnect(now) {
     this._lastReconnectAt = now;
-    this._stopPinging();
     if (this.ws) {
       const old = this.ws;
       this.ws = null;
       try {
         old.onmessage = null;
         old.onerror = null;
+        old.onclose = null;
         old.close();
       } catch (e) {
         // already closing
@@ -352,10 +400,16 @@ export class PreviewPlayer {
     if (this._needResync) {
       // The queue overflowed and we dropped fragments (#178 item 13), or a
       // #184 round-G reconnect dropped a backlog — clear the stale buffered
-      // range right before the next fragment, so it starts a clean timeline at
-      // the new live edge (until then the old picture keeps playing).
+      // range right before the next queued frame is appended, so the new data
+      // starts a clean timeline. After a reconnect that frame is the new
+      // socket's init segment, so the old media plays until the new socket
+      // delivers, then the picture holds its last frame until the first new
+      // fragment (~0.5 s). The playhead then jumps to the first new sample.
       this._needResync = false;
-      if (this._clearBuffered()) return; // a remove() started; resume on updateend
+      if (this._clearBuffered()) {
+        this._snapToStart = true;
+        return; // a remove() started; resume on updateend
+      }
     }
     const chunk = this.queue.shift();
     try {
@@ -379,13 +433,15 @@ export class PreviewPlayer {
     // (The #184 picture-lag report lives in `_reportLag`, run each pump tick.)
     // A live fMP4 fragment can begin at a non-zero media time, so the element's
     // currentTime (0 at mount) can sit BEFORE the first buffered sample — MSE
-    // then never renders. Snap into the buffered range (#178 round 3). The same
-    // snap covers a #184 round-G reconnect onto a RESTARTED media timeline
-    // (a new encoder child starts at 0): a playhead left AHEAD of everything
-    // buffered would stall forever, so it is brought back to the start too.
-    if (v.currentTime < start || v.currentTime > end + LIVE_EDGE_MAX_S) {
+    // then never renders. Snap into the buffered range (#178 round 3). After a
+    // resync cleared the range (`_snapToStart`), snap to the first new sample
+    // unconditionally: a #184 round-G reconnect can land on a RESTARTED media
+    // timeline (a new encoder child starts at 0) whose times are BEHIND the old
+    // playhead, which would otherwise stall past the end of everything buffered.
+    if (this._snapToStart || v.currentTime < start) {
       try {
         v.currentTime = start + 0.01;
+        this._snapToStart = false;
       } catch (e) {
         // currentTime may reject during a pending seek — retried next tick.
       }
@@ -488,6 +544,7 @@ export class PreviewPlayer {
       try {
         this.ws.onmessage = null;
         this.ws.onerror = null;
+        this.ws.onclose = null;
         this.ws.close();
       } catch (e) {
         // already closing

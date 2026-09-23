@@ -101,7 +101,15 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
     {
         return;
     }
-    debug!(bytes = init.len(), "preview.ws: sent init segment");
+    // #184 round G: viewer sessions are logged at INFO (open + close with the
+    // session length and the pings answered), so a viewer on a slow link that
+    // the shim keeps reconnecting (every ~10 s) is visible in the box log — the
+    // shim itself may not log (zero-console rule).
+    info!(
+        bytes = init.len(),
+        "preview.ws: viewer connected, sent init segment"
+    );
+    let mut pongs: u64 = 0;
 
     // #178 item 16: server-side keepalive + idle deadline. Ping every 5 s and
     // track the wall-time of the last message FROM the client; a half-open
@@ -148,10 +156,11 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
                     // media is stuck in — the browser's round trip then measures
                     // the real transport lag (a tunnel backlog the beacon can't
                     // see). Any other text is ignored, as before.
-                    if let Some(pong) = pong_frame(&t)
-                        && socket.send(Message::Text(pong.into())).await.is_err()
-                    {
-                        break;
+                    if let Some(pong) = pong_frame(&t) {
+                        if socket.send(Message::Text(pong.into())).await.is_err() {
+                            break;
+                        }
+                        pongs += 1;
                     }
                 }
                 Some(Ok(_)) => { last_seen_ms = start.elapsed().as_millis() as u64; }
@@ -180,6 +189,10 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
             }
         }
     }
+    info!(
+        secs = start.elapsed().as_secs(),
+        pongs, "preview.ws: viewer disconnected"
+    );
 }
 
 /// Server-side ping interval for the preview WS (#178 item 16).
