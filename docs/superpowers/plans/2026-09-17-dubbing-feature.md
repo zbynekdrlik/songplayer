@@ -73,5 +73,5 @@
 
 ## Verification (whole feature)
 1. CI green on every lane (Gate, Deploy, E2E, mutation shards).
-2. Box: the sample sermon processed end-to-end ahead of the lyrics/stems queues; the Dabing page shows the chain; the wall on `sp-dabing` shows EN/SK subtitles; the mixer slider changes what is heard; version on the DOM.
+2. Box: the sample dabing processed end-to-end ahead of the lyrics/stems queues; the Dabing page shows the chain; the wall on `sp-dabing` shows EN/SK subtitles; the mixer slider changes what is heard; version on the DOM.
 3. No wall fps / genlock telemetry change while the dub chain runs (heavy slot at BELOW_NORMAL, #162).

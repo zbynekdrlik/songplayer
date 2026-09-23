@@ -25,7 +25,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - CI workflows: runner shell traps / mutation gate / push+PR de-dup → `.claude/rules/ci-workflows.md` (auto-loads on `.github/workflows/**`, `.cargo/mutants.toml`)
 - DB migrations (manual `db/mod.rs`; per-version test isolation via `apply_upto`) → `.claude/rules/db-migrations.md` (auto-loads on `crates/sp-server/src/db/mod*.rs`)
 - lyrics_worker.py tests (eval-checks CI = numpy+soundfile only; fake torch/librosa/audio_separator) → `.claude/rules/lyrics-worker-tests.md` (auto-loads on `scripts/lyrics_worker.py`, `scripts/tests/**`)
-- sermon dubbing eval (Soniox/Chatterbox engine gotchas) → `.claude/rules/dubbing-eval.md` (auto-loads on `eval/dubbing/**`)
+- dabing (dubbing) eval (Soniox/Chatterbox engine gotchas) → `.claude/rules/dubbing-eval.md` (auto-loads on `eval/dubbing/**`)
 - Dabing feature (dub data model + section + import cookie gate + D4 dub worker/Live-Translate child/4-stream mix) → `.claude/rules/dabing.md` (auto-loads on `db/models_dabing.rs`, `api/dabing.rs`, `api/routes_import.rs`, `startup_dabing.rs`, `dabing/**`, `scripts/dub_worker.py`, `sp-ui` dabing files)
 
 | Area | Skill | Load when |

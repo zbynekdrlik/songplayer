@@ -3,9 +3,9 @@ paths:
   - "eval/dubbing/**"
 ---
 
-# Sermon dubbing eval harness (#175, epic #174) — engine gotchas + run recipe
+# Dabing (dubbing) eval harness (#175, epic #174) — engine gotchas + run recipe
 
-The `eval/dubbing/` harness compares TTS engines for the Slovak sermon-dub lane.
+The `eval/dubbing/` harness compares TTS engines for the Slovak dabing-dub lane.
 `fit.py` is PURE (CI runs only `tests/test_fit.py`); engines/mix/runner run at
 eval time on dev1 + dev2. Every hard-won fact below was verified live 2026-09-18.
 
@@ -175,7 +175,7 @@ same 7 sentences (`seg_spec` items 2..8), plus an intensity layer.
   f0 spread (semitones), words/s from the ORIGINAL voice window → `intense/neutral/
   calm` label → Gemini per-sentence style instruction + Soniox `[emphatic]`/`[calm]`
   audio tag. XTTS/Piper/SpeechT5 have no style control (noted).
-- Sermon-register SK translation: CLIProxy is localhost-only on win-resolume and
+- Dabing-register SK translation: CLIProxy is localhost-only on win-resolume and
   ssh to that box is banned in this lane → use the Gemini text API
   (`gemini-2.5-flash` generateContent) for the register translation instead.
 - `run_round2.py`: owner-approved mixes only — `dub only` + `dub + original −18 dB`

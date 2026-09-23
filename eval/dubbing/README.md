@@ -1,8 +1,8 @@
-# Sermon Dubbing — D0 Listening-Test Harness (#175)
+# Dabing Dubbing — D0 Listening-Test Harness (#175)
 
-A reusable evaluation harness for the sermon-dubbing epic (#174). It produces a
+A reusable evaluation harness for the dabing-dubbing epic (#174). It produces a
 side-by-side Slovak dub of the SAME ~2-minute segment of the owner's sample
-sermon with two candidate engines, delivered as share URLs so the owner can pick
+dabing with two candidate engines, delivered as share URLs so the owner can pick
 by ear. **No engine is baked into the dubbing feature before this verdict.**
 
 The winner's `engines/<x>.py` becomes the reference for the D4 Rust `DubEngine`
@@ -55,9 +55,9 @@ Sample: `https://www.youtube.com/watch?v=Dhp-qrZDK1g`.
    clear 2-minute speech span):
 
    ```bash
-   yt-dlp -f bestaudio -x --audio-format wav -o sermon.wav \
+   yt-dlp -f bestaudio -x --audio-format wav -o dabing.wav \
      "https://www.youtube.com/watch?v=Dhp-qrZDK1g"
-   ffmpeg -y -i sermon.wav -ss 00:02:00 -t 00:02:00 seg_raw.wav
+   ffmpeg -y -i dabing.wav -ss 00:02:00 -t 00:02:00 seg_raw.wav
    ffmpeg -y -i seg_raw.wav -af loudnorm=I=-14:TP=-1.5:LRA=11 -ar 48000 -ac 2 seg.wav
    ```
 
