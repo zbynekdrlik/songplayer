@@ -185,9 +185,11 @@ the video timeline into `<work_dir>/dub_placed.wav` (24 kHz mono) → `_assemble
 intermediates → writes the one-chunk transcripts JSON (D3) → prints the summary
 JSON (the ONLY stdout line; logs go to stderr). Box evidence left in the work dir:
 `events.jsonl` (every server message + decision, flushed per line),
-`session_summary.json`, `loudness.json`, `heartbeat`. Heartbeats every 5 s from the
-session's supervisor tick (+ before each assembly pass), so the #171
-`wait_with_stall_timeout` never kills a healthy real-time stream. A crashed job
+`session_summary.json`, `loudness.json`, `heartbeat`. The `heartbeat` is written
+on session PROGRESS only (frames sent or output arrived; at most every 5 s) and
+before each assembly pass; `events.jsonl` grows with every server message. So
+the #171 `wait_with_stall_timeout` never kills a healthy real-time stream, but a
+stuck one goes stale. A crashed job
 restarts from the beginning (no partial resume — the dub is produced ahead of
 playback; resumption handles are only used across connections of ONE run).
 Cost ~$0.037/min.
@@ -475,9 +477,18 @@ and 5797708129 (freeze this state, the model is a setting).
   exits 1 with `Live reconnect (connection N) refused: …`** and the Rust backoff
   retries the job. A LOCAL error while recording (a full disk in the raw sink, a
   bug in `_record`) is fatal too — only the transport is guarded in `_receive`, so
-  it can never pose as a closed websocket and reconnect into the same error.
+  it can never pose as a closed websocket and reconnect into the same error (one
+  recorded after the drain end is raised too, never returned as success).
   UNVERIFIED until the first box run: that the server accepts a resume while the
   old connection is still open (the probe only resumed after its grace).
+- **Teardown never waits for a connect.** A connection still CONNECTING never
+  looks at its `stop` event, and the SDK's setup wait has no timeout of its own
+  (google-genai 2.24.0 `live.py` awaits the setup reply bare): teardown cancels
+  every connection whose session is not open yet, and a cancelled `_open` takes
+  its pending connect with it. Without that, a drain that ended while a
+  reconnect was connecting hung the child until the Rust stall kill (review
+  round 2, reproduced on 3.11 + 3.12). A connection dropped by a failed/stuck
+  send is marked draining: its late output is overlap, not the active stream.
 - **Drain:** `audio_stream_end` once after the last frame (one best-effort send on
   the active connection), then until 8 s without VOICED output (a chunk above
   −50 dBFS — the session streams silence after speech), or 60 s, or every
@@ -518,7 +529,11 @@ and 5797708129 (freeze this state, the model is a setting).
   CONNECTION (the old connection's trailing text arrives after the new one's first
   text but translates earlier input — never interleaved). `sk_timed` =
   output-transcription arrival − t0 − latency, clamped ≥ 0 and made
-  non-decreasing.
+  non-decreasing — by CAPPING a connection's late (overlap) fragments at the next
+  connection's first fragment, never by pushing the next connection's subtitles
+  past its audio (review round 2). The placed-WAV memmap is released even on a
+  failed render, and the intermediate cleanup logs a removal failure instead of
+  masking the run's real error (Windows cannot delete a mapped file).
 
 ## Log lines the box acceptance reads (stderr → sp-server log)
 `live: connect N (handle_present=…, frame K)`, `live: go_away time_left 50s on
