@@ -23,11 +23,13 @@ Invariants (the project rule: never synthesized / evenly distributed timing):
   starting inside the overlap it shares with window k-1 is the SAME sung line
   as an earlier-window line reaching into that overlap when (one-to-one, the
   closest start wins):
+    * `later_longer` — the earlier copy was cut at its window's END (its text
+      is a word-prefix of the later one, or it reaches window k-1's end and
+      is similar — a mid-word cut) and the later copy is longer, starts close
+      -> the earlier, incomplete copy is dropped and the complete later one
+      kept (checked FIRST, so a similar-but-cut copy never wins);
     * `full` — normalized text ratio >= DUP_TEXT_RATIO and the starts within
       DUP_MAX_START_DELTA_MS -> the later copy is dropped;
-    * `later_longer` — the earlier copy was cut at its window's END (its text
-      is a word-prefix of the later one) and the starts are close -> the
-      earlier, incomplete copy is dropped and the complete later one kept;
     * `later_fragment` — the later copy was cut at its window's START (its
       text is a word-substring of the earlier one) and it starts inside the
       earlier line's span -> the fragment is dropped.
@@ -119,18 +121,32 @@ def clip_past_end(lines: list[dict[str, Any]], end_ms: int) -> ClipResult:
     )
 
 
-def same_line_kind(later: dict[str, Any], earlier: dict[str, Any]) -> str | None:
+def same_line_kind(
+    later: dict[str, Any],
+    earlier: dict[str, Any],
+    *,
+    earlier_window_end_ms: int | None = None,
+) -> str | None:
     """How `later` (window k) duplicates `earlier` (window k-1), or None.
-    See the module docstring for the three kinds."""
+    See the module docstring for the three kinds. `earlier_window_end_ms` is
+    where window k-1's audio ended: an earlier copy reaching it was CUT there,
+    so a longer later copy replaces it even when the two texts are similar
+    enough to count as the same line (word or mid-word cut)."""
     a = normalize_text(later["text"])
     b = normalize_text(earlier["text"])
     if not a or not b:
         return None
     close = abs(later["start_ms"] - earlier["start_ms"]) <= DUP_MAX_START_DELTA_MS
-    if close and difflib.SequenceMatcher(None, a, b).ratio() >= DUP_TEXT_RATIO:
-        return "full"
-    if close and len(a) > len(b) and (a + " ").startswith(b + " "):
+    similar = difflib.SequenceMatcher(None, a, b).ratio() >= DUP_TEXT_RATIO
+    word_prefix = (a + " ").startswith(b + " ")
+    earlier_cut = (
+        earlier_window_end_ms is not None
+        and earlier["end_ms"] >= earlier_window_end_ms - DUP_REACH_SLACK_MS
+    )
+    if close and len(a) > len(b) and (word_prefix or (similar and earlier_cut)):
         return "later_longer"
+    if close and similar:
+        return "full"
     inside = (
         earlier["start_ms"]
         <= later["start_ms"]
@@ -192,11 +208,18 @@ def merge_window_lines(
         for ln in shifted:
             match: tuple[int, str] | None = None
             if offset <= ln["start_ms"] < overlap_end:
+                # window k-1 ended where this window's overlap ends (only the
+                # LAST window is ever folded longer, and it has no successor)
                 candidates = [
                     (abs(ln["start_ms"] - merged[i][1]["start_ms"]), i, kind)
                     for i in prev_idx
                     if i not in consumed
-                    and (kind := same_line_kind(ln, merged[i][1])) is not None
+                    and (
+                        kind := same_line_kind(
+                            ln, merged[i][1], earlier_window_end_ms=overlap_end
+                        )
+                    )
+                    is not None
                 ]
                 if candidates:
                     _, i, kind = min(candidates)

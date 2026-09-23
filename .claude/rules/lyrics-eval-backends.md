@@ -242,7 +242,9 @@ Remove-Item Env:\GEMINI_API_KEY
 ```
 
 Exit 1 = a re-run can still fill a gap (error rows / lost windows) → re-run the
-same line, it retries only those. Exit 0 with `missing input: 2` is the
+same line, it retries only those, at most 3 runs per fixture
+(`metadata.attempt`; a fixture still failing after that is deterministic — left
+as is, its errors shown in scoring). Exit 0 with `missing input: 2` is the
 expected end state (`vpwDdb8r9Bk`, `fHYLw-2tTx4` have no WAV). Pull
 `$root\raw\*.json` back with the `python -m http.server` trick above into
 `eval/lyrics/reports/2026-09-2x-one-call-raw/`.
@@ -269,8 +271,9 @@ the current manifest (17 fixtures scored, 2 errored): **31.2 % of all 1414**
 gold lines (`same-denom` — the bar), 35.3 % of the 1249 gold lines in its 17
 scored fixtures, monotonic 31.3 % (also over those 1249), conditional 49.8 %
 (over its 885 matched+timed lines) — only the first is comparable to an arm's
-`same-denom` figure. An arm with `window errors` > 0 is re-run before its
-numbers are quoted.
+`same-denom` figure. An arm with `window errors` > 0 is re-run (up to the
+3-attempt cap) before its numbers are quoted; whatever remains is quoted WITH
+its window-error count.
 
 ## mtl aligner memory + on-box probe (#144 r3)
 

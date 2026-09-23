@@ -87,9 +87,9 @@ DEFAULT_TOOLS_DIR = r"C:\ProgramData\SongPlayer\cache\tools"
 
 # Above this the WAV goes through the Files API instead of inline bytes. The
 # inline request is capped at 20 MB and inline bytes travel base64-encoded
-# (x 4/3), so 14 MB raw (~18.7 MB encoded) leaves room for the prompt. A 16 kHz
-# mono s16 WAV is ~1.9 MB/min: songs over ~7.3 min (e.g. cej4vn4sWtE, 533 s)
-# take the Files API path in the `whole` arm.
+# (x 4/3), so 14 MiB raw (~18.7 MiB encoded) leaves room for the prompt. A
+# 16 kHz mono s16 WAV is 32 000 B/s: songs over ~459 s (~7.6 min — e.g.
+# p74PDWAFk0A 497 s, cej4vn4sWtE 533 s) take the Files API path in `whole`.
 INLINE_LIMIT_BYTES = 14 * 1024 * 1024
 AUDIO_MIME_TYPE = "audio/wav"
 # HttpOptions.timeout is MILLISECONDS (types.py: "Timeout for the request in

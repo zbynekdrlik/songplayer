@@ -14,10 +14,12 @@ Every fixture ALWAYS gets a file: a failure (the model call, ffmpeg, a missing
 WAV) is written as an error row (`error` set, `lines: []`) so the fixture keeps
 its gold lines in the scorer's honest denominator. A `win60` fixture that lost
 only SOME windows keeps its good windows' lines on a normal row and records
-`metadata.n_window_errors` (both scorers print it). A re-run skips only COMPLETE
+`metadata.n_window_errors` (both scorers print it). A re-run skips COMPLETE
 files — no `error`, no window errors — and retries error rows, partial rows and
-missing files (a 429 or a transient 5xx mid-run never freezes a gap); `--force`
-re-runs everything.
+missing files (a 429 or a transient 5xx mid-run never freezes a gap), up to
+MAX_ATTEMPTS runs per fixture (`metadata.attempt`); a fixture still failing
+after that fails deterministically and is left as is, its errors visible in
+scoring. `--force` re-runs everything.
 
 Exit status: 0 when every fixture is complete except permanent input gaps
 (`metadata.error_kind == "missing_input"` — no cached vocal WAV, e.g.
@@ -46,20 +48,30 @@ logger = logging.getLogger("lyrics_eval.run_one_call")
 RunOne = Callable[[str], dict[str, Any]]
 
 
-def _existing_ok(path: Path) -> bool:
-    """An existing raw file counts as done only if it parses, carries no
-    error and lost no window — error rows, partial win60 rows and corrupt
-    files are retried."""
+# A fixture that is still an error row / partial after this many runs fails
+# deterministically (e.g. a RECITATION block on one clip): it is left as is —
+# its error / window errors stay visible in scoring — instead of re-rolling it
+# on every re-run forever. `--force` still re-runs it.
+MAX_ATTEMPTS = 3
+
+
+def _existing_state(path: Path) -> tuple[bool, int]:
+    """(complete, attempts so far) of an existing raw file. Complete = parses,
+    no error, no lost window; error rows, partial win60 rows and corrupt or
+    missing files are not complete."""
     if not path.exists():
-        return False
+        return False, 0
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         logger.warning("existing %s unreadable (%s) — re-running", path.name, e)
-        return False
-    if not isinstance(data, dict) or data.get("error") is not None:
-        return False
-    return not (data.get("metadata") or {}).get("n_window_errors")
+        return False, 0
+    if not isinstance(data, dict):
+        return False, 0
+    md = data.get("metadata") or {}
+    attempt = int(md.get("attempt") or 1)
+    complete = data.get("error") is None and not md.get("n_window_errors")
+    return complete, attempt
 
 
 def exit_code(summary: dict[str, int]) -> int:
@@ -89,9 +101,16 @@ def run_all(
 
     for n, vid in enumerate(video_ids, start=1):
         out = raw_dir / f"{label}_{vid}.json"
-        if not force and _existing_ok(out):
+        complete, attempts = _existing_state(out)
+        if not force and (complete or attempts >= MAX_ATTEMPTS):
             logger.info(
-                "[%d/%d] %s: OK output exists — skipped", n, len(video_ids), vid
+                "[%d/%d] %s: %s — skipped",
+                n,
+                len(video_ids),
+                vid,
+                "complete output exists"
+                if complete
+                else f"still failing after {attempts} attempts, left as is",
             )
             summary["skipped"] += 1
             continue
@@ -99,6 +118,7 @@ def run_all(
             row = run_one(vid)
         except Exception as e:  # noqa: BLE001 — becomes this fixture's error row
             row = gemini38_flash.error_row(label, vid, f"{type(e).__name__}: {e}")
+        row.setdefault("metadata", {})["attempt"] = attempts + 1
         out.write_text(
             json.dumps(row, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
