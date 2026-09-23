@@ -13,6 +13,7 @@ paths:
   - "e2e/post-deploy-preview.spec.ts"
   - "e2e/post-deploy-dabing.spec.ts"
   - "e2e/audio-helpers.mjs"
+  - "e2e/post-deploy-owner-path.spec.ts"
 ---
 
 # Dashboard preview — the JPEG thumbnail (#15) AND the live A/V stream (#178)
@@ -187,11 +188,9 @@ behind the broadcast backlog is dropped (never blocks the reader).
   never stick claimed and block future viewers). `supervise` respawns a child
   that died with viewers connected, at most 3 restarts per rolling 60 s (pure
   `RestartBudget`), else `relay.close()`.
-- **Preview audio continuity (item 15).** The audio feeder tracks written audio
-  duration vs wall-clock since its first live block and prepends silence (pure
-  `gap_fill_samples`, > 150 ms threshold, capped 10 s/gap) for dropped blocks /
-  pauses / song gaps, so preview audio never drifts EARLIER than the video for
-  the child's life.
+- **Preview audio continuity (item 15) — SUPERSEDED by #184 round G2.** The
+  add-only `gap_fill_samples` is DELETED: it only ever prepended silence, so a
+  late burst accumulated lag. See "#184 round G2" below for the two-way aligner.
 - **WS keepalive + idle deadline (`api/preview.rs`, item 16).** The WS `select!`
   pings every 5 s and drops the viewer after 15 s of client silence (pure
   `is_idle`) — a half-open client can no longer keep the encoder child alive.
@@ -355,9 +354,10 @@ a `buffered.end` that is itself stale, and the lag beacon rides the same backlog
   `RTT_RECONNECT_MS = 3000`, or a ping has waited > `NO_PONG_RECONNECT_MS = 5000`,
   or the socket is LOST (`socketLost` — it closed on its own, e.g. a server
   restart / relay close, or delivered no init within `INIT_TIMEOUT_MS = 12000`;
-  the server itself gives up on the init after ~10 s), and never within
-  `MIN_RECONNECT_GAP_MS = 10000` of the last reconnect (a server that is down is
-  retried every 10 s, never hammered). "No pong for 5 s" is measured from the
+  the server itself gives up on the init after ~10 s), and never within the
+  reconnect backoff of the last reconnect (round G2: 12 s → 24 s → 48 s, cap
+  60 s — was a fixed `MIN_RECONNECT_GAP_MS = 10000`; a server that is down is
+  never hammered). "No pong for 5 s" is measured from the
   oldest UNANSWERED ping, never from the last pong — a background tab whose
   timers are throttled to one tick a minute would otherwise read "no pong for
   60 s" and reconnect for nothing. The 1 Hz health/ping timer runs for each
@@ -468,3 +468,73 @@ time. The discipline, for EVERY audio assertion (`e2e/post-deploy-preview.spec.t
 - The pure decision helpers (`audibleStreak`, `averageDb`) live in
   `e2e/audio-helpers.mjs` and are unit-tested on ubuntu in `frontend.spec.ts`
   (mock-free), so the determinism is proven without the box.
+
+## #184 round G2 — the preview audio is kept on the wall clock BOTH ways; the owner's path is the acceptance
+
+The owner heard a fader change ~70 s late and the preview then froze into a
+reconnect loop — reproduced on LAN in a real browser (#184 comment 5802408328),
+so round G's transport-only diagnosis was wrong. The root cause was the audio
+feeder's timing model. Do NOT regress:
+
+- **Two timelines.** The encoder's VIDEO input is wall-clock stamped
+  (`-use_wallclock_as_timestamps`); its PCM AUDIO input is SAMPLE-COUNT timed
+  (round 3: the box ffmpeg muxes zero audio packets when PCM is wall-stamped —
+  never change that). So preview A/V stays in sync only while the audio WRITTEN
+  so far equals the wall time elapsed. Anything that makes the two diverge
+  shifts the audio against the picture for the child's whole life.
+- **Why add-only gap fill accumulated lag.** The decode-seam blocks
+  (`StreamTap::offer_audio`, bounded channel of 48) arrive late on a loaded box
+  and then in a catch-up BURST. The old `gap_fill_samples` padded silence during
+  the late phase and then APPENDED the burst behind that silence — every hiccup
+  moved the audio permanently later (tens of seconds after a few minutes). It
+  also wrote nothing while no block arrived (the fill ran only inside the
+  `Ok(block)` arm), so ffmpeg — which interleaves by timestamp — waited for audio,
+  emitted no fragments, the WS dropped the idle client, and the browser looped.
+- **The aligner (`preview_stream.rs`, pure + unit-tested + mutation-gated).**
+  `wall_frames = preroll_frames + elapsed_since_feeder_start × 48` (per ms; the
+  round-3 start preroll — connect gap + decode-seam lead — is kept, so
+  written == wall right after it). `align_block(wall, written, block)` →
+  `AlignAction { pad_frames, skip_frames }`: pad silence up to the wall when
+  written < wall − `ALIGN_PAD_THRESHOLD_MS` (150); if the block would end more
+  than `MAX_AHEAD_MS` (300) ahead, skip its OLDEST frames so it ends
+  `ALIGN_TARGET_AHEAD_MS` (100) ahead (never negative, never more than the
+  block). `align_timeout(wall, written)` pads up to the wall on every 200 ms
+  receive timeout, so the encoder is NEVER starved. Result: |written − wall| ≤
+  300 ms forever (the 1000-step property test pins it). A trimmed burst loses
+  audio from the PREVIEW only — the wall/NDI path never sees this code.
+- **The feeder logs its alignment** at INFO every 10 s:
+  `preview-afeed: ahead_ms=<written−wall> padded_ms=<cum> skipped_ms=<cum>` —
+  on the box this is the first thing to read when preview audio is late/early.
+  A steadily growing `skipped_ms` means the decode seam keeps bursting (a
+  loaded box), which is now harmless; a large |ahead_ms| would be a regression.
+- **Browser reconnect backoff (`preview_player.js`).** Reconnects back off
+  `reconnectGapMs(reconnectsWithoutMedia)` = 12 s → 24 s → 48 s, cap 60 s
+  (`RECONNECT_BACKOFF_BASE_MS` / `_MAX_MS`); the count resets when a socket
+  delivers its first MEDIA fragment (the binary frame after its init).
+  `socketLost` is a pure exported rule: waiting for the first init inside
+  `INIT_TIMEOUT_MS` (12 s) is never "lost" and never lag. A replaced socket that
+  is still CONNECTING is closed on `open` (`closeQuietly`) — `close()` on a
+  CONNECTING socket logs "WebSocket is closed before the connection is
+  established", which the owner's console showed every 12 s. Table tests in
+  `e2e/preview.spec.ts` (node-side).
+- **The owner's path is the ACCEPTANCE for every preview / mixer change**
+  (owner ROZHODNUTÉ 2026-09-23: "akceptácia každého ďalšieho kola =
+  post-deploy Playwright test na SKUTOČNOM boxe cestou ownera", not a mock).
+  `e2e/post-deploy-owner-path.spec.ts` (`edge` project — it listens to the
+  preview audio, bundled Chromium has no H.264/AAC; viewport 1600×1000 — the
+  default hides the vertical faders): dashboard → the Dabing playlist row
+  (`playlist-picker-item[data-playlist-id]`) → ▶ the ready dub (video 344 when
+  ready) → "▶ Živý náhľad" → Web Audio RMS on the preview `<video>` → (a)
+  audible (> −50 dBFS) within 10 s; (b) real-mouse drag vokály + podklad +
+  dabing to 0 → < −60 dBFS within 4 s of the last PATCH (PATCH times from
+  `page.on('request')`); (c) vokály back up → audible within 4 s; (d) 180 s,
+  one sample per 500 ms: never silent > 5 s and ≤ 1 extra `preview.ws`
+  (`page.on('websocket')`); (e) `.lyr-current` inside `.lyrics-view-scroll` at
+  every sample; (f) zero console errors. Decisions need a STREAK of samples
+  (`quietStreak` / `audibleStreak`, #206 discipline); `longestSilentRunMs`
+  counts a missing read as silent. The 180 s window is the owner-ruled
+  acceptance MEASUREMENT (every sample asserted, fail on the first violation),
+  not a sleep-soak — it is the one sanctioned exception to the no-soak rule
+  above; do not add other fixed soaks. It never touches OBS scenes; `finally`
+  restores the dub memory (vokály 1, podklad 1, dabing as found), stops the
+  preview and pauses the Dabing output.
