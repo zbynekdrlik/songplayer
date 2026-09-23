@@ -57,6 +57,9 @@ QUIET_S = 8.0  # no VOICED output this long -> drained
 TAIL_CAP_S = 60.0  # hard cap on the drain after audio_stream_end
 MAX_CONNECTIONS = 50  # a runaway reconnect loop fails the dub, never runs forever
 CONNECT_TIMEOUT_S = 30.0  # a (re)connect that never completes is a refusal
+# A send stuck longer than this (websocket flow control that never drains) is a
+# dead connection: close it and send the frame on the next one.
+SEND_TIMEOUT_S = 30.0
 SILENCE_DBFS = -120.0  # floor for an all-zero chunk (JSON has no -inf)
 # A chunk louder than this is speech; the session streams (near-)digital silence
 # between/after utterances, well below it; speech sits around -30..-15 dBFS.
@@ -155,6 +158,7 @@ class SessionOptions:
     tail_cap_s: float = TAIL_CAP_S
     max_connections: int = MAX_CONNECTIONS
     connect_timeout_s: float = CONNECT_TIMEOUT_S
+    send_timeout_s: float = SEND_TIMEOUT_S
     # The pacer's clock + sleep (injectable so the 1.0x schedule is testable on a
     # virtual clock; the drain / GoAway timers always use the event log's clock).
     clock: Callable[[], float] = time.monotonic
@@ -271,8 +275,11 @@ class SessionState:
     latest_handle: str | None = None
     frames_at_handle: int = 0  # frames_sent when the latest handle arrived
     chunks: list[OutputChunk] = field(default_factory=list)
-    input_parts: list[str] = field(default_factory=list)
-    output_parts: list[tuple[float, str]] = field(default_factory=list)
+    # Transcriptions carry the connection they arrived on: during an overlap the
+    # old connection's trailing text arrives AFTER the new one's first text, but
+    # translates EARLIER input — consumers order them by connection.
+    input_parts: list[tuple[int, str]] = field(default_factory=list)  # (conn, text)
+    output_parts: list[tuple[float, str, int]] = field(default_factory=list)
     drain_end_reason: str | None = None
     errors: list[str] = field(default_factory=list)
 
@@ -308,8 +315,10 @@ class _Conn:
 
 class ContinuousSession:
     """ONE logical Live Translate session over `frames` (see the module doc).
-    `log` receives the human progress lines (stderr in the child); `on_tick` is
-    called on every supervisor poll (the child's heartbeat)."""
+    `log` receives the human progress lines (stderr in the child); `on_progress`
+    is called from a supervisor poll ONLY when frames were sent or output arrived
+    since the last call (the child's heartbeat — a stuck session must look stuck
+    to the Rust stall timeout, never alive just because the loop still ticks)."""
 
     def __init__(
         self,
@@ -321,7 +330,7 @@ class ContinuousSession:
         sink: Any,
         secret: str | None = None,
         log: Callable[[str], None] | None = None,
-        on_tick: Callable[[], None] | None = None,
+        on_progress: Callable[[], None] | None = None,
     ) -> None:
         self.frames = frames
         self.connect = connect
@@ -331,13 +340,17 @@ class ContinuousSession:
         self.sink = sink
         self.secret = secret
         self._say = log or (lambda _msg: None)
-        self.on_tick = on_tick
+        self.on_progress = on_progress
         self.state = SessionState()
         self.conns: list[_Conn] = []
         self._active: _Conn | None = None
         self._active_ready = asyncio.Event()
         self._opening: asyncio.Task | None = None
         self._stopping = False
+        self._progress_marker: tuple[int, int] = (0, 0)
+        # A LOCAL failure while recording (a full disk, a bug) — fatal, never
+        # mistaken for a closed websocket (which would reconnect into it again).
+        self._fatal: BaseException | None = None
 
     # ── the supervisor ─────────────────────────────────────────────────────────
 
@@ -356,8 +369,12 @@ class ContinuousSession:
                     await asyncio.wait(waiting, timeout=poll_s)
                 else:
                     await asyncio.sleep(poll_s)
-                if self.on_tick is not None:
-                    self.on_tick()
+                if self._fatal is not None:
+                    raise self._fatal
+                marker = (st.frames_sent, len(st.chunks))
+                if self.on_progress is not None and marker != self._progress_marker:
+                    self._progress_marker = marker
+                    self.on_progress()
                 if sender.done() and not sender.cancelled() and sender.exception():
                     raise sender.exception()
                 if self._opening is not None and self._opening.done():
@@ -384,7 +401,11 @@ class ContinuousSession:
         input never pauses."""
         st = self.state
         active = self._active
-        if self._stopping or st.stream_end_sent or active is None:
+        if self._stopping or self._fatal is not None:
+            return
+        # Every frame already sent: a new connection would carry nothing (the
+        # old one drains what it got; audio_stream_end is best-effort on it).
+        if self._all_frames_sent() or active is None:
             return
         if self._opening is not None:
             return
@@ -408,8 +429,32 @@ class ContinuousSession:
         )
         self._opening = asyncio.create_task(self._reconnect(handle))
 
+    def _all_frames_sent(self) -> bool:
+        return self.state.frames_sent >= len(self.frames)
+
     async def _reconnect(self, handle: str | None) -> None:
-        new = await self._open(handle)  # SessionFailed -> the supervisor raises
+        """Open the next connection and switch to it. A reconnect started just
+        before the last frames went out (a GoAway on the last frames) has nothing
+        left to carry once they did: its refusal must not fail a fully sent dub,
+        and a connection that opens anyway is closed instead of switched to —
+        the old one drains."""
+        try:
+            new = await self._open(handle)
+        except SessionFailed as e:
+            if not self._all_frames_sent():
+                raise  # the supervisor fails the session with it
+            self.events.log("reconnect_ignored", reason="all_frames_sent")
+            self._say(f"live: reconnect after the last frame failed, ignored: {e}")
+            return
+        if self._all_frames_sent():
+            self.events.log(
+                "reconnect_ignored", reason="all_frames_sent", connection=new.index
+            )
+            self._say(
+                f"live: connection {new.index} opened after the last frame, closed"
+            )
+            new.stop.set()
+            return
         self._switch_to(new, self.events.now())
 
     def _switch_to(self, new: _Conn, now: float) -> None:
@@ -458,6 +503,10 @@ class ContinuousSession:
 
     async def _teardown(self, sender: asyncio.Task) -> None:
         self._stopping = True  # closing connections must not start a reconnect
+        # Python 3.11's `wait_for` can swallow a cancellation that lands as its
+        # inner send completes; the sender would then wait on `_active_ready`
+        # forever. Waking it makes it see `_stopping` and stop on its own.
+        self._active_ready.set()
         if not sender.done():
             sender.cancel()
         if self._opening is not None and not self._opening.done():
@@ -471,10 +520,17 @@ class ContinuousSession:
 
     # ── connections ────────────────────────────────────────────────────────────
 
+    def _not_ready(self) -> None:
+        """No open active connection to send on — unless tearing down, where the
+        event stays set so a sender whose cancellation was swallowed wakes, sees
+        `_stopping` and stops (see `_teardown`)."""
+        if not self._stopping:
+            self._active_ready.clear()
+
     def _set_active(self, conn: _Conn) -> None:
         self._active = conn
         if conn.closed:
-            self._active_ready.clear()
+            self._not_ready()
         else:
             self._active_ready.set()
 
@@ -497,7 +553,10 @@ class ContinuousSession:
             conn.task.cancel()
             await asyncio.gather(conn.task, return_exceptions=True)
             conn.closed = True
-            err = _err(e, self.secret)
+            if isinstance(e, (asyncio.TimeoutError, TimeoutError)):
+                err = f"did not complete within {self.opts.connect_timeout_s:g} s"
+            else:
+                err = _err(e, self.secret)
             kind = "connect_failed" if n == 1 else "reconnect_failed"
             self.events.log(kind, error=err, handle_present=handle is not None)
             self.state.errors.append(err)
@@ -528,7 +587,12 @@ class ContinuousSession:
                 stop = asyncio.create_task(conn.stop.wait())
                 await asyncio.wait({recv, stop}, return_when=asyncio.FIRST_COMPLETED)
                 if recv.done() and not recv.cancelled():
-                    conn.close_error = recv.result()
+                    local = recv.exception()
+                    if local is not None:
+                        # Raised by `_record` (our side), not by the transport.
+                        self._fatal = self._fatal or local
+                    else:
+                        conn.close_error = recv.result()
                 for t in (recv, stop):
                     if not t.done():
                         t.cancel()
@@ -549,24 +613,30 @@ class ContinuousSession:
         conn.closed = True
         self.events.log("closed", connection=conn.index, error=conn.close_error)
         if conn is self._active:
-            self._active_ready.clear()
+            self._not_ready()
             if conn.close_error and not self.state.stream_end_sent:
                 self._say(f"live: connection {conn.index} closed: {conn.close_error}")
             self._maybe_reconnect()
 
     async def _receive(self, conn: _Conn) -> str | None:
         """Receive until the connection closes; returns the close reason. The SDK's
-        `receive()` ends after each completed interaction -> re-entered."""
-        try:
+        `receive()` ends after each completed interaction -> re-entered. Only the
+        TRANSPORT is guarded: an exception from `_record` (a full disk, a bug)
+        propagates, so it fails the session instead of posing as a close."""
+        while True:
+            got = 0
+            messages = conn.session.receive().__aiter__()
             while True:
-                got = 0
-                async for msg in conn.session.receive():
-                    got += 1
-                    self._record(msg, conn)
-                if got == 0:
-                    return "receive ended with no message"
-        except Exception as e:  # the websocket closed / errored
-            return _err(e, self.secret)
+                try:
+                    msg = await messages.__anext__()
+                except StopAsyncIteration:
+                    break
+                except Exception as e:  # the websocket closed / errored
+                    return _err(e, self.secret)
+                got += 1
+                self._record(msg, conn)
+            if got == 0:
+                return "receive ended with no message"
 
     def _record(self, msg: Any, conn: _Conn) -> None:
         st = self.state
@@ -600,13 +670,13 @@ class ContinuousSession:
         if sc is not None:
             it = getattr(sc, "input_transcription", None)
             if it is not None and getattr(it, "text", None):
-                st.input_parts.append(it.text)
+                st.input_parts.append((conn.index, it.text))
                 self.events.log(
                     "input_transcription", connection=conn.index, text=it.text
                 )
             ot = getattr(sc, "output_transcription", None)
             if ot is not None and getattr(ot, "text", None):
-                st.output_parts.append((round(now, 4), ot.text))
+                st.output_parts.append((round(now, 4), ot.text, conn.index))
                 self.events.log(
                     "output_transcription", connection=conn.index, text=ot.text
                 )
@@ -651,19 +721,28 @@ class ContinuousSession:
 
     async def _send_to_active(self, **kwargs: Any) -> None:
         """Send one realtime-input message to the ACTIVE connection, waiting for a
-        (re)opened one when it closed; a failed send marks it closed and retries
-        on the next connection."""
+        (re)opened one when it closed; a failed send — or one stuck longer than
+        `send_timeout_s` — marks it closed and retries on the next connection."""
+        timeout = self.opts.send_timeout_s
         while True:
             await self._active_ready.wait()
+            if self._stopping:
+                raise asyncio.CancelledError  # see `_teardown`
             conn = self._active
             if conn is None or conn.closed:
-                self._active_ready.clear()
+                self._not_ready()
                 continue
             try:
-                await conn.session.send_realtime_input(**kwargs)
+                await asyncio.wait_for(
+                    conn.session.send_realtime_input(**kwargs), timeout
+                )
                 return
+            except (asyncio.TimeoutError, TimeoutError):
+                self._mark_closed(conn, f"send timed out after {timeout:g} s")
+                conn.stop.set()  # leave the stuck connection's context
             except Exception as e:  # the websocket died under this send
                 self._mark_closed(conn, _err(e, self.secret))
+                conn.stop.set()
 
     async def _send_all(self) -> None:
         st = self.state
@@ -672,6 +751,8 @@ class ContinuousSession:
         anchor: float | None = None
         for k in range(total):
             await self._active_ready.wait()
+            if self._stopping:
+                return
             if anchor is None:
                 anchor = opts.clock()  # ONE anchor for the whole run
             delay = frame_deadline(anchor, k, opts.frame_s) - opts.clock()
@@ -686,11 +767,27 @@ class ContinuousSession:
             if st.frames_sent % PROGRESS_EVERY_FRAMES == 0:
                 out_s = sum(c.n_bytes for c in st.chunks if c.active) / 2 / OUTPUT_SR
                 self._say(f"live: frame {st.frames_sent}/{total} output {out_s:.1f}s")
-        await self._send_to_active(audio_stream_end=True)
+        # Every frame is sent: no reconnect starts from here on, so the stream
+        # end goes to the active connection once, best-effort — a connection
+        # that died after the last frame has nothing left to receive it for.
+        await self._end_stream()
         st.stream_end_sent = True
         st.sent_all_t = self.events.now()
         self.events.log("audio_stream_end", frame_index=st.frames_sent)
         self._say(f"live: audio_stream_end after frame {st.frames_sent}/{total}")
+
+    async def _end_stream(self) -> None:
+        conn = self._active
+        if conn is None or conn.closed:
+            self.events.log("stream_end_skipped", reason="no open connection")
+            return
+        try:
+            await asyncio.wait_for(
+                conn.session.send_realtime_input(audio_stream_end=True),
+                self.opts.send_timeout_s,
+            )
+        except Exception as e:  # the drain decides; nothing left to resend
+            self.events.log("stream_end_failed", error=_err(e, self.secret))
 
 
 def build_summary(state: SessionState, events: list[dict], input_s: float) -> dict:

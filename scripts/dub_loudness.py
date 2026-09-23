@@ -131,8 +131,9 @@ def assembly_args(
     out: str | None,
     sample_rate: int,
 ) -> list[str]:
-    """ffmpeg argv that lays the chunk WAVs on the timeline (`mix_filter`, the
-    `build_mix_filter` graph ending in `[mix]`) and runs `loudnorm` on the mix.
+    """ffmpeg argv that feeds the input WAV(s) through `mix_filter` (a graph ending
+    in `[mix]` — since #184 round H the ONE placed output WAV through
+    `dub_worker.stream_filter()`) and runs `loudnorm` on the mix.
     `out=None` → the analysis pass to the null muxer; else the final stereo
     dub file at `sample_rate`. Pure — unit-tested."""
     args = [ffmpeg, "-hide_banner", "-nostdin", "-nostats", "-y"]

@@ -61,15 +61,18 @@ pub fn worker_enabled(raw: Option<&str>) -> bool {
     }
 }
 
-/// Parse the `dub_voice` setting (#184 round H step 2). Absent/blank → the
-/// default `speaker` (the speaker's own voice, no `speech_config`); any other
+/// Parse the `dub_voice` setting (#184 round H step 2). Absent/blank or
+/// `speaker` in any case → `speaker` (the speaker's own voice, no
+/// `speech_config` — the child reads it case-insensitively too); any other
 /// non-blank value is trimmed and passed through as a prebuilt voice name (the
 /// catalogue is not enforced here, so a new voice needs no code change). Pure —
 /// unit-tested.
 pub fn dub_voice_from(raw: Option<&str>) -> String {
+    use sp_core::config::{DEFAULT_DUB_VOICE, DUB_VOICE_SPEAKER};
     match raw.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(v) if v.eq_ignore_ascii_case(DUB_VOICE_SPEAKER) => DUB_VOICE_SPEAKER.to_string(),
         Some(v) => v.to_string(),
-        None => sp_core::config::DEFAULT_DUB_VOICE.to_string(),
+        None => DEFAULT_DUB_VOICE.to_string(),
     }
 }
 

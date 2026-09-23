@@ -57,6 +57,9 @@ HEARTBEAT_EVERY_S = 5.0
 # input-onset probe could not see, a very late first utterance), not the model.
 LATENCY_MIN_MS = 1000
 LATENCY_MAX_MS = 6000
+# A connection's output stream may run this far ahead of its arrival time before
+# its streamed silence is skipped to catch up (see `place_output`).
+CATCH_UP_TOLERANCE_MS = 500
 RAW_OUTPUT = "live_output.raw"  # the session's output PCM, arrival order
 PLACED_WAV = "dub_placed.wav"  # the output placed on the video timeline
 # The round C-E2 resume cache (per-chunk wav/json/pcm + the Rust chunk plan).
@@ -112,31 +115,53 @@ def timeline_ms(arrival_s: float, t0_s: float, latency_ms: int) -> int:
 
 def place_output(
     chunks: list, t0_s: float, latency_ms: int, sr: int = OUTPUT_SR
-) -> list[int]:
-    """Start SAMPLE of every output chunk (`.arrival_s`, `.conn`, `.n_bytes`) on
-    the video timeline. Each connection's output is ONE continuous stream in
-    arrival order: a chunk lands at `max(cursor, arrival - t0 - latency)`, so a
-    burst never overlaps itself and a stall re-syncs to arrival. Connections keep
-    separate cursors — the old connection's trailing translation and the new
-    one's start overlap in time (they are summed by `render_placed_wav`); one
-    cursor across both would push every later second late by the overlap."""
+) -> list[int | None]:
+    """Start SAMPLE of every output chunk (`.arrival_s`, `.conn`, `.n_bytes`,
+    `.voiced`) on the video timeline, or None for a dropped one. Each
+    connection's output is ONE continuous stream in arrival order: a chunk lands
+    at `max(cursor, arrival - t0 - latency)`, so a burst never overlaps itself and
+    a stall re-syncs to arrival. When the stream has run AHEAD of arrival by more
+    than `CATCH_UP_TOLERANCE_MS` (a burst, output slightly faster than real
+    time), its streamed SILENCE is dropped until it is back — voiced audio is
+    never dropped — so the dub does not drift late for the rest of the
+    connection. Connections keep separate cursors: the old connection's trailing
+    translation and the new one's start overlap in time (they are summed by
+    `render_placed_wav`); one cursor across both would push every later second
+    late by the overlap."""
+    tolerance = CATCH_UP_TOLERANCE_MS * sr // 1000
     cursors: dict[int, int] = {}
-    starts = []
+    starts: list[int | None] = []
     for c in chunks:
         want = timeline_ms(c.arrival_s, t0_s, latency_ms) * sr // 1000
-        pos = max(cursors.get(c.conn, 0), want)
+        cursor = cursors.get(c.conn, 0)
+        if not c.voiced and cursor - want > tolerance:
+            starts.append(None)  # skip streamed silence to catch up
+            continue
+        pos = max(cursor, want)
         starts.append(pos)
         cursors[c.conn] = pos + c.n_bytes // 2
     return starts
 
 
+def _by_connection(parts: list, conn_of) -> list:
+    """`parts` stably ordered by connection: the old connection translates
+    EARLIER input than the next one, even when its trailing text arrives after
+    the next connection's first text (the overlap)."""
+    return sorted(parts, key=conn_of)
+
+
+def joined_by_connection(parts: list) -> str:
+    """The `(conn, text)` transcription parts joined in connection order."""
+    return "".join(text for _, text in _by_connection(parts, lambda p: p[0]))
+
+
 def sk_timed_from(parts: list, t0_s: float, latency_ms: int) -> list[dict]:
-    """The SK output-transcription fragments `(arrival_s, text)` stamped on the
-    video timeline (`t_ms`, non-decreasing — the D3 subtitle builder reads them
-    as consecutive windows)."""
+    """The SK output-transcription fragments `(arrival_s, text, conn)` in
+    connection order, stamped on the video timeline (`t_ms`, non-decreasing —
+    the D3 subtitle builder reads them as consecutive windows)."""
     out = []
     last = 0
-    for arrival_s, text in parts:
+    for arrival_s, text, _ in _by_connection(parts, lambda p: p[2]):
         if not text:
             continue
         last = max(last, timeline_ms(arrival_s, t0_s, latency_ms))
@@ -246,13 +271,17 @@ def _remove_legacy_work_files(work_dir: str) -> None:
 
 
 def render_placed_wav(
-    raw_path: str, chunks: list, starts: list[int], total_samples: int, wav_path: str
+    raw_path: str,
+    chunks: list,
+    starts: list[int | None],
+    total_samples: int,
+    wav_path: str,
 ) -> None:
     """Write the placed output as a 24 kHz mono 16-bit WAV of `total_samples`:
     chunk `i` (read from `raw_path` at its `.offset`) is ADDED at `starts[i]`
-    (overlapping connections sum, clipped to int16); samples past the end are
-    dropped. Memory-light: the WAV body is a memmap, the raw file is read per
-    chunk."""
+    (overlapping connections sum, clipped to int16; a None start = a dropped
+    chunk); samples past the end are dropped. Memory-light: the WAV body is a
+    memmap, the raw file is read per chunk."""
     import numpy as np
 
     header = wav_header(total_samples, OUTPUT_SR)
@@ -266,6 +295,8 @@ def render_placed_wav(
     )
     with open(raw_path, "rb") as raw:
         for c, pos in zip(chunks, starts):
+            if pos is None:
+                continue
             raw.seek(c.offset)
             data = np.frombuffer(raw.read(c.n_bytes), dtype="<i2")
             end = min(pos + data.size, total_samples)
@@ -379,7 +410,9 @@ def _run_session(
 
     last_hb = [0.0]
 
-    def on_tick() -> None:
+    def on_progress() -> None:
+        # Only called when frames or output moved: a stuck session goes stale
+        # for the Rust stall timeout instead of looking alive.
         if time.monotonic() - last_hb[0] >= HEARTBEAT_EVERY_S:
             _heartbeat(work_dir)
             last_hb[0] = time.monotonic()
@@ -393,14 +426,22 @@ def _run_session(
         sink,
         secret=key,
         log=_log,
-        on_tick=on_tick,
+        on_progress=on_progress,
     )
     return asyncio.run(session.run())
 
 
-def cmd_live_translate(args: argparse.Namespace) -> None:
-    os.makedirs(args.work_dir, exist_ok=True)
-    _remove_legacy_work_files(args.work_dir)
+def _remove_intermediates(*paths: str) -> None:
+    """Delete the raw + placed intermediates (~100 MB each for a 36-min talk);
+    `events.jsonl` / `session_summary.json` / `loudness.json` stay as evidence."""
+    for path in paths:
+        if os.path.exists(path):
+            os.remove(path)
+
+
+def _translate(args: argparse.Namespace, raw_path: str, wav_path: str) -> dict:
+    """Decode → the ONE continuous session → place → assemble → transcripts.
+    Returns the session summary (the stdout `session` object)."""
     voice = dls.voice_for_config(args.voice)
     _log(
         f"dub: model {args.model}, voice {voice or 'speaker (no speech_config)'}, "
@@ -414,8 +455,6 @@ def cmd_live_translate(args: argparse.Namespace) -> None:
     onset = dls.first_voiced_frame(frames)
     onset_ms = None if onset is None else int(round(onset * dls.FRAME_S * 1000))
 
-    raw_path = os.path.join(args.work_dir, RAW_OUTPUT)
-    wav_path = os.path.join(args.work_dir, PLACED_WAV)
     events = dls.EventLog(os.path.join(args.work_dir, "events.jsonl"))
     sink = dls.FileSink(raw_path)
     try:
@@ -435,6 +474,15 @@ def cmd_live_translate(args: argparse.Namespace) -> None:
     summary.update(
         latency_ms=latency_ms, measured_latency_ms=measured, input_onset_ms=onset_ms
     )
+
+    # Place the ONE continuous output stream on the video timeline and write it.
+    starts = place_output(state.chunks, state.t0_s, latency_ms)
+    summary["dropped_silence_s"] = round(
+        sum(c.n_bytes for c, s in zip(state.chunks, starts) if s is None)
+        / 2
+        / OUTPUT_SR,
+        3,
+    )
     with open(
         os.path.join(args.work_dir, "session_summary.json"), "w", encoding="utf-8"
     ) as f:
@@ -443,14 +491,11 @@ def cmd_live_translate(args: argparse.Namespace) -> None:
         f"dub session: connections {summary['connections']}, reconnects "
         f"{summary['reconnects']}, output/input {summary['output_to_input_ratio']}, "
         f"max voiced gap {summary['max_voiced_gap_s']}s, latency {latency_ms} ms "
-        f"(measured {measured} ms, input onset {onset_ms} ms), drain "
-        f"{summary['drain_end_reason']}"
+        f"(measured {measured} ms, input onset {onset_ms} ms), dropped silence "
+        f"{summary['dropped_silence_s']}s, drain {summary['drain_end_reason']}"
     )
-
-    # Place the ONE continuous output stream on the video timeline and write it.
-    starts = place_output(state.chunks, state.t0_s, latency_ms)
     input_samples = int(round(input_s * OUTPUT_SR))
-    ends = [s + c.n_bytes // 2 for s, c in zip(starts, state.chunks)]
+    ends = [s + c.n_bytes // 2 for s, c in zip(starts, state.chunks) if s is not None]
     total = max([input_samples] + ends)
     _heartbeat(args.work_dir)
     render_placed_wav(raw_path, state.chunks, starts, total, wav_path)
@@ -459,19 +504,30 @@ def cmd_live_translate(args: argparse.Namespace) -> None:
     # pomery = rovnaká hlasitosť"): normalized to the MEASURED loudness of the
     # audio it translates (clamped -24..-10 LUFS), two-pass LINEAR loudnorm.
     _assemble_dub(args.audio, wav_path, args.out, args.work_dir)
-    for path in (raw_path, wav_path):
-        os.remove(path)
 
-    # Transcripts JSON for D3: one chunk on the video timeline.
-    total_ms = int(round(input_s * 1000))
+    # Transcripts JSON for D3: one chunk on the video timeline, the overlap's
+    # two connections in connection order (never interleaved).
+    sk_parts = [(conn, text) for _, text, conn in state.output_parts]
     transcripts = build_transcripts(
-        "".join(state.input_parts),
-        "".join(t for _, t in state.output_parts),
+        joined_by_connection(state.input_parts),
+        joined_by_connection(sk_parts),
         sk_timed_from(state.output_parts, state.t0_s, latency_ms),
-        total_ms,
+        int(round(input_s * 1000)),
     )
     with open(args.transcripts, "w", encoding="utf-8") as f:
         json.dump(transcripts, f, ensure_ascii=False)
+    return summary
+
+
+def cmd_live_translate(args: argparse.Namespace) -> None:
+    os.makedirs(args.work_dir, exist_ok=True)
+    _remove_legacy_work_files(args.work_dir)
+    raw_path = os.path.join(args.work_dir, RAW_OUTPUT)
+    wav_path = os.path.join(args.work_dir, PLACED_WAV)
+    try:
+        summary = _translate(args, raw_path, wav_path)
+    finally:
+        _remove_intermediates(raw_path, wav_path)
 
     # The summary JSON is the ONLY thing on stdout (the Rust worker parses it).
     sys.stdout.write(
