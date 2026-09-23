@@ -26,7 +26,10 @@ use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
 use super::fmp4_relay::BoxSplitter;
-use super::preview_stream::{OUT_H, OUT_W, StreamShared, audio_preroll_samples, gap_fill_samples};
+use super::preview_stream::{
+    OUT_H, OUT_W, PREVIEW_AUDIO_FRAMES_PER_MS, StreamShared, align_block, align_timeout,
+    audio_preroll_samples,
+};
 
 /// Encoder preference ladder: hardware first, software last.
 pub const ENCODER_LADDER: [&str; 4] = ["h264_nvenc", "h264_qsv", "h264_amf", "libx264"];
@@ -664,12 +667,24 @@ fn spawn_video_feeder(
         })
 }
 
+/// How often the audio feeder logs its wall-clock alignment (#184 round G2).
+const AFEED_LOG_EVERY: Duration = Duration::from_secs(10);
+
 /// Feed tapped interleaved-f32 audio to the child's audio socket (little-endian
 /// f32 bytes) until shutdown or a write error. On start it DRAINS any stale
 /// queued blocks, then PREPENDS silence equal to how far the video timeline is
 /// already ahead (`audio_preroll_samples(connect_gap_ms, lead_ms)`) so the PCM
 /// sample-count timeline starts where the video wall-clock timeline started
 /// (#178 round 3 — replaces the box-unreliable `-itsoffset`).
+///
+/// From there on (#184 round G2) the written audio is kept on the WALL CLOCK in
+/// both directions: the target is `wall_frames = preroll + elapsed since the
+/// feeder started × 48 000`, and every block goes through [`align_block`] (pad
+/// silence up to the wall when late, trim the OLDEST frames of a burst that
+/// would run > 300 ms ahead), every 200 ms receive timeout through
+/// [`align_timeout`] (silence up to the wall — ffmpeg is never starved of audio,
+/// so it never stops emitting fragments while the decode seam is quiet). Logs
+/// `preview-afeed: ahead_ms padded_ms skipped_ms` at INFO every 10 s.
 #[cfg_attr(test, mutants::skip)]
 fn spawn_audio_feeder(
     shared: Arc<StreamShared>,
@@ -694,42 +709,68 @@ fn spawn_audio_feeder(
                 (clock_base.elapsed().as_micros() as u64).saturating_sub(v_us) / 1000
             };
             let preroll = audio_preroll_samples(gap_ms, shared.lead_ms());
+            // The wall target starts where the preroll ends: right after it is
+            // written, written == wall (the round-3 start alignment is kept).
+            let start = Instant::now();
+            let base_frames = (preroll / 2) as u64; // interleaved stereo
+            let wall_frames = || {
+                base_frames
+                    + start.elapsed().as_micros() as u64 * PREVIEW_AUDIO_FRAMES_PER_MS / 1000
+            };
             if preroll > 0 && !write_silence(&mut sock, preroll) {
                 return;
             }
-            // #178 item 15: the PCM audio is SAMPLE-COUNT timed but the video is
-            // WALL-CLOCK timed, so a dropped block / pause / song gap would shift
-            // preview audio earlier for the child's life. Track wall time vs the
-            // audio duration already written since the first live block and fill
-            // any gap > 150 ms with silence.
-            let mut written_frames: u64 = 0;
-            let mut first_block_at: Option<Instant> = None;
+            let mut written_frames: u64 = base_frames;
+            let mut padded_frames: u64 = 0;
+            let mut skipped_frames: u64 = 0;
+            let mut last_log = Instant::now();
             let mut bytes: Vec<u8> = Vec::new();
             while !shutdown.load(Ordering::Relaxed) {
-                match rx.recv_timeout(Duration::from_millis(200)) {
+                let (pad, block) = match rx.recv_timeout(Duration::from_millis(200)) {
                     Ok(block) => {
-                        let now = Instant::now();
-                        let base = *first_block_at.get_or_insert(now);
-                        let wall_ms = now.duration_since(base).as_millis() as u64;
-                        let fill = gap_fill_samples(wall_ms, written_frames);
-                        if fill > 0 {
-                            if !write_silence(&mut sock, fill) {
-                                break;
-                            }
-                            written_frames += (fill / 2) as u64; // interleaved stereo
-                        }
+                        let a = align_block(wall_frames(), written_frames, block.len() / 2);
+                        (a.pad_frames, Some((block, a.skip_frames)))
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                        (align_timeout(wall_frames(), written_frames), None)
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                };
+                if pad > 0 {
+                    if !write_silence(&mut sock, pad * 2) {
+                        break;
+                    }
+                    written_frames += pad as u64;
+                    padded_frames += pad as u64;
+                }
+                if let Some((block, skip)) = block {
+                    // Drop the block's OLDEST `skip` frames (a late burst is
+                    // trimmed, never appended behind silence).
+                    let tail = &block[(skip * 2).min(block.len())..];
+                    if !tail.is_empty() {
                         bytes.clear();
-                        bytes.reserve(block.len() * 4);
-                        for s in &block {
+                        bytes.reserve(tail.len() * 4);
+                        for s in tail {
                             bytes.extend_from_slice(&s.to_le_bytes());
                         }
                         if sock.write_all(&bytes).is_err() {
                             break;
                         }
-                        written_frames += (block.len() / 2) as u64;
                     }
-                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
-                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                    written_frames += (tail.len() / 2) as u64;
+                    skipped_frames += skip as u64;
+                }
+                if last_log.elapsed() >= AFEED_LOG_EVERY {
+                    let ahead = written_frames as i64 - wall_frames() as i64;
+                    let per_ms = PREVIEW_AUDIO_FRAMES_PER_MS as i64;
+                    info!(
+                        stream = %shared.label(),
+                        "preview-afeed: ahead_ms={} padded_ms={} skipped_ms={}",
+                        ahead / per_ms,
+                        padded_frames / PREVIEW_AUDIO_FRAMES_PER_MS,
+                        skipped_frames / PREVIEW_AUDIO_FRAMES_PER_MS
+                    );
+                    last_log = Instant::now();
                 }
             }
         })

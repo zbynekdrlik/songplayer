@@ -38,8 +38,15 @@ export const PING_INTERVAL_MS = 1000;
 export const RTT_RECONNECT_MS = 3000;
 // A ping unanswered for longer than this → reconnect.
 export const NO_PONG_RECONNECT_MS = 5000;
-// Never reconnect again sooner than this after the last reconnect.
-export const MIN_RECONNECT_GAP_MS = 10000;
+// #184 round G2: reconnect attempts BACK OFF. Round G retried every ~12 s
+// forever against an encoder that produced no init (the audio feeder starved
+// ffmpeg), so the preview sat in a reconnect loop. The wait after a reconnect
+// is RECONNECT_BACKOFF_BASE_MS, doubled for every further reconnect that has
+// not delivered a media fragment yet, capped at RECONNECT_BACKOFF_MAX_MS
+// (12 s → 24 s → 48 s → 60 s …). A socket that delivers its first media
+// fragment resets the count.
+export const RECONNECT_BACKOFF_BASE_MS = 12000;
+export const RECONNECT_BACKOFF_MAX_MS = 60000;
 // A socket that has not delivered its init segment this long after it was
 // opened is lost (the server itself gives up waiting for the encoder's init
 // after ~10 s and closes).
@@ -49,6 +56,28 @@ const RTT_HISTORY = 5;
 // A pong settles every pending ping sent up to this much after its own stamp
 // (the server echoes the number verbatim; this only absorbs float noise).
 const PONG_MATCH_TOLERANCE_MS = 0.5;
+
+// Pure (#184 round G2): how long after the last reconnect the next one may
+// happen, given `reconnectsWithoutMedia` — the reconnects made since a socket
+// last delivered a media fragment. 0 (just reset by a healthy socket) and 1
+// (the first retry) wait the base; each further fruitless retry doubles it, up
+// to the cap. Anything that is not a positive integer is the base step.
+export function reconnectGapMs(reconnectsWithoutMedia) {
+  const n = Number.isInteger(reconnectsWithoutMedia) ? reconnectsWithoutMedia : 0;
+  const doublings = Math.min(Math.max(n, 1) - 1, 16);
+  return Math.min(RECONNECT_BACKOFF_BASE_MS * 2 ** doublings, RECONNECT_BACKOFF_MAX_MS);
+}
+
+// Pure (#184 round G2): the current socket is gone for good — never created
+// (`hasSocket` false), closed on its own (`wsClosed`), or silent past
+// INIT_TIMEOUT_MS without an init segment. Waiting for the FIRST init inside
+// that window is never "lost" and never transport lag: the server sends the
+// init only after the encoder child produced one (a cold start / the libx264
+// fallback takes seconds).
+export function socketLost({ hasSocket, wsClosed, gotInit, msSinceConnect }) {
+  if (!hasSocket || wsClosed) return true;
+  return !gotInit && msSinceConnect > INIT_TIMEOUT_MS;
+}
 
 // Pure reconnect decision (#184 round G), exported for the node-side table test
 // in e2e/preview.spec.ts.
@@ -63,13 +92,24 @@ const PONG_MATCH_TOLERANCE_MS = 0.5;
 //   it never has.
 // - `socketLost`: the socket closed on its own (a server restart, a relay
 //   close) or never delivered its init within INIT_TIMEOUT_MS — there is
-//   nothing left to measure, it is simply replaced (still rate-limited, so a
-//   server that is down is retried every MIN_RECONNECT_GAP_MS, never hammered).
-export function shouldReconnect({ rtts, msAwaitingPong, msSinceLastReconnect, socketLost }) {
-  if (msSinceLastReconnect != null && msSinceLastReconnect < MIN_RECONNECT_GAP_MS) {
+//   nothing left to measure, it is simply replaced (still rate-limited by the
+//   backoff, so a server that is down is never hammered).
+// - `reconnectsWithoutMedia` (#184 round G2): reconnects since a socket last
+//   delivered media — picks the backoff step (`reconnectGapMs`).
+export function shouldReconnect({
+  rtts,
+  msAwaitingPong,
+  msSinceLastReconnect,
+  socketLost: lost,
+  reconnectsWithoutMedia,
+}) {
+  if (
+    msSinceLastReconnect != null &&
+    msSinceLastReconnect < reconnectGapMs(reconnectsWithoutMedia)
+  ) {
     return false;
   }
-  if (socketLost) return true;
+  if (lost) return true;
   const n = rtts ? rtts.length : 0;
   if (n >= 2 && rtts[n - 1] > RTT_RECONNECT_MS && rtts[n - 2] > RTT_RECONNECT_MS) {
     return true;
@@ -90,6 +130,32 @@ export function previewLagS({ beaconLagS, rtts, msAwaitingPong }) {
   if (rtts && rtts.length > 0) parts.push(rtts[rtts.length - 1] / 1000);
   if (msAwaitingPong > 0) parts.push(msAwaitingPong / 1000);
   return parts.length ? Math.max(...parts) : null;
+}
+
+// Close a socket we are done with WITHOUT a console message: its handlers are
+// nulled first (a late frame / close from it is ignored), and a socket that is
+// still CONNECTING is closed once it opens instead — close() on a CONNECTING
+// socket logs "WebSocket is closed before the connection is established"
+// (#184 round G2: that line repeated every reconnect in the owner's console).
+function closeQuietly(ws) {
+  try {
+    ws.onmessage = null;
+    ws.onclose = null;
+    ws.onerror = () => {};
+    if (ws.readyState === WebSocket.CONNECTING) {
+      ws.onopen = () => {
+        try {
+          ws.close();
+        } catch (e) {
+          // already closing
+        }
+      };
+    } else {
+      ws.close();
+    }
+  } catch (e) {
+    // already closing
+  }
 }
 
 export class PreviewPlayer {
@@ -128,6 +194,11 @@ export class PreviewPlayer {
     this._connectedAt = null;
     this._gotInit = false;
     this._wsClosed = false;
+    // #184 round G2: whether the current socket delivered a media fragment (a
+    // binary frame after its init), and how many reconnects were made since a
+    // socket last did — the reconnect backoff step.
+    this._gotMedia = false;
+    this._reconnectsWithoutMedia = 0;
     // Set when a resync cleared the buffered range: the next time media is
     // buffered the playhead jumps to its START — the first sample after the
     // drop (a reconnect may land on a restarted media timeline, e.g. a new
@@ -186,6 +257,7 @@ export class PreviewPlayer {
     this._producedMs = null;
     this._connectedAt = performance.now();
     this._gotInit = false;
+    this._gotMedia = false;
     this._wsClosed = false;
     this._startPinging();
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -247,6 +319,12 @@ export class PreviewPlayer {
       // at socket open — the server sends the init only after the encoder child
       // produced one (a cold start / the libx264 fallback can take seconds), and
       // that startup must never read as transport lag and trigger a reconnect.
+      if (this._gotInit && !this._gotMedia) {
+        // The first MEDIA fragment on this socket (the frame after its init):
+        // the stream is really flowing — reset the reconnect backoff.
+        this._gotMedia = true;
+        this._reconnectsWithoutMedia = 0;
+      }
       this._gotInit = true;
       this.queue.push(new Uint8Array(ev.data));
       if (this.queue.length > MAX_QUEUE) {
@@ -313,8 +391,12 @@ export class PreviewPlayer {
   // The current socket is gone for good: never created, closed on its own, or
   // silent past INIT_TIMEOUT_MS without an init segment.
   _socketLost(now) {
-    if (!this.ws || this._wsClosed) return true;
-    return !this._gotInit && now - this._connectedAt > INIT_TIMEOUT_MS;
+    return socketLost({
+      hasSocket: !!this.ws,
+      wsClosed: this._wsClosed,
+      gotInit: this._gotInit,
+      msSinceConnect: now - this._connectedAt,
+    });
   }
 
   _maybeReconnect() {
@@ -325,6 +407,7 @@ export class PreviewPlayer {
       msSinceLastReconnect:
         this._lastReconnectAt == null ? null : now - this._lastReconnectAt,
       socketLost: this._socketLost(now),
+      reconnectsWithoutMedia: this._reconnectsWithoutMedia,
     });
     if (decide) this._reconnect(now);
     return decide;
@@ -339,17 +422,11 @@ export class PreviewPlayer {
   // stale backlog it measured is gone; the new socket's pings re-measure it.
   _reconnect(now) {
     this._lastReconnectAt = now;
+    this._reconnectsWithoutMedia += 1;
     if (this.ws) {
       const old = this.ws;
       this.ws = null;
-      try {
-        old.onmessage = null;
-        old.onerror = null;
-        old.onclose = null;
-        old.close();
-      } catch (e) {
-        // already closing
-      }
+      closeQuietly(old);
     }
     this.queue = [];
     this._needResync = true;
@@ -545,14 +622,7 @@ export class PreviewPlayer {
     this._pendingPings = [];
     this._rtts = [];
     if (this.ws) {
-      try {
-        this.ws.onmessage = null;
-        this.ws.onerror = null;
-        this.ws.onclose = null;
-        this.ws.close();
-      } catch (e) {
-        // already closing
-      }
+      closeQuietly(this.ws);
       this.ws = null;
     }
     if (this.sb) {
