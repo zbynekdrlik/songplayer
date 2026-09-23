@@ -20,9 +20,13 @@
 //! stamp) and is placed by that arrival — `align_block` against
 //! `arrival + lead` — so the audio in flight is bounded to
 //! [`AUDIO_WRITE_AHEAD_MS`] plus one block whatever the socket buffers are, and
-//! a block that waited too long is trimmed, never delayed. The round-G2
-//! guarantees stay: silence up to the wall when no audio comes (the encoder is
-//! never starved), a burst trimmed to ≤ 300 ms ahead, whole frames only.
+//! a block that waited more than the round-G2 300 ms band is trimmed, never
+//! appended late. After silence (start, a seam stall) a block is snapped onto
+//! its exact target; between contiguous blocks the G2 band stays (silence up
+//! to the wall when no audio comes — the encoder is never starved — a burst
+//! trimmed to <= 300 ms past its target, whole frames only), so seam jitter
+//! never opens a gap. A burst can therefore leave the audio up to ~300 ms late
+//! until the next silence.
 //!
 //! Units: times are µs since the feeder started; positions are stereo frames on
 //! the encoder's sample-count audio timeline ([`PREVIEW_AUDIO_FRAMES_PER_MS`]).
@@ -42,9 +46,17 @@ use super::preview_stream::{
 /// loopback socket buffer — the whole point of round G3.
 pub const AUDIO_WRITE_AHEAD_MS: u64 = 200;
 
+/// A block that follows SILENCE (the stream start, a seam stall) is snapped
+/// onto its exact target when it would otherwise start more than this early
+/// (ms). The round-G2 150 ms pad threshold exists so jitter between CONTIGUOUS
+/// content blocks never opens a gap; after silence there is nothing to stay
+/// contiguous with, and without the snap the whole stream would start up to
+/// 150 ms early and stay there (#184 round-G3 review: −133 ms at 30 fps).
+pub const SNAP_TOLERANCE_MS: u64 = 150;
+
 /// Most blocks held at once — a safety bound only: the normal hold is one lead
-/// (~1.3 s ≈ 40-80 seam blocks). Past it the OLDEST held block is dropped (a
-/// flood that large is a catch-up burst whose head would be trimmed anyway).
+/// (~1.3 s ≈ 15-80 seam blocks, by packet size). Past it the OLDEST held block
+/// is dropped (a flood that large is a runaway catch-up burst).
 pub const MAX_HELD_BLOCKS: usize = 512;
 
 /// One write the feeder performs on the encoder's audio socket.
@@ -71,6 +83,9 @@ pub struct AudioHold {
     padded_frames: u64,
     skipped_frames: u64,
     dropped_blocks: u64,
+    /// Whether the last thing written was tapped audio (false after silence —
+    /// the preroll or a pad): only then is a block kept contiguous with it.
+    contiguous: bool,
 }
 
 /// Stereo frames in `us` microseconds of 48 kHz audio.
@@ -92,6 +107,7 @@ impl AudioHold {
             padded_frames: 0,
             skipped_frames: 0,
             dropped_blocks: 0,
+            contiguous: false,
         }
     }
 
@@ -142,9 +158,10 @@ impl AudioHold {
     }
 
     /// Everything the feeder must write at `now_us`, in order: every DUE held
-    /// block, each aligned by its ARRIVAL (`align_block` against
-    /// [`Self::block_target`] — silence first if the audio is behind it, the
-    /// block's oldest frames dropped if it would end > 300 ms past it), then
+    /// block, each aligned by its ARRIVAL against [`Self::block_target`] — after
+    /// silence it is first snapped onto that target (> [`SNAP_TOLERANCE_MS`]
+    /// early → silence up to it); then `align_block` (silence if > 150 ms
+    /// behind, its oldest frames dropped if it would end > 300 ms past), then
     /// silence up to [`Self::position_at`] once the audio is > 150 ms behind it
     /// (`align_timeout` — the encoder is never starved of audio).
     pub fn take_writes(&mut self, now_us: u64) -> Vec<AudioWrite> {
@@ -156,16 +173,20 @@ impl AudioHold {
             let Some((_, mut samples)) = self.held.pop_front() else {
                 break;
             };
-            let a = align_block(
-                self.block_target(arrival_us),
-                self.written_frames,
-                samples.len() / 2,
-            );
+            let target = self.block_target(arrival_us);
+            if !self.contiguous {
+                let short = target.saturating_sub(self.written_frames);
+                if short > SNAP_TOLERANCE_MS * PREVIEW_AUDIO_FRAMES_PER_MS {
+                    self.pad(short as usize, &mut out);
+                }
+            }
+            let a = align_block(target, self.written_frames, samples.len() / 2);
             self.pad(a.pad_frames, &mut out);
             self.skipped_frames += a.skip_frames as u64;
             let range = block_tail_range(a.skip_frames, samples.len());
             if !range.is_empty() {
                 self.written_frames += (range.len() / 2) as u64;
+                self.contiguous = true;
                 samples.truncate(range.end);
                 samples.drain(..range.start);
                 out.push(AudioWrite::Samples(samples));
@@ -180,6 +201,7 @@ impl AudioHold {
         if frames > 0 {
             self.written_frames += frames as u64;
             self.padded_frames += frames as u64;
+            self.contiguous = false;
             out.push(AudioWrite::Silence(frames));
         }
     }

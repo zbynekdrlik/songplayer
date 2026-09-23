@@ -233,3 +233,89 @@ fn in_flight_audio_stays_within_the_write_ahead_for_a_minute() {
         "only the lead was padded"
     );
 }
+
+// --- #184 round-G3 review: a block after SILENCE snaps onto its exact target ---
+
+#[test]
+fn snap_tolerance_is_10ms() {
+    assert_eq!(SNAP_TOLERANCE_MS, 10);
+}
+
+#[test]
+fn the_first_block_after_silence_lands_exactly_on_its_target() {
+    // The stream start: silence was padded only to within 150 ms of the first
+    // block's target (the G2 pad threshold). Without a snap the whole stream
+    // would start — and stay — up to 150 ms early against its video.
+    let mut h = AudioHold::new(0, LEAD);
+    h.push(0, block(1_600, 0.5));
+    let _ = h.take_writes(1_200_000); // silence up to 1.4 s = 67 200
+    let w = h.take_writes(1_300_000); // target 1.5 s = 72 000
+    assert_eq!(
+        w,
+        vec![
+            AudioWrite::Silence((100 * F) as usize),
+            AudioWrite::Samples(block(1_600, 0.5)),
+        ]
+    );
+    assert_eq!(h.written_frames(), 1_500 * F + 1_600);
+}
+
+#[test]
+fn the_snap_tolerance_is_exclusive_at_10ms() {
+    // Exactly 10 ms (480 frames) short → not worth a pad.
+    let mut h = AudioHold::new(0, LEAD);
+    h.push(0, block(1_600, 0.5));
+    let _ = h.take_writes(1_290_000); // silence up to 71 520 = target − 480
+    let w = h.take_writes(1_300_000);
+    assert_eq!(w, vec![AudioWrite::Samples(block(1_600, 0.5))]);
+    // 481 frames short → snapped.
+    let mut h = AudioHold::new(0, LEAD);
+    h.push(0, block(1_600, 0.5));
+    let _ = h.take_writes(1_289_980); // silence up to 71 519
+    let w = h.take_writes(1_300_000);
+    assert_eq!(
+        w,
+        vec![
+            AudioWrite::Silence(481),
+            AudioWrite::Samples(block(1_600, 0.5)),
+        ]
+    );
+}
+
+#[test]
+fn a_block_after_content_stays_contiguous_within_the_g2_band() {
+    // Between CONTIGUOUS blocks seam jitter must never open a gap: a block
+    // 100 ms "early" against its arrival target follows the previous one
+    // directly (only > 150 ms behind would pad, the G2 band).
+    let mut h = AudioHold::new(0, LEAD);
+    h.push(0, block(1_600, 0.5));
+    let w = h.take_writes(1_300_000);
+    assert_eq!(
+        w,
+        vec![
+            AudioWrite::Silence((1_500 * F) as usize),
+            AudioWrite::Samples(block(1_600, 0.5)),
+        ]
+    );
+    h.push(133_333, block(1_600, 0.25)); // target 78 399, written 73 600
+    let w = h.take_writes(1_433_333);
+    assert_eq!(w, vec![AudioWrite::Samples(block(1_600, 0.25))]);
+}
+
+#[test]
+fn in_flight_never_exceeds_the_write_ahead_plus_one_block() {
+    // The tight form of the in-flight bound (steady 30 fps seam, encoder
+    // consuming in step with the wall-clock video): write-ahead + one block.
+    let mut h = AudioHold::new(0, LEAD);
+    let bound = AUDIO_WRITE_AHEAD_MS * F + 1_600;
+    for k in 0..1_800u64 {
+        let now = k * 33_333;
+        h.push(now, block(1_600, 0.5));
+        let _ = h.take_writes(now);
+        let in_flight = h.written_frames().saturating_sub(now * F / 1_000);
+        assert!(
+            in_flight <= bound,
+            "at {now} µs {in_flight} frames in flight > {bound}"
+        );
+    }
+}
