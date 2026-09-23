@@ -10,6 +10,7 @@ pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;
 mod engine_play;
+pub(crate) mod frame_alloc; // #207: map a decoder FrameAlloc error to a dropped frame (pure classify + rate-limit)
 pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
 mod handle_pipeline_event;
 pub mod lock_state;

@@ -347,7 +347,7 @@ fn read_headroom() -> Option<Headroom> {
 /// to the box's defaults (no override) so a spawn before the first refresh is
 /// still contained.
 static CONTAINMENT: LazyLock<Mutex<Containment>> =
-    LazyLock::new(|| Mutex::new(containment_from_settings(None, None, logical_cores())));
+    LazyLock::new(|| Mutex::new(containment_from_settings(None, None, None, logical_cores())));
 
 /// The box's logical-processor count (`available_parallelism`, min 1). Reads the
 /// environment, so integration-only; the pure mask/cap rules it feeds are tested.
@@ -375,23 +375,40 @@ pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment 
         .await
         .ok()
         .flatten();
-    let c = containment_from_settings(cap.as_deref(), mask.as_deref(), logical_cores());
+    // #207: the operator purge-delay knob, read the same way. A present but
+    // out-of-range value collapses to -1 (never decommit); WARN once so the
+    // operator sees the setting was ignored (the pure parse fn stays silent).
+    let purge = crate::db::models::get_setting(pool, "heavy_purge_delay_ms")
+        .await
+        .ok()
+        .flatten();
+    let c = containment_from_settings(
+        cap.as_deref(),
+        mask.as_deref(),
+        purge.as_deref(),
+        logical_cores(),
+    );
+    if c.purge_delay_ms == -1 && purge.as_deref().is_some_and(|r| r.trim() != "-1") {
+        warn!(
+            "heavy_purge_delay_ms={purge:?} is invalid or out of range (-1 or 0..=600000 ms) — using -1 (never decommit)"
+        );
+    }
     if let Ok(mut g) = CONTAINMENT.lock() {
         *g = c;
     }
     c
 }
 
-/// The currently published containment (applied by the Job Object seam). Read
-/// only inside the `#[cfg(windows)]` spawn path; falls back to the box default if
-/// the lock is poisoned.
-#[cfg_attr(not(windows), allow(dead_code))]
+/// The currently published containment. Read by the `#[cfg(windows)]` Job
+/// Object seam AND (cross-platform, #207) by `stems/separator.rs` to carry the
+/// live `purge_delay_ms` into the separation child's mimalloc env. Falls back to
+/// the box default if the lock is poisoned.
 #[cfg_attr(test, mutants::skip)]
-fn current_containment() -> Containment {
+pub(crate) fn current_containment() -> Containment {
     CONTAINMENT
         .lock()
         .map(|g| *g)
-        .unwrap_or_else(|_| containment_from_settings(None, None, logical_cores()))
+        .unwrap_or_else(|_| containment_from_settings(None, None, None, logical_cores()))
 }
 
 /// The logical-core count of the currently published affinity block — the
@@ -577,10 +594,11 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
         }
         // #203: log the applied containment once per child.
         tracing::info!(
-            "heavy child contained (pid {pid}): mem_limit={limit_bytes}B cpu_cap={}% affinity=0x{:x} mem_priority_low={}",
+            "heavy child contained (pid {pid}): mem_limit={limit_bytes}B cpu_cap={}% affinity=0x{:x} mem_priority_low={} purge_delay_ms={}",
             containment.cpu_cap_pct,
             containment.affinity_mask,
-            containment.memory_priority_low
+            containment.memory_priority_low,
+            containment.purge_delay_ms
         );
         Some(job as isize)
     }

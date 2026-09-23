@@ -18,6 +18,7 @@ pub mod heavy_containment;
 pub mod heavy_faults;
 pub mod heavy_plan;
 pub mod heavy_slot;
+pub mod host_commit;
 pub mod idle_gate;
 pub mod idle_gate_abort;
 pub mod line_splitter;

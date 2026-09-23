@@ -36,6 +36,7 @@ with a stems child resident (grid slot 33 ms) → genlock pacing collapse + the
 |---|---|---|
 | `heavy_cpu_cap_pct` | **25** | integer, clamped `5..=100` (absent/invalid → 25) |
 | `heavy_cpu_affinity_mask` | **top 3 logical cores** (24-core box → `e00000`; #168 round 8) | hex string, optional `0x`; zero/invalid → default |
+| `heavy_purge_delay_ms` (#207) | **-1** (never decommit — the #168 retained-heap default) | integer ms; `-1` or `0..=600000` (absent / unparseable / out-of-range → -1). Applied to the SEPARATION child's `MIMALLOC_PURGE_DELAY` at spawn via `heavy_alloc_env(current_containment().purge_delay_ms)`. A finite delay lets the box measure returning the child's ~9 GB commit without the #168 r3 fault storm; visible in the `heavy child contained (pid …): … purge_delay_ms=<v>` line at the next spawn. |
 
 The default affinity mask is DERIVED from the live core count
 (`default_affinity_mask`), never a literal: the child gets the **TOP 3 logical

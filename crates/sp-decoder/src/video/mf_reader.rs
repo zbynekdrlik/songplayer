@@ -166,13 +166,28 @@ impl MediaFoundationVideoReader {
             // SDK-clocked path wraps this Vec in `SharedFrame::new` at
             // `submit_nv12` and the paced path in `to_paced_frame`, so its
             // last-owner drop returns the allocation to `frame_pool` for reuse.
-            let mut buf = crate::frame_pool::take(len);
-            // SAFETY: `data_ptr .. data_ptr + len` is the MF-locked buffer,
-            // valid until `Unlock` below; `extend_from_slice` copies out of it.
-            unsafe {
-                buf.extend_from_slice(std::slice::from_raw_parts(data_ptr, len));
+            // #207: FALLIBLE — a host OOM (out of commit) returns a typed
+            // `FrameAlloc` error the pipeline maps to a dropped frame instead of
+            // aborting the whole process (`handle_alloc_error`, the #156 class).
+            match crate::frame_pool::try_take(len) {
+                Ok(mut buf) => {
+                    // SAFETY: `data_ptr .. data_ptr + len` is the MF-locked
+                    // buffer, valid until `Unlock` below; `extend_from_slice`
+                    // copies out of it.
+                    unsafe {
+                        buf.extend_from_slice(std::slice::from_raw_parts(data_ptr, len));
+                    }
+                    buf
+                }
+                Err(e) => {
+                    // Unlock before propagating so the MF buffer is never left
+                    // locked on the drop path.
+                    unsafe {
+                        let _ = buffer.Unlock();
+                    }
+                    return Err(DecoderError::FrameAlloc(e.bytes));
+                }
             }
-            buf
         };
 
         unsafe {
