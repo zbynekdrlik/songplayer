@@ -108,6 +108,11 @@ struct OutFile {
 
 /// Build the `run.py` argv, in order. `no_cuda` appends `--no-cuda` — used
 /// only on the CUDA-OOM retry.
+///
+/// #144 r3: `-X faulthandler` leads the argv, before the script path, for
+/// BOTH plans, so a future access violation in the child (e.g. the torch CPU
+/// conv2d fault that killed long songs before inference-mode) prints the
+/// Python stack to the stderr tail `run_once` already captures.
 fn build_args(
     cfg: &MtlConfig,
     wav: &Path,
@@ -116,6 +121,8 @@ fn build_args(
     no_cuda: bool,
 ) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec![
+        "-X".into(),
+        "faulthandler".into(),
         cfg.run_py.clone().into_os_string(),
         "--wav".into(),
         wav.as_os_str().to_owned(),
@@ -386,7 +393,9 @@ mod tests {
             .collect();
         // Compare as paths, not strings: `Path::join` yields backslashes on
         // the Windows runner (CI run 34695364979).
-        assert_eq!(Path::new(&joined[0]), c.run_py.as_path());
+        // #144 r3: `-X faulthandler` now leads the argv, so the script path is
+        // at index 2 (see build_args_prepends_faulthandler_before_script...).
+        assert_eq!(Path::new(&joined[2]), c.run_py.as_path());
         assert!(joined.contains(&"--wav".to_string()));
         assert!(joined.contains(&"/x/v.wav".to_string()));
         assert!(joined.contains(&"--text-json".to_string()));
@@ -416,6 +425,44 @@ mod tests {
             .map(|s| s.to_string_lossy().into_owned())
             .collect();
         assert_eq!(joined.last().unwrap(), "--no-cuda");
+    }
+
+    #[test]
+    fn build_args_prepends_faulthandler_before_script_for_both_plans() {
+        // #144 r3: the mtl child must be launched as `python -X faulthandler
+        // run.py ...` for BOTH the CUDA plan and the `--no-cuda` plan, so a
+        // future access violation prints the Python stack to the stderr tail
+        // `run_once` already logs. The `-X faulthandler` pair must lead the
+        // argv, immediately before the script path.
+        let c = cfg();
+        for no_cuda in [false, true] {
+            let args = build_args(
+                &c,
+                Path::new("/x/v.wav"),
+                Path::new("/x/t.json"),
+                Path::new("/x/o.json"),
+                no_cuda,
+            );
+            let joined: Vec<String> = args
+                .iter()
+                .map(|s| s.to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(
+                joined[0].as_str(),
+                "-X",
+                "argv[0] must be -X (no_cuda={no_cuda})"
+            );
+            assert_eq!(
+                joined[1].as_str(),
+                "faulthandler",
+                "argv[1] must be faulthandler (no_cuda={no_cuda})"
+            );
+            assert_eq!(
+                Path::new(&joined[2]),
+                c.run_py.as_path(),
+                "the run.py script path must immediately follow -X faulthandler (no_cuda={no_cuda})"
+            );
+        }
     }
 
     #[test]

@@ -301,6 +301,26 @@ def install_compat_shims(repo_dir: str):
     return wrapper
 
 
+def _inference_ctx(torch_mod):
+    """torch's no-autograd inference context, shared by every wrapper.align()
+    call site below (#144 r3).
+
+    The upstream wrapper.align() runs the acoustic model's whole-song forward
+    (`all_outputs = ac_model(x)`) and then the BoundaryDetection model's
+    forward with autograd ENABLED, so the acoustic graph + activations are
+    retained across the BDR pass. Past ~4:15 (≈22k frames) an allocation
+    inside torch's CPU conv2d fails unchecked and the interpreter dies with
+    `c10.dll 0xc0000005`. Wrapping each align() in torch.inference_mode() drops
+    that graph (probe B: 170 s, peak WS 2.9 GB, 77/77 lines timed) — the
+    alignment output is UNCHANGED (inference_mode only omits autograd
+    bookkeeping), so LYRICS_PIPELINE_VERSION is NOT bumped. inference_mode is
+    torch's sanctioned pure-inference context (no_grad plus skipped tensor
+    version counters). Never call wrapper.align() outside this — see
+    .claude/rules/lyrics-eval-backends.md 'mtl aligner memory + on-box probe'.
+    """
+    return torch_mod.inference_mode()
+
+
 def align_fixture(
     *,
     wav_path: Path,
@@ -349,26 +369,28 @@ def align_fixture(
         cuda_oom_retried = False
         try:
             if cuda:
-                word_align, words_out = wrapper.align(
-                    audio,
-                    words,
-                    lyrics_p,
-                    idx_word_p,
-                    idx_line_p,
-                    method=METHOD,
-                    cuda=True,
-                )
+                with _inference_ctx(torch):
+                    word_align, words_out = wrapper.align(
+                        audio,
+                        words,
+                        lyrics_p,
+                        idx_word_p,
+                        idx_line_p,
+                        method=METHOD,
+                        cuda=True,
+                    )
                 device_used = "cuda"
             else:
-                word_align, words_out = wrapper.align(
-                    audio,
-                    words,
-                    lyrics_p,
-                    idx_word_p,
-                    idx_line_p,
-                    method=METHOD,
-                    cuda=False,
-                )
+                with _inference_ctx(torch):
+                    word_align, words_out = wrapper.align(
+                        audio,
+                        words,
+                        lyrics_p,
+                        idx_word_p,
+                        idx_line_p,
+                        method=METHOD,
+                        cuda=False,
+                    )
         except torch.cuda.OutOfMemoryError:
             # This box's GPU is SHARED with a sibling agent's concurrent
             # inference workload (task brief: "a sibling agent is ALSO
@@ -388,15 +410,16 @@ def align_fixture(
                 exc_info=True,
             )
             torch.cuda.empty_cache()
-            word_align, words_out = wrapper.align(
-                audio,
-                words,
-                lyrics_p,
-                idx_word_p,
-                idx_line_p,
-                method=METHOD,
-                cuda=False,
-            )
+            with _inference_ctx(torch):
+                word_align, words_out = wrapper.align(
+                    audio,
+                    words,
+                    lyrics_p,
+                    idx_word_p,
+                    idx_line_p,
+                    method=METHOD,
+                    cuda=False,
+                )
             device_used = "cpu"
             cuda_oom_retried = True
         align_sec = time.time() - t1

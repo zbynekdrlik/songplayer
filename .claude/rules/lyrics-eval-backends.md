@@ -185,3 +185,29 @@ Deleting a backend means deleting its `tests/test_<backend>.py` too (pytest
 imports it), but the run-script name-string registries (`BASELINE_BACKENDS` /
 `COMBOS` / `DEFAULT_BACKENDS`) are dynamic — a stale name there is a `ruff`/
 `pytest` no-op, not a failure, so prune them for cleanliness, not correctness.
+
+## mtl aligner memory + on-box probe (#144 r3)
+
+- **The upstream `wrapper.align` runs whole-song forwards with autograd ON.**
+  It keeps the acoustic model's whole-song graph alive while the boundary model
+  runs; past ~4:15 an unchecked allocation in torch's CPU conv2d faults the
+  interpreter (`c10.dll 0xc0000005`, ~8 s after `preprocess done`). Our
+  `run.py::align_fixture` wraps EACH of the three `wrapper.align()` calls (cuda,
+  cpu, cuda-OOM→cpu retry) in `torch.inference_mode()` via `_inference_ctx()` —
+  drops the graph (probe B: 170 s, peak WS 2.9 GB, identical output, so NO
+  `LYRICS_PIPELINE_VERSION` bump). Never remove it; never call the wrapper
+  outside it. The mtl child also carries `-X faulthandler` (`mtl_aligner.rs::
+  build_args`, before the script path) so any future AV prints the Python stack
+  to the stderr tail `run_once` already logs.
+- **On-box probe recipe that found it:** pause the workers via
+  `PATCH /api/v1/settings {"lyrics_worker_enabled":"false","stem_worker_enabled":"false"}`,
+  then run `verify\mtl_probe.py` DETACHED with `Start-Process
+  -RedirectStandardOutput/-RedirectStandardError` (Windows PowerShell 5.1 has NO
+  `-PriorityClass` — set `$p.PriorityClass='Idle'` and
+  `$p.ProcessorAffinity=[IntPtr]0xE00000` on the launcher AND on its `python.exe`
+  child after start), `-X faulthandler` so an AV prints the stack; re-enable the
+  workers afterwards.
+- **`mtl_aligner_venv\Scripts\python.exe` is the venv LAUNCHER (268 KB), not the
+  interpreter** — the real CPython is a child `C:\Program Files\Python312\
+  python.exe`. So a containment fault sampler on the launcher pid sees 0 faults/s
+  and Application-log crash events name the SYSTEM python path, not the venv one.
