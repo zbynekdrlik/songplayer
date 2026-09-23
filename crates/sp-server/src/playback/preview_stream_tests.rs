@@ -412,21 +412,45 @@ fn align_constants_are_the_design_values() {
 fn align_block_on_time_block_is_written_verbatim() {
     // 20 ms behind the wall, a 20 ms block arrives → nothing padded, nothing cut.
     let a = align_block(1_000 * F, 980 * F, (20 * F) as usize);
-    assert_eq!(a, AlignAction { pad_frames: 0, skip_frames: 0 });
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: 0
+        }
+    );
     // The very first block of a fresh feeder (wall 0, written 0).
     let a = align_block(0, 0, 960);
-    assert_eq!(a, AlignAction { pad_frames: 0, skip_frames: 0 });
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: 0
+        }
+    );
     // Slightly AHEAD of the wall (the previous block overshot): no pad, and the
     // result stays under the 300 ms bound → verbatim.
     let a = align_block(1_000 * F, 1_000 * F + 1, 960);
-    assert_eq!(a, AlignAction { pad_frames: 0, skip_frames: 0 });
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: 0
+        }
+    );
 }
 
 #[test]
 fn align_block_late_block_is_padded_up_to_the_wall_first() {
     // 1 s behind → 1 s of silence, then the block (a gap in the source).
     let a = align_block(2_000 * F, 1_000 * F, 960);
-    assert_eq!(a, AlignAction { pad_frames: (1_000 * F) as usize, skip_frames: 0 });
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: (1_000 * F) as usize,
+            skip_frames: 0
+        }
+    );
 }
 
 #[test]
@@ -447,7 +471,13 @@ fn align_block_burst_is_trimmed_so_it_lands_100ms_ahead() {
     // OLDEST 900 ms are dropped so written ends at wall + 100 ms.
     let wall = 5_000 * F;
     let a = align_block(wall, wall, (1_000 * F) as usize);
-    assert_eq!(a, AlignAction { pad_frames: 0, skip_frames: (900 * F) as usize });
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: (900 * F) as usize
+        }
+    );
     let written = wall + a.pad_frames as u64 + (1_000 * F) - a.skip_frames as u64;
     assert_eq!(written, wall + 100 * F);
 }
@@ -457,10 +487,22 @@ fn align_block_skip_threshold_is_exclusive_at_300ms_ahead() {
     let wall = 5_000 * F;
     // A block that ends exactly 300 ms ahead is written verbatim.
     let a = align_block(wall, wall, (300 * F) as usize);
-    assert_eq!(a, AlignAction { pad_frames: 0, skip_frames: 0 });
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: 0
+        }
+    );
     // One frame more → trimmed back to 100 ms ahead: skip = 200 ms + 1 frame.
     let a = align_block(wall, wall, (300 * F + 1) as usize);
-    assert_eq!(a, AlignAction { pad_frames: 0, skip_frames: (200 * F + 1) as usize });
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: (200 * F + 1) as usize
+        }
+    );
 }
 
 #[test]
@@ -470,10 +512,22 @@ fn align_block_skip_never_exceeds_the_block() {
     // (100 ms ahead) is BEHIND where we already are, so the whole block is
     // dropped — never more than the block, never a negative write.
     let a = align_block(wall, wall + 290 * F, (20 * F) as usize);
-    assert_eq!(a, AlignAction { pad_frames: 0, skip_frames: (20 * F) as usize });
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: (20 * F) as usize
+        }
+    );
     // An empty block never skips anything.
     let a = align_block(wall, wall + 400 * F, 0);
-    assert_eq!(a, AlignAction { pad_frames: 0, skip_frames: 0 });
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: 0
+        }
+    );
 }
 
 #[test]
@@ -484,7 +538,10 @@ fn align_block_pads_then_trims_a_late_burst() {
     let a = align_block(wall, wall - 1_000 * F, (500 * F) as usize);
     assert_eq!(
         a,
-        AlignAction { pad_frames: (1_000 * F) as usize, skip_frames: (400 * F) as usize }
+        AlignAction {
+            pad_frames: (1_000 * F) as usize,
+            skip_frames: (400 * F) as usize
+        }
     );
 }
 
@@ -500,14 +557,20 @@ fn align_timeout_pads_up_to_the_wall_when_no_block_arrived() {
     assert_eq!(align_timeout(0, 0), 0);
     // Exclusive 150 ms threshold, same as a block.
     assert_eq!(align_timeout(1_000 * F, 850 * F), 0);
-    assert_eq!(align_timeout(1_000 * F, 850 * F - 1), (150 * F + 1) as usize);
+    assert_eq!(
+        align_timeout(1_000 * F, 850 * F - 1),
+        (150 * F + 1) as usize
+    );
 }
 
 /// Tiny deterministic LCG (no rand dependency) for the property-style loop.
 struct Lcg(u64);
 impl Lcg {
     fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         self.0 >> 33
     }
     fn range(&mut self, lo: u64, hi: u64) -> u64 {
