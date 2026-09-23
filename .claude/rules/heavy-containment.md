@@ -35,30 +35,48 @@ with a stems child resident (grid slot 33 ms) → genlock pacing collapse + the
 | key | default | format |
 |---|---|---|
 | `heavy_cpu_cap_pct` | **25** | integer, clamped `5..=100` (absent/invalid → 25) |
-| `heavy_cpu_affinity_mask` | **top 4 logical cores** (24-core box → `f00000`; #168 round 5) | hex string, optional `0x`; zero/invalid → default |
+| `heavy_cpu_affinity_mask` | **top 3 logical cores** (24-core box → `e00000`; #168 round 8) | hex string, optional `0x`; zero/invalid → default |
 
 The default affinity mask is DERIVED from the live core count
-(`default_affinity_mask`), never a literal: the child gets the **TOP 4 logical
-cores** (24 cores → `f00000` = cores 20–23), the wall processes (SongPlayer /
-OBS / Resolume) keep the rest; a box with < 4 cores gets all of them.
+(`default_affinity_mask`), never a literal: the child gets the **TOP 3 logical
+cores** (24 cores → `e00000` = cores 21–23), the wall processes (SongPlayer /
+OBS / Resolume) keep the rest; a box with < 3 cores gets all of them.
 `heavy_cpu_cap_pct = 100` + all-cores mask = today's behaviour (no containment).
 
-**Why 4 logical cores, not the upper half (#168 round 5 — the measured fix).**
-Round 4's paced measurement (issue #168 comment 5779505749, 22.9.2026) isolated
-the channel that stalls the NDI `send_video_async` call while a separation child
-is resident: core PLACEMENT, not CPU share or page-fault churn. Same child, same
-work, different mask:
+**Why 3 logical cores, not 4 (#168 round 8 — the measured best resident-child
+block).** Round 5 (`f00000`, top 4) already held the grid vs the old upper-12
+`fff000`, but the receiver still dropped ≈ 1 frame/min. Round 7's paced
+measurement (issue #147 comment 5786765465, 22./23.9.2026) held one variable per
+15-minute window with the live wall on program (SP-slow, receiver = cg OBS
+`genlock-fifo audit 'sp-slow_video'`) and found the receiver's residual
+`dropped_due` scales with the resident child's CPU intensity — not its phase, not
+memory pressure:
 
-- **`fff000` (upper 12 logical cores)** — grid stall 30–105 ms/min, **0/12
-  minutes ≤ 20 ms** (W1).
-- **`f00000` (top 4 logical cores = 2 physical)** — grid held **3.8–19.3 ms,
-  10/10 minutes** (W3b), child at ~1.0 core (no throughput loss vs ~0.6 on 12).
-- **`c00000` (2 logical = 1 physical)** — STARVES the child (80 CPU-s in 12 min),
-  so 4 logical cores is the floor.
+| window | child block / threads | child CPU | sender min ≤ 20 ms | recv underruns/min | recv `dropped_due` |
+|---|---|---|---|---|---|
+| W1 baseline | `f00000` / 4 | 1.5–2.0 cores | 15/16 | 5 | 0.9/min |
+| **W2 control** | **none** | — | 16/16 | 1 | **0/min** |
+| W3 | `e00000` / 3 | ≈ 1.0 core | 14/16 | 1 | 0.5/min |
+| W4 | `f00000` / 4, cap 15 | ≈ 1.8 cores | 10/16 | 5 | 1.35/min |
+| **W5 confirm** | `e00000` / 3 | ≈ 1.1 core | **16/16 (3.2–13.2 ms)** | 1 | **0.27/min** |
 
-Mechanism: the NDI SDK's unpinned compress/send threads (HIGH class) otherwise
-land on a physical core whose SMT sibling runs an AVX-saturating RoFormer thread;
-a 2-physical-core block leaves 10 of 12 physical cores free of the child.
+The receiver reaches contract-§8 zero **only with no child resident** (W2); the
+3-core / 3-thread block (measured twice, W3 + W5) is the best a resident child
+can have — sender clean every minute, receiver ≈ 1 underrun + ≈ 0.3 drops/min —
+and roughly halves-to-quarters the 4-thread residual with no observed wall-time
+slowdown on the separations. The Job CPU cap at 15 % (W4) does not bind (3.6 of
+24 cores), so it is not a lever there. A 2-logical-core block (`c00000`) STARVES
+the child under `BELOW_NORMAL` (round 4 W3: 80 CPU-s in 12 min), so 3 is the
+floor.
+
+Mechanism: four AVX RoFormer threads over 2 full physical cores (both SMT
+siblings busy on one) run ≈ 1.5–2.0 cores and press the shared L3/DRAM the NDI
+SDK's unpinned compress/send threads (HIGH class) need; three threads on one SMT
+pair + one half pair run ≈ 1.0–1.1 core. **Operator override:** set
+`heavy_cpu_affinity_mask=f00000` (the round-5 4-core block) if a full-video
+separation ever slows > 1.5× — the escape hatch stays documented; the residual
+0.27–0.5 drops/min with a child resident + the production pacing flip remain the
+owner's parked decision on #147.
 
 ## Architecture — where each piece lives
 
@@ -80,8 +98,8 @@ a 2-physical-core block leaves 10 of 12 physical cores free of the child.
   the popcount of the published mask so the cpu-idle thread cap
   (`heavy_plan::cpu_idle_threads_for(cores, block)` = `min(cores/4, block)`,
   never 0) never gives a child more torch threads than its core block — #168
-  round 5: the 4-logical-core default block caps the 24-core box's quarter rule
-  (6) to 4.
+  round 8: the 3-logical-core default block caps the 24-core box's quarter rule
+  (6) to 3 (round 5 was a 4-core block → 4).
 - **`GET /api/v1/status`** gains `heavy_containment { cap_pct, affinity_mask
   (hex), priority_class }`, resolved live from the same pure fn.
 
@@ -104,22 +122,25 @@ a 2-physical-core block leaves 10 of 12 physical cores free of the child.
   inlined as `<< (cores - top)` precisely to avoid a redundant-paren warning
   (#168 round 5).
 
-## Acceptance — round 5 (supervisor, after integration; #168 protocol)
+## Acceptance — round 8 (supervisor, after integration; #168 protocol)
 
 With `heavy_cpu_affinity_mask` DELETED/cleared so the new default applies:
-boot/status `heavy_containment.affinity_mask == "f00000"` (no setting), the next
-`heavy child contained (pid …): cpu_cap=25% affinity=0xf00000` log line, and a
+boot/status `heavy_containment.affinity_mask == "e00000"` (no setting), the next
+`heavy child contained (pid …): cpu_cap=25% affinity=0xe00000` log line, one full
+separation timed against the same video's earlier 4-thread time (≤ 1.5×), and a
 paced re-check window (pacing ON via the `genlock.md` recipe, child resident and
-PRODUCTIVE ≥ 0.5 core): `submit_call_us_max ≤ 20 ms` in ≥ 8/10 minutes and `late`
-≤ 100/min; then pacing OFF again (the production flip is #147's decision with a
-wall soak). Verify the child is productive (`TotalProcessorTime` delta over 6 s >
-0) before trusting a window — a starved child gives a false-clean grid.
+PRODUCTIVE ≥ 0.5 core): `submit_call_us_max ≤ 20 ms` in ≥ 14/15 minutes and
+receiver `dropped_due` ≤ 0.5/min (the W3/W5 band); then pacing OFF again (the
+production flip is #147's decision with a wall soak). Verify the child is
+productive (`TotalProcessorTime` delta over 6 s > 0) before trusting a window — a
+starved child gives a false-clean grid. (Round 5 expected `f00000`; round 8
+lowers the default block to the top 3 cores.)
 
 ## Box test 8 verdict (21.9.2026) — the containment is live [SUPERSEDED by round 4]
 
 > **Superseded by round 4 (22.9.2026).** This section was round 3's page-fault
 > theory, measured on the old `fff000` (upper-12) default. Round 4's paced
-> session (see "Why 4 logical cores" above + issue #168 comment 5779505749)
+> session (see "Why 3 logical cores" above + issue #168 comment 5779505749)
 > re-tested placement directly and found the stall channel is core PLACEMENT:
 > confining the child to 4 logical cores (`f00000`) holds the grid (3.8–19.3 ms,
 > 10/10 min) with SongPlayer's OWN page faults still at 118–160k/s in every
@@ -156,7 +177,7 @@ path; the target is a flat, near-zero steady state while playing.
   (once per child spawn).
 - Live OS truth while a child runs (`mcp__win-resolume__Shell`, ≤ 30 s):
   `Get-Process python | Select ProcessorAffinity, PriorityClass` — affinity
-  should be the 4-core block (24-core box → `15728640` = `0xF00000`; #168 round
-  5, was `16773120` = `0xFFF000`), class `BelowNormal`; `Get-Process SongPlayer |
+  should be the 3-core block (24-core box → `14680064` = `0xE00000`; #168 round
+  8, was `15728640` = `0xF00000` round 5), class `BelowNormal`; `Get-Process SongPlayer |
   Select PriorityClass` → `High`. (Baseline before #203: children ran affinity
   `16777215` = all cores, SongPlayer `Normal`.)
