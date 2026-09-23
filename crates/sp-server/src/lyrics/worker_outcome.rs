@@ -22,6 +22,13 @@ pub(crate) fn exceeds_duration_cap(duration_ms: Option<i64>) -> bool {
     matches!(duration_ms, Some(d) if d > crate::lyrics::MAX_LYRICS_DURATION_MS)
 }
 
+/// #144: how far ahead a stems-blocked lyrics row is re-checked. The stems
+/// worker separates at ~2.2× realtime, so a 10-minute recheck is one or two
+/// separations — long enough that the selector spends its ticks on songs whose
+/// stems ARE ready, short enough that a freshly-separated song's lyrics follow
+/// promptly. No `lyrics_attempts` penalty (see [`LyricsWorker::defer_for_stems`]).
+pub(crate) const STEMS_WAIT_RECHECK: std::time::Duration = std::time::Duration::from_secs(600);
+
 /// The result of `LyricsWorker::process_song` for a single row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SongOutcome {
@@ -78,6 +85,20 @@ impl LyricsWorker {
             "worker: deferring row — retry after backoff"
         );
         self.clear_processing().await;
+    }
+
+    /// #144: no-penalty recheck deferral for a song whose stems vocals sidecar
+    /// is not ready yet. Schedules `lyrics_next_attempt_at` [`STEMS_WAIT_RECHECK`]
+    /// ahead WITHOUT touching `lyrics_attempts`, so the selector moves to the
+    /// next song instead of re-picking this stems-blocked row every tick;
+    /// `defer_heavy` already logged the INFO + cleared the in-flight marker.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn defer_for_stems(&self, video_id: i64) {
+        if let Err(e) =
+            crate::db::models::record_lyrics_wait(&self.pool, video_id, STEMS_WAIT_RECHECK).await
+        {
+            warn!("worker: record_lyrics_wait failed for {video_id}: {e}");
+        }
     }
 
     /// Stamp an over-cap row (#144) `unsupported_source`, log it, clear the

@@ -420,13 +420,13 @@ impl LyricsWorker {
             Ok(SongOutcome::WaitingForWall) => {
                 debug!("worker: {youtube_id} deferred — wall in use (no backoff)");
             }
-            // #162 memory below the floor, or #144 the stems vocals sidecar is
-            // not ready — both deferred with NO backoff (the WARN/INFO already
-            // fired in `heavy_step_memory_ok` / `defer_heavy`); re-runs when the
-            // cause clears.
-            Ok(SongOutcome::WaitingForMemory | SongOutcome::WaitingForStems) => {
-                debug!("worker: {youtube_id} heavy step deferred — no backoff (memory/stems)");
+            // #162: memory headroom below the floor before a heavy step — no
+            // backoff (the WARN already fired in `heavy_step_memory_ok`).
+            Ok(SongOutcome::WaitingForMemory) => {
+                debug!("worker: {youtube_id} deferred — memory headroom low (no backoff)");
             }
+            // #144: stems sidecar not ready — no-penalty recheck, selector moves on.
+            Ok(SongOutcome::WaitingForStems) => self.defer_for_stems(video_id).await,
             Err(e) => {
                 debug!("worker: processing failed for {youtube_id}: {e}");
                 let _ = crate::db::models::mark_video_lyrics(

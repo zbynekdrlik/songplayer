@@ -62,13 +62,11 @@ pub async fn record_lyrics_wait(
     wait: std::time::Duration,
 ) -> Result<(), sqlx::Error> {
     let secs = wait.as_secs() as i64;
-    // RED (#144): this bumps `lyrics_attempts` — WRONG for a no-penalty stems
-    // wait. The GREEN commit drops the `lyrics_attempts = lyrics_attempts + 1`
-    // clause so `record_lyrics_wait_leaves_attempts_unchanged…` passes.
+    // Schedule the recheck ONLY — `lyrics_attempts` is deliberately untouched
+    // (this is future work waiting on the stems worker, not a failed attempt).
     sqlx::query(
         "UPDATE videos \
-         SET lyrics_attempts = lyrics_attempts + 1, \
-             lyrics_next_attempt_at = \
+         SET lyrics_next_attempt_at = \
                  strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)) \
          WHERE id = ?",
     )
