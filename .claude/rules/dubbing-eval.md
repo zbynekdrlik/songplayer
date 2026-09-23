@@ -191,7 +191,10 @@ re-anchored per connection), `echo_target_language=False`, sliding-window
 `session_resumption`. On GoAway it stops sending at a frame boundary, keeps
 receiving the old connection's trailing translation for `min(time_left − 1 s, 8 s)`,
 then reconnects with the latest handle and resumes from the next unsent frame (an
-early close reconnects the same way); `audio_stream_end` once at the end. The
+early close reconnects the same way) — the input feed PAUSES for that grace (≤ 8 s
+per GoAway; `go_away_grace` → `reconnect` in `events.jsonl`), so a voiced gap right
+after a GoAway is the probe's own pause, not the model (step 2 should overlap the
+new connection instead); `audio_stream_end` once at the end. The
 session streams SILENCE after speech, so the drain ends after 8 s without VOICED
 output (a chunk above −50 dBFS), cap 60 s. Arms: `--voice none` (no
 `speech_config` — the model copies the speaker) vs `--voice Charon` (pinned
