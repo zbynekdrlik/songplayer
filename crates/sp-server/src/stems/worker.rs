@@ -357,14 +357,21 @@ impl StemWorker {
             }
         };
 
-        // #162: memory-headroom guard BEFORE the heavy separation (owner's
-        // order: check memory before acquiring the slot). Below the 4 GiB floor
-        // → leave the row PENDING with NO `record_stem_deferral` (no backoff);
-        // it is re-picked the next tick. The WARN with the numbers fires inside
-        // `heavy_step_memory_ok`.
-        if crate::lyrics::heavy_slot::heavy_step_memory_defers("stem separation") {
-            return;
-        }
+        // #144 r2: QUEUE for the heavy slot (fair FIFO — block behind a running
+        // child), then measure headroom AT SPAWN with the permit held. Below the
+        // 4 GiB floor → release the permit and leave the row PENDING with NO
+        // `record_stem_deferral` (no backoff); re-picked next tick. The WARN
+        // fires inside `memory_ok_for`. Held across `run_separation_watched`
+        // (incl. the GPU→CPU re-run below), so the deep acquire in
+        // `separator::separate_stems` is gone — a second acquire on the same task
+        // would deadlock the Semaphore(1). A queued dub still preempts via the
+        // watcher: the guard drops when this tick ends and the dub (next in FIFO)
+        // proceeds.
+        let _slot = match crate::lyrics::heavy_slot::acquire_slot_for_spawn("stem separation").await
+        {
+            Ok(g) => g,
+            Err(_) => return,
+        };
 
         // #177: publish the live in-flight signal for the karaoke panel's ⚙
         // "spracúvam" state; the guard clears it when this scope ends (success,

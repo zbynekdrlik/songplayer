@@ -290,11 +290,24 @@ impl DubWorker {
             }
         }
 
-        // Memory-headroom guard BEFORE the heavy child (owner's order). Below the
-        // floor → leave the row at `synth` with NO backoff; re-picked next tick.
-        if crate::lyrics::heavy_slot::heavy_step_memory_defers("dub live-translate") {
-            return;
-        }
+        // #144 r2: signal the dub-priority want, then QUEUE for the heavy slot
+        // (fair FIFO — block behind a running child) and measure headroom AT
+        // SPAWN with the permit held. The want is published BEFORE queueing so a
+        // running separation yields the slot; `acquire_slot_for_spawn` clears it
+        // the instant the dub acquires (in `heavy_slot::acquire_on`). Below the
+        // floor → release the permit and leave the row at `synth` with NO backoff
+        // (never a `record_dub_deferral`); re-picked next tick. Both guards are
+        // held across `synthesize` — the deep acquire in
+        // `dabing::child::run_live_translate` is gone (a second acquire on the
+        // same task would deadlock the Semaphore(1)); the light silencedetect
+        // pass inside `synthesize` now runs while this dub holds the slot, so no
+        // other heavy child runs alongside it.
+        let _dub_want = crate::lyrics::heavy_slot::dub_slot_want_guard();
+        let _slot =
+            match crate::lyrics::heavy_slot::acquire_slot_for_spawn("dub live-translate").await {
+                Ok(g) => g,
+                Err(_) => return,
+            };
 
         let outcome = self.synthesize(&python, &script_path, &key, &job).await;
         match outcome {
@@ -348,8 +361,10 @@ impl DubWorker {
             .join(format!("{}_dub", job.youtube_id));
         tokio::fs::create_dir_all(&work_dir).await.ok();
 
-        // 1. Chunk plan from ffmpeg silencedetect (BELOW_NORMAL, off the heavy slot
-        //    — a light one-time pass), parsed + planned by the pure chunk_plan.
+        // 1. Chunk plan from ffmpeg silencedetect (BELOW_NORMAL, a light one-time
+        //    pass), parsed + planned by the pure chunk_plan. #144 r2: the caller
+        //    (`process_next`) now holds the heavy slot across this, so the pass no
+        //    longer overlaps another heavy child.
         let stderr = self.run_silencedetect(&audio_path).await?;
         let (detected_total, silences) = chunk_plan::parse_silencedetect(&stderr);
         let total_ms = detected_total
@@ -419,12 +434,9 @@ impl DubWorker {
             chunks.len(),
             total_ms / 1000
         );
-        // #184 G0.1: signal that a dub is queued behind the heavy slot so a
-        // running stem separation yields it (and the stem/lyrics workers defer
-        // their next heavy tick). The flag is cleared the instant this dub's
-        // `acquire_slot` succeeds (inside heavy_slot::acquire_on); this guard's
-        // Drop is the early-return safety net for the paths before the acquire.
-        let _dub_want = crate::lyrics::heavy_slot::dub_slot_want_guard();
+        // #144 r2: the dub-priority want + the heavy slot are taken by the caller
+        // (`process_next`) BEFORE `synthesize`, and held across it — see there.
+        // The slot is held for this child's whole lifetime; no acquire here.
         let summary = crate::dabing::child::run_live_translate(
             python,
             script_path,

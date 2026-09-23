@@ -139,7 +139,9 @@ raising (separation would only be marked unsupported). Live INPUT is the ORIGINA
 `audio_file_path` (not a stem). `dub_engine="gemini-live-translate"`.
 
 - **Chunk plan (Rust owns it):** the worker runs ffmpeg `silencedetect` (a light
-  off-slot pass at BELOW_NORMAL), parses it with `chunk_plan::parse_silencedetect`,
+  BELOW_NORMAL pass; #144 r2: the dub now holds the heavy slot across it — the
+  acquire moved to `process_next` before `synthesize`, so it no longer overlaps
+  another heavy child), parses it with `chunk_plan::parse_silencedetect`,
   and `chunk_plan::plan_chunks` cuts at pauses ≥ 700 ms into chunks ≤ the session
   cap (round E: 2 min default, the `dub_session_max_s` setting), never mid-speech;
   the plan JSON is the child's `--chunk-plan`

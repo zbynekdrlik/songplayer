@@ -161,10 +161,10 @@ async fn run_once(
     plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
     timeout: Duration,
 ) -> Result<()> {
-    // #162: hold the process-global heavy-step slot for this mtl child's
-    // lifetime — one heavy child at a time process-wide (a CUDA-OOM `--no-cuda`
-    // retry re-acquires fresh, still ≤1 concurrent child).
-    let _slot = crate::lyrics::heavy_slot::acquire_slot("mtl align").await;
+    // #144 r2: the heavy slot is acquired by the lyrics reference stage
+    // (`worker_reference` via `acquire_slot_for_spawn`) and held across the whole
+    // mtl step (incl. a CUDA-OOM `--no-cuda` retry). No acquire here — a second
+    // acquire on the same task would deadlock the Semaphore(1).
     let mut cmd = Command::new(&cfg.python);
     cmd.args(build_args(cfg, wav, text_json, out_json, no_cuda));
     // Python on Windows defaults stdio to the console codepage; #137 hit

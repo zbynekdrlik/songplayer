@@ -420,8 +420,8 @@ impl LyricsWorker {
             Ok(SongOutcome::WaitingForWall) => {
                 debug!("worker: {youtube_id} deferred — wall in use (no backoff)");
             }
-            // #162: memory headroom below the floor before a heavy step — no
-            // backoff (the WARN already fired in `heavy_step_memory_ok`).
+            // #162/#144 r2: memory headroom below the floor AT SPAWN (inside the
+            // slot) — no backoff (the WARN already fired in `memory_ok_for`).
             Ok(SongOutcome::WaitingForMemory) => {
                 debug!("worker: {youtube_id} deferred — memory headroom low (no backoff)");
             }

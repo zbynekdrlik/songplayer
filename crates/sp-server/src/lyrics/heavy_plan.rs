@@ -537,12 +537,17 @@ impl crate::lyrics::worker::LyricsWorker {
                 return Err(HeavyDefer::WaitForStems { video_id: row.id });
             }
         };
-        // #162: memory-headroom guard BEFORE the slot (owner's order). Below the
-        // 4 GiB floor → defer with no backoff (`WaitingForMemory`), re-check next
-        // tick; the WARN with the numbers is logged in `heavy_step_memory_ok`.
-        if crate::lyrics::heavy_slot::heavy_step_memory_defers("isolation") {
-            return Err(HeavyDefer::Memory);
-        }
+        // #144 r2: QUEUE for the heavy slot (fair FIFO — block behind a running
+        // child), then measure headroom AT SPAWN with the permit held. Below the
+        // 4 GiB floor → release the permit and defer with no backoff
+        // (`WaitingForMemory`), re-queue next tick; the WARN with the numbers is
+        // logged inside `memory_ok_for`. Held across the whole step (the GPU→CPU
+        // re-run below), so the deep acquire in `aligner::preprocess_vocals` is
+        // gone — a second acquire on the same task would deadlock the Semaphore(1).
+        let _slot = match crate::lyrics::heavy_slot::acquire_slot_for_spawn("isolation").await {
+            Ok(g) => g,
+            Err(crate::lyrics::heavy_slot::HeadroomLow) => return Err(HeavyDefer::Memory),
+        };
         let activity = self.wall_activity().await;
         let plan = HeavyStepPlan::for_activity(mode, activity);
         let detail = self.wall_regime_detail(activity).await;

@@ -172,11 +172,10 @@ pub async fn preprocess_vocals(
             return Ok(wav_out.to_path_buf());
         }
     }
-    // #162: acquire the process-global heavy-step slot BEFORE spawning (after
-    // the cache check, so a cache hit never waits) and hold it until the child
-    // exits — at most one heavy child (isolation / mtl / separation) runs
-    // process-wide, so two workers can never OOM the box together.
-    let _slot = crate::lyrics::heavy_slot::acquire_slot("isolation").await;
+    // #144 r2: the heavy slot is acquired by the caller
+    // (`heavy_plan::isolate_with_regime` via `acquire_slot_for_spawn`) and held
+    // across the whole isolation step (incl. the GPU→CPU re-run). No acquire
+    // here — a second acquire on the same task would deadlock the Semaphore(1).
     let mut cmd = Command::new(python_path);
     cmd.args(preprocess_vocals_args(
         script_path,
