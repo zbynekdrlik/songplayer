@@ -536,18 +536,23 @@ def test_the_heartbeat_fires_only_when_the_session_made_progress():
 
 
 def _last_frame_go_away(total):
+    # The GoAway rides the SECOND-TO-LAST frame: it is recorded during the
+    # pacer's wait for the last one, so the reconnect is already in flight when
+    # the last frame and audio_stream_end go out on the old connection. (On the
+    # very last frame it would only be seen after audio_stream_end, when no
+    # reconnect starts at all — the scenario would never happen.)
     def first(session, n):
         session.queue.put_nowait(live_msg(data=b"\x00\x10" * 240))
-        if n == total:
+        if n == total - 1:
             session.queue.put_nowait(go_away("50s"))
 
     return first
 
 
 def test_a_reconnect_refused_after_the_stream_end_does_not_fail_the_dub():
-    # A GoAway on the LAST frame starts a reconnect; audio_stream_end goes out on
-    # the old connection before it completes. Its refusal must not throw away a
-    # fully sent dub — there is nothing left to send on it.
+    # A GoAway on the last frames starts a reconnect; audio_stream_end goes out
+    # on the old connection before it completes. Its refusal must not throw away
+    # a fully sent dub — there is nothing left to send on it.
     total = 6
     server = FakeServer([_last_frame_go_away(total), "refuse"], connect_delay_s=0.05)
     events, state, _, _ = run_fake(
