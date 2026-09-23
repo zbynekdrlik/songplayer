@@ -444,7 +444,8 @@ export class PreviewPlayer {
     if ((this._snapToStart && !clearing) || v.currentTime < start) {
       try {
         v.currentTime = start + 0.01;
-        this._snapToStart = false;
+        // Only a snap onto the NEW range spends the flag.
+        if (!clearing) this._snapToStart = false;
       } catch (e) {
         // currentTime may reject during a pending seek — retried next tick.
       }
