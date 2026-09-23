@@ -47,7 +47,7 @@ pub const RETAINED_EAGER_COMMIT: &str = "1";
 /// up front; it stays reserved-not-committed and commit grows with first touch,
 /// returned after the purge delay (#207 phase-2: eager commit, not the purge
 /// delay, is the lever that holds the child's ~9 GB commit).
-pub const LAZY_EAGER_COMMIT: &str = "1";
+pub const LAZY_EAGER_COMMIT: &str = "0";
 
 /// The LAZY-mode purge delay (ms) substituted when the operator setting is
 /// "never purge" (`purge_delay_ms < 0`). A never-purge lazy heap would grow

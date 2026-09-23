@@ -56,7 +56,7 @@ pub struct HostCommit {
 /// Pure, exact-string tested; MB = `bytes / 1_048_576` (integer).
 pub fn format_host_commit_line(c: &HostCommit) -> String {
     format!(
-        "host: commit committed_mb={} limit_mb={} free_mb={} pagefile_used_mb={} free_phys_mb={}",
+        "host: commit committed_mb={} limit_mb={} free_mb={} commit_over_ram_mb={} free_phys_mb={}",
         to_mb(c.committed_bytes),
         to_mb(c.commit_limit_bytes),
         to_mb(c.free_commit_bytes),
