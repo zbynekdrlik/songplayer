@@ -1231,21 +1231,94 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
+// #184 round G: a ONE-SHOT fault for the NEXT preview connection only (the page
+// flags apply to every connection, so they cannot express "the first socket is
+// bad, the reconnected one is healthy"). Body: { delay_ms?: N } — that socket's
+// post-init frames are delivered N ms late (a backlog, like `pong_delay_ms`);
+// { close_after_frags?: N } — the server closes that socket after N fragments
+// (a server restart / relay close); { hold_init: true } — that socket opens but
+// never sends anything, not even its init (an encoder that never starts).
+// `{}` clears a pending fault.
+let nextPreviewFault = null;
+app.post("/__mock/preview-fault", (req, res) => {
+  const b = req.body || {};
+  const fault = {};
+  if (typeof b.delay_ms === "number" && b.delay_ms > 0) fault.delay_ms = b.delay_ms;
+  if (typeof b.close_after_frags === "number" && b.close_after_frags >= 0) {
+    fault.close_after_frags = b.close_after_frags;
+  }
+  if (b.hold_init === true) fault.hold_init = true;
+  nextPreviewFault = Object.keys(fault).length ? fault : null;
+  res.json({ ok: true, fault: nextPreviewFault });
+});
+
+// #184 round G: the server closes every open preview socket NOW (a server
+// restart / encoder respawn, at a moment the test chooses).
+app.post("/__mock/preview-close", (_req, res) => {
+  let closed = 0;
+  for (const c of previewWss.clients) {
+    c.close();
+    closed++;
+  }
+  res.json({ ok: true, closed });
+});
+
 // #178: stream the canned fMP4 fixture — init segment first, then each fragment
 // with a small gap — so the card's MSE <video> reaches readyState>=3 and its
 // currentTime advances.
 previewWss.on("connection", (ws, req) => {
+  const fault = nextPreviewFault || {};
+  nextPreviewFault = null;
   const [init, ...frags] = PREVIEW_FMP4;
   // #184 round F: an optional `?lag_ms=<N>` knob on the upgrade url inflates the
   // beacon so the lag-readout E2E can force the "picture behind the wall" state.
   // Mock-only — the production dashboard never adds the flag to preview.ws.
+  // #184 round G: an optional `?pong_delay_ms=<N>` knob emulates a tunnel
+  // BACKLOG (the owner's Cloudflare-hairpin defect): every server→client frame
+  // AFTER the init segment — media fragments, the lag beacon AND the pong answer
+  // to the shim's `{"ping":N}` — is delivered N ms late, exactly like frames
+  // queued behind a stalled `cloudflared` stream. The init goes out at once (the
+  // backlog builds while the stream runs). Mock-only, forwarded from the PAGE
+  // url by the shim like `lag_ms`.
   let lagMs = 0;
+  let pongDelayMs = 0;
   try {
-    const q = new URL(req.url, "http://localhost").searchParams.get("lag_ms");
-    if (q !== null && /^\d+$/.test(q)) lagMs = Number(q);
+    const q = new URL(req.url, "http://localhost").searchParams;
+    const lag = q.get("lag_ms");
+    if (lag !== null && /^\d+$/.test(lag)) lagMs = Number(lag);
+    const delay = q.get("pong_delay_ms");
+    if (delay !== null && /^\d+$/.test(delay)) pongDelayMs = Number(delay);
   } catch {
     // malformed upgrade url — no knob
   }
+  // The one-shot fault (above) wins over the page flag for this socket only.
+  if (fault.delay_ms) pongDelayMs = fault.delay_ms;
+  const closeAfterFrags =
+    typeof fault.close_after_frags === "number" ? fault.close_after_frags : null;
+  // Deliver one frame through the (optionally delayed) "tunnel". A frame whose
+  // socket closed while it sat in the backlog is dropped silently.
+  const pending = new Set();
+  const deliver = (payload) => {
+    const send = () => {
+      if (ws.readyState !== ws.OPEN) return;
+      try {
+        ws.send(payload);
+      } catch {
+        // client vanished mid-send — ignore.
+      }
+    };
+    if (pongDelayMs <= 0) {
+      send();
+      return;
+    }
+    const t = setTimeout(() => {
+      pending.delete(t);
+      send();
+    }, pongDelayMs);
+    pending.add(t);
+  };
+  // The one-shot "encoder never starts" fault: the socket stays open and silent.
+  if (fault.hold_init) return;
   try {
     ws.send(init);
   } catch {
@@ -1258,11 +1331,7 @@ previewWss.on("connection", (ws, req) => {
   // immediately so the readout appears without waiting a full second.
   const sendBeacon = () => {
     if (ws.readyState !== ws.OPEN) return;
-    try {
-      ws.send(JSON.stringify({ produced_ms: fragsSent * 500 + lagMs }));
-    } catch {
-      // client vanished mid-send — ignore.
-    }
+    deliver(JSON.stringify({ produced_ms: fragsSent * 500 + lagMs }));
   };
   sendBeacon();
   const timer = setInterval(() => {
@@ -1270,13 +1339,36 @@ previewWss.on("connection", (ws, req) => {
       clearInterval(timer);
       return;
     }
-    ws.send(frags[i++]);
+    if (closeAfterFrags !== null && fragsSent >= closeAfterFrags) {
+      // The one-shot "server closed the socket" fault.
+      clearInterval(timer);
+      ws.close();
+      return;
+    }
+    deliver(frags[i++]);
     fragsSent++;
   }, 120);
   const beacon = setInterval(sendBeacon, 1000);
+  // #184 round G: answer the shim's application-level `{"ping":N}` with
+  // `{"pong":N}` (the same echo `api/preview.rs::pong_frame` does), queued
+  // behind the same (optionally delayed) tunnel as the media.
+  ws.on("message", (data, isBinary) => {
+    if (isBinary) return;
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return; // not JSON — ignore, like the real server
+    }
+    if (msg && typeof msg.ping === "number" && Number.isFinite(msg.ping)) {
+      deliver(JSON.stringify({ pong: msg.ping }));
+    }
+  });
   const stop = () => {
     clearInterval(timer);
     clearInterval(beacon);
+    for (const t of pending) clearTimeout(t);
+    pending.clear();
   };
   ws.on("close", stop);
   ws.on("error", stop);

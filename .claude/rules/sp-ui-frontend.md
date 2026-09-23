@@ -755,3 +755,18 @@ miesto"). The fix is a pending-target DISPLAY HOLD:
   a seek POST, then jumps to the target; a real `page.mouse` drag asserts the
   displayed value never drops below the target during the hold, then follows
   live. The box proof is in `post-deploy-preview.spec.ts` (see `preview.md`).
+
+## Running the mock E2E locally for a JS-only sp-ui change (Tier-0: no trunk build)
+
+`sp-ui/*.js` shims (e.g. `preview_player.js`) are bundled by trunk into
+`dist/snippets/sp-ui-<hash>/<name>.js`, referenced from `dist/index.html` by a
+`modulepreload` link WITH an `integrity="sha384-…"`. To exercise a changed shim
+without compiling: `gh run download <latest green dev CI run> -n dist -D dist`,
+copy the new shim over the snippet, and recompute that link's sha384 (a stale
+SRI blocks the module). The wasm is unchanged, so only JS-side behaviour is
+proven; `frontend.spec.ts`'s version-label test fails when the dist's version
+differs from `VERSION` (expected — CI rebuilds dist). A pure helper exported
+from a shim can be imported node-side in a spec (`import { f } from
+"../sp-ui/preview_player.js"`); the class touches browser globals only inside
+methods. The mock hardcodes port 8920 — if another session's stale mock holds
+it, run a port-substituted scratch copy with a config override of `baseURL`.

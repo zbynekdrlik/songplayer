@@ -322,6 +322,86 @@ area. Do NOT regress them:
   1000 100 150`), not a gating spec — do not re-add a fixed multi-second
   `waitForTimeout` to any post-deploy spec.
 
+## #184 round G — transport lag: ping/pong RTT + dropping a backlog
+
+The owner's fader → audible change took ~70 s through `sp.newlevel.media`. The
+control path was fine; the PREVIEW TRANSPORT was the lag. On the public URL the
+preview WS goes box → `cloudflared` (http2/TCP) → Cloudflare edge → back into the
+same LAN. When the tunnel dips below the stream rate the backlog builds INSIDE
+the tunnel, where every round-F guard is blind: `socket.send` on the box never
+blocks (so the broadcast `Lagged` drop never fires), the live-edge chase measures
+a `buffered.end` that is itself stale, and the lag beacon rides the same backlog
+(`produced − buffered_end ≈ 0`, no badge). Do NOT regress:
+
+- **Application-level ping/pong (the only JS-visible round trip — browsers hide
+  WS control-frame pings).** From the FIRST binary frame (the init segment) the
+  shim sends `{"ping": performance.now()}` every `PING_INTERVAL_MS = 1000`; the
+  server's existing `socket.recv()` arm answers at once on the SAME socket with
+  `{"pong": <same>}` (`api/preview.rs::pong_frame`, pure + tested; the number is
+  echoed as its RAW JSON text via serde_json `raw_value` — default float parsing
+  is not round-trip exact). The pong queues behind exactly the backlog the media
+  is in, so `rtt = now − pong` is the real transport lag; both stamps are the
+  browser's own (no clock skew). Pinging starts at the init, not at socket open:
+  the server sends the init only after the encoder child produced one (a cold
+  start / the libx264 fallback takes seconds) and answers pings only in its
+  post-init loop — a slow start must never read as transport lag.
+- **ONE lag number** (`previewLagS`, exported pure): `onLag` reports the WORST of
+  the round-F beacon lag, the LAST rtt, and how long the oldest unanswered ping
+  has waited (a backlog is at least that deep — the badge shows before any pong
+  is back). Reported each pump tick from `_reportLag`, independent of a buffered
+  range. The ≥ 3 s display threshold stays `sp_core::preview_lag_display`.
+- **The reconnect rule** (`shouldReconnect`, exported pure, table-tested in
+  `e2e/preview.spec.ts` node-side): reconnect when the last 2 rtts both exceed
+  `RTT_RECONNECT_MS = 3000`, or a ping has waited > `NO_PONG_RECONNECT_MS = 5000`,
+  or the socket is LOST (`socketLost` — it closed on its own, e.g. a server
+  restart / relay close, or delivered no init within `INIT_TIMEOUT_MS = 12000`;
+  the server itself gives up on the init after ~10 s), and never within
+  `MIN_RECONNECT_GAP_MS = 10000` of the last reconnect (a server that is down is
+  retried every 10 s, never hammered). "No pong for 5 s" is measured from the
+  oldest UNANSWERED ping, never from the last pong — a background tab whose
+  timers are throttled to one tick a minute would otherwise read "no pong for
+  60 s" and reconnect for nothing. The 1 Hz health/ping timer runs for each
+  socket's whole life (started in `_connect`); it only SENDS pings after the init.
+- **`_reconnect()`** closes the old socket (`onmessage`/`onerror`/`onclose`
+  nulled first, so a late frame or close from it is ignored), clears the append
+  queue, sets `_needResync`, reports lag 0, and re-opens through the ONE connect
+  path `_connect(path)` — a new WebSocket is a new tunnel stream at the live
+  edge; the old backlog is discarded. The encoder child survives (the new viewer
+  subscribes well inside `VIEWER_TTL`). `_needResync` is consumed right before
+  the next queued frame is appended — after a reconnect that is the new socket's
+  INIT segment, so the old media plays until the new socket delivers, then the
+  picture holds its last frame until the first new fragment (~0.5 s). The clear
+  sets `_snapToStart`: the next `_maintain` with media buffered puts the playhead
+  on the FIRST new sample unconditionally (a reconnect can land on a restarted
+  media timeline — a new encoder child starts at 0 — behind the old playhead);
+  never while the clearing `remove()` is still pending (`sb.updating`), when
+  `buffered` still shows the OLD range.
+- **Encoder respawn closes the relay** (`preview_encoder.rs::supervise`): a child
+  that had STREAMED and died with viewers present is respawned AND
+  `relay.close()`d — the viewers hold the old child's init and the new init is
+  only cached, never sent to them, so they would freeze on a restarted timeline
+  while their pings are still answered. Closing makes each socket close; the
+  shim's `socketLost` rule reconnects it onto the new init. A child that died
+  with NO init does not close (its viewers are still in `wait_for_init`).
+  Box-only glue (`mutants::skip`), not Linux-testable.
+- **Server log (`api/preview.rs`)**: every viewer session logs INFO on connect
+  (init sent) and on disconnect with `secs` + `pongs` answered — a viewer the
+  shim keeps reconnecting on a slow link shows up in the box log as a stream of
+  ~10-s sessions (the shim itself may not log).
+- **Mock seams** (`e2e/mock-api.mjs`): the shim forwards `?pong_delay_ms=<N>`
+  from the PAGE url onto the preview WS (like `lag_ms`); the mock then delivers
+  every post-init frame — fragments, beacon AND pong — N ms late (a tunnel
+  backlog) on EVERY socket. The mock always echoes `{"ping":N}` → `{"pong":N}`.
+  For "the first socket is bad, the reconnected one is healthy", the one-shot
+  `POST /__mock/preview-fault {delay_ms?, close_after_frags?}` applies to the
+  NEXT preview connection only (`{}` clears it; always clear it in `finally`).
+  `preview.spec.ts` proves: `pong_delay_ms=6000` → the badge shows on the first
+  socket and a second socket opens within ~15 s (the no-pong rule); a 4 s
+  one-shot backlog → reconnect via the rtt rule (no ping can wait > 5 s), the
+  video plays again and the badge clears; a server-closed first socket → a
+  second socket and the video plays again; no knob → ONE socket, no badge and
+  ≥ 15 ping/pong pairs over 20 s.
+
 ## #184 — per-deploy pause/seek latency proof of the owner's path
 
 `post-deploy-preview.spec.ts` (edge/msedge, off-program Dabing output) re-proves

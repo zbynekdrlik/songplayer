@@ -301,7 +301,8 @@ impl FragmentRelay {
     /// broadcast sender so every connected viewer's `recv()` returns `Closed`
     /// (their WS handler then closes the socket). A fresh sender takes any later
     /// subscribers. Called by the supervisor when it gives up restarting a
-    /// repeatedly-dying child.
+    /// repeatedly-dying child, and (#184 round G) when it respawns a child that
+    /// had streamed, so its viewers reconnect and receive the NEW child's init.
     pub fn close(&self) {
         if let Ok(mut slot) = self.init.lock() {
             *slot = None;

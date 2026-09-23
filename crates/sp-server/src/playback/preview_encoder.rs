@@ -343,7 +343,7 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
                     *g = Some("libx264".to_string());
                 }
             }
-            RunOutcome::ChildExitedNoInit | RunOutcome::ChildExited => {
+            outcome @ (RunOutcome::ChildExitedNoInit | RunOutcome::ChildExited) => {
                 // #178 item 12: a child that died while viewers are watching is
                 // respawned within the restart budget; once the budget is spent
                 // (or nobody is watching) close the relay so viewers see `Closed`
@@ -353,6 +353,18 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
                         label = shared.label(),
                         "preview-encoder: child exited with viewers present — respawning"
                     );
+                    // #184 round G: a child that DID stream leaves its viewers
+                    // holding its init; the respawned child's init is only
+                    // cached, never sent to them, so they would get fragments of
+                    // a restarted timeline with no init and freeze (their pings
+                    // are still answered, so nothing reconnects). Close the
+                    // relay: each viewer's socket closes, the shim's `socketLost`
+                    // rule reconnects it, and the new socket gets the new init.
+                    // (A child that died with NO init leaves viewers still
+                    // waiting in `wait_for_init` — they get the new one as is.)
+                    if matches!(outcome, RunOutcome::ChildExited) {
+                        shared.relay().close();
+                    }
                     continue;
                 }
                 warn!(
