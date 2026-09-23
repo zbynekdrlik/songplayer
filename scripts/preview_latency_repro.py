@@ -240,8 +240,10 @@ def audio_feeder(sh: Shared, sock: socket.socket, aq: queue.Queue, lead_ms: int)
         print(f"audio feeder: write failed ({e}) — child gone", file=sys.stderr)
 
 
-# --- #184 round G3: 1:1 port of `preview_audio_timeline.rs` + the G3 feeder --
+# --- #184 round G3: 1:1 port of `preview_audio_hold.rs` + the G3 feeder ------
 AUDIO_WRITE_AHEAD_MS = 200
+SNAP_TOLERANCE_MS = 10
+AFEED_POLL_S = 0.05
 
 
 class AudioTimeline:
@@ -279,14 +281,15 @@ def g3_audio_feeder(sh: Shared, sock: socket.socket, aq: queue.Queue, lead_ms: i
         return max(0, int((t - start) * 1_000_000))
 
     held: deque = deque()
+    contiguous = False  # the last write was tapped audio (not the preroll / a pad)
     try:
         sock.sendall(bytes(preroll * 4))
         written = preroll // 2
         while not sh.stop.is_set():
             now_us = us(time.monotonic())
-            wait_s = 0.2
+            wait_s = AFEED_POLL_S
             if held:
-                wait_s = min(0.2, max(0.0, (tl.due_us(us(held[0][0])) - now_us) / 1e6))
+                wait_s = min(AFEED_POLL_S, max(0.0, (tl.due_us(us(held[0][0])) - now_us) / 1e6))
             try:
                 held.append(aq.get(timeout=wait_s) if wait_s > 0 else aq.get_nowait())
             except queue.Empty:
@@ -299,23 +302,31 @@ def g3_audio_feeder(sh: Shared, sock: socket.socket, aq: queue.Queue, lead_ms: i
             now_us = us(time.monotonic())
             while held and tl.due_us(us(held[0][0])) <= now_us:
                 arrival, silent, block = held.popleft()
-                pad, skip = align_block(tl.block_target(us(arrival)), written, len(block) // 8)
+                target = tl.block_target(us(arrival))
+                if not contiguous and target - written > SNAP_TOLERANCE_MS * FRAMES_PER_MS:
+                    sock.sendall(bytes((target - written) * 8))  # snap after silence
+                    sh.padded_frames += target - written
+                    written = target
+                pad, skip = align_block(target, written, len(block) // 8)
                 if pad:
                     sock.sendall(bytes(pad * 8))
                     written += pad
                     sh.padded_frames += pad
+                    contiguous = False
                 sh.skipped_frames += skip
                 tail = block[skip * 8:]
                 if silent and sh.silence_written_frame < 0 and tail:
                     sh.silence_written_frame = written
                 if tail:
                     sock.sendall(tail)
+                    contiguous = True
                 written += len(tail) // 8
             pad = align_timeout(tl.position_at(us(time.monotonic())), written)
             if pad:
                 sock.sendall(bytes(pad * 8))
                 written += pad
                 sh.padded_frames += pad
+                contiguous = False
             sh.written_frames = written
     except OSError as e:
         print(f"audio feeder: write failed ({e}) — child gone", file=sys.stderr)
