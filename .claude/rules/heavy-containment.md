@@ -83,11 +83,13 @@ owner's parked decision on #147.
 ## Architecture — where each piece lives
 
 - **`lyrics/heavy_containment.rs`** is PURE + unit-tested + mutation-clean:
-  `Containment { cpu_cap_pct, affinity_mask, memory_priority_low }`,
-  `containment_from_settings(cap_str, mask_str, logical_cores)`,
+  `Containment { cpu_cap_pct, affinity_mask, memory_priority_low, purge_delay_ms
+  (#207), alloc_mode (#207 phase-3) }`,
+  `containment_from_settings(cap_str, mask_str, purge_str, alloc_str, logical_cores)`,
   `default_affinity_mask(cores)` (clamped `1..=64`), `clamp_cap_pct`,
-  `cpu_rate_from_pct(pct) = pct*100`, `affinity_mask_hex`. No loops, exact
-  boundaries. **Do NOT add DB/Win32/globals here — it must stay pure.**
+  `parse_purge_delay_ms`, `parse_alloc_mode`, `cpu_rate_from_pct(pct) = pct*100`,
+  `affinity_mask_hex`. No loops, exact boundaries. **Do NOT add DB/Win32/globals
+  here — it must stay pure** (`AllocMode` lives in the pure `heavy_alloc_env.rs`).
 - **`lyrics/heavy_slot.rs`** holds the impure seam: a process-global
   `Mutex<Containment>` published by `refresh_containment(&pool)` (reads the two
   settings + `available_parallelism`) and read by `current_containment()` inside
