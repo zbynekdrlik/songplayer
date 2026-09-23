@@ -16,12 +16,16 @@ worker. Design record: songplayer#184 comment 5794427305.
 
 What it does: decode `--audio` [start, start+duration) to 16 kHz mono s16le;
 stream it in 100 ms frames at 1.0x real time with wall-clock drift correction
-(frame k is sent at `anchor + k*0.1`, never a summed `sleep(0.1)`); record every
-server message kind with a monotonic timestamp; on GoAway, or on a connection
-that closes before the slice is fully sent, reconnect with the latest resumption
-handle and continue from the next unsent frame; `audio_stream_end` is sent once,
-after the last frame; then keep receiving until the output is quiet for
-`QUIET_S` or `TAIL_CAP_S` passes.
+(frame k is sent at `anchor + k*0.1`, re-anchored per connection, never a summed
+`sleep(0.1)`); record every server message field with a monotonic timestamp
+(fields the probe has no dedicated event for land in `other_fields`); on GoAway
+stop sending at a frame boundary, keep receiving the old connection's trailing
+translation for a bounded grace, then reconnect with the latest resumption
+handle and continue from the next unsent frame (same on a connection that
+closes before the slice is fully sent); `audio_stream_end` is sent once, after
+the last frame; then keep receiving until there has been no VOICED output (a
+chunk above `VOICED_DBFS` — the session streams silence after speech) for
+`QUIET_S`, or `TAIL_CAP_S` passes.
 
 Outputs in `--out-dir`: `output.wav` (24 kHz mono, the output PCM in arrival
 order), `output_chunks.json` (`[arrival_s, n_bytes, buffer_offset_s]` per chunk,
@@ -53,9 +57,11 @@ box `lyrics_venv`; wheel read 2026-09-23, `google/genai/types.py` + `live.py`):
     `LiveServerGoAway{time_left}`; `LiveServerSessionResumptionUpdate{new_handle,
     resumable, last_consumed_client_message_index}`.
   - `AsyncSession.send_realtime_input(audio=Blob | audio_stream_end=True)`.
-  - `AsyncSession.receive()` ENDS its iteration after a `turn_complete` (see
-    `live.py::_is_interaction_complete`), so a continuous session must re-enter
-    it; a closed websocket raises `errors.APIError` (code = the close code).
+  - `AsyncSession.receive()` ENDS its iteration once an interaction completes
+    (`live.py::_is_interaction_complete`: `interaction_status == IDLE` when the
+    server sets one, else `turn_complete`), so a continuous session must
+    re-enter it; a closed websocket raises `errors.APIError` (code = the close
+    code). `LiveServerGoAway.time_left` is a Duration string (`"9s"`, `"2.5s"`).
   - The setup_complete message is consumed by `connect()` and exposed as
     `session.setup_complete` — it never appears in `receive()`.
   - The Developer-API default `api_version` is `v1beta` (`_api_client.py`).
@@ -82,12 +88,35 @@ INPUT_SR = 16000
 OUTPUT_SR = 24000
 FRAME_S = 0.1
 FRAME_BYTES = 3200  # 100 ms @ 16 kHz s16le mono
-QUIET_S = 8.0  # output quiet this long after the last frame -> drained
+QUIET_S = 8.0  # no VOICED output this long after the last frame -> drained
 TAIL_CAP_S = 60.0  # hard cap on the post-slice drain
 MAX_CONNECTIONS = 50  # a runaway reconnect loop is a finding, not an endless run
 RMS_WINDOW_S = 300.0  # the per-5-min output level trend
 SILENCE_DBFS = -120.0  # floor for an all-zero window (JSON has no -inf)
+# An output chunk louder than this is speech; the session streams (near-)digital
+# silence between/after utterances, well below it; speech sits around -30..-15.
+VOICED_DBFS = -50.0
+GO_AWAY_MARGIN_S = 1.0  # leave the old connection this long before its time_left
+SEND_STOP_TIMEOUT_S = 2.0  # let an in-flight frame send finish before cancelling
 PROGRESS_EVERY_FRAMES = 600  # one stderr progress line per minute of input
+# Top-level / server_content fields with a dedicated event (or none needed);
+# anything else a message carries is logged as `other_fields`.
+_KNOWN_FIELDS = {
+    "data",
+    "server_content",
+    "usage_metadata",
+    "go_away",
+    "session_resumption_update",
+    "setup_complete",
+}
+_KNOWN_CONTENT_FIELDS = {
+    "model_turn",
+    "input_transcription",
+    "output_transcription",
+    "turn_complete",
+    "generation_complete",
+    "interrupted",
+}
 
 # ── pure helpers (no network; unit-tested) ─────────────────────────────────────
 
@@ -107,7 +136,8 @@ def pcm_frames(pcm: bytes, frame_bytes: int = FRAME_BYTES) -> list[bytes]:
 
 
 def should_reconnect(kind: str, sent_all: bool) -> bool:
-    """A GoAway always reconnects (the server is about to drop us); a closed
+    """A GoAway always reconnects (the server is about to drop us — after the
+    old connection's grace, and only if the drain did not end first); a closed
     connection reconnects only while input is still unsent; `done` never does."""
     if kind == "go_away":
         return True
@@ -124,18 +154,44 @@ def max_gap(arrivals: list[float]) -> float:
     return max(b - a for a, b in zip(ts, ts[1:]))
 
 
+def _samples_dbfs(samples: np.ndarray) -> float:
+    if samples.size == 0:
+        return SILENCE_DBFS
+    w = samples.astype(np.float64) / 32768.0
+    rms = float(np.sqrt(np.mean(w * w)))
+    db = 20.0 * math.log10(rms) if rms > 0 else SILENCE_DBFS
+    return round(max(db, SILENCE_DBFS), 2)
+
+
+def _s16(pcm_s16le: bytes) -> np.ndarray:
+    return np.frombuffer(pcm_s16le[: len(pcm_s16le) // 2 * 2], dtype="<i2")
+
+
+def pcm_dbfs(pcm_s16le: bytes) -> float:
+    """RMS level of mono s16le PCM in dBFS, floored at `SILENCE_DBFS`."""
+    return _samples_dbfs(_s16(pcm_s16le))
+
+
 def rms_windows(pcm_s16le: bytes, sr: int, window_s: float) -> list[float]:
     """RMS level (dBFS, floored at `SILENCE_DBFS`) per `window_s` window of mono
     s16le PCM; a trailing partial window is included."""
-    samples = np.frombuffer(pcm_s16le[: len(pcm_s16le) // 2 * 2], dtype="<i2")
+    samples = _s16(pcm_s16le)
     step = max(1, int(round(sr * window_s)))
-    out: list[float] = []
-    for i in range(0, len(samples), step):
-        w = samples[i : i + step].astype(np.float64) / 32768.0
-        rms = float(np.sqrt(np.mean(w * w)))
-        db = 20.0 * math.log10(rms) if rms > 0 else SILENCE_DBFS
-        out.append(round(max(db, SILENCE_DBFS), 2))
-    return out
+    return [_samples_dbfs(samples[i : i + step]) for i in range(0, len(samples), step)]
+
+
+def go_away_grace_s(time_left: str | None, quiet_s: float) -> float:
+    """How long to keep receiving on a connection after its GoAway: until
+    `GO_AWAY_MARGIN_S` before the server's `time_left` (a Duration string such
+    as `"9s"`), capped at `quiet_s`; an unknown `time_left` -> `quiet_s`."""
+    text = (time_left or "").strip()
+    if not text.endswith("s"):
+        return quiet_s
+    try:
+        left = float(text[:-1])
+    except ValueError:
+        return quiet_s
+    return max(0.0, min(left - GO_AWAY_MARGIN_S, quiet_s))
 
 
 def place_output(
@@ -236,12 +292,17 @@ def build_summary(
             if e["kind"] == kind and all(e.get(k) == v for k, v in match.items())
         )
 
-    audio_t = [e["t"] for e in events if e["kind"] == "audio"]
+    audio = [e for e in events if e["kind"] == "audio"]
+    audio_t = [e["t"] for e in audio]
+    voiced = [e for e in audio if e.get("voiced")]
+    voiced_t = [e["t"] for e in voiced]
     send_t = [e["t"] for e in events if e["kind"] == "send_start"]
+    drain_ends = [e.get("reason") for e in events if e["kind"] == "drain_end"]
     output_s = len(output_pcm) / 2 / output_sr
-    latency = None
-    if audio_t and send_t:
-        latency = round(audio_t[0] - send_t[0], 3)
+
+    def latency(ts: list[float]) -> float | None:
+        return round(ts[0] - send_t[0], 3) if ts and send_t else None
+
     return {
         "model": model,
         "api_version": api_version,
@@ -258,8 +319,14 @@ def build_summary(
         "reconnect_failures": count("reconnect_failed"),
         "output_audio_s": round(output_s, 3),
         "output_to_input_ratio": round(output_s / slice_s, 4) if slice_s > 0 else None,
+        # All chunks (the session also streams silence): arrival/network stalls.
         "max_output_gap_s": round(max_gap(audio_t), 3),
-        "first_output_latency_s": latency,
+        # Voiced chunks only: the gaps a listener hears in the dub.
+        "max_voiced_gap_s": round(max_gap(voiced_t), 3),
+        "voiced_output_s": round(sum(e["n_bytes"] for e in voiced) / 2 / output_sr, 3),
+        "first_output_latency_s": latency(audio_t),
+        "first_voiced_latency_s": latency(voiced_t),
+        "drain_end_reason": drain_ends[-1] if drain_ends else None,
         "rms_per_5min": rms_windows(output_pcm, output_sr, RMS_WINDOW_S),
         "errors": list(errors),
     }
@@ -301,8 +368,10 @@ class ProbeState:
     stream_end_sent: bool = False
     sent_all_t: float | None = None
     last_audio_t: float | None = None
+    last_voiced_t: float | None = None
     first_send_logged: bool = False
     latest_handle: str | None = None
+    frames_at_handle: int = 0  # frames_sent when the latest handle arrived
     out: bytearray = field(default_factory=bytearray)
     chunks: list[tuple[float, int]] = field(default_factory=list)
     input_parts: list[str] = field(default_factory=list)
@@ -314,15 +383,49 @@ def _err(e: BaseException, secret: str | None) -> str:
     return redact(f"{type(e).__name__}: {e}", secret)
 
 
-def record_message(msg: Any, state: ProbeState, events: EventLog) -> bool:
-    """Record one server message; return True when it carries a GoAway."""
+def _set_fields(obj: Any) -> dict[str, Any]:
+    """The non-None fields of an SDK message (pydantic) or a test double."""
+    model_fields = getattr(type(obj), "model_fields", None)
+    names = list(model_fields) if model_fields else list(vars(obj))
+    return {
+        n: getattr(obj, n, None) for n in names if getattr(obj, n, None) is not None
+    }
+
+
+def _other_fields(msg: Any) -> list[str]:
+    """Message fields the probe has no dedicated event for (dotted for
+    server_content subfields), so an unexpected message kind is never silent."""
+    names = [n for n in _set_fields(msg) if n not in _KNOWN_FIELDS]
+    sc = getattr(msg, "server_content", None)
+    if sc is not None:
+        names += [
+            f"server_content.{n}"
+            for n in _set_fields(sc)
+            if n not in _KNOWN_CONTENT_FIELDS
+        ]
+    return names
+
+
+def record_message(msg: Any, state: ProbeState, events: EventLog) -> Any:
+    """Record one server message; return its GoAway (or None)."""
     data = getattr(msg, "data", None)
     if data:
         t = events.now()
+        db = pcm_dbfs(data)
+        voiced = db > VOICED_DBFS
         state.out.extend(data)
         state.chunks.append((round(t, 4), len(data)))
         state.last_audio_t = t
-        events.log("audio", n_bytes=len(data))
+        if voiced:
+            state.last_voiced_t = t
+        events.log("audio", n_bytes=len(data), dbfs=db, voiced=voiced)
+    other = _other_fields(msg)
+    if other:
+        events.log(
+            "other_fields",
+            fields=other,
+            detail={n: str(_field_value(msg, n))[:300] for n in other},
+        )
     sc = getattr(msg, "server_content", None)
     if sc is not None:
         it = getattr(sc, "input_transcription", None)
@@ -341,6 +444,7 @@ def record_message(msg: Any, state: ProbeState, events: EventLog) -> bool:
         handle = getattr(sru, "new_handle", None)
         if handle:
             state.latest_handle = handle
+            state.frames_at_handle = state.frames_sent
         events.log(
             "session_resumption_update",
             handle_present=bool(handle),
@@ -361,8 +465,14 @@ def record_message(msg: Any, state: ProbeState, events: EventLog) -> bool:
     if ga is not None:
         time_left = getattr(ga, "time_left", None)
         events.log("go_away", time_left=None if time_left is None else str(time_left))
-        return True
-    return False
+    return ga
+
+
+def _field_value(msg: Any, dotted: str) -> Any:
+    obj = msg
+    for part in dotted.split("."):
+        obj = getattr(obj, part, None)
+    return obj
 
 
 # ── the session loop (network-agnostic: `connect` / `make_blob` are injected) ───
@@ -378,9 +488,12 @@ async def _run_connection(
     secret: str | None,
 ) -> str:
     """Stream the remaining frames into one connection while receiving. Returns
-    `go_away`, `closed` or `done` (drained after the whole slice was sent)."""
+    `go_away` (after the old connection's grace), `closed` or `done` (drained
+    after the whole slice was sent)."""
     k0 = state.frames_sent
     anchor = time.monotonic()  # re-anchored per connection: 1.0x from here on
+    stop_send = asyncio.Event()  # checked at every frame boundary
+    go_away_deadline: list[float] = []  # set once, by the receiver
 
     async def send() -> None:
         for k in range(k0, len(frames)):
@@ -388,6 +501,8 @@ async def _run_connection(
             # Always yield (sleep(0) when behind schedule) so the receiver keeps
             # running even if a send never blocks.
             await asyncio.sleep(max(0.0, delay))
+            if stop_send.is_set():
+                return
             await session.send_realtime_input(audio=make_blob(frames[k]))
             state.frames_sent = k + 1
             if not state.first_send_logged:
@@ -398,7 +513,7 @@ async def _run_connection(
                     f"probe: frame {state.frames_sent}/{len(frames)} "
                     f"output {len(state.out) / 2 / OUTPUT_SR:.1f}s\n"
                 )
-        if not state.stream_end_sent:
+        if not state.stream_end_sent and not stop_send.is_set():
             await session.send_realtime_input(audio_stream_end=True)
             state.stream_end_sent = True
             state.sent_all_t = events.now()
@@ -408,11 +523,23 @@ async def _run_connection(
         try:
             while True:
                 got = 0
-                # `receive()` ends after each turn_complete -> re-enter it.
+                # `receive()` ends after each completed interaction -> re-enter.
                 async for msg in session.receive():
                     got += 1
-                    if record_message(msg, state, events):
-                        return "go_away"
+                    ga = record_message(msg, state, events)
+                    if ga is not None and not go_away_deadline:
+                        # Stop feeding this connection at the next frame boundary
+                        # but keep receiving its trailing translation.
+                        stop_send.set()
+                        grace = go_away_grace_s(
+                            getattr(ga, "time_left", None), opts.quiet_s
+                        )
+                        go_away_deadline.append(events.now() + grace)
+                        events.log(
+                            "go_away_grace",
+                            grace_s=grace,
+                            frame_index=state.frames_sent,
+                        )
                 if got == 0:
                     events.log("closed", error="receive ended with no message")
                     return "closed"
@@ -427,23 +554,37 @@ async def _run_connection(
     try:
         while reason is None:
             await asyncio.wait({recv_task}, timeout=poll_s)
+            now = events.now()
             if recv_task.done():
-                reason = recv_task.result()
+                closed = recv_task.result()
+                reason = "go_away" if go_away_deadline else closed
                 break
-            if send_task.done() and send_task.exception() is not None:
+            if (
+                send_task.done()
+                and not send_task.cancelled()
+                and send_task.exception() is not None
+            ):
                 events.log("closed", error=_err(send_task.exception(), secret))
                 reason = "closed"
                 break
             if state.stream_end_sent and state.sent_all_t is not None:
-                now = events.now()
-                last = max(state.last_audio_t or 0.0, state.sent_all_t)
+                # Quiet = no VOICED output: the session streams silence.
+                last = max(state.last_voiced_t or 0.0, state.sent_all_t)
                 if now - last >= opts.quiet_s:
                     events.log("drain_end", reason="quiet")
                     reason = "done"
-                elif now - state.sent_all_t >= opts.tail_cap_s:
+                    break
+                if now - state.sent_all_t >= opts.tail_cap_s:
                     events.log("drain_end", reason="tail_cap")
                     reason = "done"
+                    break
+            if go_away_deadline and now >= go_away_deadline[0]:
+                reason = "go_away"
     finally:
+        stop_send.set()
+        if not send_task.done():
+            # Let an in-flight frame send finish so frames_sent stays exact.
+            await asyncio.wait({send_task}, timeout=SEND_STOP_TIMEOUT_S)
         for task in (send_task, recv_task):
             if not task.done():
                 task.cancel()
@@ -515,6 +656,10 @@ async def run_probe(
             reason=reason,
             handle_present=handle is not None,
             frame_index=state.frames_sent,
+            # Input the resumed state may not include (sent after the handle).
+            frames_since_handle=(
+                state.frames_sent - state.frames_at_handle if handle else None
+            ),
         )
 
 
@@ -662,7 +807,9 @@ def main(argv: list[str] | None = None) -> int:
         errors=state.errors,
     )
     _write_outputs(args.out_dir, state, summary)
-    sys.stdout.write(json.dumps(summary, ensure_ascii=False) + "\n")
+    # ASCII-only: the Windows run redirects stdout to a file in the cp1252
+    # locale, where a non-ASCII error text would raise UnicodeEncodeError.
+    sys.stdout.write(json.dumps(summary, ensure_ascii=True) + "\n")
     sys.stdout.flush()
     if failed or summary["connections"] == 0:
         return 1
