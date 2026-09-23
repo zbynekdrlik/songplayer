@@ -1231,10 +1231,30 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
+// #184 round G: a ONE-SHOT fault for the NEXT preview connection only (the page
+// flags apply to every connection, so they cannot express "the first socket is
+// bad, the reconnected one is healthy"). Body: { delay_ms?: N } — that socket's
+// post-init frames are delivered N ms late (a backlog, like `pong_delay_ms`);
+// { close_after_frags?: N } — the server closes that socket after N fragments
+// (a server restart / relay close). `{}` clears a pending fault.
+let nextPreviewFault = null;
+app.post("/__mock/preview-fault", (req, res) => {
+  const b = req.body || {};
+  const fault = {};
+  if (typeof b.delay_ms === "number" && b.delay_ms > 0) fault.delay_ms = b.delay_ms;
+  if (typeof b.close_after_frags === "number" && b.close_after_frags >= 0) {
+    fault.close_after_frags = b.close_after_frags;
+  }
+  nextPreviewFault = Object.keys(fault).length ? fault : null;
+  res.json({ ok: true, fault: nextPreviewFault });
+});
+
 // #178: stream the canned fMP4 fixture — init segment first, then each fragment
 // with a small gap — so the card's MSE <video> reaches readyState>=3 and its
 // currentTime advances.
 previewWss.on("connection", (ws, req) => {
+  const fault = nextPreviewFault || {};
+  nextPreviewFault = null;
   const [init, ...frags] = PREVIEW_FMP4;
   // #184 round F: an optional `?lag_ms=<N>` knob on the upgrade url inflates the
   // beacon so the lag-readout E2E can force the "picture behind the wall" state.
@@ -1257,6 +1277,10 @@ previewWss.on("connection", (ws, req) => {
   } catch {
     // malformed upgrade url — no knob
   }
+  // The one-shot fault (above) wins over the page flag for this socket only.
+  if (fault.delay_ms) pongDelayMs = fault.delay_ms;
+  const closeAfterFrags =
+    typeof fault.close_after_frags === "number" ? fault.close_after_frags : null;
   // Deliver one frame through the (optionally delayed) "tunnel". A frame whose
   // socket closed while it sat in the backlog is dropped silently.
   const pending = new Set();
@@ -1297,6 +1321,12 @@ previewWss.on("connection", (ws, req) => {
   const timer = setInterval(() => {
     if (ws.readyState !== ws.OPEN || i >= frags.length) {
       clearInterval(timer);
+      return;
+    }
+    if (closeAfterFrags !== null && fragsSent >= closeAfterFrags) {
+      // The one-shot "server closed the socket" fault.
+      clearInterval(timer);
+      ws.close();
       return;
     }
     deliver(frags[i++]);

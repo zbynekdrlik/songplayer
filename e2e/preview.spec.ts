@@ -421,6 +421,98 @@ test("a healthy link keeps ONE preview socket and no lag badge for 20 s (#184 ro
   expect(sockets[0].pongs, "the pongs came back").toBeGreaterThanOrEqual(15);
 });
 
+test("shouldReconnect: a lost socket is replaced, but never within the reconnect gap (#184 round G review)", () => {
+  // `socketLost`: the socket closed on its own (server restart, relay close) or
+  // never delivered its init within the connect deadline — nothing to ping on.
+  expect(
+    shouldReconnect({ rtts: [], msAwaitingPong: 0, msSinceLastReconnect: null, socketLost: true }),
+    "lost, never reconnected",
+  ).toBe(true);
+  expect(
+    shouldReconnect({ rtts: [40], msAwaitingPong: 0, msSinceLastReconnect: 60000, socketLost: true }),
+    "lost, long after the last reconnect",
+  ).toBe(true);
+  expect(
+    shouldReconnect({ rtts: [], msAwaitingPong: 0, msSinceLastReconnect: 3000, socketLost: true }),
+    "lost, but within 10 s of the last reconnect",
+  ).toBe(false);
+  expect(
+    shouldReconnect({ rtts: [40], msAwaitingPong: 0, msSinceLastReconnect: null, socketLost: false }),
+    "a live, healthy socket",
+  ).toBe(false);
+});
+
+// Wait until the <video> is playing again: readyState >= 3 and currentTime
+// moving FORWARD between two consecutive samples (the playhead may first jump
+// back to the start of the reconnected stream, so compare sample-to-sample,
+// never against a value read before the jump). A frozen picture never passes.
+async function expectPlayingAgain(page: Page) {
+  const video = page.locator(".playlist-card").getByTestId("preview-video");
+  await expect
+    .poll(async () => video.evaluate((el: HTMLVideoElement) => el.readyState), {
+      timeout: 10000,
+    })
+    .toBeGreaterThanOrEqual(3);
+  let last: number | null = null;
+  await expect
+    .poll(
+      async () => {
+        const t = await video.evaluate((el: HTMLVideoElement) => el.currentTime);
+        const advanced = last !== null && t > last + 0.02;
+        last = t;
+        return advanced;
+      },
+      { timeout: 5000, intervals: [200] },
+    )
+    .toBe(true);
+}
+
+test("a socket the server closes is replaced and the preview plays again (#184 round G review)", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60000);
+  // The FIRST preview socket is closed by the server after 2 fragments (a
+  // server restart / relay close); the reconnected one is healthy.
+  await request.post("/__mock/preview-fault", { data: { close_after_frags: 2 } });
+  try {
+    const sockets = watchPreviewSockets(page);
+    await startPreview(page);
+    await expect.poll(() => sockets.length, { timeout: 10000 }).toBeGreaterThanOrEqual(2);
+    expect(sockets[0].closed, "the first socket was closed by the server").toBe(true);
+    await expectPlayingAgain(page);
+    expect(sockets.length, "one reconnect, no churn").toBe(2);
+  } finally {
+    await request.post("/__mock/preview-fault", { data: {} });
+  }
+});
+
+test("a backlog on the first socket reconnects via the round-trip rule, then plays live with no badge (#184 round G review)", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60000);
+  // 4 s of backlog on the FIRST socket only: no ping ever waits > 5 s, so the
+  // reconnect can only come from the "2 round trips > 3 s" rule.
+  await request.post("/__mock/preview-fault", { data: { delay_ms: 4000 } });
+  try {
+    const sockets = watchPreviewSockets(page);
+    const { card } = await startPreview(page);
+    const lag = card.getByTestId("preview-lag");
+    await expect(lag).toBeVisible({ timeout: 10000 });
+    expect(sockets.length, "the badge showed on the first socket").toBe(1);
+    await expect.poll(() => sockets.length, { timeout: 15000 }).toBeGreaterThanOrEqual(2);
+    expect(sockets[0].pongs, "the round trips that decided it came back").toBeGreaterThanOrEqual(2);
+    // The reconnected socket is healthy: the picture plays again and the
+    // badge clears.
+    await expectPlayingAgain(page);
+    await expect(lag).toHaveCount(0, { timeout: 5000 });
+    expect(sockets.length, "one reconnect, no churn").toBe(2);
+  } finally {
+    await request.post("/__mock/preview-fault", { data: {} });
+  }
+});
+
 test("a playing card mounts no <video> until start is clicked", async ({
   page,
 }) => {

@@ -148,6 +148,22 @@ fn pong_frame_echoes_a_float_ping_verbatim() {
 }
 
 #[test]
+fn pong_frame_echoes_the_raw_number_text_byte_for_byte() {
+    use super::pong_frame;
+    // The shim settles a pending ping by comparing the echoed number with the
+    // one it sent, so the echo must be the ping's OWN JSON text — not a parse →
+    // re-serialize (serde_json's default float parse is best-effort and would
+    // canonicalize these). Only a verbatim (RawValue) echo passes all three.
+    for n in ["1.50", "1e3", "98765.60000000009"] {
+        assert_eq!(
+            pong_frame(&format!(r#"{{"ping":{n}}}"#)).as_deref(),
+            Some(format!(r#"{{"pong":{n}}}"#).as_str()),
+            "the ping number {n} must come back verbatim"
+        );
+    }
+}
+
+#[test]
 fn pong_frame_ignores_extra_fields() {
     use super::pong_frame;
     assert_eq!(
