@@ -557,7 +557,9 @@ def test_a_reconnect_refused_after_the_stream_end_does_not_fail_the_dub():
     # on the old connection before it completes. Its refusal must not throw away
     # a fully sent dub — there is nothing left to send on it.
     total = 6
-    server = FakeServer([_last_frame_go_away(total), "refuse"], connect_delay_s=0.05)
+    server = FakeServer(
+        [_last_frame_go_away(total), "refuse"], open_after_stream_end=True
+    )
     events, state, _, _ = run_fake(
         server, pcm_frame_list(total), fast_opts(quiet_s=0.2)
     )
@@ -569,7 +571,7 @@ def test_a_reconnect_refused_after_the_stream_end_does_not_fail_the_dub():
 
 def test_a_reconnect_that_opens_after_the_stream_end_is_closed_not_used():
     total = 6
-    server = FakeServer([_last_frame_go_away(total), None], connect_delay_s=0.05)
+    server = FakeServer([_last_frame_go_away(total), None], open_after_stream_end=True)
     events, state, _, _ = run_fake(
         server, pcm_frame_list(total), fast_opts(quiet_s=0.3)
     )
@@ -616,3 +618,29 @@ def test_a_connect_that_never_completes_says_so():
         server, pcm_frame_list(20), fast_opts(connect_timeout_s=0.05)
     )
     assert "did not complete within 0.05 s" in str(err)
+
+
+# ── review round 2 ─────────────────────────────────────────────────────────────
+
+
+def test_the_drain_ends_while_a_reconnect_is_still_connecting():
+    # The reconnect of a GoAway on the last frames never completes (the SDK's
+    # setup wait has no timeout of its own); the drain ends first and teardown
+    # must not wait for that connect — a fully sent dub would otherwise hang
+    # until the Rust stall kill.
+    total = 6
+    server = FakeServer(
+        [_last_frame_go_away(total), None], open_after_frames={2: 10_000}
+    )
+    events = dls.EventLog(None)
+    session = dls.ContinuousSession(
+        pcm_frame_list(total),
+        server.connect,
+        lambda b: b,
+        fast_opts(quiet_s=0.2, connect_timeout_s=30.0),
+        events,
+        dls.MemorySink(),
+    )
+    state = asyncio.run(asyncio.wait_for(session.run(), timeout=10.0))
+    assert state.drain_end_reason == "quiet"
+    assert len(server.configs) == 2 and len(server.sessions) == 1

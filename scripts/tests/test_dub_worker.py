@@ -442,7 +442,10 @@ def test_live_translate_with_no_voiced_output_fails_loudly(tmp_path, monkeypatch
 def test_the_overlap_transcripts_are_ordered_by_connection_not_interleaved():
     # During the overlap the OLD connection's trailing fragments arrive after
     # the NEW one's first fragments; the old connection translates EARLIER
-    # input, so its text comes first. Times stay non-decreasing.
+    # input, so its text comes first. Times stay non-decreasing — by capping
+    # the OLD connection's late fragments at the new connection's first
+    # fragment (review round 2), never by pushing the new connection's
+    # subtitles later than its audio (its audio is placed at its arrival).
     parts = [
         (110.0, "Koniec ", 1),
         (110.4, "Nová ", 2),
@@ -451,8 +454,8 @@ def test_the_overlap_transcripts_are_ordered_by_connection_not_interleaved():
     ]
     assert dw.sk_timed_from(parts, 100.0, 3000) == [
         {"t_ms": 7000, "text": "Koniec "},
-        {"t_ms": 7600, "text": "vety."},
-        {"t_ms": 7600, "text": "Nová "},
+        {"t_ms": 7400, "text": "vety."},
+        {"t_ms": 7400, "text": "Nová "},
         {"t_ms": 8000, "text": "veta."},
     ]
     joined = dw.joined_by_connection([(2, "B"), (1, "a "), (2, "C"), (1, "b ")])
@@ -526,3 +529,33 @@ def test_a_failed_run_removes_the_raw_output(tmp_path, monkeypatch):
     assert not (work / dw.RAW_OUTPUT).exists()
     assert not (work / dw.PLACED_WAV).exists()
     assert (work / "events.jsonl").exists()  # the evidence stays
+
+
+# ── review round 2 ─────────────────────────────────────────────────────────────
+
+
+def test_a_cleanup_failure_never_hides_the_real_error(tmp_path, monkeypatch):
+    # On Windows a file still mapped by a failing render cannot be removed: the
+    # PermissionError of the cleanup must not replace the ORIGINAL error.
+    work = tmp_path / "w"
+    work.mkdir()
+    (work / dw.PLACED_WAV).write_bytes(b"x")
+
+    def fails(args, raw_path, wav_path):
+        raise RuntimeError("the real failure")
+
+    def locked(path):
+        raise PermissionError(13, "The process cannot access the file", path)
+
+    monkeypatch.setattr(dw, "_translate", fails)
+    monkeypatch.setattr(dw.os, "remove", locked)
+    args = SimpleNamespace(
+        audio="a.flac",
+        out=str(tmp_path / "o.flac"),
+        transcripts=str(tmp_path / "t.json"),
+        work_dir=str(work),
+        model=dw.MODEL,
+        voice="speaker",
+    )
+    with pytest.raises(RuntimeError, match="the real failure"):
+        dw.cmd_live_translate(args)

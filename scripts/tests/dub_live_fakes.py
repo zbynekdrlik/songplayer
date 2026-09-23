@@ -168,6 +168,7 @@ class FakeServer:
         connect_delay_s=0.0,
         connect_advance_s=0.0,
         hang_at=None,
+        open_after_stream_end=False,
     ):
         self.scripts = list(scripts)
         self.on_stream_end = on_stream_end
@@ -177,6 +178,9 @@ class FakeServer:
         self.connect_delay_s = connect_delay_s
         self.connect_advance_s = connect_advance_s
         self.hang_at = hang_at or {}
+        # Hold every RE-connect until audio_stream_end arrived (deterministic
+        # "a reconnect still in flight at the stream end", no real-clock race).
+        self.open_after_stream_end = open_after_stream_end
         self.configs: list[dict] = []
         self.sessions: list[FakeSession] = []
         self.all_frames: list[bytes] = []
@@ -195,6 +199,9 @@ class FakeServer:
                 await asyncio.sleep(self.connect_delay_s)
             if n > 1 and self.connect_advance_s:
                 self.clock.t += self.connect_advance_s
+            if n > 1 and self.open_after_stream_end:
+                while self.stream_ends < 1:
+                    await asyncio.sleep(0.001)
             if wait_frames:
                 target = len(self.all_frames) + wait_frames
                 while len(self.all_frames) < target:
