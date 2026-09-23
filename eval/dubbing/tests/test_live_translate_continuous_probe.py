@@ -421,9 +421,11 @@ class FakeSession:
     makes `receive()` raise like the SDK does on a closed websocket. Like the
     SDK, `receive()` ends its iteration after a `turn_complete` message."""
 
-    def __init__(self, server, on_frame):
+    def __init__(self, server, on_frame, index):
         self.server = server
         self.on_frame = on_frame
+        self.index = index  # 1-based connection number
+        self.opened_at = server.clock.now()
         self.queue: asyncio.Queue = asyncio.Queue()
         self.frames: list[bytes] = []
         self.send_times: list[float] = []  # monotonic time each frame arrived
@@ -437,11 +439,19 @@ class FakeSession:
             if self.server.on_stream_end is not None:
                 self.server.on_stream_end(self)
             return
+        n = len(self.frames) + 1
+        if self.server.fail_at.get(self.index) == n:
+            # The websocket died under this send: the frame never arrived.
+            raise ConnectionError("send failed: websocket closed 1006")
         self.send_times.append(self.server.clock.now())
         self.frames.append(audio)
         self.server.all_frames.append(audio)
         if self.on_frame is not None:
-            self.on_frame(self, len(self.frames))
+            self.on_frame(self, n)
+        slow = self.server.slow_at.get(self.index)
+        if slow is not None and slow[0] == n:
+            # A frame the server already has, but whose send has not returned.
+            await asyncio.sleep(slow[1])
         if self.server.send_latency_s:
             # A real websocket send takes time; a fixed-sleep pacer would add it
             # on top of every frame period, the drift-corrected one must not.
@@ -491,10 +501,14 @@ class FakeServer:
         reconnect_delay_s=0.0,
         on_stream_end=None,
         clock=None,
+        fail_at=None,
+        slow_at=None,
     ):
         self.scripts = list(scripts)
         self.on_stream_end = on_stream_end
         self.clock = clock or RealClock()
+        self.fail_at = fail_at or {}  # {connection: frame n that raises}
+        self.slow_at = slow_at or {}  # {connection: (frame n, seconds)}
         self.configs: list[dict] = []
         self.sessions: list[FakeSession] = []
         self.all_frames: list[bytes] = []
@@ -513,7 +527,7 @@ class FakeServer:
                 await self.clock.sleep(delay)
             if script == "refuse":
                 raise ConnectionError("handle rejected: 1008 policy violation")
-            s = FakeSession(self, script)
+            s = FakeSession(self, script, len(self.configs))
             self.sessions.append(s)
             yield s
 
@@ -531,18 +545,21 @@ def _fast(**kw) -> probe.ProbeOptions:
 def _run(server, frames, opts, redact_word=None):
     events = probe.EventLog(None)
     state = probe.ProbeState()
-    asyncio.run(
-        probe.run_probe(
-            frames,
-            server.connect,
-            lambda b: b,
-            opts,
-            events,
-            state,
-            secret=redact_word,
-        )
+    probe_run = probe.run_probe(
+        frames,
+        server.connect,
+        lambda b: b,
+        opts,
+        events,
+        state,
+        secret=redact_word,
     )
+    # A loop that never ends is a FAILURE, never a hung CI job.
+    asyncio.run(asyncio.wait_for(probe_run, timeout=RUN_TIMEOUT_S))
     return events, state
+
+
+RUN_TIMEOUT_S = 60.0
 
 
 def _echo(session, n):
@@ -752,8 +769,9 @@ def test_send_loop_paces_at_real_time_without_drift_or_bursts():
     _run(server, frames, opts)
     times = server.sessions[0].send_times
     assert len(times) == 200
+    t0 = server.sessions[0].opened_at  # the first frame goes out at once
     for j, t in enumerate(times):
-        assert abs(t - (times[0] + j * fs)) < 1e-9, f"frame {j} off schedule"
+        assert abs(t - (t0 + j * fs)) < 1e-9, f"frame {j} off schedule"
 
 
 def test_pacing_is_re_anchored_on_each_connection():
@@ -772,10 +790,16 @@ def test_pacing_is_re_anchored_on_each_connection():
     opts = _opts(frame_s=fs, quiet_s=0.05, tail_cap_s=1.0, clock=vc.now, sleep=vc.sleep)
     _run(server, frames, opts)
     assert len(server.sessions) == 2
-    times = server.sessions[1].send_times
-    assert len(times) >= 10
-    for j, t in enumerate(times):
-        assert abs(t - (times[0] + j * fs)) < 1e-9, f"frame {j} of conn 2 burst"
+    # Each connection's first frame goes out the moment it opens (a schedule
+    # still indexed by the absolute frame number would make connection 2 wait
+    # k0 periods — ~600 s after a 10-min GoAway) and the rest follow exactly
+    # one period apart.
+    for s in server.sessions:
+        assert s.send_times, f"connection {s.index} sent nothing"
+        for j, t in enumerate(s.send_times):
+            want = s.opened_at + j * fs
+            assert abs(t - want) < 1e-9, f"conn {s.index} frame {j} off schedule"
+    assert len(server.sessions[1].send_times) >= 10
     assert server.all_frames == frames
 
 
@@ -835,7 +859,7 @@ def test_go_away_keeps_receiving_the_old_connection_output_before_reconnecting()
     assert late_idx < kinds.index("reconnect")
     assert late in bytes(state.out)
     # The sender stopped at a frame boundary once the GoAway arrived.
-    assert len(server.sessions[0].frames) <= 11
+    assert len(server.sessions[0].frames) == 10
     assert server.all_frames == frames
     rec = next(e for e in events.events if e["kind"] == "reconnect")
     assert rec["frames_since_handle"] == len(server.sessions[0].frames) - 2
@@ -916,3 +940,103 @@ def test_main_stdout_is_one_ascii_json_line_and_the_key_is_redacted(
         path = out_dir / name
         assert path.exists(), name
         assert word not in path.read_bytes().decode("utf-8", "replace")
+
+
+# ── review round 2: teardown, failure branches, model_turn parts ────────────────
+
+
+def test_teardown_lets_an_in_flight_send_finish_so_no_frame_is_sent_twice():
+    # The GoAway (grace 0) is decided while frame 10's send is still in flight:
+    # the server already has frame 10, so cancelling that send would leave
+    # frames_sent at 9 and the next connection would send frame 10 again.
+    def first(session, n):
+        if n == 10:
+            session.queue.put_nowait(_msg(go_away=SimpleNamespace(time_left="0.5s")))
+
+    server = FakeServer([first, _echo], slow_at={1: (10, 0.3)})
+    frames = _frames(20)
+    events, state = _run(server, frames, _opts(frame_s=0.001, quiet_s=0.1))
+    assert len(server.sessions) == 2
+    assert server.all_frames == frames  # every frame exactly once, in order
+    assert state.frames_sent == 20
+
+
+def test_a_failed_send_is_a_close_and_reconnects_without_losing_the_frame():
+    server = FakeServer([_echo, _echo], fail_at={1: 4})
+    frames = _frames(8)
+    events, state = _run(server, frames, _fast())
+    closed = [e for e in events.events if e["kind"] == "closed"]
+    assert any("1006" in e["error"] for e in closed)
+    rec = [e for e in events.events if e["kind"] == "reconnect"]
+    assert [e["reason"] for e in rec] == ["closed"]
+    assert rec[0]["frame_index"] == 3
+    assert server.all_frames == frames
+
+
+def test_reconnects_stop_at_max_connections():
+    def close_after_first(session, n):
+        if n == 1:
+            session.queue.put_nowait(_CLOSE)
+
+    server = FakeServer([close_after_first] * 3)
+    events, state = _run(server, _frames(50), _fast(max_connections=3))
+    assert len(server.configs) == 3
+    assert [e["reason"] for e in events.events if e["kind"] == "stop"] == [
+        "max_connections"
+    ]
+    assert any("max connections (3)" in e for e in state.errors)
+
+
+def test_a_close_during_the_go_away_grace_still_reconnects():
+    # After audio_stream_end the server sends a GoAway and then drops the socket
+    # inside the grace: that is the announced GoAway, not an unexplained close
+    # (a close after everything was sent would NOT reconnect).
+    def go_away_then_close(session):
+        session.queue.put_nowait(_msg(go_away=SimpleNamespace(time_left="5s")))
+        session.queue.put_nowait(_CLOSE)
+
+    def only(session, n):
+        session.queue.put_nowait(_msg(data=b"\x10" * 480))
+
+    server = FakeServer([only, None], on_stream_end=go_away_then_close)
+    events, _ = _run(server, _frames(3), _opts(frame_s=0.001, quiet_s=1.0))
+    assert len(server.sessions) == 2
+    rec = [e for e in events.events if e["kind"] == "reconnect"]
+    assert [e["reason"] for e in rec] == ["go_away"]
+    assert server.stream_ends == 1
+
+
+def test_non_audio_model_turn_parts_are_recorded():
+    def script(session, n):
+        if n == 1:
+            part = SimpleNamespace(inline_data=None, text="(thinking aloud)")
+            session.queue.put_nowait(
+                _msg(
+                    server_content=_content(
+                        model_turn=SimpleNamespace(parts=[part], role="model")
+                    )
+                )
+            )
+
+    events, _ = _run(FakeServer([script]), _frames(2), _fast())
+    other = [e for e in events.events if e["kind"] == "other_fields"]
+    names = {n for e in other for n in e["fields"]}
+    assert "server_content.model_turn.parts.text" in names
+
+
+def test_main_exits_1_when_no_connection_ever_opened(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("GEMINI_API_KEY", "ghostword")
+    monkeypatch.setattr(probe, "decode_slice", lambda args: b"\x01\x00" * 3200)
+
+    async def refused_live(args, key, frames, opts, events, state):
+        await probe.run_probe(
+            frames, FakeServer(["refuse"]).connect, lambda b: b, opts, events, state
+        )
+
+    monkeypatch.setattr(probe, "_run_live", refused_live)
+    rc = probe.main(["--audio", "in.flac", "--out-dir", str(tmp_path / "o")])
+    assert rc == 1
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["connections"] == 0
+    assert summary["frames_total"] == 2
+    assert any("1008" in e for e in summary["errors"])
