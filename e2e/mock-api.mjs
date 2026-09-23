@@ -1236,7 +1236,9 @@ server.on("upgrade", (req, socket, head) => {
 // bad, the reconnected one is healthy"). Body: { delay_ms?: N } — that socket's
 // post-init frames are delivered N ms late (a backlog, like `pong_delay_ms`);
 // { close_after_frags?: N } — the server closes that socket after N fragments
-// (a server restart / relay close). `{}` clears a pending fault.
+// (a server restart / relay close); { hold_init: true } — that socket opens but
+// never sends anything, not even its init (an encoder that never starts).
+// `{}` clears a pending fault.
 let nextPreviewFault = null;
 app.post("/__mock/preview-fault", (req, res) => {
   const b = req.body || {};
@@ -1245,8 +1247,20 @@ app.post("/__mock/preview-fault", (req, res) => {
   if (typeof b.close_after_frags === "number" && b.close_after_frags >= 0) {
     fault.close_after_frags = b.close_after_frags;
   }
+  if (b.hold_init === true) fault.hold_init = true;
   nextPreviewFault = Object.keys(fault).length ? fault : null;
   res.json({ ok: true, fault: nextPreviewFault });
+});
+
+// #184 round G: the server closes every open preview socket NOW (a server
+// restart / encoder respawn, at a moment the test chooses).
+app.post("/__mock/preview-close", (_req, res) => {
+  let closed = 0;
+  for (const c of previewWss.clients) {
+    c.close();
+    closed++;
+  }
+  res.json({ ok: true, closed });
 });
 
 // #178: stream the canned fMP4 fixture — init segment first, then each fragment
@@ -1303,6 +1317,8 @@ previewWss.on("connection", (ws, req) => {
     }, pongDelayMs);
     pending.add(t);
   };
+  // The one-shot "encoder never starts" fault: the socket stays open and silent.
+  if (fault.hold_init) return;
   try {
     ws.send(init);
   } catch {

@@ -8,6 +8,7 @@ import {
   RTT_RECONNECT_MS,
   NO_PONG_RECONNECT_MS,
   MIN_RECONNECT_GAP_MS,
+  INIT_TIMEOUT_MS,
 } from "../sp-ui/preview_player.js";
 
 // #178: the dashboard playlist card's live A/V preview is a real MSE `<video>`
@@ -507,6 +508,102 @@ test("a backlog on the first socket reconnects via the round-trip rule, then pla
     // badge clears.
     await expectPlayingAgain(page);
     await expect(lag).toHaveCount(0, { timeout: 5000 });
+    expect(sockets.length, "one reconnect, no churn").toBe(2);
+  } finally {
+    await request.post("/__mock/preview-fault", { data: {} });
+  }
+});
+
+// Strict "it is PLAYING": two consecutive samples, each with the element not
+// seeking and currentTime stepping forward by a normal-playback amount (a jump
+// to the live edge or a snap is a seek, not playback, and never passes).
+async function expectSteadyPlayback(page: Page) {
+  const video = page.locator(".playlist-card").getByTestId("preview-video");
+  let last: number | null = null;
+  let steady = 0;
+  await expect
+    .poll(
+      async () => {
+        const s = await video.evaluate((el: HTMLVideoElement) => ({
+          t: el.currentTime,
+          seeking: el.seeking,
+        }));
+        const step = last === null ? 0 : s.t - last;
+        steady = !s.seeking && step > 0.02 && step <= 0.5 ? steady + 1 : 0;
+        last = s.t;
+        return steady >= 2;
+      },
+      { timeout: 8000, intervals: [100] },
+    )
+    .toBe(true);
+}
+
+test("after a reconnect onto a restarted timeline the playhead jumps to the new stream's first sample (#184 round G review 2)", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60000);
+  const sockets = watchPreviewSockets(page);
+  const { video } = await startPreview(page);
+  // Let the 4 s fixture play past 3 s. The mock restarts its fixture at 0 on a
+  // new socket (like a respawned encoder child's timeline), so the reconnected
+  // stream then lies BEHIND the playhead.
+  await expect
+    .poll(async () => video.evaluate((el: HTMLVideoElement) => el.currentTime), {
+      timeout: 15000,
+      intervals: [100],
+    })
+    .toBeGreaterThanOrEqual(3);
+  await video.evaluate((el: HTMLVideoElement) => {
+    const w = window as unknown as { __seeks: number[] };
+    w.__seeks = [];
+    el.addEventListener("seeked", () => w.__seeks.push(el.currentTime));
+  });
+  // The server drops the socket now; the shim replaces it at once (its first
+  // reconnect is not rate-limited).
+  await request.post("/__mock/preview-close");
+  await expect
+    .poll(() => sockets.length, { timeout: 5000, intervals: [100] })
+    .toBeGreaterThanOrEqual(2);
+  // Without the snap the playhead would sit past the end of everything the new
+  // socket buffers and never move; with it a seek lands on the first sample.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          (window as unknown as { __seeks: number[] }).__seeks.some((t) => t < 0.6),
+        ),
+      { timeout: 10000, intervals: [100] },
+    )
+    .toBe(true);
+  await expectSteadyPlayback(page);
+  expect(sockets.length, "one reconnect, no churn").toBe(2);
+});
+
+test("a socket that never delivers its init is replaced after the init timeout (#184 round G review 2)", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60000);
+  // Above the real server's own ~10 s wait for the encoder's init.
+  expect(INIT_TIMEOUT_MS).toBe(12000);
+  // The FIRST socket opens but stays silent (an encoder that never starts).
+  await request.post("/__mock/preview-fault", { data: { hold_init: true } });
+  try {
+    const sockets = watchPreviewSockets(page);
+    await startPreview(page);
+    await expect
+      .poll(() => sockets.length, { timeout: 20000, intervals: [100] })
+      .toBeGreaterThanOrEqual(2);
+    const waited = sockets[1].openedAt - sockets[0].openedAt;
+    expect(waited, "not replaced before the init timeout").toBeGreaterThanOrEqual(
+      INIT_TIMEOUT_MS - 500,
+    );
+    expect(waited, "replaced soon after the init timeout").toBeLessThanOrEqual(
+      INIT_TIMEOUT_MS + 2500,
+    );
+    expect(sockets[0].pings, "no pings before an init").toBe(0);
+    await expectSteadyPlayback(page);
     expect(sockets.length, "one reconnect, no churn").toBe(2);
   } finally {
     await request.post("/__mock/preview-fault", { data: {} });
