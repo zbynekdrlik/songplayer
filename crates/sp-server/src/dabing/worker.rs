@@ -113,9 +113,10 @@ fn ffmpeg_path(tools_dir: &Path) -> PathBuf {
 
 /// The Python tool scripts the dub worker materialises into `tools_dir` (embedded
 /// at compile time): the worker itself PLUS `dub_voice_check.py`, which the child
-/// imports for the #184 round-E per-chunk voice-band guard. Pure — unit-tested so
-/// the guard's helper module can never silently stop shipping to the box.
-fn embedded_tool_scripts() -> [(&'static str, &'static str); 2] {
+/// imports for the #184 round-E per-chunk voice-band guard, and `dub_loudness.py`
+/// (#184 round F), the loudness rules the assembly imports at module load. Pure —
+/// unit-tested so a helper module can never silently stop shipping to the box.
+fn embedded_tool_scripts() -> [(&'static str, &'static str); 3] {
     [
         (
             "dub_worker.py",
@@ -124,6 +125,10 @@ fn embedded_tool_scripts() -> [(&'static str, &'static str); 2] {
         (
             "dub_voice_check.py",
             include_str!("../../../../scripts/dub_voice_check.py"),
+        ),
+        (
+            "dub_loudness.py",
+            include_str!("../../../../scripts/dub_loudness.py"),
         ),
     ]
 }
@@ -579,8 +584,9 @@ impl DubWorker {
 
     /// Materialise the dub tool scripts into `tools_dir` (embedded at compile
     /// time), rewriting only the stale ones. Mirrors `StemWorker::ensure_script`;
-    /// ships `dub_worker.py` AND `dub_voice_check.py` (the child imports the latter
-    /// for the round-E voice-band guard). Returns the worker script path.
+    /// ships `dub_worker.py` plus the helpers it imports: `dub_voice_check.py`
+    /// (the round-E voice-band guard) and `dub_loudness.py` (the round-F
+    /// loudness-matched assembly). Returns the worker script path.
     async fn ensure_script(&self) -> anyhow::Result<PathBuf> {
         let tools_dir = self.script_path.parent().unwrap_or_else(|| Path::new("."));
         tokio::fs::create_dir_all(tools_dir).await?;
@@ -655,10 +661,13 @@ mod tests {
     }
 
     #[test]
-    fn embedded_tool_scripts_ship_worker_and_voice_check() {
+    fn embedded_tool_scripts_ship_worker_and_helpers() {
         let scripts = embedded_tool_scripts();
         let names: Vec<&str> = scripts.iter().map(|(n, _)| *n).collect();
-        assert_eq!(names, vec!["dub_worker.py", "dub_voice_check.py"]);
+        assert_eq!(
+            names,
+            vec!["dub_worker.py", "dub_voice_check.py", "dub_loudness.py"]
+        );
         for (name, content) in scripts {
             assert!(!content.is_empty(), "{name} embedded empty");
         }
@@ -670,6 +679,21 @@ mod tests {
         assert!(
             scripts[1].1.contains("MAX_HIGH_BAND_FRACTION"),
             "dub_voice_check.py is not the round-E high-band module"
+        );
+        // #184 round F: the worker imports `dub_loudness` for the loudness-matched
+        // assembly, so it must ship next to it (a missing module = every dub fails).
+        let loudness = scripts
+            .iter()
+            .find(|(n, _)| *n == "dub_loudness.py")
+            .map(|(_, c)| *c)
+            .unwrap_or("");
+        assert!(
+            loudness.contains("def build_loudnorm_second_pass"),
+            "dub_loudness.py (round-F loudness rules) is not shipped"
+        );
+        assert!(
+            scripts[0].1.contains("import dub_loudness"),
+            "dub_worker.py does not import the shipped dub_loudness module"
         );
     }
 

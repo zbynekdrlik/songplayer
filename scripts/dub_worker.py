@@ -29,6 +29,10 @@ import time
 import wave
 from statistics import median
 
+# #184 round F: the loudness rules ship next to this script (the Rust worker
+# materialises it into the same tools dir, which is on sys.path for the child).
+import dub_loudness as dl
+
 INPUT_SR = 16000
 OUTPUT_SR = 24000
 FINAL_SR = 48000
@@ -305,6 +309,19 @@ def _run(args: list[str]) -> None:
         raise RuntimeError(
             f"command failed ({args[0]}, rc={r.returncode}): {r.stderr[-800:]}"
         )
+
+
+def _run_stderr(args: list[str]) -> str:
+    """Run `args`; return its stderr (ffmpeg prints the loudnorm JSON there).
+    Fails loudly on a non-zero exit, like `_run`."""
+    r = subprocess.run(
+        args, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"command failed ({args[0]}, rc={r.returncode}): {r.stderr[-800:]}"
+        )
+    return r.stderr
 
 
 def _ffmpeg() -> str:
@@ -719,6 +736,82 @@ def _wav_duration_ms(path: str) -> int:
     return int(round(frames / rate * 1000))
 
 
+def _assemble_dub(
+    audio: str,
+    wavs: list[str],
+    placements: list[tuple[float, int]],
+    out: str,
+    work_dir: str,
+) -> dict:
+    """#184 round F: assemble the dub on the video timeline, loudness-matched to
+    the audio it translates (`audio`, the video's normalized original):
+
+    1. measure `audio`'s integrated loudness → `dl.loudness_target` (clamped);
+    2. analyse the assembled mix against that target (loudnorm pass 1, to null);
+    3. write the 48 kHz stereo dub with the LINEAR second pass
+       (`dl.build_loudnorm_second_pass`) to a PARTIAL file, promoted over `out`
+       only once ffmpeg succeeded AND reported its loudness — a failed rebuild
+       never destroys the previous good dub.
+
+    Heartbeats before each full-length pass. Returns the loudness stats (also
+    written, JSON-safe, to `<work_dir>/loudness.json` as box-side evidence). Any
+    ffmpeg failure or unparseable measurement raises — the dub fails loudly
+    rather than shipping at an unknown level."""
+    ff = _ffmpeg()
+    part = dl.partial_out_path(out)
+    # A child hard-killed mid final pass (stall timeout, server exit) never ran
+    # the cleanup below — clear its leftover partial before anything else.
+    if os.path.exists(part):
+        _log(f"dub loudness: removing a stale partial {part} (an earlier run died)")
+        os.remove(part)
+    _heartbeat(work_dir)
+    source = dl.parse_loudnorm_json(_run_stderr(dl.loudness_measure_args(ff, audio)))
+    target = dl.loudness_target(source["input_i"])
+    mix_filter = build_mix_filter(placements)
+    analysis = dl.loudnorm_analysis_filter(target)
+    _heartbeat(work_dir)
+    mix = dl.parse_loudnorm_json(
+        _run_stderr(dl.assembly_args(ff, wavs, mix_filter, analysis, None, FINAL_SR))
+    )
+    second = dl.build_loudnorm_second_pass(mix, target)
+    _heartbeat(work_dir)
+    try:
+        applied = dl.parse_loudnorm_json(
+            _run_stderr(dl.assembly_args(ff, wavs, mix_filter, second, part, FINAL_SR))
+        )
+        os.replace(part, out)
+    except BaseException:
+        # The previous good dub stays; drop the half-written partial, then
+        # re-raise the ORIGINAL failure (a cleanup error is logged, not raised).
+        if os.path.exists(part):
+            try:
+                os.remove(part)
+            except OSError as e:
+                _log(f"dub loudness: could not remove partial {part}: {e}")
+        raise
+    stats = {
+        "source_i": source["input_i"],
+        "target_i": target,
+        "mix_i": mix["input_i"],
+        "output_i": applied.get("output_i"),
+        "normalization_type": applied.get("normalization_type"),
+    }
+    if stats["normalization_type"] != "linear":
+        _log(
+            "dub loudness: WARNING loudnorm fell back to "
+            f"{stats['normalization_type']} mode (the linear gain would breach "
+            f"TP {dl.DUB_TRUE_PEAK} or the mix LRA exceeds {dl.DUB_LRA})"
+        )
+    with open(os.path.join(work_dir, "loudness.json"), "w", encoding="utf-8") as f:
+        json.dump(dl.json_safe_stats(stats), f, allow_nan=False)
+    _log(
+        f"dub loudness: source {stats['source_i']:.2f} LUFS -> target "
+        f"{target:.2f}; mix {stats['mix_i']:.2f} -> output {stats['output_i']} "
+        f"({stats['normalization_type']})"
+    )
+    return stats
+
+
 def cmd_live_translate(args: argparse.Namespace) -> None:
     os.makedirs(args.work_dir, exist_ok=True)
     with open(args.chunk_plan, encoding="utf-8") as f:
@@ -758,25 +851,14 @@ def cmd_live_translate(args: argparse.Namespace) -> None:
         accepted_in.extend(fed_in)
 
     # Assemble the dub on the video timeline: place each chunk at its at_ms with
-    # its atempo, mix, 48 kHz stereo, loudnorm -16 (owner-approved dub-only mix).
+    # its atempo, mix, 48 kHz stereo. #184 round F (owner verdict 2026-09-23,
+    # #184 comment 5793796815 — "rovnaké pomery = rovnaká hlasitosť"): the mix is
+    # normalized to the MEASURED loudness of the audio it translates (clamped
+    # -24..-10 LUFS) with a two-pass LINEAR loudnorm — no longer a fixed
+    # single-pass dynamic -16, which left the dub ~1.6 LU under the original.
     placements = [(float(r["tempo"]), int(r["at_ms"])) for r in results]
     wavs = [os.path.join(args.work_dir, f"chunk_{r['index']}.wav") for r in results]
-    filt = build_mix_filter(placements)
-    mix_args = [_ffmpeg(), "-hide_banner", "-nostdin", "-y"]
-    for w in wavs:
-        mix_args += ["-i", w]
-    mix_args += [
-        "-filter_complex",
-        f"{filt};[mix]loudnorm=I=-16:TP=-1.5:LRA=11[out]",
-        "-map",
-        "[out]",
-        "-ar",
-        str(FINAL_SR),
-        "-ac",
-        "2",
-        args.out,
-    ]
-    _run(mix_args)
+    _assemble_dub(args.audio, wavs, placements, args.out, args.work_dir)
 
     # Transcripts JSON for D3 (EN + SK, per-chunk with timeline placement).
     transcripts = build_transcripts(results)

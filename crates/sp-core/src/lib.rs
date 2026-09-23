@@ -7,6 +7,7 @@ pub mod config;
 pub mod genlock;
 pub mod health;
 pub mod lyrics;
+pub mod lyrics_follow;
 pub mod metadata;
 pub mod mixer_model;
 pub mod models;

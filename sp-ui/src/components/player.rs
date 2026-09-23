@@ -33,7 +33,7 @@ struct SetModeBody {
 /// present `web-sys` `Performance` clock; `0` if the clock is unavailable (never
 /// in the running CSR app — the display rule just falls back to the live
 /// position, which is the safe default).
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     web_sys::window()
         .and_then(|w| w.performance())
         .map(|p| p.now())
