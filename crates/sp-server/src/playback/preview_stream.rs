@@ -21,6 +21,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 
@@ -299,6 +300,17 @@ pub fn align_block(wall_frames: u64, written_frames: u64, block_frames: usize) -
     }
 }
 
+/// One post-mix audio block on its way to the encoder's audio feeder (#184
+/// round G3): the interleaved-stereo samples plus WHEN the decode seam offered
+/// them. The feeder places a block by this ARRIVAL time, so however long it
+/// waited in the bounded channel (the feeder blocked on a full socket) can never
+/// shift the preview audio later — that invisible wait was the ~10 s fader lag.
+#[derive(Debug)]
+pub struct AudioBlock {
+    pub arrival: Instant,
+    pub samples: Vec<f32>,
+}
+
 /// State shared between the decode-side taps, the WS viewers, and the encoder
 /// child. Held behind an `Arc` by [`StreamTap`].
 pub struct StreamShared {
@@ -315,8 +327,8 @@ pub struct StreamShared {
     encoder_running: AtomicBool,
     video_tx: Sender<Vec<u8>>,
     video_rx: Receiver<Vec<u8>>,
-    audio_tx: Sender<Vec<f32>>,
-    audio_rx: Receiver<Vec<f32>>,
+    audio_tx: Sender<AudioBlock>,
+    audio_rx: Receiver<AudioBlock>,
     /// Recycled 640×360 NV12 buffers (avoids a per-frame alloc while watched).
     pool: Mutex<Vec<Vec<u8>>>,
     /// fMP4 fragment relay the child's reader thread feeds and viewers read.
@@ -365,7 +377,8 @@ impl StreamShared {
 
     /// Emit/decode-thread hot path: offer one post-mix interleaved-f32 audio
     /// block (the wall mix — karaoke/dub included). No viewer = one relaxed
-    /// load; a full channel drops the block. Never blocks the caller.
+    /// load; a full channel drops the block. Never blocks the caller. With a
+    /// viewer the block is stamped with its arrival time (#184 round G3).
     pub fn offer_audio(&self, samples: &[f32], _sample_rate: u32, channels: u32) {
         if !self.has_viewer() {
             return;
@@ -375,7 +388,10 @@ impl StreamShared {
         // would play at double speed). [`to_stereo`] upmixes mono and drops any
         // unexpected channel count.
         if let Some(block) = to_stereo(samples, channels) {
-            let _ = self.audio_tx.try_send(block);
+            let _ = self.audio_tx.try_send(AudioBlock {
+                arrival: Instant::now(),
+                samples: block,
+            });
         }
     }
 
@@ -412,7 +428,7 @@ impl StreamShared {
     pub fn video_receiver(&self) -> Receiver<Vec<u8>> {
         self.video_rx.clone()
     }
-    pub fn audio_receiver(&self) -> Receiver<Vec<f32>> {
+    pub fn audio_receiver(&self) -> Receiver<AudioBlock> {
         self.audio_rx.clone()
     }
     /// The fragment relay (reader thread feeds it, WS viewers read it).

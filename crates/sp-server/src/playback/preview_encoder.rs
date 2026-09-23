@@ -727,7 +727,7 @@ fn spawn_audio_feeder(
             let mut bytes: Vec<u8> = Vec::new();
             while !shutdown.load(Ordering::Relaxed) {
                 let (pad, block) = match rx.recv_timeout(Duration::from_millis(200)) {
-                    Ok(block) => {
+                    Ok(super::preview_stream::AudioBlock { samples: block, .. }) => {
                         let a = align_block(wall_frames(), written_frames, block.len() / 2);
                         (a.pad_frames, Some((block, a.skip_frames)))
                     }
