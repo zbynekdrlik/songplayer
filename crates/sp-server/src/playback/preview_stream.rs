@@ -260,6 +260,19 @@ pub fn align_timeout(wall_frames: u64, written_frames: u64) -> usize {
     }
 }
 
+/// The part of an interleaved-stereo block the feeder writes after
+/// [`align_block`] asked it to drop the block's first `skip_frames` frames
+/// (#184 round G2): an index range into the block's `block_samples` f32
+/// samples that starts on a frame boundary and covers only WHOLE frames. A
+/// trailing lone sample (an odd-length block) is never written — it would swap
+/// L/R for the rest of the child — so the frames written are exactly
+/// `range.len() / 2`. A skip past the block yields an empty range at its end.
+pub fn block_tail_range(skip_frames: usize, block_samples: usize) -> std::ops::Range<usize> {
+    let whole = block_samples - block_samples % 2;
+    let start = skip_frames.saturating_mul(2).min(whole);
+    start..whole
+}
+
 /// Keep the preview's SAMPLE-COUNT audio timeline on the video's WALL-CLOCK
 /// timeline in BOTH directions for one block of `block_frames` stereo frames
 /// (#184 round G2, replacing the add-only #178 item-15 gap fill): pad up to the

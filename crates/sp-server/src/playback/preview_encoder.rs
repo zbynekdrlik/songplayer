@@ -28,7 +28,7 @@ use tracing::{info, warn};
 use super::fmp4_relay::BoxSplitter;
 use super::preview_stream::{
     OUT_H, OUT_W, PREVIEW_AUDIO_FRAMES_PER_MS, StreamShared, align_block, align_timeout,
-    audio_preroll_samples,
+    audio_preroll_samples, block_tail_range,
 };
 
 /// Encoder preference ladder: hardware first, software last.
@@ -745,8 +745,8 @@ fn spawn_audio_feeder(
                 }
                 if let Some((block, skip)) = block {
                     // Drop the block's OLDEST `skip` frames (a late burst is
-                    // trimmed, never appended behind silence).
-                    let tail = &block[(skip * 2).min(block.len())..];
+                    // trimmed, never appended behind silence); whole frames only.
+                    let tail = &block[block_tail_range(skip, block.len())];
                     if !tail.is_empty() {
                         bytes.clear();
                         bytes.reserve(tail.len() * 4);
