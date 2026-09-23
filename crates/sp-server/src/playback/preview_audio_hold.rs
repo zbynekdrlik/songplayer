@@ -116,7 +116,7 @@ impl AudioHold {
     /// When that block is due to be written: `lead − write_ahead` after it
     /// arrived, i.e. exactly when [`Self::position_at`] reaches its target.
     pub fn due_us(&self, arrival_us: u64) -> u64 {
-        arrival_us
+        arrival_us + self.lead_us - self.ahead_us
     }
 
     /// Hold one tapped block (arrival µs since the feeder started). Past
