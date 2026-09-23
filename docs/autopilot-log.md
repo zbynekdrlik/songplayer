@@ -45,3 +45,9 @@ One terse line per issue/round: decisions, key commits, verification.
 - Version 0.64.0-dev.4. Ships with round G in ONE deploy (base 34dfd28, unpushed).
 
 - 2026-09-22 · #185 (Dabing D6 cross-worker priority gate) — delivered by #184 round G0.1 (merge 4b8731b), released in 0.64.0 via PR #205 (merge 6916856); box: dub wait 2.9 h → ~13 s. #200 closed as overcome (fix 435b3ac in 0.63.0). #184 stays open on the owner's wall re-acceptance (validator PARTIAL).
+
+- 2026-09-23 · #207 phase-1 lane (v0.65.0-dev.5): commit observability + settings-driven mimalloc purge delay + fallible decoder frame alloc. RED 48f581f → GREEN 145ee9c.
+  - A: new `lyrics/host_commit.rs` — per-minute `host: commit committed_mb=… limit_mb=… free_mb=… pagefile_used_mb=… free_phys_mb=…` (GlobalMemoryStatusEx+GetPerformanceInfo, cfg(windows)) + `GET /api/v1/status.commit` (HostCommitStatus). Logger spawned in lib.rs::start.
+  - B: `heavy_purge_delay_ms` setting → `MIMALLOC_PURGE_DELAY` via `heavy_alloc_env(i64)` + `Containment.purge_delay_ms` (default -1; 0..=600000 valid). `heavy child contained` line gains `purge_delay_ms=`.
+  - C: `frame_pool::try_take`/`FrameAllocFailed`/`alloc_exact` + `DecoderError::FrameAlloc`; mf_reader uses try_take (Unlock-on-error); `playback/frame_alloc.rs` maps it to a dropped frame + rate-limited WARN + `frames_dropped_alloc=` on the loop-stats line (pipeline match-guard, line-neutral).
+  - Phases 2 (box purge-delay measurement) + 3 (zombie/section commit hunt) remain the main session's.
