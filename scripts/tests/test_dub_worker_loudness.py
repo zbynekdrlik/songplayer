@@ -337,20 +337,20 @@ def test_assemble_dub_matches_the_dub_to_the_measured_input(tmp_path, monkeypatc
         ],
     )
     work = str(tmp_path)
-    wavs = [os.path.join(work, "chunk_0.wav"), os.path.join(work, "chunk_1.wav")]
-    placements = [(1.0, 0), (1.05, 60_000)]
+    wav = os.path.join(work, "dub_placed.wav")
     out = os.path.join(work, "x_dub.flac")
 
-    stats = dw._assemble_dub("orig.flac", wavs, placements, out, work)
+    stats = dw._assemble_dub("orig.flac", wav, out, work)
 
     assert len(calls) == 3
     # 1. the INPUT (the audio the dub translates) is measured first.
     assert calls[0] == dl.loudness_measure_args("ff", "orig.flac")
-    mix = dw.build_mix_filter(placements)
+    # The ONE placed output stream (#184 round H step 2), resampled into [mix].
+    mix = dw.stream_filter()
     # 2. the assembled mix is analysed against the measured target, to null.
     assert calls[1] == dl.assembly_args(
         "ff",
-        wavs,
+        [wav],
         mix,
         "loudnorm=I=-14.52:TP=-1.5:LRA=11:print_format=json",
         None,
@@ -359,7 +359,7 @@ def test_assemble_dub_matches_the_dub_to_the_measured_input(tmp_path, monkeypatc
     # 3. the linear second pass with the mix's measurements writes the PARTIAL.
     assert calls[2] == dl.assembly_args(
         "ff",
-        wavs,
+        [wav],
         mix,
         "loudnorm=I=-14.52:TP=-1.5:LRA=11:"
         "measured_I=-17.84:measured_LRA=7.30:measured_TP=-5.50:"
@@ -398,7 +398,7 @@ def test_assemble_dub_clamps_a_quiet_input(tmp_path, monkeypatch):
     work = str(tmp_path)
     out = os.path.join(work, "o_dub.flac")
     stats = dw._assemble_dub(
-        "orig.flac", [os.path.join(work, "chunk_0.wav")], [(1.0, 0)], out, work
+        "orig.flac", os.path.join(work, "dub_placed.wav"), out, work
     )
     assert stats["source_i"] == -29.4
     assert stats["target_i"] == -24.0
@@ -421,9 +421,7 @@ def test_assemble_dub_failed_final_pass_keeps_the_previous_dub(tmp_path, monkeyp
         fail_on=3,
     )
     with pytest.raises(RuntimeError):
-        dw._assemble_dub(
-            "orig.flac", [os.path.join(work, "chunk_0.wav")], [(1.0, 0)], out, work
-        )
+        dw._assemble_dub("orig.flac", os.path.join(work, "dub_placed.wav"), out, work)
     with open(out, encoding="utf-8") as f:
         assert f.read() == "OLD"
     assert not os.path.exists(dl.partial_out_path(out))
@@ -463,9 +461,7 @@ def test_assemble_dub_promotes_the_partial_with_the_posix_rename(tmp_path, monke
     monkeypatch.setattr(dw.wr, "replace_file", spy_replace_file)
     monkeypatch.setattr(dw.os, "replace", no_os_replace)
 
-    dw._assemble_dub(
-        "orig.flac", [os.path.join(work, "chunk_0.wav")], [(1.0, 0)], out, work
-    )
+    dw._assemble_dub("orig.flac", os.path.join(work, "dub_placed.wav"), out, work)
     monkeypatch.undo()
 
     assert promoted == [(dl.partial_out_path(out), out)]
@@ -489,9 +485,7 @@ def test_assemble_dub_failed_promotion_keeps_the_previous_dub(tmp_path, monkeypa
 
     monkeypatch.setattr(dw.wr, "replace_file", denied)
     with pytest.raises(PermissionError):
-        dw._assemble_dub(
-            "orig.flac", [os.path.join(work, "chunk_0.wav")], [(1.0, 0)], out, work
-        )
+        dw._assemble_dub("orig.flac", os.path.join(work, "dub_placed.wav"), out, work)
     with open(out, encoding="utf-8") as f:
         assert f.read() == "OLD"
     assert not os.path.exists(dl.partial_out_path(out))
@@ -510,9 +504,7 @@ def test_assemble_dub_unparseable_final_report_keeps_the_previous_dub(
         [_loudnorm_stderr(SOURCE_BLOCK), _loudnorm_stderr(MIX_BLOCK), "no json\n"],
     )
     with pytest.raises(ValueError):
-        dw._assemble_dub(
-            "orig.flac", [os.path.join(work, "chunk_0.wav")], [(1.0, 0)], out, work
-        )
+        dw._assemble_dub("orig.flac", os.path.join(work, "dub_placed.wav"), out, work)
     with open(out, encoding="utf-8") as f:
         assert f.read() == "OLD"
     assert not os.path.exists(dl.partial_out_path(out))
@@ -532,8 +524,7 @@ def test_assemble_dub_warns_when_loudnorm_fell_back_to_dynamic(tmp_path, monkeyp
     work = str(tmp_path)
     stats = dw._assemble_dub(
         "orig.flac",
-        [os.path.join(work, "chunk_0.wav")],
-        [(1.0, 0)],
+        os.path.join(work, "dub_placed.wav"),
         os.path.join(work, "x_dub.flac"),
         work,
     )
@@ -557,8 +548,7 @@ def test_assemble_dub_linear_pass_logs_no_warning(tmp_path, monkeypatch):
     work = str(tmp_path)
     dw._assemble_dub(
         "orig.flac",
-        [os.path.join(work, "chunk_0.wav")],
-        [(1.0, 0)],
+        os.path.join(work, "dub_placed.wav"),
         os.path.join(work, "x_dub.flac"),
         work,
     )
@@ -578,8 +568,7 @@ def test_assemble_dub_writes_strict_json_for_a_silent_source(tmp_path, monkeypat
     work = str(tmp_path)
     dw._assemble_dub(
         "orig.flac",
-        [os.path.join(work, "chunk_0.wav")],
-        [(1.0, 0)],
+        os.path.join(work, "dub_placed.wav"),
         os.path.join(work, "x_dub.flac"),
         work,
     )
@@ -602,7 +591,5 @@ def test_assemble_dub_clears_a_stale_partial_first(tmp_path, monkeypatch):
         f.write("STALE")
     _fake_ffmpeg(monkeypatch, [], fail_on=1)
     with pytest.raises(RuntimeError):
-        dw._assemble_dub(
-            "orig.flac", [os.path.join(work, "chunk_0.wav")], [(1.0, 0)], out, work
-        )
+        dw._assemble_dub("orig.flac", os.path.join(work, "dub_placed.wav"), out, work)
     assert not os.path.exists(part)

@@ -1,26 +1,24 @@
 //! Background dub-synthesis worker (#183 D4).
 //!
 //! Mirrors `stems/worker.rs`: a 10 s tick that, for the next dub-requested,
-//! downloaded video with stems ready, runs the Gemini Live Translate child under
-//! the shared heavy slot at BELOW_NORMAL priority (never gating playback — the
-//! owner's "processing keeps running during playback at reduced priority" rule).
-//! It computes the chunk plan (ffmpeg `silencedetect` → [`chunk_plan::plan_chunks`]),
-//! runs the child, cross-checks the per-chunk drift against
-//! [`chunk_plan::placement_for`], and records `dub_status = ready`.
+//! downloaded video, runs the Gemini Live Translate child under the shared heavy
+//! slot at BELOW_NORMAL priority (never gating playback — the owner's "processing
+//! keeps running during playback at reduced priority" rule). #184 round H step 2:
+//! the child streams the whole video's audio (the vocals stem when it is ready,
+//! else the original — [`dub_input_audio`]) through ONE continuous Live session
+//! with the model + voice from the `dub_model` / `dub_voice` settings; the worker
+//! logs the child's session stats and records `dub_status = ready`.
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Context;
 use sqlx::SqlitePool;
-use tokio::process::Command;
 use tokio::sync::{RwLock, broadcast};
 use tracing::{info, warn};
 
-use crate::dabing::chunk_plan::{self, ChunkPlanConfig};
 use crate::db::models_dabing;
 use crate::lyrics::heavy_plan::HeavyStepPlan;
 use crate::lyrics::idle_gate::{startup_floor_defers, wall_activity_from};
@@ -30,10 +28,6 @@ const TICK: Duration = Duration::from_secs(10);
 
 /// Backoff after a failed dub attempt before the row is retried.
 const DUB_BACKOFF: Duration = Duration::from_secs(300);
-
-/// Max acceptable per-chunk drift; a chunk beyond this is WARN-logged (not fatal —
-/// the mix is still played, the owner's ear is the final verdict).
-pub const DUB_MAX_DRIFT_MS: i64 = 2_000;
 
 /// The heavy-child wall-clock ETA used only for the stall-wait log line: the
 /// audio duration (real-time streaming) plus generous drain headroom.
@@ -67,20 +61,11 @@ pub fn worker_enabled(raw: Option<&str>) -> bool {
     }
 }
 
-/// Parse the `dub_pace` setting — the Live-input pacing factor (`1.0` = real
-/// time, the default; `2.0` = twice real time). Clamped to `0.5..=4.0`; a bad
-/// value falls back to real time. Pure — unit-tested.
-pub fn dub_pace_from(raw: Option<&str>) -> f32 {
-    match raw.and_then(|v| v.trim().parse::<f32>().ok()) {
-        Some(v) if v.is_finite() && v > 0.0 => v.clamp(0.5, 4.0),
-        _ => 1.0,
-    }
-}
-
-/// Parse the `dub_voice` setting — the pinned Gemini Live Translate output voice
-/// (#184 round C). Absent/blank → the catalogue default (`Charon`); any non-blank
-/// name is trimmed and passed through (the catalogue is not enforced here, so a
-/// future voice needs no code change). Pure — unit-tested.
+/// Parse the `dub_voice` setting (#184 round H step 2). Absent/blank → the
+/// default `speaker` (the speaker's own voice, no `speech_config`); any other
+/// non-blank value is trimmed and passed through as a prebuilt voice name (the
+/// catalogue is not enforced here, so a new voice needs no code change). Pure —
+/// unit-tested.
 pub fn dub_voice_from(raw: Option<&str>) -> String {
     match raw.map(str::trim).filter(|v| !v.is_empty()) {
         Some(v) => v.to_string(),
@@ -88,35 +73,41 @@ pub fn dub_voice_from(raw: Option<&str>) -> String {
     }
 }
 
-/// Parse the `dub_session_max_s` setting — the dub Live-session length cap in
-/// SECONDS (#184 round E), returned in MILLISECONDS for `plan_chunks`. Absent /
-/// blank / non-numeric → the default ceiling ([`chunk_plan::DUB_SESSION_MAX_MS`]);
-/// a numeric value is clamped to `60..=480` seconds so a session is never shorter
-/// than a minute nor longer than the old 8-min ceiling. Pure — unit-tested.
-pub fn dub_session_max_ms_from(raw: Option<&str>) -> u64 {
-    match raw.and_then(|v| v.trim().parse::<u64>().ok()) {
-        Some(secs) => secs.clamp(60, 480) * 1000,
-        None => chunk_plan::DUB_SESSION_MAX_MS,
+/// Parse the `dub_model` setting (#184 round H step 2) — the Live Translate model
+/// the dub session uses. Absent/blank → [`sp_core::config::DEFAULT_DUB_MODEL`];
+/// any non-blank id is trimmed and passed through, so upgrading to a newer model
+/// is a setting change. Pure — unit-tested.
+pub fn dub_model_from(raw: Option<&str>) -> String {
+    match raw.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(v) => v.to_string(),
+        None => sp_core::config::DEFAULT_DUB_MODEL.to_string(),
     }
 }
 
-/// The bundled ffmpeg path (next to the other tools). Mirrors
-/// `tools::ffmpeg_filename` without depending on its visibility.
-fn ffmpeg_path(tools_dir: &Path) -> PathBuf {
-    let name = if cfg!(windows) {
-        "ffmpeg.exe"
-    } else {
-        "ffmpeg"
-    };
-    tools_dir.join(name)
+/// The audio the dub session translates (#184 round H step 2): the video's
+/// VOCALS stem when the stems worker finished (`stem_status = 'done'`), the DB
+/// carries its path and the file exists — a cleaner input at no extra cost —
+/// else the normalized ORIGINAL. Pure — unit-tested (the caller checks the file).
+pub fn dub_input_audio(
+    original: &str,
+    vocals: Option<&str>,
+    stem_status: Option<&str>,
+    vocals_exists: bool,
+) -> PathBuf {
+    match vocals {
+        Some(v) if !v.is_empty() && stem_status == Some("ready") && vocals_exists => {
+            PathBuf::from(v)
+        }
+        _ => PathBuf::from(original),
+    }
 }
 
 /// The Python tool scripts the dub worker materialises into `tools_dir` (embedded
-/// at compile time): the worker itself PLUS `dub_voice_check.py`, which the child
-/// imports for the #184 round-E per-chunk voice-band guard, and `dub_loudness.py`
-/// (#184 round F), the loudness rules the assembly imports at module load, and
-/// `win_replace.py` (#184 round F2), the POSIX-semantics rename that promotes the
-/// finished dub even while SongPlayer holds it open. Pure — unit-tested so a
+/// at compile time): the worker itself PLUS the modules it imports at load —
+/// `dub_live_session.py` (#184 round H step 2, the ONE continuous Live session),
+/// `dub_loudness.py` (#184 round F, the loudness rules of the assembly) and
+/// `win_replace.py` (#184 round F2, the POSIX-semantics rename that promotes the
+/// finished dub even while SongPlayer holds it open). Pure — unit-tested so a
 /// helper module can never silently stop shipping to the box.
 fn embedded_tool_scripts() -> [(&'static str, &'static str); 4] {
     [
@@ -310,9 +301,7 @@ impl DubWorker {
         // (never a `record_dub_deferral`); re-picked next tick. Both guards are
         // held across `synthesize` — the deep acquire in
         // `dabing::child::run_live_translate` is gone (a second acquire on the
-        // same task would deadlock the Semaphore(1)); the light silencedetect
-        // pass inside `synthesize` now runs while this dub holds the slot, so no
-        // other heavy child runs alongside it.
+        // same task would deadlock the Semaphore(1)).
         let _dub_want = crate::lyrics::heavy_slot::dub_slot_want_guard();
         let _slot =
             match crate::lyrics::heavy_slot::acquire_slot_for_spawn("dub live-translate").await {
@@ -354,8 +343,9 @@ impl DubWorker {
         }
     }
 
-    /// Run the whole synthesis for one job: chunk plan → child → drift check.
-    /// Returns the dub file path on success.
+    /// Run the whole synthesis for one job: resolve input/model/voice → the ONE
+    /// continuous-session child → post-checks + D3 subtitles. Returns the dub
+    /// file path on success.
     async fn synthesize(
         &self,
         python: &Path,
@@ -372,52 +362,26 @@ impl DubWorker {
             .join(format!("{}_dub", job.youtube_id));
         tokio::fs::create_dir_all(&work_dir).await.ok();
 
-        // 1. Chunk plan from ffmpeg silencedetect (BELOW_NORMAL, a light one-time
-        //    pass), parsed + planned by the pure chunk_plan. #144 r2: the caller
-        //    (`process_next`) now holds the heavy slot across this, so the pass no
-        //    longer overlaps another heavy child.
-        let stderr = self.run_silencedetect(&audio_path).await?;
-        let (detected_total, silences) = chunk_plan::parse_silencedetect(&stderr);
-        let total_ms = detected_total
-            .or_else(|| job.duration_ms.map(|d| d.max(0) as u64))
-            .filter(|&t| t > 0)
-            .ok_or_else(|| anyhow::anyhow!("dub: could not determine audio duration"))?;
-        // #184 round E: cap the Live session at the `dub_session_max_s` setting
-        // (default 120 s) so the pinned voice does not drift inside a long session.
-        let session_max_ms = dub_session_max_ms_from(
-            crate::db::models::get_setting(&self.pool, sp_core::config::SETTING_DUB_SESSION_MAX_S)
-                .await
-                .ok()
-                .flatten()
-                .as_deref(),
-        );
-        let plan_cfg = ChunkPlanConfig {
-            min_pause_ms: chunk_plan::MIN_PAUSE_MS,
-            max_chunk_ms: session_max_ms,
+        // #184 round H step 2: the session input — the vocals stem when ready.
+        let vocals_exists = match job.vocals_file_path.as_deref() {
+            Some(v) if !v.is_empty() => tokio::fs::try_exists(v).await.unwrap_or(false),
+            _ => false,
         };
-        let chunks = chunk_plan::plan_chunks(&silences, total_ms, &plan_cfg);
-        let plan_json_path = work_dir.join("chunk_plan.json");
-        tokio::fs::write(&plan_json_path, serde_json::to_vec(&chunks)?).await?;
-        info!(
-            video_id = job.video_id,
-            total_ms,
-            silences = silences.len(),
-            chunks = chunks.len(),
-            "dub worker: chunk plan ready"
+        let input = dub_input_audio(
+            &job.audio_file_path,
+            job.vocals_file_path.as_deref(),
+            job.stem_status.as_deref(),
+            vocals_exists,
         );
-
-        // 2. Run the Live-Translate child under the heavy slot.
-        let pace = dub_pace_from(
-            crate::db::models::get_setting(&self.pool, "dub_pace")
+        let model = dub_model_from(
+            crate::db::models::get_setting(&self.pool, sp_core::config::SETTING_DUB_MODEL)
                 .await
                 .ok()
                 .flatten()
                 .as_deref(),
         );
-        // #184 round C: resolve + PIN one voice for this video. Persist it in the
-        // repurposed `dub_voice_ref_path` column so a resume/re-run reproduces the
-        // same voice and the dashboard can show it. A persist error is non-fatal —
-        // the synthesis proceeds with the resolved voice regardless.
+        // Persist the resolved voice in the repurposed `dub_voice_ref_path`
+        // column so the dashboard shows it; a persist error is non-fatal.
         let voice = dub_voice_from(
             crate::db::models::get_setting(&self.pool, sp_core::config::SETTING_DUB_VOICE)
                 .await
@@ -437,69 +401,43 @@ impl DubWorker {
         // #203: publish the live containment for the dub child (CPU cap +
         // affinity + memory priority), applied by the shared Job Object seam.
         crate::lyrics::heavy_slot::refresh_containment(&self.pool).await;
+        let total_ms = job.duration_ms.unwrap_or(0).max(0) as u64;
         info!(
             video_id = job.video_id,
-            pace,
+            input = %input.display(),
+            %model,
+            %voice,
             mode = plan.label(),
-            "dub worker: starting live-translate ({} chunks, ~{}s audio)",
-            chunks.len(),
+            "dub worker: starting live-translate (one continuous session, ~{}s audio)",
             total_ms / 1000
         );
         // #144 r2: the dub-priority want + the heavy slot are taken by the caller
         // (`process_next`) BEFORE `synthesize`, and held across it — see there.
-        // The slot is held for this child's whole lifetime; no acquire here.
         let summary = crate::dabing::child::run_live_translate(
             python,
             script_path,
-            &audio_path,
+            &input,
             &out_path,
             &transcripts_path,
-            &plan_json_path,
             &work_dir,
             key,
-            pace,
+            &model,
             &voice,
             dub_eta(total_ms),
             &plan,
         )
         .await?;
-
-        // 3. Drift cross-check: the pure placement_for is the canonical decision;
-        //    log each chunk's drift + warn on the child disagreeing / drift > 2 s.
-        for c in &summary.chunks {
-            let placement = chunk_plan::placement_for(
-                c.chunk_start_ms,
-                c.chunk_len_ms(),
-                c.out_len_ms,
-                c.next_start_ms,
-            );
-            let drift = chunk_plan::drift_ms(c.chunk_len_ms(), c.out_len_ms);
-            if drift.abs() > DUB_MAX_DRIFT_MS {
-                warn!(
-                    video_id = job.video_id,
-                    chunk = c.index,
-                    drift_ms = drift,
-                    "dub worker: chunk drift exceeds {DUB_MAX_DRIFT_MS} ms"
-                );
-            } else {
-                info!(
-                    video_id = job.video_id,
-                    chunk = c.index,
-                    drift_ms = drift,
-                    tempo = c.tempo,
-                    "dub worker: chunk placed"
-                );
-            }
-            if (placement.tempo - c.tempo).abs() > 0.05 {
-                warn!(
-                    video_id = job.video_id,
-                    chunk = c.index,
-                    expected_tempo = placement.tempo,
-                    applied_tempo = c.tempo,
-                    "dub worker: child tempo disagrees with placement_for"
-                );
-            }
-        }
+        let st = &summary.session;
+        info!(
+            video_id = job.video_id,
+            connections = ?st.connections,
+            reconnects = ?st.reconnects,
+            output_to_input = ?st.output_to_input_ratio,
+            max_voiced_gap_s = ?st.max_voiced_gap_s,
+            latency_ms = ?st.latency_ms,
+            drain = ?st.drain_end_reason,
+            "dub worker: live-translate session done"
+        );
 
         // Post-condition: the dub file must exist and be non-trivial.
         let out = PathBuf::from(&summary.out_path);
@@ -543,39 +481,6 @@ impl DubWorker {
         Ok(out)
     }
 
-    /// Run ffmpeg `silencedetect` on `audio` (BELOW_NORMAL, kill-on-drop, bounded)
-    /// and return its stderr for parsing. Not on the heavy slot — a light,
-    /// one-time decode pass, not the streaming child.
-    async fn run_silencedetect(&self, audio: &Path) -> anyhow::Result<String> {
-        let ffmpeg = ffmpeg_path(&self.tools_dir);
-        let af = format!(
-            "silencedetect=noise=-30dB:d={}",
-            chunk_plan::MIN_PAUSE_MS as f64 / 1000.0
-        );
-        let mut cmd = Command::new(&ffmpeg);
-        cmd.args(["-hide_banner", "-nostats", "-i"]);
-        cmd.arg(audio);
-        cmd.arg("-af").arg(&af);
-        cmd.args(["-f", "null", "-"]);
-        cmd.stdout(Stdio::null());
-        cmd.stderr(Stdio::piped());
-        cmd.kill_on_drop(true);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000 | 0x0000_4000); // CREATE_NO_WINDOW | BELOW_NORMAL
-        }
-        let child = cmd
-            .spawn()
-            .context("failed to spawn ffmpeg silencedetect")?;
-        // 20-minute ceiling — decoding a long file, but never the whole stream.
-        let out = tokio::time::timeout(Duration::from_secs(1200), child.wait_with_output())
-            .await
-            .context("ffmpeg silencedetect timed out")?
-            .context("ffmpeg silencedetect wait failed")?;
-        Ok(String::from_utf8_lossy(&out.stderr).into_owned())
-    }
-
     /// First `gemini_api_key` CSV entry (rotation-order preserved), or `None` when
     /// the setting is unset/empty.
     async fn first_gemini_key(&self) -> Option<String> {
@@ -590,8 +495,8 @@ impl DubWorker {
 
     /// Materialise the dub tool scripts into `tools_dir` (embedded at compile
     /// time), rewriting only the stale ones. Mirrors `StemWorker::ensure_script`;
-    /// ships `dub_worker.py` plus the helpers it imports: `dub_voice_check.py`
-    /// (the round-E voice-band guard), `dub_loudness.py` (the round-F
+    /// ships `dub_worker.py` plus the modules it imports: `dub_live_session.py`
+    /// (the round-H continuous session), `dub_loudness.py` (the round-F
     /// loudness-matched assembly) and `win_replace.py` (the round-F2 POSIX
     /// rename of the finished dub). Returns the worker script path.
     async fn ensure_script(&self) -> anyhow::Result<PathBuf> {
@@ -627,39 +532,64 @@ mod tests {
     }
 
     #[test]
-    fn dub_pace_defaults_to_real_time_and_clamps() {
-        assert!((dub_pace_from(None) - 1.0).abs() < 1e-6);
-        assert!((dub_pace_from(Some("2.0")) - 2.0).abs() < 1e-6);
-        assert!((dub_pace_from(Some("bad")) - 1.0).abs() < 1e-6);
-        assert!((dub_pace_from(Some("0")) - 1.0).abs() < 1e-6);
-        assert!((dub_pace_from(Some("9")) - 4.0).abs() < 1e-6); // clamp high
-        assert!((dub_pace_from(Some("0.1")) - 0.5).abs() < 1e-6); // clamp low
-    }
-
-    #[test]
-    fn dub_voice_defaults_to_charon_and_passes_through() {
-        // Absent / blank / whitespace-only → the catalogue default.
-        assert_eq!(dub_voice_from(None), "Charon");
-        assert_eq!(dub_voice_from(Some("")), "Charon");
-        assert_eq!(dub_voice_from(Some("   ")), "Charon");
-        // Any non-blank name passes through, trimmed.
+    fn dub_voice_defaults_to_the_speaker_and_passes_through() {
+        // Absent / blank / whitespace-only → the speaker's own voice.
+        assert_eq!(dub_voice_from(None), "speaker");
+        assert_eq!(dub_voice_from(Some("")), "speaker");
+        assert_eq!(dub_voice_from(Some("   ")), "speaker");
+        assert_eq!(dub_voice_from(Some("speaker")), "speaker");
+        // Any non-blank prebuilt name passes through, trimmed.
         assert_eq!(dub_voice_from(Some("Kore")), "Kore");
-        assert_eq!(dub_voice_from(Some("  Orus  ")), "Orus");
+        assert_eq!(dub_voice_from(Some("  Charon  ")), "Charon");
     }
 
     #[test]
-    fn dub_session_max_ms_defaults_and_clamps() {
-        // Absent / blank / non-numeric → the default 2-minute ceiling (round E).
-        assert_eq!(dub_session_max_ms_from(None), 120_000);
-        assert_eq!(dub_session_max_ms_from(Some("")), 120_000);
-        assert_eq!(dub_session_max_ms_from(Some("   ")), 120_000);
-        assert_eq!(dub_session_max_ms_from(Some("bad")), 120_000);
-        // A valid value is seconds → ms.
-        assert_eq!(dub_session_max_ms_from(Some("60")), 60_000);
-        assert_eq!(dub_session_max_ms_from(Some(" 90 ")), 90_000);
-        // Clamped: below 60 s → 60 s, above 480 s → 480 s.
-        assert_eq!(dub_session_max_ms_from(Some("10")), 60_000);
-        assert_eq!(dub_session_max_ms_from(Some("999")), 480_000);
+    fn dub_model_defaults_to_the_live_translate_preview_and_passes_through() {
+        assert_eq!(dub_model_from(None), "gemini-3.5-live-translate-preview");
+        assert_eq!(
+            dub_model_from(Some("")),
+            "gemini-3.5-live-translate-preview"
+        );
+        assert_eq!(
+            dub_model_from(Some("  ")),
+            "gemini-3.5-live-translate-preview"
+        );
+        assert_eq!(
+            dub_model_from(Some(" gemini-4-live-translate ")),
+            "gemini-4-live-translate"
+        );
+    }
+
+    #[test]
+    fn dub_input_is_the_vocals_stem_only_when_done_and_present() {
+        let orig = "/c/a_audio.flac";
+        let voc = Some("/c/a_audio_vocals.flac");
+        // Stems done + path + file present → the vocals stem.
+        assert_eq!(
+            dub_input_audio(orig, voc, Some("done"), true),
+            PathBuf::from("/c/a_audio_vocals.flac")
+        );
+        // The file is missing on disk → the original.
+        assert_eq!(
+            dub_input_audio(orig, voc, Some("done"), false),
+            PathBuf::from(orig)
+        );
+        // Stems not done (pending / failed / unsupported) → the original.
+        for status in [None, Some("failed"), Some("unsupported"), Some("ready")] {
+            assert_eq!(
+                dub_input_audio(orig, voc, status, true),
+                PathBuf::from(orig)
+            );
+        }
+        // No / empty vocals path → the original.
+        assert_eq!(
+            dub_input_audio(orig, None, Some("done"), true),
+            PathBuf::from(orig)
+        );
+        assert_eq!(
+            dub_input_audio(orig, Some(""), Some("done"), true),
+            PathBuf::from(orig)
+        );
     }
 
     #[test]
@@ -675,7 +605,7 @@ mod tests {
             names,
             vec![
                 "dub_worker.py",
-                "dub_voice_check.py",
+                "dub_live_session.py",
                 "dub_loudness.py",
                 "win_replace.py"
             ]
@@ -683,57 +613,38 @@ mod tests {
         for (name, content) in scripts {
             assert!(!content.is_empty(), "{name} embedded empty");
         }
-        // The shipped scripts really are the round-E modules the guard needs.
+        let worker = scripts[0].1;
+        // #184 round H step 2: the ONE continuous session ships next to the worker
+        // that imports it at module load (a missing module = every dub fails).
         assert!(
-            scripts[0].1.contains("chunk_voice_drift"),
-            "dub_worker.py missing the round-E guard helper"
+            scripts[1].1.contains("class ContinuousSession"),
+            "dub_live_session.py (round-H continuous session) is not shipped"
         );
         assert!(
-            scripts[1].1.contains("MAX_HIGH_BAND_FRACTION"),
-            "dub_voice_check.py is not the round-E high-band module"
+            worker.contains("import dub_live_session"),
+            "dub_worker.py does not import the shipped dub_live_session module"
         );
-        // #184 round F: the worker imports `dub_loudness` for the loudness-matched
-        // assembly, so it must ship next to it (a missing module = every dub fails).
-        let loudness = scripts
-            .iter()
-            .find(|(n, _)| *n == "dub_loudness.py")
-            .map(|(_, c)| *c)
-            .unwrap_or("");
+        // The superseded per-chunk machinery is gone from the shipped worker.
+        for gone in ["chunk_reusable", "build_mix_filter", "chunk_voice_drift"] {
+            assert!(!worker.contains(gone), "dub_worker.py still has {gone}");
+        }
+        // #184 round F: the loudness-matched assembly imports `dub_loudness`.
         assert!(
-            loudness.contains("def build_loudnorm_second_pass"),
+            scripts[2].1.contains("def build_loudnorm_second_pass"),
             "dub_loudness.py (round-F loudness rules) is not shipped"
         );
         assert!(
-            scripts[0].1.contains("import dub_loudness"),
+            worker.contains("import dub_loudness"),
             "dub_worker.py does not import the shipped dub_loudness module"
         );
-        // #184 round F2: the dub is promoted with a POSIX-semantics rename
-        // (`win_replace.replace_file`) so a dub SongPlayer holds open can still be
-        // replaced; the worker imports it at module load, so it must ship too.
-        let replace = scripts
-            .iter()
-            .find(|(n, _)| *n == "win_replace.py")
-            .map(|(_, c)| *c)
-            .unwrap_or("");
+        // #184 round F2: the dub is promoted with a POSIX-semantics rename.
         assert!(
-            replace.contains("FILE_RENAME_FLAG_POSIX_SEMANTICS"),
+            scripts[3].1.contains("FILE_RENAME_FLAG_POSIX_SEMANTICS"),
             "win_replace.py (round-F2 POSIX rename) is not shipped"
         );
         assert!(
-            scripts[0].1.contains("import win_replace"),
+            worker.contains("import win_replace"),
             "dub_worker.py does not import the shipped win_replace module"
-        );
-    }
-
-    #[test]
-    fn ffmpeg_path_is_under_tools_dir() {
-        let p = ffmpeg_path(Path::new("/c/tools"));
-        assert!(p.starts_with("/c/tools"));
-        assert!(
-            p.file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with("ffmpeg")
         );
     }
 }

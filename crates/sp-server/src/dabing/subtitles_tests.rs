@@ -532,3 +532,61 @@ fn deserializes_the_dub_transcripts_json_and_builds_lines() {
     assert_eq!(track.lines[0].start_ms, 0);
     assert_eq!(track.lines[0].end_ms, 1000);
 }
+
+// ── #184 round H step 2: the ONE continuous-session chunk ────────────────────
+
+#[test]
+fn one_continuous_session_chunk_builds_a_monotonic_bilingual_track() {
+    // Exactly the shape `dub_worker.py::build_transcripts` writes for the ONE
+    // continuous Live session: a single chunk covering the whole video
+    // (`at_ms` 0, `tempo` 1.0) whose `sk_timed` are VIDEO-timeline times
+    // (output-transcription arrival − t0 − latency). D3 needs no change.
+    let json = r#"{
+        "engine": "gemini-live-translate",
+        "target_lang": "sk",
+        "chunks": [
+            {"index": 0, "start_ms": 0, "end_ms": 2160000, "at_ms": 0, "tempo": 1.0,
+             "en": "Hello brothers. Today we will talk about faith. Amen.",
+             "sk": "Ahoj bratia. Dnes budeme hovoriť o viere. Amen.",
+             "sk_timed": [
+                {"t_ms": 4000, "text": "Ahoj bratia."},
+                {"t_ms": 5200, "text": "Dnes budeme"},
+                {"t_ms": 6000, "text": " hovoriť o viere."},
+                {"t_ms": 9000, "text": "Amen."}
+             ]}
+        ]
+    }"#;
+    let parsed: DubTranscripts = serde_json::from_str(json).unwrap();
+    assert_eq!(parsed.chunks.len(), 1);
+    let track = transcripts_to_track(&parsed);
+    assert_eq!(track.source, SOURCE_LIVE_TRANSLATE);
+    let got: Vec<(u64, u64, &str, Option<&str>)> = track
+        .lines
+        .iter()
+        .map(|l| (l.start_ms, l.end_ms, l.en.as_str(), l.sk.as_deref()))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (0, 4000, "Hello brothers.", Some("Ahoj bratia.")),
+            (
+                4000,
+                6000,
+                "Today we will talk about faith.",
+                Some("Dnes budeme hovoriť o viere.")
+            ),
+            (6000, 9000, "Amen.", Some("Amen.")),
+        ]
+    );
+    // Monotonic, non-overlapping, every line bilingual.
+    for pair in track.lines.windows(2) {
+        assert!(pair[0].start_ms <= pair[1].start_ms);
+        assert!(pair[0].end_ms <= pair[1].start_ms);
+    }
+    assert!(
+        track
+            .lines
+            .iter()
+            .all(|l| !l.en.is_empty() && l.sk.is_some())
+    );
+}

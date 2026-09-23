@@ -1,11 +1,13 @@
-//! Rust wrapper around `scripts/dub_worker.py live-translate` (#183 D4).
+//! Rust wrapper around `scripts/dub_worker.py live-translate` (#183 D4, #184
+//! round H step 2).
 //!
 //! Mirrors `crate::stems::separator::separate_stems`: spawn the Python child at
 //! BELOW_NORMAL priority under the process-global heavy slot + a Windows Job
-//! Object, bound by the #171 stall-timeout (the child writes `chunk_N.wav` +
-//! `chunk_N.json` and heartbeats into `work_dir`, so a slow-but-progressing
-//! real-time stream is never killed). The child streams the ORIGINAL audio into
-//! the Gemini Live Translate API and writes the Slovak dub on the video timeline.
+//! Object, bound by the #171 stall-timeout (the child heartbeats and writes its
+//! `events.jsonl` into `work_dir`, so a slow-but-progressing real-time stream is
+//! never killed). The child streams the video's audio (the vocals stem when it
+//! exists, else the original) into ONE continuous Gemini Live Translate session
+//! and writes the Slovak dub on the video timeline.
 //!
 //! The Gemini key is passed ONLY through the child's environment
 //! (`GEMINI_API_KEY`) — never on the command line or in a log.
@@ -17,28 +19,27 @@ use std::process::Stdio;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use tokio::process::Command;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::lyrics::heavy_plan::HeavyStepPlan;
 
-/// One chunk's outcome reported by the child (for the drift check + log).
-#[derive(Debug, Clone, Deserialize)]
-pub struct DubChunkResult {
-    pub index: usize,
-    pub chunk_start_ms: u64,
-    pub chunk_end_ms: u64,
-    /// Length of the translated output BEFORE any `atempo` was applied.
-    pub out_len_ms: u64,
-    pub next_start_ms: Option<u64>,
-    /// The `atempo` factor the child actually applied (`1.0` = none).
-    pub tempo: f32,
-}
-
-impl DubChunkResult {
-    /// Source-chunk length.
-    pub fn chunk_len_ms(&self) -> u64 {
-        self.chunk_end_ms.saturating_sub(self.chunk_start_ms)
-    }
+/// The continuous-session stats the child reports (its `session` object) — the
+/// numbers the box acceptance reads. Every field is optional so a missing one
+/// never fails a finished dub.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct DubSessionStats {
+    #[serde(default)]
+    pub connections: Option<u32>,
+    #[serde(default)]
+    pub reconnects: Option<u32>,
+    #[serde(default)]
+    pub output_to_input_ratio: Option<f64>,
+    #[serde(default)]
+    pub max_voiced_gap_s: Option<f64>,
+    #[serde(default)]
+    pub latency_ms: Option<i64>,
+    #[serde(default)]
+    pub drain_end_reason: Option<String>,
 }
 
 /// The summary JSON the child prints on stdout when the dub completes.
@@ -46,21 +47,20 @@ impl DubChunkResult {
 pub struct DubSummary {
     pub out_path: String,
     pub transcripts_path: String,
-    pub chunks: Vec<DubChunkResult>,
+    #[serde(default)]
+    pub session: DubSessionStats,
 }
 
 /// Build the `live-translate` argv (script + flags), in order. NO SECRET here —
 /// the Gemini key is carried in the child's env by [`run_live_translate`]. Pure,
 /// unit-tested.
-#[allow(clippy::too_many_arguments)] // argv builder: six paths + pace + voice
 pub fn live_translate_args(
     script_path: &Path,
     audio_in: &Path,
     out: &Path,
     transcripts: &Path,
-    chunk_plan: &Path,
     work_dir: &Path,
-    pace: f32,
+    model: &str,
     voice: &str,
 ) -> Vec<OsString> {
     vec![
@@ -72,32 +72,30 @@ pub fn live_translate_args(
         out.as_os_str().to_owned(),
         "--transcripts".into(),
         transcripts.as_os_str().to_owned(),
-        "--chunk-plan".into(),
-        chunk_plan.as_os_str().to_owned(),
         "--work-dir".into(),
         work_dir.as_os_str().to_owned(),
-        "--pace".into(),
-        format!("{pace}").into(),
-        // #184 round C: pin the output voice so the whole dub speaks in one voice.
-        "--voice".into(),
+        // #184 round H step 2: the model is a setting (an upgrade = a setting
+        // change); `speaker` = the speaker's own voice, else a pinned prebuilt.
+        "--model".into(),
         voice.into(),
+        "--voice".into(),
+        model.into(),
     ]
 }
 
 /// Run the Live-Translate child, returning its parsed [`DubSummary`]. Holds the
 /// heavy slot for the child's (long, real-time) lifetime. `api_key` is passed via
 /// env only. `plan` supplies BELOW_NORMAL creation flags + the stall window.
-#[allow(clippy::too_many_arguments)] // spawn helper: paths + key + pace + plan
+#[allow(clippy::too_many_arguments)] // spawn helper: paths + key + model + voice + plan
 pub async fn run_live_translate(
     python_path: &Path,
     script_path: &Path,
     audio_in: &Path,
     out: &Path,
     transcripts: &Path,
-    chunk_plan: &Path,
     work_dir: &Path,
     api_key: &str,
-    pace: f32,
+    model: &str,
     voice: &str,
     eta: std::time::Duration,
     plan: &HeavyStepPlan,
@@ -112,12 +110,11 @@ pub async fn run_live_translate(
         audio_in,
         out,
         transcripts,
-        chunk_plan,
         work_dir,
-        pace,
+        model,
         voice,
     ));
-    // The child shells out to ffmpeg by bare name (resample / atempo / mux), so the
+    // The child shells out to ffmpeg by bare name (decode / loudnorm / mux), so the
     // bundled ffmpeg next to the script must be on PATH — same as the stem child.
     if let Some(tools_dir) = script_path.parent() {
         cmd.env(
@@ -151,9 +148,9 @@ pub async fn run_live_translate(
         .stderr
         .take()
         .map(crate::lyrics::child_output::drain_pipe);
-    // #171 stall-bounded wait: the child heartbeats + writes chunk_N.wav into
+    // #171 stall-bounded wait: the child heartbeats + appends events.jsonl in
     // work_dir, so a healthy real-time stream keeps the mtime fresh; a hung child
-    // dies and work_dir is preserved for the next resume.
+    // dies (a re-run starts the session from the beginning).
     let status = crate::lyrics::heavy_plan::wait_with_stall_timeout(
         &mut child,
         work_dir,
@@ -178,9 +175,12 @@ pub async fn run_live_translate(
         warn!("dub live-translate failed ({status}); output tail:\n{tail}");
         anyhow::bail!("dub live-translate exited with status {status}; output tail:\n{tail}");
     }
-    debug!(
+    // The tail carries the session summary line (connections, reconnects,
+    // output/input, max voiced gap, latency) and the loudness line — the box
+    // acceptance reads them from the server log.
+    info!(
         "dub live-translate ok; stderr tail:\n{}",
-        crate::lyrics::child_output::tail_lines(&stderr, 5, 300)
+        crate::lyrics::child_output::tail_lines(&stderr, 8, 400)
     );
 
     // The summary JSON is the LAST non-empty stdout line (the child logs to stderr).
@@ -201,40 +201,45 @@ pub async fn run_live_translate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
-    fn live_translate_args_carry_every_flag_and_no_secret() {
+    fn live_translate_args_carry_model_voice_and_no_chunk_plan_or_secret() {
         let args = live_translate_args(
             Path::new("/t/dub_worker.py"),
-            Path::new("/c/a_audio.flac"),
+            Path::new("/c/a_audio_vocals.flac"),
             Path::new("/c/a_dub.flac"),
             Path::new("/c/a_dub_transcripts.json"),
-            Path::new("/c/w/chunk_plan.json"),
             Path::new("/c/w"),
-            1.0,
-            "Charon",
+            "gemini-3.5-live-translate-preview",
+            "speaker",
         );
         let joined: Vec<String> = args
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(joined[0], "/t/dub_worker.py");
-        assert_eq!(joined[1], "live-translate");
-        for flag in [
-            "--audio",
-            "--out",
-            "--transcripts",
-            "--chunk-plan",
-            "--work-dir",
-            "--pace",
-            "--voice",
-        ] {
-            assert!(joined.iter().any(|a| a == flag), "missing {flag}");
+        assert_eq!(
+            joined,
+            vec![
+                "/t/dub_worker.py",
+                "live-translate",
+                "--audio",
+                "/c/a_audio_vocals.flac",
+                "--out",
+                "/c/a_dub.flac",
+                "--transcripts",
+                "/c/a_dub_transcripts.json",
+                "--work-dir",
+                "/c/w",
+                "--model",
+                "gemini-3.5-live-translate-preview",
+                "--voice",
+                "speaker",
+            ]
+        );
+        // The superseded chunk plan / pacing flags are gone (#184 round H).
+        for gone in ["--chunk-plan", "--pace"] {
+            assert!(!joined.iter().any(|a| a == gone), "{gone} still passed");
         }
-        // The pinned voice follows its flag as a value.
-        let vi = joined.iter().position(|a| a == "--voice").unwrap();
-        assert_eq!(joined[vi + 1], "Charon");
         // No API key ever appears in argv.
         assert!(
             !joined.iter().any(|a| a.contains("GEMINI") || a.len() == 39),
@@ -243,15 +248,28 @@ mod tests {
     }
 
     #[test]
-    fn summary_parses_and_chunk_len_is_derived() {
+    fn summary_parses_the_session_stats() {
         let json = r#"{"out_path":"/c/a_dub.flac","transcripts_path":"/c/a_dub_transcripts.json",
-            "chunks":[{"index":0,"chunk_start_ms":0,"chunk_end_ms":60000,"out_len_ms":58000,
-            "next_start_ms":60000,"tempo":1.0}]}"#;
+            "session":{"connections":4,"reconnects":3,"output_to_input_ratio":1.0012,
+            "max_voiced_gap_s":4.2,"latency_ms":3100,"drain_end_reason":"quiet","errors":[]}}"#;
         let s: DubSummary = serde_json::from_str(json).unwrap();
         assert_eq!(s.out_path, "/c/a_dub.flac");
-        assert_eq!(s.chunks.len(), 1);
-        assert_eq!(s.chunks[0].chunk_len_ms(), 60000);
-        assert_eq!(s.chunks[0].out_len_ms, 58000);
-        let _ = PathBuf::from(&s.out_path);
+        assert_eq!(s.transcripts_path, "/c/a_dub_transcripts.json");
+        assert_eq!(s.session.connections, Some(4));
+        assert_eq!(s.session.reconnects, Some(3));
+        assert_eq!(s.session.output_to_input_ratio, Some(1.0012));
+        assert_eq!(s.session.max_voiced_gap_s, Some(4.2));
+        assert_eq!(s.session.latency_ms, Some(3100));
+        assert_eq!(s.session.drain_end_reason.as_deref(), Some("quiet"));
+    }
+
+    #[test]
+    fn summary_without_session_stats_still_parses() {
+        let s: DubSummary =
+            serde_json::from_str(r#"{"out_path":"/c/a_dub.flac","transcripts_path":"/c/t.json"}"#)
+                .unwrap();
+        assert_eq!(s.out_path, "/c/a_dub.flac");
+        assert_eq!(s.session.connections, None);
+        assert_eq!(s.session.latency_ms, None);
     }
 }

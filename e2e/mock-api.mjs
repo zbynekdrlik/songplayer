@@ -207,8 +207,10 @@ const settings = {
   gemini_api_key: "",
   gemini_model: "gemini-2.5-flash",
   cache_dir: "./cache",
-  // #184 round C: the pinned dub voice (Nastavenia "Hlas dabingu" select).
-  dub_voice: "Charon",
+  // #184 round H step 2: the dub voice (Nastavenia "Hlas dabingu" select) —
+  // `speaker` = the speaker's own voice. `dub_model` is deliberately absent so
+  // the form shows its default.
+  dub_voice: "speaker",
 };
 
 const resolumeHosts = [];
