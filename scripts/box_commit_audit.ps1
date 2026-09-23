@@ -33,11 +33,12 @@ try {
     Write-Output ("free_virtual_MB    = {0}" -f [math]::Round($os.FreeVirtualMemory / 1024))
     Write-Output ("free_physical_MB   = {0}" -f [math]::Round($os.FreePhysicalMemory / 1024))
     try {
-        $pf = Get-CimInstance Win32_PageFileUsage -ErrorAction Stop
-        if ($pf) {
-            Write-Output ("pagefile_alloc_MB  = {0}" -f $pf.AllocatedBaseSize)
-            Write-Output ("pagefile_used_MB   = {0}" -f $pf.CurrentUsage)
-            Write-Output ("pagefile_peak_MB   = {0}" -f $pf.PeakUsage)
+        # @() so a single page file is still an array; sum across all page files.
+        $pf = @(Get-CimInstance Win32_PageFileUsage -ErrorAction Stop)
+        if ($pf.Count -gt 0) {
+            Write-Output ("pagefile_alloc_MB  = {0}" -f ($pf | Measure-Object AllocatedBaseSize -Sum).Sum)
+            Write-Output ("pagefile_used_MB   = {0}" -f ($pf | Measure-Object CurrentUsage -Sum).Sum)
+            Write-Output ("pagefile_peak_MB   = {0}" -f ($pf | Measure-Object PeakUsage -Sum).Sum)
         } else { Write-Output 'pagefile           = n/a - no page file configured' }
     } catch { Write-Output ("pagefile           = n/a - {0}" -f $_.Exception.Message) }
     Write-Output ("pool_paged_MB      = {0}" -f (CtrMB '\Memory\Pool Paged Bytes'))
