@@ -69,7 +69,7 @@ fn admission_low_commit_defers() {
 // ---- memory_ok_for — the worker-level gate BOTH workers call -------------
 // Injecting a low headroom reading proves the deferral without reading real
 // memory. Named per worker so the "lyrics + stems both defer" acceptance is
-// explicit; both call the identical gate via `heavy_step_memory_ok`.
+// explicit; both call the identical gate `memory_ok_for`.
 
 #[test]
 fn lyrics_isolation_defers_when_headroom_low() {
@@ -251,7 +251,7 @@ fn acquire_clears_dub_want_only_for_the_dub_step() {
     assert!(!acquire_clears_dub_want("stem separation"));
     assert!(!acquire_clears_dub_want("isolation"));
     assert!(!acquire_clears_dub_want("mtl align"));
-    // Pinned to the exact name the dub child's `acquire_slot` uses.
+    // Pinned to the exact name the dub's `acquire_slot_for_spawn` uses.
     assert_eq!(DUB_STEP_NAME, "dub live-translate");
 }
 

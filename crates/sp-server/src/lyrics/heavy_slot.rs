@@ -10,13 +10,17 @@
 //! (2026-09-15 07:40 UTC, dump `dumps\SongPlayer.exe.4892.dmp`).
 //!
 //! Three layers, all funnelled through EVERY heavy child spawn:
-//!  1. [`acquire_slot`] — a process-global `tokio::sync::Semaphore(1)`. At most
+//!  1. [`acquire_slot_for_spawn`] — a process-global `tokio::sync::Semaphore(1)`. At most
 //!     ONE heavy child (isolation / mtl / separation) runs process-wide; the
 //!     fair FIFO `acquire().await` makes the two workers alternate naturally.
-//!  2. [`heavy_step_memory_ok`] — a `GlobalMemoryStatusEx` headroom check
-//!     BEFORE acquiring the slot (owner's order): both free physical RAM and
-//!     free commit must be ≥ [`HEAVY_STEP_MIN_FREE_BYTES`], else the tick defers
-//!     with NO backoff and re-checks next tick.
+//!  2. [`memory_ok_for`] — a `GlobalMemoryStatusEx` headroom check AT SPAWN,
+//!     inside the slot ([`acquire_slot_for_spawn`]: queue first, measure at
+//!     spawn; #144 r2): with the permit HELD, both free physical RAM and free
+//!     commit must be ≥ [`HEAVY_STEP_MIN_FREE_BYTES`], else the permit is
+//!     released and the tick defers with NO backoff, re-queueing next tick. A
+//!     pre-slot reading measured the very child the slot serialises away — from
+//!     #168 r3 a separation child commits ~9 GB from its first second, so the
+//!     lyrics worker never queued and the #162 FIFO alternation was dead.
 //!  3. [`assign_child_job`] — a per-child Windows Job Object with a
 //!     `JOB_OBJECT_LIMIT_PROCESS_MEMORY` ceiling + `KILL_ON_JOB_CLOSE`, so an
 //!     OOM kills the CHILD, never the host. It also carries the #203 containment
@@ -71,24 +75,20 @@ pub(crate) const CHILD_JOB_MEMORY_LIMIT_BYTES: u64 = 10_737_418_240; // 10 GiB
 // ---------------------------------------------------------------------------
 
 /// The one process-wide heavy-step permit. `LazyLock<Arc<..>>` so
-/// [`acquire_slot`] can hand out `'static` owned permits held across the child's
+/// [`acquire_slot_for_spawn`] can hand out `'static` owned permits held across the child's
 /// `await`.
 static HEAVY_SLOT: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(1)));
 
-/// Acquire the process-global heavy-step permit (fair FIFO). Held by the
-/// returned [`HeavySlotGuard`] until it is dropped — i.e. until the heavy child
-/// exits (including through `run_with_wall_abort`: dropping the future drops the
-/// guard, releasing the permit, while `kill_on_drop` kills the child). Logs the
-/// wait time on acquire and a `released` line on drop.
-pub(crate) async fn acquire_slot(name: &'static str) -> HeavySlotGuard {
-    acquire_on(HEAVY_SLOT.clone(), name).await
-}
-
-/// Slot acquisition against an explicit semaphore — the injectable core of
-/// [`acquire_slot`], so the serialization guarantee is unit-tested with a local
-/// `Arc<Semaphore>` (no process-global state, no DB). The serialization is
-/// proven by `slot_serializes_two_heavy_steps`; the wait-time log carries no
-/// asserted behaviour, so mutation is skipped (like `run_with_wall_abort`).
+/// Slot acquisition against an explicit semaphore (fair FIFO) — the shared
+/// acquire used by [`acquire_on_checked`] (production, via
+/// [`acquire_slot_for_spawn`]) and directly by the slot-serialization tests, so
+/// the guarantee is unit-tested with a local `Arc<Semaphore>` (no process-global
+/// state, no DB). The permit is held by the returned [`HeavySlotGuard`] until it
+/// is dropped — i.e. until the heavy child exits (including through
+/// `run_with_wall_abort`: dropping the future drops the guard, releasing the
+/// permit, while `kill_on_drop` kills the child). The serialization is proven by
+/// `slot_serializes_two_heavy_steps`; the wait-time log carries no asserted
+/// behaviour, so mutation is skipped (like `run_with_wall_abort`).
 #[cfg_attr(test, mutants::skip)]
 async fn acquire_on(slot: Arc<Semaphore>, name: &'static str) -> HeavySlotGuard {
     let start = Instant::now();
@@ -108,6 +108,53 @@ async fn acquire_on(slot: Arc<Semaphore>, name: &'static str) -> HeavySlotGuard 
     HeavySlotGuard {
         _permit: permit,
         name,
+    }
+}
+
+/// Returned by [`acquire_slot_for_spawn`] when the spawn-time headroom reading
+/// (taken with the permit HELD) is below the floor: the permit is released and
+/// the caller defers this heavy step with NO backoff — exactly as the old
+/// pre-slot check did — re-queueing behind the running child next tick.
+#[derive(Debug)]
+pub(crate) struct HeadroomLow;
+
+/// #144 r2 admission: QUEUE for the process-global heavy slot (fair FIFO — the
+/// caller blocks behind a running heavy child), THEN measure memory headroom
+/// with the permit held; admit only if it passes. Low → drop the permit and
+/// return `Err(HeadroomLow)` so the caller defers with NO backoff. This flips the
+/// two admission layers (queue first, measure AT SPAWN): a pre-slot reading
+/// measured the very child the slot serialises away, so from #168 r3 (a
+/// separation child commits ~9 GB from its first second) the lyrics worker never
+/// queued and the #162 FIFO alternation was dead. The owner's #162 ruling ("pred
+/// ŠTARTOM ťažkého kroku kontrola voľnej pamäte") is this check, at the step's
+/// actual start. The real memory read is wired here; the decision is the
+/// unit-tested [`acquire_on_checked`].
+#[cfg_attr(test, mutants::skip)] // wires the real read_headroom; the decision core is acquire_on_checked
+pub(crate) async fn acquire_slot_for_spawn(
+    name: &'static str,
+) -> Result<HeavySlotGuard, HeadroomLow> {
+    acquire_on_checked(HEAVY_SLOT.clone(), name, read_headroom).await
+}
+
+/// Injectable core of [`acquire_slot_for_spawn`]: [`acquire_on`] the given
+/// semaphore (fair FIFO), then apply [`memory_ok_for`] to the reading from `read`
+/// with the permit HELD. Low → drop the guard (releasing the permit) and return
+/// `Err(HeadroomLow)`; ok → keep the guard. Linux unit tests drive it with a
+/// local `Arc<Semaphore>` + an injected reader — no process-global state, no real
+/// memory read (`acquire_for_spawn_*` in `heavy_slot_tests.rs`).
+async fn acquire_on_checked(
+    slot: Arc<Semaphore>,
+    name: &'static str,
+    read: impl Fn() -> Option<Headroom>,
+) -> Result<HeavySlotGuard, HeadroomLow> {
+    let guard = acquire_on(slot, name).await;
+    if memory_ok_for(name, read()) {
+        Ok(guard)
+    } else {
+        // Release the permit (drop the guard) so a deferred step never holds the
+        // slot — the next FIFO waiter proceeds and this step re-queues next tick.
+        drop(guard);
+        Err(HeadroomLow)
     }
 }
 
@@ -137,8 +184,8 @@ impl Drop for HeavySlotGuard {
 // slot".
 // ---------------------------------------------------------------------------
 
-/// The heavy-slot step name the dub child's `acquire_slot` uses
-/// (`dabing/child.rs`). The ONE step whose acquire clears [`DUB_SLOT_WANTED`].
+/// The heavy-slot step name the dub's admission uses (`dabing/worker.rs`, via
+/// [`acquire_slot_for_spawn`]). The ONE step whose acquire clears [`DUB_SLOT_WANTED`].
 pub(crate) const DUB_STEP_NAME: &str = "dub live-translate";
 
 /// Process-global "a dub job is queued behind the heavy slot" flag.
@@ -185,7 +232,7 @@ impl Drop for DubSlotWant {
 
 /// Publish "a dub is queued behind the heavy slot" (flag TRUE) and return the
 /// RAII guard whose Drop clears it. Created immediately before the dub's
-/// `acquire_slot` (`dabing/worker.rs::synthesize`).
+/// `acquire_slot_for_spawn` (`dabing/worker.rs::process_next`).
 pub(crate) fn dub_slot_want_guard() -> DubSlotWant {
     set_dub_slot_wanted(true);
     DubSlotWant
@@ -241,7 +288,8 @@ pub(crate) fn admission_from_headroom(reading: Option<Headroom>) -> MemoryAdmiss
 
 /// Pure worker-facing gate: `true` = enough headroom to start the heavy step
 /// named `name`; `false` = defer (a WARN with the numbers is logged). The only
-/// impure input — the live memory read — is injected by [`heavy_step_memory_ok`],
+/// impure input — the live memory read — is injected by [`acquire_on_checked`]
+/// (the production reader is [`read_headroom`], via [`acquire_slot_for_spawn`]),
 /// so BOTH workers' deferral behaviour is unit-tested with a fed [`Headroom`],
 /// never real memory.
 pub(crate) fn memory_ok_for(name: &str, reading: Option<Headroom>) -> bool {
@@ -258,25 +306,6 @@ pub(crate) fn memory_ok_for(name: &str, reading: Option<Headroom>) -> bool {
             false
         }
     }
-}
-
-/// Live worker gate: read the box's free RAM/commit and decide. `true` = start
-/// the heavy step, `false` = defer this tick (no backoff). Integration-only
-/// (reads real memory); the decision it delegates to ([`memory_ok_for`]) is
-/// unit-tested.
-#[cfg_attr(test, mutants::skip)]
-pub(crate) fn heavy_step_memory_ok(name: &str) -> bool {
-    memory_ok_for(name, read_headroom())
-}
-
-/// Positive-form twin of [`heavy_step_memory_ok`] for call sites: `true` when
-/// the heavy step must be deferred this tick. Call sites use this instead of
-/// `!heavy_step_memory_ok(..)` so no `!` sits at the spawn seam (a deleted-`!`
-/// mutant there is unobservable without real memory pressure); the decision
-/// itself is the unit-tested `memory_ok_for`.
-#[cfg_attr(test, mutants::skip)] // thin negation over a real-memory read; the core is tested via memory_ok_for
-pub(crate) fn heavy_step_memory_defers(name: &str) -> bool {
-    !heavy_step_memory_ok(name)
 }
 
 /// Read free physical RAM + free commit via `GlobalMemoryStatusEx`. `None` on

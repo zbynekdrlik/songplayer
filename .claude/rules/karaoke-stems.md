@@ -281,11 +281,16 @@ DELETED names.
   Three layers funnel EVERY heavy child spawn: (1) a **process-global
   `tokio::sync::Semaphore(1)`** (`acquire_slot`) — at most ONE heavy child
   (isolation / mtl / separation) runs process-wide; fair FIFO, so the two workers
-  alternate; (2) a **`GlobalMemoryStatusEx` headroom check BEFORE the slot**
-  (`heavy_step_memory_ok`) — both free physical RAM and free commit must be
-  ≥ 4 GiB (`HEAVY_STEP_MIN_FREE_BYTES`), else the tick defers with NO backoff
-  (lyrics `SongOutcome::WaitingForMemory`; stems leave the row pending, no
-  `record_stem_deferral`) and re-checks next tick; (3) a **per-child Windows Job
+  alternate; (2) a **`GlobalMemoryStatusEx` headroom check AT SPAWN, inside the
+  slot** (`acquire_slot_for_spawn` → `memory_ok_for`; #144 r2: queue first,
+  measure at spawn) — the worker QUEUES for the slot first, then with the permit
+  HELD both free physical RAM and free commit must be ≥ 4 GiB
+  (`HEAVY_STEP_MIN_FREE_BYTES`), else the permit is released and the tick defers
+  with NO backoff (lyrics `SongOutcome::WaitingForMemory`; stems leave the row
+  pending, no `record_stem_deferral`) and re-queues next tick. A pre-slot reading
+  measured the very child the slot serialises away — from #168 r3 a separation
+  child commits ~9 GB from its first second, so the lyrics worker never queued
+  and the FIFO alternation was dead. (3) a **per-child Windows Job
   Object** (`assign_child_job`, `JOB_OBJECT_LIMIT_PROCESS_MEMORY` 6 GiB +
   `KILL_ON_JOB_CLOSE`) so an OOM kills the child, never the host. g35t /
   translation HTTP steps take NONE of these (not heavy). windows-sys is a

@@ -102,10 +102,10 @@ pub async fn run_live_translate(
     eta: std::time::Duration,
     plan: &HeavyStepPlan,
 ) -> Result<DubSummary> {
-    // Hold the process-global heavy slot for this child's lifetime — one heavy
-    // child at a time process-wide (shared with stems/lyrics).
-    let _slot = crate::lyrics::heavy_slot::acquire_slot("dub live-translate").await;
-
+    // #144 r2: the heavy slot is acquired by the caller (`dabing::worker::
+    // process_next` via `acquire_slot_for_spawn`) and held across the whole dub
+    // step. No acquire here — a second acquire on the same task would deadlock
+    // the Semaphore(1).
     let mut cmd = Command::new(python_path);
     cmd.args(live_translate_args(
         script_path,

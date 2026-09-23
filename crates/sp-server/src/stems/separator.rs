@@ -85,9 +85,10 @@ pub async fn separate_stems(
         return Ok(());
     }
 
-    // #162: hold the process-global heavy-step slot for this child's lifetime
-    // (after the cache check) — one heavy child at a time process-wide.
-    let _slot = crate::lyrics::heavy_slot::acquire_slot("stem separation").await;
+    // #144 r2: the heavy slot is acquired by the caller (`stems::worker` via
+    // `acquire_slot_for_spawn`) and held across `run_separation_watched` (incl.
+    // the GPU→CPU re-run). No acquire here — a second acquire on the same task
+    // would deadlock the Semaphore(1).
     let mut cmd = Command::new(python_path);
     cmd.args(separate_stems_args(
         script_path,
