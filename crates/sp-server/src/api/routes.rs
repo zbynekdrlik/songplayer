@@ -98,6 +98,10 @@ pub struct StatusResponse {
     /// zero value (older clients / the mock stay ok).
     #[serde(default)]
     pub heavy_containment: HeavyContainmentStatus,
+    /// #207: box-wide commit / pagefile snapshot in MB (Windows only; `None`
+    /// off Windows or on a read failure — a missing key deserializes to `None`).
+    #[serde(default)]
+    pub commit: Option<crate::lyrics::host_commit::HostCommitStatus>,
 }
 
 /// #203: the containment applied to the heavy children, surfaced on `/status` so
@@ -703,6 +707,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
     let containment = crate::lyrics::heavy_containment::containment_from_settings(
         heavy_cap.as_deref(),
         heavy_mask.as_deref(),
+        None, // #207: purge delay is not surfaced on /status (heavy_containment only)
         heavy_cores,
     );
 
@@ -730,6 +735,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
             ),
             priority_class: crate::process_start::priority_class_label().to_string(),
         },
+        commit: crate::lyrics::host_commit::read_status(),
     })
 }
 

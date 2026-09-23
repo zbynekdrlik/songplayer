@@ -33,6 +33,39 @@ sites, instead of destructuring in the `let`. Verify with
 `awk 'NR==<line>{print length($0)}'` + `cargo fmt --all --check` (both Tier-0-allowed)
 and re-`wc -l` before committing.
 
+## rustfmt breaks a `foo(long::path::bar(arg()))` nested call into 3 lines even under ~94 cols (#207)
+
+Adding a ONE-line statement to a file at the 1000-line cap can still trip the cap:
+rustfmt's `fn_call_width` heuristic (60 = 60 % of max_width) breaks a call whose
+single argument is ITSELF a call and whose args exceed ~60 cols — even when the
+whole line is well under 100. `lib.rs` (999→cap): a hand-written
+`tokio::spawn(crate::lyrics::host_commit::run_host_commit_logger(shutdown_tx.subscribe()));`
+(94 cols) was reflowed by `cargo fmt` into a 3-line form (`tokio::spawn(\n  arg,\n));`),
+silently taking the file to 1002 — the no-compile box only sees it via `wc -l` /
+the CI cap check, NOT `cargo fmt --all --check` alone (which passes on EITHER form,
+it just prefers the 3-line one). So near the cap: after writing any nested-call
+statement, run `cargo fmt --all` FIRST, then `wc -l`, and budget for the form
+rustfmt actually produces (a trailing `// comment` on the closing `));` line keeps
+the doc without a separate comment line). A local receiver binding (`let x = …;`
+then `spawn(fn(x))`) does NOT help — the outer arg is still a call over budget.
+
+## Line-neutral "handle sub-case, else fall through" in a file AT the cap: a match-guard arm (#207)
+
+To add a new branch to an existing `match` in a file at 1000/1000 with the fewest
+lines, put a GUARD arm BEFORE the catch-all and leave the original arm byte-identical:
+
+```rust
+Err(e) if super::helper::note_if_x(&e, id, &mut acc) => {}  // +1 line, empty body = fall-through/continue
+Err(e) => { /* unchanged original abort/return arm */ }
+```
+
+The guard runs a side-effecting helper (classify + count + rate-limited WARN)
+returning `bool`; `true` → empty arm → the loop continues, `false` → the next arm
+runs. `&e` in the guard is `&DecoderError` (not `&&`), and a `&mut` borrow of an
+OUTER local (not the scrutinee) in a guard is legal. Costs +1 line; offset it by
+reclaiming one comment/blank line so the file stays ≤1000. Keep the guard line
+≤100 cols (a `super::` path is shorter than `crate::playback::…`).
+
 ## `cargo fmt --all` reorders `crates/sp-server/src/db/models.rs` — REVERT it
 The box's local rustfmt is OLDER than CI's `dtolnay/rust-toolchain@stable`, and
 the two disagree on `reorder_modules` for `models.rs`'s no-blank-line `#[path]

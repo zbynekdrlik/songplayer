@@ -86,6 +86,10 @@ pub struct LoopStageMax {
     submit_us: u64,
     audio_us: u64,
     catchup_dropped: u64,
+    /// #207: video frames dropped because a per-frame decoder buffer could not
+    /// be allocated (host out of commit). A sum over the window, like
+    /// `catchup_dropped`.
+    frames_dropped_alloc: u64,
 }
 
 impl LoopStageMax {
@@ -104,6 +108,13 @@ impl LoopStageMax {
         self.catchup_dropped = self.catchup_dropped.saturating_add(1);
     }
 
+    /// #207: fold a frame dropped because its decoder buffer allocation failed
+    /// (host out of commit) — bump the alloc-drop COUNT only (no stage timing;
+    /// the frame never reached decode/submit). A sum over the window.
+    pub fn observe_alloc_drop(&mut self) {
+        self.frames_dropped_alloc = self.frames_dropped_alloc.saturating_add(1);
+    }
+
     /// Read the window's stage maxima and RESET (per-heartbeat drain).
     pub fn drain(&mut self) -> LoopStageStats {
         let out = LoopStageStats {
@@ -111,6 +122,7 @@ impl LoopStageMax {
             submit_us_max: self.submit_us,
             audio_us_max: self.audio_us,
             catchup_dropped: self.catchup_dropped,
+            frames_dropped_alloc: self.frames_dropped_alloc,
         };
         *self = Self::default();
         out
@@ -126,6 +138,9 @@ pub struct LoopStageStats {
     /// #192 round 4: video frames dropped by the catch-up in this window (a
     /// count, not µs) — the direct producer-stall meter.
     pub catchup_dropped: u64,
+    /// #207: video frames dropped this window because a decoder buffer could not
+    /// be allocated (host out of commit) — the direct host-commit-pressure meter.
+    pub frames_dropped_alloc: u64,
 }
 
 /// The #192-round-3 per-minute pipeline telemetry carried on the
@@ -143,6 +158,8 @@ pub struct LoopStats {
     pub audio_us_max: u64,
     /// #192 round 4: catch-up video-frame drops this window (a count, not µs).
     pub catchup_dropped: u64,
+    /// #207: frames dropped this window on a failed decoder buffer allocation.
+    pub frames_dropped_alloc: u64,
 }
 
 impl LoopStats {
@@ -161,6 +178,7 @@ impl LoopStats {
             submit_us_max: stage.submit_us_max,
             audio_us_max: stage.audio_us_max,
             catchup_dropped: stage.catchup_dropped,
+            frames_dropped_alloc: stage.frames_dropped_alloc,
         }
     }
 }
@@ -169,7 +187,7 @@ impl LoopStats {
 /// heartbeat` (the `format_genlock_line` precedent). Pure, exact-string tested.
 pub fn format_loop_stats_line(ndi_name: &str, s: &LoopStats) -> String {
     format!(
-        "pipeline: loop-stats ndi_name=\"{}\" submit_call_us_max={} submit_call_us_p99={} decode_us_max={} submit_us_max={} audio_us_max={} catchup_dropped={}",
+        "pipeline: loop-stats ndi_name=\"{}\" submit_call_us_max={} submit_call_us_p99={} decode_us_max={} submit_us_max={} audio_us_max={} catchup_dropped={} frames_dropped_alloc={}",
         ndi_name,
         s.submit_call_us_max,
         s.submit_call_us_p99,
@@ -177,6 +195,7 @@ pub fn format_loop_stats_line(ndi_name: &str, s: &LoopStats) -> String {
         s.submit_us_max,
         s.audio_us_max,
         s.catchup_dropped,
+        s.frames_dropped_alloc,
     )
 }
 
@@ -248,6 +267,7 @@ mod tests {
                 submit_us_max: 40,
                 audio_us_max: 30,
                 catchup_dropped: 0, // no drops this window
+                frames_dropped_alloc: 0,
             }
         );
         // Reset on drain: a fresh observe starts a new window.
@@ -259,6 +279,7 @@ mod tests {
                 submit_us_max: 1,
                 audio_us_max: 1,
                 catchup_dropped: 0,
+                frames_dropped_alloc: 0,
             }
         );
     }
@@ -279,6 +300,7 @@ mod tests {
                 submit_us_max: 0, // never submitted on a drop → stays 0
                 audio_us_max: 30,
                 catchup_dropped: 3, // three drops summed
+                frames_dropped_alloc: 0,
             }
         );
         // Reset on drain: the drop count starts over next window.
@@ -308,6 +330,7 @@ mod tests {
             submit_us_max: 22,
             audio_us_max: 33,
             catchup_dropped: 7,
+            frames_dropped_alloc: 4,
         };
         let ls = LoopStats::from_parts(954_000, 88_000, stage);
         assert_eq!(
@@ -318,7 +341,8 @@ mod tests {
                 decode_us_max: 11,
                 submit_us_max: 22,
                 audio_us_max: 33,
-                catchup_dropped: 7, // carried through from the stage
+                catchup_dropped: 7,      // carried through from the stage
+                frames_dropped_alloc: 4, // #207: carried through too
             }
         );
     }
@@ -332,10 +356,31 @@ mod tests {
             submit_us_max: 22,
             audio_us_max: 33,
             catchup_dropped: 5,
+            frames_dropped_alloc: 2,
         };
         assert_eq!(
             format_loop_stats_line("SP-fast", &ls),
-            "pipeline: loop-stats ndi_name=\"SP-fast\" submit_call_us_max=954000 submit_call_us_p99=88000 decode_us_max=11 submit_us_max=22 audio_us_max=33 catchup_dropped=5"
+            "pipeline: loop-stats ndi_name=\"SP-fast\" submit_call_us_max=954000 submit_call_us_p99=88000 decode_us_max=11 submit_us_max=22 audio_us_max=33 catchup_dropped=5 frames_dropped_alloc=2"
         );
+    }
+
+    /// #207: the alloc-drop counter is a per-window sum, independent of the
+    /// catch-up drop count, and resets on drain like the rest.
+    #[test]
+    fn observe_alloc_drop_counts_independently_of_catchup() {
+        let mut s = LoopStageMax::default();
+        s.observe(5, 6, 7); // a submitted frame
+        s.observe_drop(8, 9); // a catch-up drop
+        s.observe_alloc_drop();
+        s.observe_alloc_drop(); // two alloc drops
+        let drained = s.drain();
+        assert_eq!(drained.catchup_dropped, 1, "catch-up drops unaffected");
+        assert_eq!(drained.frames_dropped_alloc, 2, "two alloc drops summed");
+        assert_eq!(
+            drained.submit_us_max, 6,
+            "the submitted frame's cost survives"
+        );
+        // Reset on drain: the alloc-drop count starts over next window.
+        assert_eq!(s.drain().frames_dropped_alloc, 0);
     }
 }

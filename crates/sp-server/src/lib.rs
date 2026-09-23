@@ -389,8 +389,6 @@ pub async fn start(
     let lyrics_shutdown = shutdown_tx.clone();
     let lyrics_tools_dir = tools_dir;
     let ai_client_for_dl = ai_client.clone();
-    // #154 idle gate: the lyrics worker reads these to defer heavy GPU/CPU work
-    // while the wall is in use (any pipeline Playing, or OBS streaming/recording).
     let lyrics_ndi_health = ndi_health_registry.clone();
     let lyrics_obs_state = obs_state.clone();
     // #14 karaoke stem worker shares the same tools dir + idle-gate handles.
@@ -405,6 +403,9 @@ pub async fn start(
     let dub_ndi_health = ndi_health_registry.clone();
     let dub_obs_state = obs_state.clone();
     let dub_shutdown = shutdown_tx.clone();
+    tokio::spawn(crate::lyrics::host_commit::run_host_commit_logger(
+        shutdown_tx.subscribe(),
+    )); // #207: per-minute host commit/pagefile logger (Windows only)
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {

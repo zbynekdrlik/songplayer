@@ -69,7 +69,7 @@ fn default_mask_clamps_above_64_cores_to_the_top_3() {
 
 #[test]
 fn defaults_when_both_settings_absent() {
-    let c = containment_from_settings(None, None, 24);
+    let c = containment_from_settings(None, None, None, 24);
     assert_eq!(c.cpu_cap_pct, 25); // RED sentinel 99 fails here → GREEN 25
     assert_eq!(c.affinity_mask, 0xE00000); // #168 round 8: top 3 logical cores
     assert!(c.memory_priority_low);
@@ -123,12 +123,12 @@ fn mask_absent_zero_or_garbage_falls_back_to_default() {
 
 #[test]
 fn containment_honours_explicit_overrides() {
-    let c = containment_from_settings(Some("50"), Some("f000"), 24);
+    let c = containment_from_settings(Some("50"), Some("f000"), None, 24);
     assert_eq!(c.cpu_cap_pct, 50);
     assert_eq!(c.affinity_mask, 0xF000);
     assert!(c.memory_priority_low);
     // Clamp + zero-mask fallback compose through the seam (default = top 3 of 8).
-    let c2 = containment_from_settings(Some("3"), Some("0"), 8);
+    let c2 = containment_from_settings(Some("3"), Some("0"), None, 8);
     assert_eq!(c2.cpu_cap_pct, 5);
     assert_eq!(c2.affinity_mask, 0xE0);
 }
@@ -148,15 +148,58 @@ fn affinity_mask_hex_is_lowercase_no_prefix() {
 fn affinity_override_is_clamped_to_the_existing_cores() {
     // 8 cores: bits 0..=7 exist; 0xF0F0 keeps only its valid low bits 0xF0
     // (an explicit override keeps its valid bits verbatim — NOT the default).
-    let c = containment_from_settings(None, Some("0xF0F0"), 8);
+    let c = containment_from_settings(None, Some("0xF0F0"), None, 8);
     assert_eq!(c.affinity_mask, 0xF0);
     // A partly-valid override keeps its valid bits only.
-    let c = containment_from_settings(None, Some("0x10C"), 8);
+    let c = containment_from_settings(None, Some("0x10C"), None, 8);
     assert_eq!(c.affinity_mask, 0x0C);
     // Entirely beyond the core count → the default (top 3 of 8 = 0xE0).
-    let c = containment_from_settings(None, Some("0xF00"), 8);
+    let c = containment_from_settings(None, Some("0xF00"), None, 8);
     assert_eq!(c.affinity_mask, 0xE0);
     // 64+ cores: every bit is valid, the override is honoured verbatim.
-    let c = containment_from_settings(None, Some("0xFFFFFFFFFFFFFFFF"), 64);
+    let c = containment_from_settings(None, Some("0xFFFFFFFFFFFFFFFF"), None, 64);
     assert_eq!(c.affinity_mask, u64::MAX);
+}
+
+// ---------------------------------------------------------------------------
+// #207 — parse_purge_delay_ms (heavy_purge_delay_ms setting) + the Containment
+// purge field. Valid = -1 (never decommit) or 0..=600_000 ms; else fall back.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn purge_delay_absent_or_garbage_is_never_decommit() {
+    // Missing / unparseable → the never-decommit default (-1).
+    assert_eq!(parse_purge_delay_ms(None), -1);
+    assert_eq!(parse_purge_delay_ms(Some("abc")), -1);
+    assert_eq!(parse_purge_delay_ms(Some("")), -1);
+}
+
+#[test]
+fn purge_delay_valid_values_pass_through() {
+    assert_eq!(parse_purge_delay_ms(Some("-1")), -1);
+    assert_eq!(parse_purge_delay_ms(Some("0")), 0);
+    assert_eq!(parse_purge_delay_ms(Some("1000")), 1000);
+    assert_eq!(parse_purge_delay_ms(Some("600000")), 600_000);
+    // A `delete .trim()` mutant leaves the spaces → parse fails → default.
+    assert_eq!(parse_purge_delay_ms(Some(" 250 ")), 250);
+}
+
+#[test]
+fn purge_delay_out_of_range_falls_back_to_never() {
+    // Above the 600 000 ms cap or below -1 → default (-1).
+    assert_eq!(parse_purge_delay_ms(Some("600001")), -1);
+    assert_eq!(parse_purge_delay_ms(Some("-2")), -1);
+}
+
+#[test]
+fn containment_carries_the_parsed_purge_delay() {
+    // Absent → never-decommit default; explicit in-range → verbatim.
+    assert_eq!(
+        containment_from_settings(None, None, None, 24).purge_delay_ms,
+        -1
+    );
+    assert_eq!(
+        containment_from_settings(None, None, Some("1000"), 24).purge_delay_ms,
+        1000
+    );
 }
