@@ -56,7 +56,13 @@ def test_run_all_writes_one_file_per_fixture_in_manifest_order(tmp_path: Path) -
         assert data["video_id"] == vid
     # the scorer reads exactly these files
     assert score_one_call.load_produced(raw, "gemini38-flash-whole", "v2") is not None
-    assert summary == {"written": 3, "skipped": 0, "errors": 0, "missing_input": 0}
+    assert summary == {
+        "written": 3,
+        "skipped": 0,
+        "errors": 0,
+        "missing_input": 0,
+        "exhausted": 0,
+    }
 
 
 def test_run_all_exception_becomes_error_row_and_loop_continues(tmp_path: Path) -> None:
@@ -75,7 +81,13 @@ def test_run_all_exception_becomes_error_row_and_loop_continues(tmp_path: Path) 
     assert "ffmpeg exploded" in bad["error"]
     assert bad["lines"] == []
     assert (raw / "gemini38-flash-win60_v2.json").exists()
-    assert summary == {"written": 2, "skipped": 0, "errors": 1, "missing_input": 0}
+    assert summary == {
+        "written": 2,
+        "skipped": 0,
+        "errors": 1,
+        "missing_input": 0,
+        "exhausted": 0,
+    }
 
 
 def test_run_all_skips_existing_ok_output_unless_forced(tmp_path: Path) -> None:
@@ -99,7 +111,13 @@ def test_run_all_skips_existing_ok_output_unless_forced(tmp_path: Path) -> None:
         manifest_path=manifest, mode="whole", raw_dir=raw, run_one=run_one, force=False
     )
     assert seen == ["v2"]
-    assert summary == {"written": 1, "skipped": 1, "errors": 0, "missing_input": 0}
+    assert summary == {
+        "written": 1,
+        "skipped": 1,
+        "errors": 0,
+        "missing_input": 0,
+        "exhausted": 0,
+    }
 
     seen.clear()
     run_one_call.run_all(
@@ -169,7 +187,13 @@ def test_run_all_counts_missing_input_separately(tmp_path: Path) -> None:
         run_one=run_one,
         force=False,
     )
-    assert summary == {"written": 2, "skipped": 0, "errors": 2, "missing_input": 1}
+    assert summary == {
+        "written": 2,
+        "skipped": 0,
+        "errors": 2,
+        "missing_input": 1,
+        "exhausted": 0,
+    }
 
 
 def test_run_all_records_attempts_and_gives_up_after_the_cap(tmp_path: Path) -> None:
@@ -195,7 +219,13 @@ def test_run_all_records_attempts_and_gives_up_after_the_cap(tmp_path: Path) -> 
     assert len(calls) == run_one_call.MAX_ATTEMPTS
     data = json.loads((raw / "gemini38-flash-whole_v1.json").read_text("utf-8"))
     assert data["metadata"]["attempt"] == run_one_call.MAX_ATTEMPTS
-    assert summary == {"written": 0, "skipped": 1, "errors": 0, "missing_input": 0}
+    assert summary == {
+        "written": 0,
+        "skipped": 0,
+        "errors": 0,
+        "missing_input": 0,
+        "exhausted": 1,
+    }
     assert run_one_call.exit_code(summary) == 0
 
     # --force re-runs it anyway
@@ -251,7 +281,13 @@ def test_run_all_through_the_real_run_fixture(tmp_path: Path) -> None:
     summary = run_one_call.run_all(
         manifest_path=manifest, mode="whole", raw_dir=raw, run_one=run_one, force=False
     )
-    assert summary == {"written": 2, "skipped": 0, "errors": 1, "missing_input": 1}
+    assert summary == {
+        "written": 2,
+        "skipped": 0,
+        "errors": 1,
+        "missing_input": 1,
+        "exhausted": 0,
+    }
     ok = json.loads((raw / "gemini38-flash-whole_v1.json").read_text("utf-8"))
     assert ok["error"] is None and ok["lines"][0]["start_ms"] == 5
     bad = json.loads((raw / "gemini38-flash-whole_v2.json").read_text("utf-8"))

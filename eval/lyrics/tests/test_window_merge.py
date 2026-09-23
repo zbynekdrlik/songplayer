@@ -320,13 +320,31 @@ def test_merge_full_duplicate_away_from_the_window_end_keeps_the_earlier() -> No
     slightly longer later rendering — only a CUT copy is replaced."""
     per_window = [
         (0, [_line("Holy is the Lord", 55_500, 57_000)]),
-        (55_000, [_line("Holy is the Lord!!", 600, 2_100)]),
+        # a LONGER word-prefix rendering 0.5 s later (ratio 0.89), but the
+        # earlier copy ended 3 s before window 0's end -> it was not cut
+        (55_000, [_line("Holy is the Lord God", 1_000, 2_500)]),
     ]
     res = window_merge.merge_window_lines(
         per_window, audio_end_ms=115_000, overlap_ms=5_000
     )
     assert [ln["start_ms"] for ln in res.lines] == [55_500]
     assert res.duplicates[0]["kind"] == "full"
+
+
+def test_merge_chant_growth_away_from_the_window_end_is_not_a_replacement() -> None:
+    """'Hallelujah' then 'Hallelujah, hallelujah' 1.4 s later, the first line
+    complete (ends 3.5 s before the window end): never replace the earlier
+    line (that would move its start 1.4 s)."""
+    per_window = [
+        (0, [_line("Hallelujah", 55_500, 56_500)]),
+        (55_000, [_line("Hallelujah, hallelujah", 1_900, 3_500)]),  # 56.9 s
+    ]
+    res = window_merge.merge_window_lines(
+        per_window, audio_end_ms=115_000, overlap_ms=5_000
+    )
+    starts = [ln["start_ms"] for ln in res.lines]
+    assert 55_500 in starts
+    assert all(d["kind"] != "later_longer" for d in res.duplicates)
 
 
 def test_window_merge_shares_the_scorer_normalization() -> None:
