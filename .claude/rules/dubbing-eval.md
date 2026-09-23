@@ -180,3 +180,94 @@ same 7 sentences (`seg_spec` items 2..8), plus an intensity layer.
   (`gemini-2.5-flash` generateContent) for the register translation instead.
 - `run_round2.py`: owner-approved mixes only — `dub only` + `dub + original −18 dB`
   (NO same-colour blend), loudnorm −16; windowed 7-sentence or full-34.
+
+## Continuous-session probe (#184 round H step 1) — `live_translate_continuous_probe.py`
+
+**What it measures.** ONE logical `gemini-3.5-live-translate-preview` session over a
+whole talk slice, the way the model is documented to run long: 100 ms 16 kHz frames
+at 1.0× real time with WALL-CLOCK drift correction (frame k at `anchor + k·0.1`,
+re-anchored per connection), `echo_target_language=False`, sliding-window
+`context_window_compression` (trigger 25 000 / target 8 000 tokens) +
+`session_resumption`. On GoAway it stops sending at a frame boundary, keeps
+receiving the old connection's trailing translation for `min(time_left − 1 s, 8 s)`,
+then reconnects with the latest handle and resumes from the next unsent frame (an
+early close reconnects the same way) — the input feed PAUSES for that grace (≤ 8 s
+per GoAway; `go_away_grace` → `reconnect` in `events.jsonl`), so a voiced gap right
+after a GoAway is the probe's own pause, not the model (step 2 should overlap the
+new connection instead); `audio_stream_end` once at the end. The
+session streams SILENCE after speech, so the drain ends after 8 s without VOICED
+output (a chunk above −50 dBFS), cap 60 s. Arms: `--voice none` (no
+`speech_config` — the model copies the speaker) vs `--voice Charon` (pinned
+prebuilt voice). Outputs in `--out-dir`: `output.wav` (24 kHz, arrival order),
+`output_chunks.json` (`[arrival_s, n_bytes, buffer_offset_s]`), `input_text.txt`,
+`output_text.txt`, `events.jsonl` (every server message field + probe decision —
+fields without a dedicated event, incl. non-audio `model_turn` parts such as text,
+land in `other_fields`; `audio` events carry
+`dbfs`/`voiced`; `reconnect` carries `frames_since_handle`; flushed per line),
+`summary.json` (= the only stdout line, ASCII: connections, resumptions_offered,
+go_aways, reconnect_failures, output/input ratio, max output gap (all chunks) +
+max VOICED gap, voiced_output_s, first output / first voiced latency,
+drain_end_reason, per-5-min output RMS dBFS, errors). Exit 1 when nothing
+connected or on a crash; a refused RE-connect is a recorded finding (exit 0,
+`reconnect_failures ≥ 1`). Tests: the pacer's clock/sleep are injectable
+(`ProbeOptions.clock/.sleep`), so the 1.0× schedule is asserted exactly on a
+virtual clock — never assert pacing with wall-clock bounds (flaky on a loaded box).
+Local-verify traps from a worktree lane: the isolation guard refuses any Bash arg
+that is a bare `eval/` / `./eval/` path (reads as the `eval` builtin) — pass
+`eval/dubbing eval/lyrics eval/__init__.py` to ruff instead of the CI's `eval/`;
+and the staging secret-scan blocks a test literal like `secret="SOMEKEY"` —
+name a redaction stand-in by what it is (`redact_word="websocket"`).
+
+**The UNVERIFIED capabilities it exists to answer** (the translate docs do not
+mention them; the session-management examples are for `gemini-3.8-live`):
+(1) does this model accept `context_window_compression` and keep going past the
+15-min uncompressed limit; (2) does it send `session_resumption_update` handles /
+GoAway, and does a reconnect with the handle resume the context; (3) does the
+speaker-copy voice stay stable over 25 min with no `speech_config`, vs a pinned
+Charon. Read the answers from `summary.json` + `events.jsonl` (`connect` /
+`reconnect` / `reconnect_failed` / `go_away` / `usage_metadata` token counts), then
+run `scripts/dub_voice_check.py --source` on each `output.wav` for drift windows.
+A drift window right next to a `reconnect` event may be caused by the probe's OWN
+input pause (up to 8 s of GoAway grace — the model's documented trigger is
+"voices might shift after long pauses"), not by long-session drift: judge (3)
+from windows away from reconnects. `last_consumed_client_message_index` stays
+`None` (only sent with `SessionResumptionConfig.transparent`, which the design
+does not set); `frames_since_handle` on `reconnect` is the probe's own estimate
+of the input the resumed state may miss.
+
+**SDK traps (google-genai 2.24.0, read from source).** `session.receive()` ENDS
+once an interaction completes (`interaction_status == IDLE` when set, else
+`turn_complete`) → a continuous session must re-enter it in a loop; a
+closed websocket raises `errors.APIError` (code = close code); `setup_complete` is
+consumed by `connect()` (read `session.setup_complete`), never seen in `receive()`;
+the SDK models are `extra='forbid'`, so a mistyped config field fails at build;
+the Developer-API default `api_version` is `v1beta` (`dub_worker.py` pins
+`v1alpha` — compare with `--api-version v1alpha` if the default is refused).
+
+**Running it on win-resolume (main session, MCP `Shell`, PowerShell).** The script
+imports nothing from `eval.*`, so copy the single file to the box and run it
+directly. Put the key in the process env from the SongPlayer settings WITHOUT
+printing it, and start the ~26-min run detached (an MCP Shell call would time out):
+
+```powershell
+$s = Invoke-RestMethod http://127.0.0.1:8920/api/v1/settings
+$env:GEMINI_API_KEY = ($s.gemini_api_key -split ',')[0].Trim()
+$py  = 'C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe'
+$pr  = 'C:\ProgramData\SongPlayer\cache\tools\live_translate_continuous_probe.py'
+$src = 'C:\ProgramData\SongPlayer\cache\Morning Prayer Devotion_Jonathan_Dhp-qrZDK1g_normalized_audio.flac'
+$out = 'C:\ProgramData\SongPlayer\cache\probe_h\voice_none'
+New-Item -ItemType Directory -Force $out | Out-Null
+Start-Process -FilePath $py -WindowStyle Hidden `
+  -ArgumentList @($pr, '--audio', "`"$src`"", '--ffmpeg', 'C:\ProgramData\SongPlayer\cache\tools\ffmpeg.exe',
+                  '--start-s', '0', '--duration-s', '1500', '--voice', 'none', '--out-dir', $out) `
+  -RedirectStandardOutput "$out\stdout.json" -RedirectStandardError "$out\stderr.log"
+```
+
+`Start-Process` inherits `$env:GEMINI_API_KEY` from that shell; the key never
+appears in argv, a log or the transcript. UNVERIFIED until the first box run:
+that a process started this way survives the MCP `Shell` call returning (job-object
+teardown) — confirm `stderr.log` keeps growing a minute later; if it died, launch
+it through a scheduled task instead. Arm B = the same with `--voice Charon`
+and `$out = ...\probe_h\voice_charon` (run the arms one after the other, not in
+parallel — two concurrent Live sessions on one key muddy the quota picture).
+Progress: `stderr.log` gets one line per minute of input; `events.jsonl` grows live.
