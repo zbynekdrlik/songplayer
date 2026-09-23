@@ -374,8 +374,17 @@ test("the owner's path: Prehľad → Dabing → play → Živý náhľad → rea
 
   // The soak runs on a full bed — vokály, podklad AND dabing up (real mouse) —
   // so a pause in the (mostly spoken) dub is not read as a frozen preview.
+  const patchesBeforeBed = patches.length;
   await dragFader(page, "mix-podklad", 0.99, 0.01);
   await dragFader(page, "mix-dabing", 0.99, 0.01);
+  for (const key of ["podklad", "dabing"] as const) {
+    await expect
+      .poll(
+        () => patches.slice(patchesBeforeBed).some((p) => Number(p.body[key]) >= 0.95),
+        { timeout: 5000, message: `dragging mix-${key} to the top must PATCH ${key} ≈ 1 before the soak` },
+      )
+      .toBe(true);
+  }
 
   // ── (d) + (e): 3 minutes with the preview open ─────────────────────────
   const socketsAtSoakStart = previewSockets.length;
