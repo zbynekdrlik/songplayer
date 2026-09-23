@@ -1241,17 +1241,29 @@ server.on("upgrade", (req, socket, head) => {
 // (a server restart / relay close); { hold_init: true } — that socket opens but
 // never sends anything, not even its init (an encoder that never starts).
 // `{}` clears a pending fault.
-let nextPreviewFault = null;
-app.post("/__mock/preview-fault", (req, res) => {
-  const b = req.body || {};
+// #184 round G2: `{ sequence: [fault, fault, …] }` queues one fault per NEXT
+// connection, in order (each entry has the single-fault shape above; `{}` = a
+// healthy socket) — so a test can drive several failing sockets in a row and
+// measure the reconnect BACKOFF between them.
+let previewFaultQueue = [];
+function parsePreviewFault(b) {
   const fault = {};
   if (typeof b.delay_ms === "number" && b.delay_ms > 0) fault.delay_ms = b.delay_ms;
   if (typeof b.close_after_frags === "number" && b.close_after_frags >= 0) {
     fault.close_after_frags = b.close_after_frags;
   }
   if (b.hold_init === true) fault.hold_init = true;
-  nextPreviewFault = Object.keys(fault).length ? fault : null;
-  res.json({ ok: true, fault: nextPreviewFault });
+  return fault;
+}
+app.post("/__mock/preview-fault", (req, res) => {
+  const b = req.body || {};
+  if (Array.isArray(b.sequence)) {
+    previewFaultQueue = b.sequence.map((f) => parsePreviewFault(f || {}));
+  } else {
+    const fault = parsePreviewFault(b);
+    previewFaultQueue = Object.keys(fault).length ? [fault] : [];
+  }
+  res.json({ ok: true, faults: previewFaultQueue });
 });
 
 // #184 round G: the server closes every open preview socket NOW (a server
@@ -1269,8 +1281,7 @@ app.post("/__mock/preview-close", (_req, res) => {
 // with a small gap — so the card's MSE <video> reaches readyState>=3 and its
 // currentTime advances.
 previewWss.on("connection", (ws, req) => {
-  const fault = nextPreviewFault || {};
-  nextPreviewFault = null;
+  const fault = previewFaultQueue.shift() || {};
   const [init, ...frags] = PREVIEW_FMP4;
   // #184 round F: an optional `?lag_ms=<N>` knob on the upgrade url inflates the
   // beacon so the lag-readout E2E can force the "picture behind the wall" state.

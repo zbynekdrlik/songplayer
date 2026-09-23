@@ -22,7 +22,8 @@
  *       `preview.ws` connection;
  *   (e) the lyrics panel's active line (`.lyr-current`) stays inside its
  *       scroller (`.lyrics-view-scroll`) at every sample;
- *   (f) zero console errors / warnings (the last assertion, repo rule).
+ *   (f) zero console errors / warnings (the last assertion, repo rule — in
+ *       afterEach, after the cleanup, so it also runs when the body failed).
  *
  * The 180 s window is the owner-ruled acceptance MEASUREMENT (3 minutes of
  * preview), not a sleep: every sample is asserted as it is taken and the test
@@ -177,18 +178,47 @@ async function readyDub(request: APIRequestContext): Promise<{ pid: number; vide
 
 type MixMemory = { vokaly: number; podklad: number; dabing: number };
 
+let consoleMessages: string[] = [];
+/** What afterEach must put back: set as soon as the test knows it. */
+let cleanup: { pid: number; foundDabing: number } | null = null;
+
+test.beforeEach(async ({ page }) => {
+  consoleMessages = [];
+  cleanup = null;
+  page.on("console", (msg) => {
+    if (msg.type() === "error" || msg.type() === "warning") {
+      consoleMessages.push(`[${msg.type()}] ${msg.text()}`);
+    }
+  });
+});
+
+// Runs even when the test body failed or timed out: vokály + podklad full
+// (100 %), dabing as found (the #184 G2 restore rule), stop the preview this
+// test started and pause the (off-program) Dabing output. Then (f) — zero
+// console errors / warnings — is the LAST assertion.
+test.afterEach(async ({ page, request }) => {
+  if (cleanup) {
+    await request
+      .patch("/api/v1/mix", {
+        data: { kind: "dub", vokaly: 1.0, podklad: 1.0, dabing: cleanup.foundDabing },
+        timeout: 10000,
+      })
+      .catch(() => {});
+    await page.getByTestId("preview-stop").click({ timeout: 3000 }).catch(() => {});
+    await request
+      .post(`/api/v1/playback/${cleanup.pid}/pause`, { timeout: 10000 })
+      .catch(() => {});
+  }
+  const real = consoleMessages.filter((m) => !ALLOWED_CONSOLE.some((r) => r.test(m)));
+  expect(real, "(f) zero console errors / warnings").toEqual([]);
+});
+
 test("the owner's path: Prehľad → Dabing → play → Živý náhľad → real-mouse faders are heard within 4 s, 3 min without a freeze (#184 G2)", async ({
   page,
   request,
 }) => {
   test.setTimeout(330_000);
 
-  const consoleMessages: string[] = [];
-  page.on("console", (msg) => {
-    if (msg.type() === "error" || msg.type() === "warning") {
-      consoleMessages.push(`[${msg.type()}] ${msg.text()}`);
-    }
-  });
   // Every preview socket this page opens (a reconnect = a new one).
   const previewSockets: string[] = [];
   page.on("websocket", (ws) => {
@@ -217,184 +247,170 @@ test("the owner's path: Prehľad → Dabing → play → Živý náhľad → rea
     `[#184 G2] owner path on Dabing playlist ${pid}, video ${videoId}; dub mix as found ` +
       JSON.stringify(foundMix.dub),
   );
+  cleanup = { pid, foundDabing: foundMix.dub.dabing };
   let kind = "";
 
-  try {
-    // ── The owner's clicks ─────────────────────────────────────────────────
-    const appWs = page.waitForEvent("websocket", {
-      predicate: (ws) => !ws.url().includes("preview"),
-      timeout: 15000,
-    });
-    await page.goto("/");
-    await appWs;
-    // The Dabing playlist row of the dashboard's playlist list.
-    const plRow = page.locator(
-      `[data-testid="playlist-picker-item"][data-playlist-id="${pid}"]`,
-    );
-    await expect(plRow, "the Dabing playlist row is on the dashboard").toBeVisible({
-      timeout: 15000,
-    });
-    await plRow.click();
-    const card = page.locator(".playlist-card");
-    const row = card.locator(`[data-testid="song-row"][data-video-id="${videoId}"]`);
-    await expect(row, `video ${videoId} is in the Dabing song list`).toBeVisible({
-      timeout: 15000,
-    });
-    await row.getByTestId("song-row-play").click();
+  // ── The owner's clicks ─────────────────────────────────────────────────
+  const appWs = page.waitForEvent("websocket", {
+    predicate: (ws) => !ws.url().includes("preview"),
+    timeout: 15000,
+  });
+  await page.goto("/");
+  await appWs;
+  // The Dabing playlist row of the dashboard's playlist list.
+  const plRow = page.locator(
+    `[data-testid="playlist-picker-item"][data-playlist-id="${pid}"]`,
+  );
+  await expect(plRow, "the Dabing playlist row is on the dashboard").toBeVisible({
+    timeout: 15000,
+  });
+  await plRow.click();
+  const card = page.locator(".playlist-card");
+  const row = card.locator(`[data-testid="song-row"][data-video-id="${videoId}"]`);
+  await expect(row, `video ${videoId} is in the Dabing song list`).toBeVisible({
+    timeout: 15000,
+  });
+  await row.getByTestId("song-row-play").click();
+  await expect
+    .poll(
+      async () => {
+        const h = (await (await request.get("/api/v1/ndi/health")).json()) as Array<{
+          playlist_id: number;
+          frames_submitted_last_5s: number;
+        }>;
+        return h.find((r) => r.playlist_id === pid)?.frames_submitted_last_5s ?? 0;
+      },
+      { timeout: 30000, message: "the Dabing output must start decoding" },
+    )
+    .toBeGreaterThan(0);
+
+  // "▶ Živý náhľad" — a real click, the gesture that lets the audio start.
+  const startClickAt = Date.now();
+  await card.getByTestId("preview-start").click({ timeout: 20000 });
+  const video = card.getByTestId("preview-video");
+  await expect(video).toBeVisible({ timeout: 20000 });
+  await page.getByTestId("preview-unmute").click({ timeout: 2000 }).catch(() => {});
+  await expect
+    .poll(async () => video.evaluate((el: HTMLVideoElement) => el.muted), {
+      timeout: 10000,
+      message: "the preview must end up UNMUTED (the owner hears it)",
+    })
+    .toBe(false);
+  await installAudioTap(video);
+
+  // ── (a) audible within 10 s ────────────────────────────────────────────
+  const a = await waitForLevel(page, "audible", startClickAt + 10_000);
+  console.log(
+    `[#184 G2] (a) audible ${a.at === null ? "NEVER" : `${a.at - startClickAt} ms`} after ` +
+      `"Živý náhľad"; dBFS: ${a.trace}`,
+  );
+  expect(a.at, `(a) the preview must be audible (> ${AUDIBLE_DB} dBFS) within 10 s`).not.toBeNull();
+
+  // ── (b) all three faders to 0 → silent within 4 s of the last PATCH ───
+  for (const id of ["mix-vokaly", "mix-podklad", "mix-dabing"]) {
+    await expect(page.getByTestId(id), `${id} fader is live`).toBeEnabled({ timeout: 15000 });
+  }
+  const patchesBefore = patches.length;
+  for (const [id, key] of [
+    ["mix-vokaly", "vokaly"],
+    ["mix-podklad", "podklad"],
+    ["mix-dabing", "dabing"],
+  ] as const) {
+    await dragFader(page, id, 0.1, 0.99);
     await expect
       .poll(
-        async () => {
-          const h = (await (await request.get("/api/v1/ndi/health")).json()) as Array<{
-            playlist_id: number;
-            frames_submitted_last_5s: number;
-          }>;
-          return h.find((r) => r.playlist_id === pid)?.frames_submitted_last_5s ?? 0;
-        },
-        { timeout: 30000, message: "the Dabing output must start decoding" },
-      )
-      .toBeGreaterThan(0);
-
-    // "▶ Živý náhľad" — a real click, the gesture that lets the audio start.
-    const startClickAt = Date.now();
-    await card.getByTestId("preview-start").click({ timeout: 20000 });
-    const video = card.getByTestId("preview-video");
-    await expect(video).toBeVisible({ timeout: 20000 });
-    await page.getByTestId("preview-unmute").click({ timeout: 2000 }).catch(() => {});
-    await expect
-      .poll(async () => video.evaluate((el: HTMLVideoElement) => el.muted), {
-        timeout: 10000,
-        message: "the preview must end up UNMUTED (the owner hears it)",
-      })
-      .toBe(false);
-    await installAudioTap(video);
-
-    // ── (a) audible within 10 s ────────────────────────────────────────────
-    const a = await waitForLevel(page, "audible", startClickAt + 10_000);
-    console.log(
-      `[#184 G2] (a) audible ${a.at === null ? "NEVER" : `${a.at - startClickAt} ms`} after ` +
-        `"Živý náhľad"; dBFS: ${a.trace}`,
-    );
-    expect(a.at, `(a) the preview must be audible (> ${AUDIBLE_DB} dBFS) within 10 s`).not.toBeNull();
-
-    // ── (b) all three faders to 0 → silent within 4 s of the last PATCH ───
-    for (const id of ["mix-vokaly", "mix-podklad", "mix-dabing"]) {
-      await expect(page.getByTestId(id), `${id} fader is live`).toBeEnabled({ timeout: 15000 });
-    }
-    const patchesBefore = patches.length;
-    for (const [id, key] of [
-      ["mix-vokaly", "vokaly"],
-      ["mix-podklad", "podklad"],
-      ["mix-dabing", "dabing"],
-    ] as const) {
-      await dragFader(page, id, 0.1, 0.99);
-      await expect
-        .poll(
-          () => patches.slice(patchesBefore).some((p) => p.body[key] === 0),
-          { timeout: 5000, message: `dragging ${id} to the bottom must PATCH ${key}=0` },
-        )
-        .toBe(true);
-    }
-    const zeroPatches = patches.slice(patchesBefore);
-    kind = String(zeroPatches[zeroPatches.length - 1].body.kind ?? "");
-    expect(kind, "a ready dub video drives the DUB mix memory").toBe("dub");
-    const lastZeroPatchAt = Math.max(...zeroPatches.map((p) => p.at));
-    const mixAtZero = (await (await request.get("/api/v1/mix")).json()) as Record<string, MixMemory>;
-    expect(mixAtZero[kind], `GET /api/v1/mix shows the ${kind} memory at 0/0/0`).toEqual(
-      expect.objectContaining({ vokaly: 0, podklad: 0, dabing: 0 }),
-    );
-    const b = await waitForLevel(
-      page,
-      "quiet",
-      lastZeroPatchAt + FADER_AUDIBLE_WITHIN_MS + STREAK * LEVEL_POLL_MS + 500,
-    );
-    console.log(
-      `[#184 G2] (b) silent ${b.at === null ? "NEVER" : `${b.at - lastZeroPatchAt} ms`} after ` +
-        `the last PATCH; dBFS: ${b.trace}`,
-    );
-    expect(b.at, `(b) all faders at 0 → the preview must fall below ${SILENT_DB} dBFS`).not.toBeNull();
-    expect(
-      b.at! - lastZeroPatchAt,
-      `(b) the preview must be silent within ${FADER_AUDIBLE_WITHIN_MS} ms of the last PATCH`,
-    ).toBeLessThanOrEqual(FADER_AUDIBLE_WITHIN_MS);
-
-    // ── (c) vokály back to the top → audible within 4 s ────────────────────
-    const patchesBeforeUp = patches.length;
-    await dragFader(page, "mix-vokaly", 0.99, 0.01);
-    await expect
-      .poll(
-        () => patches.slice(patchesBeforeUp).some((p) => Number(p.body.vokaly) >= 0.95),
-        { timeout: 5000, message: "dragging mix-vokaly to the top must PATCH vokaly ≈ 1" },
+        () => patches.slice(patchesBefore).some((p) => p.body[key] === 0),
+        { timeout: 5000, message: `dragging ${id} to the bottom must PATCH ${key}=0` },
       )
       .toBe(true);
-    const upPatchAt = Math.max(...patches.slice(patchesBeforeUp).map((p) => p.at));
-    const c = await waitForLevel(
-      page,
-      "audible",
-      upPatchAt + FADER_AUDIBLE_WITHIN_MS + STREAK * LEVEL_POLL_MS + 500,
-    );
-    console.log(
-      `[#184 G2] (c) audible ${c.at === null ? "NEVER" : `${c.at - upPatchAt} ms`} after the ` +
-        `vokály PATCH; dBFS: ${c.trace}`,
-    );
-    expect(c.at, `(c) vokály up → the preview must be audible (> ${AUDIBLE_DB} dBFS)`).not.toBeNull();
-    expect(
-      c.at! - upPatchAt,
-      `(c) the preview must be audible within ${FADER_AUDIBLE_WITHIN_MS} ms of the PATCH`,
-    ).toBeLessThanOrEqual(FADER_AUDIBLE_WITHIN_MS);
-
-    // The soak runs on a full bed (vokály + podklad up, real mouse) so a pause
-    // in the speech is not read as a frozen preview.
-    await dragFader(page, "mix-podklad", 0.99, 0.01);
-
-    // ── (d) + (e): 3 minutes with the preview open ─────────────────────────
-    const socketsAtSoakStart = previewSockets.length;
-    const soakStart = Date.now();
-    const soak: Array<{ t: number; db: number }> = [];
-    let lyrSeen = 0;
-    while (Date.now() - soakStart < SOAK_MS) {
-      const s = await sample(page);
-      const t = Date.now() - soakStart;
-      soak.push({ t, db: s.db });
-      const run = longestSilentRunMs(soak, SILENT_DB);
-      expect(
-        run,
-        `(d) at ${t} ms the preview has been silent (< ${SILENT_DB} dBFS) for ${run} ms ` +
-          `(max ${MAX_SILENT_RUN_MS}) with the mix non-zero — frozen / starved preview`,
-      ).toBeLessThanOrEqual(MAX_SILENT_RUN_MS);
-      expect(
-        previewSockets.length,
-        `(d) at ${t} ms: ${previewSockets.length} preview.ws connections — more than 1 reconnect`,
-      ).toBeLessThanOrEqual(2);
-      if (s.lyrInside !== null) {
-        lyrSeen += 1;
-        expect(s.lyrInside, `(e) at ${t} ms the active lyric line left its panel: ${s.lyrDetail}`).toBe(
-          true,
-        );
-      }
-      await page.waitForTimeout(Math.max(0, SOAK_SAMPLE_MS - ((Date.now() - soakStart) - t)));
-    }
-    const dbs = soak.map((x) => x.db).filter((d) => Number.isFinite(d));
-    console.log(
-      `[#184 G2] (d) ${soak.length} samples over ${SOAK_MS} ms: longest silent run ` +
-        `${longestSilentRunMs(soak, SILENT_DB)} ms, dBFS min ${Math.min(...dbs).toFixed(1)} ` +
-        `max ${Math.max(...dbs).toFixed(1)}; preview.ws connections ${previewSockets.length} ` +
-        `(${previewSockets.length - socketsAtSoakStart} during the soak); ` +
-        `(e) active lyric line seen in ${lyrSeen} samples, always inside the panel`,
-    );
-    expect(lyrSeen, "(e) the lyrics panel must show an active line during the 3 minutes").toBeGreaterThan(0);
-  } finally {
-    // Leave the box as found: vokály + podklad full, dabing as found; stop the
-    // preview this test started and pause the (off-program) Dabing output.
-    await request
-      .patch("/api/v1/mix", {
-        data: { kind: "dub", vokaly: 1.0, podklad: 1.0, dabing: foundMix.dub.dabing },
-      })
-      .catch(() => {});
-    await page.getByTestId("preview-stop").click({ timeout: 3000 }).catch(() => {});
-    await request.post(`/api/v1/playback/${pid}/pause`).catch(() => {});
   }
+  const zeroPatches = patches.slice(patchesBefore);
+  kind = String(zeroPatches[zeroPatches.length - 1].body.kind ?? "");
+  expect(kind, "a ready dub video drives the DUB mix memory").toBe("dub");
+  const lastZeroPatchAt = Math.max(...zeroPatches.map((p) => p.at));
+  const mixAtZero = (await (await request.get("/api/v1/mix")).json()) as Record<string, MixMemory>;
+  expect(mixAtZero[kind], `GET /api/v1/mix shows the ${kind} memory at 0/0/0`).toEqual(
+    expect.objectContaining({ vokaly: 0, podklad: 0, dabing: 0 }),
+  );
+  const b = await waitForLevel(
+    page,
+    "quiet",
+    lastZeroPatchAt + FADER_AUDIBLE_WITHIN_MS + STREAK * LEVEL_POLL_MS + 500,
+  );
+  console.log(
+    `[#184 G2] (b) silent ${b.at === null ? "NEVER" : `${b.at - lastZeroPatchAt} ms`} after ` +
+      `the last PATCH; dBFS: ${b.trace}`,
+  );
+  expect(b.at, `(b) all faders at 0 → the preview must fall below ${SILENT_DB} dBFS`).not.toBeNull();
+  expect(
+    b.at! - lastZeroPatchAt,
+    `(b) the preview must be silent within ${FADER_AUDIBLE_WITHIN_MS} ms of the last PATCH`,
+  ).toBeLessThanOrEqual(FADER_AUDIBLE_WITHIN_MS);
 
-  // ── (f) zero console errors / warnings — the last assertion ──────────────
-  const real = consoleMessages.filter((m) => !ALLOWED_CONSOLE.some((r) => r.test(m)));
-  expect(real).toEqual([]);
+  // ── (c) vokály back to the top → audible within 4 s ────────────────────
+  const patchesBeforeUp = patches.length;
+  await dragFader(page, "mix-vokaly", 0.99, 0.01);
+  await expect
+    .poll(
+      () => patches.slice(patchesBeforeUp).some((p) => Number(p.body.vokaly) >= 0.95),
+      { timeout: 5000, message: "dragging mix-vokaly to the top must PATCH vokaly ≈ 1" },
+    )
+    .toBe(true);
+  const upPatchAt = Math.max(...patches.slice(patchesBeforeUp).map((p) => p.at));
+  const c = await waitForLevel(
+    page,
+    "audible",
+    upPatchAt + FADER_AUDIBLE_WITHIN_MS + STREAK * LEVEL_POLL_MS + 500,
+  );
+  console.log(
+    `[#184 G2] (c) audible ${c.at === null ? "NEVER" : `${c.at - upPatchAt} ms`} after the ` +
+      `vokály PATCH; dBFS: ${c.trace}`,
+  );
+  expect(c.at, `(c) vokály up → the preview must be audible (> ${AUDIBLE_DB} dBFS)`).not.toBeNull();
+  expect(
+    c.at! - upPatchAt,
+    `(c) the preview must be audible within ${FADER_AUDIBLE_WITHIN_MS} ms of the PATCH`,
+  ).toBeLessThanOrEqual(FADER_AUDIBLE_WITHIN_MS);
+
+  // The soak runs on a full bed — vokály, podklad AND dabing up (real mouse) —
+  // so a pause in the (mostly spoken) dub is not read as a frozen preview.
+  await dragFader(page, "mix-podklad", 0.99, 0.01);
+  await dragFader(page, "mix-dabing", 0.99, 0.01);
+
+  // ── (d) + (e): 3 minutes with the preview open ─────────────────────────
+  const socketsAtSoakStart = previewSockets.length;
+  const soakStart = Date.now();
+  const soak: Array<{ t: number; db: number }> = [];
+  let lyrSeen = 0;
+  while (Date.now() - soakStart < SOAK_MS) {
+    const s = await sample(page);
+    const t = Date.now() - soakStart;
+    soak.push({ t, db: s.db });
+    const run = longestSilentRunMs(soak, SILENT_DB);
+    expect(
+      run,
+      `(d) at ${t} ms the preview has been silent (< ${SILENT_DB} dBFS) for ${run} ms ` +
+        `(max ${MAX_SILENT_RUN_MS}) with the mix non-zero — frozen / starved preview`,
+    ).toBeLessThanOrEqual(MAX_SILENT_RUN_MS);
+    expect(
+      previewSockets.length,
+      `(d) at ${t} ms: ${previewSockets.length} preview.ws connections — more than 1 reconnect`,
+    ).toBeLessThanOrEqual(2);
+    if (s.lyrInside !== null) {
+      lyrSeen += 1;
+      expect(s.lyrInside, `(e) at ${t} ms the active lyric line left its panel: ${s.lyrDetail}`).toBe(
+        true,
+      );
+    }
+    await page.waitForTimeout(Math.max(0, SOAK_SAMPLE_MS - ((Date.now() - soakStart) - t)));
+  }
+  const dbs = soak.map((x) => x.db).filter((d) => Number.isFinite(d));
+  console.log(
+    `[#184 G2] (d) ${soak.length} samples over ${SOAK_MS} ms: longest silent run ` +
+      `${longestSilentRunMs(soak, SILENT_DB)} ms, dBFS min ${Math.min(...dbs).toFixed(1)} ` +
+      `max ${Math.max(...dbs).toFixed(1)}; preview.ws connections ${previewSockets.length} ` +
+      `(${previewSockets.length - socketsAtSoakStart} during the soak); ` +
+      `(e) active lyric line seen in ${lyrSeen} samples, always inside the panel`,
+  );
+  expect(lyrSeen, "(e) the lyrics panel must show an active line during the 3 minutes").toBeGreaterThan(0);
 });

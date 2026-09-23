@@ -702,6 +702,59 @@ test("a socket that never delivers its init is replaced after the init timeout (
   }
 });
 
+test("fruitless reconnects back off 12 → 24 s; only a MEDIA fragment resets the backoff (#184 round G2 review)", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(150000);
+  // Five sockets, one fault each (the mock's `sequence`):
+  //  1 hold_init            → lost at the 12 s init timeout, 1st reconnect at once
+  //  2 hold_init            → lost at 12 s; retry #1's gap is 12 s → reconnect
+  //  3 init, then closed    → an INIT alone is not media: the count stays, so
+  //                           retry #2 waits its 24 s (a reset-on-init would
+  //                           reconnect after 12 s, a missing increment too)
+  //  4 init + 2 fragments,  → media arrived: the count resets, so the next
+  //    then closed            reconnect waits the 12 s BASE (without the reset
+  //                           retry #3 would wait 48 s)
+  //  5 healthy              → plays.
+  await request.post("/__mock/preview-fault", {
+    data: {
+      sequence: [
+        { hold_init: true },
+        { hold_init: true },
+        { close_after_frags: 0 },
+        { close_after_frags: 2 },
+      ],
+    },
+  });
+  try {
+    const sockets = watchPreviewSockets(page);
+    await startPreview(page);
+    await expect
+      .poll(() => sockets.length, { timeout: 100000, intervals: [250] })
+      .toBeGreaterThanOrEqual(5);
+    const gap = (i: number) => sockets[i].openedAt - sockets[i - 1].openedAt;
+    const gaps = [1, 2, 3, 4].map(gap);
+    console.log(`[#184 G2] preview socket gaps (ms): ${gaps.join(", ")}`);
+    // 1 → 2: the init timeout (first reconnect is never delayed).
+    expect(gaps[0], "socket 1 replaced at its init timeout").toBeGreaterThanOrEqual(INIT_TIMEOUT_MS - 500);
+    expect(gaps[0]).toBeLessThanOrEqual(INIT_TIMEOUT_MS + 2500);
+    // 2 → 3: retry #1 waits the 12 s base (= the init timeout).
+    expect(gaps[1], "retry #1 waits 12 s").toBeGreaterThanOrEqual(RECONNECT_BACKOFF_BASE_MS - 500);
+    expect(gaps[1]).toBeLessThanOrEqual(RECONNECT_BACKOFF_BASE_MS + 2500);
+    // 3 → 4: an init without media does NOT reset — retry #2 waits 24 s.
+    expect(gaps[2], "retry #2 backs off to 24 s").toBeGreaterThanOrEqual(2 * RECONNECT_BACKOFF_BASE_MS - 500);
+    expect(gaps[2]).toBeLessThanOrEqual(2 * RECONNECT_BACKOFF_BASE_MS + 2500);
+    // 4 → 5: socket 4 delivered media → reset → the 12 s base again, not 48 s.
+    expect(gaps[3], "after media the backoff is back to 12 s").toBeGreaterThanOrEqual(RECONNECT_BACKOFF_BASE_MS - 500);
+    expect(gaps[3]).toBeLessThanOrEqual(RECONNECT_BACKOFF_BASE_MS + 2500);
+    await expectSteadyPlayback(page);
+    expect(sockets.length, "no further churn once a socket is healthy").toBe(5);
+  } finally {
+    await request.post("/__mock/preview-fault", { data: {} });
+  }
+});
+
 test("a playing card mounts no <video> until start is clicked", async ({
   page,
 }) => {

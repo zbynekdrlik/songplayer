@@ -563,6 +563,43 @@ fn align_timeout_pads_up_to_the_wall_when_no_block_arrived() {
     );
 }
 
+#[test]
+fn block_tail_range_drops_the_skipped_oldest_frames_in_interleaved_samples() {
+    // A 4-frame (8-sample) stereo block, skip 0 → the whole block.
+    assert_eq!(block_tail_range(0, 8), 0..8);
+    // Skip 1 frame = the first 2 interleaved samples.
+    assert_eq!(block_tail_range(1, 8), 2..8);
+    // Skip exactly the block → an empty tail at the end.
+    assert_eq!(block_tail_range(4, 8), 8..8);
+    // A skip clamped past the block never indexes out of range.
+    assert_eq!(block_tail_range(9, 8), 8..8);
+    // Empty block.
+    assert_eq!(block_tail_range(0, 0), 0..0);
+}
+
+#[test]
+fn block_tail_range_never_writes_a_dangling_half_frame() {
+    // #184 G2 review: an odd-length block (never produced by `to_stereo`, but
+    // the feeder must not trust that) would leave one lone sample — writing it
+    // swaps L/R for the rest of the child. The tail stops at the last WHOLE
+    // frame, so written frames == tail.len() / 2 exactly.
+    assert_eq!(block_tail_range(0, 7), 0..6);
+    assert_eq!(block_tail_range(1, 7), 2..6);
+    // Skipping every whole frame of an odd block leaves nothing (the lone
+    // sample is dropped, not written).
+    assert_eq!(block_tail_range(3, 7), 6..6);
+    assert_eq!(block_tail_range(5, 7), 6..6);
+    assert_eq!(block_tail_range(0, 1), 0..0);
+    for n in 0..40usize {
+        for skip in 0..25usize {
+            let r = block_tail_range(skip, n);
+            assert!(r.start <= r.end && r.end <= n, "skip {skip} len {n}: {r:?}");
+            assert_eq!(r.start % 2, 0, "skip {skip} len {n}: starts mid-frame");
+            assert_eq!(r.len() % 2, 0, "skip {skip} len {n}: half a frame");
+        }
+    }
+}
+
 /// Tiny deterministic LCG (no rand dependency) for the property-style loop.
 struct Lcg(u64);
 impl Lcg {
