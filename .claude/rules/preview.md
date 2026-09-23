@@ -373,7 +373,17 @@ a `buffered.end` that is itself stale, and the lag beacon rides the same backlog
   picture holds its last frame until the first new fragment (~0.5 s). The clear
   sets `_snapToStart`: the next `_maintain` with media buffered puts the playhead
   on the FIRST new sample unconditionally (a reconnect can land on a restarted
-  media timeline — a new encoder child starts at 0 — behind the old playhead).
+  media timeline — a new encoder child starts at 0 — behind the old playhead);
+  never while the clearing `remove()` is still pending (`sb.updating`), when
+  `buffered` still shows the OLD range.
+- **Encoder respawn closes the relay** (`preview_encoder.rs::supervise`): a child
+  that had STREAMED and died with viewers present is respawned AND
+  `relay.close()`d — the viewers hold the old child's init and the new init is
+  only cached, never sent to them, so they would freeze on a restarted timeline
+  while their pings are still answered. Closing makes each socket close; the
+  shim's `socketLost` rule reconnects it onto the new init. A child that died
+  with NO init does not close (its viewers are still in `wait_for_init`).
+  Box-only glue (`mutants::skip`), not Linux-testable.
 - **Server log (`api/preview.rs`)**: every viewer session logs INFO on connect
   (init sent) and on disconnect with `secs` + `pongs` answered — a viewer the
   shim keeps reconnecting on a slow link shows up in the box log as a stream of
