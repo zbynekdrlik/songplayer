@@ -111,12 +111,11 @@ pub(crate) const PURGE_DELAY_DEFAULT_MS: i64 = -1;
 /// the WARN on an out-of-range value lives in the impure caller
 /// (`heavy_slot::refresh_containment`), never here.
 fn parse_purge_delay_ms(raw: Option<&str>) -> i64 {
+    // `-1` needs no guard of its own: it IS the default, so it falls through
+    // the `_` arm (a `v == -1` guard was an equivalent mutant — `delete -`
+    // survived the diff-scoped mutation gate, run 35828975563).
     match raw.and_then(|s| s.trim().parse::<i64>().ok()) {
-        Some(v)
-            if v == -1 || (0..=crate::lyrics::heavy_alloc_env::PURGE_DELAY_MAX_MS).contains(&v) =>
-        {
-            v
-        }
+        Some(v) if (0..=crate::lyrics::heavy_alloc_env::PURGE_DELAY_MAX_MS).contains(&v) => v,
         _ => PURGE_DELAY_DEFAULT_MS,
     }
 }
