@@ -501,7 +501,7 @@ def test_go_away_reconnects_with_the_latest_handle_and_resends_nothing():
             session.queue.put_nowait(_msg(go_away=SimpleNamespace(time_left="10s")))
 
     server = FakeServer([first, _echo])
-    frames = _frames(8)
+    frames = _frames(200)
     events, state = _run(server, frames, _fast())
     assert len(server.configs) == 2
     assert server.configs[0]["session_resumption"] == {"handle": None}
@@ -529,11 +529,11 @@ def test_closed_before_everything_is_sent_reconnects():
             session.queue.put_nowait(_CLOSE)
 
     server = FakeServer([first, _echo])
-    frames = _frames(6)
+    frames = _frames(200)
     events, state = _run(server, frames, _fast(), redact_word="websocket")
     assert len(server.configs) == 2
     assert server.configs[1]["session_resumption"] == {"handle": "h1"}
-    assert state.frames_sent == 6
+    assert state.frames_sent == 200
     closed = [e for e in events.events if e["kind"] == "closed"]
     assert closed
     # The error text is redacted with the secret.
