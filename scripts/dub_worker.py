@@ -33,6 +33,10 @@ from statistics import median
 # materialises it into the same tools dir, which is on sys.path for the child).
 import dub_loudness as dl
 
+# #184 round F2: the partial dub is promoted with a POSIX-semantics rename, so a
+# dub SongPlayer holds open (video loaded in SP-dabing) can still be replaced.
+import win_replace as wr
+
 INPUT_SR = 16000
 OUTPUT_SR = 24000
 FINAL_SR = 48000
@@ -750,8 +754,9 @@ def _assemble_dub(
     2. analyse the assembled mix against that target (loudnorm pass 1, to null);
     3. write the 48 kHz stereo dub with the LINEAR second pass
        (`dl.build_loudnorm_second_pass`) to a PARTIAL file, promoted over `out`
-       only once ffmpeg succeeded AND reported its loudness — a failed rebuild
-       never destroys the previous good dub.
+       (`wr.replace_file`, a POSIX rename that works while SongPlayer holds `out`
+       open) only once ffmpeg succeeded AND reported its loudness — a failed
+       rebuild never destroys the previous good dub.
 
     Heartbeats before each full-length pass. Returns the loudness stats (also
     written, JSON-safe, to `<work_dir>/loudness.json` as box-side evidence). Any
@@ -779,7 +784,9 @@ def _assemble_dub(
         applied = dl.parse_loudnorm_json(
             _run_stderr(dl.assembly_args(ff, wavs, mix_filter, second, part, FINAL_SR))
         )
-        os.replace(part, out)
+        # NOT os.replace: on Windows that is MoveFileExW, which fails with
+        # WinError 5 while SongPlayer holds `out` open (#184 round F2).
+        wr.replace_file(part, out)
     except BaseException:
         # The previous good dub stays; drop the half-written partial, then
         # re-raise the ORIGINAL failure (a cleanup error is logged, not raised).

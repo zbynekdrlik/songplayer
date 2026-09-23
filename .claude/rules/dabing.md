@@ -7,6 +7,7 @@ paths:
   - crates/sp-server/src/dabing/**
   - scripts/dub_worker.py
   - scripts/dub_loudness.py
+  - scripts/win_replace.py
   - scripts/tests/test_dub_worker*.py
   - sp-ui/src/pages/dabing.rs
   - sp-ui/src/components/dabing_list.rs
@@ -545,13 +546,45 @@ before each pass and makes three ffmpeg calls:
    assembled mix (the same `build_mix_filter` graph) to null.
 3. `assembly_args(…, build_loudnorm_second_pass(mix, target), part, 48000)` writes
    `<base>_dub.part.flac` (`partial_out_path`) with `measured_I/LRA/TP/thresh` +
-   `offset`, `linear=true`, `print_format=json`. It is `os.replace`d over the dub
-   ONLY after ffmpeg exits 0 AND its loudness report parses. On any failure the
-   partial is deleted and the PREVIOUS good dub stays. A partial left behind by a
-   hard-killed child (stall timeout, server exit) is removed, with a log line, at
-   the start of the next assembly. On Windows a replace blocked
-   by an open handle fails the run loudly: the old dub stays, and the dub row
-   records the error and retries after the backoff.
+   `offset`, `linear=true`, `print_format=json`. It is promoted over the dub
+   (`win_replace.replace_file`, see below) ONLY after ffmpeg exits 0 AND its
+   loudness report parses. On any failure the partial is deleted and the PREVIOUS
+   good dub stays. A partial left behind by a hard-killed child (stall timeout,
+   server exit) is removed, with a log line, at the start of the next assembly.
+
+**Promote the dub with a POSIX rename, NEVER `os.replace` (#184 round F2).** On Windows
+`os.replace` is `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`. It fails with `[WinError 5]
+Access is denied` whenever ANY other handle has the target open, even one opened with
+`FILE_SHARE_DELETE`. SongPlayer holds `<base>_dub.flac` open whenever the video is
+loaded in SP-dabing, even paused: `stems/reader.rs` uses Rust std, which shares
+READ|WRITE|DELETE. The reader's path comes from `stems::dub_path(audio)`, so it is fixed.
+Box 2026-09-23: the rebuild of 344 failed at exactly that call, and would fail on
+every retry while the video stayed loaded.
+- **The fix.** `scripts/win_replace.py::replace_file` opens the partial with
+  `DELETE` access and calls `SetFileInformationByHandle(FileRenameInfoEx,
+  REPLACE_IF_EXISTS | POSIX_SEMANTICS)` (Windows 10 1709+). This is the same call
+  Rust std's `fs::rename` falls back to.
+- **What the reader sees.** The directory entry switches at once. The open reader
+  keeps reading the OLD data through its handle, and the NEXT open (the next video
+  load) gets the new dub. Playback never has to stop.
+- **Off Windows** it is plain `os.replace`.
+- **Buffer layout.** `build_rename_info` is pure and pinned on Linux
+  (`scripts/tests/test_win_replace.py`): the x64 layout Flags@0, RootDirectory@8,
+  FileNameLength@16 (UTF-16 BYTES, no NUL), FileName@20, sizeof 24. The struct uses
+  explicit-width ctypes types, because `c_ulong` and `c_wchar` differ in size
+  between Linux and Windows.
+- **Shipping.** `win_replace.py` is the 4th entry of `embedded_tool_scripts`, and
+  `dub_worker.py` imports it at module load (`import win_replace as wr`). It is in
+  the CI ruff scope.
+- **When the rename itself fails** (a reader opened WITHOUT share-delete, a
+  pre-1709 Windows, or a cache dir on a non-NTFS/network volume that lacks
+  `FileRenameInfoEx`; there is deliberately no fallback to plain `FileRenameInfo`,
+  because the box cache is on NTFS `C:`), the run fails loudly with the Win32 error
+  and both paths.
+  The old dub stays, and the dub row records the error and retries after the
+  backoff.
+- The chunk-wav `os.replace` in the per-chunk synth stays: SongPlayer never opens
+  chunk wavs.
 
 `parse_loudnorm_json` reads the last `{…}` block carrying `input_i` (CRLF-safe) and
 raises if the block is missing or incomplete. The stats (`source_i`, `target_i`,
@@ -583,7 +616,8 @@ orig −14.7 / dub −14.7. The mono mix → `-ac 2` upmix keeps the loudness (s
 4. Only `_assemble_dub` runs again (plus the transcripts JSON + subtitles store),
    then `mark_dub_ready`.
 
-The request needs the NEW `dub_worker.py` + `dub_loudness.py` on the box. The worker
+The request needs the NEW `dub_worker.py` + `dub_loudness.py` + `win_replace.py` on
+the box. The worker
 re-materialises the embedded scripts (`ensure_script`), so deploy first. Verify with the
 `<cache>/<youtube_id>_dub/loudness.json` next to the chunks, then an ebur128 of the
 new `<base>_dub.flac` against the vocals stem on the same slice (±1 LU acceptance).

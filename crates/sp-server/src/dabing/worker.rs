@@ -114,9 +114,11 @@ fn ffmpeg_path(tools_dir: &Path) -> PathBuf {
 /// The Python tool scripts the dub worker materialises into `tools_dir` (embedded
 /// at compile time): the worker itself PLUS `dub_voice_check.py`, which the child
 /// imports for the #184 round-E per-chunk voice-band guard, and `dub_loudness.py`
-/// (#184 round F), the loudness rules the assembly imports at module load. Pure —
-/// unit-tested so a helper module can never silently stop shipping to the box.
-fn embedded_tool_scripts() -> [(&'static str, &'static str); 3] {
+/// (#184 round F), the loudness rules the assembly imports at module load, and
+/// `win_replace.py` (#184 round F2), the POSIX-semantics rename that promotes the
+/// finished dub even while SongPlayer holds it open. Pure — unit-tested so a
+/// helper module can never silently stop shipping to the box.
+fn embedded_tool_scripts() -> [(&'static str, &'static str); 4] {
     [
         (
             "dub_worker.py",
@@ -129,6 +131,10 @@ fn embedded_tool_scripts() -> [(&'static str, &'static str); 3] {
         (
             "dub_loudness.py",
             include_str!("../../../../scripts/dub_loudness.py"),
+        ),
+        (
+            "win_replace.py",
+            include_str!("../../../../scripts/win_replace.py"),
         ),
     ]
 }
@@ -585,8 +591,9 @@ impl DubWorker {
     /// Materialise the dub tool scripts into `tools_dir` (embedded at compile
     /// time), rewriting only the stale ones. Mirrors `StemWorker::ensure_script`;
     /// ships `dub_worker.py` plus the helpers it imports: `dub_voice_check.py`
-    /// (the round-E voice-band guard) and `dub_loudness.py` (the round-F
-    /// loudness-matched assembly). Returns the worker script path.
+    /// (the round-E voice-band guard), `dub_loudness.py` (the round-F
+    /// loudness-matched assembly) and `win_replace.py` (the round-F2 POSIX
+    /// rename of the finished dub). Returns the worker script path.
     async fn ensure_script(&self) -> anyhow::Result<PathBuf> {
         let tools_dir = self.script_path.parent().unwrap_or_else(|| Path::new("."));
         tokio::fs::create_dir_all(tools_dir).await?;
@@ -666,7 +673,12 @@ mod tests {
         let names: Vec<&str> = scripts.iter().map(|(n, _)| *n).collect();
         assert_eq!(
             names,
-            vec!["dub_worker.py", "dub_voice_check.py", "dub_loudness.py"]
+            vec![
+                "dub_worker.py",
+                "dub_voice_check.py",
+                "dub_loudness.py",
+                "win_replace.py"
+            ]
         );
         for (name, content) in scripts {
             assert!(!content.is_empty(), "{name} embedded empty");
@@ -694,6 +706,22 @@ mod tests {
         assert!(
             scripts[0].1.contains("import dub_loudness"),
             "dub_worker.py does not import the shipped dub_loudness module"
+        );
+        // #184 round F2: the dub is promoted with a POSIX-semantics rename
+        // (`win_replace.replace_file`) so a dub SongPlayer holds open can still be
+        // replaced; the worker imports it at module load, so it must ship too.
+        let replace = scripts
+            .iter()
+            .find(|(n, _)| *n == "win_replace.py")
+            .map(|(_, c)| *c)
+            .unwrap_or("");
+        assert!(
+            replace.contains("FILE_RENAME_FLAG_POSIX_SEMANTICS"),
+            "win_replace.py (round-F2 POSIX rename) is not shipped"
+        );
+        assert!(
+            scripts[0].1.contains("import win_replace"),
+            "dub_worker.py does not import the shipped win_replace module"
         );
     }
 
