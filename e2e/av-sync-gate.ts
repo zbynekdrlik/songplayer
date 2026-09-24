@@ -68,16 +68,74 @@ export function resolveSidecars(
   return pairs[0];
 }
 
-/** Human meaning of `scripts/av_sync_check.py`'s exit code. */
-export function describeAvSyncExit(code: number | null): string {
-  switch (code) {
-    case 0:
-      return "pass";
-    case 1:
-      return "FAIL (|A/V| over the limit or an audio dropout)";
-    case 2:
-      return "CANNOT MEASURE (low correlation/match/contrast or an analysis error) — a gate failure, never a skip";
-    default:
-      return `analysis process failed to run (exit ${code})`;
+export type AvSyncStatus = "pass" | "fail" | "cannot_measure" | "error";
+
+export interface AvSyncRun {
+  status: AvSyncStatus;
+  /** One human line for the assertion message. */
+  detail: string;
+  /** True only for a cannot-measure caused by the PICTURE (the audio matched):
+   * a still or overlaid video. Another song may be measurable. An audio-side
+   * cannot-measure is never retaken, because it can be a real audio fault. */
+  retakeable: boolean;
+}
+
+const EXPECTED_EXIT: Record<string, number> = { pass: 0, fail: 1, cannot_measure: 2 };
+const MIN_AUDIO_CORR = 0.9; // scripts/av_sync_check.py MIN_AUDIO_CORR
+
+/**
+ * Classify one `scripts/av_sync_check.py` run from its stdout JSON AND its exit
+ * code. They must agree. A missing or unparseable JSON, or a code that
+ * contradicts it, means the analysis itself did not run properly. That is
+ * reported as `error` (e.g. a numpy import failure exits 1 and an argparse
+ * error exits 2, and neither is a measurement).
+ */
+export function classifyAvSyncRun(code: number | null, stdout: string): AvSyncRun {
+  let parsed: {
+    status?: string;
+    reasons?: string[];
+    av_ms?: number;
+    audio?: { corr?: number };
+  };
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return {
+      status: "error",
+      detail: `analysis produced no JSON (exit ${code}) — it failed to run`,
+      retakeable: false,
+    };
   }
+  const status = parsed.status ?? "";
+  if (!(status in EXPECTED_EXIT) || EXPECTED_EXIT[status] !== code) {
+    return {
+      status: "error",
+      detail: `analysis status "${status}" disagrees with exit ${code} — it failed to run`,
+      retakeable: false,
+    };
+  }
+  const reasons = (parsed.reasons ?? []).join("; ");
+  if (status === "pass") {
+    return { status: "pass", detail: `pass (A/V ${parsed.av_ms} ms)`, retakeable: false };
+  }
+  if (status === "fail") {
+    return { status: "fail", detail: `FAIL: ${reasons}`, retakeable: false };
+  }
+  const audioOk = (parsed.audio?.corr ?? 0) >= MIN_AUDIO_CORR;
+  return {
+    status: "cannot_measure",
+    detail: `CANNOT MEASURE (a gate failure, never a skip): ${reasons}`,
+    retakeable: audioOk,
+  };
+}
+
+/**
+ * Every file one OBS recording can leave behind. With "Automatically remux to
+ * mp4" on (OBS profile `Video/AutoRemux`), a non-mp4 recording also gets a
+ * sibling `<base>.mp4`.
+ */
+export function recordingFiles(outputPath: string, autoRemux: boolean): string[] {
+  const m = outputPath.match(/^(.*)\.([^.\\/]+)$/);
+  if (!autoRemux || !m || m[2].toLowerCase() === "mp4") return [outputPath];
+  return [outputPath, `${m[1]}.mp4`];
 }

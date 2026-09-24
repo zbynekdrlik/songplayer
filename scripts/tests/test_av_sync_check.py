@@ -116,6 +116,7 @@ def test_audio_120ms_ahead_is_measured_and_fails():
     assert r["av_ms"] == pytest.approx(120.0, abs=10.0), r
     assert r["aud"]["offset_s"] == pytest.approx(17.42, abs=0.001)
     assert r["aud"]["corr"] >= avs.MIN_AUDIO_CORR
+    assert r["aud"]["second_corr"] < r["aud"]["corr"] - 0.3  # a unique audio match
     assert r["vid"]["match"] >= avs.MIN_VIDEO_MATCH
     assert r["drops"]["dropout_blocks"] == 0
     assert r["status"] == "fail"
@@ -141,8 +142,14 @@ def test_injected_200ms_zero_gap_is_a_dropout_and_fails():
     rec_audio[gap_start : gap_start + int(0.2 * SR)] = 0.0
     r = _measure(audio, frames, pts, rec_audio, canvas, rec_pts)
     assert abs(r["av_ms"]) <= 10.0  # the gap must not disturb the offsets
-    assert r["drops"]["dropout_blocks"] >= 3, r["drops"]
-    assert all(6.9 <= t <= 7.2 for t in r["drops"]["dropout_times_s"]), r["drops"]
+    events = r["drops"]["dropout_events"]
+    assert events, r["drops"]
+    assert all(
+        7.0 <= e["start_s"] and e["start_s"] + e["ms"] / 1000 <= 7.2 for e in events
+    ), events
+    # Every loud 10 ms sub-block inside the gap is caught (the quietest 20 %
+    # of the song's sub-blocks are not classified).
+    assert sum(e["ms"] for e in events) >= 120, events
     assert r["status"] == "fail"
     assert avs.exit_code(r["status"]) == 1
     assert any("dropout" in reason for reason in r["reasons"])
@@ -251,6 +258,20 @@ def test_content_box(canvas, src, box):
     assert avs.content_box(*canvas, *src) == box
 
 
+@pytest.mark.parametrize(
+    ("canvas", "src", "crop"),
+    [
+        ((1920, 1080), (1920, 960), (0.0, 0.0, 1920.0, 960.0)),
+        # rows 4.67..31.33 kept as 5..31: the original loses the same 1/3 row
+        # (10 px) top and bottom before it is scaled into the 26-row box.
+        ((1920, 1080), (1920, 800), (0.0, 10.0, 1920.0, 780.0)),
+        ((1920, 1080), (1000, 1080), (20.0, 0.0, 960.0, 1080.0)),
+    ],
+)
+def test_source_crop_matches_the_kept_grid_cells(canvas, src, crop):
+    assert avs.source_crop(*canvas, *src) == pytest.approx(crop, abs=1e-6)
+
+
 def test_content_box_rejects_bad_sizes():
     with pytest.raises(ValueError):
         avs.content_box(1920, 1080, 0, 960)
@@ -268,6 +289,34 @@ def test_dropouts_ignore_encoder_priming_at_the_recording_edges():
     out = avs.dropout_blocks(rec, orig, SR)
     assert out["dropout_blocks"] == 0
     assert out["gain"] == pytest.approx(0.8, abs=0.05)
+
+
+@pytest.mark.parametrize(
+    ("gap_ms", "start_s"), [(20, 2.0137), (30, 2.0137), (40, 3.0561)]
+)
+def test_short_unaligned_gap_is_a_dropout(gap_ms, start_s):
+    """A lost NDI audio buffer is 10-50 ms and lands anywhere. A grid-aligned
+    50 ms block would miss gaps like these (review finding, #147)."""
+    rng = np.random.default_rng(6)
+    orig = rng.standard_normal(SR * 5) * 0.2
+    rec = orig * 0.8
+    i = int(start_s * SR)
+    rec[i : i + int(gap_ms * SR / 1000)] = 0.0
+    out = avs.dropout_blocks(rec, orig, SR)
+    assert out["dropout_blocks"] >= 1, out
+    assert len(out["dropout_events"]) == 1, out["dropout_events"]
+    assert start_s <= out["dropout_events"][0]["start_s"] <= start_s + gap_ms / 1000
+    assert avs.verdict(0.99, 0.99, 0.01, 0.0, out["dropout_blocks"])[0] == "fail"
+
+
+def test_clean_recording_has_no_dropouts_or_glitches():
+    rng = np.random.default_rng(8)
+    orig = rng.standard_normal(SR * 8) * np.repeat(rng.uniform(0.05, 1.0, 80), SR // 10)
+    rec = 0.7 * orig + rng.standard_normal(len(orig)) * 0.003
+    out = avs.dropout_blocks(rec, orig, SR)
+    assert out["dropout_blocks"] == 0, out["dropout_events"]
+    assert out["glitch_blocks"] == 0
+    assert out["median_rel_err"] < 0.1
 
 
 def test_quiet_original_passage_is_not_a_dropout():
@@ -323,6 +372,14 @@ def test_audio_offset_rejects_silence_and_oversized_recording():
         avs.audio_offset(np.zeros(100), np.ones(1000))
     with pytest.raises(ValueError, match="no longer"):
         avs.audio_offset(np.ones(1000), np.ones(100))
+
+
+def test_frame_without_pts_is_a_named_error():
+    with pytest.raises(RuntimeError, match="without a usable pts_time"):
+        avs._pts("[Parsed_showinfo_0 @ 0x1] n:   0 pts:NOPTS pts_time:NOPTS", "rec.mkv")
+    assert avs._pts(
+        "[Parsed_ashowinfo_0 @ 0x1] n:0 pts:-1024 pts_time:-0.0213333", "a"
+    ) == (pytest.approx(-0.0213333))
 
 
 def test_main_reports_analysis_error_as_cannot_measure(capsys, tmp_path):

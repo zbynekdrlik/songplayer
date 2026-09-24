@@ -354,10 +354,25 @@ and the recording actually get.
   It sets the SONG faders to unity, then `StartRecord` → 20 s → `StopRecord`,
   which returns `outputPath`.
   - `startRecord` refuses to touch a recording the operator already started.
-  - If `/api/v1/mix` shows a different `video_id` after the take, the song
-    changed mid-recording and the take is repeated once.
-  - Afterwards it deletes the recording, restores the faders, and restores the
-    scene the operator was on.
+  - **Takes (max 3).** A take is repeated only in two cases:
+    - `/api/v1/mix` shows a different `video_id` after the take, so the song
+      changed mid-recording;
+    - the result was `cannot_measure` because of the PICTURE while the audio
+      matched (a still or overlaid video). Then the playlist is `/skip`ped to
+      the next song first.
+
+    A `fail` is never retaken. Neither is an audio-side `cannot_measure`,
+    which can be a real audio fault. The run is classified by
+    `classifyAvSyncRun`: the stdout JSON and the exit code must agree.
+    Missing JSON (a numpy import failure, an argparse error) is `error`, not a
+    verdict.
+  - It deletes every recording plus its auto-remux sibling. When the profile's
+    `Video/AutoRemux` is on, an mkv also leaves `<base>.mp4`.
+    `removeRecording` waits for the remux and retries while OBS still holds
+    the file. An undeletable file fails the test after the verdict, never
+    masking it.
+  - The faders, any recording still running, and the operator's scene are
+    restored in `afterAll`, so a timed-out test body cannot strand them.
 - **Original sidecars:** `/api/v1/playlists/{id}/videos` has NO `file_path`.
   The pair is resolved from the cache listing by
   `*_{youtube_id}_normalized[_gf]_{video.mp4|audio.flac}`
@@ -383,11 +398,27 @@ and the recording actually get.
       false PASS) or toward the window edge. The pytest
       `test_mostly_static_lyric_video_still_measures_the_true_offset` pins
       this.
-  - **dropouts:** gain-matched 50 ms blocks. A block is a dropout when
-    rec RMS < 15 % of the original's while the original is above its
-    20th-percentile block RMS. The first/last 100 ms are not classified:
-    OBS mkv AAC decodes its priming (`start_time` −0.021 s) as silence at
-    sample 0.
+  - **dropouts:** gain-matched, at **10 ms** resolution. A 10 ms block is a
+    dropout when rec RMS < 15 % of the original's while the original is loud.
+    - Why not 50 ms: the manual method used 50 ms blocks, but a grid-aligned
+      50 ms block misses a lost 10–50 ms NDI buffer. A 40 ms silent stretch
+      read `pass` at 50 ms (review finding).
+    - "Loud" = above `min(20th percentile, 0.5 × median)` of the blocks. The
+      percentile alone drops a fixed 20 % of blocks even in a dense mix, so a
+      short gap would be missed one time in five.
+    - Glitch statistics (relative error > 0.8) stay at 50 ms.
+    - The first/last 100 ms are not classified. Older ffmpeg (6.1) decodes
+      the AAC priming of an mkv (`start_time` −0.021 s) as silence at sample
+      0, which would read as a dropout.
+    - Output: `dropouts.dropout_events` is a list of `{start_s, ms}`.
+  - **letterbox crop:** the original is cropped (`source_crop`) to exactly
+    the grid cells the recording keeps before scaling. A letterbox edge
+    inside a cell would otherwise skew the geometry by up to one cell.
+- **Never hardcode the AAC priming subtraction.** ffmpeg 6.1 OUTPUTS the
+  priming samples: sample 0 is at −0.021 s. The BtbN master build the box
+  downloads (`tools.rs`, checked 24.9.2026) SKIPS them: sample 0 is at 0.000.
+  The script reads sample 0's time from `ashowinfo`, so both measure right.
+  A fixed "subtract start_time" would be off by 21 ms on the box.
 - **Verdict / exit:**
   - `pass` (0): |A/V| ≤ 40 ms and 0 dropouts.
   - `fail` (1): |A/V| > 40 ms or any dropout.
@@ -401,14 +432,25 @@ and the recording actually get.
   - `video.plateau_ms` is the video's resolution. It is up to one source-frame
     period when source and recording frame rates are equal, so ~±17 ms of the
     measured A/V is quantization.
-  - `dropouts.dropout_times_s` and `glitch_times_s` are recording times.
-    Glitches (relative error > 0.8, not silent) are informational only.
+  - `dropouts.dropout_events[].start_s` and `glitch_times_s` are recording
+    times. Glitches (relative error > 0.8, not silent) are informational only.
+  - `audio.second_corr` is the best audio match more than 0.5 s away from
+    the peak. A repeated chorus can come close to `corr`. A wrong peak then
+    shows up as a low video match (`cannot_measure`), never as a false pass.
   - Baseline on 24.9.2026 (manual): A/V +13 ms, corr 0.997, match 0.999,
     0 dropouts.
 - **Tested:** the pure functions are covered by pytest on synthetic click-train
   plus flash-frame fixtures in Eval Checks (numpy only). The ffmpeg I/O layer
   is untested in CI by design, because that job has no ffmpeg. It was checked
   locally against ffmpeg-muxed mkv and mp4 AAC "recordings" with known offsets
-  (+120 → 116, 0 → −3/−4, −80 → −83 ms).
+  (+120 → 116, 0 → −3/−4, −80 → −83 ms, and an 85 ms zeroed stretch → a
+  dropout). It was checked with both ffmpeg 6.1 and the BtbN master build.
+- **Blind spot:** the reference is the sidecar pair itself. An offset baked
+  into the sidecars at download/normalize time is invisible to this gate.
+- **Unverified until the first box run:** the thresholds (0.95 match, 0.002
+  contrast) have not been measured with the global method on a real OBS
+  recording. Static overlays in the sp-slow scene (title text, logos) lower
+  the match. Read the first run's `AV-SYNC` line before trusting a red or a
+  green.
 - **Do not "fix" a red gate** by raising 40 ms, lowering 0.9/0.95, or skipping
   on exit 2. Find what moved the audio or the picture.

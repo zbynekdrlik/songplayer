@@ -7,8 +7,8 @@ answers two questions about the real output the operator sees:
 
 1. **Lipsync.** ``A/V = audio_offset - video_offset`` in ms, where each offset
    is ``orig_time - rec_time`` (positive A/V = audio AHEAD of the picture).
-2. **Audio continuity.** Are there 50 ms blocks where the recording goes quiet
-   while the original is loud (a dropout)?
+2. **Audio continuity.** Does the recording go silent anywhere the original
+   is loud (a dropout)?
 
 Method (automates the manual 24.9.2026 measurement, A/V +13 ms, 0 dropouts):
 
@@ -21,7 +21,8 @@ Method (automates the manual 24.9.2026 measurement, A/V +13 ms, 0 dropouts):
 * **Video offset**: recording frames are scaled to a 64-wide gray grid and
   cropped to the letterboxed content box. The box is computed from the source
   aspect, never hardcoded: a 1920x960 source in a 1920x1080 canvas gives rows
-  2:34 of 36. Original frames are scaled to that box size. Frames are
+  2:34 of 36. Original frames are cropped to exactly that area
+  (``source_crop``) and scaled to the box size. Frames are
   mean-removed and unit-normalized, and every recording frame is dot-scored
   against every original frame in a window of +-``VIDEO_WINDOW_S`` around the
   audio offset. The window is clamped to the decoded span of the video.
@@ -42,19 +43,21 @@ Method (automates the manual 24.9.2026 measurement, A/V +13 ms, 0 dropouts):
   false-PASS. In a global mean, static frames add a constant to every shift
   and cannot move the peak.
 * **Dropouts**: the recording and the aligned original are gain-matched
-  (least squares) and cut into 50 ms blocks. A block is a DROPOUT when the
-  recording's RMS is < 15 % of the gain-matched original's RMS while the
-  original is loud (above its 20th-percentile block RMS). A loud block whose
-  relative error exceeds 0.8 is reported as a GLITCH. Glitches are
-  informational and do not fail the gate.
+  (least squares). A 10 ms block is a DROPOUT when the recording's RMS is
+  < 15 % of the gain-matched original's RMS while the original is loud. The
+  manual method used 50 ms blocks, but a grid-aligned 50 ms block misses a
+  lost 10-50 ms NDI audio buffer. "Loud" means above
+  ``min(20th percentile, 0.5 x median)``. A loud 50 ms block whose relative
+  error exceeds 0.8 is reported as a GLITCH. Glitches are informational and do
+  not fail the gate.
 
 Verdict: ``cannot_measure`` (exit 2) when any validity threshold is missed or
 the analysis itself errors. Otherwise ``fail`` (exit 1) when |A/V| >
 ``--max-av-ms`` or any dropout block exists, and ``pass`` (exit 0) if not.
 Every number is always printed as JSON on stdout.
 
-The pure functions (``audio_offset``, ``content_box``, ``video_offset``,
-``dropout_blocks``, ``verdict``, ``exit_code``) take numpy arrays and are
+The pure functions (``audio_offset``, ``content_box``, ``source_crop``,
+``video_offset``, ``dropout_blocks``, ``verdict``, ``exit_code``) take numpy arrays and are
 covered by ``scripts/tests/test_av_sync_check.py``. The ffmpeg I/O layer
 (``decode_audio``, ``decode_video``, ``probe_video_size``, ``measure``) is kept
 thin and is deliberately NOT unit-tested. The Eval Checks CI job has no
@@ -63,6 +66,9 @@ ffmpeg, so it is exercised on the box by the post-deploy gate
 
 Only numpy is required at runtime (the box's ``lyrics_venv`` has it) plus an
 ffmpeg binary. No ffprobe is needed; the box ships none.
+
+Blind spot: the reference is the sidecar pair itself. An offset baked into
+the sidecars at download/normalize time is invisible here.
 """
 
 from __future__ import annotations
@@ -84,9 +90,11 @@ MIN_VIDEO_CONTRAST = 0.002
 VIDEO_WINDOW_S = 1.0
 VIDEO_STEP_S = 0.001
 BLOCK_MS = 50
+DROPOUT_BLOCK_MS = 10
 EDGE_GUARD_MS = 100
 DROPOUT_RATIO = 0.15
 LOUD_PERCENTILE = 20
+LOUD_MEDIAN_FRACTION = 0.5
 GLITCH_REL_ERR = 0.8
 DEFAULT_MAX_AV_MS = 40.0
 MAX_REPORTED_TIMES = 20
@@ -144,7 +152,46 @@ def audio_offset(
         if denom < 0.0:
             frac = float(np.clip(0.5 * (y0 - y2) / denom, -0.5, 0.5))
     offset_s = (orig_t0 + (lag + frac) / sr) - rec_t0
-    return {"offset_s": float(offset_s), "corr": float(corr[lag]), "lag": lag}
+    # Diagnostic only: the best correlation more than 0.5 s away from the peak.
+    # A repeated chorus can come close. A wrong peak then shows up as a low
+    # video match, so it reads cannot_measure and never a false pass.
+    away = int(0.5 * sr)
+    others = np.concatenate((corr[: max(0, lag - away)], corr[lag + away + 1 :]))
+    second = float(others.max()) if len(others) else None
+    return {
+        "offset_s": float(offset_s),
+        "corr": float(corr[lag]),
+        "lag": lag,
+        "second_corr": second,
+    }
+
+
+def _content_geometry(
+    canvas_w: int,
+    canvas_h: int,
+    src_w: int,
+    src_h: int,
+    grid_w: int,
+    grid_h: int | None,
+) -> tuple[int, float, float, float, float]:
+    """``(grid_h, x0f, y0f, content_w, content_h)`` of the fitted source, in grid cells."""
+    if min(canvas_w, canvas_h, src_w, src_h) <= 0:
+        raise ValueError("content_box: sizes must be positive")
+    if grid_h is None:
+        grid_h = max(1, round(grid_w * canvas_h / canvas_w))
+    canvas_aspect = canvas_w / canvas_h
+    src_aspect = src_w / src_h
+    if src_aspect >= canvas_aspect:
+        content_w, content_h = float(grid_w), grid_h * canvas_aspect / src_aspect
+    else:
+        content_w, content_h = grid_w * src_aspect / canvas_aspect, float(grid_h)
+    return (
+        grid_h,
+        (grid_w - content_w) / 2.0,
+        (grid_h - content_h) / 2.0,
+        content_w,
+        content_h,
+    )
 
 
 def content_box(
@@ -161,18 +208,9 @@ def content_box(
     wider, pillarbox when narrower) and centred. Only grid cells FULLY inside
     the content are kept, so no cell mixes black bar with picture.
     """
-    if min(canvas_w, canvas_h, src_w, src_h) <= 0:
-        raise ValueError("content_box: sizes must be positive")
-    if grid_h is None:
-        grid_h = max(1, round(grid_w * canvas_h / canvas_w))
-    canvas_aspect = canvas_w / canvas_h
-    src_aspect = src_w / src_h
-    if src_aspect >= canvas_aspect:
-        content_w, content_h = float(grid_w), grid_h * canvas_aspect / src_aspect
-    else:
-        content_w, content_h = grid_w * src_aspect / canvas_aspect, float(grid_h)
-    y0f = (grid_h - content_h) / 2.0
-    x0f = (grid_w - content_w) / 2.0
+    grid_h, x0f, y0f, content_w, content_h = _content_geometry(
+        canvas_w, canvas_h, src_w, src_h, grid_w, grid_h
+    )
     y0, y1 = int(np.ceil(y0f - 1e-6)), int(np.floor(y0f + content_h + 1e-6))
     x0, x1 = int(np.ceil(x0f - 1e-6)), int(np.floor(x0f + content_w + 1e-6))
     if y1 <= y0 or x1 <= x0:
@@ -180,6 +218,29 @@ def content_box(
             f"content_box: source {src_w}x{src_h} leaves no content in a {grid_w}x{grid_h} grid"
         )
     return y0, y1, x0, x1
+
+
+def source_crop(
+    canvas_w: int,
+    canvas_h: int,
+    src_w: int,
+    src_h: int,
+    grid_w: int = GRID_W,
+    grid_h: int | None = None,
+) -> tuple[float, float, float, float]:
+    """``(x, y, w, h)`` in SOURCE pixels of exactly the area ``content_box`` keeps.
+
+    When a letterbox edge falls inside a grid cell, ``content_box`` drops that
+    partial cell. The original must be cropped by the same fraction before it
+    is scaled into the box, or the two pictures differ by up to a cell of
+    geometry.
+    """
+    y0, y1, x0, x1 = content_box(canvas_w, canvas_h, src_w, src_h, grid_w, grid_h)
+    _, x0f, y0f, content_w, content_h = _content_geometry(
+        canvas_w, canvas_h, src_w, src_h, grid_w, grid_h
+    )
+    sx, sy = src_w / content_w, src_h / content_h
+    return (x0 - x0f) * sx, (y0 - y0f) * sy, (x1 - x0) * sx, (y1 - y0) * sy
 
 
 def _normalize_frames(frames: np.ndarray) -> np.ndarray:
@@ -260,6 +321,43 @@ def video_offset(
     }
 
 
+def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """``(start, length)`` of every run of consecutive True values."""
+    padded = np.concatenate(([False], mask, [False])).astype(np.int8)
+    edges = np.flatnonzero(np.diff(padded))
+    return [(int(a), int(b - a)) for a, b in zip(edges[::2], edges[1::2])]
+
+
+def _block_rms(x: np.ndarray, blk: int) -> np.ndarray:
+    nb = len(x) // blk
+    return np.sqrt(np.mean(x[: nb * blk].reshape(nb, blk) ** 2, axis=1))
+
+
+def _loud_inner(orig_rms: np.ndarray, blk_ms: float, edge_guard_ms: int) -> np.ndarray:
+    """Blocks outside the edge guard where the ORIGINAL is loud.
+
+    Loud means an RMS above ``min(LOUD_PERCENTILE-th percentile, LOUD_MEDIAN_FRACTION
+    x median)`` of the guard-free blocks. The percentile alone drops a fixed
+    20 % of blocks even in a dense mix, where the quietest 10 ms are barely
+    quieter than the rest. A short gap landing there would be missed one time
+    in five. The median bound keeps every block at least half the typical
+    level. Genuinely quiet passages (rests, fades), where an encoder may round
+    the signal to near-zero, stay excluded.
+    """
+    nb = len(orig_rms)
+    guard = int(np.ceil(edge_guard_ms / blk_ms))
+    inner = np.zeros(nb, dtype=bool)
+    inner[guard : nb - guard] = True
+    if not inner.any():
+        return inner
+    ref = orig_rms[inner]
+    threshold = min(
+        float(np.percentile(ref, LOUD_PERCENTILE)),
+        LOUD_MEDIAN_FRACTION * float(np.median(ref)),
+    )
+    return inner & (orig_rms > threshold)
+
+
 def dropout_blocks(
     rec: np.ndarray,
     orig_aligned: np.ndarray,
@@ -267,21 +365,31 @@ def dropout_blocks(
     block_ms: int = BLOCK_MS,
     t0: float = 0.0,
     edge_guard_ms: int = EDGE_GUARD_MS,
+    dropout_block_ms: int = DROPOUT_BLOCK_MS,
 ) -> dict:
-    """Gain-matched 50 ms block comparison of the recording vs the aligned original.
+    """Gain-matched block comparison of the recording vs the aligned original.
 
-    ``orig_aligned[i]`` must be the original sample heard at ``rec[i]``.
-    ``t0`` is the recording time of sample 0, used for reported block times.
-    Blocks touching the first/last ``edge_guard_ms`` of the recording are not
-    classified: an AAC recording decodes its encoder priming (OBS mkv:
-    ``start_time`` -0.021 s) as near-silence at sample 0, which would read as a
-    dropout on every run.
+    ``orig_aligned[i]`` must be the original sample heard at ``rec[i]``, and
+    ``t0`` is the recording time of sample 0 (used for the reported times).
+
+    * DROPOUTS are detected at ``dropout_block_ms`` (10 ms) resolution. A
+      sub-block is a dropout when the recording's RMS is < ``DROPOUT_RATIO`` of
+      the gain-matched original's while the original is loud. A lost NDI audio
+      buffer is 10-50 ms, and a grid-aligned 50 ms block only notices a gap
+      that covers nearly all of it.
+    * GLITCHES (relative error > ``GLITCH_REL_ERR`` on a loud ``block_ms``
+      block that is not a dropout) are informational.
+
+    Blocks touching the first/last ``edge_guard_ms`` are not classified. ffmpeg
+    6.1 decodes an AAC mkv's encoder priming (``start_time`` -0.021 s) as
+    near-silence at sample 0, which would read as a dropout on every run.
     """
     rec = np.asarray(rec, dtype=np.float64)
     orig = np.asarray(orig_aligned, dtype=np.float64)
     if len(rec) != len(orig):
         raise ValueError(f"dropouts: length mismatch {len(rec)} vs {len(orig)}")
     blk = int(sr * block_ms / 1000)
+    sub = int(sr * dropout_block_ms / 1000)
     nb = len(rec) // blk
     if nb == 0:
         raise ValueError("dropouts: recording shorter than one block")
@@ -290,40 +398,42 @@ def dropout_blocks(
         raise ValueError("dropouts: aligned original is digital silence")
     gain = float(np.dot(rec, orig) / orig_energy)
 
-    r = rec[: nb * blk].reshape(nb, blk)
-    o = orig[: nb * blk].reshape(nb, blk)
-    ref = gain * o
-    rec_rms = np.sqrt(np.mean(r * r, axis=1))
-    orig_rms = np.sqrt(np.mean(o * o, axis=1))
-    ref_rms = abs(gain) * orig_rms
-    guard = int(np.ceil(edge_guard_ms / block_ms))
-    inner = np.zeros(nb, dtype=bool)
-    inner[guard : nb - guard] = True
-    loud = (
-        inner & (orig_rms > np.percentile(orig_rms[inner], LOUD_PERCENTILE))
-        if inner.any()
-        else inner
+    sub_orig_rms = _block_rms(orig, sub)
+    sub_loud = _loud_inner(sub_orig_rms, dropout_block_ms, edge_guard_ms)
+    dropout = sub_loud & (
+        _block_rms(rec, sub) < DROPOUT_RATIO * abs(gain) * sub_orig_rms
     )
-    dropout = loud & (rec_rms < DROPOUT_RATIO * ref_rms)
+    events = [
+        {"start_s": round(t0 + a * sub / sr, 3), "ms": n * dropout_block_ms}
+        for a, n in _runs(dropout)
+    ]
+
+    r = rec[: nb * blk].reshape(nb, blk)
+    ref = gain * orig[: nb * blk].reshape(nb, blk)
+    loud = _loud_inner(_block_rms(orig, blk), block_ms, edge_guard_ms)
     rel_err = np.linalg.norm(r - ref, axis=1) / np.maximum(
         np.linalg.norm(ref, axis=1), 1e-12
     )
-    glitch = loud & ~dropout & (rel_err > GLITCH_REL_ERR)
-
-    def times(mask: np.ndarray) -> list[float]:
-        return [
-            round(t0 + i * blk / sr, 3)
-            for i in np.flatnonzero(mask)[:MAX_REPORTED_TIMES]
-        ]
+    # A 50 ms block containing a dropout is reported as the dropout, not a glitch.
+    dropout_in_block = np.zeros(nb, dtype=bool)
+    per_block = blk // sub
+    hits = np.flatnonzero(dropout) // per_block
+    dropout_in_block[hits[hits < nb]] = True
+    glitch = loud & ~dropout_in_block & (rel_err > GLITCH_REL_ERR)
 
     return {
         "blocks": int(nb),
+        "block_ms": block_ms,
+        "dropout_block_ms": dropout_block_ms,
         "edge_guard_ms": edge_guard_ms,
         "loud_blocks": int(loud.sum()),
         "dropout_blocks": int(dropout.sum()),
-        "dropout_times_s": times(dropout),
+        "dropout_events": events[:MAX_REPORTED_TIMES],
         "glitch_blocks": int(glitch.sum()),
-        "glitch_times_s": times(glitch),
+        "glitch_times_s": [
+            round(t0 + i * blk / sr, 3)
+            for i in np.flatnonzero(glitch)[:MAX_REPORTED_TIMES]
+        ],
         "median_rel_err": float(np.median(rel_err[loud])) if loud.any() else None,
         "gain": gain,
     }
@@ -386,6 +496,13 @@ def _info_lines(stderr: str, filter_name: str) -> list[str]:
     return [ln for ln in stderr.splitlines() if tag in ln and "pts_time:" in ln]
 
 
+def _pts(line: str, path: str) -> float:
+    m = _PTS_RE.search(line)
+    if m is None:  # e.g. "pts_time:NOPTS" — a frame without a timestamp
+        raise RuntimeError(f"frame without a usable pts_time in {path}: {line.strip()}")
+    return float(m.group(1))
+
+
 def decode_audio(ffmpeg: str, path: str) -> tuple[np.ndarray, float]:
     """First audio stream as 8 kHz mono float32 + the time of its sample 0."""
     out, err = _run(
@@ -395,7 +512,7 @@ def decode_audio(ffmpeg: str, path: str) -> tuple[np.ndarray, float]:
     lines = _info_lines(err, "ashowinfo")
     if not lines:
         raise RuntimeError(f"no ashowinfo frame lines decoding audio of {path}")
-    t0 = float(_PTS_RE.search(lines[0]).group(1))
+    t0 = _pts(lines[0], path)
     return np.frombuffer(out, dtype="<f4").astype(np.float64), t0
 
 
@@ -419,8 +536,10 @@ def decode_video(
     height: int,
     start: float | None = None,
     duration: float | None = None,
+    crop: tuple[float, float, float, float] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Frames scaled to ``width`` x ``height`` gray (uint8) + their container pts."""
+    """Frames (optionally cropped to source-pixel ``(x, y, w, h)`` first) scaled
+    to ``width`` x ``height`` gray (uint8), plus their container pts."""
     # -ss/-t are INPUT options: ffmpeg trims before the filter graph, so showinfo
     # reports exactly the frames written (an output -t under -copyts counts from
     # 0, not from the seek point, and cuts frames showinfo already logged).
@@ -429,13 +548,14 @@ def decode_video(
         cmd += ["-ss", f"{start:.3f}"]
     if duration is not None:
         cmd += ["-t", f"{duration:.3f}"]
+    crop_f = (
+        "" if crop is None else "crop={2:.3f}:{3:.3f}:{0:.3f}:{1:.3f},".format(*crop)
+    )
     cmd += ["-i", path, "-map", "0:v:0",
-            "-vf", f"showinfo,scale={width}:{height}:flags=area,format=gray",
+            "-vf", f"showinfo,{crop_f}scale={width}:{height}:flags=area,format=gray",
             "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"]  # fmt: skip
     out, err = _run(cmd)
-    pts = np.array(
-        [float(_PTS_RE.search(ln).group(1)) for ln in _info_lines(err, "showinfo")]
-    )
+    pts = np.array([_pts(ln, path) for ln in _info_lines(err, "showinfo")])
     frame_bytes = width * height
     n = len(out) // frame_bytes
     if n == 0 or n != len(pts):
@@ -465,6 +585,7 @@ def measure(
     grid_h = max(1, round(GRID_W * canvas_h / canvas_w))
     src_w, src_h = probe_video_size(ffmpeg, orig_video)
     y0, y1, x0, x1 = content_box(canvas_w, canvas_h, src_w, src_h, GRID_W, grid_h)
+    crop = source_crop(canvas_w, canvas_h, src_w, src_h, GRID_W, grid_h)
     rec_f, rec_pts = decode_video(ffmpeg, recording, GRID_W, grid_h)
     rec_f = rec_f[:, y0:y1, x0:x1]
     span = float(rec_pts.max() - rec_pts.min())
@@ -476,6 +597,7 @@ def measure(
         y1 - y0,
         start=start,
         duration=span + 2 * VIDEO_WINDOW_S + 1.0,
+        crop=crop,
     )
     vid = video_offset(rec_f, rec_pts, orig_f, orig_pts, center_s=aud["offset_s"])
 
@@ -498,6 +620,9 @@ def measure(
             "offset_s": round(aud["offset_s"], 4),
             "corr": round(aud["corr"], 4),
             "min_corr": MIN_AUDIO_CORR,
+            "second_corr": None
+            if aud["second_corr"] is None
+            else round(aud["second_corr"], 4),
             "rec_t0_s": rec_a_t0,
             "orig_t0_s": orig_a_t0,
         },
@@ -512,6 +637,7 @@ def measure(
             "canvas": [canvas_w, canvas_h],
             "source": [src_w, src_h],
             "content_box_y0_y1_x0_x1": [y0, y1, x0, x1],
+            "source_crop_x_y_w_h": [round(v, 1) for v in crop],
         },
         "dropouts": drops,
         "inputs": {

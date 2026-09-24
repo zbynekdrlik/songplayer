@@ -6,9 +6,10 @@
 
 import { test, expect } from "@playwright/test";
 import {
-  describeAvSyncExit,
+  classifyAvSyncRun,
   isPlayingWithFrames,
   nowPlayingVideoId,
+  recordingFiles,
   resolveSidecars,
 } from "./av-sync-gate";
 import { pickBaselineScene } from "./obs-baseline-scene";
@@ -75,11 +76,59 @@ test.describe("A/V sync gate helpers (#147)", () => {
     expect(() => resolveSidecars(two, "id1")).toThrow(/found 2/);
   });
 
-  test("describeAvSyncExit maps every exit code; cannot-measure is a failure", () => {
-    expect(describeAvSyncExit(0)).toBe("pass");
-    expect(describeAvSyncExit(1)).toMatch(/FAIL/);
-    expect(describeAvSyncExit(2)).toMatch(/CANNOT MEASURE.*never a skip/);
-    expect(describeAvSyncExit(null)).toMatch(/failed to run/);
+  test("classifyAvSyncRun: pass / fail / cannot-measure from JSON + exit code", () => {
+    const pass = classifyAvSyncRun(0, JSON.stringify({ status: "pass", reasons: [], av_ms: 13 }));
+    expect(pass).toEqual({ status: "pass", detail: "pass (A/V 13 ms)", retakeable: false });
+
+    const fail = classifyAvSyncRun(
+      1,
+      JSON.stringify({ status: "fail", reasons: ["|A/V| 120.0 ms > 40 ms"], audio: { corr: 0.99 } }),
+    );
+    expect(fail.status).toBe("fail");
+    expect(fail.detail).toContain("120.0 ms");
+    expect(fail.retakeable).toBe(false); // a real FAIL is never retaken
+  });
+
+  test("classifyAvSyncRun: only a picture-side cannot-measure is retakeable", () => {
+    const picture = classifyAvSyncRun(
+      2,
+      JSON.stringify({
+        status: "cannot_measure",
+        reasons: ["video contrast 0.0001 < 0.002 (no motion to align on)"],
+        audio: { corr: 0.99 },
+      }),
+    );
+    expect(picture.status).toBe("cannot_measure");
+    expect(picture.detail).toMatch(/never a skip/);
+    expect(picture.retakeable).toBe(true);
+
+    const audio = classifyAvSyncRun(
+      2,
+      JSON.stringify({ status: "cannot_measure", reasons: ["audio correlation 0.4 < 0.9"], audio: { corr: 0.4 } }),
+    );
+    expect(audio.retakeable).toBe(false); // may be a real audio fault
+    const crashed = classifyAvSyncRun(
+      2,
+      JSON.stringify({ status: "cannot_measure", reasons: ["analysis error: RuntimeError: ffmpeg"] }),
+    );
+    expect(crashed.retakeable).toBe(false);
+  });
+
+  test("classifyAvSyncRun: no JSON or a contradicting exit code is an error, not a verdict", () => {
+    // e.g. numpy failed to import (exit 1) or argparse rejected the args (exit 2)
+    expect(classifyAvSyncRun(1, "Traceback (most recent call last): ...").status).toBe("error");
+    expect(classifyAvSyncRun(2, "usage: av_sync_check.py ...").status).toBe("error");
+    expect(classifyAvSyncRun(null, "").status).toBe("error");
+    expect(classifyAvSyncRun(1, JSON.stringify({ status: "pass" })).status).toBe("error");
+    expect(classifyAvSyncRun(0, JSON.stringify({ status: "weird" })).status).toBe("error");
+  });
+
+  test("recordingFiles adds the auto-remux mp4 sibling only when it applies", () => {
+    const mkv = "C:\\Users\\op\\Videos\\2026-09-24 20-00-00.mkv";
+    expect(recordingFiles(mkv, false)).toEqual([mkv]);
+    expect(recordingFiles(mkv, true)).toEqual([mkv, "C:\\Users\\op\\Videos\\2026-09-24 20-00-00.mp4"]);
+    const mp4 = "C:\\Videos\\rec.mp4";
+    expect(recordingFiles(mp4, true)).toEqual([mp4]);
   });
 });
 

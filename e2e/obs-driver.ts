@@ -109,6 +109,19 @@ export class ObsDriver {
     await new Promise((r) => setTimeout(r, 400));
   }
 
+  /**
+   * Whether the current OBS profile remuxes finished recordings to mp4
+   * (`Video/AutoRemux`), which leaves a sibling `<base>.mp4` to clean up.
+   */
+  async autoRemuxEnabled(): Promise<boolean> {
+    const r = await this.obs.call("GetProfileParameter", {
+      parameterCategory: "Video",
+      parameterName: "AutoRemux",
+    });
+    const v = (r as { parameterValue: string | null; defaultParameterValue: string | null });
+    return (v.parameterValue ?? v.defaultParameterValue ?? "false").toLowerCase() === "true";
+  }
+
   /** Whether OBS is currently recording (`GetRecordStatus.outputActive`). */
   async isRecording(): Promise<boolean> {
     const r = await this.obs.call("GetRecordStatus");
