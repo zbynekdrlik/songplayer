@@ -20,6 +20,7 @@ fn base() -> LockInputs {
         slots_w: 1800,
         source_fps: 24.0,
         grid_fps: 30,
+        decoding: true,
     }
 }
 
@@ -265,6 +266,89 @@ fn late_beats_repeats() {
     });
     assert_eq!(s, LockState::Degraded);
     assert_eq!(r, "late > 25 % of slots in 60 s");
+}
+
+// ---- #150: a paused / idle output's STANDBY repeats (pacing ON) ----
+//
+// Under pacing a non-decoding output keeps servicing the grid with its frozen
+// last frame, so EVERY slot is a repeat (box 24.9.2026: SP-fast / SP-dabing
+// Paused read repeats +1812/min against seq +1812/min). That is the design,
+// not starvation — the repeat-rate rule applies only while decoding. Every
+// other rule still applies to a standby output.
+
+#[test]
+fn standby_repeats_on_every_slot_are_locked_when_not_decoding() {
+    // RED for #150: 1800 slots, 1800 repeats, 24-fps source on the 30 grid, one
+    // receiver, clock + pacing ok, NOT decoding → LOCKED (today: DEGRADED).
+    let (s, r) = derive(&LockInputs {
+        decoding: false,
+        connections: 1,
+        slots_w: 1800,
+        repeats_w: 1800,
+        ..base()
+    });
+    assert_eq!(s, LockState::Locked);
+    assert_eq!(r, "locked");
+}
+
+#[test]
+fn standby_output_still_degrades_on_late() {
+    // Not decoding does not hide a broken grid: 26 % late (468 / 1800) → the
+    // late rule still fires.
+    let (s, r) = derive(&LockInputs {
+        decoding: false,
+        slots_w: 1800,
+        late_w: 468,
+        repeats_w: 1800,
+        ..base()
+    });
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "late > 25 % of slots in 60 s");
+}
+
+#[test]
+fn standby_output_still_degrades_on_resync() {
+    let (s, r) = derive(&LockInputs {
+        decoding: false,
+        resyncs_w: 1,
+        repeats_w: 1800,
+        ..base()
+    });
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "resync in 60 s");
+}
+
+#[test]
+fn decoding_output_still_degrades_on_repeats_above_margin() {
+    // Unchanged for a decoding output: the same 1800/1800 repeats are genuine
+    // starvation while Playing → DEGRADED.
+    let (s, r) = derive(&LockInputs {
+        decoding: true,
+        slots_w: 1800,
+        repeats_w: 1800,
+        ..base()
+    });
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "repeats above the fps conversion in 60 s");
+}
+
+#[test]
+fn decoding_output_repeats_exactly_at_margin_is_locked() {
+    // Exact boundary while decoding: 540 * 1000 == (200 + 100) * 1800 → LOCKED;
+    // one more repeat → DEGRADED.
+    let (s, _) = derive(&LockInputs {
+        decoding: true,
+        repeats_w: 540,
+        ..base()
+    });
+    assert_eq!(s, LockState::Locked);
+    let (s2, r2) = derive(&LockInputs {
+        decoding: true,
+        repeats_w: 541,
+        ..base()
+    });
+    assert_eq!(s2, LockState::Degraded);
+    assert_eq!(r2, "repeats above the fps conversion in 60 s");
 }
 
 // ---- expected_repeat_permille (the structural fps-conversion rate) ----

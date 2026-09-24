@@ -756,6 +756,7 @@ impl crate::playback::PlaybackEngine {
             connections.max(0) as u32,
             source_fps,
             sp_core::genlock::GENLOCK_GRID_FPS as u32,
+            transport_from_reported(&reported_state),
         );
 
         // #127 / #173 receiver-side recovery: evaluate the dark-wall ladder for
