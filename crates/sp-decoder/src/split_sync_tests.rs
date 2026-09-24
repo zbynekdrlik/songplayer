@@ -867,7 +867,8 @@ fn assert_read_ahead_bounded(frame_ms: u64) {
 
 /// (b) Bounding the read-ahead loses nothing: each frame gets exactly the
 /// chunks in `(previous deadline, deadline]`, so over the run every chunk up
-/// to the last deadline is delivered exactly once, in order.
+/// to the last deadline is delivered exactly once, in order. A pairing-
+/// preservation guard (it holds before and after G5), not a RED test.
 fn assert_no_chunk_lost(frame_ms: u64) {
     let (steps, chunks) = run_g5(frame_ms, 300);
     let mut prev_deadline: Option<u64> = None;
@@ -943,4 +944,26 @@ fn next_synced_reads_only_when_pending_is_empty() {
         "no read while a chunk already waits past the deadline"
     );
     assert_eq!(dec.pending_audio.len(), 1);
+}
+
+#[test]
+fn seek_while_a_chunk_waits_reads_again_from_the_target() {
+    // Frame 0 (deadline 40) leaves 48 waiting. A seek empties the queue, so
+    // the next call must READ again (from the seek target), not stall on the
+    // pre-seek chunk: the first frame >= 1000 is 1023 (deadline 1063), so
+    // 1008 and 1056 pair and 1104 waits.
+    let vframes: Vec<u64> = (0..=60).map(|k| k * 33).collect();
+    let chunks: Vec<u64> = (0..=50).map(|j| j * G5_CHUNK_MS).collect();
+    let v = Box::new(SeekMockVideo::new(vframes, vec![0]));
+    let a = Box::new(SeekMockAudio::new(chunks, 2400));
+    let mut dec = SplitSyncedDecoder::new(v, a).unwrap();
+    let _ = dec.next_synced().unwrap().unwrap();
+    assert_eq!(dec.pending_audio.len(), 1, "48 waits past deadline 40");
+
+    dec.seek(1000).unwrap();
+    let (frame, audio) = dec.next_synced().unwrap().unwrap();
+    assert_eq!(frame.timestamp_ms, 1023);
+    let ts: Vec<u64> = audio.iter().map(|a| a.timestamp_ms).collect();
+    assert_eq!(ts, vec![1008, 1056]);
+    assert_eq!(dec.pending_audio.len(), 1, "1104 waits past deadline 1063");
 }
