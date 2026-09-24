@@ -235,27 +235,28 @@ def test_transcripts_are_one_chunk_on_the_video_timeline():
 # ── the EN timing (#184 H3) ─────────────────────────────────────────────────────
 
 
-def test_en_timed_is_the_input_arrival_on_the_video_timeline_with_no_latency():
-    # The source audio is streamed at 1.0x wall clock from t0, so an input
-    # fragment's arrival - t0 IS its source position (+ the small ASR lag): no
-    # output latency is subtracted, unlike the SK.
+def test_en_timed_subtracts_the_measured_en_latency():
+    # #184 H4: Live Translate emits the input transcription phrase by phrase,
+    # seconds after the audio was sent, so the EN arrival carries its own
+    # measured latency, subtracted exactly like the SK's.
     parts = [
-        (101.0, "Hello ", 1),
-        (101.0, "", 1),
-        (100.5, "world.", 1),
-        (104.2, "Next", 1),
+        (105.0, "Hello ", 1),
+        (105.0, "", 1),
+        (104.5, "world.", 1),
+        (108.2, "Next", 1),
     ]
-    assert dw.en_timed_from(parts, 100.0) == [
+    assert dw.en_timed_from(parts, 100.0, 4000) == [
         {"t_ms": 1000, "text": "Hello "},
         {"t_ms": 1000, "text": "world."},  # never earlier than the previous one
         {"t_ms": 4200, "text": "Next"},
     ]
-    # The SK of the same arrivals is shifted back by the latency; the EN is not.
-    assert dw.sk_timed_from(parts, 100.0, 1000)[2] == {"t_ms": 3200, "text": "Next"}
+    # Same arrivals, same latency -> the same timeline as the SK.
+    assert dw.en_timed_from(parts, 100.0, 4000) == dw.sk_timed_from(parts, 100.0, 4000)
 
 
-def test_en_timed_before_t0_clamps_to_zero():
-    assert dw.en_timed_from([(99.0, "Early ", 1), (100.25, "on.", 1)], 100.0) == [
+def test_en_timed_minus_the_latency_clamps_to_zero():
+    parts = [(101.0, "Early ", 1), (103.25, "on.", 1)]
+    assert dw.en_timed_from(parts, 100.0, 3000) == [
         {"t_ms": 0, "text": "Early "},
         {"t_ms": 250, "text": "on."},
     ]
@@ -266,17 +267,46 @@ def test_en_timed_overlap_is_ordered_and_capped_by_connection():
     # trailing input text comes first and is capped at the new connection's
     # first fragment, so the new connection keeps its own arrival times.
     parts = [
-        (110.0, "End ", 1),
-        (110.4, "New ", 2),
-        (110.6, "of it.", 1),
-        (111.0, "one.", 2),
+        (114.0, "End ", 1),
+        (114.4, "New ", 2),
+        (114.6, "of it.", 1),
+        (115.0, "one.", 2),
     ]
-    assert dw.en_timed_from(parts, 100.0) == [
+    assert dw.en_timed_from(parts, 100.0, 4000) == [
         {"t_ms": 10000, "text": "End "},
         {"t_ms": 10400, "text": "of it."},
         {"t_ms": 10400, "text": "New "},
         {"t_ms": 11000, "text": "one."},
     ]
+
+
+def test_en_latency_is_measured_from_the_first_input_transcription_and_the_onset():
+    # The FIRST input-transcription arrival (the earliest non-empty one, not the
+    # list order) - t0 - the input onset, with the SK's measure and clamp.
+    parts = [(115.2, "second ", 1), (114.5, "First ", 1), (113.0, "", 1)]
+    assert dw.en_latency_ms(parts, 100.0, 10_000) == (4500, 4500)
+    # No onset known -> measured from frame 0.
+    assert dw.en_latency_ms([(104.5, "Hi", 1)], 100.0, None) == (4500, 4500)
+    # Outside 1-6 s -> clamped; the raw value is kept for the log.
+    assert dw.en_latency_ms([(100.3, "Hi", 1)], 100.0, 0) == (1000, 300)
+    assert dw.en_latency_ms([(113.0, "Hi", 1)], 100.0, 0) == (6000, 13000)
+
+
+def test_no_input_transcription_gives_en_latency_zero():
+    assert dw.en_latency_ms([], 100.0, 0) == (0, None)
+    assert dw.en_latency_ms([(104.0, "", 1)], 100.0, 0) == (0, None)
+    assert dw.en_latency_ms([(104.0, "Hi", 1)], None, 0) == (0, None)
+
+
+def test_the_events_log_sits_next_to_the_dub():
+    assert (
+        dw.events_path_for("/cache/Song_Artist_abc123_normalized_dub.flac")
+        == "/cache/Song_Artist_abc123_normalized_dub_events.jsonl"
+    )
+    assert (
+        dw.events_path_for("/c/X_Y_id_normalized_gf_dub.flac")
+        == "/c/X_Y_id_normalized_gf_dub_events.jsonl"
+    )
 
 
 # ── the placed WAV ─────────────────────────────────────────────────────────────
@@ -339,11 +369,14 @@ def test_legacy_work_files_are_the_round_c_to_e2_chunk_cache():
         "heartbeat",
         "events.jsonl",
     ]
+    # The work-dir `events.jsonl` is superseded by `<base>_dub_events.jsonl`
+    # next to the dub (#184 H4): a stale one would mislead a timing analysis.
     assert dw.legacy_work_files(names) == [
         "chunk_0.json",
         "chunk_0.wav",
         "chunk_12.in.pcm",
         "chunk_plan.json",
+        "events.jsonl",
     ]
 
 
@@ -365,7 +398,10 @@ def test_live_translate_places_the_stream_and_writes_the_d3_transcripts(
     work = tmp_path / "w"
     work.mkdir()
     (work / "chunk_3.wav").write_text("old")  # a superseded resume leftover
+    (work / "events.jsonl").write_text("old")  # the pre-H4 event log location
     out = tmp_path / "x_dub.flac"
+    events_file = tmp_path / "x_dub_events.jsonl"
+    events_file.write_text('{"kind": "stale"}\n')  # a re-dub overwrites it
     transcripts = tmp_path / "x_dub_transcripts.json"
 
     # 3 s of input: 1 s of silence, then speech (the onset is at 1.0 s).
@@ -391,9 +427,14 @@ def test_live_translate_places_the_stream_and_writes_the_d3_transcripts(
                     active=True,
                 )
             )
-        state.input_parts = [(10.5, "Hello ", 1), (11.2, "world", 1)]
+        # The first input transcription arrives 3.5 s after t0.
+        state.input_parts = [(13.5, "Hello ", 1), (14.2, "world", 1)]
         state.output_parts = [(14.0, "Ahoj ", 1), (14.5, "svet.", 1)]
         events.log("connect", connection=1)
+        for _, text, conn in state.input_parts:
+            events.log("input_transcription", connection=conn, text=text)
+        for _, text, conn in state.output_parts:
+            events.log("output_transcription", connection=conn, text=text)
         return state
 
     assembled = {}
@@ -437,22 +478,30 @@ def test_live_translate_places_the_stream_and_writes_the_d3_transcripts(
     assert (placed[26400:28800] == 1001).all()
     assert (placed[28800:] == 0).all()
     # The raw + placed intermediates and the superseded chunk cache are gone.
+    # The event log moved next to the dub (#184 H4); the old one is gone too.
     assert sorted(os.listdir(work)) == [
-        "events.jsonl",
         "heartbeat",
         "session_summary.json",
     ]
+    lines = events_file.read_text(encoding="utf-8").splitlines()
+    kinds = [json.loads(line)["kind"] for line in lines]
+    assert "stale" not in kinds
+    assert kinds.count("input_transcription") == 2
+    assert kinds.count("output_transcription") == 2
     summary = json.loads((work / "session_summary.json").read_text())
     assert summary["latency_ms"] == 3000
     assert summary["measured_latency_ms"] == 3000
     assert summary["input_onset_ms"] == 1000
+    # EN latency = (13.5 - 10.0) s - the 1.0 s input onset = 2500 ms.
+    assert summary["en_latency_ms"] == 2500
+    assert summary["en_measured_latency_ms"] == 2500
     assert summary["connections"] == 1
     t = json.loads(transcripts.read_text(encoding="utf-8"))
     assert t["chunks"][0]["en"] == "Hello world"
-    # EN = input arrival - t0 (10.0), no latency: the source runs at 1.0x.
+    # EN = input arrival - t0 (10.0) - the measured EN latency (2500 ms).
     assert t["chunks"][0]["en_timed"] == [
-        {"t_ms": 500, "text": "Hello "},
-        {"t_ms": 1200, "text": "world"},
+        {"t_ms": 1000, "text": "Hello "},
+        {"t_ms": 1700, "text": "world"},
     ]
     assert t["chunks"][0]["sk"] == "Ahoj svet."
     assert t["chunks"][0]["end_ms"] == 3000
@@ -460,10 +509,15 @@ def test_live_translate_places_the_stream_and_writes_the_d3_transcripts(
         {"t_ms": 1000, "text": "Ahoj "},
         {"t_ms": 1500, "text": "svet."},
     ]
-    stdout = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    captured = capsys.readouterr()
+    stdout = json.loads(captured.out.strip().splitlines()[-1])
     assert stdout["out_path"] == str(out)
     assert stdout["transcripts_path"] == str(transcripts)
     assert stdout["session"]["latency_ms"] == 3000
+    assert stdout["session"]["en_latency_ms"] == 2500
+    # The summary line the SongPlayer log shows carries both latencies.
+    assert "latency 3000 ms (measured 3000 ms" in captured.err
+    assert "EN latency 2500 ms (measured 2500 ms)" in captured.err
 
 
 def test_live_translate_with_no_voiced_output_fails_loudly(tmp_path, monkeypatch):
@@ -585,7 +639,8 @@ def test_a_failed_run_removes_the_raw_output(tmp_path, monkeypatch):
         dw.cmd_live_translate(args)
     assert not (work / dw.RAW_OUTPUT).exists()
     assert not (work / dw.PLACED_WAV).exists()
-    assert (work / "events.jsonl").exists()  # the evidence stays
+    # The evidence stays, next to where the dub would be (#184 H4).
+    assert (tmp_path / "o_events.jsonl").exists()
 
 
 # ── review round 2 ─────────────────────────────────────────────────────────────
