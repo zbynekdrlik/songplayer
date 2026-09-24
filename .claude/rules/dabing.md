@@ -292,12 +292,21 @@ transcription + the SK output transcription; the dub child saves them as
 exactly like song lyrics.
 
 ## Transcript JSON schema (`scripts/dub_worker.py::build_transcripts`)
-`{engine, target_lang, chunks:[{index, start_ms, end_ms, at_ms, tempo, en, sk,
-sk_timed:[{t_ms, text}]}]}`. **Round H step 2: exactly ONE chunk** —
-`{index: 0, start_ms: 0, end_ms: <input length>, at_ms: 0, tempo: 1.0}` — whose
-`en` = the joined input transcription, `sk` = the joined output transcription and
+`{engine, target_lang, chunks:[{index, start_ms, end_ms, at_ms, tempo, en,
+en_timed:[{t_ms, text}], sk, sk_timed:[{t_ms, text}]}]}`. **Round H step 2: exactly
+ONE chunk** — `{index: 0, start_ms: 0, end_ms: <input length>, at_ms: 0, tempo:
+1.0}` — whose `en` = the joined input transcription, `sk` = the joined output
+transcription (both kept for readability only; the builder does not read them),
 `sk_timed` = the SK fragments stamped on the VIDEO timeline (output-transcription
-arrival − t0 − latency, non-decreasing). With `at_ms` 0 / `tempo` 1.0 the builder
+arrival − t0 − latency, non-decreasing) and **`en_timed` (round H3)** = the EN
+input-transcription fragments stamped on the VIDEO timeline (input-transcription
+arrival − t0, NO latency: the source is streamed at 1.0× wall clock from t0, so an
+input fragment arrives at its source position plus the small ASR lag;
+non-decreasing). `dub_worker.py::_timed_from` holds the connection ordering +
+overlap cap once; `sk_timed_from` and `en_timed_from` both call it. The session
+records BOTH transcriptions as `(arrival_s, text, conn)`
+(`dub_live_session.py::SessionState.input_parts` / `output_parts`), and
+`joined_by_connection` takes that shape. With `at_ms` 0 / `tempo` 1.0 the builder
 below maps `t_ms` straight to video time, so D3 needed no change (pinned by
 `subtitles_tests.rs::one_continuous_session_chunk_builds_a_monotonic_bilingual_track`
 + `test_dub_worker.py::test_transcripts_are_one_chunk_on_the_video_timeline`). The
@@ -326,10 +335,33 @@ read correctly — dubs made before round H keep their subtitles.
 - A fragment group whose joined SK is empty after trim produces NO line (#182
   item 9); an all-blank transcript yields an empty track, so
   `subtitles_store::build_and_store_subtitles` stores nothing and returns 0.
-- EN per line = the words of the chunk's `en` covering the same cumulative
-  character fraction `[a,b)` the line covers of the chunk's SK, snapped to word
-  boundaries (deterministic, order-preserving; EN is a reference — exact
-  alignment not required). Empty `en` → empty EN lines; no `sk_timed` → no lines.
+- **EN per line (round H3, #184 design 5806462894) — timed by the INPUT
+  transcription, whole sentences to the nearest SK line.** The chunk's `en_timed`
+  fragments are mapped through the SAME `to_video_ms(at_ms, t, tempo)` as the SK,
+  then the pure `assign_en_sentences(en, line_starts)`:
+  - groups them into SENTENCES with the SK's `ends_sentence` rule (a fragment
+    ending in `. ! ? …`, or the last fragment). Fragments are concatenated AS-IS,
+    exactly like the SK line text: Live Translate fragments carry their own
+    spaces, so there is no separator; the sentence is then trimmed. A run of
+    blank fragments yields no sentence;
+  - times each sentence by its first NON-BLANK fragment;
+  - gives each WHOLE sentence to the chunk's line whose start is nearest
+    (`nearest_line_from`, the first index on a tie, so equal starts resolve to
+    the earliest line). The search starts at the previous sentence's line, so the
+    assignment is monotonic and never goes backwards;
+  - joins several sentences on one line with a space. A line may carry 0, 1 or
+    several EN sentences when the translation merges or splits sentences, which is
+    better than a sentence cut mid-way.
+  EN stays within its own chunk's lines. Intra-fragment punctuation does not
+  split a sentence (the rule looks at fragment ENDS only).
+  **`en_slice` and the SK character-fraction path are DELETED** (owner rule:
+  superseded paths are deleted, not kept as a fallback). It cut the one untimed
+  `en` string per SK line by the SK character fraction, and in the one-chunk
+  regime the error accumulated over the whole video. On video 344, „Rene Garcia."
+  showed „First one" and „Prvý prihlásený." showed „in. Good to see you.".
+  **A transcript written before H3 (no `en_timed`) has NO EN** until the video is
+  re-dubbed (`PATCH /api/v1/videos/{id}/dub {"requested":true}`, below).
+  No `sk_timed` → no lines.
 - `words: None`, `source = "gemini-live-translate"` (`SOURCE_LIVE_TRANSLATE`).
   Every branch is covered in `subtitles_tests.rs`.
 
@@ -528,8 +560,9 @@ and 5797708129 (freeze this state, the model is a setting).
   (`dropped_silence_s` in the summary). The WAV is at least the input's length;
   the body is a memmap and the raw file is read per chunk (a 36-min talk never
   sits in memory). A failed run removes `live_output.raw` / `dub_placed.wav`.
-- Transcriptions carry their connection; EN, SK and `sk_timed` are ordered BY
-  CONNECTION (the old connection's trailing text arrives after the new one's first
+- Transcriptions carry their arrival time and connection (`(arrival_s, text,
+  conn)`, input AND output since round H3); EN, SK, `en_timed` and `sk_timed`
+  are ordered BY CONNECTION (the old connection's trailing text arrives after the new one's first
   text but translates earlier input — never interleaved). `sk_timed` =
   output-transcription arrival − t0 − latency, clamped ≥ 0 and made
   non-decreasing — by CAPPING a connection's late (overlap) fragments at the
