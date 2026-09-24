@@ -10,7 +10,8 @@ reconnect on GoAway), places the one continuous output stream on the VIDEO
 timeline (`video_ms = arrival_ms - t0_ms - latency_ms`), and writes the Slovak
 dub as the `--out` FLAC (48 kHz stereo, the stem format the playback
 `StemMixReader` mixes), loudness-matched to `--audio` (round F) and promoted with
-a POSIX-semantics rename (round F2), plus the EN/SK transcripts JSON for D3.
+a POSIX-semantics rename (round F2), plus the EN/SK transcripts JSON for D3 and
+the session event log next to the dub (`<base>_dub_events.jsonl`, round H4).
 
 `--audio` is chosen by the Rust worker: the vocals stem when it exists, else the
 normalized original. `--voice speaker` (default) sends NO `speech_config`; any
@@ -64,6 +65,9 @@ RAW_OUTPUT = "live_output.raw"  # the session's output PCM, arrival order
 PLACED_WAV = "dub_placed.wav"  # the output placed on the video timeline
 # The round C-E2 resume cache (per-chunk wav/json/pcm + the Rust chunk plan).
 LEGACY_PREFIXES = ("chunk_",)
+# The pre-H4 session event log: it now sits next to the dub (`events_path_for`),
+# and a stale copy left in the work dir would mislead a timing analysis.
+LEGACY_NAMES = ("events.jsonl",)
 
 # ── pure helpers (unit-tested; no I/O, no heavy imports) ─────────────────────────
 
@@ -105,6 +109,28 @@ def measure_latency_ms(
     if first_voiced_arrival_s is None or t0_s is None:
         return None
     return int(round((first_voiced_arrival_s - t0_s) * 1000)) - (onset_ms or 0)
+
+
+def en_latency_ms(
+    parts: list, t0_s: float | None, onset_ms: int | None
+) -> tuple[int, int | None]:
+    """The EN INPUT-transcription latency (#184 H4) as `(clamped, measured)`:
+    the FIRST non-empty input-transcription fragment's arrival, measured and
+    clamped exactly like the SK output latency, so both timelines use one
+    method. `(0, None)` with no input transcription (or no send): the EN is then
+    stamped at its raw arrival.
+
+    The SK's `LATENCY_MIN_MS..=LATENCY_MAX_MS` fits the input side too: Live
+    Translate emits the input transcription per phrase, so its first fragment
+    comes a phrase plus the ASR lag after the speech onset — ~4-5 s on video 344
+    (#184 5807462051), inside 1-6 s. A value outside it is the same artefact as
+    on the output side (an onset the probe could not see, a very late first
+    phrase), not the model."""
+    first = min((arrival for arrival, text, _ in parts if text), default=None)
+    measured = measure_latency_ms(first, t0_s, onset_ms)
+    if measured is None:
+        return 0, None
+    return clamp_latency_ms(measured), measured
 
 
 def timeline_ms(arrival_s: float, t0_s: float, latency_ms: int) -> int:
@@ -191,13 +217,22 @@ def sk_timed_from(parts: list, t0_s: float, latency_ms: int) -> list[dict]:
     return _timed_from(parts, t0_s, latency_ms)
 
 
-def en_timed_from(parts: list, t0_s: float) -> list[dict]:
+def en_timed_from(parts: list, t0_s: float, latency_ms: int) -> list[dict]:
     """The EN INPUT-transcription fragments on the video timeline (#184 H3):
-    arrival - t0, NO latency. The source audio is streamed at 1.0x wall clock
-    from t0, so an input fragment arrives at its source position plus the small
-    ASR lag. The D3 builder assigns each EN sentence WHOLE to the SK line whose
-    start is nearest to it."""
-    return _timed_from(parts, t0_s, 0)
+    arrival - t0 - the measured EN latency (`en_latency_ms`, #184 H4). The
+    source audio is streamed at 1.0x wall clock from t0, but Live Translate
+    emits the input transcription per phrase, seconds after the audio was sent;
+    without the latency the EN sat ~4-5 s late, one SK line below its own
+    translation. The D3 builder assigns each EN sentence WHOLE to the SK line
+    whose start is nearest to it."""
+    return _timed_from(parts, t0_s, latency_ms)
+
+
+def events_path_for(out: str) -> str:
+    """The session event log next to the dub (#184 H4): `<base>_dub.flac` ->
+    `<base>_dub_events.jsonl`, so a timing question is answered offline from
+    the saved log instead of a ~40-min re-dub. A re-dub overwrites it."""
+    return os.path.splitext(out)[0] + "_events.jsonl"
 
 
 def build_transcripts(
@@ -249,8 +284,11 @@ def stream_filter() -> str:
 
 
 def legacy_work_files(names: list[str]) -> list[str]:
-    """The round C-E2 per-chunk resume leftovers among a work dir's `names`."""
-    return sorted(n for n in names if n.startswith(LEGACY_PREFIXES))
+    """The superseded leftovers among a work dir's `names`: the round C-E2
+    per-chunk resume cache and the pre-H4 `events.jsonl`."""
+    return sorted(
+        n for n in names if n.startswith(LEGACY_PREFIXES) or n in LEGACY_NAMES
+    )
 
 
 # ── I/O helpers ─────────────────────────────────────────────────────────────────
@@ -298,12 +336,12 @@ def _decode_input(audio: str) -> bytes:
 
 
 def _remove_legacy_work_files(work_dir: str) -> None:
-    """Delete the superseded round C-E2 per-chunk resume cache, if any."""
+    """Delete the superseded work files (`legacy_work_files`), if any."""
     stale = legacy_work_files(os.listdir(work_dir))
     for name in stale:
         os.remove(os.path.join(work_dir, name))
     if stale:
-        _log(f"removed {len(stale)} superseded per-chunk work files from {work_dir}")
+        _log(f"removed {len(stale)} superseded work files from {work_dir}")
 
 
 def render_placed_wav(
@@ -473,7 +511,8 @@ def _run_session(
 
 def _remove_intermediates(*paths: str) -> None:
     """Delete the raw + placed intermediates (~100 MB each for a 36-min talk);
-    `events.jsonl` / `session_summary.json` / `loudness.json` stay as evidence.
+    `session_summary.json` / `loudness.json` and the event log next to the dub
+    (`events_path_for`) stay as evidence.
     A file that cannot be removed is logged, never raised: this runs in a
     `finally`, and its error must not replace the run's real one."""
     for path in paths:
@@ -501,7 +540,10 @@ def _translate(args: argparse.Namespace, raw_path: str, wav_path: str) -> dict:
     onset = dls.first_voiced_frame(frames)
     onset_ms = None if onset is None else int(round(onset * dls.FRAME_S * 1000))
 
-    events = dls.EventLog(os.path.join(args.work_dir, "events.jsonl"))
+    # The event log is kept next to the dub (#184 H4). No event carries a
+    # secret: the key and the connect config are never logged, errors pass
+    # through `dls.redact`, resumption handles only as `handle_present`.
+    events = dls.EventLog(events_path_for(args.out))
     sink = dls.FileSink(raw_path)
     try:
         state = _run_session(frames, args.model, voice, args.work_dir, sink, events)
@@ -517,8 +559,13 @@ def _translate(args: argparse.Namespace, raw_path: str, wav_path: str) -> dict:
             f"the Live session produced no voiced output ({summary['output_audio_s']} s)"
         )
     latency_ms = clamp_latency_ms(measured)
+    en_latency, en_measured = en_latency_ms(state.input_parts, state.t0_s, onset_ms)
     summary.update(
-        latency_ms=latency_ms, measured_latency_ms=measured, input_onset_ms=onset_ms
+        latency_ms=latency_ms,
+        measured_latency_ms=measured,
+        en_latency_ms=en_latency,
+        en_measured_latency_ms=en_measured,
+        input_onset_ms=onset_ms,
     )
 
     # Place the ONE continuous output stream on the video timeline and write it.
@@ -537,7 +584,8 @@ def _translate(args: argparse.Namespace, raw_path: str, wav_path: str) -> dict:
         f"dub session: connections {summary['connections']}, reconnects "
         f"{summary['reconnects']}, output/input {summary['output_to_input_ratio']}, "
         f"max voiced gap {summary['max_voiced_gap_s']}s, latency {latency_ms} ms "
-        f"(measured {measured} ms, input onset {onset_ms} ms), dropped silence "
+        f"(measured {measured} ms, input onset {onset_ms} ms), EN latency "
+        f"{en_latency} ms (measured {en_measured} ms), dropped silence "
         f"{summary['dropped_silence_s']}s, drain {summary['drain_end_reason']}"
     )
     input_samples = int(round(input_s * OUTPUT_SR))
@@ -553,10 +601,11 @@ def _translate(args: argparse.Namespace, raw_path: str, wav_path: str) -> dict:
 
     # Transcripts JSON for D3: one chunk on the video timeline, the overlap's
     # two connections in connection order (never interleaved). The EN is timed
-    # by its own input-transcription arrival (#184 H3).
+    # by its own input-transcription arrival (#184 H3) minus its own measured
+    # latency (#184 H4).
     transcripts = build_transcripts(
         joined_by_connection(state.input_parts),
-        en_timed_from(state.input_parts, state.t0_s),
+        en_timed_from(state.input_parts, state.t0_s, en_latency),
         joined_by_connection(state.output_parts),
         sk_timed_from(state.output_parts, state.t0_s, latency_ms),
         int(round(input_s * 1000)),
