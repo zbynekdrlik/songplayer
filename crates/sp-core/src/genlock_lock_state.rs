@@ -116,12 +116,16 @@ pub fn expected_repeat_permille(source_fps: f32, grid_fps: u32) -> u64 {
 /// 4. `resyncs_w > 0`                       → `(Degraded, "resync in 60 s")`
 /// 5. `slots_w == 0`                        → `(Locked,   "locked")`
 /// 6. `late_w > 25 %` of slots             → `(Degraded, "late > 25 % of slots in 60 s")`
-/// 7. `repeats_w > fps-conversion + 10 %`  → `(Degraded, "repeats above the fps conversion in 60 s")`
+/// 7. `decoding && repeats_w > fps-conversion + 10 %` → `(Degraded, "repeats above the fps conversion in 60 s")`
 /// 8. otherwise                             → `(Locked,   "locked")`
 ///
-/// So clock beats pacing beats receiver beats resync; a paused/idle output
-/// (`slots_w == 0`, nothing emitted — no grid to break) reads LOCKED; then the
-/// two rate-normalised checks. Resyncs stay a hard event (0 in the calibration).
+/// So clock beats pacing beats receiver beats resync; an output that emitted
+/// nothing (`slots_w == 0` — no grid to break) reads LOCKED; then the two
+/// rate-normalised checks. Resyncs stay a hard event (0 in the calibration).
+/// Rule 7 applies only while `decoding` (#150): under pacing a paused / idle
+/// output fills every slot with a standby repeat by design, so its repeat rate
+/// is not starvation — but its late / resync / receiver / clock rules still
+/// apply, so a standby grid that genuinely breaks still reads DEGRADED.
 pub fn derive(inputs: &LockInputs) -> (LockState, &'static str) {
     if !inputs.clock_ok {
         return (LockState::Unlocked, "clock not ok");
@@ -142,7 +146,9 @@ pub fn derive(inputs: &LockInputs) -> (LockState, &'static str) {
         return (LockState::Degraded, "late > 25 % of slots in 60 s");
     }
     let expected = expected_repeat_permille(inputs.source_fps, inputs.grid_fps);
-    if inputs.repeats_w * 1000 > (expected + REPEAT_MARGIN_PERMILLE) * inputs.slots_w {
+    if inputs.decoding
+        && inputs.repeats_w * 1000 > (expected + REPEAT_MARGIN_PERMILLE) * inputs.slots_w
+    {
         return (
             LockState::Degraded,
             "repeats above the fps conversion in 60 s",
