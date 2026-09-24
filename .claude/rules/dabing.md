@@ -329,8 +329,32 @@ read correctly — dubs made before round H keep their subtitles.
 ## Subtitle builder (`crates/sp-server/src/dabing/subtitles.rs`, pure + tested)
 `transcripts_to_track(&DubTranscripts) -> LyricsTrack`:
 - Fragment `i` occupies the chunk-local output window `(t[i-1], t[i]]` (`t[-1]=0`).
-- Fragments group into LINES: close at sentence punctuation (`. ! ? …`), at 14
-  words (`MAX_WORDS_PER_LINE`), or on a `> 1500 ms` (`LINE_GAP_MS`) arrival gap.
+- Fragments group into LINES (`group_fragments`): a line closes at a fragment
+  whose text ENDS with sentence punctuation (`. ! ? …`, `ends_sentence`), once it
+  reaches 20 words (`MAX_WORDS_PER_LINE`, checked after a whole fragment, so one
+  fragment can take a line past 20), or at the chunk's last fragment. **A pause
+  never closes a line (#184 H6, design 5809150188).** Live Translate streams one
+  sentence with natural pauses inside it, and the old `> 1500 ms` arrival-gap rule
+  (`LINE_GAP_MS`, DELETED) cut sentences in half: on video 344, „Definuj úprimný
+  pre" / „mňa. …" (a 1985 ms pause) and „Úprimný je zo srdca a" / „Keď Biblia …"
+  (3734 ms). The old 14-word cap also cut long sentences. Offline simulation over
+  the whole saved 344 session log (1828 SK / 1819 EN fragments):
+
+  | rule | SK lines ending a sentence | mean EN-sentence coverage |
+  |---|---|---|
+  | gap 1500 + cap 14 (before H6) | 83 % | 0.88 |
+  | no gap, cap 14 | 87 % | 0.91 |
+  | **no gap, cap 20 (H6)** | **95 %** | **0.93** |
+  | gap 3000, cap 20 | 92 % | 0.92 |
+  | no gap, cap 30 | 98 % | 0.94 |
+
+  Cap 30 was rejected because its lines are too long for the 260 px panel, and a
+  3 s gap because it still cuts at longer pauses. A line now stays up through a
+  pause (display times are tiled). Known limit: a sentence end INSIDE a fragment
+  (`„ mňa. Čo to znamená"`) does not close the SK line, so the next sentence shares
+  it — „Definuj úprimný pre mňa. Čo to znamená modliť sa úprimne?" is ONE line,
+  with EN „Define earnest for me.". The SK side does not split inside a fragment,
+  only the EN side does (`split_sentences_inside`).
 - Line video time = `at_ms + local_ms / tempo` (legacy JSON without `at_ms`/
   `tempo` → `start_ms` and `1.0`); `tempo` is clamped to `0.25..=4.0`
   (NaN/∞/≤0 → 1.0) and `to_video_ms` uses `saturating_add` so a degenerate
@@ -376,8 +400,8 @@ read correctly — dubs made before round H keep their subtitles.
     the previous sentence's line, so it is monotonic. A line carries 0..n sentences
     joined with a space. Known trade-offs (measured on the fixture window: the six
     named pairs hold, a few lines still do not): when the SK builder splits one
-    sentence into two lines (14-word cap or a >1.5 s gap) the EN goes to the half
-    it overlaps most and the other half shows no EN; and the part AFTER an
+    sentence into two lines (since H6 only the 20-word cap does that) the EN goes
+    to the half it overlaps most and the other half shows no EN; and the part AFTER an
     in-fragment split starts at that fragment's (earlier) time, so it can overlap
     the PREVIOUS SK line more — „Good morning. Bartlesville" puts „Bartlesville
     Oklahoma." on „Dobré ráno." and leaves „Bartlesville Oklahoma." without EN, and
@@ -388,7 +412,12 @@ read correctly — dubs made before round H keep their subtitles.
   a real `DubTranscripts` JSON (one chunk, 52 `sk_timed` + 48 `en_timed`, already on
   the video timeline) cut from video 344's session log, 27–100 s (public broadcast
   speech). `subtitles_tests.rs::the_video_344_session_log_pairs_the_six_named_sk_lines`
-  asserts six SK → EN pairs through `include_str!`. Cut a new window from a
+  asserts six SK → EN pairs through `include_str!` (all six still hold under the H6
+  grouping). A second window, `dabing/testdata/dub344_window_1235_1320s.json`
+  (74 `sk_timed` + 74 `en_timed`, 1235–1320 s, the 20th minute), backs
+  `the_video_344_twentieth_minute_keeps_each_sentence_on_one_line`: the Definuj and
+  Úprimný sentences are each one line, and every line of the window closes only at a
+  sentence end, at the 20-word cap or at the last fragment. Cut a new window from a
   `<base>_dub_events.jsonl` (below) when a pairing defect needs a real-data test.
   **`en_slice` and the SK character-fraction path are DELETED** (owner rule:
   superseded paths are deleted, not kept as a fallback). It cut the one untimed
@@ -427,7 +456,8 @@ JSON must not loop; failures are WARN only. The call sits in `process_next`
 (structurally mutation-excluded), NOT in `run`, so it adds no whole-fn mutant.
 
 ## Builder version + startup rebuild of stale tracks (#184 H5)
-`dabing/subtitles.rs::DUB_SUBTITLES_BUILDER_VERSION` (2 since H5) is stored with
+`dabing/subtitles.rs::DUB_SUBTITLES_BUILDER_VERSION` (2 since H5, 3 since the H6
+grouping change: no gap rule, 20-word cap) is stored with
 every dub subtitle track as the top-level JSON field `dub_subtitles_builder_version`
 of `{youtube_id}_lyrics.json` — a JSON field, NO DB column/migration (the track is
 JSON). The field is flattened next to the `LyricsTrack` fields, so every reader
