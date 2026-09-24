@@ -707,6 +707,8 @@ Reading them (faders at 0, verified by `GET /api/v1/mix`):
 - `applied` 0 and `rms_dbfs` at the floor, but `preview-tap` high → the preview
   is not fed by this reader (or the loss is between the reader and the tap).
 - `preview-tap` at the floor, `preview-afeed` high → the feeder / `AudioHold`.
+- `samples` per second at `stem-mix` ≫ at `preview-tap` → read-ahead growth in
+  `SplitSyncedDecoder::next_synced` (fixed G5, see `karaoke-stems.md`).
 - The first seam that does NOT drop to the floor (≈ −180, or at least far below
   the speech level) is where the gain is lost.
 - The `preview-tap` window re-opens on the first block after an unwatched gap

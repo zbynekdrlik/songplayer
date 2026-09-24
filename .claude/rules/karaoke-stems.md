@@ -2,6 +2,7 @@
 paths:
   - "crates/sp-server/src/stems/**"
   - "crates/sp-decoder/src/audio/stem_mix*.rs"
+  - "crates/sp-decoder/src/split_sync*.rs"
   - "crates/sp-server/src/playback/karaoke.rs"
   - "scripts/stem_worker.py"
 ---
@@ -51,6 +52,23 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
 - **Native output is 44.1 kHz** (model rate); the mix + the decoder require
   **48 kHz stereo**, so `stem_worker.py` resamples every stem to 48 kHz stereo
   before writing FLAC (PCM_24).
+
+## #184 G5 — bounded audio read-ahead (any read-ahead = fader latency)
+
+`StemMixReader` applies the live fader gains at READ time, so every chunk read
+ahead of playback reaches the wall and the preview with the gains of the moment
+it was READ. `SplitSyncedDecoder::next_synced` (`crates/sp-decoder/src/split_sync.rs`)
+therefore reads a new audio chunk ONLY when `pending_audio` is empty: a chunk
+still waiting past the deadline means the audio is already ahead. Before G5 it
+read one chunk on every call, and ~48 ms chunks against 33 ms (30 fps) / 40 ms
+(25 fps) frames made the reader run 1.44× / ~1.2× real time. `pending_audio`
+grew without bound and the fader latency grew for the whole song (the owner
+heard ~70 s). Never add a read path that runs ahead of the video frame's
+deadline + one chunk. Check it on the box: `stem-mix level samples` per second ≈
+`preview-tap level samples` (~96 k/s); a clearly larger `stem-mix` number means
+read-ahead is growing again. Guarded by the `next_synced_read_ahead_*` /
+`next_synced_bounded_read_ahead_*` / `next_synced_reads_only_when_pending_is_empty`
+tests in `split_sync_tests.rs`.
 
 ## #184 round G2 — each reader FAMILY owns its memory; NO global "active kind" (SUPERSEDES round G1)
 
