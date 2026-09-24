@@ -388,9 +388,17 @@ and the recording actually get.
       Artifacts → `post-deploy-playwright-report` →
       `test-results/post-deploy-av-sync-…-chromium/av-sync-evidence/`
       (`take1-<date>.mkv`, `take1-<date>.mp4`, `take1-av_sync.json`,
-      `take1-av_sync.stderr.txt`). About 15 MB per file. Playwright wipes
+      `take1-av_sync.stderr.txt`). The size per file is not measured yet
+      (the design estimate is ~15 MB per failing run). Playwright wipes
       `test-results/` at the start of the next run, so nothing piles up on
       the box.
+    - It is uploaded only when the JOB fails. A take that failed to measure
+      and was then followed by a passing retake leaves the job green, and
+      its copy is not uploaded.
+    - The repo is PUBLIC, so any GitHub user can download the artifact for
+      7 days. It holds 20 s of the OBS program picture + program audio,
+      which includes any other source live in the program mix at that
+      moment.
     `removeRecording` waits for the remux and retries while OBS still holds
     the file. An undeletable file fails the test after the verdict, never
     masking it.
@@ -517,7 +525,7 @@ and the recording actually get.
 - **Reading the output:** the CI log shows the full JSON and one line:
   `AV-SYNC status=… av_ms=… audio_corr=… video_match=… video_contrast=…
   dropouts=… dropout_ms=… glitches=… drift_ms_per_10s=… max_step_ms=…
-  step_at_s=… reasons=[…]`.
+  step_at_s=… windows=<used>/<total> reasons=[…]`.
   - `av_ms` > 0 means audio AHEAD of picture. `audio.offset_s` and
     `video.offset_s` are `orig_time − rec_time`.
   - `video.plateau_ms` is the video's resolution. It is up to one source-frame
@@ -538,17 +546,26 @@ and the recording actually get.
     `t_s` (window start, recording time), `audio_offset_s` + `audio_corr`
     (that window's audio cross-correlated against the original, searched
     ±300 ms around the global audio offset), `video_offset_s` +
-    `video_match` (the same global video alignment, restricted to the
-    window's frames, ±300 ms around the global video offset), `av_ms`, and
-    `errors` (why a side is `null` there: silence, no frames, no shift).
-  - `drift`: fitted over the windows with `audio_corr ≥ 0.8`
-    (`windows_used` of `windows_total`).
+    `video_match` + `video_contrast` (the same global video alignment,
+    restricted to the window's frames, ±300 ms around the global video
+    offset), `av_ms`, and `errors` (why a side is `null` there: silence, no
+    frames, no shift).
+  - `drift`: fitted over the GOOD windows (`windows_used` of
+    `windows_total`). A good window has `audio_corr ≥ 0.8` and
+    `video_contrast ≥ 0.002`: on a flat video curve the window's video
+    offset is just the plateau centre, so its `av_ms` is not a measurement.
     - `drift_ms_per_10s` is the least-squares slope of `av_ms`.
     - `max_step_ms` / `step_at_s` is the largest `av_ms` change between
-      neighbouring good windows, and the start of the later window.
-    - When that step is an outlier (≥ 20 ms and ≥ 3× the median step),
-      the fit gets its own step term there (`step_modeled: true`). A jump
-      then does not also read as a slope.
+      neighbouring good windows, and the middle of the gap between them. When
+      the window that straddles a jump is excluded, that is still close to
+      the jump.
+    - The fit gets its own step term there (`step_modeled: true`) only if
+      that step is the ONLY outlier (≥ 20 ms and ≥ 3× the median step) and
+      each side keeps ≥ 2 good windows. A jump then does not also read as a
+      slope. A steady drift (equal steps), a one-window spike or a sawtooth
+      (two or more outliers) is never split.
+    - `coverage_low: true` means fewer than 70 % of the windows are good.
+      The fit then describes only part of the take.
   - How to read it:
     - **Steady drift** (an unsynchronized clock, #148 / #55): a slope, small
       equal steps, `step_modeled: false`. 50 ms over 20 s reads ≈ 25 ms/10 s.
@@ -556,15 +573,35 @@ and the recording actually get.
       `step_at_s`, slope ≈ 0.
     - **Constant offset** (e.g. a fixed latency): slope ≈ 0, no step, every
       window's `av_ms` ≈ the global one.
-    - **A window with low `audio_corr`** is where the audio itself changed
-      (glitches, a gap). Compare its `t_s` with `glitch_times_s`.
+    - **A window with low `audio_corr`** is either where the audio itself
+      changed (glitches, a gap: compare its `t_s` with `glitch_times_s`) or
+      a drift fast enough to smear the window (next point). Its raw
+      `av_ms` is still in `segments`: when `coverage_low` is set or the low
+      windows sit at one end, read their `av_ms` trend. The fit leaves them
+      out, so a drift that STARTS mid-take can read "no drift, no step" over
+      the good windows alone.
   - Per-window `av_ms` jitters by a few ms when the picture has few cuts:
     a 2 s window has far fewer frames than the whole take. Read a trend
     over several windows, not one window.
-  - **Limit:** a drift so fast that it smears one 2 s window by more than
-    ~1 ms (≳ 500 ppm) decorrelates broadband audio. Those windows fall below
-    0.8 and `drift` stays `null` instead of fitting a slope through them.
-    Real clock error (≤ a few hundred ppm) is far below that.
+  - **Limit, measured on the pytest fixture (25.9.2026):** a drift smears
+    the alignment inside ONE 2 s window by ±(ppm × 1 µs). How much smear
+    the per-window correlation survives depends on how high the audio's
+    energy goes. Values are median window corr and good windows of 10:
+    - white noise up to 4 kHz: 50 ppm → 0.83 (6), 100 ppm → 0.62 (0);
+    - noise up to 2 kHz: 100 ppm → 0.86 (10), 200 ppm → 0.68 (0);
+    - noise up to 1 kHz: 200 ppm → 0.90 (10), 300 ppm → 0.82 (8),
+      500 ppm → 0.61 (0);
+    - noise up to 500 Hz: 500 ppm → 0.87 (10).
+
+    Whenever windows are used, the slope is right: e.g. 1 kHz at 300 ppm
+    reads 3.0 ms/10 s. The pytest
+    `test_a_realistic_clock_drift_on_music_band_audio` pins 1 kHz at
+    100 ppm.
+
+    Music at 8 kHz carries most of its energy below 1 kHz. A clock error of
+    a few hundred ppm can still push bright material under 0.8. `drift` then
+    stays `null` (or `coverage_low`) instead of fitting a slope through
+    windows that do not match. Read the raw per-window `av_ms` then.
   - The verdict and its thresholds do not read these fields. A profile
     error is reported as `drift.error` and on stderr, and never moves the
     verdict.

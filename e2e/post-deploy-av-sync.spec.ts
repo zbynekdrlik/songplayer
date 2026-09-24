@@ -460,7 +460,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           // evidence (#147). Collected, not asserted here: an assertion in a
           // finally would mask the analysis error that got us here.
           const keep = keepsEvidence(analysed, run)
-            ? { dir: testInfo.outputPath("av-sync-evidence"), take }
+            ? { dir: path.join(testInfo.outputDir, "av-sync-evidence"), take }
             : null;
           if (keep) for (const [name, text] of texts) keepText(keep, name, text);
           undeleted.push(...(await removeRecording(recording, autoRemux, 15_000, keep)));
