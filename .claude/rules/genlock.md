@@ -410,7 +410,8 @@ against the emitted slots (`seq` differenced by `EventWindow`, fed via
 grid reads LOCKED, not DEGRADED. Precedence (first match wins): `!clock_ok` →
 UNLOCKED "clock not ok"; `!pacing` → UNLOCKED "pacing disabled"; `connections==0`
 → DEGRADED "no receiver"; `resyncs_w>0` → DEGRADED "resync in 60 s"; `slots_w==0`
-(paused/idle, no grid) → LOCKED; then the two rate checks; else LOCKED.
+(nothing emitted, no grid) → LOCKED; then the late rate check and, only while
+`decoding` (#150), the repeat rate check; else LOCKED.
 
 - **Late threshold** `LATE_DEGRADED_PERMILLE = 250` (25 % of slots): DEGRADED
   "late > 25 % of slots in 60 s" once `late_w * 1000 > 250 * slots_w`.
@@ -435,6 +436,19 @@ UNLOCKED "clock not ok"; `!pacing` → UNLOCKED "pacing disabled"; `connections=
 - **Calibration (22.9.2026, SP-slow 24 fps on the 30-fps grid, 1 800 slots/min):**
   clean grid late ≤ 6 % of slots (0–100/min), stalled 42 % (W1 ~750/min,
   30–105 ms); repeats a constant 20 % (= 1 − 24/30) in EVERY window; resyncs 0.
+- **Standby repeats are by design; `decoding` gates the repeat rule (#150).**
+  With pacing ON, a PAUSED or IDLE output keeps servicing the grid with standby
+  frames. `Standby::FrozenLast` bumps `repeats` on EVERY slot, so `repeats_w ≈
+  slots_w` (box 24.9.2026: Paused SP-fast / SP-dabing read repeats +1812/min
+  against seq +1812/min). `LockInputs.decoding` (the RAW pipeline transport ==
+  `TransportState::Playing`, passed by `ndi_health.rs` as
+  `transport_from_reported(&reported_state)` into `lock_for_heartbeat`) gates
+  ONLY the repeat rule. A non-decoding output never reads "repeats above the fps
+  conversion", but clock / pacing / receiver / resync / late still apply to it,
+  so a standby grid that genuinely breaks still reads DEGRADED. The rule used to
+  fire on standby, which made every paused output flap DEGRADED and failed the
+  release E2E `genlock badges agree` (run 36063649894). Never "fix" that by
+  suppressing standby frames: receivers need the continuous grid.
 
 **Reading the badge during a soak:** LOCKED with late ≤ 100/min on 24-fps content
 = the grid is HOLDING (the round-4/5 clean span). DEGRADED "late > 25 % of slots"
