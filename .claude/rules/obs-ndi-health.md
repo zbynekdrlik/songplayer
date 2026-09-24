@@ -357,22 +357,28 @@ and the recording actually get.
   - **Takes (max 3).** A take is repeated only in two cases:
     - `/api/v1/mix` shows a different `video_id` after the take, so the song
       changed mid-recording;
-    - the result was `cannot_measure` because of the PICTURE while the audio
-      matched (a still or overlaid video). Then the playlist is `/skip`ped to
-      the next song first.
+    - the result was `cannot_measure` with `unmeasurable_sides == ["video"]`
+      (the picture alone: a still or overlaid video). Then the playlist is
+      `/skip`ped to the next song first. The skip moves the playlist position
+      and is not undone.
 
     A `fail` is never retaken. Neither is an audio-side `cannot_measure`,
-    which can be a real audio fault. The run is classified by
-    `classifyAvSyncRun`: the stdout JSON and the exit code must agree.
-    Missing JSON (a numpy import failure, an argparse error) is `error`, not a
-    verdict.
+    which can be a real audio fault. A retake starts only while less than
+    120 s of the 300 s budget is used, so a full worst-case take still fits.
+    The run is classified by `classifyAvSyncRun`: the stdout JSON and the exit
+    code must agree. Missing JSON (a numpy import failure, an argparse error)
+    is `error`, not a verdict.
   - It deletes every recording plus its auto-remux sibling. When the profile's
     `Video/AutoRemux` is on, an mkv also leaves `<base>.mp4`.
     `removeRecording` waits for the remux and retries while OBS still holds
     the file. An undeletable file fails the test after the verdict, never
     masking it.
-  - The faders, any recording still running, and the operator's scene are
-    restored in `afterAll`, so a timed-out test body cannot strand them.
+  - `afterAll` is the safety net for a timed-out body. It kills a
+    still-running analysis (a Windows `taskkill /T`: python AND its ffmpeg
+    children hold the file open), stops our recording (only while
+    `isRecording()`), re-deletes every recording made (late remux siblings
+    too), restores the faders and restores the scene. Each step runs in its
+    own try/catch, and the errors are asserted together at the end.
 - **Original sidecars:** `/api/v1/playlists/{id}/videos` has NO `file_path`.
   The pair is resolved from the cache listing by
   `*_{youtube_id}_normalized[_gf]_{video.mp4|audio.flac}`
@@ -398,19 +404,40 @@ and the recording actually get.
       false PASS) or toward the window edge. The pytest
       `test_mostly_static_lyric_video_still_measures_the_true_offset` pins
       this.
-  - **dropouts:** gain-matched, at **10 ms** resolution. A 10 ms block is a
-    dropout when rec RMS < 15 % of the original's while the original is loud.
-    - Why not 50 ms: the manual method used 50 ms blocks, but a grid-aligned
-      50 ms block misses a lost 10–50 ms NDI buffer. A 40 ms silent stretch
-      read `pass` at 50 ms (review finding).
-    - "Loud" = above `min(20th percentile, 0.5 × median)` of the blocks. The
-      percentile alone drops a fixed 20 % of blocks even in a dense mix, so a
-      short gap would be missed one time in five.
-    - Glitch statistics (relative error > 0.8) stay at 50 ms.
+  - **dropouts:** a **10 ms RMS window sliding at 1 ms**. A window is a
+    dropout when rec RMS < 15 % of `level` × the original's RMS while the
+    original is loud. Overlapping windows, and runs less than 50 ms apart,
+    merge into one event.
+    - **Detection floor: 11 ms.** Any gap of at least window + hop contains
+      a whole window at any phase.
+    - Why not blocks: the manual method used 50 ms blocks, and a
+      grid-aligned block misses a lost 10–50 ms NDI buffer. At 50 ms a 40 ms
+      silence read `pass`; at a fixed 10 ms grid a 12 ms gap was missed 14
+      times in 20. Both are review findings.
+    - `level` = `max(|LS gain|, median rec/orig RMS ratio over loud
+      windows)`. The RMS ratio is immune to a sub-sample lag, which shrinks
+      the phase-coherent LS gain and would blind the detector.
+    - "Loud" = above `max(min(p20, 0.5 × median), −45 dBFS)`.
+      - The percentile alone drops a fixed 20 % even in a dense mix.
+      - The absolute floor (the sidecars are −14 LUFS) keeps near-silence
+        out, e.g. rests, fades, and what an encoder rounds to zero.
+      - A quiet but audible passage IS classified. Losing it on the output
+        is a dropout, even if an OBS gate did it.
+    - Glitch statistics (relative error > 0.8) stay on 50 ms blocks, and
+      blocks holding a dropout are excluded.
     - The first/last 100 ms are not classified. Older ffmpeg (6.1) decodes
       the AAC priming of an mkv (`start_time` −0.021 s) as silence at sample
-      0, which would read as a dropout.
-    - Output: `dropouts.dropout_events` is a list of `{start_s, ms}`.
+      0.
+    - Output: `dropouts.dropout_count`, `dropout_ms`, and `dropout_events`
+      (a list of `{start_s, ms}`).
+  - **verdict order:** each result is trusted only as far as its own side was
+    measurable.
+    1. Audio unmeasurable → `cannot_measure` (sides `["audio", …]`).
+    2. Any dropout → `fail`, even when the picture is unmeasurable. A still
+       or overlaid picture must never turn a lost buffer into a retake.
+    3. Picture unmeasurable → `cannot_measure` (sides `["video"]`); A/V is
+       not judged.
+    4. |A/V| > 40 → `fail`, else `pass`.
   - **letterbox crop:** the original is cropped (`source_crop`) to exactly
     the grid cells the recording keeps before scaling. A letterbox edge
     inside a cell would otherwise skew the geometry by up to one cell.

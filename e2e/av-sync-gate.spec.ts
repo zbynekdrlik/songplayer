@@ -82,11 +82,23 @@ test.describe("A/V sync gate helpers (#147)", () => {
 
     const fail = classifyAvSyncRun(
       1,
-      JSON.stringify({ status: "fail", reasons: ["|A/V| 120.0 ms > 40 ms"], audio: { corr: 0.99 } }),
+      JSON.stringify({ status: "fail", reasons: ["|A/V| 120.0 ms > 40 ms"], unmeasurable_sides: [] }),
     );
     expect(fail.status).toBe("fail");
     expect(fail.detail).toContain("120.0 ms");
     expect(fail.retakeable).toBe(false); // a real FAIL is never retaken
+
+    // Dropouts with an unmeasurable picture are a FAIL, never a retake (#147 review).
+    const dropouts = classifyAvSyncRun(
+      1,
+      JSON.stringify({
+        status: "fail",
+        reasons: ["2 audio dropout(s)", "video match 0.5 < 0.95"],
+        unmeasurable_sides: [],
+      }),
+    );
+    expect(dropouts.status).toBe("fail");
+    expect(dropouts.retakeable).toBe(false);
   });
 
   test("classifyAvSyncRun: only a picture-side cannot-measure is retakeable", () => {
@@ -95,7 +107,7 @@ test.describe("A/V sync gate helpers (#147)", () => {
       JSON.stringify({
         status: "cannot_measure",
         reasons: ["video contrast 0.0001 < 0.002 (no motion to align on)"],
-        audio: { corr: 0.99 },
+        unmeasurable_sides: ["video"],
       }),
     );
     expect(picture.status).toBe("cannot_measure");
@@ -104,7 +116,11 @@ test.describe("A/V sync gate helpers (#147)", () => {
 
     const audio = classifyAvSyncRun(
       2,
-      JSON.stringify({ status: "cannot_measure", reasons: ["audio correlation 0.4 < 0.9"], audio: { corr: 0.4 } }),
+      JSON.stringify({
+        status: "cannot_measure",
+        reasons: ["audio correlation 0.4 < 0.9", "video match 0.5 < 0.95"],
+        unmeasurable_sides: ["audio", "video"],
+      }),
     );
     expect(audio.retakeable).toBe(false); // may be a real audio fault
     const crashed = classifyAvSyncRun(
@@ -121,6 +137,7 @@ test.describe("A/V sync gate helpers (#147)", () => {
     expect(classifyAvSyncRun(null, "").status).toBe("error");
     expect(classifyAvSyncRun(1, JSON.stringify({ status: "pass" })).status).toBe("error");
     expect(classifyAvSyncRun(0, JSON.stringify({ status: "weird" })).status).toBe("error");
+    expect(classifyAvSyncRun(0, JSON.stringify({ status: "toString" })).status).toBe("error");
   });
 
   test("recordingFiles adds the auto-remux mp4 sibling only when it applies", () => {

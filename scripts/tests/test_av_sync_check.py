@@ -87,12 +87,12 @@ def _measure(audio, frames, pts, rec_audio, canvas, rec_pts, max_av_ms=40.0):
         canvas[:, y0:y1, x0:x1], rec_pts, frames, pts, center_s=aud["offset_s"]
     )
     av_ms = (aud["offset_s"] - vid["offset_s"]) * 1000.0
-    status, reasons = avs.verdict(
+    status, reasons, sides = avs.verdict(
         aud["corr"],
         vid["match"],
         vid["contrast"],
         av_ms,
-        drops["dropout_blocks"],
+        drops["dropout_count"],
         max_av_ms,
     )
     return {
@@ -102,6 +102,7 @@ def _measure(audio, frames, pts, rec_audio, canvas, rec_pts, max_av_ms=40.0):
         "av_ms": av_ms,
         "status": status,
         "reasons": reasons,
+        "sides": sides,
     }
 
 
@@ -118,7 +119,7 @@ def test_audio_120ms_ahead_is_measured_and_fails():
     assert r["aud"]["corr"] >= avs.MIN_AUDIO_CORR
     assert r["aud"]["second_corr"] < r["aud"]["corr"] - 0.3  # a unique audio match
     assert r["vid"]["match"] >= avs.MIN_VIDEO_MATCH
-    assert r["drops"]["dropout_blocks"] == 0
+    assert r["drops"]["dropout_count"] == 0
     assert r["status"] == "fail"
     assert avs.exit_code(r["status"]) == 1
     assert any("A/V" in reason for reason in r["reasons"])
@@ -130,7 +131,7 @@ def test_in_sync_recording_passes():
         audio, frames, pts, *_recording(audio, frames, pts, start=31.05, av_ms=0.0)
     )
     assert abs(r["av_ms"]) <= 10.0, r
-    assert r["drops"]["dropout_blocks"] == 0
+    assert r["drops"]["dropout_count"] == 0
     assert r["status"] == "pass", r["reasons"]
     assert avs.exit_code(r["status"]) == 0
 
@@ -287,7 +288,7 @@ def test_dropouts_ignore_encoder_priming_at_the_recording_edges():
     rec[:170] = 0.0  # AAC priming decodes as silence at sample 0
     rec[-300:] = 0.0  # stop edge
     out = avs.dropout_blocks(rec, orig, SR)
-    assert out["dropout_blocks"] == 0
+    assert out["dropout_count"] == 0
     assert out["gain"] == pytest.approx(0.8, abs=0.05)
 
 
@@ -303,10 +304,45 @@ def test_short_unaligned_gap_is_a_dropout(gap_ms, start_s):
     i = int(start_s * SR)
     rec[i : i + int(gap_ms * SR / 1000)] = 0.0
     out = avs.dropout_blocks(rec, orig, SR)
-    assert out["dropout_blocks"] >= 1, out
-    assert len(out["dropout_events"]) == 1, out["dropout_events"]
-    assert start_s <= out["dropout_events"][0]["start_s"] <= start_s + gap_ms / 1000
-    assert avs.verdict(0.99, 0.99, 0.01, 0.0, out["dropout_blocks"])[0] == "fail"
+    assert out["dropout_count"] == 1, out["dropout_events"]
+    ev = out["dropout_events"][0]
+    assert start_s - 0.001 <= ev["start_s"]
+    assert ev["start_s"] + ev["ms"] / 1000 <= start_s + gap_ms / 1000 + 0.001
+    assert avs.verdict(0.99, 0.99, 0.01, 0.0, out["dropout_count"])[0] == "fail"
+
+
+def test_12ms_gap_is_caught_at_every_phase():
+    """Sliding 10 ms window, 1 ms hop: any gap >= 11 ms holds a whole window
+    whatever its phase. A fixed 10 ms grid missed a 12 ms gap 14 times in 20."""
+    rng = np.random.default_rng(12)
+    orig = rng.standard_normal(SR * 3) * 0.2
+    gap = int(0.012 * SR)
+    for phase in range(0, 80, 4):  # every half-millisecond of a 10 ms period
+        rec = orig * 0.8
+        i = SR + phase
+        rec[i : i + gap] = 0.0
+        assert avs.dropout_blocks(rec, orig, SR)["dropout_count"] == 1, phase
+
+
+def test_fractional_lag_does_not_blind_the_detector():
+    """An LS gain shrinks under a sub-sample lag; the RMS-ratio level does not."""
+    rng = np.random.default_rng(13)
+    orig = rng.standard_normal(SR * 4) * 0.2
+    rec = 0.8 * (orig + np.roll(orig, 1)) / 2  # half-sample-like smear
+    i = 2 * SR
+    rec[i : i + int(0.03 * SR)] = 0.0
+    out = avs.dropout_blocks(rec, orig, SR)
+    assert out["dropout_count"] == 1
+    assert out["level"] >= abs(out["gain"])
+
+
+def test_near_silence_in_the_original_is_never_loud():
+    rng = np.random.default_rng(14)
+    orig = rng.standard_normal(SR * 6) * 0.2
+    orig[SR * 2 : SR * 5] *= 0.01  # 50 % of the take at ~-54 dBFS (below the floor)
+    rec = orig * 0.8
+    rec[SR * 2 : SR * 5] = 0.0  # an encoder rounding near-silence to zero
+    assert avs.dropout_blocks(rec, orig, SR)["dropout_count"] == 0
 
 
 def test_clean_recording_has_no_dropouts_or_glitches():
@@ -314,7 +350,7 @@ def test_clean_recording_has_no_dropouts_or_glitches():
     orig = rng.standard_normal(SR * 8) * np.repeat(rng.uniform(0.05, 1.0, 80), SR // 10)
     rec = 0.7 * orig + rng.standard_normal(len(orig)) * 0.003
     out = avs.dropout_blocks(rec, orig, SR)
-    assert out["dropout_blocks"] == 0, out["dropout_events"]
+    assert out["dropout_count"] == 0, out["dropout_events"]
     assert out["glitch_blocks"] == 0
     assert out["median_rel_err"] < 0.1
 
@@ -325,7 +361,7 @@ def test_quiet_original_passage_is_not_a_dropout():
     orig[SR * 3 : SR * 3 + SR // 2] *= 0.001  # the song itself is silent here
     rec = orig * 0.5
     rec[SR * 3 : SR * 3 + SR // 2] = 0.0
-    assert avs.dropout_blocks(rec, orig, SR)["dropout_blocks"] == 0
+    assert avs.dropout_blocks(rec, orig, SR)["dropout_count"] == 0
 
 
 def test_glitch_is_reported_but_does_not_fail():
@@ -335,16 +371,16 @@ def test_glitch_is_reported_but_does_not_fail():
     rec[SR * 2 : SR * 2 + 400] = rng.standard_normal(400) * 0.2  # garbage, not silence
     out = avs.dropout_blocks(rec, orig, SR)
     assert out["glitch_blocks"] >= 1
-    assert out["dropout_blocks"] == 0
-    assert avs.verdict(0.99, 0.99, 0.01, 5.0, out["dropout_blocks"])[0] == "pass"
+    assert out["dropout_count"] == 0
+    assert avs.verdict(0.99, 0.99, 0.01, 5.0, out["dropout_count"])[0] == "pass"
 
 
 # --- verdict / exit codes -----------------------------------------------------
 
 
 def test_verdict_boundaries():
-    assert avs.verdict(0.99, 0.99, 0.01, 40.0, 0) == ("pass", [])
-    assert avs.verdict(0.99, 0.99, 0.01, -40.0, 0) == ("pass", [])
+    assert avs.verdict(0.99, 0.99, 0.01, 40.0, 0) == ("pass", [], [])
+    assert avs.verdict(0.99, 0.99, 0.01, -40.0, 0) == ("pass", [], [])
     assert avs.verdict(0.99, 0.99, 0.01, 40.1, 0)[0] == "fail"
     assert avs.verdict(0.99, 0.99, 0.01, -40.1, 0)[0] == "fail"
     assert avs.verdict(0.99, 0.99, 0.01, 0.0, 1)[0] == "fail"
@@ -357,10 +393,28 @@ def test_verdict_boundaries():
     assert avs.verdict(0.99, 0.99, 0.01, 30.0, 0, max_av_ms=20.0)[0] == "fail"
 
 
-def test_cannot_measure_wins_over_fail_and_keeps_both_reasons():
-    status, reasons = avs.verdict(0.5, 0.99, 0.01, 300.0, 2)
+def test_audio_side_cannot_measure_wins_over_everything():
+    status, reasons, sides = avs.verdict(0.5, 0.99, 0.01, 300.0, 2)
     assert status == "cannot_measure"
-    assert len(reasons) == 3
+    assert sides == ["audio"]
+    assert len(reasons) == 1
+
+
+def test_dropouts_fail_even_when_the_picture_is_unmeasurable():
+    """Review finding (#147): a still/overlaid picture must never turn found
+    dropouts into a retakeable cannot-measure. Dropouts are audio-only
+    evidence."""
+    status, reasons, sides = avs.verdict(0.99, 0.5, 0.0001, 0.0, 3)
+    assert status == "fail"
+    assert sides == []
+    assert "3 audio dropout(s)" in reasons
+
+
+def test_picture_side_cannot_measure_is_marked_video_only():
+    status, reasons, sides = avs.verdict(0.99, 0.5, 0.01, 999.0, 0)
+    assert status == "cannot_measure"
+    assert sides == ["video"]
+    assert not any("A/V" in r for r in reasons)  # A/V is not judged without a picture
 
 
 def test_exit_codes():

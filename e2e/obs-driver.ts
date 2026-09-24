@@ -119,7 +119,9 @@ export class ObsDriver {
       parameterName: "AutoRemux",
     });
     const v = (r as { parameterValue: string | null; defaultParameterValue: string | null });
-    return (v.parameterValue ?? v.defaultParameterValue ?? "false").toLowerCase() === "true";
+    // OBS's config_get_bool accepts "true" or any non-zero number.
+    const raw = (v.parameterValue ?? v.defaultParameterValue ?? "false").trim().toLowerCase();
+    return raw === "true" || (raw !== "" && !Number.isNaN(Number(raw)) && Number(raw) !== 0);
   }
 
   /** Whether OBS is currently recording (`GetRecordStatus.outputActive`). */

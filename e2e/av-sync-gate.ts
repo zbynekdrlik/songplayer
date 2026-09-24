@@ -74,14 +74,16 @@ export interface AvSyncRun {
   status: AvSyncStatus;
   /** One human line for the assertion message. */
   detail: string;
-  /** True only for a cannot-measure caused by the PICTURE (the audio matched):
-   * a still or overlaid video. Another song may be measurable. An audio-side
-   * cannot-measure is never retaken, because it can be a real audio fault. */
+  /** True only for a cannot-measure caused by the PICTURE alone
+   * (`unmeasurable_sides == ["video"]`): a still or overlaid video. Another
+   * song may be measurable. An audio-side cannot-measure is never retaken,
+   * because it can be a real audio fault. Neither is anything with dropouts,
+   * which the analysis reports as `fail` even when the picture is
+   * unmeasurable. */
   retakeable: boolean;
 }
 
 const EXPECTED_EXIT: Record<string, number> = { pass: 0, fail: 1, cannot_measure: 2 };
-const MIN_AUDIO_CORR = 0.9; // scripts/av_sync_check.py MIN_AUDIO_CORR
 
 /**
  * Classify one `scripts/av_sync_check.py` run from its stdout JSON AND its exit
@@ -95,7 +97,7 @@ export function classifyAvSyncRun(code: number | null, stdout: string): AvSyncRu
     status?: string;
     reasons?: string[];
     av_ms?: number;
-    audio?: { corr?: number };
+    unmeasurable_sides?: string[];
   };
   try {
     parsed = JSON.parse(stdout);
@@ -107,7 +109,7 @@ export function classifyAvSyncRun(code: number | null, stdout: string): AvSyncRu
     };
   }
   const status = parsed.status ?? "";
-  if (!(status in EXPECTED_EXIT) || EXPECTED_EXIT[status] !== code) {
+  if (!Object.prototype.hasOwnProperty.call(EXPECTED_EXIT, status) || EXPECTED_EXIT[status] !== code) {
     return {
       status: "error",
       detail: `analysis status "${status}" disagrees with exit ${code} — it failed to run`,
@@ -121,11 +123,11 @@ export function classifyAvSyncRun(code: number | null, stdout: string): AvSyncRu
   if (status === "fail") {
     return { status: "fail", detail: `FAIL: ${reasons}`, retakeable: false };
   }
-  const audioOk = (parsed.audio?.corr ?? 0) >= MIN_AUDIO_CORR;
+  const sides = parsed.unmeasurable_sides ?? [];
   return {
     status: "cannot_measure",
     detail: `CANNOT MEASURE (a gate failure, never a skip): ${reasons}`,
-    retakeable: audioOk,
+    retakeable: sides.length > 0 && sides.every((side) => side === "video"),
   };
 }
 
