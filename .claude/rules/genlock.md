@@ -6,6 +6,9 @@ paths:
   - "crates/sp-server/src/playback/clock_health*.rs"
   - "crates/sp-server/src/playback/pacer*.rs"
   - "crates/sp-server/src/playback/submitter*.rs"
+  - "crates/sp-server/src/playback/proc_mem*.rs"
+  - "crates/sp-server/src/playback/loop_stats.rs"
+  - "crates/sp-server/src/process_residency*.rs"
   - "crates/sp-ndi/src/**"
 ---
 # Genlock (NDI outputs locked to the fleet clock) — #146–#151
@@ -360,14 +363,16 @@ investigation is now a 10-minute read.
   vs 0.9–1.35/min for 4 cores). `f00000` (the round-5 4-core block) is now the
   operator experiment/override, no longer the default.
 
-- **Toggle pacing.** `genlock_pacing` is read ONLY at startup (`lib.rs::start` →
-  `engine.set_genlock_pacing`), so a paced test = `PATCH /api/v1/settings` with
-  the FLAT body `{"genlock_pacing":"true"}`, THEN restart the app. Restart via
-  `gh run rerun --job <LATEST Deploy job id>` — look the id up each time
-  (`gh run view <run> --json jobs`; a rerun mints a NEW job id). The dependent
-  E2E re-runs and FAILS under pacing ON on the dabing 12–16 kHz spectral test —
-  EXPECTED — so END every session with the flag back to `false` + another
-  Deploy-job rerun to a green run.
+- **Pacing is ON in production permanently** (owner ruling, issue #147 comment
+  5812898277, 24.9.2026): the residual stall is solved with guaranteed priority
+  and residency, NEVER by switching pacing off — not as a "temporary state", not
+  for a measurement. `genlock_pacing` is read ONLY at startup (`lib.rs::start` →
+  `engine.set_genlock_pacing`); a restart = `gh run rerun --job <LATEST Deploy
+  job id>` — look the id up each time (`gh run view <run> --json jobs`; a rerun
+  mints a NEW job id). (Historical, pre-ruling: sessions used to end with the
+  flag back to `false` because the dependent E2E fails its dabing 12–16 kHz
+  spectral test under pacing — that E2E behaviour must be addressed on its
+  own, never by turning pacing off.)
 - **Change containment mid-session.** `heavy_cpu_cap_pct` /
   `heavy_cpu_affinity_mask` apply at the NEXT child spawn (`refresh_containment`
   per tick), NOT to the running child — so after a settings change, kill the venv
@@ -433,3 +438,129 @@ UNLOCKED "clock not ok"; `!pacing` → UNLOCKED "pacing disabled"; `connections=
 source (a 24-fps source's structural 20 % never trips it). The
 `/api/v1/ndi/health` `lock_state`/`reason`, the `ndi: genlock` log line and the
 dashboard `GlobalLockBadge` all read this one derivation.
+
+## #147 round 9 — memory residency
+
+Pacing is ON in production permanently (owner ruling, issue #147 comment
+5812898277). The residual paced-sender stall with a heavy child resident is
+treated as a memory-residency problem (design record, issue #147 comment
+5812936370). The box runs with ~15 GB of commit over physical RAM. When the
+child's working set grows, Windows trims SongPlayer's frame pools and the NDI
+SDK's buffers, and the paced submit then takes hard page faults. Priority class,
+`timeBeginPeriod(1)` and the TIME_CRITICAL audio thread protect CPU time. None
+of them protects residency, so round 9 adds two guarantees and one gauge.
+
+### The two settings
+
+Both settings are read through `GET`/`PATCH /api/v1/settings`. The settings API
+has no whitelist and stores any key; the defaults live in the resolvers. Both
+values are flat strings in MiB, e.g. `{"sp_min_working_set_mb":"3072"}`.
+
+| key | default | range | takes effect |
+|---|---|---|---|
+| `sp_min_working_set_mb` | **3072** | `0` = off, else clamped `256..=8192`; absent/garbage/negative → default + WARN | the NEXT SongPlayer start (read once in `lib.rs::start`, right after the DB is ready, before any pipeline spawns) |
+| `heavy_max_working_set_mb` | **4096** | `0` = off, else clamped `512..=10240`; absent/garbage/negative → default + WARN | the NEXT heavy-child spawn (`refresh_containment` per worker tick, like the other `heavy_*` knobs) |
+
+**`sp_min_working_set_mb` — SongPlayer's hard minimum working set.**
+
+- The call is `process_start::apply_min_working_set`, which runs
+  `SetProcessWorkingSetSizeEx(GetCurrentProcess(), min, 2×min, QUOTA_LIMITS_HARDWS_MIN_ENABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE)`.
+  The minimum is HARD: the memory manager never trims SongPlayer below it. The
+  maximum stays SOFT.
+- Before the call it enables `SeIncreaseWorkingSetPrivilege` best-effort. Normal
+  users hold that privilege, but it is disabled in the token by default.
+- The minimum does not pre-allocate anything. It guarantees that pages
+  SongPlayer actually has resident, up to `min`, are never trimmed.
+- The pure core is `process_residency.rs`: parse and clamp, the plan, the `0x9`
+  flags word, and the outcome line. It is Linux-tested. The `QUOTA_*` mirrors are
+  compile-time asserted against windows-sys.
+- The windows-sys feature `Win32_System_Memory` was added for
+  `SetProcessWorkingSetSizeEx`.
+- **Why 3072 MiB.** A playing 1440p paced output holds about 21 NV12 buffers
+  (look-ahead 12, pool class 6, handoff 2, repeat, holdover), about 115 MB. On
+  top of that come the MF decoder and the SDK's per-sender compression buffers.
+  Each idle output holds its NV12 + BGRA black, about 20 MB. That totals about
+  1–2 GB, and 3072 MiB leaves headroom. Re-size it from the new `working_set_mb`
+  field.
+
+**`heavy_max_working_set_mb` — the heavy child's working-set cap.**
+
+- The cap is set on the child's Job Object: `JOB_OBJECT_LIMIT_WORKINGSET` with
+  `MaximumWorkingSetSize` = the cap and `MinimumWorkingSetSize` = 256 MiB
+  (`HEAVY_MIN_WS_MB`, never above the cap). It shares the ONE extended-limit
+  struct with the #162 10 GiB commit ceiling, kill-on-close and the #203
+  affinity. Every existing flag is unchanged.
+- When the child needs more resident memory, it pages ITSELF instead of evicting
+  SongPlayer.
+- The flags word comes from the pure `heavy_containment::job_limit_flags`, which
+  adds WORKINGSET only when the cap is non-zero.
+- **Fallback.** If the OS rejects the combined limits, or rejects the process
+  assignment with them, the seam retries ONCE without the cap and logs a WARN
+  (`heavy child working-set cap … rejected` / `… assignment with a … working-set
+  cap failed`). A bad working-set value can never cost the child its memory
+  ceiling or kill-on-close.
+- **Why 4096 MiB.** The measured child working set is 1.1–1.6 GB (round 7), 2.8 GB
+  (#168), and 2.79 GB with a 3.35 GB peak (#207). Its commit is 6.7–9 GB. So 4 GiB
+  sits above every measured peak working set, while bounding the resident
+  footprint well under the 10 GiB commit ceiling.
+
+### Log fields
+
+- **Startup, once, INFO:**
+  `sp working set: hard_min_mb=3072 max_mb=6144 flags=0x9 privilege=ok|failed(err=<GetLastError>) result=ok|failed(err=<GetLastError>)`,
+  or `sp working set: hard_min disabled (sp_min_working_set_mb=0)`.
+  - `privilege=failed(err=1300)` is `ERROR_NOT_ALL_ASSIGNED`: the token lacks
+    the privilege.
+  - `result=failed(err=1450)` is `ERROR_NO_SYSTEM_RESOURCES`: the minimum is too
+    large for the box's resident-available memory.
+  - Both are logged, never a panic.
+- **Per heavy child:** the `heavy child contained (pid …): … reserve_gib=<n> max_ws_mb=<n|off>`
+  line gains `max_ws_mb`. It reports the cap the Job Object actually APPLIED;
+  `off` means the cap is disabled or was rejected.
+- **Per UTC minute, per paced output:** the `pipeline: loop-stats …` line now
+  ends with `page_faults_per_min=<n|na> working_set_mb=<n|na>`.
+  - The value is SongPlayer's own `PROCESS_MEMORY_COUNTERS.PageFaultCount`
+    delta per minute, plus `WorkingSetSize` in MiB, from `GetProcessMemoryInfo`.
+  - It comes from `playback/proc_mem.rs`. ONE process-global `FaultWindow` is
+    sampled at most once per 60 s by whichever paced heartbeat comes first, so
+    every paced output's line shows the same last-full-minute value.
+  - `na` means the first minute after start, the SDK-clocked path, or non-Windows.
+  - `PageFaultCount` is a u32 that wraps about every 2.4 h at 500k/s, so the
+    delta is `wrapping_sub`.
+  - The arithmetic is pure, Linux-tested and mutation-scored. The OS read is
+    `mutants::skip`.
+
+### Box A/B window recipe (pacing ON in every window)
+
+This is the round-7 method: one variable per 15-minute paced window, the live
+wall on program (SP-slow), and the receiver read as cg OBS
+`genlock-fifo audit 'sp-slow_video'`. A stems child must be resident AND
+productive: `TotalProcessorTime` delta over 6 s > 0.
+
+| window | `sp_min_working_set_mb` | `heavy_max_working_set_mb` | how to switch |
+|---|---|---|---|
+| **W-a** both off | `0` | `0` | PATCH both, restart (Deploy-job rerun; the restart also respawns the child, uncapped) |
+| **W-b** SongPlayer hard min only | `3072` | `0` | PATCH, restart (the minimum is read at start) |
+| **W-c** both | `3072` | `4096` | PATCH, kill the child by `-Id` (the cap applies at the next spawn, no restart) |
+
+**Confirm each window before trusting it:**
+
+- the startup `sp working set:` line shows the expected `hard_min_mb`/`disabled` and `result=ok`;
+- the child's `heavy child contained … max_ws_mb=` line shows the expected cap;
+- in W-c, `Get-Process python | Select WorkingSet64` stays ≤ the cap.
+
+**Report per window:**
+
+- sender minutes with `submit_call_us_max` ≤ 20 ms;
+- SongPlayer `page_faults_per_min` and `working_set_mb`;
+- receiver `dropped_due`, underruns, relocks and late_holds;
+- child throughput (segments or CPU-s per window).
+
+**Targets and what the gauge tells you:**
+
+- **Target:** W-c reaches the no-child control (0 drops/min).
+- **If W-c does not reach it** and `page_faults_per_min` is already flat, residency
+  is not the channel. The next lever is memory bandwidth, e.g. a separator fork
+  with a bounded batch size (design Approach 3).
+- **If `page_faults_per_min` still spikes in W-b/W-c** while `working_set_mb` sits
+  at the minimum, raise `sp_min_working_set_mb`.
