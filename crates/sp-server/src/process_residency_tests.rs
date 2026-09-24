@@ -199,8 +199,8 @@ fn plan_sets_hard_min_and_a_soft_max_of_twice_the_min() {
 
 #[test]
 fn residency_line_disabled() {
-    // The privilege is still enabled (the heavy child's job cap may need it),
-    // so the disabled line carries its outcome; `set` is not reported.
+    // The privilege is still enabled whatever the setting, so the disabled
+    // line carries its outcome; `set` is not reported.
     assert_eq!(
         residency_line(None, Ok(()), Err(87)),
         "sp working set: hard_min disabled (sp_min_working_set_mb=0) privilege=ok"
@@ -232,6 +232,26 @@ fn residency_line_carries_each_last_error_in_its_own_field() {
         residency_line(Some(&p), Err(1300), Ok(())),
         "sp working set: hard_min_mb=4096 max_mb=8192 flags=0x9 privilege=failed(err=1300) result=ok"
     );
+}
+
+// ---- job_privilege_line (#147 round 10) -----------------------------------
+
+#[test]
+fn job_privilege_line_names_the_base_priority_privilege_and_its_outcome() {
+    assert_eq!(
+        job_privilege_line(Ok(())),
+        "heavy child job privilege: SeIncreaseBasePriorityPrivilege=ok"
+    );
+    assert_eq!(
+        job_privilege_line(Err(1300)),
+        "heavy child job privilege: SeIncreaseBasePriorityPrivilege=failed(err=1300)"
+    );
+}
+
+#[test]
+fn outcome_renders_ok_and_the_last_error() {
+    assert_eq!(outcome(Ok(())), "ok");
+    assert_eq!(outcome(Err(1314)), "failed(err=1314)");
 }
 
 #[test]

@@ -118,9 +118,9 @@ pub async fn resolve_min_working_set_mb(pool: &sqlx::SqlitePool) -> u32 {
 /// result=ok|failed(err=<GetLastError>)`), never a panic.
 ///
 /// On Windows `SeIncreaseWorkingSetPrivilege` is enabled FIRST, whatever the
-/// setting — raising the minimum above the current working set needs it, and
-/// the heavy child's Job Object working-set limit (`heavy_max_working_set_mb`)
-/// may too, so a "child cap only" configuration must not silently lose it. The
+/// setting — raising the minimum above the current working set needs it. (The
+/// heavy child's Job Object working-set cap needs a DIFFERENT privilege,
+/// `SeIncreaseBasePriorityPrivilege`, enabled by the job seam — round 10.) The
 /// quota call is attempted even when the privilege step fails (an elevated
 /// token, or a minimum at or below the current working set, does not need it).
 /// Off Windows nothing is applied and the line says so (never a fake `ok`).
@@ -180,18 +180,40 @@ fn set_hard_min_working_set(plan: &residency::WorkingSetPlan) -> Result<(), u32>
     }
 }
 
-/// Enable `SeIncreaseWorkingSetPrivilege` in this process's token.
-/// `AdjustTokenPrivileges` returns success even when the token does not hold
-/// the privilege, setting `ERROR_NOT_ALL_ASSIGNED` — reported as a failure too.
+/// Enable `SeIncreaseWorkingSetPrivilege` in this process's token (#147 r9).
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 fn enable_increase_working_set_privilege() -> Result<(), u32> {
+    enable_privilege(windows_sys::Win32::Security::SE_INC_WORKING_SET_NAME)
+}
+
+/// Enable `SeIncreaseBasePriorityPrivilege` (`SE_INC_BASE_PRIORITY_NAME`) in
+/// this process's token (#147 round 10). A Job Object's
+/// `JOB_OBJECT_LIMIT_WORKINGSET` with a `MinimumWorkingSetSize` above the
+/// system minimum needs it: the kernel's `NtSetInformationJobObject` otherwise
+/// returns `STATUS_PRIVILEGE_NOT_HELD`, which `SetInformationJobObject` surfaces
+/// as `ERROR_PRIVILEGE_NOT_HELD` (1314) — the round-9 box read (Windows Research
+/// Kernel `base/ntos/ps/psjob.c`, the WORKING SET LIMIT branch). The heavy
+/// child's job seam calls it once, before its first capped job.
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn enable_increase_base_priority_privilege() -> Result<(), u32> {
+    enable_privilege(windows_sys::Win32::Security::SE_INC_BASE_PRIORITY_NAME)
+}
+
+/// Enable the privilege `name` (a `SE_*_NAME` constant) in this process's
+/// token. `AdjustTokenPrivileges` returns success even when the token does not
+/// hold the privilege, setting `ERROR_NOT_ALL_ASSIGNED` — reported as a failure
+/// too.
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+fn enable_privilege(name: windows_sys::core::PCWSTR) -> Result<(), u32> {
     use windows_sys::Win32::Foundation::{
         CloseHandle, ERROR_NOT_ALL_ASSIGNED, GetLastError, HANDLE, LUID,
     };
     use windows_sys::Win32::Security::{
-        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_INC_WORKING_SET_NAME,
-        SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
+        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
     };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -209,7 +231,7 @@ fn enable_increase_working_set_privilege() -> Result<(), u32> {
             return Err(GetLastError());
         }
         let mut luid: LUID = std::mem::zeroed();
-        if LookupPrivilegeValueW(std::ptr::null(), SE_INC_WORKING_SET_NAME, &mut luid) == 0 {
+        if LookupPrivilegeValueW(std::ptr::null(), name, &mut luid) == 0 {
             let e = GetLastError();
             CloseHandle(token);
             return Err(e);
