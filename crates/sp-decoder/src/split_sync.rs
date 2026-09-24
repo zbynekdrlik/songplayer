@@ -184,12 +184,19 @@ impl SplitSyncedDecoder {
             }
         }
 
-        while let Some(af) = self.audio.next_samples()? {
-            if af.timestamp_ms <= deadline {
-                audio_frames.push(af);
-            } else {
-                self.pending_audio.push_back(af);
-                break;
+        // Read only when nothing is waiting: a chunk still pending past the
+        // deadline means the audio is already ahead. Reading anyway grew
+        // `pending_audio` by one chunk per frame (48 ms chunks vs 33/40 ms
+        // frames), and `StemMixReader` applies the fader gains at READ time,
+        // so that read-ahead was fader latency (#184 G5).
+        if self.pending_audio.is_empty() {
+            while let Some(af) = self.audio.next_samples()? {
+                if af.timestamp_ms <= deadline {
+                    audio_frames.push(af);
+                } else {
+                    self.pending_audio.push_back(af);
+                    break;
+                }
             }
         }
 
