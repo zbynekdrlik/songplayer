@@ -66,9 +66,11 @@ impl EventWindow {
 
     /// Record one cumulative sample at `ts_100ns`, then evict aged-out history.
     ///
-    /// A cumulative DECREASE in any counter (including `seq`) can only happen
-    /// after the pacer re-anchors (play / seek / new song zeroes its counters),
-    /// so it is treated as a reset: the ring is cleared and restarted from this
+    /// The pacer is built once per pipeline and `Pacer::anchor` (play / seek /
+    /// new song) deliberately KEEPS its cumulative counters, so a normal play /
+    /// pause / resume never decreases them. A cumulative DECREASE in any counter
+    /// (including `seq`) therefore means a genuine counter reset (a new pacer),
+    /// and is treated as one: the ring is cleared and restarted from this
     /// sample. That stops [`counts_in_window`](Self::counts_in_window) from
     /// differencing across the discontinuity and reporting a bogus giant (or,
     /// with the saturating subtraction, zero) count.
