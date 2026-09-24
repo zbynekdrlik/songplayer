@@ -87,71 +87,6 @@ fn ellipsis_and_bang_and_question_all_close_a_line() {
     assert_eq!(t.lines.len(), 4);
 }
 
-// ── Grouping: 14-word cap ────────────────────────────────────────────────────
-
-#[test]
-fn line_closes_at_fourteen_words() {
-    // 20 single-word fragments (trailing space so the joined line is
-    // whitespace-separated), no punctuation, tight timing → the cap splits them
-    // into a 14-word line then a 6-word line.
-    let frags: Vec<SkFragment> = (0..20)
-        .map(|i| frag(100 * (i as u64 + 1), &format!("slovo{i} ")))
-        .collect();
-    let t = build(vec![chunk(0, Some(0), Some(1.0), frags)]);
-    assert_eq!(t.lines.len(), 2);
-    // First line holds exactly 14 words, the second the remaining 6.
-    assert_eq!(
-        t.lines[0].sk.as_deref().unwrap().split_whitespace().count(),
-        14
-    );
-    assert_eq!(
-        t.lines[1].sk.as_deref().unwrap().split_whitespace().count(),
-        6
-    );
-}
-
-// ── Grouping: arrival-gap pause ──────────────────────────────────────────────
-
-#[test]
-fn line_closes_on_a_gap_over_1500ms() {
-    // A > 1500 ms jump between fragment arrival times closes the line even with
-    // no punctuation and few words.
-    let t = build(vec![chunk(
-        0,
-        Some(0),
-        Some(1.0),
-        vec![
-            frag(500, "slovo a"),
-            frag(1200, "slovo b"), // +700 ms → same line
-            frag(4000, "slovo c"), // +2800 ms → new line
-            frag(4500, "slovo d"),
-        ],
-    )]);
-    assert_eq!(t.lines.len(), 2);
-    assert_eq!(t.lines[0].sk.as_deref(), Some("slovo aslovo b"));
-    assert_eq!(t.lines[1].sk.as_deref(), Some("slovo cslovo d"));
-}
-
-#[test]
-fn a_gap_of_exactly_1500ms_keeps_the_line_open() {
-    // Boundary: the pause rule is STRICTLY greater than LINE_GAP_MS, so a
-    // 1500 ms gap stays on the line and 1501 ms closes it.
-    let at_limit = build(vec![chunk(
-        0,
-        Some(0),
-        Some(1.0),
-        vec![frag(500, "a"), frag(2000, " b")],
-    )]);
-    assert_eq!(at_limit.lines.len(), 1);
-    let over = build(vec![chunk(
-        0,
-        Some(0),
-        Some(1.0),
-        vec![frag(500, "a"), frag(2001, " b")],
-    )]);
-    assert_eq!(over.lines.len(), 2);
-}
-
 // ── Timing: tempo mapping ────────────────────────────────────────────────────
 
 #[test]
@@ -293,13 +228,15 @@ fn starts_stay_monotonic_when_a_later_chunk_goes_backwards() {
 
 #[test]
 fn a_blank_sk_group_is_skipped() {
-    // A pure-whitespace fragment group (closed by a > 1500 ms gap) yields no
-    // line; only the real group becomes a subtitle (#182 item 9).
+    // A pure-whitespace fragment group yields no line; only the real group
+    // becomes a subtitle (#182 item 9). The blank group is the trailing one:
+    // the sentence end closes „ozaj." and the chunk's last fragment closes the
+    // blank group (a pause no longer closes a line, #184 H6).
     let t = build(vec![chunk(
         0,
         Some(0),
         Some(1.0),
-        vec![frag(500, "   "), frag(3000, "ozaj.")],
+        vec![frag(500, "ozaj."), frag(3000, "   ")],
     )]);
     assert_eq!(t.lines.len(), 1);
     assert_eq!(t.lines[0].sk.as_deref(), Some("ozaj."));
