@@ -442,14 +442,35 @@ pub async fn list_ready_dubs_without_subtitles(
     .bind(crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE)
     .fetch_all(pool)
     .await?;
-    Ok(rows
-        .into_iter()
-        .map(|r| DubSubtitleBackfill {
-            video_id: r.get("id"),
-            youtube_id: r.get("youtube_id"),
-            audio_file_path: r.get("audio_file_path"),
-        })
-        .collect())
+    Ok(rows.iter().map(backfill_row).collect())
+}
+
+/// Dub-ready videos whose lyrics track IS the Live-Translate subtitle track —
+/// the candidates the startup backfill checks for a track made by an older
+/// subtitle builder (#184 H5). Oldest first.
+pub async fn list_ready_dubs_with_subtitles(
+    pool: &SqlitePool,
+) -> Result<Vec<DubSubtitleBackfill>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT id, youtube_id, audio_file_path FROM videos \
+         WHERE dub_requested = 1 AND dub_status = 'ready' \
+           AND audio_file_path IS NOT NULL \
+           AND lyrics_source = ? \
+         ORDER BY id ASC",
+    )
+    .bind(crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(backfill_row).collect())
+}
+
+/// One backfill-selector row → [`DubSubtitleBackfill`].
+fn backfill_row(r: &sqlx::sqlite::SqliteRow) -> DubSubtitleBackfill {
+    DubSubtitleBackfill {
+        video_id: r.get("id"),
+        youtube_id: r.get("youtube_id"),
+        audio_file_path: r.get("audio_file_path"),
+    }
 }
 
 #[cfg(test)]

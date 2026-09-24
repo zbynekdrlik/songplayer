@@ -182,3 +182,35 @@ async fn fetch_next_stale_translation_oldest_first() {
         "oldest (lowest id) stale row is chosen first"
     );
 }
+
+#[tokio::test]
+async fn fetch_next_stale_translation_skips_a_dub_subtitle_track() {
+    // #184 H5 review: a dub's SK subtitles come from the Live-Translate session.
+    // Re-translating that track with the lyrics translator would replace the
+    // session's SK and drop the stored subtitle builder version.
+    let (pool, id) = setup_translated_video().await;
+    sqlx::query("UPDATE videos SET lyrics_source = 'gemini-live-translate' WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        fetch_next_stale_translation(&pool, 1)
+            .await
+            .unwrap()
+            .is_none(),
+        "a Live-Translate dub subtitle track is never re-translated"
+    );
+    // Any other source (and NULL) stays eligible.
+    sqlx::query("UPDATE videos SET lyrics_source = 'mtl' WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        fetch_next_stale_translation(&pool, 1)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}

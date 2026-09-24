@@ -67,8 +67,9 @@ pub async fn stamp_translation_version(
 
 /// Pick the next persisted song whose SK translation is stale (produced under
 /// an older `LYRICS_TRANSLATION_VERSION`). Only `has_lyrics = 1` rows on an
-/// active, normalized playlist are eligible — nothing to translate otherwise;
-/// oldest (lowest id) first. Returns `None` when every active song is current,
+/// active, normalized playlist are eligible — nothing to translate otherwise —
+/// and never a dub subtitle track (`gemini-live-translate`, its SK is the dub
+/// session's own); oldest (lowest id) first. Returns `None` when every active song is current,
 /// so the worker does nothing this tick. The column list matches
 /// `VideoLyricsRow` exactly so the worker can re-run translation with the same
 /// row shape the alignment pipeline uses.
@@ -87,9 +88,13 @@ pub async fn fetch_next_stale_translation(
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.has_lyrics = 1 AND v.lyrics_translation_version < ? \
                AND p.is_active = 1 AND v.normalized = 1 \
+               AND (v.lyrics_source IS NULL OR v.lyrics_source != ?) \
          ORDER BY v.id ASC LIMIT 1",
     )
     .bind(current_version as i64)
+    // A dub's SK subtitles come from its Live-Translate session (#184 H5 review):
+    // never re-translate that track.
+    .bind(crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE)
     .fetch_optional(pool)
     .await?;
     Ok(row)

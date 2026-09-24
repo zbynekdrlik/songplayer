@@ -320,7 +320,7 @@ records BOTH transcriptions as `(arrival_s, text, conn)`
 (`dub_live_session.py::SessionState.input_parts` / `output_parts`), and
 `joined_by_connection` takes that shape. With `at_ms` 0 / `tempo` 1.0 the builder
 below maps `t_ms` straight to video time, so the round-H one-chunk form needed no
-timing change in D3 (the H3 EN assignment is the only builder change since; pinned by
+timing change in D3 (the H3/H5 EN assignment is the only builder change since; pinned by
 `subtitles_tests.rs::one_continuous_session_chunk_builds_a_monotonic_bilingual_track`
 + `test_dub_worker.py::test_transcripts_are_one_chunk_on_the_video_timeline`). The
 multi-chunk form (per-chunk `at_ms`/`tempo`, a legacy JSON without them) is still
@@ -348,35 +348,56 @@ read correctly — dubs made before round H keep their subtitles.
 - A fragment group whose joined SK is empty after trim produces NO line (#182
   item 9); an all-blank transcript yields an empty track, so
   `subtitles_store::build_and_store_subtitles` stores nothing and returns 0.
-- **EN per line (round H3, #184 design 5806462894) — timed by the INPUT
-  transcription, whole sentences to the nearest SK line.** The chunk's `en_timed`
-  fragments are mapped through the SAME `to_video_ms(at_ms, t, tempo)` as the SK,
-  then the pure `assign_en_sentences(en, line_starts)`:
-  - groups them into SENTENCES with the SK's `ends_sentence` rule (a fragment
-    ending in `. ! ? …`, or the last fragment). Fragments are concatenated AS-IS,
-    exactly like the SK line text: Live Translate fragments carry their own
-    spaces, so there is no separator; the sentence is then trimmed. A run of
-    blank fragments yields no sentence;
-  - times each sentence by its first NON-BLANK fragment;
-  - gives each WHOLE sentence to the chunk's line whose start is nearest
-    (`nearest_line_from`, the first index on a tie, so equal starts resolve to
-    the earliest line). The search starts at the previous sentence's line, so the
-    assignment is monotonic and never goes backwards;
-  - joins several sentences on one line with a space. A line may carry 0, 1 or
-    several EN sentences when the translation merges or splits sentences, which is
-    better than a sentence cut mid-way.
-  EN stays within its own chunk's lines. Intra-fragment punctuation does not
-  split a sentence (the rule looks at fragment ENDS only).
+- **EN per line (round H3 #184 design 5806462894, paired by CONTENT-INTERVAL
+  OVERLAP since round H5, design 5808420469) — timed by the INPUT transcription,
+  whole sentences.** The chunk's `en_timed` fragments are mapped through the SAME
+  `to_video_ms(at_ms, t, tempo)` as the SK, then:
+  - **Content intervals, not displayed windows.** A line's DISPLAYED start is where
+    the PREVIOUS fragment ended (the D3 `(t[i-1], t[i]]` rule), so on video 344
+    „Rád ťa vidím, Nathan." is displayed from 59 672 ms while its fragment arrived
+    at 63 922 ms. Matching EN to displayed starts (H3/H4) put the EN one line late
+    (8/20 rows correct on the box, #184 5808414754). So pairing uses CONTENT
+    intervals: an SK line = its fragments `lo..=hi` from `group_fragments`,
+    `[t(lo), content_end(hi))`; `content_end(i)` = the next fragment's time capped
+    at `t(i) + CONTENT_TAIL_MS` (1500), or `t(i) + 1500` for the last fragment. All
+    times are video-timeline (`to_video_ms`). An EN sentence = its first non-blank
+    fragment's time to the `content_end` of its last one, over the EN fragment list.
+  - **`en_sentences` splits sentences** with the SK's `ends_sentence` rule (a piece
+    ending in `. ! ? …`, or the last fragment) AND **inside a fragment** after
+    `. ! ? …` followed by whitespace (`split_sentences_inside`): „ Good to see you,
+    Nathan. And" is two sentences. Both parts belong to that fragment for timing —
+    the new sentence starts at that fragment's time. Fragments/pieces are
+    concatenated AS-IS (they carry their own spaces), then trimmed; a run of blank
+    fragments yields no sentence and a blank fragment never starts/ends an interval.
+  - **`assign_en_sentences(sentences, line_intervals)`** gives each WHOLE sentence
+    to the line with the largest positive overlap (`best_line_from`); with no
+    overlap, to the line with the nearest midpoint (compared doubled, no rounding);
+    a tie → the earlier line (`min_by_key` keeps the first). The search starts at
+    the previous sentence's line, so it is monotonic. A line carries 0..n sentences
+    joined with a space. Known trade-offs (measured on the fixture window: the six
+    named pairs hold, a few lines still do not): when the SK builder splits one
+    sentence into two lines (14-word cap or a >1.5 s gap) the EN goes to the half
+    it overlaps most and the other half shows no EN; and the part AFTER an
+    in-fragment split starts at that fragment's (earlier) time, so it can overlap
+    the PREVIOUS SK line more — „Good morning. Bartlesville" puts „Bartlesville
+    Oklahoma." on „Dobré ráno." and leaves „Bartlesville Oklahoma." without EN, and
+    a half line can show the NEXT sentence's EN. Input for a later round, not a
+    reason to bend this rule.
+  EN stays within its own chunk's lines.
+  **Real-data regression fixture:** `dabing/testdata/dub344_window_27_100s.json` —
+  a real `DubTranscripts` JSON (one chunk, 52 `sk_timed` + 48 `en_timed`, already on
+  the video timeline) cut from video 344's session log, 27–100 s (public broadcast
+  speech). `subtitles_tests.rs::the_video_344_session_log_pairs_the_six_named_sk_lines`
+  asserts six SK → EN pairs through `include_str!`. Cut a new window from a
+  `<base>_dub_events.jsonl` (below) when a pairing defect needs a real-data test.
   **`en_slice` and the SK character-fraction path are DELETED** (owner rule:
   superseded paths are deleted, not kept as a fallback). It cut the one untimed
   `en` string per SK line by the SK character fraction, and in the one-chunk
-  regime the error accumulated over the whole video. On video 344, „Rene Garcia."
-  showed „First one" and „Prvý prihlásený." showed „in. Good to see you.".
+  regime the error accumulated over the whole video.
   **A transcript written before H3 (no `en_timed`) has NO EN** until the video is
-  re-dubbed (`PATCH /api/v1/videos/{id}/dub {"requested":true}`, below). A
-  subtitle track ALREADY STORED before H3 (e.g. video 344) keeps its old
-  char-fraction EN: the startup backfill only builds dubs that have no track, so
-  only a re-dub replaces it.
+  re-dubbed (`PATCH /api/v1/videos/{id}/dub {"requested":true}`, below). A track
+  already stored by an older builder is rebuilt from its transcripts at the next
+  startup (builder version, below) — no re-dub needed for a builder change.
   No `sk_timed` → no lines.
 - `words: None`, `source = "gemini-live-translate"` (`SOURCE_LIVE_TRANSLATE`).
   Every branch is covered in `subtitles_tests.rs`.
@@ -384,9 +405,12 @@ read correctly — dubs made before round H keep their subtitles.
 ## Persist through the SHARED writer (no parallel writer)
 The lyrics worker's JSON-sidecar + DB persist was extracted to
 `lyrics/track_store.rs::persist_lyrics_track` (writes `{youtube_id}_lyrics.json`
-+ `mark_video_lyrics_complete`). BOTH the lyrics worker AND
-`dabing/subtitles_store.rs::build_and_store_subtitles` call it — never a second
-writer. The dub worker (`dabing/worker.rs::synthesize`) builds + stores the
++ `mark_video_lyrics_complete`). Since #184 H5 its body is
+`persist_lyrics_json<T: Serialize>(…, body, source, …)`: the lyrics worker calls
+`persist_lyrics_track` (body = the track), and
+`dabing/subtitles_store.rs::build_and_store_subtitles` calls `persist_lyrics_json`
+with `StoredDubTrack` = the track `#[serde(flatten)]` + `dub_subtitles_builder_version`
+— one writer, never a second one. The dub worker (`dabing/worker.rs::synthesize`) builds + stores the
 subtitle track after the dub file is finalized and BEFORE `dub_status = ready`;
 a subtitle failure is a WARN log and NEVER fails the dub.
 
@@ -401,6 +425,30 @@ from the saved `<base>_dub_transcripts.json` (a legacy JSON without `at_ms`/`tem
 falls back to `start_ms` / `1.0`). Once per process, never per tick — an unusable
 JSON must not loop; failures are WARN only. The call sits in `process_next`
 (structurally mutation-excluded), NOT in `run`, so it adds no whole-fn mutant.
+
+## Builder version + startup rebuild of stale tracks (#184 H5)
+`dabing/subtitles.rs::DUB_SUBTITLES_BUILDER_VERSION` (2 since H5) is stored with
+every dub subtitle track as the top-level JSON field `dub_subtitles_builder_version`
+of `{youtube_id}_lyrics.json` — a JSON field, NO DB column/migration (the track is
+JSON). The field is flattened next to the `LyricsTrack` fields, so every reader
+(wall, dashboard, `lyrics_loader`) still parses the file as a plain `LyricsTrack`.
+A stored track without the field is version 1; an unreadable file counts as 1.
+After the missing-track pass, `backfill_missing_subtitles` lists
+`models_dabing::list_ready_dubs_with_subtitles` (ready dubs whose `lyrics_source`
+IS `gemini-live-translate`), reads each stored version (`stored_builder_version`)
+and rebuilds from the saved transcripts JSON when `is_stale` (stored < current),
+logging `dub subtitles rebuild: stored track is from an older builder — rebuilding`
+with `stored_version` / `builder_version`. A current track is not touched.
+**Bump `DUB_SUBTITLES_BUILDER_VERSION` whenever the pairing or grouping OUTPUT
+changes** — the next deploy then rebuilds every stored dub's subtitles on the
+first dub-worker tick after startup (seconds; the backfill sits after the
+`dub_worker_enabled` kill-switch, so with the worker disabled nothing is
+rebuilt), never a 40-min re-dub. The lyrics translator must never rewrite a dub
+track: `models_translation::fetch_next_stale_translation` excludes
+`lyrics_source = gemini-live-translate` (a dub row keeps
+`lyrics_translation_version` 0, so without it the translator would replace the
+session SK and strip the builder version). Tested end-to-end in
+`subtitles_store_tests.rs::backfill_rebuilds_a_stale_track_and_leaves_a_current_one_untouched`.
 
 ## Lyrics queue skips dub videos
 Every selector bucket in `lyrics/reprocess.rs` (manual/null/stale/fullmix) ANDs

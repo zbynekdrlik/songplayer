@@ -1,0 +1,419 @@
+{
+ "engine": "gemini-live-translate",
+ "target_lang": "sk",
+ "chunks": [
+  {
+   "index": 0,
+   "start_ms": 0,
+   "end_ms": 2152000,
+   "at_ms": 0,
+   "tempo": 1.0,
+   "en": "",
+   "sk": "",
+   "sk_timed": [
+    {
+     "t_ms": 27766,
+     "text": " ráno."
+    },
+    {
+     "t_ms": 28672,
+     "text": " A"
+    },
+    {
+     "t_ms": 29672,
+     "text": " toto"
+    },
+    {
+     "t_ms": 31687,
+     "text": " Rene Garcia."
+    },
+    {
+     "t_ms": 32687,
+     "text": " Prvý na rade."
+    },
+    {
+     "t_ms": 33687,
+     "text": " Rád ťa vidím."
+    },
+    {
+     "t_ms": 37687,
+     "text": " Ak"
+    },
+    {
+     "t_ms": 38703,
+     "text": " by ste chceli"
+    },
+    {
+     "t_ms": 39672,
+     "text": " podať žiadosť o"
+    },
+    {
+     "t_ms": 40672,
+     "text": " modlitbu, môžete"
+    },
+    {
+     "t_ms": 41937,
+     "text": " urobiť to, čo"
+    },
+    {
+     "t_ms": 42672,
+     "text": " robíme my"
+    },
+    {
+     "t_ms": 43687,
+     "text": " v noci, pošlite"
+    },
+    {
+     "t_ms": 44719,
+     "text": " SMS s modlitbou"
+    },
+    {
+     "t_ms": 45687,
+     "text": " na 757"
+    },
+    {
+     "t_ms": 46672,
+     "text": " 67."
+    },
+    {
+     "t_ms": 47687,
+     "text": " Pomodlím sa za"
+    },
+    {
+     "t_ms": 48672,
+     "text": " ňu, koľkých len môžem."
+    },
+    {
+     "t_ms": 49672,
+     "text": " Dobré ráno"
+    },
+    {
+     "t_ms": 50687,
+     "text": " z Montrealu."
+    },
+    {
+     "t_ms": 51672,
+     "text": " Dobré ráno"
+    },
+    {
+     "t_ms": 52672,
+     "text": " Heather. Prečo"
+    },
+    {
+     "t_ms": 53672,
+     "text": " si hore? Prečo"
+    },
+    {
+     "t_ms": 54687,
+     "text": " je niekto v Colorade"
+    },
+    {
+     "t_ms": 55672,
+     "text": " hore?"
+    },
+    {
+     "t_ms": 56687,
+     "text": " o"
+    },
+    {
+     "t_ms": 57672,
+     "text": " 5:30"
+    },
+    {
+     "t_ms": 58672,
+     "text": " ráno, ale asi"
+    },
+    {
+     "t_ms": 59672,
+     "text": " ty si mama."
+    },
+    {
+     "t_ms": 63922,
+     "text": " Rád ťa vidím, Nathan."
+    },
+    {
+     "t_ms": 64672,
+     "text": " A potom"
+    },
+    {
+     "t_ms": 65672,
+     "text": " môžeš naskenovať aj ten"
+    },
+    {
+     "t_ms": 66672,
+     "text": " QR kód."
+    },
+    {
+     "t_ms": 68922,
+     "text": " a podať žiadosť"
+    },
+    {
+     "t_ms": 69952,
+     "text": " o modlitbu."
+    },
+    {
+     "t_ms": 71922,
+     "text": " Dobré ráno."
+    },
+    {
+     "t_ms": 73172,
+     "text": " Bartlesville Oklahoma."
+    },
+    {
+     "t_ms": 74172,
+     "text": " Rád by som"
+    },
+    {
+     "t_ms": 75187,
+     "text": " videl, odkiaľ všetci pozerajú."
+    },
+    {
+     "t_ms": 78922,
+     "text": " Takže toto"
+    },
+    {
+     "t_ms": 80172,
+     "text": " je každý utorok"
+    },
+    {
+     "t_ms": 80922,
+     "text": " až piatok."
+    },
+    {
+     "t_ms": 85187,
+     "text": " Budeme to"
+    },
+    {
+     "t_ms": 86172,
+     "text": " robiť. Rád"
+    },
+    {
+     "t_ms": 87172,
+     "text": " ťa vidím, Michael."
+    },
+    {
+     "t_ms": 88172,
+     "text": " Ďakujem, že si prišiel"
+    },
+    {
+     "t_ms": 89172,
+     "text": " do Pittsburghu až z Južnej"
+    },
+    {
+     "t_ms": 90155,
+     "text": " Afriky."
+    },
+    {
+     "t_ms": 94172,
+     "text": " Dobré ráno, Južná"
+    },
+    {
+     "t_ms": 94672,
+     "text": " Karolína."
+    },
+    {
+     "t_ms": 95672,
+     "text": " Nové Mexiko."
+    },
+    {
+     "t_ms": 96672,
+     "text": " Super."
+    }
+   ],
+   "en_timed": [
+    {
+     "t_ms": 27718,
+     "text": " morning."
+    },
+    {
+     "t_ms": 28641,
+     "text": " And"
+    },
+    {
+     "t_ms": 29641,
+     "text": " this"
+    },
+    {
+     "t_ms": 31688,
+     "text": " Rene Garcia."
+    },
+    {
+     "t_ms": 32735,
+     "text": " First one in."
+    },
+    {
+     "t_ms": 33735,
+     "text": " Good to see you."
+    },
+    {
+     "t_ms": 37641,
+     "text": " If you"
+    },
+    {
+     "t_ms": 38735,
+     "text": " would like to"
+    },
+    {
+     "t_ms": 39719,
+     "text": " get a prayer request"
+    },
+    {
+     "t_ms": 40719,
+     "text": " in, you can"
+    },
+    {
+     "t_ms": 41719,
+     "text": " do what we do"
+    },
+    {
+     "t_ms": 42641,
+     "text": " uh at"
+    },
+    {
+     "t_ms": 43672,
+     "text": " night, text prayer"
+    },
+    {
+     "t_ms": 44797,
+     "text": " to 757"
+    },
+    {
+     "t_ms": 45750,
+     "text": " 67. I'm going to pray"
+    },
+    {
+     "t_ms": 46719,
+     "text": " for her."
+    },
+    {
+     "t_ms": 47688,
+     "text": " as many of you as I"
+    },
+    {
+     "t_ms": 48750,
+     "text": " can."
+    },
+    {
+     "t_ms": 49688,
+     "text": " Good morning from"
+    },
+    {
+     "t_ms": 50672,
+     "text": " Montreal."
+    },
+    {
+     "t_ms": 51672,
+     "text": " Good morning"
+    },
+    {
+     "t_ms": 52703,
+     "text": " Heather. Why"
+    },
+    {
+     "t_ms": 53719,
+     "text": " are you awake? Why is"
+    },
+    {
+     "t_ms": 54735,
+     "text": " anyone in Colorado"
+    },
+    {
+     "t_ms": 55625,
+     "text": " awake?"
+    },
+    {
+     "t_ms": 56656,
+     "text": " at"
+    },
+    {
+     "t_ms": 57735,
+     "text": " 5:30 in the"
+    },
+    {
+     "t_ms": 58766,
+     "text": " morning, but I guess you"
+    },
+    {
+     "t_ms": 59735,
+     "text": " you are a mom."
+    },
+    {
+     "t_ms": 63797,
+     "text": " Good to see you, Nathan. And"
+    },
+    {
+     "t_ms": 64719,
+     "text": " then you can also scan"
+    },
+    {
+     "t_ms": 65719,
+     "text": " that QR code."
+    },
+    {
+     "t_ms": 66641,
+     "text": " Um"
+    },
+    {
+     "t_ms": 69016,
+     "text": " and get a prayer request"
+    },
+    {
+     "t_ms": 69985,
+     "text": " in."
+    },
+    {
+     "t_ms": 72016,
+     "text": " Good morning. Bartlesville"
+    },
+    {
+     "t_ms": 73047,
+     "text": " Oklahoma. I'd love to see"
+    },
+    {
+     "t_ms": 74094,
+     "text": " everybody's watch it from."
+    },
+    {
+     "t_ms": 79016,
+     "text": " So this is every"
+    },
+    {
+     "t_ms": 80047,
+     "text": " Tuesday through Friday."
+    },
+    {
+     "t_ms": 85031,
+     "text": " We'll be doing"
+    },
+    {
+     "t_ms": 86094,
+     "text": " this. Good to see you,"
+    },
+    {
+     "t_ms": 87125,
+     "text": " Michael. Thanks for"
+    },
+    {
+     "t_ms": 88203,
+     "text": " coming to Pittsburgh all"
+    },
+    {
+     "t_ms": 89250,
+     "text": " the way from South Africa."
+    },
+    {
+     "t_ms": 94078,
+     "text": " Good morning, South Carolina."
+    },
+    {
+     "t_ms": 95656,
+     "text": " New Mexico."
+    },
+    {
+     "t_ms": 96656,
+     "text": " Awesome."
+    }
+   ]
+  }
+ ]
+}
