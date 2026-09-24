@@ -374,14 +374,20 @@ read correctly — dubs made before round H keep their subtitles.
     overlap, to the line with the nearest midpoint (compared doubled, no rounding);
     a tie → the earlier line (`min_by_key` keeps the first). The search starts at
     the previous sentence's line, so it is monotonic. A line carries 0..n sentences
-    joined with a space. Known trade-off: when the SK builder splits one sentence
-    into two lines (14-word cap or a >1.5 s gap) the EN goes to the half it
-    overlaps most and the other half shows no EN.
+    joined with a space. Known trade-offs (measured on the fixture window: the six
+    named pairs hold, a few lines still do not): when the SK builder splits one
+    sentence into two lines (14-word cap or a >1.5 s gap) the EN goes to the half
+    it overlaps most and the other half shows no EN; and the part AFTER an
+    in-fragment split starts at that fragment's (earlier) time, so it can overlap
+    the PREVIOUS SK line more — „Good morning. Bartlesville" puts „Bartlesville
+    Oklahoma." on „Dobré ráno." and leaves „Bartlesville Oklahoma." without EN, and
+    a half line can show the NEXT sentence's EN. Input for a later round, not a
+    reason to bend this rule.
   EN stays within its own chunk's lines.
   **Real-data regression fixture:** `dabing/testdata/dub344_window_27_100s.json` —
   a real `DubTranscripts` JSON (one chunk, 52 `sk_timed` + 48 `en_timed`, already on
   the video timeline) cut from video 344's session log, 27–100 s (public broadcast
-  speech). `subtitles_tests.rs::the_video_344_session_log_pairs_each_en_with_its_own_sk_line`
+  speech). `subtitles_tests.rs::the_video_344_session_log_pairs_the_six_named_sk_lines`
   asserts six SK → EN pairs through `include_str!`. Cut a new window from a
   `<base>_dub_events.jsonl` (below) when a pairing defect needs a real-data test.
   **`en_slice` and the SK character-fraction path are DELETED** (owner rule:
@@ -434,8 +440,14 @@ and rebuilds from the saved transcripts JSON when `is_stale` (stored < current),
 logging `dub subtitles rebuild: stored track is from an older builder — rebuilding`
 with `stored_version` / `builder_version`. A current track is not touched.
 **Bump `DUB_SUBTITLES_BUILDER_VERSION` whenever the pairing or grouping OUTPUT
-changes** — the next deploy then rebuilds every stored dub's subtitles at startup
-(seconds), never a 40-min re-dub. Tested end-to-end in
+changes** — the next deploy then rebuilds every stored dub's subtitles on the
+first dub-worker tick after startup (seconds; the backfill sits after the
+`dub_worker_enabled` kill-switch, so with the worker disabled nothing is
+rebuilt), never a 40-min re-dub. The lyrics translator must never rewrite a dub
+track: `models_translation::fetch_next_stale_translation` excludes
+`lyrics_source = gemini-live-translate` (a dub row keeps
+`lyrics_translation_version` 0, so without it the translator would replace the
+session SK and strip the builder version). Tested end-to-end in
 `subtitles_store_tests.rs::backfill_rebuilds_a_stale_track_and_leaves_a_current_one_untouched`.
 
 ## Lyrics queue skips dub videos
