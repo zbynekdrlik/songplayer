@@ -40,6 +40,14 @@ impl SharedFrame {
         Self(Arc::new(PooledBuf::from(data)))
     }
 
+    /// Copy borrowed pixels into a buffer taken from `sp_decoder::frame_pool`
+    /// (#147 round 10): a caller that must keep its own slice still pays the
+    /// byte copy, but never a fresh per-frame allocation. Recycled on the last
+    /// drop like every other `SharedFrame`.
+    pub fn copy_from_slice(src: &[u8]) -> Self {
+        Self(Arc::new(PooledBuf::copy_from_slice(src)))
+    }
+
     /// The pixel buffer length in bytes.
     pub fn len(&self) -> usize {
         self.0.len()

@@ -142,12 +142,22 @@ pub fn recycle(buf: Vec<u8>) {
 
 /// An owned pixel buffer whose `Drop` returns its allocation to the pool for
 /// reuse instead of freeing it (#203). Derefs to `[u8]` like the `Vec` it wraps;
-/// `Clone` makes a FRESH copy (used only when the burn overlay's
-/// `Arc::make_mut` forks a shared frame — burn defaults OFF, so the steady state
-/// never clones).
+/// `Clone` makes a separate copy, but INTO a recycled buffer of the same size
+/// class (#147 round 10). The burn overlay's `Arc::make_mut` forks EVERY paced
+/// frame while burn is ON, because the pacer always holds a second Arc.
 pub struct PooledBuf(Vec<u8>);
 
 impl PooledBuf {
+    /// A copy of `src` in a buffer taken from the pool ([`take`]), so a
+    /// steady-state copy reuses recycled capacity instead of a fresh
+    /// `VirtualAlloc` + demand-zero faults (#147 round 10). The copy is its own
+    /// allocation; its `Drop` recycles it like any other `PooledBuf`.
+    pub fn copy_from_slice(src: &[u8]) -> Self {
+        let mut buf = take(src.len());
+        buf.extend_from_slice(src);
+        Self(buf)
+    }
+
     /// Exclusive access to the inner `Vec` — the burn overlay's `make_mut` path
     /// needs `&mut Vec<u8>`, which `DerefMut` (targeting `[u8]`) cannot give.
     pub fn as_vec_mut(&mut self) -> &mut Vec<u8> {
@@ -168,7 +178,7 @@ impl From<Vec<u8>> for PooledBuf {
 
 impl Clone for PooledBuf {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self::copy_from_slice(&self.0)
     }
 }
 
