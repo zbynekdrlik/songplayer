@@ -105,10 +105,10 @@ def _stitch_segments(segments, step_samples, overlap_samples):
             if i > 0:
                 w[:f] = np.linspace(0.0, 1.0, f, endpoint=False)
             if i < n - 1:
-                w[length - f:] = np.linspace(1.0, 0.0, f, endpoint=False)
+                w[length - f :] = np.linspace(1.0, 0.0, f, endpoint=False)
         s = i * step_samples
-        out[s:s + length] += seg * (w[:, None] if seg.ndim == 2 else w)
-        wsum[s:s + length] += w
+        out[s : s + length] += seg * (w[:, None] if seg.ndim == 2 else w)
+        wsum[s : s + length] += w
     nz = wsum > 1e-9
     if out.ndim == 2:
         out[nz] /= wsum[nz][:, None]
@@ -257,7 +257,7 @@ class _StreamingStitchWriter:
             if i > 0:
                 w[:f] = np.linspace(0.0, 1.0, f, endpoint=False)
             if i < self.n_segments - 1:
-                w[length - f:] = np.linspace(1.0, 0.0, f, endpoint=False)
+                w[length - f :] = np.linspace(1.0, 0.0, f, endpoint=False)
         return w
 
     def _grow_to(self, end):
@@ -388,6 +388,7 @@ def _stem_token(fname):
 def _pick(out_files, wanted_tokens, fallback_dir):
     """Return the absolute path of the stem whose parenthesized token is in
     `wanted_tokens`."""
+
     def _abs(p):
         return p if os.path.isabs(p) else os.path.join(fallback_dir, p)
 
@@ -428,7 +429,10 @@ def _set_wddm_gpu_priority():
                 file=sys.stderr,
             )
     except Exception as e:  # never fatal — priority is only an optimisation
-        print(f"gpu_polite: WDDM GPU priority call failed (non-fatal): {e}", file=sys.stderr)
+        print(
+            f"gpu_polite: WDDM GPU priority call failed (non-fatal): {e}",
+            file=sys.stderr,
+        )
 
 
 def _gpu_mem_fraction():
@@ -559,7 +563,9 @@ def _write_array_48k_stereo(out_array, out_path):
                 os.remove(tmp_path)
 
 
-def _separate_one_segment(sep, audio_path, in_sr, start_s, end_s, segv_path, segi_path, stem_dir):
+def _separate_one_segment(
+    sep, audio_path, in_sr, start_s, end_s, segv_path, segi_path, stem_dir
+):
     """Separate ONE native-rate window `[start_s, end_s]` of the mix at
     `audio_path` into vocals + instrumental, resample each to 48 kHz stereo, and
     write them atomically (WAV scratch) to `segv_path` / `segi_path`. `stem_dir`
@@ -629,8 +635,10 @@ def cmd_separate(args):
 
     def _seg_done(i):
         return (
-            os.path.exists(_segv(i)) and os.path.getsize(_segv(i)) > 0
-            and os.path.exists(_segi(i)) and os.path.getsize(_segi(i)) > 0
+            os.path.exists(_segv(i))
+            and os.path.getsize(_segv(i)) > 0
+            and os.path.exists(_segi(i))
+            and os.path.getsize(_segi(i)) > 0
         )
 
     done = [_seg_done(i) for i in range(n_seg)]
@@ -687,13 +695,17 @@ def cmd_separate(args):
     # Stitch both stems with IDENTICAL crossfade weights (preserves additivity),
     # STREAMED segment by segment into the atomic FLAC (#207) — never a
     # whole-length array.
-    step_samples = int(round((STEM_SEGMENT_SECONDS - STEM_OVERLAP_SECONDS) * OUTPUT_SAMPLE_RATE))
+    step_samples = int(
+        round((STEM_SEGMENT_SECONDS - STEM_OVERLAP_SECONDS) * OUTPUT_SAMPLE_RATE)
+    )
     overlap_samples = int(round(STEM_OVERLAP_SECONDS * OUTPUT_SAMPLE_RATE))
     _stitch_to_flac(_segv, n_seg, args.vocals_out, step_samples, overlap_samples)
     _stitch_to_flac(_segi, n_seg, args.instrumental_out, step_samples, overlap_samples)
     shutil.rmtree(work_dir, ignore_errors=True)
 
-    print(json.dumps({"vocals": args.vocals_out, "instrumental": args.instrumental_out}))
+    print(
+        json.dumps({"vocals": args.vocals_out, "instrumental": args.instrumental_out})
+    )
 
 
 def cmd_preload(args):
