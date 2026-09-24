@@ -652,7 +652,8 @@ fn spawn_video_feeder(
             while !shutdown.load(Ordering::Relaxed) {
                 match rx.recv_timeout(Duration::from_millis(200)) {
                     Ok(frame) => {
-                        if sock.write_all(&frame).is_err() {
+                        // #147 r10: `write_frame` returns the buffer to the pool.
+                        if shared.write_frame(&mut sock, frame).is_err() {
                             break;
                         }
                         // Stamp the first successful video write (`.max(1)` so a
