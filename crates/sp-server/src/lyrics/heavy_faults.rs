@@ -111,10 +111,16 @@ mod tests {
         assert_eq!(faults_per_sec(1_000, 4_000, Duration::ZERO), 0);
     }
 
-    /// A wrapped / reset counter (now < prev) must read 0, never a huge spike.
+    /// #147 round 9: `PageFaultCount` is a u32 that WRAPS (it never resets
+    /// within a process), so now < prev is a wrap — counted across u32::MAX,
+    /// not zeroed. `4_294_966_296` = `u32::MAX - 999`: 999 + 1 + 1 000 = 2 000
+    /// faults over 2 s → 1 000/s.
     #[test]
-    fn faults_per_sec_saturates_on_a_decreasing_counter() {
-        assert_eq!(faults_per_sec(9_000, 1_000, Duration::from_secs(2)), 0);
+    fn faults_per_sec_counts_across_a_u32_wrap() {
+        assert_eq!(
+            faults_per_sec(4_294_966_296, 1_000, Duration::from_secs(2)),
+            1_000
+        );
     }
 
     #[test]
