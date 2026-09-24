@@ -15,6 +15,7 @@
 use crate::playback::ndi_health::PacingStats;
 use sp_core::genlock::UNITS_PER_SECOND;
 use sp_core::genlock::lock_state::{LockInputs, LockState, derive};
+use sp_core::playback::TransportState;
 use std::collections::VecDeque;
 
 /// The lock-state observation window: 60 s in 100-ns units.
@@ -148,6 +149,10 @@ impl EventWindow {
 /// rate-normalised counts (#168 round 6). The single seam `ndi_health.rs` calls
 /// so the 999/1000-line file stays line-neutral. `source_fps` is the playing
 /// file's nominal fps; `grid_fps` the pacer's fixed grid (`GENLOCK_GRID_FPS`).
+/// `transport` is the pipeline's RAW transport (#201, pre-scene-reconciliation):
+/// only `Playing` is decoding (#150) — a Paused / Idle output's standby repeats
+/// are by design and never read as starvation.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn lock_for_heartbeat(
     window: &mut EventWindow,
     now_100ns: i64,
@@ -156,6 +161,7 @@ pub(crate) fn lock_for_heartbeat(
     connections: u32,
     source_fps: f32,
     grid_fps: u32,
+    transport: TransportState,
 ) -> (LockState, &'static str) {
     window.push(
         now_100ns,
@@ -176,6 +182,7 @@ pub(crate) fn lock_for_heartbeat(
         slots_w,
         source_fps,
         grid_fps,
+        decoding: transport == TransportState::Playing,
     })
 }
 

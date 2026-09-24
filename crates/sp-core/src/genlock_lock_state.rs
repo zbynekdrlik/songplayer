@@ -63,6 +63,12 @@ pub struct LockInputs {
     pub source_fps: f32,
     /// The fixed integer grid rate the pacer runs (`GENLOCK_GRID_FPS = 30`).
     pub grid_fps: u32,
+    /// The output is decoding content — its RAW pipeline transport is
+    /// `TransportState::Playing` (#150). A paused / idle output under pacing
+    /// keeps servicing the grid with STANDBY frames (the frozen last frame is
+    /// a repeat on every slot, `repeats_w ≈ slots_w` by design), so the
+    /// repeat-rate rule only applies while decoding.
+    pub decoding: bool,
 }
 
 /// Late-fraction threshold: DEGRADED once late emits exceed 25 % (250 ‰) of the

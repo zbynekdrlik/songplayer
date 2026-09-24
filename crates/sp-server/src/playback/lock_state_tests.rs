@@ -6,6 +6,7 @@
 //! of which exist until the GREEN commit — a documented compile-failure RED.
 
 use crate::playback::lock_state::{EVENT_WINDOW_CAP, EventWindow, lock_for_heartbeat};
+use sp_core::playback::TransportState::{Idle, Paused, Playing};
 
 /// 100-ns units per second — the sample-timestamp unit (mirrors sp-core).
 const U: i64 = sp_core::genlock::UNITS_PER_SECOND;
@@ -129,8 +130,17 @@ fn lock_for_heartbeat_holds_locked_on_a_clean_grid() {
     let mut w = EventWindow::new();
     // Two heartbeats 60 s apart: 1800 slots, 100 late (≈ 5.6 %), 360 structural
     // 24→30 repeats — a holding 24-fps grid → LOCKED.
-    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 24.0, 30);
-    let (s, r) = lock_for_heartbeat(&mut w, 60 * U, &paced(1800, 100, 360, 0), true, 2, 24.0, 30);
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 24.0, 30, Playing);
+    let (s, r) = lock_for_heartbeat(
+        &mut w,
+        60 * U,
+        &paced(1800, 100, 360, 0),
+        true,
+        2,
+        24.0,
+        30,
+        Playing,
+    );
     assert_eq!(s, LockState::Locked);
     assert_eq!(r, "locked");
 }
@@ -140,8 +150,17 @@ fn lock_for_heartbeat_degrades_on_a_stall() {
     use sp_core::genlock::lock_state::LockState;
     let mut w = EventWindow::new();
     // 750 late / 1800 slots ≈ 42 % → the sender-side stall → DEGRADED (late).
-    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 24.0, 30);
-    let (s, r) = lock_for_heartbeat(&mut w, 60 * U, &paced(1800, 750, 360, 0), true, 2, 24.0, 30);
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 24.0, 30, Playing);
+    let (s, r) = lock_for_heartbeat(
+        &mut w,
+        60 * U,
+        &paced(1800, 750, 360, 0),
+        true,
+        2,
+        24.0,
+        30,
+        Playing,
+    );
     assert_eq!(s, LockState::Degraded);
     assert_eq!(r, "late > 25 % of slots in 60 s");
 }
@@ -158,8 +177,17 @@ fn lock_for_heartbeat_degrades_on_a_stall() {
 fn lock_for_heartbeat_source_fps_23976_holds_locked() {
     use sp_core::genlock::lock_state::LockState;
     let mut w = EventWindow::new();
-    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 23.976, 30);
-    let (s, r) = lock_for_heartbeat(&mut w, 60 * U, &paced(1803, 3, 362, 0), true, 2, 23.976, 30);
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 23.976, 30, Playing);
+    let (s, r) = lock_for_heartbeat(
+        &mut w,
+        60 * U,
+        &paced(1803, 3, 362, 0),
+        true,
+        2,
+        23.976,
+        30,
+        Playing,
+    );
     assert_eq!(
         s,
         LockState::Locked,
@@ -175,10 +203,74 @@ fn lock_for_heartbeat_grid_source_fps_falsely_degrades() {
     // Feeding the grid rate (30.0, what the paced `nominal_fps` reads) as the
     // source is the BUG: expected repeat 0 % → the 20.1 % structural repeats trip
     // the margin → DEGRADED. This pins WHY `source_fps` must be the decoder rate.
-    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 30.0, 30);
-    let (s, r) = lock_for_heartbeat(&mut w, 60 * U, &paced(1803, 3, 362, 0), true, 2, 30.0, 30);
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 30.0, 30, Playing);
+    let (s, r) = lock_for_heartbeat(
+        &mut w,
+        60 * U,
+        &paced(1803, 3, 362, 0),
+        true,
+        2,
+        30.0,
+        30,
+        Playing,
+    );
     assert_eq!(s, LockState::Degraded);
     assert_eq!(r, "repeats above the fps conversion in 60 s");
+}
+
+// #150: the engine seam maps the RAW transport to `decoding` — only `Playing`
+// decodes. The SAME standby window (1800 slots, 1800 frozen-last-frame repeats,
+// a 23.976-fps file, the box read of Paused SP-fast / SP-dabing 24.9.2026)
+// reads LOCKED while Paused or Idle and DEGRADED while Playing.
+
+fn standby_minute(
+    transport: sp_core::playback::TransportState,
+) -> (sp_core::genlock::lock_state::LockState, &'static str) {
+    let mut w = EventWindow::new();
+    let _ = lock_for_heartbeat(
+        &mut w,
+        0,
+        &paced(0, 0, 0, 0),
+        true,
+        2,
+        23.976,
+        30,
+        transport,
+    );
+    lock_for_heartbeat(
+        &mut w,
+        60 * U,
+        &paced(1800, 2, 1800, 0),
+        true,
+        2,
+        23.976,
+        30,
+        transport,
+    )
+}
+
+#[test]
+fn lock_for_heartbeat_paused_standby_repeats_hold_locked() {
+    use sp_core::genlock::lock_state::LockState;
+    assert_eq!(standby_minute(Paused), (LockState::Locked, "locked"));
+}
+
+#[test]
+fn lock_for_heartbeat_idle_standby_repeats_hold_locked() {
+    use sp_core::genlock::lock_state::LockState;
+    assert_eq!(standby_minute(Idle), (LockState::Locked, "locked"));
+}
+
+#[test]
+fn lock_for_heartbeat_playing_repeats_on_every_slot_degrade() {
+    use sp_core::genlock::lock_state::LockState;
+    assert_eq!(
+        standby_minute(Playing),
+        (
+            LockState::Degraded,
+            "repeats above the fps conversion in 60 s"
+        )
+    );
 }
 
 // ---- format_genlock_line + structural guard ----
