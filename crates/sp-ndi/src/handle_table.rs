@@ -46,15 +46,18 @@ impl<T> HandleTable<T> {
             .insert(id, Arc::new(Mutex::new(Some(state))));
     }
 
-    /// Run `op` on handle `id`'s state while holding that handle's lock.
-    /// `None` (and `op` never runs) when the handle does not exist or was
-    /// removed.
+    /// Clone handle `id`'s slot. The map's read lock is released when this
+    /// returns, before anyone locks the slot.
+    fn slot(&self, id: usize) -> Option<Slot<T>> {
+        self.map.read().expect(POISONED).get(&id).cloned()
+    }
+
+    /// Run `op` on handle `id`'s state while holding that handle's lock (and
+    /// ONLY that lock). `None` (and `op` never runs) when the handle does not
+    /// exist or was removed.
     pub(crate) fn with<R>(&self, id: usize, op: impl FnOnce(&mut T) -> R) -> Option<R> {
-        // The pre-round-11 scope: the map lock stays held across the whole
-        // operation, so every handle waits for every other one.
-        let map = self.map.write().expect(POISONED);
-        let slot = map.get(&id)?;
-        run_live(slot, op)
+        let slot = self.slot(id)?;
+        run_live(&slot, op)
     }
 
     /// Remove handle `id` and hand its state to `teardown`. Waits for an
@@ -62,8 +65,9 @@ impl<T> HandleTable<T> {
     /// the handle's lock. `None` (and `teardown` never runs) when the handle
     /// does not exist.
     pub(crate) fn remove_with<R>(&self, id: usize, teardown: impl FnOnce(T) -> R) -> Option<R> {
-        let mut map = self.map.write().expect(POISONED);
-        let slot = map.remove(&id)?;
+        // The map's write lock is released at the end of this statement, so
+        // waiting for the in-flight op below never blocks the other handles.
+        let slot = self.map.write().expect(POISONED).remove(&id)?;
         let mut guard = slot.lock().expect(POISONED);
         let state = guard.take()?;
         let out = teardown(state);
@@ -238,6 +242,19 @@ mod tests {
         );
         assert_eq!(table.with(1, |_| ()), None);
         assert_eq!(table.remove_with(1, |_| ()), None);
+    }
+
+    #[test]
+    fn an_op_that_looked_up_the_handle_before_remove_does_nothing_after_it() {
+        let table: HandleTable<Log> = HandleTable::new();
+        table.insert(1, vec!["live"]);
+        // A send that cloned the slot, then lost the race to a destroy.
+        let late = table.slot(1).expect("an inserted handle has a slot");
+        assert_eq!(table.remove_with(1, |log| log), Some(vec!["live"]));
+
+        let mut ran = false;
+        assert_eq!(run_live(&late, |_| ran = true), None);
+        assert!(!ran, "a late op reached the destroyed state");
     }
 
     #[test]
