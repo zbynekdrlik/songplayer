@@ -148,6 +148,10 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
 - **`clippy::manual_slice_fill`** (rust 1.98, `-D warnings`): a `for x in &mut
   slice { *x = <const> }` loop must be `slice.fill(<const>)`. The no-compile box
   can't see it; it failed #186's Lint on `for e in &mut self.eos { *e = false }`.
+- **`clippy::collapsible_if` in edition 2024 wants a let-chain** (#147 r9):
+  `if cond { if let Some(x) = f() { … } }` with no `else` fails `-D warnings`.
+  Write `if cond && let Some(x) = f() { … }` (the tree already uses let-chains,
+  e.g. `lyrics/genius.rs`).
 - **`clippy::manual_div_ceil`** (warn-by-default → `-D warnings`): a hand-rolled
   ceil-division `(a + b - 1) / b` (or the `(a * p + 99) / 100` form) must be
   `a.div_ceil(b)`. `u64::div_ceil` is **const-fn since 1.73**, so it works inside
