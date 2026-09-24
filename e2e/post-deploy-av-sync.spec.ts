@@ -27,10 +27,13 @@
  * never touched (`startRecord` refuses). The SONG mixer faders are set to
  * unity for the measurement and restored after.
  *
- * afterAll is the safety net for a test body that timed out. It kills a
- * still-running analysis, stops our recording, deletes every recording made,
- * restores the faders and restores the scene. Every step is attempted even if
- * an earlier one fails.
+ * afterAll is the safety net for a test body that timed out. In order, it:
+ * - kills the analysis;
+ * - settles a pending start (at most 10 s);
+ * - stops our recording;
+ * - restores the faders and the scene;
+ * - then deletes every recording made.
+ * Every step is attempted even if an earlier one fails.
  *
  * Box paths (override via env): `SP_AVSYNC_PYTHON` = a Python with numpy (the
  * lyrics venv), `SP_FFMPEG` = the app's bundled ffmpeg. There is no ffprobe on
@@ -249,8 +252,13 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           ),
           sleep(10_000).then(() => "pending"),
         ]);
-        if (settled === "pending") throw new Error("StartRecord did not settle within 10 s");
         if (settled === "started") ours = true;
+        if (settled === "pending") {
+          // The call never answered, but it was SENT after the pre-check proved
+          // no operator recording was running: an active recording is ours.
+          if (driver.startIssued && (await driver.isRecording())) ours = true;
+          throw new Error("StartRecord did not settle within 10 s");
+        }
       });
       // Paths stopped HERE have not been remuxed yet: wait for their sibling.
       const stoppedHere: string[] = [];

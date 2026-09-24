@@ -18,6 +18,9 @@ export class ObsDriver {
   /** #147: the file of the last StopRecord, kept even if the inactive-poll
    * below times out, so a caller's cleanup can still delete it. */
   lastRecordingPath: string | null = null;
+  /** #147: a StartRecord was SENT after the no-operator-recording pre-check.
+   * A recording active after that is ours, even if the call never answered. */
+  startIssued = false;
 
   private constructor(private obs: OBSWebSocket) {}
 
@@ -139,11 +142,13 @@ export class ObsDriver {
    * stopped or deleted by CI.
    */
   async startRecord(): Promise<void> {
+    this.startIssued = false; // per call: true only once THIS call passed the pre-check
     if (await this.isRecording()) {
       throw new Error(
         "OBS is already recording (an operator recording?) — the A/V gate will not stop or reuse it",
       );
     }
+    this.startIssued = true;
     await this.obs.call("StartRecord");
   }
 
