@@ -87,6 +87,76 @@ fn ellipsis_and_bang_and_question_all_close_a_line() {
     assert_eq!(t.lines.len(), 4);
 }
 
+// ── Grouping: a pause never closes a line (#184 H6) ──────────────────────────
+
+#[test]
+fn a_mid_sentence_pause_keeps_the_line_open() {
+    // Live Translate streams one sentence with pauses inside it (video 344:
+    // „ úprimný pre" → „ mňa." arrived 1985 ms apart). The line stays open
+    // until the sentence ends, however long the pause.
+    let t = build(vec![chunk(
+        0,
+        Some(0),
+        Some(1.0),
+        vec![
+            frag(500, "Definuj"),
+            frag(1500, " úprimný pre"),
+            frag(3500, " mňa."),
+            frag(4000, " Potom"),
+            frag(14_000, " ďalej."),
+        ],
+    )]);
+    let got: Vec<Option<&str>> = t.lines.iter().map(|l| l.sk.as_deref()).collect();
+    assert_eq!(
+        got,
+        vec![Some("Definuj úprimný pre mňa."), Some("Potom ďalej.")]
+    );
+}
+
+// ── Grouping: 20-word cap (#184 H6) ──────────────────────────────────────────
+
+/// `n` single-word fragments `slovo0 ` … 100 ms apart, no punctuation (the
+/// trailing space keeps the joined line whitespace-separated).
+fn words(n: usize) -> Vec<SkFragment> {
+    (0..n)
+        .map(|i| frag(100 * (i as u64 + 1), &format!("slovo{i} ")))
+        .collect()
+}
+
+fn word_counts(t: &LyricsTrack) -> Vec<usize> {
+    t.lines
+        .iter()
+        .map(|l| l.sk.as_deref().unwrap().split_whitespace().count())
+        .collect()
+}
+
+#[test]
+fn line_closes_once_it_reaches_twenty_words() {
+    // 21 one-word fragments: the 20th closes the line (19 kept it open), the
+    // 21st is a line of its own.
+    let t = build(vec![chunk(0, Some(0), Some(1.0), words(21))]);
+    assert_eq!(word_counts(&t), vec![20, 1]);
+}
+
+#[test]
+fn a_line_at_nineteen_words_stays_open_and_one_fragment_may_push_it_over() {
+    // 19 words keep the line open; the next fragment carries two words and
+    // takes it to 21, which closes it — the cap is checked after a whole
+    // fragment, never inside one.
+    let mut frags = words(19);
+    frags.push(frag(2000, " a b"));
+    frags.push(frag(2100, " c"));
+    let t = build(vec![chunk(0, Some(0), Some(1.0), frags)]);
+    assert_eq!(word_counts(&t), vec![21, 1]);
+}
+
+#[test]
+fn the_h6_grouping_change_bumps_the_builder_version_to_3() {
+    // The grouping OUTPUT changed, so every stored dub track must be rebuilt
+    // by the startup backfill (stored < current).
+    assert_eq!(DUB_SUBTITLES_BUILDER_VERSION, 3);
+}
+
 // ── Timing: tempo mapping ────────────────────────────────────────────────────
 
 #[test]
@@ -736,5 +806,59 @@ fn the_video_344_session_log_pairs_the_six_named_sk_lines() {
     ];
     for (sk, en) in pairs {
         assert_eq!(en_of(&track, sk), en, "EN of the SK line {sk:?}");
+    }
+}
+
+#[test]
+fn the_video_344_twentieth_minute_keeps_each_sentence_on_one_line() {
+    // Real data (#184 H6): 1235–1320 s of video 344's session log (74 SK + 74
+    // EN fragments, already on the video timeline). With the 1500 ms gap rule
+    // the SK builder cut two sentences in half: „Definuj úprimný pre" / „mňa. …"
+    // (a 1985 ms pause) and „Úprimný je zo srdca a" / „Keď Biblia …" (3734 ms).
+    // Without the gap rule each is ONE line. The sentence end of „Definuj
+    // úprimný pre mňa." sits INSIDE the fragment „ mňa. Čo to znamená", and a
+    // line closes only at a fragment that ENDS a sentence, so the next question
+    // shares that line; its EN is still exactly the one sentence.
+    let t: DubTranscripts =
+        serde_json::from_str(include_str!("testdata/dub344_window_1235_1320s.json")).unwrap();
+    assert_eq!(t.chunks.len(), 1);
+    let sk = &t.chunks[0].sk_timed;
+    assert_eq!(sk.len(), 74);
+    assert_eq!(t.chunks[0].en_timed.len(), 74);
+    let track = transcripts_to_track(&t);
+    let sk_lines: Vec<&str> = track.lines.iter().filter_map(|l| l.sk.as_deref()).collect();
+
+    // (a) + (d): the whole „Definuj úprimný pre mňa." is on one line, with its EN.
+    let define = "Definuj úprimný pre mňa. Čo to znamená modliť sa úprimne?";
+    assert!(sk_lines.contains(&define), "no SK line {define:?}");
+    assert_eq!(en_of(&track, define), "Define earnest for me.");
+    assert!(!sk_lines.contains(&"Definuj úprimný pre"));
+
+    // (b): „Úprimný je zo srdca a" is no longer a line by itself.
+    assert!(!sk_lines.contains(&"Úprimný je zo srdca a"));
+    assert!(sk_lines.contains(
+        &"Úprimný je zo srdca a Keď Biblia hovorí, že úprimná účinná modlitba \
+          spravodlivého človeka, má veľkú silu k dispozícii, dynamickú a funguje."
+    ));
+
+    // (c) on every line of the window: a line closes only at a fragment that
+    // ends a sentence, at the 20-word cap, or at the chunk's last fragment —
+    // never on a pause — and it is under 20 words before its last fragment
+    // (only that one fragment can push it over).
+    let count = |lo: usize, hi: usize| -> usize {
+        sk[lo..hi]
+            .iter()
+            .map(|f| f.text.split_whitespace().count())
+            .sum()
+    };
+    let groups = group_fragments(sk);
+    assert_eq!(groups.last().map(|g| g.1), Some(sk.len() - 1));
+    for &(lo, hi) in &groups {
+        assert!(count(lo, hi) < 20, "line {lo}..={hi} stayed open past 20");
+        let closes = ends_sentence(&sk[hi].text) || count(lo, hi + 1) >= 20;
+        assert!(
+            closes || hi + 1 == sk.len(),
+            "line {lo}..={hi} closed on a pause"
+        );
     }
 }
