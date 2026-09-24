@@ -467,6 +467,14 @@ def test_measure_reports_av_from_the_video_step(monkeypatch):
     assert r["video"] == {"frames": 600}  # the exact helper keys are removed
 
 
+def test_dropout_hop_must_divide_the_windows():
+    """A 3 ms hop (24 samples) does not divide the 80-sample window: its
+    sub-window minimum would leave the window tail unchecked."""
+    orig = np.random.default_rng(19).standard_normal(SR * 2) * 0.2
+    with pytest.raises(ValueError, match="hop must divide"):
+        avs.dropout_blocks(orig * 0.8, orig, SR, hop_ms=3)
+
+
 def test_clean_recording_has_no_dropouts_or_glitches():
     rng = np.random.default_rng(8)
     orig = rng.standard_normal(SR * 8) * np.repeat(rng.uniform(0.05, 1.0, 80), SR // 10)

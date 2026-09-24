@@ -375,22 +375,27 @@ and the recording actually get.
     masking it.
   - `afterAll` first sets `tornDown`. Playwright does not cancel a
     timed-out body, so after that point the body refuses to start a
-    recording, the recording wait, or a skip.
+    recording, the recording wait, the analysis, or a skip.
   - It awaits an in-flight `StartRecord`, which is tracked as
     `startInFlight`. A start that resolved is ours, even if the body never
     got to set `recordingOurs`. A REJECTED start (an operator recording was
     running) is never stopped.
   - `ObsDriver.lastRecordingPath` keeps the file of a StopRecord whose
     inactive-poll timed out, so that file is deleted too.
-  - `afterAll` is the safety net for a timed-out body. It does all of this:
-    - kills a still-running analysis (a Windows `taskkill /T`, because python
-      AND its ffmpeg children hold the file open);
-    - stops our recording, only while `isRecording()`;
-    - deletes any recording it stopped itself, waiting 15 s for the remux
-      sibling;
-    - re-sweeps every earlier take, which catches a sibling that appeared
-      after the take's own wait;
-    - restores the faders and the scene.
+  - `afterAll` is the safety net for a timed-out body. It has its own 180 s
+    hook budget and works in this order:
+    1. It kills a still-running analysis (a Windows `taskkill /T`, because
+       python AND its ffmpeg children hold the file open).
+    2. It settles an in-flight start, waiting at most 10 s.
+    3. It stops our recording, only while `isRecording()`.
+    4. It restores the faders and the scene. This comes BEFORE the slow file
+       deletion, so a hook that runs out of time never leaves the program on
+       the baseline scene.
+    5. It deletes recordings:
+       - recordings the body never removed get a 15 s wait for their remux
+         sibling;
+       - recordings the body already removed get a 0 ms re-sweep, which
+         catches a sibling that appeared late.
 
     Each step runs in its own try/catch, and the errors are asserted together
     at the end.

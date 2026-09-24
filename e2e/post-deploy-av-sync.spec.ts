@@ -164,6 +164,8 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   // never set. A REJECTED start (e.g. an operator recording was running) is
   // never ours to stop.
   let startInFlight: Promise<void> | null = null;
+  // Recordings the body's own per-take cleanup already handled.
+  const removedByBody = new Set<string>();
   const madeRecordings: string[] = [];
   let liveChild: ChildProcess | null = null;
   let fadersToRestore: { vokaly: number; podklad: number } | null = null;
@@ -184,6 +186,10 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   /** Run the analysis without blocking the event loop (OBS-ws, Playwright timeout). */
   function runAnalysis(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
+      if (tornDown) {
+        reject(new Error("A/V gate torn down (test timed out) — not starting the analysis"));
+        return;
+      }
       const child = spawn(PYTHON, [SCRIPT, ...args], { windowsHide: true });
       liveChild = child;
       let stdout = "";
@@ -215,6 +221,9 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
 
   test.afterAll(async () => {
     tornDown = true;
+    // Worst case: start settle 10 + stop 10 + faders/scene ~10 + deleting up
+    // to MAX_TAKES+1 recordings (15 s remux wait + 2 x 10 s busy retries).
+    test.setTimeout(180_000);
     const driver = obs;
     if (!driver) return;
     const errors: string[] = [];
@@ -233,34 +242,23 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       const pendingStart = startInFlight;
       await step("settle an in-flight StartRecord", async () => {
         if (!pendingStart) return;
-        try {
-          await pendingStart;
-          ours = true;
-        } catch {
-          // rejected: nothing of ours started
-        }
+        const settled = await Promise.race([
+          pendingStart.then(
+            () => "started",
+            () => "rejected", // nothing of ours started
+          ),
+          sleep(10_000).then(() => "pending"),
+        ]);
+        if (settled === "pending") throw new Error("StartRecord did not settle within 10 s");
+        if (settled === "started") ours = true;
       });
       // Paths stopped HERE have not been remuxed yet: wait for their sibling.
       const stoppedHere: string[] = [];
       await step("stop our recording", async () => {
         if (ours && (await driver.isRecording())) stoppedHere.push(await driver.stopRecord());
       });
-      await step("delete the recordings", async () => {
-        // A StopRecord whose inactive-poll timed out still left its path.
-        const last = driver.lastRecordingPath;
-        if (ours && last && !madeRecordings.includes(last) && !stoppedHere.includes(last)) {
-          stoppedHere.push(last);
-        }
-        recordingOurs = false;
-        const left: string[] = [];
-        for (const rec of stoppedHere) {
-          left.push(...(await removeRecording(rec, autoRemux, 15_000)));
-        }
-        // Already-handled takes: a re-sweep catches a remux sibling that
-        // appeared after the take's own 15 s wait.
-        for (const rec of madeRecordings) left.push(...(await removeRecording(rec, autoRemux, 0)));
-        expect(left, "every OBS recording the gate made must be deleted").toEqual([]);
-      });
+      // Restore the operator's wall BEFORE the slow file deletion, so a hook
+      // that runs out of time never leaves the program on the baseline.
       await step("restore the SONG faders", async () => {
         if (!fadersToRestore) return;
         const ctx = await apiRequest.newContext({ baseURL: SONGPLAYER_URL });
@@ -277,6 +275,21 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           await driver.currentProgramScene(),
           `the A/V gate must restore the program scene "${initialScene}"`,
         ).toBe(initialScene);
+      });
+      await step("delete the recordings", async () => {
+        // A StopRecord whose inactive-poll timed out still left its path.
+        const last = driver.lastRecordingPath;
+        if (ours && last && !madeRecordings.includes(last) && !stoppedHere.includes(last)) {
+          stoppedHere.push(last);
+        }
+        recordingOurs = false;
+        const left: string[] = [];
+        // Not yet deleted by the body (it died first): wait for the remux sibling.
+        const pending = [...stoppedHere, ...madeRecordings.filter((r) => !removedByBody.has(r))];
+        for (const rec of pending) left.push(...(await removeRecording(rec, autoRemux, 15_000)));
+        // Deleted by the body: a re-sweep catches a sibling that appeared late.
+        for (const rec of removedByBody) left.push(...(await removeRecording(rec, autoRemux, 0)));
+        expect(left, "every OBS recording the gate made must be deleted").toEqual([]);
       });
     } finally {
       await driver.disconnect();
@@ -397,6 +410,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
             console.log(`A/V gate: ${lastTakeNote}`);
           } else {
             // 5. Analyse against the originals. Every number goes to the CI log.
+            assertNotTornDown("the analysis");
             const proc = await runAnalysis([
               "--recording", recording,
               "--orig-audio", path.join(cacheDir, pair.audio),
@@ -414,6 +428,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           // Collected, not asserted here: an assertion in a finally would mask
           // the analysis error that got us here.
           undeleted.push(...(await removeRecording(recording, autoRemux, 15_000)));
+          removedByBody.add(recording);
         }
 
         const retake = run === null || run.retakeable;
