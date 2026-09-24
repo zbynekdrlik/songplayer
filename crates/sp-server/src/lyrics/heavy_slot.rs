@@ -658,6 +658,13 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
         // Minimum/MaximumWorkingSetSize) so the child pages ITSELF instead of
         // evicting SongPlayer; `applied` records what the OS actually took.
         let mut applied = containment;
+        // #147 round 10: the working-set cap needs SeIncreaseBasePriorityPrivilege
+        // in OUR token (else 1314). Enabled once per process, logged once.
+        let privilege = if applied.max_working_set_mb == 0 {
+            Ok(())
+        } else {
+            job_working_set_privilege()
+        };
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
         info.BasicLimitInformation.LimitFlags = job_limit_flags(applied.max_working_set_mb);
         info.BasicLimitInformation.Affinity = applied.affinity_mask as usize;
@@ -675,8 +682,9 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
                 return None;
             }
             tracing::warn!(
-                "heavy child working-set cap {} MiB rejected (pid {pid}, err {err}) — job applied without it",
-                applied.max_working_set_mb
+                "heavy child working-set cap {} MiB rejected (pid {pid}, err {err}, base_priority_privilege={}) — job applied without it",
+                applied.max_working_set_mb,
+                crate::process_start::residency::outcome(privilege)
             );
             applied.max_working_set_mb = 0;
             without_working_set(&mut info);
@@ -752,6 +760,24 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
         tracing::info!("{}", contained_line(pid, limit_bytes, &applied));
         Some(job as isize)
     }
+}
+
+/// #147 round 10: enable `SeIncreaseBasePriorityPrivilege` in SongPlayer's
+/// token ONCE per process (the first capped job), before the job call —
+/// `JOB_OBJECT_LIMIT_WORKINGSET` with a minimum above the system minimum is
+/// refused with `ERROR_PRIVILEGE_NOT_HELD` (1314) without it. The outcome is
+/// logged once (`heavy child job privilege: …`) and cached; the job call's
+/// retry-without-cap fallback stays for a token that does not hold it.
+/// Integration-only.
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+fn job_working_set_privilege() -> Result<(), u32> {
+    static ENABLED: std::sync::OnceLock<Result<(), u32>> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        let r = crate::process_start::enable_increase_base_priority_privilege();
+        tracing::info!("{}", crate::process_start::residency::job_privilege_line(r));
+        r
+    })
 }
 
 /// #147 round 9: clear the working-set cap from a heavy child's extended-limit

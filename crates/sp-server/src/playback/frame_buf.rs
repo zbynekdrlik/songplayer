@@ -40,6 +40,14 @@ impl SharedFrame {
         Self(Arc::new(PooledBuf::from(data)))
     }
 
+    /// Copy borrowed pixels into a buffer taken from `sp_decoder::frame_pool`
+    /// (#147 round 10): a caller that must keep its own slice still pays the
+    /// byte copy, but never a fresh per-frame allocation. Recycled on the last
+    /// drop like every other `SharedFrame`.
+    pub fn copy_from_slice(src: &[u8]) -> Self {
+        Self(Arc::new(PooledBuf::copy_from_slice(src)))
+    }
+
     /// The pixel buffer length in bytes.
     pub fn len(&self) -> usize {
         self.0.len()
@@ -59,12 +67,13 @@ impl SharedFrame {
     }
 
     /// Exclusive mutable access to the pixels, cloning ONLY if this handle is not
-    /// the sole owner ([`Arc::make_mut`]). On the submit path a `SharedFrame` is
-    /// freshly wrapped and uniquely owned, so this is in place (no copy); it
-    /// exists so the paced burn-id overlay can paint into our own copy without
-    /// disturbing any other holder.
+    /// the sole owner ([`Arc::make_mut`]). It exists so the paced burn-id overlay
+    /// can paint into its own copy without disturbing any other holder. On the
+    /// paced path the pacer usually still holds the frame for its starvation
+    /// repeat, so this normally FORKS into a `frame_pool` copy (#147 round 10);
+    /// it is in place only when this handle is the sole owner, which is safe.
     pub fn make_mut(&mut self) -> &mut Vec<u8> {
-        // `Arc::make_mut` forks the `PooledBuf` (a fresh copy, via its `Clone`)
+        // `Arc::make_mut` forks the `PooledBuf` (a pooled copy, via its `Clone`)
         // only when this is not the sole owner; `as_vec_mut` exposes the inner
         // `Vec` the overlay needs (`DerefMut` targets `[u8]`, not `Vec<u8>`).
         Arc::make_mut(&mut self.0).as_vec_mut()

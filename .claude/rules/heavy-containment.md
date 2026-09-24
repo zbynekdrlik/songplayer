@@ -276,10 +276,16 @@ windows) is in `genlock.md` under "#147 round 9 — memory residency".
     applies them to the process at assignment), the seam clears the cap
     (`without_working_set`) and retries ONCE, then logs a WARN. `contained_line`
     logs the APPLIED value (`max_ws_mb=off` after a fallback).
+  - **Round 10: the cap needs `SeIncreaseBasePriorityPrivilege`.** Without it
+    the box read `err 1314`. `job_working_set_privilege` enables it once per
+    process before the first capped job and logs `heavy child job privilege:
+    SeIncreaseBasePriorityPrivilege=…`. The source is in `genlock.md`, "#147
+    round 10".
 - **SongPlayer side (`sp_min_working_set_mb`, default 3072 MiB).**
   - `process_start::apply_min_working_set` runs once after the DB is ready. On
     Windows it enables `SeIncreaseWorkingSetPrivilege` whatever the setting
-    (the child's job working-set limit may need it too), then calls
+    (the child's job cap needs `SeIncreaseBasePriorityPrivilege` instead,
+    enabled by the job seam — round 10, below), then calls
     `SetProcessWorkingSetSizeEx` with
     `QUOTA_LIMITS_HARDWS_MIN_ENABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE`.
   - The minimum commits nothing, but it reserves `min` of resident-available

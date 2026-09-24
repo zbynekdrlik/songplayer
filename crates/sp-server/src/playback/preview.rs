@@ -97,6 +97,10 @@ struct Inbox {
     pending: Option<RawPreviewFrame>,
     /// The worker is currently encoding — new offers are dropped.
     busy: bool,
+    /// The RGB buffer of the last encoded frame, handed back by the worker so
+    /// the next accepted offer downscales into it instead of allocating a
+    /// fresh 168.75 KB buffer (#147 round 10).
+    spare: Option<Vec<u8>>,
 }
 
 /// Shared state behind a [`PreviewTap`]. All the logic lives here so tests can
@@ -130,6 +134,7 @@ impl PreviewShared {
             inbox: Mutex::new(Inbox {
                 pending: None,
                 busy: false,
+                spare: None,
             }),
             cv: Condvar::new(),
             latest_jpeg: Mutex::new(None),
@@ -190,18 +195,19 @@ impl PreviewShared {
         }
         // Cheap busy/lock early-out BEFORE spending on the downscale — if the
         // worker holds the lock or is mid-encode, drop this frame. `try_lock`
-        // NEVER blocks the decode thread.
-        {
-            match self.inbox.try_lock() {
-                Ok(g) if !g.busy => {}
-                _ => {
-                    debug!(label = %self.label, "preview: dropped frame (encoder busy)");
-                    return;
-                }
+        // NEVER blocks the decode thread. The same lock hands over the spare
+        // RGB buffer the worker returned (#147 round 10).
+        let spare = match self.inbox.try_lock() {
+            Ok(mut g) if !g.busy => g.spare.take().unwrap_or_default(),
+            _ => {
+                debug!(label = %self.label, "preview: dropped frame (encoder busy)");
+                return;
             }
-        }
-        // Downscale off-lock on the decode thread (nearest-neighbour, no DCT).
-        let frame = match downscale_nv12_to_rgb(width, height, stride, nv12, self.cfg.max_width) {
+        };
+        // Downscale off-lock on the decode thread (nearest-neighbour, no DCT),
+        // into the recycled spare buffer.
+        let max_w = self.cfg.max_width;
+        let frame = match downscale_nv12_to_rgb_into(width, height, stride, nv12, max_w, spare) {
             Some(f) => f,
             None => return,
         };
@@ -212,7 +218,11 @@ impl PreviewShared {
         if ib.busy {
             return;
         }
-        ib.pending = Some(frame); // latest-wins
+        // Latest-wins; a displaced, never-encoded frame's buffer becomes the spare
+        // for the next offer instead of being freed (#147 round 10).
+        if let Some(old) = ib.pending.replace(frame) {
+            ib.spare = Some(old.rgb);
+        }
         drop(ib);
         self.last_offer_ms.store(now, Ordering::Relaxed);
         self.cv.notify_one();
@@ -242,6 +252,8 @@ impl PreviewShared {
                 Err(p) => p.into_inner(),
             };
             ib.busy = false;
+            // Hand the RGB buffer back for the next offer (#147 round 10).
+            ib.spare = Some(frame.rgb);
         }
         match encoded {
             Ok(bytes) => {
@@ -343,6 +355,21 @@ pub fn downscale_nv12_to_rgb(
     nv12: &[u8],
     max_width: u32,
 ) -> Option<RawPreviewFrame> {
+    downscale_nv12_to_rgb_into(width, height, stride, nv12, max_width, Vec::new())
+}
+
+/// [`downscale_nv12_to_rgb`] into a caller-supplied buffer (#147 round 10):
+/// `rgb` is cleared and resized to the output size, so its capacity is reused
+/// and a recycled buffer never costs a fresh allocation. Every output byte is
+/// written, so no stale pixel survives from the buffer's previous frame.
+pub fn downscale_nv12_to_rgb_into(
+    width: u32,
+    height: u32,
+    stride: u32,
+    nv12: &[u8],
+    max_width: u32,
+    mut rgb: Vec<u8>,
+) -> Option<RawPreviewFrame> {
     if width == 0 || height == 0 || stride < width || max_width == 0 {
         return None;
     }
@@ -361,7 +388,8 @@ pub fn downscale_nv12_to_rgb(
     // Preserve aspect ratio, at least 1px tall.
     let out_h = (((sh * out_w) + sw / 2) / sw).max(1);
 
-    let mut rgb = vec![0u8; out_w * out_h * 3];
+    rgb.clear();
+    rgb.resize(out_w * out_h * 3, 0);
     for oy in 0..out_h {
         let sy = (oy * sh) / out_h;
         let y_row = sy * stride;
@@ -626,6 +654,61 @@ mod tests {
     }
 
     #[test]
+    fn offer_downscales_into_the_buffer_the_encoder_handed_back() {
+        // #147 round 10: the worker returns each encoded frame's RGB buffer and
+        // the next accepted offer downscales into it — no fresh 168.75 KB
+        // allocation per preview frame. The spare stays alive in the inbox
+        // until the offer takes it, so the pointer match is deterministic.
+        let cfg = PreviewConfig {
+            min_ingest_interval_ms: 0,
+            ..PreviewConfig::default()
+        };
+        let s = shared(cfg);
+        s.note_viewer_request();
+        let nv12 = grey_nv12(1920, 1080, 1920);
+        s.offer(1920, 1080, 1920, &nv12);
+        assert!(s.inbox.lock().unwrap().spare.is_none(), "no spare yet");
+        assert!(s.encode_pending_once());
+        let spare_ptr = {
+            let ib = s.inbox.lock().unwrap();
+            let spare = ib.spare.as_ref().expect("the encoder handed the rgb back");
+            assert_eq!(spare.len(), 320 * 180 * 3, "the whole encoded frame");
+            spare.as_ptr() as usize
+        };
+
+        let mut dark = grey_nv12(1920, 1080, 1920);
+        dark[..1920 * 1080].fill(16); // studio black luma, neutral chroma
+        s.offer(1920, 1080, 1920, &dark);
+
+        let ib = s.inbox.lock().unwrap();
+        assert!(ib.spare.is_none(), "the offer took the spare");
+        let p = ib.pending.as_ref().expect("the second frame is pending");
+        assert_eq!(
+            p.rgb.as_ptr() as usize,
+            spare_ptr,
+            "downscaled into the spare"
+        );
+        assert_eq!(p.rgb.len(), 320 * 180 * 3);
+        assert!(
+            p.rgb.iter().all(|&b| b == 0),
+            "the new black frame, not the old grey"
+        );
+    }
+
+    #[test]
+    fn downscale_into_resizes_a_larger_reused_buffer_to_the_output() {
+        // A spare bigger than the output (e.g. from a wider source) is cleared
+        // and shrunk to the exact output length, keeping its capacity.
+        let nv12 = grey_nv12(4, 2, 4);
+        let big = vec![7u8; 1000];
+        let cap = big.capacity();
+        let f = downscale_nv12_to_rgb_into(4, 2, 4, &nv12, 320, big).unwrap();
+        assert_eq!(f.rgb.len(), 4 * 2 * 3, "exact output length");
+        assert!(f.rgb.capacity() >= cap, "capacity kept");
+        assert!(f.rgb.iter().all(|&b| b != 7), "no stale byte survives");
+    }
+
+    #[test]
     fn offer_keeps_only_the_latest_frame() {
         // Zero ingest interval so both offers pass the rate gate.
         let cfg = PreviewConfig {
@@ -639,8 +722,39 @@ mod tests {
         b[0] = 200;
         s.offer(4, 2, 4, &a);
         s.offer(6, 2, 6, &b);
-        let pending = s.inbox.lock().unwrap().pending.clone().unwrap();
+        let ib = s.inbox.lock().unwrap();
+        let pending = ib.pending.clone().unwrap();
         assert_eq!(pending.width, 6, "the later offer wins (latest-wins)");
+        // #147 round 10: the displaced frame's buffer is kept as the spare.
+        let spare = ib
+            .spare
+            .as_ref()
+            .expect("the displaced rgb became the spare");
+        assert_eq!(spare.len(), 4 * 2 * 3, "the first (4x2) frame's buffer");
+    }
+
+    #[test]
+    fn a_busy_encoder_keeps_the_spare_for_a_later_offer() {
+        // #147 round 10: an offer dropped because the encoder is busy must not
+        // take (and so free) the spare buffer.
+        let cfg = PreviewConfig {
+            min_ingest_interval_ms: 0,
+            ..PreviewConfig::default()
+        };
+        let s = shared(cfg);
+        s.note_viewer_request();
+        let spare = vec![1u8; 4096];
+        let spare_ptr = spare.as_ptr() as usize;
+        {
+            let mut ib = s.inbox.lock().unwrap();
+            ib.busy = true;
+            ib.spare = Some(spare);
+        }
+        s.offer(64, 64, 64, &grey_nv12(64, 64, 64));
+        let ib = s.inbox.lock().unwrap();
+        let kept = ib.spare.as_ref().expect("the spare is still there");
+        assert_eq!(kept.as_ptr() as usize, spare_ptr, "the SAME spare buffer");
+        assert!(ib.pending.is_none(), "nothing queued while busy");
     }
 
     #[test]

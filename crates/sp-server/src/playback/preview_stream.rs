@@ -455,6 +455,22 @@ impl StreamShared {
         }
     }
 
+    /// Feeder side (encoder child): write one tapped canvas frame to the child's
+    /// video input, then hand the buffer BACK to the tap's pool so the next
+    /// watched frame letterboxes into it (#147 round 10). Before this the feeder
+    /// dropped every written frame, the pool refilled only on a full channel,
+    /// and every watched frame was a fresh zeroed 337.5 KB allocation. The
+    /// buffer is recycled on a write error too (the pool is bounded).
+    pub fn write_frame<W: std::io::Write>(
+        &self,
+        out: &mut W,
+        frame: Vec<u8>,
+    ) -> std::io::Result<()> {
+        let written = out.write_all(&frame);
+        self.recycle(frame);
+        written
+    }
+
     /// Feeder side (encoder child): drain the video/audio backlog.
     pub fn video_receiver(&self) -> Receiver<Vec<u8>> {
         self.video_rx.clone()

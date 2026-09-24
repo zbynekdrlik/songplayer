@@ -196,6 +196,65 @@ fn offer_video_queues_a_fixed_canvas_frame_with_a_viewer() {
 }
 
 #[test]
+fn write_frame_writes_the_canvas_and_the_next_offer_reuses_its_buffer() {
+    // #147 round 10: the feeder hands each written frame back to the tap's
+    // pool, so a watched preview letterboxes into the SAME buffer every frame
+    // instead of a fresh 337.5 KB allocation. The buffer stays alive in the
+    // pool between the write and the next offer, so the pointer match cannot
+    // come from allocator address reuse.
+    let tap = StreamTap::new("t".into(), 0);
+    let (_guard, _relay) = ViewerGuard::subscribe(&tap);
+    let rx = tap.shared().video_receiver();
+    tap.try_offer_video(1920, 1080, 1920, &solid_nv12(1920, 1080, 1920, 200, 90));
+    let first = rx.try_recv().expect("a frame is queued while watched");
+    let first_ptr = first.as_ptr() as usize;
+    let expected = first.clone();
+
+    let mut sink: Vec<u8> = Vec::new();
+    tap.shared()
+        .write_frame(&mut sink, first)
+        .expect("a Vec sink never fails");
+    assert_eq!(
+        sink, expected,
+        "the child input gets the exact canvas bytes"
+    );
+
+    tap.try_offer_video(1920, 1080, 1920, &solid_nv12(1920, 1080, 1920, 30, 160));
+    let second = rx.try_recv().expect("the second frame is queued");
+    assert_eq!(
+        second.as_ptr() as usize,
+        first_ptr,
+        "the next offer letterboxes into the recycled buffer"
+    );
+    assert_eq!(second.len(), OUT_NV12_LEN);
+    assert!(
+        second[..(OUT_W * OUT_H) as usize].iter().all(|&y| y == 30),
+        "the recycled buffer carries the NEW frame's luma, not the old one"
+    );
+}
+
+#[test]
+fn write_frame_reports_a_write_error() {
+    struct Broken;
+    impl std::io::Write for Broken {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("child gone"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let tap = StreamTap::new("t".into(), 0);
+    let err = tap
+        .shared()
+        .write_frame(&mut Broken, vec![0u8; OUT_NV12_LEN]);
+    assert!(
+        err.is_err(),
+        "a dead child's write error reaches the feeder"
+    );
+}
+
+#[test]
 fn offer_audio_is_a_noop_with_no_viewer_and_queues_with_one() {
     let tap = StreamTap::new("t".into(), 0);
     let block = [0.1f32, -0.1, 0.2, -0.2];

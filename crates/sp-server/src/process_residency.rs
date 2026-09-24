@@ -178,17 +178,30 @@ pub fn plan_hard_min(mb: u32) -> Option<WorkingSetPlan> {
 }
 
 /// Render a Win32 outcome for the log: `ok` or `failed(err=<GetLastError>)`.
-fn outcome(r: Result<(), u32>) -> String {
+pub fn outcome(r: Result<(), u32>) -> String {
     match r {
         Ok(()) => "ok".to_string(),
         Err(e) => format!("failed(err={e})"),
     }
 }
 
+/// #147 round 10: the grep-stable INFO line logged ONCE per process when the
+/// heavy child's job seam first enables `SeIncreaseBasePriorityPrivilege` — the
+/// privilege a Job Object working-set cap (`JOB_OBJECT_LIMIT_WORKINGSET`) needs
+/// (without it `SetInformationJobObject` fails with 1314). `failed(err=1300)` =
+/// `ERROR_NOT_ALL_ASSIGNED`: the token does not hold it. Pure, exact-string
+/// tested.
+pub fn job_privilege_line(privilege: Result<(), u32>) -> String {
+    format!(
+        "heavy child job privilege: SeIncreaseBasePriorityPrivilege={}",
+        outcome(privilege)
+    )
+}
+
 /// The grep-stable INFO line logged once at startup on Windows (`sp working
 /// set: …`). `privilege` is the `SeIncreaseWorkingSetPrivilege` enable outcome
-/// (attempted whatever the setting — the heavy child's job working-set cap may
-/// need it too), `set` the `SetProcessWorkingSetSizeEx` outcome (each `Err`
+/// (attempted whatever the setting; the heavy child's job cap needs a different
+/// one, see [`job_privilege_line`]), `set` the `SetProcessWorkingSetSizeEx` outcome (each `Err`
 /// carries `GetLastError`). `plan == None` → the disabled line (no quota call,
 /// `set` unused). Pure, exact-string tested.
 pub fn residency_line(

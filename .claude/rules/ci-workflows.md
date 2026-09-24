@@ -88,6 +88,12 @@ pure code up front:
 - **No redundant guard after an earlier arm** (#147 r9): `Some(0) => 0,
   Some(v) if v > 0 => …` makes `>` → `>=` equivalent (0 is caught first). Parse
   as `u64` so a negative simply fails to parse, and drop the guard.
+- **A match guard that now GATES a side effect needs a test that observes it**
+  (#147 r10): `Ok(mut g) if !g.busy => g.spare.take()…` makes the mutant
+  `replace match guard !g.busy with true` observable ONLY through the stolen
+  `spare`. The old busy test, which asserted only "nothing pending", let the
+  mutant survive, because a later re-check hid it. Seed the side-effect state
+  (a `spare`), trip the guard, and assert that the state is untouched.
 - **No trivial `const fn new()` next to `#[derive(Default)]`**: its body can be
   swapped for `Default::default()` with no observable change. Seed a `static`
   with a struct literal in the same module and use `Default` in tests.

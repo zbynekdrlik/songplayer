@@ -142,12 +142,22 @@ pub fn recycle(buf: Vec<u8>) {
 
 /// An owned pixel buffer whose `Drop` returns its allocation to the pool for
 /// reuse instead of freeing it (#203). Derefs to `[u8]` like the `Vec` it wraps;
-/// `Clone` makes a FRESH copy (used only when the burn overlay's
-/// `Arc::make_mut` forks a shared frame — burn defaults OFF, so the steady state
-/// never clones).
+/// `Clone` makes a separate copy, but INTO a recycled buffer of the same size
+/// class (#147 round 10). The burn overlay's `Arc::make_mut` forks EVERY paced
+/// frame while burn is ON, because the pacer always holds a second Arc.
 pub struct PooledBuf(Vec<u8>);
 
 impl PooledBuf {
+    /// A copy of `src` in a buffer taken from the pool ([`take`]), so a
+    /// steady-state copy reuses recycled capacity instead of a fresh
+    /// `VirtualAlloc` + demand-zero faults (#147 round 10). The copy is its own
+    /// allocation; its `Drop` recycles it like any other `PooledBuf`.
+    pub fn copy_from_slice(src: &[u8]) -> Self {
+        let mut buf = take(src.len());
+        buf.extend_from_slice(src);
+        Self(buf)
+    }
+
     /// Exclusive access to the inner `Vec` — the burn overlay's `make_mut` path
     /// needs `&mut Vec<u8>`, which `DerefMut` (targeting `[u8]`) cannot give.
     pub fn as_vec_mut(&mut self) -> &mut Vec<u8> {
@@ -168,7 +178,7 @@ impl From<Vec<u8>> for PooledBuf {
 
 impl Clone for PooledBuf {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self::copy_from_slice(&self.0)
     }
 }
 
@@ -293,6 +303,35 @@ mod tests {
         assert_eq!(pool_len(cap), 1, "Drop recycled it");
         let again = take(cap);
         assert_eq!(again.as_ptr(), p, "the recycled allocation is reused");
+    }
+
+    #[test]
+    fn clone_copies_into_a_recycled_buffer_of_its_class() {
+        // #147 round 10: the burn overlay forks every paced frame through
+        // `Arc::make_mut` -> `PooledBuf::clone`. The fork must reuse a recycled
+        // buffer of the same size class, never a fresh 5.5 MB allocation. The
+        // spare stays alive in the pool until the clone takes it, so a fresh
+        // allocation can never land on its address by allocator coincidence.
+        let _s = guard();
+        let mut spare = Vec::with_capacity(160);
+        spare.extend_from_slice(&[0u8; 160]);
+        let cap = spare.capacity();
+        let spare_ptr = spare.as_ptr();
+        recycle(spare);
+        let mut v = Vec::with_capacity(cap);
+        v.extend((0..cap).map(|i| (i * 7) as u8));
+        let src = PooledBuf::from(v);
+
+        let copy = src.clone();
+
+        assert_eq!(
+            copy.as_ptr(),
+            spare_ptr,
+            "the clone reuses the pooled buffer"
+        );
+        assert_eq!(&copy[..], &src[..], "with the source's exact bytes");
+        assert_ne!(copy.as_ptr(), src.as_ptr(), "still a separate allocation");
+        assert_eq!(pool_len(cap), 0, "the recycled buffer left the pool");
     }
 
     #[test]

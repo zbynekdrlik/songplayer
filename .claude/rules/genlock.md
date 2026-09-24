@@ -8,6 +8,8 @@ paths:
   - "crates/sp-server/src/playback/submitter*.rs"
   - "crates/sp-server/src/playback/proc_mem*.rs"
   - "crates/sp-server/src/playback/loop_stats.rs"
+  - "crates/sp-server/src/playback/frame_buf.rs"
+  - "crates/sp-decoder/src/frame_pool.rs"
   - "crates/sp-server/src/process_residency*.rs"
   - "crates/sp-ndi/src/**"
 ---
@@ -280,9 +282,10 @@ paths:
   additive `NdiSender::send_video_async_slice(&[u8])`, so the holdover is a
   refcount hold with ZERO pixel copy. Rules for anyone touching `submitter.rs` /
   `pacer.rs`: the field-order SAFETY note still holds (sender drops before
-  `prev_frame`); the paced burn overlay paints via `SharedFrame::make_mut` (in
-  place while sole owner — it IS the sole owner on the submit path, since the pacer
-  keeps its own `last_frame` clone); idle Black is submitted by shared reference
+  `prev_frame`); the paced burn overlay paints via `SharedFrame::make_mut`, which
+  FORKS into a pooled copy while the pacer still holds its `last_frame` clone
+  (the usual case; in place only when the submit side is the sole owner, which
+  is safe — #147 round 10); idle Black is submitted by shared reference
   through `PacedSink::submit_shared` (`Standby::Black{dims, &SharedFrame}`,
   `service_standby` clones the Arc = a refcount bump per idle slot, the idle loop
   owns one black `SharedFrame`); `send_black_bgra` reuses a `black_bgra` buffer
@@ -341,8 +344,9 @@ so the OS fault + TLB-shootdown cost is unchanged):
   once → `PacedFrame.video` → the pacer's `last_frame` starvation repeat →
   `SubmitJob::from_paced` (the handoff, `frame.video.clone()`) → the submitter's
   `prev_frame` holdover. No pixel copy anywhere; the burn overlay's
-  `SharedFrame::make_mut` (`Arc::make_mut` → a fresh `PooledBuf` copy) is the
-  only cloner and burn is default OFF.
+  `SharedFrame::make_mut` (`Arc::make_mut` → `PooledBuf::clone`, a copy into a
+  RECYCLED pool buffer since #147 round 10) is the only cloner and burn is
+  default OFF.
 - **SDK-holdover safety invariant (unchanged from 2a):** a recycled buffer may
   be reused ONLY after every `Arc` is gone. Recycling fires exactly in
   `PooledBuf::Drop`, which the `Arc` runs only on the LAST holder drop — the
@@ -470,8 +474,8 @@ values are flat strings in MiB, e.g. `{"sp_min_working_set_mb":"3072"}`.
   maximum stays SOFT.
 - At every Windows start it enables `SeIncreaseWorkingSetPrivilege` best-effort,
   whatever `sp_min_working_set_mb` is. Normal users hold that privilege, but it
-  is disabled in the token by default. The heavy child's job working-set limit
-  may need it too.
+  is disabled in the token by default. (The heavy child's job working-set cap
+  needs a DIFFERENT privilege, `SeIncreaseBasePriorityPrivilege` — round 10.)
 - The minimum commits no pages. It guarantees that pages SongPlayer actually has
   resident, up to `min`, are never trimmed.
 - It DOES reserve `min` of the box's resident-available memory at call time. That
@@ -585,3 +589,80 @@ productive: `TotalProcessorTime` delta over 6 s > 0.
   with a bounded batch size (design Approach 3).
 - **If `page_faults_per_min` still spikes in W-b/W-c** while `working_set_mb` sits
   at the minimum, raise `sp_min_working_set_mb`.
+
+## #147 round 10 — no per-frame allocation churn
+
+**The rule: no allocation of ≥ 64 KB per frame (or per audio block) on the
+playback path.** A per-frame large buffer is REUSED:
+
+- On the owning thread, an owned scratch `Vec` that is `clear()`ed and
+  `resize()`d, so its capacity is kept.
+- Across threads, a bounded recycle: `sp_decoder::frame_pool` (NV12 frames,
+  `take`/`recycle`/`PooledBuf`), a tap's own bounded pool, or a one-slot `spare`
+  handed back by the consumer.
+
+SongPlayer runs on the Windows system heap. Every block above ~512 KB is a fresh
+`VirtualAlloc`/`VirtualFree`, and its first touch demand-zero faults each 4 KB
+page. A 1440p NV12 frame is 5.5 MB, about 1350 faults per fresh copy.
+
+**The check is `page_faults_per_min` on the paced `pipeline: loop-stats` line**
+(round 9, `proc_mem.rs`). Read it before and after any change on this path.
+
+**The audit (issue #147 comment 5814563750).** The playing wall path — the MF
+reader copy, `to_paced_frame` → pacer → handoff → submitter holdover, and
+`submit_nv12` — was already pool/Arc-reused by #203 2b. Round 10 converted:
+
+- `FrameSubmitter`'s `PacedSink::emit` is now an Arc bump into
+  `submit_frame_at_boundary_owned`. It used to be a `to_vec` copy.
+- `submit_frame_at_boundary(&[u8])` and `PooledBuf::clone` (the burn overlay's
+  per-frame `make_mut` fork) copy into a pooled buffer:
+  `PooledBuf::copy_from_slice` / `SharedFrame::copy_from_slice` →
+  `frame_pool::take`.
+- The #178 stream tap's vfeed hands each written canvas back to the tap's pool
+  (`StreamShared::write_frame`). Before, every watched frame was a fresh
+  337.5 KB alloc.
+- The #15 JPEG tap downscales into the RGB buffer the encoder worker hands back
+  (`Inbox.spare`, `downscale_nv12_to_rgb_into`).
+
+**Left on purpose:**
+
+- Audio blocks and chunks ≤ 32 KB (below the threshold).
+- The per-idle-entry black frame.
+- The fMP4 fragments (per 500 ms, not per frame).
+- The JPEG encoder's output `Vec` (≤ 5/s while a JPEG viewer polls, a 320×180
+  JPEG is far below 64 KB).
+- Allocations inside Media Foundation (`ConvertToContiguousBuffer` / `Lock` on a
+  row-padded 2D surface) and inside the NDI runtime. These are not in our code.
+  If `page_faults_per_min` stays in the millions after round 10, that is where
+  the churn is. The next lever there is an `IMF2DBuffer::Lock2D` read path,
+  which needs box verification of the padded-plane offsets.
+
+**Job privilege for the heavy child's working-set cap.** The cap is
+`JOB_OBJECT_LIMIT_WORKINGSET` with `MinimumWorkingSetSize` = 256 MiB.
+
+- It needs `SeIncreaseBasePriorityPrivilege` (`SE_INC_BASE_PRIORITY_NAME`) in
+  SongPlayer's token.
+- Without it `SetInformationJobObject` fails with 1314 (`ERROR_PRIVILEGE_NOT_HELD`)
+  — the round-9 box read.
+- Source: Windows Research Kernel `base/ntos/ps/psjob.c`, `NtSetInformationJobObject`,
+  the WORKING SET LIMIT branch — `MinimumWorkingSetSize <= PsMinimumWorkingSet ||
+  SeSinglePrivilegeCheck(SeIncreaseBasePriorityPrivilege)`, else
+  `STATUS_PRIVILEGE_NOT_HELD`. Microsoft's `JOBOBJECT_BASIC_LIMIT_INFORMATION`
+  page names this privilege only for the priority and scheduling class.
+- It is NOT the `SeIncreaseWorkingSetPrivilege` that round 9 enables for
+  SongPlayer's own hard minimum.
+
+`heavy_slot::job_working_set_privilege` enables it ONCE per process, before the
+first capped job, and logs
+`heavy child job privilege: SeIncreaseBasePriorityPrivilege=ok|failed(err=N)`.
+
+- `failed(err=1300)` means the account's token does not hold it. The
+  "Increase scheduling priority" user right is granted to Administrators by
+  default.
+- The retry-without-cap fallback stays. Its WARN now carries
+  `base_priority_privilege=…`.
+- The privilege is deliberately left enabled for the process lifetime (a token
+  privilege is process-wide; enabling it only permits what the account already
+  holds).
+- Box acceptance: the contained line reads `max_ws_mb=4096` and no `rejected`
+  WARN appears.
