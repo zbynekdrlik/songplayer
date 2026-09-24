@@ -184,11 +184,20 @@ the video timeline into `<work_dir>/dub_placed.wav` (24 kHz mono) → `_assemble
 `stream_filter()` = `[0:a]aresample=48000[mix]`) → deletes the raw + placed
 intermediates → writes the one-chunk transcripts JSON (D3) → prints the summary
 JSON (the ONLY stdout line; logs go to stderr). Box evidence left in the work dir:
-`events.jsonl` (every server message + decision, flushed per line),
-`session_summary.json`, `loudness.json`, `heartbeat`. The `heartbeat` is written
-on session PROGRESS only (frames sent or output arrived; at most every 5 s) and
-before each assembly pass; `events.jsonl` grows with every server message. So
-the #171 `wait_with_stall_timeout` never kills a healthy real-time stream, but a
+`session_summary.json`, `loudness.json`, `heartbeat`. **The session event log
+(round H4) sits NEXT TO THE DUB** as `<base>_dub_events.jsonl`
+(`dub_worker.py::events_path_for(--out)`: `…_normalized_dub.flac` →
+`…_normalized_dub_events.jsonl`; every server message + decision incl. each
+`input_transcription` / `output_transcription` fragment, flushed per line; a
+re-dub overwrites it, a failed run keeps it; a pre-H4 `events.jsonl` in the work
+dir is removed as a superseded leftover). It answers timing questions OFFLINE
+(pull recipe under "Re-dub a video") instead of a ~40-min re-dub. No event
+carries a secret (the key and the connect config are never logged, errors go
+through `redact`, resumption handles only as `handle_present`). The `heartbeat`
+is written on session PROGRESS only (frames sent or output arrived; at most
+every 5 s) and before each assembly pass, and `live_output.raw` grows with every
+output chunk — both in the work dir. So the #171 `wait_with_stall_timeout`
+(newest mtime in the work dir) never kills a healthy real-time stream, but a
 stuck one goes stale. A crashed job
 restarts from the beginning (no partial resume — the dub is produced ahead of
 playback; resumption handles are only used across connections of ONE run).
@@ -300,9 +309,11 @@ transcription (both kept for readability only; the builder does not read them),
 `sk_timed` = the SK fragments stamped on the VIDEO timeline (output-transcription
 arrival − t0 − latency, non-decreasing) and **`en_timed` (round H3)** = the EN
 input-transcription fragments stamped on the VIDEO timeline (input-transcription
-arrival − t0, NO latency: the source is streamed at 1.0× wall clock from t0, so an
-input fragment arrives at its source position plus the small ASR lag;
-non-decreasing). `dub_worker.py::_timed_from` holds the connection ordering +
+arrival − t0 − **`en_latency_ms`** (round H4), non-decreasing). Live Translate
+emits the input transcription per phrase, seconds after the audio was sent, so
+the raw arrival (H3 stamped it with latency 0) sat ~4–5 s late — one SK line
+below its own translation on video 344 (#184 5807462051); `en_latency_ms` is
+measured per session with the SAME method as the SK (Placement, below). `dub_worker.py::_timed_from` holds the connection ordering +
 overlap cap once; `sk_timed_from` and `en_timed_from` both call it. The session
 records BOTH transcriptions as `(arrival_s, text, conn)`
 (`dub_live_session.py::SessionState.input_parts` / `output_parts`), and
@@ -552,6 +563,17 @@ and 5797708129 (freeze this state, the model is a setting).
   voiced INPUT frame's position (`first_voiced_frame`, so a silent/instrumental
   intro is not counted as model latency), clamped to 1000–6000 ms. Raw + clamped
   values are logged and kept in `session_summary.json`.
+- **EN latency (round H4, #184 design 5807466038):** `en_latency_ms(input_parts,
+  t0, onset)` = the SAME `measure_latency_ms` + `clamp_latency_ms` over the FIRST
+  (earliest non-empty) input-transcription arrival → `(clamped, measured)`; no
+  input transcription (or no send) → `(0, None)`, EN then stamped at its raw
+  arrival. The 1–6 s clamp fits the input side: the first fragment comes a phrase
+  + the ASR lag after the onset (~4–5 s on 344). `en_timed_from(parts, t0,
+  en_latency_ms)` subtracts it through the shared `_timed_from` (clamp at 0,
+  monotonic, connection order + overlap cap unchanged). Summary fields
+  `en_latency_ms` / `en_measured_latency_ms`. A single first-phrase measure can be
+  noisy; if a 20-line read shows residual drift, derive a median offline from the
+  saved `<base>_dub_events.jsonl` (the design's stated trade-off).
 - `place_output`: every chunk lands at `max(cursor, arrival − t0 − latency)` —
   ONE continuous stream per connection in arrival order (a burst never overlaps
   itself, a stall re-syncs to arrival). Connections keep SEPARATE cursors and
@@ -584,8 +606,9 @@ drained (quiet|deadline)`, `live: frame K/N output Xs` (every 600 frames),
 `live: audio_stream_end after frame N/N`, `live: drain end (quiet|tail_cap|
 closed)`, then the summary `dub session: connections C, reconnects R,
 output/input X, max voiced gap Gs, latency L ms (measured M ms, input onset O ms),
-dropped silence Ds, drain …`, then the round-F `dub loudness: …` line (the last
-one).
+EN latency E ms (measured N ms), dropped silence Ds, drain …`, then the round-F
+`dub loudness: …` line (the last one). (The Rust `DubSessionStats` parses only
+`latency_ms`; the EN latency reaches the sp-server log through this stderr line.)
 `output_to_input_ratio` counts the active stream + VOICED draining output — the
 silence a draining connection keeps streaming during the overlap would inflate it
 by ~8 s per reconnect (`overlap_output_s` reports all draining output).
@@ -602,8 +625,10 @@ time on the VIRTUAL clock — proves owed frames catch up and the schedule is ne
 re-anchored), `hang_at` (a send that never returns). A GoAway meant to be seen
 BEFORE the stream end must ride the second-to-last frame: on the last one it is
 recorded only after `audio_stream_end`. `test_dub_worker.py`: placement,
-latency, transcripts shape, render, argv defaults, legacy cleanup and the whole
-`cmd_live_translate` with the session + ffmpeg seams faked. Rust: `worker.rs`
+latency (SK + the H4 EN latency), transcripts shape, render, argv defaults,
+legacy cleanup, the event-log path and the whole `cmd_live_translate` with the
+session + ffmpeg seams faked (the fake logs input/output transcription events and
+the test reads them back from `<base>_dub_events.jsonl`). Rust: `worker.rs`
 tests (`dub_model_from`, `dub_voice_from`, `dub_input_audio`), `child.rs` (argv,
 session stats), `sp-core config` (keys, defaults, `dub_voice_label`),
 `subtitles_tests.rs::one_continuous_session_chunk_builds_a_monotonic_bilingual_track`.
@@ -720,6 +745,26 @@ Before it: deploy (the worker re-materialises the four embedded scripts via
 `dub_voice=Charon` (a pinned voice). Set `{"dub_voice": "speaker"}` (or pick
 `Hlas rečníka` in Nastavenia) for the frozen speaker-voice state. Verify in
 `<cache>/<youtube_id>_dub/`: `session_summary.json` (connections, reconnects 0
-failures, output/input 0.98–1.02, max voiced gap, latency), `events.jsonl`,
-`loudness.json`; then an ebur128 of the new `<base>_dub.flac` against the vocals
-stem on the same slice (±1 LU, round F) and the stored EN/SK subtitle line count.
+failures, output/input 0.98–1.02, max voiced gap, latency, EN latency),
+`loudness.json`; `<cache>/<base>_dub_events.jsonl` next to the dub; then an
+ebur128 of the new `<base>_dub.flac` against the vocals stem on the same slice
+(±1 LU, round F) and the stored EN/SK subtitle line count.
+
+**Pull the event log for offline timing analysis (never ssh, never
+`FileDownload` — it base64s into the transcript).** Via the win-resolume MCP
+`Shell` (PowerShell), serve the cache dir on the box's LAN address, detached:
+
+```powershell
+$py = 'C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe'
+$p = Start-Process -FilePath $py -WindowStyle Hidden -PassThru `
+  -WorkingDirectory 'C:\ProgramData\SongPlayer\cache' `
+  -ArgumentList @('-m', 'http.server', '8931', '--bind', '10.77.9.201')
+$p.Id   # note it
+```
+
+From dev1: `curl -fo 344_dub_events.jsonl "http://10.77.9.201:8931/<url-encoded
+base>_dub_events.jsonl"` (the base has spaces — URL-encode it). Then STOP that
+server on the box: `Stop-Process -Id <pid>` (only the pid you started — the cache
+dir must not stay served). t0 in the log = the `send_start` event's `t`; each
+`input_transcription` / `output_transcription` event's `t` is its arrival on the
+same clock.
