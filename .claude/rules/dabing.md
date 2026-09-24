@@ -338,7 +338,9 @@ read correctly — dubs made before round H keep their subtitles.
   (`LINE_GAP_MS`, DELETED) cut sentences in half: on video 344, „Definuj úprimný
   pre" / „mňa. …" (a 1985 ms pause) and „Úprimný je zo srdca a" / „Keď Biblia …"
   (3734 ms). The old 14-word cap also cut long sentences. Offline simulation over
-  the whole saved 344 session log (1828 SK / 1819 EN fragments):
+  the whole saved 344 session log (1828 SK / 1819 EN fragments; the numbers are
+  from design record 5809150188 on #184, produced by a Python port of this rule
+  run over `<base>_dub_events.jsonl`, pulled with the recipe under "Re-dub a video"):
 
   | rule | SK lines ending a sentence | mean EN-sentence coverage |
   |---|---|---|
@@ -400,7 +402,9 @@ read correctly — dubs made before round H keep their subtitles.
     the previous sentence's line, so it is monotonic. A line carries 0..n sentences
     joined with a space. Known trade-offs (measured on the fixture window: the six
     named pairs hold, a few lines still do not): when the SK builder splits one
-    sentence into two lines (since H6 only the 20-word cap does that) the EN goes
+    sentence into two lines (since H6 only the 20-word cap does that — in the
+    1235–1320 s fixture „…Chcem povedať, že to nič" reaches 22 words and closes, so
+    „nevyrieši." is a 1-word line with no EN) the EN goes
     to the half it overlaps most and the other half shows no EN; and the part AFTER an
     in-fragment split starts at that fragment's (earlier) time, so it can overlap
     the PREVIOUS SK line more — „Good morning. Bartlesville" puts „Bartlesville
