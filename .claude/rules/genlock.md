@@ -721,3 +721,10 @@ first capped job, and logs
     heavy-child job, not at startup (`heavy_slot::job_working_set_privilege`);
   - the `heavy child contained` line reads `max_ws_mb=4096`;
   - no `working-set cap … rejected` WARN appears.
+
+## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
+A change to pacing, the submitter, decode, the mixer, NDI or the audio path
+merges only with `e2e/post-deploy-av-sync.spec.ts` green. That spec records the
+OBS program and requires |A/V| ≤ 40 ms and zero 50 ms dropout blocks against
+the original sidecars. Method, thresholds and how to read the `AV-SYNC …`
+output: `.claude/rules/obs-ndi-health.md` "Post-deploy A/V gate (#147)".

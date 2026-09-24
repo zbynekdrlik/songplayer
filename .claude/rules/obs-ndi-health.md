@@ -4,6 +4,11 @@ paths:
   - "crates/sp-server/src/playback/ndi_health.rs"
   - "e2e/post-deploy.spec.ts"
   - "e2e/ndi-health-gate.ts"
+  - "e2e/post-deploy-av-sync.spec.ts"
+  - "e2e/av-sync-gate.ts"
+  - "e2e/obs-driver.ts"
+  - "scripts/av_sync_check.py"
+  - "scripts/tests/test_av_sync_check.py"
 ---
 
 # OBS ↔ NDI health & receiver recovery (#127)
@@ -332,3 +337,78 @@ visible (`sender_url` via `NDIlib_find`) and ESCALATES a failed reconnect
 is camera-box's (camera-box#1096/#1302). Read `sender_url` per output on
 `/api/v1/ndi/health` to confirm the map is stable across the 10-restart box
 acceptance.
+
+## Post-deploy A/V gate (#147) — lipsync + audio dropouts on the REAL output
+
+**Rule: no change to decode, pacing, the mixer, NDI or the audio path merges
+unless this gate is green.** The owner saw a major lipsync regression while
+every other gate was green. This gate is the one that measures what the wall
+and the recording actually get.
+
+- **Where it runs:** `e2e/post-deploy-av-sync.spec.ts`, inside the E2E job's
+  "Feature-level Playwright (post-deploy spec)" step (`post-deploy.config.ts`
+  matches `post-deploy*.spec.ts`). It uses the shared `ObsDriver` (obs-websocket).
+  It parks the program on the shared baseline scene (`e2e/obs-baseline-scene.ts`:
+  sp-slow, never sp-warmup/sp-fast). It proves the output is PLAYING with
+  `/api/v1/ndi/health`: `state=Playing` AND `frames_submitted_last_5s > 0`.
+  It sets the SONG faders to unity, then `StartRecord` → 20 s → `StopRecord`,
+  which returns `outputPath`.
+  - `startRecord` refuses to touch a recording the operator already started.
+  - If `/api/v1/mix` shows a different `video_id` after the take, the song
+    changed mid-recording and the take is repeated once.
+  - Afterwards it deletes the recording, restores the faders, and restores the
+    scene the operator was on.
+- **Original sidecars:** `/api/v1/playlists/{id}/videos` has NO `file_path`.
+  The pair is resolved from the cache listing by
+  `*_{youtube_id}_normalized[_gf]_{video.mp4|audio.flac}`
+  (`resolveSidecars`). Exactly one complete pair must match, otherwise the gate
+  throws.
+- **Analysis:** `scripts/av_sync_check.py` runs under the lyrics venv Python
+  (`SP_AVSYNC_PYTHON`) with the bundled ffmpeg (`SP_FFMPEG`). Only numpy is
+  needed. The box has no ffprobe, so stream start times and frame sizes come
+  from ffmpeg's own `showinfo`/`ashowinfo` pts.
+  - **audio:** 8 kHz mono FFT cross-correlation, normalized by local energy,
+    searched over the whole song. corr must be ≥ 0.9.
+  - **video:** 64-wide gray frames, cropped to the content box computed from
+    the source aspect (1920×960 in a 1080 canvas → rows 2:34 of 36). The
+    offset is a GLOBAL alignment: the shift (1 ms grid, ±1 s around the audio
+    offset, clamped to the decoded video span) that maximizes the mean
+    per-frame score, with sample-and-hold frame timing.
+    - The median match must be ≥ 0.95, and the contrast (peak minus the
+      curve's median) must be ≥ 0.002.
+    - Do NOT "simplify" back to a per-frame argmax median. On static or
+      lyric-video frames every candidate ties at ~1.0, and those frames score
+      highest, so the "above-median" filter keeps them. The median then
+      collapses toward the window centre (the audio offset, A/V ≈ 0 →
+      false PASS) or toward the window edge. The pytest
+      `test_mostly_static_lyric_video_still_measures_the_true_offset` pins
+      this.
+  - **dropouts:** gain-matched 50 ms blocks. A block is a dropout when
+    rec RMS < 15 % of the original's while the original is above its
+    20th-percentile block RMS. The first/last 100 ms are not classified:
+    OBS mkv AAC decodes its priming (`start_time` −0.021 s) as silence at
+    sample 0.
+- **Verdict / exit:**
+  - `pass` (0): |A/V| ≤ 40 ms and 0 dropouts.
+  - `fail` (1): |A/V| > 40 ms or any dropout.
+  - `cannot_measure` (2): low corr, match or contrast, or an analysis error.
+    It FAILS the job and is never a skip.
+- **Reading the output:** the CI log shows the full JSON and one line:
+  `AV-SYNC status=… av_ms=… audio_corr=… video_match=… video_contrast=…
+  dropouts=… glitches=… reasons=[…]`.
+  - `av_ms` > 0 means audio AHEAD of picture. `audio.offset_s` and
+    `video.offset_s` are `orig_time − rec_time`.
+  - `video.plateau_ms` is the video's resolution. It is up to one source-frame
+    period when source and recording frame rates are equal, so ~±17 ms of the
+    measured A/V is quantization.
+  - `dropouts.dropout_times_s` and `glitch_times_s` are recording times.
+    Glitches (relative error > 0.8, not silent) are informational only.
+  - Baseline on 24.9.2026 (manual): A/V +13 ms, corr 0.997, match 0.999,
+    0 dropouts.
+- **Tested:** the pure functions are covered by pytest on synthetic click-train
+  plus flash-frame fixtures in Eval Checks (numpy only). The ffmpeg I/O layer
+  is untested in CI by design, because that job has no ffmpeg. It was checked
+  locally against ffmpeg-muxed mkv and mp4 AAC "recordings" with known offsets
+  (+120 → 116, 0 → −3/−4, −80 → −83 ms).
+- **Do not "fix" a red gate** by raising 40 ms, lowering 0.9/0.95, or skipping
+  on exit 2. Find what moved the audio or the picture.
