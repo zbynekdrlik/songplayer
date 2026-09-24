@@ -72,7 +72,7 @@ fn default_mask_clamps_above_64_cores_to_the_top_3() {
 
 #[test]
 fn defaults_when_both_settings_absent() {
-    let c = containment_from_settings(None, None, None, None, None, 24);
+    let c = containment_from_settings(None, None, None, None, None, None, 24);
     assert_eq!(c.cpu_cap_pct, 25); // RED sentinel 99 fails here → GREEN 25
     assert_eq!(c.affinity_mask, 0xE00000); // #168 round 8: top 3 logical cores
     assert!(c.memory_priority_low);
@@ -126,12 +126,12 @@ fn mask_absent_zero_or_garbage_falls_back_to_default() {
 
 #[test]
 fn containment_honours_explicit_overrides() {
-    let c = containment_from_settings(Some("50"), Some("f000"), None, None, None, 24);
+    let c = containment_from_settings(Some("50"), Some("f000"), None, None, None, None, 24);
     assert_eq!(c.cpu_cap_pct, 50);
     assert_eq!(c.affinity_mask, 0xF000);
     assert!(c.memory_priority_low);
     // Clamp + zero-mask fallback compose through the seam (default = top 3 of 8).
-    let c2 = containment_from_settings(Some("3"), Some("0"), None, None, None, 8);
+    let c2 = containment_from_settings(Some("3"), Some("0"), None, None, None, None, 8);
     assert_eq!(c2.cpu_cap_pct, 5);
     assert_eq!(c2.affinity_mask, 0xE0);
 }
@@ -151,16 +151,16 @@ fn affinity_mask_hex_is_lowercase_no_prefix() {
 fn affinity_override_is_clamped_to_the_existing_cores() {
     // 8 cores: bits 0..=7 exist; 0xF0F0 keeps only its valid low bits 0xF0
     // (an explicit override keeps its valid bits verbatim — NOT the default).
-    let c = containment_from_settings(None, Some("0xF0F0"), None, None, None, 8);
+    let c = containment_from_settings(None, Some("0xF0F0"), None, None, None, None, 8);
     assert_eq!(c.affinity_mask, 0xF0);
     // A partly-valid override keeps its valid bits only.
-    let c = containment_from_settings(None, Some("0x10C"), None, None, None, 8);
+    let c = containment_from_settings(None, Some("0x10C"), None, None, None, None, 8);
     assert_eq!(c.affinity_mask, 0x0C);
     // Entirely beyond the core count → the default (top 3 of 8 = 0xE0).
-    let c = containment_from_settings(None, Some("0xF00"), None, None, None, 8);
+    let c = containment_from_settings(None, Some("0xF00"), None, None, None, None, 8);
     assert_eq!(c.affinity_mask, 0xE0);
     // 64+ cores: every bit is valid, the override is honoured verbatim.
-    let c = containment_from_settings(None, Some("0xFFFFFFFFFFFFFFFF"), None, None, None, 64);
+    let c = containment_from_settings(None, Some("0xFFFFFFFFFFFFFFFF"), None, None, None, None, 64);
     assert_eq!(c.affinity_mask, u64::MAX);
 }
 
@@ -198,11 +198,11 @@ fn purge_delay_out_of_range_falls_back_to_never() {
 fn containment_carries_the_parsed_purge_delay() {
     // Absent → never-decommit default; explicit in-range → verbatim.
     assert_eq!(
-        containment_from_settings(None, None, None, None, None, 24).purge_delay_ms,
+        containment_from_settings(None, None, None, None, None, None, 24).purge_delay_ms,
         -1
     );
     assert_eq!(
-        containment_from_settings(None, None, Some("1000"), None, None, 24).purge_delay_ms,
+        containment_from_settings(None, None, Some("1000"), None, None, None, 24).purge_delay_ms,
         1000
     );
 }
@@ -232,11 +232,11 @@ fn alloc_mode_lazy_is_lazy_and_trimmed() {
 fn containment_carries_the_parsed_alloc_mode() {
     // Absent → Retained default; explicit "lazy" → Lazy.
     assert_eq!(
-        containment_from_settings(None, None, None, None, None, 24).alloc_mode,
+        containment_from_settings(None, None, None, None, None, None, 24).alloc_mode,
         AllocMode::Retained
     );
     assert_eq!(
-        containment_from_settings(None, None, None, Some("lazy"), None, 24).alloc_mode,
+        containment_from_settings(None, None, None, Some("lazy"), None, None, 24).alloc_mode,
         AllocMode::Lazy
     );
 }
@@ -276,11 +276,115 @@ fn reserve_gib_out_of_range_falls_back_to_default() {
 fn containment_carries_the_parsed_reserve_gib() {
     // Absent → the default (4); explicit in-range → verbatim.
     assert_eq!(
-        containment_from_settings(None, None, None, None, None, 24).reserve_gib,
+        containment_from_settings(None, None, None, None, None, None, 24).reserve_gib,
         4
     );
     assert_eq!(
-        containment_from_settings(None, None, None, None, Some("2"), 24).reserve_gib,
+        containment_from_settings(None, None, None, None, Some("2"), None, 24).reserve_gib,
         2
     );
+}
+
+// ---------------------------------------------------------------------------
+// #147 round 9 — the heavy child's working-set cap (heavy_max_working_set_mb):
+// default 4096 MiB, 0 = off, clamped 512..=10240; the Job Object flags word
+// carries JOB_OBJECT_LIMIT_WORKINGSET only when the cap is enabled.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn max_working_set_absent_garbage_or_negative_is_the_4096_default() {
+    assert_eq!(HEAVY_MAX_WS_DEFAULT_MB, 4096);
+    assert_eq!(parse_max_working_set_mb(None), 4096);
+    assert_eq!(parse_max_working_set_mb(Some("")), 4096);
+    assert_eq!(parse_max_working_set_mb(Some("4GiB")), 4096);
+    assert_eq!(parse_max_working_set_mb(Some("-1")), 4096);
+    assert_eq!(
+        parse_max_working_set_mb(Some("99999999999999999999999")),
+        4096,
+        "beyond i64 is unparseable, not the ceiling"
+    );
+}
+
+#[test]
+fn max_working_set_zero_disables_the_cap() {
+    assert_eq!(parse_max_working_set_mb(Some("0")), 0);
+    assert_eq!(parse_max_working_set_mb(Some(" 0 ")), 0);
+}
+
+#[test]
+fn max_working_set_clamps_on_both_sides_of_each_bound() {
+    assert_eq!(HEAVY_MAX_WS_FLOOR_MB, 512);
+    assert_eq!(HEAVY_MAX_WS_CEIL_MB, 10_240);
+    assert_eq!(parse_max_working_set_mb(Some("1")), 512);
+    assert_eq!(parse_max_working_set_mb(Some("511")), 512);
+    assert_eq!(parse_max_working_set_mb(Some("512")), 512);
+    assert_eq!(parse_max_working_set_mb(Some("513")), 513);
+    assert_eq!(parse_max_working_set_mb(Some("10239")), 10_239);
+    assert_eq!(parse_max_working_set_mb(Some("10240")), 10_240);
+    assert_eq!(parse_max_working_set_mb(Some("10241")), 10_240);
+    assert_eq!(parse_max_working_set_mb(Some(" 2048 ")), 2048);
+}
+
+#[test]
+fn max_working_set_setting_ignored_flags_only_values_not_used_as_written() {
+    assert!(!max_working_set_setting_ignored(None));
+    assert!(!max_working_set_setting_ignored(Some("0")));
+    assert!(!max_working_set_setting_ignored(Some("512")));
+    assert!(!max_working_set_setting_ignored(Some("10240")));
+    assert!(max_working_set_setting_ignored(Some("511")));
+    assert!(max_working_set_setting_ignored(Some("10241")));
+    assert!(max_working_set_setting_ignored(Some("-5")));
+    assert!(max_working_set_setting_ignored(Some("lots")));
+}
+
+#[test]
+fn containment_carries_the_parsed_working_set_cap() {
+    assert_eq!(
+        containment_from_settings(None, None, None, None, None, None, 24).max_working_set_mb,
+        4096
+    );
+    assert_eq!(
+        containment_from_settings(None, None, None, None, None, Some("3000"), 24)
+            .max_working_set_mb,
+        3000
+    );
+    assert_eq!(
+        containment_from_settings(None, None, None, None, None, Some("0"), 24).max_working_set_mb,
+        0
+    );
+}
+
+#[test]
+fn job_flag_mirrors_match_the_win32_values() {
+    // Compile-time asserted against windows-sys in heavy_slot.rs (Windows);
+    // pinned here so the Linux mutation gate sees every constant.
+    assert_eq!(JOB_LIMIT_WORKINGSET, 0x1);
+    assert_eq!(JOB_LIMIT_AFFINITY, 0x10);
+    assert_eq!(JOB_LIMIT_PROCESS_MEMORY, 0x100);
+    assert_eq!(JOB_LIMIT_KILL_ON_JOB_CLOSE, 0x2000);
+}
+
+#[test]
+fn job_limit_flags_add_workingset_only_when_the_cap_is_enabled() {
+    // Disabled: exactly today's #162/#203 set (memory + kill-on-close + affinity).
+    assert_eq!(job_limit_flags(0), 0x2110);
+    // Enabled (any non-zero cap, both sides of 0): + JOB_OBJECT_LIMIT_WORKINGSET.
+    assert_eq!(job_limit_flags(1), 0x2111);
+    assert_eq!(job_limit_flags(4096), 0x2111);
+}
+
+#[test]
+fn job_working_set_bytes_min_256_max_the_cap() {
+    assert_eq!(HEAVY_MIN_WS_MB, 256);
+    assert_eq!(job_working_set_bytes(0), None, "cap off → no sizes");
+    assert_eq!(
+        job_working_set_bytes(4096),
+        Some((268_435_456, 4_294_967_296)),
+        "256 MiB min, 4 GiB max"
+    );
+    // The minimum never exceeds the cap (API requires min <= max): both sides
+    // of the 256 MiB crossover.
+    assert_eq!(job_working_set_bytes(257), Some((268_435_456, 269_484_032)));
+    assert_eq!(job_working_set_bytes(256), Some((268_435_456, 268_435_456)));
+    assert_eq!(job_working_set_bytes(255), Some((267_386_880, 267_386_880)));
 }

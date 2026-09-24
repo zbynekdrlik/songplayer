@@ -23,6 +23,34 @@ fn bytes_to_mb_rounds_down() {
     assert_eq!(bytes_to_mb(0), 0);
 }
 
+// ---- parse_mb_setting / mb_setting_ignored (shared with the heavy child) ---
+
+#[test]
+fn parse_mb_setting_uses_the_given_default_floor_and_ceiling() {
+    // Odd bounds so a swapped floor/ceil or default argument diverges.
+    assert_eq!(parse_mb_setting(None, 77, 10, 20), 77, "absent → default");
+    assert_eq!(parse_mb_setting(Some("bad"), 77, 10, 20), 77);
+    assert_eq!(parse_mb_setting(Some("-3"), 77, 10, 20), 77, "negative");
+    assert_eq!(parse_mb_setting(Some("0"), 77, 10, 20), 0, "0 disables");
+    assert_eq!(parse_mb_setting(Some("9"), 77, 10, 20), 10);
+    assert_eq!(parse_mb_setting(Some("10"), 77, 10, 20), 10);
+    assert_eq!(parse_mb_setting(Some("15"), 77, 10, 20), 15);
+    assert_eq!(parse_mb_setting(Some("20"), 77, 10, 20), 20);
+    assert_eq!(parse_mb_setting(Some("21"), 77, 10, 20), 20);
+}
+
+#[test]
+fn mb_setting_ignored_honours_the_given_bounds() {
+    assert!(!mb_setting_ignored(None, 10, 20));
+    assert!(!mb_setting_ignored(Some("0"), 10, 20));
+    assert!(!mb_setting_ignored(Some("10"), 10, 20));
+    assert!(!mb_setting_ignored(Some("20"), 10, 20));
+    assert!(mb_setting_ignored(Some("9"), 10, 20));
+    assert!(mb_setting_ignored(Some("21"), 10, 20));
+    assert!(mb_setting_ignored(Some("-1"), 10, 20));
+    assert!(mb_setting_ignored(Some("x"), 10, 20));
+}
+
 // ---- parse_min_working_set_mb ---------------------------------------------
 
 #[test]

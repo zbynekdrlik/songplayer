@@ -353,6 +353,7 @@ static CONTAINMENT: LazyLock<Mutex<Containment>> = LazyLock::new(|| {
         None,
         None,
         None,
+        None,
         logical_cores(),
     ))
 });
@@ -375,6 +376,24 @@ pub(crate) fn logical_cores() -> usize {
 /// effect on the next child spawned, no restart. Returns the resolved value.
 #[cfg_attr(test, mutants::skip)]
 pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment {
+    let c = resolve_containment(pool).await;
+    if let Ok(mut g) = CONTAINMENT.lock() {
+        *g = c;
+    }
+    c
+}
+
+/// Read every containment setting from the DB and resolve it through the pure
+/// [`containment_from_settings`] — WITHOUT publishing (split from
+/// [`refresh_containment`] in #147 round 9 so the DB → value path, e.g. a
+/// `PATCH /api/v1/settings` of `heavy_max_working_set_mb`, is unit-tested
+/// without touching the process-global snapshot other tests read). WARNs once
+/// per ignored value.
+///
+/// mutants::skip — DB reads + WARN side effects; the value logic is the pure,
+/// mutation-scored `heavy_containment` parse fns.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) async fn resolve_containment(pool: &sqlx::SqlitePool) -> Containment {
     let cap = crate::db::models::get_setting(pool, "heavy_cpu_cap_pct")
         .await
         .ok()
@@ -406,14 +425,27 @@ pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment 
         .await
         .ok()
         .flatten();
+    // #147 round 9: the child's working-set cap (MiB), read the same way; it
+    // applies at the NEXT heavy-child spawn (the Job Object is per child).
+    let max_ws = crate::db::models::get_setting(pool, "heavy_max_working_set_mb")
+        .await
+        .ok()
+        .flatten();
     let c = containment_from_settings(
         cap.as_deref(),
         mask.as_deref(),
         purge.as_deref(),
         alloc.as_deref(),
         reserve.as_deref(),
+        max_ws.as_deref(),
         logical_cores(),
     );
+    if crate::lyrics::heavy_containment::max_working_set_setting_ignored(max_ws.as_deref()) {
+        warn!(
+            "heavy_max_working_set_mb={max_ws:?} is invalid or out of range (0 or 512..=10240 MiB) — using {} MiB",
+            c.max_working_set_mb
+        );
+    }
     if c.purge_delay_ms == -1 && purge.as_deref().is_some_and(|r| r.trim() != "-1") {
         warn!(
             "heavy_purge_delay_ms={purge:?} is invalid or out of range (-1 or 0..=600000 ms) — using -1 (never decommit)"
@@ -434,9 +466,6 @@ pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment 
             crate::lyrics::heavy_alloc_env::RESERVE_GIB_DEFAULT
         );
     }
-    if let Ok(mut g) = CONTAINMENT.lock() {
-        *g = c;
-    }
     c
 }
 
@@ -447,7 +476,7 @@ pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment 
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn current_containment() -> Containment {
     CONTAINMENT.lock().map(|g| *g).unwrap_or_else(|_| {
-        containment_from_settings(None, None, None, None, None, logical_cores())
+        containment_from_settings(None, None, None, None, None, None, logical_cores())
     })
 }
 
@@ -455,11 +484,17 @@ pub(crate) fn current_containment() -> Containment {
 /// it is exact-string tested cross-platform (#207); emitted once per child by
 /// the `#[cfg(windows)]` Job Object seam, so it is dead in the non-Windows lib
 /// target. Gains ` alloc_mode=<retained|lazy>` after `purge_delay_ms=` (#207
-/// phase-3) and ` reserve_gib=<n>` after `alloc_mode=` (#207 round-3c).
+/// phase-3), ` reserve_gib=<n>` after `alloc_mode=` (#207 round-3c) and
+/// ` max_ws_mb=<n|off>` after `reserve_gib=` (#147 round 9 — the working-set cap
+/// the Job Object actually APPLIED; `off` = disabled or rejected by the OS).
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn contained_line(pid: u32, limit_bytes: usize, c: &Containment) -> String {
+    let max_ws = match c.max_working_set_mb {
+        0 => "off".to_string(),
+        mb => mb.to_string(),
+    };
     format!(
-        "heavy child contained (pid {pid}): mem_limit={limit_bytes}B cpu_cap={}% affinity=0x{:x} mem_priority_low={} purge_delay_ms={} alloc_mode={} reserve_gib={}",
+        "heavy child contained (pid {pid}): mem_limit={limit_bytes}B cpu_cap={}% affinity=0x{:x} mem_priority_low={} purge_delay_ms={} alloc_mode={} reserve_gib={} max_ws_mb={max_ws}",
         c.cpu_cap_pct,
         c.affinity_mask,
         c.memory_priority_low,
@@ -559,21 +594,29 @@ pub(crate) fn assign_child_job(_child: &tokio::process::Child) -> ChildJobGuard 
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Option<isize> {
-    use crate::lyrics::heavy_containment::cpu_rate_from_pct;
+    use crate::lyrics::heavy_containment::{
+        JOB_LIMIT_AFFINITY, JOB_LIMIT_KILL_ON_JOB_CLOSE, JOB_LIMIT_PROCESS_MEMORY,
+        JOB_LIMIT_WORKINGSET, cpu_rate_from_pct, job_limit_flags, job_working_set_bytes,
+    };
     use core::ffi::c_void;
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_CPU_RATE_CONTROL_ENABLE,
         JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP, JOB_OBJECT_LIMIT_AFFINITY,
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY,
-        JOBOBJECT_CPU_RATE_CONTROL_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JobObjectCpuRateControlInformation, JobObjectExtendedLimitInformation,
-        SetInformationJobObject,
+        JOB_OBJECT_LIMIT_WORKINGSET, JOBOBJECT_CPU_RATE_CONTROL_INFORMATION,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectCpuRateControlInformation,
+        JobObjectExtendedLimitInformation, SetInformationJobObject,
     };
     use windows_sys::Win32::System::Threading::{
         MEMORY_PRIORITY_INFORMATION, MEMORY_PRIORITY_LOW, OpenProcess, PROCESS_SET_INFORMATION,
         PROCESS_SET_QUOTA, PROCESS_TERMINATE, ProcessMemoryPriority, SetProcessInformation,
     };
+    // The pure flag mirrors (`job_limit_flags`, Linux-tested) must equal the SDK.
+    const _: () = assert!(JOB_LIMIT_WORKINGSET == JOB_OBJECT_LIMIT_WORKINGSET);
+    const _: () = assert!(JOB_LIMIT_AFFINITY == JOB_OBJECT_LIMIT_AFFINITY);
+    const _: () = assert!(JOB_LIMIT_PROCESS_MEMORY == JOB_OBJECT_LIMIT_PROCESS_MEMORY);
+    const _: () = assert!(JOB_LIMIT_KILL_ON_JOB_CLOSE == JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE);
 
     // SAFETY: every handle is null-checked; on any failure we close what we
     // opened and return None. Each struct is zero-initialised then fully set;
@@ -584,24 +627,47 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
         if job.is_null() {
             return None;
         }
+        let set_extended = |info: &JOBOBJECT_EXTENDED_LIMIT_INFORMATION| {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                info as *const _ as *const c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            ) != 0
+        };
         // #203: ONE extended-limit struct carries the memory ceiling,
         // kill-on-close AND the core affinity (the wall keeps its cores) — a
-        // single SetInformationJobObject call, extending the #162 job.
+        // single SetInformationJobObject call, extending the #162 job. #147
+        // round 9 adds the working-set CAP (JOB_OBJECT_LIMIT_WORKINGSET +
+        // Minimum/MaximumWorkingSetSize) so the child pages ITSELF instead of
+        // evicting SongPlayer; `applied` records what the OS actually took.
+        let mut applied = containment;
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_PROCESS_MEMORY
-            | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-            | JOB_OBJECT_LIMIT_AFFINITY;
-        info.BasicLimitInformation.Affinity = containment.affinity_mask as usize;
+        info.BasicLimitInformation.LimitFlags = job_limit_flags(applied.max_working_set_mb);
+        info.BasicLimitInformation.Affinity = applied.affinity_mask as usize;
+        if let Some((min, max)) = job_working_set_bytes(applied.max_working_set_mb) {
+            info.BasicLimitInformation.MinimumWorkingSetSize = min;
+            info.BasicLimitInformation.MaximumWorkingSetSize = max;
+        }
         info.ProcessMemoryLimit = limit_bytes;
-        if SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            &info as *const _ as *const c_void,
-            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-        ) == 0
-        {
-            CloseHandle(job);
-            return None;
+        if !set_extended(&info) {
+            // #147 round 9: a rejected working-set cap must never cost the
+            // #162 memory ceiling + kill-on-close — retry once WITHOUT it.
+            if applied.max_working_set_mb == 0 {
+                CloseHandle(job);
+                return None;
+            }
+            tracing::warn!(
+                "heavy child working-set cap {} MiB rejected (pid {pid}, err {}) — job applied without it",
+                applied.max_working_set_mb,
+                GetLastError()
+            );
+            applied.max_working_set_mb = 0;
+            without_working_set(&mut info);
+            if !set_extended(&info) {
+                CloseHandle(job);
+                return None;
+            }
         }
         // #203: CPU hard cap — a separate rate-control info class on the same
         // job. Best-effort: a failure keeps the already-applied memory +
@@ -609,7 +675,7 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
         let mut rate: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION = std::mem::zeroed();
         rate.ControlFlags =
             JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP;
-        rate.Anonymous.CpuRate = cpu_rate_from_pct(containment.cpu_cap_pct);
+        rate.Anonymous.CpuRate = cpu_rate_from_pct(applied.cpu_cap_pct);
         if SetInformationJobObject(
             job,
             JobObjectCpuRateControlInformation,
@@ -630,7 +696,7 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
         }
         // #203: lower the child's process MEMORY priority so the wall's working
         // set is never trimmed for it. Best-effort (needs PROCESS_SET_INFORMATION).
-        if containment.memory_priority_low {
+        if applied.memory_priority_low {
             let mem = MEMORY_PRIORITY_INFORMATION {
                 MemoryPriority: MEMORY_PRIORITY_LOW,
             };
@@ -644,17 +710,45 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
                 tracing::warn!("heavy child memory priority not lowered (pid {pid})");
             }
         }
-        let assigned = AssignProcessToJobObject(job, proc);
+        let mut assigned = AssignProcessToJobObject(job, proc);
+        if assigned == 0 && applied.max_working_set_mb != 0 {
+            // #147 round 9: the job's working-set limits are applied to the
+            // process AT assignment — if that is what failed, drop the cap and
+            // retry once so the child still gets the memory ceiling + kill-on-close.
+            tracing::warn!(
+                "heavy child job assignment with a {} MiB working-set cap failed (pid {pid}, err {}) — retrying without it",
+                applied.max_working_set_mb,
+                GetLastError()
+            );
+            applied.max_working_set_mb = 0;
+            without_working_set(&mut info);
+            if set_extended(&info) {
+                assigned = AssignProcessToJobObject(job, proc);
+            }
+        }
         CloseHandle(proc);
         if assigned == 0 {
             CloseHandle(job);
             return None;
         }
-        // #203 / #207: log the applied containment once per child (pure
-        // formatter, so the line is exact-string tested cross-platform).
-        tracing::info!("{}", contained_line(pid, limit_bytes, &containment));
+        // #203 / #207 / #147 r9: log the APPLIED containment once per child
+        // (pure formatter, so the line is exact-string tested cross-platform).
+        tracing::info!("{}", contained_line(pid, limit_bytes, &applied));
         Some(job as isize)
     }
+}
+
+/// #147 round 9: clear the working-set cap from a heavy child's extended-limit
+/// struct (flags back to the #162/#203 set, both sizes zero) for the
+/// cap-rejected retry. Integration-only.
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+fn without_working_set(
+    info: &mut windows_sys::Win32::System::JobObjects::JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+) {
+    info.BasicLimitInformation.LimitFlags = crate::lyrics::heavy_containment::job_limit_flags(0);
+    info.BasicLimitInformation.MinimumWorkingSetSize = 0;
+    info.BasicLimitInformation.MaximumWorkingSetSize = 0;
 }
 
 #[cfg(test)]

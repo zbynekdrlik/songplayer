@@ -16,6 +16,7 @@
 //! (cfg(windows), `mutants::skip`).
 
 use crate::lyrics::heavy_alloc_env::AllocMode;
+use crate::process_start::residency::mb_to_bytes;
 
 /// The CPU hard-cap percentage is clamped into this inclusive range; an
 /// absent/unparseable setting falls back to [`CPU_CAP_DEFAULT_PCT`].
@@ -61,6 +62,102 @@ pub(crate) struct Containment {
     /// is the lever ROZHODNUTÉ 3c measures. Read cross-platform by
     /// `stems/separator.rs` at separation spawn.
     pub(crate) reserve_gib: u8,
+    /// #147 round 9: the child's per-process working-set CAP in MiB
+    /// (`heavy_max_working_set_mb`, default 4096, `0` = no cap, clamped
+    /// `512..=10240`) — applied as the Job Object's `JOB_OBJECT_LIMIT_WORKINGSET`
+    /// maximum so the child pages ITSELF instead of growing into (and evicting)
+    /// SongPlayer's resident frame pools / NDI SDK buffers. Read by the
+    /// `#[cfg(windows)]` Job Object seam + the contained line (dead off Windows).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) max_working_set_mb: u32,
+}
+
+/// #147 round 9: default heavy-child working-set cap when
+/// `heavy_max_working_set_mb` is absent / unparseable / negative: 4096 MiB.
+///
+/// Sized from the measured child: working set 1.1–1.6 GB (#147 round 7 W1),
+/// 2.8 GB (#168 topology read), 2.79 GB with a 3.35 GB PEAK (#207 lazy
+/// measurement, issue #207 comment 5792443051) — while its COMMIT runs
+/// 6.7–9 GB. A 4 GiB cap sits above every measured peak working set, so a
+/// normal separation is not squeezed, yet it bounds the child's RESIDENT
+/// footprint far below its 10 GiB commit ceiling: when the child touches more
+/// than 4 GiB (an eager-committed arena, a long video), it pages ITSELF instead
+/// of evicting SongPlayer. The per-window throughput read on the box confirms
+/// or re-sizes it via the setting (no redeploy).
+pub(crate) const HEAVY_MAX_WS_DEFAULT_MB: u32 = 4096;
+
+/// Lower clamp for a non-zero cap: below 512 MiB the separator's model weights
+/// alone would thrash.
+pub(crate) const HEAVY_MAX_WS_FLOOR_MB: u32 = 512;
+
+/// Upper clamp: the child's 10 GiB Job Object commit ceiling
+/// (`CHILD_JOB_MEMORY_LIMIT_BYTES`) — a working set above its commit is
+/// unreachable.
+pub(crate) const HEAVY_MAX_WS_CEIL_MB: u32 = 10_240;
+
+/// The Job Object's per-process MINIMUM working set that accompanies the cap
+/// (the API requires a non-zero minimum when the maximum is set): 256 MiB —
+/// low, so under pressure the child stays the first thing trimmed, never
+/// SongPlayer. Never above the cap ([`job_working_set_bytes`]).
+pub(crate) const HEAVY_MIN_WS_MB: u32 = 256;
+
+/// `JOB_OBJECT_LIMIT_WORKINGSET` (windows-sys `Win32::System::JobObjects`).
+/// These four flag mirrors are compile-time asserted equal to windows-sys in
+/// `heavy_slot.rs::assign_win_job`.
+pub(crate) const JOB_LIMIT_WORKINGSET: u32 = 0x1;
+/// `JOB_OBJECT_LIMIT_AFFINITY`.
+pub(crate) const JOB_LIMIT_AFFINITY: u32 = 0x10;
+/// `JOB_OBJECT_LIMIT_PROCESS_MEMORY`.
+pub(crate) const JOB_LIMIT_PROCESS_MEMORY: u32 = 0x100;
+/// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
+pub(crate) const JOB_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+
+/// The extended-limit `LimitFlags` word for a heavy child's Job Object: the
+/// #162 memory ceiling + kill-on-close and the #203 affinity ALWAYS, plus
+/// `JOB_OBJECT_LIMIT_WORKINGSET` ONLY when a working-set cap is enabled
+/// (`max_working_set_mb > 0`). Pure. Consumed by the `#[cfg(windows)]` seam.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn job_limit_flags(max_working_set_mb: u32) -> u32 {
+    let base = JOB_LIMIT_PROCESS_MEMORY | JOB_LIMIT_KILL_ON_JOB_CLOSE | JOB_LIMIT_AFFINITY;
+    if max_working_set_mb == 0 {
+        base
+    } else {
+        base | JOB_LIMIT_WORKINGSET
+    }
+}
+
+/// The Job Object's `(MinimumWorkingSetSize, MaximumWorkingSetSize)` in bytes
+/// for a cap of `max_working_set_mb` MiB, or `None` when the cap is disabled
+/// (`0`). The minimum is [`HEAVY_MIN_WS_MB`], never above the cap. Pure.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn job_working_set_bytes(max_working_set_mb: u32) -> Option<(usize, usize)> {
+    if max_working_set_mb == 0 {
+        return None;
+    }
+    let min_mb = HEAVY_MIN_WS_MB.min(max_working_set_mb);
+    Some((mb_to_bytes(min_mb), mb_to_bytes(max_working_set_mb)))
+}
+
+/// #147 round 9: parse the `heavy_max_working_set_mb` setting — `0` = no cap,
+/// a positive value clamped into `512..=10240`, absent / unparseable /
+/// negative → [`HEAVY_MAX_WS_DEFAULT_MB`]. Pure (the WARN is the caller's).
+pub(crate) fn parse_max_working_set_mb(raw: Option<&str>) -> u32 {
+    crate::process_start::residency::parse_mb_setting(
+        raw,
+        HEAVY_MAX_WS_DEFAULT_MB,
+        HEAVY_MAX_WS_FLOOR_MB,
+        HEAVY_MAX_WS_CEIL_MB,
+    )
+}
+
+/// `true` when a present `heavy_max_working_set_mb` was not used as written
+/// (so `refresh_containment` WARNs). Pure.
+pub(crate) fn max_working_set_setting_ignored(raw: Option<&str>) -> bool {
+    crate::process_start::residency::mb_setting_ignored(
+        raw,
+        HEAVY_MAX_WS_FLOOR_MB,
+        HEAVY_MAX_WS_CEIL_MB,
+    )
 }
 
 /// The Job Object `CpuRate` unit for a cap percentage: hundredths of a percent,
@@ -205,17 +302,19 @@ pub(crate) fn existing_cores_mask(logical_cores: usize) -> u64 {
     }
 }
 
-/// Resolve the live [`Containment`] from the five operator settings
+/// Resolve the live [`Containment`] from the six operator settings
 /// (`heavy_cpu_cap_pct`, `heavy_cpu_affinity_mask`, `heavy_purge_delay_ms`,
-/// `heavy_alloc_mode`, `heavy_alloc_reserve_gib` (#207 round-3c)) + the box's
-/// logical-core count. The impure caller ([`crate::lyrics::heavy_slot`]) reads
-/// the settings + core count and calls this pure fn. Pure.
+/// `heavy_alloc_mode`, `heavy_alloc_reserve_gib` (#207 round-3c),
+/// `heavy_max_working_set_mb` (#147 round 9)) + the box's logical-core count.
+/// The impure caller ([`crate::lyrics::heavy_slot`]) reads the settings + core
+/// count and calls this pure fn. Pure.
 pub(crate) fn containment_from_settings(
     cap_str: Option<&str>,
     mask_str: Option<&str>,
     purge_str: Option<&str>,
     alloc_str: Option<&str>,
     reserve_str: Option<&str>,
+    max_ws_str: Option<&str>,
     logical_cores: usize,
 ) -> Containment {
     Containment {
@@ -225,6 +324,7 @@ pub(crate) fn containment_from_settings(
         purge_delay_ms: parse_purge_delay_ms(purge_str),
         alloc_mode: parse_alloc_mode(alloc_str),
         reserve_gib: parse_reserve_gib(reserve_str),
+        max_working_set_mb: parse_max_working_set_mb(max_ws_str),
     }
 }
 

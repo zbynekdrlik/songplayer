@@ -80,31 +80,50 @@ pub fn bytes_to_mb(bytes: u64) -> u64 {
     bytes / MIB
 }
 
-/// Parse the `sp_min_working_set_mb` setting.
+/// Parse a MiB-sized memory-limit setting (shared by `sp_min_working_set_mb`
+/// here and the heavy child's `heavy_max_working_set_mb`):
 ///
-/// - `0` → `0` (disabled — no call is made);
-/// - a positive integer → clamped into `SP_MIN_WS_FLOOR_MB..=SP_MIN_WS_CEIL_MB`;
-/// - absent / unparseable / negative → [`SP_MIN_WS_DEFAULT_MB`].
+/// - `0` → `0` (disabled);
+/// - a positive integer → clamped into `floor..=ceil`;
+/// - absent / unparseable / negative → `default`.
 ///
 /// Pure — the WARN for an ignored value lives in the impure caller.
-pub fn parse_min_working_set_mb(raw: Option<&str>) -> u32 {
+pub fn parse_mb_setting(raw: Option<&str>, default: u32, floor: u32, ceil: u32) -> u32 {
     match raw.and_then(|s| s.trim().parse::<i64>().ok()) {
         Some(0) => 0,
-        Some(v) if v > 0 => v.clamp(SP_MIN_WS_FLOOR_MB as i64, SP_MIN_WS_CEIL_MB as i64) as u32,
-        _ => SP_MIN_WS_DEFAULT_MB,
+        Some(v) if v > 0 => v.clamp(floor as i64, ceil as i64) as u32,
+        _ => default,
     }
 }
 
-/// `true` when a PRESENT setting value was not used as written — unparseable,
-/// negative, or outside `0 | FLOOR..=CEIL` (so the caller WARNs). An absent
+/// `true` when a PRESENT MiB setting was not used as written — unparseable,
+/// negative, or outside `0 | floor..=ceil` (so the caller WARNs). An absent
 /// value is not a warning (the default is the intended behaviour). Pure.
-pub fn min_working_set_setting_ignored(raw: Option<&str>) -> bool {
+pub fn mb_setting_ignored(raw: Option<&str>, floor: u32, ceil: u32) -> bool {
     match raw {
         None => false,
-        Some(r) => !r.trim().parse::<i64>().is_ok_and(|v| {
-            v == 0 || (SP_MIN_WS_FLOOR_MB as i64..=SP_MIN_WS_CEIL_MB as i64).contains(&v)
-        }),
+        Some(r) => !r
+            .trim()
+            .parse::<i64>()
+            .is_ok_and(|v| v == 0 || (floor as i64..=ceil as i64).contains(&v)),
     }
+}
+
+/// Parse the `sp_min_working_set_mb` setting: `0` → disabled, a positive
+/// value clamped into `SP_MIN_WS_FLOOR_MB..=SP_MIN_WS_CEIL_MB`, absent /
+/// unparseable / negative → [`SP_MIN_WS_DEFAULT_MB`]. Pure.
+pub fn parse_min_working_set_mb(raw: Option<&str>) -> u32 {
+    parse_mb_setting(
+        raw,
+        SP_MIN_WS_DEFAULT_MB,
+        SP_MIN_WS_FLOOR_MB,
+        SP_MIN_WS_CEIL_MB,
+    )
+}
+
+/// [`mb_setting_ignored`] for `sp_min_working_set_mb`. Pure.
+pub fn min_working_set_setting_ignored(raw: Option<&str>) -> bool {
+    mb_setting_ignored(raw, SP_MIN_WS_FLOOR_MB, SP_MIN_WS_CEIL_MB)
 }
 
 /// The `SetProcessWorkingSetSizeEx` arguments for a hard minimum of `mb` MiB.

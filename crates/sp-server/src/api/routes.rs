@@ -693,7 +693,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
 
     let lan = state.lan_status.read().await;
 
-    // #203/#207/#207r3c: resolve the live containment; purge delay/alloc mode/reserve_gib are internal-only, not surfaced here.
+    // #203/#207/#207r3c: resolve the live containment; purge delay/alloc mode/reserve_gib/max_ws (#147 r9) are internal-only, not surfaced here.
     let heavy_cap = crate::db::models::get_setting(&state.pool, "heavy_cpu_cap_pct")
         .await
         .ok()
@@ -702,14 +702,14 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         .await
         .ok()
         .flatten();
-    let heavy_cores = crate::lyrics::heavy_slot::logical_cores();
     let containment = crate::lyrics::heavy_containment::containment_from_settings(
         heavy_cap.as_deref(),
         heavy_mask.as_deref(),
         None,
         None,
         None,
-        heavy_cores,
+        None,
+        crate::lyrics::heavy_slot::logical_cores(),
     );
 
     Json(StatusResponse {
