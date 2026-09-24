@@ -7,12 +7,18 @@ offsets per 2 s window, and ``drift_and_step`` turns that into a slope
 (ms per 10 s) plus the largest neighbour step. These tests pin that the two
 cases read differently.
 
-Synthetic fixtures with numpy only: an irregular click train over a noise bed
-(the ORIGINAL audio, 8 kHz) and a picture that cuts to a new random texture at
-every click (the ORIGINAL video, 25 fps). The recording (30 fps picture,
-sample 0 of the audio at -21 ms) shows the original picture from ``START``,
-while its audio is taken from ``START + shift(t)``, so ``shift`` is exactly the
-A/V offset at recording time ``t``.
+Synthetic fixtures with numpy only. The ORIGINAL audio (8 kHz) is band-limited
+noise with a level envelope, the ORIGINAL picture (25 fps) moves on every frame.
+The recording (30 fps picture, sample 0 of the audio at -21 ms) shows the
+original picture from ``START``, while its audio is taken from
+``START + shift(t)``, so ``shift`` is exactly the A/V offset at recording time
+``t``.
+
+Why a bass-band (<= 60 Hz) audio by default: the acceptance drift is 50 ms over
+20 s (2500 ppm). That smears the alignment by +-2.5 ms inside ONE 2 s window.
+Broadband content decorrelates under such a smear, and its windows drop below
+``SEGMENT_MIN_CORR`` (``test_a_broadband_drift_this_fast_is_not_fitted`` pins
+that). A realistic clock error (<= a few hundred ppm) smears < 0.5 ms per window.
 """
 
 from __future__ import annotations
@@ -39,23 +45,21 @@ REC_T0 = -0.021
 START = 21.4  # original time shown at recording time 0
 
 
-def _original(seed: int = 5):
+def _original(seed: int = 5, band_hz: float | None = 60.0):
+    """``band_hz`` None = broadband noise, else noise low-passed to ``band_hz``."""
     rng = np.random.default_rng(seed)
     n = int(ORIG_S * SR)
+    audio = rng.standard_normal(n)
+    if band_hz is not None:
+        spec = np.fft.rfft(audio)
+        spec[np.fft.rfftfreq(n, 1.0 / SR) > band_hz] = 0.0
+        audio = np.fft.irfft(spec, n)
     block = SR // 10
-    env = np.repeat(rng.uniform(0.1, 1.0, n // block + 1), block)[:n]
-    audio = rng.standard_normal(n) * env * 0.1
-    clicks, t = [], 0.3
-    while t < ORIG_S - 0.3:
-        clicks.append(t)
-        t += rng.uniform(0.25, 0.9)
-    for c in clicks:
-        i = int(c * SR)
-        audio[i : i + 40] += 0.9
+    env = np.repeat(rng.uniform(0.2, 1.0, n // block + 1), block)[:n]
+    audio = audio / audio.std() * 0.1 * env
     pts = np.arange(int(ORIG_S * ORIG_FPS)) / ORIG_FPS
-    scene = np.searchsorted(np.array(clicks), pts, side="right")
-    textures = rng.uniform(0, 255, size=(scene.max() + 1, 32, 64))
-    return audio, textures[scene], pts
+    frames = rng.uniform(0, 255, size=(len(pts), 32, 64))
+    return audio, frames, pts
 
 
 def _recording(audio, frames, pts, shift, seed=11):
@@ -129,6 +133,20 @@ def test_60ms_jump_at_12s_reads_as_a_step_and_no_slope():
     before = [s["av_ms"] for s in prof if s["t_s"] < 11.0]
     after = [s["av_ms"] for s in prof if s["t_s"] > 11.0]
     assert np.median(after) - np.median(before) == pytest.approx(60.0, abs=10.0), prof
+
+
+def test_a_broadband_drift_this_fast_is_not_fitted():
+    # The documented limit: 2500 ppm on broadband audio smears every 2 s window
+    # below the correlation floor. The profile must then report no drift at all
+    # rather than fit a slope through windows that do not match.
+    audio, frames, pts = _original(band_hz=None)
+    prof = _profile(
+        audio, frames, pts, *_recording(audio, frames, pts, lambda t: 0.05 * t / REC_S)
+    )
+    assert all(s["audio_corr"] < avs.SEGMENT_MIN_CORR for s in prof), prof
+    d = avs.drift_and_step(prof)
+    assert d["windows_used"] == 0
+    assert d["drift_ms_per_10s"] is None
 
 
 def test_in_sync_take_has_neither_drift_nor_step():
@@ -253,9 +271,13 @@ def test_measure_reports_segments_and_drift(monkeypatch):
     assert len(r["segments"]) == 10
     assert r["drift"]["max_step_ms"] == pytest.approx(60.0, abs=10.0)
     assert r["drift"]["step_at_s"] == pytest.approx(12.0, abs=0.1)
-    # Diagnostics only: the verdict is still the whole-take one.
-    assert r["status"] == "fail"
-    assert any("A/V" in reason for reason in r["reasons"])
+    # Diagnostics only: the verdict is still the whole-take one. A mid-take
+    # jump halves the whole-take audio correlation, so it reads cannot_measure
+    # (audio), as on release run 36068121677 (corr 0.899). The profile is what
+    # shows the jump.
+    assert r["audio"]["corr"] < avs.MIN_AUDIO_CORR
+    assert r["status"] == "cannot_measure"
+    assert r["unmeasurable_sides"] == ["audio"]
 
 
 def test_measure_profiles_the_audio_even_without_a_picture(monkeypatch):
