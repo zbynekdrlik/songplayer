@@ -619,7 +619,11 @@ The host had ~35 GB of commit free at the time, so the per-child cap was the
 limit, not the box.
 
 **Now (all in `scripts/stem_worker.py`):**
-- **Input.** `_audio_info` reads only the header (rate, frames).
+- **Input.** `_audio_info` reads only the header (rate, frames). The window
+  plan trusts that count, so an empty or UNKNOWN count raises `ValueError`. A
+  FLAC from a piped encoder has STREAMINFO total = 0, which libsndfile reports
+  as a ~2^63 sentinel; without the check, `_segment_bounds` would loop into
+  the memory cap.
   `_read_window(path, in_sr, start_s, end_s)` reads one window with `sf.read`
   `start`/`stop`. It uses the SAME `round(t*sr)` bounds and the same float32
   `(n[, ch])` layout as the old slice. librosa's `sr=None` load is itself a
@@ -631,8 +635,9 @@ limit, not the box.
   tail (`max_retained_samples` == overlap, whatever the segment count).
   - It publishes with `os.replace` only after all declared segments have been
     added.
-  - On any failure (an exception, or too few segments) it removes the `.tmp`
-    and leaves the final sidecar untouched.
+  - On any failure (an exception, too few segments, or a failed final close
+    or replace) it retries the close so the handle is released, removes the
+    `.tmp`, and leaves the final sidecar untouched.
   - Its output is **bit-identical** to
     `_write_array_48k_stereo(_stitch_segments(...))`.
 - `_stitch_to_flac` feeds the per-segment WAVs one at a time: vocals first,
