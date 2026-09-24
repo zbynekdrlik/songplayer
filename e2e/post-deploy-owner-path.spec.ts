@@ -25,6 +25,13 @@
  *   (f) zero console errors / warnings (the last assertion, repo rule — in
  *       afterEach, after the cleanup, so it also runs when the body failed).
  *
+ * #184 G4: after EVERY fader drag of (b)/(c)/the soak bed, the spec polls
+ * `GET /api/v1/mix` until the server's DUB memory holds the dragged value
+ * (≤ 5 s) and fails with "fader PATCH never reached the server" otherwise — the
+ * 24.9 00:17 measurement was void because the faders were off-screen and no
+ * PATCH ever landed, which read as "the preview ignores the faders". A drag
+ * that never committed must never be misread as audio latency.
+ *
  * The 180 s window is the owner-ruled acceptance MEASUREMENT (3 minutes of
  * preview), not a sleep: every sample is asserted as it is taken and the test
  * fails on the FIRST violation. It never touches OBS scenes (the Dabing output
@@ -65,6 +72,10 @@ const SOAK_SAMPLE_MS = 500;
 const MAX_SILENT_RUN_MS = 5000;
 /** The video the owner walked on 23.9.2026 (preferred when it is a ready dub). */
 const OWNER_VIDEO_ID = 344;
+/** A drag's PATCH must be visible in `GET /api/v1/mix` within this long (#184 G4). */
+const SERVER_MIX_WITHIN_MS = 5000;
+/** A ready dub video drives the DUB memory of the mixer console. */
+const MIX_KIND = "dub";
 
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -177,6 +188,43 @@ async function readyDub(request: APIRequestContext): Promise<{ pid: number; vide
 }
 
 type MixMemory = { vokaly: number; podklad: number; dabing: number };
+
+/** #184 G4: poll `GET /api/v1/mix` until the server's `MIX_KIND` memory shows
+ *  `key` at the dragged position — exactly 0 (`"zero"`) or ≥ 0.95 (`"full"`) —
+ *  and fail with "fader PATCH never reached the server" after
+ *  SERVER_MIX_WITHIN_MS. Returns how long the server took (ms). */
+async function expectServerFader(
+  request: APIRequestContext,
+  key: keyof MixMemory,
+  want: "zero" | "full",
+  what: string,
+): Promise<number> {
+  const start = Date.now();
+  let last: unknown = undefined;
+  for (;;) {
+    const m = (await (await request.get("/api/v1/mix")).json()) as Record<
+      string,
+      Partial<MixMemory> | undefined
+    >;
+    last = m[MIX_KIND]?.[key];
+    const v = Number(last);
+    const reached = want === "zero" ? v === 0 : v >= 0.95;
+    if (reached) {
+      const took = Date.now() - start;
+      console.log(`[#184 G4] server ${MIX_KIND}.${key}=${v} confirmed ${took} ms after ${what}`);
+      return took;
+    }
+    if (Date.now() - start >= SERVER_MIX_WITHIN_MS) {
+      expect(
+        reached,
+        `fader PATCH never reached the server: after ${what}, GET /api/v1/mix ` +
+          `${MIX_KIND}.${key} = ${JSON.stringify(last)} (wanted ${want === "zero" ? "0" : "≥ 0.95"}) ` +
+          `for ${SERVER_MIX_WITHIN_MS} ms — the drag did not commit, this is NOT audio latency`,
+      ).toBe(true);
+    }
+    await new Promise((r) => setTimeout(r, LEVEL_POLL_MS));
+  }
+}
 
 let consoleMessages: string[] = [];
 /** What afterEach must put back: set as soon as the test knows it. */
@@ -323,6 +371,13 @@ test("the owner's path: Prehľad → Dabing → play → Živý náhľad → rea
         { timeout: 5000, message: `dragging ${id} to the bottom must PATCH ${key}=0` },
       )
       .toBe(true);
+    // The PATCH must target the memory the server check reads — a wrong kind is
+    // its own failure, never reported as "never reached the server".
+    const zeroPatch = patches.slice(patchesBefore).find((p) => p.body[key] === 0);
+    expect(String(zeroPatch?.body.kind ?? ""), `${id} PATCHes the ${MIX_KIND} memory`).toBe(
+      MIX_KIND,
+    );
+    await expectServerFader(request, key, "zero", `dragging ${id} to the bottom`);
   }
   const zeroPatches = patches.slice(patchesBefore);
   kind = String(zeroPatches[zeroPatches.length - 1].body.kind ?? "");
@@ -356,6 +411,7 @@ test("the owner's path: Prehľad → Dabing → play → Živý náhľad → rea
       { timeout: 5000, message: "dragging mix-vokaly to the top must PATCH vokaly ≈ 1" },
     )
     .toBe(true);
+  await expectServerFader(request, "vokaly", "full", "dragging mix-vokaly to the top");
   const upPatchAt = Math.max(...patches.slice(patchesBeforeUp).map((p) => p.at));
   const c = await waitForLevel(
     page,
@@ -384,6 +440,7 @@ test("the owner's path: Prehľad → Dabing → play → Živý náhľad → rea
         { timeout: 5000, message: `dragging mix-${key} to the top must PATCH ${key} ≈ 1 before the soak` },
       )
       .toBe(true);
+    await expectServerFader(request, key, "full", `dragging mix-${key} to the top`);
   }
 
   // ── (d) + (e): 3 minutes with the preview open ─────────────────────────

@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+sp-core = { path = "../sp-core" }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 symphonia = { workspace = true }

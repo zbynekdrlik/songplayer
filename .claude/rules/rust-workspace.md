@@ -321,3 +321,14 @@ and then `heavy_slot_tests.rs` + `worker_tests_idle_gate.rs` + the
 `static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());`
 and take it with `let _g = SERIAL.lock().await;`. Keep the `std::sync::Mutex`
 form only for a PLAIN `#[test]` with no await (e.g. `frame_pool`'s serial).
+
+## Adding a path dependency between workspace crates on the Tier-0 box (#184 G4)
+
+`Cargo.lock` is tracked but its workspace-member versions are long stale (e.g.
+`sp-decoder 0.49.0-dev.6`), and CI builds without `--locked`. So when a crate gains
+a path dep (G4: `sp-decoder` → `sp-core`), add ONE line to that crate's
+`dependencies = [...]` list in `Cargo.lock` by hand (alphabetical). Do NOT let
+`cargo tree` / `cargo metadata` resolve it: they rewrite every stale member
+version and bump unrelated deps (a ~20-line lockfile diff riding in a feature
+PR). Also check the new edge adds no cycle (`sp-core` depends only on serde /
+thiserror, so anything may depend on it).

@@ -221,6 +221,27 @@ fn offer_audio_is_a_noop_with_no_viewer_and_queues_with_one() {
 }
 
 #[test]
+fn tap_level_probe_measures_offered_audio_only_while_watched() {
+    // #184 G4: the no-viewer fast path never touches the probe (iron rule 1);
+    // with a viewer the probe counts the STEREO block that was offered.
+    let tap = StreamTap::new("t".into(), 0);
+    tap.shared().hold_tap_window();
+    tap.try_offer_audio(&[1.0, -1.0, 1.0, -1.0], 48_000, 2);
+    assert_eq!(tap.shared().tap_pending().1, 0, "no viewer, no measurement");
+
+    let (_g, _r) = ViewerGuard::subscribe(&tap);
+    tap.try_offer_audio(&[1.0, -1.0, 1.0, -1.0], 48_000, 2);
+    // A mono block is upmixed to stereo first: 2 mono samples -> 4 measured.
+    tap.try_offer_audio(&[1.0, -1.0], 48_000, 1);
+    let (db, n) = tap.shared().tap_pending();
+    assert_eq!(n, 8);
+    assert!(
+        db.abs() < 1e-4,
+        "full-scale offered audio reads 0 dBFS, got {db}"
+    );
+}
+
+#[test]
 fn viewer_guard_counts_up_and_saturates_down() {
     let tap = StreamTap::new("t".into(), 0);
     assert!(!tap.shared().has_viewer());

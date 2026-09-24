@@ -43,6 +43,8 @@ use tracing::{debug, info};
 pub mod fmp4_relay;
 #[path = "preview_audio_hold.rs"]
 pub mod preview_audio_hold;
+#[path = "preview_audio_probe.rs"]
+pub mod preview_audio_probe;
 #[path = "preview_encoder.rs"]
 pub mod preview_encoder;
 #[path = "preview_stream.rs"]
