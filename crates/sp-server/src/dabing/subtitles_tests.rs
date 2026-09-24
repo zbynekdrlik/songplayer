@@ -9,20 +9,32 @@ fn frag(t_ms: u64, text: &str) -> SkFragment {
     }
 }
 
+fn en_frag(t_ms: u64, text: &str) -> EnFragment {
+    EnFragment {
+        t_ms,
+        text: text.to_string(),
+    }
+}
+
+/// A chunk with NO `en_timed` (the EN is added by [`with_en`] where a test needs it).
 fn chunk(
     start_ms: u64,
     at_ms: Option<u64>,
     tempo: Option<f64>,
-    en: &str,
     frags: Vec<SkFragment>,
 ) -> DubChunk {
     DubChunk {
         start_ms,
         at_ms,
         tempo,
-        en: en.to_string(),
+        en_timed: Vec::new(),
         sk_timed: frags,
     }
+}
+
+fn with_en(mut c: DubChunk, en: Vec<EnFragment>) -> DubChunk {
+    c.en_timed = en;
+    c
 }
 
 fn build(chunks: Vec<DubChunk>) -> LyricsTrack {
@@ -33,13 +45,7 @@ fn build(chunks: Vec<DubChunk>) -> LyricsTrack {
 
 #[test]
 fn track_carries_the_live_translate_source_and_langs() {
-    let t = build(vec![chunk(
-        0,
-        Some(0),
-        Some(1.0),
-        "hello",
-        vec![frag(500, "ahoj")],
-    )]);
+    let t = build(vec![chunk(0, Some(0), Some(1.0), vec![frag(500, "ahoj")])]);
     assert_eq!(t.source, "gemini-live-translate");
     assert_eq!(t.source, SOURCE_LIVE_TRANSLATE);
     assert_eq!(t.language_source, "en");
@@ -57,7 +63,6 @@ fn line_closes_at_sentence_punctuation() {
         0,
         Some(0),
         Some(1.0),
-        "Hello world how are you",
         vec![frag(1000, "Ahoj svet."), frag(2000, "Ako sa mas?")],
     )]);
     assert_eq!(t.lines.len(), 2);
@@ -71,7 +76,6 @@ fn ellipsis_and_bang_and_question_all_close_a_line() {
         0,
         Some(0),
         Some(1.0),
-        "",
         vec![
             frag(500, "Naozaj!"),
             frag(1000, "A potom…"),
@@ -93,7 +97,7 @@ fn line_closes_at_fourteen_words() {
     let frags: Vec<SkFragment> = (0..20)
         .map(|i| frag(100 * (i as u64 + 1), &format!("slovo{i} ")))
         .collect();
-    let t = build(vec![chunk(0, Some(0), Some(1.0), "", frags)]);
+    let t = build(vec![chunk(0, Some(0), Some(1.0), frags)]);
     assert_eq!(t.lines.len(), 2);
     // First line holds exactly 14 words, the second the remaining 6.
     assert_eq!(
@@ -116,7 +120,6 @@ fn line_closes_on_a_gap_over_1500ms() {
         0,
         Some(0),
         Some(1.0),
-        "",
         vec![
             frag(500, "slovo a"),
             frag(1200, "slovo b"), // +700 ms → same line
@@ -137,7 +140,6 @@ fn a_gap_of_exactly_1500ms_keeps_the_line_open() {
         0,
         Some(0),
         Some(1.0),
-        "",
         vec![frag(500, "a"), frag(2000, " b")],
     )]);
     assert_eq!(at_limit.lines.len(), 1);
@@ -145,7 +147,6 @@ fn a_gap_of_exactly_1500ms_keeps_the_line_open() {
         0,
         Some(0),
         Some(1.0),
-        "",
         vec![frag(500, "a"), frag(2001, " b")],
     )]);
     assert_eq!(over.lines.len(), 2);
@@ -161,7 +162,6 @@ fn video_time_is_at_ms_plus_local_over_tempo() {
         0,
         Some(100_000),
         Some(2.0),
-        "a b",
         vec![frag(2000, "x")],
     )]);
     assert_eq!(t.lines.len(), 1);
@@ -177,7 +177,6 @@ fn a_later_line_starts_where_the_previous_fragment_ended() {
         0,
         Some(10_000),
         Some(1.0),
-        "",
         vec![
             frag(1000, "Prvá."),
             frag(1800, " druhá"),
@@ -195,13 +194,7 @@ fn a_later_line_starts_where_the_previous_fragment_ended() {
 #[test]
 fn end_is_at_least_min_line_ms_after_start() {
     // A 100 ms line is stretched to the 400 ms floor.
-    let t = build(vec![chunk(
-        0,
-        Some(0),
-        Some(1.0),
-        "hi",
-        vec![frag(100, "ahoj")],
-    )]);
+    let t = build(vec![chunk(0, Some(0), Some(1.0), vec![frag(100, "ahoj")])]);
     assert_eq!(t.lines[0].start_ms, 0);
     assert_eq!(t.lines[0].end_ms, 400);
 }
@@ -214,8 +207,8 @@ fn overlapping_chunk_windows_trim_the_earlier_line_no_drift() {
     // is trimmed back to the second's start so they do not overlap.
     // (Old behaviour was line0 [0,500], line1 [500,900] — the drift this fixes.)
     let t = build(vec![
-        chunk(0, Some(0), Some(1.0), "one", vec![frag(500, "prve")]),
-        chunk(0, Some(300), Some(1.0), "two", vec![frag(400, "druhe")]),
+        chunk(0, Some(0), Some(1.0), vec![frag(500, "prve")]),
+        chunk(0, Some(300), Some(1.0), vec![frag(400, "druhe")]),
     ]);
     assert_eq!(t.lines.len(), 2);
     assert_eq!(t.lines[0].start_ms, 0);
@@ -242,7 +235,6 @@ fn a_run_of_short_lines_does_not_push_a_later_line_late() {
         0,
         Some(0),
         Some(1.0),
-        "",
         vec![
             frag(100, "a."),
             frag(200, "b."),
@@ -277,8 +269,8 @@ fn starts_stay_monotonic_when_a_later_chunk_goes_backwards() {
     // starting before the previous line — the start is clamped up to the
     // previous start (monotonic even when at_ms/t_ms goes backwards).
     let t = build(vec![
-        chunk(0, Some(10_000), Some(1.0), "a", vec![frag(1000, "neskor.")]),
-        chunk(0, Some(0), Some(1.0), "b", vec![frag(500, "skor.")]),
+        chunk(0, Some(10_000), Some(1.0), vec![frag(1000, "neskor.")]),
+        chunk(0, Some(0), Some(1.0), vec![frag(500, "skor.")]),
     ]);
     assert_eq!(t.lines.len(), 2);
     let starts: Vec<u64> = t.lines.iter().map(|l| l.start_ms).collect();
@@ -307,7 +299,6 @@ fn a_blank_sk_group_is_skipped() {
         0,
         Some(0),
         Some(1.0),
-        "real words here",
         vec![frag(500, "   "), frag(3000, "ozaj.")],
     )]);
     assert_eq!(t.lines.len(), 1);
@@ -322,7 +313,6 @@ fn an_all_blank_transcript_yields_no_lines() {
         0,
         Some(0),
         Some(1.0),
-        "en text",
         vec![frag(1000, "  "), frag(2000, "   ")],
     )]);
     assert!(t.lines.is_empty(), "all-blank SK → no subtitle lines");
@@ -331,42 +321,18 @@ fn an_all_blank_transcript_yields_no_lines() {
 #[test]
 fn tempo_is_clamped_to_the_supported_range() {
     // tempo below 0.25 clamps to 0.25 (local/0.25 = local*4); above 4.0 to 4.0.
-    let below = build(vec![chunk(
-        0,
-        Some(0),
-        Some(0.1),
-        "a",
-        vec![frag(1000, "x.")],
-    )]);
+    let below = build(vec![chunk(0, Some(0), Some(0.1), vec![frag(1000, "x.")])]);
     // 1000 / 0.25 = 4000 (would be 1000/0.1 = 10000 unclamped).
     assert_eq!(below.lines[0].end_ms, 4000, "tempo < 0.25 clamps to 0.25");
-    let at_low = build(vec![chunk(
-        0,
-        Some(0),
-        Some(0.25),
-        "a",
-        vec![frag(1000, "x.")],
-    )]);
+    let at_low = build(vec![chunk(0, Some(0), Some(0.25), vec![frag(1000, "x.")])]);
     assert_eq!(
         at_low.lines[0].end_ms, 4000,
         "0.25 is the low boundary, kept"
     );
-    let above = build(vec![chunk(
-        0,
-        Some(0),
-        Some(10.0),
-        "a",
-        vec![frag(8000, "x.")],
-    )]);
+    let above = build(vec![chunk(0, Some(0), Some(10.0), vec![frag(8000, "x.")])]);
     // 8000 / 4.0 = 2000 (would be 8000/10 = 800 unclamped).
     assert_eq!(above.lines[0].end_ms, 2000, "tempo > 4.0 clamps to 4.0");
-    let at_high = build(vec![chunk(
-        0,
-        Some(0),
-        Some(4.0),
-        "a",
-        vec![frag(8000, "x.")],
-    )]);
+    let at_high = build(vec![chunk(0, Some(0), Some(4.0), vec![frag(8000, "x.")])]);
     assert_eq!(
         at_high.lines[0].end_ms, 2000,
         "4.0 is the high boundary, kept"
@@ -376,9 +342,9 @@ fn tempo_is_clamped_to_the_supported_range() {
 #[test]
 fn multi_chunk_timeline_is_monotonic() {
     let t = build(vec![
-        chunk(0, Some(0), Some(1.0), "a", vec![frag(1000, "jeden.")]),
-        chunk(0, Some(2000), Some(1.0), "b", vec![frag(1000, "dva.")]),
-        chunk(0, Some(4000), Some(1.0), "c", vec![frag(1000, "tri.")]),
+        chunk(0, Some(0), Some(1.0), vec![frag(1000, "jeden.")]),
+        chunk(0, Some(2000), Some(1.0), vec![frag(1000, "dva.")]),
+        chunk(0, Some(4000), Some(1.0), vec![frag(1000, "tri.")]),
     ]);
     assert_eq!(t.lines.len(), 3);
     let mut last = 0;
@@ -396,15 +362,14 @@ fn multi_chunk_timeline_is_monotonic() {
     assert_eq!(t.lines[2].start_ms, 4000);
 }
 
-// ── Empty EN → empty EN lines ────────────────────────────────────────────────
+// ── No `en_timed` → empty EN lines ───────────────────────────────────────────
 
 #[test]
-fn empty_en_yields_empty_en_lines() {
+fn no_en_timed_yields_empty_en_lines() {
     let t = build(vec![chunk(
         0,
         Some(0),
         Some(1.0),
-        "",
         vec![frag(1000, "Ahoj."), frag(2000, "Svet.")],
     )]);
     assert_eq!(t.lines.len(), 2);
@@ -417,8 +382,8 @@ fn empty_en_yields_empty_en_lines() {
 #[test]
 fn chunk_without_sk_timed_yields_no_lines() {
     let t = build(vec![
-        chunk(0, Some(0), Some(1.0), "some english", vec![]),
-        chunk(0, Some(5000), Some(1.0), "more", vec![frag(500, "ahoj.")]),
+        chunk(0, Some(0), Some(1.0), vec![]),
+        chunk(0, Some(5000), Some(1.0), vec![frag(500, "ahoj.")]),
     ]);
     // The empty chunk contributes nothing; only the second chunk's line remains.
     assert_eq!(t.lines.len(), 1);
@@ -437,13 +402,7 @@ fn no_chunks_yields_an_empty_track() {
 #[test]
 fn legacy_chunk_uses_start_ms_and_unit_tempo() {
     // No at_ms / tempo (a pre-#182 transcripts JSON) → place at start_ms, tempo 1.
-    let t = build(vec![chunk(
-        5000,
-        None,
-        None,
-        "hi",
-        vec![frag(1000, "ahoj.")],
-    )]);
+    let t = build(vec![chunk(5000, None, None, vec![frag(1000, "ahoj.")])]);
     assert_eq!(t.lines.len(), 1);
     assert_eq!(t.lines[0].start_ms, 5000); // start_ms + 0/1.0
     assert_eq!(t.lines[0].end_ms, 6000); // start_ms + 1000/1.0
@@ -456,7 +415,6 @@ fn non_positive_tempo_falls_back_to_unit() {
         0,
         Some(0),
         Some(0.0),
-        "hi",
         vec![frag(1000, "ahoj.")],
     )]);
     assert_eq!(t.lines[0].end_ms, 1000);
@@ -472,6 +430,7 @@ fn deserializes_the_dub_transcripts_json_and_builds_lines() {
         "chunks": [
             {"index": 0, "start_ms": 0, "end_ms": 60000, "at_ms": 0, "tempo": 1.0,
              "en": "Hello world", "sk": "Ahoj svet.",
+             "en_timed": [{"t_ms": 200, "text": "Hello"}, {"t_ms": 600, "text": " world"}],
              "sk_timed": [{"t_ms": 1000, "text": "Ahoj svet."}]}
         ]
     }"#;
@@ -491,7 +450,9 @@ fn one_continuous_session_chunk_builds_a_monotonic_bilingual_track() {
     // Exactly the shape `dub_worker.py::build_transcripts` writes for the ONE
     // continuous Live session: a single chunk covering the whole video
     // (`at_ms` 0, `tempo` 1.0) whose `sk_timed` are VIDEO-timeline times
-    // (output-transcription arrival − t0 − latency). D3 needs no change.
+    // (output-transcription arrival − t0 − latency) and whose `en_timed` are the
+    // input-transcription arrivals − t0 (#184 H3). Each EN sentence lands WHOLE
+    // on the SK line whose start is nearest to the sentence's first fragment.
     let json = r#"{
         "engine": "gemini-live-translate",
         "target_lang": "sk",
@@ -499,6 +460,12 @@ fn one_continuous_session_chunk_builds_a_monotonic_bilingual_track() {
             {"index": 0, "start_ms": 0, "end_ms": 2160000, "at_ms": 0, "tempo": 1.0,
              "en": "Hello brothers. Today we will talk about faith. Amen.",
              "sk": "Ahoj bratia. Dnes budeme hovoriť o viere. Amen.",
+             "en_timed": [
+                {"t_ms": 500, "text": "Hello brothers."},
+                {"t_ms": 4300, "text": "Today we will"},
+                {"t_ms": 4800, "text": " talk about faith."},
+                {"t_ms": 6500, "text": "Amen."}
+             ],
              "sk_timed": [
                 {"t_ms": 4000, "text": "Ahoj bratia."},
                 {"t_ms": 5200, "text": "Dnes budeme"},
@@ -539,5 +506,240 @@ fn one_continuous_session_chunk_builds_a_monotonic_bilingual_track() {
             .lines
             .iter()
             .all(|l| !l.en.is_empty() && l.sk.is_some())
+    );
+}
+
+// ── #184 H3: EN timed by the input transcription, whole-sentence assignment ──
+
+fn assign(en: &[EnFragment], starts: &[u64]) -> Vec<String> {
+    assign_en_sentences(en, starts)
+}
+
+#[test]
+fn en_sentences_stay_whole_across_fragment_boundaries() {
+    // A sentence spans several input fragments; it is joined as-is (Live
+    // Translate fragments carry their own spaces) and never cut between lines.
+    let got = assign(
+        &[
+            en_frag(1000, "First one"),
+            en_frag(1300, " in."),
+            en_frag(2000, " Good to"),
+            en_frag(2200, " see you."),
+        ],
+        &[1000, 2000],
+    );
+    assert_eq!(got, vec!["First one in.", "Good to see you."]);
+}
+
+#[test]
+fn each_en_sentence_goes_to_the_line_with_the_nearest_start() {
+    let starts = [0, 10_000];
+    // Just before the midpoint → the first line; just after → the second.
+    assert_eq!(assign(&[en_frag(4999, "A.")], &starts), vec!["A.", ""]);
+    assert_eq!(assign(&[en_frag(5001, "A.")], &starts), vec!["", "A."]);
+    // Exactly between two starts → the EARLIER line.
+    assert_eq!(assign(&[en_frag(5000, "A.")], &starts), vec!["A.", ""]);
+    // Before the first start / after the last one → the edge line.
+    assert_eq!(assign(&[en_frag(0, "A.")], &[3000, 9000]), vec!["A.", ""]);
+    assert_eq!(assign(&[en_frag(20_000, "A.")], &starts), vec!["", "A."]);
+}
+
+#[test]
+fn the_sentence_time_is_its_first_fragment_not_its_last() {
+    // Starts at 1000 (nearest line 0), ends at 9000 (nearest line 1).
+    let got = assign(
+        &[en_frag(1000, "A long"), en_frag(9000, " sentence.")],
+        &[0, 10_000],
+    );
+    assert_eq!(got, vec!["A long sentence.", ""]);
+}
+
+#[test]
+fn en_assignment_is_monotonic() {
+    // The second sentence's time is nearest to line 0, but it never goes to an
+    // earlier line than the sentence before it.
+    let got = assign(
+        &[en_frag(9000, "Late."), en_frag(1000, " Early.")],
+        &[0, 5000, 10_000],
+    );
+    assert_eq!(got, vec!["", "", "Late. Early."]);
+}
+
+#[test]
+fn two_en_sentences_share_one_line() {
+    let got = assign(
+        &[en_frag(1000, "First."), en_frag(2000, " Second.")],
+        &[0, 10_000],
+    );
+    assert_eq!(got, vec!["First. Second.", ""]);
+}
+
+#[test]
+fn equal_line_starts_take_the_first_and_a_later_start_still_wins() {
+    // Two lines share start 0 (the monotonic clamp); a sentence at 9000 still
+    // reaches the line at 10 000 behind them.
+    assert_eq!(
+        assign(&[en_frag(9000, "A.")], &[0, 0, 10_000]),
+        vec!["", "", "A."]
+    );
+    // Equal starts, the sentence before both → the first of them.
+    assert_eq!(assign(&[en_frag(0, "A.")], &[5000, 5000]), vec!["A.", ""]);
+}
+
+#[test]
+fn a_blank_leading_fragment_does_not_time_the_sentence() {
+    // The blank fragment at 0 must not pull the sentence onto line 0.
+    let got = assign(&[en_frag(0, " "), en_frag(5000, "Hello.")], &[0, 5000]);
+    assert_eq!(got, vec!["", "Hello."]);
+}
+
+#[test]
+fn an_unfinished_trailing_sentence_is_still_assigned() {
+    let got = assign(
+        &[en_frag(1000, "Hello."), en_frag(6000, "and then")],
+        &[0, 6000],
+    );
+    assert_eq!(got, vec!["Hello.", "and then"]);
+}
+
+#[test]
+fn blank_only_en_assigns_nothing() {
+    let got = assign(&[en_frag(1000, "  "), en_frag(2000, " ")], &[0, 1500]);
+    assert_eq!(got, vec!["", ""]);
+}
+
+#[test]
+fn no_lines_drop_the_en_and_no_en_leaves_every_line_empty() {
+    assert_eq!(
+        assign(&[en_frag(1000, "Hello.")], &[]),
+        Vec::<String>::new()
+    );
+    assert_eq!(assign(&[], &[0, 1000]), vec!["", ""]);
+}
+
+#[test]
+fn en_timed_missing_in_the_json_gives_empty_en() {
+    // A transcript written before H3 has only the untimed `en` string: its lines
+    // get NO EN (the char-fraction guess is deleted) until the video is re-dubbed.
+    let json = r#"{"chunks": [
+        {"index": 0, "start_ms": 0, "end_ms": 9000, "at_ms": 0, "tempo": 1.0,
+         "en": "Hello world. Bye.", "sk": "Ahoj svet. Zbohom.",
+         "sk_timed": [{"t_ms": 1000, "text": "Ahoj svet."}, {"t_ms": 2000, "text": "Zbohom."}]}
+    ]}"#;
+    let parsed: DubTranscripts = serde_json::from_str(json).unwrap();
+    let track = transcripts_to_track(&parsed);
+    assert_eq!(track.lines.len(), 2);
+    assert!(track.lines.iter().all(|l| l.en.is_empty()));
+    assert!(track.lines.iter().all(|l| l.sk.is_some()));
+}
+
+#[test]
+fn en_timed_is_mapped_through_at_ms_and_tempo() {
+    // SK lines start at 100 000 and 101 000 (at_ms 100 000, tempo 2.0).
+    // EN "One." at local 800 → 100 400 (line 0; without the tempo it would be
+    // 100 800 → line 1). EN "Two." at local 2000 → 101 000 (line 1; without
+    // at_ms both would sit near 0 → line 0).
+    let c = with_en(
+        chunk(
+            0,
+            Some(100_000),
+            Some(2.0),
+            vec![frag(2000, "Prvá."), frag(4000, "Druhá.")],
+        ),
+        vec![en_frag(800, "One."), en_frag(2000, " Two.")],
+    );
+    let t = build(vec![c]);
+    let got: Vec<(u64, &str)> = t
+        .lines
+        .iter()
+        .map(|l| (l.start_ms, l.en.as_str()))
+        .collect();
+    assert_eq!(got, vec![(100_000, "One."), (101_000, "Two.")]);
+}
+
+#[test]
+fn legacy_chunk_maps_en_from_start_ms() {
+    // No at_ms / tempo → the EN is placed at start_ms + t_ms, like the SK.
+    let c = with_en(
+        chunk(
+            50_000,
+            None,
+            None,
+            vec![frag(1000, "Prvá."), frag(9000, "Druhá.")],
+        ),
+        vec![en_frag(200, "One."), en_frag(1100, " Two.")],
+    );
+    let t = build(vec![c]);
+    let got: Vec<(u64, &str)> = t
+        .lines
+        .iter()
+        .map(|l| (l.start_ms, l.en.as_str()))
+        .collect();
+    assert_eq!(got, vec![(50_000, "One."), (51_000, "Two.")]);
+}
+
+#[test]
+fn en_stays_within_its_own_chunk() {
+    // Chunk 1's EN arrives late (9 500 on the video, nearer chunk 2's line at
+    // 10 000), but it translates chunk 1's input, so it stays on chunk 1's line.
+    let t = build(vec![
+        with_en(
+            chunk(0, Some(0), Some(1.0), vec![frag(1000, "Jeden.")]),
+            vec![en_frag(9500, "One.")],
+        ),
+        with_en(
+            chunk(0, Some(10_000), Some(1.0), vec![frag(1000, "Dva.")]),
+            vec![en_frag(0, "Two.")],
+        ),
+    ]);
+    let got: Vec<&str> = t.lines.iter().map(|l| l.en.as_str()).collect();
+    assert_eq!(got, vec!["One.", "Two."]);
+}
+
+#[test]
+fn the_video_344_lines_get_their_own_whole_en_sentences() {
+    // The owner's defect (#184 H3): with the char-fraction slice, „Rene Garcia."
+    // showed „First one" and „Prvý prihlásený." showed „in. Good to see you.".
+    // With the input transcription's own times every SK line gets its own whole
+    // EN sentence.
+    let c = with_en(
+        chunk(
+            0,
+            Some(0),
+            Some(1.0),
+            vec![
+                frag(3000, "Rene Garcia."),
+                frag(5000, "Prvý prihlásený."),
+                frag(6000, " Rád vás vidím."),
+                frag(12_000, "Ak by ste chceli podať žiadosť o modlitbu…"),
+            ],
+        ),
+        vec![
+            en_frag(300, "Rene Garcia."),
+            en_frag(3300, " First one"),
+            en_frag(3600, " in."),
+            en_frag(5200, " Good to see you."),
+            en_frag(6400, " If you want"),
+            en_frag(7000, " to get a prayer request in, text prayer."),
+        ],
+    );
+    let t = build(vec![c]);
+    let got: Vec<(u64, &str, &str)> = t
+        .lines
+        .iter()
+        .map(|l| (l.start_ms, l.sk.as_deref().unwrap(), l.en.as_str()))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (0, "Rene Garcia.", "Rene Garcia."),
+            (3000, "Prvý prihlásený.", "First one in."),
+            (5000, "Rád vás vidím.", "Good to see you."),
+            (
+                6000,
+                "Ak by ste chceli podať žiadosť o modlitbu…",
+                "If you want to get a prayer request in, text prayer."
+            ),
+        ]
     );
 }

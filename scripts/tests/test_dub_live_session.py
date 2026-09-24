@@ -158,11 +158,16 @@ def test_transcriptions_are_recorded_with_their_arrival_times():
     _, state, _, _ = run_fake(FakeServer([script]), pcm_frame_list(3), fast_opts())
     # Each part carries the connection it arrived on (review round 1: the
     # overlap's two connections are ordered by connection, not interleaved).
-    assert state.input_parts == [(1, "Hello ")]
+    # The input transcription carries its arrival time too, in the SAME shape as
+    # the output (#184 H3: the EN subtitle lines are timed by it).
+    assert [(t, c) for _, t, c in state.input_parts] == [("Hello ", 1)]
     assert [(t, c) for _, t, c in state.output_parts] == [("Ahoj ", 1), ("svet", 1)]
     times = [a for a, _, _ in state.output_parts]
     assert times == sorted(times)
     assert all(a >= 0 for a in times)
+    # Same message → same arrival time as the output fragment next to it.
+    assert state.input_parts[0][0] == state.output_parts[0][0]
+    assert isinstance(state.input_parts[0][0], float)
 
 
 def test_streamed_silence_does_not_hold_the_drain_open():
