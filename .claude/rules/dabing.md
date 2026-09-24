@@ -307,7 +307,8 @@ overlap cap once; `sk_timed_from` and `en_timed_from` both call it. The session
 records BOTH transcriptions as `(arrival_s, text, conn)`
 (`dub_live_session.py::SessionState.input_parts` / `output_parts`), and
 `joined_by_connection` takes that shape. With `at_ms` 0 / `tempo` 1.0 the builder
-below maps `t_ms` straight to video time, so D3 needed no change (pinned by
+below maps `t_ms` straight to video time, so the round-H one-chunk form needed no
+timing change in D3 (the H3 EN assignment is the only builder change since; pinned by
 `subtitles_tests.rs::one_continuous_session_chunk_builds_a_monotonic_bilingual_track`
 + `test_dub_worker.py::test_transcripts_are_one_chunk_on_the_video_timeline`). The
 multi-chunk form (per-chunk `at_ms`/`tempo`, a legacy JSON without them) is still
@@ -360,7 +361,10 @@ read correctly — dubs made before round H keep their subtitles.
   regime the error accumulated over the whole video. On video 344, „Rene Garcia."
   showed „First one" and „Prvý prihlásený." showed „in. Good to see you.".
   **A transcript written before H3 (no `en_timed`) has NO EN** until the video is
-  re-dubbed (`PATCH /api/v1/videos/{id}/dub {"requested":true}`, below).
+  re-dubbed (`PATCH /api/v1/videos/{id}/dub {"requested":true}`, below). A
+  subtitle track ALREADY STORED before H3 (e.g. video 344) keeps its old
+  char-fraction EN: the startup backfill only builds dubs that have no track, so
+  only a re-dub replaces it.
   No `sk_timed` → no lines.
 - `words: None`, `source = "gemini-live-translate"` (`SOURCE_LIVE_TRANSLATE`).
   Every branch is covered in `subtitles_tests.rs`.
@@ -562,8 +566,9 @@ and 5797708129 (freeze this state, the model is a setting).
   sits in memory). A failed run removes `live_output.raw` / `dub_placed.wav`.
 - Transcriptions carry their arrival time and connection (`(arrival_s, text,
   conn)`, input AND output since round H3); EN, SK, `en_timed` and `sk_timed`
-  are ordered BY CONNECTION (the old connection's trailing text arrives after the new one's first
-  text but translates earlier input — never interleaved). `sk_timed` =
+  are ordered BY CONNECTION (the old connection's trailing text arrives after
+  the new one's first text but translates earlier input — never interleaved).
+  `sk_timed` =
   output-transcription arrival − t0 − latency, clamped ≥ 0 and made
   non-decreasing — by CAPPING a connection's late (overlap) fragments at the
   EARLIEST first fragment of any later connection, never by pushing a later
