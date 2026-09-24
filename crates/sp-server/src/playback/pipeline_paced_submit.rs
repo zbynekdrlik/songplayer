@@ -384,9 +384,12 @@ pub(crate) fn emit_heartbeat_paced(
             // `submit_call_us_max`/`_p99` fields the SDK-clocked `pipeline:
             // loop-stats` line uses (identical naming), so a pacing-ON box test
             // reads the per-frame SDK submit cost per minute from that line.
+            // #147 r9: + SongPlayer's own page faults/min + working set (MiB),
+            // sampled process-wide at most once a minute (`proc_mem::gauge`).
             loop_stats: crate::playback::loop_stats::LoopStats {
                 submit_call_us_max: paced_submit.submit_call_us_max,
                 submit_call_us_p99: paced_submit.submit_call_us_p99,
+                proc_mem: crate::playback::proc_mem::gauge(),
                 ..Default::default()
             },
         },

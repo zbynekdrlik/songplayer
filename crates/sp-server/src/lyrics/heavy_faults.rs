@@ -19,15 +19,19 @@ pub const FAULT_SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
 /// Pure: page faults per second between two cumulative `PageFaultCount`
 /// readings `prev` → `now` over `elapsed`.
 ///
-/// Saturating and guarded: a zero/sub-tick `elapsed` yields 0 (never a divide
-/// hazard), and a decreasing counter (a wrapped or reset counter) yields 0
-/// rather than a bogus spike.
-pub fn faults_per_sec(prev: u64, now: u64, elapsed: Duration) -> u64 {
+/// A zero/sub-tick `elapsed` yields 0 (never a divide hazard). The counter is
+/// the **u32** `PROCESS_MEMORY_COUNTERS.PageFaultCount`, which WRAPS (the child
+/// ran ~136–193k faults/s, #168 — a wrap every ~6–9 h) and never resets within
+/// a process, so a decrease is a wrap: the delta is the shared wrap-safe
+/// `process_start::residency::fault_delta` (#147 round 9 — it used to
+/// `saturating_sub` a decrease to 0, which reported a spurious 0 faults/s at
+/// every wrap).
+pub fn faults_per_sec(prev: u32, now: u32, elapsed: Duration) -> u64 {
     let secs = elapsed.as_secs_f64();
     if secs <= 0.0 {
         return 0;
     }
-    let delta = now.saturating_sub(prev);
+    let delta = crate::process_start::residency::fault_delta(prev, now);
     (delta as f64 / secs) as u64
 }
 
@@ -42,7 +46,7 @@ pub fn spawn_fault_sampler(pid: u32) -> tokio::task::AbortHandle {
     let task = tokio::spawn(async move {
         let mut ticker = tokio::time::interval(FAULT_SAMPLE_INTERVAL);
         ticker.tick().await; // consume the immediate first tick
-        let mut prev: Option<u64> = None;
+        let mut prev: Option<u32> = None;
         let mut last = std::time::Instant::now();
         loop {
             ticker.tick().await;
@@ -69,7 +73,7 @@ pub fn spawn_fault_sampler(pid: u32) -> tokio::task::AbortHandle {
 /// `None` if the process cannot be opened or queried (e.g. it already exited).
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
-fn read_page_fault_count(pid: u32) -> Option<u64> {
+fn read_page_fault_count(pid: u32) -> Option<u32> {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::ProcessStatus::{
         GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
@@ -93,7 +97,7 @@ fn read_page_fault_count(pid: u32) -> Option<u64> {
         if ok == 0 {
             return None;
         }
-        Some(counters.PageFaultCount as u64)
+        Some(counters.PageFaultCount)
     }
 }
 
@@ -111,10 +115,16 @@ mod tests {
         assert_eq!(faults_per_sec(1_000, 4_000, Duration::ZERO), 0);
     }
 
-    /// A wrapped / reset counter (now < prev) must read 0, never a huge spike.
+    /// #147 round 9: `PageFaultCount` is a u32 that WRAPS (it never resets
+    /// within a process), so now < prev is a wrap — counted across u32::MAX,
+    /// not zeroed. `4_294_966_296` = `u32::MAX - 999`: 999 + 1 + 1 000 = 2 000
+    /// faults over 2 s → 1 000/s.
     #[test]
-    fn faults_per_sec_saturates_on_a_decreasing_counter() {
-        assert_eq!(faults_per_sec(9_000, 1_000, Duration::from_secs(2)), 0);
+    fn faults_per_sec_counts_across_a_u32_wrap() {
+        assert_eq!(
+            faults_per_sec(4_294_966_296, 1_000, Duration::from_secs(2)),
+            1_000
+        );
     }
 
     #[test]

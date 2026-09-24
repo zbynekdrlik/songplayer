@@ -77,6 +77,16 @@ pure code up front:
   covered by whichever call site a test pins.
 - **Every `<` / `>` on a threshold needs an exact-boundary test** (gap == limit,
   fraction == line boundary), not just a far-inside / far-outside pair.
+- **No `|` of disjoint flag bits inside a fn body** (#147 r9): `A | B` → `A ^ B`
+  is equivalent when the bits don't overlap. Build the flag words as `const`
+  items (cargo-mutants never mutates const initialisers) and have the fn only
+  pick one (`if cap == 0 { BASE } else { BASE_WITH_X }`).
+- **No redundant guard after an earlier arm** (#147 r9): `Some(0) => 0,
+  Some(v) if v > 0 => …` makes `>` → `>=` equivalent (0 is caught first). Parse
+  as `u64` so a negative simply fails to parse, and drop the guard.
+- **No trivial `const fn new()` next to `#[derive(Default)]`**: its body can be
+  swapped for `Default::default()` with no observable change. Seed a `static`
+  with a struct literal in the same module and use `Default` in tests.
 - A fn that only shells out (child process / ffmpeg) and is reachable only from
   an already-excluded orchestrator gets its own STRUCTURAL `exclude_re` line with
   a rationale naming the pure fns that carry its decisions.

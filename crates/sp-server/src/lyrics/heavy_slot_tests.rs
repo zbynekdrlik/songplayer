@@ -1,6 +1,7 @@
 //! #162 pure tests for the box-overload guard: the memory-headroom decision
 //! core and the process-global heavy-step slot serialization. Never reads real
-//! memory (the headroom is injected) and never touches the DB.
+//! memory (the headroom is injected). The #147 round-9 `resolve_containment` test
+//! uses an in-memory SQLite pool (no process globals are published).
 
 use super::*;
 // `super::*` does NOT re-export the parent's private `use containment_from_settings`
@@ -344,17 +345,18 @@ fn contained_line_is_grep_stable_with_alloc_mode() {
         Some("1000"),
         Some("lazy"),
         None,
+        None,
         24,
     );
     assert_eq!(
         contained_line(42, 1_073_741_824, &c),
-        "heavy child contained (pid 42): mem_limit=1073741824B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=1000 alloc_mode=lazy reserve_gib=4"
+        "heavy child contained (pid 42): mem_limit=1073741824B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=1000 alloc_mode=lazy reserve_gib=4 max_ws_mb=4096"
     );
     // The default (retained) mode renders `alloc_mode=retained`.
-    let c = containment_from_settings(Some("50"), Some("f0"), None, None, None, 8);
+    let c = containment_from_settings(Some("50"), Some("f0"), None, None, None, None, 8);
     assert_eq!(
         contained_line(7, 2048, &c),
-        "heavy child contained (pid 7): mem_limit=2048B cpu_cap=50% affinity=0xf0 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained reserve_gib=4"
+        "heavy child contained (pid 7): mem_limit=2048B cpu_cap=50% affinity=0xf0 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained reserve_gib=4 max_ws_mb=4096"
     );
 }
 
@@ -369,10 +371,61 @@ fn contained_line_carries_reserve_gib_after_alloc_mode() {
         Some("1000"),
         Some("lazy"),
         Some("2"),
+        None,
         24,
     );
     assert_eq!(
         contained_line(42, 1_073_741_824, &c),
-        "heavy child contained (pid 42): mem_limit=1073741824B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=1000 alloc_mode=lazy reserve_gib=2"
+        "heavy child contained (pid 42): mem_limit=1073741824B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=1000 alloc_mode=lazy reserve_gib=2 max_ws_mb=4096"
     );
+}
+
+// ---- #147 round 9 — the heavy child's working-set cap ----------------------
+
+/// The contained line ends with ` max_ws_mb=<n>` — the cap the Job Object
+/// APPLIED — or ` max_ws_mb=off` when the cap is disabled (`0`) or was
+/// rejected by the OS (the seam zeroes it on the retry-without path).
+#[test]
+fn contained_line_carries_the_applied_working_set_cap() {
+    let c = containment_from_settings(None, Some("e00000"), None, None, None, Some("2048"), 24);
+    assert_eq!(
+        contained_line(9, 4096, &c),
+        "heavy child contained (pid 9): mem_limit=4096B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained reserve_gib=4 max_ws_mb=2048"
+    );
+    let off = containment_from_settings(None, Some("e00000"), None, None, None, Some("0"), 24);
+    assert_eq!(
+        contained_line(9, 4096, &off),
+        "heavy child contained (pid 9): mem_limit=4096B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained reserve_gib=4 max_ws_mb=off"
+    );
+}
+
+/// `resolve_containment` reads `heavy_max_working_set_mb` — the SAME key
+/// `PATCH /api/v1/settings` writes (the settings API stores any key) — so a
+/// PATCH takes effect at the next heavy-child spawn. It does NOT publish, so
+/// this test never disturbs the process-global snapshot other tests read.
+#[tokio::test]
+async fn resolve_containment_reads_the_patched_working_set_cap() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    assert_eq!(
+        resolve_containment(&pool).await.max_working_set_mb,
+        4096,
+        "absent → the 4096 MiB default"
+    );
+    for (value, want) in [
+        ("2048", 2048),
+        ("0", 0),
+        ("100", 512),
+        ("99999", 10_240),
+        ("x", 4096),
+    ] {
+        crate::db::models::set_setting(&pool, "heavy_max_working_set_mb", value)
+            .await
+            .unwrap();
+        assert_eq!(
+            resolve_containment(&pool).await.max_working_set_mb,
+            want,
+            "{value}"
+        );
+    }
 }

@@ -160,6 +160,11 @@ pub struct LoopStats {
     pub catchup_dropped: u64,
     /// #207: frames dropped this window on a failed decoder buffer allocation.
     pub frames_dropped_alloc: u64,
+    /// #147 round 9: SongPlayer's OWN page faults per minute + working set (MiB)
+    /// over the last full minute (`playback::proc_mem`), filled on the PACED
+    /// path; `None` (logged `na`) before the first full minute, off Windows,
+    /// and on the SDK-clocked path.
+    pub proc_mem: Option<crate::playback::proc_mem::ProcMemGauge>,
 }
 
 impl LoopStats {
@@ -179,15 +184,19 @@ impl LoopStats {
             audio_us_max: stage.audio_us_max,
             catchup_dropped: stage.catchup_dropped,
             frames_dropped_alloc: stage.frames_dropped_alloc,
+            proc_mem: None,
         }
     }
 }
 
 /// Format the grep-stable `pipeline: loop-stats` line logged beside `ndi:
 /// heartbeat` (the `format_genlock_line` precedent). Pure, exact-string tested.
+/// #147 round 9 appends `page_faults_per_min=<n|na> working_set_mb=<n|na>`
+/// (SongPlayer's own residency, beside `submit_call_us_max`).
 pub fn format_loop_stats_line(ndi_name: &str, s: &LoopStats) -> String {
+    use crate::playback::proc_mem::fmt_opt;
     format!(
-        "pipeline: loop-stats ndi_name=\"{}\" submit_call_us_max={} submit_call_us_p99={} decode_us_max={} submit_us_max={} audio_us_max={} catchup_dropped={} frames_dropped_alloc={}",
+        "pipeline: loop-stats ndi_name=\"{}\" submit_call_us_max={} submit_call_us_p99={} decode_us_max={} submit_us_max={} audio_us_max={} catchup_dropped={} frames_dropped_alloc={} page_faults_per_min={} working_set_mb={}",
         ndi_name,
         s.submit_call_us_max,
         s.submit_call_us_p99,
@@ -196,6 +205,8 @@ pub fn format_loop_stats_line(ndi_name: &str, s: &LoopStats) -> String {
         s.audio_us_max,
         s.catchup_dropped,
         s.frames_dropped_alloc,
+        fmt_opt(s.proc_mem.map(|g| g.page_faults_per_min)),
+        fmt_opt(s.proc_mem.map(|g| g.working_set_mb)),
     )
 }
 
@@ -343,6 +354,7 @@ mod tests {
                 audio_us_max: 33,
                 catchup_dropped: 7,      // carried through from the stage
                 frames_dropped_alloc: 4, // #207: carried through too
+                proc_mem: None,          // #147 r9: paced-path only
             }
         );
     }
@@ -357,10 +369,29 @@ mod tests {
             audio_us_max: 33,
             catchup_dropped: 5,
             frames_dropped_alloc: 2,
+            proc_mem: None,
         };
         assert_eq!(
             format_loop_stats_line("SP-fast", &ls),
-            "pipeline: loop-stats ndi_name=\"SP-fast\" submit_call_us_max=954000 submit_call_us_p99=88000 decode_us_max=11 submit_us_max=22 audio_us_max=33 catchup_dropped=5 frames_dropped_alloc=2"
+            "pipeline: loop-stats ndi_name=\"SP-fast\" submit_call_us_max=954000 submit_call_us_p99=88000 decode_us_max=11 submit_us_max=22 audio_us_max=33 catchup_dropped=5 frames_dropped_alloc=2 page_faults_per_min=na working_set_mb=na"
+        );
+    }
+
+    /// #147 round 9: the paced line carries SongPlayer's own page faults per
+    /// minute + working set (MiB) — distinct values so a swapped field diverges.
+    #[test]
+    fn format_loop_stats_line_carries_page_faults_and_working_set() {
+        let ls = LoopStats {
+            submit_call_us_max: 25_100,
+            proc_mem: Some(crate::playback::proc_mem::ProcMemGauge {
+                page_faults_per_min: 48_213,
+                working_set_mb: 2_300,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            format_loop_stats_line("SP-slow", &ls),
+            "pipeline: loop-stats ndi_name=\"SP-slow\" submit_call_us_max=25100 submit_call_us_p99=0 decode_us_max=0 submit_us_max=0 audio_us_max=0 catchup_dropped=0 frames_dropped_alloc=0 page_faults_per_min=48213 working_set_mb=2300"
         );
     }
 

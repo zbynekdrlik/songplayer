@@ -152,8 +152,7 @@ pub async fn start(
     config: ServerConfig,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), anyhow::Error> {
-    // #196: record the process start for `/api/v1/status.uptime_s` (the E2E job
-    // skips restarting a freshly-deployed process). Idempotent.
+    // #196: record the process start for `/api/v1/status.uptime_s`. Idempotent.
     crate::process_start::mark_started();
 
     // #203: raise SongPlayer to HIGH_PRIORITY_CLASS so the NDI SDK compression
@@ -177,6 +176,7 @@ pub async fn start(
     startup::ensure_live_playlist_exists(&pool).await?;
     startup::ensure_dabing_playlist_exists(&pool).await?; // #180 dubbing D1
     info!("database ready");
+    crate::process_start::apply_min_working_set(&pool).await; // #147 r9: hard min working set
 
     // Self-heal cache: delete legacy single-mp4s, delete orphans,
     // re-link complete pairs. Non-fatal on error.
