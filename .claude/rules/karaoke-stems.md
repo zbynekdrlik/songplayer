@@ -52,6 +52,9 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
 - **Native output is 44.1 kHz** (model rate); the mix + the decoder require
   **48 kHz stereo**, so `stem_worker.py` resamples every stem to 48 kHz stereo
   before writing FLAC (PCM_24).
+- **The separation child NEVER holds a whole-video array (#207).** It runs under
+  a 10 GiB per-process job cap. Read the mix one window at a time and stream
+  each stem through `_StreamingStitchWriter`. See the #207 section at the end.
 
 ## #184 G5 — bounded audio read-ahead (any read-ahead = fader latency)
 
@@ -244,7 +247,8 @@ DELETED names.
      30 s / 2 s-overlap windows (`_segment_bounds`), isolate/separate each into
      `<cache>/<id>_isolation|_stemsep/seg_*.wav`, SKIP windows already present on
      start (logs `isolation resumed from chunk N/M`), load models ONCE, then
-     stitch (`_stitch_segments`, weight-normalised linear crossfade) + atomic
+     stitch (weight-normalised linear crossfade — for stems STREAMED since #207,
+     see the #207 section; `_stitch_segments` is only the test reference) + atomic
      `os.replace` to the final output + remove the work dir. Stems stitch BOTH
      stems with IDENTICAL crossfade weights so `vocals+instrumental==mix`
      additivity holds by linearity. audio-separator exposes NO per-chunk resume
@@ -588,3 +592,64 @@ into an APP-OWNED venv interpreter.
   separation this line — and `Get-Counter '\Process(python*)\Page Faults/sec'` —
   should read ≤ 20k (down from ~193k) with the boot log showing
   `mimalloc override active`.
+
+## #207 — streaming separation (memory is O(segment), never O(video))
+
+**The cap.** The separation child runs inside a per-child Windows Job Object
+with `JOB_OBJECT_LIMIT_PROCESS_MEMORY` = **10 GiB**
+(`heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES`). The #168 mimalloc arena
+reserve (the `heavy_alloc_reserve_gib` setting: 2 GiB on the box on 24.9.,
+committed but never touched) counts against the same 10 GiB.
+Error 1455 from the job cap ignores how much commit the host has free.
+
+**Why whole-video arrays failed every video longer than ~35 min.** Before #207,
+`cmd_separate` held three whole-length arrays:
+- `librosa.load(mix, sr=None)` kept the whole mix for the entire run. A 70 min
+  stereo float32 mix is ≈ 1.6 GB.
+- `_stitch_paths` read EVERY segment WAV at once, and `_stitch_segments` built a
+  full-length float64 output plus a full-length `wsum`.
+- `_write_array_48k_stereo` copied the output again (`np.clip`, then
+  soundfile's PCM_24 conversion).
+
+On 24.9. 16 of 31 separations failed, on 5 videos of 36–71 min (330, 332, 328,
+149, 150). Video 150 (61.8 min) died on
+`Unable to allocate 1.33 GiB for an array with shape (177922440,) and data type float64`,
+which is 61.8 min × 48 kHz, one channel as float64, with several copies alive.
+The host had ~35 GB of commit free at the time, so the per-child cap was the
+limit, not the box.
+
+**Now (all in `scripts/stem_worker.py`):**
+- **Input.** `_audio_info` reads only the header (rate, frames). The window
+  plan trusts that count, so an empty or UNKNOWN count raises `ValueError`. A
+  FLAC from a piped encoder has STREAMINFO total = 0, which libsndfile reports
+  as a ~2^63 sentinel; without the check, `_segment_bounds` would loop into
+  the memory cap.
+  `_read_window(path, in_sr, start_s, end_s)` reads one window with `sf.read`
+  `start`/`stop`. It uses the SAME `round(t*sr)` bounds and the same float32
+  `(n[, ch])` layout as the old slice. librosa's `sr=None` load is itself a
+  soundfile float32 read, so the samples are identical.
+- **Output.** `_StreamingStitchWriter` overlap-adds with the same linear weights
+  and the same float64 accumulation order as `_stitch_segments`, and
+  weight-normalises. It writes every sample before the next segment's start as
+  a clipped float32 block to a PCM_24 FLAC `.tmp`, and holds ONLY the overlap
+  tail (`max_retained_samples` == overlap, whatever the segment count).
+  - It publishes with `os.replace` only after all declared segments have been
+    added.
+  - On any failure (an exception, too few segments, or a failed final close
+    or replace) it retries the close so the handle is released, removes the
+    `.tmp`, and leaves the final sidecar untouched.
+  - Its output is **bit-identical** to
+    `_write_array_48k_stereo(_stitch_segments(...))`.
+- `_stitch_to_flac` feeds the per-segment WAVs one at a time: vocals first,
+  then instrumental, the same order as before.
+- `_stitch_segments` and `_write_array_48k_stereo` stay ONLY as the reference
+  the tests compare against (`scripts/tests/test_stem_streaming.py`). The child
+  never calls them.
+
+**Rule: never load the whole mix or build a whole-length output array in the
+heavy child.** This covers `librosa.load` of the mix, `np.concatenate` of all
+segments, a `total`-sized `np.zeros`, and `sf.read` / `sf.write` of a whole
+stem. Anything that grows with video length fails for long videos under the
+10 GiB cap. The per-window working set (a 30 s window, the separator,
+`_load_48k_stereo` of one separated window, and the 2 s tail) is the budget.
+The resumable per-segment work dir (#171) is unchanged.
