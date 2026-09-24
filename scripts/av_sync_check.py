@@ -423,8 +423,10 @@ def dropout_blocks(
     sub_rms = _windowed_rms(orig, np.arange(0, n - sub + 1, hop), sub)
     per_win = (win - sub) // hop + 1  # sub-windows starting inside each window
     min_sub = np.lib.stride_tricks.sliding_window_view(sub_rms, per_win).min(axis=1)
-    if len(min_sub) < len(starts):
-        raise ValueError("dropouts: hop must divide the window and sub-window lengths")
+    if win % hop or sub % hop or len(min_sub) < len(starts):
+        raise ValueError(
+            "dropouts: the hop must divide the window and sub-window lengths"
+        )
     w_loud = _loud(
         w_orig, (starts >= guard) & (starts + win <= n - guard), min_sub[: len(starts)]
     )
@@ -492,6 +494,7 @@ def verdict(
     av_ms: float,
     dropouts: int,
     max_av_ms: float = DEFAULT_MAX_AV_MS,
+    video_error: str | None = None,
 ) -> tuple[str, list[str], list[str]]:
     """``(status, reasons, unmeasurable_sides)`` from the measured numbers.
 
@@ -504,8 +507,12 @@ def verdict(
     3. PICTURE unmeasurable (match < 0.95 or contrast < 0.002) ->
        ``cannot_measure``, and A/V is not judged.
     4. |A/V| > ``max_av_ms`` -> ``fail``, else ``pass``.
-    ``unmeasurable_sides`` (``"audio"`` / ``"video"``) lets the caller retake
-    ONLY a picture-side cannot-measure.
+    ``unmeasurable_sides`` (``"audio"`` / ``"video"`` / ``"video_error"``)
+    lets the caller retake ONLY a ``["video"]`` cannot-measure (a still or
+    overlaid picture that another song may not have). A ``video_error`` (the
+    picture step raised: a probe, decode or crop bug) sits at step 3 too, but
+    is deterministic and never retaken. Its reason is the error alone, not
+    NaN thresholds.
     """
     audio_bad = (
         []
@@ -513,22 +520,26 @@ def verdict(
         else [f"audio correlation {audio_corr:.3f} < {MIN_AUDIO_CORR}"]
     )
     video_bad = []
-    if not video_match >= MIN_VIDEO_MATCH:
+    video_side = "video"
+    if video_error:
+        video_bad.append(video_error)
+        video_side = "video_error"
+    elif not video_match >= MIN_VIDEO_MATCH:
         video_bad.append(f"video match {video_match:.3f} < {MIN_VIDEO_MATCH}")
-    if not video_contrast >= MIN_VIDEO_CONTRAST:
+    if not video_error and not video_contrast >= MIN_VIDEO_CONTRAST:
         video_bad.append(
             f"video contrast {video_contrast:.4f} < {MIN_VIDEO_CONTRAST} (no motion to align on)"
         )
     drop_fail = [f"{dropouts} audio dropout(s)"] if dropouts > 0 else []
     if audio_bad:
-        sides = ["audio"] + (["video"] if video_bad else [])
+        sides = ["audio"] + ([video_side] if video_bad else [])
         # Dropouts are reported too (heavy ones lower the correlation), but an
         # unaligned recording's dropout count is not a verdict on its own.
         return "cannot_measure", audio_bad + video_bad + drop_fail, sides
     if drop_fail:
         return "fail", drop_fail + video_bad, []
     if video_bad:
-        return "cannot_measure", video_bad, ["video"]
+        return "cannot_measure", video_bad, [video_side]
     if not abs(av_ms) <= max_av_ms:
         return "fail", [f"|A/V| {abs(av_ms):.1f} ms > {max_av_ms:g} ms"], []
     return "pass", [], []
@@ -715,9 +726,8 @@ def measure(
         float("nan") if av_ms is None else av_ms,
         drops["dropout_count"],
         max_av_ms,
+        video_error,
     )
-    if video_error:
-        reasons.append(video_error)
     return {
         "status": status,
         "reasons": reasons,

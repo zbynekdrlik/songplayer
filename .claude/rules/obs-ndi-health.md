@@ -373,16 +373,27 @@ and the recording actually get.
     `removeRecording` waits for the remux and retries while OBS still holds
     the file. An undeletable file fails the test after the verdict, never
     masking it.
-  - `afterAll` first sets `tornDown`: Playwright does not cancel a
-    timed-out body, so the body refuses to start a recording or a skip after
-    it. `ObsDriver.lastRecordingPath` keeps the file of a StopRecord whose
+  - `afterAll` first sets `tornDown`. Playwright does not cancel a
+    timed-out body, so after that point the body refuses to start a
+    recording, the recording wait, or a skip.
+  - It awaits an in-flight `StartRecord`, which is tracked as
+    `startInFlight`. A start that resolved is ours, even if the body never
+    got to set `recordingOurs`. A REJECTED start (an operator recording was
+    running) is never stopped.
+  - `ObsDriver.lastRecordingPath` keeps the file of a StopRecord whose
     inactive-poll timed out, so that file is deleted too.
-  - `afterAll` is the safety net for a timed-out body. It kills a
-    still-running analysis (a Windows `taskkill /T`: python AND its ffmpeg
-    children hold the file open), stops our recording (only while
-    `isRecording()`), re-deletes every recording made (late remux siblings
-    too), restores the faders and restores the scene. Each step runs in its
-    own try/catch, and the errors are asserted together at the end.
+  - `afterAll` is the safety net for a timed-out body. It does all of this:
+    - kills a still-running analysis (a Windows `taskkill /T`, because python
+      AND its ffmpeg children hold the file open);
+    - stops our recording, only while `isRecording()`;
+    - deletes any recording it stopped itself, waiting 15 s for the remux
+      sibling;
+    - re-sweeps every earlier take, which catches a sibling that appeared
+      after the take's own wait;
+    - restores the faders and the scene.
+
+    Each step runs in its own try/catch, and the errors are asserted together
+    at the end.
 - **Original sidecars:** `/api/v1/playlists/{id}/videos` has NO `file_path`.
   The pair is resolved from the cache listing by
   `*_{youtube_id}_normalized[_gf]_{video.mp4|audio.flac}`
@@ -445,11 +456,14 @@ and the recording actually get.
     2. Any dropout → `fail`, even when the picture is unmeasurable. A still
        or overlaid picture must never turn a lost buffer into a retake.
     3. Picture unmeasurable → `cannot_measure` (sides `["video"]`); A/V is
-       not judged. An EXCEPTION in the picture step (probe, decode,
-       no-shift) lands here too, as a `video analysis error` reason with
-       `av_ms: null`, so dropouts already found still decide step 2. An
-       audio-step exception is `cannot_measure` with sides `["error"]`,
-       which is never retaken.
+       not judged.
+       - An EXCEPTION in the picture step (probe, decode, crop, no-shift)
+         is side `["video_error"]` with the error as the only reason and
+         `av_ms: null`. Dropouts already found still decide step 2.
+       - A `video_error` is deterministic (a bug), so it is NEVER retaken.
+         Only `["video"]` is retaken.
+       - An audio-step exception is `cannot_measure` with sides
+         `["error"]`, and is never retaken.
     4. |A/V| > 40 → `fail`, else `pass`.
   - **letterbox crop:** the original is cropped (`source_crop`) to exactly
     the grid cells the recording keeps before scaling. A letterbox edge

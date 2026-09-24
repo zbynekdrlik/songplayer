@@ -128,6 +128,18 @@ test.describe("A/V sync gate helpers (#147)", () => {
       JSON.stringify({ status: "cannot_measure", reasons: ["analysis error: RuntimeError: ffmpeg"] }),
     );
     expect(crashed.retakeable).toBe(false);
+
+    // A picture-step EXCEPTION (probe/decode/crop bug) is deterministic: never retaken.
+    const videoError = classifyAvSyncRun(
+      2,
+      JSON.stringify({
+        status: "cannot_measure",
+        reasons: ["video analysis error: RuntimeError: decoded 0 frames"],
+        unmeasurable_sides: ["video_error"],
+      }),
+    );
+    expect(videoError.status).toBe("cannot_measure");
+    expect(videoError.retakeable).toBe(false);
   });
 
   test("classifyAvSyncRun: no JSON or a contradicting exit code is an error, not a verdict", () => {

@@ -14,6 +14,7 @@ so that layer runs on the box in e2e/post-deploy-av-sync.spec.ts.
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import numpy as np
@@ -390,19 +391,80 @@ def test_a_block_holding_a_dropout_is_not_also_a_glitch():
     rng = np.random.default_rng(18)
     orig = rng.standard_normal(SR * 4) * 0.2
     rec = orig * 0.8
-    i = 2 * SR + 20  # inside one 50 ms block
-    rec[i : i + int(0.03 * SR)] = 0.0
+    blk = SR * avs.BLOCK_MS // 1000
+    i = 2 * SR + 40  # 40 ms of silence inside one 50 ms block
+    rec[i : i + int(0.04 * SR)] = 0.0
     out = avs.dropout_blocks(rec, orig, SR)
+    # The block really is a glitch candidate (relative error > 0.8) ...
+    b = i // blk
+    ref = out["gain"] * orig[b * blk : (b + 1) * blk]
+    rel = np.linalg.norm(rec[b * blk : (b + 1) * blk] - ref) / np.linalg.norm(ref)
+    assert rel > avs.GLITCH_REL_ERR
+    # ... but it is reported once, as the dropout.
     assert out["dropout_count"] == 1
     assert out["glitch_blocks"] == 0
 
 
-def test_a_video_analysis_error_still_fails_found_dropouts():
-    """measure() turns a picture-step exception into NaN match/contrast/A/V."""
+def test_a_video_analysis_error_is_its_own_non_retakeable_side():
+    err = "video analysis error: RuntimeError: ffmpeg exited 1"
     nan = float("nan")
-    assert avs.verdict(0.99, nan, nan, nan, 2)[0] == "fail"
-    status, _, sides = avs.verdict(0.99, nan, nan, nan, 0)
-    assert (status, sides) == ("cannot_measure", ["video"])
+    # Dropouts found by the audio still fail the run.
+    status, reasons, sides = avs.verdict(0.99, nan, nan, nan, 2, video_error=err)
+    assert (status, sides) == ("fail", [])
+    assert reasons == ["2 audio dropout(s)", err]
+    # Without dropouts: cannot_measure, the error alone (no NaN thresholds).
+    status, reasons, sides = avs.verdict(0.99, nan, nan, nan, 0, video_error=err)
+    assert (status, reasons, sides) == ("cannot_measure", [err], ["video_error"])
+
+
+def _patch_measure_inputs(monkeypatch, rec, orig, video):
+    """Drive the real measure() with the ffmpeg layer replaced."""
+
+    def fake_decode_audio(_ffmpeg, path):
+        return (rec, REC_T0) if path == "rec.mkv" else (orig, 0.0)
+
+    monkeypatch.setattr(avs, "decode_audio", fake_decode_audio)
+    monkeypatch.setattr(avs, "_measure_video", video)
+
+
+def test_measure_turns_a_picture_step_exception_into_valid_json(monkeypatch):
+    audio, frames, pts = _original()
+    rec_audio, _, _ = _recording(audio, frames, pts, start=20.0, av_ms=0.0)
+
+    def broken(*_args):
+        raise RuntimeError("decoded 0 frames")
+
+    _patch_measure_inputs(monkeypatch, rec_audio, audio, broken)
+    r = avs.measure("rec.mkv", "a.flac", "v.mp4")
+    json.dumps(r, allow_nan=False)  # strict JSON: no NaN may leak
+    assert r["av_ms"] is None
+    assert r["status"] == "cannot_measure"
+    assert r["unmeasurable_sides"] == ["video_error"]
+    assert r["video"] == {
+        "error": "video analysis error: RuntimeError: decoded 0 frames"
+    }
+    assert r["audio"]["corr"] >= avs.MIN_AUDIO_CORR
+
+
+def test_measure_reports_av_from_the_video_step(monkeypatch):
+    audio, frames, pts = _original()
+    rec_audio, _, _ = _recording(audio, frames, pts, start=20.0, av_ms=120.0)
+
+    def video(_ffmpeg, _rec, _orig, center_s):
+        # The picture shows orig 20.0 at rec 0: 120 ms behind the audio.
+        return {
+            "frames": 600,
+            "_offset_exact": 20.0,
+            "_match_exact": 0.99,
+            "_contrast_exact": 0.01,
+        }
+
+    _patch_measure_inputs(monkeypatch, rec_audio, audio, video)
+    r = avs.measure("rec.mkv", "a.flac", "v.mp4")
+    json.dumps(r, allow_nan=False)
+    assert r["av_ms"] == pytest.approx(120.0, abs=1.0)
+    assert r["status"] == "fail"
+    assert r["video"] == {"frames": 600}  # the exact helper keys are removed
 
 
 def test_clean_recording_has_no_dropouts_or_glitches():

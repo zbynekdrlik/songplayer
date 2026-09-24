@@ -159,6 +159,11 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   // Cleanup state shared with afterAll. A timed-out test body never reaches
   // its own finally, so afterAll finishes whatever is still marked here.
   let recordingOurs = false;
+  // An in-flight StartRecord. afterAll awaits it: if the body timed out while
+  // OBS was starting, the recording is ours even though `recordingOurs` was
+  // never set. A REJECTED start (e.g. an operator recording was running) is
+  // never ours to stop.
+  let startInFlight: Promise<void> | null = null;
   const madeRecordings: string[] = [];
   let liveChild: ChildProcess | null = null;
   let fadersToRestore: { vokaly: number; podklad: number } | null = null;
@@ -224,15 +229,35 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       await step("kill the analysis", async () => {
         if (liveChild) killTree(liveChild);
       });
+      let ours = recordingOurs;
+      const pendingStart = startInFlight;
+      await step("settle an in-flight StartRecord", async () => {
+        if (!pendingStart) return;
+        try {
+          await pendingStart;
+          ours = true;
+        } catch {
+          // rejected: nothing of ours started
+        }
+      });
+      // Paths stopped HERE have not been remuxed yet: wait for their sibling.
+      const stoppedHere: string[] = [];
       await step("stop our recording", async () => {
-        if (recordingOurs && (await driver.isRecording())) await driver.stopRecord();
+        if (ours && (await driver.isRecording())) stoppedHere.push(await driver.stopRecord());
       });
       await step("delete the recordings", async () => {
-        // A StopRecord whose inactive-poll timed out still left its path here.
+        // A StopRecord whose inactive-poll timed out still left its path.
         const last = driver.lastRecordingPath;
-        if (recordingOurs && last && !madeRecordings.includes(last)) madeRecordings.push(last);
+        if (ours && last && !madeRecordings.includes(last) && !stoppedHere.includes(last)) {
+          stoppedHere.push(last);
+        }
         recordingOurs = false;
         const left: string[] = [];
+        for (const rec of stoppedHere) {
+          left.push(...(await removeRecording(rec, autoRemux, 15_000)));
+        }
+        // Already-handled takes: a re-sweep catches a remux sibling that
+        // appeared after the take's own 15 s wait.
         for (const rec of madeRecordings) left.push(...(await removeRecording(rec, autoRemux, 0)));
         expect(left, "every OBS recording the gate made must be deleted").toEqual([]);
       });
@@ -350,8 +375,12 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
 
         // 4. Record the PROGRAM.
         assertNotTornDown("a recording");
-        await driver.startRecord();
+        startInFlight = driver.startRecord();
+        await startInFlight;
+        startInFlight = null;
         recordingOurs = true;
+        // afterAll may have begun while OBS was starting: leave the stop to it.
+        assertNotTornDown("the recording wait");
         await sleep(RECORD_MS);
         const recording = await driver.stopRecord();
         madeRecordings.push(recording);
