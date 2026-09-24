@@ -23,6 +23,28 @@ fn bytes_to_mb_rounds_down() {
     assert_eq!(bytes_to_mb(0), 0);
 }
 
+// ---- fault_delta (shared by proc_mem + heavy_faults) -----------------------
+
+#[test]
+fn fault_delta_is_the_forward_distance_on_a_monotonic_counter() {
+    assert_eq!(fault_delta(1_000, 4_000), 3_000);
+    assert_eq!(fault_delta(7, 7), 0, "no faults");
+}
+
+/// PageFaultCount is a u32 that WRAPS (≈ every 2.4 h at the box's 500k/s);
+/// a decrease is a wrap, never a reset, so the true distance is counted
+/// across u32::MAX.
+#[test]
+fn fault_delta_counts_across_a_u32_wrap() {
+    assert_eq!(fault_delta(u32::MAX - 9, 5), 15);
+    assert_eq!(fault_delta(u32::MAX, 0), 1);
+    assert_eq!(
+        fault_delta(1, 0),
+        u32::MAX as u64,
+        "a decrease = one full wrap"
+    );
+}
+
 // ---- parse_mb_setting / mb_setting_ignored (shared with the heavy child) ---
 
 #[test]
@@ -177,9 +199,15 @@ fn plan_sets_hard_min_and_a_soft_max_of_twice_the_min() {
 
 #[test]
 fn residency_line_disabled() {
+    // The privilege is still enabled (the heavy child's job cap may need it),
+    // so the disabled line carries its outcome; `set` is not reported.
     assert_eq!(
-        residency_line(None, Ok(()), Ok(())),
-        "sp working set: hard_min disabled (sp_min_working_set_mb=0)"
+        residency_line(None, Ok(()), Err(87)),
+        "sp working set: hard_min disabled (sp_min_working_set_mb=0) privilege=ok"
+    );
+    assert_eq!(
+        residency_line(None, Err(1300), Ok(())),
+        "sp working set: hard_min disabled (sp_min_working_set_mb=0) privilege=failed(err=1300)"
     );
 }
 

@@ -387,8 +387,8 @@ pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment 
 /// [`containment_from_settings`] — WITHOUT publishing (split from
 /// [`refresh_containment`] in #147 round 9 so the DB → value path, e.g. a
 /// `PATCH /api/v1/settings` of `heavy_max_working_set_mb`, is unit-tested
-/// without touching the process-global snapshot other tests read). WARNs once
-/// per ignored value.
+/// without touching the process-global snapshot other tests read). WARNs on
+/// every resolve (each worker tick) while a present value is invalid.
 ///
 /// mutants::skip — DB reads + WARN side effects; the value logic is the pure,
 /// mutation-scored `heavy_containment` parse fns.
@@ -627,13 +627,20 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
         if job.is_null() {
             return None;
         }
+        // `Err(GetLastError())` read IMMEDIATELY after a failed call (before any
+        // logging code can clobber the thread's last-error value).
         let set_extended = |info: &JOBOBJECT_EXTENDED_LIMIT_INFORMATION| {
-            SetInformationJobObject(
+            if SetInformationJobObject(
                 job,
                 JobObjectExtendedLimitInformation,
                 info as *const _ as *const c_void,
                 std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            ) != 0
+            ) == 0
+            {
+                Err(GetLastError())
+            } else {
+                Ok(())
+            }
         };
         // #203: ONE extended-limit struct carries the memory ceiling,
         // kill-on-close AND the core affinity (the wall keeps its cores) — a
@@ -650,7 +657,7 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
             info.BasicLimitInformation.MaximumWorkingSetSize = max;
         }
         info.ProcessMemoryLimit = limit_bytes;
-        if !set_extended(&info) {
+        if let Err(err) = set_extended(&info) {
             // #147 round 9: a rejected working-set cap must never cost the
             // #162 memory ceiling + kill-on-close — retry once WITHOUT it.
             if applied.max_working_set_mb == 0 {
@@ -658,13 +665,12 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
                 return None;
             }
             tracing::warn!(
-                "heavy child working-set cap {} MiB rejected (pid {pid}, err {}) — job applied without it",
-                applied.max_working_set_mb,
-                GetLastError()
+                "heavy child working-set cap {} MiB rejected (pid {pid}, err {err}) — job applied without it",
+                applied.max_working_set_mb
             );
             applied.max_working_set_mb = 0;
             without_working_set(&mut info);
-            if !set_extended(&info) {
+            if set_extended(&info).is_err() {
                 CloseHandle(job);
                 return None;
             }
@@ -712,17 +718,17 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
         }
         let mut assigned = AssignProcessToJobObject(job, proc);
         if assigned == 0 && applied.max_working_set_mb != 0 {
+            let err = GetLastError(); // read before any logging call
             // #147 round 9: the job's working-set limits are applied to the
             // process AT assignment — if that is what failed, drop the cap and
             // retry once so the child still gets the memory ceiling + kill-on-close.
             tracing::warn!(
-                "heavy child job assignment with a {} MiB working-set cap failed (pid {pid}, err {}) — retrying without it",
-                applied.max_working_set_mb,
-                GetLastError()
+                "heavy child job assignment with a {} MiB working-set cap failed (pid {pid}, err {err}) — retrying without it",
+                applied.max_working_set_mb
             );
             applied.max_working_set_mb = 0;
             without_working_set(&mut info);
-            if set_extended(&info) {
+            if set_extended(&info).is_ok() {
                 assigned = AssignProcessToJobObject(job, proc);
             }
         }

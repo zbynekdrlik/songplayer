@@ -1,6 +1,7 @@
 //! #162 pure tests for the box-overload guard: the memory-headroom decision
 //! core and the process-global heavy-step slot serialization. Never reads real
-//! memory (the headroom is injected) and never touches the DB.
+//! memory (the headroom is injected). The #147 round-9 `resolve_containment` test
+//! uses an in-memory SQLite pool (no process globals are published).
 
 use super::*;
 // `super::*` does NOT re-export the parent's private `use containment_from_settings`

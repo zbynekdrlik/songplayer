@@ -42,7 +42,7 @@ with a stems child resident (grid slot 33 ms) → genlock pacing collapse + the
 | `heavy_purge_delay_ms` (#207) | **-1** (never decommit — the #168 retained-heap default) | integer ms; `-1` or `0..=600000` (absent / unparseable / out-of-range → -1 in RETAINED; in LAZY a negative value substitutes 10000, a never-purge lazy heap only grows). Applied to the SEPARATION child's `MIMALLOC_PURGE_DELAY` at spawn via `heavy_alloc_env(mode, purge_delay_ms)`. Visible in the `heavy child contained (pid …): … purge_delay_ms=<v> alloc_mode=<mode>` line at the next spawn. |
 | `heavy_alloc_mode` (#207 phase-3) | **retained** | `retained` \| `lazy` (unrecognised → retained, WARN). RETAINED = today's #168 heap (`MIMALLOC_ARENA_EAGER_COMMIT=1`, reserve `heavy_alloc_reserve_gib`, purge per `heavy_purge_delay_ms`). LAZY = `MIMALLOC_ARENA_EAGER_COMMIT=0` (reserve stays reserved-not-committed, commit grows with touch, purged after the delay — default 10 s). Applied to the SEPARATION child at spawn; visible as `alloc_mode=` in the contained line. |
 | `heavy_alloc_reserve_gib` (#207 round-3c) | **4** | integer GiB, `1..=8` (absent/unparseable/out-of-range → 4, WARN). Sizes `MIMALLOC_RESERVE_OS_MEMORY` for BOTH modes — round-3b's mimalloc self-report (issue #207 comment 5793008637) showed the eager-committed 4 GiB arena IS the ~4 GiB piece of the child's 8.7 GiB peak commit (`reserved: 4.0 GiB / committed: 4.0 GiB / commits: 0`), so a smaller reserve directly cuts commit by the difference — **as long as the report's `commits` counter stays 0** at the new size (see below). Applied via `heavy_alloc_env(mode, purge_delay_ms, reserve_gib)`; visible as `reserve_gib=<n>` after `alloc_mode=` in the contained line. |
-| `heavy_max_working_set_mb` (#147 round 9) | **4096** | integer MiB; `0` = no cap, else clamped `512..=10240` (absent/garbage/negative → 4096, WARN). The Job Object's `JOB_OBJECT_LIMIT_WORKINGSET` maximum (minimum 256 MiB), so the child pages ITSELF instead of evicting SongPlayer. Applies at the next child spawn. Visible as `max_ws_mb=<n\|off>` after `reserve_gib=` in the contained line; `off` = disabled or rejected by the OS. See the round-9 section below. |
+| `heavy_max_working_set_mb` (#147 round 9) | **4096** | integer MiB; `0` = no cap, else clamped `512..=10240` (absent → 4096; garbage/negative → 4096 + WARN; out-of-range → clamped + WARN). The Job Object's `JOB_OBJECT_LIMIT_WORKINGSET` maximum (minimum 256 MiB), so the child pages ITSELF instead of evicting SongPlayer. Applies at the next child spawn. Visible as `max_ws_mb=<n\|off>` after `reserve_gib=` in the contained line; `off` = disabled or rejected by the OS. See the round-9 section below. |
 
 The default affinity mask is DERIVED from the live core count
 (`default_affinity_mask`), never a literal: the child gets the **TOP 3 logical
@@ -277,9 +277,13 @@ windows) is in `genlock.md` under "#147 round 9 — memory residency".
     (`without_working_set`) and retries ONCE, then logs a WARN. `contained_line`
     logs the APPLIED value (`max_ws_mb=off` after a fallback).
 - **SongPlayer side (`sp_min_working_set_mb`, default 3072 MiB).**
-  - `process_start::apply_min_working_set` runs once after the DB is ready. It
-    enables `SeIncreaseWorkingSetPrivilege`, then calls `SetProcessWorkingSetSizeEx`
-    with `QUOTA_LIMITS_HARDWS_MIN_ENABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE`.
+  - `process_start::apply_min_working_set` runs once after the DB is ready. On
+    Windows it enables `SeIncreaseWorkingSetPrivilege` whatever the setting
+    (the child's job working-set limit may need it too), then calls
+    `SetProcessWorkingSetSizeEx` with
+    `QUOTA_LIMITS_HARDWS_MIN_ENABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE`.
+  - The minimum commits nothing, but it reserves `min` of resident-available
+    memory, so size it from the measured `working_set_mb`.
   - The pure core is `process_residency.rs` (declared as
     `process_start::residency` via `#[path]`, because `lib.rs` is at the
     1000-line cap).

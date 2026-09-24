@@ -6,27 +6,8 @@ use super::*;
 
 const MIB: u64 = 1_048_576;
 
-// ---- fault_delta -----------------------------------------------------------
-
-#[test]
-fn fault_delta_is_the_forward_distance_on_a_monotonic_counter() {
-    assert_eq!(fault_delta(1_000, 4_000), 3_000);
-    assert_eq!(fault_delta(7, 7), 0, "no faults");
-}
-
-/// PageFaultCount is a u32 that WRAPS (≈ every 2.4 h at the box's 500k/s);
-/// a decrease is a wrap, never a reset, so the true distance is counted
-/// across u32::MAX.
-#[test]
-fn fault_delta_counts_across_a_u32_wrap() {
-    assert_eq!(fault_delta(u32::MAX - 9, 5), 15);
-    assert_eq!(fault_delta(u32::MAX, 0), 1);
-    assert_eq!(
-        fault_delta(1, 0),
-        u32::MAX as u64,
-        "a decrease = one full wrap"
-    );
-}
+// (The wrap-safe `fault_delta` lives in `process_residency` and is tested in
+// `process_residency_tests.rs`.)
 
 // ---- per_minute ------------------------------------------------------------
 
@@ -125,6 +106,65 @@ fn the_window_survives_a_counter_wrap() {
     assert_eq!(
         g.page_faults_per_min, 2_000,
         "999 + 1 + 1000 faults across the wrap"
+    );
+}
+
+/// A gap of exactly MAX_SAMPLE_GAP_MS still yields a rate; one ms more
+/// re-baselines (gauge back to None), and the NEXT full minute measures from
+/// the new baseline.
+#[test]
+fn a_gap_beyond_the_max_rebaselines_instead_of_computing_a_rate() {
+    assert_eq!(MAX_SAMPLE_GAP_MS, 300_000);
+    let mut w = FaultWindow::default();
+    w.observe(0, 0, 0);
+    let at_max = w.observe(50_000, 0, 300_000).unwrap();
+    assert_eq!(at_max.page_faults_per_min, 10_000, "50 000 over 5 min");
+
+    let mut w = FaultWindow::default();
+    w.observe(0, 0, 0);
+    assert_eq!(w.observe(50_000, 0, 300_001), None, "one ms past the max");
+    assert_eq!(w.latest(), None);
+    // The long-gap reading became the baseline: +60 s → a fresh rate from it.
+    let g = w.observe(56_000, 64 * MIB, 360_001).unwrap();
+    assert_eq!(g.page_faults_per_min, 6_000);
+    assert_eq!(g.working_set_mb, 64);
+}
+
+// ---- to_slots / from_slots (the lock-free publish encoding) ----------------
+
+#[test]
+fn slots_roundtrip_a_gauge() {
+    let g = ProcMemGauge {
+        page_faults_per_min: 48_213,
+        working_set_mb: 2_300,
+    };
+    assert_eq!(to_slots(Some(g)), (48_213, 2_300));
+    assert_eq!(from_slots(48_213, 2_300), Some(g));
+}
+
+#[test]
+fn slots_encode_none_as_the_sentinel_and_back() {
+    assert_eq!(NO_READING, u64::MAX);
+    assert_eq!(to_slots(None), (u64::MAX, u64::MAX));
+    assert_eq!(from_slots(u64::MAX, u64::MAX), None);
+    // Either slot at the sentinel is "no reading".
+    assert_eq!(from_slots(u64::MAX, 5), None);
+    assert_eq!(from_slots(5, u64::MAX), None);
+}
+
+#[test]
+fn a_real_value_is_capped_below_the_sentinel() {
+    let huge = ProcMemGauge {
+        page_faults_per_min: u64::MAX,
+        working_set_mb: u64::MAX,
+    };
+    assert_eq!(to_slots(Some(huge)), (u64::MAX - 1, u64::MAX - 1));
+    assert_eq!(
+        from_slots(u64::MAX - 1, u64::MAX - 1),
+        Some(ProcMemGauge {
+            page_faults_per_min: u64::MAX - 1,
+            working_set_mb: u64::MAX - 1,
+        })
     );
 }
 

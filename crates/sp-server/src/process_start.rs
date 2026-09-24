@@ -85,8 +85,8 @@ pub fn priority_class_label() -> &'static str {
 /// #147 round 9: read `sp_min_working_set_mb` — the SAME key
 /// `PATCH /api/v1/settings` writes (the settings API stores any key) — and
 /// resolve it through the pure parse (absent / garbage / negative → the
-/// 3072 MiB default, `0` = disabled, clamped `256..=8192`). WARNs once when a
-/// present value was not used as written.
+/// 3072 MiB default, `0` = disabled, clamped `256..=8192`). WARNs when a
+/// present value was not used as written (once per start — it runs once).
 ///
 /// mutants::skip — a DB read + a WARN side effect; the value logic is the pure
 /// `residency::parse_min_working_set_mb` (mutation-scored), and this path is
@@ -115,38 +115,43 @@ pub async fn resolve_min_working_set_mb(pool: &sqlx::SqlitePool) -> u32 {
 /// `lib.rs::start()` right after the DB is ready — before any pipeline spawns —
 /// so a change to `sp_min_working_set_mb` takes effect at the NEXT start.
 /// Best-effort: the outcome is ONE INFO line (`sp working set: … privilege=…
-/// result=ok|failed(err=<GetLastError>)`), never a panic. Off Windows the
-/// setting is still resolved + logged, with no OS call.
+/// result=ok|failed(err=<GetLastError>)`), never a panic.
 ///
-/// mutants::skip — the OS call has no in-process oracle; the plan + the line
+/// On Windows `SeIncreaseWorkingSetPrivilege` is enabled FIRST, whatever the
+/// setting — raising the minimum above the current working set needs it, and
+/// the heavy child's Job Object working-set limit (`heavy_max_working_set_mb`)
+/// may too, so a "child cap only" configuration must not silently lose it. The
+/// quota call is attempted even when the privilege step fails (an elevated
+/// token, or a minimum at or below the current working set, does not need it).
+/// Off Windows nothing is applied and the line says so (never a fake `ok`).
+///
+/// mutants::skip — the OS calls have no in-process oracle; the plan + the line
 /// are pure and tested in `process_residency_tests.rs`.
 #[cfg_attr(test, mutants::skip)]
 pub async fn apply_min_working_set(pool: &sqlx::SqlitePool) {
     let mb = resolve_min_working_set_mb(pool).await;
-    let plan = residency::plan_hard_min(mb);
-    let (privilege, set) = match plan.as_ref() {
-        Some(p) => set_hard_min_working_set(p),
-        None => (Ok(()), Ok(())),
-    };
+    #[cfg(windows)]
+    {
+        let privilege = enable_increase_working_set_privilege();
+        let plan = residency::plan_hard_min(mb);
+        let set = plan.as_ref().map_or(Ok(()), set_hard_min_working_set);
+        tracing::info!(
+            "{}",
+            residency::residency_line(plan.as_ref(), privilege, set)
+        );
+    }
+    #[cfg(not(windows))]
     tracing::info!(
-        "{}",
-        residency::residency_line(plan.as_ref(), privilege, set)
+        "sp working set: not applied off Windows ({}={mb})",
+        residency::SETTING_KEY
     );
 }
 
-/// The `(privilege, set)` outcomes of the hard-minimum call, each
-/// `Err(GetLastError())` on failure.
-type WorkingSetOutcome = (Result<(), u32>, Result<(), u32>);
-
-/// Enable `SeIncreaseWorkingSetPrivilege` (needed to raise the minimum above the
-/// current working set — granted to normal users, but DISABLED in the token by
-/// default), then `SetProcessWorkingSetSizeEx(GetCurrentProcess(), min, max,
-/// HARDWS_MIN_ENABLE | HARDWS_MAX_DISABLE)`. The quota call is attempted even
-/// when the privilege step fails (an elevated token, or a minimum at or below
-/// the current working set, does not need it).
+/// `SetProcessWorkingSetSizeEx(GetCurrentProcess(), min, max,
+/// HARDWS_MIN_ENABLE | HARDWS_MAX_DISABLE)`; `Err(GetLastError())` on failure.
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
-fn set_hard_min_working_set(plan: &residency::WorkingSetPlan) -> WorkingSetOutcome {
+fn set_hard_min_working_set(plan: &residency::WorkingSetPlan) -> Result<(), u32> {
     use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::System::Memory::{
         QUOTA_LIMITS_HARDWS_MAX_DISABLE, QUOTA_LIMITS_HARDWS_MIN_ENABLE, SetProcessWorkingSetSizeEx,
@@ -156,12 +161,11 @@ fn set_hard_min_working_set(plan: &residency::WorkingSetPlan) -> WorkingSetOutco
     const _: () = assert!(residency::QUOTA_HARDWS_MIN_ENABLE == QUOTA_LIMITS_HARDWS_MIN_ENABLE);
     const _: () = assert!(residency::QUOTA_HARDWS_MAX_DISABLE == QUOTA_LIMITS_HARDWS_MAX_DISABLE);
 
-    let privilege = enable_increase_working_set_privilege();
     // SAFETY: GetCurrentProcess returns the current-process pseudo-handle (full
     // access, never closed); SetProcessWorkingSetSizeEx only changes this
     // process's working-set quota and returns 0 on failure, after which
-    // GetLastError reads the calling thread's error code.
-    let set = unsafe {
+    // GetLastError (read immediately) holds the calling thread's error code.
+    unsafe {
         if SetProcessWorkingSetSizeEx(
             GetCurrentProcess(),
             plan.min_bytes,
@@ -173,14 +177,7 @@ fn set_hard_min_working_set(plan: &residency::WorkingSetPlan) -> WorkingSetOutco
         } else {
             Ok(())
         }
-    };
-    (privilege, set)
-}
-
-/// Non-Windows: there is no working-set quota to set (prod is Windows-only).
-#[cfg(not(windows))]
-fn set_hard_min_working_set(_plan: &residency::WorkingSetPlan) -> WorkingSetOutcome {
-    (Ok(()), Ok(()))
+    }
 }
 
 /// Enable `SeIncreaseWorkingSetPrivilege` in this process's token.
@@ -255,14 +252,5 @@ mod tests {
                 .unwrap();
             assert_eq!(resolve_min_working_set_mb(&pool).await, want, "{value}");
         }
-    }
-
-    /// The off-Windows twin makes no OS call and reports both steps ok, so the
-    /// startup line on a dev box never claims a failure that did not happen.
-    #[cfg(not(windows))]
-    #[test]
-    fn non_windows_hard_min_is_a_no_op() {
-        let plan = residency::plan_hard_min(3072).unwrap();
-        assert_eq!(set_hard_min_working_set(&plan), (Ok(()), Ok(())));
     }
 }

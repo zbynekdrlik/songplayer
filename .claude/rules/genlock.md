@@ -71,7 +71,8 @@ paths:
   `late_frames` stayed 27.6 % with `iter_p99 81 ms` while `prep_p99` is 0.4 ms —
   the bottleneck MOVED from the decode to the **NDI SUBMIT** (`send_video_async` +
   audio still on the emit thread, stalling under the child's memory-bandwidth /
-  page-fault pressure). So `genlock_pacing` STAYS OFF in production until the
+  page-fault pressure). [Box-test-5 record, SUPERSEDED: pacing is ON in production
+  permanently per the owner ruling, #147 comment 5812898277.] Then: `genlock_pacing` stayed off until the
   submit is also moved off the boundary-critical path (a dedicated NDI-submit
   thread) or the stems child's D3D/NDI-path impact is bounded. `iter_p99` ≫
   `prep_p99` is the signature of submit-side (not decode-side) lateness.
@@ -256,7 +257,7 @@ paths:
   of each loop iteration; both ride the `HealthSnapshot` event and log a third
   grep-stable `pipeline: loop-stats` line beside `ndi: heartbeat` (per UTC minute)
   so the A/B box test (same song ± a resident stems child) names the stalling
-  stage. The paced (#168, genlock_pacing OFF in prod) submit-thread also surfaces
+  stage. The paced (#168; pacing is ON in production since the #147 ruling) submit-thread also surfaces
   this gauge now (#168 round 2, 0.63.0-dev.1): it drains the SAME
   `FrameSubmitter.submit_times` through its handoff snapshot into
   `emit_heartbeat_paced`, carried into `PacingStats` + the paced `pipeline:
@@ -369,10 +370,10 @@ investigation is now a 10-minute read.
   for a measurement. `genlock_pacing` is read ONLY at startup (`lib.rs::start` →
   `engine.set_genlock_pacing`); a restart = `gh run rerun --job <LATEST Deploy
   job id>` — look the id up each time (`gh run view <run> --json jobs`; a rerun
-  mints a NEW job id). (Historical, pre-ruling: sessions used to end with the
-  flag back to `false` because the dependent E2E fails its dabing 12–16 kHz
-  spectral test under pacing — that E2E behaviour must be addressed on its
-  own, never by turning pacing off.)
+  mints a NEW job id). The dabing 12–16 kHz single-snapshot E2E assertion that
+  used to fail on live content was reworked by #206 (post-deploy E2E: content/
+  state-dependent audio assertions, closed — commit b41d06e) into a
+  content-matched full-band RMS drop.
 - **Change containment mid-session.** `heavy_cpu_cap_pct` /
   `heavy_cpu_affinity_mask` apply at the NEXT child spawn (`refresh_containment`
   per tick), NOT to the running child — so after a settings change, kill the venv
@@ -458,8 +459,8 @@ values are flat strings in MiB, e.g. `{"sp_min_working_set_mb":"3072"}`.
 
 | key | default | range | takes effect |
 |---|---|---|---|
-| `sp_min_working_set_mb` | **3072** | `0` = off, else clamped `256..=8192`; absent/garbage/negative → default + WARN | the NEXT SongPlayer start (read once in `lib.rs::start`, right after the DB is ready, before any pipeline spawns) |
-| `heavy_max_working_set_mb` | **4096** | `0` = off, else clamped `512..=10240`; absent/garbage/negative → default + WARN | the NEXT heavy-child spawn (`refresh_containment` per worker tick, like the other `heavy_*` knobs) |
+| `sp_min_working_set_mb` | **3072** | `0` = off, else clamped `256..=8192`; absent → default; garbage/negative/out-of-range → default or clamp + WARN | the NEXT SongPlayer start (read once in `lib.rs::start`, right after the DB is ready, before any pipeline spawns) |
+| `heavy_max_working_set_mb` | **4096** | `0` = off, else clamped `512..=10240`; absent → default; garbage/negative/out-of-range → default or clamp + WARN | the NEXT heavy-child spawn (`refresh_containment` per worker tick, like the other `heavy_*` knobs) |
 
 **`sp_min_working_set_mb` — SongPlayer's hard minimum working set.**
 
@@ -467,10 +468,16 @@ values are flat strings in MiB, e.g. `{"sp_min_working_set_mb":"3072"}`.
   `SetProcessWorkingSetSizeEx(GetCurrentProcess(), min, 2×min, QUOTA_LIMITS_HARDWS_MIN_ENABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE)`.
   The minimum is HARD: the memory manager never trims SongPlayer below it. The
   maximum stays SOFT.
-- Before the call it enables `SeIncreaseWorkingSetPrivilege` best-effort. Normal
-  users hold that privilege, but it is disabled in the token by default.
-- The minimum does not pre-allocate anything. It guarantees that pages
-  SongPlayer actually has resident, up to `min`, are never trimmed.
+- At every Windows start it enables `SeIncreaseWorkingSetPrivilege` best-effort,
+  whatever `sp_min_working_set_mb` is. Normal users hold that privilege, but it
+  is disabled in the token by default. The heavy child's job working-set limit
+  may need it too.
+- The minimum commits no pages. It guarantees that pages SongPlayer actually has
+  resident, up to `min`, are never trimmed.
+- It DOES reserve `min` of the box's resident-available memory at call time. That
+  is why too large a minimum is refused with `ERROR_NO_SYSTEM_RESOURCES` (1450),
+  and it shrinks what OBS, the NDI SDK and the GPU drivers can pin. So size it
+  from the measured `working_set_mb` plus headroom, not "as big as possible".
 - The pure core is `process_residency.rs`: parse and clamp, the plan, the `0x9`
   flags word, and the outcome line. It is Linux-tested. The `QUOTA_*` mirrors are
   compile-time asserted against windows-sys.
@@ -508,7 +515,10 @@ values are flat strings in MiB, e.g. `{"sp_min_working_set_mb":"3072"}`.
 
 - **Startup, once, INFO:**
   `sp working set: hard_min_mb=3072 max_mb=6144 flags=0x9 privilege=ok|failed(err=<GetLastError>) result=ok|failed(err=<GetLastError>)`,
-  or `sp working set: hard_min disabled (sp_min_working_set_mb=0)`.
+  or `sp working set: hard_min disabled (sp_min_working_set_mb=0) privilege=ok|failed(err=…)`.
+  - The privilege is enabled whatever the setting.
+  - Off Windows the line is `sp working set: not applied off Windows (sp_min_working_set_mb=<n>)`,
+    never a fake `ok`.
   - `privilege=failed(err=1300)` is `ERROR_NOT_ALL_ASSIGNED`: the token lacks
     the privilege.
   - `result=failed(err=1450)` is `ERROR_NO_SYSTEM_RESOURCES`: the minimum is too
@@ -524,11 +534,22 @@ values are flat strings in MiB, e.g. `{"sp_min_working_set_mb":"3072"}`.
   - It comes from `playback/proc_mem.rs`. ONE process-global `FaultWindow` is
     sampled at most once per 60 s by whichever paced heartbeat comes first, so
     every paced output's line shows the same last-full-minute value.
-  - `na` means the first minute after start, the SDK-clocked path, or non-Windows.
-  - `PageFaultCount` is a u32 that wraps about every 2.4 h at 500k/s, so the
-    delta is `wrapping_sub`.
-  - The arithmetic is pure, Linux-tested and mutation-scored. The OS read is
-    `mutants::skip`.
+  - `na` means one of:
+    - the first minute after start;
+    - the first minute after a gap of more than 5 min with no paced heartbeat
+      (`MAX_SAMPLE_GAP_MS`), which re-baselines;
+    - the SDK-clocked path;
+    - non-Windows.
+  - `PageFaultCount` is a u32 that wraps about every 2.4 h at 500k/s. The delta
+    is the shared wrap-safe `process_start::residency::fault_delta` (`wrapping_sub`).
+    `lyrics/heavy_faults.rs` now uses the same helper: its old `saturating_sub`
+    zeroed every wrap.
+  - The paced heartbeat runs on the EMIT thread, so `proc_mem::gauge` never
+    blocks. It only `try_lock`s the window; a busy lock means another output is
+    sampling. Every caller reads the published gauge from two lock-free atomics
+    (`to_slots` / `from_slots`, sentinel `u64::MAX`).
+  - The arithmetic and the slot encoding are pure, Linux-tested and
+    mutation-scored. The OS read is `mutants::skip`.
 
 ### Box A/B window recipe (pacing ON in every window)
 
@@ -541,7 +562,7 @@ productive: `TotalProcessorTime` delta over 6 s > 0.
 |---|---|---|---|
 | **W-a** both off | `0` | `0` | PATCH both, restart (Deploy-job rerun; the restart also respawns the child, uncapped) |
 | **W-b** SongPlayer hard min only | `3072` | `0` | PATCH, restart (the minimum is read at start) |
-| **W-c** both | `3072` | `4096` | PATCH, kill the child by `-Id` (the cap applies at the next spawn, no restart) |
+| **W-c** both | `3072` | `4096` | PATCH, kill the child by `-Id` (the cap applies at the next spawn, no restart); a `max_ws_mb=off` contained line here means the OS rejected the cap and the retry-without fallback fired (read the WARN) |
 
 **Confirm each window before trusting it:**
 

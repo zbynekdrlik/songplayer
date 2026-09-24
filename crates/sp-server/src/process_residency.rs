@@ -15,11 +15,20 @@
 //! QUOTA_LIMITS_HARDWS_MIN_ENABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE)` so the
 //! memory manager NEVER trims SongPlayer below `min` (a HARD minimum), while the
 //! maximum stays SOFT (SongPlayer may still grow past it when RAM allows). The
-//! minimum does not pre-allocate or commit anything: it protects the pages
-//! SongPlayer actually has resident, up to `min`.
+//! minimum commits no pages — it protects the pages SongPlayer actually has
+//! resident, up to `min` — but it DOES reserve `min` of the box's
+//! resident-available memory at call time (why an oversized minimum is refused
+//! with `ERROR_NO_SYSTEM_RESOURCES`, and why it shrinks what OBS / the NDI SDK /
+//! GPU drivers can pin), so size it from the measured `working_set_mb`.
 //!
 //! This module is pure + Linux-tested + mutation-scored: the setting parse and
-//! clamp, MB→bytes, the (min, max, flags) plan and the grep-stable outcome line.
+//! clamp, MB↔bytes, the (min, max, flags) plan, the grep-stable outcome line,
+//! and the wrap-safe `PageFaultCount` delta. It is SongPlayer's one home for pure
+//! process-memory arithmetic, so the heavy-child containment
+//! (`lyrics::heavy_containment`), the paced-line gauge (`playback::proc_mem`) and
+//! the child fault sampler (`lyrics::heavy_faults`) share it rather than each
+//! re-deriving MiB / fault-delta helpers. (Declared under `process_start` via
+//! `#[path]` because `lib.rs` sits at the 1000-line cap.)
 //! The Win32 calls live in `process_start.rs` (`#[cfg(windows)]`,
 //! `mutants::skip`); the flag constants here are compile-time asserted equal to
 //! the `windows-sys` ones there.
@@ -40,9 +49,10 @@ pub const SETTING_KEY: &str = "sp_min_working_set_mb";
 /// buffers (a few hundred MB per playing output); every IDLE output holds its
 /// NV12 + BGRA black (≈ 20 MB); plus the audio rings, preview encoder, tokio /
 /// axum / sqlite. That is ≈ 1–2 GB with two outputs playing and the rest idle;
-/// 3072 MiB covers it with headroom. Over-sizing costs no RAM (the minimum
-/// only guarantees pages SongPlayer actually has resident are never trimmed),
-/// and the per-minute `working_set_mb` field lets the box re-size it.
+/// 3072 MiB covers it with headroom. It is not free: the minimum reserves that
+/// much resident-available memory (see the module doc), so the per-minute
+/// `working_set_mb` field is how the box re-sizes it — measured working set +
+/// headroom, never "as big as possible".
 pub const SP_MIN_WS_DEFAULT_MB: u32 = 3072;
 
 /// Lower clamp for a non-zero setting: a hard minimum below 256 MiB would not
@@ -78,6 +88,17 @@ pub fn mb_to_bytes(mb: u32) -> usize {
 /// A byte count as whole MiB (rounded down). Pure.
 pub fn bytes_to_mb(bytes: u64) -> u64 {
     bytes / MIB
+}
+
+/// Faults between two cumulative `PageFaultCount` readings
+/// (`PROCESS_MEMORY_COUNTERS`, a **u32**). Wrap-safe: at the 430–500k faults/s
+/// the box measured (#203) the counter wraps roughly every 2.4 h, and a
+/// process's counter never resets, so `now < prev` means one wrap and
+/// `wrapping_sub` yields the true forward distance. Shared by the paced-line
+/// gauge (`playback::proc_mem`) and the heavy-child sampler
+/// (`lyrics::heavy_faults`). Pure.
+pub fn fault_delta(prev: u32, now: u32) -> u64 {
+    now.wrapping_sub(prev) as u64
 }
 
 /// Parse a MiB-sized memory-limit setting (shared by `sp_min_working_set_mb`
@@ -162,18 +183,22 @@ fn outcome(r: Result<(), u32>) -> String {
     }
 }
 
-/// The grep-stable INFO line logged once at startup (`sp working set: …`).
-/// `plan == None` → the disabled line. `privilege` is the
-/// `SeIncreaseWorkingSetPrivilege` enable outcome, `set` the
-/// `SetProcessWorkingSetSizeEx` outcome (each `Err` carries `GetLastError`).
-/// Pure, exact-string tested.
+/// The grep-stable INFO line logged once at startup on Windows (`sp working
+/// set: …`). `privilege` is the `SeIncreaseWorkingSetPrivilege` enable outcome
+/// (attempted whatever the setting — the heavy child's job working-set cap may
+/// need it too), `set` the `SetProcessWorkingSetSizeEx` outcome (each `Err`
+/// carries `GetLastError`). `plan == None` → the disabled line (no quota call,
+/// `set` unused). Pure, exact-string tested.
 pub fn residency_line(
     plan: Option<&WorkingSetPlan>,
     privilege: Result<(), u32>,
     set: Result<(), u32>,
 ) -> String {
     match plan {
-        None => format!("sp working set: hard_min disabled ({SETTING_KEY}=0)"),
+        None => format!(
+            "sp working set: hard_min disabled ({SETTING_KEY}=0) privilege={}",
+            outcome(privilege)
+        ),
         Some(p) => format!(
             "sp working set: hard_min_mb={} max_mb={} flags=0x{:x} privilege={} result={}",
             bytes_to_mb(p.min_bytes as u64),
