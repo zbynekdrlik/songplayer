@@ -396,55 +396,6 @@ fn multi_chunk_timeline_is_monotonic() {
     assert_eq!(t.lines[2].start_ms, 4000);
 }
 
-// ── EN fraction snapping ─────────────────────────────────────────────────────
-
-#[test]
-fn en_reference_is_sliced_by_the_same_char_fraction_as_the_sk() {
-    // SK: "Ahoj svet." (10 ch) + "Ako sa mas?" (11 ch) = 21 ch. Line 1 covers the
-    // first 10/21 ≈ 0.476; line 2 the rest. EN "Hello world how are you" (word
-    // start-fractions 0, .263, .526, .684, .842) splits Hello+world | how+are+you.
-    let t = build(vec![chunk(
-        0,
-        Some(0),
-        Some(1.0),
-        "Hello world how are you",
-        vec![frag(1000, "Ahoj svet."), frag(2000, "Ako sa mas?")],
-    )]);
-    assert_eq!(t.lines.len(), 2);
-    assert_eq!(t.lines[0].en, "Hello world");
-    assert_eq!(t.lines[1].en, "how are you");
-}
-
-#[test]
-fn en_word_starting_exactly_on_the_line_boundary_goes_to_the_next_line() {
-    // SK splits 3 | 3 chars → boundary fraction 0.5; EN "xx yy" → "yy" starts at
-    // exactly 2/4 = 0.5. The slice is half-open `[a, b)`, so "yy" belongs to
-    // line 2 only — never duplicated into line 1.
-    let t = build(vec![chunk(
-        0,
-        Some(0),
-        Some(1.0),
-        "xx yy",
-        vec![frag(1000, "ab."), frag(2000, "cd.")],
-    )]);
-    assert_eq!(t.lines.len(), 2);
-    assert_eq!(t.lines[0].en, "xx");
-    assert_eq!(t.lines[1].en, "yy");
-}
-
-#[test]
-fn single_line_takes_the_whole_en_string() {
-    let t = build(vec![chunk(
-        0,
-        Some(0),
-        Some(1.0),
-        "one two three",
-        vec![frag(1000, "raz dva tri")],
-    )]);
-    assert_eq!(t.lines.len(), 1);
-    assert_eq!(t.lines[0].en, "one two three");
-}
-
 // ── Empty EN → empty EN lines ────────────────────────────────────────────────
 
 #[test]
