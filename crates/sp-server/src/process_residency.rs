@@ -89,10 +89,12 @@ pub fn bytes_to_mb(bytes: u64) -> u64 {
 ///
 /// Pure — the WARN for an ignored value lives in the impure caller.
 pub fn parse_mb_setting(raw: Option<&str>, default: u32, floor: u32, ceil: u32) -> u32 {
-    match raw.and_then(|s| s.trim().parse::<i64>().ok()) {
+    // Parsed as UNSIGNED: a negative (or > u64::MAX) value simply fails to
+    // parse and takes the default — no sign guard to get wrong.
+    match raw.and_then(|s| s.trim().parse::<u64>().ok()) {
         Some(0) => 0,
-        Some(v) if v > 0 => v.clamp(floor as i64, ceil as i64) as u32,
-        _ => default,
+        Some(v) => v.clamp(floor as u64, ceil as u64) as u32,
+        None => default,
     }
 }
 
@@ -104,8 +106,8 @@ pub fn mb_setting_ignored(raw: Option<&str>, floor: u32, ceil: u32) -> bool {
         None => false,
         Some(r) => !r
             .trim()
-            .parse::<i64>()
-            .is_ok_and(|v| v == 0 || (floor as i64..=ceil as i64).contains(&v)),
+            .parse::<u64>()
+            .is_ok_and(|v| v == 0 || (floor as u64..=ceil as u64).contains(&v)),
     }
 }
 

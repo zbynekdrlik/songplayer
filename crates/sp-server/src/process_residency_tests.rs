@@ -72,7 +72,7 @@ fn parse_garbage_and_negative_fall_back_to_default() {
     assert_eq!(parse_min_working_set_mb(Some("2048MB")), 3072);
     assert_eq!(parse_min_working_set_mb(Some("-1")), 3072);
     assert_eq!(parse_min_working_set_mb(Some("-4096")), 3072);
-    // Beyond i64 → unparseable → default (not the ceiling).
+    // Beyond u64 → unparseable → default (not the ceiling).
     assert_eq!(
         parse_min_working_set_mb(Some("99999999999999999999999")),
         3072

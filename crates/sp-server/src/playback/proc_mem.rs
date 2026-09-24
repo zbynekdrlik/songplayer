@@ -64,14 +64,6 @@ pub struct FaultWindow {
 }
 
 impl FaultWindow {
-    /// An empty window (no reading yet). `const` so it can seed a `static`.
-    pub const fn new() -> Self {
-        Self {
-            last: None,
-            latest: None,
-        }
-    }
-
     /// Whether a new OS reading is due at `now_ms`: always before the first
     /// reading, then once at least [`SAMPLE_PERIOD_MS`] has elapsed. A clock
     /// that went backwards is "not due" (saturating), never a bogus sample.
@@ -122,9 +114,14 @@ pub fn fmt_opt(v: Option<u64>) -> String {
     }
 }
 
-/// The process-global window the paced heartbeats share (Windows only).
+/// The process-global window the paced heartbeats share (Windows only). A
+/// struct literal (not a `const fn new`) so there is no trivial constructor
+/// body for the mutation gate to swap for `Default::default()`.
 #[cfg(windows)]
-static WINDOW: std::sync::Mutex<FaultWindow> = std::sync::Mutex::new(FaultWindow::new());
+static WINDOW: std::sync::Mutex<FaultWindow> = std::sync::Mutex::new(FaultWindow {
+    last: None,
+    latest: None,
+});
 
 /// The monotonic origin for the window's millisecond clock (Windows only).
 #[cfg(windows)]
@@ -142,10 +139,10 @@ static T0: std::sync::LazyLock<std::time::Instant> =
 pub fn gauge() -> Option<ProcMemGauge> {
     let now_ms = T0.elapsed().as_millis() as u64;
     let mut w = WINDOW.lock().ok()?;
-    if w.due(now_ms) {
-        if let Some((count, ws)) = read_own_memory_counters() {
-            return w.observe(count, ws, now_ms);
-        }
+    if w.due(now_ms)
+        && let Some((count, ws)) = read_own_memory_counters()
+    {
+        return w.observe(count, ws, now_ms);
     }
     w.latest()
 }

@@ -112,17 +112,24 @@ pub(crate) const JOB_LIMIT_PROCESS_MEMORY: u32 = 0x100;
 /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
 pub(crate) const JOB_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
 
+/// The #162/#203 flags every heavy-child job carries: memory ceiling +
+/// kill-on-close + affinity. (Consts, not fn-body `|`s: the flag bits are
+/// disjoint, so a `|`→`^` mutant inside a fn would be equivalent.)
+const JOB_LIMIT_BASE: u32 =
+    JOB_LIMIT_PROCESS_MEMORY | JOB_LIMIT_KILL_ON_JOB_CLOSE | JOB_LIMIT_AFFINITY;
+/// [`JOB_LIMIT_BASE`] + `JOB_OBJECT_LIMIT_WORKINGSET` (#147 round 9).
+const JOB_LIMIT_BASE_WITH_WORKINGSET: u32 = JOB_LIMIT_BASE | JOB_LIMIT_WORKINGSET;
+
 /// The extended-limit `LimitFlags` word for a heavy child's Job Object: the
 /// #162 memory ceiling + kill-on-close and the #203 affinity ALWAYS, plus
 /// `JOB_OBJECT_LIMIT_WORKINGSET` ONLY when a working-set cap is enabled
 /// (`max_working_set_mb > 0`). Pure. Consumed by the `#[cfg(windows)]` seam.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn job_limit_flags(max_working_set_mb: u32) -> u32 {
-    let base = JOB_LIMIT_PROCESS_MEMORY | JOB_LIMIT_KILL_ON_JOB_CLOSE | JOB_LIMIT_AFFINITY;
     if max_working_set_mb == 0 {
-        base
+        JOB_LIMIT_BASE
     } else {
-        base | JOB_LIMIT_WORKINGSET
+        JOB_LIMIT_BASE_WITH_WORKINGSET
     }
 }
 

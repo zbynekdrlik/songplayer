@@ -52,7 +52,7 @@ fn per_minute_saturates_instead_of_overflowing() {
 
 #[test]
 fn first_reading_only_arms_the_window() {
-    let mut w = FaultWindow::new();
+    let mut w = FaultWindow::default();
     assert!(w.due(0), "nothing read yet → due");
     assert_eq!(
         w.observe(1_000, 512 * MIB, 0),
@@ -60,12 +60,11 @@ fn first_reading_only_arms_the_window() {
         "no delta on the first sample"
     );
     assert_eq!(w.latest(), None);
-    assert_eq!(FaultWindow::default(), FaultWindow::new());
 }
 
 #[test]
 fn due_flips_exactly_at_the_sample_period() {
-    let mut w = FaultWindow::new();
+    let mut w = FaultWindow::default();
     w.observe(0, 0, 10_000);
     assert_eq!(SAMPLE_PERIOD_MS, 60_000);
     assert!(!w.due(69_999), "one ms short");
@@ -76,7 +75,7 @@ fn due_flips_exactly_at_the_sample_period() {
 
 #[test]
 fn a_full_minute_yields_faults_per_minute_and_working_set_mb() {
-    let mut w = FaultWindow::new();
+    let mut w = FaultWindow::default();
     w.observe(1_000, 100 * MIB, 0);
     let g = w.observe(31_000, 2_300 * MIB, 60_000);
     assert_eq!(
@@ -91,7 +90,7 @@ fn a_full_minute_yields_faults_per_minute_and_working_set_mb() {
 
 #[test]
 fn a_reading_inside_the_period_keeps_the_previous_gauge_and_baseline() {
-    let mut w = FaultWindow::new();
+    let mut w = FaultWindow::default();
     w.observe(0, 0, 0);
     let g1 = w.observe(60_000, 1_024 * MIB, 60_000);
     // 59.999 s later: ignored — neither the gauge nor the baseline moves.
@@ -110,7 +109,7 @@ fn a_reading_inside_the_period_keeps_the_previous_gauge_and_baseline() {
 
 #[test]
 fn a_late_sample_is_normalised_over_the_actual_window() {
-    let mut w = FaultWindow::new();
+    let mut w = FaultWindow::default();
     w.observe(0, 0, 0);
     // 90 s window (a heartbeat gap): 45 000 faults → 30 000/min.
     let g = w.observe(45_000, 0, 90_000).unwrap();
@@ -120,7 +119,7 @@ fn a_late_sample_is_normalised_over_the_actual_window() {
 
 #[test]
 fn the_window_survives_a_counter_wrap() {
-    let mut w = FaultWindow::new();
+    let mut w = FaultWindow::default();
     w.observe(u32::MAX - 999, 0, 0);
     let g = w.observe(1_000, 0, 60_000).unwrap();
     assert_eq!(

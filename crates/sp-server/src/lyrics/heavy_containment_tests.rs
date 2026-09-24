@@ -301,7 +301,7 @@ fn max_working_set_absent_garbage_or_negative_is_the_4096_default() {
     assert_eq!(
         parse_max_working_set_mb(Some("99999999999999999999999")),
         4096,
-        "beyond i64 is unparseable, not the ceiling"
+        "beyond u64 is unparseable, not the ceiling"
     );
 }
 
