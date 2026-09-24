@@ -473,6 +473,16 @@ and the recording actually get.
   - **letterbox crop:** the original is cropped (`source_crop`) to exactly
     the grid cells the recording keeps before scaling. A letterbox edge
     inside a cell would otherwise skew the geometry by up to one cell.
+- **ffmpeg window decode: `-copyts` with `-ss`/`-t` as INPUT options
+  (before `-i`).**
+  - With an OUTPUT `-t` under `-copyts`, the duration counts from 0, not from
+    the seek point. In the first local run that cut the window to 109 of ~570
+    frames.
+  - It also drops frames that `showinfo` had already logged, so the pts count
+    no longer matched the frames (114 vs 109).
+  - Frame times always come from `showinfo`/`ashowinfo` `pts_time:`, and the
+    script checks that the frame count equals the pts count.
+  - Keep `-fps_mode passthrough` so rawvideo never duplicates or drops frames.
 - **Never hardcode the AAC priming subtraction.** ffmpeg 6.1 OUTPUTS the
   priming samples: sample 0 is at −0.021 s. The BtbN master build the box
   downloads (`tools.rs`, checked 24.9.2026) SKIPS them: sample 0 is at 0.000.
