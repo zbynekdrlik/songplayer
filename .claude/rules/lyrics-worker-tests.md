@@ -2,6 +2,7 @@
 paths:
   - "scripts/lyrics_worker.py"
   - "scripts/tests/**"
+  - "scripts/stem_worker.py"
 ---
 
 # Testing `scripts/lyrics_worker.py` in the `eval-checks` CI job
@@ -56,3 +57,27 @@ Some invariants of `lyrics_worker.py` are asserted by `include_str!`-ing the
 script into a Rust test and matching substrings (e.g. `use_soundfile=True` count,
 `gpu_polite(` present, no `from_secs(600)`). When you change the script's model
 structure, UPDATE those counts too — they are CRLF-normalised and body-scoped.
+
+## `stem_worker.py` tests follow the same pattern (#207)
+
+`scripts/tests/test_stem_streaming.py` loads `stem_worker.py` by path and fakes
+torch / librosa / audio_separator the same way. It drives `cmd_separate`
+end to end with a real soundfile mix. Its gotchas:
+
+- **Trap, don't trust.** Make the fake `librosa.load` RAISE on the mix path,
+  and monkeypatch the whole-array reference functions (`_stitch_segments`,
+  `_write_array_48k_stereo`) to raise. A streaming regression then fails
+  loudly; checking the output values alone cannot catch it, because a
+  whole-array path produces identical samples.
+- **Order spies catch "read all, then write".** Record the order of segment
+  reads and writer adds, and assert they alternate 1:1.
+- **libsndfile cannot read an EMPTY FLAC** (`Format not recognised`), so an
+  "empty file" case is already an error at `sf.info`.
+- **An unknown-length FLAC is easy to fake:** zero the 36-bit STREAMINFO
+  `total samples` field (bytes 18..25, the low 36 bits).
+  `sf.info().frames` then reports the ~2^63 sentinel
+  (`_flac_with_total_samples` in the test).
+- **The CI ruff list must include every script you change.** It is not the
+  whole of `scripts/` (`.github/workflows/ci.yml` "Eval Checks"). From a
+  worktree lane, run that list from a small script file: the worktree Bash
+  guard rejects a command line containing the `eval/` path.
