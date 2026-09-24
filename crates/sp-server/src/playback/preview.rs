@@ -218,7 +218,11 @@ impl PreviewShared {
         if ib.busy {
             return;
         }
-        ib.pending = Some(frame); // latest-wins
+        // Latest-wins; a displaced, never-encoded frame's buffer becomes the spare
+        // for the next offer instead of being freed (#147 round 10).
+        if let Some(old) = ib.pending.replace(frame) {
+            ib.spare = Some(old.rgb);
+        }
         drop(ib);
         self.last_offer_ms.store(now, Ordering::Relaxed);
         self.cv.notify_one();
@@ -364,7 +368,7 @@ pub fn downscale_nv12_to_rgb_into(
     stride: u32,
     nv12: &[u8],
     max_width: u32,
-    rgb: Vec<u8>,
+    mut rgb: Vec<u8>,
 ) -> Option<RawPreviewFrame> {
     if width == 0 || height == 0 || stride < width || max_width == 0 {
         return None;
@@ -384,7 +388,6 @@ pub fn downscale_nv12_to_rgb_into(
     // Preserve aspect ratio, at least 1px tall.
     let out_h = (((sh * out_w) + sw / 2) / sw).max(1);
 
-    let mut rgb = rgb;
     rgb.clear();
     rgb.resize(out_w * out_h * 3, 0);
     for oy in 0..out_h {
@@ -719,8 +722,39 @@ mod tests {
         b[0] = 200;
         s.offer(4, 2, 4, &a);
         s.offer(6, 2, 6, &b);
-        let pending = s.inbox.lock().unwrap().pending.clone().unwrap();
+        let ib = s.inbox.lock().unwrap();
+        let pending = ib.pending.clone().unwrap();
         assert_eq!(pending.width, 6, "the later offer wins (latest-wins)");
+        // #147 round 10: the displaced frame's buffer is kept as the spare.
+        let spare = ib
+            .spare
+            .as_ref()
+            .expect("the displaced rgb became the spare");
+        assert_eq!(spare.len(), 4 * 2 * 3, "the first (4x2) frame's buffer");
+    }
+
+    #[test]
+    fn a_busy_encoder_keeps_the_spare_for_a_later_offer() {
+        // #147 round 10: an offer dropped because the encoder is busy must not
+        // take (and so free) the spare buffer.
+        let cfg = PreviewConfig {
+            min_ingest_interval_ms: 0,
+            ..PreviewConfig::default()
+        };
+        let s = shared(cfg);
+        s.note_viewer_request();
+        let spare = vec![1u8; 4096];
+        let spare_ptr = spare.as_ptr() as usize;
+        {
+            let mut ib = s.inbox.lock().unwrap();
+            ib.busy = true;
+            ib.spare = Some(spare);
+        }
+        s.offer(64, 64, 64, &grey_nv12(64, 64, 64));
+        let ib = s.inbox.lock().unwrap();
+        let kept = ib.spare.as_ref().expect("the spare is still there");
+        assert_eq!(kept.as_ptr() as usize, spare_ptr, "the SAME spare buffer");
+        assert!(ib.pending.is_none(), "nothing queued while busy");
     }
 
     #[test]

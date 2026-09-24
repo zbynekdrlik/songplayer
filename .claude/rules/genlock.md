@@ -283,8 +283,9 @@ paths:
   refcount hold with ZERO pixel copy. Rules for anyone touching `submitter.rs` /
   `pacer.rs`: the field-order SAFETY note still holds (sender drops before
   `prev_frame`); the paced burn overlay paints via `SharedFrame::make_mut`, which
-  FORKS into a pooled copy (the pacer keeps its own `last_frame` clone, so the
-  submit path is never the sole owner — #147 round 10); idle Black is submitted by shared reference
+  FORKS into a pooled copy while the pacer still holds its `last_frame` clone
+  (the usual case; in place only when the submit side is the sole owner, which
+  is safe — #147 round 10); idle Black is submitted by shared reference
   through `PacedSink::submit_shared` (`Standby::Black{dims, &SharedFrame}`,
   `service_standby` clones the Arc = a refcount bump per idle slot, the idle loop
   owns one black `SharedFrame`); `send_black_bgra` reuses a `black_bgra` buffer
@@ -628,6 +629,8 @@ reader copy, `to_paced_frame` → pacer → handoff → submitter holdover, and
 - Audio blocks and chunks ≤ 32 KB (below the threshold).
 - The per-idle-entry black frame.
 - The fMP4 fragments (per 500 ms, not per frame).
+- The JPEG encoder's output `Vec` (≤ 5/s while a JPEG viewer polls, a 320×180
+  JPEG is far below 64 KB).
 - Allocations inside Media Foundation (`ConvertToContiguousBuffer` / `Lock` on a
   row-padded 2D surface) and inside the NDI runtime. These are not in our code.
   If `page_faults_per_min` stays in the millions after round 10, that is where
@@ -658,5 +661,8 @@ first capped job, and logs
   default.
 - The retry-without-cap fallback stays. Its WARN now carries
   `base_priority_privilege=…`.
+- The privilege is deliberately left enabled for the process lifetime (a token
+  privilege is process-wide; enabling it only permits what the account already
+  holds).
 - Box acceptance: the contained line reads `max_ws_mb=4096` and no `rejected`
   WARN appears.

@@ -288,6 +288,43 @@ fn paced_sink_emit_submits_the_pacer_frame_without_a_pixel_copy() {
 }
 
 #[test]
+fn paced_sink_emit_with_burn_on_paints_a_fork_never_the_pacer_frame() {
+    // #147 round 10: `emit` now hands the pacer's OWN Arc to the owned path, so
+    // the burn overlay must fork (`make_mut`, refcount >= 2) and paint the fork.
+    // The pacer's pixels — reused for its starvation repeat — must stay clean.
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), "EB", false, false).unwrap();
+    let mut sub = FrameSubmitter::new(sender, 30, 1);
+    sub.set_burn_flag(Arc::new(std::sync::atomic::AtomicBool::new(true)));
+    let (w, h, stride) = (1920u32, 1080u32, 1920u32);
+    let frame = crate::playback::pacer::PacedFrame {
+        pts_ns: 0,
+        width: w,
+        height: h,
+        stride,
+        video: SharedFrame::new(vec![0u8; (stride * h * 3 / 2) as usize]),
+        audio: Vec::new(),
+    };
+    let pacer_ptr = frame.video.as_ptr() as usize;
+
+    PacedSink::emit(&mut sub, &frame, &[], 3_333_300, 3_333_300);
+
+    assert!(
+        frame.video.iter().all(|&b| b == 0),
+        "the pacer's frame is never painted"
+    );
+    let held = sub.prev_frame.as_ref().unwrap();
+    assert!(!held.ptr_eq(&frame.video), "the burn painted a fork");
+    assert_ne!(&held[..], &frame.video[..], "and the fork carries the QR");
+    let (sent_ptr, sent_len) = backend.last_async_video_slice().unwrap();
+    assert_ne!(
+        sent_ptr, pacer_ptr,
+        "the SDK gets the fork, not the pacer frame"
+    );
+    assert_eq!(sent_len, frame.video.len());
+}
+
+#[test]
 fn borrowed_boundary_submit_copies_into_a_recycled_pool_buffer() {
     // #147 round 10: the borrow API (`submit_frame_at_boundary(&[u8])`) still
     // has to copy — the caller keeps its slice — but into a RECYCLED pool
