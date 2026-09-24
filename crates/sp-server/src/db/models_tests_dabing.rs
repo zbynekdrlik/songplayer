@@ -572,3 +572,37 @@ async fn backfill_skips_a_ready_dub_without_an_audio_path() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn rebuild_candidates_are_the_ready_dubs_that_have_the_subtitle_track() {
+    // #184 H5: the startup rebuild of a stale track checks exactly the dubs the
+    // "without subtitles" selector leaves out.
+    let pool = setup().await;
+    let song_track = insert_video(&pool, "yt_song", "song lyrics").await;
+    let subs_a = insert_video(&pool, "yt_subs_a", "has subtitles").await;
+    let synth = insert_video(&pool, "yt_synth", "still synthesizing").await;
+    let subs_b = insert_video(&pool, "yt_subs_b", "has subtitles too").await;
+    let no_audio = insert_video(&pool, "yt_noaudio", "no audio path").await;
+
+    make_ready_dub(&pool, song_track, Some("mtl")).await;
+    make_ready_dub(&pool, subs_a, Some("gemini-live-translate")).await;
+    make_ready_dub(&pool, synth, Some("gemini-live-translate")).await;
+    make_ready_dub(&pool, subs_b, Some("gemini-live-translate")).await;
+    make_ready_dub(&pool, no_audio, Some("gemini-live-translate")).await;
+    sqlx::query("UPDATE videos SET dub_status = 'synth' WHERE id = ?")
+        .bind(synth)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE videos SET audio_file_path = NULL WHERE id = ?")
+        .bind(no_audio)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let got = list_ready_dubs_with_subtitles(&pool).await.unwrap();
+    let ids: Vec<i64> = got.iter().map(|b| b.video_id).collect();
+    assert_eq!(ids, vec![subs_a, subs_b]); // oldest first, nothing else
+    assert_eq!(got[0].youtube_id, "yt_subs_a");
+    assert_eq!(got[0].audio_file_path, "/c/a_audio.flac");
+}

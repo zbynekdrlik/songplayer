@@ -97,3 +97,7 @@ pub(crate) async fn backfill_missing_subtitles(pool: &SqlitePool) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "subtitles_store_tests.rs"]
+mod tests;

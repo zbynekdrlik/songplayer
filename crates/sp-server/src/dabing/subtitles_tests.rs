@@ -478,3 +478,323 @@ fn en_stays_within_its_own_chunk() {
     let got: Vec<&str> = t.lines.iter().map(|l| l.en.as_str()).collect();
     assert_eq!(got, vec!["One.", "Two."]);
 }
+
+// ── #184 round H step 2: the ONE continuous-session chunk ────────────────────
+
+#[test]
+fn one_continuous_session_chunk_builds_a_monotonic_bilingual_track() {
+    // Exactly the shape `dub_worker.py::build_transcripts` writes for the ONE
+    // continuous Live session: a single chunk covering the whole video
+    // (`at_ms` 0, `tempo` 1.0) whose `sk_timed` and `en_timed` are both
+    // VIDEO-timeline times (arrival − t0 − the measured latency, H4), so the
+    // EN and SK of the same speech are synchronous. Each EN sentence lands WHOLE
+    // on the SK line whose content interval it overlaps most (#184 H5).
+    let json = r#"{
+        "engine": "gemini-live-translate",
+        "target_lang": "sk",
+        "chunks": [
+            {"index": 0, "start_ms": 0, "end_ms": 2160000, "at_ms": 0, "tempo": 1.0,
+             "en": "Hello brothers. Today we will talk about faith. Amen.",
+             "sk": "Ahoj bratia. Dnes budeme hovoriť o viere. Amen.",
+             "en_timed": [
+                {"t_ms": 3900, "text": "Hello brothers."},
+                {"t_ms": 5100, "text": "Today we will"},
+                {"t_ms": 5900, "text": " talk about faith."},
+                {"t_ms": 8900, "text": "Amen."}
+             ],
+             "sk_timed": [
+                {"t_ms": 4000, "text": "Ahoj bratia."},
+                {"t_ms": 5200, "text": "Dnes budeme"},
+                {"t_ms": 6000, "text": " hovoriť o viere."},
+                {"t_ms": 9000, "text": "Amen."}
+             ]}
+        ]
+    }"#;
+    let parsed: DubTranscripts = serde_json::from_str(json).unwrap();
+    assert_eq!(parsed.chunks.len(), 1);
+    let track = transcripts_to_track(&parsed);
+    assert_eq!(track.source, SOURCE_LIVE_TRANSLATE);
+    let got: Vec<(u64, u64, &str, Option<&str>)> = track
+        .lines
+        .iter()
+        .map(|l| (l.start_ms, l.end_ms, l.en.as_str(), l.sk.as_deref()))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (0, 4000, "Hello brothers.", Some("Ahoj bratia.")),
+            (
+                4000,
+                6000,
+                "Today we will talk about faith.",
+                Some("Dnes budeme hovoriť o viere.")
+            ),
+            (6000, 9000, "Amen.", Some("Amen.")),
+        ]
+    );
+    // Monotonic, non-overlapping, every line bilingual.
+    for pair in track.lines.windows(2) {
+        assert!(pair[0].start_ms <= pair[1].start_ms);
+        assert!(pair[0].end_ms <= pair[1].start_ms);
+    }
+    assert!(
+        track
+            .lines
+            .iter()
+            .all(|l| !l.en.is_empty() && l.sk.is_some())
+    );
+}
+
+// ── #184 H5: content-interval overlap, sentences split inside a fragment ─────
+
+fn sent(start_ms: u64, end_ms: u64, text: &str) -> EnSentence {
+    EnSentence {
+        start_ms,
+        end_ms,
+        text: text.to_string(),
+    }
+}
+
+fn assign(sentences: &[EnSentence], lines: &[(u64, u64)]) -> Vec<String> {
+    assign_en_sentences(sentences, lines)
+}
+
+#[test]
+fn content_end_is_the_next_fragment_capped_at_1500ms() {
+    let t = [1000, 2000, 5000, 6500];
+    assert_eq!(content_end(&t, 0), 2000); // the next fragment, within the cap
+    assert_eq!(content_end(&t, 1), 3500); // next 3000 ms later → capped at +1500
+    assert_eq!(content_end(&t, 2), 6500); // next exactly +1500 → that fragment
+    assert_eq!(content_end(&t, 3), 8000); // no next fragment → +1500
+}
+
+#[test]
+fn a_fragment_splits_after_sentence_punctuation_followed_by_whitespace() {
+    assert_eq!(
+        split_sentences_inside(" Good to see you, Nathan. And"),
+        vec![" Good to see you, Nathan.", " And"]
+    );
+    // Every mark splits, the multi-byte `…` included; the pieces keep their
+    // own spaces so they concatenate back to the fragment.
+    assert_eq!(
+        split_sentences_inside("Wait… ok! Go? Yes. "),
+        vec!["Wait…", " ok!", " Go?", " Yes.", " "]
+    );
+    // A mark NOT followed by whitespace (a number, the fragment's own end) does
+    // not split.
+    assert_eq!(split_sentences_inside("at 5.30 in."), vec!["at 5.30 in."]);
+    assert_eq!(split_sentences_inside("plain"), vec!["plain"]);
+    assert!(split_sentences_inside("").is_empty());
+}
+
+#[test]
+fn en_sentences_split_inside_a_fragment_and_both_parts_belong_to_it() {
+    // „ Good to see you, Nathan. And" ends one sentence and starts the next in
+    // the SAME fragment (video 344): the first ends at that fragment's content
+    // end, the second starts at that fragment's time.
+    let got = en_sentences(&[
+        en_frag(59_735, " you are a mom."),
+        en_frag(63_797, " Good to see you, Nathan. And"),
+        en_frag(64_719, " then you can also scan"),
+        en_frag(65_719, " that QR code."),
+    ]);
+    assert_eq!(
+        got,
+        vec![
+            sent(59_735, 61_235, "you are a mom."),
+            sent(63_797, 64_719, "Good to see you, Nathan."),
+            sent(63_797, 67_219, "And then you can also scan that QR code."),
+        ]
+    );
+}
+
+#[test]
+fn en_sentences_stay_whole_across_fragments_and_skip_blank_fragments() {
+    // A blank fragment neither starts nor ends a sentence's interval; an
+    // unfinished trailing sentence is still a sentence.
+    let got = en_sentences(&[
+        en_frag(0, " "),
+        en_frag(1000, "First one"),
+        en_frag(1300, " in."),
+        en_frag(2000, "  "),
+        en_frag(5000, "and then"),
+    ]);
+    assert_eq!(
+        got,
+        vec![
+            sent(1000, 2000, "First one in."),
+            sent(5000, 6500, "and then")
+        ]
+    );
+}
+
+#[test]
+fn blank_only_en_yields_no_sentence() {
+    assert!(en_sentences(&[en_frag(1000, "  "), en_frag(2000, " ")]).is_empty());
+    assert!(en_sentences(&[]).is_empty());
+}
+
+#[test]
+fn a_sentence_goes_to_the_line_it_overlaps_most_not_the_nearest_start() {
+    // The sentence overlaps line 0 by 2000 ms and line 1 by 500 ms. Its start
+    // (8000) AND its midpoint (9250) are both nearer line 1 — overlap decides.
+    let got = assign(
+        &[sent(8000, 10_500, "A.")],
+        &[(0, 10_000), (10_000, 11_000)],
+    );
+    assert_eq!(got, vec!["A.", ""]);
+}
+
+#[test]
+fn without_overlap_the_nearest_midpoint_wins() {
+    let lines = [(0, 1000), (5000, 6000), (9000, 10_000)];
+    // In the gap [3000, 4000): midpoint 3500 is 3000 from line 0's, 2000 from
+    // line 1's → line 1 (the first candidate, line 0, would be wrong).
+    assert_eq!(
+        assign(&[sent(3000, 4000, "A.")], &lines),
+        vec!["", "A.", ""]
+    );
+    // After every line → the last one.
+    assert_eq!(
+        assign(&[sent(20_000, 21_000, "A.")], &lines),
+        vec!["", "", "A."]
+    );
+}
+
+#[test]
+fn an_overlap_tie_goes_to_the_earlier_line() {
+    let lines = [(0, 2000), (2000, 4000)];
+    // 500 ms in each line → the earlier one.
+    assert_eq!(assign(&[sent(1500, 2500, "A.")], &lines), vec!["A.", ""]);
+    // One ms more in the later line → the later one.
+    assert_eq!(assign(&[sent(1500, 2501, "A.")], &lines), vec!["", "A."]);
+}
+
+#[test]
+fn a_midpoint_tie_goes_to_the_earlier_line() {
+    let lines = [(0, 1000), (4000, 5000)];
+    // Midpoint 2500 is exactly 2000 from both line midpoints → the earlier line.
+    assert_eq!(assign(&[sent(2000, 3000, "A.")], &lines), vec!["A.", ""]);
+    // Half a ms later → the later line.
+    assert_eq!(assign(&[sent(2001, 3000, "A.")], &lines), vec!["", "A."]);
+}
+
+#[test]
+fn assignment_never_goes_back_before_the_previous_sentences_line() {
+    // The second sentence overlaps only line 0, but the first already went to
+    // line 1, so it stays on line 1.
+    let got = assign(
+        &[sent(5000, 6000, "Late."), sent(0, 1000, "Early.")],
+        &[(0, 1000), (5000, 6000)],
+    );
+    assert_eq!(got, vec!["", "Late. Early."]);
+}
+
+#[test]
+fn several_sentences_share_a_line_and_no_lines_drop_the_en() {
+    assert_eq!(
+        assign(
+            &[sent(0, 500, "One."), sent(500, 900, "Two.")],
+            &[(0, 1000), (5000, 6000)]
+        ),
+        vec!["One. Two.", ""]
+    );
+    assert_eq!(assign(&[sent(0, 500, "One.")], &[]), Vec::<String>::new());
+    assert_eq!(assign(&[], &[(0, 1000)]), vec![""]);
+}
+
+#[test]
+fn en_timed_is_mapped_through_at_ms_and_tempo() {
+    // at_ms 100 000, tempo 2.0: SK „Prvá." (local 2000) → 101 000, „Druhá."
+    // (local 4000) → 102 000; the EN at the same local times lands on the same
+    // video times, so each sentence overlaps its own line. Without the tempo the
+    // EN would sit at 102 000 / 104 000 (line 1 for „One."); without at_ms at
+    // 1000 / 2000 (both on line 0).
+    let c = with_en(
+        chunk(
+            0,
+            Some(100_000),
+            Some(2.0),
+            vec![frag(2000, "Prvá."), frag(4000, "Druhá.")],
+        ),
+        vec![en_frag(2000, "One."), en_frag(4000, " Two.")],
+    );
+    let t = build(vec![c]);
+    let got: Vec<(u64, &str)> = t
+        .lines
+        .iter()
+        .map(|l| (l.start_ms, l.en.as_str()))
+        .collect();
+    assert_eq!(got, vec![(100_000, "One."), (101_000, "Two.")]);
+}
+
+#[test]
+fn legacy_chunk_maps_en_from_start_ms() {
+    // No at_ms / tempo → the EN is placed at start_ms + t_ms, like the SK.
+    let c = with_en(
+        chunk(
+            50_000,
+            None,
+            None,
+            vec![frag(1000, "Prvá."), frag(9000, "Druhá.")],
+        ),
+        vec![en_frag(1000, "One."), en_frag(9000, " Two.")],
+    );
+    let t = build(vec![c]);
+    let got: Vec<(u64, &str)> = t
+        .lines
+        .iter()
+        .map(|l| (l.start_ms, l.en.as_str()))
+        .collect();
+    assert_eq!(got, vec![(50_000, "One."), (51_000, "Two.")]);
+}
+
+/// The EN of the line whose SK is exactly `sk` (trimmed).
+fn en_of(track: &LyricsTrack, sk: &str) -> String {
+    track
+        .lines
+        .iter()
+        .find(|l| l.sk.as_deref().map(str::trim) == Some(sk))
+        .unwrap_or_else(|| panic!("no SK line {sk:?}"))
+        .en
+        .trim()
+        .to_string()
+}
+
+#[test]
+fn the_video_344_session_log_pairs_each_en_with_its_own_sk_line() {
+    // Real data (#184 H5): 27–100 s of video 344's session log (52 SK + 48 EN
+    // fragments, already on the video timeline). With the nearest DISPLAYED
+    // start, „Rád ťa vidím, Nathan." (displayed from 59 672 ms, content at
+    // 63 922 ms) showed the previous sentence's EN, and „ Good to see you,
+    // Nathan. And" was one sentence.
+    let t: DubTranscripts =
+        serde_json::from_str(include_str!("testdata/dub344_window_27_100s.json")).unwrap();
+    assert_eq!(t.chunks.len(), 1);
+    assert_eq!(t.chunks[0].sk_timed.len(), 52);
+    assert_eq!(t.chunks[0].en_timed.len(), 48);
+    let track = transcripts_to_track(&t);
+    let pairs = [
+        ("Rád ťa vidím, Nathan.", "Good to see you, Nathan."),
+        (
+            "A potom môžeš naskenovať aj ten QR kód.",
+            "And then you can also scan that QR code.",
+        ),
+        (
+            "a podať žiadosť o modlitbu.",
+            "Um and get a prayer request in.",
+        ),
+        (
+            "Takže toto je každý utorok až piatok.",
+            "So this is every Tuesday through Friday.",
+        ),
+        (
+            "o 5:30 ráno, ale asi ty si mama.",
+            "at 5:30 in the morning, but I guess you you are a mom.",
+        ),
+        ("Dobré ráno z Montrealu.", "Good morning from Montreal."),
+    ];
+    for (sk, en) in pairs {
+        assert_eq!(en_of(&track, sk), en, "EN of the SK line {sk:?}");
+    }
+}
