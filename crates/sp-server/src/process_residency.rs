@@ -73,8 +73,10 @@ pub const QUOTA_HARDWS_MIN_ENABLE: u32 = 0x1;
 pub const QUOTA_HARDWS_MAX_DISABLE: u32 = 0x8;
 
 /// The flags word passed to `SetProcessWorkingSetSizeEx`: hard min, soft max
-/// (`0x9`).
-pub const HARD_MIN_FLAGS: u32 = QUOTA_HARDWS_MIN_ENABLE | QUOTA_HARDWS_MAX_DISABLE;
+/// (`0x9`). A LITERAL: the two bits are disjoint, so a `|` here (cargo-mutants
+/// mutates const initializers too) has an equivalent `|`→`^` mutant; the
+/// composition is pinned by `hard_min_flags_are_the_or_of_min_enable_and_max_disable`.
+pub const HARD_MIN_FLAGS: u32 = 0x9;
 
 /// Bytes per MiB.
 const MIB: u64 = 1_048_576;

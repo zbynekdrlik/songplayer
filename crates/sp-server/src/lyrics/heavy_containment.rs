@@ -104,21 +104,35 @@ pub(crate) const HEAVY_MIN_WS_MB: u32 = 256;
 /// `JOB_OBJECT_LIMIT_WORKINGSET` (windows-sys `Win32::System::JobObjects`).
 /// These four flag mirrors are compile-time asserted equal to windows-sys in
 /// `heavy_slot.rs::assign_win_job`.
+// Read only by the windows job code + the tests since the flag words are
+// literals (#147 r9 mutation gate); not dead on Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) const JOB_LIMIT_WORKINGSET: u32 = 0x1;
 /// `JOB_OBJECT_LIMIT_AFFINITY`.
+// Read only by the windows job code + the tests since the flag words are
+// literals (#147 r9 mutation gate); not dead on Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) const JOB_LIMIT_AFFINITY: u32 = 0x10;
 /// `JOB_OBJECT_LIMIT_PROCESS_MEMORY`.
+// Read only by the windows job code + the tests since the flag words are
+// literals (#147 r9 mutation gate); not dead on Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) const JOB_LIMIT_PROCESS_MEMORY: u32 = 0x100;
 /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
+// Read only by the windows job code + the tests since the flag words are
+// literals (#147 r9 mutation gate); not dead on Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) const JOB_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
 
-/// The #162/#203 flags every heavy-child job carries: memory ceiling +
-/// kill-on-close + affinity. (Consts, not fn-body `|`s: the flag bits are
-/// disjoint, so a `|`→`^` mutant inside a fn would be equivalent.)
-const JOB_LIMIT_BASE: u32 =
-    JOB_LIMIT_PROCESS_MEMORY | JOB_LIMIT_KILL_ON_JOB_CLOSE | JOB_LIMIT_AFFINITY;
-/// [`JOB_LIMIT_BASE`] + `JOB_OBJECT_LIMIT_WORKINGSET` (#147 round 9).
-const JOB_LIMIT_BASE_WITH_WORKINGSET: u32 = JOB_LIMIT_BASE | JOB_LIMIT_WORKINGSET;
+/// The #162/#203 flags every heavy-child job carries: memory ceiling (0x100) +
+/// kill-on-close (0x2000) + affinity (0x10). Written as a LITERAL: the bits are
+/// disjoint, so any `|` here (even in a const initializer — cargo-mutants mutates
+/// those too) has an equivalent `|`→`^` mutant. The composition is pinned by
+/// `job_limit_literals_are_the_or_of_their_flag_bits` in the tests.
+pub(crate) const JOB_LIMIT_BASE: u32 = 0x2110;
+/// [`JOB_LIMIT_BASE`] + `JOB_OBJECT_LIMIT_WORKINGSET` (0x1, #147 round 9) —
+/// literal for the same reason.
+pub(crate) const JOB_LIMIT_BASE_WITH_WORKINGSET: u32 = 0x2111;
 
 /// The extended-limit `LimitFlags` word for a heavy child's Job Object: the
 /// #162 memory ceiling + kill-on-close and the #203 affinity ALWAYS, plus

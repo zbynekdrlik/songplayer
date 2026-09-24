@@ -238,3 +238,13 @@ fn residency_line_carries_each_last_error_in_its_own_field() {
 fn setting_key_is_the_documented_name() {
     assert_eq!(SETTING_KEY, "sp_min_working_set_mb");
 }
+
+#[test]
+fn hard_min_flags_are_the_or_of_min_enable_and_max_disable() {
+    // HARD_MIN_FLAGS is a literal in the source (a `|` of disjoint bits has an
+    // equivalent mutant); the composition is pinned here.
+    assert_eq!(
+        HARD_MIN_FLAGS,
+        QUOTA_HARDWS_MIN_ENABLE | QUOTA_HARDWS_MAX_DISABLE
+    );
+}

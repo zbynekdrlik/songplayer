@@ -388,3 +388,18 @@ fn job_working_set_bytes_min_256_max_the_cap() {
     assert_eq!(job_working_set_bytes(256), Some((268_435_456, 268_435_456)));
     assert_eq!(job_working_set_bytes(255), Some((267_386_880, 267_386_880)));
 }
+
+#[test]
+fn job_limit_literals_are_the_or_of_their_flag_bits() {
+    // The flag words are literals in the source (a `|` of disjoint bits has an
+    // equivalent `|`→`^` mutant); tests are not mutated, so the composition is
+    // pinned here.
+    assert_eq!(
+        JOB_LIMIT_BASE,
+        JOB_LIMIT_PROCESS_MEMORY | JOB_LIMIT_KILL_ON_JOB_CLOSE | JOB_LIMIT_AFFINITY
+    );
+    assert_eq!(
+        JOB_LIMIT_BASE_WITH_WORKINGSET,
+        JOB_LIMIT_BASE | JOB_LIMIT_WORKINGSET
+    );
+}
