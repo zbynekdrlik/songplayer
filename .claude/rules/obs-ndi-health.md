@@ -6,9 +6,11 @@ paths:
   - "e2e/ndi-health-gate.ts"
   - "e2e/post-deploy-av-sync.spec.ts"
   - "e2e/av-sync-gate.ts"
+  - "e2e/av-sync-evidence.ts"
   - "e2e/obs-driver.ts"
   - "scripts/av_sync_check.py"
   - "scripts/tests/test_av_sync_check.py"
+  - "scripts/tests/test_av_sync_profile.py"
 ---
 
 # OBS ↔ NDI health & receiver recovery (#127)
@@ -364,12 +366,31 @@ and the recording actually get.
 
     A `fail` is never retaken. Neither is an audio-side `cannot_measure`,
     which can be a real audio fault. A retake starts only while less than
-    120 s of the 300 s budget is used, so a full worst-case take still fits.
+    110 s of the 300 s budget is used, so a full worst-case take (including
+    copying the evidence) still fits.
     The run is classified by `classifyAvSyncRun`: the stdout JSON and the exit
     code must agree. Missing JSON (a numpy import failure, an argparse error)
     is `error`, not a verdict.
-  - It deletes every recording plus its auto-remux sibling. When the profile's
-    `Video/AutoRemux` is on, an mkv also leaves `<base>.mp4`.
+  - It deletes every recording plus its auto-remux sibling from the OBS
+    folder. When the profile's `Video/AutoRemux` is on, an mkv also leaves
+    `<base>.mp4`.
+  - **A take that did not pass keeps its evidence first.** That is every
+    analysed take whose result is `fail`, `cannot_measure`, `error`, or an
+    analysis that threw (`keepsEvidence`). A take discarded because the song
+    changed keeps nothing. The recording, its remux sibling (copied only
+    once its size stops growing), the analysis JSON (`av_sync.json`) and its
+    stderr (or `analysis-error.txt`) are copied into the Playwright output
+    dir as `take<N>-<name>` (`e2e/av-sync-evidence.ts`). It never throws: a
+    failed copy is a `console.error`. A pass keeps no copy.
+    - **Where it lands in CI:** the E2E job's "Upload post-deploy Playwright
+      report on failure" step uploads `e2e/test-results/` as the
+      `post-deploy-playwright-report` artifact (7 days). Open the run →
+      Artifacts → `post-deploy-playwright-report` →
+      `test-results/post-deploy-av-sync-…-chromium/av-sync-evidence/`
+      (`take1-<date>.mkv`, `take1-<date>.mp4`, `take1-av_sync.json`,
+      `take1-av_sync.stderr.txt`). About 15 MB per file. Playwright wipes
+      `test-results/` at the start of the next run, so nothing piles up on
+      the box.
     `removeRecording` waits for the remux and retries while OBS still holds
     the file. An undeletable file fails the test after the verdict, never
     masking it.
@@ -495,7 +516,8 @@ and the recording actually get.
     It FAILS the job and is never a skip.
 - **Reading the output:** the CI log shows the full JSON and one line:
   `AV-SYNC status=… av_ms=… audio_corr=… video_match=… video_contrast=…
-  dropouts=… glitches=… reasons=[…]`.
+  dropouts=… dropout_ms=… glitches=… drift_ms_per_10s=… max_step_ms=…
+  step_at_s=… reasons=[…]`.
   - `av_ms` > 0 means audio AHEAD of picture. `audio.offset_s` and
     `video.offset_s` are `orig_time − rec_time`.
   - `video.plateau_ms` is the video's resolution. It is up to one source-frame
@@ -508,8 +530,50 @@ and the recording actually get.
     shows up as a low video match (`cannot_measure`), never as a false pass.
   - Baseline on 24.9.2026 (manual): A/V +13 ms, corr 0.997, match 0.999,
     0 dropouts.
+- **Per-segment profile — drift vs jump (diagnostics only, #147).** One
+  whole-take A/V number cannot tell a clock that drifts from a resync that
+  jumps. Release run 36068121677 read av_ms 60.5, corr 0.899 and glitches
+  only from 12.5 s. The JSON therefore carries two extra fields:
+  - `segments`: one row per 2 s window of the recording. Each row has
+    `t_s` (window start, recording time), `audio_offset_s` + `audio_corr`
+    (that window's audio cross-correlated against the original, searched
+    ±300 ms around the global audio offset), `video_offset_s` +
+    `video_match` (the same global video alignment, restricted to the
+    window's frames, ±300 ms around the global video offset), `av_ms`, and
+    `errors` (why a side is `null` there: silence, no frames, no shift).
+  - `drift`: fitted over the windows with `audio_corr ≥ 0.8`
+    (`windows_used` of `windows_total`).
+    - `drift_ms_per_10s` is the least-squares slope of `av_ms`.
+    - `max_step_ms` / `step_at_s` is the largest `av_ms` change between
+      neighbouring good windows, and the start of the later window.
+    - When that step is an outlier (≥ 20 ms and ≥ 3× the median step),
+      the fit gets its own step term there (`step_modeled: true`). A jump
+      then does not also read as a slope.
+  - How to read it:
+    - **Steady drift** (an unsynchronized clock, #148 / #55): a slope, small
+      equal steps, `step_modeled: false`. 50 ms over 20 s reads ≈ 25 ms/10 s.
+    - **Jump / resync:** `step_modeled: true`, `max_step_ms` ≈ the jump at
+      `step_at_s`, slope ≈ 0.
+    - **Constant offset** (e.g. a fixed latency): slope ≈ 0, no step, every
+      window's `av_ms` ≈ the global one.
+    - **A window with low `audio_corr`** is where the audio itself changed
+      (glitches, a gap). Compare its `t_s` with `glitch_times_s`.
+  - Per-window `av_ms` jitters by a few ms when the picture has few cuts:
+    a 2 s window has far fewer frames than the whole take. Read a trend
+    over several windows, not one window.
+  - **Limit:** a drift so fast that it smears one 2 s window by more than
+    ~1 ms (≳ 500 ppm) decorrelates broadband audio. Those windows fall below
+    0.8 and `drift` stays `null` instead of fitting a slope through them.
+    Real clock error (≤ a few hundred ppm) is far below that.
+  - The verdict and its thresholds do not read these fields. A profile
+    error is reported as `drift.error` and on stderr, and never moves the
+    verdict.
 - **Tested:** the pure functions are covered by pytest on synthetic click-train
-  plus flash-frame fixtures in Eval Checks (numpy only). The ffmpeg I/O layer
+  plus flash-frame fixtures in Eval Checks (numpy only). The segment profile
+  (`test_av_sync_profile.py`) uses bass-band noise and a moving picture,
+  covering drift, a jump, in-sync, and an excluded low-corr window. The
+  evidence copy (`av-sync-evidence.spec.ts`) runs on a temp dir in the mock
+  suite. The ffmpeg I/O layer
   is untested in CI by design, because that job has no ffmpeg. It was checked
   locally against ffmpeg-muxed mkv and mp4 AAC "recordings" with known offsets
   (+120 → 116, 0 → −3/−4, −80 → −83 ms, and an 85 ms zeroed stretch → a
