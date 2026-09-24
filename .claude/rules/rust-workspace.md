@@ -231,6 +231,21 @@ fails). Prefer a deterministic wrong (grow / different-length) over "allocate
 fresh" — a freed-then-reallocated buffer can land at the SAME address and make a
 pointer-equality RED pass by luck.
 
+**A LOCK-SCOPE refactor uses the same pattern (#147 r11, `sp-ndi/handle_table.rs`).**
+
+- **RED:** ship the whole new structure, wired in, but keep the OLD scope in one
+  spot (`with` holds the map's WRITE lock across the op, which is exactly the old
+  global mutex).
+- **GREEN:** only narrows that scope.
+- **Tests:** prove concurrency with channels plus bounded `recv_timeout`, never
+  sleeps. Hold an op inside handle A until signalled, then assert that handle B's
+  op (and an insert/remove) completes within the bound.
+- **Watch the lock kind:** a READ lock held across the op would still let B's
+  read-side op through. Only the insert/remove test catches that shape, so write
+  both.
+- **No hangs:** drop the `release` sender on every failure path, so the held
+  thread's `recv().unwrap()` panics instead of hanging the test.
+
 ## `-D warnings` rejects `temporary.as_ptr()` in tests — bind the value first (#203 r2b)
 
 `assert_eq!(take(cap).as_ptr(), p, …)` is a compile ERROR under CI's

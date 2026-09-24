@@ -666,3 +666,58 @@ first capped job, and logs
   holds).
 - Box acceptance: the contained line reads `max_ws_mb=4096` and no `rejected`
   WARN appears.
+
+## #147 round 11 — one lock per NDI sender, and the full task token
+
+**Per-sender NDI locking (`sp-ndi/src/handle_table.rs`).**
+
+- **The old lock.** `RealNdiBackend` kept every sender in ONE
+  `Mutex<HashMap>`, held across each SDK call: video, async video, flush,
+  audio, tally, connections and source URL.
+  `NDIlib_send_send_video_async_v2` blocks until the SDK has finished with that
+  sender's previous frame. With pacing, all ~10 outputs emit on the same
+  33.3 ms boundary, so one slow sender delayed every other output's video and
+  audio send. The per-output `submit_call_us_*` gauge included that wait.
+- **Map lock.** The map is now `HandleTable<RealHandleState>`: an `RwLock`
+  over `usize → Arc<Mutex<Option<T>>>`. The map lock is held ONLY to insert,
+  remove, or clone one handle's `Arc`, never across an SDK call.
+- **Handle lock.** Each handle's own `Mutex` is held across its SDK call.
+  Calls on one sender stay ordered, so audio and video on the same output
+  still serialise. Different senders run in parallel.
+- **Destroy.** `remove_with` removes the `Arc` under the write lock, then
+  waits on the handle's lock for the in-flight send. It takes the state out
+  (`Option::take`) and calls `NDIlib_send_destroy` while still holding that
+  lock. A send that cloned the `Arc` before the remove finds `None` and does
+  nothing, the same as a missing handle.
+- **Tests.** The table is generic, so the locking is Linux-tested and
+  mutation-scored with plain values and threads (channels plus bounded
+  timeouts). The `RealNdiBackend` methods stay `mutants::skip` (SDK pointer
+  derefs). Never put the map lock back around an SDK call:
+  `an_op_on_another_handle_completes_while_one_handle_is_blocked` and
+  `create_and_destroy_of_other_handles_proceed_while_one_handle_is_blocked`
+  fail on that shape.
+
+**The SongPlayer task runs with `-RunLevel Highest`** (the `ci.yml` Deploy step
+"Configure auto-start and launch").
+
+- **Why.** `Resolume` is an Administrator. A `Limited` task gets the filtered
+  UAC token, which does not hold `SeIncreaseBasePriorityPrivilege`. The box
+  logged `heavy child job privilege: SeIncreaseBasePriorityPrivilege=failed(err=1300)`,
+  and the child's working-set cap was rejected with 1314 (issue #147 comment
+  5815246953). The round-9 `SeIncreaseWorkingSetPrivilege` is in both
+  tokens; only `SeIncreaseBasePriorityPrivilege` needs Highest.
+- **Side effects, accepted.** SongPlayer and its children (CLIProxyAPI,
+  yt-dlp, ffmpeg, the heavy python workers) now run at high integrity, and so
+  does the port-8920 server. Windows (UIPI) blocks input from medium-integrity
+  processes into the Tauri window, e.g. drag-and-drop from Explorer.
+  WebView2 runs elevated. If it failed to start, the deploy's health check
+  would catch it.
+- **Where.** The task is re-registered on EVERY deploy, so the RunLevel lives
+  only in `ci.yml`. `scripts/setup-runner.ps1` registers only the runner's own
+  task (already Highest).
+- **Box acceptance after the deploy:**
+  - the `heavy child job privilege:` line reads
+    `SeIncreaseBasePriorityPrivilege=ok`. It is logged once, at the first capped
+    heavy-child job, not at startup (`heavy_slot::job_working_set_privilege`);
+  - the `heavy child contained` line reads `max_ws_mb=4096`;
+  - no `working-set cap … rejected` WARN appears.
