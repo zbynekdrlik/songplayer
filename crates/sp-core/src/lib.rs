@@ -2,6 +2,7 @@
 //!
 //! This crate is WASM-safe — no OS-specific dependencies.
 
+pub mod audio_level;
 pub mod clock_health;
 pub mod config;
 pub mod genlock;
