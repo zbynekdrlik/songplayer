@@ -21,7 +21,10 @@ pub mod stream;
 #[cfg(windows)]
 pub mod video;
 
-pub use audio::{StemMixReader, SymphoniaAudioReader, gain_from_bits, gain_to_bits, shared_gain};
+pub use audio::{
+    StemMixReader, SymphoniaAudioReader, format_gains, gain_from_bits, gain_to_bits, gains_id,
+    shared_gain,
+};
 pub use error::DecoderError;
 pub use frame_pool::PooledBuf;
 pub use level_probe::{LevelProbe, LevelReading, PROBE_INTERVAL};

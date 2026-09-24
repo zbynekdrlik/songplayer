@@ -33,12 +33,25 @@
 //! whole-frame portion each call, carrying the remainder forward; a stream that
 //! has ended mixes as silence so the longest stream still reaches its end.
 //! Timestamps come from a cumulative sample-frame counter (monotonic).
+//!
+//! ## Stage level probe (#184 round G4)
+//!
+//! Once a second the reader logs `stem-mix level` at INFO: the RMS of the
+//! frames it EMITTED in that second (post-gain, so a fader at 0 must read the
+//! floor here), the target and applied gain per stream, and `gains_id` — the
+//! address of the first target atomic, which `playback/mix.rs` also logs for the
+//! control's live sets, so the log proves whether this reader holds the SAME
+//! atomics the faders write.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Instant;
+
+use tracing::info;
 
 use crate::error::DecoderError;
+use crate::level_probe::{LevelProbe, LevelReading};
 use crate::stream::{AudioStream, MediaStream};
 use crate::types::DecodedAudioFrame;
 
@@ -59,6 +72,19 @@ pub fn gain_from_bits(bits: u32) -> f32 {
 /// Convenience: build a shared gain atomic initialised to `g`.
 pub fn shared_gain(g: f32) -> Arc<AtomicU32> {
     Arc::new(AtomicU32::new(gain_to_bits(g)))
+}
+
+/// Identity of a live gain set: the address of its FIRST atomic (`0` for an
+/// empty set). Two holders print the same id iff they share the same `Arc`s —
+/// the #184 G4 probe compares a reader's id with the mixer control's.
+pub fn gains_id(targets: &[Arc<AtomicU32>]) -> usize {
+    targets.first().map_or(0, |t| Arc::as_ptr(t) as usize)
+}
+
+/// Render gains for a log line with 2 decimals: `[0.00,1.00,0.50]`.
+pub fn format_gains(gains: &[f32]) -> String {
+    let parts: Vec<String> = gains.iter().map(|g| format!("{g:.2}")).collect();
+    format!("[{}]", parts.join(","))
 }
 
 /// Mixes N sample-aligned [`AudioStream`]s into one, with live per-stream gain
@@ -82,6 +108,11 @@ pub struct StemMixReader {
     eos: Vec<bool>,
     /// Per-channel sample-frames emitted so far — drives the output timestamp.
     emitted_frames: u64,
+    /// Human label for the `stem-mix level` log line (#184 G4), e.g.
+    /// `dub-4:<audio file stem>`. Defaults to `<n>-stream`.
+    label: String,
+    /// 1 Hz level probe over the emitted (post-gain) output.
+    probe: LevelProbe,
 }
 
 impl std::fmt::Debug for StemMixReader {
@@ -97,6 +128,7 @@ impl std::fmt::Debug for StemMixReader {
             .field("current", &self.current)
             .field("eos", &self.eos)
             .field("emitted_frames", &self.emitted_frames)
+            .field("label", &self.label)
             .finish()
     }
 }
@@ -165,7 +197,60 @@ impl StemMixReader {
             bufs: (0..n).map(|_| VecDeque::new()).collect(),
             eos: vec![false; n],
             emitted_frames: 0,
+            label: format!("{n}-stream"),
+            probe: LevelProbe::new(Instant::now()),
         })
+    }
+
+    /// Set the label printed on this reader's `stem-mix level` line (#184 G4).
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.label = label.into();
+        self
+    }
+
+    /// The label printed on this reader's `stem-mix level` line.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Identity of the gain atomics this reader reads ([`gains_id`] of its
+    /// targets).
+    pub fn gains_id(&self) -> usize {
+        gains_id(&self.targets)
+    }
+
+    /// Level + sample count of the output emitted in the probe's still-open
+    /// window — exposed for tests that assert the probe measures post-gain.
+    #[cfg(test)]
+    pub(crate) fn pending_level(&self) -> (f32, u64) {
+        self.probe.pending()
+    }
+
+    /// Keep the probe window open for the rest of a test (starts it an hour
+    /// ahead), so a slow test run can never close it mid-assertion.
+    #[cfg(test)]
+    pub(crate) fn hold_probe_window(&mut self) {
+        self.probe = LevelProbe::new(Instant::now() + std::time::Duration::from_secs(3600));
+    }
+
+    /// Emit the 1 Hz `stem-mix level` line for a closed probe window.
+    fn log_level(&self, r: &LevelReading) {
+        let targets: Vec<f32> = self
+            .targets
+            .iter()
+            .map(|t| gain_from_bits(t.load(Ordering::Relaxed)))
+            .collect();
+        info!(
+            label = %self.label,
+            "stem-mix level rms_dbfs={:.1} targets={} applied={} gains_id={:#x} samples={} blocks={} window_ms={}",
+            r.rms_dbfs,
+            format_gains(&targets),
+            format_gains(&self.current),
+            self.gains_id(),
+            r.samples,
+            r.blocks,
+            r.window_ms
+        );
     }
 
     /// The ramp length (`sample_rate / 20`, >= 1) in output frames — exposed for
@@ -275,6 +360,12 @@ impl AudioStream for StemMixReader {
 
         let timestamp_ms = self.emitted_frames.saturating_mul(1000) / self.sample_rate as u64;
         self.emitted_frames += frames as u64;
+
+        // #184 G4: 1 Hz level of what this reader actually emits (post-gain).
+        self.probe.add(&out);
+        if let Some(reading) = self.probe.poll(Instant::now()) {
+            self.log_level(&reading);
+        }
 
         Ok(Some(DecodedAudioFrame {
             data: out,

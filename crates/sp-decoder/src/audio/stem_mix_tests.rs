@@ -423,3 +423,82 @@ fn gain_bits_round_trip() {
         assert_eq!(gain_from_bits(gain_to_bits(g)), g);
     }
 }
+
+// ── #184 G4 stage level probe ─────────────────────────────────────────────
+
+#[test]
+fn probe_measures_the_post_gain_output_so_zero_gains_read_the_floor() {
+    // Full-scale content on every stream, every gain 0: the reader EMITS
+    // silence, and its probe must say so (the owner-path question of G4).
+    let mut r = reader3(
+        vec![vec![1.0, -1.0, 1.0, -1.0]],
+        vec![vec![1.0, -1.0, 1.0, -1.0]],
+        vec![vec![1.0, -1.0, 1.0, -1.0]],
+        0.0,
+        0.0,
+        0.0,
+    );
+    r.hold_probe_window();
+    approx(&drain(&mut r), &[0.0, 0.0, 0.0, 0.0]);
+    assert_eq!(
+        r.pending_level(),
+        (sp_core::audio_level::SILENCE_FLOOR_DBFS, 4)
+    );
+}
+
+#[test]
+fn probe_reads_full_scale_output_as_zero_dbfs() {
+    let mut r = StemMixReader::new(
+        vec![mock(
+            vec![vec![1.0, -1.0], vec![-1.0, 1.0]],
+            48_000,
+            2,
+            1000,
+        )],
+        vec![shared_gain(1.0)],
+    )
+    .unwrap();
+    r.hold_probe_window();
+    drain(&mut r);
+    let (db, n) = r.pending_level();
+    assert!(
+        db.abs() < 1e-4,
+        "full-scale output must read 0 dBFS, got {db}"
+    );
+    assert_eq!(n, 4);
+}
+
+#[test]
+fn gains_id_identifies_the_shared_atomics() {
+    let handles = vec![shared_gain(1.0), shared_gain(0.0)];
+    let r = StemMixReader::new(
+        vec![mock(vec![], 48_000, 2, 1000), mock(vec![], 48_000, 2, 1000)],
+        handles.clone(),
+    )
+    .unwrap();
+    // The reader holds the SAME Arcs it was given — its id is the first one's
+    // address, identical to what a holder of the handles computes.
+    assert_eq!(r.gains_id(), Arc::as_ptr(&handles[0]) as usize);
+    assert_eq!(r.gains_id(), gains_id(&handles));
+    // A different set of atomics with equal VALUES has a different id.
+    let other = vec![shared_gain(1.0), shared_gain(0.0)];
+    assert_ne!(gains_id(&other), gains_id(&handles));
+    assert_eq!(gains_id(&[]), 0);
+}
+
+#[test]
+fn label_defaults_to_the_stream_count_and_is_settable() {
+    let r = reader3(vec![], vec![], vec![], 1.0, 0.0, 0.0);
+    assert_eq!(r.label(), "3-stream");
+    let r = r.with_label("dub-4:song_audio");
+    assert_eq!(r.label(), "dub-4:song_audio");
+}
+
+#[test]
+fn format_gains_prints_two_decimals() {
+    assert_eq!(
+        format_gains(&[0.0, 1.0, 0.5, 0.333]),
+        "[0.00,1.00,0.50,0.33]"
+    );
+    assert_eq!(format_gains(&[]), "[]");
+}

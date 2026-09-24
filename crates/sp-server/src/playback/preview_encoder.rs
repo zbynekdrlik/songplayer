@@ -23,10 +23,12 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use sp_decoder::LevelProbe;
 use tracing::{info, warn};
 
 use super::fmp4_relay::BoxSplitter;
 use super::preview_audio_hold::{AudioHold, AudioWrite};
+use super::preview_audio_probe::log_feed_level;
 use super::preview_stream::{
     OUT_H, OUT_W, PREVIEW_AUDIO_FRAMES_PER_MS, StreamShared, audio_preroll_samples,
 };
@@ -692,7 +694,8 @@ const AFEED_POLL_US: u64 = 30_000;
 /// size. The round-G2 wall-clock rules (silence when nothing arrives, bursts
 /// trimmed) live in [`AudioHold::take_writes`]. Logs the effective timing at
 /// start and `preview-afeed: ahead_ms padded_ms skipped_ms held_ms queued
-/// dropped` at INFO every 10 s.
+/// dropped` at INFO every 10 s, plus the #184 G4 `preview-afeed level` line
+/// (RMS of the real audio written, pad silence as `pad_ms`) every second.
 #[cfg_attr(test, mutants::skip)]
 fn spawn_audio_feeder(
     shared: Arc<StreamShared>,
@@ -730,6 +733,8 @@ fn spawn_audio_feeder(
             if preroll > 0 && !write_silence(&mut sock, preroll) {
                 return;
             }
+            let mut level = LevelProbe::new(Instant::now());
+            level.add_silence(preroll as u64);
             let mut last_log = Instant::now();
             let mut bytes: Vec<u8> = Vec::new();
             while !shutdown.load(Ordering::Relaxed) {
@@ -742,8 +747,12 @@ fn spawn_audio_feeder(
                 while let Ok(b) = rx.try_recv() {
                     hold.push(us(b.arrival), b.samples);
                 }
-                if !write_audio(&mut sock, hold.take_writes(us(Instant::now())), &mut bytes) {
+                let writes = hold.take_writes(us(Instant::now()));
+                if !write_audio(&mut sock, writes, &mut bytes, &mut level) {
                     break;
+                }
+                if let Some(r) = level.poll(Instant::now()) {
+                    log_feed_level(shared.label(), &r);
                 }
                 if last_log.elapsed() >= AFEED_LOG_EVERY {
                     let pos = hold.position_at(us(Instant::now()));
@@ -766,18 +775,26 @@ fn spawn_audio_feeder(
 }
 
 /// Perform the feeder's [`AudioWrite`]s on the child's audio socket (silence in
-/// 32 KB chunks, samples as little-endian f32). `false` on a write error (the
-/// child is gone), so the caller aborts the feeder.
+/// 32 KB chunks, samples as little-endian f32), measuring what is written into
+/// the #184 G4 `level` probe. `false` on a write error (the child is gone), so
+/// the caller aborts the feeder.
 #[cfg_attr(test, mutants::skip)]
-fn write_audio(sock: &mut TcpStream, writes: Vec<AudioWrite>, bytes: &mut Vec<u8>) -> bool {
+fn write_audio(
+    sock: &mut TcpStream,
+    writes: Vec<AudioWrite>,
+    bytes: &mut Vec<u8>,
+    level: &mut LevelProbe,
+) -> bool {
     for w in writes {
         match w {
             AudioWrite::Silence(frames) => {
+                level.add_silence(frames as u64 * 2);
                 if !write_silence(sock, frames * 2) {
                     return false;
                 }
             }
             AudioWrite::Samples(samples) => {
+                level.add(&samples);
                 bytes.clear();
                 bytes.reserve(samples.len() * 4);
                 for s in &samples {

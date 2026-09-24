@@ -26,6 +26,7 @@ use std::time::Instant;
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 
 use super::fmp4_relay::FragmentRelay;
+use super::preview_audio_probe::{SharedLevelProbe, log_tap_level};
 
 /// Fixed preview canvas width (the ffmpeg raw video input geometry).
 pub const OUT_W: u32 = 640;
@@ -338,6 +339,9 @@ pub struct StreamShared {
     pool: Mutex<Vec<Vec<u8>>>,
     /// fMP4 fragment relay the child's reader thread feeds and viewers read.
     relay: Arc<FragmentRelay>,
+    /// #184 G4 stage probe: 1 Hz level of the audio this tap OFFERED to the
+    /// preview (only while watched — the no-viewer fast path never touches it).
+    tap_level: SharedLevelProbe,
 }
 
 impl StreamShared {
@@ -355,6 +359,7 @@ impl StreamShared {
             audio_rx,
             pool: Mutex::new(Vec::new()),
             relay: FragmentRelay::new(RELAY_CAPACITY),
+            tap_level: SharedLevelProbe::new(Instant::now()),
         }
     }
 
@@ -393,11 +398,32 @@ impl StreamShared {
         // would play at double speed). [`to_stereo`] upmixes mono and drops any
         // unexpected channel count.
         if let Some(block) = to_stereo(samples, channels) {
-            let _ = self.audio_tx.try_send(AudioBlock {
-                arrival: Instant::now(),
+            // #184 G4: measure the block BEFORE it moves into the channel.
+            let now = Instant::now();
+            let level = self.tap_level.record(&block, now);
+            let sent = self.audio_tx.try_send(AudioBlock {
+                arrival: now,
                 samples: block,
             });
+            if sent.is_err() {
+                self.tap_level.note_dropped();
+            }
+            if let Some(r) = level {
+                log_tap_level(&self.label, &r);
+            }
         }
+    }
+
+    /// Level + samples of the tap probe's still-open window (tests).
+    #[cfg(test)]
+    pub(crate) fn tap_pending(&self) -> (f32, u64) {
+        self.tap_level.pending()
+    }
+
+    /// Keep the tap probe's window open for the rest of a test.
+    #[cfg(test)]
+    pub(crate) fn hold_tap_window(&self) {
+        self.tap_level.hold_window();
     }
 
     // mutants::skip — a buffer-pool ALLOCATION optimization: every mutant here
