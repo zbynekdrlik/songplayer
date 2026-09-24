@@ -273,6 +273,7 @@ def _install_fakes(monkeypatch, mix_path):
     input into vocals = 0.3 * x and other = 0.7 * x (so v + i == x). The fake
     librosa.load REFUSES the mix path: the heavy child must never load it."""
     loads = []
+    windows = []  # (frames, channels) of every window the separator received
 
     def fake_load(path, sr=None, mono=True):
         if os.path.abspath(path) == os.path.abspath(mix_path):
@@ -296,6 +297,7 @@ def _install_fakes(monkeypatch, mix_path):
 
         def separate(self, path):
             x, sr = sf.read(path, dtype="float32", always_2d=False)
+            windows.append((x.shape[0], 1 if x.ndim == 1 else x.shape[1]))
             base = os.path.splitext(os.path.basename(path))[0]
             names = []
             for token, gain in (("Vocals", 0.3), ("Other", 0.7)):
@@ -315,7 +317,7 @@ def _install_fakes(monkeypatch, mix_path):
     monkeypatch.setitem(sys.modules, "librosa", librosa)
     monkeypatch.setitem(sys.modules, "audio_separator", sep_pkg)
     monkeypatch.setitem(sys.modules, "audio_separator.separator", sep_mod)
-    return loads
+    return loads, windows
 
 
 def test_cmd_separate_streams_without_loading_the_whole_mix(tmp_path, monkeypatch):
@@ -330,7 +332,7 @@ def test_cmd_separate_streams_without_loading_the_whole_mix(tmp_path, monkeypatc
     sf.write(mix_path, mix, sr, format="FLAC", subtype="PCM_24")
     mix, _ = sf.read(mix_path, dtype="float32")  # the quantised mix
 
-    loads = _install_fakes(monkeypatch, mix_path)
+    loads, windows = _install_fakes(monkeypatch, mix_path)
     work_dir = str(tmp_path / "work")
     vocals_out = str(tmp_path / "song_audio_vocals.flac")
     instr_out = str(tmp_path / "song_audio_instrumental.flac")
@@ -345,6 +347,13 @@ def test_cmd_separate_streams_without_loading_the_whole_mix(tmp_path, monkeypatc
     sw.cmd_separate(args)
 
     assert loads, "the separated segment stems were loaded"
+    # The separator got exactly the old window bounds, one window at a time.
+    expected = [
+        (int(round(e * sr)) - int(round(s * sr)), 2)
+        for s, e in sw._segment_bounds(n / sr, 3.0, 0.5)
+    ]
+    assert len(expected) == 5
+    assert windows == expected
     assert not os.path.exists(work_dir)
     for p in (vocals_out, instr_out):
         assert not os.path.exists(p + ".tmp")
