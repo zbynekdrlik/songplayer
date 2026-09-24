@@ -35,6 +35,7 @@ import {
   type APIRequestContext,
 } from "@playwright/test";
 import { ObsDriver } from "./obs-driver";
+import { pickBaselineScene } from "./obs-baseline-scene";
 import {
   unhealthyOnProgramOutputs,
   type HealthSnapshot,
@@ -82,33 +83,11 @@ async function waitEngineActiveScene(
 const FAST_PLAYLIST_NAME = "ytfast";
 const FAST_SCENE_NAME = "sp-fast";
 
-// Picking the off-program baseline scene was historically `find((s) =>
-// !s.startsWith("sp-"))`, which on win-resolume resolved to a sound-sync
-// QR-code "test" scene that disrupts the wall + LED audience whenever
-// E2E runs against a live machine. Pick another sp-* scene instead —
-// any one that isn't sp-fast (under test) and isn't sp-warmup (also
-// disturbing per operator). Falls back to a non-sp scene only if no
-// alternative sp-* exists. The assertion-of-interest in every test is
-// "ytfast NOT in active_playlist_ids", which holds for any non-sp-fast
-// program scene regardless of whether another sp-* is active.
-const DISALLOWED_BASELINE_SCENES = new Set(["sp-fast", "sp-warmup"]);
-
-function pickBaselineScene(scenes: string[]): string {
-  // Prefer sp-slow specifically — it's a quiet music scene operators
-  // routinely use as a "background" state.
-  if (scenes.includes("sp-slow")) return "sp-slow";
-  // Fall back to any other sp-* that isn't disallowed.
-  const otherSp = scenes.find(
-    (s) => s.startsWith("sp-") && !DISALLOWED_BASELINE_SCENES.has(s),
-  );
-  if (otherSp) return otherSp;
-  // Last resort — non-sp scene. This may be the disruptive QR-code
-  // test scene, but it's better than running a test where the baseline
-  // and the sp-fast probe scene collide.
-  const nonSp = scenes.find((s) => !s.startsWith("sp-"));
-  if (nonSp) return nonSp;
-  return scenes[0];
-}
+// The off-program baseline scene (sp-slow preferred; never sp-fast or
+// sp-warmup) lives in `obs-baseline-scene.ts`, shared with the #147 A/V gate.
+// The assertion of interest in every test here is "ytfast NOT in
+// active_playlist_ids", which holds for any program scene other than sp-fast,
+// whether or not another sp-* scene is active.
 
 async function findPlaylistId(request: import("@playwright/test").APIRequestContext, name: string): Promise<number> {
   const resp = await request.get("/api/v1/playlists");

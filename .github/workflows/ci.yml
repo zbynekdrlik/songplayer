@@ -1831,12 +1831,19 @@ jobs:
         env:
           SONGPLAYER_URL: http://localhost:8920
           OBS_WS_URL: ws://localhost:4455
+          # #147 A/V sync + dropout gate (e2e/post-deploy-av-sync.spec.ts):
+          # the Python that runs scripts/av_sync_check.py (numpy) and the
+          # app's bundled ffmpeg (the box has no ffprobe; none is needed).
+          SP_AVSYNC_PYTHON: C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe
+          SP_FFMPEG: C:\ProgramData\SongPlayer\cache\tools\ffmpeg.exe
         run: |
-          # Runs the committed e2e/post-deploy.spec.ts against the
+          # Runs the committed e2e/post-deploy*.spec.ts against the
           # deployed SongPlayer + OBS. This suite exercises the click
           # through the dashboard Play button, the NowPlaying
           # broadcast, and scene-driven playback — the workflows that
           # would have caught issues #8, #9, and #11 before shipping.
+          # It includes the #147 gate: an OBS program recording compared
+          # with the original sidecars (|A/V| <= 40 ms, zero dropouts).
           Set-Location $env:GITHUB_WORKSPACE\e2e
           npm ci 2>&1 | Select-Object -Last 5
           if ($LASTEXITCODE -ne 0) {
