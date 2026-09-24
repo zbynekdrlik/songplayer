@@ -207,6 +207,33 @@ def test_streaming_writer_rejects_overlap_longer_than_step(tmp_path):
     assert os.listdir(tmp_path) == []
 
 
+def test_streaming_writer_failed_close_aborts_and_releases_the_file(tmp_path):
+    # A failing final flush/close (e.g. disk full) must not publish, must not
+    # leave the .tmp, and must retry the close so the handle is released (on
+    # Windows an open handle would keep the .tmp alive).
+    out_path = str(tmp_path / "stem.flac")
+    segs = _random_segments([700, 300], 2, 8)
+    w = sw._StreamingStitchWriter(out_path, 2, 500, 200, channels=2)
+    for seg in segs:
+        w.add_segment(seg)
+    real_close = w._file.close
+    calls = []
+
+    def flaky_close():
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError("disk full")
+        real_close()
+
+    w._file.close = flaky_close
+    with pytest.raises(OSError, match="disk full"):
+        w.close()
+    assert len(calls) == 2, "the failed close was retried to release the handle"
+    assert w._file.closed
+    assert not os.path.exists(out_path)
+    assert not os.path.exists(out_path + ".tmp")
+
+
 # ---- windowed input read ---------------------------------------------------
 
 
@@ -246,6 +273,54 @@ def test_windowed_read_equals_slice_of_full_read(
         assert got.dtype == np.float32
         assert got.shape == old.shape
         assert np.array_equal(got, old)
+
+
+def test_windowed_read_clamps_a_stop_past_the_end(tmp_path):
+    sr, n = 8000, 8000 * 7 + 123
+    path = str(tmp_path / "mix.flac")
+    rng = np.random.default_rng(3)
+    sf.write(path, rng.uniform(-0.9, 0.9, (n, 2)), sr, format="FLAC", subtype="PCM_24")
+    full, _ = sf.read(path, dtype="float32", always_2d=False)
+    total_s = n / sr
+    got = sw._read_window(path, sr, total_s - 1.0, total_s + 5.0)
+    s0 = int(round((total_s - 1.0) * sr))
+    assert np.array_equal(got, full[s0:])
+    # A window starting past the end is empty, like the old numpy slice.
+    assert sw._read_window(path, sr, total_s + 1.0, total_s + 2.0).shape[0] == 0
+
+
+def _flac_with_total_samples(path, total):
+    """Rewrite the 36-bit STREAMINFO `total samples` field of a FLAC file.
+    0 means "unknown" (what a piped / streaming encoder writes)."""
+    raw = bytearray(open(path, "rb").read())
+    assert raw[:4] == b"fLaC" and (raw[4] & 0x7F) == 0  # STREAMINFO first
+    # STREAMINFO body starts at 8; sample rate / channels / bps / total samples
+    # are the 64 bits at body offset 10..17.
+    off = 8 + 10
+    packed = int.from_bytes(raw[off : off + 8], "big")
+    packed = (packed & ~((1 << 36) - 1)) | (total & ((1 << 36) - 1))
+    raw[off : off + 8] = packed.to_bytes(8, "big")
+    open(path, "wb").write(bytes(raw))
+
+
+def test_audio_info_rejects_an_unknown_frame_count(tmp_path):
+    # The segment plan trusts the header. A FLAC from a piped / streaming
+    # encoder has total samples = 0 ("unknown"), which libsndfile reports as a
+    # huge sentinel; `_segment_bounds` would then loop into the memory cap.
+    # It must fail fast with a clear error instead.
+    path = str(tmp_path / "mix.flac")
+    sf.write(path, np.zeros((4000, 2)), 8000, format="FLAC", subtype="PCM_16")
+    _flac_with_total_samples(path, 0)
+    frames = sf.info(path).frames
+    assert frames <= 0 or frames >= 2**62, frames  # the sentinel, not 4000
+    with pytest.raises(ValueError, match="frame count"):
+        sw._audio_info(path)
+
+
+def test_audio_info_reads_the_header(tmp_path):
+    path = str(tmp_path / "mix.flac")
+    sf.write(path, np.zeros((4321, 2)), 44100, format="FLAC", subtype="PCM_16")
+    assert sw._audio_info(path) == (44100, 4321)
 
 
 # ---- cmd_separate end to end with a fake model stack -----------------------
@@ -344,7 +419,28 @@ def test_cmd_separate_streams_without_loading_the_whole_mix(tmp_path, monkeypatc
         work_dir=work_dir,
         force_cpu=False,
     )
+
+    def _whole_array(*_a, **_k):
+        raise AssertionError("#207: a whole-length stem array was built")
+
+    monkeypatch.setattr(sw, "_stitch_segments", _whole_array)
+    monkeypatch.setattr(sw, "_write_array_48k_stereo", _whole_array)
+    writers = []
+    real_writer = sw._StreamingStitchWriter
+
+    def spy_writer(*a, **k):
+        w = real_writer(*a, **k)
+        writers.append(w)
+        return w
+
+    monkeypatch.setattr(sw, "_StreamingStitchWriter", spy_writer)
     sw.cmd_separate(args)
+    assert [(w.out_path, w.n_segments) for w in writers] == [
+        (vocals_out, 5),
+        (instr_out, 5),
+    ]
+    overlap = int(round(0.5 * sr))
+    assert all(w.max_retained_samples <= overlap for w in writers)
 
     assert loads, "the separated segment stems were loaded"
     # The separator got exactly the old window bounds, one window at a time.
