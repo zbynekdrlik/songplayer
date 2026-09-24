@@ -428,13 +428,33 @@ def test_cmd_separate_streams_without_loading_the_whole_mix(tmp_path, monkeypatc
     writers = []
     real_writer = sw._StreamingStitchWriter
 
+    # Order of segment-WAV reads vs writer adds: streaming means read one,
+    # add it, read the next — never "read every segment, then add them".
+    events = []
+    real_read = sf.read
+
+    def spy_read(path, *a, **k):
+        if os.path.dirname(os.path.abspath(str(path))) == os.path.abspath(work_dir):
+            events.append("read")
+        return real_read(path, *a, **k)
+
+    monkeypatch.setattr(sf, "read", spy_read)
+
     def spy_writer(*a, **k):
         w = real_writer(*a, **k)
+        real_add = w.add_segment
+
+        def add(seg):
+            events.append("add")
+            return real_add(seg)
+
+        w.add_segment = add
         writers.append(w)
         return w
 
     monkeypatch.setattr(sw, "_StreamingStitchWriter", spy_writer)
     sw.cmd_separate(args)
+    assert events == ["read", "add"] * 10  # 5 segments x 2 stems, interleaved
     assert [(w.out_path, w.n_segments) for w in writers] == [
         (vocals_out, 5),
         (instr_out, 5),
