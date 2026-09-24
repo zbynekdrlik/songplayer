@@ -313,8 +313,9 @@ arrival − t0 − **`en_latency_ms`** (round H4), non-decreasing). Live Transla
 emits the input transcription per phrase, seconds after the audio was sent, so
 the raw arrival (H3 stamped it with latency 0) sat ~4–5 s late — one SK line
 below its own translation on video 344 (#184 5807462051); `en_latency_ms` is
-measured per session with the SAME method as the SK (Placement, below). `dub_worker.py::_timed_from` holds the connection ordering +
-overlap cap once; `sk_timed_from` and `en_timed_from` both call it. The session
+measured per session with the SAME method as the SK (Placement, below).
+`dub_worker.py::_timed_from` holds the connection ordering + overlap cap once;
+`sk_timed_from` and `en_timed_from` both call it. The session
 records BOTH transcriptions as `(arrival_s, text, conn)`
 (`dub_live_session.py::SessionState.input_parts` / `output_parts`), and
 `joined_by_connection` takes that shape. With `at_ms` 0 / `tempo` 1.0 the builder
@@ -751,20 +752,26 @@ ebur128 of the new `<base>_dub.flac` against the vocals stem on the same slice
 (±1 LU, round F) and the stored EN/SK subtitle line count.
 
 **Pull the event log for offline timing analysis (never ssh, never
-`FileDownload` — it base64s into the transcript).** Via the win-resolume MCP
-`Shell` (PowerShell), serve the cache dir on the box's LAN address, detached:
+`FileDownload` — it base64s into the transcript).** NEVER serve the cache dir
+itself: it holds `cli-proxy-api-config.yaml` (may carry `claude-api-key`) and the
+`.cli-proxy-api\` OAuth tokens (`ai/proxy.rs` works in `cache_dir`), and
+`http.server` lists and serves dotfiles to the whole LAN. Copy the ONE file into
+a fresh empty temp dir and serve only that, via the win-resolume MCP `Shell`
+(PowerShell), detached, on the box's LAN address:
 
 ```powershell
+$src = 'C:\ProgramData\SongPlayer\cache\<base>_dub_events.jsonl'
+$d = New-Item -ItemType Directory (Join-Path $env:TEMP "sp-evlog-$(Get-Random)")
+Copy-Item -LiteralPath $src (Join-Path $d 'events.jsonl')
 $py = 'C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe'
 $p = Start-Process -FilePath $py -WindowStyle Hidden -PassThru `
-  -WorkingDirectory 'C:\ProgramData\SongPlayer\cache' `
-  -ArgumentList @('-m', 'http.server', '8931', '--bind', '10.77.9.201')
-$p.Id   # note it
+  -ArgumentList @('-m', 'http.server', '8931', '--bind', '10.77.9.201',
+                  '--directory', "`"$d`"")
+$p.Id; $d.FullName   # note both
 ```
 
-From dev1: `curl -fo 344_dub_events.jsonl "http://10.77.9.201:8931/<url-encoded
-base>_dub_events.jsonl"` (the base has spaces — URL-encode it). Then STOP that
-server on the box: `Stop-Process -Id <pid>` (only the pid you started — the cache
-dir must not stay served). t0 in the log = the `send_start` event's `t`; each
-`input_transcription` / `output_transcription` event's `t` is its arrival on the
-same clock.
+From dev1: `curl -fo 344_dub_events.jsonl http://10.77.9.201:8931/events.jsonl`.
+Then STOP that server and remove the copy on the box: `Stop-Process -Id <pid>;
+Remove-Item -Recurse -LiteralPath '<temp dir>'` (only the pid you started). t0 in
+the log = the `send_start` event's `t`; each `input_transcription` /
+`output_transcription` event's `t` is its arrival on the same clock.

@@ -359,7 +359,7 @@ def test_stream_filter_resamples_the_one_input_into_mix():
 # ── the superseded per-chunk work files ────────────────────────────────────────
 
 
-def test_legacy_work_files_are_the_round_c_to_e2_chunk_cache():
+def test_legacy_work_files_are_the_superseded_leftovers():
     names = [
         "chunk_0.wav",
         "chunk_0.json",
