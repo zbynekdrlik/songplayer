@@ -18,7 +18,10 @@ Why a bass-band (<= 60 Hz) audio by default: the acceptance drift is 50 ms over
 20 s (2500 ppm). That smears the alignment by +-2.5 ms inside ONE 2 s window.
 Broadband content decorrelates under such a smear, and its windows drop below
 ``SEGMENT_MIN_CORR`` (``test_a_broadband_drift_this_fast_is_not_fitted`` pins
-that). A realistic clock error (<= a few hundred ppm) smears < 0.5 ms per window.
+that). A clock error of a few hundred ppm smears +-0.1-0.3 ms. Music-band
+audio (energy up to ~1 kHz) survives that
+(``test_a_realistic_clock_drift_on_music_band_audio``), but bright material
+near 4 kHz decorrelates from ~100 ppm. obs-ndi-health.md has the measured table.
 """
 
 from __future__ import annotations
@@ -135,6 +138,20 @@ def test_60ms_jump_at_12s_reads_as_a_step_and_no_slope():
     assert np.median(after) - np.median(before) == pytest.approx(60.0, abs=10.0), prof
 
 
+def test_a_realistic_clock_drift_on_music_band_audio():
+    # 100 ppm (1 ms per 10 s) on audio with energy up to 1 kHz, like music
+    # at 8 kHz: every window still matches, and the slope is read.
+    audio, frames, pts = _original(band_hz=1000.0)
+    prof = _profile(
+        audio, frames, pts, *_recording(audio, frames, pts, lambda t: 1e-4 * t)
+    )
+    assert all(s["audio_corr"] >= 0.9 for s in prof), prof
+    d = avs.drift_and_step(prof)
+    assert d["windows_used"] == 10
+    assert d["drift_ms_per_10s"] == pytest.approx(1.0, abs=0.3), d
+    assert d["step_modeled"] is False
+
+
 def test_a_broadband_drift_this_fast_is_not_fitted():
     # The documented limit: 2500 ppm on broadband audio smears every 2 s window
     # below the correlation floor. The profile must then report no drift at all
@@ -146,6 +163,7 @@ def test_a_broadband_drift_this_fast_is_not_fitted():
     assert all(s["audio_corr"] < avs.SEGMENT_MIN_CORR for s in prof), prof
     d = avs.drift_and_step(prof)
     assert d["windows_used"] == 0
+    assert d["coverage_low"] is True
     assert d["drift_ms_per_10s"] is None
 
 
@@ -180,15 +198,20 @@ def test_a_window_with_low_correlation_is_excluded_from_the_fit():
 # --- drift_and_step on hand-built profiles --------------------------------------
 
 
-def _seg(t, av, corr=0.95):
+def _seg(t, av, corr=0.95, contrast=0.05):
     return {
         "t_s": t,
         "audio_offset_s": 0.0,
         "audio_corr": corr,
         "video_offset_s": 0.0,
         "video_match": 0.99,
+        "video_contrast": contrast,
         "av_ms": av,
     }
+
+
+def _profile_of(avs_ms, t0=0.0):
+    return [_seg(t0 + 2.0 * i, av) for i, av in enumerate(avs_ms)]
 
 
 def test_drift_fit_ignores_low_corr_and_unmeasured_windows():
@@ -213,6 +236,82 @@ def test_step_term_separates_a_jump_from_an_underlying_drift():
     assert d["step_modeled"] is True
 
 
+def test_a_fast_steady_drift_is_never_split_into_a_step():
+    # 25 ms per 2 s window: every step is >= STEP_MIN_MS, none is an outlier.
+    d = avs.drift_and_step(_profile_of([12.5 * i * 2 for i in range(10)]))
+    assert d["step_modeled"] is False
+    assert d["drift_ms_per_10s"] == pytest.approx(125.0, abs=0.01)
+    assert d["max_step_ms"] == pytest.approx(25.0, abs=0.01)
+
+
+def test_a_step_must_stand_out_from_the_median_step():
+    # A jittery 15 ms/window drift with one 22 ms step: >= STEP_MIN_MS but not
+    # >= 3x the median step, so it is drift, not a jump.
+    av = np.cumsum([0, 15, 14, 16, 15, 22, 15, 14, 16, 15]).tolist()
+    d = avs.drift_and_step(_profile_of(av))
+    assert d["max_step_ms"] == pytest.approx(22.0, abs=0.01)
+    assert d["step_modeled"] is False
+
+
+def test_small_noise_steps_are_never_modelled():
+    # +-1 ms jitter with one 5 ms step: an outlier vs the median, but below
+    # STEP_MIN_MS.
+    av = [0.0, 1.0, 0.0, -1.0, 0.0, 5.0, 4.0, 5.0, 6.0, 5.0]
+    d = avs.drift_and_step(_profile_of(av))
+    assert d["step_modeled"] is False
+    assert d["max_step_ms"] == pytest.approx(5.0, abs=0.01)
+
+
+def test_a_one_window_spike_is_not_a_jump():
+    # Up then straight back down: two outlier steps, so no step term.
+    av = [0.0] * 10
+    av[5] = 60.0
+    d = avs.drift_and_step(_profile_of(av))
+    assert d["step_modeled"] is False
+    assert d["max_step_ms"] == pytest.approx(60.0, abs=0.01)
+
+
+def test_a_jump_needs_two_good_windows_on_each_side():
+    av = [0.0] * 9 + [60.0]  # the jump is on the last window
+    d = avs.drift_and_step(_profile_of(av))
+    assert d["step_modeled"] is False
+    av = [0.0] * 8 + [60.0] * 2
+    assert avs.drift_and_step(_profile_of(av))["step_modeled"] is True
+
+
+def test_step_at_is_the_middle_of_the_gap_between_good_windows():
+    # The 12-14 s window straddles a 13.0 s jump and is excluded (low corr):
+    # the step sits between the end of 10-12 and the start of 14-16.
+    prof = _profile_of([0.0] * 6 + [30.0] + [60.0] * 3)
+    prof[6]["audio_corr"] = 0.4
+    d = avs.drift_and_step(prof)
+    assert d["step_at_s"] == pytest.approx(13.0)
+    assert d["max_step_ms"] == pytest.approx(60.0)
+    assert d["step_modeled"] is True
+    assert d["drift_ms_per_10s"] == pytest.approx(0.0, abs=0.01)
+
+
+def test_a_window_without_picture_motion_is_excluded():
+    # A flat video curve: the window's video offset is just the plateau
+    # centre, so its av_ms is not a measurement.
+    prof = _profile_of([2.5 * 2 * i for i in range(10)])
+    prof[4] = _seg(8.0, 900.0, contrast=0.0005)
+    d = avs.drift_and_step(prof)
+    assert d["windows_used"] == 9
+    assert d["drift_ms_per_10s"] == pytest.approx(25.0, abs=0.01)
+    assert d["max_step_ms"] == pytest.approx(10.0, abs=0.01)
+
+
+def test_coverage_low_flags_a_mostly_excluded_take():
+    prof = _profile_of([0.0] * 10)
+    for s in prof[6:]:
+        s["audio_corr"] = 0.5  # e.g. a drift fast enough to smear the windows
+    d = avs.drift_and_step(prof)
+    assert d["windows_used"] == 6
+    assert d["coverage_low"] is True
+    assert avs.drift_and_step(_profile_of([0.0] * 10))["coverage_low"] is False
+
+
 def test_drift_needs_two_good_windows():
     d = avs.drift_and_step([_seg(0.0, 5.0), _seg(2.0, 9.0, corr=0.1)])
     assert d["windows_used"] == 1
@@ -226,10 +325,16 @@ def test_summary_line_carries_the_drift_fields():
         "status": "fail",
         "reasons": ["|A/V| 60.5 ms > 40 ms"],
         "av_ms": 60.5,
-        "drift": {"drift_ms_per_10s": 25.0, "max_step_ms": 5.1, "step_at_s": 11.979},
+        "drift": {
+            "drift_ms_per_10s": 25.0,
+            "max_step_ms": 5.1,
+            "step_at_s": 11.979,
+            "windows_used": 9,
+            "windows_total": 10,
+        },
     }
     line = avs.summary_line(result)
-    assert "drift_ms_per_10s=25.0 max_step_ms=5.1 step_at_s=11.979" in line
+    assert "drift_ms_per_10s=25.0 max_step_ms=5.1 step_at_s=11.979 windows=9/10" in line
     # The analysis-error result has no profile: the fields read None.
     err = avs.summary_line({"status": "cannot_measure", "reasons": ["x"]})
     assert "drift_ms_per_10s=None max_step_ms=None step_at_s=None" in err

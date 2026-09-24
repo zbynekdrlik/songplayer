@@ -53,9 +53,9 @@ Method (automates the manual 24.9.2026 measurement, A/V +13 ms, 0 dropouts):
 * **Segment profile** (diagnostics, never part of the verdict): the audio and
   video offsets per 2 s window (``segment_profile``), each searched +-300 ms
   around its global offset. ``drift_and_step`` fits the per-window A/V over
-  the windows with audio corr >= 0.8: the drift slope in ms per 10 s, and the
-  largest step between neighbouring windows. A steady clock drift reads as a
-  slope, a jump/resync as one step with a flat slope.
+  the windows with audio corr >= 0.8 and picture motion: the drift slope in
+  ms per 10 s, and the largest step between neighbouring windows. A steady
+  clock drift reads as a slope, a jump/resync as one step with a flat slope.
 
 Verdict, in order (see ``verdict``):
 1. ``cannot_measure`` (exit 2) when the AUDIO is unmeasurable or the analysis
@@ -597,7 +597,7 @@ def segment_profile(
     out = []
     for i0 in range(0, len(rec) - win + 1, win):
         t0 = rec_t0 + i0 / sr
-        a_off = a_corr = v_off = v_match = None
+        a_off = a_corr = v_off = v_match = v_contrast = None
         errors: list[str] = []
         s0, s1 = max(0, lag + i0 - pad), min(len(orig), lag + i0 + win + pad)
         if s1 - s0 < win:
@@ -622,7 +622,7 @@ def segment_profile(
                     center_s=video_offset_s,
                     window_s=search_s,
                 )
-                v_off, v_match = v["offset_s"], v["match"]
+                v_off, v_match, v_contrast = v["offset_s"], v["match"], v["contrast"]
             except ValueError as exc:  # no frames, or no shift inside the original
                 errors.append(f"video: {exc}")
         both = a_off is not None and v_off is not None
@@ -633,6 +633,7 @@ def segment_profile(
                 "audio_corr": None if a_corr is None else round(a_corr, 4),
                 "video_offset_s": None if v_off is None else round(v_off, 4),
                 "video_match": None if v_match is None else round(v_match, 4),
+                "video_contrast": None if v_contrast is None else round(v_contrast, 4),
                 "av_ms": round((a_off - v_off) * 1000.0, 1) if both else None,
                 "errors": errors,
             }
@@ -640,26 +641,41 @@ def segment_profile(
     return out
 
 
-def drift_and_step(profile: list[dict], min_corr: float = SEGMENT_MIN_CORR) -> dict:
-    """Drift slope and the largest step of ``av_ms`` over the good windows.
-
-    Good = ``audio_corr >= min_corr`` and a measured ``av_ms``.
-    * ``max_step_ms`` / ``step_at_s``: the largest |av_ms change| between
-      neighbouring good windows, and the start of the later one.
-    * ``drift_ms_per_10s``: a least-squares slope of av_ms over time. When the
-      largest step is an outlier (>= ``STEP_MIN_MS`` and >= ``STEP_OUTLIER_X``
-      x the median step), the fit gets its own step term there
-      (``step_modeled``). A jump then reads as a step with a flat slope, not as
-      a slope through it. A steady drift has equal steps and is never split.
-    Fields are None with fewer than two good windows.
-    """
-    good = [
-        s
-        for s in profile
-        if s["av_ms"] is not None
+def _good_window(s: dict, min_corr: float) -> bool:
+    """A window the drift fit trusts: audio matched, and the picture had motion."""
+    contrast = s.get("video_contrast")
+    return (
+        s["av_ms"] is not None
         and s["audio_corr"] is not None
         and s["audio_corr"] >= min_corr
-    ]
+        and (contrast is None or contrast >= MIN_VIDEO_CONTRAST)
+    )
+
+
+def drift_and_step(
+    profile: list[dict], min_corr: float = SEGMENT_MIN_CORR, window_s: float = SEGMENT_S
+) -> dict:
+    """Drift slope and the largest step of ``av_ms`` over the good windows.
+
+    Good = ``audio_corr >= min_corr``, a measured ``av_ms``, and a window
+    picture with motion (``video_contrast >= MIN_VIDEO_CONTRAST``: on a flat
+    curve the window's video offset is just the plateau centre).
+    * ``max_step_ms`` / ``step_at_s``: the largest |av_ms change| between
+      neighbouring good windows, and the middle of the gap between them (the
+      end of the earlier window and the start of the later one).
+    * ``drift_ms_per_10s``: a least-squares slope of av_ms over time. When the
+      largest step is the ONLY outlier (>= ``STEP_MIN_MS`` and >=
+      ``STEP_OUTLIER_X`` x the median step) and each side keeps >= 2 good
+      windows, the fit gets its own step term there (``step_modeled``). A jump
+      then reads as a step with a flat slope. A steady drift has equal steps,
+      and a one-window spike or a sawtooth has more than one outlier, so none of
+      them is split.
+    * ``coverage_low``: fewer than 70 % of the windows are good. A fast drift
+      smears its windows below ``min_corr``, so then read the excluded rows'
+      raw ``av_ms`` too.
+    Fields are None with fewer than two good windows.
+    """
+    good = [s for s in profile if _good_window(s, min_corr)]
     out = {
         "drift_ms_per_10s": None,
         "max_step_ms": None,
@@ -667,6 +683,7 @@ def drift_and_step(profile: list[dict], min_corr: float = SEGMENT_MIN_CORR) -> d
         "step_modeled": False,
         "windows_used": len(good),
         "windows_total": len(profile),
+        "coverage_low": len(good) < 0.7 * len(profile),
         "min_corr": min_corr,
     }
     if len(good) < 2:
@@ -675,19 +692,21 @@ def drift_and_step(profile: list[dict], min_corr: float = SEGMENT_MIN_CORR) -> d
     av = np.array([s["av_ms"] for s in good], dtype=np.float64)
     steps = np.abs(np.diff(av))
     k = int(np.argmax(steps))
-    cols = [np.ones_like(t), t]
+    floor = max(STEP_MIN_MS, STEP_OUTLIER_X * float(np.median(steps)))
     modeled = (
-        len(good) >= 3
-        and steps[k] >= STEP_MIN_MS
-        and steps[k] >= STEP_OUTLIER_X * float(np.median(steps))
+        int(np.sum(steps >= floor)) == 1
+        and steps[k] >= floor
+        and k + 1 >= 2  # >= 2 good windows before the step ...
+        and len(good) - (k + 1) >= 2  # ... and after it
     )
+    cols = [np.ones_like(t), t]
     if modeled:
         cols.append((t >= t[k + 1]).astype(np.float64))
     coef = np.linalg.lstsq(np.stack(cols, axis=1), av, rcond=None)[0]
     out.update(
         drift_ms_per_10s=round(float(coef[1]) * 10.0, 1),
         max_step_ms=round(float(steps[k]), 1),
-        step_at_s=round(float(t[k + 1]), 3),
+        step_at_s=round(float(t[k] + window_s + t[k + 1]) / 2.0, 3),
         step_modeled=bool(modeled),
     )
     return out
@@ -926,6 +945,7 @@ def summary_line(result: dict) -> str:
         f"glitches={drops.get('glitch_blocks')} "
         f"drift_ms_per_10s={drift.get('drift_ms_per_10s')} "
         f"max_step_ms={drift.get('max_step_ms')} step_at_s={drift.get('step_at_s')} "
+        f"windows={drift.get('windows_used')}/{drift.get('windows_total')} "
         f"reasons={result['reasons']}"
     )
 
