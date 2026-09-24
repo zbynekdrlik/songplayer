@@ -151,19 +151,19 @@ def _by_connection(parts: list, conn_of) -> list:
 
 
 def joined_by_connection(parts: list) -> str:
-    """The `(conn, text)` transcription parts joined in connection order."""
-    return "".join(text for _, text in _by_connection(parts, lambda p: p[0]))
+    """The `(arrival_s, text, conn)` transcription parts joined in connection
+    order (no separator — Live Translate fragments carry their own spaces)."""
+    return "".join(text for _, text, _ in _by_connection(parts, lambda p: p[2]))
 
 
-def sk_timed_from(parts: list, t0_s: float, latency_ms: int) -> list[dict]:
-    """The SK output-transcription fragments `(arrival_s, text, conn)` in
-    connection order, stamped on the video timeline (`t_ms`, non-decreasing —
-    the D3 subtitle builder reads them as consecutive windows). A connection's
-    fragments that arrived after a LATER connection's first fragment (its
-    trailing translation during the overlap) are capped at the earliest such
-    first fragment, so later connections' subtitles keep their own arrival
-    times — their audio is placed at its arrival too — instead of being pushed
-    later."""
+def _timed_from(parts: list, t0_s: float, latency_ms: int) -> list[dict]:
+    """Transcription fragments `(arrival_s, text, conn)` in connection order,
+    stamped on the video timeline (`t_ms` = arrival - t0 - latency, clamped at
+    0, non-decreasing — the D3 subtitle builder reads them in order). A
+    connection's fragments that arrived after a LATER connection's first
+    fragment (its trailing text during the overlap) are capped at the earliest
+    such first fragment, so later connections keep their own arrival times
+    instead of being pushed later. Empty fragments are dropped."""
     first_of: dict[int, float] = {}
     for arrival_s, text, conn in parts:
         if text and conn not in first_of:
@@ -184,11 +184,31 @@ def sk_timed_from(parts: list, t0_s: float, latency_ms: int) -> list[dict]:
     return out
 
 
-def build_transcripts(en: str, sk: str, sk_timed: list, total_ms: int) -> dict:
+def sk_timed_from(parts: list, t0_s: float, latency_ms: int) -> list[dict]:
+    """The SK OUTPUT-transcription fragments on the video timeline: arrival - t0
+    - the measured output latency (the dub audio is placed with the same
+    latency, so the SK subtitles follow it)."""
+    return _timed_from(parts, t0_s, latency_ms)
+
+
+def en_timed_from(parts: list, t0_s: float) -> list[dict]:
+    """The EN INPUT-transcription fragments on the video timeline (#184 H3):
+    arrival - t0, NO latency. The source audio is streamed at 1.0x wall clock
+    from t0, so an input fragment arrives at its source position plus the small
+    ASR lag. The D3 builder assigns each EN sentence WHOLE to the SK line whose
+    start is nearest to it."""
+    return _timed_from(parts, t0_s, 0)
+
+
+def build_transcripts(
+    en: str, en_timed: list, sk: str, sk_timed: list, total_ms: int
+) -> dict:
     """The EN/SK transcripts JSON (the D3 #182 subtitle source) in the shape
     `dabing::subtitles::DubTranscripts` reads: ONE chunk covering the whole video
-    (`at_ms` 0, `tempo` 1.0 — the output is not stretched), so the SK fragment
-    times are video-timeline times. Pure — unit-tested."""
+    (`at_ms` 0, `tempo` 1.0 — the output is not stretched), so the EN and SK
+    fragment times are video-timeline times. `en` / `sk` are the joined texts
+    (kept for readability); the builder reads `en_timed` / `sk_timed`. Pure —
+    unit-tested."""
     return {
         "engine": "gemini-live-translate",
         "target_lang": TARGET_LANG,
@@ -200,6 +220,7 @@ def build_transcripts(en: str, sk: str, sk_timed: list, total_ms: int) -> dict:
                 "at_ms": 0,
                 "tempo": 1.0,
                 "en": en,
+                "en_timed": en_timed,
                 "sk": sk,
                 "sk_timed": sk_timed,
             }
@@ -531,11 +552,12 @@ def _translate(args: argparse.Namespace, raw_path: str, wav_path: str) -> dict:
     _assemble_dub(args.audio, wav_path, args.out, args.work_dir)
 
     # Transcripts JSON for D3: one chunk on the video timeline, the overlap's
-    # two connections in connection order (never interleaved).
-    sk_parts = [(conn, text) for _, text, conn in state.output_parts]
+    # two connections in connection order (never interleaved). The EN is timed
+    # by its own input-transcription arrival (#184 H3).
     transcripts = build_transcripts(
         joined_by_connection(state.input_parts),
-        joined_by_connection(sk_parts),
+        en_timed_from(state.input_parts, state.t0_s),
+        joined_by_connection(state.output_parts),
         sk_timed_from(state.output_parts, state.t0_s, latency_ms),
         int(round(input_s * 1000)),
     )
