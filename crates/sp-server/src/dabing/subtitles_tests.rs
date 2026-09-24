@@ -762,12 +762,15 @@ fn en_of(track: &LyricsTrack, sk: &str) -> String {
 }
 
 #[test]
-fn the_video_344_session_log_pairs_each_en_with_its_own_sk_line() {
+fn the_video_344_session_log_pairs_the_six_named_sk_lines() {
     // Real data (#184 H5): 27–100 s of video 344's session log (52 SK + 48 EN
     // fragments, already on the video timeline). With the nearest DISPLAYED
-    // start, „Rád ťa vidím, Nathan." (displayed from 59 672 ms, content at
-    // 63 922 ms) showed the previous sentence's EN, and „ Good to see you,
-    // Nathan. And" was one sentence.
+    // start the EN landed a line late — „Rád ťa vidím, Nathan." is displayed
+    // from 59 672 ms but its fragment arrived at 63 922 ms — and „ Good to see
+    // you, Nathan. And" was one sentence. These six pairs are the acceptance
+    // set; not every line of the window pairs right yet (e.g. „Bartlesville
+    // Oklahoma." gets no EN — the split-off part of „Good morning. Bartlesville"
+    // starts at that fragment's earlier time and overlaps „Dobré ráno." more).
     let t: DubTranscripts =
         serde_json::from_str(include_str!("testdata/dub344_window_27_100s.json")).unwrap();
     assert_eq!(t.chunks.len(), 1);
