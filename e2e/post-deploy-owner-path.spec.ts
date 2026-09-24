@@ -16,7 +16,8 @@
  *   (a) the preview is audible (RMS > −50 dBFS) within 10 s;
  *   (b) vokály + podklad + dabing dragged to 0 → RMS < −60 dBFS within 4 s of
  *       the last PATCH;
- *   (c) vokály dragged back to the top → RMS > −50 dBFS within 4 s;
+ *   (c) all three faders dragged back to the top → RMS > −50 dBFS within 4 s
+ *       of the last PATCH (a full mix — a vokály-only stem pauses between sentences);
  *   (d) 180 s with the preview open (500 ms samples): never silent (< −60 dBFS)
  *       for more than 5 s while the mix is non-zero, and at most ONE extra
  *       `preview.ws` connection;
@@ -402,16 +403,27 @@ test("the owner's path: Prehľad → Dabing → play → Živý náhľad → rea
     `(b) the preview must be silent within ${FADER_AUDIBLE_WITHIN_MS} ms of the last PATCH`,
   ).toBeLessThanOrEqual(FADER_AUDIBLE_WITHIN_MS);
 
-  // ── (c) vokály back to the top → audible within 4 s ────────────────────
+  // ── (c) all three faders back to the top → audible within 4 s ─────────
+  // Measured on a FULL mix (vokály + podklad + dabing = original + dub), from
+  // the LAST PATCH. A vokály-only mix is the isolated original-voice stem, which
+  // is legitimately near-silent between the speaker's sentences (G5 box run
+  // 35942985739: the stem mixer itself read −58 / −90 dBFS there), so it cannot
+  // prove the fader path. The full bed is also what the soak below runs on.
   const patchesBeforeUp = patches.length;
-  await dragFader(page, "mix-vokaly", 0.99, 0.01);
-  await expect
-    .poll(
-      () => patches.slice(patchesBeforeUp).some((p) => Number(p.body.vokaly) >= 0.95),
-      { timeout: 5000, message: "dragging mix-vokaly to the top must PATCH vokaly ≈ 1" },
-    )
-    .toBe(true);
-  await expectServerFader(request, "vokaly", "full", "dragging mix-vokaly to the top");
+  for (const [id, key] of [
+    ["mix-vokaly", "vokaly"],
+    ["mix-podklad", "podklad"],
+    ["mix-dabing", "dabing"],
+  ] as const) {
+    await dragFader(page, id, 0.99, 0.01);
+    await expect
+      .poll(
+        () => patches.slice(patchesBeforeUp).some((p) => Number(p.body[key]) >= 0.95),
+        { timeout: 5000, message: `dragging ${id} to the top must PATCH ${key} ≈ 1` },
+      )
+      .toBe(true);
+    await expectServerFader(request, key, "full", `dragging ${id} to the top`);
+  }
   const upPatchAt = Math.max(...patches.slice(patchesBeforeUp).map((p) => p.at));
   const c = await waitForLevel(
     page,
@@ -420,28 +432,13 @@ test("the owner's path: Prehľad → Dabing → play → Živý náhľad → rea
   );
   console.log(
     `[#184 G2] (c) audible ${c.at === null ? "NEVER" : `${c.at - upPatchAt} ms`} after the ` +
-      `vokály PATCH; dBFS: ${c.trace}`,
+      `last fader-up PATCH; dBFS: ${c.trace}`,
   );
-  expect(c.at, `(c) vokály up → the preview must be audible (> ${AUDIBLE_DB} dBFS)`).not.toBeNull();
+  expect(c.at, `(c) faders up → the preview must be audible (> ${AUDIBLE_DB} dBFS)`).not.toBeNull();
   expect(
     c.at! - upPatchAt,
     `(c) the preview must be audible within ${FADER_AUDIBLE_WITHIN_MS} ms of the PATCH`,
   ).toBeLessThanOrEqual(FADER_AUDIBLE_WITHIN_MS);
-
-  // The soak runs on a full bed — vokály, podklad AND dabing up (real mouse) —
-  // so a pause in the (mostly spoken) dub is not read as a frozen preview.
-  const patchesBeforeBed = patches.length;
-  await dragFader(page, "mix-podklad", 0.99, 0.01);
-  await dragFader(page, "mix-dabing", 0.99, 0.01);
-  for (const key of ["podklad", "dabing"] as const) {
-    await expect
-      .poll(
-        () => patches.slice(patchesBeforeBed).some((p) => Number(p.body[key]) >= 0.95),
-        { timeout: 5000, message: `dragging mix-${key} to the top must PATCH ${key} ≈ 1 before the soak` },
-      )
-      .toBe(true);
-    await expectServerFader(request, key, "full", `dragging mix-${key} to the top`);
-  }
 
   // ── (d) + (e): 3 minutes with the preview open ─────────────────────────
   const socketsAtSoakStart = previewSockets.length;
