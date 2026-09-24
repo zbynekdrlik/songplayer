@@ -4,6 +4,8 @@ paths:
   - "crates/sp-server/src/playback/preview_stream.rs"
   - "crates/sp-server/src/playback/preview_encoder.rs"
   - "crates/sp-server/src/playback/preview_audio_hold*.rs"
+  - "crates/sp-server/src/playback/preview_audio_probe*.rs"
+  - "crates/sp-decoder/src/level_probe*.rs"
   - "scripts/preview_latency_repro.py"
   - "crates/sp-server/src/playback/fmp4_relay.rs"
   - "crates/sp-server/src/playback/pipeline.rs"
@@ -665,3 +667,40 @@ starves, the MSE buffer drains in ~2-3.75 s) — it never exercises this queue.
   --feeder g2|g3 [--sndbuf 65536 --audio-url-query recv_buffer_size=65536]
   [--stall-every 3 --stall-ms 700 --nice --cpu-hogs 3] --duration 40
   --switch-at 25` (BtbN linux64 master builds match the box's ffmpeg family).
+
+## Stage level probes (#184 G4)
+
+Once a second each audio seam logs the RMS of what passed it, so a fader that
+"does nothing" is located by reading the log, not by guessing. All three measure
+with `sp_decoder::LevelProbe` over `sp_core::audio_level` (RMS in dBFS, full-scale
+square = 0, full-scale sine ≈ −3.01, silence = the floor **−180.0**), so the
+numbers compare directly across the seams. Observability only — no gain, mix,
+pacer or NDI path changes.
+
+| Line (INFO) | Seam | Fields |
+|---|---|---|
+| `stem-mix level … label=` | `sp_decoder::StemMixReader::next_samples` (target `sp_decoder::audio::stem_mix`) — what the reader EMITS, post-gain | `rms_dbfs`; `targets=[..]` = the atomics' values now, `applied=[..]` = the ramped gains in use (2 decimals, stream order: song-3 `[orig,voc,inst]`, dub-4 `[orig,voc,inst,dub]`, dub-2 `[orig,dub]`); `gains_id=0x…` = address of the reader's first target `Arc`; `samples` / `blocks` / `window_ms`; `label` = `song-3:` / `dub-4:` / `dub-2:` + the audio file stem |
+| `preview-tap level … stream=playlist-N` | `StreamShared::offer_audio` — the post-mix stereo block OFFERED to the preview | `rms_dbfs`, `samples`, `blocks`, `dropped` (channel full), `window_ms`. **Only while a viewer is connected** — the no-viewer fast path (iron rule 1) never touches the probe, so no line = nobody watching |
+| `preview-afeed level … stream=playlist-N` | `preview_encoder::write_audio` — what is WRITTEN to ffmpeg | `rms_dbfs` of the real samples only; `pad_ms` = silence written instead (preroll + `AudioHold` pads), never mixed into the RMS; `samples`, `blocks`, `window_ms` |
+
+`set_mix` extends `mixer console memory changed …` with `song_gains_id=`
+`dub_gains_id=` `dub2_gains_id=` — the ids of the control's live sets. A playing
+reader whose `gains_id` differs from the matching control id holds atomics the
+faders no longer write.
+
+Reading them (faders at 0, verified by `GET /api/v1/mix`): the first seam that
+does NOT drop to the floor (≈ −180, or at least far below the speech level) is
+where the gain is lost. `targets` at 0 with `applied` not → the ramp; `applied`
+0 with `rms_dbfs` high → the preview is not fed by this reader; `stem-mix` at the
+floor with `preview-tap` high → between the reader and the tap.
+
+Pull them from the box log:
+
+```powershell
+Select-String -Path C:\ProgramData\SongPlayer\songplayer.<date>.log -Pattern 'stem-mix level|preview-tap level|preview-afeed level|mixer console memory changed'
+```
+
+The post-deploy owner-path spec now confirms each fader drag on the SERVER
+(`GET /api/v1/mix` dub memory = the dragged value within 5 s, else "fader PATCH
+never reached the server") before it measures any silence — the 24.9 00:17
+attempt was void because the faders were off-screen and nothing was PATCHed.
