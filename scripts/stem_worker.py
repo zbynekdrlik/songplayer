@@ -80,7 +80,11 @@ def _stitch_segments(segments, step_samples, overlap_samples):
     adjacent linear ramps (fade-out + fade-in) sum to 1 and the crossfade region
     reconstructs the source exactly — and, applied with IDENTICAL weights to two
     additive stems (vocals + instrumental), preserves `v + i == mix`. Pure
-    numpy, no I/O."""
+    numpy, no I/O.
+
+    #207: this is the REFERENCE the tests compare `_StreamingStitchWriter`
+    against. It builds a whole-length array, so the heavy separation child never
+    calls it — `cmd_separate` streams through `_StreamingStitchWriter`."""
     import numpy as np
 
     if not segments:
@@ -111,6 +115,248 @@ def _stitch_segments(segments, step_samples, overlap_samples):
     else:
         out[nz] /= wsum[nz]
     return out.astype(np.float32)
+
+
+# ---- #207: streaming I/O — memory is O(segment), never O(video) -------------
+#
+# The heavy separation child runs under a 10 GiB per-process Job Object cap.
+# Holding the whole mix (librosa.load) and building the whole stitched output
+# (`_stitch_segments`) failed every video longer than ~35 min (61.8 min stereo
+# 48 kHz = a 1.33 GiB float64 array per channel, several copies alive at once).
+# So the mix is read one window at a time and each stem is written block by
+# block, holding only the crossfade tail of the previous segment.
+
+
+def _audio_info(path):
+    """(sample_rate, frames) of an audio file, from its header — no samples
+    are read."""
+    import soundfile as sf
+
+    info = sf.info(path)
+    return info.samplerate, info.frames
+
+
+def _read_window(path, in_sr, start_s, end_s):
+    """Read ONE native-rate window `[start_s, end_s]` straight from the file.
+
+    Same sample bounds and layout as the old whole-mix slice
+    (`full[s0:s1]` / `full[:, s0:s1].T` of `librosa.load(sr=None, mono=False)`,
+    which is itself a soundfile float32 read): float32, `(n,)` for mono,
+    `(n, ch)` otherwise. soundfile clamps `stop` to the file length exactly
+    like the numpy slice did."""
+    import soundfile as sf
+
+    s0 = max(0, int(round(start_s * in_sr)))
+    s1 = int(round(end_s * in_sr))
+    data, _ = sf.read(path, start=s0, stop=s1, dtype="float32", always_2d=False)
+    return data
+
+
+class _StreamingStitchWriter:
+    """Streaming overlap-add: writes the SAME samples as
+    `_write_array_48k_stereo(_stitch_segments(segments, step, overlap), path)`
+    while holding only the previous segment's overlap tail.
+
+    Segment `i` starts at global sample `i * step_samples` (as in the
+    reference). Contributions are accumulated in float64 in the same order with
+    the same linear crossfade weights, then weight-normalised, cast to float32,
+    clipped to [-1, 1] and written as 48 kHz PCM_24 FLAC — per settled block.
+    Everything before the NEXT segment's start is final once a segment is
+    added, so it is written out immediately; only the overlap tail stays in
+    memory (`retained_samples`, peak `max_retained_samples`).
+
+    Published ATOMICALLY like `_write_array_48k_stereo`: the FLAC is written to
+    a sibling `.tmp` and `os.replace`d into place only after ALL
+    `n_segments` were added. Any failure (an exception inside the `with`
+    block, or too few segments) removes the `.tmp` and leaves the final path
+    untouched — the live playback reader keys on the sidecar's existence, and a
+    torn stem there would corrupt the wall's NDI audio.
+
+    Use as a context manager::
+
+        with _StreamingStitchWriter(out, n, step, overlap) as w:
+            for seg in segments:
+                w.add_segment(seg)
+    """
+
+    def __init__(
+        self,
+        out_path,
+        n_segments,
+        step_samples,
+        overlap_samples,
+        channels=2,
+        samplerate=OUTPUT_SAMPLE_RATE,
+    ):
+        import numpy as np
+        import soundfile as sf
+
+        if step_samples <= 0 or overlap_samples < 0:
+            raise ValueError(
+                f"invalid stitch geometry: step={step_samples} overlap={overlap_samples}"
+            )
+        if overlap_samples > step_samples:
+            # A segment would then overlap more than its next neighbour; the
+            # "everything before the next start is final" rule needs this.
+            raise ValueError(
+                f"overlap ({overlap_samples}) must not exceed step ({step_samples})"
+            )
+        self._np = np
+        self.out_path = out_path
+        self.tmp_path = f"{out_path}.tmp"
+        self.n_segments = n_segments
+        self.step_samples = step_samples
+        self.overlap_samples = overlap_samples
+        self.channels = channels
+        self._added = 0
+        # Global sample index of acc[0] == number of samples already written.
+        self._base = 0
+        shape = (0,) if channels == 1 else (0, channels)
+        self._acc = np.zeros(shape, dtype=np.float64)
+        self._wsum = np.zeros(0, dtype=np.float64)
+        self.retained_samples = 0
+        self.max_retained_samples = 0
+        # format= is REQUIRED: the atomic temp path ends in ".tmp".
+        self._file = sf.SoundFile(
+            self.tmp_path,
+            "w",
+            samplerate=samplerate,
+            channels=channels,
+            subtype="PCM_24",
+            format="FLAC",
+        )
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            self.close()
+        else:
+            self.abort()
+        return False
+
+    def _weights(self, i, length):
+        # IDENTICAL to the weights in `_stitch_segments`.
+        np = self._np
+        w = np.ones(length, dtype=np.float64)
+        if self.overlap_samples > 0:
+            f = min(self.overlap_samples, length)
+            if i > 0:
+                w[:f] = np.linspace(0.0, 1.0, f, endpoint=False)
+            if i < self.n_segments - 1:
+                w[length - f:] = np.linspace(1.0, 0.0, f, endpoint=False)
+        return w
+
+    def _grow_to(self, end):
+        """Extend the accumulator (zero-filled) so it covers up to global
+        sample `end`."""
+        np = self._np
+        extra = end - self._base - self._wsum.shape[0]
+        if extra <= 0:
+            return
+        pad_shape = (extra,) if self.channels == 1 else (extra, self.channels)
+        self._acc = np.concatenate([self._acc, np.zeros(pad_shape, dtype=np.float64)])
+        self._wsum = np.concatenate([self._wsum, np.zeros(extra, dtype=np.float64)])
+
+    def _flush_to(self, end):
+        """Normalise + write every sample before global index `end`; keep the
+        rest as the retained tail."""
+        np = self._np
+        self._grow_to(end)
+        k = end - self._base
+        if k > 0:
+            block = self._acc[:k].copy()
+            wsum = self._wsum[:k]
+            nz = wsum > 1e-9
+            if block.ndim == 2:
+                block[nz] /= wsum[nz][:, None]
+            else:
+                block[nz] /= wsum[nz]
+            out = np.clip(block.astype(np.float32), -1.0, 1.0)
+            self._file.write(out)
+            # Copy so the written head is actually released.
+            self._acc = self._acc[k:].copy()
+            self._wsum = self._wsum[k:].copy()
+            self._base = end
+        self.retained_samples = self._wsum.shape[0]
+        self.max_retained_samples = max(
+            self.max_retained_samples, self.retained_samples
+        )
+
+    def add_segment(self, segment):
+        """Add the next segment (float, `(n,)` for 1 channel else `(n, ch)`)
+        and write every sample that no later segment can still touch."""
+        np = self._np
+        i = self._added
+        if i >= self.n_segments:
+            raise RuntimeError(f"more than the declared {self.n_segments} segments")
+        seg = np.asarray(segment, dtype=np.float64)
+        want_ndim = 1 if self.channels == 1 else 2
+        if seg.ndim != want_ndim or (want_ndim == 2 and seg.shape[1] != self.channels):
+            raise ValueError(
+                f"segment {i} has shape {seg.shape}, expected "
+                f"{'(n,)' if want_ndim == 1 else f'(n, {self.channels})'}"
+            )
+        length = seg.shape[0]
+        start = i * self.step_samples
+        end = start + length
+        # Invariant: everything before this segment's start is already written.
+        assert start >= self._base, (start, self._base)
+        self._grow_to(end)
+        w = self._weights(i, length)
+        a, b = start - self._base, end - self._base
+        self._acc[a:b] += seg * (w[:, None] if seg.ndim == 2 else w)
+        self._wsum[a:b] += w
+        self._added += 1
+        if self._added < self.n_segments:
+            # No later segment starts before the next one: all of it is final.
+            self._flush_to(self._added * self.step_samples)
+        else:
+            held_end = self._base + self._wsum.shape[0]
+            if held_end > end:
+                # The reference sizes its output by the LAST segment; an
+                # earlier segment reaching past it does not fit there either.
+                raise ValueError(
+                    f"segment {i - 1} ends past the last segment "
+                    f"({held_end} > {end} samples)"
+                )
+            self._flush_to(end)
+
+    def close(self):
+        """Publish: requires every declared segment; atomic `os.replace`."""
+        if self._added != self.n_segments:
+            self.abort()
+            raise RuntimeError(
+                f"stitch incomplete: {self._added} of {self.n_segments} segments added"
+            )
+        try:
+            self._file.close()
+            os.replace(self.tmp_path, self.out_path)
+        finally:
+            self._remove_tmp()
+
+    def abort(self):
+        """Discard the partial `.tmp`; the final path is never touched."""
+        with contextlib.suppress(Exception):
+            self._file.close()
+        self._remove_tmp()
+
+    def _remove_tmp(self):
+        if os.path.exists(self.tmp_path):
+            with contextlib.suppress(OSError):
+                os.remove(self.tmp_path)
+
+
+def _stitch_to_flac(path_of, n_seg, out_path, step_samples, overlap_samples):
+    """Stream-stitch the `n_seg` per-segment 48 kHz stereo WAVs
+    (`path_of(i)`) into `out_path`: ONE segment in memory at a time (#207)."""
+    import soundfile as sf
+
+    with _StreamingStitchWriter(out_path, n_seg, step_samples, overlap_samples) as w:
+        for i in range(n_seg):
+            seg, _ = sf.read(path_of(i), dtype="float32")
+            w.add_segment(seg)
 
 
 def _stem_token(fname):
@@ -277,7 +523,11 @@ def _write_array_48k_stereo(out_array, out_path):
     `.tmp` then `os.replace` it into place (atomic on the same filesystem, POSIX
     + Windows), so a killed subprocess never leaves a HALF-WRITTEN FLAC at the
     final sidecar path — the live playback reader keys on the sidecar's
-    existence, and a torn file there would corrupt the wall's NDI audio."""
+    existence, and a torn file there would corrupt the wall's NDI audio.
+
+    #207: whole-array writer, kept as the REFERENCE output format the tests
+    compare `_StreamingStitchWriter` against (which publishes the same way);
+    `cmd_separate` no longer calls it."""
     import numpy as np
     import soundfile as sf
 
@@ -293,16 +543,14 @@ def _write_array_48k_stereo(out_array, out_path):
                 os.remove(tmp_path)
 
 
-def _separate_one_segment(sep, full, in_sr, start_s, end_s, segv_path, segi_path, stem_dir):
-    """Separate ONE native-rate window `[start_s, end_s]` of `full` into vocals +
-    instrumental, resample each to 48 kHz stereo, and write them atomically
-    (WAV scratch) to `segv_path` / `segi_path`. `stem_dir` is cleared after."""
-    import numpy as np
+def _separate_one_segment(sep, audio_path, in_sr, start_s, end_s, segv_path, segi_path, stem_dir):
+    """Separate ONE native-rate window `[start_s, end_s]` of the mix at
+    `audio_path` into vocals + instrumental, resample each to 48 kHz stereo, and
+    write them atomically (WAV scratch) to `segv_path` / `segi_path`. `stem_dir`
+    is cleared after. Only this window is ever in memory (#207)."""
     import soundfile as sf
 
-    s0 = max(0, int(round(start_s * in_sr)))
-    s1 = int(round(end_s * in_sr))
-    data = full[s0:s1] if full.ndim == 1 else full[:, s0:s1].T  # (n[, ch])
+    data = _read_window(audio_path, in_sr, start_s, end_s)  # (n[, ch]) float32
     seg_in = os.path.join(stem_dir, "segin_" + os.path.basename(segv_path))
     sf.write(seg_in, data, in_sr, subtype="FLOAT")
 
@@ -334,9 +582,13 @@ def cmd_separate(args):
     (2 s linear crossfade, IDENTICAL weights on both stems so additivity holds)
     and written atomically to `--vocals-out` / `--instrumental-out`, then the work
     dir is removed. On a CUDA OOM the remaining segments re-run on CPU (#154).
+
+    #207: memory is O(segment), independent of the video length — each window
+    is read from the mix file on demand (`_read_window`) and each stem is
+    stitched by `_StreamingStitchWriter`, which holds only the overlap tail.
+    Never load the whole mix or build a whole-length array here: the child runs
+    under a 10 GiB per-process job cap.
     """
-    import numpy as np
-    import librosa
     from audio_separator.separator import Separator
 
     if args.force_cpu:
@@ -346,8 +598,9 @@ def cmd_separate(args):
     work_dir = args.work_dir
     os.makedirs(work_dir, exist_ok=True)
 
-    full, in_sr = librosa.load(args.audio, sr=None, mono=False)
-    total_samples = full.shape[0] if full.ndim == 1 else full.shape[1]
+    # #207: header only — each window is read from the file on demand, the
+    # whole mix is never in memory (10 GiB per-child job cap).
+    in_sr, total_samples = _audio_info(args.audio)
     total_s = total_samples / float(in_sr)
     bounds = _segment_bounds(total_s, STEM_SEGMENT_SECONDS, STEM_OVERLAP_SECONDS)
     n_seg = len(bounds)
@@ -387,7 +640,7 @@ def cmd_separate(args):
                     if done[i]:
                         continue
                     _separate_one_segment(
-                        sep, full, in_sr, s_s, e_s, _segv(i), _segi(i), stem_dir
+                        sep, args.audio, in_sr, s_s, e_s, _segv(i), _segi(i), stem_dir
                     )
                     done[i] = True
                     print(f"separation chunk {i + 1}/{n_seg} done", file=sys.stderr)
@@ -415,17 +668,13 @@ def cmd_separate(args):
                 torch.cuda.empty_cache()
             _process_remaining(force_cpu=True)
 
-    # Stitch both stems with IDENTICAL crossfade weights (preserves additivity).
+    # Stitch both stems with IDENTICAL crossfade weights (preserves additivity),
+    # STREAMED segment by segment into the atomic FLAC (#207) — never a
+    # whole-length array.
     step_samples = int(round((STEM_SEGMENT_SECONDS - STEM_OVERLAP_SECONDS) * OUTPUT_SAMPLE_RATE))
     overlap_samples = int(round(STEM_OVERLAP_SECONDS * OUTPUT_SAMPLE_RATE))
-    import soundfile as sf
-
-    def _stitch_paths(path_of):
-        segs = [sf.read(path_of(i), dtype="float32")[0] for i in range(n_seg)]
-        return _stitch_segments(segs, step_samples, overlap_samples)
-
-    _write_array_48k_stereo(_stitch_paths(_segv), args.vocals_out)
-    _write_array_48k_stereo(_stitch_paths(_segi), args.instrumental_out)
+    _stitch_to_flac(_segv, n_seg, args.vocals_out, step_samples, overlap_samples)
+    _stitch_to_flac(_segi, n_seg, args.instrumental_out, step_samples, overlap_samples)
     shutil.rmtree(work_dir, ignore_errors=True)
 
     print(json.dumps({"vocals": args.vocals_out, "instrumental": args.instrumental_out}))
