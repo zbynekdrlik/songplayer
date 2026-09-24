@@ -141,3 +141,24 @@ export function recordingFiles(outputPath: string, autoRemux: boolean): string[]
   if (!autoRemux || !m || m[2].toLowerCase() === "mp4") return [outputPath];
   return [outputPath, `${m[1]}.mp4`];
 }
+
+/**
+ * Whether a take's recording is kept as CI evidence (#147): every take that
+ * was ANALYSED and did not pass. That includes `fail`, `cannot_measure`,
+ * `error`, and an analysis that threw before giving a verdict (`run` null).
+ * Only a pass deletes the recording without a copy. A take discarded before
+ * the analysis (the song changed) is not evidence of anything.
+ */
+export function keepsEvidence(analysed: boolean, run: AvSyncRun | null): boolean {
+  return analysed && (run === null || run.status !== "pass");
+}
+
+/**
+ * File name of one kept evidence file: the take number plus the file's own
+ * name. Both Windows and POSIX separators are stripped, so the helper gives
+ * the same answer on the box and in the ubuntu unit suite.
+ */
+export function evidenceName(take: number, file: string): string {
+  const base = file.split(/[\\/]/).pop() ?? file;
+  return `take${take}-${base}`;
+}
