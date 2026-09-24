@@ -1,0 +1,611 @@
+{
+ "engine": "gemini-live-translate",
+ "target_lang": "sk",
+ "chunks": [
+  {
+   "index": 0,
+   "start_ms": 0,
+   "end_ms": 2152000,
+   "at_ms": 0,
+   "tempo": 1.0,
+   "en": "",
+   "sk": "",
+   "sk_timed": [
+    {
+     "t_ms": 1235703,
+     "text": " úprimne, s vierou."
+    },
+    {
+     "t_ms": 1238437,
+     "text": " Štvrtým kľúčom"
+    },
+    {
+     "t_ms": 1239703,
+     "text": " k božskému zdraviu"
+    },
+    {
+     "t_ms": 1241672,
+     "text": " cielene,"
+    },
+    {
+     "t_ms": 1242672,
+     "text": " úprimne,"
+    },
+    {
+     "t_ms": 1243937,
+     "text": " s vierou."
+    },
+    {
+     "t_ms": 1244937,
+     "text": " Čo je to"
+    },
+    {
+     "t_ms": 1245953,
+     "text": " úprimná modlitba?"
+    },
+    {
+     "t_ms": 1246953,
+     "text": " Čo čo"
+    },
+    {
+     "t_ms": 1247953,
+     "text": " je, čo nie"
+    },
+    {
+     "t_ms": 1249187,
+     "text": " je úprimná modlitba?"
+    },
+    {
+     "t_ms": 1250187,
+     "text": " Ó Bože,"
+    },
+    {
+     "t_ms": 1251187,
+     "text": " len sa modlíme za"
+    },
+    {
+     "t_ms": 1252187,
+     "text": " Kathy dnes a"
+    },
+    {
+     "t_ms": 1253437,
+     "text": " čokoľvek, s čím zápasí."
+    },
+    {
+     "t_ms": 1254437,
+     "text": " Úprimný"
+    },
+    {
+     "t_ms": 1255422,
+     "text": " je zo srdca"
+    },
+    {
+     "t_ms": 1256203,
+     "text": " a"
+    },
+    {
+     "t_ms": 1259937,
+     "text": " Keď Biblia hovorí,"
+    },
+    {
+     "t_ms": 1260937,
+     "text": " že úprimná účinná"
+    },
+    {
+     "t_ms": 1261937,
+     "text": " modlitba spravodlivého"
+    },
+    {
+     "t_ms": 1262937,
+     "text": " človeka,"
+    },
+    {
+     "t_ms": 1263953,
+     "text": " má veľkú"
+    },
+    {
+     "t_ms": 1264953,
+     "text": " silu k dispozícii,"
+    },
+    {
+     "t_ms": 1265937,
+     "text": " dynamickú a funguje."
+    },
+    {
+     "t_ms": 1267203,
+     "text": " Definuj"
+    },
+    {
+     "t_ms": 1268187,
+     "text": " úprimný pre"
+    },
+    {
+     "t_ms": 1270172,
+     "text": " mňa. Čo to znamená"
+    },
+    {
+     "t_ms": 1270937,
+     "text": " modliť sa úprimne?"
+    },
+    {
+     "t_ms": 1271687,
+     "text": " A aký"
+    },
+    {
+     "t_ms": 1272437,
+     "text": " by bol príklad nemodlenia"
+    },
+    {
+     "t_ms": 1272937,
+     "text": " sa úprimne?"
+    },
+    {
+     "t_ms": 1274453,
+     "text": " Takže,"
+    },
+    {
+     "t_ms": 1275437,
+     "text": " úprimný"
+    },
+    {
+     "t_ms": 1276437,
+     "text": " a Jakub 5:"
+    },
+    {
+     "t_ms": 1277437,
+     "text": " 16,"
+    },
+    {
+     "t_ms": 1278437,
+     "text": " znamená"
+    },
+    {
+     "t_ms": 1279437,
+     "text": " natiahnutý"
+    },
+    {
+     "t_ms": 1280422,
+     "text": " zámer."
+    },
+    {
+     "t_ms": 1281437,
+     "text": " Sústredený,"
+    },
+    {
+     "t_ms": 1282437,
+     "text": " nie"
+    },
+    {
+     "t_ms": 1283687,
+     "text": " náhodný."
+    },
+    {
+     "t_ms": 1284687,
+     "text": " Nie je to hlasitosť,"
+    },
+    {
+     "t_ms": 1285703,
+     "text": " je to"
+    },
+    {
+     "t_ms": 1286437,
+     "text": " nie náhodné."
+    },
+    {
+     "t_ms": 1288437,
+     "text": " To sa mi páči."
+    },
+    {
+     "t_ms": 1292437,
+     "text": " Náhodné"
+    },
+    {
+     "t_ms": 1293437,
+     "text": " modlitby."
+    },
+    {
+     "t_ms": 1294437,
+     "text": " Udržujú"
+    },
+    {
+     "t_ms": 1295437,
+     "text": " ľudí chorých."
+    },
+    {
+     "t_ms": 1296687,
+     "text": " Náhodné modlitby"
+    },
+    {
+     "t_ms": 1297437,
+     "text": " od kazateľa"
+    },
+    {
+     "t_ms": 1298687,
+     "text": " ktorý by mal"
+    },
+    {
+     "t_ms": 1299672,
+     "text": " sa modliť za chorých."
+    },
+    {
+     "t_ms": 1300422,
+     "text": " Ó Pane,"
+    },
+    {
+     "t_ms": 1301687,
+     "text": " len ťa prosíme,"
+    },
+    {
+     "t_ms": 1302687,
+     "text": " aby si bol dnes s Nancy"
+    },
+    {
+     "t_ms": 1303437,
+     "text": " a keď prechádza"
+    },
+    {
+     "t_ms": 1304437,
+     "text": " týmto"
+    },
+    {
+     "t_ms": 1305687,
+     "text": " liečením rakoviny"
+    },
+    {
+     "t_ms": 1306687,
+     "text": " Chcem povedať,"
+    },
+    {
+     "t_ms": 1307687,
+     "text": " že to nič"
+    },
+    {
+     "t_ms": 1308437,
+     "text": " nevyrieši."
+    },
+    {
+     "t_ms": 1309687,
+     "text": " a niektorí z nás vyrastali"
+    },
+    {
+     "t_ms": 1310422,
+     "text": " v cirkvi"
+    },
+    {
+     "t_ms": 1311687,
+     "text": " ktorá sa modlila za chorých"
+    },
+    {
+     "t_ms": 1312422,
+     "text": " pravidelne"
+    },
+    {
+     "t_ms": 1313687,
+     "text": " a nikdy ste nevideli"
+    },
+    {
+     "t_ms": 1314422,
+     "text": " žiadne zázraky ani"
+    },
+    {
+     "t_ms": 1315687,
+     "text": " uzdravenie. Pretože"
+    },
+    {
+     "t_ms": 1316422,
+     "text": " modlitba bola"
+    },
+    {
+     "t_ms": 1317437,
+     "text": " povrchná."
+    },
+    {
+     "t_ms": 1318687,
+     "text": " Takže myslím, že"
+    },
+    {
+     "t_ms": 1319937,
+     "text": " povrchná by bola"
+    }
+   ],
+   "en_timed": [
+    {
+     "t_ms": 1235641,
+     "text": " earnest, faith-filled"
+    },
+    {
+     "t_ms": 1236516,
+     "text": " prayers."
+    },
+    {
+     "t_ms": 1238531,
+     "text": " The fourth key"
+    },
+    {
+     "t_ms": 1239563,
+     "text": " for divine health"
+    },
+    {
+     "t_ms": 1241547,
+     "text": " targeted,"
+    },
+    {
+     "t_ms": 1242547,
+     "text": " earnest,"
+    },
+    {
+     "t_ms": 1243875,
+     "text": " faith-filled"
+    },
+    {
+     "t_ms": 1244875,
+     "text": " What's an"
+    },
+    {
+     "t_ms": 1245953,
+     "text": " earnest prayer?"
+    },
+    {
+     "t_ms": 1247000,
+     "text": " What what is"
+    },
+    {
+     "t_ms": 1248016,
+     "text": " what is not"
+    },
+    {
+     "t_ms": 1249110,
+     "text": " an earnest prayer?"
+    },
+    {
+     "t_ms": 1250203,
+     "text": " Oh God, we just"
+    },
+    {
+     "t_ms": 1251188,
+     "text": " pray for Kathy"
+    },
+    {
+     "t_ms": 1252250,
+     "text": " today and whatever"
+    },
+    {
+     "t_ms": 1253391,
+     "text": " she's struggling with."
+    },
+    {
+     "t_ms": 1254406,
+     "text": " Earnest is from the"
+    },
+    {
+     "t_ms": 1255344,
+     "text": " heart and"
+    },
+    {
+     "t_ms": 1259860,
+     "text": " When the Bible says the"
+    },
+    {
+     "t_ms": 1260860,
+     "text": " earnest effectual"
+    },
+    {
+     "t_ms": 1261891,
+     "text": " prayer of a righteous"
+    },
+    {
+     "t_ms": 1262906,
+     "text": " man,"
+    },
+    {
+     "t_ms": 1263922,
+     "text": " makes great power"
+    },
+    {
+     "t_ms": 1265000,
+     "text": " available,"
+    },
+    {
+     "t_ms": 1266031,
+     "text": " dynamic and it's working."
+    },
+    {
+     "t_ms": 1267094,
+     "text": " Define"
+    },
+    {
+     "t_ms": 1268203,
+     "text": " earnest for"
+    },
+    {
+     "t_ms": 1270281,
+     "text": " me. Like what does it mean"
+    },
+    {
+     "t_ms": 1270922,
+     "text": " to pray in"
+    },
+    {
+     "t_ms": 1271594,
+     "text": " earnest and what would be an"
+    },
+    {
+     "t_ms": 1272328,
+     "text": " example of not"
+    },
+    {
+     "t_ms": 1273000,
+     "text": " praying in earnest?"
+    },
+    {
+     "t_ms": 1274469,
+     "text": " So,"
+    },
+    {
+     "t_ms": 1275485,
+     "text": " earnest and"
+    },
+    {
+     "t_ms": 1276485,
+     "text": " James 5:"
+    },
+    {
+     "t_ms": 1277516,
+     "text": " 16,"
+    },
+    {
+     "t_ms": 1278500,
+     "text": " means"
+    },
+    {
+     "t_ms": 1279516,
+     "text": " stretched out"
+    },
+    {
+     "t_ms": 1280500,
+     "text": " intent."
+    },
+    {
+     "t_ms": 1281516,
+     "text": " Focused,"
+    },
+    {
+     "t_ms": 1282453,
+     "text": " not"
+    },
+    {
+     "t_ms": 1283531,
+     "text": " casual. It's"
+    },
+    {
+     "t_ms": 1284578,
+     "text": " not volume,"
+    },
+    {
+     "t_ms": 1285563,
+     "text": " it's"
+    },
+    {
+     "t_ms": 1286500,
+     "text": " not casual."
+    },
+    {
+     "t_ms": 1288516,
+     "text": " I like that."
+    },
+    {
+     "t_ms": 1292469,
+     "text": " Casual"
+    },
+    {
+     "t_ms": 1293485,
+     "text": " prayers."
+    },
+    {
+     "t_ms": 1294500,
+     "text": " Keep"
+    },
+    {
+     "t_ms": 1295500,
+     "text": " people sick."
+    },
+    {
+     "t_ms": 1296547,
+     "text": " Casual prayers"
+    },
+    {
+     "t_ms": 1297469,
+     "text": " from a"
+    },
+    {
+     "t_ms": 1298531,
+     "text": " minister that's supposed"
+    },
+    {
+     "t_ms": 1299594,
+     "text": " to pray for the sick."
+    },
+    {
+     "t_ms": 1300516,
+     "text": " Oh Lord, we just"
+    },
+    {
+     "t_ms": 1301547,
+     "text": " ask you to be"
+    },
+    {
+     "t_ms": 1302563,
+     "text": " with Nancy today"
+    },
+    {
+     "t_ms": 1303516,
+     "text": " and as she goes"
+    },
+    {
+     "t_ms": 1304485,
+     "text": " through this"
+    },
+    {
+     "t_ms": 1305547,
+     "text": " cancer"
+    },
+    {
+     "t_ms": 1306594,
+     "text": " treatment. I mean that that"
+    },
+    {
+     "t_ms": 1307531,
+     "text": " that doesn't get"
+    },
+    {
+     "t_ms": 1308531,
+     "text": " anything done. and some of us"
+    },
+    {
+     "t_ms": 1309594,
+     "text": " grew up in"
+    },
+    {
+     "t_ms": 1310485,
+     "text": " church"
+    },
+    {
+     "t_ms": 1311625,
+     "text": " that prayed for the sick"
+    },
+    {
+     "t_ms": 1312531,
+     "text": " regularly and you never"
+    },
+    {
+     "t_ms": 1313563,
+     "text": " saw any miracles or"
+    },
+    {
+     "t_ms": 1314516,
+     "text": " healing."
+    },
+    {
+     "t_ms": 1315563,
+     "text": " Because the prayer"
+    },
+    {
+     "t_ms": 1316531,
+     "text": " was flippant."
+    },
+    {
+     "t_ms": 1317500,
+     "text": " So I guess"
+    },
+    {
+     "t_ms": 1318578,
+     "text": " flippant would be the"
+    },
+    {
+     "t_ms": 1319906,
+     "text": " opposite of"
+    }
+   ]
+  }
+ ]
+}

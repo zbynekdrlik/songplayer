@@ -10,11 +10,11 @@
 //! Timing: the SK output transcription arrives as coarse fragments stamped by the
 //! chunk-local OUTPUT-audio position (`t_ms`); fragment `i` occupies the window
 //! `(t[i-1], t[i]]` (`t[-1] = 0`). Fragments are grouped into lines — a line
-//! closes at sentence punctuation, at [`MAX_WORDS_PER_LINE`] words, or on a
-//! `> `[`LINE_GAP_MS`] arrival gap — and each line is mapped onto the video
-//! timeline through the same placement the mix applied: `video = at_ms +
-//! local_ms / tempo`. A legacy JSON (pre-#182) without `at_ms`/`tempo` falls back
-//! to `start_ms` and `1.0`.
+//! closes at sentence punctuation or at [`MAX_WORDS_PER_LINE`] words, never on
+//! a pause (#184 H6) — and each line is mapped onto the video timeline through
+//! the same placement the mix applied: `video = at_ms + local_ms / tempo`. A
+//! legacy JSON (pre-#182) without `at_ms`/`tempo` falls back to `start_ms` and
+//! `1.0`.
 //!
 //! EN (#184 H3, paired by overlap since H5): the EN input transcription arrives
 //! as fragments stamped on the video timeline (`en_timed`, synchronous with the
@@ -38,18 +38,16 @@ pub const SOURCE_LIVE_TRANSLATE: &str = "gemini-live-translate";
 /// from its saved transcripts JSON, so a pairing change never needs a re-dub.
 /// A track stored before the field existed is version 1. Bump it whenever the
 /// grouping or the EN pairing output changes.
-pub const DUB_SUBTITLES_BUILDER_VERSION: u32 = 2;
+pub const DUB_SUBTITLES_BUILDER_VERSION: u32 = 3;
 
 /// A fragment's content runs until the next fragment arrives, but never longer
 /// than this after its own time (#184 H5 content intervals).
 const CONTENT_TAIL_MS: u64 = 1500;
 
-/// Max words in one subtitle line (the wall reads about two lines).
-const MAX_WORDS_PER_LINE: usize = 14;
-
-/// A larger arrival gap than this between consecutive SK fragments closes the
-/// line (a real speech pause).
-const LINE_GAP_MS: u64 = 1500;
+/// A line closes once it reaches this many words (#184 H6: 20, up from 14, so
+/// a long sentence stays whole; a run-on without punctuation is still bounded).
+/// Checked after a whole fragment, so one fragment can take a line past it.
+const MAX_WORDS_PER_LINE: usize = 20;
 
 /// The minimum on-screen duration of a subtitle line.
 const MIN_LINE_MS: u64 = 400;
@@ -247,10 +245,11 @@ fn to_video_ms(at_ms: u64, local_ms: u64, tempo: f64) -> u64 {
 }
 
 /// Group consecutive SK fragments into lines. Closes a line after fragment `i`
-/// when its text ends a sentence, the line reaches [`MAX_WORDS_PER_LINE`] words,
-/// or the next fragment arrives more than [`LINE_GAP_MS`] later (a pause). The
-/// final fragment always closes the last line. Returns inclusive `(lo, hi)`
-/// fragment-index ranges.
+/// when its text ends a sentence or the line reaches [`MAX_WORDS_PER_LINE`]
+/// words. A pause never closes a line (#184 H6): Live Translate streams one
+/// sentence with pauses inside it, and the old 1500 ms gap rule cut sentences
+/// in half. The final fragment always closes the last line. Returns inclusive
+/// `(lo, hi)` fragment-index ranges.
 fn group_fragments(frags: &[SkFragment]) -> Vec<(usize, usize)> {
     let mut groups = Vec::new();
     let mut lo = 0usize;
@@ -259,11 +258,8 @@ fn group_fragments(frags: &[SkFragment]) -> Vec<(usize, usize)> {
         words += f.text.split_whitespace().count();
         let ends = ends_sentence(&f.text);
         let hit_word_cap = words >= MAX_WORDS_PER_LINE;
-        let gap_next = frags
-            .get(i + 1)
-            .is_some_and(|n| n.t_ms.saturating_sub(f.t_ms) > LINE_GAP_MS);
         let last = i + 1 == frags.len();
-        if ends || hit_word_cap || gap_next || last {
+        if ends || hit_word_cap || last {
             groups.push((lo, i));
             lo = i + 1;
             words = 0;
