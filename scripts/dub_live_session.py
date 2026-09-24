@@ -275,10 +275,12 @@ class SessionState:
     latest_handle: str | None = None
     frames_at_handle: int = 0  # frames_sent when the latest handle arrived
     chunks: list[OutputChunk] = field(default_factory=list)
-    # Transcriptions carry the connection they arrived on: during an overlap the
-    # old connection's trailing text arrives AFTER the new one's first text, but
-    # translates EARLIER input — consumers order them by connection.
-    input_parts: list[tuple[int, str]] = field(default_factory=list)  # (conn, text)
+    # Transcriptions carry their arrival time and the connection they arrived on,
+    # `(arrival_s, text, conn)`: during an overlap the old connection's trailing
+    # text arrives AFTER the new one's first text, but translates EARLIER input —
+    # consumers order them by connection. The input arrival times the EN subtitle
+    # lines (#184 H3), the output arrival the SK ones.
+    input_parts: list[tuple[float, str, int]] = field(default_factory=list)
     output_parts: list[tuple[float, str, int]] = field(default_factory=list)
     drain_end_reason: str | None = None
     errors: list[str] = field(default_factory=list)
@@ -686,7 +688,7 @@ class ContinuousSession:
         if sc is not None:
             it = getattr(sc, "input_transcription", None)
             if it is not None and getattr(it, "text", None):
-                st.input_parts.append((conn.index, it.text))
+                st.input_parts.append((round(now, 4), it.text, conn.index))
                 self.events.log(
                     "input_transcription", connection=conn.index, text=it.text
                 )

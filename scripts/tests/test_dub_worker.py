@@ -209,6 +209,7 @@ def test_sk_timed_is_on_the_video_timeline_and_monotonic():
 def test_transcripts_are_one_chunk_on_the_video_timeline():
     t = dw.build_transcripts(
         "Hello world",
+        [{"t_ms": 400, "text": "Hello world"}],
         "Ahoj svet.",
         [{"t_ms": 1000, "text": "Ahoj svet."}],
         2_160_000,
@@ -223,11 +224,59 @@ def test_transcripts_are_one_chunk_on_the_video_timeline():
             "at_ms": 0,
             "tempo": 1.0,
             "en": "Hello world",
+            "en_timed": [{"t_ms": 400, "text": "Hello world"}],
             "sk": "Ahoj svet.",
             "sk_timed": [{"t_ms": 1000, "text": "Ahoj svet."}],
         }
     ]
     json.dumps(t, allow_nan=False)
+
+
+# ── the EN timing (#184 H3) ─────────────────────────────────────────────────────
+
+
+def test_en_timed_is_the_input_arrival_on_the_video_timeline_with_no_latency():
+    # The source audio is streamed at 1.0x wall clock from t0, so an input
+    # fragment's arrival - t0 IS its source position (+ the small ASR lag): no
+    # output latency is subtracted, unlike the SK.
+    parts = [
+        (101.0, "Hello ", 1),
+        (101.0, "", 1),
+        (100.5, "world.", 1),
+        (104.2, "Next", 1),
+    ]
+    assert dw.en_timed_from(parts, 100.0) == [
+        {"t_ms": 1000, "text": "Hello "},
+        {"t_ms": 1000, "text": "world."},  # never earlier than the previous one
+        {"t_ms": 4200, "text": "Next"},
+    ]
+    # The SK of the same arrivals is shifted back by the latency; the EN is not.
+    assert dw.sk_timed_from(parts, 100.0, 1000)[2] == {"t_ms": 3200, "text": "Next"}
+
+
+def test_en_timed_before_t0_clamps_to_zero():
+    assert dw.en_timed_from([(99.0, "Early ", 1), (100.25, "on.", 1)], 100.0) == [
+        {"t_ms": 0, "text": "Early "},
+        {"t_ms": 250, "text": "on."},
+    ]
+
+
+def test_en_timed_overlap_is_ordered_and_capped_by_connection():
+    # The same connection ordering + overlap cap as the SK: the old connection's
+    # trailing input text comes first and is capped at the new connection's
+    # first fragment, so the new connection keeps its own arrival times.
+    parts = [
+        (110.0, "End ", 1),
+        (110.4, "New ", 2),
+        (110.6, "of it.", 1),
+        (111.0, "one.", 2),
+    ]
+    assert dw.en_timed_from(parts, 100.0) == [
+        {"t_ms": 10000, "text": "End "},
+        {"t_ms": 10400, "text": "of it."},
+        {"t_ms": 10400, "text": "New "},
+        {"t_ms": 11000, "text": "one."},
+    ]
 
 
 # ── the placed WAV ─────────────────────────────────────────────────────────────
@@ -342,7 +391,7 @@ def test_live_translate_places_the_stream_and_writes_the_d3_transcripts(
                     active=True,
                 )
             )
-        state.input_parts = [(1, "Hello "), (1, "world")]
+        state.input_parts = [(10.5, "Hello ", 1), (11.2, "world", 1)]
         state.output_parts = [(14.0, "Ahoj ", 1), (14.5, "svet.", 1)]
         events.log("connect", connection=1)
         return state
@@ -400,6 +449,11 @@ def test_live_translate_places_the_stream_and_writes_the_d3_transcripts(
     assert summary["connections"] == 1
     t = json.loads(transcripts.read_text(encoding="utf-8"))
     assert t["chunks"][0]["en"] == "Hello world"
+    # EN = input arrival - t0 (10.0), no latency: the source runs at 1.0x.
+    assert t["chunks"][0]["en_timed"] == [
+        {"t_ms": 500, "text": "Hello "},
+        {"t_ms": 1200, "text": "world"},
+    ]
     assert t["chunks"][0]["sk"] == "Ahoj svet."
     assert t["chunks"][0]["end_ms"] == 3000
     assert t["chunks"][0]["sk_timed"] == [
@@ -458,7 +512,10 @@ def test_the_overlap_transcripts_are_ordered_by_connection_not_interleaved():
         {"t_ms": 7400, "text": "Nová "},
         {"t_ms": 8000, "text": "veta."},
     ]
-    joined = dw.joined_by_connection([(2, "B"), (1, "a "), (2, "C"), (1, "b ")])
+    # Both transcriptions are `(arrival_s, text, conn)` since #184 H3.
+    joined = dw.joined_by_connection(
+        [(1.0, "B", 2), (1.1, "a ", 1), (1.2, "C", 2), (1.3, "b ", 1)]
+    )
     assert joined == "a b BC"
 
 

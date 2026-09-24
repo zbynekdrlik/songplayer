@@ -14,10 +14,17 @@
 //! `> `[`LINE_GAP_MS`] arrival gap — and each line is mapped onto the video
 //! timeline through the same placement the mix applied: `video = at_ms +
 //! local_ms / tempo`. A legacy JSON (pre-#182) without `at_ms`/`tempo` falls back
-//! to `start_ms` and `1.0`. The EN reference line is the slice of the chunk's EN
-//! string covering the same cumulative character fraction `[a, b)` that the line
-//! covers of the chunk's SK, snapped to word boundaries. Every branch is
-//! unit-tested in the sibling `subtitles_tests.rs`.
+//! to `start_ms` and `1.0`.
+//!
+//! EN (#184 H3): the EN input transcription arrives as fragments stamped by their
+//! own arrival (`en_timed`, source position plus the small ASR lag). They are
+//! grouped into SENTENCES (the same [`ends_sentence`] rule), each sentence is
+//! timed by its first fragment through the same `to_video_ms` mapping, and each
+//! WHOLE sentence goes to the chunk's line whose start is nearest to it — never
+//! to an earlier line than the sentence before it. A line may carry zero, one or
+//! several EN sentences. A chunk without `en_timed` (a transcript written before
+//! H3) has no EN until the video is re-dubbed. Every branch is unit-tested in the
+//! sibling `subtitles_tests.rs`.
 
 use serde::Deserialize;
 use sp_core::lyrics::{LyricsLine, LyricsTrack};
@@ -47,8 +54,20 @@ pub struct SkFragment {
     pub text: String,
 }
 
+/// One EN input-transcription fragment, stamped by its chunk-local arrival
+/// (#184 H3): the source position plus the small ASR lag, since the source is
+/// streamed at 1.0x wall clock.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EnFragment {
+    /// Chunk-local arrival (ms) of this input-transcription fragment.
+    pub t_ms: u64,
+    /// The EN text of this fragment (may be empty; carries its own spaces).
+    #[serde(default)]
+    pub text: String,
+}
+
 /// One chunk of the dub transcripts JSON. Only the fields the subtitle builder
-/// needs are deserialized; any others (`index`, `end_ms`, `sk`) are ignored.
+/// needs are deserialized; any others (`index`, `end_ms`, `en`, `sk`) are ignored.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DubChunk {
     /// The chunk's source-timeline start — the `at_ms` fallback for a legacy JSON.
@@ -61,9 +80,10 @@ pub struct DubChunk {
     /// The atempo the mix applied to the chunk. Absent in a legacy JSON → `1.0`.
     #[serde(default)]
     pub tempo: Option<f64>,
-    /// The chunk's full EN transcription (one untimed string).
+    /// The EN input-transcription fragments with their chunk-local arrival
+    /// times. Absent in a transcript written before #184 H3 → no EN.
     #[serde(default)]
-    pub en: String,
+    pub en_timed: Vec<EnFragment>,
     /// The coarse SK fragments with their chunk-local output positions.
     #[serde(default)]
     pub sk_timed: Vec<SkFragment>,
@@ -102,20 +122,9 @@ pub fn transcripts_to_track(t: &DubTranscripts) -> LyricsTrack {
             _ => 1.0,
         };
 
-        // Character length of each SK fragment + its prefix sums, so a line's
-        // `[lo, hi]` fragment span maps to a cumulative character fraction of the
-        // chunk (used to slice the EN reference).
-        let frag_chars: Vec<usize> = chunk
-            .sk_timed
-            .iter()
-            .map(|f| f.text.chars().count())
-            .collect();
-        let total_sk: usize = frag_chars.iter().sum();
-
-        // EN words with their character lengths (no separators) for the slice.
-        let en_words: Vec<&str> = chunk.en.split_whitespace().collect();
-        let en_word_chars: Vec<usize> = en_words.iter().map(|w| w.chars().count()).collect();
-        let total_en: usize = en_word_chars.iter().sum();
+        // This chunk's lines are `lines[first_line..]`; its EN is assigned to
+        // them (and only them) once they are built.
+        let first_line = lines.len();
 
         for (lo, hi) in group_fragments(&chunk.sk_timed) {
             // SK line text = the line's fragments joined.
@@ -146,28 +155,34 @@ pub fn transcripts_to_track(t: &DubTranscripts) -> LyricsTrack {
             let true_end_ms = to_video_ms(at_ms, local_end, tempo).max(start_ms);
             prev_start_ms = start_ms;
 
-            // EN reference = the words covering the SAME cumulative character
-            // fraction [a, b) the line covers of the SK.
-            let char_start: usize = frag_chars[..lo].iter().sum();
-            let char_end: usize = frag_chars[..=hi].iter().sum();
-            let (a, b) = if total_sk == 0 {
-                (0.0, 0.0)
-            } else {
-                (
-                    char_start as f64 / total_sk as f64,
-                    char_end as f64 / total_sk as f64,
-                )
-            };
-            let en_text = en_slice(&en_words, &en_word_chars, total_en, a, b);
-
             lines.push(LyricsLine {
                 start_ms,
                 // Pass 1 stores the TRUE end here; pass 2 rewrites it.
                 end_ms: true_end_ms,
-                en: en_text,
+                // Filled below from the chunk's timed EN.
+                en: String::new(),
                 sk: Some(sk_text),
                 words: None,
             });
+        }
+
+        // EN (#184 H3): the input fragments on the video timeline through the
+        // SAME placement as the SK, then each whole sentence to the nearest line.
+        let en_video: Vec<EnFragment> = chunk
+            .en_timed
+            .iter()
+            .map(|f| EnFragment {
+                t_ms: to_video_ms(at_ms, f.t_ms, tempo),
+                text: f.text.clone(),
+            })
+            .collect();
+        let chunk_lines = &mut lines[first_line..];
+        let starts: Vec<u64> = chunk_lines.iter().map(|l| l.start_ms).collect();
+        for (line, en) in chunk_lines
+            .iter_mut()
+            .zip(assign_en_sentences(&en_video, &starts))
+        {
+            line.en = en;
         }
     }
 
@@ -247,24 +262,60 @@ fn ends_sentence(text: &str) -> bool {
     )
 }
 
-/// The words of `en_words` whose cumulative character START-fraction falls in
-/// `[a, b)`. Deterministic, order-preserving, snapped to word boundaries; every
-/// EN word lands in exactly one line because the chunk's line fractions form a
-/// contiguous partition of `[0, 1]`. Empty EN → empty string.
-fn en_slice(en_words: &[&str], en_word_chars: &[usize], total_en: usize, a: f64, b: f64) -> String {
-    if total_en == 0 {
-        return String::new();
-    }
-    let mut selected: Vec<&str> = Vec::new();
-    let mut cum = 0usize;
-    for (&w, &wc) in en_words.iter().zip(en_word_chars.iter()) {
-        let start_frac = cum as f64 / total_en as f64;
-        if start_frac >= a && start_frac < b {
-            selected.push(w);
+/// Assign each WHOLE EN sentence to the line whose start is nearest to it
+/// (#184 H3). `en` are the EN fragments on the video timeline, in order;
+/// `line_starts_ms` are the (non-decreasing) starts of the lines they belong to.
+/// A sentence never goes to an earlier line than the sentence before it (the
+/// search starts at the previous sentence's line); an exact tie goes to the
+/// earlier line. Several sentences on one line are joined with a space. Returns
+/// one EN string per line (empty when no sentence landed there); with no lines
+/// the EN is dropped.
+fn assign_en_sentences(en: &[EnFragment], line_starts_ms: &[u64]) -> Vec<String> {
+    let mut out = vec![String::new(); line_starts_ms.len()];
+    let mut line = 0usize;
+    for (t_ms, sentence) in en_sentences(en) {
+        line = nearest_line_from(line_starts_ms, line, t_ms);
+        if let Some(slot) = out.get_mut(line) {
+            if !slot.is_empty() {
+                slot.push(' ');
+            }
+            slot.push_str(&sentence);
         }
-        cum += wc;
     }
-    selected.join(" ")
+    out
+}
+
+/// The EN fragments grouped into trimmed, non-blank sentences. Fragments are
+/// concatenated as-is (Live Translate fragments carry their own spaces, exactly
+/// like the SK line text); a sentence closes at a fragment ending with
+/// [`ends_sentence`] punctuation or at the last fragment, and is timed by its
+/// first NON-BLANK fragment. A run of blank fragments yields no sentence.
+fn en_sentences(en: &[EnFragment]) -> Vec<(u64, String)> {
+    let mut sentences = Vec::new();
+    let mut text = String::new();
+    let mut start: Option<u64> = None;
+    for (i, f) in en.iter().enumerate() {
+        if start.is_none() && !f.text.trim().is_empty() {
+            start = Some(f.t_ms);
+        }
+        text.push_str(&f.text);
+        if ends_sentence(&f.text) || i + 1 == en.len() {
+            // No non-blank fragment → no start → no sentence.
+            if let Some(t_ms) = start.take() {
+                sentences.push((t_ms, text.trim().to_string()));
+            }
+            text.clear();
+        }
+    }
+    sentences
+}
+
+/// The index `>= from` of the start nearest to `t_ms` (the FIRST one on a tie,
+/// so equal starts resolve to the earliest line); `from` when there is none.
+fn nearest_line_from(starts: &[u64], from: usize, t_ms: u64) -> usize {
+    (from..starts.len())
+        .min_by_key(|&j| starts[j].abs_diff(t_ms))
+        .unwrap_or(from)
 }
 
 #[cfg(test)]
