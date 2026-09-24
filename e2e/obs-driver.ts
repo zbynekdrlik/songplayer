@@ -15,6 +15,9 @@ import {
 export class ObsDriver {
   // Cached once per driver (studio mode does not change mid-suite).
   private studioMode: boolean | null = null;
+  /** #147: the file of the last StopRecord, kept even if the inactive-poll
+   * below times out, so a caller's cleanup can still delete it. */
+  lastRecordingPath: string | null = null;
 
   private constructor(private obs: OBSWebSocket) {}
 
@@ -152,6 +155,7 @@ export class ObsDriver {
   async stopRecord(timeoutMs = 10_000): Promise<string> {
     const r = await this.obs.call("StopRecord");
     const outputPath = (r as { outputPath: string }).outputPath;
+    this.lastRecordingPath = outputPath;
     const deadline = Date.now() + timeoutMs;
     while (await this.isRecording()) {
       if (Date.now() >= deadline) {

@@ -162,6 +162,12 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   const madeRecordings: string[] = [];
   let liveChild: ChildProcess | null = null;
   let fadersToRestore: { vokaly: number; podklad: number } | null = null;
+  // Set first thing in afterAll. Playwright does not cancel a timed-out body,
+  // so the body checks this before starting a recording or skipping a song.
+  let tornDown = false;
+  const assertNotTornDown = (what: string) => {
+    if (tornDown) throw new Error(`A/V gate torn down (test timed out) — not starting ${what}`);
+  };
 
   async function restoreFaders(request: APIRequestContext): Promise<void> {
     if (!fadersToRestore) return;
@@ -203,6 +209,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   });
 
   test.afterAll(async () => {
+    tornDown = true;
     const driver = obs;
     if (!driver) return;
     const errors: string[] = [];
@@ -213,32 +220,42 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         errors.push(`${what}: ${e}`);
       }
     };
-    const ctx = await apiRequest.newContext({ baseURL: SONGPLAYER_URL });
-    await step("kill the analysis", async () => {
-      if (liveChild) killTree(liveChild);
-    });
-    await step("stop our recording", async () => {
-      if (recordingOurs && (await driver.isRecording())) {
-        madeRecordings.push(await driver.stopRecord());
-      }
-      recordingOurs = false;
-    });
-    await step("delete the recordings", async () => {
-      const left: string[] = [];
-      for (const rec of madeRecordings) left.push(...(await removeRecording(rec, autoRemux, 0)));
-      expect(left, "every OBS recording the gate made must be deleted").toEqual([]);
-    });
-    await step("restore the SONG faders", () => restoreFaders(ctx));
-    await step("restore the program scene", async () => {
-      if (!initialScene) return;
-      await driver.switchScene(initialScene);
-      expect(
-        await driver.currentProgramScene(),
-        `the A/V gate must restore the program scene "${initialScene}"`,
-      ).toBe(initialScene);
-    });
-    await ctx.dispose();
-    await driver.disconnect();
+    try {
+      await step("kill the analysis", async () => {
+        if (liveChild) killTree(liveChild);
+      });
+      await step("stop our recording", async () => {
+        if (recordingOurs && (await driver.isRecording())) await driver.stopRecord();
+      });
+      await step("delete the recordings", async () => {
+        // A StopRecord whose inactive-poll timed out still left its path here.
+        const last = driver.lastRecordingPath;
+        if (recordingOurs && last && !madeRecordings.includes(last)) madeRecordings.push(last);
+        recordingOurs = false;
+        const left: string[] = [];
+        for (const rec of madeRecordings) left.push(...(await removeRecording(rec, autoRemux, 0)));
+        expect(left, "every OBS recording the gate made must be deleted").toEqual([]);
+      });
+      await step("restore the SONG faders", async () => {
+        if (!fadersToRestore) return;
+        const ctx = await apiRequest.newContext({ baseURL: SONGPLAYER_URL });
+        try {
+          await restoreFaders(ctx);
+        } finally {
+          await ctx.dispose();
+        }
+      });
+      await step("restore the program scene", async () => {
+        if (!initialScene) return;
+        await driver.switchScene(initialScene);
+        expect(
+          await driver.currentProgramScene(),
+          `the A/V gate must restore the program scene "${initialScene}"`,
+        ).toBe(initialScene);
+      });
+    } finally {
+      await driver.disconnect();
+    }
     expect(errors, "A/V gate cleanup").toEqual([]);
   });
 
@@ -332,12 +349,13 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         const pair = resolveSidecars(fs.readdirSync(cacheDir), video!.youtube_id);
 
         // 4. Record the PROGRAM.
+        assertNotTornDown("a recording");
         await driver.startRecord();
         recordingOurs = true;
         await sleep(RECORD_MS);
         const recording = await driver.stopRecord();
-        recordingOurs = false;
         madeRecordings.push(recording);
+        recordingOurs = false;
         const after = await currentVideo();
         console.log(
           `A/V gate take ${take}: video ${videoId} "${video!.title}" (${video!.youtube_id}) -> ${recording}`,
@@ -377,6 +395,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         }
         if (run !== null) {
           // The picture was unmeasurable but the audio matched: try another song.
+          assertNotTornDown("a song skip");
           const skip = await request.post(`/api/v1/playback/${playlistId}/skip`);
           expect(skip.ok(), `POST /skip for playlist ${playlistId}`).toBe(true);
           await pollUntil(

@@ -345,6 +345,66 @@ def test_near_silence_in_the_original_is_never_loud():
     assert avs.dropout_blocks(rec, orig, SR)["dropout_count"] == 0
 
 
+def test_gap_in_an_audible_quieter_passage_is_caught():
+    """Review finding (#147): the old min(p20, 0.5 x median) gate skipped an
+    audible passage 12 dB under the take's level. A lost buffer there must
+    still fail (the -45 dBFS floor and -20 dB relative bound keep it loud)."""
+    rng = np.random.default_rng(15)
+    orig = rng.standard_normal(SR * 6) * 0.2
+    orig[SR * 3 : SR * 3 + SR // 2] *= 0.25  # -12 dB, clearly audible
+    for gap_ms in (20, 50):
+        rec = orig * 0.8
+        i = SR * 3 + 1000
+        rec[i : i + int(gap_ms * SR / 1000)] = 0.0
+        assert avs.dropout_blocks(rec, orig, SR)["dropout_count"] == 1, gap_ms
+
+
+def test_hard_onsets_with_a_one_sample_slip_are_not_dropouts():
+    """A window that merely clips a hard onset must not be judged against a
+    recording one sample late: the original has to be loud THROUGHOUT."""
+    rng = np.random.default_rng(16)
+    orig = np.zeros(SR * 6)
+    t = 0
+    while t < len(orig) - SR // 4:
+        n = int(rng.integers(SR // 20, SR // 5))
+        orig[t : t + n] = rng.standard_normal(n) * 0.3  # hard-edged burst
+        t += n + int(rng.integers(SR // 20, SR // 5))  # digital silence between
+    rec = 0.8 * np.concatenate(([0.0], orig[:-1]))  # one sample late
+    assert avs.dropout_blocks(rec, orig, SR)["dropout_count"] == 0
+
+
+@pytest.mark.parametrize(("apart_ms", "events"), [(40, 1), (60, 2)])
+def test_dropout_runs_closer_than_one_block_merge(apart_ms, events):
+    rng = np.random.default_rng(17)
+    orig = rng.standard_normal(SR * 4) * 0.2
+    rec = orig * 0.8
+    g = int(0.02 * SR)
+    i = 2 * SR
+    j = i + g + int(apart_ms * SR / 1000)
+    rec[i : i + g] = 0.0
+    rec[j : j + g] = 0.0
+    assert avs.dropout_blocks(rec, orig, SR)["dropout_count"] == events
+
+
+def test_a_block_holding_a_dropout_is_not_also_a_glitch():
+    rng = np.random.default_rng(18)
+    orig = rng.standard_normal(SR * 4) * 0.2
+    rec = orig * 0.8
+    i = 2 * SR + 20  # inside one 50 ms block
+    rec[i : i + int(0.03 * SR)] = 0.0
+    out = avs.dropout_blocks(rec, orig, SR)
+    assert out["dropout_count"] == 1
+    assert out["glitch_blocks"] == 0
+
+
+def test_a_video_analysis_error_still_fails_found_dropouts():
+    """measure() turns a picture-step exception into NaN match/contrast/A/V."""
+    nan = float("nan")
+    assert avs.verdict(0.99, nan, nan, nan, 2)[0] == "fail"
+    status, _, sides = avs.verdict(0.99, nan, nan, nan, 0)
+    assert (status, sides) == ("cannot_measure", ["video"])
+
+
 def test_clean_recording_has_no_dropouts_or_glitches():
     rng = np.random.default_rng(8)
     orig = rng.standard_normal(SR * 8) * np.repeat(rng.uniform(0.05, 1.0, 80), SR // 10)
@@ -397,7 +457,8 @@ def test_audio_side_cannot_measure_wins_over_everything():
     status, reasons, sides = avs.verdict(0.5, 0.99, 0.01, 300.0, 2)
     assert status == "cannot_measure"
     assert sides == ["audio"]
-    assert len(reasons) == 1
+    # The dropouts are still reported, but they are not a verdict on their own.
+    assert reasons == ["audio correlation 0.500 < 0.9", "2 audio dropout(s)"]
 
 
 def test_dropouts_fail_even_when_the_picture_is_unmeasurable():

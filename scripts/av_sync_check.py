@@ -47,7 +47,7 @@ Method (automates the manual 24.9.2026 measurement, A/V +13 ms, 0 dropouts):
   < 15 % of the level-matched original's while the original is loud. Any gap
   of >= 11 ms is caught, whatever its phase. The manual method used 50 ms
   blocks, but a grid-aligned block misses a lost 10-50 ms NDI audio buffer.
-  "Loud" means above ``max(min(20th percentile, 0.5 x median), -45 dBFS)``.
+  "Loud" means above ``max(0.1 x median window RMS, -45 dBFS)`` in every 2 ms.
   A loud 50 ms block whose relative error exceeds 0.8 is reported as a
   GLITCH. Glitches are informational and do not fail the gate.
 
@@ -100,9 +100,9 @@ DROPOUT_WINDOW_MS = 10
 DROPOUT_HOP_MS = 1
 EDGE_GUARD_MS = 100
 DROPOUT_RATIO = 0.15
-LOUD_PERCENTILE = 20
-LOUD_MEDIAN_FRACTION = 0.5
+LOUD_REL_MEDIAN = 0.1  # -20 dB below the take's median window RMS
 LOUD_ABS_FLOOR = 10 ** (-45 / 20)  # -45 dBFS; the sidecars are -14 LUFS
+LOUD_SUB_MS = 2  # the original must be loud in every 2 ms of a window
 GLITCH_REL_ERR = 0.8
 DEFAULT_MAX_AV_MS = 40.0
 MAX_REPORTED_TIMES = 20
@@ -342,27 +342,29 @@ def _windowed_rms(x: np.ndarray, starts: np.ndarray, win: int) -> np.ndarray:
     return np.sqrt(np.maximum(csum[starts + win] - csum[starts], 0.0) / win)
 
 
-def _loud(orig_rms: np.ndarray, inner: np.ndarray) -> np.ndarray:
+def _loud(
+    orig_rms: np.ndarray, inner: np.ndarray, floor_rms: np.ndarray | None = None
+) -> np.ndarray:
     """Windows where the ORIGINAL is loud, among the ``inner`` (unguarded) ones.
 
-    The threshold is ``max(min(p20, 0.5 x median), -45 dBFS)`` over the inner
-    windows:
-    * The percentile alone drops a fixed 20 % of windows even in a dense mix,
-      where the quietest 10 ms are barely quieter than the rest. A gap landing
-      there would be missed one time in five, so the median bound lowers it.
-    * The absolute floor (the sidecars are normalized to -14 LUFS) keeps
-      near-silence out: rests, fades, and anything an encoder may round to
-      zero. A quiet but clearly audible passage IS classified, and losing it on
-      the output is a dropout.
+    Threshold = ``max(0.1 x median window RMS, -45 dBFS)`` over the inner
+    windows: everything within 20 dB of the take's typical level and above
+    near-silence.
+    * A percentile gate would drop a fixed share of windows. In a dense mix
+      that share is barely quieter than the rest, and in dynamic material it
+      is clearly audible, and a lost buffer there must still fail.
+    * The absolute floor (the sidecars are -14 LUFS) keeps rests, fades, and
+      anything an encoder may round to zero out.
+    ``floor_rms`` (optional, per window) is compared instead of ``orig_rms``.
+    Pass the minimum short sub-window RMS, so a window is loud only when the
+    original is loud THROUGHOUT it. A window that merely clips the edge of a
+    hard onset is never judged against a recording that is one sample late.
     """
     if not inner.any():
         return inner
-    ref = orig_rms[inner]
-    rel = min(
-        float(np.percentile(ref, LOUD_PERCENTILE)),
-        LOUD_MEDIAN_FRACTION * float(np.median(ref)),
-    )
-    return inner & (orig_rms > max(rel, LOUD_ABS_FLOOR))
+    threshold = max(LOUD_REL_MEDIAN * float(np.median(orig_rms[inner])), LOUD_ABS_FLOOR)
+    level = orig_rms if floor_rms is None else floor_rms
+    return inner & (level > threshold)
 
 
 def dropout_blocks(
@@ -417,7 +419,15 @@ def dropout_blocks(
     starts = np.arange(0, n - win + 1, hop)
     w_orig = _windowed_rms(orig, starts, win)
     w_rec = _windowed_rms(rec, starts, win)
-    w_loud = _loud(w_orig, (starts >= guard) & (starts + win <= n - guard))
+    sub = max(1, int(sr * LOUD_SUB_MS / 1000))
+    sub_rms = _windowed_rms(orig, np.arange(0, n - sub + 1, hop), sub)
+    per_win = (win - sub) // hop + 1  # sub-windows starting inside each window
+    min_sub = np.lib.stride_tricks.sliding_window_view(sub_rms, per_win).min(axis=1)
+    if len(min_sub) < len(starts):
+        raise ValueError("dropouts: hop must divide the window and sub-window lengths")
+    w_loud = _loud(
+        w_orig, (starts >= guard) & (starts + win <= n - guard), min_sub[: len(starts)]
+    )
     ratio = w_rec[w_loud] / w_orig[w_loud]
     level = max(abs(gain), float(np.median(ratio)) if len(ratio) else 0.0)
     w_drop = w_loud & (w_rec < DROPOUT_RATIO * level * w_orig)
@@ -512,7 +522,9 @@ def verdict(
     drop_fail = [f"{dropouts} audio dropout(s)"] if dropouts > 0 else []
     if audio_bad:
         sides = ["audio"] + (["video"] if video_bad else [])
-        return "cannot_measure", audio_bad + video_bad, sides
+        # Dropouts are reported too (heavy ones lower the correlation), but an
+        # unaligned recording's dropout count is not a verdict on its own.
+        return "cannot_measure", audio_bad + video_bad + drop_fail, sides
     if drop_fail:
         return "fail", drop_fail + video_bad, []
     if video_bad:
@@ -623,30 +635,23 @@ def decode_video(
     return frames, pts
 
 
-def measure(
-    recording: str,
-    orig_audio: str,
-    orig_video: str,
-    ffmpeg: str = "ffmpeg",
-    max_av_ms: float = DEFAULT_MAX_AV_MS,
+def _measure_video(
+    ffmpeg: str, recording: str, orig_video: str, center_s: float
 ) -> dict:
-    rec_a, rec_a_t0 = decode_audio(ffmpeg, recording)
-    orig_a, orig_a_t0 = decode_audio(ffmpeg, orig_audio)
-    aud = audio_offset(rec_a, orig_a, SR, rec_a_t0, orig_a_t0)
-    aligned = orig_a[aud["lag"] : aud["lag"] + len(rec_a)]
-    drops = dropout_blocks(rec_a, aligned, SR, BLOCK_MS, rec_a_t0)
-
+    """Decode both pictures around ``center_s`` (the audio offset) and align them."""
     canvas_w, canvas_h = probe_video_size(ffmpeg, recording)
     grid_h = max(1, round(GRID_W * canvas_h / canvas_w))
     src_w, src_h = probe_video_size(ffmpeg, orig_video)
     y0, y1, x0, x1 = content_box(canvas_w, canvas_h, src_w, src_h, GRID_W, grid_h)
-    crop = source_crop(canvas_w, canvas_h, src_w, src_h, GRID_W, grid_h)
+    crop: tuple[float, float, float, float] | None = source_crop(
+        canvas_w, canvas_h, src_w, src_h, GRID_W, grid_h
+    )
     if [round(v) for v in crop] == [0, 0, src_w, src_h]:
         crop = None  # the whole source is kept: no crop filter
     rec_f, rec_pts = decode_video(ffmpeg, recording, GRID_W, grid_h)
     rec_f = rec_f[:, y0:y1, x0:x1]
     span = float(rec_pts.max() - rec_pts.min())
-    start = max(0.0, aud["offset_s"] + float(rec_pts.min()) - VIDEO_WINDOW_S - 0.5)
+    start = max(0.0, center_s + float(rec_pts.min()) - VIDEO_WINDOW_S - 0.5)
     orig_f, orig_pts = decode_video(
         ffmpeg,
         orig_video,
@@ -656,22 +661,68 @@ def measure(
         duration=span + 2 * VIDEO_WINDOW_S + 1.0,
         crop=crop,
     )
-    vid = video_offset(rec_f, rec_pts, orig_f, orig_pts, center_s=aud["offset_s"])
+    vid = video_offset(rec_f, rec_pts, orig_f, orig_pts, center_s=center_s)
+    return {
+        "offset_s": round(vid["offset_s"], 4),
+        "match": round(vid["match"], 4),
+        "min_match": MIN_VIDEO_MATCH,
+        "contrast": round(vid["contrast"], 4),
+        "min_contrast": MIN_VIDEO_CONTRAST,
+        "plateau_ms": round(vid["plateau_ms"], 1),
+        "frames": vid["frames"],
+        "canvas": [canvas_w, canvas_h],
+        "source": [src_w, src_h],
+        "content_box_y0_y1_x0_x1": [y0, y1, x0, x1],
+        "source_crop_x_y_w_h": None if crop is None else [round(v, 1) for v in crop],
+        "_offset_exact": vid["offset_s"],
+        "_match_exact": vid["match"],
+        "_contrast_exact": vid["contrast"],
+    }
 
-    av_ms = (aud["offset_s"] - vid["offset_s"]) * 1000.0
+
+def measure(
+    recording: str,
+    orig_audio: str,
+    orig_video: str,
+    ffmpeg: str = "ffmpeg",
+    max_av_ms: float = DEFAULT_MAX_AV_MS,
+) -> dict:
+    """Full analysis of one recording. An AUDIO-step error propagates (the
+    caller reports cannot_measure). A PICTURE-step error becomes a video-side
+    cannot-measure, so dropouts already found still fail the run."""
+    rec_a, rec_a_t0 = decode_audio(ffmpeg, recording)
+    orig_a, orig_a_t0 = decode_audio(ffmpeg, orig_audio)
+    aud = audio_offset(rec_a, orig_a, SR, rec_a_t0, orig_a_t0)
+    aligned = orig_a[aud["lag"] : aud["lag"] + len(rec_a)]
+    drops = dropout_blocks(rec_a, aligned, SR, BLOCK_MS, rec_a_t0)
+
+    video_error = None
+    try:
+        video = _measure_video(ffmpeg, recording, orig_video, aud["offset_s"])
+        match, contrast = video.pop("_match_exact"), video.pop("_contrast_exact")
+        av_ms: float | None = (aud["offset_s"] - video.pop("_offset_exact")) * 1000.0
+    except Exception as exc:  # noqa: BLE001 - reported loudly as a video-side cannot_measure
+        traceback.print_exc(file=sys.stderr)
+        video_error = f"video analysis error: {type(exc).__name__}: {exc}"
+        video = {"error": video_error}
+        match = contrast = float("nan")
+        av_ms = None
+
     status, reasons, sides = verdict(
         aud["corr"],
-        vid["match"],
-        vid["contrast"],
-        av_ms,
+        match,
+        contrast,
+        float("nan") if av_ms is None else av_ms,
         drops["dropout_count"],
         max_av_ms,
     )
+    if video_error:
+        reasons.append(video_error)
     return {
         "status": status,
         "reasons": reasons,
         "unmeasurable_sides": sides,
-        "av_ms": round(av_ms, 1),
+        "av_ms": None if av_ms is None else round(av_ms, 1),
         "max_av_ms": max_av_ms,
         "recording_s": round(len(rec_a) / SR, 2),
         "audio": {
@@ -684,21 +735,7 @@ def measure(
             "rec_t0_s": rec_a_t0,
             "orig_t0_s": orig_a_t0,
         },
-        "video": {
-            "offset_s": round(vid["offset_s"], 4),
-            "match": round(vid["match"], 4),
-            "min_match": MIN_VIDEO_MATCH,
-            "contrast": round(vid["contrast"], 4),
-            "min_contrast": MIN_VIDEO_CONTRAST,
-            "plateau_ms": round(vid["plateau_ms"], 1),
-            "frames": vid["frames"],
-            "canvas": [canvas_w, canvas_h],
-            "source": [src_w, src_h],
-            "content_box_y0_y1_x0_x1": [y0, y1, x0, x1],
-            "source_crop_x_y_w_h": None
-            if crop is None
-            else [round(v, 1) for v in crop],
-        },
+        "video": video,
         "dropouts": drops,
         "inputs": {
             "recording": recording,
@@ -746,6 +783,7 @@ def main(argv: list[str] | None = None) -> int:
         result = {
             "status": "cannot_measure",
             "reasons": [f"analysis error: {type(exc).__name__}: {exc}"],
+            "unmeasurable_sides": ["error"],
             "inputs": {
                 "recording": args.recording,
                 "orig_audio": args.orig_audio,

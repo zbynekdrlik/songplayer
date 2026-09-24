@@ -373,6 +373,10 @@ and the recording actually get.
     `removeRecording` waits for the remux and retries while OBS still holds
     the file. An undeletable file fails the test after the verdict, never
     masking it.
+  - `afterAll` first sets `tornDown`: Playwright does not cancel a
+    timed-out body, so the body refuses to start a recording or a skip after
+    it. `ObsDriver.lastRecordingPath` keeps the file of a StopRecord whose
+    inactive-poll timed out, so that file is deleted too.
   - `afterAll` is the safety net for a timed-out body. It kills a
     still-running analysis (a Windows `taskkill /T`: python AND its ffmpeg
     children hold the file open), stops our recording (only while
@@ -417,12 +421,17 @@ and the recording actually get.
     - `level` = `max(|LS gain|, median rec/orig RMS ratio over loud
       windows)`. The RMS ratio is immune to a sub-sample lag, which shrinks
       the phase-coherent LS gain and would blind the detector.
-    - "Loud" = above `max(min(p20, 0.5 × median), −45 dBFS)`.
-      - The percentile alone drops a fixed 20 % even in a dense mix.
-      - The absolute floor (the sidecars are −14 LUFS) keeps near-silence
-        out, e.g. rests, fades, and what an encoder rounds to zero.
-      - A quiet but audible passage IS classified. Losing it on the output
-        is a dropout, even if an OBS gate did it.
+    - "Loud" = above `max(0.1 × median window RMS, −45 dBFS)`: within 20 dB
+      of the take's level and above near-silence.
+      - The window counts only if the original is that loud in EVERY 2 ms of
+        it (a minimum sub-window RMS). A window that clips the edge of a hard
+        onset is never judged against a recording one sample late (review:
+        66 false events without this).
+      - No percentile term: `min(p20, …)` skipped an audible passage 12 dB
+        under the take's level (review finding). A lost buffer there must
+        still fail, even if an OBS gate caused it.
+      - The absolute floor (the sidecars are −14 LUFS) keeps rests, fades
+        and what an encoder rounds to zero out.
     - Glitch statistics (relative error > 0.8) stay on 50 ms blocks, and
       blocks holding a dropout are excluded.
     - The first/last 100 ms are not classified. Older ffmpeg (6.1) decodes
@@ -436,7 +445,11 @@ and the recording actually get.
     2. Any dropout → `fail`, even when the picture is unmeasurable. A still
        or overlaid picture must never turn a lost buffer into a retake.
     3. Picture unmeasurable → `cannot_measure` (sides `["video"]`); A/V is
-       not judged.
+       not judged. An EXCEPTION in the picture step (probe, decode,
+       no-shift) lands here too, as a `video analysis error` reason with
+       `av_ms: null`, so dropouts already found still decide step 2. An
+       audio-step exception is `cannot_measure` with sides `["error"]`,
+       which is never retaken.
     4. |A/V| > 40 → `fail`, else `pass`.
   - **letterbox crop:** the original is cropped (`source_crop`) to exactly
     the grid cells the recording keeps before scaling. A letterbox edge
