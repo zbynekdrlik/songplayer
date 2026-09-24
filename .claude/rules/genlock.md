@@ -71,11 +71,10 @@ paths:
   `late_frames` stayed 27.6 % with `iter_p99 81 ms` while `prep_p99` is 0.4 ms —
   the bottleneck MOVED from the decode to the **NDI SUBMIT** (`send_video_async` +
   audio still on the emit thread, stalling under the child's memory-bandwidth /
-  page-fault pressure). [Box-test-5 record, SUPERSEDED: pacing is ON in production
-  permanently per the owner ruling, #147 comment 5812898277.] Then: `genlock_pacing` stayed off until the
-  submit is also moved off the boundary-critical path (a dedicated NDI-submit
-  thread) or the stems child's D3D/NDI-path impact is bounded. `iter_p99` ≫
-  `prep_p99` is the signature of submit-side (not decode-side) lateness.
+  page-fault pressure). That led to the dedicated submit thread (#168, next
+  bullet). Pacing is ON in production permanently (owner ruling, #147 comment
+  5812898277). `iter_p99` ≫ `prep_p99` is the signature of submit-side (not
+  decode-side) lateness.
 - Submit-thread output split (#168, 0.54.0-dev.1): the symmetric twin of the
   #147 decode split, moving the NDI submit OFF the emit thread. Diagnosis
   (box-test-5 log, `paced: song summary`): `iter_p50_us` 25–31 ms MEDIAN with
@@ -136,9 +135,10 @@ paths:
   `recording-verdict` proves contiguity for SP-originated frames.
 - Dashboard genlock indicator (#150→#164→#176): the header `GlobalLockBadge`
   (`sp-ui/src/components/ndi_health.rs`) is **ALWAYS visible** — grey
-  `● GENLOCK OFF` when NO output has pacing enabled (the production default
-  `genlock_pacing=false`), else `● LOCKED`/`● DEGRADED`/`● UNLOCKED` (green/amber/
-  red, `n/m` live-locked count + worst reason). #176 revised #164's "hide the
+  `● GENLOCK OFF` when NO output has pacing enabled (the CODE default
+  `genlock_pacing=false`; production runs pacing ON per the #147 ruling), else
+  `● LOCKED`/`● DEGRADED`/`● UNLOCKED` (green/amber/red, `n/m` live-locked
+  count + worst reason). #176 revised #164's "hide the
   badge entirely while pacing is off" — the owner must always be able to tell at
   a glance whether SongPlayer is genlocked, like the fleet OBS badge. The
   whole-box state is decided by the ONE pure, unit-tested

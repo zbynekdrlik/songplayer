@@ -403,24 +403,25 @@ pub(crate) async fn resolve_containment(pool: &sqlx::SqlitePool) -> Containment 
         .ok()
         .flatten();
     // #207: the operator purge-delay knob, read the same way. A present but
-    // out-of-range value collapses to -1 (never decommit); WARN once so the
-    // operator sees the setting was ignored (the pure parse fn stays silent).
+    // out-of-range value collapses to -1 (never decommit); WARN (each tick while
+    // invalid) so the operator sees the setting was ignored (the pure parse fn
+    // stays silent).
     let purge = crate::db::models::get_setting(pool, "heavy_purge_delay_ms")
         .await
         .ok()
         .flatten();
     // #207 phase-3: the operator alloc-mode knob (retained | lazy), read the
-    // same way. An unrecognised non-empty value collapses to retained; WARN once
-    // so the operator sees the setting was ignored (the pure parse fn stays
-    // silent).
+    // same way. An unrecognised non-empty value collapses to retained; WARN
+    // (each tick) so the operator sees the setting was ignored (the pure parse
+    // fn stays silent).
     let alloc = crate::db::models::get_setting(pool, "heavy_alloc_mode")
         .await
         .ok()
         .flatten();
     // #207 round-3c: the operator reserve-size knob (GiB), read the same way.
-    // A present but out-of-range value collapses to the default 4; WARN once
-    // so the operator sees the setting was ignored (the pure parse fn stays
-    // silent).
+    // A present but out-of-range value collapses to the default 4; WARN (each
+    // tick) so the operator sees the setting was ignored (the pure parse fn
+    // stays silent).
     let reserve = crate::db::models::get_setting(pool, "heavy_alloc_reserve_gib")
         .await
         .ok()
@@ -575,6 +576,14 @@ pub(crate) fn assign_child_job(child: &tokio::process::Child) -> ChildJobGuard {
         ),
         None => None,
     };
+    // #147 round 9: every Job Object failure path returns None — say so once,
+    // loudly, so an UNcontained child (no memory ceiling / kill-on-close /
+    // affinity / CPU or working-set cap) is visible in the log.
+    if handle.is_none() {
+        tracing::warn!(
+            "heavy child NOT contained (pid {pid:?}): Job Object setup failed — no memory ceiling, kill-on-close, affinity or caps"
+        );
+    }
     // #168: start logging this child's page-fault rate (`heavy child faults/s`),
     // aborted by the guard's Drop when the child exits.
     let sampler = pid.map(crate::lyrics::heavy_faults::spawn_fault_sampler);
@@ -661,6 +670,7 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
             // #147 round 9: a rejected working-set cap must never cost the
             // #162 memory ceiling + kill-on-close — retry once WITHOUT it.
             if applied.max_working_set_mb == 0 {
+                tracing::warn!("heavy child job limits rejected (pid {pid}, err {err})");
                 CloseHandle(job);
                 return None;
             }
