@@ -3,9 +3,10 @@
 //!
 //! Mirrors `crate::stems::separator::separate_stems`: spawn the Python child at
 //! BELOW_NORMAL priority under the process-global heavy slot + a Windows Job
-//! Object, bound by the #171 stall-timeout (the child heartbeats and writes its
-//! `events.jsonl` into `work_dir`, so a slow-but-progressing real-time stream is
-//! never killed). The child streams the video's audio (the vocals stem when it
+//! Object, bound by the #171 stall-timeout (the child heartbeats and grows
+//! `live_output.raw` in `work_dir`, so a slow-but-progressing real-time stream is
+//! never killed; since #184 H4 the session event log lives next to the dub as
+//! `<base>_dub_events.jsonl`). The child streams the video's audio (the vocals stem when it
 //! exists, else the original) into ONE continuous Gemini Live Translate session
 //! and writes the Slovak dub on the video timeline.
 //!
@@ -148,7 +149,7 @@ pub async fn run_live_translate(
         .stderr
         .take()
         .map(crate::lyrics::child_output::drain_pipe);
-    // #171 stall-bounded wait: the child heartbeats + appends events.jsonl in
+    // #171 stall-bounded wait: the child heartbeats + grows live_output.raw in
     // work_dir, so a healthy real-time stream keeps the mtime fresh; a hung child
     // dies (a re-run starts the session from the beginning).
     let status = crate::lyrics::heavy_plan::wait_with_stall_timeout(
