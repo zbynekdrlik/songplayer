@@ -127,12 +127,23 @@ def _stitch_segments(segments, step_samples, overlap_samples):
 # block, holding only the crossfade tail of the previous segment.
 
 
+# A header frame count at or above this is libsndfile's "unknown length"
+# sentinel (e.g. a FLAC from a piped encoder has STREAMINFO total samples = 0).
+_UNKNOWN_FRAMES = 1 << 62
+
+
 def _audio_info(path):
     """(sample_rate, frames) of an audio file, from its header — no samples
-    are read."""
+    are read. The segment plan trusts this count, so an unknown or empty one
+    raises a clear ValueError instead of planning a bogus number of windows."""
     import soundfile as sf
 
     info = sf.info(path)
+    if info.samplerate <= 0 or info.frames <= 0 or info.frames >= _UNKNOWN_FRAMES:
+        raise ValueError(
+            f"unusable header in {path}: frame count {info.frames} "
+            f"at {info.samplerate} Hz (unknown or empty length)"
+        )
     return info.samplerate, info.frames
 
 
@@ -196,8 +207,9 @@ class _StreamingStitchWriter:
                 f"invalid stitch geometry: step={step_samples} overlap={overlap_samples}"
             )
         if overlap_samples > step_samples:
-            # A segment would then overlap more than its next neighbour; the
-            # "everything before the next start is final" rule needs this.
+            # Deliberate scope limit, not a correctness requirement: the
+            # production geometry is overlap << step (2 s vs 28 s), and the
+            # tests only cover a sample shared by at most two segments.
             raise ValueError(
                 f"overlap ({overlap_samples}) must not exceed step ({step_samples})"
             )
@@ -333,8 +345,12 @@ class _StreamingStitchWriter:
         try:
             self._file.close()
             os.replace(self.tmp_path, self.out_path)
-        finally:
-            self._remove_tmp()
+        except BaseException:
+            # A failed final flush/close (disk full) or replace: retry the
+            # close so the handle is released (Windows keeps an open file
+            # undeletable), then drop the .tmp. Nothing is published.
+            self.abort()
+            raise
 
     def abort(self):
         """Discard the partial `.tmp`; the final path is never touched."""
