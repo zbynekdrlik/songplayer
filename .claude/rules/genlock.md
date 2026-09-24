@@ -704,12 +704,20 @@ first capped job, and logs
   UAC token, which does not hold `SeIncreaseBasePriorityPrivilege`. The box
   logged `heavy child job privilege: SeIncreaseBasePriorityPrivilege=failed(err=1300)`,
   and the child's working-set cap was rejected with 1314 (issue #147 comment
-  5815246953). The full token also carries the round-9
-  `SeIncreaseWorkingSetPrivilege`.
+  5815246953). The round-9 `SeIncreaseWorkingSetPrivilege` is in both
+  tokens; only `SeIncreaseBasePriorityPrivilege` needs Highest.
+- **Side effects, accepted.** SongPlayer and its children (CLIProxyAPI,
+  yt-dlp, ffmpeg, the heavy python workers) now run at high integrity, and so
+  does the port-8920 server. Windows (UIPI) blocks input from medium-integrity
+  processes into the Tauri window, e.g. drag-and-drop from Explorer.
+  WebView2 runs elevated. If it failed to start, the deploy's health check
+  would catch it.
 - **Where.** The task is re-registered on EVERY deploy, so the RunLevel lives
   only in `ci.yml`. `scripts/setup-runner.ps1` registers only the runner's own
   task (already Highest).
 - **Box acceptance after the deploy:**
-  - the startup line reads `SeIncreaseBasePriorityPrivilege=ok`;
+  - the `heavy child job privilege:` line reads
+    `SeIncreaseBasePriorityPrivilege=ok`. It is logged once, at the first capped
+    heavy-child job, not at startup (`heavy_slot::job_working_set_privilege`);
   - the `heavy child contained` line reads `max_ws_mb=4096`;
   - no `working-set cap … rejected` WARN appears.

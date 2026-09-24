@@ -19,7 +19,7 @@
 //! threads, without the NDI SDK.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 /// One handle's state behind its own lock. `None` once the handle is removed.
 type Slot<T> = Arc<Mutex<Option<T>>>;
@@ -68,7 +68,9 @@ impl<T> HandleTable<T> {
         // The map's write lock is released at the end of this statement, so
         // waiting for the in-flight op below never blocks the other handles.
         let slot = self.map.write().expect(POISONED).remove(&id)?;
-        let mut guard = slot.lock().expect(POISONED);
+        // A panicked op poisoned this handle only. Tear it down anyway, so the
+        // SDK sender is still destroyed rather than leaked.
+        let mut guard = slot.lock().unwrap_or_else(PoisonError::into_inner);
         let state = guard.take()?;
         let out = teardown(state);
         drop(guard);
@@ -255,6 +257,24 @@ mod tests {
         let mut ran = false;
         assert_eq!(run_live(&late, |_| ran = true), None);
         assert!(!ran, "a late op reached the destroyed state");
+    }
+
+    #[test]
+    fn remove_still_tears_down_a_handle_an_op_panicked_on() {
+        let table = Arc::new(HandleTable::new());
+        table.insert(1, vec!["live"]);
+        let t = Arc::clone(&table);
+        let op = thread::spawn(move || {
+            t.with(1, |log| {
+                if log.len() == 1 {
+                    panic!("an op panicked while holding the handle's lock");
+                }
+            })
+        });
+        assert!(op.join().is_err(), "the op must have panicked");
+
+        assert_eq!(table.remove_with(1, |log| log), Some(vec!["live"]));
+        assert_eq!(table.with(1, |_| ()), None);
     }
 
     #[test]

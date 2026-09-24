@@ -946,9 +946,8 @@ jobs:
           # (#147 r10) for the heavy child's Job Object working-set cap; with the
           # filtered token it failed (box: err=1300), and the cap was rejected
           # (SetInformationJobObject err 1314). Highest runs SongPlayer with the
-          # full token, so both #147 residency privileges can be enabled:
-          # SeIncreaseWorkingSetPrivilege (r9 hard minimum working set) and
-          # SeIncreaseBasePriorityPrivilege (r10 job working-set cap).
+          # full token, which holds it. (The r9 SeIncreaseWorkingSetPrivilege is
+          # in both tokens; only SeIncreaseBasePriorityPrivilege needs Highest.)
           $principal = New-ScheduledTaskPrincipal -UserId "Resolume" -LogonType Interactive -RunLevel Highest
           # -Priority 4 (normal): the default 7 runs SongPlayer AND every child it
           # spawns at low I/O + memory priority (2026-09-15 measurement) — wrong for
