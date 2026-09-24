@@ -108,3 +108,47 @@ fn pending_reads_the_open_window_without_closing_it() {
     // pending() does not consume: the closed window still carries the samples.
     assert_eq!(p.poll(t0 + ms(1000)).unwrap().samples, 4);
 }
+
+#[test]
+fn an_idle_overdue_window_restarts_at_the_first_block() {
+    // Nothing measured for 5 s (the tap had no viewer): the first block re-opens
+    // the window, so the next line covers 1 s of measurement, not the 5 s gap.
+    let t0 = Instant::now();
+    let mut p = LevelProbe::new(t0);
+    p.restart_if_idle(t0 + ms(5000));
+    p.add(&[1.0, -1.0]);
+    assert_eq!(p.poll(t0 + ms(5999)), None);
+    let r = p.poll(t0 + ms(6000)).expect("due 1 s after the restart");
+    assert_eq!((r.window_ms, r.samples, r.blocks), (1000, 2, 1));
+}
+
+#[test]
+fn an_idle_window_restarts_at_exactly_one_second() {
+    let t0 = Instant::now();
+    let mut p = LevelProbe::new(t0);
+    p.restart_if_idle(t0 + PROBE_INTERVAL);
+    assert_eq!(p.poll(t0 + ms(1999)), None);
+    assert_eq!(p.poll(t0 + ms(2000)).unwrap().window_ms, 1000);
+}
+
+#[test]
+fn an_idle_window_that_is_not_yet_due_is_kept() {
+    let t0 = Instant::now();
+    let mut p = LevelProbe::new(t0);
+    p.restart_if_idle(t0 + ms(500));
+    p.add(&[1.0, -1.0]);
+    assert_eq!(p.poll(t0 + ms(1000)).unwrap().window_ms, 1000);
+}
+
+#[test]
+fn a_window_with_data_is_never_restarted() {
+    // Overdue but NOT idle: the data already in the window must be reported.
+    let t0 = Instant::now();
+    let mut p = LevelProbe::new(t0);
+    p.add(&[1.0, -1.0]);
+    p.restart_if_idle(t0 + ms(1200));
+    let r = p
+        .poll(t0 + ms(1200))
+        .expect("the overdue window with data closes");
+    assert_eq!((r.window_ms, r.samples), (1200, 2));
+}

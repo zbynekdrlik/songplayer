@@ -35,6 +35,19 @@ fn shared_probe_closes_a_window_after_one_second_with_the_drops() {
 }
 
 #[test]
+fn shared_probe_first_block_after_an_idle_gap_opens_a_fresh_window() {
+    // The tap is built at t0 but nobody watches until 5 s later: the first
+    // measured block starts the window, it is not reported as a 5 s window.
+    let t0 = Instant::now();
+    let p = SharedLevelProbe::new(t0);
+    assert_eq!(p.record(&[0.5, -0.5], t0 + ms(5000)), None);
+    let r = p
+        .record(&[0.5, -0.5], t0 + ms(6000))
+        .expect("due 1 s after the first watched block");
+    assert_eq!((r.window_ms, r.samples, r.blocks), (1000, 4, 2));
+}
+
+#[test]
 fn stereo_samples_ms_converts_48k_interleaved_stereo() {
     assert_eq!(stereo_samples_ms(96_000), 1000);
     assert_eq!(stereo_samples_ms(96), 1);

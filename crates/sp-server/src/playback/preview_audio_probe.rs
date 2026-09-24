@@ -38,9 +38,12 @@ impl SharedLevelProbe {
     }
 
     /// Accumulate one block and return the closed window's reading when one is
-    /// due at `now` (one line per second — the caller logs it).
+    /// due at `now` (one line per second — the caller logs it). The first block
+    /// after an idle gap (no viewer) re-opens the window, so `window_ms` never
+    /// spans the unwatched time.
     pub fn record(&self, samples: &[f32], now: Instant) -> Option<LevelReading> {
         let mut p = self.inner.try_lock().ok()?;
+        p.restart_if_idle(now);
         p.add(samples);
         p.poll(now)
     }

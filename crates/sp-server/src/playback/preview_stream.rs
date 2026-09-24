@@ -405,7 +405,7 @@ impl StreamShared {
                 arrival: now,
                 samples: block,
             });
-            if sent.is_err() {
+            if let Err(TrySendError::Full(_)) = sent {
                 self.tap_level.note_dropped();
             }
             if let Some(r) = level {

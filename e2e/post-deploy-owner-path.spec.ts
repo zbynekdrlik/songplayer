@@ -371,6 +371,12 @@ test("the owner's path: Prehľad → Dabing → play → Živý náhľad → rea
         { timeout: 5000, message: `dragging ${id} to the bottom must PATCH ${key}=0` },
       )
       .toBe(true);
+    // The PATCH must target the memory the server check reads — a wrong kind is
+    // its own failure, never reported as "never reached the server".
+    const zeroPatch = patches.slice(patchesBefore).find((p) => p.body[key] === 0);
+    expect(String(zeroPatch?.body.kind ?? ""), `${id} PATCHes the ${MIX_KIND} memory`).toBe(
+      MIX_KIND,
+    );
     await expectServerFader(request, key, "zero", `dragging ${id} to the bottom`);
   }
   const zeroPatches = patches.slice(patchesBefore);

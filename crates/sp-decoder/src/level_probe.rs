@@ -82,6 +82,17 @@ impl LevelProbe {
         (self.window.rms_dbfs(), self.window.samples())
     }
 
+    /// Restart an IDLE window: if no block was added and the window is already
+    /// overdue at `now`, re-open it at `now`. A seam that only measures while it
+    /// is used (the preview tap, only while watched) calls this before
+    /// [`LevelProbe::add`], so the first line after an idle gap covers the
+    /// second it measured instead of the whole gap (`window_ms` stays honest).
+    pub fn restart_if_idle(&mut self, now: Instant) {
+        if self.blocks == 0 && now.saturating_duration_since(self.window_start) >= PROBE_INTERVAL {
+            self.window_start = now;
+        }
+    }
+
     /// Close the window if [`PROBE_INTERVAL`] has elapsed since it opened:
     /// return its reading and start the next window at `now`. `None` while the
     /// window is still open.
