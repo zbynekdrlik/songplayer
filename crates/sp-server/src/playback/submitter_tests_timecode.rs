@@ -251,3 +251,69 @@ fn frame_submitter_submit_shared_is_zero_copy_via_the_owned_path() {
     );
     assert_eq!(sub.frames_submitted_total(), 1);
 }
+
+#[test]
+fn paced_sink_emit_submits_the_pacer_frame_without_a_pixel_copy() {
+    // #147 round 10: `impl PacedSink for FrameSubmitter::emit` used to copy the
+    // pacer's frame (`to_vec`, a fresh 5.5 MB allocation per 1440p frame). It
+    // now moves an Arc clone into the async holdover, like the handoff does.
+    // The pacer's frame stays alive for the whole test, so a copy can never
+    // land on its address by allocator coincidence.
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), "EZ", false, false).unwrap();
+    let mut sub = FrameSubmitter::new(sender, 30, 1);
+    let frame = crate::playback::pacer::PacedFrame {
+        pts_ns: 0,
+        width: 4,
+        height: 2,
+        stride: 4,
+        video: SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]),
+        audio: Vec::new(),
+    };
+    let src_ptr = frame.video.as_ptr() as usize;
+
+    PacedSink::emit(&mut sub, &frame, &[], 333_333, 333_333);
+
+    assert_eq!(
+        backend.last_async_video_slice(),
+        Some((src_ptr, 12)),
+        "the SDK receives the pacer's own allocation — no copy"
+    );
+    assert!(
+        sub.prev_frame.as_ref().unwrap().ptr_eq(&frame.video),
+        "the holdover shares the pacer's allocation (an Arc bump)"
+    );
+    assert_eq!(&frame.video[..], &[16u8; 12][..], "pacer pixels untouched");
+    assert_eq!(sub.frames_submitted_total(), 1);
+}
+
+#[test]
+fn borrowed_boundary_submit_copies_into_a_recycled_pool_buffer() {
+    // #147 round 10: the borrow API (`submit_frame_at_boundary(&[u8])`) still
+    // has to copy — the caller keeps its slice — but into a RECYCLED pool
+    // buffer (`SharedFrame::copy_from_slice`), never a fresh `to_vec`. The
+    // recycled buffer stays alive in the pool until the submit takes it, and a
+    // unique length keeps this size class private to this test.
+    use sp_decoder::frame_pool::{recycle, take};
+    const LEN: usize = 1_300_021;
+    let mut spare = take(LEN);
+    spare.resize(LEN, 0);
+    let spare_ptr = spare.as_ptr() as usize;
+    recycle(spare);
+
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), "BC", false, false).unwrap();
+    let mut sub = FrameSubmitter::new(sender, 30, 1);
+    let data: Vec<u8> = (0..LEN).map(|i| (i % 251) as u8).collect();
+
+    sub.submit_frame_at_boundary(4, 2, 4, &data, &[], 333_333, 333_333);
+
+    let held = sub.prev_frame.as_ref().unwrap();
+    assert_eq!(
+        held.as_ptr() as usize,
+        spare_ptr,
+        "the copy reuses the recycled buffer instead of allocating"
+    );
+    assert_eq!(&held[..], &data[..], "with the caller's exact bytes");
+    assert_eq!(backend.last_async_video_slice(), Some((spare_ptr, LEN)));
+}
