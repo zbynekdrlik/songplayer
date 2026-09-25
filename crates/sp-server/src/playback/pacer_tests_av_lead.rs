@@ -171,7 +171,7 @@ fn run_with_stall(
 }
 
 #[test]
-fn a_150_ms_video_stall_mid_song_plays_the_paced_audio_bit_exact_with_no_underrun() {
+fn a_5_boundary_video_stall_mid_song_plays_the_paced_audio_bit_exact_with_no_underrun() {
     let (v, a) = readers();
     let dec = open_paced_decoder(v, a).expect("valid mock readers");
     let (pacer, rec) = run_with_stall(dec, 150, STALL);
@@ -196,8 +196,8 @@ fn a_150_ms_video_stall_mid_song_plays_the_paced_audio_bit_exact_with_no_underru
     assert_eq!(s.av_corrected_samples, 0);
     assert_eq!(s.av_align_err_ms, 0.0);
     assert_eq!(pacer.audio_stats().overflows, 0, "the 2 s cap is never hit");
-    // The cushion is real: about the lead's worth of media stays buffered after
-    // the last take (≥ 249 ms here), and that depth changed nothing above.
+    // The cushion is real: after every take at least ~249 ms stays buffered
+    // (280 ms after the last one here), and that depth changed nothing above.
     assert!(
         pacer.audio_stats().buffer_ms >= PACED_AUDIO_LEAD_MS - 10,
         "buffered {} ms, want about the {PACED_AUDIO_LEAD_MS} ms lead",

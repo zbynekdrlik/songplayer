@@ -658,10 +658,10 @@ pub(crate) fn decode_and_send_paced(
                         } else {
                             info!(playlist_id, "paced: video decode complete");
                         }
-                        // Hand the remaining buffered audio (zero-filled to a full
-                        // boundary, raw wall timecode) to the submit thread so the
-                        // last <1 boundary of audio is not dropped (#148 rework,
-                        // item 4). The submit thread ships it after draining.
+                        // Hand one final boundary of the buffered audio (zero-filled,
+                        // raw wall timecode) to the submit thread so the song's last
+                        // partial boundary is not dropped (#148 rework, item 4); any
+                        // v4 read-ahead past it ends with the song. Shipped after draining.
                         let tail = pacer.take_eos_tail();
                         let tail_msg = if tail.is_empty() {
                             None

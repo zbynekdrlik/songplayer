@@ -487,11 +487,11 @@ fn clear_buffer_empties_pending_audio() {
 }
 
 #[test]
-fn with_tolerance_honors_custom_value() {
+fn with_audio_lead_honors_custom_value() {
     // Custom tolerance 200ms lets audio at 150 pair with frame 0.
     let v = Box::new(MockVideo::new(&[0]));
     let a = Box::new(MockAudio::new(&[150], 300));
-    let mut dec = SplitSyncedDecoder::with_tolerance(v, a, 200).unwrap();
+    let mut dec = SplitSyncedDecoder::with_audio_lead(v, a, 200).unwrap();
     let (_f, frames) = dec.next_synced().unwrap().unwrap();
     assert_eq!(frames.len(), 1);
     assert_eq!(frames[0].timestamp_ms, 150);

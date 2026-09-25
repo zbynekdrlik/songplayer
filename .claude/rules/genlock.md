@@ -214,7 +214,8 @@ paths:
   3× in 15 min unloaded, ~1/s while a second pipeline decoded) — and every
   underrun shifted audio later for the rest of the song. Cure: the emitter path
   opens the decoder through `pipeline_audio::open_synced_decoder` →
-  `SplitSyncedDecoder::with_tolerance(40 + AUDIO_LOOKAHEAD_MS=100)`, i.e. audio
+  `SplitSyncedDecoder::with_audio_lead(40 + AUDIO_LOOKAHEAD_MS=100)` (named
+  `with_tolerance` before #148 v4), i.e. audio
   is read ~100 ms AHEAD of video. That fills the ring to ≈ 98–225 ms (capacity
   266) WITHOUT an A/V offset (the first block starts as the first frame goes
   out; both then run in real time). Three rules ride with the lookahead: a
@@ -786,6 +787,15 @@ Now:
     `decoder_tolerance_ms` (40, or 1540 with the wall-clock emitter).
   - **A stall longer than ~250 ms still underruns.** Raise the lead only with
     a box measurement of the stall length, never as a blind bump.
+  - **Resume flushes the cushion (known bound, unchanged design).**
+    `audio_resume_reset` clears the buffer, and the decoder never re-delivers
+    that audio. The map is kept through a pause (standby does not move
+    `wall_start`), so after a pause of `D` < 250 ms the re-snap PADS up to
+    `250 − D` ms of silence; before v4 that was ≤ `40 − D`. A pause ≥ the lead
+    is unaffected, because the flushed audio is behind the wall line anyway.
+    Keeping the buffer through Resume (re-snap drops only the paused-over
+    media) would remove it. That is a Resume design change for the main
+    session, not part of v4.
 - **The anchor is local, on the DUE boundary** (`pacer_av_align.rs`). The first
   FRESH frame emitted on a new map fixes `(pts in samples, the boundary it is
   DUE at)`. The due boundary is the first grid boundary at or after

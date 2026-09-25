@@ -130,8 +130,8 @@ fn lead_read_ahead_stays_within_lead_plus_one_chunk_over_10k_frames() {
 
 #[test]
 fn new_keeps_the_40_ms_pairing_deadline() {
-    // The pacing-OFF path (`new`, and `with_tolerance` via
-    // `decoder_tolerance_ms(false)`) is unchanged: 40 ms, not the paced lead.
+    // The pacing-OFF path without the emitter (`new`, and `with_audio_lead`
+    // via `decoder_tolerance_ms(false)`) is unchanged: 40 ms, not the paced lead.
     assert_eq!(DEFAULT_TOLERANCE_MS, 40);
     let v = Box::new(MockVideo::new(&[0]));
     let a = Box::new(MockAudio::new(&[40, 41], 100));
@@ -147,10 +147,10 @@ fn new_keeps_the_40_ms_pairing_deadline() {
 
     let v = Box::new(MockVideo::new(&[0]));
     let a = Box::new(MockAudio::new(&[0], 100));
-    let dec = SplitSyncedDecoder::with_tolerance(v, a, 1540).unwrap();
+    let dec = SplitSyncedDecoder::with_audio_lead(v, a, 1540).unwrap();
     assert_eq!(
         dec.audio_lead_ms(),
         1540,
-        "with_tolerance sets the same deadline"
+        "the emitter path's 1540 ms deadline is kept verbatim"
     );
 }

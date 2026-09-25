@@ -143,7 +143,11 @@ SDK-clocked decoder with a 100 ms audio read-ahead
 seam the `audio_frames` LEAD `video_frame` by `lead_ms` on the SDK-clocked path
 (historically 100 SDK / 0 paced; today 1500 SDK / **210 paced** — since #148 v4 the
 paced decoder reads `PACED_AUDIO_LEAD_MS = 250` ahead, so `lead_ms_for(true)` =
-250 − 40; `lead_ms_for` / `StreamShared::lead_ms()`, threaded
+250 − 40. The FIRST block after a start or seek covers from the frame's own
+media time, not from +lead, so `AudioHold` can place it up to the lead late. The
+G3 ±300 ms band then keeps or trims that, the same class as the SDK path's
+start burst. Box-check it with `scripts/preview_latency_repro.py` across a song
+change or seek. `lead_ms_for` / `StreamShared::lead_ms()`, threaded
 `ensure_pipeline → register_taps → StreamTap::new`). Because the video feeder
 starts on-connect BEFORE the audio input connects, the audio feeder measures how
 far the video wall-clock timeline is already ahead and PREPENDS silence to match:

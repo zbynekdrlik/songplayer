@@ -35,8 +35,7 @@ pub(crate) fn is_duration_mismatch(v_dur: u64, a_dur: u64) -> bool {
 /// Takes a video and audio reader behind trait objects and pairs each video
 /// frame with all the audio chunks whose timestamps fall before (or within
 /// the audio lead of) that frame — [`DEFAULT_TOLERANCE_MS`] unless built with
-/// [`with_audio_lead`](Self::with_audio_lead) /
-/// [`with_tolerance`](Self::with_tolerance). Audio is the master clock: the
+/// [`with_audio_lead`](Self::with_audio_lead). Audio is the master clock: the
 /// reported duration is the audio stream's duration and every frame is
 /// paired against it.
 pub struct SplitSyncedDecoder {
@@ -78,28 +77,22 @@ impl SplitSyncedDecoder {
         video: Box<dyn VideoStream>,
         audio: Box<dyn AudioStream>,
     ) -> Result<Self, DecoderError> {
-        Self::with_tolerance(video, audio, DEFAULT_TOLERANCE_MS)
+        Self::with_audio_lead(video, audio, DEFAULT_TOLERANCE_MS)
     }
 
-    /// Like [`new`], but reads audio `audio_lead_ms` ahead of each video frame
-    /// (#148 v4, the paced path's cushion). The paced pacer aligns the audio to
-    /// the picture by MEDIA time, so the lead only changes how much audio is
-    /// buffered — never which sample plays with which frame.
+    /// Like [`new`], but reads (and hands out) audio up to `audio_lead_ms` past
+    /// each video frame's timestamp. Callers:
+    ///
+    /// - the SDK-clocked path with the wall-clock emitter (1540 ms, #192);
+    /// - the PACED path (250 ms, #148 v4).
+    ///
+    /// The paced pacer aligns the audio to the picture by MEDIA time, so there
+    /// the lead only changes how much audio is buffered — never which sample
+    /// plays with which frame.
     pub fn with_audio_lead(
         video: Box<dyn VideoStream>,
         audio: Box<dyn AudioStream>,
         audio_lead_ms: u64,
-    ) -> Result<Self, DecoderError> {
-        Self::with_tolerance(video, audio, audio_lead_ms)
-    }
-
-    /// Like [`new`], but accepts a custom pairing tolerance (the same deadline
-    /// as the audio lead: audio up to `video_ts + tolerance_ms` rides with the
-    /// frame).
-    pub fn with_tolerance(
-        video: Box<dyn VideoStream>,
-        audio: Box<dyn AudioStream>,
-        tolerance_ms: u64,
     ) -> Result<Self, DecoderError> {
         if audio.sample_rate() != 48_000 {
             return Err(DecoderError::Mismatch(format!(
@@ -135,7 +128,7 @@ impl SplitSyncedDecoder {
             video,
             audio,
             pending_audio: VecDeque::new(),
-            audio_lead_ms: tolerance_ms,
+            audio_lead_ms,
             duration_ms: a_dur,
             pending_video_target_ms: None,
         })
