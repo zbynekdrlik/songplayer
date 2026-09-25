@@ -591,9 +591,10 @@ fn a_lag_reanchor_realigns_the_audio_to_the_resumed_frame() {
 fn a_grid_resync_plays_silence_then_realigns_on_the_next_fresh_frame() {
     // Audio 640 samples ahead. At b(51) the decoder stalls (frame 50 is the last
     // one). The next call comes 12 slots late with still nothing decoded: the
-    // gate RESYNCS (repeat stamped at b(63)). The audio has no fresh frame to
-    // anchor to → one silent block; at b(64) the decoder catches up, frame 63
-    // is the fresh frame and the audio re-aligns to its media time exactly.
+    // gate RESYNCS (repeat stamped at b(63)). The map is unchanged, so the audio
+    // re-snaps onto its kept anchor: at b(63) too little is buffered to reach
+    // the wall line → one silent block; at b(64) the decoder catches up and the
+    // audio plays the wall line (frame 63's media time) exactly.
     let (mut pacer, clk) = anchored();
     let next = Cell::new(0i64);
     let mut rec = Rec::default();
@@ -626,10 +627,10 @@ fn a_grid_resync_plays_silence_then_realigns_on_the_next_fresh_frame() {
 
 #[test]
 fn audio_resume_reset_realigns_to_the_next_fresh_frame() {
-    // Resume flushes the audio (frame 30's paired audio goes with it). The next
-    // fresh frame (30, media 48000) re-anchors the audio: its own audio is gone,
-    // so that block is padded silence and frame 31's audio plays exactly at its
-    // media time on the next boundary.
+    // Resume flushes the audio (frame 30's paired audio goes with it) and the
+    // audio re-snaps onto its kept anchor: at b(31) the wall line needs media
+    // 48000, which is gone, so that block is padded silence and frame 31's
+    // audio plays exactly at its media time on the next boundary.
     let (mut pacer, clk) = anchored();
     let next = Cell::new(0i64);
     let mut rec = Rec::default();

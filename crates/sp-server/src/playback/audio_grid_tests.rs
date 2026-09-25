@@ -238,15 +238,18 @@ fn align_to_at_the_head_changes_nothing() {
 
 #[test]
 fn align_to_never_pads_beyond_the_two_second_cap() {
-    // rate 1000 → cap 2000. A head 2001 samples ahead of the picture waits.
-    let mut buf = AudioGridBuffer::new(1000);
-    buf.push_media(&ramp(2001, 10), Some(2001 * 10_000));
-    assert_eq!(buf.head_media(), Some(2001));
-    assert_eq!(buf.align_to(0), (false, 0), "a 2001-sample pad is refused");
-    assert_eq!(buf.level_samples(), 10, "nothing touched");
+    // rate 1000 → cap 2000. Pad + what is already buffered must fit the cap,
+    // or the next push's cap trim would drain the fresh padding again.
+    let mut over = AudioGridBuffer::new(1000);
+    over.push_media(&ramp(1991, 10), Some(1991 * 10_000));
+    assert_eq!(over.head_media(), Some(1991));
+    assert_eq!(over.align_to(0), (false, 0), "1991 pad + 10 buffered > cap");
+    assert_eq!(over.level_samples(), 10, "nothing touched");
     // Exactly the cap is allowed.
-    assert_eq!(buf.align_to(1), (true, -2000));
-    assert_eq!(buf.level_samples(), 2010);
+    let mut fits = AudioGridBuffer::new(1000);
+    fits.push_media(&ramp(1990, 10), Some(1990 * 10_000));
+    assert_eq!(fits.align_to(0), (true, -1990));
+    assert_eq!(fits.level_samples(), 2000, "level never exceeds the cap");
 }
 
 #[test]
