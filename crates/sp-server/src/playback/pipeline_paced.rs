@@ -16,7 +16,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::{PacingStats, PlaybackStateLabel};
-use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome, Standby, plan_sleep_100ns};
+use crate::playback::pacer::{
+    PacedFrame, Pacer, ServiceOutcome, Standby, open_paced_decoder, plan_sleep_100ns,
+};
 use crate::playback::pacer_queue::{ProducerAction, SharedQueue};
 use crate::playback::pipeline::{
     DecodeResult, PipelineCommand, PipelineEvent, should_run_heartbeat,
@@ -177,7 +179,7 @@ fn run_decode_producer(
     taps: crate::playback::preview::preview_stream::DecodeTaps,
     playlist_id: i64,
 ) {
-    use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder};
+    use sp_decoder::MediaFoundationVideoReader;
 
     let video_reader = match MediaFoundationVideoReader::open(&video_path) {
         Ok(v) => v,
@@ -203,10 +205,12 @@ fn run_decode_producer(
             return;
         }
     };
-    let mut decoder = match SplitSyncedDecoder::new(Box::new(video_reader), audio_stream) {
+    // #148 v4: audio read PACED_AUDIO_LEAD_MS ahead of each frame, a cushion in
+    // the pacer's media-aligned grid buffer that rides out a video decode stall.
+    let mut decoder = match open_paced_decoder(Box::new(video_reader), audio_stream) {
         Ok(d) => d,
         Err(e) => {
-            let _ = open_tx.send(Err(format!("SplitSyncedDecoder::new failed: {e}")));
+            let _ = open_tx.send(Err(format!("open_paced_decoder failed: {e}")));
             return;
         }
     };
@@ -654,10 +658,10 @@ pub(crate) fn decode_and_send_paced(
                         } else {
                             info!(playlist_id, "paced: video decode complete");
                         }
-                        // Hand the remaining buffered audio (zero-filled to a full
-                        // boundary, raw wall timecode) to the submit thread so the
-                        // last <1 boundary of audio is not dropped (#148 rework,
-                        // item 4). The submit thread ships it after draining.
+                        // Hand one final boundary of the buffered audio (zero-filled,
+                        // raw wall timecode) to the submit thread so the song's last
+                        // partial boundary is not dropped (#148 rework, item 4); any
+                        // v4 read-ahead past it ends with the song. Shipped after draining.
                         let tail = pacer.take_eos_tail();
                         let tail_msg = if tail.is_empty() {
                             None

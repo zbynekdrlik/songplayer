@@ -363,9 +363,17 @@ fn lead_ms_for_sdk_path_is_the_emitter_lookahead() {
 }
 
 #[test]
-fn lead_ms_for_paced_path_has_no_lead() {
-    // genlock_pacing == true → no emitter, plain 40 ms pairing → lead 0.
-    assert_eq!(lead_ms_for(true), 0);
+fn lead_ms_for_paced_path_is_the_paced_decoder_read_ahead() {
+    // genlock_pacing == true → no emitter, but the paced decoder reads
+    // PACED_AUDIO_LEAD_MS (250 ms) of audio ahead of each frame (#148 v4). At
+    // the decode seam the audio therefore leads the video by 250 − 40 = 210 ms,
+    // and the preview feeder must hold it that long. The test is pinned to the
+    // paced constant so the preview can never drift from the cushion; the exact
+    // value kills a `return 0` or branch-swap mutant.
+    let paced =
+        crate::playback::pacer::PACED_AUDIO_LEAD_MS - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS;
+    assert_eq!(u64::from(lead_ms_for(true)), paced);
+    assert_eq!(lead_ms_for(true), 210);
 }
 
 #[test]

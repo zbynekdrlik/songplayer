@@ -74,6 +74,29 @@ read-ahead is growing again. Guarded by the `next_synced_read_ahead_*` /
 `next_synced_bounded_read_ahead_*` / `next_synced_reads_only_when_pending_is_empty`
 tests in `split_sync_tests.rs`.
 
+**The deadline is the decoder's `audio_lead_ms`, so the DECODER's share of the
+fader latency depends on the path (#148 v4):**
+
+| path | deadline | decoder read-ahead (fader-latency contribution) |
+|---|---|---|
+| paced (`genlock_pacing` ON, production) | `PACED_AUDIO_LEAD_MS = 250`, via `pacer::open_paced_decoder` | ≤ 250 ms + one chunk (~300 ms) |
+| pacing-OFF, no wall-clock emitter | 40 ms (`DEFAULT_TOLERANCE_MS`) | ≤ 40 ms + one chunk |
+| pacing-OFF, with the wall-clock emitter | `decoder_tolerance_ms(true)` = 1540 ms | ≤ 1540 ms + one chunk |
+
+This is the decoder's share only. On the paced path the fader latency the owner
+hears ALSO includes the producer's look-ahead queue: `DECODE_QUEUE_BOUND` = 12
+frames, ~400–500 ms, unchanged by v4. Audio is read, and the gains applied,
+when a frame is DECODED, not when it is emitted.
+
+- **Why the paced lead exists.** A video decode stall must not empty the
+  pacer's media-aligned grid buffer (an audible underrun).
+- **Bounded.** The lead is a FIXED cushion. The G5 gate still stops it growing,
+  so the decoder's share stays ≤ lead + one chunk for the whole song.
+- **Tests.** `split_sync_lead_tests.rs` guards it:
+  `lead_read_ahead_stays_within_lead_plus_one_chunk_over_10k_frames`.
+- **Box check.** On a paced output, `stem-mix level samples` per second still ≈
+  `preview-tap level samples`; the cushion shifts the start, not the rate.
+
 ## #184 round G2 — each reader FAMILY owns its memory; NO global "active kind" (SUPERSEDES round G1)
 
 The ONE console keeps **TWO** remembered fader triples (`sp_core::mixer_model::

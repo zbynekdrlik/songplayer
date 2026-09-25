@@ -30,13 +30,47 @@
 //! not when it is consumed: the aligned take at boundary `B` needs media up to
 //! `B + 33 ms`, which only the NEXT (parked) frame's paired audio covers.
 //!
+//! **The read-ahead cushion (#148 v4).** The paced decoder is opened with
+//! [`open_paced_decoder`], so each frame carries audio up to its pts +
+//! [`PACED_AUDIO_LEAD_MS`] (not the 40 ms pairing deadline). The buffer then
+//! holds about that much media beyond the boundary being taken, so a video
+//! decode stall of up to ~the lead (no pull for several boundaries) keeps
+//! playing real audio instead of zero-filling an underrun. The depth has no
+//! effect on A/V: the take is aligned by the media head, never by the level.
+//!
 //! Split into a sibling of `pacer.rs` so that file stays under the 1000-line
 //! cap; as a child module it reaches the `Pacer`'s private state directly.
 
 use super::{AUDIO_GRID_RATE_HZ, PacedFrame, Pacer};
 use crate::playback::audio_grid::{correction_for, samples_from_100ns};
 use sp_core::genlock::strict_next_boundary_100ns;
+use sp_decoder::{AudioStream, DecoderError, SplitSyncedDecoder, VideoStream};
 use sp_ndi::AudioFrame;
+
+/// How far ahead of each video frame the PACED decoder reads audio (#148 v4).
+///
+/// A stall longer than the cushion still underruns.
+///
+/// - **Size.** 250 ms covers ~7 boundaries of video stall, including the
+///   measured MF stalls under a resident heavy child (#147).
+/// - **Memory.** It stays far under the grid buffer's 2 s cap, even with the
+///   one extra chunk the G5 read gate allows.
+/// - **Fader latency.** It costs up to this much: `StemMixReader` applies the
+///   gains at READ time (`karaoke-stems.md` G5).
+///
+/// The pacing-OFF path keeps its own pairing deadline
+/// (`audio_emitter::decoder_tolerance_ms`).
+pub const PACED_AUDIO_LEAD_MS: u64 = 250;
+
+/// Open the split A/V decoder for the PACED pipeline: audio is read
+/// [`PACED_AUDIO_LEAD_MS`] ahead of each video frame (#148 v4). The audio source
+/// may be a plain mix or a `StemMixReader` — it is wrapped the same way.
+pub fn open_paced_decoder(
+    video: Box<dyn VideoStream>,
+    audio: Box<dyn AudioStream>,
+) -> Result<SplitSyncedDecoder, DecoderError> {
+    SplitSyncedDecoder::with_audio_lead(video, audio, PACED_AUDIO_LEAD_MS)
+}
 
 /// Alignment state + telemetry for the paced audio (#148 design v2). The
 /// default is "re-align pending", so a fresh pacer aligns on its first frame.

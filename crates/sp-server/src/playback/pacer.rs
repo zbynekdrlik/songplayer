@@ -843,10 +843,10 @@ impl Pacer {
         self.av.resnap();
     }
 
-    /// Drain the remaining buffered audio at EOS as one final chunk, zero-filled
-    /// to `samples_per_boundary` (#148 rework, item 4). Returns an empty `Vec`
-    /// when the buffer is already empty. The caller stamps it with the raw wall
-    /// timecode and submits it before returning.
+    /// At EOS ship ONE final boundary of the buffered audio, zero-filled to
+    /// `samples_per_boundary` (#148 rework, item 4); anything past it (the v4
+    /// read-ahead may hold audio beyond the last frame) goes with the song.
+    /// Empty `Vec` when nothing is buffered; the caller stamps + submits it.
     pub fn take_eos_tail(&mut self) -> Vec<AudioFrame> {
         if self.audio_buf.level_samples() == 0 {
             return Vec::new();
@@ -882,9 +882,11 @@ impl Pacer {
 #[path = "pacer_prepare.rs"]
 mod pacer_prepare;
 
-// Media-time A/V alignment of the paced audio (#148 design v2).
+// Media-time A/V alignment of the paced audio (#148 design v2) + the paced
+// decoder's audio read-ahead (#148 v4).
 #[path = "pacer_av_align.rs"]
 mod pacer_av_align;
+pub use pacer_av_align::{PACED_AUDIO_LEAD_MS, open_paced_decoder};
 
 #[cfg(test)]
 #[path = "pacer_tests.rs"]
