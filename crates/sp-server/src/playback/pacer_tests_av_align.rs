@@ -212,11 +212,13 @@ fn assert_exact_stream(blocks: &[(i64, Vec<f32>)], first: i64) {
 }
 
 #[test]
-fn a_180_ms_start_skew_aligns_the_first_block_to_the_frame_media_time() {
+fn a_180_ms_start_skew_aligns_the_first_block_to_the_picture_line() {
     // Video starts 180 ms into the media; audio is decoded from media 0. The
-    // first frame is due at the 200 ms boundary (b(7)); the first block the
-    // pacer emits must start at the FRAME's media time (180 ms = 8640), not at
-    // the audio's start.
+    // first frame PRESENTS at wall_start + 180 ms (b(1) + 180 ms, 20 ms before
+    // b(7)) and is shown at the 200 ms boundary b(7). The audio runs on the
+    // picture's line (#148 v6): the block at b(7) starts at media
+    // b(7) − wall_start = 200 ms = 9600, not at the audio's start and not at
+    // the frame's own 180 ms (that would run the audio 20 ms late for the song).
     let (mut pacer, clk) = anchored();
     let src = RefCell::new(SyncedSource::new(|j| 1_800_000 + b(j), 0));
     let mut rec = Rec::default();
@@ -229,10 +231,10 @@ fn a_180_ms_start_skew_aligns_the_first_block_to_the_frame_media_time() {
     );
     let m0 = first_media(&rec.blocks[0].1);
     assert!(
-        (m0 - 8640).abs() <= 1,
-        "first block starts at media {m0}, want the frame's 8640 (±1 sample)"
+        (m0 - 9600).abs() <= 1,
+        "first block starts at media {m0}, want the picture line's 9600 (±1 sample)"
     );
-    assert_exact_stream(&rec.blocks, 8640);
+    assert_exact_stream(&rec.blocks, 9600);
 }
 
 #[test]
@@ -535,11 +537,12 @@ fn the_start_alignment_is_counted_and_then_reads_zero_error() {
     run_synced(&mut pacer, &clk, &src, 1, 7, &mut rec);
     let s = pacer.stats();
     assert_eq!(s.av_corrections, 1, "the start drop is one correction");
+    // The picture line at b(7) is media b(7) − wall_start = 200 ms (#148 v6).
     assert_eq!(
-        s.av_corrected_samples, 8640,
-        "180 ms of early audio dropped"
+        s.av_corrected_samples, 9600,
+        "200 ms of early audio dropped"
     );
-    assert_eq!(s.av_align_err_ms, -180.0, "measured before the drop");
+    assert_eq!(s.av_align_err_ms, -200.0, "measured before the drop");
     run_synced(&mut pacer, &clk, &src, 8, 12, &mut rec);
     assert_eq!(pacer.stats().av_align_err_ms, 0.0, "aligned afterwards");
     assert_eq!(pacer.stats().av_corrections, 1, "no further correction");
