@@ -2057,6 +2057,7 @@ name = "sp-decoder"
 version = "0.49.0-dev.6"
 dependencies = [
  "mutants",
+ "sp-core",
  "symphonia",
  "thiserror",
  "tracing",

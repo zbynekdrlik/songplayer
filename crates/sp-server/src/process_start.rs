@@ -7,6 +7,11 @@
 use std::sync::OnceLock;
 use std::time::Instant;
 
+// #147 round 9: the pure hard-minimum-working-set core (parse / clamp / plan /
+// the outcome line), Linux-tested; the Win32 calls stay in this file.
+#[path = "process_residency.rs"]
+pub mod residency;
+
 static START: OnceLock<Instant> = OnceLock::new();
 
 /// Record the process start. Idempotent — only the FIRST call is kept, so the
@@ -75,4 +80,199 @@ pub fn priority_class_label() -> &'static str {
 #[cfg_attr(test, mutants::skip)]
 pub fn priority_class_label() -> &'static str {
     "default"
+}
+
+/// #147 round 9: read `sp_min_working_set_mb` — the SAME key
+/// `PATCH /api/v1/settings` writes (the settings API stores any key) — and
+/// resolve it through the pure parse (absent / garbage / negative → the
+/// 3072 MiB default, `0` = disabled, clamped `256..=8192`). WARNs when a
+/// present value was not used as written (once per start — it runs once).
+///
+/// mutants::skip — a DB read + a WARN side effect; the value logic is the pure
+/// `residency::parse_min_working_set_mb` (mutation-scored), and this path is
+/// still exercised end-to-end by `resolve_min_working_set_reads_the_patched_setting`.
+#[cfg_attr(test, mutants::skip)]
+pub async fn resolve_min_working_set_mb(pool: &sqlx::SqlitePool) -> u32 {
+    let raw = crate::db::models::get_setting(pool, residency::SETTING_KEY)
+        .await
+        .ok()
+        .flatten();
+    let mb = residency::parse_min_working_set_mb(raw.as_deref());
+    if residency::min_working_set_setting_ignored(raw.as_deref()) {
+        tracing::warn!(
+            "{}={raw:?} is invalid or out of range (0 or {}..={} MiB) — using {mb} MiB",
+            residency::SETTING_KEY,
+            residency::SP_MIN_WS_FLOOR_MB,
+            residency::SP_MIN_WS_CEIL_MB,
+        );
+    }
+    mb
+}
+
+/// #147 round 9: give SongPlayer a HARD minimum working set so a heavy child's
+/// growth can never trim the paced sender's frame pools / NDI SDK buffers
+/// (genlock pacing is ON in production permanently). Called once from
+/// `lib.rs::start()` right after the DB is ready — before any pipeline spawns —
+/// so a change to `sp_min_working_set_mb` takes effect at the NEXT start.
+/// Best-effort: the outcome is ONE INFO line (`sp working set: … privilege=…
+/// result=ok|failed(err=<GetLastError>)`), never a panic.
+///
+/// On Windows `SeIncreaseWorkingSetPrivilege` is enabled FIRST, whatever the
+/// setting — raising the minimum above the current working set needs it. (The
+/// heavy child's Job Object working-set cap needs a DIFFERENT privilege,
+/// `SeIncreaseBasePriorityPrivilege`, enabled by the job seam — round 10.) The
+/// quota call is attempted even when the privilege step fails (an elevated
+/// token, or a minimum at or below the current working set, does not need it).
+/// Off Windows nothing is applied and the line says so (never a fake `ok`).
+///
+/// mutants::skip — the OS calls have no in-process oracle; the plan + the line
+/// are pure and tested in `process_residency_tests.rs`.
+#[cfg_attr(test, mutants::skip)]
+pub async fn apply_min_working_set(pool: &sqlx::SqlitePool) {
+    let mb = resolve_min_working_set_mb(pool).await;
+    #[cfg(windows)]
+    {
+        let privilege = enable_increase_working_set_privilege();
+        let plan = residency::plan_hard_min(mb);
+        let set = plan.as_ref().map_or(Ok(()), set_hard_min_working_set);
+        tracing::info!(
+            "{}",
+            residency::residency_line(plan.as_ref(), privilege, set)
+        );
+    }
+    #[cfg(not(windows))]
+    tracing::info!(
+        "sp working set: not applied off Windows ({}={mb})",
+        residency::SETTING_KEY
+    );
+}
+
+/// `SetProcessWorkingSetSizeEx(GetCurrentProcess(), min, max,
+/// HARDWS_MIN_ENABLE | HARDWS_MAX_DISABLE)`; `Err(GetLastError())` on failure.
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+fn set_hard_min_working_set(plan: &residency::WorkingSetPlan) -> Result<(), u32> {
+    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::System::Memory::{
+        QUOTA_LIMITS_HARDWS_MAX_DISABLE, QUOTA_LIMITS_HARDWS_MIN_ENABLE, SetProcessWorkingSetSizeEx,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+    // The pure flag mirrors in `residency` must equal the SDK constants.
+    const _: () = assert!(residency::QUOTA_HARDWS_MIN_ENABLE == QUOTA_LIMITS_HARDWS_MIN_ENABLE);
+    const _: () = assert!(residency::QUOTA_HARDWS_MAX_DISABLE == QUOTA_LIMITS_HARDWS_MAX_DISABLE);
+
+    // SAFETY: GetCurrentProcess returns the current-process pseudo-handle (full
+    // access, never closed); SetProcessWorkingSetSizeEx only changes this
+    // process's working-set quota and returns 0 on failure, after which
+    // GetLastError (read immediately) holds the calling thread's error code.
+    unsafe {
+        if SetProcessWorkingSetSizeEx(
+            GetCurrentProcess(),
+            plan.min_bytes,
+            plan.max_bytes,
+            plan.flags,
+        ) == 0
+        {
+            Err(GetLastError())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Enable `SeIncreaseWorkingSetPrivilege` in this process's token (#147 r9).
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+fn enable_increase_working_set_privilege() -> Result<(), u32> {
+    enable_privilege(windows_sys::Win32::Security::SE_INC_WORKING_SET_NAME)
+}
+
+/// Enable `SeIncreaseBasePriorityPrivilege` (`SE_INC_BASE_PRIORITY_NAME`) in
+/// this process's token (#147 round 10). A Job Object's
+/// `JOB_OBJECT_LIMIT_WORKINGSET` with a `MinimumWorkingSetSize` above the
+/// system minimum needs it: the kernel's `NtSetInformationJobObject` otherwise
+/// returns `STATUS_PRIVILEGE_NOT_HELD`, which `SetInformationJobObject` surfaces
+/// as `ERROR_PRIVILEGE_NOT_HELD` (1314) — the round-9 box read (Windows Research
+/// Kernel `base/ntos/ps/psjob.c`, the WORKING SET LIMIT branch). The heavy
+/// child's job seam calls it once, before its first capped job.
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn enable_increase_base_priority_privilege() -> Result<(), u32> {
+    enable_privilege(windows_sys::Win32::Security::SE_INC_BASE_PRIORITY_NAME)
+}
+
+/// Enable the privilege `name` (a `SE_*_NAME` constant) in this process's
+/// token. `AdjustTokenPrivileges` returns success even when the token does not
+/// hold the privilege, setting `ERROR_NOT_ALL_ASSIGNED` — reported as a failure
+/// too.
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+fn enable_privilege(name: windows_sys::core::PCWSTR) -> Result<(), u32> {
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_NOT_ALL_ASSIGNED, GetLastError, HANDLE, LUID,
+    };
+    use windows_sys::Win32::Security::{
+        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    // SAFETY: the token handle is checked and closed on every path after it
+    // opens; `luid` / `tp` are fully initialised PODs passed by pointer as the
+    // APIs expect; no previous-state buffer is requested (null + length 0).
+    unsafe {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            &mut token,
+        ) == 0
+        {
+            return Err(GetLastError());
+        }
+        let mut luid: LUID = std::mem::zeroed();
+        if LookupPrivilegeValueW(std::ptr::null(), name, &mut luid) == 0 {
+            let e = GetLastError();
+            CloseHandle(token);
+            return Err(e);
+        }
+        let tp = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [LUID_AND_ATTRIBUTES {
+                Luid: luid,
+                Attributes: SE_PRIVILEGE_ENABLED,
+            }],
+        };
+        let ok =
+            AdjustTokenPrivileges(token, 0, &tp, 0, std::ptr::null_mut(), std::ptr::null_mut());
+        let err = GetLastError();
+        CloseHandle(token);
+        if ok == 0 || err == ERROR_NOT_ALL_ASSIGNED {
+            Err(err)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #147 r9: the startup resolver reads the SAME key `PATCH /api/v1/settings`
+    /// writes (the settings API stores any key), so a PATCH takes effect at the
+    /// next start. Absent → the 3072 MiB default; `0` disables; out of range
+    /// clamps; garbage falls back to the default.
+    #[tokio::test]
+    async fn resolve_min_working_set_reads_the_patched_setting() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        assert_eq!(resolve_min_working_set_mb(&pool).await, 3072, "absent");
+        for (value, want) in [("4096", 4096), ("0", 0), ("99999", 8192), ("junk", 3072)] {
+            crate::db::models::set_setting(&pool, "sp_min_working_set_mb", value)
+                .await
+                .unwrap();
+            assert_eq!(resolve_min_working_set_mb(&pool).await, want, "{value}");
+        }
+    }
 }

@@ -2,7 +2,7 @@
 """mix.py — build the dub track from placed clips and produce the three listening
 variants over the ambient stem.
 
-Three variants per engine (epic #174 sermon-dubbing spec, §5):
+Three variants per engine (epic #174 dabing-dubbing spec, §5):
 
   1. **dub_only**       — the Slovak dub track + the ambient (non-voice) stem.
   2. **dub_plus_voice** — the dub track + the original English voice at -12 dB

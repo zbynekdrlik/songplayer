@@ -165,13 +165,14 @@ pub struct PacingView {
     pub resyncs: u64,
     #[serde(default)]
     pub lag_slots: i64,
+    /// #148: audio − picture media offset (ms) at the last paced boundary.
+    #[serde(default)]
+    pub av_align_err_ms: f64,
 }
 
 /// Audio clock-discipline telemetry, the subset the badge tooltip shows.
 #[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
 pub struct AudioView {
-    #[serde(default)]
-    pub residual_ppm: f64,
     #[serde(default)]
     pub underruns: u64,
     /// #192 wall-clock audio emitter (SDK-clocked path).

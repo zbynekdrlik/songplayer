@@ -22,9 +22,7 @@
 //! tests, so every emit/repeat/drop/catch-up/resync/re-latch decision is
 //! Linux-testable.
 
-use sp_core::genlock::audio::{
-    AUDIO_PLL_UPDATE_100NS, AudioPll, LevelAverager, rate_residual_ppm, samples_per_boundary,
-};
+use sp_core::genlock::audio::samples_per_boundary;
 use sp_core::genlock::{
     GENLOCK_MAX_CATCHUP_INTERVALS, UNITS_PER_SECOND, floor_boundary_100ns, genlock_emit_gate_100ns,
     interval_100ns, lag_slots_100ns, strict_next_boundary_100ns,
@@ -32,20 +30,8 @@ use sp_core::genlock::{
 use sp_ndi::AudioFrame;
 
 /// The audio grid rate (Hz). 48 kHz is enforced upstream by the decoder
-/// (`split_sync.rs`); the audio buffer + PLL run at this fixed rate (#148).
+/// (`split_sync.rs`); the audio buffer runs at this fixed rate (#148).
 const AUDIO_GRID_RATE_HZ: u32 = 48_000;
-
-/// The audio buffer's steady POST-take setpoint, in whole grid boundaries: 2
-/// (3200 samples ≈ 66 ms) is what the PLL servos toward, measured AFTER each take
-/// (#148 rework, item 3) — slack against decode jitter without audible latency.
-const AUDIO_TARGET_BOUNDARIES: usize = 2;
-
-/// Windows for the same-phase level averager: 60 s of boundaries per window,
-/// derived from the grid fps (1800 @ 30 fps). The rate residual reads
-/// `mean(last 60 s) − mean(the 60 s before)` (#148 rework, item 1).
-fn level_avg_window(grid_fps: i64) -> usize {
-    (grid_fps.max(0) * 60) as usize
-}
 
 /// A playing lag beyond [`GENLOCK_MAX_CATCHUP_INTERVALS`] must persist this long
 /// (100-ns units, 1 s) before the pacer re-anchors (#147 lane 3, change 2). A
@@ -77,11 +63,11 @@ pub struct PacedFrame {
     pub stride: u32,
     /// NV12 pixel data, shared without copying (#203 2b: repeat + handoff bump).
     pub video: SharedFrame,
-    /// Audio chunk(s) belonging to this frame. PUSHED into the pacer's
-    /// wall-clock `AudioGridBuffer` when the frame is CONSUMED (emitted OR
-    /// dropped/decimated) — audio is then delivered on the audio grid (exactly
-    /// `samples_per_boundary` per boundary, #148), NOT batched onto this video
-    /// frame.
+    /// Audio chunk(s) paired with this frame, each carrying its 0-based MEDIA
+    /// time in `timecode_100ns`. PUSHED into the pacer's `AudioGridBuffer` when
+    /// the frame is PULLED — audio is then delivered on the audio grid, aligned
+    /// to the picture by media time (#148 design v2), NOT batched onto this
+    /// video frame.
     pub audio: Vec<AudioFrame>,
 }
 
@@ -100,11 +86,11 @@ pub trait PacedSink {
     /// Emit one boundary: submit each chunk in `audio` (stamped `audio_tc_100ns`,
     /// the raw wall clock at submission — §6) IN ORDER first, then the `video`
     /// frame (stamped `video_tc_100ns`, the on-grid serviced boundary — §4).
-    /// `audio` is the boundary chunk the pacer drained from its wall-clock
-    /// `AudioGridBuffer` (0 or 1 frame of exactly `samples_per_boundary` samples,
-    /// #148) — a video repeat still carries audio (decoupled); only a pre-roll
-    /// starve passes an empty slice. Only `video`'s pixel fields are used; its own
-    /// `audio` was already pushed into the buffer on consume.
+    /// `audio` is the boundary block the pacer took from its `AudioGridBuffer`,
+    /// aligned to the picture by media time (0 or 1 frame of exactly
+    /// `samples_per_boundary` samples, #148) — a video repeat still carries audio
+    /// (decoupled); only a pre-roll starve passes an empty slice. Only `video`'s
+    /// pixel fields are used; its own `audio` was pushed into the buffer on pull.
     fn emit(
         &mut self,
         video: &PacedFrame,
@@ -280,23 +266,14 @@ pub struct Pacer {
     prep_len: usize,
     prep_idx: usize,
 
-    // --- audio clock discipline (#148) ---
+    // --- paced audio, aligned to the picture by media time (#148) ---
     /// Samples delivered per grid boundary (1600 @ 48 kHz / 30 fps).
     samples_per_boundary: usize,
-    /// Wall-clock planar FIFO: decode pushes into it, each boundary drains
-    /// exactly `samples_per_boundary` through the fractional reader.
+    /// Planar FIFO with a media-time head: pulled frames push into it, each
+    /// productive boundary takes exactly `samples_per_boundary`.
     audio_buf: AudioGridBuffer,
-    /// Slow-trim controller driving the buffer's fractional read rate.
-    audio_pll: AudioPll,
-    /// Same-phase 60 s means of the POST-take level; feeds the true rate residual
-    /// (#148 rework, item 1).
-    level_avg: LevelAverager,
-    /// Wall clock (100 ns) of the last rate-residual recompute; 0 = not yet
-    /// seeded. The residual is measured over a 60 s window, once per 60 s.
-    last_pll_100ns: i64,
-    /// The most recent rate residual (ppm) — the reported drift, for the health
-    /// doc. Positive = buffer growing (file/audio clock fast).
-    last_residual_ppm: f64,
+    /// Anchor + correction state + telemetry (`pacer_av_align.rs`).
+    av: pacer_av_align::AvAlign,
 }
 
 impl Pacer {
@@ -340,11 +317,8 @@ impl Pacer {
             prep_len: 0,
             prep_idx: 0,
             samples_per_boundary: spb,
-            audio_buf: AudioGridBuffer::new(AUDIO_GRID_RATE_HZ, spb * AUDIO_TARGET_BOUNDARIES),
-            audio_pll: AudioPll::new(),
-            level_avg: LevelAverager::new(level_avg_window(grid_fps)),
-            last_pll_100ns: 0,
-            last_residual_ppm: 0.0,
+            audio_buf: AudioGridBuffer::new(AUDIO_GRID_RATE_HZ),
+            av: pacer_av_align::AvAlign::default(),
         }
     }
 
@@ -403,15 +377,11 @@ impl Pacer {
         self.last_lag_slots = 0;
         self.max_lag_slots = 0;
         self.lag_exceeded_since = None;
-        // Audio clock discipline (#148): a fresh song starts with an empty
-        // buffer, no correction, and no level history. Cumulative
-        // underruns/overflows survive (lifetime telemetry, like the pacing
-        // counters).
+        // A fresh song / seek (#148): empty audio buffer, and the audio
+        // re-aligns to the first frame emitted on the new origin. Cumulative
+        // underruns/overflows survive (lifetime telemetry).
         self.audio_buf.clear();
-        self.audio_pll.reset();
-        self.level_avg.clear();
-        self.last_pll_100ns = 0;
-        self.last_residual_ppm = 0.0;
+        self.av.realign();
     }
 
     /// Service one scheduling step. Reads the wall clock itself: a scheduling
@@ -462,7 +432,7 @@ impl Pacer {
             let since = *self.lag_exceeded_since.get_or_insert(sched_now);
             if sched_now.saturating_sub(since) > LAG_REANCHOR_AFTER_100NS {
                 if self.prepared.is_none() && self.pending.is_none() {
-                    self.pending = pull();
+                    self.pending = self.pull_frame(&mut pull);
                 }
                 // Re-anchor onto the next un-emitted frame — the one `prepare`
                 // decoded ahead (`prepared`), or the parked `pending` when
@@ -477,6 +447,7 @@ impl Pacer {
                     let new_boundary = strict_next_boundary_100ns(sched_now, self.grid_fps);
                     self.wall_start_100ns = new_boundary - pts;
                     self.next_boundary_100ns = new_boundary;
+                    self.av.realign(); // the wall↔media map moved (#148)
                     self.resyncs += 1;
                     self.lag_exceeded_since = None;
                     self.last_lag_slots = lag;
@@ -494,21 +465,19 @@ impl Pacer {
         }
 
         // The due frame is normally the one [`prepare`](Self::prepare) decoded
-        // ahead of this boundary (its audio already pushed there — #147 lane 4).
-        // With nothing prepared (a test driving `service` inline with `pull`) the
-        // loop below decodes inline as before: keep the last frame at/before the
-        // boundary, drop older ones, park the first future frame, push each
-        // consumed frame's audio into the wall-clock buffer (#148).
+        // ahead of this boundary (#147 lane 4). With nothing prepared (a test
+        // driving `service` inline with `pull`) the loop below decodes inline as
+        // before: keep the last frame at/before the boundary, drop older ones,
+        // park the first future frame. Audio is pushed on PULL (#148 v2).
         let mut due: Option<PacedFrame> = self.prepared.take();
         loop {
             if self.pending.is_none() {
-                self.pending = pull();
+                self.pending = self.pull_frame(&mut pull);
             }
             match self.pending.take() {
                 Some(frame) => {
                     let present = self.wall_start_100ns.saturating_add(frame.pts_100ns());
                     if present <= boundary {
-                        self.push_audio(&frame.audio);
                         if due.is_some() {
                             self.dropped += 1;
                         }
@@ -555,16 +524,13 @@ impl Pacer {
         let (stamp_boundary, next) =
             self.resolve_emit_boundary(emit_now, boundary, queue_had_frame);
 
-        // Audio clock discipline (#148): every PRODUCTIVE boundary (a fresh emit
-        // OR a video repeat — audio is decoupled from the video decision) drains
-        // exactly `samples_per_boundary` from the buffer, submitted BEFORE the
-        // video frame (§6), then runs the slow-trim control off the POST-take
-        // level. A pre-roll STARVE (nothing ever emitted) delivers no audio and
-        // does not touch the buffer.
+        // Paced audio (#148 v2): every PRODUCTIVE boundary (a fresh emit OR a
+        // video repeat) takes exactly `samples_per_boundary`, aligned by media
+        // time to the stamped boundary, submitted BEFORE the video frame (§6). A
+        // pre-roll STARVE (nothing ever emitted) delivers no audio.
         let audio_frames = if had_frame || self.last_frame.is_some() {
-            let frames = self.take_boundary_audio();
-            self.run_audio_control(emit_now);
-            frames
+            let fresh_pts = due.as_ref().map(|f| f.pts_100ns());
+            self.take_aligned_audio(stamp_boundary, fresh_pts)
         } else {
             Vec::new()
         };
@@ -637,7 +603,9 @@ impl Pacer {
         let (_, next) = genlock_emit_gate_100ns(emit_now, boundary, self.grid_fps, queue_had_frame);
         if next > catch_up {
             // Advanced more than one slot → a grid resync (skipped boundaries).
+            // The map is unchanged: the audio re-snaps onto its line (#148).
             self.resyncs += 1;
+            self.av.resnap();
             (floor_boundary_100ns(emit_now, self.grid_fps), next)
         } else {
             (boundary, next)
@@ -810,6 +778,7 @@ impl Pacer {
 
     /// Snapshot the counters for the health document.
     pub fn stats(&self) -> PacingStats {
+        let anchor = self.wall.anchor_stats();
         PacingStats {
             enabled: self.enabled,
             seq: self.seq,
@@ -823,6 +792,13 @@ impl Pacer {
             lag_slots: self.last_lag_slots,
             iter_p99_us: self.iter_p99_us(),
             prep_p99_us: self.prep_p99_us(),
+            av_align_err_ms: self.av.err_ms(),
+            av_corrections: self.av.corrections,
+            av_corrected_samples: self.av.corrected_samples,
+            // #147: the anchor telemetry of the wall clock that stamps + paces.
+            wall_anchor_max_step_us: anchor.max_step_us,
+            wall_anchor_wide_brackets: anchor.wide_brackets,
+            wall_anchor_slewed_us: anchor.slewed_us,
             // #168 r2: the pacer does not submit — the paced submit thread fills
             // `submit_call_us_max`/`_p99` via `merge_pacing_stats`; 0 here.
             ..Default::default()
@@ -830,11 +806,12 @@ impl Pacer {
     }
 
     // -----------------------------------------------------------------------
-    // Audio clock discipline (#148)
+    // Paced audio (#148) — alignment itself lives in `pacer_av_align.rs`
     // -----------------------------------------------------------------------
 
-    /// Deinterleave each consumed frame's audio and push it into the wall-clock
-    /// buffer. The buffer establishes its channel count from the first push.
+    /// Deinterleave each frame's audio chunk and push it into the grid buffer
+    /// with the chunk's media time. The buffer fixes its channel count and its
+    /// media head from the first push.
     fn push_audio(&mut self, frames: &[AudioFrame]) {
         for af in frames {
             let ch = af.channels as usize;
@@ -848,96 +825,33 @@ impl Pacer {
                     plane.push(af.data[j * ch + c]);
                 }
             }
-            self.audio_buf.push(&planar);
+            self.audio_buf.push_media(&planar, af.timecode_100ns);
         }
     }
 
-    /// Drain exactly `samples_per_boundary` samples from the buffer through the
-    /// fractional reader and re-interleave into one [`AudioFrame`] stamped later
-    /// with the raw wall clock (§6). Returns an empty `Vec` when no audio has
-    /// been buffered yet (pre-roll), so the sink submits no audio that boundary.
+    /// Drain exactly `samples_per_boundary` samples (no correction) and
+    /// re-interleave into one [`AudioFrame`] stamped later with the raw wall
+    /// clock (§6). Empty when no audio has been buffered yet.
     fn take_boundary_audio(&mut self) -> Vec<AudioFrame> {
         let planar = self
             .audio_buf
             .take_boundary_chunk(self.samples_per_boundary);
-        if planar.is_empty() {
-            return Vec::new();
-        }
-        let channels = planar.len();
-        let n = planar[0].len();
-        let mut data = vec![0.0f32; channels * n];
-        for (c, plane) in planar.iter().enumerate() {
-            for (j, &s) in plane.iter().enumerate() {
-                data[j * channels + c] = s;
-            }
-        }
-        vec![AudioFrame {
-            data,
-            channels: channels as u32,
-            sample_rate: AUDIO_GRID_RATE_HZ,
-            // Stamped by the submitter with the raw emit-instant wall clock (§6).
-            timecode_100ns: None,
-        }]
+        pacer_av_align::interleave(planar)
     }
 
-    /// Slow-trim audio control off the POST-take buffer level (#148 rework). Runs
-    /// on every productive boundary AFTER the take: records the post-take level
-    /// into the same-phase averager, recomputes the true 60 s rate residual
-    /// (drift) once per 60 s, and steps the PLL. Because the pacer consumes video
-    /// AND audio by wall time, the only genuine residual is the file's own
-    /// audio-vs-video disagreement (a few ppm) — a SLOW TRIM, never a fast
-    /// position loop.
-    ///
-    /// A GROWING buffer (drift > 0, file/audio clock fast) is fed to the rate
-    /// term NEGATED (`update(−drift, …)`) so `applied_ppm` goes POSITIVE — a
-    /// faster fractional read that drains the excess (negative feedback). The
-    /// position trim independently walks a level that has sat far from target
-    /// back, on the level's own sign. The correction is copied onto the buffer
-    /// for the NEXT take.
-    fn run_audio_control(&mut self, now_100ns: i64) {
-        let post = self.audio_buf.level_samples() as i64;
-        self.level_avg.record(post);
-
-        // Recompute the drift on the 60 s cadence; hold it between updates. The
-        // PLL's own 60 s gate steps on the same tick (both seed on the first
-        // productive boundary).
-        if self.last_pll_100ns == 0 {
-            self.last_pll_100ns = now_100ns;
-        } else if now_100ns - self.last_pll_100ns >= AUDIO_PLL_UPDATE_100NS {
-            if self.level_avg.windows_full() {
-                self.last_residual_ppm = rate_residual_ppm(
-                    self.level_avg.mean_now(),
-                    self.level_avg.mean_prev(),
-                    AUDIO_GRID_RATE_HZ as i64,
-                    60.0,
-                );
-            }
-            self.last_pll_100ns = now_100ns;
-        }
-
-        let target = self.audio_buf.target_level() as i64;
-        self.audio_pll.update(-self.last_residual_ppm, now_100ns);
-        let applied = self.audio_pll.update_level(post, target, now_100ns);
-        self.audio_buf.set_applied_ppm(applied);
-    }
-
-    /// Reset the audio buffer + PLL on a Resume (#148 rework, item 4). The VIDEO
-    /// anchor is intentionally left untouched: Resume continues the same song on
-    /// the same wall grid (the video frozen-standby already held every boundary),
-    /// so only the audio path — whose backlog would otherwise overflow and lag
-    /// the video — is flushed and re-seeded.
+    /// Flush the audio buffer on a Resume and re-snap the audio onto its line
+    /// (#148). The VIDEO anchor is intentionally left untouched: Resume
+    /// continues the same song on the same wall grid (the frozen standby held
+    /// every boundary), so only the audio backlog is dropped.
     pub fn audio_resume_reset(&mut self) {
         self.audio_buf.clear();
-        self.audio_pll.reset();
-        self.level_avg.clear();
-        self.last_pll_100ns = 0;
-        self.last_residual_ppm = 0.0;
+        self.av.resnap();
     }
 
-    /// Drain the remaining buffered audio at EOS as one final chunk, zero-filled
-    /// to `samples_per_boundary` (#148 rework, item 4). Returns an empty `Vec`
-    /// when the buffer is already empty. The caller stamps it with the raw wall
-    /// timecode and submits it before returning.
+    /// At EOS ship ONE final boundary of the buffered audio, zero-filled to
+    /// `samples_per_boundary` (#148 rework, item 4); anything past it (the v4
+    /// read-ahead may hold audio beyond the last frame) goes with the song.
+    /// Empty `Vec` when nothing is buffered; the caller stamps + submits it.
     pub fn take_eos_tail(&mut self) -> Vec<AudioFrame> {
         if self.audio_buf.level_samples() == 0 {
             return Vec::new();
@@ -952,18 +866,17 @@ impl Pacer {
         self.audio_buf.take_overflow_warning()
     }
 
-    /// Snapshot the audio clock-discipline telemetry for the health document.
+    /// Snapshot the paced-audio telemetry for the health document (the A/V
+    /// alignment itself is reported on `PacingStats`).
     pub fn audio_stats(&self) -> AudioStats {
         AudioStats {
             enabled: self.enabled,
-            residual_ppm: self.last_residual_ppm,
-            applied_ppm: self.audio_pll.applied_ppm(),
             samples_per_boundary: self.samples_per_boundary as u64,
             underruns: self.audio_buf.underruns(),
             overflows: self.audio_buf.overflows(),
             buffer_ms: self.audio_buf.buffer_ms(),
-            // The paced path has its own audio clock (AudioGridBuffer + PLL); the
-            // wall-clock emitter (#192) is the SDK-clocked path's tool, disabled here.
+            // The paced path has its own media-aligned audio; the wall-clock
+            // emitter (#192) is the SDK-clocked path's tool, disabled here.
             emitter: Default::default(),
         }
     }
@@ -973,6 +886,12 @@ impl Pacer {
 // this file under the 1000-line cap (#147 lane 4).
 #[path = "pacer_prepare.rs"]
 mod pacer_prepare;
+
+// Media-time A/V alignment of the paced audio (#148 design v2) + the paced
+// decoder's audio read-ahead (#148 v4).
+#[path = "pacer_av_align.rs"]
+mod pacer_av_align;
+pub use pacer_av_align::{PACED_AUDIO_LEAD_MS, open_paced_decoder};
 
 #[cfg(test)]
 #[path = "pacer_tests.rs"]
@@ -989,10 +908,6 @@ mod pacer_tests_lane4;
 #[cfg(test)]
 #[path = "pacer_tests_audio.rs"]
 mod pacer_tests_audio;
-
-#[cfg(test)]
-#[path = "pacer_sim_audio.rs"]
-mod pacer_sim_audio;
 
 #[cfg(test)]
 #[path = "pacer_tests_mutants.rs"]

@@ -28,18 +28,43 @@ pub(crate) async fn persist_lyrics_track(
     track: &LyricsTrack,
     pipeline_version: u32,
 ) -> Result<()> {
+    persist_lyrics_json(
+        pool,
+        cache_dir,
+        youtube_id,
+        video_id,
+        track,
+        &track.source,
+        pipeline_version,
+    )
+    .await
+}
+
+/// [`persist_lyrics_track`] with the sidecar body given as any serializable
+/// value that serializes AS a [`LyricsTrack`] plus extra top-level fields (the
+/// dub subtitle track adds its builder version, #184 H5); `source` is that
+/// track's `source`. The ONE writer behind both callers.
+#[cfg_attr(test, mutants::skip)] // JSON write + one UPDATE — see persist_lyrics_track.
+pub(crate) async fn persist_lyrics_json<T: serde::Serialize>(
+    pool: &SqlitePool,
+    cache_dir: &Path,
+    youtube_id: &str,
+    video_id: i64,
+    body: &T,
+    source: &str,
+    pipeline_version: u32,
+) -> Result<()> {
     let json_path = cache_dir.join(format!("{youtube_id}_lyrics.json"));
-    let json_bytes = serde_json::to_vec(track)?;
+    let json_bytes = serde_json::to_vec(body)?;
     tokio::fs::write(&json_path, &json_bytes).await?;
 
     // Pick the alignment-model literal for this success path — see
     // `alignment_model_for_source`'s doc comment for the precedence.
-    let alignment_model =
-        crate::lyrics::worker_reference::alignment_model_for_source(&track.source);
+    let alignment_model = crate::lyrics::worker_reference::alignment_model_for_source(source);
     crate::db::models::mark_video_lyrics_complete(
         pool,
         video_id,
-        &track.source,
+        source,
         pipeline_version,
         None,
         alignment_model,

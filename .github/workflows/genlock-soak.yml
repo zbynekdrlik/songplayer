@@ -174,7 +174,7 @@ jobs:
 
           $csv = Join-Path $env:RUNNER_TEMP "sp-health.csv"
           $utf8 = New-Object System.Text.UTF8Encoding($false)
-          [System.IO.File]::WriteAllText($csv, "ts_utc,minute,ndi_name,seq,late_frames,lag_slots,repeats,resyncs,audio_residual_ppm,lock_state,lock_reason`n", $utf8)
+          [System.IO.File]::WriteAllText($csv, "ts_utc,minute,ndi_name,seq,late_frames,lag_slots,repeats,resyncs,av_align_err_ms,lock_state,lock_reason`n", $utf8)
 
           function Append-Row($line) {
             [System.IO.File]::AppendAllText($csv, $line + "`n", $utf8)
@@ -211,7 +211,7 @@ jobs:
                   (Csv-Field $o.pacing.lag_slots),
                   (Csv-Field $o.pacing.repeats),
                   (Csv-Field $o.pacing.resyncs),
-                  (Csv-Field $o.audio.residual_ppm),
+                  (Csv-Field $o.pacing.av_align_err_ms),
                   (Csv-Field $o.lock_state),
                   (Csv-Field $o.lock_reason)
                 ) -join ","

@@ -74,6 +74,57 @@ pub fn take(len: usize) -> Vec<u8> {
     }
 }
 
+/// Raised by [`try_take`] when a pool miss cannot allocate a `len`-byte buffer.
+/// The fallible alternative to [`take`]'s aborting `Vec::with_capacity` on the
+/// decoder hot path, so a host allocation failure drops one frame instead of
+/// aborting the whole process (`handle_alloc_error` — the #156 `0xc0000409`
+/// class). Carries the requested byte count for the pipeline's WARN.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameAllocFailed {
+    /// The byte count the failed allocation asked for.
+    pub bytes: usize,
+}
+
+impl std::fmt::Display for FrameAllocFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "frame buffer allocation of {} bytes failed", self.bytes)
+    }
+}
+
+impl std::error::Error for FrameAllocFailed {}
+
+/// Allocate exactly `len` bytes FALLIBLY (never aborts): a fresh `Vec` grown via
+/// `try_reserve_exact`, so a host OOM / capacity overflow returns `Err` rather
+/// than calling `handle_alloc_error`. Split out so the miss path is unit-testable
+/// with a `len` (`usize::MAX / 2`) that `try_reserve_exact` rejects on every
+/// platform. Returns an empty buffer with capacity ≥ `len` (length 0), matching
+/// [`take`]'s "cleared, capacity retained" contract.
+fn alloc_exact(len: usize) -> Result<Vec<u8>, FrameAllocFailed> {
+    let mut v: Vec<u8> = Vec::new();
+    match v.try_reserve_exact(len) {
+        Ok(()) => Ok(v),
+        Err(_) => Err(FrameAllocFailed { bytes: len }),
+    }
+}
+
+/// Like [`take`], but FALLIBLE on a pool miss: a pool hit returns the recycled
+/// buffer (never allocates); a miss allocates via [`alloc_exact`] and returns
+/// `Err(FrameAllocFailed)` when the host is out of commit, instead of aborting.
+/// The Media Foundation reader uses this on the per-frame path so a failed frame
+/// buffer drops one frame instead of killing the process (#207 / #156).
+pub fn try_take(len: usize) -> Result<Vec<u8>, FrameAllocFailed> {
+    // Pop under the lock, then drop the guard at the `let` semicolon so a fresh
+    // allocation never holds it.
+    let recycled = pool().get_mut(&len).and_then(Vec::pop);
+    match recycled {
+        Some(mut buf) => {
+            buf.clear();
+            Ok(buf)
+        }
+        None => alloc_exact(len),
+    }
+}
+
 /// Return a buffer to its exact-capacity size class for reuse. Keeps at most
 /// [`POOL_CAP_PER_CLASS`] buffers per class; beyond the cap (or for an empty,
 /// unallocated buffer) the buffer is dropped. Called from [`PooledBuf`]'s `Drop`.
@@ -91,12 +142,22 @@ pub fn recycle(buf: Vec<u8>) {
 
 /// An owned pixel buffer whose `Drop` returns its allocation to the pool for
 /// reuse instead of freeing it (#203). Derefs to `[u8]` like the `Vec` it wraps;
-/// `Clone` makes a FRESH copy (used only when the burn overlay's
-/// `Arc::make_mut` forks a shared frame — burn defaults OFF, so the steady state
-/// never clones).
+/// `Clone` makes a separate copy, but INTO a recycled buffer of the same size
+/// class (#147 round 10). The burn overlay's `Arc::make_mut` forks EVERY paced
+/// frame while burn is ON, because the pacer always holds a second Arc.
 pub struct PooledBuf(Vec<u8>);
 
 impl PooledBuf {
+    /// A copy of `src` in a buffer taken from the pool ([`take`]), so a
+    /// steady-state copy reuses recycled capacity instead of a fresh
+    /// `VirtualAlloc` + demand-zero faults (#147 round 10). The copy is its own
+    /// allocation; its `Drop` recycles it like any other `PooledBuf`.
+    pub fn copy_from_slice(src: &[u8]) -> Self {
+        let mut buf = take(src.len());
+        buf.extend_from_slice(src);
+        Self(buf)
+    }
+
     /// Exclusive access to the inner `Vec` — the burn overlay's `make_mut` path
     /// needs `&mut Vec<u8>`, which `DerefMut` (targeting `[u8]`) cannot give.
     pub fn as_vec_mut(&mut self) -> &mut Vec<u8> {
@@ -117,7 +178,7 @@ impl From<Vec<u8>> for PooledBuf {
 
 impl Clone for PooledBuf {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self::copy_from_slice(&self.0)
     }
 }
 
@@ -245,6 +306,35 @@ mod tests {
     }
 
     #[test]
+    fn clone_copies_into_a_recycled_buffer_of_its_class() {
+        // #147 round 10: the burn overlay forks every paced frame through
+        // `Arc::make_mut` -> `PooledBuf::clone`. The fork must reuse a recycled
+        // buffer of the same size class, never a fresh 5.5 MB allocation. The
+        // spare stays alive in the pool until the clone takes it, so a fresh
+        // allocation can never land on its address by allocator coincidence.
+        let _s = guard();
+        let mut spare = Vec::with_capacity(160);
+        spare.extend_from_slice(&[0u8; 160]);
+        let cap = spare.capacity();
+        let spare_ptr = spare.as_ptr();
+        recycle(spare);
+        let mut v = Vec::with_capacity(cap);
+        v.extend((0..cap).map(|i| (i * 7) as u8));
+        let src = PooledBuf::from(v);
+
+        let copy = src.clone();
+
+        assert_eq!(
+            copy.as_ptr(),
+            spare_ptr,
+            "the clone reuses the pooled buffer"
+        );
+        assert_eq!(&copy[..], &src[..], "with the source's exact bytes");
+        assert_ne!(copy.as_ptr(), src.as_ptr(), "still a separate allocation");
+        assert_eq!(pool_len(cap), 0, "the recycled buffer left the pool");
+    }
+
+    #[test]
     fn pooled_buf_into_inner_extracts_without_recycling() {
         let _s = guard();
         let mut v = Vec::with_capacity(80);
@@ -291,5 +381,61 @@ mod tests {
         assert_eq!(pool_len(c32), 1);
         clear_pool();
         assert_eq!(pool_len(c32), 0, "clear emptied the pool");
+    }
+
+    // -----------------------------------------------------------------------
+    // #207 — try_take: fallible pool-miss allocation.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn try_take_pool_hit_returns_recycled_without_allocating() {
+        let _s = guard();
+        let mut b = Vec::with_capacity(256);
+        b.extend_from_slice(&[1u8; 256]);
+        let cap = b.capacity();
+        let p = b.as_ptr();
+        recycle(b);
+        let t = try_take(cap).expect("a pool hit never fails");
+        assert_eq!(
+            t.as_ptr(),
+            p,
+            "try_take returns the SAME recycled allocation"
+        );
+        assert!(t.is_empty(), "recycled buffer is cleared");
+        assert!(t.capacity() >= cap, "capacity retained");
+        assert_eq!(pool_len(cap), 0, "try_take removed it from the pool");
+    }
+
+    #[test]
+    fn try_take_miss_allocates_ok_with_capacity() {
+        let _s = guard();
+        let t = try_take(4096).expect("a sane allocation succeeds");
+        assert!(t.is_empty());
+        assert!(t.capacity() >= 4096, "miss allocates capacity >= len");
+        assert_eq!(pool_len(4096), 0, "a fresh miss never touches the pool");
+    }
+
+    #[test]
+    fn alloc_exact_returns_ok_with_capacity_for_a_sane_len() {
+        let v = alloc_exact(1024).expect("a sane allocation succeeds");
+        assert!(v.is_empty());
+        assert!(v.capacity() >= 1024);
+    }
+
+    #[test]
+    fn alloc_exact_impossible_len_maps_to_frame_alloc_failed_not_abort() {
+        // usize::MAX/2 bytes: try_reserve_exact rejects it (CapacityOverflow /
+        // alloc error) on every platform, so the miss path returns Err — the
+        // whole point of #207 (no `handle_alloc_error` abort on the wall).
+        let len = usize::MAX / 2;
+        let err = alloc_exact(len).expect_err("an impossible allocation must fail, not abort");
+        assert_eq!(
+            err.bytes, len,
+            "the failure carries the requested byte count"
+        );
+        assert!(
+            err.to_string().contains(&len.to_string()),
+            "Display carries the byte count for the pipeline WARN"
+        );
     }
 }

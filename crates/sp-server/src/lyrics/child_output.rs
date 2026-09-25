@@ -69,6 +69,28 @@ where
 mod tests {
     use super::{failure_tail, tail_lines};
 
+    /// #207 round-3b: the separation child's success-log tail must be wide
+    /// enough to carry mimalloc's ~40-line `MIMALLOC_SHOW_STATS` block, not
+    /// just the old 5-line diagnostic window. Behaviour-tests
+    /// `SEPARATION_STDERR_TAIL_LINES` (60) directly, not a hardcoded literal,
+    /// so a future change to the constant stays honest with this assertion.
+    #[test]
+    fn separation_stderr_tail_constant_keeps_the_last_60_lines() {
+        let input = (1..=70)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let out = tail_lines(
+            &input,
+            crate::stems::separator::SEPARATION_STDERR_TAIL_LINES,
+            300,
+        );
+        let out_lines: Vec<&str> = out.lines().collect();
+        assert_eq!(out_lines.len(), 60);
+        assert_eq!(out_lines.first(), Some(&"11"));
+        assert_eq!(out_lines.last(), Some(&"70"));
+    }
+
     #[test]
     fn keeps_only_the_last_n_lines() {
         let input = (1..=25)

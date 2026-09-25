@@ -12,6 +12,14 @@ use std::process::Stdio;
 use tokio::process::Command;
 use tracing::{debug, warn};
 
+/// #207 round 3b: how many trailing stderr lines the separation child's
+/// success AND failure logs keep. mimalloc's `MIMALLOC_SHOW_STATS=1` (see
+/// `lyrics::heavy_alloc_env`) prints a ~40-line reserved/committed/peak block
+/// at child exit; the prior 5/20-line tails truncated it before the stats
+/// ever reached the log. 60 leaves headroom above the stats block plus the
+/// `gpu_polite:`/verbose-option lines already logged today.
+pub(crate) const SEPARATION_STDERR_TAIL_LINES: usize = 60;
+
 /// Build the `separate` argv (script + flags), in order. `#162`: a CPU plan
 /// appends `--force-cpu` so the script forces in-process CPU inference
 /// (`_force_cpu()`), leaving the GPU untouched WITHOUT hiding it via
@@ -85,9 +93,10 @@ pub async fn separate_stems(
         return Ok(());
     }
 
-    // #162: hold the process-global heavy-step slot for this child's lifetime
-    // (after the cache check) — one heavy child at a time process-wide.
-    let _slot = crate::lyrics::heavy_slot::acquire_slot("stem separation").await;
+    // #144 r2: the heavy slot is acquired by the caller (`stems::worker` via
+    // `acquire_slot_for_spawn`) and held across `run_separation_watched` (incl.
+    // the GPU→CPU re-run). No acquire here — a second acquire on the same task
+    // would deadlock the Semaphore(1).
     let mut cmd = Command::new(python_path);
     cmd.args(separate_stems_args(
         script_path,
@@ -109,6 +118,27 @@ pub async fn separate_stems(
     // #154: carry the operator VRAM cap (applied only on the GPU path by the
     // script's `gpu_polite()`; harmless on the CPU path).
     for (k, v) in crate::lyrics::gpu_policy::env_for_child(gpu_mem_setting) {
+        cmd.env(k, v);
+    }
+    // #168: retain the injected mimalloc heap for the separation child — never
+    // decommit freed pages, reserve+commit one arena up front, so the per-step
+    // page-fault storm is paid once, not per inference step. Effective only when
+    // the venv interpreter carries the mimalloc override (`bootstrap_venv_exe`);
+    // an env no-op otherwise, and numerically invisible to the model.
+    // #207: carry the operator `heavy_alloc_mode` + `heavy_purge_delay_ms` (from
+    // the live containment published by `refresh_containment` this tick) into the
+    // mimalloc env so the box can measure returning the child's ~9 GB commit
+    // without a rebuild. Phase-3: `lazy` turns eager commit OFF — the lever.
+    // Round-3c: `heavy_alloc_reserve_gib` sizes the arena itself — round-3b's
+    // mimalloc self-report showed the eager-committed 4 GiB arena IS the ~4 GiB
+    // piece of the child's 8.7 GiB peak commit (`commits: 0`), so a smaller
+    // reserve is a second, independent commit lever.
+    let containment = crate::lyrics::heavy_slot::current_containment();
+    for (k, v) in crate::lyrics::heavy_alloc_env::heavy_alloc_env(
+        containment.alloc_mode,
+        containment.purge_delay_ms,
+        containment.reserve_gib,
+    ) {
         cmd.env(k, v);
     }
     // #162: stamp the priority-regime plan — caps CPU threads
@@ -174,7 +204,12 @@ pub async fn separate_stems(
     let stdout = String::from_utf8_lossy(&stdout);
     let status = status?;
     if !status.success() {
-        let tail = crate::lyrics::child_output::failure_tail(&stderr, &stdout, 20, 300);
+        let tail = crate::lyrics::child_output::failure_tail(
+            &stderr,
+            &stdout,
+            SEPARATION_STDERR_TAIL_LINES,
+            300,
+        );
         warn!("separate-stems failed ({}); output tail:\n{}", status, tail);
         anyhow::bail!(
             "separate-stems exited with status {}; output tail:\n{}",
@@ -185,7 +220,7 @@ pub async fn separate_stems(
     // The script prints `gpu_polite:` diagnostics on stderr — keep the tail visible.
     debug!(
         "separate-stems ok; stderr tail:\n{}",
-        crate::lyrics::child_output::tail_lines(&stderr, 5, 300)
+        crate::lyrics::child_output::tail_lines(&stderr, SEPARATION_STDERR_TAIL_LINES, 300)
     );
 
     // Post-condition: both stems must exist and be non-trivial.

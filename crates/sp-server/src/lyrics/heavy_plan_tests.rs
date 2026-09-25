@@ -263,14 +263,28 @@ fn creation_flags_gpu_is_create_no_window_plus_below_normal_class() {
 // ---- thread cap (pure) ---------------------------------------------------
 
 #[test]
-fn cpu_idle_threads_is_quarter_cores_at_least_one() {
-    // #162: a QUARTER of the cores (minimal load, not speed) — 3 on the 12-core box.
-    assert_eq!(cpu_idle_threads_for(12), 3);
-    assert_eq!(cpu_idle_threads_for(8), 2);
-    assert_eq!(cpu_idle_threads_for(16), 4);
-    assert_eq!(cpu_idle_threads_for(3), 1);
-    assert_eq!(cpu_idle_threads_for(1), 1);
-    assert_eq!(cpu_idle_threads_for(0), 1);
+fn cpu_idle_threads_is_quarter_cores_bounded_by_the_block() {
+    // #162: a QUARTER of the cores (minimal load, not speed) when the affinity
+    // block is wide enough not to bind (block >= cores/4).
+    assert_eq!(cpu_idle_threads_for(12, 12), 3);
+    assert_eq!(cpu_idle_threads_for(8, 8), 2);
+    assert_eq!(cpu_idle_threads_for(16, 16), 4);
+    assert_eq!(cpu_idle_threads_for(3, 3), 1);
+    // #168 round 5: the 4-logical-core default block CAPS the quarter rule.
+    // 24-core box, 4-core block → 24/4 = 6 threads capped to 4.
+    assert_eq!(cpu_idle_threads_for(24, 4), 4);
+    // #168 round 8: the default block is now 3 logical cores.
+    // 24-core box, 3-core block → 24/4 = 6 threads capped to 3.
+    assert_eq!(cpu_idle_threads_for(24, 3), 3);
+    // 24-core box, wide 12-core block → the quarter rule wins (6).
+    assert_eq!(cpu_idle_threads_for(24, 12), 6);
+    // 8-core box, 4-core block → 8/4 = 2 is already below the block, so 2.
+    assert_eq!(cpu_idle_threads_for(8, 4), 2);
+    // A block smaller than the quarter rule binds: 16/4 = 4 capped to 2.
+    assert_eq!(cpu_idle_threads_for(16, 2), 2);
+    // Never zero: cores/4 rounds to 0 (or the block is degenerate) → floor 1.
+    assert_eq!(cpu_idle_threads_for(1, 4), 1);
+    assert_eq!(cpu_idle_threads_for(0, 4), 1);
 }
 
 // ---- stage_regime_suffix (dashboard badge) -------------------------------

@@ -196,6 +196,65 @@ fn offer_video_queues_a_fixed_canvas_frame_with_a_viewer() {
 }
 
 #[test]
+fn write_frame_writes_the_canvas_and_the_next_offer_reuses_its_buffer() {
+    // #147 round 10: the feeder hands each written frame back to the tap's
+    // pool, so a watched preview letterboxes into the SAME buffer every frame
+    // instead of a fresh 337.5 KB allocation. The buffer stays alive in the
+    // pool between the write and the next offer, so the pointer match cannot
+    // come from allocator address reuse.
+    let tap = StreamTap::new("t".into(), 0);
+    let (_guard, _relay) = ViewerGuard::subscribe(&tap);
+    let rx = tap.shared().video_receiver();
+    tap.try_offer_video(1920, 1080, 1920, &solid_nv12(1920, 1080, 1920, 200, 90));
+    let first = rx.try_recv().expect("a frame is queued while watched");
+    let first_ptr = first.as_ptr() as usize;
+    let expected = first.clone();
+
+    let mut sink: Vec<u8> = Vec::new();
+    tap.shared()
+        .write_frame(&mut sink, first)
+        .expect("a Vec sink never fails");
+    assert_eq!(
+        sink, expected,
+        "the child input gets the exact canvas bytes"
+    );
+
+    tap.try_offer_video(1920, 1080, 1920, &solid_nv12(1920, 1080, 1920, 30, 160));
+    let second = rx.try_recv().expect("the second frame is queued");
+    assert_eq!(
+        second.as_ptr() as usize,
+        first_ptr,
+        "the next offer letterboxes into the recycled buffer"
+    );
+    assert_eq!(second.len(), OUT_NV12_LEN);
+    assert!(
+        second[..(OUT_W * OUT_H) as usize].iter().all(|&y| y == 30),
+        "the recycled buffer carries the NEW frame's luma, not the old one"
+    );
+}
+
+#[test]
+fn write_frame_reports_a_write_error() {
+    struct Broken;
+    impl std::io::Write for Broken {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("child gone"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let tap = StreamTap::new("t".into(), 0);
+    let err = tap
+        .shared()
+        .write_frame(&mut Broken, vec![0u8; OUT_NV12_LEN]);
+    assert!(
+        err.is_err(),
+        "a dead child's write error reaches the feeder"
+    );
+}
+
+#[test]
 fn offer_audio_is_a_noop_with_no_viewer_and_queues_with_one() {
     let tap = StreamTap::new("t".into(), 0);
     let block = [0.1f32, -0.1, 0.2, -0.2];
@@ -206,13 +265,39 @@ fn offer_audio_is_a_noop_with_no_viewer_and_queues_with_one() {
     );
 
     let (_g, _r) = ViewerGuard::subscribe(&tap);
+    let before = std::time::Instant::now();
     tap.try_offer_audio(&block, 48_000, 2);
+    let after = std::time::Instant::now();
     let got = tap
         .shared()
         .audio_receiver()
         .try_recv()
         .expect("audio queued");
-    assert_eq!(got, block.to_vec());
+    assert_eq!(got.samples, block.to_vec());
+    // #184 round G3: the block carries WHEN it was offered (the feeder places
+    // it by this arrival, never by when it was dequeued).
+    assert!(got.arrival >= before && got.arrival <= after);
+}
+
+#[test]
+fn tap_level_probe_measures_offered_audio_only_while_watched() {
+    // #184 G4: the no-viewer fast path never touches the probe (iron rule 1);
+    // with a viewer the probe counts the STEREO block that was offered.
+    let tap = StreamTap::new("t".into(), 0);
+    tap.shared().hold_tap_window();
+    tap.try_offer_audio(&[1.0, -1.0, 1.0, -1.0], 48_000, 2);
+    assert_eq!(tap.shared().tap_pending().1, 0, "no viewer, no measurement");
+
+    let (_g, _r) = ViewerGuard::subscribe(&tap);
+    tap.try_offer_audio(&[1.0, -1.0, 1.0, -1.0], 48_000, 2);
+    // A mono block is upmixed to stereo first: 2 mono samples -> 4 measured.
+    tap.try_offer_audio(&[1.0, -1.0], 48_000, 1);
+    let (db, n) = tap.shared().tap_pending();
+    assert_eq!(n, 8);
+    assert!(
+        db.abs() < 1e-4,
+        "full-scale offered audio reads 0 dBFS, got {db}"
+    );
 }
 
 #[test]
@@ -278,9 +363,17 @@ fn lead_ms_for_sdk_path_is_the_emitter_lookahead() {
 }
 
 #[test]
-fn lead_ms_for_paced_path_has_no_lead() {
-    // genlock_pacing == true → no emitter, plain 40 ms pairing → lead 0.
-    assert_eq!(lead_ms_for(true), 0);
+fn lead_ms_for_paced_path_is_the_paced_decoder_read_ahead() {
+    // genlock_pacing == true → no emitter, but the paced decoder reads
+    // PACED_AUDIO_LEAD_MS (250 ms) of audio ahead of each frame (#148 v4). At
+    // the decode seam the audio therefore leads the video by 250 − 40 = 210 ms,
+    // and the preview feeder must hold it that long. The test is pinned to the
+    // paced constant so the preview can never drift from the cushion; the exact
+    // value kills a `return 0` or branch-swap mutant.
+    let paced =
+        crate::playback::pacer::PACED_AUDIO_LEAD_MS - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS;
+    assert_eq!(u64::from(lead_ms_for(true)), paced);
+    assert_eq!(lead_ms_for(true), 210);
 }
 
 #[test]
@@ -334,7 +427,7 @@ fn offer_frame_feeds_the_stream_video_and_audio_taps() {
         .audio_receiver()
         .try_recv()
         .expect("the audio tap got the block");
-    assert_eq!(got, vec![0.25f32, -0.25, 0.5, -0.5]);
+    assert_eq!(got.samples, vec![0.25f32, -0.25, 0.5, -0.5]);
 }
 
 #[test]
@@ -392,32 +485,289 @@ fn audio_preroll_samples_caps_the_connect_gap_at_5s() {
     assert_eq!(audio_preroll_samples(9_000, 0), 480_000);
 }
 
-// ── #178 item 15: preview audio-continuity gap fill ──────────────────────────
+// ── #184 round G2: the preview audio is kept on the wall clock BOTH ways ─────
+
+/// Stereo frames per millisecond at 48 kHz (test-side literal, so a mutant of
+/// the production constant cannot hide behind the same expression).
+const F: u64 = 48;
 
 #[test]
-fn gap_fill_is_zero_at_or_below_150ms_and_fills_above() {
-    // In sync (0 frames, 0 ms wall) → no gap.
-    assert_eq!(gap_fill_samples(0, 0), 0);
-    // Exactly 150 ms behind → still at the threshold, no fill.
-    assert_eq!(gap_fill_samples(150, 0), 0);
-    // 151 ms behind → fills 151 ms of interleaved-stereo silence (151*48*2).
-    assert_eq!(gap_fill_samples(151, 0), 151 * 48 * 2);
-    // Audio has kept up with the wall clock → no gap.
-    // 48_000 frames written = 1000 ms; wall 1000 ms → gap 0.
-    assert_eq!(gap_fill_samples(1000, 48_000), 0);
-    // A small drift under the threshold does not fill: 48_000 frames = 1000 ms,
-    // wall 1100 ms → 100 ms gap ≤ 150.
-    assert_eq!(gap_fill_samples(1100, 48_000), 0);
-    // Just over: wall 1151 ms → 151 ms gap → fill.
-    assert_eq!(gap_fill_samples(1151, 48_000), 151 * 48 * 2);
+fn align_constants_are_the_design_values() {
+    // #184 G2 design comment 5802429990: pad when > 150 ms behind, trim a
+    // burst that would run > 300 ms ahead back to 100 ms ahead.
+    assert_eq!(ALIGN_PAD_THRESHOLD_MS, 150);
+    assert_eq!(MAX_AHEAD_MS, 300);
+    assert_eq!(ALIGN_TARGET_AHEAD_MS, 100);
+    assert_eq!(PREVIEW_AUDIO_FRAMES_PER_MS, 48);
 }
 
 #[test]
-fn gap_fill_is_capped_at_10s_per_gap() {
-    // Exactly 10 s gap fills 10 s.
-    assert_eq!(gap_fill_samples(10_000, 0), 10_000 * 48 * 2);
-    // 10 s + 1 ms is capped to 10 s.
-    assert_eq!(gap_fill_samples(10_001, 0), 10_000 * 48 * 2);
-    // A 30 s gap still only fills 10 s.
-    assert_eq!(gap_fill_samples(30_000, 0), 10_000 * 48 * 2);
+fn align_block_on_time_block_is_written_verbatim() {
+    // 20 ms behind the wall, a 20 ms block arrives → nothing padded, nothing cut.
+    let a = align_block(1_000 * F, 980 * F, (20 * F) as usize);
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: 0
+        }
+    );
+    // The very first block of a fresh feeder (wall 0, written 0).
+    let a = align_block(0, 0, 960);
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: 0
+        }
+    );
+    // Slightly AHEAD of the wall (the previous block overshot): no pad, and the
+    // result stays under the 300 ms bound → verbatim.
+    let a = align_block(1_000 * F, 1_000 * F + 1, 960);
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: 0
+        }
+    );
+}
+
+#[test]
+fn align_block_late_block_is_padded_up_to_the_wall_first() {
+    // 1 s behind → 1 s of silence, then the block (a gap in the source).
+    let a = align_block(2_000 * F, 1_000 * F, 960);
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: (1_000 * F) as usize,
+            skip_frames: 0
+        }
+    );
+}
+
+#[test]
+fn align_block_pad_threshold_is_exclusive_at_150ms() {
+    // Exactly 150 ms behind → at the threshold, no pad.
+    let a = align_block(1_000 * F, 850 * F, 960);
+    assert_eq!(a.pad_frames, 0);
+    // One frame more → pad the whole gap up to the wall.
+    let a = align_block(1_000 * F, 850 * F - 1, 960);
+    assert_eq!(a.pad_frames, (150 * F + 1) as usize);
+    assert_eq!(a.skip_frames, 0);
+}
+
+#[test]
+fn align_block_burst_is_trimmed_so_it_lands_100ms_ahead() {
+    // The late-burst case that used to accumulate the ~70 s owner lag: the
+    // feeder is on the wall and a 1 s catch-up burst arrives at once. The
+    // OLDEST 900 ms are dropped so written ends at wall + 100 ms.
+    let wall = 5_000 * F;
+    let a = align_block(wall, wall, (1_000 * F) as usize);
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: (900 * F) as usize
+        }
+    );
+    let written = wall + a.pad_frames as u64 + (1_000 * F) - a.skip_frames as u64;
+    assert_eq!(written, wall + 100 * F);
+}
+
+#[test]
+fn align_block_skip_threshold_is_exclusive_at_300ms_ahead() {
+    let wall = 5_000 * F;
+    // A block that ends exactly 300 ms ahead is written verbatim.
+    let a = align_block(wall, wall, (300 * F) as usize);
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: 0
+        }
+    );
+    // One frame more → trimmed back to 100 ms ahead: skip = 200 ms + 1 frame.
+    let a = align_block(wall, wall, (300 * F + 1) as usize);
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: (200 * F + 1) as usize
+        }
+    );
+}
+
+#[test]
+fn align_block_skip_never_exceeds_the_block() {
+    let wall = 5_000 * F;
+    // Already 290 ms ahead, a 20 ms block would end 310 ms ahead: the target
+    // (100 ms ahead) is BEHIND where we already are, so the whole block is
+    // dropped — never more than the block, never a negative write.
+    let a = align_block(wall, wall + 290 * F, (20 * F) as usize);
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: (20 * F) as usize
+        }
+    );
+    // An empty block never skips anything.
+    let a = align_block(wall, wall + 400 * F, 0);
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: 0,
+            skip_frames: 0
+        }
+    );
+}
+
+#[test]
+fn align_block_pads_then_trims_a_late_burst() {
+    // 1 s behind AND a 500 ms burst: pad 1 s up to the wall, then the burst
+    // would end 500 ms ahead → drop its oldest 400 ms (lands 100 ms ahead).
+    let wall = 5_000 * F;
+    let a = align_block(wall, wall - 1_000 * F, (500 * F) as usize);
+    assert_eq!(
+        a,
+        AlignAction {
+            pad_frames: (1_000 * F) as usize,
+            skip_frames: (400 * F) as usize
+        }
+    );
+}
+
+#[test]
+fn align_timeout_pads_up_to_the_wall_when_no_block_arrived() {
+    // #184 G2: with NO block for 200 ms the feeder still writes silence up to
+    // the wall — the encoder (which interleaves by timestamp) is never starved.
+    assert_eq!(align_timeout(1_000 * F, 800 * F), (200 * F) as usize);
+    assert_eq!(align_timeout(60_000 * F, 0), (60_000 * F) as usize);
+    // On the wall / ahead of it → nothing.
+    assert_eq!(align_timeout(1_000 * F, 1_000 * F), 0);
+    assert_eq!(align_timeout(1_000 * F, 1_100 * F), 0);
+    assert_eq!(align_timeout(0, 0), 0);
+    // Exclusive 150 ms threshold, same as a block.
+    assert_eq!(align_timeout(1_000 * F, 850 * F), 0);
+    assert_eq!(
+        align_timeout(1_000 * F, 850 * F - 1),
+        (150 * F + 1) as usize
+    );
+}
+
+#[test]
+fn block_tail_range_drops_the_skipped_oldest_frames_in_interleaved_samples() {
+    // A 4-frame (8-sample) stereo block, skip 0 → the whole block.
+    assert_eq!(block_tail_range(0, 8), 0..8);
+    // Skip 1 frame = the first 2 interleaved samples.
+    assert_eq!(block_tail_range(1, 8), 2..8);
+    // Skip exactly the block → an empty tail at the end.
+    assert_eq!(block_tail_range(4, 8), 8..8);
+    // A skip clamped past the block never indexes out of range.
+    assert_eq!(block_tail_range(9, 8), 8..8);
+    // Empty block.
+    assert_eq!(block_tail_range(0, 0), 0..0);
+}
+
+#[test]
+fn block_tail_range_never_writes_a_dangling_half_frame() {
+    // #184 G2 review: an odd-length block (never produced by `to_stereo`, but
+    // the feeder must not trust that) would leave one lone sample — writing it
+    // swaps L/R for the rest of the child. The tail stops at the last WHOLE
+    // frame, so written frames == tail.len() / 2 exactly.
+    assert_eq!(block_tail_range(0, 7), 0..6);
+    assert_eq!(block_tail_range(1, 7), 2..6);
+    // Skipping every whole frame of an odd block leaves nothing (the lone
+    // sample is dropped, not written).
+    assert_eq!(block_tail_range(3, 7), 6..6);
+    assert_eq!(block_tail_range(5, 7), 6..6);
+    assert_eq!(block_tail_range(0, 1), 0..0);
+    for n in 0..40usize {
+        for skip in 0..25usize {
+            let r = block_tail_range(skip, n);
+            assert!(r.start <= r.end && r.end <= n, "skip {skip} len {n}: {r:?}");
+            assert_eq!(r.start % 2, 0, "skip {skip} len {n}: starts mid-frame");
+            assert_eq!(r.len() % 2, 0, "skip {skip} len {n}: half a frame");
+        }
+    }
+}
+
+/// Tiny deterministic LCG (no rand dependency) for the property-style loop.
+struct Lcg(u64);
+impl Lcg {
+    fn next(&mut self) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        self.0 >> 33
+    }
+    fn range(&mut self, lo: u64, hi: u64) -> u64 {
+        lo + self.next() % (hi - lo + 1)
+    }
+}
+
+#[test]
+fn align_keeps_written_within_300ms_of_the_wall_over_1000_mixed_steps() {
+    // Property-style: 1000 steps alternating on-time blocks, late blocks (the
+    // source stalled), catch-up bursts and 200 ms timeouts. After EVERY step
+    // |written − wall| ≤ 300 ms — the add-only gap fill let this grow by every
+    // hiccup (~70 s on the box); the aligner bounds it forever.
+    let mut rng = Lcg(0x5eed_0184);
+    let mut wall: u64 = 0;
+    let mut written: u64 = 0;
+    let bound = (300 * F) as i64;
+    let (mut padded, mut skipped) = (0u64, 0u64);
+    for step in 0..1000u64 {
+        let kind = (step + rng.next() % 2) % 4;
+        match kind {
+            // On-time: the wall advances by exactly the block's duration.
+            0 => {
+                let b = rng.range(10, 50) * F;
+                wall += b;
+                let a = align_block(wall, written, b as usize);
+                assert!(a.skip_frames as u64 <= b);
+                written += a.pad_frames as u64 + b - a.skip_frames as u64;
+                padded += a.pad_frames as u64;
+                skipped += a.skip_frames as u64;
+            }
+            // Late: the source stalled 160 ms–1.5 s, then one block.
+            1 => {
+                wall += rng.range(160, 1_500) * F;
+                let b = rng.range(10, 50) * F;
+                let a = align_block(wall, written, b as usize);
+                assert!(a.skip_frames as u64 <= b);
+                written += a.pad_frames as u64 + b - a.skip_frames as u64;
+                padded += a.pad_frames as u64;
+                skipped += a.skip_frames as u64;
+            }
+            // Burst: 0.4–3 s of backlogged audio arrives at (almost) once.
+            2 => {
+                wall += rng.range(0, 10) * F;
+                let b = rng.range(400, 3_000) * F;
+                let a = align_block(wall, written, b as usize);
+                assert!(a.skip_frames as u64 <= b);
+                written += a.pad_frames as u64 + b - a.skip_frames as u64;
+                padded += a.pad_frames as u64;
+                skipped += a.skip_frames as u64;
+            }
+            // Timeout: 200 ms with no block.
+            _ => {
+                wall += 200 * F;
+                let p = align_timeout(wall, written);
+                written += p as u64;
+                padded += p as u64;
+            }
+        }
+        let diff = written as i64 - wall as i64;
+        assert!(
+            diff.abs() <= bound,
+            "step {step} (kind {kind}): written − wall = {} ms exceeds ±300 ms",
+            diff / F as i64
+        );
+    }
+    // The loop really exercised both directions.
+    assert!(padded > 0, "no step padded");
+    assert!(skipped > 0, "no step trimmed a burst");
 }

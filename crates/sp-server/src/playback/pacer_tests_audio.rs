@@ -1,12 +1,12 @@
-//! Pacer audio clock-discipline wiring tests (#148).
+//! Pacer paced-audio wiring tests (#148).
 //!
-//! Drive the pure [`Pacer`] with a settable wall clock and assert the NEW audio
+//! Drive the pure [`Pacer`] with a settable wall clock and assert the audio
 //! contract: audio is decoupled from the video frame decision — the pacer pushes
-//! every consumed frame's audio into its `AudioGridBuffer` and, at each active
+//! every pulled frame's audio into its `AudioGridBuffer` and, at each active
 //! boundary, submits EXACTLY `samples_per_boundary` (1600 @ 48 kHz/30) samples,
-//! including on a sub-grid video repeat. `anchor()` clears the buffer + resets
-//! the PLL, and a sustained buffer drift drives `applied_ppm` in the correcting
-//! direction. `super::*` resolves to the `pacer` module under test.
+//! including on a sub-grid video repeat. These frames carry UNTIMED audio (a
+//! plain FIFO); the media-time alignment is `pacer_tests_av_align.rs`.
+//! `super::*` resolves to the `pacer` module under test.
 
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
@@ -151,22 +151,16 @@ fn audio_stats_report_the_grid_and_enabled_flag() {
     assert!(stats.enabled, "a paced pacer reports audio enabled");
     assert_eq!(stats.samples_per_boundary, 1600);
     assert_eq!(stats.underruns, 0);
-    assert_eq!(stats.applied_ppm, 0.0);
 }
 
 #[test]
-fn sustained_growth_drives_applied_positive_and_anchor_resets() {
-    // Rework (#148): the servo is a SLOW TRIM off the 60 s rate residual, so a
-    // real correction needs > 2 min of sustained drift, not the old 1 Hz loop.
-    // Feed a mild over-rate (1608 samples/frame vs 1600 taken → the buffer grows
-    // ~8 samples/boundary): the 60 s means read a large positive drift, so the
-    // slow trim drives applied_ppm POSITIVE (drain faster). 5 min at 30 fps;
-    // frames generated on demand (no huge preallocation), and push-before-take
-    // keeps the level ≥ 1600 at every take (no startup underrun).
+fn anchor_empties_the_audio_buffer() {
+    // Build up buffered audio (over-rate feed), then a seek / new song: the
+    // audio buffer starts empty on the new origin.
     let (mut pacer, clk) = anchored_pacer();
     let next = Cell::new(0i64);
     let mut sink = AudioRecordingSink::default();
-    for k in 1..=9000i64 {
+    for k in 1..=300i64 {
         clk.set(b(k));
         pacer.service(
             || {
@@ -177,27 +171,23 @@ fn sustained_growth_drives_applied_positive_and_anchor_resets() {
             &mut sink,
         );
     }
-    // A sustained growing buffer (file/audio clock fast) must engage a POSITIVE
-    // applied_ppm (drain faster) — the correcting direction.
     assert!(
-        pacer.audio_stats().applied_ppm > 0.0,
-        "sustained growth must drive applied_ppm positive, got {}",
-        pacer.audio_stats().applied_ppm
+        pacer.audio_stats().buffer_ms > 0,
+        "buffer should hold audio"
     );
-
-    // anchor() must clear the buffer, the averager, and reset the PLL back to 0.
-    clk.set(b(9001));
+    clk.set(b(301));
     pacer.anchor();
-    let stats = pacer.audio_stats();
-    assert_eq!(stats.applied_ppm, 0.0, "anchor resets the PLL");
-    assert_eq!(stats.residual_ppm, 0.0, "anchor clears the residual");
-    assert_eq!(stats.buffer_ms, 0, "anchor empties the buffer");
+    assert_eq!(
+        pacer.audio_stats().buffer_ms,
+        0,
+        "anchor empties the buffer"
+    );
 }
 
 #[test]
 fn audio_resume_reset_clears_audio_but_keeps_the_video_pending() {
     // Build up some buffered audio and park a video frame, then Resume: the audio
-    // buffer + PLL are flushed (item 4) while the VIDEO pending/anchor survive.
+    // buffer is flushed (item 4) while the VIDEO pending/anchor survive.
     let (mut pacer, clk) = anchored_pacer();
     let next = Cell::new(0i64);
     let mut sink = AudioRecordingSink::default();
@@ -221,8 +211,6 @@ fn audio_resume_reset_clears_audio_but_keeps_the_video_pending() {
     pacer.audio_resume_reset();
     let stats = pacer.audio_stats();
     assert_eq!(stats.buffer_ms, 0, "Resume empties the audio buffer");
-    assert_eq!(stats.applied_ppm, 0.0, "Resume resets the PLL");
-    assert_eq!(stats.residual_ppm, 0.0, "Resume clears the residual");
     assert_eq!(
         pacer.has_pending(),
         had_pending,
@@ -307,3 +295,8 @@ fn frame_submitter_sink_sends_one_1600_sample_audio_chunk_before_each_video() {
         "expected ~10 boundary emits, got {video_count}"
     );
 }
+
+// Media-time A/V alignment acceptance (#148 design v2), nested here so
+// `pacer.rs` stays under the 1000-line cap.
+#[path = "pacer_tests_av_align.rs"]
+mod pacer_tests_av_align;

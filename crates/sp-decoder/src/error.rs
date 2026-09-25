@@ -38,4 +38,11 @@ pub enum DecoderError {
     /// Video and audio sidecars disagree on duration / format.
     #[error("Video/audio mismatch: {0}")]
     Mismatch(String),
+
+    /// #207: a per-frame video buffer could not be allocated (host out of
+    /// commit). The pipeline maps this to a dropped frame + a rate-limited WARN +
+    /// a `frames_dropped_alloc` counter, so the wall stutters instead of the
+    /// process aborting (`handle_alloc_error`, the #156 `0xc0000409` class).
+    #[error("Frame buffer allocation failed: {0} bytes")]
+    FrameAlloc(usize),
 }

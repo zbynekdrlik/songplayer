@@ -129,6 +129,50 @@ pub(crate) fn isolation_step_timeout(
     )
 }
 
+/// #144: what the ★ isolation step should do for a song, decided from the
+/// stems worker's state instead of running a second (BS-RoFormer) isolation
+/// pass. Every video already gets a vocals sidecar from the stems worker
+/// (#184 G0, `{base}_audio_vocals.flac`), so the mtl aligner's vocals come from
+/// THAT — `preprocess-vocals` is now only anvuew dereverb + 16 kHz resample.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum IsolationInput {
+    /// The stems worker finished and the vocals sidecar exists on disk — feed
+    /// this path into the dereverb + resample step.
+    Stems(PathBuf),
+    /// The stems worker has not produced the vocals sidecar yet — defer the
+    /// song to the queue with NO penalty (no heavy child spawned); the stems
+    /// worker drains the whole catalogue, so it will get there.
+    WaitForStems,
+    /// The stems worker will NEVER produce vocals for this song (terminal
+    /// `'unsupported'` — too long / no vocals). No isolation path exists any
+    /// more, so the song takes the g35t base tier without spawning a child.
+    BaseTierOnly,
+}
+
+/// Pure decision for [`IsolationInput`] from the row's raw `stem_status`
+/// (`crate::db::models_stems` vocabulary: NULL = pending, `'done'`, `'failed'`,
+/// `'unsupported'`) and whether the vocals sidecar is on disk.
+///
+/// - `'unsupported'` → [`IsolationInput::BaseTierOnly`] (terminal; no stems ever).
+/// - `'done'` AND the vocals file exists → [`IsolationInput::Stems`].
+/// - anything else (pending / failed / done-but-file-missing) →
+///   [`IsolationInput::WaitForStems`].
+///
+/// Keyed on the RAW status (not the collapsed display `StemsState`, which folds
+/// in instrumental-file existence) so the mtl step depends only on the ONE
+/// track it consumes — the vocals.
+pub(crate) fn isolation_input(
+    stem_status: Option<&str>,
+    vocals_path: &std::path::Path,
+    vocals_exists: bool,
+) -> IsolationInput {
+    match stem_status {
+        Some("unsupported") => IsolationInput::BaseTierOnly,
+        Some("done") if vocals_exists => IsolationInput::Stems(vocals_path.to_path_buf()),
+        _ => IsolationInput::WaitForStems,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Live-handle seam for the lyrics worker — reads its in-process wall handles to
 // drive the abort watcher, and surfaces the abort to the dashboard. I/O only;
@@ -160,29 +204,69 @@ impl crate::lyrics::worker::LyricsWorker {
         self.enter_wall_wait(detail).await;
     }
 
-    /// Vocal isolation (`aligner::preprocess_vocals`) under the #161 abort
-    /// watcher. `Ok(Some(wav))` on success, `Ok(None)` when isolation is not
-    /// applicable (no venv python / no audio file) or the subprocess failed
-    /// normally (best-effort, same as before #161), and `Err(WallAbort)` when
-    /// the wall went busy mid-run — in which case the partial WAV is deleted so
-    /// the next idle pick re-isolates from scratch to identical bytes. Extracted
-    /// from `process_song` (worker.rs 1000-line cap).
+    /// #144: resolve what the ★ isolation step should do for `row` from the
+    /// stems worker's state. The mtl aligner's vocals now come from the stems
+    /// worker's vocals sidecar (`stems::stem_paths(audio).0`, #184 G0) instead
+    /// of a second BS-RoFormer pass, so this reads the row's raw `stem_status`
+    /// and whether that sidecar is on disk, and hands the pure [`isolation_input`]
+    /// decision back to the caller.
+    ///
+    /// The raw `stem_status` column is read directly (not via
+    /// `models_stems::video_stems_info`, whose collapsed `StemsState::Ready`
+    /// folds in instrumental-file existence) so the decision keys ONLY on the
+    /// one track the mtl step consumes — the vocals. I/O seam; the decision is
+    /// unit-tested pure.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn resolve_isolation_input(
+        &self,
+        row: &crate::db::models::VideoLyricsRow,
+    ) -> IsolationInput {
+        // No mix audio on disk → no vocals sidecar can exist → base tier.
+        let Some(audio) = row.audio_file_path.as_deref() else {
+            return IsolationInput::BaseTierOnly;
+        };
+        let vocals_path = crate::stems::stem_paths(std::path::Path::new(audio)).0;
+        // Raw stem_status vocabulary (`crate::db::models_stems`): NULL = pending,
+        // 'done', 'failed', 'unsupported'.
+        let stem_status: Option<String> = match sqlx::query_scalar::<_, Option<String>>(
+            "SELECT stem_status FROM videos WHERE id = ?",
+        )
+        .bind(row.id)
+        .fetch_optional(&self.pool)
+        .await
+        {
+            Ok(Some(s)) => s,
+            _ => None,
+        };
+        let exists = vocals_path.exists();
+        isolation_input(stem_status.as_deref(), &vocals_path, exists)
+    }
+
+    /// Vocal preprocessing (`aligner::preprocess_vocals`) under the #161 abort
+    /// watcher. #144: `vocals_in` is the stems worker's vocals sidecar — the
+    /// step is now anvuew dereverb + 16 kHz resample only (no isolation pass).
+    /// `Ok(Some(wav))` on success, `Ok(None)` when it is not applicable (no venv
+    /// python / the vocals sidecar vanished) or the subprocess failed normally
+    /// (best-effort, same as before #161), and `Err(WallAbort)` when the wall
+    /// went busy mid-run — in which case the partial WAV is deleted so the next
+    /// idle pick re-runs from scratch to identical bytes. Extracted from
+    /// `process_song` (worker.rs 1000-line cap).
     #[cfg_attr(test, mutants::skip)]
     pub(crate) async fn isolate_vocals(
         &self,
         row: &crate::db::models::VideoLyricsRow,
+        vocals_in: &std::path::Path,
         gpu_mem: Option<&str>,
         plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
         abort_enabled: bool,
     ) -> Result<Option<PathBuf>, WallAbort> {
         let venv_python = self.venv_python.read().await.clone();
-        let (Some(python), Some(audio_path)) = (
-            venv_python.as_ref(),
-            row.audio_file_path.as_ref().map(PathBuf::from),
-        ) else {
+        let Some(python) = venv_python.as_ref() else {
             return Ok(None);
         };
-        if !audio_path.exists() {
+        // Defensive: the sidecar existed at the `isolation_input` decision; if it
+        // vanished before the spawn, take the base tier rather than fail.
+        if !vocals_in.exists() {
             return Ok(None);
         }
         let wav_path = self
@@ -195,7 +279,7 @@ impl crate::lyrics::worker::LyricsWorker {
             python,
             &self.script_path,
             &self.models_dir,
-            &audio_path,
+            vocals_in,
             &wav_path,
             &work_dir,
             isolation_step_timeout(plan, row.duration_ms),

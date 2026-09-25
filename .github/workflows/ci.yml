@@ -129,12 +129,12 @@ jobs:
       - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy + soundfile)
         run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1 soundfile==0.12.1
       - name: Lint with ruff
-        run: ruff check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_voice_check.py
+        run: ruff check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py
       - name: Format check with ruff
-        run: ruff format --check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_voice_check.py
+        run: ruff format --check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
-      - name: Run scripts pytest (#171 segment stitch / additivity)
+      - name: Run scripts pytest (#171 segment stitch / additivity, #156 minidump helpers)
         run: pytest scripts/tests -v
       - name: Run dubbing eval pytest (#175 fit policy)
         run: pytest eval/dubbing/tests -v
@@ -205,6 +205,38 @@ jobs:
           path: dist/
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2.0.0" --locked
+      - name: Build and stage mimalloc override DLLs (#168)
+        # Build mimalloc's Windows dynamic override from a PINNED tag and stage
+        # the override DLL + the repo's prebuilt redirect DLL + minject.exe into
+        # resources/mimalloc/, which tauri.conf.json's bundle.resources ships in
+        # the NSIS installer next to SongPlayer.exe. The step FAILS if any of the
+        # three files is missing (no continue-on-error, no "|| true").
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # microsoft/mimalloc, pinned to the newest v2.2.x tag.
+          $tag = 'v2.2.7'  # commit 6a53d72d46a1a641d8e5793db37cb2da60e04192
+          git clone --depth 1 --branch $tag https://github.com/microsoft/mimalloc.git mimalloc-src
+          if ($LASTEXITCODE -ne 0) { throw "git clone mimalloc $tag failed" }
+          cmake -S mimalloc-src -B mimalloc-build -A x64 -DMI_OVERRIDE=ON -DMI_BUILD_STATIC=OFF -DMI_BUILD_OBJECT=OFF -DMI_BUILD_TESTS=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'cmake configure failed' }
+          cmake --build mimalloc-build --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'cmake build failed' }
+          $dest = 'src-tauri/resources/mimalloc'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          # CMake Release output name of the shared override target is mimalloc.dll
+          # (mi_libname = "mimalloc"), which is ALSO minject's default target.
+          $built = Get-ChildItem -Path mimalloc-build -Recurse -Filter 'mimalloc.dll' |
+            Where-Object { $_.FullName -like '*Release*' } | Select-Object -First 1
+          if (-not $built) { throw 'mimalloc.dll (override) was not built' }
+          Copy-Item $built.FullName (Join-Path $dest 'mimalloc.dll') -Force
+          Copy-Item 'mimalloc-src/bin/mimalloc-redirect.dll' (Join-Path $dest 'mimalloc-redirect.dll') -Force
+          Copy-Item 'mimalloc-src/bin/minject.exe' (Join-Path $dest 'minject.exe') -Force
+          foreach ($f in @('mimalloc.dll', 'mimalloc-redirect.dll', 'minject.exe')) {
+            if (-not (Test-Path (Join-Path $dest $f))) { throw "staged mimalloc file missing: $f" }
+          }
+          Write-Host 'Staged mimalloc override resources:'
+          Get-ChildItem $dest | Format-Table Name, Length
       - name: Build Tauri app
         run: cargo tauri build
       - name: Upload NSIS installer
@@ -213,6 +245,13 @@ jobs:
           name: tauri-installer
           path: src-tauri/target/release/bundle/nsis/*.exe
           retention-days: 5
+      - name: Upload SongPlayer PDB (symbols for the next WER dump, #156)
+        uses: actions/upload-artifact@v4
+        with:
+          name: songplayer-pdb
+          path: src-tauri/target/release/SongPlayer.pdb
+          if-no-files-found: error
+          retention-days: 30
 
   frontend-e2e:
     name: Frontend E2E Tests
@@ -901,7 +940,15 @@ jobs:
 
           $action = New-ScheduledTaskAction -Execute $ExePath -WorkingDirectory $InstallDir
           $trigger = New-ScheduledTaskTrigger -AtLogon -User "Resolume"
-          $principal = New-ScheduledTaskPrincipal -UserId "Resolume" -LogonType Interactive -RunLevel Limited
+          # -RunLevel Highest (#147 round 11): `Resolume` is an Administrator, and
+          # a Limited task gets the filtered UAC token, which does NOT hold
+          # SeIncreaseBasePriorityPrivilege. SongPlayer enables that privilege
+          # (#147 r10) for the heavy child's Job Object working-set cap; with the
+          # filtered token it failed (box: err=1300), and the cap was rejected
+          # (SetInformationJobObject err 1314). Highest runs SongPlayer with the
+          # full token, which holds it. (The r9 SeIncreaseWorkingSetPrivilege is
+          # in both tokens; only SeIncreaseBasePriorityPrivilege needs Highest.)
+          $principal = New-ScheduledTaskPrincipal -UserId "Resolume" -LogonType Interactive -RunLevel Highest
           # -Priority 4 (normal): the default 7 runs SongPlayer AND every child it
           # spawns at low I/O + memory priority (2026-09-15 measurement) — wrong for
           # the process that feeds the wall.
@@ -1784,12 +1831,19 @@ jobs:
         env:
           SONGPLAYER_URL: http://localhost:8920
           OBS_WS_URL: ws://localhost:4455
+          # #147 A/V sync + dropout gate (e2e/post-deploy-av-sync.spec.ts):
+          # the Python that runs scripts/av_sync_check.py (numpy) and the
+          # app's bundled ffmpeg (the box has no ffprobe; none is needed).
+          SP_AVSYNC_PYTHON: C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe
+          SP_FFMPEG: C:\ProgramData\SongPlayer\cache\tools\ffmpeg.exe
         run: |
-          # Runs the committed e2e/post-deploy.spec.ts against the
+          # Runs the committed e2e/post-deploy*.spec.ts against the
           # deployed SongPlayer + OBS. This suite exercises the click
           # through the dashboard Play button, the NowPlaying
           # broadcast, and scene-driven playback — the workflows that
           # would have caught issues #8, #9, and #11 before shipping.
+          # It includes the #147 gate: an OBS program recording compared
+          # with the original sidecars (|A/V| <= 40 ms, zero dropouts).
           Set-Location $env:GITHUB_WORKSPACE\e2e
           npm ci 2>&1 | Select-Object -Last 5
           if ($LASTEXITCODE -ne 0) {

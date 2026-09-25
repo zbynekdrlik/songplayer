@@ -79,13 +79,18 @@ impl LyricsWorker {
             return Err(crate::lyrics::heavy_plan::HeavyDefer::StartupGrace);
         }
 
-        // #162: memory-headroom guard BEFORE the mtl heavy step (after the skip
-        // conditions, so it only defers when mtl WILL run). Below the 4 GiB floor
-        // → defer the whole song with no backoff (`WaitingForMemory`); the WARN
-        // with the numbers is logged in `heavy_step_memory_ok`.
-        if crate::lyrics::heavy_slot::heavy_step_memory_defers("mtl align") {
-            return Err(crate::lyrics::heavy_plan::HeavyDefer::Memory);
-        }
+        // #144 r2: QUEUE for the heavy slot (fair FIFO — block behind a running
+        // child), then measure headroom AT SPAWN with the permit held (after the
+        // skip conditions, so it only queues when mtl WILL run). Below the 4 GiB
+        // floor → release the permit and defer the whole song with no backoff
+        // (`WaitingForMemory`); the WARN fires inside `memory_ok_for`. Held across
+        // `run_reference_stage` (incl. a CUDA-OOM `--no-cuda` retry), so the deep
+        // acquire in `mtl_aligner::run_mtl_align` is gone — a second acquire on
+        // the same task would deadlock the Semaphore(1).
+        let _slot = match crate::lyrics::heavy_slot::acquire_slot_for_spawn("mtl align").await {
+            Ok(g) => g,
+            Err(_) => return Err(crate::lyrics::heavy_plan::HeavyDefer::Memory),
+        };
 
         let outcome =
             crate::lyrics::orchestrator::run_reference_stage(backend, wav, youtube_id, &best.lines)

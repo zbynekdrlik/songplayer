@@ -1,16 +1,38 @@
-//! Truth-table + precedence tests for `genlock::lock_state` (#149, Lane 1,
-//! contract §7 A7.3). RED-first: this file is wired from `genlock.rs` and
-//! references `crate::genlock::lock_state`, which does not exist until the
-//! GREEN commit — a documented compile-failure RED.
+//! Truth-table + precedence + calibration tests for `genlock::lock_state`
+//! (#149, Lane 1, contract §7 A7.3; rate-normalised rule #168 round 6). Wired
+//! from `genlock.rs`; references `crate::genlock::lock_state`.
 
-use crate::genlock::lock_state::{LockState, OutputLock, derive, summarize};
+use crate::genlock::lock_state::{
+    LockInputs, LockState, OutputLock, derive, expected_repeat_permille, summarize,
+};
 
-// ---- the five branches, each with its exact reason ----
+/// A healthy LOCKED base: clock ok, pacing on, a receiver, no window events, a
+/// full minute of 24-fps-on-30-grid slots. Tests override single fields with
+/// struct-update syntax so no 9-arg helper is needed (`too_many_arguments`).
+fn base() -> LockInputs {
+    LockInputs {
+        clock_ok: true,
+        pacing_enabled: true,
+        connections: 2,
+        late_w: 0,
+        repeats_w: 0,
+        resyncs_w: 0,
+        slots_w: 1800,
+        source_fps: 24.0,
+        grid_fps: 30,
+        decoding: true,
+    }
+}
+
+// ---- the precedence branches, each with its exact reason ----
 
 #[test]
 fn unlocked_when_clock_not_ok() {
     // clock_ok=false wins even with pacing enabled + a receiver + no events.
-    let (s, r) = derive(false, true, 3, 0, 0, 0);
+    let (s, r) = derive(&LockInputs {
+        clock_ok: false,
+        ..base()
+    });
     assert_eq!(s, LockState::Unlocked);
     assert_eq!(r, "clock not ok");
 }
@@ -18,70 +40,337 @@ fn unlocked_when_clock_not_ok() {
 #[test]
 fn unlocked_when_pacing_disabled() {
     // clock ok but pacing OFF (today's flag-OFF steady state).
-    let (s, r) = derive(true, false, 3, 0, 0, 0);
+    let (s, r) = derive(&LockInputs {
+        pacing_enabled: false,
+        ..base()
+    });
     assert_eq!(s, LockState::Unlocked);
     assert_eq!(r, "pacing disabled");
 }
 
 #[test]
 fn degraded_when_no_receiver() {
-    let (s, r) = derive(true, true, 0, 0, 0, 0);
+    let (s, r) = derive(&LockInputs {
+        connections: 0,
+        ..base()
+    });
     assert_eq!(s, LockState::Degraded);
     assert_eq!(r, "no receiver");
 }
 
 #[test]
-fn degraded_when_late_in_window() {
-    let (s, r) = derive(true, true, 2, 1, 0, 0);
+fn degraded_when_resync_in_window() {
+    // A single resync is a hard event (0 everywhere in the calibration).
+    let (s, r) = derive(&LockInputs {
+        resyncs_w: 1,
+        ..base()
+    });
     assert_eq!(s, LockState::Degraded);
-    assert_eq!(r, "late/repeats/resyncs in 60 s");
+    assert_eq!(r, "resync in 60 s");
 }
 
 #[test]
-fn degraded_when_repeats_in_window() {
-    let (s, r) = derive(true, true, 2, 0, 5, 0);
+fn resync_degrades_even_with_zero_late() {
+    // Acceptance: resyncs 1 → DEGRADED (resync) regardless of the late count.
+    let (s, r) = derive(&LockInputs {
+        resyncs_w: 1,
+        late_w: 0,
+        ..base()
+    });
     assert_eq!(s, LockState::Degraded);
-    assert_eq!(r, "late/repeats/resyncs in 60 s");
+    assert_eq!(r, "resync in 60 s");
 }
 
 #[test]
-fn degraded_when_resyncs_in_window() {
-    let (s, r) = derive(true, true, 2, 0, 0, 1);
-    assert_eq!(s, LockState::Degraded);
-    assert_eq!(r, "late/repeats/resyncs in 60 s");
-}
-
-#[test]
-fn locked_when_all_clear() {
-    let (s, r) = derive(true, true, 1, 0, 0, 0);
+fn locked_when_slots_zero() {
+    // Nothing emitted (paused / idle) → no grid to break → LOCKED, even with
+    // stray non-zero late/repeats: the slots==0 guard short-circuits them.
+    let (s, r) = derive(&LockInputs {
+        slots_w: 0,
+        late_w: 5000,
+        repeats_w: 5000,
+        ..base()
+    });
     assert_eq!(s, LockState::Locked);
     assert_eq!(r, "locked");
 }
 
-// ---- precedence: earlier conditions beat later ones (declared order) ----
+#[test]
+fn locked_when_all_clear() {
+    let (s, r) = derive(&base());
+    assert_eq!(s, LockState::Locked);
+    assert_eq!(r, "locked");
+}
+
+// ---- calibration (22.9.2026 data: 1800 slots/min, 24 fps on the 30 fps grid) ----
 
 #[test]
-fn clock_not_ok_beats_pacing_disabled() {
-    // Both !clock_ok and !pacing_enabled hold → the clock reason wins.
-    let (s, r) = derive(false, false, 0, 9, 9, 9);
+fn late_100_is_locked() {
+    // Clean grid: 100 late / 1800 slots ≈ 5.6 % ≤ 25 % → LOCKED.
+    let (s, r) = derive(&LockInputs {
+        late_w: 100,
+        ..base()
+    });
+    assert_eq!(s, LockState::Locked);
+    assert_eq!(r, "locked");
+}
+
+#[test]
+fn late_750_is_degraded() {
+    // Sender-side stall: 750 late / 1800 slots ≈ 42 % > 25 % → DEGRADED.
+    let (s, r) = derive(&LockInputs {
+        late_w: 750,
+        ..base()
+    });
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "late > 25 % of slots in 60 s");
+}
+
+#[test]
+fn repeats_360_is_locked_structural() {
+    // The by-design 24→30 conversion: 360 / 1800 = 20 % = expected → LOCKED.
+    let (s, r) = derive(&LockInputs {
+        repeats_w: 360,
+        ..base()
+    });
+    assert_eq!(s, LockState::Locked);
+    assert_eq!(r, "locked");
+}
+
+#[test]
+fn repeats_600_is_degraded() {
+    // Above the conversion + 10 % margin (expected 200 ‰ + 100 ‰ = 300 ‰ →
+    // 540 slots): 600 > 540 → DEGRADED (starvation).
+    let (s, r) = derive(&LockInputs {
+        repeats_w: 600,
+        ..base()
+    });
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "repeats above the fps conversion in 60 s");
+}
+
+#[test]
+fn source_30_repeats_100_is_locked() {
+    // A 30-fps source has 0 structural repeats: threshold is the 10 % margin
+    // (180 slots). 100 < 180 → LOCKED.
+    let (s, r) = derive(&LockInputs {
+        source_fps: 30.0,
+        repeats_w: 100,
+        ..base()
+    });
+    assert_eq!(s, LockState::Locked);
+    assert_eq!(r, "locked");
+}
+
+#[test]
+fn source_30_repeats_200_is_degraded() {
+    // 200 > the 180-slot margin → DEGRADED.
+    let (s, r) = derive(&LockInputs {
+        source_fps: 30.0,
+        repeats_w: 200,
+        ..base()
+    });
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "repeats above the fps conversion in 60 s");
+}
+
+// ---- boundaries: exactly-at-threshold is LOCKED (strict `>`) ----
+
+#[test]
+fn late_exactly_at_threshold_is_locked() {
+    // late_w * 1000 == LATE_DEGRADED_PERMILLE * slots_w (450 * 1000 == 250 * 1800).
+    let (s, _) = derive(&LockInputs {
+        late_w: 450,
+        ..base()
+    });
+    assert_eq!(s, LockState::Locked);
+    // One more late tips it over.
+    let (s2, r2) = derive(&LockInputs {
+        late_w: 451,
+        ..base()
+    });
+    assert_eq!(s2, LockState::Degraded);
+    assert_eq!(r2, "late > 25 % of slots in 60 s");
+}
+
+#[test]
+fn repeats_exactly_at_threshold_is_locked() {
+    // repeats_w * 1000 == (expected 200 + margin 100) * 1800 (540 * 1000).
+    let (s, _) = derive(&LockInputs {
+        repeats_w: 540,
+        ..base()
+    });
+    assert_eq!(s, LockState::Locked);
+    let (s2, r2) = derive(&LockInputs {
+        repeats_w: 541,
+        ..base()
+    });
+    assert_eq!(s2, LockState::Degraded);
+    assert_eq!(r2, "repeats above the fps conversion in 60 s");
+}
+
+// ---- precedence chain: clock > pacing > receiver > resync > late > repeats ----
+
+#[test]
+fn clock_beats_pacing() {
+    let (s, r) = derive(&LockInputs {
+        clock_ok: false,
+        pacing_enabled: false,
+        ..base()
+    });
     assert_eq!(s, LockState::Unlocked);
     assert_eq!(r, "clock not ok");
 }
 
 #[test]
-fn pacing_disabled_beats_no_receiver() {
-    // clock ok, pacing OFF, and connections==0 → pacing reason wins.
-    let (s, r) = derive(true, false, 0, 9, 9, 9);
+fn pacing_beats_receiver() {
+    let (s, r) = derive(&LockInputs {
+        pacing_enabled: false,
+        connections: 0,
+        ..base()
+    });
     assert_eq!(s, LockState::Unlocked);
     assert_eq!(r, "pacing disabled");
 }
 
 #[test]
-fn no_receiver_beats_window_events() {
-    // clock ok, pacing ON, connections==0 AND window events → no-receiver wins.
-    let (s, r) = derive(true, true, 0, 7, 7, 7);
+fn receiver_beats_resync() {
+    let (s, r) = derive(&LockInputs {
+        connections: 0,
+        resyncs_w: 5,
+        ..base()
+    });
     assert_eq!(s, LockState::Degraded);
     assert_eq!(r, "no receiver");
+}
+
+#[test]
+fn resync_beats_late() {
+    // resync + a stall-level late → resync wins (it is the harder event).
+    let (s, r) = derive(&LockInputs {
+        resyncs_w: 1,
+        late_w: 900,
+        ..base()
+    });
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "resync in 60 s");
+}
+
+#[test]
+fn late_beats_repeats() {
+    // Both a late-stall AND above-conversion repeats → the late reason wins.
+    let (s, r) = derive(&LockInputs {
+        late_w: 900,
+        repeats_w: 900,
+        ..base()
+    });
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "late > 25 % of slots in 60 s");
+}
+
+// ---- #150: a paused / idle output's STANDBY repeats (pacing ON) ----
+//
+// Under pacing a non-decoding output keeps servicing the grid with its frozen
+// last frame, so EVERY slot is a repeat (box 24.9.2026: SP-fast / SP-dabing
+// Paused read repeats +1812/min against seq +1812/min). That is the design,
+// not starvation — the repeat-rate rule applies only while decoding. Every
+// other rule still applies to a standby output.
+
+#[test]
+fn standby_repeats_on_every_slot_are_locked_when_not_decoding() {
+    // RED for #150: 1800 slots, 1800 repeats, 24-fps source on the 30 grid, one
+    // receiver, clock + pacing ok, NOT decoding → LOCKED (today: DEGRADED).
+    let (s, r) = derive(&LockInputs {
+        decoding: false,
+        connections: 1,
+        slots_w: 1800,
+        repeats_w: 1800,
+        ..base()
+    });
+    assert_eq!(s, LockState::Locked);
+    assert_eq!(r, "locked");
+}
+
+#[test]
+fn standby_output_still_degrades_on_late() {
+    // Not decoding does not hide a broken grid: 26 % late (468 / 1800) → the
+    // late rule still fires.
+    let (s, r) = derive(&LockInputs {
+        decoding: false,
+        slots_w: 1800,
+        late_w: 468,
+        repeats_w: 1800,
+        ..base()
+    });
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "late > 25 % of slots in 60 s");
+}
+
+#[test]
+fn standby_output_still_degrades_on_resync() {
+    let (s, r) = derive(&LockInputs {
+        decoding: false,
+        resyncs_w: 1,
+        repeats_w: 1800,
+        ..base()
+    });
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "resync in 60 s");
+}
+
+#[test]
+fn decoding_output_still_degrades_on_repeats_above_margin() {
+    // Unchanged for a decoding output: the same 1800/1800 repeats are genuine
+    // starvation while Playing → DEGRADED.
+    let (s, r) = derive(&LockInputs {
+        decoding: true,
+        slots_w: 1800,
+        repeats_w: 1800,
+        ..base()
+    });
+    assert_eq!(s, LockState::Degraded);
+    assert_eq!(r, "repeats above the fps conversion in 60 s");
+}
+
+#[test]
+fn decoding_output_repeats_exactly_at_margin_is_locked() {
+    // Exact boundary while decoding: 540 * 1000 == (200 + 100) * 1800 → LOCKED;
+    // one more repeat → DEGRADED.
+    let (s, _) = derive(&LockInputs {
+        decoding: true,
+        repeats_w: 540,
+        ..base()
+    });
+    assert_eq!(s, LockState::Locked);
+    let (s2, r2) = derive(&LockInputs {
+        decoding: true,
+        repeats_w: 541,
+        ..base()
+    });
+    assert_eq!(s2, LockState::Degraded);
+    assert_eq!(r2, "repeats above the fps conversion in 60 s");
+}
+
+// ---- expected_repeat_permille (the structural fps-conversion rate) ----
+
+#[test]
+fn expected_repeat_permille_values() {
+    assert_eq!(expected_repeat_permille(24.0, 30), 200);
+    assert_eq!(expected_repeat_permille(25.0, 30), 167);
+    assert_eq!(expected_repeat_permille(30.0, 30), 0);
+    assert_eq!(expected_repeat_permille(60.0, 30), 0);
+    // #168 r6b: the box read a 23.976-fps file (NTSC 24) on the 30 grid. Integer
+    // permille: 23976/30 = 799 → 1000 − 799 = 201. This is the source rate that
+    // must reach the rule (the paced snapshot's `nominal_fps` reads the grid 30 →
+    // expected 0 → the 20 % structural repeats falsely degrade).
+    assert_eq!(expected_repeat_permille(23.976, 30), 201);
+}
+
+#[test]
+fn expected_repeat_permille_guards_zero_grid() {
+    // A zero grid (or non-positive source) is defended, never a divide-by-zero.
+    assert_eq!(expected_repeat_permille(24.0, 0), 0);
+    assert_eq!(expected_repeat_permille(0.0, 30), 0);
 }
 
 // ---- vocabulary (camera-box#1298: LOCKED / DEGRADED / UNLOCKED) ----
@@ -116,8 +405,7 @@ fn serde_renames_to_uppercase_states() {
 // summarize() is the WASM-safe reduction the dashboard's GlobalLockBadge
 // (and, later, the API/log) share: LOCKED iff every LIVE output is LOCKED
 // and clock ok; else the worst live state (UNLOCKED > DEGRADED > LOCKED)
-// naming the worst output; no live output → clock-only. RED-first: these
-// reference `OutputLock` / `summarize`, added in the GREEN commit.
+// naming the worst output; no live output → clock-only.
 
 fn ol(name: &str, state: LockState, live: bool, clock_ok: bool) -> OutputLock {
     OutputLock {

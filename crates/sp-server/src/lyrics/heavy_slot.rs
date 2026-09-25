@@ -10,13 +10,17 @@
 //! (2026-09-15 07:40 UTC, dump `dumps\SongPlayer.exe.4892.dmp`).
 //!
 //! Three layers, all funnelled through EVERY heavy child spawn:
-//!  1. [`acquire_slot`] — a process-global `tokio::sync::Semaphore(1)`. At most
+//!  1. [`acquire_slot_for_spawn`] — a process-global `tokio::sync::Semaphore(1)`. At most
 //!     ONE heavy child (isolation / mtl / separation) runs process-wide; the
 //!     fair FIFO `acquire().await` makes the two workers alternate naturally.
-//!  2. [`heavy_step_memory_ok`] — a `GlobalMemoryStatusEx` headroom check
-//!     BEFORE acquiring the slot (owner's order): both free physical RAM and
-//!     free commit must be ≥ [`HEAVY_STEP_MIN_FREE_BYTES`], else the tick defers
-//!     with NO backoff and re-checks next tick.
+//!  2. [`memory_ok_for`] — a `GlobalMemoryStatusEx` headroom check AT SPAWN,
+//!     inside the slot ([`acquire_slot_for_spawn`]: queue first, measure at
+//!     spawn; #144 r2): with the permit HELD, both free physical RAM and free
+//!     commit must be ≥ [`HEAVY_STEP_MIN_FREE_BYTES`], else the permit is
+//!     released and the tick defers with NO backoff, re-queueing next tick. A
+//!     pre-slot reading measured the very child the slot serialises away — from
+//!     #168 r3 a separation child commits ~9 GB from its first second, so the
+//!     lyrics worker never queued and the #162 FIFO alternation was dead.
 //!  3. [`assign_child_job`] — a per-child Windows Job Object with a
 //!     `JOB_OBJECT_LIMIT_PROCESS_MEMORY` ceiling + `KILL_ON_JOB_CLOSE`, so an
 //!     OOM kills the CHILD, never the host. It also carries the #203 containment
@@ -71,24 +75,20 @@ pub(crate) const CHILD_JOB_MEMORY_LIMIT_BYTES: u64 = 10_737_418_240; // 10 GiB
 // ---------------------------------------------------------------------------
 
 /// The one process-wide heavy-step permit. `LazyLock<Arc<..>>` so
-/// [`acquire_slot`] can hand out `'static` owned permits held across the child's
+/// [`acquire_slot_for_spawn`] can hand out `'static` owned permits held across the child's
 /// `await`.
 static HEAVY_SLOT: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(1)));
 
-/// Acquire the process-global heavy-step permit (fair FIFO). Held by the
-/// returned [`HeavySlotGuard`] until it is dropped — i.e. until the heavy child
-/// exits (including through `run_with_wall_abort`: dropping the future drops the
-/// guard, releasing the permit, while `kill_on_drop` kills the child). Logs the
-/// wait time on acquire and a `released` line on drop.
-pub(crate) async fn acquire_slot(name: &'static str) -> HeavySlotGuard {
-    acquire_on(HEAVY_SLOT.clone(), name).await
-}
-
-/// Slot acquisition against an explicit semaphore — the injectable core of
-/// [`acquire_slot`], so the serialization guarantee is unit-tested with a local
-/// `Arc<Semaphore>` (no process-global state, no DB). The serialization is
-/// proven by `slot_serializes_two_heavy_steps`; the wait-time log carries no
-/// asserted behaviour, so mutation is skipped (like `run_with_wall_abort`).
+/// Slot acquisition against an explicit semaphore (fair FIFO) — the shared
+/// acquire used by [`acquire_on_checked`] (production, via
+/// [`acquire_slot_for_spawn`]) and directly by the slot-serialization tests, so
+/// the guarantee is unit-tested with a local `Arc<Semaphore>` (no process-global
+/// state, no DB). The permit is held by the returned [`HeavySlotGuard`] until it
+/// is dropped — i.e. until the heavy child exits (including through
+/// `run_with_wall_abort`: dropping the future drops the guard, releasing the
+/// permit, while `kill_on_drop` kills the child). The serialization is proven by
+/// `slot_serializes_two_heavy_steps`; the wait-time log carries no asserted
+/// behaviour, so mutation is skipped (like `run_with_wall_abort`).
 #[cfg_attr(test, mutants::skip)]
 async fn acquire_on(slot: Arc<Semaphore>, name: &'static str) -> HeavySlotGuard {
     let start = Instant::now();
@@ -108,6 +108,53 @@ async fn acquire_on(slot: Arc<Semaphore>, name: &'static str) -> HeavySlotGuard 
     HeavySlotGuard {
         _permit: permit,
         name,
+    }
+}
+
+/// Returned by [`acquire_slot_for_spawn`] when the spawn-time headroom reading
+/// (taken with the permit HELD) is below the floor: the permit is released and
+/// the caller defers this heavy step with NO backoff — exactly as the old
+/// pre-slot check did — re-queueing behind the running child next tick.
+#[derive(Debug)]
+pub(crate) struct HeadroomLow;
+
+/// #144 r2 admission: QUEUE for the process-global heavy slot (fair FIFO — the
+/// caller blocks behind a running heavy child), THEN measure memory headroom
+/// with the permit held; admit only if it passes. Low → drop the permit and
+/// return `Err(HeadroomLow)` so the caller defers with NO backoff. This flips the
+/// two admission layers (queue first, measure AT SPAWN): a pre-slot reading
+/// measured the very child the slot serialises away, so from #168 r3 (a
+/// separation child commits ~9 GB from its first second) the lyrics worker never
+/// queued and the #162 FIFO alternation was dead. The owner's #162 ruling ("pred
+/// ŠTARTOM ťažkého kroku kontrola voľnej pamäte") is this check, at the step's
+/// actual start. The real memory read is wired here; the decision is the
+/// unit-tested [`acquire_on_checked`].
+#[cfg_attr(test, mutants::skip)] // wires the real read_headroom; the decision core is acquire_on_checked
+pub(crate) async fn acquire_slot_for_spawn(
+    name: &'static str,
+) -> Result<HeavySlotGuard, HeadroomLow> {
+    acquire_on_checked(HEAVY_SLOT.clone(), name, read_headroom).await
+}
+
+/// Injectable core of [`acquire_slot_for_spawn`]: [`acquire_on`] the given
+/// semaphore (fair FIFO), then apply [`memory_ok_for`] to the reading from `read`
+/// with the permit HELD. Low → drop the guard (releasing the permit) and return
+/// `Err(HeadroomLow)`; ok → keep the guard. Linux unit tests drive it with a
+/// local `Arc<Semaphore>` + an injected reader — no process-global state, no real
+/// memory read (`acquire_for_spawn_*` in `heavy_slot_tests.rs`).
+async fn acquire_on_checked(
+    slot: Arc<Semaphore>,
+    name: &'static str,
+    read: impl Fn() -> Option<Headroom>,
+) -> Result<HeavySlotGuard, HeadroomLow> {
+    let guard = acquire_on(slot, name).await;
+    if memory_ok_for(name, read()) {
+        Ok(guard)
+    } else {
+        // Release the permit (drop the guard) so a deferred step never holds the
+        // slot — the next FIFO waiter proceeds and this step re-queues next tick.
+        drop(guard);
+        Err(HeadroomLow)
     }
 }
 
@@ -137,8 +184,8 @@ impl Drop for HeavySlotGuard {
 // slot".
 // ---------------------------------------------------------------------------
 
-/// The heavy-slot step name the dub child's `acquire_slot` uses
-/// (`dabing/child.rs`). The ONE step whose acquire clears [`DUB_SLOT_WANTED`].
+/// The heavy-slot step name the dub's admission uses (`dabing/worker.rs`, via
+/// [`acquire_slot_for_spawn`]). The ONE step whose acquire clears [`DUB_SLOT_WANTED`].
 pub(crate) const DUB_STEP_NAME: &str = "dub live-translate";
 
 /// Process-global "a dub job is queued behind the heavy slot" flag.
@@ -185,7 +232,7 @@ impl Drop for DubSlotWant {
 
 /// Publish "a dub is queued behind the heavy slot" (flag TRUE) and return the
 /// RAII guard whose Drop clears it. Created immediately before the dub's
-/// `acquire_slot` (`dabing/worker.rs::synthesize`).
+/// `acquire_slot_for_spawn` (`dabing/worker.rs::process_next`).
 pub(crate) fn dub_slot_want_guard() -> DubSlotWant {
     set_dub_slot_wanted(true);
     DubSlotWant
@@ -241,7 +288,8 @@ pub(crate) fn admission_from_headroom(reading: Option<Headroom>) -> MemoryAdmiss
 
 /// Pure worker-facing gate: `true` = enough headroom to start the heavy step
 /// named `name`; `false` = defer (a WARN with the numbers is logged). The only
-/// impure input — the live memory read — is injected by [`heavy_step_memory_ok`],
+/// impure input — the live memory read — is injected by [`acquire_on_checked`]
+/// (the production reader is [`read_headroom`], via [`acquire_slot_for_spawn`]),
 /// so BOTH workers' deferral behaviour is unit-tested with a fed [`Headroom`],
 /// never real memory.
 pub(crate) fn memory_ok_for(name: &str, reading: Option<Headroom>) -> bool {
@@ -258,25 +306,6 @@ pub(crate) fn memory_ok_for(name: &str, reading: Option<Headroom>) -> bool {
             false
         }
     }
-}
-
-/// Live worker gate: read the box's free RAM/commit and decide. `true` = start
-/// the heavy step, `false` = defer this tick (no backoff). Integration-only
-/// (reads real memory); the decision it delegates to ([`memory_ok_for`]) is
-/// unit-tested.
-#[cfg_attr(test, mutants::skip)]
-pub(crate) fn heavy_step_memory_ok(name: &str) -> bool {
-    memory_ok_for(name, read_headroom())
-}
-
-/// Positive-form twin of [`heavy_step_memory_ok`] for call sites: `true` when
-/// the heavy step must be deferred this tick. Call sites use this instead of
-/// `!heavy_step_memory_ok(..)` so no `!` sits at the spawn seam (a deleted-`!`
-/// mutant there is unobservable without real memory pressure); the decision
-/// itself is the unit-tested `memory_ok_for`.
-#[cfg_attr(test, mutants::skip)] // thin negation over a real-memory read; the core is tested via memory_ok_for
-pub(crate) fn heavy_step_memory_defers(name: &str) -> bool {
-    !heavy_step_memory_ok(name)
 }
 
 /// Read free physical RAM + free commit via `GlobalMemoryStatusEx`. `None` on
@@ -317,8 +346,17 @@ fn read_headroom() -> Option<Headroom> {
 /// Job Object seam ([`assign_child_job`]) at every heavy-child spawn. Initialised
 /// to the box's defaults (no override) so a spawn before the first refresh is
 /// still contained.
-static CONTAINMENT: LazyLock<Mutex<Containment>> =
-    LazyLock::new(|| Mutex::new(containment_from_settings(None, None, logical_cores())));
+static CONTAINMENT: LazyLock<Mutex<Containment>> = LazyLock::new(|| {
+    Mutex::new(containment_from_settings(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        logical_cores(),
+    ))
+});
 
 /// The box's logical-processor count (`available_parallelism`, min 1). Reads the
 /// environment, so integration-only; the pure mask/cap rules it feeds are tested.
@@ -338,6 +376,24 @@ pub(crate) fn logical_cores() -> usize {
 /// effect on the next child spawned, no restart. Returns the resolved value.
 #[cfg_attr(test, mutants::skip)]
 pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment {
+    let c = resolve_containment(pool).await;
+    if let Ok(mut g) = CONTAINMENT.lock() {
+        *g = c;
+    }
+    c
+}
+
+/// Read every containment setting from the DB and resolve it through the pure
+/// [`containment_from_settings`] — WITHOUT publishing (split from
+/// [`refresh_containment`] in #147 round 9 so the DB → value path, e.g. a
+/// `PATCH /api/v1/settings` of `heavy_max_working_set_mb`, is unit-tested
+/// without touching the process-global snapshot other tests read). WARNs on
+/// every resolve (each worker tick) while a present value is invalid.
+///
+/// mutants::skip — DB reads + WARN side effects; the value logic is the pure,
+/// mutation-scored `heavy_containment` parse fns.
+#[cfg_attr(test, mutants::skip)]
+pub(crate) async fn resolve_containment(pool: &sqlx::SqlitePool) -> Containment {
     let cap = crate::db::models::get_setting(pool, "heavy_cpu_cap_pct")
         .await
         .ok()
@@ -346,23 +402,118 @@ pub(crate) async fn refresh_containment(pool: &sqlx::SqlitePool) -> Containment 
         .await
         .ok()
         .flatten();
-    let c = containment_from_settings(cap.as_deref(), mask.as_deref(), logical_cores());
-    if let Ok(mut g) = CONTAINMENT.lock() {
-        *g = c;
+    // #207: the operator purge-delay knob, read the same way. A present but
+    // out-of-range value collapses to -1 (never decommit); WARN (each tick while
+    // invalid) so the operator sees the setting was ignored (the pure parse fn
+    // stays silent).
+    let purge = crate::db::models::get_setting(pool, "heavy_purge_delay_ms")
+        .await
+        .ok()
+        .flatten();
+    // #207 phase-3: the operator alloc-mode knob (retained | lazy), read the
+    // same way. An unrecognised non-empty value collapses to retained; WARN
+    // (each tick) so the operator sees the setting was ignored (the pure parse
+    // fn stays silent).
+    let alloc = crate::db::models::get_setting(pool, "heavy_alloc_mode")
+        .await
+        .ok()
+        .flatten();
+    // #207 round-3c: the operator reserve-size knob (GiB), read the same way.
+    // A present but out-of-range value collapses to the default 4; WARN (each
+    // tick) so the operator sees the setting was ignored (the pure parse fn
+    // stays silent).
+    let reserve = crate::db::models::get_setting(pool, "heavy_alloc_reserve_gib")
+        .await
+        .ok()
+        .flatten();
+    // #147 round 9: the child's working-set cap (MiB), read the same way; it
+    // applies at the NEXT heavy-child spawn (the Job Object is per child).
+    let max_ws = crate::db::models::get_setting(pool, "heavy_max_working_set_mb")
+        .await
+        .ok()
+        .flatten();
+    let c = containment_from_settings(
+        cap.as_deref(),
+        mask.as_deref(),
+        purge.as_deref(),
+        alloc.as_deref(),
+        reserve.as_deref(),
+        max_ws.as_deref(),
+        logical_cores(),
+    );
+    if crate::lyrics::heavy_containment::max_working_set_setting_ignored(max_ws.as_deref()) {
+        warn!(
+            "heavy_max_working_set_mb={max_ws:?} is invalid or out of range (0 or 512..=10240 MiB) — using {} MiB",
+            c.max_working_set_mb
+        );
+    }
+    if c.purge_delay_ms == -1 && purge.as_deref().is_some_and(|r| r.trim() != "-1") {
+        warn!(
+            "heavy_purge_delay_ms={purge:?} is invalid or out of range (-1 or 0..=600000 ms) — using -1 (never decommit)"
+        );
+    }
+    if alloc
+        .as_deref()
+        .is_some_and(|r| !matches!(r.trim(), "" | "retained" | "lazy"))
+    {
+        warn!("heavy_alloc_mode={alloc:?} is unrecognised (retained or lazy) — using retained");
+    }
+    if reserve
+        .as_deref()
+        .is_some_and(|r| !r.trim().parse::<i64>().is_ok_and(|v| (1..=8).contains(&v)))
+    {
+        warn!(
+            "heavy_alloc_reserve_gib={reserve:?} is invalid or out of range (1..=8 GiB) — using {}",
+            crate::lyrics::heavy_alloc_env::RESERVE_GIB_DEFAULT
+        );
     }
     c
 }
 
-/// The currently published containment (applied by the Job Object seam). Read
-/// only inside the `#[cfg(windows)]` spawn path; falls back to the box default if
-/// the lock is poisoned.
-#[cfg_attr(not(windows), allow(dead_code))]
+/// The currently published containment. Read by the `#[cfg(windows)]` Job
+/// Object seam AND (cross-platform, #207) by `stems/separator.rs` to carry the
+/// live `purge_delay_ms` into the separation child's mimalloc env. Falls back to
+/// the box default if the lock is poisoned.
 #[cfg_attr(test, mutants::skip)]
-fn current_containment() -> Containment {
-    CONTAINMENT
-        .lock()
-        .map(|g| *g)
-        .unwrap_or_else(|_| containment_from_settings(None, None, logical_cores()))
+pub(crate) fn current_containment() -> Containment {
+    CONTAINMENT.lock().map(|g| *g).unwrap_or_else(|_| {
+        containment_from_settings(None, None, None, None, None, None, logical_cores())
+    })
+}
+
+/// The `heavy child contained (pid …)` INFO line for a spawned child. Pure, so
+/// it is exact-string tested cross-platform (#207); emitted once per child by
+/// the `#[cfg(windows)]` Job Object seam, so it is dead in the non-Windows lib
+/// target. Gains ` alloc_mode=<retained|lazy>` after `purge_delay_ms=` (#207
+/// phase-3), ` reserve_gib=<n>` after `alloc_mode=` (#207 round-3c) and
+/// ` max_ws_mb=<n|off>` after `reserve_gib=` (#147 round 9 — the working-set cap
+/// the Job Object actually APPLIED; `off` = disabled or rejected by the OS).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn contained_line(pid: u32, limit_bytes: usize, c: &Containment) -> String {
+    let max_ws = match c.max_working_set_mb {
+        0 => "off".to_string(),
+        mb => mb.to_string(),
+    };
+    format!(
+        "heavy child contained (pid {pid}): mem_limit={limit_bytes}B cpu_cap={}% affinity=0x{:x} mem_priority_low={} purge_delay_ms={} alloc_mode={} reserve_gib={} max_ws_mb={max_ws}",
+        c.cpu_cap_pct,
+        c.affinity_mask,
+        c.memory_priority_low,
+        c.purge_delay_ms,
+        c.alloc_mode.as_str(),
+        c.reserve_gib,
+    )
+}
+
+/// The logical-core count of the currently published affinity block — the
+/// `count_ones()` of the live containment's mask. Read by the cpu-idle thread
+/// cap ([`crate::lyrics::heavy_plan`]) so a heavy child never gets more torch
+/// threads than the core block it is confined to (#168 round 5: a 4-logical-core
+/// default block caps the #162 quarter-cores rule). Integration-only — reads the
+/// published global, like [`current_containment`].
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn current_affinity_block_cores() -> usize {
+    current_containment().affinity_mask.count_ones() as usize
 }
 
 // ---------------------------------------------------------------------------
@@ -380,12 +531,20 @@ fn current_containment() -> Containment {
 pub(crate) struct ChildJobGuard {
     #[cfg(windows)]
     handle: Option<isize>,
+    // #168: the page-fault-rate sampler for this child, aborted when the child
+    // exits (this guard drops). Read in Drop, so never `dead_code`.
+    #[cfg(windows)]
+    sampler: Option<tokio::task::AbortHandle>,
 }
 
 #[cfg(windows)]
 impl Drop for ChildJobGuard {
     #[cfg_attr(test, mutants::skip)] // closes an OS Job handle — only the kernel can observe it (KILL_ON_JOB_CLOSE); no in-process oracle
     fn drop(&mut self) {
+        // #168: stop sampling this child's page faults (it is exiting).
+        if let Some(s) = &self.sampler {
+            s.abort();
+        }
         if let Some(h) = self.handle {
             use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
             // SAFETY: `h` is a Job Object handle we created and still solely own;
@@ -408,7 +567,8 @@ impl Drop for ChildJobGuard {
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn assign_child_job(child: &tokio::process::Child) -> ChildJobGuard {
-    let handle = match child.id() {
+    let pid = child.id();
+    let handle = match pid {
         Some(pid) => assign_win_job(
             pid,
             CHILD_JOB_MEMORY_LIMIT_BYTES as usize,
@@ -416,7 +576,18 @@ pub(crate) fn assign_child_job(child: &tokio::process::Child) -> ChildJobGuard {
         ),
         None => None,
     };
-    ChildJobGuard { handle }
+    // #147 round 9: every Job Object failure path returns None — say so once,
+    // loudly, so an UNcontained child (no memory ceiling / kill-on-close /
+    // affinity / CPU or working-set cap) is visible in the log.
+    if handle.is_none() {
+        tracing::warn!(
+            "heavy child NOT contained (pid {pid:?}): Job Object setup failed — no memory ceiling, kill-on-close, affinity or caps"
+        );
+    }
+    // #168: start logging this child's page-fault rate (`heavy child faults/s`),
+    // aborted by the guard's Drop when the child exits.
+    let sampler = pid.map(crate::lyrics::heavy_faults::spawn_fault_sampler);
+    ChildJobGuard { handle, sampler }
 }
 
 /// Non-Windows: no Job Object, no-op guard.
@@ -432,21 +603,29 @@ pub(crate) fn assign_child_job(_child: &tokio::process::Child) -> ChildJobGuard 
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Option<isize> {
-    use crate::lyrics::heavy_containment::cpu_rate_from_pct;
+    use crate::lyrics::heavy_containment::{
+        JOB_LIMIT_AFFINITY, JOB_LIMIT_KILL_ON_JOB_CLOSE, JOB_LIMIT_PROCESS_MEMORY,
+        JOB_LIMIT_WORKINGSET, cpu_rate_from_pct, job_limit_flags, job_working_set_bytes,
+    };
     use core::ffi::c_void;
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_CPU_RATE_CONTROL_ENABLE,
         JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP, JOB_OBJECT_LIMIT_AFFINITY,
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY,
-        JOBOBJECT_CPU_RATE_CONTROL_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JobObjectCpuRateControlInformation, JobObjectExtendedLimitInformation,
-        SetInformationJobObject,
+        JOB_OBJECT_LIMIT_WORKINGSET, JOBOBJECT_CPU_RATE_CONTROL_INFORMATION,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectCpuRateControlInformation,
+        JobObjectExtendedLimitInformation, SetInformationJobObject,
     };
     use windows_sys::Win32::System::Threading::{
         MEMORY_PRIORITY_INFORMATION, MEMORY_PRIORITY_LOW, OpenProcess, PROCESS_SET_INFORMATION,
         PROCESS_SET_QUOTA, PROCESS_TERMINATE, ProcessMemoryPriority, SetProcessInformation,
     };
+    // The pure flag mirrors (`job_limit_flags`, Linux-tested) must equal the SDK.
+    const _: () = assert!(JOB_LIMIT_WORKINGSET == JOB_OBJECT_LIMIT_WORKINGSET);
+    const _: () = assert!(JOB_LIMIT_AFFINITY == JOB_OBJECT_LIMIT_AFFINITY);
+    const _: () = assert!(JOB_LIMIT_PROCESS_MEMORY == JOB_OBJECT_LIMIT_PROCESS_MEMORY);
+    const _: () = assert!(JOB_LIMIT_KILL_ON_JOB_CLOSE == JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE);
 
     // SAFETY: every handle is null-checked; on any failure we close what we
     // opened and return None. Each struct is zero-initialised then fully set;
@@ -457,24 +636,62 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
         if job.is_null() {
             return None;
         }
+        // `Err(GetLastError())` read IMMEDIATELY after a failed call (before any
+        // logging code can clobber the thread's last-error value).
+        let set_extended = |info: &JOBOBJECT_EXTENDED_LIMIT_INFORMATION| {
+            if SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                info as *const _ as *const c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            ) == 0
+            {
+                Err(GetLastError())
+            } else {
+                Ok(())
+            }
+        };
         // #203: ONE extended-limit struct carries the memory ceiling,
         // kill-on-close AND the core affinity (the wall keeps its cores) — a
-        // single SetInformationJobObject call, extending the #162 job.
+        // single SetInformationJobObject call, extending the #162 job. #147
+        // round 9 adds the working-set CAP (JOB_OBJECT_LIMIT_WORKINGSET +
+        // Minimum/MaximumWorkingSetSize) so the child pages ITSELF instead of
+        // evicting SongPlayer; `applied` records what the OS actually took.
+        let mut applied = containment;
+        // #147 round 10: the working-set cap needs SeIncreaseBasePriorityPrivilege
+        // in OUR token (else 1314). Enabled once per process, logged once.
+        let privilege = if applied.max_working_set_mb == 0 {
+            Ok(())
+        } else {
+            job_working_set_privilege()
+        };
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_PROCESS_MEMORY
-            | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-            | JOB_OBJECT_LIMIT_AFFINITY;
-        info.BasicLimitInformation.Affinity = containment.affinity_mask as usize;
+        info.BasicLimitInformation.LimitFlags = job_limit_flags(applied.max_working_set_mb);
+        info.BasicLimitInformation.Affinity = applied.affinity_mask as usize;
+        if let Some((min, max)) = job_working_set_bytes(applied.max_working_set_mb) {
+            info.BasicLimitInformation.MinimumWorkingSetSize = min;
+            info.BasicLimitInformation.MaximumWorkingSetSize = max;
+        }
         info.ProcessMemoryLimit = limit_bytes;
-        if SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            &info as *const _ as *const c_void,
-            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-        ) == 0
-        {
-            CloseHandle(job);
-            return None;
+        if let Err(err) = set_extended(&info) {
+            // #147 round 9: a rejected working-set cap must never cost the
+            // #162 memory ceiling + kill-on-close — retry once WITHOUT it.
+            if applied.max_working_set_mb == 0 {
+                tracing::warn!("heavy child job limits rejected (pid {pid}, err {err})");
+                CloseHandle(job);
+                return None;
+            }
+            tracing::warn!(
+                "heavy child working-set cap {} MiB rejected (pid {pid}, err {err}, base_priority_privilege={}) — job applied without it",
+                applied.max_working_set_mb,
+                crate::process_start::residency::outcome(privilege)
+            );
+            applied.max_working_set_mb = 0;
+            without_working_set(&mut info);
+            if set_extended(&info).is_err() {
+                CloseHandle(job);
+                return None;
+            }
         }
         // #203: CPU hard cap — a separate rate-control info class on the same
         // job. Best-effort: a failure keeps the already-applied memory +
@@ -482,7 +699,7 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
         let mut rate: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION = std::mem::zeroed();
         rate.ControlFlags =
             JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP;
-        rate.Anonymous.CpuRate = cpu_rate_from_pct(containment.cpu_cap_pct);
+        rate.Anonymous.CpuRate = cpu_rate_from_pct(applied.cpu_cap_pct);
         if SetInformationJobObject(
             job,
             JobObjectCpuRateControlInformation,
@@ -503,7 +720,7 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
         }
         // #203: lower the child's process MEMORY priority so the wall's working
         // set is never trimmed for it. Best-effort (needs PROCESS_SET_INFORMATION).
-        if containment.memory_priority_low {
+        if applied.memory_priority_low {
             let mem = MEMORY_PRIORITY_INFORMATION {
                 MemoryPriority: MEMORY_PRIORITY_LOW,
             };
@@ -517,21 +734,63 @@ fn assign_win_job(pid: u32, limit_bytes: usize, containment: Containment) -> Opt
                 tracing::warn!("heavy child memory priority not lowered (pid {pid})");
             }
         }
-        let assigned = AssignProcessToJobObject(job, proc);
+        let mut assigned = AssignProcessToJobObject(job, proc);
+        if assigned == 0 && applied.max_working_set_mb != 0 {
+            let err = GetLastError(); // read before any logging call
+            // #147 round 9: the job's working-set limits are applied to the
+            // process AT assignment — if that is what failed, drop the cap and
+            // retry once so the child still gets the memory ceiling + kill-on-close.
+            tracing::warn!(
+                "heavy child job assignment with a {} MiB working-set cap failed (pid {pid}, err {err}) — retrying without it",
+                applied.max_working_set_mb
+            );
+            applied.max_working_set_mb = 0;
+            without_working_set(&mut info);
+            if set_extended(&info).is_ok() {
+                assigned = AssignProcessToJobObject(job, proc);
+            }
+        }
         CloseHandle(proc);
         if assigned == 0 {
             CloseHandle(job);
             return None;
         }
-        // #203: log the applied containment once per child.
-        tracing::info!(
-            "heavy child contained (pid {pid}): mem_limit={limit_bytes}B cpu_cap={}% affinity=0x{:x} mem_priority_low={}",
-            containment.cpu_cap_pct,
-            containment.affinity_mask,
-            containment.memory_priority_low
-        );
+        // #203 / #207 / #147 r9: log the APPLIED containment once per child
+        // (pure formatter, so the line is exact-string tested cross-platform).
+        tracing::info!("{}", contained_line(pid, limit_bytes, &applied));
         Some(job as isize)
     }
+}
+
+/// #147 round 10: enable `SeIncreaseBasePriorityPrivilege` in SongPlayer's
+/// token ONCE per process (the first capped job), before the job call —
+/// `JOB_OBJECT_LIMIT_WORKINGSET` with a minimum above the system minimum is
+/// refused with `ERROR_PRIVILEGE_NOT_HELD` (1314) without it. The outcome is
+/// logged once (`heavy child job privilege: …`) and cached; the job call's
+/// retry-without-cap fallback stays for a token that does not hold it.
+/// Integration-only.
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+fn job_working_set_privilege() -> Result<(), u32> {
+    static ENABLED: std::sync::OnceLock<Result<(), u32>> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        let r = crate::process_start::enable_increase_base_priority_privilege();
+        tracing::info!("{}", crate::process_start::residency::job_privilege_line(r));
+        r
+    })
+}
+
+/// #147 round 9: clear the working-set cap from a heavy child's extended-limit
+/// struct (flags back to the #162/#203 set, both sizes zero) for the
+/// cap-rejected retry. Integration-only.
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+fn without_working_set(
+    info: &mut windows_sys::Win32::System::JobObjects::JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+) {
+    info.BasicLimitInformation.LimitFlags = crate::lyrics::heavy_containment::job_limit_flags(0);
+    info.BasicLimitInformation.MinimumWorkingSetSize = 0;
+    info.BasicLimitInformation.MaximumWorkingSetSize = 0;
 }
 
 #[cfg(test)]

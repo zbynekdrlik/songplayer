@@ -15,6 +15,12 @@ import {
 export class ObsDriver {
   // Cached once per driver (studio mode does not change mid-suite).
   private studioMode: boolean | null = null;
+  /** #147: the file of the last StopRecord, kept even if the inactive-poll
+   * below times out, so a caller's cleanup can still delete it. */
+  lastRecordingPath: string | null = null;
+  /** #147: a StartRecord was SENT after the no-operator-recording pre-check.
+   * A recording active after that is ours, even if the call never answered. */
+  startIssued = false;
 
   private constructor(private obs: OBSWebSocket) {}
 
@@ -107,6 +113,62 @@ export class ObsDriver {
     }
 
     await new Promise((r) => setTimeout(r, 400));
+  }
+
+  /**
+   * Whether the current OBS profile remuxes finished recordings to mp4
+   * (`Video/AutoRemux`), which leaves a sibling `<base>.mp4` to clean up.
+   */
+  async autoRemuxEnabled(): Promise<boolean> {
+    const r = await this.obs.call("GetProfileParameter", {
+      parameterCategory: "Video",
+      parameterName: "AutoRemux",
+    });
+    const v = (r as { parameterValue: string | null; defaultParameterValue: string | null });
+    // OBS's config_get_bool accepts "true" or any non-zero number.
+    const raw = (v.parameterValue ?? v.defaultParameterValue ?? "false").trim().toLowerCase();
+    return raw === "true" || (raw !== "" && !Number.isNaN(Number(raw)) && Number(raw) !== 0);
+  }
+
+  /** Whether OBS is currently recording (`GetRecordStatus.outputActive`). */
+  async isRecording(): Promise<boolean> {
+    const r = await this.obs.call("GetRecordStatus");
+    return (r as { outputActive: boolean }).outputActive;
+  }
+
+  /**
+   * #147: start recording the OBS PROGRAM. Refuses to hijack a recording that
+   * is already running: it belongs to the operator, and its file must never be
+   * stopped or deleted by CI.
+   */
+  async startRecord(): Promise<void> {
+    this.startIssued = false; // per call: true only once THIS call passed the pre-check
+    if (await this.isRecording()) {
+      throw new Error(
+        "OBS is already recording (an operator recording?) — the A/V gate will not stop or reuse it",
+      );
+    }
+    this.startIssued = true;
+    await this.obs.call("StartRecord");
+  }
+
+  /**
+   * Stop the recording started by `startRecord` and return the file path OBS
+   * wrote. Resolves once `GetRecordStatus` reports the output inactive, so the
+   * file is finalized before anyone reads it. Throws if it never goes inactive.
+   */
+  async stopRecord(timeoutMs = 10_000): Promise<string> {
+    const r = await this.obs.call("StopRecord");
+    const outputPath = (r as { outputPath: string }).outputPath;
+    this.lastRecordingPath = outputPath;
+    const deadline = Date.now() + timeoutMs;
+    while (await this.isRecording()) {
+      if (Date.now() >= deadline) {
+        throw new Error(`OBS recording did not stop within ${timeoutMs} ms (${outputPath})`);
+      }
+      await new Promise((res) => setTimeout(res, 200));
+    }
+    return outputPath;
   }
 
   async disconnect(): Promise<void> {

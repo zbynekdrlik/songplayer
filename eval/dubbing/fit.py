@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """fit.py — pure timing placement of synthesized dub lines onto the source timeline.
 
-Given the source (English) sentence spans of the sermon segment and the NATURAL
+Given the source (English) sentence spans of the dabing segment and the NATURAL
 duration of each synthesized Slovak line, decide where and how each line is laid
 onto the dub track. This module is PURE (no audio, no I/O, no external deps) so
 every branch is unit-tested on any box — the runner (`run_listening_test.py`)
 applies the plan to real audio with ffmpeg + soundfile.
 
-Placement policy (epic #174 sermon-dubbing spec, §6), evaluated per line:
+Placement policy (epic #174 dabing-dubbing spec, §6), evaluated per line:
 
   1. **fit**       — the natural clip already fits its slot
                      (`nat_dur <= slot_dur`). Placed at the line's own start

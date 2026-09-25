@@ -98,6 +98,10 @@ pub struct StatusResponse {
     /// zero value (older clients / the mock stay ok).
     #[serde(default)]
     pub heavy_containment: HeavyContainmentStatus,
+    /// #207: box-wide commit / pagefile snapshot in MB (Windows only; `None`
+    /// off Windows or on a read failure — a missing key deserializes to `None`).
+    #[serde(default)]
+    pub commit: Option<crate::lyrics::host_commit::HostCommitStatus>,
 }
 
 /// #203: the containment applied to the heavy children, surfaced on `/status` so
@@ -689,8 +693,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
 
     let lan = state.lan_status.read().await;
 
-    // #203: resolve the live containment (same pure decision the Job Object seam
-    // applies) from the two settings + the box's core count.
+    // #203/#207/#207r3c: resolve the live containment; purge delay/alloc mode/reserve_gib/max_ws (#147 r9) are internal-only, not surfaced here.
     let heavy_cap = crate::db::models::get_setting(&state.pool, "heavy_cpu_cap_pct")
         .await
         .ok()
@@ -699,11 +702,14 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         .await
         .ok()
         .flatten();
-    let heavy_cores = crate::lyrics::heavy_slot::logical_cores();
     let containment = crate::lyrics::heavy_containment::containment_from_settings(
         heavy_cap.as_deref(),
         heavy_mask.as_deref(),
-        heavy_cores,
+        None,
+        None,
+        None,
+        None,
+        crate::lyrics::heavy_slot::logical_cores(),
     );
 
     Json(StatusResponse {
@@ -730,6 +736,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
             ),
             priority_class: crate::process_start::priority_class_label().to_string(),
         },
+        commit: crate::lyrics::host_commit::read_status(),
     })
 }
 

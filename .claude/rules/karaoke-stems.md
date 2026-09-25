@@ -2,6 +2,8 @@
 paths:
   - "crates/sp-server/src/stems/**"
   - "crates/sp-decoder/src/audio/stem_mix*.rs"
+  - "crates/sp-decoder/src/audio/symphonia_reader*.rs"
+  - "crates/sp-decoder/src/split_sync*.rs"
   - "crates/sp-server/src/playback/karaoke.rs"
   - "scripts/stem_worker.py"
 ---
@@ -22,8 +24,11 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   instrumental 17.32 vs 17.17 — Kim is marginally *ahead*), but Kim is **MIT**
   while viperx has no published license (Boosty paywall, "dev-build only, no
   commercial grant"). Karaoke stems go into the NDI/broadcast output, so a clean
-  commercial license matters — unlike the lyric-alignment vocal isolation, whose
-  16 kHz mono output is internal + throwaway and still uses viperx.
+  commercial license matters. **#144: the lyric-alignment mtl step now consumes
+  THIS Kim vocals sidecar too** (one separation per video — its `preprocess-vocals`
+  dereverbs + 16 kHz-resamples the `{base}_audio_vocals.flac` this worker writes;
+  the old separate viperx BS-RoFormer isolation pass in the lyrics worker is
+  deleted, so viperx is no longer loaded anywhere).
 - Higher-SDR options exist (MVSep 124-band, becruily "deux") but are blocked by
   "no public weights" / "non-commercial" — do NOT chase them.
 - Loads via `audio-separator` (already on the box in `lyrics_venv`), auto-downloads
@@ -48,6 +53,49 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
 - **Native output is 44.1 kHz** (model rate); the mix + the decoder require
   **48 kHz stereo**, so `stem_worker.py` resamples every stem to 48 kHz stereo
   before writing FLAC (PCM_24).
+- **The separation child NEVER holds a whole-video array (#207).** It runs under
+  a 10 GiB per-process job cap. Read the mix one window at a time and stream
+  each stem through `_StreamingStitchWriter`. See the #207 section at the end.
+
+## #184 G5 — bounded audio read-ahead (any read-ahead = fader latency)
+
+`StemMixReader` applies the live fader gains at READ time, so every chunk read
+ahead of playback reaches the wall and the preview with the gains of the moment
+it was READ. `SplitSyncedDecoder::next_synced` (`crates/sp-decoder/src/split_sync.rs`)
+therefore reads a new audio chunk ONLY when `pending_audio` is empty: a chunk
+still waiting past the deadline means the audio is already ahead. Before G5 it
+read one chunk on every call, and ~48 ms chunks against 33 ms (30 fps) / 40 ms
+(25 fps) frames made the reader run 1.44× / ~1.2× real time. `pending_audio`
+grew without bound and the fader latency grew for the whole song (the owner
+heard ~70 s). Never add a read path that runs ahead of the video frame's
+deadline + one chunk. Check it on the box: `stem-mix level samples` per second ≈
+`preview-tap level samples` (~96 k/s); a clearly larger `stem-mix` number means
+read-ahead is growing again. Guarded by the `next_synced_read_ahead_*` /
+`next_synced_bounded_read_ahead_*` / `next_synced_reads_only_when_pending_is_empty`
+tests in `split_sync_tests.rs`.
+
+**The deadline is the decoder's `audio_lead_ms`, so the DECODER's share of the
+fader latency depends on the path (#148 v4):**
+
+| path | deadline | decoder read-ahead (fader-latency contribution) |
+|---|---|---|
+| paced (`genlock_pacing` ON, production) | `PACED_AUDIO_LEAD_MS = 250`, via `pacer::open_paced_decoder` | ≤ 250 ms + one chunk (~300 ms) |
+| pacing-OFF, no wall-clock emitter | 40 ms (`DEFAULT_TOLERANCE_MS`) | ≤ 40 ms + one chunk |
+| pacing-OFF, with the wall-clock emitter | `decoder_tolerance_ms(true)` = 1540 ms | ≤ 1540 ms + one chunk |
+
+This is the decoder's share only. On the paced path the fader latency the owner
+hears ALSO includes the producer's look-ahead queue: `DECODE_QUEUE_BOUND` = 12
+frames, ~400–500 ms, unchanged by v4. Audio is read, and the gains applied,
+when a frame is DECODED, not when it is emitted.
+
+- **Why the paced lead exists.** A video decode stall must not empty the
+  pacer's media-aligned grid buffer (an audible underrun).
+- **Bounded.** The lead is a FIXED cushion. The G5 gate still stops it growing,
+  so the decoder's share stays ≤ lead + one chunk for the whole song.
+- **Tests.** `split_sync_lead_tests.rs` guards it:
+  `lead_read_ahead_stays_within_lead_plus_one_chunk_over_10k_frames`.
+- **Box check.** On a paced output, `stem-mix level samples` per second still ≈
+  `preview-tap level samples`; the cushion shifts the start, not the rate.
 
 ## #184 round G2 — each reader FAMILY owns its memory; NO global "active kind" (SUPERSEDES round G1)
 
@@ -223,7 +271,8 @@ DELETED names.
      30 s / 2 s-overlap windows (`_segment_bounds`), isolate/separate each into
      `<cache>/<id>_isolation|_stemsep/seg_*.wav`, SKIP windows already present on
      start (logs `isolation resumed from chunk N/M`), load models ONCE, then
-     stitch (`_stitch_segments`, weight-normalised linear crossfade) + atomic
+     stitch (weight-normalised linear crossfade — for stems STREAMED since #207,
+     see the #207 section; `_stitch_segments` is only the test reference) + atomic
      `os.replace` to the final output + remove the work dir. Stems stitch BOTH
      stems with IDENTICAL crossfade weights so `vocals+instrumental==mix`
      additivity holds by linearity. audio-separator exposes NO per-chunk resume
@@ -278,11 +327,16 @@ DELETED names.
   Three layers funnel EVERY heavy child spawn: (1) a **process-global
   `tokio::sync::Semaphore(1)`** (`acquire_slot`) — at most ONE heavy child
   (isolation / mtl / separation) runs process-wide; fair FIFO, so the two workers
-  alternate; (2) a **`GlobalMemoryStatusEx` headroom check BEFORE the slot**
-  (`heavy_step_memory_ok`) — both free physical RAM and free commit must be
-  ≥ 4 GiB (`HEAVY_STEP_MIN_FREE_BYTES`), else the tick defers with NO backoff
-  (lyrics `SongOutcome::WaitingForMemory`; stems leave the row pending, no
-  `record_stem_deferral`) and re-checks next tick; (3) a **per-child Windows Job
+  alternate; (2) a **`GlobalMemoryStatusEx` headroom check AT SPAWN, inside the
+  slot** (`acquire_slot_for_spawn` → `memory_ok_for`; #144 r2: queue first,
+  measure at spawn) — the worker QUEUES for the slot first, then with the permit
+  HELD both free physical RAM and free commit must be ≥ 4 GiB
+  (`HEAVY_STEP_MIN_FREE_BYTES`), else the permit is released and the tick defers
+  with NO backoff (lyrics `SongOutcome::WaitingForMemory`; stems leave the row
+  pending, no `record_stem_deferral`) and re-queues next tick. A pre-slot reading
+  measured the very child the slot serialises away — from #168 r3 a separation
+  child commits ~9 GB from its first second, so the lyrics worker never queued
+  and the FIFO alternation was dead. (3) a **per-child Windows Job
   Object** (`assign_child_job`, `JOB_OBJECT_LIMIT_PROCESS_MEMORY` 6 GiB +
   `KILL_ON_JOB_CLOSE`) so an OOM kills the child, never the host. g35t /
   translation HTTP steps take NONE of these (not heavy). windows-sys is a
@@ -505,3 +559,161 @@ crashes the box). Copy FLACs off the box via a temporary `python -m http.server`
 in the cache dir, curl them to dev2, and run in a `--system-site-packages` venv
 (reuse dev2's CUDA torch) with `audio-separator` + `audioread`. Match stems by the
 parenthesized token; resample to 48 kHz for any additivity metric.
+
+## #168 — bounding the separation child's page-fault storm (retained mimalloc heap)
+
+The paced NDI grid (#147/#168) missed its ≤ 20 ms submit budget with a
+separation child resident because the child hammered the kernel memory manager:
+desktop torch has NO CPU caching allocator, so every activation tensor is an
+`_aligned_malloc`/`_aligned_free` on the UCRT heap, blocks over ~1 MiB go
+straight to `VirtualAlloc`/`VirtualFree`, and every freed page is decommitted and
+demand-zero-faulted again on the next inference step (~193k page faults/s on the
+box). Round 3 caps that at the source with a RETAINED mimalloc heap, injected
+into an APP-OWNED venv interpreter.
+
+- **The venv interpreter is an APP-OWNED COPY, never the system exe.** On the box
+  `lyrics_venv\Scripts\python.exe` is CPython's venv REDIRECTOR; the process that
+  actually runs torch is the shared `C:\Program Files\Python312\python.exe`. You
+  must NEVER patch/inject the system exe (six other processes share it). Instead
+  `bootstrap_venv_exe.rs` copies `python.exe` + `python3*.dll` + `vcruntime140*.dll`
+  from `pyvenv.cfg`'s `home` INTO `Scripts\` (the pre-3.7.2 "copies" layout, which
+  CPython's getpath still honours via `pyvenv.cfg`), replacing the redirector, then
+  runs `minject --force --inplace` on that copy. It runs from `bootstrap.rs` after
+  `is_ready`, is idempotent (an already-injected interpreter is left untouched —
+  re-copying a pristine exe over an injected one would wipe the injection every
+  boot), and is WARN-and-continue (a missing DLL / failed inject never blocks the
+  bootstrap; the child just runs unretained).
+
+- **The MIMALLOC env trio (`heavy_alloc_env.rs`), applied to the SEPARATION child
+  only** (next to `gpu_policy::env_for_child` in `stems/separator.rs`; the dub
+  child is light, the mtl venv untouched): `MIMALLOC_PURGE_DELAY=-1` (never
+  decommit freed pages back to the OS — the load-bearing knob; `0` brings the
+  storm back), `MIMALLOC_ARENA_EAGER_COMMIT=1`, `MIMALLOC_RESERVE_OS_MEMORY=4GiB`
+  (reserve+commit one arena up front so the first-touch fault cost is paid ONCE).
+  Fits under the 10 GiB per-child Job Object cap; numerically invisible to the
+  model. These are env NO-OPS unless the interpreter carries the mimalloc override.
+
+- **`mimalloc.dll`, NOT `mimalloc-override.dll`.** The CMake **Release** output of
+  the shared override target at the pinned tag (v2.2.7) is `mimalloc.dll`
+  (`mi_libname = "mimalloc"`), which is ALSO minject's DEFAULT injection target.
+  The CI `build-tauri` step builds it from the pinned tag with
+  `-DMI_OVERRIDE=ON -DMI_BUILD_STATIC=OFF -DMI_BUILD_OBJECT=OFF -DMI_BUILD_TESTS=OFF`
+  and stages `mimalloc.dll` + the repo's prebuilt `bin/mimalloc-redirect.dll` +
+  `bin/minject.exe` into `src-tauri/resources/mimalloc/`; `bundle.resources`
+  ships them next to `SongPlayer.exe` (`resources\mimalloc\`), where the bootstrap
+  resolves them from `current_exe()`'s dir (sp-server is embedded in
+  `SongPlayer.exe`, so `current_exe()` IS `SongPlayer.exe`). Re-pin: list
+  `microsoft/mimalloc` v2.2.x tags, then READ that tag's `CMakeLists.txt`
+  (`mi_libname`) + `bin/readme.md` (minject default) — the DLL name is not a
+  constant to assume.
+
+- **Reading `heavy child faults/s`.** `heavy_faults.rs` samples the heavy child's
+  cumulative `PageFaultCount` (`GetProcessMemoryInfo`) every 5 s and logs
+  `heavy child faults/s=N (pid …)`; the sampler is spawned by
+  `heavy_slot.rs::assign_child_job` and aborted by the `ChildJobGuard`'s Drop when
+  the child exits. The counter reads the RIGHT process only BECAUSE the venv now
+  spawns the real interpreter (not the redirector). Acceptance: during a cpu-idle
+  separation this line — and `Get-Counter '\Process(python*)\Page Faults/sec'` —
+  should read ≤ 20k (down from ~193k) with the boot log showing
+  `mimalloc override active`.
+
+## #207 — streaming separation (memory is O(segment), never O(video))
+
+**The cap.** The separation child runs inside a per-child Windows Job Object
+with `JOB_OBJECT_LIMIT_PROCESS_MEMORY` = **10 GiB**
+(`heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES`). The #168 mimalloc arena
+reserve (the `heavy_alloc_reserve_gib` setting: 2 GiB on the box on 24.9.,
+committed but never touched) counts against the same 10 GiB.
+Error 1455 from the job cap ignores how much commit the host has free.
+
+**Why whole-video arrays failed every video longer than ~35 min.** Before #207,
+`cmd_separate` held three whole-length arrays:
+- `librosa.load(mix, sr=None)` kept the whole mix for the entire run. A 70 min
+  stereo float32 mix is ≈ 1.6 GB.
+- `_stitch_paths` read EVERY segment WAV at once, and `_stitch_segments` built a
+  full-length float64 output plus a full-length `wsum`.
+- `_write_array_48k_stereo` copied the output again (`np.clip`, then
+  soundfile's PCM_24 conversion).
+
+On 24.9. 16 of 31 separations failed, on 5 videos of 36–71 min (330, 332, 328,
+149, 150). Video 150 (61.8 min) died on
+`Unable to allocate 1.33 GiB for an array with shape (177922440,) and data type float64`,
+which is 61.8 min × 48 kHz, one channel as float64, with several copies alive.
+The host had ~35 GB of commit free at the time, so the per-child cap was the
+limit, not the box.
+
+**Now (all in `scripts/stem_worker.py`):**
+- **Input.** `_audio_info` reads only the header (rate, frames). The window
+  plan trusts that count, so an empty or UNKNOWN count raises `ValueError`. A
+  FLAC from a piped encoder has STREAMINFO total = 0, which libsndfile reports
+  as a ~2^63 sentinel; without the check, `_segment_bounds` would loop into
+  the memory cap.
+  `_read_window(path, in_sr, start_s, end_s)` reads one window with `sf.read`
+  `start`/`stop`. It uses the SAME `round(t*sr)` bounds and the same float32
+  `(n[, ch])` layout as the old slice. librosa's `sr=None` load is itself a
+  soundfile float32 read, so the samples are identical.
+- **Output.** `_StreamingStitchWriter` overlap-adds with the same linear weights
+  and the same float64 accumulation order as `_stitch_segments`, and
+  weight-normalises. It writes every sample before the next segment's start as
+  a clipped float32 block to a PCM_24 FLAC `.tmp`, and holds ONLY the overlap
+  tail (`max_retained_samples` == overlap, whatever the segment count).
+  - It publishes with `os.replace` only after all declared segments have been
+    added.
+  - On any failure (an exception, too few segments, or a failed final close
+    or replace) it retries the close so the handle is released, removes the
+    `.tmp`, and leaves the final sidecar untouched.
+  - Its output is **bit-identical** to
+    `_write_array_48k_stereo(_stitch_segments(...))`.
+- `_stitch_to_flac` feeds the per-segment WAVs one at a time: vocals first,
+  then instrumental, the same order as before.
+- `_stitch_segments` and `_write_array_48k_stereo` stay ONLY as the reference
+  the tests compare against (`scripts/tests/test_stem_streaming.py`). The child
+  never calls them.
+
+**Rule: never load the whole mix or build a whole-length output array in the
+heavy child.** This covers `librosa.load` of the mix, `np.concatenate` of all
+segments, a `total`-sized `np.zeros`, and `sf.read` / `sf.write` of a whole
+stem. Anything that grows with video length fails for long videos under the
+10 GiB cap. The per-window working set (a 30 s window, the separator,
+`_load_48k_stereo` of one separated window, and the 2 s tail) is the budget.
+The resumable per-segment work dir (#171) is unchanged.
+
+## Audio readers after a seek: the first sample IS the target (#148 v3)
+
+symphonia's `SeekMode::Accurate` FLAC seek lands on the packet (FLAC block,
+~85-96 ms) that CONTAINS the target and returns `SeekedTo { actual_ts,
+required_ts }`. The CALLER must drop `required_ts - actual_ts` frames. Before
+#148 v3 `SymphoniaAudioReader::seek` ignored it: the first chunk started at the
+block boundary but was labelled with the requested position, so after any seek
+(resume-after-pause `start_position_ms`, dashboard scrub) the audio played up to
+~90 ms LATE against the picture for the rest of the song, and stems with
+different block sizes started on different samples.
+
+- **Where the trim lives:** `symphonia_reader.rs` — `seek` stores
+  `skip_frames` via the pure `seek_start(required, actual, position_ms, tb)`;
+  `decode_packet` runs `trim_leading_frames` and skips a packet emptied by the
+  trim (the trim may span several packets). The first emitted chunk's label is
+  then TRUE. An overshoot (`actual > required`, allowed by symphonia on odd
+  streams) trims nothing and labels the chunk at `actual_ts`.
+- **Seek with `SeekTo::TimeStamp`, never `SeekTo::Time`.** `Time::from(Duration)`
+  goes through f64 seconds: 0.288 s × 48 000 = 13 823.99… and symphonia
+  truncates it to 13 823 — one frame early, and one frame off `StemMixReader`'s
+  integer `position_ms * rate / 1000`. `ms_to_ts` computes the frame in exact
+  integer maths. The ramp tests assert EXACT equality (the decode is bit-exact),
+  so any tolerance you are tempted to add hides this class of bug.
+- **`StemMixReader` has no trim of its own** — its `seek` re-anchors
+  `emitted_frames = position_ms * rate / 1000`, which is right ONLY because every
+  sub-reader now starts exactly at the target. Never "fix" misaligned stems in the
+  mixer; fix the sub-reader.
+- **Don't label with `actual_ts` instead of trimming** (rejected in the design):
+  each stem file has its own block geometry, so labels would differ per stem.
+- **Tests use sample-index ramps**, not the silent fixture (silence can't show
+  a misalignment): `tests/fixtures/ramp_{4096,4608}.flac` are 24-bit stereo
+  48 kHz where frame `n` encodes L=`n`, R=`-n` (decoded f32 = `n / 2^23`;
+  recover with `(s as f64 * 2^23).round()`). The two files differ only in FLAC
+  block size — that is what makes the stem-mix alignment test bite. Regenerate
+  with `tests/fixtures/regen.sh` (ffmpeg `aevalsrc`, `-bits_per_raw_sample 24
+  -frame_size <N> -lpc_type fixed`).
+- A real symphonia FLAC seek never needs a trim longer than one packet, so the
+  multi-packet path is unit-tested by arming `skip_frames` directly on a real
+  decoder (`symphonia_reader_tests.rs`).

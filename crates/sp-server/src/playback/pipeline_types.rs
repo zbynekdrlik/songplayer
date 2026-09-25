@@ -59,6 +59,14 @@ pub enum PipelineEvent {
         frames_submitted_last_5s: u32,
         observed_fps: f32,
         nominal_fps: f32,
+        /// #168 round 6b: the decoder's SOURCE frame rate (`decoder.frame_rate()`
+        /// as fps), path-INDEPENDENT. Distinct from `nominal_fps`, which is the
+        /// OUTPUT nominal — the fixed genlock grid on the paced path, the decoder
+        /// rate on the SDK-clocked path. The lock rule needs the source rate to
+        /// know the structural fps-conversion repeat fraction, so it reads THIS,
+        /// never `nominal_fps` (which reads the grid 30 on the paced path and
+        /// falsely degraded a 24-fps output).
+        source_fps: f32,
         /// `Instant` is fine on the wire here because emitter and consumer
         /// are in the same process. The engine maps it to `DateTime<Utc>`
         /// using a fixed `Instant`-to-`SystemTime` reference before
@@ -72,7 +80,7 @@ pub enum PipelineEvent {
         /// fills it from the `Pacer`.
         pacing: crate::playback::ndi_health::PacingStats,
         /// Audio clock-discipline telemetry (#148); default off the SDK-clocked /
-        /// idle paths, filled from the `Pacer`'s audio buffer + PLL when paced.
+        /// idle paths, filled from the `Pacer`'s audio buffer when paced.
         audio: crate::playback::ndi_health::AudioStats,
         /// #192 round 3: per-call `send_video_async` max/p99 + the decode-loop
         /// stage maxima (decode / submit / audio), so a producer stall names its

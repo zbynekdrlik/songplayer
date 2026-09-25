@@ -1,4 +1,98 @@
 import { test, expect, Page } from "@playwright/test";
+import {
+  audibleStreak,
+  averageDb,
+  rmsToDbfs,
+  quietStreak,
+  longestSilentRunMs,
+} from "./audio-helpers.mjs";
+
+// ── #206: pure audio-assertion helpers (run on ubuntu, no box) ────────────────
+// The two content/state-dependent post-deploy audio assertions used to read ONE
+// live sample and flaked on luck (3 red jobs on 22.9.2026). The determinism now
+// lives in two pure helpers, unit-tested here with exact values.
+
+test("audibleStreak — a run of N samples strictly above the threshold (#206)", () => {
+  // Reached: index 1,2,3 are each > 0.01 → the 3-streak completes at index 3.
+  expect(audibleStreak([0, 0.02, 0.03, 0.02], 0.01, 3)).toBe(3);
+  // Reached as early as possible: the earliest qualifying streak wins.
+  expect(audibleStreak([0.5, 0.5, 0.5, 0.5], 0.01, 3)).toBe(2);
+  // n = 1 completes at the first audible sample.
+  expect(audibleStreak([0, 0, 0.5], 0.01, 1)).toBe(2);
+  // Never reached: a silent sample keeps breaking the run before it hits 3.
+  expect(audibleStreak([0.02, 0, 0.02, 0, 0.02], 0.01, 3)).toBe(-1);
+  // Threshold is STRICT: samples EQUAL to the threshold do not count.
+  expect(audibleStreak([0.01, 0.01, 0.01], 0.01, 3)).toBe(-1);
+  expect(audibleStreak([0.011, 0.011, 0.011], 0.01, 3)).toBe(2);
+  // Empty input never reaches a streak.
+  expect(audibleStreak([], 0.01, 3)).toBe(-1);
+});
+
+test("averageDb — mean of finite dB samples, non-finite dropped (#206)", () => {
+  expect(averageDb([-10, -20, -30])).toBe(-20);
+  // null / NaN / -Infinity (a codec-less runner or an empty spectral band) drop.
+  expect(averageDb([-10, null, -30])).toBe(-20);
+  expect(averageDb([-10, Number.NEGATIVE_INFINITY, -30, Number.NaN])).toBe(-20);
+  // No finite entries → null (never NaN).
+  expect(averageDb([])).toBeNull();
+  expect(averageDb([null, Number.NEGATIVE_INFINITY, Number.NaN])).toBeNull();
+});
+
+// ── #184 round G2: helpers of the owner-path post-deploy spec ────────────────
+
+test("rmsToDbfs — linear RMS to dBFS, silence is -Infinity (#184 G2)", () => {
+  expect(rmsToDbfs(1)).toBe(0);
+  expect(rmsToDbfs(0.1)).toBeCloseTo(-20, 9);
+  expect(rmsToDbfs(0.001)).toBeCloseTo(-60, 9);
+  expect(rmsToDbfs(10 ** (-50 / 20))).toBeCloseTo(-50, 9);
+  // Digital silence / a missing read is below every threshold, never NaN.
+  expect(rmsToDbfs(0)).toBe(Number.NEGATIVE_INFINITY);
+  expect(rmsToDbfs(-1)).toBe(Number.NEGATIVE_INFINITY);
+  expect(rmsToDbfs(Number.NaN)).toBe(Number.NEGATIVE_INFINITY);
+  expect(rmsToDbfs(null)).toBe(Number.NEGATIVE_INFINITY);
+});
+
+test("quietStreak — a run of N samples strictly BELOW the threshold (#184 G2)", () => {
+  // The mirror of audibleStreak: completes at the index of the Nth quiet sample.
+  expect(quietStreak([-20, -70, -80, -90], -60, 3)).toBe(3);
+  expect(quietStreak([-70, -70, -70, -70], -60, 3)).toBe(2);
+  expect(quietStreak([-20, -70], -60, 1)).toBe(1);
+  // A loud sample breaks the run.
+  expect(quietStreak([-70, -20, -70, -70, -20], -60, 3)).toBe(-1);
+  // STRICT: equal to the threshold is not quiet.
+  expect(quietStreak([-60, -60, -60], -60, 3)).toBe(-1);
+  expect(quietStreak([-60.1, -60.1, -60.1], -60, 3)).toBe(2);
+  // -Infinity (digital silence) is quiet; NaN / null reads are not proof of quiet.
+  expect(quietStreak([Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY], -60, 2)).toBe(1);
+  expect(quietStreak([-70, Number.NaN, -70], -60, 2)).toBe(-1);
+  expect(quietStreak([-70, null, -70], -60, 2)).toBe(-1);
+  expect(quietStreak([], -60, 1)).toBe(-1);
+  expect(() => quietStreak([-70], -60, 0)).toThrow();
+});
+
+test("longestSilentRunMs — the longest span of consecutive silent samples (#184 G2)", () => {
+  const at = (pairs: Array<[number, number | null]>) => pairs.map(([t, db]) => ({ t, db }));
+  // No silent sample → 0.
+  expect(longestSilentRunMs(at([[0, -20], [500, -30]]), -60)).toBe(0);
+  // One silent sample alone spans 0 ms.
+  expect(longestSilentRunMs(at([[0, -20], [500, -70], [1000, -20]]), -60)).toBe(0);
+  // A run from t=500 to t=2000 → 1500 ms; the longer of two runs wins.
+  expect(
+    longestSilentRunMs(
+      at([[0, -20], [500, -70], [1000, -80], [1500, -65], [2000, -61], [2500, -20], [3000, -70], [3500, -70]]),
+      -60,
+    ),
+  ).toBe(1500);
+  // A run still open at the end counts to the last sample.
+  expect(longestSilentRunMs(at([[0, -20], [500, -70], [6000, -70]]), -60)).toBe(5500);
+  // STRICT threshold: exactly -60 is not silent.
+  expect(longestSilentRunMs(at([[0, -60], [4000, -60]]), -60)).toBe(0);
+  // -Infinity and a null read (no signal at all) count as silent.
+  expect(
+    longestSilentRunMs(at([[0, Number.NEGATIVE_INFINITY], [1000, null], [2000, -20]]), -60),
+  ).toBe(1000);
+  expect(longestSilentRunMs([], -60)).toBe(0);
+});
 
 const ALLOWED_CONSOLE = [
   /WebSocket connection/, // WS reconnect messages are expected

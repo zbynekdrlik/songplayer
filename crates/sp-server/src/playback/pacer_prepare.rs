@@ -6,8 +6,8 @@
 //! ≈ 74), and audio was pushed at that same late instant (underruns). Lane 4
 //! moves the decode ahead: the pipeline calls [`Pacer::prepare`] right after each
 //! emit — decode forward to the frame due at the NEXT boundary, drop older, park
-//! the first beyond, and push every consumed frame's audio into the wall-clock
-//! buffer — THEN sleeps, THEN [`service`](super::Pacer::service) submits the
+//! the first beyond, and push every pulled frame's audio into the grid buffer —
+//! THEN sleeps, THEN [`service`](super::Pacer::service) submits the
 //! already-decoded frame within ~1 ms of the boundary.
 //!
 //! Split into a sibling of `pacer.rs` so that file stays under the 1000-line cap;
@@ -18,7 +18,7 @@ use super::{PacedFrame, Pacer};
 impl Pacer {
     /// Decode FORWARD toward `target_boundary_100ns` (#147 lane 4): consume every
     /// buffered/pulled frame whose presentation time is at/before the boundary —
-    /// pushing each consumed frame's audio into the wall-clock buffer — keep the
+    /// every PULLED frame's audio goes into the grid buffer (#148 v2) — keep the
     /// LAST as the due frame ([`prepared`](super::Pacer)), count the earlier ones
     /// in `dropped` (e.g. 60→30 decimation), and park the first frame beyond the
     /// boundary in `pending`. Records the pre-decode duration into the prep ring
@@ -39,13 +39,12 @@ impl Pacer {
         let start = self.now_100ns();
         loop {
             if self.pending.is_none() {
-                self.pending = pull();
+                self.pending = self.pull_frame(&mut pull);
             }
             match self.pending.take() {
                 Some(frame) => {
                     let present = self.wall_start_100ns.saturating_add(frame.pts_100ns());
                     if present <= target_boundary_100ns {
-                        self.push_audio(&frame.audio);
                         if self.prepared.is_some() {
                             self.dropped += 1;
                         }

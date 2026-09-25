@@ -35,6 +35,7 @@ import {
   type APIRequestContext,
 } from "@playwright/test";
 import { ObsDriver } from "./obs-driver";
+import { pickBaselineScene } from "./obs-baseline-scene";
 import {
   unhealthyOnProgramOutputs,
   type HealthSnapshot,
@@ -82,33 +83,11 @@ async function waitEngineActiveScene(
 const FAST_PLAYLIST_NAME = "ytfast";
 const FAST_SCENE_NAME = "sp-fast";
 
-// Picking the off-program baseline scene was historically `find((s) =>
-// !s.startsWith("sp-"))`, which on win-resolume resolved to a sound-sync
-// QR-code "test" scene that disrupts the wall + LED audience whenever
-// E2E runs against a live machine. Pick another sp-* scene instead —
-// any one that isn't sp-fast (under test) and isn't sp-warmup (also
-// disturbing per operator). Falls back to a non-sp scene only if no
-// alternative sp-* exists. The assertion-of-interest in every test is
-// "ytfast NOT in active_playlist_ids", which holds for any non-sp-fast
-// program scene regardless of whether another sp-* is active.
-const DISALLOWED_BASELINE_SCENES = new Set(["sp-fast", "sp-warmup"]);
-
-function pickBaselineScene(scenes: string[]): string {
-  // Prefer sp-slow specifically — it's a quiet music scene operators
-  // routinely use as a "background" state.
-  if (scenes.includes("sp-slow")) return "sp-slow";
-  // Fall back to any other sp-* that isn't disallowed.
-  const otherSp = scenes.find(
-    (s) => s.startsWith("sp-") && !DISALLOWED_BASELINE_SCENES.has(s),
-  );
-  if (otherSp) return otherSp;
-  // Last resort — non-sp scene. This may be the disruptive QR-code
-  // test scene, but it's better than running a test where the baseline
-  // and the sp-fast probe scene collide.
-  const nonSp = scenes.find((s) => !s.startsWith("sp-"));
-  if (nonSp) return nonSp;
-  return scenes[0];
-}
+// The off-program baseline scene (sp-slow preferred; never sp-fast or
+// sp-warmup) lives in `obs-baseline-scene.ts`, shared with the #147 A/V gate.
+// The assertion of interest in every test here is "ytfast NOT in
+// active_playlist_ids", which holds for any program scene other than sp-fast,
+// whether or not another sp-* scene is active.
 
 async function findPlaylistId(request: import("@playwright/test").APIRequestContext, name: string): Promise<number> {
   const resp = await request.get("/api/v1/playlists");
@@ -771,26 +750,46 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const sev = (s: string) => (s === "UNLOCKED" ? 2 : s === "DEGRADED" ? 1 : 0);
     const eff = (o: { lock_state: string; clock?: { clock_ok?: boolean } }) =>
       o.lock_state === "LOCKED" && !o.clock?.clock_ok ? "UNLOCKED" : o.lock_state;
-    const live = enabled.filter((o) => o.state === "Playing");
-    let expectedState: string;
-    if (live.length === 0) {
-      const clockOk = enabled.every((o) => !!o.clock?.clock_ok);
-      expectedState = clockOk ? "LOCKED" : "UNLOCKED";
-    } else {
-      expectedState = live
-        .map(eff)
-        .reduce((a, b) => (sev(b) > sev(a) ? b : a), "LOCKED");
-    }
+    const summarize = (en: typeof enabled): string => {
+      const live = en.filter((o) => o.state === "Playing");
+      if (live.length === 0) {
+        return en.every((o) => !!o.clock?.clock_ok) ? "LOCKED" : "UNLOCKED";
+      }
+      return live.map(eff).reduce((a, b) => (sev(b) > sev(a) ? b : a), "LOCKED");
+    };
+    const freshEnabled = async (): Promise<typeof enabled> => {
+      const r = await request.get("/api/v1/ndi/health");
+      expect(r.status()).toBe(200);
+      return ((await r.json()) as typeof health).filter((o) => o.pacing?.enabled === true);
+    };
 
-    const cls = (await global.getAttribute("class")) ?? "";
-    expect(
-      cls,
-      `global badge class "${cls}" must match the summarized state ${expectedState} for enabled health ${JSON.stringify(enabled)}`,
-    ).toContain(`lock-${expectedState.toLowerCase()}`);
+    // The badge and the API are two reads a poll apart (the UI polls every
+    // 1 s), and the earlier E2E tests play/seek/pause outputs, so a live
+    // output's lock state can legitimately change between the two reads (a
+    // seek is a grid resync → DEGRADED for 60 s). Require that they AGREE on
+    // the same fresh snapshot within a few UI refreshes — a badge that never
+    // matches the health still fails (release runs 36063649894/36079166526
+    // failed on the one-shot comparison in both directions).
+    let lastGlobal = "";
+    await expect
+      .poll(
+        async () => {
+          const en = await freshEnabled();
+          const expectedState = summarize(en);
+          const cls = (await global.getAttribute("class")) ?? "";
+          lastGlobal = `global badge class "${cls}" vs summarized ${expectedState} for ${JSON.stringify(en)}`;
+          return cls.includes(`lock-${expectedState.toLowerCase()}`);
+        },
+        { timeout: 10_000, intervals: [500] },
+      )
+      .toBe(true)
+      .catch((e) => {
+        throw new Error(`${lastGlobal}\n${e}`);
+      });
 
     // A per-card badge is shown only on a pacing-enabled Playing/Paused output;
     // find one that also matches a playlist card and assert its colour agrees
-    // with the output's raw lock_state.
+    // with the output's raw lock_state (same fresh-snapshot agreement).
     const playlists = (await (
       await request.get("/api/v1/playlists")
     ).json()) as Array<{ name: string; ndi_output_name: string }>;
@@ -810,11 +809,22 @@ test.describe("SongPlayer post-deploy feature verification", () => {
         .filter({ hasText: nameByNdi.get(matched.ndi_name)! })
         .locator(".lock-badge");
       await expect(cardBadge).toBeVisible({ timeout: 10_000 });
-      const ccls = (await cardBadge.getAttribute("class")) ?? "";
-      expect(
-        ccls,
-        `card badge for ${matched.ndi_name} class "${ccls}" must match its lock_state ${matched.lock_state}`,
-      ).toContain(`lock-${matched.lock_state.toLowerCase()}`);
+      let lastCard = "";
+      await expect
+        .poll(
+          async () => {
+            const now = (await freshEnabled()).find((o) => o.ndi_name === matched.ndi_name);
+            const want = now?.lock_state ?? matched.lock_state;
+            const ccls = (await cardBadge.getAttribute("class")) ?? "";
+            lastCard = `card badge for ${matched.ndi_name} class "${ccls}" vs lock_state ${want}`;
+            return ccls.includes(`lock-${want.toLowerCase()}`);
+          },
+          { timeout: 10_000, intervals: [500] },
+        )
+        .toBe(true)
+        .catch((e) => {
+          throw new Error(`${lastCard}\n${e}`);
+        });
     }
   });
 

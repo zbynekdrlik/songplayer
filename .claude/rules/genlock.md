@@ -5,7 +5,13 @@ paths:
   - "crates/sp-server/src/playback/wallclock*.rs"
   - "crates/sp-server/src/playback/clock_health*.rs"
   - "crates/sp-server/src/playback/pacer*.rs"
+  - "crates/sp-server/src/playback/audio_grid*.rs"
   - "crates/sp-server/src/playback/submitter*.rs"
+  - "crates/sp-server/src/playback/proc_mem*.rs"
+  - "crates/sp-server/src/playback/loop_stats.rs"
+  - "crates/sp-server/src/playback/frame_buf.rs"
+  - "crates/sp-decoder/src/frame_pool.rs"
+  - "crates/sp-server/src/process_residency*.rs"
   - "crates/sp-ndi/src/**"
 ---
 # Genlock (NDI outputs locked to the fleet clock) — #146–#151
@@ -68,10 +74,10 @@ paths:
   `late_frames` stayed 27.6 % with `iter_p99 81 ms` while `prep_p99` is 0.4 ms —
   the bottleneck MOVED from the decode to the **NDI SUBMIT** (`send_video_async` +
   audio still on the emit thread, stalling under the child's memory-bandwidth /
-  page-fault pressure). So `genlock_pacing` STAYS OFF in production until the
-  submit is also moved off the boundary-critical path (a dedicated NDI-submit
-  thread) or the stems child's D3D/NDI-path impact is bounded. `iter_p99` ≫
-  `prep_p99` is the signature of submit-side (not decode-side) lateness.
+  page-fault pressure). That led to the dedicated submit thread (#168, next
+  bullet). Pacing is ON in production permanently (owner ruling, #147 comment
+  5812898277). `iter_p99` ≫ `prep_p99` is the signature of submit-side (not
+  decode-side) lateness.
 - Submit-thread output split (#168, 0.54.0-dev.1): the symmetric twin of the
   #147 decode split, moving the NDI submit OFF the emit thread. Diagnosis
   (box-test-5 log, `paced: song summary`): `iter_p50_us` 25–31 ms MEDIAN with
@@ -132,9 +138,10 @@ paths:
   `recording-verdict` proves contiguity for SP-originated frames.
 - Dashboard genlock indicator (#150→#164→#176): the header `GlobalLockBadge`
   (`sp-ui/src/components/ndi_health.rs`) is **ALWAYS visible** — grey
-  `● GENLOCK OFF` when NO output has pacing enabled (the production default
-  `genlock_pacing=false`), else `● LOCKED`/`● DEGRADED`/`● UNLOCKED` (green/amber/
-  red, `n/m` live-locked count + worst reason). #176 revised #164's "hide the
+  `● GENLOCK OFF` when NO output has pacing enabled (the CODE default
+  `genlock_pacing=false`; production runs pacing ON per the #147 ruling), else
+  `● LOCKED`/`● DEGRADED`/`● UNLOCKED` (green/amber/red, `n/m` live-locked
+  count + worst reason). #176 revised #164's "hide the
   badge entirely while pacing is off" — the owner must always be able to tell at
   a glance whether SongPlayer is genlocked, like the fleet OBS badge. The
   whole-box state is decided by the ONE pure, unit-tested
@@ -187,7 +194,8 @@ paths:
   (`audio resumed after silence`). `silence_blocks` should grow ONLY at
   transitions/stalls; `late_blocks` ≈ 0 and `emit_jitter_p99_us` < 500 with the
   TIME_CRITICAL thread. The PACED path (`pipeline_paced.rs`) keeps its own audio
-  clock (the Pacer's `AudioGridBuffer` + PLL) and is untouched.
+  (the Pacer's media-aligned `AudioGridBuffer`, see "Paced audio" below) and is
+  untouched.
   **Box finding 19.9.2026 (0.59.0-dev.6):** EVERY pipeline runs an emitter (idle
   ones emit silence, so receivers never starve), and with the FIXED 2 ms spin the
   per-minute p99 was 0.4–5.5 ms, not < 0.5 — on the 24-core, ~3 % busy,
@@ -206,7 +214,8 @@ paths:
   3× in 15 min unloaded, ~1/s while a second pipeline decoded) — and every
   underrun shifted audio later for the rest of the song. Cure: the emitter path
   opens the decoder through `pipeline_audio::open_synced_decoder` →
-  `SplitSyncedDecoder::with_tolerance(40 + AUDIO_LOOKAHEAD_MS=100)`, i.e. audio
+  `SplitSyncedDecoder::with_audio_lead(40 + AUDIO_LOOKAHEAD_MS=100)` (named
+  `with_tolerance` before #148 v4), i.e. audio
   is read ~100 ms AHEAD of video. That fills the ring to ≈ 98–225 ms (capacity
   266) WITHOUT an A/V offset (the first block starts as the first frame goes
   out; both then run in real time). Three rules ride with the lookahead: a
@@ -253,7 +262,7 @@ paths:
   of each loop iteration; both ride the `HealthSnapshot` event and log a third
   grep-stable `pipeline: loop-stats` line beside `ndi: heartbeat` (per UTC minute)
   so the A/B box test (same song ± a resident stems child) names the stalling
-  stage. The paced (#168, genlock_pacing OFF in prod) submit-thread also surfaces
+  stage. The paced (#168; pacing is ON in production since the #147 ruling) submit-thread also surfaces
   this gauge now (#168 round 2, 0.63.0-dev.1): it drains the SAME
   `FrameSubmitter.submit_times` through its handoff snapshot into
   `emit_heartbeat_paced`, carried into `PacingStats` + the paced `pipeline:
@@ -276,9 +285,10 @@ paths:
   additive `NdiSender::send_video_async_slice(&[u8])`, so the holdover is a
   refcount hold with ZERO pixel copy. Rules for anyone touching `submitter.rs` /
   `pacer.rs`: the field-order SAFETY note still holds (sender drops before
-  `prev_frame`); the paced burn overlay paints via `SharedFrame::make_mut` (in
-  place while sole owner — it IS the sole owner on the submit path, since the pacer
-  keeps its own `last_frame` clone); idle Black is submitted by shared reference
+  `prev_frame`); the paced burn overlay paints via `SharedFrame::make_mut`, which
+  FORKS into a pooled copy while the pacer still holds its `last_frame` clone
+  (the usual case; in place only when the submit side is the sole owner, which
+  is safe — #147 round 10); idle Black is submitted by shared reference
   through `PacedSink::submit_shared` (`Standby::Black{dims, &SharedFrame}`,
   `service_standby` clones the Arc = a refcount bump per idle slot, the idle loop
   owns one black `SharedFrame`); `send_black_bgra` reuses a `black_bgra` buffer
@@ -337,8 +347,9 @@ so the OS fault + TLB-shootdown cost is unchanged):
   once → `PacedFrame.video` → the pacer's `last_frame` starvation repeat →
   `SubmitJob::from_paced` (the handoff, `frame.video.clone()`) → the submitter's
   `prev_frame` holdover. No pixel copy anywhere; the burn overlay's
-  `SharedFrame::make_mut` (`Arc::make_mut` → a fresh `PooledBuf` copy) is the
-  only cloner and burn is default OFF.
+  `SharedFrame::make_mut` (`Arc::make_mut` → `PooledBuf::clone`, a copy into a
+  RECYCLED pool buffer since #147 round 10) is the only cloner and burn is
+  default OFF.
 - **SDK-holdover safety invariant (unchanged from 2a):** a recycled buffer may
   be reused ONLY after every `Arc` is gone. Recycling fires exactly in
   `PooledBuf::Drop`, which the `Arc` runs only on the LAST holder drop — the
@@ -348,3 +359,564 @@ so the OS fault + TLB-shootdown cost is unchanged):
 - The idle black and the cached BGRA black stay OUT of the pool as takers (built
   from their own buffers, never `take`); the idle black's single end-of-loop
   drop recycling one bounded black buffer is harmless.
+
+## Paced measurement session (#168 round-4 recipe)
+
+How to run a paced grid-stall measurement on win-resolume (the check behind the
+#168 default `heavy_cpu_affinity_mask` and #147's production flip). A 90-minute
+investigation is now a 10-minute read.
+
+- **The default heavy block is now 3 logical cores** (`e00000` on the 24-core
+  box; #168 round 8 — round 7 measured it at receiver `dropped_due` 0.27–0.5/min
+  vs 0.9–1.35/min for 4 cores). `f00000` (the round-5 4-core block) is now the
+  operator experiment/override, no longer the default.
+
+- **Pacing is ON in production permanently** (owner ruling, issue #147 comment
+  5812898277, 24.9.2026): the residual stall is solved with guaranteed priority
+  and residency, NEVER by switching pacing off — not as a "temporary state", not
+  for a measurement. `genlock_pacing` is read ONLY at startup (`lib.rs::start` →
+  `engine.set_genlock_pacing`); a restart = `gh run rerun --job <LATEST Deploy
+  job id>` — look the id up each time (`gh run view <run> --json jobs`; a rerun
+  mints a NEW job id). The dabing 12–16 kHz single-snapshot E2E assertion that
+  used to fail on live content was reworked by #206 (post-deploy E2E: content/
+  state-dependent audio assertions, closed — commit b41d06e) into a
+  content-matched full-band RMS drop.
+- **Change containment mid-session.** `heavy_cpu_cap_pct` /
+  `heavy_cpu_affinity_mask` apply at the NEXT child spawn (`refresh_containment`
+  per tick), NOT to the running child — so after a settings change, kill the venv
+  python (`Stop-Process -Id <pid>`) to force a respawn. That video takes one
+  `stem_attempts` + backoff; its already-written segments are intact.
+- **The no-child control:** `stem_worker_enabled=false` + `lyrics_worker_enabled=false`.
+- **Read the grid per minute** from `C:\ProgramData\SongPlayer\songplayer.<date>.log`:
+  `pipeline: loop-stats ndi_name="SP-slow" … submit_call_us_max` (the raw
+  `send_video_async` call cost) and `ndi: genlock … late=` (lateness/min).
+- **Trust the window only if the child is PRODUCTIVE.** `TotalProcessorTime`
+  delta over 6 s must be > 0 — a starved child (a 2-logical-core block, W3) gives
+  a false-clean grid because it is doing no work, not because placement is safe.
+
+### MCP-shell traps (learned the hard way, round 4)
+
+- Keep each `mcp__win-resolume__Shell` call ≤ ~12 s (e.g. 2 × 4-s `Get-Counter`
+  samples). Longer calls time out and lose the output.
+- A detached sampler launched via `Start-Process` NEVER wrote its output file —
+  run the sampler inline in the (bounded) shell call instead.
+- NEVER `Stop-Process` by a `CommandLine -like '<text>'` filter whose text also
+  matches YOUR OWN command — it kills your own shell (exit -1, no output). Target
+  the child by `-Id <pid>` read from a prior listing.
+
+### The calibrated LOCKED/DEGRADED rule (#168 round 6, #149 classifier)
+
+`sp_core::genlock::lock_state::derive` no longer degrades on ANY late/repeat in
+the 60 s window (the old rule-4 `> 0`). It rate-normalises the window counts
+against the emitted slots (`seq` differenced by `EventWindow`, fed via
+`playback/lock_state.rs::lock_for_heartbeat`), so 24/25-fps content on the 30-fps
+grid reads LOCKED, not DEGRADED. Precedence (first match wins): `!clock_ok` →
+UNLOCKED "clock not ok"; `!pacing` → UNLOCKED "pacing disabled"; `connections==0`
+→ DEGRADED "no receiver"; `resyncs_w>0` → DEGRADED "resync in 60 s"; `slots_w==0`
+(nothing emitted, no grid) → LOCKED; then the late rate check and, only while
+`decoding` (#150), the repeat rate check; else LOCKED.
+
+- **Late threshold** `LATE_DEGRADED_PERMILLE = 250` (25 % of slots): DEGRADED
+  "late > 25 % of slots in 60 s" once `late_w * 1000 > 250 * slots_w`.
+- **Repeat threshold** `expected_repeat_permille(source_fps, grid) + REPEAT_MARGIN_PERMILLE(100)`:
+  DEGRADED "repeats above the fps conversion in 60 s" once repeats exceed the
+  structural conversion + 10 %. `expected_repeat_permille = 1000 − source/grid×1000`
+  (24/30 → 200 ‰ = 20 % of slots; 25/30 → 167; 30/30 & 60/30 → 0). Integer
+  permille, no float in the rule; `grid` is the pacer's `GENLOCK_GRID_FPS` (30),
+  and `source_fps` is the snapshot's **`source_fps`** — the DECODER's rate
+  (`decoder.frame_rate()`), path-independent. **#168 r6b: NEVER use `nominal_fps`
+  as the source rate.** `nominal_fps` is the OUTPUT nominal — the fixed grid (30)
+  on the paced path, the decoder rate only on the SDK-clocked path — so feeding it
+  as the source made a 23.976-fps output expect 0 % repeats and falsely DEGRADE on
+  the structural 20 % conversion (box read 22.9.2026 17:56 UTC). The event +
+  snapshot carry both: `nominal_fps` (output nominal) and `source_fps` (decoder).
+  **Sourcing `source_fps`:** SDK-clocked path = `submitter.nominal_fps()` (the
+  submitter is `set_frame_rate`'d to the decoder there). PACED path = threaded
+  from the decode PRODUCER via `open_tx` (`run_decode_producer` reads
+  `decoder.frame_rate()`; the submit thread owns the submitter, and the paced
+  submitter is NEVER `set_frame_rate`'d so `submitter.nominal_fps()` there is the
+  grid, not the source).
+- **Calibration (22.9.2026, SP-slow 24 fps on the 30-fps grid, 1 800 slots/min):**
+  clean grid late ≤ 6 % of slots (0–100/min), stalled 42 % (W1 ~750/min,
+  30–105 ms); repeats a constant 20 % (= 1 − 24/30) in EVERY window; resyncs 0.
+- **Standby repeats are by design; `decoding` gates the repeat rule (#150).**
+  With pacing ON, a PAUSED or IDLE output keeps servicing the grid with standby
+  frames. `Standby::FrozenLast` bumps `repeats` on EVERY slot, so `repeats_w ≈
+  slots_w` (box 24.9.2026: Paused SP-fast / SP-dabing read repeats +1812/min
+  against seq +1812/min). `LockInputs.decoding` (the RAW pipeline transport ==
+  `TransportState::Playing`, passed by `ndi_health.rs` as
+  `transport_from_reported(&reported_state)` into `lock_for_heartbeat`) gates
+  ONLY the repeat rule. A non-decoding output never reads "repeats above the fps
+  conversion", but clock / pacing / receiver / resync / late still apply to it,
+  so a standby grid that genuinely breaks still reads DEGRADED. The rule used to
+  fire on standby, which made every paused output flap DEGRADED and failed the
+  release E2E `genlock badges agree` (run 36063649894). Never "fix" that by
+  suppressing standby frames: receivers need the continuous grid.
+
+**Reading the badge during a soak:** LOCKED with late ≤ 100/min on 24-fps content
+= the grid is HOLDING (the round-4/5 clean span). DEGRADED "late > 25 % of slots"
+= the sender-side stall (submit-call block, the box-test-6 failure). DEGRADED
+"repeats above the fps conversion" = decoder/producer starvation on a 30-fps
+source (a 24-fps source's structural 20 % never trips it). The
+`/api/v1/ndi/health` `lock_state`/`reason`, the `ndi: genlock` log line and the
+dashboard `GlobalLockBadge` all read this one derivation.
+
+## #147 round 9 — memory residency
+
+Pacing is ON in production permanently (owner ruling, issue #147 comment
+5812898277). The residual paced-sender stall with a heavy child resident is
+treated as a memory-residency problem (design record, issue #147 comment
+5812936370). The box runs with ~15 GB of commit over physical RAM. When the
+child's working set grows, Windows trims SongPlayer's frame pools and the NDI
+SDK's buffers, and the paced submit then takes hard page faults. Priority class,
+`timeBeginPeriod(1)` and the TIME_CRITICAL audio thread protect CPU time. None
+of them protects residency, so round 9 adds two guarantees and one gauge.
+
+### The two settings
+
+Both settings are read through `GET`/`PATCH /api/v1/settings`. The settings API
+has no whitelist and stores any key; the defaults live in the resolvers. Both
+values are flat strings in MiB, e.g. `{"sp_min_working_set_mb":"3072"}`.
+
+| key | default | range | takes effect |
+|---|---|---|---|
+| `sp_min_working_set_mb` | **3072** | `0` = off, else clamped `256..=8192`; absent → default; garbage/negative/out-of-range → default or clamp + WARN | the NEXT SongPlayer start (read once in `lib.rs::start`, right after the DB is ready, before any pipeline spawns) |
+| `heavy_max_working_set_mb` | **4096** | `0` = off, else clamped `512..=10240`; absent → default; garbage/negative/out-of-range → default or clamp + WARN | the NEXT heavy-child spawn (`refresh_containment` per worker tick, like the other `heavy_*` knobs) |
+
+**`sp_min_working_set_mb` — SongPlayer's hard minimum working set.**
+
+- The call is `process_start::apply_min_working_set`, which runs
+  `SetProcessWorkingSetSizeEx(GetCurrentProcess(), min, 2×min, QUOTA_LIMITS_HARDWS_MIN_ENABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE)`.
+  The minimum is HARD: the memory manager never trims SongPlayer below it. The
+  maximum stays SOFT.
+- At every Windows start it enables `SeIncreaseWorkingSetPrivilege` best-effort,
+  whatever `sp_min_working_set_mb` is. Normal users hold that privilege, but it
+  is disabled in the token by default. (The heavy child's job working-set cap
+  needs a DIFFERENT privilege, `SeIncreaseBasePriorityPrivilege` — round 10.)
+- The minimum commits no pages. It guarantees that pages SongPlayer actually has
+  resident, up to `min`, are never trimmed.
+- It DOES reserve `min` of the box's resident-available memory at call time. That
+  is why too large a minimum is refused with `ERROR_NO_SYSTEM_RESOURCES` (1450),
+  and it shrinks what OBS, the NDI SDK and the GPU drivers can pin. So size it
+  from the measured `working_set_mb` plus headroom, not "as big as possible".
+- The pure core is `process_residency.rs`: parse and clamp, the plan, the `0x9`
+  flags word, and the outcome line. It is Linux-tested. The `QUOTA_*` mirrors are
+  compile-time asserted against windows-sys.
+- The windows-sys feature `Win32_System_Memory` was added for
+  `SetProcessWorkingSetSizeEx`.
+- **Why 3072 MiB.** A playing 1440p paced output holds about 21 NV12 buffers
+  (look-ahead 12, pool class 6, handoff 2, repeat, holdover), about 115 MB. On
+  top of that come the MF decoder and the SDK's per-sender compression buffers.
+  Each idle output holds its NV12 + BGRA black, about 20 MB. That totals about
+  1–2 GB, and 3072 MiB leaves headroom. Re-size it from the new `working_set_mb`
+  field.
+
+**`heavy_max_working_set_mb` — the heavy child's working-set cap.**
+
+- The cap is set on the child's Job Object: `JOB_OBJECT_LIMIT_WORKINGSET` with
+  `MaximumWorkingSetSize` = the cap and `MinimumWorkingSetSize` = 256 MiB
+  (`HEAVY_MIN_WS_MB`, never above the cap). It shares the ONE extended-limit
+  struct with the #162 10 GiB commit ceiling, kill-on-close and the #203
+  affinity. Every existing flag is unchanged.
+- When the child needs more resident memory, it pages ITSELF instead of evicting
+  SongPlayer.
+- The flags word comes from the pure `heavy_containment::job_limit_flags`, which
+  adds WORKINGSET only when the cap is non-zero.
+- **Fallback.** If the OS rejects the combined limits, or rejects the process
+  assignment with them, the seam retries ONCE without the cap and logs a WARN
+  (`heavy child working-set cap … rejected` / `… assignment with a … working-set
+  cap failed`). A bad working-set value can never cost the child its memory
+  ceiling or kill-on-close.
+- **Why 4096 MiB.** The measured child working set is 1.1–1.6 GB (round 7), 2.8 GB
+  (#168), and 2.79 GB with a 3.35 GB peak (#207). Its commit is 6.7–9 GB. So 4 GiB
+  sits above every measured peak working set, while bounding the resident
+  footprint well under the 10 GiB commit ceiling.
+
+### Log fields
+
+- **Startup, once, INFO:**
+  `sp working set: hard_min_mb=3072 max_mb=6144 flags=0x9 privilege=ok|failed(err=<GetLastError>) result=ok|failed(err=<GetLastError>)`,
+  or `sp working set: hard_min disabled (sp_min_working_set_mb=0) privilege=ok|failed(err=…)`.
+  - The privilege is enabled whatever the setting.
+  - Off Windows the line is `sp working set: not applied off Windows (sp_min_working_set_mb=<n>)`,
+    never a fake `ok`.
+  - `privilege=failed(err=1300)` is `ERROR_NOT_ALL_ASSIGNED`: the token lacks
+    the privilege.
+  - `result=failed(err=1450)` is `ERROR_NO_SYSTEM_RESOURCES`: the minimum is too
+    large for the box's resident-available memory.
+  - Both are logged, never a panic.
+- **Per heavy child:** the `heavy child contained (pid …): … reserve_gib=<n> max_ws_mb=<n|off>`
+  line gains `max_ws_mb`. It reports the cap the Job Object actually APPLIED;
+  `off` means the cap is disabled or was rejected.
+- **Per UTC minute, per paced output:** the `pipeline: loop-stats …` line now
+  ends with `page_faults_per_min=<n|na> working_set_mb=<n|na>`.
+  - The value is SongPlayer's own `PROCESS_MEMORY_COUNTERS.PageFaultCount`
+    delta per minute, plus `WorkingSetSize` in MiB, from `GetProcessMemoryInfo`.
+  - It comes from `playback/proc_mem.rs`. ONE process-global `FaultWindow` is
+    sampled at most once per 60 s by whichever paced heartbeat comes first, so
+    every paced output's line shows the same last-full-minute value.
+  - `na` means one of:
+    - the first minute after start;
+    - the first minute after a gap of more than 5 min with no paced heartbeat
+      (`MAX_SAMPLE_GAP_MS`), which re-baselines;
+    - the SDK-clocked path;
+    - non-Windows.
+  - `PageFaultCount` is a u32 that wraps about every 2.4 h at 500k/s. The delta
+    is the shared wrap-safe `process_start::residency::fault_delta` (`wrapping_sub`).
+    `lyrics/heavy_faults.rs` now uses the same helper: its old `saturating_sub`
+    zeroed every wrap.
+  - The paced heartbeat runs on the EMIT thread, so `proc_mem::gauge` never
+    blocks. It only `try_lock`s the window; a busy lock means another output is
+    sampling. Every caller reads the published gauge from two lock-free atomics
+    (`to_slots` / `from_slots`, sentinel `u64::MAX`).
+  - The arithmetic and the slot encoding are pure, Linux-tested and
+    mutation-scored. The OS read is `mutants::skip`.
+
+### Box A/B window recipe (pacing ON in every window)
+
+This is the round-7 method: one variable per 15-minute paced window, the live
+wall on program (SP-slow), and the receiver read as cg OBS
+`genlock-fifo audit 'sp-slow_video'`. A stems child must be resident AND
+productive: `TotalProcessorTime` delta over 6 s > 0.
+
+| window | `sp_min_working_set_mb` | `heavy_max_working_set_mb` | how to switch |
+|---|---|---|---|
+| **W-a** both off | `0` | `0` | PATCH both, restart (Deploy-job rerun; the restart also respawns the child, uncapped) |
+| **W-b** SongPlayer hard min only | `3072` | `0` | PATCH, restart (the minimum is read at start) |
+| **W-c** both | `3072` | `4096` | PATCH, kill the child by `-Id` (the cap applies at the next spawn, no restart); a `max_ws_mb=off` contained line here means the OS rejected the cap and the retry-without fallback fired (read the WARN) |
+
+**Confirm each window before trusting it:**
+
+- the startup `sp working set:` line shows the expected `hard_min_mb`/`disabled` and `result=ok`;
+- the child's `heavy child contained … max_ws_mb=` line shows the expected cap;
+- in W-c, `Get-Process python | Select WorkingSet64` stays ≤ the cap.
+
+**Report per window:**
+
+- sender minutes with `submit_call_us_max` ≤ 20 ms;
+- SongPlayer `page_faults_per_min` and `working_set_mb`;
+- receiver `dropped_due`, underruns, relocks and late_holds;
+- child throughput (segments or CPU-s per window).
+
+**Targets and what the gauge tells you:**
+
+- **Target:** W-c reaches the no-child control (0 drops/min).
+- **If W-c does not reach it** and `page_faults_per_min` is already flat, residency
+  is not the channel. The next lever is memory bandwidth, e.g. a separator fork
+  with a bounded batch size (design Approach 3).
+- **If `page_faults_per_min` still spikes in W-b/W-c** while `working_set_mb` sits
+  at the minimum, raise `sp_min_working_set_mb`.
+
+## #147 round 10 — no per-frame allocation churn
+
+**The rule: no allocation of ≥ 64 KB per frame (or per audio block) on the
+playback path.** A per-frame large buffer is REUSED:
+
+- On the owning thread, an owned scratch `Vec` that is `clear()`ed and
+  `resize()`d, so its capacity is kept.
+- Across threads, a bounded recycle: `sp_decoder::frame_pool` (NV12 frames,
+  `take`/`recycle`/`PooledBuf`), a tap's own bounded pool, or a one-slot `spare`
+  handed back by the consumer.
+
+SongPlayer runs on the Windows system heap. Every block above ~512 KB is a fresh
+`VirtualAlloc`/`VirtualFree`, and its first touch demand-zero faults each 4 KB
+page. A 1440p NV12 frame is 5.5 MB, about 1350 faults per fresh copy.
+
+**The check is `page_faults_per_min` on the paced `pipeline: loop-stats` line**
+(round 9, `proc_mem.rs`). Read it before and after any change on this path.
+
+**The audit (issue #147 comment 5814563750).** The playing wall path — the MF
+reader copy, `to_paced_frame` → pacer → handoff → submitter holdover, and
+`submit_nv12` — was already pool/Arc-reused by #203 2b. Round 10 converted:
+
+- `FrameSubmitter`'s `PacedSink::emit` is now an Arc bump into
+  `submit_frame_at_boundary_owned`. It used to be a `to_vec` copy.
+- `submit_frame_at_boundary(&[u8])` and `PooledBuf::clone` (the burn overlay's
+  per-frame `make_mut` fork) copy into a pooled buffer:
+  `PooledBuf::copy_from_slice` / `SharedFrame::copy_from_slice` →
+  `frame_pool::take`.
+- The #178 stream tap's vfeed hands each written canvas back to the tap's pool
+  (`StreamShared::write_frame`). Before, every watched frame was a fresh
+  337.5 KB alloc.
+- The #15 JPEG tap downscales into the RGB buffer the encoder worker hands back
+  (`Inbox.spare`, `downscale_nv12_to_rgb_into`).
+
+**Left on purpose:**
+
+- Audio blocks and chunks ≤ 32 KB (below the threshold).
+- The per-idle-entry black frame.
+- The fMP4 fragments (per 500 ms, not per frame).
+- The JPEG encoder's output `Vec` (≤ 5/s while a JPEG viewer polls, a 320×180
+  JPEG is far below 64 KB).
+- Allocations inside Media Foundation (`ConvertToContiguousBuffer` / `Lock` on a
+  row-padded 2D surface) and inside the NDI runtime. These are not in our code.
+  If `page_faults_per_min` stays in the millions after round 10, that is where
+  the churn is. The next lever there is an `IMF2DBuffer::Lock2D` read path,
+  which needs box verification of the padded-plane offsets.
+
+**Job privilege for the heavy child's working-set cap.** The cap is
+`JOB_OBJECT_LIMIT_WORKINGSET` with `MinimumWorkingSetSize` = 256 MiB.
+
+- It needs `SeIncreaseBasePriorityPrivilege` (`SE_INC_BASE_PRIORITY_NAME`) in
+  SongPlayer's token.
+- Without it `SetInformationJobObject` fails with 1314 (`ERROR_PRIVILEGE_NOT_HELD`)
+  — the round-9 box read.
+- Source: Windows Research Kernel `base/ntos/ps/psjob.c`, `NtSetInformationJobObject`,
+  the WORKING SET LIMIT branch — `MinimumWorkingSetSize <= PsMinimumWorkingSet ||
+  SeSinglePrivilegeCheck(SeIncreaseBasePriorityPrivilege)`, else
+  `STATUS_PRIVILEGE_NOT_HELD`. Microsoft's `JOBOBJECT_BASIC_LIMIT_INFORMATION`
+  page names this privilege only for the priority and scheduling class.
+- It is NOT the `SeIncreaseWorkingSetPrivilege` that round 9 enables for
+  SongPlayer's own hard minimum.
+
+`heavy_slot::job_working_set_privilege` enables it ONCE per process, before the
+first capped job, and logs
+`heavy child job privilege: SeIncreaseBasePriorityPrivilege=ok|failed(err=N)`.
+
+- `failed(err=1300)` means the account's token does not hold it. The
+  "Increase scheduling priority" user right is granted to Administrators by
+  default.
+- The retry-without-cap fallback stays. Its WARN now carries
+  `base_priority_privilege=…`.
+- The privilege is deliberately left enabled for the process lifetime (a token
+  privilege is process-wide; enabling it only permits what the account already
+  holds).
+- Box acceptance: the contained line reads `max_ws_mb=4096` and no `rejected`
+  WARN appears.
+
+## #147 round 11 — one lock per NDI sender, and the full task token
+
+**Per-sender NDI locking (`sp-ndi/src/handle_table.rs`).**
+
+- **The old lock.** `RealNdiBackend` kept every sender in ONE
+  `Mutex<HashMap>`, held across each SDK call: video, async video, flush,
+  audio, tally, connections and source URL.
+  `NDIlib_send_send_video_async_v2` blocks until the SDK has finished with that
+  sender's previous frame. With pacing, all ~10 outputs emit on the same
+  33.3 ms boundary, so one slow sender delayed every other output's video and
+  audio send. The per-output `submit_call_us_*` gauge included that wait.
+- **Map lock.** The map is now `HandleTable<RealHandleState>`: an `RwLock`
+  over `usize → Arc<Mutex<Option<T>>>`. The map lock is held ONLY to insert,
+  remove, or clone one handle's `Arc`, never across an SDK call.
+- **Handle lock.** Each handle's own `Mutex` is held across its SDK call.
+  Calls on one sender stay ordered, so audio and video on the same output
+  still serialise. Different senders run in parallel.
+- **Destroy.** `remove_with` removes the `Arc` under the write lock, then
+  waits on the handle's lock for the in-flight send. It takes the state out
+  (`Option::take`) and calls `NDIlib_send_destroy` while still holding that
+  lock. A send that cloned the `Arc` before the remove finds `None` and does
+  nothing, the same as a missing handle.
+- **Tests.** The table is generic, so the locking is Linux-tested and
+  mutation-scored with plain values and threads (channels plus bounded
+  timeouts). The `RealNdiBackend` methods stay `mutants::skip` (SDK pointer
+  derefs). Never put the map lock back around an SDK call:
+  `an_op_on_another_handle_completes_while_one_handle_is_blocked` and
+  `create_and_destroy_of_other_handles_proceed_while_one_handle_is_blocked`
+  fail on that shape.
+
+**The SongPlayer task runs with `-RunLevel Highest`** (the `ci.yml` Deploy step
+"Configure auto-start and launch").
+
+- **Why.** `Resolume` is an Administrator. A `Limited` task gets the filtered
+  UAC token, which does not hold `SeIncreaseBasePriorityPrivilege`. The box
+  logged `heavy child job privilege: SeIncreaseBasePriorityPrivilege=failed(err=1300)`,
+  and the child's working-set cap was rejected with 1314 (issue #147 comment
+  5815246953). The round-9 `SeIncreaseWorkingSetPrivilege` is in both
+  tokens; only `SeIncreaseBasePriorityPrivilege` needs Highest.
+- **Side effects, accepted.** SongPlayer and its children (CLIProxyAPI,
+  yt-dlp, ffmpeg, the heavy python workers) now run at high integrity, and so
+  does the port-8920 server. Windows (UIPI) blocks input from medium-integrity
+  processes into the Tauri window, e.g. drag-and-drop from Explorer.
+  WebView2 runs elevated. If it failed to start, the deploy's health check
+  would catch it.
+- **Where.** The task is re-registered on EVERY deploy, so the RunLevel lives
+  only in `ci.yml`. `scripts/setup-runner.ps1` registers only the runner's own
+  task (already Highest).
+- **Box acceptance after the deploy:**
+  - the `heavy child job privilege:` line reads
+    `SeIncreaseBasePriorityPrivilege=ok`. It is logged once, at the first capped
+    heavy-child job, not at startup (`heavy_slot::job_working_set_privilege`);
+  - the `heavy child contained` line reads `max_ws_mb=4096`;
+  - no `working-set cap … rejected` WARN appears.
+
+## Paced audio is pinned to the picture by MEDIA TIME (#148 design v2)
+
+The measured defect (A/V gate, 25.9.2026): with pacing ON the offset was fixed
+per song but random across songs (−38 … +60 ms). The chunk media time was
+dropped in `to_paced_frame`, `AudioGridBuffer` was a plain FIFO, an early
+underrun kept the queue (the audio stayed late for the rest of the song), and
+the #148 PLL steered the buffer LEVEL toward 3200 samples, which has no
+relation to the picture. The PLL (`AudioPll`, `LevelAverager`, `residual_ppm`,
+`audio.residual_ppm`/`applied_ppm`, the `audio_ppm=` log token) is DELETED.
+Now:
+
+- `to_paced_frame` puts each chunk's 0-based media time
+  (`(ts_ms − pts_offset_ms)·10⁴`) in `AudioFrame.timecode_100ns`. Only the
+  pacer reads it; the boundary chunk it submits still carries `None`, so the
+  submitter stamps the raw wall clock (§6).
+- `AudioGridBuffer` has a media HEAD in samples, taken from the first TIMED
+  push after `clear()`. After that it is counted, never re-read from the later
+  chunk stamps (Symphonia stamps are integer ms).
+- **Audio is pushed when a frame is PULLED** (`Pacer::pull_frame`, in both
+  `prepare` and `service`), not when it is consumed. The aligned take at
+  boundary B needs media up to B + 33 ms. Only the NEXT (parked) frame's paired
+  audio covers that, so pushing on consume underruns on every 24/25-fps song.
+- **The paced decoder reads a 250 ms audio cushion (#148 v4).**
+  `pipeline_paced.rs` opens the decoder through `pacer::open_paced_decoder`,
+  which calls `SplitSyncedDecoder::with_audio_lead(.., PACED_AUDIO_LEAD_MS = 250)`.
+  Each frame therefore carries audio up to pts + 250 ms, not pts + 40 ms.
+  - **Why.** With the 40 ms pairing the grid held only ~40 ms past the parked
+    frame. A video decode stall of 2+ boundaries (the MF stalls under a
+    resident heavy child) emptied it, and `take_block` zero-filled an audible
+    ~100 ms gap. Box, dev `a19beda`: song 334, `audio_underruns` 2→3, A/V gate
+    `dropouts=1 dropout_ms=100`; SP-slow underruns climbed 5→13 over one E2E.
+  - **Depth does not move A/V.** The take is aligned by the media HEAD
+    (`err = head − expected`), never by `level_samples`, so a deeper buffer
+    plays the same sample at each boundary. Tests:
+    `pacer_tests_av_lead.rs` (a 5-boundary stall: 0 underruns, bit-exact, 0
+    corrections; a 40 ms control underruns) and
+    `a_deep_buffer_is_never_servoed_toward_a_level_target`.
+  - **Bounded.** The G5 read gate keeps the read-ahead ≤ lead + one chunk,
+    far under the grid's 2 s cap, so it never grows.
+  - **Cost.** Fader latency rises by up to the lead (`karaoke-stems.md` G5).
+  - **Dashboard preview follows the lead.** The preview (#178) taps audio at
+    the SAME decode seam and holds it for `preview_stream::lead_ms_for(true)`
+    = `PACED_AUDIO_LEAD_MS − 40` = 210 ms. If the lead changes, this changes
+    with it (the test pins both), or the preview plays its audio early.
+  - **Scope.** The pacing-OFF path is untouched: `open_synced_decoder` →
+    `decoder_tolerance_ms` (40, or 1540 with the wall-clock emitter).
+  - **A stall longer than ~250 ms still underruns.** Raise the lead only with
+    a box measurement of the stall length, never as a blind bump.
+  - **Resume flushes the cushion (known bound, unchanged design).**
+    `audio_resume_reset` clears the buffer, and the decoder never re-delivers
+    that audio. The map is kept through a pause (standby does not move
+    `wall_start`), so after a pause of `D` < 250 ms the re-snap PADS up to
+    `250 − D` ms of silence; before v4 that was ≤ `40 − D`. A pause ≥ the lead
+    is unaffected, because the flushed audio is behind the wall line anyway.
+    Keeping the buffer through Resume (re-snap drops only the paused-over
+    media) would remove it. That is a Resume design change for the main
+    session, not part of v4.
+- **The anchor is local, on the DUE boundary** (`pacer_av_align.rs`). The first
+  FRESH frame emitted on a new map fixes `(pts in samples, the boundary it is
+  DUE at)`. The due boundary is the first grid boundary at or after
+  `wall_start + pts`, computed as `strict_next_boundary_100ns(ws + pts − 1)`.
+  It is NEVER the boundary the frame happened to be emitted at. The block at
+  boundary B must then start at `anchor_media + (B − anchor_wall)`, which is
+  the wall line the picture follows, including the frame's sub-slot phase.
+  - It keeps going across repeat boundaries, so a 24→30 pattern needs no
+    correction.
+  - Do NOT compare against each emitted frame's own pts: that is a 0…41 ms
+    sawtooth on 24-fps content, and the corrector would thrash.
+  - Do NOT anchor at the emit stamp (review of `0c75806`, 1 red). A STALE first
+    frame would pin the audio behind the picture for the whole song:
+    - a slow decoder at song start;
+    - the first frame after a stall.
+
+    The picture catches up to the wall line by dropping frames, and the audio
+    must do the same.
+- **Two re-align kinds.**
+  - A NEW map forgets the anchor (`AvAlign::realign`): `anchor()`
+    (play/seek/new song) and a `Reanchored` lag re-anchor, which moves
+    `wall_start`.
+  - The SAME map keeps the anchor and only re-snaps the buffer onto its line
+    (`AvAlign::resnap`): a grid resync in `resolve_emit_boundary` (only the
+    stamp jumps) and `audio_resume_reset()`.
+  - Until the expected media is buffered the output is silence. Then
+    `align_to` DROPS early audio or PADS late audio with leading silence, so
+    the first real sample plays at its media time (±1 sample).
+  - With too little buffered to drop, the block stays silent and the drop is
+    retried on the next boundary.
+  - A pad that would take pad + buffered audio past the 2 s cap is refused
+    (the cap trim would eat the fresh padding): silence until it fits, never an unbounded allocation.
+- **Continuous correction** (`correction_for`) is the ONLY controller. It
+  engages when |err| > 240 samples (5 ms), moves ≤ 48 samples per block, and
+  stops at |err| ≤ 48 (1 ms). A drop or insert of d samples reads n ± d inputs
+  onto n outputs by linear interpolation (`take_block`), so there is no click.
+  Output 0 is always an exact input sample. Underrun samples are zero-filled
+  and do NOT advance the head, so a decoder stall shows up as a negative error
+  that the correction then drops away. A corrected block is a 3 % time-stretch
+  (48 of 1600 samples, about 51 cents) for about 0.6 s per 20 ms. That is
+  audible on a sustained note, and it is what the ≤ 48-samples-per-block
+  design accepts.
+- Untimed audio (tests / frames with `timecode_100ns: None`) plays as a plain
+  FIFO. It is never aligned.
+- Telemetry is on `PacingStats` (`/api/v1/ndi/health` `pacing`), not `audio`:
+  - `av_align_err_ms` — head − expected at the last productive boundary, before
+    its correction; + = audio AHEAD of the picture, the gate's sign;
+  - `av_corrections` / `av_corrected_samples` — cumulative; they include a
+    non-zero start drop or pad.
+
+  The same three keys replace `audio_ppm=` on the `ndi: genlock` line; the
+  song summary logs `av_align_err_ms` + per-song `av_corrections`.
+  `PacingStats` is no longer `Eq` (f64).
+- Tests encode each sample's own media index in its VALUE
+  (`pacer_tests_av_align.rs`: `enc(s) = s + 1e6`, silence = 0.0). Assertions
+  then read the media time actually put on the wire, without float tolerance.
+  Keep that pattern for any new alignment case.
+
+## The WallClock anchor never steps the wall (#147, design comment 5827410168)
+
+**The defect.** The box relatched 6× in one 20 s A/V take (SP-slow
+`relatches` 0 → 6, `av_corrections` 1 → 200) while dantesync only slewed
+(≤ 94 ppm, ≤ 2.3 ms). The cause was SongPlayer's own `WallClock`:
+
+- The anchor was `(Instant::now(), Utc::now())`, two UNBRACKETED reads.
+- A preemption between them (the box runs a heavy child at 60–108k page
+  faults/s) paired a stale `Instant` with a later UTC read. The wall jumped
+  FORWARD by the preemption time.
+- The next clean re-anchor (every 100 frames) jumped it BACK.
+- Any backward move that crosses the boundary just emitted relatches
+  (`latched_boundary_100ns`), and the relatch re-stamps an earlier slot. It
+  does not need a full 33 ms slot: the resample runs right after an emit.
+
+**The rules now** (`playback/wallclock.rs`, pure math in
+`wallclock_anchor.rs`):
+
+- **Bracketed sampling.** Every anchor reads `m1 = Instant::now(); utc; m2 =
+  Instant::now()` up to 8 times (`ANCHOR_MAX_ATTEMPTS`) and keeps the NARROWEST
+  bracket, paired at its MIDPOINT (error ≤ width/2). It stops early at a
+  ≤ 20 µs bracket, so the normal cost is one read. A chosen bracket > 200 µs is
+  counted as wide.
+  - A `ClockSource` fake that implements only `sample()` gets zero-width
+    brackets through the default `read_bracketed`, so the existing
+    sample-count tests are unchanged.
+  - Override `read_bracketed` to inject a preempted read
+    (`wallclock_test_clock.rs::VirtualClock`).
+- **Bounded update.** A resample measures `delta = sample.utc − wall(sample.instant)`.
+  - |delta| ≤ 1 ms (`ANCHOR_MAX_STEP_100NS`) applies as-is (normal slewing,
+    ≈ 313 µs per 3.33 s resample at 94 ppm).
+  - Trade-off (design record): a genuine large UTC step slews at 1 ms per
+    resample (~300 ppm), so 500 ms takes ~28 min. `wall_anchor_slewed_us`
+    growing is the signal; the timecodes lag the true grid until it converges.
+  - Beyond that only ±1 ms applies, and a `wallclock: re-anchor delta over 1 ms`
+    WARN logs `delta_us`, `bracket_us`, `applied_us` and `carry_us`.
+  - The remainder is NOT carried explicitly: the next resample re-measures it.
+    Adding the old carry would count it twice.
+  - A genuine 50 ms UTC step converges in 50 resamples (~165 s, ~300 ppm).
+- **Never backward.** A negative applied correction is a HOLD: the new anchor is
+  `(instant + |applied|, wall(instant))`. The saturating read path freezes the
+  wall for ≤ 1 ms, then it runs exactly on the corrected line. Never "simplify"
+  it back to `(instant, wall − |applied|)`: that is a backward step, and right
+  after an emit it relatches (`pacer_tests_wall_anchor.rs` asserts 0 relatches
+  and 0 A/V corrections over 10 000 boundaries with a preempted resample every
+  other time).
+- **Telemetry.** These are the PACER's wall clock (the one that stamps and paces):
+  - `wall_anchor_max_step_us` — the largest MEASURED |delta|, i.e. what an
+    unbounded re-anchor would have stepped;
+  - `wall_anchor_wide_brackets` — anchors with every attempt disturbed;
+  - `wall_anchor_slewed_us` — µs applied through clamped resamples.
+
+  They are on `/api/v1/ndi/health` `pacing` and on the `ndi: genlock` line.
+- **What to read on the box.** `wall_anchor_max_step_us` in the hundreds of µs
+  is dantesync slewing. Tens of ms with `wall_anchor_wide_brackets` climbing
+  means preemption at anchor time, now outvoted or bounded. `slewed_us` growing
+  means real UTC steps (w32time / a dantesync re-lock).
+- **Layout.** `PacingStats` lives in `playback/pacing_stats.rs` (split out of
+  `ndi_health.rs` for the 1000-line cap) and is re-exported from `ndi_health`.
+
+## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
+A change to pacing, the submitter, decode, the mixer, NDI or the audio path
+merges only with `e2e/post-deploy-av-sync.spec.ts` green. That spec records the
+OBS program and requires |A/V| ≤ 40 ms and zero 50 ms dropout blocks against
+the original sidecars. Method, thresholds and how to read the `AV-SYNC …`
+output: `.claude/rules/obs-ndi-health.md` "Post-deploy A/V gate (#147)".

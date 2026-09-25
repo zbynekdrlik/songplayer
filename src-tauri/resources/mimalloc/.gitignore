@@ -1,0 +1,7 @@
+# #168 — the mimalloc override DLLs are BUILT + staged here by the build-tauri
+# CI job (microsoft/mimalloc @ the pinned tag), never committed. This dir is
+# kept in git by .gitkeep so `bundle.resources: ["resources/mimalloc/*"]` has a
+# valid path in a fresh checkout; the `*` glob ignores these dotfiles.
+mimalloc.dll
+mimalloc-redirect.dll
+minject.exe

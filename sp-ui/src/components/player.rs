@@ -33,7 +33,7 @@ struct SetModeBody {
 /// present `web-sys` `Performance` clock; `0` if the clock is unavailable (never
 /// in the running CSR app — the display rule just falls back to the live
 /// position, which is the safe default).
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     web_sys::window()
         .and_then(|w| w.performance())
         .map(|p| p.now())
@@ -219,8 +219,9 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
 
     // --- preview (click-to-start; torn down when the pipeline stops decoding) ---
     let preview_on = RwSignal::new(false);
-    // #184 round F: the latest picture lag (seconds behind the wall) the preview
-    // shim reported over the 1 Hz beacon; the readout shows only at ≥ 3 s.
+    // #184 round F/G: the latest picture lag (seconds behind the wall) the
+    // preview shim reported (beacon lag or ping/pong transport lag, whichever is
+    // worse); the readout shows only at ≥ 3 s.
     let preview_lag = RwSignal::new(0.0_f64);
     // Fold the raw shim reports (which arrive ~4×/s from the pump tick) into the
     // DISPLAYED readout (Option<i64>). A Memo only propagates when that value

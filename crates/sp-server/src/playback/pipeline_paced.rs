@@ -16,7 +16,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::{PacingStats, PlaybackStateLabel};
-use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome, Standby, plan_sleep_100ns};
+use crate::playback::pacer::{
+    PacedFrame, Pacer, ServiceOutcome, Standby, open_paced_decoder, plan_sleep_100ns,
+};
 use crate::playback::pacer_queue::{ProducerAction, SharedQueue};
 use crate::playback::pipeline::{
     DecodeResult, PipelineCommand, PipelineEvent, should_run_heartbeat,
@@ -59,7 +61,9 @@ pub(crate) fn request_high_res_timer() {
 
 /// Convert an MF-decoded video frame + its audio chunks into a [`PacedFrame`].
 /// `pts_offset_ms` is subtracted so the PTS is measured from playback start
-/// (0-based) — the origin the pacer maps onto the wall grid.
+/// (0-based) — the origin the pacer maps onto the wall grid. Each audio chunk
+/// keeps its MEDIA time on the same 0-based origin (in `timecode_100ns`), which
+/// the pacer uses to align the audio to the picture (#148 design v2).
 fn to_paced_frame(
     video: sp_decoder::DecodedVideoFrame,
     audio: Vec<sp_decoder::DecodedAudioFrame>,
@@ -70,11 +74,12 @@ fn to_paced_frame(
     let ndi_audio: Vec<sp_ndi::AudioFrame> = audio
         .into_iter()
         .map(|af| sp_ndi::AudioFrame {
+            // 0-based media time (100 ns). Only the pacer reads it; the boundary
+            // chunk it submits is stamped with the raw wall clock (§6).
+            timecode_100ns: Some((af.timestamp_ms as i64 - pts_offset_ms as i64) * 10_000),
             data: af.data,
             channels: af.channels,
             sample_rate: af.sample_rate,
-            // Stamped by the pacer at submission (raw wall clock, §6).
-            timecode_100ns: None,
         })
         .collect();
     PacedFrame {
@@ -146,10 +151,10 @@ fn log_song_summary(
         max_lag_slots = pacer.max_lag_slots(),
         iter_p50_us = pacer.iter_p50_us(),
         iter_p99_us = pacer.iter_p99_us(),
-        // Audio clock discipline (#148): the file-clock residual, the applied
-        // slow-resample correction, and the cumulative buffer underruns.
-        audio_residual_ppm = a.residual_ppm,
-        audio_applied_ppm = a.applied_ppm,
+        // Paced audio (#148 v2): the last A/V media offset, this song's drop/pad
+        // corrections, and the cumulative buffer underruns.
+        av_align_err_ms = s.av_align_err_ms,
+        av_corrections = s.av_corrections.saturating_sub(base.av_corrections),
         audio_underruns = a.underruns,
         duration_s = song_start.elapsed().as_secs_f32(),
         "paced: song summary"
@@ -170,11 +175,11 @@ fn run_decode_producer(
     audio_path: std::path::PathBuf,
     start_position_ms: Option<u64>,
     shared: Arc<SharedQueue<QueuedFrame>>,
-    open_tx: crossbeam_channel::Sender<Result<u64, String>>,
+    open_tx: crossbeam_channel::Sender<Result<(u64, f32), String>>,
     taps: crate::playback::preview::preview_stream::DecodeTaps,
     playlist_id: i64,
 ) {
-    use sp_decoder::{MediaFoundationVideoReader, SplitSyncedDecoder};
+    use sp_decoder::MediaFoundationVideoReader;
 
     let video_reader = match MediaFoundationVideoReader::open(&video_path) {
         Ok(v) => v,
@@ -200,10 +205,12 @@ fn run_decode_producer(
             return;
         }
     };
-    let mut decoder = match SplitSyncedDecoder::new(Box::new(video_reader), audio_stream) {
+    // #148 v4: audio read PACED_AUDIO_LEAD_MS ahead of each frame, a cushion in
+    // the pacer's media-aligned grid buffer that rides out a video decode stall.
+    let mut decoder = match open_paced_decoder(Box::new(video_reader), audio_stream) {
         Ok(d) => d,
         Err(e) => {
-            let _ = open_tx.send(Err(format!("SplitSyncedDecoder::new failed: {e}")));
+            let _ = open_tx.send(Err(format!("open_paced_decoder failed: {e}")));
             return;
         }
     };
@@ -229,7 +236,18 @@ fn run_decode_producer(
     }
 
     let duration_ms = decoder.duration_ms();
-    if open_tx.send(Ok(duration_ms)).is_err() {
+    // #168 r6b: report the DECODER's source fps alongside the duration so the
+    // paced heartbeat can carry a path-independent `source_fps` to the lock rule
+    // (the paced submitter carries the grid rate, so `submitter.nominal_fps()`
+    // there is the grid, never the source). `(num, den)` is the same pair the
+    // SDK path reads at `pipeline.rs` before `set_frame_rate`.
+    let (num, den) = decoder.frame_rate();
+    let source_fps = if den == 0 {
+        0.0
+    } else {
+        num as f32 / den as f32
+    };
+    if open_tx.send(Ok((duration_ms, source_fps))).is_err() {
         return; // the emit thread is already gone
     }
 
@@ -370,7 +388,7 @@ pub(crate) fn decode_and_send_paced(
     // Spawn the decode producer — it owns the decoder on its own STA thread and
     // fills the bounded look-ahead queue.
     let shared: Arc<SharedQueue<QueuedFrame>> = Arc::new(SharedQueue::new(DECODE_QUEUE_BOUND));
-    let (open_tx, open_rx) = crossbeam_channel::bounded::<Result<u64, String>>(1);
+    let (open_tx, open_rx) = crossbeam_channel::bounded::<Result<(u64, f32), String>>(1);
     let producer = {
         let shared = shared.clone();
         let taps = taps.clone();
@@ -394,8 +412,8 @@ pub(crate) fn decode_and_send_paced(
 
     // Block until the producer has opened the decoder and reported the duration
     // (or an open error). A dead producer (Disconnected) is an open failure.
-    let duration_ms = match open_rx.recv() {
-        Ok(Ok(d)) => d,
+    let (duration_ms, source_fps) = match open_rx.recv() {
+        Ok(Ok(pair)) => pair,
         Ok(Err(msg)) => {
             let _ = producer.join();
             return DecodeResult::Error(msg);
@@ -481,13 +499,16 @@ pub(crate) fn decode_and_send_paced(
                 }
                 Ok(PipelineCommand::Resume) => {
                     *paused = false;
-                    // Flush the audio buffer + reset the PLL (#148 rework, item 4):
-                    // the pause backlog would otherwise overflow and leave audio
+                    // Flush the audio buffer + re-align the audio (#148): the pause
+                    // backlog would otherwise overflow and leave audio
                     // seconds behind the video. The VIDEO anchor is left untouched —
                     // the frozen-standby held every boundary through the pause, so
                     // playback continues on the same wall grid.
                     pacer.audio_resume_reset();
-                    debug!(playlist_id, "paced: resumed (audio buffer + PLL reset)");
+                    debug!(
+                        playlist_id,
+                        "paced: resumed (audio buffer flushed, re-aligning)"
+                    );
                 }
                 Ok(PipelineCommand::Seek { position_ms }) => {
                     // Route the seek to the producer: it flushes the queue and bumps
@@ -533,6 +554,7 @@ pub(crate) fn decode_and_send_paced(
                         // change 7): a paced pipeline is `enabled=true` while paused.
                         pacer.stats(),
                         pacer.audio_stats(),
+                        source_fps,
                         &mut hb_prev_total,
                         &mut hb_prev_instant,
                     );
@@ -599,6 +621,7 @@ pub(crate) fn decode_and_send_paced(
                             consecutive_bad_polls,
                             pacer.stats(),
                             pacer.audio_stats(),
+                            source_fps,
                             &mut hb_prev_total,
                             &mut hb_prev_instant,
                         );
@@ -635,10 +658,10 @@ pub(crate) fn decode_and_send_paced(
                         } else {
                             info!(playlist_id, "paced: video decode complete");
                         }
-                        // Hand the remaining buffered audio (zero-filled to a full
-                        // boundary, raw wall timecode) to the submit thread so the
-                        // last <1 boundary of audio is not dropped (#148 rework,
-                        // item 4). The submit thread ships it after draining.
+                        // Hand one final boundary of the buffered audio (zero-filled,
+                        // raw wall timecode) to the submit thread so the song's last
+                        // partial boundary is not dropped (#148 rework, item 4); any
+                        // v4 read-ahead past it ends with the song. Shipped after draining.
                         let tail = pacer.take_eos_tail();
                         let tail_msg = if tail.is_empty() {
                             None

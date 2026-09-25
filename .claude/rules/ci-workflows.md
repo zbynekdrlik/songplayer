@@ -77,6 +77,26 @@ pure code up front:
   covered by whichever call site a test pins.
 - **Every `<` / `>` on a threshold needs an exact-boundary test** (gap == limit,
   fraction == line boundary), not just a far-inside / far-outside pair.
+- **No `|` of disjoint flag bits ANYWHERE in non-test code** (#147 r9): `A | B` →
+  `A ^ B` is equivalent when the bits don't overlap. cargo-mutants DOES mutate
+  `const` initialisers too (dev run 35996650748: 4 MISSED on
+  `const X: u32 = A | B;`). Write each flag word as a LITERAL (`0x2110`), pin
+  its composition with a test (`assert_eq!(BASE, A | B | C)` — tests are never
+  mutated), and have the fn only pick one (`if cap == 0 { BASE } else { … }`).
+  The bit mirrors then read only in `cfg(windows)` code need
+  `#[cfg_attr(not(windows), allow(dead_code))]` or the Linux clippy fails.
+- **No redundant guard after an earlier arm** (#147 r9): `Some(0) => 0,
+  Some(v) if v > 0 => …` makes `>` → `>=` equivalent (0 is caught first). Parse
+  as `u64` so a negative simply fails to parse, and drop the guard.
+- **A match guard that now GATES a side effect needs a test that observes it**
+  (#147 r10): `Ok(mut g) if !g.busy => g.spare.take()…` makes the mutant
+  `replace match guard !g.busy with true` observable ONLY through the stolen
+  `spare`. The old busy test, which asserted only "nothing pending", let the
+  mutant survive, because a later re-check hid it. Seed the side-effect state
+  (a `spare`), trip the guard, and assert that the state is untouched.
+- **No trivial `const fn new()` next to `#[derive(Default)]`**: its body can be
+  swapped for `Default::default()` with no observable change. Seed a `static`
+  with a struct literal in the same module and use `Default` in tests.
 - A fn that only shells out (child process / ffmpeg) and is reachable only from
   an already-excluded orchestrator gets its own STRUCTURAL `exclude_re` line with
   a rationale naming the pure fns that carry its decisions.

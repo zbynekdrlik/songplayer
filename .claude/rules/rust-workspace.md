@@ -33,6 +33,39 @@ sites, instead of destructuring in the `let`. Verify with
 `awk 'NR==<line>{print length($0)}'` + `cargo fmt --all --check` (both Tier-0-allowed)
 and re-`wc -l` before committing.
 
+## rustfmt breaks a `foo(long::path::bar(arg()))` nested call into 3 lines even under ~94 cols (#207)
+
+Adding a ONE-line statement to a file at the 1000-line cap can still trip the cap:
+rustfmt's `fn_call_width` heuristic (60 = 60 % of max_width) breaks a call whose
+single argument is ITSELF a call and whose args exceed ~60 cols — even when the
+whole line is well under 100. `lib.rs` (999→cap): a hand-written
+`tokio::spawn(crate::lyrics::host_commit::run_host_commit_logger(shutdown_tx.subscribe()));`
+(94 cols) was reflowed by `cargo fmt` into a 3-line form (`tokio::spawn(\n  arg,\n));`),
+silently taking the file to 1002 — the no-compile box only sees it via `wc -l` /
+the CI cap check, NOT `cargo fmt --all --check` alone (which passes on EITHER form,
+it just prefers the 3-line one). So near the cap: after writing any nested-call
+statement, run `cargo fmt --all` FIRST, then `wc -l`, and budget for the form
+rustfmt actually produces (a trailing `// comment` on the closing `));` line keeps
+the doc without a separate comment line). A local receiver binding (`let x = …;`
+then `spawn(fn(x))`) does NOT help — the outer arg is still a call over budget.
+
+## Line-neutral "handle sub-case, else fall through" in a file AT the cap: a match-guard arm (#207)
+
+To add a new branch to an existing `match` in a file at 1000/1000 with the fewest
+lines, put a GUARD arm BEFORE the catch-all and leave the original arm byte-identical:
+
+```rust
+Err(e) if super::helper::note_if_x(&e, id, &mut acc) => {}  // +1 line, empty body = fall-through/continue
+Err(e) => { /* unchanged original abort/return arm */ }
+```
+
+The guard runs a side-effecting helper (classify + count + rate-limited WARN)
+returning `bool`; `true` → empty arm → the loop continues, `false` → the next arm
+runs. `&e` in the guard is `&DecoderError` (not `&&`), and a `&mut` borrow of an
+OUTER local (not the scrutinee) in a guard is legal. Costs +1 line; offset it by
+reclaiming one comment/blank line so the file stays ≤1000. Keep the guard line
+≤100 cols (a `super::` path is shorter than `crate::playback::…`).
+
 ## `cargo fmt --all` reorders `crates/sp-server/src/db/models.rs` — REVERT it
 The box's local rustfmt is OLDER than CI's `dtolnay/rust-toolchain@stable`, and
 the two disagree on `reorder_modules` for `models.rs`'s no-blank-line `#[path]
@@ -115,6 +148,10 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
 - **`clippy::manual_slice_fill`** (rust 1.98, `-D warnings`): a `for x in &mut
   slice { *x = <const> }` loop must be `slice.fill(<const>)`. The no-compile box
   can't see it; it failed #186's Lint on `for e in &mut self.eos { *e = false }`.
+- **`clippy::collapsible_if` in edition 2024 wants a let-chain** (#147 r9):
+  `if cond { if let Some(x) = f() { … } }` with no `else` fails `-D warnings`.
+  Write `if cond && let Some(x) = f() { … }` (the tree already uses let-chains,
+  e.g. `lyrics/genius.rs`).
 - **`clippy::manual_div_ceil`** (warn-by-default → `-D warnings`): a hand-rolled
   ceil-division `(a + b - 1) / b` (or the `(a * p + 99) / 100` form) must be
   `a.div_ceil(b)`. `u64::div_ceil` is **const-fn since 1.73**, so it works inside
@@ -193,6 +230,21 @@ throwaway copy while holding the original allocation (a holdover-identity test
 fails). Prefer a deterministic wrong (grow / different-length) over "allocate
 fresh" — a freed-then-reallocated buffer can land at the SAME address and make a
 pointer-equality RED pass by luck.
+
+**A LOCK-SCOPE refactor uses the same pattern (#147 r11, `sp-ndi/handle_table.rs`).**
+
+- **RED:** ship the whole new structure, wired in, but keep the OLD scope in one
+  spot (`with` holds the map's WRITE lock across the op, which is exactly the old
+  global mutex).
+- **GREEN:** only narrows that scope.
+- **Tests:** prove concurrency with channels plus bounded `recv_timeout`, never
+  sleeps. Hold an op inside handle A until signalled, then assert that handle B's
+  op (and an insert/remove) completes within the bound.
+- **Watch the lock kind:** a READ lock held across the op would still let B's
+  read-side op through. Only the insert/remove test catches that shape, so write
+  both.
+- **No hangs:** drop the `release` sender on every failure path, so the held
+  thread's `recv().unwrap()` panics instead of hanging the test.
 
 ## `-D warnings` rejects `temporary.as_ptr()` in tests — bind the value first (#203 r2b)
 
@@ -288,3 +340,14 @@ and then `heavy_slot_tests.rs` + `worker_tests_idle_gate.rs` + the
 `static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());`
 and take it with `let _g = SERIAL.lock().await;`. Keep the `std::sync::Mutex`
 form only for a PLAIN `#[test]` with no await (e.g. `frame_pool`'s serial).
+
+## Adding a path dependency between workspace crates on the Tier-0 box (#184 G4)
+
+`Cargo.lock` is tracked but its workspace-member versions are long stale (e.g.
+`sp-decoder 0.49.0-dev.6`), and CI builds without `--locked`. So when a crate gains
+a path dep (G4: `sp-decoder` → `sp-core`), add ONE line to that crate's
+`dependencies = [...]` list in `Cargo.lock` by hand (alphabetical). Do NOT let
+`cargo tree` / `cargo metadata` resolve it: they rewrite every stale member
+version and bump unrelated deps (a ~20-line lockfile diff riding in a feature
+PR). Also check the new edge adds no cycle (`sp-core` depends only on serde /
+thiserror, so anything may depend on it).

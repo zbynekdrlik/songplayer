@@ -36,38 +36,123 @@ impl LockState {
     }
 }
 
-/// Derive the lock state + a static reason string from the clock/pacing/receiver
-/// inputs and the 60 s window event counts (contract §7 A7.3). The checks are
-/// evaluated in strict precedence order — the FIRST that matches wins:
+/// Rate-normalised lock inputs (#168 round 6, #149 calibration). Everything
+/// [`derive`] needs to classify ONE output's genlock lock state, with the 60 s
+/// window event counts normalised against the emitted slots so a structural
+/// frame-rate conversion (24/25-fps content on the 30-fps grid) reads LOCKED,
+/// not DEGRADED. WASM-safe: the rule below is pure integer permille arithmetic;
+/// the only float is `source_fps`, folded to permille exactly once inside
+/// [`expected_repeat_permille`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LockInputs {
+    /// Box clock locked (dantesync LOCK/NANO).
+    pub clock_ok: bool,
+    /// Boundary pacing enabled for this output (`genlock_pacing`).
+    pub pacing_enabled: bool,
+    /// NDI receivers currently attached.
+    pub connections: u32,
+    /// Late emits in the 60 s window (a submit > 2 ms past its boundary).
+    pub late_w: u64,
+    /// Last-frame repeats in the 60 s window (the fps-conversion + any starvation).
+    pub repeats_w: u64,
+    /// Grid resyncs in the 60 s window.
+    pub resyncs_w: u64,
+    /// Boundaries serviced (slots emitted) in the 60 s window — the rate base.
+    pub slots_w: u64,
+    /// Nominal source frame rate of the playing file (e.g. `24.0`).
+    pub source_fps: f32,
+    /// The fixed integer grid rate the pacer runs (`GENLOCK_GRID_FPS = 30`).
+    pub grid_fps: u32,
+    /// The output is decoding content — its RAW pipeline transport is
+    /// `TransportState::Playing` (#150). A paused / idle output under pacing
+    /// keeps servicing the grid with STANDBY frames (the frozen last frame is
+    /// a repeat on every slot, `repeats_w ≈ slots_w` by design), so the
+    /// repeat-rate rule only applies while decoding.
+    pub decoding: bool,
+}
+
+/// Late-fraction threshold: DEGRADED once late emits exceed 25 % (250 ‰) of the
+/// emitted slots in the 60 s window. Calibrated 22.9.2026 (SP-slow, 24 fps
+/// content on the 30 fps grid, 1 800 slots/min): a clean grid ran late ≤ 6 % of
+/// slots (0–100/min, stems child resident); a sender-side STALL ran late ≈ 42 %
+/// of slots (W1: ~750/min, 30–105 ms). 25 % sits well above clean, well below
+/// stalled.
+pub const LATE_DEGRADED_PERMILLE: u64 = 250;
+
+/// Repeat-fraction MARGIN above the structural fps-conversion rate: DEGRADED
+/// once repeats exceed `expected_repeat_permille + 10 %` (100 ‰) of the slots.
+/// The conversion itself is exact and constant (24/30 → 200 ‰ = 20 % of slots
+/// in EVERY window on 22.9.2026), so the margin only fires on genuine
+/// starvation (repeats ABOVE the conversion), never on the by-design
+/// conversion. Resyncs were 0 everywhere in the calibration, so they stay a
+/// hard event below rather than a rate.
+pub const REPEAT_MARGIN_PERMILLE: u64 = 100;
+
+/// The structural repeat permille for `source_fps` frames delivered onto a
+/// `grid_fps` grid: `1000 − (source/grid × 1000)`, saturating at 0 once the
+/// source meets or exceeds the grid. Each grid slot with no fresh source frame
+/// repeats the last one, so the fraction of repeated slots is `1 − source/grid`.
+/// The one `source_fps` fold to permille happens here, so [`derive`]'s
+/// comparison stays pure integer.
 ///
-/// 1. `!clock_ok`               → `(Unlocked, "clock not ok")`
-/// 2. `!pacing_enabled`         → `(Unlocked, "pacing disabled")`
-/// 3. `connections == 0`        → `(Degraded, "no receiver")`
-/// 4. any window count `> 0`    → `(Degraded, "late/repeats/resyncs in 60 s")`
-/// 5. otherwise                 → `(Locked,   "locked")`
+/// Examples (22.9.2026 grid): `24 → 200`, `25 → 167`, `30 → 0`, `60 → 0`.
+pub fn expected_repeat_permille(source_fps: f32, grid_fps: u32) -> u64 {
+    if grid_fps == 0 || source_fps <= 0.0 {
+        return 0;
+    }
+    // Fold source_fps to permille once, then integer-only: 1000 − source/grid,
+    // saturating so a source at or above the grid clamps to 0 (no underflow).
+    let source_permille = (source_fps * 1000.0) as u64;
+    1000u64.saturating_sub(source_permille / grid_fps as u64)
+}
+
+/// Derive the lock state + a static reason from the clock/pacing/receiver inputs
+/// and the rate-normalised 60 s window counts (contract §7 A7.3, calibrated
+/// #168 round 6 / #149). Checks in strict precedence — the FIRST match wins:
 ///
-/// So `clock not ok` beats `pacing disabled` beats `no receiver` beats the
-/// window-event check. Today (flag OFF) every output resolves to
-/// `(Unlocked, "pacing disabled")`, which is correct by contract.
-pub fn derive(
-    clock_ok: bool,
-    pacing_enabled: bool,
-    connections: u32,
-    late_in_window: u64,
-    repeats_in_window: u64,
-    resyncs_in_window: u64,
-) -> (LockState, &'static str) {
-    if !clock_ok {
+/// 1. `!clock_ok`                           → `(Unlocked, "clock not ok")`
+/// 2. `!pacing_enabled`                     → `(Unlocked, "pacing disabled")`
+/// 3. `connections == 0`                    → `(Degraded, "no receiver")`
+/// 4. `resyncs_w > 0`                       → `(Degraded, "resync in 60 s")`
+/// 5. `slots_w == 0`                        → `(Locked,   "locked")`
+/// 6. `late_w > 25 %` of slots             → `(Degraded, "late > 25 % of slots in 60 s")`
+/// 7. `decoding && repeats_w > fps-conversion + 10 %` → `(Degraded, "repeats above the fps conversion in 60 s")`
+/// 8. otherwise                             → `(Locked,   "locked")`
+///
+/// So clock beats pacing beats receiver beats resync; an output that emitted
+/// nothing (`slots_w == 0` — no grid to break) reads LOCKED; then the two
+/// rate-normalised checks. Resyncs stay a hard event (0 in the calibration).
+/// Rule 7 applies only while `decoding` (#150): under pacing a paused / idle
+/// output fills every slot with a standby repeat by design, so its repeat rate
+/// is not starvation — but its late / resync / receiver / clock rules still
+/// apply, so a standby grid that genuinely breaks still reads DEGRADED.
+pub fn derive(inputs: &LockInputs) -> (LockState, &'static str) {
+    if !inputs.clock_ok {
         return (LockState::Unlocked, "clock not ok");
     }
-    if !pacing_enabled {
+    if !inputs.pacing_enabled {
         return (LockState::Unlocked, "pacing disabled");
     }
-    if connections == 0 {
+    if inputs.connections == 0 {
         return (LockState::Degraded, "no receiver");
     }
-    if late_in_window > 0 || repeats_in_window > 0 || resyncs_in_window > 0 {
-        return (LockState::Degraded, "late/repeats/resyncs in 60 s");
+    if inputs.resyncs_w > 0 {
+        return (LockState::Degraded, "resync in 60 s");
+    }
+    if inputs.slots_w == 0 {
+        return (LockState::Locked, "locked");
+    }
+    if inputs.late_w * 1000 > LATE_DEGRADED_PERMILLE * inputs.slots_w {
+        return (LockState::Degraded, "late > 25 % of slots in 60 s");
+    }
+    let expected = expected_repeat_permille(inputs.source_fps, inputs.grid_fps);
+    if inputs.decoding
+        && inputs.repeats_w * 1000 > (expected + REPEAT_MARGIN_PERMILLE) * inputs.slots_w
+    {
+        return (
+            LockState::Degraded,
+            "repeats above the fps conversion in 60 s",
+        );
     }
     (LockState::Locked, "locked")
 }

@@ -362,23 +362,31 @@ pub(crate) async fn wait_with_stall_timeout(
     }
 }
 
-/// CPU-idle thread cap: a quarter of the logical cores, at least 1. Reads the
-/// environment (`available_parallelism`) so it is integration-only; the pure
-/// rule it delegates to (`cpu_idle_threads_for`) is unit-tested.
+/// CPU-idle thread cap: a quarter of the logical cores, BOUNDED by the affinity
+/// block the child is confined to, at least 1. Reads the environment
+/// (`available_parallelism`) AND the live published affinity block
+/// (`heavy_slot::current_affinity_block_cores`, the popcount of the resolved
+/// affinity mask), so it is integration-only; the pure rule it delegates to
+/// (`cpu_idle_threads_for`) is unit-tested.
 #[cfg_attr(test, mutants::skip)]
 fn cpu_idle_threads() -> usize {
     cpu_idle_threads_for(
         std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1),
+        crate::lyrics::heavy_slot::current_affinity_block_cores(),
     )
 }
 
-/// Pure quarter-cores rule (#162 — minimal load, not speed): `max(1, cores/4)`,
-/// so the 12-core box runs a heavy CPU step on 3 threads. Extracted so it is
-/// deterministic in tests.
-fn cpu_idle_threads_for(cores: usize) -> usize {
-    (cores / 4).max(1)
+/// Pure cpu-idle thread cap (#162 — minimal load, not speed): the quarter-cores
+/// rule `cores / 4` BOUNDED by the affinity `block` the child runs on (the
+/// popcount of the resolved affinity mask), at least 1. On the 24-core box the
+/// #147 round-8 default confines the child to a 3-logical-core block, so the 6
+/// threads the quarter rule would pick are capped to 3 — 6 torch threads on 3
+/// logical cores oversubscribe. A wide `block` (an explicit whole-machine mask)
+/// lets the quarter rule win. Extracted so it is deterministic in tests.
+fn cpu_idle_threads_for(cores: usize, block: usize) -> usize {
+    (cores / 4).min(block).max(1) // the #162 quarter rule, capped to the block
 }
 
 // ---------------------------------------------------------------------------
@@ -404,6 +412,11 @@ pub(crate) enum HeavyDefer {
     /// heavy step runs yet so the wall pipelines come up on a quiet box. No
     /// backoff; the song is re-picked next tick.
     StartupGrace,
+    /// #144: the mtl aligner's vocals come from the stems worker's vocals
+    /// sidecar, which is not ready for this song yet. No heavy child is spawned
+    /// and no penalty is taken — the song returns to the queue and is re-picked
+    /// once its stems exist (the stems worker drains the whole catalogue).
+    WaitForStems { video_id: i64 },
 }
 
 impl crate::lyrics::worker::LyricsWorker {
@@ -471,7 +484,14 @@ impl crate::lyrics::worker::LyricsWorker {
         }
     }
 
-    /// Run vocal isolation under the #162 priority regime.
+    /// Run vocal preprocessing (anvuew dereverb + 16 kHz resample) under the
+    /// #162 priority regime.
+    ///
+    /// #144: the vocals come from the stems worker's sidecar, so before any
+    /// heavy child this resolves [`resolve_isolation_input`]: `BaseTierOnly`
+    /// (stems `'unsupported'`) → `Ok(None)` (take the g35t base tier); not ready
+    /// → `Err(HeavyDefer::WaitForStems)` (no-penalty defer); ready → feed the
+    /// sidecar into the dereverb step below.
     ///
     /// - `LowPriority` + wall idle → GPU with the abort watcher armed; if the
     ///   wall goes busy mid-isolation the GPU child is killed and isolation
@@ -502,12 +522,32 @@ impl crate::lyrics::worker::LyricsWorker {
             );
             return Err(HeavyDefer::StartupGrace);
         }
-        // #162: memory-headroom guard BEFORE the slot (owner's order). Below the
-        // 4 GiB floor → defer with no backoff (`WaitingForMemory`), re-check next
-        // tick; the WARN with the numbers is logged in `heavy_step_memory_ok`.
-        if crate::lyrics::heavy_slot::heavy_step_memory_defers("isolation") {
-            return Err(HeavyDefer::Memory);
-        }
+        // #144: the ★ vocals come from the stems worker's sidecar. Decide before
+        // any heavy child whether that sidecar is ready.
+        let vocals_in = match self.resolve_isolation_input(row).await {
+            crate::lyrics::idle_gate_abort::IsolationInput::Stems(p) => p,
+            crate::lyrics::idle_gate_abort::IsolationInput::BaseTierOnly => {
+                tracing::info!(
+                    "lyrics: isolation base-tier only (stems unsupported) video_id={}",
+                    row.id
+                );
+                return Ok(None);
+            }
+            crate::lyrics::idle_gate_abort::IsolationInput::WaitForStems => {
+                return Err(HeavyDefer::WaitForStems { video_id: row.id });
+            }
+        };
+        // #144 r2: QUEUE for the heavy slot (fair FIFO — block behind a running
+        // child), then measure headroom AT SPAWN with the permit held. Below the
+        // 4 GiB floor → release the permit and defer with no backoff
+        // (`WaitingForMemory`), re-queue next tick; the WARN with the numbers is
+        // logged inside `memory_ok_for`. Held across the whole step (the GPU→CPU
+        // re-run below), so the deep acquire in `aligner::preprocess_vocals` is
+        // gone — a second acquire on the same task would deadlock the Semaphore(1).
+        let _slot = match crate::lyrics::heavy_slot::acquire_slot_for_spawn("isolation").await {
+            Ok(g) => g,
+            Err(crate::lyrics::heavy_slot::HeadroomLow) => return Err(HeavyDefer::Memory),
+        };
         let activity = self.wall_activity().await;
         let plan = HeavyStepPlan::for_activity(mode, activity);
         let detail = self.wall_regime_detail(activity).await;
@@ -520,7 +560,10 @@ impl crate::lyrics::worker::LyricsWorker {
         );
         let result = match (mode, plan.is_gpu()) {
             (ProcessingMode::LowPriority, true) => {
-                match self.isolate_vocals(row, gpu_mem, &plan, true).await {
+                match self
+                    .isolate_vocals(row, &vocals_in, gpu_mem, &plan, true)
+                    .await
+                {
                     Ok(v) => Ok(v),
                     Err(abort) => {
                         let cpu = HeavyStepPlan::cpu_idle();
@@ -535,14 +578,19 @@ impl crate::lyrics::worker::LyricsWorker {
                             abort.detail
                         );
                         // abort_enabled=false → runs to completion, never Err.
-                        self.isolate_vocals(row, gpu_mem, &cpu, false).await
+                        self.isolate_vocals(row, &vocals_in, gpu_mem, &cpu, false)
+                            .await
                     }
                 }
             }
             (ProcessingMode::LowPriority, false) => {
-                self.isolate_vocals(row, gpu_mem, &plan, false).await
+                self.isolate_vocals(row, &vocals_in, gpu_mem, &plan, false)
+                    .await
             }
-            (ProcessingMode::IdleOnly, _) => self.isolate_vocals(row, gpu_mem, &plan, true).await,
+            (ProcessingMode::IdleOnly, _) => {
+                self.isolate_vocals(row, &vocals_in, gpu_mem, &plan, true)
+                    .await
+            }
         };
         result.map_err(HeavyDefer::WallAbort)
     }
@@ -568,6 +616,15 @@ impl crate::lyrics::worker::LyricsWorker {
                 // reading is UNKNOWN at startup, which reads as in-use).
                 self.enter_wall_wait("startup grace — wall unknown").await;
                 SongOutcome::WaitingForWall
+            }
+            HeavyDefer::WaitForStems { video_id } => {
+                // #144: no-penalty defer — the stems worker has not produced this
+                // song's vocals sidecar yet. Clear the in-flight marker so the
+                // selector re-evaluates next tick (mirrors `Memory`); the row's
+                // backoff is never touched. Logged once per pass, at INFO.
+                tracing::info!("lyrics: isolation waits for stems video_id={video_id}");
+                self.clear_processing().await;
+                SongOutcome::WaitingForStems
             }
         }
     }

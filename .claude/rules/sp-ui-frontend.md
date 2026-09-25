@@ -2,6 +2,8 @@
 paths:
   - "sp-ui/**"
   - "e2e/mock-api.mjs"
+  - "e2e/lyrics-follow.spec.ts"
+  - "crates/sp-core/src/lyrics_follow.rs"
 ---
 
 # sp-ui / e2e mock gotchas
@@ -29,6 +31,14 @@ also logs `Err`).
 struct — or before wiring a previously-unused component into a page for the
 first time — grep `e2e/mock-api.mjs` for that struct's fixtures and update
 them.**
+
+## Vertical faders: 0 at the BOTTOM — drag them with the real mouse at ≥ 1600×1000
+
+`.mixer-fader` is `writing-mode: vertical-rl; direction: rtl`, so value 0 is at
+the bottom and 100 at the top; the default Playwright viewport hides the fader
+strip, so a real-mouse fader spec runs at ≥ 1600×1000 and drags by fractions of
+the slider HEIGHT (e.g. 10 % → 99 % = to 0), never `fill()` (#184 round G2,
+`e2e/post-deploy-owner-path.spec.ts`).
 
 ## A `spawn_local` poll loop must read page-owned signals with `try_*`
 
@@ -521,6 +531,52 @@ inconsistency the ticket fixes, and the Live tap-to-seek must not be lost —
   Dabing (a dub's subtitles are just its `LyricsTrack`), and in the Lyrics details
   view.
 
+#### LyricsView auto-follows the active line — panel-only scroll (#184 round F)
+
+The owner had to scroll by hand to find the spoken line, because the 260 px
+scroller was never scrolled. `LyricsView` now keeps the active line in the middle
+of ITS OWN scroller:
+
+- An `Effect` on the `current_idx` Memo (plus a `follow_resume` bump, plus
+  `list_ref.track()` on a `NodeRef<Ol>` of the `<ol>`) finds the line by position (`.lyrics-list > li:nth-child(idx+1)`, never by the
+  `lyr-current` class, which may not have re-rendered yet). It computes the line's
+  content-coordinate top from the two `getBoundingClientRect`s plus
+  `scrollTop − clientTop`, and calls `scroll_to_with_scroll_to_options`
+  (`ScrollBehavior::Instant`) with the pure `sp_core::lyrics_follow::
+  centered_scroll_top` (clamped). A sub-pixel move is skipped (`needs_scroll`).
+  **Instant, never Smooth:** a smooth animation still in flight kept running after
+  the operator's own wheel and overrode it (CI run 35857770291: 543 → 578 px after
+  a −300 wheel). **Measured in `request_animation_frame`:** the Effect can run
+  before the `<li>`s are laid out even with the tracked `NodeRef<Ol>` (same run: a
+  paused track never showed its line); the index + pause are re-read in the frame
+  (`try_get_untracked` / `try_get_value`) so a newer state wins.
+  **Why the `NodeRef<Ol>` is tracked:** in reactive_graph a re-subscribed
+  subscriber goes to the BACK of the list. So on a (re)fetch the Memo can wake the
+  follow Effect BEFORE the render effect has built the `<ol>`, and the
+  `nth-child` lookup misses. A paused track produces no later line change, so
+  without the tracked list ref it would never follow.
+- **NEVER `scroll_into_view`.** It scrolls every scrollable ancestor including the
+  window, so the phone Naživo page would jump.
+- `wheel` / `touchstart` / `pointerdown` on the scroller pause follow for
+  `FOLLOW_PAUSE_MS` (5 s, `follow_paused`; the timestamp is a `StoredValue`, read
+  only at follow time). Each gesture arms a `set_timeout`; only the newest
+  gesture's timer (a `pause_gen` match) ends the pause. It clears `paused_at`
+  itself, because a coarsened `performance.now()` can read a hair under 5000 ms,
+  and then bumps `follow_resume`, so the panel catches up even when the line did
+  not change meanwhile. The timer reads with `try_*`
+  because it can outlive the view.
+- The pure rules live in `sp_core::lyrics_follow` (workspace-tested and
+  mutation-gated; sp-ui has no unit-test job). The clock is `player::now_ms`
+  (`pub(crate)`, the `web-sys` `Performance` clock). The web-sys features are
+  `Element`, `HtmlElement`, `ScrollToOptions`, `ScrollBehavior`, `DomRect`,
+  `DomRectReadOnly`.
+- Proof: `e2e/lyrics-follow.spec.ts` (chromium). The mock `/__mock/lyrics-mode`
+  `"long"` serves a 100-line track (one line every 2 s). The Dabing Player's tick
+  (`step_ms: 2000`) advances one line per 500 ms tick. The spec asserts that the
+  `.lyr-current` rect is inside the scroller rect and that `window.scrollY` does not
+  change. A real `page.mouse.wheel` holds `scrollTop` for about 3.5 s, and follow
+  resumes after 5 s. Reset `lyrics-mode` to `track` in `afterEach`.
+
 #### LyricsView is a 4-way fetch state, and 204 = empty NOT error (#198 items 3 + 9)
 
 `lyrics_view.rs` holds `RwSignal<LyricsState>` = `Empty | Loading | Loaded(track)
@@ -707,3 +763,24 @@ miesto"). The fix is a pending-target DISPLAY HOLD:
   a seek POST, then jumps to the target; a real `page.mouse` drag asserts the
   displayed value never drops below the target during the hold, then follows
   live. The box proof is in `post-deploy-preview.spec.ts` (see `preview.md`).
+
+## Running the mock E2E locally for a JS-only sp-ui change (Tier-0: no trunk build)
+
+`sp-ui/*.js` shims (e.g. `preview_player.js`) are bundled by trunk into
+`dist/snippets/sp-ui-<hash>/<name>.js`, referenced from `dist/index.html` by a
+`modulepreload` link WITH an `integrity="sha384-…"`. To exercise a changed shim
+without compiling: `gh run download <latest green dev CI run> -n dist -D dist`,
+copy the new shim over the snippet, and recompute that link's sha384 (a stale
+SRI blocks the module). The wasm is unchanged, so only JS-side behaviour is
+proven; `frontend.spec.ts`'s version-label test fails when the dist's version
+differs from `VERSION` (expected — CI rebuilds dist). A pure helper exported
+from a shim can be imported node-side in a spec (`import { f } from
+"../sp-ui/preview_player.js"`); the class touches browser globals only inside
+methods. The mock hardcodes port 8920 — if another session's stale mock holds
+it, run a port-substituted scratch copy with a config override of `baseURL`.
+In a fresh worktree run `cd e2e && npm ci && npx playwright install chromium`
+first (the cached browser build may not match the lockfile's Playwright). Stop
+the scratch mock by PID (`ss -ltnp | grep :<port>`), never `pkill -f <name>` —
+the pattern also matches the invoking shell's own command line and kills it.
+To prove a JS test really guards a line, patch a MUTANT of the shim into the
+scratch `dist/` snippet (+ recomputed SRI), watch the test go red, restore.

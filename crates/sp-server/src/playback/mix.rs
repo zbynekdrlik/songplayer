@@ -45,12 +45,18 @@ impl PlaybackEngine {
             "a mixer fader change must not require a pipeline reload"
         );
 
+        // #184 G4: the ids of the live gain sets this write republished — compare
+        // with a reader's `stem-mix level … gains_id=` to prove it holds the same
+        // atomics (`sp_decoder::gains_id` = the first atomic's address).
+        let song_id = sp_decoder::gains_id(&control.gain_handles());
+        let dub_id = sp_decoder::gains_id(&control.dub_gain_handles());
+        let dub2_id = sp_decoder::gains_id(&control.dub_over_original_gain_handles());
         info!(
             ?kind,
             vokaly = f.vokaly,
             podklad = f.podklad,
             dabing = f.dabing,
-            "mixer console memory changed (live gains, no reload)"
+            "mixer console memory changed (live gains, no reload) song_gains_id={song_id:#x} dub_gains_id={dub_id:#x} dub2_gains_id={dub2_id:#x}"
         );
 
         // Broadcast the new live state to the dashboard.

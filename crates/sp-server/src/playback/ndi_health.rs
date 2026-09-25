@@ -8,8 +8,10 @@
 
 use crate::obs::ndi_recovery::{NdiRecoveryTracker, RecoveryStep};
 use crate::playback::clock_health::ClockHealth;
-use crate::playback::lock_state::LOCK_WINDOW_100NS;
 use crate::playback::ndi_health_transport::transport_from_reported;
+// `PacingStats` lives in its own file (1000-line cap); re-exported so every
+// `ndi_health::PacingStats` path stays valid.
+pub use crate::playback::pacing_stats::PacingStats;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -66,6 +68,8 @@ pub struct PipelineHealthSnapshot {
     pub frames_submitted_last_5s: u32,
     pub observed_fps: f32,
     pub nominal_fps: f32,
+    /// #168 r6b: file SOURCE fps (decoder rate), path-independent; the lock rule reads THIS, not grid-valued `nominal_fps`.
+    pub source_fps: f32,
     pub last_submit_ts: Option<DateTime<Utc>>,
     pub last_heartbeat_ts: Option<DateTime<Utc>>,
     pub consecutive_bad_polls: u32,
@@ -86,9 +90,9 @@ pub struct PipelineHealthSnapshot {
     /// zeros) on the SDK-clocked (flag-OFF) path; filled from the `Pacer` when
     /// `genlock_pacing` is on.
     pub pacing: PacingStats,
-    /// Audio clock-discipline telemetry (#148). Default (`enabled=false`, zeros)
-    /// on the SDK-clocked / idle path; filled from the `Pacer`'s
-    /// `AudioGridBuffer` + `AudioPll` on the paced path.
+    /// Paced-audio telemetry (#148). Default (`enabled=false`, zeros) on the
+    /// SDK-clocked / idle path; filled from the `Pacer`'s `AudioGridBuffer` on
+    /// the paced path.
     pub audio: AudioStats,
     /// Derived three-state genlock lock (#149, contract §7 A7.3): the same
     /// LOCKED / DEGRADED / UNLOCKED vocabulary the OBS indicator uses
@@ -115,83 +119,22 @@ pub struct PipelineHealthSnapshot {
     pub sender_url: Option<String>,
 }
 
-/// Boundary-paced emission telemetry (#147), surfaced on
-/// `GET /api/v1/ndi/health` as `pacing`. `enabled=false` + all-zero is what an
-/// SDK-clocked (flag-OFF) or idle pipeline reports; the `Pacer`
-/// (`playback/pacer.rs`) fills real values on the paced path.
+/// Paced-audio telemetry (#148), surfaced on `GET /api/v1/ndi/health` as
+/// `audio`. `enabled=false` + all-zero is what an SDK-clocked (flag-OFF) or idle
+/// pipeline reports; the `Pacer` fills real values from its `AudioGridBuffer`.
+/// The A/V alignment itself (`av_align_err_ms`, …) is on [`PacingStats`].
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PacingStats {
-    /// Whether boundary-paced emission is active for this pipeline.
-    pub enabled: bool,
-    /// Monotonic count of boundaries serviced (one frame emitted per boundary).
-    pub seq: u64,
-    /// Emits that landed a full interval or more past their boundary.
-    pub late_frames: u64,
-    /// Worst emit lateness observed (µs).
-    pub max_late_us: u64,
-    /// 99th-percentile emit jitter (emit − boundary, µs) over the recent window.
-    pub jitter_p99_us: u64,
-    /// Last-frame repeats emitted on decoder underrun (one per starved boundary).
-    pub repeats: u64,
-    /// Grid resyncs — a lag beyond the catch-up bound with nothing buffered.
-    pub resyncs: u64,
-    /// Backward-clock-step re-latches.
-    pub relatches: u64,
-    /// Decoded frames dropped as older-than-boundary (e.g. 60→30 decimation).
-    pub dropped: u64,
-    /// Current lag at the last emit: whole grid slots the serviced boundary sat
-    /// behind `floor(now)` (#147 lane 3). A slow file decoder (`iter_cost >=
-    /// interval`) drives this up until the playback re-anchor bounds it; a
-    /// growing `lag_slots` is the direct signal of the box-test-1 failure, where
-    /// `jitter_p99_us` (which measures emit − boundary lateness) merely mirrored
-    /// it. Signed because it is a gauge, always `>= 0` in practice.
-    pub lag_slots: i64,
-    /// 99th-percentile per-iteration decode+submit cost (µs) over the recent
-    /// window (#147 lane 3). `iter_cost >= interval` (≈ 33_333 µs @30 fps) is the
-    /// condition under which catch-up can never gain on the wall clock, so this
-    /// is the honest "can the decoder keep up?" signal, distinct from
-    /// `jitter_p99_us` (emit − boundary lateness).
-    pub iter_p99_us: u64,
-    /// 99th-percentile pre-decode (`prepare`) duration (µs) over the recent
-    /// window (#147 lane 4). Decode moved AHEAD of the boundary — `prepare`
-    /// decodes the next due frame right after each emit, off the critical path,
-    /// so `late_frames` collapses to ~0 while this gauges whether the decoder can
-    /// still produce a frame inside one slot. `prep_p99_us >= interval`
-    /// (≈ 33_333 µs @30 fps) means it cannot keep up and lag will grow until the
-    /// re-anchor bounds it (the same signal `iter_p99_us` was, now measured where
-    /// the decode actually happens).
-    pub prep_p99_us: u64,
-    pub submit_call_us_max: u64,
-    pub submit_call_us_p99: u64,
-}
-
-/// Audio clock-discipline telemetry (#148), surfaced on `GET /api/v1/ndi/health`
-/// as `audio`. `enabled=false` + all-zero is what an SDK-clocked (flag-OFF) or
-/// idle pipeline reports; the `Pacer` fills real values from its
-/// `AudioGridBuffer` + `AudioPll` on the paced path.
-///
-/// `f64` residual/applied so it cannot derive `Eq` (only `PartialEq`).
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct AudioStats {
-    /// Whether audio clock discipline is active for this pipeline.
+    /// Whether the paced audio grid is active for this pipeline.
     pub enabled: bool,
-    /// The TRUE file-clock-vs-wall rate residual (ppm) from the last 60 s window
-    /// (#148 rework): `(mean_now − mean_prev) / (rate · 60 s) · 1e6` over
-    /// same-phase means of the POST-take level. POSITIVE when the buffer is
-    /// GROWING (file/audio clock fast).
-    pub residual_ppm: f64,
-    /// The slow-trim correction (ppm) the `AudioPll` is applying to the
-    /// fractional read step (`1 + applied_ppm · 1e-6`). POSITIVE drains a growing
-    /// buffer faster (negative feedback).
-    pub applied_ppm: f64,
     /// Samples delivered per grid boundary (1600 @ 48 kHz / 30 fps).
     pub samples_per_boundary: u64,
     /// Boundary chunks that ran the FIFO dry and were zero-filled (cumulative).
     pub underruns: u64,
     /// Times the 2 s cap dropped the oldest audio (cumulative).
     pub overflows: u64,
-    /// Current buffered audio (ms) — the POST-take setpoint is ~66 ms
-    /// (2 boundaries, `AUDIO_TARGET_BOUNDARIES`).
+    /// Current buffered audio (ms) after the last take — no setpoint: the
+    /// depth follows the decoder's audio lookahead (#148 design v2).
     pub buffer_ms: u64,
     /// Wall-clock audio-emitter telemetry (#192) for the SDK-clocked path. The
     /// paced path leaves this at `enabled=false`; the SDK-clocked path fills it
@@ -593,6 +536,7 @@ impl crate::playback::PlaybackEngine {
             frames_submitted_last_5s,
             observed_fps,
             nominal_fps,
+            source_fps,
             last_submit_ts,
             last_heartbeat_ts,
             consecutive_bad_polls,
@@ -741,23 +685,20 @@ impl crate::playback::PlaybackEngine {
             .saturating_duration_since(self.instant_origin.0)
             .as_nanos()
             / 100) as i64;
-        let (late_w, repeats_w, resyncs_w) = {
-            let window = self.lock_windows.entry(playlist_id).or_default();
-            window.push(
-                heartbeat_100ns,
-                pacing.late_frames,
-                pacing.repeats,
-                pacing.resyncs,
-            );
-            window.counts_in_window(heartbeat_100ns, LOCK_WINDOW_100NS)
-        };
-        let (lock_state, lock_reason) = sp_core::genlock::lock_state::derive(
+        // #168 r6b: push this heartbeat's cumulative pacing counters into the 60 s
+        // window, difference it (slots + late/repeats/resyncs), and derive the
+        // rate-normalised lock. Feed `source_fps` (the DECODER rate, path-independent)
+        // — NOT `nominal_fps` (the grid on the paced path, which falsely degraded a
+        // 24-fps output) — with `grid_fps` the pacer's fixed `GENLOCK_GRID_FPS`.
+        let (lock_state, lock_reason) = crate::playback::lock_state::lock_for_heartbeat(
+            self.lock_windows.entry(playlist_id).or_default(),
+            heartbeat_100ns,
+            &pacing,
             clock.clock_ok,
-            pacing.enabled,
             connections.max(0) as u32,
-            late_w,
-            repeats_w,
-            resyncs_w,
+            source_fps,
+            sp_core::genlock::GENLOCK_GRID_FPS as u32,
+            transport_from_reported(&reported_state),
         );
 
         // #127 / #173 receiver-side recovery: evaluate the dark-wall ladder for
@@ -792,6 +733,7 @@ impl crate::playback::PlaybackEngine {
             frames_submitted_last_5s,
             observed_fps,
             nominal_fps,
+            source_fps,
             last_submit_ts: last_submit_ts.map(|t| self.instant_to_utc(t)),
             last_heartbeat_ts: Some(self.instant_to_utc(last_heartbeat_ts)),
             consecutive_bad_polls,
@@ -933,7 +875,7 @@ fn should_log_periodic_heartbeat(prev: Option<DateTime<Utc>>, cur: DateTime<Utc>
 /// unit-testable; the periodic INFO path logs the returned string verbatim.
 pub(crate) fn format_genlock_line(s: &PipelineHealthSnapshot) -> String {
     format!(
-        "ndi: genlock playlist_id={pid} ndi_name={name} seq={seq} late={late} p99_us={p99} repeats={repeats} resyncs={resyncs} relatches={relatches} lag={lag} audio_ppm={ppm:.1} underruns={underruns} clock_ok={clock_ok} lock={lock} reason=\"{reason}\"",
+        "ndi: genlock playlist_id={pid} ndi_name={name} seq={seq} late={late} p99_us={p99} repeats={repeats} resyncs={resyncs} relatches={relatches} lag={lag} av_align_err_ms={av_err:.1} av_corrections={av_corr} av_corrected_samples={av_samples} wall_anchor_max_step_us={wa_step} wall_anchor_wide_brackets={wa_wide} wall_anchor_slewed_us={wa_slewed} underruns={underruns} clock_ok={clock_ok} lock={lock} reason=\"{reason}\"",
         pid = s.playlist_id,
         name = s.ndi_name,
         seq = s.pacing.seq,
@@ -943,7 +885,13 @@ pub(crate) fn format_genlock_line(s: &PipelineHealthSnapshot) -> String {
         resyncs = s.pacing.resyncs,
         relatches = s.pacing.relatches,
         lag = s.pacing.lag_slots,
-        ppm = s.audio.residual_ppm,
+        av_err = s.pacing.av_align_err_ms,
+        av_corr = s.pacing.av_corrections,
+        av_samples = s.pacing.av_corrected_samples,
+        // #147: the pacer wall's anchor telemetry (bracketed sampling + bounded update).
+        wa_step = s.pacing.wall_anchor_max_step_us,
+        wa_wide = s.pacing.wall_anchor_wide_brackets,
+        wa_slewed = s.pacing.wall_anchor_slewed_us,
         underruns = s.audio.underruns,
         clock_ok = s.clock.clock_ok,
         lock = s.lock_state.as_str(),

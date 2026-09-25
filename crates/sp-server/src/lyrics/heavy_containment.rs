@@ -15,6 +15,9 @@
 //! Pure + unit-tested + mutation-clean; the Win32 calls live in `heavy_slot.rs`
 //! (cfg(windows), `mutants::skip`).
 
+use crate::lyrics::heavy_alloc_env::AllocMode;
+use crate::process_start::residency::mb_to_bytes;
+
 /// The CPU hard-cap percentage is clamped into this inclusive range; an
 /// absent/unparseable setting falls back to [`CPU_CAP_DEFAULT_PCT`].
 pub(crate) const CPU_CAP_MIN_PCT: u8 = 5;
@@ -31,7 +34,8 @@ pub(crate) struct Containment {
     /// Job Object CPU hard-cap, percent of TOTAL machine CPU time (`5..=100`).
     pub(crate) cpu_cap_pct: u8,
     /// Job Object affinity mask — which logical cores the child may run on. The
-    /// default is the UPPER half of the cores (the wall keeps the lower half).
+    /// default is the TOP 3 logical cores (#168 round 8 — the measured best
+    /// resident-child block; the wall keeps the rest).
     pub(crate) affinity_mask: u64,
     /// Whether the child's process memory priority is lowered to
     /// `MEMORY_PRIORITY_LOW`. Always `true` today; kept as a field for the
@@ -39,6 +43,142 @@ pub(crate) struct Containment {
     /// Object seam, so it is dead in the non-Windows lib target.
     #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) memory_priority_low: bool,
+    /// #207: the `MIMALLOC_PURGE_DELAY` (ms) the separation child's allocator env
+    /// carries — `-1` = never decommit (the #168 retained-heap default),
+    /// `0..=600_000` = a finite decommit delay so the box can measure returning
+    /// the child's ~9 GB commit. Read cross-platform by
+    /// [`crate::lyrics::heavy_slot::current_containment`] at separation spawn.
+    pub(crate) purge_delay_ms: i64,
+    /// #207 phase-3: the separation child's mimalloc commit mode
+    /// (`heavy_alloc_mode`): `Retained` (today's eager-committed heap) or `Lazy`
+    /// (reserve-not-commit, so the box can return the child's ~9 GB commit —
+    /// eager commit, not the purge delay, is the lever, comment 5791417188).
+    /// Read cross-platform by `stems/separator.rs` at separation spawn.
+    pub(crate) alloc_mode: AllocMode,
+    /// #207 round-3c: the `MIMALLOC_RESERVE_OS_MEMORY` arena size in GiB
+    /// (`heavy_alloc_reserve_gib`, `1..=8`, default 4) — round-3b's mimalloc
+    /// self-report showed the eager-committed 4 GiB arena IS the ~4 GiB piece
+    /// of the child's 8.7 GiB peak commit (`commits: 0`), so a smaller reserve
+    /// is the lever ROZHODNUTÉ 3c measures. Read cross-platform by
+    /// `stems/separator.rs` at separation spawn.
+    pub(crate) reserve_gib: u8,
+    /// #147 round 9: the child's per-process working-set CAP in MiB
+    /// (`heavy_max_working_set_mb`, default 4096, `0` = no cap, clamped
+    /// `512..=10240`) — applied as the Job Object's `JOB_OBJECT_LIMIT_WORKINGSET`
+    /// maximum so the child pages ITSELF instead of growing into (and evicting)
+    /// SongPlayer's resident frame pools / NDI SDK buffers. Read by the
+    /// `#[cfg(windows)]` Job Object seam + the contained line (dead off Windows).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) max_working_set_mb: u32,
+}
+
+/// #147 round 9: default heavy-child working-set cap when
+/// `heavy_max_working_set_mb` is absent / unparseable / negative: 4096 MiB.
+///
+/// Sized from the measured child: working set 1.1–1.6 GB (#147 round 7 W1),
+/// 2.8 GB (#168 topology read), 2.79 GB with a 3.35 GB PEAK (#207 lazy
+/// measurement, issue #207 comment 5792443051) — while its COMMIT runs
+/// 6.7–9 GB. A 4 GiB cap sits above every measured peak working set, so a
+/// normal separation is not squeezed, yet it bounds the child's RESIDENT
+/// footprint far below its 10 GiB commit ceiling: when the child touches more
+/// than 4 GiB (an eager-committed arena, a long video), it pages ITSELF instead
+/// of evicting SongPlayer. The per-window throughput read on the box confirms
+/// or re-sizes it via the setting (no redeploy).
+pub(crate) const HEAVY_MAX_WS_DEFAULT_MB: u32 = 4096;
+
+/// Lower clamp for a non-zero cap: below 512 MiB the separator's model weights
+/// alone would thrash.
+pub(crate) const HEAVY_MAX_WS_FLOOR_MB: u32 = 512;
+
+/// Upper clamp: the child's 10 GiB Job Object commit ceiling
+/// (`CHILD_JOB_MEMORY_LIMIT_BYTES`) — a working set above its commit is
+/// unreachable.
+pub(crate) const HEAVY_MAX_WS_CEIL_MB: u32 = 10_240;
+
+/// The Job Object's per-process MINIMUM working set that accompanies the cap
+/// (the API requires a non-zero minimum when the maximum is set): 256 MiB —
+/// low, so under pressure the child stays the first thing trimmed, never
+/// SongPlayer. Never above the cap ([`job_working_set_bytes`]).
+pub(crate) const HEAVY_MIN_WS_MB: u32 = 256;
+
+/// `JOB_OBJECT_LIMIT_WORKINGSET` (windows-sys `Win32::System::JobObjects`).
+/// These four flag mirrors are compile-time asserted equal to windows-sys in
+/// `heavy_slot.rs::assign_win_job`.
+// Read only by the windows job code + the tests since the flag words are
+// literals (#147 r9 mutation gate); not dead on Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) const JOB_LIMIT_WORKINGSET: u32 = 0x1;
+/// `JOB_OBJECT_LIMIT_AFFINITY`.
+// Read only by the windows job code + the tests since the flag words are
+// literals (#147 r9 mutation gate); not dead on Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) const JOB_LIMIT_AFFINITY: u32 = 0x10;
+/// `JOB_OBJECT_LIMIT_PROCESS_MEMORY`.
+// Read only by the windows job code + the tests since the flag words are
+// literals (#147 r9 mutation gate); not dead on Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) const JOB_LIMIT_PROCESS_MEMORY: u32 = 0x100;
+/// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
+// Read only by the windows job code + the tests since the flag words are
+// literals (#147 r9 mutation gate); not dead on Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) const JOB_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+
+/// The #162/#203 flags every heavy-child job carries: memory ceiling (0x100) +
+/// kill-on-close (0x2000) + affinity (0x10). Written as a LITERAL: the bits are
+/// disjoint, so any `|` here (even in a const initializer — cargo-mutants mutates
+/// those too) has an equivalent `|`→`^` mutant. The composition is pinned by
+/// `job_limit_literals_are_the_or_of_their_flag_bits` in the tests.
+pub(crate) const JOB_LIMIT_BASE: u32 = 0x2110;
+/// [`JOB_LIMIT_BASE`] + `JOB_OBJECT_LIMIT_WORKINGSET` (0x1, #147 round 9) —
+/// literal for the same reason.
+pub(crate) const JOB_LIMIT_BASE_WITH_WORKINGSET: u32 = 0x2111;
+
+/// The extended-limit `LimitFlags` word for a heavy child's Job Object: the
+/// #162 memory ceiling + kill-on-close and the #203 affinity ALWAYS, plus
+/// `JOB_OBJECT_LIMIT_WORKINGSET` ONLY when a working-set cap is enabled
+/// (`max_working_set_mb > 0`). Pure. Consumed by the `#[cfg(windows)]` seam.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn job_limit_flags(max_working_set_mb: u32) -> u32 {
+    if max_working_set_mb == 0 {
+        JOB_LIMIT_BASE
+    } else {
+        JOB_LIMIT_BASE_WITH_WORKINGSET
+    }
+}
+
+/// The Job Object's `(MinimumWorkingSetSize, MaximumWorkingSetSize)` in bytes
+/// for a cap of `max_working_set_mb` MiB, or `None` when the cap is disabled
+/// (`0`). The minimum is [`HEAVY_MIN_WS_MB`], never above the cap. Pure.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn job_working_set_bytes(max_working_set_mb: u32) -> Option<(usize, usize)> {
+    if max_working_set_mb == 0 {
+        return None;
+    }
+    let min_mb = HEAVY_MIN_WS_MB.min(max_working_set_mb);
+    Some((mb_to_bytes(min_mb), mb_to_bytes(max_working_set_mb)))
+}
+
+/// #147 round 9: parse the `heavy_max_working_set_mb` setting — `0` = no cap,
+/// a positive value clamped into `512..=10240`, absent / unparseable /
+/// negative → [`HEAVY_MAX_WS_DEFAULT_MB`]. Pure (the WARN is the caller's).
+pub(crate) fn parse_max_working_set_mb(raw: Option<&str>) -> u32 {
+    crate::process_start::residency::parse_mb_setting(
+        raw,
+        HEAVY_MAX_WS_DEFAULT_MB,
+        HEAVY_MAX_WS_FLOOR_MB,
+        HEAVY_MAX_WS_CEIL_MB,
+    )
+}
+
+/// `true` when a present `heavy_max_working_set_mb` was not used as written
+/// (so `refresh_containment` WARNs). Pure.
+pub(crate) fn max_working_set_setting_ignored(raw: Option<&str>) -> bool {
+    crate::process_start::residency::mb_setting_ignored(
+        raw,
+        HEAVY_MAX_WS_FLOOR_MB,
+        HEAVY_MAX_WS_CEIL_MB,
+    )
 }
 
 /// The Job Object `CpuRate` unit for a cap percentage: hundredths of a percent,
@@ -51,18 +191,91 @@ pub(crate) fn cpu_rate_from_pct(pct: u8) -> u32 {
 }
 
 /// The DEFAULT affinity mask for a box with `logical_cores` logical processors:
-/// the UPPER half of the cores (the wall processes keep the lower half), derived
-/// from the count — never a literal. `logical_cores` is clamped to `1..=64` (a
-/// Windows affinity mask is one processor group, ≤ 64 bits; a reported `0` is
-/// treated as `1`). E.g. 8 cores → `0xF0` (cores 4–7), 24 cores → `0xFFF000`
-/// (cores 12–23). Pure.
+/// the TOP 3 logical cores, derived from the count — never a literal.
+/// `logical_cores` is clamped to `1..=64` (a Windows affinity mask is one
+/// processor group, ≤ 64 bits; a reported `0` is treated as `1`); a box with
+/// fewer than 3 logical cores simply gets all of them.
+///
+/// #168 round 8 — was the TOP 4 logical cores (round 5, 24 → `f00000`). Round
+/// 7's paced measurement (issue #147 comment 5786765465, 22./23.9.2026) held
+/// one variable per 15-minute window with the live wall on program and found
+/// the receiver's residual `dropped_due` scales with the resident separation
+/// child's CPU intensity, not its phase or memory pressure:
+///
+/// - **`f00000` (top 4 logical cores, 4 threads ≈ 1.5–2.0 cores)** — receiver
+///   `dropped_due` 0.9–1.35/min, sender `submit_call_us_max` ≤ 20 ms in only
+///   10–15 of 16 minutes (W1, W4).
+/// - **`e00000` (top 3 logical cores, 3 threads ≈ 1.0–1.1 core)** — receiver
+///   `dropped_due` 0.27–0.5/min, sender ≤ 20 ms in **16/16** minutes (W5:
+///   3.2–13.2 ms), measured twice (W3, W5) with no observed wall-time slowdown
+///   on the separations.
+/// - **`c00000` (2 logical = 1 physical)** — STARVES the child under
+///   `BELOW_NORMAL` (round 4 W3: 80 CPU-s in 12 min), so 3 logical cores is the
+///   floor.
+///
+/// The receiver reaches contract-§8 zero only with NO child resident; the
+/// 3-core block is the best a resident child can have. Four AVX RoFormer threads
+/// over 2 full physical cores (both SMT siblings busy) run ≈ 1.5–2.0 cores and
+/// press the shared L3/DRAM the NDI SDK's compress threads need; three threads
+/// on one SMT pair + one half pair run ≈ 1.0–1.1 core and roughly halve-to-
+/// quarter the residual. An explicit `heavy_cpu_affinity_mask=f00000` setting
+/// still overrides this default (see [`parse_affinity_mask`]) if a full-video
+/// separation ever slows > 1.5×.
+///
+/// E.g. 24 cores → `0xE00000` (cores 21–23), 8 cores → `0xE0` (cores 5–7),
+/// 6 → `0x38`, 4 → `0xE`, 3 → `0x7`, 2 → `0x3`. Pure.
 pub(crate) fn default_affinity_mask(logical_cores: usize) -> u64 {
     let cores = logical_cores.clamp(1, 64);
-    let lower_half = cores / 2; // cores reserved for the wall processes
-    let upper_count = cores - lower_half; // heavy children get the upper half (the extra core when odd)
-    // `upper_count` is 1..=32 for `cores` 1..=64, so `1u64 << upper_count` never
-    // overflows and no all-bits special case is reachable.
-    ((1u64 << upper_count) - 1) << lower_half
+    // The child gets the TOP `top` logical cores; a box with < 3 gets all of
+    // them. `top <= cores`, so `shift = cores - top` never underflows and the
+    // mask's highest set bit is `cores - 1` (≤ 63) — no shift overflow.
+    let top = cores.min(3); // the top 3 logical cores — the measured best resident-child block
+    let shift = cores - top; // the lower cores reserved for the wall/OBS/Resolume
+    ((1u64 << top) - 1) << shift
+}
+
+/// #207 default when `heavy_purge_delay_ms` is absent / unparseable / out of the
+/// valid range: `-1` (never decommit — the #168 retained-heap behaviour).
+pub(crate) const PURGE_DELAY_DEFAULT_MS: i64 = -1;
+
+/// Parse the `heavy_purge_delay_ms` setting into a mimalloc purge delay (ms).
+/// Valid values are `-1` (never decommit) or `0..=600_000`; anything missing,
+/// unparseable, or out of range falls back to [`PURGE_DELAY_DEFAULT_MS`]. Pure —
+/// the WARN on an out-of-range value lives in the impure caller
+/// (`heavy_slot::refresh_containment`), never here.
+fn parse_purge_delay_ms(raw: Option<&str>) -> i64 {
+    // `-1` needs no guard of its own: it IS the default, so it falls through
+    // the `_` arm (a `v == -1` guard was an equivalent mutant — `delete -`
+    // survived the diff-scoped mutation gate, run 35828975563).
+    match raw.and_then(|s| s.trim().parse::<i64>().ok()) {
+        Some(v) if (0..=crate::lyrics::heavy_alloc_env::PURGE_DELAY_MAX_MS).contains(&v) => v,
+        _ => PURGE_DELAY_DEFAULT_MS,
+    }
+}
+
+/// #207 phase-3: parse the `heavy_alloc_mode` setting into an [`AllocMode`].
+/// A trimmed `"lazy"` selects [`AllocMode::Lazy`]; anything else — absent,
+/// `"retained"`, or unrecognised — is [`AllocMode::Retained`] (the default,
+/// today's eager-committed heap). Pure — the impure caller may WARN on an
+/// unrecognised non-empty value.
+fn parse_alloc_mode(raw: Option<&str>) -> AllocMode {
+    match raw.map(str::trim) {
+        Some("lazy") => AllocMode::Lazy,
+        _ => AllocMode::Retained,
+    }
+}
+
+/// #207 round-3c: parse the `heavy_alloc_reserve_gib` setting into the
+/// `MIMALLOC_RESERVE_OS_MEMORY` arena size, GiB. Valid values are `1..=8`;
+/// anything missing, unparseable, or out of range falls back to
+/// [`crate::lyrics::heavy_alloc_env::RESERVE_GIB_DEFAULT`] (4). Pure — the WARN
+/// on an out-of-range value lives in the impure caller
+/// (`heavy_slot::refresh_containment`), never here.
+fn parse_reserve_gib(raw: Option<&str>) -> u8 {
+    match raw.and_then(|s| s.trim().parse::<i64>().ok()) {
+        Some(v) if (1..=8).contains(&v) => v as u8,
+        _ => crate::lyrics::heavy_alloc_env::RESERVE_GIB_DEFAULT,
+    }
 }
 
 /// Parse + clamp the `heavy_cpu_cap_pct` setting into `5..=100`. An
@@ -110,18 +323,29 @@ pub(crate) fn existing_cores_mask(logical_cores: usize) -> u64 {
     }
 }
 
-/// Resolve the live [`Containment`] from the two operator settings + the box's
-/// logical-core count. The impure caller ([`crate::lyrics::heavy_slot`]) reads
-/// the settings + core count and calls this pure fn. Pure.
+/// Resolve the live [`Containment`] from the six operator settings
+/// (`heavy_cpu_cap_pct`, `heavy_cpu_affinity_mask`, `heavy_purge_delay_ms`,
+/// `heavy_alloc_mode`, `heavy_alloc_reserve_gib` (#207 round-3c),
+/// `heavy_max_working_set_mb` (#147 round 9)) + the box's logical-core count.
+/// The impure caller ([`crate::lyrics::heavy_slot`]) reads the settings + core
+/// count and calls this pure fn. Pure.
 pub(crate) fn containment_from_settings(
     cap_str: Option<&str>,
     mask_str: Option<&str>,
+    purge_str: Option<&str>,
+    alloc_str: Option<&str>,
+    reserve_str: Option<&str>,
+    max_ws_str: Option<&str>,
     logical_cores: usize,
 ) -> Containment {
     Containment {
         cpu_cap_pct: clamp_cap_pct(cap_str),
         affinity_mask: parse_affinity_mask(mask_str, logical_cores),
         memory_priority_low: true,
+        purge_delay_ms: parse_purge_delay_ms(purge_str),
+        alloc_mode: parse_alloc_mode(alloc_str),
+        reserve_gib: parse_reserve_gib(reserve_str),
+        max_working_set_mb: parse_max_working_set_mb(max_ws_str),
     }
 }
 

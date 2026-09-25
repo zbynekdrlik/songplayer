@@ -16,10 +16,12 @@ fn setting_value(settings: &HashMap<String, String>, key: &str, default: &str) -
         .unwrap_or_else(|| default.to_string())
 }
 
-/// The six catalogue dub voices (#184 round C): the Gemini prebuilt voice name
-/// (the stored value) with its Slovak descriptive label. Mirrors the vetted
-/// catalogue `eval/dubbing/voices.py`.
+/// The dub voices: `speaker` (#184 round H step 2, the default — the speaker's
+/// own voice, no pinned prebuilt voice) followed by the six catalogue voices
+/// (#184 round C): the stored value with its Slovak descriptive label. Mirrors
+/// the vetted catalogue `eval/dubbing/voices.py`.
 const DUB_VOICES: &[(&str, &str)] = &[
+    (config::DUB_VOICE_SPEAKER, "Hlas rečníka (odporúčané)"),
     ("Charon", "Charon — muž, vecný"),
     ("Orus", "Orus — muž, pevný"),
     ("Puck", "Puck — muž, energický"),
@@ -38,6 +40,7 @@ pub fn SettingsForm() -> impl IntoView {
     let gemini_model = RwSignal::new(String::new());
     let cache_dir = RwSignal::new(String::new());
     let dub_voice = RwSignal::new(config::DEFAULT_DUB_VOICE.to_string());
+    let dub_model = RwSignal::new(config::DEFAULT_DUB_MODEL.to_string());
     let save_status = RwSignal::new(String::new());
 
     // Populate fields from store settings when they change.
@@ -69,6 +72,11 @@ pub fn SettingsForm() -> impl IntoView {
             config::SETTING_DUB_VOICE,
             config::DEFAULT_DUB_VOICE,
         ));
+        dub_model.set(setting_value(
+            &settings,
+            config::SETTING_DUB_MODEL,
+            config::DEFAULT_DUB_MODEL,
+        ));
     });
 
     let on_save = move |ev: leptos::ev::SubmitEvent| {
@@ -92,6 +100,7 @@ pub fn SettingsForm() -> impl IntoView {
         );
         settings.insert(config::SETTING_CACHE_DIR.to_string(), cache_dir.get());
         settings.insert(config::SETTING_DUB_VOICE.to_string(), dub_voice.get());
+        settings.insert(config::SETTING_DUB_MODEL.to_string(), dub_model.get());
 
         leptos::task::spawn_local(async move {
             save_status.set("Ukladám…".into());
@@ -170,6 +179,15 @@ pub fn SettingsForm() -> impl IntoView {
                             })
                             .collect_view()}
                     </select>
+                </label>
+                <label>
+                    "Model dabingu"
+                    <input
+                        type="text"
+                        data-testid="settings-dub-model"
+                        prop:value=move || dub_model.get()
+                        on:input=move |ev| dub_model.set(event_target_value(&ev))
+                    />
                 </label>
             </fieldset>
 

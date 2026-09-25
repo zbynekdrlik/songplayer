@@ -1,293 +1,294 @@
 #!/usr/bin/env python3
-"""dub_worker.py — Slovak dub synthesis via Gemini Live Translate (#183 D4).
+"""dub_worker.py — Slovak dub synthesis via Gemini Live Translate (#183 D4,
+#184 round H step 2: the frozen target state).
 
-`live-translate` streams the ORIGINAL audio of a video into
-`gemini-3.5-live-translate-preview` (audio->audio, owner ruling #174), one Live
-session per chunk, and writes the Slovak dub on the VIDEO timeline as the `--out`
-FLAC (48 kHz stereo, so it matches the stem format the playback `StemMixReader`
-mixes), plus an EN/SK transcripts JSON for D3.
+`live-translate` streams a video's audio into `gemini-3.5-live-translate-preview`
+(audio->audio, owner ruling #174) as ONE logical Live session in the speaker's
+own voice (`scripts/dub_live_session.py`: 1.0x wall-clock-paced 100 ms frames,
+sliding-window context compression, session resumption with an overlapping
+reconnect on GoAway), places the one continuous output stream on the VIDEO
+timeline (`video_ms = arrival_ms - t0_ms - latency_ms`), and writes the Slovak
+dub as the `--out` FLAC (48 kHz stereo, the stem format the playback
+`StemMixReader` mixes), loudness-matched to `--audio` (round F) and promoted with
+a POSIX-semantics rename (round F2), plus the EN/SK transcripts JSON for D3 and
+the session event log next to the dub (`<base>_dub_events.jsonl`, round H4).
 
-The chunk plan (`--chunk-plan`, a JSON list of `{start_ms,end_ms}`) is computed by
-the Rust worker from ffmpeg `silencedetect`; this child just executes it. Each
-chunk is resumable (`<work-dir>/chunk_N.wav` + `.json` are reused on a re-run) and
-the child heartbeats into the work dir so the Rust stall-timeout never kills a
-healthy real-time stream. The Gemini key comes ONLY from `GEMINI_API_KEY` (env),
-never argv/log.
+`--audio` is chosen by the Rust worker: the vocals stem when it exists, else the
+normalized original. `--voice speaker` (default) sends NO `speech_config`; any
+other value pins that prebuilt voice. `--model` makes a newer Live Translate
+model a setting change. The Gemini key comes ONLY from `GEMINI_API_KEY` (env),
+never argv/log. The child heartbeats into `--work-dir` so the Rust stall timeout
+never kills a healthy real-time stream. Superseded (round C-E2) per-chunk
+sessions, resume, re-synthesis and atempo placement are DELETED (#184 5798586079).
 
-Heavy imports (`google.genai`) are lazy so this module imports under CI/ruff and
-the pytest helpers below run without the SDK.
+`google.genai` is imported lazily so this module imports under CI/ruff and the
+pytest helpers run without the SDK.
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
+import struct
 import subprocess
 import sys
 import time
-import wave
-from statistics import median
 
-INPUT_SR = 16000
-OUTPUT_SR = 24000
+# #184 round F: the loudness rules ship next to this script (the Rust worker
+# materialises it into the same tools dir, which is on sys.path for the child).
+import dub_loudness as dl
+
+# #184 round H step 2: the ONE continuous Live session (shipped next to it too).
+import dub_live_session as dls
+
+# #184 round F2: the partial dub is promoted with a POSIX-semantics rename, so a
+# dub SongPlayer holds open (video loaded in SP-dabing) can still be replaced.
+import win_replace as wr
+
+INPUT_SR = dls.INPUT_SR
+OUTPUT_SR = dls.OUTPUT_SR
 FINAL_SR = 48000
-CHUNK_BYTES = 3200  # 100 ms @ 16 kHz s16le mono
-MAX_TEMPO = 1.08  # mirrors dabing::chunk_plan::MAX_TEMPO
-MODEL = "gemini-3.5-live-translate-preview"
+MODEL = dls.MODEL
 TARGET_LANG = "sk"
-DRAIN_S = 27.0  # keep receiving this long after audio_stream_end (silence trail)
 HEARTBEAT_EVERY_S = 5.0
-DEFAULT_VOICE = "Charon"  # #184 round C: a male, matter-of-fact catalogue voice
-
-# #184 round E2: per-chunk voice-band guard tuning.
-VOICE_WINDOW_S = 5.0  # the f0-median window for the drift scan
-VOICE_ST_ABOVE = 6.0  # semitones above the RUNNING baseline that count as "high"
-# A chunk needs re-synthesis when it has >= VOICE_DRIFT_MIN_WINDOWS true-drift
-# windows OR a true-drift FRACTION over VOICE_DRIFT_FRAC. VOICE_DRIFT_FRAC is the
-# SAME 0.05 the file gate (`dub_voice_check.MAX_HIGH_BAND_FRACTION`) fails a file
-# at — a unit test pins the equality so the chunk trigger can never sit laxer than
-# the gate it protects (round E's bug: the trigger was 0.20, 4x the gate, so a
-# chunk at 4/22 = 18 % passed the guard while failing the file).
-VOICE_DRIFT_MIN_WINDOWS = 2
-VOICE_DRIFT_FRAC = 0.05
-VOICE_RESYNTH_ATTEMPTS = 2  # up to N re-synths (new session, same pin) per chunk
-
-# #184 round E2: the SEED chunk (chunk 0, no running baseline yet) is checked
-# against the pinned voice's EXPECTED f0 band — a coarse "chunk 0 is roughly the
-# right voice" gate so a wrong seed does not poison the running baseline for every
-# later chunk. Measured 2026-09-22 by `eval/dubbing/voice_band_measure.py` on the
-# 120-s seg.wav with the autocorrelation estimator (`use_librosa=False`, the SAME
-# path the runtime seed median uses — librosa/pyin would be a different unit), then
-# WIDENED to `median × [0.80, 1.55]` so a legit content-driven shift still seeds
-# (e.g. video 344's Charon dub median ~108 Hz) while a clear octave jump (×2) is
-# rejected. Autocorrelation collapses octaves (all six voices measure ~87–94 Hz),
-# so this is a COARSE seed gate, NOT a fine voice discriminator — the
-# baseline-relative window guard + the on-box `--source` file gate (pyin) are the
-# real drift detectors. An unknown voice → no seed check (seed as-is).
-#                        seg p10–p90 / median (Hz, autocorrelation)
-VOICE_F0_BAND = {
-    "Charon": (73, 142),  # 84.9–100.8 / 91.3  (contains 344's ~108 Hz dub)
-    "Orus": (75, 146),  # 90.3–103.0 / 94.1
-    "Puck": (74, 144),  # 89.0–99.5 / 92.8
-    "Kore": (72, 139),  # 81.3–105.3 / 89.9
-    "Aoede": (70, 135),  # 81.3–98.2 / 87.3
-    "Leda": (72, 139),  # 83.7–100.7 / 89.9
-}
-
+# The measured first-voiced output latency is clamped to this range before it
+# places the output: a value outside it is a measurement artefact (an intro the
+# input-onset probe could not see, a very late first utterance), not the model.
+LATENCY_MIN_MS = 1000
+LATENCY_MAX_MS = 6000
+# A connection's output stream may run this far ahead of its arrival time before
+# its streamed silence is skipped to catch up (see `place_output`).
+CATCH_UP_TOLERANCE_MS = 500
+RAW_OUTPUT = "live_output.raw"  # the session's output PCM, arrival order
+PLACED_WAV = "dub_placed.wav"  # the output placed on the video timeline
+# The round C-E2 resume cache (per-chunk wav/json/pcm + the Rust chunk plan).
+LEGACY_PREFIXES = ("chunk_",)
+# The pre-H4 session event log: it now sits next to the dub (`events_path_for`),
+# and a stale copy left in the work dir would mislead a timing analysis.
+LEGACY_NAMES = ("events.jsonl",)
 
 # ── pure helpers (unit-tested; no I/O, no heavy imports) ─────────────────────────
 
 
-def pcm_len_ms(byte_len: int, sample_rate: int) -> int:
-    """Duration in ms of `byte_len` bytes of s16le mono PCM at `sample_rate`."""
-    if sample_rate <= 0:
-        return 0
-    return int(round(byte_len / 2 / sample_rate * 1000))
-
-
-def pcm_pos_to_ms(byte_pos: int, sample_rate: int) -> int:
-    """Timeline position (ms) of a byte offset into s16le mono PCM — used to stamp
-    the SK transcript deltas by the output-audio position at arrival."""
-    return pcm_len_ms(byte_pos, sample_rate)
-
-
-def placement(
-    chunk_start_ms: int, chunk_len_ms: int, out_len_ms: int, next_start_ms: int | None
-) -> tuple[int, float]:
-    """Where a chunk's output lands + its atempo factor. Mirrors the Rust
-    `dabing::chunk_plan::placement_for`: start at the chunk start; speed up only to
-    fit before `next_start_ms`, never faster than MAX_TEMPO, never slower than 1.0;
-    the last chunk (`next_start_ms is None`) is never sped up."""
-    tempo = 1.0
-    if next_start_ms is not None and next_start_ms > chunk_start_ms:
-        avail = next_start_ms - chunk_start_ms
-        if avail > 0 and out_len_ms > avail:
-            tempo = min(MAX_TEMPO, max(1.0, out_len_ms / avail))
-    return chunk_start_ms, tempo
-
-
-def slice_resample_args(
-    ffmpeg: str, audio: str, start_ms: int, end_ms: int, out_pcm: str
-) -> list[str]:
-    """ffmpeg argv to cut `[start_ms,end_ms)` of `audio` and write 16 kHz mono
-    s16le PCM to `out_pcm` (the Live-API input format). Output trimming (`-ss/-to`
-    after `-i`) for sample-accurate chunk bounds."""
+def decode_args(ffmpeg: str, audio: str) -> list[str]:
+    """ffmpeg argv decoding the whole `audio` to 16 kHz mono s16le on stdout (the
+    Live-API input format)."""
     return [
         ffmpeg,
         "-hide_banner",
         "-nostdin",
-        "-y",
+        "-loglevel",
+        "error",
         "-i",
         audio,
-        "-ss",
-        f"{start_ms / 1000.0:.3f}",
-        "-to",
-        f"{end_ms / 1000.0:.3f}",
+        "-vn",
         "-ac",
         "1",
         "-ar",
         str(INPUT_SR),
         "-f",
         "s16le",
-        "-acodec",
-        "pcm_s16le",
-        out_pcm,
+        "-",
     ]
 
 
-def trim_silence_af(threshold_db: int = -45, min_silence_s: float = 0.2) -> str:
-    """The ffmpeg `-af` that strips trailing silence (reverse, remove leading
-    silence, reverse) — the Live session streams silence after `audio_stream_end`.
-    Same filter as the reference `gemini_live_translate.trim_af`."""
-    return (
-        f"areverse,silenceremove=start_periods=1:start_threshold={threshold_db}dB:"
-        f"start_duration={min_silence_s},areverse"
-    )
+def clamp_latency_ms(ms: float) -> int:
+    """The placement latency, clamped to `LATENCY_MIN_MS..=LATENCY_MAX_MS`."""
+    return int(round(min(max(ms, LATENCY_MIN_MS), LATENCY_MAX_MS)))
 
 
-def build_mix_filter(placements: list[tuple[float, int]]) -> str:
-    """Build the ffmpeg `filter_complex` that places each chunk WAV (input `i`) on
-    the timeline: `atempo` then `adelay` to its `at_ms`, then `amix` all, resample
-    to 48 kHz. `placements[i] = (tempo, at_ms)`. Pure — unit-tested. `-ac 2` on the
-    output upmixes the mono mix to stereo."""
-    parts = []
-    labels = []
-    for i, (tempo, at_ms) in enumerate(placements):
-        # atempo must be >= 1.0 here; adelay delays the (mono) stream to at_ms.
-        parts.append(f"[{i}:a]atempo={tempo:.4f},adelay={int(at_ms)}:all=1[a{i}]")
-        labels.append(f"[a{i}]")
-    n = len(placements)
-    mix = "".join(labels) + f"amix=inputs={n}:normalize=0,aresample={FINAL_SR}[mix]"
-    return ";".join(parts + [mix])
-
-
-def drain_deadline_s(input_pcm_bytes: int, drain_s: float = DRAIN_S) -> float:
-    """How long to keep the receive stream open: the input's real-time duration
-    plus a drain window for the model to finish translating."""
-    input_s = input_pcm_bytes / 2 / INPUT_SR
-    return round(input_s + drain_s, 2)
-
-
-def chunk_reusable(meta: dict, voice: str, start_ms: int, end_ms: int) -> bool:
-    """#184 round C + E + E2: a resumed chunk (`chunk_N.json`) may be reused ONLY
-    if it was synthesized with the SAME voice as the one now requested, covers the
-    SAME `[start_ms, end_ms)` slice of the source, AND carries the voice-guard
-    record (`voice_medians`, non-empty). A chunk recorded under a different voice,
-    a legacy chunk with no `voice` / boundary keys, a chunk from an OLDER chunk
-    plan (the session ceiling changed, so slot N now covers a different slice), or
-    a chunk that was never voice-guarded (pre-E2, or the guard was skipped) is NOT
-    reusable — it is re-synthesized: reusing an unguarded chunk on a re-dub would
-    silently keep exactly the drifted audio the re-dub was requested to fix. Pure —
-    unit-tested."""
-    return (
-        meta.get("voice") == voice
-        and meta.get("chunk_start_ms") == start_ms
-        and meta.get("chunk_end_ms") == end_ms
-        and bool(meta.get("voice_medians"))
-    )
-
-
-def chunk_voice_drift(
-    out_medians: list,
-    in_medians: list,
-    out_baseline: float | None,
-    in_baseline: float | None,
-    st_above: float = VOICE_ST_ABOVE,
-) -> tuple[int, int]:
-    """(#184 round E2) Count the (DRIFTED, VOICED) 5-s windows of one synthesized
-    chunk against the RUNNING baselines — the pinned-voice OUTPUT baseline (median
-    of the voiced output windows of the chunks accepted so far) and the SOURCE
-    INPUT baseline (running median of the input windows) — NOT the chunk's own
-    medians. This is the round-E2 fix for the whole-chunk blind spot: a chunk that
-    is high THROUGHOUT (round E's chunk 10) has a high chunk median, so round E saw
-    0 drift; measured against the running voice baseline those windows are high and
-    counted, unless the aligned SOURCE window is also high above the source
-    baseline (source-following, discounted). Delegates to the ONE shared drift
-    definition in `dub_voice_check.drift_windows` so the guard and the file check
-    measure the same thing. `out_baseline` None/<=0 (the seed chunk, no baseline
-    yet) → (0, voiced). Pure — unit-tested."""
-    import dub_voice_check as dvc
-
-    return dvc.drift_windows(
-        out_medians, in_medians, out_baseline, in_baseline, st_above
-    )
-
-
-def _chunk_is_drifted(drifted: int, voiced: int) -> bool:
-    """(#184 round E2) A chunk needs re-synthesis when it has at least
-    `VOICE_DRIFT_MIN_WINDOWS` true-drift windows OR a true-drift FRACTION over
-    `VOICE_DRIFT_FRAC` (== the file gate's `MAX_HIGH_BAND_FRACTION`). The absolute
-    floor catches a couple of drifted windows a small chunk's fraction would miss;
-    the fraction matches the file gate exactly (round E's 0.20 was 4x too lax).
-    Pure."""
-    if voiced <= 0:
-        return False
-    return drifted >= VOICE_DRIFT_MIN_WINDOWS or drifted / voiced > VOICE_DRIFT_FRAC
-
-
-def voice_band_for(voice: str) -> tuple | None:
-    """(#184 round E2) The `(lo, hi)` expected f0 band for `voice`, or None when
-    the voice is not in the measured `VOICE_F0_BAND` table (an unknown voice gets
-    no seed check — it seeds the baseline as-is). Pure."""
-    return VOICE_F0_BAND.get(voice)
-
-
-def seed_median_ok(median_hz: float, voice: str) -> bool | None:
-    """(#184 round E2) Is the SEED chunk's voiced f0 median inside `voice`'s
-    expected band? True/False when the voice is known, None when it is not (no
-    check). A seed outside its band is a wrong-voice seed that would poison the
-    running baseline for every later chunk, so it is treated as drifted. Pure."""
-    band = voice_band_for(voice)
-    if band is None:
+def measure_latency_ms(
+    first_voiced_arrival_s: float | None, t0_s: float | None, onset_ms: int | None
+) -> int | None:
+    """The measured first-voiced output latency: when the first voiced output
+    chunk arrived, minus when frame 0 was sent, minus where the first voiced
+    INPUT frame sits (so a silent or instrumental intro is not counted as model
+    latency). None when there was no voiced output or no send."""
+    if first_voiced_arrival_s is None or t0_s is None:
         return None
-    lo, hi = band
-    return lo <= median_hz <= hi
+    return int(round((first_voiced_arrival_s - t0_s) * 1000)) - (onset_ms or 0)
 
 
-def baseline_from_meta(meta: dict) -> tuple[list, list]:
-    """(#184 round E2) The `(output_medians, input_medians)` a chunk contributes to
-    the running pinned-voice / source baselines, read from its persisted
-    `chunk_N.json`. Only an ACCEPTED chunk contributes: a chunk that shipped still
-    drifted (`voice_band_ok is False`) or a legacy chunk with no persisted medians
-    contributes nothing, so the baseline is never poisoned and a resumed run
-    rebuilds the same baseline from the reused chunks. Pure — unit-tested."""
-    if meta.get("voice_band_ok") is False:
-        return ([], [])
-    return (
-        list(meta.get("voice_medians") or []),
-        list(meta.get("voice_in_medians") or []),
-    )
+def en_latency_ms(
+    parts: list, t0_s: float | None, onset_ms: int | None
+) -> tuple[int, int | None]:
+    """The EN INPUT-transcription latency (#184 H4) as `(clamped, measured)`:
+    the FIRST non-empty input-transcription fragment's arrival, measured and
+    clamped exactly like the SK output latency, so both timelines use one
+    method. `(0, None)` with no input transcription (or no send): the EN is then
+    stamped at its raw arrival.
+
+    The SK's `LATENCY_MIN_MS..=LATENCY_MAX_MS` fits the input side too: Live
+    Translate emits the input transcription per phrase, so its first fragment
+    comes a phrase plus the ASR lag after the speech onset — ~4-5 s on video 344
+    (#184 5807462051), inside 1-6 s. A value outside it is the same artefact as
+    on the output side (an onset the probe could not see, a very late first
+    phrase), not the model."""
+    first = min((arrival for arrival, text, _ in parts if text), default=None)
+    measured = measure_latency_ms(first, t0_s, onset_ms)
+    if measured is None:
+        return 0, None
+    return clamp_latency_ms(measured), measured
 
 
-def build_transcripts(results: list[dict]) -> dict:
-    """Assemble the EN/SK transcripts JSON (the D3 #182 subtitle source) from the
-    per-chunk results. Pure — unit-tested. Each chunk carries its video-timeline
-    placement so the Rust subtitle builder maps chunk-local SK positions onto the
-    video timeline WITHOUT a second transcription pass; the placement is read from
-    the SAME per-chunk result the mix uses (`_process_chunk`), so cached/resumed
-    chunks are included with no re-synthesis and no extra API calls."""
+def timeline_ms(arrival_s: float, t0_s: float, latency_ms: int) -> int:
+    """Video-timeline position of something that arrived at `arrival_s`:
+    `arrival - t0 - latency`, never before the start."""
+    return max(0, int(round((arrival_s - t0_s) * 1000)) - latency_ms)
+
+
+def place_output(
+    chunks: list, t0_s: float, latency_ms: int, sr: int = OUTPUT_SR
+) -> list[int | None]:
+    """Start SAMPLE of every output chunk (`.arrival_s`, `.conn`, `.n_bytes`,
+    `.voiced`) on the video timeline, or None for a dropped one. Each
+    connection's output is ONE continuous stream in arrival order: a chunk lands
+    at `max(cursor, arrival - t0 - latency)`, so a burst never overlaps itself and
+    a stall re-syncs to arrival. When the stream has run AHEAD of arrival by more
+    than `CATCH_UP_TOLERANCE_MS` (a burst, output slightly faster than real
+    time), its streamed SILENCE is dropped until it is back — voiced audio is
+    never dropped — so the dub does not drift late for the rest of the
+    connection. Connections keep separate cursors: the old connection's trailing
+    translation and the new one's start overlap in time (they are summed by
+    `render_placed_wav`); one cursor across both would push every later second
+    late by the overlap."""
+    tolerance = CATCH_UP_TOLERANCE_MS * sr // 1000
+    cursors: dict[int, int] = {}
+    starts: list[int | None] = []
+    for c in chunks:
+        want = timeline_ms(c.arrival_s, t0_s, latency_ms) * sr // 1000
+        cursor = cursors.get(c.conn, 0)
+        if not c.voiced and cursor - want > tolerance:
+            starts.append(None)  # skip streamed silence to catch up
+            continue
+        pos = max(cursor, want)
+        starts.append(pos)
+        cursors[c.conn] = pos + c.n_bytes // 2
+    return starts
+
+
+def _by_connection(parts: list, conn_of) -> list:
+    """`parts` stably ordered by connection: the old connection translates
+    EARLIER input than the next one, even when its trailing text arrives after
+    the next connection's first text (the overlap)."""
+    return sorted(parts, key=conn_of)
+
+
+def joined_by_connection(parts: list) -> str:
+    """The `(arrival_s, text, conn)` transcription parts joined in connection
+    order (no separator — Live Translate fragments carry their own spaces)."""
+    return "".join(text for _, text, _ in _by_connection(parts, lambda p: p[2]))
+
+
+def _timed_from(parts: list, t0_s: float, latency_ms: int) -> list[dict]:
+    """Transcription fragments `(arrival_s, text, conn)` in connection order,
+    stamped on the video timeline (`t_ms` = arrival - t0 - latency, clamped at
+    0, non-decreasing — the D3 subtitle builder reads them in order). A
+    connection's fragments that arrived after a LATER connection's first
+    fragment (its trailing text during the overlap) are capped at the earliest
+    such first fragment, so later connections keep their own arrival times
+    instead of being pushed later. Empty fragments are dropped."""
+    first_of: dict[int, float] = {}
+    for arrival_s, text, conn in parts:
+        if text and conn not in first_of:
+            first_of[conn] = arrival_s
+    conns = sorted(first_of)
+    next_first = {
+        c: min(first_of[later] for later in conns[i + 1 :])
+        for i, c in enumerate(conns[:-1])
+    }
+    out = []
+    last = 0
+    for arrival_s, text, conn in _by_connection(parts, lambda p: p[2]):
+        if not text:
+            continue
+        capped = min(arrival_s, next_first.get(conn, arrival_s))
+        last = max(last, timeline_ms(capped, t0_s, latency_ms))
+        out.append({"t_ms": last, "text": text})
+    return out
+
+
+def sk_timed_from(parts: list, t0_s: float, latency_ms: int) -> list[dict]:
+    """The SK OUTPUT-transcription fragments on the video timeline: arrival - t0
+    - the measured output latency (the dub audio is placed with the same
+    latency, so the SK subtitles follow it)."""
+    return _timed_from(parts, t0_s, latency_ms)
+
+
+def en_timed_from(parts: list, t0_s: float, latency_ms: int) -> list[dict]:
+    """The EN INPUT-transcription fragments on the video timeline (#184 H3):
+    arrival - t0 - the measured EN latency (`en_latency_ms`, #184 H4). The
+    source audio is streamed at 1.0x wall clock from t0, but Live Translate
+    emits the input transcription per phrase, seconds after the audio was sent;
+    without the latency the EN sat ~4-5 s late, one SK line below its own
+    translation. The D3 builder assigns each EN sentence WHOLE to the SK line
+    whose start is nearest to it."""
+    return _timed_from(parts, t0_s, latency_ms)
+
+
+def events_path_for(out: str) -> str:
+    """The session event log next to the dub (#184 H4): `<base>_dub.flac` ->
+    `<base>_dub_events.jsonl`, so a timing question is answered offline from
+    the saved log instead of a ~40-min re-dub. A re-dub overwrites it."""
+    return os.path.splitext(out)[0] + "_events.jsonl"
+
+
+def build_transcripts(
+    en: str, en_timed: list, sk: str, sk_timed: list, total_ms: int
+) -> dict:
+    """The EN/SK transcripts JSON (the D3 #182 subtitle source) in the shape
+    `dabing::subtitles::DubTranscripts` reads: ONE chunk covering the whole video
+    (`at_ms` 0, `tempo` 1.0 — the output is not stretched), so the EN and SK
+    fragment times are video-timeline times. `en` / `sk` are the joined texts
+    (kept for readability); the builder reads `en_timed` / `sk_timed`. Pure —
+    unit-tested."""
     return {
         "engine": "gemini-live-translate",
         "target_lang": TARGET_LANG,
         "chunks": [
             {
-                "index": r["index"],
-                "start_ms": r["chunk_start_ms"],
-                "end_ms": r["chunk_end_ms"],
-                # Video-timeline placement (D3 #182): `at_ms` = where the chunk's
-                # output lands, `tempo` = the atempo the mix applied. Read from the
-                # SAME per-chunk result the mix uses, so cached/resumed chunks are
-                # included with no re-synthesis.
-                "at_ms": r["at_ms"],
-                "tempo": r["tempo"],
-                "en": r["transcript_en"],
-                "sk": r["transcript_sk"],
-                "sk_timed": r["sk_timed"],
+                "index": 0,
+                "start_ms": 0,
+                "end_ms": total_ms,
+                "at_ms": 0,
+                "tempo": 1.0,
+                "en": en,
+                "en_timed": en_timed,
+                "sk": sk,
+                "sk_timed": sk_timed,
             }
-            for r in results
         ],
     }
+
+
+def wav_header(n_samples: int, sr: int) -> bytes:
+    """The 44-byte header of a 16-bit mono PCM WAV of `n_samples` samples."""
+    data = n_samples * 2
+    return (
+        b"RIFF"
+        + struct.pack("<I", 36 + data)
+        + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 1, 1, sr, sr * 2, 2, 16)
+        + b"data"
+        + struct.pack("<I", data)
+    )
+
+
+def stream_filter() -> str:
+    """The `filter_complex` for the ONE placed output WAV (input 0): resample to
+    48 kHz into `[mix]`, which the round-F loudnorm passes read; `-ac 2` on the
+    output upmixes the mono stream to stereo."""
+    return f"[0:a]aresample={FINAL_SR}[mix]"
+
+
+def legacy_work_files(names: list[str]) -> list[str]:
+    """The superseded leftovers among a work dir's `names`: the round C-E2
+    per-chunk resume cache and the pre-H4 `events.jsonl`."""
+    return sorted(
+        n for n in names if n.startswith(LEGACY_PREFIXES) or n in LEGACY_NAMES
+    )
 
 
 # ── I/O helpers ─────────────────────────────────────────────────────────────────
@@ -299,525 +300,367 @@ def _log(msg: str) -> None:
     sys.stderr.flush()
 
 
-def _run(args: list[str]) -> None:
-    r = subprocess.run(args, capture_output=True, text=True)
+def _run_stderr(args: list[str]) -> str:
+    """Run `args`; return its stderr (ffmpeg prints the loudnorm JSON there).
+    Fails loudly on a non-zero exit."""
+    r = subprocess.run(
+        args, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
     if r.returncode != 0:
         raise RuntimeError(
             f"command failed ({args[0]}, rc={r.returncode}): {r.stderr[-800:]}"
         )
+    return r.stderr
 
 
 def _ffmpeg() -> str:
     return os.environ.get("DUB_FFMPEG", "ffmpeg")
 
 
-def _write_wav_from_pcm(pcm: bytes, sr: int, path: str) -> None:
-    with wave.open(path, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(sr)
-        w.writeframes(pcm)
-
-
 def _heartbeat(work_dir: str) -> None:
     try:
         with open(os.path.join(work_dir, "heartbeat"), "w") as f:
             f.write(str(time.time()))
-    except OSError:
-        pass
+    except OSError as e:  # the stall timeout will say so if this persists
+        _log(f"heartbeat write failed: {e}")
 
 
-def _pcm_window_medians(pcm: bytes, sr: int) -> list:
-    """5-s-window f0 medians of 16-bit s16le mono PCM bytes at `sr`, via numpy +
-    the dependency-free autocorrelation path of `dub_voice_check` (no soundfile,
-    no librosa). `[]` for empty/degenerate input. Used for the in-memory INPUT
-    PCM and the output WAV samples alike."""
+def _decode_input(audio: str) -> bytes:
+    r = subprocess.run(decode_args(_ffmpeg(), audio), capture_output=True)
+    if r.returncode != 0:
+        tail = r.stderr.decode("utf-8", "replace")[-800:]
+        raise RuntimeError(f"ffmpeg decode of {audio} failed ({r.returncode}): {tail}")
+    if not r.stdout:
+        raise RuntimeError(f"ffmpeg decoded no audio from {audio}")
+    return r.stdout
+
+
+def _remove_legacy_work_files(work_dir: str) -> None:
+    """Delete the superseded work files (`legacy_work_files`), if any."""
+    stale = legacy_work_files(os.listdir(work_dir))
+    for name in stale:
+        os.remove(os.path.join(work_dir, name))
+    if stale:
+        _log(f"removed {len(stale)} superseded work files from {work_dir}")
+
+
+def render_placed_wav(
+    raw_path: str,
+    chunks: list,
+    starts: list[int | None],
+    total_samples: int,
+    wav_path: str,
+) -> None:
+    """Write the placed output as a 24 kHz mono 16-bit WAV of `total_samples`:
+    chunk `i` (read from `raw_path` at its `.offset`) is ADDED at `starts[i]`
+    (overlapping connections sum, clipped to int16; a None start = a dropped
+    chunk); samples past the end are dropped. Memory-light: the WAV body is a
+    memmap, the raw file is read per chunk."""
     import numpy as np
 
-    import dub_voice_check as dvc
-
-    if not pcm or sr <= 0:
-        return []
-    x = np.frombuffer(pcm, dtype="<i2").astype("float32") / 32768.0
-    return dvc.window_medians(x, sr, VOICE_WINDOW_S, use_librosa=False)
-
-
-def _wav_window_medians(wav_path: str) -> list:
-    """5-s-window f0 medians of a 16-bit mono WAV (the trimmed dub output), read
-    via `wave` (no soundfile). `[]` when it is not 16-bit mono."""
-    with wave.open(wav_path, "rb") as w:
-        sr = w.getframerate()
-        if w.getsampwidth() != 2 or w.getnchannels() != 1 or sr <= 0:
-            return []
-        raw = w.readframes(w.getnframes())
-    return _pcm_window_medians(raw, sr)
-
-
-def _render_and_trim(
-    pcm: bytes, pace: float, work_dir: str, voice: str, raw_wav: str, out_wav: str
-) -> tuple[str, str, list]:
-    """Translate one chunk's `pcm` to a trailing-silence-trimmed WAV at `out_wav`;
-    return `(transcript_en, transcript_sk, sk_timed)`. Writes then removes the raw
-    24 kHz WAV. Shared by the first synthesis and the round-E re-synthesis."""
-    out_pcm, en, sk, sk_timed = _translate_pcm(pcm, pace, work_dir, voice)
-    _write_wav_from_pcm(out_pcm, OUTPUT_SR, raw_wav)
-    _run(
-        [
-            _ffmpeg(),
-            "-hide_banner",
-            "-nostdin",
-            "-y",
-            "-i",
-            raw_wav,
-            "-af",
-            trim_silence_af(),
-            out_wav,
-        ]
+    header = wav_header(total_samples, OUTPUT_SR)
+    with open(wav_path, "wb") as f:
+        f.write(header)
+        f.truncate(len(header) + total_samples * 2)  # zero-filled body
+    if total_samples == 0:
+        return
+    out = np.memmap(
+        wav_path, dtype="<i2", mode="r+", offset=len(header), shape=(total_samples,)
     )
     try:
-        os.remove(raw_wav)
-    except OSError:
-        pass
-    return en, sk, sk_timed
+        with open(raw_path, "rb") as raw:
+            for c, pos in zip(chunks, starts):
+                if pos is None:
+                    continue
+                raw.seek(c.offset)
+                data = np.frombuffer(raw.read(c.n_bytes), dtype="<i2")
+                end = min(pos + data.size, total_samples)
+                if end <= pos:
+                    continue
+                acc = out[pos:end].astype(np.int32) + data[: end - pos]
+                out[pos:end] = np.clip(acc, -32768, 32767).astype("<i2")
+        out.flush()
+    finally:
+        # Unmap even on a failure: Windows cannot delete a mapped file, and the
+        # cleanup of a failed run must be able to remove it.
+        del out
 
 
-def _score_candidate(
-    out_medians: list,
-    in_medians: list,
-    out_baseline: float | None,
-    in_baseline: float | None,
-    voice: str,
-) -> tuple[int, int, bool]:
-    """(#184 round E2) Score one synthesized take: `(drifted, voiced, is_drifted)`.
-    With a running baseline it is the window-drift against that baseline
-    (`chunk_voice_drift` + `_chunk_is_drifted`). For the SEED take (no baseline
-    yet) it is the band check: an in-band / unknown-voice seed scores `(0, voiced,
-    False)`; an out-of-band seed scores `(voiced, voiced, True)` so a re-synth that
-    lands in band (0 drifted) is kept over it. Pure-ish — calls chunk_voice_drift."""
-    voiced_meds = [m for m in out_medians if m > 0]
-    voiced = len(voiced_meds)
-    if out_baseline and out_baseline > 0:
-        drifted, voiced = chunk_voice_drift(
-            out_medians, in_medians, out_baseline, in_baseline
-        )
-        return drifted, voiced, _chunk_is_drifted(drifted, voiced)
-    # Seed take (no running baseline yet): check the median against the voice band.
-    med = median(voiced_meds) if voiced_meds else 0.0
-    if seed_median_ok(med, voice) is False:
-        return voiced, voiced, True  # whole seed is the wrong voice
-    return 0, voiced, False
+def _assemble_dub(audio: str, wav: str, out: str, work_dir: str) -> dict:
+    """#184 round F: assemble the dub loudness-matched to the audio it translates
+    (`audio`, the child's `--audio`):
 
+    1. measure `audio`'s integrated loudness → `dl.loudness_target` (clamped);
+    2. analyse the placed output against that target (loudnorm pass 1, to null);
+    3. write the 48 kHz stereo dub with the LINEAR second pass
+       (`dl.build_loudnorm_second_pass`) to a PARTIAL file, promoted over `out`
+       (`wr.replace_file`, a POSIX rename that works while SongPlayer holds `out`
+       open) only once ffmpeg succeeded AND reported its loudness — a failed
+       rebuild never destroys the previous good dub.
 
-def _apply_voice_band_guard(
-    idx: int,
-    pcm: bytes,
-    pace: float,
-    work_dir: str,
-    voice: str,
-    wav_path: str,
-    out_baseline: float | None,
-    in_baseline: float | None,
-    en: str,
-    sk: str,
-    sk_timed: list,
-) -> tuple:
-    """#184 round E2: scan the just-synthesized chunk `wav_path` against the
-    RUNNING pinned-voice output baseline + source input baseline (the seed chunk,
-    with no baseline yet, against the voice's expected band) and re-synthesize up
-    to `VOICE_RESYNTH_ATTEMPTS` times (new session, same pin) when it drifts,
-    keeping the take with the fewest true-drift windows. Returns
-    `(voice_band_ok, drifted, voiced, out_medians, in_medians, en, sk, sk_timed)`
-    of the kept take — the medians so the caller can feed the running baselines
-    (only when accepted; a still-drifted chunk must NOT poison them).
-
-    BEST-EFFORT: this decorates the dub, it must never FAIL it. Any scan failure
-    (numpy/dub_voice_check import, a truncated/unreadable output wav) is caught,
-    logged, and falls through with `voice_band_ok=None`, empty medians (no baseline
-    update) and no re-synthesis — the dub is shipped as-is (round-E rule)."""
+    Heartbeats before each full-length pass. Returns the loudness stats (also
+    written, JSON-safe, to `<work_dir>/loudness.json` as box-side evidence). Any
+    ffmpeg failure or unparseable measurement raises — the dub fails loudly
+    rather than shipping at an unknown level."""
+    ff = _ffmpeg()
+    part = dl.partial_out_path(out)
+    # A child hard-killed mid final pass (stall timeout, server exit) never ran
+    # the cleanup below — clear its leftover partial before anything else.
+    if os.path.exists(part):
+        _log(f"dub loudness: removing a stale partial {part} (an earlier run died)")
+        os.remove(part)
+    _heartbeat(work_dir)
+    source = dl.parse_loudnorm_json(_run_stderr(dl.loudness_measure_args(ff, audio)))
+    target = dl.loudness_target(source["input_i"])
+    mix_filter = stream_filter()
+    analysis = dl.loudnorm_analysis_filter(target)
+    _heartbeat(work_dir)
+    mix = dl.parse_loudnorm_json(
+        _run_stderr(dl.assembly_args(ff, [wav], mix_filter, analysis, None, FINAL_SR))
+    )
+    second = dl.build_loudnorm_second_pass(mix, target)
+    _heartbeat(work_dir)
     try:
-        in_medians = _pcm_window_medians(pcm, INPUT_SR)
-        out_medians = _wav_window_medians(wav_path)
-        drifted, voiced, is_drifted = _score_candidate(
-            out_medians, in_medians, out_baseline, in_baseline, voice
+        applied = dl.parse_loudnorm_json(
+            _run_stderr(dl.assembly_args(ff, [wav], mix_filter, second, part, FINAL_SR))
         )
-        attempt = 0
-        while is_drifted and attempt < VOICE_RESYNTH_ATTEMPTS:
-            attempt += 1
-            _log(
-                f"chunk {idx}: voice drift {drifted}/{voiced} windows -> "
-                f"re-synth {attempt}/{VOICE_RESYNTH_ATTEMPTS}"
-            )
-            cand_raw = os.path.join(work_dir, f"chunk_{idx}.cand.raw.wav")
-            cand_wav = os.path.join(work_dir, f"chunk_{idx}.cand.wav")
-            en2, sk2, sk_timed2 = _render_and_trim(
-                pcm, pace, work_dir, voice, cand_raw, cand_wav
-            )
-            out2 = _wav_window_medians(cand_wav)
-            drifted2, voiced2, is_drifted2 = _score_candidate(
-                out2, in_medians, out_baseline, in_baseline, voice
-            )
-            if drifted2 < drifted:
-                os.replace(cand_wav, wav_path)
-                en, sk, sk_timed = en2, sk2, sk_timed2
-                out_medians, drifted, voiced, is_drifted = (
-                    out2,
-                    drifted2,
-                    voiced2,
-                    is_drifted2,
-                )
-                _log(
-                    f"chunk {idx}: kept re-synth candidate ({drifted}/{voiced} drifted)"
-                )
-            else:
-                try:
-                    os.remove(cand_wav)
-                except OSError:
-                    pass
-                _log(
-                    f"chunk {idx}: kept previous take ({drifted}/{voiced} drifted; "
-                    f"candidate {drifted2}/{voiced2})"
-                )
-        voice_band_ok = not is_drifted
-        # The medians are persisted for transparency + baseline rebuild on resume;
-        # `baseline_from_meta` excludes a still-drifted chunk (voice_band_ok False)
-        # from the running baselines, so a drifted chunk never poisons them.
-        return (
-            voice_band_ok,
-            drifted,
-            voiced,
-            out_medians,
-            in_medians,
-            en,
-            sk,
-            sk_timed,
+        # NOT os.replace: on Windows that is MoveFileExW, which fails with
+        # WinError 5 while SongPlayer holds `out` open (#184 round F2).
+        wr.replace_file(part, out)
+    except BaseException:
+        # The previous good dub stays; drop the half-written partial, then
+        # re-raise the ORIGINAL failure (a cleanup error is logged, not raised).
+        if os.path.exists(part):
+            try:
+                os.remove(part)
+            except OSError as e:
+                _log(f"dub loudness: could not remove partial {part}: {e}")
+        raise
+    stats = {
+        "source_i": source["input_i"],
+        "target_i": target,
+        "mix_i": mix["input_i"],
+        "output_i": applied.get("output_i"),
+        "normalization_type": applied.get("normalization_type"),
+    }
+    if stats["normalization_type"] != "linear":
+        _log(
+            "dub loudness: WARNING loudnorm fell back to "
+            f"{stats['normalization_type']} mode (the linear gain would breach "
+            f"TP {dl.DUB_TRUE_PEAK} or the mix LRA exceeds {dl.DUB_LRA})"
         )
-    except Exception as e:  # best-effort guard — a scan failure must NOT fail the dub
-        _log(f"chunk {idx}: voice-band guard skipped ({type(e).__name__}: {e})")
-        return (None, 0, 0, [], [], en, sk, sk_timed)
+    with open(os.path.join(work_dir, "loudness.json"), "w", encoding="utf-8") as f:
+        json.dump(dl.json_safe_stats(stats), f, allow_nan=False)
+    _log(
+        f"dub loudness: source {stats['source_i']:.2f} LUFS -> target "
+        f"{target:.2f}; mix {stats['mix_i']:.2f} -> output {stats['output_i']} "
+        f"({stats['normalization_type']})"
+    )
+    return stats
 
 
-# ── the Live translation of one chunk ───────────────────────────────────────────
+# ── the Live session (the real connection) ──────────────────────────────────────
 
 
-def _translate_pcm(
-    pcm: bytes, pace: float, work_dir: str, voice: str
-) -> tuple[bytes, str, str, list]:
-    """Stream 16 kHz mono s16le `pcm` into the Live API; return
-    (out_pcm_24k, transcript_en, transcript_sk, sk_timed). `sk_timed` is a coarse
-    list of `{t_ms, text}` stamped by the output-audio position at arrival — the D3
-    subtitle seed. `voice` PINS the output voice via `speech_config` so a video's
-    dub stays one voice (#184 round C — the probe confirmed the translate model
-    accepts `speech_config` and renders it stably). Heartbeats into `work_dir` so
-    the Rust stall timeout sees a live stream even mid-chunk."""
-    import asyncio
-
+def _run_session(
+    frames: list[bytes],
+    model: str,
+    voice: str | None,
+    work_dir: str,
+    sink: dls.FileSink,
+    events: dls.EventLog,
+) -> dls.SessionState:
     import google.genai as genai
     from google.genai import types
 
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         raise RuntimeError("GEMINI_API_KEY not set")
+    client = genai.Client(api_key=key)
 
-    async def run() -> tuple[bytes, str, str, list]:
-        client = genai.Client(api_key=key, http_options={"api_version": "v1alpha"})
-        config = types.LiveConnectConfig(
-            response_modalities=["AUDIO"],
-            input_audio_transcription=types.AudioTranscriptionConfig(),
-            output_audio_transcription=types.AudioTranscriptionConfig(),
-            translation_config=types.TranslationConfig(
-                target_language_code=TARGET_LANG,
-                echo_target_language=True,
-            ),
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice)
-                )
-            ),
-        )
-        out = bytearray()
-        en_parts: list[str] = []
-        sk_parts: list[str] = []
-        sk_timed: list = []
-        last_hb = time.monotonic()
-        t0 = time.monotonic()
-        deadline = t0 + drain_deadline_s(len(pcm))
-        # Sleep between 100 ms chunks, divided by the pacing factor (2x = faster).
-        chunk_sleep = 0.1 / max(0.5, pace)
-
-        async with client.aio.live.connect(model=MODEL, config=config) as session:
-
-            async def send() -> None:
-                for i in range(0, len(pcm), CHUNK_BYTES):
-                    await session.send_realtime_input(
-                        audio=types.Blob(
-                            data=bytes(pcm[i : i + CHUNK_BYTES]),
-                            mime_type=f"audio/pcm;rate={INPUT_SR}",
-                        )
-                    )
-                    await asyncio.sleep(chunk_sleep)
-                await session.send_realtime_input(audio_stream_end=True)
-
-            send_task = asyncio.create_task(send())
-            gen = session.receive().__aiter__()
-            while time.monotonic() < deadline:
-                if time.monotonic() - last_hb > HEARTBEAT_EVERY_S:
-                    _heartbeat(work_dir)
-                    last_hb = time.monotonic()
-                try:
-                    resp = await asyncio.wait_for(gen.__anext__(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    continue
-                except StopAsyncIteration:
-                    break
-                data = getattr(resp, "data", None)
-                if data:
-                    out.extend(data)
-                sc = getattr(resp, "server_content", None)
-                if sc is not None:
-                    iat = getattr(sc, "input_transcription", None)
-                    if iat is not None and getattr(iat, "text", None):
-                        en_parts.append(iat.text)
-                    oat = getattr(sc, "output_transcription", None)
-                    if oat is not None and getattr(oat, "text", None):
-                        sk_parts.append(oat.text)
-                        sk_timed.append(
-                            {
-                                "t_ms": pcm_pos_to_ms(len(out), OUTPUT_SR),
-                                "text": oat.text,
-                            }
-                        )
-                    if getattr(sc, "turn_complete", False) and send_task.done():
-                        break
-            if not send_task.done():
-                send_task.cancel()
-                try:
-                    await send_task
-                except asyncio.CancelledError:
-                    # airuleset:script-ok awaiting our own just-cancelled sender is
-                    # the standard clean-teardown idiom; nothing to log.
-                    pass
-        return bytes(out), "".join(en_parts), "".join(sk_parts), sk_timed
-
-    return asyncio.run(run())
-
-
-def _process_chunk(
-    idx: int,
-    chunk: dict,
-    next_start: int | None,
-    audio: str,
-    work_dir: str,
-    pace: float,
-    voice: str,
-    out_baseline: float | None = None,
-    in_baseline: float | None = None,
-) -> dict:
-    """Translate one chunk (resumable): returns the chunk result dict. Reuses an
-    existing `chunk_N.json` + `chunk_N.wav` on a re-run ONLY when it was made with
-    the SAME `voice` and the SAME chunk boundaries (#184 round C + E — a chunk
-    recorded under another voice, a legacy chunk with no `voice`, or a chunk from
-    an older chunk plan is re-synthesized so the whole dub is one voice laid at
-    the right offsets). `out_baseline` / `in_baseline` (#184 round E2) are the
-    running pinned-voice / source medians of the chunks accepted so far, passed to
-    the voice-band guard; the seed chunk gets `None`."""
-    start_ms = int(chunk["start_ms"])
-    end_ms = int(chunk["end_ms"])
-    result_path = os.path.join(work_dir, f"chunk_{idx}.json")
-    wav_path = os.path.join(work_dir, f"chunk_{idx}.wav")
-    if os.path.exists(result_path) and os.path.exists(wav_path):
-        with open(result_path, encoding="utf-8") as f:
-            meta = json.load(f)
-        if chunk_reusable(meta, voice, start_ms, end_ms):
-            _log(f"chunk {idx}: resume (already done, voice {voice})")
-            return meta
-        _log(
-            f"chunk {idx}: re-synthesizing (voice {voice}, {start_ms}-{end_ms} ms; "
-            f"cached {meta.get('voice')}, {meta.get('chunk_start_ms')}-{meta.get('chunk_end_ms')} ms)"
+    def connect(cfg: dict):
+        return client.aio.live.connect(
+            model=model, config=types.LiveConnectConfig(**cfg)
         )
 
-    chunk_len = end_ms - start_ms
-    _heartbeat(work_dir)
+    def make_blob(frame: bytes):
+        return types.Blob(data=frame, mime_type=f"audio/pcm;rate={INPUT_SR}")
 
-    # 1. Cut + resample the chunk to the Live-API input format.
-    pcm_path = os.path.join(work_dir, f"chunk_{idx}.in.pcm")
-    _run(slice_resample_args(_ffmpeg(), audio, start_ms, end_ms, pcm_path))
-    with open(pcm_path, "rb") as f:
-        pcm = f.read()
+    last_hb = [0.0]
 
-    # 2. Translate (audio->audio) and trim the trailing silence.
-    raw_wav = os.path.join(work_dir, f"chunk_{idx}.raw.wav")
-    en, sk, sk_timed = _render_and_trim(pcm, pace, work_dir, voice, raw_wav, wav_path)
+    def on_progress() -> None:
+        # Only called when frames or output moved: a stuck session goes stale
+        # for the Rust stall timeout instead of looking alive.
+        if time.monotonic() - last_hb[0] >= HEARTBEAT_EVERY_S:
+            _heartbeat(work_dir)
+            last_hb[0] = time.monotonic()
 
-    # #184 round E2: scan the synthesized chunk against the running pinned-voice /
-    # source baselines (seed chunk against the voice band) and re-synthesize up to
-    # 2 times if it drifts — best-effort (a scan failure never fails the dub,
-    # `voice_band_ok` then comes back None). `out_medians`/`in_medians` feed the
-    # running baselines (only when accepted; see `baseline_from_meta`).
-    voice_band_ok, drifted, voiced, out_medians, in_medians, en, sk, sk_timed = (
-        _apply_voice_band_guard(
-            idx,
-            pcm,
-            pace,
-            work_dir,
-            voice,
-            wav_path,
-            out_baseline,
-            in_baseline,
-            en,
-            sk,
-            sk_timed,
-        )
+    session = dls.ContinuousSession(
+        frames,
+        connect,
+        make_blob,
+        dls.SessionOptions(target_lang=TARGET_LANG, voice=voice),
+        events,
+        sink,
+        secret=key,
+        log=_log,
+        on_progress=on_progress,
     )
+    return asyncio.run(session.run())
 
-    # 3. Measured output length + placement.
-    out_len_ms = _wav_duration_ms(wav_path)
-    _, tempo = placement(start_ms, chunk_len, out_len_ms, next_start)
 
-    result = {
-        "index": idx,
-        "chunk_start_ms": start_ms,
-        "chunk_end_ms": end_ms,
-        "out_len_ms": out_len_ms,
-        "next_start_ms": next_start,
-        "tempo": round(tempo, 4),
-        "at_ms": start_ms,
-        # #184 round C: record the voice so a later re-run reuses this chunk only
-        # when the requested voice is unchanged (see `chunk_reusable`).
-        "voice": voice,
-        # #184 round E2: the per-chunk voice-band verdict + counts, plus the
-        # output/input 5-s medians so a resumed run rebuilds the running baselines
-        # from the reused chunks (`baseline_from_meta`).
-        "voice_band_ok": voice_band_ok,
-        "voice_drifted_windows": drifted,
-        "voice_windows": voiced,
-        "voice_medians": out_medians,
-        "voice_in_medians": in_medians,
-        "transcript_en": en,
-        "transcript_sk": sk,
-        "sk_timed": sk_timed,
-    }
-    with open(result_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False)
-    # Clean the big input PCM (keep chunk_N.wav + .json for resume/mix).
-    try:
-        os.remove(pcm_path)
-    except OSError:
-        pass
+def _remove_intermediates(*paths: str) -> None:
+    """Delete the raw + placed intermediates (~100 MB each for a 36-min talk);
+    `session_summary.json` / `loudness.json` and the event log next to the dub
+    (`events_path_for`) stay as evidence.
+    A file that cannot be removed is logged, never raised: this runs in a
+    `finally`, and its error must not replace the run's real one."""
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        try:
+            os.remove(path)
+        except OSError as e:
+            _log(f"could not remove the intermediate {path}: {e}")
+
+
+def _translate(args: argparse.Namespace, raw_path: str, wav_path: str) -> dict:
+    """Decode → the ONE continuous session → place → assemble → transcripts.
+    Returns the session summary (the stdout `session` object)."""
+    voice = dls.voice_for_config(args.voice)
     _log(
-        f"chunk {idx}: {chunk_len} ms in -> {out_len_ms} ms out, tempo {tempo:.3f}, "
-        f"voice_band_ok={voice_band_ok} ({drifted}/{voiced})"
+        f"dub: model {args.model}, voice {voice or 'speaker (no speech_config)'}, "
+        f"input {args.audio}"
     )
-    return result
+    _heartbeat(args.work_dir)
+    pcm = _decode_input(args.audio)
+    input_s = len(pcm) / 2 / INPUT_SR
+    frames = dls.pcm_frames(pcm)
+    del pcm
+    onset = dls.first_voiced_frame(frames)
+    onset_ms = None if onset is None else int(round(onset * dls.FRAME_S * 1000))
 
+    # The event log is kept next to the dub (#184 H4). No event carries a
+    # secret: the key and the connect config are never logged, errors pass
+    # through `dls.redact`, resumption handles only as `handle_present`.
+    events = dls.EventLog(events_path_for(args.out))
+    sink = dls.FileSink(raw_path)
+    try:
+        state = _run_session(frames, args.model, voice, args.work_dir, sink, events)
+    finally:
+        sink.close()
+        events.close()
+    summary = dls.build_summary(state, events.events, input_s)
 
-def _wav_duration_ms(path: str) -> int:
-    with wave.open(path, "rb") as w:
-        frames = w.getnframes()
-        rate = w.getframerate()
-    if rate <= 0:
-        return 0
-    return int(round(frames / rate * 1000))
+    voiced = [c.arrival_s for c in state.chunks if c.voiced]
+    measured = measure_latency_ms(min(voiced) if voiced else None, state.t0_s, onset_ms)
+    if measured is None or state.t0_s is None:
+        raise RuntimeError(
+            f"the Live session produced no voiced output ({summary['output_audio_s']} s)"
+        )
+    latency_ms = clamp_latency_ms(measured)
+    en_latency, en_measured = en_latency_ms(state.input_parts, state.t0_s, onset_ms)
+    summary.update(
+        latency_ms=latency_ms,
+        measured_latency_ms=measured,
+        en_latency_ms=en_latency,
+        en_measured_latency_ms=en_measured,
+        input_onset_ms=onset_ms,
+    )
+
+    # Place the ONE continuous output stream on the video timeline and write it.
+    starts = place_output(state.chunks, state.t0_s, latency_ms)
+    summary["dropped_silence_s"] = round(
+        sum(c.n_bytes for c, s in zip(state.chunks, starts) if s is None)
+        / 2
+        / OUTPUT_SR,
+        3,
+    )
+    with open(
+        os.path.join(args.work_dir, "session_summary.json"), "w", encoding="utf-8"
+    ) as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+    _log(
+        f"dub session: connections {summary['connections']}, reconnects "
+        f"{summary['reconnects']}, output/input {summary['output_to_input_ratio']}, "
+        f"max voiced gap {summary['max_voiced_gap_s']}s, latency {latency_ms} ms "
+        f"(measured {measured} ms, input onset {onset_ms} ms), EN latency "
+        f"{en_latency} ms (measured {en_measured} ms), dropped silence "
+        f"{summary['dropped_silence_s']}s, drain {summary['drain_end_reason']}"
+    )
+    input_samples = int(round(input_s * OUTPUT_SR))
+    ends = [s + c.n_bytes // 2 for s, c in zip(starts, state.chunks) if s is not None]
+    total = max([input_samples] + ends)
+    _heartbeat(args.work_dir)
+    render_placed_wav(raw_path, state.chunks, starts, total, wav_path)
+
+    # #184 round F (owner verdict 2026-09-23, #184 comment 5793796815 — "rovnaké
+    # pomery = rovnaká hlasitosť"): normalized to the MEASURED loudness of the
+    # audio it translates (clamped -24..-10 LUFS), two-pass LINEAR loudnorm.
+    _assemble_dub(args.audio, wav_path, args.out, args.work_dir)
+
+    # Transcripts JSON for D3: one chunk on the video timeline, the overlap's
+    # two connections in connection order (never interleaved). The EN is timed
+    # by its own input-transcription arrival (#184 H3) minus its own measured
+    # latency (#184 H4).
+    transcripts = build_transcripts(
+        joined_by_connection(state.input_parts),
+        en_timed_from(state.input_parts, state.t0_s, en_latency),
+        joined_by_connection(state.output_parts),
+        sk_timed_from(state.output_parts, state.t0_s, latency_ms),
+        int(round(input_s * 1000)),
+    )
+    with open(args.transcripts, "w", encoding="utf-8") as f:
+        json.dump(transcripts, f, ensure_ascii=False)
+    return summary
 
 
 def cmd_live_translate(args: argparse.Namespace) -> None:
     os.makedirs(args.work_dir, exist_ok=True)
-    with open(args.chunk_plan, encoding="utf-8") as f:
-        chunks = json.load(f)
-    if not chunks:
-        raise RuntimeError("empty chunk plan")
-
-    # #184 round E2: the running PINNED-VOICE (output) + SOURCE (input) baselines,
-    # accumulated in chunk order from the voiced medians of the chunks ACCEPTED so
-    # far. The first chunk seeds them (checked against the voice band); every later
-    # chunk's guard measures drift against the median of what accumulated BEFORE it.
-    accepted_out: list = []
-    accepted_in: list = []
-    results = []
-    for i, chunk in enumerate(chunks):
-        next_start = int(chunks[i + 1]["start_ms"]) if i + 1 < len(chunks) else None
-        out_baseline = median(accepted_out) if accepted_out else None
-        in_baseline = median(accepted_in) if accepted_in else None
-        result = _process_chunk(
-            i,
-            chunk,
-            next_start,
-            args.audio,
-            args.work_dir,
-            args.pace,
-            args.voice,
-            out_baseline,
-            in_baseline,
-        )
-        results.append(result)
-        # Feed the running baselines with this chunk's medians — but only when it
-        # was ACCEPTED (a still-drifted or legacy/guard-skipped chunk contributes
-        # nothing, so it never poisons the pinned-voice baseline). Resume-safe: a
-        # reused chunk contributes its persisted medians the same way.
-        fed_out, fed_in = baseline_from_meta(result)
-        accepted_out.extend(fed_out)
-        accepted_in.extend(fed_in)
-
-    # Assemble the dub on the video timeline: place each chunk at its at_ms with
-    # its atempo, mix, 48 kHz stereo, loudnorm -16 (owner-approved dub-only mix).
-    placements = [(float(r["tempo"]), int(r["at_ms"])) for r in results]
-    wavs = [os.path.join(args.work_dir, f"chunk_{r['index']}.wav") for r in results]
-    filt = build_mix_filter(placements)
-    mix_args = [_ffmpeg(), "-hide_banner", "-nostdin", "-y"]
-    for w in wavs:
-        mix_args += ["-i", w]
-    mix_args += [
-        "-filter_complex",
-        f"{filt};[mix]loudnorm=I=-16:TP=-1.5:LRA=11[out]",
-        "-map",
-        "[out]",
-        "-ar",
-        str(FINAL_SR),
-        "-ac",
-        "2",
-        args.out,
-    ]
-    _run(mix_args)
-
-    # Transcripts JSON for D3 (EN + SK, per-chunk with timeline placement).
-    transcripts = build_transcripts(results)
-    with open(args.transcripts, "w", encoding="utf-8") as f:
-        json.dump(transcripts, f, ensure_ascii=False)
+    _remove_legacy_work_files(args.work_dir)
+    raw_path = os.path.join(args.work_dir, RAW_OUTPUT)
+    wav_path = os.path.join(args.work_dir, PLACED_WAV)
+    try:
+        summary = _translate(args, raw_path, wav_path)
+    finally:
+        _remove_intermediates(raw_path, wav_path)
 
     # The summary JSON is the ONLY thing on stdout (the Rust worker parses it).
-    summary = {
-        "out_path": args.out,
-        "transcripts_path": args.transcripts,
-        "chunks": [
+    sys.stdout.write(
+        json.dumps(
             {
-                "index": r["index"],
-                "chunk_start_ms": r["chunk_start_ms"],
-                "chunk_end_ms": r["chunk_end_ms"],
-                "out_len_ms": r["out_len_ms"],
-                "next_start_ms": r["next_start_ms"],
-                "tempo": r["tempo"],
-            }
-            for r in results
-        ],
-    }
-    sys.stdout.write(json.dumps(summary))
+                "out_path": args.out,
+                "transcripts_path": args.transcripts,
+                "session": summary,
+            },
+            ensure_ascii=True,
+        )
+        + "\n"
+    )
     sys.stdout.flush()
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Slovak dub synthesis (Gemini Live Translate)"
+        description="Slovak dub synthesis (Gemini Live Translate, one session)"
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
     lt = sub.add_parser("live-translate", help="translate a video's audio to a SK dub")
-    lt.add_argument("--audio", required=True)
+    lt.add_argument("--audio", required=True, help="the vocals stem or the original")
     lt.add_argument("--out", required=True)
     lt.add_argument("--transcripts", required=True)
-    lt.add_argument("--chunk-plan", dest="chunk_plan", required=True)
     lt.add_argument("--work-dir", dest="work_dir", required=True)
-    lt.add_argument("--pace", type=float, default=1.0)
-    lt.add_argument("--voice", default=DEFAULT_VOICE)
-    args = parser.parse_args()
+    lt.add_argument("--model", default=MODEL)
+    lt.add_argument(
+        "--voice",
+        default=dls.SPEAKER_VOICE,
+        help="'speaker' (the speaker's own voice, no speech_config) or a prebuilt name",
+    )
+    return parser.parse_args(argv)
 
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
     try:
         if args.cmd == "live-translate":
             cmd_live_translate(args)
@@ -826,10 +669,7 @@ def main() -> None:
     except Exception as e:  # loud failure: JSON error on stderr + non-zero exit.
         # Defensive: never let the key leak into the logged error tail, even if an
         # SDK exception embedded it.
-        msg = str(e)
-        key = os.environ.get("GEMINI_API_KEY")
-        if key:
-            msg = msg.replace(key, "<redacted>")
+        msg = dls.redact(f"{type(e).__name__}: {e}", os.environ.get("GEMINI_API_KEY"))
         sys.stderr.write(json.dumps({"error": msg}) + "\n")
         sys.exit(1)
 

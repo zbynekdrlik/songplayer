@@ -207,8 +207,10 @@ const settings = {
   gemini_api_key: "",
   gemini_model: "gemini-2.5-flash",
   cache_dir: "./cache",
-  // #184 round C: the pinned dub voice (Nastavenia "Hlas dabingu" select).
-  dub_voice: "Charon",
+  // #184 round H step 2: the dub voice (Nastavenia "Hlas dabingu" select) —
+  // `speaker` = the speaker's own voice. `dub_model` is deliberately absent so
+  // the form shows its default.
+  dub_voice: "speaker",
 };
 
 const resolumeHosts = [];
@@ -727,6 +729,8 @@ let ndiHealth = [
     // #201 round 2: the raw transport the API now exposes (default from state).
     transport: "Playing",
     connections: 2,
+    // #168 r6b: decoder source fps, additive; the UI ignores it (30-fps fixture).
+    source_fps: 30,
     lock_state: "LOCKED",
     lock_reason: "locked",
     clock: { is_locked: true, mode: "LOCK", offset_ns: 1200, clock_ok: true },
@@ -737,8 +741,9 @@ let ndiHealth = [
       repeats: 0,
       resyncs: 0,
       lag_slots: 0,
+      av_align_err_ms: 0.4,
     },
-    audio: { residual_ppm: 1.2, underruns: 0 },
+    audio: { underruns: 0 },
   },
   {
     ndi_name: "SP-background",
@@ -746,6 +751,7 @@ let ndiHealth = [
     state: "Playing",
     transport: "Playing",
     connections: 0,
+    source_fps: 30,
     lock_state: "DEGRADED",
     lock_reason: "no receiver",
     clock: { is_locked: true, mode: "LOCK", offset_ns: 950, clock_ok: true },
@@ -756,8 +762,9 @@ let ndiHealth = [
       repeats: 0,
       resyncs: 0,
       lag_slots: 0,
+      av_align_err_ms: -0.6,
     },
-    audio: { residual_ppm: -0.4, underruns: 0 },
+    audio: { underruns: 0 },
   },
   {
     ndi_name: "SP-live",
@@ -765,6 +772,7 @@ let ndiHealth = [
     state: "Idle",
     transport: "Idle",
     connections: 0,
+    source_fps: 30,
     lock_state: "UNLOCKED",
     lock_reason: "pacing disabled",
     clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },
@@ -775,8 +783,9 @@ let ndiHealth = [
       repeats: 0,
       resyncs: 0,
       lag_slots: 0,
+      av_align_err_ms: 0,
     },
-    audio: { residual_ppm: 0, underruns: 0 },
+    audio: { underruns: 0 },
   },
 ];
 
@@ -906,8 +915,26 @@ const lyricsTrack = {
   ],
 };
 
+// #184 round F: a LONG track (100 lines, one every 2 s) so the shared
+// LyricsView's auto-follow can be proven — the active line has to travel far
+// past the 260 px panel. `lyrics-follow.spec.ts` selects it via `mode: "long"`.
+const LONG_LINE_MS = 2000;
+const longLyricsTrack = {
+  version: 22,
+  source: 'gemini-3-5-transcribe',
+  language_source: 'en',
+  language_translation: 'sk',
+  lines: Array.from({ length: 100 }, (_, i) => ({
+    start_ms: i * LONG_LINE_MS,
+    end_ms: (i + 1) * LONG_LINE_MS,
+    en: `Line ${i + 1}`,
+    sk: `Riadok ${i + 1}`,
+  })),
+};
+
 // #198 item 3/9: drive the shared LyricsView's loading / error / empty states.
 //   "track" (default) → 200 + the 2-line track
+//   "long"            → 200 + the 100-line track (#184 round F auto-follow)
 //   "empty"           → 204 (no lyrics; the real handler's no-lyrics reply)
 //   "error"           → 500
 //   "slow"            → 200 after a delay so the loading state is observable
@@ -915,7 +942,7 @@ const lyricsTrack = {
 let lyricsMode = 'track';
 app.post('/__mock/lyrics-mode', (req, res) => {
   const mode = req.body?.mode;
-  if (!['track', 'empty', 'error', 'slow'].includes(mode)) {
+  if (!['track', 'long', 'empty', 'error', 'slow'].includes(mode)) {
     res.status(400).json({ error: `unknown mode: ${mode}` });
     return;
   }
@@ -934,6 +961,10 @@ app.get('/api/v1/videos/:id/lyrics', (_req, res) => {
   }
   if (lyricsMode === 'slow') {
     setTimeout(() => res.json(lyricsTrack), 2000);
+    return;
+  }
+  if (lyricsMode === 'long') {
+    res.json(longLyricsTrack);
     return;
   }
   res.json(lyricsTrack);
@@ -1205,21 +1236,105 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
+// #184 round G: a ONE-SHOT fault for the NEXT preview connection only (the page
+// flags apply to every connection, so they cannot express "the first socket is
+// bad, the reconnected one is healthy"). Body: { delay_ms?: N } — that socket's
+// post-init frames are delivered N ms late (a backlog, like `pong_delay_ms`);
+// { close_after_frags?: N } — the server closes that socket after N fragments
+// (a server restart / relay close); { hold_init: true } — that socket opens but
+// never sends anything, not even its init (an encoder that never starts).
+// `{}` clears a pending fault.
+// #184 round G2: `{ sequence: [fault, fault, …] }` queues one fault per NEXT
+// connection, in order (each entry has the single-fault shape above; `{}` = a
+// healthy socket) — so a test can drive several failing sockets in a row and
+// measure the reconnect BACKOFF between them.
+let previewFaultQueue = [];
+function parsePreviewFault(b) {
+  const fault = {};
+  if (typeof b.delay_ms === "number" && b.delay_ms > 0) fault.delay_ms = b.delay_ms;
+  if (typeof b.close_after_frags === "number" && b.close_after_frags >= 0) {
+    fault.close_after_frags = b.close_after_frags;
+  }
+  if (b.hold_init === true) fault.hold_init = true;
+  return fault;
+}
+app.post("/__mock/preview-fault", (req, res) => {
+  const b = req.body || {};
+  if (Array.isArray(b.sequence)) {
+    previewFaultQueue = b.sequence.map((f) => parsePreviewFault(f || {}));
+  } else {
+    const fault = parsePreviewFault(b);
+    previewFaultQueue = Object.keys(fault).length ? [fault] : [];
+  }
+  res.json({ ok: true, faults: previewFaultQueue });
+});
+
+// #184 round G: the server closes every open preview socket NOW (a server
+// restart / encoder respawn, at a moment the test chooses).
+app.post("/__mock/preview-close", (_req, res) => {
+  let closed = 0;
+  for (const c of previewWss.clients) {
+    c.close();
+    closed++;
+  }
+  res.json({ ok: true, closed });
+});
+
 // #178: stream the canned fMP4 fixture — init segment first, then each fragment
 // with a small gap — so the card's MSE <video> reaches readyState>=3 and its
 // currentTime advances.
 previewWss.on("connection", (ws, req) => {
+  const fault = previewFaultQueue.shift() || {};
   const [init, ...frags] = PREVIEW_FMP4;
   // #184 round F: an optional `?lag_ms=<N>` knob on the upgrade url inflates the
   // beacon so the lag-readout E2E can force the "picture behind the wall" state.
   // Mock-only — the production dashboard never adds the flag to preview.ws.
+  // #184 round G: an optional `?pong_delay_ms=<N>` knob emulates a tunnel
+  // BACKLOG (the owner's Cloudflare-hairpin defect): every server→client frame
+  // AFTER the init segment — media fragments, the lag beacon AND the pong answer
+  // to the shim's `{"ping":N}` — is delivered N ms late, exactly like frames
+  // queued behind a stalled `cloudflared` stream. The init goes out at once (the
+  // backlog builds while the stream runs). Mock-only, forwarded from the PAGE
+  // url by the shim like `lag_ms`.
   let lagMs = 0;
+  let pongDelayMs = 0;
   try {
-    const q = new URL(req.url, "http://localhost").searchParams.get("lag_ms");
-    if (q !== null && /^\d+$/.test(q)) lagMs = Number(q);
+    const q = new URL(req.url, "http://localhost").searchParams;
+    const lag = q.get("lag_ms");
+    if (lag !== null && /^\d+$/.test(lag)) lagMs = Number(lag);
+    const delay = q.get("pong_delay_ms");
+    if (delay !== null && /^\d+$/.test(delay)) pongDelayMs = Number(delay);
   } catch {
     // malformed upgrade url — no knob
   }
+  // The one-shot fault (above) wins over the page flag for this socket only.
+  if (fault.delay_ms) pongDelayMs = fault.delay_ms;
+  const closeAfterFrags =
+    typeof fault.close_after_frags === "number" ? fault.close_after_frags : null;
+  // Deliver one frame through the (optionally delayed) "tunnel". A frame whose
+  // socket closed while it sat in the backlog is dropped silently.
+  const pending = new Set();
+  const deliver = (payload) => {
+    const send = () => {
+      if (ws.readyState !== ws.OPEN) return;
+      try {
+        ws.send(payload);
+      } catch {
+        // client vanished mid-send — ignore.
+      }
+    };
+    if (pongDelayMs <= 0) {
+      send();
+      return;
+    }
+    const t = setTimeout(() => {
+      pending.delete(t);
+      send();
+    }, pongDelayMs);
+    pending.add(t);
+  };
+  // The one-shot "encoder never starts" fault: the socket stays open and silent.
+  if (fault.hold_init) return;
   try {
     ws.send(init);
   } catch {
@@ -1232,11 +1347,7 @@ previewWss.on("connection", (ws, req) => {
   // immediately so the readout appears without waiting a full second.
   const sendBeacon = () => {
     if (ws.readyState !== ws.OPEN) return;
-    try {
-      ws.send(JSON.stringify({ produced_ms: fragsSent * 500 + lagMs }));
-    } catch {
-      // client vanished mid-send — ignore.
-    }
+    deliver(JSON.stringify({ produced_ms: fragsSent * 500 + lagMs }));
   };
   sendBeacon();
   const timer = setInterval(() => {
@@ -1244,13 +1355,36 @@ previewWss.on("connection", (ws, req) => {
       clearInterval(timer);
       return;
     }
-    ws.send(frags[i++]);
+    if (closeAfterFrags !== null && fragsSent >= closeAfterFrags) {
+      // The one-shot "server closed the socket" fault.
+      clearInterval(timer);
+      ws.close();
+      return;
+    }
+    deliver(frags[i++]);
     fragsSent++;
   }, 120);
   const beacon = setInterval(sendBeacon, 1000);
+  // #184 round G: answer the shim's application-level `{"ping":N}` with
+  // `{"pong":N}` (the same echo `api/preview.rs::pong_frame` does), queued
+  // behind the same (optionally delayed) tunnel as the media.
+  ws.on("message", (data, isBinary) => {
+    if (isBinary) return;
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return; // not JSON — ignore, like the real server
+    }
+    if (msg && typeof msg.ping === "number" && Number.isFinite(msg.ping)) {
+      deliver(JSON.stringify({ pong: msg.ping }));
+    }
+  });
   const stop = () => {
     clearInterval(timer);
     clearInterval(beacon);
+    for (const t of pending) clearTimeout(t);
+    pending.clear();
   };
   ws.on("close", stop);
   ws.on("error", stop);

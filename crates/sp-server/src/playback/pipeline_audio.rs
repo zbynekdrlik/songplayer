@@ -117,7 +117,7 @@ pub(crate) fn open_synced_decoder(
     if let Some(shared) = emitter {
         clear_ring(shared);
     }
-    sp_decoder::SplitSyncedDecoder::with_tolerance(
+    sp_decoder::SplitSyncedDecoder::with_audio_lead(
         video,
         audio,
         decoder_tolerance_ms(emitter.is_some()),

@@ -16,12 +16,60 @@
 //! (the active-line index is a `Memo`) — it never re-creates the `lyrics-view`
 //! root or rebuilds the `<ol>` (sp-ui-frontend.md "a live data tick must update
 //! text only").
+//!
+//! #184 round F — auto-follow: when the active line changes, ONLY the panel's
+//! own scroller (`.lyrics-view-scroll`) scrolls (instantly — a smooth animation
+//! still in flight would override the operator's own wheel), measured in the
+//! next animation frame (the list is laid out by then), so the active line
+//! sits in its middle (`sp_core::lyrics_follow::centered_scroll_top`). Never
+//! `scroll_into_view` — it also scrolls the page (the phone "Naživo" layout
+//! would jump). A manual wheel / touch / pointer-down on the panel pauses the
+//! follow for `FOLLOW_PAUSE_MS` (5 s) so the operator can look around; it
+//! resumes on its own. One component → the same behaviour on every page.
 
+use std::time::Duration;
+
+use leptos::html::{Div, Ol};
 use leptos::prelude::*;
 use sp_core::lyrics::LyricsTrack;
+use sp_core::lyrics_follow::{FOLLOW_PAUSE_MS, centered_scroll_top, follow_paused, needs_scroll};
 
+use crate::components::player::now_ms;
 use crate::components::state_block::{StateBlock, StateKind};
 use crate::store::DashboardStore;
+
+/// Scroll ONLY `scroller` (never the page), instantly, so its `idx`-th line sits in
+/// the middle. The line is found by position (`nth-child`), not by the
+/// `lyr-current` class, so it does not depend on the class binding having
+/// re-rendered first. A missing line (list not rendered yet) is a no-op.
+fn follow_line(scroller: &web_sys::Element, idx: usize) {
+    let selector = format!(".lyrics-list > li:nth-child({})", idx + 1);
+    let Ok(Some(line)) = scroller.query_selector(&selector) else {
+        return;
+    };
+    let view = scroller.get_bounding_client_rect();
+    let rect = line.get_bounding_client_rect();
+    let current = f64::from(scroller.scroll_top());
+    // The line's top in the scroller's CONTENT coordinates (independent of the
+    // current scroll and of any positioned ancestor).
+    let line_top = rect.y() - view.y() - f64::from(scroller.client_top()) + current;
+    let target = centered_scroll_top(
+        line_top,
+        rect.height(),
+        f64::from(scroller.client_height()),
+        f64::from(scroller.scroll_height()),
+    );
+    if !needs_scroll(current, target) {
+        return;
+    }
+    let opts = web_sys::ScrollToOptions::new();
+    opts.set_top(target);
+    // Instant, not Smooth: an in-flight smooth animation kept running after the
+    // operator's wheel and overrode it (CI run 35857770291: 543 → 578 px after a
+    // -300 wheel). An instant jump has nothing in flight to race.
+    opts.set_behavior(web_sys::ScrollBehavior::Instant);
+    scroller.scroll_to_with_scroll_to_options(&opts);
+}
 
 /// #198 item 3: the lyrics fetch is a real 4-way state, not `Option<LyricsTrack>`.
 /// Folding fetch-in-flight, a failed fetch and genuinely-no-lyrics all into
@@ -116,6 +164,69 @@ pub fn LyricsView(
         })
     });
 
+    // #184 round F: auto-follow. `paused_at` = the monotonic time of the last
+    // manual scroll gesture on the panel (non-reactive: read only at follow
+    // time). Each gesture also arms a one-shot timer for the end of the pause;
+    // only the NEWEST gesture's timer (matching `pause_gen`) ends the pause —
+    // it clears `paused_at` itself (a coarsened `performance.now()` can read a
+    // hair under the window when the timer fires, which would otherwise leave a
+    // stopped track paused for good) and bumps `follow_resume`, which re-runs
+    // the follow Effect so the panel catches up with the active line even when
+    // the line did not change meanwhile.
+    let scroll_ref = NodeRef::<Div>::new();
+    let list_ref = NodeRef::<Ol>::new();
+    let paused_at = StoredValue::new(None::<f64>);
+    let pause_gen = StoredValue::new(0u32);
+    let follow_resume = RwSignal::new(0u32);
+    let pause_follow = move || {
+        paused_at.set_value(Some(now_ms() as f64));
+        let generation = pause_gen.get_value().wrapping_add(1);
+        pause_gen.set_value(generation);
+        set_timeout(
+            move || {
+                // `try_*`: the timer can outlive the view (navigation).
+                if pause_gen.try_get_value() == Some(generation) {
+                    let _ = paused_at.try_set_value(None);
+                    let _ = follow_resume.try_update(|n| *n = n.wrapping_add(1));
+                }
+            },
+            Duration::from_millis(FOLLOW_PAUSE_MS as u64),
+        );
+    };
+    // Re-runs on an active-line change (a Memo — a position tick that keeps the
+    // same line never fires it), on the scroller mounting, when a manual pause
+    // ends, AND when the line list (re)mounts: on a fetch the `current_idx` Memo
+    // can wake this Effect BEFORE the render effect has built the `<ol>` (the
+    // lookup then misses), and a paused track produces no later line change —
+    // tracking `list_ref` re-runs the follow once the list is in the DOM.
+    Effect::new(move |_| {
+        follow_resume.track();
+        list_ref.track();
+        if current_idx.get().is_none() {
+            return;
+        }
+        let Some(scroller) = scroll_ref.get() else {
+            return;
+        };
+        if follow_paused(now_ms() as f64, paused_at.get_value()) {
+            return;
+        }
+        // Measure in the NEXT animation frame: when the list (re)mounts, this
+        // Effect can run before its `<li>`s are laid out (CI run 35857770291:
+        // a paused track never showed its line), and a track sitting still
+        // produces no later line change to retry. By the next frame layout is
+        // done; the index/pause are re-read there so a newer state wins.
+        request_animation_frame(move || {
+            let Some(idx) = current_idx.try_get_untracked().flatten() else {
+                return;
+            };
+            if follow_paused(now_ms() as f64, paused_at.try_get_value().flatten()) {
+                return;
+            }
+            follow_line(&scroller, idx);
+        });
+    });
+
     let do_seek = move |ms: u64| {
         if let Some(pid) = seek_pid() {
             leptos::task::spawn_local(async move {
@@ -125,7 +236,14 @@ pub fn LyricsView(
     };
 
     view! {
-        <div class="lyrics-view lyrics-view-scroll" data-testid="lyrics-view">
+        <div
+            class="lyrics-view lyrics-view-scroll"
+            data-testid="lyrics-view"
+            node_ref=scroll_ref
+            on:wheel=move |_| pause_follow()
+            on:touchstart=move |_| pause_follow()
+            on:pointerdown=move |_| pause_follow()
+        >
             {move || match state.get() {
                 // A fetch in flight / a failed fetch now render the shared
                 // StateBlock, like every other surface (#198 item 3).
@@ -165,7 +283,7 @@ pub fn LyricsView(
                             }
                         })
                         .collect_view();
-                    view! { <ol class="lyrics-list">{items}</ol> }.into_any()
+                    view! { <ol class="lyrics-list" node_ref=list_ref>{items}</ol> }.into_any()
                 }
             }}
         </div>

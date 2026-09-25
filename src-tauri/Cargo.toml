@@ -1,6 +1,6 @@
 [package]
 name = "sp-tauri"
-version = "0.64.0"
+version = "0.65.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.85"
@@ -34,3 +34,14 @@ tauri-build = { version = "2", features = [] }
 
 [dev-dependencies]
 tempfile = "3"
+
+# src-tauri is EXCLUDED from the workspace, so the root Cargo.toml
+# [profile.release] does NOT apply to the shipped SongPlayer.exe — it builds
+# with cargo's default release profile (panic = "unwind", no debuginfo, no PDB).
+# `debug = "line-tables-only"` makes rustc emit SongPlayer.pdb so the next WER
+# minidump's SongPlayer.exe+<offset> frames resolve to file:line (#156). Only
+# debuginfo is added — the panic strategy is unchanged (a behaviour change
+# outside this ticket), and the PDB is a CI artifact, not bundled in the
+# installer.
+[profile.release]
+debug = "line-tables-only"

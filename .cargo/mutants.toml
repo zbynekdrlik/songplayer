@@ -47,26 +47,29 @@ exclude_re = [
   #   no terminating Linux unit test can exercise -> MISSED (same class as
   #   downloader/reprocess). Its real DECISIONS are extracted to unit-tested pure
   #   fns (models_dabing::{synth_ready, dub_stems_state}, worker::{worker_enabled,
-  #   dub_pace_from, dub_eta, ffmpeg_path} — those stay mutation-covered). Unlike
+  #   dub_voice_from, dub_model_from, dub_input_audio, dub_eta} — those stay
+  #   mutation-covered). Unlike
   #   stems/worker.rs::process_next (whose cap decision precedes any subprocess,
   #   so it IS integration-tested), dabing's proceed decision sits AFTER the
   #   python gate, so process_next itself is integration-only. (#183 round 2)
   'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::process_next',
   # dabing/worker.rs::synthesize: called ONLY from process_next (excluded above)
-  #   and is itself the shell-out — ffmpeg silencedetect + the Gemini
-  #   Live-Translate python child (tokio::process) + the produced-file checks. No
+  #   and is itself the shell-out — the Gemini Live-Translate python child
+  #   (tokio::process) + the settings/stem-file reads + the produced-file checks. No
   #   Linux unit test can reach it, so its whole-fn mutant
   #   (`-> Ok(Default::default())`) is structurally MISSED. Everything it DECIDES
-  #   is pure + mutation-covered: chunk_plan::{parse_silencedetect, plan_chunks,
-  #   placement_for}, child::live_translate_args + the summary JSON, and the D3 subtitle
-  #   path subtitles::transcripts_to_track + subtitles_store (#182).
+  #   is pure + mutation-covered: worker::{dub_input_audio, dub_model_from,
+  #   dub_voice_from} (#184 round H step 2), child::live_translate_args + the summary
+  #   JSON, and the D3 subtitle path subtitles::transcripts_to_track + subtitles_store
+  #   (#182).
   'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::synthesize',
   # dabing/worker.rs::ensure_script: materialises the embedded Python tool scripts
-  #   (dub_worker.py + dub_voice_check.py) into the box's cache/tools dir — pure
-  #   async fs I/O, no Linux unit test constructs a DubWorker to drive it (same
-  #   class as synthesize). The one DECISION it carries — WHICH scripts ship — is
-  #   the pure free fn `embedded_tool_scripts()`, which stays mutation-covered by
-  #   `embedded_tool_scripts_ship_worker_and_voice_check` (#184 round E).
+  #   (dub_worker.py + dub_live_session.py + dub_loudness.py + win_replace.py) into
+  #   the box's cache/tools dir — pure async fs I/O, no Linux unit test constructs a
+  #   DubWorker to drive it (same class as synthesize). The one DECISION it carries
+  #   — WHICH scripts ship — is the pure free fn `embedded_tool_scripts()`, which
+  #   stays mutation-covered by `embedded_tool_scripts_ship_worker_and_helpers`
+  #   (#184 rounds F/F2/H).
   'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::ensure_script',
   # api/preview.rs::handle_preview_ws: the WebSocket session of the live preview —
   #   an upgraded socket + a running ffmpeg encoder child + the fragment relay.
@@ -116,55 +119,32 @@ exclude_re = [
   'replace \|\| with && in split_one_lyrics_line',
   'replace > with (<|==|>=) in split_one_lyrics_line',
   # === genlock #146–#151 provably-equivalent arithmetic (audit 2026-09-13, PR #153) ===
-  # genlock_audio.rs:129:31 `> -> <` in LevelAverager::record: the ring drain
-  #   `while ring.len() > 2*window { pop_front }` becomes `< 2*window`, popping
-  #   until empty then spinning on an empty deque forever -> non-terminating on
-  #   the FIRST record() call, not catchable by a terminating test.
-  'genlock_audio\.rs:129:31: replace > with <',
-  # genlock_audio.rs:254:32 `* -> +` and `* -> /` in AudioPll::update: the rate
-  #   step `(-residual * 0.5).clamp(±5)` only runs when |residual| > 50, so
-  #   |−residual·0.5| > 25 and the clamp always saturates to ±5 with sign =
-  #   sign(−residual). `-residual + 0.5` and `-residual / 0.5` keep that sign and
-  #   saturate to the SAME ±5 for every reachable residual -> equivalent.
-  'genlock_audio\.rs:254:32: replace \* with \+',
-  'genlock_audio\.rs:254:32: replace \* with /',
-  # genlock_audio.rs:296:32 `* -> /` in AudioPll::update_level: bias_target
-  #   `BIAS_PPM * signum(level − target)` is only evaluated when engaged, and
-  #   level == target is `near` (clears far_since before engaged is read), so
-  #   engaged => signum ∈ {−1,+1}; `20 * s == 20 / s` for s ∈ {−1,+1} -> equivalent.
-  'genlock_audio\.rs:296:32: replace \* with /',
-  # pacer_prepare.rs:85:66 and pacer.rs:788:70 (- -> + / /) in the p99 index
+  # pacer_prepare.rs:84:66 and pacer.rs:775:70 (- -> + / /) in the p99 index
   #   `((len*99)/100).min(len-1)`: floor(len*99/100) <= len-1 for every len>=1,
   #   so the `.min(len-1)` clamp never binds; replacing `len-1` cannot change the
   #   index. (iter_percentile_us IS killable — there p=100 makes the clamp load-bearing.)
-  'pacer_prepare\.rs:85:66: replace - with \+ in Pacer::prep_p99_us',
-  'pacer_prepare\.rs:85:66: replace - with / in Pacer::prep_p99_us',
-  'pacer\.rs:788:70: replace - with \+ in Pacer::jitter_p99_us',
-  'pacer\.rs:788:70: replace - with / in Pacer::jitter_p99_us',
-  # pacer.rs:731:20 > -> >= in on_emit: body is only `max_late_us = late_us`; the
+  'pacer_prepare\.rs:84:66: replace - with \+ in Pacer::prep_p99_us',
+  'pacer_prepare\.rs:84:66: replace - with / in Pacer::prep_p99_us',
+  'pacer\.rs:775:70: replace - with \+ in Pacer::jitter_p99_us',
+  'pacer\.rs:775:70: replace - with / in Pacer::jitter_p99_us',
+  # pacer.rs:718:20 > -> >= in on_emit: body is only `max_late_us = late_us`; the
   #   operators differ solely at `late_us == max_late_us`, where the assignment
   #   writes the value it just compared — a no-op. Output identical for all inputs.
-  'pacer\.rs:731:20: replace > with >= in Pacer::on_emit',
-  # pacer.rs:682:28 += -> *= / -= in service_standby: the mutated `relatches += 1`
+  'pacer\.rs:718:20: replace > with >= in Pacer::on_emit',
+  # pacer.rs:654:28 += -> *= / -= in service_standby: the mutated `relatches += 1`
   #   sits in the `if emit_now < boundary` backward-step net, but service_standby
   #   takes both now_100ns() reads with no decode pull between them and only
   #   reaches this point after `sched_now >= boundary`, so on a monotonic clock
   #   emit_now == sched_now >= boundary and the branch is unreachable by any
-  #   terminating deterministic test. (The `service` mutant at 532:28 IS killable.)
-  'pacer\.rs:682:28: replace \+= with \*= in Pacer::service_standby',
-  'pacer\.rs:682:28: replace \+= with -= in Pacer::service_standby',
+  #   terminating deterministic test. (The `service` mutant at 505:28 IS killable.)
+  'pacer\.rs:654:28: replace \+= with \*= in Pacer::service_standby',
+  'pacer\.rs:654:28: replace \+= with -= in Pacer::service_standby',
 
   # === TIMEOUTs (non-terminating under mutation; not catchable by a terminating
   #     test, like the apply_greedy loop-counter pins) ==========================
-  # pacer.rs:94 PacedFrame::pts_100ns (/->% and ->0/1/-1): pts drives the
+  # pacer.rs:78 PacedFrame::pts_100ns (/->% and ->0/1/-1): pts drives the
   #   decode-advance loop; a constant/zero pts never advances it -> 300 s TIMEOUT.
-  'pacer\.rs:94:',
-  # audio_grid.rs:74 push -> (), 77:26 ==->!= in push, 158 level_samples ->0/1:
-  #   the buffer-fill test loops `while level_samples() < N { push }`; a no-op
-  #   push or a constant level never reaches N -> TIMEOUT.
-  'audio_grid\.rs:74:9: replace AudioGridBuffer::push with \(\)',
-  'audio_grid\.rs:77:26: replace == with != in AudioGridBuffer::push',
-  'audio_grid\.rs:158:9: replace AudioGridBuffer::level_samples',
+  'pacer\.rs:78:',
   # lock_state.rs:96:31 >-><  in EventWindow::evict: inverts the ring-drain guard
   #   so eviction never makes progress under the window-fill test -> TIMEOUT.
   'lock_state\.rs:96:31: replace > with < in EventWindow::evict',

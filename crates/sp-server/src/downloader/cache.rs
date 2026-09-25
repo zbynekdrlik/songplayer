@@ -14,7 +14,7 @@
 //! * [`ScanResult::legacy`] — pre-migration single `.mp4` files (these are
 //!   deleted by the self-healing startup scan).
 //! * [`ScanResult::orphans`] — unpaired half-sidecars from a crashed mid
-//!   download (these are deleted by `cleanup_removed`).
+//!   download (these are deleted by the self-healing startup scan).
 
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -187,61 +187,6 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
         orphans,
         lyrics_files,
         vocals_files,
-    }
-}
-
-/// Delete song pairs whose video ID is not in `active_ids`, and always
-/// preserve the currently playing video ID if supplied.
-pub fn cleanup_removed(cache_dir: &Path, active_ids: &HashSet<String>, playing_id: Option<&str>) {
-    let result = scan_cache(cache_dir);
-    for song in result.songs {
-        if active_ids.contains(&song.video_id) {
-            continue;
-        }
-        if playing_id == Some(song.video_id.as_str()) {
-            continue;
-        }
-        for path in [&song.video_path, &song.audio_path] {
-            tracing::info!(
-                "removing cached sidecar for removed video {}: {}",
-                song.video_id,
-                path.display()
-            );
-            if let Err(e) = std::fs::remove_file(path) {
-                tracing::warn!("failed to remove {}: {e}", path.display());
-            }
-        }
-    }
-    // Orphans are always removed — they are debris from a crashed download.
-    for orphan in result.orphans {
-        tracing::info!(
-            "removing orphan sidecar for {}: {}",
-            orphan.video_id,
-            orphan.path.display()
-        );
-        if let Err(e) = std::fs::remove_file(&orphan.path) {
-            tracing::warn!("failed to remove orphan {}: {e}", orphan.path.display());
-        }
-    }
-
-    // Delete vocals for video_ids no longer in active_ids (and not currently
-    // playing). Preserves the cache-hit path on next reprocess for active
-    // songs while preventing orphan accumulation per #41.
-    for (vid, path) in result.vocals_files {
-        if active_ids.contains(&vid) {
-            continue;
-        }
-        if playing_id == Some(vid.as_str()) {
-            continue;
-        }
-        tracing::info!(
-            "removing orphan vocals for removed video {}: {}",
-            vid,
-            path.display()
-        );
-        if let Err(e) = std::fs::remove_file(&path) {
-            tracing::warn!("failed to remove vocals {}: {e}", path.display());
-        }
     }
 }
 
@@ -437,34 +382,6 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_removed_deletes_both_files_of_a_pair() {
-        let dir = tempfile::tempdir().unwrap();
-        let v = dir.path().join("S_A_dQw4w9WgXcQ_normalized_video.mp4");
-        let a = dir.path().join("S_A_dQw4w9WgXcQ_normalized_audio.flac");
-        fs::write(&v, "v").unwrap();
-        fs::write(&a, "a").unwrap();
-
-        let active: HashSet<String> = HashSet::new();
-        cleanup_removed(dir.path(), &active, None);
-        assert!(!v.exists());
-        assert!(!a.exists());
-    }
-
-    #[test]
-    fn cleanup_removed_skips_currently_playing() {
-        let dir = tempfile::tempdir().unwrap();
-        let v = dir.path().join("S_A_xxxxxxxxxxx_normalized_video.mp4");
-        let a = dir.path().join("S_A_xxxxxxxxxxx_normalized_audio.flac");
-        fs::write(&v, "v").unwrap();
-        fs::write(&a, "a").unwrap();
-
-        let active: HashSet<String> = HashSet::new();
-        cleanup_removed(dir.path(), &active, Some("xxxxxxxxxxx"));
-        assert!(v.exists());
-        assert!(a.exists());
-    }
-
-    #[test]
     fn is_valid_video_id_accepts_valid() {
         assert!(is_valid_video_id("dQw4w9WgXcQ"));
         assert!(is_valid_video_id("xxxxxxxxxxx"));
@@ -522,52 +439,5 @@ mod tests {
             .collect();
         assert!(ids.contains("dQw4w9WgXcQ"));
         assert!(ids.contains("aBcDeFgHiJk"));
-    }
-
-    #[test]
-    fn cleanup_removed_deletes_vocals_for_inactive_videos() {
-        let dir = tempfile::tempdir().unwrap();
-        // active song
-        fs::write(
-            dir.path()
-                .join("Song_Artist_aaaaaaaaaaa_normalized_video.mp4"),
-            "v",
-        )
-        .unwrap();
-        fs::write(
-            dir.path()
-                .join("Song_Artist_aaaaaaaaaaa_normalized_audio.flac"),
-            "a",
-        )
-        .unwrap();
-        fs::write(dir.path().join("aaaaaaaaaaa_vocals16k.wav"), "active").unwrap();
-        // removed song's vocals
-        fs::write(dir.path().join("xxxxxxxxxxx_vocals16k.wav"), "stale").unwrap();
-
-        let mut active: HashSet<String> = HashSet::new();
-        active.insert("aaaaaaaaaaa".into());
-        cleanup_removed(dir.path(), &active, None);
-
-        assert!(
-            dir.path().join("aaaaaaaaaaa_vocals16k.wav").exists(),
-            "active vocals must be kept"
-        );
-        assert!(
-            !dir.path().join("xxxxxxxxxxx_vocals16k.wav").exists(),
-            "stale vocals must be deleted"
-        );
-    }
-
-    #[test]
-    fn cleanup_removed_preserves_vocals_for_currently_playing() {
-        let dir = tempfile::tempdir().unwrap();
-        // Vocals for a song that is NOT in active_ids but IS playing.
-        fs::write(dir.path().join("playingidxxx_vocals16k.wav"), "playing").unwrap();
-        let active: HashSet<String> = HashSet::new();
-        cleanup_removed(dir.path(), &active, Some("playingidxxx"));
-        assert!(
-            dir.path().join("playingidxxx_vocals16k.wav").exists(),
-            "currently-playing vocals must not be deleted"
-        );
     }
 }

@@ -292,9 +292,9 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     /// then the video frame async (stamped `video_tc_100ns`, the floored
     /// boundary — §4). Unlike [`submit_nv12`](Self::submit_nv12) the `Pacer`
     /// owns the wall clock and supplies both stamps, so this bypasses the
-    /// internal [`WallClock`]. The video buffer is copied for the async
-    /// double-buffer holdover (the pacer keeps its own clone for the starvation
-    /// repeat, so this takes a borrow).
+    /// internal [`WallClock`]. The borrowed video is copied for the async
+    /// double-buffer holdover, into a RECYCLED pool buffer
+    /// ([`SharedFrame::copy_from_slice`], #147 round 10) — never a fresh alloc.
     #[allow(clippy::too_many_arguments)]
     pub fn submit_frame_at_boundary(
         &mut self,
@@ -306,15 +306,15 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
     ) {
-        // Borrow variant: copy the caller's buffer into an owned SharedFrame and
-        // delegate. Used by the pacer's `PacedSink` impl (tests) and any caller
-        // that keeps its own copy. The #168 submit thread uses the `_owned`
-        // variant to avoid this extra copy on the submit path.
+        // Borrow variant: copy the caller's buffer into a pooled SharedFrame and
+        // delegate (for a caller that keeps its own slice). The pacer's
+        // `PacedSink` impl and the #168 submit thread both use the zero-copy
+        // `_owned` variant instead.
         self.submit_frame_at_boundary_owned(
             width,
             height,
             stride,
-            SharedFrame::new(video_data.to_vec()),
+            SharedFrame::copy_from_slice(video_data),
             audio,
             video_tc_100ns,
             audio_tc_100ns,
@@ -354,10 +354,10 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         // 2. Video async, stamped with the floored boundary.
         //
         // #151 burn-id overlay: paint the QR into OUR OWN copy of the frame
-        // (`SharedFrame::make_mut` — in place while this handle is the sole owner,
-        // which it is on the submit path), NEVER the decoder's / pacer's buffer —
-        // the pacer keeps its own clone for the starvation repeat, so mutating our
-        // copy is safe and re-derives a fresh payload every boundary. Paced path
+        // (`SharedFrame::make_mut` — the pacer keeps its own clone for the
+        // starvation repeat, so this forks into a POOLED copy, #147 round 10),
+        // NEVER the decoder's / pacer's buffer, and re-derives a fresh payload
+        // every boundary. Paced path
         // only; read the shared flag fresh so a toggle-off clears within one
         // frame. `frame_id` = the pacing `seq` (== `frames_submitted_total`,
         // bumped above); `gen_ts_ns` = the serviced boundary wall time in ns
@@ -497,13 +497,16 @@ impl<B: NdiBackend> crate::playback::pacer::PacedSink for FrameSubmitter<B> {
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
     ) {
-        // `audio` is the boundary's batch (every consumed frame's chunks, §6.4),
-        // NOT `video.audio` — the pacer drains that into the batch on consume.
-        self.submit_frame_at_boundary(
+        // `audio` is the boundary's media-aligned block (#148), NOT
+        // `video.audio` — the pacer moves that into its grid buffer on pull.
+        // #147 round 10: an Arc bump of the pacer's frame, never a pixel copy
+        // (the same zero-copy holdover the #168 handoff uses; the burn overlay
+        // forks its own copy via `make_mut`, so the pacer's pixels stay intact).
+        self.submit_frame_at_boundary_owned(
             video.width,
             video.height,
             video.stride,
-            &video.video,
+            video.video.clone(),
             audio,
             video_tc_100ns,
             audio_tc_100ns,

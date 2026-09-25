@@ -317,6 +317,7 @@ fn health_snapshot_variant_constructs_and_clones() {
         frames_submitted_last_5s: 30,
         observed_fps: 29.97,
         nominal_fps: 29.97,
+        source_fps: 29.97,
         last_submit_ts: Some(now),
         last_heartbeat_ts: now,
         consecutive_bad_polls: 0,

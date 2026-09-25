@@ -306,7 +306,7 @@ fn run_loop_windows(
     // transitions / heavy-child stalls). Declared AFTER `submitter` so its guard
     // drops (shutdown + JOIN) BEFORE the sender is destroyed — `send_destroy`
     // invalidates the handle the emitter's AudioSink holds. Paced path keeps its
-    // own audio clock (the Pacer's AudioGridBuffer + PLL), so no emitter there.
+    // own media-aligned audio (the Pacer's AudioGridBuffer), so no emitter there.
     let audio_emitter = if genlock_pacing {
         None
     } else {
@@ -606,11 +606,9 @@ fn decode_and_send(
 
     let mut last_position_report = Instant::now();
     let mut frame_count: u64 = 0;
-    // #192 round 3: per-window max decode/submit/audio, drained into the heartbeat.
+    // #192 r3 loop_stage (per-window stage maxima → heartbeat) + r4 catchup (av_catchup.rs).
     let mut loop_stage = crate::playback::loop_stats::LoopStageMax::default();
-    // #192 round 4: per-song catch-up (video follows the wall-clock audio).
     let mut catchup = crate::playback::av_catchup::CatchUp::new();
-
     loop {
         // Check for commands between frames (non-blocking).
         match cmd_rx.try_recv() {
@@ -753,6 +751,8 @@ fn decode_and_send(
                 submitter.flush();
                 return DecodeResult::Ended;
             }
+            // #207: a frame-alloc failure drops ONE frame + continues (note_if_alloc_drop); else abort.
+            Err(e) if super::frame_alloc::note_if_alloc_drop(&e, playlist_id, &mut loop_stage) => {}
             Err(e) => {
                 submitter.flush();
                 return DecodeResult::Error(format!("Decode error at frame {frame_count}: {e}"));
@@ -939,7 +939,6 @@ pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
     );
     let observed_fps = stats.frames_in_window as f32 / stats.window_secs.max(0.001);
     let nominal_fps = submitter.nominal_fps();
-
     let now = std::time::Instant::now();
     let bad = classify_bad_poll(
         &state,
@@ -963,6 +962,7 @@ pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
             frames_submitted_last_5s: stats.frames_in_window,
             observed_fps,
             nominal_fps,
+            source_fps: nominal_fps, // #168 r6b: SDK path — submitter carries the decoder rate
             last_submit_ts: submitter.last_submit_ts(),
             last_heartbeat_ts: now,
             consecutive_bad_polls: *consecutive_bad_polls,

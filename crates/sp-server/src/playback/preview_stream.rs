@@ -21,10 +21,12 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 
 use super::fmp4_relay::FragmentRelay;
+use super::preview_audio_probe::{SharedLevelProbe, log_tap_level};
 
 /// Fixed preview canvas width (the ffmpeg raw video input geometry).
 pub const OUT_W: u32 = 640;
@@ -188,15 +190,20 @@ pub fn to_stereo(samples: &[f32], channels: u32) -> Option<Vec<f32>> {
 
 /// The decode-seam A/V-sync lead (ms) for a pipeline's clocking path (#178
 /// round 2). On the SDK-clocked path (`genlock_pacing == false`, so the #192
-/// wall-clock emitter carries the audio) the decoder opens with a 100 ms audio
+/// wall-clock emitter carries the audio) the decoder opens with a 1500 ms audio
 /// read-ahead, so at the decode seam the audio LEADS the video by that much; the
-/// encoder's audio feeder absorbs it into the silence preroll
-/// ([`audio_preroll_samples`]) to re-sync (round 3 — the box ffmpeg ignored the
-/// former `-itsoffset` lever). The paced path has no emitter and thus no lead (0).
+/// encoder's audio feeder re-syncs by HOLDING each block that long before
+/// writing it (#184 round G3, `preview_audio_hold::AudioHold` — round 3 folded
+/// it into a silence preroll, which parked the whole lead in the socket). The
+/// paced path has no emitter, but its decoder reads `PACED_AUDIO_LEAD_MS`
+/// (250 ms) ahead (#148 v4), so its seam audio leads by 250 − 40 = 210 ms.
 pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
-    let emitter_present = !genlock_pacing;
-    (crate::playback::pipeline::audio_emitter::decoder_tolerance_ms(emitter_present)
-        - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS) as u32
+    let decoder_lead_ms = if genlock_pacing {
+        crate::playback::pacer::PACED_AUDIO_LEAD_MS
+    } else {
+        crate::playback::pipeline::audio_emitter::decoder_tolerance_ms(true)
+    };
+    (decoder_lead_ms - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS) as u32
 }
 
 /// How many interleaved-stereo f32 samples of SILENCE the audio feeder prepends
@@ -205,7 +212,9 @@ pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
 /// input had already been feeding when the audio input connected (feed-on-connect
 /// opens video first), capped at 5 s so a late-connecting audio input can never
 /// prepend an unbounded silence; `lead_ms` is the decode-seam A/V lead
-/// ([`lead_ms_for`]) that the SDK-clocked emitter's read-ahead introduces. At
+/// ([`lead_ms_for`]) that the SDK-clocked emitter's read-ahead introduces —
+/// since #184 round G3 the feeder passes 0 here and HOLDS the lead instead
+/// (`preview_audio_hold`), so the socket never carries it. At
 /// 48 kHz stereo each millisecond is `48 * 2` interleaved f32 samples. Replaces
 /// the box-unreliable `-itsoffset` lever (the box ffmpeg kept audio `start_time`
 /// at 0.000 regardless), aligning A/V deterministically on our side instead.
@@ -213,30 +222,102 @@ pub fn audio_preroll_samples(connect_gap_ms: u64, lead_ms: u32) -> usize {
     ((connect_gap_ms.min(5000) + lead_ms as u64) * 48 * 2) as usize
 }
 
-/// A gap larger than this (ms) between the video wall-clock timeline and the
-/// audio's written duration is filled with silence (#178 item 15).
-const GAP_FILL_THRESHOLD_MS: u64 = 150;
-/// Never fill more than this much silence for a single gap (a very long pause
-/// still resyncs, but does not write minutes of silence in one burst).
-const GAP_FILL_CAP_MS: u64 = 10_000;
+/// Stereo frames per millisecond of the preview audio input (fixed 48 kHz).
+pub const PREVIEW_AUDIO_FRAMES_PER_MS: u64 = 48;
 
-/// How many interleaved-stereo f32 SILENCE samples the audio feeder must write
-/// to close a gap between the wall-clock video timeline and the sample-count
-/// audio timeline (#178 item 15). The preview's PCM audio is SAMPLE-COUNT timed
-/// by ffmpeg while the video is WALL-CLOCK timed, so a dropped block, a pause,
-/// or a song gap leaves the audio stream shorter than the elapsed wall time and
-/// it would play EARLIER than the video for the rest of the child. When the
-/// wall time since the first live block exceeds the audio duration already
-/// written by more than [`GAP_FILL_THRESHOLD_MS`], write that much silence
-/// first (capped at [`GAP_FILL_CAP_MS`] per gap). `written_frames` is the
-/// stereo frames written so far; each ms is `48 * 2` interleaved samples.
-pub fn gap_fill_samples(wall_elapsed_ms: u64, written_frames: u64) -> usize {
-    let written_ms = written_frames * 1000 / 48_000;
-    let gap_ms = wall_elapsed_ms.saturating_sub(written_ms);
-    if gap_ms <= GAP_FILL_THRESHOLD_MS {
-        return 0;
+/// Pad threshold (#184 round G2): when the audio written so far lags the wall
+/// clock by MORE than this, the feeder writes silence up to the wall — on a
+/// block AND on every feeder poll (200 ms in G2, 30 ms since round G3), so
+/// ffmpeg (which interleaves the wall-clock video with the sample-count audio by
+/// timestamp) is never starved of audio and never stops emitting fragments.
+pub const ALIGN_PAD_THRESHOLD_MS: u64 = 150;
+
+/// Ahead bound (#184 round G2): a block that would push the written audio MORE
+/// than this ahead of the wall clock is trimmed. Round G's add-only gap fill
+/// padded silence while the decode-seam blocks were late and then APPENDED the
+/// late catch-up burst behind that silence, so every hiccup permanently shifted
+/// the preview audio later than its video — the ~70 s "fader heard a minute
+/// later" lag the owner reported. Trimming bounds the lag for good.
+pub const MAX_AHEAD_MS: u64 = 300;
+
+/// Where a trimmed burst lands (#184 round G2): its OLDEST frames are dropped
+/// so the written audio ends this far ahead of the wall clock (a little headroom
+/// for the next on-time block, well inside [`MAX_AHEAD_MS`]).
+pub const ALIGN_TARGET_AHEAD_MS: u64 = 100;
+
+/// What the preview audio feeder does with one incoming block (#184 round G2):
+/// first write `pad_frames` stereo frames of silence, then the block MINUS its
+/// first (oldest) `skip_frames` frames. `skip_frames` never exceeds the block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlignAction {
+    pub pad_frames: usize,
+    pub skip_frames: usize,
+}
+
+/// Silence (stereo frames) to write when NO block arrived within the feeder's
+/// poll (#184 round G2 — 200 ms then, 30 ms since round G3): everything up to
+/// the wall clock once the written audio lags it by more than
+/// [`ALIGN_PAD_THRESHOLD_MS`], else nothing. `wall_frames` is the target
+/// position on the audio timeline (the
+/// elapsed wall time since the feeder started, plus its start preroll), and
+/// `written_frames` the stereo frames already written. Never negative.
+pub fn align_timeout(wall_frames: u64, written_frames: u64) -> usize {
+    let threshold = ALIGN_PAD_THRESHOLD_MS * PREVIEW_AUDIO_FRAMES_PER_MS;
+    if written_frames + threshold < wall_frames {
+        (wall_frames - written_frames) as usize
+    } else {
+        0
     }
-    (gap_ms.min(GAP_FILL_CAP_MS) * 48 * 2) as usize
+}
+
+/// The part of an interleaved-stereo block the feeder writes after
+/// [`align_block`] asked it to drop the block's first `skip_frames` frames
+/// (#184 round G2): an index range into the block's `block_samples` f32
+/// samples that starts on a frame boundary and covers only WHOLE frames. A
+/// trailing lone sample (an odd-length block) is never written — it would swap
+/// L/R for the rest of the child — so the frames written are exactly
+/// `range.len() / 2`. A skip past the block yields an empty range at its end.
+pub fn block_tail_range(skip_frames: usize, block_samples: usize) -> std::ops::Range<usize> {
+    let whole = block_samples - block_samples % 2;
+    let start = skip_frames.saturating_mul(2).min(whole);
+    start..whole
+}
+
+/// Keep the preview's SAMPLE-COUNT audio timeline on the video's WALL-CLOCK
+/// timeline in BOTH directions for one block of `block_frames` stereo frames
+/// (#184 round G2, replacing the add-only #178 item-15 gap fill): pad up to the
+/// wall when behind by more than [`ALIGN_PAD_THRESHOLD_MS`] (exactly like
+/// [`align_timeout`]); then, if the block would end more than [`MAX_AHEAD_MS`]
+/// ahead of the wall, skip its OLDEST frames so it ends
+/// [`ALIGN_TARGET_AHEAD_MS`] ahead (at most the whole block — a block that
+/// cannot reach the target is dropped entirely, never a negative write). The
+/// trimmed audio is lost from the PREVIEW only; the wall / NDI path never sees
+/// this code.
+pub fn align_block(wall_frames: u64, written_frames: u64, block_frames: usize) -> AlignAction {
+    let pad_frames = align_timeout(wall_frames, written_frames);
+    let block_end = written_frames + pad_frames as u64 + block_frames as u64;
+    let max_end = wall_frames + MAX_AHEAD_MS * PREVIEW_AUDIO_FRAMES_PER_MS;
+    let skip_frames = if block_end > max_end {
+        let target_end = wall_frames + ALIGN_TARGET_AHEAD_MS * PREVIEW_AUDIO_FRAMES_PER_MS;
+        ((block_end - target_end) as usize).min(block_frames)
+    } else {
+        0
+    };
+    AlignAction {
+        pad_frames,
+        skip_frames,
+    }
+}
+
+/// One post-mix audio block on its way to the encoder's audio feeder (#184
+/// round G3): the interleaved-stereo samples plus WHEN the decode seam offered
+/// them. The feeder places a block by this ARRIVAL time, so however long it
+/// waited in the bounded channel (the feeder blocked on a full socket) can never
+/// shift the preview audio later — that invisible wait was the ~10 s fader lag.
+#[derive(Debug)]
+pub struct AudioBlock {
+    pub arrival: Instant,
+    pub samples: Vec<f32>,
 }
 
 /// State shared between the decode-side taps, the WS viewers, and the encoder
@@ -244,10 +325,11 @@ pub fn gap_fill_samples(wall_elapsed_ms: u64, written_frames: u64) -> usize {
 pub struct StreamShared {
     label: String,
     /// #178 A/V-sync lead (ms): how far the decode-seam audio LEADS the video on
-    /// this pipeline's clocking path (100 on the SDK-clocked path from the #192
-    /// lookahead, 0 on the paced path). The encoder's audio feeder folds this
-    /// into its silence preroll ([`audio_preroll_samples`]) to bring preview A/V
-    /// into sync (round 3 — replaced the box-unreliable `-itsoffset`).
+    /// this pipeline's clocking path (1500 on the SDK-clocked path from the #192
+    /// lookahead, 0 on the paced path). The encoder's audio feeder HOLDS each
+    /// block this long (#184 round G3, `preview_audio_hold::AudioHold`) to bring
+    /// preview A/V into sync (round 3 used a silence preroll; before it the
+    /// box-unreliable `-itsoffset`).
     lead_ms: u32,
     /// Number of connected WS viewers. `0` = the offer fast-path early-out.
     viewers: AtomicUsize,
@@ -255,12 +337,15 @@ pub struct StreamShared {
     encoder_running: AtomicBool,
     video_tx: Sender<Vec<u8>>,
     video_rx: Receiver<Vec<u8>>,
-    audio_tx: Sender<Vec<f32>>,
-    audio_rx: Receiver<Vec<f32>>,
+    audio_tx: Sender<AudioBlock>,
+    audio_rx: Receiver<AudioBlock>,
     /// Recycled 640×360 NV12 buffers (avoids a per-frame alloc while watched).
     pool: Mutex<Vec<Vec<u8>>>,
     /// fMP4 fragment relay the child's reader thread feeds and viewers read.
     relay: Arc<FragmentRelay>,
+    /// #184 G4 stage probe: 1 Hz level of the audio this tap OFFERED to the
+    /// preview (only while watched — the no-viewer fast path never touches it).
+    tap_level: SharedLevelProbe,
 }
 
 impl StreamShared {
@@ -278,6 +363,7 @@ impl StreamShared {
             audio_rx,
             pool: Mutex::new(Vec::new()),
             relay: FragmentRelay::new(RELAY_CAPACITY),
+            tap_level: SharedLevelProbe::new(Instant::now()),
         }
     }
 
@@ -305,7 +391,8 @@ impl StreamShared {
 
     /// Emit/decode-thread hot path: offer one post-mix interleaved-f32 audio
     /// block (the wall mix — karaoke/dub included). No viewer = one relaxed
-    /// load; a full channel drops the block. Never blocks the caller.
+    /// load; a full channel drops the block. Never blocks the caller. With a
+    /// viewer the block is stamped with its arrival time (#184 round G3).
     pub fn offer_audio(&self, samples: &[f32], _sample_rate: u32, channels: u32) {
         if !self.has_viewer() {
             return;
@@ -315,8 +402,32 @@ impl StreamShared {
         // would play at double speed). [`to_stereo`] upmixes mono and drops any
         // unexpected channel count.
         if let Some(block) = to_stereo(samples, channels) {
-            let _ = self.audio_tx.try_send(block);
+            // #184 G4: measure the block BEFORE it moves into the channel.
+            let now = Instant::now();
+            let level = self.tap_level.record(&block, now);
+            let sent = self.audio_tx.try_send(AudioBlock {
+                arrival: now,
+                samples: block,
+            });
+            if let Err(TrySendError::Full(_)) = sent {
+                self.tap_level.note_dropped();
+            }
+            if let Some(r) = level {
+                log_tap_level(&self.label, &r);
+            }
         }
+    }
+
+    /// Level + samples of the tap probe's still-open window (tests).
+    #[cfg(test)]
+    pub(crate) fn tap_pending(&self) -> (f32, u64) {
+        self.tap_level.pending()
+    }
+
+    /// Keep the tap probe's window open for the rest of a test.
+    #[cfg(test)]
+    pub(crate) fn hold_tap_window(&self) {
+        self.tap_level.hold_window();
     }
 
     // mutants::skip — a buffer-pool ALLOCATION optimization: every mutant here
@@ -348,11 +459,27 @@ impl StreamShared {
         }
     }
 
+    /// Feeder side (encoder child): write one tapped canvas frame to the child's
+    /// video input, then hand the buffer BACK to the tap's pool so the next
+    /// watched frame letterboxes into it (#147 round 10). Before this the feeder
+    /// dropped every written frame, the pool refilled only on a full channel,
+    /// and every watched frame was a fresh zeroed 337.5 KB allocation. The
+    /// buffer is recycled on a write error too (the pool is bounded).
+    pub fn write_frame<W: std::io::Write>(
+        &self,
+        out: &mut W,
+        frame: Vec<u8>,
+    ) -> std::io::Result<()> {
+        let written = out.write_all(&frame);
+        self.recycle(frame);
+        written
+    }
+
     /// Feeder side (encoder child): drain the video/audio backlog.
     pub fn video_receiver(&self) -> Receiver<Vec<u8>> {
         self.video_rx.clone()
     }
-    pub fn audio_receiver(&self) -> Receiver<Vec<f32>> {
+    pub fn audio_receiver(&self) -> Receiver<AudioBlock> {
         self.audio_rx.clone()
     }
     /// The fragment relay (reader thread feeds it, WS viewers read it).
@@ -364,7 +491,7 @@ impl StreamShared {
         &self.label
     }
     /// The decode-seam A/V-sync lead in ms (see the field). The encoder's audio
-    /// feeder folds this into its silence preroll ([`audio_preroll_samples`]).
+    /// feeder holds each tapped block this long (#184 round G3).
     pub fn lead_ms(&self) -> u32 {
         self.lead_ms
     }

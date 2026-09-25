@@ -1,7 +1,8 @@
 //! Rust subprocess wrappers for `lyrics_worker.py`.
 //!
 //! Two entry points:
-//!   - `preprocess_vocals(flac) → clean_wav`: Mel-Roformer + anvuew + 16 kHz
+//!   - `preprocess_vocals(vocals) → clean_wav`: anvuew dereverb + 16 kHz (the
+//!     vocals come from the stems sidecar, #144 — no BS-RoFormer isolation pass)
 //!   - `align_chunks(wav, chunks) → ChunkResults`: chunked Qwen3 alignment
 //!
 //! No post-processing, no band-aid, no duplicate-timing fixups. The
@@ -91,14 +92,16 @@ pub fn isolation_timeout(duration_ms: Option<i64>) -> std::time::Duration {
 // preprocess_vocals
 // ---------------------------------------------------------------------------
 
-/// Build the `preprocess-vocals` argv (script + flags), in order. `#162`: a CPU
-/// plan appends `--force-cpu` so the script forces in-process CPU inference
-/// (`_force_cpu()`), leaving the GPU untouched WITHOUT hiding it via
-/// `CUDA_VISIBLE_DEVICES` (which crashed the NVIDIA user-mode driver — see
-/// `HeavyStepPlan::apply`). A GPU plan appends nothing.
+/// Build the `preprocess-vocals` argv (script + flags), in order. `#144`: the
+/// input is the stems worker's vocals sidecar (`--vocals-in`), not the mix — the
+/// step is anvuew dereverb + 16 kHz resample only, the BS-RoFormer isolation
+/// pass is gone. `#162`: a CPU plan appends `--force-cpu` so the script forces
+/// in-process CPU inference (`_force_cpu()`), leaving the GPU untouched WITHOUT
+/// hiding it via `CUDA_VISIBLE_DEVICES` (which crashed the NVIDIA user-mode
+/// driver — see `HeavyStepPlan::apply`). A GPU plan appends nothing.
 fn preprocess_vocals_args(
     script_path: &Path,
-    audio_in: &Path,
+    vocals_in: &Path,
     wav_out: &Path,
     models_dir: &Path,
     work_dir: &Path,
@@ -107,8 +110,8 @@ fn preprocess_vocals_args(
     let mut args: Vec<OsString> = vec![
         script_path.as_os_str().to_owned(),
         "preprocess-vocals".into(),
-        "--audio".into(),
-        audio_in.as_os_str().to_owned(),
+        "--vocals-in".into(),
+        vocals_in.as_os_str().to_owned(),
         "--output".into(),
         wav_out.as_os_str().to_owned(),
         "--models-dir".into(),
@@ -123,9 +126,11 @@ fn preprocess_vocals_args(
     args
 }
 
-/// Run Mel-Roformer vocal isolation + anvuew de-reverb + 16 kHz mono float32
-/// resample on `audio_in`. Writes the clean WAV to `wav_out` and returns
-/// the same path on success.
+/// Run anvuew de-reverb + 16 kHz mono float32 resample on `vocals_in` — the
+/// stems worker's vocals sidecar (`{base}_audio_vocals.flac`, #184 G0). Writes
+/// the clean WAV to `wav_out` and returns the same path on success. #144: the
+/// second BS-RoFormer vocal-isolation pass is deleted — every video is already
+/// separated once by the stems worker, so the mtl aligner consumes THAT track.
 ///
 /// `work_dir` is the per-segment scratch dir for the resumable script (#171):
 /// each isolated segment WAV lands there and is skipped on resume, so a
@@ -146,7 +151,7 @@ pub async fn preprocess_vocals(
     python_path: &Path,
     script_path: &Path,
     models_dir: &Path,
-    audio_in: &Path,
+    vocals_in: &Path,
     wav_out: &Path,
     work_dir: &Path,
     timeout: std::time::Duration,
@@ -167,15 +172,14 @@ pub async fn preprocess_vocals(
             return Ok(wav_out.to_path_buf());
         }
     }
-    // #162: acquire the process-global heavy-step slot BEFORE spawning (after
-    // the cache check, so a cache hit never waits) and hold it until the child
-    // exits — at most one heavy child (isolation / mtl / separation) runs
-    // process-wide, so two workers can never OOM the box together.
-    let _slot = crate::lyrics::heavy_slot::acquire_slot("isolation").await;
+    // #144 r2: the heavy slot is acquired by the caller
+    // (`heavy_plan::isolate_with_regime` via `acquire_slot_for_spawn`) and held
+    // across the whole isolation step (incl. the GPU→CPU re-run). No acquire
+    // here — a second acquire on the same task would deadlock the Semaphore(1).
     let mut cmd = Command::new(python_path);
     cmd.args(preprocess_vocals_args(
         script_path,
-        audio_in,
+        vocals_in,
         wav_out,
         models_dir,
         work_dir,
@@ -217,9 +221,9 @@ pub async fn preprocess_vocals(
     cmd.stderr(Stdio::piped());
 
     debug!(
-        "running preprocess-vocals: {} --audio {} --output {}",
+        "running preprocess-vocals: {} --vocals-in {} --output {}",
         python_path.display(),
-        audio_in.display(),
+        vocals_in.display(),
         wav_out.display()
     );
 
@@ -521,7 +525,8 @@ mod tests {
     fn preprocess_argv(plan: &crate::lyrics::heavy_plan::HeavyStepPlan) -> Vec<String> {
         preprocess_vocals_args(
             Path::new("/tools/lyrics_worker.py"),
-            Path::new("/x/a.flac"),
+            // #144: the input is the stems worker's vocals sidecar.
+            Path::new("/cache/foo_audio_vocals.flac"),
             Path::new("/x/o.wav"),
             Path::new("/models"),
             Path::new("/x/o_isolation"),
@@ -530,6 +535,22 @@ mod tests {
         .iter()
         .map(|s| s.to_string_lossy().into_owned())
         .collect()
+    }
+
+    #[test]
+    fn preprocess_vocals_args_passes_the_stems_vocals_sidecar() {
+        // #144: the vocals come from `--vocals-in`, not `--audio` (the old mix
+        // input + BS-RoFormer isolation pass are gone).
+        let argv = preprocess_argv(&crate::lyrics::heavy_plan::HeavyStepPlan::cpu_idle());
+        let i = argv
+            .iter()
+            .position(|a| a == "--vocals-in")
+            .expect("preprocess-vocals must receive --vocals-in");
+        assert_eq!(argv[i + 1], "/cache/foo_audio_vocals.flac");
+        assert!(
+            !argv.iter().any(|a| a == "--audio"),
+            "the deleted mix-isolation input --audio must not be passed"
+        );
     }
 
     #[test]

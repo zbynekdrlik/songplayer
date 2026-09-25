@@ -2,7 +2,7 @@
 """gemini_live_translate.py — Gemini Live API voice-to-voice translation (audio→audio).
 
 The round-2 TOP audio-to-audio candidate (#175): stream the ORIGINAL English
-sermon audio into `gemini-3.5-live-translate-preview` and receive translated
+dabing audio into `gemini-3.5-live-translate-preview` and receive translated
 Slovak SPEECH that keeps the speaker's own prosody, pacing and sentence
 boundaries — the property per-sentence TTS cannot reproduce (the owner's core
 complaint was that per-sentence dubs read "ako rozprávanie príbehu", losing the

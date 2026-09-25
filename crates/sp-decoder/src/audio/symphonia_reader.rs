@@ -10,7 +10,9 @@ use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
-use symphonia::core::units::{Time, TimeBase};
+use symphonia::core::units::TimeBase;
+
+use tracing::debug;
 
 use crate::error::DecoderError;
 use crate::stream::{AudioStream, MediaStream};
@@ -20,7 +22,10 @@ use crate::types::DecodedAudioFrame;
 ///
 /// Opens a FLAC file, reports its full duration immediately from the
 /// STREAMINFO header, and yields interleaved f32 PCM samples one packet at
-/// a time. Seeks are sample-accurate.
+/// a time. Seeks are sample-accurate: symphonia's Accurate seek lands on the
+/// packet CONTAINING the target, so the reader drops the pre-target frames
+/// (`required_ts - actual_ts`, possibly across several packets) and the first
+/// sample it emits after `seek(t)` IS the sample at `t` (#148 v3).
 pub struct SymphoniaAudioReader {
     format: Box<dyn FormatReader>,
     decoder: Box<dyn Decoder>,
@@ -29,10 +34,13 @@ pub struct SymphoniaAudioReader {
     channels: u16,
     duration_ms: u64,
     time_base: TimeBase,
-    /// After a seek, the first returned packet uses this timestamp instead of
-    /// the block-boundary timestamp, giving the caller a sample-accurate view
-    /// of the requested position.
+    /// After a seek, the first returned chunk is labelled with this timestamp
+    /// instead of its packet's block-boundary timestamp. It is TRUE because
+    /// `skip_frames` trimmed everything before it.
     pending_seek_ts_ms: Option<u64>,
+    /// Decoded frames still to drop after a seek before anything is emitted
+    /// (symphonia's `required_ts - actual_ts`). May span several packets.
+    skip_frames: u64,
 }
 
 impl SymphoniaAudioReader {
@@ -79,10 +87,7 @@ impl SymphoniaAudioReader {
             .unwrap_or(TimeBase::new(1, sample_rate));
 
         let duration_ms = match codec_params.n_frames {
-            Some(n_frames) => {
-                let t = time_base.calc_time(n_frames);
-                t.seconds * 1_000 + ((t.frac * 1_000.0) as u64)
-            }
+            Some(n_frames) => ts_to_ms(time_base, n_frames),
             _ => 0,
         };
 
@@ -99,6 +104,7 @@ impl SymphoniaAudioReader {
             duration_ms,
             time_base,
             pending_seek_ts_ms: None,
+            skip_frames: 0,
         })
     }
 
@@ -167,11 +173,18 @@ impl SymphoniaAudioReader {
                 }
             }
 
+            // After a seek, drop the frames before the target. A packet wholly
+            // before it (or an empty one) carries nothing to emit.
+            trim_leading_frames(&mut interleaved, channels as usize, &mut self.skip_frames);
+            if interleaved.is_empty() {
+                continue;
+            }
+
             let ts = packet.ts();
-            let timestamp_ms = self.pending_seek_ts_ms.take().unwrap_or_else(|| {
-                let t = self.time_base.calc_time(ts);
-                t.seconds * 1_000 + (t.frac * 1_000.0) as u64
-            });
+            let timestamp_ms = self
+                .pending_seek_ts_ms
+                .take()
+                .unwrap_or_else(|| ts_to_ms(self.time_base, ts));
 
             return Ok(Some(DecodedAudioFrame {
                 data: interleaved,
@@ -189,20 +202,39 @@ impl MediaStream for SymphoniaAudioReader {
     }
 
     fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
-        let target = Time::from(std::time::Duration::from_millis(position_ms));
-        self.format
+        // Seek by the integer stream timestamp, never a float `Time`: 0.288 s
+        // as f64 times 48 000 is 13 823.99... and symphonia truncates it one
+        // frame early. `ms_to_ts` matches `StemMixReader`'s integer re-anchor.
+        let seeked = self
+            .format
             .seek(
                 SeekMode::Accurate,
-                SeekTo::Time {
-                    time: target,
-                    track_id: Some(self.track_id),
+                SeekTo::TimeStamp {
+                    ts: ms_to_ts(self.time_base, position_ms),
+                    track_id: self.track_id,
                 },
             )
             .map_err(|e| DecoderError::Seek(e.to_string()))?;
         self.decoder.reset();
-        // Remember the exact requested position so the first decoded packet
-        // reports this timestamp rather than the FLAC block boundary.
-        self.pending_seek_ts_ms = Some(position_ms);
+        // Accurate seek lands on the packet CONTAINING the target: arm the
+        // pre-target trim so the first emitted sample is the target itself, and
+        // label that first chunk with its true media time.
+        let (skip_frames, first_ms) = seek_start(
+            seeked.required_ts,
+            seeked.actual_ts,
+            position_ms,
+            self.time_base,
+        );
+        debug!(
+            position_ms,
+            required_ts = seeked.required_ts,
+            actual_ts = seeked.actual_ts,
+            skip_frames,
+            first_ms,
+            "audio seek: trimming pre-target frames"
+        );
+        self.skip_frames = skip_frames;
+        self.pending_seek_ts_ms = Some(first_ms);
         Ok(())
     }
 }
@@ -220,3 +252,56 @@ impl AudioStream for SymphoniaAudioReader {
         self.channels
     }
 }
+
+/// Media time in whole milliseconds of stream timestamp `ts`.
+fn ts_to_ms(time_base: TimeBase, ts: u64) -> u64 {
+    let t = time_base.calc_time(ts);
+    t.seconds * 1_000 + (t.frac * 1_000.0) as u64
+}
+
+/// Stream timestamp of `position_ms`, in exact integer arithmetic (floor):
+/// `position_ms * denom / (1000 * numer)`. For FLAC's `1/sample_rate` time base
+/// that is `position_ms * rate / 1000`, the same frame `StemMixReader`
+/// re-anchors on.
+fn ms_to_ts(time_base: TimeBase, position_ms: u64) -> u64 {
+    let ticks = u128::from(position_ms) * u128::from(time_base.denom);
+    let per = 1_000 * u128::from(time_base.numer);
+    u64::try_from(ticks / per).unwrap_or(u64::MAX)
+}
+
+/// What an Accurate seek leaves to do, from symphonia's `SeekedTo`: the frames
+/// to drop before the target (`required_ts - actual_ts`) and the media time (ms)
+/// of the first sample then emitted. Normally that is the requested
+/// `position_ms` itself. If the demuxer overshot (`actual_ts > required_ts`,
+/// which symphonia's FLAC reader allows on a corrupt/odd stream) nothing can be
+/// trimmed and the first sample really is at `actual_ts`, so it is labelled so.
+fn seek_start(
+    required_ts: u64,
+    actual_ts: u64,
+    position_ms: u64,
+    time_base: TimeBase,
+) -> (u64, u64) {
+    let skip_frames = required_ts.saturating_sub(actual_ts);
+    let first_ms = if actual_ts > required_ts {
+        ts_to_ms(time_base, actual_ts)
+    } else {
+        position_ms
+    };
+    (skip_frames, first_ms)
+}
+
+/// Drop up to `*skip` leading frames (`channels` interleaved samples each) from
+/// `samples`, decrementing `*skip` by the frames dropped. A trim longer than the
+/// packet empties it and carries the rest to the next packet.
+fn trim_leading_frames(samples: &mut Vec<f32>, channels: usize, skip: &mut u64) {
+    // A 0-channel spec decodes to no samples; `max(1)` only avoids a div by 0.
+    let channels = channels.max(1);
+    let frames = (samples.len() / channels) as u64;
+    let dropped = (*skip).min(frames);
+    samples.drain(..dropped as usize * channels);
+    *skip -= dropped;
+}
+
+#[cfg(test)]
+#[path = "symphonia_reader_tests.rs"]
+mod tests;

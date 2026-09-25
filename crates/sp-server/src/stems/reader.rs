@@ -192,6 +192,17 @@ pub fn open_audio_stream(
     }
 }
 
+/// The label a [`StemMixReader`] prints on its 1 Hz `stem-mix level` line
+/// (#184 G4): the reader family + stream count, then the original audio's file
+/// stem — e.g. `dub-4:Song_Artist_abc123_normalized_audio`.
+pub fn mix_reader_label(family: &str, original_path: &Path) -> String {
+    let stem = original_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    format!("{family}:{stem}")
+}
+
 /// Open `[original, vocals, instrumental]` and wrap them in a live
 /// [`StemMixReader`] fed the control's three gain atomics. Any error (open
 /// failure, rate/channel mismatch) is returned so [`open_audio_stream`] can fall
@@ -208,10 +219,13 @@ fn build_stem_reader(
     // gain_handles() is [original, vocals, instrumental] — the SAME order the
     // streams are pushed below, so gain_k applies to stream_k.
     let gains = control.gain_handles();
-    Ok(Box::new(StemMixReader::new(
-        vec![Box::new(original), Box::new(vocals), Box::new(instrumental)],
-        gains.to_vec(),
-    )?))
+    Ok(Box::new(
+        StemMixReader::new(
+            vec![Box::new(original), Box::new(vocals), Box::new(instrumental)],
+            gains.to_vec(),
+        )?
+        .with_label(mix_reader_label("song-3", original_path)),
+    ))
 }
 
 /// Open `[original, vocals, instrumental, dub]` and wrap them in a live 4-stream
@@ -232,15 +246,18 @@ fn build_dub_reader(
     // dub_gain_handles() is [original, vocals, instrumental, dub] — the SAME order
     // the streams are pushed below, so gain_k applies to stream_k.
     let gains = control.dub_gain_handles();
-    Ok(Box::new(StemMixReader::new(
-        vec![
-            Box::new(original),
-            Box::new(vocals),
-            Box::new(instrumental),
-            Box::new(dub),
-        ],
-        gains.to_vec(),
-    )?))
+    Ok(Box::new(
+        StemMixReader::new(
+            vec![
+                Box::new(original),
+                Box::new(vocals),
+                Box::new(instrumental),
+                Box::new(dub),
+            ],
+            gains.to_vec(),
+        )?
+        .with_label(mix_reader_label("dub-4", original_path)),
+    ))
 }
 
 /// Open `[original, dub]` and wrap them in a live 2-stream [`StemMixReader`] fed
@@ -259,10 +276,10 @@ fn build_dub_over_original_reader(
     // dub_over_original_gain_handles() is [original, dub] — the SAME order the
     // streams are pushed below, so gain_k applies to stream_k.
     let gains = control.dub_over_original_gain_handles();
-    Ok(Box::new(StemMixReader::new(
-        vec![Box::new(original), Box::new(dub)],
-        gains.to_vec(),
-    )?))
+    Ok(Box::new(
+        StemMixReader::new(vec![Box::new(original), Box::new(dub)], gains.to_vec())?
+            .with_label(mix_reader_label("dub-2", original_path)),
+    ))
 }
 
 #[cfg(test)]
@@ -270,6 +287,16 @@ mod tests {
     use super::*;
     use crate::stems::control::MixControl;
     use sp_core::mixer_model::MixFaders;
+
+    #[test]
+    fn mix_reader_label_is_family_then_the_audio_file_stem() {
+        let p = Path::new("cache").join("Song_Artist_abc123_normalized_audio.flac");
+        assert_eq!(
+            mix_reader_label("dub-4", &p),
+            "dub-4:Song_Artist_abc123_normalized_audio"
+        );
+        assert_eq!(mix_reader_label("song-3", Path::new("")), "song-3:");
+    }
 
     #[test]
     fn both_stems_open_all_three_regardless_of_mode() {
