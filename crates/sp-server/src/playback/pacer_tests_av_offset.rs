@@ -272,8 +272,8 @@ fn a_23_976_fps_seek_landing_25_7_ms_before_a_boundary_reads_min_0_not_minus_25_
 fn exact_24_and_25_fps_seek_landings_read_the_on_grid_sawtooth() {
     // After the landing every 4th (24 fps) / 5th (25 fps) frame presents on a
     // boundary, so the minute reads the analytic on-grid sawtooth: min 0,
-    // max one grid slot, mean 100/6 ms. The v5 code read it 25.67 ms lower
-    // (24 fps min −25.0, 25 fps min −20.0).
+    // max one grid slot, mean 100/6 ms. The v5 code read it negative — the
+    // audio trailed the off-grid picture (24 fps min −25.0, 25 fps min −20.0).
     let cases: [(fn(i64) -> i64, &str); 2] = [
         (|j: i64| FIRST_PTS + j * 10_000_000 / 24, "24 fps"),
         (|j: i64| FIRST_PTS + j * 400_000, "25 fps"),
