@@ -425,9 +425,34 @@ def test_a_spike_anywhere_is_not_a_step(av):
     assert d["max_step_ms"] >= 60.0
 
 
-def test_a_sawtooth_is_not_modelled_as_one_jump():
-    av = [0.0, 10.0, 20.0, 30.0, 0.0, 10.0, 20.0, 30.0, 0.0, 10.0]
-    assert drift.drift_and_step(_profile_of(av))["step_modeled"] is False
+@pytest.mark.parametrize(
+    "av",
+    [
+        [0, 0, 0, 60, 60, 60, 60, 0, 0, 0],  # out and back: opposite resyncs
+        [0, -10, -20, -30, 0, -10, -20, -30, 0, -10],  # periodic resync
+        [0, 0, 0, 60, 60, 60, 120, 120, 120, 120],  # two same-direction jumps
+    ],
+)
+def test_two_resyncs_are_never_one_step_and_are_counted(av):
+    # A one-step model would read these as a steep drift (e.g. -60 or
+    # +82 ms/10 s on a clock that does not drift at all).
+    d = drift.drift_and_step(_profile_of([float(x) for x in av]))
+    assert d["step_modeled"] is False, d
+    assert d["outlier_steps"] == 2, d
+
+
+def test_outlier_steps_ignore_a_spike_and_count_a_jump():
+    spike = [0.0] * 5 + [60.0] + [0.0] * 4
+    assert drift.drift_and_step(_profile_of(spike))["outlier_steps"] == 0
+    jump = [0.0] * 5 + [60.0] * 5
+    assert drift.drift_and_step(_profile_of(jump))["outlier_steps"] == 1
+
+
+def test_a_one_cycle_sawtooth_is_a_drift_plus_its_resync():
+    av = [0.0, -8.0, -16.0, -24.0, -32.0] * 2
+    d = drift.drift_and_step(_profile_of(av))
+    assert d["step_modeled"] is True, d
+    assert d["drift_ms_per_10s"] == pytest.approx(-40.0, abs=0.1)
 
 
 def test_drift_needs_two_good_windows():
@@ -449,10 +474,14 @@ def test_summary_line_carries_the_drift_fields():
             "step_at_s": 11.979,
             "windows_used": 9,
             "windows_total": 10,
+            "outlier_steps": 0,
         },
     }
     line = avs.summary_line(result)
-    assert "drift_ms_per_10s=25.0 max_step_ms=5.1 step_at_s=11.979 windows=9/10" in line
+    assert (
+        "drift_ms_per_10s=25.0 max_step_ms=5.1 step_at_s=11.979 outlier_steps=0 "
+        "windows=9/10" in line
+    )
     # The analysis-error result has no profile: the fields read None.
     err = avs.summary_line({"status": "cannot_measure", "reasons": ["x"]})
     assert "drift_ms_per_10s=None max_step_ms=None step_at_s=None" in err

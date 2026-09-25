@@ -896,6 +896,7 @@ def summary_line(result: dict) -> str:
         f"glitches={drops.get('glitch_blocks')} "
         f"drift_ms_per_10s={drift.get('drift_ms_per_10s')} "
         f"max_step_ms={drift.get('max_step_ms')} step_at_s={drift.get('step_at_s')} "
+        f"outlier_steps={drift.get('outlier_steps')} "
         f"windows={drift.get('windows_used')}/{drift.get('windows_total')} "
         f"reasons={result['reasons']}"
     )

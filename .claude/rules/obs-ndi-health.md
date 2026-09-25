@@ -526,7 +526,7 @@ and the recording actually get.
 - **Reading the output:** the CI log shows the full JSON and one line:
   `AV-SYNC status=… av_ms=… audio_corr=… video_match=… video_contrast=…
   dropouts=… dropout_ms=… glitches=… drift_ms_per_10s=… max_step_ms=…
-  step_at_s=… windows=<used>/<total> reasons=[…]`.
+  step_at_s=… outlier_steps=… windows=<used>/<total> reasons=[…]`.
   - `av_ms` > 0 means audio AHEAD of picture. `audio.offset_s` and
     `video.offset_s` are `orig_time − rec_time`.
   - `video.plateau_ms` is the video's resolution. With continuous motion it
@@ -573,25 +573,30 @@ and the recording actually get.
       - A gap one window wide means the straddling window was excluded.
       - A wider gap means several windows were excluded: the jump is
         somewhere inside the gap, not necessarily at its middle.
-    - The fit gets its own step term there (`step_modeled: true`) only if
-      all three of these hold:
-      - the step is an outlier (≥ 20 ms and ≥ 3× the median step);
-      - each side keeps ≥ 2 good windows;
-      - the one-step model `level + slope·t + step·[t ≥ t_k+1]`, with the
-        slope fitted jointly, leaves EVERY window within half the fitted
-        step.
-
-      Results:
-      - A drift followed by a resync reads its own slope plus the step. For
-        example −5 ms/window with a pull-back reads −25 ms/10 s. This is
-        the typical fault shape.
-      - A jump next to one window that is off by less than half the step is
-        still a jump.
-      - These are never split into a step: a steady drift (equal steps), a
-        one-window spike anywhere (also next to an end window), and a
-        sawtooth.
+    - `outlier_steps` counts the LASTING outlier steps. An outlier step is
+      ≥ 20 ms and ≥ 3× the median step. It is lasting unless an adjacent step
+      undoes it (their sum is < half of it): the two edges of a one-window
+      spike cancel.
+    - The fit gets its own step term there (`step_modeled: true`) only when
+      that step is the ONE lasting outlier and each side keeps ≥ 2 good
+      windows. The fit is `level + slope·t + step·[t ≥ t_k+1]`, with the
+      slope fitted jointly. Results:
+      - A drift followed by ONE resync reads its own slope plus the step,
+        e.g. −5 ms/window with a pull-back reads −25 ms/10 s. This is the
+        typical fault shape, a one-cycle sawtooth.
+      - A jump next to one bad window is still a jump.
+      - A steady drift (equal steps) and a one-window spike, anywhere
+        (including next to an end window), are never split.
+      - **`outlier_steps ≥ 2`** (two resyncs: out and back, same direction,
+        or periodic) means no step is modelled, and the slope is NOT a clock
+        drift. Out and back reads ≈ 0, and two same-direction jumps read
+        ~+80 ms/10 s. Read the per-window `av_ms`.
     - A jump in the first or last good window cannot be modelled. It shows
       as `max_step_ms`, and it bends the slope.
+    - A resync close to the 20 ms floor reads bimodally under per-window
+      noise. With ±5–7 ms, a −5 ms/window drift plus a 30 ms pull-back
+      (a raw step of 25 ms) is modelled in ~75–85 % of takes. Otherwise it
+      reads ≈ −4 instead of −25 ms/10 s. Near the floor, read the rows.
     - `coverage_low: true` means fewer than 70 % of the windows are good.
       The fit then describes only part of the take.
   - How to read it:
@@ -638,7 +643,8 @@ and the recording actually get.
   - The segment profile (`test_av_sync_profile.py`) uses bass-band noise and
     a moving picture. It covers:
     - drift, a jump, in-sync, and a realistic 100 ppm drift on 1 kHz audio;
-    - drift + resync, spikes, a sawtooth, and the end-window guards;
+    - drift + resync, two resyncs (`outlier_steps` 2), spikes, and the
+      end-window guards;
     - an excluded low-corr window, and coverage;
     - still and nearly static windows (not `video_ok`);
     - 60 fps (doubled and real) and 24 fps sources recorded at 30 fps
