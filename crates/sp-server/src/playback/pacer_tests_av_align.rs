@@ -5,9 +5,10 @@
 //! in `f32`; silence = `0.0`), so every assertion reads the media time the
 //! pacer actually put on the wire at each boundary:
 //!
-//! * the first non-silent block after start / seek starts at the emitted
-//!   frame's media time (±1 sample) — early audio is dropped, late audio is
-//!   padded with silence;
+//! * the first non-silent block after start / seek starts on the picture's
+//!   line, media `boundary − wall_start` (±1 sample; = the emitted frame's
+//!   media time when it presents on the grid, #148 v6) — early audio is
+//!   dropped, late audio is padded with silence;
 //! * nothing is emitted before the first frame;
 //! * a 24-fps source on the 30-fps grid stays within 1 ms for 60 s;
 //! * a 20 ms error (a decoder stall) converges by ≤ 48 samples per block and
