@@ -590,9 +590,10 @@ def segment_profile(
       ``video_offset``, or None when the picture was not measurable.
     ``av_ms`` = audio minus video offset of the window. ``video_ok`` = the
     window's picture had motion (contrast >= ``MIN_VIDEO_CONTRAST``) and its
-    plateau is at most ``SEGMENT_MAX_PLATEAU_FRAMES`` source frames wide. A
-    still shot covering the window leaves a wide plateau whose centre is not
-    a measurement, even when the curve drops at the search edges. A side a
+    plateau is at most ``SEGMENT_MAX_PLATEAU_FRAMES`` frames of the coarser
+    frame clock (source or recording). A still shot covering the window
+    leaves a wide plateau whose centre is not a measurement, even when the
+    curve drops at the search edges. A side a
     window cannot measure (digital silence, no frames, no shift) is None
     there, and the reason goes to that window's ``errors``.
     """
@@ -601,9 +602,11 @@ def segment_profile(
     win = int(round(window_s * sr))
     pad = int(round(search_s * sr))
     max_plateau_ms = 0.0
-    if video is not None and len(video[3]) >= 2:
-        frame_ms = float(np.median(np.diff(video[3]))) * 1000.0
-        max_plateau_ms = SEGMENT_MAX_PLATEAU_FRAMES * frame_ms
+    if video is not None and len(video[1]) >= 2 and len(video[3]) >= 2:
+        # The plateau is bounded by the COARSER frame clock: a 60 fps source
+        # recorded at 30 fps (or with doubled frames) resolves only 33 ms.
+        frame_s = max(np.median(np.diff(video[1])), np.median(np.diff(video[3])))
+        max_plateau_ms = SEGMENT_MAX_PLATEAU_FRAMES * float(frame_s) * 1000.0
     out = []
     for i0 in range(0, len(rec) - win + 1, win):
         t0 = rec_t0 + i0 / sr

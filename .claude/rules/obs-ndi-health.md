@@ -529,9 +529,10 @@ and the recording actually get.
   step_at_s=… windows=<used>/<total> reasons=[…]`.
   - `av_ms` > 0 means audio AHEAD of picture. `audio.offset_s` and
     `video.offset_s` are `orig_time − rec_time`.
-  - `video.plateau_ms` is the video's resolution. It is up to one source-frame
-    period when source and recording frame rates are equal, so ~±17 ms of the
-    measured A/V is quantization.
+  - `video.plateau_ms` is the video's resolution. With continuous motion it
+    is up to one source-frame period when source and recording frame rates
+    are equal. With sparse cuts it is up to one period of the coarser clock
+    (33 ms at 30 fps). So ~±17 ms of the measured A/V is quantization.
   - `dropouts.dropout_events[].start_s` and `glitch_times_s` are recording
     times. Glitches (relative error > 0.8, not silent) are informational only.
   - `audio.second_corr` is the best audio match more than 0.5 s away from
@@ -551,11 +552,13 @@ and the recording actually get.
     - `video_offset_s` + `video_match` + `video_contrast` +
       `video_plateau_ms`: the same global video alignment, restricted to the
       window's frames, ±300 ms around the global video offset;
-    - `video_ok`: contrast ≥ 0.002 AND a plateau no wider than 1.5 source
-      frames. A still or nearly static shot fails it: with a flat curve, or
-      a wide plateau whose edges drop only at the search limits, the
-      window's video offset is just the plateau centre. That can be tens of
-      ms off, so its `av_ms` is not a measurement;
+    - `video_ok`: contrast ≥ 0.002 AND a plateau no wider than 1.5 frames
+      of the COARSER frame clock (source or recording). A 60 fps source
+      recorded at 30 fps resolves only 33 ms, so the limit is 50 ms, not
+      25 ms. A still or nearly static shot fails it: with a flat curve, or
+      a wide plateau whose edges drop only at the search limits (e.g.
+      233 ms), the window's video offset is just the plateau centre. That
+      can be tens of ms off, so its `av_ms` is not a measurement;
     - `av_ms` and `errors` (why a side is `null` there: silence, no frames,
       no shift).
   - `drift` (`drift_and_step` in `av_sync_drift.py`): fitted over the GOOD
@@ -571,12 +574,22 @@ and the recording actually get.
       - A wider gap means several windows were excluded: the jump is
         somewhere inside the gap, not necessarily at its middle.
     - The fit gets its own step term there (`step_modeled: true`) only if
-      the step is an outlier (≥ 20 ms and ≥ 3× the median step), each side
-      keeps ≥ 2 good windows, AND the level holds (the median `av_ms` of
-      the two sides differs by ≥ half the step). A jump then does not also
-      read as a slope, even next to one bad window. A steady drift (equal
-      steps), a one-window spike, or a sawtooth (equal side medians) is
-      never split.
+      all three of these hold:
+      - the step is an outlier (≥ 20 ms and ≥ 3× the median step);
+      - each side keeps ≥ 2 good windows;
+      - the one-step model `level + slope·t + step·[t ≥ t_k+1]`, with the
+        slope fitted jointly, leaves EVERY window within half the fitted
+        step.
+
+      Results:
+      - A drift followed by a resync reads its own slope plus the step. For
+        example −5 ms/window with a pull-back reads −25 ms/10 s. This is
+        the typical fault shape.
+      - A jump next to one window that is off by less than half the step is
+        still a jump.
+      - These are never split into a step: a steady drift (equal steps), a
+        one-window spike anywhere (also next to an end window), and a
+        sawtooth.
     - A jump in the first or last good window cannot be modelled. It shows
       as `max_step_ms`, and it bends the slope.
     - `coverage_low: true` means fewer than 70 % of the windows are good.
@@ -621,14 +634,25 @@ and the recording actually get.
     error is reported as `drift.error` and on stderr, and never moves the
     verdict.
 - **Tested:** the pure functions are covered by pytest on synthetic click-train
-  plus flash-frame fixtures in Eval Checks (numpy only). The segment profile
-  (`test_av_sync_profile.py`) uses bass-band noise and a moving picture,
-  covering drift, a jump, in-sync, and an excluded low-corr window. The
-  evidence copy (`av-sync-evidence.spec.ts`) runs on a temp dir in the mock
-  suite.
+  plus flash-frame fixtures in Eval Checks (numpy only).
+  - The segment profile (`test_av_sync_profile.py`) uses bass-band noise and
+    a moving picture. It covers:
+    - drift, a jump, in-sync, and a realistic 100 ppm drift on 1 kHz audio;
+    - drift + resync, spikes, a sawtooth, and the end-window guards;
+    - an excluded low-corr window, and coverage;
+    - still and nearly static windows (not `video_ok`);
+    - 60 fps (doubled and real) and 24 fps sources recorded at 30 fps
+      (`video_ok`).
+  - The evidence copy (`av-sync-evidence.spec.ts`) runs on a temp dir in the
+    mock suite.
   - `scripts/tests/conftest.py` puts `scripts/` on `sys.path`, as on the
     box, so a script's sibling import (`av_sync_check` → `av_sync_drift`)
     resolves when a test loads the script by file path.
+  - The ffmpeg I/O layer is untested in CI by design, because that job has no
+    ffmpeg. It was checked locally against ffmpeg-muxed mkv and mp4 AAC
+    "recordings" with known offsets (+120 → 116, 0 → −3/−4, −80 → −83 ms,
+    and an 85 ms zeroed stretch → a dropout), with both ffmpeg 6.1 and the
+    BtbN master build.
   - The real ffmpeg path of the profile was checked locally (ffmpeg 6.1,
     25.9.2026). The original was a testsrc2 1920×960 at 25 fps plus pink
     noise low-passed to 1.5 kHz. The recording was an mkv letterboxed to
@@ -637,11 +661,7 @@ and the recording actually get.
     - every window had corr ≥ 0.98 and a 6 ms video plateau;
     - `max_step_ms=60.0 step_at_s=11.979 step_modeled=true`, drift 0.0;
     - the whole-take verdict was `cannot_measure` (corr 0.596), as on the
-      release run. The ffmpeg I/O layer
-  is untested in CI by design, because that job has no ffmpeg. It was checked
-  locally against ffmpeg-muxed mkv and mp4 AAC "recordings" with known offsets
-  (+120 → 116, 0 → −3/−4, −80 → −83 ms, and an 85 ms zeroed stretch → a
-  dropout). It was checked with both ffmpeg 6.1 and the BtbN master build.
+      release run.
 - **Blind spot:** the reference is the sidecar pair itself. An offset baked
   into the sidecars at download/normalize time is invisible to this gate.
 - **Unverified until the first box run:** the thresholds (0.95 match, 0.002

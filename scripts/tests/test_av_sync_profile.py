@@ -50,8 +50,11 @@ REC_T0 = -0.021
 START = 21.4  # original time shown at recording time 0
 
 
-def _original(seed: int = 5, band_hz: float | None = 60.0):
-    """``band_hz`` None = broadband noise, else noise low-passed to ``band_hz``."""
+def _original(
+    seed: int = 5, band_hz: float | None = 60.0, fps: float = ORIG_FPS, hold: int = 1
+):
+    """``band_hz`` None = broadband noise, else noise low-passed to ``band_hz``.
+    The picture runs at ``fps`` and changes every ``hold`` frames."""
     rng = np.random.default_rng(seed)
     n = int(ORIG_S * SR)
     audio = rng.standard_normal(n)
@@ -62,8 +65,9 @@ def _original(seed: int = 5, band_hz: float | None = 60.0):
     block = SR // 10
     env = np.repeat(rng.uniform(0.2, 1.0, n // block + 1), block)[:n]
     audio = audio / audio.std() * 0.1 * env
-    pts = np.arange(int(ORIG_S * ORIG_FPS)) / ORIG_FPS
+    pts = np.arange(int(ORIG_S * fps)) / fps
     frames = rng.uniform(0, 255, size=(len(pts), 32, 64))
+    frames = frames[(np.arange(len(pts)) // hold) * hold]
     return audio, frames, pts
 
 
@@ -335,6 +339,23 @@ def test_a_still_shot_window_is_not_video_ok(still):
     assert d["drift_ms_per_10s"] == pytest.approx(0.0, abs=5.0), d
 
 
+@pytest.mark.parametrize(
+    ("fps", "hold"),
+    [
+        (60.0, 2),  # a 60 fps file carrying 30 fps content, recorded at 30
+        (60.0, 1),  # true 60 fps, recorded at 30
+        (24.0, 1),  # film rate, recorded at 30
+    ],
+)
+def test_a_moving_picture_is_video_ok_at_common_frame_rates(fps, hold):
+    # The plateau is bounded by the coarser clock (the 30 fps recording
+    # here), so a fine source clock must not fail every window.
+    audio, frames, pts = _original(fps=fps, hold=hold)
+    prof = _profile(audio, frames, pts, *_recording(audio, frames, pts, _const(0.0)))
+    assert all(s["video_ok"] for s in prof), prof
+    assert drift.drift_and_step(prof)["windows_used"] == 10
+
+
 def test_a_nearly_static_window_is_not_video_ok():
     # Almost no motion (a slow fade): the curve has a unique but tiny peak.
     # The plateau is narrow, yet the contrast is below MIN_VIDEO_CONTRAST.
@@ -371,6 +392,37 @@ def test_a_jump_next_to_one_bad_window_is_still_a_jump():
     assert d["step_modeled"] is True
     assert d["max_step_ms"] == pytest.approx(60.0)
     assert abs(d["drift_ms_per_10s"]) < 10.0, d
+
+
+@pytest.mark.parametrize(
+    ("av", "slope"),
+    [
+        # A drift, then a resync that pulls it back: the typical fault shape.
+        ([0, -5, -10, -15, -20, -25, 0, -5, -10, -15], -25.0),
+        ([-5.0 * i + (40.0 if i >= 3 else 0.0) for i in range(10)], -25.0),
+        ([-10.0 * i + (60.0 if i >= 5 else 0.0) for i in range(10)], -50.0),
+        # A jump in the same direction as the drift.
+        ([5.0 * i + (60.0 if i >= 6 else 0.0) for i in range(10)], 25.0),
+    ],
+)
+def test_a_drift_with_a_resync_reads_its_drift_and_the_step(av, slope):
+    d = drift.drift_and_step(_profile_of([float(x) for x in av]))
+    assert d["step_modeled"] is True, d
+    assert d["drift_ms_per_10s"] == pytest.approx(slope, abs=0.1), d
+
+
+@pytest.mark.parametrize(
+    "av",
+    [
+        [0.0] * 5 + [60.0] + [0.0] * 4,  # mid-take
+        [0.0] * 8 + [60.0, 0.0],  # next to the last window
+        [0.0, 60.0] + [-1.0] * 8,  # next to the first window
+    ],
+)
+def test_a_spike_anywhere_is_not_a_step(av):
+    d = drift.drift_and_step(_profile_of(av))
+    assert d["step_modeled"] is False, d
+    assert d["max_step_ms"] >= 60.0
 
 
 def test_a_sawtooth_is_not_modelled_as_one_jump():

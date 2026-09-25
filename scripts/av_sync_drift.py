@@ -19,20 +19,53 @@ import numpy as np
 SEGMENT_MIN_CORR = 0.8  # a window below this audio corr is left out of the fit
 STEP_MIN_MS = 20.0  # a step term is fitted only for a step at least this big
 STEP_OUTLIER_X = 3.0  # ... and at least this many times the median step
-STEP_PERSIST = 0.5  # ... whose level holds: side medians differ >= 0.5 x step
+STEP_MAX_RESIDUAL = 0.5  # ... and no window is off the fit by >= 0.5 x the step
 MIN_COVERAGE = 0.7  # below this share of good windows, coverage_low is set
 
 
 def good_window(s: dict, min_corr: float = SEGMENT_MIN_CORR) -> bool:
     """A window the fit trusts: its audio matched the original (corr >=
     ``min_corr``) and its picture was measurable (``video_ok``: motion, and a
-    plateau no wider than about one source frame)."""
+    plateau no wider than ~1.5 frames of the coarser frame clock)."""
     return (
         s["av_ms"] is not None
         and s["audio_corr"] is not None
         and s["audio_corr"] >= min_corr
         and s["video_ok"] is True
     )
+
+
+def _step_holds(
+    t: np.ndarray, av: np.ndarray, steps: np.ndarray, k: int
+) -> tuple[bool, np.ndarray | None]:
+    """Whether the step between good windows ``k`` and ``k + 1`` is a lasting
+    jump, and the ``[level, slope, step]`` fit if so.
+
+    It must be:
+    * an outlier: >= ``STEP_MIN_MS`` and >= ``STEP_OUTLIER_X`` x the median
+      step (a steady drift has equal steps and never qualifies);
+    * flanked by >= 2 good windows on each side;
+    * a real level change once the drift is removed. In the fit
+      ``av = level + slope * t + step * [t >= t_k+1]``, EVERY window lies
+      within ``STEP_MAX_RESIDUAL`` x ``|step|`` of the fit. A spike (anywhere,
+      also next to an end window) or a sawtooth leaves a window far off a
+      one-step model. The slope is fitted jointly, so a drift followed by a
+      resync against it still reads as its drift. One bad window off by
+      half the step or more also blocks the step term: ``max_step_ms``
+      still shows the jump.
+    """
+    n_before, n_after = k + 1, len(av) - (k + 1)
+    floor = max(STEP_MIN_MS, STEP_OUTLIER_X * float(np.median(steps)))
+    if steps[k] < floor or n_before < 2 or n_after < 2:
+        return False, None
+    after = (t >= t[k + 1]).astype(np.float64)
+    cols = np.stack([np.ones_like(t), t, after], axis=1)
+    coef = np.linalg.lstsq(cols, av, rcond=None)[0]
+    step = abs(float(coef[2]))
+    residual = float(np.max(np.abs(av - cols @ coef)))
+    if residual >= STEP_MAX_RESIDUAL * step:
+        return False, None
+    return True, coef
 
 
 def drift_and_step(profile: list[dict], min_corr: float = SEGMENT_MIN_CORR) -> dict:
@@ -45,13 +78,12 @@ def drift_and_step(profile: list[dict], min_corr: float = SEGMENT_MIN_CORR) -> d
       window, and ``step_at_s`` its middle. A gap wider than one window means
       windows between them were excluded, so the jump is somewhere inside it.
     * ``drift_ms_per_10s``: a least-squares slope of av_ms over time. The fit
-      gets its own step term at the largest step (``step_modeled``) when the
-      step is an outlier (>= ``STEP_MIN_MS`` and >= ``STEP_OUTLIER_X`` x the
-      median step), each side keeps >= 2 good windows, and the level HOLDS:
-      the medians of the two sides differ by >= ``STEP_PERSIST`` x the step.
-      A jump then reads as a step with a flat slope. A steady drift (equal
-      steps), a one-window spike or a sawtooth (equal side medians) is never
-      split. A jump in an end window cannot be modelled: it shows as
+      gets its own step term at the largest step (``step_modeled``, see
+      ``_step_holds``) when the step is an outlier and its level HOLDS once
+      the drift is removed. A jump then reads as a step with a flat slope,
+      and a drift followed by a resync as the drift's own slope plus the
+      step. A steady drift (equal steps), a one-window spike or a sawtooth is
+      never split. A jump in an end window cannot be modelled: it shows as
       ``max_step_ms`` and bends the slope.
     * ``coverage_low``: fewer than ``MIN_COVERAGE`` of the windows are good.
       A fast drift smears its windows below ``min_corr``, so then read the
@@ -77,18 +109,10 @@ def drift_and_step(profile: list[dict], min_corr: float = SEGMENT_MIN_CORR) -> d
     av = np.array([s["av_ms"] for s in good], dtype=np.float64)
     steps = np.abs(np.diff(av))
     k = int(np.argmax(steps))
-    before, after = av[: k + 1], av[k + 1 :]
-    floor = max(STEP_MIN_MS, STEP_OUTLIER_X * float(np.median(steps)))
-    modeled = (
-        steps[k] >= floor
-        and len(before) >= 2
-        and len(after) >= 2
-        and abs(float(np.median(after) - np.median(before))) >= STEP_PERSIST * steps[k]
-    )
-    cols = [np.ones_like(t), t]
-    if modeled:
-        cols.append((t >= t[k + 1]).astype(np.float64))
-    coef = np.linalg.lstsq(np.stack(cols, axis=1), av, rcond=None)[0]
+    modeled, coef = _step_holds(t, av, steps, k)
+    if not modeled:
+        cols = np.stack([np.ones_like(t), t], axis=1)
+        coef = np.linalg.lstsq(cols, av, rcond=None)[0]
     gap = [round(float(t_end[k]), 3), round(float(t[k + 1]), 3)]
     out.update(
         drift_ms_per_10s=round(float(coef[1]) * 10.0, 1),
