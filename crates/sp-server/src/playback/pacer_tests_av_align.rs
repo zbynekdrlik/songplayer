@@ -399,13 +399,14 @@ fn a_20_ms_error_converges_at_most_48_samples_per_block_and_stops_at_1_ms() {
     );
     assert_eq!(errs[52], -960, "the stall leaves the audio 20 ms behind");
     // Converge by exactly 48 samples per block: -960 → -912 → … → -48.
-    for i in 53..=71 {
+    for (i, w) in errs.windows(2).enumerate().skip(52).take(19) {
         assert_eq!(
-            errs[i] - errs[i - 1],
+            w[1] - w[0],
             48,
-            "block {i}: the correction step is 48 samples (err {} → {})",
-            errs[i - 1],
-            errs[i]
+            "block {}: the correction step is 48 samples (err {} → {})",
+            i + 1,
+            w[0],
+            w[1]
         );
     }
     assert_eq!(errs[71], -48, "converged to 1 ms");
