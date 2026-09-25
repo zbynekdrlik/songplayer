@@ -7,9 +7,6 @@
 //! exercised here by arming the trim directly on a real decoder.
 
 use super::*;
-// The parent's private `use` aliases are not guaranteed through the glob.
-use crate::stream::AudioStream;
-use symphonia::core::units::TimeBase;
 
 /// Decode a ramp sample (24-bit `n`, decoded as `n / 2^23`) to its frame index.
 fn ramp_index(sample: f32) -> i64 {
@@ -33,6 +30,19 @@ fn ts_to_ms_converts_stream_timestamps() {
     assert_eq!(ts_to_ms(tb, 60_000), 1_250);
     // Fraction only: 4096 / 48 000 s = 85.33 ms, truncated.
     assert_eq!(ts_to_ms(tb, 4_096), 85);
+}
+
+#[test]
+fn ms_to_ts_is_exact_integer_floor() {
+    let tb = TimeBase::new(1, 48_000);
+    // The float path (`SeekTo::Time`) gives 13 823 for 288 ms; this must not.
+    assert_eq!(ms_to_ts(tb, 288), 13_824);
+    assert_eq!(ms_to_ts(tb, 1_000), 48_000);
+    assert_eq!(ms_to_ts(tb, 0), 0);
+    // 44.1 kHz floors: 1 ms = 44.1 frames -> 44.
+    assert_eq!(ms_to_ts(TimeBase::new(1, 44_100), 1), 44);
+    // A non-unit numerator divides: a tick of 2/48 000 s is two frames.
+    assert_eq!(ms_to_ts(TimeBase::new(2, 48_000), 1_000), 24_000);
 }
 
 #[test]
@@ -88,6 +98,15 @@ fn trim_leading_frames_spans_several_packets() {
     trim_leading_frames(&mut p3, 2, &mut skip);
     assert_eq!(p3, packet(12), "no trim once the skip is spent");
     assert_eq!(skip, 0);
+}
+
+#[test]
+fn trim_leading_frames_with_zero_channels_does_not_panic() {
+    let mut skip = 5;
+    let mut empty: Vec<f32> = Vec::new();
+    trim_leading_frames(&mut empty, 0, &mut skip);
+    assert!(empty.is_empty());
+    assert_eq!(skip, 5, "nothing to drop, the skip carries over");
 }
 
 #[test]
