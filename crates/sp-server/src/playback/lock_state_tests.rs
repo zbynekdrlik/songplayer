@@ -318,6 +318,9 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             av_align_err_ms: -12.5,
             av_corrections: 3,
             av_corrected_samples: 144,
+            av_frame_offset_ms: -26.4,
+            av_frame_offset_min_ms: -31.5,
+            av_frame_offset_max_ms: -20.7,
             wall_anchor_max_step_us: 40_012,
             wall_anchor_wide_brackets: 2,
             wall_anchor_slewed_us: 3_000,
@@ -360,6 +363,10 @@ fn format_genlock_line_contains_every_key_token() {
         "av_align_err_ms=-12.5",
         "av_corrections=3",
         "av_corrected_samples=144",
+        // #148 v5: SongPlayer's own emitted audio-block − frame-pts relation.
+        "av_frame_offset_ms=-26.4",
+        "av_frame_offset_min_ms=-31.5",
+        "av_frame_offset_max_ms=-20.7",
         // #147: the pacer wall's anchor telemetry.
         "wall_anchor_max_step_us=40012",
         "wall_anchor_wide_brackets=2",
