@@ -791,8 +791,8 @@ Now:
     the first real sample plays at its media time (±1 sample).
   - With too little buffered to drop, the block stays silent and the drop is
     retried on the next boundary.
-  - A pad larger than the 2 s cap is refused: silence until it comes within
-    reach, never an unbounded allocation.
+  - A pad that would take pad + buffered audio past the 2 s cap is refused
+    (the cap trim would eat the fresh padding): silence until it fits, never an unbounded allocation.
 - **Continuous correction** (`correction_for`) is the ONLY controller. It
   engages when |err| > 240 samples (5 ms), moves ≤ 48 samples per block, and
   stops at |err| ≤ 48 (1 ms). A drop or insert of d samples reads n ± d inputs

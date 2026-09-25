@@ -207,17 +207,19 @@ impl AudioGridBuffer {
     /// (negative). `aligned` is false while fewer samples are buffered than
     /// must be dropped (all of them are dropped; the rest on a later call), and
     /// it is `(false, 0)` with nothing touched when there is no media head or
-    /// the pad would exceed the 2 s cap.
+    /// the pad plus the buffered audio would exceed the 2 s cap. (Audio that
+    /// sits persistently more than 2 s after the picture therefore stays
+    /// silent — bounded, never an unbounded allocation.)
     pub fn align_to(&mut self, expected: i64) -> (bool, i64) {
         let Some(head) = self.head else {
             return (false, 0);
         };
         let diff = expected - head;
         let pad = (-diff).max(0);
-        if pad > self.cap_samples as i64 {
-            // The audio starts more than the 2 s cap after the picture: stay
-            // silent (nothing touched) until the expected time comes in reach,
-            // never allocate an unbounded run of silence.
+        if pad + self.level_samples() as i64 > self.cap_samples as i64 {
+            // Padding + the buffered audio would not fit the 2 s cap (the next
+            // push's cap trim would drain the fresh padding again): stay silent,
+            // nothing touched, until the expected time comes within reach.
             return (false, 0);
         }
         self.pad_front(pad as usize);
