@@ -6,9 +6,12 @@ paths:
   - "e2e/ndi-health-gate.ts"
   - "e2e/post-deploy-av-sync.spec.ts"
   - "e2e/av-sync-gate.ts"
+  - "e2e/av-sync-evidence.ts"
   - "e2e/obs-driver.ts"
   - "scripts/av_sync_check.py"
+  - "scripts/av_sync_drift.py"
   - "scripts/tests/test_av_sync_check.py"
+  - "scripts/tests/test_av_sync_profile.py"
 ---
 
 # OBS ↔ NDI health & receiver recovery (#127)
@@ -364,12 +367,39 @@ and the recording actually get.
 
     A `fail` is never retaken. Neither is an audio-side `cannot_measure`,
     which can be a real audio fault. A retake starts only while less than
-    120 s of the 300 s budget is used, so a full worst-case take still fits.
+    110 s of the 300 s budget is used, so a full worst-case take (including
+    copying the evidence) still fits.
     The run is classified by `classifyAvSyncRun`: the stdout JSON and the exit
     code must agree. Missing JSON (a numpy import failure, an argparse error)
     is `error`, not a verdict.
-  - It deletes every recording plus its auto-remux sibling. When the profile's
-    `Video/AutoRemux` is on, an mkv also leaves `<base>.mp4`.
+  - It deletes every recording plus its auto-remux sibling from the OBS
+    folder. When the profile's `Video/AutoRemux` is on, an mkv also leaves
+    `<base>.mp4`.
+  - **A take that did not pass keeps its evidence first.** That is every
+    analysed take whose result is `fail`, `cannot_measure`, `error`, or an
+    analysis that threw (`keepsEvidence`). A take discarded because the song
+    changed keeps nothing. The recording, its remux sibling (copied only
+    once its size stops growing), the analysis JSON (`av_sync.json`) and its
+    stderr (or `analysis-error.txt`) are copied into the Playwright output
+    dir as `take<N>-<name>` (`e2e/av-sync-evidence.ts`). It never throws: a
+    failed copy is a `console.error`. A pass keeps no copy.
+    - **Where it lands in CI:** the E2E job's "Upload post-deploy Playwright
+      report on failure" step uploads `e2e/test-results/` as the
+      `post-deploy-playwright-report` artifact (7 days). Open the run →
+      Artifacts → `post-deploy-playwright-report` →
+      `test-results/post-deploy-av-sync-…-chromium/av-sync-evidence/`
+      (`take1-<date>.mkv`, `take1-<date>.mp4`, `take1-av_sync.json`,
+      `take1-av_sync.stderr.txt`). The size per file is not measured yet
+      (the design estimate is ~15 MB per failing run). Playwright wipes
+      `test-results/` at the start of the next run, so nothing piles up on
+      the box.
+    - It is uploaded only when the JOB fails. A take that failed to measure
+      and was then followed by a passing retake leaves the job green, and
+      its copy is not uploaded.
+    - The repo is PUBLIC, so any GitHub user can download the artifact for
+      7 days. It holds 20 s of the OBS program picture + program audio,
+      which includes any other source live in the program mix at that
+      moment.
     `removeRecording` waits for the remux and retries while OBS still holds
     the file. An undeletable file fails the test after the verdict, never
     masking it.
@@ -495,12 +525,14 @@ and the recording actually get.
     It FAILS the job and is never a skip.
 - **Reading the output:** the CI log shows the full JSON and one line:
   `AV-SYNC status=… av_ms=… audio_corr=… video_match=… video_contrast=…
-  dropouts=… glitches=… reasons=[…]`.
+  dropouts=… dropout_ms=… glitches=… drift_ms_per_10s=… max_step_ms=…
+  step_at_s=… outlier_steps=… windows=<used>/<total> reasons=[…]`.
   - `av_ms` > 0 means audio AHEAD of picture. `audio.offset_s` and
     `video.offset_s` are `orig_time − rec_time`.
-  - `video.plateau_ms` is the video's resolution. It is up to one source-frame
-    period when source and recording frame rates are equal, so ~±17 ms of the
-    measured A/V is quantization.
+  - `video.plateau_ms` is the video's resolution. With continuous motion it
+    is up to one source-frame period when source and recording frame rates
+    are equal. With sparse cuts it is up to one period of the coarser clock
+    (33 ms at 30 fps). So ~±17 ms of the measured A/V is quantization.
   - `dropouts.dropout_events[].start_s` and `glitch_times_s` are recording
     times. Glitches (relative error > 0.8, not silent) are informational only.
   - `audio.second_corr` is the best audio match more than 0.5 s away from
@@ -508,12 +540,134 @@ and the recording actually get.
     shows up as a low video match (`cannot_measure`), never as a false pass.
   - Baseline on 24.9.2026 (manual): A/V +13 ms, corr 0.997, match 0.999,
     0 dropouts.
+- **Per-segment profile — drift vs jump (diagnostics only, #147).** One
+  whole-take A/V number cannot tell a clock that drifts from a resync that
+  jumps. Release run 36068121677 read av_ms 60.5, corr 0.899 and glitches
+  only from 12.5 s. The JSON therefore carries two extra fields:
+  - `segments` (`segment_profile` in `av_sync_check.py`): one row per 2 s
+    window of the recording. Each row has:
+    - `t_s` / `t_end_s`: the window, in recording time;
+    - `audio_offset_s` + `audio_corr`: that window's audio cross-correlated
+      against the original, searched ±300 ms around the global audio offset;
+    - `video_offset_s` + `video_match` + `video_contrast` +
+      `video_plateau_ms`: the same global video alignment, restricted to the
+      window's frames, ±300 ms around the global video offset;
+    - `video_ok`: contrast ≥ 0.002 AND a plateau no wider than 1.5 frames
+      of the COARSER frame clock (source or recording). A 60 fps source
+      recorded at 30 fps resolves only 33 ms, so the limit is 50 ms, not
+      25 ms. A still or nearly static shot fails it: with a flat curve, or
+      a wide plateau whose edges drop only at the search limits (e.g.
+      233 ms), the window's video offset is just the plateau centre. That
+      can be tens of ms off, so its `av_ms` is not a measurement;
+    - `av_ms` and `errors` (why a side is `null` there: silence, no frames,
+      no shift).
+  - `drift` (`drift_and_step` in `av_sync_drift.py`): fitted over the GOOD
+    windows (`windows_used` of `windows_total`). A good window has
+    `audio_corr ≥ 0.8` and `video_ok`.
+    - `drift_ms_per_10s` is the least-squares slope of `av_ms`.
+    - `max_step_ms` is the largest `av_ms` change between neighbouring good
+      windows. `step_gap_s` is `[end of the earlier, start of the later]`
+      window, and `step_at_s` its middle.
+      - A zero-width gap means the jump is on that window boundary. A jump
+        inside a window lands on one side of it.
+      - A gap one window wide means the straddling window was excluded.
+      - A wider gap means several windows were excluded: the jump is
+        somewhere inside the gap, not necessarily at its middle.
+    - `outlier_steps` counts the LASTING outlier steps. An outlier step is
+      ≥ 20 ms and ≥ 3× the median step. It is lasting unless an adjacent step
+      undoes it (their sum is < half of it): the two edges of a one-window
+      spike cancel.
+    - The fit gets its own step term there (`step_modeled: true`) only when
+      that step is the ONE lasting outlier and each side keeps ≥ 2 good
+      windows. The fit is `level + slope·t + step·[t ≥ t_k+1]`, with the
+      slope fitted jointly. Results:
+      - A drift followed by ONE resync reads its own slope plus the step,
+        e.g. −5 ms/window with a pull-back reads −25 ms/10 s. This is the
+        typical fault shape, a one-cycle sawtooth.
+      - A jump next to one bad window is still a jump.
+      - A steady drift (equal steps) and a one-window spike, anywhere
+        (including next to an end window), are never split.
+      - **`outlier_steps ≥ 2`** (two resyncs: out and back, same direction,
+        or periodic) means no step is modelled, and the slope is NOT a clock
+        drift. Out and back reads ≈ 0, and two same-direction jumps read
+        ~+80 ms/10 s. Read the per-window `av_ms`.
+    - A jump in the first or last good window cannot be modelled. It shows
+      as `max_step_ms`, and it bends the slope.
+    - A resync close to the 20 ms floor reads bimodally under per-window
+      noise. With ±5–7 ms, a −5 ms/window drift plus a 30 ms pull-back
+      (a raw step of 25 ms) is modelled in ~75–85 % of takes. Otherwise it
+      reads ≈ −4 instead of −25 ms/10 s. Near the floor, read the rows.
+    - `coverage_low: true` means fewer than 70 % of the windows are good.
+      The fit then describes only part of the take.
+  - How to read it:
+    - **Steady drift** (an unsynchronized clock, #148 / #55): a slope, small
+      equal steps, `step_modeled: false`. 50 ms over 20 s reads ≈ 25 ms/10 s.
+    - **Jump / resync:** `step_modeled: true`, `max_step_ms` ≈ the jump at
+      `step_at_s`, slope ≈ 0.
+    - **Constant offset** (e.g. a fixed latency): slope ≈ 0, no step, every
+      window's `av_ms` ≈ the global one.
+    - **A window with low `audio_corr`** is either where the audio itself
+      changed (glitches, a gap: compare its `t_s` with `glitch_times_s`) or
+      a drift fast enough to smear the window (next point). Its raw
+      `av_ms` is still in `segments`: when `coverage_low` is set or the low
+      windows sit at one end, read their `av_ms` trend. The fit leaves them
+      out, so a drift that STARTS mid-take can read "no drift, no step" over
+      the good windows alone.
+  - Per-window `av_ms` jitters by a few ms when the picture has few cuts:
+    a 2 s window has far fewer frames than the whole take. Read a trend
+    over several windows, not one window.
+  - **Limit, measured on the pytest fixture (25.9.2026):** a drift smears
+    the alignment inside ONE 2 s window by ±(ppm × 1 µs). How much smear
+    the per-window correlation survives depends on how high the audio's
+    energy goes. Values are median window corr and good windows of 10:
+    - white noise up to 4 kHz: 50 ppm → 0.83 (6), 100 ppm → 0.62 (0);
+    - noise up to 2 kHz: 100 ppm → 0.86 (10), 200 ppm → 0.68 (0);
+    - noise up to 1 kHz: 200 ppm → 0.90 (10), 300 ppm → 0.82 (8),
+      500 ppm → 0.61 (0);
+    - noise up to 500 Hz: 500 ppm → 0.87 (10).
+
+    Whenever windows are used, the slope is right: e.g. 1 kHz at 300 ppm
+    reads 3.0 ms/10 s. The pytest
+    `test_a_realistic_clock_drift_on_music_band_audio` pins 1 kHz at
+    100 ppm.
+
+    Music at 8 kHz carries most of its energy below 1 kHz. A clock error of
+    a few hundred ppm can still push bright material under 0.8. `drift` then
+    stays `null` (or `coverage_low`) instead of fitting a slope through
+    windows that do not match. Read the raw per-window `av_ms` then.
+  - The verdict and its thresholds do not read these fields. A profile
+    error is reported as `drift.error` and on stderr, and never moves the
+    verdict.
 - **Tested:** the pure functions are covered by pytest on synthetic click-train
-  plus flash-frame fixtures in Eval Checks (numpy only). The ffmpeg I/O layer
-  is untested in CI by design, because that job has no ffmpeg. It was checked
-  locally against ffmpeg-muxed mkv and mp4 AAC "recordings" with known offsets
-  (+120 → 116, 0 → −3/−4, −80 → −83 ms, and an 85 ms zeroed stretch → a
-  dropout). It was checked with both ffmpeg 6.1 and the BtbN master build.
+  plus flash-frame fixtures in Eval Checks (numpy only).
+  - The segment profile (`test_av_sync_profile.py`) uses bass-band noise and
+    a moving picture. It covers:
+    - drift, a jump, in-sync, and a realistic 100 ppm drift on 1 kHz audio;
+    - drift + resync, two resyncs (`outlier_steps` 2), spikes, and the
+      end-window guards;
+    - an excluded low-corr window, and coverage;
+    - still and nearly static windows (not `video_ok`);
+    - 60 fps (doubled and real) and 24 fps sources recorded at 30 fps
+      (`video_ok`).
+  - The evidence copy (`av-sync-evidence.spec.ts`) runs on a temp dir in the
+    mock suite.
+  - `scripts/tests/conftest.py` puts `scripts/` on `sys.path`, as on the
+    box, so a script's sibling import (`av_sync_check` → `av_sync_drift`)
+    resolves when a test loads the script by file path.
+  - The ffmpeg I/O layer is untested in CI by design, because that job has no
+    ffmpeg. It was checked locally against ffmpeg-muxed mkv and mp4 AAC
+    "recordings" with known offsets (+120 → 116, 0 → −3/−4, −80 → −83 ms,
+    and an 85 ms zeroed stretch → a dropout), with both ffmpeg 6.1 and the
+    BtbN master build.
+  - The real ffmpeg path of the profile was checked locally (ffmpeg 6.1,
+    25.9.2026). The original was a testsrc2 1920×960 at 25 fps plus pink
+    noise low-passed to 1.5 kHz. The recording was an mkv letterboxed to
+    1080 at 30 fps, AAC, whose audio jumps +60 ms at rec 12 s. The result:
+    - windows 1–6 read −17.0 ms and 7–10 read +43.0 ms;
+    - every window had corr ≥ 0.98 and a 6 ms video plateau;
+    - `max_step_ms=60.0 step_at_s=11.979 step_modeled=true`, drift 0.0;
+    - the whole-take verdict was `cannot_measure` (corr 0.596), as on the
+      release run.
 - **Blind spot:** the reference is the sidecar pair itself. An offset baked
   into the sidecars at download/normalize time is invisible to this gate.
 - **Unverified until the first box run:** the thresholds (0.95 match, 0.002

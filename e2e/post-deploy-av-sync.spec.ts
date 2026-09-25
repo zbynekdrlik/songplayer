@@ -27,6 +27,13 @@
  * never touched (`startRecord` refuses). The SONG mixer faders are set to
  * unity for the measurement and restored after.
  *
+ * Evidence: a take that was analysed and did NOT pass (fail, cannot_measure,
+ * an analysis error) is copied first, with its auto-remux sibling, the
+ * analysis JSON and its stderr, into the Playwright output dir
+ * (`e2e/test-results/<test>/av-sync-evidence/take<N>-*`). The CI upload step
+ * keeps that dir when the job fails. The OBS folder itself is still emptied,
+ * so a pass leaves no copy anywhere.
+ *
  * afterAll is the safety net for a test body that timed out. In order, it:
  * - kills the analysis;
  * - settles a pending start (at most 10 s);
@@ -51,9 +58,11 @@ import * as fs from "fs";
 import * as path from "path";
 import { ObsDriver } from "./obs-driver";
 import { pickBaselineScene } from "./obs-baseline-scene";
+import { keepRecording, keepText, type Evidence } from "./av-sync-evidence";
 import {
   classifyAvSyncRun,
   isPlayingWithFrames,
+  keepsEvidence,
   nowPlayingVideoId,
   recordingFiles,
   resolveSidecars,
@@ -77,8 +86,8 @@ const MAX_TAKES = 3;
 const TEST_TIMEOUT_MS = 300_000;
 // A retake starts only while this much of the budget has been used. A full
 // worst-case take (skip 15 + play 30 + record 20 + stop 10 + analysis 60 +
-// cleanup 35 s) then still fits within TEST_TIMEOUT_MS.
-const RETAKE_BEFORE_MS = 120_000;
+// cleanup 35 + evidence copy 2 x 5 s) then still fits within TEST_TIMEOUT_MS.
+const RETAKE_BEFORE_MS = 110_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -119,6 +128,8 @@ function killTree(child: ChildProcess): void {
 /**
  * Delete a recording and, with auto-remux on, its `<base>.mp4` sibling.
  * - Waits up to `siblingWaitMs` for the remux to produce the sibling.
+ * - With `keep` (a take that did not pass), copies the files into the
+ *   evidence dir first.
  * - Retries while OBS still holds a file (Windows EBUSY/EPERM).
  * - Re-checks that nothing is left.
  * Returns the paths still present. A sibling that never appeared is logged
@@ -128,15 +139,17 @@ async function removeRecording(
   outputPath: string,
   autoRemux: boolean,
   siblingWaitMs: number,
+  keep: Evidence | null = null,
 ): Promise<string[]> {
   const files = recordingFiles(outputPath, autoRemux);
+  const siblingDeadline = Date.now() + siblingWaitMs;
   if (files.length > 1) {
-    const deadline = Date.now() + siblingWaitMs;
-    while (!fs.existsSync(files[1]) && Date.now() < deadline) await sleep(500);
+    while (!fs.existsSync(files[1]) && Date.now() < siblingDeadline) await sleep(500);
     if (!fs.existsSync(files[1])) {
       console.warn(`A/V gate: auto-remux is on but ${files[1]} has not appeared (yet)`);
     }
   }
+  if (keep) await keepRecording(files.filter((f) => fs.existsSync(f)), keep, siblingDeadline);
   for (const f of files) {
     const deadline = Date.now() + 10_000;
     for (;;) {
@@ -307,7 +320,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
 
   test("OBS program recording is in lipsync with the original and has no audio dropouts", async ({
     request,
-  }) => {
+  }, testInfo) => {
     test.setTimeout(TEST_TIMEOUT_MS);
     const testStart = Date.now();
     expect(obs, "OBS WebSocket driver must be connected").not.toBeNull();
@@ -412,6 +425,8 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         );
 
         run = null;
+        let analysed = false;
+        const texts: Array<[string, string]> = [];
         try {
           if (after !== videoId) {
             lastTakeNote = `take ${take} was discarded: the song changed (${videoId} -> ${after}) during the recording`;
@@ -419,13 +434,21 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           } else {
             // 5. Analyse against the originals. Every number goes to the CI log.
             assertNotTornDown("the analysis");
-            const proc = await runAnalysis([
-              "--recording", recording,
-              "--orig-audio", path.join(cacheDir, pair.audio),
-              "--orig-video", path.join(cacheDir, pair.video),
-              "--max-av-ms", String(MAX_AV_MS),
-              "--ffmpeg", FFMPEG,
-            ]); // prettier-ignore
+            analysed = true;
+            let proc: { code: number | null; stdout: string; stderr: string };
+            try {
+              proc = await runAnalysis([
+                "--recording", recording,
+                "--orig-audio", path.join(cacheDir, pair.audio),
+                "--orig-video", path.join(cacheDir, pair.video),
+                "--max-av-ms", String(MAX_AV_MS),
+                "--ffmpeg", FFMPEG,
+              ]); // prettier-ignore
+            } catch (e) {
+              texts.push(["analysis-error.txt", String(e)]);
+              throw e;
+            }
+            texts.push(["av_sync.json", proc.stdout], ["av_sync.stderr.txt", proc.stderr]);
             console.log(proc.stdout);
             console.log(proc.stderr.trim().split(/\r?\n/).slice(-15).join("\n"));
             run = classifyAvSyncRun(proc.code, proc.stdout);
@@ -433,9 +456,14 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
             console.log(`A/V gate ${lastTakeNote}`);
           }
         } finally {
-          // Collected, not asserted here: an assertion in a finally would mask
-          // the analysis error that got us here.
-          undeleted.push(...(await removeRecording(recording, autoRemux, 15_000)));
+          // A take that did not pass keeps its recording + analysis as CI
+          // evidence (#147). Collected, not asserted here: an assertion in a
+          // finally would mask the analysis error that got us here.
+          const keep = keepsEvidence(analysed, run)
+            ? { dir: path.join(testInfo.outputDir, "av-sync-evidence"), take }
+            : null;
+          if (keep) for (const [name, text] of texts) keepText(keep, name, text);
+          undeleted.push(...(await removeRecording(recording, autoRemux, 15_000, keep)));
           removedByBody.add(recording);
         }
 

@@ -7,7 +7,9 @@
 import { test, expect } from "@playwright/test";
 import {
   classifyAvSyncRun,
+  evidenceName,
   isPlayingWithFrames,
+  keepsEvidence,
   nowPlayingVideoId,
   recordingFiles,
   resolveSidecars,
@@ -158,6 +160,31 @@ test.describe("A/V sync gate helpers (#147)", () => {
     expect(recordingFiles(mkv, true)).toEqual([mkv, "C:\\Users\\op\\Videos\\2026-09-24 20-00-00.mp4"]);
     const mp4 = "C:\\Videos\\rec.mp4";
     expect(recordingFiles(mp4, true)).toEqual([mp4]);
+  });
+
+  test("keepsEvidence: every analysed take that did not pass keeps its recording", () => {
+    const run = (status: "pass" | "fail" | "cannot_measure" | "error") => ({
+      status,
+      detail: status,
+      retakeable: false,
+    });
+    expect(keepsEvidence(true, run("fail"))).toBe(true);
+    expect(keepsEvidence(true, run("cannot_measure"))).toBe(true);
+    expect(keepsEvidence(true, run("error"))).toBe(true);
+    // The analysis threw (timeout, spawn error): no verdict, so keep it.
+    expect(keepsEvidence(true, null)).toBe(true);
+    // Only a pass deletes the recording without a copy.
+    expect(keepsEvidence(true, run("pass"))).toBe(false);
+    // A take discarded before analysis (the song changed) is not evidence.
+    expect(keepsEvidence(false, null)).toBe(false);
+  });
+
+  test("evidenceName prefixes the take and keeps only the file name", () => {
+    expect(evidenceName(2, "C:\\Users\\op\\Videos\\2026-09-24 20-00-00.mkv")).toBe(
+      "take2-2026-09-24 20-00-00.mkv",
+    );
+    expect(evidenceName(1, "/home/op/rec.mp4")).toBe("take1-rec.mp4");
+    expect(evidenceName(3, "av_sync.json")).toBe("take3-av_sync.json");
   });
 });
 
