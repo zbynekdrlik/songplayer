@@ -268,7 +268,7 @@ fn stem_mix_seek_is_aligned_across_stems_with_different_block_sizes() {
         vec![Box::new(open_ramp(4096)), Box::new(open_ramp(4608))];
     let gains: Vec<Arc<AtomicU32>> = vec![shared_gain(1.0), shared_gain(1.0)];
     let mut mix = StemMixReader::new(streams, gains).expect("stem mixer must build");
-    for t in [1_000_u64, 2_345, 256] {
+    for t in [1_000_u64, 2_345, 256, 288] {
         mix.seek(t).expect("seek should succeed");
         let (ts, frames) = collect_frames(&mut mix, 12_000);
         assert_eq!(ts, t, "stem-mix seek({t}) timestamp_ms");
