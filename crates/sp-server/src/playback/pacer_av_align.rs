@@ -6,12 +6,22 @@
 //! `(its media time, the boundary it is DUE at)` — the first grid boundary at
 //! or after `wall_start + pts`, NOT the boundary it happened to be emitted at.
 //! The audio block at any boundary `B` must then start at
-//! `anchor_media + (B − anchor_wall)` in samples. That is the wall line the
-//! picture follows (`present = wall_start + pts`), including the frame's
-//! sub-slot phase. It continues across 24/25→30 repeat boundaries, so
-//! correctly paired input is never corrected. A STALE first frame (a slow
-//! decoder at song start, a stall) cannot pull the audio off the line: the
-//! picture catches up to the line by dropping frames, and so does the audio.
+//! `anchor_media + (B − anchor_wall)` in samples. It continues across
+//! 24/25→30 repeat boundaries, so correctly paired input is never corrected. A
+//! STALE first frame (a slow decoder at song start, a stall) cannot pull the
+//! audio off the line: the picture catches up to the line by dropping frames,
+//! and so does the audio.
+//!
+//! **The picture origin lands on the grid (#148 v6, Approach 3).** When that
+//! frame fixes the anchor the pacer also moves `wall_start` to
+//! `due(pts₀) − pts₀` ([`Pacer::land_origin_on_grid`], the lag re-anchor's own
+//! rule), so the frame presents exactly on its due boundary and is still shown
+//! there. Every frame then presents at `due + (pts − pts₀)`, the SAME line the
+//! audio anchor runs on. Without it, an off-grid first frame (a start position
+//! or seek lands anywhere inside a frame) kept `wall_start + pts` up to one slot
+//! BEFORE the audio's due line, so 24/25-fps content showed each frame up to
+//! 33 ms before its audio for the whole song (box: SP-slow `av_frame_offset` min
+//! −25.7 ms), while 30-fps content, shown at its due boundaries, read 0.
 //!
 //! - **Hard alignment** — silence until the expected media time is buffered,
 //!   then drop early / pad late audio so the first non-silent block starts at
@@ -83,7 +93,9 @@ pub fn open_paced_decoder(
 #[derive(Debug, Default)]
 pub(super) struct AvAlign {
     /// `(media sample, due boundary 100 ns)` of the frame the audio is
-    /// anchored to; `None` = waiting for a fresh frame on a new map.
+    /// anchored to; `None` = waiting for a fresh frame on a new map. The
+    /// picture origin lands on that same frame, so the due boundary is also its
+    /// present time (#148 v6).
     anchor: Option<(i64, i64)>,
     /// The hard alignment to the current anchor has completed.
     aligned: bool,
@@ -254,6 +266,22 @@ pub(super) fn interleave(planar: Vec<Vec<f32>>) -> Vec<AudioFrame> {
 }
 
 impl Pacer {
+    /// Land a NEW map's picture origin on the grid (#148 v6, Approach 3) and
+    /// return the boundary the frame at `pts` is DUE at (the first grid
+    /// boundary at or after its present time `wall_start + pts`, never the one
+    /// it happened to be emitted at). `wall_start` becomes `due − pts`, the lag
+    /// re-anchor's rule, so the frame presents exactly on `due`. It was picked
+    /// for a boundary ≥ `due`, so it is still shown there; every later frame
+    /// presents `due − (old wall_start + pts)` (< one slot) later. Called only
+    /// when the audio anchor is fixed, i.e. on the first fresh frame of a map
+    /// that has timed audio; a resnap (grid resync, Resume) keeps the anchor,
+    /// the map and so the origin.
+    pub(super) fn land_origin_on_grid(&mut self, pts: i64) -> i64 {
+        let due = strict_next_boundary_100ns(self.wall_start_100ns + pts - 1, self.grid_fps);
+        self.wall_start_100ns = due - pts;
+        due
+    }
+
     /// Pull the next decoded frame and push its audio (with the chunk media
     /// times) into the grid buffer immediately. The returned frame's `audio` is
     /// emptied — it now lives in the buffer, and the sink reads only pixels.
@@ -286,13 +314,13 @@ impl Pacer {
         let Some(head) = self.audio_buf.head_media() else {
             return interleave(self.audio_buf.take_boundary_chunk(n));
         };
-        if self.av.anchor.is_none() {
-            // The boundary the frame is DUE at (first grid boundary at or after
-            // its presentation time), never the one it was emitted at.
-            let (wall_start, fps) = (self.wall_start_100ns, self.grid_fps);
-            let due = |pts: i64| strict_next_boundary_100ns(wall_start + pts - 1, fps);
-            self.av.anchor =
-                fresh_pts_100ns.map(|pts| (samples_from_100ns(pts, AUDIO_GRID_RATE_HZ), due(pts)));
+        if self.av.anchor.is_none()
+            && let Some(pts) = fresh_pts_100ns
+        {
+            // Anchor on the frame's DUE boundary and land the picture origin on
+            // it, so picture and audio run on ONE line (#148 v6).
+            let due = self.land_origin_on_grid(pts);
+            self.av.anchor = Some((samples_from_100ns(pts, AUDIO_GRID_RATE_HZ), due));
         }
         let Some((media, wall)) = self.av.anchor else {
             // New map, no fresh frame yet (a repeat boundary): silence.

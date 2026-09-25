@@ -801,8 +801,24 @@ Now:
   DUE at)`. The due boundary is the first grid boundary at or after
   `wall_start + pts`, computed as `strict_next_boundary_100ns(ws + pts − 1)`.
   It is NEVER the boundary the frame happened to be emitted at. The block at
-  boundary B must then start at `anchor_media + (B − anchor_wall)`, which is
-  the wall line the picture follows, including the frame's sub-slot phase.
+  boundary B must then start at `anchor_media + (B − anchor_wall)`.
+  - **The picture origin lands on that frame's due boundary (#148 v6,
+    Approach 3, ROZHODNUTÉ 5834440419).** When the anchor is fixed,
+    `Pacer::land_origin_on_grid` sets `wall_start = due(pts₀) − pts₀` (the lag
+    re-anchor's rule). The frame is still shown at the same boundary, and every
+    frame then presents at `due + (pts − pts₀)`: the audio's line. Without it,
+    a start position or seek (the first frame's pts lands anywhere inside a
+    frame) kept the picture up to one slot BEFORE the audio for the whole song.
+    Box, SP-slow, 23.976 fps: `av_frame_offset` −5.0 / −25.7 / +16.0 (A/V gate
+    −25…−27 ms).
+    - Do NOT instead anchor the audio on the unrounded present time
+      `wall_start + pts` (the rejected v6 draft). 30/60-fps frames are SHOWN at
+      their due boundaries, so that led the audio by up to +33 ms after every
+      seek.
+    - It lands only together with the audio anchor (the first fresh frame with
+      timed audio on a new map). A resnap keeps the anchor and so the origin:
+      moving it onto a later off-grid 24-fps frame would shift the picture off
+      the audio line.
   - It keeps going across repeat boundaries, so a 24→30 pattern needs no
     correction.
   - Do NOT compare against each emitted frame's own pts: that is a 0…41 ms
@@ -953,8 +969,14 @@ within 2 ms, and camera-box's own gate through the same OBS build reads ~0.
   - 24/25-fps content on the 30 fps grid reads a sawtooth of 0 … +33.3 ms
     (min 0, max ≈ one grid slot) with a mean of **+16.7 ms**. The picture is
     held on the grid (the newest frame whose present time ≤ the boundary)
-    while the audio runs on the anchor line (`pacer_tests_av_offset.rs`
-    derives the 25 fps mean/min/max analytically).
+    while the audio runs on the anchor line.
+  - 23.976 fps reads min 0, max ≈ one source frame (41.7 ms) and a mean near
+    +20.7 ms: the phase drifts through the grid within the minute.
+  - Since #148 v6 these hold after ANY start position or seek, because the
+    picture origin lands on the grid. A minute whose min sits clearly BELOW 0
+    (not a stall) means the audio trails its picture line: a regression.
+    `pacer_tests_av_offset.rs` derives every one of these analytically,
+    including an off-grid landing.
   - A VIDEO stall reads POSITIVE: the pacer repeats the frozen frame while the
     250 ms audio cushion keeps the audio on its line, so the reading climbs
     +33.3 ms per stalled boundary (a minute's `max` of +100 … +250 ms = a stall
