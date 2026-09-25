@@ -60,7 +60,7 @@ use sp_ndi::AudioFrame;
 ///
 /// The pacing-OFF path keeps its own pairing deadline
 /// (`audio_emitter::decoder_tolerance_ms`).
-pub const PACED_AUDIO_LEAD_MS: u64 = 40;
+pub const PACED_AUDIO_LEAD_MS: u64 = 250;
 
 /// Open the split A/V decoder for the PACED pipeline: audio is read
 /// [`PACED_AUDIO_LEAD_MS`] ahead of each video frame (#148 v4). The audio source

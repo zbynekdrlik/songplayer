@@ -141,7 +141,9 @@ together at the ONE decode seam, but the merged #192 emitter opens the
 SDK-clocked decoder with a 100 ms audio read-ahead
 (`decoder_tolerance_ms(true) == 140` vs `DEFAULT_TOLERANCE_MS == 40`), so at the
 seam the `audio_frames` LEAD `video_frame` by `lead_ms` on the SDK-clocked path
-(100 SDK / 0 paced; `lead_ms_for` / `StreamShared::lead_ms()`, threaded
+(historically 100 SDK / 0 paced; today 1500 SDK / **210 paced** — since #148 v4 the
+paced decoder reads `PACED_AUDIO_LEAD_MS = 250` ahead, so `lead_ms_for(true)` =
+250 − 40; `lead_ms_for` / `StreamShared::lead_ms()`, threaded
 `ensure_pipeline → register_taps → StreamTap::new`). Because the video feeder
 starts on-connect BEFORE the audio input connects, the audio feeder measures how
 far the video wall-clock timeline is already ahead and PREPENDS silence to match:

@@ -195,11 +195,15 @@ pub fn to_stereo(samples: &[f32], channels: u32) -> Option<Vec<f32>> {
 /// encoder's audio feeder re-syncs by HOLDING each block that long before
 /// writing it (#184 round G3, `preview_audio_hold::AudioHold` — round 3 folded
 /// it into a silence preroll, which parked the whole lead in the socket). The
-/// paced path has no emitter and thus no lead (0).
+/// paced path has no emitter, but its decoder reads `PACED_AUDIO_LEAD_MS`
+/// (250 ms) ahead (#148 v4), so its seam audio leads by 250 − 40 = 210 ms.
 pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
-    let emitter_present = !genlock_pacing;
-    (crate::playback::pipeline::audio_emitter::decoder_tolerance_ms(emitter_present)
-        - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS) as u32
+    let decoder_lead_ms = if genlock_pacing {
+        crate::playback::pacer::PACED_AUDIO_LEAD_MS
+    } else {
+        crate::playback::pipeline::audio_emitter::decoder_tolerance_ms(true)
+    };
+    (decoder_lead_ms - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS) as u32
 }
 
 /// How many interleaved-stereo f32 samples of SILENCE the audio feeder prepends

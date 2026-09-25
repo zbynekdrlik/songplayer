@@ -759,8 +759,33 @@ Now:
 - **Audio is pushed when a frame is PULLED** (`Pacer::pull_frame`, in both
   `prepare` and `service`), not when it is consumed. The aligned take at
   boundary B needs media up to B + 33 ms. Only the NEXT (parked) frame's paired
-  audio (pts + 40 ms) covers that, so pushing on consume underruns on every
-  24/25-fps song.
+  audio covers that, so pushing on consume underruns on every 24/25-fps song.
+- **The paced decoder reads a 250 ms audio cushion (#148 v4).**
+  `pipeline_paced.rs` opens the decoder through `pacer::open_paced_decoder`,
+  which calls `SplitSyncedDecoder::with_audio_lead(.., PACED_AUDIO_LEAD_MS = 250)`.
+  Each frame therefore carries audio up to pts + 250 ms, not pts + 40 ms.
+  - **Why.** With the 40 ms pairing the grid held only ~40 ms past the parked
+    frame. A video decode stall of 2+ boundaries (the MF stalls under a
+    resident heavy child) emptied it, and `take_block` zero-filled an audible
+    ~100 ms gap. Box, dev `a19beda`: song 334, `audio_underruns` 2→3, A/V gate
+    `dropouts=1 dropout_ms=100`; SP-slow underruns climbed 5→13 over one E2E.
+  - **Depth does not move A/V.** The take is aligned by the media HEAD
+    (`err = head − expected`), never by `level_samples`, so a deeper buffer
+    plays the same sample at each boundary. Tests:
+    `pacer_tests_av_lead.rs` (a 5-boundary stall: 0 underruns, bit-exact, 0
+    corrections; a 40 ms control underruns) and
+    `a_deep_buffer_is_never_servoed_toward_a_level_target`.
+  - **Bounded.** The G5 read gate keeps the read-ahead ≤ lead + one chunk,
+    far under the grid's 2 s cap, so it never grows.
+  - **Cost.** Fader latency rises by up to the lead (`karaoke-stems.md` G5).
+  - **Dashboard preview follows the lead.** The preview (#178) taps audio at
+    the SAME decode seam and holds it for `preview_stream::lead_ms_for(true)`
+    = `PACED_AUDIO_LEAD_MS − 40` = 210 ms. If the lead changes, this changes
+    with it (the test pins both), or the preview plays its audio early.
+  - **Scope.** The pacing-OFF path is untouched: `open_synced_decoder` →
+    `decoder_tolerance_ms` (40, or 1540 with the wall-clock emitter).
+  - **A stall longer than ~250 ms still underruns.** Raise the lead only with
+    a box measurement of the stall length, never as a blind bump.
 - **The anchor is local, on the DUE boundary** (`pacer_av_align.rs`). The first
   FRESH frame emitted on a new map fixes `(pts in samples, the boundary it is
   DUE at)`. The due boundary is the first grid boundary at or after
