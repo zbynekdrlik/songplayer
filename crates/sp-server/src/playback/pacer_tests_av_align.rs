@@ -354,6 +354,8 @@ fn a_24_fps_source_on_the_30_fps_grid_stays_within_1_ms_for_60_s() {
         let err = first_media(blk) - i as i64 * SPB;
         assert!(err.abs() <= 48, "block {i}: A/V error {err} samples > 1 ms");
     }
+    // In fact bit-exact: correctly paired input never needs a correction.
+    assert_exact_stream(&rec.blocks, 0);
 }
 
 #[test]
@@ -669,4 +671,127 @@ fn untimed_audio_plays_as_a_plain_fifo() {
     assert_exact_stream(&rec.blocks, 0);
     assert_eq!(pacer.stats().av_corrections, 0);
     assert_eq!(pacer.stats().av_align_err_ms, 0.0);
+}
+
+/// Drive one exact-source service call at `now` that may pull at most `limit`
+/// frames (a producer that has only that many decoded).
+fn step_limited(
+    pacer: &mut Pacer,
+    clk: &SettableClock,
+    now: i64,
+    next: &Cell<i64>,
+    limit: usize,
+    ahead: i64,
+    rec: &mut Rec,
+) {
+    clk.set(now);
+    let pulled = Cell::new(0usize);
+    pacer.service(
+        || {
+            if pulled.get() >= limit {
+                return None;
+            }
+            pulled.set(pulled.get() + 1);
+            let j = next.get();
+            next.set(j + 1);
+            Some(ahead_frame(j, ahead))
+        },
+        rec,
+    );
+}
+
+#[test]
+fn a_late_first_frame_does_not_leave_the_audio_behind_for_the_song() {
+    // The decoder needs 3 boundaries for its first frame: frame 0 (due at
+    // b(1)) is emitted STALE at b(4), and at b(5) the picture catches up to the
+    // wall line (frames 1..4 arrive, older ones dropped). The audio must follow
+    // the wall line — media (S − wall_start) — not the stale first frame, or it
+    // stays 100 ms behind the picture for the whole song.
+    let (mut pacer, clk) = anchored();
+    let next = Cell::new(0i64);
+    let mut rec = Rec::default();
+    for k in 1..=3i64 {
+        step_limited(&mut pacer, &clk, b(k), &next, 0, 640, &mut rec);
+    }
+    assert!(rec.blocks.is_empty(), "pre-roll: nothing emitted");
+    step_limited(&mut pacer, &clk, b(4), &next, 1, 640, &mut rec);
+    for k in 5..=20i64 {
+        step_limited(&mut pacer, &clk, b(k), &next, usize::MAX, 640, &mut rec);
+    }
+    // b(4): the wall line needs media 4800, not decoded yet → silence.
+    assert_eq!(rec.blocks[0].0, b(4));
+    assert!(rec.blocks[0].1.iter().all(|&v| v == 0.0));
+    // From b(5) on, every block plays the wall line bit-exact.
+    assert_eq!(rec.blocks[1].0, b(5));
+    assert_exact_stream(&rec.blocks[1..], 4 * SPB);
+}
+
+#[test]
+fn a_grid_resync_realigns_to_the_wall_line_not_to_a_stale_frame() {
+    // Decoder stall + a late call → the gate RESYNCS (b(63)). The decoder then
+    // recovers over two calls: at b(64) only frame 51 (due at b(52)) is ready
+    // and is emitted STALE; at b(65) the picture catches up to the wall line.
+    // The audio must snap back to the wall line (the map did not move), not
+    // anchor on the stale frame 51 and stay ~400 ms behind for the song.
+    let (mut pacer, clk) = anchored();
+    let next = Cell::new(0i64);
+    let mut rec = Rec::default();
+    for k in 1..=50i64 {
+        step_limited(&mut pacer, &clk, b(k), &next, usize::MAX, 640, &mut rec);
+    }
+    // b(51): the parked frame 50 plays, nothing new is decoded.
+    step_limited(&mut pacer, &clk, b(51), &next, 0, 640, &mut rec);
+    let resyncs_before = pacer.stats().resyncs;
+    step_limited(&mut pacer, &clk, b(63), &next, 0, 640, &mut rec);
+    assert_eq!(
+        pacer.stats().resyncs,
+        resyncs_before + 1,
+        "the gate resynced"
+    );
+    step_limited(&mut pacer, &clk, b(64), &next, 1, 640, &mut rec); // frame 51, stale
+    for k in 65..=80i64 {
+        step_limited(&mut pacer, &clk, b(k), &next, usize::MAX, 640, &mut rec);
+    }
+    let from = rec
+        .blocks
+        .iter()
+        .position(|(tc, _)| *tc == b(65))
+        .expect("b(65) emitted");
+    assert_exact_stream(&rec.blocks[from..], 64 * SPB);
+}
+
+#[test]
+fn audio_resume_reset_snaps_back_to_the_wall_line() {
+    // Resume keeps the wall grid (and so the wall↔media map): after the flush
+    // the audio re-aligns to the SAME line, whatever frame is emitted first.
+    let (mut pacer, clk) = anchored();
+    let next = Cell::new(0i64);
+    let mut rec = Rec::default();
+    for k in 1..=30i64 {
+        step_limited(&mut pacer, &clk, b(k), &next, usize::MAX, 0, &mut rec);
+    }
+    pacer.audio_resume_reset();
+    // After the resume the producer stalls for 3 calls, then delivers one
+    // frame per call (frame 31, due at b(32), is emitted STALE at b(34)), then
+    // catches up.
+    for k in 31..=33i64 {
+        step_limited(&mut pacer, &clk, b(k), &next, 0, 0, &mut rec);
+    }
+    for k in 34..=35i64 {
+        step_limited(&mut pacer, &clk, b(k), &next, 1, 0, &mut rec);
+    }
+    for k in 36..=45i64 {
+        step_limited(&mut pacer, &clk, b(k), &next, usize::MAX, 0, &mut rec);
+    }
+    let (_, last) = rec.blocks.last().unwrap();
+    assert!(last.iter().all(|&v| v != 0.0), "re-aligned by the end");
+    // Every non-silent sample after the resume sits on the wall line.
+    for (tc, blk) in &rec.blocks[30..] {
+        let base = samples_of(tc - b(1));
+        for (s, &v) in blk.iter().enumerate() {
+            if let Some(m) = dec(v) {
+                assert_eq!(m, base + s as i64, "off the wall line at {tc}");
+            }
+        }
+    }
 }
