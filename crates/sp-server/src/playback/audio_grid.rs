@@ -205,14 +205,21 @@ impl AudioGridBuffer {
     /// with leading silence; audio BEHIND it is DROPPED. Returns
     /// `(aligned, delta)` — `delta` = samples dropped (positive) or padded
     /// (negative). `aligned` is false while fewer samples are buffered than
-    /// must be dropped (all of them are dropped; the rest on a later call) and
-    /// when there is no media head at all (`(false, 0)`, nothing touched).
+    /// must be dropped (all of them are dropped; the rest on a later call), and
+    /// it is `(false, 0)` with nothing touched when there is no media head or
+    /// the pad would exceed the 2 s cap.
     pub fn align_to(&mut self, expected: i64) -> (bool, i64) {
         let Some(head) = self.head else {
             return (false, 0);
         };
         let diff = expected - head;
         let pad = (-diff).max(0);
+        if pad > self.cap_samples as i64 {
+            // The audio starts more than the 2 s cap after the picture: stay
+            // silent (nothing touched) until the expected time comes in reach,
+            // never allocate an unbounded run of silence.
+            return (false, 0);
+        }
         self.pad_front(pad as usize);
         let drop = diff.max(0).min(self.level_samples() as i64);
         self.drain_front(drop as usize);

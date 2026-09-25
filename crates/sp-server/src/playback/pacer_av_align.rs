@@ -1,18 +1,26 @@
 //! Media-time A/V alignment of the PACED audio (#148 design v2).
 //!
 //! The pacer emits the video frame and its boundary audio block in the SAME
-//! [`service`](super::Pacer::service) call, so the anchor is local: when a
-//! FRESH frame is emitted after a (re-)align trigger, its media time and the
-//! stamped boundary become the anchor, and the audio block at any later
-//! boundary `B` must start at `anchor_media + (B − anchor_wall)` in samples.
-//! That continues across 24/25→30 repeat boundaries, so correctly paired input
-//! is never corrected.
+//! [`service`](super::Pacer::service) call, so the anchor is local: the first
+//! FRESH frame emitted on a new wall↔media map fixes the anchor
+//! `(its media time, the boundary it is DUE at)` — the first grid boundary at
+//! or after `wall_start + pts`, NOT the boundary it happened to be emitted at.
+//! The audio block at any boundary `B` must then start at
+//! `anchor_media + (B − anchor_wall)` in samples. That is the wall line the
+//! picture follows (`present = wall_start + pts`), including the frame's
+//! sub-slot phase. It continues across 24/25→30 repeat boundaries, so
+//! correctly paired input is never corrected. A STALE first frame (a slow
+//! decoder at song start, a stall) cannot pull the audio off the line: the
+//! picture catches up to the line by dropping frames, and so does the audio.
 //!
-//! - **Hard (re-)alignment** (`anchor`, Resume, a lag re-anchor, a grid
-//!   resync — every change of the wall↔media map): silence until a fresh frame
-//!   is emitted, then drop early / pad late audio so the first non-silent block
-//!   starts at the frame's media time ±1 sample
+//! - **Hard alignment** — silence until the expected media time is buffered,
+//!   then drop early / pad late audio so the first non-silent block starts at
+//!   the expected media time ±1 sample
 //!   ([`AudioGridBuffer::align_to`](crate::playback::audio_grid::AudioGridBuffer::align_to)).
+//!   A NEW map (`anchor` = play/seek/new song, a lag re-anchor that moves
+//!   `wall_start`) forgets the anchor ([`AvAlign::realign`]). An event that
+//!   keeps the map (a grid resync, Resume) keeps the anchor and only re-snaps
+//!   the buffer onto it ([`AvAlign::resnap`]).
 //! - **Continuous correction** (every later productive boundary): past 5 ms of
 //!   error drop/insert at most 48 samples per block until ≤ 1 ms
 //!   ([`correction_for`]). This is the ONLY controller on the buffer — the old
@@ -27,14 +35,15 @@
 
 use super::{AUDIO_GRID_RATE_HZ, PacedFrame, Pacer};
 use crate::playback::audio_grid::{correction_for, samples_from_100ns};
+use sp_core::genlock::strict_next_boundary_100ns;
 use sp_ndi::AudioFrame;
 
 /// Alignment state + telemetry for the paced audio (#148 design v2). The
 /// default is "re-align pending", so a fresh pacer aligns on its first frame.
 #[derive(Debug, Default)]
 pub(super) struct AvAlign {
-    /// `(media sample, wall 100 ns)` of the frame the audio is anchored to;
-    /// `None` = waiting for a fresh frame after a (re-)align trigger.
+    /// `(media sample, due boundary 100 ns)` of the frame the audio is
+    /// anchored to; `None` = waiting for a fresh frame on a new map.
     anchor: Option<(i64, i64)>,
     /// The hard alignment to the current anchor has completed.
     aligned: bool,
@@ -50,10 +59,17 @@ pub(super) struct AvAlign {
 }
 
 impl AvAlign {
-    /// Forget the anchor: the next fresh frame re-aligns the audio (start,
-    /// seek, Resume, lag re-anchor, grid resync).
+    /// A NEW wall↔media map (play/seek/new song, a lag re-anchor): forget the
+    /// anchor; the next fresh frame fixes it and the audio hard-aligns to it.
     pub(super) fn realign(&mut self) {
         self.anchor = None;
+        self.resnap();
+    }
+
+    /// The SAME map, but the buffer lost its place (a grid resync skipped
+    /// boundaries; Resume flushed the audio): keep the anchor and hard-align
+    /// the buffer back onto its line on the next productive boundary.
+    pub(super) fn resnap(&mut self) {
         self.aligned = false;
         self.engaged = false;
     }
@@ -124,11 +140,15 @@ impl Pacer {
             return interleave(self.audio_buf.take_boundary_chunk(n));
         };
         if self.av.anchor.is_none() {
-            self.av.anchor = fresh_pts_100ns
-                .map(|pts| (samples_from_100ns(pts, AUDIO_GRID_RATE_HZ), stamp_100ns));
+            // The boundary the frame is DUE at (first grid boundary at or after
+            // its presentation time), never the one it was emitted at.
+            let (wall_start, fps) = (self.wall_start_100ns, self.grid_fps);
+            let due = |pts: i64| strict_next_boundary_100ns(wall_start + pts - 1, fps);
+            self.av.anchor =
+                fresh_pts_100ns.map(|pts| (samples_from_100ns(pts, AUDIO_GRID_RATE_HZ), due(pts)));
         }
         let Some((media, wall)) = self.av.anchor else {
-            // Re-align pending on a repeat boundary: silence until a fresh frame.
+            // New map, no fresh frame yet (a repeat boundary): silence.
             return interleave(vec![vec![0.0; n]; self.audio_buf.channels()]);
         };
         let expected = media + samples_from_100ns(stamp_100ns - wall, AUDIO_GRID_RATE_HZ);

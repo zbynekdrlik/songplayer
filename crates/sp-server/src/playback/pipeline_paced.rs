@@ -149,8 +149,8 @@ fn log_song_summary(
         max_lag_slots = pacer.max_lag_slots(),
         iter_p50_us = pacer.iter_p50_us(),
         iter_p99_us = pacer.iter_p99_us(),
-        // Paced audio (#148 v2): the last A/V media offset, the cumulative
-        // drop/pad corrections, and the cumulative buffer underruns.
+        // Paced audio (#148 v2): the last A/V media offset, this song's drop/pad
+        // corrections, and the cumulative buffer underruns.
         av_align_err_ms = s.av_align_err_ms,
         av_corrections = s.av_corrections.saturating_sub(base.av_corrections),
         audio_underruns = a.underruns,

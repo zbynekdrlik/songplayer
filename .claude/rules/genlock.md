@@ -761,26 +761,48 @@ Now:
   boundary B needs media up to B + 33 ms. Only the NEXT (parked) frame's paired
   audio (pts + 40 ms) covers that, so pushing on consume underruns on every
   24/25-fps song.
-- **The anchor is local** (`pacer_av_align.rs`). The first FRESH frame emitted
-  after a trigger sets `(pts in samples, stamped boundary)`. The block at
-  boundary B must then start at `anchor_media + (B − anchor_wall)`. This keeps
-  going across repeat boundaries, so a 24→30 pattern needs no correction. Do NOT
-  compare against each emitted frame's own pts: that is a 0…41 ms sawtooth on
-  24-fps content, and the corrector would thrash.
-- **Hard (re-)alignment triggers** are every change of the wall↔media map:
-  `anchor()` (play/seek/new song), `audio_resume_reset()`, a `Reanchored`
-  lag re-anchor, and a grid resync in `resolve_emit_boundary`. Until a fresh
-  frame is emitted the output is silence. Then `align_to` DROPS early audio or
-  PADS late audio with leading silence, so the first real sample plays at its
-  media time (±1 sample). With too little buffered to drop, the block stays
-  silent and the drop is retried on the next boundary.
+- **The anchor is local, on the DUE boundary** (`pacer_av_align.rs`). The first
+  FRESH frame emitted on a new map fixes `(pts in samples, the boundary it is
+  DUE at)`. The due boundary is the first grid boundary at or after
+  `wall_start + pts`, computed as `strict_next_boundary_100ns(ws + pts − 1)`.
+  It is NEVER the boundary the frame happened to be emitted at. The block at
+  boundary B must then start at `anchor_media + (B − anchor_wall)`, which is
+  the wall line the picture follows, including the frame's sub-slot phase.
+  - It keeps going across repeat boundaries, so a 24→30 pattern needs no
+    correction.
+  - Do NOT compare against each emitted frame's own pts: that is a 0…41 ms
+    sawtooth on 24-fps content, and the corrector would thrash.
+  - Do NOT anchor at the emit stamp (review of `0c75806`, 1 red). A STALE first
+    frame would pin the audio behind the picture for the whole song:
+    - a slow decoder at song start;
+    - the first frame after a stall.
+
+    The picture catches up to the wall line by dropping frames, and the audio
+    must do the same.
+- **Two re-align kinds.**
+  - A NEW map forgets the anchor (`AvAlign::realign`): `anchor()`
+    (play/seek/new song) and a `Reanchored` lag re-anchor, which moves
+    `wall_start`.
+  - The SAME map keeps the anchor and only re-snaps the buffer onto its line
+    (`AvAlign::resnap`): a grid resync in `resolve_emit_boundary` (only the
+    stamp jumps) and `audio_resume_reset()`.
+  - Until the expected media is buffered the output is silence. Then
+    `align_to` DROPS early audio or PADS late audio with leading silence, so
+    the first real sample plays at its media time (±1 sample).
+  - With too little buffered to drop, the block stays silent and the drop is
+    retried on the next boundary.
+  - A pad larger than the 2 s cap is refused: silence until it comes within
+    reach, never an unbounded allocation.
 - **Continuous correction** (`correction_for`) is the ONLY controller. It
   engages when |err| > 240 samples (5 ms), moves ≤ 48 samples per block, and
   stops at |err| ≤ 48 (1 ms). A drop or insert of d samples reads n ± d inputs
   onto n outputs by linear interpolation (`take_block`), so there is no click.
   Output 0 is always an exact input sample. Underrun samples are zero-filled
   and do NOT advance the head, so a decoder stall shows up as a negative error
-  that the correction then drops away.
+  that the correction then drops away. A corrected block is a 3 % time-stretch
+  (48 of 1600 samples, about 51 cents) for about 0.6 s per 20 ms. That is
+  audible on a sustained note, and it is what the ≤ 48-samples-per-block
+  design accepts.
 - Untimed audio (tests / frames with `timecode_100ns: None`) plays as a plain
   FIFO. It is never aligned.
 - Telemetry is on `PacingStats` (`/api/v1/ndi/health` `pacing`), not `audio`:

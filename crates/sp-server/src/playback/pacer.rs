@@ -86,11 +86,11 @@ pub trait PacedSink {
     /// Emit one boundary: submit each chunk in `audio` (stamped `audio_tc_100ns`,
     /// the raw wall clock at submission — §6) IN ORDER first, then the `video`
     /// frame (stamped `video_tc_100ns`, the on-grid serviced boundary — §4).
-    /// `audio` is the boundary chunk the pacer drained from its wall-clock
-    /// `AudioGridBuffer` (0 or 1 frame of exactly `samples_per_boundary` samples,
-    /// #148) — a video repeat still carries audio (decoupled); only a pre-roll
-    /// starve passes an empty slice. Only `video`'s pixel fields are used; its own
-    /// `audio` was already pushed into the buffer on consume.
+    /// `audio` is the boundary block the pacer took from its `AudioGridBuffer`,
+    /// aligned to the picture by media time (0 or 1 frame of exactly
+    /// `samples_per_boundary` samples, #148) — a video repeat still carries audio
+    /// (decoupled); only a pre-roll starve passes an empty slice. Only `video`'s
+    /// pixel fields are used; its own `audio` was pushed into the buffer on pull.
     fn emit(
         &mut self,
         video: &PacedFrame,
@@ -602,10 +602,10 @@ impl Pacer {
         let catch_up = strict_next_boundary_100ns(boundary, self.grid_fps);
         let (_, next) = genlock_emit_gate_100ns(emit_now, boundary, self.grid_fps, queue_had_frame);
         if next > catch_up {
-            // Advanced more than one slot → a grid resync (skipped boundaries);
-            // the audio re-aligns to the next fresh frame (#148).
+            // Advanced more than one slot → a grid resync (skipped boundaries).
+            // The map is unchanged: the audio re-snaps onto its line (#148).
             self.resyncs += 1;
-            self.av.realign();
+            self.av.resnap();
             (floor_boundary_100ns(emit_now, self.grid_fps), next)
         } else {
             (boundary, next)
@@ -834,13 +834,13 @@ impl Pacer {
         pacer_av_align::interleave(planar)
     }
 
-    /// Flush the audio buffer on a Resume and re-align the audio to the next
-    /// fresh frame (#148). The VIDEO anchor is intentionally left untouched:
-    /// Resume continues the same song on the same wall grid (the frozen standby
-    /// held every boundary), so only the audio backlog is dropped.
+    /// Flush the audio buffer on a Resume and re-snap the audio onto its line
+    /// (#148). The VIDEO anchor is intentionally left untouched: Resume
+    /// continues the same song on the same wall grid (the frozen standby held
+    /// every boundary), so only the audio backlog is dropped.
     pub fn audio_resume_reset(&mut self) {
         self.audio_buf.clear();
-        self.av.realign();
+        self.av.resnap();
     }
 
     /// Drain the remaining buffered audio at EOS as one final chunk, zero-filled
