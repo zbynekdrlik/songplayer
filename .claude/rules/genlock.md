@@ -884,7 +884,10 @@ Now:
     (`wallclock_test_clock.rs::VirtualClock`).
 - **Bounded update.** A resample measures `delta = sample.utc − wall(sample.instant)`.
   - |delta| ≤ 1 ms (`ANCHOR_MAX_STEP_100NS`) applies as-is (normal slewing,
-    ≤ ~310 µs per 3.3 s at 94 ppm).
+    ≈ 313 µs per 3.33 s resample at 94 ppm).
+  - Trade-off (design record): a genuine large UTC step slews at 1 ms per
+    resample (~300 ppm), so 500 ms takes ~28 min. `wall_anchor_slewed_us`
+    growing is the signal; the timecodes lag the true grid until it converges.
   - Beyond that only ±1 ms applies, and a `wallclock: re-anchor delta over 1 ms`
     WARN logs `delta_us`, `bracket_us`, `applied_us` and `carry_us`.
   - The remainder is NOT carried explicitly: the next resample re-measures it.
