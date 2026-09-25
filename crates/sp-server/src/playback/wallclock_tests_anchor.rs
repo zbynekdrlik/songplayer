@@ -109,7 +109,11 @@ fn choose_stops_at_the_first_read_within_20_us() {
 fn choose_keeps_the_earlier_read_on_a_tie() {
     let b = Instant::now();
     let mut reads = [read(b, 0, 31, 300); 8];
-    reads[1].utc_100ns = 32;
+    // Every later read is distinct, so a `<=` pick (the last equally wide
+    // read) cannot land on another 31 by accident.
+    for (i, r) in reads.iter_mut().enumerate() {
+        r.utc_100ns = 31 + i as i64;
+    }
     let (s, n) = choose(&reads);
     assert_eq!(n, 8);
     assert_eq!(
