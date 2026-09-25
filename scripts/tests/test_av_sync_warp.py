@@ -119,7 +119,7 @@ def test_a_smooth_rate_difference_is_fitted_and_compensated(ppm):
 
 def test_a_12ms_step_is_not_absorbed():
     rec = _recording(step_ms=12.0)
-    aud, comp, _ = _analyze(rec)
+    aud, comp, drops = _analyze(rec)
     assert comp["warped"] is False
     assert comp["fit_residual_ms"] > avw.MAX_FIT_RESIDUAL_MS
     # Unwarped = today's analysis: the plain slice at the global lag.
@@ -127,6 +127,9 @@ def test_a_12ms_step_is_not_absorbed():
     np.testing.assert_array_equal(
         comp["aligned"], orig[aud["lag"] : aud["lag"] + len(rec)]
     )
+    # ... so the step still reads cannot_measure, exactly as before.
+    status, _, sides = avs.verdict(aud["corr"], 0.99, 0.01, 0.0, drops["dropout_count"])
+    assert status == "cannot_measure" and "audio" in sides
 
 
 def test_a_20ms_dropout_is_still_caught_after_the_warp():
