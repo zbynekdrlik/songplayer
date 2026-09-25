@@ -55,7 +55,9 @@ fn collect_frames(reader: &mut dyn AudioStream, min_frames: usize) -> (u64, Vec<
             .expect("decode should succeed")
             .expect("stream ended before enough frames were collected");
         assert_eq!(chunk.channels, 2);
-        first_ts.get_or_insert(chunk.timestamp_ms);
+        if first_ts.is_none() {
+            first_ts = Some(chunk.timestamp_ms);
+        }
         for f in chunk.data.chunks_exact(2) {
             frames.push((ramp_index(f[0]), ramp_index(f[1])));
         }
