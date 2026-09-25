@@ -24,7 +24,7 @@
 use std::time::{Duration, Instant};
 
 /// Most bracketed reads one anchor sample takes (#147 design).
-pub const ANCHOR_MAX_ATTEMPTS: usize = 1;
+pub const ANCHOR_MAX_ATTEMPTS: usize = 8;
 
 /// A bracket this narrow bounds the pairing error to ≤ 10 µs, so sampling stops
 /// early. A clean read on the box brackets well under 1 µs, so the normal cost
@@ -38,7 +38,7 @@ pub const ANCHOR_WIDE_BRACKET: Duration = Duration::from_micros(200);
 
 /// The most one resample may move the wall: 1 ms in 100-ns units. Normal
 /// dantesync slewing is ≤ 100 µs per ~3.3 s resample (30 ppm).
-pub const ANCHOR_MAX_STEP_100NS: i64 = i64::MAX;
+pub const ANCHOR_MAX_STEP_100NS: i64 = 10_000;
 
 /// One bracketed read of the realtime clock: `m1` is the monotonic clock read
 /// just before the UTC read, `m2` the one just after.
@@ -156,7 +156,11 @@ pub fn wall_at(anchor_instant: Instant, anchor_utc_100ns: i64, at: Instant) -> i
 ///   line. The wall never goes backward, so the pacer can never re-serve a
 ///   boundary it already emitted (the relatch the box showed).
 pub fn apply_anchor_step(at: Instant, wall_100ns: i64, applied_100ns: i64) -> (Instant, i64) {
-    (at, wall_100ns + applied_100ns)
+    // At most one of the two is non-zero: a forward step, or a backward hold.
+    let forward_100ns = applied_100ns.max(0);
+    let hold_100ns = applied_100ns.min(0).unsigned_abs();
+    let hold = Duration::from_nanos(hold_100ns.saturating_mul(100));
+    (at + hold, wall_100ns.saturating_add(forward_100ns))
 }
 
 /// Anchor telemetry of one [`WallClock`](super::WallClock). It is surfaced on

@@ -875,7 +875,7 @@ fn should_log_periodic_heartbeat(prev: Option<DateTime<Utc>>, cur: DateTime<Utc>
 /// unit-testable; the periodic INFO path logs the returned string verbatim.
 pub(crate) fn format_genlock_line(s: &PipelineHealthSnapshot) -> String {
     format!(
-        "ndi: genlock playlist_id={pid} ndi_name={name} seq={seq} late={late} p99_us={p99} repeats={repeats} resyncs={resyncs} relatches={relatches} lag={lag} av_align_err_ms={av_err:.1} av_corrections={av_corr} av_corrected_samples={av_samples} underruns={underruns} clock_ok={clock_ok} lock={lock} reason=\"{reason}\"",
+        "ndi: genlock playlist_id={pid} ndi_name={name} seq={seq} late={late} p99_us={p99} repeats={repeats} resyncs={resyncs} relatches={relatches} lag={lag} av_align_err_ms={av_err:.1} av_corrections={av_corr} av_corrected_samples={av_samples} wall_anchor_max_step_us={wa_step} wall_anchor_wide_brackets={wa_wide} wall_anchor_slewed_us={wa_slewed} underruns={underruns} clock_ok={clock_ok} lock={lock} reason=\"{reason}\"",
         pid = s.playlist_id,
         name = s.ndi_name,
         seq = s.pacing.seq,
@@ -888,6 +888,10 @@ pub(crate) fn format_genlock_line(s: &PipelineHealthSnapshot) -> String {
         av_err = s.pacing.av_align_err_ms,
         av_corr = s.pacing.av_corrections,
         av_samples = s.pacing.av_corrected_samples,
+        // #147: the pacer wall's anchor telemetry (bracketed sampling + bounded update).
+        wa_step = s.pacing.wall_anchor_max_step_us,
+        wa_wide = s.pacing.wall_anchor_wide_brackets,
+        wa_slewed = s.pacing.wall_anchor_slewed_us,
         underruns = s.audio.underruns,
         clock_ok = s.clock.clock_ok,
         lock = s.lock_state.as_str(),
