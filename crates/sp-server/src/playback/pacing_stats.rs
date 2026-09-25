@@ -59,4 +59,14 @@ pub struct PacingStats {
     pub av_corrections: u64,
     /// #148: samples dropped + padded by that alignment (cumulative).
     pub av_corrected_samples: u64,
+    /// #147: largest monotonic↔UTC re-anchor delta (µs) the pacer's wall clock
+    /// MEASURED, i.e. the step an unbounded re-anchor would have taken. The
+    /// applied step is capped at 1 ms (`WallAnchorStats::max_step_us`).
+    pub wall_anchor_max_step_us: u64,
+    /// #147: anchor samples whose best bracket was still wider than 200 µs
+    /// (every attempt preempted), cumulative.
+    pub wall_anchor_wide_brackets: u64,
+    /// #147: correction (µs) slewed in through clamped (> 1 ms) re-anchors
+    /// instead of stepped, cumulative.
+    pub wall_anchor_slewed_us: u64,
 }

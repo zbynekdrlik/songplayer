@@ -49,6 +49,9 @@ async fn ndi_health_endpoint_includes_pacing() {
             av_align_err_ms: -20.0,
             av_corrections: 20,
             av_corrected_samples: 912,
+            wall_anchor_max_step_us: 1_500,
+            wall_anchor_wide_brackets: 3,
+            wall_anchor_slewed_us: 500,
             ..Default::default()
         },
         audio: AudioStats {
@@ -100,6 +103,19 @@ async fn ndi_health_endpoint_includes_pacing() {
     assert_eq!(arr[0]["pacing"]["av_align_err_ms"].as_f64(), Some(-20.0));
     assert_eq!(arr[0]["pacing"]["av_corrections"].as_u64(), Some(20));
     assert_eq!(arr[0]["pacing"]["av_corrected_samples"].as_u64(), Some(912));
+    // #147: the pacer wall's anchor telemetry (additive keys).
+    assert_eq!(
+        arr[0]["pacing"]["wall_anchor_max_step_us"].as_u64(),
+        Some(1_500)
+    );
+    assert_eq!(
+        arr[0]["pacing"]["wall_anchor_wide_brackets"].as_u64(),
+        Some(3)
+    );
+    assert_eq!(
+        arr[0]["pacing"]["wall_anchor_slewed_us"].as_u64(),
+        Some(500)
+    );
 
     // #148: the audio clock-discipline telemetry serialises with its full key set.
     assert_eq!(

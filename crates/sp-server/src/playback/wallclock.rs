@@ -8,17 +8,48 @@
 //!
 //! The clock source is injectable so tests drive it deterministically — no
 //! `sleep`. Production uses [`SystemClock`] (`Instant::now` + `Utc::now`).
+//!
+//! Anchoring (#147: the re-anchor must not step the genlock wall): every anchor
+//! is a BRACKETED sample (the narrowest of up to 8 `m1 / utc / m2` reads, paired
+//! at the midpoint), and one resample moves the wall by at most 1 ms. A larger
+//! correction slews in over the following resamples, and a backward correction
+//! is a ≤ 1 ms hold, never a backward step. The pure math is in
+//! `wallclock_anchor.rs`.
 
 use std::time::Instant;
 
 use sp_core::genlock::should_resample_mono_to_real_offset;
 
+#[path = "wallclock_anchor.rs"]
+mod wallclock_anchor;
+pub use wallclock_anchor::{
+    ANCHOR_MAX_ATTEMPTS, ANCHOR_MAX_STEP_100NS, ANCHOR_TIGHT_BRACKET, ANCHOR_WIDE_BRACKET,
+    AnchorSample, AnchorStep, BracketedRead, WallAnchorStats, apply_anchor_step,
+    bounded_anchor_update, choose_bracketed_sample, to_us, wall_at,
+};
+
 /// Source of paired `(monotonic instant, utc_100ns)` samples. Production reads
 /// the system clocks; tests inject a deterministic fake.
 pub trait ClockSource: Send + Sync {
-    /// Sample both clocks "at the same instant". Called only at anchor time
-    /// (construction + every resample), never on the hot read path.
+    /// Sample both clocks "at the same instant". [`WallClock`] anchors through
+    /// [`read_bracketed`](ClockSource::read_bracketed) instead. A fake that only
+    /// implements this method gets zero-width brackets (an exact pairing).
     fn sample(&self) -> (Instant, i64);
+
+    /// One bracketed read: monotonic, then realtime, then monotonic again. Called
+    /// only at anchor time (construction + every resample, up to
+    /// [`ANCHOR_MAX_ATTEMPTS`] times), never on the hot read path. The default
+    /// wraps [`sample`](ClockSource::sample) as a zero-width bracket.
+    /// [`SystemClock`] reads the real clocks, and a test fake overrides it to
+    /// inject a preempted (wide) read (#147).
+    fn read_bracketed(&self) -> BracketedRead {
+        let (inst, utc_100ns) = self.sample();
+        BracketedRead {
+            m1: inst,
+            utc_100ns,
+            m2: inst,
+        }
+    }
 
     /// Monotonic instant only, for the hot `now_100ns` read path — it MUST NOT
     /// touch the realtime clock (#146 follow-up: the read path must not call
@@ -37,10 +68,7 @@ pub trait ClockSource: Send + Sync {
     /// this to return a directly controllable value, so a test can advance the
     /// wall clock between the scheduling read and the emit read (#147).
     fn read_100ns(&self, anchor_instant: Instant, anchor_utc_100ns: i64) -> i64 {
-        let inst = self.now_monotonic();
-        let elapsed = inst.saturating_duration_since(anchor_instant);
-        let elapsed_100ns = (elapsed.as_nanos() / 100) as i64;
-        anchor_utc_100ns.saturating_add(elapsed_100ns)
+        wall_at(anchor_instant, anchor_utc_100ns, self.now_monotonic())
     }
 }
 
@@ -50,7 +78,18 @@ pub struct SystemClock;
 
 impl ClockSource for SystemClock {
     fn sample(&self) -> (Instant, i64) {
-        (Instant::now(), utc_now_100ns())
+        let s = choose_bracketed_sample(|| self.read_bracketed());
+        (s.instant, s.utc_100ns)
+    }
+
+    fn read_bracketed(&self) -> BracketedRead {
+        // Bracket the realtime read between two monotonic reads (#147). A
+        // preemption between them widens the bracket and loses the vote in
+        // `choose_bracketed_sample`, instead of pairing a stale instant.
+        let m1 = Instant::now();
+        let utc_100ns = utc_now_100ns();
+        let m2 = Instant::now();
+        BracketedRead { m1, utc_100ns, m2 }
     }
 
     fn now_monotonic(&self) -> Instant {
@@ -80,17 +119,28 @@ pub struct WallClock {
     anchor_instant: Instant,
     anchor_utc_100ns: i64,
     frames_since_resample: u64,
+    stats: WallAnchorStats,
+}
+
+/// One anchor sample from `source`: the narrowest of up to
+/// [`ANCHOR_MAX_ATTEMPTS`] bracketed reads (#147).
+fn anchor_sample(source: &dyn ClockSource) -> AnchorSample {
+    choose_bracketed_sample(|| source.read_bracketed())
 }
 
 impl WallClock {
-    /// Build a wall clock over `source`, seeding the anchor from one sample.
+    /// Build a wall clock over `source`, seeding the anchor from one bracketed
+    /// sample.
     pub fn new(source: Box<dyn ClockSource>) -> Self {
-        let (anchor_instant, anchor_utc_100ns) = source.sample();
+        let sample = anchor_sample(&*source);
+        let mut stats = WallAnchorStats::default();
+        stats.record_sample(&sample);
         Self {
             source,
-            anchor_instant,
-            anchor_utc_100ns,
+            anchor_instant: sample.instant,
+            anchor_utc_100ns: sample.utc_100ns,
             frames_since_resample: 0,
+            stats,
         }
     }
 
@@ -115,11 +165,42 @@ impl WallClock {
     pub fn tick(&mut self) {
         self.frames_since_resample = self.frames_since_resample.saturating_add(1);
         if should_resample_mono_to_real_offset(self.frames_since_resample) {
-            let (inst, utc) = self.source.sample();
-            self.anchor_instant = inst;
-            self.anchor_utc_100ns = utc;
+            self.reanchor();
             self.frames_since_resample = 0;
         }
+    }
+
+    /// Re-anchor from a fresh bracketed sample, moving the wall by at most
+    /// [`ANCHOR_MAX_STEP_100NS`] (#147). `delta` is what an unbounded re-anchor
+    /// would step the wall by at the sample instant. Within ±1 ms it applies
+    /// as-is (normal dantesync slewing). Beyond that ±1 ms applies now and the
+    /// rest slews in over the next resamples, each of which re-measures the
+    /// remaining offset. A backward correction is a hold, never a step back.
+    fn reanchor(&mut self) {
+        let sample = anchor_sample(&*self.source);
+        self.stats.record_sample(&sample);
+        let wall = wall_at(self.anchor_instant, self.anchor_utc_100ns, sample.instant);
+        let delta = sample.utc_100ns.saturating_sub(wall);
+        let step = bounded_anchor_update(delta);
+        self.stats.record_step(delta, &step);
+        if step.is_clamped() {
+            tracing::warn!(
+                delta_us = to_us(delta),
+                bracket_us = sample.bracket.as_micros() as u64,
+                applied_us = to_us(step.applied_100ns),
+                carry_us = to_us(step.carry_100ns),
+                "wallclock: re-anchor delta over 1 ms — slewing it in, not stepping the wall (#147)"
+            );
+        }
+        let (instant, utc) = apply_anchor_step(sample.instant, wall, step.applied_100ns);
+        self.anchor_instant = instant;
+        self.anchor_utc_100ns = utc;
+    }
+
+    /// Anchor telemetry (#147): the largest measured re-anchor delta, the
+    /// wide-bracket count and the slewed total. Surfaced on `PacingStats`.
+    pub fn anchor_stats(&self) -> WallAnchorStats {
+        self.stats
     }
 
     /// Frames elapsed since the last anchor re-sample (0 immediately after a
@@ -202,9 +283,20 @@ impl ClockSource for SettableClock {
     }
 }
 
+// Test-only virtual-time source for the #147 anchor tests (wallclock + pacer).
+#[cfg(test)]
+#[path = "wallclock_test_clock.rs"]
+mod wallclock_test_clock;
+#[cfg(test)]
+pub use wallclock_test_clock::VirtualClock;
+
 #[cfg(test)]
 #[path = "wallclock_tests.rs"]
 mod wallclock_tests;
+
+#[cfg(test)]
+#[path = "wallclock_tests_anchor.rs"]
+mod wallclock_tests_anchor;
 
 #[cfg(test)]
 #[path = "wallclock_tests_mutants.rs"]
