@@ -854,6 +854,66 @@ Now:
   then read the media time actually put on the wire, without float tolerance.
   Keep that pattern for any new alignment case.
 
+## The WallClock anchor never steps the wall (#147, design comment 5827410168)
+
+**The defect.** The box relatched 6× in one 20 s A/V take (SP-slow
+`relatches` 0 → 6, `av_corrections` 1 → 200) while dantesync only slewed
+(≤ 94 ppm, ≤ 2.3 ms). The cause was SongPlayer's own `WallClock`:
+
+- The anchor was `(Instant::now(), Utc::now())`, two UNBRACKETED reads.
+- A preemption between them (the box runs a heavy child at 60–108k page
+  faults/s) paired a stale `Instant` with a later UTC read. The wall jumped
+  FORWARD by the preemption time.
+- The next clean re-anchor (every 100 frames) jumped it BACK.
+- Any backward move that crosses the boundary just emitted relatches
+  (`latched_boundary_100ns`), and the relatch re-stamps an earlier slot. It
+  does not need a full 33 ms slot: the resample runs right after an emit.
+
+**The rules now** (`playback/wallclock.rs`, pure math in
+`wallclock_anchor.rs`):
+
+- **Bracketed sampling.** Every anchor reads `m1 = Instant::now(); utc; m2 =
+  Instant::now()` up to 8 times (`ANCHOR_MAX_ATTEMPTS`) and keeps the NARROWEST
+  bracket, paired at its MIDPOINT (error ≤ width/2). It stops early at a
+  ≤ 20 µs bracket, so the normal cost is one read. A chosen bracket > 200 µs is
+  counted as wide.
+  - A `ClockSource` fake that implements only `sample()` gets zero-width
+    brackets through the default `read_bracketed`, so the existing
+    sample-count tests are unchanged.
+  - Override `read_bracketed` to inject a preempted read
+    (`wallclock_test_clock.rs::VirtualClock`).
+- **Bounded update.** A resample measures `delta = sample.utc − wall(sample.instant)`.
+  - |delta| ≤ 1 ms (`ANCHOR_MAX_STEP_100NS`) applies as-is (normal slewing,
+    ≈ 313 µs per 3.33 s resample at 94 ppm).
+  - Trade-off (design record): a genuine large UTC step slews at 1 ms per
+    resample (~300 ppm), so 500 ms takes ~28 min. `wall_anchor_slewed_us`
+    growing is the signal; the timecodes lag the true grid until it converges.
+  - Beyond that only ±1 ms applies, and a `wallclock: re-anchor delta over 1 ms`
+    WARN logs `delta_us`, `bracket_us`, `applied_us` and `carry_us`.
+  - The remainder is NOT carried explicitly: the next resample re-measures it.
+    Adding the old carry would count it twice.
+  - A genuine 50 ms UTC step converges in 50 resamples (~165 s, ~300 ppm).
+- **Never backward.** A negative applied correction is a HOLD: the new anchor is
+  `(instant + |applied|, wall(instant))`. The saturating read path freezes the
+  wall for ≤ 1 ms, then it runs exactly on the corrected line. Never "simplify"
+  it back to `(instant, wall − |applied|)`: that is a backward step, and right
+  after an emit it relatches (`pacer_tests_wall_anchor.rs` asserts 0 relatches
+  and 0 A/V corrections over 10 000 boundaries with a preempted resample every
+  other time).
+- **Telemetry.** These are the PACER's wall clock (the one that stamps and paces):
+  - `wall_anchor_max_step_us` — the largest MEASURED |delta|, i.e. what an
+    unbounded re-anchor would have stepped;
+  - `wall_anchor_wide_brackets` — anchors with every attempt disturbed;
+  - `wall_anchor_slewed_us` — µs applied through clamped resamples.
+
+  They are on `/api/v1/ndi/health` `pacing` and on the `ndi: genlock` line.
+- **What to read on the box.** `wall_anchor_max_step_us` in the hundreds of µs
+  is dantesync slewing. Tens of ms with `wall_anchor_wide_brackets` climbing
+  means preemption at anchor time, now outvoted or bounded. `slewed_us` growing
+  means real UTC steps (w32time / a dantesync re-lock).
+- **Layout.** `PacingStats` lives in `playback/pacing_stats.rs` (split out of
+  `ndi_health.rs` for the 1000-line cap) and is re-exported from `ndi_health`.
+
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
 A change to pacing, the submitter, decode, the mixer, NDI or the audio path
 merges only with `e2e/post-deploy-av-sync.spec.ts` green. That spec records the

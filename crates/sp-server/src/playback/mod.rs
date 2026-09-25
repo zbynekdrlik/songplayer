@@ -24,6 +24,7 @@ mod ndi_recovery_trigger; // #173 operator recover trigger (impl PlaybackEngine,
 pub mod pacer;
 pub mod pacer_queue; // #147 producer/consumer: pure bounded look-ahead frame queue
 pub mod pacer_sink; // #203 pacer scheduling + shared-frame standby submit helpers
+pub mod pacing_stats; // #147 PacingStats (split out of ndi_health.rs, 1000-line cap)
 pub mod pipeline;
 #[cfg(windows)]
 pub(crate) mod pipeline_paced;

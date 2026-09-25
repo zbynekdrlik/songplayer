@@ -801,3 +801,8 @@ fn audio_resume_reset_snaps_back_to_the_wall_line() {
 // the media-encoded helpers above.
 #[path = "pacer_tests_av_lead.rs"]
 mod pacer_tests_av_lead;
+
+// #147: a preempted WallClock re-anchor must not relatch the pacer nor move
+// the audio (the box's 0 → 6 relatches in one A/V take).
+#[path = "pacer_tests_wall_anchor.rs"]
+mod pacer_tests_wall_anchor;
