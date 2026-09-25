@@ -796,3 +796,8 @@ fn audio_resume_reset_snaps_back_to_the_wall_line() {
         }
     }
 }
+
+// The paced read-ahead cushion end to end (#148 v4), nested here so it reuses
+// the media-encoded helpers above.
+#[path = "pacer_tests_av_lead.rs"]
+mod pacer_tests_av_lead;

@@ -967,3 +967,7 @@ fn seek_while_a_chunk_waits_reads_again_from_the_target() {
     assert_eq!(ts, vec![1008, 1056]);
     assert_eq!(dec.pending_audio.len(), 1, "1104 waits past deadline 1063");
 }
+
+// #148 v4: the paced audio lead — nested here (1000-line cap) to reuse the mocks.
+#[path = "split_sync_lead_tests.rs"]
+mod lead_tests;

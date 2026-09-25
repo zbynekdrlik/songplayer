@@ -34,14 +34,21 @@ pub(crate) fn is_duration_mismatch(v_dur: u64, a_dur: u64) -> bool {
 ///
 /// Takes a video and audio reader behind trait objects and pairs each video
 /// frame with all the audio chunks whose timestamps fall before (or within
-/// [`DEFAULT_TOLERANCE_MS`] of) that frame. Audio is the master clock: the
+/// the audio lead of) that frame — [`DEFAULT_TOLERANCE_MS`] unless built with
+/// [`with_audio_lead`](Self::with_audio_lead) /
+/// [`with_tolerance`](Self::with_tolerance). Audio is the master clock: the
 /// reported duration is the audio stream's duration and every frame is
 /// paired against it.
 pub struct SplitSyncedDecoder {
     video: Box<dyn VideoStream>,
     audio: Box<dyn AudioStream>,
     pending_audio: VecDeque<DecodedAudioFrame>,
-    tolerance_ms: u64,
+    /// How far past each video frame's timestamp the audio is read and handed
+    /// out with it: the `next_synced` deadline is `video_ts + audio_lead_ms`.
+    /// The pacing-OFF path pairs at 40 ms (or 1540 ms with the wall-clock
+    /// emitter); the paced path reads a 250 ms cushion ahead (#148 v4). The G5
+    /// read gate bounds the read-ahead to this lead plus one chunk.
+    audio_lead_ms: u64,
     duration_ms: u64,
     /// After a seek, the sample-accurate audio target the video must fast-forward
     /// to. `SplitSyncedDecoder::seek` seeks the MF video reader keyframe-aligned,
@@ -58,7 +65,7 @@ impl std::fmt::Debug for SplitSyncedDecoder {
     #[cfg_attr(test, mutants::skip)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SplitSyncedDecoder")
-            .field("tolerance_ms", &self.tolerance_ms)
+            .field("audio_lead_ms", &self.audio_lead_ms)
             .field("duration_ms", &self.duration_ms)
             .field("pending_audio_count", &self.pending_audio.len())
             .finish_non_exhaustive()
@@ -74,7 +81,21 @@ impl SplitSyncedDecoder {
         Self::with_tolerance(video, audio, DEFAULT_TOLERANCE_MS)
     }
 
-    /// Like [`new`], but accepts a custom pairing tolerance.
+    /// Like [`new`], but reads audio `audio_lead_ms` ahead of each video frame
+    /// (#148 v4, the paced path's cushion). The paced pacer aligns the audio to
+    /// the picture by MEDIA time, so the lead only changes how much audio is
+    /// buffered — never which sample plays with which frame.
+    pub fn with_audio_lead(
+        video: Box<dyn VideoStream>,
+        audio: Box<dyn AudioStream>,
+        audio_lead_ms: u64,
+    ) -> Result<Self, DecoderError> {
+        Self::with_tolerance(video, audio, audio_lead_ms)
+    }
+
+    /// Like [`new`], but accepts a custom pairing tolerance (the same deadline
+    /// as the audio lead: audio up to `video_ts + tolerance_ms` rides with the
+    /// frame).
     pub fn with_tolerance(
         video: Box<dyn VideoStream>,
         audio: Box<dyn AudioStream>,
@@ -114,10 +135,15 @@ impl SplitSyncedDecoder {
             video,
             audio,
             pending_audio: VecDeque::new(),
-            tolerance_ms,
+            audio_lead_ms: tolerance_ms,
             duration_ms: a_dur,
             pending_video_target_ms: None,
         })
+    }
+
+    /// The audio read-ahead deadline past each video frame (ms).
+    pub fn audio_lead_ms(&self) -> u64 {
+        self.audio_lead_ms
     }
 
     /// Master-clock duration (audio).
@@ -162,7 +188,7 @@ impl SplitSyncedDecoder {
     }
 
     /// Return the next video frame together with all audio chunks whose
-    /// timestamps are at or before `video_ts + tolerance`.
+    /// timestamps are at or before `video_ts + audio_lead_ms`.
     ///
     /// Returns `Ok(None)` when the video stream has ended.
     pub fn next_synced(
@@ -173,7 +199,7 @@ impl SplitSyncedDecoder {
             None => return Ok(None),
         };
 
-        let deadline = video.timestamp_ms + self.tolerance_ms;
+        let deadline = video.timestamp_ms + self.audio_lead_ms;
         let mut audio_frames: Vec<DecodedAudioFrame> = Vec::new();
 
         while let Some(front) = self.pending_audio.front() {
@@ -188,7 +214,8 @@ impl SplitSyncedDecoder {
         // deadline means the audio is already ahead. Reading anyway grew
         // `pending_audio` by one chunk per frame (48 ms chunks vs 33/40 ms
         // frames), and `StemMixReader` applies the fader gains at READ time,
-        // so that read-ahead was fader latency (#184 G5).
+        // so that read-ahead was fader latency (#184 G5). The read-ahead stays
+        // bounded at `audio_lead_ms` plus one chunk.
         if self.pending_audio.is_empty() {
             while let Some(af) = self.audio.next_samples()? {
                 if af.timestamp_ms <= deadline {

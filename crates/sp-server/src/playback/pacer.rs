@@ -882,9 +882,11 @@ impl Pacer {
 #[path = "pacer_prepare.rs"]
 mod pacer_prepare;
 
-// Media-time A/V alignment of the paced audio (#148 design v2).
+// Media-time A/V alignment of the paced audio (#148 design v2) + the paced
+// decoder's audio read-ahead (#148 v4).
 #[path = "pacer_av_align.rs"]
 mod pacer_av_align;
+pub use pacer_av_align::{PACED_AUDIO_LEAD_MS, open_paced_decoder};
 
 #[cfg(test)]
 #[path = "pacer_tests.rs"]
