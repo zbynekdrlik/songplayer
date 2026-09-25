@@ -672,6 +672,12 @@ different block sizes started on different samples.
   trim (the trim may span several packets). The first emitted chunk's label is
   then TRUE. An overshoot (`actual > required`, allowed by symphonia on odd
   streams) trims nothing and labels the chunk at `actual_ts`.
+- **Seek with `SeekTo::TimeStamp`, never `SeekTo::Time`.** `Time::from(Duration)`
+  goes through f64 seconds: 0.288 s × 48 000 = 13 823.99… and symphonia
+  truncates it to 13 823 — one frame early, and one frame off `StemMixReader`'s
+  integer `position_ms * rate / 1000`. `ms_to_ts` computes the frame in exact
+  integer maths. The ramp tests assert EXACT equality (the decode is bit-exact),
+  so any tolerance you are tempted to add hides this class of bug.
 - **`StemMixReader` has no trim of its own** — its `seek` re-anchors
   `emitted_frames = position_ms * rate / 1000`, which is right ONLY because every
   sub-reader now starts exactly at the target. Never "fix" misaligned stems in the
