@@ -66,12 +66,15 @@ fn collect_frames(reader: &mut dyn AudioStream, min_frames: usize) -> (u64, Vec<
 }
 
 /// Assert the collected frames continue the ramp from `first` with no gap:
-/// frame `j` must encode `first + j` (left) and its negation (right), ±1.
+/// frame `j` must encode EXACTLY `(first + j) * scale` (left) and its negation
+/// (right). The decode is bit-exact (`n << 8` scaled by 2^-31 = `n / 2^23`), so
+/// there is no tolerance: a one-frame-early seek (e.g. `SeekTo::Time` rounding
+/// 288 ms down to frame 13 823) or a one-frame skew between stems fails.
 fn assert_ramp_from(frames: &[(i64, i64)], first: i64, scale: i64, what: &str) {
     for (j, &(l, r)) in frames.iter().enumerate() {
         let want = (first + j as i64) * scale;
         assert!(
-            (l - want).abs() <= scale && (r + want).abs() <= scale,
+            l == want && r == -want,
             "{what}: frame {j} after seek encodes (L={l}, R={r}), expected (L={want}, R={})",
             -want
         );
@@ -180,7 +183,9 @@ fn seek_inside_a_block_starts_exactly_at_the_target_frame() {
 }
 
 /// A seek exactly ON a block boundary needs no trim and must stay exact:
-/// 256 ms = frame 12 288 = 3 × 4096; 96 ms = frame 4608 = 1 × 4608.
+/// 256 ms = frame 12 288 = 3 × 4096; 96 ms = frame 4608 = 1 × 4608;
+/// 288 ms = frame 13 824 = 3 × 4608 — the case where a float `SeekTo::Time`
+/// (0.288 s → 13 823.99… → 13 823) lands one frame early in the block before.
 #[test]
 fn seek_at_a_block_boundary_starts_exactly_at_the_target_frame() {
     for (block, t) in [(4096, 256_u64), (4608, 96), (4608, 288)] {
@@ -236,6 +241,19 @@ fn seek_past_the_end_is_an_error() {
         reader.seek(10_000).is_err(),
         "seek beyond the 3 s ramp must be rejected"
     );
+}
+
+/// A rejected (out-of-range) seek does not move the reader, so a trim armed by
+/// the previous successful seek still applies: playback resumes exactly at that
+/// earlier target, labelled with it.
+#[test]
+fn rejected_seek_keeps_the_previous_seek_exact() {
+    let mut reader = open_ramp(4096);
+    reader.seek(1_000).expect("seek(1000) should succeed");
+    assert!(reader.seek(10_000).is_err(), "out-of-range seek rejected");
+    let (ts, frames) = collect_frames(&mut reader, 5_000);
+    assert_eq!(ts, 1_000);
+    assert_ramp_from(&frames, 1_000 * FRAMES_PER_MS, 1, "after rejected seek");
 }
 
 /// #148 v3: `StemMixReader` needs no code of its own — once every sub-reader
