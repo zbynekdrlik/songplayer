@@ -52,10 +52,11 @@ Method (automates the manual 24.9.2026 measurement, A/V +13 ms, 0 dropouts):
   GLITCH. Glitches are informational and do not fail the gate.
 * **Segment profile** (diagnostics, never part of the verdict): the audio and
   video offsets per 2 s window (``segment_profile``), each searched +-300 ms
-  around its global offset. ``drift_and_step`` fits the per-window A/V over
-  the windows with audio corr >= 0.8 and picture motion: the drift slope in
-  ms per 10 s, and the largest step between neighbouring windows. A steady
-  clock drift reads as a slope, a jump/resync as one step with a flat slope.
+  around its global offset. ``av_sync_drift.drift_and_step`` fits the
+  per-window A/V over the windows with audio corr >= 0.8 and a measurable
+  picture: the drift slope in ms per 10 s, and the largest step between
+  neighbouring windows. A steady clock drift reads as a slope, a jump/resync
+  as one step with a flat slope.
 
 Verdict, in order (see ``verdict``):
 1. ``cannot_measure`` (exit 2) when the AUDIO is unmeasurable or the analysis
@@ -70,8 +71,9 @@ stdout.
 
 The pure functions (``audio_offset``, ``content_box``, ``source_crop``,
 ``video_offset``, ``dropout_blocks``, ``verdict``, ``exit_code``,
-``segment_profile``, ``drift_and_step``) take numpy arrays and are covered by
-``scripts/tests/test_av_sync_check.py`` and ``test_av_sync_profile.py``. The ffmpeg I/O layer
+``segment_profile``, and the ``av_sync_drift`` fit) take numpy arrays and are
+covered by ``scripts/tests/test_av_sync_check.py`` and
+``test_av_sync_profile.py``. The ffmpeg I/O layer
 (``decode_audio``, ``decode_video``, ``probe_video_size``, ``measure``) is kept
 thin and is deliberately NOT unit-tested. The Eval Checks CI job has no
 ffmpeg, so it is exercised on the box by the post-deploy gate
@@ -94,6 +96,7 @@ import sys
 import traceback
 
 import numpy as np
+from av_sync_drift import drift_and_step
 
 SR = 8000
 GRID_W = 64
@@ -113,12 +116,11 @@ LOUD_SUB_MS = 2  # the original must be loud in every 2 ms of a window
 GLITCH_REL_ERR = 0.8
 DEFAULT_MAX_AV_MS = 40.0
 MAX_REPORTED_TIMES = 20
-# Per-segment profile (diagnostics only, never part of the verdict).
+# Per-segment profile (diagnostics only, never part of the verdict). The
+# drift/step fit over it lives in av_sync_drift.py.
 SEGMENT_S = 2.0
 SEGMENT_SEARCH_S = 0.3  # +- around the global audio / video offset
-SEGMENT_MIN_CORR = 0.8  # a window below this is left out of the drift fit
-STEP_MIN_MS = 20.0  # a step term is fitted only for a step at least this big
-STEP_OUTLIER_X = 3.0  # ... and at least this many times the median step
+SEGMENT_MAX_PLATEAU_FRAMES = 1.5  # a wider video plateau (a still) is not ok
 
 EXIT_CODES = {"pass": 0, "fail": 1, "cannot_measure": 2}
 
@@ -586,18 +588,26 @@ def segment_profile(
       the global video offset ``video_offset_s``. ``video`` is
       ``(rec_frames, rec_pts, orig_frames, orig_pts)``, cropped as for
       ``video_offset``, or None when the picture was not measurable.
-    ``av_ms`` = audio minus video offset of the window. A side a window cannot
-    measure (digital silence, no frames, no shift) is None there, and the
-    reason goes to that window's ``errors``.
+    ``av_ms`` = audio minus video offset of the window. ``video_ok`` = the
+    window's picture had motion (contrast >= ``MIN_VIDEO_CONTRAST``) and its
+    plateau is at most ``SEGMENT_MAX_PLATEAU_FRAMES`` source frames wide. A
+    still shot covering the window leaves a wide plateau whose centre is not
+    a measurement, even when the curve drops at the search edges. A side a
+    window cannot measure (digital silence, no frames, no shift) is None
+    there, and the reason goes to that window's ``errors``.
     """
     rec = np.asarray(rec, dtype=np.float64)
     orig = np.asarray(orig, dtype=np.float64)
     win = int(round(window_s * sr))
     pad = int(round(search_s * sr))
+    max_plateau_ms = 0.0
+    if video is not None and len(video[3]) >= 2:
+        frame_ms = float(np.median(np.diff(video[3]))) * 1000.0
+        max_plateau_ms = SEGMENT_MAX_PLATEAU_FRAMES * frame_ms
     out = []
     for i0 in range(0, len(rec) - win + 1, win):
         t0 = rec_t0 + i0 / sr
-        a_off = a_corr = v_off = v_match = v_contrast = None
+        a_off = a_corr = v_off = v_match = v_contrast = v_plateau = None
         errors: list[str] = []
         s0, s1 = max(0, lag + i0 - pad), min(len(orig), lag + i0 + win + pad)
         if s1 - s0 < win:
@@ -622,93 +632,31 @@ def segment_profile(
                     center_s=video_offset_s,
                     window_s=search_s,
                 )
-                v_off, v_match, v_contrast = v["offset_s"], v["match"], v["contrast"]
+                v_off, v_match = v["offset_s"], v["match"]
+                v_contrast, v_plateau = v["contrast"], v["plateau_ms"]
             except ValueError as exc:  # no frames, or no shift inside the original
                 errors.append(f"video: {exc}")
         both = a_off is not None and v_off is not None
+        video_ok = (
+            v_contrast is not None
+            and v_contrast >= MIN_VIDEO_CONTRAST
+            and v_plateau <= max_plateau_ms
+        )
         out.append(
             {
                 "t_s": round(t0, 3),
+                "t_end_s": round(t0 + window_s, 3),
                 "audio_offset_s": None if a_off is None else round(a_off, 4),
                 "audio_corr": None if a_corr is None else round(a_corr, 4),
                 "video_offset_s": None if v_off is None else round(v_off, 4),
                 "video_match": None if v_match is None else round(v_match, 4),
                 "video_contrast": None if v_contrast is None else round(v_contrast, 4),
+                "video_plateau_ms": None if v_plateau is None else round(v_plateau, 1),
+                "video_ok": bool(video_ok),
                 "av_ms": round((a_off - v_off) * 1000.0, 1) if both else None,
                 "errors": errors,
             }
         )
-    return out
-
-
-def _good_window(s: dict, min_corr: float) -> bool:
-    """A window the drift fit trusts: audio matched, and the picture had motion."""
-    contrast = s.get("video_contrast")
-    return (
-        s["av_ms"] is not None
-        and s["audio_corr"] is not None
-        and s["audio_corr"] >= min_corr
-        and (contrast is None or contrast >= MIN_VIDEO_CONTRAST)
-    )
-
-
-def drift_and_step(
-    profile: list[dict], min_corr: float = SEGMENT_MIN_CORR, window_s: float = SEGMENT_S
-) -> dict:
-    """Drift slope and the largest step of ``av_ms`` over the good windows.
-
-    Good = ``audio_corr >= min_corr``, a measured ``av_ms``, and a window
-    picture with motion (``video_contrast >= MIN_VIDEO_CONTRAST``: on a flat
-    curve the window's video offset is just the plateau centre).
-    * ``max_step_ms`` / ``step_at_s``: the largest |av_ms change| between
-      neighbouring good windows, and the middle of the gap between them (the
-      end of the earlier window and the start of the later one).
-    * ``drift_ms_per_10s``: a least-squares slope of av_ms over time. When the
-      largest step is the ONLY outlier (>= ``STEP_MIN_MS`` and >=
-      ``STEP_OUTLIER_X`` x the median step) and each side keeps >= 2 good
-      windows, the fit gets its own step term there (``step_modeled``). A jump
-      then reads as a step with a flat slope. A steady drift has equal steps,
-      and a one-window spike or a sawtooth has more than one outlier, so none of
-      them is split.
-    * ``coverage_low``: fewer than 70 % of the windows are good. A fast drift
-      smears its windows below ``min_corr``, so then read the excluded rows'
-      raw ``av_ms`` too.
-    Fields are None with fewer than two good windows.
-    """
-    good = [s for s in profile if _good_window(s, min_corr)]
-    out = {
-        "drift_ms_per_10s": None,
-        "max_step_ms": None,
-        "step_at_s": None,
-        "step_modeled": False,
-        "windows_used": len(good),
-        "windows_total": len(profile),
-        "coverage_low": len(good) < 0.7 * len(profile),
-        "min_corr": min_corr,
-    }
-    if len(good) < 2:
-        return out
-    t = np.array([s["t_s"] for s in good], dtype=np.float64)
-    av = np.array([s["av_ms"] for s in good], dtype=np.float64)
-    steps = np.abs(np.diff(av))
-    k = int(np.argmax(steps))
-    floor = max(STEP_MIN_MS, STEP_OUTLIER_X * float(np.median(steps)))
-    modeled = (
-        int(np.sum(steps >= floor)) == 1
-        and steps[k] >= floor
-        and k + 1 >= 2  # >= 2 good windows before the step ...
-        and len(good) - (k + 1) >= 2  # ... and after it
-    )
-    cols = [np.ones_like(t), t]
-    if modeled:
-        cols.append((t >= t[k + 1]).astype(np.float64))
-    coef = np.linalg.lstsq(np.stack(cols, axis=1), av, rcond=None)[0]
-    out.update(
-        drift_ms_per_10s=round(float(coef[1]) * 10.0, 1),
-        max_step_ms=round(float(steps[k]), 1),
-        step_at_s=round(float(t[k] + window_s + t[k + 1]) / 2.0, 3),
-        step_modeled=bool(modeled),
-    )
     return out
 
 
