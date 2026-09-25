@@ -307,3 +307,8 @@ fn frame_submitter_sink_sends_one_1600_sample_audio_chunk_before_each_video() {
         "expected ~10 boundary emits, got {video_count}"
     );
 }
+
+// Media-time A/V alignment acceptance (#148 design v2), nested here so
+// `pacer.rs` stays under the 1000-line cap.
+#[path = "pacer_tests_av_align.rs"]
+mod pacer_tests_av_align;
