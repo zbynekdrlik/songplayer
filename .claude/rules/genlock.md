@@ -914,6 +914,58 @@ Now:
 - **Layout.** `PacingStats` lives in `playback/pacing_stats.rs` (split out of
   `ndi_health.rs` for the 1000-line cap) and is re-exported from `ndi_health`.
 
+## `av_frame_offset` — SongPlayer's own emitted A/V relation (#148 v5)
+
+Measurement only (design comment 5833341193). It was added to find out whether
+the gate's steady −26 ms (`av_ms`, audio trails the picture) is produced by
+SongPlayer's paced emission or further downstream. The receiver places audio
+within 2 ms, and camera-box's own gate through the same OBS build reads ~0.
+
+- **What it is.** At every productive paced boundary (fresh emit or repeat)
+  `take_aligned_audio` records `audio_block_media_start − emitted_frame_pts` in
+  ms (`pacer_av_align.rs::frame_offset_ms`):
+  - the block start is the media head of the block handed to the sink:
+    `head_media()` before `take_block` on the aligned path (output 0 = input 0,
+    also on an underrun), or `expected` after a successful `align_to`;
+  - the frame pts is the frame handed with it; on a repeat that is the
+    repeated frame (`Pacer::service` passes `shown_pts`).
+
+  Untimed audio, the anchor-less silence and the not-yet-aligned silence are
+  skipped. Nothing reads the value back: no emission behaviour depends on it.
+- **Sign.** Positive = the audio handed to NDI is from LATER media than the
+  picture handed with it = the audio LEADS. This is the same sign as
+  `av_align_err_ms` and the gate's `av_ms`, so a SongPlayer-caused −26 ms
+  would read ≈ −26 here. (The design record's prose had the reading reversed;
+  the formula is what ships.)
+- **Window.** mean / min / max per UTC minute of the boundary stamp
+  (`AvFrameOffset`). `stats()` reports the last COMPLETE minute (the minute
+  before the pacer's current wall minute), so the `ndi: genlock` line logged in
+  minute M carries the whole of minute M−1. A minute with no timed productive
+  boundary (idle, paused) reads `0.0/0.0/0.0`.
+- **Where.** `/api/v1/ndi/health` → `pacing.av_frame_offset_ms` /
+  `av_frame_offset_min_ms` / `av_frame_offset_max_ms`, and the
+  `ndi: genlock … av_frame_offset_ms=… av_frame_offset_min_ms=… av_frame_offset_max_ms=…`
+  line (1 decimal).
+- **Expected values (structural, not errors).**
+  - A 30 fps source reads 0 (± 1 sample; the continuous correction's dead band
+    lets it sit up to ±5 ms after a stall).
+  - 24/25-fps content on the 30 fps grid reads a sawtooth of 0 … +33.3 ms
+    (min 0, max ≈ one grid slot) with a mean of **+16.7 ms**. The picture is
+    held on the grid (the newest frame whose present time ≤ the boundary)
+    while the audio runs on the anchor line (`pacer_tests_av_offset.rs`
+    derives the 25 fps mean/min/max analytically).
+  - A decoder stall shows as a negative dip (the zero-filled block does not
+    advance the head) that the correction walks back by ≤ 1 ms per block.
+- **How to read it on the box.** Run the post-deploy A/V gate on SP-slow and
+  note its UTC minute. Then read the `ndi: genlock ndi_name=SP-slow` line
+  logged in the FOLLOWING minute (it carries the take's minute) from
+  `C:\ProgramData\SongPlayer\songplayer.<date>.log`, or `/api/v1/ndi/health`
+  once that minute has closed. Both use the same sign, so the part produced
+  downstream of SongPlayer's sender ≈ gate `av_ms` − this mean:
+  - mean ≈ the gate's `av_ms`: SongPlayer's emission produces the offset;
+  - mean ≈ the structural value above while the gate reads −26: the error is
+    downstream of the sender (fall back to design Approach 2).
+
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
 A change to pacing, the submitter, decode, the mixer, NDI or the audio path
 merges only with `e2e/post-deploy-av-sync.spec.ts` green. That spec records the

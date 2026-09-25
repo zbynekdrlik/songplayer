@@ -528,11 +528,11 @@ impl Pacer {
         // video repeat) takes exactly `samples_per_boundary`, aligned by media
         // time to the stamped boundary, submitted BEFORE the video frame (§6). A
         // pre-roll STARVE (nothing ever emitted) delivers no audio.
-        let audio_frames = if had_frame || self.last_frame.is_some() {
-            let fresh_pts = due.as_ref().map(|f| f.pts_100ns());
-            self.take_aligned_audio(stamp_boundary, fresh_pts)
-        } else {
-            Vec::new()
+        let fresh_pts = due.as_ref().map(|f| f.pts_100ns());
+        let shown_pts = fresh_pts.or_else(|| self.last_frame.as_ref().map(|f| f.pts_100ns()));
+        let audio_frames = match shown_pts {
+            Some(shown) => self.take_aligned_audio(stamp_boundary, fresh_pts, shown),
+            None => Vec::new(),
         };
 
         let outcome = if let Some(frame) = due {
@@ -779,6 +779,7 @@ impl Pacer {
     /// Snapshot the counters for the health document.
     pub fn stats(&self) -> PacingStats {
         let anchor = self.wall.anchor_stats();
+        let offset = self.av.frame_offset.report(self.now_100ns());
         PacingStats {
             enabled: self.enabled,
             seq: self.seq,
@@ -795,6 +796,10 @@ impl Pacer {
             av_align_err_ms: self.av.err_ms(),
             av_corrections: self.av.corrections,
             av_corrected_samples: self.av.corrected_samples,
+            // #148 v5: the emitted audio-block − frame-pts relation, last full minute.
+            av_frame_offset_ms: offset.0,
+            av_frame_offset_min_ms: offset.1,
+            av_frame_offset_max_ms: offset.2,
             // #147: the anchor telemetry of the wall clock that stamps + paces.
             wall_anchor_max_step_us: anchor.max_step_us,
             wall_anchor_wide_brackets: anchor.wide_brackets,
