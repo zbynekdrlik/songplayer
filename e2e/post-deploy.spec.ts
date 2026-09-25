@@ -750,26 +750,46 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const sev = (s: string) => (s === "UNLOCKED" ? 2 : s === "DEGRADED" ? 1 : 0);
     const eff = (o: { lock_state: string; clock?: { clock_ok?: boolean } }) =>
       o.lock_state === "LOCKED" && !o.clock?.clock_ok ? "UNLOCKED" : o.lock_state;
-    const live = enabled.filter((o) => o.state === "Playing");
-    let expectedState: string;
-    if (live.length === 0) {
-      const clockOk = enabled.every((o) => !!o.clock?.clock_ok);
-      expectedState = clockOk ? "LOCKED" : "UNLOCKED";
-    } else {
-      expectedState = live
-        .map(eff)
-        .reduce((a, b) => (sev(b) > sev(a) ? b : a), "LOCKED");
-    }
+    const summarize = (en: typeof enabled): string => {
+      const live = en.filter((o) => o.state === "Playing");
+      if (live.length === 0) {
+        return en.every((o) => !!o.clock?.clock_ok) ? "LOCKED" : "UNLOCKED";
+      }
+      return live.map(eff).reduce((a, b) => (sev(b) > sev(a) ? b : a), "LOCKED");
+    };
+    const freshEnabled = async (): Promise<typeof enabled> => {
+      const r = await request.get("/api/v1/ndi/health");
+      expect(r.status()).toBe(200);
+      return ((await r.json()) as typeof health).filter((o) => o.pacing?.enabled === true);
+    };
 
-    const cls = (await global.getAttribute("class")) ?? "";
-    expect(
-      cls,
-      `global badge class "${cls}" must match the summarized state ${expectedState} for enabled health ${JSON.stringify(enabled)}`,
-    ).toContain(`lock-${expectedState.toLowerCase()}`);
+    // The badge and the API are two reads a poll apart (the UI polls every
+    // 1 s), and the earlier E2E tests play/seek/pause outputs, so a live
+    // output's lock state can legitimately change between the two reads (a
+    // seek is a grid resync → DEGRADED for 60 s). Require that they AGREE on
+    // the same fresh snapshot within a few UI refreshes — a badge that never
+    // matches the health still fails (release runs 36063649894/36079166526
+    // failed on the one-shot comparison in both directions).
+    let lastGlobal = "";
+    await expect
+      .poll(
+        async () => {
+          const en = await freshEnabled();
+          const expectedState = summarize(en);
+          const cls = (await global.getAttribute("class")) ?? "";
+          lastGlobal = `global badge class "${cls}" vs summarized ${expectedState} for ${JSON.stringify(en)}`;
+          return cls.includes(`lock-${expectedState.toLowerCase()}`);
+        },
+        { timeout: 10_000, intervals: [500] },
+      )
+      .toBe(true)
+      .catch((e) => {
+        throw new Error(`${lastGlobal}\n${e}`);
+      });
 
     // A per-card badge is shown only on a pacing-enabled Playing/Paused output;
     // find one that also matches a playlist card and assert its colour agrees
-    // with the output's raw lock_state.
+    // with the output's raw lock_state (same fresh-snapshot agreement).
     const playlists = (await (
       await request.get("/api/v1/playlists")
     ).json()) as Array<{ name: string; ndi_output_name: string }>;
@@ -789,11 +809,22 @@ test.describe("SongPlayer post-deploy feature verification", () => {
         .filter({ hasText: nameByNdi.get(matched.ndi_name)! })
         .locator(".lock-badge");
       await expect(cardBadge).toBeVisible({ timeout: 10_000 });
-      const ccls = (await cardBadge.getAttribute("class")) ?? "";
-      expect(
-        ccls,
-        `card badge for ${matched.ndi_name} class "${ccls}" must match its lock_state ${matched.lock_state}`,
-      ).toContain(`lock-${matched.lock_state.toLowerCase()}`);
+      let lastCard = "";
+      await expect
+        .poll(
+          async () => {
+            const now = (await freshEnabled()).find((o) => o.ndi_name === matched.ndi_name);
+            const want = now?.lock_state ?? matched.lock_state;
+            const ccls = (await cardBadge.getAttribute("class")) ?? "";
+            lastCard = `card badge for ${matched.ndi_name} class "${ccls}" vs lock_state ${want}`;
+            return ccls.includes(`lock-${want.toLowerCase()}`);
+          },
+          { timeout: 10_000, intervals: [500] },
+        )
+        .toBe(true)
+        .catch((e) => {
+          throw new Error(`${lastCard}\n${e}`);
+        });
     }
   });
 
