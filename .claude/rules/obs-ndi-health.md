@@ -9,6 +9,7 @@ paths:
   - "e2e/av-sync-evidence.ts"
   - "e2e/obs-driver.ts"
   - "scripts/av_sync_check.py"
+  - "scripts/av_sync_drift.py"
   - "scripts/tests/test_av_sync_check.py"
   - "scripts/tests/test_av_sync_profile.py"
 ---
@@ -542,28 +543,42 @@ and the recording actually get.
   whole-take A/V number cannot tell a clock that drifts from a resync that
   jumps. Release run 36068121677 read av_ms 60.5, corr 0.899 and glitches
   only from 12.5 s. The JSON therefore carries two extra fields:
-  - `segments`: one row per 2 s window of the recording. Each row has
-    `t_s` (window start, recording time), `audio_offset_s` + `audio_corr`
-    (that window's audio cross-correlated against the original, searched
-    ±300 ms around the global audio offset), `video_offset_s` +
-    `video_match` + `video_contrast` (the same global video alignment,
-    restricted to the window's frames, ±300 ms around the global video
-    offset), `av_ms`, and `errors` (why a side is `null` there: silence, no
-    frames, no shift).
-  - `drift`: fitted over the GOOD windows (`windows_used` of
-    `windows_total`). A good window has `audio_corr ≥ 0.8` and
-    `video_contrast ≥ 0.002`: on a flat video curve the window's video
-    offset is just the plateau centre, so its `av_ms` is not a measurement.
+  - `segments` (`segment_profile` in `av_sync_check.py`): one row per 2 s
+    window of the recording. Each row has:
+    - `t_s` / `t_end_s`: the window, in recording time;
+    - `audio_offset_s` + `audio_corr`: that window's audio cross-correlated
+      against the original, searched ±300 ms around the global audio offset;
+    - `video_offset_s` + `video_match` + `video_contrast` +
+      `video_plateau_ms`: the same global video alignment, restricted to the
+      window's frames, ±300 ms around the global video offset;
+    - `video_ok`: contrast ≥ 0.002 AND a plateau no wider than 1.5 source
+      frames. A still or nearly static shot fails it: with a flat curve, or
+      a wide plateau whose edges drop only at the search limits, the
+      window's video offset is just the plateau centre. That can be tens of
+      ms off, so its `av_ms` is not a measurement;
+    - `av_ms` and `errors` (why a side is `null` there: silence, no frames,
+      no shift).
+  - `drift` (`drift_and_step` in `av_sync_drift.py`): fitted over the GOOD
+    windows (`windows_used` of `windows_total`). A good window has
+    `audio_corr ≥ 0.8` and `video_ok`.
     - `drift_ms_per_10s` is the least-squares slope of `av_ms`.
-    - `max_step_ms` / `step_at_s` is the largest `av_ms` change between
-      neighbouring good windows, and the middle of the gap between them. When
-      the window that straddles a jump is excluded, that is still close to
-      the jump.
+    - `max_step_ms` is the largest `av_ms` change between neighbouring good
+      windows. `step_gap_s` is `[end of the earlier, start of the later]`
+      window, and `step_at_s` its middle.
+      - A zero-width gap means the jump is on that window boundary. A jump
+        inside a window lands on one side of it.
+      - A gap one window wide means the straddling window was excluded.
+      - A wider gap means several windows were excluded: the jump is
+        somewhere inside the gap, not necessarily at its middle.
     - The fit gets its own step term there (`step_modeled: true`) only if
-      that step is the ONLY outlier (≥ 20 ms and ≥ 3× the median step) and
-      each side keeps ≥ 2 good windows. A jump then does not also read as a
-      slope. A steady drift (equal steps), a one-window spike or a sawtooth
-      (two or more outliers) is never split.
+      the step is an outlier (≥ 20 ms and ≥ 3× the median step), each side
+      keeps ≥ 2 good windows, AND the level holds (the median `av_ms` of
+      the two sides differs by ≥ half the step). A jump then does not also
+      read as a slope, even next to one bad window. A steady drift (equal
+      steps), a one-window spike, or a sawtooth (equal side medians) is
+      never split.
+    - A jump in the first or last good window cannot be modelled. It shows
+      as `max_step_ms`, and it bends the slope.
     - `coverage_low: true` means fewer than 70 % of the windows are good.
       The fit then describes only part of the take.
   - How to read it:
@@ -610,7 +625,19 @@ and the recording actually get.
   (`test_av_sync_profile.py`) uses bass-band noise and a moving picture,
   covering drift, a jump, in-sync, and an excluded low-corr window. The
   evidence copy (`av-sync-evidence.spec.ts`) runs on a temp dir in the mock
-  suite. The ffmpeg I/O layer
+  suite.
+  - `scripts/tests/conftest.py` puts `scripts/` on `sys.path`, as on the
+    box, so a script's sibling import (`av_sync_check` → `av_sync_drift`)
+    resolves when a test loads the script by file path.
+  - The real ffmpeg path of the profile was checked locally (ffmpeg 6.1,
+    25.9.2026). The original was a testsrc2 1920×960 at 25 fps plus pink
+    noise low-passed to 1.5 kHz. The recording was an mkv letterboxed to
+    1080 at 30 fps, AAC, whose audio jumps +60 ms at rec 12 s. The result:
+    - windows 1–6 read −17.0 ms and 7–10 read +43.0 ms;
+    - every window had corr ≥ 0.98 and a 6 ms video plateau;
+    - `max_step_ms=60.0 step_at_s=11.979 step_modeled=true`, drift 0.0;
+    - the whole-take verdict was `cannot_measure` (corr 0.596), as on the
+      release run. The ffmpeg I/O layer
   is untested in CI by design, because that job has no ffmpeg. It was checked
   locally against ffmpeg-muxed mkv and mp4 AAC "recordings" with known offsets
   (+120 → 116, 0 → −3/−4, −80 → −83 ms, and an 85 ms zeroed stretch → a
