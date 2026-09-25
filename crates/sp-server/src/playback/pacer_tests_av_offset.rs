@@ -18,7 +18,8 @@
 use std::cell::{Cell, RefCell};
 
 use super::{
-    Rec, SyncedSource, anchored, assert_exact_stream, b, first_media, run_synced, step_ahead,
+    Rec, SyncedSource, anchored, assert_exact_stream, b, first_media, run_synced, samples_of,
+    step_ahead,
 };
 
 /// One 48 kHz sample in milliseconds — the "± 1 sample" tolerance.
@@ -159,36 +160,53 @@ fn an_injected_20_ms_audio_offset_reads_plus_20_and_the_window_resets_per_minute
 }
 
 // ---------------------------------------------------------------------------
-// #148 v6: the audio anchors on the first frame's PRESENT time
-// (`wall_start + pts₀`), never on the grid boundary it is due at. A start
-// position / seek whose first frame presents off the grid must not leave the
-// audio late by that frame's sub-slot phase for the whole song.
+// #148 v6 (Approach 3, ROZHODNUTÉ 5834440419): on the first FRESH frame of a
+// new wall↔media map the pacer lands the picture origin on the grid,
+// `wall_start = due(pts₀) − pts₀`, so that frame presents exactly on the
+// boundary it is due at and is still shown there. The audio keeps its anchor
+// `(pts₀, due(pts₀))`, which now IS the picture's line. Any seek / start
+// position therefore reads the on-grid sawtooth: 30 fps reads 0, 24/25 fps
+// read min 0 / mean 16.7 ms, whatever the landing phase.
 // ---------------------------------------------------------------------------
 
-/// A seek landing whose first frame presents at `b(1) + FIRST_PTS` = 241.0 ms,
-/// i.e. 25.67 ms BEFORE `b(8)` (266.67 ms) — the box's SP-slow case (#148 v5
-/// telemetry: min −25.7 ms on a 23.976 fps song).
+/// A seek landing whose first frame would present at `b(1) + FIRST_PTS` =
+/// 241.0 ms, i.e. 25.67 ms BEFORE `b(8)` (266.67 ms) — the box's SP-slow case
+/// (#148 v5 telemetry: min −25.7 ms on a 23.976 fps song).
 const FIRST_PTS: i64 = 2_076_667;
 
 /// The same landing exactly ON `b(8)`: `b(1) + ON_GRID_PTS = b(8)`.
 const ON_GRID_PTS: i64 = 2_333_333;
 
-/// The reading of minute 0 when the audio runs on the PICTURE's line: the
-/// block at `b(k)` starts at media `b(k) − wall_start` = `(k − 1)·100/3` ms
-/// (wall_start = `b(1)`), and the frame handed with it is the newest whose
-/// present time `b(1) + pts ≤ b(k)`. So each reading is `b(k) − present`,
-/// ≥ 0 by construction. Boundaries before the first frame read nothing.
-fn picture_line_minute_0(pts: fn(i64) -> i64) -> Vec<f64> {
+/// The boundary the landing is due at, and shown at: `b(8)`.
+const LANDING: i64 = 8;
+
+/// The grid boundary a frame presenting at `present` is due at (the first
+/// boundary at or after it), as a boundary index.
+fn due_index(present: i64) -> i64 {
+    (0..).find(|&k| b(k) >= present).expect("a boundary exists")
+}
+
+/// The reading of minute 0 with the picture origin landed on the grid: the
+/// first frame is due at `b(d)`, the origin becomes `b(d) − pts₀`, and frame
+/// `j` presents at `b(d) + (pts_j − pts₀)`. The block at `b(k)` starts at the
+/// audio anchor line `samples(pts₀) + samples(b(k) − b(d))`; the frame handed
+/// with it is the newest that has presented. Boundaries before `b(d)` read
+/// nothing (no frame has presented before `b(d)`).
+fn on_grid_minute_0(pts: fn(i64) -> i64) -> Vec<f64> {
+    let pts0 = pts(0);
+    let due = b(due_index(b(1) + pts0));
+    let origin = due - pts0;
     let mut out = Vec::new();
     let mut next = 0i64;
     let mut shown: Option<i64> = None;
     for k in 1..=LAST_OF_MINUTE_0 {
-        while b(1) + pts(next) <= b(k) {
+        while origin + pts(next) <= b(k) {
             shown = Some(pts(next));
             next += 1;
         }
         if let Some(p) = shown {
-            out.push((k - 1) as f64 * 100.0 / 3.0 - p as f64 / 10_000.0);
+            let media = samples_of(pts0) + samples_of(b(k) - due);
+            out.push(media as f64 * 1000.0 / 48_000.0 - p as f64 / 10_000.0);
         }
     }
     out
@@ -205,93 +223,141 @@ fn play_minute_0(pts: fn(i64) -> i64) -> (crate::playback::pacer::Pacer, Rec) {
     (pacer, rec)
 }
 
-#[test]
-fn a_23_976_fps_seek_landing_25_7_ms_before_a_boundary_reads_min_0_not_minus_25_7() {
-    // 23.976 fps with the decoder's integer-ms pts, first frame 25.67 ms before
-    // b(8). The due-boundary anchor read this minute as mean −5.05 / min −25.67
-    // / max +16.0 — the box's SP-slow reading. On the picture line the phase
-    // sweeps through the grid, so some frame presents exactly on a boundary:
-    // min 0, max one frame + one slot (41.7 ms).
-    let pts: fn(i64) -> i64 = |j| FIRST_PTS + (j * 1001 / 24) * 10_000;
+/// The shared checks of a landing at `b(LANDING)`: shown there, every shown
+/// boundary measured, only the start drop, the picture origin on the grid,
+/// and the reported minute equal to the on-grid model. Returns the model's
+/// `(mean, min, max)` and the recorded blocks.
+fn assert_landed_on_grid(pts: fn(i64) -> i64, what: &str) -> ((f64, f64, f64), Rec) {
     let (pacer, rec) = play_minute_0(pts);
-
-    assert_eq!(rec.blocks[0].0, b(8), "the first frame is shown at b(8)");
-    let want_series = picture_line_minute_0(pts);
-    assert_eq!(want_series.len(), 1792, "b(8..=1799) carry a frame");
+    assert_eq!(
+        rec.blocks[0].0,
+        b(LANDING),
+        "{what}: first frame shown at b(8)"
+    );
+    assert_eq!(
+        pacer.wall_start_100ns,
+        b(LANDING) - pts(0),
+        "{what}: the picture origin lands the first frame on b(8)"
+    );
+    let want = summary(&on_grid_minute_0(pts));
     let readings = pacer.av.frame_offset.readings(pacer.now_100ns());
-    assert_eq!(readings, 1792, "every shown boundary was measured");
+    assert_eq!(readings, 1792, "{what}: b(8..=1799) were measured");
     assert_eq!(
         pacer.stats().av_corrections,
         1,
-        "only the start drop: the picture-line audio needs no correction"
+        "{what}: only the start drop — the audio stays on the picture line"
     );
-
     let got = reported(&pacer);
     assert!(
         got.1.abs() <= ONE_SAMPLE_MS,
-        "min {} ms: the audio must not run late by the first frame's 25.7 ms phase",
+        "{what}: min {} ms — the audio must not run late by the landing's 25.7 ms phase",
         got.1
     );
-    assert_close(got, summary(&want_series), 1e-6, "23.976 fps seek landing");
+    assert_close(got, want, 1e-6, what);
+    (want, rec)
 }
 
 #[test]
-fn exact_24_and_25_fps_seek_landings_read_the_picture_line_sawtooth() {
-    // Exact-rate content never presents on the grid after this landing: the
-    // readings are the sawtooth `b(k) − present` whose min is the landing
-    // phase modulo the rate's grid step (24 fps: 25.67 mod 8.33 = 0.67 ms;
-    // 25 fps: 25.67 mod 6.67 = 5.67 ms) and whose mean is that min + the
-    // 16.7 ms sawtooth mean. The due-boundary anchor read all of it 25.67 ms
-    // lower (24 fps min −25.0, 25 fps min −20.0).
-    let cases: [(fn(i64) -> i64, f64, &str); 2] = [
-        (
-            |j: i64| FIRST_PTS + j * 10_000_000 / 24,
-            2.0 / 3.0,
-            "24 fps",
-        ),
-        (|j: i64| FIRST_PTS + j * 400_000, 17.0 / 3.0, "25 fps"),
+fn a_23_976_fps_seek_landing_25_7_ms_before_a_boundary_reads_min_0_not_minus_25_7() {
+    // 23.976 fps with the decoder's integer-ms pts. The v5 code (origin off
+    // the grid, audio on the due line) read this minute as −5.05 / −25.67 /
+    // +16.0 — the box's SP-slow reading. With the origin landed on the grid it
+    // is the on-grid 23.976 sawtooth: min 0, max ≈ one source frame interval
+    // (41.7 ms), mean 20.7 ms (the 23.976/30 phase drifts within the minute).
+    let (want, _) = assert_landed_on_grid(|j| FIRST_PTS + (j * 1001 / 24) * 10_000, "23.976 fps");
+    assert!((want.2 - 125.0 / 3.0).abs() < 1e-3, "max {}", want.2);
+}
+
+#[test]
+fn exact_24_and_25_fps_seek_landings_read_the_on_grid_sawtooth() {
+    // After the landing every 4th (24 fps) / 5th (25 fps) frame presents on a
+    // boundary, so the minute reads the analytic on-grid sawtooth: min 0,
+    // max one grid slot, mean 100/6 ms. The v5 code read it 25.67 ms lower
+    // (24 fps min −25.0, 25 fps min −20.0).
+    let cases: [(fn(i64) -> i64, &str); 2] = [
+        (|j: i64| FIRST_PTS + j * 10_000_000 / 24, "24 fps"),
+        (|j: i64| FIRST_PTS + j * 400_000, "25 fps"),
     ];
-    for (pts, min_ms, what) in cases {
-        let (pacer, _rec) = play_minute_0(pts);
-        let want = summary(&picture_line_minute_0(pts));
-        // The derivation itself: min = the phase, mean = phase + 100/6.
+    for (pts, what) in cases {
+        let (want, _) = assert_landed_on_grid(pts, what);
+        assert!(want.1.abs() < 1e-3, "{what}: analytic min {}", want.1);
         assert!(
-            (want.1 - min_ms).abs() < 1e-3,
-            "{what}: analytic min {}",
-            want.1
+            (want.2 - 100.0 / 3.0).abs() < 1e-3,
+            "{what}: max {}",
+            want.2
         );
         assert!(
-            (want.0 - (min_ms + 100.0 / 6.0)).abs() < 0.05,
+            (want.0 - 100.0 / 6.0).abs() < 0.01,
             "{what}: analytic mean {}",
             want.0
         );
-        assert_eq!(
-            pacer.stats().av_corrections,
-            1,
-            "{what}: only the start drop"
-        );
-        assert_close(reported(&pacer), want, 1e-6, what);
     }
 }
 
 #[test]
-fn an_on_grid_seek_landing_is_unchanged() {
-    // The first frame presents exactly on b(8): the present time IS the due
-    // boundary, so v6 changes nothing. The first block starts at the frame's
-    // own media time (233.3 ms = 11200 samples) and 24 fps plays bit-exact with
-    // the aligned sawtooth (min 0, max one slot, mean ≈ 16.7 ms).
-    let pts: fn(i64) -> i64 = |j| ON_GRID_PTS + j * 10_000_000 / 24;
-    let (pacer, rec) = play_minute_0(pts);
+fn a_30_fps_seek_landing_off_the_grid_reads_exactly_0() {
+    // 30 fps content landing 25.67 ms before b(8): every frame is shown at its
+    // due boundary, and the audio block handed with it starts at that frame's
+    // own media time — bit-exact consecutive samples from samples(pts₀) = 9968.
+    let pts: fn(i64) -> i64 = |j| FIRST_PTS + b(j);
+    let (want, rec) = assert_landed_on_grid(pts, "30 fps");
+    for v in [want.0, want.1, want.2] {
+        assert!(v.abs() <= ONE_SAMPLE_MS, "30 fps analytic reading {v}");
+    }
+    assert_eq!(
+        first_media(&rec.blocks[0].1),
+        9968,
+        "the frame's media time"
+    );
+    assert_exact_stream(&rec.blocks, 9968);
+}
 
-    assert_eq!(rec.blocks[0].0, b(8), "the first frame is shown at b(8)");
+#[test]
+fn an_on_grid_seek_landing_is_unchanged() {
+    // The first frame presents exactly on b(8): the origin is already on the
+    // grid and nothing moves. The first block starts at the frame's own media
+    // time (233.3 ms = 11200 samples), 24 fps plays bit-exact, and the minute
+    // reads the aligned sawtooth.
+    let pts: fn(i64) -> i64 = |j| ON_GRID_PTS + j * 10_000_000 / 24;
+    let (want, rec) = assert_landed_on_grid(pts, "on-grid 24 fps");
+    assert!(want.1.abs() < 1e-3 && (want.0 - 100.0 / 6.0).abs() < 0.01);
     assert_eq!(
         first_media(&rec.blocks[0].1),
         11_200,
         "the frame's media time"
     );
     assert_exact_stream(&rec.blocks, 11_200);
-    let want = summary(&picture_line_minute_0(pts));
-    assert!(want.1.abs() < 1e-3 && (want.2 - 100.0 / 3.0).abs() < 1e-3);
-    assert!((want.0 - 100.0 / 6.0).abs() < 0.05, "mean {}", want.0);
-    assert_close(reported(&pacer), want, 1e-6, "on-grid 24 fps landing");
+}
+
+#[test]
+fn each_new_map_lands_its_origin_once_and_resume_keeps_it() {
+    // The origin moves ONLY on the first fresh frame of a NEW map (anchor() on
+    // play/seek, a lag re-anchor). A Resume keeps the map (resnap): moving the
+    // origin onto a later, off-grid 24 fps frame would shift the picture off
+    // the audio line.
+    let (mut pacer, clk) = anchored();
+    let before = RefCell::new(SyncedSource::new(|j| FIRST_PTS + j * 10_000_000 / 24, 0));
+    let mut rec = Rec::default();
+    run_synced(&mut pacer, &clk, &before, 1, 20, &mut rec);
+    let landed = b(LANDING) - FIRST_PTS;
+    assert_eq!(pacer.wall_start_100ns, landed, "the first landing");
+
+    // Resume: frame 10 (b(8) + 416.7 ms, off the grid) is the first fresh
+    // frame after it — the origin must not move onto it.
+    pacer.audio_resume_reset();
+    run_synced(&mut pacer, &clk, &before, 21, 40, &mut rec);
+    assert_eq!(pacer.wall_start_100ns, landed, "Resume keeps the origin");
+
+    // A seek is a new map: anchor() puts the origin on b(41) and the new
+    // landing (present b(41) + 207.67 ms, due b(48)) moves it again.
+    clk.set(b(40) + 100);
+    pacer.anchor();
+    let after = RefCell::new(SyncedSource::new(|j| FIRST_PTS + j * 10_000_000 / 24, 0));
+    run_synced(&mut pacer, &clk, &after, 41, 60, &mut rec);
+    assert_eq!(due_index(b(41) + FIRST_PTS), 48);
+    assert_eq!(
+        pacer.wall_start_100ns,
+        b(48) - FIRST_PTS,
+        "the seek's first frame lands on b(48)"
+    );
 }
