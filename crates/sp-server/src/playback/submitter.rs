@@ -497,8 +497,8 @@ impl<B: NdiBackend> crate::playback::pacer::PacedSink for FrameSubmitter<B> {
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
     ) {
-        // `audio` is the boundary's batch (every consumed frame's chunks, §6.4),
-        // NOT `video.audio` — the pacer drains that into the batch on consume.
+        // `audio` is the boundary's media-aligned block (#148), NOT
+        // `video.audio` — the pacer moves that into its grid buffer on pull.
         // #147 round 10: an Arc bump of the pacer's frame, never a pixel copy
         // (the same zero-copy holdover the #168 handoff uses; the burn overlay
         // forks its own copy via `make_mut`, so the pacer's pixels stay intact).

@@ -18,6 +18,10 @@ Method (automates the manual 24.9.2026 measurement, A/V +13 ms, 0 dropouts):
   The time of sample 0 in each file comes from ffmpeg's own decoded-frame pts
   (``ashowinfo``), so AAC priming (a -0.021 s ``start_time``) is accounted for
   whether or not the decoder skips it.
+* **Clock-rate drift** (``av_sync_warp``): an offset + rate line fitted over
+  0.25 s windows. When smooth and within 200 ppm, the original is warped onto
+  the recording before corr / dropouts / glitches, and ``offset_s`` is the
+  fitted value at the recording's midpoint.
 * **Video offset**: recording frames are scaled to a 64-wide gray grid and
   cropped to the letterboxed content box. The box is computed from the source
   aspect, never hardcoded: a 1920x960 source in a 1920x1080 canvas gives rows
@@ -69,7 +73,7 @@ Verdict, in order (see ``verdict``):
 sense (only for ``["video"]``). Every number is always printed as JSON on
 stdout.
 
-The pure functions (``audio_offset``, ``content_box``, ``source_crop``,
+The pure functions (``audio_offset``, ``analyze_audio``, ``content_box``, ``source_crop``,
 ``video_offset``, ``dropout_blocks``, ``verdict``, ``exit_code``,
 ``segment_profile``, and the ``av_sync_drift`` fit) take numpy arrays and are
 covered by ``scripts/tests/test_av_sync_check.py`` and
@@ -97,6 +101,7 @@ import traceback
 
 import numpy as np
 from av_sync_drift import drift_and_step
+from av_sync_warp import compensate
 
 SR = 8000
 GRID_W = 64
@@ -564,6 +569,40 @@ def exit_code(status: str) -> int:
     return EXIT_CODES[status]
 
 
+def analyze_audio(
+    rec: np.ndarray,
+    orig: np.ndarray,
+    sr: int = SR,
+    rec_t0: float = 0.0,
+    orig_t0: float = 0.0,
+) -> tuple[dict, dict]:
+    """The audio side of ``measure``: global alignment, the offset + rate
+    compensation (``av_sync_warp.compensate``), then the dropout/glitch scan
+    against the (warped) original. Returns ``(aud, drops)``.
+
+    ``aud`` is ``audio_offset``'s dict plus ``rate_ppm`` / ``fit_residual_ms``
+    / ``fit_windows`` / ``warped``. When warped, ``corr`` is the correlation
+    against the warped original (``corr_unwarped`` keeps the one-lag value)
+    and ``offset_s`` is the fitted offset at the recording's MIDPOINT, which
+    matches the picture's global alignment. Unwarped, both stay the one-lag
+    values.
+    """
+    aud = audio_offset(rec, orig, sr, rec_t0, orig_t0)
+    comp = compensate(rec, orig, aud["lag"], sr)
+    aud.update(
+        rate_ppm=comp["rate_ppm"],
+        fit_residual_ms=comp["fit_residual_ms"],
+        fit_windows=comp["fit_windows"],
+        warped=comp["warped"],
+        corr_unwarped=aud["corr"],
+    )
+    if comp["warped"]:
+        aud["corr"] = comp["corr"]
+        aud["offset_s"] = orig_t0 - rec_t0 + comp["mid_lag"] / sr
+    drops = dropout_blocks(rec, comp["aligned"], sr, BLOCK_MS, rec_t0)
+    return aud, drops
+
+
 def segment_profile(
     rec: np.ndarray,
     orig: np.ndarray,
@@ -818,9 +857,7 @@ def measure(
     cannot-measure, so dropouts already found still fail the run."""
     rec_a, rec_a_t0 = decode_audio(ffmpeg, recording)
     orig_a, orig_a_t0 = decode_audio(ffmpeg, orig_audio)
-    aud = audio_offset(rec_a, orig_a, SR, rec_a_t0, orig_a_t0)
-    aligned = orig_a[aud["lag"] : aud["lag"] + len(rec_a)]
-    drops = dropout_blocks(rec_a, aligned, SR, BLOCK_MS, rec_a_t0)
+    aud, drops = analyze_audio(rec_a, orig_a, SR, rec_a_t0, orig_a_t0)
 
     video_error = None
     frames = video_off = None
@@ -864,7 +901,12 @@ def measure(
         "audio": {
             "offset_s": round(aud["offset_s"], 4),
             "corr": round(aud["corr"], 4),
+            "corr_unwarped": round(aud["corr_unwarped"], 4),
             "min_corr": MIN_AUDIO_CORR,
+            "rate_ppm": _round_or_none(aud["rate_ppm"], 2),
+            "fit_residual_ms": _round_or_none(aud["fit_residual_ms"], 3),
+            "fit_windows": aud["fit_windows"],
+            "warped": aud["warped"],
             "second_corr": None
             if aud["second_corr"] is None
             else round(aud["second_corr"], 4),
@@ -883,6 +925,10 @@ def measure(
     }
 
 
+def _round_or_none(v: float | None, digits: int) -> float | None:
+    return None if v is None else round(v, digits)
+
+
 def summary_line(result: dict) -> str:
     audio = result.get("audio", {})
     video = result.get("video", {})
@@ -890,7 +936,9 @@ def summary_line(result: dict) -> str:
     drift = result.get("drift", {})
     return (
         f"AV-SYNC status={result['status']} av_ms={result.get('av_ms')} "
-        f"audio_corr={audio.get('corr')} video_match={video.get('match')} "
+        f"audio_corr={audio.get('corr')} rate_ppm={audio.get('rate_ppm')} "
+        f"fit_residual_ms={audio.get('fit_residual_ms')} warped={audio.get('warped')} "
+        f"video_match={video.get('match')} "
         f"video_contrast={video.get('contrast')} dropouts={drops.get('dropout_count')} "
         f"dropout_ms={drops.get('dropout_ms')} "
         f"glitches={drops.get('glitch_blocks')} "

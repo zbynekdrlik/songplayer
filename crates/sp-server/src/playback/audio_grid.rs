@@ -1,28 +1,79 @@
-//! Wall-clock audio grid buffer (#148).
+//! Media-time audio grid buffer (#148).
 //!
-//! A planar-float FIFO that decouples the file audio sample clock from the
-//! wall-clock grid: the decode loop `push`es every consumed frame's audio, and
-//! the pacer `take_boundary_chunk`s exactly `samples_per_boundary` (1600 @
-//! 48 kHz / 30 fps) samples at each grid boundary. The chunk is read through a
-//! **linear-interpolation fractional pointer** whose step is
-//! `1 + applied_ppm · 1e-6`, so the slow-resample correction the
-//! [`AudioPll`](sp_core::genlock::audio::AudioPll) computes is applied
-//! transparently (ppm-scale ratios make linear interpolation inaudible; no FFT
-//! resampler, no added block latency, camera-box#1294 §6.5 — never a step or a
-//! drop/insert burst).
+//! A planar-float FIFO between the paced decode and the wall-clock grid: the
+//! pacer pushes every decoded frame's audio, and each productive grid boundary
+//! takes exactly `samples_per_boundary` (1600 @ 48 kHz / 30 fps) samples.
 //!
-//! Underrun → ONLY the missing tail of the chunk is zero-filled (silence, never a
-//! repeat of stale audio); the FIFO contents and `frac_pos` are KEPT (#148
-//! rework, item 4 — clearing the whole FIFO dropped up to a boundary of valid
-//! samples and guaranteed a second underrun) and `underruns` is bumped. Overflow
-//! past a hard 2 s cap → the oldest audio is dropped, `overflows` is bumped, and
-//! a one-per-song WARN is armed (`take_overflow_warning`).
+//! **Media-time head (#148 design v2).** The first TIMED push after a
+//! [`clear`](AudioGridBuffer::clear) fixes the media sample index of the head
+//! (the chunk's 0-based media time, minus anything already buffered); the
+//! decoded audio is contiguous, so every later sample's media time follows
+//! from the count. The pacer uses the head to pin the audio to the picture:
+//!
+//! - [`align_to`](AudioGridBuffer::align_to) — the hard alignment at start /
+//!   seek: early audio is DROPPED, late audio is PADDED with leading silence;
+//! - [`take_block`](AudioGridBuffer::take_block) with the `extra` from
+//!   [`correction_for`] — the continuous correction: past 5 ms of error at most
+//!   48 samples per block are dropped or inserted, spread over the block by
+//!   linear interpolation (no click), until the error is ≤ 1 ms.
+//!
+//! There is no level target: how deep the buffer runs has no bearing on what
+//! plays (the removed #148 PLL level trim steered toward 3200 samples and moved
+//! the A/V offset with it).
+//!
+//! Underrun → the available samples are played, the missing tail is
+//! zero-filled and `underruns` is bumped; the head advances only by the real
+//! samples consumed, so the deficit shows up as an A/V error the correction
+//! then removes. Overflow past a hard 2 s cap → the oldest audio is dropped
+//! (the head advances with it), `overflows` is bumped, and a one-per-song WARN
+//! is armed (`take_overflow_warning`).
 //!
 //! Pure: no clock calls, no I/O. Fully unit-tested on Linux CI.
 
 use std::collections::VecDeque;
 
-/// A planar-float FIFO delivering fixed-size boundary chunks on the wall grid.
+use sp_core::genlock::UNITS_PER_SECOND;
+
+/// |A/V error| above which the continuous correction engages: 5 ms @ 48 kHz.
+pub const AV_CORRECT_START_SAMPLES: i64 = 240;
+
+/// |A/V error| at or below which an engaged correction stops: 1 ms @ 48 kHz.
+pub const AV_CORRECT_STOP_SAMPLES: i64 = 48;
+
+/// Most samples dropped or inserted in one boundary block: 1 ms @ 48 kHz.
+pub const AV_CORRECT_MAX_PER_BLOCK: i64 = 48;
+
+/// A 100-ns duration in samples at `rate_hz`, rounded to the nearest sample
+/// (ties up): `round(d · rate / 1e7)`. Exact for whole milliseconds at 48 kHz
+/// (the decoder's media timestamps are integer ms).
+pub fn samples_from_100ns(d_100ns: i64, rate_hz: u32) -> i64 {
+    (d_100ns * rate_hz as i64 * 2 + UNITS_PER_SECOND).div_euclid(2 * UNITS_PER_SECOND)
+}
+
+/// The continuous-correction decision for one boundary block (#148 design
+/// v2). `err` = head − expected media time, in samples (POSITIVE = the audio
+/// is AHEAD of the picture). An idle controller engages when `|err|` exceeds
+/// 5 ms; an engaged one keeps going while `|err|` exceeds 1 ms. Returns
+/// `(extra, engaged)`: `extra` input samples are consumed on top of the block
+/// (positive = drop, the audio catches up; negative = insert, the audio
+/// waits), at most 48 either way.
+pub fn correction_for(err: i64, engaged: bool) -> (i64, bool) {
+    let limit = if engaged {
+        AV_CORRECT_STOP_SAMPLES
+    } else {
+        AV_CORRECT_START_SAMPLES
+    };
+    if err.abs() <= limit {
+        return (0, false);
+    }
+    (
+        (-err).clamp(-AV_CORRECT_MAX_PER_BLOCK, AV_CORRECT_MAX_PER_BLOCK),
+        true,
+    )
+}
+
+/// A planar-float FIFO delivering fixed-size boundary blocks on the wall grid,
+/// with a media-time head.
 pub struct AudioGridBuffer {
     /// Channel count, established on the first `push` (1–2 in practice). 0 until
     /// then (and after [`clear`](Self::clear)).
@@ -31,15 +82,9 @@ pub struct AudioGridBuffer {
     rate: u32,
     /// One FIFO per channel (planar).
     fifo: Vec<VecDeque<f32>>,
-    /// Fractional read position within the FIFO front, in input samples. Always
-    /// in `[0, 1)` between takes (the integer part is drained each take).
-    frac_pos: f64,
-    /// Slow-resample correction (ppm): the fractional read step is
-    /// `1 + applied_ppm · 1e-6`. Set by the pacer from the `AudioPll`.
-    applied_ppm: f64,
-    /// Nominal steady level (samples/channel) the pacer servos toward — 2
-    /// boundaries (3200 @ 1600/boundary).
-    target_level: usize,
+    /// Media sample index (0-based) of the FIFO's front sample; `None` until a
+    /// timed push after a clear.
+    head: Option<i64>,
     /// Hard cap (samples/channel) = 2 s; oldest audio is dropped past it.
     cap_samples: usize,
     underruns: u64,
@@ -50,16 +95,13 @@ pub struct AudioGridBuffer {
 }
 
 impl AudioGridBuffer {
-    /// A fresh buffer at `rate_hz` servoing toward `target_level` samples, with a
-    /// 2-second hard cap.
-    pub fn new(rate_hz: u32, target_level: usize) -> Self {
+    /// A fresh buffer at `rate_hz` with a 2-second hard cap.
+    pub fn new(rate_hz: u32) -> Self {
         Self {
             channels: 0,
             rate: rate_hz,
             fifo: Vec::new(),
-            frac_pos: 0.0,
-            applied_ppm: 0.0,
-            target_level,
+            head: None,
             cap_samples: (rate_hz as usize) * 2,
             underruns: 0,
             overflows: 0,
@@ -67,16 +109,30 @@ impl AudioGridBuffer {
         }
     }
 
-    /// Append planar audio (one `Vec<f32>` per channel). The channel count is
-    /// fixed on the first non-empty push; later pushes use the established count
-    /// (a mismatch is clamped to the common minimum rather than desyncing).
+    /// Append untimed planar audio (one `Vec<f32>` per channel) — see
+    /// [`push_media`](Self::push_media).
     pub fn push(&mut self, planar: &[Vec<f32>]) {
+        self.push_media(planar, None);
+    }
+
+    /// Append planar audio whose first sample has the 0-based media time
+    /// `media_100ns`. The channel count is fixed on the first non-empty push;
+    /// later pushes use the established count (a mismatch is clamped to the
+    /// common minimum rather than desyncing). The head's media time is taken
+    /// from the FIRST timed push while it is unknown (minus the samples already
+    /// buffered); later pushes are contiguous and only counted.
+    pub fn push_media(&mut self, planar: &[Vec<f32>], media_100ns: Option<i64>) {
         if planar.is_empty() {
             return;
         }
         if self.channels == 0 {
             self.channels = planar.len();
             self.fifo = (0..self.channels).map(|_| VecDeque::new()).collect();
+        }
+        if self.head.is_none()
+            && let Some(t) = media_100ns
+        {
+            self.head = Some(samples_from_100ns(t, self.rate) - self.level_samples() as i64);
         }
         let ch = self.channels.min(planar.len());
         let n = planar.iter().take(ch).map(|c| c.len()).min().unwrap_or(0);
@@ -88,69 +144,127 @@ impl AudioGridBuffer {
         self.enforce_cap();
     }
 
-    /// Take exactly `n` output samples per channel through the fractional reader.
-    /// Zero-fills (and counts one underrun) if the FIFO runs dry mid-chunk;
-    /// returns an empty `Vec` when no channels have been seen yet.
-    pub fn take_boundary_chunk(&mut self, n: usize) -> Vec<Vec<f32>> {
+    /// Take `n` output samples per channel (`n ≥ 2`) consuming `n + extra`
+    /// input samples (`|extra| < n`, the value from [`correction_for`]),
+    /// spread over the block by linear interpolation: output `j` reads input
+    /// position `j · (m−1)/(n−1)` (`m = n + extra`), so output 0 is input 0 and
+    /// the last output is input `m−1`; `extra == 0` reproduces the input
+    /// exactly. With fewer than `m` samples buffered the correction is skipped:
+    /// up to `n` real samples are played, and a shortfall zero-fills the tail
+    /// and counts one underrun. The head advances by the input consumed.
+    /// Returns the planar block (empty when no channels have been seen) and the
+    /// `extra` actually applied.
+    pub fn take_block(&mut self, n: usize, extra: i64) -> (Vec<Vec<f32>>, i64) {
         if self.channels == 0 || n == 0 {
-            return Vec::new();
+            return (Vec::new(), 0);
         }
-        let step = (1.0 + self.applied_ppm * 1e-6).max(1e-6);
+        let level = self.level_samples();
+        let m = n as i64 + extra;
         let mut out: Vec<Vec<f32>> = (0..self.channels).map(|_| vec![0.0f32; n]).collect();
-        let level = self.fifo[0].len();
-        let mut starved = false;
-
-        for j in 0..n {
-            let i = self.frac_pos.floor() as usize;
-            let frac = self.frac_pos - i as f64;
-            let need_next = frac > 0.0;
-            if i >= level || (need_next && i + 1 >= level) {
-                // FIFO exhausted mid-chunk — the remainder stays silent.
-                starved = true;
-                break;
+        if (level as i64) < m {
+            // Not enough for the correction (or even the block): play what is
+            // there, bit-exact, and zero-fill a shortfall.
+            let k = n.min(level);
+            if k < n {
+                self.underruns += 1;
             }
             for (c, out_ch) in out.iter_mut().enumerate() {
-                let a = self.fifo[c][i] as f64;
-                out_ch[j] = if need_next {
-                    let b = self.fifo[c][i + 1] as f64;
-                    (a * (1.0 - frac) + b * frac) as f32
-                } else {
-                    a as f32
-                };
+                for (dst, &src) in out_ch.iter_mut().zip(self.fifo[c].iter().take(k)) {
+                    *dst = src;
+                }
             }
-            self.frac_pos += step;
+            self.drain_front(k);
+            return (out, 0);
         }
+        let m = m as usize;
+        let last = (m - 1) as f64;
+        let ratio = last / (n - 1) as f64;
+        for j in 0..n {
+            let p = (j as f64 * ratio).min(last);
+            let i = p as usize;
+            let f = p - i as f64;
+            let partner = (i + 1).min(m - 1);
+            for (c, out_ch) in out.iter_mut().enumerate() {
+                let a = self.fifo[c][i] as f64;
+                let b = self.fifo[c][partner] as f64;
+                out_ch[j] = (a + (b - a) * f) as f32;
+            }
+        }
+        self.drain_front(m);
+        (out, extra)
+    }
 
-        // Drain only the samples fully consumed by the reader; KEEP the rest of
-        // the FIFO and the fractional pointer. On a starve this preserves the
-        // last (interpolation-partner) samples and `frac_pos` so the next chunk
-        // resumes cleanly once more audio arrives — the missing tail of THIS
-        // chunk stays zero-filled (#148 rework, item 4).
-        if starved {
-            self.underruns += 1;
+    /// Take exactly `n` samples per channel with no correction (EOS tail,
+    /// untimed audio): `take_block(n, 0)`.
+    pub fn take_boundary_chunk(&mut self, n: usize) -> Vec<Vec<f32>> {
+        self.take_block(n, 0).0
+    }
+
+    /// Hard alignment at start / seek (#148 design v2): make the head's media
+    /// time equal `expected`. Audio AHEAD of it (head > expected) is PADDED
+    /// with leading silence; audio BEHIND it is DROPPED. Returns
+    /// `(aligned, delta)` — `delta` = samples dropped (positive) or padded
+    /// (negative). `aligned` is false while fewer samples are buffered than
+    /// must be dropped (all of them are dropped; the rest on a later call), and
+    /// it is `(false, 0)` with nothing touched when there is no media head or
+    /// the pad plus the buffered audio would exceed the 2 s cap. (Audio that
+    /// sits persistently more than 2 s after the picture therefore stays
+    /// silent — bounded, never an unbounded allocation.)
+    pub fn align_to(&mut self, expected: i64) -> (bool, i64) {
+        let Some(head) = self.head else {
+            return (false, 0);
+        };
+        let diff = expected - head;
+        let pad = (-diff).max(0);
+        if pad + self.level_samples() as i64 > self.cap_samples as i64 {
+            // Padding + the buffered audio would not fit the 2 s cap (the next
+            // push's cap trim would drain the fresh padding again): stay silent,
+            // nothing touched, until the expected time comes within reach.
+            return (false, 0);
         }
-        let consumed = self.frac_pos.floor() as usize;
+        self.pad_front(pad as usize);
+        let drop = diff.max(0).min(self.level_samples() as i64);
+        self.drain_front(drop as usize);
+        (self.head == Some(expected), drop - pad)
+    }
+
+    /// Prepend `k` samples of silence to every channel; the head moves back.
+    fn pad_front(&mut self, k: usize) {
         for ch in &mut self.fifo {
-            let take_n = consumed.min(ch.len());
-            ch.drain(..take_n);
+            for _ in 0..k {
+                ch.push_front(0.0);
+            }
         }
-        self.frac_pos -= consumed as f64;
-        out
+        self.head = self.head.map(|h| h - k as i64);
+    }
+
+    /// Drop the `k` oldest samples of every channel; the head moves forward.
+    /// Callers never ask for more than [`level_samples`](Self::level_samples).
+    fn drain_front(&mut self, k: usize) {
+        for ch in &mut self.fifo {
+            ch.drain(..k.min(ch.len()));
+        }
+        self.head = self.head.map(|h| h + k as i64);
     }
 
     /// Drop the oldest audio when the level exceeds the 2 s cap (bumps
-    /// `overflows`). Dropping the front jumps the read position, so reset it.
+    /// `overflows`; the head advances past the dropped samples).
     fn enforce_cap(&mut self) {
-        let level = self.fifo.first().map(|c| c.len()).unwrap_or(0);
+        let level = self.level_samples();
         if level > self.cap_samples {
-            let excess = level - self.cap_samples;
-            for ch in &mut self.fifo {
-                let d = excess.min(ch.len());
-                ch.drain(..d);
-            }
-            self.frac_pos = 0.0;
+            self.drain_front(level - self.cap_samples);
             self.overflows += 1;
         }
+    }
+
+    /// Media sample index of the next sample to play; `None` before a timed push.
+    pub fn head_media(&self) -> Option<i64> {
+        self.head
+    }
+
+    /// Channel count established by the first push (0 before it / after a clear).
+    pub fn channels(&self) -> usize {
+        self.channels
     }
 
     /// Samples per channel currently buffered.
@@ -164,15 +278,6 @@ impl AudioGridBuffer {
             return 0;
         }
         (self.level_samples() as u64) * 1000 / self.rate as u64
-    }
-
-    /// Set the slow-resample correction (ppm) — the pacer copies the PLL output.
-    pub fn set_applied_ppm(&mut self, ppm: f64) {
-        self.applied_ppm = ppm;
-    }
-
-    pub fn target_level(&self) -> usize {
-        self.target_level
     }
 
     pub fn cap_samples(&self) -> usize {
@@ -199,14 +304,14 @@ impl AudioGridBuffer {
         }
     }
 
-    /// Empty the FIFO and reset the reader + correction (called on play / seek /
-    /// new song via the pacer's `anchor`). Cumulative `underruns` / `overflows`
-    /// survive — they are lifetime telemetry, like the pacing counters.
+    /// Empty the FIFO and forget the media head (called on play / seek / new
+    /// song via the pacer's `anchor`, and on Resume). Cumulative `underruns` /
+    /// `overflows` survive — they are lifetime telemetry, like the pacing
+    /// counters.
     pub fn clear(&mut self) {
         self.channels = 0;
         self.fifo = Vec::new();
-        self.frac_pos = 0.0;
-        self.applied_ppm = 0.0;
+        self.head = None;
         self.warned_overflow = false;
     }
 }

@@ -80,7 +80,7 @@ pub enum PipelineEvent {
         /// fills it from the `Pacer`.
         pacing: crate::playback::ndi_health::PacingStats,
         /// Audio clock-discipline telemetry (#148); default off the SDK-clocked /
-        /// idle paths, filled from the `Pacer`'s audio buffer + PLL when paced.
+        /// idle paths, filled from the `Pacer`'s audio buffer when paced.
         audio: crate::playback::ndi_health::AudioStats,
         /// #192 round 3: per-call `send_video_async` max/p99 + the decode-loop
         /// stage maxima (decode / submit / audio), so a producer stall names its

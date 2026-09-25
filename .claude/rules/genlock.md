@@ -5,6 +5,7 @@ paths:
   - "crates/sp-server/src/playback/wallclock*.rs"
   - "crates/sp-server/src/playback/clock_health*.rs"
   - "crates/sp-server/src/playback/pacer*.rs"
+  - "crates/sp-server/src/playback/audio_grid*.rs"
   - "crates/sp-server/src/playback/submitter*.rs"
   - "crates/sp-server/src/playback/proc_mem*.rs"
   - "crates/sp-server/src/playback/loop_stats.rs"
@@ -193,7 +194,8 @@ paths:
   (`audio resumed after silence`). `silence_blocks` should grow ONLY at
   transitions/stalls; `late_blocks` ≈ 0 and `emit_jitter_p99_us` < 500 with the
   TIME_CRITICAL thread. The PACED path (`pipeline_paced.rs`) keeps its own audio
-  clock (the Pacer's `AudioGridBuffer` + PLL) and is untouched.
+  (the Pacer's media-aligned `AudioGridBuffer`, see "Paced audio" below) and is
+  untouched.
   **Box finding 19.9.2026 (0.59.0-dev.6):** EVERY pipeline runs an emitter (idle
   ones emit silence, so receivers never starve), and with the FIXED 2 ms spin the
   per-minute p99 was 0.4–5.5 ms, not < 0.5 — on the 24-core, ~3 % busy,
@@ -735,6 +737,87 @@ first capped job, and logs
     heavy-child job, not at startup (`heavy_slot::job_working_set_privilege`);
   - the `heavy child contained` line reads `max_ws_mb=4096`;
   - no `working-set cap … rejected` WARN appears.
+
+## Paced audio is pinned to the picture by MEDIA TIME (#148 design v2)
+
+The measured defect (A/V gate, 25.9.2026): with pacing ON the offset was fixed
+per song but random across songs (−38 … +60 ms). The chunk media time was
+dropped in `to_paced_frame`, `AudioGridBuffer` was a plain FIFO, an early
+underrun kept the queue (the audio stayed late for the rest of the song), and
+the #148 PLL steered the buffer LEVEL toward 3200 samples, which has no
+relation to the picture. The PLL (`AudioPll`, `LevelAverager`, `residual_ppm`,
+`audio.residual_ppm`/`applied_ppm`, the `audio_ppm=` log token) is DELETED.
+Now:
+
+- `to_paced_frame` puts each chunk's 0-based media time
+  (`(ts_ms − pts_offset_ms)·10⁴`) in `AudioFrame.timecode_100ns`. Only the
+  pacer reads it; the boundary chunk it submits still carries `None`, so the
+  submitter stamps the raw wall clock (§6).
+- `AudioGridBuffer` has a media HEAD in samples, taken from the first TIMED
+  push after `clear()`. After that it is counted, never re-read from the later
+  chunk stamps (Symphonia stamps are integer ms).
+- **Audio is pushed when a frame is PULLED** (`Pacer::pull_frame`, in both
+  `prepare` and `service`), not when it is consumed. The aligned take at
+  boundary B needs media up to B + 33 ms. Only the NEXT (parked) frame's paired
+  audio (pts + 40 ms) covers that, so pushing on consume underruns on every
+  24/25-fps song.
+- **The anchor is local, on the DUE boundary** (`pacer_av_align.rs`). The first
+  FRESH frame emitted on a new map fixes `(pts in samples, the boundary it is
+  DUE at)`. The due boundary is the first grid boundary at or after
+  `wall_start + pts`, computed as `strict_next_boundary_100ns(ws + pts − 1)`.
+  It is NEVER the boundary the frame happened to be emitted at. The block at
+  boundary B must then start at `anchor_media + (B − anchor_wall)`, which is
+  the wall line the picture follows, including the frame's sub-slot phase.
+  - It keeps going across repeat boundaries, so a 24→30 pattern needs no
+    correction.
+  - Do NOT compare against each emitted frame's own pts: that is a 0…41 ms
+    sawtooth on 24-fps content, and the corrector would thrash.
+  - Do NOT anchor at the emit stamp (review of `0c75806`, 1 red). A STALE first
+    frame would pin the audio behind the picture for the whole song:
+    - a slow decoder at song start;
+    - the first frame after a stall.
+
+    The picture catches up to the wall line by dropping frames, and the audio
+    must do the same.
+- **Two re-align kinds.**
+  - A NEW map forgets the anchor (`AvAlign::realign`): `anchor()`
+    (play/seek/new song) and a `Reanchored` lag re-anchor, which moves
+    `wall_start`.
+  - The SAME map keeps the anchor and only re-snaps the buffer onto its line
+    (`AvAlign::resnap`): a grid resync in `resolve_emit_boundary` (only the
+    stamp jumps) and `audio_resume_reset()`.
+  - Until the expected media is buffered the output is silence. Then
+    `align_to` DROPS early audio or PADS late audio with leading silence, so
+    the first real sample plays at its media time (±1 sample).
+  - With too little buffered to drop, the block stays silent and the drop is
+    retried on the next boundary.
+  - A pad that would take pad + buffered audio past the 2 s cap is refused
+    (the cap trim would eat the fresh padding): silence until it fits, never an unbounded allocation.
+- **Continuous correction** (`correction_for`) is the ONLY controller. It
+  engages when |err| > 240 samples (5 ms), moves ≤ 48 samples per block, and
+  stops at |err| ≤ 48 (1 ms). A drop or insert of d samples reads n ± d inputs
+  onto n outputs by linear interpolation (`take_block`), so there is no click.
+  Output 0 is always an exact input sample. Underrun samples are zero-filled
+  and do NOT advance the head, so a decoder stall shows up as a negative error
+  that the correction then drops away. A corrected block is a 3 % time-stretch
+  (48 of 1600 samples, about 51 cents) for about 0.6 s per 20 ms. That is
+  audible on a sustained note, and it is what the ≤ 48-samples-per-block
+  design accepts.
+- Untimed audio (tests / frames with `timecode_100ns: None`) plays as a plain
+  FIFO. It is never aligned.
+- Telemetry is on `PacingStats` (`/api/v1/ndi/health` `pacing`), not `audio`:
+  - `av_align_err_ms` — head − expected at the last productive boundary, before
+    its correction; + = audio AHEAD of the picture, the gate's sign;
+  - `av_corrections` / `av_corrected_samples` — cumulative; they include a
+    non-zero start drop or pad.
+
+  The same three keys replace `audio_ppm=` on the `ndi: genlock` line; the
+  song summary logs `av_align_err_ms` + per-song `av_corrections`.
+  `PacingStats` is no longer `Eq` (f64).
+- Tests encode each sample's own media index in its VALUE
+  (`pacer_tests_av_align.rs`: `enc(s) = s + 1e6`, silence = 0.0). Assertions
+  then read the media time actually put on the wire, without float tolerance.
+  Keep that pattern for any new alignment case.
 
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
 A change to pacing, the submitter, decode, the mixer, NDI or the audio path

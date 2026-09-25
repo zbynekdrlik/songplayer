@@ -59,7 +59,9 @@ pub(crate) fn request_high_res_timer() {
 
 /// Convert an MF-decoded video frame + its audio chunks into a [`PacedFrame`].
 /// `pts_offset_ms` is subtracted so the PTS is measured from playback start
-/// (0-based) — the origin the pacer maps onto the wall grid.
+/// (0-based) — the origin the pacer maps onto the wall grid. Each audio chunk
+/// keeps its MEDIA time on the same 0-based origin (in `timecode_100ns`), which
+/// the pacer uses to align the audio to the picture (#148 design v2).
 fn to_paced_frame(
     video: sp_decoder::DecodedVideoFrame,
     audio: Vec<sp_decoder::DecodedAudioFrame>,
@@ -70,11 +72,12 @@ fn to_paced_frame(
     let ndi_audio: Vec<sp_ndi::AudioFrame> = audio
         .into_iter()
         .map(|af| sp_ndi::AudioFrame {
+            // 0-based media time (100 ns). Only the pacer reads it; the boundary
+            // chunk it submits is stamped with the raw wall clock (§6).
+            timecode_100ns: Some((af.timestamp_ms as i64 - pts_offset_ms as i64) * 10_000),
             data: af.data,
             channels: af.channels,
             sample_rate: af.sample_rate,
-            // Stamped by the pacer at submission (raw wall clock, §6).
-            timecode_100ns: None,
         })
         .collect();
     PacedFrame {
@@ -146,10 +149,10 @@ fn log_song_summary(
         max_lag_slots = pacer.max_lag_slots(),
         iter_p50_us = pacer.iter_p50_us(),
         iter_p99_us = pacer.iter_p99_us(),
-        // Audio clock discipline (#148): the file-clock residual, the applied
-        // slow-resample correction, and the cumulative buffer underruns.
-        audio_residual_ppm = a.residual_ppm,
-        audio_applied_ppm = a.applied_ppm,
+        // Paced audio (#148 v2): the last A/V media offset, this song's drop/pad
+        // corrections, and the cumulative buffer underruns.
+        av_align_err_ms = s.av_align_err_ms,
+        av_corrections = s.av_corrections.saturating_sub(base.av_corrections),
         audio_underruns = a.underruns,
         duration_s = song_start.elapsed().as_secs_f32(),
         "paced: song summary"
@@ -492,13 +495,16 @@ pub(crate) fn decode_and_send_paced(
                 }
                 Ok(PipelineCommand::Resume) => {
                     *paused = false;
-                    // Flush the audio buffer + reset the PLL (#148 rework, item 4):
-                    // the pause backlog would otherwise overflow and leave audio
+                    // Flush the audio buffer + re-align the audio (#148): the pause
+                    // backlog would otherwise overflow and leave audio
                     // seconds behind the video. The VIDEO anchor is left untouched —
                     // the frozen-standby held every boundary through the pause, so
                     // playback continues on the same wall grid.
                     pacer.audio_resume_reset();
-                    debug!(playlist_id, "paced: resumed (audio buffer + PLL reset)");
+                    debug!(
+                        playlist_id,
+                        "paced: resumed (audio buffer flushed, re-aligning)"
+                    );
                 }
                 Ok(PipelineCommand::Seek { position_ms }) => {
                     // Route the seek to the producer: it flushes the queue and bumps

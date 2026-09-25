@@ -68,7 +68,8 @@ fn badge_title(o: &NdiOutputHealth) -> String {
         o.clock.mode.as_str()
     };
     // #192: on the SDK-clocked path the wall-clock audio emitter carries the
-    // audio telemetry (silence/ring/jitter); the paced path shows ppm/underruns.
+    // audio telemetry (silence/ring/jitter); the paced path shows the A/V
+    // media offset (#148) and underruns.
     let audio = if o.audio.emitter.enabled {
         format!(
             "emitter[sdk-video/wallclock-audio] silence={} ring={}ms jitter_p99={}us late={}",
@@ -79,8 +80,8 @@ fn badge_title(o: &NdiOutputHealth) -> String {
         )
     } else {
         format!(
-            "{:+.1}ppm underruns={}",
-            o.audio.residual_ppm, o.audio.underruns,
+            "av={:+.1}ms underruns={}",
+            o.pacing.av_align_err_ms, o.audio.underruns,
         )
     };
     format!(

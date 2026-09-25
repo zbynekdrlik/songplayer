@@ -10,7 +10,9 @@ paths:
   - "e2e/obs-driver.ts"
   - "scripts/av_sync_check.py"
   - "scripts/av_sync_drift.py"
+  - "scripts/av_sync_warp.py"
   - "scripts/tests/test_av_sync_check.py"
+  - "scripts/tests/test_av_sync_warp.py"
   - "scripts/tests/test_av_sync_profile.py"
 ---
 
@@ -524,7 +526,8 @@ and the recording actually get.
   - `cannot_measure` (2): low corr, match or contrast, or an analysis error.
     It FAILS the job and is never a skip.
 - **Reading the output:** the CI log shows the full JSON and one line:
-  `AV-SYNC status=… av_ms=… audio_corr=… video_match=… video_contrast=…
+  `AV-SYNC status=… av_ms=… audio_corr=… rate_ppm=… fit_residual_ms=…
+  warped=… video_match=… video_contrast=…
   dropouts=… dropout_ms=… glitches=… drift_ms_per_10s=… max_step_ms=…
   step_at_s=… outlier_steps=… windows=<used>/<total> reasons=[…]`.
   - `av_ms` > 0 means audio AHEAD of picture. `audio.offset_s` and
@@ -540,6 +543,38 @@ and the recording actually get.
     shows up as a low video match (`cannot_measure`), never as a false pass.
   - Baseline on 24.9.2026 (manual): A/V +13 ms, corr 0.997, match 0.999,
     0 dropouts.
+- **Clock-rate drift is COMPENSATED before the audio verdict (#147,
+  `av_sync_warp.py`).** SongPlayer's genlocked output and the OBS audio clock
+  that records the program run at slightly different rates. Push run
+  36081072389 recorded the ORIGINAL with a perfectly smooth +16.8 ppm walk:
+  −3.35 → +12.43 samples at 48 kHz over 19.6 s, local corr 0.985–0.999, no
+  steps. Correlated at ONE lag, those 0.33 ms decorrelate everything above
+  ~1 kHz at SR 8 kHz: corr 0.84 → `cannot_measure`, and the fixed-lag scan
+  reads 89 "glitches". The playback was fine. So `analyze_audio` works like
+  this:
+  - It keeps the global lag.
+  - It fits `deviation(i) = a + b·i` over 0.25 s windows. Each window gets a
+    normalized xcorr searched ±50 ms, and the peak is refined by sinc
+    interpolation to 1/64 sample.
+  - When |rate| ≤ 200 ppm AND the max window residual ≤ 0.5 ms, it resamples
+    the original onto the recording with a Blackman-windowed sinc. It never
+    uses `np.interp`: linear interpolation attenuates the band the gate
+    checks.
+  - corr, the dropout scan and the glitch scan then run against that WARPED
+    original. `audio.offset_s` (and so `av_ms`) is the fitted offset at the
+    recording's MIDPOINT, which matches the picture's global alignment.
+  - A step/slip (it cannot fit a line), > 200 ppm, or < 8 measurable windows
+    stays UNWARPED. The old one-lag analysis then decides, and
+    `rate_ppm`/`fit_residual_ms` are reported as the fault sign. A real
+    resync still fails.
+  - JSON: `audio.rate_ppm`, `fit_residual_ms`, `fit_windows`, `warped` and
+    `corr_unwarped`.
+  - Offline on the evidence take: corr 0.833 → 0.996, glitches 99 → 0, rate
+    +16.68 ppm, residual 0.007 ms.
+  - Thresholds are UNCHANGED: 0.9, 0.8, the dropout rules and 40 ms.
+  - Tests: `test_av_sync_warp.py`. It uses an ANALYTIC tone-sum original, so
+    a drifted recording is exact at every sample and independent of the warp
+    under test. Never build a drift fixture with the warp itself.
 - **Per-segment profile — drift vs jump (diagnostics only, #147).** One
   whole-take A/V number cannot tell a clock that drifts from a resync that
   jumps. Release run 36068121677 read av_ms 60.5, corr 0.899 and glitches

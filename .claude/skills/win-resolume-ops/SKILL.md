@@ -340,7 +340,7 @@ One job `soak` on the `[self-hosted, windows, resolume]` runner. It:
 
 **Artifacts** (`genlock-soak-<run_id>`, uploaded `if: always()`):
 - `sp-health.csv` — send-side evidence only (NOT the gate): per output per
-  minute `seq, late_frames, lag_slots, repeats, resyncs, audio.residual_ppm,
+  minute `seq, late_frames, lag_slots, repeats, resyncs, pacing.av_align_err_ms,
   lock_state, lock_reason`.
 - `cg-chain.csv` — the verifier's per-hop/per-source verdict rows.
 - `cg-obs.log` — the receiver log tail the verdict was computed from.
