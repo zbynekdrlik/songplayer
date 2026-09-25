@@ -806,3 +806,8 @@ mod pacer_tests_av_lead;
 // the audio (the box's 0 → 6 relatches in one A/V take).
 #[path = "pacer_tests_wall_anchor.rs"]
 mod pacer_tests_wall_anchor;
+
+// #148 v5: the per-minute `av_frame_offset` telemetry (SongPlayer's own
+// emitted audio-block − frame-pts relation), on the same media-encoded helpers.
+#[path = "pacer_tests_av_offset.rs"]
+mod pacer_tests_av_offset;

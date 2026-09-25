@@ -181,6 +181,11 @@ a blank doc line or indentation — the Tier-0 box cannot see it, so it fails
 the Lint job (#195, three sites). After the last `- item` / `3. item`, insert a
 bare `//!` (or `///`) line before continuing prose.
 
+A sign convention written as a doc line that STARTS with `+ = …` or `* …` (or
+`- = …`) is ALSO a markdown list item, so the next prose line trips the same
+lint (#148 v5 review). Start such a line with a word (`Positive = …`), or keep
+the `+` mid-line.
+
 ## Format BEFORE every commit, RED commits included
 
 The Lint job runs `cargo fmt --all -- --check` on the pushed HEAD, so a RED

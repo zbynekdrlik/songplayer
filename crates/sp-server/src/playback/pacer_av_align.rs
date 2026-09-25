@@ -38,12 +38,18 @@
 //! playing real audio instead of zero-filling an underrun. The depth has no
 //! effect on A/V: the take is aligned by the media head, never by the level.
 //!
+//! **The emitted relation (#148 v5, [`AvFrameOffset`]).** Every productive
+//! boundary that hands timed audio to the sink also records
+//! `audio_block_media_start − emitted_frame_pts` (ms): the media time of the
+//! block's first sample minus the pts of the frame handed with it (a repeat
+//! uses the repeated frame). Measurement only — it never feeds the alignment.
+//!
 //! Split into a sibling of `pacer.rs` so that file stays under the 1000-line
 //! cap; as a child module it reaches the `Pacer`'s private state directly.
 
 use super::{AUDIO_GRID_RATE_HZ, PacedFrame, Pacer};
 use crate::playback::audio_grid::{correction_for, samples_from_100ns};
-use sp_core::genlock::strict_next_boundary_100ns;
+use sp_core::genlock::{UNITS_PER_SECOND, strict_next_boundary_100ns};
 use sp_decoder::{AudioStream, DecoderError, SplitSyncedDecoder, VideoStream};
 use sp_ndi::AudioFrame;
 
@@ -90,6 +96,8 @@ pub(super) struct AvAlign {
     pub(super) corrections: u64,
     /// Total samples dropped + padded (cumulative).
     pub(super) corrected_samples: u64,
+    /// The emitted audio-block − frame-pts relation, per UTC minute (#148 v5).
+    pub(super) frame_offset: AvFrameOffset,
 }
 
 impl AvAlign {
@@ -119,6 +127,106 @@ impl AvAlign {
     /// The last measured A/V error in milliseconds (+ = audio ahead).
     pub(super) fn err_ms(&self) -> f64 {
         self.last_err as f64 * 1000.0 / AUDIO_GRID_RATE_HZ as f64
+    }
+}
+
+/// One UTC minute (100-ns units).
+const MINUTE_100NS: i64 = 60 * UNITS_PER_SECOND;
+
+/// `audio_block_media_start − emitted_frame_pts` in milliseconds: the block's
+/// first sample (a media sample index at 48 kHz) minus the frame pts (100 ns).
+/// Positive = the audio handed to NDI is from LATER media than the picture
+/// handed with it, i.e. the audio LEADS (the sign of `av_align_err_ms` and the
+/// gate).
+fn frame_offset_ms(block_media: i64, frame_pts_100ns: i64) -> f64 {
+    block_media as f64 * 1000.0 / AUDIO_GRID_RATE_HZ as f64 - frame_pts_100ns as f64 / 10_000.0
+}
+
+/// Mean/min/max of the `av_frame_offset` readings of one UTC minute.
+#[derive(Clone, Copy, Debug, Default)]
+struct OffsetWindow {
+    /// UTC minute index (`stamp / 60 s`) the readings belong to.
+    minute: i64,
+    n: u64,
+    sum: f64,
+    min: f64,
+    max: f64,
+}
+
+impl OffsetWindow {
+    fn add(&mut self, v: f64) {
+        if self.n == 0 {
+            self.min = v;
+            self.max = v;
+        } else {
+            self.min = self.min.min(v);
+            self.max = self.max.max(v);
+        }
+        self.n += 1;
+        self.sum += v;
+    }
+
+    fn mean(&self) -> f64 {
+        if self.n == 0 {
+            0.0
+        } else {
+            self.sum / self.n as f64
+        }
+    }
+}
+
+/// The emitted A/V relation of the paced output (#148 v5), windowed per UTC
+/// minute of the boundary stamp — the same minute bucket the engine's
+/// once-per-minute `ndi: genlock` line uses. The pacer cannot see when that
+/// line is logged, so it reports the last COMPLETE minute: the line logged in
+/// minute M carries the whole of minute M−1.
+#[derive(Debug, Default)]
+pub(super) struct AvFrameOffset {
+    /// The minute being filled.
+    cur: OffsetWindow,
+    /// The minute before `cur` that had readings.
+    done: OffsetWindow,
+}
+
+impl AvFrameOffset {
+    /// Add one boundary's reading, stamped `stamp_100ns` (UTC 100 ns). A stamp
+    /// in a later minute closes the current window first.
+    fn record(&mut self, stamp_100ns: i64, offset_ms: f64) {
+        let minute = stamp_100ns.div_euclid(MINUTE_100NS);
+        if minute > self.cur.minute {
+            self.done = self.cur;
+            self.cur = OffsetWindow {
+                minute,
+                ..OffsetWindow::default()
+            };
+        }
+        self.cur.add(offset_ms);
+    }
+
+    /// `(mean, min, max)` in ms of the minute before `now_100ns`'s minute;
+    /// all 0 when that minute had no reading (idle, paused, untimed audio).
+    pub(super) fn report(&self, now_100ns: i64) -> (f64, f64, f64) {
+        let w = self.window_before(now_100ns);
+        (w.mean(), w.min, w.max)
+    }
+
+    /// Readings in the window [`report`](Self::report) covers — lets a test
+    /// tell a measured 0 from an empty minute.
+    #[cfg(test)]
+    pub(super) fn readings(&self, now_100ns: i64) -> u64 {
+        self.window_before(now_100ns).n
+    }
+
+    /// The window of the minute before `now_100ns`'s minute (empty if none).
+    fn window_before(&self, now_100ns: i64) -> OffsetWindow {
+        let want = now_100ns.div_euclid(MINUTE_100NS) - 1;
+        if self.cur.minute == want {
+            self.cur
+        } else if self.done.minute == want {
+            self.done
+        } else {
+            OffsetWindow::default()
+        }
     }
 }
 
@@ -161,13 +269,18 @@ impl Pacer {
 
     /// The audio block for a productive boundary stamped `stamp_100ns`.
     /// `fresh_pts_100ns` is the media time of the frame emitted on this
-    /// boundary (`None` on a repeat). Untimed audio (no media head) plays as a
-    /// plain FIFO; timed audio is hard-aligned after a trigger, then corrected
-    /// continuously.
+    /// boundary (`None` on a repeat); `shown_pts_100ns` is the pts of the frame
+    /// handed to the sink with the block (fresh or repeated). Untimed audio (no
+    /// media head) plays as a plain FIFO; timed audio is hard-aligned after a
+    /// trigger, then corrected continuously. Every timed take once aligned
+    /// records its block start against `shown_pts_100ns` (#148 v5); a fully
+    /// underrun (zero-filled) block records the head it resumes from, so a
+    /// cushion-exhausting stall shows as a negative reading.
     pub(super) fn take_aligned_audio(
         &mut self,
         stamp_100ns: i64,
         fresh_pts_100ns: Option<i64>,
+        shown_pts_100ns: i64,
     ) -> Vec<AudioFrame> {
         let n = self.samples_per_boundary;
         let Some(head) = self.audio_buf.head_media() else {
@@ -188,6 +301,9 @@ impl Pacer {
         let expected = media + samples_from_100ns(stamp_100ns - wall, AUDIO_GRID_RATE_HZ);
         self.av.last_err = head - expected;
         if self.av.aligned {
+            // The block starts at the head (output 0 = input 0, also on an underrun).
+            let offset = frame_offset_ms(head, shown_pts_100ns);
+            self.av.frame_offset.record(stamp_100ns, offset);
             let (extra, engaged) = correction_for(self.av.last_err, self.av.engaged);
             self.av.engaged = engaged;
             let (planar, applied) = self.audio_buf.take_block(n, extra);
@@ -198,6 +314,9 @@ impl Pacer {
         self.av.aligned = aligned;
         self.av.record(delta);
         if aligned {
+            // Aligned: the head (the block's first sample) is now `expected`.
+            let offset = frame_offset_ms(expected, shown_pts_100ns);
+            self.av.frame_offset.record(stamp_100ns, offset);
             interleave(self.audio_buf.take_boundary_chunk(n))
         } else {
             // Not enough audio buffered to drop yet: silence, retry next boundary.
