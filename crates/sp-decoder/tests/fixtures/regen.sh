@@ -32,4 +32,18 @@ ffmpeg -y \
   -an \
   black_3s.mp4
 
-echo "Regenerated silent_3s.flac ($(stat -c%s silent_3s.flac) bytes) and black_3s.mp4 ($(stat -c%s black_3s.mp4) bytes)"
+# Sample-index ramps (#148 v3 — seek trimming). 24-bit stereo 48 kHz, 3.000 s
+# (144000 frames). Frame n encodes its own index: left = n, right = -n
+# (n / 2^23 as float → exactly n in the top 24 bits of the s32 sample). The two
+# files differ ONLY in the FLAC block size, so symphonia's Accurate seek lands on
+# different block starts — the stem-mix alignment test relies on that.
+# `-lpc_type fixed` keeps them small (~45 KB); the ramp is exact either way.
+for block in 4096 4608; do
+  ffmpeg -y \
+    -f lavfi -i "aevalsrc=exprs=n/8388608|-n/8388608:s=48000:d=3" \
+    -c:a flac -sample_fmt s32 -bits_per_raw_sample 24 \
+    -frame_size "$block" -lpc_type fixed \
+    "ramp_${block}.flac"
+done
+
+echo "Regenerated silent_3s.flac ($(stat -c%s silent_3s.flac) bytes), black_3s.mp4 ($(stat -c%s black_3s.mp4) bytes), ramp_4096.flac ($(stat -c%s ramp_4096.flac) bytes), ramp_4608.flac ($(stat -c%s ramp_4608.flac) bytes)"
