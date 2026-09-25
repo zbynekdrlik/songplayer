@@ -2,6 +2,7 @@
 paths:
   - "crates/sp-server/src/stems/**"
   - "crates/sp-decoder/src/audio/stem_mix*.rs"
+  - "crates/sp-decoder/src/audio/symphonia_reader*.rs"
   - "crates/sp-decoder/src/split_sync*.rs"
   - "crates/sp-server/src/playback/karaoke.rs"
   - "scripts/stem_worker.py"
@@ -653,3 +654,43 @@ stem. Anything that grows with video length fails for long videos under the
 10 GiB cap. The per-window working set (a 30 s window, the separator,
 `_load_48k_stereo` of one separated window, and the 2 s tail) is the budget.
 The resumable per-segment work dir (#171) is unchanged.
+
+## Audio readers after a seek: the first sample IS the target (#148 v3)
+
+symphonia's `SeekMode::Accurate` FLAC seek lands on the packet (FLAC block,
+~85-96 ms) that CONTAINS the target and returns `SeekedTo { actual_ts,
+required_ts }`. The CALLER must drop `required_ts - actual_ts` frames. Before
+#148 v3 `SymphoniaAudioReader::seek` ignored it: the first chunk started at the
+block boundary but was labelled with the requested position, so after any seek
+(resume-after-pause `start_position_ms`, dashboard scrub) the audio played up to
+~90 ms LATE against the picture for the rest of the song, and stems with
+different block sizes started on different samples.
+
+- **Where the trim lives:** `symphonia_reader.rs` — `seek` stores
+  `skip_frames` via the pure `seek_start(required, actual, position_ms, tb)`;
+  `decode_packet` runs `trim_leading_frames` and skips a packet emptied by the
+  trim (the trim may span several packets). The first emitted chunk's label is
+  then TRUE. An overshoot (`actual > required`, allowed by symphonia on odd
+  streams) trims nothing and labels the chunk at `actual_ts`.
+- **Seek with `SeekTo::TimeStamp`, never `SeekTo::Time`.** `Time::from(Duration)`
+  goes through f64 seconds: 0.288 s × 48 000 = 13 823.99… and symphonia
+  truncates it to 13 823 — one frame early, and one frame off `StemMixReader`'s
+  integer `position_ms * rate / 1000`. `ms_to_ts` computes the frame in exact
+  integer maths. The ramp tests assert EXACT equality (the decode is bit-exact),
+  so any tolerance you are tempted to add hides this class of bug.
+- **`StemMixReader` has no trim of its own** — its `seek` re-anchors
+  `emitted_frames = position_ms * rate / 1000`, which is right ONLY because every
+  sub-reader now starts exactly at the target. Never "fix" misaligned stems in the
+  mixer; fix the sub-reader.
+- **Don't label with `actual_ts` instead of trimming** (rejected in the design):
+  each stem file has its own block geometry, so labels would differ per stem.
+- **Tests use sample-index ramps**, not the silent fixture (silence can't show
+  a misalignment): `tests/fixtures/ramp_{4096,4608}.flac` are 24-bit stereo
+  48 kHz where frame `n` encodes L=`n`, R=`-n` (decoded f32 = `n / 2^23`;
+  recover with `(s as f64 * 2^23).round()`). The two files differ only in FLAC
+  block size — that is what makes the stem-mix alignment test bite. Regenerate
+  with `tests/fixtures/regen.sh` (ffmpeg `aevalsrc`, `-bits_per_raw_sample 24
+  -frame_size <N> -lpc_type fixed`).
+- A real symphonia FLAC seek never needs a trim longer than one packet, so the
+  multi-packet path is unit-tested by arming `skip_frames` directly on a real
+  decoder (`symphonia_reader_tests.rs`).
