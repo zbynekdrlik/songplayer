@@ -940,8 +940,9 @@ within 2 ms, and camera-box's own gate through the same OBS build reads ~0.
 - **Window.** mean / min / max per UTC minute of the boundary stamp
   (`AvFrameOffset`). `stats()` reports the last COMPLETE minute (the minute
   before the pacer's current wall minute), so the `ndi: genlock` line logged in
-  minute M carries the whole of minute M−1. A minute with no timed productive
-  boundary (idle, paused) reads `0.0/0.0/0.0`.
+  minute M carries ≈ the whole of minute M−1 (the pacer's wall minute and the
+  heartbeat's UTC minute can disagree for ~1 ms at the rollover). A minute with
+  no timed productive boundary (idle, paused) reads `0.0/0.0/0.0`.
 - **Where.** `/api/v1/ndi/health` → `pacing.av_frame_offset_ms` /
   `av_frame_offset_min_ms` / `av_frame_offset_max_ms`, and the
   `ndi: genlock … av_frame_offset_ms=… av_frame_offset_min_ms=… av_frame_offset_max_ms=…`
@@ -954,8 +955,13 @@ within 2 ms, and camera-box's own gate through the same OBS build reads ~0.
     held on the grid (the newest frame whose present time ≤ the boundary)
     while the audio runs on the anchor line (`pacer_tests_av_offset.rs`
     derives the 25 fps mean/min/max analytically).
-  - A decoder stall shows as a negative dip (the zero-filled block does not
-    advance the head) that the correction walks back by ≤ 1 ms per block.
+  - A VIDEO stall reads POSITIVE: the pacer repeats the frozen frame while the
+    250 ms audio cushion keeps the audio on its line, so the reading climbs
+    +33.3 ms per stalled boundary (a minute's `max` of +100 … +250 ms = a stall
+    in that minute). Only a stall longer than the cushion then leaves a
+    NEGATIVE after-effect: the zero-filled blocks do not advance the head, the
+    picture catches up by dropping frames, and the correction walks the
+    negative reading back by ≤ 1 ms per block.
 - **How to read it on the box.** Run the post-deploy A/V gate on SP-slow and
   note its UTC minute. Then read the `ndi: genlock ndi_name=SP-slow` line
   logged in the FOLLOWING minute (it carries the take's minute) from
@@ -965,6 +971,12 @@ within 2 ms, and camera-box's own gate through the same OBS build reads ~0.
   - mean ≈ the gate's `av_ms`: SongPlayer's emission produces the offset;
   - mean ≈ the structural value above while the gate reads −26: the error is
     downstream of the sender (fall back to design Approach 2).
+
+  Not in the reading: the NDI timecodes themselves. Audio is stamped with the
+  emit instant (`emit_now`), video with the serviced boundary, so the audio
+  stamp is later by the emit lateness — normally < 1 ms (`jitter_p99_us`), but
+  whole slots on a catch-up boundary. Cross-check `jitter_p99_us` and `lag` on
+  the same line before attributing a residual to downstream.
 
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
 A change to pacing, the submitter, decode, the mixer, NDI or the audio path

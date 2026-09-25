@@ -206,15 +206,27 @@ impl AvFrameOffset {
     /// `(mean, min, max)` in ms of the minute before `now_100ns`'s minute;
     /// all 0 when that minute had no reading (idle, paused, untimed audio).
     pub(super) fn report(&self, now_100ns: i64) -> (f64, f64, f64) {
+        let w = self.window_before(now_100ns);
+        (w.mean(), w.min, w.max)
+    }
+
+    /// Readings in the window [`report`](Self::report) covers — lets a test
+    /// tell a measured 0 from an empty minute.
+    #[cfg(test)]
+    pub(super) fn readings(&self, now_100ns: i64) -> u64 {
+        self.window_before(now_100ns).n
+    }
+
+    /// The window of the minute before `now_100ns`'s minute (empty if none).
+    fn window_before(&self, now_100ns: i64) -> OffsetWindow {
         let want = now_100ns.div_euclid(MINUTE_100NS) - 1;
-        let w = if self.cur.minute == want {
+        if self.cur.minute == want {
             self.cur
         } else if self.done.minute == want {
             self.done
         } else {
             OffsetWindow::default()
-        };
-        (w.mean(), w.min, w.max)
+        }
     }
 }
 
@@ -260,8 +272,10 @@ impl Pacer {
     /// boundary (`None` on a repeat); `shown_pts_100ns` is the pts of the frame
     /// handed to the sink with the block (fresh or repeated). Untimed audio (no
     /// media head) plays as a plain FIFO; timed audio is hard-aligned after a
-    /// trigger, then corrected continuously. Every timed, non-silent take
-    /// records its block start against `shown_pts_100ns` (#148 v5).
+    /// trigger, then corrected continuously. Every timed take once aligned
+    /// records its block start against `shown_pts_100ns` (#148 v5); a fully
+    /// underrun (zero-filled) block records the head it resumes from, so a
+    /// cushion-exhausting stall shows as a negative reading.
     pub(super) fn take_aligned_audio(
         &mut self,
         stamp_100ns: i64,

@@ -67,6 +67,12 @@ fn av_frame_offset_of_a_30_fps_source_aligned_from_0_reads_0_within_one_sample()
 
     assert_eq!(rec.blocks.len() as i64, LAST_OF_MINUTE_0 + 2);
     assert_eq!(pacer.stats().av_corrections, 0, "aligned input");
+    // A MEASURED 0, not an empty minute: every boundary of minute 0 was read.
+    let readings = pacer.av.frame_offset.readings(pacer.now_100ns());
+    assert_eq!(
+        readings as i64, LAST_OF_MINUTE_0,
+        "b(1..=1799) were measured"
+    );
     assert_close(
         reported(&pacer),
         (0.0, 0.0, 0.0),
@@ -86,7 +92,10 @@ fn av_frame_offset_of_a_25_fps_source_on_the_30_fps_grid_matches_the_analytic_sa
     let (mut pacer, clk) = anchored();
     let src = RefCell::new(SyncedSource::new(|j| j * 400_000, 0));
     let mut rec = Rec::default();
-    run_synced(&mut pacer, &clk, &src, 1, LAST_OF_MINUTE_0 + 2, &mut rec);
+    run_synced(&mut pacer, &clk, &src, 1, LAST_OF_MINUTE_0, &mut rec);
+    // Read the stats in minute 1 before any boundary of it was serviced (a
+    // paused output reporting its last playing minute).
+    clk.set(b(LAST_OF_MINUTE_0 + 6));
 
     let minute_0: Vec<f64> = (0..LAST_OF_MINUTE_0)
         .map(|m| m as f64 * 100.0 / 3.0 - 40.0 * ((5 * m) / 6) as f64)
@@ -100,6 +109,11 @@ fn av_frame_offset_of_a_25_fps_source_on_the_30_fps_grid_matches_the_analytic_sa
         pacer.stats().av_corrections,
         0,
         "the sawtooth is not an error"
+    );
+    let readings = pacer.av.frame_offset.readings(pacer.now_100ns());
+    assert_eq!(
+        readings as i64, LAST_OF_MINUTE_0,
+        "b(1..=1799) were measured"
     );
     assert_close(reported(&pacer), want, 1e-6, "25 fps, minute 0");
 }
