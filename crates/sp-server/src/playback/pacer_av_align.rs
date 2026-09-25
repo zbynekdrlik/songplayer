@@ -3,15 +3,23 @@
 //! The pacer emits the video frame and its boundary audio block in the SAME
 //! [`service`](super::Pacer::service) call, so the anchor is local: the first
 //! FRESH frame emitted on a new wall↔media map fixes the anchor
-//! `(its media time, the boundary it is DUE at)` — the first grid boundary at
-//! or after `wall_start + pts`, NOT the boundary it happened to be emitted at.
-//! The audio block at any boundary `B` must then start at
-//! `anchor_media + (B − anchor_wall)` in samples. That is the wall line the
-//! picture follows (`present = wall_start + pts`), including the frame's
-//! sub-slot phase. It continues across 24/25→30 repeat boundaries, so
-//! correctly paired input is never corrected. A STALE first frame (a slow
-//! decoder at song start, a stall) cannot pull the audio off the line: the
-//! picture catches up to the line by dropping frames, and so does the audio.
+//! `(its media time, its PRESENT time wall_start + pts)` (#148 v6). The
+//! present time is never rounded to the grid and never replaced by the boundary
+//! the frame happened to be emitted at. The audio block at any boundary `B`
+//! must then start at `anchor_media + (B − anchor_wall)` = `B − wall_start`,
+//! rounded once to the nearest sample. That is exactly the wall line the
+//! picture follows: the frame shown at `B` is the newest with
+//! `wall_start + pts ≤ B`. It continues across 24/25→30 repeat boundaries, so
+//! correctly paired input is never corrected.
+//!
+//! - **Not the DUE boundary (v2–v5).** Anchoring at the first grid boundary
+//!   at/after the present time ran the audio late by that frame's sub-slot
+//!   phase `δ₀ ∈ [0, 33.3)` ms for the whole song after any off-grid start
+//!   position or seek (box: SP-slow `av_frame_offset` min −25.7 ms).
+//! - **Not the emit stamp.** A STALE first frame (a slow decoder at song
+//!   start, a stall) cannot pull the audio off the line: its present time is
+//!   on the line whenever it is emitted, the picture catches up to the line by
+//!   dropping frames, and so does the audio.
 //!
 //! - **Hard alignment** — silence until the expected media time is buffered,
 //!   then drop early / pad late audio so the first non-silent block starts at
@@ -49,7 +57,7 @@
 
 use super::{AUDIO_GRID_RATE_HZ, PacedFrame, Pacer};
 use crate::playback::audio_grid::{correction_for, samples_from_100ns};
-use sp_core::genlock::{UNITS_PER_SECOND, strict_next_boundary_100ns};
+use sp_core::genlock::UNITS_PER_SECOND;
 use sp_decoder::{AudioStream, DecoderError, SplitSyncedDecoder, VideoStream};
 use sp_ndi::AudioFrame;
 
@@ -82,8 +90,9 @@ pub fn open_paced_decoder(
 /// default is "re-align pending", so a fresh pacer aligns on its first frame.
 #[derive(Debug, Default)]
 pub(super) struct AvAlign {
-    /// `(media sample, due boundary 100 ns)` of the frame the audio is
-    /// anchored to; `None` = waiting for a fresh frame on a new map.
+    /// `(media time, present wall time)` in 100 ns of the frame the audio is
+    /// anchored to (present = `wall_start + pts`, off-grid in general);
+    /// `None` = waiting for a fresh frame on a new map.
     anchor: Option<(i64, i64)>,
     /// The hard alignment to the current anchor has completed.
     aligned: bool,
@@ -287,18 +296,18 @@ impl Pacer {
             return interleave(self.audio_buf.take_boundary_chunk(n));
         };
         if self.av.anchor.is_none() {
-            // The boundary the frame is DUE at (first grid boundary at or after
-            // its presentation time), never the one it was emitted at.
-            let (wall_start, fps) = (self.wall_start_100ns, self.grid_fps);
-            let due = |pts: i64| strict_next_boundary_100ns(wall_start + pts - 1, fps);
-            self.av.anchor =
-                fresh_pts_100ns.map(|pts| (samples_from_100ns(pts, AUDIO_GRID_RATE_HZ), due(pts)));
+            // The frame's PRESENT time (#148 v6): neither rounded up to the
+            // boundary it is due at nor the boundary it was emitted at.
+            let wall_start = self.wall_start_100ns;
+            self.av.anchor = fresh_pts_100ns.map(|pts| (pts, wall_start + pts));
         }
-        let Some((media, wall)) = self.av.anchor else {
+        let Some((media_100ns, wall)) = self.av.anchor else {
             // New map, no fresh frame yet (a repeat boundary): silence.
             return interleave(vec![vec![0.0; n]; self.audio_buf.channels()]);
         };
-        let expected = media + samples_from_100ns(stamp_100ns - wall, AUDIO_GRID_RATE_HZ);
+        // One rounding to the nearest sample (= `stamp − wall_start` on the
+        // anchor's map).
+        let expected = samples_from_100ns(media_100ns + (stamp_100ns - wall), AUDIO_GRID_RATE_HZ);
         self.av.last_err = head - expected;
         if self.av.aligned {
             // The block starts at the head (output 0 = input 0, also on an underrun).

@@ -796,13 +796,18 @@ Now:
     Keeping the buffer through Resume (re-snap drops only the paused-over
     media) would remove it. That is a Resume design change for the main
     session, not part of v4.
-- **The anchor is local, on the DUE boundary** (`pacer_av_align.rs`). The first
-  FRESH frame emitted on a new map fixes `(pts in samples, the boundary it is
-  DUE at)`. The due boundary is the first grid boundary at or after
-  `wall_start + pts`, computed as `strict_next_boundary_100ns(ws + pts − 1)`.
-  It is NEVER the boundary the frame happened to be emitted at. The block at
-  boundary B must then start at `anchor_media + (B − anchor_wall)`, which is
-  the wall line the picture follows, including the frame's sub-slot phase.
+- **The anchor is local, on the PRESENT time** (`pacer_av_align.rs`, #148 v6,
+  design comment 5834154971). The first FRESH frame emitted on a new map fixes
+  `(pts, wall_start + pts)` in 100 ns. The block at boundary B must then start
+  at `samples(pts + (B − (wall_start + pts)))` = `samples(B − wall_start)`,
+  rounded ONCE to the nearest sample. That is exactly the line the picture
+  follows: the frame shown at B is the newest with `wall_start + pts ≤ B`.
+  - Do NOT round the present time to the grid (the v2–v5 "DUE boundary",
+    `strict_next_boundary_100ns(ws + pts − 1)`). It ran the audio late by the
+    first frame's sub-slot phase δ₀ ∈ [0, 33.3) ms for the whole song after
+    any off-grid start position or seek. Box, SP-slow, 23.976 fps: minute
+    `av_frame_offset` −5.0 / −25.7 / +16.0 (mean/min/max) = δ₀ 25.7 ms,
+    matching the A/V gate's steady −25…−27 ms.
   - It keeps going across repeat boundaries, so a 24→30 pattern needs no
     correction.
   - Do NOT compare against each emitted frame's own pts: that is a 0…41 ms
@@ -950,11 +955,19 @@ within 2 ms, and camera-box's own gate through the same OBS build reads ~0.
 - **Expected values (structural, not errors).**
   - A 30 fps source reads 0 (± 1 sample; the continuous correction's dead band
     lets it sit up to ±5 ms after a stall).
-  - 24/25-fps content on the 30 fps grid reads a sawtooth of 0 … +33.3 ms
-    (min 0, max ≈ one grid slot) with a mean of **+16.7 ms**. The picture is
-    held on the grid (the newest frame whose present time ≤ the boundary)
-    while the audio runs on the anchor line (`pacer_tests_av_offset.rs`
-    derives the 25 fps mean/min/max analytically).
+  - 24/25-fps content on the 30 fps grid reads the sawtooth `B − present`
+    of the shown frame (0 … +33.3 ms, + one slot on a repeat), with a mean of
+    **+16.7 ms** + its min. The picture is held on the grid (the newest frame
+    whose present time ≤ the boundary) while the audio runs on the picture
+    line.
+    - It is NEVER negative (#148 v6).
+    - The min is 0 only if some frame presents exactly on a boundary. That
+      holds for 23.976 fps (the phase sweeps the grid within seconds) and for
+      an on-grid start.
+    - For exact 24 / 25 fps after an off-grid landing, the min is the landing
+      phase mod 8.3 / 6.7 ms.
+
+    `pacer_tests_av_offset.rs` derives all of these analytically.
   - A VIDEO stall reads POSITIVE: the pacer repeats the frozen frame while the
     250 ms audio cushion keeps the audio on its line, so the reading climbs
     +33.3 ms per stalled boundary (a minute's `max` of +100 … +250 ms = a stall
