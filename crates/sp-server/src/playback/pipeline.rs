@@ -306,7 +306,7 @@ fn run_loop_windows(
     // transitions / heavy-child stalls). Declared AFTER `submitter` so its guard
     // drops (shutdown + JOIN) BEFORE the sender is destroyed — `send_destroy`
     // invalidates the handle the emitter's AudioSink holds. Paced path keeps its
-    // own audio clock (the Pacer's AudioGridBuffer + PLL), so no emitter there.
+    // own media-aligned audio (the Pacer's AudioGridBuffer), so no emitter there.
     let audio_emitter = if genlock_pacing {
         None
     } else {

@@ -3,22 +3,22 @@
 //! Each test PASSES on the current unmutated code and FAILS under exactly the
 //! `cargo-mutants` mutation named above it. Every expected value is computed by
 //! hand against the real source and its `sp_core::genlock` /
-//! [`AudioGridBuffer`](crate::playback::audio_grid::AudioGridBuffer) /
-//! [`AudioPll`](sp_core::genlock::audio::AudioPll) dependencies. Private helpers,
+//! [`AudioGridBuffer`](crate::playback::audio_grid::AudioGridBuffer)
+//! dependencies. Private helpers,
 //! fields and methods are reached directly from this child module (`use
 //! super::*`), asserting exact values at the precise input where the mutated
 //! operator/constant diverges.
 //!
 //! Equivalent / unkillable mutants (deliberately NOT tested — see the task
 //! report):
-//!   * `pacer.rs:682:28` `+= -> *=` / `-=` — the `emit_now < boundary` branch in
+//!   * `pacer.rs:654:28` `+= -> *=` / `-=` — the `emit_now < boundary` branch in
 //!     `service_standby` is dead: there is no decode pull between the scheduling
 //!     read and the emit read, so `emit_now == sched_now >= boundary` always,
 //!     and the branch body never runs.
-//!   * `pacer.rs:731:20` `> -> >=` in `on_emit` — the body is only
+//!   * `pacer.rs:718:20` `> -> >=` in `on_emit` — the body is only
 //!     `max_late_us = late_us`; at `late_us == max_late_us` the assignment is a
 //!     no-op, so `>` and `>=` are observationally identical.
-//!   * `pacer.rs:788:70` `- -> +` / `- -> /` in `jitter_p99_us` — the fixed 99th
+//!   * `pacer.rs:775:70` `- -> +` / `- -> /` in `jitter_p99_us` — the fixed 99th
 //!     percentile makes `floor(len*99/100) <= len-1 < len < len+1` for every
 //!     `len`, so the `.min(len-1)` clamp never binds and the `len-1` operand can
 //!     be `len+1` or `len/1` with no change.
@@ -87,19 +87,6 @@ fn anchored_pacer() -> (Pacer, SettableClock) {
 }
 
 // ---------------------------------------------------------------------------
-// level_avg_window (line 50): grid_fps.max(0) * 60
-// ---------------------------------------------------------------------------
-
-// Kills 50:5 (->0), 50:5 (->1), 50:22 (* -> +), 50:22 (* -> /).
-#[test]
-fn level_avg_window_is_grid_fps_times_sixty() {
-    // 30 * 60 = 1800; distinguishes 1800 from 0, 1, 90 (+), 0 (/).
-    assert_eq!(level_avg_window(30), 1800);
-    // 60 * 60 = 3600; a second point pins the `*` shape further.
-    assert_eq!(level_avg_window(60), 3600);
-}
-
-// ---------------------------------------------------------------------------
 // plan_sleep_100ns (line 189): relatch = interval > 0 && delta > interval + 2
 // ---------------------------------------------------------------------------
 
@@ -152,19 +139,6 @@ fn latched_boundary_keeps_pending_at_exactly_floor_plus_interval() {
         nb,
         "nb == floor(now)+interval must be KEPT, not re-latched"
     );
-}
-
-// ---------------------------------------------------------------------------
-// with_wallclock (line 339): audio target = spb * AUDIO_TARGET_BOUNDARIES
-// ---------------------------------------------------------------------------
-
-// Kills 339:69 (* -> +) and (* -> /).
-#[test]
-fn with_wallclock_audio_target_is_spb_times_two_boundaries() {
-    let (pacer, _clk) = anchored_pacer();
-    // spb = 48000/30 = 1600, AUDIO_TARGET_BOUNDARIES = 2 -> 3200.
-    // `+` would give 1602, `/` would give 800.
-    assert_eq!(pacer.audio_buf.target_level(), 3200);
 }
 
 // ---------------------------------------------------------------------------
@@ -591,62 +565,6 @@ fn take_boundary_audio_reinterleaves_planar_samples() {
         as_ints(&d[..4]),
         vec![1, 2, 1, 2],
         "re-interleave places ch c of sample j at index j*channels + c"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// run_audio_control (line 882): if last_pll_100ns == 0  (seed)
-// ---------------------------------------------------------------------------
-
-// Kills 882:32 (== -> !=).
-#[test]
-fn run_audio_control_seeds_last_pll_on_the_first_call() {
-    let (mut pacer, _clk) = anchored_pacer();
-    assert_eq!(pacer.last_pll_100ns, 0, "fresh anchor");
-    // now < the 60 s cadence: the else-if cannot fire, so only the `== 0` seed
-    // can set last_pll. `!= 0` would take the (false) else-if and leave it 0.
-    pacer.run_audio_control(5_000_000);
-    assert_eq!(
-        pacer.last_pll_100ns, 5_000_000,
-        "the first run seeds last_pll at now (the `== 0` branch)"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// run_audio_control (line 884): else if now - last_pll >= AUDIO_PLL_UPDATE_100NS
-// ---------------------------------------------------------------------------
-
-// Kills 884:29 (- -> +) and (- -> /).
-#[test]
-fn run_audio_control_cadence_uses_subtraction() {
-    // `- -> +`: 585 ms elapsed is below the 600 ms cadence -> must NOT advance.
-    let (mut p1, _c1) = anchored_pacer();
-    p1.run_audio_control(10_000_000); // seed last_pll = 10_000_000
-    p1.run_audio_control(595_000_000); // 585 ms elapsed
-    assert_eq!(
-        p1.last_pll_100ns, 10_000_000,
-        "585 ms < 600 ms cadence: last_pll must not advance (subtraction, not +)"
-    );
-    // `- -> /`: 690 ms elapsed is over the cadence -> must advance.
-    let (mut p2, _c2) = anchored_pacer();
-    p2.run_audio_control(10_000_000);
-    p2.run_audio_control(700_000_000); // 690 ms elapsed
-    assert_eq!(
-        p2.last_pll_100ns, 700_000_000,
-        "690 ms >= 600 ms cadence: last_pll advances (subtraction, not /)"
-    );
-}
-
-// Kills 884:51 (>= -> <).
-#[test]
-fn run_audio_control_cadence_is_inclusive_at_the_interval() {
-    let (mut pacer, _clk) = anchored_pacer();
-    pacer.run_audio_control(10_000_000); // seed
-    // Exactly AUDIO_PLL_UPDATE_100NS (600 ms = 600_000_000) later.
-    pacer.run_audio_control(610_000_000);
-    assert_eq!(
-        pacer.last_pll_100ns, 610_000_000,
-        "elapsed == 600 ms cadence is inclusive (>=): last_pll advances"
     );
 }
 

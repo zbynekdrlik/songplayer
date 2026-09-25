@@ -470,3 +470,203 @@ fn a_deep_buffer_is_never_servoed_toward_a_level_target() {
     assert_eq!(rec.blocks.len(), 3900);
     assert_exact_stream(&rec.blocks, 0);
 }
+
+// ---------------------------------------------------------------------------
+// Re-align triggers + telemetry (#148 design v2): every change of the
+// wall↔media map re-anchors the audio on the next fresh frame, and the
+// alignment is reported on `PacingStats`.
+// ---------------------------------------------------------------------------
+
+/// Drive one exact-source service call at `now`, stalling the pull when asked.
+fn step_ahead(
+    pacer: &mut Pacer,
+    clk: &SettableClock,
+    now: i64,
+    next: &Cell<i64>,
+    stall: bool,
+    ahead: i64,
+    rec: &mut Rec,
+) -> ServiceOutcome {
+    clk.set(now);
+    pacer.service(
+        || {
+            if stall {
+                return None;
+            }
+            let j = next.get();
+            next.set(j + 1);
+            Some(ahead_frame(j, ahead))
+        },
+        rec,
+    )
+}
+
+#[test]
+fn the_20_ms_convergence_is_reported_on_pacing_stats() {
+    let (mut pacer, clk) = anchored();
+    let next = Cell::new(0i64);
+    let mut rec = Rec::default();
+    for k in 1..=150i64 {
+        let stall = k == 51 || k == 52;
+        step_ahead(&mut pacer, &clk, b(k), &next, stall, 640, &mut rec);
+    }
+    let s = pacer.stats();
+    // 19 blocks of 48 samples: -960 → -48.
+    assert_eq!(s.av_corrections, 19, "one correction per converging block");
+    assert_eq!(s.av_corrected_samples, 912, "19 × 48 samples dropped");
+    assert_eq!(
+        s.av_align_err_ms, -1.0,
+        "the residual 48-sample error is 1 ms"
+    );
+    assert_eq!(
+        pacer.audio_stats().underruns,
+        1,
+        "the stall is one underrun"
+    );
+}
+
+#[test]
+fn the_start_alignment_is_counted_and_then_reads_zero_error() {
+    let (mut pacer, clk) = anchored();
+    let src = RefCell::new(SyncedSource::new(|j| 1_800_000 + b(j), 0));
+    let mut rec = Rec::default();
+    run_synced(&mut pacer, &clk, &src, 1, 7, &mut rec);
+    let s = pacer.stats();
+    assert_eq!(s.av_corrections, 1, "the start drop is one correction");
+    assert_eq!(
+        s.av_corrected_samples, 8640,
+        "180 ms of early audio dropped"
+    );
+    assert_eq!(s.av_align_err_ms, -180.0, "measured before the drop");
+    run_synced(&mut pacer, &clk, &src, 8, 12, &mut rec);
+    assert_eq!(pacer.stats().av_align_err_ms, 0.0, "aligned afterwards");
+    assert_eq!(pacer.stats().av_corrections, 1, "no further correction");
+}
+
+#[test]
+fn padding_late_audio_is_counted_as_one_correction() {
+    let (mut pacer, clk) = anchored();
+    let src = RefCell::new(SyncedSource::new(b, 2400));
+    let mut rec = Rec::default();
+    run_synced(&mut pacer, &clk, &src, 1, 10, &mut rec);
+    let s = pacer.stats();
+    assert_eq!(s.av_corrections, 1);
+    assert_eq!(s.av_corrected_samples, 2400, "50 ms of silence padded");
+    assert_eq!(s.av_align_err_ms, 0.0);
+}
+
+#[test]
+fn a_lag_reanchor_realigns_the_audio_to_the_resumed_frame() {
+    // The pacer re-anchors `wall_start` after > 1 s of lag with a frame
+    // buffered (#147 lane 3). The audio must follow the moved wall↔media map:
+    // it re-anchors on the resumed frame instead of chasing the old line.
+    let (mut pacer, clk) = anchored();
+    let next = Cell::new(0i64);
+    let mut rec = Rec::default();
+    // 19 slots late: frame 0 is emitted (stamped b(1)), the lag timer arms.
+    let o1 = step_ahead(&mut pacer, &clk, b(20), &next, false, 0, &mut rec);
+    assert_eq!(o1, ServiceOutcome::Emitted);
+    // Still behind > 1 s later → re-anchor onto the parked frame 1.
+    let late = b(20) + 10_000_001;
+    let until = match step_ahead(&mut pacer, &clk, late, &next, false, 0, &mut rec) {
+        ServiceOutcome::Reanchored { until_100ns, .. } => until_100ns,
+        other => panic!("expected Reanchored, got {other:?}"),
+    };
+    for k in 0..10i64 {
+        step_ahead(&mut pacer, &clk, until + b(k), &next, false, 0, &mut rec);
+    }
+    // Frame 1 (media 1600) and its successors play bit-exact from `until` on.
+    assert_eq!(rec.blocks.len(), 11);
+    assert_exact_stream(&rec.blocks, 0);
+    assert_eq!(
+        pacer.stats().av_corrections,
+        0,
+        "the re-anchor needs no drop/pad"
+    );
+}
+
+#[test]
+fn a_grid_resync_plays_silence_then_realigns_on_the_next_fresh_frame() {
+    // Audio 640 samples ahead. At b(51) the decoder stalls (frame 50 is the last
+    // one). The next call comes 12 slots late with still nothing decoded: the
+    // gate RESYNCS (repeat stamped at b(63)). The audio has no fresh frame to
+    // anchor to → one silent block; at b(64) the decoder catches up, frame 63
+    // is the fresh frame and the audio re-aligns to its media time exactly.
+    let (mut pacer, clk) = anchored();
+    let next = Cell::new(0i64);
+    let mut rec = Rec::default();
+    for k in 1..=51i64 {
+        step_ahead(&mut pacer, &clk, b(k), &next, k == 51, 640, &mut rec);
+    }
+    let resyncs_before = pacer.stats().resyncs;
+    let o = step_ahead(&mut pacer, &clk, b(63), &next, true, 640, &mut rec);
+    assert_eq!(o, ServiceOutcome::Repeated);
+    assert_eq!(
+        pacer.stats().resyncs,
+        resyncs_before + 1,
+        "the gate resynced"
+    );
+    let (tc, silent) = rec.blocks.last().unwrap();
+    assert_eq!(*tc, b(63));
+    assert_eq!(silent.len(), SPB as usize);
+    assert!(
+        silent.iter().all(|&v| v == 0.0),
+        "re-align pending → silence"
+    );
+
+    for k in 64..=80i64 {
+        step_ahead(&mut pacer, &clk, b(k), &next, false, 640, &mut rec);
+    }
+    let after = &rec.blocks[52..];
+    assert_eq!(after[0].0, b(64));
+    assert_exact_stream(after, 63 * SPB);
+}
+
+#[test]
+fn audio_resume_reset_realigns_to_the_next_fresh_frame() {
+    // Resume flushes the audio (frame 30's paired audio goes with it). The next
+    // fresh frame (30, media 48000) re-anchors the audio: its own audio is gone,
+    // so that block is padded silence and frame 31's audio plays exactly at its
+    // media time on the next boundary.
+    let (mut pacer, clk) = anchored();
+    let next = Cell::new(0i64);
+    let mut rec = Rec::default();
+    for k in 1..=30i64 {
+        step_ahead(&mut pacer, &clk, b(k), &next, false, 0, &mut rec);
+    }
+    pacer.audio_resume_reset();
+    for k in 31..=40i64 {
+        step_ahead(&mut pacer, &clk, b(k), &next, false, 0, &mut rec);
+    }
+    let (_, padded) = &rec.blocks[30];
+    assert!(
+        padded.iter().all(|&v| v == 0.0),
+        "frame 30's audio was flushed"
+    );
+    assert_exact_stream(&rec.blocks[31..], 31 * SPB);
+    assert_eq!(pacer.stats().av_corrected_samples, 1600, "one block padded");
+}
+
+#[test]
+fn untimed_audio_plays_as_a_plain_fifo() {
+    // Audio with no media time (no head) is never aligned or corrected.
+    let (mut pacer, clk) = anchored();
+    let next = Cell::new(0i64);
+    let mut rec = Rec::default();
+    for k in 1..=20i64 {
+        clk.set(b(k));
+        pacer.service(
+            || {
+                let j = next.get();
+                next.set(j + 1);
+                let mut f = ahead_frame(j, 640);
+                f.audio[0].timecode_100ns = None;
+                Some(f)
+            },
+            &mut rec,
+        );
+    }
+    assert_exact_stream(&rec.blocks, 0);
+    assert_eq!(pacer.stats().av_corrections, 0);
+    assert_eq!(pacer.stats().av_align_err_ms, 0.0);
+}

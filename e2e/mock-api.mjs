@@ -741,8 +741,9 @@ let ndiHealth = [
       repeats: 0,
       resyncs: 0,
       lag_slots: 0,
+      av_align_err_ms: 0.4,
     },
-    audio: { residual_ppm: 1.2, underruns: 0 },
+    audio: { underruns: 0 },
   },
   {
     ndi_name: "SP-background",
@@ -761,8 +762,9 @@ let ndiHealth = [
       repeats: 0,
       resyncs: 0,
       lag_slots: 0,
+      av_align_err_ms: -0.6,
     },
-    audio: { residual_ppm: -0.4, underruns: 0 },
+    audio: { underruns: 0 },
   },
   {
     ndi_name: "SP-live",
@@ -781,8 +783,9 @@ let ndiHealth = [
       repeats: 0,
       resyncs: 0,
       lag_slots: 0,
+      av_align_err_ms: 0,
     },
-    audio: { residual_ppm: 0, underruns: 0 },
+    audio: { underruns: 0 },
   },
 ];
 

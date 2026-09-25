@@ -46,12 +46,13 @@ async fn ndi_health_endpoint_includes_pacing() {
             lag_slots: 3,
             iter_p99_us: 4200,
             prep_p99_us: 210,
+            av_align_err_ms: -20.0,
+            av_corrections: 20,
+            av_corrected_samples: 912,
             ..Default::default()
         },
         audio: AudioStats {
             enabled: true,
-            residual_ppm: -12.5,
-            applied_ppm: 8.0,
             samples_per_boundary: 1600,
             underruns: 4,
             overflows: 1,
@@ -95,6 +96,10 @@ async fn ndi_health_endpoint_includes_pacing() {
     assert_eq!(arr[0]["pacing"]["iter_p99_us"].as_u64(), Some(4200));
     // #147 lane 4: the pre-decode duration gauge serialises on the endpoint too.
     assert_eq!(arr[0]["pacing"]["prep_p99_us"].as_u64(), Some(210));
+    // #148 v2: the media-time A/V alignment telemetry.
+    assert_eq!(arr[0]["pacing"]["av_align_err_ms"].as_f64(), Some(-20.0));
+    assert_eq!(arr[0]["pacing"]["av_corrections"].as_u64(), Some(20));
+    assert_eq!(arr[0]["pacing"]["av_corrected_samples"].as_u64(), Some(912));
 
     // #148: the audio clock-discipline telemetry serialises with its full key set.
     assert_eq!(
@@ -106,11 +111,9 @@ async fn ndi_health_endpoint_includes_pacing() {
     assert_eq!(arr[0]["audio"]["underruns"].as_u64(), Some(4));
     assert_eq!(arr[0]["audio"]["overflows"].as_u64(), Some(1));
     assert_eq!(arr[0]["audio"]["buffer_ms"].as_u64(), Some(66));
-    assert_eq!(arr[0]["audio"]["applied_ppm"].as_f64(), Some(8.0));
-    assert!(
-        arr[0]["audio"]["residual_ppm"].as_f64().is_some(),
-        "audio.residual_ppm must serialise"
-    );
+    // The PLL level trim is gone (#148 v2): its ppm fields are not published.
+    assert!(arr[0]["audio"].get("applied_ppm").is_none());
+    assert!(arr[0]["audio"].get("residual_ppm").is_none());
 
     // #149 Lane 1: lock_state/lock_reason serialise; this snapshot is LOCKED.
     assert_eq!(arr[0]["lock_state"].as_str(), Some("LOCKED"));
