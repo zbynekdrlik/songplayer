@@ -7,13 +7,19 @@
 //! `GET /api/v1/program` once a second through the ONE shared `poll_into`, so a
 //! cut made elsewhere (the API, Companion) shows up here too.
 //!
+//! #212: while the NDI input "OBS manuál" is enabled (`input.enabled` on
+//! `GET /api/v1/program`) it is listed after the playlists as one more source,
+//! cut with `{"source": -1}` (`PROGRAM_INPUT_ID`).
+//!
 //! Testids (set here, never by a caller): `program-control`, `program-source`
-//! (the "Na programe: …" line), `program-cut` (one button per playlist, with
-//! `data-playlist-id` + `aria-pressed` on the on-program one), `program-error`.
+//! (the "Na programe: …" line), `program-cut` (one button per source, with
+//! `data-playlist-id` (`-1` for the input) + `aria-pressed` on the on-program
+//! one), `program-error`.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
+use sp_core::config::{PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
 
 use crate::components::selection;
 use crate::store::{DashboardStore, poll_into};
@@ -25,6 +31,17 @@ pub struct ProgramState {
     /// carries its standby black).
     #[serde(default)]
     pub source: Option<i64>,
+    /// #212: the NDI input's state.
+    #[serde(default)]
+    pub input: ProgramInput,
+}
+
+/// The part of `GET /api/v1/program` → `input` this control renders.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ProgramInput {
+    /// The input is enabled in Nastavenia: it is a program source.
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 #[component]
@@ -41,7 +58,9 @@ pub fn ProgramControl() -> impl IntoView {
 
     // A Memo, so a poll that returns the same source never re-renders a button.
     let on_program = Memo::new(move |_| program.get().source);
+    let input_enabled = Memo::new(move |_| program.get().input.enabled);
     let on_program_name = move || match on_program.get() {
+        Some(PROGRAM_INPUT_ID) => PROGRAM_INPUT_LABEL.to_string(),
         Some(id) => store
             .playlists
             .get()
@@ -98,6 +117,19 @@ pub fn ProgramControl() -> impl IntoView {
                         }
                     }
                 />
+                <Show when=move || input_enabled.get()>
+                    <button
+                        class="program-cut"
+                        class:program-cut-on=move || on_program.get() == Some(PROGRAM_INPUT_ID)
+                        data-testid="program-cut"
+                        data-playlist-id=PROGRAM_INPUT_ID.to_string()
+                        aria-pressed=move || (on_program.get() == Some(PROGRAM_INPUT_ID)).to_string()
+                        title="Strih na program — vstup NDI z OBS"
+                        on:click=move |_| cut(PROGRAM_INPUT_ID)
+                    >
+                        {PROGRAM_INPUT_LABEL}
+                    </button>
+                </Show>
             </div>
             <div class="program-error" data-testid="program-error">
                 {move || error.get().unwrap_or_default()}

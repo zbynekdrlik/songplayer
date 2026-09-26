@@ -213,6 +213,7 @@ const settings = {
   dub_voice: "speaker",
   // #210: the vban_* keys are deliberately absent so the Nastavenia VBAN
   // fieldset shows its defaults (off, `sp-program`, no targets).
+  // #212: the ndi_input_* keys are absent too (the input is off, no source).
 };
 // #210: the fixture as loaded, restored by `/__mock/settings-reset`.
 const settingsInitial = { ...settings };
@@ -862,12 +863,56 @@ function programBody() {
     },
   };
 }
+// #212: the NDI input "OBS manuál" — `MACHINE (stream)` → `stream`, like
+// the server's `extract_ndi_stream_name`.
+function ndiStreamName(full) {
+  const open = full.indexOf(" (");
+  if (full.endsWith(")") && open >= 0 && full.length - 1 > open + 2) {
+    return full.slice(open + 2, full.length - 1);
+  }
+  return full;
+}
+function ndiInputEnabled() {
+  return settings.ndi_input_enabled === "true";
+}
+// Mirrors `NdiInputStatus`, from the stored settings like the real API.
+function inputBody() {
+  const source = (settings.ndi_input_source || "").trim();
+  return {
+    id: -1,
+    label: "OBS manuál",
+    enabled: ndiInputEnabled(),
+    running: false,
+    connected: false,
+    source,
+    stream: ndiStreamName(source),
+    frames_received: 0,
+    video_repeats: 0,
+    video_drops: 0,
+    no_source_boundaries: 0,
+    unsupported_boundaries: 0,
+    boundaries: 0,
+    resyncs: 0,
+    relatches: 0,
+    audio_queue_depth: 0,
+    last_frame_size: null,
+    format: null,
+    frame_rate: null,
+    visible_sources: [],
+  };
+}
 app.get("/api/v1/program", (_req, res) => {
-  res.json(programBody());
+  res.json({ ...programBody(), input: inputBody() });
 });
 app.post("/api/v1/program/cut", (req, res) => {
   const source = Number(req.body?.source);
-  if (!activePlaylists().some((p) => p.id === source)) {
+  if (source === -1) {
+    // #212: the NDI input is a source only while it is enabled.
+    if (!ndiInputEnabled()) {
+      res.status(404).send("the NDI input is disabled");
+      return;
+    }
+  } else if (!activePlaylists().some((p) => p.id === source)) {
     res.status(404).send("unknown playlist");
     return;
   }
@@ -875,7 +920,7 @@ app.post("/api/v1/program/cut", (req, res) => {
   if (programState.source !== source) {
     programState = { source, previous: programState.source, cuts: programState.cuts + 1 };
   }
-  res.json(programBody());
+  res.json({ ...programBody(), input: inputBody() });
 });
 // Test-only: the last cut body the dashboard posted (backend-effect check).
 app.get("/__mock/program-last-cut", (_req, res) => {

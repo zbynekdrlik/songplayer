@@ -69,13 +69,15 @@ use sp_core::genlock::{
 use sqlx::SqlitePool;
 use tracing::{info, warn};
 
+use crate::playback::ndi_input::NdiInputShared;
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 use crate::playback::vban_out::VbanOut;
 
 /// The program output's NDI source name.
 pub const PROGRAM_NDI_NAME: &str = "SP-program";
 
-/// DB setting that persists the selected program source (a playlist id).
+/// DB setting that persists the selected program source (a playlist id, or
+/// `sp_core::config::PROGRAM_INPUT_ID` for the #212 NDI input).
 pub const SETTING_PROGRAM_SOURCE: &str = "program_source";
 
 /// A cut takes effect this many slots after the NEXT boundary (design: next
@@ -473,6 +475,9 @@ pub struct ProgramBus {
     /// #210: the program's VBAN audio output, fed by the `SP-program` sender
     /// thread and reported under `vban` on `GET /api/v1/program`.
     vban: Arc<VbanOut>,
+    /// #212: the NDI input "OBS manuál" (source id `PROGRAM_INPUT_ID`): its
+    /// settings, stop flag and telemetry (`input` on `GET /api/v1/program`).
+    input: Arc<NdiInputShared>,
 }
 
 impl Default for ProgramBus {
@@ -490,12 +495,18 @@ impl ProgramBus {
             }),
             ready: Condvar::new(),
             vban: Arc::new(VbanOut::new()),
+            input: Arc::new(NdiInputShared::default()),
         }
     }
 
     /// #210: the program's VBAN output.
     pub fn vban(&self) -> &Arc<VbanOut> {
         &self.vban
+    }
+
+    /// #212: the NDI input's shared state.
+    pub fn input(&self) -> &Arc<NdiInputShared> {
+        &self.input
     }
 
     fn lock(&self) -> MutexGuard<'_, BusState> {
@@ -602,8 +613,9 @@ pub async fn persist_selected_source(pool: &SqlitePool, pid: i64) -> Result<(), 
 }
 
 /// Restore the persisted program source into `bus` (startup). Returns the
-/// restored playlist id; a missing or unreadable setting leaves the program on
-/// its standby pair.
+/// restored source id; a missing or unreadable setting leaves the program on
+/// its standby pair. The #212 NDI input (`PROGRAM_INPUT_ID`) is restored only
+/// while it is enabled — a disabled input is not a source.
 pub async fn restore_selected_source(pool: &SqlitePool, bus: &ProgramBus) -> Option<i64> {
     let raw = match crate::db::models::get_setting(pool, SETTING_PROGRAM_SOURCE).await {
         Ok(v) => v?,
@@ -612,17 +624,31 @@ pub async fn restore_selected_source(pool: &SqlitePool, bus: &ProgramBus) -> Opt
             return None;
         }
     };
-    match raw.trim().parse::<i64>() {
-        Ok(pid) => {
-            bus.select_initial(pid);
-            info!(source = pid, "program bus: restored the selected source");
-            Some(pid)
-        }
+    let pid = match raw.trim().parse::<i64>() {
+        Ok(pid) => pid,
         Err(e) => {
-            warn!(%e, raw = %raw, "program bus: persisted source is not a playlist id");
-            None
+            warn!(%e, raw = %raw, "program bus: persisted source is not a source id");
+            return None;
         }
+    };
+    if pid == sp_core::config::PROGRAM_INPUT_ID && !input_enabled(pool).await {
+        warn!(
+            source = pid,
+            "program bus: the persisted source is the NDI input, which is disabled — not restored"
+        );
+        return None;
     }
+    bus.select_initial(pid);
+    info!(source = pid, "program bus: restored the selected source");
+    Some(pid)
+}
+
+/// #212: whether the stored settings enable the NDI input (an unreadable
+/// setting counts as disabled).
+async fn input_enabled(pool: &SqlitePool) -> bool {
+    crate::playback::ndi_input::load_input_settings(pool)
+        .await
+        .is_ok_and(|s| s.enabled)
 }
 
 #[cfg(test)]

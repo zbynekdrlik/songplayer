@@ -32,12 +32,14 @@ function realConsoleErrors(messages: string[]): string[] {
 
 test.beforeEach(async ({ request }) => {
   await request.post("/__mock/program-reset");
+  await request.post("/__mock/settings-reset");
 });
 
-// The mock program state is global in-memory state: never leak a cut into a
-// serially-run sibling spec.
+// The mock program state + settings are global in-memory state: never leak a
+// cut or an enabled NDI input into a serially-run sibling spec.
 test.afterEach(async ({ request }) => {
   await request.post("/__mock/program-reset");
+  await request.post("/__mock/settings-reset");
 });
 
 test("the Program control shows the on-program source and cuts on click", async ({
@@ -114,4 +116,94 @@ test("the Program control follows a cut made elsewhere", async ({
 
   // Zero console errors — the last assertion.
   expect(realConsoleErrors(consoleMessages)).toEqual([]);
+});
+
+// #212 (B3 of EPIC #174): the NDI input "OBS manuál" (cg OBS's manual-scene
+// mix received over NDI) is one more program source while it is enabled in
+// Nastavenia — listed after the playlists, cut with `{"source": -1}`.
+
+test("with the NDI input disabled the Program control offers no OBS manuál", async ({
+  page,
+}) => {
+  const consoleMessages = collectConsole(page);
+  await page.goto("/");
+  await expect(page.getByTestId("program-source")).toHaveText(
+    "Na programe: Worship",
+    { timeout: 10000 },
+  );
+  await expect(page.getByTestId("program-cut")).toHaveCount(3);
+  await expect(
+    page.locator('[data-testid="program-cut"][data-playlist-id="-1"]'),
+  ).toHaveCount(0);
+
+  // Zero console errors — the last assertion.
+  expect(realConsoleErrors(consoleMessages)).toEqual([]);
+});
+
+test("the Program control lists OBS manuál after the playlists and cuts to it and back", async ({
+  page,
+  request,
+}) => {
+  await request.patch("/api/v1/settings", {
+    data: { ndi_input_enabled: "true", ndi_input_source: "CG-OBS (manual)" },
+  });
+  const consoleMessages = collectConsole(page);
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto("/");
+
+  const control = page.getByTestId("program-control");
+  const input = control.locator('[data-testid="program-cut"][data-playlist-id="-1"]');
+  await expect(input).toBeVisible({ timeout: 10000 });
+  await expect(input).toHaveText("OBS manuál");
+  await expect(input).toHaveAttribute("aria-pressed", "false");
+  const cuts = control.getByTestId("program-cut");
+  await expect(cuts).toHaveCount(4);
+  await expect(cuts.last()).toHaveAttribute("data-playlist-id", "-1");
+
+  // Cut to OBS manuál with the real mouse.
+  let box = await input.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await expect(page.getByTestId("program-source")).toHaveText(
+    "Na programe: OBS manuál",
+  );
+  await expect(input).toHaveAttribute("aria-pressed", "true");
+  const worship = control.locator('[data-testid="program-cut"][data-playlist-id="1"]');
+  await expect(worship).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("program-error")).toHaveText("");
+
+  // Backend effect: the cut body is the input's id and the program moved.
+  let last = await (await request.get("/__mock/program-last-cut")).json();
+  expect(last.body).toEqual({ source: -1 });
+  let program = await (await request.get("/api/v1/program")).json();
+  expect(program.source).toBe(-1);
+  expect(program.previous).toBe(1);
+  expect(program.input.enabled).toBe(true);
+  expect(program.input.stream).toBe("manual");
+
+  // And back to Worship.
+  box = await worship.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await expect(page.getByTestId("program-source")).toHaveText(
+    "Na programe: Worship",
+  );
+  await expect(input).toHaveAttribute("aria-pressed", "false");
+  last = await (await request.get("/__mock/program-last-cut")).json();
+  expect(last.body).toEqual({ source: 1 });
+  program = await (await request.get("/api/v1/program")).json();
+  expect(program.source).toBe(1);
+  expect(program.previous).toBe(-1);
+  expect(program.health.cuts).toBe(2);
+
+  // Zero console errors — the last assertion.
+  expect(realConsoleErrors(consoleMessages)).toEqual([]);
+});
+
+test("a cut to the disabled NDI input is refused (404)", async ({ request }) => {
+  const resp = await request.post("/api/v1/program/cut", { data: { source: -1 } });
+  expect(resp.status()).toBe(404);
+  const program = await (await request.get("/api/v1/program")).json();
+  expect(program.source).toBe(1);
+  expect(program.input.enabled).toBe(false);
 });

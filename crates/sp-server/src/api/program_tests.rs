@@ -252,3 +252,172 @@ async fn the_vban_settings_save_through_the_settings_api_and_load_back() {
     assert!(status.is_success());
     assert!(!load_vban_settings(&state.pool).await.unwrap().enabled);
 }
+
+// --- #212: the NDI input "OBS manuál" -----------------------------------------
+
+async fn enable_input(state: &crate::AppState, source: &str) {
+    let (status, _) = call(
+        state.clone(),
+        "PATCH",
+        "/api/v1/settings",
+        Some(serde_json::json!({
+            "ndi_input_enabled": "true",
+            "ndi_input_source": source,
+        })),
+    )
+    .await;
+    assert!(status.is_success(), "got {status}");
+}
+
+#[tokio::test]
+async fn get_program_reports_the_input_block_from_the_stored_settings() {
+    let state = test_state().await;
+    let (status, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let i = &json["input"];
+    assert_eq!(i["id"], -1);
+    assert_eq!(i["label"], "OBS manuál");
+    assert_eq!(i["enabled"], false);
+    assert_eq!(i["running"], false, "no input thread in a unit test");
+    assert_eq!(i["connected"], false);
+    assert_eq!(i["source"], "");
+    assert_eq!(i["stream"], "");
+    assert_eq!(i["frames_received"], 0);
+    assert_eq!(i["video_repeats"], 0);
+    assert_eq!(i["video_drops"], 0);
+    assert_eq!(i["no_source_boundaries"], 0);
+    assert_eq!(i["audio_queue_depth"], 0);
+    assert!(i["last_frame_size"].is_null());
+    assert_eq!(i["visible_sources"], serde_json::json!([]));
+
+    enable_input(&state, " CG-OBS (manual) ").await;
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    let i = &json["input"];
+    assert_eq!(i["enabled"], true, "a save shows at once");
+    assert_eq!(i["source"], "CG-OBS (manual)", "trimmed");
+    assert_eq!(i["stream"], "manual");
+    assert_eq!(
+        json["ndi_name"], PROGRAM_NDI_NAME,
+        "the program fields stay flat"
+    );
+}
+
+#[tokio::test]
+async fn the_input_settings_save_through_the_settings_api_and_load_back() {
+    use crate::playback::ndi_input::{InputSettings, load_input_settings};
+    let state = test_state().await;
+    assert_eq!(
+        load_input_settings(&state.pool).await.unwrap(),
+        InputSettings::default(),
+        "default: off, no source"
+    );
+    enable_input(&state, "CG-OBS (manual)").await;
+    let s = load_input_settings(&state.pool).await.unwrap();
+    assert!(s.enabled);
+    assert_eq!(s.source, "CG-OBS (manual)");
+    let (_, json) = call(state.clone(), "GET", "/api/v1/settings", None).await;
+    assert_eq!(json["ndi_input_enabled"], "true");
+    assert_eq!(json["ndi_input_source"], "CG-OBS (manual)");
+    let (status, _) = call(
+        state.clone(),
+        "PATCH",
+        "/api/v1/settings",
+        Some(serde_json::json!({ "ndi_input_enabled": "false" })),
+    )
+    .await;
+    assert!(status.is_success());
+    let s = load_input_settings(&state.pool).await.unwrap();
+    assert!(!s.enabled);
+    assert_eq!(s.source, "CG-OBS (manual)", "the source is kept");
+}
+
+#[tokio::test]
+async fn cut_to_the_input_is_404_while_it_is_disabled_and_changes_nothing() {
+    let state = test_state().await;
+    let (status, _) = call(
+        state.clone(),
+        "POST",
+        "/api/v1/program/cut",
+        Some(serde_json::json!({ "source": -1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(state.program_bus.status().source, None);
+    assert_eq!(
+        crate::db::models::get_setting(&state.pool, SETTING_PROGRAM_SOURCE)
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn cut_to_the_enabled_input_selects_it_and_persists_it() {
+    let state = test_state().await;
+    let slow = add_playlist(&state.pool, "slow").await;
+    state.program_bus.select_initial(slow);
+    enable_input(&state, "CG-OBS (manual)").await;
+    let (status, json) = call(
+        state.clone(),
+        "POST",
+        "/api/v1/program/cut",
+        Some(serde_json::json!({ "source": -1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["source"], -1);
+    assert_eq!(json["previous"], slow);
+    assert_eq!(json["input"]["enabled"], true, "the cut answer carries it");
+    assert_eq!(state.program_bus.status().source, Some(-1));
+    assert_eq!(
+        crate::db::models::get_setting(&state.pool, SETTING_PROGRAM_SOURCE)
+            .await
+            .unwrap(),
+        Some("-1".to_string())
+    );
+    // And back to the playlist.
+    let (status, json) = call(
+        state.clone(),
+        "POST",
+        "/api/v1/program/cut",
+        Some(serde_json::json!({ "source": slow })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["source"], slow);
+    assert_eq!(state.program_bus.status().source, Some(slow));
+}
+
+#[tokio::test]
+async fn a_persisted_input_selection_restores_only_while_the_input_is_enabled() {
+    let state = test_state().await;
+    crate::db::models::set_setting(&state.pool, SETTING_PROGRAM_SOURCE, "-1")
+        .await
+        .unwrap();
+    let disabled = ProgramBus::new();
+    assert_eq!(restore_selected_source(&state.pool, &disabled).await, None);
+    assert_eq!(
+        disabled.status().source,
+        None,
+        "a disabled input is no source"
+    );
+
+    enable_input(&state, "CG-OBS (manual)").await;
+    let enabled = ProgramBus::new();
+    assert_eq!(
+        restore_selected_source(&state.pool, &enabled).await,
+        Some(-1)
+    );
+    assert_eq!(enabled.status().source, Some(-1));
+}
+
+#[tokio::test]
+async fn a_persisted_playlist_restores_whatever_the_input_setting() {
+    let state = test_state().await;
+    crate::db::models::set_setting(&state.pool, SETTING_PROGRAM_SOURCE, "5")
+        .await
+        .unwrap();
+    let bus = ProgramBus::new();
+    assert_eq!(restore_selected_source(&state.pool, &bus).await, Some(5));
+    assert_eq!(bus.status().source, Some(5));
+}
