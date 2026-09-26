@@ -1089,7 +1089,10 @@ Tests:
     ends at once on a failed open;
   - the song anchors on the waited boundary even when the clock moved past it;
   - a 17 ms first frame is preceded by the fill, not a hole;
-  - a pause before the first frame is filled on every boundary.
+  - a pause before the first frame is filled on every boundary;
+  - a seek refill holds the pre-seek picture, and a new song drops the hold.
+- One path: the idle Black arm and `fill_starved` both go through
+  `Pacer::emit_standby_pair` (`on_emit` + `standby_block` + `submit_shared`).
 
 Never "fix" a song-start re-latch by dropping the standby audio, or by sending
 standby from another thread or in another format. That re-creates the cadence
@@ -1120,8 +1123,9 @@ Now:
   `service` and the `service_standby` FrozenLast starve arms). This covers:
   - a first frame whose pts lands after the anchor (a start position
     mid-frame), which then shows on its due boundary;
-  - a seek's refill (`anchor()` clears the last frame): the wall shows black +
-    silence for the refill, where it used to have a hole;
+  - a seek's refill: `Pacer::anchor_seek` keeps the last pre-seek frame as the
+    fill's `hold`, so the refill shows that frozen picture + silence, never a
+    black flash and never a hole (the next song's pre-roll drops the hold);
   - a Pause queued during the pre-roll;
   - an empty file or a first-frame decode error.
 
@@ -1141,10 +1145,19 @@ Now:
 `_` arm. Deleting the `Wait` arm would never call `poll`, so the mutant would
 run to a 300 s TIMEOUT.
 
-**Between songs.** The submit-thread join and the old producer's join
-(including the MF decoder drop) run with no boundary serviced. A gap of up to 8
-slots shows up as a late catch-up burst, not a stamp hole. Check it on the box
-with the camera-box audit across a song change.
+**Between songs.** No boundary is serviced while the submit thread drains and
+is joined, and while the old producer is joined (its MF decoder drop).
+`decode_and_send_paced` stops the producer before the submit join, so its
+teardown overlaps that join. The next pre-roll or idle fill then catches up:
+
+- a gap of ≤ 8 slots (`GENLOCK_MAX_CATCHUP_INTERVALS`, ~267 ms) is a late
+  catch-up burst, with every boundary still stamped once;
+- a gap of more than 8 slots with nothing queued RESYNCS (`resolve_emit_boundary`),
+  which is a real stamp hole.
+
+The join time is unmeasured, and the check is tracked on #147. Read the
+camera-box audit across a song change, and log the gap if it ever nears
+8 slots.
 
 **Box acceptance** is read from camera-box's audit:
 
