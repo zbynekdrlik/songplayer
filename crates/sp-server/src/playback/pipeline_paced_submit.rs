@@ -56,10 +56,9 @@ struct HandoffState {
     /// (kept here, not in the pure counters, because `Instant` is not
     /// deterministically constructible in the Linux unit tests).
     last_submit_instant: Option<Instant>,
-    /// The emit thread signalled end-of-song — drain, then exit.
+    /// The emit thread signalled end-of-song (or the end of an idle stretch) —
+    /// drain, then exit.
     stop: bool,
-    /// EOS audio tail to submit after the queue drains (set at stop).
-    eos_tail: Option<(Vec<AudioFrame>, i64)>,
 }
 
 /// Thread-safe wrapper around the pure #168 handoff queue + submit counters: a
@@ -82,7 +81,6 @@ impl SharedHandoff {
                 connections: 0,
                 last_submit_instant: None,
                 stop: false,
-                eos_tail: None,
             }),
             not_empty: Condvar::new(),
         }
@@ -169,27 +167,18 @@ impl SharedHandoff {
         }
     }
 
-    /// Emit thread: signal end-of-song. `tail` is the EOS audio tail to submit
-    /// after the queue drains (or `None`). Wakes the submit thread. IDEMPOTENT:
-    /// the FIRST stop wins the tail — a second call (e.g. the [`StopOnPanic`]
-    /// guard firing after a normal exit already stopped) never clobbers the tail
-    /// already handed over, it only re-notifies. This lets the panic guard call
-    /// it unconditionally (#168 review 🟡).
+    /// Emit thread: signal end-of-song (or the end of an idle stretch). Wakes
+    /// the submit thread, which drains the queue, flushes and exits. IDEMPOTENT:
+    /// a second call (e.g. the [`StopOnPanic`] guard firing after a normal exit
+    /// already stopped) only re-notifies, so the panic guard can call it
+    /// unconditionally (#168 review 🟡). There is no audio-only EOS tail any
+    /// more: the pacer sends it as a standby boundary's block (#147).
     #[cfg_attr(test, mutants::skip)]
-    pub(crate) fn stop_with_tail(&self, tail: Option<(Vec<AudioFrame>, i64)>) {
+    pub(crate) fn stop(&self) {
         if let Ok(mut st) = self.inner.lock() {
-            if !st.stop {
-                st.eos_tail = tail;
-                st.stop = true;
-            }
+            st.stop = true;
             self.not_empty.notify_all();
         }
-    }
-
-    /// Submit thread: take the EOS tail (once) after draining.
-    #[cfg_attr(test, mutants::skip)]
-    fn take_eos_tail(&self) -> Option<(Vec<AudioFrame>, i64)> {
-        self.inner.lock().ok().and_then(|mut st| st.eos_tail.take())
     }
 }
 
@@ -200,8 +189,8 @@ impl SharedHandoff {
 /// blocking on that parked consumer → the pipeline thread HANGS (a dark,
 /// non-recovering wall) instead of unwinding and letting the pipeline restart —
 /// exactly the regression the #168 review flagged. On the NORMAL path the emit
-/// loop already called `stop_with_tail(tail)` (which wins the tail, being first),
-/// so this guard's drop is an idempotent no-op that only re-notifies. Held for
+/// loop already called `stop()`, so this guard's drop is an idempotent no-op
+/// that only re-notifies. Held for
 /// the whole `thread::scope` closure; its Drop runs during unwind BEFORE the
 /// scope joins the submit thread.
 pub(crate) struct StopOnPanic<'a> {
@@ -216,7 +205,7 @@ impl<'a> StopOnPanic<'a> {
 
 impl Drop for StopOnPanic<'_> {
     fn drop(&mut self) {
-        self.handoff.stop_with_tail(None);
+        self.handoff.stop();
     }
 }
 
@@ -259,8 +248,8 @@ impl PacedSink for HandoffSink<'_> {
 /// blocking `send_audio` + `send_video_async` OFF the boundary-critical emit
 /// thread. Reads its own [`WallClock`] to measure the HONEST submit-side lateness
 /// (stamp → submit-start) and the SDK submit cost (submit-start → submit-done).
-/// Drains the handoff on stop, submits the EOS tail, flushes, and returns (the
-/// scope joins it before the next song).
+/// Drains the handoff on stop, flushes, and returns (the scope joins it before
+/// the next song or idle stretch reuses the submitter).
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn run_submit_consumer(
     submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
@@ -302,14 +291,8 @@ pub(crate) fn run_submit_consumer(
         wall.tick();
     }
 
-    // Drained + stopped: flush the last <1 boundary of audio, then release the
-    // async double-buffer before the scope joins us (so `prev_frame` is safe to
-    // drop and the next song starts clean).
-    if let Some((frames, tc)) = handoff.take_eos_tail() {
-        if !frames.is_empty() {
-            submitter.submit_audio_tail(&frames, tc);
-        }
-    }
+    // Drained + stopped: release the async double-buffer before the scope joins
+    // us (so `prev_frame` is safe to drop and the next song starts clean).
     submitter.flush();
     info!(playlist_id, "paced submit consumer: drained + flushed");
 }

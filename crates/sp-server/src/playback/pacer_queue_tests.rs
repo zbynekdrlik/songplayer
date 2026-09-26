@@ -192,3 +192,33 @@ fn shared_queue_stop_tells_producer_to_stop() {
     q.stop();
     assert_eq!(q.producer_push(1, 0), ProducerAction::Stop);
 }
+
+/// #147 song-start pre-roll: primed once the first frame is buffered or the
+/// producer reached end-of-stream (an empty file); an empty, still-decoding
+/// queue is not primed. The check never pops.
+#[test]
+fn is_primed_on_the_first_frame_or_eos_never_on_an_empty_decoding_queue() {
+    let mut q: PacedQueue<u32> = PacedQueue::new(4);
+    assert!(!q.is_primed(), "empty and still decoding: not primed");
+    q.push(1, 0);
+    assert!(q.is_primed(), "the first frame is buffered");
+    assert!(q.is_primed(), "checking never pops");
+    assert_eq!(q.pop(), Some(1));
+    assert!(!q.is_primed(), "drained back to empty, no EOS: not primed");
+    q.mark_eos();
+    assert!(
+        q.is_primed(),
+        "EOS with nothing buffered (an empty file) is primed"
+    );
+}
+
+/// The shared wrapper reports the same readiness without popping.
+#[test]
+fn shared_queue_is_primed_does_not_pop() {
+    let q = SharedQueue::<u32>::new(4);
+    assert!(!q.is_primed());
+    assert_eq!(q.producer_push(9, 0), ProducerAction::Continue);
+    assert!(q.is_primed());
+    assert_eq!(q.consumer_pop(), Some(9), "the primed frame is still there");
+    assert!(!q.is_primed());
+}

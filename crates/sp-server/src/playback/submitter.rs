@@ -63,9 +63,9 @@ pub struct FrameSubmitter<B: NdiBackend> {
     /// frame (#146). One clock per pipeline thread, owned here.
     wall: WallClock,
     /// `genlock_pacing` for this pipeline (#147). ON = the app owns the cadence,
-    /// so a standby/black frame is stamped with its on-grid boundary rather than
-    /// `SYNTHESIZE` (contract §4.3 — a real send is never SYNTHESIZE; the legacy
-    /// SDK-clocked path keeps `None`). Default OFF.
+    /// so standby is the paced grid's job (NV12 black + silence, on-grid, via the
+    /// submit thread) and [`send_standby_black`](Self::send_standby_black) sends
+    /// nothing; OFF = the legacy SYNTHESIZE BGRA black. Default OFF.
     paced: bool,
     /// Runtime burn-id QR overlay toggle (#151), shared with the API via
     /// `NdiBurnRegistry`. Read fresh on every paced boundary emit
@@ -84,6 +84,11 @@ pub struct FrameSubmitter<B: NdiBackend> {
     /// churn (~83 MB/s per paused output). Reallocated only on a `(width,height)`
     /// change.
     black_bgra: Option<Vec<u8>>,
+    /// #147 standby same-path: the paced idle NV12 black `(width, height,
+    /// frame)`, built ONCE per pipeline and handed out by `Arc` clone
+    /// ([`standby_black_nv12`](Self::standby_black_nv12)). Declared after
+    /// `sender`, so the SDK's pointer is released before this last `Arc` drops.
+    black_nv12: Option<(u32, u32, SharedFrame)>,
 }
 
 impl<B: NdiBackend> FrameSubmitter<B> {
@@ -117,6 +122,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             burn_on: Arc::new(AtomicBool::new(false)),
             submit_times: crate::playback::loop_stats::SubmitHist::default(),
             black_bgra: None,
+            black_nv12: None,
         }
     }
 
@@ -135,8 +141,8 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     }
 
     /// Set the `genlock_pacing` flag (#147). Called once at pipeline-thread
-    /// start with `genlock_pacing`; when ON, standby/black frames are stamped
-    /// with their on-grid boundary instead of `SYNTHESIZE`.
+    /// start with `genlock_pacing`; when ON, the outer loop's standby black is
+    /// left to the paced idle fill (no BGRA, no sync send).
     pub fn set_paced(&mut self, paced: bool) {
         self.paced = paced;
     }
@@ -234,8 +240,10 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         self.prev_frame = None;
     }
 
-    /// Send a solid-colour BGRA frame synchronously — used for idle /
-    /// paused states. Internally flushes any pending async frame first.
+    /// Send a solid-colour BGRA frame synchronously — the SDK-clocked (legacy)
+    /// idle / paused standby; never on the paced path (#147, see
+    /// [`send_standby_black`](Self::send_standby_black)). Internally flushes any
+    /// pending async frame first.
     ///
     /// #203: reuses the [`black_bgra`](Self::black_bgra) buffer across calls of
     /// the same size (black BGRA is all zeros, so a reused buffer is already
@@ -251,18 +259,10 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             Some(buf) if buf.len() == needed => buf,
             _ => vec![0u8; needed],
         };
-        // Paced (#147): a real send is never SYNTHESIZE — stamp the standby
-        // frame with the floored on-grid boundary at the send instant (§4.3), so
-        // an idle→play transition does not drop the receiver out of `locked=`.
-        // The legacy SDK-clocked path keeps `None` (SYNTHESIZE, open question 7).
-        let timecode_100ns = if self.paced {
-            Some(floor_boundary_100ns(
-                self.wall.now_100ns(),
-                GENLOCK_GRID_FPS,
-            ))
-        } else {
-            None
-        };
+        // SDK-clocked only (#147 standby same-path): the paced path never sends
+        // this frame (`send_standby_black` is a no-op there; the paced idle fill
+        // sends an on-grid NV12 black + silence instead), so the stamp is the
+        // legacy `None` (SYNTHESIZE, open question 7).
         let frame = VideoFrame {
             data,
             width,
@@ -271,7 +271,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             frame_rate_n: self.frame_rate_n,
             frame_rate_d: self.frame_rate_d,
             pixel_format: PixelFormat::Bgra,
-            timecode_100ns,
+            timecode_100ns: None,
         };
         self.sender.send_video(&frame);
         // Reclaim the buffer for the next standby frame (send_video is sync).
@@ -391,19 +391,6 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         });
         self.submit_times.observe(submit_us);
         self.prev_frame = Some(video);
-    }
-
-    /// Submit an audio-only tail chunk at an explicit timecode (#148 rework,
-    /// item 4). Used at EOS to flush the last partial boundary of buffered audio
-    /// (zero-filled to `samples_per_boundary`) — there is no accompanying video
-    /// frame, so this does NOT touch the video double-buffer or the frame
-    /// counters; it only stamps and sends the audio chunk(s).
-    pub fn submit_audio_tail(&mut self, audio: &[AudioFrame], audio_tc_100ns: i64) {
-        for af in audio {
-            let mut stamped = af.clone();
-            stamped.timecode_100ns = Some(audio_tc_100ns);
-            self.sender.send_audio(&stamped);
-        }
     }
 
     /// Borrow the underlying sender (mainly for tests).
@@ -946,9 +933,18 @@ mod tests {
     }
 }
 
+// #147 standby same-path: the outer loop's standby black (legacy BGRA / paced
+// no-op) + the cached paced NV12 black — an `impl` split for the 1000-line cap.
+#[path = "submitter_standby.rs"]
+mod submitter_standby;
+
 #[cfg(test)]
 #[path = "submitter_tests_timecode.rs"]
 mod submitter_tests_timecode;
+
+#[cfg(test)]
+#[path = "submitter_tests_standby.rs"]
+mod submitter_tests_standby;
 
 #[cfg(test)]
 #[path = "submitter_tests_mutants.rs"]

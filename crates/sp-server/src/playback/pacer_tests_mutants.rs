@@ -11,14 +11,14 @@
 //!
 //! Equivalent / unkillable mutants (deliberately NOT tested — see the task
 //! report):
-//!   * `pacer.rs:654:28` `+= -> *=` / `-=` — the `emit_now < boundary` branch in
+//!   * `pacer.rs:663:28` `+= -> *=` / `-=` — the `emit_now < boundary` branch in
 //!     `service_standby` is dead: there is no decode pull between the scheduling
 //!     read and the emit read, so `emit_now == sched_now >= boundary` always,
 //!     and the branch body never runs.
-//!   * `pacer.rs:718:20` `> -> >=` in `on_emit` — the body is only
+//!   * `pacer.rs:728:20` `> -> >=` in `on_emit` — the body is only
 //!     `max_late_us = late_us`; at `late_us == max_late_us` the assignment is a
 //!     no-op, so `>` and `>=` are observationally identical.
-//!   * `pacer.rs:775:70` `- -> +` / `- -> /` in `jitter_p99_us` — the fixed 99th
+//!   * `pacer.rs:785:70` `- -> +` / `- -> /` in `jitter_p99_us` — the fixed 99th
 //!     percentile makes `floor(len*99/100) <= len-1 < len < len+1` for every
 //!     `len`, so the `.min(len-1)` clamp never binds and the `len-1` operand can
 //!     be `len+1` or `len/1` with no change.

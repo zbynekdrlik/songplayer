@@ -22,7 +22,8 @@ paths:
 - Timecodes are UTC in **100 ns units since the Unix epoch**; video =
   `floor_boundary_100ns` on the fixed grid (`GENLOCK_GRID_FPS`), FLOOR never
   ceil; audio = raw wall clock, never snapped; `SYNTHESIZE` only on the
-  standby black frame.
+  SDK-clocked (legacy) standby BGRA black — the paced path never sends it
+  (see "Standby = the same paced path as playing" below).
 - `clock_ok = is_locked && mode ∈ {LOCK, NANO}` from dantesync
   `127.0.0.1:8898/status`; unreachable → `no dantesync`, never blocks playback.
 - Acceptance is on the RECEIVER (`genlock-fifo audit … locked=1`, camera-box
@@ -290,10 +291,12 @@ paths:
   (the usual case; in place only when the submit side is the sole owner, which
   is safe — #147 round 10); idle Black is submitted by shared reference
   through `PacedSink::submit_shared` (`Standby::Black{dims, &SharedFrame}`,
-  `service_standby` clones the Arc = a refcount bump per idle slot, the idle loop
-  owns one black `SharedFrame`); `send_black_bgra` reuses a `black_bgra` buffer
-  keyed by size (send is synchronous, so it is reclaimed the instant the call
-  returns). The NV12 decoder/handoff/pacer-repeat pool (a cross-crate `sp-decoder`
+  `service_standby` clones the Arc = a refcount bump per idle slot; since #147
+  the ONE black `SharedFrame` is cached in the submitter,
+  `FrameSubmitter::standby_black_nv12`, built once per pipeline);
+  `send_black_bgra` (SDK-clocked standby only since #147) reuses a `black_bgra`
+  buffer keyed by size (send is synchronous, so it is reclaimed the instant the
+  call returns). The NV12 decoder/handoff/pacer-repeat pool (a cross-crate `sp-decoder`
   change) is round 2b, built on this `SharedFrame` seam. The audio emitter
   (`audio_emitter.rs`) is also allocation-free per slot now: `EmittedBlock` is a
   TAG enum, `pop_block` fills a reused `block_buf`, `samples_for` returns a borrow
@@ -356,9 +359,10 @@ so the OS fault + TLB-shootdown cost is unchanged):
   submitter installs the new `prev_frame` (dropping the old Arc) AFTER the async
   call returns, so the buffer the SDK still points at is never recycled early.
   Keep `FrameSubmitter.sender` declared BEFORE `prev_frame` (field drop order).
-- The idle black and the cached BGRA black stay OUT of the pool as takers (built
-  from their own buffers, never `take`); the idle black's single end-of-loop
-  drop recycling one bounded black buffer is harmless.
+- The idle NV12 black and the cached BGRA black stay OUT of the pool as takers
+  (built from their own buffers, never `take`). The NV12 black lives in the
+  `FrameSubmitter` for the pipeline's life (#147); its single drop at pipeline
+  end recycles one bounded black buffer, which is harmless.
 
 ## Paced measurement session (#168 round-4 recipe)
 
@@ -507,7 +511,8 @@ values are flat strings in MiB, e.g. `{"sp_min_working_set_mb":"3072"}`.
 - **Why 3072 MiB.** A playing 1440p paced output holds about 21 NV12 buffers
   (look-ahead 12, pool class 6, handoff 2, repeat, holdover), about 115 MB. On
   top of that come the MF decoder and the SDK's per-sender compression buffers.
-  Each idle output holds its NV12 + BGRA black, about 20 MB. That totals about
+  Each paced idle output holds one NV12 black, about 3 MB (no BGRA black since
+  #147; an SDK-clocked output still holds its ~8 MB BGRA black). That totals about
   1–2 GB, and 3072 MiB leaves headroom. Re-size it from the new `working_set_mb`
   field.
 
@@ -999,6 +1004,181 @@ within 2 ms, and camera-box's own gate through the same OBS build reads ~0.
   stamp is later by the emit lateness — normally < 1 ms (`jitter_p99_us`), but
   whole slots on a catch-up boundary. Cross-check `jitter_p99_us` and `lag` on
   the same line before attributing a residual to downstream.
+
+## Standby = the same paced path as playing (#147, design comment 5841796900)
+
+**The defect.** The cg OBS receiver read `recv-timing cap_avg` for
+`sp-slow_video` at ~32 ms while SongPlayer was idle and ~15 ms while it played.
+At every song start it fired `genlock-shallow-remeasure reason=rise`,
+re-latched its depth from 2 to 3 frames, and slewed the audio for ~33 s. The
+A/V gate landed inside that slew. The sender contract (camera-box
+`docs/genlock-sender-contract.md`, §5–§6) asks for one cadence and phase,
+whether the sender is idle or playing. The receiver's ASRC also follows the
+audio ARRIVAL, so a standby with no audio restarted it at every song start.
+
+**The rule.** On the paced path every boundary is the same audio + video pair,
+whatever the state:
+
+- **One audio block per standby boundary.** An emitting
+  `Pacer::service_standby` (idle `Black` and paused `FrozenLast`; a starve
+  takes none) hands the sink one block, `Pacer::standby_block` in
+  `pacer_av_align.rs`:
+  - `samples_per_boundary` zeros (1600 at 48 kHz, ~12.8 KB, under the round-10
+    64 KB rule), built directly in interleaved form;
+  - the song's channel layout when the grid buffer knows it, else stereo;
+  - stamped `emit_now`, like playing audio.
+
+  The video stamp comes from `resolve_emit_boundary`, exactly as for a playing
+  repeat; a resync stamps `floor(now)`.
+- **The EOS tail rides a standby boundary, never an audio-only send.** At a
+  natural song end `decode_and_send_paced` calls
+  `Pacer::hold_eos_tail_for_standby`, which holds the last partial boundary
+  (`take_eos_tail`, #148 rework item 4). It then serves ONE more
+  `FrozenLast` boundary (`serve_one_standby_boundary`); that boundary's block
+  is the tail. The receiver therefore gets exactly one audio block per video
+  boundary into the idle fill.
+  - Removed with this: the old audio-only tail (`SharedHandoff` `eos_tail` and
+    `FrameSubmitter::submit_audio_tail`). Kept with it, it gave n+1 blocks per
+    n boundaries at every song end.
+  - A new map (`anchor`, lag re-anchor → `AvAlign::realign`) drops a held
+    tail. With a Play already queued, the tail boundary is still served first,
+    so nothing is lost; a stale tail is never replayed at a later pause.
+  - A song that ends with no frame ever shown (`Starved`, e.g. a seek at EOS)
+    has no frozen frame to pair with. Its tail rides the first idle `Black`
+    boundary instead, or a new map drops it. It is still one block per boundary.
+  - The song summary is logged BEFORE the tail boundary, so its frozen repeat
+    is not counted as the song's.
+  - `SharedHandoff`'s stop API is now just `stop()`; the queue, snapshot and
+    counters are unchanged.
+- **The idle fill uses the playing path's submit thread.**
+  `pipeline_paced_idle::run_idle_wait` emits through the #168 `HandoffSink`
+  and `run_submit_consumer`, with the same shape as `decode_and_send_paced`:
+  `thread::scope`, `StopOnPanic`, then `stop()` and a join (the join
+  flushes). The heartbeat goes through `emit_heartbeat_paced`. The black
+  is `FrameSubmitter::standby_black_nv12`, built once per pipeline.
+- **No sync `send_video` and no BGRA on the paced path.** `run_loop_windows`
+  calls `FrameSubmitter::send_standby_black`: the legacy SYNTHESIZE BGRA when
+  SDK-clocked, a no-op when paced. The paced outer loop polls
+  `pacer_sink::idle_poll(true)` = 0, so the idle fill starts on the very next
+  boundary after start, a song end or a stop. The old 5 s `recv_timeout` left
+  the paced grid empty for up to 5 s.
+- **The SDK-clocked path is unchanged:** BGRA at the same sites, the 5 s poll,
+  and its own wall-clock audio emitter.
+
+Tests:
+
+- `pacer_tests_standby.rs`:
+  - idle, paused and playing boundaries produce the identical `MockNdiBackend`
+    `send_audio spc=1600` → `send_video_async NV12` pair;
+  - a whole paced lifetime has no sync send and no BGRA, with stamps b(1)…b(10)
+    contiguous;
+  - the standby stamp equals `resolve_emit_boundary`'s stamp and a playing
+    repeat's stamp;
+  - idle→play keeps the stamp and audio cadence contiguous;
+  - a song end sends its EOS tail as the next standby block: 6 boundaries →
+    6 blocks. With nothing buffered nothing is held, and a new song drops a
+    held tail.
+- `submitter_tests_standby.rs`: `send_standby_black` for both paths, and the
+  cached NV12 black.
+- `pacer_tests_preroll.rs`:
+  - a slow decoder open is filled with standby pairs (b(1)…b(9) contiguous,
+    the song from the boundary after readiness);
+  - a decoder that is ready at once starts on the very next boundary;
+  - song end → next song keeps one pair per boundary;
+  - `PrerollGate` reads the open result once, waits for the first frame, and
+    ends at once on a failed open;
+  - the song anchors on the waited boundary even when the clock moved past it;
+  - a 17 ms first frame is preceded by the fill, not a hole;
+  - a pause before the first frame is filled on every boundary;
+  - a seek refill holds the pre-seek picture, and a new song drops the hold.
+- **One path for the shared-picture standby.** The idle Black arm and
+  `fill_starved` (pre-roll black, starve fill, held seek frame) both go through
+  `Pacer::emit_standby_pair` (`on_emit` + `standby_block` + `submit_shared`).
+  - The paused `FrozenLast` repeat of a real frame stays a playing-style repeat
+    (`sink.emit`, counts `repeats`), with the same `standby_block`.
+  - Both end in `submit_frame_at_boundary_owned`.
+- **Song-change gap WARN.** `decode_and_send_paced` WARNs
+  `paced: song change left > 8 boundaries unserviced (grid resync)` when its
+  pre-roll resynced. `run_idle_wait` logs
+  `paced idle: > 8 boundaries went unserviced …` for its idle stretch.
+  - Grep the box log for both after a deploy.
+  - Neither may ever appear during normal song changes.
+
+Never "fix" a song-start re-latch by dropping the standby audio, or by sending
+standby from another thread or in another format. That re-creates the cadence
+change.
+
+**The song-start pre-roll (ROZHODNUTÉ 5842127369).** A song start used to
+leave a hole. The Play command stopped the idle fill, and
+`decode_and_send_paced` then blocked on `open_rx` while the decoder opened.
+Only then did it anchor, and the first boundaries could still be `Starved`.
+Now:
+
+- **Submit thread first.** `decode_and_send_paced` starts the #168 submit
+  thread BEFORE the open.
+- **`Pacer::preroll` fills every boundary** (`pacer_preroll.rs`). It services
+  each boundary with the standby pair (the cached NV12 black + one silent
+  block) through the same `HandoffSink`.
+- **One readiness check per slot.** `preroll` asks `PrerollGate::poll` right
+  before each wait: has the decoder opened (the `open_rx` result, read once)
+  AND is its first frame buffered (`SharedQueue::is_primed`: a frame or EOS,
+  never popping; or the producer died)?
+- **Anchor on readiness, on the waited boundary.** When the gate says yes it
+  calls `anchor_at(until)`, the boundary that wait was for, so a pts-0 first
+  frame lands there. It never re-reads the clock (`anchor()`), because a
+  preemption past the boundary would then skip it.
+- **The standby fill: no starve is a hole.** The pre-roll's black stays in the
+  pacer as its `StandbyFill`. Every `Starved` boundary goes through
+  `Pacer::fill_starved`, which sends the black + one audio block (both the
+  `service` and the `service_standby` FrozenLast starve arms). This covers:
+  - a first frame whose pts lands after the anchor (a start position
+    mid-frame), which then shows on its due boundary;
+  - a seek's refill: `Pacer::anchor_seek` keeps the last pre-seek frame as the
+    fill's `hold`, so the refill shows that frozen picture + silence, never a
+    black flash and never a hole (the next song's pre-roll drops the hold);
+  - a Pause queued during the pre-roll;
+  - an empty file or a first-frame decode error.
+
+  A pacer that never ran a pre-roll (the SDK-clocked path, bare unit tests)
+  still starves silently.
+- **A failed open ends the pre-roll at once:** stop + join the submit thread,
+  then `DecodeResult::Error`.
+- **Commands are held.** Commands queued during the pre-roll wait for the emit
+  loop, the same as the old blocking open wait.
+- **Coverage.** This covers idle→play, stop→play and song end→next song
+  (after the EOS-tail boundary). Every boundary carries one audio+video pair.
+- **Where it runs.** The pre-roll logic is pure and Linux-tested
+  (`pacer_tests_preroll.rs`, `pacer_queue_tests.rs`); only the wiring in
+  `pipeline_paced.rs` is Windows glue.
+
+**Mutation-gate shape.** `preroll` uses `let … else`, never a `match` with a
+`_` arm. Deleting the `Wait` arm would never call `poll`, so the mutant would
+run to a 300 s TIMEOUT.
+
+**Between songs.** No boundary is serviced while the submit thread drains and
+is joined, and while the old producer is joined (its MF decoder drop).
+`decode_and_send_paced` stops the producer before the submit join, so its
+teardown overlaps that join. The next pre-roll or idle fill then catches up:
+
+- a gap of ≤ 8 slots (`GENLOCK_MAX_CATCHUP_INTERVALS`, ~267 ms) is a late
+  catch-up burst, with every boundary still stamped once;
+- a gap of more than 8 slots with nothing queued RESYNCS (`resolve_emit_boundary`),
+  which is a real stamp hole.
+
+The join time is unmeasured, and the check is tracked on #147. Read the
+camera-box audit across a song change, and log the gap if it ever nears
+8 slots.
+
+**Box acceptance** is read from camera-box's audit:
+
+- no `genlock-shallow-remeasure` and no `shallow_latches` increment at a song
+  start;
+- `audio_pairing_offset_ms=0`;
+- the same `cap_avg` idle and playing;
+- one audio arrival per video boundary across a natural song end into idle
+  (the EOS-tail wiring is Windows-only and mutation-excluded, so the box is its
+  only check);
+- then the A/V gate within ±20 ms on 5 consecutive songs.
 
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
 A change to pacing, the submitter, decode, the mixer, NDI or the audio path

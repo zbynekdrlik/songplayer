@@ -110,13 +110,19 @@ pub(super) struct AvAlign {
     pub(super) corrected_samples: u64,
     /// The emitted audio-block − frame-pts relation, per UTC minute (#148 v5).
     pub(super) frame_offset: AvFrameOffset,
+    /// The song's EOS audio tail, held for the NEXT standby boundary (#147): it
+    /// leaves as that boundary's one audio block, next to the held last frame,
+    /// never as an audio-only send. Forgotten on a new map.
+    standby_tail: Option<Vec<AudioFrame>>,
 }
 
 impl AvAlign {
     /// A NEW wall↔media map (play/seek/new song, a lag re-anchor): forget the
     /// anchor; the next fresh frame fixes it and the audio hard-aligns to it.
+    /// A held EOS tail belongs to the old map and is dropped with it.
     pub(super) fn realign(&mut self) {
         self.anchor = None;
+        self.standby_tail = None;
         self.resnap();
     }
 
@@ -351,4 +357,49 @@ impl Pacer {
             interleave(vec![vec![0.0; n]; self.audio_buf.channels()])
         }
     }
+
+    /// The ONE audio block every STANDBY boundary carries (idle black and paused
+    /// frozen frame, #147 standby same-path, design comment 5841796900). A
+    /// standby boundary then hands the sink the same audio-then-video pair as a
+    /// playing boundary, so the receiver sees one constant A/V cadence idle or
+    /// playing, and its audio hold never has to re-engage at a song start.
+    ///
+    /// It is the song's EOS tail when one is held
+    /// ([`hold_eos_tail_for_standby`](Self::hold_eos_tail_for_standby)), once;
+    /// otherwise `samples_per_boundary` zeros per channel, the same shape as the
+    /// playing path's silence above. The layout follows the song when the grid
+    /// buffer knows it (paused, or just after a song ended), else stereo. Every
+    /// playlist file decodes to stereo, so the layout does not flip in practice.
+    pub(super) fn standby_block(&mut self) -> Vec<AudioFrame> {
+        if let Some(tail) = self.av.standby_tail.take() {
+            return tail;
+        }
+        let channels = match self.audio_buf.channels() {
+            0 => STANDBY_SILENCE_CHANNELS,
+            n => n,
+        };
+        vec![AudioFrame {
+            data: vec![0.0; self.samples_per_boundary * channels],
+            channels: channels as u32,
+            sample_rate: AUDIO_GRID_RATE_HZ,
+            timecode_100ns: None,
+        }]
+    }
+
+    /// Hold the song's EOS audio tail ([`take_eos_tail`](Pacer::take_eos_tail),
+    /// the last partial boundary zero-filled, #148 rework item 4) for the NEXT
+    /// standby boundary (#147). At a natural song end the paced pipeline then
+    /// services one more boundary with the held last frame, so the tail leaves
+    /// as that boundary's one audio block instead of an audio-only send, and the
+    /// receiver keeps exactly one audio block per video boundary into the idle
+    /// fill. Nothing is held when nothing was buffered. A new map
+    /// ([`anchor`](Pacer::anchor), a lag re-anchor) drops a held tail.
+    pub fn hold_eos_tail_for_standby(&mut self) {
+        let tail = self.take_eos_tail();
+        self.av.standby_tail = (!tail.is_empty()).then_some(tail);
+    }
 }
+
+/// Channel count of the standby silence while no song has fixed one (#147):
+/// stereo, the layout every playlist file decodes to.
+const STANDBY_SILENCE_CHANNELS: usize = 2;
