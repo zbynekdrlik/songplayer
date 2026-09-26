@@ -804,6 +804,55 @@ app.post("/__mock/ndi-health", (req, res) => {
   res.json({ status: "set", count: ndiHealth.length });
 });
 
+// #209 program bus: mirrors the real `GET /api/v1/program` /
+// `POST /api/v1/program/cut` (404 for an unknown playlist). The mock applies a
+// cut at once (the real one lands on the boundary after next).
+let programState = { source: 1, previous: null, cuts: 0 };
+let programLastCut = null;
+function programBody() {
+  return {
+    ndi_name: "SP-program",
+    source: programState.source,
+    previous: programState.previous,
+    cut_boundary_100ns: programState.cuts > 0 ? 17900000000000000 : null,
+    health: {
+      forwarded: 0,
+      filled: 0,
+      late_dropped: 0,
+      resyncs: 0,
+      coalesced: 0,
+      cuts: programState.cuts,
+      submitted: 0,
+      connections: 0,
+      last_stamp_100ns: 0,
+    },
+  };
+}
+app.get("/api/v1/program", (_req, res) => {
+  res.json(programBody());
+});
+app.post("/api/v1/program/cut", (req, res) => {
+  const source = Number(req.body?.source);
+  if (!activePlaylists().some((p) => p.id === source)) {
+    res.status(404).send("unknown playlist");
+    return;
+  }
+  programLastCut = req.body;
+  if (programState.source !== source) {
+    programState = { source, previous: programState.source, cuts: programState.cuts + 1 };
+  }
+  res.json(programBody());
+});
+// Test-only: the last cut body the dashboard posted (backend-effect check).
+app.get("/__mock/program-last-cut", (_req, res) => {
+  res.json({ body: programLastCut });
+});
+app.post("/__mock/program-reset", (_req, res) => {
+  programState = { source: 1, previous: null, cuts: 0 };
+  programLastCut = null;
+  res.json({ status: "reset" });
+});
+
 // Lyrics pipeline queue
 app.get('/api/v1/lyrics/queue', (_req, res) => {
   res.json({

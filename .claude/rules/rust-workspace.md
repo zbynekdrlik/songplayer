@@ -49,6 +49,14 @@ rustfmt actually produces (a trailing `// comment` on the closing `));` line kee
 the doc without a separate comment line). A local receiver binding (`let x = …;`
 then `spawn(fn(x))`) does NOT help — the outer arg is still a call over budget.
 
+## A method chain wider than 60 cols is split into one line per call, even with `.await` (#209)
+
+rustfmt's `chain_width` (60) splits `engine.start_program_output(program_bus, shutdown_tx.subscribe()).await;`
+(73 cols of chain) into 3 lines (`engine` / `.start_program_output(..)` / `.await;`). A trailing
+`// comment` that pushes the line past 100 forces the same split. In `lib.rs` at 1000/1000 the fix was a
+shorter chain, not a `let` receiver: a short method name + a borrowed arg the callee subscribes itself
+(`engine.start_program(program_bus, &shutdown_tx).await;` = 53 cols, one line).
+
 ## Line-neutral "handle sub-case, else fall through" in a file AT the cap: a match-guard arm (#207)
 
 To add a new branch to an existing `match` in a file at 1000/1000 with the fewest

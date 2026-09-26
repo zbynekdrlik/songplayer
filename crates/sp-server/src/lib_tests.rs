@@ -73,6 +73,7 @@ mod tests {
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
             ndi_burn_registry: Arc::new(playback::ndi_burn::NdiBurnRegistry::new()),
             preview_registry: Arc::new(playback::preview::PreviewRegistry::new()),
+            program_bus: Arc::new(playback::program_bus::ProgramBus::new()),
             lan_status: mdns::new_status_handle(),
         };
 
@@ -355,6 +356,7 @@ mod tests {
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
             ndi_burn_registry: Arc::new(playback::ndi_burn::NdiBurnRegistry::new()),
             preview_registry: Arc::new(playback::preview::PreviewRegistry::new()),
+            program_bus: Arc::new(playback::program_bus::ProgramBus::new()),
             lan_status: mdns::new_status_handle(),
         };
 

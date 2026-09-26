@@ -20,6 +20,7 @@ pub mod ndi_health;
 pub mod player;
 pub mod playlist_card;
 pub mod preview_video;
+pub mod program_control; // #209 the Program control (NDI SP-program)
 pub mod playlist_picker;
 pub mod playlist_workspace;
 pub mod selection;

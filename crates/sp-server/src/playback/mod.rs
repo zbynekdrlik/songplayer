@@ -37,6 +37,8 @@ pub(crate) mod pipeline_stub;
 mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
+pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
+pub mod program_output; // #209: the SP-program sender + its thread
 mod recovery;
 mod runtime_pipeline;
 pub mod startup_senders; // #196 deterministic restart-safe NDI sender startup (pure port-wait + order)

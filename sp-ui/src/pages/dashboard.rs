@@ -3,7 +3,9 @@
 
 use leptos::prelude::*;
 
-use crate::components::{download_queue, playlist_picker, playlist_workspace, selection};
+use crate::components::{
+    download_queue, playlist_picker, playlist_workspace, program_control, selection,
+};
 use crate::store::DashboardStore;
 
 #[component]
@@ -46,6 +48,10 @@ pub fn DashboardPage() -> impl IntoView {
             <div class="dashboard-header">
                 <h1>"Playlisty"</h1>
             </div>
+
+            // #209: SongPlayer's own program output (NDI SP-program) — which
+            // playlist is on program, and a cut on click.
+            <program_control::ProgramControl />
 
             <div class="error-banner">
                 {move || {
