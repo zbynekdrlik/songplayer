@@ -125,6 +125,22 @@ pub(crate) fn sleep_to_boundary(pacer: &Pacer, until_100ns: i64) {
     }
 }
 
+/// Service exactly ONE standby boundary with the held last frame (#147): sleep
+/// to it if it is not due yet, then emit. Used at a natural song end, so the
+/// EOS audio tail the pacer holds leaves as that boundary's audio block, paired
+/// with the last frame, on the same handoff + submit thread as every boundary.
+fn serve_one_standby_boundary(pacer: &mut Pacer, sink: &mut HandoffSink<'_>) {
+    loop {
+        match pacer.service_standby(Standby::FrozenLast, &mut *sink) {
+            ServiceOutcome::Wait { until_100ns } => sleep_to_boundary(pacer, until_100ns),
+            _ => {
+                pacer.tick_wall();
+                return;
+            }
+        }
+    }
+}
+
 /// One INFO line summarising a song's paced emission (#147 lane 3, change 4):
 /// per-song DELTAS of the accumulating pacer counters (the health doc keeps the
 /// cumulative values) plus the per-song lag/iteration gauges. Emitted once at
@@ -460,23 +476,23 @@ pub(crate) fn decode_and_send_paced(
         let submit_join = s.spawn(move || run_submit_consumer(sub, handoff_ref, playlist_id));
         // If the emit loop PANICS, unwind must still stop the submit thread or the
         // scope's join deadlocks on the parked consumer (#168 review 🟡). On the
-        // normal path the explicit `stop_with_tail` below wins the tail and this
-        // drop is a no-op re-notify.
+        // normal path the explicit `stop` below comes first and this drop only
+        // re-notifies.
         let _stop_guard = StopOnPanic::new(handoff_ref);
         let mut sink = HandoffSink::new(handoff_ref);
 
-        // The emit loop returns the song's outcome plus the EOS audio tail (if
-        // any) for the submit thread to ship before it flushes.
-        let (outcome, eos_tail): (DecodeResult, Option<(Vec<sp_ndi::AudioFrame>, i64)>) = 'emit: loop {
+        // The emit loop returns the song's outcome (the EOS audio tail already
+        // left as a standby boundary's block, #147).
+        let outcome: DecodeResult = 'emit: loop {
             // 1. Commands between boundaries (non-blocking).
             match cmd_rx.try_recv() {
                 Ok(PipelineCommand::Shutdown) => {
                     log_song_summary(pacer, &summary_base, song_start, playlist_id, "shutdown");
-                    break 'emit (DecodeResult::Shutdown, None);
+                    break 'emit DecodeResult::Shutdown;
                 }
                 Ok(PipelineCommand::Stop) => {
                     log_song_summary(pacer, &summary_base, song_start, playlist_id, "stop");
-                    break 'emit (DecodeResult::Stopped, None);
+                    break 'emit DecodeResult::Stopped;
                 }
                 Ok(PipelineCommand::Play {
                     video,
@@ -484,14 +500,11 @@ pub(crate) fn decode_and_send_paced(
                     start_position_ms,
                 }) => {
                     log_song_summary(pacer, &summary_base, song_start, playlist_id, "next");
-                    break 'emit (
-                        DecodeResult::NewPlay {
-                            video,
-                            audio,
-                            start_position_ms,
-                        },
-                        None,
-                    );
+                    break 'emit DecodeResult::NewPlay {
+                        video,
+                        audio,
+                        start_position_ms,
+                    };
                 }
                 Ok(PipelineCommand::Pause) => {
                     *paused = true;
@@ -527,7 +540,7 @@ pub(crate) fn decode_and_send_paced(
                         playlist_id,
                         "disconnected",
                     );
-                    break 'emit (DecodeResult::Shutdown, None);
+                    break 'emit DecodeResult::Shutdown;
                 }
             }
 
@@ -658,33 +671,31 @@ pub(crate) fn decode_and_send_paced(
                         } else {
                             info!(playlist_id, "paced: video decode complete");
                         }
-                        // Hand one final boundary of the buffered audio (zero-filled,
-                        // raw wall timecode) to the submit thread so the song's last
-                        // partial boundary is not dropped (#148 rework, item 4); any
-                        // v4 read-ahead past it ends with the song. Shipped after draining.
-                        let tail = pacer.take_eos_tail();
-                        let tail_msg = if tail.is_empty() {
-                            None
-                        } else {
-                            Some((tail, pacer.now_100ns()))
-                        };
+                        // The song's last partial boundary of audio (#148 rework,
+                        // item 4) rides ONE more boundary as a standby pair — the
+                        // last frame held + the tail — never an audio-only send, so
+                        // the receiver keeps one audio block per video boundary into
+                        // the idle fill that follows (#147). Any v4 read-ahead past
+                        // it ends with the song.
+                        pacer.hold_eos_tail_for_standby();
+                        serve_one_standby_boundary(pacer, &mut sink);
                         let reason = if producer_dead {
                             "producer-died"
                         } else {
                             "ended"
                         };
                         log_song_summary(pacer, &summary_base, song_start, playlist_id, reason);
-                        break 'emit (DecodeResult::Ended, tail_msg);
+                        break 'emit DecodeResult::Ended;
                     }
                 }
             }
         };
 
-        // Signal the submit thread: drain the handoff, ship the EOS tail, flush
-        // the async double-buffer, and exit. The scope JOINS it here, so the
-        // submitter's `prev_frame` is released before this function returns and
-        // the outer loop reuses the submitter (a black frame / the next song).
-        handoff_ref.stop_with_tail(eos_tail);
+        // Signal the submit thread: drain the handoff, flush the async
+        // double-buffer, and exit. The scope JOINS it here, so the submitter's
+        // `prev_frame` is released before this function returns and the outer
+        // loop reuses the submitter (the idle fill / the next song).
+        handoff_ref.stop();
         let _ = submit_join.join();
         outcome
     });

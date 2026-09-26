@@ -119,18 +119,18 @@ exclude_re = [
   'replace \|\| with && in split_one_lyrics_line',
   'replace > with (<|==|>=) in split_one_lyrics_line',
   # === genlock #146–#151 provably-equivalent arithmetic (audit 2026-09-13, PR #153) ===
-  # pacer_prepare.rs:84:66 and pacer.rs:778:70 (- -> + / /) in the p99 index
+  # pacer_prepare.rs:84:66 and pacer.rs:780:70 (- -> + / /) in the p99 index
   #   `((len*99)/100).min(len-1)`: floor(len*99/100) <= len-1 for every len>=1,
   #   so the `.min(len-1)` clamp never binds; replacing `len-1` cannot change the
   #   index. (iter_percentile_us IS killable — there p=100 makes the clamp load-bearing.)
   'pacer_prepare\.rs:84:66: replace - with \+ in Pacer::prep_p99_us',
   'pacer_prepare\.rs:84:66: replace - with / in Pacer::prep_p99_us',
-  'pacer\.rs:778:70: replace - with \+ in Pacer::jitter_p99_us',
-  'pacer\.rs:778:70: replace - with / in Pacer::jitter_p99_us',
-  # pacer.rs:721:20 > -> >= in on_emit: body is only `max_late_us = late_us`; the
+  'pacer\.rs:780:70: replace - with \+ in Pacer::jitter_p99_us',
+  'pacer\.rs:780:70: replace - with / in Pacer::jitter_p99_us',
+  # pacer.rs:723:20 > -> >= in on_emit: body is only `max_late_us = late_us`; the
   #   operators differ solely at `late_us == max_late_us`, where the assignment
   #   writes the value it just compared — a no-op. Output identical for all inputs.
-  'pacer\.rs:721:20: replace > with >= in Pacer::on_emit',
+  'pacer\.rs:723:20: replace > with >= in Pacer::on_emit',
   # pacer.rs:654:28 += -> *= / -= in service_standby: the mutated `relatches += 1`
   #   sits in the `if emit_now < boundary` backward-step net, but service_standby
   #   takes both now_100ns() reads with no decode pull between them and only

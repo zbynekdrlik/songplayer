@@ -48,6 +48,12 @@ fn idle(video: &SharedFrame) -> Standby<'_> {
 /// A 4x2 frame at `pts_ns` carrying one boundary (1600 samples per channel) of
 /// untimed, non-silent audio in `channels` channels.
 fn frame_with_block(pts_ns: i64, channels: u32) -> PacedFrame {
+    frame_with_samples(pts_ns, channels, 1600)
+}
+
+/// A 4x2 frame at `pts_ns` carrying `per_channel` samples of untimed,
+/// non-silent (0.25) audio in `channels` channels.
+fn frame_with_samples(pts_ns: i64, channels: u32, per_channel: usize) -> PacedFrame {
     PacedFrame {
         pts_ns,
         width: 4,
@@ -55,12 +61,32 @@ fn frame_with_block(pts_ns: i64, channels: u32) -> PacedFrame {
         stride: 4,
         video: SharedFrame::new(vec![0u8; 12]),
         audio: vec![AudioFrame {
-            data: vec![0.25; 1600 * channels as usize],
+            data: vec![0.25; per_channel * channels as usize],
             channels,
             sample_rate: 48_000,
             timecode_100ns: None,
         }],
     }
+}
+
+/// Play a 3-frame stereo song due at b(1), b(2), b(3) (the pacer anchored at 0),
+/// whose LAST frame carries `last_per_channel` samples. Returns the pacer and
+/// clock after the b(3) emit, i.e. at the song's natural end.
+fn play_three_frame_song(last_per_channel: usize, rec: &mut Rec) -> (Pacer, SettableClock) {
+    let (mut pacer, clk) = anchored_pacer();
+    let mut song: std::collections::VecDeque<PacedFrame> = [1600, 1600, last_per_channel]
+        .into_iter()
+        .enumerate()
+        .map(|(j, n)| frame_with_samples((b(1 + j as i64) - b(1)) * 100, 2, n))
+        .collect();
+    for k in 1..=3 {
+        clk.set(b(k));
+        assert_eq!(
+            pacer.service(|| song.pop_front(), &mut *rec),
+            ServiceOutcome::Emitted
+        );
+    }
+    (pacer, clk)
 }
 
 /// One recorded boundary: the video stamp, the audio stamp, and the audio
@@ -375,5 +401,84 @@ fn the_paced_outer_loop_enters_the_idle_fill_at_once_legacy_keeps_5_s() {
         idle_poll(false),
         std::time::Duration::from_secs(5),
         "SDK-clocked: the unchanged 5 s heartbeat poll"
+    );
+}
+
+#[test]
+fn a_song_end_sends_its_tail_as_the_next_standby_block_one_block_per_boundary() {
+    // The last frame carries 2400 samples, so 800 are still buffered at the
+    // song's end: the EOS tail (800 real + 800 zero-fill). It must leave as the
+    // NEXT boundary's one block, next to the held last frame, never as an extra
+    // audio-only send: 6 boundaries → exactly 6 blocks, one audio stamp each.
+    let mut rec = Rec::default();
+    let (mut pacer, clk) = play_three_frame_song(2400, &mut rec);
+    let blk = black();
+
+    pacer.hold_eos_tail_for_standby(); // the paced pipeline at a natural end
+    clk.set(b(4)); // …serves ONE more boundary with the held last frame
+    assert_eq!(
+        pacer.service_standby(Standby::FrozenLast, &mut rec),
+        ServiceOutcome::Repeated
+    );
+    for k in 5..=6 {
+        clk.set(b(k)); // then the idle fill
+        pacer.service_standby(idle(&blk), &mut rec);
+    }
+
+    assert_eq!(rec.video_tcs(), (1..=6).map(b).collect::<Vec<_>>());
+    let audio_tcs: Vec<i64> = rec.boundaries.iter().map(|x| x.1).collect();
+    assert_eq!(audio_tcs, rec.video_tcs(), "one audio stamp per boundary");
+    let blocks: Vec<_> = rec.boundaries.iter().map(|x| x.2).collect();
+    let song = Some((2, 1600, false));
+    let silence = Some((2, 1600, true));
+    assert_eq!(
+        blocks,
+        vec![song, song, song, song, silence, silence],
+        "three song blocks, the tail on the held frame at b(4), then silence"
+    );
+}
+
+#[test]
+fn a_song_end_with_nothing_buffered_holds_no_tail() {
+    // Every sample already played: nothing is held, the next standby boundary
+    // carries plain silence (never an empty block).
+    let mut rec = Rec::default();
+    let (mut pacer, clk) = play_three_frame_song(1600, &mut rec);
+    pacer.hold_eos_tail_for_standby();
+    clk.set(b(4));
+    assert_eq!(
+        pacer.service_standby(Standby::FrozenLast, &mut rec),
+        ServiceOutcome::Repeated
+    );
+    assert_eq!(rec.boundaries[3].2, Some((2, 1600, true)));
+}
+
+#[test]
+fn a_held_tail_is_dropped_by_a_new_song_and_never_replayed_later() {
+    // Play is already queued at the song's end: the next song anchors at once
+    // (a new map) and the old song's held tail is forgotten, so a later pause
+    // carries silence, never 33 ms of the previous song.
+    let mut rec = Rec::default();
+    let (mut pacer, clk) = play_three_frame_song(2400, &mut rec);
+    pacer.hold_eos_tail_for_standby();
+
+    clk.set(b(3) + 1_000);
+    pacer.anchor(); // the next song's first frame is due b(4)
+    let mut next = Some(frame_with_block(0, 2));
+    clk.set(b(4));
+    assert_eq!(
+        pacer.service(|| next.take(), &mut rec),
+        ServiceOutcome::Emitted
+    );
+    clk.set(b(5)); // paused
+    assert_eq!(
+        pacer.service_standby(Standby::FrozenLast, &mut rec),
+        ServiceOutcome::Repeated
+    );
+    assert_eq!(rec.boundaries[3].2, Some((2, 1600, false)), "the new song");
+    assert_eq!(
+        rec.boundaries[4].2,
+        Some((2, 1600, true)),
+        "the pause is silence, not the old song's tail"
     );
 }

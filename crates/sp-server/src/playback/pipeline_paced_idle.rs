@@ -143,7 +143,7 @@ pub(crate) fn run_idle_wait(
 
         // Drain the handoff, flush the async holdover, and join the submit thread
         // before the outer loop (or the next song) reuses the submitter.
-        handoff_ref.stop_with_tail(None);
+        handoff_ref.stop();
         let _ = submit_join.join();
     });
 }

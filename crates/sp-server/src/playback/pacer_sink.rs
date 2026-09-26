@@ -1,8 +1,9 @@
 //! Pacer scheduling + sink helpers split out of `pacer.rs` to keep it under the
 //! 1000-line cap: the pure [`plan_sleep_100ns`] sleep decision (#147 change 4),
 //! the [`default_submit_shared`] `PacedSink::submit_shared` default (#203) and
-//! the outer loop's [`idle_poll`] (#147 standby same-path). Re-exported from
-//! `pacer` so the original paths stay valid.
+//! the outer loop's [`idle_poll`] (#147 standby same-path). `SleepDecision` and
+//! `plan_sleep_100ns` are re-exported from `pacer` so their original paths stay
+//! valid; `idle_poll` is used from here.
 
 use std::time::Duration;
 

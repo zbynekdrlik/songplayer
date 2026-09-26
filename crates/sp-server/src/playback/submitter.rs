@@ -393,19 +393,6 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         self.prev_frame = Some(video);
     }
 
-    /// Submit an audio-only tail chunk at an explicit timecode (#148 rework,
-    /// item 4). Used at EOS to flush the last partial boundary of buffered audio
-    /// (zero-filled to `samples_per_boundary`) — there is no accompanying video
-    /// frame, so this does NOT touch the video double-buffer or the frame
-    /// counters; it only stamps and sends the audio chunk(s).
-    pub fn submit_audio_tail(&mut self, audio: &[AudioFrame], audio_tc_100ns: i64) {
-        for af in audio {
-            let mut stamped = af.clone();
-            stamped.timecode_100ns = Some(audio_tc_100ns);
-            self.sender.send_audio(&stamped);
-        }
-    }
-
     /// Borrow the underlying sender (mainly for tests).
     pub fn sender(&self) -> &NdiSender<B> {
         &self.sender

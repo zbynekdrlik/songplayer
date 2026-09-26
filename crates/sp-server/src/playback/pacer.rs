@@ -665,16 +665,17 @@ impl Pacer {
         // exactly like the active underrun path.
         let (stamp_boundary, next) = self.resolve_emit_boundary(emit_now, boundary, false);
         let audio_tc = emit_now;
-        // #147: the SAME audio-then-video pair as a playing boundary — one silent
-        // block, stamped with the emit instant like playing audio (§6).
-        let silence = self.standby_silence();
 
+        // #147: an emitting standby boundary is the SAME audio-then-video pair as
+        // a playing one — one block (silence, or a held EOS tail), stamped with
+        // the emit instant like playing audio (§6). A starve takes no block.
         let outcome = match standby {
             Standby::FrozenLast => {
                 if let Some(lf) = self.last_frame.take() {
                     self.on_emit(emit_now, stamp_boundary);
                     self.repeats += 1;
-                    sink.emit(&lf, &silence, stamp_boundary, audio_tc);
+                    let block = self.standby_block();
+                    sink.emit(&lf, &block, stamp_boundary, audio_tc);
                     self.last_frame = Some(lf);
                     ServiceOutcome::Repeated
                 } else {
@@ -689,13 +690,14 @@ impl Pacer {
             } => {
                 self.on_emit(emit_now, stamp_boundary);
                 // Submit the SAME allocation by shared reference — a refcount bump,
-                // no pixel copy (#203), with the boundary's silent block (#147).
+                // no pixel copy (#203), with the boundary's audio block (#147).
+                let block = self.standby_block();
                 sink.submit_shared(
                     width,
                     height,
                     stride,
                     video.clone(),
-                    &silence,
+                    &block,
                     stamp_boundary,
                     audio_tc,
                 );
