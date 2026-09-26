@@ -27,6 +27,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - lyrics_worker.py tests (eval-checks CI = numpy+soundfile only; fake torch/librosa/audio_separator) → `.claude/rules/lyrics-worker-tests.md` (auto-loads on `scripts/lyrics_worker.py`, `scripts/tests/**`)
 - dabing (dubbing) eval (Soniox/Chatterbox engine gotchas) → `.claude/rules/dubbing-eval.md` (auto-loads on `eval/dubbing/**`)
 - post-deploy specs: OBS program = ANY sp-* scene (read `program-state.ts`, explicit card, shared `box-api.ts`) → `.claude/rules/post-deploy-program-state.md` (auto-loads on `e2e/post-deploy*.spec.ts`, `e2e/program-state*.ts`, `e2e/box-api.ts`)
+- program bus + NDI `SP-program` (master switcher: cut rule, reorder/fill, OnceLock install, startup order, Program control) → `.claude/rules/program-bus.md` (auto-loads on `playback/program_{bus,output}*`, `pipeline_paced_submit.rs`, `api/program*`, `sp-ui` `program_control.rs`)
 - Dabing feature (dub data model + section + import cookie gate + D4 dub worker/Live-Translate child/4-stream mix) → `.claude/rules/dabing.md` (auto-loads on `db/models_dabing.rs`, `api/dabing.rs`, `api/routes_import.rs`, `startup_dabing.rs`, `dabing/**`, `scripts/dub_worker.py`, `sp-ui` dabing files)
 
 | Area | Skill | Load when |
