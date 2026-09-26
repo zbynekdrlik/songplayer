@@ -229,8 +229,8 @@ pub fn decide_anchor_step(
     narrow: bool,
 ) -> AnchorDecision {
     let step = bounded_anchor_update(delta_100ns);
-    // RED (#147 backward slice): only a FORWARD clamp arms or follows.
-    let armable = narrow && step.carry_100ns > 0;
+    // A clamp either way arms and follows; the tolerance picks the same step.
+    let armable = narrow && step.is_clamped();
     let confirms = |p: &PendingStep| {
         (delta_100ns + p.applied_100ns - p.delta_100ns).abs() <= ANCHOR_MAX_STEP_100NS
     };
