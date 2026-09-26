@@ -39,6 +39,27 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   `RealNdiReceiveBackend::new(lib)` shares the ONE `NdiLib`
   (`RealNdiBackend::lib()`), because `NDIlib_initialize` must run once per
   process.
+- **`RealNdiReceiveBackend` locks PER receiver and PER FrameSync.** This uses
+  `handle_table::HandleTable`, the same pattern #147 round 11 introduced for
+  the senders. It is NEVER one lock across every SDK call.
+  - Each call holds only its own instance's slot lock. So a destroy still
+    waits for a capture in flight on the SAME instance.
+  - The input's close helper destroys the old pair (~0.5 s on the box) while
+    the grid thread captures from the new one. With one global lock, the
+    grid's first `recv_connections` on the new pair waited for that destroy.
+    That was the very stall the lifecycle rule below removes (#212 follow-up,
+    review round 2).
+  - `NdiReceiveBackend`'s doc states the contract: calls on DIFFERENT handles
+    never wait for each other.
+  - The SDK calls live in `RecvHandles`. `RealNdiReceiveBackend` only adds the
+    `NdiLib` (which keeps the library loaded and serves `find`) and delegates.
+  - The lock scope is pinned over FAKE SDK functions
+    (`receive.rs` `calls_on_one_instance_never_wait_for_a_slow_call_on_another`),
+    with a gate that holds one instance's destroy or capture. The other pair's
+    calls must return, and a FrameSync destroy must wait for a capture in
+    flight on the same FrameSync.
+  - The per-call pass-throughs stay `mutants::skip`: the real functions need
+    the runtime.
 - The color format is `NDIlib_recv_color_format_fastest` with
   `allow_video_fields = false` and highest bandwidth. A source without alpha
   comes as UYVY. One with alpha comes as UYVA, whose FIRST plane is UYVY, so a
@@ -84,8 +105,10 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   - above 8 behind, resync on the floor;
   - a boundary more than 2 slots ahead is a backward clock step, so re-latch.
 - `NdiInput::service(B, audio_now, bus)`:
-  1. apply a settings change (reconnect), or retry a failed receiver after
-     exactly 5 s;
+  1. apply a settings change, take a finished connect, or request a
+     (re)connect / the retry of a failed one exactly 5 s after the boundary
+     that requested it. NO SDK call happens here (see "Receiver lifecycle off
+     the grid thread" below);
   2. `touch(-1, B)`;
   3. capture the video plus `capture_audio(48000, 2, 1600)` on every
      CONNECTED boundary, so the FrameSync keeps tracking our cadence. Nothing
@@ -117,6 +140,81 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   `lib.rs` and `pipeline.rs` are untouched (cap). On shutdown,
   `bus.input().stop()` ends the loop, which closes the receiver.
 
+## Receiver lifecycle off the grid thread (#212 follow-up)
+
+The rule: **the grid thread never calls an SDK create or destroy.** On the box
+(#212 comment 5849047061) a source change closed the old receiver and created
+the new one ON the grid thread. The destroy alone blocked it for ~0.5 s, which
+gave `> 8 boundaries missed — resync`. While the input is cut to `SP-program`,
+that is ~14 black-filled program slots. Design record: #212 comment 5849076208
+(Approach 1). The code is `playback/ndi_input_connect.rs`, a child module of
+`ndi_input.rs`.
+
+- **Connect.** A (re)connect runs on a short-lived `ndi-input-connect` thread.
+  It calls `NdiFrameSync::connect` and hands the result back through
+  `mpsc::sync_channel(1)`. `apply_settings` does, per boundary:
+  1. apply a settings change: the old pair goes to the close helper;
+  2. `try_recv` a finished connect and swap it in;
+  3. request the next connect if one is needed.
+- **Close.** A replaced or disabled pair is dropped on an `ndi-input-close`
+  thread. A pair whose connect was superseded is dropped the same way.
+- **Meanwhile.** Every boundary goes through the disconnected path: `capture`
+  finds no receiver, so the input offers the standby pair (black + silence)
+  and counts `no_source_boundaries`. The candidate and standby logic is
+  unchanged.
+- **One connect in flight.** A settings change during a pending connect
+  supersedes it. When the stale pair lands it is closed off the grid thread,
+  and the connect for the newest settings starts on that same boundary.
+  Changing back to the pending connect's own settings makes it current again.
+- **Retry.** A failed connect retries exactly `INPUT_RECONNECT_100NS` (5 s)
+  after the boundary that REQUESTED it, not the one where the failure landed.
+  So the retry timing never depends on how long the helper took.
+- **Helper edge cases.**
+  - A connect helper that could not be spawned leaves a closed channel
+    (`Disconnected`), which lands as a failed connect.
+  - A panicking helper does the same. The shipped exe unwinds: `src-tauri` is
+    outside the workspace, so its release profile keeps cargo's default
+    `panic = "unwind"` (see `crash-diagnostics.md`). Only that helper thread
+    dies, the panic hook records it, and the closed channel lands as a failed
+    connect, retried 5 s after the attempt (tested with `set_panic_create`).
+  - A close helper that could not be spawned closes inline, with a WARN.
+- **Stop path.** It runs after the loop ended.
+  - The current pair, and a connect result that was already handed over but
+    not taken yet, are closed on the close helper and JOINED.
+  - A connect still running is abandoned: its helper's `send` finds no
+    receiver, and the helper drops (closes) the pair itself.
+  - Closes started by earlier settings changes may still be running, detached.
+    That is harmless, since the loop is over.
+  - A hand-over that lands in the instant between `try_recv` and the drop of
+    the channel is dropped with the channel on the ending input thread. That
+    is inline and untimed, but harmless: the loop is over.
+  - The helper publishes `last_connect_ms` only AFTER its hand-over. So a
+    test that waits for a value set by THIS connect (e.g. ≥ 400 ms for the
+    mock's 500 ms) knows the result is in the channel. The rig's own first
+    connect already left a value there, so waiting for any value is not
+    enough.
+- **Telemetry** in `input`:
+  - `connects_pending` (0 / 1), published by the grid;
+  - `last_connect_ms` / `last_close_ms`, which the helpers time themselves.
+
+  The log lines `receiver + FrameSync created` / `creating the receiver failed`
+  carry `connect_ms`, and `receiver closed` carries `close_ms`. A superseded
+  connect logs `a superseded connect finished — closing it off the grid thread`.
+- **Trade-off (accepted).** A source change takes effect once the helper's
+  create is done. The old receiver lives ~0.5 s longer on its close thread,
+  concurrently with the new one's create (the per-handle backend locks make
+  that concurrency real).
+- **Box check.** Put the input on program and change the source in Nastavenia.
+  - The program `filled` and `resyncs` counters must stay +0, and the input
+    must log no `> 8 boundaries missed` WARN.
+  - The change must log `receiver + FrameSync created`, and never
+    `creating the receiver failed`. The new create now overlaps the old
+    receiver's destroy, so two receivers named `SongPlayer program input`
+    exist for ~0.5 s. If the SDK rejected that, the change would cost 5 s of
+    standby while counting no fills or resyncs. The fix would then be a
+    per-connect suffix on the receiver name.
+  - `last_close_ms` / `last_connect_ms` show the SDK's real cost.
+
 ## Settings, API, UI
 
 - Keys:
@@ -134,8 +232,9 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   - `GET /api/v1/program` and the cut answer carry `input`:
     `{id, label, enabled, running, connected, source, stream, frames_received,
     video_repeats, video_drops, no_source_boundaries, unsupported_boundaries,
-    boundaries, resyncs, relatches, audio_queue_depth, last_frame_size, format,
-    frame_rate, visible_sources}`.
+    boundaries, resyncs, relatches, connects_pending, last_connect_ms,
+    last_close_ms, audio_queue_depth, last_frame_size, format, frame_rate,
+    visible_sources}`.
   - `enabled` and `source` come from the STORED settings, so a save shows at
     once.
   - `stream` = `obs::ndi_discovery::extract_ndi_stream_name(source)`.
@@ -178,6 +277,44 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
 - The converted buffer's size class is pinned through `frame_pool::pool_len`
   on a unique 50×34 class (2550 bytes). A wrongly sized `take` would be an
   equivalent mutant otherwise.
+- The connect is asynchronous, so `rig()` awaits it before `b(1)` (`settle`
+  applies the settings until the pair or a scheduled retry lands, servicing
+  no boundary). `raw_rig()` is the not-yet-connected input.
+- `ndi_input_tests_lifecycle.rs` (a child module) holds the lifecycle tests.
+  The mock's `set_blocking(500 ms, 500 ms)` makes `recv_create` /
+  `recv_destroy` block like the box's SDK. The tests assert:
+  - one pair per boundary, stamped on it;
+  - the exact standby pair in the connect window;
+  - the new pair's FrameSync handle capturing only after it landed;
+  - `connects_pending` 1 during the connect and 0 after;
+  - exactly three `recv_create`s for a superseded connect;
+  - the stop path's handed-over and abandoned pairs;
+  - a helper that dies (`set_panic_create`) counting as a failed connect.
+- The rule "never on the grid thread" is asserted through the mock's
+  `calls_by_thread()`. Every create runs on `ndi-input-connect`. Every destroy
+  runs on `ndi-input-close`, except an abandoned connect's pair, which its
+  connect helper drops. The loop test runs `run_input_loop` on a thread named
+  `ndi-input` and finds no create or destroy there.
+- "The grid never WAITS on them" is asserted with the mock's `set_held(true)`.
+  The old pair's destroy and the new pair's create both stay inside the SDK
+  until released, and the loop must still service 20 more boundaries,
+  bounded by `wait_for`. The stop-path test holds the create the same way.
+  - This catches any wait on the INPUT's side, with no timing threshold: a
+    `recv` instead of `try_recv`, a `join` in `release`, or one of its own
+    locks held across the call.
+  - It cannot see the BACKEND's lock scope, because the mock has no lock. That
+    is pinned by `receive.rs`'s fake-SDK test (see the SDK section).
+- NEVER assert the rule with a wall-time threshold. The coverage job runs the
+  tests under tarpaulin's ptrace, where a thread can stall for a long time on
+  a breakpoint.
+  - The loop test's clock is paced virtual time (`PacedClock`: every wait
+    really sleeps, but only the waits advance it). So it can never resync on
+    a stall. That makes its own "no resync / contiguous" checks structural:
+    the `set_held` phase is what proves the grid does not wait.
+  - Timed durations are only ever lower bounds (≥ 400 ms for the mock's
+    500 ms).
+  - Every wait is bounded (`wait_for`, 10 s), so a hang fails instead of
+    stalling the mutation gate.
 
 ## Box acceptance (the supervisor's job)
 

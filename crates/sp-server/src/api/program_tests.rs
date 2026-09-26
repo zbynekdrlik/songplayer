@@ -287,6 +287,9 @@ async fn get_program_reports_the_input_block_from_the_stored_settings() {
     assert_eq!(i["video_drops"], 0);
     assert_eq!(i["no_source_boundaries"], 0);
     assert_eq!(i["audio_queue_depth"], 0);
+    assert_eq!(i["connects_pending"], 0);
+    assert!(i["last_connect_ms"].is_null());
+    assert!(i["last_close_ms"].is_null());
     assert!(i["last_frame_size"].is_null());
     assert_eq!(i["visible_sources"], serde_json::json!([]));
 

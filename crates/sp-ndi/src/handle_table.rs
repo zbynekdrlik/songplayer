@@ -1,10 +1,14 @@
-//! Per-sender locking for [`crate::RealNdiBackend`] (#147 round 11).
+//! Per-instance locking for the NDI backends: the senders of
+//! [`crate::RealNdiBackend`] (#147 round 11) and the receivers + FrameSyncs of
+//! [`crate::RealNdiReceiveBackend`] (#212 follow-up).
 //!
-//! The backend used to keep every sender in ONE `Mutex<HashMap<..>>` and hold
-//! it across each NDI SDK call. `NDIlib_send_send_video_async_v2` blocks until
-//! the SDK has finished with the previous frame of THAT sender, so with genlock
-//! pacing (every output emits on the same 33.3 ms boundary) one slow sender
-//! delayed the video AND audio sends of every other output.
+//! The sender backend used to keep every sender in ONE `Mutex<HashMap<..>>`
+//! and hold it across each NDI SDK call. `NDIlib_send_send_video_async_v2`
+//! blocks until the SDK has finished with the previous frame of THAT sender,
+//! so with genlock pacing (every output emits on the same 33.3 ms boundary)
+//! one slow sender delayed the video AND audio sends of every other output.
+//! The receive backend had the same shape: a close helper's ~0.5 s receiver
+//! destroy held up the input grid thread's capture of the new receiver.
 //!
 //! `HandleTable` splits that lock in two:
 //! - the map sits behind an `RwLock` that is held only to insert, remove, or
@@ -69,7 +73,7 @@ impl<T> HandleTable<T> {
         // waiting for the in-flight op below never blocks the other handles.
         let slot = self.map.write().expect(POISONED).remove(&id)?;
         // A panicked op poisoned this handle only. Tear it down anyway, so the
-        // SDK sender is still destroyed rather than leaked.
+        // SDK instance is still destroyed rather than leaked.
         let mut guard = slot.lock().unwrap_or_else(PoisonError::into_inner);
         let state = guard.take()?;
         let out = teardown(state);

@@ -278,3 +278,126 @@ fn the_mock_finder_returns_the_configured_names() {
         vec!["find_source_names(250)", "find_source_names(1000)"]
     );
 }
+
+#[test]
+fn the_mock_blocks_the_receiver_create_and_destroy_for_the_set_delays() {
+    use std::time::{Duration, Instant};
+    // The sp-server lifecycle tests (#212 follow-up) rely on a slow SDK
+    // create/destroy; the per-package mutation gate needs it asserted here.
+    let mock = Arc::new(MockNdiReceiveBackend::default());
+    mock.set_blocking(Duration::from_millis(60), Duration::from_millis(90));
+    let started = Instant::now();
+    let sync = NdiFrameSync::connect(mock.clone(), "A (b)", "SP-input").unwrap();
+    let create = started.elapsed();
+    let started = Instant::now();
+    drop(sync);
+    let destroy = started.elapsed();
+    // A margin under the set delays: a timer may wake a hair early.
+    assert!(
+        create >= Duration::from_millis(50),
+        "create blocked {create:?}"
+    );
+    assert!(
+        destroy >= Duration::from_millis(80),
+        "destroy blocked {destroy:?}"
+    );
+    assert_eq!(
+        mock.calls(),
+        vec![
+            "recv_create(A (b),SP-input)",
+            "framesync_create(1)",
+            "framesync_destroy(2)",
+            "recv_destroy(1)"
+        ],
+        "each call is recorded, then blocks"
+    );
+}
+
+#[test]
+fn the_mock_records_the_thread_of_every_call() {
+    let mock = Arc::new(MockNdiReceiveBackend::default());
+    let opener = mock.clone();
+    let sync = std::thread::Builder::new()
+        .name("t-open".into())
+        .spawn(move || NdiFrameSync::connect(opener, "A (b)", "SP-input").unwrap())
+        .unwrap()
+        .join()
+        .unwrap();
+    std::thread::Builder::new()
+        .name("t-close".into())
+        .spawn(move || drop(sync))
+        .unwrap()
+        .join()
+        .unwrap();
+    let on = |call: &str, thread: &str| (call.to_string(), thread.to_string());
+    assert_eq!(
+        mock.calls_by_thread(),
+        vec![
+            on("recv_create(A (b),SP-input)", "t-open"),
+            on("framesync_create(1)", "t-open"),
+            on("framesync_destroy(2)", "t-close"),
+            on("recv_destroy(1)", "t-close"),
+        ]
+    );
+    assert_eq!(mock.calls().len(), 4, "the same calls, without threads");
+}
+
+#[test]
+fn the_mock_can_make_recv_create_panic() {
+    let mock = Arc::new(MockNdiReceiveBackend::default());
+    mock.set_panic_create(true);
+    let opener = mock.clone();
+    let joined =
+        std::thread::spawn(move || NdiFrameSync::connect(opener, "A (b)", "SP-input").map(|_| ()))
+            .join();
+    assert!(joined.is_err(), "recv_create panicked");
+    assert_eq!(mock.calls(), vec!["recv_create(A (b),SP-input)"]);
+    mock.set_panic_create(false);
+    assert!(NdiFrameSync::connect(mock.clone(), "A (b)", "SP-input").is_ok());
+}
+
+#[test]
+fn the_mock_holds_the_receiver_create_and_destroy_until_released() {
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+    let mock = Arc::new(MockNdiReceiveBackend::default());
+    let until_recorded = |call: &str| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !mock.calls().iter().any(|c| c == call) {
+            assert!(Instant::now() < deadline, "{call} never started");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    // A held destroy waits until released.
+    let sync = NdiFrameSync::connect(mock.clone(), "A (b)", "SP-input").unwrap();
+    mock.set_held(true);
+    let (closed_tx, closed_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        drop(sync);
+        closed_tx.send(()).unwrap();
+    });
+    until_recorded("recv_destroy(1)");
+    assert!(
+        closed_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+        "the destroy is held"
+    );
+    mock.set_held(false);
+    closed_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("released");
+    // A held create waits until released.
+    mock.set_held(true);
+    let (opened_tx, opened_rx) = mpsc::channel();
+    let opener = mock.clone();
+    std::thread::spawn(move || {
+        let ok = NdiFrameSync::connect(opener, "C (d)", "SP-input").is_ok();
+        opened_tx.send(ok).unwrap();
+    });
+    until_recorded("recv_create(C (d),SP-input)");
+    assert!(
+        opened_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+        "the create is held"
+    );
+    mock.set_held(false);
+    assert!(opened_rx.recv_timeout(Duration::from_secs(10)).unwrap());
+}

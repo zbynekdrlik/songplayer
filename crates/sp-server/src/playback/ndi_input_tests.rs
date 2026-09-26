@@ -22,10 +22,12 @@ use sp_ndi::NdiReceiveBackend;
 use sp_ndi::receive::{FOURCC_UYVA, FOURCC_UYVY, FRAME_FORMAT_TYPE_PROGRESSIVE};
 use sp_ndi::test_util::{MockNdiReceiveBackend, MockVideoFrame};
 
-/// 2026-09 in 100 ns since the epoch.
+#[path = "ndi_input_tests_lifecycle.rs"]
+mod lifecycle;
 #[path = "ndi_input_tests_pool.rs"]
 mod pool;
 
+/// 2026-09 in 100 ns since the epoch.
 const T0: i64 = 17_900_000_000_000_000;
 const MS: i64 = 10_000;
 const SOURCE: &str = "CG-OBS (manual)";
@@ -89,8 +91,9 @@ struct Rig {
     input: NdiInput,
 }
 
-/// An enabled, connected input on program, receiving `frames` on `schedule`.
-fn rig(frames: Vec<MockVideoFrame>, schedule: Vec<Option<usize>>) -> Rig {
+/// An enabled input on program, receiving `frames` on `schedule`, that has
+/// not connected yet.
+fn raw_rig(frames: Vec<MockVideoFrame>, schedule: Vec<Option<usize>>) -> Rig {
     let mock = Arc::new(MockNdiReceiveBackend::default());
     mock.set_connections(1);
     mock.set_video_frames(frames);
@@ -117,6 +120,38 @@ fn rig(frames: Vec<MockVideoFrame>, schedule: Vec<Option<usize>>) -> Rig {
         bus,
         input,
     }
+}
+
+/// [`raw_rig`], connected before `b(1)`. The connect runs off the grid
+/// thread (#212 follow-up), so it is awaited here, servicing no boundary.
+fn rig(frames: Vec<MockVideoFrame>, schedule: Vec<Option<usize>>) -> Rig {
+    let mut rig = raw_rig(frames, schedule);
+    settle(&mut rig.input, b(0));
+    // Its helper publishes `last_connect_ms` just after the hand-over: wait
+    // for it, so a late write can never overwrite a later connect's timing.
+    wait_for("the rig's connect is timed", || {
+        rig.status().last_connect_ms.is_some()
+    });
+    rig
+}
+
+/// Wait until `ready()` holds, failing after 10 s (a hang fails the test
+/// instead of stalling the suite or the mutation gate).
+fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ready() {
+        assert!(Instant::now() < deadline, "timed out: {what}");
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Apply the settings at `at` until the connect they ask for has landed (a
+/// pair, or a failure waiting for its retry), servicing no boundary.
+fn settle(input: &mut NdiInput, at: i64) {
+    wait_for("the connect lands", || {
+        input.apply_settings(at);
+        input.sync.is_some() || input.retry_at > at
+    });
 }
 
 impl Rig {
@@ -427,7 +462,7 @@ fn off_program_the_input_captures_and_counts_but_offers_and_converts_nothing() {
 
 #[test]
 fn a_disabled_input_receives_nothing_and_offers_only_while_still_on_program() {
-    let mut rig = rig(source_frames(30, 30), vec![Some(0)]);
+    let mut rig = raw_rig(source_frames(30, 30), vec![Some(0)]);
     rig.shared.set_settings(InputSettings {
         enabled: false,
         source: SOURCE.to_string(),
@@ -445,7 +480,7 @@ fn a_disabled_input_receives_nothing_and_offers_only_while_still_on_program() {
 
 #[test]
 fn an_enabled_input_without_a_source_receives_nothing() {
-    let mut rig = rig(source_frames(30, 30), vec![Some(0)]);
+    let mut rig = raw_rig(source_frames(30, 30), vec![Some(0)]);
     rig.shared.set_settings(InputSettings {
         enabled: true,
         source: String::new(),
@@ -458,57 +493,6 @@ fn an_enabled_input_without_a_source_receives_nothing() {
     // Not on program: no program job.
     rig.bus = Arc::new(ProgramBus::new());
     assert!(rig.run(2).is_empty());
-}
-
-#[test]
-fn a_source_change_closes_the_receiver_and_opens_the_new_one() {
-    let mut rig = rig(source_frames(30, 30), vec![Some(0)]);
-    rig.run(1);
-    rig.shared.set_settings(InputSettings {
-        enabled: true,
-        source: "CAM (2)".to_string(),
-    });
-    rig.input.service(b(2), b(2), &rig.bus);
-    let lifecycle: Vec<String> = rig
-        .mock
-        .calls()
-        .into_iter()
-        .filter(|c| !c.starts_with("framesync_capture") && !c.starts_with("framesync_free"))
-        .collect();
-    assert_eq!(
-        lifecycle,
-        vec![
-            "recv_create(CG-OBS (manual),SongPlayer program input)",
-            "framesync_create(1)",
-            "framesync_destroy(2)",
-            "recv_destroy(1)",
-            "recv_create(CAM (2),SongPlayer program input)",
-            "framesync_create(3)",
-        ]
-    );
-    // Disabling closes it again.
-    rig.shared.set_settings(InputSettings::default());
-    rig.input.service(b(3), b(3), &rig.bus);
-    assert_eq!(rig.mock.calls().last().unwrap(), "recv_destroy(3)");
-}
-
-#[test]
-fn a_failed_receiver_is_retried_exactly_5_s_later() {
-    let mut rig = rig(source_frames(30, 30), vec![Some(0)]);
-    rig.mock.set_fail_create(true, false);
-    let mut standby = Vec::new();
-    for k in 1..=150 {
-        rig.input.service(b(k), b(k), &rig.bus);
-        standby.extend(drain(&rig.bus));
-    }
-    assert_eq!(rig.calls_matching("recv_create"), 1, "no retry inside 5 s");
-    assert_eq!(standby.len(), 150, "standby on every boundary meanwhile");
-    standby.iter().for_each(assert_standby);
-    rig.mock.set_fail_create(false, false);
-    rig.input.service(b(151), b(151), &rig.bus); // b(1) + 5 s exactly
-    assert_eq!(rig.calls_matching("recv_create"), 2);
-    let jobs = drain(&rig.bus);
-    assert_eq!(jobs[0].width, 4, "connected: the source's frame");
 }
 
 #[test]

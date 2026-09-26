@@ -8,9 +8,19 @@
 //! frame), one planar audio block, and a connection count. It records every
 //! create / destroy / capture / free, so a test can prove the RAII wrapper
 //! frees each capture and tears down in SDK order (FrameSync, then receiver).
+//! `recv_create` / `recv_destroy` can be made to block like the real SDK's
+//! (~0.5 s on the box, #212 comment 5849047061) with [`set_blocking`], or held
+//! for as long as the test wants with [`set_held`]. Every call records the
+//! thread that made it ([`calls_by_thread`]), so a test can prove WHICH thread
+//! ran an SDK create or destroy.
+//!
+//! [`set_blocking`]: MockNdiReceiveBackend::set_blocking
+//! [`set_held`]: MockNdiReceiveBackend::set_held
+//! [`calls_by_thread`]: MockNdiReceiveBackend::calls_by_thread
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicUsize, Ordering};
+use std::sync::{Condvar, Mutex};
+use std::time::Duration;
 
 use crate::error::NdiError;
 use crate::receive::{NDIlib_audio_frame_v2_t, NDIlib_video_frame_v2_recv_t, NdiReceiveBackend};
@@ -43,12 +53,14 @@ struct MockAudio {
 /// A scripted [`NdiReceiveBackend`] (see the module doc).
 #[derive(Default)]
 pub struct MockNdiReceiveBackend {
-    calls: Mutex<Vec<String>>,
+    /// Every recorded call with the name of the thread that made it.
+    calls: Mutex<Vec<(String, String)>>,
     sources: Mutex<Vec<String>>,
     connections: AtomicI32,
     queue_depth: AtomicI32,
     fail_recv_create: AtomicBool,
     fail_framesync_create: AtomicBool,
+    panic_recv_create: AtomicBool,
     last_handle: AtomicUsize,
     frames: Mutex<Vec<MockVideoFrame>>,
     schedule: Mutex<Vec<Option<usize>>>,
@@ -58,15 +70,31 @@ pub struct MockNdiReceiveBackend {
     audio: Mutex<MockAudio>,
     /// Captured minus freed audio frames.
     outstanding_audio: AtomicI64,
+    /// How long `recv_create` / `recv_destroy` block (zero = not at all).
+    blocking: Mutex<(Duration, Duration)>,
+    /// While `true`, `recv_create` / `recv_destroy` wait for `released`.
+    held: Mutex<bool>,
+    released: Condvar,
 }
 
 impl MockNdiReceiveBackend {
     fn log(&self, call: String) {
-        self.calls.lock().unwrap().push(call);
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("<unnamed>")
+            .to_string();
+        self.calls.lock().unwrap().push((call, thread));
     }
 
     /// Every recorded call (connection / queue-depth polls are not recorded).
     pub fn calls(&self) -> Vec<String> {
+        let calls = self.calls.lock().unwrap();
+        calls.iter().map(|(call, _)| call.clone()).collect()
+    }
+
+    /// Every recorded call with the name of the thread that made it
+    /// (`"<unnamed>"` for an unnamed thread).
+    pub fn calls_by_thread(&self) -> Vec<(String, String)> {
         self.calls.lock().unwrap().clone()
     }
 
@@ -83,6 +111,31 @@ impl MockNdiReceiveBackend {
     /// What `framesync_audio_queue_depth` returns.
     pub fn set_audio_queue_depth(&self, n: i32) {
         self.queue_depth.store(n, Ordering::SeqCst);
+    }
+
+    /// Make every `recv_create` block for `create` and every `recv_destroy`
+    /// for `destroy` (after it is recorded), like a slow SDK.
+    pub fn set_blocking(&self, create: Duration, destroy: Duration) {
+        *self.blocking.lock().unwrap() = (create, destroy);
+    }
+
+    /// While `held`, every `recv_create` / `recv_destroy` waits (after it is
+    /// recorded) until `set_held(false)`: an SDK call that takes exactly as
+    /// long as the test wants, with no timing threshold.
+    pub fn set_held(&self, held: bool) {
+        *self.held.lock().unwrap() = held;
+        self.released.notify_all();
+    }
+
+    fn wait_while_held(&self) {
+        let held = self.held.lock().unwrap();
+        let _released = self.released.wait_while(held, |held| *held).unwrap();
+    }
+
+    /// Make every `recv_create` panic (after it is recorded), like a helper
+    /// thread that dies without an answer.
+    pub fn set_panic_create(&self, on: bool) {
+        self.panic_recv_create.store(on, Ordering::SeqCst);
     }
 
     /// Make `recv_create` / `framesync_create` fail.
@@ -137,6 +190,12 @@ impl NdiReceiveBackend for MockNdiReceiveBackend {
 
     fn recv_create(&self, source_name: &str, recv_name: &str) -> Result<usize, NdiError> {
         self.log(format!("recv_create({source_name},{recv_name})"));
+        self.wait_while_held();
+        let block = self.blocking.lock().unwrap().0;
+        std::thread::sleep(block);
+        if self.panic_recv_create.load(Ordering::SeqCst) {
+            panic!("mock recv_create panicked");
+        }
         if self.fail_recv_create.load(Ordering::SeqCst) {
             return Err(NdiError::ReceiveFailed("mock recv_create"));
         }
@@ -145,6 +204,9 @@ impl NdiReceiveBackend for MockNdiReceiveBackend {
 
     fn recv_destroy(&self, recv: usize) {
         self.log(format!("recv_destroy({recv})"));
+        self.wait_while_held();
+        let block = self.blocking.lock().unwrap().1;
+        std::thread::sleep(block);
     }
 
     fn recv_connections(&self, _recv: usize) -> i32 {
