@@ -127,6 +127,11 @@ fn raw_rig(frames: Vec<MockVideoFrame>, schedule: Vec<Option<usize>>) -> Rig {
 fn rig(frames: Vec<MockVideoFrame>, schedule: Vec<Option<usize>>) -> Rig {
     let mut rig = raw_rig(frames, schedule);
     settle(&mut rig.input, b(0));
+    // Its helper publishes `last_connect_ms` just after the hand-over: wait
+    // for it, so a late write can never overwrite a later connect's timing.
+    wait_for("the rig's connect is timed", || {
+        rig.status().last_connect_ms.is_some()
+    });
     rig
 }
 
