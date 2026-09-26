@@ -27,6 +27,19 @@ Two traps, both cost real debugging time (#149):
   drive/scope-qualified variable** (`InvalidVariableReferenceWithDrive`), so
   `"minute $m: …"` fails to PARSE the whole script. Delimit it: `"minute ${m}: …"`.
 
+- **`shell: powershell` (Windows PowerShell 5.1) reads the step script as cp1252, so
+  keep every code line ASCII** (26.9.2026, E2E job 108408085281). An em dash inside
+  `"..."` decodes to bytes ending in 0x94, a curly quote PowerShell closes the string
+  on (`A positional parameter cannot be found`). An accented literal in a here-string
+  (`'odpojené'`) reaches the written spec as mojibake and silently never matches.
+  Comments are fine. `scripts/check_workflow_ps_ascii.py` (run by the eval-checks
+  pytest via `scripts/tests/test_check_workflow_ps_ascii.py`) fails CI on a violation.
+- **Relaunching SongPlayer after a kill: end the scheduled-task INSTANCE first**
+  (`Stop-ScheduledTask -TaskName SongPlayer`, then wait until the state is no longer
+  `Running`). The task is `MultipleInstances=IgnoreNew`; after a bare
+  `taskkill /F`, Task Scheduler can still report it Running, and `schtasks /run`
+  then prints "currently running" and does nothing.
+
 Run `actionlint` locally on any workflow you touch (`~/.local/bin/actionlint`,
 config `.github/actionlint.yaml` declares the `resolume` runner label). Note: CI
 has **no** actionlint gate, and a pre-existing SC2034 (`i` unused) in the
