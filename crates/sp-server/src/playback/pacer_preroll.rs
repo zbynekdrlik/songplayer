@@ -104,7 +104,7 @@ impl Pacer {
                 continue;
             };
             if let Some(ready) = poll() {
-                self.anchor();
+                self.anchor_at(until_100ns);
                 return ready;
             }
             wait(&*self, until_100ns);
@@ -124,7 +124,7 @@ impl Pacer {
         audio_tc: i64,
         sink: &mut S,
     ) -> ServiceOutcome {
-        if FILL_STARVED_BOUNDARIES && let Some(fill) = self.standby_fill.clone() {
+        if let Some(fill) = self.standby_fill.clone() {
             self.on_emit(emit_now, stamp_boundary);
             let block = self.standby_block();
             sink.submit_shared(
@@ -140,9 +140,6 @@ impl Pacer {
         ServiceOutcome::Starved
     }
 }
-
-/// RED: starved boundaries are not filled yet.
-const FILL_STARVED_BOUNDARIES: bool = false;
 
 /// The paced pipeline's pre-roll readiness (#147): the song may anchor once
 /// the decoder has OPENED and its first frame is buffered (`primed`). A failed
