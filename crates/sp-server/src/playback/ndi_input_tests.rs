@@ -23,6 +23,9 @@ use sp_ndi::receive::{FOURCC_UYVA, FOURCC_UYVY, FRAME_FORMAT_TYPE_PROGRESSIVE};
 use sp_ndi::test_util::{MockNdiReceiveBackend, MockVideoFrame};
 
 /// 2026-09 in 100 ns since the epoch.
+#[path = "ndi_input_tests_pool.rs"]
+mod pool;
+
 const T0: i64 = 17_900_000_000_000_000;
 const MS: i64 = 10_000;
 const SOURCE: &str = "CG-OBS (manual)";
@@ -523,36 +526,6 @@ fn two_distinct_frames_with_the_same_timecode_are_two_frames_not_a_repeat() {
     );
     let st = rig.status();
     assert_eq!((st.frames_received, st.video_repeats), (2, 0));
-}
-
-#[test]
-fn the_converted_picture_is_a_pooled_buffer_of_exactly_the_nv12_size() {
-    // 50×34 NV12 = 2550 bytes, a size class no other test uses: once every
-    // holder is gone, the buffer is recycled into `frame_pool` under exactly
-    // that capacity (a wrongly sized take would grow into another class).
-    const CAP: usize = 50 * 34 * 3 / 2;
-    let frame = MockVideoFrame {
-        xres: 50,
-        yres: 34,
-        four_cc: FOURCC_UYVY,
-        line_stride: 100,
-        frame_rate_n: 30,
-        frame_rate_d: 1,
-        frame_format_type: FRAME_FORMAT_TYPE_PROGRESSIVE,
-        timecode: 0,
-        data: vec![77; 100 * 34],
-    };
-    let before = sp_decoder::frame_pool::pool_len(CAP);
-    let mut rig = rig(vec![frame], vec![Some(0)]);
-    let jobs = rig.run(1);
-    assert_eq!(jobs[0].video.len(), CAP);
-    assert_eq!(
-        (jobs[0].width, jobs[0].height, jobs[0].stride),
-        (50, 34, 50)
-    );
-    drop(jobs);
-    drop(rig); // the input's own reference to the converted frame
-    assert_eq!(sp_decoder::frame_pool::pool_len(CAP), before + 1);
 }
 
 #[test]
