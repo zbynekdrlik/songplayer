@@ -128,11 +128,15 @@ fn the_sender_thread_fills_a_sourceless_program_and_stops_flushed() {
     let bus = Arc::new(ProgramBus::new());
     let b0 = floor_boundary_100ns(T0, GENLOCK_GRID_FPS);
     let (wall, clock) = WallClock::settable(b0 + CHECK_AFTER_BOUNDARY_100NS);
+    // Every wait is bounded: a mutant that never stops the loop fails this test
+    // after 20 s instead of hanging the mutation gate into its 300 s timeout.
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
     let thread = {
         let bus = bus.clone();
         std::thread::spawn(move || {
             let (mut out, mut wall) = (out, wall);
             run_program_loop(&mut out, &bus, &mut wall);
+            let _ = done_tx.send(());
         })
     };
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
@@ -140,6 +144,9 @@ fn the_sender_thread_fills_a_sourceless_program_and_stops_flushed() {
         std::thread::yield_now();
     }
     bus.stop();
+    done_rx
+        .recv_timeout(Duration::from_secs(20))
+        .expect("the sender thread exits once the bus is stopped");
     thread.join().unwrap();
     assert_eq!(
         clock.get(),
