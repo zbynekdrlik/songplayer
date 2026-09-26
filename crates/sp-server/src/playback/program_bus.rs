@@ -364,11 +364,10 @@ impl ProgramCore {
 
     /// The program state for the API.
     pub fn status(&self) -> ProgramStatus {
-        let n = self.segments.len();
         ProgramStatus {
             ndi_name: PROGRAM_NDI_NAME,
             source: self.selected(),
-            previous: (n >= 2).then(|| self.segments[n - 2].1),
+            previous: self.segments.iter().rev().nth(1).map(|&(_, pid)| pid),
             cut_boundary_100ns: self
                 .segments
                 .last()
