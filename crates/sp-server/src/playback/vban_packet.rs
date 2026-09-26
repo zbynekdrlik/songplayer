@@ -65,11 +65,11 @@ pub const VBAN_PACKET_LEN: usize = VBAN_HEADER_LEN + VBAN_PAYLOAD_LEN;
 pub const VBAN_PACKETS_PER_SECOND: i64 = VBAN_SAMPLE_RATE_HZ / VBAN_FRAMES_PER_PACKET as i64;
 
 /// Full scale of the INT24 conversion: `±1.0 → ±8388607` (symmetric).
-pub const INT24_FULL_SCALE: i32 = 8_388_608;
+pub const INT24_FULL_SCALE: i32 = 8_388_607;
 
 /// The fixed send latency L (100 ns): one grid slot after the boundary, so a
 /// block is always queued before its first packet is due.
-pub const VBAN_SEND_LATENCY_100NS: i64 = UNITS_PER_SECOND / 60;
+pub const VBAN_SEND_LATENCY_100NS: i64 = UNITS_PER_SECOND / GENLOCK_GRID_FPS;
 
 // A 1600-frame block is exactly one grid slot, and a packet fits the spec.
 const _: () = assert!(VBAN_BLOCK_FRAMES as i64 * GENLOCK_GRID_FPS == VBAN_SAMPLE_RATE_HZ);
