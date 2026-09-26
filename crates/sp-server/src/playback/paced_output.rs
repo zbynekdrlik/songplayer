@@ -434,7 +434,12 @@ impl<B: NdiBackend> PacedConsumer<B> {
 
     /// The fill for boundary `stamp_100ns`: the held picture (else the
     /// standby black) + one silent `samples_per_boundary` block in the last
-    /// audio layout, the audio stamped with the consumer's wall clock (§6).
+    /// audio layout, BOTH stamped exactly on that boundary (design record
+    /// 5845527884). The fill leaves a grace after its boundary; a raw-wall
+    /// audio stamp (§6) would put that ~8 ms excursion into the receiver's
+    /// audio timeline and A/V pairing for every filled slot, while a pacer's
+    /// silent standby block — stamped at its emit, right on the boundary —
+    /// carries none. The fill is the boundary's own slot of silence.
     fn fill_job(&self, stamp_100ns: i64) -> SubmitJob {
         let picture = self.held.as_ref().unwrap_or(&self.black);
         let samples = samples_per_boundary(FILL_AUDIO_RATE_HZ as i64, GENLOCK_GRID_FPS);
@@ -450,7 +455,7 @@ impl<B: NdiBackend> PacedConsumer<B> {
                 timecode_100ns: None,
             }],
             video_tc_100ns: stamp_100ns,
-            audio_tc_100ns: self.wall.now_100ns(),
+            audio_tc_100ns: stamp_100ns,
         }
     }
 
@@ -523,9 +528,13 @@ impl<B: NdiBackend> PacedConsumer<B> {
 
 /// The pipeline-lifetime submit thread's loop (#147): submit every job, fill
 /// every detached boundary once its deadline passes, and on stop drain, flush
-/// and exit.
+/// and exit. Logging stays bounded however long a window lasts: ONE INFO line
+/// at a window's first fill, one when the next job ends it (with the count),
+/// DEBUG per fill in between, and a WARN on a > 8-slot resync.
 #[cfg_attr(test, mutants::skip)]
 pub fn run_paced_consumer<B: NdiBackend>(mut consumer: PacedConsumer<B>, handoff: &SharedHandoff) {
+    let pid = consumer.playlist_id;
+    let mut window_fills: u64 = 0;
     loop {
         let step = handoff.next_blocking(|| consumer.now_100ns());
         match &step {
@@ -536,20 +545,36 @@ pub fn run_paced_consumer<B: NdiBackend>(mut consumer: PacedConsumer<B>, handoff
             } => {
                 if *skipped > 0 {
                     warn!(
-                        playlist_id = consumer.playlist_id,
+                        playlist_id = pid,
                         skipped,
                         stamp_100ns,
                         "paced output: > 8 boundaries went unserviced between two scopes (grid resync)"
                     );
                 }
-                info!(
-                    playlist_id = consumer.playlist_id,
-                    stamp_100ns,
-                    held = consumer.held.is_some(),
-                    "paced output: serviced a boundary between two scopes (held picture + silence)"
-                );
+                if window_fills == 0 {
+                    info!(
+                        playlist_id = pid,
+                        stamp_100ns,
+                        held = consumer.held.is_some(),
+                        "paced output: no pacer attached — servicing boundaries (held picture + silence)"
+                    );
+                } else {
+                    tracing::debug!(playlist_id = pid, stamp_100ns, "paced output: fill");
+                }
+                window_fills += 1;
             }
-            ConsumerStep::Submit(_) | ConsumerStep::Wait(_) => {}
+            ConsumerStep::Submit(job) => {
+                if window_fills > 0 {
+                    info!(
+                        playlist_id = pid,
+                        fills = window_fills,
+                        next_stamp_100ns = job.video_tc_100ns,
+                        "paced output: a pacer feeds again after the consumer's fills"
+                    );
+                    window_fills = 0;
+                }
+            }
+            ConsumerStep::Wait(_) => {}
         }
         consumer.serve(handoff, step);
     }
@@ -584,14 +609,25 @@ impl PacedOutput {
     pub fn handoff(&self) -> Arc<SharedHandoff> {
         self.handoff.clone()
     }
+
+    /// Whether the consumer thread has exited: it only does on stop — or on a
+    /// panic, which the pipeline's next scope then recovers from by respawning
+    /// (`FrameSubmitter::paced_handoff`).
+    pub fn is_finished(&self) -> bool {
+        self.join.as_ref().is_none_or(JoinHandle::is_finished)
+    }
 }
 
 impl Drop for PacedOutput {
     #[cfg_attr(test, mutants::skip)]
     fn drop(&mut self) {
         self.handoff.stop();
-        if let Some(join) = self.join.take() {
-            let _ = join.join();
+        if let Some(join) = self.join.take()
+            && join.join().is_err()
+        {
+            tracing::error!(
+                "paced submit thread panicked (#147) — its output was dark until respawn"
+            );
         }
     }
 }

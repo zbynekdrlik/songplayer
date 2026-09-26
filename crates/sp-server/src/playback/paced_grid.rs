@@ -22,7 +22,7 @@
 //! `paced_output.rs`.
 
 use sp_core::genlock::{
-    GENLOCK_MAX_CATCHUP_INTERVALS, floor_boundary_100ns, interval_100ns, lag_slots_100ns,
+    floor_boundary_100ns, genlock_emit_gate_100ns, interval_100ns, lag_slots_100ns,
     strict_next_boundary_100ns,
 };
 
@@ -135,7 +135,7 @@ impl PacedGrid {
     /// The grid decision at wall time `now_100ns` with no job queued. Only a
     /// DETACHED grid that has serviced a stamp fills: the next boundary once
     /// `now` reaches it + [`fill_grace_100ns`], or — when the consumer woke
-    /// more than [`GENLOCK_MAX_CATCHUP_INTERVALS`] slots late — the current
+    /// more than `GENLOCK_MAX_CATCHUP_INTERVALS` (8) slots late — the current
     /// boundary ([`fill_boundary`], a resync the caller WARNs about).
     pub fn step(&self, now_100ns: i64) -> GridStep {
         let Some(last) = self.last_serviced_100ns else {
@@ -175,13 +175,16 @@ impl PacedGrid {
     }
 }
 
-/// The boundary the grid resumes on when `due` is more than
-/// [`GENLOCK_MAX_CATCHUP_INTERVALS`] slots behind `now`: the grid boundary at
-/// or before `now` (the pacer's resync rule); else `due` itself.
+/// The boundary a fill services at `now` for the overdue boundary `due`: `due`
+/// itself (a catch-up, one slot per fill), unless it is more than
+/// `GENLOCK_MAX_CATCHUP_INTERVALS` (8) slots behind `now` — then the grid
+/// boundary at or before `now`, a resync. It is the pacer's own rule (the
+/// exact-grid emit gate with nothing buffered, as `Pacer::resolve_emit_boundary`
+/// applies it), so the two can never drift apart.
 pub fn fill_boundary(due_100ns: i64, now_100ns: i64, fps: i64) -> i64 {
-    let floor_now = floor_boundary_100ns(now_100ns, fps);
-    if lag_slots_100ns(due_100ns, floor_now, fps) > GENLOCK_MAX_CATCHUP_INTERVALS {
-        floor_now
+    let (_, next) = genlock_emit_gate_100ns(now_100ns, due_100ns, fps, false);
+    if next > strict_next_boundary_100ns(due_100ns, fps) {
+        floor_boundary_100ns(now_100ns, fps)
     } else {
         due_100ns
     }

@@ -24,7 +24,9 @@ impl<B: NdiBackend + 'static> FrameSubmitter<B> {
     /// The handoff of this pipeline's paced submit thread, spawning the thread
     /// on the first call. Its fill black is this submitter's cached
     /// `black_w`×`black_h` standby black (the idle fill's picture); every later
-    /// call returns the same handoff.
+    /// call returns the same handoff. A thread that is gone (it only exits on
+    /// stop, so: it panicked) is joined, logged and respawned here, so a dead
+    /// submit side costs at most the rest of one scope, never the output.
     pub fn paced_handoff(
         &mut self,
         playlist_id: i64,
@@ -32,8 +34,16 @@ impl<B: NdiBackend + 'static> FrameSubmitter<B> {
         black_h: u32,
     ) -> Arc<SharedHandoff> {
         if let Some(output) = &self.paced_output {
-            return output.handoff();
+            if !output.is_finished() {
+                return output.handoff();
+            }
+            tracing::error!(
+                playlist_id,
+                "paced submit thread is gone — respawning it for this scope (#147)"
+            );
         }
+        // Dropping a finished output joins it (and logs its panic, if any).
+        self.paced_output = None;
         let black = Picture {
             width: black_w,
             height: black_h,

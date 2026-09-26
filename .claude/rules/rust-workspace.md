@@ -220,15 +220,16 @@ needs `<S: TheTrait + ?Sized>(sink: &mut S, …)` — `Self` is `?Sized` inside 
 trait default, so a non-`?Sized` bound fails to compile. Verify `wc -l` after
 `cargo fmt` — an 8-arg signature reflows to ~10 lines.
 
-## `use super::*` in a `#[path]` test submodule does NOT import the parent's private `use` aliases
+## `use super::*` in a `#[path]` test submodule: import what the test uses explicitly
 
-A `#[cfg(test)] #[path = "x_tests.rs"] mod tests;` submodule reaches the parent's
-own items via `super::*`, but a PRIVATE `use crate::…::Foo;` in the parent is NOT
-re-exported by the glob (the parent files already import `sp_ndi::AudioFrame`
-explicitly for this reason). So when a test needs a type the parent imports
-privately (e.g. `SharedFrame`), add an explicit `use crate::playback::frame_buf::SharedFrame;`
-to the TEST file — there is no duplicate-import conflict because the glob never
-brought it. A `pub use` re-export in the parent IS visible via `super::*`.
+A glob DOES bring the parent's private `use` imports into a child module (Rust
+name resolution since RFC 1560 — e.g. `sp-ndi/src/sender.rs`'s tests use its
+private `use std::sync::Arc` through `super::*`). What breaks is an AMBIGUOUS
+name: two globs (or a glob + a glob-imported glob) that both provide it, which
+errors only where the name is used. So, as the repo convention (#147 review):
+give a test file an explicit `use` for every type it names that the parent
+only imports (`SharedFrame`, `AudioFrame`, `Arc`, …). An explicit import
+shadows a glob-imported name and never conflicts, so this is safe either way.
 
 ## RED on the no-compile box for a REFACTOR (not just a wrong constant) — #203
 

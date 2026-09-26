@@ -5,16 +5,24 @@
 //!
 //! The pipeline is driven single-threaded and deterministically: one handoff,
 //! the consumer on a twin of the owner's `MockNdiBackend` sender, and a pacer,
-//! all on ONE settable clock; `Rig::drain` runs the consumer until it waits.
+//! all on ONE settable clock; `drain` runs the consumer until it waits (in
+//! production it runs concurrently on its own thread). The window between two
+//! scopes (the old producer's teardown + the next scope's setup) is modelled
+//! as slots nobody feeds (`Rig::between_scopes`).
 //! Song frames are 8×2 (A) / 12×2 (B) and the standby black 4×2, so the
 //! `send_video_async(…,WxH,…)` call strings name each boundary's picture.
 
 use super::*;
-use crate::playback::pacer::{Pacer, ServiceOutcome, Standby, StandbyBlack};
+use crate::playback::frame_buf::SharedFrame;
+use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome, Standby, StandbyBlack};
+use crate::playback::submit_handoff::{SUBMIT_HANDOFF_BOUND, SubmitCounters, SubmitJob};
+use crate::playback::submitter::FrameSubmitter;
 use crate::playback::wallclock::{SettableClock, WallClock};
-use sp_ndi::NdiSender;
 use sp_ndi::test_util::MockNdiBackend;
+use sp_ndi::{AudioFrame, NdiSender};
 use std::collections::VecDeque;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// The k-th exact-rational grid boundary at 30 fps, in 100-ns units.
 fn b(k: i64) -> i64 {
@@ -75,6 +83,19 @@ fn job(stamp: i64, w: u32, channels: Option<u32>) -> SubmitJob {
     }
 }
 
+/// Run `consumer` until it waits at wall time `now`: every queued job
+/// submitted, every due fill done.
+fn drain(handoff: &SharedHandoff, consumer: &mut PacedConsumer<MockNdiBackend>, now: i64) {
+    for _ in 0..64 {
+        let step = handoff.step_now(now);
+        if matches!(step, ConsumerStep::Wait(_) | ConsumerStep::Exit) {
+            return;
+        }
+        consumer.serve(handoff, step);
+    }
+    panic!("the consumer never waited");
+}
+
 /// The paced output as the pipeline runs it (see the module doc).
 struct Rig {
     backend: Arc<MockNdiBackend>,
@@ -118,31 +139,28 @@ impl Rig {
         }
     }
 
-    /// Run the consumer until it waits: every queued job submitted, every due
-    /// fill done.
+    /// Run the consumer until it waits at the current time.
     fn drain(&mut self) {
-        for _ in 0..64 {
-            let step = self.handoff.step_now(self.clk.get());
-            if matches!(step, ConsumerStep::Wait(_) | ConsumerStep::Exit) {
-                return;
-            }
-            self.consumer.serve(&self.handoff, step);
-        }
-        panic!("the consumer never waited");
+        drain(&self.handoff, &mut self.consumer, self.clk.get());
     }
 
-    /// Nobody feeds for boundaries `from..=to` (a slow decoder open): the
+    /// No scope feeds boundaries `from..=to` (between two scopes): the
     /// consumer is woken a grace after each and services it.
-    fn open_slowly(&mut self, from: i64, to: i64) {
+    fn between_scopes(&mut self, from: i64, to: i64) {
         for k in from..=to {
             self.clk.set(b(k) + GRACE);
             self.drain();
         }
     }
 
-    /// Every `send_*` call after the sender's creation.
+    /// Every audio / video send after the sender's creation (the consumer's
+    /// connection-count polls are left out).
     fn sends(&self) -> Vec<String> {
-        self.backend.calls()[1..].to_vec()
+        self.backend.calls()[1..]
+            .iter()
+            .filter(|c| !c.starts_with("send_get_no_connections"))
+            .cloned()
+            .collect()
     }
 
     fn counters(&self) -> SubmitCounters {
@@ -158,7 +176,7 @@ fn pairs(video: &str, n: usize) -> Vec<String> {
 }
 
 #[test]
-fn a_song_change_with_a_three_slot_decoder_open_keeps_every_stamp_one_slot_apart() {
+fn a_song_change_gap_and_a_slow_decoder_open_keep_every_stamp_one_slot_apart() {
     let mut rig = Rig::new();
     let h = rig.handoff.clone();
     // Song A plays b(1)..=b(3).
@@ -175,9 +193,10 @@ fn a_song_change_with_a_three_slot_decoder_open_keeps_every_stamp_one_slot_apart
         }
     }
     let last_a = rig.backend.last_async_video_slice();
-    // The next song's decoder takes 3 slots to open: nobody feeds b(4)..=b(6).
+    // The old producer's teardown + the next scope's setup take 3 slots:
+    // nobody feeds b(4)..=b(6).
     for k in 4..=6 {
-        rig.open_slowly(k, k);
+        rig.between_scopes(k, k);
         assert_eq!(
             rig.backend.last_async_video_slice(),
             last_a,
@@ -187,24 +206,38 @@ fn a_song_change_with_a_three_slot_decoder_open_keeps_every_stamp_one_slot_apart
         assert_eq!(silence.len(), 3200, "b({k}): one stereo block");
         assert!(silence.iter().all(|&s| s == 0.0), "b({k}): silence");
     }
-    // Song B: the pre-roll continues right after the last serviced stamp.
+    // Song B: the pre-roll continues right after the last serviced stamp, and
+    // its decoder takes 3 slots to open (ready on the 4th readiness poll).
     rig.clk.set(b(6) + GRACE + 1_000);
     {
         let feed = PacedFeed::attach(&h);
         assert_eq!(feed.last_serviced_100ns(), Some(b(6)));
         rig.pacer.continue_grid_after(b(6));
         let mut sink = feed.sink();
-        let clk = rig.clk.clone();
+        let (clk, handoff, consumer) = (rig.clk.clone(), &rig.handoff, &mut rig.consumer);
         let black = StandbyBlack {
             width: 4,
             height: 2,
             stride: 4,
             video: &rig.black,
         };
-        rig.pacer
-            .preroll(black, &mut sink, || Some(()), |_, until| clk.set(until));
-        let mut bs = song(12, 7, 3);
-        for k in 7..=9 {
+        let polls = std::cell::Cell::new(0u32);
+        rig.pacer.preroll(
+            black,
+            &mut sink,
+            || {
+                polls.set(polls.get() + 1);
+                (polls.get() >= 4).then_some(())
+            },
+            |_, until| {
+                clk.set(until);
+                drain(handoff, consumer, until);
+            },
+        );
+        assert_eq!(polls.get(), 4);
+        rig.drain();
+        let mut bs = song(12, 10, 3);
+        for k in 10..=12 {
             rig.clk.set(b(k));
             let out = rig.pacer.service(|| bs.pop_front(), &mut sink);
             assert_eq!(out, ServiceOutcome::Emitted, "k={k}");
@@ -213,21 +246,19 @@ fn a_song_change_with_a_three_slot_decoder_open_keeps_every_stamp_one_slot_apart
     }
     assert_eq!(
         rig.backend.video_timecodes(),
-        (1..=9).map(b).collect::<Vec<_>>(),
+        (1..=12).map(b).collect::<Vec<_>>(),
         "Δ = exactly one slot across the song change"
     );
     let mut want = pairs(SONG_A, 6);
+    want.extend(pairs(BLACK, 3));
     want.extend(pairs(SONG_B, 3));
     assert_eq!(rig.sends(), want, "one audio + video pair per boundary");
-    // A fill's audio is stamped with the consumer's wall at the fill (§6).
-    assert_eq!(
-        rig.backend.audio_timecodes()[3..6],
-        [b(4) + GRACE, b(5) + GRACE, b(6) + GRACE]
-    );
+    // A fill's audio block is stamped on its boundary, like its picture.
+    assert_eq!(rig.backend.audio_timecodes()[3..6], [b(4), b(5), b(6)]);
     let c = rig.counters();
     assert_eq!(c.consumer_fill_pairs, 3);
     assert_eq!(c.song_change_unserviced_slots, 0);
-    assert_eq!(c.submitted, 9);
+    assert_eq!(c.submitted, 12);
     assert_eq!(c.dropped, 0, "nothing coalesced, nothing stale");
 }
 
@@ -266,8 +297,8 @@ fn pause_resume_stays_contiguous_and_a_song_change_while_paused_holds_the_frozen
         );
     }
     let frozen = rig.backend.last_async_video_slice();
-    // Play B arrives while paused: 3 slots of decoder open.
-    rig.open_slowly(8, 10);
+    // Play B arrives while paused: 3 slots between the scopes.
+    rig.between_scopes(8, 10);
     assert_eq!(
         rig.backend.last_async_video_slice(),
         frozen,
@@ -328,7 +359,7 @@ fn idle_to_play_across_a_slow_open_holds_the_idle_black_and_stays_contiguous() {
             rig.drain();
         }
     }
-    rig.open_slowly(4, 6);
+    rig.between_scopes(4, 6);
     assert_eq!(
         rig.backend.last_async_video_slice().map(|(ptr, _)| ptr),
         Some(rig.black.as_ptr() as usize),
@@ -435,12 +466,22 @@ fn stop_drains_the_queue_then_exits_without_filling() {
     h.offer(job(b(1), 8, Some(2)));
     h.stop();
     rig.clk.set(b(5));
-    assert!(matches!(h.step_now(b(5)), ConsumerStep::Submit(_)));
+    let step = h.step_now(b(5));
+    assert!(
+        matches!(step, ConsumerStep::Submit(_)),
+        "the queue drains first"
+    );
+    rig.consumer.serve(&h, step);
     assert!(
         matches!(h.step_now(b(5)), ConsumerStep::Exit),
         "no fill after stop"
     );
     rig.drain();
+    assert_eq!(
+        rig.backend.video_timecodes(),
+        vec![b(1)],
+        "the drained job went out"
+    );
     assert_eq!(rig.counters().consumer_fill_pairs, 0);
 }
 
@@ -449,13 +490,13 @@ fn a_fill_follows_the_last_audio_layout_and_ignores_an_empty_one() {
     let mut rig = Rig::new();
     let h = rig.handoff.clone();
     h.offer(job(b(1), 8, Some(1)));
-    rig.open_slowly(1, 2); // the mono job, then a fill of b(2)
+    rig.between_scopes(1, 2); // the mono job, then a fill of b(2)
     // A zero-channel block (sent as nothing) keeps the mono layout.
     h.offer(job(b(3), 8, Some(0)));
-    rig.open_slowly(3, 4);
+    rig.between_scopes(3, 4);
     // A job with no audio keeps it too.
     h.offer(job(b(5), 8, None));
-    rig.open_slowly(5, 6);
+    rig.between_scopes(5, 6);
     let mono = "send_audio(42,sr=48000,ch=1,spc=1600)";
     assert_eq!(
         rig.sends(),
@@ -569,6 +610,60 @@ fn the_pipeline_submitter_spawns_one_paced_thread_and_joins_it_before_destroying
         calls.last().map(String::as_str),
         Some("send_destroy(42)"),
         "the owning sender is destroyed LAST, after the paced thread flushed"
+    );
+}
+
+#[test]
+fn a_paced_thread_that_is_gone_is_respawned_by_the_next_scope() {
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), "PR", false, false).unwrap();
+    let mut submitter = FrameSubmitter::new(sender, 30, 1);
+    submitter.set_paced(true);
+    let first = submitter.paced_handoff(7, 4, 2);
+    // The thread exits (stop here; a panic in production).
+    first.stop();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let second = loop {
+        let h = submitter.paced_handoff(7, 4, 2);
+        if !Arc::ptr_eq(&h, &first) {
+            break h;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the gone thread was never respawned"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    // The respawned thread submits.
+    let feed = PacedFeed::attach(&second);
+    second.offer(job(b(1), 8, Some(2)));
+    while second.submitted() < 1 {
+        assert!(
+            Instant::now() < deadline,
+            "the respawned thread never submitted"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    drop(feed);
+    assert!(
+        Arc::ptr_eq(&second, &submitter.paced_handoff(7, 4, 2)),
+        "a live thread is kept"
+    );
+    drop(first);
+    drop(second);
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        drop(submitter);
+        let _ = tx.send(());
+    });
+    rx.recv_timeout(Duration::from_secs(10))
+        .expect("dropping the submitter joins the respawned thread");
+    let calls = backend.calls();
+    assert!(calls.contains(&SONG_A.to_string()));
+    assert_eq!(
+        calls.last().map(String::as_str),
+        Some("send_destroy(42)"),
+        "one owner, destroyed last"
     );
 }
 

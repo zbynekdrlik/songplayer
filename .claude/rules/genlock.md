@@ -1194,6 +1194,17 @@ decoder open, 51–84 ms = 1–3 skipped slots on the box, 26.9.). The next
 pre-roll's catch-up burst then overflowed the 2-deep handoff of a brand-new
 submit thread, which coalesced away a stamp — camera-box's `stamp_gap`.
 
+**Box acceptance** is read from camera-box's audit:
+
+- no `genlock-shallow-remeasure` and no `shallow_latches` increment at a song
+  start;
+- `audio_pairing_offset_ms=0`;
+- the same `cap_avg` idle and playing;
+- one audio arrival per video boundary across a natural song end into idle
+  (the EOS-tail wiring is Windows-only and mutation-excluded, so the box is its
+  only check);
+- then the A/V gate within ±20 ms on 5 consecutive songs.
+
 ## The paced output services every boundary between scopes (#147, design record 5845527884)
 
 **The rule.** A paced pipeline has ONE submit thread for its whole life
@@ -1207,7 +1218,17 @@ submit thread, which coalesced away a stamp — camera-box's `stamp_gap`.
   never `send_destroy`s. The handle is the FIRST field of `FrameSubmitter`, so
   it drops first: stop → drain the queue → flush → join, and only then does
   the owning sender destroy the NDI instance. Only the twin sends async video
-  on the paced path (the owner's `send_standby_black` is a no-op there).
+  on the paced path (the owner's `send_standby_black` is a no-op there). The
+  owner's `flush()` on a pipeline Shutdown may run while the twin is still
+  sending: safe — the per-handle lock serialises the calls, the flush only
+  releases the SDK's pointer early, and the twin still holds its holdover.
+- **A dead thread is respawned by the next scope.** The thread only exits on
+  stop, so a finished one panicked: `paced_handoff` (called at every scope
+  start) joins it, logs ERROR `paced submit thread is gone — respawning it`
+  (the join logs `paced submit thread panicked`), and spawns a fresh one. A
+  dead submit side costs at most the rest of one scope (the old per-scope
+  `thread::scope` re-raised the panic at the song's end — also dark until
+  then, and it took the pipeline thread down).
 - **Scopes attach, never spawn.** `decode_and_send_paced` and `run_idle_wait`
   each hold a `PacedFeed` (RAII): `attach()` returns the output's last
   serviced stamp and the scope's pacer calls `Pacer::continue_grid_after(last)`
@@ -1218,12 +1239,23 @@ submit thread, which coalesced away a stamp — camera-box's `stamp_gap`.
   pure): once `strict_next(last_serviced) + ¼ slot` (`fill_grace_100ns`,
   83 333 × 100 ns) passes with no job queued, it services that boundary itself
   — the last submitted picture (else the standby black) + one silent
-  `samples_per_boundary` block in the last audio layout, stamped exactly on
-  that boundary, through the same submit + #209 program-bus path (a fill is
-  offered like a standby pair). Woken > 8 slots late, it resyncs to
-  `floor(now)` and counts the hole (WARN `paced output: > 8 boundaries went
-  unserviced between two scopes`). Each fill logs INFO `paced output:
-  serviced a boundary between two scopes`.
+  `samples_per_boundary` block in the last audio layout, BOTH stamped exactly
+  on that boundary, through the same submit + #209 program-bus path (a fill is
+  offered like a standby pair). The fill's audio is stamped on the boundary,
+  not with the raw send instant (§6): it leaves a grace late, and a raw-wall
+  stamp would put that ~8 ms excursion into the receiver's audio timeline and
+  A/V pairing for every filled slot, while the pacer's own silent standby
+  block (stamped at its emit, right on the boundary) carries none. Woken > 8
+  slots late, it resyncs to `floor(now)` and counts the hole (WARN `paced
+  output: > 8 boundaries went unserviced between two scopes`); the resync rule
+  is the pacer's own exact-grid emit gate (`paced_grid::fill_boundary`).
+- **Logging is bounded per window**: INFO `paced output: no pacer attached —
+  servicing boundaries` at a window's first fill, INFO `paced output: a pacer
+  feeds again after the consumer's fills` (with `fills=`) when the next job
+  ends it, DEBUG per fill in between — a stalled window never floods the log.
+- **A fill counts as a late frame** (`late_frames`: it leaves ~8.3 ms after
+  its stamp, > the 2 ms floor). That is honest and tiny — a few per song
+  change against 1 800 slots a minute.
 - **While a pacer is attached it owns every boundary.** The consumer never
   fills then: a fill would steal the boundary of an emit that is merely late
   (> 8.3 ms), and the pacer's aligned audio block for it would be lost (a
@@ -1242,33 +1274,32 @@ submit thread, which coalesced away a stamp — camera-box's `stamp_gap`.
   detach→attach window (a fill resync, or a gap before the next pacer's first
   job). **Must read 0.**
 - `consumer_fill_pairs` — boundaries the consumer serviced itself; a few per
-  song change / idle→play is normal (the decoder open), a steady climb while a
-  song plays is not (nothing fills while attached).
+  song change / idle→play is normal (the window between two scopes: the old
+  producer's MF + stems teardown, then the next scope's setup — the next
+  decoder's open itself runs in the producer during the ATTACHED pre-roll),
+  a steady climb while a song plays is not (nothing fills while attached).
+- Watch `dropped` at each `wall_anchor_steps_followed` increment: after a
+  followed +50 ms step a pacer wall catches up ~1.5 slots with back-to-back
+  emits, and the 2-deep handoff could coalesce one if the consumer is mid-submit
+  with a job already queued. Not seen yet; the box log is the check.
 
 **Tests** (`paced_output_tests.rs`, single-threaded over `MockNdiBackend` on ONE
 settable clock; 8×2 / 12×2 song frames and a 4×2 black name each boundary's
-picture): a 3-slot decoder open at a song change, play → pause → resume →
-paused song change, and idle → play all give stamps with Δ = exactly one slot,
-the fills holding the last picture (same buffer) + silence and
-`song_change_unserviced_slots = 0`; plus the > 8-slot resync count, the attached
-pacer owning the grid, stale jobs, stop, the fill's audio layout, connection
-polling, the live thread filling on its own, and the spawn-once + drop order.
-`paced_grid_tests.rs` pins every comparison of the pure grid.
+picture): a song change with 3 slots between the scopes AND a decoder whose
+open takes 3 more pre-roll slots, play → pause → resume → paused song change,
+and idle → play all give stamps with Δ = exactly one slot, the fills holding
+the last picture (same buffer) + silence stamped on the boundary and
+`song_change_unserviced_slots = 0`; plus the > 8-slot resync count, the
+attached pacer owning the grid, stale jobs, stop draining the queue, the fill's
+audio layout, connection polling, the live thread filling on its own, the
+spawn-once + drop order, and a gone thread respawned by the next scope. The
+harness's `sends()` leaves out the consumer's `send_get_no_connections` polls
+(it polls on its FIRST submit, then every 30th). `paced_grid_tests.rs` pins
+every comparison of the pure grid.
 
 **Box acceptance** (#148 A/V series): across the E2E scene cuts the
 `ndi: genlock` line reads `song_change_unserviced_slots=0`, and camera-box
 reports 0 `stamp_gap` on sp-* sources.
-
-**Box acceptance** is read from camera-box's audit:
-
-- no `genlock-shallow-remeasure` and no `shallow_latches` increment at a song
-  start;
-- `audio_pairing_offset_ms=0`;
-- the same `cap_avg` idle and playing;
-- one audio arrival per video boundary across a natural song end into idle
-  (the EOS-tail wiring is Windows-only and mutation-excluded, so the box is its
-  only check);
-- then the A/V gate within ±20 ms on 5 consecutive songs.
 
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
 A change to pacing, the submitter, decode, the mixer, NDI or the audio path
