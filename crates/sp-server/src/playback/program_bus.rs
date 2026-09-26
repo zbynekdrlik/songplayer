@@ -15,7 +15,11 @@
 //! stamp `>= cut_boundary` and `from` owns every stamp `< cut_boundary`. A cut
 //! lands on the NEXT boundary + [`CUT_LEAD_SLOTS`] slot: far enough ahead that
 //! both sources emit it after the cut is recorded, so exactly one frame per
-//! boundary reaches the program — no hole, no double.
+//! boundary reaches the program — no hole, no double. "Next" is measured from
+//! the later of the caller's clock and the newest stamp any source offered, so
+//! a lagging API clock can never pull the cut onto a boundary already emitted.
+//! Every paced source reports its progress on every boundary, so the source
+//! cut to is known to be live before its first owned frame arrives.
 //!
 //! **Order.** Two sources offer from two submit threads, so the new source's
 //! first frame can arrive before the old source's last one. The bus keeps a
@@ -229,15 +233,31 @@ impl ProgramCore {
         if self.selected() == Some(pid) {
             return false;
         }
-        let mut boundary = strict_next_boundary_100ns(now_100ns, self.fps);
+        // The caller's clock (the API's realtime) can lag the sources' slewed
+        // stamp clock after a UTC step: never cut before what they emit.
+        let seen = self.last_offer.values().copied().chain(self.last).max();
+        let from = seen.map_or(now_100ns, |s| s.max(now_100ns));
+        let mut boundary = strict_next_boundary_100ns(from, self.fps);
         for _ in 0..CUT_LEAD_SLOTS {
             boundary = strict_next_boundary_100ns(boundary, self.fps);
         }
         self.segments.retain(|&(first, _)| first < boundary);
-        self.segments.push((boundary, pid));
+        // A cut back to the source that still owns the boundary (A→B→A inside
+        // one slot) just cancels the pending cut.
+        if self.selected() != Some(pid) {
+            self.segments.push((boundary, pid));
+        }
         self.health.cuts += 1;
         self.prune();
         true
+    }
+
+    /// Every paced source reports its progress here on every boundary (via
+    /// [`program_copy`]), program candidate or not, so a source that is cut to
+    /// is already known to be live. Returns whether `pid` can own a boundary.
+    pub fn touch(&mut self, pid: i64, stamp_100ns: i64) -> bool {
+        self.last_offer.insert(pid, stamp_100ns);
+        self.is_candidate(pid)
     }
 
     /// A source offers its boundary job (right after its own submit). Records
@@ -426,6 +446,11 @@ impl ProgramBus {
         self.lock().core.is_candidate(pid)
     }
 
+    /// See [`ProgramCore::touch`].
+    pub fn touch(&self, pid: i64, stamp_100ns: i64) -> bool {
+        self.lock().core.touch(pid, stamp_100ns)
+    }
+
     /// See [`ProgramCore::offer`].
     pub fn offer(&self, pid: i64, job: SubmitJob, now_100ns: i64) -> OfferOutcome {
         let outcome = self.lock().core.offer(pid, job, now_100ns);
@@ -490,9 +515,11 @@ impl ProgramBus {
 /// A copy of a source's boundary job for the program — an `Arc` bump of the
 /// frame and one ≤ 12.8 KB audio block — taken BEFORE the source's own submit
 /// moves the frame into its holdover, and only when `pid` can own a program
-/// boundary (every other source pays one lock and nothing else).
+/// boundary. Every source records its progress here on every boundary
+/// ([`ProgramCore::touch`]); a source that cannot own one pays that one lock
+/// and nothing else.
 pub fn program_copy(bus: &ProgramBus, pid: i64, job: &SubmitJob) -> Option<SubmitJob> {
-    bus.is_candidate(pid).then(|| job.clone())
+    bus.touch(pid, job.video_tc_100ns).then(|| job.clone())
 }
 
 static PROGRAM_BUS: OnceLock<Arc<ProgramBus>> = OnceLock::new();
