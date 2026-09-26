@@ -208,6 +208,8 @@ fn anchor_stats_record_max_delta_wide_brackets_and_slewed_total() {
             max_step_us: 5_500,
             wide_brackets: 1,
             slewed_us: 2_000,
+            steps_followed: 0,
+            last_step_us: 0,
         }
     );
 }
@@ -309,40 +311,44 @@ fn every_attempt_preempted_still_moves_at_most_1_ms_and_never_back() {
             max_step_us: 20_000,
             wide_brackets: 1,
             slewed_us: 1_000,
+            steps_followed: 0,
+            last_step_us: 0,
         }
     );
 }
 
 #[test]
-fn a_genuine_plus_50_ms_utc_step_slews_in_over_50_resamples_at_1_ms_each() {
+fn a_genuine_plus_50_ms_utc_step_is_followed_in_one_event_once_confirmed() {
+    // #147 (design record 5845527884, Approach 1 (b)): a dantesync fleet date
+    // step (+50 ms, forward) is followed like every other fleet sender follows
+    // it. The first resample applies the bounded 1 ms and arms the step; the
+    // second, also narrow and measuring the same step (49 ms left + the 1 ms
+    // applied = 50 ms, within ±1 ms), follows the whole rest in ONE event.
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
     clk.step_utc(50 * MS);
-    for r in 1..=50i64 {
-        let (before, after) = resample(&mut wall, &clk);
-        assert_eq!(
-            after - before,
-            MS,
-            "resample {r} must move the wall by exactly 1 ms"
-        );
-        assert_eq!(
-            clk.truth_100ns() - after,
-            (50 - r) * MS,
-            "resample {r} remainder"
-        );
-    }
-    clk.advance_ns(FRAME_NS);
+    let (before, after) = resample(&mut wall, &clk);
+    assert_eq!(after - before, MS, "resample 1: the bounded 1 ms");
+    assert_eq!(clk.truth_100ns() - after, 49 * MS);
+    let (before, after) = resample(&mut wall, &clk);
     assert_eq!(
-        wall.now_100ns(),
-        clk.truth_100ns(),
-        "converged after 50 resamples"
+        after - before,
+        49 * MS,
+        "resample 2 confirms the step and follows the rest in one event"
     );
+    assert_eq!(after, clk.truth_100ns(), "on the stepped UTC at once");
+    // Later resamples are normal again.
+    let (before, after) = resample(&mut wall, &clk);
+    assert_eq!(after, before);
+    assert_eq!(after, clk.truth_100ns());
     assert_eq!(
         wall.anchor_stats(),
         WallAnchorStats {
             max_step_us: 50_000,
             wide_brackets: 0,
-            slewed_us: 49_000,
+            slewed_us: 1_000,
+            steps_followed: 1,
+            last_step_us: 50_000,
         }
     );
 }
@@ -379,6 +385,8 @@ fn a_genuine_minus_50_ms_utc_step_is_held_in_never_stepped_back() {
             max_step_us: 50_000,
             wide_brackets: 0,
             slewed_us: 49_000,
+            steps_followed: 0,
+            last_step_us: 0,
         }
     );
 }
@@ -453,6 +461,8 @@ fn the_counters_report_max_step_wide_brackets_and_slewed_total() {
             max_step_us: 4_900,
             wide_brackets: 2,
             slewed_us: 2_000,
+            steps_followed: 0,
+            last_step_us: 0,
         }
     );
 }

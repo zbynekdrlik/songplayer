@@ -24,8 +24,9 @@ use sp_core::genlock::should_resample_mono_to_real_offset;
 mod wallclock_anchor;
 pub use wallclock_anchor::{
     ANCHOR_MAX_ATTEMPTS, ANCHOR_MAX_STEP_100NS, ANCHOR_TIGHT_BRACKET, ANCHOR_WIDE_BRACKET,
-    AnchorSample, AnchorStep, BracketedRead, WallAnchorStats, apply_anchor_step,
-    bounded_anchor_update, choose_bracketed_sample, to_us, wall_at,
+    AnchorDecision, AnchorSample, AnchorStep, BracketedRead, PendingStep, WallAnchorStats,
+    apply_anchor_step, bounded_anchor_update, choose_bracketed_sample, decide_anchor_step, to_us,
+    wall_at,
 };
 
 /// Source of paired `(monotonic instant, utc_100ns)` samples. Production reads
@@ -120,6 +121,8 @@ pub struct WallClock {
     anchor_utc_100ns: i64,
     frames_since_resample: u64,
     stats: WallAnchorStats,
+    /// A clamped forward resample the next one may confirm (#147).
+    pending: Option<PendingStep>,
 }
 
 /// One anchor sample from `source`: the narrowest of up to
@@ -141,6 +144,7 @@ impl WallClock {
             anchor_utc_100ns: sample.utc_100ns,
             frames_since_resample: 0,
             stats,
+            pending: None,
         }
     }
 
@@ -170,20 +174,32 @@ impl WallClock {
         }
     }
 
-    /// Re-anchor from a fresh bracketed sample, moving the wall by at most
-    /// [`ANCHOR_MAX_STEP_100NS`] (#147). `delta` is what an unbounded re-anchor
-    /// would step the wall by at the sample instant. Within ±1 ms it applies
-    /// as-is (normal dantesync slewing). Beyond that ±1 ms applies now and the
-    /// rest slews in over the next resamples, each of which re-measures the
-    /// remaining offset. A backward correction is a hold, never a step back.
+    /// Re-anchor from a fresh bracketed sample (#147). `delta` is what an
+    /// unbounded re-anchor would step the wall by at the sample instant. Within
+    /// ±1 ms it applies as-is (normal dantesync slewing). Beyond that ±1 ms
+    /// applies now, UNLESS this resample confirms the previous one's forward
+    /// step (`decide_anchor_step`: both brackets narrow, the same delta ±1 ms):
+    /// then the rest of the step is followed in this ONE event, as every other
+    /// fleet sender follows a dantesync date step. A lone outlier stays bounded
+    /// at 1 ms; a backward correction is a hold, never a step back.
     fn reanchor(&mut self) {
         let sample = anchor_sample(&*self.source);
         self.stats.record_sample(&sample);
         let wall = wall_at(self.anchor_instant, self.anchor_utc_100ns, sample.instant);
         let delta = sample.utc_100ns.saturating_sub(wall);
-        let step = bounded_anchor_update(delta);
+        let decision = decide_anchor_step(self.pending, delta, !sample.is_wide());
+        self.pending = decision.pending;
+        let step = decision.step;
         self.stats.record_step(delta, &step);
-        if step.is_clamped() {
+        if let Some(total) = decision.followed_100ns {
+            self.stats.record_follow(total);
+            tracing::info!(
+                delta_us = to_us(delta),
+                step_us = to_us(total),
+                bracket_us = sample.bracket.as_micros() as u64,
+                "wallclock: confirmed UTC step followed in one re-anchor (#147)"
+            );
+        } else if step.is_clamped() {
             tracing::warn!(
                 delta_us = to_us(delta),
                 bracket_us = sample.bracket.as_micros() as u64,
@@ -301,3 +317,7 @@ mod wallclock_tests_anchor;
 #[cfg(test)]
 #[path = "wallclock_tests_mutants.rs"]
 mod wallclock_tests_mutants;
+
+#[cfg(test)]
+#[path = "wallclock_tests_confirm.rs"]
+mod wallclock_tests_confirm;

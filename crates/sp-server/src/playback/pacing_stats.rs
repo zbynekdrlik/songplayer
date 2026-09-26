@@ -79,4 +79,15 @@ pub struct PacingStats {
     /// #147: correction (µs) slewed in through clamped (> 1 ms) re-anchors
     /// instead of stepped, cumulative.
     pub wall_anchor_slewed_us: u64,
+    /// #147: confirmed forward UTC steps (a dantesync fleet date step) the
+    /// pacer's wall followed in ONE re-anchor, cumulative.
+    pub wall_anchor_steps_followed: u64,
+    /// #147: the total step (µs) of the last followed UTC step; 0 before any.
+    pub wall_anchor_last_step_us: u64,
+    /// #147: grid slots nobody serviced across a song change / stop / idle
+    /// transition (the pipeline-lifetime submit consumer). Must read 0.
+    pub song_change_unserviced_slots: u64,
+    /// #147: boundaries the submit consumer serviced itself (held picture +
+    /// silence) between two scopes, cumulative.
+    pub consumer_fill_pairs: u64,
 }

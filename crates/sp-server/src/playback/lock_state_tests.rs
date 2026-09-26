@@ -324,6 +324,10 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             wall_anchor_max_step_us: 40_012,
             wall_anchor_wide_brackets: 2,
             wall_anchor_slewed_us: 3_000,
+            wall_anchor_steps_followed: 4,
+            wall_anchor_last_step_us: 50_030,
+            song_change_unserviced_slots: 6,
+            consumer_fill_pairs: 17,
             ..Default::default()
         },
         audio: AudioStats {
@@ -371,6 +375,11 @@ fn format_genlock_line_contains_every_key_token() {
         "wall_anchor_max_step_us=40012",
         "wall_anchor_wide_brackets=2",
         "wall_anchor_slewed_us=3000",
+        // #147: confirmed UTC steps followed + the consumer's grid across scopes.
+        "wall_anchor_steps_followed=4",
+        "wall_anchor_last_step_us=50030",
+        "song_change_unserviced_slots=6",
+        "consumer_fill_pairs=17",
         "underruns=9",
         "clock_ok=true",
         "lock=DEGRADED",

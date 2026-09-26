@@ -38,6 +38,11 @@ use crate::playback::wallclock::WallClock;
 /// in `crates/sp-ndi/src/sender.rs`.
 pub struct FrameSubmitter<B: NdiBackend> {
     // NOTE: do not reorder these fields — see the SAFETY-CRITICAL note above.
+    /// #147: the pipeline-lifetime paced submit thread (`submitter_paced.rs`),
+    /// spawned on first paced use. FIRST, so it drops first: its `Drop` stops,
+    /// drains, flushes and joins that thread (which sends on a twin of
+    /// `sender`) BEFORE `sender` destroys the NDI instance.
+    paced_output: Option<crate::playback::paced_output::PacedOutput>,
     sender: NdiSender<B>,
     /// Keeps the previous async frame's pixels alive until NDI releases its
     /// pointer (which happens when the next submit / flush call fires). A
@@ -109,6 +114,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         wall: WallClock,
     ) -> Self {
         Self {
+            paced_output: None,
             sender,
             prev_frame: None,
             frame_rate_n,
@@ -937,6 +943,10 @@ mod tests {
 // no-op) + the cached paced NV12 black — an `impl` split for the 1000-line cap.
 #[path = "submitter_standby.rs"]
 mod submitter_standby;
+
+// #147: the pipeline-lifetime paced submit thread, spawned on first paced use.
+#[path = "submitter_paced.rs"]
+mod submitter_paced;
 
 #[cfg(test)]
 #[path = "submitter_tests_timecode.rs"]

@@ -137,6 +137,17 @@ impl Pacer {
         }
     }
 
+    /// Continue the grid right after the paced output's last serviced stamp
+    /// `last_serviced_100ns` (#147, design record 5845527884, Approach 1 (a)):
+    /// the next boundary this pacer latches is exactly one slot after it, so
+    /// the stamps stay contiguous across a song change, a stop or an idle
+    /// stretch while the pipeline-lifetime submit consumer filled the gap. A
+    /// boundary the clock already passed is a normal catch-up (> 8 slots
+    /// behind resyncs, the WARN path).
+    ///
+    /// RED stub: not wired yet — the pacer keeps its own `next_boundary`.
+    pub fn continue_grid_after(&mut self, _last_serviced_100ns: i64) {}
+
     /// Re-anchor for a same-song SEEK (#147): like [`anchor`](Pacer::anchor),
     /// but the refill boundaries (nothing decoded at the new position yet) hold
     /// the last pre-seek picture with the standby silence, instead of flashing

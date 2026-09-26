@@ -137,6 +137,44 @@ pub fn bounded_anchor_update(delta_100ns: i64) -> AnchorStep {
     }
 }
 
+/// A clamped FORWARD resample from a narrow bracket, waiting for the next
+/// resample to confirm it (#147 confirmed date step): the delta it measured and
+/// the ≤ 1 ms it already applied.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingStep {
+    pub delta_100ns: i64,
+    pub applied_100ns: i64,
+}
+
+/// What one resample does to the wall under the confirm-then-follow rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnchorDecision {
+    /// The correction applied now.
+    pub step: AnchorStep,
+    /// `Some(total)` when this resample FOLLOWED a confirmed step: the whole
+    /// step (the earlier applied part + this one), 100-ns units.
+    pub followed_100ns: Option<i64>,
+    /// The step the NEXT resample may confirm.
+    pub pending: Option<PendingStep>,
+}
+
+/// The confirm-then-follow anchor rule (#147, design record 5845527884,
+/// Approach 1 (b)).
+///
+/// RED stub: every resample is the plain ±1 ms [`bounded_anchor_update`]; a
+/// confirmed step is never followed and nothing is ever pending.
+pub fn decide_anchor_step(
+    _pending: Option<PendingStep>,
+    delta_100ns: i64,
+    _narrow: bool,
+) -> AnchorDecision {
+    AnchorDecision {
+        step: bounded_anchor_update(delta_100ns),
+        followed_100ns: None,
+        pending: None,
+    }
+}
+
 /// The wall reading of an anchor at monotonic instant `at`:
 /// `anchor_utc + (at − anchor_instant)`, with an instant before the anchor
 /// reading as the anchor itself (saturating). This is exactly the default
@@ -176,6 +214,10 @@ pub struct WallAnchorStats {
     /// Cumulative correction (µs) applied through CLAMPED resamples (|delta| >
     /// 1 ms), i.e. slewed in rather than stepped.
     pub slewed_us: u64,
+    /// Confirmed forward UTC steps followed in ONE re-anchor (#147).
+    pub steps_followed: u64,
+    /// The total step (µs) of the last followed step; 0 before any.
+    pub last_step_us: u64,
 }
 
 impl WallAnchorStats {
@@ -184,6 +226,12 @@ impl WallAnchorStats {
         if sample.is_wide() {
             self.wide_brackets += 1;
         }
+    }
+
+    /// Record a followed step of `total_100ns` (a confirmed forward step).
+    pub fn record_follow(&mut self, total_100ns: i64) {
+        self.steps_followed += 1;
+        self.last_step_us = total_100ns.unsigned_abs() / 10;
     }
 
     /// Record one resample's measured `delta_100ns` and its bounded `step`.

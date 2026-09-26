@@ -814,6 +814,8 @@ impl Pacer {
             wall_anchor_max_step_us: anchor.max_step_us,
             wall_anchor_wide_brackets: anchor.wide_brackets,
             wall_anchor_slewed_us: anchor.slewed_us,
+            wall_anchor_steps_followed: anchor.steps_followed,
+            wall_anchor_last_step_us: anchor.last_step_us,
             // #168 r2: the pacer does not submit — the paced submit thread fills
             // `submit_call_us_max`/`_p99` via `merge_pacing_stats`; 0 here.
             ..Default::default()
