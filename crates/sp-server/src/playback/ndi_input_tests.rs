@@ -357,6 +357,18 @@ fn a_stride_too_short_for_the_width_is_standby() {
 }
 
 #[test]
+fn the_bus_hands_out_one_shared_input_state() {
+    // The API, the input thread and the shutdown all reach the input through
+    // `ProgramBus::input()`; the mutation gate (run 36258274374) MISSED
+    // replacing it with a fresh default per call. Settings written through one
+    // call must be read back through another.
+    let bus = ProgramBus::new();
+    assert!(Arc::ptr_eq(bus.input(), bus.input()), "one shared state");
+    bus.input().set_settings(enabled());
+    assert_eq!(bus.input().settings(), enabled());
+}
+
+#[test]
 fn without_an_ndi_sdk_the_enabled_input_still_owns_its_boundaries() {
     let bus = ProgramBus::new();
     bus.select_initial(PROGRAM_INPUT_ID);
