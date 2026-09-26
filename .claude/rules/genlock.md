@@ -1262,8 +1262,12 @@ submit thread, which coalesced away a stamp — camera-box's `stamp_gap`.
   33 ms dropout mid-song). The pacer's own catch-up and > 8-slot resync are
   unchanged (the WARN path for a hung box).
 - **The handoff over is atomic.** A fill reserves its stamp under the handoff
-  lock (`HandoffState::next_step`), and `attach()` reads `last_serviced` under
-  the same lock, so a boundary is never serviced twice or skipped.
+  lock (`HandoffState::next_step`), and `attach()` reads, under the same lock,
+  the NEWER of `last_serviced` and the newest job still QUEUED — at a natural
+  song end the EOS-tail boundary can sit behind a slow submit when the idle
+  scope attaches ~1 ms later, and continuing after anything less re-emits it
+  (a stale drop, or a coalesce into a real hole; #147 review round 2). So a
+  boundary is never serviced twice or skipped.
 - **A job at or before the last serviced stamp is never sent** (the output's
   stamps only increase); it counts as a submit-side `dropped`.
 

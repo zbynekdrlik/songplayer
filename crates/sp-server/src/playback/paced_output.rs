@@ -118,6 +118,17 @@ impl HandoffState {
         }
     }
 
+    /// A pacer starts feeding: the grid stops filling, and the pacer is told
+    /// the newest stamp already on its way out — the last one the consumer
+    /// serviced OR a job still queued (at a natural song end the previous
+    /// pacer's EOS-tail boundary can sit behind a slow submit when the idle
+    /// scope attaches). Continuing after anything less would re-emit a
+    /// queued stamp: a stale drop, or a coalesce into a real stamp hole.
+    fn attach(&mut self) -> Option<i64> {
+        let queued = self.queue.newest().map(|job| job.video_tc_100ns);
+        self.grid.attach().max(queued)
+    }
+
     /// The submit counters with the grid telemetry folded in.
     fn counters(&self) -> SubmitCounters {
         let mut counters = self.counters.clone();
@@ -215,7 +226,7 @@ impl SharedHandoff {
     pub fn attach(&self) -> Option<i64> {
         match self.inner.lock() {
             Ok(mut st) => {
-                let last = st.grid.attach();
+                let last = st.attach();
                 self.not_empty.notify_all();
                 last
             }

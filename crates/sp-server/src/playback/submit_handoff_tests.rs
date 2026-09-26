@@ -8,6 +8,20 @@ use crate::playback::pacer::PacedFrame;
 // ---- handoff_policy: bounded queue + coalesce-to-freshest ----
 
 #[test]
+fn newest_is_the_last_queued_job_until_it_is_taken() {
+    let mut q: SubmitQueue<u32> = SubmitQueue::new(SUBMIT_HANDOFF_BOUND);
+    assert_eq!(q.newest(), None);
+    q.offer(1);
+    q.offer(2);
+    assert_eq!(q.newest(), Some(&2));
+    q.offer(3); // coalesces 1 away
+    assert_eq!(q.newest(), Some(&3));
+    q.take();
+    q.take();
+    assert_eq!(q.newest(), None);
+}
+
+#[test]
 fn offer_enqueues_below_bound() {
     let mut q: SubmitQueue<u32> = SubmitQueue::new(SUBMIT_HANDOFF_BOUND);
     assert_eq!(SUBMIT_HANDOFF_BOUND, 2, "box-test-5 depth: 2");

@@ -165,6 +165,11 @@ impl<T> SubmitQueue<T> {
     pub fn take(&mut self) -> Option<T> {
         self.buf.pop_front()
     }
+
+    /// The newest job still queued (the next pacer continues after it, #147).
+    pub fn newest(&self) -> Option<&T> {
+        self.buf.back()
+    }
 }
 
 /// Honest submit-side lateness: how long after its stamp boundary the frame
