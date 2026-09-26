@@ -84,8 +84,10 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   - above 8 behind, resync on the floor;
   - a boundary more than 2 slots ahead is a backward clock step, so re-latch.
 - `NdiInput::service(B, audio_now, bus)`:
-  1. apply a settings change (reconnect), or retry a failed receiver after
-     exactly 5 s;
+  1. apply a settings change, take a finished connect, or request a
+     (re)connect / the retry of a failed one exactly 5 s after the boundary
+     that requested it. NO SDK call happens here (see "Receiver lifecycle off
+     the grid thread" below);
   2. `touch(-1, B)`;
   3. capture the video plus `capture_audio(48000, 2, 1600)` on every
      CONNECTED boundary, so the FrameSync keeps tracking our cadence. Nothing
@@ -117,6 +119,58 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   `lib.rs` and `pipeline.rs` are untouched (cap). On shutdown,
   `bus.input().stop()` ends the loop, which closes the receiver.
 
+## Receiver lifecycle off the grid thread (#212 follow-up)
+
+The rule: **the grid thread never calls an SDK create or destroy.** On the box
+(#212 comment 5849047061) a source change closed the old receiver and created
+the new one ON the grid thread. The destroy alone blocked it for ~0.5 s, which
+gave `> 8 boundaries missed — resync`. While the input is cut to `SP-program`,
+that is ~14 black-filled program slots. Design record: #212 comment 5849076208
+(Approach 1). The code is `playback/ndi_input_connect.rs`, a child module of
+`ndi_input.rs`.
+
+- **Connect.** A (re)connect runs on a short-lived `ndi-input-connect` thread.
+  It calls `NdiFrameSync::connect` and hands the result back through
+  `mpsc::sync_channel(1)`. `apply_settings` does, per boundary:
+  1. apply a settings change: the old pair goes to the close helper;
+  2. `try_recv` a finished connect and swap it in;
+  3. request the next connect if one is needed.
+- **Close.** A replaced or disabled pair is dropped on an `ndi-input-close`
+  thread. A pair whose connect was superseded is dropped the same way.
+- **Meanwhile.** Every boundary goes through the disconnected path: `capture`
+  finds no receiver, so the input offers the standby pair (black + silence)
+  and counts `no_source_boundaries`. The candidate and standby logic is
+  unchanged.
+- **One connect in flight.** A settings change during a pending connect
+  supersedes it. When the stale pair lands it is closed off the grid thread,
+  and the connect for the newest settings starts on that same boundary.
+  Changing back to the pending connect's own settings makes it current again.
+- **Retry.** A failed connect retries exactly `INPUT_RECONNECT_100NS` (5 s)
+  after the boundary that REQUESTED it, not the one where the failure landed.
+  So the retry timing never depends on how long the helper took.
+- **Helper edge cases.**
+  - A helper that could not be spawned, or that panicked, leaves a closed
+    channel (`Disconnected`), which lands as a failed connect.
+  - A close helper that could not be spawned closes inline, with a WARN.
+- **Stop path.** It runs after the loop ended. The current pair is closed on
+  the close helper and JOINED, so the receiver is gone before the input
+  thread returns. A pending connect is abandoned: its helper's `send` finds no
+  receiver, and the helper drops (closes) the pair itself.
+- **Telemetry** in `input`:
+  - `connects_pending` (0 / 1), published by the grid;
+  - `last_connect_ms` / `last_close_ms`, which the helpers time themselves.
+
+  The log lines `receiver + FrameSync created` / `creating the receiver failed`
+  carry `connect_ms`, and `receiver closed` carries `close_ms`. A superseded
+  connect logs `a superseded connect finished — closing it off the grid thread`.
+- **Trade-off (accepted).** A source change takes effect once the helper's
+  create is done. The old receiver lives ~0.5 s longer on its close thread,
+  concurrently with the new one's create.
+- **Box check.** Put the input on program and change the source in Nastavenia.
+  The program `filled` and `resyncs` counters must stay +0, and the input must
+  log no `> 8 boundaries missed` WARN. `last_close_ms` / `last_connect_ms`
+  show the SDK's real cost.
+
 ## Settings, API, UI
 
 - Keys:
@@ -134,8 +188,9 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   - `GET /api/v1/program` and the cut answer carry `input`:
     `{id, label, enabled, running, connected, source, stream, frames_received,
     video_repeats, video_drops, no_source_boundaries, unsupported_boundaries,
-    boundaries, resyncs, relatches, audio_queue_depth, last_frame_size, format,
-    frame_rate, visible_sources}`.
+    boundaries, resyncs, relatches, connects_pending, last_connect_ms,
+    last_close_ms, audio_queue_depth, last_frame_size, format, frame_rate,
+    visible_sources}`.
   - `enabled` and `source` come from the STORED settings, so a save shows at
     once.
   - `stream` = `obs::ndi_discovery::extract_ndi_stream_name(source)`.
@@ -178,6 +233,24 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
 - The converted buffer's size class is pinned through `frame_pool::pool_len`
   on a unique 50×34 class (2550 bytes). A wrongly sized `take` would be an
   equivalent mutant otherwise.
+- The connect is asynchronous, so `rig()` awaits it before `b(1)` (`settle`
+  applies the settings until the pair or a scheduled retry lands, servicing
+  no boundary). `raw_rig()` is the not-yet-connected input.
+- `ndi_input_tests_lifecycle.rs` (a child module) holds the lifecycle tests.
+  The mock's `set_blocking(500 ms, 500 ms)` makes `recv_create` /
+  `recv_destroy` block like the box's SDK. The tests assert:
+  - one pair per boundary, stamped on it;
+  - the exact standby pair in the connect window;
+  - the new pair's FrameSync handle capturing only after it landed;
+  - `connects_pending` 1 during the connect and 0 after;
+  - exactly three `recv_create`s for a superseded connect;
+  - every `service()` under 8 slots.
+
+  One test runs `run_input_loop` on a REAL-time clock (`RealClock`), because
+  a blocked `service()` only shows as missed boundaries on the real grid. It
+  must give contiguous stamps with 0 input / bus resyncs and 0 fills. Every
+  wait is bounded (`wait_for`, 10 s), so a hang fails instead of stalling the
+  mutation gate.
 
 ## Box acceptance (the supervisor's job)
 

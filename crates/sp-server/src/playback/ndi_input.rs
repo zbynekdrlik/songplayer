@@ -28,11 +28,14 @@
 //!   already-converted frame is an `Arc` bump.
 //! - **Settings** (`ndi_input_enabled`, `ndi_input_source`) are re-read every
 //!   [`INPUT_SETTINGS_POLL`] by [`run_input_config_task`]; a change reconnects
-//!   on the input thread. While enabled and not connected, the task lists the
-//!   visible NDI sources every [`INPUT_FIND_EVERY`] (logged + served).
+//!   OFF the grid thread (`ndi_input_connect.rs`): the SDK create and destroy
+//!   run on short-lived helper threads, the grid thread only swaps the new
+//!   pair in and offers its standby pair meanwhile. While enabled and not
+//!   connected, the task lists the visible NDI sources every
+//!   [`INPUT_FIND_EVERY`] (logged + served).
 //! - **Telemetry** is [`NdiInputStatus`], served under `input` on
-//!   `GET /api/v1/program`. Connect, disconnect, source change and format change
-//!   are logged.
+//!   `GET /api/v1/program`. Connect (with its duration), close (with its
+//!   duration), disconnect, source change and format change are logged.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -59,7 +62,7 @@ use crate::playback::program_bus::ProgramBus;
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::vban_out::VbanClock;
 
-// The receiver lifecycle: connect, close, and their timing.
+// The receiver lifecycle off the grid thread: connect, close, their timing.
 #[path = "ndi_input_connect.rs"]
 mod connect;
 
@@ -476,6 +479,8 @@ pub struct NdiInput {
     backend: Option<Arc<dyn NdiReceiveBackend>>,
     shared: Arc<NdiInputShared>,
     sync: Option<NdiFrameSync>,
+    /// A connect running on its helper thread (at most one).
+    pending: Option<connect::PendingConnect>,
     applied: InputSettings,
     retry_at: i64,
     connected: bool,
@@ -501,6 +506,7 @@ impl NdiInput {
             backend,
             shared,
             sync: None,
+            pending: None,
             applied: InputSettings::default(),
             retry_at: i64::MIN,
             connected: false,
