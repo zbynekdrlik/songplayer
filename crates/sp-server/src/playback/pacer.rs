@@ -615,8 +615,8 @@ impl Pacer {
     /// Service one STANDBY scheduling step: fill the current grid boundary with
     /// the frozen last frame (paused) or a black frame (idle / no song), stamped
     /// on-grid via the SAME machinery as [`service`](Self::service), with ONE
-    /// silent audio block (#147) and NO decode pull. The paced pipeline's paused
-    /// branch and the paced idle loop call this once per boundary so EVERY
+    /// audio block (silence, or a held EOS tail once, #147) and NO decode pull.
+    /// The paced paused branch and idle loop call this once per boundary so EVERY
     /// boundary carries a frame while paused/idle — the receiver stays `locked=`
     /// instead of seeing holes (#147 fix-lane-2, change 2). Play/Seek re-anchor
     /// via [`anchor`](Self::anchor). Returns [`ServiceOutcome::Wait`] until the
@@ -861,7 +861,7 @@ impl Pacer {
     /// At EOS ship ONE final boundary of the buffered audio, zero-filled to
     /// `samples_per_boundary` (#148 rework, item 4); anything past it (the v4
     /// read-ahead may hold audio beyond the last frame) goes with the song.
-    /// Empty `Vec` when nothing is buffered; the caller stamps + submits it.
+    /// Empty `Vec` when nothing is buffered; `hold_eos_tail_for_standby` keeps it.
     pub fn take_eos_tail(&mut self) -> Vec<AudioFrame> {
         if self.audio_buf.level_samples() == 0 {
             return Vec::new();

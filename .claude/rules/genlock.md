@@ -1043,7 +1043,13 @@ whatever the state:
   - A new map (`anchor`, lag re-anchor → `AvAlign::realign`) drops a held
     tail. With a Play already queued, the tail boundary is still served first,
     so nothing is lost; a stale tail is never replayed at a later pause.
-  - The `SharedHandoff` is now just `stop()`.
+  - A song that ends with no frame ever shown (`Starved`, e.g. a seek at EOS)
+    has no frozen frame to pair with. Its tail rides the first idle `Black`
+    boundary instead, or a new map drops it. It is still one block per boundary.
+  - The song summary is logged BEFORE the tail boundary, so its frozen repeat
+    is not counted as the song's.
+  - `SharedHandoff`'s stop API is now just `stop()`; the queue, snapshot and
+    counters are unchanged.
 - **The idle fill uses the playing path's submit thread.**
   `pipeline_paced_idle::run_idle_wait` emits through the #168 `HandoffSink`
   and `run_submit_consumer`, with the same shape as `decode_and_send_paced`:
@@ -1097,6 +1103,9 @@ the decoder takes to open.
   start;
 - `audio_pairing_offset_ms=0`;
 - the same `cap_avg` idle and playing;
+- one audio arrival per video boundary across a natural song end into idle
+  (the EOS-tail wiring is Windows-only and mutation-excluded, so the box is its
+  only check);
 - then the A/V gate within ±20 ms on 5 consecutive songs.
 
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)

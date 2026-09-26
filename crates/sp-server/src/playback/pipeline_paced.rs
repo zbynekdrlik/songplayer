@@ -677,14 +677,16 @@ pub(crate) fn decode_and_send_paced(
                         // the receiver keeps one audio block per video boundary into
                         // the idle fill that follows (#147). Any v4 read-ahead past
                         // it ends with the song.
-                        pacer.hold_eos_tail_for_standby();
-                        serve_one_standby_boundary(pacer, &mut sink);
+                        // The summary is taken first, so the tail boundary's frozen
+                        // repeat is not counted as the song's.
                         let reason = if producer_dead {
                             "producer-died"
                         } else {
                             "ended"
                         };
                         log_song_summary(pacer, &summary_base, song_start, playlist_id, reason);
+                        pacer.hold_eos_tail_for_standby();
+                        serve_one_standby_boundary(pacer, &mut sink);
                         break 'emit DecodeResult::Ended;
                     }
                 }
