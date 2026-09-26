@@ -59,6 +59,11 @@ pub struct ScanResult {
     /// the cache directory. Persisted across alignment runs (see #41) so
     /// reprocess reuses Demucs output via aligner.rs cache-hit logic.
     pub vocals_files: Vec<(String, PathBuf)>,
+    /// Complete pairs for a video id that already has a NEWER complete pair
+    /// (a re-download under different metadata left the old pair behind).
+    /// `songs` keeps the newest pair per id; these are removed by
+    /// [`remove_duplicates`] at startup.
+    pub duplicates: Vec<CachedSong>,
 }
 
 static VIDEO_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_-]{11}$").unwrap());
@@ -187,8 +192,13 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
         orphans,
         lyrics_files,
         vocals_files,
+        duplicates: Vec::new(),
     }
 }
+
+/// Delete every superseded duplicate pair: its video, its audio and the
+/// karaoke stems derived from that audio.
+pub fn remove_duplicates(_duplicates: &[CachedSong]) {}
 
 /// Delete every legacy single-file `.mp4` listed in `legacy`.
 pub fn cleanup_legacy(legacy: &[LegacyFile]) {
@@ -439,5 +449,96 @@ mod tests {
             .collect();
         assert!(ids.contains("dQw4w9WgXcQ"));
         assert!(ids.contains("aBcDeFgHiJk"));
+    }
+
+    fn touch_at(path: &Path, secs_ago: u64) {
+        fs::write(path, b"x").unwrap();
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(secs_ago);
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+    }
+
+    /// Box, 27.9.2026: `TwzfEwsTfag` had two complete pairs in the cache — an
+    /// April pair under the artist "Indiana Bible College" and an August `_gf`
+    /// pair under "Worthy" (with stems). The scan kept whichever video/audio
+    /// half it met last per id, so it could even pair one base's video with
+    /// the other base's audio, and the stale pair stayed forever (the A/V
+    /// gate refused the ambiguity).
+    #[test]
+    fn two_complete_pairs_for_one_id_keep_the_newest_and_list_the_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let old_v =
+            d.join("Never Lost Champion_Indiana Bible College_TwzfEwsTfag_normalized_video.mp4");
+        let old_a =
+            d.join("Never Lost Champion_Indiana Bible College_TwzfEwsTfag_normalized_audio.flac");
+        let new_v = d.join("Never Lost Champion_Worthy_TwzfEwsTfag_normalized_gf_video.mp4");
+        let new_a = d.join("Never Lost Champion_Worthy_TwzfEwsTfag_normalized_gf_audio.flac");
+        touch_at(&old_v, 400_000);
+        touch_at(&old_a, 400_000);
+        touch_at(&new_v, 1_000);
+        touch_at(&new_a, 1_000);
+
+        let r = scan_cache(d);
+        assert_eq!(r.songs.len(), 1, "one keeper per id");
+        assert_eq!(r.songs[0].video_path, new_v, "the newest pair is kept");
+        assert_eq!(r.songs[0].audio_path, new_a, "never a cross-paired half");
+        assert_eq!(r.songs[0].artist, "Worthy");
+        assert!(r.songs[0].gemini_failed);
+        assert_eq!(r.duplicates.len(), 1);
+        assert_eq!(r.duplicates[0].video_path, old_v);
+        assert_eq!(r.duplicates[0].audio_path, old_a);
+        assert_eq!(r.duplicates[0].video_id, "TwzfEwsTfag");
+        assert!(r.orphans.is_empty(), "both pairs are complete: no orphan");
+    }
+
+    #[test]
+    fn a_half_of_another_base_is_an_orphan_not_a_pair_partner() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let v = d.join("Song_ArtistA_dQw4w9WgXcQ_normalized_video.mp4");
+        let a = d.join("Song_ArtistB_dQw4w9WgXcQ_normalized_audio.flac");
+        touch_at(&v, 10);
+        touch_at(&a, 10);
+        let r = scan_cache(d);
+        assert!(r.songs.is_empty(), "different bases never pair");
+        assert_eq!(r.orphans.len(), 2);
+        assert!(r.duplicates.is_empty());
+    }
+
+    #[test]
+    fn remove_duplicates_deletes_the_pair_and_its_stems_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let dup_v = d.join("S_Old_TwzfEwsTfag_normalized_video.mp4");
+        let dup_a = d.join("S_Old_TwzfEwsTfag_normalized_audio.flac");
+        let dup_voc = d.join("S_Old_TwzfEwsTfag_normalized_audio_vocals.flac");
+        let dup_ins = d.join("S_Old_TwzfEwsTfag_normalized_audio_instrumental.flac");
+        let keep_v = d.join("S_New_TwzfEwsTfag_normalized_gf_video.mp4");
+        let keep_a = d.join("S_New_TwzfEwsTfag_normalized_gf_audio.flac");
+        let keep_voc = d.join("S_New_TwzfEwsTfag_normalized_gf_audio_vocals.flac");
+        for p in [
+            &dup_v, &dup_a, &dup_voc, &dup_ins, &keep_v, &keep_a, &keep_voc,
+        ] {
+            fs::write(p, b"x").unwrap();
+        }
+        remove_duplicates(&[CachedSong {
+            video_id: "TwzfEwsTfag".into(),
+            song: "S".into(),
+            artist: "Old".into(),
+            gemini_failed: false,
+            video_path: dup_v.clone(),
+            audio_path: dup_a.clone(),
+        }]);
+        for p in [&dup_v, &dup_a, &dup_voc, &dup_ins] {
+            assert!(!p.exists(), "{} removed", p.display());
+        }
+        for p in [&keep_v, &keep_a, &keep_voc] {
+            assert!(p.exists(), "{} kept", p.display());
+        }
     }
 }
