@@ -373,12 +373,69 @@ fn a_cut_follows_the_sources_clock_when_the_api_clock_lags() {
     assert!(core.cut(SRC_B, b(5)));
     assert_eq!(core.status().cut_boundary_100ns, Some(b(12)));
 
-    // An API clock ahead of the sources is taken as it is.
+    // An API clock AHEAD of the sources (a forward UTC step the stamp walls are
+    // still slewing in) must not delay the cut either: the bus cuts in the
+    // sources' stamp domain, the caller's clock is only the fallback.
     let mut core = ProgramCore::new();
     core.select_initial(SRC_A);
     core.offer(SRC_A, job(4, &fa, b(1), 0.1), b(1) + MS);
     assert!(core.cut(SRC_B, b(20)));
-    assert_eq!(core.status().cut_boundary_100ns, Some(b(22)));
+    assert_eq!(core.status().cut_boundary_100ns, Some(b(3)));
+}
+
+#[test]
+fn a_cut_ignores_the_progress_of_sources_it_does_not_involve() {
+    // C (off program, never involved) once stamped far ahead; only the program
+    // sources, the source cut to and the program's own progress place a cut.
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_A);
+    let fa = frame(4, 2);
+    for k in 1..=5 {
+        core.offer(SRC_A, job(4, &fa, b(k), 0.1), b(k) + MS);
+    }
+    assert!(!core.touch(SRC_C, b(40)));
+    assert!(!core.touch(SRC_B, b(5)));
+    assert!(core.cut(SRC_B, b(5) + 5 * MS));
+    assert_eq!(core.status().cut_boundary_100ns, Some(b(7)));
+}
+
+#[test]
+fn an_offer_never_decides_a_missed_boundary_on_the_sources_own_clock() {
+    // The paced submit thread passes its own per-song wall, which after a
+    // forward UTC step can read hundreds of ms ahead of the stamps. Only the
+    // program sender (on its own wall) declares a boundary missed by time;
+    // the offer path forwards, and fills only a gap the owner is already past.
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_A);
+    let (backend, mut out) = program();
+    let fa = frame(4, 2);
+    for k in 1..=5 {
+        let ahead = b(k) + 500 * MS;
+        assert_eq!(
+            core.offer(SRC_A, job(4, &fa, b(k), 0.1), ahead),
+            OfferOutcome::Accepted,
+            "b({k})"
+        );
+        drain(&mut core, &mut out);
+    }
+    assert_eq!(backend.video_timecodes(), stamps(1..=5));
+    assert_eq!(video_dims(&backend), dims(&[("4x2", 5)]));
+    let h = core.status().health;
+    assert_eq!((h.filled, h.late_dropped, h.resyncs), (0, 0, 0));
+}
+
+#[test]
+fn a_source_that_jumps_more_than_eight_slots_resyncs_on_the_offer_path() {
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_A);
+    let (backend, mut out) = program();
+    let fa = frame(4, 2);
+    core.offer(SRC_A, job(4, &fa, b(1), 0.1), b(1) + MS);
+    core.offer(SRC_A, job(4, &fa, b(20), 0.1), b(20) + MS);
+    drain(&mut core, &mut out);
+    assert_eq!(backend.video_timecodes(), vec![b(1), b(20)]);
+    let h = core.status().health;
+    assert_eq!((h.resyncs, h.filled, h.forwarded), (1, 0, 2));
 }
 
 #[test]
