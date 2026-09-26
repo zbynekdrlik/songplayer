@@ -177,6 +177,7 @@ pub fn SettingsForm() -> impl IntoView {
                     "Model"
                     <input
                         type="text"
+                        data-testid="settings-gemini-model"
                         prop:value=move || gemini_model.get()
                         on:input=move |ev| gemini_model.set(event_target_value(&ev))
                     />
@@ -237,7 +238,7 @@ pub fn SettingsForm() -> impl IntoView {
                     <input
                         type="text"
                         data-testid="settings-vban-targets"
-                        placeholder="fohabl.lan:6980, lv1.lan:6980"
+                        placeholder="dev1.lan:6980"
                         prop:value=move || vban_targets.get()
                         on:input=move |ev| vban_targets.set(event_target_value(&ev))
                     />

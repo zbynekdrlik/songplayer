@@ -23,18 +23,22 @@ function realConsoleErrors(): string[] {
   return consoleMessages.filter((m) => !ALLOWED_CONSOLE.some((r) => r.test(m)));
 }
 
-// Open Nastavenia and wait until the page's own GET /api/v1/settings landed,
-// so the load can never overwrite what the test types afterwards.
+// Open Nastavenia and wait until the loaded settings are IN THE FORM, so the
+// load can never overwrite what the test clicks/types afterwards. The Gemini
+// model is the proof: the fixture's `gemini-2.5-flash` differs from the form's
+// built-in default, so it shows only once the page's GET landed and the form's
+// sync Effect ran (the vban_* fields' defaults equal the fixture's, so they
+// cannot prove it).
 async function openSettings(page: Page) {
   await page.goto("/");
-  const loaded = page.waitForResponse(
-    (r) => r.request().method() === "GET" && /\/api\/v1\/settings$/.test(r.url()),
-  );
   await page.locator('[data-testid="nav-settings"]').click();
-  await loaded;
   await expect(page.locator('[data-testid="settings-vban"]')).toBeVisible({
     timeout: 10000,
   });
+  await expect(page.locator('[data-testid="settings-gemini-model"]')).toHaveValue(
+    "gemini-2.5-flash",
+    { timeout: 10000 },
+  );
 }
 
 function settingsPatches(page: Page): Record<string, unknown>[] {

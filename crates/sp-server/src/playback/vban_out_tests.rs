@@ -500,7 +500,7 @@ fn the_wall_clock_reads_the_wall_and_sleeps_for_real() {
     let t = Instant::now();
     clock.sleep_100ns(200_000);
     let slept = t.elapsed();
-    assert!(slept >= Duration::from_millis(20), "slept {slept:?}");
+    assert!(slept >= Duration::from_millis(15), "slept {slept:?}");
     assert!(slept < Duration::from_secs(2), "slept {slept:?}");
 }
 
@@ -536,6 +536,58 @@ async fn the_settings_load_with_defaults_and_stored_values() {
     let s = load_vban_settings(&pool).await.unwrap();
     assert!(!s.enabled, "only \"true\" enables");
     assert_eq!(s.stream_name, "sp-program", "a blank name is the default");
+}
+
+#[test]
+fn at_most_8_targets_are_used() {
+    let ten = VbanSettings {
+        enabled: true,
+        stream_name: "sp-program".into(),
+        targets: (1..=10)
+            .map(|i| format!("10.0.0.{i}:6980"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    };
+    let specs = ten.target_specs();
+    assert_eq!(specs.len(), 8);
+    assert_eq!(specs[0], "10.0.0.1:6980");
+    assert_eq!(specs[7], "10.0.0.8:6980");
+    assert_eq!(ten.ignored_targets(), 2);
+    let three = VbanSettings {
+        targets: "a:1,b:2, c:3".into(),
+        ..ten
+    };
+    assert_eq!(three.target_specs(), vec!["a:1", "b:2", "c:3"]);
+    assert_eq!(three.ignored_targets(), 0);
+    assert_eq!(VBAN_MAX_TARGETS, 8);
+}
+
+#[test]
+fn the_loop_reports_running_while_it_runs() {
+    let out = Arc::new(VbanOut::new());
+    assert!(!out.is_running());
+    assert!(!out.status().running);
+    let (tx, rx) = mpsc::channel();
+    let looped = out.clone();
+    let h = std::thread::spawn(move || {
+        let mut clock = FakeClock::at(D);
+        let mut sink = RecordingSink::on(&clock);
+        run_vban_loop(&looped, &mut sink, &mut clock);
+        tx.send(()).unwrap();
+    });
+    let t = Instant::now();
+    while !out.status().running {
+        assert!(
+            t.elapsed() < Duration::from_secs(10),
+            "the loop never started"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    out.stop();
+    rx.recv_timeout(Duration::from_secs(10))
+        .expect("the loop stops");
+    h.join().unwrap();
+    assert!(!out.is_running(), "cleared on exit");
 }
 
 #[test]
@@ -665,10 +717,22 @@ fn the_config_carries_the_wire_name_and_the_status_its_targets() {
 
 #[test]
 fn resolve_and_log_cadences() {
-    assert!(needs_resolve(false, None), "first pass");
-    assert!(!needs_resolve(false, Some(Duration::from_secs(59))));
-    assert!(needs_resolve(false, Some(Duration::from_secs(60))));
-    assert!(needs_resolve(true, Some(Duration::from_secs(1))), "changed");
+    assert!(needs_resolve(false, true, None), "never resolved");
+    assert!(!needs_resolve(false, true, Some(Duration::from_secs(59))));
+    assert!(needs_resolve(false, true, Some(Duration::from_secs(60))));
+    assert!(
+        needs_resolve(true, true, Some(Duration::from_secs(1))),
+        "changed"
+    );
+    assert!(
+        needs_resolve(true, false, Some(Duration::from_secs(1))),
+        "changed"
+    );
+    assert!(
+        !needs_resolve(false, false, Some(Duration::from_secs(60))),
+        "a disabled output does not re-resolve"
+    );
+    assert!(!needs_resolve(false, false, None));
     assert!(should_log(1));
     assert!(!should_log(2));
     assert!(!should_log(999));

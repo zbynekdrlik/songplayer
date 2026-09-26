@@ -48,6 +48,12 @@ pub const PROGRAM_STANDBY_H: u32 = 1080;
 const PROGRAM_AUDIO_RATE_HZ: u32 = 48_000;
 const PROGRAM_AUDIO_CHANNELS: u32 = 2;
 
+// #210: the VBAN output carries exactly the program's audio format.
+const _: () = assert!(
+    PROGRAM_AUDIO_RATE_HZ as i64 == crate::playback::vban_packet::VBAN_SAMPLE_RATE_HZ
+        && PROGRAM_AUDIO_CHANNELS as usize == crate::playback::vban_packet::VBAN_CHANNELS
+);
+
 /// Poll the `SP-program` receiver connection count every this many submitted
 /// pairs (~1 s at 30 fps), as the source submit threads do.
 const CONN_POLL_EVERY: u32 = 30;

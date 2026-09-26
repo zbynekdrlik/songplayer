@@ -11,8 +11,11 @@
 //! boundary `B` at `due(B) + L + k/240 s`, where L is one slot
 //! ([`VBAN_SEND_LATENCY_100NS`]). It paces on its own [`WallClock`], ticked
 //! once per grid boundary like the program wall ([`WallVbanClock`]), so the
-//! sends are one packet every 4.1667 ms and never a burst. The frame counter
-//! grows by exactly 1 per packet across cuts and standby.
+//! on-time packets go out one every 4.1667 ms, one wait each, never as a burst.
+//! A block that arrives after its first packet is due (a program fill after
+//! the 3-slot grace, a fleet date step before the walls re-converge) sends its
+//! past-due packets back-to-back and counts each as a late send. The frame
+//! counter grows by exactly 1 per packet across cuts and standby.
 //!
 //! One UDP socket sends to every resolved target. The settings (`vban_enabled`,
 //! `vban_stream_name`, `vban_targets`) are re-read every
@@ -24,6 +27,7 @@
 use std::collections::VecDeque;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -72,6 +76,10 @@ pub const VBAN_RESOLVE_EVERY: Duration = Duration::from_secs(60);
 /// A repeating warning (overflow, substitution, send error) is logged on its
 /// first occurrence and then every this many.
 pub const VBAN_LOG_EVERY: u64 = 1000;
+
+/// At most this many targets are sent to (each costs ~2.4 Mbit/s and one
+/// `send_to` per packet on the paced thread); the rest are ignored + logged.
+pub const VBAN_MAX_TARGETS: usize = 8;
 
 /// One program boundary's audio for VBAN.
 #[derive(Clone, Debug, PartialEq)]
@@ -137,14 +145,25 @@ impl Default for VbanSettings {
 }
 
 impl VbanSettings {
-    /// The non-empty, trimmed `host:port` entries of `targets`.
+    /// The non-empty, trimmed `host:port` entries of `targets`, at most
+    /// [`VBAN_MAX_TARGETS`] of them.
     pub fn target_specs(&self) -> Vec<String> {
+        self.all_specs()
+            .take(VBAN_MAX_TARGETS)
+            .map(String::from)
+            .collect()
+    }
+
+    /// How many entries [`target_specs`](Self::target_specs) ignores.
+    pub fn ignored_targets(&self) -> usize {
+        self.all_specs().count().saturating_sub(VBAN_MAX_TARGETS)
+    }
+
+    fn all_specs(&self) -> impl Iterator<Item = &str> {
         self.targets
             .split(',')
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect()
     }
 }
 
@@ -220,10 +239,11 @@ pub fn resolve_targets(
         .collect()
 }
 
-/// Re-resolve when the settings changed, on the first pass, or once
-/// [`VBAN_RESOLVE_EVERY`] passed since the last resolve.
-pub fn needs_resolve(changed: bool, since_last: Option<Duration>) -> bool {
-    changed || since_last.is_none_or(|d| d >= VBAN_RESOLVE_EVERY)
+/// Re-resolve when the settings changed (the first pass counts as a change),
+/// or, while enabled, once [`VBAN_RESOLVE_EVERY`] passed since the last
+/// resolve — a disabled output never re-resolves a dead target every minute.
+pub fn needs_resolve(changed: bool, enabled: bool, since_last: Option<Duration>) -> bool {
+    changed || (enabled && since_last.is_none_or(|d| d >= VBAN_RESOLVE_EVERY))
 }
 
 /// A repeating warning is logged on its first occurrence and every
@@ -297,6 +317,8 @@ pub struct VbanTargetStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct VbanStatus {
     pub enabled: bool,
+    /// The VBAN thread is running (Windows; started by `start_program`).
+    pub running: bool,
     pub stream_name: String,
     /// Packets sent (each to every resolved target).
     pub packets_sent: u64,
@@ -352,6 +374,8 @@ pub struct VbanOut {
     ready: Condvar,
     config: Mutex<Arc<VbanConfig>>,
     stats: Mutex<VbanCounters>,
+    /// Set while [`run_vban_loop`] runs.
+    running: AtomicBool,
 }
 
 impl Default for VbanOut {
@@ -371,7 +395,13 @@ impl VbanOut {
             ready: Condvar::new(),
             config: Mutex::new(Arc::new(VbanConfig::default())),
             stats: Mutex::new(VbanCounters::default()),
+            running: AtomicBool::new(false),
         }
+    }
+
+    /// The VBAN thread is running.
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
     }
 
     /// Hand one block over. Never blocks; over [`VBAN_QUEUE_BOUND`] the
@@ -397,7 +427,8 @@ impl VbanOut {
                 warn!(
                     blocks_dropped = n,
                     bound = VBAN_QUEUE_BOUND,
-                    "vban output: queue full — dropped the oldest block (the VBAN thread fell behind)"
+                    thread_running = self.is_running(),
+                    "vban output: queue full — dropped the oldest block (the VBAN thread fell behind, or is not running)"
                 );
             }
         }
@@ -470,6 +501,7 @@ impl VbanOut {
         let s = lock(&self.stats);
         VbanStatus {
             enabled: cfg.enabled,
+            running: self.is_running(),
             stream_name: cfg.stream_name.clone(),
             packets_sent: s.packets_sent,
             send_errors: s.send_errors,
@@ -566,7 +598,6 @@ pub struct VbanSender {
     encoder: VbanEncoder,
     packets: Box<VbanBlockPackets>,
     last_send_100ns: Option<i64>,
-    latency_100ns: i64,
 }
 
 impl Default for VbanSender {
@@ -575,7 +606,6 @@ impl Default for VbanSender {
             encoder: VbanEncoder::default(),
             packets: empty_block_packets(),
             last_send_100ns: None,
-            latency_100ns: VBAN_SEND_LATENCY_100NS,
         }
     }
 }
@@ -615,7 +645,7 @@ impl VbanSender {
         self.encoder
             .encode_block(&cfg.name_bytes, block.samples.as_deref(), &mut self.packets);
         for (k, packet) in self.packets.iter().enumerate() {
-            let at = packet_send_at_100ns(block.due_100ns, self.latency_100ns, k);
+            let at = packet_send_at_100ns(block.due_100ns, VBAN_SEND_LATENCY_100NS, k);
             let wait = plan_wait_100ns(clock.now_100ns(), at);
             if wait > 0 {
                 clock.sleep_100ns(wait);
@@ -654,6 +684,7 @@ pub fn run_vban_loop(
     clock: &mut dyn VbanClock,
 ) -> VbanSender {
     let mut sender = VbanSender::default();
+    out.running.store(true, Ordering::SeqCst);
     loop {
         match out.take_timeout(VBAN_IDLE_WAIT) {
             VbanTake::Block(block) => {
@@ -663,6 +694,7 @@ pub fn run_vban_loop(
             VbanTake::Stopped => break,
         }
     }
+    out.running.store(false, Ordering::SeqCst);
     info!(
         packets_sent = out.status().packets_sent,
         next_counter = sender.next_counter(),
@@ -680,6 +712,7 @@ pub fn spawn_vban_thread(out: Arc<VbanOut>) {
         .name("vban-output".into())
         .spawn(move || {
             crate::playback::pipeline_paced::request_high_res_timer();
+            crate::playback::pipeline::pipeline_audio::raise_thread_priority("vban-output");
             let mut socket = match UdpSocket::bind(("0.0.0.0", 0)) {
                 Ok(s) => s,
                 Err(e) => {
@@ -711,7 +744,15 @@ pub async fn run_vban_config_task(
         match load_vban_settings(&pool).await {
             Ok(settings) => {
                 let changed = applied.as_ref() != Some(&settings);
-                if needs_resolve(changed, resolved_at.map(|t| t.elapsed())) {
+                let since = resolved_at.map(|t| t.elapsed());
+                if needs_resolve(changed, settings.enabled, since) {
+                    if settings.ignored_targets() > 0 {
+                        warn!(
+                            ignored = settings.ignored_targets(),
+                            max = VBAN_MAX_TARGETS,
+                            "vban output: too many targets — the extra ones are ignored"
+                        );
+                    }
                     let cfg = resolve_config(settings.clone(), out.config().targets.clone()).await;
                     for t in cfg.targets.iter().filter(|t| t.error.is_some()) {
                         warn!(

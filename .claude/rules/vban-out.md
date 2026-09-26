@@ -27,7 +27,18 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
   packets of 200 frames, as INT24 PCM with full scale ±8388607 and clamping.
   It sends packet k of boundary B at `due(B) + L + k·1e7/240` (100 ns, floored:
   0, 41 666, 83 333, …, 291 666). L is one slot (`VBAN_SEND_LATENCY_100NS` =
-  333 333). One wait per packet, never a burst.
+  333 333). An on-time packet gets exactly one wait, so they go out evenly.
+  A block that arrives AFTER its first packet is due sends its past-due packets
+  back-to-back, each counted in `late_sends`. That happens after a program fill
+  past the 3-slot grace, or for ≤ ~3.3 s after a confirmed fleet date step
+  (walls up to ~1.5 slots apart, see program-bus.md). If the box capture shows
+  `late_sends` climbing there, L = 2 slots is the knob.
+- Residual: a program RESYNC (> 8 missed slots) skips stamps. VBAN then has a
+  time gap while its counter stays contiguous, and the receiver sees an
+  underrun, not a counter loss.
+- The thread runs at `THREAD_PRIORITY_TIME_CRITICAL`
+  (`pipeline_audio::raise_thread_priority`, shared with the NDI audio emitter)
+  with the 1 ms multimedia timer.
 - Clock: its own `WallClock`, ticked through `program_output::BoundaryTicker`
   once per boundary passed (`WallVbanClock`). That is the same cadence as the
   program and the pacer walls, so a UTC step slews in at the same rate — one
@@ -57,24 +68,30 @@ The payload is 1200 B of interleaved 3-byte LE samples, within the spec's
 
 - The keys live in `sp_core::config`:
   - `vban_enabled`: only `"true"` enables;
-  - `vban_stream_name`: default `sp-program`, and NEVER `cg` before B4;
-  - `vban_targets`: comma-separated `host:port`.
+  - `vban_stream_name`: default `sp-program`. Policy, not enforced by code:
+    never `cg` before B4;
+  - `vban_targets`: comma-separated `host:port`, at most `VBAN_MAX_TARGETS`
+    (8); extra entries are ignored with a warning.
 - `run_vban_config_task` re-reads them every 5 s, so a dashboard save applies
   without a restart. It resolves DNS on a change and every 60 s, with std
   `ToSocketAddrs` on the blocking pool and the first IPv4 address, because the
-  socket is IPv4. A failed re-resolve KEEPS the target's last good address and
-  shows the error.
-- `GET /api/v1/program` and the cut answer carry `vban`: `{enabled,
-  stream_name, packets_sent, send_errors, blocks_dropped, blocks_substituted,
+  socket is IPv4. The 60 s re-resolve runs only while enabled. A failed
+  re-resolve KEEPS the target's last good address and shows the error.
+- `GET /api/v1/program` and the cut answer carry `vban`: `{enabled, running
+  (the thread is alive), stream_name, packets_sent, send_errors, blocks_dropped, blocks_substituted,
   late_sends (> 2 ms after due), send_interval_p99_us (last 1200 intervals),
   frame_counter, targets[{target, addr, error}]}`. The API reaches it through
   `ProgramBus::vban()`, so there is no new `AppState` field and `lib.rs`
   (1000/1000) is untouched.
 - UI: Nastavenia fieldset `settings-vban` with the testids
   `settings-vban-enabled` (checkbox), `settings-vban-stream-name`
-  (maxlength 16) and `settings-vban-targets`. The mock keeps the vban_* keys
+  (maxlength 16) and `settings-vban-targets` (placeholder `dev1.lan:6980`,
+  never FOH). The mock keeps the vban_* keys
   absent (defaults) and `/__mock/settings-reset` restores the fixture. Its
-  `GET /api/v1/program` derives `vban` from the stored settings.
+  `GET /api/v1/program` derives `vban` from the stored settings. The spec
+  waits for `settings-gemini-model` to read the fixture's `gemini-2.5-flash`
+  before it clicks: the vban defaults equal the fixture, so only a field whose
+  fixture value differs from the form default proves the load landed.
 
 ## Tests
 

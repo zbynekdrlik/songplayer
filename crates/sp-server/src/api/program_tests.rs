@@ -174,6 +174,7 @@ async fn get_program_reports_the_vban_block() {
     assert_eq!(status, StatusCode::OK);
     let v = &json["vban"];
     assert_eq!(v["enabled"], false);
+    assert_eq!(v["running"], false, "no VBAN thread in a unit test");
     assert_eq!(v["stream_name"], "sp-program");
     assert_eq!(v["packets_sent"], 0);
     assert_eq!(v["blocks_dropped"], 0);
