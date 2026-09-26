@@ -426,6 +426,35 @@ fn a_consumer_starved_past_eight_slots_resyncs_and_counts_the_hole_honestly() {
 }
 
 #[test]
+fn a_scope_attaching_while_the_last_jobs_are_still_queued_continues_after_them() {
+    // A natural song end: the EOS-tail boundary b(4) is offered, the song
+    // detaches, and the idle scope attaches ~1 ms later while b(4) (behind a
+    // slow submit) is still queued. The next pacer must continue at b(5):
+    // re-emitting b(4) is a stale drop, and a second queued job would coalesce
+    // into a real stamp hole.
+    let mut rig = Rig::new();
+    let h = rig.handoff.clone();
+    {
+        let _song = PacedFeed::attach(&h);
+        h.offer(job(b(3), 8, Some(2)));
+        rig.drain();
+        h.offer(job(b(4), 8, Some(2)));
+    }
+    let idle = PacedFeed::attach(&h);
+    assert_eq!(
+        idle.last_serviced_100ns(),
+        Some(b(4)),
+        "the queued b(4) counts as serviced"
+    );
+    h.offer(job(b(5), 8, Some(2)));
+    rig.drain();
+    assert_eq!(rig.backend.video_timecodes(), vec![b(3), b(4), b(5)]);
+    let c = rig.counters();
+    assert_eq!(c.dropped, 0);
+    assert_eq!(c.song_change_unserviced_slots, 0);
+}
+
+#[test]
 fn an_attached_pacer_owns_the_grid_even_when_it_is_late() {
     let mut rig = Rig::new();
     let h = rig.handoff.clone();

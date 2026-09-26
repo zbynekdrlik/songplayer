@@ -161,3 +161,24 @@ fn pacing_stats_carry_the_pacer_wall_anchor_telemetry() {
         (4_800, 1, 1_000)
     );
 }
+
+#[test]
+fn pacing_stats_carry_a_followed_utc_step() {
+    // #147 (b): a +50 ms fleet date step, confirmed by the second resample, is
+    // followed in one event and reported through the pacer's own stats.
+    let clk = VirtualClock::new(0);
+    let mut pacer = Pacer::with_wallclock(30, true, WallClock::new(Box::new(clk.clone())));
+    clk.step_utc(500_000);
+    for _ in 0..200 {
+        clk.advance_ns(33_333_300);
+        pacer.tick_wall();
+    }
+    let s = pacer.stats();
+    assert_eq!(s.wall_anchor_steps_followed, 1);
+    assert_eq!(s.wall_anchor_last_step_us, 50_000);
+    assert_eq!(
+        s.wall_anchor_slewed_us, 1_000,
+        "only the arming resample slewed"
+    );
+    assert_eq!(pacer.now_100ns(), clk.truth_100ns(), "on the stepped UTC");
+}
