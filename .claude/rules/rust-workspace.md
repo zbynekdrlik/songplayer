@@ -382,3 +382,35 @@ PRE-fmt text silently does nothing — #212 shipped a test asserting the old 2×
 standby while the rig built 2×4, caught only by a review pass (it would have
 reddened 6 CI tests). Fail loudly when an anchor is missing
 (`if old not in s: sys.exit(...)`), or use the Edit tool, and re-read the result.
+
+## "Never blocks / never waits" tests: gates and thread names, never wall-time thresholds (#212 follow-up)
+
+The gating Coverage job runs every test under `cargo tarpaulin`'s ptrace, and
+under ptrace a thread can stall for a long time on a breakpoint. So a
+real-time grid, a "this call took < N ms" budget, or a read of a value some
+other thread is still publishing can flake there. The no-compile box never
+sees that. What held up across five review rounds:
+
+- **Prove WHERE a call ran.** Have the mock record `thread::current().name()`
+  per call (`MockNdiReceiveBackend::calls_by_thread`) and assert the helper's
+  thread name. A regression that runs the call inline then fails
+  deterministically.
+- **Prove the caller does not WAIT.** Hold the slow call in the mock behind a
+  `Mutex<bool>` + `Condvar` gate (`set_held`). Require the caller to make N
+  more steps within a bounded `wait_for`, then release. Any wait on the
+  caller's side stalls and fails the bound.
+- **Use "must NOT happen yet" windows only in the safe direction.** For
+  example, `recv_timeout(200 ms).is_err()` while the gate is held. Correct
+  code can never fail it; a slow runner only makes it pass vacuously.
+- **Pace virtual time for loop tests.** Every wait really sleeps, but only the
+  waits advance the clock. A stall then cannot fake a missed boundary; the
+  gate proves the waiting part.
+- **FFI lock scope** (`mutants::skip` code that needs a runtime). Move the SDK
+  calls into a struct built from the `unsafe extern "C" fn` pointer table
+  (`receive.rs` `RecvHandles`). Test it with fake `unsafe extern "C" fn`s whose
+  gate is a `static Mutex/Condvar`. Only one test may use those statics.
+  Never let a fake panic: unwinding out of `extern "C"` aborts the whole test
+  binary.
+- **A value published by another thread is read only after waiting for THIS
+  event's value** (e.g. `last_connect_ms >= 400`), never for "any value". An
+  earlier event's late write can overwrite it.
