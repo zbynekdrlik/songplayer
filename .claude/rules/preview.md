@@ -257,9 +257,11 @@ under a SEPARATE browser-channel project (bundled Chromium runs everything else)
 - **Post-deploy (`e2e/post-deploy-preview.spec.ts`, `post-deploy.config.ts` `edge`
   project)** — `channel: 'msedge'` (Edge is always present on the Windows box and
   carries the codecs; the box E2E job runs `npx playwright install msedge`). It
-  does NOT drive OBS at all (safest for the shared live wall): it reads
-  `/api/v1/status.active_playlist_ids` to confirm a playlist is on program, then
-  on the auto-selected card CLICKS `preview-start`, asserts the real box-encoded
+  does NOT drive OBS at all (safest for the shared live wall). It reads the
+  program state (`e2e/program-state.ts`, #184) and EXPLICITLY selects the
+  on-program card: a regular playlist when one is on program, else the Dabing
+  card after starting its ready dub (see `post-deploy-program-state.md`). On
+  that card it CLICKS `preview-start`, asserts the real box-encoded
   `<video>` reaches `readyState ≥ 3`, `currentTime` advances, AND
   `webkitAudioDecodedByteCount` GROWS (the round-3 audio-track regression guard),
   then clicks stop so no encoder child is left running.
