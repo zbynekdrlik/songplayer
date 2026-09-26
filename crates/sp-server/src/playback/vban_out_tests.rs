@@ -336,14 +336,24 @@ fn disabled_or_no_resolved_target_sends_nothing() {
 
 #[test]
 fn the_wall_is_read_on_every_block_even_while_disabled() {
-    let out = VbanOut::new(); // disabled: nothing is sent
+    let out = Arc::new(VbanOut::new()); // disabled: nothing is sent
     for due in 0..3 {
         out.push(block(D + due * 333_333, 0.5));
     }
     out.stop();
-    let mut clock = FakeClock::at(D);
-    let mut sink = RecordingSink::on(&clock);
-    run_vban_loop(&out, &mut sink, &mut clock);
+    // Bounded: a mutant that makes `stop` a no-op must fail this test in
+    // 20 s, not hang the mutation gate into its 300 s TIMEOUT (CI 26.9.).
+    let (tx, rx) = mpsc::channel();
+    let looped = out.clone();
+    std::thread::spawn(move || {
+        let mut clock = FakeClock::at(D);
+        let mut sink = RecordingSink::on(&clock);
+        run_vban_loop(&looped, &mut sink, &mut clock);
+        tx.send((sink, clock)).unwrap();
+    });
+    let (sink, clock) = rx
+        .recv_timeout(Duration::from_secs(20))
+        .expect("the loop drains and stops");
     assert!(sink.sent.is_empty());
     assert!(clock.sleeps.is_empty());
     assert_eq!(
