@@ -423,7 +423,7 @@ fn a_disabled_input_receives_nothing_and_offers_only_while_still_on_program() {
     jobs.iter().for_each(assert_standby);
     assert!(rig.mock.calls().is_empty(), "no receiver created");
     assert_eq!(rig.status().boundaries, 0, "nothing received");
-    // Not on program: nothing is offered at all.
+    // Not on program: no program job.
     rig.bus = Arc::new(ProgramBus::new());
     assert!(rig.run(2).is_empty());
 }
@@ -435,8 +435,12 @@ fn an_enabled_input_without_a_source_receives_nothing() {
         enabled: true,
         source: String::new(),
     });
-    rig.run(2).iter().for_each(assert_standby);
-    assert!(rig.mock.calls().is_empty());
+    let jobs = rig.run(2);
+    assert_one_pair_per_boundary(&jobs, 2);
+    jobs.iter().for_each(assert_standby);
+    assert!(rig.mock.calls().is_empty(), "no receiver created");
+    assert_eq!(rig.status().boundaries, 0, "nothing received");
+    // Not on program: no program job.
     rig.bus = Arc::new(ProgramBus::new());
     assert!(rig.run(2).is_empty());
 }

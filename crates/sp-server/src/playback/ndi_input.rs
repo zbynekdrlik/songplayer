@@ -520,7 +520,10 @@ impl NdiInput {
         let (w, h, video, samples) = match captured {
             Captured::Skipped => return,
             Captured::Picture(frame, w, h, samples) => (w, h, frame, samples),
-            Captured::Standby if candidate => {
+            Captured::Standby => {
+                if !candidate {
+                    return; // not on program: no job (the bus would not own it)
+                }
                 let silence = vec![0.0; (INPUT_AUDIO_CHANNELS * INPUT_AUDIO_SAMPLES) as usize];
                 (
                     self.standby_w,
@@ -529,7 +532,6 @@ impl NdiInput {
                     silence,
                 )
             }
-            Captured::Standby => return,
         };
         let job = SubmitJob {
             width: w,
