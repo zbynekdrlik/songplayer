@@ -168,6 +168,14 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   `block_ms`/`ring_capacity_blocks` + `loop_stats.rs` `percentile_ceil`). The tree
   already uses `.div_ceil()` (`chunking.rs`, `burn_overlay.rs`) — grep before
   hand-rolling a ceil.
+- **`clippy::manual_contains`** (`perf`, warn-by-default → `-D warnings`, #212
+  follow-up review round 4). `slice.iter().any(|&x| x == y)` must be
+  `slice.contains(&y)` whenever the element type and `y`'s type are equal
+  once lifetimes are erased; a `Vec<&'static str>` searched for a `&str` is
+  one case. The lint does NOT fire when the types differ, e.g. a `Vec<String>`
+  searched with `|c| c == "literal"`, which is why the tree's many
+  `calls().iter().any(|c| c == …)` pass. Give the needle the element's exact
+  type (`&'static str`) and call `.contains(&needle)`.
 
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,

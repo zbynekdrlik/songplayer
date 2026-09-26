@@ -317,10 +317,12 @@ fn c_string(p: *const c_char) -> String {
     unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
 }
 
-// mutants::skip on every method — each one dereferences an NDI SDK function
-// pointer that exists only with the real runtime (never on the Linux mutation
-// runner). The contract is exercised through `MockNdiReceiveBackend` +
-// `receiver::NdiFrameSync` tests; the box acceptance exercises the real SDK.
+// mutants::skip on every method: `find_source_names` dereferences the loaded
+// library's find functions, and the rest delegate to `RecvHandles`. None is
+// reachable without a loaded NDI runtime, because `RealNdiReceiveBackend::new`
+// needs one (never on the Linux mutation runner). The contract is exercised
+// through `MockNdiReceiveBackend` + `receiver::NdiFrameSync` tests; the box
+// acceptance exercises the real SDK.
 impl NdiReceiveBackend for RealNdiReceiveBackend {
     #[cfg_attr(test, mutants::skip)]
     fn find_source_names(&self, wait_ms: u32) -> Vec<String> {
@@ -410,9 +412,10 @@ impl NdiReceiveBackend for RealNdiReceiveBackend {
     }
 }
 
-// mutants::skip on every method — each one calls an NDI SDK function pointer:
-// only the real runtime has them (never the Linux mutation runner), and the
-// fake-SDK test below pins the LOCK SCOPE, not each call's pass-through.
+// mutants::skip on every method: they are thin pass-throughs to the SDK
+// function pointers. The fake-SDK test below pins their LOCK SCOPE, not every
+// value passed through; e.g. `recv_connections -> 1` would survive a fake
+// that returns 1.
 impl RecvHandles {
     #[cfg_attr(test, mutants::skip)]
     fn new(fns: RecvFns) -> Self {
@@ -711,9 +714,9 @@ mod tests {
         let _released = RELEASED.wait_while(gate, |g| held(g)).unwrap();
     }
 
-    fn wait_entered(call: &str) {
+    fn wait_entered(call: &'static str) {
         let deadline = Instant::now() + Duration::from_secs(10);
-        while !ENTERED.lock().unwrap().iter().any(|&c| c == call) {
+        while !ENTERED.lock().unwrap().contains(&call) {
             assert!(Instant::now() < deadline, "{call} never started");
             thread::sleep(Duration::from_millis(1));
         }
