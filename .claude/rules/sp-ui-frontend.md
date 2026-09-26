@@ -784,3 +784,16 @@ the scratch mock by PID (`ss -ltnp | grep :<port>`), never `pkill -f <name>` —
 the pattern also matches the invoking shell's own command line and kills it.
 To prove a JS test really guards a line, patch a MUTANT of the shim into the
 scratch `dist/` snippet (+ recomputed SRI), watch the test go red, restore.
+
+## A Nastavenia spec must wait for the LOADED settings before it clicks (#210)
+
+`SettingsPage` fetches `GET /api/v1/settings` in a `spawn_local`, and the form's
+sync `Effect` then re-sets EVERY field from `store.settings`. A click or type that
+lands before that overwrites nothing — the load overwrites IT (a checked box
+snaps back). `waitForResponse` is not enough (it resolves on the headers, before
+the WASM parses the body and the Effect runs). Wait on a DOM value only a
+finished load can produce: a field whose FIXTURE value differs from the form's
+built-in default — `settings-gemini-model` = `gemini-2.5-flash` (default
+`DEFAULT_GEMINI_MODEL`). Fields whose default equals the fixture prove nothing.
+A spec that saves settings resets them with `POST /__mock/settings-reset` in
+`beforeEach`/`afterEach` (the mock's settings are global in-memory state).

@@ -59,6 +59,16 @@ pub struct PacingStats {
     pub av_corrections: u64,
     /// #148: samples dropped + padded by that alignment (cumulative).
     pub av_corrected_samples: u64,
+    /// #148 v5: mean over the last complete UTC minute of `audio_block_media_start
+    /// − emitted_frame_pts` (ms) at every productive paced boundary: the media
+    /// time of the first audio sample handed to NDI minus the pts of the frame
+    /// handed with it (a repeat uses the repeated frame). + = the audio LEADS
+    /// the picture (the gate's sign). 0 for a minute with no timed boundary.
+    pub av_frame_offset_ms: f64,
+    /// #148 v5: smallest `av_frame_offset` (ms) in that minute.
+    pub av_frame_offset_min_ms: f64,
+    /// #148 v5: largest `av_frame_offset` (ms) in that minute.
+    pub av_frame_offset_max_ms: f64,
     /// #147: largest monotonic↔UTC re-anchor delta (µs) the pacer's wall clock
     /// MEASURED, i.e. the step an unbounded re-anchor would have taken. The
     /// applied step is capped at 1 ms (`WallAnchorStats::max_step_us`).
@@ -69,4 +79,15 @@ pub struct PacingStats {
     /// #147: correction (µs) slewed in through clamped (> 1 ms) re-anchors
     /// instead of stepped, cumulative.
     pub wall_anchor_slewed_us: u64,
+    /// #147: confirmed forward UTC steps (a dantesync fleet date step) the
+    /// pacer's wall followed in ONE re-anchor, cumulative.
+    pub wall_anchor_steps_followed: u64,
+    /// #147: the total step (µs) of the last followed UTC step; 0 before any.
+    pub wall_anchor_last_step_us: u64,
+    /// #147: grid slots nobody serviced across a song change / stop / idle
+    /// transition (the pipeline-lifetime submit consumer). Must read 0.
+    pub song_change_unserviced_slots: u64,
+    /// #147: boundaries the submit consumer serviced itself (held picture +
+    /// silence) between two scopes, cumulative.
+    pub consumer_fill_pairs: u64,
 }

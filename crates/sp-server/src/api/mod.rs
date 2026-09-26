@@ -8,6 +8,7 @@ pub mod lyrics_catalog;
 pub mod mix; // #184 round G — the ONE live mixer console
 pub mod mix_apply; // #184 live-first mix apply seam
 pub mod preview;
+pub mod program; // #209 program bus: GET /api/v1/program + POST /api/v1/program/cut
 pub mod routes;
 pub mod routes_import; // #180 shared bare-URL import core
 pub mod routes_ndi_recover;
@@ -140,6 +141,12 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/ndi/burn",
             axum::routing::post(routes::set_ndi_burn),
+        )
+        // #209: the program bus — SongPlayer's own NDI `SP-program` (master switcher).
+        .route("/api/v1/program", axum::routing::get(program::get_program))
+        .route(
+            "/api/v1/program/cut",
+            axum::routing::post(program::post_program_cut),
         )
         // #173: operator/verification one-shot dark-wall recovery rung.
         .route(

@@ -49,6 +49,14 @@ rustfmt actually produces (a trailing `// comment` on the closing `));` line kee
 the doc without a separate comment line). A local receiver binding (`let x = …;`
 then `spawn(fn(x))`) does NOT help — the outer arg is still a call over budget.
 
+## A method chain wider than 60 cols is split into one line per call, even with `.await` (#209)
+
+rustfmt's `chain_width` (60) splits `engine.start_program_output(program_bus, shutdown_tx.subscribe()).await;`
+(73 cols of chain) into 3 lines (`engine` / `.start_program_output(..)` / `.await;`). A trailing
+`// comment` that pushes the line past 100 forces the same split. In `lib.rs` at 1000/1000 the fix was a
+shorter chain, not a `let` receiver: a short method name + a borrowed arg the callee subscribes itself
+(`engine.start_program(program_bus, &shutdown_tx).await;` = 53 cols, one line).
+
 ## Line-neutral "handle sub-case, else fall through" in a file AT the cap: a match-guard arm (#207)
 
 To add a new branch to an existing `match` in a file at 1000/1000 with the fewest
@@ -181,6 +189,11 @@ a blank doc line or indentation — the Tier-0 box cannot see it, so it fails
 the Lint job (#195, three sites). After the last `- item` / `3. item`, insert a
 bare `//!` (or `///`) line before continuing prose.
 
+A sign convention written as a doc line that STARTS with `+ = …` or `* …` (or
+`- = …`) is ALSO a markdown list item, so the next prose line trips the same
+lint (#148 v5 review). Start such a line with a word (`Positive = …`), or keep
+the `+` mid-line.
+
 ## Format BEFORE every commit, RED commits included
 
 The Lint job runs `cargo fmt --all -- --check` on the pushed HEAD, so a RED
@@ -207,15 +220,16 @@ needs `<S: TheTrait + ?Sized>(sink: &mut S, …)` — `Self` is `?Sized` inside 
 trait default, so a non-`?Sized` bound fails to compile. Verify `wc -l` after
 `cargo fmt` — an 8-arg signature reflows to ~10 lines.
 
-## `use super::*` in a `#[path]` test submodule does NOT import the parent's private `use` aliases
+## `use super::*` in a `#[path]` test submodule: import what the test uses explicitly
 
-A `#[cfg(test)] #[path = "x_tests.rs"] mod tests;` submodule reaches the parent's
-own items via `super::*`, but a PRIVATE `use crate::…::Foo;` in the parent is NOT
-re-exported by the glob (the parent files already import `sp_ndi::AudioFrame`
-explicitly for this reason). So when a test needs a type the parent imports
-privately (e.g. `SharedFrame`), add an explicit `use crate::playback::frame_buf::SharedFrame;`
-to the TEST file — there is no duplicate-import conflict because the glob never
-brought it. A `pub use` re-export in the parent IS visible via `super::*`.
+A glob DOES bring the parent's private `use` imports into a child module (Rust
+name resolution since RFC 1560 — e.g. `sp-ndi/src/sender.rs`'s tests use its
+private `use std::sync::Arc` through `super::*`). What breaks is an AMBIGUOUS
+name: two globs (or a glob + a glob-imported glob) that both provide it, which
+errors only where the name is used. So, as the repo convention (#147 review):
+give a test file an explicit `use` for every type it names that the parent
+only imports (`SharedFrame`, `AudioFrame`, `Arc`, …). An explicit import
+shadows a glob-imported name and never conflicts, so this is safe either way.
 
 ## RED on the no-compile box for a REFACTOR (not just a wrong constant) — #203
 

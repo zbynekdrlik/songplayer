@@ -21,6 +21,8 @@ pub mod ndi_burn;
 pub mod ndi_health;
 mod ndi_health_transport; // #201 round 2: pure reported-label -> TransportState (Linux-tested)
 mod ndi_recovery_trigger; // #173 operator recover trigger (impl PlaybackEngine, 1000-line cap split)
+pub mod paced_grid; // #147 the paced output's own boundary clock (pure, Linux-tested)
+pub mod paced_output; // #168/#147 paced submit side: handoff + consumer (cross-platform)
 pub mod pacer;
 pub mod pacer_queue; // #147 producer/consumer: pure bounded look-ahead frame queue
 pub mod pacer_sink; // #203 pacer scheduling + shared-frame standby submit helpers
@@ -37,6 +39,8 @@ pub(crate) mod pipeline_stub;
 mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
+pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
+pub mod program_output; // #209: the SP-program sender + its thread
 mod recovery;
 mod runtime_pipeline;
 pub mod startup_senders; // #196 deterministic restart-safe NDI sender startup (pure port-wait + order)
@@ -46,6 +50,8 @@ pub mod submitter;
 mod test_helpers;
 mod title;
 mod transport_state; // #201 pure PlayState->TransportState mapping (Linux-tested)
+pub mod vban_out; // #210: the program's VBAN audio output (queue, paced thread, socket, stats)
+pub mod vban_packet; // #210: the pure VBAN packet encoder (header, INT24, 8×200 split)
 pub mod wallclock;
 
 use std::collections::{HashMap, VecDeque};

@@ -14,8 +14,8 @@
 //! DECISION layer — the bound + coalesce policy (`handoff_policy`), the honest
 //! submit-side lateness math (measured where the frame LEAVES the box, not at the
 //! handoff), the telemetry counters, and the pacer/submit stats merge. The
-//! Windows `Mutex`/`Condvar` `SharedHandoff` and the submit thread that drive it
-//! live in `pipeline_paced_submit.rs`.
+//! `Mutex`/`Condvar` `SharedHandoff` and the submit thread that drive it live in
+//! `paced_output.rs`.
 
 use std::collections::VecDeque;
 
@@ -46,7 +46,9 @@ const SUBMIT_COST_RING: usize = 256;
 /// everything the submit thread needs to perform the audio-before-video NDI
 /// submit at the pre-computed genlock timecodes, plus the `stamp_boundary_100ns`
 /// (== `video_tc_100ns`) that the honest submit-side lateness is measured
-/// against.
+/// against. `Clone` is an `Arc` bump of the frame + the audio block (the #209
+/// program bus takes such a copy of an owned boundary).
+#[derive(Clone)]
 pub struct SubmitJob {
     pub width: u32,
     pub height: u32,
@@ -163,6 +165,11 @@ impl<T> SubmitQueue<T> {
     pub fn take(&mut self) -> Option<T> {
         self.buf.pop_front()
     }
+
+    /// The newest job still queued (the next pacer continues after it, #147).
+    pub fn newest(&self) -> Option<&T> {
+        self.buf.back()
+    }
 }
 
 /// Honest submit-side lateness: how long after its stamp boundary the frame
@@ -195,6 +202,12 @@ pub struct SubmitCounters {
     pub dropped: u64,
     /// Wall clock (100 ns) of the last real submit; 0 = none yet.
     pub last_submit_100ns: i64,
+    /// #147: boundaries the pipeline-lifetime consumer filled itself (held
+    /// picture + silence) while no pacer was attached (`paced_grid.rs`).
+    pub consumer_fill_pairs: u64,
+    /// #147: grid slots nobody serviced across a song change / stop / idle
+    /// transition. Must read 0.
+    pub song_change_unserviced_slots: u64,
     // per-frame SDK submit cost ring (µs), for `submit_p99_us`.
     cost_ring: [u64; SUBMIT_COST_RING],
     cost_idx: usize,
@@ -215,6 +228,8 @@ impl SubmitCounters {
             max_late_us: 0,
             dropped: 0,
             last_submit_100ns: 0,
+            consumer_fill_pairs: 0,
+            song_change_unserviced_slots: 0,
             cost_ring: [0; SUBMIT_COST_RING],
             cost_idx: 0,
             cost_len: 0,
@@ -298,8 +313,9 @@ pub fn paced_submit_snapshot(prev: PacedSubmitStats, max: u64, p99: u64) -> Pace
 /// come from the submit thread and `dropped` sums both drop kinds
 /// (decode-decimation + handoff-coalesce); the `submit_call_us_*` gauge (#168
 /// round 2) is the paced submit thread's drained `FrameSubmitter.submit_times`;
-/// `seq` / `jitter` / `repeats` / `resyncs` / `relatches` / `lag_slots` /
-/// `prep_p99_us` / `enabled` stay the pacer's.
+/// the #147 `song_change_unserviced_slots` / `consumer_fill_pairs` are the
+/// pipeline-lifetime consumer's; `seq` / `jitter` / `repeats` / `resyncs` /
+/// `relatches` / `lag_slots` / `prep_p99_us` / `enabled` stay the pacer's.
 pub fn merge_pacing_stats(
     pacer: PacingStats,
     submit: &SubmitCounters,
@@ -313,6 +329,8 @@ pub fn merge_pacing_stats(
         dropped,
         submit_call_us_max: paced_submit.submit_call_us_max,
         submit_call_us_p99: paced_submit.submit_call_us_p99,
+        song_change_unserviced_slots: submit.song_change_unserviced_slots,
+        consumer_fill_pairs: submit.consumer_fill_pairs,
         ..pacer
     }
 }

@@ -14,7 +14,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - pipeline.rs testability → `.claude/rules/pipeline-testability.md` (auto-loads on `playback/pipeline*.rs`, `submitter.rs`)
 - YouTube cookie file / bot-check → `.claude/rules/youtube-cookies.md` (auto-loads on `downloader/**`, `playlist/**`)
 - yt-dlp spawn env (UTF-8 titles + hide console) → `.claude/rules/yt-dlp-spawn-env.md` (auto-loads on `downloader/**`, `playlist/**`)
-- genlock / NDI timecodes / dantesync → `.claude/rules/genlock.md` (auto-loads on `sp-core genlock*`, `playback/{wallclock,clock_health,pacer,submitter}*`, `sp-ndi/**`)
+- genlock / NDI timecodes / dantesync → `.claude/rules/genlock.md` (auto-loads on `sp-core genlock*`, `playback/{wallclock,clock_health,pacer,submitter,paced_,pipeline_paced}*`, `sp-ndi/**`)
 - dashboard preview — #15 JPEG thumbnail + #178 live A/V stream (never touch NDI submit path) → `.claude/rules/preview.md` (auto-loads on `playback/{preview,preview_stream,preview_encoder,preview_audio_hold,fmp4_relay,pipeline,pipeline_paced}*`, `scripts/preview_latency_repro.py`, `api/preview.rs`, `sp-ui/.../playlist_card.rs`, `sp-ui/.../preview_video.rs`, `sp-ui/preview_player.js`)
 - karaoke stem separation + audio-reader post-seek trim (#148 v3) → `.claude/rules/karaoke-stems.md` (auto-loads on `stems/**`, `audio/stem_mix*.rs`, `audio/symphonia_reader*.rs`, `split_sync*.rs`, `playback/karaoke.rs`, `scripts/stem_worker.py`)
 - OBS↔NDI health / dark-wall receiver recovery / post-deploy A/V lipsync + dropout gate (#147) → `.claude/rules/obs-ndi-health.md` (auto-loads on `obs/**`, `playback/ndi_health.rs`, `e2e/post-deploy.spec.ts`, `e2e/post-deploy-av-sync.spec.ts`, `e2e/av-sync-gate.ts`, `e2e/av-sync-evidence.ts`, `e2e/obs-driver.ts`, `scripts/av_sync_check.py`, `scripts/av_sync_drift.py`)
@@ -26,6 +26,9 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - DB migrations (manual `db/mod.rs`; per-version test isolation via `apply_upto`) → `.claude/rules/db-migrations.md` (auto-loads on `crates/sp-server/src/db/mod*.rs`)
 - lyrics_worker.py tests (eval-checks CI = numpy+soundfile only; fake torch/librosa/audio_separator) → `.claude/rules/lyrics-worker-tests.md` (auto-loads on `scripts/lyrics_worker.py`, `scripts/tests/**`)
 - dabing (dubbing) eval (Soniox/Chatterbox engine gotchas) → `.claude/rules/dubbing-eval.md` (auto-loads on `eval/dubbing/**`)
+- post-deploy specs: OBS program = ANY sp-* scene (read `program-state.ts`, explicit card, shared `box-api.ts`) → `.claude/rules/post-deploy-program-state.md` (auto-loads on `e2e/post-deploy*.spec.ts`, `e2e/program-state*.ts`, `e2e/box-api.ts`)
+- program bus + NDI `SP-program` (master switcher: cut rule, reorder/fill, OnceLock install, startup order, Program control) → `.claude/rules/program-bus.md` (auto-loads on `playback/program_{bus,output}*`, `paced_output*.rs`, `api/program*`, `sp-ui` `program_control.rs`)
+- VBAN audio out of the program (#210: pure encoder, paced 1/240 s thread, drop-oldest queue, settings task, `vban` telemetry) → `.claude/rules/vban-out.md` (auto-loads on `playback/vban_*`, `program_output*`, `api/program*`, `sp-ui` `settings_form.rs`, `e2e/settings-vban.spec.ts`)
 - Dabing feature (dub data model + section + import cookie gate + D4 dub worker/Live-Translate child/4-stream mix) → `.claude/rules/dabing.md` (auto-loads on `db/models_dabing.rs`, `api/dabing.rs`, `api/routes_import.rs`, `startup_dabing.rs`, `dabing/**`, `scripts/dub_worker.py`, `sp-ui` dabing files)
 
 | Area | Skill | Load when |

@@ -83,6 +83,8 @@ pub struct AppState {
     /// pipeline decode loops share the same registry (an idle tap costs one
     /// atomic load per decoded frame, and never touches the NDI submit path).
     pub preview_registry: Arc<playback::preview::PreviewRegistry>,
+    /// #209: the process-wide program bus (NDI `SP-program`, SongPlayer = master switcher).
+    pub program_bus: Arc<playback::program_bus::ProgramBus>,
     /// LAN `sp.local` advertisement status (#51) — written by the mDNS task,
     /// read by `/api/v1/status` so the dashboard shows the offline-LAN URL.
     pub lan_status: mdns::LanStatusHandle,
@@ -241,6 +243,7 @@ pub async fn start(
     // the engine (registers a tap per pipeline at spawn; the decode loops feed
     // it). Idle taps cost one atomic load per decoded frame.
     let preview_registry = Arc::new(playback::preview::PreviewRegistry::new());
+    let program_bus = Arc::new(playback::program_bus::ProgramBus::new()); // #209
 
     // #51: shared LAN sp.local status — the mDNS task (spawned after AppState)
     // writes it, `/api/v1/status` reads it. Starts empty until the task
@@ -300,6 +303,7 @@ pub async fn start(
         ndi_health_registry: ndi_health_registry.clone(),
         ndi_burn_registry: ndi_burn_registry.clone(),
         preview_registry: preview_registry.clone(),
+        program_bus: program_bus.clone(),
         lan_status: lan_status.clone(),
     };
 
@@ -728,8 +732,7 @@ pub async fn start(
         presenter_client,
         ndi_health_registry,
     });
-    // Inject the shared dantesync clock-health handle so every NDI health
-    // snapshot carries the current clock state (#146).
+    // Inject the shared dantesync clock-health handle into every NDI health snapshot (#146).
     engine.set_clock_health(clock_health);
 
     // Boundary-paced emission staging flag (#147): DB setting `genlock_pacing`
@@ -740,13 +743,9 @@ pub async fn start(
         .flatten()
         .map(|v| v == "true")
         .unwrap_or(false);
-    info!(
-        genlock_pacing,
-        "genlock boundary-paced emission staging flag"
-    );
+    info!(genlock_pacing, "genlock boundary-paced emission flag");
     engine.set_genlock_pacing(genlock_pacing);
-    // #151: share the burn-id toggle registry BEFORE pipelines spawn (each
-    // pipeline registers its output into it at spawn).
+    // #151: share the burn-id toggle registry BEFORE pipelines spawn (registered at spawn).
     engine.set_ndi_burn_registry(ndi_burn_registry.clone());
     // #15 part 2: share the preview registry BEFORE pipelines spawn (each
     // pipeline registers a preview tap into it at spawn).
@@ -782,6 +781,7 @@ pub async fn start(
             state.ndi_health_registry.mark_senders_ready();
         }
     }
+    engine.start_program(program_bus, &shutdown_tx).await;
 
     // Subscribe to RecoveryEvent from the Resolume registry and forward to the
     // engine via EngineCommand::ResolumeRecovered so the engine can re-emit

@@ -89,7 +89,7 @@ pub trait PacedSink {
     /// `audio` is the boundary block the pacer took from its `AudioGridBuffer`,
     /// aligned to the picture by media time (0 or 1 frame of exactly
     /// `samples_per_boundary` samples, #148) — a video repeat still carries audio
-    /// (decoupled); only a pre-roll starve passes an empty slice. Only `video`'s
+    /// (decoupled); empty while the buffer has no channel layout. Only `video`'s
     /// pixel fields are used; its own `audio` was pushed into the buffer on pull.
     fn emit(
         &mut self,
@@ -103,8 +103,8 @@ pub trait PacedSink {
     /// a one-shot [`PacedFrame`] over the borrowed pixels and delegates to
     /// [`emit`](Self::emit), so an `emit`-only sink keeps working;
     /// `FrameSubmitter` OVERRIDES it to move the `SharedFrame` into the zero-copy
-    /// holdover. Used by [`Pacer::service_standby`] for the idle black frame,
-    /// which is submitted by SHARED reference every boundary (a refcount bump).
+    /// holdover. The standby pair (idle / pre-roll black, a starve fill, a held
+    /// seek frame, #147) goes through it by SHARED reference (a refcount bump).
     #[allow(clippy::too_many_arguments)]
     fn submit_shared(
         &mut self,
@@ -140,8 +140,8 @@ pub enum ServiceOutcome {
     /// A boundary was serviced by repeating the last emitted frame (decoder
     /// underrun / sub-grid content) stamped at the serviced boundary (§5.5).
     Repeated,
-    /// A boundary came due before the first frame was ever decoded — nothing to
-    /// emit or repeat yet (pre-roll). The boundary still advances.
+    /// Nothing of the song to show (starve). With a standby fill (`preroll`, #147)
+    /// it carries the black, or the held pre-seek picture, + one block.
     Starved,
     /// Playback fell behind by more than [`GENLOCK_MAX_CATCHUP_INTERVALS`] slots
     /// for over [`LAG_REANCHOR_AFTER_100NS`] continuously with a frame buffered
@@ -274,6 +274,8 @@ pub struct Pacer {
     audio_buf: AudioGridBuffer,
     /// Anchor + correction state + telemetry (`pacer_av_align.rs`).
     av: pacer_av_align::AvAlign,
+    /// Starve fill: black, or the held pre-seek picture (#147, `preroll`).
+    standby_fill: Option<pacer_preroll::StandbyFill>,
 }
 
 impl Pacer {
@@ -319,6 +321,7 @@ impl Pacer {
             samples_per_boundary: spb,
             audio_buf: AudioGridBuffer::new(AUDIO_GRID_RATE_HZ),
             av: pacer_av_align::AvAlign::default(),
+            standby_fill: None,
         }
     }
 
@@ -363,6 +366,12 @@ impl Pacer {
         } else {
             strict_next_boundary_100ns(now, self.grid_fps)
         };
+        self.anchor_at(first);
+    }
+
+    /// [`anchor`](Self::anchor) on the explicit grid boundary `first` (#147: the
+    /// pre-roll anchors on the boundary it waited for, never a re-read clock).
+    fn anchor_at(&mut self, first: i64) {
         self.wall_start_100ns = first;
         self.next_boundary_100ns = first;
         self.pending = None;
@@ -527,12 +536,12 @@ impl Pacer {
         // Paced audio (#148 v2): every PRODUCTIVE boundary (a fresh emit OR a
         // video repeat) takes exactly `samples_per_boundary`, aligned by media
         // time to the stamped boundary, submitted BEFORE the video frame (§6). A
-        // pre-roll STARVE (nothing ever emitted) delivers no audio.
-        let audio_frames = if had_frame || self.last_frame.is_some() {
-            let fresh_pts = due.as_ref().map(|f| f.pts_100ns());
-            self.take_aligned_audio(stamp_boundary, fresh_pts)
-        } else {
-            Vec::new()
+        // first-frame STARVE gets the standby pair's block via `fill_starved`.
+        let fresh_pts = due.as_ref().map(|f| f.pts_100ns());
+        let shown_pts = fresh_pts.or_else(|| self.last_frame.as_ref().map(|f| f.pts_100ns()));
+        let audio_frames = match shown_pts {
+            Some(shown) => self.take_aligned_audio(stamp_boundary, fresh_pts, shown),
+            None => Vec::new(),
         };
 
         let outcome = if let Some(frame) = due {
@@ -547,7 +556,7 @@ impl Pacer {
             self.last_frame = Some(lf);
             ServiceOutcome::Repeated
         } else {
-            ServiceOutcome::Starved
+            self.fill_starved(emit_now, stamp_boundary, audio_tc, sink)
         };
 
         // Telemetry for a productive boundary (#147 lane 3, change 3): the lag
@@ -614,12 +623,12 @@ impl Pacer {
 
     /// Service one STANDBY scheduling step: fill the current grid boundary with
     /// the frozen last frame (paused) or a black frame (idle / no song), stamped
-    /// on-grid via the SAME machinery as [`service`](Self::service) but with NO
-    /// audio and NO decode pull. The paced pipeline's paused branch and the
-    /// paced idle loop call this once per boundary so EVERY boundary carries a
-    /// frame while paused/idle — the receiver stays `locked=` instead of seeing
-    /// holes (#147 fix-lane-2, change 2). Play/Seek re-anchor via
-    /// [`anchor`](Self::anchor). Returns [`ServiceOutcome::Wait`] until the
+    /// on-grid via the SAME machinery as [`service`](Self::service), with ONE
+    /// audio block (silence, or a held EOS tail once, #147) and NO decode pull.
+    /// The paced paused branch and idle loop call this once per boundary so EVERY
+    /// boundary carries a frame while paused/idle — the receiver stays `locked=`
+    /// instead of seeing holes (#147 fix-lane-2, change 2). Play/Seek re-anchor
+    /// via [`anchor`](Self::anchor). Returns [`ServiceOutcome::Wait`] until the
     /// boundary is due, then [`ServiceOutcome::Repeated`] (frozen) /
     /// [`ServiceOutcome::Emitted`] (black), or [`ServiceOutcome::Starved`] when
     /// a frozen standby has no last frame yet.
@@ -666,16 +675,20 @@ impl Pacer {
         let (stamp_boundary, next) = self.resolve_emit_boundary(emit_now, boundary, false);
         let audio_tc = emit_now;
 
+        // #147: an emitting standby boundary is the SAME audio-then-video pair as
+        // a playing one — one block (silence, or a held EOS tail), stamped with
+        // the emit instant like playing audio (§6); a starve takes the fill's.
         let outcome = match standby {
             Standby::FrozenLast => {
                 if let Some(lf) = self.last_frame.take() {
                     self.on_emit(emit_now, stamp_boundary);
                     self.repeats += 1;
-                    sink.emit(&lf, &[], stamp_boundary, audio_tc);
+                    let block = self.standby_block();
+                    sink.emit(&lf, &block, stamp_boundary, audio_tc);
                     self.last_frame = Some(lf);
                     ServiceOutcome::Repeated
                 } else {
-                    ServiceOutcome::Starved
+                    self.fill_starved(emit_now, stamp_boundary, audio_tc, sink)
                 }
             }
             Standby::Black {
@@ -684,18 +697,15 @@ impl Pacer {
                 stride,
                 video,
             } => {
-                self.on_emit(emit_now, stamp_boundary);
-                // Submit the SAME allocation by shared reference — a refcount bump,
-                // no pixel copy (#203). No audio on a standby boundary.
-                sink.submit_shared(
+                // The standby pair: the SAME allocation by shared reference (#203)
+                // after the boundary's audio block (#147).
+                let picture = StandbyBlack {
                     width,
                     height,
                     stride,
-                    video.clone(),
-                    &[],
-                    stamp_boundary,
-                    audio_tc,
-                );
+                    video,
+                };
+                self.emit_standby_pair(emit_now, stamp_boundary, audio_tc, picture, sink);
                 ServiceOutcome::Emitted
             }
         };
@@ -779,6 +789,7 @@ impl Pacer {
     /// Snapshot the counters for the health document.
     pub fn stats(&self) -> PacingStats {
         let anchor = self.wall.anchor_stats();
+        let offset = self.av.frame_offset.report(self.now_100ns());
         PacingStats {
             enabled: self.enabled,
             seq: self.seq,
@@ -795,10 +806,16 @@ impl Pacer {
             av_align_err_ms: self.av.err_ms(),
             av_corrections: self.av.corrections,
             av_corrected_samples: self.av.corrected_samples,
+            // #148 v5: the emitted audio-block − frame-pts relation, last full minute.
+            av_frame_offset_ms: offset.0,
+            av_frame_offset_min_ms: offset.1,
+            av_frame_offset_max_ms: offset.2,
             // #147: the anchor telemetry of the wall clock that stamps + paces.
             wall_anchor_max_step_us: anchor.max_step_us,
             wall_anchor_wide_brackets: anchor.wide_brackets,
             wall_anchor_slewed_us: anchor.slewed_us,
+            wall_anchor_steps_followed: anchor.steps_followed,
+            wall_anchor_last_step_us: anchor.last_step_us,
             // #168 r2: the pacer does not submit — the paced submit thread fills
             // `submit_call_us_max`/`_p99` via `merge_pacing_stats`; 0 here.
             ..Default::default()
@@ -851,7 +868,7 @@ impl Pacer {
     /// At EOS ship ONE final boundary of the buffered audio, zero-filled to
     /// `samples_per_boundary` (#148 rework, item 4); anything past it (the v4
     /// read-ahead may hold audio beyond the last frame) goes with the song.
-    /// Empty `Vec` when nothing is buffered; the caller stamps + submits it.
+    /// Empty `Vec` when nothing is buffered; `hold_eos_tail_for_standby` keeps it.
     pub fn take_eos_tail(&mut self) -> Vec<AudioFrame> {
         if self.audio_buf.level_samples() == 0 {
             return Vec::new();
@@ -887,6 +904,11 @@ impl Pacer {
 #[path = "pacer_prepare.rs"]
 mod pacer_prepare;
 
+// The song-start pre-roll: standby pairs until the decoder is ready (#147).
+#[path = "pacer_preroll.rs"]
+mod pacer_preroll;
+pub use pacer_preroll::{PrerollGate, StandbyBlack};
+
 // Media-time A/V alignment of the paced audio (#148 design v2) + the paced
 // decoder's audio read-ahead (#148 v4).
 #[path = "pacer_av_align.rs"]
@@ -912,3 +934,11 @@ mod pacer_tests_audio;
 #[cfg(test)]
 #[path = "pacer_tests_mutants.rs"]
 mod pacer_tests_mutants;
+
+#[cfg(test)]
+#[path = "pacer_tests_standby.rs"]
+mod pacer_tests_standby;
+
+#[cfg(test)]
+#[path = "pacer_tests_preroll.rs"]
+mod pacer_tests_preroll;

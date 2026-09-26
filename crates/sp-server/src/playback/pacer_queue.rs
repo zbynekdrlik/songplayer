@@ -109,6 +109,14 @@ impl<T> PacedQueue<T> {
         self.eos && self.buf.is_empty()
     }
 
+    /// Consumer: the song's first frame is buffered, or the producer already
+    /// reached end-of-stream (an empty file) — the paced pre-roll may anchor
+    /// the song's grid now (#147 song-start hole). Until then the pipeline keeps
+    /// filling boundaries with the standby pair.
+    pub fn is_primed(&self) -> bool {
+        self.eos || !self.buf.is_empty()
+    }
+
     /// Consumer: a seek happened — drop every buffered (now-stale) frame, clear
     /// end-of-stream, and bump the epoch so an in-flight producer push decoded
     /// under the old epoch is rejected as [`PushOutcome::Stale`]. Returns the new
@@ -287,6 +295,17 @@ impl<T> SharedQueue<T> {
     pub fn is_drained(&self) -> bool {
         match self.inner.lock() {
             Ok(st) => st.queue.is_drained(),
+            Err(_) => true,
+        }
+    }
+
+    /// Consumer: the first frame (or end-of-stream) is available — see
+    /// [`PacedQueue::is_primed`]. Does NOT pop. Poison → true (nothing more will
+    /// arrive; let the pre-roll end and the song end cleanly).
+    #[cfg_attr(test, mutants::skip)]
+    pub fn is_primed(&self) -> bool {
+        match self.inner.lock() {
+            Ok(st) => st.queue.is_primed(),
             Err(_) => true,
         }
     }

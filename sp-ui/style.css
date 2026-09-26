@@ -108,6 +108,45 @@ body {
     gap: 16px;
 }
 .playlist-selector-panel { flex: 0 0 260px; }
+
+/* #209: the Program control — SongPlayer's own NDI SP-program (the master
+   switcher). Always rendered (layout-stable); the on-program source is the
+   red "tally" button. Buttons wrap, so a phone never scrolls sideways. */
+.program-control {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    margin-bottom: 12px;
+}
+.program-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+.program-title { font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+.program-source { color: var(--text-dim); min-width: 0; overflow-wrap: anywhere; }
+.program-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.program-cut {
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 6px 12px;
+    cursor: pointer;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+.program-cut:hover { border-color: var(--text-dim); }
+.program-cut.program-cut-on {
+    background: var(--error);
+    border-color: var(--error);
+    color: #fff;
+    font-weight: 700;
+}
+.program-error { color: var(--error); min-height: 1.2em; font-size: 0.85rem; }
 .playlist-workspace { flex: 1 1 auto; min-width: 0; }
 
 /* The native dropdown is the mobile control — hidden on desktop, where the

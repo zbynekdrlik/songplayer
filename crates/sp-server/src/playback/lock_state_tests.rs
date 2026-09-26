@@ -318,9 +318,16 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             av_align_err_ms: -12.5,
             av_corrections: 3,
             av_corrected_samples: 144,
+            av_frame_offset_ms: -26.4,
+            av_frame_offset_min_ms: -31.5,
+            av_frame_offset_max_ms: -20.7,
             wall_anchor_max_step_us: 40_012,
             wall_anchor_wide_brackets: 2,
             wall_anchor_slewed_us: 3_000,
+            wall_anchor_steps_followed: 4,
+            wall_anchor_last_step_us: 50_030,
+            song_change_unserviced_slots: 6,
+            consumer_fill_pairs: 17,
             ..Default::default()
         },
         audio: AudioStats {
@@ -360,10 +367,19 @@ fn format_genlock_line_contains_every_key_token() {
         "av_align_err_ms=-12.5",
         "av_corrections=3",
         "av_corrected_samples=144",
+        // #148 v5: SongPlayer's own emitted audio-block − frame-pts relation.
+        "av_frame_offset_ms=-26.4",
+        "av_frame_offset_min_ms=-31.5",
+        "av_frame_offset_max_ms=-20.7",
         // #147: the pacer wall's anchor telemetry.
         "wall_anchor_max_step_us=40012",
         "wall_anchor_wide_brackets=2",
         "wall_anchor_slewed_us=3000",
+        // #147: confirmed UTC steps followed + the consumer's grid across scopes.
+        "wall_anchor_steps_followed=4",
+        "wall_anchor_last_step_us=50030",
+        "song_change_unserviced_slots=6",
+        "consumer_fill_pairs=17",
         "underruns=9",
         "clock_ok=true",
         "lock=DEGRADED",
