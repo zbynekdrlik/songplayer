@@ -371,4 +371,4 @@ impl Pacer {
 
 /// Channel count of the standby silence while no song has fixed one (#147):
 /// stereo, the layout every playlist file decodes to.
-const STANDBY_SILENCE_CHANNELS: usize = 0;
+const STANDBY_SILENCE_CHANNELS: usize = 2;

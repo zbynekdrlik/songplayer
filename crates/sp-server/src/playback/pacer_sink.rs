@@ -61,7 +61,7 @@ pub fn idle_poll(genlock_pacing: bool) -> Duration {
 }
 
 /// Paced outer-loop poll: no wait — standby is the paced grid's job (#147).
-const PACED_IDLE_POLL: Duration = Duration::from_secs(5);
+const PACED_IDLE_POLL: Duration = Duration::ZERO;
 
 /// SDK-clocked outer-loop poll: one idle heartbeat per 5 s (unchanged).
 const LEGACY_IDLE_POLL: Duration = Duration::from_secs(5);

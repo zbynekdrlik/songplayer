@@ -30,6 +30,14 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     /// the paced idle fill emits the NV12 black + silence on the very next
     /// boundary through the same path as a playing frame (#147).
     pub fn send_standby_black(&mut self, width: u32, height: u32) {
+        if self.paced {
+            tracing::debug!(
+                width,
+                height,
+                "paced: standby black is the idle fill's job (no BGRA / sync send)"
+            );
+            return;
+        }
         self.send_black_bgra(width, height);
     }
 
