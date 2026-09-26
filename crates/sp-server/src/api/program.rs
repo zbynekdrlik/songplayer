@@ -7,7 +7,8 @@
 //!   `playback::program_bus`). `404` for an unknown playlist. The selection is
 //!   persisted first (setting `program_source`) and restored at startup.
 //!   `{"source": -1}` (`PROGRAM_INPUT_ID`) cuts to the #212 NDI input "OBS
-//!   manuál" — accepted only while `ndi_input_enabled`, else `404`.
+//!   manuál" — accepted only while it is a source (`ndi_input_enabled` with a
+//!   non-empty `ndi_input_source`), else `404`.
 //!
 //! Both answer the program state plus `vban`, the #210 VBAN audio output's
 //! telemetry (`playback::vban_out::VbanStatus`), and `input`, the #212 NDI
@@ -72,16 +73,20 @@ pub async fn get_program(State(state): State<AppState>) -> Json<ProgramResponse>
 }
 
 /// `POST /api/v1/program/cut` — `200` + the new program state, `404` for an
-/// unknown playlist or a disabled NDI input, `500` when the selection cannot be
-/// persisted (then nothing is cut).
+/// unknown playlist or an NDI input that is disabled or has no source, `500`
+/// when the selection cannot be persisted (then nothing is cut).
 pub async fn post_program_cut(
     State(state): State<AppState>,
     Json(body): Json<CutRequest>,
 ) -> Response {
     let input = stored_input_settings(&state).await;
     if body.source == PROGRAM_INPUT_ID {
-        if !input.enabled {
-            return (StatusCode::NOT_FOUND, "the NDI input is disabled").into_response();
+        if !input.active() {
+            return (
+                StatusCode::NOT_FOUND,
+                "the NDI input is disabled or has no source",
+            )
+                .into_response();
         }
     } else {
         let exists = sqlx::query("SELECT id FROM playlists WHERE id = ?")

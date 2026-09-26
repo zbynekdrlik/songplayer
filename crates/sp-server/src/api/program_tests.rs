@@ -352,6 +352,21 @@ async fn cut_to_the_input_is_404_while_it_is_disabled_and_changes_nothing() {
 }
 
 #[tokio::test]
+async fn cut_to_an_enabled_input_without_a_source_is_404() {
+    let state = test_state().await;
+    enable_input(&state, "  ").await; // enabled, but nothing to receive
+    let (status, _) = call(
+        state.clone(),
+        "POST",
+        "/api/v1/program/cut",
+        Some(serde_json::json!({ "source": -1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "the input would never play");
+    assert_eq!(state.program_bus.status().source, None);
+}
+
+#[tokio::test]
 async fn cut_to_the_enabled_input_selects_it_and_persists_it() {
     let state = test_state().await;
     let slow = add_playlist(&state.pool, "slow").await;
@@ -400,6 +415,13 @@ async fn a_persisted_input_selection_restores_only_while_the_input_is_enabled() 
         disabled.status().source,
         None,
         "a disabled input is no source"
+    );
+
+    enable_input(&state, "").await; // enabled, but no source
+    let sourceless = ProgramBus::new();
+    assert_eq!(
+        restore_selected_source(&state.pool, &sourceless).await,
+        None
     );
 
     enable_input(&state, "CG-OBS (manual)").await;

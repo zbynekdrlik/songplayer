@@ -907,9 +907,9 @@ app.get("/api/v1/program", (_req, res) => {
 app.post("/api/v1/program/cut", (req, res) => {
   const source = Number(req.body?.source);
   if (source === -1) {
-    // #212: the NDI input is a source only while it is enabled.
-    if (!ndiInputEnabled()) {
-      res.status(404).send("the NDI input is disabled");
+    // #212: the NDI input is a source only while it is enabled with a source.
+    if (!ndiInputEnabled() || (settings.ndi_input_source || "").trim() === "") {
+      res.status(404).send("the NDI input is disabled or has no source");
       return;
     }
   } else if (!activePlaylists().some((p) => p.id === source)) {

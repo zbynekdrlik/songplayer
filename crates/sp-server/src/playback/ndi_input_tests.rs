@@ -560,11 +560,23 @@ fn a_reconnect_does_not_count_the_outage_as_dropped_frames() {
 
 #[test]
 fn a_field_that_still_arrives_is_standby_not_a_half_height_picture() {
-    let mut field = uyvy(0, 30, 1, 3);
-    field.frame_format_type = 2; // NDIlib_frame_format_type_field_0
-    let mut rig = rig(vec![field], vec![Some(0)]);
+    let mut field_0 = uyvy(0, 30, 1, 3);
+    field_0.frame_format_type = 2; // NDIlib_frame_format_type_field_0
+    let mut field_1 = uyvy(333_333, 30, 1, 4);
+    field_1.frame_format_type = 3; // NDIlib_frame_format_type_field_1
+    let mut rig = rig(vec![field_0, field_1], vec![Some(0), Some(1)]);
     rig.run(2).iter().for_each(assert_standby);
     assert_eq!(rig.status().unsupported_boundaries, 2);
+}
+
+#[test]
+fn an_interleaved_whole_frame_is_converted_like_a_progressive_one() {
+    let mut interleaved = uyvy(0, 30, 1, 6);
+    interleaved.frame_format_type = 0; // NDIlib_frame_format_type_interleaved
+    let mut rig = rig(vec![interleaved], vec![Some(0)]);
+    let jobs = rig.run(1);
+    assert_eq!(&jobs[0].video[..], &[6u8; 12][..]);
+    assert_eq!(rig.status().unsupported_boundaries, 0);
 }
 
 // --- status -----------------------------------------------------------------
@@ -767,10 +779,10 @@ fn video_format_support_and_fourcc_text() {
         height,
         frame_rate_n: 30,
         frame_rate_d: 1,
-        progressive: true,
+        full_frame: true,
     };
     let field = VideoFormat {
-        progressive: false,
+        full_frame: false,
         ..f(FOURCC_UYVY, 4, 2)
     };
     assert!(!field.is_supported(), "a field is not converted");

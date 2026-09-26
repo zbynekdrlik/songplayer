@@ -49,6 +49,9 @@ pub const RECV_COLOR_FORMAT_FASTEST: i32 = 100;
 pub const RECV_BANDWIDTH_HIGHEST: i32 = 100;
 /// `NDIlib_frame_format_type_progressive`: the FrameSync capture's field type.
 pub const FRAME_FORMAT_TYPE_PROGRESSIVE: i32 = 1;
+/// `NDIlib_frame_format_type_interleaved`: a whole frame, field 0 on the even
+/// lines and field 1 on the odd ones (full height).
+pub const FRAME_FORMAT_TYPE_INTERLEAVED: i32 = 0;
 /// `NDI_LIB_FOURCC('U','Y','V','Y')`.
 pub const FOURCC_UYVY: u32 = 0x5956_5955;
 /// `NDI_LIB_FOURCC('U','Y','V','A')`.
@@ -518,6 +521,7 @@ mod tests {
         assert_eq!(RECV_COLOR_FORMAT_FASTEST, 100);
         assert_eq!(RECV_BANDWIDTH_HIGHEST, 100);
         assert_eq!(FRAME_FORMAT_TYPE_PROGRESSIVE, 1);
+        assert_eq!(FRAME_FORMAT_TYPE_INTERLEAVED, 0);
     }
 
     /// The received video frame is byte-for-byte the send-side

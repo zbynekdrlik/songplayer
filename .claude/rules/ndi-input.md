@@ -42,12 +42,18 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
 - The color format is `NDIlib_recv_color_format_fastest` with
   `allow_video_fields = false` and highest bandwidth. A source without alpha
   comes as UYVY. One with alpha comes as UYVA, whose FIRST plane is UYVY, so a
-  single converter covers both. Any other FourCC, an odd size, a stride under
-  2 × width, or a non-progressive frame (a field — the SDK should de-interlace
-  with `allow_video_fields = false`, but `fastest` may still deliver fields)
-  gets the standby pair plus a logged
-  `ndi input: video format … progressive=… supported=false`. It is counted in
-  `unsupported_boundaries`, never in `frames_received`.
+  single converter covers both. A progressive or an interleaved WHOLE frame
+  (`frame_format_type` 1 / 0, both full height) is converted. The standby
+  pair goes out instead, logged as
+  `ndi input: video format … full_frame=… supported=false`, for:
+  - any other FourCC;
+  - an odd size;
+  - a stride under 2 × width;
+  - a single field (type 2 / 3). The SDK should de-interlace with
+    `allow_video_fields = false`, but `fastest` may still deliver fields.
+
+  Such a boundary is counted in `unsupported_boundaries`, never in
+  `frames_received`.
 - `NdiFrameSync` (RAII):
   - It destroys the FrameSync BEFORE its receiver, the SDK's order.
   - `capture_video` / `capture_audio` return guards that free the frame on
@@ -81,8 +87,9 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   1. apply a settings change (reconnect), or retry a failed receiver after
      exactly 5 s;
   2. `touch(-1, B)`;
-  3. capture the video plus `capture_audio(48000, 2, 1600)`, EVERY boundary,
-     so the FrameSync keeps tracking our cadence;
+  3. capture the video plus `capture_audio(48000, 2, 1600)` on every
+     CONNECTED boundary, so the FrameSync keeps tracking our cadence. Nothing
+     is captured without a receiver or while the source is disconnected;
   4. only while a candidate, convert UYVY→NV12 into a `frame_pool` buffer
      (recycled on the last `SharedFrame` drop) and `offer` a `SubmitJob`
      stamped at B, with the audio stamped at the emit (§6).
@@ -121,18 +128,28 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   - `enabled` and `source` come from the STORED settings, so a save shows at
     once.
   - `stream` = `obs::ndi_discovery::extract_ndi_stream_name(source)`.
-  - `POST /api/v1/program/cut {"source": -1}` → 404 while disabled.
-  - A persisted `program_source = -1` is restored only while the input is
-    enabled.
+  - The input is a program source only while it is ACTIVE:
+    `ndi_input_enabled` plus a non-empty `ndi_input_source`
+    (`InputSettings::active()`, the same rule as `NdiInput::service`). An
+    enabled input with no source would never touch or offer, so the program
+    would only get fills.
+    - `POST /api/v1/program/cut {"source": -1}` → 404 unless active.
+    - A persisted `program_source = -1` is restored only while active.
+  - Known behaviour: disabling the input WHILE it is on program leaves the
+    program selected on `-1`. The bus fills it on time with its standby
+    (`health.filled` rises), and the dashboard shows
+    "Na programe: OBS manuál" without the button. Cut to a playlist to leave
+    it.
 - sp-ui:
   - `ProgramControl` lists an extra `program-cut` button with
     `data-playlist-id="-1"` and the text "OBS manuál" AFTER the playlists, only
-    while `input.enabled`.
+    while `input.enabled` with a non-empty `input.source`
+    (`ProgramInput::is_source`, the server's rule).
   - Nastavenia has the fieldset `settings-ndi-input`, with
     `settings-ndi-input-enabled` and `settings-ndi-input-source` (placeholder
     `CG-OBS (manual)`).
 - The mock's `GET /api/v1/program` derives `input` from the stored settings,
-  and it refuses a cut to `-1` with 404 while the input is disabled. The specs
+  and it refuses a cut to `-1` with 404 unless the input is active. The specs
   reset the settings (`/__mock/settings-reset`) and the program
   (`/__mock/program-reset`).
 
@@ -161,5 +178,11 @@ output) and cut to "OBS manuál" and back in a real browser. Check that:
 - there are 0 fills;
 - `input.frames_received` advances;
 - `input.connected` is true.
+
+On a 25 fps source, `input.video_repeats > 0` confirms that the real FrameSync
+returns the SAME buffer for a repeat, which is what the repeat detection keys
+on (timecode + data pointer). If it stays 0 while `frames_received` climbs at
+30/s, every repeat is re-converted: the picture is still right, but it costs
+CPU. Then key a repeat on the timecode alone.
 
 Never switch the OBS program scene.

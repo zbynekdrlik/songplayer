@@ -106,8 +106,10 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 
 - `GET /api/v1/program` → `{ndi_name, source, previous, cut_boundary_100ns,
   health{forwarded, filled, late_dropped, resyncs, coalesced, cuts,
-  submitted, connections, last_stamp_100ns}}`; `POST /api/v1/program/cut
-  {"source": pid}` → 200 + that body, 404 unknown playlist.
+  submitted, connections, last_stamp_100ns}, vban{…} (#210), input{…}
+  (#212)}`; `POST /api/v1/program/cut {"source": pid}` → 200 + that body, 404
+  unknown playlist. Source `-1` is the #212 NDI input "OBS manuál" (404 unless
+  it is enabled with a source) — see `ndi-input.md`.
 - `/api/v1/ndi/health` is unchanged (an array of per-pipeline snapshots
   consumed by sp-ui + e2e); where the program's health also belongs there is
   an open question on #209.

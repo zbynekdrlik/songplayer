@@ -20,10 +20,11 @@
 //! - **Always on time.** With no source, a disconnected one, no video yet or an
 //!   unsupported FourCC the input offers its standby pair (the NV12 black + one
 //!   silent block), so it owns its boundary and the bus never fills for it.
-//! - **Only a candidate pays.** Every boundary is `touch`ed and captured (the
-//!   FrameSync keeps tracking our cadence and the counters stay live), but the
-//!   conversion and the job are built only while the input can own a program
-//!   boundary. A FrameSync repeat of an already-converted frame is an `Arc` bump.
+//! - **Only a candidate pays.** Every boundary is `touch`ed, and every
+//!   CONNECTED boundary is captured (the FrameSync keeps tracking our cadence
+//!   and the counters stay live), but the conversion and the job are built only
+//!   while the input can own a program boundary. A FrameSync repeat of an
+//!   already-converted frame is an `Arc` bump.
 //! - **Settings** (`ndi_input_enabled`, `ndi_input_source`) are re-read every
 //!   [`INPUT_SETTINGS_POLL`] by [`run_input_config_task`]; a change reconnects
 //!   on the input thread. While enabled and not connected, the task lists the
@@ -44,7 +45,9 @@ use sp_core::genlock::{
     GENLOCK_GRID_FPS, UNITS_PER_SECOND, floor_boundary_100ns, lag_over_catchup_bound_100ns,
     strict_next_boundary_100ns,
 };
-use sp_ndi::receive::{FOURCC_UYVA, FOURCC_UYVY, FRAME_FORMAT_TYPE_PROGRESSIVE};
+use sp_ndi::receive::{
+    FOURCC_UYVA, FOURCC_UYVY, FRAME_FORMAT_TYPE_INTERLEAVED, FRAME_FORMAT_TYPE_PROGRESSIVE,
+};
 use sp_ndi::{AudioFrame, NdiFrameSync, NdiReceiveBackend};
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
@@ -142,10 +145,11 @@ pub struct VideoFormat {
     pub height: i32,
     pub frame_rate_n: i32,
     pub frame_rate_d: i32,
-    /// `frame_format_type == progressive`. The receiver asks for progressive
-    /// frames (`allow_video_fields = false`); a field that still arrives is
-    /// not converted (it would show as a half-height picture).
-    pub progressive: bool,
+    /// A whole frame: progressive or interleaved (both full height). The
+    /// receiver asks for progressive frames (`allow_video_fields = false`); a
+    /// single FIELD that still arrives is not converted (it would show as a
+    /// half-height picture).
+    pub full_frame: bool,
 }
 
 impl VideoFormat {
@@ -159,11 +163,12 @@ impl VideoFormat {
             .collect()
     }
 
-    /// A progressive UYVY or UYVA (a UYVY plane + an alpha plane) frame with
-    /// even, non-zero dimensions — what [`uyvy_to_nv12`] converts.
+    /// A whole (not a single-field) UYVY or UYVA (a UYVY plane + an alpha
+    /// plane) frame with even, non-zero dimensions — what [`uyvy_to_nv12`]
+    /// converts.
     pub fn is_supported(&self) -> bool {
         (self.four_cc == FOURCC_UYVY || self.four_cc == FOURCC_UYVA)
-            && self.progressive
+            && self.full_frame
             && self.width > 0
             && self.height > 0
             && self.width % 2 == 0
@@ -343,16 +348,22 @@ pub fn uyvy_to_nv12(
     {
         return false;
     }
-    for y in 0..height {
+    let luma_len = width * height;
+    out.resize(luma_len + luma_len / 2, 0);
+    let (luma, chroma) = out.split_at_mut(luma_len);
+    for (y, dst) in luma.chunks_exact_mut(width).enumerate() {
         let line = &src[y * stride..y * stride + row];
-        out.extend(line.iter().skip(1).step_by(2));
+        for (d, px) in dst.iter_mut().zip(line.chunks_exact(2)) {
+            *d = px[1];
+        }
     }
-    for pair in 0..height / 2 {
+    for (pair, dst) in chroma.chunks_exact_mut(width).enumerate() {
         let top = &src[2 * pair * stride..2 * pair * stride + row];
         let bottom = &src[(2 * pair + 1) * stride..(2 * pair + 1) * stride + row];
-        for (a, b) in top.chunks_exact(4).zip(bottom.chunks_exact(4)) {
-            out.push(avg(a[0], b[0]));
-            out.push(avg(a[2], b[2]));
+        let pairs = top.chunks_exact(4).zip(bottom.chunks_exact(4));
+        for (d, (a, b)) in dst.chunks_exact_mut(2).zip(pairs) {
+            d[0] = avg(a[0], b[0]);
+            d[1] = avg(a[2], b[2]);
         }
     }
     true
@@ -616,7 +627,10 @@ impl NdiInput {
             height: f.yres,
             frame_rate_n: f.frame_rate_n,
             frame_rate_d: f.frame_rate_d,
-            progressive: f.frame_format_type == FRAME_FORMAT_TYPE_PROGRESSIVE,
+            full_frame: matches!(
+                f.frame_format_type,
+                FRAME_FORMAT_TYPE_PROGRESSIVE | FRAME_FORMAT_TYPE_INTERLEAVED
+            ),
         };
         let (timecode, data) = (f.timecode, f.p_data as usize);
         let stride = f.line_stride_in_bytes.max(0) as usize;
@@ -691,7 +705,7 @@ fn note_format(shared: &NdiInputShared, source: &str, format: VideoFormat) -> bo
         width = format.width,
         height = format.height,
         frame_rate = %format!("{}/{}", format.frame_rate_n, format.frame_rate_d),
-        progressive = format.progressive,
+        full_frame = format.full_frame,
         supported = format.is_supported(),
         "ndi input: video format"
     );

@@ -615,7 +615,7 @@ pub async fn persist_selected_source(pool: &SqlitePool, pid: i64) -> Result<(), 
 /// Restore the persisted program source into `bus` (startup). Returns the
 /// restored source id; a missing or unreadable setting leaves the program on
 /// its standby pair. The #212 NDI input (`PROGRAM_INPUT_ID`) is restored only
-/// while it is enabled — a disabled input is not a source.
+/// while it is active (enabled with a source) — otherwise it is not a source.
 pub async fn restore_selected_source(pool: &SqlitePool, bus: &ProgramBus) -> Option<i64> {
     let raw = match crate::db::models::get_setting(pool, SETTING_PROGRAM_SOURCE).await {
         Ok(v) => v?,
@@ -631,10 +631,10 @@ pub async fn restore_selected_source(pool: &SqlitePool, bus: &ProgramBus) -> Opt
             return None;
         }
     };
-    if pid == sp_core::config::PROGRAM_INPUT_ID && !input_enabled(pool).await {
+    if pid == sp_core::config::PROGRAM_INPUT_ID && !input_active(pool).await {
         warn!(
             source = pid,
-            "program bus: the persisted source is the NDI input, which is disabled — not restored"
+            "program bus: the persisted source is the NDI input, which is disabled or has no source — not restored"
         );
         return None;
     }
@@ -643,12 +643,12 @@ pub async fn restore_selected_source(pool: &SqlitePool, bus: &ProgramBus) -> Opt
     Some(pid)
 }
 
-/// #212: whether the stored settings enable the NDI input (an unreadable
-/// setting counts as disabled).
-async fn input_enabled(pool: &SqlitePool) -> bool {
+/// #212: whether the stored settings make the NDI input a source (enabled
+/// with a source name; an unreadable setting counts as not).
+async fn input_active(pool: &SqlitePool) -> bool {
     crate::playback::ndi_input::load_input_settings(pool)
         .await
-        .is_ok_and(|s| s.enabled)
+        .is_ok_and(|s| s.active())
 }
 
 #[cfg(test)]

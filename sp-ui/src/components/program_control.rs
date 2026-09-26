@@ -7,9 +7,10 @@
 //! `GET /api/v1/program` once a second through the ONE shared `poll_into`, so a
 //! cut made elsewhere (the API, Companion) shows up here too.
 //!
-//! #212: while the NDI input "OBS manuál" is enabled (`input.enabled` on
-//! `GET /api/v1/program`) it is listed after the playlists as one more source,
-//! cut with `{"source": -1}` (`PROGRAM_INPUT_ID`).
+//! #212: while the NDI input "OBS manuál" is a source (`input.enabled` with a
+//! non-empty `input.source` on `GET /api/v1/program` — the server's own cut
+//! rule) it is listed after the playlists, cut with `{"source": -1}`
+//! (`PROGRAM_INPUT_ID`).
 //!
 //! Testids (set here, never by a caller): `program-control`, `program-source`
 //! (the "Na programe: …" line), `program-cut` (one button per source, with
@@ -39,9 +40,19 @@ pub struct ProgramState {
 /// The part of `GET /api/v1/program` → `input` this control renders.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct ProgramInput {
-    /// The input is enabled in Nastavenia: it is a program source.
+    /// The input is enabled in Nastavenia.
     #[serde(default)]
     pub enabled: bool,
+    /// The configured NDI source name (empty = nothing to receive).
+    #[serde(default)]
+    pub source: String,
+}
+
+impl ProgramInput {
+    /// A program source: enabled with a source name (the server's cut rule).
+    pub fn is_source(&self) -> bool {
+        self.enabled && !self.source.trim().is_empty()
+    }
 }
 
 #[component]
@@ -58,7 +69,7 @@ pub fn ProgramControl() -> impl IntoView {
 
     // A Memo, so a poll that returns the same source never re-renders a button.
     let on_program = Memo::new(move |_| program.get().source);
-    let input_enabled = Memo::new(move |_| program.get().input.enabled);
+    let input_enabled = Memo::new(move |_| program.get().input.is_source());
     let on_program_name = move || match on_program.get() {
         Some(PROGRAM_INPUT_ID) => PROGRAM_INPUT_LABEL.to_string(),
         Some(id) => store
