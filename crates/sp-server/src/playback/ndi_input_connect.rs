@@ -125,7 +125,6 @@ impl NdiInput {
                 let started = Instant::now();
                 let result = NdiFrameSync::connect(backend, &source, INPUT_RECV_NAME);
                 let connect_ms = elapsed_ms(started);
-                shared.counters().last_connect_ms = Some(connect_ms);
                 match &result {
                     Ok(_) => {
                         info!(source = %source, connect_ms, "ndi input: receiver + FrameSync created");
@@ -137,6 +136,9 @@ impl NdiInput {
                 // No receiver any more (the input stopped): the pair is
                 // dropped — closed — here, on this helper.
                 let _ = tx.send(result);
+                // Published after the hand-over: once it reads `Some`, the
+                // result is in the channel (or was closed here).
+                shared.counters().last_connect_ms = Some(connect_ms);
             });
         if let Err(e) = spawned {
             // The helper never ran, so its channel is closed: the next
@@ -161,17 +163,22 @@ impl NdiInput {
         self.last = None;
     }
 
-    /// The stop path (the grid loop has ended). The current pair is closed on
-    /// its helper and awaited, so the receiver is gone before the input thread
-    /// returns. A pending connect is abandoned: its helper closes the pair
-    /// when the hand-over finds no receiver.
+    /// The stop path (the grid loop has ended). The current pair, and a
+    /// connect result already handed over but not taken yet, are closed on
+    /// the close helper and awaited. A connect still running is abandoned: its
+    /// helper closes the pair when the hand-over finds no receiver. Closes
+    /// started by earlier settings changes may still be running, detached.
     pub(super) fn disconnect(&mut self) {
-        if let Some(sync) = self.sync.take()
-            && let Some(closer) = close_off_thread(&self.shared, sync)
-        {
-            let _ = closer.join(); // a panic there is logged by the panic hook
+        let handed_over = self
+            .pending
+            .take()
+            .and_then(|pending| pending.rx.try_recv().ok())
+            .and_then(Result::ok);
+        for sync in self.sync.take().into_iter().chain(handed_over) {
+            if let Some(closer) = close_off_thread(&self.shared, sync) {
+                let _ = closer.join(); // a panic there is logged by the panic hook
+            }
         }
-        self.pending = None;
         self.publish_pending();
         self.set_connected(false);
         self.last = None;

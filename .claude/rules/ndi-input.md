@@ -152,10 +152,15 @@ that is ~14 black-filled program slots. Design record: #212 comment 5849076208
   - A helper that could not be spawned, or that panicked, leaves a closed
     channel (`Disconnected`), which lands as a failed connect.
   - A close helper that could not be spawned closes inline, with a WARN.
-- **Stop path.** It runs after the loop ended. The current pair is closed on
-  the close helper and JOINED, so the receiver is gone before the input
-  thread returns. A pending connect is abandoned: its helper's `send` finds no
-  receiver, and the helper drops (closes) the pair itself.
+- **Stop path.** It runs after the loop ended.
+  - The current pair, and a connect result that was already handed over but
+    not taken yet, are closed on the close helper and JOINED.
+  - A connect still running is abandoned: its helper's `send` finds no
+    receiver, and the helper drops (closes) the pair itself.
+  - Closes started by earlier settings changes may still be running, detached.
+    That is harmless, since the loop is over.
+  - The helper publishes `last_connect_ms` only AFTER its hand-over, so a
+    test can wait for it and then know the result is in the channel.
 - **Telemetry** in `input`:
   - `connects_pending` (0 / 1), published by the grid;
   - `last_connect_ms` / `last_close_ms`, which the helpers time themselves.
@@ -244,13 +249,22 @@ that is ~14 black-filled program slots. Design record: #212 comment 5849076208
   - the new pair's FrameSync handle capturing only after it landed;
   - `connects_pending` 1 during the connect and 0 after;
   - exactly three `recv_create`s for a superseded connect;
-  - every `service()` under 8 slots.
-
-  One test runs `run_input_loop` on a REAL-time clock (`RealClock`), because
-  a blocked `service()` only shows as missed boundaries on the real grid. It
-  must give contiguous stamps with 0 input / bus resyncs and 0 fills. Every
-  wait is bounded (`wait_for`, 10 s), so a hang fails instead of stalling the
-  mutation gate.
+  - the stop path's handed-over and abandoned pairs;
+  - a helper that dies (`set_panic_create`) counting as a failed connect.
+- The rule "never on the grid thread" is asserted through the mock's
+  `calls_by_thread()`: every create runs on `ndi-input-connect`, every destroy
+  on `ndi-input-close`. The loop test runs `run_input_loop` on a thread named
+  `ndi-input` and finds no create or destroy there.
+- NEVER assert the rule with a wall-time threshold. The coverage job runs the
+  tests under tarpaulin's ptrace, where a thread can stall for a long time on
+  a breakpoint.
+  - The loop test's clock is paced virtual time (`PacedClock`: every wait
+    really sleeps, but only the waits advance it). It still spans ~15
+    boundaries per 500 ms create, and it can never resync on a stall.
+  - Timed durations are only ever lower bounds (≥ 400 ms for the mock's
+    500 ms).
+  - Every wait is bounded (`wait_for`, 10 s), so a hang fails instead of
+    stalling the mutation gate.
 
 ## Box acceptance (the supervisor's job)
 
