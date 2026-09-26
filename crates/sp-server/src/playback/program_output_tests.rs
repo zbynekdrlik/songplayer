@@ -174,6 +174,9 @@ fn the_sender_thread_fills_a_sourceless_program_and_stops_flushed() {
             let (mut out, mut wall) = (out, wall);
             run_program_loop(&mut out, &bus, &mut wall);
             let _ = done_tx.send(());
+            // Hand the output back so its sender outlives the call-log check
+            // below (dropping it here would append `send_destroy`).
+            out
         })
     };
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
@@ -184,7 +187,7 @@ fn the_sender_thread_fills_a_sourceless_program_and_stops_flushed() {
     done_rx
         .recv_timeout(Duration::from_secs(20))
         .expect("the sender thread exits once the bus is stopped");
-    thread.join().unwrap();
+    let _out = thread.join().unwrap();
     assert_eq!(
         clock.get(),
         b0 + CHECK_AFTER_BOUNDARY_100NS,
