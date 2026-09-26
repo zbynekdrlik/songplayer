@@ -137,6 +137,23 @@ fn the_old_pacers_queued_tail_does_not_close_the_song_change_window() {
 }
 
 #[test]
+fn a_queued_tail_is_continued_after_and_does_not_close_the_window() {
+    // b(4) is still queued when the next pacer attaches.
+    let mut g = detached_after(3);
+    assert_eq!(g.attach_with_queued(Some(b(4))), Some(b(4)));
+    assert!(g.accept_job(b(4)), "the old pacer's tail still goes out");
+    // The next pacer's first stamp is 5 slots late: b(5)..=b(8) is a hole.
+    assert!(g.accept_job(b(9)));
+    assert_eq!(g.unserviced_slots(), 4);
+    // Its first job closed the window.
+    assert!(g.accept_job(b(11)));
+    assert_eq!(g.unserviced_slots(), 4);
+    // An older queued stamp never lowers what the pacer continues after.
+    g.detach();
+    assert_eq!(g.attach_with_queued(Some(b(2))), Some(b(11)));
+}
+
+#[test]
 fn attach_hands_the_next_pacer_the_last_serviced_stamp() {
     let mut g = detached_after(2);
     assert_eq!(g.step(b(3) + GRACE), GridStep::Fill(b(3)));

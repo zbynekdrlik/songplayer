@@ -126,7 +126,7 @@ impl HandoffState {
     /// queued stamp: a stale drop, or a coalesce into a real stamp hole.
     fn attach(&mut self) -> Option<i64> {
         let queued = self.queue.newest().map(|job| job.video_tc_100ns);
-        self.grid.attach().max(queued)
+        self.grid.attach_with_queued(queued)
     }
 
     /// The submit counters with the grid telemetry folded in.
@@ -220,9 +220,9 @@ impl SharedHandoff {
         }
     }
 
-    /// A pacer starts feeding (see [`PacedFeed`]). Returns the last serviced
-    /// stamp: the pacer continues on the boundary right after it. Poison →
-    /// `None` (the pacer then anchors on its own clock).
+    /// A pacer starts feeding (see [`PacedFeed`]). Returns the newest stamp
+    /// serviced or still queued: the pacer continues on the boundary right
+    /// after it. Poison → `None` (the pacer then anchors on its own clock).
     pub fn attach(&self) -> Option<i64> {
         match self.inner.lock() {
             Ok(mut st) => {
@@ -311,7 +311,8 @@ impl SharedHandoff {
 /// One pacer feeding the paced output for a scope (a song, or an idle
 /// stretch, #147): attached on creation, detached on drop — also on unwind, so
 /// the grid always goes back to the consumer. The pacer continues right after
-/// [`last_serviced_100ns`](Self::last_serviced_100ns).
+/// [`last_serviced_100ns`](Self::last_serviced_100ns) (the newest stamp
+/// serviced or still queued).
 pub struct PacedFeed<'a> {
     handoff: &'a SharedHandoff,
     last_serviced_100ns: Option<i64>,
@@ -326,7 +327,8 @@ impl<'a> PacedFeed<'a> {
         }
     }
 
-    /// The output's last serviced stamp at attach time (`None` before any).
+    /// The newest stamp serviced or still queued at attach time (`None`
+    /// before any).
     pub fn last_serviced_100ns(&self) -> Option<i64> {
         self.last_serviced_100ns
     }

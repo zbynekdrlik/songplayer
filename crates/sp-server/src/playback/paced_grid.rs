@@ -57,9 +57,13 @@ pub struct PacedGrid {
     last_serviced_100ns: Option<i64>,
     /// A pacer (a song or an idle scope) is feeding the handoff.
     attached: bool,
-    /// Set on detach, cleared by the first job of the next attached pacer:
-    /// the window in which a stamp gap is a song-change hole.
+    /// Set on detach, cleared by the first job of the NEXT pacer (a stamp after
+    /// `continue_after`): the window in which a stamp gap is a song-change hole.
     in_transition: bool,
+    /// What the attached pacer was told to continue after: the newest stamp
+    /// serviced or still queued at attach. A job at or before it is the
+    /// previous pacer's queued tail, which never closes the window.
+    continue_after_100ns: Option<i64>,
     fill_pairs: u64,
     unserviced_slots: u64,
 }
@@ -72,6 +76,7 @@ impl PacedGrid {
             last_serviced_100ns: None,
             attached: false,
             in_transition: false,
+            continue_after_100ns: None,
             fill_pairs: 0,
             unserviced_slots: 0,
         }
@@ -98,11 +103,22 @@ impl PacedGrid {
         self.unserviced_slots
     }
 
-    /// A pacer starts feeding. Returns the last serviced stamp: the pacer
-    /// continues on the boundary right after it. From here no fill is decided.
+    /// A pacer starts feeding with nothing queued: [`attach_with_queued`]
+    /// (`None`).
+    ///
+    /// [`attach_with_queued`]: Self::attach_with_queued
     pub fn attach(&mut self) -> Option<i64> {
+        self.attach_with_queued(None)
+    }
+
+    /// A pacer starts feeding while the previous pacer's newest job
+    /// `newest_queued` may still be queued. Returns the newest stamp serviced
+    /// or queued: the pacer continues on the boundary right after it. From
+    /// here no fill is decided.
+    pub fn attach_with_queued(&mut self, newest_queued: Option<i64>) -> Option<i64> {
         self.attached = true;
-        self.last_serviced_100ns
+        self.continue_after_100ns = self.last_serviced_100ns.max(newest_queued);
+        self.continue_after_100ns
     }
 
     /// The pacer stopped feeding. From here the grid is the consumer's.
@@ -125,7 +141,10 @@ impl PacedGrid {
         if self.in_transition {
             self.count_gap(stamp_100ns);
         }
-        if self.attached {
+        let from_new_pacer = self
+            .continue_after_100ns
+            .is_none_or(|after| stamp_100ns > after);
+        if self.attached && from_new_pacer {
             self.in_transition = false;
         }
         self.last_serviced_100ns = Some(stamp_100ns);

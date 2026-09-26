@@ -1267,7 +1267,10 @@ submit thread, which coalesced away a stamp — camera-box's `stamp_gap`.
   song end the EOS-tail boundary can sit behind a slow submit when the idle
   scope attaches ~1 ms later, and continuing after anything less re-emits it
   (a stale drop, or a coalesce into a real hole; #147 review round 2). So a
-  boundary is never serviced twice or skipped.
+  boundary is never serviced twice or skipped. The song-change window (in
+  which a stamp gap counts into `song_change_unserviced_slots`) closes only on
+  the first stamp AFTER that point — the old pacer's queued tail never closes
+  it, so a hole before the new pacer's first stamp is still counted.
 - **A job at or before the last serviced stamp is never sent** (the output's
   stamps only increase); it counts as a submit-side `dropped`.
 
