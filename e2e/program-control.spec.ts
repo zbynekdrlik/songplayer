@@ -140,6 +140,36 @@ test("with the NDI input disabled the Program control offers no OBS manuál", as
   expect(realConsoleErrors(consoleMessages)).toEqual([]);
 });
 
+test("an enabled NDI input with no source name is not offered and cannot be cut to", async ({
+  page,
+  request,
+}) => {
+  await request.patch("/api/v1/settings", {
+    data: { ndi_input_enabled: "true", ndi_input_source: "" },
+  });
+  const consoleMessages = collectConsole(page);
+  await page.goto("/");
+  await expect(page.getByTestId("program-source")).toHaveText(
+    "Na programe: Worship",
+    { timeout: 10000 },
+  );
+  // Let at least one program poll land (it carries input.enabled = true).
+  await page.waitForResponse((r) => r.url().endsWith("/api/v1/program"));
+  await expect(page.getByTestId("program-cut")).toHaveCount(3);
+  await expect(
+    page.locator('[data-testid="program-cut"][data-playlist-id="-1"]'),
+  ).toHaveCount(0);
+  const resp = await request.post("/api/v1/program/cut", { data: { source: -1 } });
+  expect(resp.status()).toBe(404);
+  const program = await (await request.get("/api/v1/program")).json();
+  expect(program.source).toBe(1);
+  expect(program.input.enabled).toBe(true);
+  expect(program.input.source).toBe("");
+
+  // Zero console errors — the last assertion.
+  expect(realConsoleErrors(consoleMessages)).toEqual([]);
+});
+
 test("the Program control lists OBS manuál after the playlists and cuts to it and back", async ({
   page,
   request,

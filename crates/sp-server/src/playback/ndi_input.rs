@@ -19,7 +19,8 @@
 //!   `SubmitJob` stamped at B and offers it under [`PROGRAM_INPUT_ID`] (`-1`).
 //! - **Always on time.** With no source, a disconnected one, no video yet or an
 //!   unsupported FourCC the input offers its standby pair (the NV12 black + one
-//!   silent block), so it owns its boundary and the bus never fills for it.
+//!   silent block), so it owns its boundary and the bus never fills for it —
+//!   also when it is switched off while it is on program.
 //! - **Only a candidate pays.** Every boundary is `touch`ed, and every
 //!   CONNECTED boundary is captured (the FrameSync keeps tracking our cadence
 //!   and the counters stay live), but the conversion and the job are built only
@@ -126,11 +127,11 @@ pub async fn load_input_settings(pool: &SqlitePool) -> Result<InputSettings, sql
     Ok(InputSettings { enabled, source })
 }
 
-/// List the visible NDI sources now? Only while enabled with a source and not
-/// connected (the operator is looking for the right name), and at most every
-/// [`INPUT_FIND_EVERY`].
-pub fn needs_find(active: bool, connected: bool, since_last: Option<Duration>) -> bool {
-    active && !connected && since_last.is_none_or(|d| d >= INPUT_FIND_EVERY)
+/// List the visible NDI sources now? Only while enabled and not connected —
+/// also with no source name yet, which is exactly when the operator needs the
+/// names — and at most every [`INPUT_FIND_EVERY`].
+pub fn needs_find(enabled: bool, connected: bool, since_last: Option<Duration>) -> bool {
+    enabled && !connected && since_last.is_none_or(|d| d >= INPUT_FIND_EVERY)
 }
 
 // ---------------------------------------------------------------------------
@@ -501,31 +502,39 @@ impl NdiInput {
 
     /// Service boundary `boundary_100ns`: apply a settings change, capture one
     /// video frame + one audio block, and offer the pair (or the standby pair)
-    /// to `bus` under [`PROGRAM_INPUT_ID`]. A disabled input does nothing — it
-    /// is not a program source then. The audio is stamped `audio_now_100ns`
-    /// (the raw wall clock at the emit, §6).
+    /// to `bus` under [`PROGRAM_INPUT_ID`] while the input can own a program
+    /// boundary. An inactive input (disabled, or no source) receives nothing;
+    /// if it is still selected on program it offers its standby pair. The
+    /// audio is stamped `audio_now_100ns` (the raw wall clock at the emit, §6).
     pub fn service(&mut self, boundary_100ns: i64, audio_now_100ns: i64, bus: &ProgramBus) {
         self.apply_settings(boundary_100ns);
-        if !self.applied.active() {
-            return;
-        }
         let candidate = bus.touch(PROGRAM_INPUT_ID, boundary_100ns);
-        let (w, h, stride, video, samples) = match self.capture(candidate) {
+        let captured = if self.applied.active() {
+            self.capture(candidate)
+        } else {
+            // Disabled / no source: nothing is received. It can still be ON
+            // program (it was cut while active, then switched off): it keeps
+            // owning those boundaries with its standby pair, never a fill.
+            Captured::Standby
+        };
+        let (w, h, video, samples) = match captured {
             Captured::Skipped => return,
-            Captured::Picture(frame, w, h, samples) => (w, h, w, frame, samples),
-            Captured::Standby => {
-                if !candidate {
-                    return;
-                }
-                let (w, h) = (self.standby_w, self.standby_h);
+            Captured::Picture(frame, w, h, samples) => (w, h, frame, samples),
+            Captured::Standby if candidate => {
                 let silence = vec![0.0; (INPUT_AUDIO_CHANNELS * INPUT_AUDIO_SAMPLES) as usize];
-                (w, h, w, self.standby.clone(), silence)
+                (
+                    self.standby_w,
+                    self.standby_h,
+                    self.standby.clone(),
+                    silence,
+                )
             }
+            Captured::Standby => return,
         };
         let job = SubmitJob {
             width: w,
             height: h,
-            stride,
+            stride: w,
             video,
             audio: vec![AudioFrame {
                 data: samples,
@@ -831,14 +840,16 @@ pub async fn run_input_config_task(
                 }
                 let since = found_at.map(|t| t.elapsed());
                 if let Some(rb) = receive.clone()
-                    && needs_find(settings.active(), shared.is_connected(), since)
+                    && needs_find(settings.enabled, shared.is_connected(), since)
                 {
                     let names = tokio::task::spawn_blocking(move || {
                         rb.find_source_names(INPUT_FIND_WAIT_MS)
                     })
                     .await
                     .unwrap_or_default();
-                    if !names.iter().any(|n| n.trim() == settings.source) {
+                    if !settings.source.is_empty()
+                        && !names.iter().any(|n| n.trim() == settings.source)
+                    {
                         warn!(
                             source = %settings.source,
                             visible = ?names,

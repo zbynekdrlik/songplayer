@@ -411,26 +411,34 @@ fn off_program_the_input_captures_and_counts_but_offers_and_converts_nothing() {
 }
 
 #[test]
-fn a_disabled_input_receives_nothing_and_is_no_source() {
+fn a_disabled_input_receives_nothing_and_offers_only_while_still_on_program() {
     let mut rig = rig(source_frames(30, 30), vec![Some(0)]);
     rig.shared.set_settings(InputSettings {
         enabled: false,
         source: SOURCE.to_string(),
     });
-    assert!(rig.run(3).is_empty());
+    // Still selected on program (cut while active): standby, never a fill.
+    let jobs = rig.run(3);
+    assert_one_pair_per_boundary(&jobs, 3);
+    jobs.iter().for_each(assert_standby);
     assert!(rig.mock.calls().is_empty(), "no receiver created");
-    assert_eq!(rig.status().boundaries, 0);
+    assert_eq!(rig.status().boundaries, 0, "nothing received");
+    // Not on program: nothing is offered at all.
+    rig.bus = Arc::new(ProgramBus::new());
+    assert!(rig.run(2).is_empty());
 }
 
 #[test]
-fn an_enabled_input_without_a_source_is_no_source() {
+fn an_enabled_input_without_a_source_receives_nothing() {
     let mut rig = rig(source_frames(30, 30), vec![Some(0)]);
     rig.shared.set_settings(InputSettings {
         enabled: true,
         source: String::new(),
     });
-    assert!(rig.run(2).is_empty());
+    rig.run(2).iter().for_each(assert_standby);
     assert!(rig.mock.calls().is_empty());
+    rig.bus = Arc::new(ProgramBus::new());
+    assert!(rig.run(2).is_empty());
 }
 
 #[test]
@@ -565,7 +573,9 @@ fn a_field_that_still_arrives_is_standby_not_a_half_height_picture() {
     let mut field_1 = uyvy(333_333, 30, 1, 4);
     field_1.frame_format_type = 3; // NDIlib_frame_format_type_field_1
     let mut rig = rig(vec![field_0, field_1], vec![Some(0), Some(1)]);
-    rig.run(2).iter().for_each(assert_standby);
+    let jobs = rig.run(2);
+    assert_one_pair_per_boundary(&jobs, 2);
+    jobs.iter().for_each(assert_standby);
     assert_eq!(rig.status().unsupported_boundaries, 2);
 }
 
@@ -754,7 +764,7 @@ fn grid_step_waits_services_catches_up_resyncs_and_relatches() {
 }
 
 #[test]
-fn needs_find_only_while_looking_for_the_source() {
+fn needs_find_only_while_enabled_and_not_connected() {
     let every = INPUT_FIND_EVERY;
     assert_eq!(every, Duration::from_secs(30));
     assert!(needs_find(true, false, None));
@@ -768,7 +778,7 @@ fn needs_find_only_while_looking_for_the_source() {
         !needs_find(true, true, None),
         "connected: nothing to look for"
     );
-    assert!(!needs_find(false, false, None), "disabled / no source");
+    assert!(!needs_find(false, false, None), "disabled");
 }
 
 #[test]

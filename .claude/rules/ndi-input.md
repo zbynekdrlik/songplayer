@@ -93,6 +93,10 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   4. only while a candidate, convert UYVY→NV12 into a `frame_pool` buffer
      (recycled on the last `SharedFrame` drop) and `offer` a `SubmitJob`
      stamped at B, with the audio stamped at the emit (§6).
+- An interleaved whole frame is converted like a progressive one. Its row-pair
+  chroma mean mixes the two fields' rows, which gives slight chroma combing on
+  moving interleaved content. That is acceptable: the receiver asks for
+  progressive frames, so it should be rare.
 - A FrameSync repeat has the same timecode AND the same data pointer. It
   re-offers the SAME converted `SharedFrame` (an `Arc` bump, no second
   conversion). A distinct buffer with the same timecode is a new frame.
@@ -104,8 +108,11 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   (`recv_get_no_connections == 0`), there is no video yet, or the format is
   unsupported. So the input ALWAYS owns its boundary on time, and the bus
   never fills for it.
-- A disabled input, or an enabled one with an empty source, does nothing: no
-  touch, no receiver. It is not a program source then.
+- An INACTIVE input (disabled, or enabled with an empty source) receives
+  nothing: no receiver, no capture, no counters. It still `touch`es. If it is
+  still selected on program (cut while active, then switched off), it keeps
+  offering its standby pair, so the program never fills for it. Otherwise it
+  offers nothing.
 - The thread is started from `start_program` via `ndi_input::start_ndi_input`.
   `lib.rs` and `pipeline.rs` are untouched (cap). On shutdown,
   `bus.input().stop()` ends the loop, which closes the receiver.
@@ -115,10 +122,14 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
 - Keys:
   - `ndi_input_enabled`: only `"true"` enables.
   - `ndi_input_source`: the full `"MACHINE (stream)"` name, trimmed.
-- `run_input_config_task` re-reads the keys every 5 s. While the input is
-  enabled and not connected, it lists the visible NDI sources every 30 s on
-  the blocking pool (a 1 s `find_wait`). The list is logged and served as
-  `input.visible_sources`, at most 16 names.
+- `run_input_config_task` re-reads the keys every 5 s.
+  - While the input is ENABLED and not connected, it lists the visible NDI
+    sources every 30 s on the blocking pool (a 1 s `find_wait`). This also runs
+    with no source name yet, which is exactly when the operator needs the
+    names.
+  - The list is served as `input.visible_sources`, at most 16 names.
+  - "The configured source is not visible" is logged only for a non-empty
+    source.
 - API:
   - `GET /api/v1/program` and the cut answer carry `input`:
     `{id, label, enabled, running, connected, source, stream, frames_received,
@@ -131,15 +142,14 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   - The input is a program source only while it is ACTIVE:
     `ndi_input_enabled` plus a non-empty `ndi_input_source`
     (`InputSettings::active()`, the same rule as `NdiInput::service`). An
-    enabled input with no source would never touch or offer, so the program
-    would only get fills.
+    enabled input with no source never receives anything, so cutting to it
+    would only ever show black.
     - `POST /api/v1/program/cut {"source": -1}` → 404 unless active.
     - A persisted `program_source = -1` is restored only while active.
-  - Known behaviour: disabling the input WHILE it is on program leaves the
-    program selected on `-1`. The bus fills it on time with its standby
-    (`health.filled` rises), and the dashboard shows
-    "Na programe: OBS manuál" without the button. Cut to a playlist to leave
-    it.
+  - Disabling the input WHILE it is on program leaves the program selected
+    on `-1`. The input thread then offers its standby pair (black + silence),
+    so there are 0 fills. The dashboard shows "Na programe: OBS manuál"
+    without the button; cut to a playlist to leave it.
 - sp-ui:
   - `ProgramControl` lists an extra `program-cut` button with
     `data-playlist-id="-1"` and the text "OBS manuál" AFTER the playlists, only
