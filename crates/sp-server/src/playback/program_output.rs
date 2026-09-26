@@ -16,6 +16,10 @@
 //! threads, and on Windows starts the thread on the engine's NDI backend. It
 //! runs AFTER the #196 startup senders, so the per-playlist name→port order is
 //! unchanged.
+//!
+//! #210: every submitted pair's audio block (forwarded or the standby silence)
+//! is handed to the program's VBAN output (`vban_out.rs`) right after its NDI
+//! submit, and `start_program` also starts the VBAN thread + its settings task.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,6 +37,7 @@ use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
 use crate::playback::submitter::FrameSubmitter;
+use crate::playback::vban_out::{VbanBlock, VbanOut, run_vban_config_task};
 use crate::playback::wallclock::WallClock;
 
 /// The program standby black resolution (1080p, the paced idle size).
@@ -58,6 +63,8 @@ pub struct ProgramOutput<B: NdiBackend> {
     silence: Vec<AudioFrame>,
     standby_w: u32,
     standby_h: u32,
+    /// #210: the VBAN output each submitted pair's audio block goes to.
+    vban: Option<Arc<VbanOut>>,
 }
 
 impl<B: NdiBackend> ProgramOutput<B> {
@@ -79,6 +86,20 @@ impl<B: NdiBackend> ProgramOutput<B> {
             silence,
             standby_w,
             standby_h,
+            vban: None,
+        }
+    }
+
+    /// #210: also hand every submitted pair's audio block to `vban`.
+    pub fn with_vban(mut self, vban: Arc<VbanOut>) -> Self {
+        self.vban = Some(vban);
+        self
+    }
+
+    /// #210: hand one pair's audio block to the VBAN output (never blocks).
+    fn feed_vban(&self, block: VbanBlock) {
+        if let Some(vban) = &self.vban {
+            vban.push(block);
         }
     }
 
@@ -99,6 +120,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
                     stamp,
                     job.audio_tc_100ns,
                 );
+                self.feed_vban(VbanBlock::from_frames(stamp, job.audio));
                 stamp
             }
             ProgramJob::Standby { stamp_100ns } => {
@@ -113,6 +135,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
                     stamp_100ns,
                     audio_now_100ns,
                 );
+                self.feed_vban(VbanBlock::silence(stamp_100ns));
                 stamp_100ns
             }
         }
@@ -213,9 +236,18 @@ impl super::PlaybackEngine {
     /// #209: restore the persisted program source, install the process-wide
     /// bus the paced submit threads offer to, start the `SP-program` sender
     /// thread (Windows, on the engine's NDI backend), and stop it on shutdown.
+    /// #210: also start the VBAN thread (Windows) and its settings task.
     /// Call once, after the #196 startup senders.
     #[cfg_attr(test, mutants::skip)]
     pub async fn start_program(&self, bus: Arc<ProgramBus>, shutdown: &broadcast::Sender<()>) {
+        let vban = bus.vban().clone();
+        tokio::spawn(run_vban_config_task(
+            self.pool.clone(),
+            vban.clone(),
+            shutdown.subscribe(),
+        ));
+        #[cfg(windows)]
+        crate::playback::vban_out::spawn_vban_thread(vban.clone());
         let mut shutdown = shutdown.subscribe();
         restore_selected_source(&self.pool, &bus).await;
         if !install(bus.clone()) {
@@ -226,6 +258,7 @@ impl super::PlaybackEngine {
         tokio::spawn(async move {
             let _ = shutdown.recv().await;
             bus.stop();
+            vban.stop();
         });
     }
 }
@@ -252,7 +285,8 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
                 }
             };
             info!(ndi_name = PROGRAM_NDI_NAME, "program output thread started");
-            let mut out = ProgramOutput::new(sender, PROGRAM_STANDBY_W, PROGRAM_STANDBY_H);
+            let mut out = ProgramOutput::new(sender, PROGRAM_STANDBY_W, PROGRAM_STANDBY_H)
+                .with_vban(bus.vban().clone());
             let mut wall = WallClock::system();
             run_program_loop(&mut out, &bus, &mut wall);
         });

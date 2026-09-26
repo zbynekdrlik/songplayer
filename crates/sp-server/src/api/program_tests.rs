@@ -162,3 +162,92 @@ async fn cut_without_a_source_is_rejected() {
     assert!(status.is_client_error(), "got {status}");
     assert_eq!(state.program_bus.status().health.cuts, 0);
 }
+
+// --- #210: the VBAN block + its settings ------------------------------------
+
+#[tokio::test]
+async fn get_program_reports_the_vban_block() {
+    use crate::playback::vban_out::VbanBlock;
+    use crate::playback::vban_out::tests::active_config;
+    let state = test_state().await;
+    let (status, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let v = &json["vban"];
+    assert_eq!(v["enabled"], false);
+    assert_eq!(v["stream_name"], "sp-program");
+    assert_eq!(v["packets_sent"], 0);
+    assert_eq!(v["blocks_dropped"], 0);
+    assert_eq!(v["late_sends"], 0);
+    assert_eq!(v["send_interval_p99_us"], 0);
+    assert_eq!(v["targets"], serde_json::json!([]));
+
+    let vban = state.program_bus.vban();
+    vban.set_config(active_config(&["127.0.0.1:6980"]));
+    for due in 0..11 {
+        vban.push(VbanBlock::silence(due)); // one over the bound
+    }
+    let (status, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let v = &json["vban"];
+    assert_eq!(v["enabled"], true);
+    assert_eq!(v["blocks_dropped"], 1);
+    assert_eq!(
+        v["targets"],
+        serde_json::json!([{"target": "127.0.0.1:6980", "addr": "127.0.0.1:6980", "error": null}])
+    );
+    assert_eq!(
+        json["ndi_name"], PROGRAM_NDI_NAME,
+        "the program fields stay flat"
+    );
+    assert_eq!(json["health"]["cuts"], 0);
+
+    let pid = add_playlist(&state.pool, "slow").await;
+    let (status, json) = call(
+        state,
+        "POST",
+        "/api/v1/program/cut",
+        Some(serde_json::json!({ "source": pid })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["source"], pid);
+    assert_eq!(
+        json["vban"]["blocks_dropped"], 1,
+        "the cut answer carries it too"
+    );
+}
+
+#[tokio::test]
+async fn the_vban_settings_save_through_the_settings_api_and_load_back() {
+    use crate::playback::vban_out::load_vban_settings;
+    let state = test_state().await;
+    let (status, _) = call(
+        state.clone(),
+        "PATCH",
+        "/api/v1/settings",
+        Some(serde_json::json!({
+            "vban_enabled": "true",
+            "vban_stream_name": "sp-program",
+            "vban_targets": "dev1.lan:6980, lv1.lan:6980",
+        })),
+    )
+    .await;
+    assert!(status.is_success(), "got {status}");
+    let s = load_vban_settings(&state.pool).await.unwrap();
+    assert!(s.enabled);
+    assert_eq!(s.stream_name, "sp-program");
+    assert_eq!(s.target_specs(), vec!["dev1.lan:6980", "lv1.lan:6980"]);
+    let (_, json) = call(state.clone(), "GET", "/api/v1/settings", None).await;
+    assert_eq!(json["vban_enabled"], "true");
+    assert_eq!(json["vban_targets"], "dev1.lan:6980, lv1.lan:6980");
+
+    let (status, _) = call(
+        state.clone(),
+        "PATCH",
+        "/api/v1/settings",
+        Some(serde_json::json!({ "vban_enabled": "false" })),
+    )
+    .await;
+    assert!(status.is_success());
+    assert!(!load_vban_settings(&state.pool).await.unwrap().enabled);
+}

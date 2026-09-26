@@ -6,16 +6,20 @@
 //!   that playlist's output on the boundary after next (frame-accurate, see
 //!   `playback::program_bus`). `404` for an unknown playlist. The selection is
 //!   persisted first (setting `program_source`) and restored at startup.
+//!
+//! Both answer the program state plus `vban`, the #210 VBAN audio output's
+//! telemetry (`playback::vban_out::VbanStatus`).
 
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::AppState;
-use crate::playback::program_bus::{ProgramStatus, persist_selected_source};
+use crate::playback::program_bus::{ProgramBus, ProgramStatus, persist_selected_source};
+use crate::playback::vban_out::VbanStatus;
 use crate::playback::wallclock::utc_now_100ns;
 
 /// Body of `POST /api/v1/program/cut`.
@@ -25,9 +29,27 @@ pub struct CutRequest {
     pub source: i64,
 }
 
+/// The body of both program routes: the program state + the VBAN telemetry.
+#[derive(Debug, Serialize)]
+pub struct ProgramResponse {
+    #[serde(flatten)]
+    pub program: ProgramStatus,
+    pub vban: VbanStatus,
+}
+
+impl ProgramResponse {
+    fn new(bus: &ProgramBus, program: ProgramStatus) -> Self {
+        Self {
+            program,
+            vban: bus.vban().status(),
+        }
+    }
+}
+
 /// `GET /api/v1/program`.
-pub async fn get_program(State(state): State<AppState>) -> Json<ProgramStatus> {
-    Json(state.program_bus.status())
+pub async fn get_program(State(state): State<AppState>) -> Json<ProgramResponse> {
+    let bus = &state.program_bus;
+    Json(ProgramResponse::new(bus, bus.status()))
 }
 
 /// `POST /api/v1/program/cut` — `200` + the new program state, `404` for an
@@ -57,7 +79,7 @@ pub async fn post_program_cut(
         cut_boundary_100ns = ?status.cut_boundary_100ns,
         "program cut"
     );
-    Json(status).into_response()
+    Json(ProgramResponse::new(&state.program_bus, status)).into_response()
 }
 
 #[cfg(test)]

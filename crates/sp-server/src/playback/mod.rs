@@ -50,6 +50,8 @@ pub mod submitter;
 mod test_helpers;
 mod title;
 mod transport_state; // #201 pure PlayState->TransportState mapping (Linux-tested)
+pub mod vban_out; // #210: the program's VBAN audio output (queue, paced thread, socket, stats)
+pub mod vban_packet; // #210: the pure VBAN packet encoder (header, INT24, 8×200 split)
 pub mod wallclock;
 
 use std::collections::{HashMap, VecDeque};
