@@ -8,7 +8,7 @@
 //! never-blocking queue: over [`VBAN_QUEUE_BOUND`] the OLDEST block is dropped
 //! and counted. A dedicated thread ([`run_vban_loop`]) encodes each block into
 //! 8 packets of 200 frames (`vban_packet.rs`) and sends packet `k` of the
-//! boundary `B` at `due(B) + L + k/240 s`, where L is one slot
+//! boundary `B` at `due(B) + L + k/240 s`, where L is two slots
 //! ([`VBAN_SEND_LATENCY_100NS`]). It paces on its own [`WallClock`], ticked
 //! once per grid boundary like the program wall ([`WallVbanClock`]) — also
 //! while nothing is sent, so its anchor never goes stale — and the
