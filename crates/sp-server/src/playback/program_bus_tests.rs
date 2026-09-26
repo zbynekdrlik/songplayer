@@ -314,6 +314,88 @@ fn a_source_that_stalls_at_the_cut_boundary_is_covered_by_the_standby_fill() {
 }
 
 #[test]
+fn a_new_source_whose_first_frame_after_the_cut_is_slow_is_waited_for() {
+    // Every paced source reports its progress on every boundary through
+    // `program_copy`, program candidate or not. So B is known to be live when
+    // the sender checks the cut boundary b(7) before B's first post-cut frame
+    // is in: b(7) waits for B's frame instead of going black.
+    let bus = ProgramBus::new();
+    bus.select_initial(SRC_A);
+    let (fa, fb) = (frame(4, 2), frame(8, 2));
+    for k in 1..=6 {
+        let now = b(k) + 5 * MS;
+        let a = job(4, &fa, b(k), 0.1);
+        if let Some(copy) = program_copy(&bus, SRC_A, &a) {
+            bus.offer(SRC_A, copy, now);
+        }
+        if k <= 5 {
+            let bj = job(8, &fb, b(k), 0.2);
+            assert!(program_copy(&bus, SRC_B, &bj).is_none(), "B is off program");
+        }
+        if k == 5 {
+            bus.cut(SRC_B, now); // cut boundary b(7)
+        }
+    }
+    // B's b(6) submit is slow: the sender's b(7) check comes first.
+    bus.release_due(b(7) + MS);
+    let bj = job(8, &fb, b(7), 0.2);
+    let copy = program_copy(&bus, SRC_B, &bj).expect("B is on program now");
+    assert_eq!(
+        bus.offer(SRC_B, copy, b(7) + 10 * MS),
+        OfferOutcome::Accepted
+    );
+
+    let mut sent = Vec::new();
+    while let Take::Job(job) = bus.take_timeout(Duration::ZERO) {
+        let width = match &job {
+            ProgramJob::Source(j) => j.width,
+            ProgramJob::Standby { .. } => 0,
+        };
+        sent.push((job.stamp_100ns(), width));
+    }
+    let want: Vec<(i64, u32)> = (1..=7).map(|k| (b(k), if k < 7 { 4 } else { 8 })).collect();
+    assert_eq!(sent, want, "b(7) is B's frame, not the program's black");
+    let h = bus.status().health;
+    assert_eq!((h.filled, h.late_dropped), (0, 0));
+}
+
+#[test]
+fn a_cut_follows_the_sources_clock_when_the_api_clock_lags() {
+    // The API reads the realtime clock; the sources stamp on their own slewed
+    // wall. After a UTC step the realtime clock can lag the stamps: the cut
+    // must still land on the boundary after next of what the sources emit.
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_A);
+    let fa = frame(4, 2);
+    for k in 1..=10 {
+        core.offer(SRC_A, job(4, &fa, b(k), 0.1), b(k) + MS);
+    }
+    assert!(core.cut(SRC_B, b(5)));
+    assert_eq!(core.status().cut_boundary_100ns, Some(b(12)));
+
+    // An API clock ahead of the sources is taken as it is.
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_A);
+    core.offer(SRC_A, job(4, &fa, b(1), 0.1), b(1) + MS);
+    assert!(core.cut(SRC_B, b(20)));
+    assert_eq!(core.status().cut_boundary_100ns, Some(b(22)));
+}
+
+#[test]
+fn cutting_back_before_the_cut_boundary_cancels_the_cut() {
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_A);
+    assert!(core.cut(SRC_B, b(5) + 5 * MS)); // b(7)
+    assert!(core.cut(SRC_A, b(5) + 6 * MS)); // same slot: back to A
+    assert_eq!(core.owner_of(b(7)), Some(SRC_A));
+    assert!(!core.is_candidate(SRC_B));
+    let st = core.status();
+    assert_eq!((st.source, st.previous), (Some(SRC_A), None));
+    assert_eq!(st.cut_boundary_100ns, None, "A owns every boundary again");
+    assert_eq!(st.health.cuts, 2);
+}
+
+#[test]
 fn with_no_source_every_boundary_is_filled_on_time() {
     let mut core = ProgramCore::new();
     let (backend, mut out) = program();
