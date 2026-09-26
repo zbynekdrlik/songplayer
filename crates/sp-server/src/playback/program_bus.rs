@@ -55,7 +55,7 @@
 //! its `Mutex`/`Condvar` wrapper ([`ProgramBus`]) and the settings persistence
 //! of the selected source. The `SP-program` sender + its thread live in
 //! `program_output.rs`; the offer hook sits in the paced submit thread
-//! (`pipeline_paced_submit.rs`).
+//! (`paced_output.rs`).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};

@@ -16,6 +16,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::{PacingStats, PlaybackStateLabel};
+use crate::playback::paced_output::{HandoffSink, SharedHandoff, StopOnPanic, run_submit_consumer};
 use crate::playback::pacer::{
     PacedFrame, Pacer, PrerollGate, ServiceOutcome, Standby, StandbyBlack, open_paced_decoder,
     plan_sleep_100ns,
@@ -26,9 +27,7 @@ use crate::playback::pipeline::{
 };
 // The song-start pre-roll's standby black: the idle fill's 1080p size (#147).
 use crate::playback::pipeline_paced_idle::{IDLE_H as STANDBY_H, IDLE_W as STANDBY_W};
-use crate::playback::pipeline_paced_submit::{
-    HandoffSink, SharedHandoff, StopOnPanic, emit_heartbeat_paced, run_submit_consumer,
-};
+use crate::playback::pipeline_paced_submit::emit_heartbeat_paced;
 use crate::playback::submit_handoff::SUBMIT_HANDOFF_BOUND;
 use crate::playback::submitter::FrameSubmitter;
 

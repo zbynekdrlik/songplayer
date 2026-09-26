@@ -14,8 +14,8 @@
 //! DECISION layer — the bound + coalesce policy (`handoff_policy`), the honest
 //! submit-side lateness math (measured where the frame LEAVES the box, not at the
 //! handoff), the telemetry counters, and the pacer/submit stats merge. The
-//! Windows `Mutex`/`Condvar` `SharedHandoff` and the submit thread that drive it
-//! live in `pipeline_paced_submit.rs`.
+//! `Mutex`/`Condvar` `SharedHandoff` and the submit thread that drive it live in
+//! `paced_output.rs`.
 
 use std::collections::VecDeque;
 

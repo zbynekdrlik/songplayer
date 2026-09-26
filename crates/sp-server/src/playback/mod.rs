@@ -21,6 +21,7 @@ pub mod ndi_burn;
 pub mod ndi_health;
 mod ndi_health_transport; // #201 round 2: pure reported-label -> TransportState (Linux-tested)
 mod ndi_recovery_trigger; // #173 operator recover trigger (impl PlaybackEngine, 1000-line cap split)
+pub mod paced_output; // #168/#147 paced submit side: handoff + consumer (cross-platform)
 pub mod pacer;
 pub mod pacer_queue; // #147 producer/consumer: pure bounded look-ahead frame queue
 pub mod pacer_sink; // #203 pacer scheduling + shared-frame standby submit helpers

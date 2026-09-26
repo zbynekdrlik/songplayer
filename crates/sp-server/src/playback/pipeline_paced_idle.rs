@@ -25,14 +25,13 @@ use std::time::Instant;
 use crossbeam_channel::Receiver;
 
 use crate::playback::ndi_health::PlaybackStateLabel;
+use crate::playback::paced_output::{HandoffSink, SharedHandoff, StopOnPanic, run_submit_consumer};
 use crate::playback::pacer::{Pacer, ServiceOutcome, StandbyBlack};
 use crate::playback::pipeline::{
     PipelineCommand, PipelineEvent, emit_heartbeat, should_run_heartbeat,
 };
 use crate::playback::pipeline_paced::sleep_to_boundary;
-use crate::playback::pipeline_paced_submit::{
-    HandoffSink, SharedHandoff, StopOnPanic, emit_heartbeat_paced, run_submit_consumer,
-};
+use crate::playback::pipeline_paced_submit::emit_heartbeat_paced;
 use crate::playback::submit_handoff::SUBMIT_HANDOFF_BOUND;
 use crate::playback::submitter::FrameSubmitter;
 
