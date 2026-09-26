@@ -142,13 +142,13 @@ impl Pacer {
     /// the pre-roll's black. A repeated seek before any new frame keeps the
     /// earlier hold. Without a fill (no pre-roll ran) it is a plain `anchor`.
     pub fn anchor_seek(&mut self) {
-        self.anchor();
         let held = self.last_frame.take().map(|f| FillFrame {
             width: f.width,
             height: f.height,
             stride: f.stride,
             video: f.video,
         });
+        self.anchor();
         if let Some(fill) = self.standby_fill.as_mut() {
             fill.hold = held.or(fill.hold.take());
         }
