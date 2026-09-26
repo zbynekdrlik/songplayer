@@ -141,4 +141,68 @@ mod tests {
         assert_eq!(msg["d"]["requestType"], "GetSceneList");
         assert!(msg["d"].get("requestData").is_none());
     }
+
+    /// A call whose requester already gave up never reaches cg OBS — the
+    /// first request a real WebSocket peer receives is the LIVE call run after
+    /// two abandoned ones (a stale `SetCurrentProgramScene` must never switch
+    /// cg OBS late). Deterministic: the abandoned calls are awaited first.
+    #[tokio::test]
+    async fn an_abandoned_call_is_never_sent_and_a_live_one_is() {
+        use futures::StreamExt;
+        use std::time::Duration;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let cg_obs = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            loop {
+                match ws.next().await {
+                    Some(Ok(Message::Text(text))) => {
+                        return serde_json::from_str::<serde_json::Value>(&text).unwrap();
+                    }
+                    Some(Ok(_)) => {}
+                    other => panic!("cg OBS got no request: {other:?}"),
+                }
+            }
+        });
+        let (client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+            .await
+            .unwrap();
+        let (write, _read) = client.split();
+        let write: SharedWrite = std::sync::Arc::new(tokio::sync::Mutex::new(write));
+        let dispatcher = Dispatcher::new();
+        let map: NdiSourceMap = Default::default();
+
+        let (reply, rx) = oneshot::channel();
+        drop(rx);
+        let stale = RemoteCall::Request {
+            request_type: "SetCurrentProgramScene".to_string(),
+            request_data: Some(serde_json::json!({ "sceneName": "stale" })),
+            reply,
+        };
+        run(write.clone(), dispatcher.clone(), map.clone(), stale).await;
+        let (reply, rx) = oneshot::channel();
+        drop(rx);
+        let lookup = RemoteCall::ScenePlaylists {
+            scene: "stale".to_string(),
+            reply,
+        };
+        run(write.clone(), dispatcher.clone(), map.clone(), lookup).await;
+
+        let (reply, _rx) = oneshot::channel();
+        let live = RemoteCall::Request {
+            request_type: "GetSceneList".to_string(),
+            request_data: None,
+            reply,
+        };
+        let live = tokio::spawn(run(write, dispatcher, map, live));
+        let first = tokio::time::timeout(Duration::from_secs(10), cg_obs)
+            .await
+            .expect("cg OBS received nothing within 10 s")
+            .unwrap();
+        assert_eq!(first["op"], 6);
+        assert_eq!(first["d"]["requestType"], "GetSceneList");
+        live.abort();
+    }
 }

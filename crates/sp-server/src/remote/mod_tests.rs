@@ -178,6 +178,48 @@ fn the_status_reports_the_stored_settings_and_the_live_counters() {
 }
 
 #[test]
+fn debug_never_prints_the_password() {
+    let shown = format!("{:?}", settings(true, 4460, Some(SPEC_PASSWORD)));
+    assert!(!shown.contains(SPEC_PASSWORD), "{shown}");
+    assert_eq!(
+        shown,
+        r#"RemoteSettings { enabled: true, port: 4460, password: Some("<set>") }"#
+    );
+    assert_eq!(
+        format!("{:?}", settings(false, 4456, None)),
+        "RemoteSettings { enabled: false, port: 4456, password: None }"
+    );
+}
+
+#[test]
+fn client_chosen_request_types_stay_bounded() {
+    let shared = RemoteShared::default();
+    let long = "G".repeat(100);
+    assert!(shared.note_unsupported(&long));
+    shared.record_request(&long);
+    let st = shared.status(&RemoteSettings::disabled());
+    assert_eq!(st.unsupported_requests, vec!["G".repeat(64)]);
+    assert_eq!(st.last_request.unwrap().request_type, "G".repeat(64));
+    for i in 1..64 {
+        assert!(shared.note_unsupported(&format!("R{i:02}")), "{i}");
+    }
+    assert_eq!(
+        shared
+            .status(&RemoteSettings::disabled())
+            .unsupported_requests
+            .len(),
+        64
+    );
+    // Full: a 65th type is neither stored nor logged.
+    assert!(!shared.note_unsupported("R99"));
+    let listed = shared
+        .status(&RemoteSettings::disabled())
+        .unsupported_requests;
+    assert_eq!(listed.len(), 64);
+    assert!(!listed.contains(&"R99".to_string()));
+}
+
+#[test]
 fn the_status_serializes_the_api_field_names() {
     let shared = RemoteShared::default();
     let v = serde_json::to_value(shared.status(&settings(true, 4456, None))).unwrap();
@@ -394,6 +436,15 @@ async fn the_settings_task_binds_rebinds_retries_and_stops_the_listener() {
     })
     .await;
     assert!(!listening());
+    // Disabled while the bind failed: nothing to stop, the error goes away.
+    set_setting(&pool, "remote_ws_enabled", "false")
+        .await
+        .unwrap();
+    wait_for("the stale error is dropped", || error().is_none()).await;
+    set_setting(&pool, "remote_ws_enabled", "true")
+        .await
+        .unwrap();
+    wait_for("the bind error shows again", || error().is_some()).await;
     drop(blocker);
     wait_for("the retried bind succeeds", listening).await;
     assert_eq!(error(), None);

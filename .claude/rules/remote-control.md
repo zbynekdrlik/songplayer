@@ -50,6 +50,9 @@ Research (spec + the Companion module v3.15.3 and 4.0 beta): #213 comment
 - v4 sends batches (op 8, SerialRealtime) and a `Reidentify` (op 3) when a
   meter feedback appears. Both are served. Batches always run serially and in
   order; `haltOnFailure` is honoured.
+- A `Reidentify` without `eventSubscriptions` KEEPS the current ones.
+  obs-websocket's `SetSessionParameters` changes them only when the field is
+  present; the spec's "= All" is the INITIAL default.
 
 ## Architecture
 
@@ -107,14 +110,17 @@ Research (spec + the Companion module v3.15.3 and 4.0 beta): #213 comment
 1. Forward it to cg OBS (the migration-time behaviour: everything still on cg
    OBS follows). The client gets cg OBS's own answer: success, or e.g. `600`
    for an unknown scene. It gets `207` when cg OBS is not reachable.
-2. Only when cg OBS accepted, look up X's playlists. A lookup that times out
-   reads as "no playlist". That is safe: cg OBS already shows X, and "OBS
-   manuál" carries cg OBS's mix.
+2. Only when cg OBS accepted, look up X's playlists. A lookup that gets no
+   answer reads as "no playlist". That is safe: cg OBS already shows X, and
+   "OBS manuál" carries cg OBS's mix. It is logged as a WARN and marked
+   `reason: lookup_failed` on the cut.
 3. Cut through `program_bus::persist_and_cut`, the ONE cut path shared with
    `POST /api/v1/program/cut`: persist first, then cut on the boundary after
-   next. A failed persist cuts nothing and returns `205`.
+   next. It is serialized on the bus (`cut_serial`), so an API cut and a
+   remote cut never interleave and the persisted source is the one on
+   program. A failed persist cuts nothing and returns `205`.
 4. Record `remote.last_remote_cut {scene, action (playlist|input|keep),
-   source, reason (not_switched|input_inactive|persist_failed),
+   source, reason (not_switched|input_inactive|persist_failed|lookup_failed),
    cut_boundary_100ns, at_ms}`.
 
 A request without `sceneName` (a `sceneUuid` only) is answered `300` and is
@@ -133,7 +139,19 @@ not forwarded: the cut is by scene name. Companion always sends the name.
   - a bind failure (the port is taken) shows as `remote.error` and is retried
     on every poll, logged once per distinct error.
 - The listener binds `0.0.0.0` (Companion runs on another machine). It is
-  opt-in and LAN-only; set a password when the LAN is not trusted.
+  opt-in and meant for a trusted LAN.
+  - The password gates the WebSocket only. Like every other setting, it is
+    stored in plain text and readable through the unauthenticated
+    `GET /api/v1/settings`, so it does not protect against a hostile LAN.
+  - `RemoteSettings`' `Debug` never prints the password.
+- The surface is bounded:
+  - a message or frame over `MAX_MESSAGE_BYTES` (1 MiB) ends the session
+    unparsed;
+  - a client that does not identify within `IDENTIFY_TIMEOUT` (10 s) is
+    closed with 4007;
+  - at most `MAX_UNSUPPORTED_LISTED` (64) unsupported request types are
+    remembered, and client-chosen request types are clipped to 64
+    characters.
 - `GET /api/v1/program` → `remote {enabled, port, auth, listening, error,
   clients, requests, last_request, last_remote_cut, unsupported_requests}`.
   `enabled` / `port` / `auth` come from the STORED settings, so a save shows
@@ -168,6 +186,17 @@ not forwarded: the cut is by scene name. Companion always sends the name.
   synchronization.
 
 ## Residuals (documented, not bugs)
+
+- While cg OBS is disconnected, SongPlayer's OBS client does not drain its
+  command queue (capacity 64).
+  - Each facade call that happens then parks one `ObsCommand::Remote` there
+    until the reconnect, where the abandoned calls are skipped.
+  - The facade itself never blocks (`try_send`, 3 s bound).
+  - The facade's traffic in an outage is a handful of calls: a Companion
+    (re)connect or a button press. SongPlayer's own title `send().await`
+    calls queue the same way.
+  - Accepted. The fix would need the facade to know the OBS connection state,
+    which the engine does not hold.
 
 - In Studio Mode cg OBS can drop a `CurrentProgramSceneChanged` (#170).
   Companion's feedback then misses it exactly as it does when connected to cg

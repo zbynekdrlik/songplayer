@@ -22,7 +22,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use crate::obs::remote_call::RemoteCall;
 use crate::obs::{ObsCommand, ObsEvent};
 use crate::playback::program_bus::{ProgramBus, SETTING_PROGRAM_SOURCE};
-use crate::remote::{Facade, Upstream, serve};
+use crate::remote::{Facade, IDENTIFY_TIMEOUT, Upstream, serve};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 /// The obs-websocket spec's example password (the only password in tests).
@@ -82,7 +82,7 @@ fn spawn_fake_upstream() -> (mpsc::Sender<ObsCommand>, Arc<Mutex<Vec<String>>>) 
                         "SetCurrentProgramScene"
                             if matches!(
                                 scene.as_str(),
-                                "sp-fast" | "sp-slow" | "multi" | "Slido"
+                                "sp-fast" | "sp-slow" | "multi" | "Slido" | "lost"
                             ) =>
                         {
                             json!({ "requestStatus": { "result": true, "code": 100 } })
@@ -100,6 +100,10 @@ fn spawn_fake_upstream() -> (mpsc::Sender<ObsCommand>, Arc<Mutex<Vec<String>>>) 
                 }
                 RemoteCall::ScenePlaylists { scene, reply } => {
                     log.lock().unwrap().push(format!("ScenePlaylists {scene}"));
+                    if scene == "lost" {
+                        // The lookup gets no answer (the reply is dropped).
+                        continue;
+                    }
                     let ids: HashSet<i64> = match scene.as_str() {
                         "sp-fast" => [7].into(),
                         "sp-slow" => [3].into(),
@@ -135,17 +139,23 @@ impl Rig {
 }
 
 async fn rig_with(password: Option<&str>, upstream: bool) -> Rig {
+    rig_full(password, upstream, IDENTIFY_TIMEOUT).await
+}
+
+async fn rig_full(password: Option<&str>, upstream: bool, identify_timeout: Duration) -> Rig {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
     let bus = Arc::new(ProgramBus::new());
     let (events, _) = broadcast::channel(64);
     let (cmd_tx, calls) = spawn_fake_upstream();
-    let facade = Facade::new(
-        pool.clone(),
-        Arc::clone(&bus),
-        Upstream::new(upstream.then_some(cmd_tx), events.clone()),
-        password.map(str::to_string),
-    );
+    let facade = Arc::new(Facade {
+        pool: pool.clone(),
+        bus: Arc::clone(&bus),
+        upstream: Upstream::new(upstream.then_some(cmd_tx), events.clone()),
+        password: password.map(str::to_string),
+        cut_order: tokio::sync::Mutex::new(()),
+        identify_timeout,
+    });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(serve(listener, facade));
@@ -193,20 +203,32 @@ async fn next_json(ws: &mut Client) -> Value {
     }
 }
 
-/// The close frame the server sends: `(code, reason)`.
+/// The close frame the server sends next: `(code, reason)`.
 async fn next_close(ws: &mut Client) -> (u16, String) {
+    let msg = tokio::time::timeout(TIMEOUT, ws.next())
+        .await
+        .expect("no close within the timeout")
+        .expect("the stream ended without a close frame")
+        .expect("read failed");
+    match msg {
+        Message::Close(Some(frame)) => (u16::from(frame.code), frame.reason.as_str().to_string()),
+        Message::Close(None) => panic!("close frame without a code"),
+        other => panic!("expected a close, got {other:?}"),
+    }
+}
+
+/// Read until the session ends: the close code the server sent, `None` when
+/// the connection just ended (or failed).
+async fn close_code_at_end(ws: &mut Client) -> Option<u16> {
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
     loop {
-        let msg = tokio::time::timeout(TIMEOUT, ws.next())
+        let next = tokio::time::timeout_at(deadline, ws.next())
             .await
-            .expect("no close within the timeout")
-            .expect("the stream ended without a close frame")
-            .expect("read failed");
-        match msg {
-            Message::Close(Some(frame)) => {
-                return (u16::from(frame.code), frame.reason.as_str().to_string());
-            }
-            Message::Close(None) => panic!("close frame without a code"),
-            other => panic!("expected a close, got {other:?}"),
+            .expect("the session did not end within the timeout");
+        match next {
+            Some(Ok(Message::Close(frame))) => return frame.map(|f| u16::from(f.code)),
+            Some(Ok(_)) => {}
+            Some(Err(_)) | None => return None,
         }
     }
 }
@@ -375,6 +397,41 @@ async fn protocol_violations_close_with_the_obs_codes() {
     hello_identify(&mut ws, 0).await;
     ws.send(Message::Text("{".into())).await.unwrap();
     assert_eq!(next_close(&mut ws).await.0, 4002);
+}
+
+#[tokio::test]
+async fn a_client_that_never_identifies_is_closed_after_the_identify_timeout() {
+    let rig = rig_full(None, true, Duration::from_millis(300)).await;
+    let mut ws = connect(rig.addr).await;
+    next_json(&mut ws).await;
+    let (code, reason) = next_close(&mut ws).await;
+    assert_eq!(code, 4007);
+    assert_eq!(reason, "No `Identify` arrived in time.");
+    wait_for("the session is gone", || rig.remote().clients == 0).await;
+}
+
+#[tokio::test]
+async fn an_identified_client_outlives_the_identify_timeout() {
+    let rig = rig_full(None, true, Duration::from_millis(300)).await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    // The scenario itself: twice the identify timeout passes after Identify.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let d = request(&mut ws, "GetStudioModeEnabled", None).await;
+    assert_eq!(d["requestStatus"]["code"], 100);
+    assert_eq!(rig.remote().clients, 1);
+}
+
+#[tokio::test]
+async fn a_message_over_1_mib_ends_the_session_without_being_parsed() {
+    let rig = rig().await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    // Not JSON: parsed, it would be closed 4002; refused by size, it never is.
+    let big = "x".repeat(1_100_000);
+    let _ = ws.send(Message::Text(big.into())).await;
+    assert_ne!(close_code_at_end(&mut ws).await, Some(4002));
+    wait_for("the session is gone", || rig.remote().clients == 0).await;
 }
 
 #[tokio::test]
@@ -597,6 +654,21 @@ async fn a_manual_or_multi_playlist_scene_cuts_to_obs_manual_while_the_input_is_
 }
 
 #[tokio::test]
+async fn an_unanswered_scene_lookup_cuts_to_obs_manual_and_says_so() {
+    let rig = rig().await;
+    enable_input(&rig.pool, true).await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    let d = press(&mut ws, "lost").await;
+    assert_eq!(d["requestStatus"]["code"], 100);
+    assert_eq!(rig.bus.status().source, Some(-1));
+    let cut = rig.remote().last_remote_cut.unwrap();
+    assert_eq!(cut.action, "input");
+    assert_eq!(cut.source, Some(-1));
+    assert_eq!(cut.reason, Some("lookup_failed"));
+}
+
+#[tokio::test]
 async fn a_manual_scene_keeps_the_program_when_the_input_is_not_a_source() {
     let rig = rig().await;
     enable_input(&rig.pool, false).await;
@@ -752,4 +824,16 @@ async fn reidentify_changes_the_subscriptions() {
     let ev = next_json(&mut ws).await;
     assert_eq!(ev["op"], 5);
     assert_eq!(ev["d"]["eventData"]["sceneName"], "b");
+
+    // A Reidentify naming no subscriptions keeps them (obs-websocket's rule).
+    send_json(&mut ws, json!({ "op": 3, "d": {} })).await;
+    assert_eq!(next_json(&mut ws).await["op"], 2);
+    rig.events
+        .send(raw(
+            "CurrentProgramSceneChanged",
+            json!({ "sceneName": "c" }),
+        ))
+        .unwrap();
+    let ev = next_json(&mut ws).await;
+    assert_eq!(ev["d"]["eventData"]["sceneName"], "c");
 }

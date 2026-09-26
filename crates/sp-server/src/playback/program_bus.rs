@@ -483,6 +483,9 @@ pub struct ProgramBus {
     /// #213: the Companion remote control's telemetry (`remote` on
     /// `GET /api/v1/program`).
     remote: Arc<RemoteShared>,
+    /// #213: serializes [`persist_and_cut`] — the API and the remote control
+    /// can cut concurrently, and the persisted source must be the one cut last.
+    cut_serial: tokio::sync::Mutex<()>,
 }
 
 impl Default for ProgramBus {
@@ -502,6 +505,7 @@ impl ProgramBus {
             vban: Arc::new(VbanOut::new()),
             input: Arc::new(NdiInputShared::default()),
             remote: Arc::new(RemoteShared::default()),
+            cut_serial: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -625,12 +629,14 @@ pub async fn persist_selected_source(pool: &SqlitePool, pid: i64) -> Result<(), 
 
 /// Persist `pid` as the selected source FIRST, then cut the program to it (a
 /// failed write cuts nothing). The one cut path of `POST /api/v1/program/cut`
-/// and the #213 remote control.
+/// and the #213 remote control; two cuts never interleave, so the persisted
+/// source is always the one on program.
 pub async fn persist_and_cut(
     pool: &SqlitePool,
     bus: &ProgramBus,
     pid: i64,
 ) -> Result<ProgramStatus, sqlx::Error> {
+    let _serial = bus.cut_serial.lock().await;
     persist_selected_source(pool, pid).await?;
     Ok(bus.cut(pid, utc_now_100ns()))
 }

@@ -17,8 +17,8 @@ use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
 use tokio_tungstenite::tungstenite::{self, Message};
 use tracing::{debug, info, warn};
 
@@ -28,7 +28,7 @@ use super::protocol::{
     STATUS_GENERIC_ERROR, STATUS_MISSING_REQUEST_FIELD, STATUS_MISSING_REQUEST_TYPE,
     STATUS_NOT_READY, STATUS_UNKNOWN_REQUEST_TYPE, Subprotocol,
 };
-use super::{Facade, RemoteCut, now_ms};
+use super::{Facade, MAX_MESSAGE_BYTES, RemoteCut, now_ms};
 use crate::obs::ObsEvent;
 use crate::playback::ndi_input::load_input_settings;
 use crate::playback::program_bus::persist_and_cut;
@@ -55,7 +55,12 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
             Subprotocol::Unsupported => Err(refused()),
         }
     };
-    let ws = match tokio_tungstenite::accept_hdr_async(stream, callback).await {
+    // A frame or message over 1 MiB is refused before it is buffered.
+    let config = WebSocketConfig::default()
+        .max_message_size(Some(MAX_MESSAGE_BYTES))
+        .max_frame_size(Some(MAX_MESSAGE_BYTES));
+    let accepted = tokio_tungstenite::accept_hdr_async_with_config(stream, callback, Some(config));
+    let ws = match accepted.await {
         Ok(ws) => ws,
         Err(e) => {
             info!(%peer, %e, "remote: WebSocket handshake refused");
@@ -78,6 +83,7 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
     {
         return;
     }
+    let identify_deadline = tokio::time::Instant::now() + facade.identify_timeout;
     loop {
         tokio::select! {
             // Events first: a cg OBS event that arrived before a client message is
@@ -118,6 +124,11 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
                         break;
                     }
                 }
+            }
+            _ = tokio::time::sleep_until(identify_deadline), if !session.identified => {
+                info!(%peer, "remote: no Identify in time — closing the session");
+                close(&mut write, &protocol::IDENTIFY_TIMED_OUT).await;
+                break;
             }
         }
     }
@@ -199,7 +210,9 @@ impl Session<'_> {
             ClientMessage::Reidentify {
                 event_subscriptions,
             } => {
-                self.subscriptions = event_subscriptions;
+                if let Some(subscriptions) = event_subscriptions {
+                    self.subscriptions = subscriptions;
+                }
                 Step::Send(vec![protocol::identified()])
             }
             ClientMessage::Request(item) => {
@@ -293,17 +306,19 @@ async fn set_program_scene(facade: &Facade, data: Option<Value>) -> Reply {
     };
     let _order = facade.cut_order.lock().await;
     let reply = forward(facade, "SetCurrentProgramScene", data).await;
-    let playlists = if reply.succeeded() {
-        Some(
-            facade
-                .upstream
-                .scene_playlists(&scene)
-                .await
-                .unwrap_or_default(),
-        )
+    // Outer `None`: cg OBS did not switch. Inner `None`: the lookup got no
+    // answer — the scene is then treated as a manual one ("OBS manuál" carries
+    // cg OBS's mix, which already shows it), and the cut says so.
+    let found = if reply.succeeded() {
+        Some(facade.upstream.scene_playlists(&scene).await)
     } else {
         None
     };
+    let lookup_failed = matches!(found, Some(None));
+    if lookup_failed {
+        warn!(scene = %scene, "remote: the scene lookup got no answer — treated as a manual scene");
+    }
+    let playlists = found.map(Option::unwrap_or_default);
     let input_active = load_input_settings(&facade.pool)
         .await
         .is_ok_and(|s| s.active());
@@ -312,7 +327,10 @@ async fn set_program_scene(facade: &Facade, data: Option<Value>) -> Reply {
         scene,
         action: action.label(),
         source: action.source(),
-        reason: action.keep_reason().map(KeepReason::as_str),
+        reason: action
+            .keep_reason()
+            .map(KeepReason::as_str)
+            .or(lookup_failed.then_some("lookup_failed")),
         cut_boundary_100ns: None,
         at_ms: now_ms(),
     };

@@ -57,9 +57,20 @@ pub const REMOTE_SETTINGS_POLL: Duration = Duration::from_secs(5);
 pub const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(3);
 /// The pause after a failed `accept` (never a hot loop on e.g. EMFILE).
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
+/// A client that has not identified within this is closed (an idle
+/// unauthenticated socket is never kept).
+pub const IDENTIFY_TIMEOUT: Duration = Duration::from_secs(10);
+/// The largest message / frame a client may send (1 MiB). Companion's biggest
+/// message is a batch of a few KB; tungstenite's default would be 64 MiB.
+pub const MAX_MESSAGE_BYTES: usize = 1_048_576;
+/// At most this many unsupported request types are remembered (client-chosen
+/// strings on an open LAN surface must stay bounded).
+pub const MAX_UNSUPPORTED_LISTED: usize = 64;
+/// Client-chosen request types are stored clipped to this many characters.
+pub const MAX_REQUEST_TYPE_CHARS: usize = 64;
 
 /// The stored remote-control settings.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct RemoteSettings {
     pub enabled: bool,
     pub port: u16,
@@ -75,6 +86,17 @@ impl RemoteSettings {
             port: DEFAULT_REMOTE_WS_PORT,
             password: None,
         }
+    }
+}
+
+/// The password never reaches a log: `Debug` shows only whether one is set.
+impl std::fmt::Debug for RemoteSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteSettings")
+            .field("enabled", &self.enabled)
+            .field("port", &self.port)
+            .field("password", &self.password.as_ref().map(|_| "<set>"))
+            .finish()
     }
 }
 
@@ -119,7 +141,9 @@ pub struct RemoteCut {
     pub action: &'static str,
     /// The program source cut to (`-1` = "OBS manuál"), `null` when kept.
     pub source: Option<i64>,
-    /// Why nothing was cut: `not_switched`, `input_inactive`, `persist_failed`.
+    /// Why nothing was cut (`not_switched`, `input_inactive`,
+    /// `persist_failed`), or `lookup_failed` for a cut to "OBS manuál" made
+    /// because the scene lookup got no answer.
     pub reason: Option<&'static str>,
     /// The boundary the cut lands on (`GET /api/v1/program`'s own field).
     pub cut_boundary_100ns: Option<i64>,
@@ -200,14 +224,19 @@ impl RemoteShared {
     pub fn record_request(&self, request_type: &str) {
         self.requests.fetch_add(1, Ordering::SeqCst);
         self.state().last_request = Some(LastRequest {
-            request_type: request_type.to_string(),
+            request_type: clip(request_type),
             at_ms: now_ms(),
         });
     }
 
-    /// Remember an unsupported request type; `true` the first time (log once).
+    /// Remember an unsupported request type (at most
+    /// [`MAX_UNSUPPORTED_LISTED`], clipped); `true` the first time (log once).
     pub fn note_unsupported(&self, request_type: &str) -> bool {
-        self.state().unsupported.insert(request_type.to_string())
+        let mut st = self.state();
+        if st.unsupported.len() >= MAX_UNSUPPORTED_LISTED {
+            return false;
+        }
+        st.unsupported.insert(clip(request_type))
     }
 
     /// Remember the outcome of a remote scene press.
@@ -232,6 +261,11 @@ impl RemoteShared {
 /// An error worth logging: there is one, and it differs from the previous one.
 pub(crate) fn is_new_error(previous: Option<&str>, current: Option<&str>) -> bool {
     current.is_some() && previous != current
+}
+
+/// A client-chosen request type, clipped to [`MAX_REQUEST_TYPE_CHARS`].
+fn clip(request_type: &str) -> String {
+    request_type.chars().take(MAX_REQUEST_TYPE_CHARS).collect()
 }
 
 /// Decrements the client count when a session ends.
@@ -316,6 +350,8 @@ pub struct Facade {
     /// Remote scene presses are applied one at a time, in arrival order,
     /// across every client — a forward + lookup + cut never interleaves.
     cut_order: tokio::sync::Mutex<()>,
+    /// [`IDENTIFY_TIMEOUT`] (shorter only in tests).
+    identify_timeout: Duration,
 }
 
 impl Facade {
@@ -331,6 +367,7 @@ impl Facade {
             upstream,
             password,
             cut_order: tokio::sync::Mutex::new(()),
+            identify_timeout: IDENTIFY_TIMEOUT,
         })
     }
 
@@ -391,8 +428,9 @@ struct Running {
 }
 
 impl Running {
-    /// Abort the accept task and wait until it (and every session) is gone, so
-    /// the port is free before a rebind.
+    /// Abort the accept task and wait until it is gone: its listening socket
+    /// is closed (the port is free before a rebind) and its `JoinSet` is
+    /// dropped, which aborts every session (not awaited).
     async fn stop(self) {
         self.task.abort();
         let _ = self.task.await;
@@ -453,7 +491,13 @@ async fn apply(
 ) -> Option<Running> {
     let shared = bus.remote();
     match listener_plan(running.as_ref().map(|r| &r.settings), &wanted) {
-        ListenerPlan::Keep => running,
+        ListenerPlan::Keep => {
+            if !wanted.enabled {
+                // Disabled after a failed bind: nothing to stop, drop the error.
+                shared.set_error(None);
+            }
+            running
+        }
         ListenerPlan::Stop => {
             if let Some(r) = running {
                 r.stop().await;

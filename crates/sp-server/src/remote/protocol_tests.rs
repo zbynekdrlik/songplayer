@@ -172,17 +172,17 @@ fn parse_identify_with_and_without_subscriptions() {
 }
 
 #[test]
-fn parse_reidentify_defaults_to_all_events() {
+fn parse_reidentify_keeps_the_subscriptions_when_none_are_named() {
     assert_eq!(
         parse_client_message(r#"{"op":3,"d":{"eventSubscriptions":65536}}"#).unwrap(),
         ClientMessage::Reidentify {
-            event_subscriptions: 65536
+            event_subscriptions: Some(65536)
         }
     );
     assert_eq!(
         parse_client_message(r#"{"op":3,"d":{}}"#).unwrap(),
         ClientMessage::Reidentify {
-            event_subscriptions: 0x7FF
+            event_subscriptions: None
         }
     );
 }
@@ -253,6 +253,7 @@ fn malformed_messages_map_to_obs_close_codes() {
     assert_eq!(code(r#"{"op":8,"d":{"requestId":"b"}}"#), 4003);
     assert_eq!(decode_error().code, 4002);
     assert_eq!(NOT_IDENTIFIED.code, 4007);
+    assert_eq!(IDENTIFY_TIMED_OUT.code, 4007);
     assert_eq!(ALREADY_IDENTIFIED.code, 4008);
 }
 

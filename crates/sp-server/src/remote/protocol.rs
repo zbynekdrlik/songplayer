@@ -68,7 +68,7 @@ pub const STATUS_MISSING_REQUEST_FIELD: u16 = 300;
 /// `EventSubscription::Scenes` (1 << 2).
 pub const EVENT_SCENES: u64 = 4;
 /// `EventSubscription::All` of rpcVersion 1 before Canvases (bits 0..=10) —
-/// the default when an `Identify` / `Reidentify` names no subscriptions.
+/// a session's subscriptions when its `Identify` names none.
 pub const EVENT_ALL: u64 = 0x7FF;
 
 /// The close reasons Companion's status mapping matches on (obs-websocket's
@@ -193,8 +193,10 @@ pub enum ClientMessage {
         authentication: Option<String>,
         event_subscriptions: u64,
     },
+    /// `None` keeps the current subscriptions (obs-websocket's
+    /// `SetSessionParameters` changes them only when the field is present).
     Reidentify {
-        event_subscriptions: u64,
+        event_subscriptions: Option<u64>,
     },
     Request(RequestItem),
     Batch {
@@ -228,10 +230,8 @@ fn str_field(d: &Value, key: &str) -> Option<String> {
     d.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
-fn subscriptions(d: &Value) -> u64 {
-    d.get("eventSubscriptions")
-        .and_then(Value::as_u64)
-        .unwrap_or(EVENT_ALL)
+fn subscriptions(d: &Value) -> Option<u64> {
+    d.get("eventSubscriptions").and_then(Value::as_u64)
 }
 
 /// Parse one text frame, or the close obs-websocket answers a malformed one
@@ -259,7 +259,7 @@ pub fn parse_client_message(text: &str) -> Result<ClientMessage, CloseReason> {
                     "Your payload's data is missing an `rpcVersion`.",
                 ))?,
             authentication: str_field(d, "authentication"),
-            event_subscriptions: subscriptions(d),
+            event_subscriptions: subscriptions(d).unwrap_or(EVENT_ALL),
         }),
         OP_REIDENTIFY => Ok(ClientMessage::Reidentify {
             event_subscriptions: subscriptions(d),
@@ -320,6 +320,10 @@ pub const NOT_IDENTIFIED: CloseReason = CloseReason::new(
     CLOSE_NOT_IDENTIFIED,
     "You must send an `Identify` before anything else.",
 );
+/// The close for a client that did not identify within
+/// `remote::IDENTIFY_TIMEOUT` (an idle unauthenticated socket is not kept).
+pub const IDENTIFY_TIMED_OUT: CloseReason =
+    CloseReason::new(CLOSE_NOT_IDENTIFIED, "No `Identify` arrived in time.");
 /// The close for a second `Identify`.
 pub const ALREADY_IDENTIFIED: CloseReason = CloseReason::new(
     CLOSE_ALREADY_IDENTIFIED,
