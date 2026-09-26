@@ -63,7 +63,7 @@ pub const SETTING_REMOTE_WS_PORT: &str = "remote_ws_port";
 /// SHA-256 challenge auth; empty = no auth.
 pub const SETTING_REMOTE_WS_PASSWORD: &str = "remote_ws_password";
 /// #213: the default remote-control port, next to cg OBS's own 4455.
-pub const DEFAULT_REMOTE_WS_PORT: u16 = 4455;
+pub const DEFAULT_REMOTE_WS_PORT: u16 = 4456;
 
 /// #212: the program-bus source id of the NDI input (playlists are positive
 /// row ids, so a negative id can never collide with one).

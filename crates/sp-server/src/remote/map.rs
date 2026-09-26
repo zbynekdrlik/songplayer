@@ -83,8 +83,8 @@ pub fn scene_action(playlists: Option<&HashSet<i64>>, input_active: bool) -> Sce
     };
     let mut ids = playlists.iter();
     match (ids.next(), ids.next()) {
-        _ if input_active => SceneAction::Input,
         (Some(&pid), None) => SceneAction::Playlist(pid),
+        _ if input_active => SceneAction::Input,
         _ => SceneAction::Keep(KeepReason::InputInactive),
     }
 }

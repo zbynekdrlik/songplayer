@@ -30,7 +30,7 @@ use serde_json::{Value, json};
 use crate::obs::compute_auth;
 
 /// The only RPC version (obs-websocket 5).
-pub const RPC_VERSION: u64 = 2;
+pub const RPC_VERSION: u64 = 1;
 /// The JSON subprotocol (`Sec-WebSocket-Protocol`).
 pub const SUBPROTOCOL_JSON: &str = "obswebsocket.json";
 /// The obs-websocket protocol level this facade speaks (the rpcVersion-1
@@ -141,7 +141,7 @@ impl AuthChallenge {
     /// Whether `provided` is the `authentication` string a client knowing
     /// `password` computes for this challenge (constant-time compare).
     pub fn accepts(&self, password: &str, provided: &str) -> bool {
-        let expected = compute_auth(password, &self.salt, &self.challenge);
+        let expected = compute_auth(password, &self.challenge, &self.salt);
         constant_time_eq(expected.as_bytes(), provided.as_bytes())
     }
 }
