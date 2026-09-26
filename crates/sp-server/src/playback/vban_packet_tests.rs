@@ -59,7 +59,7 @@ fn the_packet_geometry_is_48k_stereo_200_frames_int24() {
     assert_eq!(VBAN_PAYLOAD_LEN, 1200);
     assert_eq!(VBAN_PACKET_LEN, 1228);
     assert_eq!(VBAN_PACKETS_PER_SECOND, 240);
-    assert_eq!(VBAN_SEND_LATENCY_100NS, 333_333, "L = one grid slot");
+    assert_eq!(VBAN_SEND_LATENCY_100NS, 666_666, "L = two grid slots");
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn packet_k_is_due_at_the_boundary_plus_l_plus_k_240ths_in_100ns() {
     for (k, off) in offsets.iter().take(8).enumerate() {
         assert_eq!(
             packet_send_at_100ns(due, VBAN_SEND_LATENCY_100NS, k),
-            due + 333_333 + off
+            due + 666_666 + off
         );
     }
     assert_eq!(packet_send_at_100ns(1_000, 7, 3), 1_000 + 7 + 125_000);
