@@ -17,9 +17,8 @@
 //!
 //! A child of `pacer.rs` (1000-line cap), like `pacer_prepare.rs`.
 
-use super::{PacedSink, Pacer, Standby};
+use super::{PacedSink, Pacer, ServiceOutcome, Standby};
 use crate::playback::frame_buf::SharedFrame;
-use sp_core::genlock::strict_next_boundary_100ns;
 
 /// The idle black a pre-roll fills boundaries with: an NV12 frame of
 /// `width`×`height` (stride `stride`), shared by reference every boundary.
@@ -56,8 +55,8 @@ impl Pacer {
     /// `pipeline_paced::sleep_to_boundary`; tests: set the fake clock).
     pub fn preroll<S, P, W, T>(
         &mut self,
-        _black: StandbyBlack<'_>,
-        _sink: &mut S,
+        black: StandbyBlack<'_>,
+        sink: &mut S,
         mut poll: P,
         mut wait: W,
     ) -> T
@@ -67,12 +66,16 @@ impl Pacer {
         W: FnMut(&Pacer, i64),
     {
         loop {
-            if let Some(ready) = poll() {
-                self.anchor();
-                return ready;
+            match self.service_standby(black.standby(), &mut *sink) {
+                ServiceOutcome::Wait { until_100ns } => {
+                    if let Some(ready) = poll() {
+                        self.anchor();
+                        return ready;
+                    }
+                    wait(&*self, until_100ns);
+                }
+                _ => self.tick_wall(),
             }
-            let until = strict_next_boundary_100ns(self.now_100ns(), self.grid_fps);
-            wait(&*self, until);
         }
     }
 }
