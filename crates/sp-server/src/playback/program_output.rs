@@ -129,7 +129,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
 }
 
 /// Most wall ticks one wake may owe (a long stall catches up in bounded work).
-pub const MAX_TICKS_PER_WAKE: i64 = 1;
+pub const MAX_TICKS_PER_WAKE: i64 = 30;
 
 /// Ticks the program's [`WallClock`] once per grid boundary PASSED — the pacer's
 /// cadence (`Pacer::tick_wall`, once per serviced boundary) — never once per

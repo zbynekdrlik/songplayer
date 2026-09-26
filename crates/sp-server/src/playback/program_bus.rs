@@ -23,9 +23,12 @@
 //! cut is measured from the newest stamp the program sources, the source cut
 //! to, or the program itself reached (the caller's clock is only the fallback
 //! when nothing was seen), and a missed boundary is declared by TIME only on
-//! the `SP-program` sender's own long-lived wall (`release`). The offer path
-//! (`offer`) never reads a clock: it forwards, and fills only a gap the owner
-//! is already past. Every paced source reports its progress on every boundary
+//! the `SP-program` sender's own long-lived wall (`release`), which it ticks
+//! once per grid boundary like the pacer walls (`program_output::BoundaryTicker`)
+//! so both slew a UTC step in at the same rate. The offer path (`offer`) never
+//! reads a clock: it forwards, fills only a gap the owner is already past (or
+//! the missing boundary when the reorder buffer overflows), and measures a
+//! resync against the waiting frame. Every paced source reports its progress on every boundary
 //! (`touch`), so the source cut to is known to be live before its first owned
 //! frame arrives.
 //!
@@ -40,7 +43,7 @@
 //! - it has no owner (no source selected yet);
 //! - its owner already touched or offered a LATER stamp (a coalesce gap on it —
 //!   one source works in stamp order, so the boundary will never come);
-//! - its owner has offered nothing for [`PROGRAM_LIVE_WINDOW_100NS`] (an absent
+//! - its owner has touched or offered nothing for [`PROGRAM_LIVE_WINDOW_100NS`] (an absent
 //!   source is filled on time, not 100 ms late);
 //! - [`PROGRAM_FILL_GRACE_SLOTS`] slots after the boundary (a stalled source).
 //!
@@ -171,7 +174,8 @@ pub struct ProgramStatus {
 
 /// The pure program-bus decision layer: ownership, the reorder buffer, the
 /// standby fill, and the bounded queue to the `SP-program` sender. No clock and
-/// no threads — the time-based calls (`release`, `cut`) take `now_100ns`.
+/// no threads — the time-based calls (`release`, `fill_due`, `cut`) take
+/// `now_100ns`.
 pub struct ProgramCore {
     fps: i64,
     /// `(first_stamp, pid)`, ascending by `first_stamp`.

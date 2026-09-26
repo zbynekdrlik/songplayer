@@ -43,9 +43,15 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   So: a cut is placed from the newest stamp of the program's segment sources,
   the source cut to, or the program itself (`from`; the caller's clock only
   when nothing was seen); a boundary is declared missed BY TIME only in
-  `release` on the `SP-program` sender's own long-lived wall; `offer` reads
-  no clock (it forwards and fills only a gap its owner is already past,
-  `owner_passed`). Never pass a submit thread's clock into the bus again —
+  `release` on the `SP-program` sender's own long-lived wall, which it ticks
+  ONCE PER GRID BOUNDARY (`program_output::BoundaryTicker`) — the pacer walls'
+  cadence, so both slew a step in at the same rate (ticking per loop wake
+  slewed 2x faster and black-filled the owner after a forward step — third
+  review); `offer` reads no clock (it forwards and fills only a gap its owner
+  is already past, `owner_passed`). Residual: a pipeline CREATED mid-slew
+  anchors at the stepped time — after a backward step its stamps trail the
+  program wall by the unslewed rest, so the grace fills its boundaries until
+  the walls converge (rare: a step + a new playlist pipeline + a cut to it). Never pass a submit thread's clock into the bus again —
   the re-review showed it black-fills the owner's own boundaries after a
   forward step.
 - Cut state = `(first_stamp, pid)` segments. A cut lands on
