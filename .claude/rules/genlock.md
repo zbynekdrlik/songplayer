@@ -22,7 +22,8 @@ paths:
 - Timecodes are UTC in **100 ns units since the Unix epoch**; video =
   `floor_boundary_100ns` on the fixed grid (`GENLOCK_GRID_FPS`), FLOOR never
   ceil; audio = raw wall clock, never snapped; `SYNTHESIZE` only on the
-  standby black frame.
+  SDK-clocked (legacy) standby BGRA black — the paced path never sends it
+  (see "Standby = the same paced path as playing" below).
 - `clock_ok = is_locked && mode ∈ {LOCK, NANO}` from dantesync
   `127.0.0.1:8898/status`; unreachable → `no dantesync`, never blocks playback.
 - Acceptance is on the RECEIVER (`genlock-fifo audit … locked=1`, camera-box
@@ -290,10 +291,12 @@ paths:
   (the usual case; in place only when the submit side is the sole owner, which
   is safe — #147 round 10); idle Black is submitted by shared reference
   through `PacedSink::submit_shared` (`Standby::Black{dims, &SharedFrame}`,
-  `service_standby` clones the Arc = a refcount bump per idle slot, the idle loop
-  owns one black `SharedFrame`); `send_black_bgra` reuses a `black_bgra` buffer
-  keyed by size (send is synchronous, so it is reclaimed the instant the call
-  returns). The NV12 decoder/handoff/pacer-repeat pool (a cross-crate `sp-decoder`
+  `service_standby` clones the Arc = a refcount bump per idle slot; since #147
+  the ONE black `SharedFrame` is cached in the submitter,
+  `FrameSubmitter::standby_black_nv12`, built once per pipeline);
+  `send_black_bgra` (SDK-clocked standby only since #147) reuses a `black_bgra`
+  buffer keyed by size (send is synchronous, so it is reclaimed the instant the
+  call returns). The NV12 decoder/handoff/pacer-repeat pool (a cross-crate `sp-decoder`
   change) is round 2b, built on this `SharedFrame` seam. The audio emitter
   (`audio_emitter.rs`) is also allocation-free per slot now: `EmittedBlock` is a
   TAG enum, `pop_block` fills a reused `block_buf`, `samples_for` returns a borrow
@@ -356,9 +359,10 @@ so the OS fault + TLB-shootdown cost is unchanged):
   submitter installs the new `prev_frame` (dropping the old Arc) AFTER the async
   call returns, so the buffer the SDK still points at is never recycled early.
   Keep `FrameSubmitter.sender` declared BEFORE `prev_frame` (field drop order).
-- The idle black and the cached BGRA black stay OUT of the pool as takers (built
-  from their own buffers, never `take`); the idle black's single end-of-loop
-  drop recycling one bounded black buffer is harmless.
+- The idle NV12 black and the cached BGRA black stay OUT of the pool as takers
+  (built from their own buffers, never `take`). The NV12 black lives in the
+  `FrameSubmitter` for the pipeline's life (#147); its single drop at pipeline
+  end recycles one bounded black buffer, which is harmless.
 
 ## Paced measurement session (#168 round-4 recipe)
 
@@ -507,7 +511,8 @@ values are flat strings in MiB, e.g. `{"sp_min_working_set_mb":"3072"}`.
 - **Why 3072 MiB.** A playing 1440p paced output holds about 21 NV12 buffers
   (look-ahead 12, pool class 6, handoff 2, repeat, holdover), about 115 MB. On
   top of that come the MF decoder and the SDK's per-sender compression buffers.
-  Each idle output holds its NV12 + BGRA black, about 20 MB. That totals about
+  Each paced idle output holds one NV12 black, about 3 MB (no BGRA black since
+  #147; an SDK-clocked output still holds its ~8 MB BGRA black). That totals about
   1–2 GB, and 3072 MiB leaves headroom. Re-size it from the new `working_set_mb`
   field.
 
@@ -999,6 +1004,77 @@ within 2 ms, and camera-box's own gate through the same OBS build reads ~0.
   stamp is later by the emit lateness — normally < 1 ms (`jitter_p99_us`), but
   whole slots on a catch-up boundary. Cross-check `jitter_p99_us` and `lag` on
   the same line before attributing a residual to downstream.
+
+## Standby = the same paced path as playing (#147, design comment 5841796900)
+
+**The defect.** The cg OBS receiver read `recv-timing cap_avg` for
+`sp-slow_video` at ~32 ms while SongPlayer was idle and ~15 ms while it played.
+At every song start it fired `genlock-shallow-remeasure reason=rise`,
+re-latched its depth from 2 to 3 frames, and slewed the audio for ~33 s. The
+A/V gate landed inside that slew. The sender contract (camera-box
+`docs/genlock-sender-contract.md`, §5–§6) asks for one cadence and phase,
+whether the sender is idle or playing. The receiver's ASRC also follows the
+audio ARRIVAL, so a standby with no audio restarted it at every song start.
+
+**The rule.** On the paced path every boundary is the same audio + video pair,
+whatever the state:
+
+- **One silent block per standby boundary.** `Pacer::service_standby`
+  (idle `Black` and paused `FrozenLast`) hands the sink one silent block,
+  `Pacer::standby_silence` in `pacer_av_align.rs`:
+  - `samples_per_boundary` zeros (1600 at 48 kHz, ~12.8 KB, under the round-10
+    64 KB rule);
+  - the song's channel layout when the grid buffer knows it, else stereo;
+  - stamped `emit_now`, like playing audio.
+
+  The video stamp comes from `resolve_emit_boundary`, exactly as for a playing
+  repeat; a resync stamps `floor(now)`.
+- **The idle fill uses the playing path's submit thread.**
+  `pipeline_paced_idle::run_idle_wait` emits through the #168 `HandoffSink`
+  and `run_submit_consumer`, with the same shape as `decode_and_send_paced`:
+  `thread::scope`, `StopOnPanic`, then `stop_with_tail(None)` and a join (the
+  join flushes). The heartbeat goes through `emit_heartbeat_paced`. The black
+  is `FrameSubmitter::standby_black_nv12`, built once per pipeline.
+- **No sync `send_video` and no BGRA on the paced path.** `run_loop_windows`
+  calls `FrameSubmitter::send_standby_black`: the legacy SYNTHESIZE BGRA when
+  SDK-clocked, a no-op when paced. The paced outer loop polls
+  `pacer_sink::idle_poll(true)` = 0, so the idle fill starts on the very next
+  boundary after start, a song end or a stop. The old 5 s `recv_timeout` left
+  the paced grid empty for up to 5 s.
+- **The SDK-clocked path is unchanged:** BGRA at the same sites, the 5 s poll,
+  and its own wall-clock audio emitter.
+
+Tests:
+
+- `pacer_tests_standby.rs`:
+  - idle, paused and playing boundaries produce the identical `MockNdiBackend`
+    `send_audio spc=1600` → `send_video_async NV12` pair;
+  - a whole paced lifetime has no sync send and no BGRA, with stamps b(1)…b(10)
+    contiguous;
+  - the standby stamp equals `resolve_emit_boundary`'s stamp and a playing
+    repeat's stamp;
+  - idle→play keeps the stamp and audio cadence contiguous.
+- `submitter_tests_standby.rs`: `send_standby_black` for both paths, and the
+  cached NV12 black.
+
+Never "fix" a song-start re-latch by dropping the standby audio, or by sending
+standby from another thread or in another format. That re-creates the cadence
+change.
+
+**Still open (issue #147 comment 5841859151).** A song START still leaves a
+short hole:
+
+- the Play command stops the idle fill;
+- `decode_and_send_paced` then blocks on `open_rx` while the decoder opens;
+- it anchors, and the first boundaries can be `Starved`.
+
+**Box acceptance** is read from camera-box's audit:
+
+- no `genlock-shallow-remeasure` and no `shallow_latches` increment at a song
+  start;
+- `audio_pairing_offset_ms=0`;
+- the same `cap_avg` idle and playing;
+- then the A/V gate within ±20 ms on 5 consecutive songs.
 
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
 A change to pacing, the submitter, decode, the mixer, NDI or the audio path
