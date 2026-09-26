@@ -1019,21 +1019,36 @@ audio ARRIVAL, so a standby with no audio restarted it at every song start.
 **The rule.** On the paced path every boundary is the same audio + video pair,
 whatever the state:
 
-- **One silent block per standby boundary.** `Pacer::service_standby`
-  (idle `Black` and paused `FrozenLast`) hands the sink one silent block,
-  `Pacer::standby_silence` in `pacer_av_align.rs`:
+- **One audio block per standby boundary.** An emitting
+  `Pacer::service_standby` (idle `Black` and paused `FrozenLast`; a starve
+  takes none) hands the sink one block, `Pacer::standby_block` in
+  `pacer_av_align.rs`:
   - `samples_per_boundary` zeros (1600 at 48 kHz, ~12.8 KB, under the round-10
-    64 KB rule);
+    64 KB rule), built directly in interleaved form;
   - the song's channel layout when the grid buffer knows it, else stereo;
   - stamped `emit_now`, like playing audio.
 
   The video stamp comes from `resolve_emit_boundary`, exactly as for a playing
   repeat; a resync stamps `floor(now)`.
+- **The EOS tail rides a standby boundary, never an audio-only send.** At a
+  natural song end `decode_and_send_paced` calls
+  `Pacer::hold_eos_tail_for_standby`, which holds the last partial boundary
+  (`take_eos_tail`, #148 rework item 4). It then serves ONE more
+  `FrozenLast` boundary (`serve_one_standby_boundary`); that boundary's block
+  is the tail. The receiver therefore gets exactly one audio block per video
+  boundary into the idle fill.
+  - Removed with this: the old audio-only tail (`SharedHandoff` `eos_tail` and
+    `FrameSubmitter::submit_audio_tail`). Kept with it, it gave n+1 blocks per
+    n boundaries at every song end.
+  - A new map (`anchor`, lag re-anchor → `AvAlign::realign`) drops a held
+    tail. With a Play already queued, the tail boundary is still served first,
+    so nothing is lost; a stale tail is never replayed at a later pause.
+  - The `SharedHandoff` is now just `stop()`.
 - **The idle fill uses the playing path's submit thread.**
   `pipeline_paced_idle::run_idle_wait` emits through the #168 `HandoffSink`
   and `run_submit_consumer`, with the same shape as `decode_and_send_paced`:
-  `thread::scope`, `StopOnPanic`, then `stop_with_tail(None)` and a join (the
-  join flushes). The heartbeat goes through `emit_heartbeat_paced`. The black
+  `thread::scope`, `StopOnPanic`, then `stop()` and a join (the join
+  flushes). The heartbeat goes through `emit_heartbeat_paced`. The black
   is `FrameSubmitter::standby_black_nv12`, built once per pipeline.
 - **No sync `send_video` and no BGRA on the paced path.** `run_loop_windows`
   calls `FrameSubmitter::send_standby_black`: the legacy SYNTHESIZE BGRA when
@@ -1053,7 +1068,11 @@ Tests:
     contiguous;
   - the standby stamp equals `resolve_emit_boundary`'s stamp and a playing
     repeat's stamp;
-  - idle→play keeps the stamp and audio cadence contiguous.
+  - idle→play keeps the stamp and audio cadence contiguous (the pacer-level
+    model; the production song-start hole below is outside the pacer);
+  - a song end sends its EOS tail as the next standby block: 6 boundaries →
+    6 blocks. With nothing buffered nothing is held, and a new song drops a
+    held tail.
 - `submitter_tests_standby.rs`: `send_standby_black` for both paths, and the
   cached NV12 black.
 
@@ -1067,6 +1086,10 @@ short hole:
 - the Play command stops the idle fill;
 - `decode_and_send_paced` then blocks on `open_rx` while the decoder opens;
 - it anchors, and the first boundaries can be `Starved`.
+
+The same hole follows a Stop or a song end when a Play is already queued: no
+idle fill runs in between, so the receiver holds the last frame for the time
+the decoder takes to open.
 
 **Box acceptance** is read from camera-box's audit:
 
