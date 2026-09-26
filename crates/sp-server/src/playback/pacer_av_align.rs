@@ -396,7 +396,7 @@ impl Pacer {
     /// ([`anchor`](Pacer::anchor), a lag re-anchor) drops a held tail.
     pub fn hold_eos_tail_for_standby(&mut self) {
         let tail = self.take_eos_tail();
-        self.av.standby_tail = tail.is_empty().then_some(tail);
+        self.av.standby_tail = (!tail.is_empty()).then_some(tail);
     }
 }
 
