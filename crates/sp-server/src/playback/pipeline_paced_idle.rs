@@ -96,7 +96,7 @@ pub(crate) fn run_idle_wait(
     // flush, so no boundary goes unserviced before the next scope.
     let handoff = submitter.paced_handoff(playlist_id, IDLE_W, IDLE_H);
     let feed = PacedFeed::attach(&handoff);
-    if let Some(last) = feed.last_serviced_100ns() {
+    if let Some(last) = feed.continue_after_100ns() {
         pacer.continue_grid_after(last);
     }
     // Heartbeat window baselines over the submit-side frame count (the frames

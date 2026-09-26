@@ -182,7 +182,7 @@ fn a_song_change_gap_and_a_slow_decoder_open_keep_every_stamp_one_slot_apart() {
     // Song A plays b(1)..=b(3).
     {
         let feed = PacedFeed::attach(&h);
-        assert_eq!(feed.last_serviced_100ns(), None);
+        assert_eq!(feed.continue_after_100ns(), None);
         let mut a = song(8, 1, 3);
         for k in 1..=3 {
             rig.clk.set(b(k));
@@ -211,7 +211,7 @@ fn a_song_change_gap_and_a_slow_decoder_open_keep_every_stamp_one_slot_apart() {
     rig.clk.set(b(6) + GRACE + 1_000);
     {
         let feed = PacedFeed::attach(&h);
-        assert_eq!(feed.last_serviced_100ns(), Some(b(6)));
+        assert_eq!(feed.continue_after_100ns(), Some(b(6)));
         rig.pacer.continue_grid_after(b(6));
         let mut sink = feed.sink();
         let (clk, handoff, consumer) = (rig.clk.clone(), &rig.handoff, &mut rig.consumer);
@@ -307,7 +307,7 @@ fn pause_resume_stays_contiguous_and_a_song_change_while_paused_holds_the_frozen
     rig.clk.set(b(10) + GRACE + 1_000);
     {
         let feed = PacedFeed::attach(&h);
-        assert_eq!(feed.last_serviced_100ns(), Some(b(10)));
+        assert_eq!(feed.continue_after_100ns(), Some(b(10)));
         rig.pacer.continue_grid_after(b(10));
         let mut sink = feed.sink();
         let clk = rig.clk.clone();
@@ -422,7 +422,7 @@ fn a_consumer_starved_past_eight_slots_resyncs_and_counts_the_hole_honestly() {
     );
     // The next pacer continues right after the resynced stamp.
     let feed = PacedFeed::attach(&h);
-    assert_eq!(feed.last_serviced_100ns(), Some(b(13)));
+    assert_eq!(feed.continue_after_100ns(), Some(b(13)));
 }
 
 #[test]
@@ -442,7 +442,7 @@ fn a_scope_attaching_while_the_last_jobs_are_still_queued_continues_after_them()
     }
     let idle = PacedFeed::attach(&h);
     assert_eq!(
-        idle.last_serviced_100ns(),
+        idle.continue_after_100ns(),
         Some(b(4)),
         "the queued b(4) counts as serviced"
     );

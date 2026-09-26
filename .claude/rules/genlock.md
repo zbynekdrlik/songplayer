@@ -1230,8 +1230,9 @@ submit thread, which coalesced away a stamp — camera-box's `stamp_gap`.
   `thread::scope` re-raised the panic at the song's end — also dark until
   then, and it took the pipeline thread down).
 - **Scopes attach, never spawn.** `decode_and_send_paced` and `run_idle_wait`
-  each hold a `PacedFeed` (RAII): `attach()` returns the output's last
-  serviced stamp and the scope's pacer calls `Pacer::continue_grid_after(last)`
+  each hold a `PacedFeed` (RAII): `attach()` returns the newest stamp serviced
+  or still queued (`PacedFeed::continue_after_100ns`), and the scope's pacer
+  calls `Pacer::continue_grid_after(last)`
   (`pacer_preroll.rs`), so its first boundary (pre-roll or idle standby) is
   exactly one slot after it. Dropping the feed (end of song, command queued
   in idle, error, unwind) detaches. No flush, no join between songs.

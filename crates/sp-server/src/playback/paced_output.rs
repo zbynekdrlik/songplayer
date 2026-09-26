@@ -311,11 +311,11 @@ impl SharedHandoff {
 /// One pacer feeding the paced output for a scope (a song, or an idle
 /// stretch, #147): attached on creation, detached on drop — also on unwind, so
 /// the grid always goes back to the consumer. The pacer continues right after
-/// [`last_serviced_100ns`](Self::last_serviced_100ns) (the newest stamp
+/// [`continue_after_100ns`](Self::continue_after_100ns) (the newest stamp
 /// serviced or still queued).
 pub struct PacedFeed<'a> {
     handoff: &'a SharedHandoff,
-    last_serviced_100ns: Option<i64>,
+    continue_after_100ns: Option<i64>,
 }
 
 impl<'a> PacedFeed<'a> {
@@ -323,14 +323,14 @@ impl<'a> PacedFeed<'a> {
     pub fn attach(handoff: &'a SharedHandoff) -> Self {
         Self {
             handoff,
-            last_serviced_100ns: handoff.attach(),
+            continue_after_100ns: handoff.attach(),
         }
     }
 
     /// The newest stamp serviced or still queued at attach time (`None`
     /// before any).
-    pub fn last_serviced_100ns(&self) -> Option<i64> {
-        self.last_serviced_100ns
+    pub fn continue_after_100ns(&self) -> Option<i64> {
+        self.continue_after_100ns
     }
 
     /// The sink this scope's pacer emits through.

@@ -443,7 +443,7 @@ pub(crate) fn decode_and_send_paced(
     // the consumer, which services every boundary until the next scope attaches.
     let handoff = submitter.paced_handoff(playlist_id, STANDBY_W, STANDBY_H);
     let feed = PacedFeed::attach(&handoff);
-    if let Some(last) = feed.last_serviced_100ns() {
+    if let Some(last) = feed.continue_after_100ns() {
         pacer.continue_grid_after(last);
     }
     let handoff_ref: &SharedHandoff = &handoff;
