@@ -22,8 +22,9 @@
  * program it fails loudly — a deployed live wall is expected to be playing.
  */
 
-import { test, expect, APIRequestContext, Locator, Page } from "@playwright/test";
+import { test, expect, Locator, Page } from "@playwright/test";
 import { audibleStreak } from "./audio-helpers.mjs";
+import { healthRow, readyDub } from "./box-api";
 import { describeProgram, PlaylistRow, readProgramState } from "./program-state";
 
 const ALLOWED_CONSOLE = [
@@ -99,31 +100,6 @@ async function audioRms(video: Locator): Promise<number> {
 
 async function currentTime(video: Locator): Promise<number> {
   return video.evaluate((el: HTMLVideoElement) => el.currentTime);
-}
-
-/** A ready dub on the box (the precondition of post-deploy-dabing.spec.ts). */
-async function readyDub(request: APIRequestContext): Promise<{ pid: number; videoId: number }> {
-  const dab = await request.get("/api/v1/dabing");
-  expect(dab.status()).toBe(200);
-  const body = (await dab.json()) as {
-    playlist_id: number;
-    videos: Array<{ video_id?: number; id?: number; dub_status: string }>;
-  };
-  const ready = body.videos.find((v) => v.dub_status === "ready");
-  expect(ready, "at least one dub must be ready on the box").toBeTruthy();
-  const videoId = Number(ready!.video_id ?? ready!.id);
-  expect(videoId, "the ready dub must carry a numeric video id").toBeGreaterThan(0);
-  return { pid: body.playlist_id, videoId };
-}
-
-/** A pipeline's own decoding state (`transport`, #201) from the health
- *  registry — "Playing" while it decodes, on or off program. */
-async function transportOf(request: APIRequestContext, pid: number): Promise<string> {
-  const h = (await (await request.get("/api/v1/ndi/health")).json()) as Array<{
-    playlist_id: number;
-    transport?: string;
-  }>;
-  return h.find((r) => r.playlist_id === pid)?.transport ?? "";
 }
 
 /** Real mouse drag along a horizontal range input from `from` to `to` (fractions). */
@@ -224,7 +200,7 @@ test.describe("#178 live preview <video> post-deploy", () => {
         });
         await row.getByTestId("song-row-play").click();
         await expect
-          .poll(() => transportOf(request, pid), {
+          .poll(async () => (await healthRow(request, pid))?.transport ?? "", {
             timeout: 30_000,
             message: "the Dabing output must start decoding (health transport Playing)",
           })
@@ -296,8 +272,9 @@ test.describe("#178 live preview <video> post-deploy", () => {
     // ~1 Mb/s internet link — reproduced with CDP network emulation. The 500k
     // stream + 4-fragment (2 s) backlog must keep the picture within ~5 s of the
     // wall, and a control change (the dub mixer 'Originál' preset) must still land
-    // fast with the picture uninterrupted. Driven on the OFF-program Dabing output
-    // (never the live wall), following post-deploy-dabing.spec.ts.
+    // fast with the picture uninterrupted. Driven on the Dabing output, which
+    // can be on or off program (the operator may leave sp-dabing on program
+    // after an event, #184), following post-deploy-dabing.spec.ts.
     //
     // The liveness is proven by a BOUNDED, early-exit `expect.poll` (media reaches
     // t0 + 15 s within ~20 s wall), NOT a fixed 60 s soak — the project's CLAUDE.md
@@ -308,25 +285,12 @@ test.describe("#178 live preview <video> post-deploy", () => {
     // (design acceptance item 4: probe-preview-throttled.mjs 1000 100 150).
     test.setTimeout(120_000);
 
-    const dab = await request.get("/api/v1/dabing");
-    expect(dab.status()).toBe(200);
-    const body = (await dab.json()) as {
-      playlist_id: number;
-      videos: Array<{ video_id?: number; id?: number; dub_status: string }>;
-    };
-    const dabingPid = body.playlist_id;
-    const ready = body.videos.find((v) => v.dub_status === "ready");
-    expect(
-      ready,
-      "a ready dub must exist on the box for the throttled preview test",
-    ).toBeTruthy();
-    const sampleVideoId = Number(ready!.video_id ?? ready!.id);
-    expect(sampleVideoId).toBeGreaterThan(0);
+    const { pid: dabingPid, videoId: sampleVideoId } = await readyDub(request);
 
     await page.goto("/dabing");
     await expect(page.getByTestId("player")).toBeVisible({ timeout: 30_000 });
 
-    // Start the dub on the off-program Dabing output; prove playback by frames.
+    // Start the dub on the Dabing output; prove playback by frames.
     const row = page.locator(
       `[data-testid="song-row"][data-video-id="${sampleVideoId}"]`,
     );
@@ -334,15 +298,7 @@ test.describe("#178 live preview <video> post-deploy", () => {
     await row.getByTestId("song-row-play").click();
     await expect
       .poll(
-        async () => {
-          const h = (await (await request.get("/api/v1/ndi/health")).json()) as Array<{
-            playlist_id: number;
-            frames_submitted_last_5s: number;
-          }>;
-          return (
-            h.find((r) => r.playlist_id === dabingPid)?.frames_submitted_last_5s ?? 0
-          );
-        },
+        async () => (await healthRow(request, dabingPid))?.frames_submitted_last_5s ?? 0,
         { timeout: 30_000, message: "the Dabing output must start decoding" },
       )
       .toBeGreaterThan(0);
@@ -439,25 +395,12 @@ test.describe("#178 live preview <video> post-deploy", () => {
     // (1) clicking the Player's pause freezes the preview PICTURE (canvas
     // frame-hash stable >= 2 s) AND its AUDIO (Web Audio RMS goes quiet) within
     // 3 s; (2) resuming and a REAL-mouse seek lands the seek bar on the target
-    // and the pipeline actually fast-forwards there. Driven on the OFF-program
-    // Dabing output (never the live wall), following the throttled test above.
+    // and the pipeline actually fast-forwards there. Driven on the Dabing output
+    // (on or off program, #184), following the throttled test above.
     // All timings are printed. Bounded, early-exit polls only — no fixed soak.
     test.setTimeout(120_000);
 
-    const dab = await request.get("/api/v1/dabing");
-    expect(dab.status()).toBe(200);
-    const body = (await dab.json()) as {
-      playlist_id: number;
-      videos: Array<{ video_id?: number; id?: number; dub_status: string }>;
-    };
-    const dabingPid = body.playlist_id;
-    const ready = body.videos.find((v) => v.dub_status === "ready");
-    expect(
-      ready,
-      "a ready dub must exist on the box for the pause/seek proof",
-    ).toBeTruthy();
-    const sampleVideoId = Number(ready!.video_id ?? ready!.id);
-    expect(sampleVideoId).toBeGreaterThan(0);
+    const { pid: dabingPid, videoId: sampleVideoId } = await readyDub(request);
 
     await page.goto("/dabing");
     await expect(page.getByTestId("player")).toBeVisible({ timeout: 30_000 });
@@ -469,15 +412,7 @@ test.describe("#178 live preview <video> post-deploy", () => {
     await row.getByTestId("song-row-play").click();
     await expect
       .poll(
-        async () => {
-          const h = (await (await request.get("/api/v1/ndi/health")).json()) as Array<{
-            playlist_id: number;
-            frames_submitted_last_5s: number;
-          }>;
-          return (
-            h.find((r) => r.playlist_id === dabingPid)?.frames_submitted_last_5s ?? 0
-          );
-        },
+        async () => (await healthRow(request, dabingPid))?.frames_submitted_last_5s ?? 0,
         { timeout: 30_000, message: "the Dabing output must start decoding" },
       )
       .toBeGreaterThan(0);

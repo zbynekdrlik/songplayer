@@ -1,5 +1,6 @@
 import { test, expect, Page, APIRequestContext, Locator } from "@playwright/test";
 import { averageDb } from "./audio-helpers.mjs";
+import { healthRow, HealthRow, readyDub } from "./box-api";
 import { describeProgram, readProgramState } from "./program-state";
 
 /**
@@ -183,34 +184,18 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
   }
 
   test("a READY dub is listed and SP-dabing has a receiver", async ({ request }) => {
-    const dab = await request.get("/api/v1/dabing");
-    expect(dab.status()).toBe(200);
-    const body = (await dab.json()) as {
-      playlist_id: number;
-      videos: Array<{ video_id?: number; id?: number; dub_status: string; chain_state: string }>;
-    };
-    dabingPid = body.playlist_id;
-    const ready = body.videos.find((v) => v.dub_status === "ready");
-    expect(ready, "at least one dub must be ready on the box").toBeTruthy();
-    // DubRow carries the id as `video_id` (the row is keyed by the video).
-    sampleVideoId = Number(ready!.video_id ?? ready!.id);
-    expect(sampleVideoId, "the ready dub must carry a numeric video id").toBeGreaterThan(0);
+    const dub = await readyDub(request);
+    dabingPid = dub.pid;
+    sampleVideoId = dub.videoId;
 
     // The deploy restarts SongPlayer a couple of minutes before this suite; the
     // OBS/DistroAV inputs re-attach within the +30 s self-check window, so poll
     // (the "wall is not dark" test uses the same 60 s budget).
-    let out: { ndi_name: string; connections: number } | undefined;
+    let out: HealthRow | undefined;
     await expect
       .poll(
         async () => {
-          const health = await request.get("/api/v1/ndi/health");
-          expect(health.status()).toBe(200);
-          const rows = (await health.json()) as Array<{
-            playlist_id: number;
-            ndi_name: string;
-            connections: number;
-          }>;
-          out = rows.find((r) => r.playlist_id === dabingPid);
+          out = await healthRow(request, dabingPid);
           return out?.connections ?? -1;
         },
         { timeout: 60000, message: "SP-dabing must be advertised with ≥ 1 receiver" },
@@ -251,19 +236,15 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     const program = await readProgramState(request);
     const dabingOnProgram = program.activePlaylistIds.includes(dabingPid);
     console.log(`[#184] ${describeProgram(program)}`);
+    // The helper's kind-based classification must agree with the Dabing pid.
+    expect(program.dabingOnProgram, describeProgram(program)).toBe(dabingOnProgram);
 
     // Start the sample on the Dabing output. The proof that playback started
     // is the BACKEND effect: frames flowing on the Dabing output.
     await row.getByTestId("song-row-play").click();
     await expect
       .poll(
-        async () => {
-          const h = (await (await request.get("/api/v1/ndi/health")).json()) as Array<{
-            playlist_id: number;
-            frames_submitted_last_5s: number;
-          }>;
-          return h.find((r) => r.playlist_id === dabingPid)?.frames_submitted_last_5s ?? 0;
-        },
+        async () => (await healthRow(request, dabingPid))?.frames_submitted_last_5s ?? 0,
         { timeout: 30000, message: "the Dabing output must start submitting frames" },
       )
       .toBeGreaterThan(0);
@@ -277,13 +258,8 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     // #184: the badge follows the program state, read from the health registry
     // (`state == "Playing"` only when the wall shows this output). Assert the
     // backend source AND the badge for the state the box is actually in.
-    const dabingHealthState = async (): Promise<string> => {
-      const h = (await (await request.get("/api/v1/ndi/health")).json()) as Array<{
-        playlist_id: number;
-        state: string;
-      }>;
-      return h.find((r) => r.playlist_id === dabingPid)?.state ?? "";
-    };
+    const dabingHealthState = async (): Promise<string> =>
+      (await healthRow(request, dabingPid))?.state ?? "<no health row>";
     if (dabingOnProgram) {
       await expect
         .poll(dabingHealthState, {
@@ -299,9 +275,13 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
       await expect
         .poll(dabingHealthState, {
           timeout: 10000,
-          message: "the OFF-program Dabing output must NOT report health state Playing",
+          message:
+            "the OFF-program decoding Dabing output must report a quiet health state (Paused / WaitingForScene), never Playing",
         })
-        .not.toBe("Playing");
+        // ndi_health.rs reconciles Playing + scene inactive to Paused, and the
+        // engine's WaitingForScene is the other off-program label. A missing
+        // row, Idle or Playing all fail.
+        .toMatch(/^(Paused|WaitingForScene)$/);
       await expect(page.getByTestId("player-program-badge")).toContainText(
         "○ Mimo programu",
         { timeout: 10000 },

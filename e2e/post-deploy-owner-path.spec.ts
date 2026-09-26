@@ -36,7 +36,8 @@
  * The 180 s window is the owner-ruled acceptance MEASUREMENT (3 minutes of
  * preview), not a sleep: every sample is asserted as it is taken and the test
  * fails on the FIRST violation. It never touches OBS scenes (the Dabing output
- * is off-program — the live wall is never switched). Runs ONLY under the `edge`
+ * is on or off program, whichever the operator left, #184 — the suite never
+ * switches the live wall). Runs ONLY under the `edge`
  * project of post-deploy.config.ts (Edge carries H.264/AAC; bundled Chromium
  * cannot decode the preview). Viewport 1600×1000: the default viewport hides the
  * vertical faders.
@@ -49,6 +50,7 @@ import {
   quietStreak,
   rmsToDbfs,
 } from "./audio-helpers.mjs";
+import { healthRow, readyDub } from "./box-api";
 
 const ALLOWED_CONSOLE = [
   /WebSocket connection/,
@@ -171,23 +173,6 @@ async function waitForLevel(
   }
 }
 
-/** A ready dub on the box: the owner's video 344 when it is ready, else the
- *  first ready one (the same precondition as post-deploy-dabing.spec.ts). */
-async function readyDub(request: APIRequestContext): Promise<{ pid: number; videoId: number }> {
-  const dab = await request.get("/api/v1/dabing");
-  expect(dab.status()).toBe(200);
-  const body = (await dab.json()) as {
-    playlist_id: number;
-    videos: Array<{ video_id?: number; id?: number; dub_status: string }>;
-  };
-  const ready = body.videos.filter((v) => v.dub_status === "ready");
-  expect(ready.length, "at least one dub must be ready on the box").toBeGreaterThan(0);
-  const ids = ready.map((v) => Number(v.video_id ?? v.id));
-  const videoId = ids.includes(OWNER_VIDEO_ID) ? OWNER_VIDEO_ID : ids[0];
-  expect(videoId, "the ready dub must carry a numeric video id").toBeGreaterThan(0);
-  return { pid: body.playlist_id, videoId };
-}
-
 type MixMemory = { vokaly: number; podklad: number; dabing: number };
 
 /** #184 G4: poll `GET /api/v1/mix` until the server's `MIX_KIND` memory shows
@@ -243,7 +228,7 @@ test.beforeEach(async ({ page }) => {
 
 // Runs even when the test body failed or timed out: vokály + podklad full
 // (100 %), dabing as found (the #184 G2 restore rule), stop the preview this
-// test started and pause the (off-program) Dabing output. Then (f) — zero
+// test started and pause the Dabing output. Then (f) — zero
 // console errors / warnings — is the LAST assertion.
 test.afterEach(async ({ page, request }) => {
   if (cleanup) {
@@ -287,7 +272,8 @@ test("the owner's path: Prehľad → Dabing → play → Živý náhľad → rea
     }
   });
 
-  const { pid, videoId } = await readyDub(request);
+  // The owner's video 344 when it is a ready dub, else the first ready one.
+  const { pid, videoId } = await readyDub(request, OWNER_VIDEO_ID);
   const foundMix = (await (await request.get("/api/v1/mix")).json()) as {
     dub: MixMemory;
     song?: MixMemory;
@@ -322,13 +308,7 @@ test("the owner's path: Prehľad → Dabing → play → Živý náhľad → rea
   await row.getByTestId("song-row-play").click();
   await expect
     .poll(
-      async () => {
-        const h = (await (await request.get("/api/v1/ndi/health")).json()) as Array<{
-          playlist_id: number;
-          frames_submitted_last_5s: number;
-        }>;
-        return h.find((r) => r.playlist_id === pid)?.frames_submitted_last_5s ?? 0;
-      },
+      async () => (await healthRow(request, pid))?.frames_submitted_last_5s ?? 0,
       { timeout: 30000, message: "the Dabing output must start decoding" },
     )
     .toBeGreaterThan(0);
