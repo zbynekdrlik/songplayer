@@ -25,7 +25,7 @@ use std::time::Instant;
 use crossbeam_channel::Receiver;
 
 use crate::playback::ndi_health::PlaybackStateLabel;
-use crate::playback::pacer::{Pacer, ServiceOutcome, Standby};
+use crate::playback::pacer::{Pacer, ServiceOutcome, StandbyBlack};
 use crate::playback::pipeline::{
     PipelineCommand, PipelineEvent, emit_heartbeat, should_run_heartbeat,
 };
@@ -113,12 +113,14 @@ pub(crate) fn run_idle_wait(
 
         // Fill boundaries until a command is queued; the caller then receives it.
         while cmd_rx.is_empty() {
-            let standby = Standby::Black {
+            // The same black constructor the song-start pre-roll uses.
+            let standby = StandbyBlack {
                 width: IDLE_W,
                 height: IDLE_H,
                 stride: IDLE_W,
                 video: &black,
-            };
+            }
+            .standby();
             match pacer.service_standby(standby, &mut sink) {
                 ServiceOutcome::Wait { until_100ns } => sleep_to_boundary(pacer, until_100ns),
                 _ => pacer.tick_wall(),

@@ -1086,7 +1086,10 @@ Tests:
   - a decoder that is ready at once starts on the very next boundary;
   - song end → next song keeps one pair per boundary;
   - `PrerollGate` reads the open result once, waits for the first frame, and
-    ends at once on a failed open.
+    ends at once on a failed open;
+  - the song anchors on the waited boundary even when the clock moved past it;
+  - a 17 ms first frame is preceded by the fill, not a hole;
+  - a pause before the first frame is filled on every boundary.
 
 Never "fix" a song-start re-latch by dropping the standby audio, or by sending
 standby from another thread or in another format. That re-creates the cadence
@@ -1107,8 +1110,23 @@ Now:
   before each wait: has the decoder opened (the `open_rx` result, read once)
   AND is its first frame buffered (`SharedQueue::is_primed`: a frame or EOS,
   never popping; or the producer died)?
-- **Anchor on readiness.** When the gate says yes, it calls `anchor()`, so the
-  song's first frame lands on the boundary that wait was for.
+- **Anchor on readiness, on the waited boundary.** When the gate says yes it
+  calls `anchor_at(until)`, the boundary that wait was for, so a pts-0 first
+  frame lands there. It never re-reads the clock (`anchor()`), because a
+  preemption past the boundary would then skip it.
+- **The standby fill: no starve is a hole.** The pre-roll's black stays in the
+  pacer as its `StandbyFill`. Every `Starved` boundary goes through
+  `Pacer::fill_starved`, which sends the black + one audio block (both the
+  `service` and the `service_standby` FrozenLast starve arms). This covers:
+  - a first frame whose pts lands after the anchor (a start position
+    mid-frame), which then shows on its due boundary;
+  - a seek's refill (`anchor()` clears the last frame): the wall shows black +
+    silence for the refill, where it used to have a hole;
+  - a Pause queued during the pre-roll;
+  - an empty file or a first-frame decode error.
+
+  A pacer that never ran a pre-roll (the SDK-clocked path, bare unit tests)
+  still starves silently.
 - **A failed open ends the pre-roll at once:** stop + join the submit thread,
   then `DecodeResult::Error`.
 - **Commands are held.** Commands queued during the pre-roll wait for the emit
@@ -1119,10 +1137,14 @@ Now:
   (`pacer_tests_preroll.rs`, `pacer_queue_tests.rs`); only the wiring in
   `pipeline_paced.rs` is Windows glue.
 
-**Known narrow case.** A Pause queued during the pre-roll is applied only once
-the song has anchored. `FrozenLast` then has no frame to hold, so those paused
-boundaries are `Starved` until Resume. This is pre-existing: the old blocking
-open behaved the same way.
+**Mutation-gate shape.** `preroll` uses `let … else`, never a `match` with a
+`_` arm. Deleting the `Wait` arm would never call `poll`, so the mutant would
+run to a 300 s TIMEOUT.
+
+**Between songs.** The submit-thread join and the old producer's join
+(including the MF decoder drop) run with no boundary serviced. A gap of up to 8
+slots shows up as a late catch-up burst, not a stamp hole. Check it on the box
+with the camera-box audit across a song change.
 
 **Box acceptance** is read from camera-box's audit:
 
