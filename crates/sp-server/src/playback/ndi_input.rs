@@ -354,7 +354,7 @@ pub fn uyvy_to_nv12(
 }
 
 /// Added before halving a chroma pair's sum: the mean rounds half UP.
-const CHROMA_ROUND: u16 = 2;
+const CHROMA_ROUND: u16 = 1;
 
 /// The rounded mean of two chroma samples.
 fn avg(a: u8, b: u8) -> u8 {
