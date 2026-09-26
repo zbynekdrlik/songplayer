@@ -464,6 +464,7 @@ fn a_source_change_on_program_offers_one_pair_per_boundary_without_a_resync() {
     wait_for("the new pair is created", || {
         mock.calls().iter().any(|c| c == "framesync_create(3)")
     });
+    wait_for("the new pair is swapped in", || shared.is_connected());
     let created = boundaries();
     wait_for("10 more boundaries", || boundaries() >= created + 10);
     shared.stop();
