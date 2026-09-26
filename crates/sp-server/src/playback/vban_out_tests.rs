@@ -346,10 +346,9 @@ fn the_wall_is_read_on_every_block_even_while_disabled() {
     run_vban_loop(&out, &mut sink, &mut clock);
     assert!(sink.sent.is_empty());
     assert!(clock.sleeps.is_empty());
-    assert!(
-        clock.reads >= 3,
-        "one read (= wall tick) per block, got {}",
-        clock.reads
+    assert_eq!(
+        clock.reads, 4,
+        "one read (= wall tick) per block + one on the non-block (stop) pass"
     );
     assert_eq!(VBAN_IDLE_WAIT, Duration::from_millis(100));
 }

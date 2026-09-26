@@ -69,6 +69,10 @@ pub const VBAN_INTERVAL_WINDOW: usize = 1200;
 /// for a stop again — 3 slots, under the 8-boundary tick cap per read
 /// (`BoundaryTicker`), so an idle wall still ticks once per boundary.
 pub const VBAN_IDLE_WAIT: Duration = Duration::from_millis(100);
+const _: () = assert!(
+    VBAN_IDLE_WAIT.as_nanos() / 100
+        < (crate::playback::program_output::MAX_TICKS_PER_WAKE * VBAN_SEND_LATENCY_100NS) as u128
+);
 
 /// How often the settings are re-read (a dashboard save applies within this).
 pub const VBAN_SETTINGS_POLL: Duration = Duration::from_secs(5);
