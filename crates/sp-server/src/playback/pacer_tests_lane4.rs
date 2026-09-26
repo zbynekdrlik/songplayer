@@ -436,8 +436,11 @@ fn standby_unaffected_by_a_pre_decoded_frame() {
             "one grid slot: step={step}"
         );
     }
+    // #147 standby same-path: every standby boundary carries ONE silent block of
+    // `samples_per_boundary`, like a playing boundary (was: no audio).
     assert!(
-        sink.audio_samples[1..].iter().all(|&n| n == 0),
-        "standby submits no audio"
+        sink.audio_samples[1..].iter().all(|&n| n == 1600),
+        "standby submits one 1600-sample silent block per boundary: {:?}",
+        sink.audio_samples
     );
 }

@@ -351,4 +351,24 @@ impl Pacer {
             interleave(vec![vec![0.0; n]; self.audio_buf.channels()])
         }
     }
+
+    /// The ONE silent audio block every STANDBY boundary carries (idle black and
+    /// paused frozen frame, #147 standby same-path, design comment 5841796900):
+    /// `samples_per_boundary` zeros per channel, built exactly like the playing
+    /// path's own silence above. A standby boundary then hands the sink the same
+    /// audio-then-video pair as a playing boundary, so the receiver sees one
+    /// constant A/V cadence idle or playing, and its audio hold never has to
+    /// re-engage at a song start. The layout follows the song when the grid
+    /// buffer knows it (paused, or just after a song ended); otherwise stereo.
+    pub(super) fn standby_silence(&self) -> Vec<AudioFrame> {
+        let channels = match self.audio_buf.channels() {
+            0 => STANDBY_SILENCE_CHANNELS,
+            n => n,
+        };
+        interleave(vec![vec![0.0; self.samples_per_boundary]; channels])
+    }
 }
+
+/// Channel count of the standby silence while no song has fixed one (#147):
+/// stereo, the layout every playlist file decodes to.
+const STANDBY_SILENCE_CHANNELS: usize = 0;

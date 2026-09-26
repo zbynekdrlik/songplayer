@@ -614,12 +614,12 @@ impl Pacer {
 
     /// Service one STANDBY scheduling step: fill the current grid boundary with
     /// the frozen last frame (paused) or a black frame (idle / no song), stamped
-    /// on-grid via the SAME machinery as [`service`](Self::service) but with NO
-    /// audio and NO decode pull. The paced pipeline's paused branch and the
-    /// paced idle loop call this once per boundary so EVERY boundary carries a
-    /// frame while paused/idle — the receiver stays `locked=` instead of seeing
-    /// holes (#147 fix-lane-2, change 2). Play/Seek re-anchor via
-    /// [`anchor`](Self::anchor). Returns [`ServiceOutcome::Wait`] until the
+    /// on-grid via the SAME machinery as [`service`](Self::service), with ONE
+    /// silent audio block (#147) and NO decode pull. The paced pipeline's paused
+    /// branch and the paced idle loop call this once per boundary so EVERY
+    /// boundary carries a frame while paused/idle — the receiver stays `locked=`
+    /// instead of seeing holes (#147 fix-lane-2, change 2). Play/Seek re-anchor
+    /// via [`anchor`](Self::anchor). Returns [`ServiceOutcome::Wait`] until the
     /// boundary is due, then [`ServiceOutcome::Repeated`] (frozen) /
     /// [`ServiceOutcome::Emitted`] (black), or [`ServiceOutcome::Starved`] when
     /// a frozen standby has no last frame yet.
@@ -665,13 +665,16 @@ impl Pacer {
         // exactly like the active underrun path.
         let (stamp_boundary, next) = self.resolve_emit_boundary(emit_now, boundary, false);
         let audio_tc = emit_now;
+        // #147: the SAME audio-then-video pair as a playing boundary — one silent
+        // block, stamped with the emit instant like playing audio (§6).
+        let silence = self.standby_silence();
 
         let outcome = match standby {
             Standby::FrozenLast => {
                 if let Some(lf) = self.last_frame.take() {
                     self.on_emit(emit_now, stamp_boundary);
                     self.repeats += 1;
-                    sink.emit(&lf, &[], stamp_boundary, audio_tc);
+                    sink.emit(&lf, &silence, stamp_boundary, audio_tc);
                     self.last_frame = Some(lf);
                     ServiceOutcome::Repeated
                 } else {
@@ -686,13 +689,13 @@ impl Pacer {
             } => {
                 self.on_emit(emit_now, stamp_boundary);
                 // Submit the SAME allocation by shared reference — a refcount bump,
-                // no pixel copy (#203). No audio on a standby boundary.
+                // no pixel copy (#203), with the boundary's silent block (#147).
                 sink.submit_shared(
                     width,
                     height,
                     stride,
                     video.clone(),
-                    &[],
+                    &silence,
                     stamp_boundary,
                     audio_tc,
                 );
@@ -917,3 +920,7 @@ mod pacer_tests_audio;
 #[cfg(test)]
 #[path = "pacer_tests_mutants.rs"]
 mod pacer_tests_mutants;
+
+#[cfg(test)]
+#[path = "pacer_tests_standby.rs"]
+mod pacer_tests_standby;

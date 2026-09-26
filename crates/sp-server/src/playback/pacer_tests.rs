@@ -706,11 +706,12 @@ fn genlock_pacing_off_keeps_the_legacy_sdk_clocked_call_site() {
 // ---------------------------------------------------------------------------
 
 // Change 2: the paused/idle standby planner fills EVERY grid boundary with a
-// frozen-last / black frame (on-grid, strictly increasing, never future-dated,
-// no audio) via the same Pacer machinery, and a resuming Play re-anchors.
+// frozen-last / black frame (on-grid, strictly increasing, never future-dated)
+// via the same Pacer machinery, and a resuming Play re-anchors. Since the #147
+// standby same-path fix each standby boundary also carries ONE silent block.
 
 #[test]
-fn standby_planner_fills_one_boundary_per_interval_no_audio() {
+fn standby_planner_fills_one_boundary_per_interval_with_one_silent_block() {
     let (mut pacer, clk) = anchored_pacer();
     let mut sink = RecordingSink::default();
 
@@ -752,10 +753,13 @@ fn standby_planner_fills_one_boundary_per_interval_no_audio() {
             "on-grid stamp"
         );
     }
-    // Standby submits NO audio.
+    // The real frame carried no audio; every standby boundary carries exactly
+    // one silent `samples_per_boundary` block (#147 standby same-path).
+    assert_eq!(sink.audio_samples[0], 0, "the audio-less real frame");
     assert!(
-        sink.audio_samples.iter().all(|&n| n == 0),
-        "standby emits no audio"
+        sink.audio_samples[1..].iter().all(|&n| n == 1600),
+        "each standby boundary carries one 1600-sample silent block: {:?}",
+        sink.audio_samples
     );
     // Every frozen-frame repeat bumps `repeats`.
     assert_eq!(pacer.stats().repeats, 100);
@@ -788,8 +792,9 @@ fn standby_black_fills_boundaries_without_a_last_frame() {
         assert!(*v <= *a, "never future-dated");
     }
     assert!(
-        sink.audio_samples.iter().all(|&n| n == 0),
-        "idle emits no audio"
+        sink.audio_samples.iter().all(|&n| n == 1600),
+        "each idle boundary carries one 1600-sample silent block (#147): {:?}",
+        sink.audio_samples
     );
     // Black idle frames are NOT frozen-frame repeats.
     assert_eq!(pacer.stats().repeats, 0);

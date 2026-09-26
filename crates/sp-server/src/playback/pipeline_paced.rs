@@ -445,8 +445,8 @@ pub(crate) fn decode_and_send_paced(
     // boundary emit. The submit thread BORROWS the `FrameSubmitter` for the song
     // via `thread::scope` (SDK per-instance affinity + the async double-buffer
     // holdover stay single-threaded); it joins before this scope returns, so the
-    // buffer is flushed before the outer loop reuses the submitter for a black
-    // frame. The emit thread emits through a `HandoffSink` (hand off in ~µs) and
+    // buffer is flushed before the outer loop reuses the submitter for the idle
+    // fill. The emit thread emits through a `HandoffSink` (hand off in ~µs) and
     // reads a submit-side snapshot for the heartbeat.
     let handoff = SharedHandoff::new(SUBMIT_HANDOFF_BOUND);
     let handoff_ref = &handoff;
@@ -536,8 +536,8 @@ pub(crate) fn decode_and_send_paced(
                 // receiver stays `locked=` across a pause instead of dropping into
                 // holes/underruns — one on-grid stamped frame per boundary via the
                 // same Pacer sleep/emit machinery, handed off to the submit thread,
-                // no audio (#147 fix-lane-2, change 2). Commands are serviced at the
-                // loop top every iteration.
+                // with one silent audio block like a playing boundary (#147).
+                // Commands are serviced at the loop top every iteration.
                 match pacer.service_standby(Standby::FrozenLast, &mut sink) {
                     ServiceOutcome::Wait { until_100ns } => sleep_to_boundary(pacer, until_100ns),
                     _ => pacer.tick_wall(),

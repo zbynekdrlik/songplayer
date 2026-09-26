@@ -84,6 +84,11 @@ pub struct FrameSubmitter<B: NdiBackend> {
     /// churn (~83 MB/s per paused output). Reallocated only on a `(width,height)`
     /// change.
     black_bgra: Option<Vec<u8>>,
+    /// #147 standby same-path: the paced idle NV12 black `(width, height,
+    /// frame)`, built ONCE per pipeline and handed out by `Arc` clone
+    /// ([`standby_black_nv12`](Self::standby_black_nv12)). Declared after
+    /// `sender`, so the SDK's pointer is released before this last `Arc` drops.
+    black_nv12: Option<(u32, u32, SharedFrame)>,
 }
 
 impl<B: NdiBackend> FrameSubmitter<B> {
@@ -117,6 +122,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             burn_on: Arc::new(AtomicBool::new(false)),
             submit_times: crate::playback::loop_stats::SubmitHist::default(),
             black_bgra: None,
+            black_nv12: None,
         }
     }
 
@@ -946,9 +952,18 @@ mod tests {
     }
 }
 
+// #147 standby same-path: the outer loop's standby black (legacy BGRA / paced
+// no-op) + the cached paced NV12 black — an `impl` split for the 1000-line cap.
+#[path = "submitter_standby.rs"]
+mod submitter_standby;
+
 #[cfg(test)]
 #[path = "submitter_tests_timecode.rs"]
 mod submitter_tests_timecode;
+
+#[cfg(test)]
+#[path = "submitter_tests_standby.rs"]
+mod submitter_tests_standby;
 
 #[cfg(test)]
 #[path = "submitter_tests_mutants.rs"]

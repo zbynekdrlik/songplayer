@@ -291,15 +291,15 @@ fn run_loop_windows(
         let _ = tx.send(None);
     }
 
-    // Initial black frame. Genlock path emits on the fixed integer grid
-    // (GENLOCK_GRID_FPS/1) and skips the per-file `set_frame_rate`; the legacy
-    // path updates it per-file in `decode_and_send`.
+    // Initial standby black (legacy BGRA; paced = the idle fill, #147). Genlock
+    // emits on the fixed integer grid (GENLOCK_GRID_FPS/1) and skips the per-file
+    // `set_frame_rate`; the legacy path updates it per-file in `decode_and_send`.
     let mut submitter = FrameSubmitter::new(sender, sp_core::genlock::GENLOCK_GRID_FPS as i32, 1);
-    submitter.set_paced(genlock_pacing); // paced: stamp standby frames on-grid (#147)
+    submitter.set_paced(genlock_pacing); // paced: no BGRA / sync standby (#147)
     // #151: install the shared burn flag so the runtime API toggle drives the
     // paced-emit overlay. Default OFF; only the paced path ever paints.
     submitter.set_burn_flag(burn_on);
-    submitter.send_black_bgra(1920, 1080);
+    submitter.send_standby_black(1920, 1080);
 
     // #192: on the SDK-clocked path a dedicated wall-clock audio emitter thread
     // clocks the NDI audio stream continuously (silence-filled across song
@@ -330,7 +330,7 @@ fn run_loop_windows(
     let mut consecutive_bad_polls: u32 = 0;
 
     loop {
-        match cmd_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+        match cmd_rx.recv_timeout(super::pacer_sink::idle_poll(genlock_pacing)) {
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                 // Idle wait: paced ON fills every grid boundary with black while
                 // no song is loaded; OFF keeps the plain 5 s heartbeat. All the
@@ -424,14 +424,14 @@ fn run_loop_windows(
                         DecodeResult::Ended => {
                             paused = false;
                             info!(playlist_id, "video ended naturally");
-                            submitter.send_black_bgra(1920, 1080);
+                            submitter.send_standby_black(1920, 1080);
                             let _ = event_tx.send((playlist_id, PipelineEvent::Ended));
                             break false;
                         }
                         DecodeResult::Stopped => {
                             paused = false;
                             info!(playlist_id, "playback stopped");
-                            submitter.send_black_bgra(1920, 1080);
+                            submitter.send_standby_black(1920, 1080);
                             break false;
                         }
                         DecodeResult::Shutdown => {
@@ -453,7 +453,7 @@ fn run_loop_windows(
                         DecodeResult::Error(msg) => {
                             paused = false;
                             error!(playlist_id, %msg, "decode error");
-                            submitter.send_black_bgra(1920, 1080);
+                            submitter.send_standby_black(1920, 1080);
                             let _ = event_tx.send((playlist_id, PipelineEvent::Error(msg)));
                             break false;
                         }
@@ -488,7 +488,7 @@ fn run_loop_windows(
                 tracing::debug!(position_ms, "pipeline: seek ignored (no song loaded)");
             }
             Ok(PipelineCommand::Stop) => {
-                submitter.send_black_bgra(1920, 1080);
+                submitter.send_standby_black(1920, 1080);
                 debug!(playlist_id, "stopped (no active playback)");
             }
         }
