@@ -26,8 +26,9 @@
 use super::{PacedSink, Pacer, ServiceOutcome, Standby};
 use crate::playback::frame_buf::SharedFrame;
 
-/// The idle black a pre-roll fills boundaries with: an NV12 frame of
-/// `width`×`height` (stride `stride`), shared by reference every boundary.
+/// A standby picture by reference: the idle / pre-roll black (or a held
+/// frame), an NV12 frame of `width`×`height` (stride `stride`), submitted by
+/// shared reference every boundary.
 #[derive(Clone, Copy)]
 pub struct StandbyBlack<'a> {
     pub width: u32,
@@ -36,17 +37,29 @@ pub struct StandbyBlack<'a> {
     pub video: &'a SharedFrame,
 }
 
-/// The pacer's owned copy of the standby black (an `Arc` clone), kept for
-/// filling starved boundaries after the pre-roll (#147).
+/// An owned standby picture (an `Arc` clone, no pixel copy): the pre-roll's
+/// black, or the last pre-seek frame a seek refill holds (#147).
 #[derive(Clone, Debug)]
-pub(super) struct StandbyFill {
+pub(super) struct FillFrame {
     width: u32,
     height: u32,
     stride: u32,
     video: SharedFrame,
 }
 
-impl From<StandbyBlack<'_>> for StandbyFill {
+impl FillFrame {
+    /// This picture as a borrowed [`StandbyBlack`] for the standby pair.
+    fn view(&self) -> StandbyBlack<'_> {
+        StandbyBlack {
+            width: self.width,
+            height: self.height,
+            stride: self.stride,
+            video: &self.video,
+        }
+    }
+}
+
+impl From<StandbyBlack<'_>> for FillFrame {
     fn from(black: StandbyBlack<'_>) -> Self {
         Self {
             width: black.width,
@@ -55,6 +68,15 @@ impl From<StandbyBlack<'_>> for StandbyFill {
             video: black.video.clone(),
         }
     }
+}
+
+/// The pacer's fill for starved boundaries (#147): the pre-roll's black, and
+/// after a same-song seek the last pre-seek picture (`hold`), which the refill
+/// shows instead of flashing black. A new song's pre-roll drops the hold.
+#[derive(Clone, Debug)]
+pub(super) struct StandbyFill {
+    black: FillFrame,
+    hold: Option<FillFrame>,
 }
 
 impl<'a> StandbyBlack<'a> {
@@ -95,7 +117,10 @@ impl Pacer {
         P: FnMut() -> Option<T>,
         W: FnMut(&Pacer, i64),
     {
-        self.standby_fill = Some(StandbyFill::from(black));
+        self.standby_fill = Some(StandbyFill {
+            black: FillFrame::from(black),
+            hold: None,
+        });
         loop {
             let step = self.service_standby(black.standby(), &mut *sink);
             let ServiceOutcome::Wait { until_100ns } = step else {
@@ -111,12 +136,30 @@ impl Pacer {
         }
     }
 
+    /// Re-anchor for a same-song SEEK (#147): like [`anchor`](Pacer::anchor),
+    /// but the refill boundaries (nothing decoded at the new position yet) hold
+    /// the last pre-seek picture with the standby silence, instead of flashing
+    /// the pre-roll's black. A repeated seek before any new frame keeps the
+    /// earlier hold. Without a fill (no pre-roll ran) it is a plain `anchor`.
+    pub fn anchor_seek(&mut self) {
+        self.anchor();
+        let held = self.last_frame.take().map(|f| FillFrame {
+            width: f.width,
+            height: f.height,
+            stride: f.stride,
+            video: f.video,
+        });
+        if let Some(fill) = self.standby_fill.as_mut() {
+            fill.hold = held.or(fill.hold.take());
+        }
+    }
+
     /// A boundary with nothing of the song to show (#147): with a standby fill
-    /// set (by [`preroll`](Pacer::preroll)), it still carries the black + one
-    /// audio block (`standby_block`), stamped like any
-    /// emit, so the output never has a hole. Without a fill (the SDK-clocked
-    /// path never sets one, and neither do the unit tests that pin a bare
-    /// starve) nothing is sent. Returns [`ServiceOutcome::Starved`] either way.
+    /// set (by [`preroll`](Pacer::preroll)), it still carries the standby pair
+    /// (the held pre-seek picture, else the black), so the output never has a
+    /// hole. Without a fill (the SDK-clocked path never sets one, and neither do
+    /// the unit tests that pin a bare starve) nothing is sent. Returns
+    /// [`ServiceOutcome::Starved`] either way.
     pub(super) fn fill_starved<S: PacedSink>(
         &mut self,
         emit_now: i64,
@@ -125,19 +168,35 @@ impl Pacer {
         sink: &mut S,
     ) -> ServiceOutcome {
         if let Some(fill) = self.standby_fill.clone() {
-            self.on_emit(emit_now, stamp_boundary);
-            let block = self.standby_block();
-            sink.submit_shared(
-                fill.width,
-                fill.height,
-                fill.stride,
-                fill.video,
-                &block,
-                stamp_boundary,
-                audio_tc,
-            );
+            let picture = fill.hold.as_ref().unwrap_or(&fill.black);
+            self.emit_standby_pair(emit_now, stamp_boundary, audio_tc, picture.view(), sink);
         }
         ServiceOutcome::Starved
+    }
+
+    /// The standby pair (#147), the ONE path an idle black, a pre-roll black
+    /// and a starve fill leave through: one audio block (`standby_block`:
+    /// silence, or a held EOS tail) then the picture by shared reference (a
+    /// refcount bump, no pixel copy, #203), stamped like any emit.
+    pub(super) fn emit_standby_pair<S: PacedSink>(
+        &mut self,
+        emit_now: i64,
+        stamp_boundary: i64,
+        audio_tc: i64,
+        picture: StandbyBlack<'_>,
+        sink: &mut S,
+    ) {
+        self.on_emit(emit_now, stamp_boundary);
+        let block = self.standby_block();
+        sink.submit_shared(
+            picture.width,
+            picture.height,
+            picture.stride,
+            picture.video.clone(),
+            &block,
+            stamp_boundary,
+            audio_tc,
+        );
     }
 }
 

@@ -89,7 +89,7 @@ pub trait PacedSink {
     /// `audio` is the boundary block the pacer took from its `AudioGridBuffer`,
     /// aligned to the picture by media time (0 or 1 frame of exactly
     /// `samples_per_boundary` samples, #148) — a video repeat still carries audio
-    /// (decoupled); only a pre-roll starve passes an empty slice. Only `video`'s
+    /// (decoupled); empty only before any audio was decoded. Only `video`'s
     /// pixel fields are used; its own `audio` was pushed into the buffer on pull.
     fn emit(
         &mut self,
@@ -536,7 +536,7 @@ impl Pacer {
         // Paced audio (#148 v2): every PRODUCTIVE boundary (a fresh emit OR a
         // video repeat) takes exactly `samples_per_boundary`, aligned by media
         // time to the stamped boundary, submitted BEFORE the video frame (§6). A
-        // pre-roll STARVE (nothing ever emitted) delivers no audio.
+        // first-frame STARVE gets the standby pair's block via `fill_starved`.
         let fresh_pts = due.as_ref().map(|f| f.pts_100ns());
         let shown_pts = fresh_pts.or_else(|| self.last_frame.as_ref().map(|f| f.pts_100ns()));
         let audio_frames = match shown_pts {
@@ -677,7 +677,7 @@ impl Pacer {
 
         // #147: an emitting standby boundary is the SAME audio-then-video pair as
         // a playing one — one block (silence, or a held EOS tail), stamped with
-        // the emit instant like playing audio (§6). A starve takes no block.
+        // the emit instant like playing audio (§6); a starve takes the fill's.
         let outcome = match standby {
             Standby::FrozenLast => {
                 if let Some(lf) = self.last_frame.take() {
@@ -697,19 +697,15 @@ impl Pacer {
                 stride,
                 video,
             } => {
-                self.on_emit(emit_now, stamp_boundary);
-                // Submit the SAME allocation by shared reference — a refcount bump,
-                // no pixel copy (#203), with the boundary's audio block (#147).
-                let block = self.standby_block();
-                sink.submit_shared(
+                // The standby pair: the SAME allocation by shared reference (#203)
+                // after the boundary's audio block (#147).
+                let picture = StandbyBlack {
                     width,
                     height,
                     stride,
-                    video.clone(),
-                    &block,
-                    stamp_boundary,
-                    audio_tc,
-                );
+                    video,
+                };
+                self.emit_standby_pair(emit_now, stamp_boundary, audio_tc, picture, sink);
                 ServiceOutcome::Emitted
             }
         };

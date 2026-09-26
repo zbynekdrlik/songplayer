@@ -563,7 +563,8 @@ pub(crate) fn decode_and_send_paced(
                     // the decoder. Re-anchor the grid to the seek instant.
                     shared.request_seek(position_ms);
                     last_decoded_ms = position_ms;
-                    pacer.anchor();
+                    // #147: the refill holds the pre-seek picture, never a hole.
+                    pacer.anchor_seek();
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {

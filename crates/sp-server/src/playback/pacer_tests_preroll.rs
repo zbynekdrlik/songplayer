@@ -399,3 +399,77 @@ fn a_pause_before_the_first_frame_is_filled_with_the_standby_pair() {
         rec.boundaries
     );
 }
+
+/// After idle b(1)..b(3) and an at-once pre-roll, play a 2-frame song on b(4),
+/// b(5).
+fn playing_after_preroll(blk: &SharedFrame) -> (Pacer, SettableClock, Rec) {
+    let (mut pacer, clk, mut rec) = idle_three(blk);
+    pacer.preroll(black(blk), &mut rec, || Some(()), |_, until| clk.set(until));
+    let mut song: std::collections::VecDeque<PacedFrame> = (0..2)
+        .map(|j| song_frame((b(4 + j) - b(4)) * 100))
+        .collect();
+    for k in 4..=5 {
+        clk.set(b(k));
+        assert_eq!(
+            pacer.service(|| song.pop_front(), &mut rec),
+            ServiceOutcome::Emitted
+        );
+    }
+    (pacer, clk, rec)
+}
+
+#[test]
+fn a_seek_refill_holds_the_pre_seek_picture_not_a_black_flash() {
+    // A mid-song seek flushes the queue and re-anchors: until the decoder has a
+    // frame at the new position the boundary is starved. It must carry the last
+    // pre-seek picture (+ the standby silence), never a hole and never the
+    // pre-roll's black.
+    let blk = black_frame();
+    let (mut pacer, clk, mut rec) = playing_after_preroll(&blk);
+    clk.set(b(5) + 1_000);
+    pacer.anchor_seek(); // the post-seek grid starts at b(6)
+    clk.set(b(6));
+    assert_eq!(pacer.service(|| None, &mut rec), ServiceOutcome::Starved);
+    let mut after_seek = Some(song_frame((b(7) - b(6)) * 100));
+    clk.set(b(7));
+    assert_eq!(
+        pacer.service(|| after_seek.take(), &mut rec),
+        ServiceOutcome::Emitted
+    );
+    assert_eq!(stamps(&rec), (1..=7).map(b).collect::<Vec<_>>(), "no hole");
+    assert_eq!(
+        rec.boundaries[5],
+        (b(6), false, Some((2, 1600))),
+        "the refill holds the pre-seek picture with one block, not black"
+    );
+}
+
+#[test]
+fn a_new_song_after_a_seek_drops_the_held_picture() {
+    // The hold belongs to the song that was seeked: the next song's pre-roll
+    // drops it, so that song's own first-frame starve shows the black again.
+    let blk = black_frame();
+    let (mut pacer, clk, mut rec) = playing_after_preroll(&blk);
+    clk.set(b(5) + 1_000);
+    pacer.anchor_seek();
+    clk.set(b(6));
+    pacer.service(|| None, &mut rec); // held pre-seek picture
+    pacer.preroll(
+        black(&blk),
+        &mut rec,
+        || Some(()),
+        |_, until| clk.set(until),
+    );
+    let mut late_first = Some(song_frame(17_000_000)); // due one slot after b(7)
+    clk.set(b(7));
+    assert_eq!(
+        pacer.service(|| late_first.take(), &mut rec),
+        ServiceOutcome::Starved
+    );
+    assert_eq!(stamps(&rec), (1..=7).map(b).collect::<Vec<_>>());
+    assert!(!rec.boundaries[5].1, "b(6): the held pre-seek picture");
+    assert!(
+        rec.boundaries[6].1,
+        "b(7): the new song's fill is black again"
+    );
+}
