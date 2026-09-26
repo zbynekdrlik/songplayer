@@ -59,6 +59,10 @@ use crate::playback::program_bus::ProgramBus;
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::vban_out::VbanClock;
 
+// The receiver lifecycle: connect, close, and their timing.
+#[path = "ndi_input_connect.rs"]
+mod connect;
+
 /// The receiver's own NDI name (what the source sees connected).
 pub const INPUT_RECV_NAME: &str = "SongPlayer program input";
 
@@ -190,6 +194,9 @@ struct InputCounters {
     connected: bool,
     audio_queue_depth: i32,
     format: Option<VideoFormat>,
+    connects_pending: u32,
+    last_connect_ms: Option<u64>,
+    last_close_ms: Option<u64>,
 }
 
 /// `GET /api/v1/program` → `input`.
@@ -223,6 +230,12 @@ pub struct NdiInputStatus {
     pub resyncs: u64,
     /// Backward clock steps re-latched onto the grid.
     pub relatches: u64,
+    /// A receiver (re)connect is running on its helper thread (0 / 1).
+    pub connects_pending: u32,
+    /// How long the last receiver create took (ms).
+    pub last_connect_ms: Option<u64>,
+    /// How long the last receiver close took (ms).
+    pub last_close_ms: Option<u64>,
     /// Audio samples waiting in the FrameSync at the last boundary.
     pub audio_queue_depth: i32,
     /// `"1920x1080"` of the last received frame.
@@ -307,6 +320,9 @@ impl NdiInputShared {
             boundaries: c.boundaries,
             resyncs: c.resyncs,
             relatches: c.relatches,
+            connects_pending: c.connects_pending,
+            last_connect_ms: c.last_connect_ms,
+            last_close_ms: c.last_close_ms,
             audio_queue_depth: c.audio_queue_depth,
             last_frame_size: fmt.map(|f| format!("{}x{}", f.width, f.height)),
             format: fmt.map(|f| f.four_cc_str()),
@@ -548,53 +564,6 @@ impl NdiInput {
             audio_tc_100ns: audio_now_100ns,
         };
         bus.offer(PROGRAM_INPUT_ID, job);
-    }
-
-    /// Reconnect when the settings changed, or retry a failed receiver after
-    /// [`INPUT_RECONNECT_100NS`].
-    fn apply_settings(&mut self, boundary_100ns: i64) {
-        let want = self.shared.settings();
-        if want != self.applied {
-            info!(
-                enabled = want.enabled,
-                source = %want.source,
-                previous = %self.applied.source,
-                "ndi input: settings changed — (re)connecting"
-            );
-            self.disconnect();
-            self.applied = want;
-            self.retry_at = i64::MIN;
-        }
-        if self.applied.active() && self.sync.is_none() && boundary_100ns >= self.retry_at {
-            self.connect(boundary_100ns);
-        }
-    }
-
-    fn connect(&mut self, boundary_100ns: i64) {
-        let Some(backend) = self.backend.clone() else {
-            warn!("ndi input: no NDI SDK — the input offers its standby pair");
-            self.retry_at = i64::MAX; // never retried without an SDK
-            return;
-        };
-        match NdiFrameSync::connect(backend, &self.applied.source, INPUT_RECV_NAME) {
-            Ok(sync) => {
-                info!(source = %self.applied.source, "ndi input: receiver + FrameSync created");
-                self.sync = Some(sync);
-            }
-            Err(e) => {
-                warn!(%e, source = %self.applied.source, "ndi input: creating the receiver failed — retry in 5 s");
-                self.retry_at = boundary_100ns + INPUT_RECONNECT_100NS;
-            }
-        }
-    }
-
-    /// Drop the receiver (FrameSync first) and forget the last frame.
-    fn disconnect(&mut self) {
-        if self.sync.take().is_some() {
-            info!(source = %self.applied.source, "ndi input: receiver closed");
-        }
-        self.set_connected(false);
-        self.last = None;
     }
 
     fn set_connected(&mut self, connected: bool) {

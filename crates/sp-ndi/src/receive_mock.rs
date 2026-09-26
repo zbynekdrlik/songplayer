@@ -8,9 +8,14 @@
 //! frame), one planar audio block, and a connection count. It records every
 //! create / destroy / capture / free, so a test can prove the RAII wrapper
 //! frees each capture and tears down in SDK order (FrameSync, then receiver).
+//! `recv_create` / `recv_destroy` can be made to block like the real SDK's
+//! (~0.5 s on the box, #212 comment 5849047061) with [`set_blocking`].
+//!
+//! [`set_blocking`]: MockNdiReceiveBackend::set_blocking
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use crate::error::NdiError;
 use crate::receive::{NDIlib_audio_frame_v2_t, NDIlib_video_frame_v2_recv_t, NdiReceiveBackend};
@@ -58,6 +63,8 @@ pub struct MockNdiReceiveBackend {
     audio: Mutex<MockAudio>,
     /// Captured minus freed audio frames.
     outstanding_audio: AtomicI64,
+    /// How long `recv_create` / `recv_destroy` block (zero = not at all).
+    blocking: Mutex<(Duration, Duration)>,
 }
 
 impl MockNdiReceiveBackend {
@@ -83,6 +90,12 @@ impl MockNdiReceiveBackend {
     /// What `framesync_audio_queue_depth` returns.
     pub fn set_audio_queue_depth(&self, n: i32) {
         self.queue_depth.store(n, Ordering::SeqCst);
+    }
+
+    /// Make every `recv_create` block for `create` and every `recv_destroy`
+    /// for `destroy` (after it is recorded), like a slow SDK.
+    pub fn set_blocking(&self, create: Duration, destroy: Duration) {
+        *self.blocking.lock().unwrap() = (create, destroy);
     }
 
     /// Make `recv_create` / `framesync_create` fail.
@@ -137,6 +150,8 @@ impl NdiReceiveBackend for MockNdiReceiveBackend {
 
     fn recv_create(&self, source_name: &str, recv_name: &str) -> Result<usize, NdiError> {
         self.log(format!("recv_create({source_name},{recv_name})"));
+        let block = self.blocking.lock().unwrap().0;
+        std::thread::sleep(block);
         if self.fail_recv_create.load(Ordering::SeqCst) {
             return Err(NdiError::ReceiveFailed("mock recv_create"));
         }
@@ -145,6 +160,8 @@ impl NdiReceiveBackend for MockNdiReceiveBackend {
 
     fn recv_destroy(&self, recv: usize) {
         self.log(format!("recv_destroy({recv})"));
+        let block = self.blocking.lock().unwrap().1;
+        std::thread::sleep(block);
     }
 
     fn recv_connections(&self, _recv: usize) -> i32 {

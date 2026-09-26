@@ -278,3 +278,36 @@ fn the_mock_finder_returns_the_configured_names() {
         vec!["find_source_names(250)", "find_source_names(1000)"]
     );
 }
+
+#[test]
+fn the_mock_blocks_the_receiver_create_and_destroy_for_the_set_delays() {
+    use std::time::{Duration, Instant};
+    // The sp-server lifecycle tests (#212 follow-up) rely on a slow SDK
+    // create/destroy; the per-package mutation gate needs it asserted here.
+    let mock = Arc::new(MockNdiReceiveBackend::default());
+    mock.set_blocking(Duration::from_millis(60), Duration::from_millis(90));
+    let started = Instant::now();
+    let sync = NdiFrameSync::connect(mock.clone(), "A (b)", "SP-input").unwrap();
+    let create = started.elapsed();
+    let started = Instant::now();
+    drop(sync);
+    let destroy = started.elapsed();
+    assert!(
+        create >= Duration::from_millis(60),
+        "create blocked {create:?}"
+    );
+    assert!(
+        destroy >= Duration::from_millis(90),
+        "destroy blocked {destroy:?}"
+    );
+    assert_eq!(
+        mock.calls(),
+        vec![
+            "recv_create(A (b),SP-input)",
+            "framesync_create(1)",
+            "framesync_destroy(2)",
+            "recv_destroy(1)"
+        ],
+        "each call is recorded, then blocks"
+    );
+}
