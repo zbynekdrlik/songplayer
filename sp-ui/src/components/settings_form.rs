@@ -1,4 +1,5 @@
-//! Settings form for OBS, Gemini, dub, VBAN (#210) and cache configuration.
+//! Settings form for OBS, Gemini, dub, VBAN (#210), the NDI input "OBS manuál"
+//! (#212) and cache configuration.
 
 use std::collections::HashMap;
 
@@ -45,6 +46,9 @@ pub fn SettingsForm() -> impl IntoView {
     let vban_enabled = RwSignal::new(false);
     let vban_stream_name = RwSignal::new(config::DEFAULT_VBAN_STREAM_NAME.to_string());
     let vban_targets = RwSignal::new(String::new());
+    // #212: the NDI input "OBS manuál" (off by default, no source).
+    let ndi_input_enabled = RwSignal::new(false);
+    let ndi_input_source = RwSignal::new(String::new());
     let save_status = RwSignal::new(String::new());
 
     // Populate fields from store settings when they change.
@@ -88,6 +92,13 @@ pub fn SettingsForm() -> impl IntoView {
             config::DEFAULT_VBAN_STREAM_NAME,
         ));
         vban_targets.set(setting_value(&settings, config::SETTING_VBAN_TARGETS, ""));
+        ndi_input_enabled
+            .set(setting_value(&settings, config::SETTING_NDI_INPUT_ENABLED, "false") == "true");
+        ndi_input_source.set(setting_value(
+            &settings,
+            config::SETTING_NDI_INPUT_SOURCE,
+            "",
+        ));
     });
 
     let on_save = move |ev: leptos::ev::SubmitEvent| {
@@ -121,6 +132,14 @@ pub fn SettingsForm() -> impl IntoView {
             vban_stream_name.get(),
         );
         settings.insert(config::SETTING_VBAN_TARGETS.to_string(), vban_targets.get());
+        settings.insert(
+            config::SETTING_NDI_INPUT_ENABLED.to_string(),
+            ndi_input_enabled.get().to_string(),
+        );
+        settings.insert(
+            config::SETTING_NDI_INPUT_SOURCE.to_string(),
+            ndi_input_source.get().trim().to_string(),
+        );
 
         leptos::task::spawn_local(async move {
             save_status.set("Ukladám…".into());
@@ -241,6 +260,29 @@ pub fn SettingsForm() -> impl IntoView {
                         placeholder="dev1.lan:6980"
                         prop:value=move || vban_targets.get()
                         on:input=move |ev| vban_targets.set(event_target_value(&ev))
+                    />
+                </label>
+            </fieldset>
+
+            <fieldset data-testid="settings-ndi-input">
+                <legend>"Vstup NDI „OBS manuál“"</legend>
+                <label>
+                    <input
+                        type="checkbox"
+                        data-testid="settings-ndi-input-enabled"
+                        prop:checked=move || ndi_input_enabled.get()
+                        on:change=move |ev| ndi_input_enabled.set(event_target_checked(&ev))
+                    />
+                    "Prijímať zdroj NDI a ponúknuť ho na program"
+                </label>
+                <label>
+                    "Zdroj NDI (STROJ (stream))"
+                    <input
+                        type="text"
+                        data-testid="settings-ndi-input-source"
+                        placeholder="CG-OBS (manual)"
+                        prop:value=move || ndi_input_source.get()
+                        on:input=move |ev| ndi_input_source.set(event_target_value(&ev))
                     />
                 </label>
             </fieldset>

@@ -44,6 +44,19 @@ pub const SETTING_VBAN_STREAM_NAME: &str = "vban_stream_name";
 /// #210: comma-separated `host:port` VBAN targets (default empty = send
 /// nothing), e.g. `fohabl.lan:6980, lv1.lan:6980`.
 pub const SETTING_VBAN_TARGETS: &str = "vban_targets";
+/// #212 (B3 of EPIC #174): the NDI input "OBS manuál" — one received NDI
+/// source offered to the program bus. `"true"` receives; anything else (or
+/// absent) = off, the default.
+pub const SETTING_NDI_INPUT_ENABLED: &str = "ndi_input_enabled";
+/// #212: the full NDI name of the received source, `"MACHINE (stream)"` (e.g.
+/// cg OBS's manual-scene NDI output). Empty = nothing to receive.
+pub const SETTING_NDI_INPUT_SOURCE: &str = "ndi_input_source";
+
+/// #212: the program-bus source id of the NDI input (playlists are positive
+/// row ids, so a negative id can never collide with one).
+pub const PROGRAM_INPUT_ID: i64 = -1;
+/// #212: the NDI input's label on the dashboard Program control.
+pub const PROGRAM_INPUT_LABEL: &str = "OBS manuál";
 
 // Default values for settings that have sensible defaults.
 pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
@@ -139,6 +152,14 @@ mod tests {
         assert_eq!(SETTING_VBAN_STREAM_NAME, "vban_stream_name");
         assert_eq!(SETTING_VBAN_TARGETS, "vban_targets");
         assert_eq!(DEFAULT_VBAN_STREAM_NAME, "sp-program");
+    }
+
+    #[test]
+    fn ndi_input_setting_keys_and_program_id() {
+        assert_eq!(SETTING_NDI_INPUT_ENABLED, "ndi_input_enabled");
+        assert_eq!(SETTING_NDI_INPUT_SOURCE, "ndi_input_source");
+        assert_eq!(PROGRAM_INPUT_ID, -1);
+        assert_eq!(PROGRAM_INPUT_LABEL, "OBS manuál");
     }
 
     #[test]

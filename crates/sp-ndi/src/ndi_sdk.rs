@@ -4,10 +4,11 @@
 //! the sender function pointers we need. No link-time dependency on NDI.
 
 use libloading::{Library, Symbol};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::error::NdiError;
 use crate::network_ready;
+use crate::receive::RecvFns;
 use crate::types::{
     NDIlib_audio_frame_v3_t, NDIlib_find_create_t, NDIlib_find_instance_t, NDIlib_send_create_t,
     NDIlib_send_instance_t, NDIlib_source_t, NDIlib_tally_t, NDIlib_video_frame_v2_t,
@@ -68,6 +69,9 @@ pub struct NdiLib {
     pub(crate) find_wait_for_sources: FnFindWaitForSources,
     pub(crate) find_get_current_sources: FnFindGetCurrentSources,
     pub(crate) find_destroy: FnFindDestroy,
+    /// #212: the receive + FrameSync entry points, or `None` when this runtime
+    /// lacks them (the senders keep working; there is just no NDI input).
+    pub(crate) recv: Option<RecvFns>,
 }
 
 // SAFETY: The function pointers are loaded from a shared library and are
@@ -122,6 +126,15 @@ impl NdiLib {
                 b"NDIlib_find_get_current_sources\0",
             )?;
             let find_destroy = Self::resolve::<FnFindDestroy>(&library, b"NDIlib_find_destroy\0")?;
+            // #212: the receive half is OPTIONAL — a missing symbol must never
+            // cost the senders (every playlist output + SP-program).
+            let recv = match Self::resolve_recv(&library) {
+                Ok(fns) => Some(fns),
+                Err(e) => {
+                    warn!(%e, "NDI receive / FrameSync symbols missing — no NDI input");
+                    None
+                }
+            };
 
             // Gate NDIlib_initialize() on adapter readiness — the runtime
             // binds its mDNS announce socket once at init and never re-evaluates.
@@ -154,6 +167,57 @@ impl NdiLib {
                 find_wait_for_sources,
                 find_get_current_sources,
                 find_destroy,
+                recv,
+            })
+        }
+    }
+
+    /// #212: resolve the receive + FrameSync symbols (all or none).
+    ///
+    /// # Safety
+    /// The type aliases in `receive.rs` match the SDK headers' C signatures.
+    #[cfg_attr(test, mutants::skip)] // needs a loaded NDI runtime
+    unsafe fn resolve_recv(library: &Library) -> Result<RecvFns, NdiError> {
+        use crate::receive::*;
+        unsafe {
+            Ok(RecvFns {
+                recv_create_v3: Self::resolve::<FnRecvCreateV3>(
+                    library,
+                    b"NDIlib_recv_create_v3\0",
+                )?,
+                recv_destroy: Self::resolve::<FnRecvDestroy>(library, b"NDIlib_recv_destroy\0")?,
+                recv_get_no_connections: Self::resolve::<FnRecvGetNoConnections>(
+                    library,
+                    b"NDIlib_recv_get_no_connections\0",
+                )?,
+                framesync_create: Self::resolve::<FnFramesyncCreate>(
+                    library,
+                    b"NDIlib_framesync_create\0",
+                )?,
+                framesync_destroy: Self::resolve::<FnFramesyncDestroy>(
+                    library,
+                    b"NDIlib_framesync_destroy\0",
+                )?,
+                framesync_capture_video: Self::resolve::<FnFramesyncCaptureVideo>(
+                    library,
+                    b"NDIlib_framesync_capture_video\0",
+                )?,
+                framesync_free_video: Self::resolve::<FnFramesyncFreeVideo>(
+                    library,
+                    b"NDIlib_framesync_free_video\0",
+                )?,
+                framesync_capture_audio: Self::resolve::<FnFramesyncCaptureAudio>(
+                    library,
+                    b"NDIlib_framesync_capture_audio\0",
+                )?,
+                framesync_free_audio: Self::resolve::<FnFramesyncFreeAudio>(
+                    library,
+                    b"NDIlib_framesync_free_audio\0",
+                )?,
+                framesync_audio_queue_depth: Self::resolve::<FnFramesyncAudioQueueDepth>(
+                    library,
+                    b"NDIlib_framesync_audio_queue_depth\0",
+                )?,
             })
         }
     }

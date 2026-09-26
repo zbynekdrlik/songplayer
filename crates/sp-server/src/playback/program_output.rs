@@ -243,7 +243,9 @@ impl super::PlaybackEngine {
     /// bus the paced submit threads offer to, start the `SP-program` sender
     /// thread (Windows, on the engine's NDI backend), and stop it on shutdown.
     /// #210: also start the VBAN thread (Windows) and its settings task.
-    /// Call once, after the #196 startup senders.
+    /// #212: also start the NDI input "OBS manuál" (its settings task, and on
+    /// Windows its grid thread on the engine's NDI SDK). Call once, after the
+    /// #196 startup senders.
     #[cfg_attr(test, mutants::skip)]
     pub async fn start_program(&self, bus: Arc<ProgramBus>, shutdown: &broadcast::Sender<()>) {
         let vban = bus.vban().clone();
@@ -254,17 +256,32 @@ impl super::PlaybackEngine {
         ));
         #[cfg(windows)]
         crate::playback::vban_out::spawn_vban_thread(vban.clone());
-        let mut shutdown = shutdown.subscribe();
+        let mut shutdown_rx = shutdown.subscribe();
         restore_selected_source(&self.pool, &bus).await;
         if !install(bus.clone()) {
             warn!("program bus: a bus was already installed — keeping the first one");
         }
         #[cfg(windows)]
         spawn_program_thread(self.ndi_backend.clone(), bus.clone());
+        #[cfg(windows)]
+        let receive = self
+            .ndi_backend
+            .as_ref()
+            .and_then(|b| sp_ndi::RealNdiReceiveBackend::new(b.lib().clone()))
+            .map(|r| Arc::new(r) as Arc<dyn sp_ndi::NdiReceiveBackend>);
+        #[cfg(not(windows))]
+        let receive: Option<Arc<dyn sp_ndi::NdiReceiveBackend>> = None;
+        crate::playback::ndi_input::start_ndi_input(
+            self.pool.clone(),
+            bus.clone(),
+            receive,
+            shutdown,
+        );
         tokio::spawn(async move {
-            let _ = shutdown.recv().await;
+            let _ = shutdown_rx.recv().await;
             bus.stop();
             vban.stop();
+            bus.input().stop();
         });
     }
 }

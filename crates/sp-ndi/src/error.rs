@@ -11,6 +11,8 @@ pub enum NdiError {
     SymbolNotFound(String),
     /// `NDIlib_initialize()` returned false.
     InitFailed,
+    /// #212: creating a receiver / FrameSync failed (what failed).
+    ReceiveFailed(&'static str),
 }
 
 impl fmt::Display for NdiError {
@@ -19,6 +21,7 @@ impl fmt::Display for NdiError {
             NdiError::LibraryNotFound(msg) => write!(f, "NDI library not found: {msg}"),
             NdiError::SymbolNotFound(sym) => write!(f, "NDI symbol not found: {sym}"),
             NdiError::InitFailed => write!(f, "NDIlib_initialize() returned false"),
+            NdiError::ReceiveFailed(what) => write!(f, "NDI receive failed: {what}"),
         }
     }
 }

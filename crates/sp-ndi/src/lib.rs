@@ -10,6 +10,8 @@ pub mod find;
 pub(crate) mod handle_table;
 pub mod ndi_sdk;
 pub(crate) mod network_ready;
+pub mod receive; // #212: the receive half (recv + FrameSync FFI, mockable trait)
+pub mod receiver; // #212: the safe RAII `NdiFrameSync` + planar→interleaved audio
 pub mod sender;
 pub mod sender_real;
 pub mod source_url;
@@ -17,11 +19,15 @@ pub mod types;
 
 // The mock backend is compiled only for tests / downstream test binaries.
 #[cfg(any(test, feature = "test-util"))]
+pub mod receive_mock;
+#[cfg(any(test, feature = "test-util"))]
 pub mod sender_mock;
 
 // Re-export key public types for convenience.
 pub use error::NdiError;
 pub use ndi_sdk::NdiLib;
+pub use receive::{NdiReceiveBackend, RealNdiReceiveBackend};
+pub use receiver::{CapturedAudio, CapturedVideo, NdiFrameSync};
 #[cfg(any(test, feature = "test-util"))]
 pub use sender::test_util;
 pub use sender::{AudioFrame, AudioSink, NdiBackend, NdiSender, RealNdiBackend, Tally, VideoFrame};
@@ -118,5 +124,8 @@ mod tests {
 
         let e = NdiError::InitFailed;
         assert!(format!("{e}").contains("initialize"));
+
+        let e = NdiError::ReceiveFailed("framesync");
+        assert_eq!(format!("{e}"), "NDI receive failed: framesync");
     }
 }

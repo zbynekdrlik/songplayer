@@ -365,3 +365,12 @@ a path dep (G4: `sp-decoder` → `sp-core`), add ONE line to that crate's
 version and bump unrelated deps (a ~20-line lockfile diff riding in a feature
 PR). Also check the new edge adds no cycle (`sp-core` depends only on serde /
 thiserror, so anything may depend on it).
+
+## Scripted edits after `cargo fmt`: assert the anchor, never a silent `str.replace` (#212)
+
+On the no-compile box every change goes through editors/scripts, and `cargo fmt`
+re-wraps long lines. A later scripted `s.replace(old, new)` whose `old` is the
+PRE-fmt text silently does nothing — #212 shipped a test asserting the old 2×2
+standby while the rig built 2×4, caught only by a review pass (it would have
+reddened 6 CI tests). Fail loudly when an anchor is missing
+(`if old not in s: sys.exit(...)`), or use the Edit tool, and re-read the result.

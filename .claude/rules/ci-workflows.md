@@ -110,6 +110,18 @@ pure code up front:
 - **No trivial `const fn new()` next to `#[derive(Default)]`**: its body can be
   swapped for `Default::default()` with no observable change. Seed a `static`
   with a struct literal in the same module and use `Default` in tests.
+- **Test sizes must break `*` vs `+` (#212):** 2×2 makes `w * h == w + h`
+  (and `2 * 2 == 2 + 2`), so a `*`→`+` mutant on a size/length formula is
+  EQUIVALENT under that fixture. Use non-square, non-2 dimensions (2×4, 4×2,
+  a 2×3 silence block) wherever a test pins a computed length.
+- **Don't split one decision into `Arm if cond => …` + `Arm => return` (#212):**
+  cargo-mutants rewrites a match guard to `true`/`false`. When the fallback arm's
+  effect is unobservable (e.g. an offer the bus would reject anyway), the
+  guard→`true` mutant survives. Keep ONE arm with `if !cond { return; }` inside:
+  its only mutant is `delete !`, which the positive case kills.
+- **A pure capacity (`frame_pool::take(len)`) is invisible to output tests** —
+  a wrong `len` just reallocates. Pin it through `frame_pool::pool_len(CAP)`
+  on a unique size class after every holder dropped (ndi_input's 50×34 test).
 - A fn that only shells out (child process / ffmpeg) and is reachable only from
   an already-excluded orchestrator gets its own STRUCTURAL `exclude_re` line with
   a rationale naming the pure fns that carry its decisions.
