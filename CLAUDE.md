@@ -28,6 +28,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - dabing (dubbing) eval (Soniox/Chatterbox engine gotchas) → `.claude/rules/dubbing-eval.md` (auto-loads on `eval/dubbing/**`)
 - post-deploy specs: OBS program = ANY sp-* scene (read `program-state.ts`, explicit card, shared `box-api.ts`) → `.claude/rules/post-deploy-program-state.md` (auto-loads on `e2e/post-deploy*.spec.ts`, `e2e/program-state*.ts`, `e2e/box-api.ts`)
 - program bus + NDI `SP-program` (master switcher: cut rule, reorder/fill, OnceLock install, startup order, Program control) → `.claude/rules/program-bus.md` (auto-loads on `playback/program_{bus,output}*`, `paced_output*.rs`, `api/program*`, `sp-ui` `program_control.rs`)
+- VBAN audio out of the program (#210: pure encoder, paced 1/240 s thread, drop-oldest queue, settings task, `vban` telemetry) → `.claude/rules/vban-out.md` (auto-loads on `playback/vban_*`, `program_output*`, `api/program*`, `sp-ui` `settings_form.rs`, `e2e/settings-vban.spec.ts`)
 - Dabing feature (dub data model + section + import cookie gate + D4 dub worker/Live-Translate child/4-stream mix) → `.claude/rules/dabing.md` (auto-loads on `db/models_dabing.rs`, `api/dabing.rs`, `api/routes_import.rs`, `startup_dabing.rs`, `dabing/**`, `scripts/dub_worker.py`, `sp-ui` dabing files)
 
 | Area | Skill | Load when |

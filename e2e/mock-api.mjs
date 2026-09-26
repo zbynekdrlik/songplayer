@@ -211,7 +211,11 @@ const settings = {
   // `speaker` = the speaker's own voice. `dub_model` is deliberately absent so
   // the form shows its default.
   dub_voice: "speaker",
+  // #210: the vban_* keys are deliberately absent so the Nastavenia VBAN
+  // fieldset shows its defaults (off, `sp-program`, no targets).
 };
+// #210: the fixture as loaded, restored by `/__mock/settings-reset`.
+const settingsInitial = { ...settings };
 
 const resolumeHosts = [];
 let nextResolumeId = 1;
@@ -458,6 +462,16 @@ app.patch("/api/v1/settings", (req, res) => {
     settings[key] = value;
   }
   res.json(settings);
+});
+
+// #210: test-only — restore the settings fixture (specs that save settings
+// reset in beforeEach/afterEach so no saved value leaks into a later spec).
+app.post("/__mock/settings-reset", (_req, res) => {
+  for (const key of Object.keys(settings)) {
+    delete settings[key];
+  }
+  Object.assign(settings, settingsInitial);
+  res.json({ status: "reset" });
 });
 
 // Karaoke (#14, #177): live mode + vocal gain + stem progress + per-song
@@ -825,6 +839,26 @@ function programBody() {
       submitted: 0,
       connections: 0,
       last_stamp_100ns: 0,
+    },
+    // #210: the VBAN output's telemetry (mirrors `VbanStatus`), from the
+    // stored settings like the real settings task.
+    vban: {
+      enabled: settings.vban_enabled === "true",
+      running: false,
+      stream_name: settings.vban_stream_name || "sp-program",
+      packets_sent: 0,
+      send_errors: 0,
+      blocks_dropped: 0,
+      blocks_substituted: 0,
+      late_sends: 0,
+      send_interval_p99_us: 0,
+      frame_counter: 0,
+      targets: (settings.vban_targets || "")
+        .split(",")
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0)
+        .slice(0, 8) // VBAN_MAX_TARGETS
+        .map((t) => ({ target: t, addr: null, error: null })),
     },
   };
 }

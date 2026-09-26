@@ -35,6 +35,15 @@ pub const SETTING_MIX_SONG_PODKLAD: &str = "mix_song_podklad";
 pub const SETTING_MIX_DUB_VOKALY: &str = "mix_dub_vokaly";
 pub const SETTING_MIX_DUB_PODKLAD: &str = "mix_dub_podklad";
 pub const SETTING_MIX_DUB_DABING: &str = "mix_dub_dabing";
+/// #210 (B2 of EPIC #174): the program's VBAN audio output (to FOH VB-Matrix
+/// and lv1). `"true"` sends; anything else (or absent) = off, the default.
+pub const SETTING_VBAN_ENABLED: &str = "vban_enabled";
+/// #210: the ASCII VBAN stream name, at most 16 chars
+/// ([`DEFAULT_VBAN_STREAM_NAME`] until the B4 switch-over, never cg OBS's `cg`).
+pub const SETTING_VBAN_STREAM_NAME: &str = "vban_stream_name";
+/// #210: comma-separated `host:port` VBAN targets (default empty = send
+/// nothing), e.g. `fohabl.lan:6980, lv1.lan:6980`.
+pub const SETTING_VBAN_TARGETS: &str = "vban_targets";
 
 // Default values for settings that have sensible defaults.
 pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
@@ -47,6 +56,9 @@ pub const DUB_VOICE_SPEAKER: &str = "speaker";
 pub const DEFAULT_DUB_VOICE: &str = DUB_VOICE_SPEAKER;
 /// The default dub model — the Live Translate model the round-H probe verified.
 pub const DEFAULT_DUB_MODEL: &str = "gemini-3.5-live-translate-preview";
+/// The default VBAN stream name (#210): its own name, so it never collides
+/// with cg OBS's `cg` stream before the B4 switch-over.
+pub const DEFAULT_VBAN_STREAM_NAME: &str = "sp-program";
 
 /// The Dabing row's voice line for a stored `dub_voice`: the speaker's own voice
 /// reads `hlas: rečník`, a pinned prebuilt voice `hlas: <name>`.
@@ -119,6 +131,14 @@ mod tests {
         assert_eq!(dub_voice_label("speaker"), "hlas: rečník");
         assert_eq!(dub_voice_label("Charon"), "hlas: Charon");
         assert_eq!(dub_voice_label("Kore"), "hlas: Kore");
+    }
+
+    #[test]
+    fn vban_setting_keys_and_default_stream_name() {
+        assert_eq!(SETTING_VBAN_ENABLED, "vban_enabled");
+        assert_eq!(SETTING_VBAN_STREAM_NAME, "vban_stream_name");
+        assert_eq!(SETTING_VBAN_TARGETS, "vban_targets");
+        assert_eq!(DEFAULT_VBAN_STREAM_NAME, "sp-program");
     }
 
     #[test]

@@ -347,10 +347,12 @@ fn sleep_until(clock: &WallClock, target_100ns: i64, margin_100ns: i64) -> i64 {
     overshoot
 }
 
-/// Raise the emit thread to `THREAD_PRIORITY_TIME_CRITICAL` so a heavy child's
-/// CPU/memory burst cannot delay a grid slot.
+/// Raise the calling thread to `THREAD_PRIORITY_TIME_CRITICAL` so a heavy
+/// child's CPU/memory burst cannot delay a grid slot. `ndi_name` labels the log
+/// line (the audio emit thread's NDI name, or `vban-output` for the #210 VBAN
+/// sender thread, which shares this helper).
 #[cfg_attr(test, mutants::skip)]
-fn raise_thread_priority(ndi_name: &str) {
+pub(crate) fn raise_thread_priority(ndi_name: &str) {
     use windows_sys::Win32::System::Threading::{
         GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
     };
@@ -360,10 +362,10 @@ fn raise_thread_priority(ndi_name: &str) {
     if ok == 0 {
         warn!(
             ndi_name,
-            "audio-emitter: SetThreadPriority(TIME_CRITICAL) failed"
+            "paced thread: SetThreadPriority(TIME_CRITICAL) failed"
         );
     } else {
-        info!(ndi_name, "audio-emitter: thread priority = TIME_CRITICAL");
+        info!(ndi_name, "paced thread: priority = TIME_CRITICAL");
     }
 }
 

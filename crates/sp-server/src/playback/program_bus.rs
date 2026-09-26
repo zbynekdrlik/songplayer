@@ -70,6 +70,7 @@ use sqlx::SqlitePool;
 use tracing::{info, warn};
 
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
+use crate::playback::vban_out::VbanOut;
 
 /// The program output's NDI source name.
 pub const PROGRAM_NDI_NAME: &str = "SP-program";
@@ -469,6 +470,9 @@ struct BusState {
 pub struct ProgramBus {
     state: Mutex<BusState>,
     ready: Condvar,
+    /// #210: the program's VBAN audio output, fed by the `SP-program` sender
+    /// thread and reported under `vban` on `GET /api/v1/program`.
+    vban: Arc<VbanOut>,
 }
 
 impl Default for ProgramBus {
@@ -485,7 +489,13 @@ impl ProgramBus {
                 stop: false,
             }),
             ready: Condvar::new(),
+            vban: Arc::new(VbanOut::new()),
         }
+    }
+
+    /// #210: the program's VBAN output.
+    pub fn vban(&self) -> &Arc<VbanOut> {
+        &self.vban
     }
 
     fn lock(&self) -> MutexGuard<'_, BusState> {

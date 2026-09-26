@@ -1,4 +1,4 @@
-//! Settings form for OBS, Gemini, and cache configuration.
+//! Settings form for OBS, Gemini, dub, VBAN (#210) and cache configuration.
 
 use std::collections::HashMap;
 
@@ -41,6 +41,10 @@ pub fn SettingsForm() -> impl IntoView {
     let cache_dir = RwSignal::new(String::new());
     let dub_voice = RwSignal::new(config::DEFAULT_DUB_VOICE.to_string());
     let dub_model = RwSignal::new(config::DEFAULT_DUB_MODEL.to_string());
+    // #210: the program's VBAN audio output (off by default).
+    let vban_enabled = RwSignal::new(false);
+    let vban_stream_name = RwSignal::new(config::DEFAULT_VBAN_STREAM_NAME.to_string());
+    let vban_targets = RwSignal::new(String::new());
     let save_status = RwSignal::new(String::new());
 
     // Populate fields from store settings when they change.
@@ -77,6 +81,13 @@ pub fn SettingsForm() -> impl IntoView {
             config::SETTING_DUB_MODEL,
             config::DEFAULT_DUB_MODEL,
         ));
+        vban_enabled.set(setting_value(&settings, config::SETTING_VBAN_ENABLED, "false") == "true");
+        vban_stream_name.set(setting_value(
+            &settings,
+            config::SETTING_VBAN_STREAM_NAME,
+            config::DEFAULT_VBAN_STREAM_NAME,
+        ));
+        vban_targets.set(setting_value(&settings, config::SETTING_VBAN_TARGETS, ""));
     });
 
     let on_save = move |ev: leptos::ev::SubmitEvent| {
@@ -101,6 +112,15 @@ pub fn SettingsForm() -> impl IntoView {
         settings.insert(config::SETTING_CACHE_DIR.to_string(), cache_dir.get());
         settings.insert(config::SETTING_DUB_VOICE.to_string(), dub_voice.get());
         settings.insert(config::SETTING_DUB_MODEL.to_string(), dub_model.get());
+        settings.insert(
+            config::SETTING_VBAN_ENABLED.to_string(),
+            vban_enabled.get().to_string(),
+        );
+        settings.insert(
+            config::SETTING_VBAN_STREAM_NAME.to_string(),
+            vban_stream_name.get(),
+        );
+        settings.insert(config::SETTING_VBAN_TARGETS.to_string(), vban_targets.get());
 
         leptos::task::spawn_local(async move {
             save_status.set("Ukladám…".into());
@@ -157,6 +177,7 @@ pub fn SettingsForm() -> impl IntoView {
                     "Model"
                     <input
                         type="text"
+                        data-testid="settings-gemini-model"
                         prop:value=move || gemini_model.get()
                         on:input=move |ev| gemini_model.set(event_target_value(&ev))
                     />
@@ -187,6 +208,39 @@ pub fn SettingsForm() -> impl IntoView {
                         data-testid="settings-dub-model"
                         prop:value=move || dub_model.get()
                         on:input=move |ev| dub_model.set(event_target_value(&ev))
+                    />
+                </label>
+            </fieldset>
+
+            <fieldset data-testid="settings-vban">
+                <legend>"Zvuk programu cez VBAN"</legend>
+                <label>
+                    <input
+                        type="checkbox"
+                        data-testid="settings-vban-enabled"
+                        prop:checked=move || vban_enabled.get()
+                        on:change=move |ev| vban_enabled.set(event_target_checked(&ev))
+                    />
+                    "Posielať zvuk programu (VBAN)"
+                </label>
+                <label>
+                    "Názov streamu"
+                    <input
+                        type="text"
+                        maxlength="16"
+                        data-testid="settings-vban-stream-name"
+                        prop:value=move || vban_stream_name.get()
+                        on:input=move |ev| vban_stream_name.set(event_target_value(&ev))
+                    />
+                </label>
+                <label>
+                    "Ciele (host:port, oddelené čiarkou)"
+                    <input
+                        type="text"
+                        data-testid="settings-vban-targets"
+                        placeholder="dev1.lan:6980"
+                        prop:value=move || vban_targets.get()
+                        on:input=move |ev| vban_targets.set(event_target_value(&ev))
                     />
                 </label>
             </fieldset>
