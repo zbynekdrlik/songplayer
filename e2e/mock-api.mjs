@@ -214,6 +214,7 @@ const settings = {
   // #210: the vban_* keys are deliberately absent so the Nastavenia VBAN
   // fieldset shows its defaults (off, `sp-program`, no targets).
   // #212: the ndi_input_* keys are absent too (the input is off, no source).
+  // #213: the remote_ws_* keys are absent too (off, port 4456, no password).
 };
 // #210: the fixture as loaded, restored by `/__mock/settings-reset`.
 const settingsInitial = { ...settings };
@@ -904,8 +905,25 @@ function inputBody() {
     visible_sources: [],
   };
 }
+// #213: the Companion remote control — mirrors `RemoteStatus`, from the stored
+// settings like the real API (the mock runs no listener).
+function remoteBody() {
+  const port = Number.parseInt((settings.remote_ws_port || "").trim(), 10);
+  return {
+    enabled: settings.remote_ws_enabled === "true",
+    port: port >= 1 && port <= 65535 ? port : 4456,
+    auth: (settings.remote_ws_password || "").trim() !== "",
+    listening: false,
+    error: null,
+    clients: 0,
+    requests: 0,
+    last_request: null,
+    last_remote_cut: null,
+    unsupported_requests: [],
+  };
+}
 app.get("/api/v1/program", (_req, res) => {
-  res.json({ ...programBody(), input: inputBody() });
+  res.json({ ...programBody(), input: inputBody(), remote: remoteBody() });
 });
 app.post("/api/v1/program/cut", (req, res) => {
   const source = Number(req.body?.source);
@@ -923,7 +941,7 @@ app.post("/api/v1/program/cut", (req, res) => {
   if (programState.source !== source) {
     programState = { source, previous: programState.source, cuts: programState.cuts + 1 };
   }
-  res.json({ ...programBody(), input: inputBody() });
+  res.json({ ...programBody(), input: inputBody(), remote: remoteBody() });
 });
 // Test-only: the last cut body the dashboard posted (backend-effect check).
 app.get("/__mock/program-last-cut", (_req, res) => {

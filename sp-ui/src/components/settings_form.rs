@@ -1,5 +1,5 @@
 //! Settings form for OBS, Gemini, dub, VBAN (#210), the NDI input "OBS manuál"
-//! (#212) and cache configuration.
+//! (#212), the Companion remote control (#213) and cache configuration.
 
 use std::collections::HashMap;
 
@@ -49,6 +49,10 @@ pub fn SettingsForm() -> impl IntoView {
     // #212: the NDI input "OBS manuál" (off by default, no source).
     let ndi_input_enabled = RwSignal::new(false);
     let ndi_input_source = RwSignal::new(String::new());
+    // #213: the Companion remote control (off by default, port 4456, no password).
+    let remote_enabled = RwSignal::new(false);
+    let remote_port = RwSignal::new(config::DEFAULT_REMOTE_WS_PORT.to_string());
+    let remote_password = RwSignal::new(String::new());
     let save_status = RwSignal::new(String::new());
 
     // Populate fields from store settings when they change.
@@ -99,6 +103,18 @@ pub fn SettingsForm() -> impl IntoView {
             config::SETTING_NDI_INPUT_SOURCE,
             "",
         ));
+        remote_enabled
+            .set(setting_value(&settings, config::SETTING_REMOTE_WS_ENABLED, "false") == "true");
+        remote_port.set(setting_value(
+            &settings,
+            config::SETTING_REMOTE_WS_PORT,
+            &config::DEFAULT_REMOTE_WS_PORT.to_string(),
+        ));
+        remote_password.set(setting_value(
+            &settings,
+            config::SETTING_REMOTE_WS_PASSWORD,
+            "",
+        ));
     });
 
     let on_save = move |ev: leptos::ev::SubmitEvent| {
@@ -139,6 +155,18 @@ pub fn SettingsForm() -> impl IntoView {
         settings.insert(
             config::SETTING_NDI_INPUT_SOURCE.to_string(),
             ndi_input_source.get().trim().to_string(),
+        );
+        settings.insert(
+            config::SETTING_REMOTE_WS_ENABLED.to_string(),
+            remote_enabled.get().to_string(),
+        );
+        settings.insert(
+            config::SETTING_REMOTE_WS_PORT.to_string(),
+            remote_port.get().trim().to_string(),
+        );
+        settings.insert(
+            config::SETTING_REMOTE_WS_PASSWORD.to_string(),
+            remote_password.get(),
         );
 
         leptos::task::spawn_local(async move {
@@ -283,6 +311,39 @@ pub fn SettingsForm() -> impl IntoView {
                         placeholder="CG-OBS (manual)"
                         prop:value=move || ndi_input_source.get()
                         on:input=move |ev| ndi_input_source.set(event_target_value(&ev))
+                    />
+                </label>
+            </fieldset>
+
+            <fieldset data-testid="settings-remote">
+                <legend>"Diaľkové ovládanie (Companion)"</legend>
+                <label>
+                    <input
+                        type="checkbox"
+                        data-testid="settings-remote-enabled"
+                        prop:checked=move || remote_enabled.get()
+                        on:change=move |ev| remote_enabled.set(event_target_checked(&ev))
+                    />
+                    "Ovládať program zo Stream Decku cez obs-websocket (Companion)"
+                </label>
+                <label>
+                    "Port"
+                    <input
+                        type="number"
+                        min="1"
+                        max="65535"
+                        data-testid="settings-remote-port"
+                        prop:value=move || remote_port.get()
+                        on:input=move |ev| remote_port.set(event_target_value(&ev))
+                    />
+                </label>
+                <label>
+                    "Heslo (nepovinné)"
+                    <input
+                        type="password"
+                        data-testid="settings-remote-password"
+                        prop:value=move || remote_password.get()
+                        on:input=move |ev| remote_password.set(event_target_value(&ev))
                     />
                 </label>
             </fieldset>
