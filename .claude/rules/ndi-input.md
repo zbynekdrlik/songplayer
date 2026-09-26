@@ -39,6 +39,20 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   `RealNdiReceiveBackend::new(lib)` shares the ONE `NdiLib`
   (`RealNdiBackend::lib()`), because `NDIlib_initialize` must run once per
   process.
+- **`RealNdiReceiveBackend` locks PER receiver and PER FrameSync.** This uses
+  `handle_table::HandleTable`, the same pattern #147 round 11 introduced for
+  the senders. It is NEVER one lock across every SDK call.
+  - Each call holds only its own instance's slot lock. So a destroy still
+    waits for a capture in flight on the SAME instance.
+  - The input's close helper destroys the old pair (~0.5 s on the box) while
+    the grid thread captures from the new one. With one global lock, the
+    grid's first `recv_connections` on the new pair waited for that destroy.
+    That was the very stall the lifecycle rule below removes (#212 follow-up,
+    review round 2).
+  - `NdiReceiveBackend`'s doc states the contract: calls on DIFFERENT handles
+    never wait for each other.
+  - The FFI methods are `mutants::skip` and need the runtime. The locking
+    itself is `HandleTable`'s, which is Linux-tested.
 - The color format is `NDIlib_recv_color_format_fastest` with
   `allow_video_fields = false` and highest bandwidth. A source without alpha
   comes as UYVY. One with alpha comes as UYVA, whose FIRST plane is UYVY, so a
@@ -149,8 +163,10 @@ that is ~14 black-filled program slots. Design record: #212 comment 5849076208
   after the boundary that REQUESTED it, not the one where the failure landed.
   So the retry timing never depends on how long the helper took.
 - **Helper edge cases.**
-  - A helper that could not be spawned, or that panicked, leaves a closed
-    channel (`Disconnected`), which lands as a failed connect.
+  - A connect helper that could not be spawned leaves a closed channel
+    (`Disconnected`), which lands as a failed connect.
+  - A panicking helper does the same, but only in tests
+    (`set_panic_create`): release builds abort on a panic (`panic = "abort"`).
   - A close helper that could not be spawned closes inline, with a WARN.
 - **Stop path.** It runs after the loop ended.
   - The current pair, and a connect result that was already handed over but
@@ -159,8 +175,14 @@ that is ~14 black-filled program slots. Design record: #212 comment 5849076208
     receiver, and the helper drops (closes) the pair itself.
   - Closes started by earlier settings changes may still be running, detached.
     That is harmless, since the loop is over.
-  - The helper publishes `last_connect_ms` only AFTER its hand-over, so a
-    test can wait for it and then know the result is in the channel.
+  - A hand-over that lands in the instant between `try_recv` and the drop of
+    the channel is dropped with the channel on the ending input thread. That
+    is inline and untimed, but harmless: the loop is over.
+  - The helper publishes `last_connect_ms` only AFTER its hand-over. So a
+    test that waits for a value set by THIS connect (e.g. ≥ 400 ms for the
+    mock's 500 ms) knows the result is in the channel. The rig's own first
+    connect already left a value there, so waiting for any value is not
+    enough.
 - **Telemetry** in `input`:
   - `connects_pending` (0 / 1), published by the grid;
   - `last_connect_ms` / `last_close_ms`, which the helpers time themselves.
@@ -170,7 +192,8 @@ that is ~14 black-filled program slots. Design record: #212 comment 5849076208
   connect logs `a superseded connect finished — closing it off the grid thread`.
 - **Trade-off (accepted).** A source change takes effect once the helper's
   create is done. The old receiver lives ~0.5 s longer on its close thread,
-  concurrently with the new one's create.
+  concurrently with the new one's create (the per-handle backend locks make
+  that concurrency real).
 - **Box check.** Put the input on program and change the source in Nastavenia.
   The program `filled` and `resyncs` counters must stay +0, and the input must
   log no `> 8 boundaries missed` WARN. `last_close_ms` / `last_connect_ms`
@@ -252,15 +275,24 @@ that is ~14 black-filled program slots. Design record: #212 comment 5849076208
   - the stop path's handed-over and abandoned pairs;
   - a helper that dies (`set_panic_create`) counting as a failed connect.
 - The rule "never on the grid thread" is asserted through the mock's
-  `calls_by_thread()`: every create runs on `ndi-input-connect`, every destroy
-  on `ndi-input-close`. The loop test runs `run_input_loop` on a thread named
+  `calls_by_thread()`. Every create runs on `ndi-input-connect`. Every destroy
+  runs on `ndi-input-close`, except an abandoned connect's pair, which its
+  connect helper drops. The loop test runs `run_input_loop` on a thread named
   `ndi-input` and finds no create or destroy there.
+- "The grid never WAITS on them" is asserted with the mock's `set_held(true)`.
+  The old pair's destroy and the new pair's create both stay inside the SDK
+  until released, and the loop must still service 20 more boundaries,
+  bounded by `wait_for`. A grid-side wait of any kind (`recv` instead of
+  `try_recv`, a `join` in `release`, a lock held across the SDK call) stalls
+  it and fails the wait, with no timing threshold. The stop-path test holds
+  the create the same way.
 - NEVER assert the rule with a wall-time threshold. The coverage job runs the
   tests under tarpaulin's ptrace, where a thread can stall for a long time on
   a breakpoint.
   - The loop test's clock is paced virtual time (`PacedClock`: every wait
-    really sleeps, but only the waits advance it). It still spans ~15
-    boundaries per 500 ms create, and it can never resync on a stall.
+    really sleeps, but only the waits advance it). So it can never resync on
+    a stall. That makes its own "no resync / contiguous" checks structural:
+    the `set_held` phase is what proves the grid does not wait.
   - Timed durations are only ever lower bounds (≥ 400 ms for the mock's
     500 ms).
   - Every wait is bounded (`wait_for`, 10 s), so a hang fails instead of

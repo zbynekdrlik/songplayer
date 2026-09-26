@@ -26,14 +26,15 @@
 //! `MockNdiReceiveBackend` (`receive_mock.rs`, `sp_ndi::test_util`) records the
 //! calls for Linux tests. The safe RAII wrapper is `receiver::NdiFrameSync`.
 
-use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char};
 use std::ptr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tracing::{debug, info, warn};
 
 use crate::error::NdiError;
+use crate::handle_table::HandleTable;
 use crate::ndi_sdk::NdiLib;
 use crate::types::{NDIlib_find_create_t, NDIlib_source_t};
 
@@ -216,6 +217,11 @@ pub(crate) struct RecvFns {
 /// an unknown / destroyed id is a no-op (an empty frame, `0`, nothing freed).
 /// Use it through `receiver::NdiFrameSync`, which owns the handles and frees
 /// every captured frame.
+///
+/// Calls on DIFFERENT handles must never wait for each other: the NDI input
+/// creates and destroys its receivers on helper threads while its grid thread
+/// captures from the live one (#212 follow-up), so a slow destroy of the old
+/// pair must not hold up a capture of the new one.
 pub trait NdiReceiveBackend: Send + Sync {
     /// The names (`"MACHINE (stream)"`) of the NDI sources visible now, after
     /// waiting up to `wait_ms` for the network to be discovered.
@@ -257,25 +263,25 @@ pub trait NdiReceiveBackend: Send + Sync {
 // ---------------------------------------------------------------------------
 
 /// A raw SDK pointer as a `Send` handle-table entry. Touched only through the
-/// SDK, under the table lock.
+/// SDK, under its own handle's lock.
 #[derive(Clone, Copy)]
 struct Raw(usize);
-
-#[derive(Default)]
-struct Handles {
-    next: usize,
-    recv: HashMap<usize, Raw>,
-    fs: HashMap<usize, Raw>,
-}
 
 /// Production [`NdiReceiveBackend`] on the process's one [`NdiLib`] (the same
 /// library the senders use — `NDIlib_initialize` runs once per process).
 pub struct RealNdiReceiveBackend {
     lib: Arc<NdiLib>,
     fns: RecvFns,
-    /// Every SDK call runs under this lock: a destroy can never race a capture
-    /// on the same instance (one input thread + the rare config-task find).
-    handles: Mutex<Handles>,
+    /// Handle ids, shared by both tables (a receiver and a FrameSync never
+    /// get the same id).
+    next: AtomicUsize,
+    /// One lock PER receiver and PER FrameSync (the #147 round 11
+    /// `HandleTable`). Every SDK call holds its own instance's lock only, so a
+    /// destroy can never race a capture on the SAME instance, while a slow
+    /// create / destroy (~0.5 s on the box, run on the input's helper threads)
+    /// never holds up a capture on ANOTHER instance (#212 follow-up).
+    recv: HandleTable<Raw>,
+    fs: HandleTable<Raw>,
 }
 
 impl RealNdiReceiveBackend {
@@ -287,13 +293,15 @@ impl RealNdiReceiveBackend {
         Some(Self {
             lib,
             fns,
-            handles: Mutex::new(Handles::default()),
+            next: AtomicUsize::new(0),
+            recv: HandleTable::new(),
+            fs: HandleTable::new(),
         })
     }
 
     #[cfg_attr(test, mutants::skip)] // reached only from the FFI methods below
-    fn lock(&self) -> std::sync::MutexGuard<'_, Handles> {
-        self.handles.lock().unwrap_or_else(|p| p.into_inner())
+    fn next_id(&self) -> usize {
+        self.next.fetch_add(1, Ordering::Relaxed) + 1
     }
 }
 
@@ -357,17 +365,16 @@ impl NdiReceiveBackend for RealNdiReceiveBackend {
             allow_video_fields: false,
             p_ndi_recv_name: name.as_ptr(),
         };
-        let mut h = self.lock();
-        // SAFETY: `create` and its strings outlive the call.
+        // SAFETY: `create` and its strings outlive the call. No lock: the new
+        // instance is not shared with anyone until it is inserted below.
         let recv = unsafe { (self.fns.recv_create_v3)(&create) };
         if recv.is_null() {
             return Err(NdiError::ReceiveFailed(
                 "NDIlib_recv_create_v3 returned null",
             ));
         }
-        h.next += 1;
-        let id = h.next;
-        h.recv.insert(id, Raw(recv as usize));
+        let id = self.next_id();
+        self.recv.insert(id, Raw(recv as usize));
         info!(
             source = source_name,
             recv = id,
@@ -378,59 +385,56 @@ impl NdiReceiveBackend for RealNdiReceiveBackend {
 
     #[cfg_attr(test, mutants::skip)]
     fn recv_destroy(&self, recv: usize) {
-        let mut h = self.lock();
-        if let Some(Raw(p)) = h.recv.remove(&recv) {
-            // SAFETY: a live receiver, removed from the table so never reused.
+        self.recv.remove_with(recv, |Raw(p)| {
+            // SAFETY: a live receiver, taken out of its slot (never reused)
+            // under that slot's lock, which waits for a call in flight.
             unsafe { (self.fns.recv_destroy)(p as *mut NDIlib_recv_instance_t) };
             debug!(recv, "ndi input: receiver destroyed");
-        }
+        });
     }
 
     #[cfg_attr(test, mutants::skip)]
     fn recv_connections(&self, recv: usize) -> i32 {
-        let h = self.lock();
-        match h.recv.get(&recv) {
-            // SAFETY: a live receiver (the table lock keeps it alive).
-            Some(Raw(p)) => unsafe {
-                (self.fns.recv_get_no_connections)(*p as *mut NDIlib_recv_instance_t)
-            },
-            None => 0,
-        }
+        self.recv
+            .with(recv, |Raw(p)| {
+                // SAFETY: a live receiver (its slot lock keeps it alive).
+                unsafe { (self.fns.recv_get_no_connections)(*p as *mut NDIlib_recv_instance_t) }
+            })
+            .unwrap_or(0)
     }
 
     #[cfg_attr(test, mutants::skip)]
     fn framesync_create(&self, recv: usize) -> Result<usize, NdiError> {
-        let mut h = self.lock();
-        let Some(Raw(r)) = h.recv.get(&recv).copied() else {
-            return Err(NdiError::ReceiveFailed("unknown receiver"));
-        };
-        // SAFETY: a live receiver.
-        let fs = unsafe { (self.fns.framesync_create)(r as *mut NDIlib_recv_instance_t) };
+        let fs = self
+            .recv
+            .with(recv, |Raw(r)| {
+                // SAFETY: a live receiver (its slot lock keeps it alive).
+                unsafe { (self.fns.framesync_create)(*r as *mut NDIlib_recv_instance_t) }
+            })
+            .ok_or(NdiError::ReceiveFailed("unknown receiver"))?;
         if fs.is_null() {
             return Err(NdiError::ReceiveFailed(
                 "NDIlib_framesync_create returned null",
             ));
         }
-        h.next += 1;
-        let id = h.next;
-        h.fs.insert(id, Raw(fs as usize));
+        let id = self.next_id();
+        self.fs.insert(id, Raw(fs as usize));
         Ok(id)
     }
 
     #[cfg_attr(test, mutants::skip)]
     fn framesync_destroy(&self, fs: usize) {
-        let mut h = self.lock();
-        if let Some(Raw(p)) = h.fs.remove(&fs) {
-            // SAFETY: a live FrameSync, removed from the table.
+        self.fs.remove_with(fs, |Raw(p)| {
+            // SAFETY: a live FrameSync, taken out of its slot (never reused)
+            // under that slot's lock, which waits for a capture in flight.
             unsafe { (self.fns.framesync_destroy)(p as *mut NDIlib_framesync_instance_t) };
-        }
+        });
     }
 
     #[cfg_attr(test, mutants::skip)]
     fn framesync_capture_video(&self, fs: usize) -> NDIlib_video_frame_v2_recv_t {
         let mut frame = NDIlib_video_frame_v2_recv_t::empty();
-        let h = self.lock();
-        if let Some(Raw(p)) = h.fs.get(&fs) {
+        self.fs.with(fs, |Raw(p)| {
             // SAFETY: a live FrameSync; `frame` is a valid out-pointer.
             unsafe {
                 (self.fns.framesync_capture_video)(
@@ -439,19 +443,18 @@ impl NdiReceiveBackend for RealNdiReceiveBackend {
                     FRAME_FORMAT_TYPE_PROGRESSIVE,
                 )
             };
-        }
+        });
         frame
     }
 
     #[cfg_attr(test, mutants::skip)]
     fn framesync_free_video(&self, fs: usize, frame: &mut NDIlib_video_frame_v2_recv_t) {
-        let h = self.lock();
-        if let Some(Raw(p)) = h.fs.get(&fs) {
+        self.fs.with(fs, |Raw(p)| {
             // SAFETY: `frame` was returned by this FrameSync and not freed yet.
             unsafe {
                 (self.fns.framesync_free_video)(*p as *mut NDIlib_framesync_instance_t, frame)
             };
-        }
+        });
     }
 
     #[cfg_attr(test, mutants::skip)]
@@ -463,8 +466,7 @@ impl NdiReceiveBackend for RealNdiReceiveBackend {
         samples: i32,
     ) -> NDIlib_audio_frame_v2_t {
         let mut frame = NDIlib_audio_frame_v2_t::empty();
-        let h = self.lock();
-        if let Some(Raw(p)) = h.fs.get(&fs) {
+        self.fs.with(fs, |Raw(p)| {
             // SAFETY: a live FrameSync; `frame` is a valid out-pointer.
             unsafe {
                 (self.fns.framesync_capture_audio)(
@@ -475,31 +477,30 @@ impl NdiReceiveBackend for RealNdiReceiveBackend {
                     samples,
                 )
             };
-        }
+        });
         frame
     }
 
     #[cfg_attr(test, mutants::skip)]
     fn framesync_free_audio(&self, fs: usize, frame: &mut NDIlib_audio_frame_v2_t) {
-        let h = self.lock();
-        if let Some(Raw(p)) = h.fs.get(&fs) {
+        self.fs.with(fs, |Raw(p)| {
             // SAFETY: `frame` was returned by this FrameSync and not freed yet.
             unsafe {
                 (self.fns.framesync_free_audio)(*p as *mut NDIlib_framesync_instance_t, frame)
             };
-        }
+        });
     }
 
     #[cfg_attr(test, mutants::skip)]
     fn framesync_audio_queue_depth(&self, fs: usize) -> i32 {
-        let h = self.lock();
-        match h.fs.get(&fs) {
-            // SAFETY: a live FrameSync.
-            Some(Raw(p)) => unsafe {
-                (self.fns.framesync_audio_queue_depth)(*p as *mut NDIlib_framesync_instance_t)
-            },
-            None => 0,
-        }
+        self.fs
+            .with(fs, |Raw(p)| {
+                // SAFETY: a live FrameSync (its slot lock keeps it alive).
+                unsafe {
+                    (self.fns.framesync_audio_queue_depth)(*p as *mut NDIlib_framesync_instance_t)
+                }
+            })
+            .unwrap_or(0)
     }
 }
 
