@@ -17,12 +17,15 @@ use tracing::{debug, error, info, warn};
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::{PacingStats, PlaybackStateLabel};
 use crate::playback::pacer::{
-    PacedFrame, Pacer, ServiceOutcome, Standby, open_paced_decoder, plan_sleep_100ns,
+    PacedFrame, Pacer, PrerollGate, ServiceOutcome, Standby, StandbyBlack, open_paced_decoder,
+    plan_sleep_100ns,
 };
 use crate::playback::pacer_queue::{ProducerAction, SharedQueue};
 use crate::playback::pipeline::{
     DecodeResult, PipelineCommand, PipelineEvent, should_run_heartbeat,
 };
+// The song-start pre-roll's standby black: the idle fill's 1080p size (#147).
+use crate::playback::pipeline_paced_idle::{IDLE_H as STANDBY_H, IDLE_W as STANDBY_W};
 use crate::playback::pipeline_paced_submit::{
     HandoffSink, SharedHandoff, StopOnPanic, emit_heartbeat_paced, run_submit_consumer,
 };
@@ -426,35 +429,10 @@ pub(crate) fn decode_and_send_paced(
             .expect("spawn paced decode producer thread")
     };
 
-    // Block until the producer has opened the decoder and reported the duration
-    // (or an open error). A dead producer (Disconnected) is an open failure.
-    let (duration_ms, source_fps) = match open_rx.recv() {
-        Ok(Ok(pair)) => pair,
-        Ok(Err(msg)) => {
-            let _ = producer.join();
-            return DecodeResult::Error(msg);
-        }
-        Err(_) => {
-            let _ = producer.join();
-            return DecodeResult::Error("paced decode producer exited before open".to_string());
-        }
-    };
-    let _ = event_tx.send((playlist_id, PipelineEvent::Started { duration_ms }));
-
-    // Genlock path: NO `set_frame_rate` — emission is on the fixed integer grid
-    // the submitter already carries (GENLOCK_GRID_FPS/1, camera-box#1294 §2/§3).
-
-    // Anchor the wall grid at the first boundary after now (play/seek origin).
-    pacer.anchor();
-
-    // Baseline for the per-song summary (#147 lane 3, change 4): the pacer's
-    // counters accumulate across songs for the health doc, so the summary
-    // reports this song's DELTAS from here.
-    let summary_base = pacer.stats();
-    let song_start = Instant::now();
-
-    let mut last_decoded_ms: u64 = start_position_ms.unwrap_or(0);
-    let mut last_position_report = Instant::now();
+    // The pre-roll's standby black (#147 song-start hole), taken before the
+    // submit thread borrows the submitter: the SAME cached NV12 black as the
+    // idle fill.
+    let black = submitter.standby_black_nv12(STANDBY_W, STANDBY_H);
 
     // #168 output-side split: the NDI submit runs on a dedicated thread fed by a
     // BOUNDED handoff, so a `send_video_async` stall never lands as a late
@@ -480,6 +458,62 @@ pub(crate) fn decode_and_send_paced(
         // re-notifies.
         let _stop_guard = StopOnPanic::new(handoff_ref);
         let mut sink = HandoffSink::new(handoff_ref);
+
+        // #147 song-start pre-roll (ROZHODNUTÉ 5842127369): while the producer
+        // opens the decoder and decodes the first frame, EVERY boundary still
+        // carries the standby pair (black + one silent block) through this sink.
+        // Only when the decoder has opened AND its first frame is buffered (or it
+        // hit EOS / died) does `preroll` anchor the song's grid, so the first
+        // frame lands on the very next boundary: no hole at idle→play,
+        // stop→play or song end→next song. A failed open ends the pre-roll at
+        // once. Commands queued meanwhile are serviced by the emit loop below.
+        let mut gate = PrerollGate::pending();
+        let opened = pacer.preroll(
+            StandbyBlack {
+                width: STANDBY_W,
+                height: STANDBY_H,
+                stride: STANDBY_W,
+                video: &black,
+            },
+            &mut sink,
+            || {
+                gate.poll(
+                    || match open_rx.try_recv() {
+                        Ok(result) => Some(result),
+                        Err(TryRecvError::Empty) => None,
+                        Err(TryRecvError::Disconnected) => {
+                            Some(Err("paced decode producer exited before open".to_string()))
+                        }
+                    },
+                    || shared.is_primed() || producer.is_finished(),
+                )
+            },
+            sleep_to_boundary,
+        );
+        let (duration_ms, source_fps) = match opened {
+            Ok(pair) => pair,
+            Err(msg) => {
+                // Stop + join the submit thread (it flushes); the producer is
+                // stopped + joined after the scope.
+                handoff_ref.stop();
+                let _ = submit_join.join();
+                return DecodeResult::Error(msg);
+            }
+        };
+        let _ = event_tx.send((playlist_id, PipelineEvent::Started { duration_ms }));
+
+        // Genlock path: NO `set_frame_rate` — emission is on the fixed integer
+        // grid the submitter already carries (GENLOCK_GRID_FPS/1,
+        // camera-box#1294 §2/§3). `preroll` anchored the grid.
+
+        // Baseline for the per-song summary (#147 lane 3, change 4): the pacer's
+        // counters accumulate across songs for the health doc, so the summary
+        // reports this song's DELTAS from here.
+        let summary_base = pacer.stats();
+        let song_start = Instant::now();
+
+        let mut last_decoded_ms: u64 = start_position_ms.unwrap_or(0);
+        let mut last_position_report = Instant::now();
 
         // The emit loop returns the song's outcome (the EOS audio tail already
         // left as a standby boundary's block, #147).

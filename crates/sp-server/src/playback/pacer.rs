@@ -897,6 +897,11 @@ impl Pacer {
 #[path = "pacer_prepare.rs"]
 mod pacer_prepare;
 
+// The song-start pre-roll: standby pairs until the decoder is ready (#147).
+#[path = "pacer_preroll.rs"]
+mod pacer_preroll;
+pub use pacer_preroll::{PrerollGate, StandbyBlack};
+
 // Media-time A/V alignment of the paced audio (#148 design v2) + the paced
 // decoder's audio read-ahead (#148 v4).
 #[path = "pacer_av_align.rs"]
@@ -926,3 +931,7 @@ mod pacer_tests_mutants;
 #[cfg(test)]
 #[path = "pacer_tests_standby.rs"]
 mod pacer_tests_standby;
+
+#[cfg(test)]
+#[path = "pacer_tests_preroll.rs"]
+mod pacer_tests_preroll;

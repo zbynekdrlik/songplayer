@@ -39,8 +39,8 @@ use crate::playback::submitter::FrameSubmitter;
 /// The idle/no-song standby resolution (1080p). The idle black frame is built
 /// ONCE per pipeline (cached in the `FrameSubmitter`) and submitted by shared
 /// reference every boundary (#203, #147).
-const IDLE_W: u32 = 1920;
-const IDLE_H: u32 = 1080;
+pub(crate) const IDLE_W: u32 = 1920;
+pub(crate) const IDLE_H: u32 = 1080;
 
 /// The outer-loop idle wait (no song loaded). With `genlock_pacing` ON, fill
 /// every grid boundary with black + silence through the #168 submit thread until
