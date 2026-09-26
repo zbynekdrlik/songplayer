@@ -115,3 +115,8 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 `MockNdiBackend`: source A frames are 4×2 NV12, B 8×2, the program's standby
 black 2×2, so the `send_video_async(…,WxH,…)` call strings name the owner of
 each boundary. Keep that pattern for any new case.
+
+- **Mock call-log gotcha (CI fail 26.9.):** a test that asserts the mock sender's LAST
+  call (e.g. `send_video_flush`) must keep the owning output alive past the assertion —
+  a thread closure that drops it appends `send_destroy` after the flush. Return the output
+  from the thread (`let _out = thread.join().unwrap();`).
