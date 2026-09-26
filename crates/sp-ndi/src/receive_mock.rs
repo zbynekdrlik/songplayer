@@ -9,15 +9,17 @@
 //! create / destroy / capture / free, so a test can prove the RAII wrapper
 //! frees each capture and tears down in SDK order (FrameSync, then receiver).
 //! `recv_create` / `recv_destroy` can be made to block like the real SDK's
-//! (~0.5 s on the box, #212 comment 5849047061) with [`set_blocking`], and
-//! every call records the thread that made it ([`calls_by_thread`]), so a test
-//! can prove WHICH thread ran an SDK create or destroy.
+//! (~0.5 s on the box, #212 comment 5849047061) with [`set_blocking`], or held
+//! for as long as the test wants with [`set_held`]. Every call records the
+//! thread that made it ([`calls_by_thread`]), so a test can prove WHICH thread
+//! ran an SDK create or destroy.
 //!
 //! [`set_blocking`]: MockNdiReceiveBackend::set_blocking
+//! [`set_held`]: MockNdiReceiveBackend::set_held
 //! [`calls_by_thread`]: MockNdiReceiveBackend::calls_by_thread
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicUsize, Ordering};
+use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
 use crate::error::NdiError;
@@ -70,6 +72,9 @@ pub struct MockNdiReceiveBackend {
     outstanding_audio: AtomicI64,
     /// How long `recv_create` / `recv_destroy` block (zero = not at all).
     blocking: Mutex<(Duration, Duration)>,
+    /// While `true`, `recv_create` / `recv_destroy` wait for `released`.
+    held: Mutex<bool>,
+    released: Condvar,
 }
 
 impl MockNdiReceiveBackend {
@@ -112,6 +117,19 @@ impl MockNdiReceiveBackend {
     /// for `destroy` (after it is recorded), like a slow SDK.
     pub fn set_blocking(&self, create: Duration, destroy: Duration) {
         *self.blocking.lock().unwrap() = (create, destroy);
+    }
+
+    /// While `held`, every `recv_create` / `recv_destroy` waits (after it is
+    /// recorded) until `set_held(false)`: an SDK call that takes exactly as
+    /// long as the test wants, with no timing threshold.
+    pub fn set_held(&self, held: bool) {
+        *self.held.lock().unwrap() = held;
+        self.released.notify_all();
+    }
+
+    fn wait_while_held(&self) {
+        let held = self.held.lock().unwrap();
+        let _released = self.released.wait_while(held, |held| *held).unwrap();
     }
 
     /// Make every `recv_create` panic (after it is recorded), like a helper
@@ -172,6 +190,7 @@ impl NdiReceiveBackend for MockNdiReceiveBackend {
 
     fn recv_create(&self, source_name: &str, recv_name: &str) -> Result<usize, NdiError> {
         self.log(format!("recv_create({source_name},{recv_name})"));
+        self.wait_while_held();
         let block = self.blocking.lock().unwrap().0;
         std::thread::sleep(block);
         if self.panic_recv_create.load(Ordering::SeqCst) {
@@ -185,6 +204,7 @@ impl NdiReceiveBackend for MockNdiReceiveBackend {
 
     fn recv_destroy(&self, recv: usize) {
         self.log(format!("recv_destroy({recv})"));
+        self.wait_while_held();
         let block = self.blocking.lock().unwrap().1;
         std::thread::sleep(block);
     }

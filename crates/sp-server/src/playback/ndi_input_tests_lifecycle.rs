@@ -216,8 +216,12 @@ fn the_new_sources_frames_appear_once_the_connect_completes() {
         (4, 2),
         "three old frames, then the new one (repeated twice)"
     );
-    wait_for("the connect is timed", || {
-        rig.status().last_connect_ms.is_some()
+    // The rig's own first connect already set `last_connect_ms` (~0 ms), so
+    // wait for CAM's timing, not just for any value.
+    wait_for("CAM's connect is timed", || {
+        rig.status()
+            .last_connect_ms
+            .is_some_and(|ms| ms >= BLOCK_MS_AT_LEAST)
     });
     let connect_ms = rig.status().last_connect_ms.unwrap();
     assert!(
@@ -237,10 +241,16 @@ fn connects_pending_reads_1_during_the_connect_and_0_after() {
     expected.extend(vec![1; window]);
     expected.extend(vec![0; 3]);
     assert_eq!(trace.pending, expected);
-    wait_for("the connect and the old receiver's close are timed", || {
-        let st = rig.status();
-        st.last_connect_ms.is_some() && st.last_close_ms.is_some()
-    });
+    // The rig's own first connect already set `last_connect_ms` (~0 ms), so
+    // wait for CAM's timing, not just for any value.
+    wait_for(
+        "CAM's connect and the old receiver's close are timed",
+        || {
+            let st = rig.status();
+            st.last_connect_ms.is_some_and(|ms| ms >= BLOCK_MS_AT_LEAST)
+                && st.last_close_ms.is_some()
+        },
+    );
     let json = serde_json::to_value(rig.status()).unwrap();
     assert_eq!(json["connects_pending"], 0);
     let connect_ms = json["last_connect_ms"].as_u64().unwrap();
@@ -331,16 +341,17 @@ fn a_second_change_during_a_pending_connect_drops_the_first_result() {
 #[test]
 fn the_stop_path_abandons_a_pending_connect_and_its_helper_closes_what_it_made() {
     let mut rig = raw_rig(source_frames(30, 30), vec![Some(0)]);
-    rig.mock.set_blocking(BLOCK, BLOCK);
+    rig.mock.set_held(true); // the SDK create does not return until released
     let s = step(&mut rig, 1);
     assert_eq!((s.picture, s.pending), (STANDBY, 1), "the connect runs");
-    rig.input.disconnect();
-    assert!(
-        !rig.mock.calls().iter().any(|c| c == "framesync_create(1)"),
-        "the stop path returned while the 500 ms create still ran"
-    );
+    rig.input.disconnect(); // returns while the create is still held
     assert_eq!(rig.status().connects_pending, 0);
     assert!(rig.input.sync.is_none());
+    assert!(
+        !rig.mock.calls().iter().any(|c| c == "framesync_create(1)"),
+        "the create was still running when the stop path returned"
+    );
+    rig.mock.set_held(false);
     wait_for("the helper closes the pair nobody took", || {
         rig.mock.calls().last().map(String::as_str) == Some("recv_destroy(1)")
     });
@@ -536,7 +547,25 @@ fn a_source_change_on_program_offers_one_pair_per_boundary_off_the_grid_thread()
         .unwrap();
     let boundaries = || shared.status(&cam()).boundaries;
     wait_for("10 boundaries on the first source", || boundaries() >= 10);
+    // Hold the SDK: the old receiver's destroy and the new one's create both
+    // stay inside the SDK until released. The grid must keep servicing every
+    // boundary meanwhile — any grid-side wait on them would stall it, and the
+    // bounded wait below would fail. No timing threshold.
+    mock.set_held(true);
     shared.set_settings(cam());
+    wait_for("both the close and the connect are inside the SDK", || {
+        let calls = mock.calls();
+        calls.iter().any(|c| c == "recv_destroy(1)")
+            && calls
+                .iter()
+                .any(|c| c == "recv_create(CAM (2),SongPlayer program input)")
+    });
+    let held_at = boundaries();
+    wait_for("20 boundaries while the SDK is held", || {
+        boundaries() >= held_at + 20
+    });
+    assert_eq!(shared.status(&cam()).connects_pending, 1);
+    mock.set_held(false);
     wait_for("the new pair is created", || {
         mock.calls().iter().any(|c| c == "framesync_create(3)")
     });
@@ -588,7 +617,10 @@ fn a_source_change_on_program_offers_one_pair_per_boundary_off_the_grid_thread()
         vec![4, 2, 4],
         "the first source, standby while the connect runs, the new source: {segments:?}"
     );
-    assert!(segments[0].1 >= 10 && segments[2].1 >= 10, "{segments:?}");
+    assert!(
+        segments[0].1 >= 10 && segments[1].1 >= 20 && segments[2].1 >= 10,
+        "the standby run spans at least the 20 held boundaries: {segments:?}"
+    );
     let health = bus.status().health;
     assert_eq!(
         (health.forwarded, health.filled, health.resyncs),

@@ -355,3 +355,49 @@ fn the_mock_can_make_recv_create_panic() {
     mock.set_panic_create(false);
     assert!(NdiFrameSync::connect(mock.clone(), "A (b)", "SP-input").is_ok());
 }
+
+#[test]
+fn the_mock_holds_the_receiver_create_and_destroy_until_released() {
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+    let mock = Arc::new(MockNdiReceiveBackend::default());
+    let until_recorded = |call: &str| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !mock.calls().iter().any(|c| c == call) {
+            assert!(Instant::now() < deadline, "{call} never started");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    // A held destroy waits until released.
+    let sync = NdiFrameSync::connect(mock.clone(), "A (b)", "SP-input").unwrap();
+    mock.set_held(true);
+    let (closed_tx, closed_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        drop(sync);
+        closed_tx.send(()).unwrap();
+    });
+    until_recorded("recv_destroy(1)");
+    assert!(
+        closed_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+        "the destroy is held"
+    );
+    mock.set_held(false);
+    closed_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("released");
+    // A held create waits until released.
+    mock.set_held(true);
+    let (opened_tx, opened_rx) = mpsc::channel();
+    let opener = mock.clone();
+    std::thread::spawn(move || {
+        let ok = NdiFrameSync::connect(opener, "C (d)", "SP-input").is_ok();
+        opened_tx.send(ok).unwrap();
+    });
+    until_recorded("recv_create(C (d),SP-input)");
+    assert!(
+        opened_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+        "the create is held"
+    );
+    mock.set_held(false);
+    assert!(opened_rx.recv_timeout(Duration::from_secs(10)).unwrap());
+}
