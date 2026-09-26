@@ -1074,28 +1074,55 @@ Tests:
     contiguous;
   - the standby stamp equals `resolve_emit_boundary`'s stamp and a playing
     repeat's stamp;
-  - idle→play keeps the stamp and audio cadence contiguous (the pacer-level
-    model; the production song-start hole below is outside the pacer);
+  - idle→play keeps the stamp and audio cadence contiguous;
   - a song end sends its EOS tail as the next standby block: 6 boundaries →
     6 blocks. With nothing buffered nothing is held, and a new song drops a
     held tail.
 - `submitter_tests_standby.rs`: `send_standby_black` for both paths, and the
   cached NV12 black.
+- `pacer_tests_preroll.rs`:
+  - a slow decoder open is filled with standby pairs (b(1)…b(9) contiguous,
+    the song from the boundary after readiness);
+  - a decoder that is ready at once starts on the very next boundary;
+  - song end → next song keeps one pair per boundary;
+  - `PrerollGate` reads the open result once, waits for the first frame, and
+    ends at once on a failed open.
 
 Never "fix" a song-start re-latch by dropping the standby audio, or by sending
 standby from another thread or in another format. That re-creates the cadence
 change.
 
-**Still open (issue #147 comment 5841859151).** A song START still leaves a
-short hole:
+**The song-start pre-roll (ROZHODNUTÉ 5842127369).** A song start used to
+leave a hole. The Play command stopped the idle fill, and
+`decode_and_send_paced` then blocked on `open_rx` while the decoder opened.
+Only then did it anchor, and the first boundaries could still be `Starved`.
+Now:
 
-- the Play command stops the idle fill;
-- `decode_and_send_paced` then blocks on `open_rx` while the decoder opens;
-- it anchors, and the first boundaries can be `Starved`.
+- **Submit thread first.** `decode_and_send_paced` starts the #168 submit
+  thread BEFORE the open.
+- **`Pacer::preroll` fills every boundary** (`pacer_preroll.rs`). It services
+  each boundary with the standby pair (the cached NV12 black + one silent
+  block) through the same `HandoffSink`.
+- **One readiness check per slot.** `preroll` asks `PrerollGate::poll` right
+  before each wait: has the decoder opened (the `open_rx` result, read once)
+  AND is its first frame buffered (`SharedQueue::is_primed`: a frame or EOS,
+  never popping; or the producer died)?
+- **Anchor on readiness.** When the gate says yes, it calls `anchor()`, so the
+  song's first frame lands on the boundary that wait was for.
+- **A failed open ends the pre-roll at once:** stop + join the submit thread,
+  then `DecodeResult::Error`.
+- **Commands are held.** Commands queued during the pre-roll wait for the emit
+  loop, the same as the old blocking open wait.
+- **Coverage.** This covers idle→play, stop→play and song end→next song
+  (after the EOS-tail boundary). Every boundary carries one audio+video pair.
+- **Where it runs.** The pre-roll logic is pure and Linux-tested
+  (`pacer_tests_preroll.rs`, `pacer_queue_tests.rs`); only the wiring in
+  `pipeline_paced.rs` is Windows glue.
 
-The same hole follows a Stop or a song end when a Play is already queued: no
-idle fill runs in between, so the receiver holds the last frame for the time
-the decoder takes to open.
+**Known narrow case.** A Pause queued during the pre-roll is applied only once
+the song has anchored. `FrozenLast` then has no frame to hold, so those paused
+boundaries are `Starved` until Resume. This is pre-existing: the old blocking
+open behaved the same way.
 
 **Box acceptance** is read from camera-box's audit:
 
