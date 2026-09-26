@@ -7,6 +7,8 @@ paths:
   - "crates/sp-server/src/playback/pacer*.rs"
   - "crates/sp-server/src/playback/audio_grid*.rs"
   - "crates/sp-server/src/playback/submitter*.rs"
+  - "crates/sp-server/src/playback/paced_*.rs"
+  - "crates/sp-server/src/playback/pipeline_paced*.rs"
   - "crates/sp-server/src/playback/proc_mem*.rs"
   - "crates/sp-server/src/playback/loop_stats.rs"
   - "crates/sp-server/src/playback/frame_buf.rs"
@@ -86,12 +88,13 @@ paths:
   ~sub-ms NV12 `to_vec()` copy, so the stall is `send_video_async` blocking on
   the prior async frame (the SDK send thread starved by the resident child), NOT
   the copy → the submit-thread fix, never a pre-converted pool. The emit thread
-  now emits through `HandoffSink` (`pipeline_paced_submit.rs`): it hands the
+  now emits through `HandoffSink` (`paced_output.rs`): it hands the
   stamped frame to a BOUNDED handoff (`submit_handoff.rs::SubmitQueue`, depth
   `SUBMIT_HANDOFF_BOUND=2`) in ~µs and stays on the grid; a dedicated submit
-  thread (`run_submit_consumer`) owns the `FrameSubmitter` for the song
-  (borrowed via `std::thread::scope` — SDK per-instance affinity + the async
-  double-buffer holdover stay single-threaded) and does the blocking
+  thread owns the submitting `FrameSubmitter` (SDK per-instance affinity + the
+  async double-buffer holdover stay single-threaded; since #147 it lives for
+  the whole pipeline — see "The paced output services every boundary between
+  scopes" below) and does the blocking
   `send_audio`+`send_video_async`. It works BECAUSE median submit (25 ms) < the
   33.3 ms grid slot: the submit thread's ~40 fps capacity vs 30 fps demand drains
   the p99 spikes out of a shallow queue. `late_frames` is measured HONESTLY at
@@ -103,8 +106,9 @@ paths:
   pacer (`/api/v1/ndi/health` shape unchanged); the paced heartbeat reads a
   submit-side snapshot (`emit_heartbeat_paced`) since the submit thread owns the
   submitter. The pure decisions (`submit_handoff.rs`) are Linux-tested +
-  mutation-scored; the `SharedHandoff`/consumer glue (`pipeline_paced_submit.rs`,
-  `#[cfg(windows)]`) is `mutants::skip`, box-verified. The NON-paced
+  mutation-scored; the `SharedHandoff` + consumer are cross-platform in
+  `paced_output.rs` (Linux-tested over `MockNdiBackend`; only the blocking wait
+  and the thread lifecycle are `mutants::skip`). The NON-paced
   `pipeline::decode_and_send` path is untouched. Acceptance = box test 6
   (`genlock_pacing=true`, stems child resident, 60 s): `late_frames` < 1 % of
   `seq`, `resyncs`/`dropped`/`audio.underruns` 0, `lock_state=LOCKED`; then the
@@ -118,7 +122,7 @@ paths:
   load-induced → policy) this round PLUMBS the per-frame SDK cost onto the paced
   heartbeat, plumbing only, no behaviour change. The submit thread already timed
   every `send_video_async` into `FrameSubmitter.submit_times` (the round-3
-  `loop_stats::SubmitHist`) but never surfaced it; now `run_submit_consumer`
+  `loop_stats::SubmitHist`) but never surfaced it; now the submit consumer
   drains that SAME histogram on its ~1 s connection-poll cadence and folds the
   `(max, p99)` worst-of into the handoff snapshot (pure
   `submit_handoff::paced_submit_snapshot` + `PacedSubmitStats`), the heartbeat
@@ -906,14 +910,36 @@ Now:
 - **Bounded update.** A resample measures `delta = sample.utc − wall(sample.instant)`.
   - |delta| ≤ 1 ms (`ANCHOR_MAX_STEP_100NS`) applies as-is (normal slewing,
     ≈ 313 µs per 3.33 s resample at 94 ppm).
-  - Trade-off (design record): a genuine large UTC step slews at 1 ms per
-    resample (~300 ppm), so 500 ms takes ~28 min. `wall_anchor_slewed_us`
-    growing is the signal; the timecodes lag the true grid until it converges.
   - Beyond that only ±1 ms applies, and a `wallclock: re-anchor delta over 1 ms`
     WARN logs `delta_us`, `bracket_us`, `applied_us` and `carry_us`.
   - The remainder is NOT carried explicitly: the next resample re-measures it.
     Adding the old carry would count it twice.
-  - A genuine 50 ms UTC step converges in 50 resamples (~165 s, ~300 ppm).
+- **A confirmed forward step is FOLLOWED in one event (#147, design record
+  5845527884, Approach 1 (b)).** dantesync steps the fleet date by ~+50 ms about
+  every 47 min (a coordinated forward date step; backward corrections it slews
+  itself at 100 ppm), and every camera-box sender follows `CLOCK_REALTIME` at
+  once. Slewing it at 1 ms per resample kept our stamps ~300 ppm off the fleet
+  for ~2.7 min (the 26.9. 09:48 A/V take failed inside that window). The pure
+  rule is `wallclock_anchor.rs::decide_anchor_step`:
+  - a clamped FORWARD resample from a narrow bracket (not wider than
+    `ANCHOR_WIDE_BRACKET`, 200 µs) applies the bounded 1 ms and ARMS the step
+    (`PendingStep { delta, applied }`);
+  - the NEXT resample follows the rest in ONE event (`applied = delta`, no
+    clamp) when it is narrow too, still > 1 ms, and `delta₂ + applied₁` is within
+    ±1 ms of `delta₁` — the same step seen twice (~3.3–6.7 s after the step);
+  - everything else stays the ±1 ms bound: a lone outlier moves the wall 1 ms
+    and the next read holds it back out; a wide (preempted) sample never arms
+    or confirms (it breaks the chain); a backward delta never arms and is never
+    followed — it stays a ≤ 1 ms hold (`apply_anchor_step`).
+  - The follow logs INFO `wallclock: confirmed UTC step followed in one
+    re-anchor (#147)` with `delta_us` + `step_us` (the whole step).
+  - Tests: `wallclock_tests_confirm.rs` (the exact ±1 ms tolerance, wide /
+    backward / outlier / preempted-confirm cases) and
+    `wallclock_tests_anchor.rs::a_genuine_plus_50_ms_utc_step_is_followed_in_one_event_once_confirmed`.
+  - Every `WallClock` follows (the pacer walls, the submit consumer's, the
+    #209 `SP-program` sender's). Their resample phases differ, so for ≤ one
+    resample period (~3.3 s) two walls can sit one step (~1.5 slots) apart;
+    the program bus's 3-slot fill grace absorbs it (`program-bus.md`).
 - **Never backward.** A negative applied correction is a HOLD: the new anchor is
   `(instant + |applied|, wall(instant))`. The saturating read path freezes the
   wall for ≤ 1 ms, then it runs exactly on the corrected line. Never "simplify"
@@ -925,13 +951,19 @@ Now:
   - `wall_anchor_max_step_us` — the largest MEASURED |delta|, i.e. what an
     unbounded re-anchor would have stepped;
   - `wall_anchor_wide_brackets` — anchors with every attempt disturbed;
-  - `wall_anchor_slewed_us` — µs applied through clamped resamples.
+  - `wall_anchor_slewed_us` — µs applied through clamped resamples;
+  - `wall_anchor_steps_followed` — confirmed forward steps followed in one
+    event (#147);
+  - `wall_anchor_last_step_us` — the whole step of the last one followed
+    (≈ 50 000 for a dantesync fleet date step).
 
   They are on `/api/v1/ndi/health` `pacing` and on the `ndi: genlock` line.
 - **What to read on the box.** `wall_anchor_max_step_us` in the hundreds of µs
   is dantesync slewing. Tens of ms with `wall_anchor_wide_brackets` climbing
-  means preemption at anchor time, now outvoted or bounded. `slewed_us` growing
-  means real UTC steps (w32time / a dantesync re-lock).
+  means preemption at anchor time, now outvoted or bounded. `steps_followed`
+  +1 about every 47 min with `last_step_us` ≈ 50 000 is the fleet date step,
+  followed. `slewed_us` growing by more than ~1 ms per followed step means UTC
+  steps that were NOT confirmed (a backward step, or preempted resamples).
 - **Layout.** `PacingStats` lives in `playback/pacing_stats.rs` (split out of
   `ndi_health.rs` for the 1000-line cap) and is re-exported from `ndi_health`.
 
@@ -1051,11 +1083,12 @@ whatever the state:
   - `SharedHandoff`'s stop API is now just `stop()`; the queue, snapshot and
     counters are unchanged.
 - **The idle fill uses the playing path's submit thread.**
-  `pipeline_paced_idle::run_idle_wait` emits through the #168 `HandoffSink`
-  and `run_submit_consumer`, with the same shape as `decode_and_send_paced`:
-  `thread::scope`, `StopOnPanic`, then `stop()` and a join (the join
-  flushes). The heartbeat goes through `emit_heartbeat_paced`. The black
-  is `FrameSubmitter::standby_black_nv12`, built once per pipeline.
+  `pipeline_paced_idle::run_idle_wait` attaches a `PacedFeed` to the
+  pipeline's paced submit thread and emits through its `HandoffSink`, the same
+  shape as `decode_and_send_paced` (see "The paced output services every
+  boundary between scopes" below). The heartbeat goes through
+  `emit_heartbeat_paced`. The black is `FrameSubmitter::standby_black_nv12`,
+  built once per pipeline.
 - **No sync `send_video` and no BGRA on the paced path.** `run_loop_windows`
   calls `FrameSubmitter::send_standby_black`: the legacy SYNTHESIZE BGRA when
   SDK-clocked, a no-op when paced. The paced outer loop polls
@@ -1155,19 +1188,76 @@ Now:
 `_` arm. Deleting the `Wait` arm would never call `poll`, so the mutant would
 run to a 300 s TIMEOUT.
 
-**Between songs.** No boundary is serviced while the submit thread drains and
-is joined, and while the old producer is joined (its MF decoder drop).
-`decode_and_send_paced` stops the producer before the submit join, so its
-teardown overlaps that join. The next pre-roll or idle fill then catches up:
+**Between songs: see the next section.** The window between two scopes used
+to be unserviced (the old per-scope submit join + the producer join + the next
+decoder open, 51–84 ms = 1–3 skipped slots on the box, 26.9.). The next
+pre-roll's catch-up burst then overflowed the 2-deep handoff of a brand-new
+submit thread, which coalesced away a stamp — camera-box's `stamp_gap`.
 
-- a gap of ≤ 8 slots (`GENLOCK_MAX_CATCHUP_INTERVALS`, ~267 ms) is a late
-  catch-up burst, with every boundary still stamped once;
-- a gap of more than 8 slots with nothing queued RESYNCS (`resolve_emit_boundary`),
-  which is a real stamp hole.
+## The paced output services every boundary between scopes (#147, design record 5845527884)
 
-The join time is unmeasured, and the check is tracked on #147. Read the
-camera-box audit across a song change, and log the gap if it ever nears
-8 slots.
+**The rule.** A paced pipeline has ONE submit thread for its whole life
+(`paced_output.rs::PacedOutput`), never one per song or idle stretch:
+
+- **Lifetime.** `FrameSubmitter::paced_handoff` (`submitter_paced.rs`) spawns
+  it on the first paced scope and returns the same `Arc<SharedHandoff>` after
+  that. `pipeline.rs` owns the submitter by value (and is at the 1000-line
+  cap), so the thread cannot borrow it; it owns a twin `FrameSubmitter` built
+  on `NdiSender::twin()` — same backend + handle, whose `Drop` flushes but
+  never `send_destroy`s. The handle is the FIRST field of `FrameSubmitter`, so
+  it drops first: stop → drain the queue → flush → join, and only then does
+  the owning sender destroy the NDI instance. Only the twin sends async video
+  on the paced path (the owner's `send_standby_black` is a no-op there).
+- **Scopes attach, never spawn.** `decode_and_send_paced` and `run_idle_wait`
+  each hold a `PacedFeed` (RAII): `attach()` returns the output's last
+  serviced stamp and the scope's pacer calls `Pacer::continue_grid_after(last)`
+  (`pacer_preroll.rs`), so its first boundary (pre-roll or idle standby) is
+  exactly one slot after it. Dropping the feed (end of song, command queued
+  in idle, error, unwind) detaches. No flush, no join between songs.
+- **The consumer fills only while DETACHED** (`paced_grid.rs::PacedGrid`,
+  pure): once `strict_next(last_serviced) + ¼ slot` (`fill_grace_100ns`,
+  83 333 × 100 ns) passes with no job queued, it services that boundary itself
+  — the last submitted picture (else the standby black) + one silent
+  `samples_per_boundary` block in the last audio layout, stamped exactly on
+  that boundary, through the same submit + #209 program-bus path (a fill is
+  offered like a standby pair). Woken > 8 slots late, it resyncs to
+  `floor(now)` and counts the hole (WARN `paced output: > 8 boundaries went
+  unserviced between two scopes`). Each fill logs INFO `paced output:
+  serviced a boundary between two scopes`.
+- **While a pacer is attached it owns every boundary.** The consumer never
+  fills then: a fill would steal the boundary of an emit that is merely late
+  (> 8.3 ms), and the pacer's aligned audio block for it would be lost (a
+  33 ms dropout mid-song). The pacer's own catch-up and > 8-slot resync are
+  unchanged (the WARN path for a hung box).
+- **The handoff over is atomic.** A fill reserves its stamp under the handoff
+  lock (`HandoffState::next_step`), and `attach()` reads `last_serviced` under
+  the same lock, so a boundary is never serviced twice or skipped.
+- **A job at or before the last serviced stamp is never sent** (the output's
+  stamps only increase); it counts as a submit-side `dropped`.
+
+**Telemetry** (`SubmitCounters` → `merge_pacing_stats` → `PacingStats`, on
+`/api/v1/ndi/health` `pacing` and the `ndi: genlock` line):
+
+- `song_change_unserviced_slots` — grid slots nobody serviced across a
+  detach→attach window (a fill resync, or a gap before the next pacer's first
+  job). **Must read 0.**
+- `consumer_fill_pairs` — boundaries the consumer serviced itself; a few per
+  song change / idle→play is normal (the decoder open), a steady climb while a
+  song plays is not (nothing fills while attached).
+
+**Tests** (`paced_output_tests.rs`, single-threaded over `MockNdiBackend` on ONE
+settable clock; 8×2 / 12×2 song frames and a 4×2 black name each boundary's
+picture): a 3-slot decoder open at a song change, play → pause → resume →
+paused song change, and idle → play all give stamps with Δ = exactly one slot,
+the fills holding the last picture (same buffer) + silence and
+`song_change_unserviced_slots = 0`; plus the > 8-slot resync count, the attached
+pacer owning the grid, stale jobs, stop, the fill's audio layout, connection
+polling, the live thread filling on its own, and the spawn-once + drop order.
+`paced_grid_tests.rs` pins every comparison of the pure grid.
+
+**Box acceptance** (#148 A/V series): across the E2E scene cuts the
+`ndi: genlock` line reads `song_change_unserviced_slots=0`, and camera-box
+reports 0 `stamp_gap` on sp-* sources.
 
 **Box acceptance** is read from camera-box's audit:
 

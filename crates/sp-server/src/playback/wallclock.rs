@@ -205,7 +205,7 @@ impl WallClock {
                 bracket_us = sample.bracket.as_micros() as u64,
                 applied_us = to_us(step.applied_100ns),
                 carry_us = to_us(step.carry_100ns),
-                "wallclock: re-anchor delta over 1 ms — slewing it in, not stepping the wall (#147)"
+                "wallclock: re-anchor delta over 1 ms — 1 ms applied; the next resample follows the rest once it confirms the step, else slews it (#147)"
             );
         }
         let (instant, utc) = apply_anchor_step(sample.instant, wall, step.applied_100ns);

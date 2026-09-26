@@ -161,17 +161,50 @@ pub struct AnchorDecision {
 /// The confirm-then-follow anchor rule (#147, design record 5845527884,
 /// Approach 1 (b)).
 ///
-/// RED stub: every resample is the plain ±1 ms [`bounded_anchor_update`]; a
-/// confirmed step is never followed and nothing is ever pending.
+/// dantesync steps the fleet date by ~+50 ms about every 47 min, and every
+/// camera-box sender follows `CLOCK_REALTIME` at once. Slewing that step at
+/// 1 ms per resample kept our stamps ~300 ppm off the fleet for ~2.7 min. So:
+///
+/// - A resample measuring a FORWARD `delta` over 1 ms from a narrow bracket
+///   (`narrow` = not wider than [`ANCHOR_WIDE_BRACKET`]) applies the bounded
+///   1 ms and ARMS the step ([`PendingStep`]).
+/// - The NEXT resample follows the rest of it in ONE event when it is narrow
+///   too, still over 1 ms, and `delta + applied₁` lies within ±1 ms of the
+///   armed `delta₁`: the same step, seen twice.
+/// - Everything else is the plain [`bounded_anchor_update`]: a lone outlier
+///   moves the wall 1 ms and the next read holds it back out, a wide
+///   (preempted) sample never arms or confirms, and a backward correction is
+///   never followed (it stays a ≤ 1 ms hold, [`apply_anchor_step`]).
 pub fn decide_anchor_step(
-    _pending: Option<PendingStep>,
+    pending: Option<PendingStep>,
     delta_100ns: i64,
-    _narrow: bool,
+    narrow: bool,
 ) -> AnchorDecision {
+    let confirms = |p: &PendingStep| {
+        (delta_100ns + p.applied_100ns - p.delta_100ns).abs() <= ANCHOR_MAX_STEP_100NS
+    };
+    if narrow
+        && delta_100ns > ANCHOR_MAX_STEP_100NS
+        && let Some(p) = pending.filter(confirms)
+    {
+        return AnchorDecision {
+            step: AnchorStep {
+                applied_100ns: delta_100ns,
+                carry_100ns: 0,
+            },
+            followed_100ns: Some(p.applied_100ns + delta_100ns),
+            pending: None,
+        };
+    }
+    let step = bounded_anchor_update(delta_100ns);
+    let pending = (narrow && step.carry_100ns > 0).then_some(PendingStep {
+        delta_100ns,
+        applied_100ns: step.applied_100ns,
+    });
     AnchorDecision {
-        step: bounded_anchor_update(delta_100ns),
+        step,
         followed_100ns: None,
-        pending: None,
+        pending,
     }
 }
 

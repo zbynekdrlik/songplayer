@@ -126,6 +126,17 @@ fn a_gap_counts_as_unserviced_only_across_a_detach_attach_window() {
 }
 
 #[test]
+fn the_old_pacers_queued_tail_does_not_close_the_song_change_window() {
+    // b(4) is the previous pacer's last job, taken AFTER it detached.
+    let mut g = detached_after(3);
+    assert!(g.accept_job(b(4)));
+    assert_eq!(g.attach(), Some(b(4)));
+    // The next pacer's first job lands two slots late: a song-change hole.
+    assert!(g.accept_job(b(7)));
+    assert_eq!(g.unserviced_slots(), 2, "b(5) + b(6)");
+}
+
+#[test]
 fn attach_hands_the_next_pacer_the_last_serviced_stamp() {
     let mut g = detached_after(2);
     assert_eq!(g.step(b(3) + GRACE), GridStep::Fill(b(3)));

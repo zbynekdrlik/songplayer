@@ -2,7 +2,7 @@
 paths:
   - "crates/sp-server/src/playback/program_bus*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
-  - "crates/sp-server/src/playback/pipeline_paced_submit.rs"
+  - "crates/sp-server/src/playback/paced_output*.rs"
   - "crates/sp-server/src/api/program*.rs"
   - "sp-ui/src/components/program_control.rs"
   - "e2e/program-control.spec.ts"
@@ -15,8 +15,8 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 
 ## How a boundary reaches the program
 
-- The paced submit thread (`pipeline_paced_submit.rs::run_submit_consumer`)
-  copies its boundary job (`program_bus::program_copy`: an `Arc` bump of the
+- The paced submit thread (`paced_output.rs::PacedConsumer::submit`, the
+  pipeline-lifetime consumer since #147) copies its boundary job (`program_bus::program_copy`: an `Arc` bump of the
   `SharedFrame` + the one audio block) BEFORE its own submit moves the frame
   into the holdover, and offers it right AFTER that submit
   (`ProgramBus::offer(pid, job)` — it takes NO clock, see below). Only a
@@ -28,7 +28,11 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   black (#209 review finding).
 - Both the playing path and the idle fill go through that ONE submit thread,
   so an idle source offers its own #147 standby pair and a cut to it carries
-  that pair — no special case.
+  that pair — no special case. Since #147 (design record 5845527884) the
+  thread also services the boundaries BETWEEN two scopes (a song change, a
+  decoder open, idle→play) with the held picture + silence, and offers those
+  fills the same way: a cut source no longer black-fills the program at its
+  song changes.
 - The bus reaches the submit thread as a process-wide `OnceLock`
   (`program_bus::install`, done once in `PlaybackEngine::start_program`), NOT
   through `PlaybackPipeline::spawn` — `pipeline.rs` is at the 1000-line cap.
@@ -38,8 +42,12 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 ## Ownership, order, fill (all pure, `ProgramCore`)
 
 - **One clock domain: the stamps.** The API's realtime clock and a submit
-  thread's per-song `WallClock` can both sit off the pacer walls after a UTC
-  step (those slew it in at ≤ 1 ms per resample — a 1 s step takes ~55 min).
+  thread's `WallClock` can both sit off the pacer walls after a UTC step: an
+  unconfirmed step slews in at ≤ 1 ms per resample, and a CONFIRMED forward
+  step (the ~+50 ms dantesync fleet date step) is followed in one event at
+  each wall's second resample after it (#147) — the walls' resample phases
+  differ, so for ≤ ~3.3 s two walls sit up to one step (~1.5 slots) apart,
+  inside the 3-slot fill grace below.
   So: a cut is placed from the newest stamp of the program's segment sources,
   the source cut to, or the program itself (`from`; the caller's clock only
   when nothing was seen); a boundary is declared missed BY TIME only in

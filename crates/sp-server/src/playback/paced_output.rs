@@ -209,23 +209,6 @@ impl SharedHandoff {
         }
     }
 
-    /// Block until a job is available, or return `None` once stop is set AND
-    /// the queue is drained. The per-scope consumer's take (#168); it bypasses
-    /// the grid. Poison → `None`.
-    #[cfg_attr(test, mutants::skip)]
-    fn take_blocking(&self) -> Option<SubmitJob> {
-        let mut st = self.inner.lock().ok()?;
-        loop {
-            if let Some(job) = st.queue.take() {
-                return Some(job);
-            }
-            if st.stop {
-                return None;
-            }
-            st = self.not_empty.wait(st).ok()?;
-        }
-    }
-
     /// A pacer starts feeding (see [`PacedFeed`]). Returns the last serviced
     /// stamp: the pacer continues on the boundary right after it. Poison →
     /// `None` (the pacer then anchors on its own clock).
@@ -311,25 +294,6 @@ impl SharedHandoff {
             st.stop = true;
             self.not_empty.notify_all();
         }
-    }
-}
-
-/// RAII guard that signals the per-scope submit thread to stop if the emit
-/// loop UNWINDS, so `thread::scope`'s join never blocks on a parked consumer
-/// (#168 review). Idempotent with the normal-path `stop()`.
-pub struct StopOnPanic<'a> {
-    handoff: &'a SharedHandoff,
-}
-
-impl<'a> StopOnPanic<'a> {
-    pub fn new(handoff: &'a SharedHandoff) -> Self {
-        Self { handoff }
-    }
-}
-
-impl Drop for StopOnPanic<'_> {
-    fn drop(&mut self) {
-        self.handoff.stop();
     }
 }
 
@@ -590,50 +554,6 @@ pub fn run_paced_consumer<B: NdiBackend>(mut consumer: PacedConsumer<B>, handoff
         consumer.serve(handoff, step);
     }
     consumer.finish();
-}
-
-/// The per-scope NDI SUBMIT consumer thread (#168): borrows the
-/// [`FrameSubmitter`] via the emit thread's `thread::scope`, drains the
-/// handoff on stop, flushes and returns.
-#[cfg_attr(test, mutants::skip)]
-pub fn run_submit_consumer<B: NdiBackend>(
-    submitter: &mut FrameSubmitter<B>,
-    handoff: &SharedHandoff,
-    playlist_id: i64,
-) {
-    let mut wall = WallClock::system();
-    let mut since_conn_poll: u32 = CONN_POLL_EVERY; // poll on the first frame
-    while let Some(job) = handoff.take_blocking() {
-        let submit_start = wall.now_100ns();
-        let late = submit_late_100ns(job.stamp_boundary_100ns(), submit_start);
-        let program = program_bus::installed()
-            .and_then(|bus| program_bus::program_copy(bus, playlist_id, &job).map(|c| (bus, c)));
-        submitter.submit_frame_at_boundary_owned(
-            job.width,
-            job.height,
-            job.stride,
-            job.video,
-            &job.audio,
-            job.video_tc_100ns,
-            job.audio_tc_100ns,
-        );
-        let submit_done = wall.now_100ns();
-        let cost = (submit_done - submit_start).max(0);
-        handoff.record_submit(late, cost, submit_done);
-        if let Some((bus, copy)) = program {
-            bus.offer(playlist_id, copy);
-        }
-        since_conn_poll += 1;
-        if since_conn_poll >= CONN_POLL_EVERY {
-            handoff.set_connections(submitter.sender().get_no_connections(0));
-            let (call_max, call_p99) = submitter.drain_submit_call_us();
-            handoff.observe_submit_call(call_max, call_p99);
-            since_conn_poll = 0;
-        }
-        wall.tick();
-    }
-    submitter.flush();
-    info!(playlist_id, "paced submit consumer: drained + flushed");
 }
 
 /// The pipeline-lifetime paced submit thread (#147), owned by the pipeline's

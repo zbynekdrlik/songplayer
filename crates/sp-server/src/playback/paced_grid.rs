@@ -23,6 +23,7 @@
 
 use sp_core::genlock::{
     GENLOCK_MAX_CATCHUP_INTERVALS, floor_boundary_100ns, interval_100ns, lag_slots_100ns,
+    strict_next_boundary_100ns,
 };
 
 /// A detached boundary is filled this fraction of a slot after it: a quarter
@@ -131,12 +132,25 @@ impl PacedGrid {
         true
     }
 
-    /// The grid decision at wall time `now_100ns` with no job queued.
-    ///
-    /// RED stub (#147): no deadline fill yet — the consumer only ever waits for
-    /// a job, so a detached window is still left unserviced.
-    pub fn step(&self, _now_100ns: i64) -> GridStep {
-        GridStep::Idle
+    /// The grid decision at wall time `now_100ns` with no job queued. Only a
+    /// DETACHED grid that has serviced a stamp fills: the next boundary once
+    /// `now` reaches it + [`fill_grace_100ns`], or — when the consumer woke
+    /// more than [`GENLOCK_MAX_CATCHUP_INTERVALS`] slots late — the current
+    /// boundary ([`fill_boundary`], a resync the caller WARNs about).
+    pub fn step(&self, now_100ns: i64) -> GridStep {
+        let Some(last) = self.last_serviced_100ns else {
+            return GridStep::Idle;
+        };
+        if self.attached || interval_100ns(self.fps) == 0 {
+            return GridStep::Idle;
+        }
+        let due = strict_next_boundary_100ns(last, self.fps);
+        let deadline = due + fill_grace_100ns(self.fps);
+        if now_100ns < deadline {
+            GridStep::WaitUntil(deadline)
+        } else {
+            GridStep::Fill(fill_boundary(due, now_100ns, self.fps))
+        }
     }
 
     /// Record the fill of `stamp_100ns` (a [`GridStep::Fill`]). Returns the
