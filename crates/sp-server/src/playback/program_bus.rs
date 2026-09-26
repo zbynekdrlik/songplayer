@@ -72,6 +72,8 @@ use tracing::{info, warn};
 use crate::playback::ndi_input::NdiInputShared;
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 use crate::playback::vban_out::VbanOut;
+use crate::playback::wallclock::utc_now_100ns;
+use crate::remote::RemoteShared;
 
 /// The program output's NDI source name.
 pub const PROGRAM_NDI_NAME: &str = "SP-program";
@@ -478,6 +480,9 @@ pub struct ProgramBus {
     /// #212: the NDI input "OBS manuál" (source id `PROGRAM_INPUT_ID`): its
     /// settings, stop flag and telemetry (`input` on `GET /api/v1/program`).
     input: Arc<NdiInputShared>,
+    /// #213: the Companion remote control's telemetry (`remote` on
+    /// `GET /api/v1/program`).
+    remote: Arc<RemoteShared>,
 }
 
 impl Default for ProgramBus {
@@ -496,6 +501,7 @@ impl ProgramBus {
             ready: Condvar::new(),
             vban: Arc::new(VbanOut::new()),
             input: Arc::new(NdiInputShared::default()),
+            remote: Arc::new(RemoteShared::default()),
         }
     }
 
@@ -507,6 +513,11 @@ impl ProgramBus {
     /// #212: the NDI input's shared state.
     pub fn input(&self) -> &Arc<NdiInputShared> {
         &self.input
+    }
+
+    /// #213: the remote control's telemetry.
+    pub fn remote(&self) -> &Arc<RemoteShared> {
+        &self.remote
     }
 
     fn lock(&self) -> MutexGuard<'_, BusState> {
@@ -610,6 +621,18 @@ pub fn installed() -> Option<&'static Arc<ProgramBus>> {
 /// Persist the selected program source (a playlist id).
 pub async fn persist_selected_source(pool: &SqlitePool, pid: i64) -> Result<(), sqlx::Error> {
     crate::db::models::set_setting(pool, SETTING_PROGRAM_SOURCE, &pid.to_string()).await
+}
+
+/// Persist `pid` as the selected source FIRST, then cut the program to it (a
+/// failed write cuts nothing). The one cut path of `POST /api/v1/program/cut`
+/// and the #213 remote control.
+pub async fn persist_and_cut(
+    pool: &SqlitePool,
+    bus: &ProgramBus,
+    pid: i64,
+) -> Result<ProgramStatus, sqlx::Error> {
+    persist_selected_source(pool, pid).await?;
+    Ok(bus.cut(pid, utc_now_100ns()))
 }
 
 /// Restore the persisted program source into `bus` (startup). Returns the

@@ -244,7 +244,9 @@ impl super::PlaybackEngine {
     /// thread (Windows, on the engine's NDI backend), and stop it on shutdown.
     /// #210: also start the VBAN thread (Windows) and its settings task.
     /// #212: also start the NDI input "OBS manuál" (its settings task, and on
-    /// Windows its grid thread on the engine's NDI SDK). Call once, after the
+    /// Windows its grid thread on the engine's NDI SDK). #213: also start the
+    /// Companion remote control's settings task (its listener cuts this bus and
+    /// reaches cg OBS through the engine's OBS client). Call once, after the
     /// #196 startup senders.
     #[cfg_attr(test, mutants::skip)]
     pub async fn start_program(&self, bus: Arc<ProgramBus>, shutdown: &broadcast::Sender<()>) {
@@ -277,6 +279,9 @@ impl super::PlaybackEngine {
             receive,
             shutdown,
         );
+        let upstream =
+            crate::remote::Upstream::new(self.obs_cmd_tx.clone(), self.obs_event_tx.clone());
+        crate::remote::start_remote(self.pool.clone(), bus.clone(), upstream, shutdown);
         tokio::spawn(async move {
             let _ = shutdown_rx.recv().await;
             bus.stop();

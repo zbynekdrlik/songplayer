@@ -193,8 +193,7 @@ pub struct PlaybackEngine {
     ndi_backend: Option<pipeline::SharedNdiBackend>,
     /// For sending text source updates to OBS.
     obs_cmd_tx: Option<mpsc::Sender<crate::obs::ObsCommand>>,
-    /// Used for title show/hide updates.
-    #[allow(dead_code)]
+    /// cg OBS's events — #213: the remote-control facade re-emits the scene ones.
     obs_event_tx: broadcast::Sender<ObsEvent>,
     /// For sending title show/hide commands to Resolume hosts.
     resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,

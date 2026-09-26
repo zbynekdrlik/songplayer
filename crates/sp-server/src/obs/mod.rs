@@ -6,6 +6,7 @@ pub mod ndi_recovery;
 pub mod ndi_recovery_io;
 pub mod ndi_remove;
 pub(crate) mod output_state;
+pub mod remote_call;
 pub mod scene;
 pub mod scene_poll;
 pub mod text;
@@ -112,7 +113,7 @@ pub(crate) type SharedWrite = std::sync::Arc<
 >;
 
 /// Commands that can be sent to the OBS WebSocket connection loop.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ObsCommand {
     SetTextSource {
         source_name: String,
@@ -128,6 +129,10 @@ pub enum ObsCommand {
         ndi_name: String,
         step: crate::obs::ndi_recovery::RecoveryStep,
     },
+    /// #213: a call of the remote-control facade (`crate::remote`) to cg OBS —
+    /// a forwarded obs-websocket request or a scene → playlists lookup — run on
+    /// this ONE connection, off the main loop (`remote_call::run`).
+    Remote(remote_call::RemoteCall),
 }
 
 /// Events emitted by the OBS WebSocket connection loop.
@@ -138,6 +143,12 @@ pub enum ObsEvent {
     SceneChanged {
         scene_name: String,
         active_playlist_ids: HashSet<i64>,
+    },
+    /// #213: every op=5 event cg OBS sent, verbatim (`eventType` + `eventData`).
+    /// The remote-control facade re-emits the scene ones to its clients.
+    Raw {
+        event_type: String,
+        event_data: serde_json::Value,
     },
 }
 
@@ -294,6 +305,7 @@ async fn run_reader_task(
     mut read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     dispatcher: Dispatcher,
     reader_tx: mpsc::Sender<ReaderMessage>,
+    event_tx: broadcast::Sender<ObsEvent>,
 ) {
     loop {
         match read.next().await {
@@ -310,6 +322,11 @@ async fn run_reader_task(
                     5 => {
                         let event_type = json["d"]["eventType"].as_str().unwrap_or("");
                         debug!("OBS event: {event_type}");
+                        // #213: the remote-control facade re-emits the scene ones.
+                        let _ = event_tx.send(ObsEvent::Raw {
+                            event_type: event_type.to_string(),
+                            event_data: json["d"]["eventData"].clone(),
+                        });
                         if event_type == "CurrentProgramSceneChanged"
                             && let Some(scene_name) = json["d"]["eventData"]["sceneName"].as_str()
                         {
@@ -439,7 +456,9 @@ async fn connect_and_run(
     // serialise on the response wait.
     let dispatcher = Dispatcher::new();
     let (reader_tx, mut reader_rx) = mpsc::channel::<ReaderMessage>(32);
-    let reader_handle = tokio::spawn(run_reader_task(read, dispatcher.clone(), reader_tx));
+    let raw_events = event_tx.clone(); // #213: the reader broadcasts every raw event
+    let reader = run_reader_task(read, dispatcher.clone(), reader_tx, raw_events);
+    let reader_handle = tokio::spawn(reader);
     let write: SharedWrite = std::sync::Arc::new(tokio::sync::Mutex::new(write));
 
     // JoinSet tracks all tasks spawned in the main loop body. On loop
@@ -641,6 +660,13 @@ async fn connect_and_run(
                             )
                             .await;
                         });
+                    }
+                    ObsCommand::Remote(call) => {
+                        // #213: forwarded for the remote-control facade.
+                        let write = std::sync::Arc::clone(&write);
+                        let ndi_sources = std::sync::Arc::clone(ndi_sources);
+                        let dispatcher = dispatcher.clone();
+                        spawned_tasks.spawn(remote_call::run(write, dispatcher, ndi_sources, call));
                     }
                 }
             }

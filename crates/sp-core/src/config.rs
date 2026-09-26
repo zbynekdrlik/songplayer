@@ -52,6 +52,19 @@ pub const SETTING_NDI_INPUT_ENABLED: &str = "ndi_input_enabled";
 /// cg OBS's manual-scene NDI output). Empty = nothing to receive.
 pub const SETTING_NDI_INPUT_SOURCE: &str = "ndi_input_source";
 
+/// #213 (C of EPIC #174): the Companion-compatible remote control, an
+/// obs-websocket 5 subset SongPlayer serves on its own port. `"true"` listens;
+/// anything else (or absent) = off, the default.
+pub const SETTING_REMOTE_WS_ENABLED: &str = "remote_ws_enabled";
+/// #213: the remote control's TCP port ([`DEFAULT_REMOTE_WS_PORT`] when absent
+/// or not a port).
+pub const SETTING_REMOTE_WS_PORT: &str = "remote_ws_port";
+/// #213: the optional remote-control password. Set = the obs-websocket 5
+/// SHA-256 challenge auth; empty = no auth.
+pub const SETTING_REMOTE_WS_PASSWORD: &str = "remote_ws_password";
+/// #213: the default remote-control port, next to cg OBS's own 4455.
+pub const DEFAULT_REMOTE_WS_PORT: u16 = 4455;
+
 /// #212: the program-bus source id of the NDI input (playlists are positive
 /// row ids, so a negative id can never collide with one).
 pub const PROGRAM_INPUT_ID: i64 = -1;
@@ -160,6 +173,14 @@ mod tests {
         assert_eq!(SETTING_NDI_INPUT_SOURCE, "ndi_input_source");
         assert_eq!(PROGRAM_INPUT_ID, -1);
         assert_eq!(PROGRAM_INPUT_LABEL, "OBS manuál");
+    }
+
+    #[test]
+    fn remote_ws_setting_keys_and_default_port() {
+        assert_eq!(SETTING_REMOTE_WS_ENABLED, "remote_ws_enabled");
+        assert_eq!(SETTING_REMOTE_WS_PORT, "remote_ws_port");
+        assert_eq!(SETTING_REMOTE_WS_PASSWORD, "remote_ws_password");
+        assert_eq!(DEFAULT_REMOTE_WS_PORT, 4456);
     }
 
     #[test]

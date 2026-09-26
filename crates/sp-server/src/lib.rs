@@ -20,6 +20,7 @@ pub mod playback;
 pub mod playlist;
 pub mod presenter;
 pub mod process_start; // #196: process-start instant for /api/v1/status.uptime_s
+pub mod remote; // #213: the Companion remote control (obs-websocket 5 subset → program bus)
 pub mod reprocess;
 pub mod resolume;
 pub mod shutdown;
@@ -102,7 +103,6 @@ pub struct ToolsStatus {
     pub deno_version: Option<String>,
 }
 
-// scene_change_commands and run_obs_engine_bridge live in obs_bridge.rs
 use obs_bridge::run_obs_engine_bridge;
 #[cfg(test)]
 pub(crate) use obs_bridge::scene_change_commands;
