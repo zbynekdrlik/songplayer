@@ -1,0 +1,163 @@
+//! #209 `SP-program` sender: what [`ProgramOutput`] puts on the wire for a
+//! forwarded source boundary and for its own standby pair, the per-boundary
+//! check timing, and the sender thread end to end on a settable clock.
+//! Wired via `#[cfg(test)] #[path = "program_output_tests.rs"] mod tests;`.
+
+use super::*;
+use crate::playback::frame_buf::SharedFrame;
+use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramBus, ProgramJob};
+use crate::playback::submit_handoff::SubmitJob;
+use crate::playback::wallclock::WallClock;
+use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
+use sp_ndi::test_util::MockNdiBackend;
+use sp_ndi::{AudioFrame, NdiSender};
+use std::sync::Arc;
+use std::time::Duration;
+
+const T0: i64 = 17_900_000_000_000_000;
+
+fn output(w: u32, h: u32) -> (Arc<MockNdiBackend>, ProgramOutput<MockNdiBackend>) {
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
+        .expect("mock sender");
+    (backend, ProgramOutput::new(sender, w, h))
+}
+
+#[test]
+fn a_standby_pair_is_one_silent_block_then_the_nv12_black_on_its_boundary() {
+    let (backend, mut out) = output(4, 2);
+    let stamp = floor_boundary_100ns(T0, GENLOCK_GRID_FPS);
+    assert_eq!(
+        out.submit(ProgramJob::Standby { stamp_100ns: stamp }, stamp + 123),
+        stamp
+    );
+    assert_eq!(
+        backend.calls(),
+        vec![
+            "send_create_with_clocking(SP-program,false,false)".to_string(),
+            "send_audio(42,sr=48000,ch=2,spc=1600)".to_string(),
+            "send_video_async(42,NV12,4x2,stride=4,30/1)".to_string(),
+        ],
+        "a paced sender (no video clocking), audio first, NV12 on the 30/1 grid"
+    );
+    assert_eq!(backend.video_timecodes(), vec![stamp]);
+    assert_eq!(
+        backend.audio_timecodes(),
+        vec![stamp + 123],
+        "audio = emit instant"
+    );
+    let planar = backend.last_audio_planar();
+    assert_eq!(planar.len(), 3200);
+    assert!(planar.iter().all(|&s| s == 0.0), "silence");
+    assert_eq!(
+        backend.last_async_video_slice().map(|(_, len)| len),
+        Some(4 * 2 * 3 / 2),
+        "the NV12 black of the configured size"
+    );
+}
+
+#[test]
+fn a_forwarded_boundary_keeps_the_sources_frame_audio_and_stamps() {
+    let (backend, mut out) = output(4, 2);
+    let video = SharedFrame::new(vec![7u8; 8 * 2 * 3 / 2]);
+    let stamp = floor_boundary_100ns(T0, GENLOCK_GRID_FPS);
+    let job = SubmitJob {
+        width: 8,
+        height: 2,
+        stride: 8,
+        video: video.clone(),
+        audio: vec![AudioFrame {
+            data: vec![0.5; 3200],
+            channels: 2,
+            sample_rate: 48_000,
+            timecode_100ns: None,
+        }],
+        video_tc_100ns: stamp,
+        audio_tc_100ns: stamp + 77,
+    };
+    assert_eq!(out.submit(ProgramJob::Source(job), stamp + 999), stamp);
+    assert_eq!(backend.video_timecodes(), vec![stamp]);
+    assert_eq!(
+        backend.audio_timecodes(),
+        vec![stamp + 77],
+        "the source's own stamp"
+    );
+    assert_eq!(
+        backend.last_async_video_slice(),
+        Some((video.as_ptr() as usize, video.len())),
+        "the source's own allocation, zero copy"
+    );
+    assert!(backend.last_audio_planar().iter().all(|&s| s == 0.5));
+    assert!(
+        backend
+            .calls()
+            .contains(&"send_video_async(42,NV12,8x2,stride=8,30/1)".to_string())
+    );
+}
+
+#[test]
+fn connections_and_flush_reach_the_program_sender() {
+    let (backend, mut out) = output(4, 2);
+    backend.set_connection_count(3);
+    assert_eq!(out.connections(), 3);
+    out.flush();
+    assert_eq!(
+        backend.calls().last().map(String::as_str),
+        Some("send_video_flush(42)")
+    );
+}
+
+#[test]
+fn the_sender_checks_one_ms_after_the_next_boundary() {
+    let b0 = floor_boundary_100ns(T0, GENLOCK_GRID_FPS);
+    let b1 = strict_next_boundary_100ns(b0, GENLOCK_GRID_FPS);
+    assert_eq!(
+        next_check_wait(b0),
+        Duration::from_nanos(((b1 - b0 + CHECK_AFTER_BOUNDARY_100NS) * 100) as u64)
+    );
+    assert_eq!(
+        next_check_wait(b0 + 5),
+        Duration::from_nanos(((b1 - b0 - 5 + CHECK_AFTER_BOUNDARY_100NS) * 100) as u64)
+    );
+    assert_eq!(CHECK_AFTER_BOUNDARY_100NS, 10_000, "1 ms");
+}
+
+#[test]
+fn the_sender_thread_fills_a_sourceless_program_and_stops_flushed() {
+    let (backend, out) = output(4, 2);
+    let bus = Arc::new(ProgramBus::new());
+    let b0 = floor_boundary_100ns(T0, GENLOCK_GRID_FPS);
+    let (wall, clock) = WallClock::settable(b0 + CHECK_AFTER_BOUNDARY_100NS);
+    let thread = {
+        let bus = bus.clone();
+        std::thread::spawn(move || {
+            let (mut out, mut wall) = (out, wall);
+            run_program_loop(&mut out, &bus, &mut wall);
+        })
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while bus.status().health.submitted < 1 && std::time::Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    bus.stop();
+    thread.join().unwrap();
+    assert_eq!(
+        clock.get(),
+        b0 + CHECK_AFTER_BOUNDARY_100NS,
+        "the clock never moved"
+    );
+    assert_eq!(
+        backend.video_timecodes(),
+        vec![b0],
+        "exactly the one reached boundary"
+    );
+    let st = bus.status();
+    assert_eq!(st.health.submitted, 1);
+    assert_eq!(st.health.filled, 1);
+    let calls = backend.calls();
+    assert!(calls.contains(&"send_get_no_connections(42,0)".to_string()));
+    assert_eq!(
+        calls.last().map(String::as_str),
+        Some("send_video_flush(42)")
+    );
+}

@@ -46,7 +46,9 @@ const SUBMIT_COST_RING: usize = 256;
 /// everything the submit thread needs to perform the audio-before-video NDI
 /// submit at the pre-computed genlock timecodes, plus the `stamp_boundary_100ns`
 /// (== `video_tc_100ns`) that the honest submit-side lateness is measured
-/// against.
+/// against. `Clone` is an `Arc` bump of the frame + the audio block (the #209
+/// program bus takes such a copy of an owned boundary).
+#[derive(Clone)]
 pub struct SubmitJob {
     pub width: u32,
     pub height: u32,

@@ -29,6 +29,7 @@ use sp_ndi::AudioFrame;
 use crate::playback::ndi_health::{AudioStats, PacingStats, PlaybackStateLabel};
 use crate::playback::pacer::{PacedFrame, PacedSink};
 use crate::playback::pipeline::{PipelineEvent, classify_bad_poll};
+use crate::playback::program_bus;
 use crate::playback::submit_handoff::{
     HandoffOutcome, PacedSubmitStats, SubmitCounters, SubmitJob, SubmitQueue, merge_pacing_stats,
     paced_submit_snapshot, submit_late_100ns,
@@ -261,6 +262,12 @@ pub(crate) fn run_submit_consumer(
     while let Some(job) = handoff.take_blocking() {
         let submit_start = wall.now_100ns();
         let late = submit_late_100ns(job.stamp_boundary_100ns(), submit_start);
+        // #209: the program bus gets the SAME boundary job (an Arc bump of the
+        // frame + the audio block, same stamps) — copied before the submit below
+        // moves the frame, offered right after it. Only a source that can own a
+        // program boundary pays for the copy.
+        let program = program_bus::installed()
+            .and_then(|bus| program_bus::program_copy(bus, playlist_id, &job).map(|c| (bus, c)));
         // `job.video` is already the shared frame the emit thread Arc-cloned at
         // the handoff (#203 2b) — move it straight into the submitter's async
         // holdover (a refcount hold, no copy anywhere on the paced path).
@@ -276,6 +283,9 @@ pub(crate) fn run_submit_consumer(
         let submit_done = wall.now_100ns();
         let cost = (submit_done - submit_start).max(0);
         handoff.record_submit(late, cost, submit_done);
+        if let Some((bus, copy)) = program {
+            bus.offer(playlist_id, copy, submit_done);
+        }
 
         since_conn_poll += 1;
         if since_conn_poll >= CONN_POLL_EVERY {

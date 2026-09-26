@@ -8,6 +8,7 @@ pub mod lyrics_catalog;
 pub mod mix; // #184 round G — the ONE live mixer console
 pub mod mix_apply; // #184 live-first mix apply seam
 pub mod preview;
+pub mod program; // #209 program bus: GET /api/v1/program + POST /api/v1/program/cut
 pub mod routes;
 pub mod routes_import; // #180 shared bare-URL import core
 pub mod routes_ndi_recover;
