@@ -137,6 +137,77 @@ pub fn bounded_anchor_update(delta_100ns: i64) -> AnchorStep {
     }
 }
 
+/// A clamped FORWARD resample from a narrow bracket, waiting for the next
+/// resample to confirm it (#147 confirmed date step): the delta it measured and
+/// the ≤ 1 ms it already applied.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingStep {
+    pub delta_100ns: i64,
+    pub applied_100ns: i64,
+}
+
+/// What one resample does to the wall under the confirm-then-follow rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnchorDecision {
+    /// The correction applied now.
+    pub step: AnchorStep,
+    /// `Some(total)` when this resample FOLLOWED a confirmed step: the whole
+    /// step (the earlier applied part + this one), 100-ns units.
+    pub followed_100ns: Option<i64>,
+    /// The step the NEXT resample may confirm.
+    pub pending: Option<PendingStep>,
+}
+
+/// The confirm-then-follow anchor rule (#147, design record 5845527884,
+/// Approach 1 (b)).
+///
+/// dantesync steps the fleet date by ~+50 ms about every 47 min, and every
+/// camera-box sender follows `CLOCK_REALTIME` at once. Slewing that step at
+/// 1 ms per resample kept our stamps ~300 ppm off the fleet for ~2.7 min. So:
+///
+/// - A resample measuring a FORWARD `delta` over 1 ms from a narrow bracket
+///   (`narrow` = not wider than [`ANCHOR_WIDE_BRACKET`]) applies the bounded
+///   1 ms and ARMS the step ([`PendingStep`]).
+/// - The NEXT resample follows the rest of it in ONE event when it is narrow
+///   too, still over 1 ms, and `delta + applied₁` lies within ±1 ms of the
+///   armed `delta₁`: the same step, seen twice.
+/// - Everything else is the plain [`bounded_anchor_update`]: a lone outlier
+///   moves the wall 1 ms and the next read holds it back out, a wide
+///   (preempted) sample never arms or confirms, and a backward correction is
+///   never followed (it stays a ≤ 1 ms hold, [`apply_anchor_step`]).
+pub fn decide_anchor_step(
+    pending: Option<PendingStep>,
+    delta_100ns: i64,
+    narrow: bool,
+) -> AnchorDecision {
+    let confirms = |p: &PendingStep| {
+        (delta_100ns + p.applied_100ns - p.delta_100ns).abs() <= ANCHOR_MAX_STEP_100NS
+    };
+    if narrow
+        && delta_100ns > ANCHOR_MAX_STEP_100NS
+        && let Some(p) = pending.filter(confirms)
+    {
+        return AnchorDecision {
+            step: AnchorStep {
+                applied_100ns: delta_100ns,
+                carry_100ns: 0,
+            },
+            followed_100ns: Some(p.applied_100ns + delta_100ns),
+            pending: None,
+        };
+    }
+    let step = bounded_anchor_update(delta_100ns);
+    let pending = (narrow && step.carry_100ns > 0).then_some(PendingStep {
+        delta_100ns,
+        applied_100ns: step.applied_100ns,
+    });
+    AnchorDecision {
+        step,
+        followed_100ns: None,
+        pending,
+    }
+}
+
 /// The wall reading of an anchor at monotonic instant `at`:
 /// `anchor_utc + (at − anchor_instant)`, with an instant before the anchor
 /// reading as the anchor itself (saturating). This is exactly the default
@@ -176,6 +247,10 @@ pub struct WallAnchorStats {
     /// Cumulative correction (µs) applied through CLAMPED resamples (|delta| >
     /// 1 ms), i.e. slewed in rather than stepped.
     pub slewed_us: u64,
+    /// Confirmed forward UTC steps followed in ONE re-anchor (#147).
+    pub steps_followed: u64,
+    /// The total step (µs) of the last followed step; 0 before any.
+    pub last_step_us: u64,
 }
 
 impl WallAnchorStats {
@@ -184,6 +259,12 @@ impl WallAnchorStats {
         if sample.is_wide() {
             self.wide_brackets += 1;
         }
+    }
+
+    /// Record a followed step of `total_100ns` (a confirmed forward step).
+    pub fn record_follow(&mut self, total_100ns: i64) {
+        self.steps_followed += 1;
+        self.last_step_us = total_100ns.unsigned_abs() / 10;
     }
 
     /// Record one resample's measured `delta_100ns` and its bounded `step`.

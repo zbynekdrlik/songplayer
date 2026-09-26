@@ -8,6 +8,20 @@ use crate::playback::pacer::PacedFrame;
 // ---- handoff_policy: bounded queue + coalesce-to-freshest ----
 
 #[test]
+fn newest_is_the_last_queued_job_until_it_is_taken() {
+    let mut q: SubmitQueue<u32> = SubmitQueue::new(SUBMIT_HANDOFF_BOUND);
+    assert_eq!(q.newest(), None);
+    q.offer(1);
+    q.offer(2);
+    assert_eq!(q.newest(), Some(&2));
+    q.offer(3); // coalesces 1 away
+    assert_eq!(q.newest(), Some(&3));
+    q.take();
+    q.take();
+    assert_eq!(q.newest(), None);
+}
+
+#[test]
 fn offer_enqueues_below_bound() {
     let mut q: SubmitQueue<u32> = SubmitQueue::new(SUBMIT_HANDOFF_BOUND);
     assert_eq!(SUBMIT_HANDOFF_BOUND, 2, "box-test-5 depth: 2");
@@ -199,6 +213,30 @@ fn merge_takes_late_from_submit_and_schedule_from_pacer() {
     // thread's drained window (max and p99 are NOT swapped).
     assert_eq!(merged.submit_call_us_max, 90_000);
     assert_eq!(merged.submit_call_us_p99, 75_000);
+}
+
+#[test]
+fn merge_carries_the_consumer_grid_telemetry_unswapped() {
+    // #147: the pipeline-lifetime consumer's fill count and song-change holes
+    // come from the submit side; the pacer never sets them.
+    let pacer = PacingStats {
+        song_change_unserviced_slots: 99,
+        consumer_fill_pairs: 98,
+        wall_anchor_steps_followed: 2,
+        wall_anchor_last_step_us: 50_030,
+        ..Default::default()
+    };
+    let mut submit = SubmitCounters::new();
+    assert_eq!(submit.consumer_fill_pairs, 0);
+    assert_eq!(submit.song_change_unserviced_slots, 0);
+    submit.consumer_fill_pairs = 3;
+    submit.song_change_unserviced_slots = 1;
+    let merged = merge_pacing_stats(pacer, &submit, PacedSubmitStats::default());
+    assert_eq!(merged.consumer_fill_pairs, 3);
+    assert_eq!(merged.song_change_unserviced_slots, 1);
+    // The pacer wall's anchor telemetry stays the pacer's.
+    assert_eq!(merged.wall_anchor_steps_followed, 2);
+    assert_eq!(merged.wall_anchor_last_step_us, 50_030);
 }
 
 // ---- paced_submit_snapshot: worst-of fold over a heartbeat window (#168 r2) ----

@@ -8,32 +8,33 @@
 //!   [`Pacer::service_standby`](crate::playback::pacer::Pacer::service_standby).
 //!   Since the #147 standby same-path fix (design comment 5841796900) the idle
 //!   frame leaves through the SAME path as a playing frame: the #168
-//!   [`HandoffSink`] → submit thread → `submit_frame_at_boundary_owned` (audio
+//!   `HandoffSink` → submit thread → `submit_frame_at_boundary_owned` (audio
 //!   first, then the async NV12 send at the stamped boundary), so the receiver
 //!   sees one constant A/V cadence and phase, idle or playing. The outer loop
-//!   enters this at once when paced (`pacer_sink::idle_poll`).
+//!   enters this at once when paced (`pacer_sink::idle_poll`). The submit
+//!   thread is the pipeline's (#147, design record 5845527884): an idle
+//!   stretch only attaches a feeder and continues right after the last
+//!   serviced boundary.
 //! - **OFF (legacy):** the plain single idle heartbeat the outer loop always did
 //!   (the moved `run_heartbeat_outer`), leaving pacing to the 5 s `recv_timeout`.
 //!
 //! The scheduling DECISION (Wait vs emit, the on-grid stamp, catch-up/resync,
-//! the silent block) all lives in the cross-platform, Linux-tested `Pacer`; only
-//! the submit-thread scope, the real NDI submit and the command peek are Windows
-//! glue here.
+//! the silent block) all lives in the cross-platform, Linux-tested `Pacer`, and
+//! the submit side in the Linux-tested `paced_output.rs`; only the feeder
+//! attach, the real sleep and the command peek are Windows glue here.
 
 use std::time::Instant;
 
 use crossbeam_channel::Receiver;
 
 use crate::playback::ndi_health::PlaybackStateLabel;
+use crate::playback::paced_output::PacedFeed;
 use crate::playback::pacer::{Pacer, ServiceOutcome, StandbyBlack};
 use crate::playback::pipeline::{
     PipelineCommand, PipelineEvent, emit_heartbeat, should_run_heartbeat,
 };
 use crate::playback::pipeline_paced::sleep_to_boundary;
-use crate::playback::pipeline_paced_submit::{
-    HandoffSink, SharedHandoff, StopOnPanic, emit_heartbeat_paced, run_submit_consumer,
-};
-use crate::playback::submit_handoff::SUBMIT_HANDOFF_BOUND;
+use crate::playback::pipeline_paced_submit::emit_heartbeat_paced;
 use crate::playback::submitter::FrameSubmitter;
 
 /// The idle/no-song standby resolution (1080p). The idle black frame is built
@@ -43,12 +44,11 @@ pub(crate) const IDLE_W: u32 = 1920;
 pub(crate) const IDLE_H: u32 = 1080;
 
 /// The outer-loop idle wait (no song loaded). With `genlock_pacing` ON, fill
-/// every grid boundary with black + silence through the #168 submit thread until
-/// a command is queued, then stop + join that thread (it flushes the async
-/// holdover) and return so the outer loop's next `recv` picks the command up;
-/// with it OFF, emit one idle heartbeat and return (the legacy behaviour).
-/// Play/Seek re-anchor the grid via `Pacer::anchor` inside the decode loop, so
-/// the idle-fill's boundary state is reset cleanly when playback resumes.
+/// every grid boundary with black + silence through the pipeline's paced submit
+/// thread until a command is queued, then detach (the thread keeps servicing
+/// the grid, #147) and return so the outer loop's next `recv` picks the command
+/// up; with it OFF, emit one idle heartbeat and return (the legacy behaviour).
+/// The next song's pre-roll continues right after the last serviced boundary.
 #[cfg_attr(test, mutants::skip)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_idle_wait(
@@ -89,68 +89,66 @@ pub(crate) fn run_idle_wait(
     // boundary submits it by reference (a refcount bump, zero pixel copies, #203).
     let black = submitter.standby_black_nv12(IDLE_W, IDLE_H);
     // #147 standby same-path: the idle boundary leaves through the SAME #168
-    // handoff + submit thread as a playing frame (`decode_and_send_paced`). The
-    // submit thread borrows the submitter for this idle stretch (SDK per-instance
-    // affinity + the async holdover stay single-threaded) and is joined, after a
-    // flush, before the outer loop touches the submitter again.
-    let handoff = SharedHandoff::new(SUBMIT_HANDOFF_BOUND);
-    let handoff_ref = &handoff;
+    // handoff + submit thread as a playing frame (`decode_and_send_paced`). That
+    // thread is the pipeline's (#147, design record 5845527884): this idle
+    // stretch attaches a feeder, continues right after the last boundary the
+    // output serviced, and detaches when a command is queued — no join, no
+    // flush, so no boundary goes unserviced before the next scope.
+    let handoff = submitter.paced_handoff(playlist_id, IDLE_W, IDLE_H);
+    let feed = PacedFeed::attach(&handoff);
+    if let Some(last) = feed.continue_after_100ns() {
+        pacer.continue_grid_after(last);
+    }
     // Heartbeat window baselines over the submit-side frame count (the frames
-    // that actually left the box), as on the playing path.
-    let mut hb_prev_total: u64 = 0;
+    // that actually left the box), as on the playing path; the thread's
+    // counters live for the pipeline, so start from where they are.
+    let mut hb_prev_total: u64 = handoff.submitted();
     let mut hb_prev_instant = Instant::now();
     // Idle has no decoder: report the grid rate, which is what the idle
     // heartbeat reported before (`submitter.nominal_fps()` = the grid here).
     let idle_source_fps = sp_core::genlock::GENLOCK_GRID_FPS as f32;
-    // A resync in the idle stretch means boundaries went unserviced before it
-    // (the joins after a song / a stop, #147): log it, it is a real stamp hole.
+    // A resync in the idle stretch means more than 8 boundaries sat between the
+    // output's last serviced stamp and this fill (a hung box — the paced output
+    // services every boundary between scopes, #147): a real stamp hole.
     let resyncs_before = pacer.stats().resyncs;
+    let mut sink = feed.sink();
 
-    std::thread::scope(|s| {
-        let sub: &mut FrameSubmitter<sp_ndi::RealNdiBackend> = submitter;
-        let submit_join = s.spawn(move || run_submit_consumer(sub, handoff_ref, playlist_id));
-        // A panic in the fill must still stop the submit thread, or the scope's
-        // join deadlocks on the parked consumer (#168 review).
-        let _stop_guard = StopOnPanic::new(handoff_ref);
-        let mut sink = HandoffSink::new(handoff_ref);
-
-        // Fill boundaries until a command is queued; the caller then receives it.
-        while cmd_rx.is_empty() {
-            // The same black constructor the song-start pre-roll uses.
-            let standby = StandbyBlack {
-                width: IDLE_W,
-                height: IDLE_H,
-                stride: IDLE_W,
-                video: &black,
-            }
-            .standby();
-            match pacer.service_standby(standby, &mut sink) {
-                ServiceOutcome::Wait { until_100ns } => sleep_to_boundary(pacer, until_100ns),
-                _ => pacer.tick_wall(),
-            }
-            if should_run_heartbeat(last_heartbeat.elapsed()) {
-                emit_heartbeat_paced(
-                    handoff_ref,
-                    event_tx,
-                    playlist_id,
-                    state.clone(),
-                    last_heartbeat,
-                    consecutive_bad_polls,
-                    // A paced pipeline is `enabled=true` while idle (#147 change 7).
-                    pacer.stats(),
-                    pacer.audio_stats(),
-                    idle_source_fps,
-                    &mut hb_prev_total,
-                    &mut hb_prev_instant,
-                );
-            }
+    // Fill boundaries until a command is queued; the caller then receives it.
+    while cmd_rx.is_empty() {
+        // The same black constructor the song-start pre-roll uses.
+        let standby = StandbyBlack {
+            width: IDLE_W,
+            height: IDLE_H,
+            stride: IDLE_W,
+            video: &black,
         }
+        .standby();
+        match pacer.service_standby(standby, &mut sink) {
+            ServiceOutcome::Wait { until_100ns } => sleep_to_boundary(pacer, until_100ns),
+            _ => pacer.tick_wall(),
+        }
+        if should_run_heartbeat(last_heartbeat.elapsed()) {
+            emit_heartbeat_paced(
+                &handoff,
+                event_tx,
+                playlist_id,
+                state.clone(),
+                last_heartbeat,
+                consecutive_bad_polls,
+                // A paced pipeline is `enabled=true` while idle (#147 change 7).
+                pacer.stats(),
+                pacer.audio_stats(),
+                idle_source_fps,
+                &mut hb_prev_total,
+                &mut hb_prev_instant,
+            );
+        }
+    }
 
-        // Drain the handoff, flush the async holdover, and join the submit thread
-        // before the outer loop (or the next song) reuses the submitter.
-        handoff_ref.stop();
-        let _ = submit_join.join();
-    });
+    // Hand the grid back to the paced output: it services every boundary until
+    // the next scope (the song the queued command starts, or the next idle
+    // stretch) attaches.
+    drop(feed);
     let gap_resyncs = pacer.stats().resyncs.saturating_sub(resyncs_before);
     if gap_resyncs > 0 {
         tracing::warn!(

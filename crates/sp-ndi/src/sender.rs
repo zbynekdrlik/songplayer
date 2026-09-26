@@ -180,10 +180,13 @@ pub trait NdiBackend: Send + Sync {
 ///
 /// Generic over `B: NdiBackend` so tests can inject a mock.
 /// On [`Drop`], the sender flushes any pending async frame and destroys the
-/// underlying NDI instance.
+/// underlying NDI instance — unless it is a non-owning [`twin`](Self::twin),
+/// which only flushes.
 pub struct NdiSender<B: NdiBackend> {
     backend: Arc<B>,
     handle: usize,
+    /// `false` for a [`twin`](Self::twin): its `Drop` flushes, never destroys.
+    owner: bool,
 }
 
 impl<B: NdiBackend> NdiSender<B> {
@@ -208,7 +211,28 @@ impl<B: NdiBackend> NdiSender<B> {
         clock_audio: bool,
     ) -> Result<Self, NdiError> {
         let handle = backend.send_create_with_clocking(name, clock_video, clock_audio)?;
-        Ok(Self { backend, handle })
+        Ok(Self {
+            backend,
+            handle,
+            owner: true,
+        })
+    }
+
+    /// A NON-OWNING twin of this sender (#147): the same backend + handle, so
+    /// it sends on the same NDI instance, but its `Drop` only flushes and never
+    /// calls `send_destroy`. It lets a thread that outlives any borrow of the
+    /// owner (the paced output's pipeline-lifetime submit thread) own a full
+    /// sender. The OWNER must stay alive until the twin's user is joined — the
+    /// same teardown contract as [`audio_sink`](Self::audio_sink); the real
+    /// backend's per-handle table turns a send after the destroy into a no-op,
+    /// never a use-after-free. Only ONE of the two may send async video (the
+    /// async holdover belongs to whoever sent the last async frame).
+    pub fn twin(&self) -> Self {
+        Self {
+            backend: self.backend.clone(),
+            handle: self.handle,
+            owner: false,
+        }
     }
 
     /// Send a video frame synchronously.
@@ -410,7 +434,10 @@ impl<B: NdiBackend> Drop for NdiSender<B> {
         // Flush any pending async frame before destroying — guarantees the SDK
         // has released its pointer to our last buffer.
         self.backend.send_video_flush(self.handle);
-        self.backend.send_destroy(self.handle);
+        // A twin (#147) never destroys the instance its owner still holds.
+        if self.owner {
+            self.backend.send_destroy(self.handle);
+        }
     }
 }
 
@@ -441,6 +468,31 @@ mod tests {
         let _s = NdiSender::new_with_clocking(backend.clone(), "X", false, false).unwrap();
         let calls = backend.calls();
         assert_eq!(calls[0], "send_create_with_clocking(X,false,false)");
+    }
+
+    #[test]
+    fn a_twin_sends_on_the_same_handle_and_its_drop_never_destroys() {
+        let backend = Arc::new(MockNdiBackend::new());
+        let owner = NdiSender::new_with_clocking(backend.clone(), "T", false, false).unwrap();
+        let twin = owner.twin();
+        assert_eq!(twin.handle(), owner.handle());
+        twin.send_video_flush();
+        drop(twin);
+        assert_eq!(
+            backend.calls(),
+            vec![
+                "send_create_with_clocking(T,false,false)",
+                "send_video_flush(42)",
+                "send_video_flush(42)",
+            ],
+            "the twin flushed on drop and destroyed nothing"
+        );
+        drop(owner);
+        assert_eq!(
+            backend.calls()[3..],
+            ["send_video_flush(42)", "send_destroy(42)"],
+            "the owner still flushes + destroys"
+        );
     }
 
     #[test]

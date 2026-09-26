@@ -24,6 +24,8 @@
 //!
 //! A child of `pacer.rs` (1000-line cap), like `pacer_prepare.rs`.
 
+use sp_core::genlock::strict_next_boundary_100ns;
+
 use super::{PacedSink, Pacer, ServiceOutcome, Standby};
 use crate::playback::frame_buf::SharedFrame;
 
@@ -135,6 +137,20 @@ impl Pacer {
             }
             wait(&*self, until_100ns);
         }
+    }
+
+    /// Continue the grid right after the paced output's last serviced stamp
+    /// `last_serviced_100ns` (#147, design record 5845527884, Approach 1 (a)):
+    /// the next boundary this pacer latches is exactly one slot after it, so
+    /// the stamps stay contiguous across a song change, a stop or an idle
+    /// stretch while the pipeline-lifetime submit consumer filled the gap. A
+    /// boundary the clock already passed is a normal catch-up (> 8 slots
+    /// behind resyncs, the WARN path). Genlock off: there is no grid.
+    pub fn continue_grid_after(&mut self, last_serviced_100ns: i64) {
+        if self.interval_100ns == 0 {
+            return;
+        }
+        self.next_boundary_100ns = strict_next_boundary_100ns(last_serviced_100ns, self.grid_fps);
     }
 
     /// Re-anchor for a same-song SEEK (#147): like [`anchor`](Pacer::anchor),
