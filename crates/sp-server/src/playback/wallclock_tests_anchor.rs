@@ -210,6 +210,8 @@ fn anchor_stats_record_max_delta_wide_brackets_and_slewed_total() {
             slewed_us: 2_000,
             steps_followed: 0,
             last_step_us: 0,
+            holds_followed: 0,
+            last_hold_us: 0,
         }
     );
 }
@@ -313,6 +315,8 @@ fn every_attempt_preempted_still_moves_at_most_1_ms_and_never_back() {
             slewed_us: 1_000,
             steps_followed: 0,
             last_step_us: 0,
+            holds_followed: 0,
+            last_hold_us: 0,
         }
     );
 }
@@ -349,44 +353,68 @@ fn a_genuine_plus_50_ms_utc_step_is_followed_in_one_event_once_confirmed() {
             slewed_us: 1_000,
             steps_followed: 1,
             last_step_us: 50_000,
+            holds_followed: 0,
+            last_hold_us: 0,
         }
     );
 }
 
 #[test]
-fn a_genuine_minus_50_ms_utc_step_is_held_in_never_stepped_back() {
+fn a_genuine_minus_50_ms_utc_step_is_held_in_one_event_once_confirmed_never_stepped_back() {
+    // #147 (design record 5850063723): a backward date step is confirmed like
+    // a forward one, and then followed as ONE hold. The wall freezes for the
+    // rest of the step, then runs on the UTC line. It is never stepped back.
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
     clk.step_utc(-50 * MS);
-    for r in 1..=50i64 {
-        let (before, after) = resample(&mut wall, &clk);
-        assert_eq!(
-            after, before,
-            "resample {r}: a backward correction holds the wall"
-        );
-        // Half-way through the ≤ 1 ms hold the wall still reads the same.
-        clk.advance_ns(500_000);
-        assert_eq!(wall.now_100ns(), before, "resample {r}: still holding");
-        clk.advance_ns(500_000);
-        assert_eq!(
-            wall.now_100ns() - clk.truth_100ns(),
-            (50 - r) * MS,
-            "resample {r}: 1 ms closer to truth"
-        );
-    }
+    let (before, after) = resample(&mut wall, &clk);
+    assert_eq!(after, before, "resample 1: a 1 ms hold, never a step back");
+    clk.advance_ns(1_000_000);
+    assert_eq!(
+        wall.now_100ns(),
+        before,
+        "resample 1: held for exactly 1 ms"
+    );
+    assert_eq!(wall.now_100ns() - clk.truth_100ns(), 49 * MS);
+    let (before, after) = resample(&mut wall, &clk);
+    assert_eq!(after, before, "resample 2: the rest is ONE hold");
+    clk.advance_ns(24_500_000);
+    assert_eq!(
+        wall.now_100ns(),
+        before,
+        "resample 2: still holding half-way"
+    );
+    clk.advance_ns(24_500_000);
+    assert_eq!(
+        wall.now_100ns(),
+        before,
+        "resample 2: held for exactly 49 ms"
+    );
     assert_eq!(
         wall.now_100ns(),
         clk.truth_100ns(),
-        "converged after 50 resamples"
+        "the UTC line reached it"
     );
+    clk.advance_ns(1_000_000);
+    assert_eq!(
+        wall.now_100ns(),
+        clk.truth_100ns(),
+        "then it runs on the line"
+    );
+    // Later resamples are normal again.
+    let (before, after) = resample(&mut wall, &clk);
+    assert_eq!(after, before);
+    assert_eq!(after, clk.truth_100ns());
     assert_eq!(
         wall.anchor_stats(),
         WallAnchorStats {
             max_step_us: 50_000,
             wide_brackets: 0,
-            slewed_us: 49_000,
-            steps_followed: 0,
-            last_step_us: 0,
+            slewed_us: 1_000,
+            steps_followed: 1,
+            last_step_us: -50_000,
+            holds_followed: 1,
+            last_hold_us: 49_000,
         }
     );
 }
@@ -463,6 +491,8 @@ fn the_counters_report_max_step_wide_brackets_and_slewed_total() {
             slewed_us: 2_000,
             steps_followed: 0,
             last_step_us: 0,
+            holds_followed: 0,
+            last_hold_us: 0,
         }
     );
 }

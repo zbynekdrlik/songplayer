@@ -224,6 +224,8 @@ fn merge_carries_the_consumer_grid_telemetry_unswapped() {
         consumer_fill_pairs: 98,
         wall_anchor_steps_followed: 2,
         wall_anchor_last_step_us: 50_030,
+        wall_anchor_holds_followed: 1,
+        wall_anchor_last_hold_us: 1_499_000,
         ..Default::default()
     };
     let mut submit = SubmitCounters::new();
@@ -237,6 +239,8 @@ fn merge_carries_the_consumer_grid_telemetry_unswapped() {
     // The pacer wall's anchor telemetry stays the pacer's.
     assert_eq!(merged.wall_anchor_steps_followed, 2);
     assert_eq!(merged.wall_anchor_last_step_us, 50_030);
+    assert_eq!(merged.wall_anchor_holds_followed, 1);
+    assert_eq!(merged.wall_anchor_last_hold_us, 1_499_000);
 }
 
 // ---- paced_submit_snapshot: worst-of fold over a heartbeat window (#168 r2) ----

@@ -1,9 +1,10 @@
 //! #147 (design record 5845527884, Approach 1 (b)): the WallClock follows a
 //! CONFIRMED forward UTC step (a dantesync fleet date step, ~+50 ms about
 //! every 47 min) in ONE re-anchor, like every camera-box sender follows
-//! `CLOCK_REALTIME` at once. A lone outlier stays bounded at 1 ms and a
-//! backward correction is still held. Pure rule + a WallClock over the
-//! [`VirtualClock`]; exact values, so every comparison in the rule is pinned.
+//! `CLOCK_REALTIME` at once. A lone outlier stays bounded at 1 ms. Pure rule +
+//! a WallClock over the [`VirtualClock`]; exact values, so every comparison in
+//! the rule is pinned. The backward direction (design record 5850063723, ONE
+//! hold) is in `wallclock_tests_confirm_backward.rs`.
 
 use super::*;
 
@@ -26,10 +27,25 @@ fn resample(wall: &mut WallClock, clk: &VirtualClock) -> (i64, i64) {
     (before, wall.now_100ns())
 }
 
+/// An armed step; its direction is the sign of `delta_100ns`.
 fn pending(delta_100ns: i64, applied_100ns: i64) -> Option<PendingStep> {
+    let direction = if delta_100ns > 0 {
+        StepDirection::Forward
+    } else {
+        StepDirection::Backward
+    };
     Some(PendingStep {
         delta_100ns,
         applied_100ns,
+        direction,
+    })
+}
+
+/// A followed forward step of `total_100ns`.
+fn forward(total_100ns: i64) -> Option<FollowedStep> {
+    Some(FollowedStep {
+        total_100ns,
+        direction: StepDirection::Forward,
     })
 }
 
@@ -42,8 +58,9 @@ fn a_clamped_forward_narrow_resample_applies_1_ms_and_arms_the_step() {
     let d = decide_anchor_step(None, 50 * MS, true);
     assert_eq!(d.step, bounded_anchor_update(50 * MS));
     assert_eq!(d.step.applied_100ns, MS);
-    assert_eq!(d.followed_100ns, None);
+    assert_eq!(d.followed, None);
     assert_eq!(d.pending, pending(50 * MS, MS));
+    assert_eq!(d.pending.unwrap().direction, StepDirection::Forward);
 }
 
 #[test]
@@ -57,7 +74,7 @@ fn the_second_narrow_resample_measuring_the_same_step_follows_the_rest_at_once()
         }
     );
     assert!(!d.step.is_clamped(), "a followed step is not a slew");
-    assert_eq!(d.followed_100ns, Some(50 * MS), "the whole step");
+    assert_eq!(d.followed, forward(50 * MS), "the whole step");
     assert_eq!(d.pending, None);
 }
 
@@ -67,15 +84,15 @@ fn confirmation_holds_within_1_ms_either_way_and_not_one_tick_beyond() {
     for delta in [48 * MS, 50 * MS] {
         let d = decide_anchor_step(pending(50 * MS, MS), delta, true);
         assert_eq!(
-            d.followed_100ns,
-            Some(delta + MS),
+            d.followed,
+            forward(delta + MS),
             "delta {delta}: ±1 ms of the armed step is the same step"
         );
         assert_eq!(d.step.applied_100ns, delta);
     }
     for delta in [48 * MS - 1, 50 * MS + 1] {
         let d = decide_anchor_step(pending(50 * MS, MS), delta, true);
-        assert_eq!(d.followed_100ns, None, "delta {delta}: a different step");
+        assert_eq!(d.followed, None, "delta {delta}: a different step");
         assert_eq!(d.step.applied_100ns, MS, "delta {delta}: still bounded");
         assert_eq!(
             d.pending,
@@ -91,7 +108,7 @@ fn a_wide_bracket_never_arms_or_confirms() {
     assert_eq!(d.step.applied_100ns, MS);
     assert_eq!(d.pending, None, "a preempted sample never arms");
     let d = decide_anchor_step(pending(50 * MS, MS), 49 * MS, false);
-    assert_eq!(d.followed_100ns, None, "a preempted sample never confirms");
+    assert_eq!(d.followed, None, "a preempted sample never confirms");
     assert_eq!(d.step.applied_100ns, MS);
     assert_eq!(d.pending, None);
 }
@@ -102,7 +119,7 @@ fn a_delta_within_1_ms_is_applied_as_is_and_clears_the_armed_step() {
     // the plain rule applies it and nothing is followed or armed.
     let d = decide_anchor_step(pending(2 * MS, MS), MS, true);
     assert_eq!(d.step.applied_100ns, MS);
-    assert_eq!(d.followed_100ns, None);
+    assert_eq!(d.followed, None);
     assert_eq!(d.pending, None);
     let d = decide_anchor_step(None, 3_133, true);
     assert_eq!(d.step.applied_100ns, 3_133);
@@ -110,24 +127,30 @@ fn a_delta_within_1_ms_is_applied_as_is_and_clears_the_armed_step() {
 }
 
 #[test]
-fn a_confirmed_backward_step_is_still_held_never_followed() {
-    let d = decide_anchor_step(None, -50 * MS, true);
-    assert_eq!(d.step.applied_100ns, -MS, "a ≤ 1 ms hold");
-    assert_eq!(d.pending, None, "backward never arms");
-    // Even an armed backward step (never produced by the rule) is not followed.
-    let d = decide_anchor_step(pending(-50 * MS, -MS), -49 * MS, true);
-    assert_eq!(d.followed_100ns, None);
-    assert_eq!(d.step.applied_100ns, -MS);
-    assert_eq!(d.pending, None);
-}
-
-#[test]
-fn a_followed_step_is_recorded_as_its_total() {
+fn a_followed_forward_step_is_recorded_as_its_signed_total_and_is_no_hold() {
     let mut st = WallAnchorStats::default();
-    st.record_follow(50 * MS + 300);
-    st.record_follow(50_277 * 10);
+    let rest = AnchorStep {
+        applied_100ns: 49 * MS + 300,
+        carry_100ns: 0,
+    };
+    st.record_follow(
+        &FollowedStep {
+            total_100ns: 50 * MS + 300,
+            direction: StepDirection::Forward,
+        },
+        &rest,
+    );
+    st.record_follow(
+        &FollowedStep {
+            total_100ns: 50_277 * 10,
+            direction: StepDirection::Forward,
+        },
+        &rest,
+    );
     assert_eq!(st.steps_followed, 2);
     assert_eq!(st.last_step_us, 50_277, "the last step's total, in µs");
+    assert_eq!(st.holds_followed, 0, "a forward step is never a hold");
+    assert_eq!(st.last_hold_us, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -154,24 +177,6 @@ fn a_lone_plus_50_ms_outlier_then_a_normal_read_moves_the_wall_at_most_1_ms() {
 }
 
 #[test]
-fn a_confirmed_minus_50_ms_step_is_still_held_at_1_ms_per_resample() {
-    let clk = VirtualClock::new(0);
-    let mut wall = WallClock::new(Box::new(clk.clone()));
-    clk.step_utc(-50 * MS);
-    for r in 1..=3i64 {
-        let (before, after) = resample(&mut wall, &clk);
-        assert_eq!(after, before, "resample {r}: a hold, never a step back");
-        clk.advance_ns(1_000_000);
-        assert_eq!(
-            wall.now_100ns() - clk.truth_100ns(),
-            (50 - r) * MS,
-            "resample {r}: 1 ms closer to truth, no more"
-        );
-    }
-    assert_eq!(wall.anchor_stats().steps_followed, 0);
-}
-
-#[test]
 fn a_step_preempted_on_its_confirming_resample_slews_on_until_two_clean_reads_agree() {
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
@@ -190,4 +195,5 @@ fn a_step_preempted_on_its_confirming_resample_slews_on_until_two_clean_reads_ag
     let st = wall.anchor_stats();
     assert_eq!(st.steps_followed, 1);
     assert_eq!(st.wide_brackets, 1);
+    assert_eq!(st.holds_followed, 0);
 }

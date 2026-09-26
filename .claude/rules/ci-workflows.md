@@ -107,6 +107,14 @@ pure code up front:
   `spare`. The old busy test, which asserted only "nothing pending", let the
   mutant survive, because a later re-check hid it. Seed the side-effect state
   (a `spare`), trip the guard, and assert that the state is untouched.
+- **Never re-check a condition an earlier one already implies (#147 backward
+  slice).** In `decide_anchor_step`, an armed step is over 1 ms, and a read
+  that is within ±1 ms of it and itself over 1 ms already has the same sign.
+  An extra `p.direction == StepDirection::of(delta)` check would be dead
+  logic. Keep that proof in the doc comment instead. For the same reason,
+  classify the sign of a value that can never be 0 with `v.is_positive()`
+  (no operator to mutate), not `v > 0`: there `>` → `>=` is an equivalent
+  mutant.
 - **No trivial `const fn new()` next to `#[derive(Default)]`**: its body can be
   swapped for `Default::default()` with no observable change. Seed a `static`
   with a struct literal in the same module and use `Default` in tests.
