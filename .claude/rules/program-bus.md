@@ -19,7 +19,8 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   copies its boundary job (`program_bus::program_copy`: an `Arc` bump of the
   `SharedFrame` + the one audio block) BEFORE its own submit moves the frame
   into the holdover, and offers it right AFTER that submit
-  (`ProgramBus::offer(pid, job, submit_done)`). Only a source that can own a
+  (`ProgramBus::offer(pid, job)` — it takes NO clock, see below). Only a
+  source that can own a
   program boundary pays for the copy, but EVERY paced source records its
   progress on every boundary (`touch`, inside `program_copy`). Without that,
   the source you cut to looks absent until its first owned frame lands, and
@@ -36,21 +37,32 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 
 ## Ownership, order, fill (all pure, `ProgramCore`)
 
+- **One clock domain: the stamps.** The API's realtime clock and a submit
+  thread's per-song `WallClock` can both sit off the pacer walls after a UTC
+  step (those slew it in at ≤ 1 ms per resample — a 1 s step takes ~55 min).
+  So: a cut is placed from the newest stamp of the program's segment sources,
+  the source cut to, or the program itself (`from`; the caller's clock only
+  when nothing was seen); a boundary is declared missed BY TIME only in
+  `release` on the `SP-program` sender's own long-lived wall; `offer` reads
+  no clock (it forwards and fills only a gap its owner is already past,
+  `owner_passed`). Never pass a submit thread's clock into the bus again —
+  the re-review showed it black-fills the owner's own boundaries after a
+  forward step.
 - Cut state = `(first_stamp, pid)` segments. A cut lands on
-  `strict_next(strict_next(from))` = next boundary + `CUT_LEAD_SLOTS` (1),
-  where `from = max(caller's now, newest stamp any source offered)`: the API
-  reads the realtime clock, the sources stamp on their slewed `WallClock`, and
-  after a UTC step the realtime clock can lag — the clamp keeps the cut off
-  boundaries already emitted. The previous owner keeps every stamp before it.
-  A second cut on the same boundary REPLACES the first (the replaced source
-  never owned anything); a cut back to the source that still owns that
-  boundary just cancels the pending cut.
+  `strict_next(strict_next(from))` = next boundary + `CUT_LEAD_SLOTS` (1).
+  The previous owner keeps every stamp before it. A second cut on the same
+  boundary REPLACES the first (the replaced source never owned anything); a
+  cut back to the source that still owns that boundary just cancels the
+  pending cut.
 - A stamp-ordered reorder buffer releases strictly one boundary after the
   other: the new source's first frame waits for the old source's last one.
-- A missing boundary is filled with the program's own standby pair only once
-  it is reached AND (no owner | the owner already offered a LATER stamp — one
-  source offers in stamp order | the owner is quiet > 1 s | 3 slots passed).
-  More than 8 missed slots resync (like the pacer), never a black burst.
+- A missing boundary is filled with the program's own standby pair: on the
+  offer path only when its owner already touched/offered a LATER stamp (one
+  source works in stamp order) or the reorder buffer overflows; on the
+  sender's wall once it is reached AND (that | no owner | the owner is quiet
+  > 1 s | 3 slots passed). More than 8 missed slots resync (like the pacer) —
+  measured against the sender's wall, or the waiting frame on the offer path
+  — never a black burst.
 - An owned frame for an already-served boundary is `late_dropped`. A frame
   from a source that no longer owns anything is `NotOwner` (its segment is
   pruned once the cut boundary is served).

@@ -38,8 +38,8 @@
 //! it has been reached, when (see [`ProgramCore::fill_due`]):
 //!
 //! - it has no owner (no source selected yet);
-//! - its owner already offered a LATER stamp (a coalesce gap on that source —
-//!   one source offers in stamp order, so the boundary will never come);
+//! - its owner already touched or offered a LATER stamp (a coalesce gap on it —
+//!   one source works in stamp order, so the boundary will never come);
 //! - its owner has offered nothing for [`PROGRAM_LIVE_WINDOW_100NS`] (an absent
 //!   source is filled on time, not 100 ms late);
 //! - [`PROGRAM_FILL_GRACE_SLOTS`] slots after the boundary (a stalled source).
@@ -171,7 +171,7 @@ pub struct ProgramStatus {
 
 /// The pure program-bus decision layer: ownership, the reorder buffer, the
 /// standby fill, and the bounded queue to the `SP-program` sender. No clock and
-/// no threads — every call takes `now_100ns` explicitly.
+/// no threads — the time-based calls (`release`, `cut`) take `now_100ns`.
 pub struct ProgramCore {
     fps: i64,
     /// `(first_stamp, pid)`, ascending by `first_stamp`.
@@ -284,7 +284,7 @@ impl ProgramCore {
     /// boundary and the boundary is still open, then forwards whatever is
     /// contiguous. It reads no clock (module doc): the submit thread's wall is
     /// not the stamps' wall, so time-based misses are the sender's call.
-    pub fn offer(&mut self, pid: i64, job: SubmitJob, _now_100ns: i64) -> OfferOutcome {
+    pub fn offer(&mut self, pid: i64, job: SubmitJob) -> OfferOutcome {
         let stamp = job.video_tc_100ns;
         self.last_offer.insert(pid, stamp);
         if self.owner_of(stamp) != Some(pid) {
@@ -499,8 +499,8 @@ impl ProgramBus {
     }
 
     /// See [`ProgramCore::offer`].
-    pub fn offer(&self, pid: i64, job: SubmitJob, now_100ns: i64) -> OfferOutcome {
-        let outcome = self.lock().core.offer(pid, job, now_100ns);
+    pub fn offer(&self, pid: i64, job: SubmitJob) -> OfferOutcome {
+        let outcome = self.lock().core.offer(pid, job);
         self.ready.notify_one(); // the waiter re-checks the queue itself
         outcome
     }

@@ -284,7 +284,7 @@ pub(crate) fn run_submit_consumer(
         let cost = (submit_done - submit_start).max(0);
         handoff.record_submit(late, cost, submit_done);
         if let Some((bus, copy)) = program {
-            bus.offer(playlist_id, copy, submit_done);
+            bus.offer(playlist_id, copy);
         }
 
         since_conn_poll += 1;

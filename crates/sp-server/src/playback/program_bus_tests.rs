@@ -123,7 +123,7 @@ fn a_cut_is_contiguous_with_one_pair_per_boundary() {
         let now = b(k) + 5 * MS;
         let (a_owns, b_owns) = (k < 7, k >= 7);
         assert_eq!(
-            core.offer(SRC_A, job(4, &fa, b(k), 0.1), now),
+            core.offer(SRC_A, job(4, &fa, b(k), 0.1)),
             if a_owns {
                 OfferOutcome::Accepted
             } else {
@@ -132,7 +132,7 @@ fn a_cut_is_contiguous_with_one_pair_per_boundary() {
             "A at b({k})"
         );
         assert_eq!(
-            core.offer(SRC_B, job(8, &fb, b(k), 0.2), now),
+            core.offer(SRC_B, job(8, &fb, b(k), 0.2)),
             if b_owns {
                 OfferOutcome::Accepted
             } else {
@@ -193,10 +193,10 @@ fn the_new_source_waits_for_the_old_sources_last_boundary() {
     let (backend, mut out) = program();
     let (fa, fb) = (frame(4, 2), frame(8, 2));
     for k in 1..=5 {
-        core.offer(SRC_A, job(4, &fa, b(k), 0.1), b(k) + 5 * MS);
+        core.offer(SRC_A, job(4, &fa, b(k), 0.1));
     }
     core.cut(SRC_B, b(5) + 5 * MS);
-    let early = core.offer(SRC_B, job(8, &fb, b(7), 0.2), b(7) + 2 * MS);
+    let early = core.offer(SRC_B, job(8, &fb, b(7), 0.2));
     assert_eq!(early, OfferOutcome::Accepted);
     drain(&mut core, &mut out);
     assert_eq!(
@@ -205,13 +205,13 @@ fn the_new_source_waits_for_the_old_sources_last_boundary() {
         "b(7) waits for b(6)"
     );
 
-    let late_a = core.offer(SRC_A, job(4, &fa, b(6), 0.1), b(7) + 20 * MS);
+    let late_a = core.offer(SRC_A, job(4, &fa, b(6), 0.1));
     assert_eq!(late_a, OfferOutcome::Accepted);
     drain(&mut core, &mut out);
     assert_eq!(backend.video_timecodes(), stamps(1..=7));
     assert_eq!(video_dims(&backend), dims(&[("4x2", 6), ("8x2", 1)]));
     assert_eq!(
-        core.offer(SRC_A, job(4, &fa, b(7), 0.1), b(7) + 21 * MS),
+        core.offer(SRC_A, job(4, &fa, b(7), 0.1)),
         OfferOutcome::NotOwner
     );
     assert_eq!(core.status().health.filled, 0, "nothing was filled");
@@ -229,8 +229,8 @@ fn a_cut_to_an_idle_source_carries_its_standby_pair() {
     let b_black = frame(6, 2);
     for k in 1..=10 {
         let now = b(k) + 5 * MS;
-        core.offer(SRC_A, job(4, &fa, b(k), 0.1), now);
-        core.offer(SRC_B, job(6, &b_black, b(k), 0.0), now);
+        core.offer(SRC_A, job(4, &fa, b(k), 0.1));
+        core.offer(SRC_B, job(6, &b_black, b(k), 0.0));
         if k == 5 {
             core.cut(SRC_B, now);
         }
@@ -263,17 +263,17 @@ fn a_source_that_stalls_at_the_cut_boundary_is_covered_by_the_standby_fill() {
     let (backend, mut out) = program();
     let (fa, fb) = (frame(4, 2), frame(8, 2));
     for k in 1..=5 {
-        core.offer(SRC_A, job(4, &fa, b(k), 0.1), b(k) + 5 * MS);
+        core.offer(SRC_A, job(4, &fa, b(k), 0.1));
     }
     core.cut(SRC_B, b(5) + 5 * MS); // cut boundary b(7)
     // A stalls: its b(6) never comes in time. B delivers b(7), b(8).
-    core.offer(SRC_B, job(8, &fb, b(7), 0.2), b(7) + 5 * MS);
+    core.offer(SRC_B, job(8, &fb, b(7), 0.2));
     assert_eq!(
-        core.offer(SRC_B, job(8, &fb, b(7), 0.2), b(7) + 6 * MS),
+        core.offer(SRC_B, job(8, &fb, b(7), 0.2)),
         OfferOutcome::Late,
         "a duplicate of a waiting boundary is dropped"
     );
-    core.offer(SRC_B, job(8, &fb, b(8), 0.2), b(8) + 5 * MS);
+    core.offer(SRC_B, job(8, &fb, b(8), 0.2));
     core.release(b(6) + grace() - 1);
     drain(&mut core, &mut out);
     assert_eq!(
@@ -304,7 +304,7 @@ fn a_source_that_stalls_at_the_cut_boundary_is_covered_by_the_standby_fill() {
     // owns anything, so it is not forwarded — no double, no out-of-order send.
     assert!(!core.is_candidate(SRC_A));
     assert_eq!(
-        core.offer(SRC_A, job(4, &fa, b(6), 0.1), b(9) + 5 * MS),
+        core.offer(SRC_A, job(4, &fa, b(6), 0.1)),
         OfferOutcome::NotOwner
     );
     drain(&mut core, &mut out);
@@ -326,7 +326,7 @@ fn a_new_source_whose_first_frame_after_the_cut_is_slow_is_waited_for() {
         let now = b(k) + 5 * MS;
         let a = job(4, &fa, b(k), 0.1);
         if let Some(copy) = program_copy(&bus, SRC_A, &a) {
-            bus.offer(SRC_A, copy, now);
+            bus.offer(SRC_A, copy);
         }
         if k <= 5 {
             let bj = job(8, &fb, b(k), 0.2);
@@ -340,10 +340,7 @@ fn a_new_source_whose_first_frame_after_the_cut_is_slow_is_waited_for() {
     bus.release_due(b(7) + MS);
     let bj = job(8, &fb, b(7), 0.2);
     let copy = program_copy(&bus, SRC_B, &bj).expect("B is on program now");
-    assert_eq!(
-        bus.offer(SRC_B, copy, b(7) + 10 * MS),
-        OfferOutcome::Accepted
-    );
+    assert_eq!(bus.offer(SRC_B, copy), OfferOutcome::Accepted);
 
     let mut sent = Vec::new();
     while let Take::Job(job) = bus.take_timeout(Duration::ZERO) {
@@ -368,7 +365,7 @@ fn a_cut_follows_the_sources_clock_when_the_api_clock_lags() {
     core.select_initial(SRC_A);
     let fa = frame(4, 2);
     for k in 1..=10 {
-        core.offer(SRC_A, job(4, &fa, b(k), 0.1), b(k) + MS);
+        core.offer(SRC_A, job(4, &fa, b(k), 0.1));
     }
     assert!(core.cut(SRC_B, b(5)));
     assert_eq!(core.status().cut_boundary_100ns, Some(b(12)));
@@ -378,7 +375,7 @@ fn a_cut_follows_the_sources_clock_when_the_api_clock_lags() {
     // sources' stamp domain, the caller's clock is only the fallback.
     let mut core = ProgramCore::new();
     core.select_initial(SRC_A);
-    core.offer(SRC_A, job(4, &fa, b(1), 0.1), b(1) + MS);
+    core.offer(SRC_A, job(4, &fa, b(1), 0.1));
     assert!(core.cut(SRC_B, b(20)));
     assert_eq!(core.status().cut_boundary_100ns, Some(b(3)));
 }
@@ -391,7 +388,7 @@ fn a_cut_ignores_the_progress_of_sources_it_does_not_involve() {
     core.select_initial(SRC_A);
     let fa = frame(4, 2);
     for k in 1..=5 {
-        core.offer(SRC_A, job(4, &fa, b(k), 0.1), b(k) + MS);
+        core.offer(SRC_A, job(4, &fa, b(k), 0.1));
     }
     assert!(!core.touch(SRC_C, b(40)));
     assert!(!core.touch(SRC_B, b(5)));
@@ -401,18 +398,17 @@ fn a_cut_ignores_the_progress_of_sources_it_does_not_involve() {
 
 #[test]
 fn an_offer_never_decides_a_missed_boundary_on_the_sources_own_clock() {
-    // The paced submit thread passes its own per-song wall, which after a
-    // forward UTC step can read hundreds of ms ahead of the stamps. Only the
-    // program sender (on its own wall) declares a boundary missed by time;
-    // the offer path forwards, and fills only a gap the owner is already past.
+    // The paced submit thread's own per-song wall can read hundreds of ms ahead
+    // of the stamps after a forward UTC step, so `offer` takes no clock at all:
+    // only the program sender (on its own wall) declares a boundary missed by
+    // time; the offer path forwards, and fills only a gap the owner is past.
     let mut core = ProgramCore::new();
     core.select_initial(SRC_A);
     let (backend, mut out) = program();
     let fa = frame(4, 2);
     for k in 1..=5 {
-        let ahead = b(k) + 500 * MS;
         assert_eq!(
-            core.offer(SRC_A, job(4, &fa, b(k), 0.1), ahead),
+            core.offer(SRC_A, job(4, &fa, b(k), 0.1)),
             OfferOutcome::Accepted,
             "b({k})"
         );
@@ -430,8 +426,8 @@ fn a_source_that_jumps_more_than_eight_slots_resyncs_on_the_offer_path() {
     core.select_initial(SRC_A);
     let (backend, mut out) = program();
     let fa = frame(4, 2);
-    core.offer(SRC_A, job(4, &fa, b(1), 0.1), b(1) + MS);
-    core.offer(SRC_A, job(4, &fa, b(20), 0.1), b(20) + MS);
+    core.offer(SRC_A, job(4, &fa, b(1), 0.1));
+    core.offer(SRC_A, job(4, &fa, b(20), 0.1));
     drain(&mut core, &mut out);
     assert_eq!(backend.video_timecodes(), vec![b(1), b(20)]);
     let h = core.status().health;
@@ -494,7 +490,7 @@ fn a_selected_source_that_never_offered_is_filled_on_time() {
 fn an_owner_that_went_quiet_is_absent_after_the_live_window() {
     let mut core = ProgramCore::new();
     core.select_initial(SRC_A);
-    core.offer(SRC_A, job(4, &frame(4, 2), b(1), 0.1), b(1) + MS);
+    core.offer(SRC_A, job(4, &frame(4, 2), b(1), 0.1));
     // b(31) = b(1) + 1 s: inside its grace at both instants below.
     let far = b(31);
     assert_eq!(far, b(1) + PROGRAM_LIVE_WINDOW_100NS);
@@ -512,7 +508,7 @@ fn an_owner_that_went_quiet_is_absent_after_the_live_window() {
 fn a_live_owners_boundary_is_missed_exactly_one_grace_after_it() {
     let mut core = ProgramCore::new();
     core.select_initial(SRC_A);
-    core.offer(SRC_A, job(4, &frame(4, 2), b(1), 0.1), b(1) + MS);
+    core.offer(SRC_A, job(4, &frame(4, 2), b(1), 0.1));
     assert!(!core.fill_due(b(2), b(2) + grace() - 1));
     assert!(core.fill_due(b(2), b(2) + grace()));
 }
@@ -534,8 +530,8 @@ fn a_gap_in_the_owners_own_stream_is_filled_at_once() {
     core.select_initial(SRC_A);
     let (backend, mut out) = program();
     let fa = frame(4, 2);
-    core.offer(SRC_A, job(4, &fa, b(1), 0.1), b(1) + MS);
-    core.offer(SRC_A, job(4, &fa, b(4), 0.1), b(4) + MS);
+    core.offer(SRC_A, job(4, &fa, b(1), 0.1));
+    core.offer(SRC_A, job(4, &fa, b(4), 0.1));
     drain(&mut core, &mut out);
     assert_eq!(backend.video_timecodes(), stamps(1..=4));
     assert_eq!(
@@ -544,7 +540,7 @@ fn a_gap_in_the_owners_own_stream_is_filled_at_once() {
     );
     assert_eq!(core.status().health.filled, 2);
     assert_eq!(
-        core.offer(SRC_A, job(4, &fa, b(4), 0.1), b(4) + 2 * MS),
+        core.offer(SRC_A, job(4, &fa, b(4), 0.1)),
         OfferOutcome::Late,
         "a re-sent boundary that was already served is dropped"
     );
@@ -558,7 +554,7 @@ fn the_sender_fills_at_once_a_boundary_its_owner_is_already_past() {
     let mut core = ProgramCore::new();
     core.select_initial(SRC_A);
     let (backend, mut out) = program();
-    core.offer(SRC_A, job(4, &frame(4, 2), b(1), 0.1), b(1) + MS);
+    core.offer(SRC_A, job(4, &frame(4, 2), b(1), 0.1));
     assert!(core.touch(SRC_A, b(3)));
     core.release(b(2) + MS);
     drain(&mut core, &mut out);
@@ -596,7 +592,7 @@ fn a_full_program_queue_coalesces_to_the_freshest_boundaries() {
     let (backend, mut out) = program();
     let fa = frame(4, 2);
     for k in 1..=12 {
-        core.offer(SRC_A, job(4, &fa, b(k), 0.1), b(k) + MS);
+        core.offer(SRC_A, job(4, &fa, b(k), 0.1));
     }
     assert_eq!(core.queued(), PROGRAM_QUEUE_BOUND);
     drain(&mut core, &mut out);
@@ -610,20 +606,20 @@ fn a_reorder_buffer_over_its_bound_forces_the_missing_boundary() {
     core.select_initial(SRC_A);
     let (fa, fb) = (frame(4, 2), frame(8, 2));
     for k in 1..=5 {
-        core.offer(SRC_A, job(4, &fa, b(k), 0.1), b(k) + MS);
+        core.offer(SRC_A, job(4, &fa, b(k), 0.1));
     }
     while core.take().is_some() {}
     core.cut(SRC_B, b(5) + MS); // b(7)
-    let now = b(7) + MS; // A (b(6)) is live and inside its grace
+    // A (b(6)) is live; no sender check runs, only B's offers arrive.
     for k in 7..7 + PROGRAM_PENDING_BOUND {
-        core.offer(SRC_B, job(8, &fb, b(k), 0.2), now);
+        core.offer(SRC_B, job(8, &fb, b(k), 0.2));
     }
     assert_eq!(
         core.queued(),
         0,
         "{PROGRAM_PENDING_BOUND} waiting frames still wait"
     );
-    core.offer(SRC_B, job(8, &fb, b(7 + PROGRAM_PENDING_BOUND), 0.2), now);
+    core.offer(SRC_B, job(8, &fb, b(7 + PROGRAM_PENDING_BOUND), 0.2));
     let h = core.status().health;
     assert_eq!(h.filled, 1, "one more forces b(6)");
     assert_eq!(h.forwarded, 5 + PROGRAM_PENDING_BOUND as u64 + 1);
@@ -692,7 +688,7 @@ fn the_bus_wakes_the_sender_and_stops_after_draining() {
         "the copy is an Arc bump of the frame"
     );
     assert!(program_copy(&bus, SRC_B, &src).is_none(), "B pays nothing");
-    assert_eq!(bus.offer(SRC_A, copy, b(1) + MS), OfferOutcome::Accepted);
+    assert_eq!(bus.offer(SRC_A, copy), OfferOutcome::Accepted);
     match bus.take_timeout(Duration::ZERO) {
         Take::Job(job) => assert_eq!(job.stamp_100ns(), b(1)),
         _ => panic!("the forwarded boundary is queued"),
@@ -728,7 +724,7 @@ fn a_waiting_sender_wakes_on_a_queued_boundary_and_on_stop() {
         })
     };
     std::thread::sleep(Duration::from_millis(50));
-    bus.offer(SRC_A, job(4, &frame(4, 2), b(1), 0.1), b(1) + MS);
+    bus.offer(SRC_A, job(4, &frame(4, 2), b(1), 0.1));
     let (got, waited) = waiter.join().unwrap();
     assert!(got, "the waiter got the boundary");
     assert!(
