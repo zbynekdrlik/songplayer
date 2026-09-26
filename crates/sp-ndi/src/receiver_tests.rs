@@ -292,12 +292,13 @@ fn the_mock_blocks_the_receiver_create_and_destroy_for_the_set_delays() {
     let started = Instant::now();
     drop(sync);
     let destroy = started.elapsed();
+    // A margin under the set delays: a timer may wake a hair early.
     assert!(
-        create >= Duration::from_millis(60),
+        create >= Duration::from_millis(50),
         "create blocked {create:?}"
     );
     assert!(
-        destroy >= Duration::from_millis(90),
+        destroy >= Duration::from_millis(80),
         "destroy blocked {destroy:?}"
     );
     assert_eq!(
@@ -310,4 +311,47 @@ fn the_mock_blocks_the_receiver_create_and_destroy_for_the_set_delays() {
         ],
         "each call is recorded, then blocks"
     );
+}
+
+#[test]
+fn the_mock_records_the_thread_of_every_call() {
+    let mock = Arc::new(MockNdiReceiveBackend::default());
+    let opener = mock.clone();
+    let sync = std::thread::Builder::new()
+        .name("t-open".into())
+        .spawn(move || NdiFrameSync::connect(opener, "A (b)", "SP-input").unwrap())
+        .unwrap()
+        .join()
+        .unwrap();
+    std::thread::Builder::new()
+        .name("t-close".into())
+        .spawn(move || drop(sync))
+        .unwrap()
+        .join()
+        .unwrap();
+    let on = |call: &str, thread: &str| (call.to_string(), thread.to_string());
+    assert_eq!(
+        mock.calls_by_thread(),
+        vec![
+            on("recv_create(A (b),SP-input)", "t-open"),
+            on("framesync_create(1)", "t-open"),
+            on("framesync_destroy(2)", "t-close"),
+            on("recv_destroy(1)", "t-close"),
+        ]
+    );
+    assert_eq!(mock.calls().len(), 4, "the same calls, without threads");
+}
+
+#[test]
+fn the_mock_can_make_recv_create_panic() {
+    let mock = Arc::new(MockNdiReceiveBackend::default());
+    mock.set_panic_create(true);
+    let opener = mock.clone();
+    let joined =
+        std::thread::spawn(move || NdiFrameSync::connect(opener, "A (b)", "SP-input").map(|_| ()))
+            .join();
+    assert!(joined.is_err(), "recv_create panicked");
+    assert_eq!(mock.calls(), vec!["recv_create(A (b),SP-input)"]);
+    mock.set_panic_create(false);
+    assert!(NdiFrameSync::connect(mock.clone(), "A (b)", "SP-input").is_ok());
 }

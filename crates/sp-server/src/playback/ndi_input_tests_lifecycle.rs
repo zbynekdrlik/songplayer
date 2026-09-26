@@ -3,7 +3,12 @@
 //! SDK's close + create blocked the grid thread for ~0.5 s each (comment
 //! 5849047061). Here the mock's `recv_create` / `recv_destroy` block for 500 ms
 //! too, and the input must still offer exactly one pair on every boundary, the
-//! standby pair covering the connect. A child of `ndi_input_tests.rs`, sharing
+//! standby pair covering the connect.
+//!
+//! WHICH thread ran each SDK create / destroy is read from the mock
+//! (`calls_by_thread`), so the rule "never on the grid thread" is asserted
+//! exactly, never through a timing threshold a loaded CI runner (or the
+//! coverage job's ptrace) could trip. A child of `ndi_input_tests.rs`, sharing
 //! its rig.
 
 use std::sync::mpsc;
@@ -11,16 +16,22 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::*;
+use crate::playback::ndi_input::{INPUT_RECONNECT_100NS, InputSettings, run_input_loop};
 use crate::playback::program_bus::{ProgramJob, Take};
 use crate::playback::vban_out::VbanClock;
+use sp_ndi::test_util::MockNdiReceiveBackend;
 
 /// How long the mock's receiver create and destroy each block (the box's
 /// close took ~0.5 s).
 const BLOCK: Duration = Duration::from_millis(500);
 
-/// A `service()` call longer than 8 grid slots would force a resync on the
-/// real grid.
-const RESYNC_BUDGET: Duration = Duration::from_millis(8 * 1000 / 30);
+/// A lower bound for a timed 500 ms create / close (a timer may wake a hair
+/// early; still far above a 0 / 1 ms reading).
+const BLOCK_MS_AT_LEAST: u64 = 400;
+
+/// The helper threads that must run every SDK create / destroy.
+const CONNECT_THREAD: &str = "ndi-input-connect";
+const CLOSE_THREAD: &str = "ndi-input-close";
 
 /// The second source; its frames are all `NEW_FILL`.
 const CAM: &str = "CAM (2)";
@@ -49,6 +60,20 @@ fn serve_new_frames(rig: &Rig) {
     rig.mock.set_video_schedule(vec![Some(0)]);
 }
 
+/// The threads that made each recorded call starting with `prefix`, in order.
+fn threads_of(mock: &MockNdiReceiveBackend, prefix: &str) -> Vec<String> {
+    mock.calls_by_thread()
+        .into_iter()
+        .filter(|(call, _)| call.starts_with(prefix))
+        .map(|(_, thread)| thread)
+        .collect()
+}
+
+/// `n` times `thread`.
+fn on(thread: &str, n: usize) -> Vec<String> {
+    vec![thread.to_string(); n]
+}
+
 /// One boundary as the program got it.
 struct Step {
     /// `(width, first luma byte)`: 4 = a received 4×2 frame (its fill), 2 =
@@ -56,17 +81,13 @@ struct Step {
     picture: (u32, u8),
     /// `connects_pending` right after the boundary.
     pending: u32,
-    /// How long the `service()` call took.
-    took: Duration,
 }
 
 /// Service `b(k)` as the grid thread does: exactly one pair must reach the
 /// program (`drain` panics on a fill), stamped on `b(k)`, a standby pair being
 /// the exact black + one silent block.
 fn step(rig: &mut Rig, k: usize) -> Step {
-    let started = Instant::now();
     rig.input.service(b(k), b(k) + 2 * MS, &rig.bus);
-    let took = started.elapsed();
     let jobs = drain(&rig.bus);
     assert_eq!(jobs.len(), 1, "boundary {k}: exactly one pair");
     let job = &jobs[0];
@@ -81,7 +102,6 @@ fn step(rig: &mut Rig, k: usize) -> Step {
     Step {
         picture: (job.width, job.video[0]),
         pending: rig.status().connects_pending,
-        took,
     }
 }
 
@@ -89,14 +109,12 @@ fn step(rig: &mut Rig, k: usize) -> Step {
 struct Trace {
     pictures: Vec<(u32, u8)>,
     pending: Vec<u32>,
-    longest: Duration,
 }
 
 impl Trace {
     fn push(&mut self, s: Step) {
         self.pictures.push(s.picture);
         self.pending.push(s.pending);
-        self.longest = self.longest.max(s.took);
     }
 
     /// Boundaries between the change and the new source's first frame.
@@ -112,7 +130,6 @@ fn reconnect(rig: &mut Rig, before: usize, after: usize) -> Trace {
     let mut trace = Trace {
         pictures: Vec::new(),
         pending: Vec::new(),
-        longest: Duration::ZERO,
     };
     for k in 1..=before {
         trace.push(step(rig, k));
@@ -152,14 +169,24 @@ fn the_standby_pair_covers_the_connect_window() {
         trace.pictures, expected,
         "the old source, the standby pair while the connect runs, the new source"
     );
-    assert!(
-        trace.longest < RESYNC_BUDGET,
-        "no boundary waited on the SDK: the longest service() took {:?}",
-        trace.longest
-    );
     let st = rig.status();
     assert_eq!(st.no_source_boundaries, window as u64);
     assert_eq!(st.boundaries, trace.pictures.len() as u64);
+    // Neither the rig's connect nor CAM's, nor the old receiver's close, ran
+    // on the (test's) grid thread.
+    assert_eq!(threads_of(&rig.mock, "recv_create"), on(CONNECT_THREAD, 2));
+    assert_eq!(
+        threads_of(&rig.mock, "framesync_create"),
+        on(CONNECT_THREAD, 2)
+    );
+    wait_for("the old receiver is closed", || {
+        threads_of(&rig.mock, "recv_destroy").len() == 1
+    });
+    assert_eq!(
+        threads_of(&rig.mock, "framesync_destroy"),
+        on(CLOSE_THREAD, 1)
+    );
+    assert_eq!(threads_of(&rig.mock, "recv_destroy"), on(CLOSE_THREAD, 1));
 }
 
 #[test]
@@ -189,8 +216,14 @@ fn the_new_sources_frames_appear_once_the_connect_completes() {
         (4, 2),
         "three old frames, then the new one (repeated twice)"
     );
-    let connect_ms = st.last_connect_ms.expect("the connect is timed");
-    assert!(connect_ms >= 500, "the connect took {connect_ms} ms");
+    wait_for("the connect is timed", || {
+        rig.status().last_connect_ms.is_some()
+    });
+    let connect_ms = rig.status().last_connect_ms.unwrap();
+    assert!(
+        connect_ms >= BLOCK_MS_AT_LEAST,
+        "the connect took {connect_ms} ms"
+    );
 }
 
 #[test]
@@ -204,23 +237,23 @@ fn connects_pending_reads_1_during_the_connect_and_0_after() {
     expected.extend(vec![1; window]);
     expected.extend(vec![0; 3]);
     assert_eq!(trace.pending, expected);
-    wait_for("the old receiver's close is timed", || {
-        rig.status().last_close_ms.is_some()
+    wait_for("the connect and the old receiver's close are timed", || {
+        let st = rig.status();
+        st.last_connect_ms.is_some() && st.last_close_ms.is_some()
     });
     let json = serde_json::to_value(rig.status()).unwrap();
     assert_eq!(json["connects_pending"], 0);
     let connect_ms = json["last_connect_ms"].as_u64().unwrap();
     let close_ms = json["last_close_ms"].as_u64().unwrap();
-    assert!(connect_ms >= 500, "connect {connect_ms} ms");
-    assert!(close_ms >= 500, "close {close_ms} ms (off the grid thread)");
+    assert!(connect_ms >= BLOCK_MS_AT_LEAST, "connect {connect_ms} ms");
+    assert!(close_ms >= BLOCK_MS_AT_LEAST, "close {close_ms} ms");
 }
 
 #[test]
 fn a_second_change_during_a_pending_connect_drops_the_first_result() {
     let mut rig = slow_rig();
-    let mut longest = Duration::ZERO;
     for k in 1..=3 {
-        longest = longest.max(step(&mut rig, k).took);
+        step(&mut rig, k);
     }
     // The first change starts B's connect (500 ms) …
     rig.shared.set_settings(InputSettings {
@@ -239,7 +272,6 @@ fn a_second_change_during_a_pending_connect_drops_the_first_result() {
         assert!(Instant::now() < deadline, "CAM (2) never came through");
         k += 1;
         let s = step(&mut rig, k);
-        longest = longest.max(s.took);
         if s.picture == (4, NEW_FILL) {
             news += 1;
             assert_eq!(s.pending, 0);
@@ -252,10 +284,6 @@ fn a_second_change_during_a_pending_connect_drops_the_first_result() {
         }
         thread::sleep(Duration::from_millis(5));
     }
-    assert!(
-        longest < RESYNC_BUDGET,
-        "no boundary waited on the SDK: {longest:?}"
-    );
     let calls = rig.mock.calls();
     let at = |call: &str| calls.iter().position(|c| c == call).expect(call);
     let creates: Vec<&String> = calls
@@ -274,12 +302,15 @@ fn a_second_change_during_a_pending_connect_drops_the_first_result() {
         at("framesync_create(3)") < at("recv_create(CAM (2),SongPlayer program input)"),
         "one connect in flight: CAM's started only after B's had finished"
     );
-    // B's pair (receiver 3 / FrameSync 4) was never swapped in; it is closed
-    // off the grid thread. CAM's (FrameSync 6) carries the new frames.
+    // B's pair (receiver 3 / FrameSync 4) was never swapped in; CAM's
+    // (FrameSync 6) carries the new frames.
     assert_eq!(rig.calls_matching("framesync_capture_video(4)"), 0);
     assert_eq!(rig.calls_matching("framesync_capture_video(6)"), 3);
-    wait_for("B's pair is closed", || {
-        rig.mock.calls().iter().any(|c| c == "recv_destroy(3)")
+    assert!(rig.status().connected);
+    // Both closes (the first source's, then B's stale pair) ran on the close
+    // helper, never on the grid thread.
+    wait_for("both closes ran", || {
+        threads_of(&rig.mock, "recv_destroy").len() == 2
     });
     let calls = rig.mock.calls();
     let at = |call: &str| calls.iter().position(|c| c == call).expect(call);
@@ -287,7 +318,12 @@ fn a_second_change_during_a_pending_connect_drops_the_first_result() {
         at("framesync_destroy(4)") < at("recv_destroy(3)"),
         "the FrameSync first"
     );
-    assert!(rig.status().connected);
+    assert_eq!(
+        threads_of(&rig.mock, "framesync_destroy"),
+        on(CLOSE_THREAD, 2)
+    );
+    assert_eq!(threads_of(&rig.mock, "recv_destroy"), on(CLOSE_THREAD, 2));
+    assert_eq!(threads_of(&rig.mock, "recv_create"), on(CONNECT_THREAD, 3));
 }
 
 // --- the stop path ------------------------------------------------------------
@@ -298,11 +334,10 @@ fn the_stop_path_abandons_a_pending_connect_and_its_helper_closes_what_it_made()
     rig.mock.set_blocking(BLOCK, BLOCK);
     let s = step(&mut rig, 1);
     assert_eq!((s.picture, s.pending), (STANDBY, 1), "the connect runs");
-    let started = Instant::now();
     rig.input.disconnect();
     assert!(
-        started.elapsed() < RESYNC_BUDGET,
-        "the stop path does not wait for a pending connect"
+        !rig.mock.calls().iter().any(|c| c == "framesync_create(1)"),
+        "the stop path returned while the 500 ms create still ran"
     );
     assert_eq!(rig.status().connects_pending, 0);
     assert!(rig.input.sync.is_none());
@@ -318,6 +353,46 @@ fn the_stop_path_abandons_a_pending_connect_and_its_helper_closes_what_it_made()
             "recv_destroy(1)",
         ]
     );
+    assert_eq!(threads_of(&rig.mock, "recv_destroy"), on(CONNECT_THREAD, 1));
+}
+
+#[test]
+fn the_stop_path_closes_a_handed_over_pair_like_any_other() {
+    // The connect finished and handed its pair over, but no boundary took it
+    // yet when the input stops: it is closed on the close helper (timed, in
+    // SDK order), never dropped with the channel.
+    let mut rig = raw_rig(source_frames(30, 30), vec![Some(0)]);
+    let s = step(&mut rig, 1);
+    assert_eq!(s.pending, 1, "the connect was requested");
+    wait_for("the helper handed its pair over", || {
+        rig.status().last_connect_ms.is_some()
+    });
+    rig.input.disconnect();
+    assert_eq!(rig.status().connects_pending, 0);
+    assert!(
+        rig.status().last_close_ms.is_some(),
+        "closed through the timed close"
+    );
+    assert_eq!(
+        rig.mock.calls()[2..],
+        ["framesync_destroy(2)", "recv_destroy(1)"]
+    );
+    assert_eq!(threads_of(&rig.mock, "recv_destroy"), on(CLOSE_THREAD, 1));
+}
+
+#[test]
+fn a_connect_thread_that_dies_without_a_result_is_a_failed_connect() {
+    let mut rig = raw_rig(source_frames(30, 30), vec![Some(0)]);
+    rig.mock.set_panic_create(true);
+    settle(&mut rig.input, b(1)); // the helper panics: its channel closes
+    assert_eq!(
+        rig.input.retry_at,
+        b(1) + INPUT_RECONNECT_100NS,
+        "retried 5 s after the attempt"
+    );
+    assert_eq!(rig.status().connects_pending, 0);
+    assert!(rig.input.sync.is_none());
+    assert_eq!(threads_of(&rig.mock, "recv_create"), on(CONNECT_THREAD, 1));
 }
 
 // --- (re)connect + retry (moved from `ndi_input_tests.rs`) ---------------------
@@ -395,41 +470,41 @@ fn a_failed_receiver_is_retried_exactly_5_s_after_the_attempt() {
     assert_eq!(jobs[0].width, 4, "connected: the source's frame");
 }
 
-// --- the real grid ------------------------------------------------------------
+// --- the grid loop --------------------------------------------------------------
 
-/// The program wall in real time from just after `b(0)`: the loop services
-/// b(1), b(2), … on the real 33.3 ms grid, so a `service()` that blocks misses
-/// real boundaries, exactly as on the box.
-struct RealClock {
-    start: Instant,
+/// The loop thread's name, as in production (`spawn_input_thread`).
+const GRID_THREAD: &str = "ndi-input";
+
+/// The program wall for the loop test: virtual time that only the loop's own
+/// waits advance, each of which really sleeps. The loop runs at the real 30/s
+/// pace (the mock's 500 ms create spans ~15 boundaries), and a descheduled
+/// test thread can never make it miss a boundary.
+struct PacedClock {
+    now: i64,
 }
 
-impl VbanClock for RealClock {
+impl VbanClock for PacedClock {
     fn now_100ns(&mut self) -> i64 {
-        let elapsed = i64::try_from(self.start.elapsed().as_nanos() / 100).unwrap();
-        b(0) + 1_000 + elapsed
+        self.now
     }
 
     fn sleep_100ns(&mut self, d_100ns: i64) {
         let d = u64::try_from(d_100ns).unwrap_or(0);
         thread::sleep(Duration::from_nanos(d * 100));
+        self.now += d_100ns;
     }
 }
 
 /// `(value, run length)` of each run of equal values.
 fn runs(values: &[u32]) -> Vec<(u32, usize)> {
-    let mut out: Vec<(u32, usize)> = Vec::new();
-    for &v in values {
-        match out.last_mut() {
-            Some((last, n)) if *last == v => *n += 1,
-            _ => out.push((v, 1)),
-        }
-    }
-    out
+    values
+        .chunk_by(|x, y| x == y)
+        .map(|run| (run[0], run.len()))
+        .collect()
 }
 
 #[test]
-fn a_source_change_on_program_offers_one_pair_per_boundary_without_a_resync() {
+fn a_source_change_on_program_offers_one_pair_per_boundary_off_the_grid_thread() {
     let Rig {
         mock,
         shared,
@@ -450,14 +525,15 @@ fn a_source_change_on_program_offers_one_pair_per_boundary_without_a_resync() {
     });
     let (done_tx, done_rx) = mpsc::channel();
     let loop_bus = bus.clone();
-    thread::spawn(move || {
-        let mut input = input;
-        let mut clock = RealClock {
-            start: Instant::now(),
-        };
-        run_input_loop(&mut input, &loop_bus, &mut clock);
-        let _ = done_tx.send(input);
-    });
+    thread::Builder::new()
+        .name(GRID_THREAD.into())
+        .spawn(move || {
+            let mut input = input;
+            let mut clock = PacedClock { now: b(0) + 1_000 };
+            run_input_loop(&mut input, &loop_bus, &mut clock);
+            let _ = done_tx.send(input);
+        })
+        .unwrap();
     let boundaries = || shared.status(&cam()).boundaries;
     wait_for("10 boundaries on the first source", || boundaries() >= 10);
     shared.set_settings(cam());
@@ -473,12 +549,24 @@ fn a_source_change_on_program_offers_one_pair_per_boundary_without_a_resync() {
         .expect("the loop stops on the flag");
     bus.stop();
     sender.join().unwrap();
+    // The rule itself: no SDK create or destroy ever ran on the grid thread.
+    // The rig's connect and CAM's ran on the connect helper; the first
+    // source's close (the change) and CAM's (the stop path) on the close
+    // helper.
+    let on_grid: Vec<String> = mock
+        .calls_by_thread()
+        .into_iter()
+        .filter(|(call, thread)| {
+            thread == GRID_THREAD && (call.contains("_create(") || call.contains("_destroy("))
+        })
+        .map(|(call, _)| call)
+        .collect();
+    assert_eq!(on_grid, Vec::<String>::new(), "SDK lifecycle on the grid");
+    assert_eq!(threads_of(&mock, "recv_create"), on(CONNECT_THREAD, 2));
+    assert_eq!(threads_of(&mock, "recv_destroy"), on(CLOSE_THREAD, 2));
+    // One pair on every boundary: contiguous, no resync, no fill.
     let st = shared.status(&cam());
-    assert_eq!(
-        (st.resyncs, st.relatches),
-        (0, 0),
-        "the grid thread never blocked on the SDK"
-    );
+    assert_eq!((st.resyncs, st.relatches), (0, 0));
     let jobs: Vec<ProgramJob> = job_rx.try_iter().collect();
     let n = st.boundaries as usize;
     let stamps: Vec<i64> = jobs.iter().map(ProgramJob::stamp_100ns).collect();
@@ -506,6 +594,6 @@ fn a_source_change_on_program_offers_one_pair_per_boundary_without_a_resync() {
         (health.forwarded, health.filled, health.resyncs),
         (n as u64, 0, 0)
     );
-    assert!(st.last_connect_ms.unwrap() >= 500);
-    assert!(st.last_close_ms.unwrap() >= 500);
+    assert!(st.last_connect_ms.unwrap() >= BLOCK_MS_AT_LEAST);
+    assert!(st.last_close_ms.unwrap() >= BLOCK_MS_AT_LEAST);
 }
