@@ -1091,8 +1091,18 @@ Tests:
   - a 17 ms first frame is preceded by the fill, not a hole;
   - a pause before the first frame is filled on every boundary;
   - a seek refill holds the pre-seek picture, and a new song drops the hold.
-- One path: the idle Black arm and `fill_starved` both go through
+- **One path for the shared-picture standby.** The idle Black arm and
+  `fill_starved` (pre-roll black, starve fill, held seek frame) both go through
   `Pacer::emit_standby_pair` (`on_emit` + `standby_block` + `submit_shared`).
+  - The paused `FrozenLast` repeat of a real frame stays a playing-style repeat
+    (`sink.emit`, counts `repeats`), with the same `standby_block`.
+  - Both end in `submit_frame_at_boundary_owned`.
+- **Song-change gap WARN.** `decode_and_send_paced` WARNs
+  `paced: song change left > 8 boundaries unserviced (grid resync)` when its
+  pre-roll resynced. `run_idle_wait` logs
+  `paced idle: > 8 boundaries went unserviced …` for its idle stretch.
+  - Grep the box log for both after a deploy.
+  - Neither may ever appear during normal song changes.
 
 Never "fix" a song-start re-latch by dropping the standby audio, or by sending
 standby from another thread or in another format. That re-creates the cadence
