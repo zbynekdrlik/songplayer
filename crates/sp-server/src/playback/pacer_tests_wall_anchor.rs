@@ -57,7 +57,13 @@ struct StampSink {
     non_contiguous_stamps: u64,
     last_service_at: Option<Instant>,
     max_service_gap: Duration,
+    /// Gaps between two serviced boundaries longer than [`LONG_PAUSE`].
+    long_pauses: u64,
 }
+
+/// A gap between two serviced boundaries this long is a real output pause
+/// (three slots; a 1 ms arming hold only stretches one slot to ~34 ms).
+const LONG_PAUSE: Duration = Duration::from_millis(100);
 
 impl StampSink {
     /// The run loop serviced a boundary at virtual monotonic time `at`.
@@ -65,6 +71,9 @@ impl StampSink {
         if let Some(prev) = self.last_service_at {
             let gap = at.saturating_duration_since(prev);
             self.max_service_gap = self.max_service_gap.max(gap);
+            if gap > LONG_PAUSE {
+                self.long_pauses += 1;
+            }
         }
         self.last_service_at = Some(at);
     }
@@ -256,6 +265,7 @@ fn a_followed_minus_1_5_s_step_pauses_the_output_once_with_no_relatch_or_av_corr
     assert_eq!(s.resyncs, 0);
     assert_eq!(pacer.audio_stats().underruns, 0);
     // The output paused ONCE, for the followed hold plus the next slot.
+    assert_eq!(sink.long_pauses, 1, "exactly one output pause");
     let pause_ns = sink.max_service_gap.as_nanos();
     assert!(
         pause_ns
