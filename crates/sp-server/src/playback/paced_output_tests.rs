@@ -455,6 +455,27 @@ fn a_scope_attaching_while_the_last_jobs_are_still_queued_continues_after_them()
 }
 
 #[test]
+fn the_old_pacers_queued_tail_does_not_hide_a_hole_before_the_next_pacers_first_stamp() {
+    // As above, but the next pacer's first stamp lands 11 slots late (a hung
+    // box): the queued b(4) is still the OLD pacer's, so the b(5)..=b(14) hole
+    // after it is a song-change hole and must be counted.
+    let mut rig = Rig::new();
+    let h = rig.handoff.clone();
+    {
+        let _song = PacedFeed::attach(&h);
+        h.offer(job(b(3), 8, Some(2)));
+        rig.drain();
+        h.offer(job(b(4), 8, Some(2)));
+    }
+    let _idle = PacedFeed::attach(&h);
+    rig.drain();
+    h.offer(job(b(15), 8, Some(2)));
+    rig.drain();
+    assert_eq!(rig.backend.video_timecodes(), vec![b(3), b(4), b(15)]);
+    assert_eq!(rig.counters().song_change_unserviced_slots, 10);
+}
+
+#[test]
 fn an_attached_pacer_owns_the_grid_even_when_it_is_late() {
     let mut rig = Rig::new();
     let h = rig.handoff.clone();
