@@ -38,7 +38,7 @@ BASH_ONLY = """    steps:
       - name: Lint
         shell: bash
         run: |
-          echo "ERROR: Found assert!(true) — tests must verify real behavior."
+          echo "ERROR: lint failed — fix the tests."
 """
 
 PS_CLEAN = """    steps:
