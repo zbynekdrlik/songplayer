@@ -556,8 +556,10 @@ jobs:
     #             (a cancelled / failed / timed-out mutation run used to leave its
     #             pushed range permanently unverified — the next push only looked
     #             at its own `before..HEAD`); falls back to `github.event.before`.
-    #  - shards = ceil(mutants / 6), clamped 4..24 ("split the unit" done
-    #             mechanically: a 131-mutant push overran 4 shards x 20 min).
+    #  - shards = ceil(mutants / 6), clamped 4..64 ("split the unit" done
+    #             mechanically: a 131-mutant push overran 4 shards x 20 min;
+    #             a 335-mutant range at the old cap of 24 put 14 mutants in a
+    #             shard = ~18 min, and one attempt was cancelled at the bound).
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -620,7 +622,7 @@ jobs:
           fi
           N=$(( (COUNT + 5) / 6 ))
           if [ "$N" -lt 4 ]; then N=4; fi
-          if [ "$N" -gt 24 ]; then N=24; fi
+          if [ "$N" -gt 64 ]; then N=64; fi
           SHARDS=$(python3 -c "import json,sys; n=int(sys.argv[1]); print(json.dumps([f'{i}/{n}' for i in range(n)]))" "$N")
           echo "mutants in range: $COUNT -> $N shards"
           echo "base=$BASE" >> "$GITHUB_OUTPUT"
