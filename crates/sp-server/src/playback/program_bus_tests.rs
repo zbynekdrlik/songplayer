@@ -552,6 +552,23 @@ fn a_gap_in_the_owners_own_stream_is_filled_at_once() {
 }
 
 #[test]
+fn the_sender_fills_at_once_a_boundary_its_owner_is_already_past() {
+    // A's handoff coalesced b(2) away and A is already submitting b(3) (it
+    // touched b(3)): the sender's check fills b(2) right away, inside the grace.
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_A);
+    let (backend, mut out) = program();
+    core.offer(SRC_A, job(4, &frame(4, 2), b(1), 0.1), b(1) + MS);
+    assert!(core.touch(SRC_A, b(3)));
+    core.release(b(2) + MS);
+    drain(&mut core, &mut out);
+    assert_eq!(backend.video_timecodes(), stamps(1..=2));
+    assert_eq!(video_dims(&backend), dims(&[("4x2", 1), ("2x2", 1)]));
+    assert!(core.owner_passed(b(2)));
+    assert!(!core.owner_passed(b(3)), "b(3) itself is still coming");
+}
+
+#[test]
 fn more_than_eight_missed_slots_resync_instead_of_bursting() {
     let mut core = ProgramCore::new();
     let (backend, mut out) = program();

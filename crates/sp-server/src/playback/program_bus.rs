@@ -15,19 +15,27 @@
 //! stamp `>= cut_boundary` and `from` owns every stamp `< cut_boundary`. A cut
 //! lands on the NEXT boundary + [`CUT_LEAD_SLOTS`] slot: far enough ahead that
 //! both sources emit it after the cut is recorded, so exactly one frame per
-//! boundary reaches the program — no hole, no double. "Next" is measured from
-//! the later of the caller's clock and the newest stamp any source offered, so
-//! a lagging API clock can never pull the cut onto a boundary already emitted.
-//! Every paced source reports its progress on every boundary, so the source
-//! cut to is known to be live before its first owned frame arrives.
+//! boundary reaches the program — no hole, no double.
+//!
+//! **One clock domain: the sources' stamps.** The API's realtime clock and a
+//! submit thread's per-song wall can both sit off the stamp walls after a UTC
+//! step (the pacer walls slew it in at ≤ 1 ms per resample). So "next" for a
+//! cut is measured from the newest stamp the program sources, the source cut
+//! to, or the program itself reached (the caller's clock is only the fallback
+//! when nothing was seen), and a missed boundary is declared by TIME only on
+//! the `SP-program` sender's own long-lived wall (`release`). The offer path
+//! (`offer`) never reads a clock: it forwards, and fills only a gap the owner
+//! is already past. Every paced source reports its progress on every boundary
+//! (`touch`), so the source cut to is known to be live before its first owned
+//! frame arrives.
 //!
 //! **Order.** Two sources offer from two submit threads, so the new source's
 //! first frame can arrive before the old source's last one. The bus keeps a
 //! small stamp-ordered reorder buffer and releases strictly one boundary after
 //! the other. A boundary nobody delivers is MISSED and gets the program's own
 //! standby pair (the #147 NV12 black + one silent block), so the program keeps a
-//! constant cadence. A boundary is declared missed, once it has been reached,
-//! when (see [`ProgramCore::fill_due`]):
+//! constant cadence. On the sender's wall a boundary is declared missed, once
+//! it has been reached, when (see [`ProgramCore::fill_due`]):
 //!
 //! - it has no owner (no source selected yet);
 //! - its owner already offered a LATER stamp (a coalesce gap on that source —
@@ -172,7 +180,7 @@ pub struct ProgramCore {
     last: Option<i64>,
     /// Owned source jobs waiting for an earlier boundary, keyed by stamp.
     pending: BTreeMap<i64, SubmitJob>,
-    /// The last stamp each source offered (its liveness + progress).
+    /// The last stamp each source touched or offered (its liveness + progress).
     last_offer: HashMap<i64, i64>,
     queue: SubmitQueue<ProgramJob>,
     health: ProgramHealth,
@@ -225,18 +233,29 @@ impl ProgramCore {
     }
 
     /// Cut the program to `pid`. The cut boundary is the next boundary after
-    /// `now_100ns` plus [`CUT_LEAD_SLOTS`]; the previous owner keeps every stamp
-    /// before it. A later cut replaces one recorded on the same or a later
-    /// boundary. Returns `false` (nothing recorded) when `pid` is already the
-    /// selected source.
+    /// the newest stamp the involved sources (the program's segments + `pid`)
+    /// or the program itself reached — `now_100ns` (the caller's clock) only
+    /// when nothing was seen — plus [`CUT_LEAD_SLOTS`]. The previous owner keeps
+    /// every stamp before it. A later cut replaces one recorded on the same or a
+    /// later boundary; a cut back to the source that still owns that boundary
+    /// cancels the pending cut. Returns `false` (nothing recorded) when `pid` is
+    /// already the selected source.
     pub fn cut(&mut self, pid: i64, now_100ns: i64) -> bool {
         if self.selected() == Some(pid) {
             return false;
         }
-        // The caller's clock (the API's realtime) can lag the sources' slewed
-        // stamp clock after a UTC step: never cut before what they emit.
-        let seen = self.last_offer.values().copied().chain(self.last).max();
-        let from = seen.map_or(now_100ns, |s| s.max(now_100ns));
+        // Cut in the sources' stamp domain (module doc): the newest stamp the
+        // involved sources or the program reached; the caller's clock only as
+        // the fallback.
+        let seen = self
+            .segments
+            .iter()
+            .map(|&(_, p)| p)
+            .chain(std::iter::once(pid))
+            .filter_map(|p| self.last_offer.get(&p).copied())
+            .chain(self.last)
+            .max();
+        let from = seen.unwrap_or(now_100ns);
         let mut boundary = strict_next_boundary_100ns(from, self.fps);
         for _ in 0..CUT_LEAD_SLOTS {
             boundary = strict_next_boundary_100ns(boundary, self.fps);
@@ -262,8 +281,10 @@ impl ProgramCore {
 
     /// A source offers its boundary job (right after its own submit). Records
     /// the source's progress, keeps the job only when the source owns the
-    /// boundary and the boundary is still open, then releases whatever is ready.
-    pub fn offer(&mut self, pid: i64, job: SubmitJob, now_100ns: i64) -> OfferOutcome {
+    /// boundary and the boundary is still open, then forwards whatever is
+    /// contiguous. It reads no clock (module doc): the submit thread's wall is
+    /// not the stamps' wall, so time-based misses are the sender's call.
+    pub fn offer(&mut self, pid: i64, job: SubmitJob, _now_100ns: i64) -> OfferOutcome {
         let stamp = job.video_tc_100ns;
         self.last_offer.insert(pid, stamp);
         if self.owner_of(stamp) != Some(pid) {
@@ -274,7 +295,7 @@ impl ProgramCore {
             return OfferOutcome::Late;
         }
         self.pending.insert(stamp, job);
-        self.release(now_100ns);
+        self.release_inner(None);
         OfferOutcome::Accepted
     }
 
@@ -285,31 +306,54 @@ impl ProgramCore {
         if now_100ns < boundary_100ns {
             return false; // never fill a boundary before it is reached
         }
+        if self.owner_passed(boundary_100ns) {
+            return true;
+        }
         let Some(owner) = self.owner_of(boundary_100ns) else {
             return true;
         };
         let Some(&offered) = self.last_offer.get(&owner) else {
             return true;
         };
-        if offered >= strict_next_boundary_100ns(boundary_100ns, self.fps) {
-            return true;
-        }
         if now_100ns - offered > PROGRAM_LIVE_WINDOW_100NS {
             return true;
         }
         now_100ns >= boundary_100ns + PROGRAM_FILL_GRACE_SLOTS * interval_100ns(self.fps)
     }
 
-    /// Release, in stamp order, every boundary that is ready at `now_100ns`:
-    /// the owned frame when it is here, the standby pair when the boundary is
-    /// missed, a resync when more than 8 slots were missed. Stops at the first
-    /// boundary that is neither here nor missed yet.
+    /// Whether the owner of `boundary_100ns` already touched or offered a
+    /// LATER stamp — one source works in stamp order, so the boundary will
+    /// never come (a coalesce gap on that source). Needs no clock.
+    pub fn owner_passed(&self, boundary_100ns: i64) -> bool {
+        self.owner_of(boundary_100ns)
+            .and_then(|owner| self.last_offer.get(&owner))
+            .is_some_and(|&offered| offered >= strict_next_boundary_100ns(boundary_100ns, self.fps))
+    }
+
+    /// The `SP-program` sender's per-boundary check on its own wall: release,
+    /// in stamp order, every boundary that is ready at `now_100ns` — the owned
+    /// frame when it is here, the standby pair when the boundary is missed
+    /// ([`fill_due`](Self::fill_due)), a resync when more than 8 slots were
+    /// missed. Stops at the first boundary that is neither here nor missed yet.
     pub fn release(&mut self, now_100ns: i64) {
-        let floor_now = floor_boundary_100ns(now_100ns, self.fps);
+        self.release_inner(Some(now_100ns));
+    }
+
+    /// [`release`](Self::release) with `now = None` is the clock-free offer
+    /// path: a boundary counts as missed only when its owner is already past it
+    /// (or the reorder buffer overflows), and "how far behind" is measured
+    /// against the waiting frame instead of a clock.
+    fn release_inner(&mut self, now_100ns: Option<i64>) {
+        let floor_now = now_100ns.map(|n| floor_boundary_100ns(n, self.fps));
         for _ in 0..MAX_RELEASE_STEPS {
-            let expected = match self.last {
-                Some(last) => strict_next_boundary_100ns(last, self.fps),
-                None => self.pending.keys().next().copied().unwrap_or(floor_now),
+            let first_pending = self.pending.keys().next().copied();
+            let Some(expected) = self
+                .last
+                .map(|last| strict_next_boundary_100ns(last, self.fps))
+                .or(first_pending)
+                .or(floor_now)
+            else {
+                return;
             };
             if let Some(job) = self.pending.remove(&expected) {
                 self.health.forwarded += 1;
@@ -317,15 +361,18 @@ impl ProgramCore {
                 continue;
             }
             let overflow = self.pending.len() > PROGRAM_PENDING_BOUND;
-            if !overflow && !self.fill_due(expected, now_100ns) {
+            let missed = match now_100ns {
+                Some(now) => self.fill_due(expected, now),
+                None => self.owner_passed(expected),
+            };
+            if !overflow && !missed {
                 return;
             }
-            if lag_slots_100ns(expected, floor_now, self.fps) > GENLOCK_MAX_CATCHUP_INTERVALS {
-                let target = self
-                    .pending
-                    .keys()
-                    .next()
-                    .map_or(floor_now, |&first| first.min(floor_now));
+            let Some(horizon) = floor_now.or(first_pending) else {
+                return;
+            };
+            if lag_slots_100ns(expected, horizon, self.fps) > GENLOCK_MAX_CATCHUP_INTERVALS {
+                let target = first_pending.map_or(horizon, |first| first.min(horizon));
                 self.last = Some(floor_boundary_100ns(target - 1, self.fps));
                 self.health.resyncs += 1;
                 continue;
