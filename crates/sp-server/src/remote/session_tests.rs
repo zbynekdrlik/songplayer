@@ -412,14 +412,35 @@ async fn a_client_that_never_identifies_is_closed_after_the_identify_timeout() {
 
 #[tokio::test]
 async fn an_identified_client_outlives_the_identify_timeout() {
-    let rig = rig_full(None, true, Duration::from_millis(300)).await;
-    let mut ws = connect(rig.addr).await;
-    hello_identify(&mut ws, 0).await;
-    // The scenario itself: twice the identify timeout passes after Identify.
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    let d = request(&mut ws, "GetStudioModeEnabled", None).await;
+    // No wall-time window: a LATER client that never identifies is the
+    // witness. Its deadline is after A's, so once it is closed, A's deadline
+    // has passed too — and A must still be served.
+    let rig = rig_full(None, true, Duration::from_secs(2)).await;
+    let mut a = connect(rig.addr).await;
+    hello_identify(&mut a, 0).await;
+    let mut witness = connect(rig.addr).await;
+    next_json(&mut witness).await;
+    assert_eq!(next_close(&mut witness).await.0, 4007);
+    let d = request(&mut a, "GetStudioModeEnabled", None).await;
     assert_eq!(d["requestStatus"]["code"], 100);
-    assert_eq!(rig.remote().clients, 1);
+    wait_for("only the identified client is left", || {
+        rig.remote().clients == 1
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_socket_that_never_does_the_websocket_handshake_is_dropped() {
+    use tokio::io::AsyncReadExt;
+    let rig = rig_full(None, true, Duration::from_millis(300)).await;
+    let mut raw = TcpStream::connect(rig.addr).await.unwrap();
+    let mut buf = [0u8; 16];
+    // Correct code drops the socket (EOF or a reset); it can never time out.
+    let read = tokio::time::timeout(TIMEOUT, raw.read(&mut buf))
+        .await
+        .expect("the idle socket was kept past the timeout");
+    assert!(matches!(read, Ok(0) | Err(_)), "{read:?}");
+    assert_eq!(rig.remote().clients, 0);
 }
 
 #[tokio::test]
@@ -669,6 +690,21 @@ async fn an_unanswered_scene_lookup_cuts_to_obs_manual_and_says_so() {
 }
 
 #[tokio::test]
+async fn an_unanswered_scene_lookup_with_the_input_off_keeps_and_says_why() {
+    let rig = rig().await;
+    enable_input(&rig.pool, false).await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    let d = press(&mut ws, "lost").await;
+    assert_eq!(d["requestStatus"]["code"], 100);
+    assert_eq!(rig.bus.status().source, None);
+    let cut = rig.remote().last_remote_cut.unwrap();
+    assert_eq!(cut.action, "keep");
+    assert_eq!(cut.source, None);
+    assert_eq!(cut.reason, Some("lookup_failed"));
+}
+
+#[tokio::test]
 async fn a_manual_scene_keeps_the_program_when_the_input_is_not_a_source() {
     let rig = rig().await;
     enable_input(&rig.pool, false).await;
@@ -800,6 +836,11 @@ async fn reidentify_changes_the_subscriptions() {
     )
     .await;
     assert_eq!(next_json(&mut ws).await["op"], 2);
+    // A Reidentify naming no subscriptions KEEPS them (obs-websocket's rule):
+    // still 0, so the event is not delivered — the next message is the
+    // response (`biased;` would deliver an already-queued event first).
+    send_json(&mut ws, json!({ "op": 3, "d": {} })).await;
+    assert_eq!(next_json(&mut ws).await["op"], 2);
     rig.events
         .send(raw(
             "CurrentProgramSceneChanged",
@@ -824,16 +865,4 @@ async fn reidentify_changes_the_subscriptions() {
     let ev = next_json(&mut ws).await;
     assert_eq!(ev["op"], 5);
     assert_eq!(ev["d"]["eventData"]["sceneName"], "b");
-
-    // A Reidentify naming no subscriptions keeps them (obs-websocket's rule).
-    send_json(&mut ws, json!({ "op": 3, "d": {} })).await;
-    assert_eq!(next_json(&mut ws).await["op"], 2);
-    rig.events
-        .send(raw(
-            "CurrentProgramSceneChanged",
-            json!({ "sceneName": "c" }),
-        ))
-        .unwrap();
-    let ev = next_json(&mut ws).await;
-    assert_eq!(ev["d"]["eventData"]["sceneName"], "c");
 }

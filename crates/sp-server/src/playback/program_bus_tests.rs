@@ -793,3 +793,35 @@ async fn the_selected_source_persists_and_reloads() {
     assert_eq!(restore_selected_source(&pool, &bad).await, None);
     assert_eq!(bad.status().source, None);
 }
+
+/// #213: `persist_and_cut` persists, then cuts, and two cuts (the API and the
+/// remote control) never interleave: while one holds `cut_serial`, another
+/// cannot even persist. The "not yet" window only errs in the safe direction.
+#[tokio::test]
+async fn persist_and_cut_persists_then_cuts_one_cut_at_a_time() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    let bus = ProgramBus::new();
+    let held = bus.cut_serial.lock().await;
+    let blocked =
+        tokio::time::timeout(Duration::from_millis(50), persist_and_cut(&pool, &bus, 5)).await;
+    assert!(blocked.is_err(), "a cut ran while another held the lock");
+    assert_eq!(
+        crate::db::models::get_setting(&pool, SETTING_PROGRAM_SOURCE)
+            .await
+            .unwrap(),
+        None,
+        "nothing is persisted while another cut runs"
+    );
+    drop(held);
+    let status = persist_and_cut(&pool, &bus, 5).await.unwrap();
+    assert_eq!(status.source, Some(5));
+    assert_eq!(bus.status().source, Some(5));
+    assert_eq!(
+        crate::db::models::get_setting(&pool, SETTING_PROGRAM_SOURCE)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("5")
+    );
+}

@@ -113,7 +113,8 @@ Research (spec + the Companion module v3.15.3 and 4.0 beta): #213 comment
 2. Only when cg OBS accepted, look up X's playlists. A lookup that gets no
    answer reads as "no playlist". That is safe: cg OBS already shows X, and
    "OBS manuál" carries cg OBS's mix. It is logged as a WARN and marked
-   `reason: lookup_failed` on the cut.
+   `reason: lookup_failed` on the cut. That reason wins over
+   `input_inactive`: with the input off it is a keep with `lookup_failed`.
 3. Cut through `program_bus::persist_and_cut`, the ONE cut path shared with
    `POST /api/v1/program/cut`: persist first, then cut on the boundary after
    next. It is serialized on the bus (`cut_serial`), so an API cut and a
@@ -147,11 +148,21 @@ not forwarded: the cut is by scene name. Companion always sends the name.
 - The surface is bounded:
   - a message or frame over `MAX_MESSAGE_BYTES` (1 MiB) ends the session
     unparsed;
-  - a client that does not identify within `IDENTIFY_TIMEOUT` (10 s) is
-    closed with 4007;
+  - ONE deadline, `IDENTIFY_TIMEOUT` (10 s), covers the WebSocket
+    handshake AND the `Identify`:
+    - a socket that never finishes the handshake is dropped;
+    - a session that does not identify in time is closed with 4007;
+    - in the `biased` select the deadline comes before the client's
+      messages, so a ping stream cannot keep an unidentified session alive;
   - at most `MAX_UNSUPPORTED_LISTED` (64) unsupported request types are
-    remembered, and client-chosen request types are clipped to 64
-    characters.
+    remembered;
+  - client-chosen strings (request types, scene names) are clipped to 64
+    characters in telemetry and logs (`clip`). The forward itself uses the
+    full name.
+- Testing the timeout without a wall-time window: a LATER client that never
+  identifies is the witness. Its close proves the earlier client's deadline
+  passed, and the identified earlier client must still be served
+  (`an_identified_client_outlives_the_identify_timeout`).
 - `GET /api/v1/program` → `remote {enabled, port, auth, listening, error,
   clients, requests, last_request, last_remote_cut, unsupported_requests}`.
   `enabled` / `port` / `auth` come from the STORED settings, so a save shows

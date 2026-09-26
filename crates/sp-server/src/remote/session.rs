@@ -28,7 +28,7 @@ use super::protocol::{
     STATUS_GENERIC_ERROR, STATUS_MISSING_REQUEST_FIELD, STATUS_MISSING_REQUEST_TYPE,
     STATUS_NOT_READY, STATUS_UNKNOWN_REQUEST_TYPE, Subprotocol,
 };
-use super::{Facade, MAX_MESSAGE_BYTES, RemoteCut, now_ms};
+use super::{Facade, MAX_MESSAGE_BYTES, RemoteCut, clip, now_ms};
 use crate::obs::ObsEvent;
 use crate::playback::ndi_input::load_input_settings;
 use crate::playback::program_bus::persist_and_cut;
@@ -40,6 +40,9 @@ pub(crate) const NOT_READY_COMMENT: &str = "cg OBS is not reachable from SongPla
 
 /// Serve one client until it disconnects or the listener stops.
 pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>) {
+    // ONE deadline for the whole unidentified phase — the WebSocket handshake
+    // AND the `Identify` — so an idle socket is never kept.
+    let identify_deadline = tokio::time::Instant::now() + facade.identify_timeout;
     let callback = |req: &Request, mut resp: Response| {
         let offered = req
             .headers()
@@ -60,10 +63,14 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
         .max_message_size(Some(MAX_MESSAGE_BYTES))
         .max_frame_size(Some(MAX_MESSAGE_BYTES));
     let accepted = tokio_tungstenite::accept_hdr_async_with_config(stream, callback, Some(config));
-    let ws = match accepted.await {
-        Ok(ws) => ws,
-        Err(e) => {
+    let ws = match tokio::time::timeout_at(identify_deadline, accepted).await {
+        Ok(Ok(ws)) => ws,
+        Ok(Err(e)) => {
             info!(%peer, %e, "remote: WebSocket handshake refused");
+            return;
+        }
+        Err(_) => {
+            info!(%peer, "remote: no WebSocket handshake in time — dropped");
             return;
         }
     };
@@ -83,11 +90,12 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
     {
         return;
     }
-    let identify_deadline = tokio::time::Instant::now() + facade.identify_timeout;
     loop {
         tokio::select! {
             // Events first: a cg OBS event that arrived before a client message is
             // delivered under the subscriptions that were active when it arrived.
+            // The identify deadline comes before the client's messages, so a
+            // stream of pings cannot keep an unidentified session alive.
             biased;
             event = events.recv() => match event {
                 Ok(ObsEvent::Raw { event_type, event_data }) => {
@@ -101,6 +109,11 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
                 Err(RecvError::Lagged(n)) => warn!(%peer, n, "remote: the client missed cg OBS events"),
                 Err(RecvError::Closed) => break,
             },
+            _ = tokio::time::sleep_until(identify_deadline), if !session.identified => {
+                info!(%peer, "remote: no Identify in time — closing the session");
+                close(&mut write, &protocol::IDENTIFY_TIMED_OUT).await;
+                break;
+            }
             incoming = read.next() => {
                 let step = match incoming {
                     Some(Ok(Message::Text(text))) => session.on_text(&text).await,
@@ -124,11 +137,6 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
                         break;
                     }
                 }
-            }
-            _ = tokio::time::sleep_until(identify_deadline), if !session.identified => {
-                info!(%peer, "remote: no Identify in time — closing the session");
-                close(&mut write, &protocol::IDENTIFY_TIMED_OUT).await;
-                break;
             }
         }
     }
@@ -268,7 +276,7 @@ pub(crate) async fn execute(facade: &Facade, item: &RequestItem) -> Reply {
         Route::Unsupported => {
             if facade.shared().note_unsupported(request_type) {
                 info!(
-                    request_type,
+                    request_type = %clip(request_type),
                     "remote: a client asked for a request the facade does not serve (logged once per type)"
                 );
             }
@@ -304,6 +312,8 @@ async fn set_program_scene(facade: &Facade, data: Option<Value>) -> Reply {
             "Your request is missing `sceneName` (the remote control cuts by scene name).",
         );
     };
+    // Telemetry and logs carry the scene name clipped (a client-chosen string).
+    let shown = clip(&scene);
     let _order = facade.cut_order.lock().await;
     let reply = forward(facade, "SetCurrentProgramScene", data).await;
     // Outer `None`: cg OBS did not switch. Inner `None`: the lookup got no
@@ -316,7 +326,7 @@ async fn set_program_scene(facade: &Facade, data: Option<Value>) -> Reply {
     };
     let lookup_failed = matches!(found, Some(None));
     if lookup_failed {
-        warn!(scene = %scene, "remote: the scene lookup got no answer — treated as a manual scene");
+        warn!(scene = %shown, "remote: the scene lookup got no answer — treated as a manual scene");
     }
     let playlists = found.map(Option::unwrap_or_default);
     let input_active = load_input_settings(&facade.pool)
@@ -324,13 +334,14 @@ async fn set_program_scene(facade: &Facade, data: Option<Value>) -> Reply {
         .is_ok_and(|s| s.active());
     let action = map::scene_action(playlists.as_ref(), input_active);
     let mut cut = RemoteCut {
-        scene,
+        scene: shown,
         action: action.label(),
         source: action.source(),
-        reason: action
-            .keep_reason()
-            .map(KeepReason::as_str)
-            .or(lookup_failed.then_some("lookup_failed")),
+        // An unanswered lookup is the cause whatever the action (a cut to "OBS
+        // manuál", or keep when the input is not a source).
+        reason: lookup_failed
+            .then_some("lookup_failed")
+            .or(action.keep_reason().map(KeepReason::as_str)),
         cut_boundary_100ns: None,
         at_ms: now_ms(),
     };

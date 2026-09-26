@@ -57,8 +57,9 @@ pub const REMOTE_SETTINGS_POLL: Duration = Duration::from_secs(5);
 pub const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(3);
 /// The pause after a failed `accept` (never a hot loop on e.g. EMFILE).
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
-/// A client that has not identified within this is closed (an idle
-/// unauthenticated socket is never kept).
+/// A client that has not completed the WebSocket handshake AND identified
+/// within this is dropped / closed (an idle unauthenticated socket is never
+/// kept).
 pub const IDENTIFY_TIMEOUT: Duration = Duration::from_secs(10);
 /// The largest message / frame a client may send (1 MiB). Companion's biggest
 /// message is a batch of a few KB; tungstenite's default would be 64 MiB.
@@ -142,8 +143,9 @@ pub struct RemoteCut {
     /// The program source cut to (`-1` = "OBS manuál"), `null` when kept.
     pub source: Option<i64>,
     /// Why nothing was cut (`not_switched`, `input_inactive`,
-    /// `persist_failed`), or `lookup_failed` for a cut to "OBS manuál" made
-    /// because the scene lookup got no answer.
+    /// `persist_failed`), or `lookup_failed` when the scene lookup got no
+    /// answer (a cut to "OBS manuál", or keep when the input is not a
+    /// source). The scene name is clipped to 64 characters.
     pub reason: Option<&'static str>,
     /// The boundary the cut lands on (`GET /api/v1/program`'s own field).
     pub cut_boundary_100ns: Option<i64>,
@@ -263,9 +265,10 @@ pub(crate) fn is_new_error(previous: Option<&str>, current: Option<&str>) -> boo
     current.is_some() && previous != current
 }
 
-/// A client-chosen request type, clipped to [`MAX_REQUEST_TYPE_CHARS`].
-fn clip(request_type: &str) -> String {
-    request_type.chars().take(MAX_REQUEST_TYPE_CHARS).collect()
+/// A client-chosen string (a request type, a scene name) as stored and
+/// logged: clipped to [`MAX_REQUEST_TYPE_CHARS`].
+pub(crate) fn clip(text: &str) -> String {
+    text.chars().take(MAX_REQUEST_TYPE_CHARS).collect()
 }
 
 /// Decrements the client count when a session ends.
