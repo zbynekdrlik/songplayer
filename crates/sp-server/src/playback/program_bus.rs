@@ -64,7 +64,7 @@ pub const SETTING_PROGRAM_SOURCE: &str = "program_source";
 
 /// A cut takes effect this many slots after the NEXT boundary (design: next
 /// boundary + 1 slot, ~33–67 ms after the click).
-pub const CUT_LEAD_SLOTS: i64 = 3;
+pub const CUT_LEAD_SLOTS: i64 = 1;
 
 /// How long the program waits for a LIVE source's boundary before it fills the
 /// slot with its own standby pair: 3 slots (100 ms) covers the measured p99

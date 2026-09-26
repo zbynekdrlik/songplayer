@@ -142,6 +142,12 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/ndi/burn",
             axum::routing::post(routes::set_ndi_burn),
         )
+        // #209: the program bus — SongPlayer's own NDI `SP-program` (master switcher).
+        .route("/api/v1/program", axum::routing::get(program::get_program))
+        .route(
+            "/api/v1/program/cut",
+            axum::routing::post(program::post_program_cut),
+        )
         // #173: operator/verification one-shot dark-wall recovery rung.
         .route(
             "/api/v1/ndi/recover/{playlist_id}",
