@@ -728,6 +728,11 @@ pub(crate) fn decode_and_send_paced(
             }
         };
 
+        // #147: stop the producer NOW (idempotent with the stop after the scope),
+        // so its MF decoder teardown overlaps the submit drain + join below and
+        // the unserviced gap before the next song's pre-roll / idle fill is short.
+        shared.stop();
+
         // Signal the submit thread: drain the handoff, flush the async
         // double-buffer, and exit. The scope JOINS it here, so the submitter's
         // `prev_frame` is released before this function returns and the outer
