@@ -267,21 +267,30 @@ pub trait NdiReceiveBackend: Send + Sync {
 #[derive(Clone, Copy)]
 struct Raw(usize);
 
-/// Production [`NdiReceiveBackend`] on the process's one [`NdiLib`] (the same
-/// library the senders use — `NDIlib_initialize` runs once per process).
-pub struct RealNdiReceiveBackend {
-    lib: Arc<NdiLib>,
+/// The SDK's receiver + FrameSync calls, with ONE lock PER receiver and PER
+/// FrameSync (the #147 round 11 `HandleTable`). Every call holds its own
+/// instance's lock only: a destroy still waits for a call in flight on the
+/// SAME instance, while a slow create / destroy (~0.5 s on the box, run on the
+/// input's helper threads) never holds up a call on ANOTHER instance (#212
+/// follow-up — one lock across every SDK call made the grid thread's capture
+/// of the new pair wait for the old pair's destroy). Split from
+/// [`RealNdiReceiveBackend`] so the lock scope is tested over fake SDK
+/// functions (`tests::calls_on_one_instance_never_wait_for_a_slow_call_on_another`).
+struct RecvHandles {
     fns: RecvFns,
     /// Handle ids, shared by both tables (a receiver and a FrameSync never
     /// get the same id).
     next: AtomicUsize,
-    /// One lock PER receiver and PER FrameSync (the #147 round 11
-    /// `HandleTable`). Every SDK call holds its own instance's lock only, so a
-    /// destroy can never race a capture on the SAME instance, while a slow
-    /// create / destroy (~0.5 s on the box, run on the input's helper threads)
-    /// never holds up a capture on ANOTHER instance (#212 follow-up).
     recv: HandleTable<Raw>,
     fs: HandleTable<Raw>,
+}
+
+/// Production [`NdiReceiveBackend`] on the process's one [`NdiLib`] (the same
+/// library the senders use — `NDIlib_initialize` runs once per process).
+pub struct RealNdiReceiveBackend {
+    /// Keeps the library loaded (the `fns` point into it) and serves `find`.
+    lib: Arc<NdiLib>,
+    handles: RecvHandles,
 }
 
 impl RealNdiReceiveBackend {
@@ -292,16 +301,8 @@ impl RealNdiReceiveBackend {
         let fns = lib.recv?;
         Some(Self {
             lib,
-            fns,
-            next: AtomicUsize::new(0),
-            recv: HandleTable::new(),
-            fs: HandleTable::new(),
+            handles: RecvHandles::new(fns),
         })
-    }
-
-    #[cfg_attr(test, mutants::skip)] // reached only from the FFI methods below
-    fn next_id(&self) -> usize {
-        self.next.fetch_add(1, Ordering::Relaxed) + 1
     }
 }
 
@@ -349,6 +350,83 @@ impl NdiReceiveBackend for RealNdiReceiveBackend {
             (self.lib.find_destroy)(finder);
         }
         names
+    }
+
+    #[cfg_attr(test, mutants::skip)]
+    fn recv_create(&self, source_name: &str, recv_name: &str) -> Result<usize, NdiError> {
+        self.handles.recv_create(source_name, recv_name)
+    }
+
+    #[cfg_attr(test, mutants::skip)]
+    fn recv_destroy(&self, recv: usize) {
+        self.handles.recv_destroy(recv);
+    }
+
+    #[cfg_attr(test, mutants::skip)]
+    fn recv_connections(&self, recv: usize) -> i32 {
+        self.handles.recv_connections(recv)
+    }
+
+    #[cfg_attr(test, mutants::skip)]
+    fn framesync_create(&self, recv: usize) -> Result<usize, NdiError> {
+        self.handles.framesync_create(recv)
+    }
+
+    #[cfg_attr(test, mutants::skip)]
+    fn framesync_destroy(&self, fs: usize) {
+        self.handles.framesync_destroy(fs);
+    }
+
+    #[cfg_attr(test, mutants::skip)]
+    fn framesync_capture_video(&self, fs: usize) -> NDIlib_video_frame_v2_recv_t {
+        self.handles.framesync_capture_video(fs)
+    }
+
+    #[cfg_attr(test, mutants::skip)]
+    fn framesync_free_video(&self, fs: usize, frame: &mut NDIlib_video_frame_v2_recv_t) {
+        self.handles.framesync_free_video(fs, frame);
+    }
+
+    #[cfg_attr(test, mutants::skip)]
+    fn framesync_capture_audio(
+        &self,
+        fs: usize,
+        sample_rate: i32,
+        channels: i32,
+        samples: i32,
+    ) -> NDIlib_audio_frame_v2_t {
+        self.handles
+            .framesync_capture_audio(fs, sample_rate, channels, samples)
+    }
+
+    #[cfg_attr(test, mutants::skip)]
+    fn framesync_free_audio(&self, fs: usize, frame: &mut NDIlib_audio_frame_v2_t) {
+        self.handles.framesync_free_audio(fs, frame);
+    }
+
+    #[cfg_attr(test, mutants::skip)]
+    fn framesync_audio_queue_depth(&self, fs: usize) -> i32 {
+        self.handles.framesync_audio_queue_depth(fs)
+    }
+}
+
+// mutants::skip on every method — each one calls an NDI SDK function pointer:
+// only the real runtime has them (never the Linux mutation runner), and the
+// fake-SDK test below pins the LOCK SCOPE, not each call's pass-through.
+impl RecvHandles {
+    #[cfg_attr(test, mutants::skip)]
+    fn new(fns: RecvFns) -> Self {
+        Self {
+            fns,
+            next: AtomicUsize::new(0),
+            recv: HandleTable::new(),
+            fs: HandleTable::new(),
+        }
+    }
+
+    #[cfg_attr(test, mutants::skip)] // reached only from the SDK methods below
+    fn next_id(&self) -> usize {
+        self.next.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     #[cfg_attr(test, mutants::skip)]
@@ -600,5 +678,206 @@ mod tests {
         );
         assert_eq!((a.timecode, a.timestamp), (0, 0));
         assert!(a.p_data.is_null() && a.p_metadata.is_null());
+    }
+
+    // --- the lock scope, over fake SDK functions (#212 follow-up) -------------
+
+    use std::sync::mpsc;
+    use std::sync::{Condvar, Mutex};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    /// The first fake receiver / FrameSync: its destroy / video capture blocks
+    /// while the gate holds it. Later ones get addresses 16 apart.
+    const SLOW_RECV: usize = 0x1000;
+    const SLOW_FS: usize = 0x2000;
+    static RECVS: AtomicUsize = AtomicUsize::new(0);
+    static SYNCS: AtomicUsize = AtomicUsize::new(0);
+    /// `(slow receiver destroy held, slow FrameSync capture held)`.
+    static GATE: Mutex<(bool, bool)> = Mutex::new((false, false));
+    static RELEASED: Condvar = Condvar::new();
+    /// The held calls that were entered.
+    static ENTERED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+    fn set_gate(destroy: bool, capture: bool) {
+        *GATE.lock().unwrap() = (destroy, capture);
+        RELEASED.notify_all();
+    }
+
+    /// Record `call` as entered, then wait while `held` says so.
+    fn enter(call: &'static str, held: fn(&(bool, bool)) -> bool) {
+        ENTERED.lock().unwrap().push(call);
+        let gate = GATE.lock().unwrap();
+        let _released = RELEASED.wait_while(gate, |g| held(g)).unwrap();
+    }
+
+    fn wait_entered(call: &str) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !ENTERED.lock().unwrap().iter().any(|&c| c == call) {
+            assert!(Instant::now() < deadline, "{call} never started");
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    unsafe extern "C" fn fake_recv_create(
+        _: *const NDIlib_recv_create_v3_t,
+    ) -> *mut NDIlib_recv_instance_t {
+        (SLOW_RECV + 16 * RECVS.fetch_add(1, Ordering::SeqCst)) as *mut NDIlib_recv_instance_t
+    }
+
+    unsafe extern "C" fn fake_recv_destroy(recv: *mut NDIlib_recv_instance_t) {
+        if recv as usize == SLOW_RECV {
+            enter("recv_destroy", |g| g.0);
+        }
+    }
+
+    unsafe extern "C" fn fake_recv_connections(_: *mut NDIlib_recv_instance_t) -> i32 {
+        1
+    }
+
+    unsafe extern "C" fn fake_framesync_create(
+        _: *mut NDIlib_recv_instance_t,
+    ) -> *mut NDIlib_framesync_instance_t {
+        (SLOW_FS + 16 * SYNCS.fetch_add(1, Ordering::SeqCst)) as *mut NDIlib_framesync_instance_t
+    }
+
+    unsafe extern "C" fn fake_framesync_destroy(_: *mut NDIlib_framesync_instance_t) {}
+
+    unsafe extern "C" fn fake_capture_video(
+        fs: *mut NDIlib_framesync_instance_t,
+        _: *mut NDIlib_video_frame_v2_recv_t,
+        _: i32,
+    ) {
+        if fs as usize == SLOW_FS {
+            enter("capture_video", |g| g.1);
+        }
+    }
+
+    unsafe extern "C" fn fake_free_video(
+        _: *mut NDIlib_framesync_instance_t,
+        _: *mut NDIlib_video_frame_v2_recv_t,
+    ) {
+    }
+
+    unsafe extern "C" fn fake_capture_audio(
+        _: *mut NDIlib_framesync_instance_t,
+        _: *mut NDIlib_audio_frame_v2_t,
+        _: i32,
+        _: i32,
+        _: i32,
+    ) {
+    }
+
+    unsafe extern "C" fn fake_free_audio(
+        _: *mut NDIlib_framesync_instance_t,
+        _: *mut NDIlib_audio_frame_v2_t,
+    ) {
+    }
+
+    unsafe extern "C" fn fake_queue_depth(_: *mut NDIlib_framesync_instance_t) -> i32 {
+        7
+    }
+
+    fn fake_fns() -> RecvFns {
+        RecvFns {
+            recv_create_v3: fake_recv_create,
+            recv_destroy: fake_recv_destroy,
+            recv_get_no_connections: fake_recv_connections,
+            framesync_create: fake_framesync_create,
+            framesync_destroy: fake_framesync_destroy,
+            framesync_capture_video: fake_capture_video,
+            framesync_free_video: fake_free_video,
+            framesync_capture_audio: fake_capture_audio,
+            framesync_free_audio: fake_free_audio,
+            framesync_audio_queue_depth: fake_queue_depth,
+        }
+    }
+
+    /// Run every call a grid boundary makes on the pair `(recv, fs)` on its
+    /// own thread; the answer arrives only once all of them returned.
+    fn boundary_calls(h: &Arc<RecvHandles>, recv: usize, fs: usize) -> mpsc::Receiver<(i32, i32)> {
+        let (tx, rx) = mpsc::channel();
+        let h = Arc::clone(h);
+        thread::spawn(move || {
+            let mut video = h.framesync_capture_video(fs);
+            h.framesync_free_video(fs, &mut video);
+            let mut audio = h.framesync_capture_audio(fs, 48_000, 2, 1_600);
+            h.framesync_free_audio(fs, &mut audio);
+            tx.send((h.recv_connections(recv), h.framesync_audio_queue_depth(fs)))
+                .unwrap();
+        });
+        rx
+    }
+
+    #[test]
+    fn calls_on_one_instance_never_wait_for_a_slow_call_on_another() {
+        // #212 follow-up (review round 2): the input's close helper destroys the
+        // old pair (~0.5 s on the box) while its grid thread captures from the
+        // new one. One lock across every SDK call made that capture wait.
+        let h = Arc::new(RecvHandles::new(fake_fns()));
+        let old = h.recv_create("A (a)", "SP-input").unwrap();
+        let old_fs = h.framesync_create(old).unwrap();
+        let new = h.recv_create("B (b)", "SP-input").unwrap();
+        let new_fs = h.framesync_create(new).unwrap();
+        assert_eq!((old, old_fs, new, new_fs), (1, 2, 3, 4));
+
+        // A capture held on the old FrameSync: its destroy waits for it (the
+        // SAME instance), the new pair's calls go straight through.
+        set_gate(false, true);
+        let capture = boundary_calls(&h, old, old_fs);
+        wait_entered("capture_video");
+        let (destroyed_tx, destroyed_rx) = mpsc::channel();
+        let closer = Arc::clone(&h);
+        thread::spawn(move || {
+            closer.framesync_destroy(old_fs);
+            destroyed_tx.send(()).unwrap();
+        });
+        let live = boundary_calls(&h, new, new_fs);
+        assert_eq!(
+            live.recv_timeout(Duration::from_secs(10))
+                .expect("the new pair waited for the old FrameSync's capture"),
+            (1, 7)
+        );
+        assert!(
+            destroyed_rx
+                .recv_timeout(Duration::from_millis(200))
+                .is_err(),
+            "the FrameSync destroy waits for the capture in flight on it"
+        );
+        set_gate(false, false);
+        capture
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the held capture finishes once released");
+        destroyed_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the destroy follows the capture");
+
+        // The old receiver's destroy held inside the SDK: the new pair's calls
+        // still go straight through.
+        set_gate(true, false);
+        let (gone_tx, gone_rx) = mpsc::channel();
+        let closer = Arc::clone(&h);
+        thread::spawn(move || {
+            closer.recv_destroy(old);
+            gone_tx.send(()).unwrap();
+        });
+        wait_entered("recv_destroy");
+        let live = boundary_calls(&h, new, new_fs);
+        assert_eq!(
+            live.recv_timeout(Duration::from_secs(10))
+                .expect("the new pair waited for the old receiver's destroy"),
+            (1, 7)
+        );
+        assert!(
+            gone_rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "the old receiver's destroy is still held"
+        );
+        set_gate(false, false);
+        gone_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("released");
+        // The destroyed instances are gone: their calls are no-ops now.
+        assert_eq!(h.recv_connections(old), 0);
+        assert_eq!(h.framesync_audio_queue_depth(old_fs), 0);
     }
 }

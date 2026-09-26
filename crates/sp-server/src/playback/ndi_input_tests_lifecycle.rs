@@ -626,6 +626,13 @@ fn a_source_change_on_program_offers_one_pair_per_boundary_off_the_grid_thread()
         (health.forwarded, health.filled, health.resyncs),
         (n as u64, 0, 0)
     );
-    assert!(st.last_connect_ms.unwrap() >= BLOCK_MS_AT_LEAST);
+    // CAM's helper publishes its timing right after the hand-over; the rig's
+    // own first connect left ~0 ms there. The stop path's close was joined.
+    wait_for("CAM's connect is timed", || {
+        shared
+            .status(&cam())
+            .last_connect_ms
+            .is_some_and(|ms| ms >= BLOCK_MS_AT_LEAST)
+    });
     assert!(st.last_close_ms.unwrap() >= BLOCK_MS_AT_LEAST);
 }

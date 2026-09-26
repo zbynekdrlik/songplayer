@@ -51,8 +51,15 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
     review round 2).
   - `NdiReceiveBackend`'s doc states the contract: calls on DIFFERENT handles
     never wait for each other.
-  - The FFI methods are `mutants::skip` and need the runtime. The locking
-    itself is `HandleTable`'s, which is Linux-tested.
+  - The SDK calls live in `RecvHandles`. `RealNdiReceiveBackend` only adds the
+    `NdiLib` (which keeps the library loaded and serves `find`) and delegates.
+  - The lock scope is pinned over FAKE SDK functions
+    (`receive.rs` `calls_on_one_instance_never_wait_for_a_slow_call_on_another`),
+    with a gate that holds one instance's destroy or capture. The other pair's
+    calls must return, and a FrameSync destroy must wait for a capture in
+    flight on the same FrameSync.
+  - The per-call pass-throughs stay `mutants::skip`: the real functions need
+    the runtime.
 - The color format is `NDIlib_recv_color_format_fastest` with
   `allow_video_fields = false` and highest bandwidth. A source without alpha
   comes as UYVY. One with alpha comes as UYVA, whose FIRST plane is UYVY, so a
@@ -165,8 +172,11 @@ that is ~14 black-filled program slots. Design record: #212 comment 5849076208
 - **Helper edge cases.**
   - A connect helper that could not be spawned leaves a closed channel
     (`Disconnected`), which lands as a failed connect.
-  - A panicking helper does the same, but only in tests
-    (`set_panic_create`): release builds abort on a panic (`panic = "abort"`).
+  - A panicking helper does the same. The shipped exe unwinds: `src-tauri` is
+    outside the workspace, so its release profile keeps cargo's default
+    `panic = "unwind"` (see `crash-diagnostics.md`). Only that helper thread
+    dies, the panic hook records it, and the closed channel lands as a failed
+    connect, retried 5 s after the attempt (tested with `set_panic_create`).
   - A close helper that could not be spawned closes inline, with a WARN.
 - **Stop path.** It runs after the loop ended.
   - The current pair, and a connect result that was already handed over but
@@ -195,9 +205,15 @@ that is ~14 black-filled program slots. Design record: #212 comment 5849076208
   concurrently with the new one's create (the per-handle backend locks make
   that concurrency real).
 - **Box check.** Put the input on program and change the source in Nastavenia.
-  The program `filled` and `resyncs` counters must stay +0, and the input must
-  log no `> 8 boundaries missed` WARN. `last_close_ms` / `last_connect_ms`
-  show the SDK's real cost.
+  - The program `filled` and `resyncs` counters must stay +0, and the input
+    must log no `> 8 boundaries missed` WARN.
+  - The change must log `receiver + FrameSync created`, and never
+    `creating the receiver failed`. The new create now overlaps the old
+    receiver's destroy, so two receivers named `SongPlayer program input`
+    exist for ~0.5 s. If the SDK rejected that, the change would cost 5 s of
+    standby while counting no fills or resyncs. The fix would then be a
+    per-connect suffix on the receiver name.
+  - `last_close_ms` / `last_connect_ms` show the SDK's real cost.
 
 ## Settings, API, UI
 
@@ -282,10 +298,12 @@ that is ~14 black-filled program slots. Design record: #212 comment 5849076208
 - "The grid never WAITS on them" is asserted with the mock's `set_held(true)`.
   The old pair's destroy and the new pair's create both stay inside the SDK
   until released, and the loop must still service 20 more boundaries,
-  bounded by `wait_for`. A grid-side wait of any kind (`recv` instead of
-  `try_recv`, a `join` in `release`, a lock held across the SDK call) stalls
-  it and fails the wait, with no timing threshold. The stop-path test holds
-  the create the same way.
+  bounded by `wait_for`. The stop-path test holds the create the same way.
+  - This catches any wait on the INPUT's side, with no timing threshold: a
+    `recv` instead of `try_recv`, a `join` in `release`, or one of its own
+    locks held across the call.
+  - It cannot see the BACKEND's lock scope, because the mock has no lock. That
+    is pinned by `receive.rs`'s fake-SDK test (see the SDK section).
 - NEVER assert the rule with a wall-time threshold. The coverage job runs the
   tests under tarpaulin's ptrace, where a thread can stall for a long time on
   a breakpoint.
