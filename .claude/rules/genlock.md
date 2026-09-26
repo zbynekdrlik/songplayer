@@ -978,9 +978,18 @@ Now:
     resample would follow the rest. The wall would still be monotonic and
     would converge one resample later.
   - **Gotcha:** `pipeline_paced::sleep_to_boundary` SPINS its last stretch
-    while `0 < until − now ≤ interval`. Through a frozen wall that condition
-    holds for the whole hold, so each pacer thread busy-spins ~|hold| once a
-    night (not a correctness issue; flagged to the main, #147).
+    while `0 < until − now ≤ interval`. On the box the wall freezes a few µs
+    PAST the emitted boundary (emit lateness), so `until − now < interval`
+    for either slot width (333 333 / 333 334), and the condition holds for the
+    whole hold. Each pacer thread therefore busy-spins ~|hold| once a night.
+    It is not a correctness issue; it was flagged to the main in the #147
+    FINDING comment. Only in the zero-lateness virtual harness does a
+    333 334-wide slot leave the spin at once.
+  - **Legacy SDK-clocked path (pacing OFF):** `FrameSubmitter::submit_nv12`
+    ticks its wall per submitted frame and stamps `floor(now)`. Through a
+    followed ~1.5 s hold it therefore gives ~45 consecutive frames the SAME
+    video timecode, once. Pacing is ON on the box (owner: it must stay ON), so
+    this applies only to the legacy path.
   - **Test-harness gotcha:** `VirtualClock`'s preempted read places `m1` BEFORE
     a wall read the test made at the same virtual `t`. A backward hold at a WIDE
     bracket's midpoint then reads up to width/2 below that earlier read. It is
