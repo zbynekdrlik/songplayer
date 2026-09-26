@@ -59,6 +59,7 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
         songs = scan.songs.len(),
         legacy = scan.legacy.len(),
         orphans = scan.orphans.len(),
+        duplicates = scan.duplicates.len(),
         lyrics = scan.lyrics_files.len(),
         "self-heal cache scan"
     );
@@ -77,6 +78,9 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
             tracing::warn!("failed to remove orphan {}: {e}", orphan.path.display());
         }
     }
+
+    // Delete superseded duplicate pairs (an older download of an id that has a newer pair).
+    cache::remove_duplicates(&scan.duplicates);
 
     // Re-link complete pairs back to their DB row.
     for song in &scan.songs {

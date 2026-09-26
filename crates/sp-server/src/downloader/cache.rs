@@ -17,7 +17,7 @@
 //!   download (these are deleted by the self-healing startup scan).
 
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -108,9 +108,10 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
         }
     };
 
-    // Temporary buckets per video_id for pairing.
-    let mut video_half: HashMap<String, (String, String, bool, PathBuf)> = HashMap::new();
-    let mut audio_half: HashMap<String, (String, String, bool, PathBuf)> = HashMap::new();
+    // Temporary buckets per BASE name (`{song}_{artist}_{id}_normalized[_gf]`)
+    // for pairing: a video pairs only with the audio of the same base, so two
+    // downloads of one id under different metadata never cross-pair.
+    let mut halves: HashMap<String, Halves> = HashMap::new();
     let mut legacy: Vec<LegacyFile> = Vec::new();
     let mut lyrics_files: Vec<(String, PathBuf)> = Vec::new();
     let mut vocals_files: Vec<(String, PathBuf)> = Vec::new();
@@ -130,11 +131,26 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
             let vid = caps[3].to_string();
             let gf = caps.get(4).is_some();
             let kind = &caps[5];
-            let slot = (song, artist, gf, path.clone());
+            let base = filename
+                .strip_suffix(if kind == "video" {
+                    "_video.mp4"
+                } else {
+                    "_audio.flac"
+                })
+                .unwrap_or(filename)
+                .to_string();
+            let h = halves.entry(base).or_insert_with(|| Halves {
+                video_id: vid,
+                song,
+                artist,
+                gemini_failed: gf,
+                video: None,
+                audio: None,
+            });
             if kind == "video" {
-                video_half.insert(vid, slot);
+                h.video = Some(path.clone());
             } else {
-                audio_half.insert(vid, slot);
+                h.audio = Some(path.clone());
             }
             continue;
         }
@@ -159,31 +175,43 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
         }
     }
 
-    // Pair video + audio halves by video_id.
-    let mut songs: Vec<CachedSong> = Vec::new();
+    // Pair video + audio halves of the same base; a lone half is an orphan.
+    let mut complete: HashMap<String, Vec<CachedSong>> = HashMap::new();
     let mut orphans: Vec<Orphan> = Vec::new();
-
-    let video_ids: HashSet<String> = video_half.keys().cloned().collect();
-    let audio_ids: HashSet<String> = audio_half.keys().cloned().collect();
-
-    for vid in video_ids.intersection(&audio_ids) {
-        let (song, artist, gf, v_path) = video_half.remove(vid).unwrap();
-        let (_, _, _, a_path) = audio_half.remove(vid).unwrap();
-        songs.push(CachedSong {
-            video_id: vid.clone(),
-            song,
-            artist,
-            gemini_failed: gf,
-            video_path: v_path,
-            audio_path: a_path,
-        });
+    for h in halves.into_values() {
+        match (h.video, h.audio) {
+            (Some(video_path), Some(audio_path)) => {
+                complete
+                    .entry(h.video_id.clone())
+                    .or_default()
+                    .push(CachedSong {
+                        video_id: h.video_id,
+                        song: h.song,
+                        artist: h.artist,
+                        gemini_failed: h.gemini_failed,
+                        video_path,
+                        audio_path,
+                    });
+            }
+            (Some(path), None) | (None, Some(path)) => orphans.push(Orphan {
+                video_id: h.video_id,
+                path,
+            }),
+            (None, None) => {}
+        }
     }
 
-    for (vid, (_, _, _, path)) in video_half.into_iter().chain(audio_half) {
-        orphans.push(Orphan {
-            video_id: vid,
-            path,
-        });
+    // One keeper per id: the newest pair (by the video file's mtime); every
+    // older complete pair of that id is a superseded duplicate.
+    let mut songs: Vec<CachedSong> = Vec::new();
+    let mut duplicates: Vec<CachedSong> = Vec::new();
+    for (_, mut pairs) in complete {
+        pairs.sort_by_key(|p| std::cmp::Reverse(modified(&p.video_path)));
+        let mut pairs = pairs.into_iter();
+        if let Some(keeper) = pairs.next() {
+            songs.push(keeper);
+        }
+        duplicates.extend(pairs);
     }
 
     ScanResult {
@@ -192,13 +220,46 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
         orphans,
         lyrics_files,
         vocals_files,
-        duplicates: Vec::new(),
+        duplicates,
     }
+}
+
+/// The two halves of one base name seen by [`scan_cache`].
+struct Halves {
+    video_id: String,
+    song: String,
+    artist: String,
+    gemini_failed: bool,
+    video: Option<PathBuf>,
+    audio: Option<PathBuf>,
+}
+
+/// A file's modification time (the epoch when unreadable, so it loses).
+fn modified(path: &Path) -> std::time::SystemTime {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::UNIX_EPOCH)
 }
 
 /// Delete every superseded duplicate pair: its video, its audio and the
 /// karaoke stems derived from that audio.
-pub fn remove_duplicates(_duplicates: &[CachedSong]) {}
+pub fn remove_duplicates(duplicates: &[CachedSong]) {
+    for dup in duplicates {
+        let (vocals, instrumental) = crate::stems::stem_paths(&dup.audio_path);
+        tracing::info!(
+            video_id = %dup.video_id,
+            video = %dup.video_path.display(),
+            "removing superseded duplicate cache pair (a newer pair of this id is kept)"
+        );
+        for path in [&dup.video_path, &dup.audio_path, &vocals, &instrumental] {
+            match std::fs::remove_file(path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => tracing::warn!("failed to remove duplicate {}: {e}", path.display()),
+            }
+        }
+    }
+}
 
 /// Delete every legacy single-file `.mp4` listed in `legacy`.
 pub fn cleanup_legacy(legacy: &[LegacyFile]) {
@@ -241,6 +302,7 @@ pub fn is_valid_video_id(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use std::fs;
 
     #[test]
