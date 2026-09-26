@@ -205,3 +205,49 @@ fn the_sender_thread_fills_a_sourceless_program_and_stops_flushed() {
         Some("send_video_flush(42)")
     );
 }
+
+#[test]
+fn the_sender_thread_ticks_its_wall_once_per_boundary_passed() {
+    // The loop wakes several times per boundary (a job, an idle check); its
+    // wall must still tick once per grid boundary passed, like the pacer
+    // walls, or it slews a UTC step in faster than the stamps (#209 review).
+    let (backend, out) = output(4, 2);
+    let bus = Arc::new(ProgramBus::new());
+    let b0 = floor_boundary_100ns(T0, GENLOCK_GRID_FPS);
+    let b3 = (0..3).fold(b0, |x, _| strict_next_boundary_100ns(x, GENLOCK_GRID_FPS));
+    let (wall, clock) = WallClock::settable(b0 + CHECK_AFTER_BOUNDARY_100NS);
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let thread = {
+        let bus = bus.clone();
+        std::thread::spawn(move || {
+            let (mut out, mut wall) = (out, wall);
+            run_program_loop(&mut out, &bus, &mut wall);
+            let _ = done_tx.send(());
+            wall
+        })
+    };
+    let wait_for = |n: u64| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while bus.status().health.submitted < n && std::time::Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+    };
+    wait_for(1); // b0 filled and sent
+    clock.set(b3 + CHECK_AFTER_BOUNDARY_100NS); // three boundaries pass at once
+    wait_for(4); // b1..b3 filled and sent
+    bus.stop();
+    done_rx
+        .recv_timeout(Duration::from_secs(20))
+        .expect("the sender thread exits once the bus is stopped");
+    let wall = thread.join().unwrap();
+    assert_eq!(
+        backend.video_timecodes().len(),
+        4,
+        "b0..b3, one pair per boundary"
+    );
+    assert_eq!(
+        wall.frames_since_resample(),
+        3,
+        "three boundaries passed = three ticks, however often the loop woke"
+    );
+}

@@ -22,7 +22,8 @@ use std::time::Duration;
 
 use sp_core::genlock::audio::samples_per_boundary;
 use sp_core::genlock::{
-    GENLOCK_GRID_FPS, floor_boundary_100ns, lag_slots_100ns, strict_next_boundary_100ns,
+    GENLOCK_GRID_FPS, GENLOCK_MAX_CATCHUP_INTERVALS, floor_boundary_100ns, lag_slots_100ns,
+    strict_next_boundary_100ns,
 };
 use sp_ndi::{AudioFrame, NdiBackend, NdiSender};
 use tokio::sync::broadcast;
@@ -128,8 +129,10 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 }
 
-/// Most wall ticks one wake may owe (a long stall catches up in bounded work).
-pub const MAX_TICKS_PER_WAKE: i64 = 30;
+/// Most wall ticks one wake may owe: the pacer's own catch-up bound, beyond
+/// which a pacer resyncs without ticking — so a long stall costs the program
+/// wall no more re-anchor progress than it costs the stamp walls.
+pub const MAX_TICKS_PER_WAKE: i64 = GENLOCK_MAX_CATCHUP_INTERVALS;
 
 /// Ticks the program's [`WallClock`] once per grid boundary PASSED — the pacer's
 /// cadence (`Pacer::tick_wall`, once per serviced boundary) — never once per
