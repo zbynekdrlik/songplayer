@@ -123,6 +123,43 @@ fn the_sender_checks_one_ms_after_the_next_boundary() {
 }
 
 #[test]
+fn the_program_wall_ticks_once_per_grid_boundary_not_per_wake() {
+    let b = |k: i64| {
+        let mut x = floor_boundary_100ns(T0, GENLOCK_GRID_FPS);
+        for _ in 0..k {
+            x = strict_next_boundary_100ns(x, GENLOCK_GRID_FPS);
+        }
+        x
+    };
+    let mut t = BoundaryTicker::default();
+    assert_eq!(t.advance(b(10) + 5), 0, "the first wake only anchors");
+    assert_eq!(
+        t.advance(b(10) + 20_000),
+        0,
+        "a second wake in the same slot"
+    );
+    assert_eq!(t.advance(b(11) + 10_000), 1, "one boundary passed");
+    assert_eq!(t.advance(b(11) + 30_000), 0, "woken again, same boundary");
+    assert_eq!(
+        t.advance(b(14) + 10_000),
+        3,
+        "a stall: three boundaries owed"
+    );
+    assert_eq!(t.advance(b(5)), 0, "a backward read owes nothing");
+    assert_eq!(
+        t.advance(b(15) + 10_000),
+        1,
+        "and does not move the anchor back"
+    );
+    assert_eq!(
+        t.advance(b(15 + 100)),
+        MAX_TICKS_PER_WAKE,
+        "a long stall is capped"
+    );
+    assert_eq!(t.advance(b(116)), 1, "counted from the capped wake");
+}
+
+#[test]
 fn the_sender_thread_fills_a_sourceless_program_and_stops_flushed() {
     let (backend, out) = output(4, 2);
     let bus = Arc::new(ProgramBus::new());

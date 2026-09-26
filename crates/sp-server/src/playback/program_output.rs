@@ -21,7 +21,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sp_core::genlock::audio::samples_per_boundary;
-use sp_core::genlock::{GENLOCK_GRID_FPS, strict_next_boundary_100ns};
+use sp_core::genlock::{
+    GENLOCK_GRID_FPS, floor_boundary_100ns, lag_slots_100ns, strict_next_boundary_100ns,
+};
 use sp_ndi::{AudioFrame, NdiBackend, NdiSender};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
@@ -126,6 +128,38 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 }
 
+/// Most wall ticks one wake may owe (a long stall catches up in bounded work).
+pub const MAX_TICKS_PER_WAKE: i64 = 1;
+
+/// Ticks the program's [`WallClock`] once per grid boundary PASSED — the pacer's
+/// cadence (`Pacer::tick_wall`, once per serviced boundary) — never once per
+/// loop wake. The wall re-anchors every 100 ticks and slews a UTC step in at
+/// ≤ 1 ms per re-anchor; the sender wakes about twice per boundary, so ticking
+/// per wake would slew twice as fast as the stamp walls and, after a forward
+/// step, run ahead of the owner's stamps until the fill grace black-fills its
+/// boundaries (#209 review). Same cadence = same slew = one clock domain.
+#[derive(Debug, Default)]
+pub struct BoundaryTicker {
+    last: Option<i64>,
+}
+
+impl BoundaryTicker {
+    /// How many wall ticks are owed at `now_100ns`: the grid boundaries passed
+    /// since the last call that owed some (0 on the first call, which only
+    /// anchors; 0 on a backward clock read), at most [`MAX_TICKS_PER_WAKE`].
+    pub fn advance(&mut self, now_100ns: i64) -> i64 {
+        let floor = floor_boundary_100ns(now_100ns, GENLOCK_GRID_FPS);
+        let owed = self
+            .last
+            .map_or(0, |last| lag_slots_100ns(last, floor, GENLOCK_GRID_FPS))
+            .min(MAX_TICKS_PER_WAKE);
+        if owed > 0 || self.last.is_none() {
+            self.last = Some(floor);
+        }
+        owed
+    }
+}
+
 /// How long the sender thread waits for a queued boundary before it checks
 /// for missed ones again: until [`CHECK_AFTER_BOUNDARY_100NS`] past the next
 /// grid boundary.
@@ -144,8 +178,12 @@ pub fn run_program_loop<B: NdiBackend>(
     wall: &mut WallClock,
 ) {
     let mut since_conn_poll = CONN_POLL_EVERY; // poll on the first pair
+    let mut ticker = BoundaryTicker::default();
     loop {
         let now = wall.now_100ns();
+        for _ in 0..ticker.advance(now) {
+            wall.tick(); // once per grid boundary, like the pacer walls
+        }
         bus.release_due(now);
         match bus.take_timeout(next_check_wait(now)) {
             Take::Job(job) => {
@@ -160,7 +198,6 @@ pub fn run_program_loop<B: NdiBackend>(
             Take::Idle => {}
             Take::Stopped => break,
         }
-        wall.tick();
     }
     out.flush();
     info!(
