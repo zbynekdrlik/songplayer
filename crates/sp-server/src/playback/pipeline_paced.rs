@@ -468,6 +468,7 @@ pub(crate) fn decode_and_send_paced(
         // stop→play or song end→next song. A failed open ends the pre-roll at
         // once. Commands queued meanwhile are serviced by the emit loop below.
         let mut gate = PrerollGate::pending();
+        let resyncs_before = pacer.stats().resyncs;
         let opened = pacer.preroll(
             StandbyBlack {
                 width: STANDBY_W,
@@ -490,6 +491,16 @@ pub(crate) fn decode_and_send_paced(
             },
             sleep_to_boundary,
         );
+        // A resync while the pre-roll caught up means the song change left more
+        // than GENLOCK_MAX_CATCHUP_INTERVALS boundaries unserviced (the submit /
+        // producer joins between songs): a real stamp hole. Make it visible.
+        let gap_resyncs = pacer.stats().resyncs.saturating_sub(resyncs_before);
+        if gap_resyncs > 0 {
+            warn!(
+                playlist_id,
+                gap_resyncs, "paced: song change left > 8 boundaries unserviced (grid resync)"
+            );
+        }
         let (duration_ms, source_fps) = match opened {
             Ok(pair) => pair,
             Err(msg) => {

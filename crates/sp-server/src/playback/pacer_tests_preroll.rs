@@ -69,6 +69,8 @@ fn slow_decoder(ready_on: u32) -> (Cell<u32>, u32) {
 struct Rec {
     black: Option<SharedFrame>,
     boundaries: Vec<Boundary>,
+    /// The picture handed over on each boundary (identity checks).
+    videos: Vec<SharedFrame>,
 }
 
 /// `(video stamp, video is the standby black, audio block (channels, samples))`.
@@ -82,6 +84,7 @@ impl PacedSink for Rec {
             .first()
             .map(|a| (a.channels, a.data.len() / a.channels.max(1) as usize));
         self.boundaries.push((vtc, is_black, block));
+        self.videos.push(video.video.clone());
     }
 }
 
@@ -401,7 +404,7 @@ fn a_pause_before_the_first_frame_is_filled_with_the_standby_pair() {
 }
 
 /// After idle b(1)..b(3) and an at-once pre-roll, play a 2-frame song on b(4),
-/// b(5).
+/// b(5). `rec.videos[4]` is then the last pre-seek picture.
 fn playing_after_preroll(blk: &SharedFrame) -> (Pacer, SettableClock, Rec) {
     let (mut pacer, clk, mut rec) = idle_three(blk);
     pacer.preroll(black(blk), &mut rec, || Some(()), |_, until| clk.set(until));
@@ -442,6 +445,41 @@ fn a_seek_refill_holds_the_pre_seek_picture_not_a_black_flash() {
         (b(6), false, Some((2, 1600))),
         "the refill holds the pre-seek picture with one block, not black"
     );
+    assert!(
+        rec.videos[5].ptr_eq(&rec.videos[4]),
+        "the refill shows EXACTLY the last pre-seek frame (same allocation)"
+    );
+}
+
+#[test]
+fn a_second_seek_before_any_new_frame_keeps_holding_the_pre_seek_picture() {
+    // Seek, then seek again (e.g. a scrub) before the decoder delivered a frame
+    // at the first position: there is no newer frame, so the refill keeps the
+    // ORIGINAL pre-seek picture, never black. A paused refill holds it too.
+    let blk = black_frame();
+    let (mut pacer, clk, mut rec) = playing_after_preroll(&blk);
+    clk.set(b(5) + 1_000);
+    pacer.anchor_seek();
+    clk.set(b(6));
+    assert_eq!(pacer.service(|| None, &mut rec), ServiceOutcome::Starved);
+    clk.set(b(6) + 1_000);
+    pacer.anchor_seek(); // the second seek: last_frame is None now
+    clk.set(b(7));
+    assert_eq!(pacer.service(|| None, &mut rec), ServiceOutcome::Starved);
+    clk.set(b(8)); // paused during the refill
+    assert_eq!(
+        pacer.service_standby(Standby::FrozenLast, &mut rec),
+        ServiceOutcome::Starved
+    );
+    assert_eq!(stamps(&rec), (1..=8).map(b).collect::<Vec<_>>(), "no hole");
+    let pre_seek = &rec.videos[4];
+    for (i, (video, boundary)) in rec.videos.iter().zip(&rec.boundaries).enumerate().skip(5) {
+        assert!(
+            video.ptr_eq(pre_seek),
+            "boundary {i}: still the original pre-seek frame"
+        );
+        assert_eq!(boundary.2, Some((2, 1600)), "boundary {i}: one block");
+    }
 }
 
 #[test]

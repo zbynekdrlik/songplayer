@@ -17,9 +17,10 @@
 //!
 //! The pre-roll's black also becomes the pacer's STANDBY FILL: any later
 //! boundary with nothing of the song to show (a first frame whose pts lands
-//! after the anchor, a seek's refill, a pause before the first frame, an empty
-//! file) still carries the black + silence pair instead of a hole
-//! (`Pacer::fill_starved`).
+//! after the anchor, a pause before the first frame, an empty file) still
+//! carries the black + silence pair instead of a hole (`Pacer::fill_starved`).
+//! A same-song seek refill holds the last pre-seek picture instead
+//! ([`Pacer::anchor_seek`]), so a seek never flashes black.
 //!
 //! A child of `pacer.rs` (1000-line cap), like `pacer_prepare.rs`.
 

@@ -102,6 +102,9 @@ pub(crate) fn run_idle_wait(
     // Idle has no decoder: report the grid rate, which is what the idle
     // heartbeat reported before (`submitter.nominal_fps()` = the grid here).
     let idle_source_fps = sp_core::genlock::GENLOCK_GRID_FPS as f32;
+    // A resync in the idle stretch means boundaries went unserviced before it
+    // (the joins after a song / a stop, #147): log it, it is a real stamp hole.
+    let resyncs_before = pacer.stats().resyncs;
 
     std::thread::scope(|s| {
         let sub: &mut FrameSubmitter<sp_ndi::RealNdiBackend> = submitter;
@@ -148,4 +151,12 @@ pub(crate) fn run_idle_wait(
         handoff_ref.stop();
         let _ = submit_join.join();
     });
+    let gap_resyncs = pacer.stats().resyncs.saturating_sub(resyncs_before);
+    if gap_resyncs > 0 {
+        tracing::warn!(
+            playlist_id,
+            gap_resyncs,
+            "paced idle: > 8 boundaries went unserviced before or during the idle fill (grid resync)"
+        );
+    }
 }

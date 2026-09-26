@@ -89,7 +89,7 @@ pub trait PacedSink {
     /// `audio` is the boundary block the pacer took from its `AudioGridBuffer`,
     /// aligned to the picture by media time (0 or 1 frame of exactly
     /// `samples_per_boundary` samples, #148) — a video repeat still carries audio
-    /// (decoupled); empty only before any audio was decoded. Only `video`'s
+    /// (decoupled); empty while the buffer has no channel layout. Only `video`'s
     /// pixel fields are used; its own `audio` was pushed into the buffer on pull.
     fn emit(
         &mut self,
@@ -103,8 +103,8 @@ pub trait PacedSink {
     /// a one-shot [`PacedFrame`] over the borrowed pixels and delegates to
     /// [`emit`](Self::emit), so an `emit`-only sink keeps working;
     /// `FrameSubmitter` OVERRIDES it to move the `SharedFrame` into the zero-copy
-    /// holdover. Used by [`Pacer::service_standby`] for the idle black frame,
-    /// which is submitted by SHARED reference every boundary (a refcount bump).
+    /// holdover. The standby pair (idle / pre-roll black, a starve fill, a held
+    /// seek frame, #147) goes through it by SHARED reference (a refcount bump).
     #[allow(clippy::too_many_arguments)]
     fn submit_shared(
         &mut self,
@@ -140,8 +140,8 @@ pub enum ServiceOutcome {
     /// A boundary was serviced by repeating the last emitted frame (decoder
     /// underrun / sub-grid content) stamped at the serviced boundary (§5.5).
     Repeated,
-    /// Nothing of the song to show yet (a first-frame starve). With a standby fill
-    /// (set by `preroll`, #147) it still carries the black + silence pair.
+    /// Nothing of the song to show (starve). With a standby fill (`preroll`, #147)
+    /// it carries the black, or the held pre-seek picture, + one block.
     Starved,
     /// Playback fell behind by more than [`GENLOCK_MAX_CATCHUP_INTERVALS`] slots
     /// for over [`LAG_REANCHOR_AFTER_100NS`] continuously with a frame buffered
@@ -274,7 +274,7 @@ pub struct Pacer {
     audio_buf: AudioGridBuffer,
     /// Anchor + correction state + telemetry (`pacer_av_align.rs`).
     av: pacer_av_align::AvAlign,
-    /// The black a starved boundary is filled with (#147, set by `preroll`).
+    /// Starve fill: black, or the held pre-seek picture (#147, `preroll`).
     standby_fill: Option<pacer_preroll::StandbyFill>,
 }
 
