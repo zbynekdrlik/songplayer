@@ -10,7 +10,8 @@
 //! 8 packets of 200 frames (`vban_packet.rs`) and sends packet `k` of the
 //! boundary `B` at `due(B) + L + k/240 s`, where L is one slot
 //! ([`VBAN_SEND_LATENCY_100NS`]). It paces on its own [`WallClock`], ticked
-//! once per grid boundary like the program wall ([`WallVbanClock`]), so the
+//! once per grid boundary like the program wall ([`WallVbanClock`]) — also
+//! while nothing is sent, so its anchor never goes stale — and the
 //! on-time packets go out one every 4.1667 ms, one wait each, never as a burst.
 //! A block that arrives after its first packet is due (a program fill after
 //! the 3-slot grace, a fleet date step before the walls re-converge) sends its
@@ -20,9 +21,10 @@
 //! One UDP socket sends to every resolved target. The settings (`vban_enabled`,
 //! `vban_stream_name`, `vban_targets`) are re-read every
 //! [`VBAN_SETTINGS_POLL`] by [`run_vban_config_task`]. DNS is resolved when
-//! they change and re-resolved every [`VBAN_RESOLVE_EVERY`]; a target whose
-//! re-resolve fails keeps its last good address. Telemetry is [`VbanStatus`],
-//! served under `vban` on `GET /api/v1/program`.
+//! they change and, while enabled, re-resolved every [`VBAN_RESOLVE_EVERY`];
+//! a target whose re-resolve fails keeps its last good address, and at most
+//! [`VBAN_MAX_TARGETS`] targets are used. Telemetry is [`VbanStatus`], served
+//! under `vban` on `GET /api/v1/program`.
 
 use std::collections::VecDeque;
 use std::io;
@@ -35,7 +37,6 @@ use serde::Serialize;
 use sp_core::config::{
     DEFAULT_VBAN_STREAM_NAME, SETTING_VBAN_ENABLED, SETTING_VBAN_STREAM_NAME, SETTING_VBAN_TARGETS,
 };
-use sp_core::genlock::GENLOCK_MAX_CATCHUP_INTERVALS;
 use sp_ndi::AudioFrame;
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
@@ -50,9 +51,9 @@ use crate::playback::vban_packet::{
 };
 use crate::playback::wallclock::WallClock;
 
-/// Queue bound: a full program catch-up (8 slots) plus the block behind it,
-/// with one to spare — the program queue's own bound.
-pub const VBAN_QUEUE_BOUND: usize = GENLOCK_MAX_CATCHUP_INTERVALS as usize + 2;
+/// Queue bound: the program queue's own bound — a full program catch-up (8
+/// slots) plus the block behind it, with one to spare.
+pub const VBAN_QUEUE_BOUND: usize = crate::playback::program_bus::PROGRAM_QUEUE_BOUND;
 
 /// A packet sent more than this after its due time is a late send (2 ms).
 pub const VBAN_LATE_100NS: i64 = 20_000;
@@ -64,8 +65,10 @@ pub const VBAN_MAX_WAIT_100NS: i64 = 4 * VBAN_SEND_LATENCY_100NS;
 /// Send intervals kept for the p99 (the last 5 s at 240 packets/s).
 pub const VBAN_INTERVAL_WINDOW: usize = 1200;
 
-/// How long the thread waits for a block before it checks for a stop again.
-pub const VBAN_IDLE_WAIT: Duration = Duration::from_millis(500);
+/// How long the thread waits for a block before it reads its clock and checks
+/// for a stop again — 3 slots, under the 8-boundary tick cap per read
+/// (`BoundaryTicker`), so an idle wall still ticks once per boundary.
+pub const VBAN_IDLE_WAIT: Duration = Duration::from_millis(100);
 
 /// How often the settings are re-read (a dashboard save applies within this).
 pub const VBAN_SETTINGS_POLL: Duration = Duration::from_secs(5);
@@ -686,7 +689,12 @@ pub fn run_vban_loop(
     let mut sender = VbanSender::default();
     out.running.store(true, Ordering::SeqCst);
     loop {
-        match out.take_timeout(VBAN_IDLE_WAIT) {
+        let take = out.take_timeout(VBAN_IDLE_WAIT);
+        // Read (= tick) the wall on every pass, also while nothing is sent
+        // (disabled, no target, idle), so its anchor follows UTC like the
+        // program wall and the first packets after enabling are on schedule.
+        clock.now_100ns();
+        match take {
             VbanTake::Block(block) => {
                 sender.send_block(out, &block, sink, clock);
             }

@@ -5,7 +5,8 @@
 //! `SP-program` carries). [`VbanEncoder::encode_block`] turns one block into
 //! [`VBAN_PACKETS_PER_BLOCK`] packets of [`VBAN_FRAMES_PER_PACKET`] frames each,
 //! as PCM INT24, and [`packet_send_at_100ns`] says when each packet goes out, so
-//! the sender (`vban_out.rs`) sends one packet every 1/240 s, never in bursts.
+//! the sender (`vban_out.rs`) sends an on-time packet every 1/240 s (a late
+//! block's past-due packets go out back-to-back and count as late sends).
 //!
 //! Wire format, per the VB-Audio "VBAN Protocol Specifications" (revision 13,
 //! SEP 2025), little-endian throughout. The 28-byte header is:

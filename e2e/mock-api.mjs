@@ -844,6 +844,7 @@ function programBody() {
     // stored settings like the real settings task.
     vban: {
       enabled: settings.vban_enabled === "true",
+      running: false,
       stream_name: settings.vban_stream_name || "sp-program",
       packets_sent: 0,
       send_errors: 0,
@@ -856,6 +857,7 @@ function programBody() {
         .split(",")
         .map((t) => t.trim())
         .filter((t) => t.length > 0)
+        .slice(0, 8) // VBAN_MAX_TARGETS
         .map((t) => ({ target: t, addr: null, error: null })),
     },
   };

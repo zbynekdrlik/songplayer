@@ -40,7 +40,11 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
   (`pipeline_audio::raise_thread_priority`, shared with the NDI audio emitter)
   with the 1 ms multimedia timer.
 - Clock: its own `WallClock`, ticked through `program_output::BoundaryTicker`
-  once per boundary passed (`WallVbanClock`). That is the same cadence as the
+  once per boundary passed (`WallVbanClock`). `run_vban_loop` reads the clock on
+  EVERY pass, also for a block it does not send (disabled, no target) and on an
+  idle wake every 100 ms (`VBAN_IDLE_WAIT`, under the 8-tick cap). If it did
+  not, the wall would go stale while the output is off, and the first packets
+  after enabling would burst or stall. That is the same cadence as the
   program and the pacer walls, so a UTC step slews in at the same rate — one
   clock domain. A single wait is capped at 4 slots (`VBAN_MAX_WAIT_100NS`), so
   a clock mismatch never parks the thread.
@@ -95,9 +99,10 @@ The payload is 1200 B of interleaved 3-byte LE samples, within the spec's
 
 ## Tests
 
-`vban_packet_tests.rs` (`parse_packet`, `ramp_block`) and `vban_out_tests.rs`
-(`FakeClock`, `RecordingSink`, `active_config`) are `pub(crate)`, and
-`api/program_tests.rs` reuses them. The schedule is tested on `FakeClock`,
+The helpers in `vban_packet_tests.rs` (`parse_packet`, `ramp_block`) and
+`vban_out_tests.rs` (`FakeClock` with a `reads` counter, `RecordingSink`,
+`active_config`) are `pub(crate)`. `vban_out_tests.rs` reuses the packet
+helpers, and `api/program_tests.rs` reuses `active_config`. The schedule is tested on `FakeClock`,
 with exact send instants and the recorded sleeps. The counter test drives a
 real `ProgramOutput` over `MockNdiBackend` and keeps the output alive past the
 assertions. The loopback test sends through a real `UdpSocket` to

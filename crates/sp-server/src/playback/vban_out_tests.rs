@@ -2,7 +2,7 @@
 //! schedule on a fake clock (exact 100 ns send instants), disabled / no-target
 //! silence, the frame counter across blocks + a cut + standby through a real
 //! `ProgramOutput`, the settings load, DNS resolution, and a real loopback UDP
-//! round trip. `FakeClock` / `RecordingSink` / `active_config` are shared with
+//! round trip. The helpers are `pub(crate)`; `active_config` is reused by
 //! `api/program_tests.rs`.
 //! Wired via `#[cfg(test)] #[path = "vban_out_tests.rs"] pub(crate) mod tests;`.
 
@@ -30,6 +30,8 @@ const L: i64 = VBAN_SEND_LATENCY_100NS;
 pub(crate) struct FakeClock {
     pub now: Arc<AtomicI64>,
     pub sleeps: Vec<i64>,
+    /// `now_100ns` calls (the production clock ticks on each).
+    pub reads: usize,
 }
 
 impl FakeClock {
@@ -37,12 +39,14 @@ impl FakeClock {
         Self {
             now: Arc::new(AtomicI64::new(t)),
             sleeps: Vec::new(),
+            reads: 0,
         }
     }
 }
 
 impl VbanClock for FakeClock {
     fn now_100ns(&mut self) -> i64 {
+        self.reads += 1;
         self.now.load(Ordering::SeqCst)
     }
     fn sleep_100ns(&mut self, d_100ns: i64) {
@@ -328,6 +332,26 @@ fn disabled_or_no_resolved_target_sends_nothing() {
         assert_eq!(sender.next_counter(), 0, "{what}: the counter did not move");
     }
     assert!(active_config(&["10.0.0.1:6980"]).is_active());
+}
+
+#[test]
+fn the_wall_is_read_on_every_block_even_while_disabled() {
+    let out = VbanOut::new(); // disabled: nothing is sent
+    for due in 0..3 {
+        out.push(block(D + due * 333_333, 0.5));
+    }
+    out.stop();
+    let mut clock = FakeClock::at(D);
+    let mut sink = RecordingSink::on(&clock);
+    run_vban_loop(&out, &mut sink, &mut clock);
+    assert!(sink.sent.is_empty());
+    assert!(clock.sleeps.is_empty());
+    assert!(
+        clock.reads >= 3,
+        "one read (= wall tick) per block, got {}",
+        clock.reads
+    );
+    assert_eq!(VBAN_IDLE_WAIT, Duration::from_millis(100));
 }
 
 #[test]

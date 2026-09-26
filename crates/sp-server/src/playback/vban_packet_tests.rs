@@ -1,7 +1,7 @@
 //! #210 VBAN encoder: the header bytes against the VB-Audio spec (revision 13),
 //! the bit-exact INT24 conversion, the 1600-frame block → 8 × 200-frame split,
-//! the frame counter and the packet schedule. `parse_packet` is shared with
-//! `vban_out_tests.rs` and `api/program_tests.rs`.
+//! the frame counter and the packet schedule. `parse_packet` and `ramp_block`
+//! are `pub(crate)` and reused by `vban_out_tests.rs`.
 //! Wired via `#[cfg(test)] #[path = "vban_packet_tests.rs"] pub(crate) mod tests;`.
 
 use super::*;
