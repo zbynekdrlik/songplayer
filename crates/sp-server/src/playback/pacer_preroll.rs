@@ -15,6 +15,12 @@
 //! [`PrerollGate`] is the pure readiness decision the paced pipeline polls:
 //! the decoder opened (or failed to) AND its first frame is buffered.
 //!
+//! The pre-roll's black also becomes the pacer's STANDBY FILL: any later
+//! boundary with nothing of the song to show (a first frame whose pts lands
+//! after the anchor, a seek's refill, a pause before the first frame, an empty
+//! file) still carries the black + silence pair instead of a hole
+//! (`Pacer::fill_starved`).
+//!
 //! A child of `pacer.rs` (1000-line cap), like `pacer_prepare.rs`.
 
 use super::{PacedSink, Pacer, ServiceOutcome, Standby};
@@ -28,6 +34,27 @@ pub struct StandbyBlack<'a> {
     pub height: u32,
     pub stride: u32,
     pub video: &'a SharedFrame,
+}
+
+/// The pacer's owned copy of the standby black (an `Arc` clone), kept for
+/// filling starved boundaries after the pre-roll (#147).
+#[derive(Clone, Debug)]
+pub(super) struct StandbyFill {
+    width: u32,
+    height: u32,
+    stride: u32,
+    video: SharedFrame,
+}
+
+impl From<StandbyBlack<'_>> for StandbyFill {
+    fn from(black: StandbyBlack<'_>) -> Self {
+        Self {
+            width: black.width,
+            height: black.height,
+            stride: black.stride,
+            video: black.video.clone(),
+        }
+    }
 }
 
 impl<'a> StandbyBlack<'a> {
@@ -49,10 +76,13 @@ impl Pacer {
     /// grid and return that value (#147 song-start hole).
     ///
     /// `poll` is asked once per slot, right before the wait to the next
-    /// boundary, so a song that is ready anchors on the boundary that wait was
-    /// for: the first frame lands there, and no boundary is skipped or doubled.
-    /// `wait(pacer, until)` sleeps to a boundary (production:
-    /// `pipeline_paced::sleep_to_boundary`; tests: set the fake clock).
+    /// boundary. A song that is ready anchors ON the boundary that wait was for
+    /// (never on a re-read clock, so a preemption between the poll and the
+    /// anchor cannot skip it): a pts-0 first frame lands there, and no boundary
+    /// is skipped or doubled. `black` also becomes the pacer's standby fill
+    /// (`fill_starved`). `wait(pacer, until)` sleeps to a
+    /// boundary (production: `pipeline_paced::sleep_to_boundary`; tests: set
+    /// the fake clock).
     pub fn preroll<S, P, W, T>(
         &mut self,
         black: StandbyBlack<'_>,
@@ -65,20 +95,54 @@ impl Pacer {
         P: FnMut() -> Option<T>,
         W: FnMut(&Pacer, i64),
     {
+        self.standby_fill = Some(StandbyFill::from(black));
         loop {
-            match self.service_standby(black.standby(), &mut *sink) {
-                ServiceOutcome::Wait { until_100ns } => {
-                    if let Some(ready) = poll() {
-                        self.anchor();
-                        return ready;
-                    }
-                    wait(&*self, until_100ns);
-                }
-                _ => self.tick_wall(),
+            let step = self.service_standby(black.standby(), &mut *sink);
+            let ServiceOutcome::Wait { until_100ns } = step else {
+                // A boundary was just filled; the next step waits for the next.
+                self.tick_wall();
+                continue;
+            };
+            if let Some(ready) = poll() {
+                self.anchor();
+                return ready;
             }
+            wait(&*self, until_100ns);
         }
     }
+
+    /// A boundary with nothing of the song to show (#147): with a standby fill
+    /// set (by [`preroll`](Pacer::preroll)), it still carries the black + one
+    /// audio block (`standby_block`), stamped like any
+    /// emit, so the output never has a hole. Without a fill (the SDK-clocked
+    /// path never sets one, and neither do the unit tests that pin a bare
+    /// starve) nothing is sent. Returns [`ServiceOutcome::Starved`] either way.
+    pub(super) fn fill_starved<S: PacedSink>(
+        &mut self,
+        emit_now: i64,
+        stamp_boundary: i64,
+        audio_tc: i64,
+        sink: &mut S,
+    ) -> ServiceOutcome {
+        if FILL_STARVED_BOUNDARIES && let Some(fill) = self.standby_fill.clone() {
+            self.on_emit(emit_now, stamp_boundary);
+            let block = self.standby_block();
+            sink.submit_shared(
+                fill.width,
+                fill.height,
+                fill.stride,
+                fill.video,
+                &block,
+                stamp_boundary,
+                audio_tc,
+            );
+        }
+        ServiceOutcome::Starved
+    }
 }
+
+/// RED: starved boundaries are not filled yet.
+const FILL_STARVED_BOUNDARIES: bool = false;
 
 /// The paced pipeline's pre-roll readiness (#147): the song may anchor once
 /// the decoder has OPENED and its first frame is buffered (`primed`). A failed

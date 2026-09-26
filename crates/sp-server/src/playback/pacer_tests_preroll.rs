@@ -68,8 +68,11 @@ fn slow_decoder(ready_on: u32) -> (Cell<u32>, u32) {
 #[derive(Default)]
 struct Rec {
     black: Option<SharedFrame>,
-    boundaries: Vec<(i64, bool, Option<(u32, usize)>)>,
+    boundaries: Vec<Boundary>,
 }
+
+/// `(video stamp, video is the standby black, audio block (channels, samples))`.
+type Boundary = (i64, bool, Option<(u32, usize)>);
 
 impl PacedSink for Rec {
     fn emit(&mut self, video: &PacedFrame, audio: &[AudioFrame], vtc: i64, _atc: i64) {
@@ -281,5 +284,118 @@ fn preroll_gate_ends_at_once_on_a_failed_open() {
         gate.poll(|| Some(Err("no file".to_string())), || false),
         Some(Err("no file".to_string())),
         "a failed open ends the pre-roll without waiting for a frame"
+    );
+}
+
+/// Idle standby at b(1)..b(3) into a recorder that knows the black.
+fn idle_three(blk: &SharedFrame) -> (Pacer, SettableClock, Rec) {
+    let (mut pacer, clk) = anchored_pacer();
+    let mut rec = Rec {
+        black: Some(blk.clone()),
+        ..Rec::default()
+    };
+    for k in 1..=3 {
+        clk.set(b(k));
+        pacer.service_standby(black(blk).standby(), &mut rec);
+    }
+    (pacer, clk, rec)
+}
+
+fn stamps(rec: &Rec) -> Vec<i64> {
+    rec.boundaries.iter().map(|x| x.0).collect()
+}
+
+#[test]
+fn a_ready_decoder_anchors_on_the_waited_boundary_even_if_the_clock_moved_past_it() {
+    // The decoder turns ready while the pre-roll waits for b(5), and the thread
+    // is preempted past b(5) before the anchor. The song must still take b(5):
+    // anchoring on a re-read clock would pick b(6) and leave b(5) a hole.
+    let blk = black_frame();
+    let (mut pacer, clk, mut rec) = idle_three(&blk);
+    let polls = Cell::new(0);
+    pacer.preroll(
+        black(&blk),
+        &mut rec,
+        || {
+            polls.set(polls.get() + 1);
+            if polls.get() < 2 {
+                return None;
+            }
+            clk.set(b(5) + 50_000); // preempted 5 ms past the waited boundary
+            Some(())
+        },
+        |_, until| clk.set(until),
+    );
+    let mut song: std::collections::VecDeque<PacedFrame> = (0..2)
+        .map(|j| song_frame((b(5 + j) - b(5)) * 100))
+        .collect();
+    assert_eq!(
+        pacer.service(|| song.pop_front(), &mut rec),
+        ServiceOutcome::Emitted,
+        "the song's first frame goes out at once, on b(5)"
+    );
+    clk.set(b(6));
+    pacer.service(|| song.pop_front(), &mut rec);
+    assert_eq!(stamps(&rec), (1..=6).map(b).collect::<Vec<_>>());
+    let is_black: Vec<bool> = rec.boundaries.iter().map(|x| x.1).collect();
+    assert_eq!(is_black, vec![true, true, true, true, false, false]);
+}
+
+#[test]
+fn a_first_frame_that_lands_after_the_anchor_is_preceded_by_the_fill_not_a_hole() {
+    // A start position lands mid-frame: the first frame's pts is 17 ms, so it is
+    // due one slot after the anchor boundary b(4). b(4) must still carry the
+    // black + silence pair (the standby fill), then the frame on b(5).
+    let blk = black_frame();
+    let (mut pacer, clk, mut rec) = idle_three(&blk);
+    pacer.preroll(
+        black(&blk),
+        &mut rec,
+        || Some(()),
+        |_, until| clk.set(until),
+    );
+    let mut first = Some(song_frame(17_000_000));
+    clk.set(b(4));
+    assert_eq!(
+        pacer.service(|| first.take(), &mut rec),
+        ServiceOutcome::Starved,
+        "nothing of the song is due on b(4)"
+    );
+    clk.set(b(5));
+    assert_eq!(pacer.service(|| None, &mut rec), ServiceOutcome::Emitted);
+    assert_eq!(stamps(&rec), (1..=5).map(b).collect::<Vec<_>>(), "no hole");
+    assert_eq!(
+        rec.boundaries[3],
+        (b(4), true, Some((2, 1600))),
+        "b(4) = the standby black + one silent block"
+    );
+    assert!(!rec.boundaries[4].1, "the song's first frame on b(5)");
+}
+
+#[test]
+fn a_pause_before_the_first_frame_is_filled_with_the_standby_pair() {
+    // A Pause queued during the pre-roll is applied once the song anchored,
+    // before any frame was shown: FrozenLast has nothing to hold, so the fill
+    // carries every paused boundary.
+    let blk = black_frame();
+    let (mut pacer, clk, mut rec) = idle_three(&blk);
+    pacer.preroll(
+        black(&blk),
+        &mut rec,
+        || Some(()),
+        |_, until| clk.set(until),
+    );
+    for k in 4..=5 {
+        clk.set(b(k));
+        assert_eq!(
+            pacer.service_standby(Standby::FrozenLast, &mut rec),
+            ServiceOutcome::Starved
+        );
+    }
+    assert_eq!(stamps(&rec), (1..=5).map(b).collect::<Vec<_>>());
+    assert!(
+        rec.boundaries.iter().all(|x| x.1 && x.2 == Some((2, 1600))),
+        "every boundary is the black + silence pair: {:?}",
+        rec.boundaries
     );
 }

@@ -140,8 +140,8 @@ pub enum ServiceOutcome {
     /// A boundary was serviced by repeating the last emitted frame (decoder
     /// underrun / sub-grid content) stamped at the serviced boundary (§5.5).
     Repeated,
-    /// A boundary came due before the first frame was ever decoded — nothing to
-    /// emit or repeat yet (pre-roll). The boundary still advances.
+    /// Nothing of the song to show yet (a first-frame starve). With a standby fill
+    /// (set by `preroll`, #147) it still carries the black + silence pair.
     Starved,
     /// Playback fell behind by more than [`GENLOCK_MAX_CATCHUP_INTERVALS`] slots
     /// for over [`LAG_REANCHOR_AFTER_100NS`] continuously with a frame buffered
@@ -274,6 +274,8 @@ pub struct Pacer {
     audio_buf: AudioGridBuffer,
     /// Anchor + correction state + telemetry (`pacer_av_align.rs`).
     av: pacer_av_align::AvAlign,
+    /// The black a starved boundary is filled with (#147, set by `preroll`).
+    standby_fill: Option<pacer_preroll::StandbyFill>,
 }
 
 impl Pacer {
@@ -319,6 +321,7 @@ impl Pacer {
             samples_per_boundary: spb,
             audio_buf: AudioGridBuffer::new(AUDIO_GRID_RATE_HZ),
             av: pacer_av_align::AvAlign::default(),
+            standby_fill: None,
         }
     }
 
@@ -363,6 +366,12 @@ impl Pacer {
         } else {
             strict_next_boundary_100ns(now, self.grid_fps)
         };
+        self.anchor_at(first);
+    }
+
+    /// [`anchor`](Self::anchor) on the explicit grid boundary `first` (#147: the
+    /// pre-roll anchors on the boundary it waited for, never a re-read clock).
+    fn anchor_at(&mut self, first: i64) {
         self.wall_start_100ns = first;
         self.next_boundary_100ns = first;
         self.pending = None;
@@ -547,7 +556,7 @@ impl Pacer {
             self.last_frame = Some(lf);
             ServiceOutcome::Repeated
         } else {
-            ServiceOutcome::Starved
+            self.fill_starved(emit_now, stamp_boundary, audio_tc, sink)
         };
 
         // Telemetry for a productive boundary (#147 lane 3, change 3): the lag
@@ -679,7 +688,7 @@ impl Pacer {
                     self.last_frame = Some(lf);
                     ServiceOutcome::Repeated
                 } else {
-                    ServiceOutcome::Starved
+                    self.fill_starved(emit_now, stamp_boundary, audio_tc, sink)
                 }
             }
             Standby::Black {
