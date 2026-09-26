@@ -19,7 +19,7 @@ use sp_core::genlock::{
     GENLOCK_GRID_FPS, floor_boundary_100ns, interval_100ns, strict_next_boundary_100ns,
 };
 use sp_ndi::NdiReceiveBackend;
-use sp_ndi::receive::{FOURCC_UYVA, FOURCC_UYVY};
+use sp_ndi::receive::{FOURCC_UYVA, FOURCC_UYVY, FRAME_FORMAT_TYPE_PROGRESSIVE};
 use sp_ndi::test_util::{MockNdiReceiveBackend, MockVideoFrame};
 
 /// 2026-09 in 100 ns since the epoch.
@@ -45,6 +45,7 @@ fn uyvy(tc: i64, n: i32, d: i32, fill: u8) -> MockVideoFrame {
         line_stride: 8,
         frame_rate_n: n,
         frame_rate_d: d,
+        frame_format_type: FRAME_FORMAT_TYPE_PROGRESSIVE,
         timecode: tc,
         data: vec![fill; 16],
     }
@@ -247,11 +248,11 @@ fn a_60_fps_source_is_decimated_onto_the_grid_and_the_drops_are_counted() {
 // --- standby -----------------------------------------------------------------
 
 fn assert_standby(job: &SubmitJob) {
-    assert_eq!((job.width, job.height, job.stride), (2, 2, 2));
+    assert_eq!((job.width, job.height, job.stride), (2, 4, 2));
     assert_eq!(
         &job.video[..],
-        &[16, 16, 16, 16, 128, 128][..],
-        "NV12 black"
+        &[16, 16, 16, 16, 16, 16, 16, 16, 128, 128, 128, 128][..],
+        "NV12 black: 2×4 luma 16, then 2×2 chroma 128"
     );
     assert_eq!(job.audio[0].data, vec![0.0; 3200], "one silent block");
 }
@@ -271,6 +272,7 @@ fn a_disconnected_source_gives_standby_black_and_silence_on_every_boundary() {
     assert_eq!(st.no_source_boundaries, 30);
     assert_eq!(st.frames_received, 0);
     assert!(!st.connected);
+    assert!(!rig.shared.is_connected());
     assert_eq!(rig.calls_matching("framesync_capture_video"), 0);
 }
 
@@ -338,7 +340,17 @@ fn a_stride_too_short_for_the_width_is_standby() {
     f.line_stride = 7; // under 2 × 4
     let mut rig = rig(vec![f], vec![Some(0)]);
     rig.run(2).iter().for_each(assert_standby);
-    assert_eq!(rig.status().unsupported_boundaries, 2);
+    let st = rig.status();
+    assert_eq!(st.unsupported_boundaries, 2);
+    assert_eq!(
+        st.frames_received, 0,
+        "a frame that cannot be converted is not received"
+    );
+    // A stride of exactly 2 × width is the tightest valid one.
+    let mut tight = uyvy(0, 30, 1, 5);
+    tight.line_stride = 8;
+    let mut tight_rig = self::rig(vec![tight], vec![Some(0)]);
+    assert_eq!(&tight_rig.run(1)[0].video[..], &[5u8; 12][..]);
 }
 
 #[test]
@@ -514,6 +526,7 @@ fn the_converted_picture_is_a_pooled_buffer_of_exactly_the_nv12_size() {
         line_stride: 100,
         frame_rate_n: 30,
         frame_rate_d: 1,
+        frame_format_type: FRAME_FORMAT_TYPE_PROGRESSIVE,
         timecode: 0,
         data: vec![77; 100 * 34],
     };
@@ -528,6 +541,30 @@ fn the_converted_picture_is_a_pooled_buffer_of_exactly_the_nv12_size() {
     drop(jobs);
     drop(rig); // the input's own reference to the converted frame
     assert_eq!(sp_decoder::frame_pool::pool_len(CAP), before + 1);
+}
+
+#[test]
+fn a_reconnect_does_not_count_the_outage_as_dropped_frames() {
+    // Frame 10 arrives after an outage of 10 frames: nothing was DROPPED on
+    // our side, the source was simply gone.
+    let mut rig = rig(source_frames(30, 30), vec![Some(0), Some(1), Some(10)]);
+    rig.run(2);
+    rig.mock.set_connections(0);
+    rig.input.service(b(3), b(3), &rig.bus);
+    rig.mock.set_connections(1);
+    rig.input.service(b(4), b(4), &rig.bus);
+    let st = rig.status();
+    assert_eq!((st.frames_received, st.video_drops), (3, 0));
+    assert!(rig.shared.is_connected());
+}
+
+#[test]
+fn a_field_that_still_arrives_is_standby_not_a_half_height_picture() {
+    let mut field = uyvy(0, 30, 1, 3);
+    field.frame_format_type = 2; // NDIlib_frame_format_type_field_0
+    let mut rig = rig(vec![field], vec![Some(0)]);
+    rig.run(2).iter().for_each(assert_standby);
+    assert_eq!(rig.status().unsupported_boundaries, 2);
 }
 
 // --- status -----------------------------------------------------------------
@@ -568,6 +605,7 @@ fn a_fresh_input_reports_nothing_received() {
     assert_eq!(st.format, None);
     assert_eq!(st.frame_rate, None);
     assert!(st.visible_sources.is_empty());
+    assert!(!shared.is_connected());
     assert!(!shared.is_stopped());
     shared.stop();
     assert!(shared.is_stopped());
@@ -672,11 +710,11 @@ fn grid_step_waits_services_catches_up_resyncs_and_relatches() {
     // Before the next boundary: wait exactly until it.
     assert_eq!(
         grid_step(b(5) + 1_000, b(5)),
-        GridStep::Wait(b(6) - b(5) - 1_000)
+        InputGridStep::Wait(b(6) - b(5) - 1_000)
     );
-    assert_eq!(grid_step(b(6) - 1, b(5)), GridStep::Wait(1));
+    assert_eq!(grid_step(b(6) - 1, b(5)), InputGridStep::Wait(1));
     // On it: service it.
-    let on = GridStep::Service {
+    let on = InputGridStep::Service {
         boundary: b(6),
         resync: false,
     };
@@ -687,7 +725,7 @@ fn grid_step_waits_services_catches_up_resyncs_and_relatches() {
     // More than 8 behind: resync on the current floor.
     assert_eq!(
         grid_step(b(15), b(5)),
-        GridStep::Service {
+        InputGridStep::Service {
             boundary: b(15),
             resync: true
         }
@@ -695,11 +733,11 @@ fn grid_step_waits_services_catches_up_resyncs_and_relatches() {
     // A next boundary exactly two slots ahead still waits; further re-latches.
     assert_eq!(
         grid_step(b(6) - INPUT_RELATCH_100NS, b(5)),
-        GridStep::Wait(INPUT_RELATCH_100NS)
+        InputGridStep::Wait(INPUT_RELATCH_100NS)
     );
     assert_eq!(
         grid_step(b(6) - INPUT_RELATCH_100NS - 1, b(5)),
-        GridStep::Relatch
+        InputGridStep::Relatch
     );
 }
 
@@ -729,7 +767,13 @@ fn video_format_support_and_fourcc_text() {
         height,
         frame_rate_n: 30,
         frame_rate_d: 1,
+        progressive: true,
     };
+    let field = VideoFormat {
+        progressive: false,
+        ..f(FOURCC_UYVY, 4, 2)
+    };
+    assert!(!field.is_supported(), "a field is not converted");
     assert!(f(FOURCC_UYVY, 4, 2).is_supported());
     assert!(f(FOURCC_UYVA, 1920, 1080).is_supported());
     assert!(!f(u32::from_le_bytes(*b"BGRA"), 4, 2).is_supported());

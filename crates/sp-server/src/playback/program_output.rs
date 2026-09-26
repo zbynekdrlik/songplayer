@@ -248,7 +248,6 @@ impl super::PlaybackEngine {
     /// #196 startup senders.
     #[cfg_attr(test, mutants::skip)]
     pub async fn start_program(&self, bus: Arc<ProgramBus>, shutdown: &broadcast::Sender<()>) {
-        let shutdown_tx = shutdown;
         let vban = bus.vban().clone();
         tokio::spawn(run_vban_config_task(
             self.pool.clone(),
@@ -257,7 +256,7 @@ impl super::PlaybackEngine {
         ));
         #[cfg(windows)]
         crate::playback::vban_out::spawn_vban_thread(vban.clone());
-        let mut shutdown = shutdown.subscribe();
+        let mut shutdown_rx = shutdown.subscribe();
         restore_selected_source(&self.pool, &bus).await;
         if !install(bus.clone()) {
             warn!("program bus: a bus was already installed — keeping the first one");
@@ -276,10 +275,10 @@ impl super::PlaybackEngine {
             self.pool.clone(),
             bus.clone(),
             receive,
-            shutdown_tx,
+            shutdown,
         );
         tokio::spawn(async move {
-            let _ = shutdown.recv().await;
+            let _ = shutdown_rx.recv().await;
             bus.stop();
             vban.stop();
             bus.input().stop();

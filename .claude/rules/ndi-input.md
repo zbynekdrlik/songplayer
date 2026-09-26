@@ -42,8 +42,12 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
 - The color format is `NDIlib_recv_color_format_fastest` with
   `allow_video_fields = false` and highest bandwidth. A source without alpha
   comes as UYVY. One with alpha comes as UYVA, whose FIRST plane is UYVY, so a
-  single converter covers both. Any other FourCC, or an odd size, gets the
-  standby pair plus a logged `ndi input: video format … supported=false`.
+  single converter covers both. Any other FourCC, an odd size, a stride under
+  2 × width, or a non-progressive frame (a field — the SDK should de-interlace
+  with `allow_video_fields = false`, but `fastest` may still deliver fields)
+  gets the standby pair plus a logged
+  `ndi input: video format … progressive=… supported=false`. It is counted in
+  `unsupported_boundaries`, never in `frames_received`.
 - `NdiFrameSync` (RAII):
   - It destroys the FrameSync BEFORE its receiver, the SDK's order.
   - `capture_video` / `capture_audio` return guards that free the frame on
@@ -62,8 +66,13 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
 
 ## The grid thread (`playback/ndi_input.rs`)
 
-- `run_input_loop` ticks on the program wall domain: a `WallVbanClock`, ticked
-  once per boundary. `grid_step` applies the pacer's rule:
+- `run_input_loop` (Windows thread `ndi-input`, `THREAD_PRIORITY_TIME_CRITICAL`
+  via `pipeline_audio::raise_thread_priority` + the 1 ms timer: while cut it
+  owns every program boundary) ticks on the program wall domain: a
+  `WallVbanClock`, ticked once per boundary. `grid_step` (→ `InputGridStep`)
+  applies the pacer's rule, with the resync decided by
+  `sp_core::genlock::lag_over_catchup_bound_100ns` (it STEPS the grid; never
+  divide by the nominal interval):
   - wait for the next boundary;
   - catch up one by one while ≤ 8 behind;
   - above 8 behind, resync on the floor;
@@ -81,7 +90,8 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   re-offers the SAME converted `SharedFrame` (an `Arc` bump, no second
   conversion). A distinct buffer with the same timecode is a new frame.
 - Drops are the rounded source-frame distance minus one (`skipped_frames`,
-  from the source rate).
+  from the source rate). A disconnect forgets the last frame, so an outage is
+  never counted as drops after the reconnect.
 - The standby pair (the input's own NV12 black + one silent block) goes out
   when there is no SDK, no receiver, the source is disconnected
   (`recv_get_no_connections == 0`), there is no video yet, or the format is

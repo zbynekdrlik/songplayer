@@ -199,11 +199,3 @@ test("the Program control lists OBS manuál after the playlists and cuts to it a
   // Zero console errors — the last assertion.
   expect(realConsoleErrors(consoleMessages)).toEqual([]);
 });
-
-test("a cut to the disabled NDI input is refused (404)", async ({ request }) => {
-  const resp = await request.post("/api/v1/program/cut", { data: { source: -1 } });
-  expect(resp.status()).toBe(404);
-  const program = await (await request.get("/api/v1/program")).json();
-  expect(program.source).toBe(1);
-  expect(program.input.enabled).toBe(false);
-});

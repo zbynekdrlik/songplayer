@@ -25,6 +25,8 @@ pub struct MockVideoFrame {
     pub line_stride: i32,
     pub frame_rate_n: i32,
     pub frame_rate_d: i32,
+    /// `NDIlib_frame_format_type_e` (1 = progressive).
+    pub frame_format_type: i32,
     pub timecode: i64,
     pub data: Vec<u8>,
 }
@@ -176,7 +178,7 @@ impl NdiReceiveBackend for MockNdiReceiveBackend {
                 frame_rate_n: f.frame_rate_n,
                 frame_rate_d: f.frame_rate_d,
                 picture_aspect_ratio: 0.0,
-                frame_format_type: crate::receive::FRAME_FORMAT_TYPE_PROGRESSIVE,
+                frame_format_type: f.frame_format_type,
                 timecode: f.timecode,
                 p_data: f.data.as_mut_ptr(),
                 line_stride_in_bytes: f.line_stride,

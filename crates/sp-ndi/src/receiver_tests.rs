@@ -22,6 +22,7 @@ fn frame(tc: i64, data: Vec<u8>) -> MockVideoFrame {
         line_stride: 4,
         frame_rate_n: 30,
         frame_rate_d: 1,
+        frame_format_type: crate::receive::FRAME_FORMAT_TYPE_PROGRESSIVE,
         timecode: tc,
         data,
     }
@@ -211,8 +212,9 @@ fn a_degenerate_audio_descriptor_interleaves_to_silence() {
     );
     mock.set_audio(vec![0.5; 4], -2, 2, 8); // negative channel count
     assert_eq!(
-        sync.capture_audio(48_000, 2, 2).interleaved(2, 2),
-        vec![0.0; 4]
+        sync.capture_audio(48_000, 2, 3).interleaved(2, 3),
+        vec![0.0; 6],
+        "exactly channels × samples of silence"
     );
     mock.set_audio(vec![0.5; 4], 2, 2, -8); // negative stride
     assert_eq!(

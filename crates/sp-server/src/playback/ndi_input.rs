@@ -41,10 +41,10 @@ use sp_core::config::{
     PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL, SETTING_NDI_INPUT_ENABLED, SETTING_NDI_INPUT_SOURCE,
 };
 use sp_core::genlock::{
-    GENLOCK_GRID_FPS, GENLOCK_MAX_CATCHUP_INTERVALS, UNITS_PER_SECOND, floor_boundary_100ns,
-    lag_slots_100ns, strict_next_boundary_100ns,
+    GENLOCK_GRID_FPS, UNITS_PER_SECOND, floor_boundary_100ns, lag_over_catchup_bound_100ns,
+    strict_next_boundary_100ns,
 };
-use sp_ndi::receive::{FOURCC_UYVA, FOURCC_UYVY};
+use sp_ndi::receive::{FOURCC_UYVA, FOURCC_UYVY, FRAME_FORMAT_TYPE_PROGRESSIVE};
 use sp_ndi::{AudioFrame, NdiFrameSync, NdiReceiveBackend};
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
@@ -142,6 +142,10 @@ pub struct VideoFormat {
     pub height: i32,
     pub frame_rate_n: i32,
     pub frame_rate_d: i32,
+    /// `frame_format_type == progressive`. The receiver asks for progressive
+    /// frames (`allow_video_fields = false`); a field that still arrives is
+    /// not converted (it would show as a half-height picture).
+    pub progressive: bool,
 }
 
 impl VideoFormat {
@@ -155,10 +159,11 @@ impl VideoFormat {
             .collect()
     }
 
-    /// UYVY or UYVA (a UYVY plane + an alpha plane) with even, non-zero
-    /// dimensions — what [`uyvy_to_nv12`] converts.
+    /// A progressive UYVY or UYVA (a UYVY plane + an alpha plane) frame with
+    /// even, non-zero dimensions — what [`uyvy_to_nv12`] converts.
     pub fn is_supported(&self) -> bool {
         (self.four_cc == FOURCC_UYVY || self.four_cc == FOURCC_UYVA)
+            && self.progressive
             && self.width > 0
             && self.height > 0
             && self.width % 2 == 0
@@ -369,14 +374,14 @@ pub fn skipped_frames(prev_tc: i64, tc: i64, n: i32, d: i32) -> u64 {
         return 0;
     }
     let den = i128::from(UNITS_PER_SECOND) * i128::from(d);
-    let frames = (i128::from(tc - prev_tc) * i128::from(n) + den / 2) / den;
+    let frames = ((i128::from(tc) - i128::from(prev_tc)) * i128::from(n) + den / 2) / den;
     (frames - 1).max(0) as u64
 }
 
 /// One step of the input's grid loop at `now_100ns`, `last_100ns` being the
 /// last boundary serviced (or the grid floor it started from).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GridStep {
+pub enum InputGridStep {
     /// Sleep this long (100 ns) — the next boundary is not reached yet.
     Wait(i64),
     /// The next boundary is more than [`INPUT_RELATCH_100NS`] ahead: the clock
@@ -387,25 +392,29 @@ pub enum GridStep {
     Service { boundary: i64, resync: bool },
 }
 
-/// The pacer's grid rule for the input thread: the boundary after the last one
-/// serviced, caught up one by one (up to 8 behind), resynced beyond that.
-pub fn grid_step(now_100ns: i64, last_100ns: i64) -> GridStep {
+/// The pacer's grid rule for the input thread (`genlock_emit_gate_100ns`'s
+/// exact-grid catch-up + resync, with its own backward-step re-latch): the
+/// boundary after the last one serviced, caught up one by one while at most 8
+/// behind, resynced on the current floor beyond that.
+pub fn grid_step(now_100ns: i64, last_100ns: i64) -> InputGridStep {
     let target = strict_next_boundary_100ns(last_100ns, GENLOCK_GRID_FPS);
     let wait = target - now_100ns;
     if wait > INPUT_RELATCH_100NS {
-        return GridStep::Relatch;
+        return InputGridStep::Relatch;
     }
     if wait > 0 {
-        return GridStep::Wait(wait);
+        return InputGridStep::Wait(wait);
     }
     let floor = floor_boundary_100ns(now_100ns, GENLOCK_GRID_FPS);
-    if lag_slots_100ns(target, floor, GENLOCK_GRID_FPS) > GENLOCK_MAX_CATCHUP_INTERVALS {
-        return GridStep::Service {
+    // The pacer's exact-grid rule: STEP the grid (slots are 333_333 or 333_334
+    // wide), never divide by a nominal interval.
+    if lag_over_catchup_bound_100ns(target, floor, GENLOCK_GRID_FPS) {
+        return InputGridStep::Service {
             boundary: floor,
             resync: true,
         };
     }
-    GridStep::Service {
+    InputGridStep::Service {
         boundary: target,
         resync: false,
     }
@@ -572,6 +581,9 @@ impl NdiInput {
                 info!(source = %self.applied.source, "ndi input: source connected");
             } else {
                 warn!(source = %self.applied.source, "ndi input: source disconnected — standby pair");
+                // The first frame after a reconnect is not a drop count from
+                // the one before the outage.
+                self.last = None;
             }
             self.connected = connected;
             self.shared.counters().connected = connected;
@@ -604,6 +616,7 @@ impl NdiInput {
             height: f.yres,
             frame_rate_n: f.frame_rate_n,
             frame_rate_d: f.frame_rate_d,
+            progressive: f.frame_format_type == FRAME_FORMAT_TYPE_PROGRESSIVE,
         };
         let (timecode, data) = (f.timecode, f.p_data as usize);
         let stride = f.line_stride_in_bytes.max(0) as usize;
@@ -612,7 +625,7 @@ impl NdiInput {
             return Captured::Standby;
         };
         let changed = note_format(&self.shared, &self.applied.source, format);
-        if !format.is_supported() {
+        if !format.is_supported() || stride < 2 * format.width as usize {
             self.last = None;
             self.shared.counters().unsupported_boundaries += 1;
             return Captured::Standby;
@@ -655,9 +668,7 @@ impl NdiInput {
         let (wu, hu) = (w as usize, h as usize);
         let mut buf = sp_decoder::frame_pool::take(wu * hu * 3 / 2);
         if !uyvy_to_nv12(plane, wu, hu, stride, &mut buf) {
-            self.last = None;
-            self.shared.counters().unsupported_boundaries += 1;
-            return Captured::Standby;
+            return Captured::Standby; // not reached: size + stride were checked above
         }
         let frame = SharedFrame::new(buf);
         if let Some(l) = self.last.as_mut() {
@@ -680,6 +691,7 @@ fn note_format(shared: &NdiInputShared, source: &str, format: VideoFormat) -> bo
         width = format.width,
         height = format.height,
         frame_rate = %format!("{}/{}", format.frame_rate_n, format.frame_rate_d),
+        progressive = format.progressive,
         supported = format.is_supported(),
         "ndi input: video format"
     );
@@ -702,8 +714,8 @@ pub fn run_input_loop(input: &mut NdiInput, bus: &ProgramBus, clock: &mut dyn Vb
         let now = clock.now_100ns();
         let from = *last.get_or_insert_with(|| floor_boundary_100ns(now, GENLOCK_GRID_FPS));
         match grid_step(now, from) {
-            GridStep::Wait(d) => clock.sleep_100ns(d),
-            GridStep::Relatch => {
+            InputGridStep::Wait(d) => clock.sleep_100ns(d),
+            InputGridStep::Relatch => {
                 shared.counters().relatches += 1;
                 warn!(
                     now_100ns = now,
@@ -712,7 +724,7 @@ pub fn run_input_loop(input: &mut NdiInput, bus: &ProgramBus, clock: &mut dyn Vb
                 );
                 last = None;
             }
-            GridStep::Service { boundary, resync } => {
+            InputGridStep::Service { boundary, resync } => {
                 if resync {
                     shared.counters().resyncs += 1;
                     warn!(
@@ -765,6 +777,9 @@ fn spawn_input_thread(receive: Option<Arc<dyn NdiReceiveBackend>>, bus: Arc<Prog
         .name("ndi-input".into())
         .spawn(move || {
             crate::playback::pipeline_paced::request_high_res_timer();
+            // The input owns every program boundary while it is cut: guaranteed
+            // priority, like the VBAN sender and the paced audio threads.
+            crate::playback::pipeline::pipeline_audio::raise_thread_priority("ndi-input");
             info!(has_sdk = receive.is_some(), "ndi input thread started");
             let shared = bus.input().clone();
             let mut input = NdiInput::new(receive, shared, PROGRAM_STANDBY_W, PROGRAM_STANDBY_H);
