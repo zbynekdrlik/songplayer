@@ -45,6 +45,10 @@ pub const CPUS_PER_MIX_BAND: usize = 4;
 /// The name of a band's helper thread.
 const MIX_THREAD_NAME: &str = "program-mix";
 
+/// Paints one run of one destination row ([`FitPlan::luma_run`] or
+/// [`FitPlan::chroma_run`]): `(plan, src, row, first column, out, to, w)`.
+type RowRun = fn(&FitPlan, &[u8], usize, usize, &mut [u8], &[u8], Weight);
+
 /// How many row bands the `SP-program` sender paints a mixed picture in on a
 /// box with `logical_cpus` logical processors: a quarter of them, at least 1,
 /// at most [`MAX_MIX_BANDS`] (the 24-thread box: 6).
@@ -65,7 +69,7 @@ pub enum Outgoing<'a> {
 
 /// Mix one boundary's pictures into `out` (appended): every byte
 /// `blend(fit(from)[p], to[p], weight)`, computed once, in `bands` row bands
-/// (at least 1). Bit-identical to `FitPlan::apply` then `blend_nv12_into`
+/// (1 to [`MAX_MIX_BANDS`]). Bit-identical to `FitPlan::apply` then `blend_nv12_into`
 /// (for [`Outgoing::Same`]: to `blend_nv12_into`), and to any other band
 /// count. As long as the two-pass result: the destination's bytes (the
 /// `Same` picture's, the plan's destination layout's) that `to` also holds.
@@ -85,7 +89,7 @@ pub fn mix_nv12_into(
         Outgoing::Fitted(plan, _) => (plan.dst, plan.dst.len),
     };
     let len = len.min(to.len());
-    let k = bands.max(1);
+    let k = bands.clamp(1, MAX_MIX_BANDS);
     let base = out.len();
     // A memset of the pooled buffer: the bands then need disjoint `&mut`
     // slices of it (safe code), and every byte is overwritten once.
@@ -265,34 +269,50 @@ impl FitPlan {
     /// outgoing byte, blended with `to`'s. Outside the fitted rectangle that
     /// byte is the bar's studio black: Y 16 in the luma plane, UV 128 after
     /// it (`black_nv12_into`). A picture that is not whole NV12 is the black
-    /// canvas alone. A run may start anywhere; it is walked row by row.
-    fn mix_run(&self, src: &[u8], mut at: usize, mut out: &mut [u8], mut to: &[u8], w: Weight) {
+    /// canvas alone. A run may start anywhere: it is cut at the plane edge,
+    /// and each part is walked row by row ([`FitPlan::plane_run`]).
+    fn mix_run(&self, src: &[u8], at: usize, out: &mut [u8], to: &[u8], w: Weight) {
+        let luma_end = self.dst.stride as usize * self.dst.height as usize;
         if !self.draws(src) {
-            let luma = (self.dst.stride as usize * self.dst.height as usize).min(self.dst.len);
-            let split = luma.saturating_sub(at).min(out.len());
+            let split = luma_end.min(self.dst.len).saturating_sub(at).min(out.len());
             let (bars, rest) = out.split_at_mut(split);
             w.fill(16, bars, &to[..split]);
             w.fill(128, rest, &to[split..]);
             return;
         }
+        let split = luma_end.saturating_sub(at).min(out.len());
+        let (luma, chroma) = out.split_at_mut(split);
+        let (luma_to, chroma_to) = to.split_at(split);
+        self.plane_run(src, Self::luma_run, at, luma, luma_to, w);
+        // The chroma part (it starts on the plane edge when the run crosses
+        // it) also holds the bytes past the chroma plane: rows below the
+        // picture, all bar.
+        let offset = at.max(luma_end) - luma_end;
+        self.plane_run(src, Self::chroma_run, offset, chroma, chroma_to, w);
+    }
+
+    /// The part of a run inside one plane, from `offset` bytes into the
+    /// plane: the rest of its first row, then whole `stride`-byte rows (the
+    /// last one maybe cut short), each painted by `row_run`. The rows are
+    /// chunks of the run, so every step paints at least one byte.
+    fn plane_run(
+        &self,
+        src: &[u8],
+        row_run: RowRun,
+        offset: usize,
+        out: &mut [u8],
+        to: &[u8],
+        w: Weight,
+    ) {
         let ds = self.dst.stride as usize;
-        let luma_end = ds * self.dst.height as usize;
-        while !out.is_empty() {
-            let luma = at < luma_end;
-            // The byte's offset in its plane (one subtraction feeds both the
-            // row and the column). The chroma branch also walks the bytes
-            // past the chroma plane: rows below the picture, all bar.
-            let offset = if luma { at } else { at - luma_end };
-            let (row, c0) = (offset / ds, offset % ds);
-            let len = (ds - c0).min(out.len());
-            let (run, rest) = std::mem::take(&mut out).split_at_mut(len);
-            let (run_to, rest_to) = to.split_at(len);
-            if luma {
-                self.luma_run(src, row, c0, run, run_to, w);
-            } else {
-                self.chroma_run(src, row, c0, run, run_to, w);
-            }
-            (at, out, to) = (at + len, rest, rest_to);
+        let (row, c0) = (offset / ds, offset % ds);
+        let head = (ds - c0).min(out.len());
+        let (first, rest) = out.split_at_mut(head);
+        let (first_to, rest_to) = to.split_at(head);
+        row_run(self, src, row, c0, first, first_to, w);
+        let rows = rest.chunks_mut(ds).zip(rest_to.chunks(ds));
+        for (i, (run, run_to)) in rows.enumerate() {
+            row_run(self, src, row + 1 + i, 0, run, run_to, w);
         }
     }
 
