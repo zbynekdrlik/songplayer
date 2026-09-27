@@ -235,6 +235,13 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   with that reason. Build the refusal in a helper that returns `ErrorResponse`
   by value. Own helpers returning `tungstenite::Error` (136 B) must box it:
   `Result<(), Box<tungstenite::Error>>` + `.map_err(Box::new)`.
+- **`clippy::nonminimal_bool` rewrites `!opt.is_some_and(|x| …)`** (#217
+  addendum 3 review round 2). It is warn-by-default (complexity), so under
+  `-D warnings` it fails the Lint job. Clippy's `METHODS_WITH_NEGATION`
+  table maps a negated `is_some_and` to `is_none_or` from MSRV 1.82, and the
+  workspace is 1.85. Write `opt.is_none_or(|x| x.id != id)`: negate the
+  closure body, never the call. `!opt.is_some()` / `!opt.is_none()` are in
+  the same table.
 
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,
@@ -326,6 +333,30 @@ pointer-equality RED pass by luck.
   both.
 - **No hangs:** drop the `release` sender on every failure path, so the held
   thread's `recv().unwrap()` panics instead of hanging the test.
+
+**A RED for a new state machine or a restructure (#217 addendum 3, three
+rounds).** Ship the whole new structure in RED (new types, fields, modules,
+command variants). Keep the OLD behaviour in a few NAMED spots and list them
+in the RED message:
+
+- a `plan` that runs every command as sent;
+- a supersede that returns the batch unchanged;
+- a predicate that still reads the old input;
+- an empty `rearm` with `_`-prefixed params (warning-free, still called);
+- a helper without its new first step.
+
+Keep every new item USED in RED, or the lib target warns. Two things that
+were enough:
+
+- a variant only GREEN's `plan` returns can be constructed by an old path
+  (the old retry's instant hide as `run_title_action(HideNow)`);
+- a new fn only GREEN's predicate calls can be read by a debug log of the
+  window inputs, which GREEN keeps.
+
+Write GREEN first and tar the changed files to the scratchpad. Build RED with
+anchor-asserted scripts (rustfmt re-wraps lines, so re-read the formatted text
+before anchoring). Commit RED, then restore ONLY the files whose spots differ
+from the tar.
 
 **A RED whose new tests call a CHANGED signature (#215 review rounds 3–5).**
 The new tests must compile at the RED commit, but the fix changes an API

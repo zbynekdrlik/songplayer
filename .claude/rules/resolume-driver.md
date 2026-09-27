@@ -343,18 +343,31 @@ Otherwise a stale text Arena restored from its saved composition stays until
 the next line change, for the whole song, or over the next camera shot.
 
 **The title is ONE `Resync` (#217 addendum 3), sent first by
-`resync_wall_title(now)`**, which the OBS scene-on (`push_title_for_playing`)
-uses too. It names the title that SHOULD be up, and the driver compares it
-with what it did (above).
+`resync_wall_title`**, which the OBS scene-on (`push_title_for_playing`) uses
+too. It names the title that SHOULD be up, and the driver compares it with
+what it did (above).
 
 - **One clock: `TitleClock { video_id, show_at, hide_at }`**
   (`playback/title.rs`). The `Started` handler fixes it
   (`show_at = Started + 1.5 s`, `hide_at = end − 3.5 s`, `None` for a song of
   5 s or less or an unknown 0 duration) and arms the timers from it
-  (`title_timers.rs::arm_title_timers`: `sleep_until` those instants).
-- **A title is due** (`PlaylistPipeline::title_due`) when its pipeline plays
-  on program and its clock is this video's and `open_at(now)`:
+  (`title_timers.rs::arm_title_timers`: `sleep_until` those instants; arming
+  cancels the timers it finds, so no old timer is left to fire). Every
+  `PipelineCommand::Play` (SelectAndPlay, ReplayCurrent, `handle_play_video`,
+  `handle_previous`) clears the clock. Even the same video (a skip in a
+  single-video playlist, Loop, a Previous) gets its new clock at its new
+  `Started`, never the last song's (review round 2).
+- **A title is due** when its pipeline plays on program with its own clock
+  (`PlaylistPipeline::on_air_clock`) and that clock is `open_at(now)`:
   `[show_at, hide_at)`.
+- **Read first, decide at the send (review round 2).** `resync_wall_title`
+  reads the title of every candidate (`title::title_text`), its one await.
+  Only then does it decide at `Instant::now()` (`due_title_video`) and send at
+  once (`title::send_resync`: the Resolume Resync first, then the OBS text,
+  which can stall while cg OBS is away). A timer that fired during the read is
+  already past its instant, so the Resync agrees with it. Deciding before the
+  read let a HideTitle land ahead of a Resync that still named the title, and
+  the Resync superseded it.
 - **Why not the position (review round 1, 🔴).** The first version read
   `cached_position_ms`, the decoder position the pipeline reports every
   500 ms, while the timers slept on the clock of `Started`. For up to
@@ -363,9 +376,8 @@ with what it did (above).
   a `Resync(None)` just after the show timer hid the title for the whole song.
   Every OBS program change re-sends `on_program: true` for every on-program
   playlist (`obs_bridge.rs`), so a Resync near a boundary is common. The
-  timers and the Resync now read the same instants; only a race of
-  microseconds between the engine computing a Resync and a timer sending
-  remains.
+  timers and the Resync now read the same instants; only the microseconds
+  between the decision and the (non-awaiting) send can still race a timer.
 - **Between songs.** The clock is the previous video's until the new one's
   `Started`, and a skip's late Position events do not matter any more. So the
   window is closed from a song change to the new `Started`, and the scene-on
