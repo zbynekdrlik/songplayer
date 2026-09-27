@@ -22,8 +22,21 @@ The fix is **display-only**. `lyrics/display_plan.rs` builds a plan once per
 loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).
 The Resolume wall (`resolume_lines_with_next`, also used by
 `playback/recovery.rs`) and the Presenter (`presenter_lines`) read
-`plan.at(position)`. The dashboard karaoke (`LyricsState::update`) and
-`resolume_lines` stay on the RAW track, keeping its word timing.
+`plan.at(position)`. The dashboard karaoke (`LyricsState::update`) stays on
+the RAW track, keeping its word timing. The raw `resolume_lines` was deleted
+(ROZHODNUTÉ 5853953564): its name promised the wall but it bypassed the plan.
+
+**Two display profiles, chosen at load from the track's `source`**
+(`DisplayProfile::for_source`):
+
+- `Song` is every sung-lyrics track and gets the 1.5 s lead.
+- `Speech` is a dub subtitle track: `source ==
+  dabing::subtitles::SOURCE_LIVE_TRANSLATE` (`"gemini-live-translate"`). That
+  is the same marker the translation worker already excludes dub tracks by.
+- `Speech` has lead 0, so each line shows exactly when it is spoken. Merge,
+  hold and the break tail stay the same.
+- The `lyrics: loaded` log line carries `display_lines` and
+  `display_profile`.
 
 **Never bump `LYRICS_PIPELINE_VERSION` for a display change.** The stored JSON
 and the pipeline are untouched. Changing the grouping in the pipeline instead is
@@ -34,7 +47,7 @@ songs that are already stored.
 
 | Const | Value | Meaning |
 |---|---|---|
-| `LEAD_MS` | 1500 | A line appears up to this long before it is sung, so people can pre-read. |
+| `LEAD_MS` | 1500 | A `Song` line appears up to this long before it is sung, so people can pre-read (`Speech`: 0). |
 | `MIN_VISIBLE_MS` | 1200 | The shortest time a line stays on the wall. |
 | `LONG_GAP_MS` | 8000 | A sung gap longer than this is an instrumental break: the wall blanks. |
 | `HOLD_TAIL_MS` | 3000 | Before a break, and after the last line, the line leaves this long after its end. |
@@ -58,9 +71,12 @@ one only together with the design record on #217.
    EN and SK are joined with one space: texts are trimmed, an empty side is
    dropped, and a lone SK is kept. `next_merge` rescans from the start after
    every merge. Each merge removes a group, so the loop always ends.
-2. **Lead.** `show = min(start, max(start − LEAD, prev.show + MIN_VISIBLE))`.
-   A line never shows after it is sung. When the previous lines leave no
-   room, it shows exactly when it is sung.
+2. **Lead.** `show = min(start, max(start − lead, prev.sung_end,
+   prev.show + MIN_VISIBLE))`, with `lead = LEAD_MS` for `Song` and `0` for
+   `Speech`. A line appears early only once the previous wall line has been
+   sung to its end (ROZHODNUTÉ 5853953564), and it never shows after it is
+   sung. When the previous lines leave no room, it shows exactly when it is
+   sung.
 3. **Hold.** `hide = next.show` when the sung gap to the next line is
    ≤ `LONG_GAP_MS`. Before a longer gap, and after the last line, it is
    `end + HOLD_TAIL`.
@@ -83,9 +99,10 @@ one only together with the design record on #217.
   non-overlapping: the base tier runs `g35t_transcript::sanitize_lines`, but
   `orchestrator::run_reference_stage` passes the ★ tier's mtl line times
   through unchanged.
-- **Dub subtitle tracks go through the same plan.** `gemini-live-translate`
-  tracks (#182/#184) are stored as the same `{youtube_id}_lyrics.json`
-  (`dabing/subtitles_store.rs`) and load into the same `LyricsState`.
+- **Dub subtitle tracks go through the same plan, as `Speech`.**
+  `gemini-live-translate` tracks (#182/#184) are stored as the same
+  `{youtube_id}_lyrics.json` (`dabing/subtitles_store.rs`, `StoredDubTrack`
+  flattens `source` into it) and load into the same `LyricsState`.
   - Their lines touch, because `finalize_line_ends` trims each end to the
     next start. Many have `en: ""`, and each holds a whole SK sentence of up
     to 20 words.
@@ -94,31 +111,25 @@ one only together with the design record on #217.
     run collapsed into one Slovak block. The model gave 10 lines → 1 line of
     679 chars.
   - `a_dub_subtitle_track_never_collapses_into_one_giant_sk_line` pins this.
-  - Whether dub tracks should get the lead and hold at all is an open design
-    question on #217.
-- **The operator `lyrics_lead_ms` ADDS to the plan's 1.5 s lead.** No
-  migration seeds it, so it is 0 unless an operator set it. After a deploy,
-  read `lead_ms` from the `lyrics: loaded … display_lines=…` log line. If it
-  is not 0, the total lead is over 1.5 s.
-- **The lead can replace a line while it is still sung, and sometimes even
-  before it is sung.**
-  - It leaves before its sung end whenever the next line's show falls before
-    that end. Usually that is while it is still sung; sometimes it is even
-    before it is sung (next point).
-  - It leaves at or before its sung START when the next line is sung at most
-    `LEAD_MS` after this start and this line had at least `MIN_VISIBLE_MS`
-    of lead.
-  - This follows the design as written (record 5853195402): a line shows at
-    `start − 1500` as long as the previous line got its 1200 ms, and nothing
-    waits for the previous line's sung end.
-  - On the fixture every line gets the full 1500 ms lead. But 68 of 137 wall
-    lines leave before their sung end, 41.7 s in total.
-  - "All I have" (sung at 509.6 s) is on the wall only 508.1–509.5 s.
-  - The Resolume SK clip shows only the current line, so the Slovak of the
-    phrase being sung is what vanishes.
-  - A `Design-question:` on #217 asks the main whether to floor the lead at
-    the previous line's sung END, the issue-body acceptance "never before the
-    previous line's end". Check #217 before changing this.
+  - The wall shows each dub line exactly when spoken:
+    `a_speech_line_shows_exactly_when_it_is_spoken`, and through the renderer
+    `a_dub_track_loads_as_speech_and_shows_lines_exactly_when_spoken`.
+- **The operator `lyrics_lead_ms` ADDS to the plan's lead.** No migration
+  seeds it, so it is 0 unless an operator set it. After a deploy, read
+  `lead_ms` from the `lyrics: loaded … display_lines=…` log line. If it is not
+  0, the total lead is over the plan's. It also shifts `Speech` tracks.
+- **The lead never cuts a sung line (ROZHODNUTÉ 5853953564).** The first
+  design floored the lead only at `prev.show + 1200`. On the fixture, 68 of
+  137 wall lines then left before their sung end (41.7 s), and "All I have"
+  left before it was even sung.
+  - The `prev.sung_end` floor makes that 0.
+  - The cost: 69 lines keep the full 1.5 s lead, 7 show exactly on time, and
+    the average lead is about 1.2 s.
+  - Only OVERLAPPING source lines (the next sung before the previous ends)
+    can still replace a sung line. The `min(start)` cap then shows the next
+    one exactly at its sung start.
+  - Pinned by `fixture_no_wall_line_leaves_before_it_is_sung_to_the_end` and
+    `a_line_stays_on_the_wall_until_it_is_sung_to_the_end`.
 - **`at()` is a linear first-match over half-open `[show, hide)`.** At an
   exact boundary the NEXT line wins. The tests pin both sides of every boundary
   (`x − 1` → old line, `x` → new line) for the mutation gate.
@@ -126,7 +137,13 @@ one only together with the design record on #217.
   long-break tail is anchored on that.
 - **The fixture is the real song** (`crates/sp-server/tests/fixtures/
   lyrics_6KuPjo1diLg.json`, loaded via `include_str!` + `CARGO_MANIFEST_DIR`).
-  Its pins are exact: 137 wall lines, 17 500 ms blank (the three breaks only),
-  a shortest line of 1400 ms, and the full 1500 ms lead everywhere. When the
-  algorithm changes on purpose, re-derive them with a reference model that
-  mirrors `build_plan` step by step. The Tier-0 box cannot run the tests.
+  Its pins are exact:
+  - 137 wall lines;
+  - 17 500 ms blank (the three breaks only);
+  - a shortest line of 1500 ms (`Oh,`);
+  - 69 full leads, 7 exact;
+  - no line leaves before its sung end.
+
+  When the algorithm changes on purpose, re-derive them with a reference
+  model that mirrors `build_plan` step by step. The Tier-0 box cannot run the
+  tests.
