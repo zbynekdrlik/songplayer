@@ -17,16 +17,12 @@
 //!    it cannot merge forward, it merges backward under the same limits. The
 //!    Slovak text is joined the same way as the English. Merging repeats until
 //!    no rule applies.
-//! 2. **Lead.** A line shows at `max(start - LEAD_MS, prev.show +
-//!    MIN_VISIBLE_MS)`, but never after it is sung (`<= start`): when the
-//!    previous lines leave no room, it shows exactly when it is sung. This
-//!    show time is when the previous line leaves the wall, unless an
-//!    instrumental break separates them (step 3). So the previous
-//!    line leaves before its own sung end whenever this show falls before that
-//!    end, usually while it is still sung. The previous line leaves at or
-//!    before its sung START when this line is sung at most `LEAD_MS` after
-//!    that start and the previous line had at least `MIN_VISIBLE_MS` of lead
-//!    (see the design question on #217).
+//! 2. **Lead.** A line shows at `max(start - LEAD_MS, prev.sung_end,
+//!    prev.show + MIN_VISIBLE_MS)`, but never after it is sung (`<= start`).
+//!    It appears early only once the previous line has been sung to its end
+//!    (ROZHODNUTÉ on #217). When the previous lines leave no room, it shows
+//!    exactly when it is sung. So a line never leaves the wall while it is
+//!    still sung, unless the source lines themselves overlap.
 //! 3. **Hold.** A line stays on the wall until the next line shows. Before an
 //!    instrumental break (a gap over [`LONG_GAP_MS`]) and after the last line,
 //!    it leaves [`HOLD_TAIL_MS`] after its sung end instead.
@@ -277,13 +273,19 @@ fn join_sk(a: Option<String>, b: Option<String>) -> Option<String> {
 /// the module docs).
 fn schedule(groups: &[Group]) -> Vec<(u64, u64)> {
     let mut shows: Vec<u64> = Vec::with_capacity(groups.len());
+    // The previous group's (show, sung end).
+    let mut prev: Option<(u64, u64)> = None;
     for group in groups {
         let lead = group.start_ms.saturating_sub(LEAD_MS);
-        let show = match shows.last() {
-            Some(&prev) => lead.max(prev + MIN_VISIBLE_MS).min(group.start_ms),
+        let show = match prev {
+            Some((prev_show, prev_end)) => lead
+                .max(prev_end)
+                .max(prev_show + MIN_VISIBLE_MS)
+                .min(group.start_ms),
             None => lead,
         };
         shows.push(show);
+        prev = Some((show, group.end_ms));
     }
     groups
         .iter()
