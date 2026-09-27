@@ -623,3 +623,85 @@ fn a_later_cut_can_land_before_a_frozen_windows_end_and_still_fades_out_of_the_s
         "X → A, the frozen A → B window, A → C"
     );
 }
+
+#[test]
+fn a_waiting_window_cut_after_the_new_boundary_does_not_decide_the_source_on_air() {
+    // Review round 4, the waiting half: X → A fades b(7)..b(15) while X's
+    // submit thread runs four slots ahead. A Cut to B lands on b(17), then a
+    // fade to C on b(18) (its cue waits on B's pairs). Once b(15) is served X
+    // is out, and the cut to D lands on b(17): it replaces both. On program
+    // before b(17) is A — never B, whose Cut this cut replaces — so the fade
+    // goes from A to D and B is not held.
+    const SRC_X: i64 = 55;
+    const SRC_D: i64 = 44;
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_X);
+    assert!(core.set_transition(TransitionSpec::fade(300, SpecSource::Obs)));
+    let (fx, fa, fb, fc, fd) = (
+        frame(10, 2),
+        frame(4, 2),
+        frame(8, 2),
+        frame(6, 2),
+        frame(12, 2),
+    );
+    let mut sent = Vec::new();
+    for k in 1..=27 {
+        core.offer(SRC_A, job(4, &fa, b(k), LEVEL_A));
+        // X: one pair per boundary, then from b(6) on four slots ahead.
+        let x_stamps: Vec<usize> = match k {
+            1..=5 => vec![k],
+            6 => vec![6, 7, 8, 9, 10],
+            _ => vec![k + 4],
+        };
+        for kx in x_stamps {
+            core.offer(SRC_X, job(10, &fx, b(kx), 0.05));
+        }
+        core.offer(SRC_B, job(8, &fb, b(k), LEVEL_B));
+        core.offer(SRC_C, job(6, &fc, b(k), 0.3));
+        core.offer(SRC_D, job(12, &fd, b(k), 0.4));
+        match k {
+            5 => assert!(core.cut(SRC_A, b(5) + 5 * MS)),
+            11 => {
+                assert!(core.set_transition(TransitionSpec::cut(SpecSource::Setting)));
+                assert!(core.cut(SRC_B, b(11) + 5 * MS));
+                assert_eq!(core.status().cut_boundary_100ns, Some(b(17)));
+            }
+            12 => {
+                assert!(core.set_transition(TransitionSpec::fade(300, SpecSource::Obs)));
+                assert!(core.cut(SRC_C, b(12) + 5 * MS));
+                assert_eq!(core.status().cut_boundary_100ns, Some(b(18)));
+                assert_eq!(
+                    core.hold_for(SRC_B),
+                    Some(Hold::Until(b(43))),
+                    "the fade to C waits: B held to b(18) + 15 + 9, plus one slot"
+                );
+            }
+            15 => {
+                assert!(core.cut(SRC_D, b(15) + 5 * MS));
+                let st = core.status();
+                assert_eq!(st.cut_boundary_100ns, Some(b(17)), "on B's own Cut");
+                assert_eq!(
+                    st.transition
+                        .active
+                        .map(|w| (w.from, w.to, w.start_boundary_100ns)),
+                    Some((Some(SRC_A), SRC_D, b(17)))
+                );
+                assert_eq!(core.hold_for(SRC_B), None, "B never went on program");
+            }
+            _ => {}
+        }
+        sent.extend(take_all(&mut core));
+    }
+    let mut want = run(1..=6, |_| "src 10".to_string());
+    want.extend(run(7..=15, |k| format!("mix {}/9 10>4", k - 7)));
+    want.extend(one(16, "src 4"));
+    want.extend(run(17..=25, |k| format!("mix {}/9 4>12", k - 17)));
+    want.extend(run(26..=27, |_| "src 12".to_string()));
+    assert_eq!(sent, want, "A alone on b(16), then the A → D fade");
+    let c = core.status().transition.counters;
+    assert_eq!(
+        (c.transitions_done, c.mixed_boundaries, c.side_fills),
+        (2, 18, 0),
+        "X → A and A → D; the replaced Cut and fade never count"
+    );
+}
