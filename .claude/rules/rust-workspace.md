@@ -388,6 +388,17 @@ the test that kills each one BEFORE CI's mutation gate runs.
   A mutant that only a mid-row / off-edge input can reveal (`a - c0` with
   `c0` always 0 on row-aligned runs) needs a test that cuts the input
   arbitrarily.
+- **A HANG fails the gate exactly like a survivor** (review round 1, same
+  ticket). cargo-mutants kills a stalled test run at `--timeout` and reports
+  TIMEOUT, which turns the shard red. My harness first counted its own
+  iteration guard as a "kill" and missed one: `%`→`+` made a hand-advanced
+  `while !out.is_empty()` cursor step by 0 bytes forever. So:
+  - give every loop of the model an iteration guard, and count a trip as a
+    gate FAILURE, never a kill;
+  - in the Rust, make progress structural instead of a cursor you advance
+    by a computed length: split at the edge, then `chunks_mut(n)` /
+    `enumerate`. A mutated length then panics or moves the output (killed),
+    it never stalls.
 
 **`tokio::select!` drops the branch futures before a handler runs**
 (tokio `macros/select.rs`: the futures live inside the `let output = {…}`

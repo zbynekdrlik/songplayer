@@ -220,10 +220,21 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     6 on the 24-thread box, 1 on a 4-vCPU CI runner (tests set
     `out.mix_bands` themselves). The `program output thread started` INFO
     line prints `mix_bands`.
-  - The run painter walks ANY byte run row by row (a run may start mid-row),
-    so the picture never depends on K or on the band edges.
-  - The pooled output is `resize`d once (a memset: the bands need disjoint
-    `&mut` slices in safe code); nothing else is allocated per boundary.
+  - The run painter takes ANY byte run (a run may start mid-row): it cuts
+    the run at the plane edge, then `plane_run` paints the rest of the first
+    row and then whole rows as `chunks_mut(stride)`. So the picture never
+    depends on K or on the band edges, and every step paints at least one
+    byte: a mutated row length panics or moves the picture, it never stalls
+    (review round 1: a hand-advanced cursor hung on a `%`→`+` mutant, which
+    is a cargo-mutants TIMEOUT and a red gate).
+  - The only large buffer is the pooled output, `resize`d once (a memset:
+    the bands need disjoint `&mut` slices in safe code). Per boundary there
+    are also K−1 scoped thread spawns (a name `String` and a stack each) and
+    a few small `Vec`s (the band offsets, runs and slots).
+  - A helper that fails to start WARNs once per failed band (at most K−1 = 5
+    per boundary). There is deliberately no rate limiter: its branch would be
+    arithmetic on a path no Linux test can reach, i.e. a mutant the gate
+    cannot kill.
   - `max_picture_us` is unchanged: the wall time of `mix_picture` (all
     bands) on the `SP-program` thread. Box run 3 target: ≤ 15 000 at
     2560×1440 with `fitted=9` and 0 late drops, for a 300 ms fade and a 1 s
