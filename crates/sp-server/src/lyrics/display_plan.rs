@@ -44,7 +44,7 @@ pub const MIN_VISIBLE_MS: u64 = 1_200;
 
 /// A gap between two sung lines longer than this is an instrumental break, and
 /// the wall goes blank for it. A shorter gap keeps the line on the wall.
-pub const LONG_GAP_MS: u64 = 1;
+pub const LONG_GAP_MS: u64 = 8_000;
 
 /// Before an instrumental break, and after the last line, a line stays this
 /// long after its sung end.
