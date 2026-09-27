@@ -526,3 +526,115 @@ async fn an_outage_during_a_not_ready_episode_fires_one_recovery_event_on_return
         "only the breaker close's RecoveryEvent, no second one from the same return"
     );
 }
+
+/// Review round 1: a probe failed during the not-ready episode (too few to
+/// open the breaker). On the next tick the probe's recovery fires a
+/// RecoveryEvent and resets the failure count, then the NotReady refresh on
+/// the same tick finds the clips. The engine's re-push for the probe's event
+/// is queued on the driver's command channel and runs after this tick, against
+/// the now-ready map, so the ready transition must not add a second event (a
+/// second ShowTitle restarts the title fade).
+#[tokio::test]
+async fn a_probe_recovery_on_the_ready_tick_fires_one_recovery_event() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(composition_with(&[SUBS_TOKEN])))
+        .mount(&server)
+        .await;
+    let (tx, mut rx) = broadcast::channel(16);
+    let mut driver =
+        HostDriver::new("127.0.0.1".into(), server.address().port()).with_recovery_channel(tx);
+    let base = Instant::now();
+    driver.not_ready_since = Some(base);
+    driver.last_full_attempt_at = Some(base);
+    driver.apply_outcome(false); // one failed probe: breaker still closed
+
+    driver.on_tick_at(base + secs(10)).await;
+
+    assert_eq!(
+        composition_fetches(&server).await,
+        1,
+        "the not-ready mapping is fetched on this tick"
+    );
+    assert!(
+        driver.not_ready_since.is_none(),
+        "the clips arrived, the episode is over"
+    );
+    assert_eq!(
+        drain(&mut rx),
+        1,
+        "one tick fires one RecoveryEvent, the probe's recovery covers the ready map"
+    );
+}
+
+/// An earlier tick's RecoveryEvent does not cover a later step. A forced
+/// RefreshMapping that ends the not-ready episode fires its own event.
+#[tokio::test]
+async fn a_forced_refresh_that_finds_the_clips_fires_the_ready_event() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(composition_with(&[SUBS_TOKEN])))
+        .mount(&server)
+        .await;
+    let (tx, mut rx) = broadcast::channel(16);
+    let mut driver =
+        HostDriver::new("127.0.0.1".into(), server.address().port()).with_recovery_channel(tx);
+    let base = Instant::now();
+    driver.not_ready_since = Some(base);
+    driver.apply_outcome(false);
+    driver.apply_outcome(true); // an earlier tick's probe recovery
+    assert_eq!(drain(&mut rx), 1, "the earlier recovery fired its event");
+
+    driver.handle_command(ResolumeCommand::RefreshMapping).await;
+
+    assert_eq!(
+        drain(&mut rx),
+        1,
+        "the forced refresh that finds the clips fires the ready event"
+    );
+}
+
+/// Arena goes away during a not-ready episode that started long ago, and comes
+/// back still loading. Opening the breaker ended the old episode, so the
+/// breaker-closed refresh opens a FRESH 120 s fast window: the next tick
+/// fetches again instead of waiting out the 60 s retry window.
+#[tokio::test]
+async fn an_outage_gives_the_relaunch_a_fresh_fast_window() {
+    let server = arena().await;
+    composition_sequence(
+        &server,
+        serde_json::json!({"layers": []}),
+        composition_with(&[SUBS_TOKEN]),
+    )
+    .await;
+    let (tx, mut rx) = broadcast::channel(16);
+    let mut driver =
+        HostDriver::new("127.0.0.1".into(), server.address().port()).with_recovery_channel(tx);
+    let base = Instant::now();
+    driver.not_ready_since = Some(base);
+    for _ in 0..3 {
+        driver.apply_outcome(false);
+    }
+
+    let relaunch = base + secs(1000);
+    driver.on_tick_at(relaunch).await;
+    assert_eq!(
+        driver.not_ready_since,
+        Some(relaunch),
+        "the still-loading composition starts a new episode at the relaunch"
+    );
+    driver.on_tick_at(relaunch + secs(10)).await;
+
+    assert_eq!(
+        composition_fetches(&server).await,
+        2,
+        "breaker-closed refresh + the next tick's NotReady refetch"
+    );
+    assert_eq!(
+        drain(&mut rx),
+        2,
+        "the breaker close's event, then one when the clips arrive"
+    );
+}

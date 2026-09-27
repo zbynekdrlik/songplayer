@@ -1,5 +1,7 @@
 //! Unit tests for HostDriver — extracted via #[path] to keep driver.rs under the 1000-line file-size cap.
 
+use std::time::{Duration, Instant};
+
 use super::*;
 
 fn sample_composition() -> serde_json::Value {
