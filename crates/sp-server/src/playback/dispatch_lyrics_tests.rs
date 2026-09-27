@@ -112,7 +112,7 @@ fn install_pipeline(
         last_resolume_subtitles_signature: None,
         last_lyrics_ws_signature: None,
         cached_position_ms: 0,
-        started_video_id: None,
+        title_clock: None,
         paused_at: None,
     };
     engine.pipelines.insert(playlist_id, pp);

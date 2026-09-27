@@ -55,6 +55,7 @@ pub mod submit_handoff; // #168 output-side split: pure emit->submit handoff dec
 pub mod submitter;
 mod test_helpers;
 mod title;
+mod title_timers; // #217 addendum 3: title timers armed from the song's TitleClock
 mod transport_state; // #201 pure PlayState->TransportState mapping (Linux-tested)
 pub mod vban_out; // #210: the program's VBAN audio output (queue, paced thread, socket, stats)
 pub mod vban_packet; // #210: the pure VBAN packet encoder (header, INT24, 8×200 split)
@@ -166,10 +167,11 @@ struct PlaylistPipeline {
     /// current subtitle line. The re-push line may be up to one Position
     /// tick (~500 ms) behind the audio's actual playhead.
     cached_position_ms: u64,
-    /// The video whose `Started` the engine last handled. Until the current
-    /// video's own `Started`, the position and duration above are the
-    /// previous song's, so its title window stays closed (#217 addendum 3).
-    started_video_id: Option<i64>,
+    /// The title window of the song whose `Started` the engine last handled:
+    /// the instants the title timers sleep until, and that a recovery or a
+    /// scene-on reads (#217 addendum 3). A clock of another video (the
+    /// previous song, before the next `Started`) leaves the window closed.
+    title_clock: Option<title::TitleClock>,
     /// Pause snapshot; consumed on manual /play to resume same song. #88.
     paused_at: Option<(i64, u64)>,
 }
@@ -408,17 +410,20 @@ impl PlaybackEngine {
     /// pipeline. The 1.5 s title-show task aborted with "title suppressed —
     /// off program" if the scene was off then, so without this the wall shows
     /// a stale title. It goes through the same `Resync` as a recovery, with
-    /// the song's title window: a scene-on outside it (a song that has not
-    /// started yet, its first 1.5 s, its last 3.5 s) shows no title, and a
-    /// title that is already up is not faded again (#217 addendum 3).
-    async fn push_title_for_playing(&self, playlist_id: i64, video_id: i64) {
-        let title = self.resync_wall_title().await;
+    /// the song's title clock: a scene-on outside the window (a song that has
+    /// not started yet, its first 1.5 s, its last 3.5 s) shows no title, and a
+    /// title that is already up is not faded again. Then the song's timers
+    /// are armed again for what is still ahead (#217 addendum 3).
+    async fn push_title_for_playing(&mut self, playlist_id: i64, video_id: i64) {
+        let now = tokio::time::Instant::now();
+        let title = self.resync_wall_title(now).await;
         info!(
             playlist_id,
             video_id,
             ?title,
             "title re-synced on scene-go-on"
         );
+        self.rearm_title_timers(playlist_id, video_id, now);
     }
 
     /// Handle a scene change from the OBS module. On program, fires

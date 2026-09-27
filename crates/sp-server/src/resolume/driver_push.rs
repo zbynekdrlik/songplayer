@@ -177,7 +177,10 @@ impl HostDriver {
             ?action,
             "Resolume title command"
         );
-        self.run_title_action(action).await
+        match action {
+            Some(action) => self.run_title_action(action).await,
+            None => false,
+        }
     }
 
     /// Run a title action on the `#sp-title` clips and record it in the title
@@ -185,21 +188,18 @@ impl HostDriver {
     /// answered. Without title clips nothing runs and the state is kept (the
     /// clips a later refresh maps decide it). Returns the 404 note.
     async fn run_title_action(&mut self, action: TitleAction<'_>) -> bool {
-        let what = match action {
-            TitleAction::Nothing => return false,
-            TitleAction::FadeIn(_) => "show_title",
-            TitleAction::FadeOut => "hide_title",
-            TitleAction::HideNow => "hide_title_now",
-        };
         let Some(clips) = handlers::clips_for_title(self) else {
-            debug!(host = %self.host, "{what}: no #sp-title clips mapped — title state kept");
+            debug!(host = %self.host, ?action, "no #sp-title clips mapped — title state kept");
             return false;
         };
         self.title.begin(action, clips);
-        let result = match action {
-            TitleAction::FadeIn(text) => handlers::show_title(self, text).await,
-            TitleAction::FadeOut => handlers::hide_title(self).await,
-            TitleAction::HideNow | TitleAction::Nothing => handlers::hide_title_now(self).await,
+        let (what, result) = match action {
+            TitleAction::FadeIn(text) => ("show_title", handlers::show_title(self, text).await),
+            TitleAction::Replace(text) => {
+                ("replace_title", handlers::replace_title(self, text).await)
+            }
+            TitleAction::FadeOut => ("hide_title", handlers::hide_title(self).await),
+            TitleAction::HideNow => ("hide_title_now", handlers::hide_title_now(self).await),
         };
         self.title.finish(result.is_ok());
         self.finish_push(what, result)

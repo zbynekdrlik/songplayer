@@ -432,8 +432,9 @@ impl HostDriver {
         if !self.last_refresh_ok {
             return;
         }
-        if was_failing && !breaker_just_closed {
-            // A hiccup the breaker did not see: did Arena relaunch in it?
+        if was_failing {
+            // Did Arena relaunch in the hiccup? (A breaker close evicted the
+            // map and opened an episode: the probe skips it.)
             self.probe_stale_map(now).await;
         }
         if let Some(reason) = FullRefreshReason::decide(

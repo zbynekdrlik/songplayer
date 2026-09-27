@@ -15,13 +15,15 @@ use tracing::{debug, warn};
 use super::HostDriver;
 
 impl HostDriver {
-    /// Called on a failing→ok liveness flip that did not close the breaker:
+    /// Called on a failing→ok liveness flip:
     /// `GET /api/v1/parameter/by-id/{id}` for the first mapped SongPlayer
     /// text param. A 404 means the map is stale: it opens the not-ready
     /// episode, so this tick's `decide` refreshes on the NotReady path (then
     /// every 2 s until the clips are mapped, and the ready map fires the
     /// RecoveryEvent). Any other answer leaves the map alone. An open episode
-    /// refreshes anyway, so it is not probed.
+    /// refreshes anyway, so it is not probed; a breaker close is one (it
+    /// evicted the map and opened an episode, the design's "breaker did not
+    /// open" case).
     pub(super) async fn probe_stale_map(&mut self, now: Instant) {
         if self.not_ready_since.is_some() {
             return;

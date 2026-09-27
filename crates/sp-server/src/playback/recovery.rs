@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering;
 
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, mpsc};
+use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
 use super::state::PlayState;
@@ -50,15 +51,25 @@ pub(crate) async fn forward_recovery_events(
 }
 
 impl super::PlaylistPipeline {
-    /// Whether this pipeline's song title belongs on the wall now (#217
-    /// addendum 3): it plays `video_id` on program, the song has had its
-    /// `Started` (before it, the position and duration are the previous
-    /// song's), and its position is inside the title window.
-    fn title_due(&self, video_id: i64) -> bool {
+    /// Whether this pipeline's song title belongs on the wall at `now` (#217
+    /// addendum 3): it plays `video_id` on program, and that song's title
+    /// clock (fixed at its `Started`, the instants the title timers sleep
+    /// until) is open. A clock of another video (the previous song, before
+    /// the next `Started`) is closed.
+    fn title_due(&self, video_id: i64, _now: Instant) -> bool {
         self.scene_active.load(Ordering::Acquire)
-            && self.started_video_id == Some(video_id)
-            && title::title_window_open(self.cached_position_ms, self.cached_duration_ms)
+            && self
+                .title_clock
+                .is_some_and(|clock| clock.video_id == video_id)
+            && position_window_open(self.cached_position_ms, self.cached_duration_ms)
     }
+}
+
+/// Scaffolding (RED): round 0's window, read from the last position report.
+fn position_window_open(position_ms: u64, duration_ms: u64) -> bool {
+    position_ms >= title::TITLE_SHOW_DELAY_MS
+        && (duration_ms <= title::TITLE_SHOW_DELAY_MS + title::TITLE_HIDE_BEFORE_END_MS
+            || position_ms < duration_ms - title::TITLE_HIDE_BEFORE_END_MS)
 }
 
 impl super::PlaybackEngine {
@@ -66,20 +77,19 @@ impl super::PlaybackEngine {
     /// pipeline inside its title window. Several (a program scene with more
     /// than one SongPlayer playlist; they share the one `#sp-title` clip):
     /// the highest playlist id, so the HashMap order never decides.
-    fn due_title_video(&self) -> Option<i64> {
+    fn due_title_video(&self, now: Instant) -> Option<i64> {
         self.pipelines
             .iter()
             .filter_map(|(&playlist_id, pp)| {
                 debug!(
                     playlist_id,
                     state = ?pp.state,
-                    started = ?pp.started_video_id,
-                    position_ms = pp.cached_position_ms,
-                    duration_ms = pp.cached_duration_ms,
+                    clock = ?pp.title_clock,
+                    open = ?pp.title_clock.map(|clock| clock.open_at(now)),
                     "title window inputs"
                 );
                 match pp.state {
-                    PlayState::Playing { video_id } if pp.title_due(video_id) => {
+                    PlayState::Playing { video_id } if pp.title_due(video_id, now) => {
                         Some((playlist_id, video_id))
                     }
                     _ => None,
@@ -89,12 +99,12 @@ impl super::PlaybackEngine {
             .map(|(_, video_id)| video_id)
     }
 
-    /// Declare the wall's title to the Resolume driver (a `Resync`): the due
-    /// title, or none. The driver acts only on a difference, so this is
-    /// idempotent: it never re-runs a fade for a title that is up. Used by a
-    /// Resolume recovery and by an OBS scene-on (#217 addendum 3).
-    pub(super) async fn resync_wall_title(&self) -> Option<String> {
-        let due = self.due_title_video();
+    /// Declare the wall's title at `now` to the Resolume driver (a `Resync`):
+    /// the due title, or none. The driver acts only on a difference, so this
+    /// is idempotent: it never re-runs a fade for a title that is up. Used by
+    /// a Resolume recovery and by an OBS scene-on (#217 addendum 3).
+    pub(super) async fn resync_wall_title(&self, now: Instant) -> Option<String> {
+        let due = self.due_title_video(now);
         title::resync_title(&self.pool, self.obs_cmd_tx.as_ref(), &self.resolume_tx, due).await
     }
 
@@ -110,7 +120,7 @@ impl super::PlaybackEngine {
         // The driver owns the title (#217 addendum 3): it compares this with
         // what it last did and cannot double-fade, flash, or show a title
         // outside its window, whatever is queued ahead of this Resync.
-        let title = self.resync_wall_title().await;
+        let title = self.resync_wall_title(Instant::now()).await;
         info!(host, ?title, "title re-synced on Resolume recovery");
         let mut shows = Vec::new();
         for (&playlist_id, pp) in &self.pipelines {

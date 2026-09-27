@@ -182,11 +182,11 @@ async fn a_liveness_flip_whose_param_probe_answers_200_refreshes_nothing() {
     assert_eq!(drain(&mut rx), 0);
 }
 
-/// No failure since the last ok probe: nothing to check. A breaker close
-/// resyncs the map on its own (the breaker-closed refresh), so it is not
-/// probed either. The param answers 404 here, so a probe would refresh.
+/// No failure since the last ok probe: nothing to check. The param answers
+/// 404 here, so a probe would refresh. (A breaker close needs no test of its
+/// own: it evicts the map and opens an episode, and the probe skips both.)
 #[tokio::test]
-async fn only_a_failure_the_breaker_did_not_see_is_probed() {
+async fn a_steady_tick_is_not_probed() {
     let server = arena().await;
     let mapped = composition(&[(SUBS_TOKEN, 100, 900)]);
     composition_sequence(&server, mapped.clone(), mapped).await;
@@ -198,23 +198,9 @@ async fn only_a_failure_the_breaker_did_not_see_is_probed() {
     driver.on_tick_at(base).await;
 
     driver.on_tick_at(base + secs(10)).await;
+
     assert_eq!(param_probes(&server, 900).await, 0, "a steady tick");
     assert_eq!(composition_fetches(&server).await, 1);
-
-    for _ in 0..3 {
-        driver.apply_outcome(false);
-    }
-    assert!(
-        driver.circuit_breaker_open,
-        "three failures open the breaker"
-    );
-    driver.on_tick_at(base + secs(20)).await;
-    assert!(!driver.circuit_breaker_open, "the ok probe closed it");
-    assert_eq!(
-        param_probes(&server, 900).await,
-        0,
-        "the breaker close resyncs the map itself"
-    );
 }
 
 /// A failure inside an open not-ready episode: the episode refreshes anyway.

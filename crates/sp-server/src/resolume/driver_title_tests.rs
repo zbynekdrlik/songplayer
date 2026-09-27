@@ -73,6 +73,28 @@ fn fade_in() -> Vec<f64> {
     crate::resolume::handlers::fade_steps(20)
 }
 
+/// A cut to 0 and then the fade-in, on one clip (`replace_title`).
+fn cut_then_fade_in() -> Vec<f64> {
+    let mut opacities = vec![0.0];
+    opacities.extend(fade_in());
+    opacities
+}
+
+/// The wall's request sequence for `text` replacing whatever clip 100 /
+/// param 900 showed: opacity 0 at once, the text, then the fade-in.
+fn replaced_by(text: &str) -> Vec<String> {
+    let mut sequence = vec![
+        "opacity 100 = 0.0".to_string(),
+        format!("text 900 = {text:?}"),
+    ];
+    sequence.extend(
+        fade_in()
+            .iter()
+            .map(|opacity| format!("opacity 100 = {}", serde_json::json!(opacity))),
+    );
+    sequence
+}
+
 // -- the acceptance: act only on a difference ---------------------------------
 
 /// The title the engine wants is already up: no request at all. Before, the
@@ -158,6 +180,44 @@ async fn a_queued_show_then_a_resync_naming_no_title_ends_hidden_without_a_flash
     assert_eq!(driver.title.state(), &TitleState::Hidden);
 }
 
+/// Review round 1 (🟡 2): a new title over one that is up. `show_title`
+/// alone writes the new text first, so it showed at full opacity before the
+/// fade restarted from 5 %: a blink. A clip not known to be hidden is cut to
+/// 0 first.
+#[tokio::test]
+async fn a_new_title_over_one_that_is_up_is_cut_before_it_fades_in() {
+    let (server, mut driver) = title_arena().await;
+    driver.title = WallTitle::at(TitleState::Shown("Old - Title".into()), title_clip());
+
+    driver.handle_command(resync(Some("Song - Artist"))).await;
+
+    assert_eq!(put_sequence(&server).await, replaced_by("Song - Artist"));
+    assert_eq!(
+        driver.title.state(),
+        &TitleState::Shown("Song - Artist".into())
+    );
+}
+
+/// Review round 1 (🟡 2): a scene-off HideTitle queued behind a slow step,
+/// then the next scene's re-sync naming its title. The Resync supersedes the
+/// hide, so the old title is still up when the new one comes: it is cut, not
+/// overwritten at full opacity.
+#[tokio::test]
+async fn a_queued_hide_then_a_resync_naming_a_title_cuts_before_the_new_title() {
+    let (server, mut driver) = title_arena().await;
+    driver.title = WallTitle::at(TitleState::Shown("Old - Title".into()), title_clip());
+    let (tx, mut rx) = mpsc::channel(8);
+    tx.send(ResolumeCommand::HideTitle).await.unwrap();
+    tx.send(resync(Some("Song - Artist"))).await.unwrap();
+
+    let first = rx.recv().await.unwrap();
+    for cmd in take_queued(first, &mut rx) {
+        driver.handle_command(cmd).await;
+    }
+
+    assert_eq!(put_sequence(&server).await, replaced_by("Song - Artist"));
+}
+
 // -- plain ShowTitle / HideTitle go through the same state ---------------------
 
 /// The show timer's ShowTitle after a re-sync already showed that title: no
@@ -170,7 +230,11 @@ async fn a_show_title_of_the_title_already_up_runs_no_second_fade() {
     driver.handle_command(show_title()).await;
 
     assert_eq!(texts_put(&server, 900).await, ["Song - Artist"]);
-    assert_eq!(opacities_put(&server, 100).await, fade_in(), "one fade");
+    assert_eq!(
+        opacities_put(&server, 100).await,
+        cut_then_fade_in(),
+        "one fade (after the cut: the startup state is not known)"
+    );
 }
 
 /// A HideTitle fades only a title known to be up. At startup the driver does
@@ -230,7 +294,11 @@ async fn new_title_clip_ids_let_the_resync_show_the_title_again() {
     driver.handle_command(resync(Some("Song - Artist"))).await;
 
     assert_eq!(texts_put(&server, 1900).await, ["Song - Artist"]);
-    assert_eq!(opacities_put(&server, 200).await, fade_in());
+    assert_eq!(
+        opacities_put(&server, 200).await,
+        cut_then_fade_in(),
+        "the restored clip is cut to 0 first"
+    );
 }
 
 /// An outage without a relaunch: the breaker evicts the map, and the
@@ -288,5 +356,5 @@ async fn a_title_command_without_a_title_clip_keeps_the_state() {
     driver.refresh_mapping(Instant::now()).await.unwrap();
     driver.handle_command(resync(Some("Song - Artist"))).await;
     assert_eq!(texts_put(&server, 900).await, ["Song - Artist"]);
-    assert_eq!(opacities_put(&server, 100).await, fade_in());
+    assert_eq!(opacities_put(&server, 100).await, cut_then_fade_in());
 }

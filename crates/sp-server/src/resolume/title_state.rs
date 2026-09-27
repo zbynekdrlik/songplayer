@@ -42,12 +42,19 @@ pub(crate) enum TitleIntent<'a> {
     Resync(Option<&'a str>),
 }
 
-/// What the driver does about a [`TitleIntent`].
+/// What the driver does about a [`TitleIntent`] (`plan` returns `None` when
+/// the wall already shows what the engine wants).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TitleAction<'a> {
-    Nothing,
-    /// `handlers::show_title`: set the text, then fade in from 5 %.
+    /// `handlers::show_title` on a hidden clip: set the text, then fade in
+    /// from 5 %.
     FadeIn(&'a str),
+    /// `handlers::replace_title` on a clip NOT known to be hidden (another
+    /// title up, a relaunched clip, an interrupted fade): opacity 0 at once,
+    /// then the text and the fade-in. Setting the text first showed the new
+    /// title at the clip's current opacity (full) before the fade restarted
+    /// from 5 %: a blink (#217 addendum 3 review round 1).
+    Replace(&'a str),
     /// `handlers::hide_title`: fade out from full opacity, clear the text.
     FadeOut,
     /// `handlers::hide_title_now`: opacity 0 at once, clear the text.
@@ -59,30 +66,32 @@ impl TitleState {
     ///
     /// - A title (a Show, or a Resync naming one) that is already `Shown`:
     ///   nothing, as a second fade from 5 % is a visible blink. Otherwise it
-    ///   fades in. An empty Show shows nothing (`show_title`'s old no-op); an
-    ///   empty Resync title is no title.
+    ///   fades in: onto a `Hidden` clip directly, onto any other state after
+    ///   an instant cut (`Replace`). An empty Show shows nothing
+    ///   (`show_title`'s old no-op); an empty Resync title is no title.
     /// - A Hide: nothing while `Hidden`. It fades only a title known to be up
     ///   (`Shown`); any other state hides at once, because `hide_title` fades
     ///   from FULL opacity and would flash a clip that is not.
     /// - A Resync naming no title: nothing while `Hidden`, else hide at once.
-    pub(crate) fn plan<'a>(&self, intent: TitleIntent<'a>) -> TitleAction<'a> {
+    pub(crate) fn plan<'a>(&self, intent: TitleIntent<'a>) -> Option<TitleAction<'a>> {
         let wanted = match intent {
-            TitleIntent::Show("") => return TitleAction::Nothing,
+            TitleIntent::Show("") => return None,
             TitleIntent::Show(text) => Some(text),
             TitleIntent::Resync(title) => title.filter(|text| !text.is_empty()),
             TitleIntent::Hide => {
                 return match self {
-                    TitleState::Hidden => TitleAction::Nothing,
-                    TitleState::Shown(_) => TitleAction::FadeOut,
-                    _ => TitleAction::HideNow,
+                    TitleState::Hidden => None,
+                    TitleState::Shown(_) => Some(TitleAction::FadeOut),
+                    _ => Some(TitleAction::HideNow),
                 };
             }
         };
         match wanted {
-            Some(text) if self.shows(text) => TitleAction::Nothing,
-            Some(text) => TitleAction::FadeIn(text),
-            None if *self == TitleState::Hidden => TitleAction::Nothing,
-            None => TitleAction::HideNow,
+            Some(text) if self.shows(text) => None,
+            Some(text) if *self == TitleState::Hidden => Some(TitleAction::FadeIn(text)),
+            Some(text) => Some(TitleAction::Replace(text)),
+            None if *self == TitleState::Hidden => None,
+            None => Some(TitleAction::HideNow),
         }
     }
 
@@ -117,7 +126,7 @@ impl WallTitle {
         &self.state
     }
 
-    pub(crate) fn plan<'a>(&self, intent: TitleIntent<'a>) -> TitleAction<'a> {
+    pub(crate) fn plan<'a>(&self, intent: TitleIntent<'a>) -> Option<TitleAction<'a>> {
         self.state.plan(intent)
     }
 
@@ -139,9 +148,10 @@ impl WallTitle {
     /// between two states.
     pub(crate) fn begin(&mut self, action: TitleAction<'_>, clips: Vec<ClipInfo>) {
         self.state = match action {
-            TitleAction::FadeIn(text) => TitleState::FadingIn(text.to_string()),
+            TitleAction::FadeIn(text) | TitleAction::Replace(text) => {
+                TitleState::FadingIn(text.to_string())
+            }
             TitleAction::FadeOut | TitleAction::HideNow => TitleState::FadingOut,
-            TitleAction::Nothing => return,
         };
         self.clips = clips;
     }

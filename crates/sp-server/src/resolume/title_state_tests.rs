@@ -20,29 +20,39 @@ fn clip(clip_id: i64, text_param_id: i64) -> ClipInfo {
 
 // -- plan: act only on a difference -------------------------------------------
 
+/// Every state but `Hidden` and the given `Shown` one: a title is not known
+/// to be hidden there.
+fn not_hidden_states() -> [TitleState; 4] {
+    [
+        TitleState::Unknown,
+        shown("Other - Song"),
+        TitleState::FadingIn("A - B".into()),
+        TitleState::FadingOut,
+    ]
+}
+
 #[test]
 fn a_show_fades_in_unless_that_title_is_already_up() {
     assert_eq!(
         shown("A - B").plan(TitleIntent::Show("A - B")),
-        TitleAction::Nothing,
+        None,
         "no second fade for the title that is up"
     );
-    for state in [
-        TitleState::Unknown,
-        TitleState::Hidden,
-        shown("Other - Song"),
-        TitleState::FadingIn("A - B".into()),
-        TitleState::FadingOut,
-    ] {
+    assert_eq!(
+        TitleState::Hidden.plan(TitleIntent::Show("A - B")),
+        Some(TitleAction::FadeIn("A - B")),
+        "onto a hidden clip: set the text, fade in"
+    );
+    for state in not_hidden_states() {
         assert_eq!(
             state.plan(TitleIntent::Show("A - B")),
-            TitleAction::FadeIn("A - B"),
-            "{state:?}: the title is not fully up, so it fades in"
+            Some(TitleAction::Replace("A - B")),
+            "{state:?}: not known to be hidden, so the clip is cut to 0 before the new text"
         );
     }
     assert_eq!(
         TitleState::Hidden.plan(TitleIntent::Show("")),
-        TitleAction::Nothing,
+        None,
         "an empty title shows nothing"
     );
 }
@@ -51,12 +61,12 @@ fn a_show_fades_in_unless_that_title_is_already_up() {
 fn a_hide_fades_only_a_title_known_to_be_up() {
     assert_eq!(
         TitleState::Hidden.plan(TitleIntent::Hide),
-        TitleAction::Nothing,
+        None,
         "nothing to hide"
     );
     assert_eq!(
         shown("A - B").plan(TitleIntent::Hide),
-        TitleAction::FadeOut,
+        Some(TitleAction::FadeOut),
         "a title known to be up fades out"
     );
     for state in [
@@ -66,7 +76,7 @@ fn a_hide_fades_only_a_title_known_to_be_up() {
     ] {
         assert_eq!(
             state.plan(TitleIntent::Hide),
-            TitleAction::HideNow,
+            Some(TitleAction::HideNow),
             "{state:?}: a fade from full opacity could flash the clip, so it hides at once"
         );
     }
@@ -76,20 +86,18 @@ fn a_hide_fades_only_a_title_known_to_be_up() {
 fn a_resync_naming_a_title_shows_it_only_when_it_is_not_up() {
     assert_eq!(
         shown("A - B").plan(TitleIntent::Resync(Some("A - B"))),
-        TitleAction::Nothing,
+        None,
         "the title the engine wants is up: nothing"
     );
-    for state in [
-        TitleState::Unknown,
-        TitleState::Hidden,
-        shown("Other - Song"),
-        TitleState::FadingIn("A - B".into()),
-        TitleState::FadingOut,
-    ] {
+    assert_eq!(
+        TitleState::Hidden.plan(TitleIntent::Resync(Some("A - B"))),
+        Some(TitleAction::FadeIn("A - B"))
+    );
+    for state in not_hidden_states() {
         assert_eq!(
             state.plan(TitleIntent::Resync(Some("A - B"))),
-            TitleAction::FadeIn("A - B"),
-            "{state:?}: the wanted title fades in"
+            Some(TitleAction::Replace("A - B")),
+            "{state:?}: the wanted title replaces what may be up"
         );
     }
 }
@@ -98,7 +106,7 @@ fn a_resync_naming_a_title_shows_it_only_when_it_is_not_up() {
 fn a_resync_naming_no_title_hides_at_once_unless_hidden() {
     assert_eq!(
         TitleState::Hidden.plan(TitleIntent::Resync(None)),
-        TitleAction::Nothing,
+        None,
         "already hidden"
     );
     for state in [
@@ -109,19 +117,16 @@ fn a_resync_naming_no_title_hides_at_once_unless_hidden() {
     ] {
         assert_eq!(
             state.plan(TitleIntent::Resync(None)),
-            TitleAction::HideNow,
+            Some(TitleAction::HideNow),
             "{state:?}: a title that must not be up is hidden at once, never faded"
         );
     }
     assert_eq!(
         shown("A - B").plan(TitleIntent::Resync(Some(""))),
-        TitleAction::HideNow,
+        Some(TitleAction::HideNow),
         "an empty title is no title"
     );
-    assert_eq!(
-        TitleState::Hidden.plan(TitleIntent::Resync(Some(""))),
-        TitleAction::Nothing
-    );
+    assert_eq!(TitleState::Hidden.plan(TitleIntent::Resync(Some(""))), None);
 }
 
 // -- WallTitle: the state and the clips it was reached on ---------------------
@@ -158,6 +163,11 @@ fn a_finished_action_reaches_its_state_and_a_failed_one_stays_between() {
         &TitleState::FadingIn("C - D".into()),
         "a failed show leaves the title partly up"
     );
+
+    title.begin(TitleAction::Replace("E - F"), vec![clip(100, 900)]);
+    assert_eq!(title.state(), &TitleState::FadingIn("E - F".into()));
+    title.finish(true);
+    assert_eq!(title.state(), &shown("E - F"), "the replacement finished");
 }
 
 #[test]

@@ -106,6 +106,23 @@ pub async fn show_title(driver: &mut HostDriver, text: &str) -> Result<(), anyho
     Ok(())
 }
 
+/// Show `text` on `#sp-title` clips NOT known to be hidden (another title
+/// up, a relaunched clip, an interrupted fade): opacity 0 at once, then the
+/// usual text + fade-in. `show_title` alone writes the new text at the clips'
+/// current opacity before its fade restarts from 5 %: a blink (#217
+/// addendum 3 review round 1).
+pub async fn replace_title(driver: &mut HostDriver, text: &str) -> Result<(), anyhow::Error> {
+    let Some(clips) = clips_for_title(driver) else {
+        debug!(
+            token = TITLE_TOKEN,
+            "no Resolume clips found, skipping replace_title"
+        );
+        return Ok(());
+    };
+    let _ = clips; // Scaffolding (RED): round 0 had no cut before the text.
+    show_title(driver, text).await
+}
+
 /// Hide title across all `#sp-title` clips in parallel.
 pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
     let Some(clips) = clips_for_title(driver) else {
