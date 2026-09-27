@@ -307,6 +307,18 @@ mod tests {
         }
     }
 
+    /// `test_track()`'s texts on wall-safe timing (#217). The second line is
+    /// sung from 4000 ms, 1000 ms after the first ends. That gap is over the
+    /// display plan's 700 ms merge limit, so the two short lines stay two wall
+    /// lines instead of merging into "Hello world Goodbye". The plan shows
+    /// them over [0, 2500) and [2500, 9000).
+    fn wall_track() -> LyricsTrack {
+        let mut track = test_track();
+        track.lines[1].start_ms = 4_000;
+        track.lines[1].end_ms = 6_000;
+        track
+    }
+
     #[test]
     fn update_emits_lyrics_for_active_line() {
         let state = LyricsState::new(test_track());
@@ -421,7 +433,7 @@ mod tests {
 
     #[test]
     fn presenter_lines_returns_current_and_next() {
-        let st = LyricsState::new(test_track());
+        let st = LyricsState::new(wall_track());
         // First line starts at 1000 ms per `test_track()`.
         let (cur, nxt) = st.presenter_lines(1500).expect("on line 0");
         assert_eq!(cur, "Hello world");
@@ -465,7 +477,7 @@ mod tests {
 
     #[test]
     fn resolume_lines_with_next_returns_all_four() {
-        let st = LyricsState::new(test_track());
+        let st = LyricsState::new(wall_track());
         let (cur_en, next_en, cur_sk, _next_sk) =
             st.resolume_lines_with_next(1500, false).expect("on line 0");
         assert_eq!(cur_en, "Hello world");
@@ -480,7 +492,7 @@ mod tests {
         // is_reference=true: every non-empty EN/SK current+next line ends
         // with " ★" so the LED wall shows which songs carry Claude's
         // verified reference lyrics (#142).
-        let st = LyricsState::new(test_track());
+        let st = LyricsState::new(wall_track());
         let (cur_en, next_en, cur_sk, next_sk) =
             st.resolume_lines_with_next(1500, true).expect("on line 0");
         assert_eq!(cur_en, "Hello world \u{2605}");
@@ -492,7 +504,7 @@ mod tests {
     #[test]
     fn resolume_lines_with_next_no_star_when_not_reference() {
         // is_reference=false: behavior is byte-identical to before #142.
-        let st = LyricsState::new(test_track());
+        let st = LyricsState::new(wall_track());
         let (cur_en, next_en, cur_sk, next_sk) =
             st.resolume_lines_with_next(1500, false).expect("on line 0");
         assert_eq!(cur_en, "Hello world");
@@ -506,11 +518,11 @@ mod tests {
         // Empty strings/None stay empty/None even when is_reference=true —
         // a lone " ★" on an empty next-line slot would be worse than no
         // marker at all.
-        let st = LyricsState::new(test_track());
-        // With 0 lead, position 3200 looks up at exactly 3200 ms, which is
-        // inside the last line (3000..5000) — no next line exists.
+        let st = LyricsState::new(wall_track());
+        // Position 4500 is inside wall_track()'s last line (sung 4000..6000),
+        // so no next line exists.
         let (cur_en, next_en, cur_sk, next_sk) = st
-            .resolume_lines_with_next(3200, true)
+            .resolume_lines_with_next(4500, true)
             .expect("on last line");
         assert_eq!(
             cur_en, "Goodbye \u{2605}",
@@ -533,10 +545,15 @@ mod tests {
         assert!(next_sk.is_none(), "last-line next_sk must be None");
     }
 
-    /// Track with a single line starting at 1000 ms, lead=0, offset_ms = +500.
-    /// At playback position 0 ms: effective lookup = 0 + lead(0) - offset(500) = 0
-    /// (saturating subtraction) — still before the 1000 ms line start, so
-    /// `presenter_lines` must return None. Kills the `offset subtracted` mutant.
+    /// A single line sung at 3000 ms, with lead=0 and offset_ms = +500. The
+    /// #217 display plan shows it 1500 ms early, at 1500 ms. The positive
+    /// offset delays it: the lookup is `position - 500`, so it first appears
+    /// at playback 2000 ms.
+    ///
+    /// - Position 1999 → lookup 1499 → None.
+    /// - Position 2000 → lookup 1500 → Some.
+    ///
+    /// Kills the `offset subtracted` mutant, which would show it from 1000 ms.
     #[test]
     fn applies_positive_offset_delays_line_start() {
         let track = LyricsTrack {
@@ -545,8 +562,8 @@ mod tests {
             language_source: "en".into(),
             language_translation: String::new(),
             lines: vec![LyricsLine {
-                start_ms: 1_000,
-                end_ms: 3_000,
+                start_ms: 3_000,
+                end_ms: 5_000,
                 en: "Offset line".into(),
                 sk: None,
                 words: None,
@@ -554,9 +571,13 @@ mod tests {
         };
         let st = LyricsState::with_lead_and_offset(track, 0, 500);
         assert!(
-            st.presenter_lines(0).is_none(),
-            "positive offset must delay — lookup 0+0-500=0 (saturating) is before line start 1000"
+            st.presenter_lines(1_999).is_none(),
+            "positive offset must delay: lookup 1999-500=1499 is before the plan's show at 1500"
         );
+        let (cur, _nxt) = st
+            .presenter_lines(2_000)
+            .expect("lookup 2000-500=1500 is the plan's show time");
+        assert_eq!(cur, "Offset line");
     }
 
     /// Negative offset advances the displayed line: offset_ms = -500
@@ -614,28 +635,26 @@ mod tests {
         }
     }
 
-    /// Constructor `with_lead_and_offset` parameterizes the stage-display
-    /// lead. With lead=500 and no offset, position 500 + lead 500 = 1000
-    /// which is exactly line 0's start — `presenter_lines(500)` must
-    /// return the line. With lead=0 (the current default), position 500
-    /// would look at exactly 500 ms (before line 0 start at 1000). This test
-    /// demonstrates that the lead parameter is actually applied.
+    /// Constructor `with_lead_and_offset` parameterizes the operator's
+    /// stage-display lead, which shifts every wall lookup ON TOP of the #217
+    /// display plan. `wall_track()`'s plan switches from "Hello world" to
+    /// "Goodbye" at 2500 ms, so with lead=500 the switch comes at playback
+    /// 2000 ms.
     ///
-    /// Position 499 + lead 500 = 999 < 1000 → None (just below line 0 start).
-    /// Position 500 + lead 500 = 1000 = line 0 start → Some.
-    /// So line 0 being Some at pos 500 AND None at pos 499 proves the
-    /// lead is 500 (not 0).
+    /// - Position 1999 + lead 500 = 2499 → still "Hello world".
+    /// - Position 2000 + lead 500 = 2500 → "Goodbye".
+    ///
+    /// Together the two prove the lead is exactly 500 (not 0).
     #[test]
     fn lead_ms_is_applied_from_state() {
-        let st = LyricsState::with_lead_and_offset(test_track(), 500, 0);
+        let st = LyricsState::with_lead_and_offset(wall_track(), 500, 0);
         let (cur, _nxt) = st
-            .presenter_lines(500)
-            .expect("500 + lead(500) = 1000 = line 0 start, expected a line");
+            .presenter_lines(2_000)
+            .expect("2000 + lead(500) = 2500 = the plan's switch to Goodbye");
+        assert_eq!(cur, "Goodbye");
+        let (cur, _nxt) = st
+            .presenter_lines(1_999)
+            .expect("1999 + lead(500) = 2499: Hello world is still on the wall");
         assert_eq!(cur, "Hello world");
-        // With lead=500, position 499 must NOT reach line 0 at 1000.
-        assert!(
-            st.presenter_lines(499).is_none(),
-            "lead=500: pos 499 + 500 = 999 < 1000 line-start, must be None"
-        );
     }
 }
