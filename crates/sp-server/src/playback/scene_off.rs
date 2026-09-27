@@ -8,7 +8,12 @@
 //! asks the program bus (`ProgramBus::hold_for`):
 //!
 //! - `Hold::Until(t)` — it is the `from` of a window (or a cut) that is not
-//!   served yet: re-check at `t`, one slot after the window's end;
+//!   served yet: re-check at `t`, one slot after the window's end. A fade that
+//!   still waits for the incoming source's first live pair (the #215 cue
+//!   gate) reports the LATEST end it can reach, i.e. the cut plus
+//!   `CUE_WAIT_MAX_SLOTS` plus its slots, so the outgoing playlist keeps
+//!   playing through the wait too; the re-check then finds the window over,
+//!   or asks again;
 //! - `Hold::OnProgram` — it is still the program's source, and the cut away
 //!   from it may be on its way: the follow task and the #213 remote control cut
 //!   only AFTER cg OBS switched, and cg OBS's scene event reaches the engine

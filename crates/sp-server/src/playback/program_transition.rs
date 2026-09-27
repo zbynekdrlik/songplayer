@@ -64,11 +64,11 @@ pub const Q8_ONE: u32 = 256;
 /// The cue gate's bound (`CUE_WAIT_MAX` = 500 ms): a fade waits at most this
 /// many boundaries (15 at 30 fps) for the incoming source's first live pair,
 /// then starts anyway ([`Cue::Waiting`]).
-pub const CUE_WAIT_MAX_SLOTS: u32 = 1;
+pub const CUE_WAIT_MAX_SLOTS: u32 = 15;
 
 /// Half a pixel in Q8: a fitted picture samples its source at the destination
 /// pixel CENTRES ([`FitPlan`]).
-const HALF_PIXEL_Q8: u64 = 64;
+const HALF_PIXEL_Q8: u64 = 128;
 
 /// What a cut does on `SP-program`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -550,35 +550,6 @@ impl FitPlan {
 /// boundaries; this one-shot form builds it every call.
 pub fn fit_nv12_into(src: &[u8], src_layout: Layout, dst_layout: Layout, out: &mut Vec<u8>) {
     FitPlan::new(src_layout, dst_layout).apply(src, out);
-}
-
-/// How a mixed boundary builds its picture.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Picture {
-    /// Blend both pictures (same layout).
-    Blend,
-    /// Different layouts, first half of the window: the `from` picture.
-    From,
-    /// Different layouts, from the midpoint on: the `to` picture.
-    To,
-}
-
-/// Blend two pictures of the same layout; otherwise cut the picture at the
-/// window's midpoint (`weight ≥ ½`).
-pub fn picture_mix(from: Layout, to: Layout, weight: u32) -> Picture {
-    if from == to {
-        Picture::Blend
-    } else if weight >= Q8_ONE / 2 {
-        Picture::To
-    } else {
-        Picture::From
-    }
-}
-
-/// Whether a mixed boundary's picture decision starts a run of midpoint cuts,
-/// so the sender logs the size mismatch once per window, not per boundary.
-pub fn starts_size_cut(previous_was_cut: bool, picture: Picture) -> bool {
-    picture != Picture::Blend && !previous_was_cut
 }
 
 /// The equal-power gains `(cos θ, sin θ)` of sample `j` of a `total`-sample

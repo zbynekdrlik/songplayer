@@ -68,8 +68,9 @@ const PACED_IDLE_POLL: Duration = Duration::ZERO;
 const LEGACY_IDLE_POLL: Duration = Duration::from_secs(5);
 
 /// The default [`PacedSink::submit_shared`] body: build a one-shot [`PacedFrame`]
-/// over the borrowed pixels and delegate to [`PacedSink::emit`], so a sink that
-/// implements only `emit` (the test sinks) keeps working. [`FrameSubmitter`]
+/// over the borrowed pixels and delegate to [`PacedSink::emit_standby`] (every
+/// shared-picture submit is a standby pair, #215), so a sink that implements
+/// only `emit` (the test sinks) keeps working. [`FrameSubmitter`]
 /// OVERRIDES `submit_shared` to move the [`SharedFrame`] straight into the
 /// zero-copy async holdover instead.
 ///
@@ -95,5 +96,5 @@ pub(crate) fn default_submit_shared<S: PacedSink + ?Sized>(
         video,
         audio: Vec::new(),
     };
-    sink.emit(&frame, audio, video_tc_100ns, audio_tc_100ns);
+    sink.emit_standby(&frame, audio, video_tc_100ns, audio_tc_100ns);
 }

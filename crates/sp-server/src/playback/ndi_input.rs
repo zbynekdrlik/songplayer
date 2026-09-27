@@ -539,6 +539,8 @@ impl NdiInput {
             // owning those boundaries with its standby pair, never a fill.
             Captured::Standby
         };
+        // #215: a captured picture is live; the standby pair never is.
+        let live = matches!(captured, Captured::Picture(..));
         let (w, h, video, samples) = match captured {
             Captured::Skipped => return,
             Captured::Picture(frame, w, h, samples) => (w, h, frame, samples),
@@ -568,7 +570,7 @@ impl NdiInput {
             }],
             video_tc_100ns: boundary_100ns,
             audio_tc_100ns: audio_now_100ns,
-            live: true,
+            live,
         };
         bus.offer(PROGRAM_INPUT_ID, job);
     }

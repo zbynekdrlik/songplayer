@@ -374,6 +374,17 @@ impl PacedSink for HandoffSink<'_> {
         let job = SubmitJob::from_paced(video, audio, video_tc_100ns, audio_tc_100ns, true);
         self.handoff.offer(job);
     }
+
+    fn emit_standby(
+        &mut self,
+        video: &PacedFrame,
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        let job = SubmitJob::from_paced(video, audio, video_tc_100ns, audio_tc_100ns, false);
+        self.handoff.offer(job);
+    }
 }
 
 /// A picture the consumer can hold on a fill: an NV12 frame by shared
@@ -468,7 +479,7 @@ impl<B: NdiBackend> PacedConsumer<B> {
             }],
             video_tc_100ns: stamp_100ns,
             audio_tc_100ns: stamp_100ns,
-            live: true,
+            live: false,
         }
     }
 

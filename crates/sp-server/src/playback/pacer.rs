@@ -700,7 +700,7 @@ impl Pacer {
                     self.on_emit(emit_now, stamp_boundary);
                     self.repeats += 1;
                     let block = self.standby_block();
-                    sink.emit(&lf, &block, stamp_boundary, audio_tc);
+                    sink.emit_standby(&lf, &block, stamp_boundary, audio_tc);
                     self.last_frame = Some(lf);
                     ServiceOutcome::Repeated
                 } else {

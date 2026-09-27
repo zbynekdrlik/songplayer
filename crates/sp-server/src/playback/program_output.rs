@@ -23,11 +23,12 @@
 //!
 //! #215: a [`ProgramJob::Mix`] (one boundary inside a transition window) is
 //! crossfaded here, on the sender thread: the audio per sample with the
-//! equal-power curve, the picture blended into a `frame_pool` buffer or cut at
-//! the window's midpoint when the two layouts differ
-//! (`program_transition.rs`). `start_program` also starts the OBS-follow task
-//! (`program_follow.rs`) and hands the bus to the engine for the deferred
-//! scene-go-off pause.
+//! equal-power curve, the picture blended into a `frame_pool` buffer. When the
+//! two layouts differ, the outgoing picture is first fitted into the incoming
+//! layout (`program_transition::FitPlan`, one plan per window, into a reused
+//! scratch buffer), so it always dissolves. `start_program` also starts the
+//! OBS-follow task (`program_follow.rs`) and hands the bus to the engine for
+//! the deferred scene-go-off pause.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -39,15 +40,14 @@ use sp_core::genlock::{
 };
 use sp_ndi::{AudioFrame, NdiBackend, NdiSender};
 use tokio::sync::broadcast;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
 use crate::playback::program_transition::{
-    AudioFormat, Layout, MixJob, Picture, black_nv12_into, blend_nv12_into, mix_audio_block,
-    picture_mix, starts_size_cut,
+    AudioFormat, FitPlan, Layout, MixJob, black_nv12_into, blend_nv12_into, mix_audio_block,
 };
 use crate::playback::submitter::FrameSubmitter;
 use crate::playback::vban_out::{VbanBlock, VbanOut, run_vban_config_task};
@@ -86,9 +86,14 @@ pub struct ProgramOutput<B: NdiBackend> {
     vban: Option<Arc<VbanOut>>,
     /// #215: audio frames per boundary (1600).
     spc: usize,
-    /// #215: the previous mixed boundary cut its picture (two layouts); the
-    /// cut is logged once per window.
-    size_cut: bool,
+    /// #215: the plan that fits the outgoing picture into the incoming
+    /// layout, kept while the pair of layouts stays the same (a window).
+    fit: Option<FitPlan>,
+    /// Plans built so far (one per window whose pictures differ in size).
+    fit_plans: u64,
+    /// The fitted outgoing picture, reused boundary after boundary (its
+    /// capacity is kept, #147 round 10).
+    fitted: Vec<u8>,
 }
 
 impl<B: NdiBackend> ProgramOutput<B> {
@@ -112,7 +117,9 @@ impl<B: NdiBackend> ProgramOutput<B> {
             standby_h,
             vban: None,
             spc,
-            size_cut: false,
+            fit: None,
+            fit_plans: 0,
+            fitted: Vec::new(),
         }
     }
 
@@ -134,9 +141,6 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// the audio stamped `audio_now_100ns` (the emit instant, like #147
     /// standby audio).
     pub fn submit(&mut self, job: ProgramJob, audio_now_100ns: i64) -> i64 {
-        if !matches!(job, ProgramJob::Mix(_)) {
-            self.size_cut = false;
-        }
         match job {
             ProgramJob::Mix(mix) => self.submit_mix(mix, audio_now_100ns),
             ProgramJob::Source(job) => {
@@ -211,11 +215,11 @@ impl<B: NdiBackend> ProgramOutput<B> {
         stamp
     }
 
-    /// #215: the picture of a window boundary: both pictures blended into a
-    /// pooled buffer when their layouts match, else the `from` / `to` picture
-    /// (the midpoint cut, logged once per window). A missing side is the NV12
-    /// black in the present side's exact layout (`black_nv12_into`), so it
-    /// always blends. `None` when neither side is here.
+    /// #215: the picture of a window boundary, in the incoming side's layout:
+    /// both pictures blended into a pooled buffer, the outgoing one first
+    /// fitted into that layout when the two differ ([`FitPlan`]). A missing
+    /// side is the NV12 black in the present side's exact layout
+    /// (`black_nv12_into`). `None` when neither side is here.
     pub(crate) fn mix_picture(&mut self, mix: &MixJob) -> Option<(Layout, SharedFrame)> {
         let present = Layout::of(mix.to.as_ref().or(mix.from.as_ref())?);
         let standby = || {
@@ -228,24 +232,29 @@ impl<B: NdiBackend> ProgramOutput<B> {
         let from = mix.from.as_ref().map_or_else(standby, side);
         let to = mix.to.as_ref().map_or_else(standby, side);
         let weight = mix.weight_q8();
-        let picture = picture_mix(from.0, to.0, weight);
-        if starts_size_cut(self.size_cut, picture) {
-            warn!(
-                from = ?from.0,
-                to = ?to.0,
-                "program transition: the two pictures differ in size — the picture cuts at the window's midpoint, the audio still crossfades"
-            );
+        let mut out = sp_decoder::frame_pool::take(to.0.len);
+        if from.0 == to.0 {
+            blend_nv12_into(&from.1, &to.1, weight, &mut out);
+        } else {
+            let plan = match self.fit.take() {
+                Some(plan) if plan.fits(from.0, to.0) => plan,
+                _ => {
+                    self.fit_plans += 1;
+                    debug!(
+                        from = ?from.0,
+                        to = ?to.0,
+                        plans = self.fit_plans,
+                        "program transition: the two pictures differ in size — the outgoing one is fitted into the incoming layout"
+                    );
+                    FitPlan::new(from.0, to.0)
+                }
+            };
+            self.fitted.clear();
+            plan.apply(&from.1, &mut self.fitted);
+            blend_nv12_into(&self.fitted, &to.1, weight, &mut out);
+            self.fit = Some(plan);
         }
-        self.size_cut = picture != Picture::Blend;
-        Some(match picture {
-            Picture::Blend => {
-                let mut out = sp_decoder::frame_pool::take(from.0.len);
-                blend_nv12_into(&from.1, &to.1, weight, &mut out);
-                (from.0, SharedFrame::new(out))
-            }
-            Picture::From => from,
-            Picture::To => to,
-        })
+        Some((to.0, SharedFrame::new(out)))
     }
 
     /// Current `SP-program` receiver connection count.
