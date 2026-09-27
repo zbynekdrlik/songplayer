@@ -1,11 +1,14 @@
 use sp_core::lyrics::LyricsTrack;
 use sp_core::ws::ServerMsg;
 
-/// DB key used to read the configured lead time. Operators can override
-/// per-installation via `PATCH /api/v1/settings {"lyrics_lead_ms": "500"}`
-/// if stage-display / LED-wall sync needs adjustment. When absent or
-/// unparseable, defaults to 0 (no lead — line timing is real, per WhisperX
-/// alignment accuracy).
+use crate::lyrics::display_plan::DisplayPlan;
+
+/// DB key used to read the configured operator lead time. Operators can
+/// override per-installation via `PATCH /api/v1/settings {"lyrics_lead_ms":
+/// "500"}` if stage-display / LED-wall sync needs adjustment. When absent or
+/// unparseable, it defaults to 0, meaning no EXTRA lead. The #217 display plan
+/// already shows each wall line up to `display_plan::LEAD_MS` (1.5 s) before
+/// it is sung; this setting shifts the whole plan on top of that.
 pub const LYRICS_LEAD_SETTING_KEY: &str = "lyrics_lead_ms";
 
 /// Strip trailing punctuation (`,;:.!?…`) from a single display line. Stage
@@ -40,7 +43,13 @@ fn append_reference_star(s: String, is_reference: bool) -> String {
 /// [`ServerMsg::LyricsUpdate`] messages for the dashboard WebSocket.
 pub struct LyricsState {
     track: LyricsTrack,
-    /// Lead time (ms) shifted into every stage-display / LED-wall lookup.
+    /// What the LED wall and the Presenter show (#217): merged fragments,
+    /// each with a lead, held until the next line. Built once per loaded
+    /// track. The dashboard paths (`update`, `resolume_lines`) keep the raw
+    /// `track` and its word timing.
+    plan: DisplayPlan,
+    /// Operator lead time (ms) shifted into every stage-display / LED-wall
+    /// lookup, on top of the plan's own lead.
     /// `0` for raw paths (`update`, `resolume_lines`) preserves the
     /// dashboard-highlighter-aligns-to-real-audio invariant.
     lead_ms: u64,
@@ -74,22 +83,26 @@ fn effective_lookup(position_ms: u64, lead_ms: u64, offset_ms: i64) -> u64 {
 
 impl LyricsState {
     pub fn new(track: LyricsTrack) -> Self {
-        Self {
-            track,
-            lead_ms: 0,
-            offset_ms: 0,
-        }
+        Self::with_lead_and_offset(track, 0, 0)
     }
 
     /// Construct a state with an explicit lead AND per-song offset. The lead
     /// is read from the `lyrics_lead_ms` DB setting (0 by default); the offset
-    /// is from the per-song `videos.lyrics_time_offset_ms` field.
+    /// is from the per-song `videos.lyrics_time_offset_ms` field. Builds the
+    /// track's #217 display plan once, here.
     pub fn with_lead_and_offset(track: LyricsTrack, lead_ms: u64, offset_ms: i64) -> Self {
+        let plan = DisplayPlan::build(&track.lines);
         Self {
             track,
+            plan,
             lead_ms,
             offset_ms,
         }
+    }
+
+    /// The display plan the wall and the Presenter read (#217).
+    pub fn display_plan(&self) -> &DisplayPlan {
+        &self.plan
     }
 
     /// Compute the [`ServerMsg::LyricsUpdate`] for the given playback position.
@@ -152,9 +165,14 @@ impl LyricsState {
     }
 
     /// Returns `(current_en, next_en, current_sk, next_sk)` for the Resolume
-    /// dual-line push. `next_en` is the empty string when the current line is
-    /// the last line of the track. `next_sk` is `None` when the current line
-    /// is last or when the next line has no SK translation.
+    /// dual-line push, read from the #217 display plan. The current line is
+    /// the plan's line on the wall at this position; `next_*` is the plan's
+    /// NEXT display line. `next_en` is the empty string when the current line
+    /// is the last one. `next_sk` is `None` when the current line is last or
+    /// the next line has no SK translation. Returns `None` only before the
+    /// first line, in the blank stretch of an instrumental break (a gap over
+    /// `display_plan::LONG_GAP_MS`), and after the last line leaves. In every
+    /// normal gap the line is held.
     ///
     /// The lookup is shifted forward by `self.lead_ms` (0 unless operator-overridden).
     ///
@@ -169,8 +187,8 @@ impl LyricsState {
         is_reference: bool,
     ) -> Option<(String, String, Option<String>, Option<String>)> {
         let lookahead = effective_lookup(position_ms, self.lead_ms, self.offset_ms);
-        let (idx, line) = self.track.line_at(lookahead)?;
-        let next_line = self.track.lines.get(idx + 1);
+        let (idx, line) = self.plan.at(lookahead)?;
+        let next_line = self.plan.lines().get(idx + 1);
         let cur_en = append_reference_star(strip_display_punctuation(&line.en), is_reference);
         let next_en = append_reference_star(
             next_line
@@ -190,19 +208,21 @@ impl LyricsState {
         Some((cur_en, next_en, cur_sk, next_sk))
     }
 
-    /// Returns `Some((current_en, next_en))` for the Presenter push when
-    /// playback position is on a line. `next_en` is the empty string when
-    /// the current line is the last line of the track. Returns `None`
-    /// between lines so the caller can hold off pushing a duplicate.
+    /// Returns `Some((current_en, next_en))` for the Presenter push, read from
+    /// the same #217 display plan as the wall. `next_en` is the plan's next
+    /// display line, or the empty string on the last one. Returns `None` where
+    /// the wall is blank (before the first line, in an instrumental break's
+    /// blank stretch, after the last line), so the caller can hold off
+    /// pushing a duplicate.
     ///
     /// The lookup is shifted forward by `self.lead_ms` (0 unless operator-overridden).
     pub fn presenter_lines(&self, position_ms: u64) -> Option<(String, String)> {
         let lookahead = effective_lookup(position_ms, self.lead_ms, self.offset_ms);
-        let (idx, line) = self.track.line_at(lookahead)?;
+        let (idx, line) = self.plan.at(lookahead)?;
         let cur = strip_display_punctuation(&line.en);
         let next = self
-            .track
-            .lines
+            .plan
+            .lines()
             .get(idx + 1)
             .map(|l| strip_display_punctuation(&l.en))
             .unwrap_or_default();
@@ -656,5 +676,130 @@ mod tests {
             .presenter_lines(1_999)
             .expect("1999 + lead(500) = 2499: Hello world is still on the wall");
         assert_eq!(cur, "Hello world");
+    }
+
+    // ── #217 — the wall and the Presenter read the display plan ────────────
+
+    /// Two SK-translated lines with the given sung ranges.
+    fn two_line_track(first: (u64, u64), second: (u64, u64)) -> LyricsTrack {
+        LyricsTrack {
+            version: 1,
+            source: "test".into(),
+            language_source: "en".into(),
+            language_translation: "sk".into(),
+            lines: vec![
+                LyricsLine {
+                    start_ms: first.0,
+                    end_ms: first.1,
+                    en: "Hello world".into(),
+                    sk: Some("Ahoj svet".into()),
+                    words: None,
+                },
+                LyricsLine {
+                    start_ms: second.0,
+                    end_ms: second.1,
+                    en: "Goodbye".into(),
+                    sk: Some("Zbohom".into()),
+                    words: None,
+                },
+            ],
+        }
+    }
+
+    /// A 4000 ms sung gap (3000..7000): the old lookup blanked the wall in
+    /// it. Now "Hello world" is held until "Goodbye" shows, 1500 ms before it
+    /// is sung (5500).
+    #[test]
+    fn wall_holds_the_line_through_a_normal_gap() {
+        let st = LyricsState::new(two_line_track((1_000, 3_000), (7_000, 9_000)));
+        assert_eq!(
+            st.resolume_lines_with_next(4_000, false),
+            Some((
+                "Hello world".to_string(),
+                "Goodbye".to_string(),
+                Some("Ahoj svet".to_string()),
+                Some("Zbohom".to_string()),
+            ))
+        );
+        assert_eq!(
+            st.presenter_lines(5_499),
+            Some(("Hello world".to_string(), "Goodbye".to_string()))
+        );
+        assert_eq!(
+            st.presenter_lines(5_500),
+            Some(("Goodbye".to_string(), String::new()))
+        );
+        assert_eq!(st.display_plan().lines().len(), 2);
+    }
+
+    /// An 8001 ms gap is an instrumental break. "Hello world" leaves 3000 ms
+    /// after its end (6000), the wall is blank, and "Goodbye" shows 1500 ms
+    /// before it is sung (9501).
+    #[test]
+    fn wall_blanks_only_in_a_long_break() {
+        let st = LyricsState::new(two_line_track((1_000, 3_000), (11_001, 13_000)));
+        assert!(st.resolume_lines_with_next(5_999, false).is_some());
+        assert!(st.resolume_lines_with_next(6_000, false).is_none());
+        assert!(st.presenter_lines(9_500).is_none());
+        assert_eq!(
+            st.presenter_lines(9_501),
+            Some(("Goodbye".to_string(), String::new()))
+        );
+    }
+
+    /// Two 0.3 s fragments show as one wall line, and `next_*` is the plan's
+    /// next DISPLAY line, not the next source line.
+    #[test]
+    fn wall_shows_merged_fragments_and_the_plans_next_line() {
+        let track = LyricsTrack {
+            version: 1,
+            source: "test".into(),
+            language_source: "en".into(),
+            language_translation: "sk".into(),
+            lines: vec![
+                LyricsLine {
+                    start_ms: 1_000,
+                    end_ms: 1_300,
+                    en: "What a God,".into(),
+                    sk: Some("Aký Boh,".into()),
+                    words: None,
+                },
+                LyricsLine {
+                    start_ms: 1_300,
+                    end_ms: 1_600,
+                    en: "what a God.".into(),
+                    sk: Some("aký Boh.".into()),
+                    words: None,
+                },
+                LyricsLine {
+                    start_ms: 5_000,
+                    end_ms: 7_000,
+                    en: "Angels bow before him".into(),
+                    sk: Some("Anjeli sa mu klaňajú".into()),
+                    words: None,
+                },
+            ],
+        };
+        let st = LyricsState::new(track);
+        assert_eq!(
+            st.resolume_lines_with_next(1_000, false),
+            Some((
+                "What a God, what a God".to_string(),
+                "Angels bow before him".to_string(),
+                Some("Aký Boh, aký Boh".to_string()),
+                Some("Anjeli sa mu klaňajú".to_string()),
+            ))
+        );
+        assert_eq!(
+            st.presenter_lines(3_499),
+            Some((
+                "What a God, what a God".to_string(),
+                "Angels bow before him".to_string()
+            ))
+        );
+        assert_eq!(
+            st.presenter_lines(3_500),
+            Some(("Angels bow before him".to_string(), String::new()))
+        );
     }
 }

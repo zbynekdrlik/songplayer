@@ -45,15 +45,18 @@ impl PlaybackEngine {
                                 let line_count = track.lines.len();
                                 let source = track.source.clone();
                                 let pipeline_version = track.version;
-                                pp.lyrics_state = Some(
+                                let state =
                                     crate::lyrics::renderer::LyricsState::with_lead_and_offset(
                                         track, lead_ms, offset_ms,
-                                    ),
-                                );
+                                    );
+                                // #217: how many wall lines the fragments merged into.
+                                let display_lines = state.display_plan().lines().len();
+                                pp.lyrics_state = Some(state);
                                 info!(
                                     playlist_id,
                                     video_id,
                                     lines = line_count,
+                                    display_lines,
                                     source = %source,
                                     pipeline_version,
                                     lead_ms,
