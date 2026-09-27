@@ -418,12 +418,16 @@ async fn arming_the_title_timers_aborts_the_ones_it_replaces() {
 /// single-video playlist, Loop's replay, a re-picked or resumed song, a
 /// Previous) kept the old song's clock until the new `Started`. The title was
 /// named at once, and a scene-on re-armed the old instants. Every Play clears
-/// the clock; the new `Started` fixes the new one.
+/// the clock; the new `Started` fixes the new one. Review round 3 (🔵): it
+/// cancels the old song's timers too, so a skipped song's pending show timer
+/// cannot push its title before the new `Started`.
 #[tokio::test]
 async fn every_play_of_a_song_clears_the_last_song_s_title_clock() {
     for how in ["skip", "loop", "play video", "previous"] {
         let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
-        play(&mut engine, 7, 42, Window::Due);
+        play(&mut engine, 7, 42, Window::BeforeShow);
+        engine.arm_title_timers(7, tokio::time::Instant::now());
+        assert_eq!(timers(&engine), (true, true), "{how}: the old timers armed");
         match how {
             "skip" => engine.handle_command(7, PlayEvent::Skip).await,
             "loop" => {
@@ -445,7 +449,41 @@ async fn every_play_of_a_song_clears_the_last_song_s_title_clock() {
             "{how}: the same video plays again"
         );
         assert_eq!(pp.title_clock, None, "{how}: the old song's clock is gone");
+        assert_eq!(
+            timers(&engine),
+            (false, false),
+            "{how}: the old song's timers are cancelled"
+        );
     }
+}
+
+/// Review round 3 (🔵): a resume (`handle_play_video` with a position, the
+/// manual /play after a pause) starts the song mid-way, but its clock ran
+/// from `Started` over the FULL duration: the hide point came late by the
+/// resume position (the hide timer had this gap before #217 addendum 3 too).
+/// The clock counts the time left to play.
+#[tokio::test]
+async fn a_resumed_song_s_clock_hides_3_5_s_before_its_real_end() {
+    let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::OtherSong);
+    engine.handle_play_video(7, 42, Some(60_000)).await;
+
+    engine
+        .handle_pipeline_event(
+            7,
+            PipelineEvent::Started {
+                duration_ms: SONG_MS,
+            },
+        )
+        .await;
+
+    let clock = engine.pipelines[&7].title_clock.expect("the song's clock");
+    assert_eq!(
+        clock.hide_at.expect("120 s left: it hides") - clock.show_at,
+        std::time::Duration::from_millis(SONG_MS - 60_000 - 5_000),
+        "shown 1.5 s after the resume, hidden 3.5 s before the real end"
+    );
+    engine.pipelines.get_mut(&7).unwrap().cancel_title_timers();
 }
 
 /// On a RecoveryEvent the title of an on-program pipeline inside its title

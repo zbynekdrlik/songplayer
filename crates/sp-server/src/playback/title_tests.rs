@@ -111,6 +111,37 @@ async fn the_title_text_is_the_formatted_title_or_none() {
     assert_eq!(title_text(&pool, 99).await.unwrap(), None, "no row");
 }
 
+/// Review round 3 (🔵): cg OBS's command queue drains only while cg OBS is
+/// connected, and the resync runs on the engine loop. An awaited OBS send
+/// parked the whole engine behind a full queue. The OBS text is the fallback
+/// display: it is dropped when the queue is full, and the Resync goes out
+/// first either way.
+#[tokio::test]
+async fn a_full_obs_queue_never_holds_the_resync_back() {
+    let (obs_tx, _obs_rx) = mpsc::channel(1);
+    obs_tx
+        .try_send(ObsCommand::SetTextSource {
+            source_name: "#other".to_string(),
+            text: String::new(),
+        })
+        .unwrap();
+    let (resolume_tx, mut resolume_rx) = mpsc::channel(8);
+
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        send_resync(Some(&obs_tx), &resolume_tx, Some("Song - Artist".into())),
+    )
+    .await
+    .expect("the resync does not wait for cg OBS");
+
+    match resolume_rx.try_recv() {
+        Ok(ResolumeCommand::Resync { title }) => {
+            assert_eq!(title.as_deref(), Some("Song - Artist"));
+        }
+        other => panic!("expected the Resync, got {other:?}"),
+    }
+}
+
 /// The Resolume Resync goes first (the OBS send can stall while cg OBS is
 /// away), and the OBS text source follows it like the wall: the title when
 /// one is due, cleared when none is (as the song-end hide timer clears it).
