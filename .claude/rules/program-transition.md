@@ -118,9 +118,20 @@ cut boundary mixed the outgoing song against silence.
   froze it, a live pair of its incoming source inside it is held like any
   other (review round 1). `cut` reads `on_air(boundary)` BEFORE
   `windows.retain`, so a same-slot re-cut that drops the waiting window still
-  fades out of that window's outgoing source; and `on_air` also counts a
-  FROZEN window that ends exactly on the new boundary (a cut back, then a
-  same-slot re-cut that drops the cut back's segment, review round 3).
+  fades out of that window's outgoing source. `on_air` takes the first
+  WAITING or FROZEN window whose span reaches the new boundary — cut on or
+  before it, end on or after it — else the selected source:
+  - a frozen window's end may lie on (a cut back, then a same-slot re-cut
+    that drops the cut back's segment, review round 3) or AFTER the new
+    boundary: cut boundaries are NOT monotone. A cut is placed after the
+    newest stamp of every source still involved, and a source that drops out
+    (its window served) no longer pushes it later, so a later cut can land a
+    slot or more BEFORE an earlier one (review round 4, X running two slots
+    ahead: cut back on b(18), the next cut on b(17));
+  - a window cut AFTER the new boundary is one this cut replaces: its
+    outgoing source held nothing on program yet, so it never decides (X four
+    slots ahead: a Cut to B on b(17), a waiting fade B → C on b(18), then a
+    cut to D on b(17) fades out of A, not B — review round 4).
 - Logs: INFO `the incoming source is live — the fade starts` (from, to,
   waited) / WARN `… sent no live pair in time …` per opened cue, INFO `a later
   cut froze the fade still waiting for its cue`, and from the sender one INFO
