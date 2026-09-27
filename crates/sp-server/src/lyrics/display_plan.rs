@@ -30,6 +30,11 @@
 //!    than [`MIN_VISIBLE_MS`] is merged again under the same limits. If no merge
 //!    fits, it is shown exactly.
 //!
+//! The [`DisplayProfile`] sets the lead. Sung lyrics ([`DisplayProfile::Song`])
+//! lead by [`LEAD_MS`]. Dub subtitles of speech ([`DisplayProfile::Speech`])
+//! have no lead: each line shows exactly when it is spoken, while merge and
+//! hold stay the same (ROZHODNUTÉ on #217).
+//!
 //! The dashboard karaoke view (`LyricsState::update`) keeps the raw track and
 //! its word timing. Only the wall and the Presenter read this plan. The
 //! constants are documented in `.claude/rules/lyrics-display.md`.
@@ -37,6 +42,8 @@
 use std::ops::Range;
 
 use sp_core::lyrics::LyricsLine;
+
+use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
 
 /// How long before it is sung a line appears on the wall, so the room can
 /// pre-read it.
@@ -68,6 +75,39 @@ pub const MERGE_MAX_GAP_MS: u64 = 700;
 /// dub subtitle tracks, whose lines often have no English at all.
 pub const MERGE_MAX_CHARS: usize = 64;
 
+/// How a track is shown on the wall, chosen when the track loads (#217).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayProfile {
+    /// Sung lyrics: a line appears up to [`LEAD_MS`] before it is sung, so the
+    /// room can pre-read it.
+    Song,
+    /// Dub subtitles of speech (`gemini-live-translate`): no lead, each line
+    /// appears exactly when it is spoken. Merge and hold apply as for songs.
+    Speech,
+}
+
+impl DisplayProfile {
+    /// The profile of a track by its `source` label. A dub subtitle track
+    /// ([`SOURCE_LIVE_TRANSLATE`], the marker the dub builder stamps and the
+    /// translation worker already excludes by) is speech; everything else is
+    /// a song.
+    pub fn for_source(source: &str) -> Self {
+        if source == SOURCE_LIVE_TRANSLATE {
+            Self::Speech
+        } else {
+            Self::Song
+        }
+    }
+
+    /// How long before its start a line may appear on the wall.
+    pub fn lead_ms(self) -> u64 {
+        match self {
+            Self::Song => LEAD_MS,
+            Self::Speech => LEAD_MS,
+        }
+    }
+}
+
 /// One line as the LED wall and the Presenter show it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisplayLine {
@@ -90,14 +130,21 @@ pub struct DisplayLine {
 #[derive(Debug, Clone)]
 pub struct DisplayPlan {
     lines: Vec<DisplayLine>,
+    profile: DisplayProfile,
 }
 
 impl DisplayPlan {
-    /// Build the plan for a track's lines (see [`build_plan`]).
-    pub fn build(lines: &[LyricsLine]) -> Self {
+    /// Build the plan for a track's lines under `profile` (see [`build_plan`]).
+    pub fn build(lines: &[LyricsLine], profile: DisplayProfile) -> Self {
         Self {
-            lines: build_plan(lines),
+            lines: build_plan(lines, profile),
+            profile,
         }
+    }
+
+    /// The profile this plan was built under.
+    pub fn profile(&self) -> DisplayProfile {
+        self.profile
     }
 
     /// Every display line, in wall order.
@@ -117,11 +164,12 @@ impl DisplayPlan {
     }
 }
 
-/// Turn a track's sung lines into its display lines: merge, then schedule (see
-/// the module docs).
-pub fn build_plan(lines: &[LyricsLine]) -> Vec<DisplayLine> {
-    let groups = merge_groups(lines);
-    let spans = schedule(&groups);
+/// Turn a track's sung lines into its display lines under `profile`: merge,
+/// then schedule (see the module docs).
+pub fn build_plan(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<DisplayLine> {
+    let lead_ms = profile.lead_ms();
+    let groups = merge_groups(lines, lead_ms);
+    let spans = schedule(&groups, lead_ms);
     groups
         .into_iter()
         .zip(spans)
@@ -167,13 +215,13 @@ impl Group {
 
 /// Merge the lines until no merge applies. Each merge removes one group, so
 /// the loop ends after at most `lines.len() - 1` merges.
-fn merge_groups(lines: &[LyricsLine]) -> Vec<Group> {
+fn merge_groups(lines: &[LyricsLine], lead_ms: u64) -> Vec<Group> {
     let mut groups: Vec<Group> = lines
         .iter()
         .enumerate()
         .map(|(index, line)| Group::of(index, line))
         .collect();
-    while let Some(i) = next_merge(&groups) {
+    while let Some(i) = next_merge(&groups, lead_ms) {
         let next = groups.remove(i + 1);
         groups[i].absorb(next);
     }
@@ -183,8 +231,8 @@ fn merge_groups(lines: &[LyricsLine]) -> Vec<Group> {
 /// The next merge to apply, as the index `i` that absorbs group `i + 1`. Text
 /// fragments come first. Once none is left, a line the schedule shows for less
 /// than [`MIN_VISIBLE_MS`] is tried.
-fn next_merge(groups: &[Group]) -> Option<usize> {
-    fragment_merge(groups).or_else(|| short_merge(groups, &schedule(groups)))
+fn next_merge(groups: &[Group], lead_ms: u64) -> Option<usize> {
+    fragment_merge(groups).or_else(|| short_merge(groups, &schedule(groups, lead_ms)))
 }
 
 /// The first text fragment that fits a neighbour.
@@ -269,14 +317,14 @@ fn join_sk(a: Option<String>, b: Option<String>) -> Option<String> {
     }
 }
 
-/// The `(show_ms, hide_ms)` of every group (lead, hold, long-break tail; see
-/// the module docs).
-fn schedule(groups: &[Group]) -> Vec<(u64, u64)> {
+/// The `(show_ms, hide_ms)` of every group with a lead of `lead_ms` (lead,
+/// hold, long-break tail; see the module docs).
+fn schedule(groups: &[Group], lead_ms: u64) -> Vec<(u64, u64)> {
     let mut shows: Vec<u64> = Vec::with_capacity(groups.len());
     // The previous group's (show, sung end).
     let mut prev: Option<(u64, u64)> = None;
     for group in groups {
-        let lead = group.start_ms.saturating_sub(LEAD_MS);
+        let lead = group.start_ms.saturating_sub(lead_ms);
         let show = match prev {
             Some((prev_show, prev_end)) => lead
                 .max(prev_end)

@@ -1,7 +1,7 @@
 use sp_core::lyrics::LyricsTrack;
 use sp_core::ws::ServerMsg;
 
-use crate::lyrics::display_plan::DisplayPlan;
+use crate::lyrics::display_plan::{DisplayPlan, DisplayProfile};
 
 /// DB key used to read the configured operator lead time. Operators can
 /// override per-installation via `PATCH /api/v1/settings {"lyrics_lead_ms":
@@ -89,9 +89,11 @@ impl LyricsState {
     /// Construct a state with an explicit lead AND per-song offset. The lead
     /// is read from the `lyrics_lead_ms` DB setting (0 by default); the offset
     /// is from the per-song `videos.lyrics_time_offset_ms` field. Builds the
-    /// track's #217 display plan once, here.
+    /// track's #217 display plan once, here, under the profile its `source`
+    /// marks: a dub subtitle track is speech (no lead), anything else a song.
     pub fn with_lead_and_offset(track: LyricsTrack, lead_ms: u64, offset_ms: i64) -> Self {
-        let plan = DisplayPlan::build(&track.lines);
+        let profile = DisplayProfile::for_source(&track.source);
+        let plan = DisplayPlan::build(&track.lines, profile);
         Self {
             track,
             plan,
@@ -239,6 +241,7 @@ impl LyricsState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lyrics::display_plan::DisplayProfile;
     use sp_core::lyrics::{LyricsLine, LyricsTrack, LyricsWord};
 
     #[test]
@@ -815,6 +818,38 @@ mod tests {
         assert_eq!(
             st.presenter_lines(3_500),
             Some(("Angels bow before him".to_string(), String::new()))
+        );
+    }
+
+    /// A dub subtitle track (`source = "gemini-live-translate"`) is chosen as
+    /// speech when it loads, so the wall shows each line exactly when it is
+    /// spoken (no lead) and still holds it through the gap. A song track keeps
+    /// the song profile.
+    #[test]
+    fn a_dub_track_loads_as_speech_and_shows_lines_exactly_when_spoken() {
+        let mut track = two_line_track((1_000, 3_000), (4_000, 6_000));
+        track.source = "gemini-live-translate".into();
+        for line in &mut track.lines {
+            line.en = String::new();
+        }
+        let st = LyricsState::new(track);
+        assert_eq!(st.display_plan().profile(), DisplayProfile::Speech);
+        assert_eq!(st.resolume_lines_with_next(999, false), None);
+        assert_eq!(
+            st.resolume_lines_with_next(1_000, false),
+            Some((
+                String::new(),
+                String::new(),
+                Some("Ahoj svet".to_string()),
+                Some("Zbohom".to_string()),
+            ))
+        );
+        let sk_at = |pos| st.resolume_lines_with_next(pos, false).and_then(|l| l.2);
+        assert_eq!(sk_at(3_999).as_deref(), Some("Ahoj svet"));
+        assert_eq!(sk_at(4_000).as_deref(), Some("Zbohom"));
+        assert_eq!(
+            LyricsState::new(wall_track()).display_plan().profile(),
+            DisplayProfile::Song
         );
     }
 }

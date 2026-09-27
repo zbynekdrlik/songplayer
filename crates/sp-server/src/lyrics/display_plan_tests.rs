@@ -9,9 +9,9 @@ use std::ops::Range;
 use sp_core::lyrics::{LyricsLine, LyricsTrack};
 
 use super::{
-    DisplayLine, DisplayPlan, FRAGMENT_MAX_MS, FRAGMENT_MAX_WORDS, Group, HOLD_TAIL_MS, LEAD_MS,
-    LONG_GAP_MS, MERGE_MAX_CHARS, MERGE_MAX_GAP_MS, MIN_VISIBLE_MS, build_plan, fits, is_fragment,
-    join_sk, join_text, starts_lowercase,
+    DisplayLine, DisplayPlan, DisplayProfile, FRAGMENT_MAX_MS, FRAGMENT_MAX_WORDS, Group,
+    HOLD_TAIL_MS, LEAD_MS, LONG_GAP_MS, MERGE_MAX_CHARS, MERGE_MAX_GAP_MS, MIN_VISIBLE_MS,
+    build_plan, fits, is_fragment, join_sk, join_text, starts_lowercase,
 };
 
 fn line(start_ms: u64, end_ms: u64, en: &str, sk: &str) -> LyricsLine {
@@ -26,6 +26,16 @@ fn line(start_ms: u64, end_ms: u64, en: &str, sk: &str) -> LyricsLine {
 
 fn group(start_ms: u64, end_ms: u64, en: &str) -> Group {
     Group::of(0, &line(start_ms, end_ms, en, ""))
+}
+
+/// The plan of sung lyrics (the Song profile, 1.5 s lead).
+fn song_plan(lines: &[LyricsLine]) -> Vec<DisplayLine> {
+    build_plan(lines, DisplayProfile::Song)
+}
+
+/// [`DisplayPlan`] of sung lyrics (the Song profile).
+fn song_display_plan(lines: &[LyricsLine]) -> DisplayPlan {
+    DisplayPlan::build(lines, DisplayProfile::Song)
 }
 
 fn texts(plan: &[DisplayLine]) -> Vec<&str> {
@@ -160,17 +170,74 @@ fn a_dub_subtitle_track_never_collapses_into_one_giant_sk_line() {
     let lines: Vec<LyricsLine> = (0..10u64)
         .map(|k| line(1_000 + 4_000 * k, 5_000 + 4_000 * k, "", sk))
         .collect();
-    let plan = build_plan(&lines);
+    let plan = build_plan(&lines, DisplayProfile::Speech);
     assert_eq!(plan.len(), 10);
     assert!(plan.iter().all(|d| d.sk.as_deref() == Some(sk)));
     // Two short dub lines with no EN still merge, because their SK fits.
-    let short = build_plan(&[
-        line(1_000, 1_500, "", "Áno."),
-        line(1_500, 2_000, "", "Amen."),
-    ]);
+    let short = build_plan(
+        &[
+            line(1_000, 1_500, "", "Áno."),
+            line(1_500, 2_000, "", "Amen."),
+        ],
+        DisplayProfile::Speech,
+    );
     assert_eq!(short.len(), 1);
     assert_eq!(short[0].sk.as_deref(), Some("Áno. Amen."));
     assert_eq!(short[0].en, "");
+}
+
+// ── display profiles: song vs speech (ROZHODNUTÉ on #217) ──────────────────
+
+#[test]
+fn dub_subtitles_are_speech_and_everything_else_is_a_song() {
+    assert_eq!(
+        DisplayProfile::for_source("gemini-live-translate"),
+        DisplayProfile::Speech
+    );
+    assert_eq!(
+        DisplayProfile::for_source("gemini-3-5-transcribe"),
+        DisplayProfile::Song
+    );
+    assert_eq!(
+        DisplayProfile::for_source("lrclib+mtl@rev1/g35t-ok"),
+        DisplayProfile::Song
+    );
+    assert_eq!(DisplayProfile::for_source(""), DisplayProfile::Song);
+    assert_eq!(DisplayProfile::Song.lead_ms(), 1_500);
+    assert_eq!(DisplayProfile::Speech.lead_ms(), 0);
+}
+
+#[test]
+fn a_speech_line_shows_exactly_when_it_is_spoken() {
+    // The same three lines under both profiles. Speech has no lead, but it
+    // keeps the hold (through the 1000 ms gap) and the break tail (the 9000 ms
+    // gap).
+    let lines = [
+        line(1_000, 3_000, "", "Boh nás miluje viac, než si predstavíme."),
+        line(4_000, 6_000, "", "A volá nás k sebe každý deň."),
+        line(15_000, 17_000, "", "Preto mu dnes ďakujeme."),
+    ];
+    let speech = DisplayPlan::build(&lines, DisplayProfile::Speech);
+    assert_eq!(speech.profile(), DisplayProfile::Speech);
+    let spans: Vec<(u64, u64)> = speech
+        .lines()
+        .iter()
+        .map(|d| (d.show_ms, d.hide_ms))
+        .collect();
+    assert_eq!(spans, [(1_000, 4_000), (4_000, 9_000), (15_000, 20_000)]);
+    assert_eq!(index_at(&speech, 999), None);
+    assert_eq!(index_at(&speech, 1_000), Some(0));
+    assert_eq!(index_at(&speech, 3_999), Some(0));
+    assert_eq!(index_at(&speech, 4_000), Some(1));
+
+    let song = song_display_plan(&lines);
+    assert_eq!(song.profile(), DisplayProfile::Song);
+    let spans: Vec<(u64, u64)> = song
+        .lines()
+        .iter()
+        .map(|d| (d.show_ms, d.hide_ms))
+        .collect();
+    assert_eq!(spans, [(0, 3_000), (3_000, 9_000), (13_500, 20_000)]);
 }
 
 #[test]
@@ -200,7 +267,7 @@ fn join_sk_joins_what_is_present() {
 #[test]
 fn two_short_repeats_merge_into_one_wall_line() {
     // "What a God, what a God." twice at 0.3 s each (fixture lines 29 + 30).
-    let plan = build_plan(&[
+    let plan = song_plan(&[
         line(
             97_000,
             97_300,
@@ -228,7 +295,7 @@ fn two_short_repeats_merge_into_one_wall_line() {
 
 #[test]
 fn a_fragment_chain_merges_greedily_forward() {
-    let plan = build_plan(&[
+    let plan = song_plan(&[
         line(1_000, 1_300, "What a God,", "Aký Boh,"),
         line(1_300, 1_600, "what a", "aký"),
         line(1_600, 1_900, "God.", "Boh."),
@@ -252,7 +319,7 @@ fn a_fragment_chain_merges_greedily_forward() {
 fn a_fragment_that_cannot_merge_forward_merges_backward() {
     // "Oh God" is 701 ms before the next line (too far), so it joins the
     // line before it.
-    let plan = build_plan(&[
+    let plan = song_plan(&[
         line(
             0,
             2_500,
@@ -282,7 +349,7 @@ fn a_fragment_that_cannot_merge_forward_merges_backward() {
 
 #[test]
 fn a_fragment_that_fits_both_neighbours_joins_the_line_it_leads_into() {
-    let plan = build_plan(&[
+    let plan = song_plan(&[
         line(0, 2_500, "Seated on the throne of grace", "a"),
         line(2_500, 3_000, "Oh God", "b"),
         line(3_000, 5_000, "We give you the glory now", "c"),
@@ -299,7 +366,7 @@ fn a_fragment_that_fits_both_neighbours_joins_the_line_it_leads_into() {
 
 #[test]
 fn a_fragment_stays_alone_when_no_neighbour_is_within_700_ms() {
-    let plan = build_plan(&[
+    let plan = song_plan(&[
         line(0, 2_000, "Seated on the throne of grace", ""),
         line(2_701, 3_000, "Oh", "Ó"),
         line(3_701, 6_000, "We give you the glory now", ""),
@@ -322,7 +389,7 @@ fn a_line_stays_on_the_wall_until_it_is_sung_to_the_end() {
     // Two whole lines 500 ms apart. The second would lead by 1500 ms, but it
     // may appear only once the first is sung to its end (12 000), so it gets
     // only the 500 ms of lead that the gap leaves.
-    let plan = build_plan(&[
+    let plan = song_plan(&[
         line(10_000, 12_000, "Seated on the throne of grace", ""),
         line(12_500, 14_500, "We give you the glory now", ""),
     ]);
@@ -333,9 +400,9 @@ fn a_line_stays_on_the_wall_until_it_is_sung_to_the_end() {
 #[test]
 fn a_merge_never_grows_a_wall_line_past_64_chars() {
     let a = "a".repeat(31);
-    let fits_64 = build_plan(&[line(0, 500, &a, ""), line(500, 1_000, &"b".repeat(32), "")]);
+    let fits_64 = song_plan(&[line(0, 500, &a, ""), line(500, 1_000, &"b".repeat(32), "")]);
     assert_eq!(fits_64.len(), 1);
-    let over_64 = build_plan(&[line(0, 500, &a, ""), line(500, 1_000, &"b".repeat(33), "")]);
+    let over_64 = song_plan(&[line(0, 500, &a, ""), line(500, 1_000, &"b".repeat(33), "")]);
     assert_eq!(over_64.len(), 2);
 }
 
@@ -345,7 +412,7 @@ fn a_whole_line_joins_its_lowercase_continuation() {
     // mid-sentence, so the first is a fragment and takes it. The third line
     // starts a new sentence and stays alone. Checking the lowercase rule on a
     // line's OWN text would instead pair the continuation with the third.
-    let plan = build_plan(&[
+    let plan = song_plan(&[
         line(0, 2_000, "Seated on the throne of grace", "a"),
         line(2_000, 4_000, "and we give you the glory", "b"),
         line(4_000, 6_000, "Holy is the Lord our God", "c"),
@@ -362,7 +429,7 @@ fn a_whole_line_joins_its_lowercase_continuation() {
 
 #[test]
 fn whole_lines_that_would_fit_together_stay_separate() {
-    let plan = build_plan(&[
+    let plan = song_plan(&[
         line(0, 2_000, "There is no one higher", ""),
         line(2_000, 4_000, "There is no one greater", ""),
     ]);
@@ -376,7 +443,7 @@ fn whole_lines_that_would_fit_together_stay_separate() {
 fn a_line_left_under_1200_ms_on_the_wall_merges_when_it_fits() {
     // Two whole (non-fragment) lines that overlap: the second starts 1199 ms
     // after the first shows, so the first would be up for only 1199 ms.
-    let plan = build_plan(&[
+    let plan = song_plan(&[
         line(1_000, 4_000, "Seated on the throne of grace", "a"),
         line(1_199, 4_500, "We give you the glory now", "b"),
     ]);
@@ -394,7 +461,7 @@ fn a_line_left_under_1200_ms_on_the_wall_merges_when_it_fits() {
 
 #[test]
 fn a_line_left_exactly_1200_ms_on_the_wall_stays_alone() {
-    let plan = build_plan(&[
+    let plan = song_plan(&[
         line(1_000, 4_000, "Seated on the throne of grace", "a"),
         line(1_200, 4_500, "We give you the glory now", "b"),
     ]);
@@ -407,19 +474,19 @@ fn a_line_left_exactly_1200_ms_on_the_wall_stays_alone() {
 
 #[test]
 fn a_line_shows_1500_ms_before_it_is_sung() {
-    let plan = build_plan(&[line(10_000, 12_000, "Seated on the throne of grace", "")]);
+    let plan = song_plan(&[line(10_000, 12_000, "Seated on the throne of grace", "")]);
     assert_eq!((plan[0].show_ms, plan[0].hide_ms), (8_500, 15_000));
 }
 
 #[test]
 fn the_first_lead_is_clamped_at_the_track_start() {
-    let plan = build_plan(&[line(1_000, 3_000, "Seated on the throne of grace", "")]);
+    let plan = song_plan(&[line(1_000, 3_000, "Seated on the throne of grace", "")]);
     assert_eq!((plan[0].show_ms, plan[0].hide_ms), (0, 6_000));
 }
 
 #[test]
 fn a_line_holds_through_a_gap_until_the_next_line_shows() {
-    let plan = build_plan(&[
+    let plan = song_plan(&[
         line(1_000, 3_000, "Seated on the throne of grace", ""),
         line(7_000, 9_000, "We give you the glory now", ""),
     ]);
@@ -429,7 +496,7 @@ fn a_line_holds_through_a_gap_until_the_next_line_shows() {
 
 #[test]
 fn a_gap_of_exactly_8000_ms_still_holds() {
-    let plan = build_plan(&[
+    let plan = song_plan(&[
         line(10_000, 12_000, "Seated on the throne of grace", ""),
         line(20_000, 22_000, "We give you the glory now", ""),
     ]);
@@ -439,7 +506,7 @@ fn a_gap_of_exactly_8000_ms_still_holds() {
 
 #[test]
 fn a_gap_over_8000_ms_hides_the_line_3_s_after_it_ends() {
-    let plan = DisplayPlan::build(&[
+    let plan = song_display_plan(&[
         line(10_000, 12_000, "Seated on the throne of grace", ""),
         line(20_001, 22_000, "We give you the glory now", ""),
     ]);
@@ -470,7 +537,7 @@ fn a_fast_passage_switches_exactly_on_time_when_no_lead_is_left() {
             line(start, start + 900, &format!("{k} {}", "x".repeat(35)), "")
         })
         .collect();
-    let plan = build_plan(&lines);
+    let plan = song_plan(&lines);
     let shows: Vec<u64> = plan.iter().map(|d| d.show_ms).collect();
     assert_eq!(
         shows,
@@ -499,7 +566,7 @@ fn a_fast_passage_switches_exactly_on_time_when_no_lead_is_left() {
 
 #[test]
 fn at_finds_the_line_on_the_wall_with_half_open_bounds() {
-    let plan = DisplayPlan::build(&[
+    let plan = song_display_plan(&[
         line(1_000, 3_000, "Seated on the throne of grace", ""),
         line(7_000, 9_000, "We give you the glory now", ""),
     ]);
@@ -515,7 +582,7 @@ fn at_finds_the_line_on_the_wall_with_half_open_bounds() {
 
 #[test]
 fn an_empty_track_has_an_empty_plan() {
-    let plan = DisplayPlan::build(&[]);
+    let plan = song_display_plan(&[]);
     assert!(plan.lines().is_empty());
     assert_eq!(plan.at(0), None);
 }
@@ -539,7 +606,7 @@ fn fixture_is_the_what_a_god_base_tier_track() {
 #[test]
 fn fixture_wall_never_blanks_in_a_gap_of_8_s_or_less() {
     let lines = fixture().lines;
-    let plan = build_plan(&lines);
+    let plan = song_plan(&lines);
     let mut blank_ms = 0;
     let mut long_breaks = 0;
     for pair in plan.windows(2) {
@@ -563,7 +630,7 @@ fn fixture_wall_never_blanks_in_a_gap_of_8_s_or_less() {
 #[test]
 fn fixture_no_wall_line_is_up_for_less_than_1200_ms() {
     let lines = fixture().lines;
-    let plan = build_plan(&lines);
+    let plan = song_plan(&lines);
     for pair in plan.windows(2) {
         let up = pair[0].hide_ms - pair[0].show_ms;
         if up < MIN_VISIBLE_MS {
@@ -592,7 +659,7 @@ fn fixture_no_wall_line_leaves_before_it_is_sung_to_the_end() {
     // 137 wall lines left early (41.7 s), and "All I have" left before it was
     // even sung.
     let lines = fixture().lines;
-    let plan = build_plan(&lines);
+    let plan = song_plan(&lines);
     for d in &plan {
         let end = sung_end(&lines, d);
         assert!(
@@ -607,7 +674,7 @@ fn fixture_no_wall_line_leaves_before_it_is_sung_to_the_end() {
 #[test]
 fn fixture_lead_bounds_hold() {
     let lines = fixture().lines;
-    let plan = build_plan(&lines);
+    let plan = song_plan(&lines);
     for (i, d) in plan.iter().enumerate() {
         let start = sung_start(&lines, d);
         assert!(d.show_ms <= start, "{:?} shows after it is sung", d.en);
@@ -646,7 +713,7 @@ fn fixture_lead_bounds_hold() {
 #[test]
 fn fixture_merges_fragments_into_verses() {
     let lines = fixture().lines;
-    let plan = build_plan(&lines);
+    let plan = song_plan(&lines);
     assert_eq!(plan.len(), 137);
     let by_src = |range: Range<usize>| {
         plan.iter()
@@ -696,7 +763,7 @@ fn fixture_merges_fragments_into_verses() {
 #[test]
 fn fixture_en_and_sk_stay_paired() {
     let lines = fixture().lines;
-    let plan = build_plan(&lines);
+    let plan = song_plan(&lines);
     for d in &plan {
         let src = &lines[d.src_range.clone()];
         let en: Vec<&str> = src.iter().map(|l| l.en.trim()).collect();
@@ -711,7 +778,7 @@ fn fixture_en_and_sk_stay_paired() {
 
 #[test]
 fn fixture_long_breaks_hide_3_s_after_the_line_ends() {
-    let plan = DisplayPlan::build(&fixture().lines);
+    let plan = song_display_plan(&fixture().lines);
     // [start of the break's blank, next line's show) for the three breaks.
     for (blank_from, next_show, last_text) in [
         (205_800, 210_900, "To you are"),

@@ -49,14 +49,17 @@ impl PlaybackEngine {
                                     crate::lyrics::renderer::LyricsState::with_lead_and_offset(
                                         track, lead_ms, offset_ms,
                                     );
-                                // #217: how many wall lines the fragments merged into.
+                                // #217: how many wall lines the fragments merged into,
+                                // and whether the wall leads (song) or not (speech).
                                 let display_lines = state.display_plan().lines().len();
+                                let display_profile = state.display_plan().profile();
                                 pp.lyrics_state = Some(state);
                                 info!(
                                     playlist_id,
                                     video_id,
                                     lines = line_count,
                                     display_lines,
+                                    ?display_profile,
                                     source = %source,
                                     pipeline_version,
                                     lead_ms,
