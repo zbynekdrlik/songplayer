@@ -618,11 +618,12 @@ fn fixture_merges_fragments_into_verses() {
         (oh.en.as_str(), oh.show_ms, oh.hide_ms),
         ("Oh,", 32_500, 34_700)
     );
-    // Every merged line fits the wall.
+    // Every merged line fits the wall, in both languages.
     assert!(
         plan.iter()
             .filter(|d| d.src_range.len() > 1)
-            .all(|d| d.en.chars().count() <= MERGE_MAX_CHARS)
+            .all(|d| d.en.chars().count() <= MERGE_MAX_CHARS
+                && d.sk.as_deref().unwrap_or_default().chars().count() <= MERGE_MAX_CHARS)
     );
     // The source lines tile the plan in order, none lost or repeated.
     let mut next = 0;

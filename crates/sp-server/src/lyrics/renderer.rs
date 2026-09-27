@@ -454,11 +454,11 @@ mod tests {
     #[test]
     fn presenter_lines_returns_current_and_next() {
         let st = LyricsState::new(wall_track());
-        // First line starts at 1000 ms per `test_track()`.
+        // wall_track()'s plan shows line 0 over [0, 2500).
         let (cur, nxt) = st.presenter_lines(1500).expect("on line 0");
         assert_eq!(cur, "Hello world");
-        // next_en should be line 1's text.
-        assert!(!nxt.is_empty(), "expected a next line");
+        // next_en is line 1's text.
+        assert_eq!(nxt, "Goodbye");
     }
 
     #[test]
