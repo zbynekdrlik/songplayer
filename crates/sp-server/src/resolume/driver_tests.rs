@@ -373,7 +373,7 @@ async fn refresh_mapping_populates_clip_mapping_from_composition() {
     let mut driver = HostDriver::new(host, port);
     assert!(driver.clip_mapping.is_empty());
 
-    driver.refresh_mapping().await.unwrap();
+    driver.refresh_mapping(Instant::now()).await.unwrap();
 
     let clips = driver
         .clip_mapping
@@ -416,8 +416,8 @@ async fn recovery_event_fires_on_success_after_failure() {
     let (tx, mut rx) = tokio::sync::broadcast::channel(8);
     let mut driver = HostDriver::new("127.0.0.1".into(), port).with_recovery_channel(tx);
 
-    let _ = driver.refresh_mapping().await; // fails
-    let _ = driver.refresh_mapping().await; // succeeds → RecoveryEvent
+    let _ = driver.refresh_mapping(Instant::now()).await; // fails
+    let _ = driver.refresh_mapping(Instant::now()).await; // succeeds → RecoveryEvent
 
     let event = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv())
         .await
@@ -439,7 +439,7 @@ async fn no_recovery_event_on_clean_first_success() {
     let (tx, mut rx) = tokio::sync::broadcast::channel(8);
     let mut driver = HostDriver::new("127.0.0.1".into(), port).with_recovery_channel(tx);
 
-    let _ = driver.refresh_mapping().await;
+    let _ = driver.refresh_mapping(Instant::now()).await;
 
     let result = tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
     assert!(
@@ -463,7 +463,7 @@ async fn circuit_breaker_evicts_clip_map_after_threshold_failures() {
 
     // Three consecutive failures should trip the breaker and evict
     for _ in 0..3 {
-        let _ = driver.refresh_mapping().await;
+        let _ = driver.refresh_mapping(Instant::now()).await;
     }
 
     assert!(driver.circuit_breaker_open, "circuit should be open");
@@ -482,7 +482,7 @@ async fn single_failure_does_not_trip_circuit() {
     let port = server.address().port();
     let mut driver = HostDriver::new("127.0.0.1".into(), port);
 
-    let _ = driver.refresh_mapping().await;
+    let _ = driver.refresh_mapping(Instant::now()).await;
 
     assert_eq!(driver.consecutive_failures, 1);
     assert!(!driver.circuit_breaker_open);

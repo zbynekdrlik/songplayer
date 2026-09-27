@@ -25,6 +25,14 @@ const FULL_REFRESH_TTL: Duration = Duration::from_secs(300); // 5 minutes
 /// ~10 s liveness tick — the retry storm the #157 review caught (#157).
 const FULL_REFRESH_RETRY: Duration = Duration::from_secs(60);
 
+/// How long a NOT READY clip mapping is fetched again on EVERY liveness tick,
+/// counted from the first not-ready refresh. Not ready means `/composition`
+/// answered but carries none of SongPlayer's clips, because Arena's REST
+/// answers before its composition has loaded. After this window the normal
+/// `FULL_REFRESH_RETRY` applies, so a composition that genuinely has no
+/// SongPlayer clips never becomes a 14 MB fetch every 10 s (#217).
+const NOT_READY_FAST_WINDOW: Duration = Duration::from_secs(1);
+
 /// Why a full `/composition` refresh is being performed. Drives the INFO
 /// transition log and is the return type of the pure [`FullRefreshReason::decide`]
 /// poll policy (#157). The steady state runs ONLY the light `/product` probe,
@@ -42,6 +50,10 @@ pub(crate) enum FullRefreshReason {
     Ttl,
     /// The circuit breaker just closed (Arena recovered) — resync the map once.
     BreakerClosed,
+    /// The last full refresh found none of SongPlayer's clips: Arena's REST
+    /// answers before its composition has loaded. Fetch again until the clips
+    /// appear (#217).
+    NotReady,
 }
 
 impl FullRefreshReason {
@@ -53,26 +65,36 @@ impl FullRefreshReason {
             FullRefreshReason::Command => "command",
             FullRefreshReason::Ttl => "ttl",
             FullRefreshReason::BreakerClosed => "breaker-closed",
+            FullRefreshReason::NotReady => "not-ready",
         }
     }
 
     /// Pure poll policy: decide whether — and why — a full `/composition`
-    /// refresh should run on this tick. `now`, `last_full_ok` and
-    /// `last_full_attempt` are monotonic `Instant`s so tests can construct
-    /// synthetic forward-only clocks (the `is_expired_at` Windows-underflow-safe
-    /// pattern).
+    /// refresh should run on this tick. `now`, `last_full_ok`,
+    /// `last_full_attempt` and `not_ready_since` are monotonic `Instant`s so
+    /// tests can construct synthetic forward-only clocks (the `is_expired_at`
+    /// Windows-underflow-safe pattern).
     ///
     /// Precedence: a forced command wins immediately (bypasses the retry
-    /// window), then a just-closed breaker, then the never-refreshed startup
-    /// case, then TTL expiry. Returns `None` in the steady state (fresh cache,
-    /// live REST). The three non-forced reasons additionally back off: a full
-    /// refresh is never re-ATTEMPTED (success OR failure) within `retry_after`
-    /// of the last attempt — the guard against a per-tick 14 MB retry storm
-    /// when `/product` answers but `/composition` keeps failing (#157 review).
+    /// window), then a just-closed breaker, then a NOT READY mapping, then the
+    /// never-refreshed startup case, then TTL expiry. Returns `None` in the
+    /// steady state (ready mapping, fresh cache, live REST). The non-forced
+    /// reasons additionally back off: a full refresh is never re-ATTEMPTED
+    /// (success OR failure) within `retry_after` of the last attempt — the
+    /// guard against a per-tick 14 MB retry storm when `/product` answers but
+    /// `/composition` keeps failing (#157 review).
+    ///
+    /// The one exception to the backoff: a NOT READY mapping within
+    /// `NOT_READY_FAST_WINDOW` of `not_ready_since` is fetched on every tick,
+    /// because Arena is still loading its composition (#217). NotReady sits
+    /// before TTL because after an Arena restart `last_full_ok` is the
+    /// pre-restart stamp, and a TTL reason would wait out the retry window.
+    #[allow(clippy::too_many_arguments)] // pure: every clock/flag is an input tests can drive
     fn decide(
         now: Instant,
         last_full_ok: Option<Instant>,
         last_full_attempt: Option<Instant>,
+        not_ready_since: Option<Instant>,
         ttl: Duration,
         retry_after: Duration,
         forced: bool,
@@ -83,6 +105,11 @@ impl FullRefreshReason {
         }
         let reason = if breaker_just_closed {
             FullRefreshReason::BreakerClosed
+        } else if let Some(since) = not_ready_since {
+            if now.duration_since(since) < NOT_READY_FAST_WINDOW {
+                return Some(FullRefreshReason::NotReady);
+            }
+            FullRefreshReason::NotReady
         } else {
             match last_full_ok {
                 None => FullRefreshReason::Startup,
@@ -205,16 +232,24 @@ pub struct HostDriver {
     /// `None` after a failed probe or before the first one (#157).
     product_latency_ms: Option<u64>,
     /// Wall-clock timestamp of the last SUCCESSFUL full `/composition`
-    /// refresh — surfaced in the health snapshot for before/after measuring.
+    /// refresh (one whose mapping is ready, #217) — surfaced in the health
+    /// snapshot for before/after measuring.
     last_full_refresh_ts: Option<chrono::DateTime<chrono::Utc>>,
-    /// Monotonic instant of the last successful full `/composition` refresh,
-    /// used for the TTL decision. Separate from `last_full_refresh_ts` (which
-    /// is a display timestamp) so TTL math stays on a monotonic clock (#157).
+    /// Monotonic instant of the last successful full `/composition` refresh
+    /// (one whose mapping is ready, #217), used for the TTL decision. Separate
+    /// from `last_full_refresh_ts` (which is a display timestamp) so TTL math
+    /// stays on a monotonic clock (#157).
     last_full_refresh_ok_at: Option<Instant>,
     /// Monotonic instant of the last full-refresh ATTEMPT (success OR failure),
     /// used for the retry-backoff decision so a failing `/composition` is not
     /// re-fetched on every liveness tick (#157 review).
     last_full_attempt_at: Option<Instant>,
+    /// Monotonic instant of the first refresh of the current NOT READY
+    /// episode: `/composition` answered with none of SongPlayer's clips,
+    /// because Arena's REST answers before its composition has loaded. `None`
+    /// while the mapping is ready. Drives the `NotReady` refetch; the refresh
+    /// that clears it fires a `RecoveryEvent` (#217).
+    not_ready_since: Option<Instant>,
     /// Set via `with_recovery_channel` builder; never accessed directly.
     recovery_tx: Option<tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>>,
     /// Set via `with_health_channel` builder; never accessed directly.
@@ -240,6 +275,7 @@ impl HostDriver {
             last_full_refresh_ts: None,
             last_full_refresh_ok_at: None,
             last_full_attempt_at: None,
+            not_ready_since: None,
             recovery_tx: None,
             health_tx: None,
         }
@@ -312,6 +348,7 @@ impl HostDriver {
             now,
             self.last_full_refresh_ok_at,
             self.last_full_attempt_at,
+            self.not_ready_since,
             FULL_REFRESH_TTL,
             FULL_REFRESH_RETRY,
             false,
@@ -323,8 +360,9 @@ impl HostDriver {
 
     /// Record the attempt, log the mode transition, and run a full
     /// `/composition` refresh. `now` stamps `last_full_attempt_at` (the retry-
-    /// backoff clock) so it stays on the same monotonic clock as the `decide`
-    /// call that scheduled this refresh.
+    /// backoff clock) and is handed to `refresh_mapping`, so every poll-policy
+    /// instant stays on the same monotonic clock as the `decide` call that
+    /// scheduled this refresh.
     #[cfg_attr(test, mutants::skip)] // the refresh call + attempt-stamp are covered by the retry/steady/ttl wiremock request-count tests; the info!/warn! lines are log-only
     async fn run_full_refresh(&mut self, reason: FullRefreshReason, now: Instant) {
         self.last_full_attempt_at = Some(now);
@@ -333,7 +371,7 @@ impl HostDriver {
             reason = reason.as_str(),
             "Resolume full /composition refresh"
         );
-        if let Err(e) = self.refresh_mapping().await {
+        if let Err(e) = self.refresh_mapping(now).await {
             warn!(host = %self.host, %e, "Resolume full refresh failed");
         }
     }
@@ -390,11 +428,7 @@ impl HostDriver {
                 info!(host = %self.host, "circuit breaker closed — Resolume recovered");
             }
             if was_failing {
-                if let Some(tx) = &self.recovery_tx {
-                    let _ = tx.send(crate::resolume::RecoveryEvent {
-                        host: self.host.clone(),
-                    });
-                }
+                self.send_recovery_event();
                 info!(host = %self.host, "Resolume recovery — RecoveryEvent fired");
             }
         } else {
@@ -412,11 +446,26 @@ impl HostDriver {
             {
                 self.circuit_breaker_open = true;
                 self.clip_mapping = HashMap::new();
+                // The breaker-closed refresh starts over: it fires no
+                // ready-transition event on top of the breaker close's own
+                // RecoveryEvent, and a still-loading composition then opens
+                // a fresh fast window (#217).
+                self.not_ready_since = None;
                 warn!(host = %self.host, "circuit breaker opened — clip cache evicted");
             }
         }
         self.publish_health();
         breaker_just_closed
+    }
+
+    /// Broadcast a `RecoveryEvent`, so the engine re-pushes the title and the
+    /// current line to this host.
+    fn send_recovery_event(&self) {
+        if let Some(tx) = &self.recovery_tx {
+            let _ = tx.send(crate::resolume::RecoveryEvent {
+                host: self.host.clone(),
+            });
+        }
     }
 
     /// Publish the current health snapshot on the watch channel (if wired).
@@ -434,20 +483,15 @@ impl HostDriver {
                 // entire composition for `#`-prefixed names, but operators
                 // have many of their own tokens (#bible-*, #timer,
                 // #translate-*-u-re, etc.) that are noise to this dashboard.
-                clips_by_token: [
-                    crate::resolume::TITLE_TOKEN,
-                    crate::resolume::SUBS_TOKEN,
-                    crate::resolume::SUBS_NEXT_TOKEN,
-                    crate::resolume::SUBS_SK_TOKEN,
-                ]
-                .iter()
-                .map(|t| {
-                    (
-                        (*t).to_string(),
-                        self.clip_mapping.get(*t).map(|v| v.len()).unwrap_or(0),
-                    )
-                })
-                .collect(),
+                clips_by_token: crate::resolume::SONGPLAYER_TOKENS
+                    .iter()
+                    .map(|t| {
+                        (
+                            (*t).to_string(),
+                            self.clip_mapping.get(*t).map(|v| v.len()).unwrap_or(0),
+                        )
+                    })
+                    .collect(),
             };
             let _ = tx.send(snapshot);
         }
@@ -501,6 +545,7 @@ impl HostDriver {
                     now,
                     self.last_full_refresh_ok_at,
                     self.last_full_attempt_at,
+                    self.not_ready_since,
                     FULL_REFRESH_TTL,
                     FULL_REFRESH_RETRY,
                     true,
@@ -526,12 +571,33 @@ impl HostDriver {
     /// Fetch composition JSON from Resolume and build clip mapping from
     /// `#token` tags found in clip names.
     ///
+    /// A composition with none of SongPlayer's clips is NOT READY, never a
+    /// success: Arena's REST answers before its composition has loaded. Such a
+    /// refresh leaves `last_full_refresh_ok_at` alone and starts (or
+    /// continues) the not-ready episode that `decide` fetches again. The REST
+    /// did answer, so the breaker bookkeeping still counts it as a success.
+    /// The refresh that ends the episode fires a `RecoveryEvent`, so the
+    /// engine re-pushes the title and the current line to the clips that now
+    /// exist (#217). `now` is the tick's monotonic clock, the one `decide`
+    /// reads.
+    ///
     /// `GET /api/v1/composition`
-    pub(crate) async fn refresh_mapping(&mut self) -> Result<(), anyhow::Error> {
+    pub(crate) async fn refresh_mapping(&mut self, now: Instant) -> Result<(), anyhow::Error> {
         match self.fetch_mapping_inner().await {
             Ok(new_mapping) => {
-                self.last_full_refresh_ok_at = Some(Instant::now());
-                self.last_full_refresh_ts = Some(chrono::Utc::now());
+                let ready = has_songplayer_clips(&new_mapping);
+                let became_ready = ready && self.not_ready_since.is_some();
+                if ready {
+                    self.not_ready_since = None;
+                    self.last_full_refresh_ok_at = Some(now);
+                    self.last_full_refresh_ts = Some(chrono::Utc::now());
+                } else if self.not_ready_since.is_none() {
+                    self.not_ready_since = Some(now);
+                    info!(
+                        host = %self.host,
+                        "Resolume composition has no SongPlayer clips yet — mapping not ready"
+                    );
+                }
                 if new_mapping != self.clip_mapping {
                     let total: usize = new_mapping.values().map(|v| v.len()).sum();
                     info!(
@@ -542,7 +608,15 @@ impl HostDriver {
                     );
                     self.clip_mapping = new_mapping;
                 }
+                // `apply_outcome` fires its own RecoveryEvent after prior
+                // failures. One refresh must never re-push twice: a second
+                // ShowTitle restarts the title fade, a visible blink.
+                let recovery_fired = self.consecutive_failures > 0;
                 self.apply_outcome(true);
+                if became_ready && !recovery_fired {
+                    self.send_recovery_event();
+                    info!(host = %self.host, "Resolume clip mapping ready — RecoveryEvent fired");
+                }
                 Ok(())
             }
             Err(e) => {
@@ -685,6 +759,16 @@ fn extract_text_param_id(clip: &serde_json::Value) -> Option<i64> {
         }
     }
     None
+}
+
+/// Whether a parsed mapping carries at least one of SongPlayer's own clip
+/// tokens. Arena's REST answers before its composition has loaded, so a
+/// mapping without any (empty, or only the operator's own `#bible-*` /
+/// `#timer` tokens) means "not loaded yet", not "no clips" (#217).
+fn has_songplayer_clips(mapping: &HashMap<String, Vec<ClipInfo>>) -> bool {
+    crate::resolume::SONGPLAYER_TOKENS
+        .iter()
+        .any(|token| mapping.contains_key(*token))
 }
 
 /// Parse a Resolume composition JSON and extract clip tokens.

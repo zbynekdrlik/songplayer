@@ -222,3 +222,307 @@ async fn arena_relaunch_refetches_the_composition_until_its_clips_load() {
         "a ready mapping returns to the steady state"
     );
 }
+
+// -- FullRefreshReason::decide with a NOT READY mapping (pure policy) ------
+
+/// `decide` with the production TTL and retry windows, never forced.
+fn decide_at(
+    now: Instant,
+    last_full_ok: Option<Instant>,
+    last_full_attempt: Option<Instant>,
+    not_ready_since: Option<Instant>,
+    breaker_just_closed: bool,
+) -> Option<FullRefreshReason> {
+    FullRefreshReason::decide(
+        now,
+        last_full_ok,
+        last_full_attempt,
+        not_ready_since,
+        FULL_REFRESH_TTL,
+        FULL_REFRESH_RETRY,
+        false,
+        breaker_just_closed,
+    )
+}
+
+fn secs(s: u64) -> Duration {
+    Duration::from_secs(s)
+}
+
+#[test]
+fn decide_not_ready_fires_on_every_tick_inside_the_first_two_minutes() {
+    let base = Instant::now();
+    // Every ~10 s tick from 10 s to 110 s after the first not-ready refresh,
+    // with the previous tick's fetch 10 s ago (well inside the 60 s retry
+    // window), fetches again. It does so both at startup (never a successful
+    // refresh) and with a fresh TTL stamp that would otherwise mean "steady".
+    for k in 1..=11u64 {
+        let now = base + secs(10 * k);
+        let attempt = Some(base + secs(10 * (k - 1)));
+        assert_eq!(
+            decide_at(now, None, attempt, Some(base), false),
+            Some(FullRefreshReason::NotReady),
+            "{} s into a not-ready episode (startup) must fetch again",
+            10 * k
+        );
+        assert_eq!(
+            decide_at(now, Some(base), attempt, Some(base), false),
+            Some(FullRefreshReason::NotReady),
+            "{} s into a not-ready episode must fetch again despite a fresh TTL stamp",
+            10 * k
+        );
+    }
+}
+
+#[test]
+fn decide_not_ready_after_an_arena_restart_beats_the_old_ttl_stamp() {
+    // The box incident: the last good refresh is 30 min old, the breaker-closed
+    // refresh 10 s ago got an empty composition. A TTL reason would wait out
+    // the 60 s retry window; NotReady fetches now.
+    let base = Instant::now();
+    let relaunch = base + secs(1800);
+    assert_eq!(
+        decide_at(
+            relaunch + secs(10),
+            Some(base),
+            Some(relaunch),
+            Some(relaunch),
+            false
+        ),
+        Some(FullRefreshReason::NotReady),
+    );
+}
+
+#[test]
+fn decide_not_ready_at_the_end_of_the_fast_window_uses_the_retry_window() {
+    // Exactly 120 s after the first not-ready refresh the fast window is over
+    // (`<`, not `<=`), so the 60 s retry window applies: the last attempt was
+    // 10 s ago, so no fetch on this tick.
+    let base = Instant::now();
+    assert_eq!(
+        decide_at(
+            base + secs(120),
+            None,
+            Some(base + secs(110)),
+            Some(base),
+            false
+        ),
+        None,
+    );
+}
+
+#[test]
+fn decide_not_ready_after_the_fast_window_fetches_once_per_retry_window() {
+    let base = Instant::now();
+    let attempt = Some(base + secs(120));
+    assert_eq!(
+        decide_at(base + secs(179), Some(base), attempt, Some(base), false),
+        None,
+        "59 s after the last attempt the retry window still holds"
+    );
+    assert_eq!(
+        decide_at(base + secs(180), Some(base), attempt, Some(base), false),
+        Some(FullRefreshReason::NotReady),
+        "60 s after the last attempt a still-not-ready mapping is fetched again"
+    );
+}
+
+#[test]
+fn decide_ready_mapping_keeps_the_steady_state() {
+    let base = Instant::now();
+    assert_eq!(
+        decide_at(base + secs(10), Some(base), Some(base), None, false),
+        None,
+        "a ready, fresh mapping runs only the light probe"
+    );
+}
+
+#[test]
+fn decide_command_and_breaker_close_keep_their_precedence_over_not_ready() {
+    let base = Instant::now();
+    assert_eq!(
+        FullRefreshReason::decide(
+            base + secs(10),
+            None,
+            Some(base),
+            Some(base),
+            FULL_REFRESH_TTL,
+            FULL_REFRESH_RETRY,
+            true,
+            true,
+        ),
+        Some(FullRefreshReason::Command),
+        "a forced command wins"
+    );
+    assert_eq!(
+        decide_at(base + secs(10), None, None, Some(base), true),
+        Some(FullRefreshReason::BreakerClosed),
+        "a just-closed breaker keeps its own reason"
+    );
+}
+
+// -- has_songplayer_clips ----------------------------------------------------
+
+#[test]
+fn a_mapping_is_ready_only_with_one_of_songplayer_s_own_tokens() {
+    assert!(
+        !has_songplayer_clips(&parse_composition(&serde_json::json!({"layers": []}))),
+        "an empty composition (Arena still loading) is not ready"
+    );
+    assert!(
+        !has_songplayer_clips(&parse_composition(&composition_with(&[
+            "#timer",
+            "#bible-verse"
+        ]))),
+        "the operator's own tokens alone are not ready"
+    );
+    for token in crate::resolume::SONGPLAYER_TOKENS {
+        assert!(
+            has_songplayer_clips(&parse_composition(&composition_with(&["#timer", token]))),
+            "{token} alone makes the mapping ready"
+        );
+    }
+}
+
+// -- the driver over wiremock ------------------------------------------------
+
+/// A composition that never gets SongPlayer's clips (only the operator's own
+/// tokens), polled for 5 minutes of ~10 s ticks: 1 startup fetch + 11 fast
+/// fetches (10–110 s) + 3 in the 60 s retry window (170, 230, 290 s) = 15,
+/// against 31 if every tick fetched. The design bound is 12 + 3 after startup.
+#[tokio::test]
+async fn a_composition_that_never_loads_is_fetched_15_times_in_five_minutes() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(composition_with(&["#timer", "#bible-verse"])),
+        )
+        .mount(&server)
+        .await;
+    let (tx, mut rx) = broadcast::channel(16);
+    let mut driver =
+        HostDriver::new("127.0.0.1".into(), server.address().port()).with_recovery_channel(tx);
+    let base = Instant::now();
+
+    for k in 0..=30u64 {
+        driver.on_tick_at(base + secs(10 * k)).await;
+    }
+
+    assert_eq!(
+        composition_fetches(&server).await,
+        15,
+        "1 startup + 11 fast (10..110 s) + 3 retry-window fetches (170, 230, 290 s)"
+    );
+    assert_eq!(
+        drain(&mut rx),
+        0,
+        "a mapping that never gets ready never fires a RecoveryEvent"
+    );
+    assert!(
+        driver.last_full_refresh_ok_at.is_none() && driver.last_full_refresh_ts.is_none(),
+        "no refresh of a not-ready composition counts as successful"
+    );
+}
+
+#[tokio::test]
+async fn a_ready_composition_on_a_clean_start_fires_no_recovery_event() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(composition_with(&[SUBS_TOKEN])))
+        .mount(&server)
+        .await;
+    let (tx, mut rx) = broadcast::channel(16);
+    let mut driver =
+        HostDriver::new("127.0.0.1".into(), server.address().port()).with_recovery_channel(tx);
+    let base = Instant::now();
+
+    driver.on_tick_at(base).await;
+
+    assert_eq!(
+        driver.last_full_refresh_ok_at,
+        Some(base),
+        "a ready startup refresh is a success, stamped on the tick's clock"
+    );
+    assert_eq!(
+        drain(&mut rx),
+        0,
+        "nothing was lost, so a clean ready start re-pushes nothing"
+    );
+}
+
+/// The ready refresh comes after a failure (e.g. a forced RefreshMapping
+/// while the last probe had failed): `apply_outcome` fires its RecoveryEvent,
+/// and the ready transition must not fire a second one. Two re-pushes would
+/// restart the title fade (a visible blink).
+#[tokio::test]
+async fn a_ready_refresh_after_a_failure_fires_exactly_one_recovery_event() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(composition_with(&[SUBS_TOKEN])))
+        .mount(&server)
+        .await;
+    let (tx, mut rx) = broadcast::channel(16);
+    let mut driver =
+        HostDriver::new("127.0.0.1".into(), server.address().port()).with_recovery_channel(tx);
+    let base = Instant::now();
+    driver.not_ready_since = Some(base);
+    driver.consecutive_failures = 1;
+
+    driver.refresh_mapping(base + secs(10)).await.unwrap();
+
+    assert!(
+        driver.not_ready_since.is_none(),
+        "the ready refresh ends the not-ready episode"
+    );
+    assert_eq!(
+        drain(&mut rx),
+        1,
+        "one refresh fires exactly one RecoveryEvent"
+    );
+}
+
+/// Arena goes away in the middle of a not-ready episode and comes back with
+/// its composition loaded. The breaker close fires its own RecoveryEvent, and
+/// the engine's re-push lands after the breaker-closed refresh maps the clips.
+/// Opening the breaker ends the episode, so that refresh must not fire a
+/// second RecoveryEvent (a second re-push restarts the title fade).
+#[tokio::test]
+async fn an_outage_during_a_not_ready_episode_fires_one_recovery_event_on_return() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(composition_with(&[SUBS_TOKEN])))
+        .mount(&server)
+        .await;
+    let (tx, mut rx) = broadcast::channel(16);
+    let mut driver =
+        HostDriver::new("127.0.0.1".into(), server.address().port()).with_recovery_channel(tx);
+    let base = Instant::now();
+    driver.not_ready_since = Some(base);
+    for _ in 0..3 {
+        driver.apply_outcome(false);
+    }
+    assert!(
+        driver.circuit_breaker_open,
+        "three failures open the breaker"
+    );
+    assert!(
+        driver.not_ready_since.is_none(),
+        "opening the breaker ends the not-ready episode"
+    );
+
+    driver.on_tick_at(base + secs(100)).await;
+
+    assert!(
+        driver.clip_mapping.contains_key(SUBS_TOKEN),
+        "the breaker-closed refresh maps the loaded clips"
+    );
+    assert_eq!(
+        drain(&mut rx),
+        1,
+        "only the breaker close's RecoveryEvent, no second one from the same return"
+    );
+}
