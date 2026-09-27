@@ -267,3 +267,75 @@ async fn handle_resolume_recovery_reemits_title_for_active_pipeline() {
         "ShowTitle must be re-emitted on Resolume recovery"
     );
 }
+
+/// #217 addendum 2 (review round 2): the song's end-of-song title hide has
+/// already run (its timer task finished). A Resolume recovery then must not
+/// fade the title back in for the song's last seconds and on into the next
+/// song. The driver fires such a recovery when that very HideTitle got a 404
+/// (Arena re-ids its clips on relaunch) and the refresh mapped the new ids;
+/// it retries the hide, and the re-push must not undo it.
+#[tokio::test]
+async fn handle_resolume_recovery_does_not_re_show_a_title_the_song_end_hid() {
+    use std::sync::atomic::Ordering;
+
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (7, 'p', 'u', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized) \
+         VALUES (42, 7, 'abc', 'Song', 'Artist', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (obs_tx, _obs_rx) = broadcast::channel(16);
+    let (resolume_tx, mut resolume_rx) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
+        pool,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
+        resolume_tx,
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
+    engine.ensure_pipeline(7, "SP-fast");
+    // The end-of-song hide timer has fired: its task is finished.
+    let hide = tokio::spawn(async {});
+    let hide_done = hide.abort_handle();
+    hide.await.unwrap();
+    if let Some(pp) = engine.pipelines.get_mut(&7) {
+        pp.state = PlayState::Playing { video_id: 42 };
+        pp.scene_active.store(true, Ordering::Release);
+        pp.title_hide_abort = Some(hide_done);
+    }
+    while resolume_rx.try_recv().is_ok() {}
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    let mut cmds = Vec::new();
+    while let Ok(cmd) = resolume_rx.try_recv() {
+        cmds.push(cmd);
+    }
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, crate::resolume::ResolumeCommand::ShowTitle { .. })),
+        "a title the song end already hid is not re-shown, got {cmds:?}"
+    );
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, crate::resolume::ResolumeCommand::HideSubtitles)),
+        "the subtitle state is still re-sent, got {cmds:?}"
+    );
+}
