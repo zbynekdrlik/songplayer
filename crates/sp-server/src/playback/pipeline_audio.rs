@@ -6,8 +6,9 @@
 //!
 //! - the dedicated OS emit thread, raised to `THREAD_PRIORITY_TIME_CRITICAL`
 //!   (audio-app class) so a heavy child's CPU burst cannot delay the grid;
-//! - the wall-clock sleep-until + ≤ 2 ms spin loop that fires one grid slot
-//!   every 33.333 ms (`WallClock` QPC readings, the 1 ms multimedia timer);
+//! - the wall-clock sleep-until + adaptive 2–6 ms spin (`SpinMargin`) that
+//!   fires one grid slot every 33.333 ms (`WallClock` QPC readings, the 1 ms
+//!   multimedia timer);
 //! - the [`AudioEmitterThread`] guard whose `Drop` signals shutdown, wakes any
 //!   blocked decoder push, and JOINS the thread — MUST run before the
 //!   `FrameSubmitter` (and thus the `NdiSender`) is dropped, since

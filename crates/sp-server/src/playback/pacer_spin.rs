@@ -18,8 +18,8 @@
 //! [`SPIN_YIELD`] instead. A frozen wall then costs ~1 wake-up per ms. The wall
 //! resumes from its frozen value, so the awaited boundary is still ~one slot
 //! ahead, and the wait keeps yielding through that slot too. That boundary goes
-//! out at most ~1 ms after the wall reaches it: the one boundary per hold
-//! without spin precision.
+//! out one yield after the wall reaches it (~1 ms plus the sleep's wake-up
+//! overshoot): the one boundary per hold without spin precision.
 //!
 //! Cross-platform and Linux-tested (`pacer_spin_tests.rs`): `pipeline_paced`
 //! itself is `#[cfg(windows)]` and excluded from the mutation gate.
@@ -47,8 +47,9 @@ pub enum SpinStep {
     Bail,
     /// Short of the boundary within the budget: `std::hint::spin_loop()`.
     Spin,
-    /// Short of the boundary past the budget, because the wall stood still
-    /// (a followed hold, or the slot after it): sleep [`SPIN_YIELD`].
+    /// Short of the boundary past the budget. Only a wall that stood still (a
+    /// followed hold) gets here, and the wait then stays here through the hold
+    /// and the slot after it: sleep [`SPIN_YIELD`].
     Yield,
 }
 
