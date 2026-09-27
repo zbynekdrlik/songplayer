@@ -10,8 +10,8 @@ use super::title;
 
 impl super::PlaybackEngine {
     /// Re-emit current state to a recovered Resolume host: ShowTitle for
-    /// every active playlist inside its title window (the show timer ran, the
-    /// end-of-song hide has not) + the wall's subtitle state (ShowSubtitles for
+    /// every active playlist inside its title window (no pending show timer,
+    /// no finished end-of-song hide) + the wall's subtitle state (ShowSubtitles for
     /// each on-program line, one HideSubtitles when there is none — also
     /// when no SongPlayer playlist is on program).
     pub(crate) async fn handle_resolume_recovery(&self, host: &str) {

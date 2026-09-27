@@ -295,7 +295,7 @@ pub struct HostDriver {
     /// the title fade (#217 review round 1).
     recovery_sent_this_step: bool,
     /// Set by a push answered `404 Not Found` (`note_push_status`), read and
-    /// cleared by `push` (the push step). Atomic because `set_text` /
+    /// cleared by `finish_push` (the end of every push). Atomic because `set_text` /
     /// `set_clip_opacity` take `&self`: the handlers drive them in parallel
     /// (#217 addendum 2).
     stale_id_seen: AtomicBool,

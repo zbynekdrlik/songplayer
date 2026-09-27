@@ -121,7 +121,8 @@ log 14:12:22) until the 300 s TTL.
      RecoveryEvent.
 - **How each push is retried (`retry_push`):**
   - a ShowTitle is NOT retried. The RecoveryEvent's engine re-push shows the
-    title; a second ShowTitle would run another fade from 5 %, the blink the
+    title inside its window (a pending show timer shows it itself); a second
+    ShowTitle would run another fade from 5 %, the blink the
     one-event-per-step rule exists for;
   - a HideTitle is retried AT ONCE (`handlers::hide_title_now`: opacity 0,
     then the text cleared). The relaunched clip holds whatever Arena's saved
@@ -146,7 +147,8 @@ log 14:12:22) until the 300 s TTL.
   "one mark per 60 s" guard held it back, review round 1). The hold is not
   per id: a relaunch inside the 60 s after a refused-id refresh waits for
   the hold to end (no episode opens during the hold, so no 2 s ticks help;
-  only the TTL or a breaker close would refresh sooner) — only when an id is
+  only a breaker close would refresh sooner; the refused-id refresh itself
+  restamped the TTL clock) — only when an id is
   refused, which the steady state never has.
 - **Logs.** The stale-map WARN is logged only when the refresh runs; a 404
   that the retry window holds, or on a refused id, logs at debug (a lyric
@@ -251,6 +253,15 @@ current subtitle state of the playing, on-program pipelines:
     was skipped against an empty or evicted map) gets no re-show and no hide.
     Arena's restored title stays until the next song's ShowTitle
     (Started + 1.5 s).
+  - Residual (review round 4, a follow-up for the main session): the window
+    is read from the engine's timer handles, and cannot see what is already
+    queued at the driver. Between Ended / a skip and the next Started a
+    recovery re-shows the NEXT song's title early (then its show timer fades
+    again); a ShowTitle or scene-off HideTitle queued behind the 404 refresh
+    still runs as sent (a double fade, or a hide from full opacity on the
+    relaunched clip). The root fix is a driver that owns the title's on-air
+    state. The OBS scene-on re-push (`push_title_for_playing`) applies no
+    window at all (older, outside this path).
 
 Otherwise a stale text Arena restored from its saved composition stays until
 the next line change, for the whole song, or over the next camera shot.

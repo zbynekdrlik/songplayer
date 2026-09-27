@@ -15,7 +15,7 @@ impl HostDriver {
     /// Arena gives every clip and text param a new id on each relaunch
     /// (`#sp-subs` 1790510617970 → 1790518489097 on the box), so the clip map
     /// is stale. Called at the one push choke point (`set_text` /
-    /// `set_clip_opacity`); `push` reads and clears it.
+    /// `set_clip_opacity`); `finish_push` reads and clears it.
     pub(super) fn note_push_status(&self, status: reqwest::StatusCode) {
         if status == reqwest::StatusCode::NOT_FOUND {
             self.stale_id_seen.store(true, Ordering::Relaxed);
@@ -99,7 +99,8 @@ impl HostDriver {
 
     /// The one retry after a refresh that mapped SongPlayer's clips anew. That
     /// refresh has just fired this step's RecoveryEvent, whose engine re-push
-    /// shows the title and the current line after the step. So:
+    /// sends the current line and, inside the title window, the title after
+    /// the step (a pending show timer shows the title itself). So:
     ///
     /// - a ShowTitle is left to that re-push: a second ShowTitle restarts the
     ///   title fade, the blink the one-event-per-step rule prevents;
