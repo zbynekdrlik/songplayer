@@ -542,7 +542,7 @@ async fn a_msgpack_only_client_is_refused_and_a_client_without_subprotocol_is_se
         .await
         .unwrap()
     {
-        Err(tokio_tungstenite::tungstenite::Error::Http(resp)) => {
+        Err(Error::Http(resp)) => {
             assert_eq!(resp.status().as_u16(), 400);
         }
         other => panic!(
