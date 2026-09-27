@@ -182,6 +182,9 @@ async fn a_404_on_a_title_push_is_re_pushed_by_the_recovery_event_not_retried() 
         composition(&[(TITLE_TOKEN, 200, 1900)]),
     )
     .await;
+    // The startup state is Unknown, so the ShowTitle is a Replace: its cut to
+    // opacity 0 answers, and the text PUT on the dead param is the 404.
+    put_answers(&server, "/api/v1/composition/clips/by-id/100", 204).await;
     put_answers(&server, "/api/v1/parameter/by-id/900", 404).await;
     put_answers(&server, "/api/v1/parameter/by-id/1900", 204).await;
     put_answers(&server, "/api/v1/composition/clips/by-id/200", 204).await;

@@ -7,9 +7,11 @@
 use std::sync::atomic::Ordering;
 
 use super::pipeline::PipelineEvent;
+use super::state::PlayEvent;
 use super::title::TitleClock;
 use super::*;
 use crate::resolume::ResolumeCommand;
+use sp_core::playback::PlaybackMode;
 use sp_core::ws::ServerMsg;
 use tokio::sync::{broadcast, mpsc};
 
@@ -144,13 +146,15 @@ async fn test_engine(
         .await
         .unwrap();
         sqlx::query(
-            "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized) \
-             VALUES (?, ?, ?, ?, 'Artist', 1)",
+            "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized, \
+             file_path, audio_file_path) VALUES (?, ?, ?, ?, 'Artist', 1, ?, ?)",
         )
         .bind(video_id)
         .bind(playlist_id)
         .bind(format!("yt{video_id}"))
         .bind(song)
+        .bind(format!("/tmp/sp-test-{video_id}_video.mp4"))
+        .bind(format!("/tmp/sp-test-{video_id}_audio.flac"))
         .execute(&pool)
         .await
         .unwrap();
@@ -371,6 +375,77 @@ async fn title_timers_are_armed_only_for_instants_still_ahead() {
     engine.arm_title_timers(7, now);
     assert_eq!(timers(&engine), (true, true), "both ahead: both armed");
     engine.pipelines.get_mut(&7).unwrap().cancel_title_timers();
+}
+
+/// Review round 2 (🔵): arming replaces the timers it finds, so a caller
+/// that did not cancel first never leaves an old timer to fire later (a stale
+/// HideTitle into the next song).
+#[tokio::test]
+async fn arming_the_title_timers_aborts_the_ones_it_replaces() {
+    let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
+    let now = tokio::time::Instant::now();
+    let hour = std::time::Duration::from_secs(3600);
+    engine.pipelines.get_mut(&7).unwrap().title_clock = Some(TitleClock {
+        video_id: 42,
+        show_at: now + hour,
+        hide_at: Some(now + hour),
+    });
+    engine.arm_title_timers(7, now);
+    let pp = &engine.pipelines[&7];
+    let first = (
+        pp.title_show_abort.clone().expect("show timer"),
+        pp.title_hide_abort.clone().expect("hide timer"),
+    );
+
+    engine.arm_title_timers(7, now);
+
+    // An abort lands on the task's next poll: bounded, it never hangs.
+    for _ in 0..200 {
+        if first.0.is_finished() && first.1.is_finished() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert!(
+        first.0.is_finished() && first.1.is_finished(),
+        "the replaced show and hide timers were aborted"
+    );
+    assert_eq!(timers(&engine), (true, true), "the new ones are armed");
+    engine.pipelines.get_mut(&7).unwrap().cancel_title_timers();
+}
+
+/// Review round 2 (🔵): a song change to the SAME video (a skip in a
+/// single-video playlist, Loop's replay, a re-picked or resumed song, a
+/// Previous) kept the old song's clock until the new `Started`. The title was
+/// named at once, and a scene-on re-armed the old instants. Every Play clears
+/// the clock; the new `Started` fixes the new one.
+#[tokio::test]
+async fn every_play_of_a_song_clears_the_last_song_s_title_clock() {
+    for how in ["skip", "loop", "play video", "previous"] {
+        let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
+        play(&mut engine, 7, 42, Window::Due);
+        match how {
+            "skip" => engine.handle_command(7, PlayEvent::Skip).await,
+            "loop" => {
+                engine
+                    .handle_command(7, PlayEvent::SetMode(PlaybackMode::Loop))
+                    .await;
+                engine.handle_command(7, PlayEvent::VideoEnded).await;
+            }
+            "play video" => engine.handle_play_video(7, 42, None).await,
+            _ => {
+                engine.pipelines.get_mut(&7).unwrap().history.push_back(42);
+                engine.handle_previous(7).await;
+            }
+        }
+        let pp = &engine.pipelines[&7];
+        assert_eq!(
+            pp.state,
+            PlayState::Playing { video_id: 42 },
+            "{how}: the same video plays again"
+        );
+        assert_eq!(pp.title_clock, None, "{how}: the old song's clock is gone");
+    }
 }
 
 /// On a RecoveryEvent the title of an on-program pipeline inside its title
