@@ -247,10 +247,12 @@ pub struct HostDriver {
     /// used for the retry-backoff decision so a failing `/composition` is not
     /// re-fetched on every liveness tick (#157 review).
     last_full_attempt_at: Option<Instant>,
-    /// Whether the last full-refresh ATTEMPT failed (no answer, or a body
-    /// that is not a composition). `decide` takes the NotReady fast path
-    /// only while the last attempt answered: a failing `/composition` is the
-    /// #157 case and keeps the retry window (#217 review round 3).
+    /// Whether the last full-refresh ATTEMPT failed: a DNS/transport/timeout
+    /// error or a body that is not JSON (`fetch_mapping_inner` does not check
+    /// the status, so a non-2xx JSON body counts as answered). `decide` takes
+    /// the NotReady fast path only while the last attempt answered: a failing
+    /// `/composition` is the #157 case and keeps the retry window (#217
+    /// review round 3).
     last_full_attempt_failed: bool,
     /// Monotonic instant of the first refresh of the current NOT READY
     /// episode: `/composition` answered with none of SongPlayer's clips,
@@ -648,9 +650,16 @@ impl HostDriver {
                 // after the step, against the ready map, so one step never
                 // fires twice: a second ShowTitle restarts the title fade.
                 self.apply_outcome(true);
-                if became_ready && !self.recovery_sent_this_step {
-                    self.send_recovery_event();
-                    info!(host = %self.host, "Resolume clip mapping ready — RecoveryEvent fired");
+                if became_ready {
+                    let fire = !self.recovery_sent_this_step;
+                    if fire {
+                        self.send_recovery_event();
+                    }
+                    info!(
+                        host = %self.host,
+                        recovery_event = fire,
+                        "Resolume clip mapping ready — the not-ready episode is over"
+                    );
                 }
                 Ok(())
             }
