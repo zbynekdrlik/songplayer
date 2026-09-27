@@ -24,11 +24,12 @@
 //! #215: a [`ProgramJob::Mix`] (one boundary inside a transition window) is
 //! crossfaded here, on the sender thread: the audio per sample with the
 //! equal-power curve, the picture blended into a `frame_pool` buffer. When the
-//! two layouts differ, the outgoing picture is first fitted into the incoming
-//! layout (`program_transition::FitPlan`, one plan per window, into a reused
-//! scratch buffer), so it always dissolves. `start_program` also starts the
-//! OBS-follow task (`program_follow.rs`) and hands the bus to the engine for
-//! the deferred scene-go-off pause.
+//! two layouts differ, the outgoing picture is fitted into the incoming
+//! layout (`program_transition::FitPlan`, one plan per window), so it always
+//! dissolves. The fit and the blend are one pass, painted in row bands on
+//! helper threads (`program_transition::mix_nv12_into`, #215 addendum 3).
+//! `start_program` also starts the OBS-follow task (`program_follow.rs`) and
+//! hands the bus to the engine for the deferred scene-go-off pause.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -47,7 +48,8 @@ use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
 use crate::playback::program_transition::{
-    AudioFormat, FitPlan, Layout, MixJob, black_nv12_into, blend_nv12_into, mix_audio_block,
+    AudioFormat, FitPlan, Layout, MixJob, Outgoing, black_nv12_into, mix_audio_block, mix_bands,
+    mix_nv12_into,
 };
 use crate::playback::submitter::FrameSubmitter;
 use crate::playback::vban_out::{VbanBlock, VbanOut, run_vban_config_task};
@@ -91,9 +93,9 @@ pub struct ProgramOutput<B: NdiBackend> {
     fit: Option<FitPlan>,
     /// Plans built so far (one per window whose pictures differ in size).
     fit_plans: u64,
-    /// The fitted outgoing picture, reused boundary after boundary (its
-    /// capacity is kept, #147 round 10).
-    fitted: Vec<u8>,
+    /// #215 addendum 3: the row bands (threads) a mixed picture is painted in
+    /// (`mix_bands` of the box's logical processors).
+    mix_bands: usize,
     /// The run of mixed boundaries being sent (a window), logged once when
     /// the next unmixed boundary ends it.
     mix_run: MixRun,
@@ -101,8 +103,9 @@ pub struct ProgramOutput<B: NdiBackend> {
 
 /// #215: one run of mixed boundaries as the `SP-program` sender saw it: how
 /// many, how many fitted a differently sized outgoing picture, and the worst
-/// time the picture (fit + blend) took on this thread — the cost the review
-/// asked to see on the box, next to `health.coalesced`.
+/// time the picture (the fit + blend, all its row bands) took, measured on
+/// this thread — the cost the review asked to see on the box, next to
+/// `health.coalesced`.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct MixRun {
     pub(crate) boundaries: u64,
@@ -147,7 +150,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             spc,
             fit: None,
             fit_plans: 0,
-            fitted: Vec::new(),
+            mix_bands: mix_bands(crate::lyrics::heavy_slot::logical_cores()),
             mix_run: MixRun::default(),
         }
     }
@@ -252,9 +255,11 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 
     /// #215: the picture of a window boundary, in the incoming side's layout:
-    /// both pictures blended into a pooled buffer, the outgoing one first
-    /// fitted into that layout when the two differ ([`FitPlan`]). A missing
-    /// side is the NV12 black in the present side's exact layout
+    /// both pictures blended into a pooled buffer, the outgoing one fitted
+    /// into that layout as it is blended when the two differ ([`FitPlan`]).
+    /// One pass, in `mix_bands` row bands, straight into the pooled buffer
+    /// (`mix_nv12_into`, #215 addendum 3: no fitted scratch). A missing side
+    /// is the NV12 black in the present side's exact layout
     /// (`black_nv12_into`). `None` when neither side is here.
     pub(crate) fn mix_picture(&mut self, mix: &MixJob) -> Option<(Layout, SharedFrame)> {
         let present = Layout::of(mix.to.as_ref().or(mix.from.as_ref())?);
@@ -267,10 +272,16 @@ impl<B: NdiBackend> ProgramOutput<B> {
             |job: &crate::playback::submit_handoff::SubmitJob| (Layout::of(job), job.video.clone());
         let from = mix.from.as_ref().map_or_else(standby, side);
         let to = mix.to.as_ref().map_or_else(standby, side);
-        let weight = mix.weight_q8();
+        let (weight, bands) = (mix.weight_q8(), self.mix_bands);
         let mut out = sp_decoder::frame_pool::take(to.0.len);
         if from.0 == to.0 {
-            blend_nv12_into(&from.1, &to.1, weight, &mut out);
+            mix_nv12_into(
+                Outgoing::Same(to.0, &from.1),
+                &to.1,
+                weight,
+                bands,
+                &mut out,
+            );
         } else {
             let plan = match self.fit.take() {
                 Some(plan) if plan.fits(from.0, to.0) => plan,
@@ -285,9 +296,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
                     FitPlan::new(from.0, to.0)
                 }
             };
-            self.fitted.clear();
-            plan.apply(&from.1, &mut self.fitted);
-            blend_nv12_into(&self.fitted, &to.1, weight, &mut out);
+            let outgoing = Outgoing::Fitted(&plan, &from.1);
+            mix_nv12_into(outgoing, &to.1, weight, bands, &mut out);
             self.fit = Some(plan);
             self.mix_run.fitted += 1;
         }
@@ -468,9 +478,14 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
                     return;
                 }
             };
-            info!(ndi_name = PROGRAM_NDI_NAME, "program output thread started");
             let mut out = ProgramOutput::new(sender, PROGRAM_STANDBY_W, PROGRAM_STANDBY_H)
                 .with_vban(bus.vban().clone());
+            // #215 addendum 3: how many threads paint a mixed picture.
+            let mix_bands = out.mix_bands;
+            info!(
+                ndi_name = PROGRAM_NDI_NAME,
+                mix_bands, "program output thread started"
+            );
             let mut wall = WallClock::system();
             run_program_loop(&mut out, &bus, &mut wall);
         });

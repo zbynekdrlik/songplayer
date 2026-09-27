@@ -7,6 +7,7 @@ paths:
   - "crates/sp-server/src/playback/program_output*.rs"
   - "crates/sp-server/src/playback/pacer_tests_live.rs"
   - "crates/sp-server/src/playback/nv12_fit.rs"
+  - "crates/sp-server/src/playback/nv12_mix*.rs"
   - "crates/sp-server/src/api/program*.rs"
   - "sp-ui/src/components/program_control.rs"
   - "sp-ui/src/components/settings_form.rs"
@@ -174,9 +175,10 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
 - Picture: Q8 weight `w = round(256 · (k + ½)/n)`, blended
   `(f·(256 − w) + t·w + 128) >> 8` on Y and UV alike into a `frame_pool`
   buffer, always in the INCOMING side's layout. When the two layouts (width,
-  height, stride, length) differ, the outgoing picture is first fitted into
-  the incoming one (#215 addendum A) — there is no midpoint cut any more:
-  - `FitPlan` (`fit_nv12_into` is its one-shot form) places the picture with
+  height, stride, length) differ, the outgoing picture is fitted into the
+  incoming one as it is blended (#215 addendum A; one pass since addendum 3)
+  — there is no midpoint cut any more:
+  - `FitPlan` (test-only `fit_nv12_into` is its one-shot form) places the picture with
     `nv12_fit::aspect_fit` — the SAME placement the #178 preview letterbox
     (`preview_stream::placement_for`) uses: each axis the destination capped by
     the aspect-scaled other axis, floored to even, centred on even offsets (a
@@ -188,15 +190,60 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     half-resolution chroma each on their own grid, clamped at the edges;
   - the column taps are built once per pair of layouts: `ProgramOutput` keeps
     the plan (`fit`, `fit_plans` counts builds) while the pair stays the same,
-    fits into a reused scratch `Vec` (`fitted`), and logs one DEBUG line per
-    plan naming both layouts;
+    and logs one DEBUG line per plan naming both layouts. The plan is ALL it
+    keeps: there is no fitted scratch buffer any more (addendum 3);
   - a source or destination that is not whole NV12 for its layout gives the
-    black canvas alone, never a panic (a zero-size one simply draws nothing);
-  - the cost per mixed boundary is the black canvas, the fit and the blend,
-    each a full pass over the destination; if the box's `max_picture_us`
-    reads high, fuse the fit into the blend and paint only the bars.
-  The cost is one bilinear fit per mixed boundary on the program thread (≤ 9
-  for 300 ms).
+    black canvas alone, never a panic (a zero-size one simply draws nothing,
+    and a zero-stride destination is the canvas too).
+- **The fit + blend is ONE fused pass in K row bands (#215 addendum 3, design
+  record 5858472395, `nv12_mix.rs` — a child module of `program_transition`,
+  so it reads `FitPlan`'s private rectangle and taps).** Box run 2 measured
+  ~56 ms per 2560×1440 fitted boundary (canvas + fit into a scratch + blend,
+  three passes on one thread) against the 33.3 ms slot.
+  - `mix_nv12_into(Outgoing::Same(layout, from) | Outgoing::Fitted(plan,
+    src), to, w, K, out)` computes every byte ONCE as `blend(fit(from)[p],
+    to[p], w)`; the fitted byte is never stored. It is BIT-IDENTICAL to
+    `FitPlan::apply` then `blend_nv12_into` (the same `tap` / `bilinear`, the
+    same Q8 rounding). Those two and `fit_nv12_into` are `#[cfg(test)]` now:
+    the reference the kernel is pinned against. Change the fit or the blend
+    in BOTH places, or the equality tests fail.
+  - The rows are shared out per plane in K contiguous bands (`band_bounds`):
+    luma rows `dh·i/K .. dh·(i+1)/K` and chroma rows `ch·i/K .. ch·(i+1)/K`.
+    The last band also gets the bytes past the chroma plane, and every offset
+    is capped at the mixed length. Band 0 runs on the `SP-program` thread;
+    bands 1..K run on named `program-mix` scoped threads
+    (`std::thread::scope`, spawned per mixed boundary, no pool, no new
+    dependency). A helper that cannot start has its band painted inline,
+    with a WARN. The return value is the number of threads that painted; the
+    tests use it as the proof of parallelism.
+  - K = `mix_bands(heavy_slot::logical_cores())` = clamp(cpus / 4, 1, 6):
+    6 on the 24-thread box, 1 on a 4-vCPU CI runner (tests set
+    `out.mix_bands` themselves). The `program output thread started` INFO
+    line prints `mix_bands`.
+  - The run painter takes ANY byte run (a run may start mid-row): it cuts
+    the run at the plane edge, then `plane_run` paints the rest of the first
+    row and then whole rows as `chunks_mut(stride)`. So the picture never
+    depends on K or on the band edges, and every step paints at least one
+    byte: a mutated row length panics or moves the picture, it never stalls
+    (review round 1: a hand-advanced cursor hung on a `%`→`+` mutant, which
+    is a cargo-mutants TIMEOUT and a red gate).
+  - The only large buffer is the pooled output, `resize`d once (a memset:
+    the bands need disjoint `&mut` slices in safe code). Per boundary there
+    are also K−1 scoped thread spawns (a name `String` and a stack each) and
+    a few small `Vec`s (the band offsets, runs and slots).
+  - A helper that fails to start WARNs once per failed band. That is at most
+    K−1 = 5 per boundary and 300 boundaries per window, and it only happens
+    when the OS cannot create a thread at all, so each failed band gets its
+    own line and there is no rate limiter.
+  - Box run 3: read the `max_picture_us` TAIL, not a mean. On Windows each
+    of the K−1 spawns per boundary runs every loaded DLL's thread attach
+    under the loader lock (NDI, Media Foundation, WebView2). If the target is
+    missed, time the spawns separately before touching the kernel (review
+    round 2).
+  - `max_picture_us` is unchanged: the wall time of `mix_picture` (all
+    bands) on the `SP-program` thread. Box run 3 target: ≤ 15 000 at
+    2560×1440 with `fitted=9` and 0 late drops, for a 300 ms fade and a 1 s
+    fade (30 boundaries).
 - `mix_audio_block` collects its samples instead of pre-sizing the `Vec`: a
   capacity formula is an equivalent mutant.
 
@@ -332,7 +379,13 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   it reads `core.pending` / `core.from_pending` directly),
   `pacer_tests_live.rs` (which pacer pairs are `emit` vs `emit_standby`, and
   the B1 pin), `program_output_tests.rs` (the mixed
-  boundary on the mock sender, the fitted blend, the plan reuse),
+  boundary on the mock sender, the fitted blend, the plan reuse at every
+  band count), `nv12_mix_tests.rs` (addendum 3: the fused kernel against
+  the two-pass reference on fixed-seed SplitMix64 frames at every weight
+  and K = 1..=6, odd and short row counts, a sweep of small and broken
+  layouts, arbitrary run cuts, the exact `band_bounds`, K threads for K
+  bands; the `blend` / `fitted` helpers of `program_transition_tests.rs`
+  also run the kernel, so every blend and fit pin pins it),
   `scene_off_tests.rs`, `program_follow_tests.rs`
   (pure + `Follow`), `program_follow_tests_task.rs` (the task end to end) and
   `program_follow_tests_loop.rs` (`FollowLoop`'s steps awaited one by one; the
@@ -393,5 +446,6 @@ HOLDS those boundaries (the outgoing song on program at full level) and the
 fade starts on the first live pair. The wait shows up as
 `cue_wait_boundaries` (~10–11, see B1) and must stay under the 15-boundary
 bound (`cue_timeouts` +0). During a 2560×1440 ↔ 1920×1080 fade also read the
-sender's `max_picture_us` line (well under one 33 ms slot) and
-`health.coalesced` +0.
+sender's `max_picture_us` line (≤ 15 000 since addendum 3; run 2 read ~56 000
+before it) and `health.coalesced` +0, for a 300 ms AND a 1 s fade, with 0
+late drops.
