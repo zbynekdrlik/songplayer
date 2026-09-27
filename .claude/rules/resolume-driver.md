@@ -44,7 +44,17 @@ What the driver does now (`refresh_mapping(now)`):
   pre-restart stamp, and a TTL reason would wait out the retry window.
 - The refresh that finds a SongPlayer token clears `not_ready_since` and fires
   a `RecoveryEvent`. The engine's `handle_resolume_recovery` re-pushes the
-  title and the current display line.
+  title and the current subtitle state.
+- **An evicted map is not ready too.** Opening the breaker empties
+  `clip_mapping` and clears `not_ready_since` (the outage ends any episode).
+  The probe that closes the breaker sets `not_ready_since = now`
+  (`on_tick_at`).
+  - Why: `decide` applies the 60 s retry backoff to `BreakerClosed` too. A
+    breaker-closed refresh held back by it (Arena back less than 60 s after
+    the last attempt) would otherwise leave the empty map looking like the
+    steady state until the TTL (review round 2).
+  - The relaunch gets a FRESH 120 s fast window from the close, not the tail
+    of an old episode.
 
 ## RecoveryEvent: one per driver step
 
@@ -64,10 +74,9 @@ refresh.
 - **Rejected guard:** `consecutive_failures > 0` cannot be the guard. The
   probe resets the counter before the refresh runs, so it missed the
   failed-probe-then-ready tick (review round 1, 🔴).
-- **Opening the breaker clears `not_ready_since`.** A relaunch whose
-  composition is still loading then gets a FRESH 120 s fast window from the
-  breaker-closed refresh. The tail of an old episode would give only the
-  60 s retry.
+- **The breaker close:** the probe fires its event (`was_failing`), and the
+  breaker-closed refresh in the same tick that finds the clips does not fire
+  a second one.
 - **Counting events in tests:** the event is broadcast synchronously inside
   the driver call. Count with `try_recv` right after the `.await` (see
   `drain` in `driver_not_ready_tests.rs`).
@@ -83,10 +92,16 @@ through the `last_resolume_subtitles_signature` dedup in
 `playback/position_update.rs`, so a re-push is always delivered.
 
 The dedup DOES record a push the driver skipped against an empty clip map
-("no Resolume subtitle clips found … skipping push"). So recovery must re-send
-the full current state: `ShowSubtitles` for a line, and `HideSubtitles` when
-the display plan is blank. Otherwise a stale text Arena restored from its
-saved composition stays until the next line change.
+("no Resolume subtitle clips found … skipping push"), and the song-start
+`clear_lyrics_display` hide is never re-sent. So recovery re-sends the full
+current subtitle state of every playing, on-program pipeline:
+
+- `ShowSubtitles` when the display plan has a line at the cached position;
+- `HideSubtitles` when the plan is blank there, OR the song has no
+  `lyrics_state`.
+
+Otherwise a stale text Arena restored from its saved composition stays until
+the next line change, or for the whole song.
 
 ## Testing the driver on the no-compile box
 
