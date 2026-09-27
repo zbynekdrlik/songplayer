@@ -10,7 +10,8 @@ use super::title;
 
 impl super::PlaybackEngine {
     /// Re-emit current state to a recovered Resolume host: ShowTitle for
-    /// every active playlist + the wall's subtitle state (ShowSubtitles for
+    /// every active playlist whose end-of-song title hide has not run yet +
+    /// the wall's subtitle state (ShowSubtitles for
     /// each on-program line, one HideSubtitles when there is none — also
     /// when no SongPlayer playlist is on program).
     pub(crate) async fn handle_resolume_recovery(&self, host: &str) {
@@ -26,13 +27,23 @@ impl super::PlaybackEngine {
             if !pp.scene_active.load(Ordering::Acquire) {
                 continue;
             }
-            if title::push_title(
-                &self.pool,
-                self.obs_cmd_tx.as_ref(),
-                &self.resolume_tx,
-                video_id,
-            )
-            .await
+            // The song's end-of-song title hide already ran (its timer task
+            // finished): re-showing the title would undo it for the song's
+            // last seconds and carry it into the next song. A HideTitle that
+            // 404'd on a stale clip map ends in exactly this recovery
+            // (#217 addendum 2).
+            let title_hidden = pp
+                .title_hide_abort
+                .as_ref()
+                .is_some_and(|hide| hide.is_finished());
+            if !title_hidden
+                && title::push_title(
+                    &self.pool,
+                    self.obs_cmd_tx.as_ref(),
+                    &self.resolume_tx,
+                    video_id,
+                )
+                .await
             {
                 info!(
                     playlist_id,
