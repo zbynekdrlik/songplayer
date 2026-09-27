@@ -67,7 +67,8 @@ pub const MAX_MESSAGE_BYTES: usize = 1_048_576;
 /// At most this many unsupported request types are remembered (client-chosen
 /// strings on an open LAN surface must stay bounded).
 pub const MAX_UNSUPPORTED_LISTED: usize = 64;
-/// Client-chosen request types are stored clipped to this many characters.
+/// Client-chosen strings (request types, scene names) are stored and logged
+/// clipped to this many characters (`clip`).
 pub const MAX_REQUEST_TYPE_CHARS: usize = 64;
 
 /// The stored remote-control settings.
@@ -137,6 +138,7 @@ pub struct LastRequest {
 /// The outcome of the last remote `SetCurrentProgramScene`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RemoteCut {
+    /// The scene pressed, clipped to 64 characters (a client-chosen string).
     pub scene: String,
     /// `playlist` / `input` / `keep` (`map::SceneAction::label`).
     pub action: &'static str,
@@ -145,7 +147,7 @@ pub struct RemoteCut {
     /// Why nothing was cut (`not_switched`, `input_inactive`,
     /// `persist_failed`), or `lookup_failed` when the scene lookup got no
     /// answer (a cut to "OBS manuál", or keep when the input is not a
-    /// source). The scene name is clipped to 64 characters.
+    /// source).
     pub reason: Option<&'static str>,
     /// The boundary the cut lands on (`GET /api/v1/program`'s own field).
     pub cut_boundary_100ns: Option<i64>,

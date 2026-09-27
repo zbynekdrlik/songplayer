@@ -159,10 +159,15 @@ not forwarded: the cut is by scene name. Companion always sends the name.
   - client-chosen strings (request types, scene names) are clipped to 64
     characters in telemetry and logs (`clip`). The forward itself uses the
     full name.
-- Testing the timeout without a wall-time window: a LATER client that never
-  identifies is the witness. Its close proves the earlier client's deadline
-  passed, and the identified earlier client must still be served
-  (`an_identified_client_outlives_the_identify_timeout`).
+- Testing the timeout without a wall-time window that correct code can fail:
+  - a LATER client that never identifies is the witness. Its close, or its
+    dropped handshake, proves the earlier client's deadline passed, and the
+    identified earlier client must still be served
+    (`an_identified_client_outlives_the_identify_timeout`);
+  - on a short-deadline rig every connect / identify is RETRIED when the
+    deadline wins first (`connect_in_time`, `identified_in_time`, bounded by
+    the test timeout). A dropped handshake or a 4007 there is correct
+    behaviour under a stall, not a failure.
 - `GET /api/v1/program` → `remote {enabled, port, auth, listening, error,
   clients, requests, last_request, last_remote_cut, unsupported_requests}`.
   `enabled` / `port` / `auth` come from the STORED settings, so a save shows

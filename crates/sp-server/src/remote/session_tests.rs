@@ -217,6 +217,74 @@ async fn next_close(ws: &mut Client) -> (u16, String) {
     }
 }
 
+/// One WebSocket connect attempt (JSON subprotocol) bounded by `deadline`:
+/// `None` when the server dropped the handshake — a short-deadline rig does
+/// that, correctly, when a stall delays the handshake past its deadline.
+async fn try_connect(addr: SocketAddr, deadline: tokio::time::Instant) -> Option<Client> {
+    let mut req = format!("ws://{addr}").into_client_request().unwrap();
+    req.headers_mut().insert(
+        "Sec-WebSocket-Protocol",
+        HeaderValue::from_static("obswebsocket.json"),
+    );
+    match tokio::time::timeout_at(deadline, tokio_tungstenite::connect_async(req)).await {
+        Ok(Ok((ws, _))) => Some(ws),
+        Ok(Err(_)) => None,
+        Err(_) => panic!("no handshake answer within the test timeout"),
+    }
+}
+
+/// Connect until a handshake lands (short-deadline rigs), bounded by TIMEOUT.
+async fn connect_in_time(addr: SocketAddr) -> Client {
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no handshake landed before the rig's deadline"
+        );
+        if let Some(ws) = try_connect(addr, deadline).await {
+            return ws;
+        }
+    }
+}
+
+/// Connect AND identify on a short-deadline rig, retrying an attempt the rig's
+/// deadline closed first (correct code under a stall), bounded by TIMEOUT.
+async fn identified_in_time(addr: SocketAddr) -> Client {
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "never identified before the rig's deadline"
+        );
+        let mut ws = connect_in_time(addr).await;
+        next_json(&mut ws).await; // Hello, always sent before any close
+        let identify = json!({ "op": 1, "d": { "rpcVersion": 1, "eventSubscriptions": 0 } });
+        let _ = ws.send(Message::Text(identify.to_string().into())).await;
+        match close_or_message(&mut ws).await {
+            Ok(msg) if msg["op"] == 2 => return ws,
+            Err(Some(4007)) => {}
+            other => panic!("unexpected answer to Identify: {other:?}"),
+        }
+    }
+}
+
+/// The next message (`Ok`), or the end of the session (`Err` with the close
+/// code, `None` when the connection just ended).
+async fn close_or_message(ws: &mut Client) -> Result<Value, Option<u16>> {
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        let next = tokio::time::timeout_at(deadline, ws.next())
+            .await
+            .expect("nothing within the timeout");
+        match next {
+            Some(Ok(Message::Text(text))) => return Ok(serde_json::from_str(&text).unwrap()),
+            Some(Ok(Message::Close(frame))) => return Err(frame.map(|f| u16::from(f.code))),
+            Some(Ok(_)) => {}
+            Some(Err(_)) | None => return Err(None),
+        }
+    }
+}
+
 /// Read until the session ends: the close code the server sent, `None` when
 /// the connection just ended (or failed).
 async fn close_code_at_end(ws: &mut Client) -> Option<u16> {
@@ -402,7 +470,7 @@ async fn protocol_violations_close_with_the_obs_codes() {
 #[tokio::test]
 async fn a_client_that_never_identifies_is_closed_after_the_identify_timeout() {
     let rig = rig_full(None, true, Duration::from_millis(300)).await;
-    let mut ws = connect(rig.addr).await;
+    let mut ws = connect_in_time(rig.addr).await;
     next_json(&mut ws).await;
     let (code, reason) = next_close(&mut ws).await;
     assert_eq!(code, 4007);
@@ -413,14 +481,16 @@ async fn a_client_that_never_identifies_is_closed_after_the_identify_timeout() {
 #[tokio::test]
 async fn an_identified_client_outlives_the_identify_timeout() {
     // No wall-time window: a LATER client that never identifies is the
-    // witness. Its deadline is after A's, so once it is closed, A's deadline
-    // has passed too — and A must still be served.
-    let rig = rig_full(None, true, Duration::from_secs(2)).await;
-    let mut a = connect(rig.addr).await;
-    hello_identify(&mut a, 0).await;
-    let mut witness = connect(rig.addr).await;
-    next_json(&mut witness).await;
-    assert_eq!(next_close(&mut witness).await.0, 4007);
+    // witness. Its deadline is after A's, so once it is closed (or its
+    // handshake dropped), A's deadline has passed too — and A must still be
+    // served. A's own attempts are retried if a stall lets the deadline win.
+    let rig = rig_full(None, true, Duration::from_millis(500)).await;
+    let mut a = identified_in_time(rig.addr).await;
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    if let Some(mut witness) = try_connect(rig.addr, deadline).await {
+        next_json(&mut witness).await;
+        assert_eq!(next_close(&mut witness).await.0, 4007);
+    }
     let d = request(&mut a, "GetStudioModeEnabled", None).await;
     assert_eq!(d["requestStatus"]["code"], 100);
     wait_for("only the identified client is left", || {
@@ -742,6 +812,20 @@ async fn an_unknown_scene_passes_cg_obs_error_through_and_keeps_the_program() {
 }
 
 #[tokio::test]
+async fn a_long_scene_name_is_forwarded_whole_and_recorded_clipped() {
+    let rig = rig().await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    let long = "S".repeat(100);
+    let d = press(&mut ws, &long).await;
+    assert_eq!(d["requestStatus"]["code"], 600);
+    assert_eq!(rig.calls(), vec![format!("SetCurrentProgramScene {long}")]);
+    let cut = rig.remote().last_remote_cut.unwrap();
+    assert_eq!(cut.scene, "S".repeat(64));
+    assert_eq!(cut.reason, Some("not_switched"));
+}
+
+#[tokio::test]
 async fn a_press_without_a_scene_name_is_300_and_not_forwarded() {
     let rig = rig().await;
     let mut ws = connect(rig.addr).await;
@@ -865,4 +949,17 @@ async fn reidentify_changes_the_subscriptions() {
     let ev = next_json(&mut ws).await;
     assert_eq!(ev["op"], 5);
     assert_eq!(ev["d"]["eventData"]["sceneName"], "b");
+
+    // Kept at 4 too (a reset to 0 would drop this event).
+    send_json(&mut ws, json!({ "op": 3, "d": {} })).await;
+    assert_eq!(next_json(&mut ws).await["op"], 2);
+    rig.events
+        .send(raw(
+            "CurrentProgramSceneChanged",
+            json!({ "sceneName": "c" }),
+        ))
+        .unwrap();
+    let ev = next_json(&mut ws).await;
+    assert_eq!(ev["op"], 5);
+    assert_eq!(ev["d"]["eventData"]["sceneName"], "c");
 }
