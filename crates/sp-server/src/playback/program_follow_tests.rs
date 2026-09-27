@@ -651,19 +651,19 @@ async fn missed_events_reread_the_transition_and_catch_up_to_the_program_scene()
         .await;
     // cg OBS switched to sp-fast and to a 1000 ms fade, and its events are
     // among the missed ones: the broadcast keeps ONE event, so three sent
-    // before the task runs again lag it by two, and only the last (a
-    // transition change) is left.
+    // before the task runs again lag it by two. The one left (a transition
+    // change) is older than the re-read, so it is dropped with the rest.
     rig.switch_program_scene("sp-fast");
     rig.raw("SceneItemEnableStateChanged");
     rig.raw("InputVolumeChanged");
     rig.raw("CurrentSceneTransitionChanged");
     assert_eq!(
-        rig.next_requests(4).await,
-        vec![REQUEST, PROGRAM_SCENE, "ScenePlaylists:sp-fast", REQUEST],
-        "the lag re-read the transition and caught up, then the kept event re-read it"
+        rig.next_requests(3).await,
+        vec![REQUEST, PROGRAM_SCENE, "ScenePlaylists:sp-fast"],
+        "the lag re-read the transition once and caught up"
     );
+    rig.source_becomes(7).await;
     let st = rig.bus.status();
-    assert_eq!(st.source, Some(7), "caught up to cg OBS's scene");
     assert_eq!(
         st.transition.active.map(|w| w.n_slots),
         Some(30),
