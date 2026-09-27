@@ -25,12 +25,13 @@ const FULL_REFRESH_TTL: Duration = Duration::from_secs(300); // 5 minutes
 /// ~10 s liveness tick — the retry storm the #157 review caught (#157).
 const FULL_REFRESH_RETRY: Duration = Duration::from_secs(60);
 
-/// How long a NOT READY clip mapping is fetched again on EVERY liveness tick,
-/// counted from the first not-ready refresh. Not ready means `/composition`
-/// answered but carries none of SongPlayer's clips, because Arena's REST
-/// answers before its composition has loaded. After this window the normal
-/// `FULL_REFRESH_RETRY` applies, so a composition that genuinely has no
-/// SongPlayer clips never becomes a 14 MB fetch every 10 s (#217).
+/// How long a NOT READY clip mapping is fetched again on EVERY liveness tick
+/// (while `/composition` answers), counted from the start of the not-ready
+/// episode. Not ready means the map has none of SongPlayer's clips: the
+/// composition answered without them (Arena's REST answers before its
+/// composition has loaded), or the outage evicted the map. After this window
+/// the normal `FULL_REFRESH_RETRY` applies, so a composition that genuinely
+/// has no SongPlayer clips never becomes a 14 MB fetch every 10 s (#217).
 const NOT_READY_FAST_WINDOW: Duration = Duration::from_secs(120);
 
 /// Why a full `/composition` refresh is being performed. Drives the INFO
@@ -50,9 +51,10 @@ pub(crate) enum FullRefreshReason {
     Ttl,
     /// The circuit breaker just closed (Arena recovered) — resync the map once.
     BreakerClosed,
-    /// The last full refresh found none of SongPlayer's clips: Arena's REST
-    /// answers before its composition has loaded. Fetch again until the clips
-    /// appear (#217).
+    /// The clip map has none of SongPlayer's clips: a refresh answered
+    /// without them (Arena's REST answers before its composition has loaded),
+    /// or the outage evicted the map. Fetch again until the clips appear
+    /// (#217).
     NotReady,
 }
 
@@ -254,11 +256,12 @@ pub struct HostDriver {
     /// `/composition` is the #157 case and keeps the retry window (#217
     /// review round 3).
     last_full_attempt_failed: bool,
-    /// Monotonic instant of the first refresh of the current NOT READY
-    /// episode: `/composition` answered with none of SongPlayer's clips,
-    /// because Arena's REST answers before its composition has loaded. `None`
-    /// while the mapping is ready. Drives the `NotReady` refetch; the refresh
-    /// that clears it fires a `RecoveryEvent` (#217).
+    /// Monotonic start of the current NOT READY episode: the first refresh
+    /// whose `/composition` answered with none of SongPlayer's clips (Arena's
+    /// REST answers before its composition has loaded), or the probe that
+    /// closed the breaker (the outage evicted the map). `None` while the
+    /// mapping is ready. Drives the `NotReady` refetch; the refresh that
+    /// clears it fires a `RecoveryEvent` (#217).
     not_ready_since: Option<Instant>,
     /// Whether the current driver step (one liveness tick, one command, or
     /// the startup refresh) has already broadcast a `RecoveryEvent`. The

@@ -110,11 +110,16 @@ through the `last_resolume_subtitles_signature` dedup in
 The dedup DOES record a push the driver skipped against an empty clip map
 ("no Resolume subtitle clips found … skipping push"), and the song-start
 `clear_lyrics_display` hide is never re-sent. So recovery re-sends the full
-current subtitle state of every playing, on-program pipeline:
+current subtitle state of the playing, on-program pipelines:
 
-- `ShowSubtitles` when the display plan has a line at the cached position;
-- `HideSubtitles` when the plan is blank there, OR the song has no
-  `lyrics_state`.
+- `ShowSubtitles` for each one whose display plan has a line at the cached
+  position;
+- ONE `HideSubtitles` only when none of them has a line (a blank plan
+  position, or a song with no `lyrics_state`). The subtitle clips are shared
+  by every on-program playlist, so a blank one must never clear another's
+  line (review round 5; `obs/scene.rs` can keep several active playlists);
+- nothing when no SongPlayer playlist plays on program. Going off program
+  already sent its own hide.
 
 Otherwise a stale text Arena restored from its saved composition stays until
 the next line change, or for the whole song.
