@@ -705,3 +705,75 @@ fn a_waiting_window_cut_after_the_new_boundary_does_not_decide_the_source_on_air
         "X → A and A → D; the replaced Cut and fade never count"
     );
 }
+
+#[test]
+fn a_waiting_window_that_ends_before_a_later_cut_still_opens_on_its_live_pair() {
+    // Review round 5: a later cut freezes only a waiting window whose span
+    // reaches it — the rule `on_air` decides the source on air by. A 1-slot
+    // fade A → B cut on b(7) waits for B (standby pairs until its first live
+    // pair on b(22), the cue's deadline); its latest end is b(23). A runs one
+    // slot ahead, so the cut to C at k = 21 lands on b(24), after that end.
+    // The A → B fade must still open on b(22) (frozen, it would hard-cut A → B
+    // on b(23)), and the fade to C goes out of B.
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_A);
+    assert!(core.set_transition(TransitionSpec::fade(30, SpecSource::Obs)));
+    assert_eq!(core.status().transition.n_slots, 1, "30 ms = one slot");
+    let (fa, fb, fc) = (frame(4, 2), frame(8, 2), frame(6, 2));
+    let mut sent = Vec::new();
+    let mut offered_a = 0;
+    for k in 1..=27 {
+        // A: one pair per boundary, then from b(6) on one slot ahead.
+        let upto = if k <= 5 { k } else { k + 1 };
+        while offered_a < upto {
+            offered_a += 1;
+            core.offer(SRC_A, job(4, &fa, b(offered_a), LEVEL_A));
+        }
+        let pair = if k >= 22 {
+            job(8, &fb, b(k), LEVEL_B)
+        } else {
+            standby(8, &fb, b(k), LEVEL_B)
+        };
+        core.offer(SRC_B, pair);
+        core.offer(SRC_C, job(6, &fc, b(k), 0.3));
+        if k == 5 {
+            assert!(core.cut(SRC_B, b(5) + 5 * MS));
+            assert_eq!(core.status().cut_boundary_100ns, Some(b(7)));
+        }
+        if k == 21 {
+            assert!(core.cut(SRC_C, b(21) + 5 * MS));
+            let st = core.status();
+            assert_eq!(
+                st.cut_boundary_100ns,
+                Some(b(24)),
+                "after the A → B window's latest end, b(23)"
+            );
+            assert_eq!(
+                st.transition
+                    .active
+                    .map(|w| (w.from, w.to, w.start_boundary_100ns)),
+                Some((Some(SRC_A), SRC_B, b(7))),
+                "the A → B fade still waits for its cue"
+            );
+        }
+        sent.extend(take_all(&mut core));
+    }
+    let mut want = run(1..=21, |_| "src 4".to_string());
+    want.extend(one(22, "mix 0/1 4>8"));
+    want.extend(one(23, "src 8"));
+    want.extend(one(24, "mix 0/1 8>6"));
+    want.extend(run(25..=27, |_| "src 6".to_string()));
+    assert_eq!(sent, want, "A → B on B's first live pair, then B → C");
+    let c = core.status().transition.counters;
+    assert_eq!(
+        (
+            c.transitions_done,
+            c.mixed_boundaries,
+            c.side_fills,
+            c.cue_wait_boundaries,
+            c.cue_timeouts
+        ),
+        (2, 2, 0, 0, 0),
+        "both fades mixed their slot; B → C opened live on its cut"
+    );
+}
