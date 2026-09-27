@@ -446,3 +446,50 @@ async fn a_persisted_playlist_restores_whatever_the_input_setting() {
     assert_eq!(restore_selected_source(&state.pool, &bus).await, Some(5));
     assert_eq!(bus.status().source, Some(5));
 }
+
+// ---- #213: the `remote` block (the Companion remote control) ---------------
+
+#[tokio::test]
+async fn the_remote_block_reports_the_stored_settings_and_the_live_state() {
+    let state = test_state().await;
+    let (status, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json["remote"],
+        serde_json::json!({
+            "enabled": false,
+            "port": 4456,
+            "auth": false,
+            "listening": false,
+            "error": null,
+            "clients": 0,
+            "requests": 0,
+            "last_request": null,
+            "last_remote_cut": null,
+            "unsupported_requests": [],
+        })
+    );
+
+    // The obs-websocket spec's example password (the only password in tests).
+    for (key, value) in [
+        ("remote_ws_enabled", "true"),
+        ("remote_ws_port", "4460"),
+        ("remote_ws_password", "supersecretpassword"),
+    ] {
+        crate::db::models::set_setting(&state.pool, key, value)
+            .await
+            .unwrap();
+    }
+    state.program_bus.remote().record_request("GetSceneList");
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(json["remote"]["enabled"], true);
+    assert_eq!(json["remote"]["port"], 4460);
+    assert_eq!(json["remote"]["auth"], true);
+    assert_eq!(json["remote"]["requests"], 1);
+    assert_eq!(
+        json["remote"]["last_request"]["request_type"],
+        "GetSceneList"
+    );
+    // The password itself is never part of the answer.
+    assert!(!json.to_string().contains("supersecretpassword"));
+}

@@ -176,6 +176,19 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   searched with `|c| c == "literal"`, which is why the tree's many
   `calls().iter().any(|c| c == …)` pass. Give the needle the element's exact
   type (`&'static str`) and call `.contains(&needle)`.
+- **`clippy::never_loop` is DENY-by-default** (a correctness lint, so it is an
+  error even without `-D warnings`; #213 review round 1). A `loop { match … }`
+  in a test helper where EVERY arm returns or panics never iterates twice, so
+  it fails the Lint job. For example, "read the next frame; a Close returns,
+  anything else panics". Write it straight-line with no `loop`. Keep the
+  `loop` only when some arm continues (e.g. `Some(Ok(_)) => {}` skipping
+  pings).
+- **`clippy::result_large_err` and a tungstenite handshake callback** (#213).
+  A named `fn` returning `Result<Response, ErrorResponse>` (http
+  `Response<Option<String>>`, over 128 B) can trip the lint. Pass
+  `accept_hdr_async` an inline closure (closures are not checked). Build the
+  refusal in a helper that returns `ErrorResponse` by value, never inside a
+  `Result`.
 
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,
@@ -414,3 +427,17 @@ sees that. What held up across five review rounds:
 - **A value published by another thread is read only after waiting for THIS
   event's value** (e.g. `last_connect_ms >= 400`), never for "any value". An
   earlier event's late write can overwrite it.
+- **A server-side deadline is tested with a WITNESS, not a sleep window**
+  (#213, `remote/session_tests.rs`).
+  - To prove "an identified client is NOT closed at the identify deadline",
+    connect a LATER client that never identifies. Its close, or its dropped
+    handshake, proves the earlier deadline passed; the first client must
+    still be served.
+  - On a short-deadline rig, RETRY a connect / identify that the deadline
+    won under a stall (`connect_in_time`, `identified_in_time`, bounded by
+    the test timeout). Retry only the errors the deadline really produces:
+    `tungstenite::Error::Io` / `ProtocolError::HandshakeIncomplete`, a 4007,
+    or (Windows) a reset that discarded the close frame. Anything else
+    panics.
+  - A 600 ms "must still work" sleep is exactly the window a ptrace stall
+    fails on correct code.

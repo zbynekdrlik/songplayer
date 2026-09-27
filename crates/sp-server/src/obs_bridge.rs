@@ -114,6 +114,9 @@ pub(crate) async fn run_obs_engine_bridge(
                         // from the `previous` diff above. Doing work here
                         // would race that event.
                     }
+                    // #213: raw cg OBS events are for the remote-control facade;
+                    // the engine reacts to the derived `SceneChanged` only.
+                    obs::ObsEvent::Raw { .. } => {}
                 }
             }
         }

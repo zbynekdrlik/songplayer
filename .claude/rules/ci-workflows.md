@@ -81,7 +81,18 @@ on a shrinking slice instead of two `offset < len` checks).
 
 ### Write new pure code so it has NO equivalent mutants (#182 lesson)
 The no-compile box only learns about survivors ~15 min after the push, so shape
-pure code up front:
+pure code up front. cargo-mutants' binary-operator table (its book,
+`mutants.md`):
+
+- `<` → `==`, `>`
+- `>` → `==`, `<`
+- `<=` → `>`
+- `>=` → `<` ONLY
+- `==` ↔ `!=`, `&&` ↔ `||`
+- `&` → `|`, `^`
+
+So a cap guard written `if len >= CAP { return }` has a single mutant, `<`,
+and a monotonic counter leaves it no `==` equivalent (#213 `note_unsupported`).
 - **Clamp with `.max()` / `.min()`, not `if a < b { a = b }`** — `<` → `<=` on
   such a clamp is a provably EQUIVALENT mutant (the assignment is a no-op when
   equal) and can never be killed; `.max()` leaves no comparison to mutate.
