@@ -224,6 +224,7 @@ fn a_30_fps_source_lands_one_frame_per_boundary() {
     assert_one_pair_per_boundary(&jobs, 30);
     for (k, job) in jobs.iter().enumerate() {
         assert_eq!((job.width, job.height, job.stride), (4, 2, 4));
+        assert!(job.live, "a captured picture is live (#215 cue gate)");
         // Frame k is all-`k` UYVY: NV12 luma `k` and chroma `k`.
         assert_eq!(
             &job.video[..],
@@ -287,6 +288,7 @@ fn a_60_fps_source_is_decimated_onto_the_grid_and_the_drops_are_counted() {
 // --- standby -----------------------------------------------------------------
 
 fn assert_standby(job: &SubmitJob) {
+    assert!(!job.live, "the standby pair is never live (#215 cue gate)");
     assert_eq!((job.width, job.height, job.stride), (2, 4, 2));
     assert_eq!(
         &job.video[..],

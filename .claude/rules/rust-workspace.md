@@ -145,6 +145,15 @@ the scratchpad, not the repo. When the Rust changes, update the model in the
 same step. Each fresh-context review pass should re-derive the pins with its own
 model; two independent models agreeing is the only local evidence available.
 
+**For a state machine, also FUZZ the model against invariants (#215 rounds
+4–6).** Hand-picked scenarios kept missing the program bus's cut edge cases;
+a randomized run (random cuts, source skews, pre-rolls, stalls) checked for
+"no hard cut, no mix out of a source that is off program, no stale reorder
+entry" found one each round. All three came from ONE condition written twice
+(which window holds the source on air vs which window a later cut freezes),
+so when two decisions depend on the same state, derive both from one
+predicate (`Window::holds_on_air`).
+
 ## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these
 compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
@@ -343,6 +352,9 @@ the test that kills each one BEFORE CI's mutation gate runs.
   only here.
 - cargo-mutants 27 turns `|=` only into `&=`, not `^=`.
 - It turns a match guard into `true` / `false`, and `==` into `!=`.
+- `a && b && c` parses as `(a && b) && c`, so its two `&&`→`||` mutants
+  are `(a || b) && c` and `(a && b) || c` — never `a || (b && c)`. Model
+  those two when you name the killing test (#215 round 4).
 - It generates NO mutant for a plain assignment (`self.flag = false;`) or
   for an `if` condition that is a bare variable (`if breaker_just_closed {`).
   Deleting such a line survives the gate unseen, so give it its own

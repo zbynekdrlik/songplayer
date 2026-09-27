@@ -99,9 +99,25 @@ pub trait PacedSink {
         audio_tc_100ns: i64,
     );
 
+    /// Emit one STANDBY boundary (#215): the paused frozen picture (also the
+    /// one carrying a song's EOS audio tail), or via `submit_shared`'s default
+    /// the idle / pre-roll black, a starve fill or a held seek frame — never a
+    /// decoded pair. The DEFAULT is [`emit`](Self::emit); only the paced
+    /// handoff tells the two apart, for the program bus's cue gate
+    /// (`SubmitJob::live`).
+    fn emit_standby(
+        &mut self,
+        video: &PacedFrame,
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        self.emit(video, audio, video_tc_100ns, audio_tc_100ns);
+    }
+
     /// Emit one boundary from an already-shared frame (#203). The DEFAULT builds
     /// a one-shot [`PacedFrame`] over the borrowed pixels and delegates to
-    /// [`emit`](Self::emit), so an `emit`-only sink keeps working;
+    /// [`emit_standby`](Self::emit_standby), so an `emit`-only sink still works;
     /// `FrameSubmitter` OVERRIDES it to move the `SharedFrame` into the zero-copy
     /// holdover. The standby pair (idle / pre-roll black, a starve fill, a held
     /// seek frame, #147) goes through it by SHARED reference (a refcount bump).
@@ -684,7 +700,7 @@ impl Pacer {
                     self.on_emit(emit_now, stamp_boundary);
                     self.repeats += 1;
                     let block = self.standby_block();
-                    sink.emit(&lf, &block, stamp_boundary, audio_tc);
+                    sink.emit_standby(&lf, &block, stamp_boundary, audio_tc);
                     self.last_frame = Some(lf);
                     ServiceOutcome::Repeated
                 } else {
@@ -944,3 +960,7 @@ mod pacer_tests_standby;
 #[cfg(test)]
 #[path = "pacer_tests_preroll.rs"]
 mod pacer_tests_preroll;
+
+#[cfg(test)]
+#[path = "pacer_tests_live.rs"]
+mod pacer_tests_live;

@@ -149,13 +149,16 @@ async fn the_outgoing_playlist_plays_through_its_window_and_pauses_once_it_is_ov
     let mut engine = rig().await;
     playing(&mut engine, OUT);
     let bus = program(&engine, OUT);
-    bus.cut(IN, b(5)); // the window b(7)..=b(15): OUT is held until b(17)
-    assert_eq!(bus.hold_for(OUT), Some(Hold::Until(b(17))));
+    // The cut lands on b(7). IN has sent no live pair yet, so the fade may
+    // wait up to 15 boundaries (the #215 cue gate) and end as late as b(31):
+    // OUT is held until b(32).
+    bus.cut(IN, b(5));
+    assert_eq!(bus.hold_for(OUT), Some(Hold::Until(b(32))));
     engine.set_scene_active_for_test(OUT, false); // cg OBS switched away
 
     // The scene leaves program 100 ms before the hold ends.
     let started = Instant::now();
-    engine.scene_off_step(OUT, false, b(17) - 100 * MS).await;
+    engine.scene_off_step(OUT, false, b(32) - 100 * MS).await;
     assert_eq!(
         state(&engine, OUT),
         PLAYING,
@@ -170,12 +173,12 @@ async fn the_outgoing_playlist_plays_through_its_window_and_pauses_once_it_is_ov
     );
 
     // A re-check while the hold still runs waits again.
-    engine.scene_off_recheck(OUT, b(17) - 1).await;
+    engine.scene_off_recheck(OUT, b(32) - 1).await;
     assert_eq!(state(&engine, OUT), PLAYING);
     next_scene_off_due(&mut engine, OUT).await;
 
     // At the hold's end it pauses exactly as a scene-go-off always did.
-    engine.scene_off_recheck(OUT, b(17)).await;
+    engine.scene_off_recheck(OUT, b(32)).await;
     assert_eq!(state(&engine, OUT), PlayState::WaitingForScene);
     assert_eq!(paused_at(&engine, OUT), Some((SONG, 0)));
 }
@@ -206,9 +209,9 @@ async fn the_on_program_playlist_settles_once_for_the_cut_that_follows_cg_obs() 
     engine.set_scene_active_for_test(OUT, false);
     engine.scene_off_step(OUT, false, b(5)).await;
     next_scene_off_due(&mut engine, OUT).await;
-    bus.cut(IN, b(5)); // the window b(7)..=b(15): held until b(17)
+    bus.cut(IN, b(5)); // the cue may wait: held until b(32)
     let started = Instant::now();
-    engine.scene_off_recheck(OUT, b(17) - 50 * MS).await;
+    engine.scene_off_recheck(OUT, b(32) - 50 * MS).await;
     assert_eq!(state(&engine, OUT), PLAYING, "now held through the window");
     next_scene_off_due(&mut engine, OUT).await;
     assert!(
@@ -216,7 +219,7 @@ async fn the_on_program_playlist_settles_once_for_the_cut_that_follows_cg_obs() 
         "{:?}",
         started.elapsed()
     );
-    engine.scene_off_recheck(OUT, b(17)).await;
+    engine.scene_off_recheck(OUT, b(32)).await;
     assert_eq!(state(&engine, OUT), PlayState::WaitingForScene);
 }
 

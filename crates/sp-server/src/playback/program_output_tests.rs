@@ -1,8 +1,9 @@
 //! #209 `SP-program` sender: what [`ProgramOutput`] puts on the wire for a
 //! forwarded source boundary and for its own standby pair, the per-boundary
 //! check timing, and the sender thread end to end on a settable clock. #215:
-//! a mixed window boundary (the crossfaded block, the blended or midpoint-cut
-//! picture, a missing side as black + silence).
+//! a mixed window boundary (the crossfaded block, the blended picture — the
+//! outgoing one first fitted into the incoming layout when the two differ —
+//! a missing side as black + silence).
 //! Wired via `#[cfg(test)] #[path = "program_output_tests.rs"] mod tests;`.
 
 use super::*;
@@ -77,6 +78,7 @@ fn a_forwarded_boundary_keeps_the_sources_frame_audio_and_stamps() {
         }],
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp + 77,
+        live: true,
     };
     assert_eq!(out.submit(ProgramJob::Source(job), stamp + 999), stamp);
     assert_eq!(backend.video_timecodes(), vec![stamp]);
@@ -295,6 +297,7 @@ fn pair(width: u32, pixels: &[u8], stamp: i64, audio_tc: i64, level: f32) -> Sub
         }],
         video_tc_100ns: stamp,
         audio_tc_100ns: audio_tc,
+        live: true,
     }
 }
 
@@ -369,7 +372,6 @@ fn a_mix_submits_the_crossfaded_block_then_the_blended_picture_on_its_boundary()
         sources.iter().all(|s| s.as_ptr() as usize != ptr),
         "the blend is its own buffer, never a source's"
     );
-    assert!(!out.size_cut);
 }
 
 #[test]
@@ -393,7 +395,6 @@ fn the_mix_picture_blends_equal_layouts_at_the_boundarys_weight() {
         vec![28, 31, 64, 100, 121, 203, 223, 14, 122, 134, 92, 234],
         "slot 0 of 9 = weight 14/256"
     );
-    assert!(!out.size_cut);
 }
 
 #[test]
@@ -432,7 +433,6 @@ fn a_missing_side_mixes_against_the_black_of_the_present_sides_size() {
         vec![28, 16, 19, 21, 15, 29, 16, 29, 122, 134, 128, 128],
         "14/256 of the incoming picture over studio black"
     );
-    assert!(!out.size_cut, "a black of the same size blends");
     assert!(
         out.mix_picture(&mix_at(at(2), None, None, 0, 9)).is_none(),
         "neither side: no mixed picture"
@@ -518,47 +518,52 @@ fn a_missing_side_is_black_in_the_present_sides_exact_layout_padding_included() 
         ],
         "14/256 of the incoming picture over black"
     );
-    assert!(!out.size_cut, "a black of the same layout always blends");
 }
 
 #[test]
-fn different_sizes_cut_the_picture_at_the_windows_midpoint_once_per_run() {
+fn different_sizes_fit_the_outgoing_picture_into_the_incoming_layout_then_blend() {
+    // #215 addendum A: a 4×2 outgoing picture meets an 8×2 incoming one. On
+    // EVERY slot of the window (never a cut at the midpoint) the outgoing
+    // picture is pillarboxed into 8×2 (aspect kept, centred at x = 2, studio
+    // black Y 16 / UV 128 around it) and blended at the slot's weight.
     let (backend, mut out) = output(2, 2);
     let from = pair(4, &FROM_4X2, at(0), at(0), 0.25);
     let wide = pair(8, &[7u8; 24], at(0), at(0), 0.5);
+    let layout_8x2 = Layout {
+        width: 8,
+        height: 2,
+        stride: 8,
+        len: 24,
+    };
     let before = mix_at(at(0), Some(from.clone()), Some(wide.clone()), 3, 9);
     let (layout, picture) = out.mix_picture(&before).expect("a picture");
+    assert_eq!(layout, layout_8x2, "slot 3 of 9: the incoming layout");
     assert_eq!(
-        layout, LAYOUT_4X2,
-        "slot 3 of 9 (weight 100): the outgoing picture"
+        picture.to_vec(),
+        vec![
+            12, 12, 12, 22, 42, 64, 12, 12, 12, 12, 81, 125, 146, 3, 12, 12, 81, 81, 81, 81, 58,
+            149, 81, 81
+        ],
+        "the pillarboxed outgoing picture blended at weight 100/256"
     );
-    assert!(picture.ptr_eq(&from.video), "that picture itself, no copy");
-    assert!(out.size_cut, "a size cut is running");
-    let after = mix_at(at(0), Some(from.clone()), Some(wide.clone()), 4, 9);
+    assert!(
+        !picture.ptr_eq(&from.video) && !picture.ptr_eq(&wide.video),
+        "its own buffer, never a source's picture"
+    );
+    let after = mix_at(at(1), Some(from.clone()), Some(wide.clone()), 4, 9);
     let (layout, picture) = out.mix_picture(&after).expect("a picture");
+    assert_eq!(layout, layout_8x2);
     assert_eq!(
-        layout,
-        Layout {
-            width: 8,
-            height: 2,
-            stride: 8,
-            len: 24,
-        },
-        "slot 4 of 9 (weight ½): the incoming picture"
+        picture.to_vec(),
+        vec![
+            12, 12, 12, 20, 36, 54, 12, 12, 12, 12, 68, 104, 121, 4, 12, 12, 68, 68, 68, 68, 49,
+            124, 68, 68
+        ],
+        "slot 4 of 9 (weight ½)"
     );
-    assert!(picture.ptr_eq(&wide.video));
-    assert!(out.size_cut);
-
-    // Any boundary that is not mixed ends the run, so the next window's size
-    // cut is logged again.
-    out.submit(ProgramJob::Standby { stamp_100ns: at(1) }, at(1));
-    assert!(!out.size_cut);
-    let next = mix_at(at(2), Some(from.clone()), Some(wide.clone()), 3, 9);
-    out.submit(ProgramJob::Mix(next), at(2));
-    assert!(out.size_cut);
-    let last = mix_at(at(3), Some(from.clone()), Some(wide), 4, 9);
-    out.submit(ProgramJob::Mix(last), at(3));
-    // The audio still crossfades on the window's curve.
+    out.submit(ProgramJob::Mix(before), at(0));
+    out.submit(ProgramJob::Mix(after), at(1));
+    // The audio crossfades on the window's curve as before.
     assert_block(&backend, |i| {
         let (g_from, g_to) = crossfade_gains(4 * 1600 + i, 9 * 1600);
         g_from * 0.25 + g_to * 0.5
@@ -566,13 +571,104 @@ fn different_sizes_cut_the_picture_at_the_windows_midpoint_once_per_run() {
     assert_eq!(
         pictures(&backend),
         vec![
-            "send_video_async(42,NV12,2x2,stride=2,30/1)".to_string(),
-            "send_video_async(42,NV12,4x2,stride=4,30/1)".to_string(),
+            "send_video_async(42,NV12,8x2,stride=8,30/1)".to_string(),
             "send_video_async(42,NV12,8x2,stride=8,30/1)".to_string(),
         ]
     );
-    // Two pictures of the same size blend: that ends the run too.
-    let same = mix_at(at(4), Some(from.clone()), Some(from), 4, 9);
-    assert!(out.mix_picture(&same).is_some());
-    assert!(!out.size_cut);
+    assert_eq!(backend.video_timecodes(), vec![at(0), at(1)]);
+}
+
+#[test]
+fn a_window_builds_its_fit_plan_once_and_another_pair_of_layouts_builds_its_own() {
+    // #215 addendum A: the fit's column taps are built once per window (one
+    // pair of layouts), not once per boundary; a new pair builds a new plan
+    // (a stale one would fit into the wrong layout).
+    let (_backend, mut out) = output(2, 2);
+    let from = pair(4, &FROM_4X2, at(0), at(0), 0.25);
+    let wide = pair(8, &[7u8; 24], at(0), at(0), 0.5);
+    for slot in 0..9u32 {
+        let mix = mix_at(
+            at(slot as usize),
+            Some(from.clone()),
+            Some(wide.clone()),
+            slot,
+            9,
+        );
+        assert!(out.mix_picture(&mix).is_some());
+    }
+    assert_eq!(out.fit_plans, 1, "one plan for the whole 9-slot window");
+
+    // Another destination: 4×2 into 8×4.
+    let tall = SubmitJob {
+        height: 4,
+        video: SharedFrame::new(vec![7u8; 48]),
+        ..pair(8, &[], at(9), at(9), 0.5)
+    };
+    let (layout, picture) = out
+        .mix_picture(&mix_at(at(9), Some(from.clone()), Some(tall), 4, 9))
+        .expect("a picture");
+    assert_eq!(
+        layout,
+        Layout {
+            width: 8,
+            height: 4,
+            stride: 8,
+            len: 48,
+        }
+    );
+    assert_eq!(
+        picture.to_vec(),
+        vec![
+            12, 14, 18, 24, 32, 40, 49, 54, 26, 30, 37, 45, 53, 53, 45, 41, 54, 61, 76, 87, 96, 79,
+            37, 16, 68, 77, 95, 108, 117, 92, 33, 4, 68, 68, 63, 82, 54, 110, 49, 124, 68, 68, 63,
+            82, 54, 110, 49, 124
+        ],
+        "the 4×2 picture upscaled into 8×4, blended at weight ½"
+    );
+    assert_eq!(out.fit_plans, 2);
+
+    // Another source: a 6×2 picture into the first 8×2 layout.
+    let six = pair(6, &[50u8; 18], at(10), at(10), 0.25);
+    let (_, picture) = out
+        .mix_picture(&mix_at(at(10), Some(six), Some(wide), 4, 9))
+        .expect("a picture");
+    assert_eq!(
+        picture.to_vec(),
+        vec![
+            29, 29, 29, 29, 29, 29, 12, 12, 29, 29, 29, 29, 29, 29, 12, 12, 29, 29, 29, 29, 29, 29,
+            68, 68
+        ],
+        "6×2 kept at 6 columns (the odd 1-column offset rounds to 0), black past it"
+    );
+    assert_eq!(out.fit_plans, 3);
+}
+
+#[test]
+fn a_run_of_mixed_boundaries_is_counted_until_the_next_unmixed_boundary() {
+    // Review round 1: the sender logs ONE line per fade (boundaries, how
+    // many fitted a differently sized picture, the worst fit + blend time),
+    // when the first unmixed boundary after it goes out.
+    let (_backend, mut out) = output(2, 2);
+    let from = pair(4, &FROM_4X2, at(0), at(0), 0.25);
+    let same = pair(4, &TO_4X2, at(0), at(0), 0.5);
+    let wide = pair(8, &[7u8; 24], at(0), at(0), 0.5);
+    out.submit(
+        ProgramJob::Mix(mix_at(at(0), Some(from.clone()), Some(same), 0, 9)),
+        at(0),
+    );
+    out.submit(
+        ProgramJob::Mix(mix_at(at(1), Some(from), Some(wide), 1, 9)),
+        at(1),
+    );
+    assert_eq!(
+        (out.mix_run.boundaries, out.mix_run.fitted),
+        (2, 1),
+        "two mixed boundaries, the second one fitted"
+    );
+    out.submit(ProgramJob::Standby { stamp_100ns: at(2) }, at(2));
+    assert_eq!(
+        out.mix_run,
+        MixRun::default(),
+        "the run ended and was logged"
+    );
 }

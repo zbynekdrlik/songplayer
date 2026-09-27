@@ -283,6 +283,7 @@ fn submit_job_stamp_boundary_is_the_video_tc() {
         audio: Vec::new(),
         video_tc_100ns: 3_333_300,
         audio_tc_100ns: 3_333_311,
+        live: true,
     };
     assert_eq!(job.stamp_boundary_100ns(), 3_333_300);
 }
@@ -302,7 +303,9 @@ fn from_paced_arc_clones_the_frame_without_copying_pixels() {
         video,
         audio: Vec::new(),
     };
-    let job = SubmitJob::from_paced(&paced, &[], 3_333_300, 3_333_311);
+    let job = SubmitJob::from_paced(&paced, &[], 3_333_300, 3_333_311, true);
+    assert!(job.live, "`live` is carried as given (#215)");
+    assert!(!SubmitJob::from_paced(&paced, &[], 3_333_300, 3_333_311, false).live);
     assert_eq!(
         job.video.as_ptr(),
         src_ptr,

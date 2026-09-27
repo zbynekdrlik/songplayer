@@ -1,6 +1,9 @@
 //! #215: the pure transition layer — the spec (OBS / override / fallback), the
-//! window's grid indices, the Q8 picture weight + NV12 blend, the equal-power
-//! gain curve and the audio mix. Exact values, so every arithmetic mutant dies.
+//! window's grid indices and its cue (the gate that waits for the incoming
+//! source's first live pair), the Q8 picture weight + NV12 blend, the NV12 fit
+//! of one layout into another, the equal-power gain curve and the audio mix.
+//! Exact values, so every arithmetic mutant dies (the fit's pins come from a
+//! scratch Python model of `FitPlan`).
 //! Wired via `#[cfg(test)] #[path = "program_transition_tests.rs"] mod tests;`.
 
 use super::*;
@@ -125,6 +128,11 @@ fn a_window_spans_exactly_its_slots_and_is_served_boundary_by_boundary() {
     );
     assert_eq!((w.from, w.to, w.kind), (Some(1), 2, TransitionKind::Fade));
     assert_eq!((w.start_100ns, w.n_slots, w.end_100ns), (b(3), 9, b(12)));
+    assert_eq!(
+        (w.cut_100ns, w.cue),
+        (b(3), Cue::Open),
+        "an open window starts mixing on its cut boundary"
+    );
     assert_eq!(w.slot(b(2)), None, "before the window");
     for k in 0..9 {
         assert_eq!(w.slot(b(3 + k)), Some(k as u32), "slot of b({})", 3 + k);
@@ -205,44 +213,252 @@ fn the_blend_appends_after_what_the_buffer_holds() {
     assert_eq!(out, vec![9, 16, 32]);
 }
 
-fn layout(width: u32, stride: u32, len: usize) -> Layout {
+/// FROM_4X2's layout: 4×2, stride 4, 12 bytes.
+const L_4X2: Layout = Layout {
+    width: 4,
+    height: 2,
+    stride: 4,
+    len: 12,
+};
+
+/// A `width`×`height` NV12 layout with a tight stride.
+const fn tight(width: u32, height: u32) -> Layout {
     Layout {
         width,
-        height: 2,
-        stride,
-        len,
+        height,
+        stride: width,
+        len: (width * height * 3 / 2) as usize,
     }
 }
 
-#[test]
-fn equal_layouts_blend_and_different_ones_cut_at_the_midpoint() {
-    let a = layout(4, 4, 12);
-    let wide = layout(8, 8, 24);
-    assert_eq!(picture_mix(a, a, 14), Picture::Blend);
-    assert_eq!(picture_mix(a, wide, 0), Picture::From);
-    assert_eq!(picture_mix(a, wide, 127), Picture::From);
+/// `src` of `src_layout` fitted into `dst`, checking that the fit appends.
+fn fitted(src: &[u8], src_layout: Layout, dst: Layout) -> Vec<u8> {
+    let mut out = vec![9u8];
+    fit_nv12_into(src, src_layout, dst, &mut out);
     assert_eq!(
-        picture_mix(a, wide, 128),
-        Picture::To,
-        "from the midpoint on"
+        out.remove(0),
+        9,
+        "the fit appends after what the buffer holds"
     );
-    assert_eq!(picture_mix(a, wide, 242), Picture::To);
-    assert_eq!(
-        picture_mix(a, layout(4, 6, 12), 200),
-        Picture::To,
-        "a different stride alone never blends"
-    );
-    assert_eq!(picture_mix(a, layout(4, 4, 13), 1), Picture::From);
+    assert_eq!(out.len(), dst.len, "exactly the destination's bytes");
+    out
 }
 
 #[test]
-fn a_size_cut_is_logged_once_per_run() {
-    assert!(starts_size_cut(false, Picture::From));
-    assert!(starts_size_cut(false, Picture::To));
-    assert!(!starts_size_cut(true, Picture::From));
-    assert!(!starts_size_cut(true, Picture::To));
-    assert!(!starts_size_cut(false, Picture::Blend));
-    assert!(!starts_size_cut(true, Picture::Blend));
+fn fitting_a_picture_into_its_own_layout_copies_it_exactly() {
+    assert_eq!(FitPlan::new(L_4X2, L_4X2).rect(), (0, 0, 4, 2));
+    assert_eq!(fitted(&FROM_4X2, L_4X2, L_4X2), FROM_4X2.to_vec());
+    // A wider stride: the same picture, its padding studio black.
+    let padded = Layout {
+        width: 4,
+        height: 2,
+        stride: 6,
+        len: 18,
+    };
+    assert_eq!(
+        fitted(&FROM_4X2, L_4X2, padded),
+        vec![
+            16, 32, 64, 100, 16, 16, 128, 200, 235, 0, 16, 16, 128, 128, 90, 240, 128, 128
+        ]
+    );
+}
+
+#[test]
+fn a_4x2_picture_fits_2x2_by_averaging_each_pixel_pair() {
+    // 2:1 into 1:1 keeps the full width; the aspect-kept height (1) rounds up
+    // to the even 2, so the chroma rows still line up.
+    let dst = tight(2, 2);
+    assert_eq!(FitPlan::new(L_4X2, dst).rect(), (0, 0, 2, 2));
+    assert_eq!(
+        fitted(&FROM_4X2, L_4X2, dst),
+        vec![24, 82, 164, 118, 109, 184],
+        "luma (16+32)/2, (64+100)/2, (128+200)/2, (235+0)/2 rounded up; \
+         chroma (128+90)/2, (128+240)/2"
+    );
+}
+
+#[test]
+fn a_wider_picture_is_letterboxed_with_studio_black_bars() {
+    // 4×2 into 4×4: full width, height 2. The one bar row each side would put
+    // the picture on an odd row, so it rounds to the even offset 0.
+    let square = tight(4, 4);
+    assert_eq!(FitPlan::new(L_4X2, square).rect(), (0, 0, 4, 2));
+    let mut want = FROM_4X2[..8].to_vec(); // luma rows 0-1: the picture
+    want.extend([16; 8]); // luma rows 2-3: the bar
+    want.extend(&FROM_4X2[8..]); // chroma row 0: the picture's
+    want.extend([128; 4]); // chroma row 1: the bar's
+    assert_eq!(fitted(&FROM_4X2, L_4X2, square), want);
+    // 4×2 into 4×6: two bar rows each side, centred.
+    let tall = tight(4, 6);
+    assert_eq!(FitPlan::new(L_4X2, tall).rect(), (0, 2, 4, 2));
+    let mut want = vec![16; 8];
+    want.extend(&FROM_4X2[..8]);
+    want.extend([16; 8]);
+    want.extend([128; 4]);
+    want.extend(&FROM_4X2[8..]);
+    want.extend([128; 4]);
+    assert_eq!(fitted(&FROM_4X2, L_4X2, tall), want);
+}
+
+#[test]
+fn a_taller_picture_is_pillarboxed_centred() {
+    // 4×2 into 8×2: full height, width 4, centred at x = 2.
+    let wide = tight(8, 2);
+    assert_eq!(FitPlan::new(L_4X2, wide).rect(), (2, 0, 4, 2));
+    assert_eq!(
+        fitted(&FROM_4X2, L_4X2, wide),
+        vec![
+            16, 16, 16, 32, 64, 100, 16, 16, 16, 16, 128, 200, 235, 0, 16, 16, 128, 128, 128, 128,
+            90, 240, 128, 128
+        ]
+    );
+}
+
+#[test]
+fn an_upscale_interpolates_along_both_axes_and_clamps_at_the_edges() {
+    // 4×2 into 8×4: every destination pixel centre between four source ones.
+    assert_eq!(FitPlan::new(L_4X2, tight(8, 4)).rect(), (0, 0, 8, 4));
+    assert_eq!(
+        fitted(&FROM_4X2, L_4X2, tight(8, 4)),
+        vec![
+            16, 20, 28, 40, 56, 73, 91, 100, 44, 52, 67, 82, 99, 99, 83, 75, 100, 115, 144, 167,
+            184, 150, 67, 25, 128, 146, 182, 209, 226, 176, 59, 0, 128, 128, 119, 156, 100, 212,
+            90, 240, 128, 128, 119, 156, 100, 212, 90, 240
+        ]
+    );
+}
+
+/// A 4×4 NV12 picture whose luma rows AND whose two chroma rows all differ.
+const SRC_4X4: [u8; 24] = [
+    10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 100, 200, 110, 210, 60,
+    150, 70, 160,
+];
+
+#[test]
+fn a_picture_with_two_chroma_rows_scales_them_like_its_luma() {
+    let l_4x4 = tight(4, 4);
+    assert_eq!(fitted(&SRC_4X4, l_4x4, l_4x4), SRC_4X4.to_vec(), "identity");
+    assert_eq!(
+        fitted(&SRC_4X4, l_4x4, tight(2, 2)),
+        vec![35, 55, 115, 135, 85, 180],
+        "each 2×2 luma block and both chroma rows averaged"
+    );
+    assert_eq!(
+        fitted(&SRC_4X4, l_4x4, tight(8, 8)),
+        vec![
+            10, 13, 18, 23, 28, 33, 38, 40, 20, 23, 28, 33, 38, 43, 48, 50, 40, 43, 48, 53, 58, 63,
+            68, 70, 60, 63, 68, 73, 78, 83, 88, 90, 80, 83, 88, 93, 98, 103, 108, 110, 100, 103,
+            108, 113, 118, 123, 128, 130, 120, 123, 128, 133, 138, 143, 148, 150, 130, 133, 138,
+            143, 148, 153, 158, 160, 100, 200, 103, 203, 108, 208, 110, 210, 90, 188, 93, 190, 98,
+            195, 100, 198, 70, 163, 73, 165, 78, 170, 80, 173, 60, 150, 63, 153, 68, 158, 70, 160
+        ],
+        "an upscale interpolates between the two chroma rows"
+    );
+}
+
+#[test]
+fn a_downscale_takes_its_second_chroma_tap_from_the_next_pixel_pair() {
+    // Review round 1 (mutation `2 * c.i1` → `2 / c.i1`): a 6×2 source has
+    // THREE chroma pixels, so the second tap of a destination chroma pixel
+    // can be pixel 2 (bytes 4, 5), which only `2 * i1` reaches.
+    let src: [u8; 18] = [
+        10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 100, 200, 110, 210, 120, 220,
+    ];
+    let six = tight(6, 2);
+    assert_eq!(FitPlan::new(six, tight(4, 2)).rect(), (0, 0, 4, 2));
+    assert_eq!(
+        fitted(&src, six, tight(4, 2)),
+        vec![13, 28, 43, 58, 73, 88, 103, 118, 103, 203, 118, 218]
+    );
+}
+
+#[test]
+fn the_catalogs_resolutions_fit_centred_on_even_offsets() {
+    let fit = |sw, sh, dw, dh| FitPlan::new(tight(sw, sh), tight(dw, dh)).rect();
+    assert_eq!(
+        fit(2560, 1080, 2560, 1440),
+        (0, 180, 2560, 1080),
+        "21:9 into 16:9: 180-row bars above and below"
+    );
+    assert_eq!(
+        fit(2560, 1440, 2560, 1080),
+        (320, 0, 1920, 1080),
+        "16:9 into 21:9: 320-column bars left and right"
+    );
+    assert_eq!(
+        fit(1920, 1080, 2560, 1440),
+        (0, 0, 2560, 1440),
+        "same aspect"
+    );
+    assert_eq!(
+        fit(2560, 1080, 1920, 1080),
+        (0, 134, 1920, 810),
+        "the 135-row bar rounds to the even offset 134"
+    );
+}
+
+#[test]
+fn a_picture_that_is_not_whole_nv12_fits_as_the_black_canvas_alone() {
+    let black = |dst: Layout| {
+        let mut out = Vec::new();
+        black_nv12_into(dst, &mut out);
+        out
+    };
+    let dst = tight(4, 4);
+    assert_eq!(
+        fitted(&FROM_4X2[..11], L_4X2, dst),
+        black(dst),
+        "one byte short of 4×2 NV12"
+    );
+    let short_stride = Layout {
+        width: 4,
+        height: 2,
+        stride: 3,
+        len: 9,
+    };
+    assert_eq!(
+        fitted(&FROM_4X2[..9], short_stride, dst),
+        black(dst),
+        "a stride shorter than the row"
+    );
+    let empty = Layout {
+        width: 0,
+        height: 2,
+        stride: 4,
+        len: 12,
+    };
+    assert_eq!(fitted(&FROM_4X2, empty, dst), black(dst), "no width");
+    assert_eq!(
+        FitPlan::new(empty, dst).rect(),
+        (2, 2, 0, 0),
+        "a degenerate source: an empty rectangle at the centre"
+    );
+    let flat = Layout {
+        width: 4,
+        height: 0,
+        stride: 4,
+        len: 12,
+    };
+    assert_eq!(fitted(&FROM_4X2, flat, dst), black(dst), "no height");
+    let cut_short = Layout {
+        width: 4,
+        height: 4,
+        stride: 4,
+        len: 20,
+    };
+    assert_eq!(
+        fitted(&FROM_4X2, L_4X2, cut_short),
+        black(cut_short),
+        "a destination buffer too short for its layout: the canvas alone"
+    );
+}
+
+#[test]
+fn a_plan_fits_exactly_its_own_pair_of_layouts() {
+    let plan = FitPlan::new(L_4X2, tight(8, 2));
+    assert!(plan.fits(L_4X2, tight(8, 2)));
+    assert!(!plan.fits(L_4X2, tight(8, 4)), "another destination");
+    assert!(!plan.fits(tight(6, 2), tight(8, 2)), "another source");
 }
 
 #[test]
@@ -255,6 +471,7 @@ fn a_layout_is_read_from_the_sources_job() {
         audio: Vec::new(),
         video_tc_100ns: T0,
         audio_tc_100ns: T0,
+        live: true,
     };
     assert_eq!(
         Layout::of(&job),
@@ -503,4 +720,151 @@ fn a_truncated_window_reports_its_progress_against_the_boundaries_it_covers() {
         (9, 3, 100),
         "served to its end: 100 %, while the curve keeps its 9 slots"
     );
+}
+
+#[test]
+fn a_fade_waits_for_its_cue_at_most_fifteen_boundaries_and_a_cut_never_waits() {
+    assert_eq!(CUE_WAIT_MAX_SLOTS, 15, "CUE_WAIT_MAX = 500 ms at 30 fps");
+    let w = Window::cued(
+        Some(1),
+        2,
+        b(3),
+        &TransitionSpec::fade(300, SpecSource::Obs),
+    );
+    assert_eq!(
+        w.cue,
+        Cue::Waiting {
+            deadline_100ns: b(18)
+        }
+    );
+    assert_eq!(
+        (w.cut_100ns, w.start_100ns, w.n_slots, w.end_100ns),
+        (b(3), b(3), 9, b(27)),
+        "until the cue opens it may end as late as 15 + 9 slots after the cut"
+    );
+    assert!(!w.covers(b(2)), "before the cut");
+    assert!(w.covers(b(3)) && w.covers(b(26)));
+    assert!(!w.covers(b(27)), "the end is exclusive");
+    assert_eq!(w.slot(b(3)), None, "nothing mixes while the cue waits");
+    assert_eq!((w.covered(), w.served(Some(b(20)))), (9, 0));
+    assert_eq!(ActiveWindow::of(&w, Some(b(20))).progress, 0);
+
+    let cut = Window::cued(Some(1), 2, b(3), &TransitionSpec::cut(SpecSource::Obs));
+    assert_eq!(
+        (cut.cue, cut.cut_100ns, cut.end_100ns),
+        (Cue::Open, b(3), b(3)),
+        "a Cut is open at once and mixes nothing"
+    );
+}
+
+#[test]
+fn a_cue_opens_on_its_boundary_and_lays_the_fade_from_there() {
+    let w = Window::cued(
+        Some(1),
+        2,
+        b(3),
+        &TransitionSpec::fade(300, SpecSource::Obs),
+    );
+    let mut opened = w;
+    assert_eq!(opened.open(b(8)), 5, "it waited b(3)..=b(7)");
+    assert_eq!(opened.cue, Cue::Open);
+    assert_eq!(
+        (opened.cut_100ns, opened.start_100ns, opened.end_100ns),
+        (b(3), b(8), b(17))
+    );
+    assert!(opened.covers(b(3)), "the held boundaries stay the window's");
+    assert!(opened.covers(b(16)) && !opened.covers(b(17)));
+    assert_eq!(opened.slot(b(7)), None, "held, not mixed");
+    assert_eq!(opened.slot(b(8)), Some(0));
+    assert_eq!(opened.slot(b(16)), Some(8));
+    assert_eq!(opened.slot(b(17)), None);
+    assert_eq!(opened.covered(), 9);
+    assert_eq!(opened.served(Some(b(7))), 0);
+    assert_eq!(opened.served(Some(b(10))), 3);
+    assert_eq!(
+        ActiveWindow::of(&opened, Some(b(10))),
+        ActiveWindow {
+            from: Some(1),
+            to: 2,
+            start_boundary_100ns: b(8),
+            n_slots: 9,
+            served_slots: 3,
+            progress: 33,
+        }
+    );
+
+    let mut at_once = w;
+    assert_eq!(at_once.open(b(3)), 0, "live on the cut boundary");
+    assert_eq!((at_once.start_100ns, at_once.end_100ns), (b(3), b(12)));
+    let mut timed_out = w;
+    assert_eq!(timed_out.open(b(18)), 15, "the deadline");
+    assert_eq!((timed_out.start_100ns, timed_out.end_100ns), (b(18), b(27)));
+}
+
+#[test]
+fn a_later_cut_freezes_a_waiting_cue_but_only_truncates_an_open_one() {
+    let w = Window::cued(
+        Some(1),
+        2,
+        b(3),
+        &TransitionSpec::fade(300, SpecSource::Obs),
+    );
+    let mut frozen = w;
+    frozen.truncate(b(6));
+    assert_eq!((frozen.cue, frozen.end_100ns), (Cue::Frozen, b(6)));
+    assert!(frozen.covers(b(5)) && !frozen.covers(b(6)));
+    assert_eq!(frozen.slot(b(4)), None, "it never mixes");
+    assert_eq!(
+        (frozen.covered(), frozen.served(Some(b(20)))),
+        (0, 0),
+        "a frozen cue covers no mixed boundary"
+    );
+
+    let mut open = w;
+    open.open(b(4));
+    open.truncate(b(8));
+    assert_eq!((open.cue, open.end_100ns), (Cue::Open, b(8)));
+    assert_eq!((open.covered(), open.served(Some(b(20)))), (4, 4));
+}
+
+#[test]
+fn a_window_holds_its_outgoing_source_from_its_cut_to_its_end_while_its_cue_does_not_run() {
+    // #215 review rounds 4 + 5: the ONE predicate behind `on_air` and the
+    // freeze. The waiting fade: cut b(3), latest end b(3 + 15 + 9) = b(27).
+    let waiting = Window::cued(
+        Some(1),
+        2,
+        b(3),
+        &TransitionSpec::fade(300, SpecSource::Obs),
+    );
+    assert!(!waiting.holds_on_air(b(2)), "a cut before it replaces it");
+    assert!(waiting.holds_on_air(b(3)), "a same-slot re-cut");
+    assert!(waiting.holds_on_air(b(27)), "a cut on its latest end");
+    assert!(!waiting.holds_on_air(b(28)), "past its latest end");
+    let mut open = waiting;
+    open.open(b(4));
+    assert!(
+        !open.holds_on_air(b(5)),
+        "an open fade mixes, it holds nothing"
+    );
+
+    let mut frozen = waiting;
+    assert!(frozen.truncate(b(6)), "a cut inside its span freezes it");
+    assert!(frozen.holds_on_air(b(6)), "frozen, ending on the boundary");
+    assert!(!frozen.truncate(b(5)), "already frozen: only truncated");
+    assert_eq!((frozen.cue, frozen.end_100ns), (Cue::Frozen, b(5)));
+
+    let mut on_end = waiting;
+    assert!(on_end.truncate(b(27)), "a cut on its latest end freezes it");
+    assert_eq!(on_end.cue, Cue::Frozen);
+    let mut late = waiting;
+    assert!(
+        !late.truncate(b(28)),
+        "a cut after its latest end leaves it waiting"
+    );
+    assert_eq!((late.cue, late.end_100ns), (waiting.cue, b(27)));
+
+    let mut running = open;
+    assert!(!running.truncate(b(8)), "an open fade is only truncated");
+    assert_eq!((running.cue, running.end_100ns), (Cue::Open, b(8)));
 }
