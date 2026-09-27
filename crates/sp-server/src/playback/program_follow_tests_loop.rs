@@ -2,7 +2,8 @@
 //! of `program_follow_tests_task.rs` (no task runs, so what the fake logged
 //! is complete when a step returns): the drains (stale scene changes, a
 //! transition change or a lag during a read, the bounded re-reads, the
-//! fallback to the newest dropped scene change), cg OBS's connection state,
+//! fallback to the newest dropped scene change and when it is forgotten), cg
+//! OBS's connection state,
 //! and the retry and the switch-on catch-up gated on cg OBS being up.
 //! Wired via `#[cfg(test)] #[path = "program_follow_tests_loop.rs"] mod tests_loop;`.
 
@@ -404,4 +405,90 @@ async fn an_unanswered_catch_up_follows_the_newest_scene_change_it_dropped() {
         (Some(7), 2),
         "nothing was dropped this time: nothing to follow"
     );
+}
+
+#[tokio::test]
+async fn a_catch_up_whose_scene_lookup_fails_follows_only_a_dropped_change_of_that_scene() {
+    let pool = pool().await;
+    store(&pool, "program_follow_obs", "true").await;
+    let mut fake = fake_obs(vec![fade(500)], 16);
+    let mut events = fake.upstream.subscribe();
+    let (mut task, bus) = follow_loop(&pool, fake.upstream.clone()).await;
+    *fake.program_scene.lock().unwrap() = "sp-fast".to_string();
+    fake.lookup_unanswered.store(true, Ordering::SeqCst);
+    // cg OBS names sp-fast but not its playlists; the dropped change is of
+    // sp-slow, so it is older than sp-fast.
+    fake.during_read
+        .lock()
+        .unwrap()
+        .push_back(vec![scene_event("sp-slow", &[8])]);
+    task.resync(&mut events).await;
+    assert_eq!(
+        answered(&mut fake.seen),
+        vec![REQUEST, PROGRAM_SCENE, "ScenePlaylists:sp-fast"]
+    );
+    let st = bus.status();
+    assert_eq!(
+        (st.source, st.health.cuts),
+        (None, 0),
+        "an older scene is never followed"
+    );
+    // A dropped change of sp-fast itself carries its playlists.
+    fake.during_read
+        .lock()
+        .unwrap()
+        .push_back(vec![scene_event("sp-fast", &[7])]);
+    task.resync(&mut events).await;
+    let st = bus.status();
+    assert_eq!((st.source, st.health.cuts), (Some(7), 1));
+    assert_eq!(last_cut(&bus).scene, "sp-fast");
+}
+
+#[tokio::test]
+async fn a_dropped_scene_change_is_forgotten_after_a_reconnect() {
+    let pool = pool().await;
+    store(&pool, "program_follow_obs", "true").await;
+    let mut fake = fake_obs(vec![fade(500)], 16);
+    let mut events = fake.upstream.subscribe();
+    let (mut task, bus) = follow_loop(&pool, fake.upstream.clone()).await;
+    // A scene change of the previous connection, then a new connection: it
+    // re-reports its own scene, so the old change is not followed even when
+    // cg OBS does not name its scene.
+    fake.events
+        .send(scene_event("sp-slow", &[8]))
+        .expect("subscribed");
+    fake.events.send(ObsEvent::Connected).expect("subscribed");
+    fake.scene_unanswered.store(true, Ordering::SeqCst);
+    task.resync(&mut events).await;
+    assert_eq!(answered(&mut fake.seen), vec![REQUEST, PROGRAM_SCENE]);
+    let st = bus.status();
+    assert_eq!((st.source, st.health.cuts), (None, 0));
+}
+
+#[tokio::test]
+async fn a_dropped_scene_change_is_forgotten_after_a_lag() {
+    let pool = pool().await;
+    store(&pool, "program_follow_obs", "true").await;
+    // The broadcast keeps ONE event: the queued scene change, then three
+    // events during the read lag the task (a newer scene change may be lost).
+    let mut fake = fake_obs(vec![fade(500)], 1);
+    let mut events = fake.upstream.subscribe();
+    let (mut task, bus) = follow_loop(&pool, fake.upstream.clone()).await;
+    fake.events
+        .send(scene_event("sp-slow", &[8]))
+        .expect("subscribed");
+    fake.during_read.lock().unwrap().push_back(vec![
+        raw_event("InputVolumeChanged"),
+        raw_event("InputVolumeChanged"),
+        raw_event("InputVolumeChanged"),
+    ]);
+    fake.scene_unanswered.store(true, Ordering::SeqCst);
+    task.resync(&mut events).await;
+    assert_eq!(
+        answered(&mut fake.seen),
+        vec![REQUEST, REQUEST, PROGRAM_SCENE],
+        "the lag re-read the transition; the scene read got no answer"
+    );
+    let st = bus.status();
+    assert_eq!((st.source, st.health.cuts), (None, 0));
 }

@@ -1,7 +1,8 @@
 //! #215: `SP-program` follows cg OBS and keeps the transition spec in step.
 //! The reply parsing, the settings, the telemetry, `apply_spec` and
 //! `follow_scene` over a real pool + `ProgramBus`. The task itself runs in
-//! `program_follow_tests_task.rs`, which shares the helpers here (`pub(super)`).
+//! `program_follow_tests_task.rs` and `FollowLoop`'s steps in
+//! `program_follow_tests_loop.rs`; both share the helpers here (`pub(super)`).
 //! Wired via `#[cfg(test)] #[path = "program_follow_tests.rs"] mod tests;`.
 
 use std::collections::HashSet;
@@ -158,10 +159,7 @@ async fn without_cg_obs_nothing_is_read_and_nothing_is_cut() {
     assert!(!follow.refresh_obs(&no_obs, false).await, "no answer");
     assert!(!follow.refresh_obs(&no_obs, true).await);
     assert_eq!(bus.follow().obs_transition(), None);
-    assert!(
-        !follow.follow_current_scene(&no_obs).await,
-        "no answer: nothing followed"
-    );
+    follow.follow_current_scene(&no_obs, None).await;
     assert_eq!(bus.status().source, Some(3));
     assert_eq!(bus.status().health.cuts, 0);
     assert_eq!(

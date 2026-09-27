@@ -84,6 +84,8 @@ pub(super) struct FakeObs {
     pub(super) during_read: Arc<std::sync::Mutex<VecDeque<Vec<ObsEvent>>>>,
     /// While set, `GetCurrentProgramScene` is answered with a failure.
     pub(super) scene_unanswered: Arc<AtomicBool>,
+    /// While set, a scene → playlists lookup gets no answer.
+    pub(super) lookup_unanswered: Arc<AtomicBool>,
 }
 
 pub(super) fn fake_obs(replies: Vec<Value>, capacity: usize) -> FakeObs {
@@ -96,6 +98,8 @@ pub(super) fn fake_obs(replies: Vec<Value>, capacity: usize) -> FakeObs {
     let pending_events = during_read.clone();
     let scene_unanswered = Arc::new(AtomicBool::new(false));
     let unanswered = scene_unanswered.clone();
+    let lookup_unanswered = Arc::new(AtomicBool::new(false));
+    let lookup_fails = lookup_unanswered.clone();
     let broadcast_tx = events.clone();
     tokio::spawn(async move {
         let mut n: usize = 0;
@@ -134,7 +138,10 @@ pub(super) fn fake_obs(replies: Vec<Value>, capacity: usize) -> FakeObs {
                 }
                 RemoteCall::ScenePlaylists { scene, reply } => {
                     let _ = seen_tx.send(format!("ScenePlaylists:{scene}"));
-                    let _ = reply.send(playlists_of(&scene));
+                    // A dropped reply is a lookup with no answer.
+                    if !lookup_fails.load(Ordering::SeqCst) {
+                        let _ = reply.send(playlists_of(&scene));
+                    }
                 }
             }
         }
@@ -148,6 +155,7 @@ pub(super) fn fake_obs(replies: Vec<Value>, capacity: usize) -> FakeObs {
         program_scene,
         during_read,
         scene_unanswered,
+        lookup_unanswered,
     }
 }
 
@@ -507,6 +515,11 @@ async fn with_the_follow_off_a_scene_change_cuts_nothing() {
     let pool = pool().await;
     let mut rig = start(&pool, vec![fade(500)], 16, NO_POLL);
     assert_eq!(rig.next_request().await, REQUEST);
+    // The start's catch-up drains the queue even with the follow off: the
+    // spec it applies right before that drain (no `.await` between) proves
+    // the drain ran, so the events below reach `on_event`.
+    rig.spec_becomes((TransitionKind::Fade, 500, 15, SpecSource::Obs))
+        .await;
     rig.scene("sp-fast", &[7]);
     // A transition event after it: once cg OBS is asked again, the scene
     // change before it has been handled.

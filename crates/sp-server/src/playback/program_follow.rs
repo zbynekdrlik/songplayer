@@ -296,7 +296,11 @@ impl Follow {
     /// what the retired watcher script got by polling. `false` when cg OBS did
     /// not answer (nothing was followed). Ungated: the task calls it only
     /// through `FollowLoop::catch_up`, which checks cg OBS is up.
-    pub async fn follow_current_scene(&self, upstream: &Upstream) -> bool {
+    pub async fn follow_current_scene(
+        &self,
+        upstream: &Upstream,
+        _dropped: Option<(String, HashSet<i64>)>,
+    ) -> bool {
         let reply = upstream.request(GET_CURRENT_PROGRAM_SCENE, None).await;
         let Some(scene) = reply.as_ref().and_then(program_scene_from_reply) else {
             warn!("program follow: cg OBS did not report its program scene — not caught up");
@@ -492,7 +496,7 @@ impl FollowLoop {
         if !(self.obs_up && self.settings.follow_obs) {
             return;
         }
-        if !self.follow.follow_current_scene(&self.upstream).await
+        if !self.follow.follow_current_scene(&self.upstream, None).await
             && let Some((scene, playlists)) = missed
         {
             info!(
