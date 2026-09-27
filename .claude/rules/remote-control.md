@@ -178,6 +178,20 @@ not forwarded: the cut is by scene name. Companion always sends the name.
   `settings-remote-port` and `settings-remote-password`. The mock derives
   `remote` from the stored settings and runs no listener.
 
+## tungstenite 0.26 facts this code relies on
+- `accept_hdr_async_with_config(stream, callback, Some(config))`:
+  `WebSocketConfig` is `#[non_exhaustive]`, so build it with its builders
+  (`.max_message_size(Some(n)).max_frame_size(Some(n))`).
+- A frame over the limit is `Error::Capacity` on read, with NO close frame.
+  The session breaks, and the unread data turns the close into a reset.
+- The tungstenite CLIENT verifies the subprotocol:
+  - requested but not echoed → `NoSubProtocol`;
+  - echoed but not requested → `ServerSentSubProtocolNoneRequested`.
+
+  That is why the tests prove the echo simply by connecting.
+- A handshake the server drops surfaces on the client as
+  `Protocol(HandshakeIncomplete)` (EOF) or `Io` (a reset).
+
 ## Tests
 
 - `protocol_tests.rs`, pure. Includes the spec's auth vector: password
