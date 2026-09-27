@@ -463,10 +463,10 @@ mod tests {
 
     #[test]
     fn presenter_lines_returns_empty_next_for_last_line() {
-        let st = LyricsState::new(test_track());
-        // New default is 0 lead, so position 3200 looks up at exactly 3200 ms,
-        // which is inside the last line (3000..5000).
-        let (_cur, nxt) = st.presenter_lines(3200).expect("on last line");
+        let st = LyricsState::new(wall_track());
+        // Position 4500 is inside wall_track()'s last line (sung 4000..6000).
+        // test_track() would merge into ONE wall line under #217.
+        let (_cur, nxt) = st.presenter_lines(4500).expect("on last line");
         assert!(
             nxt.is_empty(),
             "last line's next must be empty, got {nxt:?}"
@@ -475,8 +475,9 @@ mod tests {
 
     #[test]
     fn presenter_lines_returns_none_before_first_line() {
-        // With 0 lead (the new default), lookup at position 0 is exactly 0 ms,
-        // which is before the first line (starts at 5000 ms).
+        // With operator lead 0, the lookup is the position itself. The #217
+        // plan shows the first line (sung at 5000 ms) 1500 ms early, at 3500 ms,
+        // so the wall is blank before that.
         let track = LyricsTrack {
             version: 1,
             source: "test".into(),
@@ -491,8 +492,12 @@ mod tests {
             }],
         };
         let st = LyricsState::new(track);
-        // position 0 + lead 0 = 0 ms, before 5000 ms.
         assert!(st.presenter_lines(0).is_none());
+        assert!(st.presenter_lines(3_499).is_none());
+        assert_eq!(
+            st.presenter_lines(3_500),
+            Some(("Later".to_string(), String::new()))
+        );
     }
 
     #[test]
@@ -555,11 +560,11 @@ mod tests {
 
     #[test]
     fn resolume_lines_with_next_returns_empty_next_on_last_line() {
-        let st = LyricsState::new(test_track());
-        // With 0 lead, position 3200 looks up at exactly 3200 ms, which is
-        // inside the last line (3000..5000).
+        let st = LyricsState::new(wall_track());
+        // Position 4500 is inside wall_track()'s last line (sung 4000..6000).
+        // test_track() would merge into ONE wall line under #217.
         let (_cur, next_en, _cur_sk, next_sk) = st
-            .resolume_lines_with_next(3200, false)
+            .resolume_lines_with_next(4500, false)
             .expect("on last line");
         assert!(next_en.is_empty(), "last-line next_en must be empty");
         assert!(next_sk.is_none(), "last-line next_sk must be None");
@@ -600,12 +605,15 @@ mod tests {
         assert_eq!(cur, "Offset line");
     }
 
-    /// Negative offset advances the displayed line: offset_ms = -500
-    /// effectively adds to the lead. At position 200 ms with lead=0:
-    /// effective lookup = 200 + lead(0) - (-500) = 700 ms — before the line
-    /// (starts at 2000 ms), so None. With offset -1500: 200 + 0 - (-1500) = 1700
-    /// — still before 2000 → None. Need offset -1800: 200 + 0 - (-1800) = 2000
-    /// — exactly the line start → Some.
+    /// A negative offset advances the displayed line: offset_ms = -1800 adds
+    /// 1800 to every lookup. The #217 plan shows a line sung at 5000 ms from
+    /// 3500 ms (1500 ms early), so with the offset it appears at playback
+    /// 1700 ms.
+    ///
+    /// - Position 1699 → lookup 3499 → None.
+    /// - Position 1700 → lookup 3500 → Some.
+    ///
+    /// Kills a flipped offset sign, which would make the lookup 0 at 1700.
     #[test]
     fn applies_negative_offset_advances_line_start() {
         let track = LyricsTrack {
@@ -614,17 +622,20 @@ mod tests {
             language_source: "en".into(),
             language_translation: String::new(),
             lines: vec![LyricsLine {
-                start_ms: 2_000,
-                end_ms: 4_000,
+                start_ms: 5_000,
+                end_ms: 7_000,
                 en: "Advanced line".into(),
                 sk: None,
                 words: None,
             }],
         };
-        // With lead=0 and offset -1800: 200 + 0 - (-1800) = 2000 = line start.
         let st = LyricsState::with_lead_and_offset(track, 0, -1_800);
+        assert!(
+            st.presenter_lines(1_699).is_none(),
+            "lookup 1699+1800=3499 is before the plan's show at 3500"
+        );
         let (cur, _nxt) = st
-            .presenter_lines(200)
+            .presenter_lines(1_700)
             .expect("negative offset must advance lookup onto the line");
         assert_eq!(cur, "Advanced line");
     }

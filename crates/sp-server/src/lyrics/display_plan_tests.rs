@@ -406,6 +406,8 @@ fn a_fast_passage_switches_exactly_on_time_when_no_lead_is_left() {
     // Nine lines 1000 ms apart, each too long to merge with its neighbour
     // (37 + 1 + 37 > 64 chars). Each line keeps 1200 ms on the wall, which
     // eats the next line's lead until the ninth shows exactly when sung.
+    // Under the design as written, lines 0 and 1 leave before they are sung
+    // (9700 < 10000, 10900 < 11000); see the design question on #217.
     let lines: Vec<LyricsLine> = (0..9u64)
         .map(|k| {
             let start = 10_000 + 1_000 * k;
@@ -512,8 +514,9 @@ fn fixture_no_wall_line_is_up_for_less_than_1200_ms() {
         .map(|d| d.hide_ms - d.show_ms)
         .min()
         .expect("the plan is not empty");
-    // The shortest is "All I have" (sung 509.6 s), which gets 1.4 s. The old
-    // wall flashed 42 lines for under 1 s.
+    // The shortest is "All I have", on the wall for 508.1–509.5 s. Note that
+    // it is sung only at 509.6 s: the next line's lead replaces it first (the
+    // design question on #217). The old wall flashed 42 lines for under 1 s.
     assert_eq!(shortest, 1_400);
 }
 
