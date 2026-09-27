@@ -48,6 +48,16 @@ fn indices_round_trip_every_boundary_across_second_edges() {
 }
 
 #[test]
+fn the_helpers_are_total_on_a_pre_1970_stamp() {
+    // Out of the wall-clock domain, but never a panic: the last slot of the
+    // second before the epoch is 333_334 before it.
+    assert_eq!(grid_index_100ns(-333_334, 30), -1);
+    assert_eq!(grid_boundary_100ns(-1, 30), -333_334);
+    assert_eq!(grid_index_100ns(-10_000_000, 30), -30);
+    assert_eq!(grid_boundary_100ns(-30, 30), -10_000_000);
+}
+
+#[test]
 fn a_non_positive_fps_indexes_nothing() {
     assert_eq!(grid_index_100ns(T0 + 333_333, 0), 0);
     assert_eq!(grid_index_100ns(T0 + 333_333, -30), 0);

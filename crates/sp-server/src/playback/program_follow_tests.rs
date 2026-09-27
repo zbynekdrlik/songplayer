@@ -641,7 +641,7 @@ async fn an_unrelated_event_asks_nothing_a_reconnect_rereads_and_a_scene_is_foll
 async fn missed_events_reread_the_transition_and_catch_up_to_the_program_scene() {
     let pool = pool().await;
     store(&pool, "program_follow_obs", "true").await;
-    let mut rig = start(&pool, vec![fade(500)], 1, NO_POLL);
+    let mut rig = start(&pool, vec![fade(500), fade(1000)], 1, NO_POLL);
     assert_eq!(
         rig.next_requests(3).await,
         vec![REQUEST, PROGRAM_SCENE, "ScenePlaylists:Slido"],
@@ -649,9 +649,10 @@ async fn missed_events_reread_the_transition_and_catch_up_to_the_program_scene()
     );
     rig.spec_becomes((TransitionKind::Fade, 500, 15, SpecSource::Obs))
         .await;
-    // cg OBS switched to sp-fast and its scene event is among the missed
-    // ones: the broadcast keeps ONE event, so three sent before the task runs
-    // again lag it by two, and only the last (a transition change) is left.
+    // cg OBS switched to sp-fast and to a 1000 ms fade, and its events are
+    // among the missed ones: the broadcast keeps ONE event, so three sent
+    // before the task runs again lag it by two, and only the last (a
+    // transition change) is left.
     rig.switch_program_scene("sp-fast");
     rig.raw("SceneItemEnableStateChanged");
     rig.raw("InputVolumeChanged");
@@ -661,11 +662,80 @@ async fn missed_events_reread_the_transition_and_catch_up_to_the_program_scene()
         vec![REQUEST, PROGRAM_SCENE, "ScenePlaylists:sp-fast", REQUEST],
         "the lag re-read the transition and caught up, then the kept event re-read it"
     );
+    let st = rig.bus.status();
+    assert_eq!(st.source, Some(7), "caught up to cg OBS's scene");
     assert_eq!(
-        rig.bus.status().source,
-        Some(7),
-        "caught up to cg OBS's scene"
+        st.transition.active.map(|w| w.n_slots),
+        Some(30),
+        "the catch-up cut fades with the 1000 ms transition the lag re-read"
     );
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn switching_the_follow_on_with_a_new_transition_cuts_with_the_new_one() {
+    let pool = pool().await;
+    store(&pool, "program_transition", "cut").await;
+    let mut rig = start(&pool, vec![fade(500)], 16, Duration::from_millis(20));
+    rig.switch_program_scene("sp-fast");
+    assert_eq!(rig.next_request().await, REQUEST);
+    rig.spec_becomes((TransitionKind::Cut, 0, 0, SpecSource::Setting))
+        .await;
+    // ONE save switches the follow on and picks a 400 ms fade.
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES \
+         ('program_follow_obs', 'true'), ('program_transition', 'fade'), \
+         ('program_transition_ms', '400') \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    rig.source_becomes(7).await;
+    assert_eq!(
+        rig.bus.status().transition.active.map(|w| w.n_slots),
+        Some(12),
+        "the catch-up cut fades with the 400 ms saved together with the switch"
+    );
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn a_transition_read_is_retried_only_while_cg_obs_is_connected() {
+    let pool = pool().await;
+    let failed = json!({
+        "requestType": REQUEST,
+        "requestStatus": { "result": false, "code": 207, "comment": "not ready" },
+    });
+    let mut rig = start(
+        &pool,
+        vec![failed, fade(500)],
+        16,
+        Duration::from_millis(20),
+    );
+    // cg OBS is away before the task even runs: the OBS client does not
+    // serve calls then, so a retry would only pile up in its queue.
+    rig.events
+        .send(ObsEvent::Disconnected)
+        .expect("the task listens");
+    assert_eq!(rig.next_request().await, REQUEST, "the start's read");
+    store(&pool, "program_transition", "cut").await;
+    rig.spec_becomes((TransitionKind::Cut, 0, 0, SpecSource::Setting))
+        .await;
+    assert_eq!(
+        rig.more_requests(),
+        Vec::<String>::new(),
+        "no retry while cg OBS is away"
+    );
+    // It is back: one read, answered, and no more.
+    rig.events
+        .send(ObsEvent::Connected)
+        .expect("the task listens");
+    assert_eq!(rig.next_request().await, REQUEST);
+    store(&pool, "program_transition", "obs").await;
+    rig.spec_becomes((TransitionKind::Fade, 500, 15, SpecSource::Obs))
+        .await;
+    assert_eq!(rig.more_requests(), Vec::<String>::new());
     rig.stop().await;
 }
 
