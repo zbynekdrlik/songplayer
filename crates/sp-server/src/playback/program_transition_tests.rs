@@ -428,6 +428,11 @@ fn a_picture_that_is_not_whole_nv12_fits_as_the_black_canvas_alone() {
         len: 12,
     };
     assert_eq!(fitted(&FROM_4X2, empty, dst), black(dst), "no width");
+    assert_eq!(
+        FitPlan::new(empty, dst).rect(),
+        (2, 2, 0, 0),
+        "a degenerate source: an empty rectangle at the centre"
+    );
     let flat = Layout {
         width: 4,
         height: 0,

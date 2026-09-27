@@ -52,6 +52,7 @@ use serde::Serialize;
 use sp_core::genlock::{GENLOCK_GRID_FPS, grid_boundary_100ns, grid_index_100ns};
 use sp_ndi::AudioFrame;
 
+use crate::playback::nv12_fit::aspect_fit;
 use crate::playback::submit_handoff::SubmitJob;
 
 /// The longest window a transition may take: 300 slots (10 s at 30 fps). A
@@ -428,12 +429,6 @@ fn bilinear(p00: u8, p01: u8, p10: u8, p11: u8, wx: u32, wy: u32) -> u8 {
     ((top * (Q8_ONE - wy) + bottom * wy + (1 << 15)) >> 16) as u8
 }
 
-/// `num / den` rounded to the nearest EVEN number (half up), so a fitted
-/// picture's chroma samples line up with its luma.
-fn even_round(num: u64, den: u64) -> u64 {
-    (num + den) / (2 * den) * 2
-}
-
 /// Whether `layout` is an NV12 picture a buffer of `len` bytes holds whole:
 /// a non-empty size, a stride that fits a row of chroma pairs, and a luma
 /// plane + a half-height chroma plane of `stride` bytes per row.
@@ -470,16 +465,12 @@ pub struct FitPlan {
 }
 
 impl FitPlan {
-    /// The plan that fits a `src` picture into `dst`.
+    /// The plan that fits a `src` picture into `dst`: placed like the preview
+    /// letterbox places it (`nv12_fit::aspect_fit`), capped at a destination
+    /// too small for its 2×2 minimum.
     pub fn new(src: Layout, dst: Layout) -> Self {
-        let (sw, sh) = (u64::from(src.width), u64::from(src.height));
-        let (dw, dh) = (u64::from(dst.width), u64::from(dst.height));
-        // Each axis at the source's aspect for the OTHER axis in full, capped
-        // at the destination: the wider (relatively) side fills its axis, the
-        // other keeps the aspect (equal aspects fill both).
-        let fw = even_round(sw * dh, sh.max(1)).max(2).min(dw);
-        let fh = even_round(sh * dw, sw.max(1)).max(2).min(dh);
-        let (width, height) = (fw as u32, fh as u32);
+        let place = aspect_fit(src.width, src.height, dst.width, dst.height);
+        let (width, height) = (place.w.min(dst.width), place.h.min(dst.height));
         let luma = (0..width).map(|x| tap(x, width, src.width)).collect();
         let chroma = (0..width / 2)
             .map(|x| tap(x, width / 2, src.width.div_ceil(2)))
@@ -487,8 +478,8 @@ impl FitPlan {
         Self {
             src,
             dst,
-            x0: ((dw - fw) / 2) as usize & !1,
-            y0: ((dh - fh) / 2) as usize & !1,
+            x0: place.off_x as usize,
+            y0: place.off_y as usize,
             width,
             height,
             luma,
