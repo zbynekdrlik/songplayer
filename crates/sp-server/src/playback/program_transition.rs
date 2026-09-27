@@ -447,9 +447,9 @@ fn nv12_whole(layout: Layout, len: usize) -> bool {
 /// studio-black bars (Y 16, UV 128) on the other. Bilinear in Q8 fixed point,
 /// the luma plane and the half-resolution chroma plane each on their own grid.
 /// The rectangle is even in every coordinate (unless the destination is under
-/// 2×2), so each chroma sample covers exactly its 2×2 luma block. Built ONCE per pair of layouts (the column
-/// taps are precomputed, the row taps are one per row) and applied on every
-/// boundary of the window that needs it.
+/// 2×2), so each chroma sample covers exactly its 2×2 luma block. Built ONCE
+/// per pair of layouts (the column taps are precomputed, the row taps are one
+/// per row) and applied on every boundary of the window that needs it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FitPlan {
     src: Layout,

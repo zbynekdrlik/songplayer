@@ -125,6 +125,17 @@ fn placement_extreme_aspect_clamps_to_min_2px() {
 fn placement_degenerate_source_is_zero_image() {
     assert_eq!(placement_for(0, 100).w, 0);
     assert_eq!(placement_for(100, 0).h, 0);
+    // #215 review round 4: its centre is floored to even too (6 / 2 = 3 → 2),
+    // like every other placement's offsets.
+    assert_eq!(
+        crate::playback::nv12_fit::aspect_fit(0, 2, 6, 6),
+        Placement {
+            w: 0,
+            h: 0,
+            off_x: 2,
+            off_y: 2,
+        }
+    );
 }
 
 #[test]
