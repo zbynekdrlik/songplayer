@@ -26,6 +26,12 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   the source you cut to looks absent until its first owned frame lands, and
   a slow first frame (> the sender's b+1 ms check) turned the cut boundary
   black (#209 review finding).
+- #215: every offered pair carries `SubmitJob::live` — `true` only for the
+  source's own decoded content (the pacer's `PacedSink::emit`, an NDI input
+  capture), `false` for every standby pair (`emit_standby`, the
+  `default_submit_shared` black / fill / held frame, `fill_job`, the input's
+  standby). The cue gate (`program-transition.md`) opens a fade on the first
+  live pair; ownership and forwarding ignore the flag.
 - Both the playing path and the idle fill go through that ONE submit thread,
   so an idle source offers its own #147 standby pair and a cut to it carries
   that pair — no special case. Since #147 (design record 5845527884) the

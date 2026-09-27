@@ -5,6 +5,7 @@ paths:
   - "crates/sp-server/src/playback/scene_off*.rs"
   - "crates/sp-server/src/playback/program_bus*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
+  - "crates/sp-server/src/playback/pacer_tests_live.rs"
   - "crates/sp-server/src/api/program*.rs"
   - "sp-ui/src/components/program_control.rs"
   - "sp-ui/src/components/settings_form.rs"
@@ -19,14 +20,23 @@ A program cut is no longer a hard switch on one boundary. It is a crossfade of
 audio AND picture that follows cg OBS's scene transition, and the outgoing
 playlist keeps playing until the fade is over. Design record: #215 comment
 5853036223 (Approach 1); the implementation notes are in comment 5853106216.
+The addendum (design record 5855841198, after box run 1 in 5855833871): the
+picture dissolves across different sizes, and a fade waits for the incoming
+song's first real pair.
 
 ## A cut is a transition WINDOW (`program_bus.rs`)
 
 - `ProgramCore::cut` still records the `(first_stamp, pid)` segment of #209:
   `to` owns every boundary from the cut boundary on. It ALSO pushes a
-  `program_transition::Window` of the current spec: `from` (the outgoing
-  source, `None` for a fade up from nothing), `to`, `start` = the cut
-  boundary, `n_slots`, and an exclusive `end`.
+  `program_transition::Window::cued` of the current spec: `from` (the source
+  ON AIR — see the cue gate below; `None` for a fade up from nothing), `to`,
+  `cut_100ns` = the cut boundary, `start_100ns` = the first MIXED boundary,
+  `n_slots`, an exclusive `end`, and its `cue`. The window takes `from`'s
+  pairs over `[cut, end)` (`Window::covers`); only `[start, end)` is mixed
+  (`Window::slot`).
+- The window half of the core is the child module `program_bus_window.rs`
+  (`window_at`, `on_air`, `window_step`, `open_cue`, `commit_held`,
+  `commit_mix`; 1000-line cap).
 - On each window boundary the outgoing source's pair goes to `from_pending`,
   the incoming one to `pending`. The boundary is released as ONE
   `ProgramJob::Mix` once each side is here or MISSED. "Missed" uses the #209
@@ -46,6 +56,11 @@ playlist keeps playing until the fade is over. Design record: #215 comment
   cut is also placed after the newest stamp of every window's `from`, so the
   outgoing source never has a waiting pair for a boundary that left its window
   (a stale `from_pending` entry would count toward the reorder bound forever).
+  A window whose cue still WAITS is truncated too and FROZEN (`Cue::Frozen`:
+  it never opens, its boundaries stay held), and the new window fades out of
+  the source really on air, the frozen window's `from` (`ProgramCore::on_air`).
+  A cut back to that source needs no window: it just takes the boundaries over
+  (segment only).
 - `prune` drops a window once its last boundary is served
   (`transitions_done`, a Cut included). `Window::covered()` is the number of
   boundaries a (possibly truncated) window covers; `served` and the dashboard
@@ -54,17 +69,88 @@ playlist keeps playing until the fade is over. Design record: #215 comment
   grid_boundary_100ns}` (tested in sp-core `genlock_tests_grid_index.rs`).
   Slots are 333 333 or 333 334 × 100 ns wide, so NEVER `start + k · interval`.
 
+## The cue gate (#215 addendum B2, `program_bus_window.rs`)
+
+The box run 1 finding: a playlist whose scene comes on program starts a NEW
+song. Its first decoded pair arrives ~10 boundaries after the cut (the paused
+song's teardown = ~4 paced-output fills, then the new song's pre-roll = ~6
+standby pairs while the decoder opens, see "B1" below), so a fade laid on the
+cut boundary mixed the outgoing song against silence.
+
+- `SubmitJob::live` marks a pair of the source's OWN content: the pacer's
+  `PacedSink::emit` (a decoded frame with its song audio, a stall repeat
+  included) and an NDI input capture. Never live: `PacedSink::emit_standby`
+  (the paused frozen picture, and via `default_submit_shared` the idle and
+  pre-roll black, a starve fill, a held seek frame), the paced consumer's
+  fill (`PacedConsumer::fill_job`) and the NDI input's standby pair. The
+  default `emit_standby` is `emit`, so `FrameSubmitter` and emit-only sinks
+  see what they always saw; `HandoffSink` overrides it (live = false).
+- A Fade window starts `Cue::Waiting { deadline }` (`Window::cued`), with
+  `deadline` = the cut + `CUE_WAIT_MAX_SLOTS` (15 = the design's
+  `CUE_WAIT_MAX` 500 ms) and its `end` the latest it can reach (the cut +
+  15 + `n_slots`). A Cut is `Cue::Open` at once and zero-length: it never
+  waits.
+- While it waits, a boundary is decided once the INCOMING pair is here or
+  missed (its first live pair may be the one):
+  - `to`'s pair is live → the cue OPENS there (`Window::open`: `start` = that
+    boundary, `end` = start + `n_slots`), and the boundary is mixed as slot 0;
+  - `to` decided and the boundary is the deadline → the cue opens anyway
+    (`cue_timeouts` +1, WARN `the incoming source sent no live pair in time`);
+  - otherwise the boundary is HELD (`commit_held`): `from`'s own pair at full
+    level as a `ProgramJob::Source` (counted `forwarded`), or the program's
+    standby pair when `from` missed (`filled`); `to`'s pair is dropped;
+  - both missed and neither here: filled like any boundary (the core's fill +
+    resync path).
+- `open_cue` drops `from`'s pairs past the window's new end (they belonged to
+  the wait's worst case and would count toward the reorder bound forever).
+- `transition.cue_wait_boundaries` = the LAST opened window's wait (0 = live
+  on the cut boundary, 15 = timed out); `cue_timeouts` counts the timeouts.
+  The dashboard "Prechod" line shows no counters, so it is unchanged; a
+  waiting window shows as `active` with 0 %.
+- `hold_for` reports a waiting window's LATEST end, so `scene_off.rs` keeps
+  the outgoing playlist playing through the wait with no new timer; its
+  re-check finds the window over, or asks again.
+
+### B1: the silence before a new song is its PRE-ROLL, not a defect
+
+Traced on #215 (comment 5856377673): after `paced output: a pacer feeds
+again`, `Pacer::preroll` (`pacer_preroll.rs`) services every boundary with the
+standby pair (the 1920×1080 black + silence) until `PrerollGate::poll` sees the
+decoder opened (MF reader, the stems — `karaoke: mixing stems` ~93 ms after
+`starting playback` — and `open_paced_decoder`) AND its first frame buffered.
+The song's first decoded pair then carries FLAC block 0 (`split_sync` pairs
+the first frame with every chunk up to pts + 250 ms; the A/V anchor starts the
+block at the frame's media time). `pacer_tests_live.rs` pins both halves. What
+would shorten the wait (main-session decisions, not built): overlap the paused
+song's producer teardown (`stop` + `join`, ~4 fills) with the new song's open,
+or resume the paused song on scene-on instead of `SelectAndPlay`.
+
 ## The mix (`program_transition.rs` pure, `program_output.rs` on the sender thread)
 
 - Audio: equal power, `a = a_from·cos θ + a_to·sin θ`, θ = π/2 · (j + ½)/N over
   the WHOLE window (N = n · 1600 samples, j runs across boundaries), so the gain
   never steps at a boundary edge. A mono side feeds both channels; a missing
   side is silence. The audio stamp is `to`'s, else `from`'s.
-- Picture: Q8 weight `w = round(256 · (k + ½)/n)`; same layout (width, height,
-  stride, length) → `(f·(256 − w) + t·w + 128) >> 8` on Y and UV alike, into a
-  `frame_pool` buffer. Different layouts → the picture CUTS at the window's
-  midpoint (`w ≥ 128` → `to`) while the audio still crossfades, logged once per
-  run (`ProgramOutput::size_cut`, reset by any non-mixed boundary).
+- Picture: Q8 weight `w = round(256 · (k + ½)/n)`, blended
+  `(f·(256 − w) + t·w + 128) >> 8` on Y and UV alike into a `frame_pool`
+  buffer, always in the INCOMING side's layout. When the two layouts (width,
+  height, stride, length) differ, the outgoing picture is first fitted into
+  the incoming one (#215 addendum A) — there is no midpoint cut any more:
+  - `FitPlan` (`fit_nv12_into` is its one-shot form): aspect kept, each axis
+    `even_round(src·other_dst / other_src)` capped at the destination (so the
+    relatively wider side fills its axis), centred on EVEN offsets (a chroma
+    sample covers its 2×2 luma block; an odd centring offset rounds down, e.g.
+    2560×1080 into 1920×1080 → rows 134..943), studio-black bars Y 16 / UV 128;
+  - bilinear in Q8 at the pixel CENTRES (`HALF_PIXEL_Q8`), luma and the
+    half-resolution chroma each on their own grid, clamped at the edges;
+  - the column taps are built once per pair of layouts: `ProgramOutput` keeps
+    the plan (`fit`, `fit_plans` counts builds) while the pair stays the same,
+    fits into a reused scratch `Vec` (`fitted`), and logs one DEBUG line per
+    plan naming both layouts;
+  - a source or destination that is not whole NV12 for its layout gives the
+    black canvas alone, never a panic.
+  The cost is one bilinear fit per mixed boundary on the program thread (≤ 9
+  for 300 ms).
 - `mix_audio_block` collects its samples instead of pre-sizing the `Vec`: a
   capacity formula is an equivalent mutant.
 
@@ -176,7 +262,8 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
 - `GET /api/v1/program` (and the cut answer) → `transition {kind, duration_ms,
   n_slots, source (obs|setting|fallback), active {from, to,
   start_boundary_100ns, n_slots, served_slots, progress} | null,
-  transitions_done, mixed_boundaries, side_fills}` and `follow {enabled, mode,
+  transitions_done, mixed_boundaries, side_fills, cue_wait_boundaries,
+  cue_timeouts}` and `follow {enabled, mode,
   ms, obs_transition {name, kind, duration_ms} | null, last_follow_cut}`
   (`last_follow_cut` has the #213 `RemoteCut` shape).
 - Dashboard `ProgramControl`: the `program-transition` line, e.g.
@@ -191,10 +278,16 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
 
 ## Tests
 
-- `program_transition_tests.rs` (pure, exact pins), `program_bus_tests_transition.rs`
+- `program_transition_tests.rs` (pure, exact pins; the fit's from a scratch
+  Python model of `FitPlan`), `program_bus_tests_transition.rs`
   (the #209 rig: A 4×2, B 8×2, C 6×2, standby 2×2; `take_all` renders each job as
-  `src W` / `fill` / `mix k/n F>T`), `program_output_tests.rs` (the mixed
-  boundary on the mock sender), `scene_off_tests.rs`, `program_follow_tests.rs`
+  `src W` / `fill` / `mix k/n F>T`; its helpers are `pub(super)`),
+  `program_bus_tests_cue.rs` (the cue gate: `standby()` is a non-live pair;
+  it reads `core.pending` / `core.from_pending` directly),
+  `pacer_tests_live.rs` (which pacer pairs are `emit` vs `emit_standby`, and
+  the B1 pin), `program_output_tests.rs` (the mixed
+  boundary on the mock sender, the fitted blend, the plan reuse),
+  `scene_off_tests.rs`, `program_follow_tests.rs`
   (pure + `Follow`), `program_follow_tests_task.rs` (the task end to end) and
   `program_follow_tests_loop.rs` (`FollowLoop`'s steps awaited one by one; the
   helpers are `pub(super)`) — a fake cg OBS at `ObsCommand::Remote`: scripted
@@ -236,7 +329,12 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
 Two playing playlists, a scene change via Companion/remote with a 300 ms OBS
 fade: `mixed_boundaries` +9, audio RMS never more than 3 dB below the quieter
 source, a dev1 VBAN capture with no zero-run ≥ 5 ms across the change, and the
-owner confirms on the PA and the wall. `program_follow_obs` is the setting
+owner confirms on the PA and the wall. Addendum (run 2): no `differ in size`
+WARN (only the DEBUG fit line), the incoming song's FLAC block 0 inside the
+window, no true-zero run between the outgoing fade and the incoming song, and
+`cue_wait_boundaries` ≤ 15 with `cue_timeouts` +0 — about 10–11 for a paused
+playlist that starts a new song (the fills + the pre-roll, B1 above), 0 for an
+already playing one. `program_follow_obs` is the setting
 switched on for events (design record); the watcher script
 `%TEMP%\sp_follow.ps1` is retired once it is on.
 
