@@ -39,7 +39,7 @@ pub const ANCHOR_TIGHT_BRACKET: Duration = Duration::from_micros(20);
 pub const ANCHOR_WIDE_BRACKET: Duration = Duration::from_micros(200);
 
 /// The most one resample may move the wall: 1 ms in 100-ns units. Normal
-/// dantesync slewing is ≤ 100 µs per ~3.3 s resample (30 ppm).
+/// dantesync slewing is ≤ ~313 µs per ~3.3 s resample (≤ 94 ppm).
 pub const ANCHOR_MAX_STEP_100NS: i64 = 10_000;
 
 /// One bracketed read of the realtime clock: `m1` is the monotonic clock read

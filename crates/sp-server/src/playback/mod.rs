@@ -27,6 +27,7 @@ pub mod paced_output; // #168/#147 paced submit side: handoff + consumer (cross-
 pub mod pacer;
 pub mod pacer_queue; // #147 producer/consumer: pure bounded look-ahead frame queue
 pub mod pacer_sink; // #203 pacer scheduling + shared-frame standby submit helpers
+pub mod pacer_spin; // #147 the boundary wait's spin: yields once the wall stands still (pure, Linux-tested)
 pub mod pacing_stats; // #147 PacingStats (split out of ndi_health.rs, 1000-line cap)
 pub mod pipeline;
 #[cfg(windows)]

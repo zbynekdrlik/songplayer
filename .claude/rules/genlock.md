@@ -977,14 +977,64 @@ Now:
     delta. It would then cut the hold to a 1 ms hold and re-arm, and the next
     resample would follow the rest. The wall would still be monotonic and
     would converge one resample later.
-  - **Gotcha:** `pipeline_paced::sleep_to_boundary` SPINS its last stretch
-    while `0 < until − now ≤ interval`. On the box the wall freezes a few µs
-    PAST the emitted boundary (emit lateness), so `until − now < interval`
-    for either slot width (333 333 / 333 334), and the condition holds for the
-    whole hold. Each pacer thread therefore busy-spins ~|hold| once a night.
-    It is not a correctness issue; it was flagged to the main in the #147
-    FINDING comment. Only with zero lateness would a 333 334-wide slot leave
-    the spin at once. The virtual harness's `sleep_to` has no spin at all.
+  - **The boundary wait through a hold: spin budget, then yield (#147
+    follow-up, design record 5852618200).**
+    - Why it is needed: `pipeline_paced::sleep_to_boundary` coarse-sleeps to
+      ~2 ms before the boundary, then waits in
+      `pacer_spin::spin_to_boundary`. On the box the wall freezes a few µs
+      PAST the emitted boundary (emit lateness), so `0 < until − now ≤
+      interval` holds for either slot width (333 333 / 333 334) for the whole
+      hold. The old unbounded spin therefore burned one core per paced thread
+      through the ~1.5 s hold, at most once a night (a backward step).
+    - The pure `spin_step(elapsed, delta, interval)` decides every check:
+      - `delta ≤ 0` → Done;
+      - `interval > 0 && delta > interval` → Bail (unchanged);
+      - `elapsed ≤ SPIN_BUDGET` (3 ms, monotonic, from the start of the
+        spin) → Spin;
+      - otherwise → Yield (`thread::sleep(1 ms)`).
+    - A normal boundary never reaches the budget, so its precision is
+      unchanged. The spin normally starts ~2 ms (the coarse-sleep margin)
+      before the boundary.
+      - Worst case: a resample's ≤ 1 ms hold starts at the tick right after
+        an emit. If the next wait's plan read lands inside that hold, the
+        coarse sleep comes out short by the un-slept rest of the hold, so the
+        spin starts up to 2 ms + that rest (< 1 ms) early. That is < 3 ms.
+      - The inclusive budget covers it: the rest is always less than the
+        whole hold, the coarse sleep's overshoot only shortens the spin, and
+        std documents that `thread::sleep` never sleeps less. So that edge
+        never yields and never logs the line below.
+      - A hold near 1 ms is rare. It follows a UTC step or an outlier (a
+        clamped resample, or the resample that takes it back out), never
+        normal µs slewing.
+    - A hold costs ~1 wake-up per ms, through the hold and through the slot
+      after it. The wall resumes from its frozen value, so the awaited
+      boundary is still ~one slot ahead, and the wait, already past its
+      budget, keeps yielding.
+    - That boundary goes out at most one yield after the wall REACHES it: up
+      to ~1 ms nominally, plus the sleep's wake-up overshoot, which on the box
+      can be several ms (the 19.9.2026 coarse-sleep finding above). It is the one
+      boundary per hold without spin precision. It may count ONE late frame
+      per paced thread per backward step, against `LATE_THRESHOLD_100NS` =
+      2 ms (`pacer.rs`). Stamps stay contiguous either way.
+    - A wait that yielded logs ONE INFO line, `paced: the wall stood still
+      through a boundary wait` (`yields`, `spins`).
+      - At a backward 04:00 step (~1.5 s hold) expect one per paced thread. A
+        forward step holds nothing, so it logs none.
+      - Any line outside a followed backward hold means something froze the
+        wall (or the coarse sleep broke its contract): investigate it.
+    - `pacer_spin.rs` is cross-platform and mutation-covered. It is NOT named
+      `pipeline_paced_*`, because `.cargo/mutants.toml` excludes that
+      substring.
+    - Its thread test runs a real `Pacer` over a `WallClock::settable` wall
+      that the test holds frozen. It witnesses every check through an observer
+      hook and never times a check, so it is safe under ptrace. It asserts:
+      the wait spins only within the budget, yields after it, never returns or
+      spins again while the wall is frozen, yields at most once after the wall
+      passes the boundary, and `yields × 1 ms ≤` the real time taken.
+    - The virtual harness's `sleep_to` (`pacer_tests_wall_anchor.rs`) still
+      has no spin at all.
+    - The SDK-clocked audio emitter's `pipeline_audio::sleep_until` (pacing
+      OFF only, not used on the box) still spins with no budget.
   - **Legacy SDK-clocked path (pacing OFF):** `FrameSubmitter::submit_nv12`
     ticks its wall per submitted frame and stamps `floor(now)`. Through a
     followed ~1.5 s hold it therefore gives ≈ 1.5 s × the file's frame rate
