@@ -99,10 +99,11 @@ fn to_paced_frame(
 
 /// Sleep the monotonic clock until ~2 ms before `until_100ns` (wall-clock
 /// 100 ns), then spin to the boundary. The spin stays within
-/// `pacer_spin::SPIN_BUDGET`; after that, while the wall stands still, it
-/// yields `SPIN_YIELD` per check. The coarse wait is clamped to 1 s and a
-/// backward clock jump escapes without spinning (#147 change 4, via the pure
-/// [`plan_sleep_100ns`]), so a clock step never parks the send thread.
+/// `pacer_spin::SPIN_BUDGET`. After that it yields `SPIN_YIELD` per check until
+/// the wall reaches the boundary (through a hold and the slot after it). The
+/// coarse wait is clamped to 1 s and a backward clock jump escapes without
+/// spinning (#147 change 4, via the pure [`plan_sleep_100ns`]), so a clock step
+/// never parks the send thread.
 pub(crate) fn sleep_to_boundary(pacer: &Pacer, until_100ns: i64) {
     let interval = pacer.interval_100ns();
     const SPIN_MARGIN_100NS: i64 = 20_000; // ~2 ms
@@ -116,9 +117,11 @@ pub(crate) fn sleep_to_boundary(pacer: &Pacer, until_100ns: i64) {
         std::thread::sleep(Duration::from_nanos((coarse_100ns * 100) as u64));
     }
     // Spin the last ~2 ms to hit the boundary precisely; bail on a backward jump
-    // (delta grows past one interval) so a clock step never spins forever. Past
-    // the 3 ms spin budget the wall stands still (a followed hold), so each check
-    // yields 1 ms instead of burning a core through it (#147 follow-up).
+    // (delta grows past one interval) so a clock step never spins forever. A
+    // wait that outlasts the 3 ms spin budget met a wall that stood still (a
+    // followed hold). From then on each check yields 1 ms until the wall reaches
+    // the boundary, through the hold and the slot after it, instead of burning a
+    // core (#147 follow-up).
     let spin = spin_to_boundary(pacer, until_100ns, |_, _| {});
     if spin.yields > 0 {
         info!(

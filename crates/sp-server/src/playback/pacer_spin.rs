@@ -47,8 +47,8 @@ pub enum SpinStep {
     Bail,
     /// Short of the boundary within the budget: `std::hint::spin_loop()`.
     Spin,
-    /// Short of the boundary past the budget, so the wall stands still: sleep
-    /// [`SPIN_YIELD`].
+    /// Short of the boundary past the budget, because the wall stood still
+    /// (a followed hold, or the slot after it): sleep [`SPIN_YIELD`].
     Yield,
 }
 
