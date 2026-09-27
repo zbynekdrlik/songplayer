@@ -36,7 +36,9 @@ What the driver does now (`refresh_mapping(now)`):
 - `decide` returns `NotReady` (log `reason="not-ready"`) on every tick for
   `NOT_READY_FAST_WINDOW` (120 s) from `not_ready_since`, skipping the 60 s
   retry backoff. After that the retry window applies again. A composition
-  that never gets SongPlayer's clips costs 1 + 11 + 3 = 15 fetches in 5 min.
+  that never gets SongPlayer's clips costs 1 + 11 + 3 = 15 fetches in 5 min,
+  then one fetch (and one INFO `reason="not-ready"` line) every 60 s for as
+  long as it stays that way — 5× the TTL rate, the accepted trade-off.
 - Precedence: forced command > breaker-closed > NotReady > startup / TTL.
   NotReady must sit BEFORE TTL: after a restart `last_full_ok` is the
   pre-restart stamp, and a TTL reason would wait out the retry window.
@@ -44,23 +46,35 @@ What the driver does now (`refresh_mapping(now)`):
   a `RecoveryEvent`. The engine's `handle_resolume_recovery` re-pushes the
   title and the current display line.
 
-## RecoveryEvent: exactly one re-push per recovery
+## RecoveryEvent: one per driver step
 
 `show_title` fades opacity from 5 % to 100 %, so a SECOND `ShowTitle` while the
-title is up is a visible blink. Keep it to one event:
+title is up is a visible blink. So one driver step fires at most one event.
+A step is one liveness tick (`on_tick_at`), one command, or the startup
+refresh.
 
-- `apply_outcome(true)` fires one after prior failures (`was_failing`). The
-  ready transition in the same `refresh_mapping` call fires only when that one
-  did not (`recovery_fired = consecutive_failures > 0`, read BEFORE
-  `apply_outcome`).
-- Opening the breaker clears `not_ready_since`. The `/product` probe that
-  closes the breaker fires its own event BEFORE the breaker-closed refresh.
-  The engine's commands queue on the driver's mpsc and run after that refresh,
-  against the fresh map. A not-ready episode left over from before the outage
-  would add a second event.
-- The event is broadcast synchronously inside the driver call. Tests count
-  events with `try_recv` right after the `.await` (see `drain` in
-  `driver_not_ready_tests.rs`).
+- **Why per step:** the engine's re-push for an event queues on the driver's
+  own mpsc. The driver is busy until the step ends, so that re-push runs
+  AFTER the step, against the map the step ends with. An event fired earlier
+  in the step, e.g. by the probe's `apply_outcome(true)` after a failed probe,
+  already covers a refresh that later in the same step finds the clips.
+- **How:** `send_recovery_event` sets `recovery_sent_this_step`, and
+  `on_tick_at` / the `RefreshMapping` arm clear it at the step's start. The
+  ready transition fires only when it is still false.
+- **Rejected guard:** `consecutive_failures > 0` cannot be the guard. The
+  probe resets the counter before the refresh runs, so it missed the
+  failed-probe-then-ready tick (review round 1, 🔴).
+- **Opening the breaker clears `not_ready_since`.** A relaunch whose
+  composition is still loading then gets a FRESH 120 s fast window from the
+  breaker-closed refresh. The tail of an old episode would give only the
+  60 s retry.
+- **Counting events in tests:** the event is broadcast synchronously inside
+  the driver call. Count with `try_recv` right after the `.await` (see
+  `drain` in `driver_not_ready_tests.rs`).
+- **Every host re-pushes.** The engine's `handle_resolume_recovery` ignores
+  `host`, and the Resolume command forwarder sends to every host. So every
+  RecoveryEvent re-pushes all hosts, including healthy ones (an older
+  behaviour).
 
 ## Engine side (`playback/recovery.rs`)
 
@@ -83,8 +97,9 @@ saved composition stays until the next line change.
   freshly booted Windows runner). A real `Instant::now()` stamp mixed with
   synthetic ticks shifts every window by the test's runtime.
 - **A composition sequence** is two mocks on the same path. Mount the first
-  with `.up_to_n_times(1)` first; wiremock tries mocks in mount order, so it
-  wins while it has a use left.
+  with `.up_to_n_times(1)` first. wiremock 0.6 sorts mocks by priority, and
+  the sort is stable, so at equal (default) priority mount order decides. The
+  first mock wins while it has a use left.
 - **A "steady state" fixture must carry a SongPlayer clip.** `{"layers":[]}`
   is NOT READY and is fetched again on the next tick
   (`driver_poll_tests.rs::loaded_composition`).
