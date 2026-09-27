@@ -274,12 +274,16 @@ async fn dispatch_lyrics_no_throttle() {
 
 // -- Resolume recovery re-emits the wall's display state (#217) -------------
 
-/// A Playing, on-program pipeline at `position_ms`, then a Resolume recovery.
-/// Returns the Resolume commands it sent. No `videos` row exists, so
-/// `push_title` sends no ShowTitle and only the subtitle state remains.
-async fn recovery_commands_at(position_ms: u64) -> Vec<crate::resolume::ResolumeCommand> {
+/// A Playing, on-program pipeline with `lyrics` at `position_ms`, then a
+/// Resolume recovery. Returns the Resolume commands it sent. No `videos` row
+/// exists, so `push_title` sends no ShowTitle and only the subtitle state
+/// remains.
+async fn recovery_commands(
+    lyrics: Option<LyricsState>,
+    position_ms: u64,
+) -> Vec<crate::resolume::ResolumeCommand> {
     let (mut engine, mut resolume_rx, _ws_rx) = build_engine().await;
-    install_pipeline(&mut engine, 99, true, Some(LyricsState::new(make_track())));
+    install_pipeline(&mut engine, 99, true, lyrics);
     let pp = engine.pipelines.get_mut(&99).unwrap();
     pp.state = PlayState::Playing { video_id: 42 };
     pp.cached_position_ms = position_ms;
@@ -295,7 +299,7 @@ async fn recovery_commands_at(position_ms: u64) -> Vec<crate::resolume::Resolume
 
 #[tokio::test]
 async fn resolume_recovery_re_pushes_the_current_line() {
-    let cmds = recovery_commands_at(1500).await; // inside "alpha"
+    let cmds = recovery_commands(Some(LyricsState::new(make_track())), 1500).await; // inside "alpha"
     match cmds.as_slice() {
         [crate::resolume::ResolumeCommand::ShowSubtitles { en, .. }] => {
             assert!(en.contains("alpha"), "got: {en}");
@@ -310,12 +314,28 @@ async fn resolume_recovery_re_pushes_the_current_line() {
 /// restored from its saved composition.
 #[tokio::test]
 async fn resolume_recovery_re_sends_hide_when_the_plan_is_blank() {
-    let cmds = recovery_commands_at(60_000).await;
+    let cmds = recovery_commands(Some(LyricsState::new(make_track())), 60_000).await;
     assert!(
         matches!(
             cmds.as_slice(),
             [crate::resolume::ResolumeCommand::HideSubtitles]
         ),
         "a blank plan position re-sends HideSubtitles, got {cmds:?}"
+    );
+}
+
+/// Review round 2: a song without lyrics. Its song-start HideSubtitles was
+/// skipped against the host's empty clip map, so recovery must clear the
+/// subtitle clips too, or a stale text Arena restored from its saved
+/// composition stays for the whole song.
+#[tokio::test]
+async fn resolume_recovery_re_sends_hide_for_a_song_without_lyrics() {
+    let cmds = recovery_commands(None, 1500).await;
+    assert!(
+        matches!(
+            cmds.as_slice(),
+            [crate::resolume::ResolumeCommand::HideSubtitles]
+        ),
+        "a playing song without lyrics re-sends HideSubtitles, got {cmds:?}"
     );
 }

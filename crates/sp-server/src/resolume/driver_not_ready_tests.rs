@@ -638,3 +638,60 @@ async fn an_outage_gives_the_relaunch_a_fresh_fast_window() {
         "the breaker close's event, then one when the clips arrive"
     );
 }
+
+/// Review round 2: Arena comes back less than 60 s after the last full-refresh
+/// attempt, so the retry window holds the breaker-closed refresh back. The
+/// breaker had evicted the clip map, so that map has none of SongPlayer's
+/// clips: it is NOT READY from the breaker close, and the next tick fetches it
+/// instead of treating the empty map as the steady state until the TTL.
+#[tokio::test]
+async fn a_breaker_close_held_back_by_the_retry_window_is_refetched_on_the_next_tick() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(composition_with(&[SUBS_TOKEN])))
+        .mount(&server)
+        .await;
+    let (tx, mut rx) = broadcast::channel(16);
+    let mut driver =
+        HostDriver::new("127.0.0.1".into(), server.address().port()).with_recovery_channel(tx);
+    let base = Instant::now();
+
+    driver.on_tick_at(base).await; // startup refresh: mapped
+    for _ in 0..3 {
+        driver.apply_outcome(false); // Arena goes away: breaker opens, map evicted
+    }
+
+    driver.on_tick_at(base + secs(40)).await;
+    assert_eq!(
+        composition_fetches(&server).await,
+        1,
+        "40 s after the startup attempt the retry window holds the breaker-closed refresh"
+    );
+    assert_eq!(
+        drain(&mut rx),
+        1,
+        "the breaker close fires its own RecoveryEvent"
+    );
+    assert_eq!(
+        driver.not_ready_since,
+        Some(base + secs(40)),
+        "the evicted map is not ready from the breaker close"
+    );
+
+    driver.on_tick_at(base + secs(50)).await;
+    assert_eq!(
+        composition_fetches(&server).await,
+        2,
+        "the next tick fetches the evicted map, not the TTL refresh at 300 s"
+    );
+    assert!(
+        driver.clip_mapping.contains_key(SUBS_TOKEN),
+        "the clips are mapped again"
+    );
+    assert_eq!(
+        drain(&mut rx),
+        1,
+        "the refresh that maps the clips fires one RecoveryEvent, so the wall is re-pushed"
+    );
+}
