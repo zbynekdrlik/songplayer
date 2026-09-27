@@ -318,6 +318,15 @@ needed an explicit Linux unit test calling it through `MockNdiBackend`. When you
 add a pub fn during a diff, ask "does a LINUX `#[test]` actually call this?" — if
 not, add one or the mutation gate reddens.
 
+**Extracting pure logic OUT of a `#[cfg(windows)]` module: mind the file NAME
+(#147 spin budget).** The `.cargo/mutants.toml` `exclude_re` entries are
+SUBSTRING regexes. `'sp-server/src/playback/pipeline_paced'` excludes
+`pipeline_paced.rs` AND every `pipeline_paced_*.rs` sibling. So a helper split
+into `pipeline_paced_spin.rs` would compile on Linux but never be
+mutation-tested. Name it outside every excluded prefix: `pacer_spin.rs`, with
+`pub mod` in `playback/mod.rs`. Then `grep` the exclude list for your new path
+before committing.
+
 ## Inserting a `mod` before a `#[cfg(test)]` test module STEALS the gate (#192 r5)
 
 Attributes attach to the NEXT item. A `#[path] mod audio_emitter_tests;` at the
@@ -421,6 +430,20 @@ sees that. What held up across five review rounds:
 - **Pace virtual time for loop tests.** Every wait really sleeps, but only the
   waits advance the clock. A stall then cannot fake a missed boundary; the
   gate proves the waiting part.
+- **A spin / wait loop on a real clock: witness each step, never time it**
+  (#147, `pacer_spin_tests.rs`).
+  - Give the loop an observer hook `FnMut(step, elapsed)` and return a tally.
+  - The test runs the loop on its own thread over a `WallClock::settable`
+    wall that it holds frozen. The observer sends each Yield on a channel, and
+    the test waits for N witnesses with `recv_timeout(20 s)`.
+  - Assert only invariants that hold whatever the stall:
+    - the tally equals the observer's counts;
+    - the elapsed seen at each step is on the right side of the budget;
+    - the loop never spins again after it starts yielding;
+    - `yields × sleep ≤` the real time taken.
+  - A `Drop` guard that moves the wall far past the boundary frees the
+    spinner on every failure path, so the test never leaves a spinning thread
+    behind.
 - **FFI lock scope** (`mutants::skip` code that needs a runtime). Move the SDK
   calls into a struct built from the `unsafe extern "C" fn` pointer table
   (`receive.rs` `RecvHandles`). Test it with fake `unsafe extern "C" fn`s whose
