@@ -640,19 +640,22 @@ mod tests {
         assert_eq!(cur, "Advanced line");
     }
 
-    /// With offset 0 and default lead (0 in new codebase), `LyricsState::with_lead_and_offset`
-    /// must behave identically to `LyricsState::new`. Kills any mutant that
-    /// folds the offset branch into a different path when offset == 0.
+    /// Lead 0 and offset 0 leave the plan's own boundaries untouched, and
+    /// `new` behaves exactly like `with_lead_and_offset(track, 0, 0)`.
+    /// `wall_track()`'s plan is [0, 2500) "Hello world", then [2500, 9000)
+    /// "Goodbye".
     #[test]
     fn offset_zero_behaves_identically_to_no_offset() {
-        let st_new = LyricsState::new(test_track());
-        let st_off = LyricsState::with_lead_and_offset(test_track(), 0, 0);
-        for pos in [0u64, 500, 1500, 3200, 4500] {
-            assert_eq!(
-                st_new.presenter_lines(pos),
-                st_off.presenter_lines(pos),
-                "presenter_lines must match at position {pos}"
-            );
+        let st_new = LyricsState::new(wall_track());
+        let st_off = LyricsState::with_lead_and_offset(wall_track(), 0, 0);
+        for st in [&st_new, &st_off] {
+            let cur = |pos| st.presenter_lines(pos).map(|(c, _)| c);
+            assert_eq!(cur(2_499).as_deref(), Some("Hello world"));
+            assert_eq!(cur(2_500).as_deref(), Some("Goodbye"));
+            assert_eq!(cur(8_999).as_deref(), Some("Goodbye"));
+            assert_eq!(cur(9_000), None);
+        }
+        for pos in [0u64, 2_499, 2_500, 4_500, 9_000] {
             assert_eq!(
                 st_new.resolume_lines(pos),
                 st_off.resolume_lines(pos),
