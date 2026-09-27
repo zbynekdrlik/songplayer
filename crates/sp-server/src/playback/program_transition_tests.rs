@@ -328,6 +328,34 @@ fn an_upscale_interpolates_along_both_axes_and_clamps_at_the_edges() {
     );
 }
 
+/// A 4×4 NV12 picture whose luma rows AND whose two chroma rows all differ.
+const SRC_4X4: [u8; 24] = [
+    10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 100, 200, 110, 210, 60,
+    150, 70, 160,
+];
+
+#[test]
+fn a_picture_with_two_chroma_rows_scales_them_like_its_luma() {
+    let l_4x4 = tight(4, 4);
+    assert_eq!(fitted(&SRC_4X4, l_4x4, l_4x4), SRC_4X4.to_vec(), "identity");
+    assert_eq!(
+        fitted(&SRC_4X4, l_4x4, tight(2, 2)),
+        vec![35, 55, 115, 135, 85, 180],
+        "each 2×2 luma block and both chroma rows averaged"
+    );
+    assert_eq!(
+        fitted(&SRC_4X4, l_4x4, tight(8, 8)),
+        vec![
+            10, 13, 18, 23, 28, 33, 38, 40, 20, 23, 28, 33, 38, 43, 48, 50, 40, 43, 48, 53, 58, 63,
+            68, 70, 60, 63, 68, 73, 78, 83, 88, 90, 80, 83, 88, 93, 98, 103, 108, 110, 100, 103,
+            108, 113, 118, 123, 128, 130, 120, 123, 128, 133, 138, 143, 148, 150, 130, 133, 138,
+            143, 148, 153, 158, 160, 100, 200, 103, 203, 108, 208, 110, 210, 90, 188, 93, 190, 98,
+            195, 100, 198, 70, 163, 73, 165, 78, 170, 80, 173, 60, 150, 63, 153, 68, 158, 70, 160
+        ],
+        "an upscale interpolates between the two chroma rows"
+    );
+}
+
 #[test]
 fn the_catalogs_resolutions_fit_centred_on_even_offsets() {
     let fit = |sw, sh, dw, dh| FitPlan::new(tight(sw, sh), tight(dw, dh)).rect();

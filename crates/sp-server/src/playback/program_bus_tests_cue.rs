@@ -217,6 +217,10 @@ fn an_outgoing_side_missing_while_the_cue_waits_is_the_programs_standby_pair() {
         "A missed b(7) and B is not live: the program's standby pair"
     );
     assert_eq!(core.status().health.filled, 1);
+    assert!(
+        core.pending.is_empty(),
+        "B's standby pair for the held b(7) is dropped, never left waiting"
+    );
     core.offer(SRC_A, job(4, &fa, b(8), LEVEL_A));
     assert_eq!(core.queued(), 0, "A's b(8) waits for B's");
     core.offer(SRC_B, job(8, &fb, b(8), LEVEL_B));
