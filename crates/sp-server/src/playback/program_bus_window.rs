@@ -44,17 +44,15 @@ impl ProgramCore {
     }
 
     /// The source on program just before a cut on `boundary`: the OUTGOING
-    /// source of a window that holds it there at full level — its cue still
-    /// waits or was frozen, and its span reaches `boundary` (cut on or before
-    /// it, end on or after it: the segment after a frozen window's end may be
-    /// one this cut drops) — else the selected source. Cut boundaries are not
+    /// source of a window that holds it there at full level
+    /// (`Window::holds_on_air`: its cue waits or was frozen, and its span
+    /// reaches `boundary`), else the selected source. Cut boundaries are not
     /// monotone: a source whose window was served no longer pushes a cut
-    /// later, so a window cut AFTER `boundary` is one this cut replaces, and
+    /// later, so the segment after a frozen window's end may be one this cut
+    /// drops, and a window cut AFTER `boundary` is one this cut replaces —
     /// its outgoing source held nothing on program yet (review round 4).
     pub(super) fn on_air(&self, boundary_100ns: i64) -> Option<i64> {
-        let holding = self.windows.iter().find(|w| {
-            w.cue != Cue::Open && w.cut_100ns <= boundary_100ns && boundary_100ns <= w.end_100ns
-        });
+        let holding = self.windows.iter().find(|w| w.holds_on_air(boundary_100ns));
         match holding {
             Some(window) => window.from,
             None => self.selected(),

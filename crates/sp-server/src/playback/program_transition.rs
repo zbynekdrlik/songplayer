@@ -299,13 +299,30 @@ impl Window {
         u32::try_from(waited).unwrap_or(0)
     }
 
-    /// End the window at `at` (a later cut starts there). A window whose cue
-    /// is still waiting never opens (frozen).
-    pub fn truncate(&mut self, at_100ns: i64) {
-        self.end_100ns = self.end_100ns.min(at_100ns);
-        if matches!(self.cue, Cue::Waiting { .. }) {
+    /// Whether the window holds its OUTGOING source on program at full level
+    /// just before a cut on `boundary`: its cue waits or was frozen, and its
+    /// span reaches `boundary` — cut on or before it, end on or after it (a
+    /// frozen window's end may lie on or after a later cut: cut boundaries
+    /// are not monotone). The ONE rule for both `ProgramCore::on_air` and
+    /// [`Window::truncate`]'s freeze, so they never disagree.
+    pub fn holds_on_air(&self, boundary_100ns: i64) -> bool {
+        self.cue != Cue::Open
+            && self.cut_100ns <= boundary_100ns
+            && boundary_100ns <= self.end_100ns
+    }
+
+    /// End the window at `at` (a later cut starts there). A cue still
+    /// waiting whose span reaches `at` is FROZEN — it never opens, and the
+    /// new window fades out of its outgoing source; one whose latest end is
+    /// before `at` is left to open, its fade is over before the new cut.
+    /// Returns whether it froze the cue.
+    pub fn truncate(&mut self, at_100ns: i64) -> bool {
+        let freezes = matches!(self.cue, Cue::Waiting { .. }) && self.holds_on_air(at_100ns);
+        if freezes {
             self.cue = Cue::Frozen;
         }
+        self.end_100ns = self.end_100ns.min(at_100ns);
+        freezes
     }
 
     /// How many boundaries the mix covers: `n_slots`, or fewer once a later

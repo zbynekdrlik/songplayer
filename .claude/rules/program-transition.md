@@ -57,11 +57,16 @@ song's first real pair.
   cut is also placed after the newest stamp of every window's `from`, so the
   outgoing source never has a waiting pair for a boundary that left its window
   (a stale `from_pending` entry would count toward the reorder bound forever).
-  A window whose cue still WAITS is truncated too and FROZEN (`Cue::Frozen`:
-  it never opens, its boundaries stay held), and the new window fades out of
-  the source really on air, the frozen window's `from` (`ProgramCore::on_air`).
-  A cut back to that source needs no window: it just takes the boundaries over
-  (segment only).
+  A window whose cue still WAITS and whose span reaches the new cut boundary
+  is truncated too and FROZEN (`Cue::Frozen`: it never opens, its boundaries
+  stay held), and the new window fades out of the source really on air, the
+  frozen window's `from` (`ProgramCore::on_air`). A cut back to that source
+  needs no window: it just takes the boundaries over (segment only). A
+  waiting window whose LATEST end lies before the new cut boundary is left
+  alone: it opens by its deadline and its fade is over before the new cut
+  (review round 5 — frozen, it hard-cut its two sources at its end). Both
+  decisions use ONE predicate, `Window::holds_on_air` (the cue waits or was
+  frozen, cut ≤ boundary ≤ end), so `on_air` and the freeze never disagree.
 - `prune` drops a window once its last boundary is served
   (`transitions_done`, a Cut included; a frozen window too, a same-slot
   replaced one never). `Window::covered()` is the number of MIXED boundaries:
@@ -119,8 +124,10 @@ cut boundary mixed the outgoing song against silence.
   other (review round 1). `cut` reads `on_air(boundary)` BEFORE
   `windows.retain`, so a same-slot re-cut that drops the waiting window still
   fades out of that window's outgoing source. `on_air` takes the first
-  WAITING or FROZEN window whose span reaches the new boundary — cut on or
-  before it, end on or after it — else the selected source:
+  window that `holds_on_air` the new boundary — WAITING or FROZEN, cut on or
+  before it, end on or after it — else the selected source (windows stay
+  disjoint and in push order, so at most two match, where one ends exactly
+  where the next starts, and the older one holds the slot before):
   - a frozen window's end may lie on (a cut back, then a same-slot re-cut
     that drops the cut back's segment, review round 3) or AFTER the new
     boundary: cut boundaries are NOT monotone. A cut is placed after the

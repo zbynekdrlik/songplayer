@@ -332,10 +332,11 @@ impl ProgramCore {
     /// recorded on the same or a later boundary; a cut back to the source that
     /// still owns that boundary cancels the pending cut. #215: the cut opens a
     /// transition window of the current spec ([`Self::set_transition`]; a Cut
-    /// = zero boundaries), fading out of the source ON AIR: a window still
-    /// waiting for its cue kept its outgoing source there, and the new cut
-    /// freezes it (it never opens). Returns `false` (nothing recorded) when
-    /// `pid` is already the selected source.
+    /// = zero boundaries), fading out of the source ON AIR: a waiting or
+    /// frozen window whose span reaches the new boundary kept its outgoing
+    /// source there, and the new cut freezes a waiting one (it never opens;
+    /// `Window::holds_on_air`). Returns `false` (nothing recorded) when `pid`
+    /// is already the selected source.
     pub fn cut(&mut self, pid: i64, now_100ns: i64) -> bool {
         if self.selected() == Some(pid) {
             return false;
@@ -358,19 +359,19 @@ impl ProgramCore {
             boundary = strict_next_boundary_100ns(boundary, self.fps);
         }
         self.segments.retain(|&(first, _)| first < boundary);
-        // #215: the source on air, read BEFORE a waiting window this cut
-        // replaces is dropped (its outgoing source is the one on program).
+        // #215: the source on air, read BEFORE the windows this cut replaces
+        // are dropped: a waiting one cut ON the boundary kept its outgoing
+        // source on program (one cut after it never did, `on_air` skips it).
         let outgoing = self.on_air(boundary);
         // A window that has not started at the new cut boundary is replaced
         // (or cancelled); a running one ends where the new cut starts, and one
-        // still waiting for its cue is frozen there. Its outgoing source's
-        // frames are all older than `boundary`: the cut is placed after the
-        // newest stamp of every window's `from` too.
+        // still waiting for its cue is frozen there when its span reaches it
+        // (`Window::truncate`). Its outgoing source's frames are all older
+        // than `boundary`: the cut is placed after the newest stamp of every
+        // window's `from` too.
         self.windows.retain(|w| w.cut_100ns < boundary);
         for w in &mut self.windows {
-            let was_waiting = matches!(w.cue, Cue::Waiting { .. });
-            w.truncate(boundary);
-            if was_waiting {
+            if w.truncate(boundary) {
                 info!(
                     from = ?w.from,
                     to = w.to,
