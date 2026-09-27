@@ -42,16 +42,17 @@ use serde::Serialize;
 use serde_json::Value;
 use sp_core::config::{
     SETTING_PROGRAM_FOLLOW_OBS, SETTING_PROGRAM_TRANSITION, SETTING_PROGRAM_TRANSITION_MS,
+    program_transition_ms,
 };
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
-use tokio::sync::broadcast::error::RecvError;
-use tracing::{info, warn};
+use tokio::sync::broadcast::error::{RecvError, TryRecvError};
+use tracing::{debug, info, warn};
 
 use crate::obs::ObsEvent;
 use crate::playback::program_bus::{ProgramBus, persist_and_cut};
 use crate::playback::program_transition::{
-    ObsTransition, TransitionMode, TransitionSpec, effective_spec, parse_transition_ms,
+    ObsTransition, TransitionMode, TransitionSpec, effective_spec,
 };
 use crate::remote::map::{SceneAction, scene_action};
 use crate::remote::{RemoteCut, Upstream, clip};
@@ -98,7 +99,7 @@ pub async fn load_follow_settings(pool: &SqlitePool) -> Result<FollowSettings, s
             .await?
             .as_deref(),
     );
-    let ms = parse_transition_ms(
+    let ms = program_transition_ms(
         get_setting(pool, SETTING_PROGRAM_TRANSITION_MS)
             .await?
             .as_deref(),
@@ -247,13 +248,18 @@ impl Follow {
 
     /// Ask cg OBS for its current transition and keep it; `true` when cg OBS
     /// answered. No answer keeps the last known one (the task asks again on
-    /// its next settings poll).
-    pub async fn refresh_obs(&self, upstream: &Upstream) -> bool {
+    /// its settings polls while cg OBS is up). `retry`: such a poll's retry,
+    /// logged at debug so a failure streak WARNs once.
+    pub async fn refresh_obs(&self, upstream: &Upstream, retry: bool) -> bool {
         let reply = upstream.request(GET_CURRENT_SCENE_TRANSITION, None).await;
         let Some(obs) = reply.as_ref().and_then(obs_transition_from_reply) else {
-            warn!(
-                "program follow: cg OBS did not report its scene transition — keeping the last known one"
-            );
+            if retry {
+                debug!("program follow: cg OBS still did not report its scene transition");
+            } else {
+                warn!(
+                    "program follow: cg OBS did not report its scene transition — keeping the last known one"
+                );
+            }
             return false;
         };
         if self.bus.follow().set_obs_transition(obs.clone()) {
@@ -341,6 +347,104 @@ pub fn start_follow(follow: Follow, upstream: Upstream, shutdown: &broadcast::Se
     tokio::spawn(run_follow_task(follow, upstream, rx, FOLLOW_SETTINGS_POLL));
 }
 
+/// The follow task's state between two cg OBS events.
+struct FollowLoop {
+    follow: Follow,
+    upstream: Upstream,
+    settings: FollowSettings,
+    /// cg OBS's connection as the OBS client last reported it: assumed up
+    /// until it says otherwise, so the start's reads count.
+    obs_up: bool,
+    /// The last transition read got no answer. It is asked again on every
+    /// settings poll, but only while cg OBS is up and an OBS client exists:
+    /// a call made while cg OBS is away waits in the OBS client's command
+    /// queue (served only while connected, 64 deep), and a full queue blocks
+    /// that client's other senders.
+    read_pending: bool,
+}
+
+impl FollowLoop {
+    fn new(follow: Follow, upstream: Upstream, settings: FollowSettings) -> Self {
+        Self {
+            follow,
+            upstream,
+            settings,
+            obs_up: true,
+            read_pending: false,
+        }
+    }
+
+    /// Read cg OBS's transition (`retry`: a settings poll's retry).
+    async fn read_transition(&mut self, retry: bool) {
+        self.read_pending = !self.follow.refresh_obs(&self.upstream, retry).await;
+    }
+
+    /// One cg OBS event.
+    async fn on_event(&mut self, event: ObsEvent) {
+        match event {
+            ObsEvent::SceneChanged {
+                scene_name,
+                active_playlist_ids,
+            } => {
+                if self.settings.follow_obs {
+                    self.follow
+                        .follow_scene(&scene_name, &active_playlist_ids)
+                        .await;
+                }
+            }
+            ObsEvent::Connected => {
+                self.obs_up = true;
+                self.read_transition(false).await;
+            }
+            ObsEvent::Disconnected => self.obs_up = false,
+            ObsEvent::Raw { event_type, .. } => {
+                if is_transition_event(&event_type) {
+                    self.read_transition(false).await;
+                }
+            }
+        }
+    }
+
+    /// At start and after missed events: every event still queued is older
+    /// than the reads below, so it is dropped (a stale scene change would cut
+    /// back to a scene cg OBS already left) and only cg OBS's connection
+    /// state is kept. Then re-read cg OBS's transition while it is up, put the
+    /// spec on the bus, and, while following, cut to cg OBS's current scene
+    /// with that spec.
+    async fn resync(&mut self, events: &mut broadcast::Receiver<ObsEvent>) {
+        loop {
+            match events.try_recv() {
+                Ok(ObsEvent::Connected) => self.obs_up = true,
+                Ok(ObsEvent::Disconnected) => self.obs_up = false,
+                Ok(_) | Err(TryRecvError::Lagged(_)) => {}
+                Err(TryRecvError::Empty | TryRecvError::Closed) => break,
+            }
+        }
+        if self.obs_up {
+            self.read_transition(false).await;
+        }
+        self.follow.apply_spec(&self.settings);
+        if self.obs_up && self.settings.follow_obs {
+            self.follow.catch_up(&self.upstream).await;
+        }
+    }
+
+    /// The settings poll: re-read the settings, retry an unanswered transition
+    /// read, apply the spec, then catch up when the follow was just switched
+    /// on (with the spec just applied).
+    async fn on_tick(&mut self) {
+        let was_following = self.settings.follow_obs;
+        self.settings = self.follow.load(self.settings).await;
+        if self.read_pending && self.obs_up && self.upstream.is_configured() {
+            self.read_transition(true).await;
+        }
+        self.follow.apply_spec(&self.settings);
+        if self.settings.follow_obs && !was_following {
+            self.follow.catch_up(&self.upstream).await;
+        }
+    }
+}
+
 /// Keep the bus's transition spec in step with the settings and cg OBS, and
 /// follow cg OBS's program scene while `program_follow_obs` is on, until
 /// shutdown.
@@ -351,15 +455,10 @@ pub async fn run_follow_task(
     poll: Duration,
 ) {
     let mut events = upstream.subscribe();
-    let mut settings = follow.load(FollowSettings::default()).await;
-    // cg OBS's transition first, so the very first spec already uses it. A
-    // read that got no answer (cg OBS away or still starting its connection)
-    // is asked again on every settings poll until one is answered.
-    let mut obs_known = follow.refresh_obs(&upstream).await;
-    follow.apply_spec(&settings);
-    if settings.follow_obs {
-        follow.catch_up(&upstream).await;
-    }
+    let settings = follow.load(FollowSettings::default()).await;
+    let mut task = FollowLoop::new(follow, upstream, settings);
+    // cg OBS's transition first, so the very first spec already uses it.
+    task.resync(&mut events).await;
     let mut tick = tokio::time::interval(poll);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -367,40 +466,19 @@ pub async fn run_follow_task(
             biased;
             _ = shutdown.recv() => break,
             event = events.recv() => match event {
-                Ok(ObsEvent::SceneChanged { scene_name, active_playlist_ids }) => {
-                    if settings.follow_obs {
-                        follow.follow_scene(&scene_name, &active_playlist_ids).await;
-                    }
-                }
-                Ok(ObsEvent::Connected) => obs_known = follow.refresh_obs(&upstream).await,
-                Ok(ObsEvent::Raw { event_type, .. }) if is_transition_event(&event_type) => {
-                    obs_known = follow.refresh_obs(&upstream).await;
-                }
-                Ok(_) => {}
+                Ok(event) => task.on_event(event).await,
                 Err(RecvError::Lagged(n)) => {
                     warn!(
                         n,
                         "program follow: missed cg OBS events — re-reading its transition and program scene"
                     );
-                    obs_known = follow.refresh_obs(&upstream).await;
-                    if settings.follow_obs {
-                        follow.catch_up(&upstream).await;
-                    }
+                    task.resync(&mut events).await;
                 }
                 Err(RecvError::Closed) => break,
             },
-            _ = tick.tick() => {
-                let was_following = settings.follow_obs;
-                settings = follow.load(settings).await;
-                if settings.follow_obs && !was_following {
-                    follow.catch_up(&upstream).await;
-                }
-                if !obs_known {
-                    obs_known = follow.refresh_obs(&upstream).await;
-                }
-            }
+            _ = tick.tick() => task.on_tick().await,
         }
-        follow.apply_spec(&settings);
+        task.follow.apply_spec(&task.settings);
     }
     info!("program follow: task stopped");
 }
@@ -408,3 +486,6 @@ pub async fn run_follow_task(
 #[cfg(test)]
 #[path = "program_follow_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "program_follow_tests_task.rs"]
+mod tests_task;

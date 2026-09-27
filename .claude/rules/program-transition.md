@@ -92,9 +92,12 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   - `program_follow_obs`: only `"true"` follows (default off);
   - `program_transition`: `obs` (default) / `fade` / `cut`;
   - `program_transition_ms`: a positive integer, default 300 (= 9 slots),
-    rounded to whole slots, at least 1 slot, at most 300 slots (10 s). The
-    Nastavenia field shows the value the server uses (`effective_transition_ms`),
-    so its `min` / `max` never refuse a save of a stored out-of-range value.
+    rounded to whole slots, at least 1 slot, at most 300 slots (10 s). ONE
+    parse for the server and the Nastavenia form:
+    `sp_core::config::program_transition_ms` (+ `MAX_PROGRAM_TRANSITION_MS` =
+    10 000, pinned equal to 300 slots by a test). The form shows the value the
+    server uses, so its `min` / `max` never refuse a save of a stored
+    out-of-range value.
 - The spec every cut uses (`effective_spec`): the `fade` / `cut` override,
   else cg OBS's transition (`cut_transition` → Cut, any other kind → a Fade of
   its duration, a fixed-duration one → `program_transition_ms`), else a Fade
@@ -104,13 +107,18 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   `remote::Upstream` (the existing OBS client, never a second connection). It
   is read at start (BEFORE the first spec is applied), on `Connected`, on
   `CurrentSceneTransitionChanged` / `CurrentSceneTransitionDurationChanged`,
-  and after a lagged broadcast. A read that got no answer is asked again on
-  every settings poll until one is answered: the OBS client broadcasts
-  `Connected` before its connection loop serves `ObsCommand::Remote` (the NDI
-  map rebuild runs first, up to ~10 s), so the `Connected` read can time out
-  (`UPSTREAM_TIMEOUT` 3 s). The OBS identify subscribes Scenes (4) |
-  Transitions (16) | Outputs (64) = 84; without Transitions cg OBS never sends
-  those events.
+  and after a lagged broadcast. A read that got no answer (`read_pending`) is
+  asked again on the settings polls — the OBS client broadcasts `Connected`
+  before its connection loop serves `ObsCommand::Remote` (the NDI map rebuild
+  runs first, up to ~10 s), so the `Connected` read can time out
+  (`UPSTREAM_TIMEOUT` 3 s). **But only while cg OBS is up (`obs_up`, from
+  `Connected` / `Disconnected`) and an OBS client exists
+  (`Upstream::is_configured`).** A call made while cg OBS is away waits in the
+  OBS client's command queue (served only while connected, 64 deep), and a full
+  queue blocks its other senders (`title::push_title`'s blocking `send`) — the
+  review round-2 finding. A retry that fails logs at debug; the first failure
+  WARNs. The OBS identify subscribes Scenes (4) | Transitions (16) | Outputs
+  (64) = 84; without Transitions cg OBS never sends those events.
 - Follow = `ObsEvent::SceneChanged` (SongPlayer's own derived event, its
   playlists from `check_scene_items`) → `remote::map::scene_action` → cut via
   `persist_and_cut`, unless the program already shows that source.
@@ -120,6 +128,15 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   `SceneChanged`; the #170 poll only repairs an event cg OBS itself dropped).
   It never polls the scene otherwise. This replaces the event-night watcher
   `%TEMP%\sp_follow.ps1`, which polled the scene every 200 ms.
+- **The task is `FollowLoop`** (`on_event`, `on_tick`, `resync`). Rules:
+  - a catch-up always cuts with the spec APPLIED JUST BEFORE it: at start and
+    after a lag `resync` reads the transition → `apply_spec` → catch-up; a poll
+    loads the settings → retries a pending read → `apply_spec` → catch-up on
+    the flip. (Catching up first cut with the previous spec — round 2.)
+  - `resync` first DRAINS the events still queued: they are all older than its
+    reads, so every one is dropped — a stale `SceneChanged` would cut back to a
+    scene cg OBS already left — except that `Connected` / `Disconnected` still
+    set `obs_up`. It then reads, applies, and catches up only while `obs_up`.
 
 ## API + UI
 
@@ -144,7 +161,8 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
 - `program_transition_tests.rs` (pure, exact pins), `program_bus_tests_transition.rs`
   (the #209 rig: A 4×2, B 8×2, C 6×2, standby 2×2; `take_all` renders each job as
   `src W` / `fill` / `mix k/n F>T`), `program_output_tests.rs` (the mixed
-  boundary on the mock sender), `scene_off_tests.rs`, `program_follow_tests.rs`
+  boundary on the mock sender), `scene_off_tests.rs`, `program_follow_tests.rs` +
+  `program_follow_tests_task.rs` (the task and `FollowLoop`; the helpers are `pub(super)`)
   (a fake cg OBS at `ObsCommand::Remote`: scripted transition replies, a
   settable program scene for `GetCurrentProgramScene`, `playlists_of` for the
   scene lookups; every call is logged in order), `api/program_tests.rs`, and the mock
@@ -156,6 +174,14 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   observable (a cut, a request to cg OBS), never by a sleep. The lagged-event
   test uses a broadcast of capacity 1 and three synchronous sends: the
   current-thread test runtime cannot run the task between them.
+- **Send an event to the task only after it SUBSCRIBED** (wait for its first
+  request to the fake cg OBS). The task subscribes when it is first polled, so
+  an event sent right after `start()` reaches no receiver: `send` fails (the
+  test's `expect` panics) and the task never sees it (round 2).
+- To prove a state change ended a periodic action (e.g. no retry after
+  `Disconnected`), sync on a LATER poll's observable effect (store a setting,
+  `spec_becomes`), drain what was already running, then sync on one more poll
+  and assert nothing followed. Events are handled before polls (`biased`).
 - The engine tests never assert a "not yet" against the wall clock: the bus
   runs on fixed stamps, the steps are driven at chosen instants, and the real
   re-check timer is only bounded from below.

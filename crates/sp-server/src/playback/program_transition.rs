@@ -134,14 +134,6 @@ impl TransitionMode {
     }
 }
 
-/// `program_transition_ms`: a positive whole number of ms, else
-/// [`sp_core::config::DEFAULT_PROGRAM_TRANSITION_MS`].
-pub fn parse_transition_ms(raw: Option<&str>) -> u32 {
-    raw.and_then(|v| v.trim().parse::<u32>().ok())
-        .filter(|&ms| ms != 0)
-        .unwrap_or(sp_core::config::DEFAULT_PROGRAM_TRANSITION_MS)
-}
-
 /// cg OBS's current scene transition, as `GetCurrentSceneTransition` reports it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ObsTransition {

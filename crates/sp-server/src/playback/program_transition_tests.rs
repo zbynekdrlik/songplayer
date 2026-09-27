@@ -44,6 +44,11 @@ fn a_duration_rounds_to_the_nearest_whole_slot_at_least_one_at_most_ten_seconds(
     assert_eq!(slots_for_ms(10_017), 300, "300.51 slots is capped");
     assert_eq!(slots_for_ms(u32::MAX), MAX_TRANSITION_SLOTS);
     assert_eq!(MAX_TRANSITION_SLOTS, 300);
+    assert_eq!(
+        slots_for_ms(sp_core::config::MAX_PROGRAM_TRANSITION_MS),
+        MAX_TRANSITION_SLOTS,
+        "the Nastavenia maximum is exactly the longest window"
+    );
 }
 
 #[test]
@@ -102,22 +107,12 @@ fn the_override_wins_and_an_unknown_obs_transition_falls_back_to_the_settings_fa
 }
 
 #[test]
-fn the_transition_settings_parse_with_obs_and_300_ms_as_defaults() {
+fn the_transition_setting_parses_with_obs_as_the_default() {
     assert_eq!(TransitionMode::parse(Some("fade")), TransitionMode::Fade);
     assert_eq!(TransitionMode::parse(Some(" cut ")), TransitionMode::Cut);
     assert_eq!(TransitionMode::parse(Some("obs")), TransitionMode::Obs);
     assert_eq!(TransitionMode::parse(Some("wipe")), TransitionMode::Obs);
     assert_eq!(TransitionMode::parse(None), TransitionMode::Obs);
-    assert_eq!(parse_transition_ms(Some(" 500 ")), 500);
-    assert_eq!(parse_transition_ms(Some("1")), 1);
-    assert_eq!(
-        parse_transition_ms(Some("0")),
-        300,
-        "0 ms is no fade length"
-    );
-    assert_eq!(parse_transition_ms(Some("-5")), 300);
-    assert_eq!(parse_transition_ms(Some("abc")), 300);
-    assert_eq!(parse_transition_ms(None), 300);
 }
 
 #[test]

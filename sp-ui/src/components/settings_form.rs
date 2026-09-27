@@ -40,20 +40,12 @@ const PROGRAM_TRANSITIONS: &[(&str, &str)] = &[
     ("cut", "Vždy strih"),
 ];
 
-/// #215: the longest fade the server makes (300 slots of the 30 fps grid).
-const MAX_TRANSITION_MS: u32 = 10_000;
-
 /// #215: the fade length the server uses for the stored `program_transition_ms`
-/// (a positive whole number, else the default; at most 10 s), so the field
-/// never shows a value its `min`/`max` would refuse on save.
+/// (`sp_core::config::program_transition_ms`, at most 10 s), so the field never
+/// shows a value its `min` / `max` would refuse on save.
 fn effective_transition_ms(stored: &str) -> String {
-    stored
-        .trim()
-        .parse::<u32>()
-        .ok()
-        .filter(|&ms| ms != 0)
-        .unwrap_or(config::DEFAULT_PROGRAM_TRANSITION_MS)
-        .min(MAX_TRANSITION_MS)
+    config::program_transition_ms(Some(stored))
+        .min(config::MAX_PROGRAM_TRANSITION_MS)
         .to_string()
 }
 
@@ -433,7 +425,7 @@ pub fn SettingsForm() -> impl IntoView {
                     <input
                         type="number"
                         min="1"
-                        max=MAX_TRANSITION_MS.to_string()
+                        max=config::MAX_PROGRAM_TRANSITION_MS.to_string()
                         data-testid="settings-program-transition-ms"
                         prop:value=move || transition_ms.get()
                         on:input=move |ev| transition_ms.set(event_target_value(&ev))

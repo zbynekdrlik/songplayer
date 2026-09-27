@@ -423,14 +423,15 @@ pub fn starvation_repeat_timecode_100ns(
 /// `grid_boundary_100ns(grid_index_100ns(b, fps) + k, fps)`, with no drift,
 /// where `b + k · interval` would leave the grid (the 30 fps slots are 333_333
 /// or 333_334 × 100 ns wide). Input domain as [`floor_boundary_100ns`]: an
-/// on-grid, post-2020 wall reading. A non-positive `fps` returns 0.
+/// on-grid, post-2020 wall reading; the Euclidean division keeps both helpers
+/// total (never a panic) before 1970 too. A non-positive `fps` returns 0.
 pub fn grid_index_100ns(boundary_100ns: i64, fps: i64) -> i64 {
     if fps <= 0 {
         return 0;
     }
-    let offset = (boundary_100ns % UNITS_PER_SECOND) as u64;
+    let offset = boundary_100ns.rem_euclid(UNITS_PER_SECOND) as u64;
     let slot = (offset * fps as u64).div_ceil(UNITS_PER_SECOND as u64) as i64;
-    (boundary_100ns / UNITS_PER_SECOND) * fps + slot
+    boundary_100ns.div_euclid(UNITS_PER_SECOND) * fps + slot
 }
 
 /// The boundary with grid index `index` on the [`floor_boundary_100ns`] grid
@@ -439,7 +440,7 @@ pub fn grid_boundary_100ns(index: i64, fps: i64) -> i64 {
     if fps <= 0 {
         return 0;
     }
-    (index / fps) * UNITS_PER_SECOND + (index % fps) * UNITS_PER_SECOND / fps
+    index.div_euclid(fps) * UNITS_PER_SECOND + index.rem_euclid(fps) * UNITS_PER_SECOND / fps
 }
 
 /// Paced-audio grid math (#148): `samples_per_boundary`. WASM-safe pure
