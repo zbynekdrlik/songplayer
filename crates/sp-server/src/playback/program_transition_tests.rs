@@ -205,46 +205,6 @@ fn the_blend_appends_after_what_the_buffer_holds() {
     assert_eq!(out, vec![9, 16, 32]);
 }
 
-fn layout(width: u32, stride: u32, len: usize) -> Layout {
-    Layout {
-        width,
-        height: 2,
-        stride,
-        len,
-    }
-}
-
-#[test]
-fn equal_layouts_blend_and_different_ones_cut_at_the_midpoint() {
-    let a = layout(4, 4, 12);
-    let wide = layout(8, 8, 24);
-    assert_eq!(picture_mix(a, a, 14), Picture::Blend);
-    assert_eq!(picture_mix(a, wide, 0), Picture::From);
-    assert_eq!(picture_mix(a, wide, 127), Picture::From);
-    assert_eq!(
-        picture_mix(a, wide, 128),
-        Picture::To,
-        "from the midpoint on"
-    );
-    assert_eq!(picture_mix(a, wide, 242), Picture::To);
-    assert_eq!(
-        picture_mix(a, layout(4, 6, 12), 200),
-        Picture::To,
-        "a different stride alone never blends"
-    );
-    assert_eq!(picture_mix(a, layout(4, 4, 13), 1), Picture::From);
-}
-
-#[test]
-fn a_size_cut_is_logged_once_per_run() {
-    assert!(starts_size_cut(false, Picture::From));
-    assert!(starts_size_cut(false, Picture::To));
-    assert!(!starts_size_cut(true, Picture::From));
-    assert!(!starts_size_cut(true, Picture::To));
-    assert!(!starts_size_cut(false, Picture::Blend));
-    assert!(!starts_size_cut(true, Picture::Blend));
-}
-
 #[test]
 fn a_layout_is_read_from_the_sources_job() {
     let job = SubmitJob {

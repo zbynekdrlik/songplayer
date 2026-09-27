@@ -1,9 +1,11 @@
 //! #215 program transitions on the bus: a cut is a transition WINDOW. Each of
 //! its boundaries waits for BOTH sources' pairs (the #209 reorder and fill
 //! rules, per source), is queued as ONE `ProgramJob::Mix`, and a side that is
-//! missed is mixed against the standby. `hold_for` keeps the outgoing playlist
-//! playing through its window, and a Cut is the zero-length window, the #209
-//! cut unchanged. Reuses the #209 rig (`program_bus_tests.rs`): A's frames are
+//! missed is mixed against the standby. A fade starts on the incoming
+//! source's first live pair (the cue gate): an incoming side missing on the
+//! cut boundary holds the outgoing source on program instead. `hold_for` keeps
+//! the outgoing playlist playing through its window, and a Cut is the
+//! zero-length window, the #209 cut unchanged. Reuses the #209 rig (`program_bus_tests.rs`): A's frames are
 //! 4×2 NV12, B's 8×2, C's 6×2, the program's standby black 2×2.
 //! Wired via `#[cfg(test)] #[path = "program_bus_tests_transition.rs"] mod tests_transition;`.
 
@@ -199,9 +201,9 @@ fn the_window_audio_is_the_equal_power_crossfade_and_never_dips_below_the_quiete
         36,
         "exactly one audio block + one picture per boundary"
     );
-    // A (4×2) and B (8×2) differ in size: the picture cuts at the window's
-    // midpoint (slot 4 of 9, weight ½) while the audio crossfades.
-    assert_eq!(video_dims(&backend), dims(&[("4x2", 10), ("8x2", 8)]));
+    // A (4×2) and B (8×2) differ in size: every window boundary is a blend in
+    // B's 8×2 layout (A fitted into it, #215 addendum A), never a midpoint cut.
+    assert_eq!(video_dims(&backend), dims(&[("4x2", 6), ("8x2", 12)]));
     assert_eq!(blocks.len(), 18);
     let total = 9 * 1600u64;
     for (k, (stamp, planar)) in (1..=18usize).zip(&blocks) {
@@ -305,6 +307,59 @@ fn a_stalled_outgoing_side_is_mixed_against_the_standby_after_its_grace() {
     assert_eq!(take_all(&mut core), one(9, "mix 2/9 ->8"));
     let c = core.status().transition.counters;
     assert_eq!((c.mixed_boundaries, c.side_fills), (3, 1));
+}
+
+#[test]
+fn an_incoming_side_missing_on_the_cut_boundary_holds_the_outgoing_source_until_it_delivers() {
+    // #215 cue gate: the fade starts on the incoming source's first live
+    // pair. Until B delivers one, A stays on program at full level (its own
+    // pair) — never a mix against B's standby.
+    let mut core = fade_core();
+    let (fa, fb) = (frame(4, 2), frame(8, 2));
+    offer_both(&mut core, &fa, &fb, 1..=6);
+    assert_eq!(take_all(&mut core).len(), 6);
+    assert_eq!(
+        core.hold_for(SRC_A),
+        Some(Hold::Until(b(32))),
+        "the fade may wait up to 15 boundaries: A is held through b(31)"
+    );
+    core.offer(SRC_A, job(4, &fa, b(7), LEVEL_A));
+    core.offer(SRC_A, job(4, &fa, b(8), LEVEL_A));
+    core.release(b(7) + grace());
+    assert_eq!(
+        take_all(&mut core),
+        one(7, "src 4"),
+        "B missed b(7): A holds it"
+    );
+    core.release(b(8) + grace());
+    assert_eq!(take_all(&mut core), one(8, "src 4"));
+    // B's first pair is b(9): the fade runs b(9)..=b(17).
+    core.offer(SRC_B, job(8, &fb, b(9), LEVEL_B));
+    assert_eq!(core.queued(), 0, "B's b(9) waits for A's");
+    core.offer(SRC_A, job(4, &fa, b(9), LEVEL_A));
+    assert_eq!(take_all(&mut core), one(9, "mix 0/9 4>8"));
+    assert_eq!(
+        core.hold_for(SRC_A),
+        Some(Hold::Until(b(19))),
+        "the fade is laid: A is held through its last boundary b(17), plus one slot"
+    );
+    let mut sent = Vec::new();
+    offer_both(&mut core, &fa, &fb, 10..=18);
+    sent.extend(take_all(&mut core));
+    let mut want = run(10..=17, |k| format!("mix {}/9 4>8", k - 9));
+    want.extend(one(18, "src 8"));
+    assert_eq!(sent, want, "exactly 9 mixed boundaries, then B alone");
+    let st = core.status();
+    let c = st.transition.counters;
+    assert_eq!(
+        (c.transitions_done, c.mixed_boundaries, c.side_fills),
+        (1, 9, 0)
+    );
+    assert_eq!(
+        (st.health.forwarded, st.health.filled),
+        (9, 0),
+        "b(1)..=b(6) + the two held boundaries + b(18)"
+    );
 }
 
 #[test]
@@ -485,7 +540,12 @@ fn hold_for_keeps_the_outgoing_source_until_one_slot_after_its_window() {
         ),
         (TransitionKind::Fade, 9, SpecSource::Obs)
     );
-    assert_eq!(bus.hold_for(SRC_A), Some(Hold::Until(b(17))));
+    assert_eq!(
+        bus.hold_for(SRC_A),
+        Some(Hold::Until(b(32))),
+        "B has sent nothing yet: the fade may wait up to 15 boundaries for its \
+         first live pair, so the window may end as late as b(31)"
+    );
 }
 
 #[test]
@@ -510,8 +570,9 @@ fn a_second_cut_inside_a_window_truncates_it_and_opens_the_next_window() {
             );
             assert_eq!(
                 core.hold_for(SRC_B),
-                Some(Hold::Until(b(21))),
-                "B fades out over b(11)..=b(19)"
+                Some(Hold::Until(b(36))),
+                "C has sent no pair for b(11) yet: B's fade-out may wait up to 15 \
+                 boundaries, so it may end as late as b(35)"
             );
             assert_eq!(core.hold_for(SRC_C), Some(Hold::OnProgram));
             assert_eq!(core.status().transition.counters.transitions_done, 0);
@@ -617,7 +678,11 @@ fn a_second_cut_on_the_same_boundary_replaces_the_windows_target() {
         Some((Some(SRC_A), SRC_C, b(7)))
     );
     assert!(!core.is_candidate(SRC_B), "the replaced target never plays");
-    assert_eq!(core.hold_for(SRC_A), Some(Hold::Until(b(17))));
+    assert_eq!(
+        core.hold_for(SRC_A),
+        Some(Hold::Until(b(32))),
+        "C has sent nothing yet: the window may end as late as b(31)"
+    );
 }
 
 /// A on program with a 1000 ms fade (30 slots, b(7)..=b(36)); b(1)..=b(6) out.
@@ -632,7 +697,7 @@ fn long_fade() -> (ProgramCore, SharedFrame, SharedFrame) {
 }
 
 #[test]
-fn the_outgoing_sides_reorder_buffer_forces_one_mix_past_its_bound() {
+fn the_outgoing_sides_reorder_buffer_forces_one_boundary_past_its_bound() {
     let (mut core, fa, _) = long_fade();
     for k in 7..7 + PROGRAM_PENDING_BOUND {
         assert_eq!(
@@ -648,10 +713,11 @@ fn the_outgoing_sides_reorder_buffer_forces_one_mix_past_its_bound() {
     core.offer(SRC_A, job(4, &fa, b(7 + PROGRAM_PENDING_BOUND), LEVEL_A));
     assert_eq!(
         take_all(&mut core),
-        one(7, "mix 0/30 4>-"),
-        "one more forces b(7), against B's standby"
+        one(7, "src 4"),
+        "one more forces b(7): B sent no live pair for it, so the fade has not \
+         started and A stays on program at full level (#215 cue gate)"
     );
-    assert_eq!(core.status().transition.counters.side_fills, 1);
+    assert_eq!(core.status().transition.counters.side_fills, 0);
 }
 
 #[test]

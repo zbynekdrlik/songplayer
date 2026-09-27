@@ -513,6 +513,8 @@ async fn the_program_reports_the_transition_and_the_follow() {
             "transitions_done": 0,
             "mixed_boundaries": 0,
             "side_fills": 0,
+            "cue_wait_boundaries": 0,
+            "cue_timeouts": 0,
         }),
         "until the follow task sets one, a cut is a hard cut"
     );
@@ -601,6 +603,8 @@ async fn the_program_reports_the_transition_and_the_follow() {
             "transitions_done": 0,
             "mixed_boundaries": 0,
             "side_fills": 0,
+            "cue_wait_boundaries": 0,
+            "cue_timeouts": 0,
         })
     );
     assert_eq!(json["follow"]["enabled"], true, "the cut answer carries it");
