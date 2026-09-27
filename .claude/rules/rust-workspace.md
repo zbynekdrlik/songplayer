@@ -97,7 +97,9 @@ You can't run tests locally, so a RED test must FAIL against a version of the
 code you can only reason about, without leaving warnings CI's clippy
 (`--all-targets -D warnings`) would reject. The clean pattern (used for #161's
 `idle_gate_abort`): make the RED commit ship the REAL logic but with ONE WRONG
-CONSTANT (e.g. `const ABORT_CONSECUTIVE_BUSY: u32 = u32::MAX;` → GREEN sets `2`).
+CONSTANT (e.g. `const ABORT_CONSECUTIVE_BUSY: u32 = u32::MAX;` → GREEN sets `2`;
+#161 shipped `u32::MAX` there, but do not copy that value, see the extreme-constant
+note below).
 The logic still reads/writes every field, so nothing is dead_code, and the
 "must-abort" tests fail cleanly; a stub function body that ignores its fields
 would instead trip `dead_code`/`unused`. For timing tests (interval + sleep),
@@ -110,6 +112,38 @@ Pick the WRONG constant so it is NOT an arithmetic identity: shipping a RED
 commit itself. Use a wrong NON-identity value (a named const `FRAGMENT_MS = 250`
 → GREEN `500`, or a different literal) so the exact-value test still fails but
 the RED tree is clippy-clean.
+
+Likewise avoid a RED constant at an unsigned type's minimum (`0`) or maximum
+(`u32::MAX`) when that makes one side of the comparison impossible. The
+examples below take `x` as unsigned; for a signed type the minimum is
+`iN::MIN`, not `0`.
+`clippy::absurd_extreme_comparisons` flags three shapes, and as a
+correctness-group lint it is deny-by-default:
+
+- always false: `x < 0` and `x > MAX`;
+- always true: `x >= 0` and `x <= MAX`;
+- really `==`: `x <= 0` and `x >= MAX`.
+
+`x > 0` or `x < MAX` does not trigger it. The #161 example above, `u32::MAX`
+compared with `>=`, is the "really `==`" shape, so prefer a non-extreme wrong
+value such as `1_000`. #217 used `LONG_GAP_MS = 1`, then set it to `8_000` in
+GREEN.
+
+**A wrong-constant RED for a whole NEW module proves only the tests that
+depend on that constant (#217 review round 3).** Every other new test passes at
+the RED commit, so nobody ever saw it fail. In the RED commit message, list
+only the tests that really fail under the wrong constant (derive them, do not
+guess), and never claim the RED reproduces the old behaviour unless it does.
+The tests that encode the new contract against the OLD code belong in their own
+earlier `test(#N)` commit that uses only the existing API (#217 `e66514a`).
+
+**Deriving exact expected values on the no-compile box (#217).** Do not
+hand-compute dozens of pins. Write a scratch Python model that mirrors the pure
+Rust function step by step, and derive every exact value from it: fixture
+counts, boundary show/hide times, what each mutant would do. Keep the model in
+the scratchpad, not the repo. When the Rust changes, update the model in the
+same step. Each fresh-context review pass should re-derive the pins with its own
+model; two independent models agreeing is the only local evidence available.
 
 ## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these
