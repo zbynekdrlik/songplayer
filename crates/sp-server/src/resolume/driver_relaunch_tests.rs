@@ -265,6 +265,42 @@ async fn a_404_on_a_clip_opacity_push_marks_the_map_stale_too() {
     );
 }
 
+/// Review round 4: the instant hide that retries a HideTitle ends through
+/// `finish_push` like every push. When it 404s too, the note is cleared, so
+/// the next push that succeeds is not read as a stale map (a spurious ~14 MB
+/// refresh).
+#[tokio::test]
+async fn a_retried_hide_that_404s_leaves_no_stale_note_for_the_next_push() {
+    let server = arena().await;
+    composition_sequence(
+        &server,
+        composition(&[(TITLE_TOKEN, 100, 900), (SUBS_TOKEN, 101, 901)]),
+        composition(&[(TITLE_TOKEN, 200, 1900), (SUBS_TOKEN, 201, 1901)]),
+    )
+    .await;
+    put_answers(&server, "/api/v1/composition/clips/by-id/100", 404).await;
+    put_answers(&server, "/api/v1/composition/clips/by-id/200", 404).await;
+    put_answers(&server, "/api/v1/parameter/by-id/1901", 204).await;
+    let (mut driver, _rx) = mapped_driver(&server, Instant::now()).await;
+
+    driver.handle_command(ResolumeCommand::HideTitle).await;
+    assert_eq!(
+        opacities_put(&server, 200).await,
+        [0.0],
+        "the refresh ran and the hide was retried, and 404'd again"
+    );
+    assert_eq!(composition_fetches(&server).await, 2);
+
+    driver.handle_command(subtitle("Line one")).await;
+
+    assert_eq!(texts_put(&server, 1901).await, ["Line one"]);
+    assert_eq!(
+        composition_fetches(&server).await,
+        2,
+        "a push that succeeded refreshes nothing"
+    );
+}
+
 #[tokio::test]
 async fn a_push_that_succeeds_refreshes_nothing() {
     let server = arena().await;
