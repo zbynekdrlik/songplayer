@@ -16,6 +16,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::error::{Error, ProtocolError};
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
@@ -228,7 +229,10 @@ async fn try_connect(addr: SocketAddr, deadline: tokio::time::Instant) -> Option
     );
     match tokio::time::timeout_at(deadline, tokio_tungstenite::connect_async(req)).await {
         Ok(Ok((ws, _))) => Some(ws),
-        Ok(Err(_)) => None,
+        // Only "the server dropped the handshake" is a retry; any other
+        // handshake error (e.g. no subprotocol echo) is a real regression.
+        Ok(Err(Error::Io(_) | Error::Protocol(ProtocolError::HandshakeIncomplete))) => None,
+        Ok(Err(e)) => panic!("the handshake failed: {e}"),
         Err(_) => panic!("no handshake answer within the test timeout"),
     }
 }
@@ -262,7 +266,8 @@ async fn identified_in_time(addr: SocketAddr) -> Client {
         let _ = ws.send(Message::Text(identify.to_string().into())).await;
         match close_or_message(&mut ws).await {
             Ok(msg) if msg["op"] == 2 => return ws,
-            Err(Some(4007)) => {}
+            // 4007, or (Windows) a reset that discarded the close frame.
+            Err(Some(4007) | None) => {}
             other => panic!("unexpected answer to Identify: {other:?}"),
         }
     }

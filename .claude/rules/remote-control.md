@@ -166,8 +166,10 @@ not forwarded: the cut is by scene name. Companion always sends the name.
     (`an_identified_client_outlives_the_identify_timeout`);
   - on a short-deadline rig every connect / identify is RETRIED when the
     deadline wins first (`connect_in_time`, `identified_in_time`, bounded by
-    the test timeout). A dropped handshake or a 4007 there is correct
-    behaviour under a stall, not a failure.
+    the test timeout). A dropped handshake, a 4007, or a connection that
+    ends with no readable close (on Windows a reset discards the close frame
+    when the client's Identify was unread) there is correct behaviour under a
+    stall, not a failure. Any OTHER handshake error still fails the test.
 - `GET /api/v1/program` → `remote {enabled, port, auth, listening, error,
   clients, requests, last_request, last_remote_cut, unsupported_requests}`.
   `enabled` / `port` / `auth` come from the STORED settings, so a save shows
