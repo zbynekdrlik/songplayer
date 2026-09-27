@@ -5,7 +5,7 @@
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::{FULL_REFRESH_RETRY, FULL_REFRESH_TTL, FullRefreshReason, HostDriver};
 use crate::resolume::{ResolumeCommand, handlers};
@@ -15,7 +15,7 @@ impl HostDriver {
     /// Arena gives every clip and text param a new id on each relaunch
     /// (`#sp-subs` 1790510617970 → 1790518489097 on the box), so the clip map
     /// is stale. Called at the one push choke point (`set_text` /
-    /// `set_clip_opacity`); `run_push` acts on it.
+    /// `set_clip_opacity`); `push` reads and clears it.
     pub(super) fn note_push_status(&self, status: reqwest::StatusCode) {
         if status == reqwest::StatusCode::NOT_FOUND {
             self.stale_id_seen.store(true, Ordering::Relaxed);
@@ -29,25 +29,43 @@ impl HostDriver {
     /// this every push went to the dead ids until the 300 s TTL refresh. The
     /// stale map starts a not-ready episode, the refresh runs through the
     /// existing NotReady path (`decide`: a failed last attempt still waits
-    /// out the retry window), and when it maps SongPlayer's clips the push is
-    /// retried once.
+    /// out the retry window), and when it maps SongPlayer's clips anew the
+    /// push is retried once.
     ///
     /// That refresh ends the episode with a RecoveryEvent, whose engine
     /// re-push sends the title and the current line after this step. So a
     /// ShowTitle is not retried here: a second ShowTitle restarts the title
     /// fade, the blink the one-event-per-step rule prevents.
+    ///
+    /// A refresh that maps the SAME clips is no relaunch: Arena still lists
+    /// the ids it answers 404 for. No retry (it would 404 again), no event
+    /// (`refresh_mapping` fires none for an unchanged map), and no new stale
+    /// mark for `FULL_REFRESH_RETRY`: otherwise every push would cost a
+    /// ~14 MB fetch.
     pub(super) async fn run_push(&mut self, cmd: &ResolumeCommand, now: Instant) {
         // A command is its own step: an event from an earlier tick does not
         // cover the ready transition this push's refresh may find.
         self.recovery_sent_this_step = false;
-        self.stale_id_seen.store(false, Ordering::Relaxed);
-        self.push(cmd).await;
-        if !self.stale_id_seen.swap(false, Ordering::Relaxed) {
+        if !self.push(cmd).await {
             return;
         }
-        if !self.mark_map_stale(now) {
+        if self
+            .refused_ids_at
+            .is_some_and(|at| now.duration_since(at) < FULL_REFRESH_RETRY)
+        {
+            debug!(
+                host = %self.host,
+                "Resolume answered 404 again for an id its composition still lists — not refreshing"
+            );
             return;
         }
+        // Start (or continue) the not-ready episode: an open one keeps its
+        // start, so its fast window never extends.
+        self.not_ready_since.get_or_insert(now);
+        warn!(
+            host = %self.host,
+            "Resolume answered 404 for a clip or parameter id — the clip map is stale (Arena re-ids its clips on relaunch), refreshing it"
+        );
         let Some(reason) = FullRefreshReason::decide(
             now,
             self.last_full_refresh_ok_at,
@@ -65,11 +83,20 @@ impl HostDriver {
             );
             return;
         };
+        let before = self.clip_mapping.clone();
         self.run_full_refresh(reason, now).await;
         if self.not_ready_since.is_some() {
             // Still not ready (the composition is loading, or the fetch
             // failed): the episode's ticks refetch, and its end fires the
             // RecoveryEvent that re-pushes the wall.
+            return;
+        }
+        if self.clip_mapping == before {
+            self.refused_ids_at = Some(now);
+            warn!(
+                host = %self.host,
+                "Resolume still lists the ids it answered 404 for — not a relaunch: no retry, no new refresh for 60 s"
+            );
             return;
         }
         if self.recovery_sent_this_step && matches!(cmd, ResolumeCommand::ShowTitle { .. }) {
@@ -86,36 +113,10 @@ impl HostDriver {
         self.push(cmd).await;
     }
 
-    /// Mark the clip map stale after a 404 push: start a not-ready episode.
-    /// An open episode keeps its start, so its fast window never extends.
-    ///
-    /// Returns false when a 404 already marked the map stale less than
-    /// `FULL_REFRESH_RETRY` ago. That bounds an id Arena keeps refusing while
-    /// its composition still lists it: every mark costs a ~14 MB fetch, and
-    /// the ready refresh's RecoveryEvent re-pushes into the same 404, a loop
-    /// with no timer in it. A relaunch is never held back by it: the steady
-    /// state has no 404s.
-    fn mark_map_stale(&mut self, now: Instant) -> bool {
-        if let Some(at) = self.last_stale_mark_at
-            && now.duration_since(at) < FULL_REFRESH_RETRY
-        {
-            warn!(
-                host = %self.host,
-                "Resolume answered 404 again within 60 s of the last stale-map refresh — not refreshing"
-            );
-            return false;
-        }
-        self.last_stale_mark_at = Some(now);
-        self.not_ready_since.get_or_insert(now);
-        warn!(
-            host = %self.host,
-            "Resolume answered 404 for a clip or parameter id — the clip map is stale (Arena re-ids its clips on relaunch), refreshing it"
-        );
-        true
-    }
-
-    /// Run one push command's handler, logging a failure.
-    async fn push(&mut self, cmd: &ResolumeCommand) {
+    /// Run one push command's handler, logging a failure. Returns whether
+    /// Arena answered 404 to any of its requests, and clears that note, so
+    /// it is false again outside a push.
+    async fn push(&mut self, cmd: &ResolumeCommand) -> bool {
         let (what, result) = match cmd {
             ResolumeCommand::ShowTitle { song, artist } => {
                 ("show_title", handlers::show_title(self, song, artist).await)
@@ -142,10 +143,11 @@ impl HostDriver {
             ResolumeCommand::HideSubtitles => {
                 ("subtitle clear", handlers::clear_subtitles(self).await)
             }
-            ResolumeCommand::RefreshMapping | ResolumeCommand::Shutdown => return,
+            ResolumeCommand::RefreshMapping | ResolumeCommand::Shutdown => return false,
         };
         if let Err(e) = result {
             warn!(host = %self.host, %e, "{what} failed");
         }
+        self.stale_id_seen.swap(false, Ordering::Relaxed)
     }
 }

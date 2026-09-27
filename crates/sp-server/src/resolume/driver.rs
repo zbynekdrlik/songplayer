@@ -25,27 +25,36 @@ const FULL_REFRESH_TTL: Duration = Duration::from_secs(300); // 5 minutes
 /// ~10 s liveness tick — the retry storm the #157 review caught (#157).
 const FULL_REFRESH_RETRY: Duration = Duration::from_secs(60);
 
-/// How long a NOT READY clip mapping is fetched again on EVERY liveness tick
-/// (while `/composition` answers), counted from the start of the not-ready
-/// episode. Not ready means the map has none of SongPlayer's clips: the
-/// composition answered without them (Arena's REST answers before its
-/// composition has loaded), or the outage evicted the map. After this window
+/// How long a NOT READY clip mapping is fetched again on EVERY tick (while
+/// `/composition` answers; the ticks are `NOT_READY_TICK` apart then),
+/// counted from the start of the not-ready episode. Not ready means the map
+/// has none of SongPlayer's clips: the composition answered without them
+/// (Arena's REST answers before its composition has loaded), the outage
+/// evicted the map, or a push answered 404 (a stale map). After this window
 /// the normal `FULL_REFRESH_RETRY` applies, so a composition that genuinely
-/// has no SongPlayer clips never becomes a 14 MB fetch every 10 s (#217).
+/// has no SongPlayer clips never becomes a 14 MB fetch every tick (#217).
 const NOT_READY_FAST_WINDOW: Duration = Duration::from_secs(120);
 
-/// The tick interval while a not-ready episode's fast window is open, instead
-/// of the ~10 s liveness cadence: after an Arena relaunch the clips are mapped
-/// within ~2 s of the composition loading, not one liveness tick later
-/// (#217 addendum 2). Each such tick refetches the ~14 MB composition while it
-/// answers, bounded by `NOT_READY_FAST_WINDOW`.
+/// The tick interval on a not-ready episode's fast path, instead of the
+/// ~10 s liveness cadence: after an Arena relaunch the clips are mapped within
+/// ~2 s of the composition loading, not one liveness tick later (#217
+/// addendum 2). Each such tick refetches the ~14 MB composition, bounded by
+/// `NOT_READY_FAST_WINDOW`.
 const NOT_READY_TICK: Duration = Duration::from_secs(2);
 
-/// Whether a not-ready episode that began at `since` is still inside its fast
-/// window. The one predicate for both `decide`'s every-tick refetch and the
-/// `NOT_READY_TICK` cadence, so the two never disagree (#217 addendum 2).
-fn not_ready_fast_window_open(now: Instant, since: Instant) -> bool {
-    now.duration_since(since) < NOT_READY_FAST_WINDOW
+/// Whether a not-ready episode is on its fast path: open (`not_ready_since`),
+/// inside its `NOT_READY_FAST_WINDOW`, and the last `/composition` attempt
+/// answered. `decide` then refetches on every tick and the driver ticks every
+/// `NOT_READY_TICK`: one predicate, so the two never disagree. A failed last
+/// attempt (#157) waits out the retry window at the liveness cadence
+/// (#217 addendum 2).
+fn not_ready_fast_path(
+    now: Instant,
+    not_ready_since: Option<Instant>,
+    last_attempt_failed: bool,
+) -> bool {
+    !last_attempt_failed
+        && not_ready_since.is_some_and(|since| now.duration_since(since) < NOT_READY_FAST_WINDOW)
 }
 
 /// Why a full `/composition` refresh is being performed. Drives the INFO
@@ -67,8 +76,8 @@ pub(crate) enum FullRefreshReason {
     BreakerClosed,
     /// The clip map has none of SongPlayer's clips: a refresh answered
     /// without them (Arena's REST answers before its composition has loaded),
-    /// or the outage evicted the map. Fetch again until the clips appear
-    /// (#217).
+    /// or the outage evicted the map, or a push answered 404 (Arena re-ids its
+    /// clips on relaunch). Fetch again until the clips appear (#217).
     NotReady,
 }
 
@@ -124,8 +133,8 @@ impl FullRefreshReason {
         }
         let reason = if breaker_just_closed {
             FullRefreshReason::BreakerClosed
-        } else if let Some(since) = not_ready_since {
-            if !last_attempt_failed && not_ready_fast_window_open(now, since) {
+        } else if not_ready_since.is_some() {
+            if not_ready_fast_path(now, not_ready_since, last_attempt_failed) {
                 return Some(FullRefreshReason::NotReady);
             }
             FullRefreshReason::NotReady
@@ -276,7 +285,8 @@ pub struct HostDriver {
     /// closed the breaker (the outage evicted the map), or a push answered
     /// 404 (a relaunch gave the clips new ids, #217 addendum 2). `None` while the
     /// mapping is ready. Drives the `NotReady` refetch and the 2 s tick; the
-    /// refresh that clears it fires a `RecoveryEvent` (#217).
+    /// refresh that clears it fires a `RecoveryEvent` when it changed the map
+    /// (#217).
     not_ready_since: Option<Instant>,
     /// Whether the current driver step (one liveness tick, one command, or
     /// the startup refresh) has already broadcast a `RecoveryEvent`. The
@@ -286,13 +296,15 @@ pub struct HostDriver {
     /// the title fade (#217 review round 1).
     recovery_sent_this_step: bool,
     /// Set by a push answered `404 Not Found` (`note_push_status`), read and
-    /// cleared by the push step (`run_push`). Atomic because `set_text` /
+    /// cleared by `push` (the push step). Atomic because `set_text` /
     /// `set_clip_opacity` take `&self`: the handlers drive them in parallel
     /// (#217 addendum 2).
     stale_id_seen: AtomicBool,
-    /// Monotonic instant of the last 404 that marked the clip map stale. A
-    /// 404 marks it again only `FULL_REFRESH_RETRY` later (#217 addendum 2).
-    last_stale_mark_at: Option<Instant>,
+    /// Monotonic instant a stale-map refresh came back with the SAME clip map:
+    /// Arena still lists the ids it answers 404 for, so they are refused, not
+    /// stale (no relaunch). A 404 marks the map stale again only
+    /// `FULL_REFRESH_RETRY` later (#217 addendum 2).
+    refused_ids_at: Option<Instant>,
     /// Set via `with_recovery_channel` builder; never accessed directly.
     recovery_tx: Option<tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>>,
     /// Set via `with_health_channel` builder; never accessed directly.
@@ -322,7 +334,7 @@ impl HostDriver {
             not_ready_since: None,
             recovery_sent_this_step: false,
             stale_id_seen: AtomicBool::new(false),
-            last_stale_mark_at: None,
+            refused_ids_at: None,
             recovery_tx: None,
             health_tx: None,
         }
@@ -370,11 +382,11 @@ impl HostDriver {
             tokio::select! {
                 Some(cmd) = rx.recv() => {
                     self.handle_command(cmd).await;
-                    // A push whose 404 opened a not-ready episode moves the
-                    // next tick up to the fast cadence; `min` never delays it.
-                    if self.in_not_ready_fast_window(Instant::now()) {
-                        next_probe = next_probe.min(tokio::time::Instant::now() + NOT_READY_TICK);
-                    }
+                    next_probe = self.tick_due_after_command(
+                        next_probe,
+                        tokio::time::Instant::now(),
+                        Instant::now(),
+                    );
                 }
                 _ = tokio::time::sleep_until(next_probe) => {
                     self.on_tick_at(Instant::now()).await;
@@ -426,23 +438,34 @@ impl HostDriver {
         }
     }
 
-    /// Whether a not-ready episode is open and still inside its fast window:
-    /// `decide` refetches on every tick then, and the driver ticks every
-    /// `NOT_READY_TICK` (#217 addendum 2).
-    fn in_not_ready_fast_window(&self, now: Instant) -> bool {
-        self.not_ready_since
-            .is_some_and(|since| not_ready_fast_window_open(now, since))
-    }
-
-    /// The period until the next liveness tick: `NOT_READY_TICK` while a
-    /// not-ready episode's fast window is open, else `liveness` (the jittered
-    /// ~10 s cadence). After the window the 60 s retry spaces the refetches,
-    /// so the liveness cadence is enough (#217 addendum 2).
+    /// The period until the next liveness tick: `NOT_READY_TICK` on a
+    /// not-ready episode's fast path (`not_ready_fast_path`), else `liveness`
+    /// (the jittered ~10 s cadence). After the fast window the 60 s retry
+    /// spaces the refetches, so the liveness cadence is enough (#217
+    /// addendum 2).
     fn tick_period(&self, now: Instant, liveness: Duration) -> Duration {
-        if self.in_not_ready_fast_window(now) {
+        if not_ready_fast_path(now, self.not_ready_since, self.last_full_attempt_failed) {
             NOT_READY_TICK
         } else {
             liveness
+        }
+    }
+
+    /// When the next liveness tick is due after a command step. A push whose
+    /// 404 put the episode on its fast path moves it up to `NOT_READY_TICK`
+    /// from `tnow`; a command never delays it (`min`), so command traffic
+    /// cannot starve the probe (#217 addendum 2). `tnow` is the run loop's
+    /// tokio clock, `now` the policy clock.
+    fn tick_due_after_command(
+        &self,
+        due: tokio::time::Instant,
+        tnow: tokio::time::Instant,
+        now: Instant,
+    ) -> tokio::time::Instant {
+        if not_ready_fast_path(now, self.not_ready_since, self.last_full_attempt_failed) {
+            due.min(tnow + NOT_READY_TICK)
+        } else {
+            due
         }
     }
 
@@ -641,8 +664,9 @@ impl HostDriver {
     /// did answer, so the breaker bookkeeping still counts it as a success.
     /// The refresh that ends the episode fires a `RecoveryEvent`, so the
     /// engine re-pushes the title and the current line to the clips that now
-    /// exist (#217). `now` is the tick's monotonic clock, the one `decide`
-    /// reads.
+    /// exist (#217), unless the map came back unchanged (a 404 on an id Arena
+    /// still lists lost nothing, #217 addendum 2). `now` is the tick's
+    /// monotonic clock, the one `decide` reads.
     ///
     /// `GET /api/v1/composition`
     pub(crate) async fn refresh_mapping(&mut self, now: Instant) -> Result<(), anyhow::Error> {
@@ -662,7 +686,8 @@ impl HostDriver {
                         "Resolume composition has no SongPlayer clips yet — mapping not ready"
                     );
                 }
-                if new_mapping != self.clip_mapping {
+                let changed = new_mapping != self.clip_mapping;
+                if changed {
                     let total: usize = new_mapping.values().map(|v| v.len()).sum();
                     info!(
                         host = %self.host,
@@ -675,10 +700,12 @@ impl HostDriver {
                 // `apply_outcome` fires its own RecoveryEvent when it closes
                 // the breaker, and so may this step's probe. That re-push runs
                 // after the step, against the ready map, so one step never
-                // fires twice: a second ShowTitle restarts the title fade.
+                // fires twice: a second ShowTitle restarts the title fade. A
+                // map that came back UNCHANGED lost nothing (a 404 on an id
+                // Arena still lists): nothing to re-push (#217 addendum 2).
                 self.apply_outcome(true);
                 if became_ready {
-                    let fire = !self.recovery_sent_this_step;
+                    let fire = changed && !self.recovery_sent_this_step;
                     if fire {
                         self.send_recovery_event();
                     }
