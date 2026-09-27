@@ -752,10 +752,13 @@ jobs:
           # PR's mutation gate can finish before the push run's Build Tauri (~10 min),
           # so a one-shot read would spuriously see "pending" and force a needless
           # Gate re-run — the poll waits for the real result instead. Bounded to
-          # ~15 min (the push Gate completes well within that); the PR cannot merge
-          # before that build finishes anyway, so this adds no real latency.
+          # ~45 min: the push Gate waits for Build Tauri (~10-15 min) AND every
+          # mutation shard (20-min job bound each, up to 64 shards that may queue
+          # behind the runner concurrency). The old ~15 min bound timed out on the
+          # 0.66.0 and 0.67.0 release PRs while the push Gate was still green-bound.
+          # The PR cannot merge before the push Gate anyway, so this adds no latency.
           conclusion=""
-          for i in $(seq 1 30); do
+          for i in $(seq 1 90); do
             conclusion=$(gh api \
               "repos/${{ github.repository }}/commits/$HEAD_SHA/check-runs?check_name=Gate&per_page=100" \
               --jq '[.check_runs[] | select(.status == "completed")] | sort_by(.completed_at) | last | .conclusion // ""' \
