@@ -141,14 +141,18 @@ pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
 }
 
 /// Show subtitles — instant text swap on the four token groups:
-///   - `#sp-subs`      : current EN line (skipped if `suppress_en`)
-///   - `#sp-subs-next` : next EN line    (skipped if `suppress_en`)
+///   - `#sp-subs`      : current EN line (blank if `suppress_en`)
+///   - `#sp-subs-next` : next EN line    (blank if `suppress_en`)
 ///   - `#sp-subssk`    : current SK line
 ///   - `#sp-subssk-next`: next SK line (pushed only if a mapping exists —
 ///     the driver's clip scanner picks up the token automatically, no
 ///     config change needed)
 ///
-/// No fade animation; text is written directly.
+/// No fade animation; text is written directly. `suppress_en` (a song with
+/// its English lyrics inside the video) writes the EN clips EMPTY instead of
+/// skipping them: a skip left the previous song's English on the wall. The
+/// engine sends a push only when its signature changes, so that is one blank
+/// write per change (#217 addendum 2).
 #[cfg_attr(test, mutants::skip)]
 pub async fn set_subtitles(
     driver: &mut HostDriver,
@@ -158,24 +162,17 @@ pub async fn set_subtitles(
     next_sk: Option<&str>,
     suppress_en: bool,
 ) -> Result<(), anyhow::Error> {
-    let subs_clips = if suppress_en {
-        None
-    } else {
-        driver
-            .clip_mapping
-            .get(super::SUBS_TOKEN)
-            .filter(|v| !v.is_empty())
-            .cloned()
-    };
-    let subs_next_clips = if suppress_en {
-        None
-    } else {
-        driver
-            .clip_mapping
-            .get(super::SUBS_NEXT_TOKEN)
-            .filter(|v| !v.is_empty())
-            .cloned()
-    };
+    let (en, next_en) = if suppress_en { ("", "") } else { (en, next_en) };
+    let subs_clips = driver
+        .clip_mapping
+        .get(super::SUBS_TOKEN)
+        .filter(|v| !v.is_empty())
+        .cloned();
+    let subs_next_clips = driver
+        .clip_mapping
+        .get(super::SUBS_NEXT_TOKEN)
+        .filter(|v| !v.is_empty())
+        .cloned();
     let subs_sk_clips = driver
         .clip_mapping
         .get(super::SUBS_SK_TOKEN)
@@ -210,13 +207,20 @@ pub async fn set_subtitles(
     Ok(())
 }
 
-/// Hide subtitles — clear text on all `#sp-subs` and `#sp-subssk` clips.
-/// No fade animation; text is cleared directly.
+/// Hide subtitles — clear text on all `#sp-subs`, `#sp-subs-next` and
+/// `#sp-subssk` clips. No fade animation; text is cleared directly. The
+/// next-line clip is cleared too: it kept the stale next line while the wall
+/// was blank (#217 addendum 2).
 #[cfg_attr(test, mutants::skip)]
 pub async fn clear_subtitles(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
     let subs_clips = driver
         .clip_mapping
         .get(super::SUBS_TOKEN)
+        .filter(|v| !v.is_empty())
+        .cloned();
+    let subs_next_clips = driver
+        .clip_mapping
+        .get(super::SUBS_NEXT_TOKEN)
         .filter(|v| !v.is_empty())
         .cloned();
     let subs_sk_clips = driver
@@ -225,9 +229,10 @@ pub async fn clear_subtitles(driver: &mut HostDriver) -> Result<(), anyhow::Erro
         .filter(|v| !v.is_empty())
         .cloned();
 
-    if subs_clips.is_none() && subs_sk_clips.is_none() {
+    if subs_clips.is_none() && subs_next_clips.is_none() && subs_sk_clips.is_none() {
         warn!(
             subs_token = super::SUBS_TOKEN,
+            subs_next_token = super::SUBS_NEXT_TOKEN,
             subs_sk_token = super::SUBS_SK_TOKEN,
             "no Resolume subtitle clips found — wall is dark for subtitles, skipping push"
         );
@@ -238,6 +243,9 @@ pub async fn clear_subtitles(driver: &mut HostDriver) -> Result<(), anyhow::Erro
     let driver_ref: &HostDriver = driver;
 
     if let Some(clips) = subs_clips {
+        set_text_all(driver_ref, &clips, "").await?;
+    }
+    if let Some(clips) = subs_next_clips {
         set_text_all(driver_ref, &clips, "").await?;
     }
     if let Some(clips) = subs_sk_clips {

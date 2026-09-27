@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use tokio::sync::{broadcast, mpsc};
@@ -32,6 +33,20 @@ const FULL_REFRESH_RETRY: Duration = Duration::from_secs(60);
 /// the normal `FULL_REFRESH_RETRY` applies, so a composition that genuinely
 /// has no SongPlayer clips never becomes a 14 MB fetch every 10 s (#217).
 const NOT_READY_FAST_WINDOW: Duration = Duration::from_secs(120);
+
+/// The tick interval while a not-ready episode's fast window is open, instead
+/// of the ~10 s liveness cadence: after an Arena relaunch the clips are mapped
+/// within ~2 s of the composition loading, not one liveness tick later
+/// (#217 addendum 2). Each such tick refetches the ~14 MB composition while it
+/// answers, bounded by `NOT_READY_FAST_WINDOW`.
+const NOT_READY_TICK: Duration = Duration::from_secs(2);
+
+/// Whether a not-ready episode that began at `since` is still inside its fast
+/// window. The one predicate for both `decide`'s every-tick refetch and the
+/// `NOT_READY_TICK` cadence, so the two never disagree (#217 addendum 2).
+fn not_ready_fast_window_open(now: Instant, since: Instant) -> bool {
+    now.duration_since(since) < NOT_READY_FAST_WINDOW
+}
 
 /// Why a full `/composition` refresh is being performed. Drives the INFO
 /// transition log and is the return type of the pure [`FullRefreshReason::decide`]
@@ -110,7 +125,7 @@ impl FullRefreshReason {
         let reason = if breaker_just_closed {
             FullRefreshReason::BreakerClosed
         } else if let Some(since) = not_ready_since {
-            if !last_attempt_failed && now.duration_since(since) < NOT_READY_FAST_WINDOW {
+            if !last_attempt_failed && not_ready_fast_window_open(now, since) {
                 return Some(FullRefreshReason::NotReady);
             }
             FullRefreshReason::NotReady
@@ -249,18 +264,19 @@ pub struct HostDriver {
     /// re-fetched on every liveness tick (#157 review).
     last_full_attempt_at: Option<Instant>,
     /// Whether the last full-refresh ATTEMPT failed: a DNS/transport/timeout
-    /// error or a body that is not JSON (`fetch_mapping_inner` does not check
-    /// the status, so a non-2xx JSON body counts as answered). `decide` takes
+    /// error, a non-2xx status (even with a JSON body, #217 addendum 2), or a
+    /// body that is not JSON. `decide` takes
     /// the NotReady fast path only while the last attempt answered: a failing
     /// `/composition` is the #157 case and keeps the retry window (#217
     /// review round 3).
     last_full_attempt_failed: bool,
     /// Monotonic start of the current NOT READY episode: the first refresh
     /// whose `/composition` answered with none of SongPlayer's clips (Arena's
-    /// REST answers before its composition has loaded), or the probe that
-    /// closed the breaker (the outage evicted the map). `None` while the
-    /// mapping is ready. Drives the `NotReady` refetch; the refresh that
-    /// clears it fires a `RecoveryEvent` (#217).
+    /// REST answers before its composition has loaded), the probe that
+    /// closed the breaker (the outage evicted the map), or a push answered
+    /// 404 (a relaunch gave the clips new ids, #217 addendum 2). `None` while the
+    /// mapping is ready. Drives the `NotReady` refetch and the 2 s tick; the
+    /// refresh that clears it fires a `RecoveryEvent` (#217).
     not_ready_since: Option<Instant>,
     /// Whether the current driver step (one liveness tick, one command, or
     /// the startup refresh) has already broadcast a `RecoveryEvent`. The
@@ -269,6 +285,14 @@ pub struct HostDriver {
     /// transition must not fire a second one: a second `ShowTitle` restarts
     /// the title fade (#217 review round 1).
     recovery_sent_this_step: bool,
+    /// Set by a push answered `404 Not Found` (`note_push_status`), read and
+    /// cleared by the push step (`run_push`). Atomic because `set_text` /
+    /// `set_clip_opacity` take `&self`: the handlers drive them in parallel
+    /// (#217 addendum 2).
+    stale_id_seen: AtomicBool,
+    /// Monotonic instant of the last 404 that marked the clip map stale. A
+    /// 404 marks it again only `FULL_REFRESH_RETRY` later (#217 addendum 2).
+    last_stale_mark_at: Option<Instant>,
     /// Set via `with_recovery_channel` builder; never accessed directly.
     recovery_tx: Option<tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>>,
     /// Set via `with_health_channel` builder; never accessed directly.
@@ -297,6 +321,8 @@ impl HostDriver {
             last_full_attempt_failed: false,
             not_ready_since: None,
             recovery_sent_this_step: false,
+            stale_id_seen: AtomicBool::new(false),
+            last_stale_mark_at: None,
             recovery_tx: None,
             health_tx: None,
         }
@@ -333,9 +359,10 @@ impl HostDriver {
         self.run_full_refresh(FullRefreshReason::Startup, Instant::now())
             .await;
 
-        // Jittered liveness cadence. `sleep_until` a stable per-cycle deadline
-        // (recomputed only when the probe actually fires) so command traffic
-        // never resets or delays the next liveness probe.
+        // Jittered liveness cadence, or `NOT_READY_TICK` inside a not-ready
+        // episode's fast window. `sleep_until` a stable per-cycle deadline
+        // (recomputed when the probe fires) so command traffic never resets
+        // or delays the next liveness probe.
         let mut next_probe =
             tokio::time::Instant::now() + self.tick_period(Instant::now(), jittered_poll_period());
 
@@ -343,6 +370,11 @@ impl HostDriver {
             tokio::select! {
                 Some(cmd) = rx.recv() => {
                     self.handle_command(cmd).await;
+                    // A push whose 404 opened a not-ready episode moves the
+                    // next tick up to the fast cadence; `min` never delays it.
+                    if self.in_not_ready_fast_window(Instant::now()) {
+                        next_probe = next_probe.min(tokio::time::Instant::now() + NOT_READY_TICK);
+                    }
                 }
                 _ = tokio::time::sleep_until(next_probe) => {
                     self.on_tick_at(Instant::now()).await;
@@ -394,9 +426,24 @@ impl HostDriver {
         }
     }
 
-    /// The period until the next liveness tick: the jittered ~10 s cadence.
-    fn tick_period(&self, _now: Instant, liveness: Duration) -> Duration {
-        liveness
+    /// Whether a not-ready episode is open and still inside its fast window:
+    /// `decide` refetches on every tick then, and the driver ticks every
+    /// `NOT_READY_TICK` (#217 addendum 2).
+    fn in_not_ready_fast_window(&self, now: Instant) -> bool {
+        self.not_ready_since
+            .is_some_and(|since| not_ready_fast_window_open(now, since))
+    }
+
+    /// The period until the next liveness tick: `NOT_READY_TICK` while a
+    /// not-ready episode's fast window is open, else `liveness` (the jittered
+    /// ~10 s cadence). After the window the 60 s retry spaces the refetches,
+    /// so the liveness cadence is enough (#217 addendum 2).
+    fn tick_period(&self, now: Instant, liveness: Duration) -> Duration {
+        if self.in_not_ready_fast_window(now) {
+            NOT_READY_TICK
+        } else {
+            liveness
+        }
     }
 
     /// Record the attempt, log the mode transition, and run a full
@@ -456,19 +503,22 @@ impl HostDriver {
     /// open→closed on this call (so the caller can trigger a resync refresh).
     /// The WARN / circuit-breaker log lines are kept byte-identical to the
     /// pre-#157 inline machinery.
+    ///
+    /// The RecoveryEvent fires only on a real recovery: the breaker close
+    /// here, or a not-ready map becoming ready (`refresh_mapping`). A bare
+    /// failing→ok flip (one failed probe or `/composition`) evicted nothing,
+    /// and re-pushing on it restarted the title fade on every transient
+    /// failure (#217 addendum 2).
     fn apply_outcome(&mut self, ok: bool) -> bool {
         let mut breaker_just_closed = false;
         self.last_refresh_ts = Some(chrono::Utc::now());
         if ok {
             self.last_refresh_ok = true;
-            let was_failing = self.consecutive_failures > 0;
             self.consecutive_failures = 0;
             if self.circuit_breaker_open {
                 self.circuit_breaker_open = false;
                 breaker_just_closed = true;
                 info!(host = %self.host, "circuit breaker closed — Resolume recovered");
-            }
-            if was_failing {
                 self.send_recovery_event();
                 info!(host = %self.host, "Resolume recovery — RecoveryEvent fired");
             }
@@ -539,8 +589,9 @@ impl HostDriver {
     }
 
     /// Handle a single command: the forced refresh and the shutdown here, a
-    /// title or subtitle push through `run_push`. Pure dispatch; the handlers
-    /// have their own wiremock tests.
+    /// title or subtitle push through `run_push` (its own driver step, which
+    /// acts on a 404, #217 addendum 2). Pure dispatch; the handlers and
+    /// `run_push` have their own wiremock tests.
     #[cfg_attr(test, mutants::skip)]
     async fn handle_command(&mut self, cmd: ResolumeCommand) {
         match cmd {
@@ -621,8 +672,8 @@ impl HostDriver {
                     );
                     self.clip_mapping = new_mapping;
                 }
-                // `apply_outcome` fires its own RecoveryEvent after prior
-                // failures, and so may this step's probe. That re-push runs
+                // `apply_outcome` fires its own RecoveryEvent when it closes
+                // the breaker, and so may this step's probe. That re-push runs
                 // after the step, against the ready map, so one step never
                 // fires twice: a second ShowTitle restarts the title fade.
                 self.apply_outcome(true);
@@ -653,7 +704,12 @@ impl HostDriver {
         let ep = self.endpoint().await?;
         let url = format!("{}/api/v1/composition", ep.base_url);
         let req = self.client.get(&url);
-        let resp = Self::apply_host_header(req, &ep).send().await?;
+        // A non-2xx is a failed fetch even with a JSON body (#217 addendum 2):
+        // breaker bookkeeping and the 60 s retry window (#157).
+        let resp = Self::apply_host_header(req, &ep)
+            .send()
+            .await?
+            .error_for_status()?;
         let body: serde_json::Value = resp.json().await?;
         Ok(parse_composition(&body))
     }
@@ -732,10 +788,9 @@ impl HostDriver {
             .client
             .put(&url)
             .json(&serde_json::json!({ "value": text }));
-        Self::apply_host_header(req, &ep)
-            .send()
-            .await?
-            .error_for_status()?;
+        let resp = Self::apply_host_header(req, &ep).send().await?;
+        self.note_push_status(resp.status());
+        resp.error_for_status()?;
         Ok(())
     }
 
@@ -759,10 +814,9 @@ impl HostDriver {
             .client
             .put(&url)
             .json(&serde_json::json!({"video":{"opacity":{"value": opacity}}}));
-        Self::apply_host_header(req, &ep)
-            .send()
-            .await?
-            .error_for_status()?;
+        let resp = Self::apply_host_header(req, &ep).send().await?;
+        self.note_push_status(resp.status());
+        resp.error_for_status()?;
         Ok(())
     }
 }
