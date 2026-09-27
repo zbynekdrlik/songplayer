@@ -329,6 +329,36 @@ fn decide_not_ready_after_the_fast_window_fetches_once_per_retry_window() {
 }
 
 #[test]
+fn decide_not_ready_after_a_failed_fetch_keeps_the_retry_window() {
+    // Inside the fast window, but the last /composition attempt FAILED (the
+    // #157 case): no every-tick refetch, the 60 s retry window applies.
+    let base = Instant::now();
+    let after_failed_fetch = |now| {
+        FullRefreshReason::decide(
+            now,
+            None,
+            Some(base),
+            Some(base),
+            true,
+            FULL_REFRESH_TTL,
+            FULL_REFRESH_RETRY,
+            false,
+            false,
+        )
+    };
+    assert_eq!(
+        after_failed_fetch(base + secs(10)),
+        None,
+        "10 s after a failed fetch the retry window holds, even in the fast window"
+    );
+    assert_eq!(
+        after_failed_fetch(base + secs(60)),
+        Some(FullRefreshReason::NotReady),
+        "60 s after a failed fetch a not-ready mapping is fetched again"
+    );
+}
+
+#[test]
 fn decide_ready_mapping_keeps_the_steady_state() {
     let base = Instant::now();
     assert_eq!(
