@@ -74,6 +74,10 @@ impl ProgramTransition {
     /// `Prechod: strih (nastavenie)`, or with a running fade
     /// `… — prebieha 44 %`.
     pub fn label(&self) -> String {
+        // Before the first poll lands there is no transition to name yet.
+        if self.kind.is_empty() {
+            return String::new();
+        }
         let what = if self.kind == "fade" {
             format!("prelínanie {} ms", self.duration_ms)
         } else {

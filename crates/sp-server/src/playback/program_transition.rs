@@ -239,12 +239,17 @@ impl Window {
         self.end_100ns = self.end_100ns.min(at_100ns);
     }
 
+    /// How many boundaries the window covers: `n_slots`, or fewer once a
+    /// later cut truncated it.
+    pub fn covered(&self) -> u32 {
+        u32::try_from(boundary_index(self.end_100ns) - self.start_index).unwrap_or(0)
+    }
+
     /// How many of the window's boundaries are at or before `last` (the last
     /// boundary the program committed).
     pub fn served(&self, last: Option<i64>) -> u32 {
-        let len = boundary_index(self.end_100ns) - self.start_index;
         let upto = last.map_or(0, |l| boundary_index(l) - self.start_index + 1);
-        u32::try_from(upto.clamp(0, len)).unwrap_or(0)
+        u32::try_from(upto.clamp(0, i64::from(self.covered()))).unwrap_or(0)
     }
 }
 
@@ -288,6 +293,17 @@ impl Layout {
             len: job.video.len(),
         }
     }
+}
+
+/// The NV12 studio black of `layout`, appended to `out`: Y 16 over the
+/// `stride × height` luma plane, then 128 (neutral chroma) for the rest of the
+/// buffer. A missing side of a mixed boundary is this black in the PRESENT
+/// side's exact layout (a decoder's stride padding and buffer length
+/// included), so the two always blend and never cut at the midpoint.
+pub fn black_nv12_into(layout: Layout, out: &mut Vec<u8>) {
+    let luma = (layout.stride as usize * layout.height as usize).min(layout.len);
+    out.extend(std::iter::repeat_n(16u8, luma));
+    out.extend(std::iter::repeat_n(128u8, layout.len - luma));
 }
 
 /// How a mixed boundary builds its picture.
@@ -429,7 +445,8 @@ pub struct ActiveWindow {
     pub n_slots: u32,
     /// Window boundaries the program already emitted.
     pub served_slots: u32,
-    /// `served_slots` in percent of `n_slots`.
+    /// `served_slots` in percent of the boundaries the window covers
+    /// (`n_slots`, or fewer once a later cut truncated it).
     pub progress: u32,
 }
 
@@ -443,7 +460,7 @@ impl ActiveWindow {
             start_boundary_100ns: w.start_100ns,
             n_slots: w.n_slots,
             served_slots: served,
-            progress: served * 100 / w.n_slots.max(1),
+            progress: served * 100 / w.covered().max(1),
         }
     }
 }

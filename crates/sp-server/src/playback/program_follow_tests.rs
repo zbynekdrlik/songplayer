@@ -130,6 +130,46 @@ fn cg_obs_transition_is_read_from_its_reply() {
 }
 
 #[test]
+fn cg_obs_program_scene_is_read_from_its_reply() {
+    let ok = json!({
+        "requestStatus": { "result": true, "code": 100 },
+        "responseData": {
+            "currentProgramSceneName": "sp-fast",
+            "currentProgramSceneUuid": "uuid-1",
+        },
+    });
+    assert_eq!(program_scene_from_reply(&ok), Some("sp-fast".to_string()));
+    let failed = json!({ "requestStatus": { "result": false, "code": 207 } });
+    assert_eq!(program_scene_from_reply(&failed), None);
+    let unnamed = json!({
+        "requestStatus": { "result": true, "code": 100 },
+        "responseData": {},
+    });
+    assert_eq!(program_scene_from_reply(&unnamed), None);
+    assert_eq!(GET_CURRENT_PROGRAM_SCENE, PROGRAM_SCENE);
+}
+
+#[tokio::test]
+async fn without_cg_obs_nothing_is_read_and_nothing_is_cut() {
+    let bus = Arc::new(ProgramBus::new());
+    bus.select_initial(3);
+    let follow = Follow::new(pool().await, bus.clone());
+    let (events, _) = broadcast::channel::<ObsEvent>(4);
+    let no_obs = Upstream::new(None, events);
+    assert!(!follow.refresh_obs(&no_obs).await, "no answer");
+    assert_eq!(bus.follow().obs_transition(), None);
+    follow.catch_up(&no_obs).await;
+    assert_eq!(bus.status().source, Some(3));
+    assert_eq!(bus.status().health.cuts, 0);
+    assert_eq!(
+        bus.follow()
+            .status(&FollowSettings::default())
+            .last_follow_cut,
+        None
+    );
+}
+
+#[test]
 fn only_the_two_transition_events_trigger_a_reread() {
     assert!(is_transition_event("CurrentSceneTransitionChanged"));
     assert!(is_transition_event("CurrentSceneTransitionDurationChanged"));

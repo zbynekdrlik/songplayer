@@ -46,8 +46,8 @@ use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
 use crate::playback::program_transition::{
-    AudioFormat, Layout, MixJob, Picture, blend_nv12_into, mix_audio_block, picture_mix,
-    starts_size_cut,
+    AudioFormat, Layout, MixJob, Picture, black_nv12_into, blend_nv12_into, mix_audio_block,
+    picture_mix, starts_size_cut,
 };
 use crate::playback::submitter::FrameSubmitter;
 use crate::playback::vban_out::{VbanBlock, VbanOut, run_vban_config_task};
@@ -214,24 +214,19 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// #215: the picture of a window boundary: both pictures blended into a
     /// pooled buffer when their layouts match, else the `from` / `to` picture
     /// (the midpoint cut, logged once per window). A missing side is the NV12
-    /// black of the present side's size. `None` when neither side is here.
+    /// black in the present side's exact layout (`black_nv12_into`), so it
+    /// always blends. `None` when neither side is here.
     pub(crate) fn mix_picture(&mut self, mix: &MixJob) -> Option<(Layout, SharedFrame)> {
-        let main = mix.to.as_ref().or(mix.from.as_ref())?;
-        let (w, h) = (main.width, main.height);
-        let mut standby = || {
-            let black = self.submitter.standby_black_nv12(w, h);
-            let layout = Layout {
-                width: w,
-                height: h,
-                stride: w,
-                len: black.len(),
-            };
-            (layout, black)
+        let present = Layout::of(mix.to.as_ref().or(mix.from.as_ref())?);
+        let standby = || {
+            let mut black = sp_decoder::frame_pool::take(present.len);
+            black_nv12_into(present, &mut black);
+            (present, SharedFrame::new(black))
         };
         let side =
             |job: &crate::playback::submit_handoff::SubmitJob| (Layout::of(job), job.video.clone());
-        let from = mix.from.as_ref().map_or_else(&mut standby, side);
-        let to = mix.to.as_ref().map_or_else(&mut standby, side);
+        let from = mix.from.as_ref().map_or_else(standby, side);
+        let to = mix.to.as_ref().map_or_else(standby, side);
         let weight = mix.weight_q8();
         let picture = picture_mix(from.0, to.0, weight);
         if starts_size_cut(self.size_cut, picture) {

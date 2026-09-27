@@ -32,8 +32,9 @@ playlist keeps playing until the fade is over. Design record: #215 comment
   `ProgramJob::Mix` once each side is here or MISSED. "Missed" uses the #209
   per-source rules (`source_missed`): the source passed the boundary, it is
   absent for 1 s, or its 3-slot grace ran out (on the sender's wall only).
-  A missed side is left `None` and mixed against the standby (black of the
-  present side's size + silence, `side_fills`). With NEITHER side here, the
+  A missed side is left `None` and mixed against the standby (studio black in
+  the present side's EXACT layout, stride padding included —
+  `black_nv12_into` — + silence, `side_fills`). With NEITHER side here, the
   boundary is filled like any other (`ProgramJob::Standby`). Either reorder
   buffer over 16 forces the boundary.
 - **A Cut is a zero-length window**: no boundary is mixed, the output is the
@@ -46,7 +47,9 @@ playlist keeps playing until the fade is over. Design record: #215 comment
   outgoing source never has a waiting pair for a boundary that left its window
   (a stale `from_pending` entry would count toward the reorder bound forever).
 - `prune` drops a window once its last boundary is served
-  (`transitions_done`, a Cut included).
+  (`transitions_done`, a Cut included). `Window::covered()` is the number of
+  boundaries a (possibly truncated) window covers; `served` and the dashboard
+  `progress` count against it, so a superseded fade still ends at 100 %.
 - Grid math is exact: `boundary_index` / `boundary_at`. Slots are 333 333 or
   333 334 × 100 ns wide, so NEVER `start + k · interval`.
 
@@ -88,7 +91,9 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   - `program_follow_obs`: only `"true"` follows (default off);
   - `program_transition`: `obs` (default) / `fade` / `cut`;
   - `program_transition_ms`: a positive integer, default 300 (= 9 slots),
-    rounded to whole slots, at least 1, at most 300 (10 s).
+    rounded to whole slots, at least 1 slot, at most 300 slots (10 s). The
+    Nastavenia field shows the value the server uses (`effective_transition_ms`),
+    so its `min` / `max` never refuse a save of a stored out-of-range value.
 - The spec every cut uses (`effective_spec`): the `fade` / `cut` override,
   else cg OBS's transition (`cut_transition` → Cut, any other kind → a Fade of
   its duration, a fixed-duration one → `program_transition_ms`), else a Fade
@@ -98,13 +103,22 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   `remote::Upstream` (the existing OBS client, never a second connection). It
   is read at start (BEFORE the first spec is applied), on `Connected`, on
   `CurrentSceneTransitionChanged` / `CurrentSceneTransitionDurationChanged`,
-  and after a lagged broadcast. The OBS identify subscribes Scenes (4) |
+  and after a lagged broadcast. A read that got no answer is asked again on
+  every settings poll until one is answered: the OBS client broadcasts
+  `Connected` before its connection loop serves `ObsCommand::Remote` (the NDI
+  map rebuild runs first, up to ~10 s), so the `Connected` read can time out
+  (`UPSTREAM_TIMEOUT` 3 s). The OBS identify subscribes Scenes (4) |
   Transitions (16) | Outputs (64) = 84; without Transitions cg OBS never sends
   those events.
 - Follow = `ObsEvent::SceneChanged` (SongPlayer's own derived event, its
   playlists from `check_scene_items`) → `remote::map::scene_action` → cut via
-  `persist_and_cut`, unless the program already shows that source. This
-  replaces the event-night watcher `%TEMP%\sp_follow.ps1`.
+  `persist_and_cut`, unless the program already shows that source.
+- The follow CATCHES UP to cg OBS's current scene (`GetCurrentProgramScene` +
+  `Upstream::scene_playlists` → `follow_scene`) at start, when
+  `program_follow_obs` flips false → true, and after a lagged broadcast (a lost
+  `SceneChanged`; the #170 poll only repairs an event cg OBS itself dropped).
+  It never polls the scene otherwise. This replaces the event-night watcher
+  `%TEMP%\sp_follow.ps1`, which polled the scene every 200 ms.
 
 ## API + UI
 
@@ -130,7 +144,9 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   (the #209 rig: A 4×2, B 8×2, C 6×2, standby 2×2; `take_all` renders each job as
   `src W` / `fill` / `mix k/n F>T`), `program_output_tests.rs` (the mixed
   boundary on the mock sender), `scene_off_tests.rs`, `program_follow_tests.rs`
-  (a fake cg OBS at `ObsCommand::Remote`), `api/program_tests.rs`, and the mock
+  (a fake cg OBS at `ObsCommand::Remote`: scripted transition replies, a
+  settable program scene for `GetCurrentProgramScene`, `playlists_of` for the
+  scene lookups; every call is logged in order), `api/program_tests.rs`, and the mock
   E2Es `program-control.spec.ts` + `settings-program-transition.spec.ts`.
 - Pins were derived with scratch Python models of `ProgramCore` and the
   weight / blend math (rust-workspace.md, no-compile box). Re-derive them with
@@ -151,3 +167,12 @@ source, a dev1 VBAN capture with no zero-run ≥ 5 ms across the change, and the
 owner confirms on the PA and the wall. `program_follow_obs` is the setting
 switched on for events (design record); the watcher script
 `%TEMP%\sp_follow.ps1` is retired once it is on.
+
+**Also check the common production path: a PAUSED incoming playlist.** Every
+off-program playlist is paused when its scene leaves program, and it resumes
+on its own scene-go-on, at the same moment as the cut. Until its decode lands,
+its paced pipeline offers its held last frame + silence (`paced_output.rs`
+between scopes), so the first part of the fade can mix a frozen picture and
+silence on the incoming side. Measure the resume latency against the window
+(program `side_fills`, the VBAN capture); the design record's box case (two
+PLAYING playlists) does not cover it (review round 1, #215).

@@ -460,6 +460,53 @@ fn an_active_window_reports_its_progress_in_percent() {
 }
 
 #[test]
+fn a_window_covers_its_slots_until_a_later_cut_truncates_it() {
+    let mut w = Window::new(
+        Some(1),
+        2,
+        b(3),
+        &TransitionSpec::fade(300, SpecSource::Obs),
+    );
+    assert_eq!(w.covered(), 9);
+    w.truncate(b(6));
+    assert_eq!(w.covered(), 3);
+    let cut = Window::new(Some(1), 2, b(3), &TransitionSpec::cut(SpecSource::Obs));
+    assert_eq!(cut.covered(), 0);
+}
+
+#[test]
+fn the_black_of_a_layout_is_studio_black_over_its_padded_planes() {
+    let black = |width, stride, len| {
+        let mut out = vec![9u8];
+        black_nv12_into(
+            Layout {
+                width,
+                height: 2,
+                stride,
+                len,
+            },
+            &mut out,
+        );
+        out
+    };
+    let mut want = vec![9u8];
+    want.extend([16; 8]);
+    want.extend([128; 4]);
+    assert_eq!(black(4, 4, 12), want, "4×2: 8 luma bytes, 4 chroma");
+    let mut want = vec![9u8];
+    want.extend([16; 12]);
+    want.extend([128; 6]);
+    assert_eq!(
+        black(4, 6, 18),
+        want,
+        "stride 6: the luma plane is 6 × 2 bytes, padding included"
+    );
+    let mut want = vec![9u8];
+    want.extend([16; 10]);
+    assert_eq!(black(4, 6, 10), want, "a short buffer is all luma");
+}
+
+#[test]
 fn a_truncated_window_reports_its_progress_against_the_boundaries_it_covers() {
     let mut w = Window::new(
         Some(1),
