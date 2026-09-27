@@ -826,9 +826,16 @@ app.post("/__mock/ndi-health", (req, res) => {
 // cut at once (the real one lands on the boundary after next).
 let programState = { source: 1, previous: null, cuts: 0, transitions: 0, mixed: 0 };
 let programLastCut = null;
-// #215: the program transition — mirrors the server's `effective_spec` with no
-// cg OBS (the mock runs none): `cut` → a Cut, `fade` → a Fade of
-// `program_transition_ms`, `obs` (default) → the same Fade as the fallback.
+// #215: the mock runs no cg OBS and no program sender, so a spec can inject
+// cg OBS's current scene transition (`/__mock/program-obs-transition`) and a
+// running fade window (`/__mock/program-transition-active`); both are cleared
+// by `/__mock/program-reset`.
+let programObsTransition = null;
+let programActiveWindow = null;
+// #215: the program transition — mirrors the server's `effective_spec`:
+// `cut` → a Cut, `fade` → a Fade of `program_transition_ms`, `obs` (default)
+// → cg OBS's transition (`cut_transition` → a Cut, any other kind → a Fade of
+// its duration), or a Fade of `program_transition_ms` while it is unknown.
 function transitionMode() {
   const mode = (settings.program_transition || "").trim();
   return mode === "fade" || mode === "cut" ? mode : "obs";
@@ -838,18 +845,30 @@ function transitionMs() {
   const ms = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : 0;
   return ms >= 1 ? ms : 300;
 }
+function fadeSpec(ms, source) {
+  return {
+    kind: "fade",
+    duration_ms: ms,
+    n_slots: Math.min(300, Math.max(1, Math.round((ms * 30) / 1000))),
+    source,
+  };
+}
 function transitionSpec() {
   const mode = transitionMode();
   if (mode === "cut") {
     return { kind: "cut", duration_ms: 0, n_slots: 0, source: "setting" };
   }
-  const ms = transitionMs();
-  return {
-    kind: "fade",
-    duration_ms: ms,
-    n_slots: Math.min(300, Math.max(1, Math.round((ms * 30) / 1000))),
-    source: mode === "fade" ? "setting" : "fallback",
-  };
+  if (mode === "fade") {
+    return fadeSpec(transitionMs(), "setting");
+  }
+  const obs = programObsTransition;
+  if (obs === null) {
+    return fadeSpec(transitionMs(), "fallback");
+  }
+  if (obs.kind === "cut_transition") {
+    return { kind: "cut", duration_ms: 0, n_slots: 0, source: "obs" };
+  }
+  return fadeSpec(obs.duration_ms ?? transitionMs(), "obs");
 }
 // Mirrors `FollowStatus`, from the stored settings like the real API.
 function followBody() {
@@ -857,7 +876,7 @@ function followBody() {
     enabled: settings.program_follow_obs === "true",
     mode: transitionMode(),
     ms: transitionMs(),
-    obs_transition: null,
+    obs_transition: programObsTransition,
     last_follow_cut: null,
   };
 }
@@ -879,10 +898,10 @@ function programBody() {
       last_stamp_100ns: 0,
     },
     // #215: the transition the next cut uses; the mock applies a cut at once,
-    // so no window is ever running and each cut counts as done.
+    // so each cut counts as done and a window runs only when a spec injects one.
     transition: {
       ...transitionSpec(),
-      active: null,
+      active: programActiveWindow,
       transitions_done: programState.transitions,
       mixed_boundaries: programState.mixed,
       side_fills: 0,
@@ -1001,7 +1020,36 @@ app.get("/__mock/program-last-cut", (_req, res) => {
 app.post("/__mock/program-reset", (_req, res) => {
   programState = { source: 1, previous: null, cuts: 0, transitions: 0, mixed: 0 };
   programLastCut = null;
+  programObsTransition = null;
+  programActiveWindow = null;
   res.json({ status: "reset" });
+});
+// #215 test-only: cg OBS's current scene transition (`{name, kind,
+// duration_ms}`, mirrors `ObsTransition`), or `{}` for "not known yet".
+app.post("/__mock/program-obs-transition", (req, res) => {
+  const t = req.body || {};
+  programObsTransition =
+    typeof t.kind === "string"
+      ? { name: t.name || "", kind: t.kind, duration_ms: t.duration_ms ?? null }
+      : null;
+  res.json({ obs_transition: programObsTransition });
+});
+// #215 test-only: a running fade window of `progress` % (mirrors
+// `ActiveWindow`), or `{}` for none.
+app.post("/__mock/program-transition-active", (req, res) => {
+  const progress = req.body?.progress;
+  programActiveWindow =
+    typeof progress === "number"
+      ? {
+          from: programState.previous,
+          to: programState.source,
+          start_boundary_100ns: 17900000000000000,
+          n_slots: transitionSpec().n_slots,
+          served_slots: Math.round((progress * transitionSpec().n_slots) / 100),
+          progress,
+        }
+      : null;
+  res.json({ active: programActiveWindow });
 });
 
 // Lyrics pipeline queue
