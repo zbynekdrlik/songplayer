@@ -421,7 +421,9 @@ fn a_mapping_is_ready_only_with_one_of_songplayer_s_own_tokens() {
 /// A composition that never gets SongPlayer's clips (only the operator's own
 /// tokens), polled for 5 minutes of ~10 s ticks: 1 startup fetch + 11 fast
 /// fetches (10–110 s) + 3 in the 60 s retry window (170, 230, 290 s) = 15,
-/// against 31 if every tick fetched. The design bound is 12 + 3 after startup.
+/// against 31 if every tick fetched. The test drives the ticks 10 s apart; the
+/// real driver ticks every 2 s on the fast path (#217 addendum 2: 63 fetches,
+/// `a_not_ready_episode_refetches_every_2_s_then_falls_back_after_120_s`).
 #[tokio::test]
 async fn a_composition_that_never_loads_is_fetched_15_times_in_five_minutes() {
     let server = arena().await;

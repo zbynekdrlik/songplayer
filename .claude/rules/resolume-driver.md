@@ -37,13 +37,16 @@ What the driver does now (`refresh_mapping(now)`):
 - `decide` returns `NotReady` (log `reason="not-ready"`) on every tick for
   `NOT_READY_FAST_WINDOW` (120 s) from `not_ready_since`, skipping the 60 s
   retry backoff. After that the retry window applies again.
-- **The 2 s cadence (#217 addendum 2).** While that fast window is open,
-  `run` ticks every `NOT_READY_TICK` (2 s, `tick_period`) instead of the
-  ~10 s liveness cadence, so the clips are mapped within ~2 s of the
-  composition loading (the box took 11 s, one liveness tick). One predicate,
-  `not_ready_fast_window_open`, decides both the every-tick refetch and the
-  2 s tick. A command that opened an episode (a 404 push) moves the next tick
-  up to 2 s with `next_probe.min(..)`, which never delays the probe.
+- **The 2 s cadence (#217 addendum 2).** On that fast path `run` ticks
+  every `NOT_READY_TICK` (2 s, `tick_period`) instead of the ~10 s liveness
+  cadence, so the clips are mapped within ~2 s of the composition loading
+  (the box took 11 s, one liveness tick). One predicate,
+  `not_ready_fast_path` (open episode, inside the 120 s, last attempt
+  answered), decides both the every-tick refetch and the 2 s tick, so they
+  never disagree: after a failed fetch the retry window runs at the liveness
+  cadence. A command that put an episode on its fast path (a 404 push) moves
+  the next tick up to 2 s (`tick_due_after_command`, a `min`: it never delays
+  the probe).
 - **The cost.** A composition that never gets SongPlayer's clips costs
   1 + 59 + 3 = 63 fetches in 5 min (0..118 s every 2 s, then 180, 240, 300 s),
   then one fetch (and one INFO `reason="not-ready"` line) every 60 s for as
@@ -105,22 +108,37 @@ log 14:12:22) until the 300 s TTL.
   not help and costs ~14 MB (`a_push_answered_500_does_not_mark_the_map_stale`).
 - **The push step** (`driver_push.rs::run_push`, every title/subtitle
   command is its own driver step and clears `recovery_sent_this_step`):
-  1. run the handler;
-  2. on a 404, `mark_map_stale`: `not_ready_since.get_or_insert(now)` (an
-     open episode keeps its start, so its fast window never extends);
+  1. run the handler (`push` returns whether a 404 was seen and clears the
+     note, so it is false outside a push);
+  2. on a 404, `not_ready_since.get_or_insert(now)` (an open episode keeps
+     its start, so its fast window never extends);
   3. refresh through `decide` (the NotReady path; a failed last attempt still
      waits out the 60 s retry window, the ticks fetch it then);
-  4. if the refresh mapped SongPlayer's clips, retry the push once. The ready
-     transition has already fired the step's RecoveryEvent.
+  4. still not ready, or the fetch failed: stop, the episode's ticks carry on;
+  5. the refresh mapped NEW clips (a relaunch): retry the push once. The
+     ready transition has already fired the step's RecoveryEvent.
 - **A ShowTitle is not retried.** That RecoveryEvent's engine re-push shows
   the title; a retried ShowTitle would run a second fade from 5 %, the blink
-  the one-event-per-step rule exists for. A HideTitle IS retried (the re-push
-  never hides), and a subtitle retry is an instant, harmless double.
-- **At most one stale mark per `FULL_REFRESH_RETRY` (`last_stale_mark_at`).**
-  An id the composition still lists but the by-id endpoint refuses would
-  otherwise loop with no timer in it: ready refresh → RecoveryEvent → engine
-  re-push → 404 → refresh → … one 14 MB fetch per lap. A relaunch is never
-  held back by it: the steady state has no 404s.
+  the one-event-per-step rule exists for. A subtitle retry is an instant,
+  harmless double. A HideTitle IS retried (the re-push sends no hide), but
+  see the caveat below.
+- **The SAME clips came back = a refused id, not a stale map
+  (`refused_ids_at`).** Arena still lists the ids it answers 404 for, so
+  no clip got a new id: no retry (it would 404 again), no RecoveryEvent
+  (`refresh_mapping` fires the ready event only when the map changed), and
+  no new refresh for `FULL_REFRESH_RETRY` (a 404 on it logs at debug).
+  Otherwise every push costs a ~14 MB fetch, and with an event the loop
+  ready refresh → RecoveryEvent → re-push → 404 → refresh had no timer in it.
+  Only this holds a refresh back: a relaunch maps new ids, so a second
+  relaunch a few seconds later refreshes at once
+  (`a_second_relaunch_within_a_minute_is_refreshed_at_once`; an earlier
+  "one mark per 60 s" guard held it back, review round 1).
+- **Caveat — the engine can undo a retried HideTitle.**
+  `playback/recovery.rs::handle_resolume_recovery` re-pushes `ShowTitle` for
+  every pipeline Playing on program, even after its end-of-song hide (an
+  older engine behaviour, not tracked per pipeline). A HideTitle that 404s on
+  program near a song's end is retried, then faded back in by that re-push;
+  off program the retry hides the title for good.
 
 ## Subtitle clips: blank, never skip (#217 addendum 2)
 
@@ -134,11 +152,18 @@ log 14:12:22) until the 300 s TTL.
 ## RecoveryEvent: only on a real recovery, one per driver step
 
 **Only a real recovery fires one (#217 addendum 2):** the breaker close
-(`apply_outcome`) or a not-ready map becoming ready (`refresh_mapping`,
-including an episode a 404 started). A bare failing→ok flip (one failed probe
-or `/composition`) evicted nothing, so it fires none. It used to
-(`was_failing`): every transient failure re-pushed all hosts and restarted the
-title fade, and in the #157 retry case every failed fetch did.
+(`apply_outcome`) or a not-ready map becoming ready with a CHANGED map
+(`refresh_mapping`, including an episode a 404 started). A bare failing→ok
+flip (one failed probe or `/composition`) evicted nothing, so it fires none.
+It used to (`was_failing`): every transient failure re-pushed all hosts and
+restarted the title fade, and in the #157 retry case every failed fetch did.
+
+- **The accepted cost (design item 2).** A push that failed with a timeout or
+  a 5xx (not a 404) during such a hiccup is no longer caught up by a
+  re-push. A subtitle line comes back at the next line change (the engine's
+  dedup key changes); a lost `ShowTitle` stays lost until the next song.
+  Before, the flip's event re-pushed it only when a probe or `/composition`
+  had also failed, never for a push that failed alone.
 
 `show_title` fades opacity from 5 % to 100 %, so a SECOND `ShowTitle` while the
 title is up is a visible blink. So one driver step fires at most one event.
@@ -148,7 +173,7 @@ refresh.
 - **Why per step:** the engine's re-push for an event queues on the driver's
   own mpsc. The driver is busy until the step ends, so that re-push runs
   AFTER the step, against the map the step ends with. An event fired earlier
-  in the step, e.g. by the probe's `apply_outcome(true)` after a failed probe,
+  in the step, e.g. by the probe's `apply_outcome(true)` closing the breaker,
   already covers a refresh that later in the same step finds the clips.
 - **How:** `send_recovery_event` sets `recovery_sent_this_step`, and
   `on_tick_at` / the `RefreshMapping` arm / `run_push` clear it at the step's
