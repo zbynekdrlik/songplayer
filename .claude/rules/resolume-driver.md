@@ -3,6 +3,8 @@ paths:
   - "crates/sp-server/src/resolume/**"
   - "crates/sp-server/src/playback/recovery.rs"
   - "crates/sp-server/src/playback/title.rs"
+  - "crates/sp-server/src/playback/title_timers.rs"
+  - "crates/sp-server/src/playback/handle_pipeline_event.rs"
 ---
 
 # Resolume host driver — poll policy, NOT READY mapping, stale ids, RecoveryEvent, the wall title (#157, #217)
@@ -169,10 +171,12 @@ SongPlayer pushes nothing meanwhile, no request answers 404, and the map
 keeps the dead ids until the 300 s TTL refresh, which fires no event.
 
 - **When:** `on_tick_at` notes `was_failing` (`consecutive_failures > 0`)
-  BEFORE the liveness probe. On an ok probe that did not close the breaker
-  (a close refreshes on its own), and with no open not-ready episode (it
-  refreshes anyway, and a probe would restamp its start),
-  `driver_probe.rs::probe_stale_map` runs before the tick's `decide`.
+  BEFORE the liveness probe. On an ok probe with no open not-ready episode
+  (it refreshes anyway, and a probe would restamp its start),
+  `driver_probe.rs::probe_stale_map` runs before the tick's `decide`. A
+  breaker close is such an episode: it evicted the map and opened one, so
+  it is never probed, and no `!breaker_just_closed` guard is needed (review
+  round 1; a test of that half could not fail).
 - **What:** `GET /api/v1/parameter/by-id/{id}` for the first mapped
   SongPlayer text param (`SONGPLAYER_TOKENS` order), ~100 bytes. A full
   `/composition` per hiccup (14 MB) is the design's rejected alternative.
@@ -185,6 +189,10 @@ keeps the dead ids until the 300 s TTL refresh, which fires no event.
 - **A composition fetch failure counts as a failure too** (the #157 case):
   the next ok tick probes one param. That costs at most one tiny GET per
   failed fetch, and the retry window still spaces the refetches.
+- **A 404 on an id Arena still lists** (a refused id) costs one refresh per
+  failing→ok flip: the refresh maps the same clips and fires no event, and
+  there is no `refused_ids_at` hold on this path. That is bounded by the
+  failure rate; the steady state never has a refused id.
 
 ## The driver owns the wall title (#217 addendum 3)
 
@@ -201,10 +209,16 @@ reached on (`WallTitle`), and every title command goes through
   fade that did not finish leaves (a request failed): partly up. The driver
   runs one command at a time and a fade blocks it, so a fade is never seen
   "in flight" by another command.
-- **`plan`, act only on a difference:**
+- **`plan`, act only on a difference** (it returns `Option<TitleAction>`,
+  `None` = nothing to do):
   - a title (a `ShowTitle`, or a `Resync` naming one): nothing while that
-    exact text is `Shown`; otherwise it fades in (`show_title`, from 5 %). An
-    empty ShowTitle shows nothing; an empty Resync title is no title;
+    exact text is `Shown`. Onto a `Hidden` clip it fades in (`FadeIn`:
+    `show_title`, text then 5 % → 100 %). Onto any other state it is
+    `Replace` (`replace_title`: opacity 0 at once, then the same fade-in).
+    `show_title` writes the text first, so over a title that is up (or a
+    relaunched clip) the new text showed at full opacity before the fade
+    restarted: a blink (review round 1). An empty ShowTitle shows nothing;
+    an empty Resync title is no title;
   - `HideTitle`: nothing while `Hidden`. It fades out only from `Shown` (a
     title known to be up); any other state hides at once (`hide_title_now`);
   - a `Resync` naming no title: nothing while `Hidden`, else hide at once.
@@ -223,10 +237,16 @@ reached on (`WallTitle`), and every title command goes through
   Resync before the LAST Resync. The Resync is the engine's later statement
   of the wall, so a queued ShowTitle can no longer flash the title on the way
   to a `Resync(None)`. Subtitle commands and later title commands keep their
-  order.
+  order. A superseded scene-off HideTitle leaves the old title up for the
+  next scene's `Resync(Some(new))`, which is why that is a `Replace`, not a
+  text swap at full opacity.
+- **A batch holds the tick.** `run` handles the whole drained batch (at most
+  the 64-command channel, each fade ~1 s) before `select!` looks at the tick
+  or the shutdown again. The tick's deadline is kept, only reached later.
 - **`handlers::show_title` takes the formatted text** (`format_title_text`),
-  the text the state compares. The engine's Resync text comes from the same
-  `resolume::handlers::format_title_text`.
+  the text the state compares. `playback::title::format_title_text` is a
+  re-export of it, the one formatter for the Resync, the ShowTitle and the
+  OBS text.
 
 ## The RecoveryEvent forwarder (#217 addendum 3)
 
@@ -323,41 +343,57 @@ Otherwise a stale text Arena restored from its saved composition stays until
 the next line change, for the whole song, or over the next camera shot.
 
 **The title is ONE `Resync` (#217 addendum 3), sent first by
-`resync_wall_title`**, which the OBS scene-on (`push_title_for_playing`) uses
-too. It names the title that SHOULD be up, and the driver compares it with
-what it did (above). The engine no longer decides from the timer handles:
-they could not tell the gap between songs (both `None`), a skip before the
-next `Started`, or a scene-off that cancelled them mid-song.
+`resync_wall_title(now)`**, which the OBS scene-on (`push_title_for_playing`)
+uses too. It names the title that SHOULD be up, and the driver compares it
+with what it did (above).
 
+- **One clock: `TitleClock { video_id, show_at, hide_at }`**
+  (`playback/title.rs`). The `Started` handler fixes it
+  (`show_at = Started + 1.5 s`, `hide_at = end − 3.5 s`, `None` for a song of
+  5 s or less or an unknown 0 duration) and arms the timers from it
+  (`title_timers.rs::arm_title_timers`: `sleep_until` those instants).
 - **A title is due** (`PlaylistPipeline::title_due`) when its pipeline plays
-  on program, the song has had its `Started`, and its position is inside
-  `title::title_window_open`.
-- **`started_video_id`** is set in the `Started` handler together with
-  `cached_position_ms = 0`. Until the current video's own `Started`, the
-  position and duration are the previous song's; a skip's late Position
-  events are the old song's too. So the window stays closed from a song
-  change to the new `Started`.
-- **The window is `[1.5 s, dur − 3.5 s)`**, the same constants as the show and
-  hide timers (`TITLE_SHOW_DELAY_MS`, `TITLE_HIDE_BEFORE_END_MS`; the timers
-  use them). A song of 5 s or less, or with an unknown 0 duration, has no hide
-  timer and keeps its title to the end.
+  on program and its clock is this video's and `open_at(now)`:
+  `[show_at, hide_at)`.
+- **Why not the position (review round 1, 🔴).** The first version read
+  `cached_position_ms`, the decoder position the pipeline reports every
+  500 ms, while the timers slept on the clock of `Started`. For up to
+  ~500 ms at each boundary they disagreed. A `Resync(Some)` queued with the
+  song-end HideTitle superseded it, and the title stayed into the next song;
+  a `Resync(None)` just after the show timer hid the title for the whole song.
+  Every OBS program change re-sends `on_program: true` for every on-program
+  playlist (`obs_bridge.rs`), so a Resync near a boundary is common. The
+  timers and the Resync now read the same instants; only a race of
+  microseconds between the engine computing a Resync and a timer sending
+  remains.
+- **Between songs.** The clock is the previous video's until the new one's
+  `Started`, and a skip's late Position events do not matter any more. So the
+  window is closed from a song change to the new `Started`, and the scene-on
+  that selects a new song names no title.
+- **A scene-on re-arms the timers** (`rearm_title_timers`). A scene-off
+  cancels the song's timers (a timer of a playlist off program must not write
+  the shared clip), while the #215 transition hold keeps the song playing. A
+  scene-on of the playing video cancels and arms them again from its clock,
+  for what is still ahead. Before, a bounce in the first 1.5 s left the song
+  with no title, and a later one with no hide 3.5 s before the end. A clock of
+  another video arms nothing; its `Started` will. Every scene change
+  re-arms (cheap tasks, the same deadlines).
 - **Several due** (a program scene with more than one SongPlayer playlist;
   they share the one `#sp-title` clip): the highest playlist id, so the
   answer never depends on HashMap order.
-- **The text** comes from `resolume::handlers::format_title_text`, the
-  formatter the driver's state compares. Inside the window the OBS text
-  source gets it too. A failed DB read sends nothing: a transient error must
-  not hide a title mid-song.
-- Pinned in `tests_scene_change.rs`: mid-song, one ms before the hide point,
-  from the hide point (`…does_not_re_show_a_title_the_song_end_hid`), before
-  and from 1.5 s, between songs, two playlists, the `Started` handler, and
-  the scene-on in and outside the window.
-- **Residual:** a scene-off cancels the song's title timers. A scene-on later
-  in the same song (the #215 transition hold keeps it playing) re-syncs the
-  title, but no timer hides it 3.5 s before the end. It stays until the next
-  song's ShowTitle, as before this addendum. A resume (`start_position_ms`)
-  has the same gap: the hide timer counts from `Started`, not from the resume
-  position.
+- **The text** comes from `format_title_text` (one formatter, see above).
+  The OBS text source follows the Resync: the title, or cleared, as the hide
+  timer clears it. A failed DB read sends nothing: a transient error must not
+  hide a title mid-song.
+- **`cached_position_ms`** is the subtitle and pause position only. The
+  `Started` handler no longer zeroes it: a Pause before the first Position
+  report recorded 0 and resumed the song from its start (review round 1).
+- Pinned in `tests_scene_change.rs` (`Window::{Due, BeforeShow, AfterHide,
+  OtherSong, NotStarted}`), `title_tests.rs` (the clock's instants and both
+  sides of each boundary) and `a_recovery_follows_the_title_clock_not_a_lagging_position`.
+- **Residual:** a resume (`start_position_ms`) runs its clock from its
+  `Started`, like the timers, not from the resume position. The hide timer
+  was already this way.
 
 ## Testing the driver on the no-compile box
 
@@ -397,9 +433,14 @@ next `Started`, or a scene-off that cancelled them mid-song.
   (`driver_title_tests.rs::put_sequence`: `opacity 100 = 0.0`,
   `text 900 = ""`). The "no flash" test feeds `take_queued` from a real mpsc,
   like `run`.
-- **An engine window test sets the position, not timers**
-  (`tests_scene_change.rs::play`): `state`, `current_video_id`,
-  `started_video_id`, `cached_position_ms`, `cached_duration_ms` and
-  `scene_active`. Pin both sides of each boundary through the engine
-  (1499 / 1500 ms, `dur − 3501` / `dur − 3500`), and give `None` a type
-  (`[None::<String>]`) in an `assert_eq!` against a `Vec<Option<String>>`.
+- **An engine window test sets the song's clock** (`tests_scene_change.rs`,
+  `play` + `clock_for`). Its instants are the test's `Instant::now()` or an
+  hour ahead, and past the hide point is `hide_at = now`. Never subtract from
+  `now`: a freshly booted Windows runner's monotonic clock underflows. A
+  window test of the real-clock engine is then deterministic, even under a
+  ptrace stall. Pin the boundaries on `TitleClock` itself
+  (`title_tests.rs`: `base + 1499 ms` / `base + 1500 ms`), and a timer-arming
+  boundary with an explicit `now` (`arm_title_timers(7, now)` with
+  `show_at == now`).
+- Give `None` a type (`[None::<String>]`) in an `assert_eq!` against a
+  `Vec<Option<String>>`.
