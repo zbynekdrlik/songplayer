@@ -28,7 +28,7 @@ fn group(start_ms: u64, end_ms: u64, en: &str) -> Group {
     Group::of(0, &line(start_ms, end_ms, en, ""))
 }
 
-/// The plan of sung lyrics (the Song profile, 1.5 s lead).
+/// The plan of sung lyrics (the Song profile, lead up to 1.5 s).
 fn song_plan(lines: &[LyricsLine]) -> Vec<DisplayLine> {
     build_plan(lines, DisplayProfile::Song)
 }

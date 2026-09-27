@@ -234,8 +234,8 @@ fn merge_groups(lines: &[LyricsLine], lead_ms: u64) -> Vec<Group> {
 }
 
 /// The next merge to apply, as the index `i` that absorbs group `i + 1`. Text
-/// fragments come first. Once none is left, a line the schedule shows for less
-/// than [`MIN_VISIBLE_MS`] is tried.
+/// fragments come first. Once no fragment can merge, a line the schedule shows
+/// for less than [`MIN_VISIBLE_MS`] is tried.
 fn next_merge(groups: &[Group], lead_ms: u64) -> Option<usize> {
     fragment_merge(groups).or_else(|| short_merge(groups, &schedule(groups, lead_ms)))
 }
