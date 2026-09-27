@@ -202,8 +202,9 @@ pub enum Cue {
     /// source stays on program at full level meanwhile. It opens on
     /// `deadline_100ns` at the latest.
     Waiting { deadline_100ns: i64 },
-    /// A later cut came while it was still waiting: it never opens, and its
-    /// outgoing source stays on program at full level to the window's end.
+    /// A later cut landed inside its span (on or before its end,
+    /// [`Window::holds_on_air`]) while it was still waiting: it never opens,
+    /// and its outgoing source stays on program at full level to its end.
     Frozen,
 }
 

@@ -15,9 +15,10 @@
 //!   then each boundary is HELD: the outgoing source's own pair at full level
 //!   (or the program's standby pair when it missed), and the incoming side's
 //!   pair (a fill, the pre-roll black, a paused frozen frame) is dropped.
-//! - **Frozen** — a later cut came while it was still waiting: every boundary
-//!   is held to the window's end, and the next window fades out of the source
-//!   that was really on program.
+//! - **Frozen** — a later cut landed inside its span (on or before its end)
+//!   while it was still waiting: every boundary is held to the window's end,
+//!   and the next window fades out of the source that was really on program.
+//!   A cut after its latest end leaves it waiting (`Window::truncate`).
 //!
 //! A held boundary waits for the incoming side like a mixed one does (it may
 //! be the live pair that opens the cue); with neither side here and both
