@@ -50,8 +50,9 @@ playlist keeps playing until the fade is over. Design record: #215 comment
   (`transitions_done`, a Cut included). `Window::covered()` is the number of
   boundaries a (possibly truncated) window covers; `served` and the dashboard
   `progress` count against it, so a superseded fade still ends at 100 %.
-- Grid math is exact: `boundary_index` / `boundary_at`. Slots are 333 333 or
-  333 334 × 100 ns wide, so NEVER `start + k · interval`.
+- Grid math is exact: `sp_core::genlock::{grid_index_100ns,
+  grid_boundary_100ns}` (tested in sp-core `genlock_tests_grid_index.rs`).
+  Slots are 333 333 or 333 334 × 100 ns wide, so NEVER `start + k · interval`.
 
 ## The mix (`program_transition.rs` pure, `program_output.rs` on the sender thread)
 
