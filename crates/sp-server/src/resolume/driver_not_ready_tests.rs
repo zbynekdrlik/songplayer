@@ -487,8 +487,9 @@ async fn a_ready_refresh_after_a_failure_fires_exactly_one_recovery_event() {
 /// Arena goes away in the middle of a not-ready episode and comes back with
 /// its composition loaded. The breaker close fires its own RecoveryEvent, and
 /// the engine's re-push lands after the breaker-closed refresh maps the clips.
-/// Opening the breaker ends the episode, so that refresh must not fire a
-/// second RecoveryEvent (a second re-push restarts the title fade).
+/// That refresh ends the episode the close started, but in the same step as
+/// the close's event, so it must not fire a second one (a second re-push
+/// restarts the title fade).
 #[tokio::test]
 async fn an_outage_during_a_not_ready_episode_fires_one_recovery_event_on_return() {
     let server = arena().await;
@@ -597,9 +598,9 @@ async fn a_forced_refresh_that_finds_the_clips_fires_the_ready_event() {
 }
 
 /// Arena goes away during a not-ready episode that started long ago, and comes
-/// back still loading. Opening the breaker ended the old episode, so the
-/// breaker-closed refresh opens a FRESH 120 s fast window: the next tick
-/// fetches again instead of waiting out the 60 s retry window.
+/// back still loading. The breaker close starts a new episode, so the relaunch
+/// gets a FRESH 120 s fast window: the next tick fetches again instead of
+/// waiting out the 60 s retry window.
 #[tokio::test]
 async fn an_outage_gives_the_relaunch_a_fresh_fast_window() {
     let server = arena().await;
@@ -693,5 +694,47 @@ async fn a_breaker_close_held_back_by_the_retry_window_is_refetched_on_the_next_
         drain(&mut rx),
         1,
         "the refresh that maps the clips fires one RecoveryEvent, so the wall is re-pushed"
+    );
+}
+
+/// Review round 3: after a breaker close `/composition` keeps FAILING (Arena's
+/// REST answers `/product` but chokes on the 14 MB composition while it
+/// loads). Not ready means "answered without SongPlayer's clips"; a failed
+/// fetch is the #157 case, so it waits out the 60 s retry window instead of
+/// taking the every-tick fast path. 31 ticks, 10 s apart, from the relaunch:
+/// fetches at 0, 60, 120, 180, 240, 300 s = 6, not 15. Each failed fetch
+/// makes the next probe fire the #157 `was_failing` RecoveryEvent, so there is
+/// one event per failed fetch (6), never one per tick.
+#[tokio::test]
+async fn a_failing_composition_after_a_breaker_close_keeps_the_retry_window() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let (tx, mut rx) = broadcast::channel(64);
+    let mut driver =
+        HostDriver::new("127.0.0.1".into(), server.address().port()).with_recovery_channel(tx);
+    let base = Instant::now();
+    driver.last_full_refresh_ok_at = Some(base);
+    driver.last_full_attempt_at = Some(base);
+    driver.consecutive_failures = 3;
+    driver.circuit_breaker_open = true;
+
+    let relaunch = base + secs(1800);
+    for k in 0..=30u64 {
+        driver.on_tick_at(relaunch + secs(10 * k)).await;
+    }
+
+    assert_eq!(
+        composition_fetches(&server).await,
+        6,
+        "a failing /composition is fetched once per 60 s window (0, 60, ..., 300 s)"
+    );
+    assert_eq!(
+        drain(&mut rx),
+        6,
+        "the breaker close + one #157 re-push per failed fetch, never one per tick"
     );
 }
