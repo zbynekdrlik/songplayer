@@ -103,7 +103,7 @@ impl DisplayProfile {
     pub fn lead_ms(self) -> u64 {
         match self {
             Self::Song => LEAD_MS,
-            Self::Speech => LEAD_MS,
+            Self::Speech => 0,
         }
     }
 }
