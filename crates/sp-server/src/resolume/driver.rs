@@ -250,6 +250,13 @@ pub struct HostDriver {
     /// while the mapping is ready. Drives the `NotReady` refetch; the refresh
     /// that clears it fires a `RecoveryEvent` (#217).
     not_ready_since: Option<Instant>,
+    /// Whether the current driver step (one liveness tick, one command, or
+    /// the startup refresh) has already broadcast a `RecoveryEvent`. The
+    /// engine's re-push for it queues on this driver's command channel and
+    /// runs AFTER the step, against the map the step ends with, so the ready
+    /// transition must not fire a second one: a second `ShowTitle` restarts
+    /// the title fade (#217 review round 1).
+    recovery_sent_this_step: bool,
     /// Set via `with_recovery_channel` builder; never accessed directly.
     recovery_tx: Option<tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>>,
     /// Set via `with_health_channel` builder; never accessed directly.
@@ -276,6 +283,7 @@ impl HostDriver {
             last_full_refresh_ok_at: None,
             last_full_attempt_at: None,
             not_ready_since: None,
+            recovery_sent_this_step: false,
             recovery_tx: None,
             health_tx: None,
         }
@@ -340,6 +348,7 @@ impl HostDriver {
     /// `now` is an explicit parameter so the TTL branch is testable with a
     /// synthetic forward-only clock (the `is_expired_at` pattern).
     async fn on_tick_at(&mut self, now: Instant) {
+        self.recovery_sent_this_step = false;
         let breaker_just_closed = self.probe_liveness().await;
         if !self.last_refresh_ok {
             return;
@@ -446,10 +455,9 @@ impl HostDriver {
             {
                 self.circuit_breaker_open = true;
                 self.clip_mapping = HashMap::new();
-                // The breaker-closed refresh starts over: it fires no
-                // ready-transition event on top of the breaker close's own
-                // RecoveryEvent, and a still-loading composition then opens
-                // a fresh fast window (#217).
+                // The outage ends any not-ready episode: a relaunch whose
+                // composition is still loading gets a fresh fast window from
+                // the breaker-closed refresh, not the tail of an old one (#217).
                 self.not_ready_since = None;
                 warn!(host = %self.host, "circuit breaker opened — clip cache evicted");
             }
@@ -459,8 +467,9 @@ impl HostDriver {
     }
 
     /// Broadcast a `RecoveryEvent`, so the engine re-pushes the title and the
-    /// current line to this host.
-    fn send_recovery_event(&self) {
+    /// current line to this host, and note it for the current step.
+    fn send_recovery_event(&mut self) {
+        self.recovery_sent_this_step = true;
         if let Some(tx) = &self.recovery_tx {
             let _ = tx.send(crate::resolume::RecoveryEvent {
                 host: self.host.clone(),
@@ -539,7 +548,9 @@ impl HostDriver {
             }
             ResolumeCommand::RefreshMapping => {
                 // A command forces a full refresh regardless of TTL/liveness/
-                // retry window.
+                // retry window. It is its own step: an earlier tick's
+                // RecoveryEvent was already re-pushed.
+                self.recovery_sent_this_step = false;
                 let now = Instant::now();
                 if let Some(reason) = FullRefreshReason::decide(
                     now,
@@ -609,11 +620,11 @@ impl HostDriver {
                     self.clip_mapping = new_mapping;
                 }
                 // `apply_outcome` fires its own RecoveryEvent after prior
-                // failures. One refresh must never re-push twice: a second
-                // ShowTitle restarts the title fade, a visible blink.
-                let recovery_fired = self.consecutive_failures > 0;
+                // failures, and so may this step's probe. That re-push runs
+                // after the step, against the ready map, so one step never
+                // fires twice: a second ShowTitle restarts the title fade.
                 self.apply_outcome(true);
-                if became_ready && !recovery_fired {
+                if became_ready && !self.recovery_sent_this_step {
                     self.send_recovery_event();
                     info!(host = %self.host, "Resolume clip mapping ready — RecoveryEvent fired");
                 }
