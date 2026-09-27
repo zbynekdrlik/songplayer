@@ -30,12 +30,7 @@ impl HostDriver {
     /// stale map starts a not-ready episode, the refresh runs through the
     /// existing NotReady path (`decide`: a failed last attempt still waits
     /// out the retry window), and when it maps SongPlayer's clips anew the
-    /// push is retried once.
-    ///
-    /// That refresh ends the episode with a RecoveryEvent, whose engine
-    /// re-push sends the title and the current line after this step. So a
-    /// ShowTitle is not retried here: a second ShowTitle restarts the title
-    /// fade, the blink the one-event-per-step rule prevents.
+    /// push is retried once (`retry_push`).
     ///
     /// A refresh that maps the SAME clips is no relaunch: Arena still lists
     /// the ids it answers 404 for. No retry (it would 404 again), no event
@@ -99,23 +94,47 @@ impl HostDriver {
             );
             return;
         }
-        if self.recovery_sent_this_step && matches!(cmd, ResolumeCommand::ShowTitle { .. }) {
-            info!(
-                host = %self.host,
-                "stale Resolume clip map refreshed — the RecoveryEvent re-pushes the title"
-            );
-            return;
-        }
-        info!(
-            host = %self.host,
-            "stale Resolume clip map refreshed — retrying the push once"
-        );
-        self.push(cmd).await;
+        self.retry_push(cmd).await;
     }
 
-    /// Run one push command's handler, logging a failure. Returns whether
-    /// Arena answered 404 to any of its requests, and clears that note, so
-    /// it is false again outside a push.
+    /// The one retry after a refresh that mapped SongPlayer's clips anew. That
+    /// refresh has just fired this step's RecoveryEvent, whose engine re-push
+    /// shows the title and the current line after the step. So:
+    ///
+    /// - a ShowTitle is left to that re-push: a second ShowTitle restarts the
+    ///   title fade, the blink the one-event-per-step rule prevents;
+    /// - a HideTitle hides at once (`hide_title_now`): the relaunched clip
+    ///   holds Arena's restored state, possibly at opacity 0, and the
+    ///   `hide_title` fade starts at FULL opacity, a flash of stale text;
+    /// - a subtitle push runs again (an instant, harmless double).
+    async fn retry_push(&mut self, cmd: &ResolumeCommand) {
+        match cmd {
+            ResolumeCommand::ShowTitle { .. } => {
+                info!(
+                    host = %self.host,
+                    "stale Resolume clip map refreshed — the RecoveryEvent re-pushes the title"
+                );
+            }
+            ResolumeCommand::HideTitle => {
+                info!(
+                    host = %self.host,
+                    "stale Resolume clip map refreshed — hiding the title at once"
+                );
+                let result = handlers::hide_title_now(self).await;
+                self.finish_push("hide_title_now", result);
+            }
+            _ => {
+                info!(
+                    host = %self.host,
+                    "stale Resolume clip map refreshed — retrying the push once"
+                );
+                self.push(cmd).await;
+            }
+        }
+    }
+
+    /// Run one push command's handler (`finish_push`: log a failure, return
+    /// and clear whether Arena answered 404).
     async fn push(&mut self, cmd: &ResolumeCommand) -> bool {
         let (what, result) = match cmd {
             ResolumeCommand::ShowTitle { song, artist } => {
@@ -145,6 +164,13 @@ impl HostDriver {
             }
             ResolumeCommand::RefreshMapping | ResolumeCommand::Shutdown => return false,
         };
+        self.finish_push(what, result)
+    }
+
+    /// End one push: log a failure, and return whether Arena answered 404 to
+    /// any of its requests, clearing that note, so it is false again outside
+    /// a push.
+    fn finish_push(&mut self, what: &str, result: Result<(), anyhow::Error>) -> bool {
         if let Err(e) = result {
             warn!(host = %self.host, %e, "{what} failed");
         }

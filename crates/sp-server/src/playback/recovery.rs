@@ -10,8 +10,8 @@ use super::title;
 
 impl super::PlaybackEngine {
     /// Re-emit current state to a recovered Resolume host: ShowTitle for
-    /// every active playlist whose end-of-song title hide has not run yet +
-    /// the wall's subtitle state (ShowSubtitles for
+    /// every active playlist inside its title window (the show timer ran, the
+    /// end-of-song hide has not) + the wall's subtitle state (ShowSubtitles for
     /// each on-program line, one HideSubtitles when there is none — also
     /// when no SongPlayer playlist is on program).
     pub(crate) async fn handle_resolume_recovery(&self, host: &str) {
@@ -27,16 +27,23 @@ impl super::PlaybackEngine {
             if !pp.scene_active.load(Ordering::Acquire) {
                 continue;
             }
-            // The song's end-of-song title hide already ran (its timer task
-            // finished): re-showing the title would undo it for the song's
-            // last seconds and carry it into the next song. A HideTitle that
-            // 404'd on a stale clip map ends in exactly this recovery
-            // (#217 addendum 2).
-            let title_hidden = pp
+            // Re-show the title only inside its window (#217 addendum 2).
+            // A pending show timer (Started + 1.5 s) shows it itself: a
+            // second ShowTitle restarts the fade. A finished end-of-song
+            // hide must stay: re-showing would carry the title into the next
+            // song (a HideTitle that 404'd on a stale clip map ends in
+            // exactly this recovery). `cancel_title_timers` `take()`s both
+            // handles, so an aborted one never lingers.
+            let show_pending = pp
+                .title_show_abort
+                .as_ref()
+                .is_some_and(|show| !show.is_finished());
+            let hide_done = pp
                 .title_hide_abort
                 .as_ref()
                 .is_some_and(|hide| hide.is_finished());
-            if !title_hidden
+            if !show_pending
+                && !hide_done
                 && title::push_title(
                     &self.pool,
                     self.obs_cmd_tx.as_ref(),

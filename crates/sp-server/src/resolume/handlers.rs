@@ -140,6 +140,35 @@ pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/// Hide the title at once across all `#sp-title` clips: opacity 0, then the
+/// text cleared, no fade. The driver retries a HideTitle this way after a 404
+/// made it refresh a stale clip map (#217 addendum 2): the relaunched clip
+/// holds whatever Arena's saved composition restored, possibly at opacity 0,
+/// and `hide_title`'s fade starts at FULL opacity, a 1 s flash of that stale
+/// text.
+pub async fn hide_title_now(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
+    let Some(clips) = clips_for_title(driver) else {
+        debug!(
+            token = TITLE_TOKEN,
+            "no Resolume clips found, skipping hide_title_now"
+        );
+        return Ok(());
+    };
+
+    driver.ensure_endpoint().await?;
+    let driver_ref: &HostDriver = driver;
+
+    set_opacity_all(driver_ref, &clips, 0.0).await?;
+    set_text_all(driver_ref, &clips, "").await?;
+
+    info!(
+        token = TITLE_TOKEN,
+        count = clips.len(),
+        "title hidden at once"
+    );
+    Ok(())
+}
+
 /// Show subtitles — instant text swap on the four token groups:
 ///   - `#sp-subs`      : current EN line (blank if `suppress_en`)
 ///   - `#sp-subs-next` : next EN line    (blank if `suppress_en`)
