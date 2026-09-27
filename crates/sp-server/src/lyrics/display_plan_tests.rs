@@ -134,6 +134,46 @@ fn fits_allows_a_joined_text_of_at_most_64_chars() {
 }
 
 #[test]
+fn fits_allows_a_joined_slovak_text_of_at_most_64_chars() {
+    // The EN fits ("Oh God"); only the SK decides: 31 + 1 + 32 = 64 fits,
+    // 31 + 1 + 33 = 65 does not.
+    let a = Group::of(0, &line(0, 1_000, "Oh", &"x".repeat(31)));
+    let sk_64 = Group::of(1, &line(1_000, 2_000, "God", &"y".repeat(32)));
+    let sk_65 = Group::of(1, &line(1_000, 2_000, "God", &"y".repeat(33)));
+    assert!(fits(&a, &sk_64));
+    assert!(!fits(&a, &sk_65));
+    // A missing SK side counts as empty.
+    let no_sk = Group {
+        sk: None,
+        ..Group::of(1, &line(1_000, 2_000, "God", ""))
+    };
+    assert!(fits(&a, &no_sk));
+}
+
+#[test]
+fn a_dub_subtitle_track_never_collapses_into_one_giant_sk_line() {
+    // Dub subtitle tracks (`gemini-live-translate`, #182/#184) load into the
+    // same LyricsState as songs. Their lines touch, often carry no EN, and
+    // hold a whole SK sentence. An empty EN always "fits", so only an SK
+    // limit keeps them from merging into one huge Slovak block.
+    let sk = "Boh nás miluje viac, než si dokážeme predstaviť, a volá nás k sebe.";
+    let lines: Vec<LyricsLine> = (0..10u64)
+        .map(|k| line(1_000 + 4_000 * k, 5_000 + 4_000 * k, "", sk))
+        .collect();
+    let plan = build_plan(&lines);
+    assert_eq!(plan.len(), 10);
+    assert!(plan.iter().all(|d| d.sk.as_deref() == Some(sk)));
+    // Two short dub lines with no EN still merge, because their SK fits.
+    let short = build_plan(&[
+        line(1_000, 1_500, "", "Áno."),
+        line(1_500, 2_000, "", "Amen."),
+    ]);
+    assert_eq!(short.len(), 1);
+    assert_eq!(short[0].sk.as_deref(), Some("Áno. Amen."));
+    assert_eq!(short[0].en, "");
+}
+
+#[test]
 fn join_text_puts_one_space_between_non_empty_texts() {
     assert_eq!(
         join_text("What a God,", "what a God."),
