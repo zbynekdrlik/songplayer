@@ -186,6 +186,7 @@ impl PlaybackEngine {
                 last_lyrics_ws_signature: None,
                 cached_position_ms: 0,
                 title_clock: None,
+                play_start_ms: 0,
                 paused_at: None,
             }
         });

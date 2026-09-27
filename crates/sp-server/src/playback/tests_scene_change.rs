@@ -573,7 +573,7 @@ async fn a_recovery_follows_the_title_clock_not_a_lagging_position() {
 
 /// A song playing off program (its scene is not on the wall, e.g. held
 /// through a transition) has no title due, whatever its clock. Kills the
-/// `on_program || (clock due)` mutant of `title_due`.
+/// `delete !` mutant of `on_air_clock` (the scene check).
 #[tokio::test]
 async fn handle_resolume_recovery_names_no_title_for_an_off_program_song() {
     let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;

@@ -47,10 +47,11 @@ pub struct TitleClock {
 }
 
 impl TitleClock {
-    /// The clock of `video_id`, started at `started_at`, `duration_ms` long.
-    pub fn new(video_id: i64, started_at: Instant, duration_ms: u64) -> Self {
-        let hide_at = if duration_ms > TITLE_SHOW_DELAY_MS + TITLE_HIDE_BEFORE_END_MS {
-            Some(started_at + Duration::from_millis(duration_ms - TITLE_HIDE_BEFORE_END_MS))
+    /// The clock of `video_id`, started at `started_at` with `play_ms` left
+    /// to play: the song's duration, less a resume's start position.
+    pub fn new(video_id: i64, started_at: Instant, play_ms: u64) -> Self {
+        let hide_at = if play_ms > TITLE_SHOW_DELAY_MS + TITLE_HIDE_BEFORE_END_MS {
+            Some(started_at + Duration::from_millis(play_ms - TITLE_HIDE_BEFORE_END_MS))
         } else {
             None
         };
@@ -126,8 +127,10 @@ pub async fn title_text(pool: &SqlitePool, video_id: i64) -> Result<Option<Strin
 /// Tell the wall which title SHOULD be up (`None` = no title, #217
 /// addendum 3). The Resolume `Resync` goes first: the driver owns what the
 /// wall shows and acts only on a difference. The OBS text source then gets
-/// the same title, or is cleared as the hide timer clears it. The OBS send
-/// can stall while cg OBS is away, so the Resync must not wait behind it.
+/// the same title, or is cleared as the hide timer clears it. cg OBS's
+/// command queue drains only while it is connected, and this runs on the
+/// engine loop, so the OBS text (the fallback display) is dropped when the
+/// queue is full, never awaited (review round 3).
 pub async fn send_resync(
     obs_cmd_tx: Option<&mpsc::Sender<ObsCommand>>,
     resolume_tx: &mpsc::Sender<ResolumeCommand>,
@@ -139,12 +142,13 @@ pub async fn send_resync(
         })
         .await;
     if let Some(cmd_tx) = obs_cmd_tx {
-        let _ = cmd_tx
-            .send(ObsCommand::SetTextSource {
-                source_name: OBS_TITLE_SOURCE.to_string(),
-                text: title.unwrap_or_default(),
-            })
-            .await;
+        let text = ObsCommand::SetTextSource {
+            source_name: OBS_TITLE_SOURCE.to_string(),
+            text: title.unwrap_or_default(),
+        };
+        if let Err(e) = cmd_tx.try_send(text) {
+            tracing::debug!(%e, "OBS title text dropped (cg OBS queue full or closed)");
+        }
     }
 }
 

@@ -67,9 +67,9 @@ impl PlaybackEngine {
     /// so a timer of a playlist off program never writes the shared clip),
     /// and the #215 transition hold keeps the song playing. Before, a scene
     /// bounce in the song's first 1.5 s left it with no title, and a later
-    /// one with no hide 3.5 s before the end. A clock of another video (a
-    /// song this scene-on just selected, not started yet) arms nothing: its
-    /// `Started` will.
+    /// one with no hide 3.5 s before the end. A song this scene-on just
+    /// selected has no clock yet (`begin_play`), so nothing is armed: its
+    /// `Started` will. The video check is defensive.
     pub(super) fn rearm_title_timers(&mut self, playlist_id: i64, video_id: i64, now: Instant) {
         let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
             return;
@@ -81,6 +81,18 @@ impl PlaybackEngine {
             return;
         }
         self.arm_title_timers(playlist_id, now);
+    }
+}
+
+impl super::PlaylistPipeline {
+    /// A Play command starts a song (#217 addendum 3). The last song's title
+    /// clock and timers go: a skipped song's pending show timer must not push
+    /// its title before the new `Started`, which fixes the new clock. That
+    /// clock counts from `start_ms`, 0 or a resume's position.
+    pub(super) fn begin_play(&mut self, start_ms: u64) {
+        self.title_clock = None;
+        self.cancel_title_timers();
+        self.play_start_ms = start_ms;
     }
 }
 

@@ -169,9 +169,12 @@ struct PlaylistPipeline {
     cached_position_ms: u64,
     /// The title window of the song whose `Started` the engine last handled:
     /// the instants the title timers sleep until, and that a recovery or a
-    /// scene-on reads (#217 addendum 3). A clock of another video (the
-    /// previous song, before the next `Started`) leaves the window closed.
+    /// scene-on reads (#217 addendum 3). Every Play clears it (`begin_play`),
+    /// so it is `None` from a song change to the new `Started`.
     title_clock: Option<title::TitleClock>,
+    /// Where the current Play started: 0, or a resume's position. The title
+    /// clock counts the time left to play from it (#217 addendum 3).
+    play_start_ms: u64,
     /// Pause snapshot; consumed on manual /play to resume same song. #88.
     paused_at: Option<(i64, u64)>,
 }
@@ -415,14 +418,23 @@ impl PlaybackEngine {
     /// title that is already up is not faded again. Then the song's timers
     /// are armed again for what is still ahead (#217 addendum 3).
     async fn push_title_for_playing(&mut self, playlist_id: i64, video_id: i64) {
-        let title = self.resync_wall_title().await;
-        info!(
-            playlist_id,
-            video_id,
-            ?title,
-            "title re-synced on scene-go-on"
-        );
-        self.rearm_title_timers(playlist_id, video_id, tokio::time::Instant::now());
+        // Re-arm at the decision's own instant, before the send: no await
+        // between them, so the timers and the Resync never disagree about
+        // which side of a show / hide instant the wall is on (review round 3).
+        let decided = self.decide_wall_title().await;
+        let now = decided
+            .as_ref()
+            .map_or_else(tokio::time::Instant::now, |(_, at)| *at);
+        self.rearm_title_timers(playlist_id, video_id, now);
+        if let Some((title, _)) = decided {
+            title::send_resync(self.obs_cmd_tx.as_ref(), &self.resolume_tx, title.clone()).await;
+            info!(
+                playlist_id,
+                video_id,
+                ?title,
+                "title re-synced on scene-go-on"
+            );
+        }
     }
 
     /// Handle a scene change from the OBS module. On program, fires
@@ -584,7 +596,7 @@ impl PlaybackEngine {
                         video_id, %video_path, %audio_path,
                         "Previous → replaying song from history"
                     );
-                    pp.title_clock = None;
+                    pp.begin_play(0);
                     pp.pipeline.send(PipelineCommand::Play {
                         video: video_path.into(),
                         audio: audio_path.into(),
@@ -788,7 +800,7 @@ impl PlaybackEngine {
                                     );
                                     // #217 addendum 3: even the same video gets
                                     // a new title clock, at its new Started.
-                                    pp.title_clock = None;
+                                    pp.begin_play(0);
                                     pp.pipeline.send(PipelineCommand::Play {
                                         video: video_path.into(),
                                         audio: audio_path.into(),
@@ -832,7 +844,7 @@ impl PlaybackEngine {
                         debug!(playlist_id, "replaying current video");
                         match crate::db::models::get_song_paths(&self.pool, video_id).await {
                             Ok(Some((video_path, audio_path))) => {
-                                pp.title_clock = None;
+                                pp.begin_play(0);
                                 pp.pipeline.send(PipelineCommand::Play {
                                     video: video_path.into(),
                                     audio: audio_path.into(),
