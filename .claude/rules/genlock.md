@@ -1000,18 +1000,18 @@ Now:
         coarse sleep comes out short by the un-slept rest of the hold, so the
         spin starts up to 2 ms + that rest (< 1 ms) early. That is < 3 ms.
       - The inclusive budget covers it: the rest is always less than the
-        whole hold, and the coarse sleep's overshoot only shortens the spin.
-      - A 1 ms hold is rare: it is a clamped resample, i.e. the first sighting
-        of a step, not normal µs slewing.
+        whole hold, the coarse sleep's overshoot only shortens the spin, and
+        std's `thread::sleep` never returns early. So that edge never yields
+        and never logs the line below.
+      - A hold near 1 ms is rare. It follows a UTC step or an outlier (a
+        clamped resample, or the resample that takes it back out), never
+        normal µs slewing.
     - A hold costs ~1 wake-up per ms, and the boundary goes out ≤ ~1 ms after
       the wall resumes.
     - A wait that yielded logs ONE INFO line, `paced: the wall stood still
       through a boundary wait` (`yields`, `spins`). At the 04:00 step expect
-      one per paced thread.
-      - A line right after a `re-anchor delta over 1 ms` WARN is the clamped
-        1 ms hold edge above (at most one 1 ms yield), not a frozen wall.
-      - Any other line outside a followed hold means something froze the
-        wall: investigate it.
+      one per paced thread. Any line outside a followed hold means something
+      froze the wall (or a coarse timer woke early): investigate it.
     - `pacer_spin.rs` is cross-platform and mutation-covered. It is NOT named
       `pipeline_paced_*`, because `.cargo/mutants.toml` excludes that
       substring.
