@@ -231,10 +231,15 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     the bands need disjoint `&mut` slices in safe code). Per boundary there
     are also K−1 scoped thread spawns (a name `String` and a stack each) and
     a few small `Vec`s (the band offsets, runs and slots).
-  - A helper that fails to start WARNs once per failed band (at most K−1 = 5
-    per boundary). There is deliberately no rate limiter: its branch would be
-    arithmetic on a path no Linux test can reach, i.e. a mutant the gate
-    cannot kill.
+  - A helper that fails to start WARNs once per failed band. That is at most
+    K−1 = 5 per boundary and 300 boundaries per window, and it only happens
+    when the OS cannot create a thread at all, so each failed band gets its
+    own line and there is no rate limiter.
+  - Box run 3: read the `max_picture_us` TAIL, not a mean. On Windows each
+    of the K−1 spawns per boundary runs every loaded DLL's thread attach
+    under the loader lock (NDI, Media Foundation, WebView2). If the target is
+    missed, time the spawns separately before touching the kernel (review
+    round 2).
   - `max_picture_us` is unchanged: the wall time of `mix_picture` (all
     bands) on the `SP-program` thread. Box run 3 target: ≤ 15 000 at
     2560×1440 with `fitted=9` and 0 late drops, for a 300 ms fade and a 1 s

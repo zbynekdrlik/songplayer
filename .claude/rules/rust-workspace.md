@@ -390,8 +390,8 @@ the test that kills each one BEFORE CI's mutation gate runs.
   arbitrarily.
 - **A HANG fails the gate exactly like a survivor** (review round 1, same
   ticket). cargo-mutants kills a stalled test run at `--timeout` and reports
-  TIMEOUT, which turns the shard red. My harness first counted its own
-  iteration guard as a "kill" and missed one: `%`→`+` made a hand-advanced
+  TIMEOUT, which turns the shard red. The #215 harness first counted its
+  own iteration guard as a "kill" and missed one: `%`→`+` made a hand-advanced
   `while !out.is_empty()` cursor step by 0 bytes forever. So:
   - give every loop of the model an iteration guard, and count a trip as a
     gate FAILURE, never a kill;
