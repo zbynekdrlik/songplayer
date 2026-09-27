@@ -185,10 +185,13 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   pings).
 - **`clippy::result_large_err` and a tungstenite handshake callback** (#213).
   A named `fn` returning `Result<Response, ErrorResponse>` (http
-  `Response<Option<String>>`, over 128 B) can trip the lint. Pass
-  `accept_hdr_async` an inline closure (closures are not checked). Build the
-  refusal in a helper that returns `ErrorResponse` by value, never inside a
-  `Result`.
+  `Response<Option<String>>`, over 128 B) trips the lint — and so does an
+  inline CLOSURE (clippy 1.98 checks closures too; CI Lint run 36283126391).
+  The shape is fixed by tungstenite's `Callback`, so put
+  `#[allow(clippy::result_large_err)]` on the `let callback = …` statement
+  with that reason. Build the refusal in a helper that returns `ErrorResponse`
+  by value. Own helpers returning `tungstenite::Error` (136 B) must box it:
+  `Result<(), Box<tungstenite::Error>>` + `.map_err(Box::new)`.
 
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,

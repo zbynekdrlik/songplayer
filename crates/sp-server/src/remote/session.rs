@@ -43,6 +43,9 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
     // ONE deadline for the whole unidentified phase — the WebSocket handshake
     // AND the `Identify` — so an idle socket is never kept.
     let identify_deadline = tokio::time::Instant::now() + facade.identify_timeout;
+    // tungstenite's `Callback` fixes this `Result<Response, ErrorResponse>`
+    // shape (an http `Response`, > 128 B), so the size lint cannot be met here.
+    #[allow(clippy::result_large_err)]
     let callback = |req: &Request, mut resp: Response| {
         let offered = req
             .headers()
@@ -152,11 +155,15 @@ fn refused() -> ErrorResponse {
     refused
 }
 
-async fn send(write: &mut WsWrite, msg: &Value) -> Result<(), tungstenite::Error> {
-    write.send(Message::Text(msg.to_string().into())).await
+/// Send one JSON message; the (large) tungstenite error is boxed.
+async fn send(write: &mut WsWrite, msg: &Value) -> Result<(), Box<tungstenite::Error>> {
+    write
+        .send(Message::Text(msg.to_string().into()))
+        .await
+        .map_err(Box::new)
 }
 
-async fn send_all(write: &mut WsWrite, msgs: &[Value]) -> Result<(), tungstenite::Error> {
+async fn send_all(write: &mut WsWrite, msgs: &[Value]) -> Result<(), Box<tungstenite::Error>> {
     for msg in msgs {
         send(write, msg).await?;
     }
