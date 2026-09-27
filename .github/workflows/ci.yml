@@ -961,6 +961,11 @@ jobs:
           Remove-NetFirewallRule -DisplayName "SongPlayer API" -ErrorAction SilentlyContinue
           New-NetFirewallRule -DisplayName "SongPlayer API" -Direction Inbound -Protocol TCP -LocalPort 8920 -Action Allow | Out-Null
           Write-Host "Firewall rule created for port 8920"
+          # #213: the Companion-compatible remote control (obs-websocket 5 subset)
+          # listens on 4456 when enabled in Nastavenia; Companion runs on another PC.
+          Remove-NetFirewallRule -DisplayName "SongPlayer Remote" -ErrorAction SilentlyContinue
+          New-NetFirewallRule -DisplayName "SongPlayer Remote" -Direction Inbound -Protocol TCP -LocalPort 4456 -Action Allow | Out-Null
+          Write-Host "Firewall rule created for port 4456 (remote control)"
 
           schtasks.exe /run /tn $TaskName
           if ($LASTEXITCODE -ne 0) { throw "schtasks.exe failed (exit code: $LASTEXITCODE)" }
