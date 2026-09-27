@@ -339,3 +339,48 @@ async fn resolume_recovery_re_sends_hide_for_a_song_without_lyrics() {
         "a playing song without lyrics re-sends HideSubtitles, got {cmds:?}"
     );
 }
+
+/// Review round 5: two playing, on-program playlists share the subtitle
+/// clips, one with a line and one without lyrics. The recovery must not let
+/// the blank one's HideSubtitles land after (HashMap order) and clear the
+/// other's line: the line goes out, and no Hide.
+#[tokio::test]
+async fn resolume_recovery_never_hides_another_on_program_playlist_s_line() {
+    let (mut engine, mut resolume_rx, _ws_rx) = build_engine().await;
+    install_pipeline(&mut engine, 98, true, None);
+    install_pipeline(&mut engine, 99, true, Some(LyricsState::new(make_track())));
+    for id in [98, 99] {
+        let pp = engine.pipelines.get_mut(&id).unwrap();
+        pp.state = PlayState::Playing { video_id: 42 };
+        pp.cached_position_ms = 1500; // inside "alpha" for playlist 99
+    }
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    let mut cmds = Vec::new();
+    while let Ok(cmd) = resolume_rx.try_recv() {
+        cmds.push(cmd);
+    }
+    match cmds.as_slice() {
+        [crate::resolume::ResolumeCommand::ShowSubtitles { en, .. }] => {
+            assert!(en.contains("alpha"), "got: {en}");
+        }
+        other => panic!("expected only playlist 99's ShowSubtitles, got {other:?}"),
+    }
+}
+
+/// No SongPlayer playlist is playing on program: the recovery leaves the
+/// subtitle clips alone (going off program already sent its own hide).
+#[tokio::test]
+async fn resolume_recovery_sends_nothing_without_an_on_program_playlist() {
+    let (mut engine, mut resolume_rx, _ws_rx) = build_engine().await;
+    install_pipeline(&mut engine, 99, false, Some(LyricsState::new(make_track())));
+    engine.pipelines.get_mut(&99).unwrap().state = PlayState::Playing { video_id: 42 };
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    assert!(
+        resolume_rx.try_recv().is_err(),
+        "an off-program playlist gets no Resolume command on recovery"
+    );
+}

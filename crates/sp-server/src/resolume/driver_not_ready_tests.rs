@@ -767,7 +767,8 @@ async fn a_failing_composition_after_a_breaker_close_keeps_the_retry_window() {
     assert_eq!(
         drain(&mut rx),
         6,
-        "the breaker close + one #157 re-push per failed fetch, never one per tick"
+        "the breaker close + the #157 re-push after each failed fetch but the last \
+         (its re-push would come at R+310), never one per tick"
     );
 }
 
