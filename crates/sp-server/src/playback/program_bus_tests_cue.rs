@@ -372,3 +372,100 @@ fn the_outgoing_pairs_past_the_fade_are_dropped_when_the_cue_opens() {
     assert_eq!(sent, want);
     assert!(core.from_pending.is_empty());
 }
+
+#[test]
+fn a_frozen_window_never_opens_even_when_its_incoming_source_goes_live() {
+    // Review round 1: the cut to C froze the A → B fade; B's first live pair
+    // then lands on b(9), still inside the frozen window. It must stay held
+    // (A at full level) — B was cut away before it ever went on program.
+    let mut core = fade_core();
+    let (fa, fb, fc) = (frame(4, 2), frame(8, 2), frame(6, 2));
+    let mut sent = Vec::new();
+    for k in 1..=21 {
+        core.offer(SRC_A, job(4, &fa, b(k), LEVEL_A));
+        let pair_b = if k >= 9 {
+            job(8, &fb, b(k), LEVEL_B)
+        } else {
+            standby(8, &fb, b(k), LEVEL_B)
+        };
+        core.offer(SRC_B, pair_b);
+        core.offer(SRC_C, job(6, &fc, b(k), 0.3));
+        if k == 5 {
+            assert!(core.cut(SRC_B, b(5) + 5 * MS));
+        }
+        if k == 8 {
+            assert!(core.cut(SRC_C, b(8) + 5 * MS));
+        }
+        sent.extend(take_all(&mut core));
+    }
+    let mut want = run(1..=9, |_| "src 4".to_string());
+    want.extend(run(10..=18, |k| format!("mix {}/9 4>6", k - 10)));
+    want.extend(run(19..=21, |_| "src 6".to_string()));
+    assert_eq!(sent, want, "b(9) is held, never a mix into B");
+    assert_eq!(
+        core.status().transition.counters,
+        TransitionCounters {
+            transitions_done: 2,
+            mixed_boundaries: 9,
+            side_fills: 0,
+            cue_wait_boundaries: 0,
+            cue_timeouts: 0,
+        }
+    );
+}
+
+#[test]
+fn a_same_slot_recut_after_a_freeze_still_fades_out_of_the_source_on_air() {
+    // Review round 1: A → B (never live), then C on b(10) — the A → B fade is
+    // frozen and A → C waits — then, in the same slot, D replaces C. A is
+    // still the source on program, so the fade must go from A to D.
+    const SRC_D: i64 = 44;
+    let mut core = fade_core();
+    let (fa, fb, fc, fd) = (frame(4, 2), frame(8, 2), frame(6, 2), frame(10, 2));
+    let mut sent = Vec::new();
+    for k in 1..=21 {
+        core.offer(SRC_A, job(4, &fa, b(k), LEVEL_A));
+        core.offer(SRC_B, standby(8, &fb, b(k), LEVEL_B));
+        core.offer(SRC_C, job(6, &fc, b(k), 0.3));
+        core.offer(SRC_D, job(10, &fd, b(k), 0.4));
+        if k == 5 {
+            assert!(core.cut(SRC_B, b(5) + 5 * MS));
+        }
+        if k == 8 {
+            assert!(core.cut(SRC_C, b(8) + 5 * MS));
+            assert!(
+                core.cut(SRC_D, b(8) + 6 * MS),
+                "the same slot: D replaces C"
+            );
+            assert_eq!(core.status().cut_boundary_100ns, Some(b(10)));
+            assert_eq!(
+                core.status()
+                    .transition
+                    .active
+                    .map(|w| (w.from, w.to, w.start_boundary_100ns)),
+                Some((Some(SRC_A), SRC_D, b(10))),
+                "the fade goes out of A, the source on program"
+            );
+            assert_eq!(core.hold_for(SRC_B), None, "B never went on program");
+        }
+        sent.extend(take_all(&mut core));
+    }
+    let mut want = run(1..=9, |_| "src 4".to_string());
+    want.extend(run(10..=18, |k| format!("mix {}/9 4>10", k - 10)));
+    want.extend(run(19..=21, |_| "src 10".to_string()));
+    assert_eq!(sent, want);
+    let st = core.status();
+    assert_eq!(st.health.cuts, 3);
+    assert_eq!(
+        st.transition.counters,
+        TransitionCounters {
+            transitions_done: 2,
+            mixed_boundaries: 9,
+            side_fills: 0,
+            cue_wait_boundaries: 0,
+            cue_timeouts: 0,
+        },
+        "the frozen A → B window and the A → D fade are done; the replaced \
+         A → C window never counted"
+    );
+}
