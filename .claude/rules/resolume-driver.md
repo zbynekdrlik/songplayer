@@ -45,6 +45,11 @@ What the driver does now (`refresh_mapping(now)`):
   - A FAILED fetch is the #157 case: Arena's REST answers `/product` but
     chokes on the 14 MB composition while it loads. It keeps the 60 s retry
     window, even inside the 120 s.
+  - "Failed" means a DNS, transport or timeout error, or a body that is not
+    JSON. `fetch_mapping_inner` never checks the status, so a non-2xx JSON
+    body counts as ANSWERED (not ready).
+  - An answered fetch clears the flag, and the fast path resumes on the next
+    tick (`an_answered_fetch_after_a_failed_one_restores_the_fast_path`).
   - Without this, after a breaker close a failing `/composition` was fetched
     every tick. Each failure also made the next probe fire a `was_failing`
     RecoveryEvent, one title re-push per tick (review round 3).
