@@ -31,7 +31,7 @@ const FULL_REFRESH_RETRY: Duration = Duration::from_secs(60);
 /// answers before its composition has loaded. After this window the normal
 /// `FULL_REFRESH_RETRY` applies, so a composition that genuinely has no
 /// SongPlayer clips never becomes a 14 MB fetch every 10 s (#217).
-const NOT_READY_FAST_WINDOW: Duration = Duration::from_secs(1);
+const NOT_READY_FAST_WINDOW: Duration = Duration::from_secs(120);
 
 /// Why a full `/composition` refresh is being performed. Drives the INFO
 /// transition log and is the return type of the pure [`FullRefreshReason::decide`]
