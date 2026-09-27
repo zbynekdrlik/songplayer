@@ -200,9 +200,8 @@ async fn a_404_on_a_title_push_is_re_pushed_by_the_recovery_event_not_retried() 
 
 /// A 404 on a clip id (the opacity PUT) is a stale map too. A HideTitle is
 /// retried on the new clip id: the RecoveryEvent's re-push sends no hide of
-/// its own. (It re-shows the title of a pipeline still playing on program,
-/// though, even after its end-of-song hide: an older engine behaviour of
-/// `playback/recovery.rs`. The retry hides it for good off program.)
+/// its own, and it does not re-show a title whose end-of-song hide ran
+/// (`handle_resolume_recovery_does_not_re_show_a_title_the_song_end_hid`).
 #[tokio::test]
 async fn a_404_on_a_clip_opacity_push_marks_the_map_stale_too() {
     let server = arena().await;

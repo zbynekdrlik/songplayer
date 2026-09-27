@@ -121,8 +121,9 @@ log 14:12:22) until the 300 s TTL.
 - **A ShowTitle is not retried.** That RecoveryEvent's engine re-push shows
   the title; a retried ShowTitle would run a second fade from 5 %, the blink
   the one-event-per-step rule exists for. A subtitle retry is an instant,
-  harmless double. A HideTitle IS retried (the re-push sends no hide), but
-  see the caveat below.
+  harmless double. A HideTitle IS retried (the re-push sends no hide), and
+  the re-push no longer re-shows a title whose end-of-song hide ran (see
+  "Engine side" below).
 - **The SAME clips came back = a refused id, not a stale map
   (`refused_ids_at`).** Arena still lists the ids it answers 404 for, so
   no clip got a new id: no retry (it would 404 again), no RecoveryEvent
@@ -140,12 +141,11 @@ log 14:12:22) until the 300 s TTL.
 - **Logs.** The stale-map WARN is logged only when the refresh runs; a 404
   that the retry window holds, or on a refused id, logs at debug (a lyric
   line is pushed every few seconds).
-- **Caveat — the engine can undo a retried HideTitle.**
-  `playback/recovery.rs::handle_resolume_recovery` re-pushes `ShowTitle` for
-  every pipeline Playing on program, even after its end-of-song hide (an
-  older engine behaviour, not tracked per pipeline). A HideTitle that 404s on
-  program near a song's end is retried, then faded back in by that re-push;
-  off program the retry hides the title for good.
+- **A HideTitle that 404s near a song's end** is the one push whose
+  recovery used to undo it: `handle_resolume_recovery` re-pushed `ShowTitle`
+  for every pipeline Playing on program, so the retried hide was faded back
+  in and the title stayed into the next song (review rounds 1–2). Fixed on
+  the engine side, below.
 
 ## Subtitle clips: blank, never skip (#217 addendum 2)
 
@@ -222,6 +222,11 @@ current subtitle state of the playing, on-program pipelines:
 - NEVER a `HideTitle`. `hide_title` fades from FULL opacity, so hiding a
   title that is already hidden would flash the stale text. The subtitle clear
   is instant, so it is always safe.
+- NO `ShowTitle` for a pipeline whose end-of-song hide already ran
+  (`title_hide_abort` is `Some` and `is_finished()`; `cancel_title_timers`
+  `take()`s both handles, so an aborted handle never lingers). Re-showing it
+  undid the hide for the song's last seconds and into the next song (#217
+  addendum 2, `handle_resolume_recovery_does_not_re_show_a_title_the_song_end_hid`).
 
 Otherwise a stale text Arena restored from its saved composition stays until
 the next line change, for the whole song, or over the next camera shot.
