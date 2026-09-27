@@ -404,21 +404,21 @@ impl PlaybackEngine {
         self.event_rx.recv().await
     }
 
-    /// Re-push the song title to OBS + Resolume for an already-Playing pipeline.
-    /// Used when a scene becomes program while the pipeline was already playing
-    /// off-program — the 1.5 s title-show task aborted with "title suppressed —
-    /// off program", so without this the wall shows a stale title. Idempotent.
+    /// Re-sync the wall title when a scene becomes program for a Playing
+    /// pipeline. The 1.5 s title-show task aborted with "title suppressed —
+    /// off program" if the scene was off then, so without this the wall shows
+    /// a stale title. It goes through the same `Resync` as a recovery, with
+    /// the song's title window: a scene-on outside it (a song that has not
+    /// started yet, its first 1.5 s, its last 3.5 s) shows no title, and a
+    /// title that is already up is not faded again (#217 addendum 3).
     async fn push_title_for_playing(&self, playlist_id: i64, video_id: i64) {
-        if title::push_title(
-            &self.pool,
-            self.obs_cmd_tx.as_ref(),
-            &self.resolume_tx,
+        let title = self.resync_wall_title().await;
+        info!(
+            playlist_id,
             video_id,
-        )
-        .await
-        {
-            info!(playlist_id, video_id, "title re-pushed on scene-go-on");
-        }
+            ?title,
+            "title re-synced on scene-go-on"
+        );
     }
 
     /// Handle a scene change from the OBS module. On program, fires

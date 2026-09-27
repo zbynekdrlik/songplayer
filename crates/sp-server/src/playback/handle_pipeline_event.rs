@@ -95,6 +95,10 @@ impl PlaybackEngine {
                 //    mid-playback.
                 let video_id_opt = if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.cancel_title_timers();
+                    // #217 addendum 3: the title window is this song's from
+                    // now on, and its position restarts (not the last song's).
+                    pp.started_video_id = pp.current_video_id;
+                    pp.cached_position_ms = 0;
                     pp.current_video_id
                 } else {
                     None
@@ -114,7 +118,8 @@ impl PlaybackEngine {
                     let pl_id = playlist_id;
 
                     let show_handle = tokio::spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                        let delay_ms = title::TITLE_SHOW_DELAY_MS;
+                        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                         if !scene_active.load(Ordering::Acquire) {
                             debug!(playlist_id = pl_id, "title suppressed — off program");
                             return;
@@ -130,12 +135,13 @@ impl PlaybackEngine {
                         pp.title_show_abort = Some(show_handle.abort_handle());
                     }
 
-                    // Title hide 3.5s before end (only if duration is known and long enough).
-                    if dur > 5000 {
+                    // Title hide 3.5s before end (only if duration is known and long
+                    // enough). The same constants as the recovery's title window.
+                    if dur > title::TITLE_SHOW_DELAY_MS + title::TITLE_HIDE_BEFORE_END_MS {
                         let obs_cmd = self.obs_cmd_tx.clone();
                         let resolume_tx = self.resolume_tx.clone();
                         let pl_id = playlist_id;
-                        let hide_at = dur - 3500;
+                        let hide_at = dur - title::TITLE_HIDE_BEFORE_END_MS;
                         let hide_handle = tokio::spawn(async move {
                             tokio::time::sleep(std::time::Duration::from_millis(hide_at)).await;
 

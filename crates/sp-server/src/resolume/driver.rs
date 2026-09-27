@@ -410,10 +410,13 @@ impl HostDriver {
     /// One liveness tick: a light `/product` probe, then a full `/composition`
     /// refresh ONLY when the poll policy calls for one AND the REST is alive
     /// (never pile the ~14 MB fetch onto a dead/saturated single-thread REST).
+    /// After a failure the breaker did not see, one mapped param tells whether
+    /// Arena relaunched (`probe_stale_map`, #217 addendum 3).
     /// `now` is an explicit parameter so the TTL branch is testable with a
     /// synthetic forward-only clock (the `is_expired_at` pattern).
     async fn on_tick_at(&mut self, now: Instant) {
         self.recovery_sent_this_step = false;
+        let was_failing = self.consecutive_failures > 0;
         let breaker_just_closed = self.probe_liveness().await;
         if breaker_just_closed {
             // Opening the breaker evicted the clip map, so it has none of
@@ -428,6 +431,10 @@ impl HostDriver {
         }
         if !self.last_refresh_ok {
             return;
+        }
+        if was_failing && !breaker_just_closed {
+            // A hiccup the breaker did not see: did Arena relaunch in it?
+            self.probe_stale_map(now).await;
         }
         if let Some(reason) = FullRefreshReason::decide(
             now,
@@ -954,6 +961,9 @@ impl Eq for ClipInfo {}
 
 #[path = "driver_push.rs"]
 mod push;
+
+#[path = "driver_probe.rs"]
+mod probe;
 
 #[cfg(test)]
 #[path = "driver_tests.rs"]

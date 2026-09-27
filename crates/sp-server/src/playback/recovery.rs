@@ -1,43 +1,117 @@
 //! Extracted from mod.rs to keep the file under the 1000-line cap.
-//! Re-emit ShowTitle + the subtitle state after a Resolume host recovers.
+//! Re-sync the wall after a Resolume host recovers (the title as a `Resync`,
+//! the subtitle state as it is), and the forwarder that brings the driver's
+//! `RecoveryEvent`s to the engine.
 
 use std::sync::atomic::Ordering;
 
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::state::PlayState;
 use super::title;
 use crate::EngineCommand;
 use crate::resolume::RecoveryEvent;
 
-/// Scaffolding (RED): the forwarder moved out of `lib.rs` unchanged.
+/// The `host` of the one `ResolumeRecovered` a lagged forwarder sends for the
+/// events it missed. The engine re-pushes every host whatever the host.
+pub(crate) const LAGGED_HOST: &str = "(lagged)";
+
+/// Forward every Resolume `RecoveryEvent` to the engine as
+/// `EngineCommand::ResolumeRecovered`, until shutdown or until the channel
+/// closes (#217 addendum 3). It matches the whole `recv()` result: the old
+/// `Ok(event) = recv()` select branch was disabled by the first error, so a
+/// single `Lagged` ended recovery forwarding until shutdown. A lag means
+/// events were missed, so a recovery may be pending: it forwards ONE event
+/// for all of them. The re-push is idempotent, since the driver acts only on
+/// a difference.
 pub(crate) async fn forward_recovery_events(
     mut events: broadcast::Receiver<RecoveryEvent>,
     engine_tx: mpsc::Sender<EngineCommand>,
     mut shutdown: broadcast::Receiver<()>,
 ) {
     loop {
-        tokio::select! {
-            Ok(event) = events.recv() => {
-                let _ = engine_tx.send(EngineCommand::ResolumeRecovered { host: event.host }).await;
-            }
-            _ = shutdown.recv() => break,
-        }
+        let host = tokio::select! {
+            received = events.recv() => match received {
+                Ok(event) => event.host,
+                Err(RecvError::Lagged(missed)) => {
+                    warn!(missed, "Resolume recovery events lagged — forwarding one re-push for them");
+                    LAGGED_HOST.to_string()
+                }
+                Err(RecvError::Closed) => return,
+            },
+            _ = shutdown.recv() => return,
+        };
+        let _ = engine_tx
+            .send(EngineCommand::ResolumeRecovered { host })
+            .await;
+    }
+}
+
+impl super::PlaylistPipeline {
+    /// Whether this pipeline's song title belongs on the wall now (#217
+    /// addendum 3): it plays `video_id` on program, the song has had its
+    /// `Started` (before it, the position and duration are the previous
+    /// song's), and its position is inside the title window.
+    fn title_due(&self, video_id: i64) -> bool {
+        self.scene_active.load(Ordering::Acquire)
+            && self.started_video_id == Some(video_id)
+            && title::title_window_open(self.cached_position_ms, self.cached_duration_ms)
     }
 }
 
 impl super::PlaybackEngine {
-    /// Re-emit current state to a recovered Resolume host: ShowTitle for
-    /// every active playlist inside its title window (no pending show timer,
-    /// no finished end-of-song hide) + the wall's subtitle state (ShowSubtitles for
-    /// each on-program line, one HideSubtitles when there is none — also
-    /// when no SongPlayer playlist is on program).
+    /// The video whose title SHOULD be on the wall: a playing, on-program
+    /// pipeline inside its title window. Several (a program scene with more
+    /// than one SongPlayer playlist; they share the one `#sp-title` clip):
+    /// the highest playlist id, so the HashMap order never decides.
+    fn due_title_video(&self) -> Option<i64> {
+        self.pipelines
+            .iter()
+            .filter_map(|(&playlist_id, pp)| {
+                debug!(
+                    playlist_id,
+                    state = ?pp.state,
+                    started = ?pp.started_video_id,
+                    position_ms = pp.cached_position_ms,
+                    duration_ms = pp.cached_duration_ms,
+                    "title window inputs"
+                );
+                match pp.state {
+                    PlayState::Playing { video_id } if pp.title_due(video_id) => {
+                        Some((playlist_id, video_id))
+                    }
+                    _ => None,
+                }
+            })
+            .max()
+            .map(|(_, video_id)| video_id)
+    }
+
+    /// Declare the wall's title to the Resolume driver (a `Resync`): the due
+    /// title, or none. The driver acts only on a difference, so this is
+    /// idempotent: it never re-runs a fade for a title that is up. Used by a
+    /// Resolume recovery and by an OBS scene-on (#217 addendum 3).
+    pub(super) async fn resync_wall_title(&self) -> Option<String> {
+        let due = self.due_title_video();
+        title::resync_title(&self.pool, self.obs_cmd_tx.as_ref(), &self.resolume_tx, due).await
+    }
+
+    /// Re-sync a recovered Resolume host: the title as a `Resync` (the song
+    /// title inside its window, else none) + the wall's subtitle state
+    /// (ShowSubtitles for each on-program line, one HideSubtitles when there
+    /// is none — also when no SongPlayer playlist is on program).
     pub(crate) async fn handle_resolume_recovery(&self, host: &str) {
         info!(
             host,
-            "Resolume recovery — re-emitting current state for active pipelines"
+            "Resolume recovery — re-syncing the title and the subtitle state"
         );
+        // The driver owns the title (#217 addendum 3): it compares this with
+        // what it last did and cannot double-fade, flash, or show a title
+        // outside its window, whatever is queued ahead of this Resync.
+        let title = self.resync_wall_title().await;
+        info!(host, ?title, "title re-synced on Resolume recovery");
         let mut shows = Vec::new();
         for (&playlist_id, pp) in &self.pipelines {
             let PlayState::Playing { video_id } = pp.state else {
@@ -45,37 +119,6 @@ impl super::PlaybackEngine {
             };
             if !pp.scene_active.load(Ordering::Acquire) {
                 continue;
-            }
-            debug!(playlist_id, video_id, started = ?pp.started_video_id, "title window inputs");
-            // Re-show the title only inside its window (#217 addendum 2).
-            // A pending show timer (Started + 1.5 s) shows it itself: a
-            // second ShowTitle restarts the fade. A finished end-of-song
-            // hide must stay: re-showing would carry the title into the next
-            // song (a HideTitle that 404'd on a stale clip map ends in
-            // exactly this recovery). `cancel_title_timers` `take()`s both
-            // handles, so an aborted one never lingers.
-            let show_pending = pp
-                .title_show_abort
-                .as_ref()
-                .is_some_and(|show| !show.is_finished());
-            let hide_done = pp
-                .title_hide_abort
-                .as_ref()
-                .is_some_and(|hide| hide.is_finished());
-            if !show_pending
-                && !hide_done
-                && title::push_title(
-                    &self.pool,
-                    self.obs_cmd_tx.as_ref(),
-                    &self.resolume_tx,
-                    video_id,
-                )
-                .await
-            {
-                info!(
-                    playlist_id,
-                    video_id, "title re-pushed on Resolume recovery"
-                );
             }
             let lines = pp.lyrics_state.as_ref().and_then(|state| {
                 state.resolume_lines_with_next(pp.cached_position_ms, pp.cached_lyrics_reference)
@@ -99,9 +142,7 @@ impl super::PlaybackEngine {
         // clip map and is not re-sent, so without this a stale text Arena
         // restored from its saved composition would stay. The subtitle clips
         // are shared by every on-program playlist, so the one Hide goes out
-        // only when none of them has a line. The clear is instant; the title
-        // is not hidden here, as `hide_title` fades from full opacity and
-        // would flash a stale title that is already hidden (#217).
+        // only when none of them has a line. The clear is instant (#217).
         if shows.is_empty() {
             let _ = self
                 .resolume_tx

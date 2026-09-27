@@ -117,13 +117,6 @@ impl HostDriver {
                     "stale Resolume clip map refreshed — the RecoveryEvent re-syncs the title"
                 );
             }
-            ResolumeCommand::HideTitle => {
-                info!(
-                    host = %self.host,
-                    "stale Resolume clip map refreshed — hiding the title at once"
-                );
-                self.run_title_action(TitleAction::HideNow).await;
-            }
             _ => {
                 info!(
                     host = %self.host,

@@ -55,20 +55,40 @@ pub(crate) enum TitleAction<'a> {
 }
 
 impl TitleState {
-    /// Scaffolding (RED): every command runs as sent, as before #217
-    /// addendum 3. A Show or a Resync naming a title fades it in, a Hide
-    /// fades it out; a Resync naming none does nothing (the recovery sent no
-    /// title then).
+    /// Act only on a difference.
+    ///
+    /// - A title (a Show, or a Resync naming one) that is already `Shown`:
+    ///   nothing, as a second fade from 5 % is a visible blink. Otherwise it
+    ///   fades in. An empty Show shows nothing (`show_title`'s old no-op); an
+    ///   empty Resync title is no title.
+    /// - A Hide: nothing while `Hidden`. It fades only a title known to be up
+    ///   (`Shown`); any other state hides at once, because `hide_title` fades
+    ///   from FULL opacity and would flash a clip that is not.
+    /// - A Resync naming no title: nothing while `Hidden`, else hide at once.
     pub(crate) fn plan<'a>(&self, intent: TitleIntent<'a>) -> TitleAction<'a> {
-        match intent {
-            TitleIntent::Show("") => TitleAction::Nothing,
-            TitleIntent::Show(text) => TitleAction::FadeIn(text),
-            TitleIntent::Hide => TitleAction::FadeOut,
-            TitleIntent::Resync(title) => match title.filter(|text| !text.is_empty()) {
-                Some(text) => TitleAction::FadeIn(text),
-                None => TitleAction::Nothing,
-            },
+        let wanted = match intent {
+            TitleIntent::Show("") => return TitleAction::Nothing,
+            TitleIntent::Show(text) => Some(text),
+            TitleIntent::Resync(title) => title.filter(|text| !text.is_empty()),
+            TitleIntent::Hide => {
+                return match self {
+                    TitleState::Hidden => TitleAction::Nothing,
+                    TitleState::Shown(_) => TitleAction::FadeOut,
+                    _ => TitleAction::HideNow,
+                };
+            }
+        };
+        match wanted {
+            Some(text) if self.shows(text) => TitleAction::Nothing,
+            Some(text) => TitleAction::FadeIn(text),
+            None if *self == TitleState::Hidden => TitleAction::Nothing,
+            None => TitleAction::HideNow,
         }
+    }
+
+    /// Whether `text` is fully up.
+    fn shows(&self, text: &str) -> bool {
+        matches!(self, TitleState::Shown(shown) if shown == text)
     }
 }
 
@@ -155,7 +175,32 @@ pub(crate) fn take_queued(
     while let Ok(cmd) = rx.try_recv() {
         batch.push(cmd);
     }
+    supersede_by_resync(batch)
+}
+
+/// Drop the title commands before the last `Resync` of `batch`.
+fn supersede_by_resync(batch: Vec<ResolumeCommand>) -> Vec<ResolumeCommand> {
+    let Some(last) = batch
+        .iter()
+        .rposition(|cmd| matches!(cmd, ResolumeCommand::Resync { .. }))
+    else {
+        return batch;
+    };
     batch
+        .into_iter()
+        .enumerate()
+        .filter(|(i, cmd)| *i >= last || !is_title_command(cmd))
+        .map(|(_, cmd)| cmd)
+        .collect()
+}
+
+fn is_title_command(cmd: &ResolumeCommand) -> bool {
+    matches!(
+        cmd,
+        ResolumeCommand::ShowTitle { .. }
+            | ResolumeCommand::HideTitle
+            | ResolumeCommand::Resync { .. }
+    )
 }
 
 #[cfg(test)]
