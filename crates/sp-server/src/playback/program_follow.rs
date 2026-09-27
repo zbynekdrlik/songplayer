@@ -31,8 +31,9 @@
 //!   at start, when it is switched on, and after events this task missed (a
 //!   lagged broadcast), while cg OBS is up; the scene changes queued before
 //!   that read are dropped, and the newest of them is followed when cg OBS
-//!   does not name its scene (or names that scene without its playlists).
-//!   This replaces the event-night watcher script
+//!   does not name its scene (or names that scene without its playlists),
+//!   unless a reconnect or a lag came after it. This replaces the event-night
+//!   watcher script
 //!   `%TEMP%\sp_follow.ps1`, which polled the scene.
 //! - The settings are re-read every [`FOLLOW_SETTINGS_POLL`], so a save
 //!   applies within 5 s. The telemetry ([`FollowShared`], on
@@ -465,7 +466,8 @@ impl FollowLoop {
 
     /// Drop every event still queued: each one is older than the read that
     /// follows. A scene change would cut back to a scene cg OBS already left;
-    /// the newest one is kept as `missed_scene`. Keeps cg OBS's connection
+    /// the newest one is kept as `missed_scene` (forgotten again on a
+    /// `Connected` or a lag). Keeps cg OBS's connection
     /// state, and returns whether cg OBS's transition must be read again (an
     /// event asked for it, or events were lost to a lag).
     fn drain(&mut self, events: &mut broadcast::Receiver<ObsEvent>) -> bool {
