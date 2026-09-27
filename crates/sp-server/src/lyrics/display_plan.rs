@@ -20,7 +20,8 @@
 //! 2. **Lead.** A line shows at `max(start - LEAD_MS, prev.show +
 //!    MIN_VISIBLE_MS)`, but never after it is sung (`<= start`): when the
 //!    previous lines leave no room, it shows exactly when it is sung. This
-//!    show time is when the previous line leaves the wall. So the previous
+//!    show time is when the previous line leaves the wall, unless an
+//!    instrumental break separates them (step 3). So the previous
 //!    line leaves before its own sung end whenever this show falls before that
 //!    end, usually while it is still sung. The previous line leaves at or
 //!    before its sung START when this line is sung at most `LEAD_MS` after

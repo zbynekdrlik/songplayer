@@ -97,7 +97,9 @@ You can't run tests locally, so a RED test must FAIL against a version of the
 code you can only reason about, without leaving warnings CI's clippy
 (`--all-targets -D warnings`) would reject. The clean pattern (used for #161's
 `idle_gate_abort`): make the RED commit ship the REAL logic but with ONE WRONG
-CONSTANT (e.g. `const ABORT_CONSECUTIVE_BUSY: u32 = u32::MAX;` → GREEN sets `2`).
+CONSTANT (e.g. `const ABORT_CONSECUTIVE_BUSY: u32 = u32::MAX;` → GREEN sets `2`;
+#161 shipped `u32::MAX` there, but do not copy that value, see the extreme-constant
+note below).
 The logic still reads/writes every field, so nothing is dead_code, and the
 "must-abort" tests fail cleanly; a stub function body that ignores its fields
 would instead trip `dead_code`/`unused`. For timing tests (interval + sleep),
@@ -112,13 +114,18 @@ commit itself. Use a wrong NON-identity value (a named const `FRAGMENT_MS = 250`
 the RED tree is clippy-clean.
 
 Likewise avoid a RED constant at its type's minimum (`0`) or maximum
-(`u32::MAX`) when the comparison makes it trivially true or false. Examples:
-`x <= 0`, `x < 0` and `x >= 0` on an unsigned value, or `x >= MAX` and
-`x > MAX`. `clippy::absurd_extreme_comparisons` flags that shape, and as a
-correctness-group lint it is deny-by-default. `x > 0` or `x < MAX` does not
-trigger it. The #161 example above, `u32::MAX` compared with `>=`, has exactly
-that shape, so prefer a non-extreme wrong value such as `1_000`. #217 used
-`LONG_GAP_MS = 1`, then set it to `8_000` in GREEN.
+(`u32::MAX`) when that makes one side of the comparison impossible.
+`clippy::absurd_extreme_comparisons` flags three shapes, and as a
+correctness-group lint it is deny-by-default:
+
+- always false: `x < 0` and `x > MAX`;
+- always true: `x >= 0` and `x <= MAX`;
+- really `==`: `x <= 0` and `x >= MAX`.
+
+`x > 0` or `x < MAX` does not trigger it. The #161 example above, `u32::MAX`
+compared with `>=`, is the "really `==`" shape, so prefer a non-extreme wrong
+value such as `1_000`. #217 used `LONG_GAP_MS = 1`, then set it to `8_000` in
+GREEN.
 
 **A wrong-constant RED for a whole NEW module proves only the tests that
 depend on that constant (#217 review round 3).** Every other new test passes at
