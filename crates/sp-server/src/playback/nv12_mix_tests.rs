@@ -303,3 +303,88 @@ fn every_band_beyond_the_first_is_painted_on_a_helper_thread() {
         );
     }
 }
+
+#[test]
+fn a_run_may_start_anywhere_in_a_row() {
+    // The bands start on row edges, but the painter must not rely on it:
+    // cutting the destination anywhere (mid-row, inside the bars, inside
+    // the picture, on the plane edge) paints the same bytes.
+    let mut bytes = Bytes(99);
+    let (src_layout, dst_layout) = (nv12(10, 4, 12), nv12(16, 6, 18));
+    let (src, to) = (bytes.frame(src_layout.len), bytes.frame(dst_layout.len));
+    let plan = FitPlan::new(src_layout, dst_layout);
+    assert_eq!(plan.rect(), (0, 0, 14, 6), "a pillarbox: bars right of it");
+    let same = bytes.frame(dst_layout.len);
+    for (kind, from) in [
+        ("fitted", Outgoing::Fitted(&plan, &src)),
+        ("same", Outgoing::Same(dst_layout, &same)),
+    ] {
+        let want = reference(from, &to, 77);
+        for cuts in [
+            vec![5, 23, 40, 107, 108, 115, 130],
+            vec![1, 2, 3, 17, 19, 33, 35, 150, 161],
+            vec![13, 14, 15, 16, 17, 100, 120, 145],
+        ] {
+            let mix = Mix {
+                from,
+                to: &to,
+                weight: Weight::new(77),
+            };
+            let mut got = vec![0u8; dst_layout.len];
+            let mut at = 0;
+            for end in cuts.into_iter().chain([dst_layout.len]) {
+                mix.paint(at, &mut got[at..end]);
+                at = end;
+            }
+            assert_same(&got, &want, &format!("the {kind} mix cut into runs"));
+        }
+    }
+}
+
+#[test]
+fn the_rows_are_shared_out_evenly_across_the_bands() {
+    // Band i: luma rows dh·i/k .. dh·(i+1)/k, chroma rows ch·i/k ..
+    // ch·(i+1)/k; the last band also every byte past the chroma plane; every
+    // offset capped at the bytes mixed.
+    let full = nv12(2560, 1440, 2560);
+    let s = 2560;
+    assert_eq!(
+        band_bounds(full, full.len, 6),
+        vec![
+            0,
+            240 * s,
+            480 * s,
+            720 * s,
+            960 * s,
+            1200 * s,
+            1440 * s,
+            1560 * s,
+            1680 * s,
+            1800 * s,
+            1920 * s,
+            2040 * s,
+            full.len,
+        ],
+        "1440 luma rows, 720 chroma rows, six bands"
+    );
+    assert_eq!(
+        band_bounds(nv12(4, 7, 4), 50, 3),
+        vec![0, 8, 16, 28, 32, 36, 50],
+        "7 luma rows as 2 + 2 + 3, 4 chroma rows as 1 + 1 + 2, then the bytes past them"
+    );
+    assert_eq!(
+        band_bounds(nv12(6, 2, 6), 18, 4),
+        vec![0, 0, 6, 6, 12, 12, 12, 12, 18],
+        "2 rows in 4 bands: bands 1 and 3 get a luma row, band 3 the chroma row"
+    );
+    assert_eq!(
+        band_bounds(nv12(6, 2, 6), 10, 2),
+        vec![0, 6, 10, 10, 10],
+        "capped at the 10 bytes both pictures hold"
+    );
+    assert_eq!(
+        band_bounds(nv12(6, 2, 6), 18, 1),
+        vec![0, 12, 18],
+        "one band: the luma plane, then the rest"
+    );
+}

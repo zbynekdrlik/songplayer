@@ -371,7 +371,10 @@ pub fn weight_q8(slot: u32, n_slots: u32) -> u32 {
 
 /// Blend two NV12 frames of the SAME layout into `out` (appended): per byte
 /// `(f·(256 − w) + t·w + 128) >> 8`. Y and the interleaved UV plane blend
-/// alike, since both are linear in the same weight.
+/// alike, since both are linear in the same weight. Test-only since #215
+/// addendum 3: the reference [`mix_nv12_into`] is pinned against (the sender
+/// blends in its one fused pass).
+#[cfg(test)]
 pub fn blend_nv12_into(from: &[u8], to: &[u8], weight: u32, out: &mut Vec<u8>) {
     let weight = weight.min(Q8_ONE);
     let keep = Q8_ONE - weight;
@@ -476,7 +479,8 @@ fn nv12_whole(layout: Layout, len: usize) -> bool {
 /// The rectangle is even in every coordinate (unless the destination is under
 /// 2×2), so each chroma sample covers exactly its 2×2 luma block. Built ONCE
 /// per pair of layouts (the column taps are precomputed, the row taps are one
-/// per row) and applied on every boundary of the window that needs it.
+/// per row) and drawn by [`mix_nv12_into`] on every mixed boundary of the
+/// window that needs it, blended as it is fitted (#215 addendum 3).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FitPlan {
     src: Layout,
@@ -529,7 +533,10 @@ impl FitPlan {
     /// Fit `src` (the plan's source layout) into the destination layout,
     /// appended to `out`: exactly `dst.len` bytes, the bars studio black. A
     /// source (or destination) buffer that is not a whole NV12 picture of its
-    /// layout gives the black canvas alone, never a panic.
+    /// layout gives the black canvas alone, never a panic. Test-only since
+    /// #215 addendum 3: with `blend_nv12_into`, the two-pass reference the
+    /// fused [`mix_nv12_into`] is pinned against, byte for byte.
+    #[cfg(test)]
     pub fn apply(&self, src: &[u8], out: &mut Vec<u8>) {
         let base = out.len();
         black_nv12_into(self.dst, out);
@@ -565,8 +572,10 @@ impl FitPlan {
 }
 
 /// Fit the NV12 picture `src` of `src_layout` into `dst_layout` (appended to
-/// `out`, [`FitPlan`]). The program sender keeps its plan across a window's
-/// boundaries; this one-shot form builds it every call.
+/// `out`, [`FitPlan::apply`]), building the plan every call. Test-only (#215
+/// addendum 3): the sender keeps its plan across a window's boundaries and
+/// draws it with [`mix_nv12_into`].
+#[cfg(test)]
 pub fn fit_nv12_into(src: &[u8], src_layout: Layout, dst_layout: Layout, out: &mut Vec<u8>) {
     FitPlan::new(src_layout, dst_layout).apply(src, out);
 }
