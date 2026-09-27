@@ -9,7 +9,6 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 
 use crate::resolume::ResolumeCommand;
-use crate::resolume::handlers;
 
 const RESOLUTION_TTL: Duration = Duration::from_secs(300); // 5 minutes
 
@@ -337,7 +336,8 @@ impl HostDriver {
         // Jittered liveness cadence. `sleep_until` a stable per-cycle deadline
         // (recomputed only when the probe actually fires) so command traffic
         // never resets or delays the next liveness probe.
-        let mut next_probe = tokio::time::Instant::now() + jittered_poll_period();
+        let mut next_probe =
+            tokio::time::Instant::now() + self.tick_period(Instant::now(), jittered_poll_period());
 
         loop {
             tokio::select! {
@@ -346,7 +346,8 @@ impl HostDriver {
                 }
                 _ = tokio::time::sleep_until(next_probe) => {
                     self.on_tick_at(Instant::now()).await;
-                    next_probe = tokio::time::Instant::now() + jittered_poll_period();
+                    next_probe = tokio::time::Instant::now()
+                        + self.tick_period(Instant::now(), jittered_poll_period());
                 }
                 _ = shutdown.recv() => {
                     info!(host = %self.host, "Resolume driver shutting down");
@@ -391,6 +392,11 @@ impl HostDriver {
         ) {
             self.run_full_refresh(reason, now).await;
         }
+    }
+
+    /// The period until the next liveness tick: the jittered ~10 s cadence.
+    fn tick_period(&self, _now: Instant, liveness: Duration) -> Duration {
+        liveness
     }
 
     /// Record the attempt, log the mode transition, and run a full
@@ -532,46 +538,12 @@ impl HostDriver {
         }
     }
 
-    /// Handle a single command. Pure dispatch to handlers — each branch is
-    /// covered by wiremock tests in `handlers.rs`.
+    /// Handle a single command: the forced refresh and the shutdown here, a
+    /// title or subtitle push through `run_push`. Pure dispatch; the handlers
+    /// have their own wiremock tests.
     #[cfg_attr(test, mutants::skip)]
     async fn handle_command(&mut self, cmd: ResolumeCommand) {
         match cmd {
-            ResolumeCommand::ShowTitle { song, artist } => {
-                if let Err(e) = handlers::show_title(self, &song, &artist).await {
-                    warn!(host = %self.host, %e, "show_title failed");
-                }
-            }
-            ResolumeCommand::HideTitle => {
-                if let Err(e) = handlers::hide_title(self).await {
-                    warn!(host = %self.host, %e, "hide_title failed");
-                }
-            }
-            ResolumeCommand::ShowSubtitles {
-                en,
-                next_en,
-                sk,
-                next_sk,
-                suppress_en,
-            } => {
-                if let Err(e) = handlers::set_subtitles(
-                    self,
-                    &en,
-                    &next_en,
-                    sk.as_deref(),
-                    next_sk.as_deref(),
-                    suppress_en,
-                )
-                .await
-                {
-                    warn!(host = %self.host, %e, "subtitle set failed");
-                }
-            }
-            ResolumeCommand::HideSubtitles => {
-                if let Err(e) = handlers::clear_subtitles(self).await {
-                    warn!(host = %self.host, %e, "subtitle clear failed");
-                }
-            }
             ResolumeCommand::RefreshMapping => {
                 // A command forces a full refresh regardless of TTL/liveness/
                 // retry window. It is its own step (nothing in production
@@ -596,6 +568,7 @@ impl HostDriver {
             ResolumeCommand::Shutdown => {
                 info!(host = %self.host, "received shutdown command");
             }
+            push_cmd => self.run_push(&push_cmd, Instant::now()).await,
         }
     }
 
@@ -889,6 +862,9 @@ impl PartialEq for ClipInfo {
 
 impl Eq for ClipInfo {}
 
+#[path = "driver_push.rs"]
+mod push;
+
 #[cfg(test)]
 #[path = "driver_tests.rs"]
 mod tests;
@@ -900,3 +876,7 @@ mod poll_tests;
 #[cfg(test)]
 #[path = "driver_not_ready_tests.rs"]
 mod not_ready_tests;
+
+#[cfg(test)]
+#[path = "driver_relaunch_tests.rs"]
+mod relaunch_tests;

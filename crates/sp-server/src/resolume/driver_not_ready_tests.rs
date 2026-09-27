@@ -33,7 +33,7 @@ fn composition_with(tokens: &[&str]) -> serde_json::Value {
 }
 
 /// An Arena whose light `/product` probe always answers.
-async fn arena() -> MockServer {
+pub(super) async fn arena() -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/product"))
@@ -47,7 +47,7 @@ async fn arena() -> MockServer {
 
 /// `/composition` answers `first` once, then `then` on every later fetch.
 /// The `first` mock is mounted first, so it wins while it has a use left.
-async fn composition_sequence(
+pub(super) async fn composition_sequence(
     server: &MockServer,
     first: serde_json::Value,
     then: serde_json::Value,
@@ -65,7 +65,7 @@ async fn composition_sequence(
         .await;
 }
 
-async fn composition_fetches(server: &MockServer) -> usize {
+pub(super) async fn composition_fetches(server: &MockServer) -> usize {
     server
         .received_requests()
         .await
@@ -77,7 +77,7 @@ async fn composition_fetches(server: &MockServer) -> usize {
 
 /// How many `RecoveryEvent`s are waiting on the channel (they are sent
 /// synchronously inside the driver call, so none is still in flight).
-fn drain(rx: &mut broadcast::Receiver<RecoveryEvent>) -> usize {
+pub(super) fn drain(rx: &mut broadcast::Receiver<RecoveryEvent>) -> usize {
     let mut n = 0;
     while rx.try_recv().is_ok() {
         n += 1;
@@ -485,9 +485,10 @@ async fn a_ready_composition_on_a_clean_start_fires_no_recovery_event() {
 }
 
 /// The ready refresh comes after a failure (e.g. a forced RefreshMapping
-/// while the last probe had failed): `apply_outcome` fires its RecoveryEvent,
-/// and the ready transition must not fire a second one. Two re-pushes would
-/// restart the title fade (a visible blink).
+/// while the last probe had failed). The failure evicted nothing, so its
+/// recovery fires no event of its own (#217 addendum 2); the ready transition
+/// fires the one. Two re-pushes would restart the title fade (a visible
+/// blink).
 #[tokio::test]
 async fn a_ready_refresh_after_a_failure_fires_exactly_one_recovery_event() {
     let server = arena().await;
@@ -561,12 +562,12 @@ async fn an_outage_during_a_not_ready_episode_fires_one_recovery_event_on_return
 }
 
 /// Review round 1: a probe failed during the not-ready episode (too few to
-/// open the breaker). On the next tick the probe's recovery fires a
-/// RecoveryEvent and resets the failure count, then the NotReady refresh on
-/// the same tick finds the clips. The engine's re-push for the probe's event
-/// is queued on the driver's command channel and runs after this tick, against
-/// the now-ready map, so the ready transition must not add a second event (a
-/// second ShowTitle restarts the title fade).
+/// open the breaker). On the next tick the probe's recovery resets the failure
+/// count, then the NotReady refresh on the same tick finds the clips. One
+/// event for the tick, never two (a second ShowTitle restarts the title fade).
+/// Before #217 addendum 2 the probe's recovery fired it and the ready
+/// transition held back; now a bare failing→ok flip fires none, and the ready
+/// transition fires the one.
 #[tokio::test]
 async fn a_probe_recovery_on_the_ready_tick_fires_one_recovery_event() {
     let server = arena().await;
@@ -597,7 +598,7 @@ async fn a_probe_recovery_on_the_ready_tick_fires_one_recovery_event() {
     assert_eq!(
         drain(&mut rx),
         1,
-        "one tick fires one RecoveryEvent, the probe's recovery covers the ready map"
+        "one tick fires one RecoveryEvent: the ready transition's"
     );
 }
 
@@ -615,10 +616,12 @@ async fn a_forced_refresh_that_finds_the_clips_fires_the_ready_event() {
     let mut driver =
         HostDriver::new("127.0.0.1".into(), server.address().port()).with_recovery_channel(tx);
     let base = Instant::now();
-    driver.not_ready_since = Some(base);
-    driver.apply_outcome(false);
-    driver.apply_outcome(true); // an earlier tick's probe recovery
+    for _ in 0..3 {
+        driver.apply_outcome(false); // Arena goes away: the breaker opens
+    }
+    driver.apply_outcome(true); // an earlier tick's breaker close
     assert_eq!(drain(&mut rx), 1, "the earlier recovery fired its event");
+    driver.not_ready_since = Some(base); // the evicted map, as `on_tick_at` marks it
 
     driver.handle_command(ResolumeCommand::RefreshMapping).await;
 
@@ -734,10 +737,10 @@ async fn a_breaker_close_held_back_by_the_retry_window_is_refetched_on_the_next_
 /// loads). Not ready means "answered without SongPlayer's clips"; a failed
 /// fetch is the #157 case, so it waits out the 60 s retry window instead of
 /// taking the every-tick fast path. 31 ticks, 10 s apart, from the relaunch:
-/// fetches at 0, 60, 120, 180, 240, 300 s = 6, not 15. Each failed fetch
-/// makes the next probe fire the #157 `was_failing` RecoveryEvent. So the
-/// events are the breaker close + the re-push after each failed fetch but the
-/// last (its re-push would come at R+310) = 6, never one per tick.
+/// fetches at 0, 60, 120, 180, 240, 300 s = 6, not 15. The only event is
+/// the breaker close's: a failed fetch followed by an ok probe is a bare
+/// failing→ok flip, no recovery (#217 addendum 2). Before, each failed fetch
+/// made the next probe fire the #157 `was_failing` event, 6 in all.
 #[tokio::test]
 async fn a_failing_composition_after_a_breaker_close_keeps_the_retry_window() {
     let server = arena().await;
@@ -767,9 +770,8 @@ async fn a_failing_composition_after_a_breaker_close_keeps_the_retry_window() {
     );
     assert_eq!(
         drain(&mut rx),
-        6,
-        "the breaker close + the #157 re-push after each failed fetch but the last \
-         (its re-push would come at R+310), never one per tick"
+        1,
+        "only the breaker close fires: a failed fetch then an ok probe is no recovery"
     );
 }
 
@@ -809,7 +811,8 @@ async fn an_answered_fetch_after_a_failed_one_restores_the_fast_path() {
     let relaunch = base + secs(1800);
 
     // R: the breaker close fires its event; its refresh fails (500).
-    // R+10: the probe's `was_failing` event; the retry window holds.
+    // R+10: the probe answers again, no event (#217 addendum 2); the retry
+    // window holds.
     let mut events = Vec::new();
     for k in 0..=6u64 {
         driver.on_tick_at(relaunch + secs(10 * k)).await;
@@ -822,8 +825,8 @@ async fn an_answered_fetch_after_a_failed_one_restores_the_fast_path() {
     );
     assert_eq!(
         events,
-        [1, 1, 0, 0, 0, 0, 0],
-        "RecoveryEvents per tick R..R+60: the close, then the failed fetch's `was_failing`"
+        [1, 0, 0, 0, 0, 0, 0],
+        "RecoveryEvents per tick R..R+60: only the close, a failed fetch then an ok probe is none"
     );
 
     driver.on_tick_at(relaunch + secs(70)).await;

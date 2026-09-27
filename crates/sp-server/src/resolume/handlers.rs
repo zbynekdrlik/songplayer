@@ -657,4 +657,125 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "boom");
     }
+
+    // -----------------------------------------------------------------------
+    // Subtitle clips (#217 addendum 2)
+    // -----------------------------------------------------------------------
+
+    /// A driver with the given `(token, clip id, text param id)` clips mapped
+    /// and every text PUT answered 204.
+    async fn subtitle_driver(clips: &[(&str, i64, i64)]) -> (MockServer, HostDriver) {
+        let (server, mut driver) = spawn_mock_driver_with_clips(vec![]).await;
+        for (token, clip_id, text_param_id) in clips {
+            driver.clip_mapping.insert(
+                token.to_string(),
+                vec![ClipInfo {
+                    clip_id: *clip_id,
+                    text_param_id: *text_param_id,
+                }],
+            );
+        }
+        Mock::given(method("PUT"))
+            .and(path_regex(r"^/api/v1/parameter/by-id/\d+$"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+        (server, driver)
+    }
+
+    /// `#sp-subs` (param 200), `#sp-subs-next` (201) and `#sp-subssk` (202).
+    fn all_subtitle_clips() -> [(&'static str, i64, i64); 3] {
+        [
+            (crate::resolume::SUBS_TOKEN, 100, 200),
+            (crate::resolume::SUBS_NEXT_TOKEN, 101, 201),
+            (crate::resolume::SUBS_SK_TOKEN, 102, 202),
+        ]
+    }
+
+    /// The `value` of every text PUT to param `param_id`, in order.
+    async fn texts_put(server: &MockServer, param_id: i64) -> Vec<String> {
+        let route = format!("/api/v1/parameter/by-id/{param_id}");
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == route)
+            .map(|r| {
+                let body: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+                body["value"].as_str().unwrap().to_string()
+            })
+            .collect()
+    }
+
+    /// The box (2026-09-27): `#sp-subs-next` still showed "If he dresses
+    /// lilies" while `#sp-subs` was empty. A hide clears the next line too.
+    #[tokio::test]
+    async fn clear_subtitles_blanks_the_next_line_clip_too() {
+        let (server, mut driver) = subtitle_driver(&all_subtitle_clips()).await;
+
+        clear_subtitles(&mut driver).await.unwrap();
+
+        for param in [200, 201, 202] {
+            assert_eq!(
+                texts_put(&server, param).await,
+                [""],
+                "param {param} is cleared once"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn clear_subtitles_clears_a_lone_next_line_clip() {
+        let (server, mut driver) =
+            subtitle_driver(&[(crate::resolume::SUBS_NEXT_TOKEN, 101, 201)]).await;
+
+        clear_subtitles(&mut driver).await.unwrap();
+
+        assert_eq!(
+            texts_put(&server, 201).await,
+            [""],
+            "a composition with only the next-line clip still gets it cleared"
+        );
+    }
+
+    /// A song with its English lyrics inside the video: the EN clips are
+    /// written empty, so the previous song's English leaves the wall.
+    #[tokio::test]
+    async fn a_suppress_en_push_blanks_the_english_clips() {
+        let (server, mut driver) = subtitle_driver(&all_subtitle_clips()).await;
+
+        set_subtitles(
+            &mut driver,
+            "Stale English",
+            "Next English",
+            Some("Slovenský riadok"),
+            None,
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            texts_put(&server, 200).await,
+            [""],
+            "#sp-subs is blanked, not skipped"
+        );
+        assert_eq!(texts_put(&server, 201).await, [""], "#sp-subs-next too");
+        assert_eq!(
+            texts_put(&server, 202).await,
+            ["Slovenský riadok"],
+            "the Slovak line is shown"
+        );
+
+        set_subtitles(&mut driver, "Line", "Next", None, None, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            texts_put(&server, 200).await,
+            ["", "Line"],
+            "without suppress_en the English is shown"
+        );
+        assert_eq!(texts_put(&server, 201).await, ["", "Next"]);
+    }
 }
