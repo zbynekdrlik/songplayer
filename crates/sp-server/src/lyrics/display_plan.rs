@@ -13,9 +13,10 @@
 //!    one with at most [`FRAGMENT_MAX_WORDS`] words, or one whose next line
 //!    starts lowercase (a continuation). A fragment merges with its following
 //!    line when the gap is at most [`MERGE_MAX_GAP_MS`] and the joined English
-//!    text fits in [`MERGE_MAX_CHARS`] chars. If it cannot merge forward, it
-//!    merges backward under the same limits. The Slovak text is joined the same
-//!    way. Merging repeats until no rule applies.
+//!    text and the joined Slovak text each fit in [`MERGE_MAX_CHARS`] chars. If
+//!    it cannot merge forward, it merges backward under the same limits. The
+//!    Slovak text is joined the same way as the English. Merging repeats until
+//!    no rule applies.
 //! 2. **Lead.** A line shows at `max(start - LEAD_MS, prev.show +
 //!    MIN_VISIBLE_MS)`, but never after it is sung (`<= start`): when the
 //!    previous lines leave no room, it shows exactly when it is sung. The
@@ -62,8 +63,9 @@ pub const FRAGMENT_MAX_WORDS: usize = 3;
 /// A fragment merges with a neighbour only across a gap of at most this.
 pub const MERGE_MAX_GAP_MS: u64 = 700;
 
-/// A merge must keep the joined English text within this many chars (what fits
-/// the wall).
+/// A merge must keep the joined English text and the joined Slovak text each
+/// within this many chars (what fits the wall). The Slovak limit matters for
+/// dub subtitle tracks, whose lines often have no English at all.
 pub const MERGE_MAX_CHARS: usize = 64;
 
 /// One line as the LED wall and the Presenter show it.
@@ -223,12 +225,21 @@ fn is_fragment(group: &Group, next: Option<&Group>) -> bool {
         || next.is_some_and(|next| starts_lowercase(&next.en))
 }
 
-/// Whether `a` and the group `b` that follows it may merge: a gap of at most
-/// [`MERGE_MAX_GAP_MS`] and a joined English text of at most
-/// [`MERGE_MAX_CHARS`] chars. Overlapping lines have no gap.
+/// Whether `a` and the group `b` that follows it may merge. The gap must be
+/// at most [`MERGE_MAX_GAP_MS`] (overlapping lines have no gap), and the joined
+/// English text and the joined Slovak text must each be at most
+/// [`MERGE_MAX_CHARS`] chars. A missing Slovak side counts as empty.
 fn fits(a: &Group, b: &Group) -> bool {
+    let a_sk = a.sk.as_deref().unwrap_or_default();
+    let b_sk = b.sk.as_deref().unwrap_or_default();
     b.start_ms.saturating_sub(a.end_ms) <= MERGE_MAX_GAP_MS
-        && join_text(&a.en, &b.en).chars().count() <= MERGE_MAX_CHARS
+        && joined_chars(&a.en, &b.en) <= MERGE_MAX_CHARS
+        && joined_chars(a_sk, b_sk) <= MERGE_MAX_CHARS
+}
+
+/// The length in chars of two texts joined by [`join_text`].
+fn joined_chars(a: &str, b: &str) -> usize {
+    join_text(a, b).chars().count()
 }
 
 /// Whether the text continues a sentence: its first letter or digit is a
