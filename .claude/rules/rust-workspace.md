@@ -361,6 +361,16 @@ the test that kills each one BEFORE CI's mutation gate runs.
   behaviour test that fails without it. #217 pinned the Ok-arm clear of
   `last_full_attempt_failed` with
   `an_answered_fetch_after_a_failed_one_restores_the_fast_path`.
+- The same holds for a CALL STATEMENT whose result is discarded
+  (`self.finish_push("hide_title_now", result);`): no mutant, so pin its
+  effect with a behaviour test (#217 addendum 2,
+  `a_retried_hide_that_404s_leaves_no_stale_note_for_the_next_push`).
+- A match GUARD that is always true where it sits (`ShowTitle { .. } if
+  self.recovery_sent_this_step` when the step has always fired an event by
+  then) makes the guard→`true` mutant EQUIVALENT: it survives the gate. Drop
+  the redundant guard (a plain arm; its "delete match arm" mutant is
+  killable next to a `_` arm), or keep it as `a && b` where the `||` mutant
+  is observable (#217 addendum 2 review round 3).
 - A mutation that cannot compile (`&&`→`||` inside a let-chain) is
   "unviable": it costs a build but cannot fail the gate.
 

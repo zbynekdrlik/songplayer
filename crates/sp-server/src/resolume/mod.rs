@@ -10,11 +10,13 @@ use tracing::{info, warn};
 
 use crate::resolume::driver::HostDriver;
 
-/// Fired by [`HostDriver`] when a refresh succeeds after at least one
-/// prior consecutive failure, and when a NOT READY clip mapping (a
-/// composition without SongPlayer's clips, #217) becomes ready. Subscribers
-/// (e.g. the playback engine) react by re-emitting their current state to
-/// the recovered host.
+/// Fired by [`HostDriver`] only on a real recovery: when its circuit breaker
+/// closes (Arena is back after an outage), and when a NOT READY clip mapping
+/// (a composition without SongPlayer's clips, or a map a 404 push marked
+/// stale, #217) becomes ready with a changed map. Never on a bare
+/// failing→ok flip (#217 addendum 2). Subscribers (e.g. the playback engine)
+/// react by re-emitting their current state, to every host (the engine does
+/// not target `host`).
 #[derive(Debug, Clone)]
 pub struct RecoveryEvent {
     pub host: String,
@@ -54,7 +56,8 @@ pub enum ResolumeCommand {
         next_en: String,
         sk: Option<String>,
         next_sk: Option<String>,
-        /// When true, skip the EN pushes (both #sp-subs and #sp-subs-next).
+        /// When true, the EN clips (#sp-subs and #sp-subs-next) are written
+        /// empty, so no English from the previous song stays on the wall.
         /// SK clips still receive their text. Used for songs with baked-in
         /// English lyrics inside the YouTube video frame.
         suppress_en: bool,
@@ -110,7 +113,8 @@ impl ResolumeRegistry {
             .collect()
     }
 
-    /// Subscribe to recovery events fired when a host recovers after failures.
+    /// Subscribe to recovery events: a host's breaker closed, or its clip map
+    /// became ready again (see [`RecoveryEvent`]).
     pub fn subscribe_recovery(&self) -> broadcast::Receiver<RecoveryEvent> {
         self.recovery_tx.subscribe()
     }

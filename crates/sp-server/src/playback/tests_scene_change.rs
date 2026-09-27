@@ -267,3 +267,131 @@ async fn handle_resolume_recovery_reemits_title_for_active_pipeline() {
         "ShowTitle must be re-emitted on Resolume recovery"
     );
 }
+
+// -- #217 addendum 2: the recovery re-shows the title only in its window ----
+
+/// An engine whose playlist 7 plays video 42 ("Song" / "Artist") on program,
+/// with the title timers given (`None` = no timer). Returns the Resolume
+/// commands one recovery sends.
+async fn recovery_title_commands(
+    show: Option<tokio::task::AbortHandle>,
+    hide: Option<tokio::task::AbortHandle>,
+) -> Vec<crate::resolume::ResolumeCommand> {
+    use std::sync::atomic::Ordering;
+
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (7, 'p', 'u', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized) \
+         VALUES (42, 7, 'abc', 'Song', 'Artist', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (obs_tx, _obs_rx) = broadcast::channel(16);
+    let (resolume_tx, mut resolume_rx) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
+        pool,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
+        resolume_tx,
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
+    engine.ensure_pipeline(7, "SP-fast");
+    let pp = engine.pipelines.get_mut(&7).expect("pipeline 7");
+    pp.state = PlayState::Playing { video_id: 42 };
+    pp.scene_active.store(true, Ordering::Release);
+    pp.title_show_abort = show;
+    pp.title_hide_abort = hide;
+    while resolume_rx.try_recv().is_ok() {}
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    let mut cmds = Vec::new();
+    while let Ok(cmd) = resolume_rx.try_recv() {
+        cmds.push(cmd);
+    }
+    cmds
+}
+
+/// A timer task that has already run.
+async fn finished_timer() -> tokio::task::AbortHandle {
+    let task = tokio::spawn(async {});
+    let handle = task.abort_handle();
+    task.await.unwrap();
+    handle
+}
+
+/// A timer task that has not run yet (never completes on its own).
+fn pending_timer() -> tokio::task::AbortHandle {
+    tokio::spawn(std::future::pending::<()>()).abort_handle()
+}
+
+fn shows_title(cmds: &[crate::resolume::ResolumeCommand]) -> bool {
+    cmds.iter()
+        .any(|c| matches!(c, crate::resolume::ResolumeCommand::ShowTitle { .. }))
+}
+
+/// Review round 2: the song's end-of-song title hide has already run (its
+/// timer task finished). A Resolume recovery then must not fade the title
+/// back in for the song's last seconds and on into the next song. The driver
+/// fires such a recovery when that very HideTitle got a 404 (Arena re-ids its
+/// clips on relaunch) and the refresh mapped the new ids; it retries the
+/// hide, and the re-push must not undo it.
+#[tokio::test]
+async fn handle_resolume_recovery_does_not_re_show_a_title_the_song_end_hid() {
+    let cmds =
+        recovery_title_commands(Some(finished_timer().await), Some(finished_timer().await)).await;
+    assert!(
+        !shows_title(&cmds),
+        "a title the song end already hid is not re-shown, got {cmds:?}"
+    );
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, crate::resolume::ResolumeCommand::HideSubtitles)),
+        "the subtitle state is still re-sent, got {cmds:?}"
+    );
+}
+
+/// Review round 3: the usual case, an Arena relaunch mid-song. The title was
+/// shown (the show timer ran) and the end-of-song hide is still pending: the
+/// recovery re-shows the title.
+#[tokio::test]
+async fn handle_resolume_recovery_re_shows_the_title_mid_song() {
+    let hide = pending_timer();
+    let cmds = recovery_title_commands(Some(finished_timer().await), Some(hide.clone())).await;
+    hide.abort();
+    assert!(
+        shows_title(&cmds),
+        "mid-song the title is re-shown, got {cmds:?}"
+    );
+}
+
+/// Review round 3: a recovery in the first 1.5 s of a song (e.g. the
+/// song-start subtitle clear got a 404 after a relaunch in the song gap).
+/// The pending show timer shows the title itself; a ShowTitle from the
+/// recovery too would run the fade twice, a blink.
+#[tokio::test]
+async fn handle_resolume_recovery_leaves_a_pending_title_to_its_show_timer() {
+    let (show, hide) = (pending_timer(), pending_timer());
+    let cmds = recovery_title_commands(Some(show.clone()), Some(hide.clone())).await;
+    show.abort();
+    hide.abort();
+    assert!(
+        !shows_title(&cmds),
+        "the show timer shows the title, got {cmds:?}"
+    );
+}
