@@ -279,10 +279,11 @@ impl FitPlan {
         let luma_end = ds * self.dst.height as usize;
         while !out.is_empty() {
             let luma = at < luma_end;
-            let plane = if luma { 0 } else { luma_end };
-            // The chroma branch also walks the bytes past the chroma plane:
-            // rows below the picture, all bar.
-            let (row, c0) = ((at - plane) / ds, (at - plane) % ds);
+            // The byte's offset in its plane (one subtraction feeds both the
+            // row and the column). The chroma branch also walks the bytes
+            // past the chroma plane: rows below the picture, all bar.
+            let offset = if luma { at } else { at - luma_end };
+            let (row, c0) = (offset / ds, offset % ds);
             let len = (ds - c0).min(out.len());
             let (run, rest) = std::mem::take(&mut out).split_at_mut(len);
             let (run_to, rest_to) = to.split_at(len);
