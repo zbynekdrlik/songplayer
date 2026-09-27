@@ -111,14 +111,19 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   asked again on the settings polls — the OBS client broadcasts `Connected`
   before its connection loop serves `ObsCommand::Remote` (the NDI map rebuild
   runs first, up to ~10 s), so the `Connected` read can time out
-  (`UPSTREAM_TIMEOUT` 3 s). **But only while cg OBS is up (`obs_up`, from
-  `Connected` / `Disconnected`) and an OBS client exists
-  (`Upstream::is_configured`).** A call made while cg OBS is away waits in the
-  OBS client's command queue (served only while connected, 64 deep), and a full
-  queue blocks its other senders (`title::push_title`'s blocking `send`) — the
-  review round-2 finding. A retry that fails logs at debug; the first failure
-  WARNs. The OBS identify subscribes Scenes (4) | Transitions (16) | Outputs
-  (64) = 84; without Transitions cg OBS never sends those events.
+  (`UPSTREAM_TIMEOUT` 3 s). **But only while cg OBS is up (`obs_up`).** A
+  call made while cg OBS is away waits in the OBS client's command queue
+  (served only while connected, 64 deep), and a full queue blocks its other
+  senders (`title::push_title`'s blocking `send`) — the review round-2
+  finding. A retry that fails logs at debug; the first failure WARNs. The OBS
+  identify subscribes Scenes (4) | Transitions (16) | Outputs (64) = 84;
+  without Transitions cg OBS never sends those events.
+- `obs_up` starts as `Upstream::is_configured()`: without an OBS client cg OBS
+  is never up and nothing is read, retried or caught up (a call there returns
+  `None` at once, so this saves only log noise). With a client it starts up,
+  so the start's reads count. `Disconnected` sets it down, and EVERY other
+  event sets it up: only a live connection sends them, so a `Connected` lost
+  in a lagged broadcast cannot leave it down (review round 3).
 - Follow = `ObsEvent::SceneChanged` (SongPlayer's own derived event, its
   playlists from `check_scene_items`) → `remote::map::scene_action` → cut via
   `persist_and_cut`, unless the program already shows that source.
@@ -128,15 +133,24 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   `SceneChanged`; the #170 poll only repairs an event cg OBS itself dropped).
   It never polls the scene otherwise. This replaces the event-night watcher
   `%TEMP%\sp_follow.ps1`, which polled the scene every 200 ms.
-- **The task is `FollowLoop`** (`on_event`, `on_tick`, `resync`). Rules:
+- **The task is `FollowLoop`** (`on_event`, `on_tick`, `resync`,
+  `catch_up`, `drain`). Rules:
   - a catch-up always cuts with the spec APPLIED JUST BEFORE it: at start and
     after a lag `resync` reads the transition → `apply_spec` → catch-up; a poll
     loads the settings → retries a pending read → `apply_spec` → catch-up on
     the flip. (Catching up first cut with the previous spec — round 2.)
-  - `resync` first DRAINS the events still queued: they are all older than its
-    reads, so every one is dropped — a stale `SceneChanged` would cut back to a
-    scene cg OBS already left — except that `Connected` / `Disconnected` still
-    set `obs_up`. It then reads, applies, and catches up only while `obs_up`.
+  - `drain` drops every event still queued (they are older than the read that
+    follows; a stale `SceneChanged` would cut back to a scene cg OBS already
+    left), keeps `obs_up`, and returns whether cg OBS's transition must be
+    read again (`rereads_transition`: `Connected` or a transition event, or a
+    `Lagged` inside the drain). `resync` drains before its transition read;
+    `catch_up` drains again right before the scene read — the events queued
+    DURING the transition read (up to 3 s) — and re-reads + applies the
+    transition first when the drain says so (review round 3).
+  - the catch-up runs only while `obs_up` and following. Switched on while cg
+    OBS is away, the follow catches up on the reconnect instead: the OBS
+    client's connection step 6 reports cg OBS's program scene as a
+    `SceneChanged`.
 
 ## API + UI
 
@@ -165,7 +179,9 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   `program_follow_tests_task.rs` (the task and `FollowLoop`; the helpers are `pub(super)`)
   (a fake cg OBS at `ObsCommand::Remote`: scripted transition replies, a
   settable program scene for `GetCurrentProgramScene`, `playlists_of` for the
-  scene lookups; every call is logged in order), `api/program_tests.rs`, and the mock
+  scene lookups; every call is logged in order; `during_read` = events it
+  broadcasts while answering the next transition read, i.e. what reaches the
+  queue while the task waits), `api/program_tests.rs`, and the mock
   E2Es `program-control.spec.ts` + `settings-program-transition.spec.ts`.
 - Pins were derived with scratch Python models of `ProgramCore` and the
   weight / blend math (rust-workspace.md, no-compile box). Re-derive them with

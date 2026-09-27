@@ -15,8 +15,9 @@
 //!   `CurrentSceneTransitionDurationChanged` (the OBS client subscribes to the
 //!   Transitions events for this) and after missed events. A read that got no
 //!   answer (cg OBS answers `Connected`'s read only once its connection loop
-//!   runs) is asked again on every settings poll until one is answered. The
-//!   last answer is kept while cg OBS is away.
+//!   runs) is asked again on the settings polls until one is answered, but
+//!   only while cg OBS is up (never without an OBS client). The last answer
+//!   is kept while cg OBS is away.
 //! - **Follow** (`program_follow_obs`, off by default). On every program scene
 //!   change of cg OBS (`ObsEvent::SceneChanged`, SongPlayer's own derived form
 //!   of `CurrentProgramSceneChanged`: its playlists come from `check_scene_items`
@@ -28,7 +29,8 @@
 //!   the on-program source cuts nothing. The follow also CATCHES UP to cg OBS's
 //!   current program scene (`GetCurrentProgramScene` + the scene's playlists)
 //!   at start, when it is switched on, and after events this task missed (a
-//!   lagged broadcast). This replaces the event-night watcher script
+//!   lagged broadcast), while cg OBS is up; the scene changes queued before
+//!   that read are dropped. This replaces the event-night watcher script
 //!   `%TEMP%\sp_follow.ps1`, which polled the scene.
 //! - The settings are re-read every [`FOLLOW_SETTINGS_POLL`], so a save
 //!   applies within 5 s. The telemetry ([`FollowShared`], on
@@ -144,6 +146,16 @@ pub fn is_transition_event(event_type: &str) -> bool {
         event_type,
         "CurrentSceneTransitionChanged" | "CurrentSceneTransitionDurationChanged"
     )
+}
+
+/// Whether `event` asks for cg OBS's transition to be read again: a
+/// (re)connect, or a change of cg OBS's current transition.
+fn rereads_transition(event: &ObsEvent) -> bool {
+    match event {
+        ObsEvent::Connected => true,
+        ObsEvent::Raw { event_type, .. } => is_transition_event(event_type),
+        ObsEvent::SceneChanged { .. } | ObsEvent::Disconnected => false,
+    }
 }
 
 /// `GET /api/v1/program` → `follow`.
@@ -352,24 +364,28 @@ struct FollowLoop {
     follow: Follow,
     upstream: Upstream,
     settings: FollowSettings,
-    /// cg OBS's connection as the OBS client last reported it: assumed up
-    /// until it says otherwise, so the start's reads count.
+    /// cg OBS's connection as the OBS client reports it. Never up without an
+    /// OBS client; with one it is assumed up until the client says otherwise,
+    /// so the start's reads count. Every event but `Disconnected` comes from
+    /// a live connection, so each one says it is up: a `Connected` lost in a
+    /// lagged broadcast must not leave it down.
     obs_up: bool,
     /// The last transition read got no answer. It is asked again on every
-    /// settings poll, but only while cg OBS is up and an OBS client exists:
-    /// a call made while cg OBS is away waits in the OBS client's command
-    /// queue (served only while connected, 64 deep), and a full queue blocks
-    /// that client's other senders.
+    /// settings poll, but only while cg OBS is up: a call made while cg OBS
+    /// is away waits in the OBS client's command queue (served only while
+    /// connected, 64 deep), and a full queue blocks that client's other
+    /// senders.
     read_pending: bool,
 }
 
 impl FollowLoop {
     fn new(follow: Follow, upstream: Upstream, settings: FollowSettings) -> Self {
+        let obs_up = upstream.is_configured();
         Self {
             follow,
             upstream,
             settings,
-            obs_up: true,
+            obs_up,
             read_pending: false,
         }
     }
@@ -379,68 +395,87 @@ impl FollowLoop {
         self.read_pending = !self.follow.refresh_obs(&self.upstream, retry).await;
     }
 
+    /// cg OBS's connection after `event` (see `obs_up`).
+    fn note_connection(&mut self, event: &ObsEvent) {
+        self.obs_up = !matches!(event, ObsEvent::Disconnected);
+    }
+
     /// One cg OBS event.
     async fn on_event(&mut self, event: ObsEvent) {
-        match event {
-            ObsEvent::SceneChanged {
-                scene_name,
-                active_playlist_ids,
-            } => {
-                if self.settings.follow_obs {
-                    self.follow
-                        .follow_scene(&scene_name, &active_playlist_ids)
-                        .await;
+        self.note_connection(&event);
+        if rereads_transition(&event) {
+            self.read_transition(false).await;
+        } else if let ObsEvent::SceneChanged {
+            scene_name,
+            active_playlist_ids,
+        } = event
+            && self.settings.follow_obs
+        {
+            self.follow
+                .follow_scene(&scene_name, &active_playlist_ids)
+                .await;
+        }
+    }
+
+    /// Drop every event still queued: each one is older than the read that
+    /// follows. A scene change would cut back to a scene cg OBS already left.
+    /// Keeps cg OBS's connection state, and returns whether cg OBS's
+    /// transition must be read again (an event asked for it, or events were
+    /// lost to a lag).
+    fn drain(&mut self, events: &mut broadcast::Receiver<ObsEvent>) -> bool {
+        let mut reread = false;
+        loop {
+            match events.try_recv() {
+                Ok(event) => {
+                    self.note_connection(&event);
+                    reread |= rereads_transition(&event);
                 }
-            }
-            ObsEvent::Connected => {
-                self.obs_up = true;
-                self.read_transition(false).await;
-            }
-            ObsEvent::Disconnected => self.obs_up = false,
-            ObsEvent::Raw { event_type, .. } => {
-                if is_transition_event(&event_type) {
-                    self.read_transition(false).await;
-                }
+                Err(TryRecvError::Lagged(_)) => reread = true,
+                Err(TryRecvError::Empty | TryRecvError::Closed) => return reread,
             }
         }
     }
 
-    /// At start and after missed events: every event still queued is older
-    /// than the reads below, so it is dropped (a stale scene change would cut
-    /// back to a scene cg OBS already left) and only cg OBS's connection
-    /// state is kept. Then re-read cg OBS's transition while it is up, put the
-    /// spec on the bus, and, while following, cut to cg OBS's current scene
-    /// with that spec.
+    /// At start and after missed events: drop the queued events, re-read cg
+    /// OBS's transition while it is up, put the spec on the bus, then catch
+    /// up.
     async fn resync(&mut self, events: &mut broadcast::Receiver<ObsEvent>) {
-        loop {
-            match events.try_recv() {
-                Ok(ObsEvent::Connected) => self.obs_up = true,
-                Ok(ObsEvent::Disconnected) => self.obs_up = false,
-                Ok(_) | Err(TryRecvError::Lagged(_)) => {}
-                Err(TryRecvError::Empty | TryRecvError::Closed) => break,
-            }
-        }
+        self.drain(events);
         if self.obs_up {
             self.read_transition(false).await;
         }
         self.follow.apply_spec(&self.settings);
+        self.catch_up(events).await;
+    }
+
+    /// While following and cg OBS is up: cut to cg OBS's current program
+    /// scene with the spec on the bus. The events queued meanwhile (during
+    /// the transition read) are dropped first; when one of them changed cg
+    /// OBS's transition, it is read and applied again, so the cut uses it.
+    async fn catch_up(&mut self, events: &mut broadcast::Receiver<ObsEvent>) {
+        if self.drain(events) && self.obs_up {
+            self.read_transition(false).await;
+            self.follow.apply_spec(&self.settings);
+        }
         if self.obs_up && self.settings.follow_obs {
             self.follow.catch_up(&self.upstream).await;
         }
     }
 
     /// The settings poll: re-read the settings, retry an unanswered transition
-    /// read, apply the spec, then catch up when the follow was just switched
-    /// on (with the spec just applied).
-    async fn on_tick(&mut self, _events: &mut broadcast::Receiver<ObsEvent>) {
+    /// read while cg OBS is up, apply the spec, then catch up when the follow
+    /// was just switched on (with the spec just applied). Switched on while
+    /// cg OBS is away, the follow catches up on the reconnect: the OBS client
+    /// then reports cg OBS's program scene as a `SceneChanged`.
+    async fn on_tick(&mut self, events: &mut broadcast::Receiver<ObsEvent>) {
         let was_following = self.settings.follow_obs;
         self.settings = self.follow.load(self.settings).await;
-        if self.read_pending && self.obs_up && self.upstream.is_configured() {
+        if self.read_pending && self.obs_up {
             self.read_transition(true).await;
         }
         self.follow.apply_spec(&self.settings);
         if self.settings.follow_obs && !was_following {
-            self.follow.catch_up(&self.upstream).await;
+            self.catch_up(events).await;
         }
     }
 }
