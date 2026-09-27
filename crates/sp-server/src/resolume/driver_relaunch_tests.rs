@@ -601,6 +601,40 @@ fn the_tick_is_2_s_only_inside_a_not_ready_episode_s_fast_window() {
     );
 }
 
+/// `run` re-arms the tick after every command with `tick_due_after_command`:
+/// a push whose 404 put the episode on its fast path brings the next tick
+/// to 2 s from now; otherwise, or when the tick is due sooner, it stays.
+#[tokio::test]
+async fn a_command_that_opens_a_not_ready_episode_moves_the_next_tick_up_to_2_s() {
+    let base = Instant::now();
+    let tnow = tokio::time::Instant::now();
+    let later = tnow + secs(10);
+    let mut driver = HostDriver::new("127.0.0.1".into(), 1);
+    assert_eq!(
+        driver.tick_due_after_command(later, tnow, base),
+        later,
+        "a ready map keeps the scheduled tick"
+    );
+    driver.not_ready_since = Some(base);
+    assert_eq!(
+        driver.tick_due_after_command(later, tnow, base),
+        tnow + secs(2),
+        "an episode on its fast path ticks 2 s from now"
+    );
+    let sooner = tnow + secs(1);
+    assert_eq!(
+        driver.tick_due_after_command(sooner, tnow, base),
+        sooner,
+        "a command never delays the tick"
+    );
+    driver.last_full_attempt_failed = true;
+    assert_eq!(
+        driver.tick_due_after_command(later, tnow, base),
+        later,
+        "after a failed fetch the retry window runs at the liveness cadence"
+    );
+}
+
 /// A composition that never gets SongPlayer's clips, polled the way `run`
 /// polls it (the tick period from `tick_period`, the jitter fixed at 10 s):
 /// every 2 s tick fetches for the 120 s fast window (0..118 s), then the 60 s
