@@ -13,9 +13,10 @@ use crate::resolume::driver::HostDriver;
 /// Fired by [`HostDriver`] only on a real recovery: when its circuit breaker
 /// closes (Arena is back after an outage), and when a NOT READY clip mapping
 /// (a composition without SongPlayer's clips, or a map a 404 push marked
-/// stale, #217) becomes ready. Never on a bare failing→ok flip (#217
-/// addendum 2). Subscribers (e.g. the playback engine) react by re-emitting
-/// their current state to the recovered host.
+/// stale, #217) becomes ready with a changed map. Never on a bare
+/// failing→ok flip (#217 addendum 2). Subscribers (e.g. the playback engine)
+/// react by re-emitting their current state, to every host (the engine does
+/// not target `host`).
 #[derive(Debug, Clone)]
 pub struct RecoveryEvent {
     pub host: String,

@@ -116,14 +116,23 @@ log 14:12:22) until the 300 s TTL.
   3. refresh through `decide` (the NotReady path; a failed last attempt still
      waits out the 60 s retry window, the ticks fetch it then);
   4. still not ready, or the fetch failed: stop, the episode's ticks carry on;
-  5. the refresh mapped NEW clips (a relaunch): retry the push once. The
-     ready transition has already fired the step's RecoveryEvent.
-- **A ShowTitle is not retried.** That RecoveryEvent's engine re-push shows
-  the title; a retried ShowTitle would run a second fade from 5 %, the blink
-  the one-event-per-step rule exists for. A subtitle retry is an instant,
-  harmless double. A HideTitle IS retried (the re-push sends no hide), and
-  the re-push no longer re-shows a title whose end-of-song hide ran (see
-  "Engine side" below).
+  5. the refresh mapped NEW clips (a relaunch): retry the push once
+     (`retry_push`). The ready transition has already fired the step's
+     RecoveryEvent.
+- **How each push is retried (`retry_push`):**
+  - a ShowTitle is NOT retried. The RecoveryEvent's engine re-push shows the
+    title; a second ShowTitle would run another fade from 5 %, the blink the
+    one-event-per-step rule exists for;
+  - a HideTitle is retried AT ONCE (`handlers::hide_title_now`: opacity 0,
+    then the text cleared). The relaunched clip holds whatever Arena's saved
+    composition restored, possibly at opacity 0, and `hide_title`'s fade
+    starts at FULL opacity: a 1 s flash of stale text (review round 3). The
+    re-push sends no hide, and no longer re-shows a title whose end-of-song
+    hide ran ("Engine side" below);
+  - a subtitle push runs again: an instant, harmless double.
+- **`finish_push` is the one end of a push:** it logs a failure and returns
+  and clears the 404 note, so the note is false outside a push (the instant
+  hide goes through it too).
 - **The SAME clips came back = a refused id, not a stale map
   (`refused_ids_at`).** Arena still lists the ids it answers 404 for, so
   no clip got a new id: no retry (it would 404 again), no RecoveryEvent
@@ -136,8 +145,9 @@ log 14:12:22) until the 300 s TTL.
   (`a_second_relaunch_within_a_minute_is_refreshed_at_once`; an earlier
   "one mark per 60 s" guard held it back, review round 1). The hold is not
   per id: a relaunch inside the 60 s after a refused-id refresh waits for
-  the hold to end (or for a tick's refetch) — only when an id is refused,
-  which the steady state never has.
+  the hold to end (no episode opens during the hold, so no 2 s ticks help;
+  only the TTL or a breaker close would refresh sooner) — only when an id is
+  refused, which the steady state never has.
 - **Logs.** The stale-map WARN is logged only when the refresh runs; a 404
   that the retry window holds, or on a refused id, logs at debug (a lyric
   line is pushed every few seconds).
@@ -222,11 +232,25 @@ current subtitle state of the playing, on-program pipelines:
 - NEVER a `HideTitle`. `hide_title` fades from FULL opacity, so hiding a
   title that is already hidden would flash the stale text. The subtitle clear
   is instant, so it is always safe.
-- NO `ShowTitle` for a pipeline whose end-of-song hide already ran
-  (`title_hide_abort` is `Some` and `is_finished()`; `cancel_title_timers`
-  `take()`s both handles, so an aborted handle never lingers). Re-showing it
-  undid the hide for the song's last seconds and into the next song (#217
-  addendum 2, `handle_resolume_recovery_does_not_re_show_a_title_the_song_end_hid`).
+- `ShowTitle` ONLY inside the title window (#217 addendum 2).
+  `cancel_title_timers` `take()`s both handles, so an aborted one never
+  lingers.
+  - A pending show timer (`title_show_abort` is `Some` and not finished,
+    Started + 1.5 s): no ShowTitle. The timer shows the title itself, and a
+    second ShowTitle restarts the fade (a recovery in a song's first 1.5 s,
+    e.g. the song-start subtitle clear 404'd after a relaunch in the gap).
+  - A finished end-of-song hide (`title_hide_abort` `Some` and
+    `is_finished()`): no ShowTitle. Re-showing undid the hide for the song's
+    last seconds and into the next song; a HideTitle that 404'd ends in
+    exactly this recovery.
+  - Otherwise (`None`, or the show ran and the hide is pending: mid-song) the
+    title is re-shown.
+  - Pinned by `handle_resolume_recovery_does_not_re_show_a_title_the_song_end_hid`,
+    `…re_shows_the_title_mid_song` and `…leaves_a_pending_title_to_its_show_timer`.
+  - Residual: a relaunch that spans the end-of-song hide with no 404 (the hide
+    was skipped against an empty or evicted map) gets no re-show and no hide.
+    Arena's restored title stays until the next song's ShowTitle
+    (Started + 1.5 s).
 
 Otherwise a stale text Arena restored from its saved composition stays until
 the next line change, for the whole song, or over the next camera shot.
