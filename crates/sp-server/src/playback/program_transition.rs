@@ -13,14 +13,27 @@
 //! - **video**: a per-pixel linear blend of the two NV12 frames at the
 //!   boundary's midpoint fraction α = (k + ½)/n, in integer Q8 math
 //!   ([`weight_q8`], [`blend_nv12_into`]). When the two pictures differ in
-//!   size or stride, the picture CUTS at the window's midpoint instead
-//!   ([`picture_mix`]) while the audio still crossfades;
+//!   size or stride, the outgoing picture is first FITTED into the incoming
+//!   layout ([`FitPlan`], [`fit_nv12_into`]: bilinear, aspect kept, centred,
+//!   studio-black bars), so the picture dissolves whatever the catalog's
+//!   resolutions (#215 addendum A);
 //! - a side that is missing on a boundary (its source stalled past the fill
 //!   grace) is the standby: the black picture and silence. There is never a
 //!   hole.
 //!
 //! A Cut is a window of zero boundaries: nothing is mixed, so its output is
 //! exactly the #209 hard cut.
+//!
+//! **The cue gate (#215 addendum B2).** A fade does not start on the cut
+//! boundary: it waits ([`Cue::Waiting`]) for the incoming source's first
+//! LIVE pair (`SubmitJob::live`: a decoder frame with its song audio, never a
+//! paced-output fill, a pre-roll black or a paused frozen picture), with the
+//! outgoing source kept on program at full level meanwhile. A playlist whose
+//! scene comes on program starts a new song, and its first live pair comes
+//! ~10 boundaries after the cut (box run 1, #215 comment 5855833871); a fade
+//! laid over that wait mixed the outgoing song against silence. The wait is
+//! bounded by [`CUE_WAIT_MAX_SLOTS`]; then the fade starts anyway. A Cut
+//! never waits.
 //!
 //! The window's stamps use exact grid indices
 //! (`sp_core::genlock::{grid_index_100ns, grid_boundary_100ns}`): at 30 fps
@@ -47,6 +60,15 @@ pub const MAX_TRANSITION_SLOTS: u32 = 300;
 
 /// The Q8 weight of the `to` picture: 0 = all `from`, 256 = all `to`.
 pub const Q8_ONE: u32 = 256;
+
+/// The cue gate's bound (`CUE_WAIT_MAX` = 500 ms): a fade waits at most this
+/// many boundaries (15 at 30 fps) for the incoming source's first live pair,
+/// then starts anyway ([`Cue::Waiting`]).
+pub const CUE_WAIT_MAX_SLOTS: u32 = 1;
+
+/// Half a pixel in Q8: a fitted picture samples its source at the destination
+/// pixel CENTRES ([`FitPlan`]).
+const HALF_PIXEL_Q8: u64 = 64;
 
 /// What a cut does on `SP-program`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -170,6 +192,20 @@ pub fn effective_spec(
     }
 }
 
+/// Where a window stands with its cue (#215 cue gate, see the module doc).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cue {
+    /// The mix runs from the window's `start_100ns` (a Cut, or the cue opened).
+    Open,
+    /// The fade waits for the incoming source's first live pair; the outgoing
+    /// source stays on program at full level meanwhile. It opens on
+    /// `deadline_100ns` at the latest.
+    Waiting { deadline_100ns: i64 },
+    /// A later cut came while it was still waiting: it never opens, and its
+    /// outgoing source stays on program at full level to the window's end.
+    Frozen,
+}
+
 /// One transition window on the program grid (see the module doc).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Window {
@@ -178,54 +214,118 @@ pub struct Window {
     pub from: Option<i64>,
     pub to: i64,
     pub kind: TransitionKind,
-    /// The first boundary `to` owns (the cut boundary).
+    /// The cut boundary: `to` owns every boundary from here on, and the
+    /// window takes `from`'s pairs from here to `end_100ns`.
+    pub cut_100ns: i64,
+    /// The first MIXED boundary: the cut boundary, or the boundary the cue
+    /// opened on (the cut boundary while the window still waits).
     pub start_100ns: i64,
     /// The window length the mix curve is laid over.
     pub n_slots: u32,
     /// The first boundary after the window: exclusive, and moved earlier when
-    /// a later cut starts inside the window ([`Window::truncate`]).
+    /// a later cut starts inside the window ([`Window::truncate`]). While the
+    /// cue waits, the latest end the window can still reach.
     pub end_100ns: i64,
+    pub cue: Cue,
     start_index: i64,
 }
 
 impl Window {
-    /// The window of a cut from `from` to `to` on `start` with `spec`.
+    /// An OPEN window of a cut from `from` to `to` on `start` with `spec`: its
+    /// mix runs from `start` (a Cut: zero boundaries).
     pub fn new(from: Option<i64>, to: i64, start_100ns: i64, spec: &TransitionSpec) -> Self {
         let start_index = grid_index_100ns(start_100ns, GENLOCK_GRID_FPS);
         Self {
             from,
             to,
             kind: spec.kind,
+            cut_100ns: start_100ns,
             start_100ns,
             n_slots: spec.n_slots,
             end_100ns: grid_boundary_100ns(start_index + i64::from(spec.n_slots), GENLOCK_GRID_FPS),
+            cue: Cue::Open,
             start_index,
         }
     }
 
-    /// The slot `k` of boundary `b` inside the window, `None` outside it.
+    /// The window a cut on `cut` opens (#215 cue gate): a Cut is open at once
+    /// (zero boundaries); a Fade waits for the incoming source's first live
+    /// pair, at most [`CUE_WAIT_MAX_SLOTS`] boundaries, so until its cue opens
+    /// it may end as late as the cut + that wait + `n_slots`.
+    pub fn cued(from: Option<i64>, to: i64, cut_100ns: i64, spec: &TransitionSpec) -> Self {
+        let mut window = Self::new(from, to, cut_100ns, spec);
+        if spec.n_slots > 0 {
+            let cut_index = window.start_index;
+            let at =
+                |slots: u32| grid_boundary_100ns(cut_index + i64::from(slots), GENLOCK_GRID_FPS);
+            window.cue = Cue::Waiting {
+                deadline_100ns: at(CUE_WAIT_MAX_SLOTS),
+            };
+            window.end_100ns = at(CUE_WAIT_MAX_SLOTS + spec.n_slots);
+        }
+        window
+    }
+
+    /// Whether the window takes `from`'s pair for boundary `b` (from the cut
+    /// boundary to the end, the cue's wait included).
+    pub fn covers(&self, boundary_100ns: i64) -> bool {
+        boundary_100ns >= self.cut_100ns && boundary_100ns < self.end_100ns
+    }
+
+    /// The slot `k` of boundary `b` in the mix, `None` outside it (and while
+    /// the cue does not run the mix).
     pub fn slot(&self, boundary_100ns: i64) -> Option<u32> {
-        if boundary_100ns < self.start_100ns || boundary_100ns >= self.end_100ns {
+        if self.cue != Cue::Open
+            || boundary_100ns < self.start_100ns
+            || boundary_100ns >= self.end_100ns
+        {
             return None;
         }
         u32::try_from(grid_index_100ns(boundary_100ns, GENLOCK_GRID_FPS) - self.start_index).ok()
     }
 
-    /// End the window at `at` (a later cut starts there).
+    /// The cue opened on boundary `at`: the mix runs from there over
+    /// `n_slots`, never past an end a later cut set. Returns how many
+    /// boundaries the window waited (0 = live on the cut boundary).
+    pub fn open(&mut self, at_100ns: i64) -> u32 {
+        let at_index = grid_index_100ns(at_100ns, GENLOCK_GRID_FPS);
+        let waited = at_index - grid_index_100ns(self.cut_100ns, GENLOCK_GRID_FPS);
+        self.start_100ns = at_100ns;
+        self.start_index = at_index;
+        let mix_end = grid_boundary_100ns(at_index + i64::from(self.n_slots), GENLOCK_GRID_FPS);
+        self.end_100ns = self.end_100ns.min(mix_end);
+        self.cue = Cue::Open;
+        u32::try_from(waited).unwrap_or(0)
+    }
+
+    /// End the window at `at` (a later cut starts there). A window whose cue
+    /// is still waiting never opens (frozen).
     pub fn truncate(&mut self, at_100ns: i64) {
         self.end_100ns = self.end_100ns.min(at_100ns);
+        if matches!(self.cue, Cue::Waiting { .. }) {
+            self.cue = Cue::Frozen;
+        }
     }
 
-    /// How many boundaries the window covers: `n_slots`, or fewer once a
-    /// later cut truncated it.
+    /// How many boundaries the mix covers: `n_slots`, or fewer once a later
+    /// cut truncated it; `n_slots` while the cue waits, 0 once frozen.
     pub fn covered(&self) -> u32 {
-        u32::try_from(grid_index_100ns(self.end_100ns, GENLOCK_GRID_FPS) - self.start_index)
-            .unwrap_or(0)
+        match self.cue {
+            Cue::Open => {
+                u32::try_from(grid_index_100ns(self.end_100ns, GENLOCK_GRID_FPS) - self.start_index)
+                    .unwrap_or(0)
+            }
+            Cue::Waiting { .. } => self.n_slots,
+            Cue::Frozen => 0,
+        }
     }
 
-    /// How many of the window's boundaries are at or before `last` (the last
-    /// boundary the program committed).
+    /// How many of the mix's boundaries are at or before `last` (the last
+    /// boundary the program committed); 0 while the cue does not run the mix.
     pub fn served(&self, last: Option<i64>) -> u32 {
+        if self.cue != Cue::Open {
+            return 0;
+        }
         let upto = last.map_or(0, |l| {
             grid_index_100ns(l, GENLOCK_GRID_FPS) - self.start_index + 1
         });
@@ -254,7 +354,8 @@ pub fn blend_nv12_into(from: &[u8], to: &[u8], weight: u32, out: &mut Vec<u8>) {
     );
 }
 
-/// A picture's memory layout; two pictures blend only when these are equal.
+/// A picture's memory layout; two pictures blend byte for byte only when these
+/// are equal (otherwise the outgoing one is fitted first, [`FitPlan`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Layout {
     pub width: u32,
@@ -279,11 +380,178 @@ impl Layout {
 /// `stride × height` luma plane, then 128 (neutral chroma) for the rest of the
 /// buffer. A missing side of a mixed boundary is this black in the PRESENT
 /// side's exact layout (a decoder's stride padding and buffer length
-/// included), so the two always blend and never cut at the midpoint.
+/// included), so the two blend byte for byte; it is also the canvas a
+/// [`FitPlan`] draws the fitted picture on (the bars).
 pub fn black_nv12_into(layout: Layout, out: &mut Vec<u8>) {
     let luma = (layout.stride as usize * layout.height as usize).min(layout.len);
     out.extend(std::iter::repeat_n(16u8, luma));
     out.extend(std::iter::repeat_n(128u8, layout.len - luma));
+}
+
+/// One bilinear tap along an axis: the two neighbouring source pixels and the
+/// Q8 weight of the second.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Tap {
+    i0: usize,
+    i1: usize,
+    w: u32,
+}
+
+/// The tap of destination pixel `d` of a `fitted`-pixel run that shows a
+/// `src`-pixel source run: the pixel CENTRES line up, so the source position
+/// is `(d + ½) · src / fitted − ½` (in Q8, floored), clamped to the source's
+/// first and last pixel.
+fn tap(d: u32, fitted: u32, src: u32) -> Tap {
+    let q = ((2 * u64::from(d) + 1) * u64::from(src) * HALF_PIXEL_Q8 / u64::from(fitted.max(1)))
+        .saturating_sub(HALF_PIXEL_Q8);
+    let i0 = (q >> 8) as usize;
+    let last = src.saturating_sub(1) as usize;
+    if i0 >= last {
+        return Tap {
+            i0: last,
+            i1: last,
+            w: 0,
+        };
+    }
+    Tap {
+        i0,
+        i1: i0 + 1,
+        w: (q & 0xff) as u32,
+    }
+}
+
+/// One bilinear sample in Q8: each row `a·(256 − wx) + b·wx`, then the two
+/// rows `top·(256 − wy) + bottom·wy`, rounded.
+fn bilinear(p00: u8, p01: u8, p10: u8, p11: u8, wx: u32, wy: u32) -> u8 {
+    let top = u32::from(p00) * (Q8_ONE - wx) + u32::from(p01) * wx;
+    let bottom = u32::from(p10) * (Q8_ONE - wx) + u32::from(p11) * wx;
+    ((top * (Q8_ONE - wy) + bottom * wy + (1 << 15)) >> 16) as u8
+}
+
+/// `num / den` rounded to the nearest EVEN number (half up), so a fitted
+/// picture's chroma samples line up with its luma.
+fn even_round(num: u64, den: u64) -> u64 {
+    (num + den) / (2 * den) * 2
+}
+
+/// Whether `layout` is an NV12 picture a buffer of `len` bytes holds whole:
+/// a non-empty size, a stride that fits a row of chroma pairs, and a luma
+/// plane + a half-height chroma plane of `stride` bytes per row.
+fn nv12_whole(layout: Layout, len: usize) -> bool {
+    let (w, h, stride) = (
+        layout.width as usize,
+        layout.height as usize,
+        layout.stride as usize,
+    );
+    w > 0 && h > 0 && stride >= 2 * w.div_ceil(2) && len >= stride * (h + h.div_ceil(2))
+}
+
+/// How the outgoing picture is fitted into the incoming layout (#215
+/// addendum A): its aspect kept, scaled until it fills one axis, centred, with
+/// studio-black bars (Y 16, UV 128) on the other. Bilinear in Q8 fixed point,
+/// the luma plane and the half-resolution chroma plane each on their own grid.
+/// The rectangle is even in every coordinate, so each chroma sample covers
+/// exactly its 2×2 luma block. Built ONCE per pair of layouts (the column
+/// taps are precomputed, the row taps are one per row) and applied on every
+/// boundary of the window that needs it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FitPlan {
+    src: Layout,
+    dst: Layout,
+    /// The fitted picture's rectangle in the destination, in luma pixels.
+    x0: usize,
+    y0: usize,
+    width: u32,
+    height: u32,
+    /// Per column of the rectangle: the luma tap.
+    luma: Vec<Tap>,
+    /// Per column of the rectangle's chroma (half its width): the chroma tap.
+    chroma: Vec<Tap>,
+}
+
+impl FitPlan {
+    /// The plan that fits a `src` picture into `dst`.
+    pub fn new(src: Layout, dst: Layout) -> Self {
+        let (sw, sh) = (u64::from(src.width), u64::from(src.height));
+        let (dw, dh) = (u64::from(dst.width), u64::from(dst.height));
+        // Full width when the source is at least as wide (relatively) as the
+        // destination, else full height; the other axis keeps the aspect.
+        let (fw, fh) = if sw * dh >= dw * sh {
+            (dw, even_round(sh * dw, sw.max(1)).max(2).min(dh))
+        } else {
+            (even_round(sw * dh, sh.max(1)).max(2).min(dw), dh)
+        };
+        let (width, height) = (fw as u32, fh as u32);
+        let luma = (0..width).map(|x| tap(x, width, src.width)).collect();
+        let chroma = (0..width / 2)
+            .map(|x| tap(x, width / 2, src.width.div_ceil(2)))
+            .collect();
+        Self {
+            src,
+            dst,
+            x0: ((dw - fw) / 2) as usize & !1,
+            y0: ((dh - fh) / 2) as usize & !1,
+            width,
+            height,
+            luma,
+            chroma,
+        }
+    }
+
+    /// Whether this plan fits a `src` picture into `dst` (the sender keeps
+    /// one plan per window and rebuilds it for another pair of layouts).
+    pub fn fits(&self, src: Layout, dst: Layout) -> bool {
+        self.src == src && self.dst == dst
+    }
+
+    /// The fitted rectangle `(x0, y0, width, height)` in destination pixels.
+    pub fn rect(&self) -> (usize, usize, u32, u32) {
+        (self.x0, self.y0, self.width, self.height)
+    }
+
+    /// Fit `src` (the plan's source layout) into the destination layout,
+    /// appended to `out`: exactly `dst.len` bytes, the bars studio black. A
+    /// source (or destination) buffer that is not a whole NV12 picture of its
+    /// layout gives the black canvas alone, never a panic.
+    pub fn apply(&self, src: &[u8], out: &mut Vec<u8>) {
+        let base = out.len();
+        black_nv12_into(self.dst, out);
+        if !nv12_whole(self.src, src.len()) || !nv12_whole(self.dst, self.dst.len) {
+            return;
+        }
+        let out = &mut out[base..];
+        let (ss, ds) = (self.src.stride as usize, self.dst.stride as usize);
+        let (sh, dh) = (self.src.height as usize, self.dst.height as usize);
+        let width = self.width as usize;
+        for y in 0..self.height {
+            let row = tap(y, self.height, self.src.height);
+            let (r0, r1) = (&src[row.i0 * ss..], &src[row.i1 * ss..]);
+            let at = (self.y0 + y as usize) * ds + self.x0;
+            for (o, c) in out[at..at + width].iter_mut().zip(&self.luma) {
+                *o = bilinear(r0[c.i0], r0[c.i1], r1[c.i0], r1[c.i1], c.w, row.w);
+            }
+        }
+        // The interleaved UV plane: half the rows, pairs of bytes per column.
+        let (s_uv, d_uv) = (ss * sh, ds * dh);
+        for y in 0..self.height / 2 {
+            let row = tap(y, self.height / 2, self.src.height.div_ceil(2));
+            let (r0, r1) = (&src[s_uv + row.i0 * ss..], &src[s_uv + row.i1 * ss..]);
+            let at = d_uv + (self.y0 / 2 + y as usize) * ds + self.x0;
+            for (uv, c) in out[at..at + width].chunks_exact_mut(2).zip(&self.chroma) {
+                for (k, o) in uv.iter_mut().enumerate() {
+                    let (a, b) = (2 * c.i0 + k, 2 * c.i1 + k);
+                    *o = bilinear(r0[a], r0[b], r1[a], r1[b], c.w, row.w);
+                }
+            }
+        }
+    }
+}
+
+/// Fit the NV12 picture `src` of `src_layout` into `dst_layout` (appended to
+/// `out`, [`FitPlan`]). The program sender keeps its plan across a window's
+/// boundaries; this one-shot form builds it every call.
+pub fn fit_nv12_into(src: &[u8], src_layout: Layout, dst_layout: Layout, out: &mut Vec<u8>) {
+    FitPlan::new(src_layout, dst_layout).apply(src, out);
 }
 
 /// How a mixed boundary builds its picture.
@@ -414,6 +682,13 @@ pub struct TransitionCounters {
     /// Mixed boundaries on which a source's side was missing (mixed against
     /// the standby).
     pub side_fills: u64,
+    /// #215 cue gate: how many boundaries the LAST fade waited for the
+    /// incoming source's first live pair (0 = live on the cut boundary,
+    /// [`CUE_WAIT_MAX_SLOTS`] = it timed out).
+    pub cue_wait_boundaries: u64,
+    /// Fades that started without a live incoming pair once the cue gate's
+    /// wait ran out.
+    pub cue_timeouts: u64,
 }
 
 /// The running or next transition window.

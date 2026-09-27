@@ -22,17 +22,17 @@ use crate::playback::program_transition::{
 use crate::playback::submit_handoff::SubmitJob;
 
 /// The audio level of every block A (the outgoing source) offers.
-const LEVEL_A: f32 = 0.1;
+pub(super) const LEVEL_A: f32 = 0.1;
 /// The audio level of every block B (the incoming source) offers.
-const LEVEL_B: f32 = 0.2;
+pub(super) const LEVEL_B: f32 = 0.2;
 
 /// The 300 ms fade (9 slots at 30 fps) the rigs cut with.
-fn fade_300() -> TransitionSpec {
+pub(super) fn fade_300() -> TransitionSpec {
     TransitionSpec::fade(300, SpecSource::Obs)
 }
 
 /// A on program with the 300 ms fade in force.
-fn fade_core() -> ProgramCore {
+pub(super) fn fade_core() -> ProgramCore {
     let mut core = ProgramCore::new();
     core.select_initial(SRC_A);
     assert!(core.set_transition(fade_300()), "Cut → Fade is a change");
@@ -41,7 +41,7 @@ fn fade_core() -> ProgramCore {
 
 /// A and B offer every boundary of `ks`; after b(5) the operator cuts to B, so
 /// the window is b(7)..=b(15) (end b(16), exclusive).
-fn offer_both(
+pub(super) fn offer_both(
     core: &mut ProgramCore,
     fa: &SharedFrame,
     fb: &SharedFrame,
@@ -73,7 +73,7 @@ fn width(side: Option<&SubmitJob>) -> String {
 /// Every queued program boundary as `(stamp, what)`: `src W` (a source's
 /// own pair), `fill` (the program's standby pair) or `mix k/n F>T` (slot `k`
 /// of an `n`-slot window, the outgoing and the incoming side's width).
-fn take_all(core: &mut ProgramCore) -> Vec<(i64, String)> {
+pub(super) fn take_all(core: &mut ProgramCore) -> Vec<(i64, String)> {
     let mut out = Vec::new();
     while let Some(job) = core.take() {
         let what = match &job {
@@ -93,11 +93,14 @@ fn take_all(core: &mut ProgramCore) -> Vec<(i64, String)> {
 }
 
 /// `(b(k), what)` for every `k` of `ks`.
-fn run(ks: std::ops::RangeInclusive<usize>, what: impl Fn(usize) -> String) -> Vec<(i64, String)> {
+pub(super) fn run(
+    ks: std::ops::RangeInclusive<usize>,
+    what: impl Fn(usize) -> String,
+) -> Vec<(i64, String)> {
     ks.map(|k| (b(k), what(k))).collect()
 }
 
-fn one(k: usize, what: &str) -> Vec<(i64, String)> {
+pub(super) fn one(k: usize, what: &str) -> Vec<(i64, String)> {
     vec![(b(k), what.to_string())]
 }
 

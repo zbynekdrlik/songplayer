@@ -99,6 +99,22 @@ pub trait PacedSink {
         audio_tc_100ns: i64,
     );
 
+    /// Emit one STANDBY boundary (#215): the paused frozen picture, or (via
+    /// the [`submit_shared`](Self::submit_shared) default) the idle / pre-roll
+    /// black, a starve fill or a held seek frame — each with its standby audio
+    /// block, never the song's own decoded pair. The DEFAULT is
+    /// [`emit`](Self::emit); only the paced handoff tells the two apart, for
+    /// the program bus's cue gate (`SubmitJob::live`).
+    fn emit_standby(
+        &mut self,
+        video: &PacedFrame,
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        self.emit(video, audio, video_tc_100ns, audio_tc_100ns);
+    }
+
     /// Emit one boundary from an already-shared frame (#203). The DEFAULT builds
     /// a one-shot [`PacedFrame`] over the borrowed pixels and delegates to
     /// [`emit`](Self::emit), so an `emit`-only sink keeps working;
@@ -944,3 +960,7 @@ mod pacer_tests_standby;
 #[cfg(test)]
 #[path = "pacer_tests_preroll.rs"]
 mod pacer_tests_preroll;
+
+#[cfg(test)]
+#[path = "pacer_tests_live.rs"]
+mod pacer_tests_live;

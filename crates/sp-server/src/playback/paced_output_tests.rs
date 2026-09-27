@@ -14,7 +14,7 @@
 
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
-use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome, Standby, StandbyBlack};
+use crate::playback::pacer::{PacedFrame, PacedSink, Pacer, ServiceOutcome, Standby, StandbyBlack};
 use crate::playback::submit_handoff::{SUBMIT_HANDOFF_BOUND, SubmitCounters, SubmitJob};
 use crate::playback::submitter::FrameSubmitter;
 use crate::playback::wallclock::{SettableClock, WallClock};
@@ -80,6 +80,7 @@ fn job(stamp: i64, w: u32, channels: Option<u32>) -> SubmitJob {
             .collect(),
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp,
+        live: true,
     }
 }
 
@@ -754,4 +755,38 @@ fn the_live_paced_thread_services_detached_boundaries_on_its_own() {
     }
     drop(handoff);
     drop(submitter);
+}
+
+#[test]
+fn a_decoder_pair_is_live_and_every_standby_pair_and_fill_is_not() {
+    // #215 cue gate: the program bus starts a fade on the incoming source's
+    // first LIVE pair — the pacer's `emit` (the song's own decoded frame) —
+    // never on a standby pair (`emit_standby`, and the shared-picture submit
+    // that defaults to it) or on the consumer's own fill.
+    let handoff = SharedHandoff::new(SUBMIT_HANDOFF_BOUND);
+    let mut sink = HandoffSink::new(&handoff);
+    let picture = frame(8, 0);
+    let silence = [AudioFrame {
+        data: vec![0.0; 1600 * 2],
+        channels: 2,
+        sample_rate: 48_000,
+        timecode_100ns: None,
+    }];
+    let taken = |handoff: &SharedHandoff| match handoff.step_now(b(10)) {
+        ConsumerStep::Submit(job) => (job.video_tc_100ns, job.live),
+        _ => panic!("a queued job"),
+    };
+    sink.emit(&picture, &picture.audio, b(1), b(1));
+    sink.emit_standby(&picture, &silence, b(2), b(2));
+    assert_eq!(taken(&handoff), (b(1), true), "the song's decoded pair");
+    assert_eq!(taken(&handoff), (b(2), false), "a paused frozen picture");
+    sink.submit_shared(8, 2, 8, picture.video.clone(), &silence, b(3), b(3));
+    assert_eq!(
+        taken(&handoff),
+        (b(3), false),
+        "the idle / pre-roll black, a starve fill, a held seek frame"
+    );
+    let rig = Rig::new();
+    let fill = rig.consumer.fill_job(b(4));
+    assert_eq!((fill.video_tc_100ns, fill.live), (b(4), false), "a fill");
 }

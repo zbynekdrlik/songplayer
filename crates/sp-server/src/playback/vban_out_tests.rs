@@ -462,6 +462,7 @@ fn source_job(stamp: i64, v: f32) -> ProgramJob {
         audio: vec![frame(vec![v; 3200], 2, 48_000)],
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp + 5,
+        live: true,
     })
 }
 

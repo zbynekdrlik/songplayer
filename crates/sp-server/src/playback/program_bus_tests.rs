@@ -53,7 +53,8 @@ pub(super) fn block(level: f32) -> Vec<AudioFrame> {
 }
 
 /// A source's boundary job: the SAME shared frame, one audio block, the audio
-/// stamped 2 ms after the boundary.
+/// stamped 2 ms after the boundary. A decoder pair (`live`), so a #215 fade
+/// opens on the incoming source's first one.
 pub(super) fn job(w: u32, video: &SharedFrame, stamp: i64, level: f32) -> SubmitJob {
     SubmitJob {
         width: w,
@@ -63,6 +64,7 @@ pub(super) fn job(w: u32, video: &SharedFrame, stamp: i64, level: f32) -> Submit
         audio: block(level),
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp + 2 * MS,
+        live: true,
     }
 }
 

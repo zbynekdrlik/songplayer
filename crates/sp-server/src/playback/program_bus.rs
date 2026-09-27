@@ -58,8 +58,11 @@
 //! and fill rules per source (a side that is missed is left `None` and mixed
 //! against the standby). It then queues ONE [`ProgramJob::Mix`], which the
 //! sender crossfades. A Cut is a zero-length window, the #209 behaviour above,
-//! unchanged. The engine asks [`ProgramCore::hold_for`] whether a source that
-//! left its OBS scene must keep playing through a window ([`Hold`]).
+//! unchanged. A fade first waits for the incoming source's first LIVE pair
+//! (the cue gate), with the outgoing source held on program at full level —
+//! the window half lives in the child module `program_bus_window.rs`. The
+//! engine asks [`ProgramCore::hold_for`] whether a source that left its OBS
+//! scene must keep playing through a window ([`Hold`]).
 //!
 //! This file is the PURE, Linux-tested decision layer ([`ProgramCore`]) plus
 //! its `Mutex`/`Condvar` wrapper ([`ProgramBus`]) and the settings persistence
@@ -82,7 +85,7 @@ use tracing::{info, warn};
 use crate::playback::ndi_input::NdiInputShared;
 use crate::playback::program_follow::FollowShared;
 use crate::playback::program_transition::{
-    ActiveWindow, MixJob, SpecSource, TransitionCounters, TransitionSpec, TransitionStatus, Window,
+    ActiveWindow, Cue, SpecSource, TransitionCounters, TransitionSpec, TransitionStatus, Window,
 };
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 use crate::playback::vban_out::VbanOut;
@@ -120,6 +123,12 @@ pub const PROGRAM_PENDING_BOUND: usize = 2 * GENLOCK_MAX_CATCHUP_INTERVALS as us
 /// Upper bound on release steps per call (fills + forwards + a resync), so a
 /// release is always bounded work.
 const MAX_RELEASE_STEPS: usize = 64;
+
+// #215: what a boundary inside a transition window becomes (the mix, the cue
+// gate's held boundaries) — an `impl ProgramCore` child for the 1000-line cap.
+#[path = "program_bus_window.rs"]
+mod window;
+use window::WindowStep;
 
 /// One program boundary for the `SP-program` sender.
 pub enum ProgramJob {
@@ -286,16 +295,10 @@ impl ProgramCore {
         changed
     }
 
-    /// #215: the window boundary `stamp_100ns` falls in, if any.
-    fn window_at(&self, stamp_100ns: i64) -> Option<Window> {
-        self.windows
-            .iter()
-            .find(|w| w.slot(stamp_100ns).is_some())
-            .copied()
-    }
-
     /// #215: whether the engine must keep `pid` playing although its OBS scene
-    /// left program (see [`Hold`]). `None` = pause it now, as before.
+    /// left program (see [`Hold`]). `None` = pause it now, as before. A window
+    /// still waiting for its cue holds its outgoing source to the latest end
+    /// the window can reach (the cue gate's wait included).
     pub fn hold_for(&self, pid: i64) -> Option<Hold> {
         let end = self
             .windows
@@ -328,8 +331,10 @@ impl ProgramCore {
     /// recorded on the same or a later boundary; a cut back to the source that
     /// still owns that boundary cancels the pending cut. #215: the cut opens a
     /// transition window of the current spec ([`Self::set_transition`]; a Cut
-    /// = zero boundaries). Returns `false` (nothing recorded) when `pid` is
-    /// already the selected source.
+    /// = zero boundaries), fading out of the source ON AIR: a window still
+    /// waiting for its cue kept its outgoing source there, and the new cut
+    /// freezes it (it never opens). Returns `false` (nothing recorded) when
+    /// `pid` is already the selected source.
     pub fn cut(&mut self, pid: i64, now_100ns: i64) -> bool {
         if self.selected() == Some(pid) {
             return false;
@@ -353,20 +358,24 @@ impl ProgramCore {
         }
         self.segments.retain(|&(first, _)| first < boundary);
         // #215: a window that has not started at the new cut boundary is
-        // replaced (or cancelled); a running one ends where the new cut starts.
-        // Its outgoing source's frames are all older than `boundary`: the cut
-        // is placed after the newest stamp of every window's `from` too.
-        self.windows.retain(|w| w.start_100ns < boundary);
+        // replaced (or cancelled); a running one ends where the new cut starts,
+        // and one still waiting for its cue is frozen there. Its outgoing
+        // source's frames are all older than `boundary`: the cut is placed
+        // after the newest stamp of every window's `from` too.
+        self.windows.retain(|w| w.cut_100ns < boundary);
+        let outgoing = self.on_air();
         for w in &mut self.windows {
             w.truncate(boundary);
         }
         // A cut back to the source that still owns the boundary (A→B→A inside
-        // one slot) just cancels the pending cut.
-        let outgoing = self.selected();
+        // one slot) just cancels the pending cut; a cut back to the source a
+        // waiting cue kept on air takes the boundaries over with no window.
         if outgoing != Some(pid) {
             self.segments.push((boundary, pid));
-            let window = Window::new(outgoing, pid, boundary, &self.spec);
+            let window = Window::cued(outgoing, pid, boundary, &self.spec);
             self.windows.push(window);
+        } else if self.selected() != Some(pid) {
+            self.segments.push((boundary, pid));
         }
         self.health.cuts += 1;
         self.prune();
@@ -474,21 +483,12 @@ impl ProgramCore {
                 return;
             };
             let missed = match self.window_at(expected) {
-                // #215: a window boundary carries BOTH sources' pairs: mix once
-                // each side is here or missed (or the buffers overflow).
-                Some(w) => {
-                    let to_here = self.pending.contains_key(&expected);
-                    let from_here = self.from_pending.contains_key(&expected);
-                    let to_done = to_here || self.source_missed(w.to, expected, now_100ns);
-                    let from_done = from_here
-                        || w.from
-                            .is_none_or(|f| self.source_missed(f, expected, now_100ns));
-                    if (to_here || from_here) && ((to_done && from_done) || self.overflowing()) {
-                        self.commit_mix(&w, expected);
-                        continue;
-                    }
-                    to_done && from_done // neither is here: fill like any boundary
-                }
+                // #215: a window boundary carries BOTH sources' pairs: mixed,
+                // or held while the cue waits (`program_bus_window.rs`).
+                Some(w) => match self.window_step(&w, expected, now_100ns) {
+                    WindowStep::Next => continue,
+                    WindowStep::Missed(missed) => missed,
+                },
                 None => {
                     if let Some(job) = self.pending.remove(&expected) {
                         self.health.forwarded += 1;
@@ -531,23 +531,6 @@ impl ProgramCore {
         let to = self.pending.keys().next().copied();
         let from = self.from_pending.keys().next().copied();
         to.into_iter().chain(from).min()
-    }
-
-    /// #215: queue window boundary `stamp` as one mixed pair (a side that is
-    /// not here is the standby).
-    fn commit_mix(&mut self, w: &Window, stamp: i64) {
-        let to = self.pending.remove(&stamp);
-        let from = self.from_pending.remove(&stamp);
-        let side_missing = to.is_none() || (from.is_none() && w.from.is_some());
-        self.counters.mixed_boundaries += 1;
-        self.counters.side_fills += u64::from(side_missing);
-        self.commit(ProgramJob::Mix(MixJob {
-            stamp_100ns: stamp,
-            from,
-            to,
-            slot: w.slot(stamp).unwrap_or(0),
-            n_slots: w.n_slots,
-        }));
     }
 
     /// Queue one boundary for the `SP-program` sender and advance.
@@ -619,7 +602,7 @@ impl ProgramCore {
                 active: self
                     .windows
                     .iter()
-                    .find(|w| w.n_slots > 0)
+                    .find(|w| w.n_slots > 0 && w.cue != Cue::Frozen)
                     .map(|w| ActiveWindow::of(w, self.last)),
                 counters: self.counters,
             },
@@ -874,6 +857,9 @@ async fn input_active(pool: &SqlitePool) -> bool {
 #[cfg(test)]
 #[path = "program_bus_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "program_bus_tests_cue.rs"]
+mod tests_cue;
 #[cfg(test)]
 #[path = "program_bus_tests_transition.rs"]
 mod tests_transition;

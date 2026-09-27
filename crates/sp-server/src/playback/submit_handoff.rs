@@ -64,6 +64,12 @@ pub struct SubmitJob {
     pub video_tc_100ns: i64,
     /// Raw wall-clock audio timecode (100 ns since epoch) at the boundary.
     pub audio_tc_100ns: i64,
+    /// #215: the pair is the source's own decoded content — a paced decoder
+    /// frame with its song audio, or an NDI input capture — never a standby
+    /// pair (a paced-output fill, the idle / pre-roll black, a paused frozen
+    /// picture, a held seek frame, the input's standby). The program bus's
+    /// cue gate starts a fade on the incoming source's first live pair.
+    pub live: bool,
 }
 
 impl SubmitJob {
@@ -77,11 +83,13 @@ impl SubmitJob {
     /// video by `Arc` CLONE — a refcount bump, NO pixel copy (#203 2b, D6). The
     /// pacer keeps its own clone of the SAME allocation for the starvation
     /// repeat, so the handoff no longer needs to copy the pixels off it.
+    /// `live` = a decoder pair (the pacer's `emit`), not a standby pair.
     pub fn from_paced(
         frame: &PacedFrame,
         audio: &[AudioFrame],
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
+        live: bool,
     ) -> Self {
         Self {
             width: frame.width,
@@ -91,6 +99,7 @@ impl SubmitJob {
             audio: audio.to_vec(),
             video_tc_100ns,
             audio_tc_100ns,
+            live,
         }
     }
 }

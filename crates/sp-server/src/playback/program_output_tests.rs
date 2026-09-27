@@ -78,6 +78,7 @@ fn a_forwarded_boundary_keeps_the_sources_frame_audio_and_stamps() {
         }],
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp + 77,
+        live: true,
     };
     assert_eq!(out.submit(ProgramJob::Source(job), stamp + 999), stamp);
     assert_eq!(backend.video_timecodes(), vec![stamp]);
@@ -296,6 +297,7 @@ fn pair(width: u32, pixels: &[u8], stamp: i64, audio_tc: i64, level: f32) -> Sub
         }],
         video_tc_100ns: stamp,
         audio_tc_100ns: audio_tc,
+        live: true,
     }
 }
 
