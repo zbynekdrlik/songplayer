@@ -42,9 +42,12 @@ mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
 pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
+pub mod program_follow; // #215: SP-program follows cg OBS + the transition settings/spec task
 pub mod program_output; // #209: the SP-program sender + its thread
+pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
 mod recovery;
 mod runtime_pipeline;
+mod scene_off; // #215: the deferred scene-go-off pause of the program's outgoing source
 pub mod startup_senders; // #196 deterministic restart-safe NDI sender startup (pure port-wait + order)
 pub mod state;
 pub mod submit_handoff; // #168 output-side split: pure emit->submit handoff decisions
@@ -244,6 +247,9 @@ pub struct PlaybackEngine {
     /// ladder (item 5). `None` when OBS is not configured (never suppresses the
     /// ladder in that case).
     ndi_source_map: Option<crate::obs::NdiSourceMap>,
+    /// #215: the program bus (set by `start_program`), asked whether a playlist
+    /// that left its OBS scene must keep playing through a transition.
+    program: std::sync::OnceLock<Arc<crate::playback::program_bus::ProgramBus>>,
 }
 
 /// Construction-time configuration for [`PlaybackEngine`]. Bundling these
@@ -319,6 +325,7 @@ impl PlaybackEngine {
             ),
             preview_registry: std::sync::Arc::new(crate::playback::preview::PreviewRegistry::new()),
             ndi_source_map: None,
+            program: std::sync::OnceLock::new(),
         }
     }
 
@@ -457,7 +464,7 @@ impl PlaybackEngine {
                 self.push_title_for_playing(playlist_id, video_id).await;
             }
         } else {
-            self.apply_event(playlist_id, PlayEvent::SceneOff).await;
+            self.scene_off(playlist_id).await; // #215: held through a transition
         }
     }
 
@@ -613,116 +620,6 @@ impl PlaybackEngine {
         if let Some(pp) = self.pipelines.get(&playlist_id) {
             pp.pipeline
                 .send(crate::playback::pipeline::PipelineCommand::Seek { position_ms });
-        }
-    }
-
-    /// Jump to a specific video within a playlist and start playing it.
-    ///
-    /// For custom playlists this also updates `playlists.current_position` so
-    /// the next `Skip` advances to position+1. For youtube playlists the
-    /// column is ignored by the selector — only the pipeline command is
-    /// relevant. The previously-playing video (if any) is pushed onto the
-    /// history stack so `Previous` still walks the history.
-    // mutants::skip: I/O-heavy orchestrator — covered by handle_play_video integration tests in playback/tests.rs.
-    #[cfg_attr(test, mutants::skip)]
-    pub async fn handle_play_video(
-        &mut self,
-        playlist_id: i64,
-        video_id: i64,
-        position_ms: Option<u64>,
-    ) {
-        // Resolve paths first — if the video row is unknown, no side-effects.
-        let paths = match crate::db::models::get_song_paths(&self.pool, video_id).await {
-            Ok(Some(p)) => p,
-            Ok(None) => {
-                warn!(
-                    playlist_id,
-                    video_id, "PlayVideo: no paths for video; ignoring"
-                );
-                return;
-            }
-            Err(e) => {
-                warn!(playlist_id, video_id, %e, "PlayVideo: DB lookup failed; ignoring");
-                return;
-            }
-        };
-
-        // For custom playlists, bump current_position to the clicked item's
-        // position so Skip continues from the right place.
-        let kind: Option<String> = sqlx::query_scalar("SELECT kind FROM playlists WHERE id = ?")
-            .bind(playlist_id)
-            .fetch_optional(&self.pool)
-            .await
-            .unwrap_or_default();
-        if kind.as_deref() == Some("custom") {
-            if let Ok(Some(pos)) =
-                crate::db::models::position_for_playlist_item(&self.pool, playlist_id, video_id)
-                    .await
-            {
-                let _ = sqlx::query("UPDATE playlists SET current_position = ? WHERE id = ?")
-                    .bind(pos)
-                    .bind(playlist_id)
-                    .execute(&self.pool)
-                    .await;
-            }
-        }
-
-        // Clear Resolume `#sp-subs` and Presenter immediately so the previous
-        // song's last line doesn't linger during the new song's intro
-        // (e.g. song 17 has ~19s before first lyric).
-        self.clear_lyrics_display(playlist_id);
-
-        // Send the pipeline command and update engine bookkeeping.
-        let (video_path, audio_path) = paths;
-        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-            if let Some(prev) = pp.current_video_id {
-                if prev != video_id {
-                    pp.history.push_back(prev);
-                }
-            }
-            pp.current_video_id = Some(video_id);
-            pp.last_presenter_text = None;
-            pp.last_resolume_subtitles_signature = None;
-            pp.last_lyrics_ws_signature = None;
-            pp.paused_at = None;
-            pp.state = PlayState::Playing { video_id };
-            info!(
-                playlist_id,
-                video_id, %video_path, %audio_path,
-                position_ms,
-                "PlayVideo → jumping to clicked song"
-            );
-            pp.pipeline.send(PipelineCommand::Play {
-                video: video_path.into(),
-                audio: audio_path.into(),
-                start_position_ms: position_ms,
-            });
-
-            // #134: a manually-picked song must count toward "already
-            // played" the same as a naturally-selected one (SelectAndPlay,
-            // above, does this same call) — otherwise the unplayed-first
-            // selector would immediately re-offer a song the operator just
-            // played by hand.
-            if let Err(e) = crate::db::models::record_play(&self.pool, playlist_id, video_id).await
-            {
-                warn!(playlist_id, video_id, %e, "PlayVideo: failed to record play");
-            }
-
-            // #170: gate on scene_active so a PlayVideo on an off-program
-            // playlist shows WaitingForScene, matching the health-label replay.
-            // #201: transport reports the raw decoding state (Playing here) so
-            // an off-program dub reads `⏸ Pauza` while it plays.
-            let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
-                playlist_id,
-                state: play_state_to_ws(
-                    &PlayState::Playing { video_id },
-                    pp.scene_active.load(Ordering::Acquire),
-                ),
-                mode: pp.mode,
-                transport: transport_from_play_state(&PlayState::Playing { video_id }),
-            });
-        } else {
-            warn!(playlist_id, video_id, "PlayVideo: no pipeline for playlist");
         }
     }
 

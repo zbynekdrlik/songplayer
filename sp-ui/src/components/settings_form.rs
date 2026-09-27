@@ -1,5 +1,6 @@
 //! Settings form for OBS, Gemini, dub, VBAN (#210), the NDI input "OBS manuál"
-//! (#212), the Companion remote control (#213) and cache configuration.
+//! (#212), the Companion remote control (#213), the program transition + OBS
+//! follow (#215) and cache configuration.
 
 use std::collections::HashMap;
 
@@ -21,6 +22,13 @@ fn setting_value(settings: &HashMap<String, String>, key: &str, default: &str) -
 /// own voice, no pinned prebuilt voice) followed by the six catalogue voices
 /// (#184 round C): the stored value with its Slovak descriptive label. Mirrors
 /// the vetted catalogue `eval/dubbing/voices.py`.
+/// #215: the `program_transition` choices with their Slovak labels.
+const PROGRAM_TRANSITIONS: &[(&str, &str)] = &[
+    ("obs", "Podľa OBS (odporúčané)"),
+    ("fade", "Vždy prelínanie"),
+    ("cut", "Vždy strih"),
+];
+
 const DUB_VOICES: &[(&str, &str)] = &[
     (config::DUB_VOICE_SPEAKER, "Hlas rečníka (odporúčané)"),
     ("Charon", "Charon — muž, vecný"),
@@ -53,6 +61,10 @@ pub fn SettingsForm() -> impl IntoView {
     let remote_enabled = RwSignal::new(false);
     let remote_port = RwSignal::new(config::DEFAULT_REMOTE_WS_PORT.to_string());
     let remote_password = RwSignal::new(String::new());
+    // #215: SP-program follows cg OBS (off by default) + the transition.
+    let follow_obs = RwSignal::new(false);
+    let transition_mode = RwSignal::new("obs".to_string());
+    let transition_ms = RwSignal::new(config::DEFAULT_PROGRAM_TRANSITION_MS.to_string());
     let save_status = RwSignal::new(String::new());
 
     // Populate fields from store settings when they change.
@@ -115,6 +127,18 @@ pub fn SettingsForm() -> impl IntoView {
             config::SETTING_REMOTE_WS_PASSWORD,
             "",
         ));
+        follow_obs
+            .set(setting_value(&settings, config::SETTING_PROGRAM_FOLLOW_OBS, "false") == "true");
+        transition_mode.set(setting_value(
+            &settings,
+            config::SETTING_PROGRAM_TRANSITION,
+            "obs",
+        ));
+        transition_ms.set(setting_value(
+            &settings,
+            config::SETTING_PROGRAM_TRANSITION_MS,
+            &config::DEFAULT_PROGRAM_TRANSITION_MS.to_string(),
+        ));
     });
 
     let on_save = move |ev: leptos::ev::SubmitEvent| {
@@ -167,6 +191,18 @@ pub fn SettingsForm() -> impl IntoView {
         settings.insert(
             config::SETTING_REMOTE_WS_PASSWORD.to_string(),
             remote_password.get(),
+        );
+        settings.insert(
+            config::SETTING_PROGRAM_FOLLOW_OBS.to_string(),
+            follow_obs.get().to_string(),
+        );
+        settings.insert(
+            config::SETTING_PROGRAM_TRANSITION.to_string(),
+            transition_mode.get(),
+        );
+        settings.insert(
+            config::SETTING_PROGRAM_TRANSITION_MS.to_string(),
+            transition_ms.get().trim().to_string(),
         );
 
         leptos::task::spawn_local(async move {
@@ -344,6 +380,45 @@ pub fn SettingsForm() -> impl IntoView {
                         data-testid="settings-remote-password"
                         prop:value=move || remote_password.get()
                         on:input=move |ev| remote_password.set(event_target_value(&ev))
+                    />
+                </label>
+            </fieldset>
+
+            <fieldset data-testid="settings-program-transition">
+                <legend>"Prechody programu (SP-program)"</legend>
+                <label>
+                    <input
+                        type="checkbox"
+                        data-testid="settings-program-follow-obs"
+                        prop:checked=move || follow_obs.get()
+                        on:change=move |ev| follow_obs.set(event_target_checked(&ev))
+                    />
+                    "Program sleduje scénu v OBS (bez skriptu)"
+                </label>
+                <label>
+                    "Prechod"
+                    <select
+                        data-testid="settings-program-transition-kind"
+                        prop:value=move || transition_mode.get()
+                        on:change=move |ev| transition_mode.set(event_target_value(&ev))
+                    >
+                        {PROGRAM_TRANSITIONS
+                            .iter()
+                            .map(|(value, label)| {
+                                view! { <option value=*value>{*label}</option> }
+                            })
+                            .collect_view()}
+                    </select>
+                </label>
+                <label>
+                    "Dĺžka prelínania (ms)"
+                    <input
+                        type="number"
+                        min="1"
+                        max="10000"
+                        data-testid="settings-program-transition-ms"
+                        prop:value=move || transition_ms.get()
+                        on:input=move |ev| transition_ms.set(event_target_value(&ev))
                     />
                 </label>
             </fieldset>
