@@ -555,3 +555,71 @@ fn a_cut_back_then_back_again_in_the_same_slot_waits_for_the_first_live_pair() {
         "the frozen A → B window and the new A → B fade, which waited b(10), b(11)"
     );
 }
+
+#[test]
+fn a_later_cut_can_land_before_a_frozen_windows_end_and_still_fades_out_of_the_source_on_air() {
+    // Review round 4: cut boundaries are not monotone. X → A fades b(7)..b(15)
+    // while X's submit thread runs two slots ahead, so the cut to B lands on
+    // b(16) and the cut back to A (while X is still a window's source) on
+    // b(18): the waiting A → B window is frozen to b(18). Once b(15) is
+    // served X is no longer involved, and the cut to C lands on b(17) —
+    // BEFORE that frozen window's end. A is on program there, so the fade
+    // must go from A to C.
+    const SRC_X: i64 = 55;
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_X);
+    assert!(core.set_transition(TransitionSpec::fade(300, SpecSource::Obs)));
+    let (fx, fa, fb, fc) = (frame(10, 2), frame(4, 2), frame(8, 2), frame(6, 2));
+    let mut sent = Vec::new();
+    for k in 1..=27 {
+        core.offer(SRC_A, job(4, &fa, b(k), LEVEL_A));
+        // X: one pair per boundary, then from b(6) on two slots ahead.
+        let x_stamps: Vec<usize> = match k {
+            1..=5 => vec![k],
+            6 => vec![6, 7, 8],
+            _ => vec![k + 2],
+        };
+        for kx in x_stamps {
+            core.offer(SRC_X, job(10, &fx, b(kx), 0.05));
+        }
+        core.offer(SRC_B, standby(8, &fb, b(k), LEVEL_B));
+        core.offer(SRC_C, job(6, &fc, b(k), 0.3));
+        match k {
+            5 => assert!(core.cut(SRC_A, b(5) + 5 * MS)),
+            12 => {
+                assert!(core.cut(SRC_B, b(12) + 5 * MS));
+                assert_eq!(core.status().cut_boundary_100ns, Some(b(16)));
+            }
+            14 => {
+                assert!(core.cut(SRC_A, b(14) + 5 * MS), "back to A");
+                assert_eq!(core.status().cut_boundary_100ns, Some(b(18)));
+            }
+            15 => {
+                assert!(core.cut(SRC_C, b(15) + 5 * MS));
+                let st = core.status();
+                assert_eq!(st.cut_boundary_100ns, Some(b(17)), "before b(18)");
+                assert_eq!(
+                    st.transition
+                        .active
+                        .map(|w| (w.from, w.to, w.start_boundary_100ns)),
+                    Some((Some(SRC_A), SRC_C, b(17)))
+                );
+                assert_eq!(core.hold_for(SRC_B), None, "B never went on program");
+            }
+            _ => {}
+        }
+        sent.extend(take_all(&mut core));
+    }
+    let mut want = run(1..=6, |_| "src 10".to_string());
+    want.extend(run(7..=15, |k| format!("mix {}/9 10>4", k - 7)));
+    want.extend(one(16, "src 4"));
+    want.extend(run(17..=25, |k| format!("mix {}/9 4>6", k - 17)));
+    want.extend(run(26..=27, |_| "src 6".to_string()));
+    assert_eq!(sent, want, "A held on b(16), then the A → C fade");
+    let c = core.status().transition.counters;
+    assert_eq!(
+        (c.transitions_done, c.mixed_boundaries, c.side_fills),
+        (3, 18, 0),
+        "X → A, the frozen A → B window, A → C"
+    );
+}
