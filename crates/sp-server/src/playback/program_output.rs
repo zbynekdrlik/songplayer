@@ -31,7 +31,7 @@
 //! the deferred scene-go-off pause.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sp_core::genlock::audio::samples_per_boundary;
 use sp_core::genlock::{
@@ -94,6 +94,34 @@ pub struct ProgramOutput<B: NdiBackend> {
     /// The fitted outgoing picture, reused boundary after boundary (its
     /// capacity is kept, #147 round 10).
     fitted: Vec<u8>,
+    /// The run of mixed boundaries being sent (a window), logged once when
+    /// the next unmixed boundary ends it.
+    mix_run: MixRun,
+}
+
+/// #215: one run of mixed boundaries as the `SP-program` sender saw it: how
+/// many, how many fitted a differently sized outgoing picture, and the worst
+/// time the picture (fit + blend) took on this thread — the cost the review
+/// asked to see on the box, next to `health.coalesced`.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct MixRun {
+    pub(crate) boundaries: u64,
+    pub(crate) fitted: u64,
+    pub(crate) max_picture_us: u64,
+}
+
+/// The one INFO line of a finished run of mixed boundaries (none for an
+/// empty run). Logging only.
+#[cfg_attr(test, mutants::skip)]
+fn log_mix_run(run: &MixRun) {
+    if run.boundaries > 0 {
+        info!(
+            boundaries = run.boundaries,
+            fitted = run.fitted,
+            max_picture_us = run.max_picture_us,
+            "program transition: the fade's mixed boundaries went out"
+        );
+    }
 }
 
 impl<B: NdiBackend> ProgramOutput<B> {
@@ -120,6 +148,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             fit: None,
             fit_plans: 0,
             fitted: Vec::new(),
+            mix_run: MixRun::default(),
         }
     }
 
@@ -141,6 +170,9 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// the audio stamped `audio_now_100ns` (the emit instant, like #147
     /// standby audio).
     pub fn submit(&mut self, job: ProgramJob, audio_now_100ns: i64) -> i64 {
+        if !matches!(job, ProgramJob::Mix(_)) {
+            self.end_mix_run();
+        }
         match job {
             ProgramJob::Mix(mix) => self.submit_mix(mix, audio_now_100ns),
             ProgramJob::Source(job) => {
@@ -181,9 +213,13 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// out as the standby pair.
     fn submit_mix(&mut self, mix: MixJob, audio_now_100ns: i64) -> i64 {
         let stamp = mix.stamp_100ns;
+        let started = Instant::now();
         let Some((layout, video)) = self.mix_picture(&mix) else {
             return self.submit(ProgramJob::Standby { stamp_100ns: stamp }, audio_now_100ns);
         };
+        let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        self.mix_run.boundaries += 1;
+        self.mix_run.max_picture_us = self.mix_run.max_picture_us.max(picture_us);
         let (first, total) = mix.sample_span(self.spc);
         let format = AudioFormat {
             frames: self.spc,
@@ -253,8 +289,14 @@ impl<B: NdiBackend> ProgramOutput<B> {
             plan.apply(&from.1, &mut self.fitted);
             blend_nv12_into(&self.fitted, &to.1, weight, &mut out);
             self.fit = Some(plan);
+            self.mix_run.fitted += 1;
         }
         Some((to.0, SharedFrame::new(out)))
+    }
+
+    /// End a run of mixed boundaries: log it once and start the next.
+    fn end_mix_run(&mut self) {
+        log_mix_run(&std::mem::take(&mut self.mix_run));
     }
 
     /// Current `SP-program` receiver connection count.

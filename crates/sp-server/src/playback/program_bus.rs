@@ -368,7 +368,15 @@ impl ProgramCore {
         // newest stamp of every window's `from` too.
         self.windows.retain(|w| w.cut_100ns < boundary);
         for w in &mut self.windows {
+            let was_waiting = matches!(w.cue, Cue::Waiting { .. });
             w.truncate(boundary);
+            if was_waiting {
+                info!(
+                    from = ?w.from,
+                    to = w.to,
+                    "program transition: a later cut froze the fade still waiting for its cue"
+                );
+            }
         }
         // A cut back to the source that still owns the boundary (A→B→A inside
         // one slot) just cancels the pending cut; a cut back to the source a

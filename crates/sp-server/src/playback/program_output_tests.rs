@@ -642,3 +642,33 @@ fn a_window_builds_its_fit_plan_once_and_another_pair_of_layouts_builds_its_own(
     );
     assert_eq!(out.fit_plans, 3);
 }
+
+#[test]
+fn a_run_of_mixed_boundaries_is_counted_until_the_next_unmixed_boundary() {
+    // Review round 1: the sender logs ONE line per fade (boundaries, how
+    // many fitted a differently sized picture, the worst fit + blend time),
+    // when the first unmixed boundary after it goes out.
+    let (_backend, mut out) = output(2, 2);
+    let from = pair(4, &FROM_4X2, at(0), at(0), 0.25);
+    let same = pair(4, &TO_4X2, at(0), at(0), 0.5);
+    let wide = pair(8, &[7u8; 24], at(0), at(0), 0.5);
+    out.submit(
+        ProgramJob::Mix(mix_at(at(0), Some(from.clone()), Some(same), 0, 9)),
+        at(0),
+    );
+    out.submit(
+        ProgramJob::Mix(mix_at(at(1), Some(from), Some(wide), 1, 9)),
+        at(1),
+    );
+    assert_eq!(
+        (out.mix_run.boundaries, out.mix_run.fitted),
+        (2, 1),
+        "two mixed boundaries, the second one fitted"
+    );
+    out.submit(ProgramJob::Standby { stamp_100ns: at(2) }, at(2));
+    assert_eq!(
+        out.mix_run,
+        MixRun::default(),
+        "the run ended and was logged"
+    );
+}
