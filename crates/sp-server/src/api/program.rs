@@ -12,8 +12,11 @@
 //!
 //! Both answer the program state plus `vban`, the #210 VBAN audio output's
 //! telemetry (`playback::vban_out::VbanStatus`), `input`, the #212 NDI
-//! input's (`playback::ndi_input::NdiInputStatus`), and `remote`, the #213
-//! Companion remote control's (`remote::RemoteStatus`).
+//! input's (`playback::ndi_input::NdiInputStatus`), `remote`, the #213
+//! Companion remote control's (`remote::RemoteStatus`), and `follow`, the #215
+//! OBS follow (`playback::program_follow::FollowStatus`). The program state
+//! itself carries `transition` (#215): the transition the next cut uses, the
+//! running window and the transition counters.
 
 use axum::Json;
 use axum::extract::State;
@@ -27,6 +30,7 @@ use sp_core::config::PROGRAM_INPUT_ID;
 use crate::AppState;
 use crate::playback::ndi_input::{InputSettings, NdiInputStatus, load_input_settings};
 use crate::playback::program_bus::{ProgramBus, ProgramStatus, persist_and_cut};
+use crate::playback::program_follow::{FollowSettings, FollowStatus, load_follow_settings};
 use crate::playback::vban_out::VbanStatus;
 use crate::remote::{RemoteSettings, RemoteStatus, load_remote_settings};
 
@@ -46,12 +50,14 @@ pub struct ProgramResponse {
     pub vban: VbanStatus,
     pub input: NdiInputStatus,
     pub remote: RemoteStatus,
+    pub follow: FollowStatus,
 }
 
 /// The STORED settings the telemetry blocks report next to their live state.
 struct StoredSettings {
     input: InputSettings,
     remote: RemoteSettings,
+    follow: FollowSettings,
 }
 
 impl ProgramResponse {
@@ -61,13 +67,14 @@ impl ProgramResponse {
             vban: bus.vban().status(),
             input: bus.input().status(&stored.input),
             remote: bus.remote().status(&stored.remote),
+            follow: bus.follow().status(&stored.follow),
         }
     }
 }
 
-/// The STORED input and remote-control settings (a save shows at once; the
-/// settings tasks apply them within their 5 s poll). An unreadable setting
-/// reads as disabled.
+/// The STORED input, remote-control and follow settings (a save shows at
+/// once; the settings tasks apply them within their 5 s poll). An unreadable
+/// setting reads as disabled.
 async fn stored_settings(state: &AppState) -> StoredSettings {
     let input = load_input_settings(&state.pool).await.unwrap_or_else(|e| {
         warn!(%e, "program: reading the NDI input settings failed");
@@ -77,7 +84,15 @@ async fn stored_settings(state: &AppState) -> StoredSettings {
         warn!(%e, "program: reading the remote-control settings failed");
         RemoteSettings::disabled()
     });
-    StoredSettings { input, remote }
+    let follow = load_follow_settings(&state.pool).await.unwrap_or_else(|e| {
+        warn!(%e, "program: reading the follow settings failed");
+        FollowSettings::default()
+    });
+    StoredSettings {
+        input,
+        remote,
+        follow,
+    }
 }
 
 /// `GET /api/v1/program`.

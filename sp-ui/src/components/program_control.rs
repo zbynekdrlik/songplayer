@@ -12,10 +12,15 @@
 //! rule) it is listed after the playlists, cut with `{"source": -1}`
 //! (`PROGRAM_INPUT_ID`).
 //!
+//! #215: the "Prechod" line shows the transition every cut uses (a crossfade of
+//! N ms or a hard cut, and where it comes from: cg OBS, the Nastavenia
+//! override, or the default while cg OBS's transition is unknown), and the
+//! progress of a running fade (`transition` on `GET /api/v1/program`).
+//!
 //! Testids (set here, never by a caller): `program-control`, `program-source`
-//! (the "Na programe: …" line), `program-cut` (one button per source, with
-//! `data-playlist-id` (`-1` for the input) + `aria-pressed` on the on-program
-//! one), `program-error`.
+//! (the "Na programe: …" line), `program-transition` (the "Prechod: …" line),
+//! `program-cut` (one button per source, with `data-playlist-id` (`-1` for the
+//! input) + `aria-pressed` on the on-program one), `program-error`.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -35,6 +40,55 @@ pub struct ProgramState {
     /// #212: the NDI input's state.
     #[serde(default)]
     pub input: ProgramInput,
+    /// #215: the transition the next cut uses + the running window.
+    #[serde(default)]
+    pub transition: ProgramTransition,
+}
+
+/// The part of `GET /api/v1/program` → `transition` this control renders.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ProgramTransition {
+    /// `fade` or `cut`.
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub duration_ms: u32,
+    /// `obs`, `setting` or `fallback`.
+    #[serde(default)]
+    pub source: String,
+    /// The running (or next) fade window.
+    #[serde(default)]
+    pub active: Option<ProgramWindow>,
+}
+
+/// A running fade window (`transition.active`).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ProgramWindow {
+    /// Served boundaries in percent of the window.
+    #[serde(default)]
+    pub progress: u32,
+}
+
+impl ProgramTransition {
+    /// The "Prechod: …" line, e.g. `Prechod: prelínanie 300 ms (podľa OBS)`,
+    /// `Prechod: strih (nastavenie)`, or with a running fade
+    /// `… — prebieha 44 %`.
+    pub fn label(&self) -> String {
+        let what = if self.kind == "fade" {
+            format!("prelínanie {} ms", self.duration_ms)
+        } else {
+            "strih".to_string()
+        };
+        let from = match self.source.as_str() {
+            "obs" => "podľa OBS",
+            "setting" => "nastavenie",
+            _ => "predvolené",
+        };
+        match &self.active {
+            Some(w) => format!("Prechod: {what} ({from}) — prebieha {} %", w.progress),
+            None => format!("Prechod: {what} ({from})"),
+        }
+    }
 }
 
 /// The part of `GET /api/v1/program` → `input` this control renders.
@@ -70,6 +124,8 @@ pub fn ProgramControl() -> impl IntoView {
     // A Memo, so a poll that returns the same source never re-renders a button.
     let on_program = Memo::new(move |_| program.get().source);
     let input_enabled = Memo::new(move |_| program.get().input.is_source());
+    // #215: a Memo, so an unchanged poll never touches the line.
+    let transition_label = Memo::new(move |_| program.get().transition.label());
     let on_program_name = move || match on_program.get() {
         Some(PROGRAM_INPUT_ID) => PROGRAM_INPUT_LABEL.to_string(),
         Some(id) => store
@@ -103,6 +159,9 @@ pub fn ProgramControl() -> impl IntoView {
                 <span class="program-title">"Program"</span>
                 <span class="program-source" data-testid="program-source">
                     {move || format!("Na programe: {}", on_program_name())}
+                </span>
+                <span class="program-transition" data-testid="program-transition">
+                    {move || transition_label.get()}
                 </span>
             </div>
             <div class="program-buttons">

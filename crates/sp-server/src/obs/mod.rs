@@ -427,13 +427,15 @@ async fn connect_and_run(
     debug!("received OBS Hello");
 
     // Step 2: Identify (op 1).
-    // eventSubscriptions bitmask: Scenes (4) | Outputs (64). Outputs delivers
-    // StreamStateChanged / RecordStateChanged so the #154 idle gate can defer
-    // heavy lyrics work while OBS is live.
-    // 68 = Scenes (4) | Outputs (64).
+    // eventSubscriptions bitmask: Scenes (4) | Transitions (16) | Outputs (64).
+    // Outputs delivers StreamStateChanged / RecordStateChanged so the #154 idle
+    // gate can defer heavy lyrics work while OBS is live; Transitions delivers
+    // CurrentSceneTransitionChanged / CurrentSceneTransitionDurationChanged for
+    // the #215 program transition (`playback::program_follow`).
+    // 84 = Scenes (4) | Transitions (16) | Outputs (64).
     let mut identify_data = serde_json::json!({
         "rpcVersion": 1,
-        "eventSubscriptions": 68
+        "eventSubscriptions": 84
     });
     if let Some(password) = &config.password
         && let Some(auth) = hello["d"]["authentication"].as_object()
