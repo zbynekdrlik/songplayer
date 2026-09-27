@@ -271,3 +271,51 @@ async fn dispatch_lyrics_no_throttle() {
         .try_recv()
         .expect("second ws message must fire 100 ms later — no throttle");
 }
+
+// -- Resolume recovery re-emits the wall's display state (#217) -------------
+
+/// A Playing, on-program pipeline at `position_ms`, then a Resolume recovery.
+/// Returns the Resolume commands it sent. No `videos` row exists, so
+/// `push_title` sends no ShowTitle and only the subtitle state remains.
+async fn recovery_commands_at(position_ms: u64) -> Vec<crate::resolume::ResolumeCommand> {
+    let (mut engine, mut resolume_rx, _ws_rx) = build_engine().await;
+    install_pipeline(&mut engine, 99, true, Some(LyricsState::new(make_track())));
+    let pp = engine.pipelines.get_mut(&99).unwrap();
+    pp.state = PlayState::Playing { video_id: 42 };
+    pp.cached_position_ms = position_ms;
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    let mut cmds = Vec::new();
+    while let Ok(cmd) = resolume_rx.try_recv() {
+        cmds.push(cmd);
+    }
+    cmds
+}
+
+#[tokio::test]
+async fn resolume_recovery_re_pushes_the_current_line() {
+    let cmds = recovery_commands_at(1500).await; // inside "alpha"
+    match cmds.as_slice() {
+        [crate::resolume::ResolumeCommand::ShowSubtitles { en, .. }] => {
+            assert!(en.contains("alpha"), "got: {en}");
+        }
+        other => panic!("expected one ShowSubtitles, got {other:?}"),
+    }
+}
+
+/// The plan is blank here (the last line left at 9 s + the 3 s tail). The
+/// dispatch dedup already recorded "hide", while the push was skipped against
+/// the host's empty clip map, so nothing else would clear a stale text Arena
+/// restored from its saved composition.
+#[tokio::test]
+async fn resolume_recovery_re_sends_hide_when_the_plan_is_blank() {
+    let cmds = recovery_commands_at(60_000).await;
+    assert!(
+        matches!(
+            cmds.as_slice(),
+            [crate::resolume::ResolumeCommand::HideSubtitles]
+        ),
+        "a blank plan position re-sends HideSubtitles, got {cmds:?}"
+    );
+}
