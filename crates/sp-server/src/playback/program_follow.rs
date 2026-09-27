@@ -289,20 +289,21 @@ impl Follow {
     /// start, when the follow is switched on (the next scene change may be
     /// long away), and after missed events (a lost `SceneChanged`). This is
     /// what the retired watcher script got by polling.
-    pub async fn catch_up(&self, upstream: &Upstream) {
+    pub async fn follow_current_scene(&self, upstream: &Upstream) -> bool {
         let reply = upstream.request(GET_CURRENT_PROGRAM_SCENE, None).await;
         let Some(scene) = reply.as_ref().and_then(program_scene_from_reply) else {
             warn!("program follow: cg OBS did not report its program scene — not caught up");
-            return;
+            return false;
         };
         let Some(playlists) = upstream.scene_playlists(&scene).await else {
             warn!(
                 scene = %clip(&scene),
                 "program follow: cg OBS did not report the scene's playlists — not caught up"
             );
-            return;
+            return false;
         };
         self.follow_scene(&scene, &playlists).await;
+        true
     }
 
     /// Follow one cg OBS program scene: map it with the #213 rule
@@ -458,7 +459,7 @@ impl FollowLoop {
             self.follow.apply_spec(&self.settings);
         }
         if self.obs_up && self.settings.follow_obs {
-            self.follow.catch_up(&self.upstream).await;
+            self.follow.follow_current_scene(&self.upstream).await;
         }
     }
 
@@ -521,6 +522,9 @@ pub async fn run_follow_task(
 #[cfg(test)]
 #[path = "program_follow_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "program_follow_tests_loop.rs"]
+mod tests_loop;
 #[cfg(test)]
 #[path = "program_follow_tests_task.rs"]
 mod tests_task;

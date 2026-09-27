@@ -158,7 +158,10 @@ async fn without_cg_obs_nothing_is_read_and_nothing_is_cut() {
     assert!(!follow.refresh_obs(&no_obs, false).await, "no answer");
     assert!(!follow.refresh_obs(&no_obs, true).await);
     assert_eq!(bus.follow().obs_transition(), None);
-    follow.catch_up(&no_obs).await;
+    assert!(
+        !follow.follow_current_scene(&no_obs).await,
+        "no answer: nothing followed"
+    );
     assert_eq!(bus.status().source, Some(3));
     assert_eq!(bus.status().health.cuts, 0);
     assert_eq!(
