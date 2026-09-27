@@ -318,6 +318,40 @@ pointer-equality RED pass by luck.
 - **No hangs:** drop the `release` sender on every failure path, so the held
   thread's `recv().unwrap()` panics instead of hanging the test.
 
+**A RED whose new tests call a CHANGED signature (#215 review rounds 3–5).**
+The new tests must compile at the RED commit, but the fix changes an API
+(an extra `&mut events` param, a renamed fn, an extra argument). Do it like
+this:
+
+- **Write GREEN first.** Save a copy of the GREEN file to the scratchpad.
+- **Build the RED file from `git show HEAD:<file>`.** Apply ONLY the
+  signature change with scripted, anchor-asserted edits: the param stays
+  unused as `_events` / `_dropped`, or the renamed fn returns what the old
+  one returned. Keep the old logic byte-identical otherwise. An unused
+  `_`-param is warning-free.
+- **Commit** the tests with that RED file as `test(#N) … [red]`.
+- **Copy the saved GREEN back** and commit `fix(#N) … [green]`.
+- **List only the tests that really fail on the old logic in the RED
+  message.** Walk each one by hand.
+
+**`cargo mutants --in-diff <range> --list` compiles nothing (#215).** It
+lists the diff's mutants (`file:line` + replacement) so a review can name
+the test that kills each one BEFORE CI's mutation gate runs.
+
+- The Tier-0 hook blocks it as a cargo subcommand. Because it only lists,
+  the logged `# airuleset:build-ok list-only` bypass is honest here, and
+  only here.
+- cargo-mutants 27 turns `|=` only into `&=`, not `^=`.
+- It turns a match guard into `true` / `false`, and `==` into `!=`.
+- A mutation that cannot compile (`&&`→`||` inside a let-chain) is
+  "unviable": it costs a build but cannot fail the gate.
+
+**`tokio::select!` drops the branch futures before a handler runs**
+(tokio `macros/select.rs`: the futures live inside the `let output = {…}`
+block, and the handlers run in the `match output` after it). So a handler may
+take `&mut` of a receiver that a branch future borrowed, e.g.
+`event = events.recv() => … task.resync(&mut events).await`.
+
 ## `-D warnings` rejects `temporary.as_ptr()` in tests — bind the value first (#203 r2b)
 
 `assert_eq!(take(cap).as_ptr(), p, …)` is a compile ERROR under CI's
