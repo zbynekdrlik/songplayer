@@ -23,7 +23,7 @@ use crate::playback::pacer::Pacer;
 
 /// How long a boundary wait may busy-spin before it yields: above the 2 ms spin
 /// margin plus scheduler jitter, so a normal boundary never reaches it.
-pub const SPIN_BUDGET: Duration = Duration::from_secs(3600);
+pub const SPIN_BUDGET: Duration = Duration::from_millis(3);
 
 /// One check's wait once the spin is past [`SPIN_BUDGET`]: a 1 ms sleep (the
 /// paced threads run on the 1 ms `timeBeginPeriod` timer).
