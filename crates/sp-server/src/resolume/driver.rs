@@ -86,8 +86,10 @@ impl FullRefreshReason {
     ///
     /// The one exception to the backoff: a NOT READY mapping within
     /// `NOT_READY_FAST_WINDOW` of `not_ready_since` is fetched on every tick,
-    /// because Arena is still loading its composition (#217). NotReady sits
-    /// before TTL because after an Arena restart `last_full_ok` is the
+    /// because Arena is still loading its composition (#217). It applies only
+    /// while the last attempt ANSWERED (`!last_attempt_failed`): a failing
+    /// `/composition` is the #157 case and keeps the retry window. NotReady
+    /// sits before TTL because after an Arena restart `last_full_ok` is the
     /// pre-restart stamp, and a TTL reason would wait out the retry window.
     #[allow(clippy::too_many_arguments)] // pure: every clock/flag is an input tests can drive
     fn decide(
@@ -95,6 +97,7 @@ impl FullRefreshReason {
         last_full_ok: Option<Instant>,
         last_full_attempt: Option<Instant>,
         not_ready_since: Option<Instant>,
+        last_attempt_failed: bool,
         ttl: Duration,
         retry_after: Duration,
         forced: bool,
@@ -106,7 +109,7 @@ impl FullRefreshReason {
         let reason = if breaker_just_closed {
             FullRefreshReason::BreakerClosed
         } else if let Some(since) = not_ready_since {
-            if now.duration_since(since) < NOT_READY_FAST_WINDOW {
+            if !last_attempt_failed && now.duration_since(since) < NOT_READY_FAST_WINDOW {
                 return Some(FullRefreshReason::NotReady);
             }
             FullRefreshReason::NotReady
@@ -244,6 +247,11 @@ pub struct HostDriver {
     /// used for the retry-backoff decision so a failing `/composition` is not
     /// re-fetched on every liveness tick (#157 review).
     last_full_attempt_at: Option<Instant>,
+    /// Whether the last full-refresh ATTEMPT failed (no answer, or a body
+    /// that is not a composition). `decide` takes the NotReady fast path
+    /// only while the last attempt answered: a failing `/composition` is the
+    /// #157 case and keeps the retry window (#217 review round 3).
+    last_full_attempt_failed: bool,
     /// Monotonic instant of the first refresh of the current NOT READY
     /// episode: `/composition` answered with none of SongPlayer's clips,
     /// because Arena's REST answers before its composition has loaded. `None`
@@ -282,6 +290,7 @@ impl HostDriver {
             last_full_refresh_ts: None,
             last_full_refresh_ok_at: None,
             last_full_attempt_at: None,
+            last_full_attempt_failed: false,
             not_ready_since: None,
             recovery_sent_this_step: false,
             recovery_tx: None,
@@ -356,6 +365,10 @@ impl HostDriver {
             // even when the retry window holds the breaker-closed refresh
             // back (#217).
             self.not_ready_since = Some(now);
+            info!(
+                host = %self.host,
+                "Resolume clip map evicted by the outage — not ready until a refresh maps SongPlayer's clips"
+            );
         }
         if !self.last_refresh_ok {
             return;
@@ -365,6 +378,7 @@ impl HostDriver {
             self.last_full_refresh_ok_at,
             self.last_full_attempt_at,
             self.not_ready_since,
+            self.last_full_attempt_failed,
             FULL_REFRESH_TTL,
             FULL_REFRESH_RETRY,
             false,
@@ -565,6 +579,7 @@ impl HostDriver {
                     self.last_full_refresh_ok_at,
                     self.last_full_attempt_at,
                     self.not_ready_since,
+                    self.last_full_attempt_failed,
                     FULL_REFRESH_TTL,
                     FULL_REFRESH_RETRY,
                     true,
@@ -604,6 +619,7 @@ impl HostDriver {
     pub(crate) async fn refresh_mapping(&mut self, now: Instant) -> Result<(), anyhow::Error> {
         match self.fetch_mapping_inner().await {
             Ok(new_mapping) => {
+                self.last_full_attempt_failed = false;
                 let ready = has_songplayer_clips(&new_mapping);
                 let became_ready = ready && self.not_ready_since.is_some();
                 if ready {
@@ -639,6 +655,7 @@ impl HostDriver {
                 Ok(())
             }
             Err(e) => {
+                self.last_full_attempt_failed = true;
                 self.apply_outcome(false);
                 Err(e)
             }

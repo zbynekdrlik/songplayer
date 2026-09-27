@@ -9,7 +9,8 @@ use super::*;
 // -- FullRefreshReason::decide (pure poll policy) ---------------------------
 
 // Signature: decide(now, last_full_ok, last_full_attempt, not_ready_since,
-//                    ttl, retry_after, forced, breaker_just_closed).
+//                    last_attempt_failed, ttl, retry_after, forced,
+//                    breaker_just_closed).
 const T300: Duration = Duration::from_secs(300);
 const T60: Duration = Duration::from_secs(60);
 
@@ -32,7 +33,7 @@ fn loaded_composition() -> serde_json::Value {
 fn decide_forced_is_command() {
     let now = Instant::now();
     assert_eq!(
-        FullRefreshReason::decide(now, Some(now), None, None, T300, T60, true, false),
+        FullRefreshReason::decide(now, Some(now), None, None, false, T300, T60, true, false),
         Some(FullRefreshReason::Command),
         "a forced RefreshMapping must always yield a full refresh"
     );
@@ -42,7 +43,7 @@ fn decide_forced_is_command() {
 fn decide_breaker_closed_triggers_refresh() {
     let now = Instant::now();
     assert_eq!(
-        FullRefreshReason::decide(now, Some(now), None, None, T300, T60, false, true),
+        FullRefreshReason::decide(now, Some(now), None, None, false, T300, T60, false, true),
         Some(FullRefreshReason::BreakerClosed),
         "a just-closed breaker resyncs the map even when the cache is fresh"
     );
@@ -52,7 +53,7 @@ fn decide_breaker_closed_triggers_refresh() {
 fn decide_never_refreshed_is_startup() {
     let now = Instant::now();
     assert_eq!(
-        FullRefreshReason::decide(now, None, None, None, T300, T60, false, false),
+        FullRefreshReason::decide(now, None, None, None, false, T300, T60, false, false),
         Some(FullRefreshReason::Startup),
         "no successful full refresh yet must trigger the first one"
     );
@@ -67,6 +68,7 @@ fn decide_fresh_mapping_skips_refresh() {
             Some(base),
             None,
             None,
+            false,
             T300,
             T60,
             false,
@@ -86,6 +88,7 @@ fn decide_ttl_expiry_triggers_refresh() {
             Some(base),
             None,
             None,
+            false,
             T300,
             T60,
             false,
@@ -106,6 +109,7 @@ fn decide_exactly_at_ttl_triggers_refresh() {
             Some(base),
             None,
             None,
+            false,
             T300,
             T60,
             false,
@@ -120,7 +124,7 @@ fn decide_exactly_at_ttl_triggers_refresh() {
 fn decide_command_wins_over_ttl_and_breaker() {
     let now = Instant::now();
     assert_eq!(
-        FullRefreshReason::decide(now, None, None, None, T300, T60, true, true),
+        FullRefreshReason::decide(now, None, None, None, false, T300, T60, true, true),
         Some(FullRefreshReason::Command),
         "a forced command takes precedence over every other reason"
     );
@@ -139,6 +143,7 @@ fn decide_startup_retry_blocked_inside_window() {
             None,
             Some(base),
             None,
+            false,
             T300,
             T60,
             false,
@@ -158,6 +163,7 @@ fn decide_startup_retry_allowed_after_window() {
             None,
             Some(base),
             None,
+            false,
             T300,
             T60,
             false,
@@ -179,6 +185,7 @@ fn decide_retry_exactly_at_window_allowed() {
             None,
             Some(base),
             None,
+            false,
             T300,
             T60,
             false,
@@ -200,6 +207,7 @@ fn decide_ttl_retry_blocked_inside_window() {
             Some(base),
             Some(base + Duration::from_secs(390)),
             None,
+            false,
             T300,
             T60,
             false,
@@ -219,6 +227,7 @@ fn decide_ttl_retry_allowed_after_window() {
             Some(base),
             Some(base + Duration::from_secs(330)),
             None,
+            false,
             T300,
             T60,
             false,
@@ -239,6 +248,7 @@ fn decide_command_immediate_despite_recent_attempt() {
             None,
             Some(base),
             None,
+            false,
             T300,
             T60,
             true,
