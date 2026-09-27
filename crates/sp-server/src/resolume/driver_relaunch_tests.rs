@@ -81,6 +81,22 @@ async fn opacity_puts(server: &MockServer, clip_id: i64) -> usize {
         .count()
 }
 
+/// The opacity of every PUT to clip `clip_id`, in order.
+async fn opacities_put(server: &MockServer, clip_id: i64) -> Vec<f64> {
+    let route = format!("/api/v1/composition/clips/by-id/{clip_id}");
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path() == route)
+        .map(|r| {
+            let body: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+            body["video"]["opacity"]["value"].as_f64().unwrap()
+        })
+        .collect()
+}
+
 fn subtitle(en: &str) -> ResolumeCommand {
     ResolumeCommand::ShowSubtitles {
         en: en.to_string(),
@@ -199,8 +215,12 @@ async fn a_404_on_a_title_push_is_re_pushed_by_the_recovery_event_not_retried() 
 }
 
 /// A 404 on a clip id (the opacity PUT) is a stale map too. A HideTitle is
-/// retried on the new clip id: the RecoveryEvent's re-push sends no hide of
-/// its own, and it does not re-show a title whose end-of-song hide ran
+/// retried on the new clip id AT ONCE (opacity 0, then the text cleared):
+/// the relaunched clip holds whatever Arena's saved composition restored,
+/// possibly at opacity 0, and `hide_title`'s fade starts at FULL opacity, a
+/// 1 s flash of that stale text (review round 3). The RecoveryEvent's re-push
+/// sends no hide of its own, and it does not re-show a title whose
+/// end-of-song hide ran
 /// (`handle_resolume_recovery_does_not_re_show_a_title_the_song_end_hid`).
 #[tokio::test]
 async fn a_404_on_a_clip_opacity_push_marks_the_map_stale_too() {
@@ -229,9 +249,9 @@ async fn a_404_on_a_clip_opacity_push_marks_the_map_stale_too() {
         "the 404 refreshed the stale map"
     );
     assert_eq!(
-        opacity_puts(&server, 200).await,
-        21,
-        "the hide was retried on the new clip id: 20 fade steps + the final zero"
+        opacities_put(&server, 200).await,
+        [0.0],
+        "the hide was retried at once on the new clip id: opacity 0, no fade from full"
     );
     assert_eq!(
         texts_put(&server, 1900).await,
