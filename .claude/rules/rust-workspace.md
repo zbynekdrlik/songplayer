@@ -113,8 +113,10 @@ commit itself. Use a wrong NON-identity value (a named const `FRAGMENT_MS = 250`
 → GREEN `500`, or a different literal) so the exact-value test still fails but
 the RED tree is clippy-clean.
 
-Likewise avoid a RED constant at its type's minimum (`0`) or maximum
-(`u32::MAX`) when that makes one side of the comparison impossible.
+Likewise avoid a RED constant at an unsigned type's minimum (`0`) or maximum
+(`u32::MAX`) when that makes one side of the comparison impossible. The
+examples below take `x` as unsigned; for a signed type the minimum is
+`iN::MIN`, not `0`.
 `clippy::absurd_extreme_comparisons` flags three shapes, and as a
 correctness-group lint it is deny-by-default:
 
