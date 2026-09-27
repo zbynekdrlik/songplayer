@@ -350,6 +350,13 @@ impl HostDriver {
     async fn on_tick_at(&mut self, now: Instant) {
         self.recovery_sent_this_step = false;
         let breaker_just_closed = self.probe_liveness().await;
+        if breaker_just_closed {
+            // Opening the breaker evicted the clip map, so it has none of
+            // SongPlayer's clips: NOT READY from the moment the REST is back,
+            // even when the retry window holds the breaker-closed refresh
+            // back (#217).
+            self.not_ready_since = Some(now);
+        }
         if !self.last_refresh_ok {
             return;
         }
@@ -455,9 +462,9 @@ impl HostDriver {
             {
                 self.circuit_breaker_open = true;
                 self.clip_mapping = HashMap::new();
-                // The outage ends any not-ready episode: a relaunch whose
-                // composition is still loading gets a fresh fast window from
-                // the breaker-closed refresh, not the tail of an old one (#217).
+                // The outage ends any not-ready episode. The breaker close
+                // starts a new one, so a relaunch whose composition is still
+                // loading gets a fresh fast window, not an old one's tail (#217).
                 self.not_ready_since = None;
                 warn!(host = %self.host, "circuit breaker opened — clip cache evicted");
             }
@@ -548,8 +555,9 @@ impl HostDriver {
             }
             ResolumeCommand::RefreshMapping => {
                 // A command forces a full refresh regardless of TTL/liveness/
-                // retry window. It is its own step: an earlier tick's
-                // RecoveryEvent was already re-pushed.
+                // retry window. It is its own step (nothing in production
+                // sends it; it is an operator/test command), so it fires its
+                // own ready event.
                 self.recovery_sent_this_step = false;
                 let now = Instant::now();
                 if let Some(reason) = FullRefreshReason::decide(

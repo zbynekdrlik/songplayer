@@ -1,5 +1,5 @@
 //! Extracted from mod.rs to keep the file under the 1000-line cap.
-//! Re-emit ShowTitle + ShowSubtitles after a Resolume host recovers.
+//! Re-emit ShowTitle + the subtitle state after a Resolume host recovers.
 
 use std::sync::atomic::Ordering;
 
@@ -10,7 +10,8 @@ use super::title;
 
 impl super::PlaybackEngine {
     /// Re-emit current state to a recovered Resolume host: ShowTitle for
-    /// every active playlist + ShowSubtitles for the current line.
+    /// every active playlist + its subtitle state (ShowSubtitles for the
+    /// current line, HideSubtitles when the wall is blank).
     pub(crate) async fn handle_resolume_recovery(&self, host: &str) {
         info!(
             host,
@@ -36,32 +37,34 @@ impl super::PlaybackEngine {
                     video_id, "title re-pushed on Resolume recovery"
                 );
             }
-            if let Some(state) = &pp.lyrics_state {
-                // Re-emit the wall's CURRENT state, a blank one included, as
-                // `dispatch_lyrics_if_changed` does. Its dedup already recorded
-                // "hide", so without this a stale text Arena restored from its
-                // saved composition would stay until the next line (#217).
-                let cmd = match state
-                    .resolume_lines_with_next(pp.cached_position_ms, pp.cached_lyrics_reference)
-                {
-                    Some((en, next_en, sk, next_sk)) => {
-                        crate::resolume::ResolumeCommand::ShowSubtitles {
-                            en,
-                            next_en,
-                            sk,
-                            next_sk,
-                            suppress_en: pp.cached_suppress_en,
-                        }
+            // Re-emit the wall's CURRENT subtitle state, a blank one included:
+            // a blank plan position, or a song without lyrics. The engine's
+            // own hide for it (`dispatch_lyrics_if_changed`, or
+            // `clear_lyrics_display` at song start) was skipped against the
+            // host's empty clip map and is not re-sent, so without this a
+            // stale text Arena restored from its saved composition would stay
+            // until the next line, or the whole song (#217).
+            let lines = pp.lyrics_state.as_ref().and_then(|state| {
+                state.resolume_lines_with_next(pp.cached_position_ms, pp.cached_lyrics_reference)
+            });
+            let cmd = match lines {
+                Some((en, next_en, sk, next_sk)) => {
+                    crate::resolume::ResolumeCommand::ShowSubtitles {
+                        en,
+                        next_en,
+                        sk,
+                        next_sk,
+                        suppress_en: pp.cached_suppress_en,
                     }
-                    None => crate::resolume::ResolumeCommand::HideSubtitles,
-                };
-                let blank = matches!(cmd, crate::resolume::ResolumeCommand::HideSubtitles);
-                let _ = self.resolume_tx.send(cmd).await;
-                info!(
-                    playlist_id,
-                    video_id, blank, "subtitle re-pushed on Resolume recovery"
-                );
-            }
+                }
+                None => crate::resolume::ResolumeCommand::HideSubtitles,
+            };
+            let blank = matches!(cmd, crate::resolume::ResolumeCommand::HideSubtitles);
+            let _ = self.resolume_tx.send(cmd).await;
+            info!(
+                playlist_id,
+                video_id, blank, "subtitle re-pushed on Resolume recovery"
+            );
         }
     }
 }
