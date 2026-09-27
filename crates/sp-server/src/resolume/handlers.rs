@@ -119,7 +119,11 @@ pub async fn replace_title(driver: &mut HostDriver, text: &str) -> Result<(), an
         );
         return Ok(());
     };
-    let _ = clips; // Scaffolding (RED): round 0 had no cut before the text.
+    if text.is_empty() {
+        return Ok(());
+    }
+    driver.ensure_endpoint().await?;
+    set_opacity_all(driver, &clips, 0.0).await?;
     show_title(driver, text).await
 }
 

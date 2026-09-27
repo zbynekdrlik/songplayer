@@ -96,7 +96,6 @@ impl PlaybackEngine {
                 let now = tokio::time::Instant::now();
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.cancel_title_timers();
-                    pp.cached_position_ms = 0;
                     pp.title_clock = pp
                         .current_video_id
                         .map(|video_id| title::TitleClock::new(video_id, now, dur));

@@ -142,11 +142,11 @@ pub async fn resync_title(
             }
         },
     };
-    if let (Some(text), Some(cmd_tx)) = (&title, obs_cmd_tx) {
+    if let Some(cmd_tx) = obs_cmd_tx {
         let _ = cmd_tx
             .send(ObsCommand::SetTextSource {
                 source_name: OBS_TITLE_SOURCE.to_string(),
-                text: text.clone(),
+                text: title.clone().unwrap_or_default(),
             })
             .await;
     }

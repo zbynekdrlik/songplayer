@@ -68,8 +68,18 @@ impl PlaybackEngine {
     /// one with no hide 3.5 s before the end. A clock of another video (a
     /// song this scene-on just selected, not started yet) arms nothing: its
     /// `Started` will.
-    pub(super) fn rearm_title_timers(&mut self, _playlist_id: i64, _video_id: i64, _now: Instant) {
-        // Scaffolding (RED): round 0 armed the timers only at `Started`.
+    pub(super) fn rearm_title_timers(&mut self, playlist_id: i64, video_id: i64, now: Instant) {
+        let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
+            return;
+        };
+        if !pp
+            .title_clock
+            .is_some_and(|clock| clock.video_id == video_id)
+        {
+            return;
+        }
+        pp.cancel_title_timers();
+        self.arm_title_timers(playlist_id, now);
     }
 }
 

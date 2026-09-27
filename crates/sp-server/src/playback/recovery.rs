@@ -56,20 +56,12 @@ impl super::PlaylistPipeline {
     /// clock (fixed at its `Started`, the instants the title timers sleep
     /// until) is open. A clock of another video (the previous song, before
     /// the next `Started`) is closed.
-    fn title_due(&self, video_id: i64, _now: Instant) -> bool {
+    fn title_due(&self, video_id: i64, now: Instant) -> bool {
         self.scene_active.load(Ordering::Acquire)
             && self
                 .title_clock
-                .is_some_and(|clock| clock.video_id == video_id)
-            && position_window_open(self.cached_position_ms, self.cached_duration_ms)
+                .is_some_and(|clock| clock.video_id == video_id && clock.open_at(now))
     }
-}
-
-/// Scaffolding (RED): round 0's window, read from the last position report.
-fn position_window_open(position_ms: u64, duration_ms: u64) -> bool {
-    position_ms >= title::TITLE_SHOW_DELAY_MS
-        && (duration_ms <= title::TITLE_SHOW_DELAY_MS + title::TITLE_HIDE_BEFORE_END_MS
-            || position_ms < duration_ms - title::TITLE_HIDE_BEFORE_END_MS)
 }
 
 impl super::PlaybackEngine {
