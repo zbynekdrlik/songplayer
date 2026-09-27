@@ -22,6 +22,7 @@ use crate::playback::pacer::{
     plan_sleep_100ns,
 };
 use crate::playback::pacer_queue::{ProducerAction, SharedQueue};
+use crate::playback::pacer_spin::spin_to_boundary;
 use crate::playback::pipeline::{
     DecodeResult, PipelineCommand, PipelineEvent, should_run_heartbeat,
 };
@@ -113,16 +114,16 @@ pub(crate) fn sleep_to_boundary(pacer: &Pacer, until_100ns: i64) {
         std::thread::sleep(Duration::from_nanos((coarse_100ns * 100) as u64));
     }
     // Spin the last ~2 ms to hit the boundary precisely; bail on a backward jump
-    // (delta grows past one interval) so a clock step never spins forever.
-    loop {
-        let delta = until_100ns - pacer.now_100ns();
-        if delta <= 0 {
-            break;
-        }
-        if interval > 0 && delta > interval {
-            break;
-        }
-        std::hint::spin_loop();
+    // (delta grows past one interval) so a clock step never spins forever. Past
+    // the 3 ms spin budget the wall stands still (a followed hold), so each check
+    // yields 1 ms instead of burning a core through it (#147 follow-up).
+    let spin = spin_to_boundary(pacer, until_100ns, |_, _| {});
+    if spin.yields > 0 {
+        info!(
+            yields = spin.yields,
+            spins = spin.spins,
+            "paced: the wall stood still through a boundary wait — yielded 1 ms per check instead of spinning (#147)"
+        );
     }
 }
 
