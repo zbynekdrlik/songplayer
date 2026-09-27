@@ -357,6 +357,22 @@ fn a_picture_with_two_chroma_rows_scales_them_like_its_luma() {
 }
 
 #[test]
+fn a_downscale_takes_its_second_chroma_tap_from_the_next_pixel_pair() {
+    // Review round 1 (mutation `2 * c.i1` → `2 / c.i1`): a 6×2 source has
+    // THREE chroma pixels, so the second tap of a destination chroma pixel
+    // can be pixel 2 (bytes 4, 5), which only `2 * i1` reaches.
+    let src: [u8; 18] = [
+        10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 100, 200, 110, 210, 120, 220,
+    ];
+    let six = tight(6, 2);
+    assert_eq!(FitPlan::new(six, tight(4, 2)).rect(), (0, 0, 4, 2));
+    assert_eq!(
+        fitted(&src, six, tight(4, 2)),
+        vec![13, 28, 43, 58, 73, 88, 103, 118, 103, 203, 118, 218]
+    );
+}
+
+#[test]
 fn the_catalogs_resolutions_fit_centred_on_even_offsets() {
     let fit = |sw, sh, dw, dh| FitPlan::new(tight(sw, sh), tight(dw, dh)).rect();
     assert_eq!(
