@@ -31,7 +31,8 @@
 //!   at start, when it is switched on, and after events this task missed (a
 //!   lagged broadcast), while cg OBS is up; the scene changes queued before
 //!   that read are dropped, and the newest of them is followed when cg OBS
-//!   does not answer the read. This replaces the event-night watcher script
+//!   does not name its scene (or names that scene without its playlists).
+//!   This replaces the event-night watcher script
 //!   `%TEMP%\sp_follow.ps1`, which polled the scene.
 //! - The settings are re-read every [`FOLLOW_SETTINGS_POLL`], so a save
 //!   applies within 5 s. The telemetry ([`FollowShared`], on
@@ -293,28 +294,53 @@ impl Follow {
     /// Follow cg OBS's CURRENT program scene, read through the OBS client: at
     /// start, when the follow is switched on (the next scene change may be
     /// long away), and after missed events (a lost `SceneChanged`). This is
-    /// what the retired watcher script got by polling. `false` when cg OBS did
-    /// not answer (nothing was followed). Ungated: the task calls it only
-    /// through `FollowLoop::catch_up`, which checks cg OBS is up.
+    /// what the retired watcher script got by polling.
+    ///
+    /// `dropped` is the newest scene change the caller dropped unhandled. It is
+    /// followed instead when cg OBS does not name its program scene, or names
+    /// that same scene but not its playlists: the dropped event may be the only
+    /// news of the change, because the #170 poll does not repeat a scene the
+    /// OBS client already stored. A dropped change of ANOTHER scene is older
+    /// than the one cg OBS named, so it is never followed. Ungated: the task
+    /// calls it only through `FollowLoop::catch_up`, which checks cg OBS is up.
     pub async fn follow_current_scene(
         &self,
         upstream: &Upstream,
-        _dropped: Option<(String, HashSet<i64>)>,
-    ) -> bool {
+        dropped: Option<(String, HashSet<i64>)>,
+    ) {
         let reply = upstream.request(GET_CURRENT_PROGRAM_SCENE, None).await;
         let Some(scene) = reply.as_ref().and_then(program_scene_from_reply) else {
-            warn!("program follow: cg OBS did not report its program scene — not caught up");
-            return false;
+            match dropped {
+                Some((named, playlists)) => {
+                    info!(
+                        scene = %clip(&named),
+                        "program follow: cg OBS did not report its program scene — following the newest scene change it sent"
+                    );
+                    self.follow_scene(&named, &playlists).await;
+                }
+                None => {
+                    warn!("program follow: cg OBS did not report its program scene — not caught up")
+                }
+            }
+            return;
         };
         let Some(playlists) = upstream.scene_playlists(&scene).await else {
-            warn!(
-                scene = %clip(&scene),
-                "program follow: cg OBS did not report the scene's playlists — not caught up"
-            );
-            return false;
+            match dropped {
+                Some((named, playlists)) if named == scene => {
+                    info!(
+                        scene = %clip(&scene),
+                        "program follow: cg OBS did not report the scene's playlists — following them from its scene change"
+                    );
+                    self.follow_scene(&named, &playlists).await;
+                }
+                _ => warn!(
+                    scene = %clip(&scene),
+                    "program follow: cg OBS did not report the scene's playlists — not caught up"
+                ),
+            }
+            return;
         };
         self.follow_scene(&scene, &playlists).await;
-        true
     }
 
     /// Follow one cg OBS program scene: map it with the #213 rule
@@ -388,10 +414,12 @@ struct FollowLoop {
     /// connected, 64 deep), and a full queue blocks that client's other
     /// senders.
     read_pending: bool,
-    /// The newest scene change a drain dropped. The catch-up after the drain
-    /// follows it when cg OBS does not answer its scene read, so a failed read
-    /// never loses the news (the #170 poll does not repeat it: the OBS client
-    /// already stored that scene as current).
+    /// The newest scene change a drain dropped, until a `Connected` (the new
+    /// connection re-reports its scene) or a lag (a newer one may be among the
+    /// lost events). The catch-up after the drain hands it to
+    /// `Follow::follow_current_scene`. An unanswered catch-up with nothing
+    /// dropped is not retried: the program then waits for cg OBS's next scene
+    /// change (or reconnect).
     missed_scene: Option<(String, HashSet<i64>)>,
 }
 
@@ -447,15 +475,19 @@ impl FollowLoop {
                 Ok(event) => {
                     self.note_connection(&event);
                     reread |= rereads_transition(&event);
-                    if let ObsEvent::SceneChanged {
-                        scene_name,
-                        active_playlist_ids,
-                    } = event
-                    {
-                        self.missed_scene = Some((scene_name, active_playlist_ids));
+                    match event {
+                        ObsEvent::SceneChanged {
+                            scene_name,
+                            active_playlist_ids,
+                        } => self.missed_scene = Some((scene_name, active_playlist_ids)),
+                        ObsEvent::Connected => self.missed_scene = None,
+                        ObsEvent::Raw { .. } | ObsEvent::Disconnected => {}
                     }
                 }
-                Err(TryRecvError::Lagged(_)) => reread = true,
+                Err(TryRecvError::Lagged(_)) => {
+                    self.missed_scene = None;
+                    reread = true;
+                }
                 Err(TryRecvError::Empty | TryRecvError::Closed) => return reread,
             }
         }
@@ -473,14 +505,13 @@ impl FollowLoop {
         self.catch_up(events).await;
     }
 
-    /// While following and cg OBS is up: cut to cg OBS's current program
-    /// scene with the spec on the bus. The events queued meanwhile are dropped
-    /// first; when one of them changed cg OBS's transition, it is read and
-    /// applied again and what queued during THAT read is dropped too, so a
-    /// drain always comes right before the scene read (after
-    /// [`MAX_CATCH_UP_REREADS`] re-reads the polls take over). When cg OBS
-    /// does not answer the scene read, the newest dropped scene change is
-    /// followed instead.
+    /// Drop the queued events (always, following or not); when one of them
+    /// changed cg OBS's transition, read and apply it again and drop what
+    /// queued during THAT read too, so a drain always comes right before the
+    /// scene read (after [`MAX_CATCH_UP_REREADS`] re-reads the polls take
+    /// over). Then, while following and cg OBS is up, cut to cg OBS's current
+    /// program scene with the spec on the bus (`Follow::follow_current_scene`,
+    /// handed the newest dropped scene change).
     async fn catch_up(&mut self, events: &mut broadcast::Receiver<ObsEvent>) {
         let mut reread = self.drain(events);
         for _ in 0..MAX_CATCH_UP_REREADS {
@@ -492,18 +523,11 @@ impl FollowLoop {
             reread = self.drain(events);
         }
         self.read_pending |= reread;
-        let missed = self.missed_scene.take();
-        if !(self.obs_up && self.settings.follow_obs) {
-            return;
-        }
-        if !self.follow.follow_current_scene(&self.upstream, None).await
-            && let Some((scene, playlists)) = missed
-        {
-            info!(
-                scene = %clip(&scene),
-                "program follow: cg OBS did not answer — following the newest scene change it reported"
-            );
-            self.follow.follow_scene(&scene, &playlists).await;
+        let dropped = self.missed_scene.take();
+        if self.obs_up && self.settings.follow_obs {
+            self.follow
+                .follow_current_scene(&self.upstream, dropped)
+                .await;
         }
     }
 

@@ -143,19 +143,29 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   - `drain` drops every event still queued (they are older than the read that
     follows; a stale `SceneChanged` would cut back to a scene cg OBS already
     left), keeps `obs_up` and the newest dropped `SceneChanged`
-    (`missed_scene`), and returns whether cg OBS's transition must be read
-    again (`rereads_transition`: `Connected` or a transition event, or a
-    `Lagged` inside the drain). `resync` drains before its transition read.
-    `catch_up` drains the events queued DURING that read (up to 3 s); while a
-    drain asks for it, it re-reads + applies the transition and drains again,
-    at most `MAX_CATCH_UP_REREADS` (3) times — still changing after that, it
-    sets `read_pending` for the polls. So a drain ALWAYS comes right before
-    the scene read (review rounds 3 + 4).
-  - When cg OBS does not answer the catch-up's scene read (or its playlist
-    lookup), the catch-up follows `missed_scene` instead: the dropped event
-    may be the only news of that change, because the #170 poll does not repeat
-    it (the OBS client already stored that scene as current). `missed_scene`
-    is taken by every catch-up, answered or not (review round 4).
+    (`missed_scene`, forgotten again on a `Connected` — the new connection
+    re-reports its scene — or a `Lagged` — a newer one may be lost), and
+    returns whether cg OBS's transition must be read again
+    (`rereads_transition`: `Connected` or a transition event, or a `Lagged`
+    inside the drain). `resync` drains before its transition read. `catch_up`
+    ALWAYS drains (following or not) what queued since — during resync's read,
+    or, for the switch-on catch-up, since the task last handled an event;
+    while a drain asks for it, it re-reads + applies the transition and drains
+    again, at most `MAX_CATCH_UP_REREADS` (3) times — still changing after
+    that, it sets `read_pending` for the polls. So a drain ALWAYS comes right
+    before the scene read (review rounds 3 + 4).
+  - `Follow::follow_current_scene(upstream, dropped)` follows `dropped` (the
+    taken `missed_scene`) instead of cg OBS's answer only when cg OBS names NO
+    scene, or names that SAME scene without its playlists: the dropped event
+    may be the only news of the change, because the #170 poll does not repeat
+    a scene the OBS client already stored. A dropped change of another scene
+    is older than the named one and is never followed (review rounds 4 + 5).
+    Known gap: an unanswered catch-up with nothing dropped is not retried —
+    the program waits for cg OBS's next scene change or reconnect. Reading
+    the OBS client's own `ObsState` (`connected`, `current_scene`,
+    `active_playlist_ids`) instead of asking cg OBS would remove it; that
+    needs `ObsState` wired to the engine through `lib.rs`, which #215's design
+    keeps untouched, so it is the main session's call (review round 5).
   - the catch-up runs only while `obs_up` and following. Switched on while cg
     OBS is away, the follow catches up on the reconnect instead: the OBS
     client's connection step 6 reports cg OBS's program scene as a
@@ -190,7 +200,8 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   helpers are `pub(super)`) — a fake cg OBS at `ObsCommand::Remote`: scripted
   transition replies, a settable program scene for `GetCurrentProgramScene`
   (`scene_unanswered` answers it with a failure), `playlists_of` for the scene
-  lookups; every call is logged in order; `during_read` = one batch of events
+  lookups (`lookup_unanswered` drops the reply); every call is logged in
+  order; `during_read` = one batch of events
   per transition read, broadcast while the fake answers it, i.e. what reaches
   the queue while the task waits — `api/program_tests.rs`, and the mock
   E2Es `program-control.spec.ts` + `settings-program-transition.spec.ts`.
@@ -205,11 +216,13 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
   request to the fake cg OBS). The task subscribes when it is first polled, so
   an event sent right after `start()` reaches no receiver: `send` fails (the
   test's `expect` panics) and the task never sees it (round 2).
-- **With the follow ON, send events only after the start's whole catch-up**
-  (wait for `REQUEST`, `PROGRAM_SCENE`, `ScenePlaylists:<scene>`). The
-  catch-up drains the queue right before its scene read, so an event sent
-  after only the first request can be dropped by that drain; that it is not
-  is then luck of the current-thread scheduler, not the test's sync (round 4).
+- **Send events only after the start's catch-up has drained the queue** —
+  it drains following or not, so an event sent after only the first request
+  can be dropped by that drain (that it is not is then luck of the
+  current-thread scheduler, not the test's sync). With the follow ON wait for
+  the whole catch-up (`REQUEST`, `PROGRAM_SCENE`, `ScenePlaylists:<scene>`);
+  with it OFF wait for the spec the start applied (`spec_becomes`): the drain
+  follows `apply_spec` with no `.await` between (rounds 4 + 5).
 - To prove a state change ended a periodic action (e.g. no retry after
   `Disconnected`), sync on a LATER poll's observable effect (store a setting,
   `spec_becomes`), drain what was already running, then sync on one more poll
