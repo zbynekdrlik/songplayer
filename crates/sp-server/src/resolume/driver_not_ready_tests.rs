@@ -770,3 +770,73 @@ async fn a_failing_composition_after_a_breaker_close_keeps_the_retry_window() {
         "the breaker close + one #157 re-push per failed fetch, never one per tick"
     );
 }
+
+/// Review round 4: the first `/composition` after a breaker close FAILS, the
+/// next one ANSWERS without clips (Arena still loading), then the clips load.
+/// The answered fetch must clear `last_full_attempt_failed`, so the fast path
+/// comes back and the next tick maps the clips (R+70 s), instead of waiting
+/// out another 60 s retry window (R+120 s).
+#[tokio::test]
+async fn an_answered_fetch_after_a_failed_one_restores_the_fast_path() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(500))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"layers": []})))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(composition_with(&[SUBS_TOKEN])))
+        .mount(&server)
+        .await;
+    let (tx, mut rx) = broadcast::channel(16);
+    let mut driver =
+        HostDriver::new("127.0.0.1".into(), server.address().port()).with_recovery_channel(tx);
+    let base = Instant::now();
+    driver.last_full_refresh_ok_at = Some(base);
+    driver.last_full_attempt_at = Some(base);
+    driver.consecutive_failures = 3;
+    driver.circuit_breaker_open = true;
+    let relaunch = base + secs(1800);
+
+    // R: the breaker close fires its event; its refresh fails (500).
+    // R+10: the probe's `was_failing` event; the retry window holds.
+    let mut events = Vec::new();
+    for k in 0..=6u64 {
+        driver.on_tick_at(relaunch + secs(10 * k)).await;
+        events.push(drain(&mut rx));
+    }
+    assert_eq!(
+        composition_fetches(&server).await,
+        2,
+        "the failed fetch at R, then the retry-window fetch at R+60 that answers empty"
+    );
+    assert_eq!(
+        events,
+        [1, 1, 0, 0, 0, 0, 0],
+        "RecoveryEvents per tick R..R+60: the close, then the failed fetch's `was_failing`"
+    );
+
+    driver.on_tick_at(relaunch + secs(70)).await;
+    assert_eq!(
+        composition_fetches(&server).await,
+        3,
+        "the answered fetch restored the fast path: fetched again on the next tick"
+    );
+    assert!(
+        driver.clip_mapping.contains_key(SUBS_TOKEN),
+        "the clips are mapped at R+70 s"
+    );
+    assert_eq!(
+        drain(&mut rx),
+        1,
+        "the refresh that maps the clips fires one RecoveryEvent"
+    );
+}
