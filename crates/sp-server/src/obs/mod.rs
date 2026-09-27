@@ -84,12 +84,29 @@ pub struct ObsState {
 }
 
 /// Configuration for connecting to OBS WebSocket.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObsConfig {
     /// WebSocket URL, e.g. `"ws://127.0.0.1:4455"`.
     pub url: String,
     /// Optional password for authentication.
     pub password: Option<String>,
+}
+
+/// The OBS connection settings as the dashboard stores them (Nastavenia):
+/// `None` when no WebSocket URL is set, an empty password means no auth.
+pub async fn load_obs_config(pool: &SqlitePool) -> Result<Option<ObsConfig>, sqlx::Error> {
+    use crate::db::models::get_setting;
+    let url = get_setting(pool, sp_core::config::SETTING_OBS_WEBSOCKET_URL)
+        .await?
+        .unwrap_or_default();
+    if url.is_empty() {
+        return Ok(None);
+    }
+    let password = get_setting(pool, "obs_password").await?.unwrap_or_default();
+    Ok(Some(ObsConfig {
+        url,
+        password: (!password.is_empty()).then_some(password),
+    }))
 }
 
 /// Mapping of NDI source name to playlist ID (for scene detection).

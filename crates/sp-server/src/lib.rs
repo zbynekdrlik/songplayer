@@ -656,21 +656,7 @@ pub async fn start(
     // output (item 5). `None` when OBS is not configured (never suppresses the
     // dark-wall ladder in that case).
     let mut ndi_sources_for_engine: Option<obs::NdiSourceMap> = None;
-    let obs_url = db::models::get_setting(&pool, "obs_websocket_url")
-        .await?
-        .unwrap_or_default();
-    if !obs_url.is_empty() {
-        let obs_password = db::models::get_setting(&pool, "obs_password")
-            .await?
-            .unwrap_or_default();
-        let obs_config = obs::ObsConfig {
-            url: obs_url,
-            password: if obs_password.is_empty() {
-                None
-            } else {
-                Some(obs_password)
-            },
-        };
+    if let Some(obs_config) = obs::load_obs_config(&pool).await? {
         let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
         ndi_sources_for_engine = Some(ndi_sources.clone());
         let obs_client = obs::ObsClient::spawn(

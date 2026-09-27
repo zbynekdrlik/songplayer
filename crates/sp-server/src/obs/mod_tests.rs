@@ -247,3 +247,36 @@ async fn apply_rebuild_result_replaces_map_with_empty_when_rebuild_legitimately_
          wipe the map so scene detection reflects current reality"
     );
 }
+
+/// The dashboard (sp-ui Nastavenia) stores the OBS password under
+/// `SETTING_OBS_WEBSOCKET_PASSWORD` ("obs_websocket_password"), but startup
+/// read "obs_password", so a password set in the UI never reached the client
+/// (found in the #213 review).
+#[tokio::test]
+async fn the_obs_config_reads_the_keys_the_dashboard_writes() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    assert_eq!(
+        load_obs_config(&pool).await.unwrap(),
+        None,
+        "no URL, no client"
+    );
+    let set = |k: &'static str, v: &'static str| {
+        let pool = pool.clone();
+        async move { crate::db::models::set_setting(&pool, k, v).await.unwrap() }
+    };
+    set(
+        sp_core::config::SETTING_OBS_WEBSOCKET_URL,
+        "ws://10.0.0.5:4455",
+    )
+    .await;
+    let cfg = load_obs_config(&pool)
+        .await
+        .unwrap()
+        .expect("a URL configures OBS");
+    assert_eq!(cfg.url, "ws://10.0.0.5:4455");
+    assert_eq!(cfg.password, None, "an empty password means no auth");
+    set(sp_core::config::SETTING_OBS_WEBSOCKET_PASSWORD, "s3cret").await;
+    let cfg = load_obs_config(&pool).await.unwrap().unwrap();
+    assert_eq!(cfg.password.as_deref(), Some("s3cret"));
+}
