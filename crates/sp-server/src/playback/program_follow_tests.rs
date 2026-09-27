@@ -352,39 +352,76 @@ async fn a_scene_already_on_program_cuts_nothing_and_a_failed_persist_cuts_nothi
 
 // ---- the task, against a fake cg OBS ----------------------------------------
 
+/// The obs-websocket request that reads cg OBS's current program scene.
+const PROGRAM_SCENE: &str = "GetCurrentProgramScene";
+
+/// The playlists each of the fake cg OBS's scenes shows: `sp-fast` → 7,
+/// `sp-slow` → 8, any other scene is a manual one (none).
+fn playlists_of(scene: &str) -> HashSet<i64> {
+    match scene {
+        "sp-fast" => set(&[7]),
+        "sp-slow" => set(&[8]),
+        _ => set(&[]),
+    }
+}
+
 /// The follow task running against a fake cg OBS.
 struct TaskRig {
     pool: SqlitePool,
     bus: Arc<ProgramBus>,
     /// cg OBS's events, as the OBS client broadcasts them.
     events: broadcast::Sender<ObsEvent>,
-    /// Every request type the fake cg OBS answered, in order.
+    /// Every call the fake cg OBS answered, in order: a request by its type,
+    /// a scene → playlists lookup as `ScenePlaylists:<scene>`.
     seen: mpsc::UnboundedReceiver<String>,
+    /// The fake cg OBS's program scene (initially the manual scene `Slido`).
+    program_scene: Arc<std::sync::Mutex<String>>,
     shutdown: broadcast::Sender<()>,
     task: JoinHandle<()>,
 }
 
 /// Start the task over `pool` (settings stored first) against a fake cg OBS
-/// that answers the n-th request with `replies[n]` (the last one repeats). The
-/// event broadcast holds `capacity` events; the settings are re-read every
-/// `poll`.
+/// at the OBS client's command channel. It answers the n-th
+/// `GetCurrentSceneTransition` with `replies[n]` (the last one repeats),
+/// `GetCurrentProgramScene` with `program_scene`, and a scene lookup with
+/// [`playlists_of`]. The event broadcast holds `capacity` events; the
+/// settings are re-read every `poll`.
 fn start(pool: &SqlitePool, replies: Vec<Value>, capacity: usize, poll: Duration) -> TaskRig {
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<ObsCommand>(16);
     let (events, _) = broadcast::channel::<ObsEvent>(capacity);
     let (seen_tx, seen) = mpsc::unbounded_channel();
+    let program_scene = Arc::new(std::sync::Mutex::new("Slido".to_string()));
+    let current = program_scene.clone();
     tokio::spawn(async move {
         let mut n: usize = 0;
-        while let Some(cmd) = cmd_rx.recv().await {
-            if let ObsCommand::Remote(RemoteCall::Request {
-                request_type,
-                reply,
-                ..
-            }) = cmd
-            {
-                let d = replies[n.min(replies.len() - 1)].clone();
-                n += 1;
-                let _ = seen_tx.send(request_type);
-                let _ = reply.send(Some(d));
+        while let Some(ObsCommand::Remote(call)) = cmd_rx.recv().await {
+            match call {
+                RemoteCall::Request {
+                    request_type,
+                    reply,
+                    ..
+                } => {
+                    let d = if request_type == PROGRAM_SCENE {
+                        let scene = current.lock().unwrap().clone();
+                        json!({
+                            "requestType": PROGRAM_SCENE,
+                            "requestStatus": { "result": true, "code": 100 },
+                            "responseData": {
+                                "currentProgramSceneName": scene,
+                                "currentProgramSceneUuid": "uuid-scene",
+                            },
+                        })
+                    } else {
+                        n += 1;
+                        replies[(n - 1).min(replies.len() - 1)].clone()
+                    };
+                    let _ = seen_tx.send(request_type);
+                    let _ = reply.send(Some(d));
+                }
+                RemoteCall::ScenePlaylists { scene, reply } => {
+                    let _ = seen_tx.send(format!("ScenePlaylists:{scene}"));
+                    let _ = reply.send(playlists_of(&scene));
+                }
             }
         }
     });
@@ -398,6 +435,7 @@ fn start(pool: &SqlitePool, replies: Vec<Value>, capacity: usize, poll: Duration
         bus,
         events,
         seen,
+        program_scene,
         shutdown,
         task,
     }
@@ -413,6 +451,20 @@ impl TaskRig {
             .await
             .expect("a request to cg OBS within 20 s")
             .expect("the fake cg OBS is running")
+    }
+
+    /// The next `n` calls the fake cg OBS answered, each within 20 s.
+    async fn next_requests(&mut self, n: usize) -> Vec<String> {
+        let mut out = Vec::new();
+        for _ in 0..n {
+            out.push(self.next_request().await);
+        }
+        out
+    }
+
+    /// cg OBS switches its program scene (no event: only a read sees it).
+    fn switch_program_scene(&self, scene: &str) {
+        *self.program_scene.lock().unwrap() = scene.to_string();
     }
 
     /// The requests answered since the last look (no wait).
@@ -523,8 +575,9 @@ async fn an_unrelated_event_asks_nothing_a_reconnect_rereads_and_a_scene_is_foll
     rig.source_becomes(7).await;
     assert_eq!(
         rig.more_requests(),
-        vec![REQUEST.to_string()],
-        "only the reconnect asked cg OBS again"
+        vec![PROGRAM_SCENE, "ScenePlaylists:Slido", REQUEST],
+        "the start caught up to cg OBS's manual scene (the input is off: no \
+         cut), then only the reconnect asked cg OBS again"
     );
     assert_eq!(
         crate::db::models::get_setting(&rig.pool, SETTING_PROGRAM_SOURCE)
@@ -545,24 +598,104 @@ async fn an_unrelated_event_asks_nothing_a_reconnect_rereads_and_a_scene_is_foll
 }
 
 #[tokio::test]
-async fn missed_events_reread_the_transition() {
+async fn missed_events_reread_the_transition_and_catch_up_to_the_program_scene() {
     let pool = pool().await;
     store(&pool, "program_follow_obs", "true").await;
-    // The broadcast keeps ONE event: three sent before the task runs again
-    // lag it by two, and only the last one (the scene change) is still there.
     let mut rig = start(&pool, vec![fade(500)], 1, NO_POLL);
-    assert_eq!(rig.next_request().await, REQUEST);
+    assert_eq!(
+        rig.next_requests(3).await,
+        vec![REQUEST, PROGRAM_SCENE, "ScenePlaylists:Slido"],
+        "the transition, then the start's catch-up (a manual scene: no cut)"
+    );
     rig.spec_becomes((TransitionKind::Fade, 500, 15, SpecSource::Obs))
         .await;
+    // cg OBS switched to sp-fast and its scene event is among the missed
+    // ones: the broadcast keeps ONE event, so three sent before the task runs
+    // again lag it by two, and only the last (a transition change) is left.
+    rig.switch_program_scene("sp-fast");
     rig.raw("SceneItemEnableStateChanged");
     rig.raw("InputVolumeChanged");
-    rig.scene("sp-fast", &[7]);
+    rig.raw("CurrentSceneTransitionChanged");
+    assert_eq!(
+        rig.next_requests(4).await,
+        vec![REQUEST, PROGRAM_SCENE, "ScenePlaylists:sp-fast", REQUEST],
+        "the lag re-read the transition and caught up, then the kept event re-read it"
+    );
+    assert_eq!(
+        rig.bus.status().source,
+        Some(7),
+        "caught up to cg OBS's scene"
+    );
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn a_following_task_catches_up_to_cg_obs_program_scene_at_start() {
+    let pool = pool().await;
+    store(&pool, "program_follow_obs", "true").await;
+    let mut rig = start(&pool, vec![fade(500)], 16, Duration::from_millis(20));
+    rig.switch_program_scene("sp-slow");
+    assert_eq!(
+        rig.next_requests(3).await,
+        vec![REQUEST, PROGRAM_SCENE, "ScenePlaylists:sp-slow"]
+    );
+    rig.source_becomes(8).await;
+    assert_eq!(last_cut(&rig.bus).scene, "sp-slow");
+    // While it keeps following, the settings polls never read the scene again.
+    store(&pool, "program_transition", "cut").await;
+    rig.spec_becomes((TransitionKind::Cut, 0, 0, SpecSource::Setting))
+        .await;
+    assert_eq!(rig.more_requests(), Vec::<String>::new());
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn switching_the_follow_on_catches_up_once() {
+    let pool = pool().await;
+    let mut rig = start(&pool, vec![fade(500)], 16, Duration::from_millis(20));
+    rig.switch_program_scene("sp-fast");
+    assert_eq!(
+        rig.next_request().await,
+        REQUEST,
+        "no follow: no scene read"
+    );
+    store(&pool, "program_follow_obs", "true").await;
     rig.source_becomes(7).await;
     assert_eq!(
         rig.more_requests(),
-        vec![REQUEST.to_string()],
-        "the lag re-read cg OBS's transition once"
+        vec![PROGRAM_SCENE, "ScenePlaylists:sp-fast"],
+        "switching it on caught up to cg OBS's scene"
     );
+    // Later polls, still following, read nothing.
+    store(&pool, "program_transition", "cut").await;
+    rig.spec_becomes((TransitionKind::Cut, 0, 0, SpecSource::Setting))
+        .await;
+    assert_eq!(rig.more_requests(), Vec::<String>::new());
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn a_failed_transition_read_is_retried_until_cg_obs_answers() {
+    let pool = pool().await;
+    // cg OBS is still starting: its first answer is a failure.
+    let failed = json!({
+        "requestType": REQUEST,
+        "requestStatus": { "result": false, "code": 207, "comment": "not ready" },
+    });
+    let mut rig = start(
+        &pool,
+        vec![failed, fade(500)],
+        16,
+        Duration::from_millis(20),
+    );
+    assert_eq!(rig.next_requests(2).await, vec![REQUEST, REQUEST]);
+    rig.spec_becomes((TransitionKind::Fade, 500, 15, SpecSource::Obs))
+        .await;
+    // Answered: the polls stop asking.
+    store(&pool, "program_transition", "cut").await;
+    rig.spec_becomes((TransitionKind::Cut, 0, 0, SpecSource::Setting))
+        .await;
+    assert_eq!(rig.more_requests(), Vec::<String>::new());
     rig.stop().await;
 }
 

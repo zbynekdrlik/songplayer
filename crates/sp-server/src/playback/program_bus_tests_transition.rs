@@ -449,8 +449,12 @@ fn hold_for_keeps_the_outgoing_source_until_one_slot_after_its_window() {
     );
     assert_eq!(core.hold_for(SRC_B), None);
     let (fa, fb) = (frame(4, 2), frame(8, 2));
-    offer_both(&mut core, &fa, &fb, 1..=14);
-    assert_eq!(take_all(&mut core).len(), 14);
+    // Drained in two batches: the program queue holds 10 boundaries.
+    offer_both(&mut core, &fa, &fb, 1..=8);
+    assert_eq!(take_all(&mut core).len(), 8);
+    offer_both(&mut core, &fa, &fb, 9..=14);
+    assert_eq!(take_all(&mut core).len(), 6);
+    assert_eq!(core.status().health.coalesced, 0);
     assert_eq!(
         core.hold_for(SRC_A),
         Some(Hold::Until(b(17))),

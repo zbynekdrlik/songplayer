@@ -471,6 +471,56 @@ fn a_missing_side_mixes_against_the_black_of_the_present_sides_size() {
     );
 }
 
+/// A 4×2 NV12 picture with a padded stride of 6 (as a decoder may lock it):
+/// two 6-byte luma rows, then one 6-byte chroma row; the padding bytes are 7.
+const PADDED_4X2: [u8; 18] = [
+    16, 32, 64, 100, 7, 7, 128, 200, 235, 0, 7, 7, 128, 128, 90, 240, 7, 7,
+];
+const LAYOUT_PADDED: Layout = Layout {
+    width: 4,
+    height: 2,
+    stride: 6,
+    len: 18,
+};
+
+fn padded(stamp: i64, level: f32) -> SubmitJob {
+    SubmitJob {
+        stride: 6,
+        ..pair(4, &PADDED_4X2, stamp, stamp, level)
+    }
+}
+
+#[test]
+fn a_missing_side_is_black_in_the_present_sides_exact_layout_padding_included() {
+    let (_backend, mut out) = output(2, 2);
+    // The incoming side stalled: the outgoing padded picture fades to black.
+    let from_only = mix_at(at(0), Some(padded(at(0), 0.25)), None, 4, 9);
+    let (layout, picture) = out.mix_picture(&from_only).expect("a picture");
+    assert_eq!(
+        layout, LAYOUT_PADDED,
+        "the present side's layout, stride included"
+    );
+    assert_eq!(
+        picture.to_vec(),
+        vec![
+            16, 24, 40, 58, 12, 12, 72, 108, 126, 8, 12, 12, 128, 128, 109, 184, 68, 68
+        ],
+        "½ over a black of the same layout: Y 16 over stride × height, then UV 128"
+    );
+    // A fade up from nothing into a padded source blends too, never a cut.
+    let to_only = mix_at(at(1), None, Some(padded(at(1), 0.5)), 0, 9);
+    let (layout, picture) = out.mix_picture(&to_only).expect("a picture");
+    assert_eq!(layout, LAYOUT_PADDED);
+    assert_eq!(
+        picture.to_vec(),
+        vec![
+            16, 17, 19, 21, 16, 16, 22, 26, 28, 15, 16, 16, 128, 128, 126, 134, 121, 121
+        ],
+        "14/256 of the incoming picture over black"
+    );
+    assert!(!out.size_cut, "a black of the same layout always blends");
+}
+
 #[test]
 fn different_sizes_cut_the_picture_at_the_windows_midpoint_once_per_run() {
     let (backend, mut out) = output(2, 2);

@@ -458,3 +458,21 @@ fn an_active_window_reports_its_progress_in_percent() {
     let cut = Window::new(None, 2, b(3), &TransitionSpec::cut(SpecSource::Obs));
     assert_eq!(ActiveWindow::of(&cut, Some(b(9))).progress, 0);
 }
+
+#[test]
+fn a_truncated_window_reports_its_progress_against_the_boundaries_it_covers() {
+    let mut w = Window::new(
+        Some(1),
+        2,
+        b(3),
+        &TransitionSpec::fade(300, SpecSource::Obs),
+    );
+    w.truncate(b(6)); // a later cut: the window covers b(3)..=b(5)
+    assert_eq!(ActiveWindow::of(&w, Some(b(4))).progress, 66, "2 of 3");
+    let done = ActiveWindow::of(&w, Some(b(5)));
+    assert_eq!(
+        (done.n_slots, done.served_slots, done.progress),
+        (9, 3, 100),
+        "served to its end: 100 %, while the curve keeps its 9 slots"
+    );
+}
