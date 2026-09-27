@@ -360,7 +360,7 @@ impl ProgramCore {
         self.segments.retain(|&(first, _)| first < boundary);
         // #215: the source on air, read BEFORE a waiting window this cut
         // replaces is dropped (its outgoing source is the one on program).
-        let outgoing = self.on_air();
+        let outgoing = self.on_air(boundary);
         // A window that has not started at the new cut boundary is replaced
         // (or cancelled); a running one ends where the new cut starts, and one
         // still waiting for its cue is frozen there. Its outgoing source's

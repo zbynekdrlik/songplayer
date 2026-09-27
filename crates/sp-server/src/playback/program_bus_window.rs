@@ -43,15 +43,19 @@ impl ProgramCore {
         self.windows.iter().find(|w| w.covers(stamp_100ns)).copied()
     }
 
-    /// The source on program: while a window still waits for its cue, its
-    /// OUTGOING source (kept at full level), else the selected source.
-    pub(super) fn on_air(&self) -> Option<i64> {
-        match self
-            .windows
-            .iter()
-            .find(|w| matches!(w.cue, Cue::Waiting { .. }))
-        {
-            Some(waiting) => waiting.from,
+    /// The source on program just before a cut on `boundary`: the OUTGOING
+    /// source of a window that holds it there at full level — one still
+    /// waiting for its cue, or a frozen one that ends right on `boundary` (a
+    /// same-slot re-cut after a cut back dropped the segment that followed
+    /// it) — else the selected source.
+    pub(super) fn on_air(&self, boundary_100ns: i64) -> Option<i64> {
+        let holding = self.windows.iter().find(|w| match w.cue {
+            Cue::Waiting { .. } => true,
+            Cue::Frozen => w.end_100ns == boundary_100ns,
+            Cue::Open => false,
+        });
+        match holding {
+            Some(window) => window.from,
             None => self.selected(),
         }
     }
