@@ -369,18 +369,29 @@ async fn resolume_recovery_never_hides_another_on_program_playlist_s_line() {
     }
 }
 
-/// No SongPlayer playlist is playing on program: the recovery leaves the
-/// subtitle clips alone (going off program already sent its own hide).
+/// Review round 6: no SongPlayer playlist is playing on program, so the
+/// wall's subtitle clips should be blank. The hide sent when the playlist went
+/// off program can itself have been skipped against the host's empty clip map
+/// during the outage, so the recovery clears them (an instant text clear; the
+/// title is left alone, since a HideTitle fades from full opacity and would
+/// flash a stale title that is already hidden).
 #[tokio::test]
-async fn resolume_recovery_sends_nothing_without_an_on_program_playlist() {
+async fn resolume_recovery_clears_the_subtitles_without_an_on_program_playlist() {
     let (mut engine, mut resolume_rx, _ws_rx) = build_engine().await;
     install_pipeline(&mut engine, 99, false, Some(LyricsState::new(make_track())));
     engine.pipelines.get_mut(&99).unwrap().state = PlayState::Playing { video_id: 42 };
 
     engine.handle_resolume_recovery("127.0.0.1").await;
 
+    let mut cmds = Vec::new();
+    while let Ok(cmd) = resolume_rx.try_recv() {
+        cmds.push(cmd);
+    }
     assert!(
-        resolume_rx.try_recv().is_err(),
-        "an off-program playlist gets no Resolume command on recovery"
+        matches!(
+            cmds.as_slice(),
+            [crate::resolume::ResolumeCommand::HideSubtitles]
+        ),
+        "with no on-program line the recovery clears the subtitles, got {cmds:?}"
     );
 }

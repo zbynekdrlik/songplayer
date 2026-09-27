@@ -735,8 +735,9 @@ async fn a_breaker_close_held_back_by_the_retry_window_is_refetched_on_the_next_
 /// fetch is the #157 case, so it waits out the 60 s retry window instead of
 /// taking the every-tick fast path. 31 ticks, 10 s apart, from the relaunch:
 /// fetches at 0, 60, 120, 180, 240, 300 s = 6, not 15. Each failed fetch
-/// makes the next probe fire the #157 `was_failing` RecoveryEvent, so there is
-/// one event per failed fetch (6), never one per tick.
+/// makes the next probe fire the #157 `was_failing` RecoveryEvent. So the
+/// events are the breaker close + the re-push after each failed fetch but the
+/// last (its re-push would come at R+310) = 6, never one per tick.
 #[tokio::test]
 async fn a_failing_composition_after_a_breaker_close_keeps_the_retry_window() {
     let server = arena().await;
