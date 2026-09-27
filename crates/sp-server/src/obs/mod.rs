@@ -102,7 +102,9 @@ pub async fn load_obs_config(pool: &SqlitePool) -> Result<Option<ObsConfig>, sql
     if url.is_empty() {
         return Ok(None);
     }
-    let password = get_setting(pool, "obs_password").await?.unwrap_or_default();
+    let password = get_setting(pool, sp_core::config::SETTING_OBS_WEBSOCKET_PASSWORD)
+        .await?
+        .unwrap_or_default();
     Ok(Some(ObsConfig {
         url,
         password: (!password.is_empty()).then_some(password),
