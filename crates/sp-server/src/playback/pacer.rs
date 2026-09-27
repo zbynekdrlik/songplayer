@@ -117,7 +117,7 @@ pub trait PacedSink {
 
     /// Emit one boundary from an already-shared frame (#203). The DEFAULT builds
     /// a one-shot [`PacedFrame`] over the borrowed pixels and delegates to
-    /// [`emit`](Self::emit), so an `emit`-only sink keeps working;
+    /// [`emit_standby`](Self::emit_standby), so an `emit`-only sink still works;
     /// `FrameSubmitter` OVERRIDES it to move the `SharedFrame` into the zero-copy
     /// holdover. The standby pair (idle / pre-roll black, a starve fill, a held
     /// seek frame, #147) goes through it by SHARED reference (a refcount bump).

@@ -430,15 +430,16 @@ fn bilinear(p00: u8, p01: u8, p10: u8, p11: u8, wx: u32, wy: u32) -> u8 {
 }
 
 /// Whether `layout` is an NV12 picture a buffer of `len` bytes holds whole:
-/// a non-empty size, a stride that fits a row of chroma pairs, and a luma
-/// plane + a half-height chroma plane of `stride` bytes per row.
+/// a stride that fits a row of chroma pairs, and a luma plane + a half-height
+/// chroma plane of `stride` bytes per row. (A zero-size picture passes, and
+/// draws nothing: its placement, or its capped destination, is empty.)
 fn nv12_whole(layout: Layout, len: usize) -> bool {
     let (w, h, stride) = (
         layout.width as usize,
         layout.height as usize,
         layout.stride as usize,
     );
-    w > 0 && h > 0 && stride >= 2 * w.div_ceil(2) && len >= stride * (h + h.div_ceil(2))
+    stride >= 2 * w.div_ceil(2) && len >= stride * (h + h.div_ceil(2))
 }
 
 /// How the outgoing picture is fitted into the incoming layout (#215

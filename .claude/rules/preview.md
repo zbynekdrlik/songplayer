@@ -1,5 +1,6 @@
 ---
 paths:
+  - "crates/sp-server/src/playback/nv12_fit.rs"
   - "crates/sp-server/src/playback/preview.rs"
   - "crates/sp-server/src/playback/preview_stream.rs"
   - "crates/sp-server/src/playback/preview_encoder.rs"

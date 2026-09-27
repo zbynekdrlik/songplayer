@@ -1237,7 +1237,9 @@ Tests:
   `fill_starved` (pre-roll black, starve fill, held seek frame) both go through
   `Pacer::emit_standby_pair` (`on_emit` + `standby_block` + `submit_shared`).
   - The paused `FrozenLast` repeat of a real frame stays a playing-style repeat
-    (`sink.emit`, counts `repeats`), with the same `standby_block`.
+    (counts `repeats`), with the same `standby_block`, but goes through
+    `sink.emit_standby` (#215: a standby pair, not live for the program's cue
+    gate; the default is `emit`, so the NDI submit is unchanged).
   - Both end in `submit_frame_at_boundary_owned`.
 - **Song-change gap WARN.** `decode_and_send_paced` WARNs
   `paced: song change left > 8 boundaries unserviced (grid resync)` when its

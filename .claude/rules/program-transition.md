@@ -6,6 +6,7 @@ paths:
   - "crates/sp-server/src/playback/program_bus*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
   - "crates/sp-server/src/playback/pacer_tests_live.rs"
+  - "crates/sp-server/src/playback/nv12_fit.rs"
   - "crates/sp-server/src/api/program*.rs"
   - "sp-ui/src/components/program_control.rs"
   - "sp-ui/src/components/settings_form.rs"
@@ -108,7 +109,11 @@ cut boundary mixed the outgoing song against silence.
 - `transition.cue_wait_boundaries` = the LAST opened window's wait (0 = live
   on the cut boundary, 15 = timed out; more only if a > 8-slot resync jumped
   past the deadline); `cue_timeouts` counts the timeouts. A frozen window
-  never opens and never touches them.
+  never opens and never touches them. NOT every timeout is a fault: a
+  dashboard cut to a playlist whose scene is not on program (it stays paused,
+  no new song) or to the NDI input with no source offers only standby pairs,
+  so it waits the full 15 boundaries, WARNs and counts one. Read the box's
+  `cue_timeouts` +0 check on the cg OBS scene-change path only.
 - A WAITING cue opens only on its own window's live pair: once a later cut
   froze it, a live pair of its incoming source inside it is held like any
   other (review round 1). `cut` reads `on_air()` BEFORE `windows.retain`, so
@@ -166,7 +171,10 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     fits into a reused scratch `Vec` (`fitted`), and logs one DEBUG line per
     plan naming both layouts;
   - a source or destination that is not whole NV12 for its layout gives the
-    black canvas alone, never a panic.
+    black canvas alone, never a panic (a zero-size one simply draws nothing);
+  - the cost per mixed boundary is the black canvas, the fit and the blend,
+    each a full pass over the destination; if the box's `max_picture_us`
+    reads high, fuse the fit into the blend and paint only the bars.
   The cost is one bilinear fit per mixed boundary on the program thread (≤ 9
   for 300 ms).
 - `mix_audio_block` collects its samples instead of pre-sizing the `Vec`: a
