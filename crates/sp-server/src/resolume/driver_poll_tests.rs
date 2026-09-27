@@ -13,6 +13,21 @@ use super::*;
 const T300: Duration = Duration::from_secs(300);
 const T60: Duration = Duration::from_secs(60);
 
+/// A loaded composition: it carries a SongPlayer clip (`#sp-subs`), so its
+/// mapping is ready. A composition with none is NOT READY and is fetched
+/// again (#217), so the steady-state tests need this one.
+fn loaded_composition() -> serde_json::Value {
+    serde_json::json!({
+        "layers": [{
+            "clips": [{
+                "id": 1,
+                "name": { "value": "#sp-subs" },
+                "video": { "sourceparams": { "Text": { "id": 9, "valuetype": "ParamText" } } }
+            }]
+        }]
+    })
+}
+
 #[test]
 fn decide_forced_is_command() {
     let now = Instant::now();
@@ -368,7 +383,7 @@ async fn steady_state_polls_product_not_composition() {
         .await;
     Mock::given(method("GET"))
         .and(path("/api/v1/composition"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"layers": []})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(loaded_composition()))
         .mount(&server)
         .await;
     let port = server.address().port();
@@ -413,7 +428,7 @@ async fn ttl_expiry_triggers_one_composition_refresh() {
         .await;
     Mock::given(method("GET"))
         .and(path("/api/v1/composition"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"layers": []})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(loaded_composition()))
         .mount(&server)
         .await;
     let port = server.address().port();

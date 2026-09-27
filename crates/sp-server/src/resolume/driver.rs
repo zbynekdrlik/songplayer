@@ -764,3 +764,7 @@ mod tests;
 #[cfg(test)]
 #[path = "driver_poll_tests.rs"]
 mod poll_tests;
+
+#[cfg(test)]
+#[path = "driver_not_ready_tests.rs"]
+mod not_ready_tests;
