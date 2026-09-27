@@ -3,10 +3,29 @@
 
 use std::sync::atomic::Ordering;
 
-use tracing::info;
+use tokio::sync::{broadcast, mpsc};
+use tracing::{debug, info};
 
 use super::state::PlayState;
 use super::title;
+use crate::EngineCommand;
+use crate::resolume::RecoveryEvent;
+
+/// Scaffolding (RED): the forwarder moved out of `lib.rs` unchanged.
+pub(crate) async fn forward_recovery_events(
+    mut events: broadcast::Receiver<RecoveryEvent>,
+    engine_tx: mpsc::Sender<EngineCommand>,
+    mut shutdown: broadcast::Receiver<()>,
+) {
+    loop {
+        tokio::select! {
+            Ok(event) = events.recv() => {
+                let _ = engine_tx.send(EngineCommand::ResolumeRecovered { host: event.host }).await;
+            }
+            _ = shutdown.recv() => break,
+        }
+    }
+}
 
 impl super::PlaybackEngine {
     /// Re-emit current state to a recovered Resolume host: ShowTitle for
@@ -27,6 +46,7 @@ impl super::PlaybackEngine {
             if !pp.scene_active.load(Ordering::Acquire) {
                 continue;
             }
+            debug!(playlist_id, video_id, started = ?pp.started_video_id, "title window inputs");
             // Re-show the title only inside its window (#217 addendum 2).
             // A pending show timer (Started + 1.5 s) shows it itself: a
             // second ShowTitle restarts the fade. A finished end-of-song
@@ -101,3 +121,7 @@ impl super::PlaybackEngine {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "recovery_tests.rs"]
+mod tests;

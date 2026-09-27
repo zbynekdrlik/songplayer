@@ -1,5 +1,6 @@
 //! A title or subtitle push as its own driver step, and what a 404 on it
-//! means (#217 addendum 2). Split from `driver.rs` for the 1000-line cap; a
+//! means (#217 addendum 2); a title push goes through the driver's title
+//! state (#217 addendum 3). Split from `driver.rs` for the 1000-line cap; a
 //! child module of `driver`, so it reads the driver's private state.
 
 use std::sync::atomic::Ordering;
@@ -8,6 +9,7 @@ use std::time::Instant;
 use tracing::{debug, info, warn};
 
 use super::{FULL_REFRESH_RETRY, FULL_REFRESH_TTL, FullRefreshReason, HostDriver};
+use crate::resolume::title_state::{TitleAction, TitleIntent};
 use crate::resolume::{ResolumeCommand, handlers};
 
 impl HostDriver {
@@ -99,21 +101,20 @@ impl HostDriver {
 
     /// The one retry after a refresh that mapped SongPlayer's clips anew. That
     /// refresh has just fired this step's RecoveryEvent, whose engine re-push
-    /// sends the current line and, inside the title window, the title after
-    /// the step (a pending show timer shows the title itself). So:
+    /// resyncs the title after the step and sends the current line. So:
     ///
-    /// - a ShowTitle is left to that re-push: a second ShowTitle restarts the
-    ///   title fade, the blink the one-event-per-step rule prevents;
-    /// - a HideTitle hides at once (`hide_title_now`): the relaunched clip
-    ///   holds Arena's restored state, possibly at opacity 0, and the
-    ///   `hide_title` fade starts at FULL opacity, a flash of stale text;
-    /// - a subtitle push runs again (an instant, harmless double).
+    /// - a title to show (a ShowTitle, a Resync naming one) is left to that
+    ///   Resync, which shows it only inside the engine's title window;
+    /// - anything else runs again. A hide hides at once: the new clip ids
+    ///   made the title state `Unknown` (or the failed hide left it
+    ///   `FadingOut`), so it never fades restored text from full opacity. A
+    ///   subtitle push is an instant, harmless double.
     async fn retry_push(&mut self, cmd: &ResolumeCommand) {
         match cmd {
-            ResolumeCommand::ShowTitle { .. } => {
+            ResolumeCommand::ShowTitle { .. } | ResolumeCommand::Resync { title: Some(_) } => {
                 info!(
                     host = %self.host,
-                    "stale Resolume clip map refreshed — the RecoveryEvent re-pushes the title"
+                    "stale Resolume clip map refreshed — the RecoveryEvent re-syncs the title"
                 );
             }
             ResolumeCommand::HideTitle => {
@@ -121,8 +122,7 @@ impl HostDriver {
                     host = %self.host,
                     "stale Resolume clip map refreshed — hiding the title at once"
                 );
-                let result = handlers::hide_title_now(self).await;
-                self.finish_push("hide_title_now", result);
+                self.run_title_action(TitleAction::HideNow).await;
             }
             _ => {
                 info!(
@@ -135,13 +135,18 @@ impl HostDriver {
     }
 
     /// Run one push command's handler (`finish_push`: log a failure, return
-    /// and clear whether Arena answered 404).
+    /// and clear whether Arena answered 404). A title command goes through
+    /// the title state (`push_title`).
     async fn push(&mut self, cmd: &ResolumeCommand) -> bool {
         let (what, result) = match cmd {
             ResolumeCommand::ShowTitle { song, artist } => {
-                ("show_title", handlers::show_title(self, song, artist).await)
+                let text = handlers::format_title_text(song, artist);
+                return self.push_title(TitleIntent::Show(&text)).await;
             }
-            ResolumeCommand::HideTitle => ("hide_title", handlers::hide_title(self).await),
+            ResolumeCommand::HideTitle => return self.push_title(TitleIntent::Hide).await,
+            ResolumeCommand::Resync { title } => {
+                return self.push_title(TitleIntent::Resync(title.as_deref())).await;
+            }
             ResolumeCommand::ShowSubtitles {
                 en,
                 next_en,
@@ -168,6 +173,45 @@ impl HostDriver {
         self.finish_push(what, result)
     }
 
+    /// One title command, acted on only where it differs from what the wall
+    /// shows (#217 addendum 3, `TitleState::plan`).
+    async fn push_title(&mut self, intent: TitleIntent<'_>) -> bool {
+        let action = self.title.plan(intent);
+        debug!(
+            host = %self.host,
+            ?intent,
+            state = ?self.title.state(),
+            ?action,
+            "Resolume title command"
+        );
+        self.run_title_action(action).await
+    }
+
+    /// Run a title action on the `#sp-title` clips and record it in the title
+    /// state: between states while it runs, the new state once every request
+    /// answered. Without title clips nothing runs and the state is kept (the
+    /// clips a later refresh maps decide it). Returns the 404 note.
+    async fn run_title_action(&mut self, action: TitleAction<'_>) -> bool {
+        let what = match action {
+            TitleAction::Nothing => return false,
+            TitleAction::FadeIn(_) => "show_title",
+            TitleAction::FadeOut => "hide_title",
+            TitleAction::HideNow => "hide_title_now",
+        };
+        let Some(clips) = handlers::clips_for_title(self) else {
+            debug!(host = %self.host, "{what}: no #sp-title clips mapped — title state kept");
+            return false;
+        };
+        self.title.begin(action, clips);
+        let result = match action {
+            TitleAction::FadeIn(text) => handlers::show_title(self, text).await,
+            TitleAction::FadeOut => handlers::hide_title(self).await,
+            TitleAction::HideNow | TitleAction::Nothing => handlers::hide_title_now(self).await,
+        };
+        self.title.finish(result.is_ok());
+        self.finish_push(what, result)
+    }
+
     /// End one push: log a failure, and return whether Arena answered 404 to
     /// any of its requests, clearing that note, so it is false again outside
     /// a push.
@@ -178,3 +222,7 @@ impl HostDriver {
         self.stale_id_seen.swap(false, Ordering::Relaxed)
     }
 }
+
+#[cfg(test)]
+#[path = "driver_title_tests.rs"]
+mod title_tests;

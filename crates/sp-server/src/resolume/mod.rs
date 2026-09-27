@@ -2,6 +2,7 @@
 
 pub mod driver;
 pub mod handlers;
+pub(crate) mod title_state;
 
 use std::collections::HashMap;
 
@@ -50,6 +51,14 @@ pub enum ResolumeCommand {
     ShowTitle { song: String, artist: String },
     /// Hide the title (fade out + clear text) on all `#sp-title` clips.
     HideTitle,
+    /// The title that SHOULD be on the wall now (`handlers::format_title_text`
+    /// text, `None` = no title), sent after a recovery and on an OBS scene-on
+    /// (#217 addendum 3). The driver owns what the wall shows and acts only on
+    /// a difference: nothing when that title is up, a fade-in when it is not,
+    /// an instant hide when no title must be up. It also supersedes the title
+    /// commands queued before it. The subtitle half of a resync is the plain
+    /// `ShowSubtitles` / `HideSubtitles`: instant writes, nothing to compare.
+    Resync { title: Option<String> },
     /// Show subtitle text (lyrics) on Resolume subtitle clips.
     ShowSubtitles {
         en: String,

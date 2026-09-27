@@ -46,7 +46,7 @@ pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI
 pub mod program_follow; // #215: SP-program follows cg OBS + the transition settings/spec task
 pub mod program_output; // #209: the SP-program sender + its thread
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
-mod recovery;
+pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns
 mod runtime_pipeline;
 mod scene_off; // #215: the deferred scene-go-off pause of the program's outgoing source
 pub mod startup_senders; // #196 deterministic restart-safe NDI sender startup (pure port-wait + order)
@@ -166,6 +166,10 @@ struct PlaylistPipeline {
     /// current subtitle line. The re-push line may be up to one Position
     /// tick (~500 ms) behind the audio's actual playhead.
     cached_position_ms: u64,
+    /// The video whose `Started` the engine last handled. Until the current
+    /// video's own `Started`, the position and duration above are the
+    /// previous song's, so its title window stays closed (#217 addendum 3).
+    started_video_id: Option<i64>,
     /// Pause snapshot; consumed on manual /play to resume same song. #88.
     paused_at: Option<(i64, u64)>,
 }

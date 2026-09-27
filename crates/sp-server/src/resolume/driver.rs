@@ -291,8 +291,8 @@ pub struct HostDriver {
     /// the startup refresh) has already broadcast a `RecoveryEvent`. The
     /// engine's re-push for it queues on this driver's command channel and
     /// runs AFTER the step, against the map the step ends with, so the ready
-    /// transition must not fire a second one: a second `ShowTitle` restarts
-    /// the title fade (#217 review round 1).
+    /// transition must not fire a second one: a second re-push is redundant
+    /// (it used to restart the title fade, #217 review round 1).
     recovery_sent_this_step: bool,
     /// Set by a push answered `404 Not Found` (`note_push_status`), read and
     /// cleared by `finish_push` (the end of every push). Atomic because `set_text` /
@@ -304,6 +304,9 @@ pub struct HostDriver {
     /// stale (no relaunch). A 404 marks the map stale again only
     /// `FULL_REFRESH_RETRY` later (#217 addendum 2).
     refused_ids_at: Option<Instant>,
+    /// What the driver last did to the `#sp-title` clips: every title command
+    /// acts only on a difference (#217 addendum 3, `title_state.rs`).
+    title: crate::resolume::title_state::WallTitle,
     /// Set via `with_recovery_channel` builder; never accessed directly.
     recovery_tx: Option<tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>>,
     /// Set via `with_health_channel` builder; never accessed directly.
@@ -334,6 +337,7 @@ impl HostDriver {
             recovery_sent_this_step: false,
             stale_id_seen: AtomicBool::new(false),
             refused_ids_at: None,
+            title: crate::resolume::title_state::WallTitle::new(),
             recovery_tx: None,
             health_tx: None,
         }
@@ -380,12 +384,15 @@ impl HostDriver {
         loop {
             tokio::select! {
                 Some(cmd) = rx.recv() => {
-                    self.handle_command(cmd).await;
-                    next_probe = self.tick_due_after_command(
-                        next_probe,
-                        tokio::time::Instant::now(),
-                        Instant::now(),
-                    );
+                    // With everything queued behind it (a Resync supersedes titles).
+                    for cmd in crate::resolume::title_state::take_queued(cmd, &mut rx) {
+                        self.handle_command(cmd).await;
+                        next_probe = self.tick_due_after_command(
+                            next_probe,
+                            tokio::time::Instant::now(),
+                            Instant::now(),
+                        );
+                    }
                 }
                 _ = tokio::time::sleep_until(next_probe) => {
                     self.on_tick_at(Instant::now()).await;
@@ -694,12 +701,15 @@ impl HostDriver {
                         clips = total,
                         "updated Resolume clip mapping"
                     );
+                    // New #sp-title ids = a relaunch: the title state is unknown.
+                    self.title
+                        .note_clips(new_mapping.get(crate::resolume::TITLE_TOKEN));
                     self.clip_mapping = new_mapping;
                 }
                 // `apply_outcome` fires its own RecoveryEvent when it closes
                 // the breaker, and so may this step's probe. That re-push runs
                 // after the step, against the ready map, so one step never
-                // fires twice: a second ShowTitle restarts the title fade. A
+                // fires twice (a second re-push is redundant work). A
                 // map that came back UNCHANGED lost nothing (a 404 on an id
                 // Arena still lists): nothing to re-push (#217 addendum 2).
                 self.apply_outcome(true);
@@ -960,3 +970,7 @@ mod not_ready_tests;
 #[cfg(test)]
 #[path = "driver_relaunch_tests.rs"]
 mod relaunch_tests;
+
+#[cfg(test)]
+#[path = "driver_probe_tests.rs"]
+mod probe_tests;

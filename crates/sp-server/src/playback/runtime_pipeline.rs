@@ -185,6 +185,7 @@ impl PlaybackEngine {
                 last_resolume_subtitles_signature: None,
                 last_lyrics_ws_signature: None,
                 cached_position_ms: 0,
+                started_video_id: None,
                 paused_at: None,
             }
         });
