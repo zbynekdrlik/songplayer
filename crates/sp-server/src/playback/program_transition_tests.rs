@@ -826,3 +826,45 @@ fn a_later_cut_freezes_a_waiting_cue_but_only_truncates_an_open_one() {
     assert_eq!((open.cue, open.end_100ns), (Cue::Open, b(8)));
     assert_eq!((open.covered(), open.served(Some(b(20)))), (4, 4));
 }
+
+#[test]
+fn a_window_holds_its_outgoing_source_from_its_cut_to_its_end_while_its_cue_does_not_run() {
+    // #215 review rounds 4 + 5: the ONE predicate behind `on_air` and the
+    // freeze. The waiting fade: cut b(3), latest end b(3 + 15 + 9) = b(27).
+    let waiting = Window::cued(
+        Some(1),
+        2,
+        b(3),
+        &TransitionSpec::fade(300, SpecSource::Obs),
+    );
+    assert!(!waiting.holds_on_air(b(2)), "a cut before it replaces it");
+    assert!(waiting.holds_on_air(b(3)), "a same-slot re-cut");
+    assert!(waiting.holds_on_air(b(27)), "a cut on its latest end");
+    assert!(!waiting.holds_on_air(b(28)), "past its latest end");
+    let mut open = waiting;
+    open.open(b(4));
+    assert!(
+        !open.holds_on_air(b(5)),
+        "an open fade mixes, it holds nothing"
+    );
+
+    let mut frozen = waiting;
+    assert!(frozen.truncate(b(6)), "a cut inside its span freezes it");
+    assert!(frozen.holds_on_air(b(6)), "frozen, ending on the boundary");
+    assert!(!frozen.truncate(b(5)), "already frozen: only truncated");
+    assert_eq!((frozen.cue, frozen.end_100ns), (Cue::Frozen, b(5)));
+
+    let mut on_end = waiting;
+    assert!(on_end.truncate(b(27)), "a cut on its latest end freezes it");
+    assert_eq!(on_end.cue, Cue::Frozen);
+    let mut late = waiting;
+    assert!(
+        !late.truncate(b(28)),
+        "a cut after its latest end leaves it waiting"
+    );
+    assert_eq!((late.cue, late.end_100ns), (waiting.cue, b(27)));
+
+    let mut running = open;
+    assert!(!running.truncate(b(8)), "an open fade is only truncated");
+    assert_eq!((running.cue, running.end_100ns), (Cue::Open, b(8)));
+}
