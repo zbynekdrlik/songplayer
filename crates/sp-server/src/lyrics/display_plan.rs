@@ -17,8 +17,10 @@
 //!    it cannot merge forward, it merges backward under the same limits. The
 //!    Slovak text is joined the same way as the English. Merging repeats until
 //!    no rule applies.
-//! 2. **Lead.** A line shows at `max(start - LEAD_MS, prev.sung_end,
+//! 2. **Lead.** A line shows at `max(start - lead, prev.sung_end,
 //!    prev.show + MIN_VISIBLE_MS)`, but never after it is sung (`<= start`).
+//!    `lead` is the profile's [`DisplayProfile::lead_ms`]: [`LEAD_MS`] for a
+//!    song, 0 for speech.
 //!    It appears early only once the previous line has been sung to its end
 //!    (ROZHODNUTÉ on #217). When the previous lines leave no room, it shows
 //!    exactly when it is sung. So a line never leaves the wall while it is
@@ -45,8 +47,9 @@ use sp_core::lyrics::LyricsLine;
 
 use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
 
-/// How long before it is sung a line appears on the wall, so the room can
-/// pre-read it.
+/// The most a `Song` line appears on the wall before it is sung, so the room
+/// can pre-read it. It is less when the previous line is still being sung;
+/// `Speech` has no lead.
 pub const LEAD_MS: u64 = 1_500;
 
 /// The shortest time a line stays on the wall (no blinking). A line gets less
