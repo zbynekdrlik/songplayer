@@ -195,6 +195,11 @@ it polls the push-run `Gate` check (needs `checks: read`) to confirm it was gree
 closing the hole where a shared failure reds the push Gate but is skipped-ok on the
 PR Gate. `version-check` must stay `pull_request`-only (a dev push legitimately has a
 `-dev` VERSION).
+The poll is bounded at ~45 min (90 × 30 s): the push Gate waits for Build Tauri
+AND every mutation shard (20-min bound each, up to 64 shards). The old ~15 min bound
+timed out on release PRs #211/#214 while the push Gate later went green. If it still
+times out, re-run ONLY the failed PR Gate job once the push Gate is green
+(`gh run rerun <pr-run> --failed`).
 
 ## RED-GREEN gate: retroactive `[no-test: <sha> <reason>]` (release PR #160)
 `scripts/check-red-green-order.sh` runs on the PR event over the whole
