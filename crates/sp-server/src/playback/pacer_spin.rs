@@ -6,6 +6,10 @@
 //! boundary, then waits here. A normal boundary arrives within those ~2 ms, so
 //! it never reaches [`SPIN_BUDGET`] and keeps full spin precision.
 //!
+//! Worst case: a plan read inside a resample's ≤ 1 ms hold makes the coarse
+//! sleep short by the un-slept rest of that hold, so the spin starts < 3 ms
+//! before the boundary. The inclusive budget still covers that.
+//!
 //! A followed backward date step is ONE hold of the pacer's wall, up to ~1.5 s
 //! (`genlock.md`). The wall freezes a few µs PAST the emitted boundary, so
 //! `0 < until − now ≤ interval` for the whole hold, and an unbounded spin burned
@@ -21,8 +25,9 @@ use std::time::{Duration, Instant};
 
 use crate::playback::pacer::Pacer;
 
-/// How long a boundary wait may busy-spin before it yields: above the 2 ms spin
-/// margin plus scheduler jitter, so a normal boundary never reaches it.
+/// How long a boundary wait may busy-spin before it yields. It sits above the
+/// 2 ms spin margin plus the < 1 ms rest of a resample hold, so a normal
+/// boundary never reaches it.
 pub const SPIN_BUDGET: Duration = Duration::from_millis(3);
 
 /// One check's wait once the spin is past [`SPIN_BUDGET`]: a 1 ms sleep (the

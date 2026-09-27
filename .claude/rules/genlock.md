@@ -993,15 +993,25 @@ Now:
         spin) → Spin;
       - otherwise → Yield (`thread::sleep(1 ms)`).
     - A normal boundary never reaches the budget, so its precision is
-      unchanged. The spin starts ≤ ~2 ms before the boundary, and a resample's
-      ≤ 1 ms hold starts at the tick right after an emit, so it ends long
-      before the next wait's spin.
+      unchanged. The spin normally starts ~2 ms (the coarse-sleep margin)
+      before the boundary.
+      - Worst case: a resample's ≤ 1 ms hold starts at the tick right after
+        an emit. If the next wait's plan read lands inside that hold, the
+        coarse sleep comes out short by the un-slept rest of the hold, so the
+        spin starts up to 2 ms + that rest (< 1 ms) early. That is < 3 ms.
+      - The inclusive budget covers it: the rest is always less than the
+        whole hold, and the coarse sleep's overshoot only shortens the spin.
+      - A 1 ms hold is rare: it is a clamped resample, i.e. the first sighting
+        of a step, not normal µs slewing.
     - A hold costs ~1 wake-up per ms, and the boundary goes out ≤ ~1 ms after
       the wall resumes.
     - A wait that yielded logs ONE INFO line, `paced: the wall stood still
       through a boundary wait` (`yields`, `spins`). At the 04:00 step expect
-      one per paced thread, and none at any other time. A line outside a
-      followed hold means something froze the wall: investigate it.
+      one per paced thread.
+      - A line right after a `re-anchor delta over 1 ms` WARN is the clamped
+        1 ms hold edge above (at most one 1 ms yield), not a frozen wall.
+      - Any other line outside a followed hold means something froze the
+        wall: investigate it.
     - `pacer_spin.rs` is cross-platform and mutation-covered. It is NOT named
       `pipeline_paced_*`, because `.cargo/mutants.toml` excludes that
       substring.

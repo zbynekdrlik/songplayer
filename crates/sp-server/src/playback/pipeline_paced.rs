@@ -98,7 +98,9 @@ fn to_paced_frame(
 }
 
 /// Sleep the monotonic clock until ~2 ms before `until_100ns` (wall-clock
-/// 100 ns), then spin to the boundary. The coarse wait is clamped to 1 s and a
+/// 100 ns), then spin to the boundary. The spin stays within
+/// `pacer_spin::SPIN_BUDGET`; after that, while the wall stands still, it
+/// yields `SPIN_YIELD` per check. The coarse wait is clamped to 1 s and a
 /// backward clock jump escapes without spinning (#147 change 4, via the pure
 /// [`plan_sleep_100ns`]), so a clock step never parks the send thread.
 pub(crate) fn sleep_to_boundary(pacer: &Pacer, until_100ns: i64) {
