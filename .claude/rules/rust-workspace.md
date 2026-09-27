@@ -373,6 +373,21 @@ the test that kills each one BEFORE CI's mutation gate runs.
   is observable (#217 addendum 2 review round 3).
 - A mutation that cannot compile (`&&`→`||` inside a let-chain) is
   "unviable": it costs a build but cannot fail the gate.
+- `(at - plane) % ds` where `plane` is a multiple of `ds` (a plane or row
+  edge): the `-`→`+` mutant gives the SAME remainder, so it is equivalent
+  and survives. Subtract ONCE into a local (`let offset = …; (offset / ds,
+  offset % ds)`), so the mutant also moves the quotient, which a test sees
+  (#215 addendum 3, `nv12_mix.rs`).
+- **A Python mutation harness for a pure kernel (#215 addendum 3).** Mirror
+  the Rust function in the scratch model with one switch per listed mutant
+  (`cargo mutants --in-diff … --list`) and a mirror of the Rust tests. Also
+  emulate Rust's panics: usize underflow, slice / index bounds, division by
+  zero, and `clamp(lo > hi)`. Python wraps negative indices silently, so
+  those panics must be raised by hand. A Python survivor is then a superset
+  of the Rust ones; zero survivors is the local evidence before the CI gate.
+  A mutant that only a mid-row / off-edge input can reveal (`a - c0` with
+  `c0` always 0 on row-aligned runs) needs a test that cuts the input
+  arbitrarily.
 
 **`tokio::select!` drops the branch futures before a handler runs**
 (tokio `macros/select.rs`: the futures live inside the `let output = {…}`
