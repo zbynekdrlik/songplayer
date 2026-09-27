@@ -5,6 +5,7 @@ paths:
   - "crates/sp-server/src/playback/position_update.rs"
   - "crates/sp-server/src/playback/recovery.rs"
   - "crates/sp-server/tests/fixtures/lyrics_*.json"
+  - "crates/sp-server/src/dabing/subtitles*.rs"
 ---
 
 # LED-wall lyrics display plan — hold, lead, merge, min visibility (#217)
@@ -100,11 +101,15 @@ one only together with the design record on #217.
   read `lead_ms` from the `lyrics: loaded … display_lines=…` log line. If it
   is not 0, the total lead is over 1.5 s.
 - **The lead can replace a line while it is still sung, and sometimes even
-  before it is sung.** This happens whenever the next line is sung within
-  `LEAD_MS` of this line's start and this line already had `MIN_VISIBLE_MS`
-  of lead. It follows the design as written (record
-  5853195402): a line shows at `start − 1500` as long as the previous line got
-  its 1200 ms, and nothing waits for the previous line's sung end.
+  before it is sung.**
+  - It leaves while still sung whenever the next line's show falls before
+    this line's sung end.
+  - It leaves at or before its sung START when the next line is sung at most
+    `LEAD_MS` after this start and this line had at least `MIN_VISIBLE_MS`
+    of lead.
+  - This follows the design as written (record 5853195402): a line shows at
+    `start − 1500` as long as the previous line got its 1200 ms, and nothing
+    waits for the previous line's sung end.
   - On the fixture every line gets the full 1500 ms lead. But 68 of 137 wall
     lines leave before their sung end, 41.7 s in total.
   - "All I have" (sung at 509.6 s) is on the wall only 508.1–509.5 s.
