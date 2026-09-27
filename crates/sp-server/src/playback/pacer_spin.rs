@@ -15,8 +15,11 @@
 //! `0 < until − now ≤ interval` for the whole hold, and an unbounded spin burned
 //! one core per paced thread through it. Past the budget, measured on the
 //! MONOTONIC clock (which keeps running through a hold), each check yields
-//! [`SPIN_YIELD`] instead. A frozen wall then costs ~1 wake-up per ms, and the
-//! boundary goes out at most ~1 ms after the wall resumes.
+//! [`SPIN_YIELD`] instead. A frozen wall then costs ~1 wake-up per ms. The wall
+//! resumes from its frozen value, so the awaited boundary is still ~one slot
+//! ahead, and the wait keeps yielding through that slot too. That boundary goes
+//! out at most ~1 ms after the wall reaches it: the one boundary per hold
+//! without spin precision.
 //!
 //! Cross-platform and Linux-tested (`pacer_spin_tests.rs`): `pipeline_paced`
 //! itself is `#[cfg(windows)]` and excluded from the mutation gate.

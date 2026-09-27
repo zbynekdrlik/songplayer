@@ -985,7 +985,7 @@ Now:
       PAST the emitted boundary (emit lateness), so `0 < until − now ≤
       interval` holds for either slot width (333 333 / 333 334) for the whole
       hold. The old unbounded spin therefore burned one core per paced thread
-      through the ~1.5 s hold, once a night.
+      through the ~1.5 s hold, at most once a night (a backward step).
     - The pure `spin_step(elapsed, delta, interval)` decides every check:
       - `delta ≤ 0` → Done;
       - `interval > 0 && delta > interval` → Bail (unchanged);
@@ -1001,17 +1001,24 @@ Now:
         spin starts up to 2 ms + that rest (< 1 ms) early. That is < 3 ms.
       - The inclusive budget covers it: the rest is always less than the
         whole hold, the coarse sleep's overshoot only shortens the spin, and
-        std's `thread::sleep` never returns early. So that edge never yields
-        and never logs the line below.
+        std documents that `thread::sleep` never sleeps less. So that edge
+        never yields and never logs the line below.
       - A hold near 1 ms is rare. It follows a UTC step or an outlier (a
         clamped resample, or the resample that takes it back out), never
         normal µs slewing.
-    - A hold costs ~1 wake-up per ms, and the boundary goes out ≤ ~1 ms after
-      the wall resumes.
+    - A hold costs ~1 wake-up per ms, through the hold and through the slot
+      after it. The wall resumes from its frozen value, so the awaited
+      boundary is still ~one slot ahead, and the wait, already past its
+      budget, keeps yielding.
+    - That boundary goes out ≤ ~1 ms after the wall REACHES it. It is the one
+      boundary per hold without spin precision (still under the 2 ms late
+      threshold).
     - A wait that yielded logs ONE INFO line, `paced: the wall stood still
-      through a boundary wait` (`yields`, `spins`). At the 04:00 step expect
-      one per paced thread. Any line outside a followed hold means something
-      froze the wall (or a coarse timer woke early): investigate it.
+      through a boundary wait` (`yields`, `spins`).
+      - At a backward 04:00 step (~1.5 s hold) expect one per paced thread. A
+        forward step holds nothing, so it logs none.
+      - Any line outside a followed backward hold means something froze the
+        wall (or the coarse sleep broke its contract): investigate it.
     - `pacer_spin.rs` is cross-platform and mutation-covered. It is NOT named
       `pipeline_paced_*`, because `.cargo/mutants.toml` excludes that
       substring.
