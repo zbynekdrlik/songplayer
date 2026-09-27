@@ -29,7 +29,8 @@ the RAW track, keeping its word timing. The raw `resolume_lines` was deleted
 **Two display profiles, chosen at load from the track's `source`**
 (`DisplayProfile::for_source`):
 
-- `Song` is every sung-lyrics track and gets the 1.5 s lead.
+- `Song` is every sung-lyrics track and gets a lead of up to 1.5 s (floored
+  at the previous line's sung end, step 2).
 - `Speech` is a dub subtitle track: `source ==
   dabing::subtitles::SOURCE_LIVE_TRANSLATE` (`"gemini-live-translate"`). That
   is the same marker the translation worker already excludes dub tracks by.

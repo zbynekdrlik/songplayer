@@ -44,10 +44,10 @@ fn append_reference_star(s: String, is_reference: bool) -> String {
 pub struct LyricsState {
     track: LyricsTrack,
     /// What the LED wall and the Presenter show (#217): merged fragments,
-    /// each held until the next line and shown per its `DisplayProfile`. A
-    /// song leads by up to `LEAD_MS` once the previous line is sung; speech
-    /// has no lead. Built once per loaded track. The dashboard path (`update`) keeps the raw `track` and its
-    /// word timing.
+    /// each held until the next line and shown per the track's
+    /// `DisplayProfile`. A song leads by up to `LEAD_MS` once the previous
+    /// line is sung; speech has no lead. Built once per loaded track. The
+    /// dashboard path (`update`) keeps the raw `track` and its word timing.
     plan: DisplayPlan,
     /// Operator lead time (ms) shifted into every stage-display / LED-wall
     /// lookup, on top of the plan's own lead.

@@ -33,7 +33,8 @@
 //!    fits, it is shown exactly.
 //!
 //! The [`DisplayProfile`] sets the lead. Sung lyrics ([`DisplayProfile::Song`])
-//! lead by [`LEAD_MS`]. Dub subtitles of speech ([`DisplayProfile::Speech`])
+//! lead by up to [`LEAD_MS`] (less when the previous line is still sung, see
+//! step 2). Dub subtitles of speech ([`DisplayProfile::Speech`])
 //! have no lead: each line shows exactly when it is spoken, while merge and
 //! hold stay the same (ROZHODNUTÉ on #217).
 //!
@@ -48,8 +49,9 @@ use sp_core::lyrics::LyricsLine;
 use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
 
 /// The most a `Song` line appears on the wall before it is sung, so the room
-/// can pre-read it. It is less when the previous line is still being sung;
-/// `Speech` has no lead.
+/// can pre-read it. It is less when the previous line is still being sung or
+/// has not yet been on the wall for [`MIN_VISIBLE_MS`], and near the track
+/// start; `Speech` has no lead.
 pub const LEAD_MS: u64 = 1_500;
 
 /// The shortest time a line stays on the wall (no blinking). A line gets less
