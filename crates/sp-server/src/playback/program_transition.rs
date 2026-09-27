@@ -22,9 +22,10 @@
 //! A Cut is a window of zero boundaries: nothing is mixed, so its output is
 //! exactly the #209 hard cut.
 //!
-//! The window's stamps use exact grid indices ([`boundary_index`] /
-//! [`boundary_at`]): at 30 fps the slots are 333 333 or 333 334 × 100 ns wide,
-//! so `start + k · interval` would drift off the grid.
+//! The window's stamps use exact grid indices
+//! (`sp_core::genlock::{grid_index_100ns, grid_boundary_100ns}`): at 30 fps
+//! the slots are 333 333 or 333 334 × 100 ns wide, so `start + k · interval`
+//! would drift off the grid.
 //!
 //! This file also holds the transition SPEC, meaning what the next cut does:
 //! cg OBS's current transition or the operator's override
@@ -35,7 +36,7 @@
 use std::f64::consts::FRAC_PI_2;
 
 use serde::Serialize;
-use sp_core::genlock::{GENLOCK_GRID_FPS, UNITS_PER_SECOND};
+use sp_core::genlock::{GENLOCK_GRID_FPS, grid_boundary_100ns, grid_index_100ns};
 use sp_ndi::AudioFrame;
 
 use crate::playback::submit_handoff::SubmitJob;
@@ -177,22 +178,6 @@ pub fn effective_spec(
     }
 }
 
-/// The grid index of an on-grid boundary: `second · fps + slot`. The exact
-/// inverse of [`boundary_at`] (stamps are post-2020 wall readings, so they are
-/// positive).
-pub fn boundary_index(boundary_100ns: i64) -> i64 {
-    let fps = GENLOCK_GRID_FPS;
-    let offset = (boundary_100ns % UNITS_PER_SECOND) as u64;
-    let slot = (offset * fps as u64).div_ceil(UNITS_PER_SECOND as u64) as i64;
-    (boundary_100ns / UNITS_PER_SECOND) * fps + slot
-}
-
-/// The boundary with grid index `index` (the `floor_boundary_100ns` grid).
-pub fn boundary_at(index: i64) -> i64 {
-    let fps = GENLOCK_GRID_FPS;
-    (index / fps) * UNITS_PER_SECOND + (index % fps) * UNITS_PER_SECOND / fps
-}
-
 /// One transition window on the program grid (see the module doc).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Window {
@@ -214,14 +199,14 @@ pub struct Window {
 impl Window {
     /// The window of a cut from `from` to `to` on `start` with `spec`.
     pub fn new(from: Option<i64>, to: i64, start_100ns: i64, spec: &TransitionSpec) -> Self {
-        let start_index = boundary_index(start_100ns);
+        let start_index = grid_index_100ns(start_100ns, GENLOCK_GRID_FPS);
         Self {
             from,
             to,
             kind: spec.kind,
             start_100ns,
             n_slots: spec.n_slots,
-            end_100ns: boundary_at(start_index + i64::from(spec.n_slots)),
+            end_100ns: grid_boundary_100ns(start_index + i64::from(spec.n_slots), GENLOCK_GRID_FPS),
             start_index,
         }
     }
@@ -231,7 +216,7 @@ impl Window {
         if boundary_100ns < self.start_100ns || boundary_100ns >= self.end_100ns {
             return None;
         }
-        u32::try_from(boundary_index(boundary_100ns) - self.start_index).ok()
+        u32::try_from(grid_index_100ns(boundary_100ns, GENLOCK_GRID_FPS) - self.start_index).ok()
     }
 
     /// End the window at `at` (a later cut starts there).
@@ -242,13 +227,16 @@ impl Window {
     /// How many boundaries the window covers: `n_slots`, or fewer once a
     /// later cut truncated it.
     pub fn covered(&self) -> u32 {
-        u32::try_from(boundary_index(self.end_100ns) - self.start_index).unwrap_or(0)
+        u32::try_from(grid_index_100ns(self.end_100ns, GENLOCK_GRID_FPS) - self.start_index)
+            .unwrap_or(0)
     }
 
     /// How many of the window's boundaries are at or before `last` (the last
     /// boundary the program committed).
     pub fn served(&self, last: Option<i64>) -> u32 {
-        let upto = last.map_or(0, |l| boundary_index(l) - self.start_index + 1);
+        let upto = last.map_or(0, |l| {
+            grid_index_100ns(l, GENLOCK_GRID_FPS) - self.start_index + 1
+        });
         u32::try_from(upto.clamp(0, i64::from(self.covered()))).unwrap_or(0)
     }
 }

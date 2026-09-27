@@ -121,20 +121,6 @@ fn the_transition_settings_parse_with_obs_and_300_ms_as_defaults() {
 }
 
 #[test]
-fn grid_indices_round_trip_every_boundary_across_second_edges() {
-    // T0 is exactly on a second: index = second · 30.
-    assert_eq!(boundary_index(T0), 53_700_000_000);
-    assert_eq!(boundary_at(53_700_000_001), T0 + 333_333);
-    assert_eq!(boundary_at(53_700_000_029), T0 + 9_666_666);
-    assert_eq!(boundary_at(53_700_000_030), T0 + 10_000_000);
-    let first = boundary_index(b(0));
-    for k in 0..70 {
-        assert_eq!(boundary_index(b(k)), first + k as i64, "index of b({k})");
-        assert_eq!(boundary_at(first + k as i64), b(k), "boundary of b({k})");
-    }
-}
-
-#[test]
 fn a_window_spans_exactly_its_slots_and_is_served_boundary_by_boundary() {
     let w = Window::new(
         Some(1),
