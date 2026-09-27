@@ -82,7 +82,9 @@ impl ProgramCore {
             Cue::Waiting { deadline_100ns } => Some(deadline_100ns),
             Cue::Frozen => None,
         };
-        let to_live = self.pending.get(&expected).is_some_and(|job| job.live);
+        // Only a WAITING cue opens: a frozen one stays held to its end, even
+        // when its incoming source goes live inside it (review round 1).
+        let to_live = deadline.is_some() && self.pending.get(&expected).is_some_and(|job| job.live);
         let to_decided = to_done || forced;
         if to_live || (to_decided && deadline.is_some_and(|d| expected >= d)) {
             self.open_cue(expected, to_live);

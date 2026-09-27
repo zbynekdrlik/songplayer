@@ -358,13 +358,15 @@ impl ProgramCore {
             boundary = strict_next_boundary_100ns(boundary, self.fps);
         }
         self.segments.retain(|&(first, _)| first < boundary);
-        // #215: a window that has not started at the new cut boundary is
-        // replaced (or cancelled); a running one ends where the new cut starts,
-        // and one still waiting for its cue is frozen there. Its outgoing
-        // source's frames are all older than `boundary`: the cut is placed
-        // after the newest stamp of every window's `from` too.
-        self.windows.retain(|w| w.cut_100ns < boundary);
+        // #215: the source on air, read BEFORE a waiting window this cut
+        // replaces is dropped (its outgoing source is the one on program).
         let outgoing = self.on_air();
+        // A window that has not started at the new cut boundary is replaced
+        // (or cancelled); a running one ends where the new cut starts, and one
+        // still waiting for its cue is frozen there. Its outgoing source's
+        // frames are all older than `boundary`: the cut is placed after the
+        // newest stamp of every window's `from` too.
+        self.windows.retain(|w| w.cut_100ns < boundary);
         for w in &mut self.windows {
             w.truncate(boundary);
         }
