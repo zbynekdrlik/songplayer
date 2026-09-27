@@ -165,7 +165,10 @@ fn a_fade_mixes_exactly_its_n_boundaries_then_the_new_source_alone() {
             transitions_done: 1,
             mixed_boundaries: 9,
             side_fills: 0,
-        }
+            cue_wait_boundaries: 0,
+            cue_timeouts: 0,
+        },
+        "B was live on the cut boundary: no wait"
     );
     assert_eq!(st.transition.active, None, "the window is over");
     let h = st.health;
@@ -485,9 +488,9 @@ fn a_cut_is_the_zero_length_window_the_209_cut_unchanged() {
         st.transition.counters,
         TransitionCounters {
             transitions_done: 1,
-            mixed_boundaries: 0,
-            side_fills: 0,
-        }
+            ..TransitionCounters::default()
+        },
+        "a Cut never waits for a cue"
     );
     assert_eq!((st.health.forwarded, st.health.filled), (12, 0));
 }
@@ -613,7 +616,10 @@ fn a_second_cut_inside_a_window_truncates_it_and_opens_the_next_window() {
             transitions_done: 2,
             mixed_boundaries: 13,
             side_fills: 0,
-        }
+            cue_wait_boundaries: 0,
+            cue_timeouts: 0,
+        },
+        "B and then C were live on their cut boundaries"
     );
 }
 

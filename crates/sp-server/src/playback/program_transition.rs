@@ -474,13 +474,11 @@ impl FitPlan {
     pub fn new(src: Layout, dst: Layout) -> Self {
         let (sw, sh) = (u64::from(src.width), u64::from(src.height));
         let (dw, dh) = (u64::from(dst.width), u64::from(dst.height));
-        // Full width when the source is at least as wide (relatively) as the
-        // destination, else full height; the other axis keeps the aspect.
-        let (fw, fh) = if sw * dh >= dw * sh {
-            (dw, even_round(sh * dw, sw.max(1)).max(2).min(dh))
-        } else {
-            (even_round(sw * dh, sh.max(1)).max(2).min(dw), dh)
-        };
+        // Each axis at the source's aspect for the OTHER axis in full, capped
+        // at the destination: the wider (relatively) side fills its axis, the
+        // other keeps the aspect (equal aspects fill both).
+        let fw = even_round(sw * dh, sh.max(1)).max(2).min(dw);
+        let fh = even_round(sh * dw, sw.max(1)).max(2).min(dh);
         let (width, height) = (fw as u32, fh as u32);
         let luma = (0..width).map(|x| tap(x, width, src.width)).collect();
         let chroma = (0..width / 2)

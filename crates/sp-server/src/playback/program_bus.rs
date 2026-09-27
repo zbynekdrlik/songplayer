@@ -85,7 +85,8 @@ use tracing::{info, warn};
 use crate::playback::ndi_input::NdiInputShared;
 use crate::playback::program_follow::FollowShared;
 use crate::playback::program_transition::{
-    ActiveWindow, Cue, SpecSource, TransitionCounters, TransitionSpec, TransitionStatus, Window,
+    ActiveWindow, Cue, MixJob, SpecSource, TransitionCounters, TransitionSpec, TransitionStatus,
+    Window,
 };
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 use crate::playback::vban_out::VbanOut;

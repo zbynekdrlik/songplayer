@@ -905,6 +905,9 @@ function programBody() {
       transitions_done: programState.transitions,
       mixed_boundaries: programState.mixed,
       side_fills: 0,
+      // #215 cue gate: the mock's cut never waits for a live pair.
+      cue_wait_boundaries: 0,
+      cue_timeouts: 0,
     },
     // #210: the VBAN output's telemetry (mirrors `VbanStatus`), from the
     // stored settings like the real settings task.
