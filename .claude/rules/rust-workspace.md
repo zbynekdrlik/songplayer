@@ -109,7 +109,26 @@ Pick the WRONG constant so it is NOT an arithmetic identity: shipping a RED
 `-D warnings` (the Lint job the no-compile box can't see), reddening the RED
 commit itself. Use a wrong NON-identity value (a named const `FRAGMENT_MS = 250`
 → GREEN `500`, or a different literal) so the exact-value test still fails but
-the RED tree is clippy-clean.
+the RED tree is clippy-clean. Likewise avoid a RED `0` compared against an
+unsigned value with `<=` / `>`: `clippy::absurd_extreme_comparisons` is a
+deny-by-default correctness lint (#217 used `LONG_GAP_MS = 1`, then GREEN
+`8_000`).
+
+**A wrong-constant RED for a whole NEW module proves only the tests that
+depend on that constant (#217 review round 3).** Every other new test passes at
+the RED commit, so nobody ever saw it fail. In the RED commit message, list
+only the tests that really fail under the wrong constant (derive them, do not
+guess), and never claim the RED reproduces the old behaviour unless it does.
+The tests that encode the new contract against the OLD code belong in their own
+earlier `test(#N)` commit that uses only the existing API (#217 `e66514a`).
+
+**Deriving exact expected values on the no-compile box (#217).** Do not
+hand-compute dozens of pins. Write a scratch Python model that mirrors the pure
+Rust function step by step, and derive every exact value from it: fixture
+counts, boundary show/hide times, what each mutant would do. Keep the model in
+the scratchpad, not the repo. When the Rust changes, update the model in the
+same step. Each fresh-context review pass should re-derive the pins with its own
+model; two independent models agreeing is the only local evidence available.
 
 ## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these

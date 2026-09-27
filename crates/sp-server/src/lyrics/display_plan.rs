@@ -20,8 +20,8 @@
 //! 2. **Lead.** A line shows at `max(start - LEAD_MS, prev.show +
 //!    MIN_VISIBLE_MS)`, but never after it is sung (`<= start`): when the
 //!    previous lines leave no room, it shows exactly when it is sung. The
-//!    lead replaces the previous line while it is still sung whenever the next
-//!    line's show falls before that line's sung end. It replaces it at or
+//!    previous line leaves before its sung end whenever the next line's show
+//!    falls before that end, usually while it is still sung. It leaves at or
 //!    before its sung START when the next line is sung at most `LEAD_MS`
 //!    after that start and the previous line had at least `MIN_VISIBLE_MS` of
 //!    lead (see the design question on #217).

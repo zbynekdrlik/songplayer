@@ -102,8 +102,9 @@ one only together with the design record on #217.
   is not 0, the total lead is over 1.5 s.
 - **The lead can replace a line while it is still sung, and sometimes even
   before it is sung.**
-  - It leaves while still sung whenever the next line's show falls before
-    this line's sung end.
+  - It leaves before its sung end whenever the next line's show falls before
+    that end. Usually that is while it is still sung; sometimes it is even
+    before it is sung (next point).
   - It leaves at or before its sung START when the next line is sung at most
     `LEAD_MS` after this start and this line had at least `MIN_VISIBLE_MS`
     of lead.
