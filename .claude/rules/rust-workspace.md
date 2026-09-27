@@ -109,10 +109,16 @@ Pick the WRONG constant so it is NOT an arithmetic identity: shipping a RED
 `-D warnings` (the Lint job the no-compile box can't see), reddening the RED
 commit itself. Use a wrong NON-identity value (a named const `FRAGMENT_MS = 250`
 → GREEN `500`, or a different literal) so the exact-value test still fails but
-the RED tree is clippy-clean. Likewise avoid a RED `0` compared against an
-unsigned value with `<=` / `>`: `clippy::absurd_extreme_comparisons` is a
-deny-by-default correctness lint (#217 used `LONG_GAP_MS = 1`, then GREEN
-`8_000`).
+the RED tree is clippy-clean.
+
+Likewise avoid a RED constant at its type's minimum (`0`) or maximum
+(`u32::MAX`) when the comparison makes it trivially true or false. Examples:
+`x <= 0`, `x < 0` and `x >= 0` on an unsigned value, or `x >= MAX` and
+`x > MAX`. `clippy::absurd_extreme_comparisons` flags that shape, and as a
+correctness-group lint it is deny-by-default. `x > 0` or `x < MAX` does not
+trigger it. The #161 example above, `u32::MAX` compared with `>=`, has exactly
+that shape, so prefer a non-extreme wrong value such as `1_000`. #217 used
+`LONG_GAP_MS = 1`, then set it to `8_000` in GREEN.
 
 **A wrong-constant RED for a whole NEW module proves only the tests that
 depend on that constant (#217 review round 3).** Every other new test passes at

@@ -19,12 +19,13 @@
 //!    no rule applies.
 //! 2. **Lead.** A line shows at `max(start - LEAD_MS, prev.show +
 //!    MIN_VISIBLE_MS)`, but never after it is sung (`<= start`): when the
-//!    previous lines leave no room, it shows exactly when it is sung. The
-//!    previous line leaves before its sung end whenever the next line's show
-//!    falls before that end, usually while it is still sung. It leaves at or
-//!    before its sung START when the next line is sung at most `LEAD_MS`
-//!    after that start and the previous line had at least `MIN_VISIBLE_MS` of
-//!    lead (see the design question on #217).
+//!    previous lines leave no room, it shows exactly when it is sung. This
+//!    show time is when the previous line leaves the wall. So the previous
+//!    line leaves before its own sung end whenever this show falls before that
+//!    end, usually while it is still sung. The previous line leaves at or
+//!    before its sung START when this line is sung at most `LEAD_MS` after
+//!    that start and the previous line had at least `MIN_VISIBLE_MS` of lead
+//!    (see the design question on #217).
 //! 3. **Hold.** A line stays on the wall until the next line shows. Before an
 //!    instrumental break (a gap over [`LONG_GAP_MS`]) and after the last line,
 //!    it leaves [`HOLD_TAIL_MS`] after its sung end instead.
