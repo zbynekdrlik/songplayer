@@ -116,9 +116,11 @@ cut boundary mixed the outgoing song against silence.
   `cue_timeouts` +0 check on the cg OBS scene-change path only.
 - A WAITING cue opens only on its own window's live pair: once a later cut
   froze it, a live pair of its incoming source inside it is held like any
-  other (review round 1). `cut` reads `on_air()` BEFORE `windows.retain`, so
-  a same-slot re-cut that drops the waiting window still fades out of that
-  window's outgoing source.
+  other (review round 1). `cut` reads `on_air(boundary)` BEFORE
+  `windows.retain`, so a same-slot re-cut that drops the waiting window still
+  fades out of that window's outgoing source; and `on_air` also counts a
+  FROZEN window that ends exactly on the new boundary (a cut back, then a
+  same-slot re-cut that drops the cut back's segment, review round 3).
 - Logs: INFO `the incoming source is live — the fade starts` (from, to,
   waited) / WARN `… sent no live pair in time …` per opened cue, INFO `a later
   cut froze the fade still waiting for its cue`, and from the sender one INFO

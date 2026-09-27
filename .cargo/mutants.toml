@@ -136,7 +136,7 @@ exclude_re = [
   #   takes both now_100ns() reads with no decode pull between them and only
   #   reaches this point after `sched_now >= boundary`, so on a monotonic clock
   #   emit_now == sched_now >= boundary and the branch is unreachable by any
-  #   terminating deterministic test. (The `service` mutant at 514:28 IS killable.)
+  #   terminating deterministic test. (The `service` mutant at 530:28 IS killable.)
   'pacer\.rs:679:28: replace \+= with \*= in Pacer::service_standby',
   'pacer\.rs:679:28: replace \+= with -= in Pacer::service_standby',
 

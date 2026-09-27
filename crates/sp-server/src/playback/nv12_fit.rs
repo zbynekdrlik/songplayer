@@ -28,15 +28,16 @@ pub struct Placement {
 /// Each axis is the full destination axis capped by the aspect-scaled other
 /// axis (branch-free, so there is no `<=`-boundary comparison whose `<` mutant
 /// would be equivalent on an exact aspect match; `min` picks the tighter
-/// axis), floored to even, at least 2×2; the offsets centre it, floored to
-/// even. A degenerate source is a zero-size image at the centre.
+/// axis), floored to even, at least 2×2 (so under a destination smaller than
+/// 2×2 it overhangs; the program fit caps it); the offsets centre it, floored
+/// to even. A degenerate source is a zero-size image at the centre.
 pub fn aspect_fit(sw: u32, sh: u32, dw: u32, dh: u32) -> Placement {
     if sw == 0 || sh == 0 {
         return Placement {
             w: 0,
             h: 0,
-            off_x: dw / 2,
-            off_y: dh / 2,
+            off_x: (dw / 2) & !1,
+            off_y: (dh / 2) & !1,
         };
     }
     let w = u64::from(dw).min(u64::from(sw) * u64::from(dh) / u64::from(sh)) as u32;
