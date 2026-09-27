@@ -37,24 +37,30 @@ impl super::PlaybackEngine {
                 );
             }
             if let Some(state) = &pp.lyrics_state {
-                if let Some((en, next_en, sk, next_sk)) = state
+                // Re-emit the wall's CURRENT state, a blank one included, as
+                // `dispatch_lyrics_if_changed` does. Its dedup already recorded
+                // "hide", so without this a stale text Arena restored from its
+                // saved composition would stay until the next line (#217).
+                let cmd = match state
                     .resolume_lines_with_next(pp.cached_position_ms, pp.cached_lyrics_reference)
                 {
-                    let _ = self
-                        .resolume_tx
-                        .send(crate::resolume::ResolumeCommand::ShowSubtitles {
+                    Some((en, next_en, sk, next_sk)) => {
+                        crate::resolume::ResolumeCommand::ShowSubtitles {
                             en,
                             next_en,
                             sk,
                             next_sk,
                             suppress_en: pp.cached_suppress_en,
-                        })
-                        .await;
-                    info!(
-                        playlist_id,
-                        video_id, "subtitle re-pushed on Resolume recovery"
-                    );
-                }
+                        }
+                    }
+                    None => crate::resolume::ResolumeCommand::HideSubtitles,
+                };
+                let blank = matches!(cmd, crate::resolume::ResolumeCommand::HideSubtitles);
+                let _ = self.resolume_tx.send(cmd).await;
+                info!(
+                    playlist_id,
+                    video_id, blank, "subtitle re-pushed on Resolume recovery"
+                );
             }
         }
     }
