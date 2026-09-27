@@ -349,25 +349,42 @@ what it did (above).
 
 - **One clock: `TitleClock { video_id, show_at, hide_at }`**
   (`playback/title.rs`). The `Started` handler fixes it
-  (`show_at = Started + 1.5 s`, `hide_at = end − 3.5 s`, `None` for a song of
-  5 s or less or an unknown 0 duration) and arms the timers from it
-  (`title_timers.rs::arm_title_timers`: `sleep_until` those instants; arming
-  cancels the timers it finds, so no old timer is left to fire). Every
-  `PipelineCommand::Play` (SelectAndPlay, ReplayCurrent, `handle_play_video`,
-  `handle_previous`) clears the clock. Even the same video (a skip in a
+  (`show_at = Started + 1.5 s`, `hide_at` 3.5 s before the end of the time
+  left to play, `None` when 5 s or less is left or the duration is an unknown
+  0) and arms the timers from it (`title_timers.rs::arm_title_timers`:
+  `sleep_until` those instants; arming cancels the timers it finds, so no old
+  timer is left to fire).
+- **Every `PipelineCommand::Play` calls `PlaylistPipeline::begin_play(start)`**
+  (SelectAndPlay, ReplayCurrent, `handle_play_video`, `handle_previous`). It
+  clears the clock and cancels the old song's timers, so a skipped song's
+  pending show timer cannot push its title before the new `Started` (review
+  round 3). It records the start position. Even the same video (a skip in a
   single-video playlist, Loop, a Previous) gets its new clock at its new
-  `Started`, never the last song's (review round 2).
+  `Started`, never the last song's (review round 2). A resume
+  (`handle_play_video` with a position) counts `duration − start`, so it
+  hides 3.5 s before its REAL end. The hide timer used to count the full
+  duration from the resume.
 - **A title is due** when its pipeline plays on program with its own clock
   (`PlaylistPipeline::on_air_clock`) and that clock is `open_at(now)`:
   `[show_at, hide_at)`.
-- **Read first, decide at the send (review round 2).** `resync_wall_title`
+- **Read first, decide at the send (review round 2).** `decide_wall_title`
   reads the title of every candidate (`title::title_text`), its one await.
-  Only then does it decide at `Instant::now()` (`due_title_video`) and send at
-  once (`title::send_resync`: the Resolume Resync first, then the OBS text,
-  which can stall while cg OBS is away). A timer that fired during the read is
-  already past its instant, so the Resync agrees with it. Deciding before the
-  read let a HideTitle land ahead of a Resync that still named the title, and
-  the Resync superseded it.
+  Only then does it decide at `Instant::now()` (`due_title_video`), and the
+  caller sends at once (`title::send_resync`). A timer that fired during the
+  read is already past its instant, so the Resync agrees with it. Deciding
+  before the read let a HideTitle land ahead of a Resync that still named the
+  title, and the Resync superseded it. Only the DUE song's failed read sends
+  nothing; another candidate's is ignored (review round 3).
+- **The scene-on re-arms at the decision instant, before the send (review
+  round 3).** `push_title_for_playing` calls `decide_wall_title`, then
+  `rearm_title_timers(.., decided_at)`, then `send_resync`, with nothing
+  awaited between the decision and the re-arm. A re-arm with a fresh `now`
+  AFTER the awaited sends could leave a show or hide instant covered by
+  neither: the Resync decided just before it, and the re-arm saw it as past.
+- **`send_resync`:** the Resolume Resync is awaited first; the OBS text goes
+  through `try_send` (debug log when full). cg OBS's queue drains only while
+  it is connected, and an awaited send parked the engine loop (review round
+  3, `a_full_obs_queue_never_holds_the_resync_back`).
 - **Why not the position (review round 1, 🔴).** The first version read
   `cached_position_ms`, the decoder position the pipeline reports every
   500 ms, while the timers slept on the clock of `Started`. For up to
@@ -378,34 +395,32 @@ what it did (above).
   playlist (`obs_bridge.rs`), so a Resync near a boundary is common. The
   timers and the Resync now read the same instants; only the microseconds
   between the decision and the (non-awaiting) send can still race a timer.
-- **Between songs.** The clock is the previous video's until the new one's
-  `Started`, and a skip's late Position events do not matter any more. So the
-  window is closed from a song change to the new `Started`, and the scene-on
-  that selects a new song names no title.
+- **Between songs.** `begin_play` cleared the clock, and a skip's late
+  Position events do not matter any more. So the window is closed from a
+  song change to the new `Started`, and the scene-on that selects a new song
+  names no title. The video check in `on_air_clock` is defensive: only tests
+  build a clock of another video (`Window::OtherSong`).
 - **A scene-on re-arms the timers** (`rearm_title_timers`). A scene-off
   cancels the song's timers (a timer of a playlist off program must not write
   the shared clip), while the #215 transition hold keeps the song playing. A
   scene-on of the playing video cancels and arms them again from its clock,
   for what is still ahead. Before, a bounce in the first 1.5 s left the song
-  with no title, and a later one with no hide 3.5 s before the end. A clock of
-  another video arms nothing; its `Started` will. Every scene change
+  with no title, and a later one with no hide 3.5 s before the end. A song
+  with no clock yet arms nothing; its `Started` will. Every scene change
   re-arms (cheap tasks, the same deadlines).
 - **Several due** (a program scene with more than one SongPlayer playlist;
   they share the one `#sp-title` clip): the highest playlist id, so the
   answer never depends on HashMap order.
 - **The text** comes from `format_title_text` (one formatter, see above).
   The OBS text source follows the Resync: the title, or cleared, as the hide
-  timer clears it. A failed DB read sends nothing: a transient error must not
-  hide a title mid-song.
+  timer clears it. A failed read of the due title sends nothing: a transient
+  error must not hide a title mid-song.
 - **`cached_position_ms`** is the subtitle and pause position only. The
   `Started` handler no longer zeroes it: a Pause before the first Position
   report recorded 0 and resumed the song from its start (review round 1).
 - Pinned in `tests_scene_change.rs` (`Window::{Due, BeforeShow, AfterHide,
   OtherSong, NotStarted}`), `title_tests.rs` (the clock's instants and both
   sides of each boundary) and `a_recovery_follows_the_title_clock_not_a_lagging_position`.
-- **Residual:** a resume (`start_position_ms`) runs its clock from its
-  `Started`, like the timers, not from the resume position. The hide timer
-  was already this way.
 
 ## Testing the driver on the no-compile box
 
