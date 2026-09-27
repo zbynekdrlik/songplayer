@@ -65,6 +65,31 @@ pub const SETTING_REMOTE_WS_PASSWORD: &str = "remote_ws_password";
 /// #213: the default remote-control port, next to cg OBS's own 4455.
 pub const DEFAULT_REMOTE_WS_PORT: u16 = 4456;
 
+/// #215 (B5 of EPIC #174): `SP-program` follows cg OBS's program scene
+/// natively (the scene → source rule of the #213 remote control). `"true"`
+/// follows; anything else (or absent) = off, the default.
+pub const SETTING_PROGRAM_FOLLOW_OBS: &str = "program_follow_obs";
+/// #215: the transition every program cut uses: `obs` (cg OBS's current scene
+/// transition, the default), `fade` or `cut`.
+pub const SETTING_PROGRAM_TRANSITION: &str = "program_transition";
+/// #215: the fade length in ms when SongPlayer picks it (`fade`, or `obs`
+/// while cg OBS's transition is not known).
+pub const SETTING_PROGRAM_TRANSITION_MS: &str = "program_transition_ms";
+/// #215: the default fade length (9 slots of the 30 fps grid).
+pub const DEFAULT_PROGRAM_TRANSITION_MS: u32 = 300;
+/// #215: the longest fade `SP-program` makes (300 slots of the 30 fps grid); a
+/// longer duration is clamped to it.
+pub const MAX_PROGRAM_TRANSITION_MS: u32 = 10_000;
+
+/// #215: the fade length a stored `program_transition_ms` means: a positive
+/// whole number of ms (trimmed), else [`DEFAULT_PROGRAM_TRANSITION_MS`]. The
+/// ONE rule the server and the Nastavenia form share.
+pub fn program_transition_ms(raw: Option<&str>) -> u32 {
+    raw.and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|&ms| ms != 0)
+        .unwrap_or(DEFAULT_PROGRAM_TRANSITION_MS)
+}
+
 /// #212: the program-bus source id of the NDI input (playlists are positive
 /// row ids, so a negative id can never collide with one).
 pub const PROGRAM_INPUT_ID: i64 = -1;
@@ -181,6 +206,36 @@ mod tests {
         assert_eq!(SETTING_REMOTE_WS_PORT, "remote_ws_port");
         assert_eq!(SETTING_REMOTE_WS_PASSWORD, "remote_ws_password");
         assert_eq!(DEFAULT_REMOTE_WS_PORT, 4456);
+    }
+
+    #[test]
+    fn program_transition_setting_keys_and_default_ms() {
+        assert_eq!(SETTING_PROGRAM_FOLLOW_OBS, "program_follow_obs");
+        assert_eq!(SETTING_PROGRAM_TRANSITION, "program_transition");
+        assert_eq!(SETTING_PROGRAM_TRANSITION_MS, "program_transition_ms");
+        assert_eq!(DEFAULT_PROGRAM_TRANSITION_MS, 300);
+        assert_eq!(MAX_PROGRAM_TRANSITION_MS, 10_000);
+    }
+
+    #[test]
+    fn a_stored_fade_length_is_a_positive_whole_number_of_ms_else_300() {
+        assert_eq!(program_transition_ms(Some(" 500 ")), 500);
+        assert_eq!(program_transition_ms(Some("1")), 1);
+        assert_eq!(
+            program_transition_ms(Some("20000")),
+            20_000,
+            "clamped by the slots, not here"
+        );
+        assert_eq!(
+            program_transition_ms(Some("0")),
+            300,
+            "0 ms is no fade length"
+        );
+        assert_eq!(program_transition_ms(Some("-5")), 300);
+        assert_eq!(program_transition_ms(Some("12.5")), 300);
+        assert_eq!(program_transition_ms(Some("abc")), 300);
+        assert_eq!(program_transition_ms(Some("")), 300);
+        assert_eq!(program_transition_ms(None), 300);
     }
 
     #[test]

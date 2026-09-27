@@ -609,6 +609,7 @@ fn a_source_change_on_program_offers_one_pair_per_boundary_off_the_grid_thread()
         .map(|job| match job {
             ProgramJob::Source(job) => job.width,
             ProgramJob::Standby { stamp_100ns } => panic!("the program filled {stamp_100ns}"),
+            ProgramJob::Mix(_) => panic!("a Cut spec never mixes"),
         })
         .collect();
     let segments = runs(&widths);

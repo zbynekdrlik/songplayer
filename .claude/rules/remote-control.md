@@ -124,6 +124,11 @@ Research (spec + the Companion module v3.15.3 and 4.0 beta): #213 comment
    source, reason (not_switched|input_inactive|persist_failed|lookup_failed),
    cut_boundary_100ns, at_ms}`.
 
+#215: the cut uses the program's transition spec (a crossfade following cg
+OBS's scene transition), and `scene_action` is shared with the native OBS
+follow (`playback/program_follow.rs`, setting `program_follow_obs`) — see
+`program-transition.md`.
+
 A request without `sceneName` (a `sceneUuid` only) is answered `300` and is
 not forwarded: the cut is by scene name. Companion always sends the name.
 

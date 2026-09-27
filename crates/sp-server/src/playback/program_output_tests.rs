@@ -1,11 +1,14 @@
 //! #209 `SP-program` sender: what [`ProgramOutput`] puts on the wire for a
 //! forwarded source boundary and for its own standby pair, the per-boundary
-//! check timing, and the sender thread end to end on a settable clock.
+//! check timing, and the sender thread end to end on a settable clock. #215:
+//! a mixed window boundary (the crossfaded block, the blended or midpoint-cut
+//! picture, a missing side as black + silence).
 //! Wired via `#[cfg(test)] #[path = "program_output_tests.rs"] mod tests;`.
 
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramBus, ProgramJob};
+use crate::playback::program_transition::{Layout, MixJob, crossfade_gains};
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::wallclock::WallClock;
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
@@ -253,4 +256,323 @@ fn the_sender_thread_ticks_its_wall_once_per_boundary_passed() {
         3,
         "three boundaries passed = three ticks, however often the loop woke"
     );
+}
+
+// ---- #215: one boundary inside a transition window (`ProgramJob::Mix`) ------
+
+/// A known 4×2 NV12 picture: 8 luma bytes, then 4 interleaved chroma bytes.
+const FROM_4X2: [u8; 12] = [16, 32, 64, 100, 128, 200, 235, 0, 128, 128, 90, 240];
+const TO_4X2: [u8; 12] = [235, 16, 64, 101, 0, 255, 16, 255, 16, 240, 128, 128];
+const LAYOUT_4X2: Layout = Layout {
+    width: 4,
+    height: 2,
+    stride: 4,
+    len: 12,
+};
+
+/// The k-th grid boundary after `floor(T0)`.
+fn at(k: usize) -> i64 {
+    let mut x = floor_boundary_100ns(T0, GENLOCK_GRID_FPS);
+    for _ in 0..k {
+        x = strict_next_boundary_100ns(x, GENLOCK_GRID_FPS);
+    }
+    x
+}
+
+/// A source's boundary pair: a `width`×2 NV12 picture of `pixels` and one
+/// stereo 1600-frame block carrying `level`, its audio stamped `audio_tc`.
+fn pair(width: u32, pixels: &[u8], stamp: i64, audio_tc: i64, level: f32) -> SubmitJob {
+    SubmitJob {
+        width,
+        height: 2,
+        stride: width,
+        video: SharedFrame::new(pixels.to_vec()),
+        audio: vec![AudioFrame {
+            data: vec![level; 3200],
+            channels: 2,
+            sample_rate: 48_000,
+            timecode_100ns: None,
+        }],
+        video_tc_100ns: stamp,
+        audio_tc_100ns: audio_tc,
+    }
+}
+
+fn mix_at(
+    stamp: i64,
+    from: Option<SubmitJob>,
+    to: Option<SubmitJob>,
+    slot: u32,
+    n_slots: u32,
+) -> MixJob {
+    MixJob {
+        stamp_100ns: stamp,
+        from,
+        to,
+        slot,
+        n_slots,
+    }
+}
+
+/// Every sample of the last block sent (both channels) is `want(frame)`.
+fn assert_block(backend: &MockNdiBackend, want: impl Fn(u64) -> f32) {
+    let planar = backend.last_audio_planar();
+    assert_eq!(planar.len(), 3200, "one stereo 1600-frame block");
+    let (left, right) = planar.split_at(1600);
+    for (i, (&l, &r)) in left.iter().zip(right).enumerate() {
+        let w = want(i as u64);
+        assert_eq!((l, r), (w, w), "frame {i}");
+    }
+}
+
+/// The video send calls, in order.
+fn pictures(backend: &MockNdiBackend) -> Vec<String> {
+    backend
+        .calls()
+        .into_iter()
+        .filter(|c| c.starts_with("send_video_async("))
+        .collect()
+}
+
+#[test]
+fn a_mix_submits_the_crossfaded_block_then_the_blended_picture_on_its_boundary() {
+    let (backend, mut out) = output(4, 2);
+    let stamp = at(0);
+    let from = pair(4, &FROM_4X2, stamp, stamp + 11, 0.25);
+    let to = pair(4, &TO_4X2, stamp, stamp + 22, 0.5);
+    let sources = [from.video.clone(), to.video.clone()];
+    let mix = mix_at(stamp, Some(from), Some(to), 4, 9);
+    assert_eq!(out.submit(ProgramJob::Mix(mix), stamp + 999), stamp);
+    assert_eq!(
+        backend.calls(),
+        vec![
+            "send_create_with_clocking(SP-program,false,false)".to_string(),
+            "send_audio(42,sr=48000,ch=2,spc=1600)".to_string(),
+            "send_video_async(42,NV12,4x2,stride=4,30/1)".to_string(),
+        ],
+        "audio first, then the picture, like any boundary"
+    );
+    assert_eq!(backend.video_timecodes(), vec![stamp]);
+    assert_eq!(
+        backend.audio_timecodes(),
+        vec![stamp + 22],
+        "the incoming source's own audio stamp"
+    );
+    // Slot 4 of a 9-slot window: samples 6400.. of 14 400 on the one curve.
+    assert_block(&backend, |i| {
+        let (g_from, g_to) = crossfade_gains(4 * 1600 + i, 9 * 1600);
+        g_from * 0.25 + g_to * 0.5
+    });
+    let (ptr, len) = backend.last_async_video_slice().expect("a picture");
+    assert_eq!(len, 12);
+    assert!(
+        sources.iter().all(|s| s.as_ptr() as usize != ptr),
+        "the blend is its own buffer, never a source's"
+    );
+    assert!(!out.size_cut);
+}
+
+#[test]
+fn the_mix_picture_blends_equal_layouts_at_the_boundarys_weight() {
+    let (_backend, mut out) = output(4, 2);
+    let stamp = at(0);
+    let from = pair(4, &FROM_4X2, stamp, stamp, 0.0);
+    let to = pair(4, &TO_4X2, stamp, stamp, 0.0);
+    let half = mix_at(stamp, Some(from.clone()), Some(to.clone()), 4, 9);
+    let (layout, picture) = out.mix_picture(&half).expect("a picture");
+    assert_eq!(layout, LAYOUT_4X2);
+    assert_eq!(
+        picture.to_vec(),
+        vec![126, 24, 64, 101, 64, 228, 126, 128, 72, 184, 109, 184],
+        "slot 4 of 9 = weight ½: (f + t + 1) / 2 on luma and chroma alike"
+    );
+    let first = mix_at(stamp, Some(from), Some(to), 0, 9);
+    let (_, picture) = out.mix_picture(&first).expect("a picture");
+    assert_eq!(
+        picture.to_vec(),
+        vec![28, 31, 64, 100, 121, 203, 223, 14, 122, 134, 92, 234],
+        "slot 0 of 9 = weight 14/256"
+    );
+    assert!(!out.size_cut);
+}
+
+#[test]
+fn a_missing_side_mixes_against_the_black_of_the_present_sides_size() {
+    let (backend, mut out) = output(2, 2);
+    // The incoming side is missing (its source stalled past the grace).
+    let from_only = mix_at(
+        at(0),
+        Some(pair(4, &FROM_4X2, at(0), at(0) + 11, 0.25)),
+        None,
+        4,
+        9,
+    );
+    let (layout, picture) = out.mix_picture(&from_only).expect("a picture");
+    assert_eq!(
+        layout, LAYOUT_4X2,
+        "the present side's size, not the program's 2×2 standby"
+    );
+    assert_eq!(
+        picture.to_vec(),
+        vec![16, 24, 40, 58, 72, 108, 126, 8, 128, 128, 109, 184],
+        "½ of the outgoing picture over studio black (Y 16, UV 128)"
+    );
+    // The outgoing side is missing (a fade up from nothing).
+    let to_only = mix_at(
+        at(1),
+        None,
+        Some(pair(4, &TO_4X2, at(1), at(1) + 22, 0.5)),
+        0,
+        9,
+    );
+    let (layout, picture) = out.mix_picture(&to_only).expect("a picture");
+    assert_eq!(layout, LAYOUT_4X2);
+    assert_eq!(
+        picture.to_vec(),
+        vec![28, 16, 19, 21, 15, 29, 16, 29, 122, 134, 128, 128],
+        "14/256 of the incoming picture over studio black"
+    );
+    assert!(!out.size_cut, "a black of the same size blends");
+    assert!(
+        out.mix_picture(&mix_at(at(2), None, None, 0, 9)).is_none(),
+        "neither side: no mixed picture"
+    );
+
+    // Submitted: the missing side is silence, and the audio keeps the stamp of
+    // the side that is there.
+    assert_eq!(out.submit(ProgramJob::Mix(from_only), at(0) + 999), at(0));
+    assert_block(&backend, |i| {
+        let (g_from, g_to) = crossfade_gains(4 * 1600 + i, 9 * 1600);
+        g_from * 0.25 + g_to * 0.0
+    });
+    assert_eq!(out.submit(ProgramJob::Mix(to_only), at(1) + 999), at(1));
+    assert_block(&backend, |i| {
+        let (g_from, g_to) = crossfade_gains(i, 9 * 1600);
+        g_from * 0.0 + g_to * 0.5
+    });
+    // A mix with neither side (the bus never queues one) goes out as the
+    // program's own standby pair.
+    let neither = mix_at(at(2), None, None, 5, 9);
+    assert_eq!(out.submit(ProgramJob::Mix(neither), at(2) + 5), at(2));
+    assert_block(&backend, |_| 0.0);
+    assert_eq!(backend.video_timecodes(), vec![at(0), at(1), at(2)]);
+    assert_eq!(
+        backend.audio_timecodes(),
+        vec![at(0) + 11, at(1) + 22, at(2) + 5],
+        "the outgoing side's stamp, the incoming side's, the emit instant"
+    );
+    assert_eq!(
+        pictures(&backend),
+        vec![
+            "send_video_async(42,NV12,4x2,stride=4,30/1)".to_string(),
+            "send_video_async(42,NV12,4x2,stride=4,30/1)".to_string(),
+            "send_video_async(42,NV12,2x2,stride=2,30/1)".to_string(),
+        ]
+    );
+}
+
+/// A 4×2 NV12 picture with a padded stride of 6 (as a decoder may lock it):
+/// two 6-byte luma rows, then one 6-byte chroma row; the padding bytes are 7.
+const PADDED_4X2: [u8; 18] = [
+    16, 32, 64, 100, 7, 7, 128, 200, 235, 0, 7, 7, 128, 128, 90, 240, 7, 7,
+];
+const LAYOUT_PADDED: Layout = Layout {
+    width: 4,
+    height: 2,
+    stride: 6,
+    len: 18,
+};
+
+fn padded(stamp: i64, level: f32) -> SubmitJob {
+    SubmitJob {
+        stride: 6,
+        ..pair(4, &PADDED_4X2, stamp, stamp, level)
+    }
+}
+
+#[test]
+fn a_missing_side_is_black_in_the_present_sides_exact_layout_padding_included() {
+    let (_backend, mut out) = output(2, 2);
+    // The incoming side stalled: the outgoing padded picture fades to black.
+    let from_only = mix_at(at(0), Some(padded(at(0), 0.25)), None, 4, 9);
+    let (layout, picture) = out.mix_picture(&from_only).expect("a picture");
+    assert_eq!(
+        layout, LAYOUT_PADDED,
+        "the present side's layout, stride included"
+    );
+    assert_eq!(
+        picture.to_vec(),
+        vec![
+            16, 24, 40, 58, 12, 12, 72, 108, 126, 8, 12, 12, 128, 128, 109, 184, 68, 68
+        ],
+        "½ over a black of the same layout: Y 16 over stride × height, then UV 128"
+    );
+    // A fade up from nothing into a padded source blends too, never a cut.
+    let to_only = mix_at(at(1), None, Some(padded(at(1), 0.5)), 0, 9);
+    let (layout, picture) = out.mix_picture(&to_only).expect("a picture");
+    assert_eq!(layout, LAYOUT_PADDED);
+    assert_eq!(
+        picture.to_vec(),
+        vec![
+            16, 17, 19, 21, 16, 16, 22, 26, 28, 15, 16, 16, 128, 128, 126, 134, 121, 121
+        ],
+        "14/256 of the incoming picture over black"
+    );
+    assert!(!out.size_cut, "a black of the same layout always blends");
+}
+
+#[test]
+fn different_sizes_cut_the_picture_at_the_windows_midpoint_once_per_run() {
+    let (backend, mut out) = output(2, 2);
+    let from = pair(4, &FROM_4X2, at(0), at(0), 0.25);
+    let wide = pair(8, &[7u8; 24], at(0), at(0), 0.5);
+    let before = mix_at(at(0), Some(from.clone()), Some(wide.clone()), 3, 9);
+    let (layout, picture) = out.mix_picture(&before).expect("a picture");
+    assert_eq!(
+        layout, LAYOUT_4X2,
+        "slot 3 of 9 (weight 100): the outgoing picture"
+    );
+    assert!(picture.ptr_eq(&from.video), "that picture itself, no copy");
+    assert!(out.size_cut, "a size cut is running");
+    let after = mix_at(at(0), Some(from.clone()), Some(wide.clone()), 4, 9);
+    let (layout, picture) = out.mix_picture(&after).expect("a picture");
+    assert_eq!(
+        layout,
+        Layout {
+            width: 8,
+            height: 2,
+            stride: 8,
+            len: 24,
+        },
+        "slot 4 of 9 (weight ½): the incoming picture"
+    );
+    assert!(picture.ptr_eq(&wide.video));
+    assert!(out.size_cut);
+
+    // Any boundary that is not mixed ends the run, so the next window's size
+    // cut is logged again.
+    out.submit(ProgramJob::Standby { stamp_100ns: at(1) }, at(1));
+    assert!(!out.size_cut);
+    let next = mix_at(at(2), Some(from.clone()), Some(wide.clone()), 3, 9);
+    out.submit(ProgramJob::Mix(next), at(2));
+    assert!(out.size_cut);
+    let last = mix_at(at(3), Some(from.clone()), Some(wide), 4, 9);
+    out.submit(ProgramJob::Mix(last), at(3));
+    // The audio still crossfades on the window's curve.
+    assert_block(&backend, |i| {
+        let (g_from, g_to) = crossfade_gains(4 * 1600 + i, 9 * 1600);
+        g_from * 0.25 + g_to * 0.5
+    });
+    assert_eq!(
+        pictures(&backend),
+        vec![
+            "send_video_async(42,NV12,2x2,stride=2,30/1)".to_string(),
+            "send_video_async(42,NV12,4x2,stride=4,30/1)".to_string(),
+            "send_video_async(42,NV12,8x2,stride=8,30/1)".to_string(),
+        ]
+    );
+    // Two pictures of the same size blend: that ends the run too.
+    let same = mix_at(at(4), Some(from.clone()), Some(from), 4, 9);
+    assert!(out.mix_picture(&same).is_some());
+    assert!(!out.size_cut);
 }

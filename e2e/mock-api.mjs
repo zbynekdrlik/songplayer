@@ -215,6 +215,7 @@ const settings = {
   // fieldset shows its defaults (off, `sp-program`, no targets).
   // #212: the ndi_input_* keys are absent too (the input is off, no source).
   // #213: the remote_ws_* keys are absent too (off, port 4456, no password).
+  // #215: the program_* transition keys are absent too (no follow, `obs`, 300 ms).
 };
 // #210: the fixture as loaded, restored by `/__mock/settings-reset`.
 const settingsInitial = { ...settings };
@@ -823,8 +824,62 @@ app.post("/__mock/ndi-health", (req, res) => {
 // #209 program bus: mirrors the real `GET /api/v1/program` /
 // `POST /api/v1/program/cut` (404 for an unknown playlist). The mock applies a
 // cut at once (the real one lands on the boundary after next).
-let programState = { source: 1, previous: null, cuts: 0 };
+let programState = { source: 1, previous: null, cuts: 0, transitions: 0, mixed: 0 };
 let programLastCut = null;
+// #215: the mock runs no cg OBS and no program sender, so a spec can inject
+// cg OBS's current scene transition (`/__mock/program-obs-transition`) and a
+// running fade window (`/__mock/program-transition-active`); both are cleared
+// by `/__mock/program-reset`.
+let programObsTransition = null;
+let programActiveWindow = null;
+// #215: the program transition — mirrors the server's `effective_spec`:
+// `cut` → a Cut, `fade` → a Fade of `program_transition_ms`, `obs` (default)
+// → cg OBS's transition (`cut_transition` → a Cut, any other kind → a Fade of
+// its duration), or a Fade of `program_transition_ms` while it is unknown.
+function transitionMode() {
+  const mode = (settings.program_transition || "").trim();
+  return mode === "fade" || mode === "cut" ? mode : "obs";
+}
+function transitionMs() {
+  const raw = (settings.program_transition_ms || "").trim();
+  const ms = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : 0;
+  return ms >= 1 ? ms : 300;
+}
+function fadeSpec(ms, source) {
+  return {
+    kind: "fade",
+    duration_ms: ms,
+    n_slots: Math.min(300, Math.max(1, Math.round((ms * 30) / 1000))),
+    source,
+  };
+}
+function transitionSpec() {
+  const mode = transitionMode();
+  if (mode === "cut") {
+    return { kind: "cut", duration_ms: 0, n_slots: 0, source: "setting" };
+  }
+  if (mode === "fade") {
+    return fadeSpec(transitionMs(), "setting");
+  }
+  const obs = programObsTransition;
+  if (obs === null) {
+    return fadeSpec(transitionMs(), "fallback");
+  }
+  if (obs.kind === "cut_transition") {
+    return { kind: "cut", duration_ms: 0, n_slots: 0, source: "obs" };
+  }
+  return fadeSpec(obs.duration_ms ?? transitionMs(), "obs");
+}
+// Mirrors `FollowStatus`, from the stored settings like the real API.
+function followBody() {
+  return {
+    enabled: settings.program_follow_obs === "true",
+    mode: transitionMode(),
+    ms: transitionMs(),
+    obs_transition: programObsTransition,
+    last_follow_cut: null,
+  };
+}
 function programBody() {
   return {
     ndi_name: "SP-program",
@@ -841,6 +896,15 @@ function programBody() {
       submitted: 0,
       connections: 0,
       last_stamp_100ns: 0,
+    },
+    // #215: the transition the next cut uses; the mock applies a cut at once,
+    // so each cut counts as done and a window runs only when a spec injects one.
+    transition: {
+      ...transitionSpec(),
+      active: programActiveWindow,
+      transitions_done: programState.transitions,
+      mixed_boundaries: programState.mixed,
+      side_fills: 0,
     },
     // #210: the VBAN output's telemetry (mirrors `VbanStatus`), from the
     // stored settings like the real settings task.
@@ -923,7 +987,7 @@ function remoteBody() {
   };
 }
 app.get("/api/v1/program", (_req, res) => {
-  res.json({ ...programBody(), input: inputBody(), remote: remoteBody() });
+  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody() });
 });
 app.post("/api/v1/program/cut", (req, res) => {
   const source = Number(req.body?.source);
@@ -939,18 +1003,53 @@ app.post("/api/v1/program/cut", (req, res) => {
   }
   programLastCut = req.body;
   if (programState.source !== source) {
-    programState = { source, previous: programState.source, cuts: programState.cuts + 1 };
+    programState = {
+      source,
+      previous: programState.source,
+      cuts: programState.cuts + 1,
+      transitions: programState.transitions + 1,
+      mixed: programState.mixed + transitionSpec().n_slots,
+    };
   }
-  res.json({ ...programBody(), input: inputBody(), remote: remoteBody() });
+  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody() });
 });
 // Test-only: the last cut body the dashboard posted (backend-effect check).
 app.get("/__mock/program-last-cut", (_req, res) => {
   res.json({ body: programLastCut });
 });
 app.post("/__mock/program-reset", (_req, res) => {
-  programState = { source: 1, previous: null, cuts: 0 };
+  programState = { source: 1, previous: null, cuts: 0, transitions: 0, mixed: 0 };
   programLastCut = null;
+  programObsTransition = null;
+  programActiveWindow = null;
   res.json({ status: "reset" });
+});
+// #215 test-only: cg OBS's current scene transition (`{name, kind,
+// duration_ms}`, mirrors `ObsTransition`), or `{}` for "not known yet".
+app.post("/__mock/program-obs-transition", (req, res) => {
+  const t = req.body || {};
+  programObsTransition =
+    typeof t.kind === "string"
+      ? { name: t.name || "", kind: t.kind, duration_ms: t.duration_ms ?? null }
+      : null;
+  res.json({ obs_transition: programObsTransition });
+});
+// #215 test-only: a running fade window of `progress` % (mirrors
+// `ActiveWindow`), or `{}` for none.
+app.post("/__mock/program-transition-active", (req, res) => {
+  const progress = req.body?.progress;
+  programActiveWindow =
+    typeof progress === "number"
+      ? {
+          from: programState.previous,
+          to: programState.source,
+          start_boundary_100ns: 17900000000000000,
+          n_slots: transitionSpec().n_slots,
+          served_slots: Math.round((progress * transitionSpec().n_slots) / 100),
+          progress,
+        }
+      : null;
+  res.json({ active: programActiveWindow });
 });
 
 // Lyrics pipeline queue

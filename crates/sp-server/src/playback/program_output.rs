@@ -20,6 +20,14 @@
 //! #210: every submitted pair's audio block (forwarded or the standby silence)
 //! is handed to the program's VBAN output (`vban_out.rs`) right after its NDI
 //! submit, and `start_program` also starts the VBAN thread + its settings task.
+//!
+//! #215: a [`ProgramJob::Mix`] (one boundary inside a transition window) is
+//! crossfaded here, on the sender thread: the audio per sample with the
+//! equal-power curve, the picture blended into a `frame_pool` buffer or cut at
+//! the window's midpoint when the two layouts differ
+//! (`program_transition.rs`). `start_program` also starts the OBS-follow task
+//! (`program_follow.rs`) and hands the bus to the engine for the deferred
+//! scene-go-off pause.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,8 +41,13 @@ use sp_ndi::{AudioFrame, NdiBackend, NdiSender};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
+use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
+};
+use crate::playback::program_transition::{
+    AudioFormat, Layout, MixJob, Picture, black_nv12_into, blend_nv12_into, mix_audio_block,
+    picture_mix, starts_size_cut,
 };
 use crate::playback::submitter::FrameSubmitter;
 use crate::playback::vban_out::{VbanBlock, VbanOut, run_vban_config_task};
@@ -71,6 +84,11 @@ pub struct ProgramOutput<B: NdiBackend> {
     standby_h: u32,
     /// #210: the VBAN output each submitted pair's audio block goes to.
     vban: Option<Arc<VbanOut>>,
+    /// #215: audio frames per boundary (1600).
+    spc: usize,
+    /// #215: the previous mixed boundary cut its picture (two layouts); the
+    /// cut is logged once per window.
+    size_cut: bool,
 }
 
 impl<B: NdiBackend> ProgramOutput<B> {
@@ -93,6 +111,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
             standby_w,
             standby_h,
             vban: None,
+            spc,
+            size_cut: false,
         }
     }
 
@@ -114,7 +134,11 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// the audio stamped `audio_now_100ns` (the emit instant, like #147
     /// standby audio).
     pub fn submit(&mut self, job: ProgramJob, audio_now_100ns: i64) -> i64 {
+        if !matches!(job, ProgramJob::Mix(_)) {
+            self.size_cut = false;
+        }
         match job {
+            ProgramJob::Mix(mix) => self.submit_mix(mix, audio_now_100ns),
             ProgramJob::Source(job) => {
                 let stamp = job.video_tc_100ns;
                 self.submitter.submit_frame_at_boundary_owned(
@@ -145,6 +169,83 @@ impl<B: NdiBackend> ProgramOutput<B> {
                 stamp_100ns
             }
         }
+    }
+
+    /// #215: one window boundary: the crossfaded audio block, then the mixed
+    /// picture, stamped like a source boundary (the audio with `to`'s stamp,
+    /// else `from`'s). A mix with neither side (the bus never queues one) goes
+    /// out as the standby pair.
+    fn submit_mix(&mut self, mix: MixJob, audio_now_100ns: i64) -> i64 {
+        let stamp = mix.stamp_100ns;
+        let Some((layout, video)) = self.mix_picture(&mix) else {
+            return self.submit(ProgramJob::Standby { stamp_100ns: stamp }, audio_now_100ns);
+        };
+        let (first, total) = mix.sample_span(self.spc);
+        let format = AudioFormat {
+            frames: self.spc,
+            channels: PROGRAM_AUDIO_CHANNELS,
+            sample_rate: PROGRAM_AUDIO_RATE_HZ,
+        };
+        let audio = vec![mix_audio_block(
+            mix.from.as_ref().and_then(|j| j.audio.first()),
+            mix.to.as_ref().and_then(|j| j.audio.first()),
+            first,
+            total,
+            format,
+        )];
+        let audio_tc = mix
+            .to
+            .as_ref()
+            .or(mix.from.as_ref())
+            .map_or(audio_now_100ns, |j| j.audio_tc_100ns);
+        self.submitter.submit_frame_at_boundary_owned(
+            layout.width,
+            layout.height,
+            layout.stride,
+            video,
+            &audio,
+            stamp,
+            audio_tc,
+        );
+        self.feed_vban(VbanBlock::from_frames(stamp, audio));
+        stamp
+    }
+
+    /// #215: the picture of a window boundary: both pictures blended into a
+    /// pooled buffer when their layouts match, else the `from` / `to` picture
+    /// (the midpoint cut, logged once per window). A missing side is the NV12
+    /// black in the present side's exact layout (`black_nv12_into`), so it
+    /// always blends. `None` when neither side is here.
+    pub(crate) fn mix_picture(&mut self, mix: &MixJob) -> Option<(Layout, SharedFrame)> {
+        let present = Layout::of(mix.to.as_ref().or(mix.from.as_ref())?);
+        let standby = || {
+            let mut black = sp_decoder::frame_pool::take(present.len);
+            black_nv12_into(present, &mut black);
+            (present, SharedFrame::new(black))
+        };
+        let side =
+            |job: &crate::playback::submit_handoff::SubmitJob| (Layout::of(job), job.video.clone());
+        let from = mix.from.as_ref().map_or_else(standby, side);
+        let to = mix.to.as_ref().map_or_else(standby, side);
+        let weight = mix.weight_q8();
+        let picture = picture_mix(from.0, to.0, weight);
+        if starts_size_cut(self.size_cut, picture) {
+            warn!(
+                from = ?from.0,
+                to = ?to.0,
+                "program transition: the two pictures differ in size — the picture cuts at the window's midpoint, the audio still crossfades"
+            );
+        }
+        self.size_cut = picture != Picture::Blend;
+        Some(match picture {
+            Picture::Blend => {
+                let mut out = sp_decoder::frame_pool::take(from.0.len);
+                blend_nv12_into(&from.1, &to.1, weight, &mut out);
+                (from.0, SharedFrame::new(out))
+            }
+            Picture::From => from,
+            Picture::To => to,
+        })
     }
 
     /// Current `SP-program` receiver connection count.
@@ -246,10 +347,12 @@ impl super::PlaybackEngine {
     /// #212: also start the NDI input "OBS manuál" (its settings task, and on
     /// Windows its grid thread on the engine's NDI SDK). #213: also start the
     /// Companion remote control's settings task (its listener cuts this bus and
-    /// reaches cg OBS through the engine's OBS client). Call once, after the
-    /// #196 startup senders.
+    /// reaches cg OBS through the engine's OBS client). #215: also start the
+    /// OBS-follow task and keep the bus for the deferred scene-go-off pause.
+    /// Call once, after the #196 startup senders.
     #[cfg_attr(test, mutants::skip)]
     pub async fn start_program(&self, bus: Arc<ProgramBus>, shutdown: &broadcast::Sender<()>) {
+        let _ = self.program.set(bus.clone()); // #215: the deferred scene-go-off pause
         let vban = bus.vban().clone();
         tokio::spawn(run_vban_config_task(
             self.pool.clone(),
@@ -281,6 +384,8 @@ impl super::PlaybackEngine {
         );
         let upstream =
             crate::remote::Upstream::new(self.obs_cmd_tx.clone(), self.obs_event_tx.clone());
+        let follow = crate::playback::program_follow::Follow::new(self.pool.clone(), bus.clone());
+        crate::playback::program_follow::start_follow(follow, upstream.clone(), shutdown);
         crate::remote::start_remote(self.pool.clone(), bus.clone(), upstream, shutdown);
         tokio::spawn(async move {
             let _ = shutdown_rx.recv().await;
