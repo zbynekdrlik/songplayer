@@ -18,8 +18,8 @@
 //! [`SPIN_YIELD`] instead. A frozen wall then costs ~1 wake-up per ms. The wall
 //! resumes from its frozen value, so the awaited boundary is still ~one slot
 //! ahead, and the wait keeps yielding through that slot too. That boundary goes
-//! out one yield after the wall reaches it (~1 ms plus the sleep's wake-up
-//! overshoot): the one boundary per hold without spin precision.
+//! out at most one yield after the wall reaches it (up to ~1 ms plus the sleep's
+//! wake-up overshoot): the one boundary per hold without spin precision.
 //!
 //! Cross-platform and Linux-tested (`pacer_spin_tests.rs`): `pipeline_paced`
 //! itself is `#[cfg(windows)]` and excluded from the mutation gate.

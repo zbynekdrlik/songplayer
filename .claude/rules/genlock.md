@@ -1010,9 +1010,9 @@ Now:
       after it. The wall resumes from its frozen value, so the awaited
       boundary is still ~one slot ahead, and the wait, already past its
       budget, keeps yielding.
-    - That boundary goes out one yield after the wall REACHES it: ~1 ms
-      nominally, plus the sleep's wake-up overshoot, which on the box can be
-      several ms (the 19.9.2026 coarse-sleep finding above). It is the one
+    - That boundary goes out at most one yield after the wall REACHES it: up
+      to ~1 ms nominally, plus the sleep's wake-up overshoot, which on the box
+      can be several ms (the 19.9.2026 coarse-sleep finding above). It is the one
       boundary per hold without spin precision. It may count ONE late frame
       per paced thread per backward step, against `LATE_THRESHOLD_100NS` =
       2 ms (`pacer.rs`). Stamps stay contiguous either way.
