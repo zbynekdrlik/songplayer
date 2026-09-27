@@ -112,7 +112,8 @@ impl ResolumeRegistry {
             .collect()
     }
 
-    /// Subscribe to recovery events fired when a host recovers after failures.
+    /// Subscribe to recovery events: a host's breaker closed, or its clip map
+    /// became ready again (see [`RecoveryEvent`]).
     pub fn subscribe_recovery(&self) -> broadcast::Receiver<RecoveryEvent> {
         self.recovery_tx.subscribe()
     }

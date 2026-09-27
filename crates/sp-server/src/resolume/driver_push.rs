@@ -62,10 +62,6 @@ impl HostDriver {
         // Start (or continue) the not-ready episode: an open one keeps its
         // start, so its fast window never extends.
         self.not_ready_since.get_or_insert(now);
-        warn!(
-            host = %self.host,
-            "Resolume answered 404 for a clip or parameter id — the clip map is stale (Arena re-ids its clips on relaunch), refreshing it"
-        );
         let Some(reason) = FullRefreshReason::decide(
             now,
             self.last_full_refresh_ok_at,
@@ -77,12 +73,16 @@ impl HostDriver {
             false,
             false,
         ) else {
-            info!(
+            debug!(
                 host = %self.host,
-                "stale Resolume clip map: the retry window holds the refresh, the not-ready ticks fetch it"
+                "Resolume answered 404 (a stale clip map): the retry window holds the refresh, the not-ready ticks fetch it"
             );
             return;
         };
+        warn!(
+            host = %self.host,
+            "Resolume answered 404 for a clip or parameter id — the clip map is stale (Arena re-ids its clips on relaunch), refreshing it"
+        );
         let before = self.clip_mapping.clone();
         self.run_full_refresh(reason, now).await;
         if self.not_ready_since.is_some() {

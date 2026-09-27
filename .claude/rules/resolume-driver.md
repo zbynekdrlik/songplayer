@@ -77,8 +77,9 @@ What the driver does now (`refresh_mapping(now)`):
   NotReady must sit BEFORE TTL: after a restart `last_full_ok` is the
   pre-restart stamp, and a TTL reason would wait out the retry window.
 - The refresh that finds a SongPlayer token clears `not_ready_since` and fires
-  a `RecoveryEvent`. The engine's `handle_resolume_recovery` re-pushes the
-  title and the current subtitle state.
+  a `RecoveryEvent` when the map changed and the step has not fired one yet
+  (see below). The engine's `handle_resolume_recovery` re-pushes the title and
+  the current subtitle state.
 - **An evicted map is not ready too.** Opening the breaker empties
   `clip_mapping` and clears `not_ready_since` (the outage ends any episode).
   The probe that closes the breaker sets `not_ready_since = now`
@@ -132,7 +133,13 @@ log 14:12:22) until the 300 s TTL.
   Only this holds a refresh back: a relaunch maps new ids, so a second
   relaunch a few seconds later refreshes at once
   (`a_second_relaunch_within_a_minute_is_refreshed_at_once`; an earlier
-  "one mark per 60 s" guard held it back, review round 1).
+  "one mark per 60 s" guard held it back, review round 1). The hold is not
+  per id: a relaunch inside the 60 s after a refused-id refresh waits for
+  the hold to end (or for a tick's refetch) — only when an id is refused,
+  which the steady state never has.
+- **Logs.** The stale-map WARN is logged only when the refresh runs; a 404
+  that the retry window holds, or on a refused id, logs at debug (a lyric
+  line is pushed every few seconds).
 - **Caveat — the engine can undo a retried HideTitle.**
   `playback/recovery.rs::handle_resolume_recovery` re-pushes `ShowTitle` for
   every pipeline Playing on program, even after its end-of-song hide (an

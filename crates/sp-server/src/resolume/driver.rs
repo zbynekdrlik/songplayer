@@ -274,10 +274,9 @@ pub struct HostDriver {
     last_full_attempt_at: Option<Instant>,
     /// Whether the last full-refresh ATTEMPT failed: a DNS/transport/timeout
     /// error, a non-2xx status (even with a JSON body, #217 addendum 2), or a
-    /// body that is not JSON. `decide` takes
-    /// the NotReady fast path only while the last attempt answered: a failing
-    /// `/composition` is the #157 case and keeps the retry window (#217
-    /// review round 3).
+    /// body that is not JSON. `decide` takes the NotReady fast path only while
+    /// the last attempt answered: a failing `/composition` is the #157 case
+    /// and keeps the retry window (#217 review round 3).
     last_full_attempt_failed: bool,
     /// Monotonic start of the current NOT READY episode: the first refresh
     /// whose `/composition` answered with none of SongPlayer's clips (Arena's
