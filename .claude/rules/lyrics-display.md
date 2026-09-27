@@ -40,7 +40,7 @@ songs that are already stored.
 | `FRAGMENT_MAX_MS` | 1500 | A line sung for less than this is a fragment. |
 | `FRAGMENT_MAX_WORDS` | 3 | A line with at most this many words is a fragment. |
 | `MERGE_MAX_GAP_MS` | 700 | A fragment merges only across a gap of at most this. |
-| `MERGE_MAX_CHARS` | 64 | A merge must keep the joined EN within this many chars. |
+| `MERGE_MAX_CHARS` | 64 | A merge must keep the joined EN AND the joined SK each within this many chars. |
 
 `display_plan_tests::constants_match_the_design_record` pins every value. Change
 one only together with the design record on #217.
@@ -51,8 +51,9 @@ one only together with the design record on #217.
    `FRAGMENT_MAX_MS`, has ≤ 3 words, or is followed by a line whose first
    letter or digit is lowercase (a continuation; leading punctuation like
    `'cause` / `…and` is skipped). A fragment joins its FOLLOWING line when they
-   `fits` (the gap is ≤ 700 ms, where overlap counts as 0, and the joined EN is
-   ≤ 64 chars). Otherwise it joins its previous line under the same limits.
+   `fits` (the gap is ≤ 700 ms, where overlap counts as 0, and the joined EN
+   and the joined SK are each ≤ 64 chars; a missing SK counts as empty).
+   Otherwise it joins its previous line under the same limits.
    EN and SK are joined with one space: texts are trimmed, an empty side is
    dropped, and a lone SK is kept. `next_merge` rescans from the start after
    every merge. Each merge removes a group, so the loop always ends.
@@ -81,8 +82,27 @@ one only together with the design record on #217.
   non-overlapping: the base tier runs `g35t_transcript::sanitize_lines`, but
   `orchestrator::run_reference_stage` passes the ★ tier's mtl line times
   through unchanged.
-- **The lead can replace a line while it is still sung, and in a fast run
-  even before it is sung.** This follows the design as written (record
+- **Dub subtitle tracks go through the same plan.** `gemini-live-translate`
+  tracks (#182/#184) are stored as the same `{youtube_id}_lyrics.json`
+  (`dabing/subtitles_store.rs`) and load into the same `LyricsState`.
+  - Their lines touch, because `finalize_line_ends` trims each end to the
+    next start. Many have `en: ""`, and each holds a whole SK sentence of up
+    to 20 words.
+  - An empty EN is 0 words, so it counts as a fragment, and `"" + ""` always
+    fits the EN limit. Before the SK limit (review round 2, 🔴) every EN-less
+    run collapsed into one Slovak block. The model gave 10 lines → 1 line of
+    679 chars.
+  - `a_dub_subtitle_track_never_collapses_into_one_giant_sk_line` pins this.
+  - Whether dub tracks should get the lead and hold at all is an open design
+    question on #217.
+- **The operator `lyrics_lead_ms` ADDS to the plan's 1.5 s lead.** No
+  migration seeds it, so it is 0 unless an operator set it. After a deploy,
+  read `lead_ms` from the `lyrics: loaded … display_lines=…` log line. If it
+  is not 0, the total lead is over 1.5 s.
+- **The lead can replace a line while it is still sung, and sometimes even
+  before it is sung.** This happens whenever the next line is sung within
+  `LEAD_MS` of this line's start and this line already had `MIN_VISIBLE_MS`
+  of lead. It follows the design as written (record
   5853195402): a line shows at `start − 1500` as long as the previous line got
   its 1200 ms, and nothing waits for the previous line's sung end.
   - On the fixture every line gets the full 1500 ms lead. But 68 of 137 wall
