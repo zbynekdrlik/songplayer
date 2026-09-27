@@ -343,6 +343,12 @@ the test that kills each one BEFORE CI's mutation gate runs.
   only here.
 - cargo-mutants 27 turns `|=` only into `&=`, not `^=`.
 - It turns a match guard into `true` / `false`, and `==` into `!=`.
+- It generates NO mutant for a plain assignment (`self.flag = false;`) or
+  for an `if` condition that is a bare variable (`if breaker_just_closed {`).
+  Deleting such a line survives the gate unseen, so give it its own
+  behaviour test that fails without it. #217 pinned the Ok-arm clear of
+  `last_full_attempt_failed` with
+  `an_answered_fetch_after_a_failed_one_restores_the_fast_path`.
 - A mutation that cannot compile (`&&`→`||` inside a let-chain) is
   "unviable": it costs a build but cannot fail the gate.
 
