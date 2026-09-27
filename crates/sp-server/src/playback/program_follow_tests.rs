@@ -707,35 +707,48 @@ async fn a_transition_read_is_retried_only_while_cg_obs_is_connected() {
         "requestType": REQUEST,
         "requestStatus": { "result": false, "code": 207, "comment": "not ready" },
     });
+    // The start's read is answered; every later one fails.
     let mut rig = start(
         &pool,
-        vec![failed, fade(500)],
+        vec![fade(500), failed],
         16,
         Duration::from_millis(20),
     );
-    // cg OBS is away before the task even runs: the OBS client does not
-    // serve calls then, so a retry would only pile up in its queue.
+    assert_eq!(rig.next_request().await, REQUEST, "the start's read");
+    rig.spec_becomes((TransitionKind::Fade, 500, 15, SpecSource::Obs))
+        .await;
+    // A transition change whose read fails: the polls retry it while cg OBS
+    // is up.
+    rig.raw("CurrentSceneTransitionChanged");
+    assert_eq!(
+        rig.next_requests(2).await,
+        vec![REQUEST, REQUEST],
+        "the event's read, then a poll's retry"
+    );
+    // cg OBS goes away: the OBS client serves no call then, so a retry would
+    // only wait in its queue. The task handles the Disconnected before its
+    // next poll (events come first), so once a poll has applied the next
+    // setting, no retry follows.
     rig.events
         .send(ObsEvent::Disconnected)
         .expect("the task listens");
-    assert_eq!(rig.next_request().await, REQUEST, "the start's read");
     store(&pool, "program_transition", "cut").await;
     rig.spec_becomes((TransitionKind::Cut, 0, 0, SpecSource::Setting))
+        .await;
+    rig.more_requests(); // the retries that were already running
+    store(&pool, "program_transition", "fade").await;
+    rig.spec_becomes((TransitionKind::Fade, 300, 9, SpecSource::Setting))
         .await;
     assert_eq!(
         rig.more_requests(),
         Vec::<String>::new(),
         "no retry while cg OBS is away"
     );
-    // It is back: one read, answered, and no more.
+    // It is back: it is read again at once.
     rig.events
         .send(ObsEvent::Connected)
         .expect("the task listens");
     assert_eq!(rig.next_request().await, REQUEST);
-    store(&pool, "program_transition", "obs").await;
-    rig.spec_becomes((TransitionKind::Fade, 500, 15, SpecSource::Obs))
-        .await;
-    assert_eq!(rig.more_requests(), Vec::<String>::new());
     rig.stop().await;
 }
 
