@@ -4,12 +4,13 @@ paths:
   - "crates/sp-server/src/playback/recovery.rs"
 ---
 
-# Resolume host driver — poll policy, NOT READY mapping, RecoveryEvent (#157, #217)
+# Resolume host driver — poll policy, NOT READY mapping, stale ids, RecoveryEvent (#157, #217)
 
 `resolume/driver.rs::HostDriver` is one task per Arena host. The steady state
 runs only the light `GET /api/v1/product` liveness probe, every ~10 s with
 jitter. The ~14 MB `GET /api/v1/composition` (the clip map) runs only when the
-pure `FullRefreshReason::decide` asks for it (#157).
+pure `FullRefreshReason::decide` asks for it (#157). Inside a not-ready
+episode's fast window the driver ticks every 2 s instead (#217 addendum 2).
 
 ## Arena's REST answers before its composition has loaded (#217)
 
@@ -35,24 +36,40 @@ What the driver does now (`refresh_mapping(now)`):
   breaker and failure counter do not see "not ready".
 - `decide` returns `NotReady` (log `reason="not-ready"`) on every tick for
   `NOT_READY_FAST_WINDOW` (120 s) from `not_ready_since`, skipping the 60 s
-  retry backoff. After that the retry window applies again. A composition
-  that never gets SongPlayer's clips costs 1 + 11 + 3 = 15 fetches in 5 min,
+  retry backoff. After that the retry window applies again.
+- **The 2 s cadence (#217 addendum 2).** While that fast window is open,
+  `run` ticks every `NOT_READY_TICK` (2 s, `tick_period`) instead of the
+  ~10 s liveness cadence, so the clips are mapped within ~2 s of the
+  composition loading (the box took 11 s, one liveness tick). One predicate,
+  `not_ready_fast_window_open`, decides both the every-tick refetch and the
+  2 s tick. A command that opened an episode (a 404 push) moves the next tick
+  up to 2 s with `next_probe.min(..)`, which never delays the probe.
+- **The cost.** A composition that never gets SongPlayer's clips costs
+  1 + 59 + 3 = 63 fetches in 5 min (0..118 s every 2 s, then 180, 240, 300 s),
   then one fetch (and one INFO `reason="not-ready"` line) every 60 s for as
-  long as it stays that way — 5× the TTL rate, the accepted trade-off.
+  long as it stays that way — the accepted trade-off of the design record
+  (comment 5858074840). `driver_not_ready_tests.rs`'s storm test drives
+  explicit 10 s ticks and still pins 15.
+- **A 2 s episode opens the breaker sooner.** Three failed probes in a row
+  open it, so during a fast window that is ~6 s of failures (plus the 5 s
+  probe timeouts), not ~30 s. The close then starts a fresh episode and fires
+  its own RecoveryEvent.
 - **The fast path needs an ANSWERED last attempt** (`last_full_attempt_failed`,
   a `decide` input).
   - Not ready means `/composition` answered without SongPlayer's clips.
   - A FAILED fetch is the #157 case: Arena's REST answers `/product` but
     chokes on the 14 MB composition while it loads. It keeps the 60 s retry
     window, even inside the 120 s.
-  - "Failed" means a DNS, transport or timeout error, or a body that is not
-    JSON. `fetch_mapping_inner` never checks the status, so a non-2xx JSON
-    body counts as ANSWERED (not ready).
+  - "Failed" means a DNS, transport or timeout error, a non-2xx status, or
+    a body that is not JSON. `fetch_mapping_inner` calls `error_for_status`,
+    so a 500 with a JSON body is a failed fetch (#217 addendum 2; before, it
+    was parsed as an answered, not-ready composition).
   - An answered fetch clears the flag, and the fast path resumes on the next
     tick (`an_answered_fetch_after_a_failed_one_restores_the_fast_path`).
   - Without this, after a breaker close a failing `/composition` was fetched
     every tick. Each failure also made the next probe fire a `was_failing`
-    RecoveryEvent, one title re-push per tick (review round 3).
+    RecoveryEvent, one title re-push per tick (review round 3; `was_failing`
+    is gone since #217 addendum 2, see below).
 - Precedence: forced command > breaker-closed > NotReady > startup / TTL.
   NotReady must sit BEFORE TTL: after a restart `last_full_ok` is the
   pre-restart stamp, and a TTL reason would wait out the retry window.
@@ -72,7 +89,56 @@ What the driver does now (`refresh_mapping(now)`):
   - The relaunch gets a FRESH 120 s fast window from the close, not the tail
     of an old episode.
 
-## RecoveryEvent: one per driver step
+## A push answered 404 = a stale clip map (#217 addendum 2)
+
+**Arena gives every clip and text param a NEW id on each relaunch** (box
+2026-09-27: `#sp-subs` 1790510617970 → 1790518489097; still so on 7.28.0). A
+relaunch quicker than three failed probes never opens the breaker, so nothing
+refreshed the map: every push went to the dead ids (`404 Not Found`, SongPlayer
+log 14:12:22) until the 300 s TTL.
+
+- **Detection at the push choke point.** `set_text` / `set_clip_opacity`
+  call `note_push_status`, which sets the `stale_id_seen` `AtomicBool` on a
+  404. They take `&self` (the handlers run them in parallel through
+  `FuturesUnordered`), hence the atomic.
+- **Only 404.** A 500 or a timeout is Arena's REST choking; a refresh would
+  not help and costs ~14 MB (`a_push_answered_500_does_not_mark_the_map_stale`).
+- **The push step** (`driver_push.rs::run_push`, every title/subtitle
+  command is its own driver step and clears `recovery_sent_this_step`):
+  1. run the handler;
+  2. on a 404, `mark_map_stale`: `not_ready_since.get_or_insert(now)` (an
+     open episode keeps its start, so its fast window never extends);
+  3. refresh through `decide` (the NotReady path; a failed last attempt still
+     waits out the 60 s retry window, the ticks fetch it then);
+  4. if the refresh mapped SongPlayer's clips, retry the push once. The ready
+     transition has already fired the step's RecoveryEvent.
+- **A ShowTitle is not retried.** That RecoveryEvent's engine re-push shows
+  the title; a retried ShowTitle would run a second fade from 5 %, the blink
+  the one-event-per-step rule exists for. A HideTitle IS retried (the re-push
+  never hides), and a subtitle retry is an instant, harmless double.
+- **At most one stale mark per `FULL_REFRESH_RETRY` (`last_stale_mark_at`).**
+  An id the composition still lists but the by-id endpoint refuses would
+  otherwise loop with no timer in it: ready refresh → RecoveryEvent → engine
+  re-push → 404 → refresh → … one 14 MB fetch per lap. A relaunch is never
+  held back by it: the steady state has no 404s.
+
+## Subtitle clips: blank, never skip (#217 addendum 2)
+
+- `clear_subtitles` clears `#sp-subs`, `#sp-subs-next` AND `#sp-subssk`. The
+  next-line clip used to keep its text while the wall was blank (box:
+  `#sp-subs-next` = "If he dresses lilies" with `#sp-subs` empty).
+- A `suppress_en` push (English lyrics inside the video) writes the EN clips
+  EMPTY. Skipping them left the previous song's English on the wall. The
+  engine pushes only on a signature change, so that is one blank write each.
+
+## RecoveryEvent: only on a real recovery, one per driver step
+
+**Only a real recovery fires one (#217 addendum 2):** the breaker close
+(`apply_outcome`) or a not-ready map becoming ready (`refresh_mapping`,
+including an episode a 404 started). A bare failing→ok flip (one failed probe
+or `/composition`) evicted nothing, so it fires none. It used to
+(`was_failing`): every transient failure re-pushed all hosts and restarted the
+title fade, and in the #157 retry case every failed fetch did.
 
 `show_title` fades opacity from 5 % to 100 %, so a SECOND `ShowTitle` while the
 title is up is a visible blink. So one driver step fires at most one event.
@@ -85,14 +151,14 @@ refresh.
   in the step, e.g. by the probe's `apply_outcome(true)` after a failed probe,
   already covers a refresh that later in the same step finds the clips.
 - **How:** `send_recovery_event` sets `recovery_sent_this_step`, and
-  `on_tick_at` / the `RefreshMapping` arm clear it at the step's start. The
-  ready transition fires only when it is still false.
+  `on_tick_at` / the `RefreshMapping` arm / `run_push` clear it at the step's
+  start. The ready transition fires only when it is still false.
 - **Rejected guard:** `consecutive_failures > 0` cannot be the guard. The
   probe resets the counter before the refresh runs, so it missed the
   failed-probe-then-ready tick (review round 1, 🔴).
-- **The breaker close:** the probe fires its event (`was_failing`), and the
-  breaker-closed refresh in the same tick that finds the clips does not fire
-  a second one.
+- **The breaker close:** the probe's `apply_outcome` fires its event on the
+  close, and the breaker-closed refresh in the same tick that finds the clips
+  does not fire a second one.
 - **Counting events in tests:** the event is broadcast synchronously inside
   the driver call. Count with `try_recv` right after the `.await` (see
   `drain` in `driver_not_ready_tests.rs`).
@@ -146,3 +212,13 @@ the next line change, for the whole song, or over the next camera shot.
 - Pin exact fetch counts from a scratch Python model of `decide` + the tick
   loop. The storm test's 15 kills the `<` → `<=` window mutant; a `≤ 15` bound
   would not.
+- **The 2 s cadence without `run`** (`run` is `mutants::skip`, real time):
+  simulate its loop, `now += driver.tick_period(now, secs(10))` with the
+  jitter fixed, and pin the fetch instants
+  (`a_not_ready_episode_refetches_every_2_s_then_falls_back_after_120_s`).
+  Bound the loop (`for _ in 0..200`): a mutant whose period is zero would
+  otherwise hang the test instead of failing it.
+- **A push step on the synthetic clock:** call `run_push(&cmd, base + secs(n))`;
+  `handle_command` stamps `Instant::now()`.
+- **Mount every route a push test PUTs to.** wiremock answers an unmatched
+  request with 404, which the driver now reads as a stale id and refreshes.
