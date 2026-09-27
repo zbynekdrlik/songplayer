@@ -271,3 +271,127 @@ async fn dispatch_lyrics_no_throttle() {
         .try_recv()
         .expect("second ws message must fire 100 ms later — no throttle");
 }
+
+// -- Resolume recovery re-emits the wall's display state (#217) -------------
+
+/// A Playing, on-program pipeline with `lyrics` at `position_ms`, then a
+/// Resolume recovery. Returns the Resolume commands it sent. No `videos` row
+/// exists, so `push_title` sends no ShowTitle and only the subtitle state
+/// remains.
+async fn recovery_commands(
+    lyrics: Option<LyricsState>,
+    position_ms: u64,
+) -> Vec<crate::resolume::ResolumeCommand> {
+    let (mut engine, mut resolume_rx, _ws_rx) = build_engine().await;
+    install_pipeline(&mut engine, 99, true, lyrics);
+    let pp = engine.pipelines.get_mut(&99).unwrap();
+    pp.state = PlayState::Playing { video_id: 42 };
+    pp.cached_position_ms = position_ms;
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    let mut cmds = Vec::new();
+    while let Ok(cmd) = resolume_rx.try_recv() {
+        cmds.push(cmd);
+    }
+    cmds
+}
+
+#[tokio::test]
+async fn resolume_recovery_re_pushes_the_current_line() {
+    let cmds = recovery_commands(Some(LyricsState::new(make_track())), 1500).await; // inside "alpha"
+    match cmds.as_slice() {
+        [crate::resolume::ResolumeCommand::ShowSubtitles { en, .. }] => {
+            assert!(en.contains("alpha"), "got: {en}");
+        }
+        other => panic!("expected one ShowSubtitles, got {other:?}"),
+    }
+}
+
+/// The plan is blank here (the last line left at 9 s + the 3 s tail). The
+/// dispatch dedup already recorded "hide", while the push was skipped against
+/// the host's empty clip map, so nothing else would clear a stale text Arena
+/// restored from its saved composition.
+#[tokio::test]
+async fn resolume_recovery_re_sends_hide_when_the_plan_is_blank() {
+    let cmds = recovery_commands(Some(LyricsState::new(make_track())), 60_000).await;
+    assert!(
+        matches!(
+            cmds.as_slice(),
+            [crate::resolume::ResolumeCommand::HideSubtitles]
+        ),
+        "a blank plan position re-sends HideSubtitles, got {cmds:?}"
+    );
+}
+
+/// Review round 2: a song without lyrics. Its song-start HideSubtitles was
+/// skipped against the host's empty clip map, so recovery must clear the
+/// subtitle clips too, or a stale text Arena restored from its saved
+/// composition stays for the whole song.
+#[tokio::test]
+async fn resolume_recovery_re_sends_hide_for_a_song_without_lyrics() {
+    let cmds = recovery_commands(None, 1500).await;
+    assert!(
+        matches!(
+            cmds.as_slice(),
+            [crate::resolume::ResolumeCommand::HideSubtitles]
+        ),
+        "a playing song without lyrics re-sends HideSubtitles, got {cmds:?}"
+    );
+}
+
+/// Review round 5: two playing, on-program playlists share the subtitle
+/// clips, one with a line and one without lyrics. The recovery must not let
+/// the blank one's HideSubtitles land after (HashMap order) and clear the
+/// other's line: the line goes out, and no Hide.
+#[tokio::test]
+async fn resolume_recovery_never_hides_another_on_program_playlist_s_line() {
+    let (mut engine, mut resolume_rx, _ws_rx) = build_engine().await;
+    install_pipeline(&mut engine, 98, true, None);
+    install_pipeline(&mut engine, 99, true, Some(LyricsState::new(make_track())));
+    for id in [98, 99] {
+        let pp = engine.pipelines.get_mut(&id).unwrap();
+        pp.state = PlayState::Playing { video_id: 42 };
+        pp.cached_position_ms = 1500; // inside "alpha" for playlist 99
+    }
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    let mut cmds = Vec::new();
+    while let Ok(cmd) = resolume_rx.try_recv() {
+        cmds.push(cmd);
+    }
+    match cmds.as_slice() {
+        [crate::resolume::ResolumeCommand::ShowSubtitles { en, .. }] => {
+            assert!(en.contains("alpha"), "got: {en}");
+        }
+        other => panic!("expected only playlist 99's ShowSubtitles, got {other:?}"),
+    }
+}
+
+/// Review round 6: no SongPlayer playlist is playing on program, so the
+/// wall's subtitle clips should be blank. The hide sent when the playlist went
+/// off program can itself have been skipped against the host's empty clip map
+/// during the outage, so the recovery clears them (an instant text clear; the
+/// title is left alone, since a HideTitle fades from full opacity and would
+/// flash a stale title that is already hidden).
+#[tokio::test]
+async fn resolume_recovery_clears_the_subtitles_without_an_on_program_playlist() {
+    let (mut engine, mut resolume_rx, _ws_rx) = build_engine().await;
+    install_pipeline(&mut engine, 99, false, Some(LyricsState::new(make_track())));
+    engine.pipelines.get_mut(&99).unwrap().state = PlayState::Playing { video_id: 42 };
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    let mut cmds = Vec::new();
+    while let Ok(cmd) = resolume_rx.try_recv() {
+        cmds.push(cmd);
+    }
+    assert!(
+        matches!(
+            cmds.as_slice(),
+            [crate::resolume::ResolumeCommand::HideSubtitles]
+        ),
+        "with no on-program line the recovery clears the subtitles, got {cmds:?}"
+    );
+}

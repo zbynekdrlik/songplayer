@@ -11,8 +11,10 @@ use tracing::{info, warn};
 use crate::resolume::driver::HostDriver;
 
 /// Fired by [`HostDriver`] when a refresh succeeds after at least one
-/// prior consecutive failure. Subscribers (e.g. the playback engine)
-/// react by re-emitting their current state to the recovered host.
+/// prior consecutive failure, and when a NOT READY clip mapping (a
+/// composition without SongPlayer's clips, #217) becomes ready. Subscribers
+/// (e.g. the playback engine) react by re-emitting their current state to
+/// the recovered host.
 #[derive(Debug, Clone)]
 pub struct RecoveryEvent {
     pub host: String,
@@ -33,6 +35,11 @@ pub const SUBS_NEXT_TOKEN: &str = "#sp-subs-next";
 
 /// Resolume clip tag for Slovak subtitle text delivery.
 pub const SUBS_SK_TOKEN: &str = "#sp-subssk";
+
+/// Every clip tag SongPlayer writes to. The health snapshot counts clips for
+/// exactly these, and a composition whose mapping has none of them is NOT
+/// READY: Arena's REST answers before its composition has loaded (#217).
+pub const SONGPLAYER_TOKENS: [&str; 4] = [TITLE_TOKEN, SUBS_TOKEN, SUBS_NEXT_TOKEN, SUBS_SK_TOKEN];
 
 /// Commands sent to per-host Resolume workers.
 #[derive(Debug, Clone)]
