@@ -45,12 +45,12 @@ pub struct LyricsState {
     track: LyricsTrack,
     /// What the LED wall and the Presenter show (#217): merged fragments,
     /// each with a lead, held until the next line. Built once per loaded
-    /// track. The dashboard paths (`update`, `resolume_lines`) keep the raw
-    /// `track` and its word timing.
+    /// track. The dashboard path (`update`) keeps the raw `track` and its
+    /// word timing.
     plan: DisplayPlan,
     /// Operator lead time (ms) shifted into every stage-display / LED-wall
     /// lookup, on top of the plan's own lead.
-    /// `0` for raw paths (`update`, `resolume_lines`) preserves the
+    /// `0` for the raw dashboard path (`update`) preserves the
     /// dashboard-highlighter-aligns-to-real-audio invariant.
     lead_ms: u64,
     /// Per-song time-axis shift in ms (from `videos.lyrics_time_offset_ms`).
@@ -69,7 +69,7 @@ pub struct LyricsState {
 ///
 /// `lead_ms = self.lead_ms` for the stage-display / LED-wall paths
 /// (`presenter_lines`, `resolume_lines_with_next`). `lead_ms = 0` for the
-/// dashboard-highlighter paths (`update`, `resolume_lines`) per the
+/// dashboard-highlighter path (`update`) per the
 /// CLAUDE.md note that the dashboard must align to real playback.
 #[inline]
 fn effective_lookup(position_ms: u64, lead_ms: u64, offset_ms: i64) -> u64 {
@@ -150,19 +150,6 @@ impl LyricsState {
                     word_count,
                 }
             }
-        }
-    }
-
-    /// Returns `(en_text, sk_text)` for the line active at `position_ms`.
-    /// Returns `(None, None)` when between lines.
-    ///
-    /// Dashboard/raw path: no lead, but the per-song `offset_ms` is applied
-    /// so operator shifts affect the wall playthrough consistently.
-    pub fn resolume_lines(&self, position_ms: u64) -> (Option<String>, Option<String>) {
-        let lookup = effective_lookup(position_ms, 0, self.offset_ms);
-        match self.track.line_at(lookup) {
-            None => (None, None),
-            Some((_, line)) => (Some(line.en.clone()), line.sk.clone()),
         }
     }
 
@@ -438,24 +425,6 @@ mod tests {
     }
 
     #[test]
-    fn resolume_lines_returns_text() {
-        let state = LyricsState::new(test_track());
-        // position inside first line
-        let (en, sk) = state.resolume_lines(1500);
-        assert_eq!(en, Some("Hello world".into()));
-        assert_eq!(sk, Some("Ahoj svet".into()));
-    }
-
-    #[test]
-    fn resolume_lines_returns_none_between_lines() {
-        let state = LyricsState::new(test_track());
-        // position before any line
-        let (en, sk) = state.resolume_lines(500);
-        assert_eq!(en, None);
-        assert_eq!(sk, None);
-    }
-
-    #[test]
     fn presenter_lines_returns_current_and_next() {
         let st = LyricsState::new(wall_track());
         // wall_track()'s plan shows line 0 over [0, 3000).
@@ -660,11 +629,6 @@ mod tests {
             assert_eq!(cur(9_000), None);
         }
         for pos in [0u64, 2_999, 3_000, 4_500, 9_000] {
-            assert_eq!(
-                st_new.resolume_lines(pos),
-                st_off.resolume_lines(pos),
-                "resolume_lines must match at position {pos}"
-            );
             assert_eq!(
                 st_new.resolume_lines_with_next(pos, false),
                 st_off.resolume_lines_with_next(pos, false),
