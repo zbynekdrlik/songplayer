@@ -57,8 +57,8 @@ one only together with the design record on #217.
    dropped, and a lone SK is kept. `next_merge` rescans from the start after
    every merge. Each merge removes a group, so the loop always ends.
 2. **Lead.** `show = min(start, max(start − LEAD, prev.show + MIN_VISIBLE))`.
-   A fast passage therefore switches exactly on time, and a line never shows
-   after it is sung.
+   A line never shows after it is sung. When the previous lines leave no
+   room, it shows exactly when it is sung.
 3. **Hold.** `hide = next.show` when the sung gap to the next line is
    ≤ `LONG_GAP_MS`. Before a longer gap, and after the last line, it is
    `end + HOLD_TAIL`.
@@ -81,9 +81,18 @@ one only together with the design record on #217.
   non-overlapping: the base tier runs `g35t_transcript::sanitize_lines`, but
   `orchestrator::run_reference_stage` passes the ★ tier's mtl line times
   through unchanged.
-- **The lead can replace a line before its sung end.** This is by design
-  (record 5853195402): a line shows at `start − 1500` as long as the previous
-  line got its 1200 ms. On the fixture every line gets the full 1500 ms lead.
+- **The lead can replace a line while it is still sung, and in a fast run
+  even before it is sung.** This follows the design as written (record
+  5853195402): a line shows at `start − 1500` as long as the previous line got
+  its 1200 ms, and nothing waits for the previous line's sung end.
+  - On the fixture every line gets the full 1500 ms lead. But 68 of 137 wall
+    lines leave before their sung end, 41.7 s in total.
+  - "All I have" (sung at 509.6 s) is on the wall only 508.1–509.5 s.
+  - The Resolume SK clip shows only the current line, so the Slovak of the
+    phrase being sung is what vanishes.
+  - A `Design-question:` on #217 asks the main whether to floor the lead at
+    the previous line's sung END, the issue-body acceptance "never before the
+    previous line's end". Check #217 before changing this.
 - **`at()` is a linear first-match over half-open `[show, hide)`.** At an
   exact boundary the NEXT line wins. The tests pin both sides of every boundary
   (`x − 1` → old line, `x` → new line) for the mutation gate.

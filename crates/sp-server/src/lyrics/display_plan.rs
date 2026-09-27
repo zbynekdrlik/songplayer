@@ -17,8 +17,11 @@
 //!    merges backward under the same limits. The Slovak text is joined the same
 //!    way. Merging repeats until no rule applies.
 //! 2. **Lead.** A line shows at `max(start - LEAD_MS, prev.show +
-//!    MIN_VISIBLE_MS)`, but never after it is sung (`<= start`). A fast passage
-//!    therefore switches exactly on time.
+//!    MIN_VISIBLE_MS)`, but never after it is sung (`<= start`): when the
+//!    previous lines leave no room, it shows exactly when it is sung. The
+//!    lead can replace the previous line while that line is still sung. In a
+//!    fast run it can even replace it before its sung start (see the
+//!    design question on #217).
 //! 3. **Hold.** A line stays on the wall until the next line shows. Before an
 //!    instrumental break (a gap over [`LONG_GAP_MS`]) and after the last line,
 //!    it leaves [`HOLD_TAIL_MS`] after its sung end instead.
