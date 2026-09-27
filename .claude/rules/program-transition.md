@@ -62,9 +62,11 @@ song's first real pair.
   A cut back to that source needs no window: it just takes the boundaries over
   (segment only).
 - `prune` drops a window once its last boundary is served
-  (`transitions_done`, a Cut included). `Window::covered()` is the number of
-  boundaries a (possibly truncated) window covers; `served` and the dashboard
-  `progress` count against it, so a superseded fade still ends at 100 %.
+  (`transitions_done`, a Cut included; a frozen window too, a same-slot
+  replaced one never). `Window::covered()` is the number of MIXED boundaries:
+  the open window's (possibly truncated) span, `n_slots` while its cue waits,
+  0 once frozen; `served` and the dashboard `progress` count against it, so a
+  superseded fade still ends at 100 %.
 - Grid math is exact: `sp_core::genlock::{grid_index_100ns,
   grid_boundary_100ns}` (tested in sp-core `genlock_tests_grid_index.rs`).
   Slots are 333 333 or 333 334 × 100 ns wide, so NEVER `start + k · interval`.
@@ -104,7 +106,20 @@ cut boundary mixed the outgoing song against silence.
 - `open_cue` drops `from`'s pairs past the window's new end (they belonged to
   the wait's worst case and would count toward the reorder bound forever).
 - `transition.cue_wait_boundaries` = the LAST opened window's wait (0 = live
-  on the cut boundary, 15 = timed out); `cue_timeouts` counts the timeouts.
+  on the cut boundary, 15 = timed out; more only if a > 8-slot resync jumped
+  past the deadline); `cue_timeouts` counts the timeouts. A frozen window
+  never opens and never touches them.
+- A WAITING cue opens only on its own window's live pair: once a later cut
+  froze it, a live pair of its incoming source inside it is held like any
+  other (review round 1). `cut` reads `on_air()` BEFORE `windows.retain`, so
+  a same-slot re-cut that drops the waiting window still fades out of that
+  window's outgoing source.
+- Logs: INFO `the incoming source is live — the fade starts` (from, to,
+  waited) / WARN `… sent no live pair in time …` per opened cue, INFO `a later
+  cut froze the fade still waiting for its cue`, and from the sender one INFO
+  `the fade's mixed boundaries went out` per run of mixed boundaries
+  (`boundaries`, `fitted`, `max_picture_us` = the worst fit + blend time on
+  the `SP-program` thread).
   The dashboard "Prechod" line shows no counters, so it is unchanged; a
   waiting window shows as `active` with 0 %.
 - `hold_for` reports a waiting window's LATEST end, so `scene_off.rs` keeps
@@ -136,11 +151,14 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
   buffer, always in the INCOMING side's layout. When the two layouts (width,
   height, stride, length) differ, the outgoing picture is first fitted into
   the incoming one (#215 addendum A) — there is no midpoint cut any more:
-  - `FitPlan` (`fit_nv12_into` is its one-shot form): aspect kept, each axis
-    `even_round(src·other_dst / other_src)` capped at the destination (so the
-    relatively wider side fills its axis), centred on EVEN offsets (a chroma
-    sample covers its 2×2 luma block; an odd centring offset rounds down, e.g.
-    2560×1080 into 1920×1080 → rows 134..943), studio-black bars Y 16 / UV 128;
+  - `FitPlan` (`fit_nv12_into` is its one-shot form) places the picture with
+    `nv12_fit::aspect_fit` — the SAME placement the #178 preview letterbox
+    (`preview_stream::placement_for`) uses: each axis the destination capped by
+    the aspect-scaled other axis, floored to even, centred on even offsets (a
+    chroma sample covers its 2×2 luma block; 2560×1080 into 1920×1080 → rows
+    134..943), studio-black bars Y 16 / UV 128. Only the pixel paths differ:
+    the preview copies nearest-neighbour on the decode thread (cheap by rule),
+    the program fit is bilinear and runs only on mixed boundaries;
   - bilinear in Q8 at the pixel CENTRES (`HALF_PIXEL_Q8`), luma and the
     half-resolution chroma each on their own grid, clamped at the edges;
   - the column taps are built once per pair of layouts: `ProgramOutput` keeps
@@ -339,10 +357,13 @@ switched on for events (design record); the watcher script
 `%TEMP%\sp_follow.ps1` is retired once it is on.
 
 **Also check the common production path: a PAUSED incoming playlist.** Every
-off-program playlist is paused when its scene leaves program, and it resumes
-on its own scene-go-on, at the same moment as the cut. Until its decode lands,
-its paced pipeline offers its held last frame + silence (`paced_output.rs`
-between scopes), so the first part of the fade can mix a frozen picture and
-silence on the incoming side. Measure the resume latency against the window
-(program `side_fills`, the VBAN capture); the design record's box case (two
-PLAYING playlists) does not cover it (review round 1, #215).
+off-program playlist is paused when its scene leaves program; on its
+scene-go-on the engine starts a NEW song for it, at the same moment as the cut.
+Until that song's first decoded pair, its paced output offers fills, then
+pre-roll standby pairs (black + silence) — none of them live, so the cue gate
+HOLDS those boundaries (the outgoing song on program at full level) and the
+fade starts on the first live pair. The wait shows up as
+`cue_wait_boundaries` (~10–11, see B1) and must stay under the 15-boundary
+bound (`cue_timeouts` +0). During a 2560×1440 ↔ 1920×1080 fade also read the
+sender's `max_picture_us` line (well under one 33 ms slot) and
+`health.coalesced` +0.
