@@ -10,6 +10,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 
 - rust workspace (1000-line cap, cargo-fmt reorder trap) → `.claude/rules/rust-workspace.md` (auto-loads on `crates/**/*.rs`)
 - lyrics-eval backends → `.claude/rules/lyrics-eval-backends.md` (auto-loads on `eval/lyrics/**`)
+- LED-wall / Presenter lyrics display plan (#217: merge fragments, 1.5 s lead, hold until next, 8 s break → blank, min 1.2 s; display-only, NO pipeline bump) → `.claude/rules/lyrics-display.md` (auto-loads on `lyrics/display_plan*.rs`, `lyrics/renderer.rs`, `playback/position_update.rs`, `playback/recovery.rs`, `tests/fixtures/lyrics_*.json`)
 - sp-ui / e2e mock gotchas → `.claude/rules/sp-ui-frontend.md` (auto-loads on `sp-ui/**`, `e2e/mock-api.mjs`)
 - pipeline.rs testability → `.claude/rules/pipeline-testability.md` (auto-loads on `playback/pipeline*.rs`, `submitter.rs`)
 - YouTube cookie file / bot-check → `.claude/rules/youtube-cookies.md` (auto-loads on `downloader/**`, `playlist/**`)
