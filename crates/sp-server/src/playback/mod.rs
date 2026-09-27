@@ -415,15 +415,14 @@ impl PlaybackEngine {
     /// title that is already up is not faded again. Then the song's timers
     /// are armed again for what is still ahead (#217 addendum 3).
     async fn push_title_for_playing(&mut self, playlist_id: i64, video_id: i64) {
-        let now = tokio::time::Instant::now();
-        let title = self.resync_wall_title(now).await;
+        let title = self.resync_wall_title().await;
         info!(
             playlist_id,
             video_id,
             ?title,
             "title re-synced on scene-go-on"
         );
-        self.rearm_title_timers(playlist_id, video_id, now);
+        self.rearm_title_timers(playlist_id, video_id, tokio::time::Instant::now());
     }
 
     /// Handle a scene change from the OBS module. On program, fires
@@ -585,6 +584,7 @@ impl PlaybackEngine {
                         video_id, %video_path, %audio_path,
                         "Previous → replaying song from history"
                     );
+                    pp.title_clock = None;
                     pp.pipeline.send(PipelineCommand::Play {
                         video: video_path.into(),
                         audio: audio_path.into(),
@@ -786,6 +786,9 @@ impl PlaybackEngine {
                                         %video_path, %audio_path,
                                         "sent Play command"
                                     );
+                                    // #217 addendum 3: even the same video gets
+                                    // a new title clock, at its new Started.
+                                    pp.title_clock = None;
                                     pp.pipeline.send(PipelineCommand::Play {
                                         video: video_path.into(),
                                         audio: audio_path.into(),
@@ -824,11 +827,12 @@ impl PlaybackEngine {
             }
 
             PlayAction::ReplayCurrent => {
-                if let Some(pp) = self.pipelines.get(&playlist_id) {
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     if let Some(video_id) = pp.current_video_id {
                         debug!(playlist_id, "replaying current video");
                         match crate::db::models::get_song_paths(&self.pool, video_id).await {
                             Ok(Some((video_path, audio_path))) => {
+                                pp.title_clock = None;
                                 pp.pipeline.send(PipelineCommand::Play {
                                     video: video_path.into(),
                                     audio: audio_path.into(),

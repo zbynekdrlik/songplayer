@@ -23,8 +23,9 @@ use crate::resolume::ResolumeCommand;
 impl PlaybackEngine {
     /// Spawn `playlist_id`'s title timers from its song's clock, for the part
     /// of the title window still ahead of `now`: the show timer while the
-    /// show point is ahead, the hide timer while the hide point is. Called at
-    /// the song's `Started` (both ahead) and by a scene-on
+    /// show point is ahead, the hide timer while the hide point is. The
+    /// timers it finds are cancelled first, so no old timer is left to fire.
+    /// Called at the song's `Started` (both ahead) and by a scene-on
     /// (`rearm_title_timers`).
     pub(super) fn arm_title_timers(&mut self, playlist_id: i64, now: Instant) {
         let pool = self.pool.clone();
@@ -33,6 +34,7 @@ impl PlaybackEngine {
         let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
             return;
         };
+        pp.cancel_title_timers();
         let Some(clock) = pp.title_clock else {
             return;
         };
@@ -72,13 +74,12 @@ impl PlaybackEngine {
         let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
             return;
         };
-        if !pp
+        if pp
             .title_clock
-            .is_some_and(|clock| clock.video_id == video_id)
+            .is_none_or(|clock| clock.video_id != video_id)
         {
             return;
         }
-        pp.cancel_title_timers();
         self.arm_title_timers(playlist_id, now);
     }
 }

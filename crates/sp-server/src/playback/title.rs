@@ -1,13 +1,10 @@
-//! Title-text push helpers shared by the engine.
+//! The engine's song-title helpers: the one title formatter, the song's
+//! `TitleClock` (#217 addendum 3), and the two ways the title reaches OBS's
+//! `#sp-title` text source and Resolume's `#sp-title` clips:
 //!
-//! Two call sites in `playback/mod.rs` push the same song title to the
-//! same downstreams (OBS text source + Resolume `#sp-title` clips):
-//!
-//! * The 1.5 s post-`Started` timer task (`title_timers.rs`)
-//! * The scene-go-on refresh path (in `handle_scene_change`)
-//!
-//! Extracting the body keeps both sites consistent and stops `mod.rs`
-//! from creeping past the 1000-line cap.
+//! * `push_title`: the show timer's ShowTitle (`title_timers.rs`);
+//! * `title_text` + `send_resync`: a recovery's or a scene-on's `Resync`
+//!   (`recovery.rs::resync_wall_title`).
 
 use std::time::Duration;
 
@@ -117,45 +114,38 @@ pub async fn push_title(
     true
 }
 
-/// Tell the Resolume driver which title SHOULD be on the wall now: the song
-/// title of `due` (a video inside its title window), or none (#217
-/// addendum 3). The driver owns what the wall shows and acts only on a
-/// difference, so a resync is idempotent. The OBS text source gets the same
-/// title, or is cleared, as the hide timer clears it. A failed DB read sends
-/// nothing: hiding a title mid-song on a transient error would be the glitch
-/// this avoids. Returns the title sent.
-pub async fn resync_title(
-    pool: &SqlitePool,
+/// The wall title of `video_id` (`format_title_text`): `None` when the
+/// video has no row, or neither a song nor an artist.
+pub async fn title_text(pool: &SqlitePool, video_id: i64) -> Result<Option<String>, sqlx::Error> {
+    Ok(get_video_title_info(pool, video_id)
+        .await?
+        .map(|(song, artist)| format_title_text(&song, &artist))
+        .filter(|text| !text.is_empty()))
+}
+
+/// Tell the wall which title SHOULD be up (`None` = no title, #217
+/// addendum 3). The Resolume `Resync` goes first: the driver owns what the
+/// wall shows and acts only on a difference. The OBS text source then gets
+/// the same title, or is cleared as the hide timer clears it. The OBS send
+/// can stall while cg OBS is away, so the Resync must not wait behind it.
+pub async fn send_resync(
     obs_cmd_tx: Option<&mpsc::Sender<ObsCommand>>,
     resolume_tx: &mpsc::Sender<ResolumeCommand>,
-    due: Option<i64>,
-) -> Option<String> {
-    let title = match due {
-        None => None,
-        Some(video_id) => match get_video_title_info(pool, video_id).await {
-            Ok(info) => info
-                .map(|(song, artist)| format_title_text(&song, &artist))
-                .filter(|text| !text.is_empty()),
-            Err(e) => {
-                tracing::warn!(video_id, %e, "title resync: DB lookup failed — nothing sent");
-                return None;
-            }
-        },
-    };
-    if let Some(cmd_tx) = obs_cmd_tx {
-        let _ = cmd_tx
-            .send(ObsCommand::SetTextSource {
-                source_name: OBS_TITLE_SOURCE.to_string(),
-                text: title.clone().unwrap_or_default(),
-            })
-            .await;
-    }
+    title: Option<String>,
+) {
     let _ = resolume_tx
         .send(ResolumeCommand::Resync {
             title: title.clone(),
         })
         .await;
-    title
+    if let Some(cmd_tx) = obs_cmd_tx {
+        let _ = cmd_tx
+            .send(ObsCommand::SetTextSource {
+                source_name: OBS_TITLE_SOURCE.to_string(),
+                text: title.unwrap_or_default(),
+            })
+            .await;
+    }
 }
 
 #[cfg(test)]

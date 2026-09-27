@@ -85,17 +85,15 @@ impl PlaybackEngine {
                 debug!(playlist_id, duration_ms, "video started");
                 let dur = *duration_ms;
 
-                // 2) Cancel any pending title timers from a previous video on
-                //    this playlist. Without this, a stale hide_title from a
-                //    skipped 4-min song would fire 3.5s before that song's
-                //    natural end during the next song, clearing the title
-                //    mid-playback.
-                // 3) Fix this song's title clock and arm its timers from it:
+                // 2) Fix this song's title clock and arm its timers from it:
                 //    show 1.5 s from now, hide 3.5 s before the end. A recovery
                 //    or a scene-on reads the same clock (#217 addendum 3).
+                //    Arming first cancels any pending timer of a previous
+                //    video on this playlist: a stale hide_title from a skipped
+                //    4-min song would fire 3.5s before that song's natural end
+                //    during the next song, clearing the title mid-playback.
                 let now = tokio::time::Instant::now();
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-                    pp.cancel_title_timers();
                     pp.title_clock = pp
                         .current_video_id
                         .map(|video_id| title::TitleClock::new(video_id, now, dur));

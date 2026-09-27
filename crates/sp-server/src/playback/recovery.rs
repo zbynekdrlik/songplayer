@@ -11,7 +11,7 @@ use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
 use super::state::PlayState;
-use super::title;
+use super::title::{self, TitleClock};
 use crate::EngineCommand;
 use crate::resolume::RecoveryEvent;
 
@@ -51,53 +51,77 @@ pub(crate) async fn forward_recovery_events(
 }
 
 impl super::PlaylistPipeline {
-    /// Whether this pipeline's song title belongs on the wall at `now` (#217
-    /// addendum 3): it plays `video_id` on program, and that song's title
+    /// The title clock of the song whose title this pipeline could put on
+    /// the wall (#217 addendum 3): `video_id`, played on program, with its own
     /// clock (fixed at its `Started`, the instants the title timers sleep
-    /// until) is open. A clock of another video (the previous song, before
-    /// the next `Started`) is closed.
-    fn title_due(&self, video_id: i64, now: Instant) -> bool {
-        self.scene_active.load(Ordering::Acquire)
-            && self
-                .title_clock
-                .is_some_and(|clock| clock.video_id == video_id && clock.open_at(now))
+    /// until). A clock of another video (the previous song, before the next
+    /// `Started`) is none.
+    fn on_air_clock(&self, video_id: i64) -> Option<TitleClock> {
+        if !self.scene_active.load(Ordering::Acquire) {
+            return None;
+        }
+        self.title_clock.filter(|clock| clock.video_id == video_id)
     }
 }
 
+/// The video whose title is due at `now` among `candidates` (`(playlist id,
+/// clock)`): an open clock. Several (a program scene with more than one
+/// SongPlayer playlist; they share the one `#sp-title` clip): the highest
+/// playlist id, so the HashMap order never decides.
+fn due_title_video(candidates: &[(i64, TitleClock)], now: Instant) -> Option<i64> {
+    candidates
+        .iter()
+        .filter(|(_, clock)| clock.open_at(now))
+        .max_by_key(|(playlist_id, _)| *playlist_id)
+        .map(|(_, clock)| clock.video_id)
+}
+
 impl super::PlaybackEngine {
-    /// The video whose title SHOULD be on the wall: a playing, on-program
-    /// pipeline inside its title window. Several (a program scene with more
-    /// than one SongPlayer playlist; they share the one `#sp-title` clip):
-    /// the highest playlist id, so the HashMap order never decides.
-    fn due_title_video(&self, now: Instant) -> Option<i64> {
+    /// The songs whose title could be on the wall: `(playlist id, clock)` of
+    /// every playing, on-program pipeline with its own song's clock.
+    fn title_candidates(&self) -> Vec<(i64, TitleClock)> {
         self.pipelines
             .iter()
-            .filter_map(|(&playlist_id, pp)| {
-                debug!(
-                    playlist_id,
-                    state = ?pp.state,
-                    clock = ?pp.title_clock,
-                    open = ?pp.title_clock.map(|clock| clock.open_at(now)),
-                    "title window inputs"
-                );
-                match pp.state {
-                    PlayState::Playing { video_id } if pp.title_due(video_id, now) => {
-                        Some((playlist_id, video_id))
-                    }
-                    _ => None,
+            .filter_map(|(&playlist_id, pp)| match pp.state {
+                PlayState::Playing { video_id } => {
+                    pp.on_air_clock(video_id).map(|clock| (playlist_id, clock))
                 }
+                _ => None,
             })
-            .max()
-            .map(|(_, video_id)| video_id)
+            .collect()
     }
 
-    /// Declare the wall's title at `now` to the Resolume driver (a `Resync`):
-    /// the due title, or none. The driver acts only on a difference, so this
-    /// is idempotent: it never re-runs a fade for a title that is up. Used by
-    /// a Resolume recovery and by an OBS scene-on (#217 addendum 3).
-    pub(super) async fn resync_wall_title(&self, now: Instant) -> Option<String> {
-        let due = self.due_title_video(now);
-        title::resync_title(&self.pool, self.obs_cmd_tx.as_ref(), &self.resolume_tx, due).await
+    /// Declare the wall's title to the Resolume driver (a `Resync`): the due
+    /// title, or none. The driver acts only on a difference, so this is
+    /// idempotent: it never re-runs a fade for a title that is up. Used by a
+    /// Resolume recovery and by an OBS scene-on (#217 addendum 3).
+    ///
+    /// The candidates' titles are read FIRST, the one await. The due title is
+    /// then decided at `Instant::now()` and sent at once. A hide timer that
+    /// fired during the read is already past its instant, so this Resync
+    /// agrees with it. Deciding before the read let such a timer's HideTitle
+    /// land ahead of a Resync that still named the title, which superseded it
+    /// (review round 2). A failed read sends nothing: a transient error must
+    /// not hide a title mid-song.
+    pub(super) async fn resync_wall_title(&self) -> Option<String> {
+        let candidates = self.title_candidates();
+        let mut titles = Vec::with_capacity(candidates.len());
+        for &(_, clock) in &candidates {
+            match title::title_text(&self.pool, clock.video_id).await {
+                Ok(text) => titles.push((clock.video_id, text)),
+                Err(e) => {
+                    warn!(video_id = clock.video_id, %e, "title resync: DB lookup failed — nothing sent");
+                    return None;
+                }
+            }
+        }
+        let due = due_title_video(&candidates, Instant::now());
+        debug!(?candidates, ?due, "title window");
+        let title = due
+            .and_then(|video_id| titles.into_iter().find(|(id, _)| *id == video_id))
+            .and_then(|(_, text)| text);
+        title::send_resync(self.obs_cmd_tx.as_ref(), &self.resolume_tx, title.clone()).await;
+        title
     }
 
     /// Re-sync a recovered Resolume host: the title as a `Resync` (the song
@@ -112,7 +136,7 @@ impl super::PlaybackEngine {
         // The driver owns the title (#217 addendum 3): it compares this with
         // what it last did and cannot double-fade, flash, or show a title
         // outside its window, whatever is queued ahead of this Resync.
-        let title = self.resync_wall_title(Instant::now()).await;
+        let title = self.resync_wall_title().await;
         info!(host, ?title, "title re-synced on Resolume recovery");
         let mut shows = Vec::new();
         for (&playlist_id, pp) in &self.pipelines {

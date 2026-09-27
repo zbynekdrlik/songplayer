@@ -99,6 +99,7 @@ impl PlaybackEngine {
                 position_ms,
                 "PlayVideo → jumping to clicked song"
             );
+            pp.title_clock = None; // its Started fixes the new clock (#217 addendum 3)
             pp.pipeline.send(PipelineCommand::Play {
                 video: video_path.into(),
                 audio: audio_path.into(),

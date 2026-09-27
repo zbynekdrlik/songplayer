@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use super::{TitleClock, format_title_text, resync_title};
+use super::{TitleClock, format_title_text, send_resync, title_text};
 use crate::obs::ObsCommand;
 use crate::resolume::ResolumeCommand;
 
@@ -86,7 +86,7 @@ async fn song_pool() -> sqlx::SqlitePool {
         .unwrap();
     sqlx::query(
         "INSERT INTO videos (id, playlist_id, youtube_id, song, artist) \
-         VALUES (42, 7, 'yt42', 'Song', 'Artist')",
+         VALUES (42, 7, 'yt42', 'Song', 'Artist'), (43, 7, 'yt43', '', '')",
     )
     .execute(&pool)
     .await
@@ -94,30 +94,46 @@ async fn song_pool() -> sqlx::SqlitePool {
     pool
 }
 
-/// The OBS text source follows the resync like the wall: the title when one
-/// is due, cleared when none is (as the song-end hide timer clears it).
+/// The resync's title: the formatted song title; none for a video without a
+/// row, or with neither a song nor an artist.
+#[tokio::test]
+async fn the_title_text_is_the_formatted_title_or_none() {
+    let pool = song_pool().await;
+    assert_eq!(
+        title_text(&pool, 42).await.unwrap(),
+        Some("Song - Artist".to_string())
+    );
+    assert_eq!(
+        title_text(&pool, 43).await.unwrap(),
+        None,
+        "no song, no artist"
+    );
+    assert_eq!(title_text(&pool, 99).await.unwrap(), None, "no row");
+}
+
+/// The Resolume Resync goes first (the OBS send can stall while cg OBS is
+/// away), and the OBS text source follows it like the wall: the title when
+/// one is due, cleared when none is (as the song-end hide timer clears it).
 #[tokio::test]
 async fn a_resync_sets_or_clears_the_obs_title_text_too() {
-    let pool = song_pool().await;
     let (obs_tx, mut obs_rx) = mpsc::channel(8);
     let (resolume_tx, mut resolume_rx) = mpsc::channel(8);
 
-    for (due, expected) in [(Some(42), "Song - Artist"), (None, "")] {
-        let sent = resync_title(&pool, Some(&obs_tx), &resolume_tx, due).await;
+    for (title, expected) in [(Some("Song - Artist"), "Song - Artist"), (None, "")] {
+        send_resync(Some(&obs_tx), &resolume_tx, title.map(str::to_string)).await;
 
+        match resolume_rx.try_recv() {
+            Ok(ResolumeCommand::Resync { title: sent }) => {
+                assert_eq!(sent.as_deref(), title, "the Resync names the title");
+            }
+            other => panic!("expected one Resync, got {other:?}"),
+        }
         match obs_rx.try_recv() {
             Ok(ObsCommand::SetTextSource { source_name, text }) => {
                 assert_eq!(source_name, "#sp-title");
-                assert_eq!(text, expected, "due {due:?}");
+                assert_eq!(text, expected, "title {title:?}");
             }
             other => panic!("expected one SetTextSource, got {other:?}"),
-        }
-        match resolume_rx.try_recv() {
-            Ok(ResolumeCommand::Resync { title }) => {
-                assert_eq!(title, sent, "the Resync names the title returned");
-                assert_eq!(title.as_deref().unwrap_or(""), expected);
-            }
-            other => panic!("expected one Resync, got {other:?}"),
         }
     }
 }
