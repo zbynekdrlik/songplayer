@@ -432,7 +432,7 @@ impl FollowLoop {
     /// The settings poll: re-read the settings, retry an unanswered transition
     /// read, apply the spec, then catch up when the follow was just switched
     /// on (with the spec just applied).
-    async fn on_tick(&mut self) {
+    async fn on_tick(&mut self, _events: &mut broadcast::Receiver<ObsEvent>) {
         let was_following = self.settings.follow_obs;
         self.settings = self.follow.load(self.settings).await;
         if self.read_pending && self.obs_up && self.upstream.is_configured() {
@@ -476,7 +476,7 @@ pub async fn run_follow_task(
                 }
                 Err(RecvError::Closed) => break,
             },
-            _ = tick.tick() => task.on_tick().await,
+            _ = tick.tick() => task.on_tick(&mut events).await,
         }
         task.follow.apply_spec(&task.settings);
     }

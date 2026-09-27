@@ -1,7 +1,8 @@
 //! #215: the follow task end to end against a fake cg OBS at the OBS
 //! client's command channel (`ObsCommand::Remote`), driven by events on the
-//! client's broadcast, plus `FollowLoop`'s own steps (the stale-scene drain,
-//! the retry gated on cg OBS being up). Every wait is bounded (20 s); an
+//! client's broadcast, plus `FollowLoop`'s own steps (the stale-scene drains,
+//! cg OBS's connection state, the retry and the switch-on catch-up gated on
+//! cg OBS being up). Every wait is bounded (20 s); an
 //! event's effect is proven by a later event whose own effect is observable,
 //! never by a sleep. Shares the helpers of `program_follow_tests.rs`.
 //! Wired via `#[cfg(test)] #[path = "program_follow_tests_task.rs"] mod tests_task;`.
@@ -12,6 +13,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
+use tokio::sync::broadcast::error::TryRecvError;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
@@ -77,6 +79,10 @@ struct FakeObs {
     events: broadcast::Sender<ObsEvent>,
     seen: mpsc::UnboundedReceiver<String>,
     program_scene: Arc<std::sync::Mutex<String>>,
+    /// Events the fake broadcasts, in order, while it answers the NEXT
+    /// `GetCurrentSceneTransition` (before its reply): what reaches the queue
+    /// while the task waits for that read.
+    during_read: Arc<std::sync::Mutex<Vec<ObsEvent>>>,
 }
 
 fn fake_obs(replies: Vec<Value>, capacity: usize) -> FakeObs {
@@ -85,6 +91,9 @@ fn fake_obs(replies: Vec<Value>, capacity: usize) -> FakeObs {
     let (seen_tx, seen) = mpsc::unbounded_channel();
     let program_scene = Arc::new(std::sync::Mutex::new("Slido".to_string()));
     let current = program_scene.clone();
+    let during_read = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let pending_events = during_read.clone();
+    let broadcast_tx = events.clone();
     tokio::spawn(async move {
         let mut n: usize = 0;
         while let Some(ObsCommand::Remote(call)) = cmd_rx.recv().await {
@@ -105,6 +114,11 @@ fn fake_obs(replies: Vec<Value>, capacity: usize) -> FakeObs {
                             },
                         })
                     } else {
+                        let queued: Vec<ObsEvent> =
+                            std::mem::take(&mut *pending_events.lock().unwrap());
+                        for event in queued {
+                            let _ = broadcast_tx.send(event);
+                        }
                         n += 1;
                         replies[(n - 1).min(replies.len() - 1)].clone()
                     };
@@ -125,6 +139,7 @@ fn fake_obs(replies: Vec<Value>, capacity: usize) -> FakeObs {
         events,
         seen,
         program_scene,
+        during_read,
     }
 }
 
@@ -208,6 +223,7 @@ async fn a_poll_retries_an_unanswered_read_only_while_cg_obs_is_up() {
         "requestStatus": { "result": false, "code": 207 },
     });
     let mut fake = fake_obs(vec![failed, fade(500)], 16);
+    let mut events = fake.upstream.subscribe();
     let bus = Arc::new(ProgramBus::new());
     let mut task = FollowLoop::new(
         Follow::new(pool.clone(), bus.clone()),
@@ -217,13 +233,13 @@ async fn a_poll_retries_an_unanswered_read_only_while_cg_obs_is_up() {
     task.read_transition(false).await;
     assert!(task.read_pending, "no answer yet");
     task.obs_up = false;
-    task.on_tick().await;
+    task.on_tick(&mut events).await;
     assert_eq!(answered(&mut fake.seen), vec![REQUEST], "away: no retry");
     task.obs_up = true;
-    task.on_tick().await;
+    task.on_tick(&mut events).await;
     assert!(!task.read_pending, "the retry was answered");
     assert_eq!(answered(&mut fake.seen), vec![REQUEST]);
-    task.on_tick().await;
+    task.on_tick(&mut events).await;
     assert_eq!(
         answered(&mut fake.seen),
         Vec::<String>::new(),
@@ -233,17 +249,186 @@ async fn a_poll_retries_an_unanswered_read_only_while_cg_obs_is_up() {
         spec_of(&bus),
         (TransitionKind::Fade, 500, 15, SpecSource::Obs)
     );
-    // Without an OBS client there is nothing to retry.
-    let (events, _) = broadcast::channel::<ObsEvent>(4);
-    let mut no_obs = FollowLoop::new(
-        Follow::new(pool.clone(), bus.clone()),
-        Upstream::new(None, events),
-        FollowSettings::default(),
+}
+
+/// A `FollowLoop` over `pool`'s stored settings and a fresh bus.
+async fn follow_loop(pool: &SqlitePool, upstream: Upstream) -> (FollowLoop, Arc<ProgramBus>) {
+    let bus = Arc::new(ProgramBus::new());
+    let settings = load_follow_settings(pool).await.unwrap();
+    let task = FollowLoop::new(Follow::new(pool.clone(), bus.clone()), upstream, settings);
+    (task, bus)
+}
+
+#[tokio::test]
+async fn without_an_obs_client_nothing_is_read_retried_or_caught_up() {
+    let pool = pool().await;
+    store(&pool, "program_follow_obs", "true").await;
+    let (sender, _) = broadcast::channel::<ObsEvent>(4);
+    let no_obs = Upstream::new(None, sender);
+    let mut events = no_obs.subscribe();
+    let (mut task, bus) = follow_loop(&pool, no_obs).await;
+    assert!(!task.obs_up, "no OBS client: cg OBS is never up");
+    task.resync(&mut events).await;
+    assert!(
+        !task.read_pending,
+        "nothing was asked, so nothing is retried"
     );
-    no_obs.read_transition(false).await;
-    assert!(no_obs.read_pending);
-    no_obs.on_tick().await;
-    assert!(no_obs.read_pending, "never retried: no OBS client");
+    task.on_tick(&mut events).await;
+    assert!(!task.read_pending);
+    assert_eq!(
+        spec_of(&bus),
+        (TransitionKind::Fade, 300, 9, SpecSource::Fallback),
+        "the spec is still applied"
+    );
+    assert_eq!(bus.status().health.cuts, 0);
+}
+
+#[tokio::test]
+async fn a_live_event_says_cg_obs_is_up_when_its_connected_was_lost() {
+    let pool = pool().await;
+    store(&pool, "program_follow_obs", "true").await;
+    let mut fake = fake_obs(vec![fade(500)], 16);
+    let mut events = fake.upstream.subscribe();
+    let (mut task, bus) = follow_loop(&pool, fake.upstream.clone()).await;
+    // The task saw cg OBS go away; the Connected of its return was then lost
+    // in a lag, so only a later event of the new connection is still queued.
+    task.obs_up = false;
+    *fake.program_scene.lock().unwrap() = "sp-fast".to_string();
+    fake.events
+        .send(ObsEvent::SceneChanged {
+            scene_name: "sp-fast".to_string(),
+            active_playlist_ids: set(&[7]),
+        })
+        .expect("subscribed");
+    task.resync(&mut events).await;
+    assert!(task.obs_up, "only a live connection sends a scene change");
+    assert_eq!(
+        answered(&mut fake.seen),
+        vec![REQUEST, PROGRAM_SCENE, "ScenePlaylists:sp-fast"]
+    );
+    assert_eq!(bus.status().source, Some(7));
+    // A Disconnected after a live event still says cg OBS is away.
+    fake.events
+        .send(ObsEvent::Raw {
+            event_type: "InputVolumeChanged".to_string(),
+            event_data: json!({}),
+        })
+        .expect("subscribed");
+    fake.events
+        .send(ObsEvent::Disconnected)
+        .expect("subscribed");
+    task.resync(&mut events).await;
+    assert!(!task.obs_up);
+    assert_eq!(answered(&mut fake.seen), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn switching_the_follow_on_while_cg_obs_is_away_asks_nothing() {
+    let pool = pool().await;
+    let mut fake = fake_obs(vec![fade(500)], 16);
+    let mut events = fake.upstream.subscribe();
+    let (mut task, bus) = follow_loop(&pool, fake.upstream.clone()).await;
+    task.on_event(ObsEvent::Disconnected).await;
+    assert!(!task.obs_up);
+    store(&pool, "program_follow_obs", "true").await;
+    task.on_tick(&mut events).await;
+    assert!(task.settings.follow_obs, "switched on");
+    assert_eq!(
+        answered(&mut fake.seen),
+        Vec::<String>::new(),
+        "cg OBS is away: its scene is not asked (the reconnect reports it)"
+    );
+    assert_eq!(bus.status().health.cuts, 0);
+}
+
+#[tokio::test]
+async fn a_catch_up_drops_the_scene_changes_queued_during_the_transition_read() {
+    let pool = pool().await;
+    store(&pool, "program_follow_obs", "true").await;
+    let mut fake = fake_obs(vec![fade(500)], 16);
+    let mut events = fake.upstream.subscribe();
+    let (mut task, bus) = follow_loop(&pool, fake.upstream.clone()).await;
+    // cg OBS shows sp-fast; an older switch to sp-slow reaches the queue
+    // while the task waits for the transition read.
+    *fake.program_scene.lock().unwrap() = "sp-fast".to_string();
+    fake.during_read
+        .lock()
+        .unwrap()
+        .push(ObsEvent::SceneChanged {
+            scene_name: "sp-slow".to_string(),
+            active_playlist_ids: set(&[8]),
+        });
+    task.resync(&mut events).await;
+    // Whatever is still queued is handled next, as the task's loop would.
+    while let Ok(event) = events.try_recv() {
+        task.on_event(event).await;
+    }
+    let st = bus.status();
+    assert_eq!(
+        (st.source, st.health.cuts),
+        (Some(7), 1),
+        "only the scene read by the catch-up is followed, never the older one"
+    );
+    assert_eq!(
+        answered(&mut fake.seen),
+        vec![REQUEST, PROGRAM_SCENE, "ScenePlaylists:sp-fast"]
+    );
+}
+
+#[tokio::test]
+async fn a_transition_change_during_the_read_is_read_again_before_the_catch_up_cuts() {
+    let pool = pool().await;
+    store(&pool, "program_follow_obs", "true").await;
+    let mut fake = fake_obs(vec![fade(500), fade(2000)], 16);
+    let mut events = fake.upstream.subscribe();
+    let (mut task, bus) = follow_loop(&pool, fake.upstream.clone()).await;
+    *fake.program_scene.lock().unwrap() = "sp-fast".to_string();
+    fake.during_read.lock().unwrap().push(ObsEvent::Raw {
+        event_type: "CurrentSceneTransitionChanged".to_string(),
+        event_data: json!({}),
+    });
+    task.resync(&mut events).await;
+    assert_eq!(
+        answered(&mut fake.seen),
+        vec![REQUEST, REQUEST, PROGRAM_SCENE, "ScenePlaylists:sp-fast"],
+        "read again before the scene"
+    );
+    assert!(matches!(events.try_recv(), Err(TryRecvError::Empty)));
+    let st = bus.status();
+    assert_eq!(st.source, Some(7));
+    assert_eq!(
+        st.transition.active.map(|w| w.n_slots),
+        Some(60),
+        "the catch-up cut fades with the 2000 ms transition read again"
+    );
+}
+
+#[tokio::test]
+async fn events_lost_during_the_read_read_the_transition_again_before_the_catch_up() {
+    let pool = pool().await;
+    store(&pool, "program_follow_obs", "true").await;
+    // The broadcast keeps ONE event: three sent during the read lag the task.
+    let mut fake = fake_obs(vec![fade(500), fade(2000)], 1);
+    let mut events = fake.upstream.subscribe();
+    let (mut task, bus) = follow_loop(&pool, fake.upstream.clone()).await;
+    *fake.program_scene.lock().unwrap() = "sp-fast".to_string();
+    for event_type in [
+        "InputVolumeChanged",
+        "InputVolumeChanged",
+        "SceneItemEnableStateChanged",
+    ] {
+        fake.during_read.lock().unwrap().push(ObsEvent::Raw {
+            event_type: event_type.to_string(),
+            event_data: json!({}),
+        });
+    }
+    task.resync(&mut events).await;
+    assert_eq!(
+        answered(&mut fake.seen),
+        vec![REQUEST, REQUEST, PROGRAM_SCENE, "ScenePlaylists:sp-fast"],
+        "the lost events may have changed the transition: read again"
+    );
+    assert_eq!(bus.status().transition.active.map(|w| w.n_slots), Some(60));
 }
 
 /// A poll interval that never comes round again after the first tick.
@@ -274,11 +459,7 @@ impl TaskRig {
 
     /// The requests answered since the last look (no wait).
     fn more_requests(&mut self) -> Vec<String> {
-        let mut out = Vec::new();
-        while let Ok(r) = self.seen.try_recv() {
-            out.push(r);
-        }
-        out
+        answered(&mut self.seen)
     }
 
     /// Wait (at most 20 s) until the bus's spec is `want`.
