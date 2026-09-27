@@ -118,11 +118,15 @@ current subtitle state of the playing, on-program pipelines:
   position, or a song with no `lyrics_state`). The subtitle clips are shared
   by every on-program playlist, so a blank one must never clear another's
   line (review round 5; `obs/scene.rs` can keep several active playlists);
-- nothing when no SongPlayer playlist plays on program. Going off program
-  already sent its own hide.
+- that same one `HideSubtitles` when NO SongPlayer playlist plays on program.
+  The scene-off hide goes through the same `clear_subtitles` path, so an
+  outage can have swallowed it too (review round 6);
+- NEVER a `HideTitle`. `hide_title` fades from FULL opacity, so hiding a
+  title that is already hidden would flash the stale text. The subtitle clear
+  is instant, so it is always safe.
 
 Otherwise a stale text Arena restored from its saved composition stays until
-the next line change, or for the whole song.
+the next line change, for the whole song, or over the next camera shot.
 
 ## Testing the driver on the no-compile box
 
