@@ -197,6 +197,19 @@ output as a fault.
 ## Adding recovery/health state without touching `playback/mod.rs`
 `handle_health_snapshot` runs on the engine but the engine struct lives in `playback/mod.rs` (often owned by a parallel lane). Compose new per-pipeline state into `NdiHealthRegistry` (the `Arc` the engine already holds) instead of adding a `PlaybackEngine` field — the engine reaches it via `self.ndi_health_registry.<method>()`. `handle_health_snapshot` is sync + `mutants::skip`; send `ObsCommand` with `try_send` (channel cap 64).
 
+## The OBS client serves the #213 remote control (`ObsCommand::Remote`, `ObsEvent::Raw`)
+- `ObsCommand::Remote(remote_call::RemoteCall)` runs a forwarded request or
+  a scene → playlists lookup (`check_scene_items`) for the Companion facade,
+  on this ONE connection (`obs/remote_call.rs`). A call whose requester gave
+  up (`reply.is_closed()`) is skipped.
+- `ObsCommand` is no longer `Clone`: it holds a oneshot sender.
+- The reader broadcasts EVERY op=5 event as `ObsEvent::Raw { event_type,
+  event_data }` on `obs_event_tx`. Any exhaustive `match` on `ObsEvent` needs
+  a `Raw` arm (the engine bridge ignores it). A test that waits for
+  `SceneChanged` must skip other events.
+- The obs-websocket SERVER side (the facade) lives in `crate::remote`; see
+  `remote-control.md`.
+
 ## Mutation gate: `obs/**` is EXCLUDED
 `ci.yml` runs `cargo mutants --in-diff` with `--exclude-re 'sp-server/src/obs/'` — pure logic in `obs/` is NOT mutation-scored (still unit-test it, but survivors there won't fail CI). Code in `playback/ndi_health.rs` **is** scored: every new non-`mutants::skip` fn there needs tests that kill its true/false mutants (e.g. `evaluate_recovery` is killed by a nudge-fires + a nudge-does-not-fire engine test).
 

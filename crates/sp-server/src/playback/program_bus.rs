@@ -69,13 +69,17 @@ use sp_core::genlock::{
 use sqlx::SqlitePool;
 use tracing::{info, warn};
 
+use crate::playback::ndi_input::NdiInputShared;
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 use crate::playback::vban_out::VbanOut;
+use crate::playback::wallclock::utc_now_100ns;
+use crate::remote::RemoteShared;
 
 /// The program output's NDI source name.
 pub const PROGRAM_NDI_NAME: &str = "SP-program";
 
-/// DB setting that persists the selected program source (a playlist id).
+/// DB setting that persists the selected program source (a playlist id, or
+/// `sp_core::config::PROGRAM_INPUT_ID` for the #212 NDI input).
 pub const SETTING_PROGRAM_SOURCE: &str = "program_source";
 
 /// A cut takes effect this many slots after the NEXT boundary (design: next
@@ -473,6 +477,15 @@ pub struct ProgramBus {
     /// #210: the program's VBAN audio output, fed by the `SP-program` sender
     /// thread and reported under `vban` on `GET /api/v1/program`.
     vban: Arc<VbanOut>,
+    /// #212: the NDI input "OBS manuál" (source id `PROGRAM_INPUT_ID`): its
+    /// settings, stop flag and telemetry (`input` on `GET /api/v1/program`).
+    input: Arc<NdiInputShared>,
+    /// #213: the Companion remote control's telemetry (`remote` on
+    /// `GET /api/v1/program`).
+    remote: Arc<RemoteShared>,
+    /// #213: serializes [`persist_and_cut`] — the API and the remote control
+    /// can cut concurrently, and the persisted source must be the one cut last.
+    cut_serial: tokio::sync::Mutex<()>,
 }
 
 impl Default for ProgramBus {
@@ -490,12 +503,25 @@ impl ProgramBus {
             }),
             ready: Condvar::new(),
             vban: Arc::new(VbanOut::new()),
+            input: Arc::new(NdiInputShared::default()),
+            remote: Arc::new(RemoteShared::default()),
+            cut_serial: tokio::sync::Mutex::new(()),
         }
     }
 
     /// #210: the program's VBAN output.
     pub fn vban(&self) -> &Arc<VbanOut> {
         &self.vban
+    }
+
+    /// #212: the NDI input's shared state.
+    pub fn input(&self) -> &Arc<NdiInputShared> {
+        &self.input
+    }
+
+    /// #213: the remote control's telemetry.
+    pub fn remote(&self) -> &Arc<RemoteShared> {
+        &self.remote
     }
 
     fn lock(&self) -> MutexGuard<'_, BusState> {
@@ -601,9 +627,24 @@ pub async fn persist_selected_source(pool: &SqlitePool, pid: i64) -> Result<(), 
     crate::db::models::set_setting(pool, SETTING_PROGRAM_SOURCE, &pid.to_string()).await
 }
 
+/// Persist `pid` as the selected source FIRST, then cut the program to it (a
+/// failed write cuts nothing). The one cut path of `POST /api/v1/program/cut`
+/// and the #213 remote control; two cuts never interleave, so the persisted
+/// source is always the one on program.
+pub async fn persist_and_cut(
+    pool: &SqlitePool,
+    bus: &ProgramBus,
+    pid: i64,
+) -> Result<ProgramStatus, sqlx::Error> {
+    let _serial = bus.cut_serial.lock().await;
+    persist_selected_source(pool, pid).await?;
+    Ok(bus.cut(pid, utc_now_100ns()))
+}
+
 /// Restore the persisted program source into `bus` (startup). Returns the
-/// restored playlist id; a missing or unreadable setting leaves the program on
-/// its standby pair.
+/// restored source id; a missing or unreadable setting leaves the program on
+/// its standby pair. The #212 NDI input (`PROGRAM_INPUT_ID`) is restored only
+/// while it is active (enabled with a source) — otherwise it is not a source.
 pub async fn restore_selected_source(pool: &SqlitePool, bus: &ProgramBus) -> Option<i64> {
     let raw = match crate::db::models::get_setting(pool, SETTING_PROGRAM_SOURCE).await {
         Ok(v) => v?,
@@ -612,17 +653,31 @@ pub async fn restore_selected_source(pool: &SqlitePool, bus: &ProgramBus) -> Opt
             return None;
         }
     };
-    match raw.trim().parse::<i64>() {
-        Ok(pid) => {
-            bus.select_initial(pid);
-            info!(source = pid, "program bus: restored the selected source");
-            Some(pid)
-        }
+    let pid = match raw.trim().parse::<i64>() {
+        Ok(pid) => pid,
         Err(e) => {
-            warn!(%e, raw = %raw, "program bus: persisted source is not a playlist id");
-            None
+            warn!(%e, raw = %raw, "program bus: persisted source is not a source id");
+            return None;
         }
+    };
+    if pid == sp_core::config::PROGRAM_INPUT_ID && !input_active(pool).await {
+        warn!(
+            source = pid,
+            "program bus: the persisted source is the NDI input, which is disabled or has no source — not restored"
+        );
+        return None;
     }
+    bus.select_initial(pid);
+    info!(source = pid, "program bus: restored the selected source");
+    Some(pid)
+}
+
+/// #212: whether the stored settings make the NDI input a source (enabled
+/// with a source name; an unreadable setting counts as not).
+async fn input_active(pool: &SqlitePool) -> bool {
+    crate::playback::ndi_input::load_input_settings(pool)
+        .await
+        .is_ok_and(|s| s.active())
 }
 
 #[cfg(test)]

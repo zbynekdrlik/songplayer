@@ -325,7 +325,9 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             wall_anchor_wide_brackets: 2,
             wall_anchor_slewed_us: 3_000,
             wall_anchor_steps_followed: 4,
-            wall_anchor_last_step_us: 50_030,
+            wall_anchor_last_step_us: -1_500_000,
+            wall_anchor_holds_followed: 1,
+            wall_anchor_last_hold_us: 1_499_000,
             song_change_unserviced_slots: 6,
             consumer_fill_pairs: 17,
             ..Default::default()
@@ -377,7 +379,10 @@ fn format_genlock_line_contains_every_key_token() {
         "wall_anchor_slewed_us=3000",
         // #147: confirmed UTC steps followed + the consumer's grid across scopes.
         "wall_anchor_steps_followed=4",
-        "wall_anchor_last_step_us=50030",
+        // Signed: a followed backward date step (one hold, #147).
+        "wall_anchor_last_step_us=-1500000",
+        "wall_anchor_holds_followed=1",
+        "wall_anchor_last_hold_us=1499000",
         "song_change_unserviced_slots=6",
         "consumer_fill_pairs=17",
         "underruns=9",

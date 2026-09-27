@@ -61,6 +61,15 @@ impl RealNdiBackend {
         }
     }
 
+    /// #212: the loaded SDK, so the NDI input's receive backend
+    /// (`RealNdiReceiveBackend`) shares the process's ONE `NdiLib` —
+    /// `NDIlib_initialize` must run once, never per backend. mutants::skip:
+    /// an `NdiLib` exists only with the real runtime (never on Linux CI).
+    #[cfg_attr(test, mutants::skip)]
+    pub fn lib(&self) -> &Arc<NdiLib> {
+        &self.lib
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_video_frame(
         four_cc: FourCCVideoType,

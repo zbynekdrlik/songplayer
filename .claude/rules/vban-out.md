@@ -26,13 +26,16 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
 - The `vban-output` thread (`run_vban_loop`, Windows) encodes one block into 8
   packets of 200 frames, as INT24 PCM with full scale ±8388607 and clamping.
   It sends packet k of boundary B at `due(B) + L + k·1e7/240` (100 ns, floored:
-  0, 41 666, 83 333, …, 291 666). L is one slot (`VBAN_SEND_LATENCY_100NS` =
-  333 333). An on-time packet gets exactly one wait, so they go out evenly.
+  0, 41 666, 83 333, …, 291 666). L is TWO slots (`VBAN_SEND_LATENCY_100NS` =
+  666 666). It was one slot at first; the 26.9.2026 FOH capture (VB-Matrix stream 6,
+  5 min) showed 0.5 % late sends and Overload +11 / Underrun +14 against cg's +3 / +7,
+  because a program block arrives only after the source submit AND the `SP-program`
+  NDI submit (each up to ~20 ms p99). An on-time packet gets exactly one wait, so they go out evenly.
   A block that arrives AFTER its first packet is due sends its past-due packets
   back-to-back, each counted in `late_sends`. That happens after a program fill
   past the 3-slot grace, or for ≤ ~3.3 s after a confirmed fleet date step
   (walls up to ~1.5 slots apart, see program-bus.md). If the box capture shows
-  `late_sends` climbing there, L = 2 slots is the knob.
+  `late_sends` climbing there, re-measure the block arrival lead before raising L again.
 - Residual: a program RESYNC (> 8 missed slots) skips stamps. VBAN then has a
   time gap while its counter stays contiguous, and the receiver sees an
   underrun, not a counter loss.

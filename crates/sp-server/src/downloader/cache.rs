@@ -17,7 +17,7 @@
 //!   download (these are deleted by the self-healing startup scan).
 
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -59,6 +59,11 @@ pub struct ScanResult {
     /// the cache directory. Persisted across alignment runs (see #41) so
     /// reprocess reuses Demucs output via aligner.rs cache-hit logic.
     pub vocals_files: Vec<(String, PathBuf)>,
+    /// Complete pairs for a video id that already has a NEWER complete pair
+    /// (a re-download under different metadata left the old pair behind).
+    /// `songs` keeps the newest pair per id; these are removed by
+    /// [`remove_duplicates`] at startup.
+    pub duplicates: Vec<CachedSong>,
 }
 
 static VIDEO_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_-]{11}$").unwrap());
@@ -103,9 +108,10 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
         }
     };
 
-    // Temporary buckets per video_id for pairing.
-    let mut video_half: HashMap<String, (String, String, bool, PathBuf)> = HashMap::new();
-    let mut audio_half: HashMap<String, (String, String, bool, PathBuf)> = HashMap::new();
+    // Temporary buckets per BASE name (`{song}_{artist}_{id}_normalized[_gf]`)
+    // for pairing: a video pairs only with the audio of the same base, so two
+    // downloads of one id under different metadata never cross-pair.
+    let mut halves: HashMap<String, Halves> = HashMap::new();
     let mut legacy: Vec<LegacyFile> = Vec::new();
     let mut lyrics_files: Vec<(String, PathBuf)> = Vec::new();
     let mut vocals_files: Vec<(String, PathBuf)> = Vec::new();
@@ -125,11 +131,26 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
             let vid = caps[3].to_string();
             let gf = caps.get(4).is_some();
             let kind = &caps[5];
-            let slot = (song, artist, gf, path.clone());
+            let base = filename
+                .strip_suffix(if kind == "video" {
+                    "_video.mp4"
+                } else {
+                    "_audio.flac"
+                })
+                .unwrap_or(filename)
+                .to_string();
+            let h = halves.entry(base).or_insert_with(|| Halves {
+                video_id: vid,
+                song,
+                artist,
+                gemini_failed: gf,
+                video: None,
+                audio: None,
+            });
             if kind == "video" {
-                video_half.insert(vid, slot);
+                h.video = Some(path.clone());
             } else {
-                audio_half.insert(vid, slot);
+                h.audio = Some(path.clone());
             }
             continue;
         }
@@ -154,31 +175,43 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
         }
     }
 
-    // Pair video + audio halves by video_id.
-    let mut songs: Vec<CachedSong> = Vec::new();
+    // Pair video + audio halves of the same base; a lone half is an orphan.
+    let mut complete: HashMap<String, Vec<CachedSong>> = HashMap::new();
     let mut orphans: Vec<Orphan> = Vec::new();
-
-    let video_ids: HashSet<String> = video_half.keys().cloned().collect();
-    let audio_ids: HashSet<String> = audio_half.keys().cloned().collect();
-
-    for vid in video_ids.intersection(&audio_ids) {
-        let (song, artist, gf, v_path) = video_half.remove(vid).unwrap();
-        let (_, _, _, a_path) = audio_half.remove(vid).unwrap();
-        songs.push(CachedSong {
-            video_id: vid.clone(),
-            song,
-            artist,
-            gemini_failed: gf,
-            video_path: v_path,
-            audio_path: a_path,
-        });
+    for h in halves.into_values() {
+        match (h.video, h.audio) {
+            (Some(video_path), Some(audio_path)) => {
+                complete
+                    .entry(h.video_id.clone())
+                    .or_default()
+                    .push(CachedSong {
+                        video_id: h.video_id,
+                        song: h.song,
+                        artist: h.artist,
+                        gemini_failed: h.gemini_failed,
+                        video_path,
+                        audio_path,
+                    });
+            }
+            (Some(path), None) | (None, Some(path)) => orphans.push(Orphan {
+                video_id: h.video_id,
+                path,
+            }),
+            (None, None) => {}
+        }
     }
 
-    for (vid, (_, _, _, path)) in video_half.into_iter().chain(audio_half) {
-        orphans.push(Orphan {
-            video_id: vid,
-            path,
-        });
+    // One keeper per id: the newest pair (by the video file's mtime); every
+    // older complete pair of that id is a superseded duplicate.
+    let mut songs: Vec<CachedSong> = Vec::new();
+    let mut duplicates: Vec<CachedSong> = Vec::new();
+    for (_, mut pairs) in complete {
+        pairs.sort_by_key(|p| std::cmp::Reverse(modified(&p.video_path)));
+        let mut pairs = pairs.into_iter();
+        if let Some(keeper) = pairs.next() {
+            songs.push(keeper);
+        }
+        duplicates.extend(pairs);
     }
 
     ScanResult {
@@ -187,6 +220,44 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
         orphans,
         lyrics_files,
         vocals_files,
+        duplicates,
+    }
+}
+
+/// The two halves of one base name seen by [`scan_cache`].
+struct Halves {
+    video_id: String,
+    song: String,
+    artist: String,
+    gemini_failed: bool,
+    video: Option<PathBuf>,
+    audio: Option<PathBuf>,
+}
+
+/// A file's modification time (the epoch when unreadable, so it loses).
+fn modified(path: &Path) -> std::time::SystemTime {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::UNIX_EPOCH)
+}
+
+/// Delete every superseded duplicate pair: its video, its audio and the
+/// karaoke stems derived from that audio.
+pub fn remove_duplicates(duplicates: &[CachedSong]) {
+    for dup in duplicates {
+        let (vocals, instrumental) = crate::stems::stem_paths(&dup.audio_path);
+        tracing::info!(
+            video_id = %dup.video_id,
+            video = %dup.video_path.display(),
+            "removing superseded duplicate cache pair (a newer pair of this id is kept)"
+        );
+        for path in [&dup.video_path, &dup.audio_path, &vocals, &instrumental] {
+            match std::fs::remove_file(path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => tracing::warn!("failed to remove duplicate {}: {e}", path.display()),
+            }
+        }
     }
 }
 
@@ -231,6 +302,7 @@ pub fn is_valid_video_id(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use std::fs;
 
     #[test]
@@ -439,5 +511,96 @@ mod tests {
             .collect();
         assert!(ids.contains("dQw4w9WgXcQ"));
         assert!(ids.contains("aBcDeFgHiJk"));
+    }
+
+    fn touch_at(path: &Path, secs_ago: u64) {
+        fs::write(path, b"x").unwrap();
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(secs_ago);
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+    }
+
+    /// Box, 27.9.2026: `TwzfEwsTfag` had two complete pairs in the cache — an
+    /// April pair under the artist "Indiana Bible College" and an August `_gf`
+    /// pair under "Worthy" (with stems). The scan kept whichever video/audio
+    /// half it met last per id, so it could even pair one base's video with
+    /// the other base's audio, and the stale pair stayed forever (the A/V
+    /// gate refused the ambiguity).
+    #[test]
+    fn two_complete_pairs_for_one_id_keep_the_newest_and_list_the_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let old_v =
+            d.join("Never Lost Champion_Indiana Bible College_TwzfEwsTfag_normalized_video.mp4");
+        let old_a =
+            d.join("Never Lost Champion_Indiana Bible College_TwzfEwsTfag_normalized_audio.flac");
+        let new_v = d.join("Never Lost Champion_Worthy_TwzfEwsTfag_normalized_gf_video.mp4");
+        let new_a = d.join("Never Lost Champion_Worthy_TwzfEwsTfag_normalized_gf_audio.flac");
+        touch_at(&old_v, 400_000);
+        touch_at(&old_a, 400_000);
+        touch_at(&new_v, 1_000);
+        touch_at(&new_a, 1_000);
+
+        let r = scan_cache(d);
+        assert_eq!(r.songs.len(), 1, "one keeper per id");
+        assert_eq!(r.songs[0].video_path, new_v, "the newest pair is kept");
+        assert_eq!(r.songs[0].audio_path, new_a, "never a cross-paired half");
+        assert_eq!(r.songs[0].artist, "Worthy");
+        assert!(r.songs[0].gemini_failed);
+        assert_eq!(r.duplicates.len(), 1);
+        assert_eq!(r.duplicates[0].video_path, old_v);
+        assert_eq!(r.duplicates[0].audio_path, old_a);
+        assert_eq!(r.duplicates[0].video_id, "TwzfEwsTfag");
+        assert!(r.orphans.is_empty(), "both pairs are complete: no orphan");
+    }
+
+    #[test]
+    fn a_half_of_another_base_is_an_orphan_not_a_pair_partner() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let v = d.join("Song_ArtistA_dQw4w9WgXcQ_normalized_video.mp4");
+        let a = d.join("Song_ArtistB_dQw4w9WgXcQ_normalized_audio.flac");
+        touch_at(&v, 10);
+        touch_at(&a, 10);
+        let r = scan_cache(d);
+        assert!(r.songs.is_empty(), "different bases never pair");
+        assert_eq!(r.orphans.len(), 2);
+        assert!(r.duplicates.is_empty());
+    }
+
+    #[test]
+    fn remove_duplicates_deletes_the_pair_and_its_stems_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let dup_v = d.join("S_Old_TwzfEwsTfag_normalized_video.mp4");
+        let dup_a = d.join("S_Old_TwzfEwsTfag_normalized_audio.flac");
+        let dup_voc = d.join("S_Old_TwzfEwsTfag_normalized_audio_vocals.flac");
+        let dup_ins = d.join("S_Old_TwzfEwsTfag_normalized_audio_instrumental.flac");
+        let keep_v = d.join("S_New_TwzfEwsTfag_normalized_gf_video.mp4");
+        let keep_a = d.join("S_New_TwzfEwsTfag_normalized_gf_audio.flac");
+        let keep_voc = d.join("S_New_TwzfEwsTfag_normalized_gf_audio_vocals.flac");
+        for p in [
+            &dup_v, &dup_a, &dup_voc, &dup_ins, &keep_v, &keep_a, &keep_voc,
+        ] {
+            fs::write(p, b"x").unwrap();
+        }
+        remove_duplicates(&[CachedSong {
+            video_id: "TwzfEwsTfag".into(),
+            song: "S".into(),
+            artist: "Old".into(),
+            gemini_failed: false,
+            video_path: dup_v.clone(),
+            audio_path: dup_a.clone(),
+        }]);
+        for p in [&dup_v, &dup_a, &dup_voc, &dup_ins] {
+            assert!(!p.exists(), "{} removed", p.display());
+        }
+        for p in [&keep_v, &keep_a, &keep_voc] {
+            assert!(p.exists(), "{} kept", p.display());
+        }
     }
 }

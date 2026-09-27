@@ -168,6 +168,30 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   `block_ms`/`ring_capacity_blocks` + `loop_stats.rs` `percentile_ceil`). The tree
   already uses `.div_ceil()` (`chunking.rs`, `burn_overlay.rs`) — grep before
   hand-rolling a ceil.
+- **`clippy::manual_contains`** (`perf`, warn-by-default → `-D warnings`, #212
+  follow-up review round 4). `slice.iter().any(|&x| x == y)` must be
+  `slice.contains(&y)` whenever the element type and `y`'s type are equal
+  once lifetimes are erased; a `Vec<&'static str>` searched for a `&str` is
+  one case. The lint does NOT fire when the types differ, e.g. a `Vec<String>`
+  searched with `|c| c == "literal"`, which is why the tree's many
+  `calls().iter().any(|c| c == …)` pass. Give the needle the element's exact
+  type (`&'static str`) and call `.contains(&needle)`.
+- **`clippy::never_loop` is DENY-by-default** (a correctness lint, so it is an
+  error even without `-D warnings`; #213 review round 1). A `loop { match … }`
+  in a test helper where EVERY arm returns or panics never iterates twice, so
+  it fails the Lint job. For example, "read the next frame; a Close returns,
+  anything else panics". Write it straight-line with no `loop`. Keep the
+  `loop` only when some arm continues (e.g. `Some(Ok(_)) => {}` skipping
+  pings).
+- **`clippy::result_large_err` and a tungstenite handshake callback** (#213).
+  A named `fn` returning `Result<Response, ErrorResponse>` (http
+  `Response<Option<String>>`, over 128 B) trips the lint — and so does an
+  inline CLOSURE (clippy 1.98 checks closures too; CI Lint run 36283126391).
+  The shape is fixed by tungstenite's `Callback`, so put
+  `#[allow(clippy::result_large_err)]` on the `let callback = …` statement
+  with that reason. Build the refusal in a helper that returns `ErrorResponse`
+  by value. Own helpers returning `tungstenite::Error` (136 B) must box it:
+  `Result<(), Box<tungstenite::Error>>` + `.map_err(Box::new)`.
 
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,
@@ -365,3 +389,58 @@ a path dep (G4: `sp-decoder` → `sp-core`), add ONE line to that crate's
 version and bump unrelated deps (a ~20-line lockfile diff riding in a feature
 PR). Also check the new edge adds no cycle (`sp-core` depends only on serde /
 thiserror, so anything may depend on it).
+
+## Scripted edits after `cargo fmt`: assert the anchor, never a silent `str.replace` (#212)
+
+On the no-compile box every change goes through editors/scripts, and `cargo fmt`
+re-wraps long lines. A later scripted `s.replace(old, new)` whose `old` is the
+PRE-fmt text silently does nothing — #212 shipped a test asserting the old 2×2
+standby while the rig built 2×4, caught only by a review pass (it would have
+reddened 6 CI tests). Fail loudly when an anchor is missing
+(`if old not in s: sys.exit(...)`), or use the Edit tool, and re-read the result.
+
+## "Never blocks / never waits" tests: gates and thread names, never wall-time thresholds (#212 follow-up)
+
+The gating Coverage job runs every test under `cargo tarpaulin`'s ptrace, and
+under ptrace a thread can stall for a long time on a breakpoint. So a
+real-time grid, a "this call took < N ms" budget, or a read of a value some
+other thread is still publishing can flake there. The no-compile box never
+sees that. What held up across five review rounds:
+
+- **Prove WHERE a call ran.** Have the mock record `thread::current().name()`
+  per call (`MockNdiReceiveBackend::calls_by_thread`) and assert the helper's
+  thread name. A regression that runs the call inline then fails
+  deterministically.
+- **Prove the caller does not WAIT.** Hold the slow call in the mock behind a
+  `Mutex<bool>` + `Condvar` gate (`set_held`). Require the caller to make N
+  more steps within a bounded `wait_for`, then release. Any wait on the
+  caller's side stalls and fails the bound.
+- **Use "must NOT happen yet" windows only in the safe direction.** For
+  example, `recv_timeout(200 ms).is_err()` while the gate is held. Correct
+  code can never fail it; a slow runner only makes it pass vacuously.
+- **Pace virtual time for loop tests.** Every wait really sleeps, but only the
+  waits advance the clock. A stall then cannot fake a missed boundary; the
+  gate proves the waiting part.
+- **FFI lock scope** (`mutants::skip` code that needs a runtime). Move the SDK
+  calls into a struct built from the `unsafe extern "C" fn` pointer table
+  (`receive.rs` `RecvHandles`). Test it with fake `unsafe extern "C" fn`s whose
+  gate is a `static Mutex/Condvar`. Only one test may use those statics.
+  Never let a fake panic: unwinding out of `extern "C"` aborts the whole test
+  binary.
+- **A value published by another thread is read only after waiting for THIS
+  event's value** (e.g. `last_connect_ms >= 400`), never for "any value". An
+  earlier event's late write can overwrite it.
+- **A server-side deadline is tested with a WITNESS, not a sleep window**
+  (#213, `remote/session_tests.rs`).
+  - To prove "an identified client is NOT closed at the identify deadline",
+    connect a LATER client that never identifies. Its close, or its dropped
+    handshake, proves the earlier deadline passed; the first client must
+    still be served.
+  - On a short-deadline rig, RETRY a connect / identify that the deadline
+    won under a stall (`connect_in_time`, `identified_in_time`, bounded by
+    the test timeout). Retry only the errors the deadline really produces:
+    `tungstenite::Error::Io` / `ProtocolError::HandshakeIncomplete`, a 4007,
+    or (Windows) a reset that discarded the close frame. Anything else
+    panics.
+  - A 600 ms "must still work" sleep is exactly the window a ptrace stall
+    fails on correct code.

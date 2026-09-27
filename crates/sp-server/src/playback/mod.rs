@@ -20,6 +20,7 @@ mod mix; // #184 round G set_mix (impl PlaybackEngine, 1000-line cap split)
 pub mod ndi_burn;
 pub mod ndi_health;
 mod ndi_health_transport; // #201 round 2: pure reported-label -> TransportState (Linux-tested)
+pub mod ndi_input; // #212: the NDI input "OBS manuál" on the genlock grid → the program bus
 mod ndi_recovery_trigger; // #173 operator recover trigger (impl PlaybackEngine, 1000-line cap split)
 pub mod paced_grid; // #147 the paced output's own boundary clock (pure, Linux-tested)
 pub mod paced_output; // #168/#147 paced submit side: handoff + consumer (cross-platform)
@@ -192,8 +193,7 @@ pub struct PlaybackEngine {
     ndi_backend: Option<pipeline::SharedNdiBackend>,
     /// For sending text source updates to OBS.
     obs_cmd_tx: Option<mpsc::Sender<crate::obs::ObsCommand>>,
-    /// Used for title show/hide updates.
-    #[allow(dead_code)]
+    /// cg OBS's events — #213: the remote-control facade re-emits the scene ones.
     obs_event_tx: broadcast::Sender<ObsEvent>,
     /// For sending title show/hide commands to Resolume hosts.
     resolume_tx: mpsc::Sender<crate::resolume::ResolumeCommand>,

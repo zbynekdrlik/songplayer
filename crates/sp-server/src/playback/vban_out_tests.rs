@@ -239,7 +239,7 @@ fn packet_k_goes_out_at_due_plus_l_plus_k_240ths_exactly() {
     assert_eq!(
         clock.sleeps,
         vec![
-            333_333, 41_666, 41_667, 41_667, 41_666, 41_667, 41_667, 41_666
+            666_666, 41_666, 41_667, 41_667, 41_666, 41_667, 41_667, 41_666
         ],
         "one wait per packet, never a burst"
     );
@@ -289,11 +289,32 @@ fn a_packet_more_than_2_ms_after_its_due_time_is_a_late_send() {
 }
 
 #[test]
+fn a_block_handed_over_40_ms_after_its_boundary_still_goes_out_on_time() {
+    // Box, 26.9.2026 (FOH capture): with L = one slot, 0.5 % of the packets
+    // left late — a program block reaches VBAN only after the source submit
+    // AND the SP-program NDI submit (each up to ~20 ms p99), so a 33 ms lead
+    // was too thin and VB-Matrix counted overload/underrun bursts. L = two
+    // slots absorbs a block that arrives 40 ms after its boundary.
+    let out = out_with(active_config(&["10.0.0.1:6980"]));
+    let mut clock = FakeClock::at(D + 400_000);
+    let mut sink = RecordingSink::on(&clock);
+    let sent = VbanSender::default().send_block(&out, &block(D, 0.5), &mut sink, &mut clock);
+    assert_eq!(sent, 8);
+    assert_eq!(out.status().late_sends, 0, "no packet of the block is late");
+    assert_eq!(
+        clock.sleeps[0],
+        666_666 - 400_000,
+        "packet 0 waits for D + L"
+    );
+    assert_eq!(sink.sent[0].0, D + 666_666);
+}
+
+#[test]
 fn the_wait_is_clamped_to_zero_and_to_the_max() {
     assert_eq!(plan_wait_100ns(100, 105), 5);
     assert_eq!(plan_wait_100ns(110, 105), 0);
     assert_eq!(plan_wait_100ns(0, 1_000_000_000), VBAN_MAX_WAIT_100NS);
-    assert_eq!(VBAN_MAX_WAIT_100NS, 1_333_332);
+    assert_eq!(VBAN_MAX_WAIT_100NS, 2_666_664);
     assert_eq!(interval_us(1_000, 42_666), 4_166);
     assert_eq!(interval_us(42_666, 1_000), 0, "a backward read is 0");
 }

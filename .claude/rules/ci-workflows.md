@@ -71,7 +71,7 @@ forever. So `ci.yml` now has a `mutation-plan` job (dev pushes only):
   check-runs all concluded `success` (skipped ones ignored); fallback =
   `github.event.before`. A cancelled / failed / timed-out mutation run is thereby
   re-covered by the next push automatically — never re-run an over-budget shard.
-- **shards** = `ceil(mutants / 6)` clamped 4..24, fed to the matrix via
+- **shards** = `ceil(mutants / 6)` clamped 4..64 (was 24 until 26.9.2026: 335 mutants → 14 per shard ≈ 18 min, one attempt cancelled at the 20-min bound; shards beyond the runner concurrency just queue, and the per-job bound counts from job start), fed to the matrix via
   `fromJSON(needs.mutation-plan.outputs.shards)`; the 20-min per-shard bound is
   unchanged (never raise it). Job names become `Mutation Testing (i/N)`.
 - The Gate needs `mutation-plan` too (a failed plan must not read as "skipped").
@@ -81,7 +81,18 @@ on a shrinking slice instead of two `offset < len` checks).
 
 ### Write new pure code so it has NO equivalent mutants (#182 lesson)
 The no-compile box only learns about survivors ~15 min after the push, so shape
-pure code up front:
+pure code up front. cargo-mutants' binary-operator table (its book,
+`mutants.md`):
+
+- `<` → `==`, `>`
+- `>` → `==`, `<`
+- `<=` → `>`
+- `>=` → `<` ONLY
+- `==` ↔ `!=`, `&&` ↔ `||`
+- `&` → `|`, `^`
+
+So a cap guard written `if len >= CAP { return }` has a single mutant, `<`,
+and a monotonic counter leaves it no `==` equivalent (#213 `note_unsupported`).
 - **Clamp with `.max()` / `.min()`, not `if a < b { a = b }`** — `<` → `<=` on
   such a clamp is a provably EQUIVALENT mutant (the assignment is a no-op when
   equal) and can never be killed; `.max()` leaves no comparison to mutate.
@@ -107,9 +118,29 @@ pure code up front:
   `spare`. The old busy test, which asserted only "nothing pending", let the
   mutant survive, because a later re-check hid it. Seed the side-effect state
   (a `spare`), trip the guard, and assert that the state is untouched.
+- **Never re-check a condition an earlier one already implies (#147 backward
+  slice).** In `decide_anchor_step`, an armed step is over 1 ms, and a read
+  that is within ±1 ms of it and itself over 1 ms already has the same sign.
+  An extra `p.direction == StepDirection::of(delta)` check would be dead
+  logic. Keep that proof in the doc comment instead. For the same reason,
+  classify the sign of a value that can never be 0 with `v.is_positive()`
+  (no operator to mutate), not `v > 0`: there `>` → `>=` is an equivalent
+  mutant.
 - **No trivial `const fn new()` next to `#[derive(Default)]`**: its body can be
   swapped for `Default::default()` with no observable change. Seed a `static`
   with a struct literal in the same module and use `Default` in tests.
+- **Test sizes must break `*` vs `+` (#212):** 2×2 makes `w * h == w + h`
+  (and `2 * 2 == 2 + 2`), so a `*`→`+` mutant on a size/length formula is
+  EQUIVALENT under that fixture. Use non-square, non-2 dimensions (2×4, 4×2,
+  a 2×3 silence block) wherever a test pins a computed length.
+- **Don't split one decision into `Arm if cond => …` + `Arm => return` (#212):**
+  cargo-mutants rewrites a match guard to `true`/`false`. When the fallback arm's
+  effect is unobservable (e.g. an offer the bus would reject anyway), the
+  guard→`true` mutant survives. Keep ONE arm with `if !cond { return; }` inside:
+  its only mutant is `delete !`, which the positive case kills.
+- **A pure capacity (`frame_pool::take(len)`) is invisible to output tests** —
+  a wrong `len` just reallocates. Pin it through `frame_pool::pool_len(CAP)`
+  on a unique size class after every holder dropped (ndi_input's 50×34 test).
 - A fn that only shells out (child process / ffmpeg) and is reachable only from
   an already-excluded orchestrator gets its own STRUCTURAL `exclude_re` line with
   a rationale naming the pure fns that carry its decisions.

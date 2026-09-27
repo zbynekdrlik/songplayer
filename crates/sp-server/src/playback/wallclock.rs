@@ -12,9 +12,10 @@
 //! Anchoring (#147: the re-anchor must not step the genlock wall): every anchor
 //! is a BRACKETED sample (the narrowest of up to 8 `m1 / utc / m2` reads, paired
 //! at the midpoint), and one resample moves the wall by at most 1 ms. A larger
-//! correction slews in over the following resamples, and a backward correction
-//! is a ≤ 1 ms hold, never a backward step. The pure math is in
-//! `wallclock_anchor.rs`.
+//! correction slews in over the following resamples, unless two narrow
+//! resamples confirm the same step: then it is followed in ONE event, a step
+//! ahead when forward, ONE hold when backward. A backward correction is always
+//! a hold, never a backward step. The pure math is in `wallclock_anchor.rs`.
 
 use std::time::Instant;
 
@@ -24,9 +25,9 @@ use sp_core::genlock::should_resample_mono_to_real_offset;
 mod wallclock_anchor;
 pub use wallclock_anchor::{
     ANCHOR_MAX_ATTEMPTS, ANCHOR_MAX_STEP_100NS, ANCHOR_TIGHT_BRACKET, ANCHOR_WIDE_BRACKET,
-    AnchorDecision, AnchorSample, AnchorStep, BracketedRead, PendingStep, WallAnchorStats,
-    apply_anchor_step, bounded_anchor_update, choose_bracketed_sample, decide_anchor_step, to_us,
-    wall_at,
+    AnchorDecision, AnchorSample, AnchorStep, BracketedRead, FollowedStep, PendingStep,
+    StepDirection, WallAnchorStats, apply_anchor_step, bounded_anchor_update,
+    choose_bracketed_sample, decide_anchor_step, to_us, wall_at,
 };
 
 /// Source of paired `(monotonic instant, utc_100ns)` samples. Production reads
@@ -121,7 +122,7 @@ pub struct WallClock {
     anchor_utc_100ns: i64,
     frames_since_resample: u64,
     stats: WallAnchorStats,
-    /// A clamped forward resample the next one may confirm (#147).
+    /// A clamped resample (either direction) the next one may confirm (#147).
     pending: Option<PendingStep>,
 }
 
@@ -177,11 +178,12 @@ impl WallClock {
     /// Re-anchor from a fresh bracketed sample (#147). `delta` is what an
     /// unbounded re-anchor would step the wall by at the sample instant. Within
     /// ±1 ms it applies as-is (normal dantesync slewing). Beyond that ±1 ms
-    /// applies now, UNLESS this resample confirms the previous one's forward
-    /// step (`decide_anchor_step`: both brackets narrow, the same delta ±1 ms):
-    /// then the rest of the step is followed in this ONE event, as every other
-    /// fleet sender follows a dantesync date step. A lone outlier stays bounded
-    /// at 1 ms; a backward correction is a hold, never a step back.
+    /// applies now, UNLESS this resample confirms the previous one's step
+    /// (`decide_anchor_step`: both brackets narrow, the same delta ±1 ms): then
+    /// the rest of the step is followed in this ONE event, as every other fleet
+    /// sender follows a dantesync date step — a step ahead when forward, ONE
+    /// hold when backward. A lone outlier stays bounded at 1 ms; a backward
+    /// correction is a hold, never a step back.
     fn reanchor(&mut self) {
         let sample = anchor_sample(&*self.source);
         self.stats.record_sample(&sample);
@@ -191,11 +193,12 @@ impl WallClock {
         self.pending = decision.pending;
         let step = decision.step;
         self.stats.record_step(delta, &step);
-        if let Some(total) = decision.followed_100ns {
-            self.stats.record_follow(total);
+        if let Some(followed) = decision.followed {
+            self.stats.record_follow(&followed, &step);
             tracing::info!(
                 delta_us = to_us(delta),
-                step_us = to_us(total),
+                step_us = to_us(followed.total_100ns),
+                direction = followed.direction.as_str(),
                 bracket_us = sample.bracket.as_micros() as u64,
                 "wallclock: confirmed UTC step followed in one re-anchor (#147)"
             );
@@ -214,7 +217,8 @@ impl WallClock {
     }
 
     /// Anchor telemetry (#147): the largest measured re-anchor delta, the
-    /// wide-bracket count and the slewed total. Surfaced on `PacingStats`.
+    /// wide-bracket count, the slewed total and the followed steps / holds.
+    /// Surfaced on `PacingStats`.
     pub fn anchor_stats(&self) -> WallAnchorStats {
         self.stats
     }
@@ -321,3 +325,7 @@ mod wallclock_tests_mutants;
 #[cfg(test)]
 #[path = "wallclock_tests_confirm.rs"]
 mod wallclock_tests_confirm;
+
+#[cfg(test)]
+#[path = "wallclock_tests_confirm_backward.rs"]
+mod wallclock_tests_confirm_backward;

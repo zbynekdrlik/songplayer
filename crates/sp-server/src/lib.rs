@@ -20,6 +20,7 @@ pub mod playback;
 pub mod playlist;
 pub mod presenter;
 pub mod process_start; // #196: process-start instant for /api/v1/status.uptime_s
+pub mod remote; // #213: the Companion remote control (obs-websocket 5 subset → program bus)
 pub mod reprocess;
 pub mod resolume;
 pub mod shutdown;
@@ -102,7 +103,6 @@ pub struct ToolsStatus {
     pub deno_version: Option<String>,
 }
 
-// scene_change_commands and run_obs_engine_bridge live in obs_bridge.rs
 use obs_bridge::run_obs_engine_bridge;
 #[cfg(test)]
 pub(crate) use obs_bridge::scene_change_commands;
@@ -656,21 +656,7 @@ pub async fn start(
     // output (item 5). `None` when OBS is not configured (never suppresses the
     // dark-wall ladder in that case).
     let mut ndi_sources_for_engine: Option<obs::NdiSourceMap> = None;
-    let obs_url = db::models::get_setting(&pool, "obs_websocket_url")
-        .await?
-        .unwrap_or_default();
-    if !obs_url.is_empty() {
-        let obs_password = db::models::get_setting(&pool, "obs_password")
-            .await?
-            .unwrap_or_default();
-        let obs_config = obs::ObsConfig {
-            url: obs_url,
-            password: if obs_password.is_empty() {
-                None
-            } else {
-                Some(obs_password)
-            },
-        };
+    if let Some(obs_config) = obs::load_obs_config(&pool).await? {
         let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
         ndi_sources_for_engine = Some(ndi_sources.clone());
         let obs_client = obs::ObsClient::spawn(

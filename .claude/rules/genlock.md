@@ -914,56 +914,115 @@ Now:
     WARN logs `delta_us`, `bracket_us`, `applied_us` and `carry_us`.
   - The remainder is NOT carried explicitly: the next resample re-measures it.
     Adding the old carry would count it twice.
-- **A confirmed forward step is FOLLOWED in one event (#147, design record
-  5845527884, Approach 1 (b)).** dantesync steps the fleet date by ~+50 ms about
-  every 47 min (a coordinated forward date step; backward corrections it slews
-  itself at 100 ppm), and every camera-box sender follows `CLOCK_REALTIME` at
-  once. Slewing it at 1 ms per resample kept our stamps ~300 ppm off the fleet
-  for ~2.7 min (the 26.9. 09:48 A/V take failed inside that window). The pure
-  rule is `wallclock_anchor.rs::decide_anchor_step`:
-  - a clamped FORWARD resample from a narrow bracket (not wider than
-    `ANCHOR_WIDE_BRACKET`, 200 µs) applies the bounded 1 ms and ARMS the step
-    (`PendingStep { delta, applied }`);
+- **A confirmed step is FOLLOWED in one event, in either direction (#147,
+  design records 5845527884 (forward) and 5850063723 (backward)).** dantesync
+  steps the fleet date in one coordinated step (1.12.0, from 26.9.2026: once a
+  night at 04:00 local, up to ~±1.5 s, either direction, announced with a
+  lead; no daytime steps), and every camera-box sender follows
+  `CLOCK_REALTIME` at once. Slewing a step at 1 ms per resample kept our stamps
+  ~300 ppm off the fleet: ~2.7 min for +50 ms (the 26.9. 09:48 A/V take failed
+  inside that window), ~83 min for −1.5 s. The pure rule, ONE function for both
+  directions, is `wallclock_anchor.rs::decide_anchor_step`:
+  - a CLAMPED resample (|delta| > 1 ms, either sign) from a narrow bracket (not
+    wider than `ANCHOR_WIDE_BRACKET`, 200 µs) applies the bounded 1 ms (a step
+    ahead, or a 1 ms hold) and ARMS the step
+    (`PendingStep { delta, applied, direction }`);
   - the NEXT resample follows the rest in ONE event (`applied = delta`, no
     clamp) when it is narrow too, still > 1 ms, and `delta₂ + applied₁` is within
-    ±1 ms of `delta₁` — the same step seen twice (~3.3–6.7 s after the step);
+    ±1 ms of `delta₁` — the same step seen twice (~3.3–6.7 s after the step).
+    Forward, the wall steps ahead by the rest. Backward, the rest is ONE HOLD
+    (see "Never backward" below). The tolerance alone implies the same sign, so
+    the rule never compares directions (such a check would be redundant, and
+    its mutants would be equivalent);
   - everything else stays the ±1 ms bound: a lone outlier moves the wall 1 ms
-    and the next read holds it back out; a wide (preempted) sample never arms
-    or confirms (it breaks the chain); a backward delta never arms and is never
-    followed — it stays a ≤ 1 ms hold (`apply_anchor_step`).
+    (a step or a hold) and the next read takes it back out; a wide (preempted)
+    sample never arms or confirms (it breaks the chain).
   - The follow logs INFO `wallclock: confirmed UTC step followed in one
-    re-anchor (#147)` with `delta_us` + `step_us` (the whole step).
-  - Tests: `wallclock_tests_confirm.rs` (the exact ±1 ms tolerance, wide /
-    backward / outlier / preempted-confirm cases) and
-    `wallclock_tests_anchor.rs::a_genuine_plus_50_ms_utc_step_is_followed_in_one_event_once_confirmed`.
+    re-anchor (#147)` with `delta_us`, a SIGNED `step_us` (the whole step) and
+    `direction=forward|backward`.
+  - Tests: `wallclock_tests_confirm.rs` (forward) and
+    `wallclock_tests_confirm_backward.rs`: the exact ±1 ms tolerance both ways,
+    wide / outlier / opposite-direction cases, the −1.5 s hold walked at 1 ms
+    resolution (the wall reads `max(frozen, UTC)`). Also
+    `wallclock_tests_anchor.rs` (±50 ms) and `pacer_tests_wall_anchor.rs`
+    (`run_paced_with`: a followed −1.5 s step in the paced loop).
   - Every `WallClock` follows (the pacer walls, the submit consumer's, the
-    #209 `SP-program` sender's). Their resample phases differ, so for ≤ one
-    resample period (~3.3 s) two walls can sit one step (~1.5 slots) apart;
-    the program bus's 3-slot fill grace absorbs it (`program-bus.md`).
+    #209 `SP-program` sender's, the NDI input's, VBAN's). Their resample phases
+    differ, so for ≤ one resample period (~3.3 s) two walls can sit one step
+    apart. For +50 ms (~1.5 slots) the program bus's 3-slot fill grace absorbs
+    it (`program-bus.md`). For the 04:00 ±1.5 s step (~45 slots) it does not.
+    Expect ONE discontinuity there (accepted on #210): a submit consumer whose
+    wall has not followed yet counts `late_frames` against a pacer that already
+    held; the program bus fills.
 - **Never backward.** A negative applied correction is a HOLD: the new anchor is
   `(instant + |applied|, wall(instant))`. The saturating read path freezes the
-  wall for ≤ 1 ms, then it runs exactly on the corrected line. Never "simplify"
-  it back to `(instant, wall − |applied|)`: that is a backward step, and right
-  after an emit it relatches (`pacer_tests_wall_anchor.rs` asserts 0 relatches
-  and 0 A/V corrections over 10 000 boundaries with a preempted resample every
-  other time).
+  wall for `|applied|`, then it runs exactly on the corrected line. That is
+  ≤ 1 ms for a bounded resample, or the whole rest of a confirmed backward step
+  (~1.5 s) in ONE hold. Never "simplify" it back to `(instant, wall − |applied|)`:
+  that is a backward step, and right after an emit it relatches
+  (`pacer_tests_wall_anchor.rs` asserts 0 relatches and 0 A/V corrections over
+  10 000 boundaries with a preempted resample every other time, and across a
+  followed −1.5 s step).
+  - **What a followed hold does to the paced output:** the pacer's wall
+    resumes from the value it froze at. So the next boundary is simply the
+    NEXT slot, serviced `|hold|` + one slot later: consecutive stamps, 0
+    resyncs, 0 relatches, 0 A/V corrections. Only the real-time pause is
+    visible. The pacer does not tick its wall while held (it ticks per serviced
+    boundary). Neither do the `SP-program` sender, VBAN or the NDI input (they
+    tick per wall boundary crossed). So no resample lands inside their own
+    hold. The submit consumer ticks per job, and its next resample comes ≥ 100
+    jobs (~3.3 s) after the follow, which is longer than a ≤ 1.5 s hold.
+  - If a resample ever DID land inside a hold (a step longer than one
+    resample period), it would measure the remaining hold as a new backward
+    delta. It would then cut the hold to a 1 ms hold and re-arm, and the next
+    resample would follow the rest. The wall would still be monotonic and
+    would converge one resample later.
+  - **Gotcha:** `pipeline_paced::sleep_to_boundary` SPINS its last stretch
+    while `0 < until − now ≤ interval`. On the box the wall freezes a few µs
+    PAST the emitted boundary (emit lateness), so `until − now < interval`
+    for either slot width (333 333 / 333 334), and the condition holds for the
+    whole hold. Each pacer thread therefore busy-spins ~|hold| once a night.
+    It is not a correctness issue; it was flagged to the main in the #147
+    FINDING comment. Only with zero lateness would a 333 334-wide slot leave
+    the spin at once. The virtual harness's `sleep_to` has no spin at all.
+  - **Legacy SDK-clocked path (pacing OFF):** `FrameSubmitter::submit_nv12`
+    ticks its wall per submitted frame and stamps `floor(now)`. Through a
+    followed ~1.5 s hold it therefore gives ≈ 1.5 s × the file's frame rate
+    consecutive frames (~45 at 30 fps) the SAME video timecode, once. Pacing is ON on the box (owner: it must stay ON), so
+    this applies only to the legacy path.
+  - **Test-harness gotcha:** `VirtualClock`'s preempted read places `m1` BEFORE
+    a wall read the test made at the same virtual `t`. A backward hold at a WIDE
+    bracket's midpoint then reads up to width/2 below that earlier read. It is
+    an artifact of the harness, not a code path: in a real program every earlier
+    read precedes `m1 ≤ midpoint`. Never assert `after == before` on a wide
+    backward resample; assert the stats / the eventual follow instead.
 - **Telemetry.** These are the PACER's wall clock (the one that stamps and paces):
   - `wall_anchor_max_step_us` — the largest MEASURED |delta|, i.e. what an
     unbounded re-anchor would have stepped;
   - `wall_anchor_wide_brackets` — anchors with every attempt disturbed;
   - `wall_anchor_slewed_us` — µs applied through clamped resamples;
-  - `wall_anchor_steps_followed` — confirmed forward steps followed in one
-    event (#147);
-  - `wall_anchor_last_step_us` — the whole step of the last one followed
-    (≈ 50 000 for a dantesync fleet date step).
+  - `wall_anchor_steps_followed` — confirmed steps followed in one event,
+    BOTH directions (#147);
+  - `wall_anchor_last_step_us` — the whole step of the last one followed,
+    SIGNED (≈ ±1 500 000 for a 04:00 dantesync 1.12.0 step, negative =
+    backward);
+  - `wall_anchor_holds_followed` — the backward ones among them, each
+    followed as ONE hold;
+  - `wall_anchor_last_hold_us` — how long the last followed hold froze the
+    wall and paused the output (the step minus the arming 1 ms).
 
   They are on `/api/v1/ndi/health` `pacing` and on the `ndi: genlock` line.
 - **What to read on the box.** `wall_anchor_max_step_us` in the hundreds of µs
   is dantesync slewing. Tens of ms with `wall_anchor_wide_brackets` climbing
   means preemption at anchor time, now outvoted or bounded. `steps_followed`
-  +1 about every 47 min with `last_step_us` ≈ 50 000 is the fleet date step,
-  followed. `slewed_us` growing by more than ~1 ms per followed step means UTC
-  steps that were NOT confirmed (a backward step, or preempted resamples).
+  +1 once a night (~04:00 local, dantesync 1.12.0) with `last_step_us` ≈ the
+  announced step is the fleet date step, followed. A backward one also bumps
+  `holds_followed`, and the INFO log shows `direction=backward`. Each wall
+  anchors and follows independently, so every pacer and consumer logs its
+  own follow within ~3.3 s. `wall_anchor_max_step_us` is a lifetime max: after
+  the first ±1.5 s step it stays ~1 500 000; it does not drop back.
+  `slewed_us` growing by more than ~1 ms per followed step means UTC steps
+  that were NOT confirmed (a lone outlier, or preempted resamples).
 - **Layout.** `PacingStats` lives in `playback/pacing_stats.rs` (split out of
   `ndi_health.rs` for the 1000-line cap) and is re-exported from `ndi_health`.
 

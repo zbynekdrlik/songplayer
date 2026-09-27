@@ -450,6 +450,7 @@ impl<B: NdiBackend> Drop for NdiSender<B> {
 /// External code keeps addressing it as `sp_ndi::test_util::MockNdiBackend`.
 #[cfg(any(test, feature = "test-util"))]
 pub mod test_util {
+    pub use crate::receive_mock::{MockNdiReceiveBackend, MockVideoFrame};
     pub use crate::sender_mock::MockNdiBackend;
 }
 

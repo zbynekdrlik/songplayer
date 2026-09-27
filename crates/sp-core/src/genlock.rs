@@ -197,8 +197,9 @@ pub fn strict_next_boundary_100ns(x_100ns: i64, fps: i64) -> i64 {
 /// miscounts across a second boundary; this STEPS the grid instead, exactly
 /// `GENLOCK_MAX_CATCHUP_INTERVALS + 1` times. If the stepped boundary is still
 /// at-or-before `floor_now`, the lag exceeds the bound. Bounded work (9 steps at
-/// 30 fps) — the whole count is never materialised, only "> bound?".
-fn lag_over_catchup_bound_100ns(boundary_100ns: i64, floor_now_100ns: i64, fps: i64) -> bool {
+/// 30 fps) — the whole count is never materialised, only "> bound?". Also the
+/// #212 NDI input thread's resync rule (`playback::ndi_input::grid_step`).
+pub fn lag_over_catchup_bound_100ns(boundary_100ns: i64, floor_now_100ns: i64, fps: i64) -> bool {
     let mut b = boundary_100ns;
     for _ in 0..=GENLOCK_MAX_CATCHUP_INTERVALS {
         b = strict_next_boundary_100ns(b, fps);

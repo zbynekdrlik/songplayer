@@ -49,6 +49,15 @@ pub struct FakeObsState {
     /// caused the reconnect loop to terminate instead of backing off and
     /// reconnecting.
     pub close_after_identify: bool,
+    /// #213: the scenes `GetSceneList` lists, in order (their uuid is
+    /// `uuid-<name>`). `SetCurrentProgramScene` accepts only these.
+    pub scene_list: Vec<String>,
+    /// #213: the program scene (`GetSceneList` / `GetCurrentProgramScene`;
+    /// `SetCurrentProgramScene` sets it). `None` keeps the old `{}` answer
+    /// of `GetCurrentProgramScene`.
+    pub program_scene: Option<String>,
+    /// #213: every request received, as `{requestType, requestData}`.
+    pub requests: Vec<Value>,
 }
 
 /// A fake OBS WebSocket server listening on a random localhost port.
@@ -124,6 +133,20 @@ impl FakeObsServer {
             }
         });
         let _ = self.event_tx.send(evt).await;
+    }
+
+    /// #213: push any event (intent 4 = Scenes) to the connected client.
+    pub async fn push_event(&self, event_type: &str, event_data: Value) {
+        let evt = json!({
+            "op": 5,
+            "d": { "eventType": event_type, "eventIntent": 4, "eventData": event_data }
+        });
+        let _ = self.event_tx.send(evt).await;
+    }
+
+    /// #213: a snapshot of the fake state (request log, program scene, …).
+    pub async fn state(&self) -> FakeObsState {
+        self.state.lock().await.clone()
     }
 
     /// Mutate the fake state (e.g. to simulate a new NDI input appearing).
@@ -277,6 +300,11 @@ async fn handle_client(
 async fn handle_request(req: &Value, state: &Arc<Mutex<FakeObsState>>) -> Value {
     let request_type = req["d"]["requestType"].as_str().unwrap_or("");
     let request_id = req["d"]["requestId"].as_str().unwrap_or("");
+    state.lock().await.requests.push(json!({
+        "requestType": request_type,
+        "requestData": req["d"]["requestData"],
+    }));
+    let mut request_status = json!({ "result": true, "code": 100 });
 
     let response_data = match request_type {
         "GetInputList" => {
@@ -331,6 +359,47 @@ async fn handle_request(req: &Value, state: &Arc<Mutex<FakeObsState>>) -> Value 
                 .unwrap_or_default();
             json!({ "sceneItems": items })
         }
+        "GetSceneList" => {
+            let s = state.lock().await;
+            let scenes: Vec<Value> = s
+                .scene_list
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    json!({ "sceneIndex": i, "sceneName": name, "sceneUuid": format!("uuid-{name}") })
+                })
+                .collect();
+            json!({
+                "currentProgramSceneName": s.program_scene,
+                "currentProgramSceneUuid": s.program_scene.as_ref().map(|n| format!("uuid-{n}")),
+                "currentPreviewSceneName": null,
+                "currentPreviewSceneUuid": null,
+                "scenes": scenes,
+            })
+        }
+        "GetCurrentProgramScene" => match state.lock().await.program_scene.clone() {
+            Some(name) => json!({
+                "sceneName": name,
+                "sceneUuid": format!("uuid-{name}"),
+                "currentProgramSceneName": name,
+                "currentProgramSceneUuid": format!("uuid-{name}"),
+            }),
+            None => json!({}),
+        },
+        "SetCurrentProgramScene" => {
+            let scene = req["d"]["requestData"]["sceneName"].as_str().unwrap_or("");
+            let mut s = state.lock().await;
+            if s.scene_list.iter().any(|n| n == scene) {
+                s.program_scene = Some(scene.to_string());
+            } else {
+                request_status = json!({
+                    "result": false,
+                    "code": 600,
+                    "comment": format!("No source was found by the name of `{scene}`."),
+                });
+            }
+            json!({})
+        }
         _ => json!({}),
     };
 
@@ -339,7 +408,7 @@ async fn handle_request(req: &Value, state: &Arc<Mutex<FakeObsState>>) -> Value 
         "d": {
             "requestType": request_type,
             "requestId": request_id,
-            "requestStatus": { "result": true, "code": 100 },
+            "requestStatus": request_status,
             "responseData": response_data,
         }
     })

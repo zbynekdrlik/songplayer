@@ -44,6 +44,32 @@ pub const SETTING_VBAN_STREAM_NAME: &str = "vban_stream_name";
 /// #210: comma-separated `host:port` VBAN targets (default empty = send
 /// nothing), e.g. `fohabl.lan:6980, lv1.lan:6980`.
 pub const SETTING_VBAN_TARGETS: &str = "vban_targets";
+/// #212 (B3 of EPIC #174): the NDI input "OBS manuál" — one received NDI
+/// source offered to the program bus. `"true"` receives; anything else (or
+/// absent) = off, the default.
+pub const SETTING_NDI_INPUT_ENABLED: &str = "ndi_input_enabled";
+/// #212: the full NDI name of the received source, `"MACHINE (stream)"` (e.g.
+/// cg OBS's manual-scene NDI output). Empty = nothing to receive.
+pub const SETTING_NDI_INPUT_SOURCE: &str = "ndi_input_source";
+
+/// #213 (C of EPIC #174): the Companion-compatible remote control, an
+/// obs-websocket 5 subset SongPlayer serves on its own port. `"true"` listens;
+/// anything else (or absent) = off, the default.
+pub const SETTING_REMOTE_WS_ENABLED: &str = "remote_ws_enabled";
+/// #213: the remote control's TCP port ([`DEFAULT_REMOTE_WS_PORT`] when absent
+/// or not a port).
+pub const SETTING_REMOTE_WS_PORT: &str = "remote_ws_port";
+/// #213: the optional remote-control password. Set = the obs-websocket 5
+/// SHA-256 challenge auth; empty = no auth.
+pub const SETTING_REMOTE_WS_PASSWORD: &str = "remote_ws_password";
+/// #213: the default remote-control port, next to cg OBS's own 4455.
+pub const DEFAULT_REMOTE_WS_PORT: u16 = 4456;
+
+/// #212: the program-bus source id of the NDI input (playlists are positive
+/// row ids, so a negative id can never collide with one).
+pub const PROGRAM_INPUT_ID: i64 = -1;
+/// #212: the NDI input's label on the dashboard Program control.
+pub const PROGRAM_INPUT_LABEL: &str = "OBS manuál";
 
 // Default values for settings that have sensible defaults.
 pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
@@ -139,6 +165,22 @@ mod tests {
         assert_eq!(SETTING_VBAN_STREAM_NAME, "vban_stream_name");
         assert_eq!(SETTING_VBAN_TARGETS, "vban_targets");
         assert_eq!(DEFAULT_VBAN_STREAM_NAME, "sp-program");
+    }
+
+    #[test]
+    fn ndi_input_setting_keys_and_program_id() {
+        assert_eq!(SETTING_NDI_INPUT_ENABLED, "ndi_input_enabled");
+        assert_eq!(SETTING_NDI_INPUT_SOURCE, "ndi_input_source");
+        assert_eq!(PROGRAM_INPUT_ID, -1);
+        assert_eq!(PROGRAM_INPUT_LABEL, "OBS manuál");
+    }
+
+    #[test]
+    fn remote_ws_setting_keys_and_default_port() {
+        assert_eq!(SETTING_REMOTE_WS_ENABLED, "remote_ws_enabled");
+        assert_eq!(SETTING_REMOTE_WS_PORT, "remote_ws_port");
+        assert_eq!(SETTING_REMOTE_WS_PASSWORD, "remote_ws_password");
+        assert_eq!(DEFAULT_REMOTE_WS_PORT, 4456);
     }
 
     #[test]
