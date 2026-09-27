@@ -469,3 +469,89 @@ fn a_same_slot_recut_after_a_freeze_still_fades_out_of_the_source_on_air() {
          A → C window never counted"
     );
 }
+
+#[test]
+fn a_cut_back_then_a_same_slot_recut_still_fades_out_of_the_source_on_air() {
+    // Review round 3: A → B (never live), back to A on b(10) — the A → B fade
+    // is frozen and A takes b(10) on — then C in the same slot. A is on
+    // program right up to b(10), so the fade goes from A to C.
+    let mut core = fade_core();
+    let (fa, fb, fc) = (frame(4, 2), frame(8, 2), frame(6, 2));
+    let mut sent = Vec::new();
+    for k in 1..=21 {
+        core.offer(SRC_A, job(4, &fa, b(k), LEVEL_A));
+        core.offer(SRC_B, standby(8, &fb, b(k), LEVEL_B));
+        core.offer(SRC_C, job(6, &fc, b(k), 0.3));
+        if k == 5 {
+            assert!(core.cut(SRC_B, b(5) + 5 * MS));
+        }
+        if k == 8 {
+            assert!(core.cut(SRC_A, b(8) + 5 * MS), "back to A");
+            assert!(core.cut(SRC_C, b(8) + 6 * MS), "then C, same slot");
+            assert_eq!(
+                core.status()
+                    .transition
+                    .active
+                    .map(|w| (w.from, w.to, w.start_boundary_100ns)),
+                Some((Some(SRC_A), SRC_C, b(10)))
+            );
+            assert_eq!(core.hold_for(SRC_B), None, "B never went on program");
+        }
+        sent.extend(take_all(&mut core));
+    }
+    let mut want = run(1..=9, |_| "src 4".to_string());
+    want.extend(run(10..=18, |k| format!("mix {}/9 4>6", k - 10)));
+    want.extend(run(19..=21, |_| "src 6".to_string()));
+    assert_eq!(sent, want);
+}
+
+#[test]
+fn a_cut_back_then_back_again_in_the_same_slot_waits_for_the_first_live_pair() {
+    // Review round 3: A → B, back to A on b(10), then B again in the same
+    // slot. A is still on program, so this is a new A → B fade that waits for
+    // B's first live pair (b(12)) — never a hard cut to B's standby pairs.
+    let mut core = fade_core();
+    let (fa, fb) = (frame(4, 2), frame(8, 2));
+    let mut sent = Vec::new();
+    for k in 1..=23 {
+        core.offer(SRC_A, job(4, &fa, b(k), LEVEL_A));
+        let pair_b = if k >= 12 {
+            job(8, &fb, b(k), LEVEL_B)
+        } else {
+            standby(8, &fb, b(k), LEVEL_B)
+        };
+        core.offer(SRC_B, pair_b);
+        if k == 5 {
+            assert!(core.cut(SRC_B, b(5) + 5 * MS));
+        }
+        if k == 8 {
+            assert!(core.cut(SRC_A, b(8) + 5 * MS), "back to A");
+            assert!(core.cut(SRC_B, b(8) + 6 * MS), "B again, same slot");
+            assert_eq!(core.status().cut_boundary_100ns, Some(b(10)));
+            assert_eq!(
+                core.hold_for(SRC_A),
+                Some(Hold::Until(b(35))),
+                "A is held through the new fade's worst case"
+            );
+        }
+        sent.extend(take_all(&mut core));
+    }
+    let mut want = run(1..=11, |_| "src 4".to_string());
+    want.extend(run(12..=20, |k| format!("mix {}/9 4>8", k - 12)));
+    want.extend(run(21..=23, |_| "src 8".to_string()));
+    assert_eq!(
+        sent, want,
+        "A held on b(7)..=b(11), the fade from B's first live pair"
+    );
+    let c = core.status().transition.counters;
+    assert_eq!(
+        (
+            c.transitions_done,
+            c.mixed_boundaries,
+            c.cue_wait_boundaries,
+            c.cue_timeouts
+        ),
+        (2, 9, 2, 0),
+        "the frozen A → B window and the new A → B fade, which waited b(10), b(11)"
+    );
+}
