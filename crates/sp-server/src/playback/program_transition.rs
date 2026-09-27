@@ -42,7 +42,7 @@ use crate::playback::submit_handoff::SubmitJob;
 
 /// The longest window a transition may take: 300 slots (10 s at 30 fps). A
 /// longer OBS or configured duration is clamped to it.
-pub const MAX_TRANSITION_SLOTS: u32 = 1;
+pub const MAX_TRANSITION_SLOTS: u32 = 300;
 
 /// The Q8 weight of the `to` picture: 0 = all `from`, 256 = all `to`.
 pub const Q8_ONE: u32 = 256;
