@@ -199,7 +199,10 @@ async fn a_404_on_a_title_push_is_re_pushed_by_the_recovery_event_not_retried() 
 }
 
 /// A 404 on a clip id (the opacity PUT) is a stale map too. A HideTitle is
-/// retried on the new clip id: the RecoveryEvent's re-push never hides.
+/// retried on the new clip id: the RecoveryEvent's re-push sends no hide of
+/// its own. (It re-shows the title of a pipeline still playing on program,
+/// though, even after its end-of-song hide: an older engine behaviour of
+/// `playback/recovery.rs`. The retry hides it for good off program.)
 #[tokio::test]
 async fn a_404_on_a_clip_opacity_push_marks_the_map_stale_too() {
     let server = arena().await;
@@ -283,12 +286,13 @@ async fn a_push_answered_500_does_not_mark_the_map_stale() {
     assert_eq!(drain(&mut rx), 0);
 }
 
-/// An id Arena keeps refusing while its composition still lists it (not a
-/// relaunch: the refresh maps the same ids). Without a bound this loops: the
-/// ready refresh's RecoveryEvent re-pushes into the same 404, which refreshes
-/// again. A 404 marks the map stale at most once per 60 s retry window.
+/// An id Arena keeps refusing while its composition still lists it: not a
+/// relaunch, the refresh maps the same clips. It lost nothing, so no
+/// RecoveryEvent (its re-push would only 404 again, a loop with no timer in
+/// it) and no retry. Every push would cost a ~14 MB fetch, so such a 404 is
+/// not refreshed again for the 60 s retry window.
 #[tokio::test]
-async fn a_404_marks_the_map_stale_at_most_once_per_retry_window() {
+async fn an_id_the_composition_still_lists_is_refreshed_at_most_once_per_retry_window() {
     let server = arena().await;
     composition_always(&server, composition(&[(SUBS_TOKEN, 100, 900)])).await;
     put_answers(&server, "/api/v1/parameter/by-id/900", 404).await;
@@ -304,33 +308,125 @@ async fn a_404_marks_the_map_stale_at_most_once_per_retry_window() {
     );
     assert_eq!(
         drain(&mut rx),
-        1,
-        "its ready refresh fires one RecoveryEvent"
+        0,
+        "the map came back unchanged: nothing to re-push"
     );
     assert_eq!(
         texts_put(&server, 900).await.len(),
-        2,
-        "the push and its one retry, both on the same refused id"
+        1,
+        "no retry: the same id would 404 again"
     );
+    assert!(driver.not_ready_since.is_none(), "the map is ready");
 
     for s in [31, 89] {
         driver.run_push(&line, base + secs(s)).await;
         assert_eq!(
             composition_fetches(&server).await,
             2,
-            "{} s after the stale mark a 404 refreshes nothing",
+            "{} s after that refresh a 404 on the same id refreshes nothing",
             s - 30
         );
-        assert_eq!(drain(&mut rx), 0, "and fires no RecoveryEvent");
     }
 
     driver.run_push(&line, base + secs(90)).await;
     assert_eq!(
         composition_fetches(&server).await,
         3,
-        "60 s after the last stale mark a 404 refreshes once more"
+        "60 s after it a 404 refreshes once more"
     );
-    assert_eq!(drain(&mut rx), 1);
+    assert_eq!(drain(&mut rx), 0, "never a RecoveryEvent");
+}
+
+/// Arena relaunched twice within a minute. The first relaunch's 404 mapped
+/// new ids, so the second relaunch's 404 is a stale map again and refreshes
+/// at once; only an id the composition still lists holds the refresh back.
+#[tokio::test]
+async fn a_second_relaunch_within_a_minute_is_refreshed_at_once() {
+    let server = arena().await;
+    let relaunch_1 = composition(&[(SUBS_TOKEN, 200, 1900)]);
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(composition(&[(SUBS_TOKEN, 100, 900)])),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(relaunch_1))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    composition_always(&server, composition(&[(SUBS_TOKEN, 300, 2900)])).await;
+    put_answers(&server, "/api/v1/parameter/by-id/900", 404).await;
+    // 1900 works until the second relaunch, then 404s.
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/parameter/by-id/1900"))
+        .respond_with(ResponseTemplate::new(204))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    put_answers(&server, "/api/v1/parameter/by-id/1900", 404).await;
+    put_answers(&server, "/api/v1/parameter/by-id/2900", 204).await;
+    let base = Instant::now();
+    let (mut driver, mut rx) = mapped_driver(&server, base).await;
+
+    driver.run_push(&subtitle("Line one"), base + secs(5)).await;
+    assert_eq!(texts_put(&server, 1900).await, ["Line one"]);
+    assert_eq!(drain(&mut rx), 1, "relaunch 1: one RecoveryEvent");
+
+    driver
+        .run_push(&subtitle("Line two"), base + secs(38))
+        .await;
+    assert_eq!(
+        composition_fetches(&server).await,
+        3,
+        "33 s later the second relaunch's 404 refreshes at once"
+    );
+    assert_eq!(
+        texts_put(&server, 2900).await,
+        ["Line two"],
+        "and the push is retried on the newest id"
+    );
+    assert_eq!(drain(&mut rx), 1, "relaunch 2: one RecoveryEvent");
+}
+
+/// A 404 whose refresh fails (Arena's REST chokes on the composition): the
+/// episode stays open for the ticks to fetch, and the push is not retried
+/// against the old, dead ids.
+#[tokio::test]
+async fn a_404_whose_refresh_fails_is_not_retried() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(composition(&[(SUBS_TOKEN, 100, 900)])),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    put_answers(&server, "/api/v1/parameter/by-id/900", 404).await;
+    let base = Instant::now();
+    let (mut driver, mut rx) = mapped_driver(&server, base).await;
+
+    driver
+        .run_push(&subtitle("Line one"), base + secs(30))
+        .await;
+
+    assert_eq!(composition_fetches(&server).await, 2, "the refresh ran");
+    assert_eq!(texts_put(&server, 900).await.len(), 1, "no retry");
+    assert_eq!(
+        driver.not_ready_since,
+        Some(base + secs(30)),
+        "the episode stays open for the ticks"
+    );
+    assert_eq!(drain(&mut rx), 0);
 }
 
 /// A 404 while the last `/composition` attempt failed: the episode starts,
@@ -496,6 +592,12 @@ fn the_tick_is_2_s_only_inside_a_not_ready_episode_s_fast_window() {
         driver.tick_period(base + secs(120), liveness),
         liveness,
         "at 120 s the window is over (`<`, not `<=`)"
+    );
+    driver.last_full_attempt_failed = true;
+    assert_eq!(
+        driver.tick_period(base, liveness),
+        liveness,
+        "after a failed fetch `decide` waits out the retry window: no 2 s ticks"
     );
 }
 
