@@ -337,6 +337,27 @@ async fn handle_resolume_recovery_leaves_a_pending_title_to_its_show_timer() {
     );
 }
 
+/// A song playing off program (its scene is not on the wall, e.g. held
+/// through a transition) has no title due, whatever its position. Kills the
+/// `(on_program || started) && window` mutant of `title_due`.
+#[tokio::test]
+async fn handle_resolume_recovery_names_no_title_for_an_off_program_song() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, 60_000, Some(42));
+    engine.pipelines[&7]
+        .scene_active
+        .store(false, Ordering::Release);
+    sent(&mut rx);
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    assert_eq!(
+        resyncs(&sent(&mut rx)),
+        [None::<String>],
+        "off program: no title"
+    );
+}
+
 /// Design record 5859883842 root cause 2: a recovery between one song's end
 /// and the next song's `Started` showed the next song's title early (both
 /// timer handles were `None`, which read as "mid-song"). Until the new song's
