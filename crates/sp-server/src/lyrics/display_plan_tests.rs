@@ -276,7 +276,8 @@ fn a_fragment_that_cannot_merge_forward_merges_backward() {
     );
     assert_eq!(plan[0].sk.as_deref(), Some("Sedíš na tróne milosti Ó Bože"));
     assert_eq!(plan[0].src_range, 0..2);
-    assert_eq!((plan[1].show_ms, plan[1].hide_ms), (2_201, 9_000));
+    // The next line may lead only after "Oh God" is sung to its end (3000).
+    assert_eq!((plan[1].show_ms, plan[1].hide_ms), (3_000, 9_000));
 }
 
 #[test]
@@ -311,8 +312,22 @@ fn a_fragment_stays_alone_when_no_neighbour_is_within_700_ms() {
             "We give you the glory now"
         ]
     );
-    // "Oh" still stays on the wall for the full 1200 ms.
-    assert_eq!((plan[1].show_ms, plan[1].hide_ms), (1_201, 2_401));
+    // "Oh" waits until the first line is sung to its end (2000), then stays
+    // on the wall for the full 1200 ms.
+    assert_eq!((plan[1].show_ms, plan[1].hide_ms), (2_000, 3_200));
+}
+
+#[test]
+fn a_line_stays_on_the_wall_until_it_is_sung_to_the_end() {
+    // Two whole lines 500 ms apart. The second would lead by 1500 ms, but it
+    // may appear only once the first is sung to its end (12 000), so it gets
+    // only the 500 ms of lead that the gap leaves.
+    let plan = build_plan(&[
+        line(10_000, 12_000, "Seated on the throne of grace", ""),
+        line(12_500, 14_500, "We give you the glory now", ""),
+    ]);
+    assert_eq!((plan[0].show_ms, plan[0].hide_ms), (8_500, 12_000));
+    assert_eq!((plan[1].show_ms, plan[1].hide_ms), (12_000, 17_500));
 }
 
 #[test]
@@ -443,11 +458,12 @@ fn a_gap_over_8000_ms_hides_the_line_3_s_after_it_ends() {
 
 #[test]
 fn a_fast_passage_switches_exactly_on_time_when_no_lead_is_left() {
-    // Nine lines 1000 ms apart, each too long to merge with its neighbour
-    // (37 + 1 + 37 > 64 chars). Each line keeps 1200 ms on the wall, which
-    // eats the next line's lead until the ninth shows exactly when sung.
-    // Under the design as written, lines 0 and 1 leave before they are sung
-    // (9700 < 10000, 10900 < 11000); see the design question on #217.
+    // Nine lines 1000 ms apart, each sung for 900 ms and too long to merge
+    // with its neighbour (37 + 1 + 37 > 64 chars). Only the first line gets
+    // the full lead. The second may appear only once the first is sung to its
+    // end (10 900), which leaves it 100 ms of lead. From the third on, the
+    // previous line's 1200 ms would push past the sung start, so every line
+    // shows exactly when it is sung.
     let lines: Vec<LyricsLine> = (0..9u64)
         .map(|k| {
             let start = 10_000 + 1_000 * k;
@@ -459,16 +475,26 @@ fn a_fast_passage_switches_exactly_on_time_when_no_lead_is_left() {
     assert_eq!(
         shows,
         [
-            8_500, 9_700, 10_900, 12_100, 13_300, 14_500, 15_700, 16_900, 18_000
+            8_500, 10_900, 12_000, 13_000, 14_000, 15_000, 16_000, 17_000, 18_000
         ]
     );
     for pair in plan.windows(2) {
         assert_eq!(pair[0].hide_ms, pair[1].show_ms);
     }
     assert_eq!(plan[8].hide_ms, 21_900);
-    // Only the eighth line gets less than 1200 ms. That is allowed, because
-    // the source lines start only 1000 ms apart.
-    assert_eq!(plan[7].hide_ms - plan[7].show_ms, 1_100);
+    // Lines 1–7 get less than 1200 ms. That is allowed, because the source
+    // lines start only 1000 ms apart; none of them leaves before it is sung
+    // to its end.
+    let up: Vec<u64> = plan.iter().map(|d| d.hide_ms - d.show_ms).collect();
+    assert_eq!(
+        up,
+        [
+            2_400, 1_100, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 3_900
+        ]
+    );
+    for (d, source) in plan.iter().zip(&lines) {
+        assert!(d.hide_ms >= source.end_ms, "{:?} leaves while sung", d.en);
+    }
 }
 
 #[test]
@@ -554,10 +580,28 @@ fn fixture_no_wall_line_is_up_for_less_than_1200_ms() {
         .map(|d| d.hide_ms - d.show_ms)
         .min()
         .expect("the plan is not empty");
-    // The shortest is "All I have", on the wall for 508.1–509.5 s. Note that
-    // it is sung only at 509.6 s: the next line's lead replaces it first (the
-    // design question on #217). The old wall flashed 42 lines for under 1 s.
-    assert_eq!(shortest, 1_400);
+    // The shortest is the lone "Oh," (1.5 s, on the wall 33.2–34.7 s). The
+    // old wall flashed 42 lines for under 1 s.
+    assert_eq!(shortest, 1_500);
+}
+
+#[test]
+fn fixture_no_wall_line_leaves_before_it_is_sung_to_the_end() {
+    // ROZHODNUTÉ on #217: the next line may appear early only once the
+    // previous one has been sung to its end. Under the first design 68 of the
+    // 137 wall lines left early (41.7 s), and "All I have" left before it was
+    // even sung.
+    let lines = fixture().lines;
+    let plan = build_plan(&lines);
+    for d in &plan {
+        let end = sung_end(&lines, d);
+        assert!(
+            d.hide_ms >= end,
+            "{:?} leaves at {} ms but is sung until {end} ms",
+            d.en,
+            d.hide_ms
+        );
+    }
 }
 
 #[test]
@@ -570,19 +614,32 @@ fn fixture_lead_bounds_hold() {
         assert!(d.show_ms + LEAD_MS >= start, "{:?} shows too early", d.en);
         if i > 0 {
             let prev = &plan[i - 1];
+            let exact = d.show_ms == start;
             assert!(
-                d.show_ms >= prev.show_ms + MIN_VISIBLE_MS || d.show_ms == start,
+                d.show_ms >= sung_end(&lines, prev) || exact,
+                "{:?} shows while {:?} is still sung",
+                d.en,
+                prev.en
+            );
+            assert!(
+                d.show_ms >= prev.show_ms + MIN_VISIBLE_MS || exact,
                 "{:?} cuts {:?} short",
                 d.en,
                 prev.en
             );
         }
     }
-    // This song leaves room everywhere: every line gets the full 1.5 s lead.
-    assert!(
-        plan.iter()
-            .all(|d| sung_start(&lines, d) - d.show_ms == LEAD_MS)
-    );
+    // 69 lines get the full 1.5 s lead; 7 have no room and show exactly when
+    // sung; the rest lead by what the gap after the previous line leaves.
+    let full = plan
+        .iter()
+        .filter(|d| sung_start(&lines, d) - d.show_ms == LEAD_MS)
+        .count();
+    let exact = plan
+        .iter()
+        .filter(|d| d.show_ms == sung_start(&lines, d))
+        .count();
+    assert_eq!((full, exact), (69, 7));
     assert_eq!(plan[0].show_ms, 300);
 }
 
@@ -612,11 +669,12 @@ fn fixture_merges_fragments_into_verses() {
         "You're nothing like I thought you were you're better."
     );
     // A lone "Oh," with no neighbour within 700 ms stays alone, but it gets
-    // 2.2 s instead of flashing for 0.5 s.
+    // 1.5 s instead of flashing for 0.5 s. It appears once the line before it
+    // is sung to its end (33.2 s).
     let oh = by_src(11..12);
     assert_eq!(
         (oh.en.as_str(), oh.show_ms, oh.hide_ms),
-        ("Oh,", 32_500, 34_700)
+        ("Oh,", 33_200, 34_700)
     );
     // Every merged line fits the wall, in both languages.
     assert!(

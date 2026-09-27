@@ -330,8 +330,9 @@ mod tests {
     /// `test_track()`'s texts on wall-safe timing (#217). The second line is
     /// sung from 4000 ms, 1000 ms after the first ends. That gap is over the
     /// display plan's 700 ms merge limit, so the two short lines stay two wall
-    /// lines instead of merging into "Hello world Goodbye". The plan shows
-    /// them over [0, 2500) and [2500, 9000).
+    /// lines instead of merging into "Hello world Goodbye". "Goodbye" may
+    /// lead only once "Hello world" is sung to its end (3000), so the plan
+    /// shows them over [0, 3000) and [3000, 9000).
     fn wall_track() -> LyricsTrack {
         let mut track = test_track();
         track.lines[1].start_ms = 4_000;
@@ -454,7 +455,7 @@ mod tests {
     #[test]
     fn presenter_lines_returns_current_and_next() {
         let st = LyricsState::new(wall_track());
-        // wall_track()'s plan shows line 0 over [0, 2500).
+        // wall_track()'s plan shows line 0 over [0, 3000).
         let (cur, nxt) = st.presenter_lines(1500).expect("on line 0");
         assert_eq!(cur, "Hello world");
         // next_en is line 1's text.
@@ -642,7 +643,7 @@ mod tests {
 
     /// Lead 0 and offset 0 leave the plan's own boundaries untouched, and
     /// `new` behaves exactly like `with_lead_and_offset(track, 0, 0)`.
-    /// `wall_track()`'s plan is [0, 2500) "Hello world", then [2500, 9000)
+    /// `wall_track()`'s plan is [0, 3000) "Hello world", then [3000, 9000)
     /// "Goodbye".
     #[test]
     fn offset_zero_behaves_identically_to_no_offset() {
@@ -650,12 +651,12 @@ mod tests {
         let st_off = LyricsState::with_lead_and_offset(wall_track(), 0, 0);
         for st in [&st_new, &st_off] {
             let cur = |pos| st.presenter_lines(pos).map(|(c, _)| c);
-            assert_eq!(cur(2_499).as_deref(), Some("Hello world"));
-            assert_eq!(cur(2_500).as_deref(), Some("Goodbye"));
+            assert_eq!(cur(2_999).as_deref(), Some("Hello world"));
+            assert_eq!(cur(3_000).as_deref(), Some("Goodbye"));
             assert_eq!(cur(8_999).as_deref(), Some("Goodbye"));
             assert_eq!(cur(9_000), None);
         }
-        for pos in [0u64, 2_499, 2_500, 4_500, 9_000] {
+        for pos in [0u64, 2_999, 3_000, 4_500, 9_000] {
             assert_eq!(
                 st_new.resolume_lines(pos),
                 st_off.resolume_lines(pos),
@@ -672,23 +673,23 @@ mod tests {
     /// Constructor `with_lead_and_offset` parameterizes the operator's
     /// stage-display lead, which shifts every wall lookup ON TOP of the #217
     /// display plan. `wall_track()`'s plan switches from "Hello world" to
-    /// "Goodbye" at 2500 ms, so with lead=500 the switch comes at playback
-    /// 2000 ms.
+    /// "Goodbye" at 3000 ms, so with lead=500 the switch comes at playback
+    /// 2500 ms.
     ///
-    /// - Position 1999 + lead 500 = 2499 → still "Hello world".
-    /// - Position 2000 + lead 500 = 2500 → "Goodbye".
+    /// - Position 2499 + lead 500 = 2999 → still "Hello world".
+    /// - Position 2500 + lead 500 = 3000 → "Goodbye".
     ///
     /// Together the two prove the lead is exactly 500 (not 0).
     #[test]
     fn lead_ms_is_applied_from_state() {
         let st = LyricsState::with_lead_and_offset(wall_track(), 500, 0);
         let (cur, _nxt) = st
-            .presenter_lines(2_000)
-            .expect("2000 + lead(500) = 2500 = the plan's switch to Goodbye");
+            .presenter_lines(2_500)
+            .expect("2500 + lead(500) = 3000 = the plan's switch to Goodbye");
         assert_eq!(cur, "Goodbye");
         let (cur, _nxt) = st
-            .presenter_lines(1_999)
-            .expect("1999 + lead(500) = 2499: Hello world is still on the wall");
+            .presenter_lines(2_499)
+            .expect("2499 + lead(500) = 2999: Hello world is still on the wall");
         assert_eq!(cur, "Hello world");
     }
 
