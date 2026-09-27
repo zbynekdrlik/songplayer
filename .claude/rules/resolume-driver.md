@@ -39,6 +39,15 @@ What the driver does now (`refresh_mapping(now)`):
   that never gets SongPlayer's clips costs 1 + 11 + 3 = 15 fetches in 5 min,
   then one fetch (and one INFO `reason="not-ready"` line) every 60 s for as
   long as it stays that way — 5× the TTL rate, the accepted trade-off.
+- **The fast path needs an ANSWERED last attempt** (`last_full_attempt_failed`,
+  a `decide` input).
+  - Not ready means `/composition` answered without SongPlayer's clips.
+  - A FAILED fetch is the #157 case: Arena's REST answers `/product` but
+    chokes on the 14 MB composition while it loads. It keeps the 60 s retry
+    window, even inside the 120 s.
+  - Without this, after a breaker close a failing `/composition` was fetched
+    every tick. Each failure also made the next probe fire a `was_failing`
+    RecoveryEvent, one title re-push per tick (review round 3).
 - Precedence: forced command > breaker-closed > NotReady > startup / TTL.
   NotReady must sit BEFORE TTL: after a restart `last_full_ok` is the
   pre-restart stamp, and a TTL reason would wait out the retry window.
@@ -48,7 +57,9 @@ What the driver does now (`refresh_mapping(now)`):
 - **An evicted map is not ready too.** Opening the breaker empties
   `clip_mapping` and clears `not_ready_since` (the outage ends any episode).
   The probe that closes the breaker sets `not_ready_since = now`
-  (`on_tick_at`).
+  (`on_tick_at`, which logs "clip map evicted by the outage — not ready …").
+  A breaker-closed refresh that finds no clips does not log its own
+  not-ready line: the episode has already started.
   - Why: `decide` applies the 60 s retry backoff to `BreakerClosed` too. A
     breaker-closed refresh held back by it (Arena back less than 60 s after
     the last attempt) would otherwise leave the empty map looking like the
