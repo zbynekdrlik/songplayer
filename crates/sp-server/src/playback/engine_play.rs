@@ -12,6 +12,8 @@
 //! setlist row after pause doesn't keep the old snapshot. `handle_play_video`
 //! itself lives here too (moved out of `mod.rs` for the 1000-line cap, #215).
 
+use std::sync::atomic::Ordering;
+
 use sp_core::ws::ServerMsg;
 use tracing::{info, warn};
 

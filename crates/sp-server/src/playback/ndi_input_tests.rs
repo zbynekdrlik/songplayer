@@ -188,6 +188,7 @@ fn drain(bus: &ProgramBus) -> Vec<SubmitJob> {
             Take::Job(ProgramJob::Standby { stamp_100ns }) => {
                 panic!("the program filled boundary {stamp_100ns} — the input must own it")
             }
+            Take::Job(ProgramJob::Mix(_)) => panic!("a Cut spec never mixes"),
             Take::Idle | Take::Stopped => break,
         }
     }

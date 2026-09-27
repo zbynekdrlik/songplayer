@@ -42,7 +42,7 @@ use crate::playback::submit_handoff::SubmitJob;
 
 /// The longest window a transition may take: 300 slots (10 s at 30 fps). A
 /// longer OBS or configured duration is clamped to it.
-pub const MAX_TRANSITION_SLOTS: u32 = 300;
+pub const MAX_TRANSITION_SLOTS: u32 = 1;
 
 /// The Q8 weight of the `to` picture: 0 = all `from`, 256 = all `to`.
 pub const Q8_ONE: u32 = 256;
@@ -363,13 +363,15 @@ pub fn mix_audio_block(
     format: AudioFormat,
 ) -> AudioFrame {
     let channels = format.channels as usize;
-    let mut data = Vec::with_capacity(format.frames * channels);
-    for i in 0..format.frames {
-        let (g_from, g_to) = crossfade_gains(first + i as u64, total);
-        for c in 0..channels {
-            data.push(g_from * side_sample(from, i, c) + g_to * side_sample(to, i, c));
-        }
-    }
+    // Collected, not pre-sized: a capacity formula would be an equivalent
+    // mutant (only the allocation changes).
+    let data = (0..format.frames)
+        .flat_map(|i| {
+            let (g_from, g_to) = crossfade_gains(first + i as u64, total);
+            (0..channels)
+                .map(move |c| g_from * side_sample(from, i, c) + g_to * side_sample(to, i, c))
+        })
+        .collect();
     AudioFrame {
         data,
         channels: format.channels,

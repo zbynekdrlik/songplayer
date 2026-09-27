@@ -210,11 +210,10 @@ impl Follow {
 
     /// Put the spec of `settings` + cg OBS's last known transition on the bus
     /// and return it; a change is logged.
-    pub fn apply_spec(&self, settings: &FollowSettings, previous: Option<TransitionSpec>) -> TransitionSpec {
+    pub fn apply_spec(&self, settings: &FollowSettings) -> TransitionSpec {
         let obs = self.bus.follow().obs_transition();
         let spec = effective_spec(settings.mode, settings.ms, obs.as_ref());
-        self.bus.set_transition(spec);
-        if previous != Some(spec) {
+        if self.bus.set_transition(spec) {
             info!(
                 kind = ?spec.kind,
                 duration_ms = spec.duration_ms,
@@ -312,8 +311,9 @@ pub async fn run_follow_task(
 ) {
     let mut events = upstream.subscribe();
     let mut settings = follow.load(FollowSettings::default()).await;
-    let mut spec = follow.apply_spec(&settings, None);
+    // cg OBS's transition first, so the very first spec already uses it.
     follow.refresh_obs(&upstream).await;
+    follow.apply_spec(&settings);
     let mut tick = tokio::time::interval(poll);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -339,7 +339,7 @@ pub async fn run_follow_task(
             },
             _ = tick.tick() => settings = follow.load(settings).await,
         }
-        spec = follow.apply_spec(&settings, Some(spec));
+        follow.apply_spec(&settings);
     }
     info!("program follow: task stopped");
 }

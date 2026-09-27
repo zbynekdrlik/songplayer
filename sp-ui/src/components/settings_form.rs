@@ -22,13 +22,6 @@ fn setting_value(settings: &HashMap<String, String>, key: &str, default: &str) -
 /// own voice, no pinned prebuilt voice) followed by the six catalogue voices
 /// (#184 round C): the stored value with its Slovak descriptive label. Mirrors
 /// the vetted catalogue `eval/dubbing/voices.py`.
-/// #215: the `program_transition` choices with their Slovak labels.
-const PROGRAM_TRANSITIONS: &[(&str, &str)] = &[
-    ("obs", "Podľa OBS (odporúčané)"),
-    ("fade", "Vždy prelínanie"),
-    ("cut", "Vždy strih"),
-];
-
 const DUB_VOICES: &[(&str, &str)] = &[
     (config::DUB_VOICE_SPEAKER, "Hlas rečníka (odporúčané)"),
     ("Charon", "Charon — muž, vecný"),
@@ -37,6 +30,14 @@ const DUB_VOICES: &[(&str, &str)] = &[
     ("Kore", "Kore — žena, pevná"),
     ("Aoede", "Aoede — žena, ľahká"),
     ("Leda", "Leda — žena, mladá"),
+];
+
+/// #215: the `program_transition` choices (the stored value) with their Slovak
+/// labels. `obs` (the default) follows cg OBS's current scene transition.
+const PROGRAM_TRANSITIONS: &[(&str, &str)] = &[
+    ("obs", "Podľa OBS (odporúčané)"),
+    ("fade", "Vždy prelínanie"),
+    ("cut", "Vždy strih"),
 ];
 
 #[component]

@@ -279,9 +279,11 @@ impl ProgramCore {
     }
 
     /// #215: the transition every later cut uses (the follow task keeps it in
-    /// step with cg OBS and the settings).
-    pub fn set_transition(&mut self, spec: TransitionSpec) {
+    /// step with cg OBS and the settings). Returns whether it changed.
+    pub fn set_transition(&mut self, spec: TransitionSpec) -> bool {
+        let changed = self.spec != spec;
         self.spec = spec;
+        changed
     }
 
     /// #215: the window boundary `stamp_100ns` falls in, if any.
@@ -704,8 +706,8 @@ impl ProgramBus {
     }
 
     /// See [`ProgramCore::set_transition`].
-    pub fn set_transition(&self, spec: TransitionSpec) {
-        self.lock().core.set_transition(spec);
+    pub fn set_transition(&self, spec: TransitionSpec) -> bool {
+        self.lock().core.set_transition(spec)
     }
 
     /// See [`ProgramCore::hold_for`].

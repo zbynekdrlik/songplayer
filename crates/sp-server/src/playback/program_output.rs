@@ -228,9 +228,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
             };
             (layout, black)
         };
-        let side = |job: &crate::playback::submit_handoff::SubmitJob| {
-            (Layout::of(job), job.video.clone())
-        };
+        let side =
+            |job: &crate::playback::submit_handoff::SubmitJob| (Layout::of(job), job.video.clone());
         let from = mix.from.as_ref().map_or_else(&mut standby, side);
         let to = mix.to.as_ref().map_or_else(&mut standby, side);
         let weight = mix.weight_q8();

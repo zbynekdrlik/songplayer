@@ -110,7 +110,11 @@ fn the_transition_settings_parse_with_obs_and_300_ms_as_defaults() {
     assert_eq!(TransitionMode::parse(None), TransitionMode::Obs);
     assert_eq!(parse_transition_ms(Some(" 500 ")), 500);
     assert_eq!(parse_transition_ms(Some("1")), 1);
-    assert_eq!(parse_transition_ms(Some("0")), 300, "0 ms is no fade length");
+    assert_eq!(
+        parse_transition_ms(Some("0")),
+        300,
+        "0 ms is no fade length"
+    );
     assert_eq!(parse_transition_ms(Some("-5")), 300);
     assert_eq!(parse_transition_ms(Some("abc")), 300);
     assert_eq!(parse_transition_ms(None), 300);
@@ -132,7 +136,12 @@ fn grid_indices_round_trip_every_boundary_across_second_edges() {
 
 #[test]
 fn a_window_spans_exactly_its_slots_and_is_served_boundary_by_boundary() {
-    let w = Window::new(Some(1), 2, b(3), &TransitionSpec::fade(300, SpecSource::Obs));
+    let w = Window::new(
+        Some(1),
+        2,
+        b(3),
+        &TransitionSpec::fade(300, SpecSource::Obs),
+    );
     assert_eq!((w.from, w.to, w.kind), (Some(1), 2, TransitionKind::Fade));
     assert_eq!((w.start_100ns, w.n_slots, w.end_100ns), (b(3), 9, b(12)));
     assert_eq!(w.slot(b(2)), None, "before the window");
@@ -159,7 +168,10 @@ fn a_window_spans_exactly_its_slots_and_is_served_boundary_by_boundary() {
     assert_eq!(cut_short.end_100ns, b(6), "a truncation never extends");
 
     let cut = Window::new(Some(1), 2, b(3), &TransitionSpec::cut(SpecSource::Setting));
-    assert_eq!((cut.kind, cut.n_slots, cut.end_100ns), (TransitionKind::Cut, 0, b(3)));
+    assert_eq!(
+        (cut.kind, cut.n_slots, cut.end_100ns),
+        (TransitionKind::Cut, 0, b(3))
+    );
     assert_eq!(cut.slot(b(3)), None, "a cut mixes no boundary");
     assert_eq!(cut.served(Some(b(40))), 0);
 }
@@ -228,7 +240,11 @@ fn equal_layouts_blend_and_different_ones_cut_at_the_midpoint() {
     assert_eq!(picture_mix(a, a, 14), Picture::Blend);
     assert_eq!(picture_mix(a, wide, 0), Picture::From);
     assert_eq!(picture_mix(a, wide, 127), Picture::From);
-    assert_eq!(picture_mix(a, wide, 128), Picture::To, "from the midpoint on");
+    assert_eq!(
+        picture_mix(a, wide, 128),
+        Picture::To,
+        "from the midpoint on"
+    );
     assert_eq!(picture_mix(a, wide, 242), Picture::To);
     assert_eq!(
         picture_mix(a, layout(4, 6, 12), 200),
@@ -297,7 +313,10 @@ fn the_gain_curve_steps_evenly_across_boundary_edges() {
             "boundary edge {k}: θ steps {d}, not {step}"
         );
     }
-    assert!((theta(0) - step / 2.0).abs() < 1e-6, "starts next to all-`from`");
+    assert!(
+        (theta(0) - step / 2.0).abs() < 1e-6,
+        "starts next to all-`from`"
+    );
     assert!(
         (theta(total - 1) - (FRAC_PI_2 - step / 2.0)).abs() < 1e-6,
         "ends next to all-`to`"
@@ -349,7 +368,11 @@ fn a_block_crossfades_every_sample_on_the_window_curve() {
         let (gf, gt) = crossfade_gains(3 + i as u64, 9);
         let fi = i as f32;
         assert_eq!(out.data[2 * i], gf * (0.5 + fi) + gt * (0.25 + fi), "L {i}");
-        assert_eq!(out.data[2 * i + 1], gf * (-0.5 - fi) + gt * (1.0 - fi), "R {i}");
+        assert_eq!(
+            out.data[2 * i + 1],
+            gf * (-0.5 - fi) + gt * (1.0 - fi),
+            "R {i}"
+        );
     }
 }
 
@@ -365,7 +388,11 @@ fn a_mono_side_feeds_both_channels_and_a_missing_side_is_silence() {
     for i in 0..3 {
         let (gf, gt) = crossfade_gains(i as u64, 3);
         let want = gf * mono.data[i] + gt * 0.0;
-        assert_eq!((out.data[2 * i], out.data[2 * i + 1]), (want, want), "frame {i}");
+        assert_eq!(
+            (out.data[2 * i], out.data[2 * i + 1]),
+            (want, want),
+            "frame {i}"
+        );
     }
     let to_only = mix_audio_block(None, Some(&mono), 0, 3, FMT);
     let (gf, gt) = crossfade_gains(2, 3);
@@ -409,7 +436,12 @@ fn a_mix_job_names_its_weight_and_its_span_of_the_window() {
 
 #[test]
 fn an_active_window_reports_its_progress_in_percent() {
-    let w = Window::new(Some(1), 2, b(3), &TransitionSpec::fade(300, SpecSource::Obs));
+    let w = Window::new(
+        Some(1),
+        2,
+        b(3),
+        &TransitionSpec::fade(300, SpecSource::Obs),
+    );
     assert_eq!(
         ActiveWindow::of(&w, Some(b(6))),
         ActiveWindow {

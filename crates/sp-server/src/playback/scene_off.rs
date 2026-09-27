@@ -52,22 +52,30 @@ impl PlaybackEngine {
     /// The scene-go-off half of `handle_scene_change`: pause, unless the
     /// program bus holds the playlist through a transition.
     pub(super) async fn scene_off(&mut self, playlist_id: i64) {
-        self.scene_off_step(playlist_id, false).await;
+        self.scene_off_step(playlist_id, false, utc_now_100ns())
+            .await;
     }
 
     /// `PipelineEvent::SceneOffDue`: re-check a held pause; nothing when the
     /// scene came back on program (or the pipeline is gone).
     pub(super) async fn scene_off_due(&mut self, playlist_id: i64) {
+        self.scene_off_recheck(playlist_id, utc_now_100ns()).await;
+    }
+
+    /// [`Self::scene_off_due`] at `now_100ns` (the stamps' wall clock).
+    async fn scene_off_recheck(&mut self, playlist_id: i64, now_100ns: i64) {
         let off = self
             .pipelines
             .get(&playlist_id)
             .is_some_and(|pp| !pp.scene_active.load(Ordering::Acquire));
         if off {
-            self.scene_off_step(playlist_id, true).await;
+            self.scene_off_step(playlist_id, true, now_100ns).await;
         }
     }
 
-    async fn scene_off_step(&mut self, playlist_id: i64, settled: bool) {
+    /// Pause `playlist_id` now, or re-check once its hold is over (see the
+    /// module doc). `settled` = the one [`CUT_SETTLE`] wait was given.
+    async fn scene_off_step(&mut self, playlist_id: i64, settled: bool, now_100ns: i64) {
         let playing = self
             .pipelines
             .get(&playlist_id)
@@ -77,7 +85,7 @@ impl PlaybackEngine {
             .get()
             .filter(|_| playing)
             .and_then(|bus| bus.hold_for(playlist_id));
-        let Some(delay) = scene_off_delay(hold, utc_now_100ns(), settled) else {
+        let Some(delay) = scene_off_delay(hold, now_100ns, settled) else {
             self.apply_event(playlist_id, PlayEvent::SceneOff).await;
             return;
         };
