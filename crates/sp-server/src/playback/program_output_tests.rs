@@ -2,14 +2,14 @@
 //! forwarded source boundary and for its own standby pair, the per-boundary
 //! check timing, and the sender thread end to end on a settable clock. #215:
 //! a mixed window boundary (the crossfaded block, the blended picture — the
-//! outgoing one first fitted into the incoming layout when the two differ —
-//! a missing side as black + silence).
+//! outgoing one fitted into the incoming layout when the two differ, in any
+//! number of row bands (addendum 3) — a missing side as black + silence).
 //! Wired via `#[cfg(test)] #[path = "program_output_tests.rs"] mod tests;`.
 
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramBus, ProgramJob};
-use crate::playback::program_transition::{Layout, MixJob, crossfade_gains};
+use crate::playback::program_transition::{Layout, MAX_MIX_BANDS, MixJob, crossfade_gains};
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::wallclock::WallClock;
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
@@ -582,65 +582,72 @@ fn different_sizes_fit_the_outgoing_picture_into_the_incoming_layout_then_blend(
 fn a_window_builds_its_fit_plan_once_and_another_pair_of_layouts_builds_its_own() {
     // #215 addendum A: the fit's column taps are built once per window (one
     // pair of layouts), not once per boundary; a new pair builds a new plan
-    // (a stale one would fit into the wrong layout).
-    let (_backend, mut out) = output(2, 2);
-    let from = pair(4, &FROM_4X2, at(0), at(0), 0.25);
-    let wide = pair(8, &[7u8; 24], at(0), at(0), 0.5);
-    for slot in 0..9u32 {
-        let mix = mix_at(
-            at(slot as usize),
-            Some(from.clone()),
-            Some(wide.clone()),
-            slot,
-            9,
-        );
-        assert!(out.mix_picture(&mix).is_some());
-    }
-    assert_eq!(out.fit_plans, 1, "one plan for the whole 9-slot window");
-
-    // Another destination: 4×2 into 8×4.
-    let tall = SubmitJob {
-        height: 4,
-        video: SharedFrame::new(vec![7u8; 48]),
-        ..pair(8, &[], at(9), at(9), 0.5)
-    };
-    let (layout, picture) = out
-        .mix_picture(&mix_at(at(9), Some(from.clone()), Some(tall), 4, 9))
-        .expect("a picture");
-    assert_eq!(
-        layout,
-        Layout {
-            width: 8,
-            height: 4,
-            stride: 8,
-            len: 48,
+    // (a stale one would fit into the wrong layout). Addendum 3: the plan is
+    // all the sender keeps — the fused mix paints straight into the pooled
+    // output, with no fitted scratch — and the pictures are the same in
+    // every band count the sender may run.
+    for bands in 1..=MAX_MIX_BANDS {
+        let (_backend, mut out) = output(2, 2);
+        out.mix_bands = bands;
+        let from = pair(4, &FROM_4X2, at(0), at(0), 0.25);
+        let wide = pair(8, &[7u8; 24], at(0), at(0), 0.5);
+        for slot in 0..9u32 {
+            let mix = mix_at(
+                at(slot as usize),
+                Some(from.clone()),
+                Some(wide.clone()),
+                slot,
+                9,
+            );
+            assert!(out.mix_picture(&mix).is_some());
         }
-    );
-    assert_eq!(
-        picture.to_vec(),
-        vec![
-            12, 14, 18, 24, 32, 40, 49, 54, 26, 30, 37, 45, 53, 53, 45, 41, 54, 61, 76, 87, 96, 79,
-            37, 16, 68, 77, 95, 108, 117, 92, 33, 4, 68, 68, 63, 82, 54, 110, 49, 124, 68, 68, 63,
-            82, 54, 110, 49, 124
-        ],
-        "the 4×2 picture upscaled into 8×4, blended at weight ½"
-    );
-    assert_eq!(out.fit_plans, 2);
+        assert_eq!(out.fit_plans, 1, "one plan for the whole 9-slot window");
 
-    // Another source: a 6×2 picture into the first 8×2 layout.
-    let six = pair(6, &[50u8; 18], at(10), at(10), 0.25);
-    let (_, picture) = out
-        .mix_picture(&mix_at(at(10), Some(six), Some(wide), 4, 9))
-        .expect("a picture");
-    assert_eq!(
-        picture.to_vec(),
-        vec![
-            29, 29, 29, 29, 29, 29, 12, 12, 29, 29, 29, 29, 29, 29, 12, 12, 29, 29, 29, 29, 29, 29,
-            68, 68
-        ],
-        "6×2 kept at 6 columns (the odd 1-column offset rounds to 0), black past it"
-    );
-    assert_eq!(out.fit_plans, 3);
+        // Another destination: 4×2 into 8×4.
+        let tall = SubmitJob {
+            height: 4,
+            video: SharedFrame::new(vec![7u8; 48]),
+            ..pair(8, &[], at(9), at(9), 0.5)
+        };
+        let (layout, picture) = out
+            .mix_picture(&mix_at(at(9), Some(from.clone()), Some(tall), 4, 9))
+            .expect("a picture");
+        assert_eq!(
+            layout,
+            Layout {
+                width: 8,
+                height: 4,
+                stride: 8,
+                len: 48,
+            }
+        );
+        assert_eq!(
+            picture.to_vec(),
+            vec![
+                12, 14, 18, 24, 32, 40, 49, 54, 26, 30, 37, 45, 53, 53, 45, 41, 54, 61, 76, 87, 96,
+                79, 37, 16, 68, 77, 95, 108, 117, 92, 33, 4, 68, 68, 63, 82, 54, 110, 49, 124, 68,
+                68, 63, 82, 54, 110, 49, 124
+            ],
+            "the 4×2 picture upscaled into 8×4, blended at weight ½, in {bands} bands"
+        );
+        assert_eq!(out.fit_plans, 2);
+
+        // Another source: a 6×2 picture into the first 8×2 layout.
+        let six = pair(6, &[50u8; 18], at(10), at(10), 0.25);
+        let (_, picture) = out
+            .mix_picture(&mix_at(at(10), Some(six), Some(wide), 4, 9))
+            .expect("a picture");
+        assert_eq!(
+            picture.to_vec(),
+            vec![
+                29, 29, 29, 29, 29, 29, 12, 12, 29, 29, 29, 29, 29, 29, 12, 12, 29, 29, 29, 29, 29,
+                29, 68, 68
+            ],
+            "6×2 kept at 6 columns (the odd 1-column offset rounds to 0), black past it, \
+             in {bands} bands"
+        );
+        assert_eq!(out.fit_plans, 3);
+    }
 }
 
 #[test]

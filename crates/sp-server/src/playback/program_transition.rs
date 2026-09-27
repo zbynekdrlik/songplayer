@@ -12,11 +12,14 @@
 //!   ([`crossfade_gains`]), so the gain never steps at a boundary edge;
 //! - **video**: a per-pixel linear blend of the two NV12 frames at the
 //!   boundary's midpoint fraction α = (k + ½)/n, in integer Q8 math
-//!   ([`weight_q8`], [`blend_nv12_into`]). When the two pictures differ in
-//!   size or stride, the outgoing picture is first FITTED into the incoming
-//!   layout ([`FitPlan`], [`fit_nv12_into`]: bilinear, aspect kept, centred,
-//!   studio-black bars), so the picture dissolves whatever the catalog's
-//!   resolutions (#215 addendum A);
+//!   ([`weight_q8`]). When the two pictures differ in size or stride, the
+//!   outgoing picture is FITTED into the incoming layout ([`FitPlan`]:
+//!   bilinear, aspect kept, centred, studio-black bars), so the picture
+//!   dissolves whatever the catalog's resolutions (#215 addendum A). The fit
+//!   and the blend are ONE pass, split into row bands across threads
+//!   ([`mix_nv12_into`], the child module `nv12_mix.rs`, #215 addendum 3);
+//!   the two-pass form (`FitPlan::apply` then `blend_nv12_into`) is kept as
+//!   the test-only reference it is pinned against;
 //! - a side that is missing on a boundary (its source stalled past the fill
 //!   grace) is the standby: the black picture and silence. There is never a
 //!   hole.
@@ -54,6 +57,12 @@ use sp_ndi::AudioFrame;
 
 use crate::playback::nv12_fit::aspect_fit;
 use crate::playback::submit_handoff::SubmitJob;
+
+// #215 addendum 3: the fused, row-banded fit + blend — a child module, so it
+// reads `FitPlan`'s private rectangle and taps (1000-line cap).
+#[path = "nv12_mix.rs"]
+mod nv12_mix;
+pub use nv12_mix::{MAX_MIX_BANDS, Outgoing, mix_bands, mix_nv12_into};
 
 /// The longest window a transition may take: 300 slots (10 s at 30 fps). A
 /// longer OBS or configured duration is clamped to it.

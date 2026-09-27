@@ -3,7 +3,9 @@
 //! source's first live pair), the Q8 picture weight + NV12 blend, the NV12 fit
 //! of one layout into another, the equal-power gain curve and the audio mix.
 //! Exact values, so every arithmetic mutant dies (the fit's pins come from a
-//! scratch Python model of `FitPlan`).
+//! scratch Python model of `FitPlan`). The `blend` / `fitted` helpers also run
+//! the fused `mix_nv12_into` in every band count (#215 addendum 3), so each
+//! blend and fit pin pins it too; its own tests are in `nv12_mix_tests.rs`.
 //! Wired via `#[cfg(test)] #[path = "program_transition_tests.rs"] mod tests;`.
 
 use super::*;
@@ -183,9 +185,17 @@ fn the_picture_weight_is_the_slots_midpoint_fraction() {
 const FROM_4X2: [u8; 12] = [16, 32, 64, 100, 128, 200, 235, 0, 128, 128, 90, 240];
 const TO_4X2: [u8; 12] = [235, 16, 64, 101, 0, 255, 16, 255, 16, 240, 128, 128];
 
+/// The reference blend of FROM_4X2 over TO_4X2, and (#215 addendum 3) the
+/// fused mix of the same layout, in every band count, equal to it.
 fn blend(weight: u32) -> Vec<u8> {
     let mut out = Vec::new();
     blend_nv12_into(&FROM_4X2, &TO_4X2, weight, &mut out);
+    for bands in 1..=MAX_MIX_BANDS {
+        let mut fused = Vec::new();
+        let same = Outgoing::Same(L_4X2, &FROM_4X2);
+        mix_nv12_into(same, &TO_4X2, weight, bands, &mut fused);
+        assert_eq!(fused, out, "the fused mix in {bands} bands");
+    }
     out
 }
 
@@ -231,7 +241,10 @@ const fn tight(width: u32, height: u32) -> Layout {
     }
 }
 
-/// `src` of `src_layout` fitted into `dst`, checking that the fit appends.
+/// `src` of `src_layout` fitted into `dst`, checking that the fit appends,
+/// and (#215 addendum 3) that the fused mix at weight 0 — the outgoing
+/// picture alone, whatever the incoming one holds — draws the same bytes in
+/// every band count, so every fit pin below also pins the fused kernel.
 fn fitted(src: &[u8], src_layout: Layout, dst: Layout) -> Vec<u8> {
     let mut out = vec![9u8];
     fit_nv12_into(src, src_layout, dst, &mut out);
@@ -241,6 +254,12 @@ fn fitted(src: &[u8], src_layout: Layout, dst: Layout) -> Vec<u8> {
         "the fit appends after what the buffer holds"
     );
     assert_eq!(out.len(), dst.len, "exactly the destination's bytes");
+    let (plan, to) = (FitPlan::new(src_layout, dst), vec![0x5a; dst.len]);
+    for bands in 1..=MAX_MIX_BANDS {
+        let mut fused = Vec::new();
+        mix_nv12_into(Outgoing::Fitted(&plan, src), &to, 0, bands, &mut fused);
+        assert_eq!(fused, out, "the fused mix at weight 0 in {bands} bands");
+    }
     out
 }
 
