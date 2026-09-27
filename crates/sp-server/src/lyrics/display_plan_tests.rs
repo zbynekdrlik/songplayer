@@ -128,7 +128,7 @@ fn fits_allows_a_joined_text_of_at_most_64_chars() {
     // Chars, not bytes: 64 two-byte chars still fit.
     let sk = group(0, 1_000, &"č".repeat(31));
     assert!(fits(&sk, &group(1_000, 2_000, &"ž".repeat(32))));
-    // A tiny fragment is measured against its REAL neighbour, not itself.
+    // "Oh" next to a 62-char line: 2 + 1 + 62 = 65 chars do not fit.
     let tiny = group(0, 1_000, "Oh");
     assert!(!fits(&tiny, &group(1_000, 2_000, &"b".repeat(62))));
 }
@@ -282,6 +282,27 @@ fn a_merge_never_grows_a_wall_line_past_64_chars() {
     assert_eq!(fits_64.len(), 1);
     let over_64 = build_plan(&[line(0, 500, &a, ""), line(500, 1_000, &"b".repeat(33), "")]);
     assert_eq!(over_64.len(), 2);
+}
+
+#[test]
+fn a_whole_line_joins_its_lowercase_continuation() {
+    // The first line is long and wordy, but the next one starts lowercase
+    // mid-sentence, so the first is a fragment and takes it. The third line
+    // starts a new sentence and stays alone. Checking the lowercase rule on a
+    // line's OWN text would instead pair the continuation with the third.
+    let plan = build_plan(&[
+        line(0, 2_000, "Seated on the throne of grace", "a"),
+        line(2_000, 4_000, "and we give you the glory", "b"),
+        line(4_000, 6_000, "Holy is the Lord our God", "c"),
+    ]);
+    assert_eq!(
+        texts(&plan),
+        [
+            "Seated on the throne of grace and we give you the glory",
+            "Holy is the Lord our God"
+        ]
+    );
+    assert_eq!(plan[0].sk.as_deref(), Some("a b"));
 }
 
 #[test]
