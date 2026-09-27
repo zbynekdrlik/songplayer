@@ -294,3 +294,8 @@ the next line change, for the whole song, or over the next camera shot.
   `handle_command` stamps `Instant::now()`.
 - **Mount every route a push test PUTs to.** wiremock answers an unmatched
   request with 404, which the driver now reads as a stale id and refreshes.
+- **Fake title timers for a recovery test** (`tests_scene_change.rs`,
+  `recovery_title_commands`): a finished timer is `tokio::spawn(async {})`
+  awaited, then its `abort_handle()`; a pending one is
+  `tokio::spawn(std::future::pending::<()>()).abort_handle()`, aborted at the
+  test's end. `AbortHandle::is_finished` reads the task's COMPLETE bit.
