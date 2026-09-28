@@ -479,6 +479,72 @@ async fn one_switch_at_a_time_across_every_client() {
     assert_eq!(rig.bus.status().source, Some(7));
 }
 
+/// #221 review round 7: a manual press holds the switch order across its
+/// awaited forward ("OBS manuál" carries cg OBS's program, so a later press
+/// must not overtake it): another client's playlist press cannot even cut
+/// until cg OBS answered the manual one.
+#[tokio::test]
+async fn a_manual_press_holds_the_switch_order_until_cg_obs_answers() {
+    // cg OBS holds every switch; the facade would wait 10 minutes for it.
+    let (cmd_tx, calls, held) = spawn_holding_upstream();
+    let upstream_timeout = Duration::from_secs(600);
+    let rig = rig_on(
+        Some(cmd_tx),
+        calls,
+        None,
+        IDENTIFY_TIMEOUT,
+        upstream_timeout,
+    )
+    .await;
+    enable_input(&rig.pool, true).await;
+    let mut manual = connect(rig.addr).await;
+    hello_identify(&mut manual, 0).await;
+    let mut playlist = connect(rig.addr).await;
+    hello_identify(&mut playlist, 0).await;
+    let press_of = |id: &str, scene: &str| {
+        json!({ "op": 6, "d": {
+            "requestType": "SetCurrentProgramScene",
+            "requestId": id,
+            "requestData": { "sceneName": scene },
+        }})
+    };
+    send_json(&mut manual, press_of("manual", "Slido")).await;
+    wait_for("cg OBS holds the manual switch", || {
+        held.lock().unwrap().len() == 1
+    })
+    .await;
+    send_json(&mut playlist, press_of("playlist", "sp-fast")).await;
+    // The "not yet" window only errs in the safe direction.
+    let early = tokio::time::timeout(Duration::from_millis(200), next_json(&mut playlist)).await;
+    assert!(
+        early.is_err(),
+        "a press overtook a manual press still waiting for cg OBS"
+    );
+    assert_eq!(rig.bus.status().source, None);
+    let reply = held.lock().unwrap().pop().expect("the held manual switch");
+    let _ = reply.send(Some(
+        json!({ "requestStatus": { "result": true, "code": 100 } }),
+    ));
+    let answer = next_json(&mut manual).await;
+    assert_eq!(answer["d"]["requestId"], "manual");
+    assert_eq!(answer["d"]["requestStatus"]["code"], 100);
+    let answer = next_json(&mut playlist).await;
+    assert_eq!(answer["d"]["requestId"], "playlist");
+    assert_eq!(answer["d"]["requestStatus"]["code"], 100);
+    assert_eq!(rig.bus.status().source, Some(7));
+    wait_for(
+        "the playlist press is mirrored after the manual switch",
+        || {
+            rig.calls()
+                == [
+                    "SetCurrentProgramScene Slido",
+                    "SetCurrentProgramScene sp-fast",
+                ]
+        },
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn a_store_that_cannot_be_read_switches_nothing() {
     let rig = rig().await;
