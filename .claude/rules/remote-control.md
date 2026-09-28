@@ -346,6 +346,9 @@ authority and deleting the follow are the later lanes (L3–L6) of #221.
     the test's 10 s bound. Never prove it with a wall-time threshold.
   - The switch order: the test holds `bus.switch_order()`, sends a press,
     and requires NO answer for 200 ms (the safe direction), then releases.
+    `a_manual_press_holds_the_switch_order_until_cg_obs_answers` pins that
+    the lock spans a manual press's awaited forward: a second client's
+    playlist press cannot cut while cg OBS holds the manual switch.
 - `playback/program_switch_tests.rs`: `cg_forward_label`, the records, and
   `record_mirror` (its answer lands only on its own cut; an answer after the
   upstream timeout is still recorded, and the wait is bounded).
