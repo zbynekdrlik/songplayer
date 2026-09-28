@@ -1,12 +1,12 @@
 //! Tests for `playback/title.rs`: the formatter, the song's title clock
-//! (#217 addendum 3) and the title resync.
+//! (#217 addendum 3), the title timers' pushes and the title resync.
 
 use std::time::Duration;
 
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use super::{TitleClock, format_title_text, send_resync, title_text};
+use super::{TitleClock, format_title_text, push_hide, push_title, send_resync, title_text};
 use crate::obs::ObsCommand;
 use crate::resolume::ResolumeCommand;
 
@@ -39,7 +39,7 @@ fn ms(n: u64) -> Duration {
 #[test]
 fn a_title_clock_shows_1_5_s_after_the_start_and_hides_3_5_s_before_the_end() {
     let base = Instant::now();
-    let clock = TitleClock::new(42, base, 180_000);
+    let clock = TitleClock::new(42, base, 180_000, 0);
     assert_eq!(clock.video_id, 42);
     assert_eq!(clock.show_at, base + ms(1_500));
     assert_eq!(clock.hide_at, Some(base + ms(176_500)));
@@ -51,25 +51,73 @@ fn a_title_clock_shows_1_5_s_after_the_start_and_hides_3_5_s_before_the_end() {
 #[test]
 fn a_song_too_short_for_a_hide_timer_has_no_hide_point() {
     let base = Instant::now();
-    assert_eq!(TitleClock::new(42, base, 5_000).hide_at, None);
-    assert_eq!(TitleClock::new(42, base, 0).hide_at, None);
+    assert_eq!(TitleClock::new(42, base, 5_000, 0).hide_at, None);
+    assert_eq!(TitleClock::new(42, base, 0, 0).hide_at, None);
     assert_eq!(
-        TitleClock::new(42, base, 5_001).hide_at,
+        TitleClock::new(42, base, 5_001, 0).hide_at,
         Some(base + ms(1_501))
     );
+}
+
+/// Review round 4 (🔵): a resume hides 3.5 s before the song's REAL end,
+/// wherever it starts. A resume 5 s or less before the end has no window at
+/// all: its hide point is not after its show point (`shows`). Before, it had
+/// no hide point, so its title showed for the song's last seconds and
+/// stayed past its end. A song of 5 s or less still keeps its title to the
+/// end.
+#[test]
+fn a_resume_hides_3_5_s_before_the_real_end_or_shows_no_title() {
+    let base = Instant::now();
+    let resumed = TitleClock::new(42, base, 180_000, 60_000);
+    assert_eq!(resumed.hide_at, Some(base + ms(116_500)));
+    assert!(resumed.shows());
+
+    let last = TitleClock::new(42, base, 180_000, 174_999);
+    assert_eq!(last.hide_at, Some(base + ms(1_501)), "the last 1 ms window");
+    assert!(last.shows());
+
+    for start in [175_000, 177_000, 200_000] {
+        let clock = TitleClock::new(42, base, 180_000, start);
+        assert!(!clock.shows(), "{start}: no title window");
+        assert!(!clock.open_at(clock.show_at), "{start}: never due");
+    }
+    assert_eq!(
+        TitleClock::new(42, base, 180_000, 177_000).hide_at,
+        Some(base),
+        "the hide point is already past at the start"
+    );
+
+    let short = TitleClock::new(42, base, 5_000, 1_000);
+    assert_eq!(short.hide_at, None, "a 5 s song keeps its title to its end");
+    assert!(short.shows());
+}
+
+/// `shows` is strict: a hide point AT the show point leaves no window.
+#[test]
+fn a_clock_shows_a_title_only_when_its_hide_point_is_after_its_show_point() {
+    let base = Instant::now();
+    let clock = |hide_ms: Option<u64>| TitleClock {
+        video_id: 42,
+        show_at: base + ms(1_500),
+        hide_at: hide_ms.map(|hide_ms| base + ms(hide_ms)),
+    };
+    assert!(clock(None).shows(), "no hide point: to the end");
+    assert!(clock(Some(1_501)).shows(), "1 ms after the show point");
+    assert!(!clock(Some(1_500)).shows(), "at the show point: no window");
+    assert!(!clock(Some(0)).shows(), "before the show point: no window");
 }
 
 /// The window is `[show_at, hide_at)`: both sides of each boundary.
 #[test]
 fn the_title_window_is_open_from_the_show_point_until_the_hide_point() {
     let base = Instant::now();
-    let clock = TitleClock::new(42, base, 180_000);
+    let clock = TitleClock::new(42, base, 180_000, 0);
     assert!(!clock.open_at(base + ms(1_499)), "before the show point");
     assert!(clock.open_at(base + ms(1_500)), "from the show point");
     assert!(clock.open_at(base + ms(176_499)), "until the hide point");
     assert!(!clock.open_at(base + ms(176_500)), "from the hide point on");
 
-    let short = TitleClock::new(42, base, 5_000);
+    let short = TitleClock::new(42, base, 5_000, 0);
     assert!(
         short.open_at(base + ms(600_000)),
         "no hide point: open to the end"
@@ -111,20 +159,39 @@ async fn the_title_text_is_the_formatted_title_or_none() {
     assert_eq!(title_text(&pool, 99).await.unwrap(), None, "no row");
 }
 
-/// Review round 3 (🔵): cg OBS's command queue drains only while cg OBS is
-/// connected, and the resync runs on the engine loop. An awaited OBS send
-/// parked the whole engine behind a full queue. The OBS text is the fallback
-/// display: it is dropped when the queue is full, and the Resync goes out
-/// first either way.
-#[tokio::test]
-async fn a_full_obs_queue_never_holds_the_resync_back() {
-    let (obs_tx, _obs_rx) = mpsc::channel(1);
+/// cg OBS's command queue, full: one command in a channel of one. cg OBS
+/// drains it only while it is connected. Keep the receiver alive, or a send
+/// fails at once instead of waiting.
+fn full_obs_queue() -> (mpsc::Sender<ObsCommand>, mpsc::Receiver<ObsCommand>) {
+    let (obs_tx, obs_rx) = mpsc::channel(1);
     obs_tx
         .try_send(ObsCommand::SetTextSource {
             source_name: "#other".to_string(),
             text: String::new(),
         })
         .unwrap();
+    (obs_tx, obs_rx)
+}
+
+/// The OBS title text waiting on `rx`, if any.
+fn obs_title_text(rx: &mut mpsc::Receiver<ObsCommand>) -> Option<String> {
+    match rx.try_recv() {
+        Ok(ObsCommand::SetTextSource { source_name, text }) => {
+            assert_eq!(source_name, "#sp-title");
+            Some(text)
+        }
+        Ok(other) => panic!("expected the OBS title text, got {other:?}"),
+        Err(_) => None,
+    }
+}
+
+/// Review round 3 (🔵): the resync runs on the engine loop, and an awaited
+/// OBS send parked the whole engine behind a full cg OBS queue (the Resync
+/// itself already went first). The OBS text is the fallback display: it is
+/// dropped when the queue is full, never awaited.
+#[tokio::test]
+async fn a_resync_never_waits_on_a_full_obs_queue() {
+    let (obs_tx, _obs_rx) = full_obs_queue();
     let (resolume_tx, mut resolume_rx) = mpsc::channel(8);
 
     tokio::time::timeout(
@@ -142,9 +209,9 @@ async fn a_full_obs_queue_never_holds_the_resync_back() {
     }
 }
 
-/// The Resolume Resync goes first (the OBS send can stall while cg OBS is
-/// away), and the OBS text source follows it like the wall: the title when
-/// one is due, cleared when none is (as the song-end hide timer clears it).
+/// The Resolume Resync goes first, and the OBS text source follows it like
+/// the wall: the title when one is due, cleared when none is (as the
+/// song-end hide timer clears it).
 #[tokio::test]
 async fn a_resync_sets_or_clears_the_obs_title_text_too() {
     let (obs_tx, mut obs_rx) = mpsc::channel(8);
@@ -167,4 +234,85 @@ async fn a_resync_sets_or_clears_the_obs_title_text_too() {
             other => panic!("expected one SetTextSource, got {other:?}"),
         }
     }
+}
+
+/// Review round 4 (🟡): the show timer awaited the OBS text before the
+/// ShowTitle, and cg OBS's queue drains only while it is connected. With cg
+/// OBS away, the title never reached the wall. Resolume goes first, and the
+/// OBS text is dropped, never awaited.
+#[tokio::test]
+async fn a_full_obs_queue_never_holds_the_show_timer_s_title_back() {
+    let pool = song_pool().await;
+    let (obs_tx, _obs_rx) = full_obs_queue();
+    let (resolume_tx, mut resolume_rx) = mpsc::channel(8);
+
+    let pushed = tokio::time::timeout(
+        Duration::from_secs(5),
+        push_title(&pool, Some(&obs_tx), &resolume_tx, 42),
+    )
+    .await
+    .expect("the show timer does not wait for cg OBS");
+
+    assert!(pushed, "video 42 has a title");
+    match resolume_rx.try_recv() {
+        Ok(ResolumeCommand::ShowTitle { song, artist }) => {
+            assert_eq!((song.as_str(), artist.as_str()), ("Song", "Artist"));
+        }
+        other => panic!("expected the ShowTitle, got {other:?}"),
+    }
+}
+
+/// Review round 4 (🟡): the same for the hide timer. It awaited the OBS text
+/// before the HideTitle, so with cg OBS away the title stayed into the next
+/// song.
+#[tokio::test]
+async fn a_full_obs_queue_never_holds_the_hide_timer_s_hide_back() {
+    let (obs_tx, _obs_rx) = full_obs_queue();
+    let (resolume_tx, mut resolume_rx) = mpsc::channel(8);
+
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        push_hide(Some(&obs_tx), &resolume_tx),
+    )
+    .await
+    .expect("the hide timer does not wait for cg OBS");
+
+    assert!(
+        matches!(resolume_rx.try_recv(), Ok(ResolumeCommand::HideTitle)),
+        "the HideTitle went out"
+    );
+}
+
+/// With room in cg OBS's queue, the show timer sets OBS's title text and the
+/// hide timer clears it, each after Resolume's command. A video with no row
+/// pushes nothing.
+#[tokio::test]
+async fn the_title_timers_set_and_clear_the_obs_title_text() {
+    let pool = song_pool().await;
+    let (obs_tx, mut obs_rx) = mpsc::channel(8);
+    let (resolume_tx, mut resolume_rx) = mpsc::channel(8);
+
+    assert!(push_title(&pool, Some(&obs_tx), &resolume_tx, 42).await);
+    assert!(matches!(
+        resolume_rx.try_recv(),
+        Ok(ResolumeCommand::ShowTitle { .. })
+    ));
+    assert_eq!(
+        obs_title_text(&mut obs_rx).as_deref(),
+        Some("Song - Artist")
+    );
+
+    push_hide(Some(&obs_tx), &resolume_tx).await;
+    assert!(matches!(
+        resolume_rx.try_recv(),
+        Ok(ResolumeCommand::HideTitle)
+    ));
+    assert_eq!(obs_title_text(&mut obs_rx).as_deref(), Some(""));
+
+    assert!(
+        !push_title(&pool, Some(&obs_tx), &resolume_tx, 99).await,
+        "no row: no title"
+    );
+    assert!(resolume_rx.try_recv().is_err(), "nothing sent to Resolume");
+    assert_eq!(obs_title_text(&mut obs_rx), None, "nothing sent to OBS");
 }

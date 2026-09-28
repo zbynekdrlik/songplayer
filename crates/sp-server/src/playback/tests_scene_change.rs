@@ -189,7 +189,8 @@ enum Window {
     BeforeShow,
     /// Past the hide point (the song's last 3.5 s).
     AfterHide,
-    /// The clock is the previous song's: this one has not had its `Started`.
+    /// A clock of another video. Only a test builds one: every Play clears
+    /// the clock (`begin_play`), so `on_air_clock`'s video check is defensive.
     OtherSong,
     /// No song has started on this playlist yet.
     NotStarted,
@@ -308,11 +309,16 @@ async fn scene_go_on_refreshes_title_for_already_playing() {
 
 /// Design record 5859883842 item 3: the scene-on re-push applied no title
 /// window, so the wall showed a title outside it. A scene-on before the
-/// song's `Started` (the scene-on itself selected it), in its first 1.5 s, or
-/// in its last 3.5 s shows none.
+/// song's `Started` (the scene-on itself selected it: no clock yet), in its
+/// first 1.5 s, or in its last 3.5 s shows none.
 #[tokio::test]
 async fn scene_go_on_outside_the_title_window_pushes_no_title() {
-    for window in [Window::OtherSong, Window::BeforeShow, Window::AfterHide] {
+    for window in [
+        Window::NotStarted,
+        Window::OtherSong,
+        Window::BeforeShow,
+        Window::AfterHide,
+    ] {
         let (_engine, cmds) = after_scene_on(window).await;
         assert!(
             !shows_title(&cmds),
@@ -352,7 +358,9 @@ async fn a_scene_on_rearms_the_song_s_title_timers_for_what_is_ahead() {
 }
 
 /// The timers are armed only for an instant still AHEAD: at the show or
-/// hide instant itself, the recovery's clock already says so.
+/// hide instant itself, the recovery's clock already says so. (Review round
+/// 4: the "both ahead" clock hides an hour after its show point, since a
+/// hide point AT the show point is now a clock with no title window.)
 #[tokio::test]
 async fn title_timers_are_armed_only_for_instants_still_ahead() {
     let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
@@ -370,7 +378,7 @@ async fn title_timers_are_armed_only_for_instants_still_ahead() {
     engine.pipelines.get_mut(&7).unwrap().title_clock = Some(TitleClock {
         video_id: 42,
         show_at: now + hour,
-        hide_at: Some(now + hour),
+        hide_at: Some(now + 2 * hour),
     });
     engine.arm_title_timers(7, now);
     assert_eq!(timers(&engine), (true, true), "both ahead: both armed");
@@ -379,7 +387,8 @@ async fn title_timers_are_armed_only_for_instants_still_ahead() {
 
 /// Review round 2 (🔵): arming replaces the timers it finds, so a caller
 /// that did not cancel first never leaves an old timer to fire later (a stale
-/// HideTitle into the next song).
+/// HideTitle into the next song). (The clock hides an hour after its show
+/// point: review round 4, see above.)
 #[tokio::test]
 async fn arming_the_title_timers_aborts_the_ones_it_replaces() {
     let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
@@ -388,7 +397,7 @@ async fn arming_the_title_timers_aborts_the_ones_it_replaces() {
     engine.pipelines.get_mut(&7).unwrap().title_clock = Some(TitleClock {
         video_id: 42,
         show_at: now + hour,
-        hide_at: Some(now + hour),
+        hide_at: Some(now + 2 * hour),
     });
     engine.arm_title_timers(7, now);
     let pp = &engine.pipelines[&7];
@@ -594,9 +603,9 @@ async fn handle_resolume_recovery_names_no_title_for_an_off_program_song() {
 
 /// Design record 5859883842 root cause 2: a recovery between one song's end
 /// and the next song's `Started` showed the next song's title early (both
-/// timer handles were `None`, which read as "mid-song"). The clock is still
-/// the previous song's until the new one's `Started`, so the window stays
-/// closed.
+/// timer handles were `None`, which read as "mid-song"). Every Play clears
+/// the clock (`begin_play`) and the new `Started` fixes the next one, so the
+/// window stays closed until then.
 #[tokio::test]
 async fn handle_resolume_recovery_between_songs_shows_no_title() {
     for window in [Window::OtherSong, Window::NotStarted] {
@@ -632,6 +641,132 @@ async fn a_recovery_with_two_playlists_on_program_resyncs_one_title() {
         resyncs(&sent(&mut rx)),
         [Some("Song - Artist".to_string())],
         "only playlist 7's title is due"
+    );
+}
+
+/// Review round 4 (🔵): a resume 5 s or less before a song's end (177 s of
+/// 180 s) had no hide point, so its show timer put the title up for the
+/// song's last seconds and it stayed past the end. Its clock now has no
+/// title window: no timer is armed, and it is never due.
+#[tokio::test]
+async fn a_resume_too_near_the_end_arms_no_title_timer() {
+    let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::OtherSong);
+    engine.handle_play_video(7, 42, Some(SONG_MS - 3_000)).await;
+
+    engine
+        .handle_pipeline_event(
+            7,
+            PipelineEvent::Started {
+                duration_ms: SONG_MS,
+            },
+        )
+        .await;
+
+    let clock = engine.pipelines[&7].title_clock.expect("the song's clock");
+    assert!(!clock.shows(), "3 s left: no title window");
+    assert!(!clock.open_at(clock.show_at), "never due");
+    assert_eq!(timers(&engine), (false, false), "no timer armed");
+}
+
+/// A clock with no title window arms neither timer, even with both of its
+/// instants ahead: the show timer would put up a title the window never had.
+#[tokio::test]
+async fn a_clock_with_no_title_window_arms_no_timer() {
+    let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
+    let now = tokio::time::Instant::now();
+    let hour = std::time::Duration::from_secs(3600);
+    engine.pipelines.get_mut(&7).unwrap().title_clock = Some(TitleClock {
+        video_id: 42,
+        show_at: now + hour,
+        hide_at: Some(now + hour),
+    });
+    engine.arm_title_timers(7, now);
+    assert_eq!(timers(&engine), (false, false), "no window: no timer");
+    engine.pipelines.get_mut(&7).unwrap().cancel_title_timers();
+}
+
+/// Review round 4 (🔵): a Play drops the old song's clock and cancels its
+/// hide timer (`begin_play`), and the new song's show timer comes 1.5 s
+/// after its `Started`. The old song's title stayed up over that gap, and a
+/// recovery in it would have hidden it (the timers and a Resync disagreed).
+/// On program, every Play now re-syncs the wall at once: no title is due,
+/// so the old one goes down.
+#[tokio::test]
+async fn a_play_on_program_takes_the_old_song_s_title_down_at_once() {
+    for how in ["skip", "loop", "play video", "previous"] {
+        let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+        play(&mut engine, 7, 42, Window::Due);
+        if how == "loop" {
+            engine
+                .handle_command(7, PlayEvent::SetMode(PlaybackMode::Loop))
+                .await;
+        }
+        sent(&mut rx);
+        match how {
+            "skip" => engine.handle_command(7, PlayEvent::Skip).await,
+            "loop" => engine.handle_command(7, PlayEvent::VideoEnded).await,
+            "play video" => engine.handle_play_video(7, 42, None).await,
+            _ => {
+                engine.pipelines.get_mut(&7).unwrap().history.push_back(42);
+                engine.handle_previous(7).await;
+            }
+        }
+        assert_eq!(
+            resyncs(&sent(&mut rx)),
+            [None::<String>],
+            "{how}: one re-sync, naming no title"
+        );
+    }
+}
+
+/// Off program, a Play re-syncs nothing: that playlist's title is not on the
+/// wall.
+#[tokio::test]
+async fn a_play_off_program_sends_no_title_resync() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::Due);
+    engine.pipelines[&7]
+        .scene_active
+        .store(false, Ordering::Release);
+    sent(&mut rx);
+
+    engine.handle_play_video(7, 42, None).await;
+
+    let cmds = sent(&mut rx);
+    assert!(resyncs(&cmds).is_empty(), "no re-sync, got {cmds:?}");
+}
+
+/// Review round 3: a failed read of the DUE title sends nothing, so a
+/// transient DB error never hides a title mid-song.
+#[tokio::test]
+async fn a_failed_read_of_the_due_title_sends_no_resync() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::Due);
+    sent(&mut rx);
+    engine.pool.close().await;
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    let cmds = sent(&mut rx);
+    assert!(resyncs(&cmds).is_empty(), "nothing re-synced, got {cmds:?}");
+}
+
+/// Review rounds 3 and 4: a failed read of a title that is NOT due does not
+/// matter (it is logged): the wall is still re-synced, naming no title.
+#[tokio::test]
+async fn a_failed_read_of_a_title_not_due_still_resyncs_the_wall() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::BeforeShow);
+    sent(&mut rx);
+    engine.pool.close().await;
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    assert_eq!(
+        resyncs(&sent(&mut rx)),
+        [None::<String>],
+        "not due: the re-sync names no title"
     );
 }
 

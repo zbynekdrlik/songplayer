@@ -92,13 +92,13 @@ impl PlaybackEngine {
                 //    video on this playlist: a stale hide_title from a skipped
                 //    4-min song would fire 3.5s before that song's natural end
                 //    during the next song, clearing the title mid-playback.
-                //    A resume counts the time left from where it started.
+                //    A resume hides 3.5 s before the song's real end.
                 let now = tokio::time::Instant::now();
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-                    let play_ms = dur.saturating_sub(pp.play_start_ms);
+                    let start_ms = pp.play_start_ms;
                     pp.title_clock = pp
                         .current_video_id
-                        .map(|video_id| title::TitleClock::new(video_id, now, play_ms));
+                        .map(|video_id| title::TitleClock::new(video_id, now, dur, start_ms));
                 }
                 self.arm_title_timers(playlist_id, now);
             }

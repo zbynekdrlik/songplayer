@@ -4,7 +4,8 @@
 //! instants a recovery or a scene-on reads (`recovery.rs`), so a `Resync`
 //! never contradicts a timer. They used to be armed inline in the `Started`
 //! handler; they live here so a scene-on can re-arm them after a scene-off
-//! cancelled them.
+//! cancelled them. A Play drops the old song's clock and timers
+//! (`begin_play`) and re-syncs the wall (`resync_after_play`).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,7 +17,7 @@ use tokio::time::Instant;
 use tracing::{debug, info};
 
 use super::PlaybackEngine;
-use super::title::{self, OBS_TITLE_SOURCE};
+use super::title::{self, TitleClock};
 use crate::obs::ObsCommand;
 use crate::resolume::ResolumeCommand;
 
@@ -26,7 +27,9 @@ impl PlaybackEngine {
     /// show point is ahead, the hide timer while the hide point is. The
     /// timers it finds are cancelled first, so no old timer is left to fire.
     /// Called at the song's `Started` (both ahead) and by a scene-on
-    /// (`rearm_title_timers`).
+    /// (`rearm_title_timers`). A clock with no title window (a resume 5 s or
+    /// less before the end, `TitleClock::shows`) arms neither: its show
+    /// timer would put up a title the window never had (review round 4).
     pub(super) fn arm_title_timers(&mut self, playlist_id: i64, now: Instant) {
         let pool = self.pool.clone();
         let obs_cmd = self.obs_cmd_tx.clone();
@@ -35,7 +38,7 @@ impl PlaybackEngine {
             return;
         };
         pp.cancel_title_timers();
-        let Some(clock) = pp.title_clock else {
+        let Some(clock) = pp.title_clock.filter(TitleClock::shows) else {
             return;
         };
         if clock.show_at > now {
@@ -82,6 +85,15 @@ impl PlaybackEngine {
         }
         self.arm_title_timers(playlist_id, now);
     }
+
+    /// After a Play of `playlist_id` (review round 4): `begin_play` closed the
+    /// old song's title window and cancelled its hide timer, so on program
+    /// the wall is re-synced at once. The old song's title goes down now
+    /// (an instant hide), not when the new song's ShowTitle replaces it 1.5 s
+    /// after its `Started`. The timers and a `Resync` then never disagree
+    /// between the Play and the new `Started`. Off program the playlist's
+    /// title is not on the wall: nothing is sent.
+    pub(super) async fn resync_after_play(&self, _playlist_id: i64) {}
 }
 
 impl super::PlaylistPipeline {
@@ -121,9 +133,9 @@ fn spawn_show_timer(
     .abort_handle()
 }
 
-/// The hide timer: at `hide_at`, clear the OBS title text and hide the
-/// Resolume title.
-#[cfg_attr(test, mutants::skip)] // spawn glue on the real clock (see spawn_show_timer)
+/// The hide timer: at `hide_at`, hide the Resolume title and clear the OBS
+/// title text (`title::push_hide`).
+#[cfg_attr(test, mutants::skip)] // spawn glue on the real clock; push_hide is unit-tested
 fn spawn_hide_timer(
     obs_cmd: Option<mpsc::Sender<ObsCommand>>,
     resolume_tx: mpsc::Sender<ResolumeCommand>,
@@ -132,15 +144,7 @@ fn spawn_hide_timer(
 ) -> AbortHandle {
     tokio::spawn(async move {
         tokio::time::sleep_until(hide_at).await;
-        if let Some(cmd_tx) = obs_cmd {
-            let _ = cmd_tx
-                .send(ObsCommand::SetTextSource {
-                    source_name: OBS_TITLE_SOURCE.to_string(),
-                    text: String::new(),
-                })
-                .await;
-        }
-        let _ = resolume_tx.send(ResolumeCommand::HideTitle).await;
+        title::push_hide(obs_cmd.as_ref(), &resolume_tx).await;
         debug!(playlist_id, "title hidden");
     })
     .abort_handle()

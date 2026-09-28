@@ -132,6 +132,7 @@ impl PlaybackEngine {
         } else {
             warn!(playlist_id, video_id, "PlayVideo: no pipeline for playlist");
         }
+        self.resync_after_play(playlist_id).await;
     }
 
     /// Consume paused snapshot for `playlist_id`; `None` if never paused. #88.

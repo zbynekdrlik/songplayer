@@ -415,8 +415,9 @@ impl PlaybackEngine {
     /// a stale title. It goes through the same `Resync` as a recovery, with
     /// the song's title clock: a scene-on outside the window (a song that has
     /// not started yet, its first 1.5 s, its last 3.5 s) shows no title, and a
-    /// title that is already up is not faded again. Then the song's timers
-    /// are armed again for what is still ahead (#217 addendum 3).
+    /// title that is already up is not faded again. The song's timers are
+    /// armed again for what is still ahead, at the decision instant and
+    /// before the send (#217 addendum 3).
     async fn push_title_for_playing(&mut self, playlist_id: i64, video_id: i64) {
         // Re-arm at the decision's own instant, before the send: no await
         // between them, so the timers and the Resync never disagree about
@@ -618,6 +619,7 @@ impl PlaybackEngine {
                         transport: transport_from_play_state(&PlayState::Playing { video_id }),
                     });
                 }
+                self.resync_after_play(playlist_id).await;
             }
             Ok(None) => {
                 warn!(
@@ -817,6 +819,7 @@ impl PlaybackEngine {
                                         warn!(playlist_id, video_id, %e, "failed to record play");
                                     }
                                 }
+                                self.resync_after_play(playlist_id).await;
                             }
                             Ok(None) => {
                                 warn!(
@@ -839,6 +842,7 @@ impl PlaybackEngine {
             }
 
             PlayAction::ReplayCurrent => {
+                let mut played = false;
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     if let Some(video_id) = pp.current_video_id {
                         debug!(playlist_id, "replaying current video");
@@ -850,6 +854,7 @@ impl PlaybackEngine {
                                     audio: audio_path.into(),
                                     start_position_ms: None,
                                 });
+                                played = true;
                             }
                             Ok(None) => {
                                 warn!(playlist_id, video_id, "no song paths for replay");
@@ -859,6 +864,9 @@ impl PlaybackEngine {
                             }
                         }
                     }
+                }
+                if played {
+                    self.resync_after_play(playlist_id).await;
                 }
             }
 
