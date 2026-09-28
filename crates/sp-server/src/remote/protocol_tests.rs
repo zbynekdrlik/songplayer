@@ -575,3 +575,23 @@ fn a_transition_duration_is_validated_like_obs_websocket() {
         (401, 402)
     );
 }
+
+// ---- #221 L3: SP-program's own program scene -------------------------------
+
+#[test]
+fn get_current_program_scene_is_answered_from_sp_program() {
+    assert_eq!(route("GetCurrentProgramScene"), Route::GetProgramScene);
+    assert_eq!(
+        program_scene_data("sp-fast"),
+        json!({ "sceneName": "sp-fast", "currentProgramSceneName": "sp-fast" })
+    );
+    let nothing = nothing_on_program();
+    assert!(!nothing.succeeded());
+    assert_eq!(
+        nothing.status,
+        json!({ "result": false, "code": 604, "comment": "Nothing is on SP-program." })
+    );
+    assert_eq!(nothing.data, None);
+    // `EventSubscription::Transitions` (bit 4).
+    assert_eq!(EVENT_TRANSITIONS, 16);
+}

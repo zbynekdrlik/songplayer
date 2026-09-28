@@ -1223,6 +1223,9 @@ jobs:
           $seed = @{
             obs_websocket_url = "ws://localhost:4455"
             cache_dir = "C:\ProgramData\SongPlayer\cache"
+            # #221 L3: the post-deploy E2E switches scenes through SongPlayer's
+            # obs-websocket facade (Companion's path), so it is always on.
+            remote_ws_enabled = "true"
           }
           if ([string]::IsNullOrEmpty($current.gemini_api_key)) {
             $seed.gemini_api_key = $env:GEMINI_API_KEY
@@ -1258,6 +1261,26 @@ jobs:
             Write-Error "FAIL: obs_websocket_url not set"
             exit 1
           }
+          if ($current.remote_ws_enabled -ne "true") {
+            Write-Error "FAIL: remote_ws_enabled not set"
+            exit 1
+          }
+          # The settings task applies the setting within its 5 s poll; the
+          # E2E scene driver connects to the facade, so wait until it listens.
+          $listening = $false
+          for ($i = 1; $i -le 15; $i++) {
+            $program = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program" -TimeoutSec 10
+            if ($program.remote.listening) {
+              $listening = $true
+              break
+            }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $listening) {
+            Write-Error "FAIL: the remote-control facade is not listening on port $($program.remote.port) (error: $($program.remote.error))"
+            exit 1
+          }
+          Write-Host "OK: the remote-control facade listens on port $($program.remote.port)"
 
       - name: Seed Resolume host
         shell: powershell
@@ -1853,6 +1876,9 @@ jobs:
         shell: powershell
         env:
           SONGPLAYER_URL: http://localhost:8920
+          # #221 L3: the scene driver talks to SongPlayer's obs-websocket
+          # facade (Companion's path); cg OBS only records for the A/V gate.
+          FACADE_WS_URL: ws://localhost:4456
           OBS_WS_URL: ws://localhost:4455
           # #147 A/V sync + dropout gate (e2e/post-deploy-av-sync.spec.ts):
           # the Python that runs scripts/av_sync_check.py (numpy) and the

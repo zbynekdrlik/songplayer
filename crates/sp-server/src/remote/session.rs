@@ -1,5 +1,7 @@
 //! One remote-control client session (#213): the obs-websocket 5 handshake,
-//! requests + batches, and the re-emitted cg OBS events.
+//! requests + batches, cg OBS's re-emitted scene list, and (#221 L3) the
+//! facade's own events: SongPlayer's program feedback and the transition
+//! events (`studio_events`).
 //!
 //! Requests of one session run strictly in order — load-bearing since #221:
 //! a transition switches to the preview the same client set just before.
@@ -33,6 +35,7 @@ use super::protocol::{
     STATUS_GENERIC_ERROR, STATUS_MISSING_REQUEST_TYPE, STATUS_NOT_READY,
     STATUS_UNKNOWN_REQUEST_TYPE, Subprotocol,
 };
+use super::studio_events::{self, FacadeEvent};
 use super::{Facade, MAX_MESSAGE_BYTES, clip};
 use crate::obs::ObsEvent;
 use crate::playback::program_on_air::program_scene_name;
@@ -86,6 +89,7 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
     info!(%peer, "remote: client connected");
     let (mut write, mut read) = ws.split();
     let mut events = facade.upstream.subscribe();
+    let mut own_events = facade.events.subscribe();
     let mut session = Session {
         facade: &facade,
         auth: facade.password.as_ref().map(|_| AuthChallenge::random()),
@@ -116,6 +120,18 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
                 }
                 Ok(_) => {}
                 Err(RecvError::Lagged(n)) => warn!(%peer, n, "remote: the client missed cg OBS events"),
+                Err(RecvError::Closed) => break,
+            },
+            // #221 L3: SongPlayer's own program feedback and transition events.
+            event = own_events.recv() => match event {
+                Ok(event) => {
+                    if let Some(msg) = session.own_event(&event)
+                        && send(&mut write, &msg).await.is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(RecvError::Lagged(n)) => warn!(%peer, n, "remote: the client missed SongPlayer's own events"),
                 Err(RecvError::Closed) => break,
             },
             _ = tokio::time::sleep_until(identify_deadline), if !session.identified => {
@@ -289,6 +305,11 @@ impl Session<'_> {
                 Ok(scene) => switch(facade, &scene, Via::Program).await,
                 Err(reply) => reply,
             },
+            // #221 L3: SP-program's scene, never cg OBS's.
+            Route::GetProgramScene => match program_scene_name(&facade.bus.on_air_now()) {
+                Some(scene) => Reply::ok(Some(protocol::program_scene_data(&scene))),
+                None => protocol::nothing_on_program(),
+            },
             Route::SetPreviewScene => match protocol::scene_name(data) {
                 Ok(scene) => self.set_preview(scene, events),
                 Err(reply) => reply,
@@ -361,6 +382,13 @@ impl Session<'_> {
         protocol::subscribed(self.subscriptions, intent)
             .then(|| protocol::event(event_type, intent, data))
     }
+
+    /// #221 L3: the `Event` for one of the facade's own events, when this
+    /// client subscribed to its intent.
+    pub(crate) fn own_event(&self, event: &FacadeEvent) -> Option<Value> {
+        protocol::subscribed(self.subscriptions, event.intent)
+            .then(|| protocol::event(event.event_type, event.intent, &event.data))
+    }
 }
 
 /// Forward one request to cg OBS and pass its answer through.
@@ -374,7 +402,9 @@ async fn forward(facade: &Facade, request_type: &str, data: Option<Value>) -> Re
 /// A scene press through the ONE switch path (`program_switch`), answered the
 /// obs-websocket way: 100 for a cut or a kept program, cg OBS's own answer
 /// when it refused a manual scene, 207 when it was not reachable, 205 when
-/// the store failed.
+/// the store failed. #221 L3: a cut is announced as a transition
+/// (`SceneTransitionStarted`, then `SceneTransitionEnded` once the window is
+/// served).
 async fn switch(facade: &Facade, scene: &str, via: Via) -> Reply {
     let ctx = SwitchCtx {
         pool: &facade.pool,
@@ -382,7 +412,11 @@ async fn switch(facade: &Facade, scene: &str, via: Via) -> Reply {
         upstream: &facade.upstream,
     };
     match switch_scene(&ctx, scene, via).await {
-        Switched::Cut | Switched::Kept => Reply::ok(None),
+        Switched::Cut => {
+            studio_events::announce_transition(&facade.bus, &facade.events);
+            Reply::ok(None)
+        }
+        Switched::Kept => Reply::ok(None),
         Switched::NotSwitched(Some(d)) => Reply::from_upstream(&d),
         Switched::NotSwitched(None) => Reply::error(STATUS_NOT_READY, NOT_READY_COMMENT),
         Switched::StoreFailed(e) => Reply::error(

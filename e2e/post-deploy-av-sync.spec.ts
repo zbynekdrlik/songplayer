@@ -22,10 +22,13 @@
  *
  * OBS discipline (CLAUDE.md): the program goes to the shared baseline scene
  * (sp-slow preferred, never sp-warmup/sp-fast). The scene the operator was on
- * is captured first and restored after. Every recording file (plus its
- * auto-remux sibling) is deleted, and an operator's own running recording is
- * never touched (`startRecord` refuses). The SONG mixer faders are set to
- * unity for the measurement and restored after.
+ * is captured first and restored after. #221 L3: scenes are switched through
+ * SongPlayer's obs-websocket facade (`FACADE_WS_URL`, Companion's exact
+ * studio-mode path: preview + transition, SongPlayer's own program feedback);
+ * the recording and the profile read stay on cg OBS (`OBS_WS_URL`). Every
+ * recording file (plus its auto-remux sibling) is deleted, and an operator's
+ * own running recording is never touched (`startRecord` refuses). The SONG
+ * mixer faders are set to unity for the measurement and restored after.
  *
  * Evidence: a take that was analysed and did NOT pass (fail, cannot_measure,
  * an analysis error) is copied first, with its auto-remux sibling, the
@@ -42,9 +45,11 @@
  * - then deletes every recording made.
  * Every step is attempted even if an earlier one fails.
  *
- * Box paths (override via env): `SP_AVSYNC_PYTHON` = a Python with numpy (the
- * lyrics venv), `SP_FFMPEG` = the app's bundled ffmpeg. There is no ffprobe on
- * the box, and the script does not need one.
+ * Box paths (override via env): `SP_AVSYNC_PYTHON` = the gate's OWN venv with
+ * pinned numpy (#221: created by the CI post-deploy step; never the lyrics
+ * venv, whose packages SongPlayer may reinstall at startup), `SP_FFMPEG` = the
+ * app's bundled ffmpeg. There is no ffprobe on the box, and the script does
+ * not need one.
  */
 
 import {
@@ -72,10 +77,12 @@ import {
 } from "./av-sync-gate";
 
 const SONGPLAYER_URL = process.env.SONGPLAYER_URL || "http://localhost:8920";
+// #221 L3: scene switches go through SongPlayer's facade; cg OBS only records.
+const FACADE_WS_URL = process.env.FACADE_WS_URL || "ws://localhost:4456";
 const OBS_WS_URL = process.env.OBS_WS_URL || "ws://localhost:4455";
 const PYTHON =
   process.env.SP_AVSYNC_PYTHON ||
-  "C:\\ProgramData\\SongPlayer\\cache\\tools\\lyrics_venv\\Scripts\\python.exe";
+  "C:\\ProgramData\\SongPlayer\\e2e\\avsync_venv\\Scripts\\python.exe";
 const FFMPEG = process.env.SP_FFMPEG || "C:\\ProgramData\\SongPlayer\\cache\\tools\\ffmpeg.exe";
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "av_sync_check.py");
 
@@ -169,7 +176,9 @@ async function removeRecording(
 }
 
 test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
-  let obs: ObsDriver | null = null;
+  // The scene driver (SongPlayer's facade) and the recorder (cg OBS).
+  let scenes: ObsDriver | null = null;
+  let recorder: ObsDriver | null = null;
   let initialScene: string | null = null;
   let autoRemux = false;
   // Cleanup state shared with afterAll. A timed-out test body never reaches
@@ -230,9 +239,10 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   }
 
   test.beforeAll(async () => {
-    obs = await ObsDriver.connect(OBS_WS_URL);
-    initialScene = await obs.currentProgramScene();
-    autoRemux = await obs.autoRemuxEnabled();
+    scenes = await ObsDriver.connect(FACADE_WS_URL);
+    recorder = await ObsDriver.connect(OBS_WS_URL);
+    initialScene = await scenes.currentProgramScene();
+    autoRemux = await recorder.autoRemuxEnabled();
   });
 
   test.afterAll(async () => {
@@ -240,8 +250,13 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     // Worst case: start settle 10 + stop 10 + faders/scene ~10 + deleting up
     // to MAX_TAKES+1 recordings (15 s remux wait + 2 x 10 s busy retries).
     test.setTimeout(180_000);
-    const driver = obs;
-    if (!driver) return;
+    const driver = scenes;
+    const rec = recorder;
+    if (!driver || !rec) {
+      await driver?.disconnect();
+      await rec?.disconnect();
+      return;
+    }
     const errors: string[] = [];
     const step = async (what: string, fn: () => Promise<void>) => {
       try {
@@ -269,14 +284,14 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         if (settled === "pending") {
           // The call never answered, but it was SENT after the pre-check proved
           // no operator recording was running: an active recording is ours.
-          if (driver.startIssued && (await driver.isRecording())) ours = true;
+          if (rec.startIssued && (await rec.isRecording())) ours = true;
           throw new Error("StartRecord did not settle within 10 s");
         }
       });
       // Paths stopped HERE have not been remuxed yet: wait for their sibling.
       const stoppedHere: string[] = [];
       await step("stop our recording", async () => {
-        if (ours && (await driver.isRecording())) stoppedHere.push(await driver.stopRecord());
+        if (ours && (await rec.isRecording())) stoppedHere.push(await rec.stopRecord());
       });
       // Restore the operator's wall BEFORE the slow file deletion, so a hook
       // that runs out of time never leaves the program on the baseline.
@@ -299,7 +314,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       });
       await step("delete the recordings", async () => {
         // A StopRecord whose inactive-poll timed out still left its path.
-        const last = driver.lastRecordingPath;
+        const last = rec.lastRecordingPath;
         if (ours && last && !madeRecordings.includes(last) && !stoppedHere.includes(last)) {
           stoppedHere.push(last);
         }
@@ -314,6 +329,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       });
     } finally {
       await driver.disconnect();
+      await rec.disconnect();
     }
     expect(errors, "A/V gate cleanup").toEqual([]);
   });
@@ -323,8 +339,10 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   }, testInfo) => {
     test.setTimeout(TEST_TIMEOUT_MS);
     const testStart = Date.now();
-    expect(obs, "OBS WebSocket driver must be connected").not.toBeNull();
-    const driver = obs!;
+    expect(scenes, "the facade's scene driver must be connected").not.toBeNull();
+    expect(recorder, "cg OBS's recording driver must be connected").not.toBeNull();
+    const driver = scenes!;
+    const rec = recorder!;
     for (const [label, p] of [
       ["analysis script", SCRIPT],
       ["python (SP_AVSYNC_PYTHON)", PYTHON],
@@ -409,14 +427,14 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
 
         // 4. Record the PROGRAM.
         assertNotTornDown("a recording");
-        startInFlight = driver.startRecord();
+        startInFlight = rec.startRecord();
         await startInFlight;
         startInFlight = null;
         recordingOurs = true;
         // afterAll may have begun while OBS was starting: leave the stop to it.
         assertNotTornDown("the recording wait");
         await sleep(RECORD_MS);
-        const recording = await driver.stopRecord();
+        const recording = await rec.stopRecord();
         madeRecordings.push(recording);
         recordingOurs = false;
         const after = await currentVideo();

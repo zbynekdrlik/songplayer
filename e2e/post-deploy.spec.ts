@@ -15,10 +15,13 @@
  *     "Nothing playing" to a visible song/artist display. This catches
  *     issue #9 (server never broadcast ServerMsg::NowPlaying).
  *
- *  3. Switching the OBS program scene to a matching `sp-*` scene via
+ *  3. Switching the program scene to a matching `sp-*` scene via
  *     obs-websocket-js must kick off scene-driven playback — SongPlayer
  *     must detect the NDI source in the scene and start the pipeline.
- *     This catches issue #11 (ndi_sources map was empty).
+ *     This catches issue #11 (ndi_sources map was empty). #221 L3: the
+ *     driver talks to SongPlayer's obs-websocket facade (`FACADE_WS_URL`),
+ *     so its studio-mode branch (preview + transition, SongPlayer's own
+ *     program feedback and transition events) is Companion's exact path.
  *
  *  4. Switching back to a non-fast baseline scene must stop ytfast
  *     playback and return the card to "Nothing playing".
@@ -42,7 +45,8 @@ import {
   type UnhealthyOutput,
 } from "./ndi-health-gate";
 
-const OBS_WS_URL = process.env.OBS_WS_URL || "ws://localhost:4455";
+// #221 L3: SongPlayer's obs-websocket facade (the Companion remote control).
+const FACADE_WS_URL = process.env.FACADE_WS_URL || "ws://localhost:4456";
 const SONGPLAYER_URL = process.env.SONGPLAYER_URL || "http://localhost:8920";
 
 // #170: read the ENGINE's view of the on-program scene (`obs_state.current_scene`)
@@ -152,7 +156,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   let initialScene: string | null = null;
 
   test.beforeAll(async () => {
-    obs = await ObsDriver.connect(OBS_WS_URL);
+    obs = await ObsDriver.connect(FACADE_WS_URL);
     try {
       initialScene = await obs.currentProgramScene();
     } catch {
