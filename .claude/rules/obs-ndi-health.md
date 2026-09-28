@@ -2,6 +2,7 @@
 paths:
   - "crates/sp-server/src/obs/**"
   - "crates/sp-server/src/obs_bridge.rs"
+  - "crates/sp-server/tests/common/mod.rs"
   - "crates/sp-server/tests/scene_lookup_failure.rs"
   - "crates/sp-server/tests/obs_snapshot_follow.rs"
   - "crates/sp-server/src/playback/ndi_health.rs"
@@ -279,7 +280,12 @@ only) never repaired it.
   newer scene lookup already answered`). The `SceneChanged` is sent inside
   that closure, under the write lock, so the engine gets the scene changes in
   write order. A dropped relookup costs one poll tick (the next one asks
-  again). Tests: `a_poll_read_an_event_overtook_never_rolls_the_scene_back`
+  again). The limit: tickets follow the order the READER sees things, not
+  the order cg OBS did them — an event cg OBS sent before answering a read
+  but that the reader reads after the read's ticket still outranks the read
+  (same or older state); that is stale only if cg OBS then drops the newer
+  event (#170), and the poll's mismatch path repairs it in ~3–5 s.
+  Tests: `a_poll_read_an_event_overtook_never_rolls_the_scene_back`
   (the fake's `hold_program_scene` / `hold_lookups_of` + `release_held`: a
   held answer must stay under the client's 2 s response timeout) and
   `an_event_queued_during_the_connect_never_overrides_the_initial_read` (the
@@ -288,6 +294,11 @@ only) never repaired it.
   transition reader's `Notify` itself (a burst merges into one read and
   never blocks the reader, whose `reader_rx` is not drained during the
   connect).
+- **The connection's helper tasks are reaped (review round 4):** every
+  helper goes through `spawn_helper(&mut spawned_tasks, …)`, which first
+  `try_join_next`s the finished ones (a `JoinSet` keeps a finished task until
+  joined, and the ~2 s poll alone spawns ~43 000 a day) and WARNs a helper
+  that panicked. Never call `spawned_tasks.spawn` directly.
 - The ~2 s poll repairs it: `scene_poll_verdict(last, lookup_failed, polled,
   …)` → `PollVerdict::Relookup(scene)` when cg OBS still shows the stored
   scene and its lookup failed — looked up again on that tick (no confirm

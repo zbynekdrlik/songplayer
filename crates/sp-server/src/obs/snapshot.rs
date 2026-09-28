@@ -92,11 +92,14 @@ impl ObsShared {
 
     /// A ticket for one scene apply, taken BEFORE the information it applies
     /// was read: the reader takes an event's the moment it reads it off the
-    /// wire (in cg OBS's order, even while the connection loop is still
-    /// connecting); the poll and the initial read take theirs before asking
-    /// cg OBS for its program scene. So a later event always outranks a read
-    /// that answered before it, and an earlier one never outranks it. The
-    /// disconnect reset takes one too. See [`Self::update_scene`].
+    /// wire (even while the connection loop is still connecting); the poll
+    /// and the initial read take theirs before asking cg OBS for its program
+    /// scene. So an event read after a read's ticket outranks that read, and
+    /// one read before it never does. An event that crosses a read on the
+    /// wire (cg OBS sent it before answering) still outranks the read with the
+    /// same or older state — stale only if cg OBS then drops the newer event,
+    /// which the #170 poll's mismatch path repairs. The disconnect reset
+    /// takes a ticket too. See [`Self::update_scene`].
     pub(crate) fn scene_ticket(&self) -> u64 {
         self.scene_order.issued.fetch_add(1, Ordering::SeqCst) + 1
     }

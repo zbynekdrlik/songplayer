@@ -430,7 +430,8 @@ unanswered-catch-up gap it had is gone by construction.
     when connected, named and NOT `lookup_failed`; `Unknown` when
     disconnected or not named yet; `LookupFailed` when the client's playlist
     lookup failed (#218 — its `active_playlist_ids` then belong to an EARLIER
-    scene). The `lookup_failed` check comes FIRST;
+    scene). The order of the checks: not connected → `Unknown` first, then
+    `lookup_failed` → `LookupFailed`, then the scene;
   - a `Known` scene is followed (when `program_follow_obs` is on) only when
     it differs from `seen`, the last known scene (name AND playlists). A
     snapshot that changes only the transition cuts nothing, so a manual

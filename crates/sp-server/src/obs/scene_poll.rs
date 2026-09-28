@@ -45,8 +45,8 @@ pub(crate) async fn reconcile_program_scene(
     pending: &Mutex<Option<(String, Instant)>>,
 ) {
     // The ticket is taken BEFORE cg OBS is asked (review round 2): an event
-    // that arrives after this read is newer than whatever it answers, so its
-    // apply must outrank this one's (`ObsShared::update_scene`).
+    // read after this point outranks this read's apply, so a stale answer
+    // never rolls a newer event back (`ObsShared::scene_ticket`).
     let ticket = obs.scene_ticket();
     let req_id = uuid::Uuid::new_v4().to_string();
     let req = get_current_scene_request(&req_id);

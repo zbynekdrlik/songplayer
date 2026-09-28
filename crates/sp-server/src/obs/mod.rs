@@ -831,11 +831,21 @@ async fn connect_and_run(
     result
 }
 
-/// Spawn one of the connection's helper tasks into `tasks` (review round 4).
+/// Spawn one of the connection's helper tasks into `tasks`, first reaping the
+/// finished ones (review round 4): a `JoinSet` keeps a finished task until it
+/// is joined, and the connection loop never joins (its ~2 s scene poll alone
+/// spawns ~43 000 helpers a day). A helper that panicked is logged here.
 fn spawn_helper(
     tasks: &mut JoinSet<()>,
     task: impl std::future::Future<Output = ()> + Send + 'static,
 ) {
+    while let Some(done) = tasks.try_join_next() {
+        if let Err(e) = done
+            && !e.is_cancelled()
+        {
+            warn!("OBS helper task failed: {e}");
+        }
+    }
     tasks.spawn(task);
 }
 
