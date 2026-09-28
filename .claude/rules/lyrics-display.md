@@ -130,7 +130,10 @@ one only together with the design record on #217.
   4.8 s late, and before a break over 8 s the last "Hey!" got
   `show > hide` and was never shown.
   - Now every `Song` line shows at most 400 ms after its sung start, and
-    `hide > show` always. The chant's lines are up for 400–1200 ms each,
+    `hide > show` whenever the display lines' sung starts strictly
+    increase. (Display lines starting at the SAME ms — only possible with
+    unsanitized overlapping ★-tier mtl times — can leave the middle one at
+    zero length.) The chant's lines are up for 400–1200 ms each,
     and the sentence after it shows 400 ms late
     (`a_chant_of_short_sentences_falls_at_most_400_ms_behind`).
   - Four sentences 1 s apart still show −800, 0, +200 and +400 ms

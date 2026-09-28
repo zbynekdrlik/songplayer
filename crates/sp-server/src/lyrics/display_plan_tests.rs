@@ -427,7 +427,7 @@ fn a_line_leads_only_into_a_pause_after_the_previous_one() {
 }
 
 #[test]
-fn a_line_stays_1200_ms_on_the_wall_even_when_the_next_is_sung_sooner() {
+fn a_line_stays_1200_ms_when_that_holds_the_next_at_most_400_ms() {
     // "What a God, what a God." twice at 0.3 s each ("What A God" lines 29
     // and 30). The second waits until the first has been up for 1200 ms,
     // 100 ms after it starts being sung. The text is the same.
