@@ -37,9 +37,15 @@ named 'numpy.fft'` while pip replaced it (CI run 36475215084).
   180 s. After the budget: still `Timeout` → `UseAsIs` (the venv is used as
   it is — a timeout NEVER triggers the torch force-reinstall); any other
   failure → install (the CUDA repair of a CPU-only torch).
+- The loop is `for probes in 1..=MAX_PROBES` (12) and breaks on the cap or
+  the budget BEFORE it pauses (review round 1): a loop that ends only on a
+  comparison can be made to spin by one mutant (`>` → `==` never equals the
+  budget; a halved pause shrinks to 0), and a hang fails the mutation gate
+  like a survivor.
 - Tests run `decide` on a paused clock with a scripted probe
   (`bootstrap_probe_tests.rs`); the exact-budget boundary is pinned with a
-  custom plan (135 vs 134 s).
+  custom plan (135 vs 134 s), the cap with a one-day budget (12 probes,
+  495 s).
 
 ## Reading the box log after a restart
 

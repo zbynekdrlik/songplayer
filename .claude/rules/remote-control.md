@@ -488,19 +488,27 @@ follow are the later lanes (L4a–L6) of #221.
   playlist on `SP-program` paused (`cg_forward` says so).
 - Hand switches in cg OBS's own UI are invisible to the facade (no cg
   tracking, by the owner's ruling): the next press decides.
-- **The post-deploy E2E restore when SP-program is "OBS manuál" with NO
-  scene** (L3, found in the lane, for the main session). A SongPlayer
-  restart restores a persisted -1 without a scene (`scene_of_source` has
-  none for the input), so after a deploy while an operator's manual scene
-  was on, the facade names the program "OBS manuál". The E2E then captures
-  that as its initial scene; its restore presses "OBS manuál" (a keep, no
-  transition event, while the input is off — the box had it off on 28.9),
-  the driver's transition wait times out, and `post-deploy.spec.ts`'s
-  `afterAll` engine check (`active_scene`, cg OBS's scene until L4b) sees
-  cg OBS's scene instead. Not hit while a playlist is on program (the box:
-  source 7). The cutover (input on) and L4b (`active_scene` = the resolver)
-  remove the mismatch; reading cg OBS for the initial scene would contradict
-  the dispatch (the cg driver is for the recording only).
+- **Until the cutover / L4b the E2E's "scene to restore" is SP-program's,
+  not the wall's** (L3 + review round 1, for the main session). The E2E
+  captures its initial scene from the facade (the dispatch: the cg driver is
+  for the recording only), but cg OBS's program — what the wall, FOH, lv1
+  and strih take — can differ from SP-program's name:
+  - cg OBS on a manual scene while "OBS manuál" is off: the follow keeps the
+    last playlist on SP-program (box 28.9: the input was off);
+  - a manual → manual change in cg OBS: the follow publishes nothing, so
+    SP-program still names the first manual scene;
+  - a restart while a manual scene was on: -1 is restored with NO scene, so
+    the facade names it "OBS manuál" (a keep while the input is off: no
+    transition event, the driver's wait times out, and `post-deploy.spec.ts`
+    `afterAll`'s engine check, cg OBS's `active_scene` until L4b, fails).
+
+  In the first two the E2E's restore presses SP-program's scene, and the
+  mirror leaves cg OBS — the wall — on it instead of the operator's manual
+  scene. Not hit while a playlist is on program (the box: source 7). The
+  driver's old same-scene skip made it worse (a baseline press the facade
+  already named never re-mirrored cg OBS) and was removed in round 1; the
+  rest needs either the cutover + L4b, or a read-only initial scene from cg
+  OBS until then — a decision for the main session.
 
 ## Box acceptance (the supervisor's job)
 

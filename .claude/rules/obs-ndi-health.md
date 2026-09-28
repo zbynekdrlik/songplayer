@@ -600,7 +600,10 @@ and the recording actually get.
   numpy replaced mid-analysis failed CI run 36475215084 (`No module named
   'numpy.fft'`). The E2E step "Prepare the A/V gate's own Python (#221)"
   creates the venv once and verifies it every run (numpy pinned to the
-  Eval Checks version, 2.1.1; `av_sync_check.py --help` must start). A new
+  Eval Checks version, 2.1.1; `av_sync_check.py --help` must start and
+  `import numpy, numpy.fft` must succeed: numpy 2 loads `numpy.fft` lazily
+  and the scripts use it only inside functions, so `--help` alone never
+  imports it; `C:\Program Files\Python312` is required, no PATH fallback). A new
   import in `av_sync_check.py` / `av_sync_drift.py` / `av_sync_warp.py`
   must be added to that step AND to the Eval Checks pip line. The box has
   no ffprobe, so stream start times and frame sizes come from ffmpeg's own
