@@ -894,3 +894,31 @@ async fn a_started_after_a_failed_selection_still_starts_the_song() {
         "its Started fixed the song's title clock"
     );
 }
+
+/// Review round 6 (🔵): a ▶ took the pause's resume point BEFORE looking the
+/// song up. When the lookup failed (the row gone, the song re-normalizing),
+/// no Play went out and the pipeline stayed paused, but the resume point was
+/// gone: a queued `Started` of the Play the pause overtook then armed the
+/// title timers of a paused song. A failed resume keeps the resume point.
+#[tokio::test]
+async fn a_failed_resume_keeps_the_pause_s_resume_point() {
+    let mut rig = rig().await;
+    let clock = playing(&mut rig.engine);
+    rig.engine.handle_command(OUT, PlayEvent::SceneOff).await; // paused
+    sqlx::query("DELETE FROM videos WHERE playlist_id = ?")
+        .bind(OUT)
+        .execute(&rig.engine.pool)
+        .await
+        .unwrap();
+
+    rig.engine.handle_engine_play(OUT).await; // ▶: the song lookup fails
+
+    assert_eq!(
+        out(&rig.engine).paused_at,
+        Some((SONG, AT_MS)),
+        "still paused: the resume point stays"
+    );
+    started(&mut rig.engine).await; // the overtaken Play's Started
+    assert_eq!(out(&rig.engine).title_clock, Some(clock), "no new clock");
+    assert_eq!(timers(&rig.engine), (false, false), "no timer");
+}
