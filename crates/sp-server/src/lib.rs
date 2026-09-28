@@ -273,14 +273,18 @@ pub async fn start(
         sqlx::query("SELECT id, host, port FROM resolume_hosts WHERE is_enabled = 1")
             .fetch_all(&pool)
             .await?;
-    let mut resolume_registry_mut = resolume::ResolumeRegistry::new();
-    for row in &resolume_rows {
-        let host_id: i64 = row.get("id");
-        let host: String = row.get("host");
-        let port: i32 = row.get("port");
-        resolume_registry_mut.add_host(host_id, host, port as u16, shutdown_tx.subscribe());
-    }
-    let resolume_registry = Arc::new(resolume_registry_mut);
+    let resolume_hosts: Vec<(i64, String, u16)> = resolume_rows
+        .iter()
+        .map(|row| {
+            let port: i32 = row.get("port");
+            (row.get("id"), row.get("host"), port as u16)
+        })
+        .collect();
+    let resolume_registry = Arc::new(playback::recovery::registry_with_forwarder(
+        resolume_hosts,
+        engine_tx.clone(),
+        &shutdown_tx,
+    ));
 
     let state = AppState {
         pool: pool.clone(),

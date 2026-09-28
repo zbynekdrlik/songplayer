@@ -67,6 +67,37 @@ async fn the_forwarder_survives_a_lag_and_stops_when_the_channel_closes() {
     drop(shutdown_tx); // alive until here: the close, not shutdown, ended it
 }
 
+/// Release 0.68.0 blocker 4 (design record 5863318980): `ResolumeRegistry::new`
+/// keeps no receiver, and `lib.rs` subscribed the forwarder only after the
+/// whole startup, long after `add_host` started the host drivers. A broadcast
+/// sent with no receiver is dropped, so a driver's startup not-ready → ready
+/// RecoveryEvent was lost (Arena's restored stale text stayed on the wall).
+/// The forwarder is now subscribed with the registry, before the first
+/// driver: an event sent right after the build, with no await between,
+/// reaches the engine's channel.
+#[tokio::test]
+async fn a_recovery_event_right_after_the_registry_is_built_reaches_the_engine() {
+    let (engine_tx, mut engine_rx) = mpsc::channel(16);
+    let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
+    let registry = super::registry_with_forwarder(
+        vec![(1, "127.0.0.1".to_string(), 9)],
+        engine_tx,
+        &shutdown_tx,
+    );
+
+    assert_eq!(
+        registry.host_senders().len(),
+        1,
+        "the host's driver started"
+    );
+    assert!(
+        registry.recovery_sender().send(event("startup")).is_ok(),
+        "a receiver was subscribed before the first host driver started"
+    );
+    assert_eq!(next_host(&mut engine_rx).await, "startup");
+}
+
 #[tokio::test]
 async fn the_forwarder_stops_on_shutdown() {
     let (_events_tx, events_rx) = broadcast::channel::<RecoveryEvent>(4);

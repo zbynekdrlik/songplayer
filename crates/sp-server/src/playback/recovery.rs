@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 use super::state::PlayState;
 use super::title::{self, TitleClock};
 use crate::EngineCommand;
-use crate::resolume::RecoveryEvent;
+use crate::resolume::{RecoveryEvent, ResolumeRegistry};
 
 /// The `host` of the one `ResolumeRecovered` a lagged forwarder sends for the
 /// events it missed. The engine re-pushes every host whatever the host.
@@ -48,6 +48,20 @@ pub(crate) async fn forward_recovery_events(
             .send(EngineCommand::ResolumeRecovered { host })
             .await;
     }
+}
+
+/// The Resolume registry with a host driver per `(id, host, port)` (RED:
+/// `lib.rs` still subscribes the recovery forwarder after the startup).
+pub(crate) fn registry_with_forwarder(
+    hosts: Vec<(i64, String, u16)>,
+    _engine_tx: mpsc::Sender<EngineCommand>,
+    shutdown_tx: &broadcast::Sender<()>,
+) -> ResolumeRegistry {
+    let mut registry = ResolumeRegistry::new();
+    for (host_id, host, port) in hosts {
+        registry.add_host(host_id, host, port, shutdown_tx.subscribe());
+    }
+    registry
 }
 
 impl super::PlaylistPipeline {
