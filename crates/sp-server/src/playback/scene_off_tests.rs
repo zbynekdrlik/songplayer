@@ -273,19 +273,24 @@ async fn a_scene_off_on_the_live_clock_goes_through_the_hold() {
 
 #[tokio::test]
 async fn a_scene_back_on_program_cancels_the_pending_pause() {
+    // A real hold (release 0.68.0 review round 2: a re-check with no hold
+    // pending is stale, so the test no longer injects one): OUT is still the
+    // program's source, so its scene-off waits one `CUT_SETTLE`.
     let mut engine = rig().await;
     playing(&mut engine, OUT);
-    let _bus = program(&engine, IN); // OUT holds nothing: a re-check would pause
-    // A re-check with no hold of OUT pending (its id names no newer hold).
-    let due = tokio::spawn(async {}).id();
+    let _bus = program(&engine, OUT);
+    engine.handle_scene_change(OUT, false).await;
+    let due = pending_re_check(&engine, OUT);
     // The scene is back on program when the re-check comes: nothing happens.
+    engine.handle_scene_change(OUT, true).await;
     engine
         .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(due))
         .await;
     assert_eq!(state(&engine, OUT), PLAYING);
     assert_eq!(paused_at(&engine, OUT), None);
-    // Still off program: the re-check pauses it.
-    engine.set_scene_active_for_test(OUT, false);
+    // Off program again: its own re-check pauses it (the settle was given).
+    engine.handle_scene_change(OUT, false).await;
+    let due = pending_re_check(&engine, OUT);
     engine
         .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(due))
         .await;

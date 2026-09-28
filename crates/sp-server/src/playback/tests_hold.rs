@@ -694,23 +694,34 @@ async fn off_program_a_song_s_end_leaves_the_subtitle_clips_alone() {
     );
 }
 
-/// Review round 1 (🔵): with its timers cancelled, a song paused on program
-/// kept its title up until some re-sync (a recovery, another Play) took it
-/// down. The pause re-syncs the wall at once: a paused song's title is not
-/// due. And a `Started` the pause overtook (its Play went out just before)
-/// shows nothing: no clock, no timer, no clear. The resume's `Started` does
-/// all of it.
+/// Review rounds 1-2 (🔵): with its timers cancelled and its lyrics
+/// dropped, a song paused on program kept its title and its line up until
+/// some re-sync (a recovery, another Play) took them down. The pause clears
+/// both at once: a paused song's title and line are not due. And a
+/// `Started` the pause overtook (its Play went out just before) shows
+/// nothing: no clock, no timer, no clear. The resume's `Started` does all of
+/// it.
 #[tokio::test]
-async fn a_pause_on_program_takes_the_title_down_and_a_late_started_shows_nothing() {
+async fn a_pause_on_program_takes_the_title_and_line_down_and_a_late_started_shows_nothing() {
     let mut rig = rig().await;
     let clock = playing(&mut rig.engine);
     rig.engine.handle_command(OUT, PlayEvent::SceneOff).await; // the dashboard's Pause
+    let cmds = sent(&mut rig.resolume);
     assert_eq!(
-        resyncs(&sent(&mut rig.resolume)),
+        resyncs(&cmds),
         [None::<String>],
         "the paused song's title goes down"
     );
-    lyrics_updates(&mut rig.ws);
+    assert!(
+        cmds.iter()
+            .any(|cmd| matches!(cmd, ResolumeCommand::HideSubtitles)),
+        "and its line, got {cmds:?}"
+    );
+    assert_eq!(
+        lyrics_updates(&mut rig.ws),
+        [None::<String>],
+        "its karaoke clear too"
+    );
 
     started(&mut rig.engine).await;
 
@@ -749,6 +760,16 @@ async fn an_operator_pick_inside_the_hold_ends_it() {
             "{pick}: no longer held"
         );
         assert!(finished(&due).await, "{pick}: the re-check is cancelled");
+        // Review round 2: the re-check may already be queued when the pick
+        // comes (the engine's select! is unbiased). It is stale: no hold is
+        // pending, so it neither holds the pick again nor pauses it.
+        rig.engine
+            .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(due.id()))
+            .await;
+        assert!(
+            out(&rig.engine).scene_off_due.is_none(),
+            "{pick}: a stale re-check holds nothing"
+        );
         rig.engine
             .handle_pipeline_event(OUT, PipelineEvent::Ended)
             .await;
@@ -790,4 +811,25 @@ async fn a_play_drops_the_last_song_s_lyrics_and_position() {
         30_000,
         "a resume starts where it resumes"
     );
+}
+
+/// Review round 2 (🔵): a pause's resume point outlived the song it was
+/// taken in. A pause (the hold's end, the dashboard's), then a scene-on that
+/// starts the next song, then a ▶ while that song is held again resumed the
+/// OLD song over the new one. Every Play makes the snapshot obsolete.
+#[tokio::test]
+async fn a_play_drops_the_last_pause_s_resume_point() {
+    let mut rig = rig().await;
+    playing(&mut rig.engine);
+    rig.engine.handle_command(OUT, PlayEvent::SceneOff).await; // paused
+    assert_eq!(out(&rig.engine).paused_at, Some((SONG, AT_MS)));
+
+    rig.engine.handle_scene_change(OUT, true).await; // starts a song
+
+    let pp = out(&rig.engine);
+    assert!(
+        matches!(pp.state, PlayState::Playing { .. }),
+        "a song plays"
+    );
+    assert_eq!(pp.paused_at, None, "the old resume point is gone");
 }
