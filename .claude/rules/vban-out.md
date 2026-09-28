@@ -117,3 +117,13 @@ Box acceptance is the supervisor's job: point `vban_targets` at a dev1 LAN
 receiver and never at FOH, capture 60 s with tcpdump and check 0 counter gaps,
 an interval p99 < 7 ms, and PCM that cross-correlates with `SP-program`.
 Routing fohabl/lv1 in VB-Matrix is B4, with the owner's go.
+
+## FOH routing on fohabl (VB-Matrix over VBAN-TEXT)
+
+On 28.9.2026 FOH "CG L/R" (`VASIO32.OUT[27..28]`) was switched back to the cg OBS VBAN (`VBAN2`). SongPlayer's `sp-program` (`VBAN6`) points stay present but muted (#210 comment 5864647147).
+
+- **Switch with `Mute` only.** VB-Matrix silently ignores `dBGain=-inf`: it sends no reply and applies no change. A revert that relied on it summed cg and SongPlayer on FOH for ~16 s.
+  - SongPlayer → FOH: `Point(VBAN2.IN[1],VASIO32.OUT[27]).Mute = 1;Point(VBAN2.IN[2],VASIO32.OUT[28]).Mute = 1;Point(VBAN6.IN[1],VASIO32.OUT[27]).Mute = 0;Point(VBAN6.IN[2],VASIO32.OUT[28]).Mute = 0;`
+  - cg → FOH: the same four points with the Mute values swapped.
+- **Read back every point after each write.** Record the prior values first (fohabl is critical production).
+- **FOH follows cg now.** Before a SongPlayer deploy or restart, or an Arena kill/relaunch, on win-resolume, message the camera-box session: it watches the cg audio path.
