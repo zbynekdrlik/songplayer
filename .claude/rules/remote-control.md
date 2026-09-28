@@ -113,7 +113,8 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
     `obs/remote_call.rs` on the client's own write half and dispatcher.
   - #221 deleted `RemoteCall::ScenePlaylists` (the cg scene-item lookup):
     the facade never asks cg OBS which playlists a scene shows.
-  - **The newest press always reaches cg OBS (#221 review rounds 1–4).** The
+  - **The newest press reaches cg OBS last (#221 review rounds 1–5)** — for
+    switches cg OBS answers within the OBS client's 2 s (see Residuals). The
     connection loop hands every `Remote` call to ONE forwarder per connection
     (`remote_call::forwarder` → `run_calls`, in the connection's task set).
     A playlist press's mirror is not awaited by the facade, so each of these
@@ -140,9 +141,21 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
     supersedes NOTHING: its `SP-program` cut depends on cg OBS's answer,
     which may be a refusal (600) or come too late — a mirror it replaced
     would be lost. A superseded mirror's waiter logs at debug, not WARN.
-  - A manual press queued behind an unanswered mirror waits at most 2 s for
-    it, so its own answer has ~1 s of its 3 s upstream timeout left; if the
-    facade gave up meanwhile, the call is skipped, never sent late.
+  - **An awaited switch keeps its requester's verdict (round 5).** Every
+    call carries its requester's `deadline` (`Upstream::enqueue`: now + the
+    upstream timeout). A manual press's switch (ordered, not a mirror) with
+    less than the forwarder's answer timeout left — e.g. queued behind an
+    unanswered mirror (2 s) with ~1 s of its 3 s left — is answered with
+    nothing and never written (`RemoteCall::too_late`): cg OBS never
+    switches after the facade answered the press "not ready" (a keep). A
+    mirror goes out however late (its cut already happened), and a getter is
+    written while its requester still waits (it changes nothing in cg OBS).
+    A call whose requester already gave up is skipped (`reply.is_closed()`).
+  - **A mirror's waiter outwaits the forwarder.** `record_mirror` waits with
+    `Upstream::wait_mirror` = the upstream timeout + `MIRROR_EXTRA_WAIT`
+    (4 s = a switch in flight + the mirror's own answer, each ≤ 2 s; pinned
+    to `2 × DEFAULT_RESPONSE_TIMEOUT` by a test), so a mirror cg OBS
+    followed late is still recorded `ok`, never `not_ready`.
   - The forwarder's answer timeout is a parameter (`run_calls(…,
     answer_timeout)`; `forwarder()` passes the production 2 s): the tests
     pass 10 minutes, so a wait the forwarder must not do fails them, and
@@ -150,20 +163,27 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
     `the_calls_reach_cg_obs_in_queue_order`,
     `a_scene_switch_is_answered_before_the_next_call_goes_out`,
     `a_getter_never_holds_the_next_call_back`,
-    `a_switch_a_later_one_supersedes_is_never_sent`,
+    `a_switch_a_later_mirror_supersedes_is_never_sent`,
     `a_later_manual_forward_supersedes_nothing`,
-    `an_abandoned_later_switch_supersedes_nothing`; the facade side by
-    `only_the_mirror_of_a_playlist_press_supersedes_an_earlier_switch`.
+    `an_abandoned_later_switch_supersedes_nothing`,
+    `an_awaited_switch_with_too_little_time_left_is_never_sent`; the facade
+    side by `only_the_mirror_of_a_playlist_press_supersedes_an_earlier_switch`;
+    the mirror's waiter by
+    `a_mirror_answered_after_the_upstream_timeout_is_still_recorded`
+    (paused clock).
   - Every raw op=5 event cg OBS sends is broadcast as `ObsEvent::Raw` on the
     existing `obs_event_tx`; the engine bridge ignores it.
 - **Never block the engine's OBS queue.** `Upstream::enqueue` uses
   `try_send` (a full queue returns 207 at once; FIFO, so a call goes out
   after every call queued before it) and `Upstream::wait` waits at most the
-  upstream timeout (`UPSTREAM_TIMEOUT`, 3 s; a test rig may set a longer one
-  with `with_timeout`). `request` = both. A call whose requester gave up is
-  skipped on the OBS side (`reply.is_closed()`). A stale
-  `SetCurrentProgramScene` queued while cg OBS was away must never switch
-  cg OBS seconds after the press was answered "not ready".
+  upstream timeout (`UPSTREAM_TIMEOUT`, 3 s; a test may set a longer one
+  with the `#[doc(hidden)] pub` `with_timeout` — the end-to-end test uses
+  20 s, so a stalled coverage runner never runs a manual press out of its
+  time). `request` = both. A call whose requester gave up is skipped on the
+  OBS side (`reply.is_closed()`), and a switch with too little of its time
+  left is never written (above). A stale `SetCurrentProgramScene` queued
+  while cg OBS was away must never switch cg OBS seconds after the press was
+  answered "not ready".
 - **Startup:** `PlaybackEngine::start_program` calls `remote::start_remote`
   with the engine's `obs_cmd_tx` + `obs_event_tx`. `lib.rs` is at 1000/1000:
   its `pub mod remote;` line replaced a redundant comment, and it gained no
@@ -200,7 +220,7 @@ whole switch:
    gated on cg OBS (an unreachable cg OBS still cuts and plays). Then the
    legacy MIRROR, until B4 step 6: `SetCurrentProgramScene(catalog name)` is
    `enqueue`d for cg OBS and NOT awaited under the lock; a spawned
-   `record_mirror` waits (≤ the upstream timeout) and sets the cut's
+   `record_mirror` waits (≤ the upstream timeout + 4 s) and sets the cut's
    `cg_forward` (`pending` → `ok` | `error <code>` | `not_ready`) only while
    that cut is still the last one (`RemoteShared::set_cg_forward` by the id
    `record_cut` returned). The reply is 100 whatever the mirror does. A
@@ -324,10 +344,12 @@ authority and deleting the follow are the later lanes (L3–L6) of #221.
   - The switch order: the test holds `bus.switch_order()`, sends a press,
     and requires NO answer for 200 ms (the safe direction), then releases.
 - `playback/program_switch_tests.rs`: `cg_forward_label`, the records, and
-  `record_mirror` (its answer lands only on its own cut).
+  `record_mirror` (its answer lands only on its own cut; an answer after the
+  upstream timeout is still recorded, and the wait is bounded).
 - `mod_tests.rs` covers the settings, the telemetry, `Upstream` on a paused
-  clock (the time-out leaves the call marked abandoned; a full queue never
-  waits) and the settings task over real ports:
+  clock (the time-out leaves the call marked abandoned and its `deadline` is
+  the enqueue time + the timeout; a full queue never waits) and the settings
+  task over real ports:
   - bind;
   - a same-port password rebind;
   - disable;
@@ -353,6 +375,14 @@ authority and deleting the follow are the later lanes (L3–L6) of #221.
   - Accepted. The fix would need the facade to know the OBS connection state,
     which the engine does not hold.
 
+- **The newest-press-last order has a limit.** It holds for switches cg OBS
+  answers within the OBS client's answer timeout (2 s). A switch cg OBS
+  answers later is given up by the forwarder (the dispatcher's timeout) and
+  the next call is written; obs-websocket runs messages on a thread pool, so
+  cg OBS may still carry out the late switch after the newer one. Waiting
+  longer would hold every later press behind a stalled cg OBS; the next
+  press (or the operator) corrects it, and `cg_forward` shows the late one
+  as `not_ready`.
 - In Studio Mode cg OBS can drop a `CurrentProgramSceneChanged` (#170).
   Companion's feedback then misses it exactly as it does when connected to cg
   OBS directly. SongPlayer's own ~2 s poll reconcile emits `SceneChanged`,
