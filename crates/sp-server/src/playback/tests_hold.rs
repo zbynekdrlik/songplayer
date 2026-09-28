@@ -558,7 +558,7 @@ async fn a_scene_back_on_program_ends_the_hold() {
     playing(&mut rig.engine);
     {
         let pp = rig.engine.pipelines.get_mut(&OUT).unwrap();
-        pp.last_presenter_text = Some("alpha".into());
+        pp.last_presenter_text = Some(("alpha".into(), "alfa".into()));
         pp.last_resolume_subtitles_signature = Some("show|alpha".into());
     }
     let _bus = hold(&mut rig).await;

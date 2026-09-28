@@ -1223,6 +1223,9 @@ jobs:
           $seed = @{
             obs_websocket_url = "ws://localhost:4455"
             cache_dir = "C:\ProgramData\SongPlayer\cache"
+            # #221 L3: the post-deploy E2E switches scenes through SongPlayer's
+            # obs-websocket facade (Companion's path), so it is always on.
+            remote_ws_enabled = "true"
           }
           if ([string]::IsNullOrEmpty($current.gemini_api_key)) {
             $seed.gemini_api_key = $env:GEMINI_API_KEY
@@ -1258,6 +1261,32 @@ jobs:
             Write-Error "FAIL: obs_websocket_url not set"
             exit 1
           }
+          if ($current.remote_ws_enabled -ne "true") {
+            Write-Error "FAIL: remote_ws_enabled not set"
+            exit 1
+          }
+          # The settings task applies the setting within its 5 s poll; the
+          # E2E scene driver connects to the facade, so wait until it listens.
+          $listening = $false
+          for ($i = 1; $i -le 15; $i++) {
+            $program = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program" -TimeoutSec 10
+            if ($program.remote.listening) {
+              $listening = $true
+              break
+            }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $listening) {
+            Write-Error "FAIL: the remote-control facade is not listening on port $($program.remote.port) (error: $($program.remote.error))"
+            exit 1
+          }
+          # The E2E scene driver connects to ws://localhost:4456 with no
+          # password (FACADE_WS_URL); say so here, not far away in the suite.
+          if ($program.remote.port -ne 4456 -or $program.remote.auth) {
+            Write-Error "FAIL: the E2E needs the facade on port 4456 without a password (port $($program.remote.port), auth $($program.remote.auth))"
+            exit 1
+          }
+          Write-Host "OK: the remote-control facade listens on port $($program.remote.port)"
 
       - name: Seed Resolume host
         shell: powershell
@@ -1849,15 +1878,77 @@ jobs:
           }
           Write-Host "OK: Dashboard verified via Playwright"
 
+      - name: Prepare the A/V gate's own Python (#221)
+        shell: powershell
+        run: |
+          # #221: the A/V gate (scripts/av_sync_check.py) must never share
+          # SongPlayer's lyrics venv: SongPlayer may reinstall its packages at
+          # startup (numpy replaced mid-analysis failed CI run 36475215084 with
+          # "No module named 'numpy.fft'"). It gets its OWN small venv, created
+          # once and verified on every run. numpy is pinned to the version the
+          # Eval Checks job tests av_sync_check.py with; av_sync_check.py and
+          # its sibling av_sync_drift / av_sync_warp import nothing else.
+          # Continue (NOT Stop): pip may print notices on stderr; every native
+          # call below is judged by its own exit code instead.
+          $ErrorActionPreference = "Continue"
+          $venv = "C:\ProgramData\SongPlayer\e2e\avsync_venv"
+          $py = Join-Path $venv "Scripts\python.exe"
+          $numpy = "2.1.1"
+          if (-not (Test-Path $py)) {
+            # The box's system Python (the lyrics venv's base too). numpy
+            # 2.1.1 ships wheels for CPython 3.10-3.13 only, so never fall
+            # back to whatever `python` is on PATH: fail clearly instead.
+            $sys = "C:\Program Files\Python312\python.exe"
+            if (-not (Test-Path $sys)) {
+              Write-Error "FAIL: $sys not found - the A/V gate venv needs the box's Python 3.12"
+              exit 1
+            }
+            Write-Host "Creating the A/V gate venv at $venv with $sys"
+            & $sys -m venv $venv
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "FAIL: python -m venv $venv exited $LASTEXITCODE"
+              exit 1
+            }
+          }
+          # Exit 3 (no traceback) when numpy is missing or another version.
+          & $py -c "import sys, importlib.util as u; sys.exit(3) if u.find_spec('numpy') is None else None; import numpy; sys.exit(0 if numpy.__version__ == '$numpy' else 3)"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Installing numpy==$numpy into the A/V gate venv"
+            & $py -m pip install --disable-pip-version-check --no-input "numpy==$numpy"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "FAIL: pip install numpy==$numpy exited $LASTEXITCODE"
+              exit 1
+            }
+          }
+          # Verify: the script and its siblings start (their top-level
+          # imports), and numpy.fft - which numpy 2 loads lazily and the
+          # scripts use only inside functions - really imports (the module CI
+          # run 36475215084 lost mid-analysis).
+          & $py "$env:GITHUB_WORKSPACE\scripts\av_sync_check.py" --help | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: av_sync_check.py does not start under $py (exit $LASTEXITCODE)"
+            exit 1
+          }
+          $version = & $py -c "import numpy, numpy.fft; print(numpy.__version__)"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: numpy.fft does not import under $py (exit $LASTEXITCODE)"
+            exit 1
+          }
+          Write-Host "OK: the A/V gate venv at $venv has numpy $version with numpy.fft"
+
       - name: Feature-level Playwright (post-deploy spec)
         shell: powershell
         env:
           SONGPLAYER_URL: http://localhost:8920
+          # #221 L3: the scene driver talks to SongPlayer's obs-websocket
+          # facade (Companion's path); cg OBS only records for the A/V gate.
+          FACADE_WS_URL: ws://localhost:4456
           OBS_WS_URL: ws://localhost:4455
           # #147 A/V sync + dropout gate (e2e/post-deploy-av-sync.spec.ts):
-          # the Python that runs scripts/av_sync_check.py (numpy) and the
-          # app's bundled ffmpeg (the box has no ffprobe; none is needed).
-          SP_AVSYNC_PYTHON: C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe
+          # the Python that runs scripts/av_sync_check.py (#221: its OWN venv,
+          # prepared by the step above, never the lyrics venv) and the app's
+          # bundled ffmpeg (the box has no ffprobe; none is needed).
+          SP_AVSYNC_PYTHON: C:\ProgramData\SongPlayer\e2e\avsync_venv\Scripts\python.exe
           SP_FFMPEG: C:\ProgramData\SongPlayer\cache\tools\ffmpeg.exe
         run: |
           # Runs the committed e2e/post-deploy*.spec.ts against the

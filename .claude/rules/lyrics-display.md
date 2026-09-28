@@ -8,6 +8,7 @@ paths:
   - "crates/sp-server/src/playback/tests_hold.rs"
   - "crates/sp-server/tests/fixtures/lyrics_*.json"
   - "crates/sp-server/src/dabing/subtitles*.rs"
+  - "crates/sp-server/src/presenter/**"
 ---
 
 # LED-wall lyrics display plan — whole sentences, lead only into a pause, hold (#217)
@@ -42,6 +43,18 @@ loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).
 - The Resolume wall (`resolume_lines_with_next`, also used by
   `playback/recovery.rs`) and the Presenter (`presenter_lines`) read
   `plan.at(position)`.
+- **#222: the Presenter push carries BOTH languages.** `presenter_lines`
+  returns `PresenterLines {current_en, next_en, current_sk, next_sk}`, each
+  EN/SK pair from the SAME plan line (SK punctuation-stripped like the EN,
+  "" with no translation). `presenter::payload_for` sends them as
+  `currentText`/`nextText` + `currentTranslation`/`nextTranslation` (all
+  through `wrap_for_presenter`) and dedups on the pair (current EN, current
+  SK) — `PlaylistPipeline.last_presenter_text` holds that `PushedLine`, so
+  a Slovak line arriving later under the same English one is pushed.
+  Presenter (its issue 799) picks per stage layout what to show; SongPlayer
+  has no language setting for it. Read back on the box with Presenter's
+  `GET /stage/snapshot?layout=api` (`current.main` = the EN,
+  `current.translation` = the SK; `PUT /api/stage` has no GET).
 - The dashboard karaoke (`LyricsState::update`) stays on the RAW track, with
   its word timing.
 - The raw `resolume_lines` was deleted (ROZHODNUTÉ 5853953564): its name

@@ -7,6 +7,8 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+use crate::lyrics::bootstrap_probe::{PROBE_TIMEOUT, Readiness};
+
 /// Prepend `dir` to the current `PATH` env var, with the OS-appropriate
 /// separator, and return the joined string. Exposed as `pub(crate)` so
 /// `aligner.rs` can use the same helper when spawning its subprocesses.
@@ -142,16 +144,20 @@ pub async fn ensure_genai(venv_python: &Path) -> anyhow::Result<String> {
         .ok_or_else(|| anyhow::anyhow!("google-genai still not importable after install"))
 }
 
-/// Returns `true` if `python_path` exists AND `python_path -c "..."` confirms
-/// both `qwen_asr` is importable AND `torch.cuda.is_available()`. Used to
-/// decide whether bootstrap is needed. A venv with CPU-only torch fails this
-/// check so the bootstrap re-runs and installs the CUDA variant.
+/// Probe the venv: `python_path -c IS_READY_PROBE` (every package imports
+/// AND `torch.cuda.is_available()`), answered with its REASON (#221 BLOCKER):
+/// `Ready`, `Missing` (no interpreter), `Timeout` (not done within
+/// `PROBE_TIMEOUT`; the probe is killed), or `Failed` with the exit code and
+/// the end of its stderr. `bootstrap_probe::decide` turns it into the
+/// fast-path decision. A venv with CPU-only torch fails the probe (exit 1, no
+/// traceback), is retried, and gets the CUDA variant only after the retries.
 #[cfg_attr(test, mutants::skip)]
-pub async fn is_ready(python_path: &Path) -> bool {
+pub async fn is_ready(python_path: &Path) -> Readiness {
+    use std::process::Stdio;
     use tokio::process::Command;
 
     if !python_path.exists() {
-        return false;
+        return Readiness::Missing;
     }
 
     // IMPORTANT: do NOT set CREATE_NO_WINDOW on Windows here.
@@ -172,14 +178,27 @@ pub async fn is_ready(python_path: &Path) -> bool {
     // CUDA detection. The CREATE_NO_WINDOW flag remains on the longer-
     // running subprocess calls (preprocess-vocals, align-chunks) where a
     // brief window flicker during a 3-minute Demucs run would be visible.
+    //
+    // #221: stderr is captured (the reason: a traceback's last line names an
+    // import failure), and a probe that runs out of time is killed
+    // (`kill_on_drop`), so it never holds the GPU while the next one runs.
     let mut cmd = Command::new(python_path);
-    cmd.args(["-c", IS_READY_PROBE]);
-
-    // Longer timeout than the 15s we had — first CUDA init on a cold
-    // driver can take 10-20s on its own before torch even returns.
-    let res = tokio::time::timeout(std::time::Duration::from_secs(45), cmd.status()).await;
-
-    matches!(res, Ok(Ok(s)) if s.success())
+    cmd.args(["-c", IS_READY_PROBE])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => return Readiness::failed(None, &e.to_string()),
+    };
+    // The first CUDA init on a cold driver can take 10-20 s on its own.
+    match tokio::time::timeout(PROBE_TIMEOUT, child.wait_with_output()).await {
+        Err(_) => Readiness::Timeout,
+        Ok(Err(e)) => Readiness::failed(None, &e.to_string()),
+        Ok(Ok(out)) if out.status.success() => Readiness::Ready,
+        Ok(Ok(out)) => Readiness::failed(out.status.code(), &String::from_utf8_lossy(&out.stderr)),
+    }
 }
 
 /// Ensure the lyrics venv exists, `qwen-asr` is installed, and the
@@ -190,7 +209,11 @@ pub async fn is_ready(python_path: &Path) -> bool {
 ///   2. Run `{venv}/Scripts/python.exe -m pip install -U qwen-asr`.
 ///   3. Run `{venv}/Scripts/python.exe {script_path} preload --models-dir ...`.
 ///
-/// Fast-paths return `Ok(venv_python)` if `is_ready` already passes.
+/// Fast-paths return `Ok(venv_python)` when `bootstrap_probe::decide` says the
+/// venv is ready (a slow or failed cold probe is RETRIED for ~3 min first,
+/// #221) or kept timing out (used as it is: a timeout never reinstalls).
+/// Only a proven import failure, a missing interpreter, or a failure that
+/// outlived the retries runs the install.
 /// On non-Windows: returns `Ok(None)` unconditionally.
 #[cfg_attr(test, mutants::skip)]
 pub async fn ensure_ready(
@@ -207,23 +230,40 @@ pub async fn ensure_ready(
 
     #[cfg(target_os = "windows")]
     {
+        use crate::lyrics::bootstrap_probe::{FastPath, RETRY_PLAN, decide};
         use anyhow::Context;
         use tokio::process::Command;
 
         let venv_python = venv_python_path(tools_dir);
         let venv_dir = tools_dir.join("lyrics_venv");
 
-        if is_ready(&venv_python).await {
-            tracing::info!(
-                "lyrics bootstrap: venv already ready at {}",
-                venv_python.display()
-            );
+        // #221: the probe's reason decides; a timeout or a CUDA / init failure
+        // is retried (~3 min) before any install.
+        let decision = decide(|| is_ready(&venv_python), RETRY_PLAN).await;
+        if decision.path != FastPath::Install {
+            if decision.path == FastPath::UseAsIs {
+                tracing::warn!(
+                    probes = decision.probes,
+                    "lyrics bootstrap: the venv probe kept timing out — using the venv at {} as it is (a timeout never reinstalls)",
+                    venv_python.display()
+                );
+            } else {
+                tracing::info!(
+                    probes = decision.probes,
+                    "lyrics bootstrap: venv already ready at {}",
+                    venv_python.display()
+                );
+            }
             // #168: replace the venv redirector with an app-owned interpreter
             // and inject the retained mimalloc heap (idempotent; WARN-and-continue).
             crate::lyrics::bootstrap_venv_exe::prepare_heavy_interpreter(tools_dir, &venv_python)
                 .await;
             return Ok(Some(venv_python));
         }
+        tracing::info!(
+            probes = decision.probes,
+            "lyrics bootstrap: the venv needs the install (see the probe's reason above)"
+        );
 
         // 1. Create venv if the interpreter is missing (handles corrupted venv too).
         if !venv_python.exists() {
@@ -404,11 +444,13 @@ pub async fn ensure_ready(
         // cache / antivirus scan). Retrying gives the OS time to settle.
         let mut ok = false;
         for attempt in 0..5 {
-            if is_ready(&venv_python).await {
+            let readiness = is_ready(&venv_python).await;
+            if readiness.is_ready() {
                 ok = true;
                 break;
             }
             tracing::debug!(
+                ?readiness,
                 "lyrics bootstrap: is_ready check failed (attempt {attempt}), retrying"
             );
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -466,6 +508,7 @@ mod bootstrap_tests_numpy_pin;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lyrics::bootstrap_probe::Readiness;
 
     #[test]
     fn venv_python_path_windows_layout() {
@@ -485,9 +528,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn is_ready_false_when_missing() {
+    async fn is_ready_reports_a_missing_interpreter() {
         let result = is_ready(Path::new("/definitely/not/a/real/path/python")).await;
-        assert!(!result);
+        assert_eq!(result, Readiness::Missing);
     }
 
     /// The `is_ready` Python probe must import every runtime dependency

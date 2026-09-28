@@ -126,9 +126,9 @@ impl super::PlaybackEngine {
             }
         }
 
-        // Presenter — fire-and-forget. `maybe_push_line` is idempotent on
-        // identical `current_en` (compares against the `last_seen` arg we
-        // pass, which is the pre-call snapshot).
+        // Presenter — fire-and-forget. `maybe_push_line` is idempotent on an
+        // identical current line in BOTH languages (#222: compares its EN and
+        // SK against the `last_seen` arg we pass, the pre-call snapshot).
         let pp = match self.pipelines.get_mut(&playlist_id) {
             Some(pp) => pp,
             None => return,
@@ -137,12 +137,11 @@ impl super::PlaybackEngine {
             Some(l) => l,
             None => return,
         };
-        if let Some((cur, nxt)) = lyrics.presenter_lines(position_ms) {
+        if let Some(lines) = lyrics.presenter_lines(position_ms) {
             pp.last_presenter_text = crate::presenter::maybe_push_line(
                 self.presenter_client.as_ref(),
                 pp.last_presenter_text.take(),
-                cur,
-                nxt,
+                lines,
                 &pp.cached_song,
                 &pp.cached_artist,
             );

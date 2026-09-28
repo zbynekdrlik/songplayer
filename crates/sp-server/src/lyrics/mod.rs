@@ -3,6 +3,7 @@ pub mod assembly;
 pub mod audit_ctx;
 pub mod backend;
 pub mod bootstrap;
+pub mod bootstrap_probe; // #221: the venv probe's reason + the fast-path retry decision
 pub mod bootstrap_venv_exe;
 pub mod child_output;
 pub mod chunking;

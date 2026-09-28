@@ -16,6 +16,7 @@ use super::tests::{
     Calls, connect, enable_input, hello_identify, last_cut_json, next_json, persisted_source,
     press, request, rig, rig_on, rig_with, send_json, wait_for,
 };
+use super::tests_feedback::request_collecting;
 use crate::obs::ObsCommand;
 use crate::obs::remote_call::RemoteCall;
 use crate::remote::IDENTIFY_TIMEOUT;
@@ -230,15 +231,23 @@ async fn each_client_keeps_its_own_preview() {
         next_json(&mut driver).await["d"]["eventData"]["sceneName"],
         "Slido"
     );
-    // Each transition takes its own client's preview.
+    // Each transition takes its own client's preview. #221 L3: every cut is
+    // fed back to BOTH clients (SongPlayer's program + transition events), so
+    // the events before a response are collected and checked.
     request(&mut companion, "TriggerStudioModeTransition", None).await;
     assert_eq!(rig.bus.status().source, Some(7));
-    request(&mut driver, "TriggerStudioModeTransition", None).await;
+    let (_, before) = request_collecting(&mut driver, "TriggerStudioModeTransition", None).await;
     assert_eq!(rig.bus.status().source, Some(-1));
-    // The companion never got the driver's preview event: its next message is
-    // its own response, still naming its own preview.
-    let d = request(&mut companion, "GetCurrentPreviewScene", None).await;
+    // The companion never got the driver's preview event: the events before
+    // its response are the program's own, and it still names its own preview.
+    let (d, mut seen) = request_collecting(&mut companion, "GetCurrentPreviewScene", None).await;
     assert_eq!(d["responseData"]["sceneName"], "sp-fast");
+    seen.extend(before);
+    assert!(
+        seen.iter()
+            .all(|e| e["eventType"] != "CurrentPreviewSceneChanged"),
+        "{seen:?}"
+    );
 }
 
 #[tokio::test]

@@ -18,13 +18,18 @@
 //!   (op 8) → `RequestBatchResponse` (op 9, executed serially in order).
 //! - Events: `Event` (op 5) to identified clients subscribed to its intent.
 //!
-//! Which request is answered how is [`route`]: a few natively (studio mode ON
-//! and the per-session preview, #221), the scene/input list getters forwarded
-//! to cg OBS, a scene press (`SetCurrentProgramScene`,
-//! `TriggerStudioModeTransition`) through the program switch, anything else a
-//! well-formed [`STATUS_UNKNOWN_REQUEST_TYPE`] error (Companion treats a failed
-//! request as "no data" and stays connected — only `GetVersion` and
+//! Which request is answered how is [`route`]: a few natively (studio mode ON,
+//! the per-session preview and, #221 L3, `GetCurrentProgramScene` from
+//! SongPlayer's own program), the scene/input list getters forwarded to cg
+//! OBS, a scene press (`SetCurrentProgramScene`, `TriggerStudioModeTransition`)
+//! through the program switch, anything else a well-formed
+//! [`STATUS_UNKNOWN_REQUEST_TYPE`] error (Companion treats a failed request as
+//! "no data" and stays connected — only `GetVersion` and
 //! `GetStudioModeEnabled` must succeed, which is why they are native).
+//!
+//! Of cg OBS's events only `SceneListChanged` is passed through
+//! ([`passthrough_intent`]); the program feedback and the transition events
+//! are SongPlayer's own (#221 L3, `remote::studio_events`).
 
 use serde_json::{Value, json};
 
@@ -75,6 +80,9 @@ pub const TRANSITION_DURATION_MAX_MS: u32 = 20_000;
 
 /// `EventSubscription::Scenes` (1 << 2).
 pub const EVENT_SCENES: u64 = 4;
+/// `EventSubscription::Transitions` (1 << 4): `SceneTransitionStarted` /
+/// `SceneTransitionEnded` (#221 L3).
+pub const EVENT_TRANSITIONS: u64 = 16;
 /// `EventSubscription::All` of rpcVersion 1 before Canvases (bits 0..=10) —
 /// a session's subscriptions when its `Identify` names none.
 pub const EVENT_ALL: u64 = 0x7FF;
@@ -86,9 +94,10 @@ pub const REASON_AUTH_MISSING: &str = "Your payload's data is missing an `authen
 pub const REASON_AUTH_FAILED: &str = "Authentication failed.";
 
 /// The requests forwarded to cg OBS verbatim (the scene/input list getters).
-pub const FORWARDED_REQUESTS: [&str; 5] = [
+/// #221 L3: `GetCurrentProgramScene` is no longer one — SP-program's scene is
+/// SongPlayer's own.
+pub const FORWARDED_REQUESTS: [&str; 4] = [
     "GetSceneList",
-    "GetCurrentProgramScene",
     "GetInputList",
     "GetSceneItemList",
     "GetGroupSceneItemList",
@@ -458,10 +467,12 @@ pub fn event(event_type: &str, intent: u64, data: &Value) -> Value {
 }
 
 /// The cg OBS events the facade re-emits, with the intent a client must be
-/// subscribed to (Companion's scene feedback + scene list).
+/// subscribed to: only the scene list. #221 L3: cg OBS's
+/// `CurrentProgramSceneChanged` is NOT passed through — Companion's program
+/// feedback is SongPlayer's own program (`remote::studio_events`).
 pub fn passthrough_intent(event_type: &str) -> Option<u64> {
     match event_type {
-        "CurrentProgramSceneChanged" | "SceneListChanged" => Some(EVENT_SCENES),
+        "SceneListChanged" => Some(EVENT_SCENES),
         _ => None,
     }
 }
@@ -480,6 +491,8 @@ pub enum Route {
     Forward,
     /// A scene press: switch `SP-program` to `sceneName`.
     SetProgramScene,
+    /// #221 L3: SP-program's scene (the one resolver), never cg OBS's.
+    GetProgramScene,
     /// #221: set this session's preview scene.
     SetPreviewScene,
     /// #221: this session's preview scene (initially the program scene).
@@ -503,16 +516,15 @@ pub fn route(request_type: &str) -> Route {
             Route::Native(Reply::ok(Some(json!({ "studioModeEnabled": true }))))
         }
         "SetCurrentProgramScene" => Route::SetProgramScene,
+        "GetCurrentProgramScene" => Route::GetProgramScene,
         "SetCurrentPreviewScene" => Route::SetPreviewScene,
         "GetCurrentPreviewScene" => Route::GetPreviewScene,
         "TriggerStudioModeTransition" => Route::TriggerTransition,
         "SetCurrentSceneTransitionDuration" => Route::SetTransitionDuration,
         // Keep in sync with FORWARDED_REQUESTS (pinned by a test).
-        "GetSceneList"
-        | "GetCurrentProgramScene"
-        | "GetInputList"
-        | "GetSceneItemList"
-        | "GetGroupSceneItemList" => Route::Forward,
+        "GetSceneList" | "GetInputList" | "GetSceneItemList" | "GetGroupSceneItemList" => {
+            Route::Forward
+        }
         _ => Route::Unsupported,
     }
 }
@@ -523,6 +535,7 @@ pub fn available_requests() -> Vec<&'static str> {
         "GetVersion",
         "GetStudioModeEnabled",
         "SetCurrentProgramScene",
+        "GetCurrentProgramScene",
         "SetCurrentPreviewScene",
         "GetCurrentPreviewScene",
         "TriggerStudioModeTransition",
@@ -565,6 +578,20 @@ pub fn scene_name(data: Option<&Value>) -> Result<String, Reply> {
 /// Companion reads) and the 5.0 `currentPreviewSceneName`.
 pub fn preview_scene_data(scene: &str) -> Value {
     json!({ "sceneName": scene, "currentPreviewSceneName": scene })
+}
+
+/// #221 L3: `GetCurrentProgramScene`'s response data, SP-program's scene: the
+/// 5.x `sceneName` and the 5.0 `currentProgramSceneName` (what the post-deploy
+/// E2E driver reads).
+pub fn program_scene_data(scene: &str) -> Value {
+    json!({ "sceneName": scene, "currentProgramSceneName": scene })
+}
+
+/// #221 L3: the error of `GetCurrentProgramScene` while SP-program has no
+/// scene name: nothing is on it, or a playlist whose catalog names no scene
+/// (604 `InvalidResourceState`, like [`no_scene`]).
+pub fn nothing_on_program() -> Reply {
+    Reply::error(STATUS_INVALID_RESOURCE_STATE, "Nothing is on SP-program.")
 }
 
 /// The error of a preview or transition request with no preview set and

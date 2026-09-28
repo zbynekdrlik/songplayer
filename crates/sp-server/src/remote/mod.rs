@@ -15,8 +15,13 @@
 //! - **cg OBS** is reached through SongPlayer's EXISTING OBS client
 //!   ([`Upstream`]: its command channel + its event broadcast). The scene and
 //!   input list getters are forwarded verbatim, so the button names match cg
-//!   OBS 1:1; `CurrentProgramSceneChanged` / `SceneListChanged` from cg OBS are
-//!   re-emitted to the clients (Companion's button feedback).
+//!   OBS 1:1; cg OBS's `SceneListChanged` is re-emitted to the clients.
+//! - **Program feedback (#221 L3)** is SongPlayer's own (`studio_events`):
+//!   `CurrentProgramSceneChanged` whenever the scene name of what `SP-program`
+//!   has on air changes (a press, a dashboard cut, anything that cuts), and
+//!   `SceneTransitionStarted` / `SceneTransitionEnded` around every facade
+//!   switch that cut. `GetCurrentProgramScene` answers SP-program's scene.
+//!   cg OBS's own `CurrentProgramSceneChanged` is never passed through.
 //! - **Studio mode (#221 L2).** Studio mode is reported ON, so Companion's
 //!   page-13 buttons (`preview_scene` + `do_transition`) reach SongPlayer:
 //!   `SetCurrentPreviewScene` / `GetCurrentPreviewScene` keep a preview PER
@@ -35,6 +40,7 @@
 pub mod map;
 pub mod protocol;
 mod session;
+pub mod studio_events;
 
 use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
@@ -57,6 +63,8 @@ use tracing::{info, warn};
 use crate::obs::remote_call::RemoteCall;
 use crate::obs::{ObsCommand, ObsEvent};
 use crate::playback::program_bus::ProgramBus;
+use crate::playback::program_on_air::{OnAir, program_scene_name};
+use studio_events::{FACADE_EVENTS_CAPACITY, FacadeEvent, TRANSITION_END_MAX_WAIT};
 
 /// How often the settings task re-reads the settings.
 pub const REMOTE_SETTINGS_POLL: Duration = Duration::from_secs(5);
@@ -209,6 +217,12 @@ pub struct RemoteStatus {
     pub unsupported_requests: Vec<String>,
     /// #221: the last transition duration a client sent (not applied).
     pub last_transition_duration: Option<TransitionDuration>,
+    /// #221 L3: SP-program's scene name (the one resolver,
+    /// `program_scene_name`): what `GetCurrentProgramScene` answers and
+    /// `CurrentProgramSceneChanged` announced last; `null` while nothing is on
+    /// program, and also while a playlist whose catalog names no scene (an
+    /// empty or duplicate NDI output name) is on it.
+    pub program_scene: Option<String>,
 }
 
 #[derive(Default)]
@@ -239,8 +253,9 @@ impl RemoteShared {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The `remote` block for the stored `settings`.
-    pub fn status(&self, settings: &RemoteSettings) -> RemoteStatus {
+    /// The `remote` block for the stored `settings`, with `on_air` (what
+    /// `SP-program` has on air) named as `program_scene`.
+    pub fn status(&self, settings: &RemoteSettings, on_air: &OnAir) -> RemoteStatus {
         let st = self.state();
         RemoteStatus {
             enabled: settings.enabled,
@@ -254,6 +269,7 @@ impl RemoteShared {
             last_remote_cut: st.last_cut.clone(),
             unsupported_requests: st.unsupported.iter().cloned().collect(),
             last_transition_duration: st.last_transition_duration,
+            program_scene: program_scene_name(on_air),
         }
     }
 
@@ -446,7 +462,8 @@ impl Upstream {
 
 /// Everything a session needs: the pool (the playlists, input settings, the
 /// persisted program source), the program bus (which also orders the scene
-/// switches), cg OBS and the password of this listener.
+/// switches), cg OBS, the password of this listener and (#221 L3) the
+/// facade's own events.
 pub struct Facade {
     pool: SqlitePool,
     bus: Arc<ProgramBus>,
@@ -454,6 +471,13 @@ pub struct Facade {
     password: Option<String>,
     /// [`IDENTIFY_TIMEOUT`] (shorter only in tests).
     identify_timeout: Duration,
+    /// #221 L3: the events the facade emits itself (`studio_events`), to
+    /// every session of this listener.
+    events: broadcast::Sender<FacadeEvent>,
+    /// #221 L3: how long a switch's `SceneTransitionEnded` waits for the
+    /// window at most: [`TRANSITION_END_MAX_WAIT`] (10 minutes in tests, so a
+    /// stalled test runner never ends a fade's wait early — review round 2).
+    transition_end_max: Duration,
 }
 
 impl Facade {
@@ -469,6 +493,8 @@ impl Facade {
             upstream,
             password,
             identify_timeout: IDENTIFY_TIMEOUT,
+            events: broadcast::channel(FACADE_EVENTS_CAPACITY).0,
+            transition_end_max: TRANSITION_END_MAX_WAIT,
         })
     }
 
@@ -487,6 +513,8 @@ impl Facade {
             upstream,
             password,
             identify_timeout,
+            events: broadcast::channel(FACADE_EVENTS_CAPACITY).0,
+            transition_end_max: Duration::from_secs(600),
         })
     }
 
@@ -496,9 +524,14 @@ impl Facade {
 }
 
 /// Accept clients until this future is dropped (the listener task is
-/// aborted); every session lives in the `JoinSet` and is dropped with it.
+/// aborted); every session lives in the `JoinSet` and is dropped with it, and
+/// so does this listener's program feedback (#221 L3,
+/// `studio_events::run_program_feedback`).
 pub async fn serve(listener: TcpListener, facade: Arc<Facade>) {
     let mut sessions = JoinSet::new();
+    let (on_air, last) = studio_events::subscribe_program(&facade.bus);
+    let feedback = studio_events::run_program_feedback(on_air, last, facade.events.clone());
+    sessions.spawn(feedback);
     loop {
         tokio::select! {
             accepted = listener.accept() => match accepted {

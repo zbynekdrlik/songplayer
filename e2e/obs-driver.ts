@@ -1,16 +1,19 @@
 /**
  * Thin wrapper around obs-websocket-js for post-deploy Playwright tests.
  *
- * Used by the post-deploy suite to switch OBS scenes and verify that
- * SongPlayer's scene-driven playback engine reacts correctly.
+ * Used by the post-deploy suite to switch scenes and verify that SongPlayer's
+ * scene-driven playback engine reacts correctly.
+ *
+ * #221 L3: the SCENE driver connects to SongPlayer's obs-websocket facade
+ * (`FACADE_WS_URL`, :4456), the server Companion's buttons talk to: studio
+ * mode is ON there, so `switchScene` takes Companion's exact path (preview,
+ * then transition), and the program scene and the transition events are
+ * SongPlayer's own. A second driver on cg OBS (`OBS_WS_URL`, :4455) is kept
+ * only for the recording and profile requests of the A/V gate.
  */
 
 import OBSWebSocket from "obs-websocket-js";
-import {
-  shouldSkipSceneSwitch,
-  waitForPreviewApplied,
-  waitForSceneSwitchApplied,
-} from "./obs-scene-wait";
+import { waitForPreviewApplied, waitForSceneSwitchApplied } from "./obs-scene-wait";
 
 export class ObsDriver {
   // Cached once per driver (studio mode does not change mid-suite).
@@ -54,12 +57,18 @@ export class ObsDriver {
   }
 
   /**
-   * Switch the OBS program scene and wait until the switch has ACTUALLY taken
-   * effect (#170). On win-resolume OBS runs Studio Mode with a 2000ms Fade:
+   * Switch the program scene and wait until the switch has ACTUALLY taken
+   * effect (#170).
    *
-   *  - Never issue a same-scene switch — it runs a pointless fade that leaves
-   *    `preview == program`, from which OBS then DROPS the next switch's
-   *    `CurrentProgramSceneChanged` event (reproduced live, round 3).
+   *  - #221 L3: a switch to the scene already on program is ALWAYS sent. The
+   *    driver talks to SongPlayer's facade, where a same-scene transition is
+   *    the designed re-kick: it re-mirrors the scene to cg OBS, whose program
+   *    can differ from SP-program until the cutover (e.g. cg OBS on a manual
+   *    scene while "OBS manual" is off keeps the last playlist on
+   *    SP-program). Skipping it left cg OBS, and so the engine's
+   *    `active_scene`, off the target (review round 1). The skip existed for
+   *    cg OBS's own same-scene 2 s fade, which dropped the next switch's
+   *    event (#170); the E2E no longer switches cg OBS directly.
    *  - In studio mode, drive the transition the studio way
    *    (`SetCurrentPreviewScene` + `TriggerStudioModeTransition`) so OBS emits
    *    the program-scene-changed event SongPlayer reacts to; fall back to
@@ -69,9 +78,6 @@ export class ObsDriver {
    *    SongPlayer processes the post-transition event (its reaction is <1ms).
    */
   async switchScene(sceneName: string): Promise<void> {
-    const current = await this.currentProgramScene();
-    if (shouldSkipSceneSwitch(current, sceneName)) return;
-
     // Track the transition so we can wait for it to END, not just for the
     // program-scene name to flip (which happens mid-fade). Subscribe BEFORE
     // triggering so the Started event is never missed.
@@ -91,14 +97,17 @@ export class ObsDriver {
         // The preview change is applied asynchronously — trigger only once OBS
         // reports it, else the transition fades the program scene to itself.
         await waitForPreviewApplied(() => this.currentPreviewScene(), sceneName);
-        await this.obs.call("TriggerStudioModeTransition");
-        // We KNOW a transition is now running — mark it active synchronously so
-        // the settle check cannot fire before the SceneTransitionStarted frame
-        // arrives. In Studio Mode GetCurrentProgramScene can report the target
-        // near fade start, so relying on the async Started event to raise this
-        // flag would reinstate the round-2 name-only early return. The real
-        // SceneTransitionEnded frame (a 2s Fade always emits one) clears it.
+        // We KNOW a transition is about to run — mark it active BEFORE the
+        // trigger, so the settle check cannot fire before the
+        // SceneTransitionStarted frame arrives. GetCurrentProgramScene can
+        // report the target near the transition's start, so relying on the
+        // async Started event would reinstate the round-2 name-only early
+        // return. Only the real SceneTransitionEnded frame clears it. #221 L3:
+        // set BEFORE the call, never after: SongPlayer's facade ends a Cut at
+        // once, and its Ended frame may be handled before the call's promise
+        // continuation runs, which a flag raised after the call would undo.
         transitionActive = true;
+        await this.obs.call("TriggerStudioModeTransition");
       } else {
         await this.obs.call("SetCurrentProgramScene", { sceneName });
       }

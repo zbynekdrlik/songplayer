@@ -16,6 +16,7 @@ use crate::db::models::set_setting;
 use crate::obs::remote_call::RemoteCall;
 use crate::obs::{ObsCommand, ObsEvent};
 use crate::playback::program_bus::ProgramBus;
+use crate::playback::program_on_air::OnAir;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 /// The obs-websocket spec's example password (the only password in tests).
@@ -121,7 +122,10 @@ fn only_a_new_error_is_logged() {
 #[test]
 fn the_status_reports_the_stored_settings_and_the_live_counters() {
     let shared = Arc::new(RemoteShared::default());
-    let st = shared.status(&settings(true, 4460, Some(SPEC_PASSWORD)));
+    let st = shared.status(
+        &settings(true, 4460, Some(SPEC_PASSWORD)),
+        &OnAir::default(),
+    );
     assert!(st.enabled);
     assert_eq!(st.port, 4460);
     assert!(st.auth);
@@ -132,15 +136,34 @@ fn the_status_reports_the_stored_settings_and_the_live_counters() {
     assert_eq!(st.last_request, None);
     assert_eq!(st.last_remote_cut, None);
     assert!(st.unsupported_requests.is_empty());
-    assert!(!shared.status(&settings(false, 4456, None)).auth);
+    assert!(
+        !shared
+            .status(&settings(false, 4456, None), &OnAir::default())
+            .auth
+    );
 
     let a = shared.client_connected();
     let b = shared.client_connected();
-    assert_eq!(shared.status(&RemoteSettings::disabled()).clients, 2);
+    assert_eq!(
+        shared
+            .status(&RemoteSettings::disabled(), &OnAir::default())
+            .clients,
+        2
+    );
     drop(a);
-    assert_eq!(shared.status(&RemoteSettings::disabled()).clients, 1);
+    assert_eq!(
+        shared
+            .status(&RemoteSettings::disabled(), &OnAir::default())
+            .clients,
+        1
+    );
     drop(b);
-    assert_eq!(shared.status(&RemoteSettings::disabled()).clients, 0);
+    assert_eq!(
+        shared
+            .status(&RemoteSettings::disabled(), &OnAir::default())
+            .clients,
+        0
+    );
 
     shared.record_request("GetVersion");
     shared.record_request("GetSceneList");
@@ -150,7 +173,7 @@ fn the_status_reports_the_stored_settings_and_the_live_counters() {
     shared.set_listening(true);
     assert!(shared.set_error(Some("taken".to_string())));
     assert!(!shared.set_error(Some("taken".to_string())));
-    let st = shared.status(&RemoteSettings::disabled());
+    let st = shared.status(&RemoteSettings::disabled(), &OnAir::default());
     assert_eq!(st.requests, 2);
     let last = st.last_request.unwrap();
     assert_eq!(last.request_type, "GetSceneList");
@@ -159,7 +182,12 @@ fn the_status_reports_the_stored_settings_and_the_live_counters() {
     assert!(st.listening);
     assert_eq!(st.error.as_deref(), Some("taken"));
     assert!(!shared.set_error(None));
-    assert_eq!(shared.status(&RemoteSettings::disabled()).error, None);
+    assert_eq!(
+        shared
+            .status(&RemoteSettings::disabled(), &OnAir::default())
+            .error,
+        None
+    );
 
     let cut = RemoteCut {
         scene: "sp-fast".to_string(),
@@ -173,7 +201,9 @@ fn the_status_reports_the_stored_settings_and_the_live_counters() {
     };
     shared.record_cut(cut.clone());
     assert_eq!(
-        shared.status(&RemoteSettings::disabled()).last_remote_cut,
+        shared
+            .status(&RemoteSettings::disabled(), &OnAir::default())
+            .last_remote_cut,
         Some(cut)
     );
 }
@@ -198,7 +228,7 @@ fn a_late_mirror_answer_updates_only_its_own_cut() {
     let shared = RemoteShared::default();
     let last_forward = |shared: &RemoteShared| {
         shared
-            .status(&RemoteSettings::disabled())
+            .status(&RemoteSettings::disabled(), &OnAir::default())
             .last_remote_cut
             .and_then(|c| c.cg_forward)
     };
@@ -207,7 +237,9 @@ fn a_late_mirror_answer_updates_only_its_own_cut() {
         "no cut recorded yet"
     );
     assert_eq!(
-        shared.status(&RemoteSettings::disabled()).last_remote_cut,
+        shared
+            .status(&RemoteSettings::disabled(), &OnAir::default())
+            .last_remote_cut,
         None
     );
     let first = shared.record_cut(cut_of("sp-fast"));
@@ -222,7 +254,7 @@ fn a_late_mirror_answer_updates_only_its_own_cut() {
     assert_eq!(last_forward(&shared).as_deref(), Some("pending"));
     assert!(shared.set_cg_forward(second, "not_ready".to_string()));
     let last = shared
-        .status(&RemoteSettings::disabled())
+        .status(&RemoteSettings::disabled(), &OnAir::default())
         .last_remote_cut
         .unwrap();
     assert_eq!(
@@ -237,7 +269,7 @@ fn a_transition_duration_is_recorded_as_not_applied() {
     let shared = RemoteShared::default();
     assert_eq!(
         shared
-            .status(&RemoteSettings::disabled())
+            .status(&RemoteSettings::disabled(), &OnAir::default())
             .last_transition_duration,
         None
     );
@@ -245,7 +277,7 @@ fn a_transition_duration_is_recorded_as_not_applied() {
     shared.record_transition_duration(750);
     assert_eq!(
         shared
-            .status(&RemoteSettings::disabled())
+            .status(&RemoteSettings::disabled(), &OnAir::default())
             .last_transition_duration,
         Some(TransitionDuration {
             ms: 750,
@@ -274,7 +306,7 @@ fn client_chosen_request_types_stay_bounded() {
     let long = "G".repeat(100);
     assert!(shared.note_unsupported(&long));
     shared.record_request(&long);
-    let st = shared.status(&RemoteSettings::disabled());
+    let st = shared.status(&RemoteSettings::disabled(), &OnAir::default());
     assert_eq!(st.unsupported_requests, vec!["G".repeat(64)]);
     assert_eq!(st.last_request.unwrap().request_type, "G".repeat(64));
     for i in 1..64 {
@@ -282,7 +314,7 @@ fn client_chosen_request_types_stay_bounded() {
     }
     assert_eq!(
         shared
-            .status(&RemoteSettings::disabled())
+            .status(&RemoteSettings::disabled(), &OnAir::default())
             .unsupported_requests
             .len(),
         64
@@ -290,7 +322,7 @@ fn client_chosen_request_types_stay_bounded() {
     // Full: a 65th type is neither stored nor logged.
     assert!(!shared.note_unsupported("R99"));
     let listed = shared
-        .status(&RemoteSettings::disabled())
+        .status(&RemoteSettings::disabled(), &OnAir::default())
         .unsupported_requests;
     assert_eq!(listed.len(), 64);
     assert!(!listed.contains(&"R99".to_string()));
@@ -299,7 +331,8 @@ fn client_chosen_request_types_stay_bounded() {
 #[test]
 fn the_status_serializes_the_api_field_names() {
     let shared = RemoteShared::default();
-    let v = serde_json::to_value(shared.status(&settings(true, 4456, None))).unwrap();
+    let v = serde_json::to_value(shared.status(&settings(true, 4456, None), &OnAir::default()))
+        .unwrap();
     assert_eq!(
         v,
         json!({
@@ -314,7 +347,49 @@ fn the_status_serializes_the_api_field_names() {
             "last_remote_cut": null,
             "unsupported_requests": [],
             "last_transition_duration": null,
+            "program_scene": null,
         })
+    );
+}
+
+/// #221 review round 3: a production facade waits for a switch's
+/// `SceneTransitionEnded` at most the production bound (only `for_test` sets
+/// a longer one).
+#[tokio::test]
+async fn a_production_facade_bounds_the_ended_wait_by_the_production_value() {
+    let (events, _) = broadcast::channel::<ObsEvent>(4);
+    let facade = Facade::new(
+        pool().await,
+        Arc::new(ProgramBus::new()),
+        Upstream::new(None, events),
+        None,
+    );
+    assert_eq!(
+        facade.transition_end_max,
+        studio_events::TRANSITION_END_MAX_WAIT
+    );
+}
+
+/// #221 L3: `program_scene` names what SP-program has on air with the one
+/// resolver: the scene it was cut for, "OBS manuál" for the NDI input with
+/// no scene, `null` while nothing is on air.
+#[test]
+fn the_status_names_the_program_scene_with_the_resolver() {
+    let shared = RemoteShared::default();
+    let settings = RemoteSettings::disabled();
+    let on_air = |source: i64, scene: Option<&str>| OnAir::default().next(source, scene);
+    let named = |on_air: &OnAir| shared.status(&settings, on_air).program_scene;
+    assert_eq!(named(&OnAir::default()), None);
+    assert_eq!(
+        named(&on_air(7, Some("sp-fast"))).as_deref(),
+        Some("sp-fast")
+    );
+    assert_eq!(named(&on_air(-1, Some("Slido"))).as_deref(), Some("Slido"));
+    assert_eq!(named(&on_air(-1, None)).as_deref(), Some("OBS manuál"));
+    assert_eq!(
+        named(&on_air(7, None)),
+        None,
+        "a playlist with no catalog scene"
     );
 }
 
@@ -466,8 +541,16 @@ async fn the_settings_task_binds_rebinds_retries_and_stops_the_listener() {
     let bus = Arc::new(ProgramBus::new());
     let (events, _) = broadcast::channel::<ObsEvent>(4);
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
-    let listening = || bus.remote().status(&RemoteSettings::disabled()).listening;
-    let error = || bus.remote().status(&RemoteSettings::disabled()).error;
+    let listening = || {
+        bus.remote()
+            .status(&RemoteSettings::disabled(), &OnAir::default())
+            .listening
+    };
+    let error = || {
+        bus.remote()
+            .status(&RemoteSettings::disabled(), &OnAir::default())
+            .error
+    };
 
     let port = free_port();
     set_setting(&pool, "remote_ws_port", &port.to_string())

@@ -6,6 +6,7 @@ paths:
   - "crates/sp-server/src/obs/remote_call.rs"
   - "crates/sp-server/tests/remote_control.rs"
   - "e2e/settings-remote.spec.ts"
+  - "e2e/obs-driver.ts"
 ---
 
 # Companion remote control — obs-websocket 5 subset (#213, C of EPIC #174)
@@ -18,10 +19,13 @@ the Companion module v3.15.3 and 4.0 beta): #213 comment 5850492736.
 
 #221 (owner ruling, comment 5872272050: Companion switches scenes directly in
 SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
-5873773896, lanes L1 + L2 here). The box's 17 page-13 buttons of the
+5873773896, lanes L1 + L2 + L3 here). The box's 17 page-13 buttons of the
 `cg_obs` connection are STUDIO-MODE buttons: each is `preview_scene(X)`,
 `wait 10 ms`, `do_transition`, and "ytfast" [0/0] also sends
-`set_transition_duration 2000`. The facade serves exactly that.
+`set_transition_duration 2000`. The facade serves exactly that, and (L3)
+Companion's feedback is SongPlayer's OWN program: `CurrentProgramSceneChanged`,
+`SceneTransitionStarted` / `SceneTransitionEnded` and `GetCurrentProgramScene`
+come from `SP-program`, never from cg OBS.
 
 ## What Companion needs (read from its source — do not "simplify" these away)
 
@@ -55,10 +59,15 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
   - "Authentication failed." → an authentication failure.
 
   Both close with 4009.
-- **Feedback** comes from `CurrentProgramSceneChanged {sceneName, sceneUuid}`
-  and the scene list from `GetSceneList` + `SceneListChanged {scenes}`. Both
-  events are passed through verbatim from cg OBS, with intent Scenes (4)
-  (until #221 L3 makes the program feedback SongPlayer's own).
+- **Feedback** comes from `CurrentProgramSceneChanged {sceneName}` (v3.15.3
+  reads only `sceneName`: `index.js` 420-425 sets `scene_active`), and the
+  scene list from `GetSceneList` + `SceneListChanged {scenes}`. #221 L3: the
+  program-scene event is SongPlayer's own (`remote/studio_events.rs`, below);
+  cg OBS's is NOT passed through. `SceneListChanged` is still cg OBS's,
+  passed through verbatim with intent Scenes (4).
+- `SceneTransitionStarted` / `SceneTransitionEnded` only set Companion's
+  `transition_active` variable (`index.js` 530-539, no field read); the
+  post-deploy E2E driver waits for the Ended.
 - The module reads only `sceneName` from `CurrentPreviewSceneChanged` and
   from `GetCurrentPreviewScene` (`index.js` 426-430, 676-686).
 - v4 sends batches (op 8, SerialRealtime) and a `Reidentify` (op 3) when a
@@ -75,23 +84,29 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
   - Hello / Identify / Identified, parse and `check_identify`;
   - `Reply` (its own status, or cg OBS's `requestStatus` passed through);
   - the route table: native / forward / `SetProgramScene` /
-    `SetPreviewScene` / `GetPreviewScene` / `TriggerTransition` /
-    `SetTransitionDuration` / unsupported;
+    `GetProgramScene` (L3) / `SetPreviewScene` / `GetPreviewScene` /
+    `TriggerTransition` / `SetTransitionDuration` / unsupported;
   - the pure request checks (#221): `scene_name` (missing → 300),
     `transition_duration`, `preview_scene_data`, `no_scene` (604,
-    obs-websocket's `InvalidResourceState`).
+    obs-websocket's `InvalidResourceState`), and (L3)
+    `program_scene_data` / `nothing_on_program` (604).
 
-  `FORWARDED_REQUESTS` = GetSceneList, GetCurrentProgramScene, GetInputList,
-  GetSceneItemList, GetGroupSceneItemList. A test pins it in sync with
-  `route`. The studio requests are never forwarded.
+  `FORWARDED_REQUESTS` = GetSceneList, GetInputList, GetSceneItemList,
+  GetGroupSceneItemList (L3: `GetCurrentProgramScene` is native now). A test
+  pins it in sync with `route`. The studio requests are never forwarded.
+  `passthrough_intent` passes only cg OBS's `SceneListChanged`.
+- `remote/studio_events.rs` (#221 L3) holds the facade's OWN events (see
+  "Program feedback" below): `FacadeEvent`, `run_program_feedback`,
+  `announce_transition`, `wait_transition_end`.
 - `remote/map.rs` (pure) is now only the #215 OBS follow's scene →
   `SceneAction` rule. Its `KeepReason` labels (`not_switched`,
   `input_inactive`) are shared with the switch path.
 - `playback/program_switch.rs` is the ONE switch path of a press (below).
   `playback/scene_catalog.rs` says which scene is a playlist's.
 - `remote/session.rs` runs one client in a `select!` that is `biased` toward
-  events. A cg OBS event that arrived before a client message is therefore
-  delivered under the subscriptions active when it arrived.
+  events: cg OBS's, then the facade's own (`Facade::events`). An event that
+  arrived before a client message is therefore delivered under the
+  subscriptions active when it arrived, and before that message's answer.
   - Requests of one session run in order.
   - Each session keeps its OWN preview scene (`Session::preview`).
   - Scene presses are serialized across ALL sessions by the bus's
@@ -101,11 +116,11 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
 - `remote/mod.rs` holds:
   - the settings;
   - `RemoteShared` (the telemetry, on `ProgramBus::remote()` like `vban()` /
-    `input()`);
+    `input()`; `status(&settings, &on_air)` names `program_scene`);
   - `Upstream`;
-  - `Facade`;
-  - `serve` (the accept loop; sessions live in its `JoinSet`, so dropping
-    it drops them);
+  - `Facade` (#221 L3: with `events`, the facade's own broadcast);
+  - `serve` (the accept loop; sessions AND the listener's program feedback
+    task live in its `JoinSet`, so dropping it drops them);
   - `run_remote_config_task`.
 - **cg OBS is reached ONLY through SongPlayer's existing OBS client**, never
   over a second connection:
@@ -201,6 +216,7 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
 | `GetCurrentPreviewScene` | `{sceneName, currentPreviewSceneName}`: the session's preview, else the program scene NOW (`program_scene_name`), else 604 |
 | `TriggerStudioModeTransition` | ALWAYS a switch to that preview (below), never short-circuited when it equals the program scene: a same-source cut is a bus no-op whose publication still counts (the re-kick). No preview and nothing on program → 604. The preview is NOT swapped afterwards. |
 | `SetCurrentProgramScene {sceneName}` | a switch to that scene |
+| `GetCurrentProgramScene` | (L3) `{sceneName, currentProgramSceneName}`: SP-program's scene (`program_scene_name`), never forwarded; nothing on program → 604 |
 | `SetCurrentSceneTransitionDuration {transitionDuration}` | validated like obs-websocket (missing / null → 300, not a number → 401, outside 50..=20000 → 402), 100, NOT applied: `remote.last_transition_duration {ms, applied: false}` (a fraction truncates) |
 
 - **The preview is per session**, not OBS-global: Companion's preview →
@@ -253,9 +269,44 @@ whole switch:
 A request without `sceneName` (a `sceneUuid` only) is answered `300` and
 nothing is switched. Companion always sends the name.
 
-The program feedback (`GetCurrentProgramScene` / `CurrentProgramSceneChanged`
-from SongPlayer's own program), the dashboard cut on this path, the playback
-authority and deleting the follow are the later lanes (L3–L6) of #221.
+The dashboard cut on this path, the playback authority and deleting the
+follow are the later lanes (L4a–L6) of #221.
+
+## Program feedback + transition events (#221 L3, `remote/studio_events.rs`)
+
+- **`CurrentProgramSceneChanged {sceneName}`** (Scenes, 4):
+  `run_program_feedback`, ONE task per bound listener (spawned by `serve`
+  into its `JoinSet`), watches `ProgramBus::on_air()`, names it with the one
+  resolver and emits whenever the NAME changes (`scene_change`). So it
+  follows EVERY cut: a press, a dashboard `POST /api/v1/program/cut`, the
+  OBS follow, the startup restore. A publication under the same name (a
+  same-scene press, the re-kick) is no event, as in OBS. The value on air
+  when the listener starts is not announced (a client reads it at connect).
+  -1 with no scene is "OBS manuál". The watch coalesces: A → B → A faster
+  than the task runs may announce nothing; the NAME a client last got is
+  always the current one.
+- **`SceneTransitionStarted` / `SceneTransitionEnded {transitionName}`**
+  (Transitions, 16): ONLY a facade switch that cut (`Switched::Cut` in
+  `session::switch`; a same-source cut too) calls `announce_transition`:
+  Started at once (sent before the waiter exists, so every client gets it
+  before Ended), then Ended once `transition.active` clears
+  (`wait_transition_end`, polled every 20 ms): at once when nothing is
+  mixed (a Cut, a same-source cut), else when the window is served, bounded
+  by `TRANSITION_END_MAX_WAIT` (15 s; the longest window is ~10.6 s, so only
+  a stalled `SP-program` sender reaches it — then Ended is sent anyway, with
+  a WARN). `transitionName` = the kind the program cuts with (`Cut` /
+  `Fade`). A kept / refused / failed press and a dashboard cut announce no
+  transition.
+- **Order a client sees for its own press:** the RequestResponse first (the
+  session is busy answering while the events queue), then Started, the
+  program-scene event and Ended — the program-scene event may come anywhere
+  relative to Started AND Ended (another task emits it; for a Cut the Ended
+  waiter, spawned last, can run first), Ended always after Started. Another
+  client may get them any time, so a test that asks a second client for
+  something must skip events (`request_collecting`).
+- `GET /api/v1/program` → `remote.program_scene` = the same resolver
+  (`null` — and `GetCurrentProgramScene` 604 — while nothing is on program
+  or a playlist whose catalog names no scene is on it).
 
 ## Settings, API, UI
 
@@ -270,7 +321,10 @@ authority and deleting the follow are the later lanes (L3–L6) of #221.
   - a bind failure (the port is taken) shows as `remote.error` and is retried
     on every poll, logged once per distinct error.
 - The listener binds `0.0.0.0` (Companion runs on another machine). It is
-  opt-in and meant for a trusted LAN.
+  off by default and meant for a trusted LAN. On the box CI keeps it ON
+  since #221 L3: "Seed settings" seeds `remote_ws_enabled=true` and fails
+  unless the facade listens on 4456 without a password — what the E2E scene
+  driver (`FACADE_WS_URL`) connects with.
   - The password gates the WebSocket only. Like every other setting, it is
     stored in plain text and readable through the unauthenticated
     `GET /api/v1/settings`, so it does not protect against a hostile LAN.
@@ -304,7 +358,8 @@ authority and deleting the follow are the later lanes (L3–L6) of #221.
   clients, requests, last_request, last_remote_cut, unsupported_requests,
   last_transition_duration}`.
   `enabled` / `port` / `auth` come from the STORED settings, so a save shows
-  at once.
+  at once. #221 L3: `program_scene` (SP-program's scene name, `null` while
+  nothing is on program).
 - Nastavenia has the fieldset `settings-remote` with `settings-remote-enabled`,
   `settings-remote-port` and `settings-remote-password`. The mock derives
   `remote` from the stored settings and runs no listener.
@@ -349,6 +404,21 @@ authority and deleting the follow are the later lanes (L3–L6) of #221.
     `a_manual_press_holds_the_switch_order_until_cg_obs_answers` pins that
     the lock spans a manual press's awaited forward: a second client's
     playlist press cannot cut while cg OBS holds the manual switch.
+- `session_tests_feedback.rs` (#221 L3, same rig): SongPlayer's own
+  `CurrentProgramSceneChanged` on a press AND a dashboard cut (no transition
+  events for the latter), none for a same-name publication, Started → Ended
+  at once for a Cut and only after the window is served for a fade (the test
+  serves it with `bus.release_due(now + 1 min)`: with no source live, every
+  due boundary is filled and the window is pruned), no transition for a
+  press that cut nothing, `GetCurrentProgramScene` native (604, never
+  forwarded). Its `pub(super) request_collecting` answers a request and
+  returns the events that came before the response — use it whenever
+  another client's press can have queued events.
+- `studio_events_tests.rs`: `scene_change`, the feedback task over a real
+  bus (a same-name publication is checked with `yield_now` rounds on the
+  current-thread runtime + `try_recv` Empty), the event shapes, and
+  `wait_transition_end` / `announce_transition` on a paused clock (at once
+  for a Cut, the served window, the 15 s bound).
 - `playback/program_switch_tests.rs`: `cg_forward_label`, the records, and
   `record_mirror` (its answer lands only on its own cut; an answer after the
   upstream timeout is still recorded, and the wait is bounded).
@@ -364,7 +434,11 @@ authority and deleting the follow are the later lanes (L3–L6) of #221.
 - `tests/remote_control.rs` runs end to end: client → facade → the REAL
   `ObsClient` → `FakeObsServer`. The harness serves `GetSceneList` /
   `GetCurrentProgramScene` / `SetCurrentProgramScene` from `scene_list` /
-  `program_scene`, logs `requests`, and has `push_event`.
+  `program_scene`, logs `requests`, and has `push_event`. #221 L3: after the
+  page-13 pair Companion gets SongPlayer's own `CurrentProgramSceneChanged`;
+  a pushed cg OBS `CurrentProgramSceneChanged` never arrives before the
+  pushed `SceneListChanged` witness (the OBS client's reader broadcasts raw
+  events in wire order).
 - Every wait is bounded (`TIMEOUT` ≤ 20 s); no sleep is used as
   synchronization.
 
@@ -398,21 +472,49 @@ authority and deleting the follow are the later lanes (L3–L6) of #221.
   manuál") did switch; a mirror cg OBS answers after 2 s is recorded
   `cg_forward: not_ready` although cg OBS followed. The next press
   corrects it.
-- In Studio Mode cg OBS can drop a `CurrentProgramSceneChanged` (#170).
-  Companion's feedback then misses it exactly as it does when connected to cg
-  OBS directly. SongPlayer's own ~2 s poll reconcile emits `SceneChanged`,
-  which is not re-emitted as a raw event. (#221 L3 replaces this feedback
-  with SongPlayer's own.)
+- **Companion's feedback at CONNECT is still cg OBS's.** v3.15.3's
+  `buildSceneList` sets `scene_active` from the forwarded `GetSceneList`'s
+  `currentProgramSceneName` (`index.js` 1102-1115), which is cg OBS's
+  program. Until B4 step 6 the mirror keeps cg OBS on SP-program's playlist
+  scene, so they differ only after SongPlayer cut to "OBS manuál" with no
+  scene (a startup restore, a dashboard cut to -1); the next program-scene
+  event corrects it. Found in L3, not in the design record — the main
+  session decides whether the forwarded answer is patched.
 - When Companion connects while cg OBS is down, its scene list stays empty
   until cg OBS emits a `SceneListChanged` or Companion reconnects. The
   page-13 buttons send their stored names verbatim, so they keep working:
   playlist presses cut, manual presses answer not-ready.
+- The E2E driver (`e2e/obs-driver.ts`) raises its transition flag BEFORE
+  `TriggerStudioModeTransition`: the facade ends a Cut at once, and Node's
+  `ws` may hand the response and the Ended frame over in one tick, so a flag
+  raised after the call's promise could undo the Ended and stall the wait.
 - Until #221 L4b the PLAYBACK is still driven by cg OBS's scene detection:
   a playlist press cuts `SP-program` at once, but the playlist starts
   playing when the mirror has switched cg OBS. A failed mirror leaves the
   playlist on `SP-program` paused (`cg_forward` says so).
 - Hand switches in cg OBS's own UI are invisible to the facade (no cg
   tracking, by the owner's ruling): the next press decides.
+- **Until the cutover / L4b the E2E's "scene to restore" is SP-program's,
+  not the wall's** (L3 + review round 1, for the main session). The E2E
+  captures its initial scene from the facade (the dispatch: the cg driver is
+  for the recording only), but cg OBS's program — what the wall, FOH, lv1
+  and strih take — can differ from SP-program's name:
+  - cg OBS on a manual scene while "OBS manuál" is off: the follow keeps the
+    last playlist on SP-program (box 28.9: the input was off);
+  - a manual → manual change in cg OBS: the follow publishes nothing, so
+    SP-program still names the first manual scene;
+  - a restart while a manual scene was on: -1 is restored with NO scene, so
+    the facade names it "OBS manuál" (a keep while the input is off: no
+    transition event, the driver's wait times out, and `post-deploy.spec.ts`
+    `afterAll`'s engine check, cg OBS's `active_scene` until L4b, fails).
+
+  In the first two the E2E's restore presses SP-program's scene, and the
+  mirror leaves cg OBS — the wall — on it instead of the operator's manual
+  scene. Not hit while a playlist is on program (the box: source 7). The
+  driver's old same-scene skip made it worse (a baseline press the facade
+  already named never re-mirrored cg OBS) and was removed in round 1; the
+  rest needs either the cutover + L4b, or a read-only initial scene from cg
+  OBS until then — a decision for the main session.
 
 ## Box acceptance (the supervisor's job)
 
@@ -429,7 +531,14 @@ against `resolume:4456`, with `remote_ws_enabled=true`. It must:
 - on `SetCurrentSceneTransitionDuration 2000`, answer 100 and leave
   `transition.duration_ms` unchanged (`last_transition_duration {ms: 2000,
   applied: false}`);
-- keep `unsupported_requests` free of the studio requests.
+- keep `unsupported_requests` free of the studio requests;
+- (L3) after each press send SongPlayer's `CurrentProgramSceneChanged` with
+  the button's scene (Companion → Variables `cg_obs:scene_active`), then
+  `SceneTransitionStarted` / `SceneTransitionEnded`; answer
+  `GetCurrentProgramScene` with `remote.program_scene`; after a dashboard
+  `POST /api/v1/program/cut` send only the program-scene event;
+- (L3) run the post-deploy E2E with its scene driver on :4456
+  (`FACADE_WS_URL`), `remote_ws_enabled=true` seeded by CI.
 
 Box E2E rules apply: never leave the wall on a disruptive scene, and restore
 the program scene afterwards.
