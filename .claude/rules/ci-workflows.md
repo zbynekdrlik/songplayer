@@ -224,6 +224,13 @@ finished leaves that push range without a mutation verdict — re-run its failed
 jobs before trusting the diff, and expect the old commit's already-known
 survivors to fail again there (read only the shard you need).
 
+**Two push runs for ONE commit: never cancel either by hand** (28.9.2026,
+`36494106201` + `36494106433`). The concurrency group already cancels the
+older one. `gh run cancel` on the queued survivor still lands, even when the
+run keeps showing `queued` for a minute, and then NO run is left for the
+commit. Leave a duplicate alone. If both end cancelled, re-run the survivor
+in full (`gh run rerun <id>`, not `--failed`).
+
 ## Post-deploy E2E: OBS is in Studio Mode with a 2000ms Fade — never blind-sleep after a scene switch (#170)
 
 **#221 L3 (read this first).** The E2E scene driver no longer talks to cg
