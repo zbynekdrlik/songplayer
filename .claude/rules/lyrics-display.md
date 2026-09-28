@@ -71,7 +71,8 @@ catalogue reprocess, and it would not fix songs that are already stored.
 |---|---|---|
 | `LEAD_MAX_MS` | 800 | A `Song` line appears at most this long before it is sung (`Speech`: 0). |
 | `SUSTAIN_MARGIN_MS` | 1500 | …and only this long after the previous display line's last sung line ends (a real pause). |
-| `MIN_VISIBLE_MS` | 1200 | A `Song` line stays up at least this long; the next line waits for it. |
+| `MIN_VISIBLE_MS` | 1200 | A `Song` line stays up at least this long; the next line waits for it, up to `MAX_LATE_MS`. |
+| `MAX_LATE_MS` | 400 | `MIN_VISIBLE_MS − LEAD_MAX_MS`: the most the floor may hold a `Song` line back past its sung start (ROZHODNUTÉ, Design-question 5868750224). |
 | `LONG_GAP_MS` | 8000 | A sung gap longer than this is an instrumental break: the display line closes and the wall blanks. |
 | `HOLD_TAIL_MS` | 3000 | Before a break, and after the last line, the line leaves this long after its end. |
 | `MAX_CHARS` | 72 | The most chars one display line's text may have (a single longer source line is shown whole). |
@@ -102,13 +103,16 @@ one only together with the design record on #217.
      never synthesized (v18 rule).
 2. **Show** (`DisplayProfile::show_ms`). For a `Song`:
    `show = max(min(max(start − LEAD_MAX, prev_end + SUSTAIN_MARGIN), start),
-   prev_show + MIN_VISIBLE)`. The first line gets `start − LEAD_MAX`
-   (clamped at 0).
+   min(prev_show + MIN_VISIBLE, start + MAX_LATE))`. The first line gets
+   `start − LEAD_MAX` (clamped at 0).
    - A line that follows the previous sentence without a pause shows
      exactly when it is sung.
    - The floor comes LAST, so a line sung less than 1200 ms after the
      previous one shows a little late (the design record's order; its
-     acceptance "no display under 1.2 s on the fixtures" needs it).
+     acceptance "no display under 1.2 s on the fixtures" needs it). It is
+     bounded: never more than `MAX_LATE_MS` (400 ms) past the sung start,
+     so a fast run of short sentences is shown for under 1200 ms each
+     instead of drifting behind the singing.
    - For `Speech`: `show = start`.
 3. **Hold.** `hide = next.show` when the sung gap to the next display line is
    ≤ `LONG_GAP_MS`. Before a longer gap, and after the last line, it is
@@ -119,20 +123,26 @@ one only together with the design record on #217.
 
 ## Gotchas
 
-- **The MIN_VISIBLE floor after the cap can fall behind in a fast run of
-  separate sentences.** Once a line shows at or after its sung start, each
-  further sentence that starts under 1200 ms after the previous one's start
-  adds `1200 − Δstart` ms of delay. For example, four sentences 1 s apart
-  show −800 (the first line's lead), 0, +200 and +400 ms from their sung
-  starts (pinned by `in_a_fast_run_of_short_sentences_each_keeps_1200_ms`).
-  - Not on the three fixtures. The worst is 100 ms: What A God's doubled
-    0.3 s "What a God, what a God.", whose text is the same.
-  - A chant with a sentence mark on every short line drifts. Eight "Hey!"
-    lines 400 ms apart put the next sentence 4.8 s late. Before a break
-    over 8 s, the last "Hey!" gets `show > hide` and is never shown. This is
-    raised on #217 as a design question (bound the floor's delay).
+- **The MIN_VISIBLE floor is bounded by `MAX_LATE_MS` (ROZHODNUTÉ on
+  Design-question 5868750224).** Unbounded, it drifted: each sentence
+  starting under 1200 ms after the previous one added `1200 − Δstart` ms of
+  delay. A chant of eight "Hey!" lines 400 ms apart put the next sentence
+  4.8 s late, and before a break over 8 s the last "Hey!" got
+  `show > hide` and was never shown.
+  - Now every `Song` line shows at most 400 ms after its sung start, and
+    `hide > show` always. The chant's lines are up for 400–1200 ms each,
+    and the sentence after it shows 400 ms late
+    (`a_chant_of_short_sentences_falls_at_most_400_ms_behind`).
+  - Four sentences 1 s apart still show −800, 0, +200 and +400 ms
+    (`in_a_fast_run_of_short_sentences_each_keeps_1200_ms`).
+  - Every fixture pin is unchanged. The worst delay on the fixtures is
+    100 ms: What A God's doubled 0.3 s "What a God, what a God.".
   - The cap-first order never lags, but gives What A God an 1100 ms display.
-  - Changing the order is a design-record change on #217.
+  - Changing the order or the bound is a design-record change on #217.
+- **The SK text is not split at 72 chars (ROZHODNUTÉ on Design-question
+  5868750224).** EN drives the grouping. 4 of the 233 fixture wall lines
+  carry a 73–83-char SK translation; the main checks them on the wall
+  after deploy.
 - **Test tracks need sentence marks.** Unpunctuated lines within 6.5 s and 72
   chars are ONE sentence now, so a test that wants two wall lines must end
   each line in `.`. Examples: `renderer.rs` `wall_track` / `two_line_track`,
