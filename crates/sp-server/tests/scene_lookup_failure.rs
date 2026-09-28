@@ -25,6 +25,11 @@ use tokio::sync::{RwLock, broadcast};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 
+/// The longest a held answer may wait (seen from the test) and still be
+/// awaited by the client, whose response timeout is 2 s: the hold starts a
+/// little before the test sees it.
+const HELD_MAX: Duration = Duration::from_millis(1500);
+
 /// The real OBS client connected to a fake cg OBS whose program shows
 /// `sp-fast` (playlist 7); `sp-slow` shows playlist 8.
 struct Rig {
@@ -316,6 +321,7 @@ async fn a_poll_read_an_event_overtook_never_rolls_the_scene_back() {
             .any(|r| r["d"]["requestType"] == "GetCurrentProgramScene")
     })
     .await;
+    let read_held = tokio::time::Instant::now();
     // cg OBS switches to sp-slow; its event overtakes that read, and its
     // lookup is held. sp-fast's lookups answer again from now on.
     rig.fake
@@ -332,14 +338,21 @@ async fn a_poll_read_an_event_overtook_never_rolls_the_scene_back() {
             .any(|r| r["d"]["requestType"] == "GetSceneItemList")
     })
     .await;
+    let lookup_held = tokio::time::Instant::now();
     // The stale read answers sp-fast: the poll looks sp-fast up again (it
     // answers now). Then sp-slow's lookup answers. Whichever of the two
-    // lands first, the event's must win. (Every hold here is well under the
-    // client's 2 s response timeout.)
+    // lands first, the event's must win. A held answer only counts while the
+    // client still waits for it (its 2 s response timeout): a runner that
+    // stalled past that voids the scenario, which is said as such.
     let asked = rig.lookups_of("sp-fast").await;
     rig.fake
         .update_state(|s| s.hold_program_scene = false)
         .await;
+    assert!(
+        read_held.elapsed() < HELD_MAX,
+        "scenario void: the runner stalled {:?} with the program read held (not a regression)",
+        read_held.elapsed()
+    );
     rig.fake.release_held("GetCurrentProgramScene").await;
     rig.fake_until("the stale relookup of sp-fast", move |s| {
         s.requests
@@ -351,6 +364,11 @@ async fn a_poll_read_an_event_overtook_never_rolls_the_scene_back() {
             > asked
     })
     .await;
+    assert!(
+        lookup_held.elapsed() < HELD_MAX,
+        "scenario void: the runner stalled {:?} with sp-slow's lookup held (not a regression)",
+        lookup_held.elapsed()
+    );
     rig.fake.release_held("GetSceneItemList").await;
     rig.program_becomes("sp-slow", &[8]).await;
     rig.stop().await;

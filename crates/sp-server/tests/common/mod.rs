@@ -30,6 +30,9 @@ use tokio_tungstenite::tungstenite::Message;
 /// The key of the control message `FakeObsServer::release_held` sends down
 /// the event channel (never forwarded to the client as an event).
 const RELEASE_HELD: &str = "__release_held";
+/// The key of the control message `FakeObsServer::close_client` sends down the
+/// event channel: close the connected client's WebSocket.
+const CLOSE_CLIENT: &str = "__close_client";
 
 /// Scripted state the fake OBS reveals to its clients.
 #[derive(Clone, Default)]
@@ -178,6 +181,12 @@ impl FakeObsServer {
             .event_tx
             .send(json!({ RELEASE_HELD: request_type }))
             .await;
+    }
+
+    /// #219: close the connected client's WebSocket (a Close frame) — cg OBS
+    /// going away; the fake keeps accepting, so the client reconnects.
+    pub async fn close_client(&self) {
+        let _ = self.event_tx.send(json!({ CLOSE_CLIENT: true })).await;
     }
 
     /// #213: push any event (intent 4 = Scenes) to the connected client.
@@ -381,6 +390,11 @@ async fn handle_client(
                 }
             }
             Some(evt) = event_rx_guard.recv() => {
+                // #219: a `close_client` control message.
+                if evt.get(CLOSE_CLIENT).is_some() {
+                    let _ = write.send(Message::Close(None)).await;
+                    return;
+                }
                 // #218: a `release_held` control message, not an OBS event.
                 if let Some(kind) = evt.get(RELEASE_HELD).and_then(Value::as_str) {
                     let released: Vec<Value> = {

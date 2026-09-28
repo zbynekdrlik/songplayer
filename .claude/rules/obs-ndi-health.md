@@ -284,7 +284,8 @@ only) never repaired it.
   the order cg OBS did them — an event cg OBS sent before answering a read
   but that the reader reads after the read's ticket still outranks the read
   (same or older state); that is stale only if cg OBS then drops the newer
-  event (#170), and the poll's mismatch path repairs it in ~3–5 s.
+  event (#170), and the poll's mismatch path repairs it in ~4–6 s (plus one
+  lookup round-trip).
   Tests: `a_poll_read_an_event_overtook_never_rolls_the_scene_back`
   (the fake's `hold_program_scene` / `hold_lookups_of` + `release_held`: a
   held answer must stay under the client's 2 s response timeout) and
@@ -347,9 +348,13 @@ ONE view of cg OBS: the OBS client's. `obs/snapshot.rs`: `ObsSnapshot`
 - `lookup_failed: Some(scene)` → `active_playlist_ids` belong to an EARLIER
   scene: a consumer must not act on them (the follow ignores the snapshot);
 - `transition` = cg OBS's current scene transition, `None` while unknown;
-- a disconnect resets everything (`ObsState::reset_disconnected`); the
-  channel starts at the default (disconnected) snapshot; without OBS
-  configured `start_obs` hands out a CLOSED channel.
+- a disconnect resets everything (`ObsState::reset_disconnected`, written
+  through `update_scene` with a fresh ticket, so it is published) — pinned by
+  `a_disconnect_forgets_everything_of_cg_obs` (the fields) and
+  `a_disconnect_is_published_and_the_reconnect_publishes_the_program_again`
+  (the fake's `close_client`); the channel starts at the default
+  (disconnected) snapshot; without OBS configured `start_obs` hands out a
+  CLOSED channel.
 - Functions taking the crate-private `ObsShared` (`apply_scene_change`,
   `reconcile_program_scene`) are `pub(crate)` — a `pub fn` with it in its
   signature trips `private_interfaces` under `-D warnings`.

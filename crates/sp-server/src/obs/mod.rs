@@ -537,9 +537,11 @@ async fn connect_and_run(
     let reader_handle = tokio::spawn(reader);
     let write: SharedWrite = std::sync::Arc::new(tokio::sync::Mutex::new(write));
 
-    // JoinSet tracks all tasks spawned in the main loop body. On loop
-    // exit, abort_all() prevents detached tasks from running against a
-    // dead write half across reconnects.
+    // JoinSet tracks the connection's helper tasks: the step-4b transition
+    // reader and every task the main loop body spawns (`spawn_helper`, which
+    // reaps the finished ones). On loop exit (or the step-6 `Closed` bail),
+    // abort_all() prevents them from running against a dead write half
+    // across reconnects.
     let mut spawned_tasks: JoinSet<()> = JoinSet::new();
 
     // Step 4b (#219): cg OBS's transition — read now, again on every
@@ -759,7 +761,10 @@ async fn connect_and_run(
                         let write = std::sync::Arc::clone(&write);
                         let ndi_sources = std::sync::Arc::clone(ndi_sources);
                         let dispatcher = dispatcher.clone();
-                        spawn_helper(&mut spawned_tasks, remote_call::run(write, dispatcher, ndi_sources, call));
+                        spawn_helper(
+                            &mut spawned_tasks,
+                            remote_call::run(write, dispatcher, ndi_sources, call),
+                        );
                     }
                 }
             }

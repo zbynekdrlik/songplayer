@@ -212,6 +212,30 @@ async fn the_client_reads_cg_obs_transition_at_connect_and_on_its_events() {
     rig.stop().await;
 }
 
+/// Review round 5: a real disconnect is PUBLISHED as the default
+/// (disconnected, nothing known) snapshot — the program follow reads a
+/// disconnect only from it — and the reconnect publishes cg OBS's program
+/// again.
+#[tokio::test]
+async fn a_disconnect_is_published_and_the_reconnect_publishes_the_program_again() {
+    let mut rig = Rig::start(cg_obs()).await;
+    let program = |s: &obs::ObsSnapshot| {
+        s.connected
+            && s.current_scene.as_deref() == Some("sp-fast")
+            && s.active_playlist_ids.len() == 1
+            && s.active_playlist_ids.contains(&7)
+            && s.lookup_failed.is_none()
+    };
+    rig.snapshot_becomes("cg OBS's program, sp-fast {7}", program)
+        .await;
+    rig.fake.close_client().await;
+    rig.snapshot_becomes("the disconnect", |s| *s == obs::ObsSnapshot::default())
+        .await;
+    rig.snapshot_becomes("the reconnect's program, sp-fast {7}", program)
+        .await;
+    rig.stop().await;
+}
+
 #[tokio::test]
 async fn a_transition_read_with_no_answer_is_asked_again_until_answered() {
     let mut cg = cg_obs();
