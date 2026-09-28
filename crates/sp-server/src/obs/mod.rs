@@ -544,12 +544,15 @@ async fn connect_and_run(
 
     // Step 4b (#219): cg OBS's transition — read now, again on every
     // transition event (the reader wakes it), retried until answered.
-    spawned_tasks.spawn(transition::run_transition_reader(
-        Arc::clone(&write),
-        dispatcher.clone(),
-        obs.clone(),
-        transition_wake,
-    ));
+    spawn_helper(
+        &mut spawned_tasks,
+        transition::run_transition_reader(
+            Arc::clone(&write),
+            dispatcher.clone(),
+            obs.clone(),
+            transition_wake,
+        ),
+    );
 
     // Step 5: initial NDI source map rebuild (same retry-on-empty
     // policy as before — the rebuild now goes via the dispatcher).
@@ -653,7 +656,7 @@ async fn connect_and_run(
                         let ndi_sources = std::sync::Arc::clone(ndi_sources);
                         let obs = obs.clone();
                         let event_tx = event_tx.clone();
-                        spawned_tasks.spawn(async move {
+                        spawn_helper(&mut spawned_tasks, async move {
                             scene::apply_scene_change(
                                 &write,
                                 &dispatcher,
@@ -689,7 +692,7 @@ async fn connect_and_run(
                     ObsCommand::SetTextSource { source_name, text } => {
                         let write = std::sync::Arc::clone(&write);
                         let dispatcher = dispatcher.clone();
-                        spawned_tasks.spawn(async move {
+                        spawn_helper(&mut spawned_tasks, async move {
                             let req_id = uuid::Uuid::new_v4().to_string();
                             let req = text::set_text_request(&req_id, &source_name, &text);
                             match dispatcher
@@ -741,7 +744,7 @@ async fn connect_and_run(
                         // the main loop does not block on the OBS round-trips.
                         let write = std::sync::Arc::clone(&write);
                         let dispatcher = dispatcher.clone();
-                        spawned_tasks.spawn(async move {
+                        spawn_helper(&mut spawned_tasks, async move {
                             crate::obs::ndi_recovery_io::execute(
                                 &write,
                                 &dispatcher,
@@ -756,7 +759,7 @@ async fn connect_and_run(
                         let write = std::sync::Arc::clone(&write);
                         let ndi_sources = std::sync::Arc::clone(ndi_sources);
                         let dispatcher = dispatcher.clone();
-                        spawned_tasks.spawn(remote_call::run(write, dispatcher, ndi_sources, call));
+                        spawn_helper(&mut spawned_tasks, remote_call::run(write, dispatcher, ndi_sources, call));
                     }
                 }
             }
@@ -780,7 +783,7 @@ async fn connect_and_run(
                     let dispatcher = dispatcher.clone();
                     let ndi_sources = std::sync::Arc::clone(ndi_sources);
                     let pool = pool.clone();
-                    spawned_tasks.spawn(async move {
+                    spawn_helper(&mut spawned_tasks, async move {
                         apply_rebuild_result(
                             &ndi_sources,
                             rebuild_ndi_source_map(&write, &dispatcher, &pool).await,
@@ -800,7 +803,7 @@ async fn connect_and_run(
                 let obs = obs.clone();
                 let event_tx = event_tx.clone();
                 let scene_pending = std::sync::Arc::clone(&scene_pending);
-                spawned_tasks.spawn(async move {
+                spawn_helper(&mut spawned_tasks, async move {
                     scene_poll::reconcile_program_scene(
                         &write,
                         &dispatcher,
@@ -826,6 +829,14 @@ async fn connect_and_run(
         warn!("OBS reader task exited with error: {e}");
     }
     result
+}
+
+/// Spawn one of the connection's helper tasks into `tasks` (review round 4).
+fn spawn_helper(
+    tasks: &mut JoinSet<()>,
+    task: impl std::future::Future<Output = ()> + Send + 'static,
+) {
+    tasks.spawn(task);
 }
 
 /// Read the next text message from the WebSocket and parse as JSON.

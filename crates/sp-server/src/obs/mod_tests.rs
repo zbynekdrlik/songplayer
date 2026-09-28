@@ -307,3 +307,22 @@ async fn the_obs_config_reads_the_keys_the_dashboard_writes() {
     let cfg = load_obs_config(&pool).await.unwrap().unwrap();
     assert_eq!(cfg.password.as_deref(), Some("s3cret"));
 }
+
+/// Review round 4: a `JoinSet` keeps a finished task until it is joined, and
+/// the connection loop never joins — its ~2 s scene poll alone spawns ~43 000
+/// helper tasks a day. Every spawn first reaps the finished helpers.
+#[tokio::test]
+async fn spawning_a_helper_reaps_the_finished_ones() {
+    let mut tasks: JoinSet<()> = JoinSet::new();
+    for _ in 0..3 {
+        spawn_helper(&mut tasks, async {});
+    }
+    assert_eq!(tasks.len(), 3);
+    // Current-thread runtime: the three run to completion while this yields.
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    spawn_helper(&mut tasks, std::future::pending::<()>());
+    assert_eq!(tasks.len(), 1, "the three finished helpers were reaped");
+    tasks.abort_all();
+}
