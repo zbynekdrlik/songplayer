@@ -59,6 +59,10 @@ pub enum RemoteCall {
     Request {
         request_type: String,
         request_data: Option<Value>,
+        /// #221: a fire-and-forget switch whose `SP-program` cut already
+        /// happened (a playlist press's mirror): it replaces an earlier switch
+        /// still queued. `false` for everything the facade awaits.
+        supersedes: bool,
         reply: oneshot::Sender<Option<Value>>,
     },
 }
@@ -155,6 +159,7 @@ async fn send_call(
         request_type,
         request_data,
         reply,
+        ..
     } = call;
     if reply.is_closed() {
         debug!(request_type, "remote: the caller gave up — not forwarded");
@@ -314,13 +319,27 @@ mod tests {
         let call = RemoteCall::Request {
             request_type: request_type.to_string(),
             request_data: scene.map(|s| json!({ "sceneName": s })),
+            supersedes: false,
             reply,
         };
         (call, rx)
     }
 
+    /// A switch the facade awaits (a manual press's forward).
     fn switch_to(scene: &str) -> (RemoteCall, oneshot::Receiver<Option<Value>>) {
         call("SetCurrentProgramScene", Some(scene))
+    }
+
+    /// A playlist press's mirror (fire-and-forget: it supersedes).
+    fn mirror_of(scene: &str) -> (RemoteCall, oneshot::Receiver<Option<Value>>) {
+        let (reply, rx) = oneshot::channel();
+        let call = RemoteCall::Request {
+            request_type: "SetCurrentProgramScene".to_string(),
+            request_data: Some(json!({ "sceneName": scene })),
+            supersedes: true,
+            reply,
+        };
+        (call, rx)
     }
 
     /// The answer timeout of every forwarder test: far past any test's 10 s
@@ -429,7 +448,7 @@ mod tests {
         forwarder.abort();
     }
 
-    /// #221 review round 3: a switch with a later, still wanted switch queued
+    /// #221 review round 3: a switch with a later, still wanted mirror queued
     /// behind it is never sent — it is answered with nothing — so the newest
     /// press goes out at once however slowly cg OBS answers. A getter between
     /// them is still sent.
@@ -441,8 +460,8 @@ mod tests {
         let (tx, calls) = mpsc::unbounded_channel();
         let (older, older_rx) = switch_to("sp-fast");
         let (getter, _getter_rx) = call("GetSceneList", None);
-        let (middle, middle_rx) = switch_to("sp-slow");
-        let (newest, _newest_rx) = switch_to("Blank");
+        let (middle, middle_rx) = mirror_of("sp-slow");
+        let (newest, _newest_rx) = mirror_of("Blank");
         for queued in [older, getter, middle, newest] {
             tx.send(queued).unwrap();
         }
@@ -462,7 +481,27 @@ mod tests {
         forwarder.abort();
     }
 
-    /// A later switch whose requester already gave up supersedes nothing: the
+    /// #221 review round 4: a later MANUAL forward supersedes nothing: its
+    /// cut depends on cg OBS's answer, so the mirror queued before it still
+    /// goes out first.
+    #[tokio::test]
+    async fn a_later_manual_forward_supersedes_nothing() {
+        let (addr, mut frames) = cg_obs(false).await;
+        let dispatcher = Dispatcher::new();
+        let write = connect(addr, &dispatcher).await;
+        let (tx, calls) = mpsc::unbounded_channel();
+        let (mirror, _mirror_rx) = mirror_of("sp-fast");
+        let (manual, _manual_rx) = switch_to("Blank");
+        tx.send(mirror).unwrap();
+        tx.send(manual).unwrap();
+        let forwarder = tokio::spawn(run_calls(write, dispatcher, calls, HELD));
+        let frame = next_frame(&mut frames).await;
+        assert_eq!(frame["d"]["requestData"]["sceneName"], "sp-fast");
+        drop(tx);
+        forwarder.abort();
+    }
+
+    /// A later mirror whose requester already gave up supersedes nothing: the
     /// earlier, still wanted switch goes out.
     #[tokio::test]
     async fn an_abandoned_later_switch_supersedes_nothing() {
@@ -471,7 +510,7 @@ mod tests {
         let write = connect(addr, &dispatcher).await;
         let (tx, calls) = mpsc::unbounded_channel();
         let (wanted, _wanted_rx) = switch_to("sp-fast");
-        let (abandoned, abandoned_rx) = switch_to("sp-slow");
+        let (abandoned, abandoned_rx) = mirror_of("sp-slow");
         drop(abandoned_rx);
         tx.send(wanted).unwrap();
         tx.send(abandoned).unwrap();

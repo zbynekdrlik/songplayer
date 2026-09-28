@@ -36,6 +36,7 @@ fn spawn_holding_upstream() -> (mpsc::Sender<ObsCommand>, Calls, Held) {
                 request_type,
                 request_data,
                 reply,
+                ..
             }) = cmd
             else {
                 continue;
@@ -391,6 +392,61 @@ async fn a_playlist_press_never_waits_for_cg_obs() {
     })
     .await;
     assert_eq!(last_cut_json(&rig)["scene"], "sp-slow");
+}
+
+/// #221 review round 4: only a playlist press's mirror may supersede an
+/// earlier switch in the OBS client's forwarder; a manual press's forward,
+/// whose cut depends on cg OBS's answer, never does.
+#[tokio::test]
+async fn only_the_mirror_of_a_playlist_press_supersedes_an_earlier_switch() {
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<ObsCommand>(16);
+    let seen: Arc<Mutex<Vec<(String, bool)>>> = Arc::default();
+    let log = Arc::clone(&seen);
+    tokio::spawn(async move {
+        while let Some(cmd) = cmd_rx.recv().await {
+            let ObsCommand::Remote(RemoteCall::Request {
+                request_data,
+                supersedes,
+                reply,
+                ..
+            }) = cmd
+            else {
+                continue;
+            };
+            let scene = request_data
+                .as_ref()
+                .and_then(|d| d["sceneName"].as_str())
+                .unwrap_or("")
+                .to_string();
+            log.lock().unwrap().push((scene, supersedes));
+            let _ = reply.send(Some(
+                json!({ "requestStatus": { "result": true, "code": 100 } }),
+            ));
+        }
+    });
+    let calls = Calls::default();
+    let rig = rig_on(
+        Some(cmd_tx),
+        calls,
+        None,
+        IDENTIFY_TIMEOUT,
+        Duration::from_secs(3),
+    )
+    .await;
+    enable_input(&rig.pool, true).await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    press(&mut ws, "sp-fast").await;
+    press(&mut ws, "Slido").await;
+    wait_for("both switches reached cg OBS", || {
+        seen.lock().unwrap().len() == 2
+    })
+    .await;
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [("sp-fast".to_string(), true), ("Slido".to_string(), false)],
+        "the mirror supersedes, the manual forward does not"
+    );
 }
 
 #[tokio::test]

@@ -67,6 +67,7 @@ pub(super) fn spawn_fake_upstream() -> (mpsc::Sender<ObsCommand>, Calls) {
                 request_type,
                 request_data,
                 reply,
+                ..
             }) = cmd
             else {
                 continue;

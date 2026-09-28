@@ -338,6 +338,7 @@ async fn a_call_is_answered_through_the_obs_command_channel() {
                 request_type,
                 request_data,
                 reply,
+                ..
             }) = cmd
             else {
                 continue;
@@ -393,6 +394,7 @@ async fn a_full_obs_queue_is_not_ready_at_once_never_a_blocked_caller() {
         .try_send(ObsCommand::Remote(RemoteCall::Request {
             request_type: "filler".to_string(),
             request_data: None,
+            supersedes: false,
             reply,
         }))
         .unwrap();

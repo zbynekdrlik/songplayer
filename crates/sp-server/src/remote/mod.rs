@@ -380,23 +380,27 @@ impl Upstream {
     /// is not configured, not connected or did not answer within the timeout
     /// ([`UPSTREAM_TIMEOUT`]).
     pub async fn request(&self, request_type: &str, request_data: Option<Value>) -> Option<Value> {
-        let rx = self.enqueue(request_type, request_data)?;
+        let rx = self.enqueue(request_type, request_data, false)?;
         self.wait(rx).await
     }
 
     /// Hand one request to the OBS client without ever blocking on its queue
     /// (FIFO: it goes out after every call queued before it); the receiver of
     /// its op=7 `d`, `None` when there is no OBS client or its queue is full.
+    /// `supersedes`: a fire-and-forget switch (the #221 mirror) that replaces
+    /// an earlier switch still queued (`obs::remote_call`).
     pub fn enqueue(
         &self,
         request_type: &str,
         request_data: Option<Value>,
+        supersedes: bool,
     ) -> Option<oneshot::Receiver<Option<Value>>> {
         let tx = self.cmd_tx.as_ref()?;
         let (reply, rx) = oneshot::channel();
         let call = RemoteCall::Request {
             request_type: request_type.to_string(),
             request_data,
+            supersedes,
             reply,
         };
         if tx.try_send(ObsCommand::Remote(call)).is_err() {

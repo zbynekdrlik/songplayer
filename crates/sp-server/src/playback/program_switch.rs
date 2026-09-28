@@ -291,7 +291,10 @@ async fn cut_and_record(
 fn mirror(ctx: &SwitchCtx<'_>, name: &str, cut_id: u64) {
     let shared = Arc::clone(ctx.bus.remote());
     let data = json!({ "sceneName": name });
-    match ctx.upstream.enqueue("SetCurrentProgramScene", Some(data)) {
+    match ctx
+        .upstream
+        .enqueue("SetCurrentProgramScene", Some(data), true)
+    {
         Some(rx) => {
             shared.set_cg_forward(cut_id, CG_PENDING.to_string());
             let upstream = ctx.upstream.clone();
