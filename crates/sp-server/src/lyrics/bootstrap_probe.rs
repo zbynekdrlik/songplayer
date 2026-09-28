@@ -92,8 +92,9 @@ impl Readiness {
     pub fn action(&self) -> ProbeAction {
         match self {
             Self::Ready => ProbeAction::FastPath,
-            // The old bare-bool gate: any other answer reinstalls.
-            _ => ProbeAction::Install,
+            Self::Missing => ProbeAction::Install,
+            _ if self.is_import_failure() => ProbeAction::Install,
+            Self::Timeout | Self::Failed { .. } => ProbeAction::Retry,
         }
     }
 }
@@ -111,9 +112,10 @@ pub fn import_failure(stderr: &str) -> bool {
 }
 
 /// The last `max` characters of `stderr`, trimmed (never splits a character).
-pub fn stderr_tail(_stderr: &str, _max: usize) -> String {
-    // The old probe never read its stderr.
-    String::new()
+pub fn stderr_tail(stderr: &str, max: usize) -> String {
+    let trimmed = stderr.trim();
+    let skip = trimmed.chars().count().saturating_sub(max);
+    trimmed.chars().skip(skip).collect()
 }
 
 /// How long `decide` keeps retrying before it acts.

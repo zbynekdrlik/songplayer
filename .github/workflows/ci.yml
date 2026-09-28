@@ -1872,6 +1872,53 @@ jobs:
           }
           Write-Host "OK: Dashboard verified via Playwright"
 
+      - name: Prepare the A/V gate's own Python (#221)
+        shell: powershell
+        run: |
+          # #221: the A/V gate (scripts/av_sync_check.py) must never share
+          # SongPlayer's lyrics venv: SongPlayer may reinstall its packages at
+          # startup (numpy replaced mid-analysis failed CI run 36475215084 with
+          # "No module named 'numpy.fft'"). It gets its OWN small venv, created
+          # once and verified on every run. numpy is pinned to the version the
+          # Eval Checks job tests av_sync_check.py with; av_sync_check.py and
+          # its sibling av_sync_drift / av_sync_warp import nothing else.
+          # Continue (NOT Stop): pip may print notices on stderr; every native
+          # call below is judged by its own exit code instead.
+          $ErrorActionPreference = "Continue"
+          $venv = "C:\ProgramData\SongPlayer\e2e\avsync_venv"
+          $py = Join-Path $venv "Scripts\python.exe"
+          $numpy = "2.1.1"
+          if (-not (Test-Path $py)) {
+            $sys = "C:\Program Files\Python312\python.exe"
+            if (-not (Test-Path $sys)) {
+              $sys = (Get-Command python -ErrorAction Stop).Source
+            }
+            Write-Host "Creating the A/V gate venv at $venv with $sys"
+            & $sys -m venv $venv
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "FAIL: python -m venv $venv exited $LASTEXITCODE"
+              exit 1
+            }
+          }
+          # Exit 3 (no traceback) when numpy is missing or another version.
+          & $py -c "import sys, importlib.util as u; sys.exit(3) if u.find_spec('numpy') is None else None; import numpy; sys.exit(0 if numpy.__version__ == '$numpy' else 3)"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Installing numpy==$numpy into the A/V gate venv"
+            & $py -m pip install --disable-pip-version-check --no-input "numpy==$numpy"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "FAIL: pip install numpy==$numpy exited $LASTEXITCODE"
+              exit 1
+            }
+          }
+          # Verify: the script's own imports load (numpy.fft + its siblings).
+          & $py "$env:GITHUB_WORKSPACE\scripts\av_sync_check.py" --help | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: av_sync_check.py does not start under $py (exit $LASTEXITCODE)"
+            exit 1
+          }
+          $version = & $py -c "import numpy; print(numpy.__version__)"
+          Write-Host "OK: the A/V gate venv at $venv has numpy $version"
+
       - name: Feature-level Playwright (post-deploy spec)
         shell: powershell
         env:
@@ -1881,9 +1928,10 @@ jobs:
           FACADE_WS_URL: ws://localhost:4456
           OBS_WS_URL: ws://localhost:4455
           # #147 A/V sync + dropout gate (e2e/post-deploy-av-sync.spec.ts):
-          # the Python that runs scripts/av_sync_check.py (numpy) and the
-          # app's bundled ffmpeg (the box has no ffprobe; none is needed).
-          SP_AVSYNC_PYTHON: C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe
+          # the Python that runs scripts/av_sync_check.py (#221: its OWN venv,
+          # prepared by the step above, never the lyrics venv) and the app's
+          # bundled ffmpeg (the box has no ffprobe; none is needed).
+          SP_AVSYNC_PYTHON: C:\ProgramData\SongPlayer\e2e\avsync_venv\Scripts\python.exe
           SP_FFMPEG: C:\ProgramData\SongPlayer\cache\tools\ffmpeg.exe
         run: |
           # Runs the committed e2e/post-deploy*.spec.ts against the
