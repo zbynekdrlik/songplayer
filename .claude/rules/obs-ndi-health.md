@@ -504,7 +504,12 @@ and the recording actually get.
 
 - **Where it runs:** `e2e/post-deploy-av-sync.spec.ts`, inside the E2E job's
   "Feature-level Playwright (post-deploy spec)" step (`post-deploy.config.ts`
-  matches `post-deploy*.spec.ts`). It uses the shared `ObsDriver` (obs-websocket).
+  matches `post-deploy*.spec.ts`). It uses the shared `ObsDriver` (obs-websocket)
+  twice (#221 L3): the SCENE driver on SongPlayer's facade (`FACADE_WS_URL`,
+  :4456 — Companion's studio-mode path, SongPlayer's own program feedback and
+  transition events), and a second one on cg OBS (`OBS_WS_URL`, :4455) ONLY
+  for `GetProfileParameter` / `StartRecord` / `StopRecord` /
+  `GetRecordStatus` (the recording is cg OBS's program).
   It parks the program on the shared baseline scene (`e2e/obs-baseline-scene.ts`:
   sp-slow, never sp-warmup/sp-fast). It proves the output is PLAYING with
   `/api/v1/ndi/health`: `state=Playing` AND `frames_submitted_last_5s > 0`.
@@ -588,10 +593,18 @@ and the recording actually get.
   `*_{youtube_id}_normalized[_gf]_{video.mp4|audio.flac}`
   (`resolveSidecars`). Exactly one complete pair must match, otherwise the gate
   throws.
-- **Analysis:** `scripts/av_sync_check.py` runs under the lyrics venv Python
-  (`SP_AVSYNC_PYTHON`) with the bundled ffmpeg (`SP_FFMPEG`). Only numpy is
-  needed. The box has no ffprobe, so stream start times and frame sizes come
-  from ffmpeg's own `showinfo`/`ashowinfo` pts.
+- **Analysis:** `scripts/av_sync_check.py` runs under the gate's OWN venv
+  (`SP_AVSYNC_PYTHON` = `C:\ProgramData\SongPlayer\e2e\avsync_venv\Scripts\python.exe`)
+  with the bundled ffmpeg (`SP_FFMPEG`). Only numpy is needed. #221: never
+  the lyrics venv — SongPlayer may reinstall its packages at startup, and a
+  numpy replaced mid-analysis failed CI run 36475215084 (`No module named
+  'numpy.fft'`). The E2E step "Prepare the A/V gate's own Python (#221)"
+  creates the venv once and verifies it every run (numpy pinned to the
+  Eval Checks version, 2.1.1; `av_sync_check.py --help` must start). A new
+  import in `av_sync_check.py` / `av_sync_drift.py` / `av_sync_warp.py`
+  must be added to that step AND to the Eval Checks pip line. The box has
+  no ffprobe, so stream start times and frame sizes come from ffmpeg's own
+  `showinfo`/`ashowinfo` pts.
   - **audio:** 8 kHz mono FFT cross-correlation, normalized by local energy,
     searched over the whole song. corr must be ≥ 0.9.
   - **video:** 64-wide gray frames, cropped to the content box computed from
