@@ -241,7 +241,13 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   test.beforeAll(async () => {
     scenes = await ObsDriver.connect(FACADE_WS_URL);
     recorder = await ObsDriver.connect(OBS_WS_URL);
-    initialScene = await scenes.currentProgramScene();
+    try {
+      initialScene = await scenes.currentProgramScene();
+    } catch {
+      // #221 L3: the facade answers 604 while nothing is on SP-program; then
+      // there is no scene to restore (afterAll skips the restore).
+      initialScene = null;
+    }
     autoRemux = await recorder.autoRemuxEnabled();
   });
 
