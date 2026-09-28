@@ -271,10 +271,15 @@ back can start in either order. The OBS client once spawned a task per
 facade call, so a playlist press's mirror could reach cg OBS after a later
 press. Anything whose ORDER matters goes through ONE task that takes the
 items in order (`obs::remote_call::run_calls`: write each frame, then take
-the next; spawn only the answer wait). A test of such an order must queue
-all items before the consumer runs, so a reordering spot fails
-deterministically (`the_calls_reach_cg_obs_in_queue_order`; its RED sent
-the drained batch newest first).
+the next; a scene switch's answer is awaited first because cg OBS runs its
+messages on a thread pool; only a getter's answer wait is spawned). A test
+of such an order must queue all items before the consumer runs, so a
+reordering spot fails deterministically (`the_calls_reach_cg_obs_in_queue_order`;
+its RED sent the drained batch newest first). Give such a consumer its
+timeouts as PARAMETERS (`run_calls(…, answer_timeout)`, like
+`Upstream::with_timeout`): a test passing a very long one makes "this must
+not be awaited" fail deterministically instead of racing the production
+value.
 
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,

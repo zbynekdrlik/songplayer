@@ -127,12 +127,24 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
       `SetCurrentProgramScene`, at most 2 s) before it writes the next call;
       a getter's answer is awaited in a task of its own.
 
-    A manual press queued behind an unanswered mirror waits at most 2 s,
-    inside its 3 s upstream timeout; if the facade gave up meanwhile, the
-    call is skipped, never sent late. Pinned on a real WebSocket peer:
-    `the_calls_reach_cg_obs_in_queue_order`,
+    - a burst of switches while cg OBS answers slowly (its UI thread busy)
+      would hold each queued switch for up to 2 s, and the newest could
+      pass its requester's 3 s timeout and be skipped — cg OBS then ends on
+      an older press. So a switch with a later, still wanted switch already
+      queued behind it is SUPERSEDED: answered with nothing, never written
+      (review round 3); the newest press goes out at once.
+
+    A manual press queued behind an unanswered mirror waits at most 2 s for
+    it, so its own answer has ~1 s of its 3 s upstream timeout left; if the
+    facade gave up meanwhile, the call is skipped, never sent late. The
+    forwarder's answer timeout is a parameter (`run_calls(…, answer_timeout)`,
+    `forwarder()` passes the production 2 s): the tests pass 10 minutes, so
+    a wait the forwarder must not do fails them, and none races the 2 s.
+    Pinned on a real WebSocket peer: `the_calls_reach_cg_obs_in_queue_order`,
     `a_scene_switch_is_answered_before_the_next_call_goes_out`,
-    `a_getter_never_holds_the_next_call_back`.
+    `a_getter_never_holds_the_next_call_back`,
+    `a_switch_a_later_one_supersedes_is_never_sent`,
+    `an_abandoned_later_switch_supersedes_nothing`.
     #221 deleted `RemoteCall::ScenePlaylists` (the cg scene-item lookup):
     the facade never asks cg OBS which playlists a scene shows.
   - Every raw op=5 event cg OBS sends is broadcast as `ObsEvent::Raw` on the

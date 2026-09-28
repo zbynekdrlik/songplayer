@@ -155,7 +155,11 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   press passes the scene pressed (a playlist's by its catalog name); the
   restore and the dashboard cut the playlist's catalog scene
   (`scene_catalog::scene_of_source`, `None` for -1); the OBS follow the cg
-  OBS scene it follows. Tests that do not care pass `None`.
+  OBS scene it follows — only when it CUTS (`follow_scene` skips a source
+  already on program), so a followed manual → manual change publishes
+  nothing and the published scene stays the earlier one (matters for L3's
+  feedback while the follow still runs; L5 deletes the follow). Tests that
+  do not care pass `None`.
 - `program_on_air::program_scene_name(&OnAir)` is the ONE name resolver:
   the scene, else "OBS manuál" (`PROGRAM_INPUT_LABEL`) for -1, else none.
   It never asks cg OBS.
