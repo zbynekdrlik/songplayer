@@ -169,6 +169,16 @@ fn lyrics_updates(rx: &mut broadcast::Receiver<ServerMsg>) -> Vec<Option<String>
     lines
 }
 
+/// The title of every `Resync` in `cmds` (`None` = a resync naming no title).
+fn resyncs(cmds: &[ResolumeCommand]) -> Vec<Option<String>> {
+    cmds.iter()
+        .filter_map(|cmd| match cmd {
+            ResolumeCommand::Resync { title } => Some(title.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The `en` text of every `ShowSubtitles` in `cmds`.
 fn subtitle_lines(cmds: &[ResolumeCommand]) -> Vec<String> {
     cmds.iter()
@@ -187,19 +197,31 @@ async fn plays_recorded(engine: &PlaybackEngine) -> i64 {
         .unwrap()
 }
 
-/// What happens to OUT: its song ends (Continuous or Loop), it fails, or
-/// the operator skips it.
+/// What happens to OUT: its song ends (Continuous, Loop or Single), it
+/// fails, or the operator skips it.
 #[derive(Clone, Copy, Debug)]
 enum Happens {
     Ended,
     Looped,
+    EndedSingle,
     Failed,
     Skipped,
 }
 
+impl Happens {
+    /// The playback mode OUT is in when it happens.
+    fn mode(self) -> Option<PlaybackMode> {
+        match self {
+            Happens::Looped => Some(PlaybackMode::Loop),
+            Happens::EndedSingle => Some(PlaybackMode::Single),
+            _ => None,
+        }
+    }
+}
+
 async fn happens(engine: &mut PlaybackEngine, what: Happens) {
     match what {
-        Happens::Ended | Happens::Looped => {
+        Happens::Ended | Happens::Looped | Happens::EndedSingle => {
             engine
                 .handle_pipeline_event(OUT, PipelineEvent::Ended)
                 .await
@@ -218,25 +240,37 @@ async fn happens(engine: &mut PlaybackEngine, what: Happens) {
 /// program (`record_play` of an unaired song), its `Started` armed its title
 /// timers, and 3.5 s before ITS end the hide timer faded out IN's live
 /// title; the ungated song-end clear blanked IN's `#sp-subs` too. The same
-/// for a Loop replay, a failure and a skip. Now OUT pauses at once, exactly
-/// like the hold's own end: no Play, no play recorded, no timer, nothing sent
-/// to the wall.
+/// for a Loop replay, a failure and a skip (Single's black too). Now OUT
+/// pauses at once, exactly like the hold's own end: no Play, no play
+/// recorded, its title timers cancelled, nothing sent to the wall. The
+/// pause's resume point is where OUT was; for a song that ENDED that is its
+/// end (an accepted residual: a later ▶ plays its last moment, then the next
+/// song).
 #[tokio::test]
 async fn a_held_playlist_pauses_instead_of_starting_a_song_off_program() {
     for what in [
         Happens::Ended,
         Happens::Looped,
+        Happens::EndedSingle,
         Happens::Failed,
         Happens::Skipped,
     ] {
         let mut rig = rig().await;
-        if let Happens::Looped = what {
+        if let Some(mode) = what.mode() {
             rig.engine
-                .handle_command(OUT, PlayEvent::SetMode(PlaybackMode::Loop))
+                .handle_command(OUT, PlayEvent::SetMode(mode))
                 .await;
         }
         let clock = playing(&mut rig.engine);
         let _bus = hold(&mut rig).await;
+        // A timer armed inside the hold (a `Started` that came in it).
+        rig.engine
+            .arm_title_timers(OUT, tokio::time::Instant::now());
+        assert_eq!(
+            timers(&rig.engine),
+            (false, true),
+            "{what:?}: the hide timer"
+        );
 
         happens(&mut rig.engine, what).await;
 
@@ -261,7 +295,11 @@ async fn a_held_playlist_pauses_instead_of_starting_a_song_off_program() {
             Some(clock),
             "{what:?}: no Play was sent (every Play clears the clock)"
         );
-        assert_eq!(timers(&rig.engine), (false, false), "{what:?}: no timer");
+        assert_eq!(
+            timers(&rig.engine),
+            (false, false),
+            "{what:?}: the pause cancelled the timer"
+        );
         assert_eq!(
             plays_recorded(&rig.engine).await,
             0,
@@ -418,8 +456,9 @@ async fn position(engine: &mut PlaybackEngine, position_ms: u64) {
 /// (`(Playing, SceneOn)` does nothing) and lyrics load only at `Started`,
 /// so the rest of the song had no subtitles on the wall, the stage display
 /// or the karaoke. Now the scene-off keeps them; while held, no line goes
-/// anywhere (as before), and a scene back on program re-sends the line at
-/// once, although the wall already had it before the scene-off cleared it.
+/// anywhere (as before), not even a new one, and a scene back on program
+/// sends the line at the next Position. (The Presenter sits behind the same
+/// gate as the karaoke WS, `dispatch_lyrics_if_changed`.)
 #[tokio::test]
 async fn a_scene_back_on_inside_the_hold_keeps_the_lyrics_and_resumes_the_lines() {
     let mut rig = rig().await;
@@ -440,7 +479,7 @@ async fn a_scene_back_on_inside_the_hold_keeps_the_lyrics_and_resumes_the_lines(
     );
     lyrics_updates(&mut rig.ws);
 
-    position(&mut rig.engine, 2000).await;
+    position(&mut rig.engine, 4500).await; // "beta": a new line
     assert!(
         subtitle_lines(&sent(&mut rig.resolume)).is_empty(),
         "held off program: no line to the wall"
@@ -452,12 +491,13 @@ async fn a_scene_back_on_inside_the_hold_keeps_the_lyrics_and_resumes_the_lines(
 
     rig.engine.handle_scene_change(OUT, true).await;
     sent(&mut rig.resolume); // the scene-on's title re-sync
-    position(&mut rig.engine, 2200).await;
+    position(&mut rig.engine, 4600).await;
     assert_eq!(
         subtitle_lines(&sent(&mut rig.resolume)),
-        ["alpha"],
-        "back on program: the line goes to the wall again at the next Position"
+        ["beta"],
+        "back on program: the line goes to the wall at the next Position"
     );
+    assert_eq!(lyrics_updates(&mut rig.ws), [Some("beta".to_string())]);
 }
 
 // -- the hold marker (`scene_off_due`) itself ------------------------------
@@ -552,7 +592,7 @@ async fn a_newer_hold_supersedes_the_pending_re_check() {
     let first = re_check(&rig.engine);
 
     rig.engine
-        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue)
+        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(first.id()))
         .await;
 
     assert_eq!(
@@ -561,9 +601,193 @@ async fn a_newer_hold_supersedes_the_pending_re_check() {
         "still held: the window is a minute away"
     );
     let second = re_check(&rig.engine);
+    assert_ne!(second.id(), first.id(), "a new re-check replaced it");
     assert!(finished(&first).await, "the superseded one was cancelled");
     assert!(
         !second.is_finished(),
         "a new re-check is pending, a minute away"
+    );
+
+    // Review round 1: the superseded hold's re-check, already queued (an
+    // A→B→A→B inside one hold), is stale. Taken as the newer hold's, it
+    // skipped that hold's `CUT_SETTLE`; it is ignored.
+    rig.engine
+        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(first.id()))
+        .await;
+    assert_eq!(
+        re_check(&rig.engine).id(),
+        second.id(),
+        "the newer hold's re-check is still the pending one"
+    );
+    assert!(!second.is_finished(), "and it still runs");
+}
+
+// -- review round 1: nothing else of a held or paused song reaches the wall --
+
+async fn started(engine: &mut PlaybackEngine) {
+    engine
+        .handle_pipeline_event(
+            OUT,
+            PipelineEvent::Started {
+                duration_ms: SONG_MS,
+            },
+        )
+        .await;
+}
+
+/// Review round 1 (🔴): a song whose Play went out on program (its song
+/// ended, or a skip) has its `Started` INSIDE the hold when the cut lands in
+/// its pre-roll. A song without lyrics cleared the subtitle clips and the
+/// stage display at its `Started`, blanking the line of the playlist now on
+/// program. A held playlist clears nothing.
+#[tokio::test]
+async fn a_started_inside_the_hold_clears_nothing() {
+    let mut rig = rig().await;
+    playing(&mut rig.engine);
+    let _bus = hold(&mut rig).await;
+    lyrics_updates(&mut rig.ws);
+
+    started(&mut rig.engine).await;
+
+    let cmds = sent(&mut rig.resolume);
+    assert!(
+        cmds.is_empty(),
+        "nothing reaches the wall IN is on, got {cmds:?}"
+    );
+    assert!(
+        lyrics_updates(&mut rig.ws).is_empty(),
+        "no karaoke clear either"
+    );
+}
+
+/// Review round 1 (🟡): a playlist off program (played by hand, no hold)
+/// still cleared the shared subtitle clips at its song's end, blanking the
+/// on-program playlist's line. It stays off them, as its lines do
+/// (`dispatch_lyrics_if_changed`); its own karaoke clear still goes out, and
+/// its end still starts the next song.
+#[tokio::test]
+async fn off_program_a_song_s_end_leaves_the_subtitle_clips_alone() {
+    let mut rig = rig().await;
+    playing(&mut rig.engine);
+    rig.engine.set_scene_active_for_test(OUT, false);
+    lyrics_updates(&mut rig.ws);
+
+    rig.engine
+        .handle_pipeline_event(OUT, PipelineEvent::Ended)
+        .await;
+
+    assert!(
+        matches!(out(&rig.engine).state, PlayState::Playing { .. }),
+        "not held: the next song starts"
+    );
+    let cmds = sent(&mut rig.resolume);
+    assert!(
+        !cmds
+            .iter()
+            .any(|cmd| matches!(cmd, ResolumeCommand::HideSubtitles)),
+        "the on-program line stays, got {cmds:?}"
+    );
+    assert_eq!(
+        lyrics_updates(&mut rig.ws),
+        [None::<String>],
+        "its karaoke clear still goes out"
+    );
+}
+
+/// Review round 1 (🔵): with its timers cancelled, a song paused on program
+/// kept its title up until some re-sync (a recovery, another Play) took it
+/// down. The pause re-syncs the wall at once: a paused song's title is not
+/// due. And a `Started` the pause overtook (its Play went out just before)
+/// shows nothing: no clock, no timer, no clear. The resume's `Started` does
+/// all of it.
+#[tokio::test]
+async fn a_pause_on_program_takes_the_title_down_and_a_late_started_shows_nothing() {
+    let mut rig = rig().await;
+    let clock = playing(&mut rig.engine);
+    rig.engine.handle_command(OUT, PlayEvent::SceneOff).await; // the dashboard's Pause
+    assert_eq!(
+        resyncs(&sent(&mut rig.resolume)),
+        [None::<String>],
+        "the paused song's title goes down"
+    );
+    lyrics_updates(&mut rig.ws);
+
+    started(&mut rig.engine).await;
+
+    assert_eq!(out(&rig.engine).title_clock, Some(clock), "no new clock");
+    assert_eq!(timers(&rig.engine), (false, false), "no timer");
+    let cmds = sent(&mut rig.resolume);
+    assert!(cmds.is_empty(), "nothing to the wall, got {cmds:?}");
+    assert!(lyrics_updates(&mut rig.ws).is_empty(), "no karaoke clear");
+}
+
+/// Review round 1 (🔵): the operator's pick inside the hold (a PlayVideo, a
+/// Previous, a ▶ resume) started a song the hold kept muted, and the hold's
+/// re-check paused it a moment later. A pick ends the hold: the song plays
+/// like any song played off program by hand, and its end starts the next.
+#[tokio::test]
+async fn an_operator_pick_inside_the_hold_ends_it() {
+    for pick in ["play video", "previous"] {
+        let mut rig = rig().await;
+        playing(&mut rig.engine);
+        let _bus = hold(&mut rig).await;
+        let due = re_check(&rig.engine);
+        if pick == "play video" {
+            rig.engine.handle_play_video(OUT, NEXT, None).await;
+        } else {
+            rig.engine
+                .pipelines
+                .get_mut(&OUT)
+                .unwrap()
+                .history
+                .push_back(NEXT);
+            rig.engine.handle_previous(OUT).await;
+        }
+
+        assert!(
+            out(&rig.engine).scene_off_due.is_none(),
+            "{pick}: no longer held"
+        );
+        assert!(finished(&due).await, "{pick}: the re-check is cancelled");
+        rig.engine
+            .handle_pipeline_event(OUT, PipelineEvent::Ended)
+            .await;
+        assert!(
+            matches!(out(&rig.engine).state, PlayState::Playing { .. }),
+            "{pick}: its end starts the next song"
+        );
+    }
+}
+
+/// Review round 1 (🔵): a Play kept the last song's lyrics and position
+/// until the new `Started`. A recovery in between re-pushed the old song's
+/// line, and a pause there recorded the old song's position for the new one
+/// (a resume then started it there).
+#[tokio::test]
+async fn a_play_drops_the_last_song_s_lyrics_and_position() {
+    let mut rig = rig().await;
+    playing(&mut rig.engine);
+    {
+        let pp = rig.engine.pipelines.get_mut(&OUT).unwrap();
+        pp.lyrics_state = Some(LyricsState::new(track()));
+        pp.cached_position_ms = 1500; // inside "alpha"
+    }
+
+    rig.engine.handle_command(OUT, PlayEvent::Skip).await;
+
+    let pp = out(&rig.engine);
+    assert!(pp.lyrics_state.is_none(), "the old song's lyrics are gone");
+    assert_eq!(pp.cached_position_ms, 0, "the new song starts at 0");
+    sent(&mut rig.resolume);
+    rig.engine.handle_resolume_recovery("127.0.0.1").await;
+    assert!(
+        subtitle_lines(&sent(&mut rig.resolume)).is_empty(),
+        "a recovery before the new `Started` pushes no old line"
+    );
+    rig.engine.handle_play_video(OUT, SONG, Some(30_000)).await;
+    assert_eq!(
+        out(&rig.engine).cached_position_ms,
+        30_000,
+        "a resume starts where it resumes"
     );
 }

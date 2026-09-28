@@ -146,7 +146,7 @@ impl PlaybackEngine {
                 self.apply_event(playlist_id, PlayEvent::VideoError(msg.clone()))
                     .await;
             }
-            PipelineEvent::SceneOffDue => self.scene_off_due(playlist_id).await,
+            PipelineEvent::SceneOffDue(due) => self.scene_off_due(playlist_id, *due).await,
             ev @ PipelineEvent::HealthSnapshot { .. } => {
                 self.handle_health_snapshot(playlist_id, ev.clone());
                 // #198 item 5: the sync handler only QUEUES a changed receiver

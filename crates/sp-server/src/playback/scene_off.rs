@@ -73,8 +73,9 @@ impl PlaybackEngine {
     }
 
     /// `PipelineEvent::SceneOffDue`: re-check a held pause; nothing when the
-    /// scene came back on program (or the pipeline is gone).
-    pub(super) async fn scene_off_due(&mut self, playlist_id: i64) {
+    /// scene came back on program (or the pipeline is gone). (RED: the
+    /// re-check task's id `_due` is not checked yet.)
+    pub(super) async fn scene_off_due(&mut self, playlist_id: i64, _due: tokio::task::Id) {
         self.scene_off_recheck(playlist_id, utc_now_100ns()).await;
     }
 
@@ -114,7 +115,8 @@ impl PlaybackEngine {
         let tx = self.event_tx.clone();
         let due = tokio::spawn(async move {
             tokio::time::sleep(delay).await;
-            let _ = tx.send((playlist_id, PipelineEvent::SceneOffDue));
+            let due = tokio::task::id(); // this task: `scene_off_due` matches it
+            let _ = tx.send((playlist_id, PipelineEvent::SceneOffDue(due)));
         })
         .abort_handle();
         if let Some(pp) = self.pipelines.get_mut(&playlist_id) {

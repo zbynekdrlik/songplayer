@@ -134,7 +134,7 @@ async fn next_scene_off_due(engine: &mut PlaybackEngine, pid: i64) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     loop {
         match tokio::time::timeout_at(deadline, engine.event_rx.recv()).await {
-            Ok(Some((id, PipelineEvent::SceneOffDue))) if id == pid => return,
+            Ok(Some((id, PipelineEvent::SceneOffDue(_)))) if id == pid => return,
             Ok(Some(_)) => continue,
             Ok(None) => panic!("the engine's event channel closed"),
             Err(_) => panic!("no SceneOffDue for playlist {pid} within 20 s"),
@@ -143,6 +143,16 @@ async fn next_scene_off_due(engine: &mut PlaybackEngine, pid: i64) {
 }
 
 const PLAYING: PlayState = PlayState::Playing { video_id: SONG };
+
+/// The id of `pid`'s pending hold re-check (the hold marker).
+fn pending_re_check(engine: &PlaybackEngine, pid: i64) -> tokio::task::Id {
+    engine
+        .pipelines
+        .get(&pid)
+        .and_then(|pp| pp.scene_off_due.as_ref())
+        .expect("a hold re-check is pending")
+        .id()
+}
 
 #[tokio::test]
 async fn the_outgoing_playlist_plays_through_its_window_and_pauses_once_it_is_over() {
@@ -252,9 +262,11 @@ async fn a_scene_off_on_the_live_clock_goes_through_the_hold() {
     assert!(status.cut_boundary_100ns.is_some());
     engine.handle_scene_change(OUT, false).await;
     assert_eq!(state(&engine, OUT), PLAYING, "held through the window");
-    // `SceneOffDue` through the engine's event handler re-checks it the same.
+    // `SceneOffDue` through the engine's event handler re-checks it the same
+    // (the pending re-check's own id: the event names its hold).
+    let due = pending_re_check(&engine, OUT);
     engine
-        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue)
+        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(due))
         .await;
     assert_eq!(state(&engine, OUT), PLAYING);
 }
@@ -264,20 +276,22 @@ async fn a_scene_back_on_program_cancels_the_pending_pause() {
     let mut engine = rig().await;
     playing(&mut engine, OUT);
     let _bus = program(&engine, IN); // OUT holds nothing: a re-check would pause
+    // A re-check with no hold of OUT pending (its id names no newer hold).
+    let due = tokio::spawn(async {}).id();
     // The scene is back on program when the re-check comes: nothing happens.
     engine
-        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue)
+        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(due))
         .await;
     assert_eq!(state(&engine, OUT), PLAYING);
     assert_eq!(paused_at(&engine, OUT), None);
     // Still off program: the re-check pauses it.
     engine.set_scene_active_for_test(OUT, false);
     engine
-        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue)
+        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(due))
         .await;
     assert_eq!(state(&engine, OUT), PlayState::WaitingForScene);
     // A re-check for a pipeline that is gone is ignored.
     engine
-        .handle_pipeline_event(99, PipelineEvent::SceneOffDue)
+        .handle_pipeline_event(99, PipelineEvent::SceneOffDue(due))
         .await;
 }
