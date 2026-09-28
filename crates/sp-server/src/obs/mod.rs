@@ -642,7 +642,7 @@ async fn connect_and_run(
                             .await;
                         });
                     }
-                    Some(ReaderMessage::TransitionChanged) => {}
+                    Some(ReaderMessage::TransitionChanged) => transition_wake.notify_one(),
                     Some(ReaderMessage::OutputState { recording, active }) => {
                         // #154: record OBS stream/record state for the idle gate.
                         let mut s = obs.state().write().await;

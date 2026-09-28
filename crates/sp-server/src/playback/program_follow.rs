@@ -290,11 +290,11 @@ enum ProgramScene {
 /// connected, named cg OBS's program scene, and looked up its playlists.
 fn program_scene(snapshot: &ObsSnapshot) -> ProgramScene {
     match (&snapshot.current_scene, snapshot.connected) {
+        _ if snapshot.lookup_failed.is_some() => ProgramScene::LookupFailed,
         (Some(scene), true) => ProgramScene::Known(SceneView {
             scene: scene.clone(),
             playlists: snapshot.active_playlist_ids.clone(),
         }),
-        _ if snapshot.lookup_failed.is_some() => ProgramScene::LookupFailed,
         _ => ProgramScene::Unknown,
     }
 }
@@ -320,7 +320,13 @@ impl FollowLoop {
 
     /// Keep `snapshot`'s transition as cg OBS's (the last known one stays
     /// while it has none) and put the spec on the bus.
-    fn take_transition(&self, _snapshot: &ObsSnapshot) {
+    fn take_transition(&self, snapshot: &ObsSnapshot) {
+        if let Some(transition) = &snapshot.transition {
+            self.follow
+                .bus
+                .follow()
+                .set_obs_transition(transition.clone());
+        }
         self.follow.apply_spec(&self.settings);
     }
 
