@@ -72,6 +72,11 @@ pub struct ObsState {
     pub current_scene: Option<String>,
     /// Playlist IDs whose NDI source is currently on program.
     pub active_playlist_ids: HashSet<i64>,
+    /// #218: the program scene whose playlist lookup FAILED (always the
+    /// `current_scene` when set). `active_playlist_ids` then still holds the
+    /// previous set — unknown is not empty — and the ~2 s scene poll looks
+    /// the scene up again until it answers.
+    pub lookup_failed: Option<String>,
     /// OBS is actively streaming an output (#154). Seeded from
     /// `GetStreamStatus` on connect and updated by `StreamStateChanged`
     /// events; reset to `false` on disconnect. Read by the lyrics idle gate
@@ -261,6 +266,7 @@ impl ObsClient {
                     s.connected = false;
                     s.current_scene = None;
                     s.active_playlist_ids.clear();
+                    s.lookup_failed = None;
                     // #154: OBS is gone — its stream/record state is unknown, so
                     // clear it. The Playing gate still covers SP outputs; a
                     // stale `true` here would gate heavy work forever.

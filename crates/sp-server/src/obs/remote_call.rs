@@ -38,7 +38,7 @@ pub enum RemoteCall {
         reply: oneshot::Sender<Option<serde_json::Value>>,
     },
     /// The playlist ids whose SongPlayer NDI source is in `scene` (nested
-    /// scenes and groups included).
+    /// scenes and groups included). A failed lookup gets no reply (#218).
     ScenePlaylists {
         scene: String,
         reply: oneshot::Sender<HashSet<i64>>,
@@ -72,9 +72,16 @@ pub async fn run(
                 return;
             }
             let map = ndi_sources.read().await;
-            let ids = check_scene_items(&write, &dispatcher, &scene, &map).await;
+            let lookup = check_scene_items(&write, &dispatcher, &scene, &map).await;
             drop(map);
-            let _ = reply.send(ids);
+            match lookup {
+                Ok(ids) => {
+                    let _ = reply.send(ids);
+                }
+                // #218: a failed lookup is not "no playlist". No reply: the
+                // facade reads it as a lookup that got no answer.
+                Err(e) => warn!(scene, error = %e, "remote: the scene's playlist lookup failed"),
+            }
         }
     }
 }

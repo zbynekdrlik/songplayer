@@ -1,15 +1,57 @@
 //! Scene change handler — detects which NDI sources are active in a scene.
+//!
+//! #218: a scene's playlist lookup that FAILED (no answer, the connection
+//! closed, or an answer without a `sceneItems` list) is not a scene that
+//! shows no playlist. [`check_scene_items`] returns it as a [`LookupError`];
+//! [`apply_scene_change`] then keeps the previous playlists, records the
+//! failure in `ObsState::lookup_failed` and broadcasts nothing, and the ~2 s
+//! scene poll (`scene_poll.rs`) looks the scene up again until it answers.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use serde_json::Value;
 use tokio::sync::{RwLock, broadcast};
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
 use crate::obs::text::get_scene_items_request;
 use crate::obs::{NdiSourceMap, ObsEvent, ObsState, SharedWrite};
+
+/// Why a scene's playlist lookup failed: its playlists are UNKNOWN, never
+/// "none" (#218).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LookupError {
+    /// The OBS connection closed before cg OBS answered.
+    Closed,
+    /// cg OBS did not answer within the response timeout.
+    Timeout,
+    /// cg OBS refused the request (`requestStatus.result` false).
+    Refused { code: u64, comment: String },
+    /// cg OBS answered, but without a `sceneItems` list.
+    NoSceneItems,
+}
+
+impl std::fmt::Display for LookupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Closed => write!(f, "the OBS connection closed before the answer"),
+            Self::Timeout => write!(f, "no answer in time"),
+            Self::Refused { code, comment } => write!(f, "refused ({code}: {comment})"),
+            Self::NoSceneItems => write!(f, "answered without a sceneItems list"),
+        }
+    }
+}
+
+impl From<DispatcherError> for LookupError {
+    fn from(e: DispatcherError) -> Self {
+        match e {
+            DispatcherError::Closed => Self::Closed,
+            DispatcherError::Timeout => Self::Timeout,
+        }
+    }
+}
 
 /// Apply a program-scene change: query which NDI sources are on program for
 /// `scene_name`, write `current_scene` + `active_playlist_ids` into shared
@@ -19,6 +61,12 @@ use crate::obs::{NdiSourceMap, ObsEvent, ObsState, SharedWrite};
 /// poll-reconcile path (#170) so a dropped OBS event feeds the exact same
 /// downstream handling. A duplicate emit for the already-current scene is
 /// harmless — `(Playing, SceneOn)` is a no-op in the playback state machine.
+///
+/// #218: when the lookup FAILS, the scene's name is stored but its playlists
+/// are not: `active_playlist_ids` keeps the previous set, `lookup_failed`
+/// names the scene, and nothing is broadcast (an empty set would scene-off
+/// the playlist on program). The scene poll looks it up again; a success
+/// clears `lookup_failed` and broadcasts as usual.
 pub async fn apply_scene_change(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
@@ -28,13 +76,45 @@ pub async fn apply_scene_change(
     scene_name: String,
 ) {
     let sources = ndi_sources.read().await;
-    let active_ids = check_scene_items(write, dispatcher, &scene_name, &sources).await;
+    let lookup = check_scene_items(write, dispatcher, &scene_name, &sources).await;
     drop(sources);
 
-    {
+    let active_ids = match lookup {
+        Ok(ids) => ids,
+        Err(e) => {
+            let repeated = {
+                let mut s = state.write().await;
+                let repeated = s.lookup_failed.as_deref() == Some(scene_name.as_str());
+                s.current_scene = Some(scene_name.clone());
+                s.lookup_failed = Some(scene_name.clone());
+                repeated
+            };
+            if repeated {
+                debug!(scene = %scene_name, error = %e, "obs: the scene's playlist lookup failed again");
+            } else {
+                warn!(
+                    scene = %scene_name,
+                    error = %e,
+                    "obs: looking up the scene's playlists failed — keeping the previous ones; the scene poll looks it up again"
+                );
+            }
+            return;
+        }
+    };
+
+    let repaired = {
         let mut s = state.write().await;
+        let repaired = s.lookup_failed.take().is_some();
         s.current_scene = Some(scene_name.clone());
         s.active_playlist_ids = active_ids.clone();
+        repaired
+    };
+    if repaired {
+        info!(
+            scene = %scene_name,
+            playlists = ?active_ids,
+            "obs: the scene's playlist lookup answered again"
+        );
     }
 
     let _ = event_tx.send(ObsEvent::SceneChanged {
@@ -46,13 +126,17 @@ pub async fn apply_scene_change(
 /// Check which NDI sources are present in a given scene.
 ///
 /// Sends `GetSceneItemList` for the scene, checks each item name against the
-/// NDI source map. Recurses into nested scenes / group sources.
+/// NDI source map. Recurses into nested scenes / group sources. A lookup that
+/// failed anywhere is an `Err` (#218) — never a partial or empty set — except
+/// a nested item cg OBS REFUSES to list: obs-websocket 5 answers
+/// `GetSceneItemList` for a group with 602 "Is group", so a nested refusal
+/// adds nothing, as it always did.
 pub async fn check_scene_items(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
     scene_name: &str,
     ndi_sources: &HashMap<String, i64>,
-) -> HashSet<i64> {
+) -> Result<HashSet<i64>, LookupError> {
     let mut active_ids = HashSet::new();
     check_scene_items_recursive(
         write,
@@ -62,12 +146,30 @@ pub async fn check_scene_items(
         &mut active_ids,
         0,
     )
-    .await;
-    active_ids
+    .await?;
+    Ok(active_ids)
 }
 
 /// Maximum recursion depth for nested scenes to prevent infinite loops.
 const MAX_RECURSION_DEPTH: u32 = 5;
+
+/// The items of an op=7 `GetSceneItemList` reply, or why there are none to
+/// read: a refusal (`requestStatus.result` false) or no `sceneItems` list.
+pub(crate) fn scene_items_from_reply(reply: &Value) -> Result<&Vec<Value>, LookupError> {
+    let d = &reply["d"];
+    if d["requestStatus"]["result"].as_bool() == Some(false) {
+        return Err(LookupError::Refused {
+            code: d["requestStatus"]["code"].as_u64().unwrap_or(0),
+            comment: d["requestStatus"]["comment"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        });
+    }
+    d["responseData"]["sceneItems"]
+        .as_array()
+        .ok_or(LookupError::NoSceneItems)
+}
 
 async fn check_scene_items_recursive(
     write: &SharedWrite,
@@ -76,38 +178,35 @@ async fn check_scene_items_recursive(
     ndi_sources: &HashMap<String, i64>,
     active_ids: &mut HashSet<i64>,
     depth: u32,
-) {
+) -> Result<(), LookupError> {
     if depth >= MAX_RECURSION_DEPTH {
         warn!("max scene recursion depth reached for '{scene_name}'");
-        return;
+        return Ok(());
     }
 
     let request_id = uuid::Uuid::new_v4().to_string();
     let req = get_scene_items_request(&request_id, scene_name);
-
-    let items = match dispatcher
+    let reply = dispatcher
         .send_and_await(
             write,
             request_id,
             Message::Text(req.to_string().into()),
             DEFAULT_RESPONSE_TIMEOUT,
         )
-        .await
-    {
-        Ok(v) => v,
-        Err(DispatcherError::Closed) => {
-            warn!("no response for GetSceneItemList request (dispatcher closed)");
-            return;
-        }
-        Err(DispatcherError::Timeout) => {
-            warn!("timed out waiting for GetSceneItemList for '{scene_name}'");
-            return;
-        }
-    };
+        .await?;
 
-    let scene_items = match items["d"]["responseData"]["sceneItems"].as_array() {
-        Some(arr) => arr,
-        None => return,
+    let scene_items = match scene_items_from_reply(&reply) {
+        Ok(items) => items,
+        Err(LookupError::Refused { code, comment }) if depth > 0 => {
+            debug!(
+                scene = scene_name,
+                code,
+                comment = %comment,
+                "obs: a nested scene item's list was refused — it adds no playlist"
+            );
+            return Ok(());
+        }
+        Err(e) => return Err(e),
     };
 
     for item in scene_items {
@@ -135,9 +234,10 @@ async fn check_scene_items_recursive(
                 active_ids,
                 depth + 1,
             ))
-            .await;
+            .await?;
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -225,5 +325,109 @@ mod tests {
         let input_kind = regular_item["inputKind"].as_str().unwrap_or("");
         let is_scene_source = input_kind == "scene" || is_group;
         assert!(!is_scene_source);
+    }
+
+    // ---- #218: a failed lookup is an Err, never an empty set ----
+
+    #[test]
+    fn a_listed_scene_yields_its_items_even_an_empty_list() {
+        let listed = serde_json::json!({
+            "op": 7,
+            "d": {
+                "requestStatus": { "result": true, "code": 100 },
+                "responseData": { "sceneItems": [ { "sourceName": "sp-fast_video" } ] },
+            }
+        });
+        let items = scene_items_from_reply(&listed).expect("listed");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["sourceName"], "sp-fast_video");
+        let empty = serde_json::json!({
+            "d": {
+                "requestStatus": { "result": true, "code": 100 },
+                "responseData": { "sceneItems": [] },
+            }
+        });
+        assert_eq!(
+            scene_items_from_reply(&empty).map(Vec::len),
+            Ok(0),
+            "a scene with no items is a real (empty) answer"
+        );
+    }
+
+    #[test]
+    fn an_answer_without_scene_items_is_a_failed_lookup() {
+        let no_items = serde_json::json!({
+            "d": {
+                "requestStatus": { "result": true, "code": 100 },
+                "responseData": {},
+            }
+        });
+        assert_eq!(
+            scene_items_from_reply(&no_items),
+            Err(LookupError::NoSceneItems)
+        );
+        assert_eq!(
+            scene_items_from_reply(&serde_json::json!({})),
+            Err(LookupError::NoSceneItems),
+            "no `d` at all"
+        );
+    }
+
+    #[test]
+    fn a_refused_request_is_a_failed_lookup_with_its_code() {
+        // obs-websocket 5's answer to GetSceneItemList for a group.
+        let refused = serde_json::json!({
+            "d": {
+                "requestStatus": {
+                    "result": false,
+                    "code": 602,
+                    "comment": "The specified source is not a scene. (Is group)",
+                },
+            }
+        });
+        assert_eq!(
+            scene_items_from_reply(&refused),
+            Err(LookupError::Refused {
+                code: 602,
+                comment: "The specified source is not a scene. (Is group)".to_string(),
+            })
+        );
+        let bare = serde_json::json!({ "d": { "requestStatus": { "result": false } } });
+        assert_eq!(
+            scene_items_from_reply(&bare),
+            Err(LookupError::Refused {
+                code: 0,
+                comment: String::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_dispatcher_failure_is_a_failed_lookup_and_every_failure_reads_in_a_log() {
+        assert_eq!(
+            LookupError::from(DispatcherError::Timeout),
+            LookupError::Timeout
+        );
+        assert_eq!(
+            LookupError::from(DispatcherError::Closed),
+            LookupError::Closed
+        );
+        assert_eq!(LookupError::Timeout.to_string(), "no answer in time");
+        assert_eq!(
+            LookupError::Refused {
+                code: 600,
+                comment: "No source".to_string()
+            }
+            .to_string(),
+            "refused (600: No source)"
+        );
+        assert_eq!(
+            LookupError::NoSceneItems.to_string(),
+            "answered without a sceneItems list"
+        );
+        assert_eq!(
+            LookupError::Closed.to_string(),
+            "the OBS connection closed before the answer"
+        );
     }
 }

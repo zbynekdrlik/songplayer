@@ -59,6 +59,7 @@ fn test_obs_state_default() {
     assert!(!state.connected);
     assert!(state.current_scene.is_none());
     assert!(state.active_playlist_ids.is_empty());
+    assert!(state.lookup_failed.is_none(), "#218: no failed lookup");
     // #154: idle-gate signals default to "not busy".
     assert!(!state.streaming);
     assert!(!state.recording);
