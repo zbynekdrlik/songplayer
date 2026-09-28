@@ -85,8 +85,8 @@ one only together with the design record on #217.
 1. **Sentences** (`group_lines`, `close_to_fit`).
    - Consecutive source lines form one display line until a line **ends a
      sentence**: its text ends in `. ! ? …`, read past closing quotes and
-     brackets (`" ' ” ’ “ » « ) ]`; `“` and `«` close the Slovak „…“ and
-     »…«).
+     brackets (`" ' ” ’ “ ‘ » « ) ]`; `“`, `‘` and `«` close the Slovak
+     „…“, ‚…‘ and »…«).
    - A line's text is its EN, or its SK when the EN is empty (dub lines).
      SK is not checked against `MAX_CHARS`: a translation must not re-split
      a sentence the EN keeps whole.
@@ -120,8 +120,8 @@ one only together with the design record on #217.
 ## Gotchas
 
 - **The MIN_VISIBLE floor after the cap can fall behind in a fast run of
-  separate sentences.** Each sentence sung under 1200 ms after the previous
-  one shows `1200 − gap` ms later than the one before, and it adds up. For
+  separate sentences.** Once the floor binds, each further sentence sung
+  under 1200 ms after the previous one adds `1200 − gap` ms of delay. For
   example, four sentences 1 s apart show −800 (the first line's lead), 0,
   +200 and +400 ms from their sung starts (pinned by
   `in_a_fast_run_of_short_sentences_each_keeps_1200_ms`).
@@ -185,13 +185,9 @@ one only together with the design record on #217.
   When the algorithm changes on purpose, re-derive the pins with a reference
   model that mirrors `build_plan` step by step. The Tier-0 box cannot run the
   tests.
-- **The design record's simulation counts (56/49/122 display lines) are not
-  the pins (59/51/123).** That draft simulation differed from the record's
-  rules in several ways:
-  - it used LEAD 1000 / SUSTAIN 1200;
-  - it had no span cap;
-  - it checked the 72 chars only AFTER a sentence end had closed the line,
-    so a sentence-ending line could overflow;
-  - it dropped EN-less lines.
-
-  The code follows the record's text.
+- **The design record's counts (56/49/122 display lines on 335/221/What A
+  God) are not the pins (59/51/123).** The record's simulation skipped the
+  72-char check for a line that ends a sentence, so such a line could push
+  its display line past 72 chars. A reference model with only that change
+  gives 56/49/122 exactly. The code checks every line, as the record's text
+  says (review round 2).
