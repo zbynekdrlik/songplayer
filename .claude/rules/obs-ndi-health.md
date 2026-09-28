@@ -206,8 +206,10 @@ output as a fault.
   for the Companion facade, on this ONE connection (`obs/remote_call.rs`). A
   call whose requester gave up (`reply.is_closed()`) is skipped. #221
   deleted the facade's scene → playlists lookup (`ScenePlaylists`): the
-  facade decides from SongPlayer's own playlists, so `remote_call::run` no
-  longer takes the `NdiSourceMap`.
+  facade decides from SongPlayer's own playlists, so the forwarder no
+  longer takes the `NdiSourceMap`. The facade's calls go through ONE
+  forwarder per connection, `remote_call::run_calls`, in queue order (never
+  a task per call: see `remote-control.md`).
 - `ObsCommand` is no longer `Clone`: it holds a oneshot sender.
 - The reader broadcasts EVERY op=5 event as `ObsEvent::Raw { event_type,
   event_data }` on `obs_event_tx`. Any exhaustive `match` on `ObsEvent` needs

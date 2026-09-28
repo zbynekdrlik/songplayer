@@ -78,7 +78,8 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
     `SetPreviewScene` / `GetPreviewScene` / `TriggerTransition` /
     `SetTransitionDuration` / unsupported;
   - the pure request checks (#221): `scene_name` (missing → 300),
-    `transition_duration`, `preview_scene_data`, `no_scene` (604).
+    `transition_duration`, `preview_scene_data`, `no_scene` (604,
+    obs-websocket's `InvalidResourceState`).
 
   `FORWARDED_REQUESTS` = GetSceneList, GetCurrentProgramScene, GetInputList,
   GetSceneItemList, GetGroupSceneItemList. A test pins it in sync with
@@ -110,6 +111,17 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
   over a second connection:
   - `ObsCommand::Remote(RemoteCall::Request)` is executed by
     `obs/remote_call.rs` on the client's own write half and dispatcher.
+  - **In queue order (#221 review round 1).** The connection loop hands every
+    `Remote` call to ONE forwarder per connection (`remote_call::run_calls`,
+    in the connection's task set): it writes a request frame
+    (`Dispatcher::send`) before it takes the next call, and only the wait
+    for the answer (`Dispatcher::wait`) runs in a task of its own. A task PER
+    call (the #213 shape) could start the newest first — a multi-thread
+    tokio worker runs the task it spawned last from its LIFO slot — so a
+    playlist press's mirror (not awaited by the facade) could reach cg OBS
+    after a later manual press's forward. Never spawn per call again.
+    `the_calls_reach_cg_obs_in_queue_order` pins the order on a real
+    WebSocket peer.
     #221 deleted `RemoteCall::ScenePlaylists` (the cg scene-item lookup):
     the facade never asks cg OBS which playlists a scene shows.
   - Every raw op=5 event cg OBS sends is broadcast as `ObsEvent::Raw` on the
@@ -169,10 +181,17 @@ whole switch:
    `not_switched`; not reachable → 207, keep `not_switched`, `cg_forward
    not_ready`. Accepted → cut to -1 (published with the scene X) while
    `InputSettings::active()`, else keep `input_inactive` (100).
-4. The cut uses the bus's current transition spec unchanged. Manual →
+4. **"OBS manuál" itself** (`PROGRAM_INPUT_LABEL`: the resolver's name for
+   -1 with no scene, so a transition with no preview after the input was
+   restored at startup lands here): the NDI input — cut to -1 while it is a
+   source, published with NO scene and with NO cg OBS call (cg OBS keeps
+   what it shows, like a dashboard cut to -1), `cg_forward` null; else keep
+   `input_inactive`. Before review round 1 the label went to cg OBS as a
+   scene name and came back 600.
+5. The cut uses the bus's current transition spec unchanged. Manual →
    manual keeps -1 (no mix, `health.cuts` unchanged) and publishes the new
    scene name.
-5. `remote.last_remote_cut {scene, action (playlist|input|keep), source,
+6. `remote.last_remote_cut {scene, action (playlist|input|keep), source,
    reason (not_switched|input_inactive|persist_failed|catalog_failed),
    cut_boundary_100ns, at_ms, via (program|transition), cg_forward}`. The
    follow's `last_follow_cut` has the same shape with `via` / `cg_forward`
@@ -319,10 +338,6 @@ authority and deleting the follow are the later lanes (L3–L6) of #221.
   playlist on `SP-program` paused (`cg_forward` says so).
 - Hand switches in cg OBS's own UI are invisible to the facade (no cg
   tracking, by the owner's ruling): the next press decides.
-- The OBS client runs each queued call as its own spawned helper, so two
-  calls enqueued back to back reach cg OBS in queue order only as far as
-  the helpers start in spawn order (the write half's `Mutex` is FIFO). A
-  press is ~100 ms of human time, far longer than that window.
 
 ## Box acceptance (the supervisor's job)
 
