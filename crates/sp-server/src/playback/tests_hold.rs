@@ -867,3 +867,30 @@ async fn the_old_song_s_late_report_does_not_move_the_new_song_s_pause_point() {
         "the new song pauses at its start"
     );
 }
+
+/// Review round 5 (🔵): the "a pause overtook the Play" guard read the state
+/// (`WaitingForScene`), which a FAILED selection leaves too: a Skip between
+/// a Play and its `Started` whose selection starts nothing sends no Pause, so
+/// the pipeline keeps playing the song, and its `Started` was swallowed (no
+/// clock, no timers, no lyrics for the whole song). The guard is now "a
+/// pause came after the last Play" (`paused_at`, which every Play clears).
+#[tokio::test]
+async fn a_started_after_a_failed_selection_still_starts_the_song() {
+    let mut rig = rig().await;
+    playing(&mut rig.engine);
+    rig.engine.handle_command(OUT, PlayEvent::Skip).await; // a Play
+    sqlx::query("DELETE FROM videos WHERE playlist_id = ?")
+        .bind(OUT)
+        .execute(&rig.engine.pool)
+        .await
+        .unwrap();
+    rig.engine.handle_command(OUT, PlayEvent::Skip).await; // selects nothing
+    assert_eq!(out(&rig.engine).state, PlayState::WaitingForScene);
+
+    started(&mut rig.engine).await; // the first Play's song plays on
+
+    assert!(
+        out(&rig.engine).title_clock.is_some(),
+        "its Started fixed the song's title clock"
+    );
+}
