@@ -380,7 +380,8 @@ the driver compares it with what it did (above).
   "Several due"). Off program nothing is sent. A scene-on that selects a
   song sends two (the Play's, then the scene-on's): the driver does one
   action for them (`take_queued` drops the first when both are in one
-  batch, else the second changes nothing). Pinned by
+  batch; else the second is a no-op, or retries a hide whose request
+  failed and left `FadingOut`). Pinned by
   `a_scene_on_that_selects_a_song_resyncs_no_title_twice`.
 - **Residual: the clock is fixed at `Started`.** A resume whose seek failed
   plays from 0 (`decode_and_send` and the paced producer log it), but
