@@ -190,10 +190,13 @@ async fn a_window_nobody_serves_is_announced_ended_after_the_max_wait() {
         rx.try_recv(),
         Ok(FacadeEvent::transition(TRANSITION_STARTED, "Fade"))
     );
-    assert_eq!(
-        recv(&mut rx).await,
-        FacadeEvent::transition(TRANSITION_ENDED, "Fade")
-    );
+    // Not `recv`: its 10 s bound is shorter than the 15 s it must outwait
+    // (the clock is paused, so this longer bound costs no real time).
+    let ended = tokio::time::timeout(TRANSITION_END_MAX_WAIT * 2, rx.recv())
+        .await
+        .expect("no Ended within twice the max wait")
+        .expect("the channel closed");
+    assert_eq!(ended, FacadeEvent::transition(TRANSITION_ENDED, "Fade"));
     let waited = start.elapsed();
     assert!(
         waited >= TRANSITION_END_MAX_WAIT && waited < TRANSITION_END_MAX_WAIT + TRANSITION_END_POLL,
