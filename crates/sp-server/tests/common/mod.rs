@@ -86,6 +86,11 @@ pub struct FakeObsState {
     pub hold_lookups_of: Option<String>,
     /// The held answers, in request order.
     pub held: Vec<Value>,
+    /// #218 review round 3: right after answering the client's first
+    /// `GetInputList` (its connect-time NDI map rebuild, before its initial
+    /// `GetCurrentProgramScene`), send `CurrentProgramSceneChanged` for this
+    /// scene — an event cg OBS sent before the client's initial read.
+    pub event_on_input_list: Option<String>,
     /// #219: the `responseData` of `GetCurrentSceneTransition`; `None` answers
     /// `{}` (no transition kind: the client reads it as no answer).
     pub scene_transition: Option<Value>,
@@ -343,6 +348,27 @@ async fn handle_client(
                             }
                             if write.send(Message::Text(response.to_string().into())).await.is_err() {
                                 return;
+                            }
+                            // #218 review round 3: cg OBS switched its program
+                            // while the client was still connecting (its NDI
+                            // map rebuild runs first).
+                            let early = if req_type == "GetInputList" {
+                                state.lock().await.event_on_input_list.take()
+                            } else {
+                                None
+                            };
+                            if let Some(scene) = early {
+                                let evt = json!({
+                                    "op": 5,
+                                    "d": {
+                                        "eventType": "CurrentProgramSceneChanged",
+                                        "eventIntent": 4,
+                                        "eventData": { "sceneName": scene }
+                                    }
+                                });
+                                if write.send(Message::Text(evt.to_string().into())).await.is_err() {
+                                    return;
+                                }
                             }
                         }
                     }

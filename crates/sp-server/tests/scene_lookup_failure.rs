@@ -70,6 +70,14 @@ impl Rig {
 
     /// [`Self::start`] against the fake cg OBS `cg`.
     async fn start_with(cg: FakeObsState) -> Self {
+        let mut rig = Self::connect(cg).await;
+        rig.program_becomes("sp-fast", &[7]).await;
+        rig
+    }
+
+    /// Spawn the client against `cg` without waiting for anything; `events`
+    /// holds every event from the very start.
+    async fn connect(cg: FakeObsState) -> Self {
         let pool = db::create_memory_pool().await.unwrap();
         db::run_migrations(&pool).await.unwrap();
         sqlx::query(
@@ -98,16 +106,14 @@ impl Rig {
             rebuild_rx,
             shutdown_rx,
         );
-        let mut rig = Self {
+        Self {
             fake,
             state,
             events,
             _rebuild: rebuild,
             shutdown,
             _client: client,
-        };
-        rig.program_becomes("sp-fast", &[7]).await;
-        rig
+        }
     }
 
     /// Wait until the client's state shows `scene` with `playlists`.
@@ -344,5 +350,69 @@ async fn a_poll_read_an_event_overtook_never_rolls_the_scene_back() {
     .await;
     rig.fake.release_held("GetSceneItemList").await;
     rig.program_becomes("sp-slow", &[8]).await;
+    rig.stop().await;
+}
+
+/// Review round 3: an event cg OBS sent while the client was still
+/// connecting (read during its NDI map rebuild, queued until the connection
+/// loop runs) is OLDER than the client's initial program read. It must never
+/// override that read: cg OBS shows sp-fast, so the only `SceneChanged` is
+/// sp-fast's — no sp-slow after it (the engine would scene-off sp-fast and the
+/// follow would cut to sp-slow).
+#[tokio::test]
+async fn an_event_queued_during_the_connect_never_overrides_the_initial_read() {
+    let mut cg = cg_obs(); // cg OBS shows sp-fast
+    cg.event_on_input_list = Some("sp-slow".to_string());
+    let mut rig = Rig::connect(cg).await;
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    let mut changes = Vec::new();
+    // The initial read and two polls (the first poll runs right after it).
+    loop {
+        while let Ok(event) = rig.events.try_recv() {
+            if let obs::ObsEvent::SceneChanged {
+                scene_name,
+                active_playlist_ids,
+            } = event
+            {
+                changes.push((scene_name, active_playlist_ids));
+            }
+        }
+        let reads = rig
+            .fake
+            .state()
+            .await
+            .requests
+            .iter()
+            .filter(|r| r["requestType"] == "GetCurrentProgramScene")
+            .count();
+        if reads >= 3 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the client never polled twice after its initial read"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    while let Ok(event) = rig.events.try_recv() {
+        if let obs::ObsEvent::SceneChanged {
+            scene_name,
+            active_playlist_ids,
+        } = event
+        {
+            changes.push((scene_name, active_playlist_ids));
+        }
+    }
+    assert_eq!(
+        changes,
+        vec![("sp-fast".to_string(), set(&[7]))],
+        "the queued, older sp-slow event overrode the initial read"
+    );
+    let s = rig.state.read().await;
+    assert_eq!(
+        (s.current_scene.as_deref(), &s.active_playlist_ids),
+        (Some("sp-fast"), &set(&[7]))
+    );
+    drop(s);
     rig.stop().await;
 }
