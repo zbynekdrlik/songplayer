@@ -142,8 +142,11 @@ impl PlaybackEngine {
         self.resync_after_play(playlist_id).await;
     }
 
-    /// Consume paused snapshot for `playlist_id`; `None` if never paused. #88.
-    pub fn take_paused_snapshot(&mut self, playlist_id: i64) -> Option<(i64, u64)> {
+    /// Test-only: consume the paused snapshot for `playlist_id`; `None` if
+    /// never paused. #88. (The ▶ only reads it since release 0.68.0 review
+    /// round 6; `handle_play_video` clears it with its Play.)
+    #[cfg(test)]
+    pub(crate) fn take_paused_snapshot(&mut self, playlist_id: i64) -> Option<(i64, u64)> {
         self.pipelines
             .get_mut(&playlist_id)
             .and_then(|pp| pp.paused_at.take())

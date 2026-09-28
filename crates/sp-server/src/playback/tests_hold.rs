@@ -896,10 +896,11 @@ async fn a_started_after_a_failed_selection_still_starts_the_song() {
 }
 
 /// Review round 6 (🔵): a ▶ took the pause's resume point BEFORE looking the
-/// song up. When the lookup failed (the row gone, the song re-normalizing),
-/// no Play went out and the pipeline stayed paused, but the resume point was
-/// gone: a queued `Started` of the Play the pause overtook then armed the
-/// title timers of a paused song. A failed resume keeps the resume point.
+/// song up. When the lookup failed (a transient DB error, or the row gone
+/// with its playlist; the test deletes it), no Play went out and the
+/// pipeline stayed paused, but the resume point was gone: a queued `Started`
+/// of the Play the pause overtook then armed the title timers of a paused
+/// song. A failed resume keeps the resume point (a later ▶ retries it).
 #[tokio::test]
 async fn a_failed_resume_keeps_the_pause_s_resume_point() {
     let mut rig = rig().await;
