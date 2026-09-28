@@ -17,6 +17,9 @@ use crate::lyrics::renderer::LyricsState;
 use crate::playback::ndi_health::NdiHealthRegistry;
 use crate::playback::pipeline::PlaybackPipeline;
 
+/// Three sentences, 1 s apart. The #217 display plan groups source lines
+/// into sentences, so each ends in a period; the wall strips it, the karaoke
+/// WS sends the raw text.
 fn make_track() -> LyricsTrack {
     LyricsTrack {
         version: 20,
@@ -27,21 +30,21 @@ fn make_track() -> LyricsTrack {
             LyricsLine {
                 start_ms: 1000,
                 end_ms: 3000,
-                en: "alpha".into(),
+                en: "alpha.".into(),
                 sk: Some("alfa".into()),
                 words: None,
             },
             LyricsLine {
                 start_ms: 4000,
                 end_ms: 6000,
-                en: "beta".into(),
+                en: "beta.".into(),
                 sk: Some("beta".into()),
                 words: None,
             },
             LyricsLine {
                 start_ms: 7000,
                 end_ms: 9000,
-                en: "gamma".into(),
+                en: "gamma.".into(),
                 sk: Some("gama".into()),
                 words: None,
             },
@@ -161,14 +164,14 @@ async fn dispatch_lyrics_fires_on_first_position_event() {
             ..
         } => {
             assert_eq!(playlist_id, 99);
-            assert_eq!(line_en.as_deref(), Some("alpha"));
+            assert_eq!(line_en.as_deref(), Some("alpha."));
         }
         other => panic!("expected LyricsUpdate, got {other:?}"),
     }
 
     let pp = engine.pipelines.get(&99).unwrap();
     assert!(pp.last_resolume_subtitles_signature.is_some());
-    assert_eq!(pp.last_lyrics_ws_signature.as_deref(), Some("alpha"));
+    assert_eq!(pp.last_lyrics_ws_signature.as_deref(), Some("alpha."));
 }
 
 #[tokio::test]
@@ -218,7 +221,7 @@ async fn dispatch_lyrics_fires_on_line_change() {
     let msg = ws_rx.try_recv().expect("line change → second ws message");
     match msg {
         ServerMsg::LyricsUpdate { line_en, .. } => {
-            assert_eq!(line_en.as_deref(), Some("beta"));
+            assert_eq!(line_en.as_deref(), Some("beta."));
         }
         other => panic!("expected LyricsUpdate, got {other:?}"),
     }
@@ -245,7 +248,7 @@ async fn dispatch_lyrics_resolume_gated_on_scene_active() {
         .expect("ws LyricsUpdate must still fire when scene_active=false");
     match msg {
         ServerMsg::LyricsUpdate { line_en, .. } => {
-            assert_eq!(line_en.as_deref(), Some("alpha"));
+            assert_eq!(line_en.as_deref(), Some("alpha."));
         }
         other => panic!("expected LyricsUpdate, got {other:?}"),
     }

@@ -417,7 +417,8 @@ async fn a_hide_timer_writes_the_wall_only_on_program() {
     );
 }
 
-/// Three lines: "alpha" 1–3 s, "beta" 4–6 s, "gamma" 7–9 s.
+/// Three sentences: "alpha." 1–3 s, "beta." 4–6 s, "gamma." 7–9 s. The #217
+/// display plan groups lines into sentences; the wall strips the period.
 fn track() -> LyricsTrack {
     let line = |start_ms, end_ms, en: &str| LyricsLine {
         start_ms,
@@ -432,9 +433,9 @@ fn track() -> LyricsTrack {
         language_source: "en".into(),
         language_translation: "sk".into(),
         lines: vec![
-            line(1000, 3000, "alpha"),
-            line(4000, 6000, "beta"),
-            line(7000, 9000, "gamma"),
+            line(1000, 3000, "alpha."),
+            line(4000, 6000, "beta."),
+            line(7000, 9000, "gamma."),
         ],
     }
 }
@@ -470,7 +471,7 @@ async fn a_scene_back_on_inside_the_hold_keeps_the_lyrics_and_resumes_the_lines(
         ["alpha"],
         "on program the line goes to the wall"
     );
-    assert_eq!(lyrics_updates(&mut rig.ws), [Some("alpha".to_string())]);
+    assert_eq!(lyrics_updates(&mut rig.ws), [Some("alpha.".to_string())]);
 
     let _bus = hold(&mut rig).await;
     assert!(
@@ -497,7 +498,7 @@ async fn a_scene_back_on_inside_the_hold_keeps_the_lyrics_and_resumes_the_lines(
         ["beta"],
         "back on program: the line goes to the wall at the next Position"
     );
-    assert_eq!(lyrics_updates(&mut rig.ws), [Some("beta".to_string())]);
+    assert_eq!(lyrics_updates(&mut rig.ws), [Some("beta.".to_string())]);
 }
 
 // -- the hold marker (`scene_off_due`) itself ------------------------------

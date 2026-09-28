@@ -1,17 +1,16 @@
-//! Tests for the #217 LED-wall display plan. They run on the real "What A
-//! God" (`6KuPjo1diLg`) lyrics, the song that blinked on the wall during the
-//! 2026-09-27 event, plus synthetic edge cases with exact boundaries. The
-//! expected values were derived by hand and cross-checked against a line-by-line
-//! reference model of `build_plan`.
+//! Tests for the #217 LED-wall display plan: synthetic cases with exact
+//! boundaries. The stored-lyrics fixtures are in
+//! `display_plan_fixture_tests.rs`. The expected values were derived by hand
+//! and cross-checked against a line-by-line reference model of `build_plan`.
 
 use std::ops::Range;
 
-use sp_core::lyrics::{LyricsLine, LyricsTrack};
+use sp_core::lyrics::LyricsLine;
 
 use super::{
-    DisplayLine, DisplayPlan, DisplayProfile, FRAGMENT_MAX_MS, FRAGMENT_MAX_WORDS, Group,
-    HOLD_TAIL_MS, LEAD_MS, LONG_GAP_MS, MERGE_MAX_CHARS, MERGE_MAX_GAP_MS, MIN_VISIBLE_MS,
-    build_plan, fits, is_fragment, join_sk, join_text, starts_lowercase,
+    DisplayLine, DisplayPlan, DisplayProfile, GROUP_MAX_SPAN_MS, HOLD_TAIL_MS, LEAD_MAX_MS,
+    LONG_GAP_MS, MAX_CHARS, MAX_LATE_MS, MIN_VISIBLE_MS, SUSTAIN_MARGIN_MS, build_plan, join_sk,
+    join_text,
 };
 
 fn line(start_ms: u64, end_ms: u64, en: &str, sk: &str) -> LyricsLine {
@@ -24,11 +23,17 @@ fn line(start_ms: u64, end_ms: u64, en: &str, sk: &str) -> LyricsLine {
     }
 }
 
-fn group(start_ms: u64, end_ms: u64, en: &str) -> Group {
-    Group::of(0, &line(start_ms, end_ms, en, ""))
+/// A line with English text and an empty Slovak one.
+fn en(start_ms: u64, end_ms: u64, text: &str) -> LyricsLine {
+    line(start_ms, end_ms, text, "")
 }
 
-/// The plan of sung lyrics (the Song profile, lead up to 1.5 s).
+/// A dub subtitle line: Slovak text, no English.
+fn sk(start_ms: u64, end_ms: u64, text: &str) -> LyricsLine {
+    line(start_ms, end_ms, "", text)
+}
+
+/// The plan of sung lyrics (the Song profile).
 fn song_plan(lines: &[LyricsLine]) -> Vec<DisplayLine> {
     build_plan(lines, DisplayProfile::Song)
 }
@@ -42,28 +47,19 @@ fn texts(plan: &[DisplayLine]) -> Vec<&str> {
     plan.iter().map(|d| d.en.as_str()).collect()
 }
 
-/// "What A God" by Indiana Bible College, the base tier (`gemini-3-5-transcribe`,
-/// v22): 191 lines over 633 s.
-fn fixture() -> LyricsTrack {
-    let raw = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/lyrics_6KuPjo1diLg.json"
-    ));
-    serde_json::from_str(raw).expect("the fixture parses as a LyricsTrack")
+fn ranges(plan: &[DisplayLine]) -> Vec<Range<usize>> {
+    plan.iter().map(|d| d.src_range.clone()).collect()
 }
 
-/// When the display line's first source line starts being sung.
-fn sung_start(lines: &[LyricsLine], d: &DisplayLine) -> u64 {
-    lines[d.src_range.start].start_ms
+/// The source lines of a plan that must be ONE wall line. (A one-range array
+/// literal would trip `clippy::single_range_in_vec_init`.)
+fn single(plan: &[DisplayLine]) -> Range<usize> {
+    assert_eq!(plan.len(), 1, "one wall line, got {:?}", texts(plan));
+    plan[0].src_range.clone()
 }
 
-/// When the display line's last word is sung.
-fn sung_end(lines: &[LyricsLine], d: &DisplayLine) -> u64 {
-    lines[d.src_range.clone()]
-        .iter()
-        .map(|l| l.end_ms)
-        .max()
-        .expect("a display line has at least one source line")
+fn spans(plan: &[DisplayLine]) -> Vec<(u64, u64)> {
+    plan.iter().map(|d| (d.show_ms, d.hide_ms)).collect()
 }
 
 fn index_at(plan: &DisplayPlan, position_ms: u64) -> Option<usize> {
@@ -74,170 +70,238 @@ fn index_at(plan: &DisplayPlan, position_ms: u64) -> Option<usize> {
 
 #[test]
 fn constants_match_the_design_record() {
-    assert_eq!(LEAD_MS, 1_500);
+    assert_eq!(LEAD_MAX_MS, 800);
+    assert_eq!(SUSTAIN_MARGIN_MS, 1_500);
     assert_eq!(MIN_VISIBLE_MS, 1_200);
+    assert_eq!(MAX_LATE_MS, 400);
     assert_eq!(LONG_GAP_MS, 8_000);
     assert_eq!(HOLD_TAIL_MS, 3_000);
-    assert_eq!(FRAGMENT_MAX_MS, 1_500);
-    assert_eq!(FRAGMENT_MAX_WORDS, 3);
-    assert_eq!(MERGE_MAX_GAP_MS, 700);
-    assert_eq!(MERGE_MAX_CHARS, 64);
+    assert_eq!(MAX_CHARS, 72);
+    assert_eq!(GROUP_MAX_SPAN_MS, 6_500);
 }
 
-// ── fragment / merge predicates ────────────────────────────────────────────
+// ── grouping by sentence ───────────────────────────────────────────────────
 
+/// Video 335 at 99.8–113.6 s, where the owner saw the wall switch
+/// mid-sentence (28.9.2026). The fragment/merge plan showed "And now his
+/// kingdom comes. Now his will be", then "done. Lift up your banners and
+/// practice your praise." 1.5 s before "done." was sung.
 #[test]
-fn a_line_sung_under_1500_ms_is_a_fragment_and_1500_ms_is_not() {
-    let four_words = "Seated on the throne";
-    assert!(is_fragment(&group(0, 1_499, four_words), None));
-    assert!(!is_fragment(&group(0, 1_500, four_words), None));
-}
-
-#[test]
-fn three_words_are_a_fragment_and_four_are_not() {
-    assert!(is_fragment(&group(0, 2_000, "Seated on the"), None));
-    assert!(!is_fragment(&group(0, 2_000, "Seated on the throne"), None));
-    assert!(is_fragment(&group(0, 2_000, "  Seated   on  the  "), None));
-}
-
-#[test]
-fn a_line_before_a_lowercase_continuation_is_a_fragment() {
-    let whole = group(0, 2_000, "Seated on the throne");
-    let continuation = group(2_000, 4_000, "and we give you glory");
-    let new_sentence = group(2_000, 4_000, "And we give you glory");
-    assert!(is_fragment(&whole, Some(&continuation)));
-    assert!(!is_fragment(&whole, Some(&new_sentence)));
-}
-
-#[test]
-fn starts_lowercase_reads_the_first_letter_or_digit() {
-    assert!(starts_lowercase("and then"));
-    assert!(starts_lowercase("'cause I"));
-    assert!(starts_lowercase("…and then"));
-    assert!(!starts_lowercase("And then"));
-    assert!(!starts_lowercase("10,000 reasons"));
-    assert!(!starts_lowercase("..."));
-    assert!(!starts_lowercase(""));
-}
-
-#[test]
-fn fits_allows_a_gap_of_at_most_700_ms() {
-    let a = group(0, 1_000, "What a God,");
-    assert!(fits(&a, &group(1_700, 2_000, "what a God.")));
-    assert!(!fits(&a, &group(1_701, 2_000, "what a God.")));
-    // Overlapping lines have no gap.
-    assert!(fits(&a, &group(900, 2_000, "what a God.")));
+fn a_display_line_is_one_whole_sentence() {
+    let plan = song_plan(&[
+        line(
+            99_800,
+            103_941,
+            "And now his kingdom comes.",
+            "A teraz prichádza jeho kráľovstvo.",
+        ),
+        line(103_941, 106_200, "Now his will be", "Teraz sa deje jeho"),
+        line(108_600, 109_168, "done.", "vôľa."),
+        line(109_168, 110_306, "Lift up your", "Zdvihnite svoje"),
+        line(110_306, 112_354, "banners and practice", "zástavy a cvičte"),
+        line(112_354, 113_605, "your praise.", "svoju chválu."),
+    ]);
+    assert_eq!(
+        texts(&plan),
+        [
+            "And now his kingdom comes.",
+            "Now his will be done.",
+            "Lift up your banners and practice your praise."
+        ]
+    );
+    assert_eq!(ranges(&plan), [0..1, 1..3, 3..6]);
+    assert_eq!(plan[1].sk.as_deref(), Some("Teraz sa deje jeho vôľa."));
+    assert_eq!(
+        plan[2].sk.as_deref(),
+        Some("Zdvihnite svoje zástavy a cvičte svoju chválu.")
+    );
+    // Each sentence follows the previous one without a pause, so none leads:
+    // each shows exactly when it starts being sung.
+    assert_eq!(
+        spans(&plan),
+        [(99_000, 103_941), (103_941, 109_168), (109_168, 116_605)]
+    );
 }
 
 #[test]
-fn fits_allows_a_joined_text_of_at_most_64_chars() {
-    // 31 + 1 space + 32 = 64 chars; one more char is 65.
-    let a = group(0, 1_000, &"a".repeat(31));
-    assert!(fits(&a, &group(1_000, 2_000, &"b".repeat(32))));
-    assert!(!fits(&a, &group(1_000, 2_000, &"b".repeat(33))));
-    // Chars, not bytes: 64 two-byte chars still fit.
-    let sk = group(0, 1_000, &"č".repeat(31));
-    assert!(fits(&sk, &group(1_000, 2_000, &"ž".repeat(32))));
-    // "Oh" next to a 62-char line: 2 + 1 + 62 = 65 chars do not fit.
-    let tiny = group(0, 1_000, "Oh");
-    assert!(!fits(&tiny, &group(1_000, 2_000, &"b".repeat(62))));
+fn every_sentence_mark_ends_a_display_line() {
+    // `. ! ? …`, also before closing quotes and brackets, the Slovak „…“,
+    // ‚…‘ and »…« included (dub lines group by their SK).
+    for text in [
+        "Glory to God.",
+        "Glory to God!",
+        "Glory to God?",
+        "Glory to God…",
+        "Glory to God.\"",
+        "Glory to God!”",
+        "Glory to God?’",
+        "Glory to God…»",
+        "Glory to God.)",
+        "Glory to God!]",
+        "Glory to God.'",
+        "Sláva Bohu.“",
+        "Sláva Bohu.‘",
+        "Sláva Bohu!«",
+    ] {
+        let plan = song_plan(&[en(0, 1_000, text), en(1_000, 2_000, "we sing")]);
+        assert_eq!(ranges(&plan), [0..1, 1..2], "{text:?} ends a sentence");
+    }
 }
 
 #[test]
-fn fits_allows_a_joined_slovak_text_of_at_most_64_chars() {
-    // The EN fits ("Oh God"); only the SK decides: 31 + 1 + 32 = 64 fits,
-    // 31 + 1 + 33 = 65 does not.
-    let a = Group::of(0, &line(0, 1_000, "Oh", &"x".repeat(31)));
-    let sk_64 = Group::of(1, &line(1_000, 2_000, "God", &"y".repeat(32)));
-    let sk_65 = Group::of(1, &line(1_000, 2_000, "God", &"y".repeat(33)));
-    assert!(fits(&a, &sk_64));
-    assert!(!fits(&a, &sk_65));
-    // A missing SK side counts as empty.
-    let no_sk = Group {
-        sk: None,
-        ..Group::of(1, &line(1_000, 2_000, "God", ""))
+fn a_line_without_a_sentence_mark_runs_on_into_the_next() {
+    for text in [
+        "Glory to God",
+        "Glory to God,",
+        "Glory to God;",
+        "Glory to God:",
+        "Glory to God—",
+        "Glory to God-",
+        "Glory to God–",
+        "Glory to God\"",
+        "Glory to God)",
+    ] {
+        let plan = song_plan(&[en(0, 1_000, text), en(1_000, 2_000, "we sing.")]);
+        assert_eq!(single(&plan), 0..2, "{text:?} does not end a sentence");
+        assert_eq!(plan[0].en, format!("{text} we sing."));
+    }
+}
+
+#[test]
+fn a_long_sentence_splits_after_its_last_soft_end() {
+    // 32 + 1 + 17 + 1 + 45 chars do not fit in 72. When the middle line ends
+    // in a soft end (`, ; : —`), it is the last one, so the split comes after
+    // it.
+    let first = "Lift up your hands, oh ye gates,";
+    let last = "you everlasting doors, and the king of glory.";
+    let sentence = |middle: &str| {
+        song_plan(&[
+            en(0, 1_000, first),
+            en(1_000, 2_000, middle),
+            en(2_000, 3_000, last),
+        ])
     };
-    assert!(fits(&a, &no_sk));
+    for mark in [",", ";", ":", "—"] {
+        let plan = sentence(format!("and be lifted up{mark}").as_str());
+        assert_eq!(ranges(&plan), [0..2, 2..3], "{mark:?} is a soft end");
+    }
+    // Otherwise the last soft end is "gates,", and the middle line joins the
+    // rest of the sentence (17 + 1 + 45 chars fit).
+    for mark in ["", "-", "–"] {
+        let plan = sentence(format!("and be lifted up{mark}").as_str());
+        assert_eq!(ranges(&plan), [0..1, 1..3], "{mark:?} is no soft end");
+    }
+}
+
+#[test]
+fn a_long_sentence_with_no_soft_end_splits_before_the_line_that_overflows() {
+    // 35 + 1 + 36 = 72 chars fit; one char more does not. Chars, not bytes.
+    let first = "č".repeat(35);
+    let at_72 = song_plan(&[
+        en(0, 1_000, &first),
+        en(1_000, 2_000, &format!("{}.", "ž".repeat(35))),
+    ]);
+    assert_eq!(single(&at_72), 0..2);
+    assert_eq!(at_72[0].en.chars().count(), MAX_CHARS);
+    let at_73 = song_plan(&[
+        en(0, 1_000, &first),
+        en(1_000, 2_000, &format!("{}.", "ž".repeat(36))),
+    ]);
+    assert_eq!(ranges(&at_73), [0..1, 1..2]);
+}
+
+#[test]
+fn a_sentence_sung_over_6500_ms_splits_at_its_last_soft_end() {
+    let sentence = |last_start: u64| {
+        song_plan(&[
+            en(0, 1_000, "Shout all ye people,"),
+            en(1_000, 2_000, "shout it out"),
+            en(3_000, 4_000, "and dance"),
+            en(last_start, last_start + 1_000, "through the town."),
+        ])
+    };
+    // The last line starts exactly 6500 ms after the first: one wall line.
+    assert_eq!(single(&sentence(6_500)), 0..4);
+    // At 6501 ms it splits after "people,", and the rest stays together.
+    assert_eq!(ranges(&sentence(6_501)), [0..1, 1..4]);
+}
+
+#[test]
+fn what_is_left_after_a_split_must_fit_too() {
+    // "forever." starts 7600 ms after "Glory," and 7100 ms after "to God".
+    // After the split at "Glory," the rest still spans over 6500 ms, so
+    // "to God" stands alone.
+    let plan = song_plan(&[
+        en(0, 500, "Glory,"),
+        en(500, 1_000, "to God"),
+        en(7_600, 8_600, "forever."),
+    ]);
+    assert_eq!(ranges(&plan), [0..1, 1..2, 2..3]);
+    // From 7000 ms the rest spans exactly 6500 ms and stays together.
+    let plan = song_plan(&[
+        en(0, 500, "Glory,"),
+        en(500, 1_000, "to God"),
+        en(7_000, 8_000, "forever."),
+    ]);
+    assert_eq!(ranges(&plan), [0..1, 1..3]);
+}
+
+#[test]
+fn an_instrumental_break_ends_the_display_line_before_it() {
+    // "forever." starts 8001 ms after "to God" is sung. The break closes
+    // "Glory, to God" whole, and it leaves the wall 3 s after its end.
+    let plan = song_plan(&[
+        en(0, 500, "Glory,"),
+        en(500, 1_000, "to God"),
+        en(9_001, 10_000, "forever."),
+    ]);
+    assert_eq!(ranges(&plan), [0..2, 2..3]);
+    assert_eq!(spans(&plan), [(0, 4_000), (8_201, 13_000)]);
+    // A gap of exactly 8000 ms is no break. The 9000 ms span splits the
+    // sentence at its soft end instead, and the rest again.
+    let plan = song_plan(&[
+        en(0, 500, "Glory,"),
+        en(500, 1_000, "to God"),
+        en(9_000, 10_000, "forever."),
+    ]);
+    assert_eq!(ranges(&plan), [0..1, 1..2, 2..3]);
+}
+
+#[test]
+fn a_line_with_no_english_is_grouped_by_its_slovak() {
+    // Dub subtitle lines have no EN; their SK is the text they group by.
+    let plan = build_plan(
+        &[
+            sk(0, 500, "Áno"),
+            sk(500, 1_000, "amen."),
+            sk(1_000, 2_000, "Boh je dobrý."),
+        ],
+        DisplayProfile::Speech,
+    );
+    assert_eq!(ranges(&plan), [0..2, 2..3]);
+    assert_eq!(plan[0].sk.as_deref(), Some("Áno amen."));
+    assert_eq!(plan[0].en, "");
+    // The 72-char limit reads the SK too: 40 + 1 + 42 chars do not fit.
+    let text = "Boh nás miluje viac než si predstavíme a";
+    let plan = build_plan(
+        &[sk(0, 2_000, text), sk(2_000, 4_000, &format!("{text} b"))],
+        DisplayProfile::Speech,
+    );
+    assert_eq!(ranges(&plan), [0..1, 1..2]);
 }
 
 #[test]
 fn a_dub_subtitle_track_never_collapses_into_one_giant_sk_line() {
     // Dub subtitle tracks (`gemini-live-translate`, #182/#184) load into the
-    // same LyricsState as songs. Their lines touch, often carry no EN, and
-    // hold a whole SK sentence. An empty EN always "fits", so only an SK
-    // limit keeps them from merging into one huge Slovak block.
-    let sk = "Boh nás miluje viac, než si dokážeme predstaviť, a volá nás k sebe.";
+    // same LyricsState as songs. Their lines touch, carry no EN, and each
+    // holds a whole SK sentence, so each is its own wall line.
+    let text = "Boh nás miluje viac, než si dokážeme predstaviť, a volá nás k sebe.";
     let lines: Vec<LyricsLine> = (0..10u64)
-        .map(|k| line(1_000 + 4_000 * k, 5_000 + 4_000 * k, "", sk))
+        .map(|k| sk(1_000 + 4_000 * k, 5_000 + 4_000 * k, text))
         .collect();
     let plan = build_plan(&lines, DisplayProfile::Speech);
     assert_eq!(plan.len(), 10);
-    assert!(plan.iter().all(|d| d.sk.as_deref() == Some(sk)));
-    // Two short dub lines with no EN still merge, because their SK fits.
-    let short = build_plan(
-        &[
-            line(1_000, 1_500, "", "Áno."),
-            line(1_500, 2_000, "", "Amen."),
-        ],
-        DisplayProfile::Speech,
-    );
-    assert_eq!(short.len(), 1);
-    assert_eq!(short[0].sk.as_deref(), Some("Áno. Amen."));
-    assert_eq!(short[0].en, "");
-}
-
-// ── display profiles: song vs speech (ROZHODNUTÉ on #217) ──────────────────
-
-#[test]
-fn dub_subtitles_are_speech_and_everything_else_is_a_song() {
-    assert_eq!(
-        DisplayProfile::for_source("gemini-live-translate"),
-        DisplayProfile::Speech
-    );
-    assert_eq!(
-        DisplayProfile::for_source("gemini-3-5-transcribe"),
-        DisplayProfile::Song
-    );
-    assert_eq!(
-        DisplayProfile::for_source("lrclib+mtl@rev1/g35t-ok"),
-        DisplayProfile::Song
-    );
-    assert_eq!(DisplayProfile::for_source(""), DisplayProfile::Song);
-    assert_eq!(DisplayProfile::Song.lead_ms(), 1_500);
-    assert_eq!(DisplayProfile::Speech.lead_ms(), 0);
-}
-
-#[test]
-fn a_speech_line_shows_exactly_when_it_is_spoken() {
-    // The same three lines under both profiles. Speech has no lead, but it
-    // keeps the hold (through the 1000 ms gap) and the break tail (the 9000 ms
-    // gap).
-    let lines = [
-        line(1_000, 3_000, "", "Boh nás miluje viac, než si predstavíme."),
-        line(4_000, 6_000, "", "A volá nás k sebe každý deň."),
-        line(15_000, 17_000, "", "Preto mu dnes ďakujeme."),
-    ];
-    let speech = DisplayPlan::build(&lines, DisplayProfile::Speech);
-    assert_eq!(speech.profile(), DisplayProfile::Speech);
-    let spans: Vec<(u64, u64)> = speech
-        .lines()
-        .iter()
-        .map(|d| (d.show_ms, d.hide_ms))
-        .collect();
-    assert_eq!(spans, [(1_000, 4_000), (4_000, 9_000), (15_000, 20_000)]);
-    assert_eq!(index_at(&speech, 999), None);
-    assert_eq!(index_at(&speech, 1_000), Some(0));
-    assert_eq!(index_at(&speech, 3_999), Some(0));
-    assert_eq!(index_at(&speech, 4_000), Some(1));
-
-    let song = song_display_plan(&lines);
-    assert_eq!(song.profile(), DisplayProfile::Song);
-    let spans: Vec<(u64, u64)> = song
-        .lines()
-        .iter()
-        .map(|d| (d.show_ms, d.hide_ms))
-        .collect();
-    assert_eq!(spans, [(0, 3_000), (3_000, 9_000), (13_500, 20_000)]);
+    assert!(plan.iter().all(|d| d.sk.as_deref() == Some(text)));
 }
 
 #[test]
@@ -262,322 +326,247 @@ fn join_sk_joins_what_is_present() {
     assert_eq!(join_sk(None, None), None);
 }
 
-// ── merging (synthetic) ────────────────────────────────────────────────────
+// ── display profiles: song vs speech (ROZHODNUTÉ on #217) ──────────────────
 
 #[test]
-fn two_short_repeats_merge_into_one_wall_line() {
-    // "What a God, what a God." twice at 0.3 s each (fixture lines 29 + 30).
-    let plan = song_plan(&[
-        line(
-            97_000,
-            97_300,
-            "What a God, what a God.",
-            "Aký Boh, aký Boh.",
-        ),
-        line(
-            97_300,
-            97_600,
-            "What a God, what a God.",
-            "Aký Boh, aký Boh.",
-        ),
-    ]);
+fn dub_subtitles_are_speech_and_everything_else_is_a_song() {
     assert_eq!(
-        plan,
-        [DisplayLine {
-            en: "What a God, what a God. What a God, what a God.".into(),
-            sk: Some("Aký Boh, aký Boh. Aký Boh, aký Boh.".into()),
-            show_ms: 95_500,
-            hide_ms: 100_600,
-            src_range: 0..2,
-        }]
+        DisplayProfile::for_source("gemini-live-translate"),
+        DisplayProfile::Speech
+    );
+    assert_eq!(
+        DisplayProfile::for_source("gemini-3-5-transcribe"),
+        DisplayProfile::Song
+    );
+    assert_eq!(
+        DisplayProfile::for_source("lrclib+mtl@rev1/g35t-ok"),
+        DisplayProfile::Song
+    );
+    assert_eq!(DisplayProfile::for_source(""), DisplayProfile::Song);
+}
+
+#[test]
+fn a_speech_line_shows_exactly_when_it_is_spoken() {
+    // The same three lines under both profiles. Speech has no lead, but it
+    // keeps the hold (through the 1000 ms gap) and the break tail (the
+    // 9000 ms gap).
+    let lines = [
+        sk(1_000, 3_000, "Boh nás miluje viac, než si predstavíme."),
+        sk(4_000, 6_000, "A volá nás k sebe každý deň."),
+        sk(15_000, 17_000, "Preto mu dnes ďakujeme."),
+    ];
+    let speech = DisplayPlan::build(&lines, DisplayProfile::Speech);
+    assert_eq!(speech.profile(), DisplayProfile::Speech);
+    assert_eq!(
+        spans(speech.lines()),
+        [(1_000, 4_000), (4_000, 9_000), (15_000, 20_000)]
+    );
+    assert_eq!(index_at(&speech, 999), None);
+    assert_eq!(index_at(&speech, 1_000), Some(0));
+    assert_eq!(index_at(&speech, 3_999), Some(0));
+    assert_eq!(index_at(&speech, 4_000), Some(1));
+
+    // A song leads by 800 ms at the start and after the break. The second
+    // line follows the first after only 1000 ms, so it gets no lead.
+    let song = song_display_plan(&lines);
+    assert_eq!(song.profile(), DisplayProfile::Song);
+    assert_eq!(
+        spans(song.lines()),
+        [(200, 4_000), (4_000, 9_000), (14_200, 20_000)]
     );
 }
 
 #[test]
-fn a_fragment_chain_merges_greedily_forward() {
-    let plan = song_plan(&[
-        line(1_000, 1_300, "What a God,", "Aký Boh,"),
-        line(1_300, 1_600, "what a", "aký"),
-        line(1_600, 1_900, "God.", "Boh."),
-        line(
-            5_000,
-            7_000,
-            "Angels bow before him now",
-            "Anjeli sa mu klaňajú",
-        ),
-    ]);
+fn a_speech_line_is_never_held_back_for_the_one_before() {
+    // Two dub sentences 300 ms apart. Speech shows each exactly when it is
+    // spoken, even though the first is then up for only 300 ms. A song keeps
+    // the first on the wall for 1200 ms.
+    let lines = [sk(1_000, 1_300, "Áno."), sk(1_300, 1_600, "Amen.")];
     assert_eq!(
-        texts(&plan),
-        ["What a God, what a God.", "Angels bow before him now"]
+        spans(&build_plan(&lines, DisplayProfile::Speech)),
+        [(1_000, 1_300), (1_300, 4_600)]
     );
-    assert_eq!(plan[0].sk.as_deref(), Some("Aký Boh, aký Boh."));
-    assert_eq!(plan[0].src_range, 0..3);
-    assert_eq!(plan[1].src_range, 3..4);
-}
-
-#[test]
-fn a_fragment_that_cannot_merge_forward_merges_backward() {
-    // "Oh God" is 701 ms before the next line (too far), so it joins the
-    // line before it.
-    let plan = song_plan(&[
-        line(
-            0,
-            2_500,
-            "Seated on the throne of grace",
-            "Sedíš na tróne milosti",
-        ),
-        line(2_500, 3_000, "Oh God", "Ó Bože"),
-        line(
-            3_701,
-            6_000,
-            "We give you the glory now",
-            "Vzdávame ti slávu teraz",
-        ),
-    ]);
     assert_eq!(
-        texts(&plan),
-        [
-            "Seated on the throne of grace Oh God",
-            "We give you the glory now"
-        ]
-    );
-    assert_eq!(plan[0].sk.as_deref(), Some("Sedíš na tróne milosti Ó Bože"));
-    assert_eq!(plan[0].src_range, 0..2);
-    // The next line may lead only after "Oh God" is sung to its end (3000).
-    assert_eq!((plan[1].show_ms, plan[1].hide_ms), (3_000, 9_000));
-}
-
-#[test]
-fn a_fragment_that_fits_both_neighbours_joins_the_line_it_leads_into() {
-    let plan = song_plan(&[
-        line(0, 2_500, "Seated on the throne of grace", "a"),
-        line(2_500, 3_000, "Oh God", "b"),
-        line(3_000, 5_000, "We give you the glory now", "c"),
-    ]);
-    assert_eq!(
-        texts(&plan),
-        [
-            "Seated on the throne of grace",
-            "Oh God We give you the glory now"
-        ]
-    );
-    assert_eq!(plan[1].sk.as_deref(), Some("b c"));
-}
-
-#[test]
-fn a_fragment_stays_alone_when_no_neighbour_is_within_700_ms() {
-    let plan = song_plan(&[
-        line(0, 2_000, "Seated on the throne of grace", ""),
-        line(2_701, 3_000, "Oh", "Ó"),
-        line(3_701, 6_000, "We give you the glory now", ""),
-    ]);
-    assert_eq!(
-        texts(&plan),
-        [
-            "Seated on the throne of grace",
-            "Oh",
-            "We give you the glory now"
-        ]
-    );
-    // "Oh" waits until the first line is sung to its end (2000), then stays
-    // on the wall for the full 1200 ms.
-    assert_eq!((plan[1].show_ms, plan[1].hide_ms), (2_000, 3_200));
-}
-
-#[test]
-fn a_line_stays_on_the_wall_until_it_is_sung_to_the_end() {
-    // Two whole lines 500 ms apart. The second would lead by 1500 ms, but it
-    // may appear only once the first is sung to its end (12 000), so it gets
-    // only the 500 ms of lead that the gap leaves.
-    let plan = song_plan(&[
-        line(10_000, 12_000, "Seated on the throne of grace", ""),
-        line(12_500, 14_500, "We give you the glory now", ""),
-    ]);
-    assert_eq!((plan[0].show_ms, plan[0].hide_ms), (8_500, 12_000));
-    assert_eq!((plan[1].show_ms, plan[1].hide_ms), (12_000, 17_500));
-}
-
-#[test]
-fn a_merge_never_grows_a_wall_line_past_64_chars() {
-    let a = "a".repeat(31);
-    let fits_64 = song_plan(&[line(0, 500, &a, ""), line(500, 1_000, &"b".repeat(32), "")]);
-    assert_eq!(fits_64.len(), 1);
-    let over_64 = song_plan(&[line(0, 500, &a, ""), line(500, 1_000, &"b".repeat(33), "")]);
-    assert_eq!(over_64.len(), 2);
-}
-
-#[test]
-fn a_whole_line_joins_its_lowercase_continuation() {
-    // The first line is long and wordy, but the next one starts lowercase
-    // mid-sentence, so the first is a fragment and takes it. The third line
-    // starts a new sentence and stays alone. Checking the lowercase rule on a
-    // line's OWN text would instead pair the continuation with the third.
-    let plan = song_plan(&[
-        line(0, 2_000, "Seated on the throne of grace", "a"),
-        line(2_000, 4_000, "and we give you the glory", "b"),
-        line(4_000, 6_000, "Holy is the Lord our God", "c"),
-    ]);
-    assert_eq!(
-        texts(&plan),
-        [
-            "Seated on the throne of grace and we give you the glory",
-            "Holy is the Lord our God"
-        ]
-    );
-    assert_eq!(plan[0].sk.as_deref(), Some("a b"));
-}
-
-#[test]
-fn whole_lines_that_would_fit_together_stay_separate() {
-    let plan = song_plan(&[
-        line(0, 2_000, "There is no one higher", ""),
-        line(2_000, 4_000, "There is no one greater", ""),
-    ]);
-    assert_eq!(
-        texts(&plan),
-        ["There is no one higher", "There is no one greater"]
+        spans(&build_plan(&lines, DisplayProfile::Song)),
+        [(200, 1_400), (1_400, 4_600)]
     );
 }
 
-#[test]
-fn a_line_left_under_1200_ms_on_the_wall_merges_when_it_fits() {
-    // Two whole (non-fragment) lines that overlap: the second starts 1199 ms
-    // after the first shows, so the first would be up for only 1199 ms.
-    let plan = song_plan(&[
-        line(1_000, 4_000, "Seated on the throne of grace", "a"),
-        line(1_199, 4_500, "We give you the glory now", "b"),
-    ]);
-    assert_eq!(
-        plan,
-        [DisplayLine {
-            en: "Seated on the throne of grace We give you the glory now".into(),
-            sk: Some("a b".into()),
-            show_ms: 0,
-            hide_ms: 7_500,
-            src_range: 0..2,
-        }]
-    );
-}
+// ── show time: lead only into a pause, min visibility ──────────────────────
 
 #[test]
-fn a_line_left_exactly_1200_ms_on_the_wall_stays_alone() {
-    let plan = song_plan(&[
-        line(1_000, 4_000, "Seated on the throne of grace", "a"),
-        line(1_200, 4_500, "We give you the glory now", "b"),
-    ]);
-    assert_eq!(plan.len(), 2);
-    assert_eq!((plan[0].show_ms, plan[0].hide_ms), (0, 1_200));
-    assert_eq!((plan[1].show_ms, plan[1].hide_ms), (1_200, 7_500));
-}
-
-// ── lead / hold / long break (synthetic) ───────────────────────────────────
-
-#[test]
-fn a_line_shows_1500_ms_before_it_is_sung() {
-    let plan = song_plan(&[line(10_000, 12_000, "Seated on the throne of grace", "")]);
-    assert_eq!((plan[0].show_ms, plan[0].hide_ms), (8_500, 15_000));
+fn a_line_shows_800_ms_before_it_is_sung() {
+    let plan = song_plan(&[en(10_000, 12_000, "Seated on the throne of grace.")]);
+    assert_eq!(spans(&plan), [(9_200, 15_000)]);
 }
 
 #[test]
 fn the_first_lead_is_clamped_at_the_track_start() {
-    let plan = song_plan(&[line(1_000, 3_000, "Seated on the throne of grace", "")]);
-    assert_eq!((plan[0].show_ms, plan[0].hide_ms), (0, 6_000));
+    let plan = song_plan(&[en(500, 2_500, "Seated on the throne of grace.")]);
+    assert_eq!(spans(&plan), [(0, 5_500)]);
 }
+
+#[test]
+fn a_line_leads_only_into_a_pause_after_the_previous_one() {
+    // The previous sentence is sung until 12 000 ms. The next may appear
+    // early only from 1500 ms after that (13 500), and at most 800 ms early.
+    for (start, show) in [
+        (12_000, 12_000),
+        (13_500, 13_500),
+        (14_000, 13_500),
+        (14_300, 13_500),
+        (15_000, 14_200),
+    ] {
+        let plan = song_plan(&[
+            en(10_000, 12_000, "Seated on the throne of grace."),
+            en(start, start + 2_000, "We give you the glory now."),
+        ]);
+        assert_eq!(plan[1].show_ms, show, "sung from {start}");
+        assert_eq!(plan[0].hide_ms, show, "held until the next shows");
+    }
+}
+
+#[test]
+fn a_line_stays_1200_ms_when_that_holds_the_next_at_most_400_ms() {
+    // "What a God, what a God." twice at 0.3 s each ("What A God" lines 29
+    // and 30). The second waits until the first has been up for 1200 ms,
+    // 100 ms after it starts being sung. The text is the same.
+    let what_a_god = |start_ms: u64| {
+        line(
+            start_ms,
+            start_ms + 300,
+            "What a God, what a God.",
+            "Aký Boh, aký Boh.",
+        )
+    };
+    let plan = song_plan(&[what_a_god(97_000), what_a_god(97_300)]);
+    assert_eq!(ranges(&plan), [0..1, 1..2]);
+    assert_eq!(spans(&plan), [(96_200, 97_400), (97_400, 100_600)]);
+}
+
+#[test]
+fn in_a_fast_run_of_short_sentences_each_keeps_1200_ms() {
+    // Four sentences 1000 ms apart, each sung for 900 ms. The MIN_VISIBLE
+    // floor comes after the cap at the sung start (design record
+    // 5867952012), so the third and fourth show 200 and 400 ms after they
+    // start being sung; 400 ms is also the most the floor may hold a line
+    // back (MAX_LATE_MS). Pinned so that a change of that order is deliberate.
+    let lines: Vec<LyricsLine> = (0..4u64)
+        .map(|k| {
+            let start = 10_000 + 1_000 * k;
+            en(start, start + 900, &format!("Line {k}."))
+        })
+        .collect();
+    assert_eq!(
+        spans(&song_plan(&lines)),
+        [
+            (9_200, 11_000),
+            (11_000, 12_200),
+            (12_200, 13_400),
+            (13_400, 16_900)
+        ]
+    );
+}
+
+#[test]
+fn a_chant_of_short_sentences_falls_at_most_400_ms_behind() {
+    // Eight "Hey!" sung 400 ms apart, then a sentence (ROZHODNUTÉ on #217,
+    // Design-question 5868750224). The MIN_VISIBLE floor holds a line back
+    // at most MAX_LATE_MS past its sung start. Unbounded, "We lift your
+    // name." showed 4.8 s late, and before a break the last "Hey!" left the
+    // wall before it ever showed.
+    let chant = |next_start: u64| {
+        let mut lines: Vec<LyricsLine> = (0..8u64)
+            .map(|k| {
+                let start = 10_000 + 400 * k;
+                en(start, start + 400, "Hey!")
+            })
+            .collect();
+        lines.push(en(next_start, next_start + 2_000, "We lift your name."));
+        (song_plan(&lines), lines)
+    };
+    let (plan, _) = chant(14_000);
+    assert_eq!(
+        spans(&plan),
+        [
+            (9_200, 10_400),
+            (10_400, 11_200),
+            (11_200, 11_600),
+            (11_600, 12_000),
+            (12_000, 12_400),
+            (12_400, 12_800),
+            (12_800, 13_200),
+            (13_200, 14_400),
+            (14_400, 19_000)
+        ]
+    );
+    // Before a break over 8 s the last "Hey!" is shown, and the sentence
+    // after the break leads by 800 ms as usual.
+    let (plan, _) = chant(30_000);
+    assert_eq!((plan[7].show_ms, plan[7].hide_ms), (13_200, 16_200));
+    assert_eq!(plan[8].show_ms, 29_200);
+    for next_start in [14_000, 30_000] {
+        let (plan, lines) = chant(next_start);
+        for d in &plan {
+            let start = lines[d.src_range.start].start_ms;
+            assert!(d.show_ms <= start + MAX_LATE_MS, "{:?} is held back", d.en);
+            assert!(d.show_ms < d.hide_ms, "{:?} is never shown", d.en);
+        }
+    }
+}
+
+// ── hold / long break ──────────────────────────────────────────────────────
 
 #[test]
 fn a_line_holds_through_a_gap_until_the_next_line_shows() {
     let plan = song_plan(&[
-        line(1_000, 3_000, "Seated on the throne of grace", ""),
-        line(7_000, 9_000, "We give you the glory now", ""),
+        en(1_000, 3_000, "Seated on the throne of grace."),
+        en(7_000, 9_000, "We give you the glory now."),
     ]);
-    assert_eq!((plan[0].show_ms, plan[0].hide_ms), (0, 5_500));
-    assert_eq!((plan[1].show_ms, plan[1].hide_ms), (5_500, 12_000));
+    assert_eq!(spans(&plan), [(200, 6_200), (6_200, 12_000)]);
 }
 
 #[test]
 fn a_gap_of_exactly_8000_ms_still_holds() {
     let plan = song_plan(&[
-        line(10_000, 12_000, "Seated on the throne of grace", ""),
-        line(20_000, 22_000, "We give you the glory now", ""),
+        en(10_000, 12_000, "Seated on the throne of grace."),
+        en(20_000, 22_000, "We give you the glory now."),
     ]);
-    assert_eq!((plan[0].show_ms, plan[0].hide_ms), (8_500, 18_500));
-    assert_eq!((plan[1].show_ms, plan[1].hide_ms), (18_500, 25_000));
+    assert_eq!(spans(&plan), [(9_200, 19_200), (19_200, 25_000)]);
 }
 
 #[test]
 fn a_gap_over_8000_ms_hides_the_line_3_s_after_it_ends() {
     let plan = song_display_plan(&[
-        line(10_000, 12_000, "Seated on the throne of grace", ""),
-        line(20_001, 22_000, "We give you the glory now", ""),
+        en(10_000, 12_000, "Seated on the throne of grace."),
+        en(20_001, 22_000, "We give you the glory now."),
     ]);
-    let lines = plan.lines();
-    assert_eq!((lines[0].show_ms, lines[0].hide_ms), (8_500, 15_000));
-    assert_eq!((lines[1].show_ms, lines[1].hide_ms), (18_501, 25_000));
-    assert_eq!(index_at(&plan, 8_499), None);
-    assert_eq!(index_at(&plan, 8_500), Some(0));
+    assert_eq!(spans(plan.lines()), [(9_200, 15_000), (19_201, 25_000)]);
+    assert_eq!(index_at(&plan, 9_199), None);
+    assert_eq!(index_at(&plan, 9_200), Some(0));
     assert_eq!(index_at(&plan, 14_999), Some(0));
     assert_eq!(index_at(&plan, 15_000), None);
-    assert_eq!(index_at(&plan, 18_500), None);
-    assert_eq!(index_at(&plan, 18_501), Some(1));
+    assert_eq!(index_at(&plan, 19_200), None);
+    assert_eq!(index_at(&plan, 19_201), Some(1));
     assert_eq!(index_at(&plan, 24_999), Some(1));
     assert_eq!(index_at(&plan, 25_000), None);
 }
 
 #[test]
-fn a_fast_passage_switches_exactly_on_time_when_no_lead_is_left() {
-    // Nine lines 1000 ms apart, each sung for 900 ms and too long to merge
-    // with its neighbour (37 + 1 + 37 > 64 chars). Only the first line gets
-    // the full lead. The second may appear only once the first is sung to its
-    // end (10 900), which leaves it 100 ms of lead. From the third on, the
-    // previous line's 1200 ms would push past the sung start, so every line
-    // shows exactly when it is sung.
-    let lines: Vec<LyricsLine> = (0..9u64)
-        .map(|k| {
-            let start = 10_000 + 1_000 * k;
-            line(start, start + 900, &format!("{k} {}", "x".repeat(35)), "")
-        })
-        .collect();
-    let plan = song_plan(&lines);
-    let shows: Vec<u64> = plan.iter().map(|d| d.show_ms).collect();
-    assert_eq!(
-        shows,
-        [
-            8_500, 10_900, 12_000, 13_000, 14_000, 15_000, 16_000, 17_000, 18_000
-        ]
-    );
-    for pair in plan.windows(2) {
-        assert_eq!(pair[0].hide_ms, pair[1].show_ms);
-    }
-    assert_eq!(plan[8].hide_ms, 21_900);
-    // Lines 1–7 get less than 1200 ms. That is allowed, because the source
-    // lines start only 1000 ms apart; none of them leaves before it is sung
-    // to its end.
-    let up: Vec<u64> = plan.iter().map(|d| d.hide_ms - d.show_ms).collect();
-    assert_eq!(
-        up,
-        [
-            2_400, 1_100, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 3_900
-        ]
-    );
-    for (d, source) in plan.iter().zip(&lines) {
-        assert!(d.hide_ms >= source.end_ms, "{:?} leaves while sung", d.en);
-    }
-}
-
-#[test]
 fn at_finds_the_line_on_the_wall_with_half_open_bounds() {
     let plan = song_display_plan(&[
-        line(1_000, 3_000, "Seated on the throne of grace", ""),
-        line(7_000, 9_000, "We give you the glory now", ""),
+        en(1_000, 3_000, "Seated on the throne of grace."),
+        en(7_000, 9_000, "We give you the glory now."),
     ]);
     assert_eq!(plan.lines().len(), 2);
-    assert_eq!(index_at(&plan, 0), Some(0));
-    assert_eq!(index_at(&plan, 5_499), Some(0));
-    assert_eq!(index_at(&plan, 5_500), Some(1));
+    assert_eq!(index_at(&plan, 199), None);
+    assert_eq!(index_at(&plan, 200), Some(0));
+    assert_eq!(index_at(&plan, 6_199), Some(0));
+    assert_eq!(index_at(&plan, 6_200), Some(1));
     assert_eq!(index_at(&plan, 11_999), Some(1));
     assert_eq!(index_at(&plan, 12_000), None);
-    let (_, shown) = plan.at(5_500).expect("the second line is on the wall");
-    assert_eq!(shown.en, "We give you the glory now");
+    let (_, shown) = plan.at(6_200).expect("the second line is on the wall");
+    assert_eq!(shown.en, "We give you the glory now.");
 }
 
 #[test]
@@ -585,219 +574,4 @@ fn an_empty_track_has_an_empty_plan() {
     let plan = song_display_plan(&[]);
     assert!(plan.lines().is_empty());
     assert_eq!(plan.at(0), None);
-}
-
-// ── the "What A God" fixture ───────────────────────────────────────────────
-
-#[test]
-fn fixture_is_the_what_a_god_base_tier_track() {
-    let track = fixture();
-    assert_eq!(track.source, "gemini-3-5-transcribe");
-    assert_eq!(track.lines.len(), 191);
-    // Before #217 the wall blanked in every gap between sung lines: 310.7 s.
-    let sung_gaps: u64 = track
-        .lines
-        .windows(2)
-        .map(|w| w[1].start_ms.saturating_sub(w[0].end_ms))
-        .sum();
-    assert_eq!(sung_gaps, 310_700);
-}
-
-#[test]
-fn fixture_wall_never_blanks_in_a_gap_of_8_s_or_less() {
-    let lines = fixture().lines;
-    let plan = song_plan(&lines);
-    let mut blank_ms = 0;
-    let mut long_breaks = 0;
-    for pair in plan.windows(2) {
-        let (cur, next) = (&pair[0], &pair[1]);
-        let gap = sung_start(&lines, next).saturating_sub(sung_end(&lines, cur));
-        if gap <= LONG_GAP_MS {
-            assert_eq!(cur.hide_ms, next.show_ms, "a blank before {:?}", next.en);
-        } else {
-            long_breaks += 1;
-            assert_eq!(cur.hide_ms, sung_end(&lines, cur) + HOLD_TAIL_MS);
-            assert_eq!(next.show_ms, sung_start(&lines, next) - LEAD_MS);
-            blank_ms += next.show_ms - cur.hide_ms;
-        }
-    }
-    // Only the three instrumental breaks (9.6 s, 11.6 s, 9.8 s) blank the wall:
-    // 5.1 s + 7.1 s + 5.3 s, down from 310.7 s.
-    assert_eq!(long_breaks, 3);
-    assert_eq!(blank_ms, 17_500);
-}
-
-#[test]
-fn fixture_no_wall_line_is_up_for_less_than_1200_ms() {
-    let lines = fixture().lines;
-    let plan = song_plan(&lines);
-    for pair in plan.windows(2) {
-        let up = pair[0].hide_ms - pair[0].show_ms;
-        if up < MIN_VISIBLE_MS {
-            let apart = sung_start(&lines, &pair[1]) - sung_start(&lines, &pair[0]);
-            assert!(
-                apart < MIN_VISIBLE_MS,
-                "{:?} blinks for {up} ms",
-                pair[0].en
-            );
-        }
-    }
-    let shortest = plan
-        .iter()
-        .map(|d| d.hide_ms - d.show_ms)
-        .min()
-        .expect("the plan is not empty");
-    // The shortest is the lone "Oh," (1.5 s, on the wall 33.2–34.7 s). The
-    // old wall flashed 42 lines for under 1 s.
-    assert_eq!(shortest, 1_500);
-}
-
-#[test]
-fn fixture_no_wall_line_leaves_before_it_is_sung_to_the_end() {
-    // ROZHODNUTÉ on #217: the next line may appear early only once the
-    // previous one has been sung to its end. Under the first design 68 of the
-    // 137 wall lines left early (41.7 s), and "All I have" left before it was
-    // even sung.
-    let lines = fixture().lines;
-    let plan = song_plan(&lines);
-    for d in &plan {
-        let end = sung_end(&lines, d);
-        assert!(
-            d.hide_ms >= end,
-            "{:?} leaves at {} ms but is sung until {end} ms",
-            d.en,
-            d.hide_ms
-        );
-    }
-}
-
-#[test]
-fn fixture_lead_bounds_hold() {
-    let lines = fixture().lines;
-    let plan = song_plan(&lines);
-    for (i, d) in plan.iter().enumerate() {
-        let start = sung_start(&lines, d);
-        assert!(d.show_ms <= start, "{:?} shows after it is sung", d.en);
-        assert!(d.show_ms + LEAD_MS >= start, "{:?} shows too early", d.en);
-        if i > 0 {
-            let prev = &plan[i - 1];
-            let exact = d.show_ms == start;
-            assert!(
-                d.show_ms >= sung_end(&lines, prev) || exact,
-                "{:?} shows while {:?} is still sung",
-                d.en,
-                prev.en
-            );
-            assert!(
-                d.show_ms >= prev.show_ms + MIN_VISIBLE_MS || exact,
-                "{:?} cuts {:?} short",
-                d.en,
-                prev.en
-            );
-        }
-    }
-    // 69 lines get the full 1.5 s lead; 7 have no room and show exactly when
-    // sung; the rest lead by what the gap after the previous line leaves.
-    let full = plan
-        .iter()
-        .filter(|d| sung_start(&lines, d) - d.show_ms == LEAD_MS)
-        .count();
-    let exact = plan
-        .iter()
-        .filter(|d| d.show_ms == sung_start(&lines, d))
-        .count();
-    assert_eq!((full, exact), (69, 7));
-    assert_eq!(plan[0].show_ms, 300);
-}
-
-#[test]
-fn fixture_merges_fragments_into_verses() {
-    let lines = fixture().lines;
-    let plan = song_plan(&lines);
-    assert_eq!(plan.len(), 137);
-    let by_src = |range: Range<usize>| {
-        plan.iter()
-            .find(|d| d.src_range == range)
-            .unwrap_or_else(|| panic!("no display line for source lines {range:?}"))
-    };
-    // "What a God, what a God." twice at 0.3 s.
-    assert_eq!(
-        by_src(29..31).en,
-        "What a God, what a God. What a God, what a God."
-    );
-    // "find nobody no" joins its sentence.
-    assert_eq!(
-        by_src(128..131).en,
-        "I searched all over and I still couldn't find nobody no."
-    );
-    // A verse split in three mid-sentence.
-    assert_eq!(
-        by_src(6..9).en,
-        "You're nothing like I thought you were you're better."
-    );
-    // A lone "Oh," with no neighbour within 700 ms stays alone, but it gets
-    // 1.5 s instead of flashing for 0.5 s. It appears once the line before it
-    // is sung to its end (33.2 s).
-    let oh = by_src(11..12);
-    assert_eq!(
-        (oh.en.as_str(), oh.show_ms, oh.hide_ms),
-        ("Oh,", 33_200, 34_700)
-    );
-    // Every merged line fits the wall, in both languages.
-    assert!(
-        plan.iter()
-            .filter(|d| d.src_range.len() > 1)
-            .all(|d| d.en.chars().count() <= MERGE_MAX_CHARS
-                && d.sk.as_deref().unwrap_or_default().chars().count() <= MERGE_MAX_CHARS)
-    );
-    // The source lines tile the plan in order, none lost or repeated.
-    let mut next = 0;
-    for d in &plan {
-        assert_eq!(d.src_range.start, next);
-        assert!(d.src_range.end > next);
-        next = d.src_range.end;
-    }
-    assert_eq!(next, lines.len());
-}
-
-#[test]
-fn fixture_en_and_sk_stay_paired() {
-    let lines = fixture().lines;
-    let plan = song_plan(&lines);
-    for d in &plan {
-        let src = &lines[d.src_range.clone()];
-        let en: Vec<&str> = src.iter().map(|l| l.en.trim()).collect();
-        let sk: Vec<&str> = src
-            .iter()
-            .map(|l| l.sk.as_deref().unwrap_or_default().trim())
-            .collect();
-        assert_eq!(d.en, en.join(" "));
-        assert_eq!(d.sk.as_deref(), Some(sk.join(" ").as_str()));
-    }
-}
-
-#[test]
-fn fixture_long_breaks_hide_3_s_after_the_line_ends() {
-    let plan = song_display_plan(&fixture().lines);
-    // [start of the break's blank, next line's show) for the three breaks.
-    for (blank_from, next_show, last_text) in [
-        (205_800, 210_900, "To you are"),
-        (432_200, 439_300, "No."),
-        (547_200, 552_500, "What a God, what a God."),
-    ] {
-        let (i, held) = plan
-            .at(blank_from - 1)
-            .expect("the line is held until 3 s after it ends");
-        assert_eq!(held.en, last_text);
-        assert_eq!(held.hide_ms, blank_from);
-        assert_eq!(index_at(&plan, blank_from), None);
-        assert_eq!(index_at(&plan, next_show - 1), None);
-        assert_eq!(index_at(&plan, next_show), Some(i + 1));
-    }
-    // Before the first line and after the last one, the wall is blank.
-    assert_eq!(index_at(&plan, 299), None);
-    assert_eq!(index_at(&plan, 300), Some(0));
-    let last = plan.lines().len() - 1;
-    assert_eq!(index_at(&plan, 635_999), Some(last));
-    assert_eq!(index_at(&plan, 636_000), None);
 }
