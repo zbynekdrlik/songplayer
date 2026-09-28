@@ -96,6 +96,15 @@ What the driver does now (`refresh_mapping(now)`):
     attempt. Only the episode flag, and so the ready event, change.
   - It runs BEFORE `apply_outcome(false)`, so a failure that opens the
     breaker still ends the episode (the close opens a fresh one).
+  - **The first ANSWER restarts it** (review round 1,
+    `not_ready_by_failure`). A failed attempt never takes the fast path, so
+    counted from the failure the 120 s window could be over before Arena
+    answered at all (three failures 60 s apart), and the answered, still
+    loading composition waited out the 60 s retry. The first answered
+    fetch of an episode the Err arm opened restarts it there. Only that
+    one: an episode an answer, a 404 or a breaker close opened has another
+    start and is never restamped
+    (`a_failed_fetch_s_episode_restarts_at_the_first_answer`).
   - A failure while SongPlayer's clips ARE mapped opens nothing (Arena's
     REST choking, the map is valid), and an open episode keeps its start
     (`a_failed_fetch_opens_an_episode_only_without_songplayer_clips`).
@@ -397,6 +406,10 @@ the driver compares it with what it did (above).
   `Started`, never the last song's (review round 2). A resume
   (`handle_play_video` with a position) hides 3.5 s before the song's REAL
   end. The hide timer used to count the full duration from the resume.
+  Since the release 0.68.0 review round 1 it also drops the last song's
+  `lyrics_state` and sets `cached_position_ms` to the Play's start: a
+  recovery before the new `Started` re-pushed the old song's line, and a
+  pause there recorded the old song's position for the new one.
 - **A Play on program re-syncs the wall at once (review round 4,
   `resync_after_play`, after every Play).** `begin_play` closed the old
   song's window and cancelled its hide timer, and the new show timer comes
@@ -474,6 +487,10 @@ the driver compares it with what it did (above).
   that started off program (a playlist held through a #215 transition)
   faded out the on-program playlist's title. `PlayAction::Pause` cancels
   the song's timers: a paused song's hide timer fired at its planned end.
+  On program the pause then re-syncs the wall (`resync_after_play`): a
+  paused song is not a title candidate, so without it the title stayed up
+  until some re-sync took it down. A `Started` that a pause overtook
+  (`WaitingForScene`) arms nothing and clears nothing.
   The held playlist itself no longer starts a song
   (`.claude/rules/program-transition.md`, "A held playlist has no side
   effects").
@@ -492,6 +509,7 @@ the driver compares it with what it did (above).
 - **`cached_position_ms`** is the subtitle and pause position only. The
   `Started` handler no longer zeroes it: a Pause before the first Position
   report recorded 0 and resumed the song from its start (review round 1).
+  `begin_play` sets it to the Play's start (0, or the resume's position).
 - Pinned in `tests_scene_change.rs` (`Window::{Due, BeforeShow, AfterHide,
   OtherSong, NotStarted}`, the Play re-sync on and off program, the failed
   reads, the window-less resume), `title_tests.rs` (the clock's instants and

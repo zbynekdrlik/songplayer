@@ -4,6 +4,9 @@ paths:
   - "crates/sp-server/src/playback/program_follow*.rs"
   - "crates/sp-server/src/playback/scene_off*.rs"
   - "crates/sp-server/src/playback/tests_hold.rs"
+  - "crates/sp-server/src/playback/handle_pipeline_event.rs"
+  - "crates/sp-server/src/playback/clear_lyrics.rs"
+  - "crates/sp-server/src/playback/engine_play.rs"
   - "crates/sp-server/src/playback/program_bus*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
   - "crates/sp-server/src/playback/pacer_tests_live.rs"
@@ -268,32 +271,57 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
 
 ### A held playlist has no side effects (release 0.68.0 blockers)
 
-Design record 5863318980 (the cross-lane review of PR #220). The hold keeps
-the outgoing playlist DECODING, nothing more: for every engine side effect it
-is off program. Before, its song's end inside the hold started the next song
-off program, whose hide timer later faded out the on-program title.
+Design record 5863318980 (the cross-lane review of PR #220), plus its two
+review rounds. The hold keeps the outgoing playlist DECODING, nothing more:
+for every engine side effect it is off program. Before, its song's end
+inside the hold started the next song off program, whose hide timer later
+faded out the on-program title.
 
 - **The hold is a marker.** `PlaylistPipeline::scene_off_due` keeps the
   abort handle of the pending `SceneOffDue`; `Some` = held. `end_hold`
-  cancels it, and three things call it:
+  cancels it, and these call it:
   - every `PlayAction::Pause`;
   - a scene back on program (`handle_scene_change(pid, true)`);
+  - an operator's pick (`handle_play_video`, which a ▶ resume also runs,
+    and `handle_previous`): the song then plays like any song played off
+    program by hand, and its end starts the next;
   - a newer hold: a re-check that finds the window not over replaces its
     predecessor.
-- **It never starts a song off program.** `pause_if_held` runs first in the
-  `Ended` and `Error` arms and for a `Skip`. A held playlist gets
-  `SceneOff`, the hold's own end, instead of `SelectAndPlay` /
-  `ReplayCurrent` (Continuous, Loop and Single alike). So none of these
-  happen:
+- **A re-check names its hold.** `SceneOffDue` carries the re-check task's
+  id (`tokio::task::id()` inside the task). `scene_off_due` ignores one
+  whose task a newer hold replaced: queued during an A→B→A→B, it was taken
+  as the newer hold's re-check and skipped that hold's `CUT_SETTLE`. With no
+  hold pending, a re-check is handled as before.
+- **Its end, a failure or a skip never start a song off program.**
+  `pause_if_held` runs first in the `Ended` and `Error` arms and for a
+  `Skip`. A held playlist gets `SceneOff`, the hold's own end, instead of
+  `SelectAndPlay` / `ReplayCurrent` / Single's `SendBlack`. So none of
+  these happen:
   - an off-program `Started` (its title timers took down the on-program
     title);
   - a `record_play` of an unaired song;
-  - the ungated song-end `clear_lyrics_display`, which blanked the
-    on-program playlist's `#sp-subs`.
+  - the song-end `clear_lyrics_display` (see the next bullet).
 
-  The accepted trade-off: a song ending inside the ≤ 1 s hold is not
-  followed by the next one, and the rest of the window mixes the paused
-  side's standby.
+  The accepted trade-offs:
+  - A song that ends inside the hold is not followed by the next one, and
+    the rest of the window mixes the paused side's standby. The hold is the
+    fade plus up to 15 slots of cue wait: about 0.8 s for a 300 ms fade, up
+    to about 10.5 s for the longest one (300 slots).
+  - The pause keeps its resume point. For a song that ENDED that is its
+    end, so a later ▶ plays its last moment, then the next song.
+- **`clear_lyrics_display` follows the dispatch gates.** A held playlist
+  clears nothing. One merely off program leaves the shared subtitle clips
+  alone, as its lines do; its own karaoke WS clear and the Presenter clear
+  still go out (the off-program contract of `dispatch_lyrics_if_changed`).
+  Before, a held song's `Started` with no lyrics, and any off-program song
+  end or PlayVideo, blanked the on-program playlist's `#sp-subs` line (its
+  dedup key kept it blank until its next line).
+- **A `Started` a pause overtook shows nothing.** The Play went out, then a
+  pause came (the hold's end, the dashboard's Pause) before the song's
+  `Started`: the pipeline is `WaitingForScene`. After the NowPlaying
+  broadcast the arm returns, with no lyrics, clock, timers or clear; the
+  resume's `Started` does them. Every production Play sets `Playing` first,
+  so only an overtaken Play gets there.
 - **The bus needs nothing new.** A paused paced pipeline emits its frozen
   last frame + a silent block per boundary (`Standby::FrozenLast`), an ended
   one its idle standby. They are `from`'s pairs like any other (only `to`'s
@@ -301,7 +329,9 @@ off program, whose hide timer later faded out the on-program title.
   against the program standby, so the window never stalls.
 - **Both title timers fire only on program** (`title_timers.rs`): the hide
   timer reads `scene_active` when it fires, like the show timer. A pause
-  cancels them.
+  cancels them, and on program it re-syncs the wall (`resync_after_play`):
+  a paused song's title is not due, so the title goes down at the pause,
+  as any later re-sync would take it down.
 - **The lyrics survive the hold.** The scene-off used to drop
   `lyrics_state`, so a scene back on inside the hold played on with no
   subtitles. Now:
@@ -312,14 +342,17 @@ off program, whose hide timer later faded out the on-program title.
     (`dispatch_lyrics_resolume_gated_on_scene_active`).
   - The scene-off resets the wall and Presenter dedup keys (the wall was
     cleared), so a scene back on re-sends the line at the next Position.
-  - The PAUSE drops the lyrics, where the scene-off used to. A later
-    scene-on starts a new song, and a recovery between that Play and the
-    new `Started` must not re-push the old song's line.
+  - The PAUSE drops the lyrics, where the scene-off used to: a Position
+    queued before the pause took effect sends nothing. Every Play drops
+    them too (`begin_play`, with the position set to the Play's start): a
+    recovery before the new `Started` must not re-push the old song's line.
 - Pinned in `tests_hold.rs`. The hold there is real: the bus cuts a minute
   ahead on the live clock. "No Play was sent" is read from the title clock,
   which every Play clears (`begin_play`). That works on every platform:
   the Windows test pipeline never answers a Play, so counting its replies
-  is not portable.
+  is not portable. A "nothing went out while held" check must use a NEW
+  line: the same line is held back by the dedup keys anyway, so it proves
+  nothing.
 
 ## Following cg OBS (`program_follow.rs`)
 
