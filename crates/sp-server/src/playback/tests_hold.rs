@@ -843,3 +843,27 @@ async fn a_play_drops_the_last_pause_s_resume_point() {
     );
     assert_eq!(pp.paused_at, None, "the old resume point is gone");
 }
+
+/// Review round 4 (🔵): a Play resets the position to its start
+/// (`begin_play`), but the OLD song's last report can still arrive after it
+/// (the pipeline reports before it reads the Play; `Position` names no
+/// video). It moved the new song's pause point until the new song's first
+/// report, so a pause there resumed the new song at the old one's position.
+/// A report before the new song's `Started` (a Play clears the clock) is the
+/// old song's.
+#[tokio::test]
+async fn the_old_song_s_late_report_does_not_move_the_new_song_s_pause_point() {
+    let mut rig = rig().await;
+    playing(&mut rig.engine);
+    rig.engine.handle_command(OUT, PlayEvent::Skip).await; // a Play
+    let playing_now = out(&rig.engine).current_video_id.expect("a song");
+
+    position(&mut rig.engine, 50_000).await; // the old song's last report
+    rig.engine.handle_command(OUT, PlayEvent::SceneOff).await; // a pause
+
+    assert_eq!(
+        out(&rig.engine).paused_at,
+        Some((playing_now, 0)),
+        "the new song pauses at its start"
+    );
+}
