@@ -261,9 +261,10 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
   `t` = one slot after the window's end. It is re-checked at `t`.
 - `Hold::OnProgram`: `pid` is still the program's source. The follow task and
   the #213 remote control cut only AFTER cg OBS switched, and cg OBS's scene
-  event can reach the engine before their cut (#219: the follow reads the
-  OBS client's snapshot, published just before the `SceneChanged`, so either
-  order happens). One `CUT_SETTLE` (500 ms) re-check.
+  event usually reaches the engine before their cut — but not always (#219:
+  the follow reads the OBS client's snapshot, published together with the
+  `SceneChanged`, on its own task, so either order happens; a cut that came
+  first is a `Hold::Until`). One `CUT_SETTLE` (500 ms) re-check.
 - `None`: pause now, exactly as before. Every playlist that is not the
   program's source takes this path.
 
@@ -437,8 +438,12 @@ unanswered-catch-up gap it had is gone by construction.
   - `LookupFailed` is ignored completely: no cut, no `last_follow_cut`,
     `seen` kept. The client's repaired lookup is the next change. A failure
     that ends back on the followed scene changes nothing;
-  - `Unknown` resets `seen`, so the reconnect's scene is followed again
-    (as the old `SceneChanged` of a reconnect was);
+  - `Unknown` (not connected wins over a flagged failure) resets `seen`, so
+    the reconnect's scene is followed again (as the old `SceneChanged` of a
+    reconnect was) — when the follow SAW the disconnected snapshot: a
+    disconnect shorter than the follow's own step (it is inside
+    `follow_scene`) can be coalesced away, and a reconnect to the same scene
+    then changes nothing;
   - a CATCH-UP — at start (`run_follow_task`'s first snapshot) and when
     `program_follow_obs` flips false → true (`on_tick`, the snapshot read
     with `borrow()`) — clears `seen` first, so the current scene is followed
@@ -447,15 +452,24 @@ unanswered-catch-up gap it had is gone by construction.
   - the watch coalesces: only the newest snapshot is seen, so a scene cg OBS
     showed only briefly between two wakes is never cut to (correct: the
     program ends on cg OBS's final scene).
+  - **Behaviour change vs #215 (for the main session to confirm):** the old
+    follow acted on EVERY `SceneChanged`, so cg OBS re-taking the SAME scene
+    (a same-scene transition that fires `CurrentProgramSceneChanged`) cut
+    `SP-program` back to that scene's source after a manual dashboard cut.
+    Now only a CHANGED scene view acts (the design record's "reacts to every
+    change"; `send_if_modified` also drops an identical snapshot), so such a
+    re-take leaves the manual cut alone. The Companion path is unaffected:
+    the #213 facade cuts on every press itself.
 - Follow = `scene_action` (the #213 rule) → cut via `persist_and_cut`, unless
   the program already shows that source (`Follow::follow_scene`, which also
   records `last_follow_cut`). This replaces the event-night watcher
   `%TEMP%\sp_follow.ps1`, which polled the scene every 200 ms.
-- Order vs the engine: the client publishes a scene's snapshot and THEN
-  broadcasts its `SceneChanged`, so the follow may cut before or after the
-  engine's scene-off of the outgoing playlist. `scene_off.rs` handles both
-  (`Hold::Until` when the cut came first, `Hold::OnProgram` + `CUT_SETTLE`
-  when the scene-off came first).
+- Order vs the engine: the client sends a scene's `SceneChanged` and
+  publishes its snapshot under one write lock (the broadcast first), but the
+  engine bridge and the follow are separate tasks, so the follow may cut
+  before or after the engine's scene-off of the outgoing playlist.
+  `scene_off.rs` handles both (`Hold::Until` when the cut came first,
+  `Hold::OnProgram` + `CUT_SETTLE` when the scene-off came first).
 
 ## API + UI
 

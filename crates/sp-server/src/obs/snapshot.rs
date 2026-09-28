@@ -22,9 +22,15 @@
 //! lock did not hold, and snapshots are published in write order) and only
 //! on a real change of the snapshot (a streaming / recording change wakes
 //! nobody). A disconnect resets them all. The channel starts disconnected.
+//!
+//! A scene apply writes through [`ObsShared::update_scene`] with a ticket
+//! taken before its lookup ran ([`ObsShared::scene_ticket`]): an answer that
+//! arrives after a LATER apply's answer was written is dropped, so an
+//! out-of-order lookup never rolls the scene back.
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::{RwLock, watch};
 
@@ -59,12 +65,52 @@ impl ObsSnapshot {
 pub(crate) struct ObsShared {
     state: Arc<RwLock<ObsState>>,
     tx: watch::Sender<ObsSnapshot>,
+    scene_order: Arc<SceneOrder>,
+}
+
+/// The order of the scene applies (#218 review): cg OBS may answer two
+/// lookups out of order, and the poll's relookups can overlap an event's
+/// lookup, so a late answer must never overwrite a newer one.
+#[derive(Default)]
+struct SceneOrder {
+    /// The last ticket handed out.
+    issued: AtomicU64,
+    /// The ticket of the apply that wrote last.
+    written: AtomicU64,
 }
 
 impl ObsShared {
     pub(crate) fn new(state: Arc<RwLock<ObsState>>) -> Self {
         let (tx, _) = watch::channel(ObsSnapshot::default());
-        Self { state, tx }
+        Self {
+            state,
+            tx,
+            scene_order: Arc::default(),
+        }
+    }
+
+    /// A ticket for one scene apply, taken where its scene became known (the
+    /// connection loop, in event order, or the poll right before it applies)
+    /// and BEFORE its lookup runs. See [`Self::update_scene`].
+    pub(crate) fn scene_ticket(&self) -> u64 {
+        self.scene_order.issued.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// [`Self::update`] for the scene apply holding `ticket`: skipped (`None`)
+    /// when an apply with a LATER ticket already wrote — its answer is newer.
+    pub(crate) async fn update_scene<R>(
+        &self,
+        ticket: u64,
+        f: impl FnOnce(&mut ObsState) -> R,
+    ) -> Option<R> {
+        let mut state = self.state.write().await;
+        if ticket < self.scene_order.written.load(Ordering::SeqCst) {
+            return None;
+        }
+        self.scene_order.written.store(ticket, Ordering::SeqCst);
+        let out = f(&mut state);
+        self.publish(&state);
+        Some(out)
     }
 
     /// The shared state, for reads and for the fields that are not published
@@ -83,7 +129,14 @@ impl ObsShared {
     pub(crate) async fn update<R>(&self, f: impl FnOnce(&mut ObsState) -> R) -> R {
         let mut state = self.state.write().await;
         let out = f(&mut state);
-        let snapshot = ObsSnapshot::of(&state);
+        self.publish(&state);
+        out
+    }
+
+    /// Publish `state`'s snapshot when it differs from the last one (the
+    /// caller holds the write lock).
+    fn publish(&self, state: &ObsState) {
+        let snapshot = ObsSnapshot::of(state);
         self.tx.send_if_modified(|current| {
             if *current == snapshot {
                 return false;
@@ -91,7 +144,6 @@ impl ObsShared {
             *current = snapshot;
             true
         });
-        out
     }
 }
 
@@ -140,6 +192,41 @@ mod tests {
             state.read().await.current_scene.as_deref(),
             Some("sp-fast"),
             "the shared state holds the change"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_late_scene_answer_never_overwrites_a_newer_one() {
+        let obs = ObsShared::new(Arc::new(RwLock::new(ObsState::default())));
+        let older = obs.scene_ticket();
+        let newer = obs.scene_ticket();
+        assert!(newer > older, "tickets increase");
+        // The newer apply's lookup answers first ...
+        let wrote = obs
+            .update_scene(newer, |s| s.current_scene = Some("sp-slow".to_string()))
+            .await;
+        assert_eq!(wrote, Some(()));
+        // ... then the older one's: dropped, the newer scene stays.
+        let late = obs
+            .update_scene(older, |s| s.current_scene = Some("sp-fast".to_string()))
+            .await;
+        assert_eq!(late, None, "the late answer is dropped");
+        assert_eq!(
+            obs.subscribe().borrow().current_scene.as_deref(),
+            Some("sp-slow")
+        );
+        // A later apply writes again, and a plain update is never ordered.
+        let latest = obs.scene_ticket();
+        assert_eq!(
+            obs.update_scene(latest, |s| s.current_scene = Some("Slido".to_string()))
+                .await,
+            Some(())
+        );
+        obs.update(|s| s.connected = true).await;
+        let snapshot = obs.subscribe().borrow().clone();
+        assert_eq!(
+            (snapshot.current_scene.as_deref(), snapshot.connected),
+            (Some("Slido"), true)
         );
     }
 

@@ -79,8 +79,8 @@ pub async fn run(
                     let _ = reply.send(ids);
                 }
                 // #218: a failed lookup is not "no playlist". No reply: the
-                // facade reads it as a lookup that got no answer.
-                Err(e) => warn!(scene, error = %e, "remote: the scene's playlist lookup failed"),
+                // facade reads it as a lookup that got no answer (and WARNs).
+                Err(e) => debug!(scene, error = %e, "remote: the scene's playlist lookup failed"),
             }
         }
     }

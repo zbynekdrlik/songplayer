@@ -63,6 +63,32 @@ fn test_obs_state_default() {
     // #154: idle-gate signals default to "not busy".
     assert!(!state.streaming);
     assert!(!state.recording);
+    assert!(state.transition.is_none(), "#219: transition unknown");
+}
+
+#[test]
+fn a_disconnect_forgets_everything_of_cg_obs() {
+    // #219: every published field back to the default (disconnected)
+    // snapshot — the program follow reads a disconnect from exactly this.
+    let mut state = ObsState {
+        connected: true,
+        current_scene: Some("sp-fast".to_string()),
+        active_playlist_ids: std::collections::HashSet::from([7]),
+        lookup_failed: Some("sp-fast".to_string()),
+        streaming: true,
+        recording: true,
+        transition: Some(ObsTransition {
+            name: "Fade".to_string(),
+            kind: "fade_transition".to_string(),
+            duration_ms: Some(300),
+        }),
+    };
+    state.reset_disconnected();
+    assert_eq!(ObsSnapshot::of(&state), ObsSnapshot::default());
+    assert!(
+        !state.streaming && !state.recording,
+        "#154 idle-gate signals"
+    );
 }
 
 #[test]

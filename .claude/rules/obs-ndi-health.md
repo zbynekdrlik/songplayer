@@ -258,7 +258,16 @@ only) never repaired it.
   scene's first failure (`obs: looking up the scene's playlists failed —
   keeping the previous ones; …`), debug on repeats; INFO `obs: the scene's
   playlist lookup answered again` on the repair. `lookup_failed` is always
-  `None` or the current scene, so it can never go stale on an older scene.
+  `None` or the current scene (the two are written together).
+- **Out-of-order answers (review round 1).** cg OBS may answer two lookups
+  out of order, and the poll's relookups can overlap an event's lookup. Every
+  apply carries a ticket (`ObsShared::scene_ticket`) taken where its scene
+  became known — in the connection loop in EVENT order, before spawning; by
+  the poll right before it applies; before the initial apply — and writes
+  through `ObsShared::update_scene(ticket, …)`, which DROPS an answer that
+  arrives after a later ticket's answer was written (debug `a newer scene
+  lookup already answered`). The `SceneChanged` is sent inside that closure,
+  under the write lock, so the engine gets the scene changes in write order.
 - The ~2 s poll repairs it: `scene_poll_verdict(last, lookup_failed, polled,
   …)` → `PollVerdict::Relookup(scene)` when cg OBS still shows the stored
   scene and its lookup failed — looked up again on that tick (no confirm
@@ -277,9 +286,17 @@ only) never repaired it.
   as `lookup_failed` (its own rule).
 - Test: `tests/scene_lookup_failure.rs` — the `FakeObsServer` knobs
   `drop_scene_item_lists` (no answer, still logged in `requests` with
-  `"dropped": true`) and `omit_scene_items` (success, no list), each for the
-  next N lookups. The first `SceneChanged` after the failure must already
-  carry the right set and come from a second lookup.
+  `"dropped": true`), `omit_scene_items` (success, no list) and
+  `refuse_scene_item_lists` (600), each for the next N lookups, plus `groups`
+  (a name listed there is refused with 602 like a real group). The first
+  `SceneChanged` after the failure must already carry the right set and come
+  from a second lookup; a group on the program scene must not fail it.
+- **Mutation gap (known):** `.cargo/mutants.toml` excludes all of
+  `sp-server/src/obs/`, so the pure `scene_items_from_reply`,
+  `scene_poll_verdict`, `obs_transition_from_reply`, `is_transition_event`
+  and the `depth > 0` refusal guard are NOT mutation-scored — their unit and
+  integration tests are the only guard. Narrowing that exclusion to the I/O
+  functions is a separate change (it would also score the rest of `obs/`).
 
 ## The OBS client PUBLISHES its state — `ObsSnapshot` on a `watch` (#219)
 
@@ -290,12 +307,13 @@ ONE view of cg OBS: the OBS client's. `obs/snapshot.rs`: `ObsSnapshot`
 (`obs_bridge::start_obs`) hands it to `start_program` → the #215 follow
 (`program-transition.md`). The contract:
 
-- every write of those fields goes through `ObsShared::update(|s| …)`, which
-  changes `ObsState` and publishes under the ONE write lock (a snapshot never
-  shows a state the lock did not hold; snapshots come in write order) and
-  only on a real change (`send_if_modified`: streaming / recording are not
-  published and wake nobody). Never write them through `state().write()`
-  directly, or a consumer misses the change;
+- every write of those fields goes through `ObsShared::update(|s| …)` (a
+  scene apply: `update_scene(ticket, …)`, above), which changes `ObsState`
+  and publishes under the ONE write lock (a snapshot never shows a state the
+  lock did not hold; snapshots come in write order) and only on a real change
+  (`send_if_modified`: streaming / recording are not published and wake
+  nobody). Never write them through `state().write()` directly, or a
+  consumer misses the change;
 - `lookup_failed: Some(scene)` → `active_playlist_ids` belong to an EARLIER
   scene: a consumer must not act on them (the follow ignores the snapshot);
 - `transition` = cg OBS's current scene transition, `None` while unknown;

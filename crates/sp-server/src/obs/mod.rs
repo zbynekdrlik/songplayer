@@ -576,6 +576,7 @@ async fn connect_and_run(
                     obs,
                     event_tx,
                     scene_name.to_string(),
+                    obs.scene_ticket(),
                 )
                 .await;
             } else {
@@ -630,6 +631,8 @@ async fn connect_and_run(
                         let ndi_sources = std::sync::Arc::clone(ndi_sources);
                         let obs = obs.clone();
                         let event_tx = event_tx.clone();
+                        // The ticket is taken HERE, in event order (#218 review).
+                        let ticket = obs.scene_ticket();
                         spawned_tasks.spawn(async move {
                             scene::apply_scene_change(
                                 &write,
@@ -638,6 +641,7 @@ async fn connect_and_run(
                                 &obs,
                                 &event_tx,
                                 scene_name,
+                                ticket,
                             )
                             .await;
                         });

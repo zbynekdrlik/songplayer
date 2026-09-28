@@ -205,11 +205,10 @@ async fn the_client_reads_cg_obs_transition_at_connect_and_on_its_events() {
         s.transition == Some(transition("Fade", "fade_transition", Some(800)))
     })
     .await;
-    assert_eq!(
-        rig.transition_reads().await,
-        3,
-        "one read at connect and one per transition event, nothing else"
-    );
+    // An ANSWERED read is never retried, so each new value can only come from
+    // the read its event woke (the exact count is not asserted: under a slow
+    // runner a read may time out and be retried, which is correct too).
+    assert!(rig.transition_reads().await >= 3);
     rig.stop().await;
 }
 

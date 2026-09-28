@@ -62,9 +62,14 @@ fn set(ids: &[i64]) -> HashSet<i64> {
 }
 
 impl Rig {
-    /// Connect the client and wait until it knows cg OBS's program: sp-fast
-    /// showing playlist 7.
+    /// Connect the client to [`cg_obs`] and wait until it knows cg OBS's
+    /// program: sp-fast showing playlist 7.
     async fn start() -> Self {
+        Self::start_with(cg_obs()).await
+    }
+
+    /// [`Self::start`] against the fake cg OBS `cg`.
+    async fn start_with(cg: FakeObsState) -> Self {
         let pool = db::create_memory_pool().await.unwrap();
         db::run_migrations(&pool).await.unwrap();
         sqlx::query(
@@ -75,7 +80,7 @@ impl Rig {
         .execute(&pool)
         .await
         .unwrap();
-        let fake = FakeObsServer::spawn_with_state(cg_obs()).await;
+        let fake = FakeObsServer::spawn_with_state(cg).await;
         let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
         let state = Arc::new(RwLock::new(obs::ObsState::default()));
         let (event_tx, events) = broadcast::channel::<obs::ObsEvent>(64);
@@ -221,5 +226,38 @@ async fn a_scene_lookup_answered_without_scene_items_is_not_an_empty_scene() {
         .await;
     rig.switch_with_a_failed_lookup("sp-slow", answer_the_next_lookup_without_items, &[8])
         .await;
+    rig.stop().await;
+}
+
+fn refuse_the_next_lookup(s: &mut FakeObsState) {
+    s.refuse_scene_item_lists = 1;
+}
+
+#[tokio::test]
+async fn a_refused_scene_lookup_is_a_failed_lookup_too() {
+    let mut rig = Rig::start().await;
+    rig.switch_with_a_failed_lookup("sp-slow", refuse_the_next_lookup, &[8])
+        .await;
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn a_group_on_the_program_scene_is_refused_below_the_top_and_adds_nothing() {
+    // obs-websocket 5 refuses `GetSceneItemList` for a group (602). A group
+    // on sp-fast must neither fail sp-fast's lookup nor add a playlist: the
+    // start (which waits for sp-fast = {7}) proves the lookup succeeded.
+    let mut cg = cg_obs();
+    cg.groups = vec!["Lower thirds".to_string()];
+    cg.scene_items.get_mut("sp-fast").expect("sp-fast").push((
+        "Lower thirds".to_string(),
+        true,
+        String::new(),
+    ));
+    let rig = Rig::start_with(cg).await;
+    assert!(
+        rig.lookups_of("Lower thirds").await >= 1,
+        "the group was looked up and refused"
+    );
+    assert_eq!(rig.state.read().await.lookup_failed, None);
     rig.stop().await;
 }

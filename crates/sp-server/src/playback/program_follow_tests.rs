@@ -142,6 +142,15 @@ fn a_snapshot_knows_its_scene_only_connected_named_and_looked_up() {
         ProgramScene::Unknown,
         "not connected"
     );
+    let gone_while_failed = ObsSnapshot {
+        connected: false,
+        ..lookup_failed("sp-slow", &[7])
+    };
+    assert_eq!(
+        program_scene(&gone_while_failed),
+        ProgramScene::Unknown,
+        "not connected wins over a failed lookup: the reconnect is followed again"
+    );
     assert_eq!(FOLLOW_SETTINGS_POLL, Duration::from_secs(5));
 }
 

@@ -30,8 +30,9 @@ use crate::obs::{NdiSourceMap, ObsEvent, SharedWrite};
 
 /// One poll pass: read `GetCurrentProgramScene` over the existing WS and, when
 /// it differs from the last event-derived scene (a dropped
-/// `CurrentProgramSceneChanged`, #170), reconcile it through
-/// [`apply_scene_change`] — the exact path the event takes. Cheap and
+/// `CurrentProgramSceneChanged`, #170) or cg OBS still shows the stored scene
+/// whose playlist lookup failed (#218, `PollVerdict::Relookup`), apply it
+/// through [`apply_scene_change`] — the exact path the event takes. Cheap and
 /// best-effort: a closed/timed-out read is transient (the reconnect loop or the
 /// next tick handles it), so it is silently ignored rather than logged as an
 /// error.
@@ -102,7 +103,8 @@ pub(crate) async fn reconcile_program_scene(
         }
         PollVerdict::InSync | PollVerdict::Pending => return,
     };
-    apply_scene_change(write, dispatcher, ndi_sources, obs, event_tx, scene).await;
+    let ticket = obs.scene_ticket();
+    apply_scene_change(write, dispatcher, ndi_sources, obs, event_tx, scene, ticket).await;
 }
 
 /// Decide whether a polled program scene reflects a change the event stream

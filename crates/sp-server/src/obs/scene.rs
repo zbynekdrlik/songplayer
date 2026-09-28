@@ -67,6 +67,13 @@ impl From<DispatcherError> for LookupError {
 /// names the scene, and nothing is broadcast (an empty set would scene-off
 /// the playlist on program). The scene poll looks it up again; a success
 /// clears `lookup_failed` and broadcasts as usual.
+///
+/// `ticket` ([`ObsShared::scene_ticket`], taken before this apply's lookup):
+/// an answer that arrives after a later apply's answer was written is
+/// dropped — cg OBS may answer lookups out of order, and the poll's
+/// relookups can overlap an event's lookup. The `SceneChanged` goes out under
+/// the same write lock, so the engine gets the scene changes in the order
+/// they were written.
 pub(crate) async fn apply_scene_change(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
@@ -74,6 +81,7 @@ pub(crate) async fn apply_scene_change(
     obs: &ObsShared,
     event_tx: &broadcast::Sender<ObsEvent>,
     scene_name: String,
+    ticket: u64,
 ) {
     let sources = ndi_sources.read().await;
     let lookup = check_scene_items(write, dispatcher, &scene_name, &sources).await;
@@ -82,47 +90,57 @@ pub(crate) async fn apply_scene_change(
     let active_ids = match lookup {
         Ok(ids) => ids,
         Err(e) => {
-            let repeated = obs
-                .update(|s| {
+            let written = obs
+                .update_scene(ticket, |s| {
                     let repeated = s.lookup_failed.as_deref() == Some(scene_name.as_str());
                     s.current_scene = Some(scene_name.clone());
                     s.lookup_failed = Some(scene_name.clone());
                     repeated
                 })
                 .await;
-            if repeated {
-                debug!(scene = %scene_name, error = %e, "obs: the scene's playlist lookup failed again");
-            } else {
-                warn!(
+            match written {
+                None => debug!(
+                    scene = %scene_name,
+                    error = %e,
+                    "obs: a newer scene lookup already answered — this failed one is dropped"
+                ),
+                Some(true) => {
+                    debug!(scene = %scene_name, error = %e, "obs: the scene's playlist lookup failed again")
+                }
+                Some(false) => warn!(
                     scene = %scene_name,
                     error = %e,
                     "obs: looking up the scene's playlists failed — keeping the previous ones; the scene poll looks it up again"
-                );
+                ),
             }
             return;
         }
     };
 
-    let repaired = obs
-        .update(|s| {
+    let written = obs
+        .update_scene(ticket, |s| {
             let repaired = s.lookup_failed.take().is_some();
             s.current_scene = Some(scene_name.clone());
             s.active_playlist_ids = active_ids.clone();
+            let _ = event_tx.send(ObsEvent::SceneChanged {
+                scene_name: scene_name.clone(),
+                active_playlist_ids: active_ids.clone(),
+            });
             repaired
         })
         .await;
-    if repaired {
-        info!(
+    match written {
+        None => debug!(
+            scene = %scene_name,
+            "obs: a newer scene lookup already answered — this answer is dropped"
+        ),
+        Some(true) => info!(
             scene = %scene_name,
             playlists = ?active_ids,
             "obs: the scene's playlist lookup answered again"
-        );
+        ),
+        Some(false) => {}
     }
-
-    let _ = event_tx.send(ObsEvent::SceneChanged {
-        scene_name,
-        active_playlist_ids: active_ids,
-    });
 }
 
 /// Check which NDI sources are present in a given scene.

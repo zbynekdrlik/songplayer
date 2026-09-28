@@ -65,6 +65,14 @@ pub struct FakeObsState {
     /// #218: the next N `GetSceneItemList` requests are answered with a
     /// success status but no `sceneItems` list.
     pub omit_scene_items: usize,
+    /// #218: the next N `GetSceneItemList` requests are REFUSED (600, as for
+    /// an unknown scene).
+    pub refuse_scene_item_lists: usize,
+    /// #218: sources that are GROUPS: `GetSceneItemList` for one is refused
+    /// with 602 "(Is group)", as obs-websocket 5 does (a group is listed only
+    /// by `GetGroupSceneItemList`). List them in `scene_items` as
+    /// `(name, true, "")`.
+    pub groups: Vec<String>,
     /// #219: the `responseData` of `GetCurrentSceneTransition`; `None` answers
     /// `{}` (no transition kind: the client reads it as no answer).
     pub scene_transition: Option<Value>,
@@ -361,6 +369,30 @@ async fn handle_request(req: &Value, state: &Arc<Mutex<FakeObsState>>) -> Value 
         "GetSceneItemList" => {
             let scene_name = req["d"]["requestData"]["sceneName"].as_str().unwrap_or("");
             let mut s = state.lock().await;
+            let group = s.groups.iter().any(|g| g == scene_name);
+            if group || s.refuse_scene_item_lists > 0 {
+                // #218: a refusal carries no responseData at all.
+                let (code, comment) = if group {
+                    (
+                        602,
+                        "The specified source is not a scene. (Is group)".to_string(),
+                    )
+                } else {
+                    s.refuse_scene_item_lists -= 1;
+                    (
+                        600,
+                        format!("No source was found by the name of `{scene_name}`."),
+                    )
+                };
+                return json!({
+                    "op": 7,
+                    "d": {
+                        "requestType": request_type,
+                        "requestId": request_id,
+                        "requestStatus": { "result": false, "code": code, "comment": comment },
+                    }
+                });
+            }
             if s.omit_scene_items > 0 {
                 // #218: a success status, but no `sceneItems` list.
                 s.omit_scene_items -= 1;

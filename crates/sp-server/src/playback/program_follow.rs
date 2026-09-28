@@ -287,9 +287,12 @@ enum ProgramScene {
 }
 
 /// Read a snapshot's program scene: known only when the OBS client is
-/// connected, named cg OBS's program scene, and looked up its playlists.
+/// connected, named cg OBS's program scene, and looked up its playlists. Not
+/// connected is always unknown (the reconnect is then followed again), even
+/// if a failed lookup were still flagged.
 fn program_scene(snapshot: &ObsSnapshot) -> ProgramScene {
     match (&snapshot.current_scene, snapshot.connected) {
+        (_, false) => ProgramScene::Unknown,
         _ if snapshot.lookup_failed.is_some() => ProgramScene::LookupFailed,
         (Some(scene), true) => ProgramScene::Known(SceneView {
             scene: scene.clone(),
