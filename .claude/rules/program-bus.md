@@ -26,6 +26,12 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   the source you cut to looks absent until its first owned frame lands, and
   a slow first frame (> the sender's b+1 ms check) turned the cut boundary
   black (#209 review finding).
+- #215: every offered pair carries `SubmitJob::live` — `true` only for the
+  source's own decoded content (the pacer's `PacedSink::emit`, an NDI input
+  capture), `false` for every standby pair (`emit_standby`, the
+  `default_submit_shared` black / fill / held frame, `fill_job`, the input's
+  standby). The cue gate (`program-transition.md`) opens a fade on the first
+  live pair; ownership and forwarding ignore the flag.
 - Both the playing path and the idle fill go through that ONE submit thread,
   so an idle source offers its own #147 standby pair and a cut to it carries
   that pair — no special case. Since #147 (design record 5845527884) the
@@ -68,6 +74,10 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   boundary REPLACES the first (the replaced source never owned anything); a
   cut back to the source that still owns that boundary just cancels the
   pending cut.
+- #215: every cut ALSO opens a transition window (a crossfade of both
+  sources over `n` boundaries, `ProgramJob::Mix`); a Cut is the zero-length
+  window, i.e. exactly the rules above. The window, the mix, the deferred
+  scene-go-off pause and the OBS follow are in `program-transition.md`.
 - A stamp-ordered reorder buffer releases strictly one boundary after the
   other: the new source's first frame waits for the old source's last one.
 - A missing boundary is filled with the program's own standby pair: on the
@@ -107,7 +117,8 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 - `GET /api/v1/program` → `{ndi_name, source, previous, cut_boundary_100ns,
   health{forwarded, filled, late_dropped, resyncs, coalesced, cuts,
   submitted, connections, last_stamp_100ns}, vban{…} (#210), input{…}
-  (#212), remote{…} (#213)}`; `POST /api/v1/program/cut {"source": pid}` → 200 + that body, 404
+  (#212), remote{…} (#213), transition{…} + follow{…} (#215)}`;
+  `POST /api/v1/program/cut {"source": pid}` → 200 + that body, 404
   unknown playlist. Source `-1` is the #212 NDI input "OBS manuál" (404 unless
   it is enabled with a source) — see `ndi-input.md`.
 - The ONE cut path is `program_bus::persist_and_cut` (persist first, then cut),
@@ -126,7 +137,9 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 `program_bus_tests.rs` drives `ProgramCore` + a real `ProgramOutput` over
 `MockNdiBackend`: source A frames are 4×2 NV12, B 8×2, the program's standby
 black 2×2, so the `send_video_async(…,WxH,…)` call strings name the owner of
-each boundary. Keep that pattern for any new case.
+each boundary. Keep that pattern for any new case. Its rig helpers (`b`,
+`job`, `frame`, `program`, `drain`, `video_dims`, …) are `pub(super)` and
+reused by the #215 sibling `program_bus_tests_transition.rs`.
 
 - **Mock call-log gotcha (CI fail 26.9.):** a test that asserts the mock sender's LAST
   call (e.g. `send_video_flush`) must keep the owning output alive past the assertion —

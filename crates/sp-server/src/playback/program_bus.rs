@@ -51,6 +51,19 @@
 //! (`late_dropped`). More than [`GENLOCK_MAX_CATCHUP_INTERVALS`] missed slots in
 //! a row RESYNC (like the pacer) instead of bursting old black frames.
 //!
+//! **Transitions (#215).** A cut is a transition WINDOW
+//! (`program_transition::Window`): `to` owns every boundary from the cut
+//! boundary on, and `from` ALSO contributes to the window's `n` boundaries. For
+//! each of them the bus waits for BOTH sources' pairs, with the same reorder
+//! and fill rules per source (a side that is missed is left `None` and mixed
+//! against the standby). It then queues ONE [`ProgramJob::Mix`], which the
+//! sender crossfades. A Cut is a zero-length window, the #209 behaviour above,
+//! unchanged. A fade first waits for the incoming source's first LIVE pair
+//! (the cue gate), with the outgoing source held on program at full level —
+//! the window half lives in the child module `program_bus_window.rs`. The
+//! engine asks [`ProgramCore::hold_for`] whether a source that left its OBS
+//! scene must keep playing through a window ([`Hold`]).
+//!
 //! This file is the PURE, Linux-tested decision layer ([`ProgramCore`]) plus
 //! its `Mutex`/`Condvar` wrapper ([`ProgramBus`]) and the settings persistence
 //! of the selected source. The `SP-program` sender + its thread live in
@@ -70,6 +83,11 @@ use sqlx::SqlitePool;
 use tracing::{info, warn};
 
 use crate::playback::ndi_input::NdiInputShared;
+use crate::playback::program_follow::FollowShared;
+use crate::playback::program_transition::{
+    ActiveWindow, Cue, MixJob, SpecSource, TransitionCounters, TransitionSpec, TransitionStatus,
+    Window,
+};
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 use crate::playback::vban_out::VbanOut;
 use crate::playback::wallclock::utc_now_100ns;
@@ -107,6 +125,12 @@ pub const PROGRAM_PENDING_BOUND: usize = 2 * GENLOCK_MAX_CATCHUP_INTERVALS as us
 /// release is always bounded work.
 const MAX_RELEASE_STEPS: usize = 64;
 
+// #215: what a boundary inside a transition window becomes (the mix, the cue
+// gate's held boundaries) — an `impl ProgramCore` child for the 1000-line cap.
+#[path = "program_bus_window.rs"]
+mod window;
+use window::WindowStep;
+
 /// One program boundary for the `SP-program` sender.
 pub enum ProgramJob {
     /// A source's own boundary job, forwarded unchanged (same `Arc` frame, same
@@ -115,6 +139,9 @@ pub enum ProgramJob {
     /// The program's own standby pair for a missed boundary (#147 NV12 black +
     /// one silent block), stamped on that boundary.
     Standby { stamp_100ns: i64 },
+    /// #215: a boundary inside a transition window: both sources' pairs,
+    /// crossfaded by the sender.
+    Mix(MixJob),
 }
 
 impl ProgramJob {
@@ -123,6 +150,7 @@ impl ProgramJob {
         match self {
             ProgramJob::Source(job) => job.video_tc_100ns,
             ProgramJob::Standby { stamp_100ns } => *stamp_100ns,
+            ProgramJob::Mix(mix) => mix.stamp_100ns,
         }
     }
 }
@@ -175,6 +203,22 @@ pub struct ProgramStatus {
     /// at startup (it owns every boundary).
     pub cut_boundary_100ns: Option<i64>,
     pub health: ProgramHealth,
+    /// #215: the transition the next cut uses, the running window and the
+    /// transition counters.
+    pub transition: TransitionStatus,
+}
+
+/// #215: why the engine keeps a playlist that left its OBS scene playing
+/// ([`ProgramCore::hold_for`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hold {
+    /// The source is the `from` of a window (or a cut) not served yet: keep it
+    /// playing until this stamp, one slot after the window's end.
+    Until(i64),
+    /// The source is still the selected one. A cut away from it may still be
+    /// on its way: the follow task and the #213 remote control cut only AFTER
+    /// cg OBS switched.
+    OnProgram,
 }
 
 /// The pure program-bus decision layer: ownership, the reorder buffer, the
@@ -189,6 +233,14 @@ pub struct ProgramCore {
     last: Option<i64>,
     /// Owned source jobs waiting for an earlier boundary, keyed by stamp.
     pending: BTreeMap<i64, SubmitJob>,
+    /// #215: the outgoing sources' jobs for window boundaries, keyed by stamp.
+    from_pending: BTreeMap<i64, SubmitJob>,
+    /// #215: transition windows not served to their end yet, ascending, never
+    /// overlapping.
+    windows: Vec<Window>,
+    /// #215: the transition the next cut uses.
+    spec: TransitionSpec,
+    counters: TransitionCounters,
     /// The last stamp each source touched or offered (its liveness + progress).
     last_offer: HashMap<i64, i64>,
     queue: SubmitQueue<ProgramJob>,
@@ -209,6 +261,10 @@ impl ProgramCore {
             segments: Vec::new(),
             last: None,
             pending: BTreeMap::new(),
+            from_pending: BTreeMap::new(),
+            windows: Vec::new(),
+            spec: TransitionSpec::cut(SpecSource::Fallback),
+            counters: TransitionCounters::default(),
             last_offer: HashMap::new(),
             queue: SubmitQueue::new(PROGRAM_QUEUE_BOUND),
             health: ProgramHealth::default(),
@@ -224,10 +280,37 @@ impl ProgramCore {
             .map(|&(_, pid)| pid)
     }
 
-    /// Whether `pid` owns, or may still own, a program boundary — the cheap
-    /// pre-check that lets every other source skip the offer entirely.
+    /// Whether `pid` owns, or may still own, a program boundary (#215: or
+    /// still contributes to a window) — the cheap pre-check that lets every
+    /// other source skip the offer entirely.
     pub fn is_candidate(&self, pid: i64) -> bool {
         self.segments.iter().any(|&(_, p)| p == pid)
+            || self.windows.iter().any(|w| w.from == Some(pid))
+    }
+
+    /// #215: the transition every later cut uses (the follow task keeps it in
+    /// step with cg OBS and the settings). Returns whether it changed.
+    pub fn set_transition(&mut self, spec: TransitionSpec) -> bool {
+        let changed = self.spec != spec;
+        self.spec = spec;
+        changed
+    }
+
+    /// #215: whether the engine must keep `pid` playing although its OBS scene
+    /// left program (see [`Hold`]). `None` = pause it now, as before. A window
+    /// still waiting for its cue holds its outgoing source to the latest end
+    /// the window can reach (the cue gate's wait included).
+    pub fn hold_for(&self, pid: i64) -> Option<Hold> {
+        let end = self
+            .windows
+            .iter()
+            .filter(|w| w.from == Some(pid))
+            .map(|w| w.end_100ns)
+            .max();
+        match end {
+            Some(end) => Some(Hold::Until(strict_next_boundary_100ns(end, self.fps))),
+            None => (self.selected() == Some(pid)).then_some(Hold::OnProgram),
+        }
     }
 
     /// The selected source (the latest cut's target).
@@ -242,13 +325,18 @@ impl ProgramCore {
     }
 
     /// Cut the program to `pid`. The cut boundary is the next boundary after
-    /// the newest stamp the involved sources (the program's segments + `pid`)
-    /// or the program itself reached — `now_100ns` (the caller's clock) only
-    /// when nothing was seen — plus [`CUT_LEAD_SLOTS`]. The previous owner keeps
-    /// every stamp before it. A later cut replaces one recorded on the same or a
-    /// later boundary; a cut back to the source that still owns that boundary
-    /// cancels the pending cut. Returns `false` (nothing recorded) when `pid` is
-    /// already the selected source.
+    /// the newest stamp the involved sources (the program's segments + `pid` +
+    /// every window's `from`) or the program itself reached — `now_100ns` (the
+    /// caller's clock) only when nothing was seen — plus [`CUT_LEAD_SLOTS`].
+    /// The previous owner keeps every stamp before it. A later cut replaces one
+    /// recorded on the same or a later boundary; a cut back to the source that
+    /// still owns that boundary cancels the pending cut. #215: the cut opens a
+    /// transition window of the current spec ([`Self::set_transition`]; a Cut
+    /// = zero boundaries), fading out of the source ON AIR: a waiting or
+    /// frozen window whose span reaches the new boundary kept its outgoing
+    /// source there, and the new cut freezes a waiting one (it never opens;
+    /// `Window::holds_on_air`). Returns `false` (nothing recorded) when `pid`
+    /// is already the selected source.
     pub fn cut(&mut self, pid: i64, now_100ns: i64) -> bool {
         if self.selected() == Some(pid) {
             return false;
@@ -261,6 +349,7 @@ impl ProgramCore {
             .iter()
             .map(|&(_, p)| p)
             .chain(std::iter::once(pid))
+            .chain(self.windows.iter().filter_map(|w| w.from))
             .filter_map(|p| self.last_offer.get(&p).copied())
             .chain(self.last)
             .max();
@@ -270,9 +359,34 @@ impl ProgramCore {
             boundary = strict_next_boundary_100ns(boundary, self.fps);
         }
         self.segments.retain(|&(first, _)| first < boundary);
+        // #215: the source on air, read BEFORE the windows this cut replaces
+        // are dropped: a waiting one cut ON the boundary kept its outgoing
+        // source on program (one cut after it never did, `on_air` skips it).
+        let outgoing = self.on_air(boundary);
+        // A window that has not started at the new cut boundary is replaced
+        // (or cancelled); a running one ends where the new cut starts, and one
+        // still waiting for its cue is frozen there when its span reaches it
+        // (`Window::truncate`). Its outgoing source's frames are all older
+        // than `boundary`: the cut is placed after the newest stamp of every
+        // window's `from` too.
+        self.windows.retain(|w| w.cut_100ns < boundary);
+        for w in &mut self.windows {
+            if w.truncate(boundary) {
+                info!(
+                    from = ?w.from,
+                    to = w.to,
+                    "program transition: a later cut froze the fade still waiting for its cue"
+                );
+            }
+        }
         // A cut back to the source that still owns the boundary (A→B→A inside
-        // one slot) just cancels the pending cut.
-        if self.selected() != Some(pid) {
+        // one slot) just cancels the pending cut; a cut back to the source a
+        // waiting cue kept on air takes the boundaries over with no window.
+        if outgoing != Some(pid) {
+            self.segments.push((boundary, pid));
+            let window = Window::cued(outgoing, pid, boundary, &self.spec);
+            self.windows.push(window);
+        } else if self.selected() != Some(pid) {
             self.segments.push((boundary, pid));
         }
         self.health.cuts += 1;
@@ -296,14 +410,22 @@ impl ProgramCore {
     pub fn offer(&mut self, pid: i64, job: SubmitJob) -> OfferOutcome {
         let stamp = job.video_tc_100ns;
         self.last_offer.insert(pid, stamp);
-        if self.owner_of(stamp) != Some(pid) {
+        // #215: inside a window the outgoing source contributes too.
+        let from_side = self.window_at(stamp).is_some_and(|w| w.from == Some(pid));
+        if !from_side && self.owner_of(stamp) != Some(pid) {
             return OfferOutcome::NotOwner;
         }
-        if self.last.is_some_and(|l| stamp <= l) || self.pending.contains_key(&stamp) {
+        let late = self.last.is_some_and(|l| stamp <= l);
+        let waiting = if from_side {
+            &mut self.from_pending
+        } else {
+            &mut self.pending
+        };
+        if late || waiting.contains_key(&stamp) {
             self.health.late_dropped += 1;
             return OfferOutcome::Late;
         }
-        self.pending.insert(stamp, job);
+        waiting.insert(stamp, job);
         self.release_inner(None);
         OfferOutcome::Accepted
     }
@@ -312,22 +434,31 @@ impl ProgramCore {
     /// `now_100ns` — never before it is reached, then the four cases of the
     /// module doc.
     pub fn fill_due(&self, boundary_100ns: i64, now_100ns: i64) -> bool {
-        if now_100ns < boundary_100ns {
+        match self.owner_of(boundary_100ns) {
+            Some(owner) => self.source_missed(owner, boundary_100ns, Some(now_100ns)),
+            None => now_100ns >= boundary_100ns, // never before it is reached
+        }
+    }
+
+    /// Whether `src`'s pair for `boundary_100ns` counts as missed (#215: per
+    /// source, for both sides of a window boundary). With a clock: never
+    /// before the boundary is reached, then the source passed it, is absent,
+    /// or the grace ran out. Without one (the offer path): only when it passed.
+    fn source_missed(&self, src: i64, boundary_100ns: i64, now_100ns: Option<i64>) -> bool {
+        let offered = self.last_offer.get(&src).copied();
+        let next = strict_next_boundary_100ns(boundary_100ns, self.fps);
+        let passed = offered.is_some_and(|o| o >= next);
+        let Some(now) = now_100ns else {
+            return passed;
+        };
+        if now < boundary_100ns {
             return false; // never fill a boundary before it is reached
         }
-        if self.owner_passed(boundary_100ns) {
-            return true;
-        }
-        let Some(owner) = self.owner_of(boundary_100ns) else {
-            return true;
+        let Some(offered) = offered.filter(|_| !passed) else {
+            return true; // passed it, or never offered anything
         };
-        let Some(&offered) = self.last_offer.get(&owner) else {
-            return true;
-        };
-        if now_100ns - offered > PROGRAM_LIVE_WINDOW_100NS {
-            return true;
-        }
-        now_100ns >= boundary_100ns + PROGRAM_FILL_GRACE_SLOTS * interval_100ns(self.fps)
+        now - offered > PROGRAM_LIVE_WINDOW_100NS
+            || now >= boundary_100ns + PROGRAM_FILL_GRACE_SLOTS * interval_100ns(self.fps)
     }
 
     /// Whether the owner of `boundary_100ns` already touched or offered a
@@ -335,8 +466,7 @@ impl ProgramCore {
     /// never come (a coalesce gap on that source). Needs no clock.
     pub fn owner_passed(&self, boundary_100ns: i64) -> bool {
         self.owner_of(boundary_100ns)
-            .and_then(|owner| self.last_offer.get(&owner))
-            .is_some_and(|&offered| offered >= strict_next_boundary_100ns(boundary_100ns, self.fps))
+            .is_some_and(|owner| self.source_missed(owner, boundary_100ns, None))
     }
 
     /// The `SP-program` sender's per-boundary check on its own wall: release,
@@ -355,7 +485,7 @@ impl ProgramCore {
     fn release_inner(&mut self, now_100ns: Option<i64>) {
         let floor_now = now_100ns.map(|n| floor_boundary_100ns(n, self.fps));
         for _ in 0..MAX_RELEASE_STEPS {
-            let first_pending = self.pending.keys().next().copied();
+            let first_pending = self.first_waiting();
             let Some(expected) = self
                 .last
                 .map(|last| strict_next_boundary_100ns(last, self.fps))
@@ -364,17 +494,26 @@ impl ProgramCore {
             else {
                 return;
             };
-            if let Some(job) = self.pending.remove(&expected) {
-                self.health.forwarded += 1;
-                self.commit(ProgramJob::Source(job));
-                continue;
-            }
-            let overflow = self.pending.len() > PROGRAM_PENDING_BOUND;
-            let missed = match now_100ns {
-                Some(now) => self.fill_due(expected, now),
-                None => self.owner_passed(expected),
+            let missed = match self.window_at(expected) {
+                // #215: a window boundary carries BOTH sources' pairs: mixed,
+                // or held while the cue waits (`program_bus_window.rs`).
+                Some(w) => match self.window_step(&w, expected, now_100ns) {
+                    WindowStep::Next => continue,
+                    WindowStep::Missed(missed) => missed,
+                },
+                None => {
+                    if let Some(job) = self.pending.remove(&expected) {
+                        self.health.forwarded += 1;
+                        self.commit(ProgramJob::Source(job));
+                        continue;
+                    }
+                    match now_100ns {
+                        Some(now) => self.fill_due(expected, now),
+                        None => self.owner_passed(expected),
+                    }
+                }
             };
-            if !overflow && !missed {
+            if !self.overflowing() && !missed {
                 return;
             }
             let Some(horizon) = floor_now.or(first_pending) else {
@@ -391,6 +530,19 @@ impl ProgramCore {
                 stamp_100ns: expected,
             });
         }
+    }
+
+    /// #215: more waiting jobs than the reorder bound, on either side.
+    fn overflowing(&self) -> bool {
+        self.pending.len() > PROGRAM_PENDING_BOUND
+            || self.from_pending.len() > PROGRAM_PENDING_BOUND
+    }
+
+    /// The oldest waiting job's stamp, on either side.
+    fn first_waiting(&self) -> Option<i64> {
+        let to = self.pending.keys().next().copied();
+        let from = self.from_pending.keys().next().copied();
+        to.into_iter().chain(from).min()
     }
 
     /// Queue one boundary for the `SP-program` sender and advance.
@@ -415,6 +567,10 @@ impl ProgramCore {
             .filter(|&&(first, _)| first <= next)
             .count();
         self.segments.drain(..dead);
+        // #215: a window whose last boundary is served is done.
+        let before = self.windows.len();
+        self.windows.retain(|w| w.end_100ns > next);
+        self.counters.transitions_done += (before - self.windows.len()) as u64;
     }
 
     /// The next queued program boundary for the sender.
@@ -450,6 +606,18 @@ impl ProgramCore {
                 .map(|&(first, _)| first)
                 .filter(|&first| first != i64::MIN),
             health: self.health,
+            transition: TransitionStatus {
+                kind: self.spec.kind,
+                duration_ms: self.spec.duration_ms,
+                n_slots: self.spec.n_slots,
+                source: self.spec.source,
+                active: self
+                    .windows
+                    .iter()
+                    .find(|w| w.n_slots > 0 && w.cue != Cue::Frozen)
+                    .map(|w| ActiveWindow::of(w, self.last)),
+                counters: self.counters,
+            },
         }
     }
 }
@@ -483,6 +651,8 @@ pub struct ProgramBus {
     /// #213: the Companion remote control's telemetry (`remote` on
     /// `GET /api/v1/program`).
     remote: Arc<RemoteShared>,
+    /// #215: the OBS-follow telemetry (`follow` on `GET /api/v1/program`).
+    follow: Arc<FollowShared>,
     /// #213: serializes [`persist_and_cut`] — the API and the remote control
     /// can cut concurrently, and the persisted source must be the one cut last.
     cut_serial: tokio::sync::Mutex<()>,
@@ -505,6 +675,7 @@ impl ProgramBus {
             vban: Arc::new(VbanOut::new()),
             input: Arc::new(NdiInputShared::default()),
             remote: Arc::new(RemoteShared::default()),
+            follow: Arc::new(FollowShared::default()),
             cut_serial: tokio::sync::Mutex::new(()),
         }
     }
@@ -522,6 +693,21 @@ impl ProgramBus {
     /// #213: the remote control's telemetry.
     pub fn remote(&self) -> &Arc<RemoteShared> {
         &self.remote
+    }
+
+    /// #215: the OBS-follow telemetry.
+    pub fn follow(&self) -> &Arc<FollowShared> {
+        &self.follow
+    }
+
+    /// See [`ProgramCore::set_transition`].
+    pub fn set_transition(&self, spec: TransitionSpec) -> bool {
+        self.lock().core.set_transition(spec)
+    }
+
+    /// See [`ProgramCore::hold_for`].
+    pub fn hold_for(&self, pid: i64) -> Option<Hold> {
+        self.lock().core.hold_for(pid)
     }
 
     fn lock(&self) -> MutexGuard<'_, BusState> {
@@ -683,3 +869,9 @@ async fn input_active(pool: &SqlitePool) -> bool {
 #[cfg(test)]
 #[path = "program_bus_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "program_bus_tests_cue.rs"]
+mod tests_cue;
+#[cfg(test)]
+#[path = "program_bus_tests_transition.rs"]
+mod tests_transition;

@@ -1,5 +1,6 @@
 ---
 paths:
+  - "crates/sp-server/src/playback/nv12_fit.rs"
   - "crates/sp-server/src/playback/preview.rs"
   - "crates/sp-server/src/playback/preview_stream.rs"
   - "crates/sp-server/src/playback/preview_encoder.rs"
@@ -54,6 +55,9 @@ call, BEFORE the NDI submit / `#192` audio-emitter push consume the frame:
 `offer_frame` fans out to: the JPEG tap (`preview.try_offer`), the stream video
 tap (`stream.try_offer_video` → NV12→NV12 letterbox into a fixed 640×360 canvas),
 and the stream audio tap (`stream.try_offer_audio` per post-mix `DecodedAudioFrame`).
+The letterbox's placement (`placement_for`) is `playback::nv12_fit::aspect_fit`,
+shared with the #215 `SP-program` fit: change it there, for both (the preview's
+nearest-neighbour pixel copy stays its own).
 Tapping BOTH audio and video at this ONE decode seam keeps them offered together,
 so ffmpeg's `-use_wallclock_as_timestamps` keeps A/V in sync, and it stays OFF the
 TIME_CRITICAL `#192` emit thread (which must never wait). (The main design comment

@@ -19,14 +19,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// 2026-09 in 100 ns since the epoch.
-const T0: i64 = 17_900_000_000_000_000;
-const MS: i64 = 10_000;
-const SRC_A: i64 = 11;
-const SRC_B: i64 = 22;
-const SRC_C: i64 = 33;
+pub(super) const T0: i64 = 17_900_000_000_000_000;
+pub(super) const MS: i64 = 10_000;
+pub(super) const SRC_A: i64 = 11;
+pub(super) const SRC_B: i64 = 22;
+pub(super) const SRC_C: i64 = 33;
 
 /// The k-th grid boundary after `floor(T0)` (`b(0)` = `floor(T0)`).
-fn b(k: usize) -> i64 {
+pub(super) fn b(k: usize) -> i64 {
     let mut x = floor_boundary_100ns(T0, GENLOCK_GRID_FPS);
     for _ in 0..k {
         x = strict_next_boundary_100ns(x, GENLOCK_GRID_FPS);
@@ -34,16 +34,16 @@ fn b(k: usize) -> i64 {
     x
 }
 
-fn grace() -> i64 {
+pub(super) fn grace() -> i64 {
     PROGRAM_FILL_GRACE_SLOTS * interval_100ns(GENLOCK_GRID_FPS)
 }
 
-fn frame(w: u32, h: u32) -> SharedFrame {
+pub(super) fn frame(w: u32, h: u32) -> SharedFrame {
     SharedFrame::new(vec![0u8; (w * h * 3 / 2) as usize])
 }
 
 /// One 1600-sample stereo block carrying `level`.
-fn block(level: f32) -> Vec<AudioFrame> {
+pub(super) fn block(level: f32) -> Vec<AudioFrame> {
     vec![AudioFrame {
         data: vec![level; 1600 * 2],
         channels: 2,
@@ -53,8 +53,9 @@ fn block(level: f32) -> Vec<AudioFrame> {
 }
 
 /// A source's boundary job: the SAME shared frame, one audio block, the audio
-/// stamped 2 ms after the boundary.
-fn job(w: u32, video: &SharedFrame, stamp: i64, level: f32) -> SubmitJob {
+/// stamped 2 ms after the boundary. A decoder pair (`live`), so a #215 fade
+/// opens on the incoming source's first one.
+pub(super) fn job(w: u32, video: &SharedFrame, stamp: i64, level: f32) -> SubmitJob {
     SubmitJob {
         width: w,
         height: 2,
@@ -63,10 +64,11 @@ fn job(w: u32, video: &SharedFrame, stamp: i64, level: f32) -> SubmitJob {
         audio: block(level),
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp + 2 * MS,
+        live: true,
     }
 }
 
-fn program() -> (Arc<MockNdiBackend>, ProgramOutput<MockNdiBackend>) {
+pub(super) fn program() -> (Arc<MockNdiBackend>, ProgramOutput<MockNdiBackend>) {
     let backend = Arc::new(MockNdiBackend::new());
     let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
         .expect("mock sender");
@@ -74,7 +76,7 @@ fn program() -> (Arc<MockNdiBackend>, ProgramOutput<MockNdiBackend>) {
 }
 
 /// Send every queued program boundary through the mock `SP-program` sender.
-fn drain(core: &mut ProgramCore, out: &mut ProgramOutput<MockNdiBackend>) {
+pub(super) fn drain(core: &mut ProgramCore, out: &mut ProgramOutput<MockNdiBackend>) {
     while let Some(job) = core.take() {
         let stamp = out.submit(job, T0);
         core.record_submitted(stamp);
@@ -82,7 +84,7 @@ fn drain(core: &mut ProgramCore, out: &mut ProgramOutput<MockNdiBackend>) {
 }
 
 /// The `WxH` of every video the program sent, in order.
-fn video_dims(backend: &MockNdiBackend) -> Vec<String> {
+pub(super) fn video_dims(backend: &MockNdiBackend) -> Vec<String> {
     backend
         .calls()
         .iter()
@@ -92,7 +94,7 @@ fn video_dims(backend: &MockNdiBackend) -> Vec<String> {
 }
 
 /// The send calls (audio + video) after the sender's creation, in order.
-fn sends(backend: &MockNdiBackend) -> Vec<String> {
+pub(super) fn sends(backend: &MockNdiBackend) -> Vec<String> {
     backend
         .calls()
         .into_iter()
@@ -100,13 +102,13 @@ fn sends(backend: &MockNdiBackend) -> Vec<String> {
         .collect()
 }
 
-fn dims(spec: &[(&str, usize)]) -> Vec<String> {
+pub(super) fn dims(spec: &[(&str, usize)]) -> Vec<String> {
     spec.iter()
         .flat_map(|&(d, n)| std::iter::repeat_n(d.to_string(), n))
         .collect()
 }
 
-fn stamps(range: std::ops::RangeInclusive<usize>) -> Vec<i64> {
+pub(super) fn stamps(range: std::ops::RangeInclusive<usize>) -> Vec<i64> {
     range.map(b).collect()
 }
 
@@ -347,6 +349,7 @@ fn a_new_source_whose_first_frame_after_the_cut_is_slow_is_waited_for() {
         let width = match &job {
             ProgramJob::Source(j) => j.width,
             ProgramJob::Standby { .. } => 0,
+            ProgramJob::Mix(_) => panic!("a Cut spec never mixes"),
         };
         sent.push((job.stamp_100ns(), width));
     }

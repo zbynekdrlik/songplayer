@@ -350,7 +350,9 @@ impl Drop for PacedFeed<'_> {
 /// into a [`SubmitJob`] and hands it to the [`SharedHandoff`] in ~µs — so the
 /// emit thread never blocks on `send_video_async`. The pacer keeps its own
 /// `last_frame` clone for the starvation repeat, so the job takes the frame by
-/// `Arc` clone (no pixel copy, #203 2b).
+/// `Arc` clone (no pixel copy, #203 2b). A decoder pair ([`PacedSink::emit`])
+/// is marked `live`, a standby pair ([`PacedSink::emit_standby`]) is not
+/// (#215 cue gate).
 pub struct HandoffSink<'a> {
     handoff: &'a SharedHandoff,
 }
@@ -369,12 +371,19 @@ impl PacedSink for HandoffSink<'_> {
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
     ) {
-        self.handoff.offer(SubmitJob::from_paced(
-            video,
-            audio,
-            video_tc_100ns,
-            audio_tc_100ns,
-        ));
+        let job = SubmitJob::from_paced(video, audio, video_tc_100ns, audio_tc_100ns, true);
+        self.handoff.offer(job);
+    }
+
+    fn emit_standby(
+        &mut self,
+        video: &PacedFrame,
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        let job = SubmitJob::from_paced(video, audio, video_tc_100ns, audio_tc_100ns, false);
+        self.handoff.offer(job);
     }
 }
 
@@ -452,7 +461,8 @@ impl<B: NdiBackend> PacedConsumer<B> {
     /// audio stamp (§6) would put that ~8 ms excursion into the receiver's
     /// audio timeline and A/V pairing for every filled slot, while a pacer's
     /// silent standby block — stamped at its emit, right on the boundary —
-    /// carries none. The fill is the boundary's own slot of silence.
+    /// carries none. The fill is the boundary's own slot of silence, never a
+    /// live pair (#215 cue gate).
     fn fill_job(&self, stamp_100ns: i64) -> SubmitJob {
         let picture = self.held.as_ref().unwrap_or(&self.black);
         let samples = samples_per_boundary(FILL_AUDIO_RATE_HZ as i64, GENLOCK_GRID_FPS);
@@ -469,6 +479,7 @@ impl<B: NdiBackend> PacedConsumer<B> {
             }],
             video_tc_100ns: stamp_100ns,
             audio_tc_100ns: stamp_100ns,
+            live: false,
         }
     }
 

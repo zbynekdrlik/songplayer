@@ -63,12 +63,10 @@ pub(crate) fn clips_for_title(driver: &HostDriver) -> Option<Vec<ClipInfo>> {
         .cloned()
 }
 
-/// Show title across all `#sp-title` clips in parallel.
-pub async fn show_title(
-    driver: &mut HostDriver,
-    song: &str,
-    artist: &str,
-) -> Result<(), anyhow::Error> {
+/// Show `text` (a `format_title_text` title) across all `#sp-title` clips in
+/// parallel. It takes the formatted text because the driver compares that
+/// text with its title state (#217 addendum 3).
+pub async fn show_title(driver: &mut HostDriver, text: &str) -> Result<(), anyhow::Error> {
     let Some(clips) = clips_for_title(driver) else {
         debug!(
             token = TITLE_TOKEN,
@@ -77,7 +75,6 @@ pub async fn show_title(
         return Ok(());
     };
 
-    let text = format_title_text(song, artist);
     if text.is_empty() {
         return Ok(());
     }
@@ -85,7 +82,7 @@ pub async fn show_title(
     driver.ensure_endpoint().await?;
     let driver_ref: &HostDriver = driver;
 
-    set_text_all(driver_ref, &clips, &text).await?;
+    set_text_all(driver_ref, &clips, text).await?;
     info!(
         token = TITLE_TOKEN,
         count = clips.len(),
@@ -107,6 +104,27 @@ pub async fn show_title(
         "title fade-in complete"
     );
     Ok(())
+}
+
+/// Show `text` on `#sp-title` clips NOT known to be hidden (another title
+/// up, a relaunched clip, an interrupted fade): opacity 0 at once, then the
+/// usual text + fade-in. `show_title` alone writes the new text at the clips'
+/// current opacity before its fade restarts from 5 %: a blink (#217
+/// addendum 3 review round 1).
+pub async fn replace_title(driver: &mut HostDriver, text: &str) -> Result<(), anyhow::Error> {
+    let Some(clips) = clips_for_title(driver) else {
+        debug!(
+            token = TITLE_TOKEN,
+            "no Resolume clips found, skipping replace_title"
+        );
+        return Ok(());
+    };
+    if text.is_empty() {
+        return Ok(());
+    }
+    driver.ensure_endpoint().await?;
+    set_opacity_all(driver, &clips, 0.0).await?;
+    show_title(driver, text).await
 }
 
 /// Hide title across all `#sp-title` clips in parallel.
@@ -140,15 +158,48 @@ pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/// Hide the title at once across all `#sp-title` clips: opacity 0, then the
+/// text cleared, no fade. The driver retries a HideTitle this way after a 404
+/// made it refresh a stale clip map (#217 addendum 2): the relaunched clip
+/// holds whatever Arena's saved composition restored, possibly at opacity 0,
+/// and `hide_title`'s fade starts at FULL opacity, a 1 s flash of that stale
+/// text.
+pub async fn hide_title_now(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
+    let Some(clips) = clips_for_title(driver) else {
+        debug!(
+            token = TITLE_TOKEN,
+            "no Resolume clips found, skipping hide_title_now"
+        );
+        return Ok(());
+    };
+
+    driver.ensure_endpoint().await?;
+    let driver_ref: &HostDriver = driver;
+
+    set_opacity_all(driver_ref, &clips, 0.0).await?;
+    set_text_all(driver_ref, &clips, "").await?;
+
+    info!(
+        token = TITLE_TOKEN,
+        count = clips.len(),
+        "title hidden at once"
+    );
+    Ok(())
+}
+
 /// Show subtitles — instant text swap on the four token groups:
-///   - `#sp-subs`      : current EN line (skipped if `suppress_en`)
-///   - `#sp-subs-next` : next EN line    (skipped if `suppress_en`)
+///   - `#sp-subs`      : current EN line (blank if `suppress_en`)
+///   - `#sp-subs-next` : next EN line    (blank if `suppress_en`)
 ///   - `#sp-subssk`    : current SK line
 ///   - `#sp-subssk-next`: next SK line (pushed only if a mapping exists —
 ///     the driver's clip scanner picks up the token automatically, no
 ///     config change needed)
 ///
-/// No fade animation; text is written directly.
+/// No fade animation; text is written directly. `suppress_en` (a song with
+/// its English lyrics inside the video) writes the EN clips EMPTY instead of
+/// skipping them: a skip left the previous song's English on the wall. The
+/// engine sends a push only when its signature changes, so that is one blank
+/// write per change (#217 addendum 2).
 #[cfg_attr(test, mutants::skip)]
 pub async fn set_subtitles(
     driver: &mut HostDriver,
@@ -158,24 +209,17 @@ pub async fn set_subtitles(
     next_sk: Option<&str>,
     suppress_en: bool,
 ) -> Result<(), anyhow::Error> {
-    let subs_clips = if suppress_en {
-        None
-    } else {
-        driver
-            .clip_mapping
-            .get(super::SUBS_TOKEN)
-            .filter(|v| !v.is_empty())
-            .cloned()
-    };
-    let subs_next_clips = if suppress_en {
-        None
-    } else {
-        driver
-            .clip_mapping
-            .get(super::SUBS_NEXT_TOKEN)
-            .filter(|v| !v.is_empty())
-            .cloned()
-    };
+    let (en, next_en) = if suppress_en { ("", "") } else { (en, next_en) };
+    let subs_clips = driver
+        .clip_mapping
+        .get(super::SUBS_TOKEN)
+        .filter(|v| !v.is_empty())
+        .cloned();
+    let subs_next_clips = driver
+        .clip_mapping
+        .get(super::SUBS_NEXT_TOKEN)
+        .filter(|v| !v.is_empty())
+        .cloned();
     let subs_sk_clips = driver
         .clip_mapping
         .get(super::SUBS_SK_TOKEN)
@@ -210,13 +254,20 @@ pub async fn set_subtitles(
     Ok(())
 }
 
-/// Hide subtitles — clear text on all `#sp-subs` and `#sp-subssk` clips.
-/// No fade animation; text is cleared directly.
+/// Hide subtitles — clear text on all `#sp-subs`, `#sp-subs-next` and
+/// `#sp-subssk` clips. No fade animation; text is cleared directly. The
+/// next-line clip is cleared too: it kept the stale next line while the wall
+/// was blank (#217 addendum 2).
 #[cfg_attr(test, mutants::skip)]
 pub async fn clear_subtitles(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
     let subs_clips = driver
         .clip_mapping
         .get(super::SUBS_TOKEN)
+        .filter(|v| !v.is_empty())
+        .cloned();
+    let subs_next_clips = driver
+        .clip_mapping
+        .get(super::SUBS_NEXT_TOKEN)
         .filter(|v| !v.is_empty())
         .cloned();
     let subs_sk_clips = driver
@@ -225,9 +276,10 @@ pub async fn clear_subtitles(driver: &mut HostDriver) -> Result<(), anyhow::Erro
         .filter(|v| !v.is_empty())
         .cloned();
 
-    if subs_clips.is_none() && subs_sk_clips.is_none() {
+    if subs_clips.is_none() && subs_next_clips.is_none() && subs_sk_clips.is_none() {
         warn!(
             subs_token = super::SUBS_TOKEN,
+            subs_next_token = super::SUBS_NEXT_TOKEN,
             subs_sk_token = super::SUBS_SK_TOKEN,
             "no Resolume subtitle clips found — wall is dark for subtitles, skipping push"
         );
@@ -238,6 +290,9 @@ pub async fn clear_subtitles(driver: &mut HostDriver) -> Result<(), anyhow::Erro
     let driver_ref: &HostDriver = driver;
 
     if let Some(clips) = subs_clips {
+        set_text_all(driver_ref, &clips, "").await?;
+    }
+    if let Some(clips) = subs_next_clips {
         set_text_all(driver_ref, &clips, "").await?;
     }
     if let Some(clips) = subs_sk_clips {
@@ -396,7 +451,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        show_title(&mut driver, "My Song", "Artist Name")
+        show_title(&mut driver, &format_title_text("My Song", "Artist Name"))
             .await
             .expect("show_title should succeed");
 
@@ -452,7 +507,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        show_title(&mut driver, "Song", "Artist").await.unwrap();
+        show_title(&mut driver, &format_title_text("Song", "Artist"))
+            .await
+            .unwrap();
 
         let received = server.received_requests().await.unwrap();
 
@@ -522,7 +579,9 @@ mod tests {
     async fn show_title_with_no_clips_is_no_op() {
         let (server, mut driver) = spawn_mock_driver_with_clips(vec![]).await;
 
-        show_title(&mut driver, "Song", "Artist").await.unwrap();
+        show_title(&mut driver, &format_title_text("Song", "Artist"))
+            .await
+            .unwrap();
 
         let received = server.received_requests().await.unwrap();
         assert_eq!(received.len(), 0, "no requests should be sent");
@@ -585,7 +644,9 @@ mod tests {
         let (server, mut driver) = spawn_mock_driver_with_clips(clips).await;
 
         // No mocks - empty text should produce no requests.
-        show_title(&mut driver, "", "").await.unwrap();
+        show_title(&mut driver, &format_title_text("", ""))
+            .await
+            .unwrap();
 
         let received = server.received_requests().await.unwrap();
         assert_eq!(received.len(), 0, "empty text should send no requests");
@@ -656,5 +717,126 @@ mod tests {
         let result = drain_all(futs).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "boom");
+    }
+
+    // -----------------------------------------------------------------------
+    // Subtitle clips (#217 addendum 2)
+    // -----------------------------------------------------------------------
+
+    /// A driver with the given `(token, clip id, text param id)` clips mapped
+    /// and every text PUT answered 204.
+    async fn subtitle_driver(clips: &[(&str, i64, i64)]) -> (MockServer, HostDriver) {
+        let (server, mut driver) = spawn_mock_driver_with_clips(vec![]).await;
+        for (token, clip_id, text_param_id) in clips {
+            driver.clip_mapping.insert(
+                token.to_string(),
+                vec![ClipInfo {
+                    clip_id: *clip_id,
+                    text_param_id: *text_param_id,
+                }],
+            );
+        }
+        Mock::given(method("PUT"))
+            .and(path_regex(r"^/api/v1/parameter/by-id/\d+$"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+        (server, driver)
+    }
+
+    /// `#sp-subs` (param 200), `#sp-subs-next` (201) and `#sp-subssk` (202).
+    fn all_subtitle_clips() -> [(&'static str, i64, i64); 3] {
+        [
+            (crate::resolume::SUBS_TOKEN, 100, 200),
+            (crate::resolume::SUBS_NEXT_TOKEN, 101, 201),
+            (crate::resolume::SUBS_SK_TOKEN, 102, 202),
+        ]
+    }
+
+    /// The `value` of every text PUT to param `param_id`, in order.
+    async fn texts_put(server: &MockServer, param_id: i64) -> Vec<String> {
+        let route = format!("/api/v1/parameter/by-id/{param_id}");
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == route)
+            .map(|r| {
+                let body: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+                body["value"].as_str().unwrap().to_string()
+            })
+            .collect()
+    }
+
+    /// The box (2026-09-27): `#sp-subs-next` still showed "If he dresses
+    /// lilies" while `#sp-subs` was empty. A hide clears the next line too.
+    #[tokio::test]
+    async fn clear_subtitles_blanks_the_next_line_clip_too() {
+        let (server, mut driver) = subtitle_driver(&all_subtitle_clips()).await;
+
+        clear_subtitles(&mut driver).await.unwrap();
+
+        for param in [200, 201, 202] {
+            assert_eq!(
+                texts_put(&server, param).await,
+                [""],
+                "param {param} is cleared once"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn clear_subtitles_clears_a_lone_next_line_clip() {
+        let (server, mut driver) =
+            subtitle_driver(&[(crate::resolume::SUBS_NEXT_TOKEN, 101, 201)]).await;
+
+        clear_subtitles(&mut driver).await.unwrap();
+
+        assert_eq!(
+            texts_put(&server, 201).await,
+            [""],
+            "a composition with only the next-line clip still gets it cleared"
+        );
+    }
+
+    /// A song with its English lyrics inside the video: the EN clips are
+    /// written empty, so the previous song's English leaves the wall.
+    #[tokio::test]
+    async fn a_suppress_en_push_blanks_the_english_clips() {
+        let (server, mut driver) = subtitle_driver(&all_subtitle_clips()).await;
+
+        set_subtitles(
+            &mut driver,
+            "Stale English",
+            "Next English",
+            Some("Slovenský riadok"),
+            None,
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            texts_put(&server, 200).await,
+            [""],
+            "#sp-subs is blanked, not skipped"
+        );
+        assert_eq!(texts_put(&server, 201).await, [""], "#sp-subs-next too");
+        assert_eq!(
+            texts_put(&server, 202).await,
+            ["Slovenský riadok"],
+            "the Slovak line is shown"
+        );
+
+        set_subtitles(&mut driver, "Line", "Next", None, None, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            texts_put(&server, 200).await,
+            ["", "Line"],
+            "without suppress_en the English is shown"
+        );
+        assert_eq!(texts_put(&server, 201).await, ["", "Next"]);
     }
 }

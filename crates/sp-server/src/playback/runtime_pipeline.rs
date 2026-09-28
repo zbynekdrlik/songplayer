@@ -173,6 +173,7 @@ impl PlaybackEngine {
                 scene_active: Arc::new(AtomicBool::new(false)),
                 title_show_abort: None,
                 title_hide_abort: None,
+                scene_off_due: None,
                 cached_song: String::new(),
                 cached_artist: String::new(),
                 cached_duration_ms: 0,
@@ -185,6 +186,8 @@ impl PlaybackEngine {
                 last_resolume_subtitles_signature: None,
                 last_lyrics_ws_signature: None,
                 cached_position_ms: 0,
+                title_clock: None,
+                play_start_ms: 0,
                 paused_at: None,
             }
         });

@@ -151,6 +151,7 @@ fn cancel_title_timers_aborts_pending_handles() {
             scene_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             title_show_abort: Some(task.abort_handle()),
             title_hide_abort: None,
+            scene_off_due: None,
             cached_song: String::new(),
             cached_artist: String::new(),
             cached_duration_ms: 0,
@@ -163,6 +164,8 @@ fn cancel_title_timers_aborts_pending_handles() {
             last_resolume_subtitles_signature: None,
             last_lyrics_ws_signature: None,
             cached_position_ms: 0,
+            title_clock: None,
+            play_start_ms: 0,
             paused_at: None,
         };
 

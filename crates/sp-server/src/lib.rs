@@ -273,14 +273,20 @@ pub async fn start(
         sqlx::query("SELECT id, host, port FROM resolume_hosts WHERE is_enabled = 1")
             .fetch_all(&pool)
             .await?;
-    let mut resolume_registry_mut = resolume::ResolumeRegistry::new();
-    for row in &resolume_rows {
-        let host_id: i64 = row.get("id");
-        let host: String = row.get("host");
-        let port: i32 = row.get("port");
-        resolume_registry_mut.add_host(host_id, host, port as u16, shutdown_tx.subscribe());
-    }
-    let resolume_registry = Arc::new(resolume_registry_mut);
+    let resolume_hosts: Vec<(i64, String, u16)> = resolume_rows
+        .iter()
+        .map(|row| {
+            let port: i32 = row.get("port");
+            (row.get("id"), row.get("host"), port as u16)
+        })
+        .collect();
+    // Its RecoveryEvent → engine forwarder (the title + line re-sync after a
+    // host comes back) is subscribed before the first host driver starts.
+    let resolume_registry = Arc::new(playback::recovery::registry_with_forwarder(
+        resolume_hosts,
+        engine_tx.clone(),
+        &shutdown_tx,
+    ));
 
     let state = AppState {
         pool: pool.clone(),
@@ -768,23 +774,6 @@ pub async fn start(
         }
     }
     engine.start_program(program_bus, &shutdown_tx).await;
-
-    // Subscribe to RecoveryEvent from the Resolume registry and forward to the
-    // engine via EngineCommand::ResolumeRecovered so the engine can re-emit
-    // ShowTitle + ShowSubtitles after a host comes back online.
-    let mut recovery_rx = resolume_registry.subscribe_recovery();
-    let recovery_engine_tx = engine_tx.clone();
-    let mut recovery_shutdown = shutdown_tx.subscribe();
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                Ok(event) = recovery_rx.recv() => {
-                    let _ = recovery_engine_tx.send(EngineCommand::ResolumeRecovered { host: event.host }).await;
-                }
-                _ = recovery_shutdown.recv() => break,
-            }
-        }
-    });
 
     // Engine subscribes to the download worker's broadcast so that
     // `processed:<youtube_id>` events can rewake pipelines stuck in

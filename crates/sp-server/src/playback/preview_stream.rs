@@ -53,39 +53,15 @@ const POOL_MAX: usize = 6;
 
 /// Placement of the scaled image inside the fixed 640×360 canvas: scaled size +
 /// centred, even-aligned offsets (so the 2×2-subsampled chroma stays aligned).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Placement {
-    pub w: u32,
-    pub h: u32,
-    pub off_x: u32,
-    pub off_y: u32,
-}
+/// The ONE placement the #215 program fit uses too (`nv12_fit`).
+pub use crate::playback::nv12_fit::Placement;
 
 /// Compute the letterboxed placement of a `sw×sh` source inside the 640×360
 /// canvas, preserving aspect ratio and never upscaling past the canvas. All
 /// four values are floored to even numbers; a degenerate source yields a zero
-/// image (a fully black canvas).
+/// image (a fully black canvas). See [`crate::playback::nv12_fit::aspect_fit`].
 pub fn placement_for(sw: u32, sh: u32) -> Placement {
-    if sw == 0 || sh == 0 {
-        return Placement {
-            w: 0,
-            h: 0,
-            off_x: OUT_W / 2,
-            off_y: OUT_H / 2,
-        };
-    }
-    // Largest aspect-preserving fit inside the canvas: each axis is the
-    // full-canvas value capped by the aspect-scaled value (branch-free, so
-    // there is no `<=`-boundary comparison whose `<` mutant would be
-    // equivalent at the exact-16:9 case). `min` picks whichever axis is tighter.
-    let w = OUT_W.min(sw * OUT_H / sh);
-    let h = OUT_H.min(sh * OUT_W / sw);
-    // Floor to even (keeps 2×2-subsampled chroma aligned), keep at least 2×2.
-    let w = (w & !1).max(2);
-    let h = (h & !1).max(2);
-    let off_x = ((OUT_W - w) / 2) & !1;
-    let off_y = ((OUT_H - h) / 2) & !1;
-    Placement { w, h, off_x, off_y }
+    crate::playback::nv12_fit::aspect_fit(sw, sh, OUT_W, OUT_H)
 }
 
 /// Nearest-neighbour letterbox an arbitrary NV12 frame into the fixed 640×360

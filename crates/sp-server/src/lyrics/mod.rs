@@ -8,6 +8,7 @@ pub mod child_output;
 pub mod chunking;
 pub mod claude_merge;
 pub mod description_provider;
+pub mod display_plan;
 pub mod g35t_client;
 pub mod g35t_transcript;
 pub mod gather;

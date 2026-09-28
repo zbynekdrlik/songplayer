@@ -88,4 +88,9 @@ pub enum PipelineEvent {
         /// the idle / paused / paced heartbeat paths.
         loop_stats: crate::playback::loop_stats::LoopStats,
     },
+    /// #215: not from a pipeline thread — the engine's own deferred
+    /// scene-go-off pause of a playlist held through a program transition is
+    /// due for a re-check (`scene_off.rs`). It carries the hold's re-check
+    /// id: only the pending re-check acts, any other is stale.
+    SceneOffDue(u64),
 }

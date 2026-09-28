@@ -1,5 +1,7 @@
 //! Unit tests for HostDriver — extracted via #[path] to keep driver.rs under the 1000-line file-size cap.
 
+use std::time::{Duration, Instant};
+
 use super::*;
 
 fn sample_composition() -> serde_json::Value {
@@ -373,7 +375,7 @@ async fn refresh_mapping_populates_clip_mapping_from_composition() {
     let mut driver = HostDriver::new(host, port);
     assert!(driver.clip_mapping.is_empty());
 
-    driver.refresh_mapping().await.unwrap();
+    driver.refresh_mapping(Instant::now()).await.unwrap();
 
     let clips = driver
         .clip_mapping
@@ -396,13 +398,17 @@ async fn endpoint_returns_cached_value_on_subsequent_calls() {
     assert_eq!(ep1.base_url, ep2.base_url);
 }
 
+/// A RecoveryEvent fires when the circuit breaker closes: three failed
+/// refreshes opened it, the next answered one closes it. One failure and then
+/// a success is a bare failing→ok flip and fires nothing (#217 addendum 2,
+/// `a_single_failed_composition_then_an_ok_probe_fires_no_recovery_event`).
 #[tokio::test]
-async fn recovery_event_fires_on_success_after_failure() {
+async fn recovery_event_fires_when_the_breaker_closes() {
     let server = wiremock::MockServer::start().await;
-    // First request fails, subsequent succeed
+    // The first three requests fail (the breaker opens), then they succeed.
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .respond_with(wiremock::ResponseTemplate::new(503))
-        .up_to_n_times(1)
+        .up_to_n_times(3)
         .mount(&server)
         .await;
     wiremock::Mock::given(wiremock::matchers::method("GET"))
@@ -416,8 +422,14 @@ async fn recovery_event_fires_on_success_after_failure() {
     let (tx, mut rx) = tokio::sync::broadcast::channel(8);
     let mut driver = HostDriver::new("127.0.0.1".into(), port).with_recovery_channel(tx);
 
-    let _ = driver.refresh_mapping().await; // fails
-    let _ = driver.refresh_mapping().await; // succeeds → RecoveryEvent
+    for _ in 0..3 {
+        let _ = driver.refresh_mapping(Instant::now()).await; // fails
+    }
+    assert!(
+        driver.circuit_breaker_open,
+        "three failures open the breaker"
+    );
+    let _ = driver.refresh_mapping(Instant::now()).await; // succeeds → breaker closes → RecoveryEvent
 
     let event = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv())
         .await
@@ -439,7 +451,7 @@ async fn no_recovery_event_on_clean_first_success() {
     let (tx, mut rx) = tokio::sync::broadcast::channel(8);
     let mut driver = HostDriver::new("127.0.0.1".into(), port).with_recovery_channel(tx);
 
-    let _ = driver.refresh_mapping().await;
+    let _ = driver.refresh_mapping(Instant::now()).await;
 
     let result = tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
     assert!(
@@ -463,7 +475,7 @@ async fn circuit_breaker_evicts_clip_map_after_threshold_failures() {
 
     // Three consecutive failures should trip the breaker and evict
     for _ in 0..3 {
-        let _ = driver.refresh_mapping().await;
+        let _ = driver.refresh_mapping(Instant::now()).await;
     }
 
     assert!(driver.circuit_breaker_open, "circuit should be open");
@@ -482,7 +494,7 @@ async fn single_failure_does_not_trip_circuit() {
     let port = server.address().port();
     let mut driver = HostDriver::new("127.0.0.1".into(), port);
 
-    let _ = driver.refresh_mapping().await;
+    let _ = driver.refresh_mapping(Instant::now()).await;
 
     assert_eq!(driver.consecutive_failures, 1);
     assert!(!driver.circuit_breaker_open);

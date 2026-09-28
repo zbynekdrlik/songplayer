@@ -97,7 +97,9 @@ You can't run tests locally, so a RED test must FAIL against a version of the
 code you can only reason about, without leaving warnings CI's clippy
 (`--all-targets -D warnings`) would reject. The clean pattern (used for #161's
 `idle_gate_abort`): make the RED commit ship the REAL logic but with ONE WRONG
-CONSTANT (e.g. `const ABORT_CONSECUTIVE_BUSY: u32 = u32::MAX;` → GREEN sets `2`).
+CONSTANT (e.g. `const ABORT_CONSECUTIVE_BUSY: u32 = u32::MAX;` → GREEN sets `2`;
+#161 shipped `u32::MAX` there, but do not copy that value, see the extreme-constant
+note below).
 The logic still reads/writes every field, so nothing is dead_code, and the
 "must-abort" tests fail cleanly; a stub function body that ignores its fields
 would instead trip `dead_code`/`unused`. For timing tests (interval + sleep),
@@ -110,6 +112,47 @@ Pick the WRONG constant so it is NOT an arithmetic identity: shipping a RED
 commit itself. Use a wrong NON-identity value (a named const `FRAGMENT_MS = 250`
 → GREEN `500`, or a different literal) so the exact-value test still fails but
 the RED tree is clippy-clean.
+
+Likewise avoid a RED constant at an unsigned type's minimum (`0`) or maximum
+(`u32::MAX`) when that makes one side of the comparison impossible. The
+examples below take `x` as unsigned; for a signed type the minimum is
+`iN::MIN`, not `0`.
+`clippy::absurd_extreme_comparisons` flags three shapes, and as a
+correctness-group lint it is deny-by-default:
+
+- always false: `x < 0` and `x > MAX`;
+- always true: `x >= 0` and `x <= MAX`;
+- really `==`: `x <= 0` and `x >= MAX`.
+
+`x > 0` or `x < MAX` does not trigger it. The #161 example above, `u32::MAX`
+compared with `>=`, is the "really `==`" shape, so prefer a non-extreme wrong
+value such as `1_000`. #217 used `LONG_GAP_MS = 1`, then set it to `8_000` in
+GREEN.
+
+**A wrong-constant RED for a whole NEW module proves only the tests that
+depend on that constant (#217 review round 3).** Every other new test passes at
+the RED commit, so nobody ever saw it fail. In the RED commit message, list
+only the tests that really fail under the wrong constant (derive them, do not
+guess), and never claim the RED reproduces the old behaviour unless it does.
+The tests that encode the new contract against the OLD code belong in their own
+earlier `test(#N)` commit that uses only the existing API (#217 `e66514a`).
+
+**Deriving exact expected values on the no-compile box (#217).** Do not
+hand-compute dozens of pins. Write a scratch Python model that mirrors the pure
+Rust function step by step, and derive every exact value from it: fixture
+counts, boundary show/hide times, what each mutant would do. Keep the model in
+the scratchpad, not the repo. When the Rust changes, update the model in the
+same step. Each fresh-context review pass should re-derive the pins with its own
+model; two independent models agreeing is the only local evidence available.
+
+**For a state machine, also FUZZ the model against invariants (#215 rounds
+4–6).** Hand-picked scenarios kept missing the program bus's cut edge cases;
+a randomized run (random cuts, source skews, pre-rolls, stalls) checked for
+"no hard cut, no mix out of a source that is off program, no stale reorder
+entry" found one each round. All three came from ONE condition written twice
+(which window holds the source on air vs which window a later cut freezes),
+so when two decisions depend on the same state, derive both from one
+predicate (`Window::holds_on_air`).
 
 ## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these
@@ -192,6 +235,13 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   with that reason. Build the refusal in a helper that returns `ErrorResponse`
   by value. Own helpers returning `tungstenite::Error` (136 B) must box it:
   `Result<(), Box<tungstenite::Error>>` + `.map_err(Box::new)`.
+- **`clippy::nonminimal_bool` rewrites `!opt.is_some_and(|x| …)`** (#217
+  addendum 3 review round 2). It is warn-by-default (complexity), so under
+  `-D warnings` it fails the Lint job. Clippy's `METHODS_WITH_NEGATION`
+  table maps a negated `is_some_and` to `is_none_or` from MSRV 1.82, and the
+  workspace is 1.85. Write `opt.is_none_or(|x| x.id != id)`: negate the
+  closure body, never the call. `!opt.is_some()` / `!opt.is_none()` are in
+  the same table.
 
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,
@@ -204,6 +254,24 @@ test asserting the joined PATH string `"/opt/tools:/usr/bin:/bin"` — on Window
 the platform string — round-trip the result through `std::env::split_paths` and
 check `parts[0] == tools_dir`, which holds on both separators. Same rule for any
 `MAIN_SEPARATOR` / line-ending / drive-letter / temp-path assumption in a test.
+
+**An engine test must not count the test pipeline's replies (release 0.68.0
+blockers).** On Linux the stub pipeline (`pipeline_stub.rs`) answers every
+`PipelineCommand::Play` with a `PipelineEvent::Error`; on Windows the real
+pipeline has no NDI backend in CI, sends ONE Error at spawn and then only
+waits for Shutdown. So "no Play was sent" read from `event_rx` passes or fails
+by platform. Read it from engine state every Play resets instead: every Play
+calls `begin_play`, which clears the song's title clock (`tests_hold.rs`).
+
+**Never key a "stale event" check on a tokio task id.** tokio documents that
+an id may be reused once its task has ended, which is exactly the state of a
+stale event's task. Carry your own id from a process-wide `AtomicU64`
+(`scene_off.rs::NEXT_RE_CHECK`, #215 review round 3).
+
+**A "nothing was sent while X" test must use a NEW value.** The dispatch
+paths dedup on the last value sent (`last_*_signature`), so the same line is
+held back with or without the gate under test, and the test passes vacuously
+(#215 review round 1: a held Position on the same line proved nothing).
 
 ## Doc-comment lists: blank `//!`/`///` line before the paragraph that follows
 
@@ -284,6 +352,119 @@ pointer-equality RED pass by luck.
 - **No hangs:** drop the `release` sender on every failure path, so the held
   thread's `recv().unwrap()` panics instead of hanging the test.
 
+**A RED for a new state machine or a restructure (#217 addendum 3, three
+rounds).** Ship the whole new structure in RED (new types, fields, modules,
+command variants). Keep the OLD behaviour in a few NAMED spots and list them
+in the RED message:
+
+- a `plan` that runs every command as sent;
+- a supersede that returns the batch unchanged;
+- a predicate that still reads the old input;
+- an empty `rearm` with `_`-prefixed params (warning-free, still called);
+- a helper without its new first step.
+
+Keep every new item USED in RED, or the lib target warns. Two things that
+were enough:
+
+- a variant only GREEN's `plan` returns can be constructed by an old path
+  (the old retry's instant hide as `run_title_action(HideNow)`);
+- a new fn only GREEN's predicate calls can be read by a debug log of the
+  window inputs, which GREEN keeps.
+
+Write GREEN first and tar the changed files to the scratchpad. Build RED with
+anchor-asserted scripts (rustfmt re-wraps lines, so re-read the formatted text
+before anchoring). Commit RED, then restore ONLY the files whose spots differ
+from the tar.
+
+**A RED whose new tests call a CHANGED signature (#215 review rounds 3–5).**
+The new tests must compile at the RED commit, but the fix changes an API
+(an extra `&mut events` param, a renamed fn, an extra argument). Do it like
+this:
+
+- **Write GREEN first.** Save a copy of the GREEN file to the scratchpad.
+- **Build the RED file from `git show HEAD:<file>`.** Apply ONLY the
+  signature change with scripted, anchor-asserted edits: the param stays
+  unused as `_events` / `_dropped`, or the renamed fn returns what the old
+  one returned. Keep the old logic byte-identical otherwise. An unused
+  `_`-param is warning-free.
+- **Commit** the tests with that RED file as `test(#N) … [red]`.
+- **Copy the saved GREEN back** and commit `fix(#N) … [green]`.
+- **List only the tests that really fail on the old logic in the RED
+  message.** Walk each one by hand.
+
+**`cargo mutants --in-diff <range> --list` compiles nothing (#215).** It
+lists the diff's mutants (`file:line` + replacement) so a review can name
+the test that kills each one BEFORE CI's mutation gate runs.
+
+- The Tier-0 hook blocks it as a cargo subcommand. Because it only lists,
+  the logged `# airuleset:build-ok list-only` bypass is honest here, and
+  only here.
+- cargo-mutants 27 turns `|=` only into `&=`, not `^=`.
+- It turns a match guard into `true` / `false`, and `==` into `!=`.
+- `a && b && c` parses as `(a && b) && c`, so its two `&&`→`||` mutants
+  are `(a || b) && c` and `(a && b) || c` — never `a || (b && c)`. Model
+  those two when you name the killing test (#215 round 4).
+- It generates NO mutant for a plain assignment (`self.flag = false;`) or
+  for an `if` condition that is a bare variable (`if breaker_just_closed {`).
+  Deleting such a line survives the gate unseen, so give it its own
+  behaviour test that fails without it. #217 pinned the Ok-arm clear of
+  `last_full_attempt_failed` with
+  `an_answered_fetch_after_a_failed_one_restores_the_fast_path`.
+- The same holds for a CALL STATEMENT whose result is discarded
+  (`self.finish_push("hide_title_now", result);`): no mutant, so pin its
+  effect with a behaviour test (#217 addendum 2,
+  `a_retried_hide_that_404s_leaves_no_stale_note_for_the_next_push`).
+- A match GUARD that is always true where it sits (`ShowTitle { .. } if
+  self.recovery_sent_this_step` when the step has always fired an event by
+  then) makes the guard→`true` mutant EQUIVALENT: it survives the gate. Drop
+  the redundant guard (a plain arm; its "delete match arm" mutant is
+  killable next to a `_` arm), or keep it as `a && b` where the `||` mutant
+  is observable (#217 addendum 2 review round 3).
+- A mutation that cannot compile (`&&`→`||` inside a let-chain) is
+  "unviable": it costs a build but cannot fail the gate.
+- `(at - plane) % ds` where `plane` is a multiple of `ds` (a plane or row
+  edge): the `-`→`+` mutant gives the SAME remainder, so it is equivalent
+  and survives. Subtract ONCE into a local (`let offset = …; (offset / ds,
+  offset % ds)`), so the mutant also moves the quotient, which a test sees
+  (#215 addendum 3, `nv12_mix.rs`).
+- **A Python mutation harness for a pure kernel (#215 addendum 3).** Mirror
+  the Rust function in the scratch model with one switch per listed mutant
+  (`cargo mutants --in-diff … --list`) and a mirror of the Rust tests. Also
+  emulate Rust's panics: usize underflow, slice / index bounds, division by
+  zero, and `clamp(lo > hi)`. Python wraps negative indices silently, so
+  those panics must be raised by hand. A Python survivor is then a superset
+  of the Rust ones; zero survivors is the local evidence before the CI gate.
+  A mutant that only a mid-row / off-edge input can reveal (`a - c0` with
+  `c0` always 0 on row-aligned runs) needs a test that cuts the input
+  arbitrarily.
+- **A new early return in front of pinned comparisons can silently orphan
+  their killers** (#217 addendum 3, review rounds 4-5). Round 4 added
+  `TitleClock::shows` as a guard ahead of `arm_title_timers`'s `>`
+  comparisons, and adapted a boundary test whose clock the guard now
+  rejected. The test still passed, but it no longer reached the
+  comparisons, so their `>` → `>=` mutants survived. CI's gate diffs from
+  the last GREEN mutation verdict, not from the last review round. So after
+  any fix that adds a guard or adapts an existing test, re-list the FULL
+  branch range (`cargo mutants --in-diff <base>..HEAD --list`) and re-map
+  every mutant to a killer, not just the round's own diff.
+- **A HANG fails the gate exactly like a survivor** (review round 1, same
+  ticket). cargo-mutants kills a stalled test run at `--timeout` and reports
+  TIMEOUT, which turns the shard red. The #215 harness first counted its
+  own iteration guard as a "kill" and missed one: `%`→`+` made a hand-advanced
+  `while !out.is_empty()` cursor step by 0 bytes forever. So:
+  - give every loop of the model an iteration guard, and count a trip as a
+    gate FAILURE, never a kill;
+  - in the Rust, make progress structural instead of a cursor you advance
+    by a computed length: split at the edge, then `chunks_mut(n)` /
+    `enumerate`. A mutated length then panics or moves the output (killed),
+    it never stalls.
+
+**`tokio::select!` drops the branch futures before a handler runs**
+(tokio `macros/select.rs`: the futures live inside the `let output = {…}`
+block, and the handlers run in the `match output` after it). So a handler may
+take `&mut` of a receiver that a branch future borrowed, e.g.
+`event = events.recv() => … task.resync(&mut events).await`.
+
 ## `-D warnings` rejects `temporary.as_ptr()` in tests — bind the value first (#203 r2b)
 
 `assert_eq!(take(cap).as_ptr(), p, …)` is a compile ERROR under CI's
@@ -317,6 +498,15 @@ gate — even though the function is "obviously" covered on Windows. `#203`'s
 needed an explicit Linux unit test calling it through `MockNdiBackend`. When you
 add a pub fn during a diff, ask "does a LINUX `#[test]` actually call this?" — if
 not, add one or the mutation gate reddens.
+
+**Extracting pure logic OUT of a `#[cfg(windows)]` module: mind the file NAME
+(#147 spin budget).** The `.cargo/mutants.toml` `exclude_re` entries are
+SUBSTRING regexes. `'sp-server/src/playback/pipeline_paced'` excludes
+`pipeline_paced.rs` AND every `pipeline_paced_*.rs` sibling. So a helper split
+into `pipeline_paced_spin.rs` would compile on Linux but never be
+mutation-tested. Name it outside every excluded prefix: `pacer_spin.rs`, with
+`pub mod` in `playback/mod.rs`. Then `grep` the exclude list for your new path
+before committing.
 
 ## Inserting a `mod` before a `#[cfg(test)]` test module STEALS the gate (#192 r5)
 
@@ -415,12 +605,34 @@ sees that. What held up across five review rounds:
   `Mutex<bool>` + `Condvar` gate (`set_held`). Require the caller to make N
   more steps within a bounded `wait_for`, then release. Any wait on the
   caller's side stalls and fails the bound.
+- **An awaited `mpsc` send to a queue that drains only while a peer is
+  connected (cg OBS's command queue) is a stall** (#217 addendum 3, review
+  rounds 3–4: it parked the engine loop, then the title timers). Send what
+  matters first, then `try_send` the rest. Test it with a capacity-1
+  channel filled by one `try_send`, the receiver KEPT ALIVE (`_rx`: a
+  dropped receiver makes the send fail at once, so the test passes
+  vacuously), the call under `tokio::time::timeout(5 s)`, then assert the
+  important command arrived.
 - **Use "must NOT happen yet" windows only in the safe direction.** For
   example, `recv_timeout(200 ms).is_err()` while the gate is held. Correct
   code can never fail it; a slow runner only makes it pass vacuously.
 - **Pace virtual time for loop tests.** Every wait really sleeps, but only the
   waits advance the clock. A stall then cannot fake a missed boundary; the
   gate proves the waiting part.
+- **A spin / wait loop on a real clock: witness each step, never time it**
+  (#147, `pacer_spin_tests.rs`).
+  - Give the loop an observer hook `FnMut(step, elapsed)` and return a tally.
+  - The test runs the loop on its own thread over a `WallClock::settable`
+    wall that it holds frozen. The observer sends each Yield on a channel, and
+    the test waits for N witnesses with `recv_timeout(20 s)`.
+  - Assert only invariants that hold whatever the stall:
+    - the tally equals the observer's counts;
+    - the elapsed seen at each step is on the right side of the budget;
+    - the loop never spins again after it starts yielding;
+    - `yields × sleep ≤` the real time taken.
+  - A `Drop` guard that moves the wall far past the boundary frees the
+    spinner on every failure path, so the test never leaves a spinning thread
+    behind.
 - **FFI lock scope** (`mutants::skip` code that needs a runtime). Move the SDK
   calls into a struct built from the `unsafe extern "C" fn` pointer table
   (`receive.rs` `RecvHandles`). Test it with fake `unsafe extern "C" fn`s whose

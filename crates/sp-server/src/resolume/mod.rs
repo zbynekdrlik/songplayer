@@ -2,6 +2,7 @@
 
 pub mod driver;
 pub mod handlers;
+pub(crate) mod title_state;
 
 use std::collections::HashMap;
 
@@ -10,9 +11,13 @@ use tracing::{info, warn};
 
 use crate::resolume::driver::HostDriver;
 
-/// Fired by [`HostDriver`] when a refresh succeeds after at least one
-/// prior consecutive failure. Subscribers (e.g. the playback engine)
-/// react by re-emitting their current state to the recovered host.
+/// Fired by [`HostDriver`] only on a real recovery: when its circuit breaker
+/// closes (Arena is back after an outage), and when a NOT READY clip mapping
+/// (a composition without SongPlayer's clips, or a map a 404 push marked
+/// stale, #217) becomes ready with a changed map. Never on a bare
+/// failing→ok flip (#217 addendum 2). Subscribers (e.g. the playback engine)
+/// react by re-emitting their current state, to every host (the engine does
+/// not target `host`).
 #[derive(Debug, Clone)]
 pub struct RecoveryEvent {
     pub host: String,
@@ -34,6 +39,11 @@ pub const SUBS_NEXT_TOKEN: &str = "#sp-subs-next";
 /// Resolume clip tag for Slovak subtitle text delivery.
 pub const SUBS_SK_TOKEN: &str = "#sp-subssk";
 
+/// Every clip tag SongPlayer writes to. The health snapshot counts clips for
+/// exactly these, and a composition whose mapping has none of them is NOT
+/// READY: Arena's REST answers before its composition has loaded (#217).
+pub const SONGPLAYER_TOKENS: [&str; 4] = [TITLE_TOKEN, SUBS_TOKEN, SUBS_NEXT_TOKEN, SUBS_SK_TOKEN];
+
 /// Commands sent to per-host Resolume workers.
 #[derive(Debug, Clone)]
 pub enum ResolumeCommand {
@@ -41,13 +51,22 @@ pub enum ResolumeCommand {
     ShowTitle { song: String, artist: String },
     /// Hide the title (fade out + clear text) on all `#sp-title` clips.
     HideTitle,
+    /// The title that SHOULD be on the wall now (`handlers::format_title_text`
+    /// text, `None` = no title), sent after a recovery and on an OBS scene-on
+    /// (#217 addendum 3). The driver owns what the wall shows and acts only on
+    /// a difference: nothing when that title is up, a fade-in when it is not,
+    /// an instant hide when no title must be up. It also supersedes the title
+    /// commands queued before it. The subtitle half of a resync is the plain
+    /// `ShowSubtitles` / `HideSubtitles`: instant writes, nothing to compare.
+    Resync { title: Option<String> },
     /// Show subtitle text (lyrics) on Resolume subtitle clips.
     ShowSubtitles {
         en: String,
         next_en: String,
         sk: Option<String>,
         next_sk: Option<String>,
-        /// When true, skip the EN pushes (both #sp-subs and #sp-subs-next).
+        /// When true, the EN clips (#sp-subs and #sp-subs-next) are written
+        /// empty, so no English from the previous song stays on the wall.
         /// SK clips still receive their text. Used for songs with baked-in
         /// English lyrics inside the YouTube video frame.
         suppress_en: bool,
@@ -103,9 +122,16 @@ impl ResolumeRegistry {
             .collect()
     }
 
-    /// Subscribe to recovery events fired when a host recovers after failures.
+    /// Subscribe to recovery events: a host's breaker closed, or its clip map
+    /// became ready again (see [`RecoveryEvent`]).
     pub fn subscribe_recovery(&self) -> broadcast::Receiver<RecoveryEvent> {
         self.recovery_tx.subscribe()
+    }
+
+    /// Test-only: the channel the host drivers fire their `RecoveryEvent`s on.
+    #[cfg(test)]
+    pub(crate) fn recovery_sender(&self) -> broadcast::Sender<RecoveryEvent> {
+        self.recovery_tx.clone()
     }
 
     /// Start a worker for a host. Spawns a background task and stores the
