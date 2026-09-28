@@ -111,42 +111,49 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
   over a second connection:
   - `ObsCommand::Remote(RemoteCall::Request)` is executed by
     `obs/remote_call.rs` on the client's own write half and dispatcher.
-  - **In queue order, and a switch RUNS in order (#221 review rounds 1–2).**
-    The connection loop hands every `Remote` call to ONE forwarder per
-    connection (`remote_call::run_calls`, in the connection's task set): it
-    writes a request frame (`Dispatcher::send`) before it takes the next
-    call. Two traps, both would let a playlist press's mirror (not awaited by
-    the facade) land after a later press and leave cg OBS on the older scene:
-    - a task PER call (the #213 shape) can start the newest first: a
+  - #221 deleted `RemoteCall::ScenePlaylists` (the cg scene-item lookup):
+    the facade never asks cg OBS which playlists a scene shows.
+  - **The newest press always reaches cg OBS (#221 review rounds 1–4).** The
+    connection loop hands every `Remote` call to ONE forwarder per connection
+    (`remote_call::forwarder` → `run_calls`, in the connection's task set).
+    A playlist press's mirror is not awaited by the facade, so each of these
+    traps would let it land after a later press and leave cg OBS on the
+    older scene:
+    - **a task PER call** (the #213 shape) can start the newest first: a
       multi-thread tokio worker runs the task it spawned last from its LIFO
-      slot. Never spawn per call again;
-    - cg OBS (obs-websocket, `WebSocketServer::onMessage`) runs every
-      incoming message on a `QThreadPool` with no per-client order, so frames
-      written in order can still RUN out of order. The forwarder therefore
-      waits for the answer of a scene switch (`ORDERED_REQUESTS` =
+      slot. The forwarder writes each frame (`Dispatcher::send`) before it
+      takes the next call. Never spawn per call again;
+    - **cg OBS runs its messages out of order**: obs-websocket
+      (`WebSocketServer::onMessage`) runs every incoming message on a
+      `QThreadPool` with no per-client order. The forwarder waits for the
+      ANSWER of a scene switch (`ORDERED_REQUESTS` =
       `SetCurrentProgramScene`, at most 2 s) before it writes the next call;
       a getter's answer is awaited in a task of its own.
 
-    - a burst of switches while cg OBS answers slowly (its UI thread busy)
-      would hold each queued switch for up to 2 s, and the newest could
-      pass its requester's 3 s timeout and be skipped — cg OBS then ends on
-      an older press. So a switch with a later, still wanted switch already
-      queued behind it is SUPERSEDED: answered with nothing, never written
-      (review round 3); the newest press goes out at once.
-
-    A manual press queued behind an unanswered mirror waits at most 2 s for
+  - **A superseded switch is never sent (round 3, narrowed in round 4).**
+    While cg OBS answers slowly (its UI thread busy), each queued switch
+    would hold the forwarder up to 2 s, so the newest could pass its
+    requester's 3 s timeout and be skipped. So a switch with a later, still
+    wanted MIRROR queued behind it (`RemoteCall::Request.supersedes`, set only
+    by `program_switch`'s mirror through `Upstream::enqueue(…, true)`) is
+    answered with nothing and never written. A manual press's forward
+    supersedes NOTHING: its `SP-program` cut depends on cg OBS's answer,
+    which may be a refusal (600) or come too late — a mirror it replaced
+    would be lost. A superseded mirror's waiter logs at debug, not WARN.
+  - A manual press queued behind an unanswered mirror waits at most 2 s for
     it, so its own answer has ~1 s of its 3 s upstream timeout left; if the
-    facade gave up meanwhile, the call is skipped, never sent late. The
-    forwarder's answer timeout is a parameter (`run_calls(…, answer_timeout)`,
-    `forwarder()` passes the production 2 s): the tests pass 10 minutes, so
-    a wait the forwarder must not do fails them, and none races the 2 s.
-    Pinned on a real WebSocket peer: `the_calls_reach_cg_obs_in_queue_order`,
+    facade gave up meanwhile, the call is skipped, never sent late.
+  - The forwarder's answer timeout is a parameter (`run_calls(…,
+    answer_timeout)`; `forwarder()` passes the production 2 s): the tests
+    pass 10 minutes, so a wait the forwarder must not do fails them, and
+    none races the 2 s. Pinned on a real WebSocket peer:
+    `the_calls_reach_cg_obs_in_queue_order`,
     `a_scene_switch_is_answered_before_the_next_call_goes_out`,
     `a_getter_never_holds_the_next_call_back`,
     `a_switch_a_later_one_supersedes_is_never_sent`,
-    `an_abandoned_later_switch_supersedes_nothing`.
-    #221 deleted `RemoteCall::ScenePlaylists` (the cg scene-item lookup):
-    the facade never asks cg OBS which playlists a scene shows.
+    `a_later_manual_forward_supersedes_nothing`,
+    `an_abandoned_later_switch_supersedes_nothing`; the facade side by
+    `only_the_mirror_of_a_playlist_press_supersedes_an_earlier_switch`.
   - Every raw op=5 event cg OBS sends is broadcast as `ObsEvent::Raw` on the
     existing `obs_event_tx`; the engine bridge ignores it.
 - **Never block the engine's OBS queue.** `Upstream::enqueue` uses
