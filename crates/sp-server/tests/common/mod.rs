@@ -27,6 +27,13 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 
+/// The key of the control message `FakeObsServer::release_held` sends down
+/// the event channel (never forwarded to the client as an event).
+const RELEASE_HELD: &str = "__release_held";
+/// The key of the control message `FakeObsServer::close_client` sends down the
+/// event channel: close the connected client's WebSocket.
+const CLOSE_CLIENT: &str = "__close_client";
+
 /// Scripted state the fake OBS reveals to its clients.
 #[derive(Clone, Default)]
 pub struct FakeObsState {
@@ -58,6 +65,38 @@ pub struct FakeObsState {
     pub program_scene: Option<String>,
     /// #213: every request received, as `{requestType, requestData}`.
     pub requests: Vec<Value>,
+    /// #218: the next N `GetSceneItemList` requests get NO answer (the
+    /// client's lookup times out). Each dropped request is still logged in
+    /// `requests`, with `"dropped": true`.
+    pub drop_scene_item_lists: usize,
+    /// #218: the next N `GetSceneItemList` requests are answered with a
+    /// success status but no `sceneItems` list.
+    pub omit_scene_items: usize,
+    /// #218: the next N `GetSceneItemList` requests are REFUSED (600, as for
+    /// an unknown scene).
+    pub refuse_scene_item_lists: usize,
+    /// #218: sources that are GROUPS: `GetSceneItemList` for one is refused
+    /// with 602 "(Is group)", as obs-websocket 5 does (a group is listed only
+    /// by `GetGroupSceneItemList`). List them in `scene_items` as
+    /// `(name, true, "")`.
+    pub groups: Vec<String>,
+    /// #218 review round 2: while set, every `GetCurrentProgramScene` answer
+    /// is built at once (the program scene at that moment) but HELD in
+    /// `held` until [`FakeObsServer::release_held`].
+    pub hold_program_scene: bool,
+    /// #218 review round 2: while set, the `GetSceneItemList` answers for this
+    /// scene are held the same way.
+    pub hold_lookups_of: Option<String>,
+    /// The held answers, in request order.
+    pub held: Vec<Value>,
+    /// #218 review round 3: right after answering the client's first
+    /// `GetInputList` (its connect-time NDI map rebuild, before its initial
+    /// `GetCurrentProgramScene`), send `CurrentProgramSceneChanged` for this
+    /// scene — an event cg OBS sent before the client's initial read.
+    pub event_on_input_list: Option<String>,
+    /// #219: the `responseData` of `GetCurrentSceneTransition`; `None` answers
+    /// `{}` (no transition kind: the client reads it as no answer).
+    pub scene_transition: Option<Value>,
 }
 
 /// A fake OBS WebSocket server listening on a random localhost port.
@@ -133,6 +172,23 @@ impl FakeObsServer {
             }
         });
         let _ = self.event_tx.send(evt).await;
+    }
+
+    /// #218: send the held answers of `request_type` to the client, in order
+    /// (after anything pushed before this call).
+    pub async fn release_held(&self, request_type: &str) {
+        let _ = self
+            .event_tx
+            .send(json!({ RELEASE_HELD: request_type }))
+            .await;
+    }
+
+    /// #219: close the connected client's WebSocket (a Close frame) — cg OBS
+    /// going away; the fake keeps accepting, so the client reconnects. Only
+    /// an identified client reads the control queue: called while none is,
+    /// it closes the NEXT one to identify.
+    pub async fn close_client(&self) {
+        let _ = self.event_tx.send(json!({ CLOSE_CLIENT: true })).await;
     }
 
     /// #213: push any event (intent 4 = Scenes) to the connected client.
@@ -268,15 +324,62 @@ async fn handle_client(
                             // a GetInputList request goes out, OBS never responds.
                             let req_type = val["d"]["requestType"].as_str().unwrap_or("");
                             let suppress = {
-                                let s = state.lock().await;
-                                req_type == "GetInputList" && s.suppress_get_input_list
+                                let mut s = state.lock().await;
+                                if req_type == "GetSceneItemList" && s.drop_scene_item_lists > 0 {
+                                    // #218: cg OBS never answers this lookup.
+                                    s.drop_scene_item_lists -= 1;
+                                    s.requests.push(json!({
+                                        "requestType": req_type,
+                                        "requestData": val["d"]["requestData"],
+                                        "dropped": true,
+                                    }));
+                                    true
+                                } else {
+                                    req_type == "GetInputList" && s.suppress_get_input_list
+                                }
                             };
                             if suppress {
                                 continue;
                             }
                             let response = handle_request(&val, &state).await;
+                            {
+                                // #218: an answer built NOW (the state at
+                                // processing time), sent only on `release_held`.
+                                let mut s = state.lock().await;
+                                let scene = val["d"]["requestData"]["sceneName"].as_str();
+                                let hold = (req_type == "GetCurrentProgramScene"
+                                    && s.hold_program_scene)
+                                    || (req_type == "GetSceneItemList"
+                                        && s.hold_lookups_of.is_some()
+                                        && s.hold_lookups_of.as_deref() == scene);
+                                if hold {
+                                    s.held.push(response);
+                                    continue;
+                                }
+                            }
                             if write.send(Message::Text(response.to_string().into())).await.is_err() {
                                 return;
+                            }
+                            // #218 review round 3: cg OBS switched its program
+                            // while the client was still connecting (its NDI
+                            // map rebuild runs first).
+                            let early = if req_type == "GetInputList" {
+                                state.lock().await.event_on_input_list.take()
+                            } else {
+                                None
+                            };
+                            if let Some(scene) = early {
+                                let evt = json!({
+                                    "op": 5,
+                                    "d": {
+                                        "eventType": "CurrentProgramSceneChanged",
+                                        "eventIntent": 4,
+                                        "eventData": { "sceneName": scene }
+                                    }
+                                });
+                                if write.send(Message::Text(evt.to_string().into())).await.is_err() {
+                                    return;
+                                }
                             }
                         }
                     }
@@ -289,6 +392,29 @@ async fn handle_client(
                 }
             }
             Some(evt) = event_rx_guard.recv() => {
+                // #219: a `close_client` control message.
+                if evt.get(CLOSE_CLIENT).is_some() {
+                    let _ = write.send(Message::Close(None)).await;
+                    return;
+                }
+                // #218: a `release_held` control message, not an OBS event.
+                if let Some(kind) = evt.get(RELEASE_HELD).and_then(Value::as_str) {
+                    let released: Vec<Value> = {
+                        let mut s = state.lock().await;
+                        let (out, keep): (Vec<Value>, Vec<Value>) = s
+                            .held
+                            .drain(..)
+                            .partition(|r| r["d"]["requestType"] == kind);
+                        s.held = keep;
+                        out
+                    };
+                    for response in released {
+                        if write.send(Message::Text(response.to_string().into())).await.is_err() {
+                            return;
+                        }
+                    }
+                    continue;
+                }
                 if write.send(Message::Text(evt.to_string().into())).await.is_err() {
                     return;
                 }
@@ -339,7 +465,44 @@ async fn handle_request(req: &Value, state: &Arc<Mutex<FakeObsState>>) -> Value 
         }
         "GetSceneItemList" => {
             let scene_name = req["d"]["requestData"]["sceneName"].as_str().unwrap_or("");
-            let s = state.lock().await;
+            let mut s = state.lock().await;
+            let group = s.groups.iter().any(|g| g == scene_name);
+            if group || s.refuse_scene_item_lists > 0 {
+                // #218: a refusal carries no responseData at all.
+                let (code, comment) = if group {
+                    (
+                        602,
+                        "The specified source is not a scene. (Is group)".to_string(),
+                    )
+                } else {
+                    s.refuse_scene_item_lists -= 1;
+                    (
+                        600,
+                        format!("No source was found by the name of `{scene_name}`."),
+                    )
+                };
+                return json!({
+                    "op": 7,
+                    "d": {
+                        "requestType": request_type,
+                        "requestId": request_id,
+                        "requestStatus": { "result": false, "code": code, "comment": comment },
+                    }
+                });
+            }
+            if s.omit_scene_items > 0 {
+                // #218: a success status, but no `sceneItems` list.
+                s.omit_scene_items -= 1;
+                return json!({
+                    "op": 7,
+                    "d": {
+                        "requestType": request_type,
+                        "requestId": request_id,
+                        "requestStatus": request_status,
+                        "responseData": {},
+                    }
+                });
+            }
             let items: Vec<Value> = s
                 .scene_items
                 .get(scene_name)
@@ -377,6 +540,12 @@ async fn handle_request(req: &Value, state: &Arc<Mutex<FakeObsState>>) -> Value 
                 "scenes": scenes,
             })
         }
+        "GetCurrentSceneTransition" => state
+            .lock()
+            .await
+            .scene_transition
+            .clone()
+            .unwrap_or_else(|| json!({})),
         "GetCurrentProgramScene" => match state.lock().await.program_scene.clone() {
             Some(name) => json!({
                 "sceneName": name,

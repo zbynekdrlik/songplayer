@@ -286,6 +286,26 @@ A sign convention written as a doc line that STARTS with `+ = …` or `* …` (o
 lint (#148 v5 review). Start such a line with a word (`Positive = …`), or keep
 the `+` mid-line.
 
+It happens by accident when prose WRAPS so a line begins with `+ `/`- `
+(#219: `//! … over a real pool` / `//! + \`ProgramBus\`, and …` failed
+review round 3). Before pushing, scan every changed file's doc lines: a doc
+line matching `^\s*(//!|///) ?([-+*]|\d+[.)]) ` followed by a non-blank doc
+line indented less than 3 spaces is the lint (a ~30-line Python scan in the
+scratchpad, list files from `git diff --name-only <base>..HEAD -- '*.rs'`;
+check it flags a known-bad sample first).
+
+## A long-lived `JoinSet` must be JOINED, not only spawned and aborted (#219)
+
+A tokio `JoinSet` keeps a FINISHED task (its cell + output) until
+`join_next` / `try_join_next` takes it. A set that only ever sees `spawn` +
+`abort_all` — the OBS connection loop's helpers, one per ~2 s poll tick —
+grows for the whole life of the connection (~43 000 cells a day). Route every
+spawn through a helper that first drains `try_join_next()` (and WARNs a
+`JoinError` that is not a cancellation): `obs/mod.rs::spawn_helper`. Test it
+on the current-thread `#[tokio::test]`: spawn finished tasks, `yield_now` a
+few times, spawn one more, assert `len() == 1` (the RED is the helper that
+only spawns → `len() == 4`).
+
 ## Format BEFORE every commit, RED commits included
 
 The Lint job runs `cargo fmt --all -- --check` on the pushed HEAD, so a RED

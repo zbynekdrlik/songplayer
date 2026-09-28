@@ -59,9 +59,36 @@ fn test_obs_state_default() {
     assert!(!state.connected);
     assert!(state.current_scene.is_none());
     assert!(state.active_playlist_ids.is_empty());
+    assert!(state.lookup_failed.is_none(), "#218: no failed lookup");
     // #154: idle-gate signals default to "not busy".
     assert!(!state.streaming);
     assert!(!state.recording);
+    assert!(state.transition.is_none(), "#219: transition unknown");
+}
+
+#[test]
+fn a_disconnect_forgets_everything_of_cg_obs() {
+    // #219: every published field back to the default (disconnected)
+    // snapshot — the program follow reads a disconnect from exactly this.
+    let mut state = ObsState {
+        connected: true,
+        current_scene: Some("sp-fast".to_string()),
+        active_playlist_ids: std::collections::HashSet::from([7]),
+        lookup_failed: Some("sp-fast".to_string()),
+        streaming: true,
+        recording: true,
+        transition: Some(ObsTransition {
+            name: "Fade".to_string(),
+            kind: "fade_transition".to_string(),
+            duration_ms: Some(300),
+        }),
+    };
+    state.reset_disconnected();
+    assert_eq!(ObsSnapshot::of(&state), ObsSnapshot::default());
+    assert!(
+        !state.streaming && !state.recording,
+        "#154 idle-gate signals"
+    );
 }
 
 #[test]
@@ -279,4 +306,23 @@ async fn the_obs_config_reads_the_keys_the_dashboard_writes() {
     set(sp_core::config::SETTING_OBS_WEBSOCKET_PASSWORD, "s3cret").await;
     let cfg = load_obs_config(&pool).await.unwrap().unwrap();
     assert_eq!(cfg.password.as_deref(), Some("s3cret"));
+}
+
+/// Review round 4: a `JoinSet` keeps a finished task until it is joined, and
+/// the connection loop never joins — its ~2 s scene poll alone spawns ~43 000
+/// helper tasks a day. Every spawn first reaps the finished helpers.
+#[tokio::test]
+async fn spawning_a_helper_reaps_the_finished_ones() {
+    let mut tasks: JoinSet<()> = JoinSet::new();
+    for _ in 0..3 {
+        spawn_helper(&mut tasks, async {});
+    }
+    assert_eq!(tasks.len(), 3);
+    // Current-thread runtime: the three run to completion while this yields.
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    spawn_helper(&mut tasks, std::future::pending::<()>());
+    assert_eq!(tasks.len(), 1, "the three finished helpers were reaped");
+    tasks.abort_all();
 }

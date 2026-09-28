@@ -16,8 +16,10 @@
 //!   or asks again;
 //! - `Hold::OnProgram` — it is still the program's source, and the cut away
 //!   from it may be on its way: the follow task and the #213 remote control cut
-//!   only AFTER cg OBS switched, and cg OBS's scene event reaches the engine
-//!   first. Re-check once after [`CUT_SETTLE`];
+//!   only AFTER cg OBS switched, and cg OBS's scene event can reach the engine
+//!   before their cut (#219: the follow reads the OBS client's snapshot, so
+//!   either order happens; a cut that came first is a `Hold::Until`).
+//!   Re-check once after [`CUT_SETTLE`];
 //! - no hold — pause now, exactly as before. Every playlist that is not the
 //!   program's source takes this path.
 //!

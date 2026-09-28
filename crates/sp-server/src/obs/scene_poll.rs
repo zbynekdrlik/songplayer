@@ -8,34 +8,46 @@
 //! paused source — a dark wall in daily studio-mode operation. The connection
 //! loop polls `GetCurrentProgramScene` on a ~2 s cadence and reconciles a
 //! mismatch through the same path `CurrentProgramSceneChanged` feeds.
+//!
+//! #218: the same poll repairs a FAILED playlist lookup. When cg OBS still
+//! shows the stored scene but that scene's lookup failed
+//! (`ObsState::lookup_failed`), the poll looks it up again at once — the
+//! event already came, so there is no fade to wait for — on every tick
+//! until a lookup answers.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
 use crate::obs::scene::apply_scene_change;
+use crate::obs::snapshot::ObsShared;
 use crate::obs::text::get_current_scene_request;
-use crate::obs::{NdiSourceMap, ObsEvent, ObsState, SharedWrite};
+use crate::obs::{NdiSourceMap, ObsEvent, SharedWrite};
 
 /// One poll pass: read `GetCurrentProgramScene` over the existing WS and, when
 /// it differs from the last event-derived scene (a dropped
-/// `CurrentProgramSceneChanged`, #170), reconcile it through
-/// [`apply_scene_change`] — the exact path the event takes. Cheap and
+/// `CurrentProgramSceneChanged`, #170) or cg OBS still shows the stored scene
+/// whose playlist lookup failed (#218, `PollVerdict::Relookup`), apply it
+/// through [`apply_scene_change`] — the exact path the event takes. Cheap and
 /// best-effort: a closed/timed-out read is transient (the reconnect loop or the
 /// next tick handles it), so it is silently ignored rather than logged as an
 /// error.
-pub async fn reconcile_program_scene(
+pub(crate) async fn reconcile_program_scene(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
     ndi_sources: &NdiSourceMap,
-    state: &Arc<RwLock<ObsState>>,
+    obs: &ObsShared,
     event_tx: &broadcast::Sender<ObsEvent>,
     pending: &Mutex<Option<(String, Instant)>>,
 ) {
+    // The ticket is taken BEFORE cg OBS is asked (review round 2): an event
+    // read after this point outranks this read's apply, so a stale answer
+    // never rolls a newer event back (`ObsShared::scene_ticket`).
+    let ticket = obs.scene_ticket();
     let req_id = uuid::Uuid::new_v4().to_string();
     let req = get_current_scene_request(&req_id);
     let polled = match dispatcher
@@ -56,7 +68,10 @@ pub async fn reconcile_program_scene(
         return;
     };
 
-    let last = { state.read().await.current_scene.clone() };
+    let (last, failed) = {
+        let s = obs.state().read().await;
+        (s.current_scene.clone(), s.lookup_failed.clone())
+    };
     // The mismatch clock lives across ticks: `(polled scene, first seen)`.
     let verdict = {
         let mut guard = pending.lock().unwrap_or_else(|e| e.into_inner());
@@ -64,21 +79,35 @@ pub async fn reconcile_program_scene(
             .as_ref()
             .filter(|(scene, _)| scene == &polled)
             .map(|(_, since)| since.elapsed());
-        let verdict = scene_poll_verdict(last.as_deref(), &polled, elapsed, SCENE_POLL_CONFIRM);
+        let verdict = scene_poll_verdict(
+            last.as_deref(),
+            failed.as_deref(),
+            &polled,
+            elapsed,
+            SCENE_POLL_CONFIRM,
+        );
         *guard = match verdict {
             PollVerdict::Pending if elapsed.is_none() => Some((polled.clone(), Instant::now())),
             PollVerdict::Pending => guard.take(),
-            PollVerdict::InSync | PollVerdict::Reconcile(_) => None,
+            PollVerdict::InSync | PollVerdict::Reconcile(_) | PollVerdict::Relookup(_) => None,
         };
         verdict
     };
-    if let PollVerdict::Reconcile(scene) = verdict {
-        info!(
-            scene = %scene,
-            "obs: program scene changed without an event — reconciled by poll"
-        );
-        apply_scene_change(write, dispatcher, ndi_sources, state, event_tx, scene).await;
-    }
+    let scene = match verdict {
+        PollVerdict::Reconcile(scene) => {
+            info!(
+                scene = %scene,
+                "obs: program scene changed without an event — reconciled by poll"
+            );
+            scene
+        }
+        PollVerdict::Relookup(scene) => {
+            debug!(scene = %scene, "obs: looking up the program scene's playlists again");
+            scene
+        }
+        PollVerdict::InSync | PollVerdict::Pending => return,
+    };
+    apply_scene_change(write, dispatcher, ndi_sources, obs, event_tx, scene, ticket).await;
 }
 
 /// Decide whether a polled program scene reflects a change the event stream
@@ -112,18 +141,26 @@ pub enum PollVerdict {
     Pending,
     /// Mismatch persisted past the confirm window — reconcile to this scene.
     Reconcile(String),
+    /// #218: cg OBS still shows the stored scene, but its playlist lookup
+    /// failed — look it up again now.
+    Relookup(String),
 }
 
-/// Decide the poll's action from the last event-derived scene, the polled
-/// scene, how long THIS mismatch has been pending (`None` = first sighting) and
-/// the confirm window. Pure — unit-tested.
+/// Decide the poll's action from the last event-derived scene, the scene
+/// whose lookup failed (#218), the polled scene, how long THIS mismatch has
+/// been pending (`None` = first sighting) and the confirm window. Pure —
+/// unit-tested.
 pub fn scene_poll_verdict(
     last_event_scene: Option<&str>,
+    lookup_failed: Option<&str>,
     polled_scene: &str,
     pending_for: Option<Duration>,
     confirm: Duration,
 ) -> PollVerdict {
     match scene_poll_detects_change(last_event_scene, polled_scene) {
+        None if lookup_failed == Some(polled_scene) => {
+            PollVerdict::Relookup(polled_scene.to_string())
+        }
         None => PollVerdict::InSync,
         // A mismatch reconciles only once it has outlived the confirm window —
         // the event still has the whole fade to arrive on its own.
@@ -166,12 +203,14 @@ mod tests {
 
     // ---- confirm window (#170 round 4): the poll must not beat the event ----
 
+    const CONFIRM: Duration = Duration::from_secs(3);
+
     #[test]
     fn mismatch_first_sighting_is_pending() {
         // First tick that sees a mismatch: the transition just started; the
         // event fires at its END, so wait — never reconcile on first sight.
         assert_eq!(
-            scene_poll_verdict(Some("sp-slow"), "sp-fast", None, Duration::from_secs(3)),
+            scene_poll_verdict(Some("sp-slow"), None, "sp-fast", None, CONFIRM),
             PollVerdict::Pending
         );
     }
@@ -181,9 +220,10 @@ mod tests {
         assert_eq!(
             scene_poll_verdict(
                 Some("sp-slow"),
+                None,
                 "sp-fast",
                 Some(Duration::from_millis(1000)),
-                Duration::from_secs(3)
+                CONFIRM
             ),
             PollVerdict::Pending
         );
@@ -195,9 +235,10 @@ mod tests {
         assert_eq!(
             scene_poll_verdict(
                 Some("sp-slow"),
+                None,
                 "sp-fast",
                 Some(Duration::from_millis(3500)),
-                Duration::from_secs(3)
+                CONFIRM
             ),
             PollVerdict::Reconcile("sp-fast".to_string())
         );
@@ -208,9 +249,10 @@ mod tests {
         assert_eq!(
             scene_poll_verdict(
                 Some("sp-fast"),
+                None,
                 "sp-fast",
                 Some(Duration::from_secs(9)),
-                Duration::from_secs(3)
+                CONFIRM
             ),
             PollVerdict::InSync
         );
@@ -220,5 +262,55 @@ mod tests {
     fn confirm_window_outlasts_the_studio_fade() {
         // The box fade is 2000 ms; the event fires at its END.
         assert!(SCENE_POLL_CONFIRM >= Duration::from_millis(2500));
+    }
+
+    // ---- #218: a failed lookup of the scene on program is looked up again ----
+
+    #[test]
+    fn a_failed_lookup_of_the_scene_on_program_is_looked_up_again_at_once() {
+        // cg OBS still shows sp-fast, whose lookup failed: no confirm window
+        // (the event already came), first sighting or not.
+        assert_eq!(
+            scene_poll_verdict(Some("sp-fast"), Some("sp-fast"), "sp-fast", None, CONFIRM),
+            PollVerdict::Relookup("sp-fast".to_string())
+        );
+        assert_eq!(
+            scene_poll_verdict(
+                Some("sp-fast"),
+                Some("sp-fast"),
+                "sp-fast",
+                Some(Duration::from_secs(9)),
+                CONFIRM
+            ),
+            PollVerdict::Relookup("sp-fast".to_string())
+        );
+    }
+
+    #[test]
+    fn a_failed_lookup_of_a_scene_cg_obs_left_takes_the_mismatch_path() {
+        // cg OBS moved on from the failed sp-fast to sp-slow: the usual
+        // confirm window applies to sp-slow, whose event may still come.
+        assert_eq!(
+            scene_poll_verdict(Some("sp-fast"), Some("sp-fast"), "sp-slow", None, CONFIRM),
+            PollVerdict::Pending
+        );
+        assert_eq!(
+            scene_poll_verdict(
+                Some("sp-fast"),
+                Some("sp-fast"),
+                "sp-slow",
+                Some(Duration::from_millis(3500)),
+                CONFIRM
+            ),
+            PollVerdict::Reconcile("sp-slow".to_string())
+        );
+    }
+
+    #[test]
+    fn a_failed_lookup_naming_another_scene_does_not_relookup_the_one_in_sync() {
+        assert_eq!(
+            scene_poll_verdict(Some("sp-fast"), Some("sp-slow"), "sp-fast", None, CONFIRM),
+            PollVerdict::InSync
+        );
     }
 }

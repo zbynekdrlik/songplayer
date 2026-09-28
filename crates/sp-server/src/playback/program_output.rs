@@ -409,10 +409,16 @@ impl super::PlaybackEngine {
     /// Windows its grid thread on the engine's NDI SDK). #213: also start the
     /// Companion remote control's settings task (its listener cuts this bus and
     /// reaches cg OBS through the engine's OBS client). #215: also start the
-    /// OBS-follow task and keep the bus for the deferred scene-go-off pause.
+    /// OBS-follow task and keep the bus for the deferred scene-go-off pause;
+    /// #219: the follow consumes the OBS client's snapshots (`obs`).
     /// Call once, after the #196 startup senders.
     #[cfg_attr(test, mutants::skip)]
-    pub async fn start_program(&self, bus: Arc<ProgramBus>, shutdown: &broadcast::Sender<()>) {
+    pub async fn start_program(
+        &self,
+        bus: Arc<ProgramBus>,
+        shutdown: &broadcast::Sender<()>,
+        obs: tokio::sync::watch::Receiver<crate::obs::ObsSnapshot>,
+    ) {
         let _ = self.program.set(bus.clone()); // #215: the deferred scene-go-off pause
         let vban = bus.vban().clone();
         tokio::spawn(run_vban_config_task(
@@ -446,7 +452,7 @@ impl super::PlaybackEngine {
         let upstream =
             crate::remote::Upstream::new(self.obs_cmd_tx.clone(), self.obs_event_tx.clone());
         let follow = crate::playback::program_follow::Follow::new(self.pool.clone(), bus.clone());
-        crate::playback::program_follow::start_follow(follow, upstream.clone(), shutdown);
+        crate::playback::program_follow::start_follow(follow, obs, shutdown);
         crate::remote::start_remote(self.pool.clone(), bus.clone(), upstream, shutdown);
         tokio::spawn(async move {
             let _ = shutdown_rx.recv().await;

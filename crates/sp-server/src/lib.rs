@@ -29,7 +29,6 @@ pub mod stems;
 
 pub use panic_hook::install_panic_hook;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -103,9 +102,8 @@ pub struct ToolsStatus {
     pub deno_version: Option<String>,
 }
 
-use obs_bridge::run_obs_engine_bridge;
 #[cfg(test)]
-pub(crate) use obs_bridge::scene_change_commands;
+pub(crate) use obs_bridge::{run_obs_engine_bridge, scene_change_commands};
 
 // ---------------------------------------------------------------------------
 // Server configuration
@@ -633,50 +631,10 @@ pub async fn start(
         }
     });
 
-    // 7. OBS WebSocket client + OBS→engine bridge
-    //
-    // The bridge subscribes to obs_event_tx BEFORE the OBS client spawns.
-    // On a fast LAN the OBS client can connect, authenticate, rebuild the
-    // NDI source map, and broadcast the initial SceneChanged event in
-    // under 50 ms — fast enough to beat a subscription that happens after
-    // the spawn. Subscribing first guarantees the bridge never misses the
-    // initial scene detection, which is what triggers auto-play on startup.
-    let (obs_event_tx, _) = broadcast::channel::<obs::ObsEvent>(64);
-
-    // Bridge: subscribe BEFORE the OBS client spawns so the initial
-    // SceneChanged event is never lost to a subscription race.
-    {
-        let obs_event_rx = obs_event_tx.subscribe();
-        let bridge_engine_tx = engine_tx.clone();
-        let bridge_shutdown = shutdown_tx.subscribe();
-        tokio::spawn(run_obs_engine_bridge(
-            obs_event_rx,
-            bridge_engine_tx,
-            bridge_shutdown,
-        ));
-    }
-
-    let mut obs_cmd_tx: Option<tokio::sync::mpsc::Sender<obs::ObsCommand>> = None;
-    // #196: the OBS-input → playlist-id map, shared with the engine below so
-    // `handle_health_snapshot` can tell whether an OBS input advertises an
-    // output (item 5). `None` when OBS is not configured (never suppresses the
-    // dark-wall ladder in that case).
-    let mut ndi_sources_for_engine: Option<obs::NdiSourceMap> = None;
-    if let Some(obs_config) = obs::load_obs_config(&pool).await? {
-        let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
-        ndi_sources_for_engine = Some(ndi_sources.clone());
-        let obs_client = obs::ObsClient::spawn(
-            obs_config,
-            pool.clone(),
-            ndi_sources,
-            obs_state.clone(),
-            obs_event_tx.clone(),
-            obs_rebuild_tx.subscribe(),
-            shutdown_tx.subscribe(),
-        );
-        obs_cmd_tx = Some(obs_client.cmd_sender());
-        info!("OBS WebSocket client started");
-    }
+    // 7. OBS→engine bridge + OBS WebSocket client (bridge subscribed first;
+    // #219: the client's snapshots feed the program follow, `start_program`).
+    let obs_side =
+        obs_bridge::start_obs(&pool, &obs_state, &engine_tx, &obs_rebuild_tx, &shutdown_tx).await?;
 
     // 8. Reprocess worker (with Gemini provider if API key is configured)
     let mut reprocess_provider_list: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
@@ -717,8 +675,8 @@ pub async fn start(
     let mut engine = playback::PlaybackEngine::new(playback::PlaybackEngineConfig {
         pool: pool.clone(),
         cache_dir: config.cache_dir.clone(),
-        obs_event_tx,
-        obs_cmd_tx,
+        obs_event_tx: obs_side.event_tx,
+        obs_cmd_tx: obs_side.cmd_tx,
         resolume_tx: resolume_cmd_tx,
         ws_event_tx: event_tx.clone(),
         presenter_client,
@@ -745,7 +703,7 @@ pub async fn start(
     // #196: share the OBS-input → playlist-id map so the health handler can
     // tell whether an OBS input advertises an output (skip the ladder + set a
     // distinct reason when none does). Only when OBS is configured.
-    if let Some(map) = ndi_sources_for_engine {
+    if let Some(map) = obs_side.ndi_sources {
         engine.set_ndi_source_map(map);
     }
 
@@ -773,7 +731,9 @@ pub async fn start(
             state.ndi_health_registry.mark_senders_ready();
         }
     }
-    engine.start_program(program_bus, &shutdown_tx).await;
+    engine
+        .start_program(program_bus, &shutdown_tx, obs_side.snapshots)
+        .await;
 
     // Engine subscribes to the download worker's broadcast so that
     // `processed:<youtube_id>` events can rewake pipelines stuck in
