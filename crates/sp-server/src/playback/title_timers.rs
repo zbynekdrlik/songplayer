@@ -93,7 +93,16 @@ impl PlaybackEngine {
     /// after its `Started`. The timers and a `Resync` then never disagree
     /// between the Play and the new `Started`. Off program the playlist's
     /// title is not on the wall: nothing is sent.
-    pub(super) async fn resync_after_play(&self, _playlist_id: i64) {}
+    pub(super) async fn resync_after_play(&self, playlist_id: i64) {
+        let on_program = self
+            .pipelines
+            .get(&playlist_id)
+            .is_some_and(|pp| pp.scene_active.load(Ordering::Acquire));
+        if on_program {
+            let title = self.resync_wall_title().await;
+            debug!(playlist_id, ?title, "title re-synced on play");
+        }
+    }
 }
 
 impl super::PlaylistPipeline {

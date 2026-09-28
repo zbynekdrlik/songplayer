@@ -59,9 +59,9 @@ impl TitleClock {
     /// but `Started` does not say so: its title then hides early by the
     /// requested position (a known residual, as for a dashboard seek).
     pub fn new(video_id: i64, started_at: Instant, duration_ms: u64, start_ms: u64) -> Self {
-        let play_ms = duration_ms.saturating_sub(start_ms);
-        let hide_at = if play_ms > TITLE_SHOW_DELAY_MS + TITLE_HIDE_BEFORE_END_MS {
-            Some(started_at + Duration::from_millis(play_ms - TITLE_HIDE_BEFORE_END_MS))
+        let hide_at = if duration_ms > TITLE_SHOW_DELAY_MS + TITLE_HIDE_BEFORE_END_MS {
+            let until_hide = (duration_ms - TITLE_HIDE_BEFORE_END_MS).saturating_sub(start_ms);
+            Some(started_at + Duration::from_millis(until_hide))
         } else {
             None
         };
@@ -76,7 +76,7 @@ impl TitleClock {
     /// comes after its show point. A resume 5 s or less before the end has
     /// none: no title, and no timer is armed (`arm_title_timers`).
     pub fn shows(&self) -> bool {
-        self.hide_at.is_none_or(|hide_at| hide_at >= self.show_at)
+        self.hide_at.is_none_or(|hide_at| hide_at > self.show_at)
     }
 
     /// Whether the title is due at `now`: from `show_at`, before `hide_at`.
@@ -137,17 +137,10 @@ pub async fn push_title(
         return false;
     };
     let text = format_title_text(&song, &artist);
-    if let Some(cmd_tx) = obs_cmd_tx {
-        let _ = cmd_tx
-            .send(ObsCommand::SetTextSource {
-                source_name: OBS_TITLE_SOURCE.to_string(),
-                text,
-            })
-            .await;
-    }
     let _ = resolume_tx
         .send(ResolumeCommand::ShowTitle { song, artist })
         .await;
+    send_obs_title(obs_cmd_tx, text);
     true
 }
 
@@ -157,15 +150,8 @@ pub async fn push_hide(
     obs_cmd_tx: Option<&mpsc::Sender<ObsCommand>>,
     resolume_tx: &mpsc::Sender<ResolumeCommand>,
 ) {
-    if let Some(cmd_tx) = obs_cmd_tx {
-        let _ = cmd_tx
-            .send(ObsCommand::SetTextSource {
-                source_name: OBS_TITLE_SOURCE.to_string(),
-                text: String::new(),
-            })
-            .await;
-    }
     let _ = resolume_tx.send(ResolumeCommand::HideTitle).await;
+    send_obs_title(obs_cmd_tx, String::new());
 }
 
 /// The wall title of `video_id` (`format_title_text`): `None` when the

@@ -94,14 +94,14 @@ impl super::PlaybackEngine {
     /// Decide the wall's title (#217 addendum 3): the due title or none, and
     /// the instant it was decided at. `None` when the due song's title read
     /// failed: a transient error must not hide a title mid-song, so nothing
-    /// is sent (another candidate's failed read does not matter).
+    /// is sent. Another candidate's failed read is logged and does not matter.
     ///
-    /// The candidates' titles are read FIRST, the one await. The due title is
-    /// then decided at `Instant::now()`, and the callers send it with no await
-    /// in between. A timer that fired during the read is already past its
-    /// instant, so the Resync agrees with it. Deciding before the read let a
-    /// hide timer's HideTitle land ahead of a Resync that still named the
-    /// title, which superseded it (review round 2).
+    /// The candidates' titles are read FIRST, one await per candidate. The
+    /// due title is then decided at `Instant::now()`, and the callers send it
+    /// with no await in between. A timer that fired during the reads is
+    /// already past its instant, so the Resync agrees with it. Deciding before
+    /// the reads let a hide timer's HideTitle land ahead of a Resync that
+    /// still named the title, which superseded it (review round 2).
     pub(super) async fn decide_wall_title(&self) -> Option<(Option<String>, Instant)> {
         let candidates = self.title_candidates();
         let mut titles = Vec::with_capacity(candidates.len());
@@ -112,23 +112,27 @@ impl super::PlaybackEngine {
         let now = Instant::now();
         let due = due_title_video(&candidates, now);
         debug!(?candidates, ?due, "title window");
-        let title =
-            match due.and_then(|video_id| titles.into_iter().find(|(id, _)| *id == video_id)) {
-                None => None,
-                Some((_, Ok(text))) => text,
-                Some((video_id, Err(e))) => {
+        let mut title = None;
+        for (video_id, text) in titles {
+            match text {
+                Ok(text) if due == Some(video_id) => title = text,
+                Ok(_) => {}
+                Err(e) if due == Some(video_id) => {
                     warn!(video_id, %e, "title resync: DB lookup failed — nothing sent");
                     return None;
                 }
-            };
+                Err(e) => warn!(video_id, %e, "title read failed — its title is not due"),
+            }
+        }
         Some((title, now))
     }
 
     /// Declare the wall's title to the Resolume driver (a `Resync`): the due
     /// title, or none. The driver acts only on a difference, so this is
     /// idempotent: it never re-runs a fade for a title that is up. Used by a
-    /// Resolume recovery; the OBS scene-on also re-arms the song's timers at
-    /// the decision instant (`push_title_for_playing`).
+    /// Resolume recovery and after a Play (`resync_after_play`). The OBS
+    /// scene-on calls `decide_wall_title` itself: it also re-arms the song's
+    /// timers at the decision instant (`push_title_for_playing`).
     pub(super) async fn resync_wall_title(&self) -> Option<String> {
         let (title, _) = self.decide_wall_title().await?;
         title::send_resync(self.obs_cmd_tx.as_ref(), &self.resolume_tx, title.clone()).await;
