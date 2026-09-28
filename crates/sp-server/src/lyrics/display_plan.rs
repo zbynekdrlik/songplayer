@@ -31,8 +31,9 @@
 //!    display line has been sung to its end [`SUSTAIN_MARGIN_MS`] ago:
 //!    `show = min(max(start − LEAD_MAX_MS, prev_end + SUSTAIN_MARGIN_MS),
 //!    start)`. It then waits until the previous line has been up for
-//!    [`MIN_VISIBLE_MS`] (`show ≥ prev_show + MIN_VISIBLE_MS`), so a line
-//!    sung sooner than that after the previous one shows a little late.
+//!    [`MIN_VISIBLE_MS`] (`show ≥ prev_show + MIN_VISIBLE_MS`), but never
+//!    more than [`MAX_LATE_MS`] past its sung start. So a line sung sooner
+//!    than that after the previous one shows a little late, at most 400 ms.
 //!    A `Speech` line shows exactly when it is spoken.
 //! 3. **Hold.** A line stays on the wall until the next line shows. Before an
 //!    instrumental break (a gap over [`LONG_GAP_MS`]) and after the last line,
@@ -60,7 +61,8 @@ pub const LEAD_MAX_MS: u64 = 800;
 pub const SUSTAIN_MARGIN_MS: u64 = 1_500;
 
 /// The shortest time a `Song` line stays on the wall (no blinking). The next
-/// line waits for it, even past its own sung start.
+/// line waits for it, even past its own sung start, but at most
+/// [`MAX_LATE_MS`].
 pub const MIN_VISIBLE_MS: u64 = 1_200;
 
 /// The most the [`MIN_VISIBLE_MS`] floor may hold a `Song` line back past its
@@ -99,7 +101,8 @@ const CLOSERS: [char; 10] = ['"', '\'', '”', '’', '“', '‘', '»', '«', 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayProfile {
     /// Sung lyrics: a line may appear up to [`LEAD_MAX_MS`] before it is
-    /// sung, into a pause, and stays up at least [`MIN_VISIBLE_MS`].
+    /// sung, into a pause, and stays up at least [`MIN_VISIBLE_MS`] unless
+    /// that would hold the next line over [`MAX_LATE_MS`] behind its singing.
     Song,
     /// Dub subtitles of speech (`gemini-live-translate`): each line appears
     /// exactly when it is spoken. Grouping and hold apply as for songs.
@@ -130,7 +133,7 @@ impl DisplayProfile {
             (Self::Song, Some((prev_show, prev_end))) => early
                 .max(prev_end + SUSTAIN_MARGIN_MS)
                 .min(start_ms)
-                .max(prev_show + MIN_VISIBLE_MS),
+                .max((prev_show + MIN_VISIBLE_MS).min(start_ms + MAX_LATE_MS)),
         }
     }
 }
