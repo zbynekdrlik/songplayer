@@ -271,6 +271,53 @@ async fn a_transition_to_the_scene_on_air_always_switches() {
 }
 
 #[tokio::test]
+async fn a_transition_to_obs_manual_recuts_the_input_and_asks_cg_obs_nothing() {
+    let rig = rig().await;
+    enable_input(&rig.pool, true).await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    // "OBS manuál" restored at startup: no cg OBS scene is known for it.
+    rig.bus.select_initial(-1, None);
+    let d = request(&mut ws, "GetCurrentPreviewScene", None).await;
+    assert_eq!(d["responseData"]["sceneName"], "OBS manuál");
+    // A transition with no preview re-cuts the input itself.
+    let d = request(&mut ws, "TriggerStudioModeTransition", None).await;
+    assert_eq!(d["requestStatus"], json!({ "result": true, "code": 100 }));
+    assert_eq!(rig.bus.status().source, Some(-1));
+    let on_air = rig.bus.on_air_now();
+    assert_eq!(
+        (on_air.seq, on_air.scene.as_deref()),
+        (2, None),
+        "published again, still with no cg OBS scene"
+    );
+    assert!(
+        rig.calls().is_empty(),
+        "no scene to send to cg OBS: {:?}",
+        rig.calls()
+    );
+    let cut = last_cut_json(&rig);
+    assert_eq!(
+        (
+            cut["action"].as_str(),
+            cut["source"].as_i64(),
+            cut["via"].as_str()
+        ),
+        (Some("input"), Some(-1), Some("transition"))
+    );
+    assert_eq!(cut["cg_forward"], Value::Null);
+    // With the input off, "OBS manuál" is not a source: kept.
+    enable_input(&rig.pool, false).await;
+    let d = press(&mut ws, "OBS manuál").await;
+    assert_eq!(d["requestStatus"]["code"], 100);
+    let cut = last_cut_json(&rig);
+    assert_eq!(
+        (cut["action"].as_str(), cut["reason"].as_str()),
+        (Some("keep"), Some("input_inactive"))
+    );
+    assert!(rig.calls().is_empty(), "{:?}", rig.calls());
+}
+
+#[tokio::test]
 async fn a_playlist_press_cuts_even_when_cg_obs_is_unreachable() {
     let rig = rig_with(None, false).await;
     let mut ws = connect(rig.addr).await;

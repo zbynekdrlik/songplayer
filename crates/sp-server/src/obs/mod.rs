@@ -555,6 +555,11 @@ async fn connect_and_run(
             transition_wake,
         ),
     );
+    // #221: the remote-control facade's calls go out in queue order through
+    // ONE forwarder (a mirrored press never overtakes a later one).
+    let (remote_tx, remote_rx) = mpsc::unbounded_channel();
+    let forwarder = remote_call::run_calls(Arc::clone(&write), dispatcher.clone(), remote_rx);
+    spawn_helper(&mut spawned_tasks, forwarder);
 
     // Step 5: initial NDI source map rebuild (same retry-on-empty
     // policy as before — the rebuild now goes via the dispatcher).
@@ -757,10 +762,11 @@ async fn connect_and_run(
                         });
                     }
                     ObsCommand::Remote(call) => {
-                        // #213: forwarded for the remote-control facade.
-                        let write = std::sync::Arc::clone(&write);
-                        let dispatcher = dispatcher.clone();
-                        spawn_helper(&mut spawned_tasks, remote_call::run(write, dispatcher, call));
+                        // #213: forwarded for the remote-control facade, in
+                        // queue order by this connection's forwarder (#221).
+                        if remote_tx.send(call).is_err() {
+                            warn!("remote: the forwarder of this OBS connection is gone — call dropped");
+                        }
                     }
                 }
             }

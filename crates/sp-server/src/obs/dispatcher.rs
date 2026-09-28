@@ -86,22 +86,47 @@ impl Dispatcher {
         msg: tokio_tungstenite::tungstenite::Message,
         timeout_dur: Duration,
     ) -> Result<Value, DispatcherError> {
+        let rx = self.send(write, req_id.clone(), msg).await?;
+        self.wait(&req_id, rx, timeout_dur).await
+    }
+
+    /// The first half of [`Self::send_and_await`]: register a waiter for
+    /// `req_id`, then write `msg` (the write lock is released on return). A
+    /// write error cancels the registration. #221: a caller that must keep
+    /// its frames in order (`remote_call::run_calls`) writes with this and
+    /// waits with [`Self::wait`] off its own path.
+    pub async fn send(
+        &self,
+        write: &crate::obs::SharedWrite,
+        req_id: String,
+        msg: tokio_tungstenite::tungstenite::Message,
+    ) -> Result<oneshot::Receiver<Value>, DispatcherError> {
         use futures::SinkExt;
 
         let rx = self.register(req_id.clone());
-        {
-            let mut w = write.lock().await;
-            if w.send(msg).await.is_err() {
-                drop(w);
-                self.cancel(&req_id);
-                return Err(DispatcherError::Closed);
-            }
+        let mut w = write.lock().await;
+        if w.send(msg).await.is_err() {
+            drop(w);
+            self.cancel(&req_id);
+            return Err(DispatcherError::Closed);
         }
+        Ok(rx)
+    }
+
+    /// The second half of [`Self::send_and_await`]: await the op=7 answer
+    /// for `req_id` at most `timeout_dur`; a timeout cancels the
+    /// registration.
+    pub async fn wait(
+        &self,
+        req_id: &str,
+        rx: oneshot::Receiver<Value>,
+        timeout_dur: Duration,
+    ) -> Result<Value, DispatcherError> {
         match timeout(timeout_dur, rx).await {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(_)) => Err(DispatcherError::Closed),
             Err(_) => {
-                self.cancel(&req_id);
+                self.cancel(req_id);
                 Err(DispatcherError::Timeout)
             }
         }

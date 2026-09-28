@@ -377,6 +377,9 @@ fn only_the_scene_events_pass_through_on_the_scenes_intent() {
     assert_eq!(passthrough_intent("CurrentPreviewSceneChanged"), None);
     assert_eq!(passthrough_intent("StreamStateChanged"), None);
     assert_eq!(passthrough_intent(""), None);
+    // #221: never cg OBS's studio-mode event — Companion would cache studio
+    // mode OFF and every page-13 button would go silently dead.
+    assert_eq!(passthrough_intent("StudioModeStateChanged"), None);
 }
 
 #[test]
