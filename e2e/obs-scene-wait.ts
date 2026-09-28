@@ -65,8 +65,8 @@ export async function waitForSceneSwitchApplied(
       throw new Error(
         `OBS scene switch to "${target}" did not settle within ${timeoutMs}ms ` +
           `(last program "${current}", transitionActive=${isTransitionActive()}). ` +
-          `On win-resolume OBS runs Studio Mode with a 2000ms Fade — the switch ` +
-          `must reach the target AND the transition must end; a dropped/stuck ` +
+          `The switch must reach the target AND the transition must end ` +
+          `(SongPlayer's facade: SP-program's transition; #221 L3); a dropped/stuck ` +
           `transition or a missing scene surfaces here instead of as a ` +
           `mysterious downstream failure. (#170)`,
       );

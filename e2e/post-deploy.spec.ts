@@ -192,14 +192,14 @@ test.describe("SongPlayer post-deploy feature verification", () => {
         initialScene ?? pickBaselineScene(await driver.listScenes());
       const ctx = await apiRequest.newContext({ baseURL: SONGPLAYER_URL });
       try {
-        // Restore (afterEach may already have — switchScene no-ops if program
-        // is already on target) and PROVE the ENGINE ended on the start scene.
+        // Restore (afterEach may already have; #221 L3: a press of the scene
+        // already on program is the facade's re-kick, which re-mirrors cg
+        // OBS) and PROVE the ENGINE ended on the start scene.
         // The generous wait is the honest resilience: it covers the driver's
         // own transition wait PLUS the ~2 s engine poll-reconcile (part C)
         // catching a dropped event. An active_scene that never converges fails
-        // loudly with the scene names — a retry of the SWITCH would be a no-op
-        // here (program is already target), so the wait, not a re-drive, is
-        // what tolerates a lagging engine.
+        // loudly with the scene names — the wait, not a re-drive, is what
+        // tolerates a lagging engine.
         await driver.switchScene(target);
         const engineScene = await waitEngineActiveScene(ctx, target, 8000);
         expect(
@@ -500,7 +500,14 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // transition to sp-fast, not a no-op.
     const baselineScene = pickBaselineScene(scenes);
     await obs!.switchScene(baselineScene);
-    await new Promise((r) => setTimeout(r, 500));
+    // #221 L3 (review round 2): the driver returns on the facade's own
+    // transition end, while the engine's active_scene (cg OBS's scene
+    // detection until L4b) follows the mirror to cg OBS a moment later, so a
+    // single read here would race it. Wait for the engine first.
+    expect(
+      await waitEngineActiveScene(request, baselineScene, 8000),
+      `the engine's active_scene must reach the baseline scene "${baselineScene}"`,
+    ).toBe(baselineScene);
 
     // Verify baseline: ytfast should NOT be in active_playlist_ids
     // while the non-fast baseline scene is on program. This kills any
