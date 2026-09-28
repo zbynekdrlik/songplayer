@@ -128,7 +128,12 @@ impl PlaybackEngine {
                 // Throttled NowPlaying rebroadcast for the dashboard progress
                 // bar. Title hide is timer-based (spawned in the Started
                 // handler above) so no position-driven hide work happens here.
-                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                // A report before the new song's `Started` (a Play clears the
+                // clock) is the OLD song's: `Position` names no video, and it
+                // must not move the new song's pause point (review round 4).
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id)
+                    && pp.title_clock.is_some()
+                {
                     pp.cached_position_ms = *position_ms;
                 }
                 self.dispatch_lyrics_if_changed(playlist_id, *position_ms);
