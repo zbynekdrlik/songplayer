@@ -322,7 +322,7 @@ fn a_new_source_whose_first_frame_after_the_cut_is_slow_is_waited_for() {
     // the sender checks the cut boundary b(7) before B's first post-cut frame
     // is in: b(7) waits for B's frame instead of going black.
     let bus = ProgramBus::new();
-    bus.select_initial(SRC_A);
+    bus.select_initial(SRC_A, None);
     let (fa, fb) = (frame(4, 2), frame(8, 2));
     for k in 1..=6 {
         let now = b(k) + 5 * MS;
@@ -335,7 +335,7 @@ fn a_new_source_whose_first_frame_after_the_cut_is_slow_is_waited_for() {
             assert!(program_copy(&bus, SRC_B, &bj).is_none(), "B is off program");
         }
         if k == 5 {
-            bus.cut(SRC_B, now); // cut boundary b(7)
+            bus.cut(SRC_B, now, None); // cut boundary b(7)
         }
     }
     // B's b(6) submit is slow: the sender's b(7) check comes first.
@@ -681,7 +681,7 @@ fn the_bus_wakes_the_sender_and_stops_after_draining() {
     let bus = ProgramBus::new();
     assert!(matches!(bus.take_timeout(Duration::ZERO), Take::Idle));
     assert!(!bus.is_candidate(SRC_A));
-    bus.select_initial(SRC_A);
+    bus.select_initial(SRC_A, None);
     assert!(bus.is_candidate(SRC_A));
     let fa = frame(4, 2);
     let src = job(4, &fa, b(1), 0.1);
@@ -705,7 +705,7 @@ fn the_bus_wakes_the_sender_and_stops_after_draining() {
     assert!(matches!(bus.take_timeout(Duration::ZERO), Take::Stopped));
     bus.record_submitted(b(2));
     bus.set_connections(3);
-    let st = bus.cut(SRC_B, b(3));
+    let st = bus.cut(SRC_B, b(3), None);
     assert_eq!(st.source, Some(SRC_B));
     assert_eq!(st.health.connections, 3);
     assert_eq!(st.health.submitted, 1);
@@ -716,7 +716,7 @@ fn the_bus_wakes_the_sender_and_stops_after_draining() {
 #[test]
 fn a_waiting_sender_wakes_on_a_queued_boundary_and_on_stop() {
     let bus = Arc::new(ProgramBus::new());
-    bus.select_initial(SRC_A);
+    bus.select_initial(SRC_A, None);
     let long = Duration::from_secs(20);
     let waiter = {
         let bus = bus.clone();
@@ -806,8 +806,11 @@ async fn persist_and_cut_persists_then_cuts_one_cut_at_a_time() {
     crate::db::run_migrations(&pool).await.unwrap();
     let bus = ProgramBus::new();
     let held = bus.cut_serial.lock().await;
-    let blocked =
-        tokio::time::timeout(Duration::from_millis(50), persist_and_cut(&pool, &bus, 5)).await;
+    let blocked = tokio::time::timeout(
+        Duration::from_millis(50),
+        persist_and_cut(&pool, &bus, 5, None),
+    )
+    .await;
     assert!(blocked.is_err(), "a cut ran while another held the lock");
     assert_eq!(
         crate::db::models::get_setting(&pool, SETTING_PROGRAM_SOURCE)
@@ -817,7 +820,7 @@ async fn persist_and_cut_persists_then_cuts_one_cut_at_a_time() {
         "nothing is persisted while another cut runs"
     );
     drop(held);
-    let status = persist_and_cut(&pool, &bus, 5).await.unwrap();
+    let status = persist_and_cut(&pool, &bus, 5, None).await.unwrap();
     assert_eq!(status.source, Some(5));
     assert_eq!(bus.status().source, Some(5));
     assert_eq!(

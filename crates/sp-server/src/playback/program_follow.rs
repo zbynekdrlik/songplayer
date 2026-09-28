@@ -221,7 +221,7 @@ impl Follow {
         let mut cut_boundary_100ns = None;
         match action.source() {
             Some(source) if self.bus.status().source != Some(source) => {
-                match persist_and_cut(&self.pool, &self.bus, source).await {
+                match persist_and_cut(&self.pool, &self.bus, source, Some(scene)).await {
                     Ok(status) => {
                         cut_boundary_100ns = status.cut_boundary_100ns;
                         info!(

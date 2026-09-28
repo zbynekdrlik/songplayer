@@ -122,7 +122,7 @@ fn paused_at(engine: &PlaybackEngine, pid: i64) -> Option<(i64, u64)> {
 /// handed to the engine the way `start_program` does.
 fn program(engine: &PlaybackEngine, on_program: i64) -> Arc<ProgramBus> {
     let bus = Arc::new(ProgramBus::new());
-    bus.select_initial(on_program);
+    bus.select_initial(on_program, None);
     assert!(bus.set_transition(TransitionSpec::fade(300, SpecSource::Obs)));
     assert!(engine.program.set(bus.clone()).is_ok());
     bus
@@ -162,7 +162,7 @@ async fn the_outgoing_playlist_plays_through_its_window_and_pauses_once_it_is_ov
     // The cut lands on b(7). IN has sent no live pair yet, so the fade may
     // wait up to 15 boundaries (the #215 cue gate) and end as late as b(31):
     // OUT is held until b(32).
-    bus.cut(IN, b(5));
+    bus.cut(IN, b(5), None);
     assert_eq!(bus.hold_for(OUT), Some(Hold::Until(b(32))));
     engine.set_scene_active_for_test(OUT, false); // cg OBS switched away
 
@@ -219,7 +219,7 @@ async fn the_on_program_playlist_settles_once_for_the_cut_that_follows_cg_obs() 
     engine.set_scene_active_for_test(OUT, false);
     engine.scene_off_step(OUT, false, b(5)).await;
     next_scene_off_due(&mut engine, OUT).await;
-    bus.cut(IN, b(5)); // the cue may wait: held until b(32)
+    bus.cut(IN, b(5), None); // the cue may wait: held until b(32)
     let started = Instant::now();
     engine.scene_off_recheck(OUT, b(32) - 50 * MS).await;
     assert_eq!(state(&engine, OUT), PLAYING, "now held through the window");
@@ -258,7 +258,7 @@ async fn a_scene_off_on_the_live_clock_goes_through_the_hold() {
     let mut engine = rig().await;
     playing(&mut engine, OUT);
     let bus = program(&engine, OUT);
-    let status = bus.cut(IN, utc_now_100ns() + 60 * 10_000_000);
+    let status = bus.cut(IN, utc_now_100ns() + 60 * 10_000_000, None);
     assert!(status.cut_boundary_100ns.is_some());
     engine.handle_scene_change(OUT, false).await;
     assert_eq!(state(&engine, OUT), PLAYING, "held through the window");

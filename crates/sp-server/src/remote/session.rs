@@ -357,33 +357,35 @@ async fn set_program_scene(facade: &Facade, data: Option<Value>) -> Reply {
             warn!(scene = %cut.scene, reason = ?cut.reason, "remote: SP-program unchanged");
             reply
         }
-        Some(source) => match persist_and_cut(&facade.pool, &facade.bus, source).await {
-            Ok(status) => {
-                info!(
-                    scene = %cut.scene,
-                    source,
-                    cut_boundary_100ns = ?status.cut_boundary_100ns,
-                    "remote: program cut"
-                );
-                cut.cut_boundary_100ns = status.cut_boundary_100ns;
-                reply
+        Some(source) => {
+            match persist_and_cut(&facade.pool, &facade.bus, source, Some(scene.as_str())).await {
+                Ok(status) => {
+                    info!(
+                        scene = %cut.scene,
+                        source,
+                        cut_boundary_100ns = ?status.cut_boundary_100ns,
+                        "remote: program cut"
+                    );
+                    cut.cut_boundary_100ns = status.cut_boundary_100ns;
+                    reply
+                }
+                Err(e) => {
+                    warn!(
+                        scene = %cut.scene,
+                        source,
+                        %e,
+                        "remote: persisting the program source failed — nothing cut"
+                    );
+                    cut.action = "keep";
+                    cut.source = None;
+                    cut.reason = Some("persist_failed");
+                    Reply::error(
+                        STATUS_GENERIC_ERROR,
+                        &format!("cg OBS switched, but SP-program was not cut: {e}"),
+                    )
+                }
             }
-            Err(e) => {
-                warn!(
-                    scene = %cut.scene,
-                    source,
-                    %e,
-                    "remote: persisting the program source failed — nothing cut"
-                );
-                cut.action = "keep";
-                cut.source = None;
-                cut.reason = Some("persist_failed");
-                Reply::error(
-                    STATUS_GENERIC_ERROR,
-                    &format!("cg OBS switched, but SP-program was not cut: {e}"),
-                )
-            }
-        },
+        }
     };
     facade.shared().record_cut(cut);
     reply

@@ -532,11 +532,11 @@ fn hold_for_keeps_the_outgoing_source_until_one_slot_after_its_window() {
 
     // The same through the thread-safe bus.
     let bus = ProgramBus::new();
-    bus.select_initial(SRC_A);
+    bus.select_initial(SRC_A, None);
     assert_eq!(bus.hold_for(SRC_A), Some(Hold::OnProgram));
     assert!(bus.set_transition(fade_300()));
     assert!(!bus.set_transition(fade_300()), "the same spec again");
-    let st = bus.cut(SRC_B, b(5));
+    let st = bus.cut(SRC_B, b(5), None);
     assert_eq!(st.cut_boundary_100ns, Some(b(7)));
     assert_eq!(
         (

@@ -44,10 +44,12 @@ pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
 pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
 pub mod program_follow; // #215: SP-program follows cg OBS + the transition settings/spec task
+pub mod program_on_air; // #221: what is on air (the bus's watch value) + the one scene-name resolver
 pub mod program_output; // #209: the SP-program sender + its thread
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
 pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns
 mod runtime_pipeline;
+pub mod scene_catalog; // #221: which scene is a playlist's, from its NDI output name (no cg OBS lookup)
 mod scene_off; // #215: the deferred scene-go-off pause of the program's outgoing source
 pub mod startup_senders; // #196 deterministic restart-safe NDI sender startup (pure port-wait + order)
 pub mod state;

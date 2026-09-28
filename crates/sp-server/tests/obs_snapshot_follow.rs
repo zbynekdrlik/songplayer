@@ -293,7 +293,7 @@ async fn the_follow_ignores_a_failed_lookup_and_follows_its_repair() {
     // cg OBS shows sp-fast: the program follows it.
     source_becomes(7).await;
     // The operator takes the program elsewhere by hand.
-    persist_and_cut(&rig.pool, &bus, 9).await.unwrap();
+    persist_and_cut(&rig.pool, &bus, 9, None).await.unwrap();
     // cg OBS switches to sp-slow and that scene's lookup gets no answer.
     rig.fake
         .update_state(|s| {

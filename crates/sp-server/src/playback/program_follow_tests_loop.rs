@@ -27,7 +27,7 @@ async fn follow_loop(pool: &SqlitePool) -> (FollowLoop, Arc<ProgramBus>) {
 
 /// The operator cuts `SP-program` to `source` by hand (the dashboard's path).
 async fn manual_cut(pool: &SqlitePool, bus: &ProgramBus, source: i64) {
-    persist_and_cut(pool, bus, source).await.unwrap();
+    persist_and_cut(pool, bus, source, None).await.unwrap();
 }
 
 #[tokio::test]
