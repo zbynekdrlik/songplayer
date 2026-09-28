@@ -85,7 +85,8 @@ one only together with the design record on #217.
 1. **Sentences** (`group_lines`, `close_to_fit`).
    - Consecutive source lines form one display line until a line **ends a
      sentence**: its text ends in `. ! ? …`, read past closing quotes and
-     brackets (`" ' ” ’ » ) ]`).
+     brackets (`" ' ” ’ “ » « ) ]`; `“` and `«` close the Slovak „…“ and
+     »…«).
    - A line's text is its EN, or its SK when the EN is empty (dub lines).
      SK is not checked against `MAX_CHARS`: a translation must not re-split
      a sentence the EN keeps whole.
@@ -121,11 +122,15 @@ one only together with the design record on #217.
 - **The MIN_VISIBLE floor after the cap can fall behind in a fast run of
   separate sentences.** Each sentence sung under 1200 ms after the previous
   one shows `1200 − gap` ms later than the one before, and it adds up. For
-  example, 1 s apart → 0, 0, +200, +400 ms (pinned by
+  example, four sentences 1 s apart show −800 (the first line's lead), 0,
+  +200 and +400 ms from their sung starts (pinned by
   `in_a_fast_run_of_short_sentences_each_keeps_1200_ms`).
   - Not on the three fixtures. The worst is 100 ms: What A God's doubled
     0.3 s "What a God, what a God.", whose text is the same.
-  - A chant with a sentence mark on every short line would drift.
+  - A chant with a sentence mark on every short line drifts. Eight "Hey!"
+    lines 400 ms apart put the next sentence 4.8 s late. Before a break
+    over 8 s, the last "Hey!" gets `show > hide` and is never shown. This is
+    raised on #217 as a design question (bound the floor's delay).
   - The cap-first order never lags, but gives What A God an 1100 ms display.
   - Changing the order is a design-record change on #217.
 - **Test tracks need sentence marks.** Unpunctuated lines within 6.5 s and 72
@@ -180,3 +185,13 @@ one only together with the design record on #217.
   When the algorithm changes on purpose, re-derive the pins with a reference
   model that mirrors `build_plan` step by step. The Tier-0 box cannot run the
   tests.
+- **The design record's simulation counts (56/49/122 display lines) are not
+  the pins (59/51/123).** That draft simulation differed from the record's
+  rules in several ways:
+  - it used LEAD 1000 / SUSTAIN 1200;
+  - it had no span cap;
+  - it checked the 72 chars only AFTER a sentence end had closed the line,
+    so a sentence-ending line could overflow;
+  - it dropped EN-less lines.
+
+  The code follows the record's text.
