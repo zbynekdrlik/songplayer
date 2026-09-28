@@ -488,6 +488,19 @@ follow are the later lanes (L4a–L6) of #221.
   playlist on `SP-program` paused (`cg_forward` says so).
 - Hand switches in cg OBS's own UI are invisible to the facade (no cg
   tracking, by the owner's ruling): the next press decides.
+- **The post-deploy E2E restore when SP-program is "OBS manuál" with NO
+  scene** (L3, found in the lane, for the main session). A SongPlayer
+  restart restores a persisted -1 without a scene (`scene_of_source` has
+  none for the input), so after a deploy while an operator's manual scene
+  was on, the facade names the program "OBS manuál". The E2E then captures
+  that as its initial scene; its restore presses "OBS manuál" (a keep, no
+  transition event, while the input is off — the box had it off on 28.9),
+  the driver's transition wait times out, and `post-deploy.spec.ts`'s
+  `afterAll` engine check (`active_scene`, cg OBS's scene until L4b) sees
+  cg OBS's scene instead. Not hit while a playlist is on program (the box:
+  source 7). The cutover (input on) and L4b (`active_scene` = the resolver)
+  remove the mismatch; reading cg OBS for the initial scene would contradict
+  the dispatch (the cg driver is for the recording only).
 
 ## Box acceptance (the supervisor's job)
 
