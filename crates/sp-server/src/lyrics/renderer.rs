@@ -7,8 +7,8 @@ use crate::lyrics::display_plan::{DisplayPlan, DisplayProfile};
 /// override per-installation via `PATCH /api/v1/settings {"lyrics_lead_ms":
 /// "500"}` if stage-display / LED-wall sync needs adjustment. When absent or
 /// unparseable, it defaults to 0, meaning no EXTRA lead. The #217 display plan
-/// already shows each wall line up to `display_plan::LEAD_MS` (1.5 s) before
-/// it is sung; this setting shifts the whole plan on top of that.
+/// already shows a wall line up to `display_plan::LEAD_MAX_MS` (0.8 s) before
+/// it is sung, into a pause; this setting shifts the whole plan on top of that.
 pub const LYRICS_LEAD_SETTING_KEY: &str = "lyrics_lead_ms";
 
 /// Strip trailing punctuation (`,;:.!?…`) from a single display line. Stage
@@ -43,11 +43,12 @@ fn append_reference_star(s: String, is_reference: bool) -> String {
 /// [`ServerMsg::LyricsUpdate`] messages for the dashboard WebSocket.
 pub struct LyricsState {
     track: LyricsTrack,
-    /// What the LED wall and the Presenter show (#217): merged fragments,
+    /// What the LED wall and the Presenter show (#217): whole sentences,
     /// each held until the next line and shown per the track's
-    /// `DisplayProfile`. A song leads by up to `LEAD_MS` once the previous
-    /// line is sung; speech has no lead. Built once per loaded track. The
-    /// dashboard path (`update`) keeps the raw `track` and its word timing.
+    /// `DisplayProfile`. A song leads by up to `LEAD_MAX_MS` only into a
+    /// pause after the previous line; speech has no lead. Built once per
+    /// loaded track. The dashboard path (`update`) keeps the raw `track` and
+    /// its word timing.
     plan: DisplayPlan,
     /// Operator lead time (ms) shifted into every stage-display / LED-wall
     /// lookup, on top of the plan's own lead.

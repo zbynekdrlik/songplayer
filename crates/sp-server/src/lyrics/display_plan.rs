@@ -1,42 +1,42 @@
 //! The LED-wall / Presenter display plan of one lyrics track (#217).
 //!
 //! The stored lyrics lines are sung-timing units. The base tier
-//! (`gemini-3-5-transcribe`) in particular splits verses into short,
-//! mid-sentence fragments. Showing them one by one at their sung times made the
-//! wall blink: a fragment flashed for 0.2–1.5 s, and the wall went dark in every
-//! gap. On "What A God" (`6KuPjo1diLg`) that was 310 s dark out of 633 s.
+//! (`gemini-3-5-transcribe`) in particular splits verses into short
+//! punctuated phrases: "Now his will be", "done.", "Lift up your", …
+//! Shown one by one at their sung times, the wall blinked and went dark in
+//! every gap. Merged by length, they ran across sentence ends ("done. Lift up
+//! your banners…"), so the wall switched to the next sentence while the
+//! singers were still finishing the last one (owner, 28.9.2026).
 //!
 //! [`build_plan`] turns the lines into what the wall shows, once per loaded
-//! track, and never touches the stored JSON or the lyrics pipeline:
+//! track, and never touches the stored JSON or the lyrics pipeline
+//! (design record 5867952012):
 //!
-//! 1. **Merge.** A fragment is a line sung for less than [`FRAGMENT_MAX_MS`],
-//!    one with at most [`FRAGMENT_MAX_WORDS`] words, or one whose next line
-//!    starts lowercase (a continuation). A fragment merges with its following
-//!    line when the gap is at most [`MERGE_MAX_GAP_MS`] and the joined English
-//!    text and the joined Slovak text each fit in [`MERGE_MAX_CHARS`] chars. If
-//!    it cannot merge forward, it merges backward under the same limits. The
-//!    Slovak text is joined the same way as the English. Merging repeats until
-//!    no rule applies.
-//! 2. **Lead.** A line shows at `max(start - lead, prev.sung_end,
-//!    prev.show + MIN_VISIBLE_MS)`, but never after it is sung (`<= start`).
-//!    `lead` is the profile's [`DisplayProfile::lead_ms`]: [`LEAD_MS`] for a
-//!    song, 0 for speech.
-//!    It appears early only once the previous line has been sung to its end
-//!    (ROZHODNUTÉ on #217). When the previous lines leave no room, it shows
-//!    exactly when it is sung. So a line never leaves the wall while it is
-//!    still sung, unless the source lines themselves overlap.
+//! 1. **Sentences.** Consecutive source lines form one display line until a
+//!    line ends a sentence: its text ends in `. ! ? …`, optionally followed by
+//!    closing quotes or brackets. A line's text is its English, or its Slovak
+//!    when it has none (a dub subtitle line). The display line closes earlier
+//!    when the next line would not fit it:
+//!    - its text would get over [`MAX_CHARS`] chars, or the next line starts
+//!      over [`GROUP_MAX_SPAN_MS`] after its first line: it closes after its
+//!      last line ending in `, ; : —` (a soft end), else whole, and the rest
+//!      is checked again;
+//!    - the next line starts over [`LONG_GAP_MS`] after it is sung (an
+//!      instrumental break): it closes whole.
+//!
+//!    A display line spans whole source lines. A line cannot be split without
+//!    word timings, and those are never synthesized.
+//! 2. **Show.** A `Song` line shows when its first line starts being sung. It
+//!    leads by up to [`LEAD_MAX_MS`] only into a real pause, once the previous
+//!    display line has been sung to its end [`SUSTAIN_MARGIN_MS`] ago:
+//!    `show = min(max(start − LEAD_MAX_MS, prev_end + SUSTAIN_MARGIN_MS),
+//!    start)`. It then waits until the previous line has been up for
+//!    [`MIN_VISIBLE_MS`] (`show ≥ prev_show + MIN_VISIBLE_MS`), so a line
+//!    sung sooner than that after the previous one shows a little late.
+//!    A `Speech` line shows exactly when it is spoken.
 //! 3. **Hold.** A line stays on the wall until the next line shows. Before an
 //!    instrumental break (a gap over [`LONG_GAP_MS`]) and after the last line,
 //!    it leaves [`HOLD_TAIL_MS`] after its sung end instead.
-//! 4. **Minimum visibility.** A line the schedule leaves on the wall for less
-//!    than [`MIN_VISIBLE_MS`] is merged again under the same limits. If no merge
-//!    fits, it is shown exactly.
-//!
-//! The [`DisplayProfile`] sets the lead. Sung lyrics ([`DisplayProfile::Song`])
-//! lead by up to [`LEAD_MS`] (less when the previous line is still sung, see
-//! step 2). Dub subtitles of speech ([`DisplayProfile::Speech`])
-//! have no lead: each line shows exactly when it is spoken, while merge and
-//! hold stay the same (ROZHODNUTÉ on #217).
 //!
 //! The dashboard karaoke view (`LyricsState::update`) keeps the raw track and
 //! its word timing. Only the wall and the Presenter read this plan. The
@@ -49,13 +49,18 @@ use sp_core::lyrics::LyricsLine;
 use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
 
 /// The most a `Song` line appears on the wall before it is sung, so the room
-/// can pre-read it. It is less when the previous line is still being sung or
-/// has not yet been on the wall for [`MIN_VISIBLE_MS`], and near the track
-/// start; `Speech` has no lead.
-pub const LEAD_MS: u64 = 1_500;
+/// can pre-read it. Only into a pause of [`SUSTAIN_MARGIN_MS`] after the
+/// previous line; `Speech` has no lead.
+pub const LEAD_MAX_MS: u64 = 800;
 
-/// The shortest time a line stays on the wall (no blinking). A line gets less
-/// only when the next line is sung sooner than that after it.
+/// A `Song` line may appear early only this long after the previous display
+/// line's last sung line ends. A transcript line ends before a held note does,
+/// so the margin keeps the next sentence off the wall while the last one is
+/// still being sung.
+pub const SUSTAIN_MARGIN_MS: u64 = 1_500;
+
+/// The shortest time a `Song` line stays on the wall (no blinking). The next
+/// line waits for it, even past its own sung start.
 pub const MIN_VISIBLE_MS: u64 = 1_200;
 
 /// A gap between two sung lines longer than this is an instrumental break, and
@@ -66,43 +71,31 @@ pub const LONG_GAP_MS: u64 = 8_000;
 /// long after its sung end.
 pub const HOLD_TAIL_MS: u64 = 3_000;
 
-/// A line sung for less than this is a fragment.
-pub const FRAGMENT_MAX_MS: u64 = 1_500;
-
-/// A line with at most this many words is a fragment.
-pub const FRAGMENT_MAX_WORDS: usize = 3;
-
-/// A fragment merges with a neighbour only across a gap of at most this.
-pub const MERGE_MAX_GAP_MS: u64 = 700;
-
-/// A merge must keep the joined English text and the joined Slovak text each
-/// within this many chars (what fits the wall). The Slovak limit matters for
-/// dub subtitle tracks, whose lines often have no English at all.
-pub const MERGE_MAX_CHARS: usize = 64;
-
-/// The sentence plan's lead cap (design record 5867952012). The RED commit
-/// declares it for the tests; the GREEN commit makes the plan use it.
-pub const LEAD_MAX_MS: u64 = 800;
-
-/// The sentence plan's pause before a lead (design record 5867952012).
-pub const SUSTAIN_MARGIN_MS: u64 = 1_500;
-
-/// The sentence plan's char limit per display line (design record
-/// 5867952012).
+/// The most chars one display line's text may have (what fits the wall). A
+/// single source line over it is shown whole.
 pub const MAX_CHARS: usize = 72;
 
-/// The sentence plan's span limit per display line (design record
-/// 5867952012).
+/// The last source line of a display line starts at most this long after its
+/// first one, so a long sentence never lights its end seconds early.
 pub const GROUP_MAX_SPAN_MS: u64 = 6_500;
+
+/// Marks that end a sentence.
+const SENTENCE_ENDS: [char; 4] = ['.', '!', '?', '…'];
+
+/// Marks where an over-long sentence may split (a soft end).
+const SOFT_ENDS: [char; 4] = [',', ';', ':', '—'];
+
+/// Closing quotes and brackets, skipped when reading a line's final mark.
+const CLOSERS: [char; 7] = ['"', '\'', '”', '’', '»', ')', ']'];
 
 /// How a track is shown on the wall, chosen when the track loads (#217).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayProfile {
-    /// Sung lyrics: a line appears up to [`LEAD_MS`] before it is sung, so the
-    /// room can pre-read it.
+    /// Sung lyrics: a line may appear up to [`LEAD_MAX_MS`] before it is
+    /// sung, into a pause, and stays up at least [`MIN_VISIBLE_MS`].
     Song,
-    /// Dub subtitles of speech (`gemini-live-translate`): no lead, each line
-    /// appears exactly when it is spoken. Merge and hold apply as for songs.
+    /// Dub subtitles of speech (`gemini-live-translate`): each line appears
+    /// exactly when it is spoken. Grouping and hold apply as for songs.
     Speech,
 }
 
@@ -119,11 +112,18 @@ impl DisplayProfile {
         }
     }
 
-    /// How long before its start a line may appear on the wall.
-    pub fn lead_ms(self) -> u64 {
-        match self {
-            Self::Song => LEAD_MS,
-            Self::Speech => 0,
+    /// When a display line whose first line starts being sung at `start_ms`
+    /// appears, given the previous display line's `(show_ms, sung end)` (see
+    /// step 2 of the module docs).
+    fn show_ms(self, start_ms: u64, prev: Option<(u64, u64)>) -> u64 {
+        let early = start_ms.saturating_sub(LEAD_MAX_MS);
+        match (self, prev) {
+            (Self::Speech, _) => start_ms,
+            (Self::Song, None) => early,
+            (Self::Song, Some((prev_show, prev_end))) => early
+                .max(prev_end + SUSTAIN_MARGIN_MS)
+                .min(start_ms)
+                .max(prev_show + MIN_VISIBLE_MS),
         }
     }
 }
@@ -131,7 +131,7 @@ impl DisplayProfile {
 /// One line as the LED wall and the Presenter show it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisplayLine {
-    /// English text: the merged source lines' texts joined with one space.
+    /// English text: the source lines' texts joined with one space.
     pub en: String,
     /// Slovak text, joined the same way; `None` when no source line has one.
     pub sk: Option<String>,
@@ -141,8 +141,8 @@ pub struct DisplayLine {
     /// line's `show_ms`, or `sung end + HOLD_TAIL_MS` before a long break and
     /// after the last line.
     pub hide_ms: u64,
-    /// The indices of the source lines (in `LyricsTrack::lines`) merged into
-    /// this line.
+    /// The indices of the source lines (in `LyricsTrack::lines`) this line
+    /// shows.
     pub src_range: Range<usize>,
 }
 
@@ -184,138 +184,132 @@ impl DisplayPlan {
     }
 }
 
-/// Turn a track's sung lines into its display lines under `profile`: merge,
-/// then schedule (see the module docs).
+/// Turn a track's sung lines into its display lines under `profile`: group
+/// them into sentences, then schedule (see the module docs).
 pub fn build_plan(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<DisplayLine> {
-    let lead_ms = profile.lead_ms();
-    let groups = merge_groups(lines, lead_ms);
-    let spans = schedule(&groups, lead_ms);
+    let groups = group_lines(lines);
+    let spans = schedule(lines, &groups, profile);
     groups
         .into_iter()
         .zip(spans)
-        .map(|(group, (show_ms, hide_ms))| DisplayLine {
-            en: group.en,
-            sk: group.sk,
-            show_ms,
-            hide_ms,
-            src_range: group.src,
+        .map(|(group, (show_ms, hide_ms))| {
+            let members = &lines[group.clone()];
+            DisplayLine {
+                en: members
+                    .iter()
+                    .fold(String::new(), |en, line| join_text(&en, &line.en)),
+                sk: members
+                    .iter()
+                    .fold(None, |sk, line| join_sk(sk, line.sk.clone())),
+                show_ms,
+                hide_ms,
+                src_range: group,
+            }
         })
         .collect()
 }
 
-/// A run of consecutive source lines that the wall shows as one line.
-#[derive(Debug, Clone)]
-struct Group {
-    en: String,
-    sk: Option<String>,
-    start_ms: u64,
-    end_ms: u64,
-    src: Range<usize>,
-}
-
-impl Group {
-    fn of(index: usize, line: &LyricsLine) -> Self {
-        Self {
-            en: line.en.clone(),
-            sk: line.sk.clone(),
-            start_ms: line.start_ms,
-            end_ms: line.end_ms,
-            src: index..index + 1,
+/// The source lines of each display line, in order (step 1 of the module
+/// docs).
+fn group_lines(lines: &[LyricsLine]) -> Vec<Range<usize>> {
+    let mut groups = Vec::new();
+    // The first source line of the open display line, which runs up to the
+    // line at hand.
+    let mut open: Option<usize> = None;
+    for (i, line) in lines.iter().enumerate() {
+        if let Some(first) = open {
+            open = close_to_fit(lines, first..i, &mut groups);
+        }
+        let first = *open.get_or_insert(i);
+        if ends_sentence(line) {
+            groups.push(first..i + 1);
+            open = None;
         }
     }
-
-    /// Append the group that follows this one.
-    fn absorb(&mut self, next: Group) {
-        self.en = join_text(&self.en, &next.en);
-        self.sk = join_sk(self.sk.take(), next.sk);
-        self.end_ms = self.end_ms.max(next.end_ms);
-        self.src.end = next.src.end;
-    }
-}
-
-/// Merge the lines until no merge applies. Each merge removes one group, so
-/// the loop ends after at most `lines.len() - 1` merges.
-fn merge_groups(lines: &[LyricsLine], lead_ms: u64) -> Vec<Group> {
-    let mut groups: Vec<Group> = lines
-        .iter()
-        .enumerate()
-        .map(|(index, line)| Group::of(index, line))
-        .collect();
-    while let Some(i) = next_merge(&groups, lead_ms) {
-        let next = groups.remove(i + 1);
-        groups[i].absorb(next);
-    }
+    groups.extend(open.map(|first| first..lines.len()));
     groups
 }
 
-/// The next merge to apply, as the index `i` that absorbs group `i + 1`. Text
-/// fragments come first. Once no fragment can merge, a line the schedule shows
-/// for less than [`MIN_VISIBLE_MS`] is tried.
-fn next_merge(groups: &[Group], lead_ms: u64) -> Option<usize> {
-    fragment_merge(groups).or_else(|| short_merge(groups, &schedule(groups, lead_ms)))
-}
-
-/// The first text fragment that fits a neighbour.
-fn fragment_merge(groups: &[Group]) -> Option<usize> {
-    groups
-        .iter()
-        .enumerate()
-        .filter(|&(i, group)| is_fragment(group, groups.get(i + 1)))
-        .find_map(|(i, _)| merge_target(groups, i))
-}
-
-/// The first line on the wall for less than [`MIN_VISIBLE_MS`] that fits a
-/// neighbour.
-fn short_merge(groups: &[Group], spans: &[(u64, u64)]) -> Option<usize> {
-    spans
-        .iter()
-        .enumerate()
-        .filter(|&(_, &(show_ms, hide_ms))| hide_ms.saturating_sub(show_ms) < MIN_VISIBLE_MS)
-        .find_map(|(i, _)| merge_target(groups, i))
-}
-
-/// Where group `i` merges: forward into its following group when they fit
-/// (returns `i`), else backward into the previous one (returns `i - 1`).
-fn merge_target(groups: &[Group], i: usize) -> Option<usize> {
-    let group = &groups[i];
-    if groups.get(i + 1).is_some_and(|next| fits(group, next)) {
-        return Some(i);
+/// Close as much of the open display line `open` as the source line after it
+/// (`lines[open.end]`) needs to join what stays open, pushing each closed part
+/// to `groups`. Before an instrumental break the whole line closes. When the
+/// next line would not [`fits`], the line closes after its last soft end (or
+/// whole, with none). The rest has no soft end, so it either takes the next
+/// line or closes whole too. Returns the first line of what stays open.
+fn close_to_fit(
+    lines: &[LyricsLine],
+    open: Range<usize>,
+    groups: &mut Vec<Range<usize>>,
+) -> Option<usize> {
+    let members = &lines[open.clone()];
+    if lines[open.end].start_ms.saturating_sub(sung_end(members)) > LONG_GAP_MS {
+        groups.push(open);
+        return None;
     }
-    let prev = i.checked_sub(1)?;
-    fits(&groups[prev], group).then_some(prev)
+    if fits(&lines[open.start..=open.end]) {
+        return Some(open.start);
+    }
+    let head = members
+        .iter()
+        .rposition(ends_softly)
+        .map_or(members.len(), |k| k + 1);
+    let rest = open.start + head..open.end;
+    groups.push(open.start..rest.start);
+    if rest.is_empty() {
+        return None;
+    }
+    if fits(&lines[rest.start..=open.end]) {
+        return Some(rest.start);
+    }
+    groups.push(rest);
+    None
 }
 
-/// A fragment: sung for less than [`FRAGMENT_MAX_MS`], at most
-/// [`FRAGMENT_MAX_WORDS`] words, or followed by a lowercase continuation.
-fn is_fragment(group: &Group, next: Option<&Group>) -> bool {
-    group.end_ms.saturating_sub(group.start_ms) < FRAGMENT_MAX_MS
-        || group.en.split_whitespace().count() <= FRAGMENT_MAX_WORDS
-        || next.is_some_and(|next| starts_lowercase(&next.en))
+/// Whether consecutive source lines fit one display line: their joined text
+/// is at most [`MAX_CHARS`] chars, and the last starts at most
+/// [`GROUP_MAX_SPAN_MS`] after the first.
+fn fits(members: &[LyricsLine]) -> bool {
+    let (Some(first), Some(last)) = (members.first(), members.last()) else {
+        return true;
+    };
+    let joined = members
+        .iter()
+        .fold(String::new(), |acc, line| join_text(&acc, text(line)));
+    joined.chars().count() <= MAX_CHARS
+        && last.start_ms.saturating_sub(first.start_ms) <= GROUP_MAX_SPAN_MS
 }
 
-/// Whether `a` and the group `b` that follows it may merge. The gap must be
-/// at most [`MERGE_MAX_GAP_MS`] (overlapping lines have no gap), and the joined
-/// English text and the joined Slovak text must each be at most
-/// [`MERGE_MAX_CHARS`] chars. A missing Slovak side counts as empty.
-fn fits(a: &Group, b: &Group) -> bool {
-    let a_sk = a.sk.as_deref().unwrap_or_default();
-    let b_sk = b.sk.as_deref().unwrap_or_default();
-    b.start_ms.saturating_sub(a.end_ms) <= MERGE_MAX_GAP_MS
-        && joined_chars(&a.en, &b.en) <= MERGE_MAX_CHARS
-        && joined_chars(a_sk, b_sk) <= MERGE_MAX_CHARS
+/// The text a line is grouped by: its English, or its Slovak when it has
+/// none (a dub subtitle line). Trimmed.
+fn text(line: &LyricsLine) -> &str {
+    match line.en.trim() {
+        "" => line.sk.as_deref().unwrap_or_default().trim(),
+        en => en,
+    }
 }
 
-/// The length in chars of two texts joined by [`join_text`].
-fn joined_chars(a: &str, b: &str) -> usize {
-    join_text(a, b).chars().count()
+/// The last char of `text` that is not a closing quote or bracket.
+fn final_mark(text: &str) -> Option<char> {
+    text.chars().rev().find(|c| !CLOSERS.contains(c))
 }
 
-/// Whether the text continues a sentence: its first letter or digit is a
-/// lowercase letter. Leading punctuation (`'cause`, `…and`) is skipped.
-fn starts_lowercase(text: &str) -> bool {
-    text.chars()
-        .find(|c| c.is_alphanumeric())
-        .is_some_and(char::is_lowercase)
+/// Whether the line ends a sentence (`. ! ? …`).
+fn ends_sentence(line: &LyricsLine) -> bool {
+    final_mark(text(line)).is_some_and(|c| SENTENCE_ENDS.contains(&c))
+}
+
+/// Whether the line ends in a soft end (`, ; : —`).
+fn ends_softly(line: &LyricsLine) -> bool {
+    final_mark(text(line)).is_some_and(|c| SOFT_ENDS.contains(&c))
+}
+
+/// When the last of `members` is sung to its end.
+fn sung_end(members: &[LyricsLine]) -> u64 {
+    members
+        .iter()
+        .map(|line| line.end_ms)
+        .max()
+        .unwrap_or_default()
 }
 
 /// Join two texts with one space. The texts are trimmed, and an empty side is
@@ -337,33 +331,31 @@ fn join_sk(a: Option<String>, b: Option<String>) -> Option<String> {
     }
 }
 
-/// The `(show_ms, hide_ms)` of every group with a lead of `lead_ms` (lead,
-/// hold, long-break tail; see the module docs).
-fn schedule(groups: &[Group], lead_ms: u64) -> Vec<(u64, u64)> {
+/// The `(show_ms, hide_ms)` of every display line (steps 2 and 3 of the
+/// module docs).
+fn schedule(
+    lines: &[LyricsLine],
+    groups: &[Range<usize>],
+    profile: DisplayProfile,
+) -> Vec<(u64, u64)> {
     let mut shows: Vec<u64> = Vec::with_capacity(groups.len());
-    // The previous group's (show, sung end).
+    // The previous display line's (show, sung end).
     let mut prev: Option<(u64, u64)> = None;
     for group in groups {
-        let lead = group.start_ms.saturating_sub(lead_ms);
-        let show = match prev {
-            Some((prev_show, prev_end)) => lead
-                .max(prev_end)
-                .max(prev_show + MIN_VISIBLE_MS)
-                .min(group.start_ms),
-            None => lead,
-        };
+        let show = profile.show_ms(lines[group.start].start_ms, prev);
         shows.push(show);
-        prev = Some((show, group.end_ms));
+        prev = Some((show, sung_end(&lines[group.clone()])));
     }
     groups
         .iter()
         .enumerate()
         .map(|(i, group)| {
+            let end = sung_end(&lines[group.clone()]);
             let hide = match groups.get(i + 1) {
-                Some(next) if next.start_ms.saturating_sub(group.end_ms) <= LONG_GAP_MS => {
+                Some(next) if lines[next.start].start_ms.saturating_sub(end) <= LONG_GAP_MS => {
                     shows[i + 1]
                 }
-                _ => group.end_ms + HOLD_TAIL_MS,
+                _ => end + HOLD_TAIL_MS,
             };
             (shows[i], hide)
         })
