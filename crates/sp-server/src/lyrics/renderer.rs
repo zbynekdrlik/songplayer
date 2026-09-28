@@ -41,6 +41,24 @@ fn append_reference_star(s: String, is_reference: bool) -> String {
 
 /// Tracks playback position relative to a [`LyricsTrack`] and produces
 /// [`ServerMsg::LyricsUpdate`] messages for the dashboard WebSocket.
+/// #222: the lines of one Presenter push — the current and the next display
+/// line in EN and SK, each pair from the same plan line (`presenter_lines`).
+/// An SK is empty when its line has no translation; `next_*` are empty on the
+/// last line.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PresenterLines {
+    pub current_en: String,
+    pub next_en: String,
+    pub current_sk: String,
+    pub next_sk: String,
+}
+
+/// A plan line's SK as the Presenter shows it: punctuation stripped like the
+/// EN, "" when there is no line or no translation.
+fn presenter_sk(_line: Option<&crate::lyrics::display_plan::DisplayLine>) -> String {
+    String::new()
+}
+
 pub struct LyricsState {
     track: LyricsTrack,
     /// What the LED wall and the Presenter show (#217): whole sentences,
@@ -199,25 +217,28 @@ impl LyricsState {
         Some((cur_en, next_en, cur_sk, next_sk))
     }
 
-    /// Returns `Some((current_en, next_en))` for the Presenter push, read from
-    /// the same #217 display plan as the wall. `next_en` is the plan's next
-    /// display line, or the empty string on the last one. Returns `None` where
-    /// the wall is blank (before the first line, in an instrumental break's
-    /// blank stretch, after the last line), so the caller can hold off
-    /// pushing a duplicate.
+    /// Returns the Presenter push's lines, read from the same #217 display
+    /// plan as the wall: the current and the next display line, EN and (#222)
+    /// SK, each pair from the SAME plan line, so the two languages never
+    /// disagree about which line is current. `next_*` is empty on the last
+    /// line, and an SK is empty when its line has no translation. Returns
+    /// `None` where the wall is blank (before the first line, in an
+    /// instrumental break's blank stretch, after the last line), so the
+    /// caller can hold off pushing a duplicate.
     ///
     /// The lookup is shifted forward by `self.lead_ms` (0 unless operator-overridden).
-    pub fn presenter_lines(&self, position_ms: u64) -> Option<(String, String)> {
+    pub fn presenter_lines(&self, position_ms: u64) -> Option<PresenterLines> {
         let lookahead = effective_lookup(position_ms, self.lead_ms, self.offset_ms);
         let (idx, line) = self.plan.at(lookahead)?;
-        let cur = strip_display_punctuation(&line.en);
-        let next = self
-            .plan
-            .lines()
-            .get(idx + 1)
-            .map(|l| strip_display_punctuation(&l.en))
-            .unwrap_or_default();
-        Some((cur, next))
+        let next = self.plan.lines().get(idx + 1);
+        Some(PresenterLines {
+            current_en: strip_display_punctuation(&line.en),
+            next_en: next
+                .map(|l| strip_display_punctuation(&l.en))
+                .unwrap_or_default(),
+            current_sk: presenter_sk(Some(line)),
+            next_sk: presenter_sk(next),
+        })
     }
 
     /// Read-only accessor for the underlying [`LyricsTrack`]. Used in tests
@@ -431,10 +452,10 @@ mod tests {
     fn presenter_lines_returns_current_and_next() {
         let st = LyricsState::new(wall_track());
         // wall_track()'s plan shows line 0 over [200, 4000).
-        let (cur, nxt) = st.presenter_lines(1500).expect("on line 0");
-        assert_eq!(cur, "Hello world");
+        let lines = st.presenter_lines(1500).expect("on line 0");
+        assert_eq!(lines.current_en, "Hello world");
         // next_en is line 1's text.
-        assert_eq!(nxt, "Goodbye");
+        assert_eq!(lines.next_en, "Goodbye");
     }
 
     #[test]
@@ -442,11 +463,58 @@ mod tests {
         let st = LyricsState::new(wall_track());
         // Position 4500 is inside wall_track()'s last line (sung 4000..6000).
         // test_track()'s unpunctuated lines would be ONE sentence under #217.
-        let (_cur, nxt) = st.presenter_lines(4500).expect("on last line");
+        let nxt = st.presenter_lines(4500).expect("on last line").next_en;
         assert!(
             nxt.is_empty(),
             "last line's next must be empty, got {nxt:?}"
         );
+    }
+
+    /// The EN pair of a Presenter push (the plan-timing tests read only it).
+    fn en_pair(lines: PresenterLines) -> (String, String) {
+        (lines.current_en, lines.next_en)
+    }
+
+    // ── #222 — the Presenter gets the SK of the SAME plan line ────────────
+
+    #[test]
+    fn presenter_lines_carry_the_sk_of_the_same_plan_line() {
+        let st = LyricsState::new(wall_track());
+        assert_eq!(
+            st.presenter_lines(1500),
+            Some(PresenterLines {
+                current_en: "Hello world".into(),
+                next_en: "Goodbye".into(),
+                current_sk: "Ahoj svet".into(),
+                next_sk: "Zbohom".into(),
+            })
+        );
+        // The last line: its own SK, and no next line in either language.
+        assert_eq!(
+            st.presenter_lines(4500),
+            Some(PresenterLines {
+                current_en: "Goodbye".into(),
+                next_en: String::new(),
+                current_sk: "Zbohom".into(),
+                next_sk: String::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_presenter_line_without_a_translation_has_an_empty_sk() {
+        let mut track = wall_track();
+        // Trailing punctuation goes like the EN's; a line with no SK is "".
+        track.lines[0].sk = Some("Ahoj svet!".into());
+        track.lines[1].sk = None;
+        let st = LyricsState::new(track);
+        let lines = st.presenter_lines(1500).expect("on line 0");
+        assert_eq!(
+            (lines.current_sk.as_str(), lines.next_sk.as_str()),
+            ("Ahoj svet", "")
+        );
+        let lines = st.presenter_lines(4500).expect("on line 1");
+        assert_eq!(lines.current_sk, "");
     }
 
     #[test]
@@ -471,7 +539,7 @@ mod tests {
         assert!(st.presenter_lines(0).is_none());
         assert!(st.presenter_lines(4_199).is_none());
         assert_eq!(
-            st.presenter_lines(4_200),
+            st.presenter_lines(4_200).map(en_pair),
             Some(("Later".to_string(), String::new()))
         );
     }
@@ -575,9 +643,10 @@ mod tests {
             st.presenter_lines(2_699).is_none(),
             "positive offset must delay: lookup 2699-500=2199 is before the plan's show at 2200"
         );
-        let (cur, _nxt) = st
+        let cur = st
             .presenter_lines(2_700)
-            .expect("lookup 2700-500=2200 is the plan's show time");
+            .expect("lookup 2700-500=2200 is the plan's show time")
+            .current_en;
         assert_eq!(cur, "Offset line");
     }
 
@@ -610,9 +679,10 @@ mod tests {
             st.presenter_lines(2_399).is_none(),
             "lookup 2399+1800=4199 is before the plan's show at 4200"
         );
-        let (cur, _nxt) = st
+        let cur = st
             .presenter_lines(2_400)
-            .expect("negative offset must advance lookup onto the line");
+            .expect("negative offset must advance lookup onto the line")
+            .current_en;
         assert_eq!(cur, "Advanced line");
     }
 
@@ -625,7 +695,7 @@ mod tests {
         let st_new = LyricsState::new(wall_track());
         let st_off = LyricsState::with_lead_and_offset(wall_track(), 0, 0);
         for st in [&st_new, &st_off] {
-            let cur = |pos| st.presenter_lines(pos).map(|(c, _)| c);
+            let cur = |pos| st.presenter_lines(pos).map(|l| l.current_en);
             assert_eq!(cur(199), None);
             assert_eq!(cur(200).as_deref(), Some("Hello world"));
             assert_eq!(cur(3_999).as_deref(), Some("Hello world"));
@@ -655,13 +725,15 @@ mod tests {
     #[test]
     fn lead_ms_is_applied_from_state() {
         let st = LyricsState::with_lead_and_offset(wall_track(), 500, 0);
-        let (cur, _nxt) = st
+        let cur = st
             .presenter_lines(3_500)
-            .expect("3500 + lead(500) = 4000 = the plan's switch to Goodbye");
+            .expect("3500 + lead(500) = 4000 = the plan's switch to Goodbye")
+            .current_en;
         assert_eq!(cur, "Goodbye");
-        let (cur, _nxt) = st
+        let cur = st
             .presenter_lines(3_499)
-            .expect("3499 + lead(500) = 3999: Hello world is still on the wall");
+            .expect("3499 + lead(500) = 3999: Hello world is still on the wall")
+            .current_en;
         assert_eq!(cur, "Hello world");
     }
 
@@ -709,11 +781,11 @@ mod tests {
             ))
         );
         assert_eq!(
-            st.presenter_lines(6_199),
+            st.presenter_lines(6_199).map(en_pair),
             Some(("Hello world".to_string(), "Goodbye".to_string()))
         );
         assert_eq!(
-            st.presenter_lines(6_200),
+            st.presenter_lines(6_200).map(en_pair),
             Some(("Goodbye".to_string(), String::new()))
         );
         assert_eq!(st.display_plan().lines().len(), 2);
@@ -729,7 +801,7 @@ mod tests {
         assert!(st.resolume_lines_with_next(6_000, false).is_none());
         assert!(st.presenter_lines(10_200).is_none());
         assert_eq!(
-            st.presenter_lines(10_201),
+            st.presenter_lines(10_201).map(en_pair),
             Some(("Goodbye".to_string(), String::new()))
         );
     }
@@ -779,14 +851,14 @@ mod tests {
             ))
         );
         assert_eq!(
-            st.presenter_lines(4_199),
+            st.presenter_lines(4_199).map(en_pair),
             Some((
                 "What a God, what a God".to_string(),
                 "Angels bow before him".to_string()
             ))
         );
         assert_eq!(
-            st.presenter_lines(4_200),
+            st.presenter_lines(4_200).map(en_pair),
             Some(("Angels bow before him".to_string(), String::new()))
         );
     }

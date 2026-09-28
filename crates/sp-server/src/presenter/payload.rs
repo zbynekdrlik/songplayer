@@ -2,6 +2,10 @@
 //! stage-display API. Matches the spec exactly:
 //!   - field names serialize camelCase: `currentText`, `nextText`, etc.
 //!   - missing-on-the-wire fields default to "" server-side (not displayed)
+//!   - #222 (presenter #799): `currentTranslation` / `nextTranslation` carry
+//!     the Slovak line of the same display line as `currentText` /
+//!     `nextText`, "" when it has none. Both languages are always sent;
+//!     Presenter's stage layout picks what to show.
 //!
 //! `currentGroup` / `nextGroup` are intentionally omitted — SongPlayer has
 //! no notion of worship-team groups today. Follow-up can add them via
@@ -81,16 +85,22 @@ pub struct PresenterPayload {
     pub next_text: String,
     pub current_song: String,
     pub next_song: String,
+    /// #222: the Slovak line of `current_text`'s display line, "" when none.
+    pub current_translation: String,
+    /// #222: the Slovak line of `next_text`'s display line, "" when none.
+    pub next_translation: String,
 }
 
 impl PresenterPayload {
-    /// Four empty strings — clears the stage display on the Presenter side.
+    /// Six empty strings — clears the stage display on the Presenter side.
     pub fn empty() -> Self {
         Self {
             current_text: String::new(),
             next_text: String::new(),
             current_song: String::new(),
             next_song: String::new(),
+            current_translation: String::new(),
+            next_translation: String::new(),
         }
     }
 }
@@ -102,16 +112,26 @@ mod tests {
     #[test]
     fn serializes_with_camel_case_keys_matching_api_spec() {
         let p = PresenterPayload {
-            current_text: "Haleluja, haleluja".to_string(),
-            next_text: "Spievajte Hospodinovi".to_string(),
+            current_text: "Hallelujah, hallelujah".to_string(),
+            next_text: "Sing to the Lord".to_string(),
             current_song: "Haleluja".to_string(),
             next_song: "Spievajte".to_string(),
+            current_translation: "Haleluja, haleluja".to_string(),
+            next_translation: "Spievajte Hospodinovi".to_string(),
         };
         let json = serde_json::to_value(&p).unwrap();
-        assert_eq!(json["currentText"], "Haleluja, haleluja");
-        assert_eq!(json["nextText"], "Spievajte Hospodinovi");
-        assert_eq!(json["currentSong"], "Haleluja");
-        assert_eq!(json["nextSong"], "Spievajte");
+        // #222: exactly the six fields of Presenter's `PUT /api/stage`.
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "currentText": "Hallelujah, hallelujah",
+                "nextText": "Sing to the Lord",
+                "currentSong": "Haleluja",
+                "nextSong": "Spievajte",
+                "currentTranslation": "Haleluja, haleluja",
+                "nextTranslation": "Spievajte Hospodinovi",
+            })
+        );
     }
 
     #[test]
@@ -133,12 +153,11 @@ mod tests {
     }
 
     #[test]
-    fn empty_returns_four_empty_strings() {
-        let p = PresenterPayload::empty();
-        assert!(p.current_text.is_empty());
-        assert!(p.next_text.is_empty());
-        assert!(p.current_song.is_empty());
-        assert!(p.next_song.is_empty());
+    fn empty_returns_six_empty_strings() {
+        let json = serde_json::to_value(PresenterPayload::empty()).unwrap();
+        let obj = json.as_object().expect("object");
+        assert_eq!(obj.len(), 6, "{json}");
+        assert!(obj.values().all(|v| v == ""), "{json}");
     }
 
     // ---- wrap_for_presenter tests -----------------------------------

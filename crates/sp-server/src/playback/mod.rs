@@ -169,8 +169,8 @@ struct PlaylistPipeline {
     /// ends and when the pipeline pauses. A scene-off keeps it through the
     /// #215 hold (design record 5863318980).
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
-    /// Presenter-push debounce: last EN text sent, compared each 500ms tick.
-    last_presenter_text: Option<String>,
+    /// Presenter-push debounce: the current line last sent, (EN, SK) (#222).
+    last_presenter_text: Option<crate::presenter::PushedLine>,
     /// Last Resolume ShowSubtitles signature; dedup key for `dispatch_lyrics_if_changed`. Reset on song change.
     last_resolume_subtitles_signature: Option<String>,
     /// Last karaoke ws line text; dedup key for `dispatch_lyrics_if_changed`. Reset on song change.

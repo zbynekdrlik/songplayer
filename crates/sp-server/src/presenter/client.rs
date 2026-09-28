@@ -73,6 +73,8 @@ mod tests {
             next_text: "line B".to_string(),
             current_song: "Song X".to_string(),
             next_song: "Song Y".to_string(),
+            current_translation: "riadok A".to_string(),
+            next_translation: String::new(),
         }
     }
 
@@ -86,7 +88,9 @@ mod tests {
                 "currentText": "line A",
                 "nextText": "line B",
                 "currentSong": "Song X",
-                "nextSong": "Song Y"
+                "nextSong": "Song Y",
+                "currentTranslation": "riadok A",
+                "nextTranslation": ""
             })))
             .respond_with(ResponseTemplate::new(204))
             .mount(&mock)
