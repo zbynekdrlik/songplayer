@@ -51,7 +51,7 @@ impl OnAir {
 pub fn program_scene_name(on_air: &OnAir) -> Option<String> {
     match (&on_air.scene, on_air.source) {
         (Some(scene), _) => Some(scene.clone()),
-        (None, Some(PROGRAM_INPUT_ID)) => Some(PROGRAM_INPUT_LABEL.to_lowercase()),
+        (None, Some(PROGRAM_INPUT_ID)) => Some(PROGRAM_INPUT_LABEL.to_string()),
         _ => None,
     }
 }

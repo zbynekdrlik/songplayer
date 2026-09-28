@@ -749,9 +749,8 @@ impl ProgramBus {
     /// lock (so in cut order).
     pub fn cut(&self, pid: i64, now_100ns: i64, scene: Option<&str>) -> ProgramStatus {
         let mut st = self.lock();
-        if st.core.cut(pid, now_100ns) {
-            self.publish(pid, scene);
-        }
+        st.core.cut(pid, now_100ns);
+        self.publish(pid, scene);
         st.core.status()
     }
 
@@ -759,8 +758,7 @@ impl ProgramBus {
     pub fn select_initial(&self, pid: i64, scene: Option<&str>) {
         let mut st = self.lock();
         st.core.select_initial(pid);
-        let next = self.on_air.borrow().next(pid, scene);
-        let _ = self.on_air.send(next);
+        self.publish(pid, scene);
     }
 
     /// #221: publish `source` as on air for `scene` (`seq` + 1). Always

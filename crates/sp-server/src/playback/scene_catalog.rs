@@ -50,7 +50,7 @@ impl SceneCatalog {
             if ndi_name.trim().is_empty() {
                 conflicts.push(format!("playlist {pid} has no NDI output name"));
             } else {
-                let scene = ndi_name.to_string();
+                let scene = ndi_name.to_ascii_lowercase();
                 named.entry(scene).or_default().push(pid);
             }
         }
@@ -75,7 +75,7 @@ impl SceneCatalog {
 
     /// What `scene` is, ignoring ASCII case.
     pub fn kind(&self, scene: &str) -> SceneKind {
-        match self.scenes.get(scene) {
+        match self.scenes.get(&scene.to_ascii_lowercase()) {
             Some(&pid) => SceneKind::Playlist(pid),
             None => SceneKind::Manual,
         }
