@@ -540,6 +540,12 @@ the test that kills each one BEFORE CI's mutation gate runs.
     by a computed length: split at the edge, then `chunks_mut(n)` /
     `enumerate`. A mutated length then panics or moves the output (killed),
     it never stalls.
+  - the same for a retry/poll loop that ends only on a time comparison
+    (#221 review round 1, `bootstrap_probe::decide`): `elapsed + delay >
+    budget` → `==` never matches, and `delay * 2` → `/ 2` shrinks the pause
+    to 0 — both spin forever on a paused clock. Bound it with `for n in
+    1..=MAX` and break on the cap or the budget before pausing; the cap
+    turns both mutants into a wrong probe count a test sees.
 
 **`tokio::select!` drops the branch futures before a handler runs**
 (tokio `macros/select.rs`: the futures live inside the `let output = {…}`
@@ -701,6 +707,16 @@ sees that. What held up across five review rounds:
 - **Pace virtual time for loop tests.** Every wait really sleeps, but only the
   waits advance the clock. A stall then cannot fake a missed boundary; the
   gate proves the waiting part.
+- **On a paused clock a helper's OWN timeout is a timer too** (#221 review
+  round 1). A `recv()` helper bounded at 10 s, awaiting an event the code
+  sends at 15 s of virtual time, fails every run: auto-advance reaches the
+  helper's 10 s deadline first. Bound such a wait above the virtual time it
+  must outlast (`timeout(MAX * 2, rx.recv())` — it costs no real time).
+- **A production bound a wire test must never reach is a parameter**
+  (#221 review round 2). A real-socket test that holds a "no Ended yet"
+  window races the 15 s production bound under a ptrace stall; the facade
+  carries it (`Facade::transition_end_max`) and `Facade::for_test` sets
+  10 minutes, like `Upstream::with_timeout`.
 - **A spin / wait loop on a real clock: witness each step, never time it**
   (#147, `pacer_spin_tests.rs`).
   - Give the loop an observer hook `FnMut(step, elapsed)` and return a tally.
