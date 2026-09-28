@@ -123,8 +123,8 @@ fn a_display_line_is_one_whole_sentence() {
 
 #[test]
 fn every_sentence_mark_ends_a_display_line() {
-    // `. ! ? …`, also before closing quotes and brackets, the Slovak „…“ and
-    // »…« included (dub lines group by their SK).
+    // `. ! ? …`, also before closing quotes and brackets, the Slovak „…“,
+    // ‚…‘ and »…« included (dub lines group by their SK).
     for text in [
         "Glory to God.",
         "Glory to God!",
@@ -138,6 +138,7 @@ fn every_sentence_mark_ends_a_display_line() {
         "Glory to God!]",
         "Glory to God.'",
         "Sláva Bohu.“",
+        "Sláva Bohu.‘",
         "Sláva Bohu!«",
     ] {
         let plan = song_plan(&[en(0, 1_000, text), en(1_000, 2_000, "we sing")]);
