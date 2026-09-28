@@ -119,9 +119,8 @@ impl Rig {
     }
 
     pub(super) fn remote(&self) -> crate::remote::RemoteStatus {
-        self.bus
-            .remote()
-            .status(&crate::remote::RemoteSettings::disabled())
+        let settings = crate::remote::RemoteSettings::disabled();
+        self.bus.remote().status(&settings, &self.bus.on_air_now())
     }
 }
 
@@ -829,7 +828,7 @@ fn raw(event_type: &str, data: Value) -> ObsEvent {
 }
 
 #[tokio::test]
-async fn cg_obs_scene_events_fan_out_to_every_subscribed_client() {
+async fn cg_obs_scene_list_fans_out_but_its_program_scene_event_never_does() {
     let rig = rig().await;
     let mut a = connect(rig.addr).await;
     hello_identify(&mut a, 0x7FF).await;
@@ -839,31 +838,29 @@ async fn cg_obs_scene_events_fan_out_to_every_subscribed_client() {
     let mut general = connect(rig.addr).await;
     hello_identify(&mut general, 1).await;
 
-    // Not re-emitted (not a scene event), then the program scene change.
+    // Not re-emitted: not a scene event, and (#221 L3) cg OBS's program
+    // scene — the program feedback is SongPlayer's own.
     rig.events
         .send(raw("StreamStateChanged", json!({ "outputActive": true })))
         .unwrap();
-    let data = json!({ "sceneName": "sp-fast", "sceneUuid": "u-sp-fast" });
     rig.events
-        .send(raw("CurrentProgramSceneChanged", data.clone()))
+        .send(raw(
+            "CurrentProgramSceneChanged",
+            json!({ "sceneName": "Slido", "sceneUuid": "u-Slido" }),
+        ))
         .unwrap();
-    let expected = json!({ "op": 5, "d": {
-        "eventType": "CurrentProgramSceneChanged",
-        "eventIntent": 4,
-        "eventData": data,
-    }});
-    assert_eq!(next_json(&mut a).await, expected);
-    assert_eq!(next_json(&mut b).await, expected);
-    // The scene list passes through too.
+    // The scene list passes through: it is the first event either client gets.
     let scenes = json!({ "scenes": [{ "sceneName": "sp-fast" }] });
     rig.events
         .send(raw("SceneListChanged", scenes.clone()))
         .unwrap();
-    assert_eq!(next_json(&mut a).await["d"]["eventData"], scenes);
-    assert_eq!(
-        next_json(&mut b).await["d"]["eventType"],
-        "SceneListChanged"
-    );
+    let expected = json!({ "op": 5, "d": {
+        "eventType": "SceneListChanged",
+        "eventIntent": 4,
+        "eventData": scenes,
+    }});
+    assert_eq!(next_json(&mut a).await, expected);
+    assert_eq!(next_json(&mut b).await, expected);
 
     // The General-only client's next message is its own response, no event.
     let d = request(&mut general, "GetStudioModeEnabled", None).await;
@@ -887,10 +884,7 @@ async fn reidentify_changes_the_subscriptions() {
     send_json(&mut ws, json!({ "op": 3, "d": {} })).await;
     assert_eq!(next_json(&mut ws).await["op"], 2);
     rig.events
-        .send(raw(
-            "CurrentProgramSceneChanged",
-            json!({ "sceneName": "a" }),
-        ))
+        .send(raw("SceneListChanged", json!({ "scenes": ["a"] })))
         .unwrap();
     let d = request(&mut ws, "GetStudioModeEnabled", None).await;
     assert_eq!(d["requestStatus"]["code"], 100);
@@ -902,25 +896,19 @@ async fn reidentify_changes_the_subscriptions() {
     .await;
     assert_eq!(next_json(&mut ws).await["op"], 2);
     rig.events
-        .send(raw(
-            "CurrentProgramSceneChanged",
-            json!({ "sceneName": "b" }),
-        ))
+        .send(raw("SceneListChanged", json!({ "scenes": ["b"] })))
         .unwrap();
     let ev = next_json(&mut ws).await;
     assert_eq!(ev["op"], 5);
-    assert_eq!(ev["d"]["eventData"]["sceneName"], "b");
+    assert_eq!(ev["d"]["eventData"]["scenes"], json!(["b"]));
 
     // Kept at 4 too (a reset to 0 would drop this event).
     send_json(&mut ws, json!({ "op": 3, "d": {} })).await;
     assert_eq!(next_json(&mut ws).await["op"], 2);
     rig.events
-        .send(raw(
-            "CurrentProgramSceneChanged",
-            json!({ "sceneName": "c" }),
-        ))
+        .send(raw("SceneListChanged", json!({ "scenes": ["c"] })))
         .unwrap();
     let ev = next_json(&mut ws).await;
     assert_eq!(ev["op"], 5);
-    assert_eq!(ev["d"]["eventData"]["sceneName"], "c");
+    assert_eq!(ev["d"]["eventData"]["scenes"], json!(["c"]));
 }

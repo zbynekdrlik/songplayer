@@ -57,6 +57,7 @@ use tracing::{info, warn};
 use crate::obs::remote_call::RemoteCall;
 use crate::obs::{ObsCommand, ObsEvent};
 use crate::playback::program_bus::ProgramBus;
+use crate::playback::program_on_air::OnAir;
 
 /// How often the settings task re-reads the settings.
 pub const REMOTE_SETTINGS_POLL: Duration = Duration::from_secs(5);
@@ -209,6 +210,11 @@ pub struct RemoteStatus {
     pub unsupported_requests: Vec<String>,
     /// #221: the last transition duration a client sent (not applied).
     pub last_transition_duration: Option<TransitionDuration>,
+    /// #221 L3: SP-program's scene name (the one resolver,
+    /// `program_scene_name`): what `GetCurrentProgramScene` answers and
+    /// `CurrentProgramSceneChanged` announced last; `null` while nothing is on
+    /// program.
+    pub program_scene: Option<String>,
 }
 
 #[derive(Default)]
@@ -239,8 +245,9 @@ impl RemoteShared {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The `remote` block for the stored `settings`.
-    pub fn status(&self, settings: &RemoteSettings) -> RemoteStatus {
+    /// The `remote` block for the stored `settings`, with `on_air` (what
+    /// `SP-program` has on air) named as `program_scene`.
+    pub fn status(&self, settings: &RemoteSettings, _on_air: &OnAir) -> RemoteStatus {
         let st = self.state();
         RemoteStatus {
             enabled: settings.enabled,
@@ -254,6 +261,7 @@ impl RemoteShared {
             last_remote_cut: st.last_cut.clone(),
             unsupported_requests: st.unsupported.iter().cloned().collect(),
             last_transition_duration: st.last_transition_duration,
+            program_scene: None,
         }
     }
 

@@ -13,7 +13,8 @@
 //! Both answer the program state plus `vban`, the #210 VBAN audio output's
 //! telemetry (`playback::vban_out::VbanStatus`), `input`, the #212 NDI
 //! input's (`playback::ndi_input::NdiInputStatus`), `remote`, the #213
-//! Companion remote control's (`remote::RemoteStatus`), and `follow`, the #215
+//! Companion remote control's (`remote::RemoteStatus`, #221 L3: with
+//! `program_scene`, SP-program's scene name), and `follow`, the #215
 //! OBS follow (`playback::program_follow::FollowStatus`). The program state
 //! itself carries `transition` (#215): the transition the next cut uses, the
 //! running window and the transition counters.
@@ -67,7 +68,7 @@ impl ProgramResponse {
             program,
             vban: bus.vban().status(),
             input: bus.input().status(&stored.input),
-            remote: bus.remote().status(&stored.remote),
+            remote: bus.remote().status(&stored.remote, &bus.on_air_now()),
             follow: bus.follow().status(&stored.follow),
         }
     }

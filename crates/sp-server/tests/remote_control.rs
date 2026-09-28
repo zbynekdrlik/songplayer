@@ -7,9 +7,10 @@
 //! connect → Identify → studio mode ON (#221) → GetSceneList (cg OBS's scenes
 //! 1:1) → a page-13 button, `SetCurrentPreviewScene(playlist scene)` +
 //! `TriggerStudioModeTransition` → `SP-program` cut to the playlist from
-//! SongPlayer's own playlists, cg OBS mirrored → cg OBS's
-//! CurrentProgramSceneChanged re-emitted → SetCurrentProgramScene(manual
-//! scene) → cg OBS switched, then a cut to "OBS manuál".
+//! SongPlayer's own playlists, cg OBS mirrored → Companion's feedback is
+//! SongPlayer's OWN `CurrentProgramSceneChanged` (#221 L3), and cg OBS's is
+//! never passed through → SetCurrentProgramScene(manual scene) → cg OBS
+//! switched, then a cut to "OBS manuál".
 //! Every wait is bounded; no sleep is used as synchronization.
 
 mod common;
@@ -238,25 +239,54 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         Some("7")
     );
 
-    // cg OBS's program-scene event reaches Companion (the button feedback).
-    fake.push_event(
-        "CurrentProgramSceneChanged",
-        json!({ "sceneName": "sp-fast", "sceneUuid": "uuid-sp-fast" }),
-    )
-    .await;
-    let event = loop {
+    // #221 L3: Companion's button feedback is SongPlayer's OWN program (the
+    // fake cg OBS emits no event for the mirrored switch).
+    let feedback = loop {
         let msg = next_json(&mut ws).await;
-        if msg["op"] == 5 {
+        if msg["op"] == 5 && msg["d"]["eventType"] == "CurrentProgramSceneChanged" {
             break msg;
         }
     };
     assert_eq!(
-        event,
+        feedback,
         json!({ "op": 5, "d": {
             "eventType": "CurrentProgramSceneChanged",
             "eventIntent": 4,
-            "eventData": { "sceneName": "sp-fast", "sceneUuid": "uuid-sp-fast" },
+            "eventData": { "sceneName": "sp-fast" },
         }})
+    );
+    // cg OBS's own program-scene event (a hand switch in its UI) is never
+    // passed through; its scene list is, and it is the witness: pushed
+    // after it on the same connection, it arrives after it.
+    fake.push_event(
+        "CurrentProgramSceneChanged",
+        json!({ "sceneName": "Slido", "sceneUuid": "uuid-Slido" }),
+    )
+    .await;
+    fake.push_event(
+        "SceneListChanged",
+        json!({ "scenes": [{ "sceneName": "sp-fast" }] }),
+    )
+    .await;
+    let mut before = Vec::new();
+    loop {
+        let msg = next_json(&mut ws).await;
+        if msg["op"] == 5 && msg["d"]["eventType"] == "SceneListChanged" {
+            break;
+        }
+        before.push(msg);
+    }
+    assert!(
+        before
+            .iter()
+            .all(|m| m["d"]["eventType"] != "CurrentProgramSceneChanged"),
+        "cg OBS's program scene reached Companion: {before:?}"
+    );
+    // SongPlayer's program scene, never cg OBS's.
+    let program = request(&mut ws, "GetCurrentProgramScene", None).await;
+    assert_eq!(
+        program["responseData"]["currentProgramSceneName"],
+        "sp-fast"
     );
 
     // A manual cg OBS scene: cg OBS switches, SP-program cuts to "OBS manuál".
@@ -280,7 +310,11 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     assert_eq!(pressed["requestStatus"]["code"], 600);
     assert_eq!(bus.status().source, Some(-1));
 
-    let remote = bus.remote().status(&remote::RemoteSettings::disabled());
+    let settings = remote::RemoteSettings::disabled();
+    let remote = bus.remote().status(&settings, &bus.on_air_now());
+    // #221 L3: the manual press put Slido on "OBS manuál"; the refused one
+    // kept it.
+    assert_eq!(remote.program_scene.as_deref(), Some("Slido"));
     assert_eq!(remote.clients, 1);
     let cut = remote.last_remote_cut.unwrap();
     assert_eq!((cut.scene.as_str(), cut.action), ("Nope", "keep"));

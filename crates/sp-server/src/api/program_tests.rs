@@ -468,6 +468,7 @@ async fn the_remote_block_reports_the_stored_settings_and_the_live_state() {
             "last_remote_cut": null,
             "unsupported_requests": [],
             "last_transition_duration": null,
+            "program_scene": null,
         })
     );
 
@@ -649,4 +650,34 @@ async fn a_dashboard_cut_is_published_with_the_playlists_catalog_scene() {
         (2, Some(-1), None)
     );
     assert_eq!(program_scene_name(&on_air).as_deref(), Some("OBS manuál"));
+}
+
+/// #221 L3: `remote.program_scene` is SP-program's scene from the one
+/// resolver — what the facade answers `GetCurrentProgramScene` with and
+/// feeds back to Companion — after a dashboard cut too.
+#[tokio::test]
+async fn the_remote_block_names_sp_programs_scene_after_a_dashboard_cut() {
+    let state = test_state().await;
+    let fast = add_playlist(&state.pool, "fast").await; // NDI output SP-fast
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(json["remote"]["program_scene"], serde_json::Value::Null);
+    let (status, json) = call(
+        state.clone(),
+        "POST",
+        "/api/v1/program/cut",
+        Some(serde_json::json!({ "source": fast })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["remote"]["program_scene"], "sp-fast");
+    enable_input(&state, "CG-OBS (manual)").await;
+    call(
+        state.clone(),
+        "POST",
+        "/api/v1/program/cut",
+        Some(serde_json::json!({ "source": -1 })),
+    )
+    .await;
+    let (_, json) = call(state, "GET", "/api/v1/program", None).await;
+    assert_eq!(json["remote"]["program_scene"], "OBS manuál");
 }

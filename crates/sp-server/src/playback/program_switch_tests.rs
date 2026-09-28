@@ -12,6 +12,7 @@ use tokio::time::Instant;
 
 use super::*;
 use crate::playback::program_bus::ProgramBus;
+use crate::playback::program_on_air::OnAir;
 use crate::remote::{MIRROR_EXTRA_WAIT, RemoteSettings, RemoteShared, UPSTREAM_TIMEOUT, Upstream};
 
 #[test]
@@ -83,7 +84,7 @@ fn pending_cut(shared: &RemoteShared) -> u64 {
 
 fn last_forward(shared: &RemoteShared) -> Option<String> {
     shared
-        .status(&RemoteSettings::disabled())
+        .status(&RemoteSettings::disabled(), &OnAir::default())
         .last_remote_cut
         .and_then(|cut| cut.cg_forward)
 }

@@ -371,9 +371,11 @@ fn event_carries_type_intent_and_data() {
 }
 
 #[test]
-fn only_the_scene_events_pass_through_on_the_scenes_intent() {
-    assert_eq!(passthrough_intent("CurrentProgramSceneChanged"), Some(4));
+fn only_cg_obs_scene_list_passes_through_on_the_scenes_intent() {
     assert_eq!(passthrough_intent("SceneListChanged"), Some(4));
+    // #221 L3: cg OBS's program scene never — the program feedback is
+    // SongPlayer's own (`studio_events`).
+    assert_eq!(passthrough_intent("CurrentProgramSceneChanged"), None);
     assert_eq!(passthrough_intent("CurrentPreviewSceneChanged"), None);
     assert_eq!(passthrough_intent("StreamStateChanged"), None);
     assert_eq!(passthrough_intent(""), None);
@@ -406,11 +408,24 @@ fn routes_of_the_companion_subset() {
         Route::Native(Reply::ok(Some(json!({ "studioModeEnabled": true }))))
     );
     assert_eq!(route("SetCurrentProgramScene"), Route::SetProgramScene);
+    // Only the scene/input list getters go to cg OBS.
+    assert_eq!(
+        FORWARDED_REQUESTS.as_slice(),
+        [
+            "GetSceneList",
+            "GetInputList",
+            "GetSceneItemList",
+            "GetGroupSceneItemList",
+        ]
+        .as_slice()
+    );
     for t in FORWARDED_REQUESTS {
         assert_eq!(route(t), Route::Forward, "{t}");
     }
-    // #221: the studio-mode requests of the page-13 buttons are served.
+    // #221: the studio-mode requests of the page-13 buttons are served, and
+    // (L3) the program scene is SP-program's own.
     for t in [
+        "GetCurrentProgramScene",
         "SetCurrentPreviewScene",
         "GetCurrentPreviewScene",
         "TriggerStudioModeTransition",
@@ -453,12 +468,12 @@ fn version_data_has_what_companion_reads_unguarded() {
             "GetVersion",
             "GetStudioModeEnabled",
             "SetCurrentProgramScene",
+            "GetCurrentProgramScene",
             "SetCurrentPreviewScene",
             "GetCurrentPreviewScene",
             "TriggerStudioModeTransition",
             "SetCurrentSceneTransitionDuration",
             "GetSceneList",
-            "GetCurrentProgramScene",
             "GetInputList",
             "GetSceneItemList",
             "GetGroupSceneItemList",
