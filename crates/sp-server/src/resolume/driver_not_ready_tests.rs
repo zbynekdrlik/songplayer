@@ -847,3 +847,151 @@ async fn an_answered_fetch_after_a_failed_one_restores_the_fast_path() {
         "the refresh that maps the clips fires one RecoveryEvent"
     );
 }
+
+/// Release 0.68.0 blocker 3 (design record 5863318980): a FAILED startup
+/// `/composition` (Arena's REST choking while it loads, the #157 case) left
+/// the map empty with no not-ready episode. The #157 retry 60 s later found
+/// the clips, but `became_ready` was false: no RecoveryEvent, so the playing
+/// song never got its title back (its line only at the next change). A
+/// failed fetch that leaves no SongPlayer clip mapped is NOT READY now: the
+/// episode opens on the failure, the #157 retry window still spaces the
+/// fetches (a failed attempt never takes the 2 s fast path), and the first
+/// mapping ends the episode with exactly one RecoveryEvent.
+#[tokio::test]
+async fn a_failed_startup_fetch_opens_the_episode_and_the_first_mapping_fires_one_event() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(500))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(composition_with(&[TITLE_TOKEN, SUBS_TOKEN])),
+        )
+        .mount(&server)
+        .await;
+    let (tx, mut rx) = broadcast::channel(16);
+    let mut driver =
+        HostDriver::new("127.0.0.1".into(), server.address().port()).with_recovery_channel(tx);
+    let base = Instant::now();
+
+    driver
+        .run_full_refresh(FullRefreshReason::Startup, base)
+        .await;
+    assert_eq!(composition_fetches(&server).await, 1);
+    assert_eq!(
+        driver.not_ready_since,
+        Some(base),
+        "no SongPlayer clip is mapped after the failure: not ready, from the failure"
+    );
+    assert_eq!(drain(&mut rx), 0, "a failed fetch fires nothing");
+
+    for k in 1..=5u64 {
+        driver.on_tick_at(base + secs(10 * k)).await;
+    }
+    assert_eq!(
+        composition_fetches(&server).await,
+        1,
+        "the #157 retry window still spaces the fetches after a failed one"
+    );
+    assert_eq!(drain(&mut rx), 0, "nothing mapped yet");
+
+    driver.on_tick_at(base + secs(60)).await;
+    assert_eq!(composition_fetches(&server).await, 2, "the retry");
+    assert!(
+        driver.clip_mapping.contains_key(SUBS_TOKEN),
+        "the retry maps the clips"
+    );
+    assert_eq!(driver.not_ready_since, None, "the mapping ends the episode");
+    assert_eq!(
+        drain(&mut rx),
+        1,
+        "the first mapping fires exactly one RecoveryEvent: the engine re-syncs the title"
+    );
+}
+
+/// Blocker 3's other side: a failed fetch while SongPlayer's clips ARE
+/// mapped is the plain #157 case (Arena's REST choking), and the map is
+/// still valid, so no episode opens. A second failure inside an episode
+/// keeps the episode's first instant (its fast window never extends).
+#[tokio::test]
+async fn a_failed_fetch_opens_an_episode_only_without_songplayer_clips() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(composition_with(&[SUBS_TOKEN])))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let mut driver = HostDriver::new("127.0.0.1".into(), server.address().port());
+    let base = Instant::now();
+    driver.refresh_mapping(base).await.unwrap();
+
+    assert!(driver.refresh_mapping(base + secs(60)).await.is_err());
+    assert_eq!(
+        driver.not_ready_since, None,
+        "the clips are still mapped: not an episode"
+    );
+
+    driver.clip_mapping.clear();
+    driver.consecutive_failures = 0; // the breaker (3 failures) is another case
+    assert!(driver.refresh_mapping(base + secs(120)).await.is_err());
+    assert!(driver.refresh_mapping(base + secs(180)).await.is_err());
+    assert_eq!(
+        driver.not_ready_since,
+        Some(base + secs(120)),
+        "no clips: the episode opens on the first failure and keeps its start"
+    );
+}
+
+/// Review round 1: a failed attempt never takes the 2 s fast path, so an
+/// episode counted from its failure could be past its 120 s window before
+/// Arena answered at all (three failures 60 s apart). The composition then
+/// answered, still loading, and waited out the 60 s retry instead of the
+/// 2 s ticks. The first ANSWER restarts a failure's episode; after that its
+/// start holds (it is never restamped on each refresh).
+#[tokio::test]
+async fn a_failed_fetch_s_episode_restarts_at_the_first_answer() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(500))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"layers": []})))
+        .mount(&server)
+        .await;
+    let mut driver = HostDriver::new("127.0.0.1".into(), server.address().port());
+    let base = Instant::now();
+    assert!(driver.refresh_mapping(base).await.is_err());
+    assert_eq!(driver.not_ready_since, Some(base));
+
+    driver.refresh_mapping(base + secs(180)).await.unwrap();
+    assert_eq!(
+        driver.not_ready_since,
+        Some(base + secs(180)),
+        "the first answer restarts the episode"
+    );
+    assert_eq!(
+        driver.tick_period(base + secs(182), secs(10)),
+        secs(2),
+        "a fresh fast window: 2 s ticks while Arena loads"
+    );
+    driver.refresh_mapping(base + secs(184)).await.unwrap();
+    assert_eq!(
+        driver.not_ready_since,
+        Some(base + secs(180)),
+        "then its start holds"
+    );
+}

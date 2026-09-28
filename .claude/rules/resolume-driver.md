@@ -83,6 +83,34 @@ What the driver does now (`refresh_mapping(now)`):
   a `RecoveryEvent` when the map changed and the step has not fired one yet
   (see below). The engine's `handle_resolume_recovery` re-pushes the title and
   the current subtitle state.
+- **A FAILED fetch with no SongPlayer clip mapped is not ready too**
+  (release 0.68.0 blocker 3, design record 5863318980). `refresh_mapping`'s
+  Err arm opens the episode (`not_ready_since = now` when none is open, an
+  INFO "fetch failed with no SongPlayer clips mapped" line). That covers a
+  startup fetch and a map an eviction emptied.
+  - Before, a failed startup `/composition` (the #157 case) left the map
+    empty with NO episode. The #157 retry 60 s later mapped the clips as a
+    `Startup` refresh, `became_ready` was false, no RecoveryEvent fired, and
+    the playing song's title never came back.
+  - The #157 retry window is unchanged: the fast path needs an answered
+    attempt. Only the episode flag, and so the ready event, change.
+  - It runs BEFORE `apply_outcome(false)`, so a failure that opens the
+    breaker still ends the episode (the close opens a fresh one).
+  - **The first ANSWER restarts it** (review round 1,
+    `not_ready_by_failure`). A failed attempt never takes the fast path, so
+    counted from the failure the 120 s window could be over before Arena
+    answered at all (three failures 60 s apart), and the answered, still
+    loading composition waited out the 60 s retry. The first answered
+    fetch of an episode the Err arm opened restarts it there. Only that
+    one: an episode an answer, a 404 or a breaker close opened has another
+    start and is never restamped
+    (`a_failed_fetch_s_episode_restarts_at_the_first_answer`).
+  - Residual (pre-existing, #217 addendum 2): an episode a breaker close or
+    a 404 opened whose `/composition` keeps failing for over 120 s is not
+    restarted at its first answer; it gets the 60 s retry cadence then.
+  - A failure while SongPlayer's clips ARE mapped opens nothing (Arena's
+    REST choking, the map is valid), and an open episode keeps its start
+    (`a_failed_fetch_opens_an_episode_only_without_songplayer_clips`).
 - **An evicted map is not ready too.** Opening the breaker empties
   `clip_mapping` and clears `not_ready_since` (the outage ends any episode).
   The probe that closes the breaker sets `not_ready_since = now`
@@ -263,6 +291,17 @@ shutdown only, and no RecoveryEvent reached the engine again.
 - Test with a capacity-1 channel and three sends BEFORE the task starts:
   `(lagged)`, then the kept third, then a later one; drop the sender →
   it ends (`recovery_tests.rs`).
+- **Subscribed before the first host driver** (release 0.68.0 blocker 4).
+  `ResolumeRegistry::new` keeps no receiver, and a broadcast sent with none
+  is dropped. `recovery::registry_with_forwarder` builds the registry,
+  subscribes and spawns the forwarder, and only THEN calls `add_host`;
+  `lib.rs` calls it with the host rows. The forwarded events queue on
+  `engine_tx` (64) until the engine loop runs. Before, `lib.rs` subscribed
+  after the whole startup (up to ~55 s), and a startup not-ready → ready
+  event was lost. Pinned by
+  `a_recovery_event_right_after_the_registry_is_built_reaches_the_engine`:
+  a send right after the build, with no await between, reaches the engine
+  channel (the `#[cfg(test)]` `ResolumeRegistry::recovery_sender`).
 
 ## Subtitle clips: blank, never skip (#217 addendum 2)
 
@@ -370,6 +409,12 @@ the driver compares it with what it did (above).
   `Started`, never the last song's (review round 2). A resume
   (`handle_play_video` with a position) hides 3.5 s before the song's REAL
   end. The hide timer used to count the full duration from the resume.
+  Since the release 0.68.0 review round 1 it also drops the last song's
+  `lyrics_state` and sets `cached_position_ms` to the Play's start: a
+  recovery before the new `Started` re-pushed the old song's line, and a
+  pause there recorded the old song's position for the new one. Since
+  round 2 it clears `paused_at` too: a later ▶ resumed the old song over
+  the new one.
 - **A Play on program re-syncs the wall at once (review round 4,
   `resync_after_play`, after every Play).** `begin_play` closed the old
   song's window and cancelled its hide timer, and the new show timer comes
@@ -441,6 +486,24 @@ the driver compares it with what it did (above).
   with no title, and a later one with no hide 3.5 s before the end. A song
   with no clock yet arms nothing; its `Started` will. Every scene change
   re-arms (cheap tasks, the same deadlines).
+- **Both timers write the clip only on program, and a pause cancels them**
+  (release 0.68.0 blockers 1a + 1c). The hide timer reads `scene_active`
+  when it fires, like the show timer. Before, a hide timer armed by a song
+  that started off program (a playlist held through a #215 transition)
+  faded out the on-program playlist's title. `PlayAction::Pause` cancels
+  the song's timers: a paused song's hide timer fired at its planned end.
+  On program the pause then clears the line (`clear_lyrics_display`) and
+  re-syncs the title (`resync_after_play`): a paused song is neither a
+  title candidate nor re-pushed by a recovery, so without it both stayed up
+  until some re-sync took them down. A `Started` that a pause overtook
+  (`paused_at` set since the last Play; a ▶ only reads it, so a failed
+  resume keeps it) arms nothing and clears nothing. The trade-off: if the
+  resume's song lookup keeps failing, every ▶ is a logged no-op (it used to
+  fall through to the scene-on selection on the second press); a setlist
+  pick, Previous or a scene-on still starts a song.
+  The held playlist itself no longer starts a song
+  (`.claude/rules/program-transition.md`, "A held playlist has no side
+  effects").
 - **Several due** (a program scene with more than one SongPlayer playlist;
   they share the one `#sp-title` clip): the highest playlist id, so the
   answer never depends on HashMap order. Residual: the lower id's own show
@@ -456,6 +519,19 @@ the driver compares it with what it did (above).
 - **`cached_position_ms`** is the subtitle and pause position only. The
   `Started` handler no longer zeroes it: a Pause before the first Position
   report recorded 0 and resumed the song from its start (review round 1).
+  `begin_play` sets it to the Play's start (0, or the resume's position),
+  and a `Position` before the new song's `Started` (no title clock yet) does
+  not move it: that is the old song's last report, sent before its
+  pipeline read the Play (`Position` names no video; review round 4).
+  Residual (older: pipeline events name no Play): the gate is exact only
+  when the old song's `Started` was handled before the new Play. If the
+  engine stalls and a pick is taken ahead of a still-queued `Started(A)`,
+  that `Started` fixes a clock for B, and A's queued reports pass until
+  `Started(B)`. A still-queued `Ended(A)` is likewise taken as B's: it
+  replaces B with the next song (Continuous), restarts B (Loop) or stops B
+  (Single). Exact attribution needs a
+  per-pipeline count of unanswered Plays; it was left out of the release
+  0.68.0 blockers (returned to the supervisor as a follow-up candidate).
 - Pinned in `tests_scene_change.rs` (`Window::{Due, BeforeShow, AfterHide,
   OtherSong, NotStarted}`, the Play re-sync on and off program, the failed
   reads, the window-less resume), `title_tests.rs` (the clock's instants and

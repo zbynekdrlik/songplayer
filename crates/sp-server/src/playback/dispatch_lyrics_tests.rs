@@ -100,6 +100,7 @@ fn install_pipeline(
         scene_active: Arc::new(AtomicBool::new(scene_active)),
         title_show_abort: None,
         title_hide_abort: None,
+        scene_off_due: None,
         cached_song: "Song".into(),
         cached_artist: "Artist".into(),
         cached_duration_ms: 10_000,

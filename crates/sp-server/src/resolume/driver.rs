@@ -229,8 +229,9 @@ fn is_ip_literal(host: &str) -> bool {
     host.parse::<IpAddr>().is_ok()
 }
 
-/// Information about a discovered Resolume clip.
-#[derive(Debug, Clone)]
+/// Information about a discovered Resolume clip (compared to tell a changed
+/// clip map).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClipInfo {
     pub clip_id: i64,
     pub text_param_id: i64,
@@ -281,12 +282,18 @@ pub struct HostDriver {
     /// Monotonic start of the current NOT READY episode: the first refresh
     /// whose `/composition` answered with none of SongPlayer's clips (Arena's
     /// REST answers before its composition has loaded), the probe that
-    /// closed the breaker (the outage evicted the map), or a push answered
-    /// 404 (a relaunch gave the clips new ids, #217 addendum 2). `None` while the
+    /// closed the breaker (the outage evicted the map), a push answered 404
+    /// (a relaunch gave the clips new ids, #217 addendum 2), or a failed fetch
+    /// with no SongPlayer clip mapped (blocker 3). `None` while the
     /// mapping is ready. Drives the `NotReady` refetch and the 2 s tick; the
     /// refresh that clears it fires a `RecoveryEvent` when it changed the map
     /// (#217).
     not_ready_since: Option<Instant>,
+    /// The start of a not-ready episode a FAILED fetch opened (`refresh_mapping`'s
+    /// Err arm, release 0.68.0 blocker 3), until a fetch answers. A failed
+    /// attempt never takes the fast path, so the first answer restarts the
+    /// episode there: its 120 s window counts from an answer (review round 1).
+    not_ready_by_failure: Option<Instant>,
     /// Whether the current driver step (one liveness tick, one command, or
     /// the startup refresh) has already broadcast a `RecoveryEvent`. The
     /// engine's re-push for it queues on this driver's command channel and
@@ -334,6 +341,7 @@ impl HostDriver {
             last_full_attempt_at: None,
             last_full_attempt_failed: false,
             not_ready_since: None,
+            not_ready_by_failure: None,
             recovery_sent_this_step: false,
             stale_id_seen: AtomicBool::new(false),
             refused_ids_at: None,
@@ -687,13 +695,14 @@ impl HostDriver {
         match self.fetch_mapping_inner().await {
             Ok(new_mapping) => {
                 self.last_full_attempt_failed = false;
+                let by_failure = self.not_ready_by_failure.take();
                 let ready = has_songplayer_clips(&new_mapping);
                 let became_ready = ready && self.not_ready_since.is_some();
                 if ready {
                     self.not_ready_since = None;
                     self.last_full_refresh_ok_at = Some(now);
                     self.last_full_refresh_ts = Some(chrono::Utc::now());
-                } else if self.not_ready_since.is_none() {
+                } else if self.not_ready_since.is_none() || self.not_ready_since == by_failure {
                     self.not_ready_since = Some(now);
                     info!(
                         host = %self.host,
@@ -736,6 +745,17 @@ impl HostDriver {
             }
             Err(e) => {
                 self.last_full_attempt_failed = true;
+                // No SongPlayer clip mapped (startup, eviction) = not ready
+                // (release 0.68.0 blocker 3): the first map fires the event.
+                // The #157 retry window still spaces the fetches.
+                if !has_songplayer_clips(&self.clip_mapping) && self.not_ready_since.is_none() {
+                    self.not_ready_since = Some(now);
+                    self.not_ready_by_failure = Some(now);
+                    info!(
+                        host = %self.host,
+                        "Resolume composition fetch failed with no SongPlayer clips mapped — mapping not ready"
+                    );
+                }
                 self.apply_outcome(false);
                 Err(e)
             }
@@ -950,15 +970,6 @@ pub fn parse_composition(composition: &serde_json::Value) -> HashMap<String, Vec
 
     mapping
 }
-
-// Implement PartialEq for ClipInfo so we can compare mappings.
-impl PartialEq for ClipInfo {
-    fn eq(&self, other: &Self) -> bool {
-        self.clip_id == other.clip_id && self.text_param_id == other.text_param_id
-    }
-}
-
-impl Eq for ClipInfo {}
 
 #[path = "driver_push.rs"]
 mod push;

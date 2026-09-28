@@ -18,6 +18,14 @@ wall used to show those lines one by one with `track.line_at()`, which returns
 vanish: 310.7 s of the 633 s song was blank, and 79 fragments were shown for
 under 1.5 s.
 
+**Who may send a line** (release 0.68.0 blockers, design record 5863318980):
+`dispatch_lyrics_if_changed` sends nothing for a playlist HELD off program
+through a #215 transition (`scene_off_due` is set), and `clear_lyrics_display`
+follows the same gates. The wall (`#sp-subs*`) takes only on-program lines
+and clears; the karaoke WS and the Presenter also take a song played off
+program by hand. Details: `.claude/rules/program-transition.md`, "A held
+playlist has no side effects".
+
 The fix is **display-only**. `lyrics/display_plan.rs` builds a plan once per
 loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).
 The Resolume wall (`resolume_lines_with_next`, also used by

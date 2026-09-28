@@ -136,6 +136,14 @@ struct PlaylistPipeline {
     title_show_abort: Option<tokio::task::AbortHandle>,
     /// Abort handle for the title-hide timer (3.5s before end).
     title_hide_abort: Option<tokio::task::AbortHandle>,
+    /// #215: the pending re-check (`SceneOffDue`: its id, its sleeping task)
+    /// of a playlist HELD off program through a transition (`scene_off.rs`);
+    /// `Some` = held. Its pause, a scene back on program, an operator's pick
+    /// and a newer hold end it (`end_hold`). A held playlist has no side
+    /// effects: no lyrics line goes out, and its song's end, a failure or a
+    /// skip pause it instead of starting a song off program (release 0.68.0
+    /// blockers, design record 5863318980).
+    scene_off_due: Option<(u64, tokio::task::AbortHandle)>,
     /// Cached song/artist/duration so `Position` events can re-broadcast
     /// `NowPlaying` without re-querying the DB.
     cached_song: String,
@@ -154,7 +162,9 @@ struct PlaylistPipeline {
     /// `handle_previous`. Bounded to [`PREVIOUS_HISTORY_CAPACITY`].
     history: VecDeque<i64>,
     /// Active lyrics state for karaoke display. Loaded when a video with
-    /// lyrics starts; cleared when the video ends.
+    /// lyrics starts; cleared by every Play (`begin_play`), when the video
+    /// ends and when the pipeline pauses. A scene-off keeps it through the
+    /// #215 hold (design record 5863318980).
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
     /// Presenter-push debounce: last EN text sent, compared each 500ms tick.
     last_presenter_text: Option<String>,
@@ -162,10 +172,12 @@ struct PlaylistPipeline {
     last_resolume_subtitles_signature: Option<String>,
     /// Last karaoke ws line text; dedup key for `dispatch_lyrics_if_changed`. Reset on song change.
     last_lyrics_ws_signature: Option<String>,
-    /// Last reported playback position (ms). Updated on every Position event
-    /// (~500 ms throttle); used by handle_resolume_recovery to re-push the
-    /// current subtitle line. The re-push line may be up to one Position
-    /// tick (~500 ms) behind the audio's actual playhead.
+    /// Last reported playback position (ms): the Play's start (`begin_play`,
+    /// 0 or a resume's position), then every Position event once the song's
+    /// `Started` fixed its title clock (an earlier one is the old song's,
+    /// release 0.68.0 review round 4). Read by the Pause snapshot and by
+    /// handle_resolume_recovery to re-push the current subtitle line, which
+    /// may be up to one Position tick (~500 ms) behind the actual playhead.
     cached_position_ms: u64,
     /// The title window of the song whose `Started` the engine last handled:
     /// the instants the title timers sleep until, and that a recovery or a
@@ -450,6 +462,9 @@ impl PlaybackEngine {
         let went_off_program = if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
             // Release pairs with Acquire in the title-show task.
             let prev = pp.scene_active.swap(on_program, Ordering::Release);
+            if on_program {
+                pp.end_hold(); // #215: back on program, no pause is pending
+            }
             prev && !on_program
         } else {
             false
@@ -457,7 +472,12 @@ impl PlaybackEngine {
         if went_off_program {
             if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                 pp.cancel_title_timers();
-                pp.lyrics_state = None;
+                // Design record 5863318980 item 2: the lyrics stay loaded
+                // through the #215 hold (a scene back on program resumes its
+                // lines; the pause drops them). The wall is cleared below and
+                // the stage display moves on, so their dedup keys go too.
+                pp.last_resolume_subtitles_signature = None;
+                pp.last_presenter_text = None;
             }
             let _ = self
                 .resolume_tx
@@ -562,6 +582,10 @@ impl PlaybackEngine {
                 pp.mode = *new_mode;
             }
         }
+        // #215: a skip of a playlist held off program starts no song there.
+        if matches!(cmd, PlayEvent::Skip) && self.pause_if_held(playlist_id, "skipped").await {
+            return;
+        }
         self.apply_event(playlist_id, cmd).await;
     }
 
@@ -593,6 +617,7 @@ impl PlaybackEngine {
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.current_video_id = Some(video_id);
                     pp.state = PlayState::Playing { video_id };
+                    pp.end_hold(); // #215: the operator's pick plays, off program too
                     info!(
                         playlist_id,
                         video_id, %video_path, %audio_path,
@@ -875,8 +900,26 @@ impl PlaybackEngine {
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.paused_at = pp.current_video_id.map(|v| (v, pp.cached_position_ms));
                     pp.pipeline.send(PipelineCommand::Pause);
+                    // A paused song writes nothing more (design record
+                    // 5863318980 items 1c + 2): its title timers and a
+                    // hold's re-check go, and its lyrics, which a scene-off
+                    // kept through the hold. A resume's `Started` reloads them.
+                    pp.cancel_title_timers();
+                    pp.end_hold();
+                    pp.lyrics_state = None;
                     debug!(playlist_id, paused_at = ?pp.paused_at, "paused pipeline");
                 }
+                // On program, a paused song's title and line are not due: the
+                // wall says so now, as any later re-sync would (review rounds
+                // 1-2). Off program (the hold's end) nothing of it is up.
+                let on_program = self
+                    .pipelines
+                    .get(&playlist_id)
+                    .is_some_and(|pp| pp.scene_active.load(Ordering::Acquire));
+                if on_program {
+                    self.clear_lyrics_display(playlist_id);
+                }
+                self.resync_after_play(playlist_id).await;
             }
 
             PlayAction::SendBlack => {
@@ -913,6 +956,9 @@ mod tests_engine_setters;
 #[cfg(test)]
 #[path = "tests_history.rs"]
 mod tests_history;
+#[cfg(test)]
+#[path = "tests_hold.rs"]
+mod tests_hold;
 #[cfg(test)]
 #[path = "tests_play_video.rs"]
 mod tests_play_video;

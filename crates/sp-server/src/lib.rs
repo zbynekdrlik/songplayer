@@ -273,14 +273,20 @@ pub async fn start(
         sqlx::query("SELECT id, host, port FROM resolume_hosts WHERE is_enabled = 1")
             .fetch_all(&pool)
             .await?;
-    let mut resolume_registry_mut = resolume::ResolumeRegistry::new();
-    for row in &resolume_rows {
-        let host_id: i64 = row.get("id");
-        let host: String = row.get("host");
-        let port: i32 = row.get("port");
-        resolume_registry_mut.add_host(host_id, host, port as u16, shutdown_tx.subscribe());
-    }
-    let resolume_registry = Arc::new(resolume_registry_mut);
+    let resolume_hosts: Vec<(i64, String, u16)> = resolume_rows
+        .iter()
+        .map(|row| {
+            let port: i32 = row.get("port");
+            (row.get("id"), row.get("host"), port as u16)
+        })
+        .collect();
+    // Its RecoveryEvent → engine forwarder (the title + line re-sync after a
+    // host comes back) is subscribed before the first host driver starts.
+    let resolume_registry = Arc::new(playback::recovery::registry_with_forwarder(
+        resolume_hosts,
+        engine_tx.clone(),
+        &shutdown_tx,
+    ));
 
     let state = AppState {
         pool: pool.clone(),
@@ -768,16 +774,6 @@ pub async fn start(
         }
     }
     engine.start_program(program_bus, &shutdown_tx).await;
-
-    // Forward the Resolume registry's RecoveryEvents to the engine
-    // (EngineCommand::ResolumeRecovered: it re-syncs the title and the line
-    // after a host comes back); it survives a lagged receiver (#217 addendum 3).
-    let recovery_rx = resolume_registry.subscribe_recovery();
-    tokio::spawn(playback::recovery::forward_recovery_events(
-        recovery_rx,
-        engine_tx.clone(),
-        shutdown_tx.subscribe(),
-    ));
 
     // Engine subscribes to the download worker's broadcast so that
     // `processed:<youtube_id>` events can rewake pipelines stuck in

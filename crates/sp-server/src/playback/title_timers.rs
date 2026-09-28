@@ -1,11 +1,13 @@
 //! A song's title timers (#217 addendum 3). The show timer (`Started` +
 //! 1.5 s) pushes the title; the hide timer (3.5 s before the end) takes it
-//! down. They sleep until the instants of the song's `TitleClock`, the same
-//! instants a recovery or a scene-on reads (`recovery.rs`), so a `Resync`
-//! never contradicts a timer. They used to be armed inline in the `Started`
-//! handler; they live here so a scene-on can re-arm them after a scene-off
-//! cancelled them. A Play drops the old song's clock and timers
-//! (`begin_play`) and re-syncs the wall (`resync_after_play`).
+//! down, each only while its scene is on program when it fires (release
+//! 0.68.0 blocker 1a). They sleep until the instants of the song's
+//! `TitleClock`, the same instants a recovery or a scene-on reads
+//! (`recovery.rs`), so a `Resync` never contradicts a timer. They used to be
+//! armed inline in the `Started` handler; they live here so a scene-on can
+//! re-arm them after a scene-off cancelled them. A Play drops the old song's
+//! clock and timers (`begin_play`) and re-syncs the wall
+//! (`resync_after_play`); a pause cancels the timers.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -53,8 +55,13 @@ impl PlaybackEngine {
             ));
         }
         if let Some(hide_at) = clock.hide_at.filter(|hide_at| *hide_at > now) {
-            pp.title_hide_abort =
-                Some(spawn_hide_timer(obs_cmd, resolume_tx, playlist_id, hide_at));
+            pp.title_hide_abort = Some(spawn_hide_timer(
+                obs_cmd,
+                resolume_tx,
+                pp.scene_active.clone(),
+                playlist_id,
+                hide_at,
+            ));
         }
         debug!(
             playlist_id,
@@ -93,7 +100,9 @@ impl PlaybackEngine {
     /// after its `Started`; if another on-program playlist's title is due,
     /// the Resync names that one. The timers and a `Resync` then never
     /// disagree between the Play and the new `Started`. Off program the
-    /// playlist's title is not on the wall: nothing is sent.
+    /// playlist's title is not on the wall: nothing is sent. A pause calls it
+    /// too: a paused song's title is not due, and its timers are cancelled
+    /// (release 0.68.0 blockers, review round 1).
     pub(super) async fn resync_after_play(&self, playlist_id: i64) {
         let on_program = self
             .pipelines
@@ -110,11 +119,19 @@ impl super::PlaylistPipeline {
     /// A Play command starts a song (#217 addendum 3). The last song's title
     /// clock and timers go: a skipped song's pending show timer must not push
     /// its title before the new `Started`, which fixes the new clock. That
-    /// clock counts from `start_ms`, 0 or a resume's position.
+    /// clock counts from `start_ms`, 0 or a resume's position. The last
+    /// song's lyrics and position go too (release 0.68.0 blockers, review
+    /// round 1): a recovery before the new `Started` re-pushed the old song's
+    /// line, and a pause there recorded the old song's position for the new.
+    /// So does the last pause's resume point (review round 2): a later ▶
+    /// resumed the old song over the new one.
     pub(super) fn begin_play(&mut self, start_ms: u64) {
         self.title_clock = None;
         self.cancel_title_timers();
         self.play_start_ms = start_ms;
+        self.lyrics_state = None;
+        self.cached_position_ms = start_ms;
+        self.paused_at = None;
     }
 }
 
@@ -144,16 +161,24 @@ fn spawn_show_timer(
 }
 
 /// The hide timer: at `hide_at`, hide the Resolume title and clear the OBS
-/// title text (`title::push_hide`).
-#[cfg_attr(test, mutants::skip)] // spawn glue on the real clock; push_hide is unit-tested
+/// title text (`title::push_hide`) when the scene is still on program (read
+/// at fire time, like the show timer). A playlist off program, e.g. held
+/// through a #215 transition, must not take down the title of the playlist
+/// on program (design record 5863318980 item 1a, `tests_hold.rs`).
+#[cfg_attr(test, mutants::skip)] // spawn glue on the real clock; push_hide is unit-tested, the scene check by tests_hold.rs
 fn spawn_hide_timer(
     obs_cmd: Option<mpsc::Sender<ObsCommand>>,
     resolume_tx: mpsc::Sender<ResolumeCommand>,
+    scene_active: Arc<AtomicBool>,
     playlist_id: i64,
     hide_at: Instant,
 ) -> AbortHandle {
     tokio::spawn(async move {
         tokio::time::sleep_until(hide_at).await;
+        if !scene_active.load(Ordering::Acquire) {
+            debug!(playlist_id, "title hide suppressed — off program");
+            return;
+        }
         title::push_hide(obs_cmd.as_ref(), &resolume_tx).await;
         debug!(playlist_id, "title hidden");
     })

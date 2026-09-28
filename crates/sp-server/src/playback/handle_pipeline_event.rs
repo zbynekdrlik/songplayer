@@ -16,10 +16,11 @@ impl PlaybackEngine {
     /// Handle an event emitted by a pipeline thread.
     ///
     /// This is the top-level orchestration entry point — it dispatches on
-    /// pipeline events and spawns title-show / title-hide timer tasks. Unit
-    /// testing it requires a full DB + OBS + Resolume harness; the
-    /// individual concerns (timer cancellation, title formatting, get_video_title_info)
-    /// have dedicated unit tests below.
+    /// pipeline events and spawns title-show / title-hide timer tasks. Its
+    /// branches are pinned by behaviour tests on an in-memory DB
+    /// (`tests_hold.rs`, `tests_scene_change.rs`, `tests_play_video.rs`); the
+    /// individual concerns (timer cancellation, title formatting,
+    /// get_video_title_info) have dedicated unit tests.
     #[cfg_attr(test, mutants::skip)]
     pub async fn handle_pipeline_event(&mut self, playlist_id: i64, event: PipelineEvent) {
         match &event {
@@ -28,6 +29,23 @@ impl PlaybackEngine {
                 //    switches from "Nothing playing" immediately.
                 self.broadcast_now_playing_on_start(playlist_id, *duration_ms)
                     .await;
+
+                // A Play that a pause overtook (the #215 hold's end, the
+                // dashboard's Pause): the song is loaded, but paused. None of
+                // it reaches the wall, the stage display or the title timers
+                // (release 0.68.0 blockers, review round 1); its resume's
+                // `Started` does all of that. "Paused since the last Play" is
+                // `paused_at` (every Pause sets it, every Play clears it), not
+                // the state: a failed selection leaves WaitingForScene with
+                // the song still playing (review round 5).
+                if self
+                    .pipelines
+                    .get(&playlist_id)
+                    .is_some_and(|pp| pp.paused_at.is_some())
+                {
+                    debug!(playlist_id, "started, but paused — nothing to show");
+                    return;
+                }
 
                 // Load lyrics for karaoke display
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
@@ -114,13 +132,23 @@ impl PlaybackEngine {
                 // Throttled NowPlaying rebroadcast for the dashboard progress
                 // bar. Title hide is timer-based (spawned in the Started
                 // handler above) so no position-driven hide work happens here.
-                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                // A report before the new song's `Started` (a Play clears the
+                // clock) is the OLD song's: `Position` names no video, and it
+                // must not move the new song's pause point (review round 4).
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id)
+                    && pp.title_clock.is_some()
+                {
                     pp.cached_position_ms = *position_ms;
                 }
                 self.dispatch_lyrics_if_changed(playlist_id, *position_ms);
                 self.maybe_broadcast_position_update(playlist_id, *position_ms, *duration_ms);
             }
             PipelineEvent::Ended => {
+                // #215: held off program, it pauses: no song starts there, and
+                // the shared subtitle clips belong to the playlist on program.
+                if self.pause_if_held(playlist_id, "its song ended").await {
+                    return;
+                }
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.cancel_title_timers();
                     pp.lyrics_state = None;
@@ -130,6 +158,9 @@ impl PlaybackEngine {
             }
             PipelineEvent::Error(msg) => {
                 warn!(playlist_id, %msg, "pipeline error");
+                if self.pause_if_held(playlist_id, "its song failed").await {
+                    return;
+                }
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.cancel_title_timers();
                     pp.lyrics_state = None;
@@ -138,7 +169,7 @@ impl PlaybackEngine {
                 self.apply_event(playlist_id, PlayEvent::VideoError(msg.clone()))
                     .await;
             }
-            PipelineEvent::SceneOffDue => self.scene_off_due(playlist_id).await,
+            PipelineEvent::SceneOffDue(due) => self.scene_off_due(playlist_id, *due).await,
             ev @ PipelineEvent::HealthSnapshot { .. } => {
                 self.handle_health_snapshot(playlist_id, ev.clone());
                 // #198 item 5: the sync handler only QUEUES a changed receiver

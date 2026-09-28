@@ -5,8 +5,9 @@
 //! Contract: `Pause` (via `PlayAction::Pause` in `execute_action`) captures
 //! `(current_video_id, cached_position_ms)` into `PlaylistPipeline::paused_at`.
 //! `handle_engine_play` (invoked from `lib.rs` on `EngineCommand::Play`)
-//! consumes the snapshot — if `Some`, resumes the same video at the recorded
-//! position via `handle_play_video`; otherwise falls back to the prior
+//! reads the snapshot — if `Some`, resumes the same video at the recorded
+//! position via `handle_play_video`, whose Play clears it (a failed lookup
+//! keeps it, the pipeline stays paused); otherwise falls back to the prior
 //! scene-on dispatch so fresh starts still pick a new video.
 //! `handle_play_video` clears any stale `paused_at` so picking a different
 //! setlist row after pause doesn't keep the old snapshot. `handle_play_video`
@@ -74,6 +75,12 @@ impl PlaybackEngine {
             }
         }
 
+        // #215: a pick inside a transition hold ends the hold (review rounds
+        // 1 + 3): the song plays like any song played off program by hand,
+        // and the clear below is not skipped as a held playlist's.
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            pp.end_hold();
+        }
         // Clear Resolume `#sp-subs` and Presenter immediately so the previous
         // song's last line doesn't linger during the new song's intro
         // (e.g. song 17 has ~19s before first lyric).
@@ -135,8 +142,11 @@ impl PlaybackEngine {
         self.resync_after_play(playlist_id).await;
     }
 
-    /// Consume paused snapshot for `playlist_id`; `None` if never paused. #88.
-    pub fn take_paused_snapshot(&mut self, playlist_id: i64) -> Option<(i64, u64)> {
+    /// Test-only: consume the paused snapshot for `playlist_id`; `None` if
+    /// never paused. #88. (The ▶ only reads it since release 0.68.0 review
+    /// round 6; `handle_play_video` clears it with its Play.)
+    #[cfg(test)]
+    pub(crate) fn take_paused_snapshot(&mut self, playlist_id: i64) -> Option<(i64, u64)> {
         self.pipelines
             .get_mut(&playlist_id)
             .and_then(|pp| pp.paused_at.take())
@@ -147,7 +157,12 @@ impl PlaybackEngine {
     /// reload showed ▶ Prehrať) is a no-op — the scene-on fallback would flag an
     /// off-program output as on program and re-push its title to the wall.
     pub async fn handle_engine_play(&mut self, playlist_id: i64) {
-        match self.take_paused_snapshot(playlist_id) {
+        // Read, not take: `handle_play_video` clears the snapshot with its
+        // Play. A resume whose song lookup fails sends no Play, so the
+        // pipeline stays paused and keeps its resume point (release 0.68.0
+        // review round 6: an empty one let a queued `Started` through).
+        let snapshot = self.pipelines.get(&playlist_id).and_then(|pp| pp.paused_at);
+        match snapshot {
             Some((video_id, position_ms)) => {
                 self.handle_play_video(playlist_id, video_id, Some(position_ms))
                     .await;

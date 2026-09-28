@@ -128,6 +128,12 @@ impl ResolumeRegistry {
         self.recovery_tx.subscribe()
     }
 
+    /// Test-only: the channel the host drivers fire their `RecoveryEvent`s on.
+    #[cfg(test)]
+    pub(crate) fn recovery_sender(&self) -> broadcast::Sender<RecoveryEvent> {
+        self.recovery_tx.clone()
+    }
+
     /// Start a worker for a host. Spawns a background task and stores the
     /// command channel sender.
     pub fn add_host(
