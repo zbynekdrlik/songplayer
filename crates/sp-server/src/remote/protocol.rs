@@ -587,8 +587,9 @@ pub fn program_scene_data(scene: &str) -> Value {
     json!({ "sceneName": scene, "currentProgramSceneName": scene })
 }
 
-/// #221 L3: the error of `GetCurrentProgramScene` while nothing is on
-/// `SP-program` (604 `InvalidResourceState`, like [`no_scene`]).
+/// #221 L3: the error of `GetCurrentProgramScene` while SP-program has no
+/// scene name: nothing is on it, or a playlist whose catalog names no scene
+/// (604 `InvalidResourceState`, like [`no_scene`]).
 pub fn nothing_on_program() -> Reply {
     Reply::error(STATUS_INVALID_RESOURCE_STATE, "Nothing is on SP-program.")
 }

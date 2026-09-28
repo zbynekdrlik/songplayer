@@ -30,8 +30,11 @@ named 'numpy.fft'` while pip replaced it (CI run 36475215084).
   failure (`import_failure`: the LAST non-empty stderr line starts with
   `ModuleNotFoundError` / `ImportError` — numba's "needs NumPy 2.4 or less"
   is one, the #144 repair) → install at once; everything else (a timeout,
-  CUDA unavailable, an `OSError` loading torch's DLLs, a spawn error) →
-  retry.
+  CUDA unavailable, an `OSError` or an `ImportError: DLL load failed …`
+  loading torch's native libraries, a spawn error) → retry. Review round
+  2: a DLL that fails to LOAD is, on Windows, typically the paging file
+  under memory pressure (WinError 1455) — the startup case itself — so it
+  is not a proven missing package.
 - `decide(probe, RETRY_PLAN)`: pauses 5, 10, 20, 40, 60 s (probes at 0, 5,
   15, 35, 75, 135 s when each answers at once), no pause that would end after
   180 s. After the budget: still `Timeout` → `UseAsIs` (the venv is used as

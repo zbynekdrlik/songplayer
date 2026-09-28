@@ -220,7 +220,8 @@ pub struct RemoteStatus {
     /// #221 L3: SP-program's scene name (the one resolver,
     /// `program_scene_name`): what `GetCurrentProgramScene` answers and
     /// `CurrentProgramSceneChanged` announced last; `null` while nothing is on
-    /// program.
+    /// program, and also while a playlist whose catalog names no scene (an
+    /// empty or duplicate NDI output name) is on it.
     pub program_scene: Option<String>,
 }
 

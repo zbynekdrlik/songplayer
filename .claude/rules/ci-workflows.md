@@ -226,6 +226,25 @@ survivors to fail again there (read only the shard you need).
 
 ## Post-deploy E2E: OBS is in Studio Mode with a 2000ms Fade — never blind-sleep after a scene switch (#170)
 
+**#221 L3 (read this first).** The E2E scene driver no longer talks to cg
+OBS: `ObsDriver` connects to SongPlayer's obs-websocket facade
+(`FACADE_WS_URL`, :4456; cg OBS :4455 only for the A/V gate's recording and
+profile read). The contract is in `remote-control.md` ("Program feedback")
+and the driver's own doc:
+- the transition is SP-program's (the Settings fade, e.g. 300 ms, or a Cut
+  that ends at once), announced by SongPlayer's `SceneTransitionStarted` /
+  `SceneTransitionEnded`, not cg OBS's 2 s fade; the driver raises its
+  transition flag BEFORE the trigger;
+- a switch to the scene already on program is ALWAYS sent (the facade's
+  re-kick re-mirrors cg OBS); the round-3 skip below is gone (review round
+  1 of the L3 lane);
+- until L4b the engine's `active_scene` / `active_playlist_ids` still come
+  from cg OBS's scene detection, which follows the facade's mirror a moment
+  AFTER the driver returns: wait for it (`waitEngineActiveScene`), never
+  read once.
+
+The rest of this section is the #170 history of the cg OBS driver.
+
 The `E2E Tests (win-resolume)` job restarts SongPlayer (`taskkill` + `schtasks
 /run /tn SongPlayer` + `Wait-SongPlayerUp`), then the Playwright post-deploy
 suite drives OBS scene switches via `e2e/obs-driver.ts`. **OBS on win-resolume
@@ -262,9 +281,9 @@ behaviours defeat that (reproduced live 3×, 17.9 02:06–02:09 UTC):
    source. A real transition to another scene first (so preview becomes the
    *previous* program) restores normal behaviour.
 
-**Contract (round 3):** `ObsDriver.switchScene`
-(1) **skips when `program == target`** (`shouldSkipSceneSwitch` — never issue a
-same-scene switch); (2) in Studio Mode drives the transition the studio way —
+**Contract (round 3, superseded by #221 L3 above for (1)):** `ObsDriver.switchScene`
+(1) skipped when `program == target` (removed: on the facade a same-scene
+switch is the designed re-kick); (2) in Studio Mode drives the transition the studio way —
 `SetCurrentPreviewScene(target)` + `TriggerStudioModeTransition` (which DOES emit
 the program-scene-changed event), else `SetCurrentProgramScene` (read
 `GetStudioModeEnabled` once); (3) waits until `GetCurrentProgramScene == target`

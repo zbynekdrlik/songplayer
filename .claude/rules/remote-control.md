@@ -303,7 +303,9 @@ follow are the later lanes (L4a–L6) of #221.
   after Started (another task emits it), Ended always after Started. Another
   client may get them any time, so a test that asks a second client for
   something must skip events (`request_collecting`).
-- `GET /api/v1/program` → `remote.program_scene` = the same resolver.
+- `GET /api/v1/program` → `remote.program_scene` = the same resolver
+  (`null` — and `GetCurrentProgramScene` 604 — while nothing is on program
+  or a playlist whose catalog names no scene is on it).
 
 ## Settings, API, UI
 
@@ -318,7 +320,10 @@ follow are the later lanes (L4a–L6) of #221.
   - a bind failure (the port is taken) shows as `remote.error` and is retried
     on every poll, logged once per distinct error.
 - The listener binds `0.0.0.0` (Companion runs on another machine). It is
-  opt-in and meant for a trusted LAN.
+  off by default and meant for a trusted LAN. On the box CI keeps it ON
+  since #221 L3: "Seed settings" seeds `remote_ws_enabled=true` and fails
+  unless the facade listens on 4456 without a password — what the E2E scene
+  driver (`FACADE_WS_URL`) connects with.
   - The password gates the WebSocket only. Like every other setting, it is
     stored in plain text and readable through the unauthenticated
     `GET /api/v1/settings`, so it does not protect against a hostile LAN.
