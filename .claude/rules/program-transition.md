@@ -3,6 +3,7 @@ paths:
   - "crates/sp-server/src/playback/program_transition*.rs"
   - "crates/sp-server/src/playback/program_follow*.rs"
   - "crates/sp-server/src/playback/scene_off*.rs"
+  - "crates/sp-server/src/playback/tests_hold.rs"
   - "crates/sp-server/src/playback/program_bus*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
   - "crates/sp-server/src/playback/pacer_tests_live.rs"
@@ -264,6 +265,61 @@ The re-check is `PipelineEvent::SceneOffDue` on the engine's own channel (a
 spawned sleep). If the scene is back on program by then, it does nothing.
 `scene_off_step` / `scene_off_recheck` take `now_100ns`, so the tests drive
 them at chosen stamps; only the wrappers read `utc_now_100ns()`.
+
+### A held playlist has no side effects (release 0.68.0 blockers)
+
+Design record 5863318980 (the cross-lane review of PR #220). The hold keeps
+the outgoing playlist DECODING, nothing more: for every engine side effect it
+is off program. Before, its song's end inside the hold started the next song
+off program, whose hide timer later faded out the on-program title.
+
+- **The hold is a marker.** `PlaylistPipeline::scene_off_due` keeps the
+  abort handle of the pending `SceneOffDue`; `Some` = held. `end_hold`
+  cancels it, and three things call it:
+  - every `PlayAction::Pause`;
+  - a scene back on program (`handle_scene_change(pid, true)`);
+  - a newer hold: a re-check that finds the window not over replaces its
+    predecessor.
+- **It never starts a song off program.** `pause_if_held` runs first in the
+  `Ended` and `Error` arms and for a `Skip`. A held playlist gets
+  `SceneOff`, the hold's own end, instead of `SelectAndPlay` /
+  `ReplayCurrent` (Continuous, Loop and Single alike). So none of these
+  happen:
+  - an off-program `Started` (its title timers took down the on-program
+    title);
+  - a `record_play` of an unaired song;
+  - the ungated song-end `clear_lyrics_display`, which blanked the
+    on-program playlist's `#sp-subs`.
+
+  The accepted trade-off: a song ending inside the ≤ 1 s hold is not
+  followed by the next one, and the rest of the window mixes the paused
+  side's standby.
+- **The bus needs nothing new.** A paused paced pipeline emits its frozen
+  last frame + a silent block per boundary (`Standby::FrozenLast`), an ended
+  one its idle standby. They are `from`'s pairs like any other (only `to`'s
+  liveness gates a window). A side that sends nothing is MISSED and mixed
+  against the program standby, so the window never stalls.
+- **Both title timers fire only on program** (`title_timers.rs`): the hide
+  timer reads `scene_active` when it fires, like the show timer. A pause
+  cancels them.
+- **The lyrics survive the hold.** The scene-off used to drop
+  `lyrics_state`, so a scene back on inside the hold played on with no
+  subtitles. Now:
+  - While held, `dispatch_lyrics_if_changed` sends nothing to the wall, the
+    Presenter or the karaoke WS, which is what `None` did. The gate is the
+    MARKER, not `scene_active`: a song played off program by hand still
+    feeds the karaoke WS + Presenter
+    (`dispatch_lyrics_resolume_gated_on_scene_active`).
+  - The scene-off resets the wall and Presenter dedup keys (the wall was
+    cleared), so a scene back on re-sends the line at the next Position.
+  - The PAUSE drops the lyrics, where the scene-off used to. A later
+    scene-on starts a new song, and a recovery between that Play and the
+    new `Started` must not re-push the old song's line.
+- Pinned in `tests_hold.rs`. The hold there is real: the bus cuts a minute
+  ahead on the live clock. "No Play was sent" is read from the title clock,
+  which every Play clears (`begin_play`). That works on every platform:
+  the Windows test pipeline never answers a Play, so counting its replies
+  is not portable.
 
 ## Following cg OBS (`program_follow.rs`)
 

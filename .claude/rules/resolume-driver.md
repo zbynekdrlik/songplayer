@@ -83,6 +83,22 @@ What the driver does now (`refresh_mapping(now)`):
   a `RecoveryEvent` when the map changed and the step has not fired one yet
   (see below). The engine's `handle_resolume_recovery` re-pushes the title and
   the current subtitle state.
+- **A FAILED fetch with no SongPlayer clip mapped is not ready too**
+  (release 0.68.0 blocker 3, design record 5863318980). `refresh_mapping`'s
+  Err arm opens the episode (`not_ready_since = now` when none is open, an
+  INFO "fetch failed with no SongPlayer clips mapped" line). That covers a
+  startup fetch and a map an eviction emptied.
+  - Before, a failed startup `/composition` (the #157 case) left the map
+    empty with NO episode. The #157 retry 60 s later mapped the clips as a
+    `Startup` refresh, `became_ready` was false, no RecoveryEvent fired, and
+    the playing song's title never came back.
+  - The #157 retry window is unchanged: the fast path needs an answered
+    attempt. Only the episode flag, and so the ready event, change.
+  - It runs BEFORE `apply_outcome(false)`, so a failure that opens the
+    breaker still ends the episode (the close opens a fresh one).
+  - A failure while SongPlayer's clips ARE mapped opens nothing (Arena's
+    REST choking, the map is valid), and an open episode keeps its start
+    (`a_failed_fetch_opens_an_episode_only_without_songplayer_clips`).
 - **An evicted map is not ready too.** Opening the breaker empties
   `clip_mapping` and clears `not_ready_since` (the outage ends any episode).
   The probe that closes the breaker sets `not_ready_since = now`
@@ -263,6 +279,17 @@ shutdown only, and no RecoveryEvent reached the engine again.
 - Test with a capacity-1 channel and three sends BEFORE the task starts:
   `(lagged)`, then the kept third, then a later one; drop the sender →
   it ends (`recovery_tests.rs`).
+- **Subscribed before the first host driver** (release 0.68.0 blocker 4).
+  `ResolumeRegistry::new` keeps no receiver, and a broadcast sent with none
+  is dropped. `recovery::registry_with_forwarder` builds the registry,
+  subscribes and spawns the forwarder, and only THEN calls `add_host`;
+  `lib.rs` calls it with the host rows. The forwarded events queue on
+  `engine_tx` (64) until the engine loop runs. Before, `lib.rs` subscribed
+  after the whole startup (up to ~55 s), and a startup not-ready → ready
+  event was lost. Pinned by
+  `a_recovery_event_right_after_the_registry_is_built_reaches_the_engine`:
+  a send right after the build, with no await between, reaches the engine
+  channel (the `#[cfg(test)]` `ResolumeRegistry::recovery_sender`).
 
 ## Subtitle clips: blank, never skip (#217 addendum 2)
 
@@ -441,6 +468,15 @@ the driver compares it with what it did (above).
   with no title, and a later one with no hide 3.5 s before the end. A song
   with no clock yet arms nothing; its `Started` will. Every scene change
   re-arms (cheap tasks, the same deadlines).
+- **Both timers write the clip only on program, and a pause cancels them**
+  (release 0.68.0 blockers 1a + 1c). The hide timer reads `scene_active`
+  when it fires, like the show timer. Before, a hide timer armed by a song
+  that started off program (a playlist held through a #215 transition)
+  faded out the on-program playlist's title. `PlayAction::Pause` cancels
+  the song's timers: a paused song's hide timer fired at its planned end.
+  The held playlist itself no longer starts a song
+  (`.claude/rules/program-transition.md`, "A held playlist has no side
+  effects").
 - **Several due** (a program scene with more than one SongPlayer playlist;
   they share the one `#sp-title` clip): the highest playlist id, so the
   answer never depends on HashMap order. Residual: the lower id's own show
