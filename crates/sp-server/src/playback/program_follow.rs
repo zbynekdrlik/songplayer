@@ -216,7 +216,7 @@ impl Follow {
         let input_active = crate::playback::ndi_input::load_input_settings(&self.pool)
             .await
             .is_ok_and(|s| s.active());
-        let action = scene_action(Some(playlists), input_active);
+        let action = scene_action(playlists, input_active);
         let mut reason = action.keep_reason().map(|r| r.as_str());
         let mut cut_boundary_100ns = None;
         match action.source() {
