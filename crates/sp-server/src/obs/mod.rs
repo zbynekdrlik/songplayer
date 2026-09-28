@@ -205,16 +205,16 @@ pub enum ObsEvent {
 enum ReaderMessage {
     /// `CurrentProgramSceneChanged` arrived. Main loop must issue
     /// follow-up GetSceneItemList queries (via dispatcher) and emit
-    /// the upstream `ObsEvent::SceneChanged`.
-    SceneChange { scene_name: String },
+    /// the upstream `ObsEvent::SceneChanged`. `ticket`: its scene ticket,
+    /// taken when the reader READ the event (#218 review round 3: during the
+    /// connect the main loop is not running yet, so the dequeue order is not
+    /// cg OBS's order relative to the initial program read).
+    SceneChange { scene_name: String, ticket: u64 },
     /// #154: `StreamStateChanged` / `RecordStateChanged` arrived. `outputActive`
     /// is the new state; the main loop writes it into `ObsState` so the lyrics
     /// idle gate defers heavy work while OBS is live. `recording` distinguishes
     /// the two output kinds.
     OutputState { recording: bool, active: bool },
-    /// #219: cg OBS's current transition changed (kind or duration); the main
-    /// loop wakes the connection's transition reader.
-    TransitionChanged,
     /// Stream closed cleanly OR errored. Main loop must exit so the
     /// outer reconnect loop fires.
     Closed,
@@ -291,8 +291,11 @@ impl ObsClient {
                     }
                 }
 
-                // Mark disconnected (published) and notify.
-                obs.update(ObsState::reset_disconnected).await;
+                // Mark disconnected (published) and notify. A fresh scene
+                // ticket: an apply of the old connection that still writes
+                // after this reset is dropped (#218 review round 3).
+                obs.update_scene(obs.scene_ticket(), ObsState::reset_disconnected)
+                    .await;
                 let _ = loop_event_tx.send(ObsEvent::Disconnected);
 
                 info!("Reconnecting to OBS in {backoff:?}");
@@ -355,11 +358,18 @@ pub fn compute_auth(password: &str, challenge: &str, salt: &str) -> String {
 /// `ReaderMessage::Closed` and calls `dispatcher.drain_and_close()`
 /// before returning so no waiter hangs forever and the main loop
 /// drops cleanly.
+///
+/// A `CurrentProgramSceneChanged` gets its scene ticket HERE, in wire order
+/// (`obs.scene_ticket()`, #218 review round 3); a transition event wakes the
+/// transition reader directly (`transition_wake`, #219 — a `Notify` merges a
+/// burst into one read and never blocks this task).
 async fn run_reader_task(
     mut read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     dispatcher: Dispatcher,
     reader_tx: mpsc::Sender<ReaderMessage>,
     event_tx: broadcast::Sender<ObsEvent>,
+    obs: ObsShared,
+    transition_wake: Arc<Notify>,
 ) {
     loop {
         match read.next().await {
@@ -387,6 +397,7 @@ async fn run_reader_task(
                             let _ = reader_tx
                                 .send(ReaderMessage::SceneChange {
                                     scene_name: scene_name.to_string(),
+                                    ticket: obs.scene_ticket(),
                                 })
                                 .await;
                         } else if event_type == "StreamStateChanged"
@@ -411,7 +422,7 @@ async fn run_reader_task(
                                 .await;
                         } else if transition::is_transition_event(event_type) {
                             // #219: re-read cg OBS's transition.
-                            let _ = reader_tx.send(ReaderMessage::TransitionChanged).await;
+                            transition_wake.notify_one();
                         }
                     }
                     7 => {
@@ -513,7 +524,16 @@ async fn connect_and_run(
     let dispatcher = Dispatcher::new();
     let (reader_tx, mut reader_rx) = mpsc::channel::<ReaderMessage>(32);
     let raw_events = event_tx.clone(); // #213: the reader broadcasts every raw event
-    let reader = run_reader_task(read, dispatcher.clone(), reader_tx, raw_events);
+    // #219: the reader wakes the transition reader (step 4b) on its events.
+    let transition_wake = Arc::new(Notify::new());
+    let reader = run_reader_task(
+        read,
+        dispatcher.clone(),
+        reader_tx,
+        raw_events,
+        obs.clone(),
+        Arc::clone(&transition_wake),
+    );
     let reader_handle = tokio::spawn(reader);
     let write: SharedWrite = std::sync::Arc::new(tokio::sync::Mutex::new(write));
 
@@ -523,13 +543,12 @@ async fn connect_and_run(
     let mut spawned_tasks: JoinSet<()> = JoinSet::new();
 
     // Step 4b (#219): cg OBS's transition — read now, again on every
-    // transition event (the main loop wakes it), retried until answered.
-    let transition_wake = Arc::new(Notify::new());
+    // transition event (the reader wakes it), retried until answered.
     spawned_tasks.spawn(transition::run_transition_reader(
         Arc::clone(&write),
         dispatcher.clone(),
         obs.clone(),
-        Arc::clone(&transition_wake),
+        transition_wake,
     ));
 
     // Step 5: initial NDI source map rebuild (same retry-on-empty
@@ -627,16 +646,13 @@ async fn connect_and_run(
         tokio::select! {
             reader_msg = reader_rx.recv() => {
                 match reader_msg {
-                    Some(ReaderMessage::SceneChange { scene_name }) => {
+                    Some(ReaderMessage::SceneChange { scene_name, ticket }) => {
+                        // `ticket` was taken by the reader, in wire order.
                         let write = std::sync::Arc::clone(&write);
                         let dispatcher = dispatcher.clone();
                         let ndi_sources = std::sync::Arc::clone(ndi_sources);
                         let obs = obs.clone();
                         let event_tx = event_tx.clone();
-                        // The ticket is taken HERE, before spawning, so the
-                        // tickets follow cg OBS's event order (#218 review):
-                        // a spawned apply may start after a later one.
-                        let ticket = obs.scene_ticket();
                         spawned_tasks.spawn(async move {
                             scene::apply_scene_change(
                                 &write,
@@ -650,7 +666,6 @@ async fn connect_and_run(
                             .await;
                         });
                     }
-                    Some(ReaderMessage::TransitionChanged) => transition_wake.notify_one(),
                     Some(ReaderMessage::OutputState { recording, active }) => {
                         // #154: record OBS stream/record state for the idle gate.
                         let mut s = obs.state().write().await;

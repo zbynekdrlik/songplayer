@@ -1,7 +1,7 @@
 //! #215: `SP-program` follows cg OBS and keeps the transition spec in step.
 //! The settings, the telemetry, `apply_spec`, `follow_scene` over a real pool
-//! + `ProgramBus`, and how a snapshot of the OBS client reads (#219). The task
-//! itself runs in `program_follow_tests_task.rs` and `FollowLoop`'s steps in
+//! and a `ProgramBus`, and how a snapshot of the OBS client reads (#219). The
+//! task itself runs in `program_follow_tests_task.rs` and `FollowLoop`'s steps in
 //! `program_follow_tests_loop.rs`; both share the helpers here (`pub(super)`).
 //! Wired via `#[cfg(test)] #[path = "program_follow_tests.rs"] mod tests;`.
 

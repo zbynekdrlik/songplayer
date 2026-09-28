@@ -259,20 +259,35 @@ only) never repaired it.
   keeping the previous ones; …`), debug on repeats; INFO `obs: the scene's
   playlist lookup answered again` on the repair. `lookup_failed` is always
   `None` or the current scene (the two are written together).
-- **Out-of-order answers (review round 1).** cg OBS may answer two lookups
-  out of order, and the poll's relookups can overlap an event's lookup. Every
-  apply carries a ticket (`ObsShared::scene_ticket`) taken BEFORE the scene
-  it applies was read — an event's in the connection loop, in EVENT order,
-  before spawning; the poll's and the initial read's BEFORE they send
-  `GetCurrentProgramScene` (review round 2: a poll ticket taken after its
-  read let a stale poll answer outrank a newer event and cut back) — and
-  writes through `ObsShared::update_scene(ticket, …)`, which DROPS an answer
-  that arrives after a later ticket's answer was written (debug `a newer
-  scene lookup already answered`). The `SceneChanged` is sent inside that
-  closure, under the write lock, so the engine gets the scene changes in
+- **Out-of-order answers (review rounds 1–3).** cg OBS may answer two
+  lookups out of order, the poll's relookups can overlap an event's lookup,
+  and an event can overtake a read. Every apply carries a ticket
+  (`ObsShared::scene_ticket`) taken BEFORE the scene it applies was read:
+  - an event's by the READER, the moment it reads the event off the wire
+    (`ReaderMessage::SceneChange { ticket }`) — round 3: taken at the main
+    loop's dequeue, an event cg OBS sent during the connect (queued while
+    steps 4–6 run) outranked the NEWER initial read and a stale
+    `SceneChanged` went out after the right one;
+  - the poll's and the initial read's BEFORE they send
+    `GetCurrentProgramScene` — round 2: taken after the read, a stale poll
+    answer outranked a newer event and cut back;
+  - the disconnect reset's (a fresh one), so an old connection's apply that
+    still writes after it is dropped.
+
+  It writes through `ObsShared::update_scene(ticket, …)`, which DROPS an
+  answer that arrives after a later ticket's answer was written (debug `a
+  newer scene lookup already answered`). The `SceneChanged` is sent inside
+  that closure, under the write lock, so the engine gets the scene changes in
   write order. A dropped relookup costs one poll tick (the next one asks
-  again). Test: `a_poll_read_an_event_overtook_never_rolls_the_scene_back`
-  (the fake's `hold_program_scene` / `hold_lookups_of` + `release_held`).
+  again). Tests: `a_poll_read_an_event_overtook_never_rolls_the_scene_back`
+  (the fake's `hold_program_scene` / `hold_lookups_of` + `release_held`: a
+  held answer must stay under the client's 2 s response timeout) and
+  `an_event_queued_during_the_connect_never_overrides_the_initial_read` (the
+  fake's `event_on_input_list`).
+- **Transition events never go through `reader_rx`:** the reader wakes the
+  transition reader's `Notify` itself (a burst merges into one read and
+  never blocks the reader, whose `reader_rx` is not drained during the
+  connect).
 - The ~2 s poll repairs it: `scene_poll_verdict(last, lookup_failed, polled,
   …)` → `PollVerdict::Relookup(scene)` when cg OBS still shows the stored
   scene and its lookup failed — looked up again on that tick (no confirm
@@ -332,8 +347,8 @@ ONE view of cg OBS: the OBS client's. `obs/snapshot.rs`: `ObsSnapshot`
 `ObsTransition` lives here, re-exported by `playback::program_transition`):
 one reader task per connection (in the connection's `JoinSet`), spawned
 right after the reader task (step 4b, before the NDI map rebuild): it reads
-`GetCurrentSceneTransition` at once, then each time the main loop wakes it
-(`ReaderMessage::TransitionChanged`, from `CurrentSceneTransitionChanged` /
+`GetCurrentSceneTransition` at once, then each time the READER wakes it (its
+`Notify`, on `CurrentSceneTransitionChanged` /
 `CurrentSceneTransitionDurationChanged` — the identify's Transitions (16)
 subscription). A `Notify` wake keeps a change that arrives DURING a read, so
 reads never overlap and the newest answer wins. No answer → `transition =

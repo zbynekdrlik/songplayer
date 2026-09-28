@@ -8,7 +8,7 @@
 //!
 //! - One reader task per connection ([`run_transition_reader`], spawned at
 //!   connect): it reads `GetCurrentSceneTransition` at once, then again each
-//!   time it is woken. The connection loop wakes it on
+//!   time it is woken. The connection's reader task wakes it on
 //!   `CurrentSceneTransitionChanged` / `CurrentSceneTransitionDurationChanged`
 //!   ([`is_transition_event`]; the identify subscribes the Transitions
 //!   events for this).
