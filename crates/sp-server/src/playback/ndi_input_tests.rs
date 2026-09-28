@@ -105,7 +105,7 @@ fn raw_rig(frames: Vec<MockVideoFrame>, schedule: Vec<Option<usize>>) -> Rig {
         INPUT_AUDIO_SAMPLES * 4,
     );
     let bus = Arc::new(ProgramBus::new());
-    bus.select_initial(PROGRAM_INPUT_ID);
+    bus.select_initial(PROGRAM_INPUT_ID, None);
     let shared = bus.input().clone();
     shared.set_settings(enabled());
     let input = NdiInput::new(
@@ -409,7 +409,7 @@ fn the_bus_hands_out_one_shared_input_state() {
 #[test]
 fn without_an_ndi_sdk_the_enabled_input_still_owns_its_boundaries() {
     let bus = ProgramBus::new();
-    bus.select_initial(PROGRAM_INPUT_ID);
+    bus.select_initial(PROGRAM_INPUT_ID, None);
     bus.input().set_settings(enabled());
     let mut input = NdiInput::new(None, bus.input().clone(), 2, 4);
     for k in 1..=3 {
@@ -455,7 +455,7 @@ fn off_program_the_input_captures_and_counts_but_offers_and_converts_nothing() {
     );
     assert_eq!(rig.calls_matching("framesync_capture_video"), 2);
     // Cut to the input: the next boundary converts the frame it still holds.
-    rig.bus.select_initial(PROGRAM_INPUT_ID);
+    rig.bus.select_initial(PROGRAM_INPUT_ID, None);
     rig.input.service(b(3), b(3), &rig.bus);
     let jobs = drain(&rig.bus);
     assert_eq!(jobs.len(), 1);

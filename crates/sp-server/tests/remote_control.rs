@@ -4,10 +4,12 @@
 //! (`obs::ObsClient::spawn`, the one the facade reaches cg OBS through) → a
 //! fake cg OBS (`FakeObsServer`). The program is a real `ProgramBus`.
 //!
-//! connect → Identify → GetSceneList (cg OBS's scenes 1:1) →
-//! SetCurrentProgramScene(playlist scene) → cg OBS switched + `SP-program`
-//! cut to the playlist → cg OBS's CurrentProgramSceneChanged re-emitted →
-//! SetCurrentProgramScene(manual scene) → cut to "OBS manuál".
+//! connect → Identify → studio mode ON (#221) → GetSceneList (cg OBS's scenes
+//! 1:1) → a page-13 button, `SetCurrentPreviewScene(playlist scene)` +
+//! `TriggerStudioModeTransition` → `SP-program` cut to the playlist from
+//! SongPlayer's own playlists, cg OBS mirrored → cg OBS's
+//! CurrentProgramSceneChanged re-emitted → SetCurrentProgramScene(manual
+//! scene) → cg OBS switched, then a cut to "OBS manuál".
 //! Every wait is bounded; no sleep is used as synchronization.
 
 mod common;
@@ -149,14 +151,13 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     })
     .await;
 
-    // SongPlayer's remote control on a real program bus.
+    // SongPlayer's remote control on a real program bus. The long upstream
+    // timeout keeps a stalled runner (the coverage job's ptrace) from running
+    // a manual press out of its time (#221: then it is never sent).
     let bus = Arc::new(ProgramBus::new());
-    let facade = Facade::new(
-        pool.clone(),
-        Arc::clone(&bus),
-        Upstream::new(Some(client.cmd_sender()), obs_event_tx.clone()),
-        None,
-    );
+    let upstream =
+        Upstream::new(Some(client.cmd_sender()), obs_event_tx.clone()).with_timeout(TIMEOUT);
+    let facade = Facade::new(pool.clone(), Arc::clone(&bus), upstream, None);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(remote::serve(listener, facade));
@@ -183,8 +184,10 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     let version = request(&mut ws, "GetVersion", None).await;
     assert_eq!(version["requestStatus"]["code"], 100);
     assert!(version["responseData"]["supportedImageFormats"].is_array());
+    // #221: studio mode ON — Companion's `do_transition` sends its request
+    // only while it caches studio mode as on.
     let studio = request(&mut ws, "GetStudioModeEnabled", None).await;
-    assert_eq!(studio["responseData"]["studioModeEnabled"], false);
+    assert_eq!(studio["responseData"]["studioModeEnabled"], true);
 
     // The scene list is cg OBS's, 1:1.
     let list = request(&mut ws, "GetSceneList", None).await;
@@ -198,18 +201,26 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     assert_eq!(names, vec!["sp-fast", "sp-slow", "Slido"]);
     assert_eq!(list["responseData"]["currentProgramSceneName"], "sp-slow");
 
-    // A playlist scene button: cg OBS switches AND SP-program cuts to ytfast.
-    let pressed = request(
+    // A page-13 playlist button: preview, then transition. SP-program cuts to
+    // ytfast from SongPlayer's own playlists; cg OBS is mirrored after it.
+    let previewed = request(
         &mut ws,
-        "SetCurrentProgramScene",
+        "SetCurrentPreviewScene",
         Some(json!({ "sceneName": "sp-fast" })),
     )
     .await;
+    assert_eq!(previewed["requestStatus"]["result"], true);
+    assert_eq!(bus.status().source, None, "a preview cuts nothing");
+    let pressed = request(&mut ws, "TriggerStudioModeTransition", None).await;
     assert_eq!(pressed["requestStatus"]["result"], true);
     assert_eq!(bus.status().source, Some(7));
     assert!(bus.status().cut_boundary_100ns.is_some_and(|b| b > 0));
+    wait_until("cg OBS is mirrored to sp-fast", || {
+        let fake = &fake;
+        async move { fake.state().await.program_scene.as_deref() == Some("sp-fast") }
+    })
+    .await;
     let cg_now = fake.state().await;
-    assert_eq!(cg_now.program_scene.as_deref(), Some("sp-fast"));
     assert!(
         cg_now
             .requests

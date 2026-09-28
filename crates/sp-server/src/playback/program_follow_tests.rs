@@ -255,7 +255,7 @@ async fn apply_spec_puts_the_override_or_cg_obs_transition_on_the_bus() {
 async fn a_scene_showing_one_playlist_cuts_the_program_to_it_and_persists_it() {
     let pool = pool().await;
     let bus = Arc::new(ProgramBus::new());
-    bus.select_initial(3);
+    bus.select_initial(3, None);
     let follow = Follow::new(pool.clone(), bus.clone());
     assert_eq!(
         follow.follow_scene("sp-fast", &set(&[7])).await,
@@ -277,6 +277,11 @@ async fn a_scene_showing_one_playlist_cuts_the_program_to_it_and_persists_it() {
         ("sp-fast", "playlist", Some(7), None)
     );
     assert_eq!(cut.cut_boundary_100ns, st.cut_boundary_100ns);
+    assert_eq!(
+        bus.on_air_now().scene.as_deref(),
+        Some("sp-fast"),
+        "#221: the follow publishes the cg OBS scene it follows"
+    );
     assert!(cut.cut_boundary_100ns.is_some());
     assert!(cut.at_ms > 0);
 }
@@ -285,7 +290,7 @@ async fn a_scene_showing_one_playlist_cuts_the_program_to_it_and_persists_it() {
 async fn a_manual_scene_cuts_to_obs_manual_only_while_the_input_is_a_source() {
     let pool = pool().await;
     let bus = Arc::new(ProgramBus::new());
-    bus.select_initial(3);
+    bus.select_initial(3, None);
     let follow = Follow::new(pool.clone(), bus.clone());
     // The input is off: a manual (or multi-playlist) scene keeps the program.
     assert_eq!(
@@ -330,7 +335,7 @@ async fn a_manual_scene_cuts_to_obs_manual_only_while_the_input_is_a_source() {
 async fn a_scene_already_on_program_cuts_nothing_and_a_failed_persist_cuts_nothing() {
     let pool = pool().await;
     let bus = Arc::new(ProgramBus::new());
-    bus.select_initial(7);
+    bus.select_initial(7, None);
     let follow = Follow::new(pool.clone(), bus.clone());
     assert_eq!(
         follow.follow_scene("sp-fast", &set(&[7])).await,

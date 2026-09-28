@@ -2,7 +2,6 @@
 //! settings task's listener lifecycle (bound over REAL ports; every wait is
 //! bounded). Wired via `#[cfg(test)] #[path = "mod_tests.rs"] mod tests;`.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -169,11 +168,89 @@ fn the_status_reports_the_stored_settings_and_the_live_counters() {
         reason: None,
         cut_boundary_100ns: Some(42),
         at_ms: 1,
+        via: Some("transition"),
+        cg_forward: Some("pending".to_string()),
     };
     shared.record_cut(cut.clone());
     assert_eq!(
         shared.status(&RemoteSettings::disabled()).last_remote_cut,
         Some(cut)
+    );
+}
+
+fn cut_of(scene: &str) -> RemoteCut {
+    RemoteCut {
+        scene: scene.to_string(),
+        action: "playlist",
+        source: Some(7),
+        reason: None,
+        cut_boundary_100ns: None,
+        at_ms: 1,
+        via: Some("program"),
+        cg_forward: Some("pending".to_string()),
+    }
+}
+
+/// #221: the mirror's answer lands after the press was answered; it may only
+/// update ITS cut, never a later press's.
+#[test]
+fn a_late_mirror_answer_updates_only_its_own_cut() {
+    let shared = RemoteShared::default();
+    let last_forward = |shared: &RemoteShared| {
+        shared
+            .status(&RemoteSettings::disabled())
+            .last_remote_cut
+            .and_then(|c| c.cg_forward)
+    };
+    assert!(
+        !shared.set_cg_forward(0, "ok".to_string()),
+        "no cut recorded yet"
+    );
+    assert_eq!(
+        shared.status(&RemoteSettings::disabled()).last_remote_cut,
+        None
+    );
+    let first = shared.record_cut(cut_of("sp-fast"));
+    assert!(shared.set_cg_forward(first, "error 600".to_string()));
+    assert_eq!(last_forward(&shared).as_deref(), Some("error 600"));
+    let second = shared.record_cut(cut_of("sp-slow"));
+    assert_ne!(first, second);
+    assert!(
+        !shared.set_cg_forward(first, "ok".to_string()),
+        "a later press replaced it"
+    );
+    assert_eq!(last_forward(&shared).as_deref(), Some("pending"));
+    assert!(shared.set_cg_forward(second, "not_ready".to_string()));
+    let last = shared
+        .status(&RemoteSettings::disabled())
+        .last_remote_cut
+        .unwrap();
+    assert_eq!(
+        (last.scene.as_str(), last.cg_forward.as_deref()),
+        ("sp-slow", Some("not_ready"))
+    );
+}
+
+/// #221: a transition duration is kept for the telemetry, never applied.
+#[test]
+fn a_transition_duration_is_recorded_as_not_applied() {
+    let shared = RemoteShared::default();
+    assert_eq!(
+        shared
+            .status(&RemoteSettings::disabled())
+            .last_transition_duration,
+        None
+    );
+    shared.record_transition_duration(2000);
+    shared.record_transition_duration(750);
+    assert_eq!(
+        shared
+            .status(&RemoteSettings::disabled())
+            .last_transition_duration,
+        Some(TransitionDuration {
+            ms: 750,
+            applied: false
+        })
     );
 }
 
@@ -236,6 +313,7 @@ fn the_status_serializes_the_api_field_names() {
             "last_request": null,
             "last_remote_cut": null,
             "unsupported_requests": [],
+            "last_transition_duration": null,
         })
     );
 }
@@ -247,7 +325,6 @@ async fn without_an_obs_client_every_call_is_none() {
     let (events, _) = broadcast::channel::<ObsEvent>(4);
     let up = Upstream::new(None, events);
     assert_eq!(up.request("GetSceneList", None).await, None);
-    assert_eq!(up.scene_playlists("sp-fast").await, None);
 }
 
 #[tokio::test]
@@ -256,27 +333,20 @@ async fn a_call_is_answered_through_the_obs_command_channel() {
     let (tx, mut rx) = mpsc::channel::<ObsCommand>(4);
     let up = Upstream::new(Some(tx), events);
     tokio::spawn(async move {
-        while let Some(ObsCommand::Remote(call)) = rx.recv().await {
-            match call {
-                RemoteCall::Request {
-                    request_type,
-                    request_data,
-                    reply,
-                } => {
-                    let _ = reply.send(Some(json!({
-                        "echo": request_type,
-                        "data": request_data,
-                    })));
-                }
-                RemoteCall::ScenePlaylists { scene, reply } => {
-                    let ids: HashSet<i64> = if scene == "sp-fast" {
-                        [7].into()
-                    } else {
-                        HashSet::new()
-                    };
-                    let _ = reply.send(ids);
-                }
-            }
+        while let Some(cmd) = rx.recv().await {
+            let ObsCommand::Remote(RemoteCall::Request {
+                request_type,
+                request_data,
+                reply,
+                ..
+            }) = cmd
+            else {
+                continue;
+            };
+            let _ = reply.send(Some(json!({
+                "echo": request_type,
+                "data": request_data,
+            })));
         }
     });
     let d = up
@@ -286,11 +356,8 @@ async fn a_call_is_answered_through_the_obs_command_channel() {
         d,
         Some(json!({ "echo": "GetSceneItemList", "data": { "sceneName": "x" } }))
     );
-    assert_eq!(
-        up.scene_playlists("sp-fast").await,
-        Some(HashSet::from([7]))
-    );
-    assert_eq!(up.scene_playlists("Slido").await, Some(HashSet::new()));
+    let d = up.request("GetSceneList", None).await;
+    assert_eq!(d, Some(json!({ "echo": "GetSceneList", "data": null })));
 }
 
 #[tokio::test(start_paused = true)]
@@ -304,15 +371,29 @@ async fn an_unanswered_call_times_out_and_is_left_marked_abandoned() {
     match rx.try_recv() {
         Ok(ObsCommand::Remote(RemoteCall::Request {
             request_type,
+            deadline,
             reply,
             ..
         })) => {
             assert_eq!(request_type, "SetCurrentProgramScene");
+            // #221: the OBS side sees when its requester stops waiting.
+            assert_eq!(deadline, started + UPSTREAM_TIMEOUT);
             // The OBS side skips it: a late switch never happens.
             assert!(reply.is_closed());
         }
         other => panic!("expected the queued request, got {other:?}"),
     }
+}
+
+/// #221: a mirror's waiter outwaits the forwarder's worst case — a switch
+/// in flight, then the mirror's own answer, each at most the OBS client's
+/// answer timeout.
+#[test]
+fn a_mirror_waits_for_two_answers_of_cg_obs_longer() {
+    assert_eq!(
+        MIRROR_EXTRA_WAIT,
+        crate::obs::dispatcher::DEFAULT_RESPONSE_TIMEOUT * 2
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -324,8 +405,11 @@ async fn a_full_obs_queue_is_not_ready_at_once_never_a_blocked_caller() {
     up.cmd_tx
         .as_ref()
         .unwrap()
-        .try_send(ObsCommand::Remote(RemoteCall::ScenePlaylists {
-            scene: "filler".to_string(),
+        .try_send(ObsCommand::Remote(RemoteCall::Request {
+            request_type: "filler".to_string(),
+            request_data: None,
+            supersedes: false,
+            deadline: tokio::time::Instant::now(),
             reply,
         }))
         .unwrap();

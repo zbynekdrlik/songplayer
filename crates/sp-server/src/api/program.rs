@@ -31,6 +31,7 @@ use crate::AppState;
 use crate::playback::ndi_input::{InputSettings, NdiInputStatus, load_input_settings};
 use crate::playback::program_bus::{ProgramBus, ProgramStatus, persist_and_cut};
 use crate::playback::program_follow::{FollowSettings, FollowStatus, load_follow_settings};
+use crate::playback::scene_catalog::scene_of_source;
 use crate::playback::vban_out::VbanStatus;
 use crate::remote::{RemoteSettings, RemoteStatus, load_remote_settings};
 
@@ -129,7 +130,15 @@ pub async fn post_program_cut(
             Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }
     }
-    let status = match persist_and_cut(&state.pool, &state.program_bus, body.source).await {
+    // #221: published as on air with the playlist's catalog scene.
+    let scene = scene_of_source(&state.pool, body.source).await;
+    let cut = persist_and_cut(
+        &state.pool,
+        &state.program_bus,
+        body.source,
+        scene.as_deref(),
+    );
+    let status = match cut.await {
         Ok(status) => status,
         Err(e) => {
             warn!(%e, source = body.source, "program cut: persisting the source failed");

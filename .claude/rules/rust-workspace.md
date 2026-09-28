@@ -258,6 +258,28 @@ failed on them (`36438006665`):
   argument is a generic tuple, so no coercion site exists. Write
   `done(&*guard)`. A plain `fn f(s: &ObsState)` would coerce, which is why
   it reads as fine.
+- **Splitting a fn: a `String` param that becomes `&str` leaves
+  `f(&req_id)` behind → `clippy::needless_borrow`** (#221, caught in
+  review before CI). When a moved body now receives `req_id: &str`, write
+  `self.cancel(req_id)`, not `self.cancel(&req_id)`.
+
+## Spawn order is not execution order — never order work by spawning it (#221)
+
+A multi-thread tokio worker runs the task it spawned LAST first (its LIFO
+slot) and other workers may steal the rest, so two tasks spawned back to
+back can start in either order. The OBS client once spawned a task per
+facade call, so a playlist press's mirror could reach cg OBS after a later
+press. Anything whose ORDER matters goes through ONE task that takes the
+items in order (`obs::remote_call::run_calls`: write each frame, then take
+the next; a scene switch's answer is awaited first because cg OBS runs its
+messages on a thread pool; only a getter's answer wait is spawned). A test
+of such an order must queue all items before the consumer runs, so a
+reordering spot fails deterministically (`the_calls_reach_cg_obs_in_queue_order`;
+its RED sent the drained batch newest first). Give such a consumer its
+timeouts as PARAMETERS (`run_calls(…, answer_timeout)`, like
+`Upstream::with_timeout`): a test passing a very long one makes "this must
+not be awaited" fail deterministically instead of racing the production
+value.
 
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,
@@ -428,6 +450,23 @@ this:
 - **List only the tests that really fail on the old logic in the RED
   message.** Walk each one by hand.
 
+**A RED for a wire-protocol feature runs against the OLD code (#221 L2).**
+Tests that speak the wire (the facade's obs-websocket JSON over a real
+socket) compile against the old implementation, so the RED is the real old
+behaviour, not a wrong spot. Keep them compiling on both sides:
+
+- add only the test SEAMS in RED (a `#[cfg(test)]` constructor such as
+  `Facade::for_test` instead of a struct literal whose fields GREEN changes;
+  a configurable timeout such as `Upstream::with_timeout`) and the new
+  telemetry STRUCTURE (fields the old path fills with `None`);
+- read new telemetry through its serialized JSON
+  (`serde_json::to_value(status)["field"]`), which compiles whether or not
+  the field exists yet;
+- a fake peer matched with `let … else { continue }` on the one variant it
+  serves keeps compiling when GREEN deletes the other variants;
+- tests of functions that only GREEN adds (new pure helpers) go in the GREEN
+  commit, as new tests; no RED test is edited there.
+
 **`cargo mutants --in-diff <range> --list` compiles nothing (#215).** It
 lists the diff's mutants (`file:line` + replacement) so a review can name
 the test that kills each one BEFORE CI's mutation gate runs.
@@ -458,6 +497,13 @@ the test that kills each one BEFORE CI's mutation gate runs.
   is observable (#217 addendum 2 review round 3).
 - A mutation that cannot compile (`&&`→`||` inside a let-chain) is
   "unviable": it costs a build but cannot fail the gate.
+- **A binary op inside a `const` initializer IS mutated** (#221 review
+  round 5). `Duration::from_secs(2 * DEFAULT_RESPONSE_TIMEOUT.as_secs())`
+  listed `*`→`+` and `*`→`/`; with the 2 s default the `+` mutant is
+  EQUIVALENT (2 + 2 = 2 × 2) and would survive the gate. Write such a
+  constant as a literal (`Duration::from_secs(4)`) and pin the relation in
+  a test (`MIRROR_EXTRA_WAIT == DEFAULT_RESPONSE_TIMEOUT * 2`; a runtime
+  `Duration * u32` is fine there, it is not `const`).
 - `(at - plane) % ds` where `plane` is a multiple of `ds` (a plane or row
   edge): the `-`→`+` mutant gives the SAME remainder, so it is equivalent
   and survives. Subtract ONCE into a local (`let offset = …; (offset / ds,

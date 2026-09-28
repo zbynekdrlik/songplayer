@@ -111,7 +111,7 @@ async fn a_cut_away_from_a_restored_source_reports_it_as_previous() {
     let state = test_state().await;
     let slow = add_playlist(&state.pool, "slow").await;
     let fast = add_playlist(&state.pool, "fast").await;
-    state.program_bus.select_initial(slow); // as restored at startup
+    state.program_bus.select_initial(slow, None); // as restored at startup
     let (status, json) = call(
         state.clone(),
         "POST",
@@ -373,7 +373,7 @@ async fn cut_to_an_enabled_input_without_a_source_is_404() {
 async fn cut_to_the_enabled_input_selects_it_and_persists_it() {
     let state = test_state().await;
     let slow = add_playlist(&state.pool, "slow").await;
-    state.program_bus.select_initial(slow);
+    state.program_bus.select_initial(slow, None);
     enable_input(&state, "CG-OBS (manual)").await;
     let (status, json) = call(
         state.clone(),
@@ -467,6 +467,7 @@ async fn the_remote_block_reports_the_stored_settings_and_the_live_state() {
             "last_request": null,
             "last_remote_cut": null,
             "unsupported_requests": [],
+            "last_transition_duration": null,
         })
     );
 
@@ -570,7 +571,7 @@ async fn the_program_reports_the_transition_and_the_follow() {
     // program's source to the new one.
     let slow = add_playlist(&state.pool, "slow").await;
     let fast = add_playlist(&state.pool, "fast").await;
-    state.program_bus.select_initial(slow);
+    state.program_bus.select_initial(slow, None);
     assert!(
         state
             .program_bus
@@ -610,4 +611,42 @@ async fn the_program_reports_the_transition_and_the_follow() {
     assert_eq!(json["follow"]["enabled"], true, "the cut answer carries it");
     let (_, json) = call(state, "GET", "/api/v1/program", None).await;
     assert_eq!(json["transition"]["active"]["to"], fast);
+}
+
+// ---- #221: the on-air publication -------------------------------------------
+
+#[tokio::test]
+async fn a_dashboard_cut_is_published_with_the_playlists_catalog_scene() {
+    use crate::playback::program_on_air::program_scene_name;
+    let state = test_state().await;
+    let fast = add_playlist(&state.pool, "fast").await; // NDI output SP-fast
+    let (status, _) = call(
+        state.clone(),
+        "POST",
+        "/api/v1/program/cut",
+        Some(serde_json::json!({ "source": fast })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let on_air = state.program_bus.on_air_now();
+    assert_eq!(
+        (on_air.seq, on_air.source, on_air.scene.as_deref()),
+        (1, Some(fast), Some("sp-fast"))
+    );
+    // The NDI input has no catalog scene: the resolver names it.
+    enable_input(&state, "CG-OBS (manual)").await;
+    let (status, _) = call(
+        state.clone(),
+        "POST",
+        "/api/v1/program/cut",
+        Some(serde_json::json!({ "source": -1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let on_air = state.program_bus.on_air_now();
+    assert_eq!(
+        (on_air.seq, on_air.source, on_air.scene.as_deref()),
+        (2, Some(-1), None)
+    );
+    assert_eq!(program_scene_name(&on_air).as_deref(), Some("OBS manuál"));
 }

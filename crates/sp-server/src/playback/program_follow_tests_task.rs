@@ -104,7 +104,7 @@ impl TaskRig {
 
     /// The operator cuts `SP-program` to `source` by hand.
     async fn manual_cut(&self, source: i64) {
-        persist_and_cut(&self.pool, &self.bus, source)
+        persist_and_cut(&self.pool, &self.bus, source, None)
             .await
             .unwrap();
     }

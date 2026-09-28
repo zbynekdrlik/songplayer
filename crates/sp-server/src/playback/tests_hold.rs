@@ -124,10 +124,10 @@ fn playing(engine: &mut PlaybackEngine) -> TitleClock {
 /// test) and OUT's scene leaves program, held through the transition.
 async fn hold(rig: &mut Rig) -> Arc<ProgramBus> {
     let bus = Arc::new(ProgramBus::new());
-    bus.select_initial(OUT);
+    bus.select_initial(OUT, None);
     assert!(bus.set_transition(TransitionSpec::fade(300, SpecSource::Obs)));
     assert!(rig.engine.program.set(bus.clone()).is_ok());
-    let status = bus.cut(IN, utc_now_100ns() + 60 * 10_000_000);
+    let status = bus.cut(IN, utc_now_100ns() + 60 * 10_000_000, None);
     assert!(status.cut_boundary_100ns.is_some(), "the cut is recorded");
     rig.engine.handle_scene_change(OUT, false).await;
     assert_eq!(

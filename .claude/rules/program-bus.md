@@ -1,6 +1,8 @@
 ---
 paths:
   - "crates/sp-server/src/playback/program_bus*.rs"
+  - "crates/sp-server/src/playback/program_on_air*.rs"
+  - "crates/sp-server/src/playback/scene_catalog*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
   - "crates/sp-server/src/playback/paced_output*.rs"
   - "crates/sp-server/src/api/program*.rs"
@@ -123,6 +125,8 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   it is enabled with a source) — see `ndi-input.md`.
 - The ONE cut path is `program_bus::persist_and_cut` (persist first, then cut),
   shared by the API and the #213 Companion remote control (`remote-control.md`).
+  #221: it takes the scene name the cut is published with ("What is on air"
+  below).
 - `/api/v1/ndi/health` is unchanged (an array of per-pipeline snapshots
   consumed by sp-ui + e2e); where the program's health also belongs there is
   an open question on #209.
@@ -131,6 +135,43 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   `program-error`) polls `GET /api/v1/program` through `store::poll_into`.
   The mock (`e2e/mock-api.mjs`) keeps program state in memory —
   `POST /__mock/program-reset` in `beforeEach`/`afterEach`.
+
+## What is on air (#221 L1, design record 5873773896 §1b, §1d)
+
+- `ProgramBus` publishes an `OnAir {seq, source, scene}` on a
+  `tokio::sync::watch` (`playback/program_on_air.rs`; `on_air()` = a
+  receiver, `on_air_now()` = a copy). It is published INSIDE `cut` (under
+  the state lock, so in cut order) and `select_initial`, and `seq` grows on
+  EVERY publication — also a cut to the source already selected (a bus
+  no-op: `ProgramCore::cut` returns `false`, `health.cuts` does not move),
+  so a same-scene press is still an event, and a manual → manual press
+  (-1 → -1) publishes the new scene name.
+- Always `send_modify`, never `send`: `send` DROPS the value while no
+  receiver exists, and `restore_selected_source` runs in `start_program`
+  before any task subscribes.
+  `the_startup_selection_is_published_before_anyone_subscribes` pins it.
+- Every publisher names the scene: `persist_and_cut(pool, bus, pid, scene)`
+  / `ProgramBus::cut(pid, now, scene)` / `select_initial(pid, scene)`. A
+  press passes the scene pressed (a playlist's by its catalog name;
+  "OBS manuál" itself passes none); the restore and the dashboard cut the
+  playlist's catalog scene
+  (`scene_catalog::scene_of_source`, `None` for -1); the OBS follow the cg
+  OBS scene it follows — only when it CUTS (`follow_scene` skips a source
+  already on program), so a followed manual → manual change publishes
+  nothing and the published scene stays the earlier one (matters for L3's
+  feedback while the follow still runs; L5 deletes the follow). Tests that
+  do not care pass `None`.
+- `program_on_air::program_scene_name(&OnAir)` is the ONE name resolver:
+  the scene, else "OBS manuál" (`PROGRAM_INPUT_LABEL`) for -1, else none.
+  It never asks cg OBS.
+- The scene catalog (`playback/scene_catalog.rs`): a scene is a PLAYLIST
+  scene when exactly one ACTIVE playlist's `ndi_output_name` equals it,
+  ignoring ASCII case (only ASCII folds); its name is that NDI name
+  lowercased. An empty or shared NDI name names no scene (WARNed once per
+  process per conflict). Pinned with the 10 live names.
+- `ProgramBus::switch_order` (a `tokio::sync::Mutex`) orders the scene
+  switches of the #221 switch path (`remote-control.md`). It is separate
+  from `cut_serial`, which only orders persist + cut.
 
 ## Tests
 

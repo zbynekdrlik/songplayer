@@ -1,11 +1,13 @@
-//! Scene → program action for a remote `SetCurrentProgramScene` (#213) — pure.
+//! Scene → program action for the #215 OBS follow — pure. (#221: the Companion
+//! facade no longer uses it; its presses go through `playback::program_switch`,
+//! which decides from SongPlayer's own scene catalog. `KeepReason` names are
+//! shared by both; `NotSwitched` is the switch path's.)
 //!
 //! The scene's playlists come from the SAME scene → playlist map SongPlayer's
 //! own scene detection uses (`obs::scene::check_scene_items` over the
-//! `NdiSourceMap`, run by the OBS client for the facade):
+//! `NdiSourceMap`, read by the OBS client); the follow acts only on a scene
+//! cg OBS already shows:
 //!
-//! - cg OBS did not switch (unknown scene, cg OBS not reachable) → the program
-//!   stays as it is;
 //! - the scene shows exactly ONE SongPlayer playlist → cut `SP-program` to it;
 //! - any other scene (a manual cg OBS scene — media, browser, Slido, photos —
 //!   or one showing several playlists) → cut to the #212 NDI input "OBS
@@ -17,10 +19,11 @@ use std::collections::HashSet;
 
 use sp_core::config::PROGRAM_INPUT_ID;
 
-/// Why a remote scene press leaves `SP-program` unchanged.
+/// Why a scene press (or a followed scene) leaves `SP-program` unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeepReason {
-    /// cg OBS did not accept the switch (unknown scene, not reachable).
+    /// cg OBS did not accept a manual scene's switch (unknown scene, not
+    /// reachable) — the #221 switch path.
     NotSwitched,
     /// A manual or multi-playlist scene, but the NDI input is not a source.
     InputInactive,
@@ -35,7 +38,7 @@ impl KeepReason {
     }
 }
 
-/// What a remote `SetCurrentProgramScene` does to `SP-program`.
+/// What a scene cg OBS shows does to `SP-program` (the follow).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SceneAction {
     /// Cut to this playlist's output.
@@ -64,7 +67,7 @@ impl SceneAction {
         }
     }
 
-    /// The telemetry label (`last_remote_cut.action`).
+    /// The telemetry label (`last_follow_cut.action`, the #215 follow).
     pub fn label(self) -> &'static str {
         match self {
             Self::Playlist(_) => "playlist",
@@ -74,13 +77,10 @@ impl SceneAction {
     }
 }
 
-/// Decide the action. `playlists` is `None` when cg OBS did not switch to the
-/// scene, else the playlists the scene shows; `input_active` is the #212 rule
-/// (`InputSettings::active()`: enabled with a source).
-pub fn scene_action(playlists: Option<&HashSet<i64>>, input_active: bool) -> SceneAction {
-    let Some(playlists) = playlists else {
-        return SceneAction::Keep(KeepReason::NotSwitched);
-    };
+/// Decide the action. `playlists` are the playlists the scene shows;
+/// `input_active` is the #212 rule (`InputSettings::active()`: enabled with a
+/// source).
+pub fn scene_action(playlists: &HashSet<i64>, input_active: bool) -> SceneAction {
     let mut ids = playlists.iter();
     match (ids.next(), ids.next()) {
         (Some(&pid), None) => SceneAction::Playlist(pid),
@@ -99,47 +99,29 @@ mod tests {
 
     #[test]
     fn a_scene_with_exactly_one_playlist_cuts_to_it_whatever_the_input() {
-        assert_eq!(
-            scene_action(Some(&set(&[7])), true),
-            SceneAction::Playlist(7)
-        );
-        assert_eq!(
-            scene_action(Some(&set(&[7])), false),
-            SceneAction::Playlist(7)
-        );
+        assert_eq!(scene_action(&set(&[7]), true), SceneAction::Playlist(7));
+        assert_eq!(scene_action(&set(&[7]), false), SceneAction::Playlist(7));
     }
 
     #[test]
     fn a_manual_scene_cuts_to_the_input_while_it_is_a_source() {
-        assert_eq!(scene_action(Some(&set(&[])), true), SceneAction::Input);
+        assert_eq!(scene_action(&set(&[]), true), SceneAction::Input);
     }
 
     #[test]
     fn a_manual_scene_keeps_the_program_when_the_input_is_not_a_source() {
         assert_eq!(
-            scene_action(Some(&set(&[])), false),
+            scene_action(&set(&[]), false),
             SceneAction::Keep(KeepReason::InputInactive)
         );
     }
 
     #[test]
     fn a_multi_playlist_scene_is_a_manual_scene() {
-        assert_eq!(scene_action(Some(&set(&[3, 7])), true), SceneAction::Input);
+        assert_eq!(scene_action(&set(&[3, 7]), true), SceneAction::Input);
         assert_eq!(
-            scene_action(Some(&set(&[3, 7])), false),
+            scene_action(&set(&[3, 7]), false),
             SceneAction::Keep(KeepReason::InputInactive)
-        );
-    }
-
-    #[test]
-    fn an_unknown_scene_keeps_the_program_even_with_the_input_on() {
-        assert_eq!(
-            scene_action(None, true),
-            SceneAction::Keep(KeepReason::NotSwitched)
-        );
-        assert_eq!(
-            scene_action(None, false),
-            SceneAction::Keep(KeepReason::NotSwitched)
         );
     }
 

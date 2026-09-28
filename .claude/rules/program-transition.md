@@ -260,7 +260,8 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
 - `Hold::Until(t)`: `pid` is the `from` of a window (or a Cut) not served yet.
   `t` = one slot after the window's end. It is re-checked at `t`.
 - `Hold::OnProgram`: `pid` is still the program's source. The follow task and
-  the #213 remote control cut only AFTER cg OBS switched, and cg OBS's scene
+  a #221 manual-scene press cut only AFTER cg OBS switched (a playlist press
+  cuts first, then mirrors cg OBS: that is a `Hold::Until`), and cg OBS's scene
   event usually reaches the engine before their cut — but not always (#219:
   the follow reads the OBS client's snapshot, published together with the
   `SceneChanged`, on its own task, so either order happens; a cut that came
