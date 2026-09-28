@@ -99,15 +99,15 @@ pub fn subscribe_program(bus: &ProgramBus) -> (watch::Receiver<OnAir>, Option<St
 }
 
 /// Emit `CurrentProgramSceneChanged` for every change of the program's scene
-/// name until the bus goes away (the task is dropped with its listener). The
-/// value `on_air` holds when the task starts is not announced: a client reads
-/// the program when it connects.
+/// name after `last` (the name [`subscribe_program`] read) until the bus goes
+/// away (the task is dropped with its listener). What was on air when the
+/// listener started is not announced: a client reads the program when it
+/// connects.
 pub async fn run_program_feedback(
     mut on_air: watch::Receiver<OnAir>,
-    _last: Option<String>,
+    mut last: Option<String>,
     events: broadcast::Sender<FacadeEvent>,
 ) {
-    let mut last = program_scene_name(&on_air.borrow_and_update());
     while on_air.changed().await.is_ok() {
         let now = program_scene_name(&on_air.borrow_and_update());
         if let Some(scene) = scene_change(last.as_deref(), now.as_deref()) {

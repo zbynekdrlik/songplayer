@@ -138,6 +138,12 @@ pub const RETRY_PLAN: RetryPlan = RetryPlan {
     budget: Duration::from_secs(180),
 };
 
+/// At most this many probes. The budget ends the retries long before it
+/// (6 probes in production); the cap makes the loop's end structural, so no
+/// single comparison can make `decide` spin (review round 1: a flipped budget
+/// check or a shrinking pause would otherwise hang the mutation gate).
+pub const MAX_PROBES: u32 = 12;
+
 /// What `ensure_ready` does with the venv.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FastPath {
@@ -158,8 +164,9 @@ pub struct Decision {
     pub probes: u32,
 }
 
-/// Probe until the venv is ready, a probe proves an install is needed, or
-/// `plan`'s budget runs out (the module doc). `probe` runs one probe.
+/// Probe until the venv is ready, a probe proves an install is needed,
+/// `plan`'s budget runs out, or [`MAX_PROBES`] probes were made (the module
+/// doc). `probe` runs one probe.
 pub async fn decide<P, F>(mut probe: P, plan: RetryPlan) -> Decision
 where
     P: FnMut() -> F,
@@ -167,12 +174,14 @@ where
 {
     let start = tokio::time::Instant::now();
     let mut delay = plan.first_delay;
-    let mut probes = 0;
-    loop {
+    let mut verdict = Decision {
+        path: FastPath::Install,
+        probes: 0,
+    };
+    for probes in 1..=MAX_PROBES {
         let outcome = probe().await;
-        probes += 1;
         log_probe(&outcome, probes);
-        match outcome.action() {
+        let path = match outcome.action() {
             ProbeAction::FastPath => {
                 return Decision {
                     path: FastPath::Ready,
@@ -185,18 +194,28 @@ where
                     probes,
                 };
             }
-            ProbeAction::Retry => {}
-        }
-        if start.elapsed() + delay > plan.budget {
-            let path = if outcome == Readiness::Timeout {
-                FastPath::UseAsIs
-            } else {
-                FastPath::Install
-            };
-            return Decision { path, probes };
+            ProbeAction::Retry => after_retries(&outcome),
+        };
+        // The verdict if this probe is the last one (the cap or the budget);
+        // no pause after the last probe.
+        verdict = Decision { path, probes };
+        if probes == MAX_PROBES || start.elapsed() + delay > plan.budget {
+            break;
         }
         tokio::time::sleep(delay).await;
         delay = (delay * 2).min(plan.max_delay);
+    }
+    verdict
+}
+
+/// What a probe that still asks for a retry means once the retries are
+/// over: a timeout uses the venv as it is (a timeout never reinstalls torch),
+/// any other failure installs.
+fn after_retries(outcome: &Readiness) -> FastPath {
+    if *outcome == Readiness::Timeout {
+        FastPath::UseAsIs
+    } else {
+        FastPath::Install
     }
 }
 
