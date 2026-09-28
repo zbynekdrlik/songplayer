@@ -1280,6 +1280,12 @@ jobs:
             Write-Error "FAIL: the remote-control facade is not listening on port $($program.remote.port) (error: $($program.remote.error))"
             exit 1
           }
+          # The E2E scene driver connects to ws://localhost:4456 with no
+          # password (FACADE_WS_URL); say so here, not far away in the suite.
+          if ($program.remote.port -ne 4456 -or $program.remote.auth) {
+            Write-Error "FAIL: the E2E needs the facade on port 4456 without a password (port $($program.remote.port), auth $($program.remote.auth))"
+            exit 1
+          }
           Write-Host "OK: the remote-control facade listens on port $($program.remote.port)"
 
       - name: Seed Resolume host
