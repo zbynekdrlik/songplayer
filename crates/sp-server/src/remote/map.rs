@@ -67,7 +67,7 @@ impl SceneAction {
         }
     }
 
-    /// The telemetry label (`last_remote_cut.action`).
+    /// The telemetry label (`last_follow_cut.action`, the #215 follow).
     pub fn label(self) -> &'static str {
         match self {
             Self::Playlist(_) => "playlist",

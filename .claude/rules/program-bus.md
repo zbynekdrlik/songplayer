@@ -152,8 +152,9 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   `the_startup_selection_is_published_before_anyone_subscribes` pins it.
 - Every publisher names the scene: `persist_and_cut(pool, bus, pid, scene)`
   / `ProgramBus::cut(pid, now, scene)` / `select_initial(pid, scene)`. A
-  press passes the scene pressed (a playlist's by its catalog name); the
-  restore and the dashboard cut the playlist's catalog scene
+  press passes the scene pressed (a playlist's by its catalog name;
+  "OBS manuál" itself passes none); the restore and the dashboard cut the
+  playlist's catalog scene
   (`scene_catalog::scene_of_source`, `None` for -1); the OBS follow the cg
   OBS scene it follows — only when it CUTS (`follow_scene` skips a source
   already on program), so a followed manual → manual change publishes
