@@ -120,11 +120,11 @@ one only together with the design record on #217.
 ## Gotchas
 
 - **The MIN_VISIBLE floor after the cap can fall behind in a fast run of
-  separate sentences.** Once the floor binds, each further sentence sung
-  under 1200 ms after the previous one adds `1200 − gap` ms of delay. For
-  example, four sentences 1 s apart show −800 (the first line's lead), 0,
-  +200 and +400 ms from their sung starts (pinned by
-  `in_a_fast_run_of_short_sentences_each_keeps_1200_ms`).
+  separate sentences.** Once a line shows at or after its sung start, each
+  further sentence that starts under 1200 ms after the previous one's start
+  adds `1200 − Δstart` ms of delay. For example, four sentences 1 s apart
+  show −800 (the first line's lead), 0, +200 and +400 ms from their sung
+  starts (pinned by `in_a_fast_run_of_short_sentences_each_keeps_1200_ms`).
   - Not on the three fixtures. The worst is 100 ms: What A God's doubled
     0.3 s "What a God, what a God.", whose text is the same.
   - A chant with a sentence mark on every short line drifts. Eight "Hey!"
