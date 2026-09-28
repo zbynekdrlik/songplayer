@@ -1889,9 +1889,13 @@ jobs:
           $py = Join-Path $venv "Scripts\python.exe"
           $numpy = "2.1.1"
           if (-not (Test-Path $py)) {
+            # The box's system Python (the lyrics venv's base too). numpy
+            # 2.1.1 ships wheels for CPython 3.10-3.13 only, so never fall
+            # back to whatever `python` is on PATH: fail clearly instead.
             $sys = "C:\Program Files\Python312\python.exe"
             if (-not (Test-Path $sys)) {
-              $sys = (Get-Command python -ErrorAction Stop).Source
+              Write-Error "FAIL: $sys not found - the A/V gate venv needs the box's Python 3.12"
+              exit 1
             }
             Write-Host "Creating the A/V gate venv at $venv with $sys"
             & $sys -m venv $venv
@@ -1910,14 +1914,21 @@ jobs:
               exit 1
             }
           }
-          # Verify: the script's own imports load (numpy.fft + its siblings).
+          # Verify: the script and its siblings start (their top-level
+          # imports), and numpy.fft - which numpy 2 loads lazily and the
+          # scripts use only inside functions - really imports (the module CI
+          # run 36475215084 lost mid-analysis).
           & $py "$env:GITHUB_WORKSPACE\scripts\av_sync_check.py" --help | Out-Null
           if ($LASTEXITCODE -ne 0) {
             Write-Error "FAIL: av_sync_check.py does not start under $py (exit $LASTEXITCODE)"
             exit 1
           }
-          $version = & $py -c "import numpy; print(numpy.__version__)"
-          Write-Host "OK: the A/V gate venv at $venv has numpy $version"
+          $version = & $py -c "import numpy, numpy.fft; print(numpy.__version__)"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: numpy.fft does not import under $py (exit $LASTEXITCODE)"
+            exit 1
+          }
+          Write-Host "OK: the A/V gate venv at $venv has numpy $version with numpy.fft"
 
       - name: Feature-level Playwright (post-deploy spec)
         shell: powershell
