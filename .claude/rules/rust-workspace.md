@@ -419,6 +419,16 @@ the test that kills each one BEFORE CI's mutation gate runs.
   A mutant that only a mid-row / off-edge input can reveal (`a - c0` with
   `c0` always 0 on row-aligned runs) needs a test that cuts the input
   arbitrarily.
+- **A new early return in front of pinned comparisons can silently orphan
+  their killers** (#217 addendum 3, review rounds 4-5). Round 4 added
+  `TitleClock::shows` as a guard ahead of `arm_title_timers`'s `>`
+  comparisons, and adapted a boundary test whose clock the guard now
+  rejected. The test still passed, but it no longer reached the
+  comparisons, so their `>` → `>=` mutants survived. CI's gate diffs from
+  the last GREEN mutation verdict, not from the last review round. So after
+  any fix that adds a guard or adapts an existing test, re-list the FULL
+  branch range (`cargo mutants --in-diff <base>..HEAD --list`) and re-map
+  every mutant to a killer, not just the round's own diff.
 - **A HANG fails the gate exactly like a survivor** (review round 1, same
   ticket). cargo-mutants kills a stalled test run at `--timeout` and reports
   TIMEOUT, which turns the shard red. The #215 harness first counted its
