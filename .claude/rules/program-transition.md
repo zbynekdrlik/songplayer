@@ -288,10 +288,14 @@ faded out the on-program title.
   - a newer hold: a re-check that finds the window not over replaces its
     predecessor.
 - **A re-check names its hold.** `SceneOffDue` carries the re-check task's
-  id (`tokio::task::id()` inside the task). `scene_off_due` ignores one
-  whose task a newer hold replaced: queued during an A→B→A→B, it was taken
-  as the newer hold's re-check and skipped that hold's `CUT_SETTLE`. With no
-  hold pending, a re-check is handled as before.
+  id (`tokio::task::id()` inside the task). A hold registers its re-check
+  before the engine can see the event, so `scene_off_due` acts only on the
+  PENDING one and ignores any other as stale:
+  - a newer hold replaced it: queued during an A→B→A→B, it was taken as the
+    newer hold's re-check and skipped that hold's `CUT_SETTLE`;
+  - the hold ended (a pause, a scene-on, an operator's pick): queued when
+    the pick came (the engine's `select!` is unbiased), it held the picked
+    song again or paused it.
 - **Its end, a failure or a skip never start a song off program.**
   `pause_if_held` runs first in the `Ended` and `Error` arms and for a
   `Skip`. A held playlist gets `SceneOff`, the hold's own end, instead of
@@ -307,8 +311,11 @@ faded out the on-program title.
     the rest of the window mixes the paused side's standby. The hold is the
     fade plus up to 15 slots of cue wait: about 0.8 s for a 300 ms fade, up
     to about 10.5 s for the longest one (300 slots).
-  - The pause keeps its resume point. For a song that ENDED that is its
-    end, so a later ▶ plays its last moment, then the next song.
+  - The pause keeps its resume point while the playlist stays paused. For
+    a song that ENDED that is its end (a later ▶ plays its last moment,
+    then the next song); for a skipped one the skipped song where it was
+    (the skip is not carried over). Every Play drops the resume point
+    (`begin_play`), so it never outlives the pause.
 - **`clear_lyrics_display` follows the dispatch gates.** A held playlist
   clears nothing. One merely off program leaves the shared subtitle clips
   alone, as its lines do; its own karaoke WS clear and the Presenter clear
@@ -329,9 +336,11 @@ faded out the on-program title.
   against the program standby, so the window never stalls.
 - **Both title timers fire only on program** (`title_timers.rs`): the hide
   timer reads `scene_active` when it fires, like the show timer. A pause
-  cancels them, and on program it re-syncs the wall (`resync_after_play`):
-  a paused song's title is not due, so the title goes down at the pause,
-  as any later re-sync would take it down.
+  cancels them, and on program it clears the line
+  (`clear_lyrics_display`) and re-syncs the title (`resync_after_play`): a
+  paused song's title and line are not due, so they go down at the pause,
+  as any later re-sync would take them down. Off program (the hold's end)
+  nothing of the song is up, so nothing is sent.
 - **The lyrics survive the hold.** The scene-off used to drop
   `lyrics_state`, so a scene back on inside the hold played on with no
   subtitles. Now:

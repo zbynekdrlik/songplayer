@@ -105,6 +105,9 @@ What the driver does now (`refresh_mapping(now)`):
     one: an episode an answer, a 404 or a breaker close opened has another
     start and is never restamped
     (`a_failed_fetch_s_episode_restarts_at_the_first_answer`).
+  - Residual (pre-existing, #217 addendum 2): an episode a breaker close or
+    a 404 opened whose `/composition` keeps failing for over 120 s is not
+    restarted at its first answer; it gets the 60 s retry cadence then.
   - A failure while SongPlayer's clips ARE mapped opens nothing (Arena's
     REST choking, the map is valid), and an open episode keeps its start
     (`a_failed_fetch_opens_an_episode_only_without_songplayer_clips`).
@@ -409,7 +412,9 @@ the driver compares it with what it did (above).
   Since the release 0.68.0 review round 1 it also drops the last song's
   `lyrics_state` and sets `cached_position_ms` to the Play's start: a
   recovery before the new `Started` re-pushed the old song's line, and a
-  pause there recorded the old song's position for the new one.
+  pause there recorded the old song's position for the new one. Since
+  round 2 it clears `paused_at` too: a later ▶ resumed the old song over
+  the new one.
 - **A Play on program re-syncs the wall at once (review round 4,
   `resync_after_play`, after every Play).** `begin_play` closed the old
   song's window and cancelled its hide timer, and the new show timer comes
@@ -487,9 +492,10 @@ the driver compares it with what it did (above).
   that started off program (a playlist held through a #215 transition)
   faded out the on-program playlist's title. `PlayAction::Pause` cancels
   the song's timers: a paused song's hide timer fired at its planned end.
-  On program the pause then re-syncs the wall (`resync_after_play`): a
-  paused song is not a title candidate, so without it the title stayed up
-  until some re-sync took it down. A `Started` that a pause overtook
+  On program the pause then clears the line (`clear_lyrics_display`) and
+  re-syncs the title (`resync_after_play`): a paused song is neither a
+  title candidate nor re-pushed by a recovery, so without it both stayed up
+  until some re-sync took them down. A `Started` that a pause overtook
   (`WaitingForScene`) arms nothing and clears nothing.
   The held playlist itself no longer starts a song
   (`.claude/rules/program-transition.md`, "A held playlist has no side
