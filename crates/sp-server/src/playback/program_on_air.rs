@@ -9,14 +9,17 @@
 //!   its state lock, so in cut order) and inside `select_initial`, always with
 //!   `send_modify`. A `send` would DROP the value while nobody subscribed yet,
 //!   and `restore_selected_source` runs before any task subscribes.
-//! - Every publisher names the scene: a press passes the scene pressed, the
-//!   startup restore and a dashboard cut the playlist's catalog scene
-//!   (`scene_catalog`), the OBS follow the cg OBS scene it follows.
+//! - Every publisher names the scene: a playlist press passes the playlist's
+//!   catalog scene (`scene_catalog`, whatever ASCII case was pressed), a
+//!   manual press the scene pressed, "OBS manuál" itself none; the startup
+//!   restore and a dashboard cut pass the playlist's catalog scene; the OBS
+//!   follow the cg OBS scene it follows.
 //! - [`program_scene_name`] is the ONE name resolver: the scene, else "OBS
 //!   manuál" for the NDI input, else none. It never asks cg OBS.
 //!
-//! The consumers (the facade's feedback, `/api/v1/status`, the playback
-//! authority) arrive in the later lanes of #221.
+//! The facade's per-session preview falls back to it (#221 L2); the facade's
+//! feedback, `/api/v1/status` and the playback authority arrive in the later
+//! lanes of #221.
 
 use sp_core::config::{PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
 

@@ -382,7 +382,7 @@ async fn switch(facade: &Facade, scene: &str, via: Via) -> Reply {
         upstream: &facade.upstream,
     };
     match switch_scene(&ctx, scene, via).await {
-        Switched::Cut(_) | Switched::Kept => Reply::ok(None),
+        Switched::Cut | Switched::Kept => Reply::ok(None),
         Switched::NotSwitched(Some(d)) => Reply::from_upstream(&d),
         Switched::NotSwitched(None) => Reply::error(STATUS_NOT_READY, NOT_READY_COMMENT),
         Switched::StoreFailed(e) => Reply::error(

@@ -51,14 +51,8 @@ pub async fn run_calls(
     dispatcher: Dispatcher,
     mut calls: mpsc::UnboundedReceiver<RemoteCall>,
 ) {
-    while let Some(first) = calls.recv().await {
-        let mut batch = vec![first];
-        while let Ok(next) = calls.try_recv() {
-            batch.push(next);
-        }
-        for call in batch.into_iter().rev() {
-            send_call(&write, &dispatcher, call).await;
-        }
+    while let Some(call) = calls.recv().await {
+        send_call(&write, &dispatcher, call).await;
     }
 }
 

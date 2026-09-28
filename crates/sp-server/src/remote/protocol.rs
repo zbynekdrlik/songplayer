@@ -67,7 +67,7 @@ pub const STATUS_NOT_READY: u16 = 207;
 pub const STATUS_MISSING_REQUEST_FIELD: u16 = 300;
 pub const STATUS_INVALID_REQUEST_FIELD_TYPE: u16 = 401;
 pub const STATUS_REQUEST_FIELD_OUT_OF_RANGE: u16 = 402;
-pub const STATUS_RESOURCE_NOT_FOUND: u16 = 604;
+pub const STATUS_INVALID_RESOURCE_STATE: u16 = 604;
 
 /// `SetCurrentSceneTransitionDuration`'s bounds, ms (obs-websocket's own).
 pub const TRANSITION_DURATION_MIN_MS: u32 = 50;
@@ -568,19 +568,21 @@ pub fn preview_scene_data(scene: &str) -> Value {
 }
 
 /// The error of a preview or transition request with no preview set and
-/// nothing on `SP-program`.
+/// nothing on `SP-program` (obs-websocket's 604 `InvalidResourceState`).
 pub fn no_scene() -> Reply {
     Reply::error(
-        STATUS_RESOURCE_NOT_FOUND,
+        STATUS_INVALID_RESOURCE_STATE,
         "No preview scene is set and nothing is on SP-program.",
     )
 }
 
-/// `SetCurrentSceneTransitionDuration`'s `transitionDuration`, validated the
-/// way obs-websocket does: missing (or null) → [`STATUS_MISSING_REQUEST_FIELD`],
+/// `SetCurrentSceneTransitionDuration`'s `transitionDuration`, validated
+/// like obs-websocket: missing (or null) → [`STATUS_MISSING_REQUEST_FIELD`],
 /// not a number → [`STATUS_INVALID_REQUEST_FIELD_TYPE`], outside
 /// 50..=20000 ms → [`STATUS_REQUEST_FIELD_OUT_OF_RANGE`]. A fraction is
-/// truncated to whole ms.
+/// truncated to whole ms. One difference, as the design record specifies: a
+/// request with no `requestData` at all is also 300 (obs-websocket answers
+/// 301 `MissingRequestData`; Companion always sends the data).
 pub fn transition_duration(data: Option<&Value>) -> Result<u32, Reply> {
     let value = data
         .and_then(|d| d.get("transitionDuration"))

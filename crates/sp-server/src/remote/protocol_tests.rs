@@ -529,8 +529,8 @@ fn the_preview_answer_and_the_no_scene_error() {
     );
     let err = no_scene();
     assert!(!err.succeeded());
-    assert_eq!(err.status["code"], STATUS_RESOURCE_NOT_FOUND);
-    assert_eq!(STATUS_RESOURCE_NOT_FOUND, 604);
+    assert_eq!(err.status["code"], STATUS_INVALID_RESOURCE_STATE);
+    assert_eq!(STATUS_INVALID_RESOURCE_STATE, 604);
 }
 
 #[test]

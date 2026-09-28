@@ -12,17 +12,24 @@
 //! 2. A PLAYLIST scene is cut FIRST (`persist_and_cut`, published as on air
 //!    with the catalog name), never gated on cg OBS. Then the legacy MIRROR:
 //!    the same `SetCurrentProgramScene` is queued for cg OBS with `try_send`
-//!    (FIFO on the OBS client's queue, so it never overtakes a later press)
-//!    and is NOT awaited under the lock. A spawned waiter (at most the
-//!    upstream timeout, 3 s) records cg OBS's answer as
-//!    `last_remote_cut.cg_forward`. The consumers that still take cg OBS's
-//!    program (Arena, FOH, lv1, strih) follow it until B4 step 6 deletes it.
+//!    and is NOT awaited under the lock. The queue is FIFO up to cg OBS: the
+//!    OBS client writes the facade's calls through ONE forwarder per
+//!    connection (`obs::remote_call::run_calls`), so the mirror never
+//!    overtakes a later press. A spawned waiter (at most the upstream
+//!    timeout, 3 s) records cg OBS's answer as `last_remote_cut.cg_forward`.
+//!    The consumers that still take cg OBS's program (Arena, FOH, lv1,
+//!    strih) follow it until B4 step 6 deletes it.
 //! 3. A MANUAL scene goes to cg OBS FIRST, awaited under the lock: "OBS
 //!    manuál" carries cg OBS's program, and a later press must not overtake
 //!    it. cg OBS accepted → cut to "OBS manuál" (-1) while the NDI input is a
 //!    source, else keep (`input_inactive`). Refused or not reachable → keep
 //!    (`not_switched`); the caller passes cg OBS's answer through.
-//! 4. The cut uses the bus's current transition spec unchanged. A manual →
+//! 4. "OBS manuál" itself (`PROGRAM_INPUT_LABEL`, the resolver's name for -1
+//!    with no scene, e.g. a transition with no preview after the input was
+//!    restored at startup) is the NDI input: cut to -1 while it is a source,
+//!    with no scene to send to cg OBS (it keeps what it shows, like a
+//!    dashboard cut to -1); else keep (`input_inactive`).
+//! 5. The cut uses the bus's current transition spec unchanged. A manual →
 //!    manual press keeps -1 (no mix) and publishes the new scene name.
 //!
 //! Every switch is recorded as `remote.last_remote_cut`, with `via` (what
@@ -31,7 +38,7 @@
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use sp_core::config::PROGRAM_INPUT_ID;
+use sp_core::config::{PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
 use sqlx::SqlitePool;
 use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
@@ -76,11 +83,10 @@ impl Via {
 /// What a switch did, for the caller's answer (it is already recorded).
 #[derive(Debug)]
 pub enum Switched {
-    /// `SP-program` was cut (to the playlist, or to "OBS manuál"); the
-    /// program after the cut.
-    Cut(ProgramStatus),
-    /// A manual scene cg OBS switched to while the NDI input is not a
-    /// source: the program is kept.
+    /// `SP-program` was cut (to the playlist, or to "OBS manuál").
+    Cut,
+    /// A manual scene cg OBS switched to (or "OBS manuál" itself) while the
+    /// NDI input is not a source: the program is kept.
     Kept,
     /// cg OBS refused the manual scene (its op=7 `d`, to pass through) or
     /// did not answer (`None`): the program is kept.
@@ -164,15 +170,36 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
             // The catalog's name: the lowercased NDI output name, the scene
             // cg OBS shows the playlist in.
             let name = catalog.scene_of(pid).unwrap_or(scene).to_string();
-            match cut_and_record(ctx, scene, via, pid, &name, None).await {
-                Ok((status, cut_id)) => {
+            match cut_and_record(ctx, scene, via, pid, Some(&name), None).await {
+                Ok(cut_id) => {
                     mirror(ctx, &name, cut_id);
-                    Switched::Cut(status)
+                    Switched::Cut
                 }
                 Err(e) => Switched::StoreFailed(e),
             }
         }
+        SceneKind::Manual if scene == PROGRAM_INPUT_LABEL => switch_input(ctx, scene, via).await,
         SceneKind::Manual => switch_manual(ctx, scene, via).await,
+    }
+}
+
+/// "OBS manuál" itself: the NDI input, with no scene for cg OBS (module doc,
+/// step 4).
+async fn switch_input(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
+    let input_active = load_input_settings(ctx.pool)
+        .await
+        .is_ok_and(|s| s.active());
+    if !input_active {
+        warn!(
+            "program switch: \"OBS manuál\" is not a source (the NDI input is off or has no source) — SP-program unchanged"
+        );
+        let record = kept(scene, via, KeepReason::InputInactive.as_str(), None);
+        ctx.bus.remote().record_cut(record);
+        return Switched::Kept;
+    }
+    match cut_and_record(ctx, scene, via, PROGRAM_INPUT_ID, None, None).await {
+        Ok(_) => Switched::Cut,
+        Err(e) => Switched::StoreFailed(e),
     }
 }
 
@@ -209,25 +236,34 @@ async fn switch_manual(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
         ctx.bus.remote().record_cut(record);
         return Switched::Kept;
     }
-    match cut_and_record(ctx, scene, via, PROGRAM_INPUT_ID, scene, Some(forward)).await {
-        Ok((status, _)) => Switched::Cut(status),
+    match cut_and_record(
+        ctx,
+        scene,
+        via,
+        PROGRAM_INPUT_ID,
+        Some(scene),
+        Some(forward),
+    )
+    .await
+    {
+        Ok(_) => Switched::Cut,
         Err(e) => Switched::StoreFailed(e),
     }
 }
 
-/// Persist + cut to `source` (published as on air for `name`) and record it.
-/// A failed persist cuts nothing and is recorded as `persist_failed`. Returns
-/// the program after the cut and the record's id.
+/// Persist + cut to `source` (published as on air for `name`, the scene cg
+/// OBS shows it in, when there is one) and record it. A failed persist cuts
+/// nothing and is recorded as `persist_failed`. Returns the record's id.
 async fn cut_and_record(
     ctx: &SwitchCtx<'_>,
     pressed: &str,
     via: Via,
     source: i64,
-    name: &str,
+    name: Option<&str>,
     cg_forward: Option<String>,
-) -> Result<(ProgramStatus, u64), sqlx::Error> {
+) -> Result<u64, sqlx::Error> {
     let shared = ctx.bus.remote();
-    match persist_and_cut(ctx.pool, ctx.bus, source, Some(name)).await {
+    match persist_and_cut(ctx.pool, ctx.bus, source, name).await {
         Ok(status) => {
             info!(
                 scene = %clip(pressed),
@@ -237,7 +273,7 @@ async fn cut_and_record(
                 "program switch: SP-program cut"
             );
             let cut_id = shared.record_cut(cut_done(pressed, via, source, &status, cg_forward));
-            Ok((status, cut_id))
+            Ok(cut_id)
         }
         Err(e) => {
             warn!(scene = %clip(pressed), source, %e, "program switch: persisting the program source failed — nothing cut");
