@@ -3,8 +3,9 @@
  * (#170).
  *
  * #221 L3: the driver now talks to SongPlayer's obs-websocket facade, so the
- * transition is SP-program's (the Settings fade, or a Cut that ends at once)
- * and its Started/Ended events are SongPlayer's. What follows is the #170
+ * transition is SP-program's — cg OBS's own transition in the default
+ * `program_transition = obs` mode, else the Settings fade, or a Cut that
+ * ends at once — and its Started/Ended events are SongPlayer's. What follows is the #170
  * history of the cg OBS driver, whose OBS ran **Studio Mode** with a
  * **`Fade` transition of 2000ms**. Two consequences the naive
  * "SetCurrentProgramScene then sleep" approach raced (round 3):
@@ -38,7 +39,10 @@ export function sceneSwitchSettled(
 }
 
 export interface WaitForSceneSwitchOptions {
-  /** Give up (throw) after this many ms. Default 8000 (covers any Settings fade). */
+  /** Give up (throw) after this many ms. Default 8000: covers a program
+   * transition of up to ~7 s plus the cue wait (the box runs 300 ms); a
+   * longer fade (the cap is 10 s, ~10.6 s with the cue wait) needs a larger
+   * `timeoutMs`. */
   timeoutMs?: number;
   /** Delay between polls. Default 150 ms. */
   pollMs?: number;
