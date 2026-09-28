@@ -36,7 +36,7 @@
 //! of the window out of the paused side's standby (its frozen frame or idle
 //! black, and silence).
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use tracing::{debug, info};
@@ -46,6 +46,11 @@ use super::pipeline::PipelineEvent;
 use super::program_bus::Hold;
 use super::state::{PlayEvent, PlayState};
 use super::wallclock::utc_now_100ns;
+
+/// The id of each hold's re-check (`SceneOffDue`), unique in the process.
+/// Not a tokio task id: tokio may reuse one once its task has ended, which
+/// is exactly a stale re-check's state (review round 3).
+static NEXT_RE_CHECK: AtomicU64 = AtomicU64::new(1);
 
 /// How long a playlist that is still on program keeps playing after its OBS
 /// scene left, so that the cut following cg OBS lands first (the follow task's
@@ -72,7 +77,7 @@ impl PlaybackEngine {
             .await;
     }
 
-    /// `PipelineEvent::SceneOffDue` of the hold's re-check task `due`:
+    /// `PipelineEvent::SceneOffDue` of the hold re-check `due`:
     /// re-check a held pause; nothing when the scene came back on program (or
     /// the pipeline is gone), or when `due` is not the pending re-check. A
     /// hold registers its re-check before the engine can see the event, so
@@ -80,12 +85,12 @@ impl PlaybackEngine {
     /// A→B→A→B, it skipped that hold's `CUT_SETTLE`, review round 1), or the
     /// hold ended (a pause, a scene-on, an operator's pick, which it held again
     /// or paused, review round 2).
-    pub(super) async fn scene_off_due(&mut self, playlist_id: i64, due: tokio::task::Id) {
+    pub(super) async fn scene_off_due(&mut self, playlist_id: i64, due: u64) {
         let stale = self
             .pipelines
             .get(&playlist_id)
             .and_then(|pp| pp.scene_off_due.as_ref())
-            .is_none_or(|pending| pending.id() != due);
+            .is_none_or(|(pending, _)| *pending != due);
         if stale {
             debug!(playlist_id, "a stale hold re-check — ignored");
             return;
@@ -127,15 +132,15 @@ impl PlaybackEngine {
             "scene off program — the playlist keeps playing through the program transition"
         );
         let tx = self.event_tx.clone();
-        let due = tokio::spawn(async move {
+        let re_check = NEXT_RE_CHECK.fetch_add(1, Ordering::Relaxed);
+        let task = tokio::spawn(async move {
             tokio::time::sleep(delay).await;
-            let due = tokio::task::id(); // this task: `scene_off_due` matches it
-            let _ = tx.send((playlist_id, PipelineEvent::SceneOffDue(due)));
+            let _ = tx.send((playlist_id, PipelineEvent::SceneOffDue(re_check)));
         })
         .abort_handle();
         if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
             pp.end_hold(); // a re-check of an earlier hold is superseded
-            pp.scene_off_due = Some(due);
+            pp.scene_off_due = Some((re_check, task));
         }
     }
 
@@ -161,11 +166,11 @@ impl PlaybackEngine {
 }
 
 impl super::PlaylistPipeline {
-    /// The hold is over (its pause, a scene back on program, or a newer
-    /// hold): its pending re-check is cancelled.
+    /// The hold is over (its pause, a scene back on program, an operator's
+    /// pick, or a newer hold): its pending re-check is cancelled.
     pub(super) fn end_hold(&mut self) {
-        if let Some(due) = self.scene_off_due.take() {
-            due.abort();
+        if let Some((_, task)) = self.scene_off_due.take() {
+            task.abort();
         }
     }
 }

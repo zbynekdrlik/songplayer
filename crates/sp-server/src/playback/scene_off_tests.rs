@@ -145,13 +145,13 @@ async fn next_scene_off_due(engine: &mut PlaybackEngine, pid: i64) {
 const PLAYING: PlayState = PlayState::Playing { video_id: SONG };
 
 /// The id of `pid`'s pending hold re-check (the hold marker).
-fn pending_re_check(engine: &PlaybackEngine, pid: i64) -> tokio::task::Id {
+fn pending_re_check(engine: &PlaybackEngine, pid: i64) -> u64 {
     engine
         .pipelines
         .get(&pid)
         .and_then(|pp| pp.scene_off_due.as_ref())
         .expect("a hold re-check is pending")
-        .id()
+        .0
 }
 
 #[tokio::test]

@@ -90,7 +90,7 @@ pub enum PipelineEvent {
     },
     /// #215: not from a pipeline thread — the engine's own deferred
     /// scene-go-off pause of a playlist held through a program transition is
-    /// due for a re-check (`scene_off.rs`). It carries the id of the hold's
-    /// re-check task: the re-check of a hold a newer one replaced is stale.
-    SceneOffDue(tokio::task::Id),
+    /// due for a re-check (`scene_off.rs`). It carries the hold's re-check
+    /// id: only the pending re-check acts, any other is stale.
+    SceneOffDue(u64),
 }

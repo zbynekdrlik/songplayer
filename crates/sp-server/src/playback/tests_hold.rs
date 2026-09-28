@@ -515,7 +515,8 @@ async fn finished(task: &tokio::task::AbortHandle) -> bool {
 }
 
 /// OUT's pending hold re-check (the hold marker).
-fn re_check(engine: &PlaybackEngine) -> tokio::task::AbortHandle {
+/// Its id and its sleeping task.
+fn re_check(engine: &PlaybackEngine) -> (u64, tokio::task::AbortHandle) {
     out(engine)
         .scene_off_due
         .clone()
@@ -534,7 +535,7 @@ async fn the_pause_of_a_held_playlist_cancels_its_re_check_and_drops_its_lyrics(
     playing(&mut rig.engine);
     rig.engine.pipelines.get_mut(&OUT).unwrap().lyrics_state = Some(LyricsState::new(track()));
     let _bus = hold(&mut rig).await;
-    let due = re_check(&rig.engine);
+    let (_, due) = re_check(&rig.engine);
 
     rig.engine
         .handle_pipeline_event(OUT, PipelineEvent::Ended)
@@ -566,7 +567,7 @@ async fn a_scene_back_on_program_ends_the_hold() {
         pp.last_resolume_subtitles_signature, None,
         "the scene-off cleared the wall's line"
     );
-    let due = re_check(&rig.engine);
+    let (_, due) = re_check(&rig.engine);
 
     rig.engine.handle_scene_change(OUT, true).await;
 
@@ -589,10 +590,10 @@ async fn a_newer_hold_supersedes_the_pending_re_check() {
     let mut rig = rig().await;
     playing(&mut rig.engine);
     let _bus = hold(&mut rig).await;
-    let first = re_check(&rig.engine);
+    let (first_id, first) = re_check(&rig.engine);
 
     rig.engine
-        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(first.id()))
+        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(first_id))
         .await;
 
     assert_eq!(
@@ -600,8 +601,8 @@ async fn a_newer_hold_supersedes_the_pending_re_check() {
         PlayState::Playing { video_id: SONG },
         "still held: the window is a minute away"
     );
-    let second = re_check(&rig.engine);
-    assert_ne!(second.id(), first.id(), "a new re-check replaced it");
+    let (second_id, second) = re_check(&rig.engine);
+    assert_ne!(second_id, first_id, "a new re-check replaced it");
     assert!(finished(&first).await, "the superseded one was cancelled");
     assert!(
         !second.is_finished(),
@@ -612,11 +613,11 @@ async fn a_newer_hold_supersedes_the_pending_re_check() {
     // A→B→A→B inside one hold), is stale. Taken as the newer hold's, it
     // skipped that hold's `CUT_SETTLE`; it is ignored.
     rig.engine
-        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(first.id()))
+        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(first_id))
         .await;
     assert_eq!(
-        re_check(&rig.engine).id(),
-        second.id(),
+        re_check(&rig.engine).0,
+        second_id,
         "the newer hold's re-check is still the pending one"
     );
     assert!(!second.is_finished(), "and it still runs");
@@ -742,7 +743,7 @@ async fn an_operator_pick_inside_the_hold_ends_it() {
         let mut rig = rig().await;
         playing(&mut rig.engine);
         let _bus = hold(&mut rig).await;
-        let due = re_check(&rig.engine);
+        let (due_id, due) = re_check(&rig.engine);
         lyrics_updates(&mut rig.ws);
         if pick == "play video" {
             rig.engine.handle_play_video(OUT, NEXT, None).await;
@@ -773,7 +774,7 @@ async fn an_operator_pick_inside_the_hold_ends_it() {
         // comes (the engine's select! is unbiased). It is stale: no hold is
         // pending, so it neither holds the pick again nor pauses it.
         rig.engine
-            .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(due.id()))
+            .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(due_id))
             .await;
         assert!(
             out(&rig.engine).scene_off_due.is_none(),

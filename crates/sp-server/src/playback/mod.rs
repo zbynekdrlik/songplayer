@@ -136,13 +136,14 @@ struct PlaylistPipeline {
     title_show_abort: Option<tokio::task::AbortHandle>,
     /// Abort handle for the title-hide timer (3.5s before end).
     title_hide_abort: Option<tokio::task::AbortHandle>,
-    /// #215: the pending re-check (`SceneOffDue`) of a playlist HELD off
-    /// program through a transition (`scene_off.rs`); `Some` = held. Its
-    /// pause, a scene back on program and a newer hold end it (`end_hold`).
-    /// A held playlist has no side effects: no lyrics line goes out, and its
-    /// song's end, a failure or a skip pause it instead of starting a song
-    /// off program (release 0.68.0 blockers, design record 5863318980).
-    scene_off_due: Option<tokio::task::AbortHandle>,
+    /// #215: the pending re-check (`SceneOffDue`: its id, its sleeping task)
+    /// of a playlist HELD off program through a transition (`scene_off.rs`);
+    /// `Some` = held. Its pause, a scene back on program, an operator's pick
+    /// and a newer hold end it (`end_hold`). A held playlist has no side
+    /// effects: no lyrics line goes out, and its song's end, a failure or a
+    /// skip pause it instead of starting a song off program (release 0.68.0
+    /// blockers, design record 5863318980).
+    scene_off_due: Option<(u64, tokio::task::AbortHandle)>,
     /// Cached song/artist/duration so `Position` events can re-broadcast
     /// `NowPlaying` without re-querying the DB.
     cached_song: String,
