@@ -58,6 +58,13 @@ pub struct FakeObsState {
     pub program_scene: Option<String>,
     /// #213: every request received, as `{requestType, requestData}`.
     pub requests: Vec<Value>,
+    /// #218: the next N `GetSceneItemList` requests get NO answer (the
+    /// client's lookup times out). Each dropped request is still logged in
+    /// `requests`, with `"dropped": true`.
+    pub drop_scene_item_lists: usize,
+    /// #218: the next N `GetSceneItemList` requests are answered with a
+    /// success status but no `sceneItems` list.
+    pub omit_scene_items: usize,
 }
 
 /// A fake OBS WebSocket server listening on a random localhost port.
@@ -268,8 +275,19 @@ async fn handle_client(
                             // a GetInputList request goes out, OBS never responds.
                             let req_type = val["d"]["requestType"].as_str().unwrap_or("");
                             let suppress = {
-                                let s = state.lock().await;
-                                req_type == "GetInputList" && s.suppress_get_input_list
+                                let mut s = state.lock().await;
+                                if req_type == "GetSceneItemList" && s.drop_scene_item_lists > 0 {
+                                    // #218: cg OBS never answers this lookup.
+                                    s.drop_scene_item_lists -= 1;
+                                    s.requests.push(json!({
+                                        "requestType": req_type,
+                                        "requestData": val["d"]["requestData"],
+                                        "dropped": true,
+                                    }));
+                                    true
+                                } else {
+                                    req_type == "GetInputList" && s.suppress_get_input_list
+                                }
                             };
                             if suppress {
                                 continue;
@@ -339,7 +357,20 @@ async fn handle_request(req: &Value, state: &Arc<Mutex<FakeObsState>>) -> Value 
         }
         "GetSceneItemList" => {
             let scene_name = req["d"]["requestData"]["sceneName"].as_str().unwrap_or("");
-            let s = state.lock().await;
+            let mut s = state.lock().await;
+            if s.omit_scene_items > 0 {
+                // #218: a success status, but no `sceneItems` list.
+                s.omit_scene_items -= 1;
+                return json!({
+                    "op": 7,
+                    "d": {
+                        "requestType": request_type,
+                        "requestId": request_id,
+                        "requestStatus": request_status,
+                        "responseData": {},
+                    }
+                });
+            }
             let items: Vec<Value> = s
                 .scene_items
                 .get(scene_name)
