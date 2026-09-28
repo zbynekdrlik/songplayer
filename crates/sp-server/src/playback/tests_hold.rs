@@ -743,8 +743,17 @@ async fn an_operator_pick_inside_the_hold_ends_it() {
         playing(&mut rig.engine);
         let _bus = hold(&mut rig).await;
         let due = re_check(&rig.engine);
+        lyrics_updates(&mut rig.ws);
         if pick == "play video" {
             rig.engine.handle_play_video(OUT, NEXT, None).await;
+            // Review round 3: the hold ends BEFORE the PlayVideo's clear, so
+            // the old song's karaoke line goes, as for any song played off
+            // program by hand (held, the clear was skipped for good).
+            assert_eq!(
+                lyrics_updates(&mut rig.ws),
+                [None::<String>],
+                "the PlayVideo clear"
+            );
         } else {
             rig.engine
                 .pipelines
