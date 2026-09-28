@@ -60,7 +60,8 @@ pub fn payload_for(
     song: &str,
     artist: &str,
 ) -> Option<PresenterPayload> {
-    let pushed = last_seen.is_some_and(|(en, _sk)| *en == lines.current_en);
+    let pushed =
+        last_seen.is_some_and(|(en, sk)| *en == lines.current_en && *sk == lines.current_sk);
     if pushed {
         return None;
     }
@@ -78,8 +79,8 @@ pub fn payload_for(
         next_text: payload::wrap_for_presenter(&lines.next_en),
         current_song,
         next_song: String::new(),
-        current_translation: String::new(),
-        next_translation: String::new(),
+        current_translation: payload::wrap_for_presenter(&lines.current_sk),
+        next_translation: payload::wrap_for_presenter(&lines.next_sk),
     })
 }
 

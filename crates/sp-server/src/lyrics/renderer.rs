@@ -55,8 +55,10 @@ pub struct PresenterLines {
 
 /// A plan line's SK as the Presenter shows it: punctuation stripped like the
 /// EN, "" when there is no line or no translation.
-fn presenter_sk(_line: Option<&crate::lyrics::display_plan::DisplayLine>) -> String {
-    String::new()
+fn presenter_sk(line: Option<&crate::lyrics::display_plan::DisplayLine>) -> String {
+    line.and_then(|l| l.sk.as_deref())
+        .map(strip_display_punctuation)
+        .unwrap_or_default()
 }
 
 pub struct LyricsState {
