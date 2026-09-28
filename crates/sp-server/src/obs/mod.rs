@@ -179,8 +179,9 @@ pub enum ObsCommand {
         step: crate::obs::ndi_recovery::RecoveryStep,
     },
     /// #213: a call of the remote-control facade (`crate::remote`) to cg OBS —
-    /// a forwarded obs-websocket request or a scene → playlists lookup — run on
-    /// this ONE connection, off the main loop (`remote_call::run`).
+    /// a forwarded obs-websocket request, run on this ONE connection by its ONE
+    /// forwarder (`remote_call::run_calls`, #221: in queue order, a scene
+    /// switch answered before the next call is written).
     Remote(remote_call::RemoteCall),
 }
 
@@ -555,10 +556,8 @@ async fn connect_and_run(
             transition_wake,
         ),
     );
-    // #221: the remote-control facade's calls go out in queue order through
-    // ONE forwarder (a mirrored press never overtakes a later one).
-    let (remote_tx, remote_rx) = mpsc::unbounded_channel();
-    let forwarder = remote_call::run_calls(Arc::clone(&write), dispatcher.clone(), remote_rx);
+    // #221: ONE forwarder writes the remote-control facade's calls in order.
+    let (remote_tx, forwarder) = remote_call::forwarder(Arc::clone(&write), dispatcher.clone());
     spawn_helper(&mut spawned_tasks, forwarder);
 
     // Step 5: initial NDI source map rebuild (same retry-on-empty
@@ -647,8 +646,8 @@ async fn connect_and_run(
     let scene_pending: std::sync::Arc<std::sync::Mutex<Option<(String, std::time::Instant)>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
 
-    // Step 7: main loop — thin router: each arm spawns a task to do
-    // the work. The write half is shared via Arc<Mutex<>> so helper
+    // Step 7: main loop — thin router: each arm spawns a task (a Remote
+    // call goes to the connection's forwarder) to do the work. The write half is shared via Arc<Mutex<>> so helper
     // tasks lock it briefly for the send and release before awaiting
     // the op=7 response, preventing the main loop from blocking on
     // in-flight requests.
@@ -762,8 +761,7 @@ async fn connect_and_run(
                         });
                     }
                     ObsCommand::Remote(call) => {
-                        // #213: forwarded for the remote-control facade, in
-                        // queue order by this connection's forwarder (#221).
+                        // #213/#221: to this connection's forwarder, in order.
                         if remote_tx.send(call).is_err() {
                             warn!("remote: the forwarder of this OBS connection is gone — call dropped");
                         }

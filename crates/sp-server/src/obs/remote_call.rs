@@ -10,22 +10,27 @@
 //! switch cg OBS. #221 deleted the scene → playlists lookup: the switch
 //! decides from SongPlayer's own playlists (`playback::scene_catalog`).
 //!
-//! #221: the calls go out IN QUEUE ORDER, and a scene switch RUNS in order.
-//! The forwarder writes each request frame before it takes the next call. A
-//! task per call (the #213 shape) could start the newest first — a
-//! multi-thread tokio worker runs the task spawned last from its LIFO slot.
-//! And cg OBS (obs-websocket) runs every incoming message on a thread pool
-//! with no per-client order, so frames written in order can still run out of
-//! order: the forwarder waits for a scene switch's ANSWER
-//! ([`ORDERED_REQUESTS`]) before it writes the next call. Without both, a
-//! playlist press's mirror, which the facade does not await, could run after
-//! a later press's switch and leave cg OBS on the older scene. Every other
-//! request's answer is awaited beside the later calls.
+//! #221: the NEWEST scene switch always wins in cg OBS. A playlist press's
+//! mirror is not awaited by the facade, so without these rules it could run
+//! after a later press's switch and leave cg OBS on the older scene:
+//!
+//! - **In queue order.** The forwarder writes each request frame before it
+//!   takes the next call. A task per call (the #213 shape) could start the
+//!   newest first: a multi-thread tokio worker runs the task spawned last from
+//!   its LIFO slot.
+//! - **A switch runs in order.** cg OBS (obs-websocket) runs every incoming
+//!   message on a thread pool with no per-client order, so the forwarder
+//!   waits for a scene switch's ANSWER ([`ORDERED_REQUESTS`], at most
+//!   `DEFAULT_RESPONSE_TIMEOUT`, 2 s) before it writes the next call. Every
+//!   other request's answer is awaited beside the later calls.
 //!
 //! The facade waits for a reply only for a bounded time. A call whose requester
 //! already gave up (`reply.is_closed()`, e.g. queued while cg OBS was away) is
 //! dropped unexecuted: a stale `SetCurrentProgramScene` must never switch cg OBS
 //! seconds after the button press was answered as "not ready".
+
+use std::future::Future;
+use std::time::Duration;
 
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
@@ -36,8 +41,8 @@ use crate::obs::SharedWrite;
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
 
 /// The requests whose effect depends on the order cg OBS runs them in: the
-/// forwarder waits for such a request's answer (at most
-/// `DEFAULT_RESPONSE_TIMEOUT`, 2 s) before it writes the next call.
+/// forwarder waits for such a request's answer before it writes the next
+/// call.
 pub const ORDERED_REQUESTS: [&str; 1] = ["SetCurrentProgramScene"];
 
 /// One call of the remote-control facade to cg OBS.
@@ -52,23 +57,48 @@ pub enum RemoteCall {
     },
 }
 
-/// The connection's forwarder (one task per OBS connection, in the
-/// connection's task set): run the facade's calls in queue order until the
-/// connection loop drops its sender or the task is aborted on a disconnect.
+/// A new connection's forwarder: the sender the connection loop hands the
+/// facade's calls to, and the task to spawn in the connection's task set
+/// ([`run_calls`] with the production answer timeout).
+pub fn forwarder(
+    write: SharedWrite,
+    dispatcher: Dispatcher,
+) -> (
+    mpsc::UnboundedSender<RemoteCall>,
+    impl Future<Output = ()> + Send + 'static,
+) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    (
+        tx,
+        run_calls(write, dispatcher, rx, DEFAULT_RESPONSE_TIMEOUT),
+    )
+}
+
+/// The connection's forwarder (one task per OBS connection): run the
+/// facade's calls in queue order (module doc) until the connection loop drops
+/// its sender or the task is aborted on a disconnect. `answer_timeout` bounds
+/// the wait for cg OBS's answer (`DEFAULT_RESPONSE_TIMEOUT`; longer only in
+/// tests, so a test never races the production 2 s).
 pub async fn run_calls(
     write: SharedWrite,
     dispatcher: Dispatcher,
     mut calls: mpsc::UnboundedReceiver<RemoteCall>,
+    answer_timeout: Duration,
 ) {
     while let Some(call) = calls.recv().await {
-        send_call(&write, &dispatcher, call).await;
+        send_call(&write, &dispatcher, call, answer_timeout).await;
     }
 }
 
 /// Write one call's request frame (skipped when its requester gave up). A
 /// scene switch ([`ORDERED_REQUESTS`]) is answered before this returns; any
 /// other call's answer is awaited by a task of its own.
-async fn send_call(write: &SharedWrite, dispatcher: &Dispatcher, call: RemoteCall) {
+async fn send_call(
+    write: &SharedWrite,
+    dispatcher: &Dispatcher,
+    call: RemoteCall,
+    answer_timeout: Duration,
+) {
     let RemoteCall::Request {
         request_type,
         request_data,
@@ -84,7 +114,14 @@ async fn send_call(write: &SharedWrite, dispatcher: &Dispatcher, call: RemoteCal
     let ordered = ORDERED_REQUESTS.contains(&request_type.as_str());
     match dispatcher.send(write, req_id.clone(), frame).await {
         Ok(rx) => {
-            let waiting = answer(dispatcher.clone(), request_type, req_id, rx, reply);
+            let waiting = answer(
+                dispatcher.clone(),
+                request_type,
+                req_id,
+                rx,
+                reply,
+                answer_timeout,
+            );
             if ordered {
                 waiting.await;
             } else {
@@ -98,16 +135,17 @@ async fn send_call(write: &SharedWrite, dispatcher: &Dispatcher, call: RemoteCal
     }
 }
 
-/// Wait (at most `DEFAULT_RESPONSE_TIMEOUT`) for cg OBS's answer to request
-/// `req_id` and hand its op=7 `d` to the requester (`None` without one).
+/// Wait (at most `answer_timeout`) for cg OBS's answer to request `req_id`
+/// and hand its op=7 `d` to the requester (`None` without one).
 async fn answer(
     dispatcher: Dispatcher,
     request_type: String,
     req_id: String,
     rx: oneshot::Receiver<Value>,
     reply: oneshot::Sender<Option<Value>>,
+    answer_timeout: Duration,
 ) {
-    let d = match dispatcher.wait(&req_id, rx, DEFAULT_RESPONSE_TIMEOUT).await {
+    let d = match dispatcher.wait(&req_id, rx, answer_timeout).await {
         Ok(mut response) => response.get_mut("d").map(Value::take),
         Err(e) => {
             warn!(request_type, %e, "remote: cg OBS did not answer a forwarded request");
@@ -233,34 +271,43 @@ mod tests {
         call("SetCurrentProgramScene", Some(scene))
     }
 
-    /// #221: calls queued back to back reach cg OBS in queue order — a
-    /// mirrored playlist press never after a later press.
+    /// The answer timeout of every forwarder test: far past any test's 10 s
+    /// bound, so a wait the forwarder must not do can never pass by timing
+    /// out, and no test races the production 2 s.
+    const HELD: Duration = Duration::from_secs(600);
+
+    /// #221: calls queued back to back reach cg OBS in queue order.
     #[tokio::test]
     async fn the_calls_reach_cg_obs_in_queue_order() {
-        let scenes = ["sp-fast", "Blank", "sp-slow", "Trailer", "sp-90s"];
+        let queued = [
+            ("GetSceneList", None),
+            ("GetInputList", None),
+            ("SetCurrentProgramScene", Some("sp-fast")),
+            ("GetSceneItemList", Some("sp-fast")),
+            ("GetCurrentProgramScene", None),
+        ];
         let (addr, mut frames) = cg_obs(true).await;
         let dispatcher = Dispatcher::new();
         let write = connect(addr, &dispatcher).await;
         let (tx, calls) = mpsc::unbounded_channel();
         let mut replies = Vec::new();
-        for scene in scenes {
-            let (call, rx) = switch_to(scene);
-            tx.send(call).unwrap();
+        for (request_type, scene) in queued {
+            let (queued_call, rx) = call(request_type, scene);
+            tx.send(queued_call).unwrap();
             replies.push(rx); // kept: a call whose requester gave up is skipped
         }
         drop(tx);
-        run_calls(write, dispatcher, calls).await;
+        run_calls(write, dispatcher, calls, HELD).await;
         let mut order = Vec::new();
-        for _ in scenes {
+        for _ in queued {
             let frame = next_frame(&mut frames).await;
-            order.push(
-                frame["d"]["requestData"]["sceneName"]
-                    .as_str()
-                    .unwrap()
-                    .to_string(),
-            );
+            order.push(frame["d"]["requestType"].as_str().unwrap().to_string());
         }
-        assert_eq!(order, scenes);
+        let expected: Vec<&str> = queued
+            .iter()
+            .map(|&(request_type, _)| request_type)
+            .collect();
+        assert_eq!(order, expected);
         for rx in replies {
             let answer = rx.await.unwrap().expect("cg OBS answered");
             assert_eq!(answer["requestStatus"]["code"], 100);
@@ -270,7 +317,8 @@ mod tests {
     /// #221 review round 2: cg OBS (obs-websocket) runs each incoming message
     /// on a thread pool, so frames written in order can still RUN out of
     /// order. A scene switch is answered before the next call goes out. The
-    /// "none yet" window only errs in the safe direction.
+    /// "none yet" window sits under a held gate (the answer timeout is
+    /// `HELD`, and only the test answers), so correct code can never fail it.
     #[tokio::test]
     async fn a_scene_switch_is_answered_before_the_next_call_goes_out() {
         let (addr, mut frames) = cg_obs(false).await;
@@ -278,34 +326,35 @@ mod tests {
         let write = connect(addr, &dispatcher).await;
         let (tx, calls) = mpsc::unbounded_channel();
         let (first, first_rx) = switch_to("sp-fast");
-        let (second, _second_rx) = switch_to("Blank");
+        let (getter, _getter_rx) = call("GetSceneList", None);
         tx.send(first).unwrap();
-        tx.send(second).unwrap();
-        let forwarder = tokio::spawn(run_calls(write, dispatcher.clone(), calls));
+        tx.send(getter).unwrap();
+        let forwarder = tokio::spawn(run_calls(write, dispatcher.clone(), calls, HELD));
         let frame = next_frame(&mut frames).await;
         assert_eq!(frame["d"]["requestData"]["sceneName"], "sp-fast");
         let early = tokio::time::timeout(Duration::from_millis(200), frames.recv()).await;
         assert!(
             early.is_err(),
-            "the next switch went out before cg OBS answered this one: {early:?}"
+            "the next call went out before cg OBS answered the switch: {early:?}"
         );
-        // cg OBS answers the first switch: the second goes out.
+        // cg OBS answers the switch: the next call goes out.
         let id = frame["d"]["requestId"].as_str().unwrap().to_string();
         let answered = json!({ "op": 7, "d": {
             "requestId": id,
             "requestStatus": { "result": true, "code": 100 },
         }});
         dispatcher.complete(&id, answered);
-        let answer = first_rx.await.unwrap().expect("the first switch's answer");
+        let answer = first_rx.await.unwrap().expect("the switch's answer");
         assert_eq!(answer["requestStatus"]["code"], 100);
         let frame = next_frame(&mut frames).await;
-        assert_eq!(frame["d"]["requestData"]["sceneName"], "Blank");
+        assert_eq!(frame["d"]["requestType"], "GetSceneList");
         drop(tx);
         forwarder.abort();
     }
 
-    /// A getter's answer never holds the next call back (only the scene
-    /// switches are ordered by their answers).
+    /// A getter's answer never holds the next call back: an awaited getter
+    /// would hold the switch behind it for `HELD`, far past `next_frame`'s
+    /// 10 s.
     #[tokio::test]
     async fn a_getter_never_holds_the_next_call_back() {
         let (addr, mut frames) = cg_obs(false).await;
@@ -316,12 +365,65 @@ mod tests {
         let (switch, _switch_rx) = switch_to("sp-fast");
         tx.send(getter).unwrap();
         tx.send(switch).unwrap();
-        let forwarder = tokio::spawn(run_calls(write, dispatcher, calls));
+        let forwarder = tokio::spawn(run_calls(write, dispatcher, calls, HELD));
         assert_eq!(
             next_frame(&mut frames).await["d"]["requestType"],
             "GetSceneList"
         );
         // cg OBS has not answered the getter; the switch goes out anyway.
+        let frame = next_frame(&mut frames).await;
+        assert_eq!(frame["d"]["requestData"]["sceneName"], "sp-fast");
+        drop(tx);
+        forwarder.abort();
+    }
+
+    /// #221 review round 3: a switch with a later, still wanted switch queued
+    /// behind it is never sent — it is answered with nothing — so the newest
+    /// press goes out at once however slowly cg OBS answers. A getter between
+    /// them is still sent.
+    #[tokio::test]
+    async fn a_switch_a_later_one_supersedes_is_never_sent() {
+        let (addr, mut frames) = cg_obs(false).await;
+        let dispatcher = Dispatcher::new();
+        let write = connect(addr, &dispatcher).await;
+        let (tx, calls) = mpsc::unbounded_channel();
+        let (older, older_rx) = switch_to("sp-fast");
+        let (getter, _getter_rx) = call("GetSceneList", None);
+        let (middle, middle_rx) = switch_to("sp-slow");
+        let (newest, _newest_rx) = switch_to("Blank");
+        for queued in [older, getter, middle, newest] {
+            tx.send(queued).unwrap();
+        }
+        let forwarder = tokio::spawn(run_calls(write, dispatcher, calls, HELD));
+        assert_eq!(
+            next_frame(&mut frames).await["d"]["requestType"],
+            "GetSceneList"
+        );
+        let frame = next_frame(&mut frames).await;
+        assert_eq!(
+            frame["d"]["requestData"]["sceneName"], "Blank",
+            "only the newest switch goes out"
+        );
+        assert_eq!(older_rx.await.unwrap(), None, "superseded: no answer");
+        assert_eq!(middle_rx.await.unwrap(), None, "superseded: no answer");
+        drop(tx);
+        forwarder.abort();
+    }
+
+    /// A later switch whose requester already gave up supersedes nothing: the
+    /// earlier, still wanted switch goes out.
+    #[tokio::test]
+    async fn an_abandoned_later_switch_supersedes_nothing() {
+        let (addr, mut frames) = cg_obs(false).await;
+        let dispatcher = Dispatcher::new();
+        let write = connect(addr, &dispatcher).await;
+        let (tx, calls) = mpsc::unbounded_channel();
+        let (wanted, _wanted_rx) = switch_to("sp-fast");
+        let (abandoned, abandoned_rx) = switch_to("sp-slow");
+        drop(abandoned_rx);
+        tx.send(wanted).unwrap();
+        tx.send(abandoned).unwrap();
+        let forwarder = tokio::spawn(run_calls(write, dispatcher, calls, HELD));
         let frame = next_frame(&mut frames).await;
         assert_eq!(frame["d"]["requestData"]["sceneName"], "sp-fast");
         drop(tx);
@@ -344,7 +446,7 @@ mod tests {
         let (live, _live_rx) = call("GetSceneList", None);
         tx.send(live).unwrap();
         drop(tx);
-        run_calls(write, dispatcher, calls).await;
+        run_calls(write, dispatcher, calls, HELD).await;
         let first = next_frame(&mut frames).await;
         assert_eq!(first["op"], 6);
         assert_eq!(first["d"]["requestType"], "GetSceneList");
