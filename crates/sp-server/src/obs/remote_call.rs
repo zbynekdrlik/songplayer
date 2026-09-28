@@ -10,9 +10,10 @@
 //! switch cg OBS. #221 deleted the scene → playlists lookup: the switch
 //! decides from SongPlayer's own playlists (`playback::scene_catalog`).
 //!
-//! #221: the newest press always reaches cg OBS. A playlist press's mirror
-//! is not awaited by the facade, so without these rules it could run after a
-//! later press's switch and leave cg OBS on the older scene:
+//! #221: the newest press reaches cg OBS last (for switches cg OBS answers
+//! within `DEFAULT_RESPONSE_TIMEOUT`). A playlist press's mirror is not
+//! awaited by the facade, so without these rules it could run after a later
+//! press's switch and leave cg OBS on the older scene:
 //!
 //! - **In queue order.** The forwarder writes each request frame before it
 //!   takes the next call. A task per call (the #213 shape) could start the
@@ -30,6 +31,13 @@
 //!   mirror supersedes (`supersedes`): its `SP-program` cut already happened.
 //!   A manual press's forward supersedes nothing: its cut depends on cg OBS's
 //!   answer, which may be a refusal (600) or come too late.
+//! - **An awaited switch keeps its requester's verdict.** A switch the
+//!   facade awaits (a manual press's forward) is written only while its
+//!   requester still has the whole answer timeout left (`deadline`);
+//!   otherwise it is answered with nothing and never written. So cg OBS
+//!   never switches after its requester was told "not ready". A mirror goes
+//!   out however late (its cut already happened); a getter changes nothing
+//!   in cg OBS, so it is written while its requester still waits.
 //!
 //! The facade waits for a reply only for a bounded time. A call whose requester
 //! already gave up (`reply.is_closed()`, e.g. queued while cg OBS was away) is
@@ -59,7 +67,8 @@ pub const ORDERED_REQUESTS: [&str; 1] = ["SetCurrentProgramScene"];
 pub enum RemoteCall {
     /// Forward `requestType` + `requestData` verbatim. The reply is the op=7
     /// `d` object, `None` when cg OBS did not answer in time (or a later
-    /// switch superseded this one).
+    /// mirror superseded this one, or too little of its requester's time was
+    /// left to write this switch).
     Request {
         request_type: String,
         request_data: Option<Value>,
@@ -92,6 +101,17 @@ impl RemoteCall {
     fn wanted(&self) -> bool {
         let RemoteCall::Request { reply, .. } = self;
         !reply.is_closed()
+    }
+
+    /// #221: an awaited switch whose requester has less than `answer_timeout`
+    /// left: cg OBS's answer could come after the requester was told "not
+    /// ready", so it is never written. Never a mirror (its cut already
+    /// happened) and never a getter (it changes nothing in cg OBS).
+    fn too_late(&self, answer_timeout: Duration) -> bool {
+        let RemoteCall::Request { deadline, .. } = self;
+        self.ordered()
+            && !self.supersedes()
+            && deadline.saturating_duration_since(Instant::now()) < answer_timeout
     }
 }
 
@@ -132,8 +152,8 @@ pub async fn run_calls(
                 None => return,
             },
         };
-        // Everything already queued, so a switch a later one supersedes is
-        // never written.
+        // Everything already queued, so a switch a later mirror supersedes
+        // is never written.
         while let Ok(next) = calls.try_recv() {
             queued.push_back(next);
         }
@@ -145,7 +165,7 @@ pub async fn run_calls(
             } = call;
             debug!(
                 request_type,
-                "remote: a later switch is queued — this one is not sent"
+                "remote: a later mirror is queued — this switch is not sent"
             );
             let _ = reply.send(None);
             continue;
@@ -163,15 +183,18 @@ fn superseded(call: &RemoteCall, queued: &VecDeque<RemoteCall>) -> bool {
             .any(|later| later.ordered() && later.supersedes() && later.wanted())
 }
 
-/// Write one call's request frame (skipped when its requester gave up). A
-/// scene switch ([`ORDERED_REQUESTS`]) is answered before this returns; any
-/// other call's answer is awaited by a task of its own.
+/// Write one call's request frame (skipped when its requester gave up, or
+/// when it is an awaited switch with less than `answer_timeout` of its
+/// requester's time left). A scene switch ([`ORDERED_REQUESTS`]) is answered
+/// before this returns; any other call's answer is awaited by a task of its
+/// own.
 async fn send_call(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
     call: RemoteCall,
     answer_timeout: Duration,
 ) {
+    let too_late = call.too_late(answer_timeout);
     let RemoteCall::Request {
         request_type,
         request_data,
@@ -180,6 +203,14 @@ async fn send_call(
     } = call;
     if reply.is_closed() {
         debug!(request_type, "remote: the caller gave up — not forwarded");
+        return;
+    }
+    if too_late {
+        debug!(
+            request_type,
+            "remote: too little of the caller's time is left for cg OBS's answer — this switch is not sent"
+        );
+        let _ = reply.send(None);
         return;
     }
     let req_id = uuid::Uuid::new_v4().to_string();

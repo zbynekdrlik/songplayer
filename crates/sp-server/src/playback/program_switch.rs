@@ -16,8 +16,9 @@
 //!    press: the OBS client writes the facade's calls through ONE forwarder
 //!    per connection (`obs::remote_call::run_calls`), which waits for a
 //!    scene switch's answer before it writes the next call (cg OBS runs its
-//!    messages on a thread pool). A spawned waiter (at most the upstream
-//!    timeout, 3 s) records cg OBS's answer as `last_remote_cut.cg_forward`.
+//!    messages on a thread pool) and drops a switch a later mirror
+//!    supersedes. A spawned waiter (the upstream timeout + 4 s) records cg
+//!    OBS's answer as `last_remote_cut.cg_forward`.
 //!    The consumers that still take cg OBS's program (Arena, FOH, lv1,
 //!    strih) follow it until B4 step 6 deletes it.
 //! 3. A MANUAL scene goes to cg OBS FIRST, awaited under the lock: "OBS
@@ -55,8 +56,7 @@ use crate::remote::{RemoteCut, RemoteShared, Upstream, clip, now_ms};
 pub const CG_PENDING: &str = "pending";
 /// `cg_forward` when cg OBS accepted.
 pub const CG_OK: &str = "ok";
-/// `cg_forward` when cg OBS is not reachable or did not answer in time (or,
-/// for a mirror, a later press's mirror superseded it).
+/// `cg_forward` when cg OBS is not reachable or did not answer in time.
 pub const CG_NOT_READY: &str = "not_ready";
 /// The keep reason of a switch whose playlists could not be read.
 pub const CATALOG_FAILED: &str = "catalog_failed";
@@ -308,7 +308,8 @@ fn mirror(ctx: &SwitchCtx<'_>, name: &str, cut_id: u64) {
     }
 }
 
-/// Wait for cg OBS's answer to a mirror (at most the upstream timeout) and
+/// Wait for cg OBS's answer to a mirror (at most the upstream timeout plus
+/// `MIRROR_EXTRA_WAIT`: the forwarder writes a mirror however late) and
 /// record it as cut `cut_id`'s `cg_forward` (only while that cut is still the
 /// last one).
 async fn record_mirror(
@@ -318,7 +319,7 @@ async fn record_mirror(
     cut_id: u64,
     scene: String,
 ) {
-    let answer = upstream.wait(rx).await;
+    let answer = upstream.wait_mirror(rx).await;
     let label = cg_forward_label(answer.as_ref());
     let current = shared.set_cg_forward(cut_id, label.clone());
     log_mirror(&scene, &label, current);
