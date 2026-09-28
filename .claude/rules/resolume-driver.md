@@ -496,7 +496,8 @@ the driver compares it with what it did (above).
   re-syncs the title (`resync_after_play`): a paused song is neither a
   title candidate nor re-pushed by a recovery, so without it both stayed up
   until some re-sync took them down. A `Started` that a pause overtook
-  (`WaitingForScene`) arms nothing and clears nothing.
+  (`paused_at` set since the last Play; a ▶ only reads it, so a failed
+  resume keeps it) arms nothing and clears nothing.
   The held playlist itself no longer starts a song
   (`.claude/rules/program-transition.md`, "A held playlist has no side
   effects").
@@ -523,8 +524,10 @@ the driver compares it with what it did (above).
   when the old song's `Started` was handled before the new Play. If the
   engine stalls and a pick is taken ahead of a still-queued `Started(A)`,
   that `Started` fixes a clock for B, and A's queued reports pass until
-  `Started(B)`. Exact attribution needs a per-pipeline count of unanswered
-  Plays (a follow-up, not a release blocker).
+  `Started(B)`. A still-queued `Ended(A)` is likewise taken as B's (in
+  Single mode its `SendBlack` stops B). Exact attribution needs a
+  per-pipeline count of unanswered Plays; it was left out of the release
+  0.68.0 blockers (returned to the supervisor as a follow-up candidate).
 - Pinned in `tests_scene_change.rs` (`Window::{Due, BeforeShow, AfterHide,
   OtherSong, NotStarted}`, the Play re-sync on and off program, the failed
   reads, the window-less resume), `title_tests.rs` (the clock's instants and
