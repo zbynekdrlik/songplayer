@@ -103,13 +103,22 @@ impl Readiness {
 /// line starts with `ModuleNotFoundError` or `ImportError` — the uncaught
 /// exception an `import` raised (numba's "needs NumPy 2.4 or less" is an
 /// `ImportError` too, the #144 repair case). A warning printed before the
-/// probe's `sys.exit(1)` (CUDA not available) is never one.
+/// probe's `sys.exit(1)` (CUDA not available) is never one, and neither is
+/// `ImportError: DLL load failed …` (review round 2): a native library that
+/// fails to LOAD is, on Windows, typically transient under memory pressure
+/// (the paging file) — an init problem that is retried, and installs only if
+/// it outlives the retries.
 pub fn import_failure(stderr: &str) -> bool {
     let last = stderr.lines().map(str::trim).rfind(|line| !line.is_empty());
     last.is_some_and(|line| {
-        line.starts_with("ModuleNotFoundError") || line.starts_with("ImportError")
+        (line.starts_with("ModuleNotFoundError") || line.starts_with("ImportError"))
+            && !line.contains(DLL_LOAD_FAILED)
     })
 }
+
+/// The start of the message Python raises when a native extension's DLL does
+/// not load (`ImportError: DLL load failed while importing <module>: …`).
+pub const DLL_LOAD_FAILED: &str = "DLL load failed";
 
 /// The last `max` characters of `stderr`, trimmed (never splits a character).
 pub fn stderr_tail(stderr: &str, max: usize) -> String {
