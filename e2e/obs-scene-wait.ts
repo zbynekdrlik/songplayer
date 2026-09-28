@@ -9,8 +9,9 @@
  *  1. A SAME-scene `SetCurrentProgramScene` still runs a real 2 s transition,
  *     leaving `preview == program == that scene`. From that state OBS then
  *     DROPS the next `SetCurrentProgramScene`'s `CurrentProgramSceneChanged`
- *     event (reproduced live) — the driver must never issue a same-scene
- *     switch (`shouldSkipSceneSwitch`).
+ *     event (reproduced live). #221 L3: the driver now talks to SongPlayer's
+ *     facade, where a same-scene transition is the designed re-kick (it
+ *     re-mirrors cg OBS), so the old same-scene skip is gone.
  *  2. `GetCurrentProgramScene` reports the target *during* the fade, so a
  *     name-only wait returns before the transition has actually ended and
  *     before SongPlayer's event has fired — the wait must require BOTH the
@@ -21,12 +22,6 @@
  * `ndi-health-gate.ts`) so they are unit-testable in the ubuntu mock suite
  * without a browser or the box.
  */
-
-/** True when the program scene is already the target — issuing the switch
- * would run a pointless same-scene transition, so the driver skips it. */
-export function shouldSkipSceneSwitch(current: string, target: string): boolean {
-  return current === target;
-}
 
 /** True once the switch has fully applied: the program scene equals the target
  * AND no transition is still running. A name-only check is satisfied mid-fade,

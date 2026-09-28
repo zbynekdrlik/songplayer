@@ -13,11 +13,7 @@
  */
 
 import OBSWebSocket from "obs-websocket-js";
-import {
-  shouldSkipSceneSwitch,
-  waitForPreviewApplied,
-  waitForSceneSwitchApplied,
-} from "./obs-scene-wait";
+import { waitForPreviewApplied, waitForSceneSwitchApplied } from "./obs-scene-wait";
 
 export class ObsDriver {
   // Cached once per driver (studio mode does not change mid-suite).
@@ -61,12 +57,18 @@ export class ObsDriver {
   }
 
   /**
-   * Switch the OBS program scene and wait until the switch has ACTUALLY taken
-   * effect (#170). On win-resolume OBS runs Studio Mode with a 2000ms Fade:
+   * Switch the program scene and wait until the switch has ACTUALLY taken
+   * effect (#170).
    *
-   *  - Never issue a same-scene switch — it runs a pointless fade that leaves
-   *    `preview == program`, from which OBS then DROPS the next switch's
-   *    `CurrentProgramSceneChanged` event (reproduced live, round 3).
+   *  - #221 L3: a switch to the scene already on program is ALWAYS sent. The
+   *    driver talks to SongPlayer's facade, where a same-scene transition is
+   *    the designed re-kick: it re-mirrors the scene to cg OBS, whose program
+   *    can differ from SP-program until the cutover (e.g. cg OBS on a manual
+   *    scene while "OBS manual" is off keeps the last playlist on
+   *    SP-program). Skipping it left cg OBS, and so the engine's
+   *    `active_scene`, off the target (review round 1). The skip existed for
+   *    cg OBS's own same-scene 2 s fade, which dropped the next switch's
+   *    event (#170); the E2E no longer switches cg OBS directly.
    *  - In studio mode, drive the transition the studio way
    *    (`SetCurrentPreviewScene` + `TriggerStudioModeTransition`) so OBS emits
    *    the program-scene-changed event SongPlayer reacts to; fall back to
@@ -76,9 +78,6 @@ export class ObsDriver {
    *    SongPlayer processes the post-transition event (its reaction is <1ms).
    */
   async switchScene(sceneName: string): Promise<void> {
-    const current = await this.currentProgramScene();
-    if (shouldSkipSceneSwitch(current, sceneName)) return;
-
     // Track the transition so we can wait for it to END, not just for the
     // program-scene name to flip (which happens mid-fade). Subscribe BEFORE
     // triggering so the Started event is never missed.

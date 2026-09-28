@@ -3,29 +3,21 @@
  *
  * Runs in the ubuntu mock suite (playwright.config.ts) — no browser and no
  * deployed box; these `test()` blocks never touch the `page` fixture. They
- * pin the contract `ObsDriver.switchScene` relies on: OBS on win-resolume runs
- * Studio Mode with a 2000ms Fade, so (a) a same-scene switch must be skipped
- * (it runs a real transition that then drops the NEXT switch's event) and
- * (b) `GetCurrentProgramScene` reports the target mid-fade, so the wait must
- * require the transition to have actually ENDED, not just the name to match.
+ * pin the contract `ObsDriver.switchScene` relies on: `GetCurrentProgramScene`
+ * reports the target mid-transition, so the wait must require the transition
+ * to have actually ENDED, not just the name to match. (#221 L3: the old
+ * same-scene skip is gone — the driver talks to SongPlayer's facade, where a
+ * same-scene transition is the designed re-kick.)
  */
 
 import { test, expect } from "@playwright/test";
 import {
-  shouldSkipSceneSwitch,
   sceneSwitchSettled,
   waitForSceneSwitchApplied,
   waitForPreviewApplied,
 } from "./obs-scene-wait";
 
 test.describe("OBS studio-mode scene-switch decisions (#170 round 3)", () => {
-  test("shouldSkipSceneSwitch is true only when already on the target", () => {
-    // Never issue a same-scene switch — it runs a pointless studio-mode
-    // transition that then drops the following switch's event.
-    expect(shouldSkipSceneSwitch("sp-slow", "sp-slow")).toBe(true);
-    expect(shouldSkipSceneSwitch("sp-slow", "sp-fast")).toBe(false);
-  });
-
   test("sceneSwitchSettled requires BOTH target reached AND transition ended", () => {
     // Program reached the target but the fade is still running → NOT settled
     // (the round-2 name-only bug). This is the discriminating case.
