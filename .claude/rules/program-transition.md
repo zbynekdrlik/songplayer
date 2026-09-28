@@ -287,15 +287,18 @@ faded out the on-program title.
     program by hand, and its end starts the next;
   - a newer hold: a re-check that finds the window not over replaces its
     predecessor.
-- **A re-check names its hold.** `SceneOffDue` carries the re-check task's
-  id (`tokio::task::id()` inside the task). A hold registers its re-check
-  before the engine can see the event, so `scene_off_due` acts only on the
-  PENDING one and ignores any other as stale:
+- **A re-check names its hold.** `SceneOffDue` carries the hold's re-check
+  id, a process-wide `u64` (`NEXT_RE_CHECK`). Not a tokio task id: tokio may
+  reuse one once its task has ended, which is a stale re-check's state. A
+  hold registers its re-check before the engine can see the event, so
+  `scene_off_due` acts only on the PENDING one and ignores any other as
+  stale:
   - a newer hold replaced it: queued during an A→B→A→B, it was taken as the
     newer hold's re-check and skipped that hold's `CUT_SETTLE`;
   - the hold ended (a pause, a scene-on, an operator's pick): queued when
     the pick came (the engine's `select!` is unbiased), it held the picked
-    song again or paused it.
+    song again or paused it. A pick ends the hold BEFORE its PlayVideo clear,
+    so the clear goes out as for any song played off program by hand.
 - **Its end, a failure or a skip never start a song off program.**
   `pause_if_held` runs first in the `Ended` and `Error` arms and for a
   `Skip`. A held playlist gets `SceneOff`, the hold's own end, instead of
@@ -340,7 +343,16 @@ faded out the on-program title.
   (`clear_lyrics_display`) and re-syncs the title (`resync_after_play`): a
   paused song's title and line are not due, so they go down at the pause,
   as any later re-sync would take them down. Off program (the hold's end)
-  nothing of the song is up, so nothing is sent.
+  nothing of the song is up, so nothing is sent. With several SongPlayer
+  playlists on one program scene the clear also blanks the other's line,
+  like the song-end and PlayVideo clears: the shared-clip corner, where the
+  lines already overwrite each other at every line change (older, as is).
+- **Residual: the stage display at a scene change** (older than the
+  hold). A scene-off clears the wall, never the Presenter, and a scene-on
+  of a song without lyrics sends nothing. So a song without lyrics whose
+  `Started` came inside the hold (its clear skipped) and whose scene then
+  comes back on leaves the stage display and its karaoke view on their
+  last line for that song, as a scene-on of any song without lyrics does.
 - **The lyrics survive the hold.** The scene-off used to drop
   `lyrics_state`, so a scene back on inside the hold played on with no
   subtitles. Now:
