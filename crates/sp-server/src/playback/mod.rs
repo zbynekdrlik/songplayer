@@ -173,7 +173,8 @@ struct PlaylistPipeline {
     /// so it is `None` from a song change to the new `Started`.
     title_clock: Option<title::TitleClock>,
     /// Where the current Play started: 0, or a resume's position. The title
-    /// clock counts the time left to play from it (#217 addendum 3).
+    /// clock hides 3.5 s before the song's real end, counted from it (#217
+    /// addendum 3).
     play_start_ms: u64,
     /// Pause snapshot; consumed on manual /play to resume same song. #88.
     paused_at: Option<(i64, u64)>,

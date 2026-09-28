@@ -376,11 +376,15 @@ the driver compares it with what it did (above).
   1.5 s after the new `Started`. The old title stayed up over that gap, and
   a recovery inside it disagreed with the timers. Now the Play's `Resync`
   names no title for this playlist, so the old title goes down at the Play
-  (an instant hide). Off program nothing is sent. A scene-on that selects a
-  song sends it twice (the Play's, then the scene-on's): the second one is a
-  no-op in the driver.
+  (an instant hide), unless another on-program playlist's title is due (see
+  "Several due"). Off program nothing is sent. A scene-on that selects a
+  song sends two (the Play's, then the scene-on's): the driver does one
+  action for them (`take_queued` drops the first when both are in one
+  batch, else the second changes nothing). Pinned by
+  `a_scene_on_that_selects_a_song_resyncs_no_title_twice`.
 - **Residual: the clock is fixed at `Started`.** A resume whose seek failed
-  plays from 0 (`decode_and_send` logs it), but `Started` does not say so,
+  plays from 0 (`decode_and_send` and the paced producer log it), but
+  `Started` does not say so,
   and a dashboard seek never moves the clock: the title then hides early or
   late by the difference. The timers always worked this way.
 - **A title is due** when its pipeline plays on program with its own clock
@@ -419,9 +423,10 @@ the driver compares it with what it did (above).
   a `Resync(None)` just after the show timer hid the title for the whole song.
   Every OBS program change re-sends `on_program: true` for every on-program
   playlist (`obs_bridge.rs`), so a Resync near a boundary is common. The
-  timers and the Resync now read the same instants; only the moment between
-  the decision and the send (an await on the driver's queue, no DB read) can
-  still race a timer.
+  timers and the Resync now read the same instants. Only the moment between
+  the decision and the enqueue can still race a timer: an await on the
+  shared 64-slot engine → Resolume fan-out channel (no DB read), and a
+  timer task on another worker thread can land in it too.
 - **Between songs.** `begin_play` cleared the clock, and a skip's late
   Position events do not matter any more. So the window is closed from a
   song change to the new `Started`, and the scene-on that selects a new song
@@ -440,7 +445,9 @@ the driver compares it with what it did (above).
   answer never depends on HashMap order. Residual: the lower id's own show
   timer still pushes its title, so the clip shows whichever of the two
   pushed last until a Resync names the higher id's. A shared-clip corner
-  older than #217, left as is (review round 4).
+  older than #217, left as is (review round 4). A Play of one of them then
+  names the OTHER playlist's due title: the wall swaps to it, and 1.5 s
+  after the new `Started` to the new song's (review round 5).
 - **The text** comes from `format_title_text` (one formatter, see above).
   The OBS text source follows the Resync: the title, or cleared, as the hide
   timer clears it. A failed read of the due title sends nothing: a transient
@@ -494,13 +501,17 @@ the driver compares it with what it did (above).
   like `run`.
 - **An engine window test sets the song's clock** (`tests_scene_change.rs`,
   `play` + `clock_for`). Its instants are the test's `Instant::now()` or an
-  hour ahead, and past the hide point is `hide_at = now`. Never subtract from
+  hour ahead, and past the hide point is `hide_at = now` (with `show_at =
+  now` too, that clock has no window: `Window::AfterHide`). Never subtract from
   `now`: a freshly booted Windows runner's monotonic clock underflows. A
   window test of the real-clock engine is then deterministic, even under a
   ptrace stall. Pin the boundaries on `TitleClock` itself
   (`title_tests.rs`: `base + 1499 ms` / `base + 1500 ms`), and a timer-arming
-  boundary with an explicit `now` (`arm_title_timers(7, now)` with
-  `show_at == now`).
+  boundary with an explicit `now` on a clock WITH a window (`show_at = now`,
+  `hide_at = now + hour`: `arm_title_timers(7, now)` arms the hide only,
+  `arm_title_timers(7, now + hour)` nothing). A boundary clock with
+  `show_at == hide_at` has no window, so `arm_title_timers` returns before
+  either comparison and their `>` → `>=` mutants survive (review round 5).
 - Give `None` a type (`[None::<String>]`) in an `assert_eq!` against a
   `Vec<Option<String>>`.
 - **A failed title read:** `engine.pool.close().await` makes every read

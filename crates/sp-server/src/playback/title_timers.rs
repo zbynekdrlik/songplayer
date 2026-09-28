@@ -90,9 +90,10 @@ impl PlaybackEngine {
     /// old song's title window and cancelled its hide timer, so on program
     /// the wall is re-synced at once. The old song's title goes down now
     /// (an instant hide), not when the new song's ShowTitle replaces it 1.5 s
-    /// after its `Started`. The timers and a `Resync` then never disagree
-    /// between the Play and the new `Started`. Off program the playlist's
-    /// title is not on the wall: nothing is sent.
+    /// after its `Started`; if another on-program playlist's title is due,
+    /// the Resync names that one. The timers and a `Resync` then never
+    /// disagree between the Play and the new `Started`. Off program the
+    /// playlist's title is not on the wall: nothing is sent.
     pub(super) async fn resync_after_play(&self, playlist_id: i64) {
         let on_program = self
             .pipelines
@@ -117,8 +118,8 @@ impl super::PlaylistPipeline {
     }
 }
 
-/// The show timer: at `show_at`, push `video_id`'s title (OBS text +
-/// Resolume) when the scene is still on program (read at fire time).
+/// The show timer: at `show_at`, push `video_id`'s title (Resolume, then the
+/// OBS text) when the scene is still on program (read at fire time).
 #[cfg_attr(test, mutants::skip)] // spawn glue on the real clock; the deadline is TitleClock's, the arming arm_title_timers's (both unit-tested)
 fn spawn_show_timer(
     pool: SqlitePool,
