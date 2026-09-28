@@ -1,6 +1,9 @@
 ---
 paths:
   - "crates/sp-server/src/obs/**"
+  - "crates/sp-server/src/obs_bridge.rs"
+  - "crates/sp-server/tests/scene_lookup_failure.rs"
+  - "crates/sp-server/tests/obs_snapshot_follow.rs"
   - "crates/sp-server/src/playback/ndi_health.rs"
   - "e2e/post-deploy.spec.ts"
   - "e2e/ndi-health-gate.ts"
@@ -238,6 +241,83 @@ pure `scene_poll_detects_change` is Linux-unit-tested; `reconcile_program_scene`
 (I/O) is not (`obs/**` is excluded from the mutation gate). INFO log on a
 poll-caught switch: `obs: program scene changed without an event — reconciled by
 poll`.
+
+## A FAILED scene lookup is not an empty scene (#218)
+
+`scene::check_scene_items` returns `Result<HashSet<i64>, LookupError>`
+(`Closed` / `Timeout` / `Refused{code,comment}` / `NoSceneItems`; the pure
+`scene_items_from_reply`). Before #218 a `GetSceneItemList` timeout / close /
+answer without `sceneItems` returned an EMPTY set: `apply_scene_change` wrote
+it and broadcast `SceneChanged{ {} }`, the bridge scene-offed (paused) the
+playlist on program, the follow cut to "OBS manuál", and the poll (names
+only) never repaired it.
+
+- On a failure `apply_scene_change` stores the scene's NAME
+  (`current_scene`), KEEPS `active_playlist_ids`, sets
+  `ObsState::lookup_failed = Some(scene)` and broadcasts NOTHING. WARN on a
+  scene's first failure (`obs: looking up the scene's playlists failed —
+  keeping the previous ones; …`), debug on repeats; INFO `obs: the scene's
+  playlist lookup answered again` on the repair. `lookup_failed` is always
+  `None` or the current scene, so it can never go stale on an older scene.
+- The ~2 s poll repairs it: `scene_poll_verdict(last, lookup_failed, polled,
+  …)` → `PollVerdict::Relookup(scene)` when cg OBS still shows the stored
+  scene and its lookup failed — looked up again on that tick (no confirm
+  window: the event already came), every tick until it answers. cg OBS moved
+  on → the usual mismatch path (confirm window) for the new scene.
+- **Nested refusals are NOT failures.** obs-websocket 5 refuses
+  `GetSceneItemList` for a GROUP (602 "The specified source is not a scene.
+  (Is group)", `Request::AcquireScene` scene-only filter; groups need
+  `GetGroupSceneItemList`), and a nested SCENE item carries `inputKind: null`
+  (so it is not recursed at all). A refusal below the top level adds
+  nothing, as it always did; a timeout / close / reply without `sceneItems`
+  at ANY depth fails the whole lookup. Promoting the group refusal to a
+  failure would leave every scene holding a group "lookup failed" forever.
+- The #213 facade: `remote_call` answers `ScenePlaylists` only on a
+  successful lookup; a failed one drops the reply, which the facade reads
+  as `lookup_failed` (its own rule).
+- Test: `tests/scene_lookup_failure.rs` — the `FakeObsServer` knobs
+  `drop_scene_item_lists` (no answer, still logged in `requests` with
+  `"dropped": true`) and `omit_scene_items` (success, no list), each for the
+  next N lookups. The first `SceneChanged` after the failure must already
+  carry the right set and come from a second lookup.
+
+## The OBS client PUBLISHES its state — `ObsSnapshot` on a `watch` (#219)
+
+ONE view of cg OBS: the OBS client's. `obs/snapshot.rs`: `ObsSnapshot`
+(`connected`, `current_scene`, `active_playlist_ids`, `lookup_failed`,
+`transition`) is the program part of `ObsState`, published on a
+`tokio::sync::watch` (`ObsClient::snapshots()`); `lib.rs` step 7
+(`obs_bridge::start_obs`) hands it to `start_program` → the #215 follow
+(`program-transition.md`). The contract:
+
+- every write of those fields goes through `ObsShared::update(|s| …)`, which
+  changes `ObsState` and publishes under the ONE write lock (a snapshot never
+  shows a state the lock did not hold; snapshots come in write order) and
+  only on a real change (`send_if_modified`: streaming / recording are not
+  published and wake nobody). Never write them through `state().write()`
+  directly, or a consumer misses the change;
+- `lookup_failed: Some(scene)` → `active_playlist_ids` belong to an EARLIER
+  scene: a consumer must not act on them (the follow ignores the snapshot);
+- `transition` = cg OBS's current scene transition, `None` while unknown;
+- a disconnect resets everything (`ObsState::reset_disconnected`); the
+  channel starts at the default (disconnected) snapshot; without OBS
+  configured `start_obs` hands out a CLOSED channel.
+- Functions taking the crate-private `ObsShared` (`apply_scene_change`,
+  `reconcile_program_scene`) are `pub(crate)` — a `pub fn` with it in its
+  signature trips `private_interfaces` under `-D warnings`.
+
+**cg OBS's transition is read by the client** (`obs/transition.rs`,
+`ObsTransition` lives here, re-exported by `playback::program_transition`):
+one reader task per connection (in the connection's `JoinSet`), spawned
+right after the reader task (step 4b, before the NDI map rebuild): it reads
+`GetCurrentSceneTransition` at once, then each time the main loop wakes it
+(`ReaderMessage::TransitionChanged`, from `CurrentSceneTransitionChanged` /
+`CurrentSceneTransitionDurationChanged` — the identify's Transitions (16)
+subscription). A `Notify` wake keeps a change that arrives DURING a read, so
+reads never overlap and the newest answer wins. No answer → `transition =
+None` and a retry every `TRANSITION_RETRY` (2 s) until answered (first
+failure WARN, retries debug). Test: `tests/obs_snapshot_follow.rs` with the
+`FakeObsServer`'s `scene_transition` knob (`None` answers `{}` = no kind).
 
 ## Reading the health snapshot's `state` — `Playing` already means "on program" (#154)
 `handle_health_snapshot` RECONCILES the pipeline-reported state before storing it: a pipeline that is `Playing` but whose scene is NOT on OBS program (`scene_active == false`) is stored as `Paused`, not `Playing`. So a consumer that reads `NdiHealthRegistry::snapshots()` and checks `state == PlaybackStateLabel::Playing` is already getting "an output is playing AND OBS is showing it" — you do NOT need to also cross-reference `active_playlist_ids`. The #154 lyrics idle gate relies on exactly this (`lyrics/idle_gate.rs::any_playing`): "any snapshot Playing" = "the wall is showing an output" = defer heavy GPU work. Read the registry in-process (the engine already holds the `Arc`); never HTTP-loop `/api/v1/ndi/health` back to your own server.

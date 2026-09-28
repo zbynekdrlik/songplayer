@@ -2,6 +2,7 @@
 paths:
   - "crates/sp-server/src/playback/program_transition*.rs"
   - "crates/sp-server/src/playback/program_follow*.rs"
+  - "crates/sp-server/tests/obs_snapshot_follow.rs"
   - "crates/sp-server/src/playback/scene_off*.rs"
   - "crates/sp-server/src/playback/tests_hold.rs"
   - "crates/sp-server/src/playback/handle_pipeline_event.rs"
@@ -260,7 +261,9 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
   `t` = one slot after the window's end. It is re-checked at `t`.
 - `Hold::OnProgram`: `pid` is still the program's source. The follow task and
   the #213 remote control cut only AFTER cg OBS switched, and cg OBS's scene
-  event reaches the engine first. One `CUT_SETTLE` (500 ms) re-check.
+  event can reach the engine before their cut (#219: the follow reads the
+  OBS client's snapshot, published just before the `SceneChanged`, so either
+  order happens). One `CUT_SETTLE` (500 ms) re-check.
 - `None`: pause now, exactly as before. Every playlist that is not the
   program's source takes this path.
 
@@ -381,6 +384,14 @@ faded out the on-program title.
 
 ## Following cg OBS (`program_follow.rs`)
 
+#219 (design record: #219 comment 5868318993, Approach 1) made the follow a
+PURE CONSUMER of the OBS client's state: it asks cg OBS nothing itself. The
+old parallel view (its own `GetCurrentProgramScene` / scene-lookup /
+transition reads through `remote::Upstream`, `drain`, `missed_scene`, the
+fallback to a dropped scene change, `obs_up`, `read_pending`,
+`MAX_CATCH_UP_REREADS`) is DELETED — do not bring any of it back; the
+unanswered-catch-up gap it had is gone by construction.
+
 - Settings (`sp_core::config`, re-read every 5 s):
   - `program_follow_obs`: only `"true"` follows (default off);
   - `program_transition`: `obs` (default) / `fade` / `cut`;
@@ -396,73 +407,55 @@ faded out the on-program title.
   its duration, a fixed-duration one → `program_transition_ms`), else a Fade
   of `program_transition_ms` (`fallback`). `ProgramBus::set_transition` returns
   whether it changed, and only a change is logged.
-- cg OBS's transition comes from `GetCurrentSceneTransition` through
-  `remote::Upstream` (the existing OBS client, never a second connection). It
-  is read at start (BEFORE the first spec is applied), on `Connected`, on
-  `CurrentSceneTransitionChanged` / `CurrentSceneTransitionDurationChanged`,
-  and after a lagged broadcast. A read that got no answer (`read_pending`) is
-  asked again on the settings polls — the OBS client broadcasts `Connected`
-  before its connection loop serves `ObsCommand::Remote` (the NDI map rebuild
-  runs first, up to ~10 s), so the `Connected` read can time out
-  (`UPSTREAM_TIMEOUT` 3 s). **But only while cg OBS is up (`obs_up`).** A
-  call made while cg OBS is away waits in the OBS client's command queue
-  (served only while connected, 64 deep), and a full queue blocks its other
-  senders (`title::push_title`'s blocking `send`) — the review round-2
-  finding. A retry that fails logs at debug; the first failure WARNs. The OBS
-  identify subscribes Scenes (4) | Transitions (16) | Outputs (64) = 84;
-  without Transitions cg OBS never sends those events.
-- `obs_up` starts as `Upstream::is_configured()`: without an OBS client cg OBS
-  is never up and nothing is read, retried or caught up (a call there returns
-  `None` at once, so this saves only log noise). With a client it starts up,
-  so the start's reads count. `Disconnected` sets it down, and EVERY other
-  event sets it up: only a live connection sends them, so a `Connected` lost
-  in a lagged broadcast cannot leave it down (review round 3).
-- Follow = `ObsEvent::SceneChanged` (SongPlayer's own derived event, its
-  playlists from `check_scene_items`) → `remote::map::scene_action` → cut via
-  `persist_and_cut`, unless the program already shows that source.
-- The follow CATCHES UP to cg OBS's current scene (`GetCurrentProgramScene` +
-  `Upstream::scene_playlists` → `follow_scene`, in `Follow::follow_current_scene`,
-  which is UNGATED: only `FollowLoop::catch_up` calls it) at start, when
-  `program_follow_obs` flips false → true, and after a lagged broadcast (a lost
-  `SceneChanged`; the #170 poll only repairs an event cg OBS itself dropped).
-  It never polls the scene otherwise. This replaces the event-night watcher
+- **The input is the OBS client's `ObsSnapshot`** (`obs::snapshot`, a
+  `tokio::sync::watch`; contract in `obs-ndi-health.md`): `connected`,
+  `current_scene`, `active_playlist_ids`, `lookup_failed`, `transition`.
+  `lib.rs` step 7 is `obs_bridge::start_obs` (the engine bridge subscribes
+  first, then the client spawns); its `snapshots` go to
+  `PlaybackEngine::start_program(bus, shutdown, snapshots)` →
+  `start_follow`. Without OBS configured the follow gets a CLOSED channel
+  (the default, disconnected snapshot): `run_follow_task` stops selecting
+  on it (`obs_open`) and only the settings polls run.
+- cg OBS's transition is the snapshot's: the client reads
+  `GetCurrentSceneTransition` itself (`obs::transition`, at connect, on
+  `CurrentSceneTransitionChanged` / `…DurationChanged`, retried every 2 s
+  until answered). `FollowLoop::take_transition` stores a snapshot's
+  transition in `FollowShared` (the `follow.obs_transition` telemetry) and
+  keeps the LAST KNOWN one while a snapshot has none (unknown, or cg OBS
+  away), then applies the spec — BEFORE any cut of the same snapshot, so a
+  cut always uses the spec of the snapshot that caused it.
+- **What the follow acts on** (`FollowLoop::on_snapshot`, `program_scene`):
+  - a snapshot's program scene is `Known(SceneView {scene, playlists})` only
+    when connected, named and NOT `lookup_failed`; `Unknown` when
+    disconnected or not named yet; `LookupFailed` when the client's playlist
+    lookup failed (#218 — its `active_playlist_ids` then belong to an EARLIER
+    scene). The `lookup_failed` check comes FIRST;
+  - a `Known` scene is followed (when `program_follow_obs` is on) only when
+    it differs from `seen`, the last known scene (name AND playlists). A
+    snapshot that changes only the transition cuts nothing, so a manual
+    dashboard cut is never undone by it;
+  - `LookupFailed` is ignored completely: no cut, no `last_follow_cut`,
+    `seen` kept. The client's repaired lookup is the next change. A failure
+    that ends back on the followed scene changes nothing;
+  - `Unknown` resets `seen`, so the reconnect's scene is followed again
+    (as the old `SceneChanged` of a reconnect was);
+  - a CATCH-UP — at start (`run_follow_task`'s first snapshot) and when
+    `program_follow_obs` flips false → true (`on_tick`, the snapshot read
+    with `borrow()`) — clears `seen` first, so the current scene is followed
+    whether it changed or not; on an unknown or failed snapshot the NEXT
+    known one is followed;
+  - the watch coalesces: only the newest snapshot is seen, so a scene cg OBS
+    showed only briefly between two wakes is never cut to (correct: the
+    program ends on cg OBS's final scene).
+- Follow = `scene_action` (the #213 rule) → cut via `persist_and_cut`, unless
+  the program already shows that source (`Follow::follow_scene`, which also
+  records `last_follow_cut`). This replaces the event-night watcher
   `%TEMP%\sp_follow.ps1`, which polled the scene every 200 ms.
-- **The task is `FollowLoop`** (`on_event`, `on_tick`, `resync`,
-  `catch_up`, `drain`). Rules:
-  - a catch-up always cuts with the spec APPLIED JUST BEFORE it: at start and
-    after a lag `resync` reads the transition → `apply_spec` → catch-up; a poll
-    loads the settings → retries a pending read → `apply_spec` → catch-up on
-    the flip. (Catching up first cut with the previous spec — round 2.)
-  - `drain` drops every event still queued (they are older than the read that
-    follows; a stale `SceneChanged` would cut back to a scene cg OBS already
-    left), keeps `obs_up` and the newest dropped `SceneChanged`
-    (`missed_scene`, forgotten again on a `Connected` — the new connection
-    re-reports its scene — or a `Lagged` — a newer one may be lost), and
-    returns whether cg OBS's transition must be read again
-    (`rereads_transition`: `Connected` or a transition event, or a `Lagged`
-    inside the drain). `resync` drains before its transition read. `catch_up`
-    ALWAYS drains (following or not) what queued since — during resync's read,
-    or, for the switch-on catch-up, since the task last handled an event;
-    while a drain asks for it, it re-reads + applies the transition and drains
-    again, at most `MAX_CATCH_UP_REREADS` (3) times — still changing after
-    that, it sets `read_pending` for the polls. So a drain ALWAYS comes right
-    before the scene read (review rounds 3 + 4).
-  - `Follow::follow_current_scene(upstream, dropped)` follows `dropped` (the
-    taken `missed_scene`) instead of cg OBS's answer only when cg OBS names NO
-    scene, or names that SAME scene without its playlists: the dropped event
-    may be the only news of the change, because the #170 poll does not repeat
-    a scene the OBS client already stored. A dropped change of another scene
-    is older than the named one and is never followed (review rounds 4 + 5).
-    Known gap: an unanswered catch-up with nothing dropped is not retried —
-    the program waits for cg OBS's next scene change or reconnect. Reading
-    the OBS client's own `ObsState` (`connected`, `current_scene`,
-    `active_playlist_ids`) instead of asking cg OBS would remove it; that
-    needs `ObsState` wired to the engine through `lib.rs`, which #215's design
-    keeps untouched, so it is the main session's call (review round 5).
-  - the catch-up runs only while `obs_up` and following. Switched on while cg
-    OBS is away, the follow catches up on the reconnect instead: the OBS
-    client's connection step 6 reports cg OBS's program scene as a
-    `SceneChanged`.
+- Order vs the engine: the client publishes a scene's snapshot and THEN
+  broadcasts its `SceneChanged`, so the follow may cut before or after the
+  engine's scene-off of the outgoing playlist. `scene_off.rs` handles both
+  (`Hold::Until` when the cut came first, `Hold::OnProgram` + `CUT_SETTLE`
+  when the scene-off came first).
 
 ## API + UI
 
@@ -500,39 +493,34 @@ faded out the on-program title.
   layouts, arbitrary run cuts, the exact `band_bounds`, K threads for K
   bands; the `blend` / `fitted` helpers of `program_transition_tests.rs`
   also run the kernel, so every blend and fit pin pins it),
-  `scene_off_tests.rs`, `program_follow_tests.rs`
-  (pure + `Follow`), `program_follow_tests_task.rs` (the task end to end) and
-  `program_follow_tests_loop.rs` (`FollowLoop`'s steps awaited one by one; the
-  helpers are `pub(super)`) — a fake cg OBS at `ObsCommand::Remote`: scripted
-  transition replies, a settable program scene for `GetCurrentProgramScene`
-  (`scene_unanswered` answers it with a failure), `playlists_of` for the scene
-  lookups (`lookup_unanswered` drops the reply); every call is logged in
-  order; `during_read` = one batch of events
-  per transition read, broadcast while the fake answers it, i.e. what reaches
-  the queue while the task waits — `api/program_tests.rs`, and the mock
-  E2Es `program-control.spec.ts` + `settings-program-transition.spec.ts`.
+  `scene_off_tests.rs`, `program_follow_tests.rs` (pure + `Follow` +
+  `program_scene`; the snapshot helpers `on_program` / `lookup_failed` /
+  `with` / `fade` / `cut` are `pub(super)`), `program_follow_tests_loop.rs`
+  (`FollowLoop::on_snapshot` / `on_tick` awaited one by one — no task, so
+  every effect is complete when the step returns; a manual `persist_and_cut`
+  makes a wrong re-follow observable as an extra cut) and
+  `program_follow_tests_task.rs` (`run_follow_task` on a `watch` the test
+  publishes on, incl. a closed channel = no OBS client) — the follow is
+  driven ONLY by snapshots, there is no fake cg OBS any more.
+  `tests/obs_snapshot_follow.rs` runs the real `ObsClient` against the
+  `FakeObsServer` (its `scene_transition` knob): the transition read at
+  connect / on each transition event / retried, and the real follow task on
+  the client's snapshots through a failed lookup (#218) and its repair.
+  Then `api/program_tests.rs`, and the mock E2Es `program-control.spec.ts` +
+  `settings-program-transition.spec.ts`.
 - Pins were derived with scratch Python models of `ProgramCore` and the
   weight / blend math (rust-workspace.md, no-compile box). Re-derive them with
   your own model when the Rust changes.
-- A follow-task event is proven processed by a LATER event whose own effect is
-  observable (a cut, a request to cg OBS), never by a sleep. The lagged-event
-  test uses a broadcast of capacity 1 and three synchronous sends: the
-  current-thread test runtime cannot run the task between them.
-- **Send an event to the task only after it SUBSCRIBED** (wait for its first
-  request to the fake cg OBS). The task subscribes when it is first polled, so
-  an event sent right after `start()` reaches no receiver: `send` fails (the
-  test's `expect` panics) and the task never sees it (round 2).
-- **Send events only after the start's catch-up has drained the queue** —
-  it drains following or not, so an event sent after only the first request
-  can be dropped by that drain (that it is not is then luck of the
-  current-thread scheduler, not the test's sync). With the follow ON wait for
-  the whole catch-up (`REQUEST`, `PROGRAM_SCENE`, `ScenePlaylists:<scene>`);
-  with it OFF wait for the spec the start applied (`spec_becomes`): the drain
-  follows `apply_spec` with no `.await` between (rounds 4 + 5).
-- To prove a state change ended a periodic action (e.g. no retry after
-  `Disconnected`), sync on a LATER poll's observable effect (store a setting,
-  `spec_becomes`), drain what was already running, then sync on one more poll
-  and assert nothing followed. Events are handled before polls (`biased`).
+- A follow-task effect is proven by a LATER observable one (a spec, a cut),
+  never by a sleep: publish a scene change, then a snapshot with a new
+  transition, and `spec_becomes` the new one — the scene change before it
+  has been handled (the watch may coalesce the two, with the same result).
+  Wait for the start's catch-up to be DONE (a `last_follow_cut`, or the
+  spec it applied) before publishing a change that must take the change
+  path.
+- To prove a poll does NOT act (no re-follow while following), cut by hand,
+  then sync on a LATER poll's observable effect (store a setting,
+  `spec_becomes`) and assert the manual source stayed.
 - The engine tests never assert a "not yet" against the wall clock: the bus
   runs on fixed stamps, the steps are driven at chosen instants, and the real
   re-check timer is only bounded from below.

@@ -115,6 +115,9 @@ Research (spec + the Companion module v3.15.3 and 4.0 beta): #213 comment
    "OBS manuál" carries cg OBS's mix. It is logged as a WARN and marked
    `reason: lookup_failed` on the cut. That reason wins over
    `input_inactive`: with the input off it is a keep with `lookup_failed`.
+   #218: a lookup that FAILED on the OBS side (a `GetSceneItemList` timeout,
+   a closed connection, an answer without `sceneItems`) is a lookup with no
+   answer too — `remote_call` drops the reply — never an empty set.
 3. Cut through `program_bus::persist_and_cut`, the ONE cut path shared with
    `POST /api/v1/program/cut`: persist first, then cut on the boundary after
    next. It is serialized on the bus (`cut_serial`), so an API cut and a
