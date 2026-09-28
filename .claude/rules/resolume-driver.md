@@ -519,6 +519,12 @@ the driver compares it with what it did (above).
   and a `Position` before the new song's `Started` (no title clock yet) does
   not move it: that is the old song's last report, sent before its
   pipeline read the Play (`Position` names no video; review round 4).
+  Residual (older: pipeline events name no Play): the gate is exact only
+  when the old song's `Started` was handled before the new Play. If the
+  engine stalls and a pick is taken ahead of a still-queued `Started(A)`,
+  that `Started` fixes a clock for B, and A's queued reports pass until
+  `Started(B)`. Exact attribution needs a per-pipeline count of unanswered
+  Plays (a follow-up, not a release blocker).
 - Pinned in `tests_scene_change.rs` (`Window::{Due, BeforeShow, AfterHide,
   OtherSong, NotStarted}`, the Play re-sync on and off program, the failed
   reads, the window-less resume), `title_tests.rs` (the clock's instants and

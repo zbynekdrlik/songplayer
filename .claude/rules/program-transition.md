@@ -330,10 +330,12 @@ faded out the on-program title.
   dedup key kept it blank until its next line).
 - **A `Started` a pause overtook shows nothing.** The Play went out, then a
   pause came (the hold's end, the dashboard's Pause) before the song's
-  `Started`: the pipeline is `WaitingForScene`. After the NowPlaying
-  broadcast the arm returns, with no lyrics, clock, timers or clear; the
-  resume's `Started` does them. Every production Play sets `Playing` first,
-  so only an overtaken Play gets there.
+  `Started`. After the NowPlaying broadcast the arm returns, with no lyrics,
+  clock, timers or clear; the resume's `Started` does them. The test is
+  "paused since the last Play": `paused_at` is set (every Pause sets it,
+  every Play clears it in `begin_play`). Not the `WaitingForScene` state: a
+  Skip whose selection starts nothing leaves that state with no Pause sent,
+  and the pipeline keeps playing the song (review round 5).
 - **The bus needs nothing new.** A paused paced pipeline emits its frozen
   last frame + a silent block per boundary (`Standby::FrozenLast`), an ended
   one its idle standby. They are `from`'s pairs like any other (only `to`'s
