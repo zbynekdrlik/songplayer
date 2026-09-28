@@ -39,8 +39,6 @@ fn append_reference_star(s: String, is_reference: bool) -> String {
     }
 }
 
-/// Tracks playback position relative to a [`LyricsTrack`] and produces
-/// [`ServerMsg::LyricsUpdate`] messages for the dashboard WebSocket.
 /// #222: the lines of one Presenter push — the current and the next display
 /// line in EN and SK, each pair from the same plan line (`presenter_lines`).
 /// An SK is empty when its line has no translation; `next_*` are empty on the
@@ -61,6 +59,8 @@ fn presenter_sk(line: Option<&crate::lyrics::display_plan::DisplayLine>) -> Stri
         .unwrap_or_default()
 }
 
+/// Tracks playback position relative to a [`LyricsTrack`] and produces
+/// [`ServerMsg::LyricsUpdate`] messages for the dashboard WebSocket.
 pub struct LyricsState {
     track: LyricsTrack,
     /// What the LED wall and the Presenter show (#217): whole sentences,
