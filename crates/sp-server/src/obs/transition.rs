@@ -200,7 +200,7 @@ mod tests {
             "a fixed transition has no duration"
         );
         assert_eq!(
-            obs_transition_from_reply(&reply("Fade", "fade_transition", json!(5_000_000_000)))
+            obs_transition_from_reply(&reply("Fade", "fade_transition", json!(5_000_000_000_u64)))
                 .and_then(|t| t.duration_ms),
             Some(u32::MAX),
             "an absurd duration saturates"

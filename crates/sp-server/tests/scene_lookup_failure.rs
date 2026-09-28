@@ -148,7 +148,7 @@ impl Rig {
     /// client's 2 s response timeout.
     async fn until(&self, what: &str, done: impl Fn(&obs::ObsState) -> bool) {
         let deadline = tokio::time::Instant::now() + TIMEOUT;
-        while !done(&self.state.read().await) {
+        while !done(&*self.state.read().await) {
             assert!(tokio::time::Instant::now() < deadline, "never: {what}");
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
