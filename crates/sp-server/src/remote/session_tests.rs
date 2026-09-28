@@ -1,10 +1,12 @@
 //! #213 remote-control sessions over REAL sockets: a tokio-tungstenite client
-//! against `remote::serve`, a real `ProgramBus` + SQLite pool, and cg OBS faked
-//! at the OBS client's command channel (`ObsCommand::Remote`) — the facade's
-//! actual upstream seam. Every wait is bounded (`TIMEOUT`), never a sleep.
+//! against `remote::serve`, a real `ProgramBus` + SQLite pool (with the
+//! playlists sp-fast = 7 and sp-slow = 3, #221: the switch reads them), and cg
+//! OBS faked at the OBS client's command channel (`ObsCommand::Remote`) — the
+//! facade's actual upstream seam. Every wait is bounded (`TIMEOUT`), never a
+//! sleep. The rig is `pub(super)`: the #221 studio-mode tests
+//! (`session_tests_studio.rs`) share it.
 //! Wired via `#[cfg(test)] #[path = "session_tests.rs"] mod tests;`.
 
-use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -23,16 +25,20 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use crate::obs::remote_call::RemoteCall;
 use crate::obs::{ObsCommand, ObsEvent};
 use crate::playback::program_bus::{ProgramBus, SETTING_PROGRAM_SOURCE};
-use crate::remote::{Facade, IDENTIFY_TIMEOUT, Upstream, serve};
+use crate::remote::{Facade, IDENTIFY_TIMEOUT, UPSTREAM_TIMEOUT, Upstream, serve};
 
-const TIMEOUT: Duration = Duration::from_secs(10);
+pub(super) const TIMEOUT: Duration = Duration::from_secs(10);
 /// The obs-websocket spec's example password (the only password in tests).
 const SPEC_PASSWORD: &str = "supersecretpassword";
-/// cg OBS's scenes in the fake: two playlist scenes, a multi-playlist scene and
-/// a manual (browser) scene.
-const SCENES: [&str; 4] = ["sp-fast", "sp-slow", "multi", "Slido"];
+/// cg OBS's scenes in the fake: two playlist scenes and two manual scenes.
+pub(super) const SCENES: [&str; 4] = ["sp-fast", "sp-slow", "Slido", "Trailer"];
+/// SongPlayer's playlists in the rig: `(id, ndi_output_name)`.
+pub(super) const PLAYLISTS: [(i64, &str); 2] = [(7, "SP-fast"), (3, "SP-slow")];
 
-type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
+pub(super) type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+/// A fake cg OBS's call log.
+pub(super) type Calls = Arc<Mutex<Vec<String>>>;
 
 fn scene_list() -> Value {
     json!({
@@ -49,114 +55,119 @@ fn scene_list() -> Value {
 }
 
 /// The fake cg OBS behind the OBS client's command channel. It records every
-/// call as `"<type> <sceneName>"` / `"ScenePlaylists <scene>"`.
-fn spawn_fake_upstream() -> (mpsc::Sender<ObsCommand>, Arc<Mutex<Vec<String>>>) {
+/// request as `"<type> <sceneName>"` and switches to a scene it has
+/// ([`SCENES`], else 600).
+pub(super) fn spawn_fake_upstream() -> (mpsc::Sender<ObsCommand>, Calls) {
     let (tx, mut rx) = mpsc::channel::<ObsCommand>(16);
-    let calls = Arc::new(Mutex::new(Vec::new()));
+    let calls = Calls::default();
     let log = Arc::clone(&calls);
     tokio::spawn(async move {
         while let Some(cmd) = rx.recv().await {
-            let ObsCommand::Remote(call) = cmd else {
+            let ObsCommand::Remote(RemoteCall::Request {
+                request_type,
+                request_data,
+                reply,
+            }) = cmd
+            else {
                 continue;
             };
-            match call {
-                RemoteCall::Request {
-                    request_type,
-                    request_data,
-                    reply,
-                } => {
-                    let scene = request_data
-                        .as_ref()
-                        .and_then(|d| d["sceneName"].as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    log.lock().unwrap().push(format!("{request_type} {scene}"));
-                    let ok = |data: Value| {
-                        json!({
-                            "requestType": request_type,
-                            "requestStatus": { "result": true, "code": 100 },
-                            "responseData": data,
-                        })
-                    };
-                    let d = match request_type.as_str() {
-                        "GetSceneList" => ok(scene_list()),
-                        "SetCurrentProgramScene"
-                            if matches!(
-                                scene.as_str(),
-                                "sp-fast" | "sp-slow" | "multi" | "Slido" | "lost"
-                            ) =>
-                        {
-                            json!({ "requestStatus": { "result": true, "code": 100 } })
-                        }
-                        "SetCurrentProgramScene" => json!({
-                            "requestStatus": {
-                                "result": false,
-                                "code": 600,
-                                "comment": "No source was found by the name of `Nope`.",
-                            }
-                        }),
-                        _ => ok(json!({})),
-                    };
-                    let _ = reply.send(Some(d));
+            let scene = request_data
+                .as_ref()
+                .and_then(|d| d["sceneName"].as_str())
+                .unwrap_or("")
+                .to_string();
+            log.lock().unwrap().push(format!("{request_type} {scene}"));
+            let ok = |data: Value| {
+                json!({
+                    "requestType": request_type,
+                    "requestStatus": { "result": true, "code": 100 },
+                    "responseData": data,
+                })
+            };
+            let d = match request_type.as_str() {
+                "GetSceneList" => ok(scene_list()),
+                "SetCurrentProgramScene" if SCENES.contains(&scene.as_str()) => {
+                    json!({ "requestStatus": { "result": true, "code": 100 } })
                 }
-                RemoteCall::ScenePlaylists { scene, reply } => {
-                    log.lock().unwrap().push(format!("ScenePlaylists {scene}"));
-                    if scene == "lost" {
-                        // The lookup gets no answer (the reply is dropped).
-                        continue;
+                "SetCurrentProgramScene" => json!({
+                    "requestStatus": {
+                        "result": false,
+                        "code": 600,
+                        "comment": "No source was found by the name of `Nope`.",
                     }
-                    let ids: HashSet<i64> = match scene.as_str() {
-                        "sp-fast" => [7].into(),
-                        "sp-slow" => [3].into(),
-                        "multi" => [3, 7].into(),
-                        _ => HashSet::new(),
-                    };
-                    let _ = reply.send(ids);
-                }
-            }
+                }),
+                _ => ok(json!({})),
+            };
+            let _ = reply.send(Some(d));
         }
     });
     (tx, calls)
 }
 
-struct Rig {
-    addr: SocketAddr,
-    pool: SqlitePool,
-    bus: Arc<ProgramBus>,
-    events: broadcast::Sender<ObsEvent>,
-    calls: Arc<Mutex<Vec<String>>>,
+pub(super) struct Rig {
+    pub(super) addr: SocketAddr,
+    pub(super) pool: SqlitePool,
+    pub(super) bus: Arc<ProgramBus>,
+    pub(super) events: broadcast::Sender<ObsEvent>,
+    pub(super) calls: Calls,
 }
 
 impl Rig {
-    fn calls(&self) -> Vec<String> {
+    pub(super) fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
     }
 
-    fn remote(&self) -> crate::remote::RemoteStatus {
+    pub(super) fn remote(&self) -> crate::remote::RemoteStatus {
         self.bus
             .remote()
             .status(&crate::remote::RemoteSettings::disabled())
     }
 }
 
-async fn rig_with(password: Option<&str>, upstream: bool) -> Rig {
+pub(super) async fn rig_with(password: Option<&str>, upstream: bool) -> Rig {
     rig_full(password, upstream, IDENTIFY_TIMEOUT).await
 }
 
 async fn rig_full(password: Option<&str>, upstream: bool, identify_timeout: Duration) -> Rig {
+    let (cmd_tx, calls) = spawn_fake_upstream();
+    let cmd_tx = upstream.then_some(cmd_tx);
+    rig_on(cmd_tx, calls, password, identify_timeout, UPSTREAM_TIMEOUT).await
+}
+
+/// A facade on a real bus + pool (with [`PLAYLISTS`]) that reaches cg OBS
+/// through `cmd_tx` and waits for it at most `upstream_timeout`.
+pub(super) async fn rig_on(
+    cmd_tx: Option<mpsc::Sender<ObsCommand>>,
+    calls: Calls,
+    password: Option<&str>,
+    identify_timeout: Duration,
+    upstream_timeout: Duration,
+) -> Rig {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
+    for (id, ndi) in PLAYLISTS {
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active)
+             VALUES (?, ?, ?, ?, 1)",
+        )
+        .bind(id)
+        .bind(format!("p{id}"))
+        .bind(format!("https://youtube.com/playlist?list=p{id}"))
+        .bind(ndi)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
     let bus = Arc::new(ProgramBus::new());
     let (events, _) = broadcast::channel(64);
-    let (cmd_tx, calls) = spawn_fake_upstream();
-    let facade = Arc::new(Facade {
-        pool: pool.clone(),
-        bus: Arc::clone(&bus),
-        upstream: Upstream::new(upstream.then_some(cmd_tx), events.clone()),
-        password: password.map(str::to_string),
-        cut_order: tokio::sync::Mutex::new(()),
+    let upstream = Upstream::new(cmd_tx, events.clone()).with_timeout(upstream_timeout);
+    let facade = Facade::for_test(
+        pool.clone(),
+        Arc::clone(&bus),
+        upstream,
+        password.map(str::to_string),
         identify_timeout,
-    });
+    );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(serve(listener, facade));
@@ -169,11 +180,11 @@ async fn rig_full(password: Option<&str>, upstream: bool, identify_timeout: Dura
     }
 }
 
-async fn rig() -> Rig {
+pub(super) async fn rig() -> Rig {
     rig_with(None, true).await
 }
 
-async fn connect(addr: SocketAddr) -> Client {
+pub(super) async fn connect(addr: SocketAddr) -> Client {
     let mut req = format!("ws://{addr}").into_client_request().unwrap();
     req.headers_mut().insert(
         "Sec-WebSocket-Protocol",
@@ -189,7 +200,7 @@ async fn connect(addr: SocketAddr) -> Client {
 }
 
 /// The next JSON text message (panics on a close or after `TIMEOUT`).
-async fn next_json(ws: &mut Client) -> Value {
+pub(super) async fn next_json(ws: &mut Client) -> Value {
     loop {
         let msg = tokio::time::timeout(TIMEOUT, ws.next())
             .await
@@ -306,12 +317,12 @@ async fn close_code_at_end(ws: &mut Client) -> Option<u16> {
     }
 }
 
-async fn send_json(ws: &mut Client, v: Value) {
+pub(super) async fn send_json(ws: &mut Client, v: Value) {
     ws.send(Message::Text(v.to_string().into())).await.unwrap();
 }
 
 /// Read the Hello and identify (no auth) with `subscriptions`.
-async fn hello_identify(ws: &mut Client, subscriptions: u64) -> Value {
+pub(super) async fn hello_identify(ws: &mut Client, subscriptions: u64) -> Value {
     let hello = next_json(ws).await;
     assert_eq!(hello["op"], 0);
     send_json(
@@ -328,7 +339,7 @@ async fn hello_identify(ws: &mut Client, subscriptions: u64) -> Value {
 }
 
 /// Send one request and return its RequestResponse `d`.
-async fn request(ws: &mut Client, request_type: &str, data: Option<Value>) -> Value {
+pub(super) async fn request(ws: &mut Client, request_type: &str, data: Option<Value>) -> Value {
     let id = format!("req-{request_type}");
     let mut d = json!({ "requestType": request_type, "requestId": id });
     if let Some(data) = data {
@@ -342,7 +353,7 @@ async fn request(ws: &mut Client, request_type: &str, data: Option<Value>) -> Va
     resp["d"].clone()
 }
 
-async fn press(ws: &mut Client, scene: &str) -> Value {
+pub(super) async fn press(ws: &mut Client, scene: &str) -> Value {
     request(
         ws,
         "SetCurrentProgramScene",
@@ -351,7 +362,7 @@ async fn press(ws: &mut Client, scene: &str) -> Value {
     .await
 }
 
-async fn wait_for(what: &str, mut cond: impl FnMut() -> bool) {
+pub(super) async fn wait_for(what: &str, mut cond: impl FnMut() -> bool) {
     let deadline = tokio::time::Instant::now() + TIMEOUT;
     while !cond() {
         assert!(tokio::time::Instant::now() < deadline, "timed out: {what}");
@@ -359,7 +370,7 @@ async fn wait_for(what: &str, mut cond: impl FnMut() -> bool) {
     }
 }
 
-async fn enable_input(pool: &SqlitePool, enabled: bool) {
+pub(super) async fn enable_input(pool: &SqlitePool, enabled: bool) {
     use crate::db::models::set_setting;
     let value = if enabled { "true" } else { "false" };
     set_setting(pool, "ndi_input_enabled", value).await.unwrap();
@@ -368,7 +379,7 @@ async fn enable_input(pool: &SqlitePool, enabled: bool) {
         .unwrap();
 }
 
-async fn persisted_source(pool: &SqlitePool) -> Option<String> {
+pub(super) async fn persisted_source(pool: &SqlitePool) -> Option<String> {
     crate::db::models::get_setting(pool, SETTING_PROGRAM_SOURCE)
         .await
         .unwrap()
@@ -582,7 +593,8 @@ async fn get_version_and_studio_mode_are_answered_by_the_facade() {
     assert_eq!(d["requestStatus"], json!({ "result": true, "code": 100 }));
     assert_eq!(d["responseData"], crate::remote::protocol::version_data());
     let d = request(&mut ws, "GetStudioModeEnabled", None).await;
-    assert_eq!(d["responseData"], json!({ "studioModeEnabled": false }));
+    // #221: ON, so Companion's `do_transition` sends its transition.
+    assert_eq!(d["responseData"], json!({ "studioModeEnabled": true }));
     // Neither reached cg OBS.
     assert!(rig.calls().is_empty(), "{:?}", rig.calls());
     let st = rig.remote();
@@ -672,7 +684,7 @@ async fn a_batch_runs_in_order_and_halts_on_failure_only_when_asked() {
     assert!(results[2].get("requestId").is_none());
     assert_eq!(
         results[2]["responseData"],
-        json!({ "studioModeEnabled": false })
+        json!({ "studioModeEnabled": true })
     );
     assert_eq!(results[3]["requestId"], "d");
 
@@ -704,79 +716,11 @@ async fn without_cg_obs_forwarded_requests_are_not_ready_and_nothing_is_cut() {
     assert_eq!(cut.reason, Some("not_switched"));
 }
 
-// ---- SetCurrentProgramScene → SP-program ----------------------------------
+// ---- SetCurrentProgramScene → SP-program (#221: the one switch path) -------
 
-#[tokio::test]
-async fn a_playlist_scene_is_forwarded_and_cuts_the_program_to_that_playlist() {
-    let rig = rig().await;
-    let mut ws = connect(rig.addr).await;
-    hello_identify(&mut ws, 0).await;
-    let d = press(&mut ws, "sp-fast").await;
-    assert_eq!(d["requestStatus"], json!({ "result": true, "code": 100 }));
-    assert_eq!(
-        rig.calls(),
-        vec!["SetCurrentProgramScene sp-fast", "ScenePlaylists sp-fast"]
-    );
-    let status = rig.bus.status();
-    assert_eq!(status.source, Some(7));
-    assert!(status.cut_boundary_100ns.is_some_and(|b| b > 0));
-    assert_eq!(persisted_source(&rig.pool).await.as_deref(), Some("7"));
-    let cut = rig.remote().last_remote_cut.unwrap();
-    assert_eq!(cut.scene, "sp-fast");
-    assert_eq!(cut.action, "playlist");
-    assert_eq!(cut.source, Some(7));
-    assert_eq!(cut.reason, None);
-    assert_eq!(cut.cut_boundary_100ns, status.cut_boundary_100ns);
-    assert!(cut.at_ms > 1_700_000_000_000, "{}", cut.at_ms);
-}
-
-#[tokio::test]
-async fn a_manual_or_multi_playlist_scene_cuts_to_obs_manual_while_the_input_is_a_source() {
-    let rig = rig().await;
-    enable_input(&rig.pool, true).await;
-    let mut ws = connect(rig.addr).await;
-    hello_identify(&mut ws, 0).await;
-    press(&mut ws, "Slido").await;
-    assert_eq!(rig.bus.status().source, Some(-1));
-    assert_eq!(persisted_source(&rig.pool).await.as_deref(), Some("-1"));
-    let cut = rig.remote().last_remote_cut.unwrap();
-    assert_eq!((cut.action, cut.source), ("input", Some(-1)));
-
-    press(&mut ws, "sp-slow").await;
-    assert_eq!(rig.bus.status().source, Some(3));
-    press(&mut ws, "multi").await;
-    assert_eq!(rig.bus.status().source, Some(-1));
-    assert_eq!(rig.remote().last_remote_cut.unwrap().scene, "multi");
-}
-
-#[tokio::test]
-async fn an_unanswered_scene_lookup_cuts_to_obs_manual_and_says_so() {
-    let rig = rig().await;
-    enable_input(&rig.pool, true).await;
-    let mut ws = connect(rig.addr).await;
-    hello_identify(&mut ws, 0).await;
-    let d = press(&mut ws, "lost").await;
-    assert_eq!(d["requestStatus"]["code"], 100);
-    assert_eq!(rig.bus.status().source, Some(-1));
-    let cut = rig.remote().last_remote_cut.unwrap();
-    assert_eq!(cut.action, "input");
-    assert_eq!(cut.source, Some(-1));
-    assert_eq!(cut.reason, Some("lookup_failed"));
-}
-
-#[tokio::test]
-async fn an_unanswered_scene_lookup_with_the_input_off_keeps_and_says_why() {
-    let rig = rig().await;
-    enable_input(&rig.pool, false).await;
-    let mut ws = connect(rig.addr).await;
-    hello_identify(&mut ws, 0).await;
-    let d = press(&mut ws, "lost").await;
-    assert_eq!(d["requestStatus"]["code"], 100);
-    assert_eq!(rig.bus.status().source, None);
-    let cut = rig.remote().last_remote_cut.unwrap();
-    assert_eq!(cut.action, "keep");
-    assert_eq!(cut.source, None);
-    assert_eq!(cut.reason, Some("lookup_failed"));
+/// `GET /api/v1/program`'s `remote.last_remote_cut`, as the API serializes it.
+pub(super) fn last_cut_json(rig: &Rig) -> Value {
+    serde_json::to_value(rig.remote()).unwrap()["last_remote_cut"].clone()
 }
 
 #[tokio::test]
@@ -797,6 +741,7 @@ async fn a_manual_scene_keeps_the_program_when_the_input_is_not_a_source() {
     assert_eq!(cut.action, "keep");
     assert_eq!(cut.source, None);
     assert_eq!(cut.reason, Some("input_inactive"));
+    assert_eq!(last_cut_json(&rig)["cg_forward"], "ok");
 }
 
 #[tokio::test]
@@ -810,10 +755,11 @@ async fn an_unknown_scene_passes_cg_obs_error_through_and_keeps_the_program() {
     assert_eq!(d["requestStatus"]["code"], 600);
     assert_eq!(rig.bus.status().source, None);
     assert_eq!(persisted_source(&rig.pool).await, None);
-    // No scene lookup after a refused switch.
+    // Nothing but the forward reached cg OBS.
     assert_eq!(rig.calls(), vec!["SetCurrentProgramScene Nope"]);
     let cut = rig.remote().last_remote_cut.unwrap();
     assert_eq!((cut.action, cut.reason), ("keep", Some("not_switched")));
+    assert_eq!(last_cut_json(&rig)["cg_forward"], "error 600");
 }
 
 #[tokio::test]
@@ -848,11 +794,15 @@ async fn a_press_without_a_scene_name_is_300_and_not_forwarded() {
 }
 
 #[tokio::test]
-async fn a_cut_that_cannot_be_persisted_is_205_and_cuts_nothing() {
+async fn a_cut_that_cannot_be_persisted_is_205_cuts_nothing_and_mirrors_nothing() {
     let rig = rig().await;
     let mut ws = connect(rig.addr).await;
     hello_identify(&mut ws, 0).await;
-    rig.pool.close().await;
+    // The playlists are readable, the program source cannot be written.
+    sqlx::query("DROP TABLE settings")
+        .execute(&rig.pool)
+        .await
+        .unwrap();
     let d = press(&mut ws, "sp-fast").await;
     assert_eq!(d["requestStatus"]["code"], 205);
     assert_eq!(d["requestStatus"]["result"], false);
@@ -861,6 +811,11 @@ async fn a_cut_that_cannot_be_persisted_is_205_and_cuts_nothing() {
     assert_eq!(cut.action, "keep");
     assert_eq!(cut.source, None);
     assert_eq!(cut.reason, Some("persist_failed"));
+    assert!(
+        rig.calls().is_empty(),
+        "cg OBS is not mirrored: {:?}",
+        rig.calls()
+    );
 }
 
 // ---- events ----------------------------------------------------------------

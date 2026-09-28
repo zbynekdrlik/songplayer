@@ -467,6 +467,7 @@ async fn the_remote_block_reports_the_stored_settings_and_the_live_state() {
             "last_request": null,
             "last_remote_cut": null,
             "unsupported_requests": [],
+            "last_transition_duration": null,
         })
     );
 

@@ -153,6 +153,22 @@ pub struct RemoteCut {
     pub cut_boundary_100ns: Option<i64>,
     /// Unix time, ms.
     pub at_ms: i64,
+    /// #221: what triggered the switch, `program` (`SetCurrentProgramScene`)
+    /// or `transition` (`TriggerStudioModeTransition`); `null` for the follow.
+    pub via: Option<&'static str>,
+    /// #221: cg OBS's answer to the forward (a manual scene) or the mirror (a
+    /// playlist scene): `ok`, `error <code>`, `not_ready`, or `pending` while
+    /// the mirror's answer is due; `null` when nothing went to cg OBS.
+    pub cg_forward: Option<String>,
+}
+
+/// #221: the last `SetCurrentSceneTransitionDuration` a client sent. It is
+/// acknowledged, never applied: the program transition is the Settings value
+/// (cg OBS runs a Cut, so the button's duration never had a visible effect).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct TransitionDuration {
+    pub ms: u32,
+    pub applied: bool,
 }
 
 /// The `remote` block of `GET /api/v1/program`.
@@ -175,6 +191,8 @@ pub struct RemoteStatus {
     pub last_remote_cut: Option<RemoteCut>,
     /// Request types clients asked for that the facade does not serve.
     pub unsupported_requests: Vec<String>,
+    /// #221: the last transition duration a client sent (not applied).
+    pub last_transition_duration: Option<TransitionDuration>,
 }
 
 #[derive(Default)]
@@ -183,7 +201,11 @@ struct RemoteState {
     error: Option<String>,
     last_request: Option<LastRequest>,
     last_cut: Option<RemoteCut>,
+    /// The id of `last_cut` (`record_cut`), so a late mirror answer updates
+    /// only its own cut.
+    last_cut_id: u64,
     unsupported: BTreeSet<String>,
+    last_transition_duration: Option<TransitionDuration>,
 }
 
 /// The remote control's telemetry, shared by the settings task, the sessions
@@ -215,6 +237,7 @@ impl RemoteShared {
             last_request: st.last_request.clone(),
             last_remote_cut: st.last_cut.clone(),
             unsupported_requests: st.unsupported.iter().cloned().collect(),
+            last_transition_duration: st.last_transition_duration,
         }
     }
 
@@ -243,9 +266,35 @@ impl RemoteShared {
         st.unsupported.insert(clip(request_type))
     }
 
-    /// Remember the outcome of a remote scene press.
-    pub fn record_cut(&self, cut: RemoteCut) {
-        self.state().last_cut = Some(cut);
+    /// Remember the outcome of a remote scene press; returns its id (for
+    /// [`Self::set_cg_forward`]).
+    pub fn record_cut(&self, cut: RemoteCut) -> u64 {
+        let mut st = self.state();
+        st.last_cut_id += 1;
+        st.last_cut = Some(cut);
+        st.last_cut_id
+    }
+
+    /// #221: set cut `id`'s `cg_forward` (the mirror's answer) while it is
+    /// still the last cut; `false` when a later press replaced it.
+    pub fn set_cg_forward(&self, id: u64, cg_forward: String) -> bool {
+        let mut st = self.state();
+        if st.last_cut_id != id {
+            return false;
+        }
+        match st.last_cut.as_mut() {
+            Some(cut) => {
+                cut.cg_forward = Some(cg_forward);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// #221: remember a client's transition duration (acknowledged, not
+    /// applied).
+    pub fn record_transition_duration(&self, ms: u32) {
+        self.state().last_transition_duration = Some(TransitionDuration { ms, applied: false });
     }
 
     fn set_listening(&self, listening: bool) {
@@ -293,6 +342,9 @@ fn now_ms() -> i64 {
 pub struct Upstream {
     cmd_tx: Option<mpsc::Sender<ObsCommand>>,
     events: broadcast::Sender<ObsEvent>,
+    /// How long a call waits for cg OBS: [`UPSTREAM_TIMEOUT`] (longer only in
+    /// tests, so a "never awaited" test cannot be passed by a timeout).
+    timeout: Duration,
 }
 
 impl Upstream {
@@ -300,7 +352,18 @@ impl Upstream {
         cmd_tx: Option<mpsc::Sender<ObsCommand>>,
         events: broadcast::Sender<ObsEvent>,
     ) -> Self {
-        Self { cmd_tx, events }
+        Self {
+            cmd_tx,
+            events,
+            timeout: UPSTREAM_TIMEOUT,
+        }
+    }
+
+    /// This link with another call timeout (tests).
+    #[cfg(test)]
+    pub(crate) fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     /// Forward one request to cg OBS; its op=7 `d` object, `None` when cg OBS
@@ -336,7 +399,7 @@ impl Upstream {
             warn!("remote: the OBS client's command queue is full or closed");
             return None;
         }
-        tokio::time::timeout(UPSTREAM_TIMEOUT, rx).await.ok()?.ok()
+        tokio::time::timeout(self.timeout, rx).await.ok()?.ok()
     }
 
     /// A new receiver of cg OBS's events (one per session).
@@ -373,6 +436,25 @@ impl Facade {
             password,
             cut_order: tokio::sync::Mutex::new(()),
             identify_timeout: IDENTIFY_TIMEOUT,
+        })
+    }
+
+    /// A facade with its own identify timeout (tests).
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        pool: SqlitePool,
+        bus: Arc<ProgramBus>,
+        upstream: Upstream,
+        password: Option<String>,
+        identify_timeout: Duration,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            pool,
+            bus,
+            upstream,
+            password,
+            cut_order: tokio::sync::Mutex::new(()),
+            identify_timeout,
         })
     }
 

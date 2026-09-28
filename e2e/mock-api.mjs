@@ -987,6 +987,7 @@ function remoteBody() {
     last_request: null,
     last_remote_cut: null,
     unsupported_requests: [],
+    last_transition_duration: null,
   };
 }
 app.get("/api/v1/program", (_req, res) => {

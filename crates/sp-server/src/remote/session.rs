@@ -351,6 +351,8 @@ async fn set_program_scene(facade: &Facade, data: Option<Value>) -> Reply {
             .or(action.keep_reason().map(KeepReason::as_str)),
         cut_boundary_100ns: None,
         at_ms: now_ms(),
+        via: None,
+        cg_forward: None,
     };
     let reply = match action.source() {
         None => {
@@ -394,3 +396,6 @@ async fn set_program_scene(facade: &Facade, data: Option<Value>) -> Reply {
 #[cfg(test)]
 #[path = "session_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "session_tests_studio.rs"]
+mod tests_studio;

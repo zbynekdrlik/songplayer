@@ -251,6 +251,8 @@ impl Follow {
             reason,
             cut_boundary_100ns,
             at_ms: chrono::Utc::now().timestamp_millis(),
+            via: None,
+            cg_forward: None,
         });
         action
     }

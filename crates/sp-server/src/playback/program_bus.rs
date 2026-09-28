@@ -661,6 +661,9 @@ pub struct ProgramBus {
     /// #221: what is on air, published on every cut and on the startup
     /// selection (`program_on_air.rs`).
     on_air: watch::Sender<OnAir>,
+    /// #221: one scene switch at a time, in arrival order, across every
+    /// client (`program_switch::switch_scene`).
+    switch_order: tokio::sync::Mutex<()>,
 }
 
 impl Default for ProgramBus {
@@ -683,6 +686,7 @@ impl ProgramBus {
             follow: Arc::new(FollowShared::default()),
             cut_serial: tokio::sync::Mutex::new(()),
             on_air: watch::channel(OnAir::default()).0,
+            switch_order: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -777,6 +781,11 @@ impl ProgramBus {
     /// #221: what is on air now.
     pub fn on_air_now(&self) -> OnAir {
         self.on_air.borrow().clone()
+    }
+
+    /// #221: the order of the scene switches (`program_switch`).
+    pub fn switch_order(&self) -> &tokio::sync::Mutex<()> {
+        &self.switch_order
     }
 
     pub fn status(&self) -> ProgramStatus {

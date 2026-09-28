@@ -397,18 +397,29 @@ fn routes_of_the_companion_subset() {
         }
         other => panic!("GetVersion must be native, got {other:?}"),
     }
+    // #221: studio mode ON, so Companion's `do_transition` sends its request.
     assert_eq!(
         route("GetStudioModeEnabled"),
-        Route::Native(Reply::ok(Some(json!({ "studioModeEnabled": false }))))
+        Route::Native(Reply::ok(Some(json!({ "studioModeEnabled": true }))))
     );
     assert_eq!(route("SetCurrentProgramScene"), Route::SetProgramScene);
     for t in FORWARDED_REQUESTS {
         assert_eq!(route(t), Route::Forward, "{t}");
     }
+    // #221: the studio-mode requests of the page-13 buttons are served.
+    for t in [
+        "SetCurrentPreviewScene",
+        "GetCurrentPreviewScene",
+        "TriggerStudioModeTransition",
+        "SetCurrentSceneTransitionDuration",
+    ] {
+        assert_ne!(route(t), Route::Unsupported, "{t}");
+        assert_ne!(route(t), Route::Forward, "{t} is never forwarded");
+    }
     for t in [
         "GetStats",
         "GetHotkeyList",
-        "SetCurrentPreviewScene",
+        "SetStudioModeEnabled",
         "Sleep",
         "",
     ] {
@@ -439,6 +450,10 @@ fn version_data_has_what_companion_reads_unguarded() {
             "GetVersion",
             "GetStudioModeEnabled",
             "SetCurrentProgramScene",
+            "SetCurrentPreviewScene",
+            "GetCurrentPreviewScene",
+            "TriggerStudioModeTransition",
+            "SetCurrentSceneTransitionDuration",
             "GetSceneList",
             "GetCurrentProgramScene",
             "GetInputList",
