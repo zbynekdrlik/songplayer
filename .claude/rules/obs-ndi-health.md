@@ -261,13 +261,18 @@ only) never repaired it.
   `None` or the current scene (the two are written together).
 - **Out-of-order answers (review round 1).** cg OBS may answer two lookups
   out of order, and the poll's relookups can overlap an event's lookup. Every
-  apply carries a ticket (`ObsShared::scene_ticket`) taken where its scene
-  became known — in the connection loop in EVENT order, before spawning; by
-  the poll right before it applies; before the initial apply — and writes
-  through `ObsShared::update_scene(ticket, …)`, which DROPS an answer that
-  arrives after a later ticket's answer was written (debug `a newer scene
-  lookup already answered`). The `SceneChanged` is sent inside that closure,
-  under the write lock, so the engine gets the scene changes in write order.
+  apply carries a ticket (`ObsShared::scene_ticket`) taken BEFORE the scene
+  it applies was read — an event's in the connection loop, in EVENT order,
+  before spawning; the poll's and the initial read's BEFORE they send
+  `GetCurrentProgramScene` (review round 2: a poll ticket taken after its
+  read let a stale poll answer outrank a newer event and cut back) — and
+  writes through `ObsShared::update_scene(ticket, …)`, which DROPS an answer
+  that arrives after a later ticket's answer was written (debug `a newer
+  scene lookup already answered`). The `SceneChanged` is sent inside that
+  closure, under the write lock, so the engine gets the scene changes in
+  write order. A dropped relookup costs one poll tick (the next one asks
+  again). Test: `a_poll_read_an_event_overtook_never_rolls_the_scene_back`
+  (the fake's `hold_program_scene` / `hold_lookups_of` + `release_held`).
 - The ~2 s poll repairs it: `scene_poll_verdict(last, lookup_failed, polled,
   …)` → `PollVerdict::Relookup(scene)` when cg OBS still shows the stored
   scene and its lookup failed — looked up again on that tick (no confirm
@@ -291,12 +296,11 @@ only) never repaired it.
   (a name listed there is refused with 602 like a real group). The first
   `SceneChanged` after the failure must already carry the right set and come
   from a second lookup; a group on the program scene must not fail it.
-- **Mutation gap (known):** `.cargo/mutants.toml` excludes all of
+- **Not mutation-scored:** `.cargo/mutants.toml` excludes all of
   `sp-server/src/obs/`, so the pure `scene_items_from_reply`,
   `scene_poll_verdict`, `obs_transition_from_reply`, `is_transition_event`
-  and the `depth > 0` refusal guard are NOT mutation-scored — their unit and
-  integration tests are the only guard. Narrowing that exclusion to the I/O
-  functions is a separate change (it would also score the rest of `obs/`).
+  and the `depth > 0` refusal guard are guarded ONLY by their unit and
+  integration tests — keep those exact (both directions of each branch).
 
 ## The OBS client PUBLISHES its state — `ObsSnapshot` on a `watch` (#219)
 

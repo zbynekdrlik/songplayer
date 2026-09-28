@@ -552,7 +552,9 @@ async fn connect_and_run(
         }
     }
 
-    // Step 6: initial GetCurrentProgramScene via dispatcher.
+    // Step 6: initial GetCurrentProgramScene via dispatcher. Its scene ticket
+    // is taken before the read, like the poll's (`ObsShared::update_scene`).
+    let initial_ticket = obs.scene_ticket();
     let initial_scene_req_id = uuid::Uuid::new_v4().to_string();
     let initial_scene_req = get_current_scene_request(&initial_scene_req_id);
     match dispatcher
@@ -576,7 +578,7 @@ async fn connect_and_run(
                     obs,
                     event_tx,
                     scene_name.to_string(),
-                    obs.scene_ticket(),
+                    initial_ticket,
                 )
                 .await;
             } else {
@@ -631,7 +633,9 @@ async fn connect_and_run(
                         let ndi_sources = std::sync::Arc::clone(ndi_sources);
                         let obs = obs.clone();
                         let event_tx = event_tx.clone();
-                        // The ticket is taken HERE, in event order (#218 review).
+                        // The ticket is taken HERE, before spawning, so the
+                        // tickets follow cg OBS's event order (#218 review):
+                        // a spawned apply may start after a later one.
                         let ticket = obs.scene_ticket();
                         spawned_tasks.spawn(async move {
                             scene::apply_scene_change(

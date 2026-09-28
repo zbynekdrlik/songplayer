@@ -44,6 +44,10 @@ pub(crate) async fn reconcile_program_scene(
     event_tx: &broadcast::Sender<ObsEvent>,
     pending: &Mutex<Option<(String, Instant)>>,
 ) {
+    // The ticket is taken BEFORE cg OBS is asked (review round 2): an event
+    // that arrives after this read is newer than whatever it answers, so its
+    // apply must outrank this one's (`ObsShared::update_scene`).
+    let ticket = obs.scene_ticket();
     let req_id = uuid::Uuid::new_v4().to_string();
     let req = get_current_scene_request(&req_id);
     let polled = match dispatcher
@@ -103,7 +107,6 @@ pub(crate) async fn reconcile_program_scene(
         }
         PollVerdict::InSync | PollVerdict::Pending => return,
     };
-    let ticket = obs.scene_ticket();
     apply_scene_change(write, dispatcher, ndi_sources, obs, event_tx, scene, ticket).await;
 }
 

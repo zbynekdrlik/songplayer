@@ -24,9 +24,10 @@
 //! nobody). A disconnect resets them all. The channel starts disconnected.
 //!
 //! A scene apply writes through [`ObsShared::update_scene`] with a ticket
-//! taken before its lookup ran ([`ObsShared::scene_ticket`]): an answer that
-//! arrives after a LATER apply's answer was written is dropped, so an
-//! out-of-order lookup never rolls the scene back.
+//! taken before the scene it applies was read ([`ObsShared::scene_ticket`]):
+//! an answer that arrives after a LATER apply's answer was written is
+//! dropped, so an out-of-order lookup, or a poll whose read an event already
+//! overtook, never rolls the scene back.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -89,9 +90,11 @@ impl ObsShared {
         }
     }
 
-    /// A ticket for one scene apply, taken where its scene became known (the
-    /// connection loop, in event order, or the poll right before it applies)
-    /// and BEFORE its lookup runs. See [`Self::update_scene`].
+    /// A ticket for one scene apply, taken BEFORE the information it applies
+    /// was read: the connection loop takes an event's before spawning its
+    /// apply (in event order); the poll and the initial read take theirs
+    /// before asking cg OBS for its program scene. A later event then always
+    /// outranks a read that answered before it. See [`Self::update_scene`].
     pub(crate) fn scene_ticket(&self) -> u64 {
         self.scene_order.issued.fetch_add(1, Ordering::SeqCst) + 1
     }

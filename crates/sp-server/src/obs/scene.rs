@@ -68,12 +68,13 @@ impl From<DispatcherError> for LookupError {
 /// the playlist on program). The scene poll looks it up again; a success
 /// clears `lookup_failed` and broadcasts as usual.
 ///
-/// `ticket` ([`ObsShared::scene_ticket`], taken before this apply's lookup):
-/// an answer that arrives after a later apply's answer was written is
-/// dropped — cg OBS may answer lookups out of order, and the poll's
-/// relookups can overlap an event's lookup. The `SceneChanged` goes out under
-/// the same write lock, so the engine gets the scene changes in the order
-/// they were written.
+/// `ticket` ([`ObsShared::scene_ticket`], taken before `scene_name` was read:
+/// the event's, or the poll's / the initial `GetCurrentProgramScene`): an
+/// answer that arrives after a later apply's answer was written is dropped —
+/// cg OBS may answer lookups out of order, the poll's relookups can overlap
+/// an event's lookup, and an event can overtake a poll's read. The
+/// `SceneChanged` goes out under the same write lock, so the engine gets the
+/// scene changes in the order they were written.
 pub(crate) async fn apply_scene_change(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
@@ -119,7 +120,7 @@ pub(crate) async fn apply_scene_change(
 
     let written = obs
         .update_scene(ticket, |s| {
-            let repaired = s.lookup_failed.take().is_some();
+            let repaired = s.lookup_failed.take().as_deref() == Some(scene_name.as_str());
             s.current_scene = Some(scene_name.clone());
             s.active_playlist_ids = active_ids.clone();
             let _ = event_tx.send(ObsEvent::SceneChanged {
