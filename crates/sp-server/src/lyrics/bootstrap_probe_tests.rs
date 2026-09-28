@@ -136,6 +136,24 @@ async fn a_retry_that_ends_exactly_on_the_budget_still_runs() {
     assert_eq!(took, Duration::from_secs(75));
 }
 
+/// Review round 1: the loop's end is structural — at most 12 probes
+/// (`MAX_PROBES`) whatever the budget, so no flipped comparison can make
+/// `decide` spin (a hang fails the mutation gate like a survivor).
+#[tokio::test(start_paused = true)]
+async fn a_probe_is_never_repeated_more_than_twelve_times() {
+    let a_day = RetryPlan {
+        budget: Duration::from_secs(86_400),
+        ..RETRY_PLAN
+    };
+    let (verdict, took) = run(always(Readiness::Timeout), a_day).await;
+    // Pauses of 5, 10, 20, 40, then 60 s: probes at 0 … 75 s, then every
+    // 60 s up to the 12th at 495 s.
+    assert_eq!(verdict, decision(FastPath::UseAsIs, 12));
+    assert_eq!(took, Duration::from_secs(495));
+    let (verdict, _) = run(always(cuda_unavailable()), a_day).await;
+    assert_eq!(verdict, decision(FastPath::Install, 12));
+}
+
 #[test]
 fn the_production_plan_retries_for_about_three_minutes() {
     assert_eq!(

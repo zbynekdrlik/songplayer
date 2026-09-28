@@ -522,8 +522,8 @@ impl Facade {
 /// `studio_events::run_program_feedback`).
 pub async fn serve(listener: TcpListener, facade: Arc<Facade>) {
     let mut sessions = JoinSet::new();
-    let on_air = facade.bus.on_air();
-    let feedback = studio_events::run_program_feedback(on_air, facade.events.clone());
+    let (on_air, last) = studio_events::subscribe_program(&facade.bus);
+    let feedback = studio_events::run_program_feedback(on_air, last, facade.events.clone());
     sessions.spawn(feedback);
     loop {
         tokio::select! {

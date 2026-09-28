@@ -90,7 +90,9 @@ async fn the_feedback_announces_every_change_of_the_program_scene_name() {
     // program when it connects).
     bus.select_initial(3, Some("sp-slow"));
     let (tx, mut rx) = broadcast::channel(16);
-    let task = tokio::spawn(run_program_feedback(bus.on_air(), tx));
+    let (on_air, last) = subscribe_program(&bus);
+    assert_eq!(last.as_deref(), Some("sp-slow"));
+    let task = tokio::spawn(run_program_feedback(on_air, last, tx));
     settle().await;
     assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
     bus.cut(7, utc_now_100ns(), Some("sp-fast"));
@@ -113,6 +115,20 @@ async fn the_feedback_announces_every_change_of_the_program_scene_name() {
         .await
         .expect("the feedback outlived the bus")
         .unwrap();
+}
+
+/// Review round 1: a cut after the listener subscribed but before its
+/// feedback task first ran (a client can press right after the listener
+/// starts) is still announced.
+#[tokio::test]
+async fn a_cut_before_the_feedback_task_first_runs_is_announced() {
+    let bus = Arc::new(ProgramBus::new());
+    bus.select_initial(3, Some("sp-slow"));
+    let (tx, mut rx) = broadcast::channel(16);
+    let (on_air, last) = subscribe_program(&bus);
+    bus.cut(7, utc_now_100ns(), Some("sp-fast"));
+    let _task = tokio::spawn(run_program_feedback(on_air, last, tx));
+    assert_eq!(recv(&mut rx).await, FacadeEvent::program_scene("sp-fast"));
 }
 
 #[tokio::test(start_paused = true)]

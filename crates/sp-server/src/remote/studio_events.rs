@@ -88,12 +88,23 @@ pub fn scene_change<'a>(last: Option<&str>, now: Option<&'a str>) -> Option<&'a 
     now.filter(|scene| last != Some(*scene))
 }
 
+/// The start of a listener's program feedback: subscribe to what is on air
+/// and name it NOW. Every publication after this is a change
+/// [`run_program_feedback`] sees, even one made before the task first runs
+/// (review round 1: a press in that window was never announced).
+pub fn subscribe_program(bus: &ProgramBus) -> (watch::Receiver<OnAir>, Option<String>) {
+    let mut on_air = bus.on_air();
+    let name = program_scene_name(&on_air.borrow_and_update());
+    (on_air, name)
+}
+
 /// Emit `CurrentProgramSceneChanged` for every change of the program's scene
 /// name until the bus goes away (the task is dropped with its listener). The
 /// value `on_air` holds when the task starts is not announced: a client reads
 /// the program when it connects.
 pub async fn run_program_feedback(
     mut on_air: watch::Receiver<OnAir>,
+    _last: Option<String>,
     events: broadcast::Sender<FacadeEvent>,
 ) {
     let mut last = program_scene_name(&on_air.borrow_and_update());
