@@ -235,6 +235,13 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   with that reason. Build the refusal in a helper that returns `ErrorResponse`
   by value. Own helpers returning `tungstenite::Error` (136 B) must box it:
   `Result<(), Box<tungstenite::Error>>` + `.map_err(Box::new)`.
+- **`clippy::nonminimal_bool` rewrites `!opt.is_some_and(|x| …)`** (#217
+  addendum 3 review round 2). It is warn-by-default (complexity), so under
+  `-D warnings` it fails the Lint job. Clippy's `METHODS_WITH_NEGATION`
+  table maps a negated `is_some_and` to `is_none_or` from MSRV 1.82, and the
+  workspace is 1.85. Write `opt.is_none_or(|x| x.id != id)`: negate the
+  closure body, never the call. `!opt.is_some()` / `!opt.is_none()` are in
+  the same table.
 
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,
@@ -327,6 +334,30 @@ pointer-equality RED pass by luck.
 - **No hangs:** drop the `release` sender on every failure path, so the held
   thread's `recv().unwrap()` panics instead of hanging the test.
 
+**A RED for a new state machine or a restructure (#217 addendum 3, three
+rounds).** Ship the whole new structure in RED (new types, fields, modules,
+command variants). Keep the OLD behaviour in a few NAMED spots and list them
+in the RED message:
+
+- a `plan` that runs every command as sent;
+- a supersede that returns the batch unchanged;
+- a predicate that still reads the old input;
+- an empty `rearm` with `_`-prefixed params (warning-free, still called);
+- a helper without its new first step.
+
+Keep every new item USED in RED, or the lib target warns. Two things that
+were enough:
+
+- a variant only GREEN's `plan` returns can be constructed by an old path
+  (the old retry's instant hide as `run_title_action(HideNow)`);
+- a new fn only GREEN's predicate calls can be read by a debug log of the
+  window inputs, which GREEN keeps.
+
+Write GREEN first and tar the changed files to the scratchpad. Build RED with
+anchor-asserted scripts (rustfmt re-wraps lines, so re-read the formatted text
+before anchoring). Commit RED, then restore ONLY the files whose spots differ
+from the tar.
+
 **A RED whose new tests call a CHANGED signature (#215 review rounds 3–5).**
 The new tests must compile at the RED commit, but the fix changes an API
 (an extra `&mut events` param, a renamed fn, an extra argument). Do it like
@@ -388,6 +419,16 @@ the test that kills each one BEFORE CI's mutation gate runs.
   A mutant that only a mid-row / off-edge input can reveal (`a - c0` with
   `c0` always 0 on row-aligned runs) needs a test that cuts the input
   arbitrarily.
+- **A new early return in front of pinned comparisons can silently orphan
+  their killers** (#217 addendum 3, review rounds 4-5). Round 4 added
+  `TitleClock::shows` as a guard ahead of `arm_title_timers`'s `>`
+  comparisons, and adapted a boundary test whose clock the guard now
+  rejected. The test still passed, but it no longer reached the
+  comparisons, so their `>` → `>=` mutants survived. CI's gate diffs from
+  the last GREEN mutation verdict, not from the last review round. So after
+  any fix that adds a guard or adapts an existing test, re-list the FULL
+  branch range (`cargo mutants --in-diff <base>..HEAD --list`) and re-map
+  every mutant to a killer, not just the round's own diff.
 - **A HANG fails the gate exactly like a survivor** (review round 1, same
   ticket). cargo-mutants kills a stalled test run at `--timeout` and reports
   TIMEOUT, which turns the shard red. The #215 harness first counted its
@@ -546,6 +587,14 @@ sees that. What held up across five review rounds:
   `Mutex<bool>` + `Condvar` gate (`set_held`). Require the caller to make N
   more steps within a bounded `wait_for`, then release. Any wait on the
   caller's side stalls and fails the bound.
+- **An awaited `mpsc` send to a queue that drains only while a peer is
+  connected (cg OBS's command queue) is a stall** (#217 addendum 3, review
+  rounds 3–4: it parked the engine loop, then the title timers). Send what
+  matters first, then `try_send` the rest. Test it with a capacity-1
+  channel filled by one `try_send`, the receiver KEPT ALIVE (`_rx`: a
+  dropped receiver makes the send fail at once, so the test passes
+  vacuously), the call under `tokio::time::timeout(5 s)`, then assert the
+  important command arrived.
 - **Use "must NOT happen yet" windows only in the safe direction.** For
   example, `recv_timeout(200 ms).is_err()` while the gate is held. Correct
   code can never fail it; a slow runner only makes it pass vacuously.

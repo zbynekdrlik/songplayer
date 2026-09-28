@@ -99,6 +99,7 @@ impl PlaybackEngine {
                 position_ms,
                 "PlayVideo → jumping to clicked song"
             );
+            pp.begin_play(position_ms.unwrap_or(0)); // its Started fixes the title clock
             pp.pipeline.send(PipelineCommand::Play {
                 video: video_path.into(),
                 audio: audio_path.into(),
@@ -131,6 +132,7 @@ impl PlaybackEngine {
         } else {
             warn!(playlist_id, video_id, "PlayVideo: no pipeline for playlist");
         }
+        self.resync_after_play(playlist_id).await;
     }
 
     /// Consume paused snapshot for `playlist_id`; `None` if never paused. #88.

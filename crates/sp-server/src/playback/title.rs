@@ -1,33 +1,87 @@
-//! Title-text push helpers shared by the engine.
+//! The engine's song-title helpers: the one title formatter, the song's
+//! `TitleClock` (#217 addendum 3), and the three ways the title reaches
+//! Resolume's `#sp-title` clips and OBS's `#sp-title` text source:
 //!
-//! Two call sites in `playback/mod.rs` push the same song title to the
-//! same downstreams (OBS text source + Resolume `#sp-title` clips):
+//! * `push_title` / `push_hide`: the show / hide timer's ShowTitle /
+//!   HideTitle (`title_timers.rs`);
+//! * `title_text` + `send_resync`: the `Resync` of a recovery, a scene-on or
+//!   a Play (`recovery.rs::decide_wall_title`).
 //!
-//! * The 1.5 s post-`Started` timer task (in `handle_pipeline_event`)
-//! * The scene-go-on refresh path (in `handle_scene_change`)
-//!
-//! Extracting the body keeps both sites consistent and stops `mod.rs`
-//! from creeping past the 1000-line cap.
+//! All three send Resolume first and never wait for cg OBS
+//! (`send_obs_title`, review round 4).
+
+use std::time::Duration;
 
 use sqlx::SqlitePool;
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 
 use crate::obs::ObsCommand;
 use crate::resolume::ResolumeCommand;
+
+/// The one title formatter: the Resolume driver compares its title state in
+/// this text, and the OBS text source shows the same (#217 addendum 3).
+pub use crate::resolume::handlers::format_title_text;
 
 /// OBS text source name used for the fallback title display (in the
 /// CG OVERLAY scene). Must match the source name in OBS exactly.
 pub const OBS_TITLE_SOURCE: &str = "#sp-title";
 
-/// Format a title for display: `"<song> - <artist>"`, falling back to
-/// whichever side is non-empty when the other is missing.
-pub fn format_title_text(song: &str, artist: &str) -> String {
-    if artist.is_empty() {
-        song.to_string()
-    } else if song.is_empty() {
-        artist.to_string()
-    } else {
-        format!("{song} - {artist}")
+/// The title shows this long after a song's `Started`…
+pub const TITLE_SHOW_DELAY_MS: u64 = 1500;
+
+/// …and hides this long before the song's end.
+pub const TITLE_HIDE_BEFORE_END_MS: u64 = 3500;
+
+/// The one clock of a song's title window (#217 addendum 3): the instants
+/// the title timers sleep until, fixed at the song's `Started`. A recovery
+/// or a scene-on reads the SAME instants, so its `Resync` never contradicts a
+/// timer. (It read the decoder position before, which the pipeline reports
+/// every 500 ms: near each boundary the two disagreed, and a queued Resync
+/// could keep a title into the next song or hide a title just shown.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TitleClock {
+    /// The song this clock belongs to.
+    pub video_id: i64,
+    /// When the title shows: `Started` + 1.5 s.
+    pub show_at: Instant,
+    /// When it hides: 3.5 s before the song's end. `None` for a song of 5 s
+    /// or less (or an unknown 0 duration): it keeps its title to the end.
+    pub hide_at: Option<Instant>,
+}
+
+impl TitleClock {
+    /// The clock of `video_id`, a `duration_ms` song whose `Started` came at
+    /// `started_at`, `start_ms` into it (0, or a resume's position). The
+    /// title shows 1.5 s after the start and hides 3.5 s before the song's
+    /// REAL end, so a resume 5 s or less before the end has no window
+    /// (`shows`, review round 4). A resume whose seek failed plays from 0,
+    /// but `Started` does not say so: its title then hides early by the
+    /// requested position (a known residual, as for a dashboard seek).
+    pub fn new(video_id: i64, started_at: Instant, duration_ms: u64, start_ms: u64) -> Self {
+        let hide_at = if duration_ms > TITLE_SHOW_DELAY_MS + TITLE_HIDE_BEFORE_END_MS {
+            let until_hide = (duration_ms - TITLE_HIDE_BEFORE_END_MS).saturating_sub(start_ms);
+            Some(started_at + Duration::from_millis(until_hide))
+        } else {
+            None
+        };
+        Self {
+            video_id,
+            show_at: started_at + Duration::from_millis(TITLE_SHOW_DELAY_MS),
+            hide_at,
+        }
+    }
+
+    /// Whether the song has a title window at all: its hide point, if any,
+    /// comes after its show point. A resume 5 s or less before the end has
+    /// none: no title, and no timer is armed (`arm_title_timers`).
+    pub fn shows(&self) -> bool {
+        self.hide_at.is_none_or(|hide_at| hide_at > self.show_at)
+    }
+
+    /// Whether the title is due at `now`: from `show_at`, before `hide_at`.
+    pub fn open_at(&self, now: Instant) -> bool {
+        now >= self.show_at && self.hide_at.is_none_or(|hide_at| now < hide_at)
     }
 }
 
@@ -49,11 +103,30 @@ pub async fn get_video_title_info(
     }))
 }
 
-/// Push the song title to OBS (if configured) and Resolume.
+/// Set OBS's `#sp-title` text source (`""` clears it), when cg OBS is
+/// configured. cg OBS's command queue drains only while it is connected, so
+/// the text (the fallback display) is dropped when the queue is full, never
+/// awaited: an await parked the engine loop (a resync) or a title timer
+/// (review rounds 3 and 4). The caller has already sent Resolume its command.
+fn send_obs_title(obs_cmd_tx: Option<&mpsc::Sender<ObsCommand>>, text: String) {
+    let Some(cmd_tx) = obs_cmd_tx else {
+        return;
+    };
+    let cmd = ObsCommand::SetTextSource {
+        source_name: OBS_TITLE_SOURCE.to_string(),
+        text,
+    };
+    if let Err(e) = cmd_tx.try_send(cmd) {
+        tracing::debug!(%e, "OBS title text dropped (cg OBS queue full or closed)");
+    }
+}
+
+/// The show timer's title: Resolume's ShowTitle, then the OBS text.
 ///
 /// Returns `true` if a title was pushed, `false` if the video had no
 /// title info on disk (silent, mirrors prior 1.5 s timer behaviour).
-/// Idempotent — Resolume's A/B crossfade no-ops on same-text writes.
+/// The driver acts only on a difference: a title already up is not faded
+/// again (#217 addendum 3).
 pub async fn push_title(
     pool: &SqlitePool,
     obs_cmd_tx: Option<&mpsc::Sender<ObsCommand>>,
@@ -64,41 +137,50 @@ pub async fn push_title(
         return false;
     };
     let text = format_title_text(&song, &artist);
-    if let Some(cmd_tx) = obs_cmd_tx {
-        let _ = cmd_tx
-            .send(ObsCommand::SetTextSource {
-                source_name: OBS_TITLE_SOURCE.to_string(),
-                text,
-            })
-            .await;
-    }
     let _ = resolume_tx
         .send(ResolumeCommand::ShowTitle { song, artist })
         .await;
+    send_obs_title(obs_cmd_tx, text);
     true
 }
 
-#[cfg(test)]
-mod tests {
-    use super::format_title_text;
-
-    #[test]
-    fn formats_song_and_artist() {
-        assert_eq!(format_title_text("Song", "Artist"), "Song - Artist");
-    }
-
-    #[test]
-    fn empty_artist_yields_song_only() {
-        assert_eq!(format_title_text("Song", ""), "Song");
-    }
-
-    #[test]
-    fn empty_song_yields_artist_only() {
-        assert_eq!(format_title_text("", "Artist"), "Artist");
-    }
-
-    #[test]
-    fn both_empty_yields_empty() {
-        assert_eq!(format_title_text("", ""), "");
-    }
+/// The hide timer's hide (3.5 s before a song's end): Resolume's
+/// HideTitle, then the OBS text cleared.
+pub async fn push_hide(
+    obs_cmd_tx: Option<&mpsc::Sender<ObsCommand>>,
+    resolume_tx: &mpsc::Sender<ResolumeCommand>,
+) {
+    let _ = resolume_tx.send(ResolumeCommand::HideTitle).await;
+    send_obs_title(obs_cmd_tx, String::new());
 }
+
+/// The wall title of `video_id` (`format_title_text`): `None` when the
+/// video has no row, or neither a song nor an artist.
+pub async fn title_text(pool: &SqlitePool, video_id: i64) -> Result<Option<String>, sqlx::Error> {
+    Ok(get_video_title_info(pool, video_id)
+        .await?
+        .map(|(song, artist)| format_title_text(&song, &artist))
+        .filter(|text| !text.is_empty()))
+}
+
+/// Tell the wall which title SHOULD be up (`None` = no title, #217
+/// addendum 3). The Resolume `Resync` goes first: the driver owns what the
+/// wall shows and acts only on a difference. The OBS text source then gets
+/// the same title, or is cleared as the hide timer clears it (never
+/// awaited, `send_obs_title`: this runs on the engine loop).
+pub async fn send_resync(
+    obs_cmd_tx: Option<&mpsc::Sender<ObsCommand>>,
+    resolume_tx: &mpsc::Sender<ResolumeCommand>,
+    title: Option<String>,
+) {
+    let _ = resolume_tx
+        .send(ResolumeCommand::Resync {
+            title: title.clone(),
+        })
+        .await;
+    send_obs_title(obs_cmd_tx, title.unwrap_or_default());
+}
+
+#[cfg(test)]
+#[path = "title_tests.rs"]
+mod tests;

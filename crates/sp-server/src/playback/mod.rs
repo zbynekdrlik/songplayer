@@ -46,7 +46,7 @@ pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI
 pub mod program_follow; // #215: SP-program follows cg OBS + the transition settings/spec task
 pub mod program_output; // #209: the SP-program sender + its thread
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
-mod recovery;
+pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns
 mod runtime_pipeline;
 mod scene_off; // #215: the deferred scene-go-off pause of the program's outgoing source
 pub mod startup_senders; // #196 deterministic restart-safe NDI sender startup (pure port-wait + order)
@@ -55,6 +55,7 @@ pub mod submit_handoff; // #168 output-side split: pure emit->submit handoff dec
 pub mod submitter;
 mod test_helpers;
 mod title;
+mod title_timers; // #217 addendum 3: title timers armed from the song's TitleClock
 mod transport_state; // #201 pure PlayState->TransportState mapping (Linux-tested)
 pub mod vban_out; // #210: the program's VBAN audio output (queue, paced thread, socket, stats)
 pub mod vban_packet; // #210: the pure VBAN packet encoder (header, INT24, 8×200 split)
@@ -166,6 +167,15 @@ struct PlaylistPipeline {
     /// current subtitle line. The re-push line may be up to one Position
     /// tick (~500 ms) behind the audio's actual playhead.
     cached_position_ms: u64,
+    /// The title window of the song whose `Started` the engine last handled:
+    /// the instants the title timers sleep until, and that a recovery or a
+    /// scene-on reads (#217 addendum 3). Every Play clears it (`begin_play`),
+    /// so it is `None` from a song change to the new `Started`.
+    title_clock: Option<title::TitleClock>,
+    /// Where the current Play started: 0, or a resume's position. The title
+    /// clock hides 3.5 s before the song's real end, counted from it (#217
+    /// addendum 3).
+    play_start_ms: u64,
     /// Pause snapshot; consumed on manual /play to resume same song. #88.
     paused_at: Option<(i64, u64)>,
 }
@@ -400,20 +410,32 @@ impl PlaybackEngine {
         self.event_rx.recv().await
     }
 
-    /// Re-push the song title to OBS + Resolume for an already-Playing pipeline.
-    /// Used when a scene becomes program while the pipeline was already playing
-    /// off-program — the 1.5 s title-show task aborted with "title suppressed —
-    /// off program", so without this the wall shows a stale title. Idempotent.
-    async fn push_title_for_playing(&self, playlist_id: i64, video_id: i64) {
-        if title::push_title(
-            &self.pool,
-            self.obs_cmd_tx.as_ref(),
-            &self.resolume_tx,
-            video_id,
-        )
-        .await
-        {
-            info!(playlist_id, video_id, "title re-pushed on scene-go-on");
+    /// Re-sync the wall title when a scene becomes program for a Playing
+    /// pipeline. The 1.5 s title-show task aborted with "title suppressed —
+    /// off program" if the scene was off then, so without this the wall shows
+    /// a stale title. It goes through the same `Resync` as a recovery, with
+    /// the song's title clock: a scene-on outside the window (a song that has
+    /// not started yet, its first 1.5 s, its last 3.5 s) shows no title, and a
+    /// title that is already up is not faded again. The song's timers are
+    /// armed again for what is still ahead, at the decision instant and
+    /// before the send (#217 addendum 3).
+    async fn push_title_for_playing(&mut self, playlist_id: i64, video_id: i64) {
+        // Re-arm at the decision's own instant, before the send: no await
+        // between them, so the timers and the Resync never disagree about
+        // which side of a show / hide instant the wall is on (review round 3).
+        let decided = self.decide_wall_title().await;
+        let now = decided
+            .as_ref()
+            .map_or_else(tokio::time::Instant::now, |(_, at)| *at);
+        self.rearm_title_timers(playlist_id, video_id, now);
+        if let Some((title, _)) = decided {
+            title::send_resync(self.obs_cmd_tx.as_ref(), &self.resolume_tx, title.clone()).await;
+            info!(
+                playlist_id,
+                video_id,
+                ?title,
+                "title re-synced on scene-go-on"
+            );
         }
     }
 
@@ -576,6 +598,7 @@ impl PlaybackEngine {
                         video_id, %video_path, %audio_path,
                         "Previous → replaying song from history"
                     );
+                    pp.begin_play(0);
                     pp.pipeline.send(PipelineCommand::Play {
                         video: video_path.into(),
                         audio: audio_path.into(),
@@ -597,6 +620,7 @@ impl PlaybackEngine {
                         transport: transport_from_play_state(&PlayState::Playing { video_id }),
                     });
                 }
+                self.resync_after_play(playlist_id).await;
             }
             Ok(None) => {
                 warn!(
@@ -777,6 +801,9 @@ impl PlaybackEngine {
                                         %video_path, %audio_path,
                                         "sent Play command"
                                     );
+                                    // #217 addendum 3: even the same video gets
+                                    // a new title clock, at its new Started.
+                                    pp.begin_play(0);
                                     pp.pipeline.send(PipelineCommand::Play {
                                         video: video_path.into(),
                                         audio: audio_path.into(),
@@ -793,6 +820,7 @@ impl PlaybackEngine {
                                         warn!(playlist_id, video_id, %e, "failed to record play");
                                     }
                                 }
+                                self.resync_after_play(playlist_id).await;
                             }
                             Ok(None) => {
                                 warn!(
@@ -815,16 +843,19 @@ impl PlaybackEngine {
             }
 
             PlayAction::ReplayCurrent => {
-                if let Some(pp) = self.pipelines.get(&playlist_id) {
+                let mut played = false;
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     if let Some(video_id) = pp.current_video_id {
                         debug!(playlist_id, "replaying current video");
                         match crate::db::models::get_song_paths(&self.pool, video_id).await {
                             Ok(Some((video_path, audio_path))) => {
+                                pp.begin_play(0);
                                 pp.pipeline.send(PipelineCommand::Play {
                                     video: video_path.into(),
                                     audio: audio_path.into(),
                                     start_position_ms: None,
                                 });
+                                played = true;
                             }
                             Ok(None) => {
                                 warn!(playlist_id, video_id, "no song paths for replay");
@@ -834,6 +865,9 @@ impl PlaybackEngine {
                             }
                         }
                     }
+                }
+                if played {
+                    self.resync_after_play(playlist_id).await;
                 }
             }
 

@@ -4,7 +4,14 @@
 
 #![allow(unused_imports)]
 
+use std::sync::atomic::Ordering;
+
+use super::pipeline::PipelineEvent;
+use super::state::PlayEvent;
+use super::title::TitleClock;
 use super::*;
+use crate::resolume::ResolumeCommand;
+use sp_core::playback::PlaybackMode;
 use sp_core::ws::ServerMsg;
 use tokio::sync::{broadcast, mpsc};
 
@@ -110,37 +117,50 @@ async fn handle_scene_change_off_noop_when_already_off_program() {
     );
 }
 
-/// #45 — when a scene becomes program for a pipeline that is already in
-/// `Playing` state (off-program), `handle_scene_change` MUST re-push the
-/// title to Resolume so the wall doesn't keep showing the previous song.
-/// The 1.5s post-Started title-show task aborted itself with "title
-/// suppressed — off program"; nothing else re-pushes title without this fix.
-#[tokio::test]
-async fn scene_go_on_refreshes_title_for_already_playing() {
-    use std::sync::atomic::Ordering;
+// -- #217 addendum 3: the wall title is re-synced, per the song's title clock --
+//
+// A recovery and an OBS scene-on send the driver ONE `Resync` naming the title
+// that SHOULD be up: the song title of a playing, on-program pipeline whose
+// title clock (fixed at its `Started`, the instants the title timers sleep
+// until) is open, else none. The driver owns the wall and acts only on a
+// difference (`resolume/driver_title_tests.rs`).
 
+/// Every test song is this long.
+const SONG_MS: u64 = 180_000;
+
+/// An engine with one pipeline per `(playlist, video, song)`, each video by
+/// "Artist".
+async fn test_engine(
+    songs: &[(i64, i64, &str)],
+) -> (PlaybackEngine, mpsc::Receiver<ResolumeCommand>) {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
-
-    // Parent playlist row (FK target for videos.playlist_id).
-    sqlx::query(
-        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
-         VALUES (7, 'test', 'https://example.com/p', 'SP-fast', 1)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    // Video row that get_video_title_info will resolve.
-    sqlx::query(
-        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized) \
-         VALUES (42, 7, 'abc123', 'Test Song', 'Test Artist', 1)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-
+    for &(playlist_id, video_id, song) in songs {
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (?, 'p', 'u', ?, 1)",
+        )
+        .bind(playlist_id)
+        .bind(format!("SP-{playlist_id}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized, \
+             file_path, audio_file_path) VALUES (?, ?, ?, ?, 'Artist', 1, ?, ?)",
+        )
+        .bind(video_id)
+        .bind(playlist_id)
+        .bind(format!("yt{video_id}"))
+        .bind(song)
+        .bind(format!("/tmp/sp-test-{video_id}_video.mp4"))
+        .bind(format!("/tmp/sp-test-{video_id}_audio.flac"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
     let (obs_tx, _obs_rx) = broadcast::channel(16);
-    let (resolume_tx, mut resolume_rx) = mpsc::channel(16);
+    let (resolume_tx, resolume_rx) = mpsc::channel(64);
     let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
     let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
         pool,
@@ -154,244 +174,666 @@ async fn scene_go_on_refreshes_title_for_already_playing() {
             crate::playback::ndi_health::NdiHealthRegistry::new(),
         ),
     });
-
-    engine.ensure_pipeline(7, "SP-fast");
-    if let Some(pp) = engine.pipelines.get_mut(&7) {
-        pp.state = PlayState::Playing { video_id: 42 };
-        pp.scene_active.store(false, Ordering::Release);
+    for &(playlist_id, _, _) in songs {
+        engine.ensure_pipeline(playlist_id, &format!("SP-{playlist_id}"));
     }
-
-    // Drain any residual messages from setup.
-    while resolume_rx.try_recv().is_ok() {}
-
-    // Scene becomes program.
-    engine.handle_scene_change(7, true).await;
-
-    // Collect every ResolumeCommand emitted during the call (the helper
-    // pushes ShowTitle but earlier scene-state code might also emit other
-    // messages — we look for the ShowTitle specifically).
-    let mut cmds: Vec<crate::resolume::ResolumeCommand> = Vec::new();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
-    while std::time::Instant::now() < deadline {
-        match tokio::time::timeout(std::time::Duration::from_millis(50), resolume_rx.recv()).await {
-            Ok(Some(cmd)) => cmds.push(cmd),
-            Ok(None) => break,
-            Err(_) => {
-                if !cmds.is_empty() {
-                    break;
-                }
-            }
-        }
-    }
-
-    let show_title = cmds.iter().find_map(|c| match c {
-        crate::resolume::ResolumeCommand::ShowTitle { song, artist } => {
-            Some((song.clone(), artist.clone()))
-        }
-        _ => None,
-    });
-    assert_eq!(
-        show_title,
-        Some(("Test Song".into(), "Test Artist".into())),
-        "scene-go-on for an already-Playing pipeline MUST re-push ShowTitle. Got: {cmds:?}"
-    );
+    (engine, resolume_rx)
 }
 
-/// On RecoveryEvent, handle_resolume_recovery MUST re-emit ShowTitle for every
-/// active pipeline in Playing state with scene_active=true.
-#[tokio::test]
-async fn handle_resolume_recovery_reemits_title_for_active_pipeline() {
-    use std::sync::atomic::Ordering;
-
-    let pool = crate::db::create_memory_pool().await.unwrap();
-    crate::db::run_migrations(&pool).await.unwrap();
-    sqlx::query(
-        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
-         VALUES (7, 'p', 'u', 'SP-fast', 1)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized) \
-         VALUES (42, 7, 'abc', 'Song', 'Artist', 1)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    let (obs_tx, _obs_rx) = broadcast::channel(16);
-    let (resolume_tx, mut resolume_rx) = mpsc::channel(16);
-    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
-        pool,
-        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
-        obs_event_tx: obs_tx,
-        obs_cmd_tx: None,
-        resolume_tx,
-        ws_event_tx: ws_tx,
-        presenter_client: None,
-        ndi_health_registry: std::sync::Arc::new(
-            crate::playback::ndi_health::NdiHealthRegistry::new(),
-        ),
-    });
-    engine.ensure_pipeline(7, "SP-fast");
-    if let Some(pp) = engine.pipelines.get_mut(&7) {
-        pp.state = PlayState::Playing { video_id: 42 };
-        pp.scene_active.store(true, Ordering::Release);
-    }
-    while resolume_rx.try_recv().is_ok() {}
-
-    engine.handle_resolume_recovery("127.0.0.1").await;
-
-    let mut got_title = false;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
-    while std::time::Instant::now() < deadline {
-        match tokio::time::timeout(std::time::Duration::from_millis(20), resolume_rx.recv()).await {
-            Ok(Some(cmd)) => {
-                if matches!(cmd, crate::resolume::ResolumeCommand::ShowTitle { .. }) {
-                    got_title = true;
-                    break;
-                }
-            }
-            Ok(None) => break,
-            Err(_) => {
-                if got_title {
-                    break;
-                }
-            }
-        }
-    }
-    assert!(
-        got_title,
-        "ShowTitle must be re-emitted on Resolume recovery"
-    );
+/// Where a song is in its title window, as its title clock says.
+#[derive(Clone, Copy, Debug)]
+enum Window {
+    /// Past the show point, before the hide point.
+    Due,
+    /// Before the show point (the song's first 1.5 s).
+    BeforeShow,
+    /// Past the hide point (the song's last 3.5 s).
+    AfterHide,
+    /// A clock of another video. Only a test builds one: every Play clears
+    /// the clock (`begin_play`), so `on_air_clock`'s video check is defensive.
+    OtherSong,
+    /// No song has started on this playlist yet.
+    NotStarted,
 }
 
-// -- #217 addendum 2: the recovery re-shows the title only in its window ----
+/// The title clock of `video_id` for `window`. Its instants sit at the
+/// test's clock or an hour away, never a subtraction from it (a freshly
+/// booted Windows runner's monotonic clock can underflow).
+fn clock_for(video_id: i64, window: Window) -> Option<TitleClock> {
+    let now = tokio::time::Instant::now();
+    let hour = std::time::Duration::from_secs(3600);
+    let clock = |video_id, show_at, hide_at| TitleClock {
+        video_id,
+        show_at,
+        hide_at: Some(hide_at),
+    };
+    match window {
+        Window::Due => Some(clock(video_id, now, now + hour)),
+        Window::BeforeShow => Some(clock(video_id, now + hour, now + 2 * hour)),
+        Window::AfterHide => Some(clock(video_id, now, now)),
+        Window::OtherSong => Some(clock(video_id - 1, now, now + hour)),
+        Window::NotStarted => None,
+    }
+}
 
-/// An engine whose playlist 7 plays video 42 ("Song" / "Artist") on program,
-/// with the title timers given (`None` = no timer). Returns the Resolume
-/// commands one recovery sends.
-async fn recovery_title_commands(
-    show: Option<tokio::task::AbortHandle>,
-    hide: Option<tokio::task::AbortHandle>,
-) -> Vec<crate::resolume::ResolumeCommand> {
-    use std::sync::atomic::Ordering;
+/// The decoder position a song in `window` reports (consistent with the
+/// clock; a lagging report is set by the test that means it).
+fn position_for(window: Window) -> u64 {
+    match window {
+        Window::BeforeShow => 1_000,
+        Window::AfterHide => SONG_MS - 3_000,
+        Window::Due | Window::OtherSong | Window::NotStarted => 60_000,
+    }
+}
 
-    let pool = crate::db::create_memory_pool().await.unwrap();
-    crate::db::run_migrations(&pool).await.unwrap();
-    sqlx::query(
-        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
-         VALUES (7, 'p', 'u', 'SP-fast', 1)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized) \
-         VALUES (42, 7, 'abc', 'Song', 'Artist', 1)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    let (obs_tx, _obs_rx) = broadcast::channel(16);
-    let (resolume_tx, mut resolume_rx) = mpsc::channel(16);
-    let (ws_tx, _) = broadcast::channel::<ServerMsg>(16);
-    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
-        pool,
-        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
-        obs_event_tx: obs_tx,
-        obs_cmd_tx: None,
-        resolume_tx,
-        ws_event_tx: ws_tx,
-        presenter_client: None,
-        ndi_health_registry: std::sync::Arc::new(
-            crate::playback::ndi_health::NdiHealthRegistry::new(),
-        ),
-    });
-    engine.ensure_pipeline(7, "SP-fast");
-    let pp = engine.pipelines.get_mut(&7).expect("pipeline 7");
-    pp.state = PlayState::Playing { video_id: 42 };
+/// Playlist `playlist_id` plays `video_id` on program, at `window` of its
+/// `SONG_MS`, with no title timers armed.
+fn play(engine: &mut PlaybackEngine, playlist_id: i64, video_id: i64, window: Window) {
+    let pp = engine.pipelines.get_mut(&playlist_id).expect("pipeline");
+    pp.state = PlayState::Playing { video_id };
+    pp.current_video_id = Some(video_id);
+    pp.title_clock = clock_for(video_id, window);
+    pp.cached_position_ms = position_for(window);
+    pp.cached_duration_ms = SONG_MS;
     pp.scene_active.store(true, Ordering::Release);
-    pp.title_show_abort = show;
-    pp.title_hide_abort = hide;
-    while resolume_rx.try_recv().is_ok() {}
+}
 
-    engine.handle_resolume_recovery("127.0.0.1").await;
-
+/// Every command waiting on the Resolume channel.
+fn sent(rx: &mut mpsc::Receiver<ResolumeCommand>) -> Vec<ResolumeCommand> {
     let mut cmds = Vec::new();
-    while let Ok(cmd) = resolume_rx.try_recv() {
+    while let Ok(cmd) = rx.try_recv() {
         cmds.push(cmd);
     }
     cmds
 }
 
-/// A timer task that has already run.
-async fn finished_timer() -> tokio::task::AbortHandle {
-    let task = tokio::spawn(async {});
-    let handle = task.abort_handle();
-    task.await.unwrap();
-    handle
-}
-
-/// A timer task that has not run yet (never completes on its own).
-fn pending_timer() -> tokio::task::AbortHandle {
-    tokio::spawn(std::future::pending::<()>()).abort_handle()
-}
-
-fn shows_title(cmds: &[crate::resolume::ResolumeCommand]) -> bool {
+/// The title of every `Resync` in `cmds` (`None` = a resync naming no title).
+fn resyncs(cmds: &[ResolumeCommand]) -> Vec<Option<String>> {
     cmds.iter()
-        .any(|c| matches!(c, crate::resolume::ResolumeCommand::ShowTitle { .. }))
+        .filter_map(|cmd| match cmd {
+            ResolumeCommand::Resync { title } => Some(title.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
-/// Review round 2: the song's end-of-song title hide has already run (its
-/// timer task finished). A Resolume recovery then must not fade the title
-/// back in for the song's last seconds and on into the next song. The driver
-/// fires such a recovery when that very HideTitle got a 404 (Arena re-ids its
-/// clips on relaunch) and the refresh mapped the new ids; it retries the
-/// hide, and the re-push must not undo it.
+fn shows_title(cmds: &[ResolumeCommand]) -> bool {
+    cmds.iter()
+        .any(|cmd| matches!(cmd, ResolumeCommand::ShowTitle { .. }))
+}
+
+/// The commands one recovery sends for playlist 7 playing video 42 ("Song").
+async fn recovery_commands(window: Window) -> Vec<ResolumeCommand> {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, window);
+    sent(&mut rx);
+    engine.handle_resolume_recovery("127.0.0.1").await;
+    sent(&mut rx)
+}
+
+/// The engine after a scene-on of playlist 7, playing video 42 ("Song")
+/// while its scene was off program (its title timers cancelled, as a
+/// scene-off leaves them), and the commands it sent.
+async fn after_scene_on(window: Window) -> (PlaybackEngine, Vec<ResolumeCommand>) {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, window);
+    engine.pipelines[&7]
+        .scene_active
+        .store(false, Ordering::Release);
+    sent(&mut rx);
+    engine.handle_scene_change(7, true).await;
+    let cmds = sent(&mut rx);
+    (engine, cmds)
+}
+
+/// Whether playlist 7 has a show / hide timer armed.
+fn timers(engine: &PlaybackEngine) -> (bool, bool) {
+    let pp = &engine.pipelines[&7];
+    (pp.title_show_abort.is_some(), pp.title_hide_abort.is_some())
+}
+
+/// #45 — a scene becomes program for a pipeline already playing (its 1.5 s
+/// show task found the scene off and showed nothing): mid-song, the title is
+/// re-synced. It goes through the driver's `Resync` (#217 addendum 3), never
+/// a ShowTitle, whose fade from 5 % blinked a title that was already up.
+#[tokio::test]
+async fn scene_go_on_refreshes_title_for_already_playing() {
+    let (_engine, cmds) = after_scene_on(Window::Due).await;
+    assert_eq!(
+        resyncs(&cmds),
+        [Some("Song - Artist".to_string())],
+        "scene-go-on mid-song re-syncs the title, got {cmds:?}"
+    );
+    assert!(!shows_title(&cmds), "no ShowTitle, got {cmds:?}");
+}
+
+/// Design record 5859883842 item 3: the scene-on re-push applied no title
+/// window, so the wall showed a title outside it. A scene-on of a song
+/// played but not yet `Started` (no clock yet), in its first 1.5 s, or in
+/// its last 3.5 s shows none.
+#[tokio::test]
+async fn scene_go_on_outside_the_title_window_pushes_no_title() {
+    for window in [
+        Window::NotStarted,
+        Window::OtherSong,
+        Window::BeforeShow,
+        Window::AfterHide,
+    ] {
+        let (_engine, cmds) = after_scene_on(window).await;
+        assert!(
+            !shows_title(&cmds),
+            "{window:?}: no ShowTitle, got {cmds:?}"
+        );
+        assert_eq!(
+            resyncs(&cmds),
+            [None::<String>],
+            "{window:?}: the re-sync names no title, got {cmds:?}"
+        );
+    }
+}
+
+/// Review round 5 (🔵): a scene-on that SELECTS a song (its playlist was
+/// waiting for its scene) re-syncs twice: the Play's re-sync
+/// (`resync_after_play`), then the scene-on's own. The new song has no
+/// clock yet, so both name no title; the driver does one action for them
+/// (`take_queued` drops the first, or the second is a no-op).
+#[tokio::test]
+async fn a_scene_on_that_selects_a_song_resyncs_no_title_twice() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    sent(&mut rx);
+
+    engine.handle_scene_change(7, true).await;
+
+    let pp = &engine.pipelines[&7];
+    assert_eq!(
+        pp.state,
+        PlayState::Playing { video_id: 42 },
+        "the scene-on selected the song"
+    );
+    assert_eq!(pp.title_clock, None, "no `Started` yet");
+    let cmds = sent(&mut rx);
+    assert_eq!(
+        resyncs(&cmds),
+        [None::<String>, None],
+        "the Play's re-sync, then the scene-on's, got {cmds:?}"
+    );
+}
+
+/// Review round 1 (🟡 3): a scene-off cancels the song's title timers, and
+/// the #215 transition hold keeps the song playing. A scene-on then arms
+/// them again from the song's clock, for what is still ahead: before, a
+/// bounce in the first 1.5 s left the song with no title, and a later one
+/// with no hide 3.5 s before the end. A clock of another song arms nothing
+/// (that song's `Started` will).
+#[tokio::test]
+async fn a_scene_on_rearms_the_song_s_title_timers_for_what_is_ahead() {
+    for (window, expected) in [
+        (Window::BeforeShow, (true, true)),
+        (Window::Due, (false, true)),
+        (Window::AfterHide, (false, false)),
+        (Window::OtherSong, (false, false)),
+        (Window::NotStarted, (false, false)),
+    ] {
+        let (mut engine, _cmds) = after_scene_on(window).await;
+        assert_eq!(
+            timers(&engine),
+            expected,
+            "{window:?}: (show, hide) timers armed"
+        );
+        engine.pipelines.get_mut(&7).unwrap().cancel_title_timers();
+    }
+}
+
+/// The timers are armed only for an instant still AHEAD: at the show or
+/// hide instant itself, the recovery's clock already says so. Every clock
+/// here has a title window (its hide point after its show point): a hide
+/// point AT the show point is a clock with no window, which arms nothing
+/// before either comparison is reached (review rounds 4-5).
+#[tokio::test]
+async fn title_timers_are_armed_only_for_instants_still_ahead() {
+    let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
+    let now = tokio::time::Instant::now();
+    let hour = std::time::Duration::from_secs(3600);
+    engine.pipelines.get_mut(&7).unwrap().title_clock = Some(TitleClock {
+        video_id: 42,
+        show_at: now,
+        hide_at: Some(now + hour),
+    });
+    engine.arm_title_timers(7, now);
+    assert_eq!(
+        timers(&engine),
+        (false, true),
+        "at the show instant: hide only"
+    );
+    engine.arm_title_timers(7, now + hour);
+    assert_eq!(timers(&engine), (false, false), "at the hide instant: none");
+
+    engine.pipelines.get_mut(&7).unwrap().title_clock = Some(TitleClock {
+        video_id: 42,
+        show_at: now + hour,
+        hide_at: Some(now + 2 * hour),
+    });
+    engine.arm_title_timers(7, now);
+    assert_eq!(timers(&engine), (true, true), "both ahead: both armed");
+    engine.pipelines.get_mut(&7).unwrap().cancel_title_timers();
+}
+
+/// Review round 2 (🔵): arming replaces the timers it finds, so a caller
+/// that did not cancel first never leaves an old timer to fire later (a stale
+/// HideTitle into the next song). (The clock hides an hour after its show
+/// point: review round 4, see above.)
+#[tokio::test]
+async fn arming_the_title_timers_aborts_the_ones_it_replaces() {
+    let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
+    let now = tokio::time::Instant::now();
+    let hour = std::time::Duration::from_secs(3600);
+    engine.pipelines.get_mut(&7).unwrap().title_clock = Some(TitleClock {
+        video_id: 42,
+        show_at: now + hour,
+        hide_at: Some(now + 2 * hour),
+    });
+    engine.arm_title_timers(7, now);
+    let pp = &engine.pipelines[&7];
+    let first = (
+        pp.title_show_abort.clone().expect("show timer"),
+        pp.title_hide_abort.clone().expect("hide timer"),
+    );
+
+    engine.arm_title_timers(7, now);
+
+    // An abort lands on the task's next poll: bounded, it never hangs.
+    for _ in 0..200 {
+        if first.0.is_finished() && first.1.is_finished() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert!(
+        first.0.is_finished() && first.1.is_finished(),
+        "the replaced show and hide timers were aborted"
+    );
+    assert_eq!(timers(&engine), (true, true), "the new ones are armed");
+    engine.pipelines.get_mut(&7).unwrap().cancel_title_timers();
+}
+
+/// Review round 2 (🔵): a song change to the SAME video (a skip in a
+/// single-video playlist, Loop's replay, a re-picked or resumed song, a
+/// Previous) kept the old song's clock until the new `Started`. The title was
+/// named at once, and a scene-on re-armed the old instants. Every Play clears
+/// the clock; the new `Started` fixes the new one. Review round 3 (🔵): it
+/// cancels the old song's timers too, so a skipped song's pending show timer
+/// cannot push its title before the new `Started`.
+#[tokio::test]
+async fn every_play_of_a_song_clears_the_last_song_s_title_clock() {
+    for how in ["skip", "loop", "play video", "previous"] {
+        let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
+        play(&mut engine, 7, 42, Window::BeforeShow);
+        engine.arm_title_timers(7, tokio::time::Instant::now());
+        assert_eq!(timers(&engine), (true, true), "{how}: the old timers armed");
+        match how {
+            "skip" => engine.handle_command(7, PlayEvent::Skip).await,
+            "loop" => {
+                engine
+                    .handle_command(7, PlayEvent::SetMode(PlaybackMode::Loop))
+                    .await;
+                engine.handle_command(7, PlayEvent::VideoEnded).await;
+            }
+            "play video" => engine.handle_play_video(7, 42, None).await,
+            _ => {
+                engine.pipelines.get_mut(&7).unwrap().history.push_back(42);
+                engine.handle_previous(7).await;
+            }
+        }
+        let pp = &engine.pipelines[&7];
+        assert_eq!(
+            pp.state,
+            PlayState::Playing { video_id: 42 },
+            "{how}: the same video plays again"
+        );
+        assert_eq!(pp.title_clock, None, "{how}: the old song's clock is gone");
+        assert_eq!(
+            timers(&engine),
+            (false, false),
+            "{how}: the old song's timers are cancelled"
+        );
+    }
+}
+
+/// Review round 3 (🔵): a resume (`handle_play_video` with a position, the
+/// manual /play after a pause) starts the song mid-way, but its clock ran
+/// from `Started` over the FULL duration: the hide point came late by the
+/// resume position (the hide timer had this gap before #217 addendum 3 too).
+/// The clock counts the time left to play.
+#[tokio::test]
+async fn a_resumed_song_s_clock_hides_3_5_s_before_its_real_end() {
+    let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::OtherSong);
+    engine.handle_play_video(7, 42, Some(60_000)).await;
+
+    engine
+        .handle_pipeline_event(
+            7,
+            PipelineEvent::Started {
+                duration_ms: SONG_MS,
+            },
+        )
+        .await;
+
+    let clock = engine.pipelines[&7].title_clock.expect("the song's clock");
+    assert_eq!(
+        clock.hide_at.expect("120 s left: it hides") - clock.show_at,
+        std::time::Duration::from_millis(SONG_MS - 60_000 - 5_000),
+        "shown 1.5 s after the resume, hidden 3.5 s before the real end"
+    );
+    engine.pipelines.get_mut(&7).unwrap().cancel_title_timers();
+}
+
+/// On a RecoveryEvent the title of an on-program pipeline inside its title
+/// window is re-synced.
+#[tokio::test]
+async fn handle_resolume_recovery_reemits_title_for_active_pipeline() {
+    let cmds = recovery_commands(Window::Due).await;
+    assert_eq!(
+        resyncs(&cmds),
+        [Some("Song - Artist".to_string())],
+        "the title must be re-synced on Resolume recovery, got {cmds:?}"
+    );
+    assert!(!shows_title(&cmds), "no ShowTitle, got {cmds:?}");
+}
+
+/// Review round 2 of addendum 2: after the song's hide point (3.5 s before
+/// its end) a recovery must not show the title again: it would stay into the
+/// next song. The driver fires such a recovery when that very HideTitle got a
+/// 404 (Arena re-ids its clips on relaunch) and the refresh mapped the new
+/// ids; it retries the hide, and the re-sync must not undo it.
 #[tokio::test]
 async fn handle_resolume_recovery_does_not_re_show_a_title_the_song_end_hid() {
-    let cmds =
-        recovery_title_commands(Some(finished_timer().await), Some(finished_timer().await)).await;
-    assert!(
-        !shows_title(&cmds),
-        "a title the song end already hid is not re-shown, got {cmds:?}"
+    let cmds = recovery_commands(Window::AfterHide).await;
+    assert_eq!(
+        resyncs(&cmds),
+        [None::<String>],
+        "no title after the hide point, got {cmds:?}"
     );
     assert!(
         cmds.iter()
-            .any(|c| matches!(c, crate::resolume::ResolumeCommand::HideSubtitles)),
+            .any(|c| matches!(c, ResolumeCommand::HideSubtitles)),
         "the subtitle state is still re-sent, got {cmds:?}"
     );
 }
 
-/// Review round 3: the usual case, an Arena relaunch mid-song. The title was
-/// shown (the show timer ran) and the end-of-song hide is still pending: the
-/// recovery re-shows the title.
+/// The usual case, an Arena relaunch mid-song: the title is re-synced.
 #[tokio::test]
 async fn handle_resolume_recovery_re_shows_the_title_mid_song() {
-    let hide = pending_timer();
-    let cmds = recovery_title_commands(Some(finished_timer().await), Some(hide.clone())).await;
-    hide.abort();
-    assert!(
-        shows_title(&cmds),
-        "mid-song the title is re-shown, got {cmds:?}"
+    let cmds = recovery_commands(Window::Due).await;
+    assert_eq!(
+        resyncs(&cmds),
+        [Some("Song - Artist".to_string())],
+        "mid-song the title is due, got {cmds:?}"
     );
 }
 
-/// Review round 3: a recovery in the first 1.5 s of a song (e.g. the
-/// song-start subtitle clear got a 404 after a relaunch in the song gap).
-/// The pending show timer shows the title itself; a ShowTitle from the
-/// recovery too would run the fade twice, a blink.
+/// A recovery in the first 1.5 s of a song: the show timer shows the title
+/// itself, so the re-sync names none yet.
 #[tokio::test]
 async fn handle_resolume_recovery_leaves_a_pending_title_to_its_show_timer() {
-    let (show, hide) = (pending_timer(), pending_timer());
-    let cmds = recovery_title_commands(Some(show.clone()), Some(hide.clone())).await;
-    show.abort();
-    hide.abort();
-    assert!(
-        !shows_title(&cmds),
-        "the show timer shows the title, got {cmds:?}"
+    let cmds = recovery_commands(Window::BeforeShow).await;
+    assert_eq!(
+        resyncs(&cmds),
+        [None::<String>],
+        "not due before the show point, got {cmds:?}"
     );
+}
+
+/// Review round 1 (🔴 1): the recovery read the decoder position, reported
+/// every 500 ms, while the timers run on the clock of the song's `Started`.
+/// Near a boundary the two disagreed: a Resync naming the title just after
+/// the hide timer's HideTitle superseded it (the title stayed into the next
+/// song), a Resync naming none just after the show timer's ShowTitle hid it
+/// (no title for the song). The re-sync now reads the timers' own clock, not
+/// the last position report.
+#[tokio::test]
+async fn a_recovery_follows_the_title_clock_not_a_lagging_position() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::Due);
+    engine.pipelines.get_mut(&7).unwrap().cached_position_ms = 1_200;
+    engine.handle_resolume_recovery("127.0.0.1").await;
+    assert_eq!(
+        resyncs(&sent(&mut rx)),
+        [Some("Song - Artist".to_string())],
+        "past the show instant, whatever the last report (1.2 s) says"
+    );
+
+    play(&mut engine, 7, 42, Window::AfterHide);
+    engine.pipelines.get_mut(&7).unwrap().cached_position_ms = SONG_MS - 4_000;
+    engine.handle_resolume_recovery("127.0.0.1").await;
+    assert_eq!(
+        resyncs(&sent(&mut rx)),
+        [None::<String>],
+        "past the hide instant, whatever the last report (4 s before the end) says"
+    );
+}
+
+/// A song playing off program (its scene is not on the wall, e.g. held
+/// through a transition) has no title due, whatever its clock. Kills the
+/// `delete !` mutant of `on_air_clock` (the scene check).
+#[tokio::test]
+async fn handle_resolume_recovery_names_no_title_for_an_off_program_song() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::Due);
+    engine.pipelines[&7]
+        .scene_active
+        .store(false, Ordering::Release);
+    sent(&mut rx);
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    assert_eq!(
+        resyncs(&sent(&mut rx)),
+        [None::<String>],
+        "off program: no title"
+    );
+}
+
+/// Design record 5859883842 root cause 2: a recovery between one song's end
+/// and the next song's `Started` showed the next song's title early (both
+/// timer handles were `None`, which read as "mid-song"). Every Play clears
+/// the clock (`begin_play`) and the new `Started` fixes the next one, so the
+/// window stays closed until then.
+#[tokio::test]
+async fn handle_resolume_recovery_between_songs_shows_no_title() {
+    for window in [Window::OtherSong, Window::NotStarted] {
+        let cmds = recovery_commands(window).await;
+        assert_eq!(
+            resyncs(&cmds),
+            [None::<String>],
+            "{window:?}: the next song has not started, got {cmds:?}"
+        );
+    }
+}
+
+/// A program scene with two SongPlayer playlists: they share the one
+/// `#sp-title` clip, so the re-sync names one title, the highest playlist
+/// id's among those due, whatever the HashMap order.
+#[tokio::test]
+async fn a_recovery_with_two_playlists_on_program_resyncs_one_title() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song"), (9, 44, "Later")]).await;
+    play(&mut engine, 7, 42, Window::Due);
+    play(&mut engine, 9, 44, Window::Due);
+    sent(&mut rx);
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+    assert_eq!(
+        resyncs(&sent(&mut rx)),
+        [Some("Later - Artist".to_string())],
+        "both due: the highest playlist id's title"
+    );
+
+    play(&mut engine, 9, 44, Window::BeforeShow);
+    engine.handle_resolume_recovery("127.0.0.1").await;
+    assert_eq!(
+        resyncs(&sent(&mut rx)),
+        [Some("Song - Artist".to_string())],
+        "only playlist 7's title is due"
+    );
+}
+
+/// Review round 4 (🔵): a resume 5 s or less before a song's end (177 s of
+/// 180 s) had no hide point, so its show timer put the title up for the
+/// song's last seconds and it stayed past the end. Its clock now has no
+/// title window: no timer is armed, and it is never due.
+#[tokio::test]
+async fn a_resume_too_near_the_end_arms_no_title_timer() {
+    let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::OtherSong);
+    engine.handle_play_video(7, 42, Some(SONG_MS - 3_000)).await;
+
+    engine
+        .handle_pipeline_event(
+            7,
+            PipelineEvent::Started {
+                duration_ms: SONG_MS,
+            },
+        )
+        .await;
+
+    let clock = engine.pipelines[&7].title_clock.expect("the song's clock");
+    assert!(!clock.shows(), "3 s left: no title window");
+    assert!(!clock.open_at(clock.show_at), "never due");
+    assert_eq!(timers(&engine), (false, false), "no timer armed");
+}
+
+/// A clock with no title window arms neither timer, even with both of its
+/// instants ahead: the show timer would put up a title the window never had.
+#[tokio::test]
+async fn a_clock_with_no_title_window_arms_no_timer() {
+    let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
+    let now = tokio::time::Instant::now();
+    let hour = std::time::Duration::from_secs(3600);
+    engine.pipelines.get_mut(&7).unwrap().title_clock = Some(TitleClock {
+        video_id: 42,
+        show_at: now + hour,
+        hide_at: Some(now + hour),
+    });
+    engine.arm_title_timers(7, now);
+    assert_eq!(timers(&engine), (false, false), "no window: no timer");
+    engine.pipelines.get_mut(&7).unwrap().cancel_title_timers();
+}
+
+/// Review round 4 (🔵): a Play drops the old song's clock and cancels its
+/// hide timer (`begin_play`), and the new song's show timer comes 1.5 s
+/// after its `Started`. The old song's title stayed up over that gap, and a
+/// recovery in it would have hidden it (the timers and a Resync disagreed).
+/// On program, every Play now re-syncs the wall at once: no title is due,
+/// so the old one goes down.
+#[tokio::test]
+async fn a_play_on_program_takes_the_old_song_s_title_down_at_once() {
+    for how in ["skip", "loop", "play video", "previous"] {
+        let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+        play(&mut engine, 7, 42, Window::Due);
+        if how == "loop" {
+            engine
+                .handle_command(7, PlayEvent::SetMode(PlaybackMode::Loop))
+                .await;
+        }
+        sent(&mut rx);
+        match how {
+            "skip" => engine.handle_command(7, PlayEvent::Skip).await,
+            "loop" => engine.handle_command(7, PlayEvent::VideoEnded).await,
+            "play video" => engine.handle_play_video(7, 42, None).await,
+            _ => {
+                engine.pipelines.get_mut(&7).unwrap().history.push_back(42);
+                engine.handle_previous(7).await;
+            }
+        }
+        assert_eq!(
+            resyncs(&sent(&mut rx)),
+            [None::<String>],
+            "{how}: one re-sync, naming no title"
+        );
+    }
+}
+
+/// Off program, a Play re-syncs nothing: that playlist's title is not on the
+/// wall.
+#[tokio::test]
+async fn a_play_off_program_sends_no_title_resync() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::Due);
+    engine.pipelines[&7]
+        .scene_active
+        .store(false, Ordering::Release);
+    sent(&mut rx);
+
+    engine.handle_play_video(7, 42, None).await;
+
+    let cmds = sent(&mut rx);
+    assert!(resyncs(&cmds).is_empty(), "no re-sync, got {cmds:?}");
+}
+
+/// Review round 3: a failed read of the DUE title sends nothing, so a
+/// transient DB error never hides a title mid-song.
+#[tokio::test]
+async fn a_failed_read_of_the_due_title_sends_no_resync() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::Due);
+    sent(&mut rx);
+    engine.pool.close().await;
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    let cmds = sent(&mut rx);
+    assert!(resyncs(&cmds).is_empty(), "nothing re-synced, got {cmds:?}");
+}
+
+/// Review rounds 3 and 4: a failed read of a title that is NOT due does not
+/// matter (it is logged): the wall is still re-synced, naming no title.
+#[tokio::test]
+async fn a_failed_read_of_a_title_not_due_still_resyncs_the_wall() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::BeforeShow);
+    sent(&mut rx);
+    engine.pool.close().await;
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+
+    assert_eq!(
+        resyncs(&sent(&mut rx)),
+        [None::<String>],
+        "not due: the re-sync names no title"
+    );
+}
+
+/// A song's `Started` fixes its title clock (show 1.5 s after it, hide 3.5 s
+/// before the end) and arms both timers from it. It no longer resets the
+/// cached position: a Pause before the first Position report kept 0 and
+/// resumed the song from its start (review round 1, 🔵 4).
+#[tokio::test]
+async fn started_fixes_the_song_s_title_clock_and_arms_its_timers() {
+    let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
+    play(&mut engine, 7, 42, Window::OtherSong);
+    engine.pipelines.get_mut(&7).unwrap().cached_position_ms = 85_240;
+
+    engine
+        .handle_pipeline_event(
+            7,
+            PipelineEvent::Started {
+                duration_ms: SONG_MS,
+            },
+        )
+        .await;
+
+    let pp = &engine.pipelines[&7];
+    let clock = pp.title_clock.expect("the song's clock");
+    assert_eq!(clock.video_id, 42);
+    assert_eq!(
+        clock.hide_at.expect("a 180 s song hides") - clock.show_at,
+        std::time::Duration::from_millis(SONG_MS - 5_000),
+        "shown at +1.5 s, hidden 3.5 s before the end"
+    );
+    assert_eq!(timers(&engine), (true, true), "both timers armed");
+    assert_eq!(
+        engine.pipelines[&7].cached_position_ms, 85_240,
+        "the position is the pipeline's to report"
+    );
+    engine.pipelines.get_mut(&7).unwrap().cancel_title_timers();
 }

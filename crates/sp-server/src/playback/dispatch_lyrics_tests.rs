@@ -112,6 +112,8 @@ fn install_pipeline(
         last_resolume_subtitles_signature: None,
         last_lyrics_ws_signature: None,
         cached_position_ms: 0,
+        title_clock: None,
+        play_start_ms: 0,
         paused_at: None,
     };
     engine.pipelines.insert(playlist_id, pp);
@@ -274,10 +276,23 @@ async fn dispatch_lyrics_no_throttle() {
 
 // -- Resolume recovery re-emits the wall's display state (#217) -------------
 
+/// The subtitle commands a recovery sent. Its title part is one `Resync`
+/// (#217 addendum 3, pinned in `tests_scene_change.rs`); these tests read the
+/// subtitle state, so it is set aside.
+fn subtitle_commands(
+    resolume_rx: &mut mpsc::Receiver<crate::resolume::ResolumeCommand>,
+) -> Vec<crate::resolume::ResolumeCommand> {
+    let mut cmds = Vec::new();
+    while let Ok(cmd) = resolume_rx.try_recv() {
+        if !matches!(cmd, crate::resolume::ResolumeCommand::Resync { .. }) {
+            cmds.push(cmd);
+        }
+    }
+    cmds
+}
+
 /// A Playing, on-program pipeline with `lyrics` at `position_ms`, then a
-/// Resolume recovery. Returns the Resolume commands it sent. No `videos` row
-/// exists, so `push_title` sends no ShowTitle and only the subtitle state
-/// remains.
+/// Resolume recovery. Returns the subtitle commands it sent.
 async fn recovery_commands(
     lyrics: Option<LyricsState>,
     position_ms: u64,
@@ -290,11 +305,7 @@ async fn recovery_commands(
 
     engine.handle_resolume_recovery("127.0.0.1").await;
 
-    let mut cmds = Vec::new();
-    while let Ok(cmd) = resolume_rx.try_recv() {
-        cmds.push(cmd);
-    }
-    cmds
+    subtitle_commands(&mut resolume_rx)
 }
 
 #[tokio::test]
@@ -357,10 +368,7 @@ async fn resolume_recovery_never_hides_another_on_program_playlist_s_line() {
 
     engine.handle_resolume_recovery("127.0.0.1").await;
 
-    let mut cmds = Vec::new();
-    while let Ok(cmd) = resolume_rx.try_recv() {
-        cmds.push(cmd);
-    }
+    let cmds = subtitle_commands(&mut resolume_rx);
     match cmds.as_slice() {
         [crate::resolume::ResolumeCommand::ShowSubtitles { en, .. }] => {
             assert!(en.contains("alpha"), "got: {en}");
@@ -373,8 +381,8 @@ async fn resolume_recovery_never_hides_another_on_program_playlist_s_line() {
 /// wall's subtitle clips should be blank. The hide sent when the playlist went
 /// off program can itself have been skipped against the host's empty clip map
 /// during the outage, so the recovery clears them (an instant text clear; the
-/// title is left alone, since a HideTitle fades from full opacity and would
-/// flash a stale title that is already hidden).
+/// title goes through the Resync, which the driver turns into an instant hide
+/// only when a title is up, #217 addendum 3).
 #[tokio::test]
 async fn resolume_recovery_clears_the_subtitles_without_an_on_program_playlist() {
     let (mut engine, mut resolume_rx, _ws_rx) = build_engine().await;
@@ -383,10 +391,7 @@ async fn resolume_recovery_clears_the_subtitles_without_an_on_program_playlist()
 
     engine.handle_resolume_recovery("127.0.0.1").await;
 
-    let mut cmds = Vec::new();
-    while let Ok(cmd) = resolume_rx.try_recv() {
-        cmds.push(cmd);
-    }
+    let cmds = subtitle_commands(&mut resolume_rx);
     assert!(
         matches!(
             cmds.as_slice(),

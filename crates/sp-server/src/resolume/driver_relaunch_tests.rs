@@ -13,6 +13,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::not_ready_tests::{arena, composition_fetches, composition_sequence, drain};
 use super::*;
+use crate::resolume::title_state::{TitleState, WallTitle};
 use crate::resolume::{RecoveryEvent, ResolumeCommand, SUBS_TOKEN, TITLE_TOKEN};
 
 fn secs(s: u64) -> Duration {
@@ -20,7 +21,7 @@ fn secs(s: u64) -> Duration {
 }
 
 /// A composition with one text clip per `(token, clip id, text param id)`.
-fn composition(clips: &[(&str, i64, i64)]) -> serde_json::Value {
+pub(super) fn composition(clips: &[(&str, i64, i64)]) -> serde_json::Value {
     let clips: Vec<serde_json::Value> = clips
         .iter()
         .map(|(token, clip_id, param_id)| {
@@ -35,7 +36,7 @@ fn composition(clips: &[(&str, i64, i64)]) -> serde_json::Value {
 }
 
 /// `/composition` always answers `body`.
-async fn composition_always(server: &MockServer, body: serde_json::Value) {
+pub(super) async fn composition_always(server: &MockServer, body: serde_json::Value) {
     Mock::given(method("GET"))
         .and(path("/api/v1/composition"))
         .respond_with(ResponseTemplate::new(200).set_body_json(body))
@@ -45,7 +46,7 @@ async fn composition_always(server: &MockServer, body: serde_json::Value) {
 
 /// A `PUT` on `route` answers `status`. An unmounted route answers 404 too
 /// (wiremock's default), so every route a test pushes to is mounted.
-async fn put_answers(server: &MockServer, route: &str, status: u16) {
+pub(super) async fn put_answers(server: &MockServer, route: &str, status: u16) {
     Mock::given(method("PUT"))
         .and(path(route))
         .respond_with(ResponseTemplate::new(status))
@@ -54,7 +55,7 @@ async fn put_answers(server: &MockServer, route: &str, status: u16) {
 }
 
 /// The `value` of every text PUT to param `param_id`, in order.
-async fn texts_put(server: &MockServer, param_id: i64) -> Vec<String> {
+pub(super) async fn texts_put(server: &MockServer, param_id: i64) -> Vec<String> {
     let route = format!("/api/v1/parameter/by-id/{param_id}");
     server
         .received_requests()
@@ -82,7 +83,7 @@ async fn opacity_puts(server: &MockServer, clip_id: i64) -> usize {
 }
 
 /// The opacity of every PUT to clip `clip_id`, in order.
-async fn opacities_put(server: &MockServer, clip_id: i64) -> Vec<f64> {
+pub(super) async fn opacities_put(server: &MockServer, clip_id: i64) -> Vec<f64> {
     let route = format!("/api/v1/composition/clips/by-id/{clip_id}");
     server
         .received_requests()
@@ -109,7 +110,7 @@ fn subtitle(en: &str) -> ResolumeCommand {
 
 /// A driver whose startup refresh at `base` mapped the composition's first
 /// answer (the ids from before the relaunch).
-async fn mapped_driver(
+pub(super) async fn mapped_driver(
     server: &MockServer,
     base: Instant,
 ) -> (HostDriver, broadcast::Receiver<RecoveryEvent>) {
@@ -181,6 +182,9 @@ async fn a_404_on_a_title_push_is_re_pushed_by_the_recovery_event_not_retried() 
         composition(&[(TITLE_TOKEN, 200, 1900)]),
     )
     .await;
+    // The startup state is Unknown, so the ShowTitle is a Replace: its cut to
+    // opacity 0 answers, and the text PUT on the dead param is the 404.
+    put_answers(&server, "/api/v1/composition/clips/by-id/100", 204).await;
     put_answers(&server, "/api/v1/parameter/by-id/900", 404).await;
     put_answers(&server, "/api/v1/parameter/by-id/1900", 204).await;
     put_answers(&server, "/api/v1/composition/clips/by-id/200", 204).await;
@@ -218,9 +222,10 @@ async fn a_404_on_a_title_push_is_re_pushed_by_the_recovery_event_not_retried() 
 /// retried on the new clip id AT ONCE (opacity 0, then the text cleared):
 /// the relaunched clip holds whatever Arena's saved composition restored,
 /// possibly at opacity 0, and `hide_title`'s fade starts at FULL opacity, a
-/// 1 s flash of that stale text (review round 3). The RecoveryEvent's re-push
-/// sends no hide of its own, and it does not re-show a title whose
-/// end-of-song hide ran
+/// 1 s flash of that stale text (review round 3). The new clip ids made the
+/// driver's title state `Unknown`, which is why the retry hides at once
+/// (#217 addendum 3). The RecoveryEvent's re-sync names no title after the
+/// song's hide point
 /// (`handle_resolume_recovery_does_not_re_show_a_title_the_song_end_hid`).
 #[tokio::test]
 async fn a_404_on_a_clip_opacity_push_marks_the_map_stale_too() {
@@ -235,6 +240,15 @@ async fn a_404_on_a_clip_opacity_push_marks_the_map_stale_too() {
     put_answers(&server, "/api/v1/composition/clips/by-id/200", 204).await;
     put_answers(&server, "/api/v1/parameter/by-id/1900", 204).await;
     let (mut driver, mut rx) = mapped_driver(&server, Instant::now()).await;
+    // The song's title is up, so its HideTitle fades out (#217 addendum 3:
+    // only a title known to be up fades).
+    driver.title = WallTitle::at(
+        TitleState::Shown("Song - Artist".into()),
+        vec![ClipInfo {
+            clip_id: 100,
+            text_param_id: 900,
+        }],
+    );
 
     driver.handle_command(ResolumeCommand::HideTitle).await;
 
@@ -555,6 +569,13 @@ async fn a_single_failed_composition_then_an_ok_probe_fires_no_recovery_event() 
         .mount(&server)
         .await;
     composition_always(&server, ready).await;
+    // No relaunch: Arena still has the param the flip's staleness probe asks
+    // for (#217 addendum 3; an unmounted route would answer 404).
+    Mock::given(method("GET"))
+        .and(path("/api/v1/parameter/by-id/900"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
     let base = Instant::now();
     let (mut driver, mut rx) = mapped_driver(&server, base).await;
 

@@ -63,12 +63,10 @@ pub(crate) fn clips_for_title(driver: &HostDriver) -> Option<Vec<ClipInfo>> {
         .cloned()
 }
 
-/// Show title across all `#sp-title` clips in parallel.
-pub async fn show_title(
-    driver: &mut HostDriver,
-    song: &str,
-    artist: &str,
-) -> Result<(), anyhow::Error> {
+/// Show `text` (a `format_title_text` title) across all `#sp-title` clips in
+/// parallel. It takes the formatted text because the driver compares that
+/// text with its title state (#217 addendum 3).
+pub async fn show_title(driver: &mut HostDriver, text: &str) -> Result<(), anyhow::Error> {
     let Some(clips) = clips_for_title(driver) else {
         debug!(
             token = TITLE_TOKEN,
@@ -77,7 +75,6 @@ pub async fn show_title(
         return Ok(());
     };
 
-    let text = format_title_text(song, artist);
     if text.is_empty() {
         return Ok(());
     }
@@ -85,7 +82,7 @@ pub async fn show_title(
     driver.ensure_endpoint().await?;
     let driver_ref: &HostDriver = driver;
 
-    set_text_all(driver_ref, &clips, &text).await?;
+    set_text_all(driver_ref, &clips, text).await?;
     info!(
         token = TITLE_TOKEN,
         count = clips.len(),
@@ -107,6 +104,27 @@ pub async fn show_title(
         "title fade-in complete"
     );
     Ok(())
+}
+
+/// Show `text` on `#sp-title` clips NOT known to be hidden (another title
+/// up, a relaunched clip, an interrupted fade): opacity 0 at once, then the
+/// usual text + fade-in. `show_title` alone writes the new text at the clips'
+/// current opacity before its fade restarts from 5 %: a blink (#217
+/// addendum 3 review round 1).
+pub async fn replace_title(driver: &mut HostDriver, text: &str) -> Result<(), anyhow::Error> {
+    let Some(clips) = clips_for_title(driver) else {
+        debug!(
+            token = TITLE_TOKEN,
+            "no Resolume clips found, skipping replace_title"
+        );
+        return Ok(());
+    };
+    if text.is_empty() {
+        return Ok(());
+    }
+    driver.ensure_endpoint().await?;
+    set_opacity_all(driver, &clips, 0.0).await?;
+    show_title(driver, text).await
 }
 
 /// Hide title across all `#sp-title` clips in parallel.
@@ -433,7 +451,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        show_title(&mut driver, "My Song", "Artist Name")
+        show_title(&mut driver, &format_title_text("My Song", "Artist Name"))
             .await
             .expect("show_title should succeed");
 
@@ -489,7 +507,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        show_title(&mut driver, "Song", "Artist").await.unwrap();
+        show_title(&mut driver, &format_title_text("Song", "Artist"))
+            .await
+            .unwrap();
 
         let received = server.received_requests().await.unwrap();
 
@@ -559,7 +579,9 @@ mod tests {
     async fn show_title_with_no_clips_is_no_op() {
         let (server, mut driver) = spawn_mock_driver_with_clips(vec![]).await;
 
-        show_title(&mut driver, "Song", "Artist").await.unwrap();
+        show_title(&mut driver, &format_title_text("Song", "Artist"))
+            .await
+            .unwrap();
 
         let received = server.received_requests().await.unwrap();
         assert_eq!(received.len(), 0, "no requests should be sent");
@@ -622,7 +644,9 @@ mod tests {
         let (server, mut driver) = spawn_mock_driver_with_clips(clips).await;
 
         // No mocks - empty text should produce no requests.
-        show_title(&mut driver, "", "").await.unwrap();
+        show_title(&mut driver, &format_title_text("", ""))
+            .await
+            .unwrap();
 
         let received = server.received_requests().await.unwrap();
         assert_eq!(received.len(), 0, "empty text should send no requests");

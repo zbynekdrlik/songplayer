@@ -769,22 +769,15 @@ pub async fn start(
     }
     engine.start_program(program_bus, &shutdown_tx).await;
 
-    // Subscribe to RecoveryEvent from the Resolume registry and forward to the
-    // engine via EngineCommand::ResolumeRecovered so the engine can re-emit
-    // ShowTitle + ShowSubtitles after a host comes back online.
-    let mut recovery_rx = resolume_registry.subscribe_recovery();
-    let recovery_engine_tx = engine_tx.clone();
-    let mut recovery_shutdown = shutdown_tx.subscribe();
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                Ok(event) = recovery_rx.recv() => {
-                    let _ = recovery_engine_tx.send(EngineCommand::ResolumeRecovered { host: event.host }).await;
-                }
-                _ = recovery_shutdown.recv() => break,
-            }
-        }
-    });
+    // Forward the Resolume registry's RecoveryEvents to the engine
+    // (EngineCommand::ResolumeRecovered: it re-syncs the title and the line
+    // after a host comes back); it survives a lagged receiver (#217 addendum 3).
+    let recovery_rx = resolume_registry.subscribe_recovery();
+    tokio::spawn(playback::recovery::forward_recovery_events(
+        recovery_rx,
+        engine_tx.clone(),
+        shutdown_tx.subscribe(),
+    ));
 
     // Engine subscribes to the download worker's broadcast so that
     // `processed:<youtube_id>` events can rewake pipelines stuck in
