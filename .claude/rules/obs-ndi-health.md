@@ -202,10 +202,12 @@ output as a fault.
 `handle_health_snapshot` runs on the engine but the engine struct lives in `playback/mod.rs` (often owned by a parallel lane). Compose new per-pipeline state into `NdiHealthRegistry` (the `Arc` the engine already holds) instead of adding a `PlaybackEngine` field — the engine reaches it via `self.ndi_health_registry.<method>()`. `handle_health_snapshot` is sync + `mutants::skip`; send `ObsCommand` with `try_send` (channel cap 64).
 
 ## The OBS client serves the #213 remote control (`ObsCommand::Remote`, `ObsEvent::Raw`)
-- `ObsCommand::Remote(remote_call::RemoteCall)` runs a forwarded request or
-  a scene → playlists lookup (`check_scene_items`) for the Companion facade,
-  on this ONE connection (`obs/remote_call.rs`). A call whose requester gave
-  up (`reply.is_closed()`) is skipped.
+- `ObsCommand::Remote(remote_call::RemoteCall)` runs a forwarded request
+  for the Companion facade, on this ONE connection (`obs/remote_call.rs`). A
+  call whose requester gave up (`reply.is_closed()`) is skipped. #221
+  deleted the facade's scene → playlists lookup (`ScenePlaylists`): the
+  facade decides from SongPlayer's own playlists, so `remote_call::run` no
+  longer takes the `NdiSourceMap`.
 - `ObsCommand` is no longer `Clone`: it holds a oneshot sender.
 - The reader broadcasts EVERY op=5 event as `ObsEvent::Raw { event_type,
   event_data }` on `obs_event_tx`. Any exhaustive `match` on `ObsEvent` needs
@@ -313,9 +315,9 @@ only) never repaired it.
   nothing, as it always did; a timeout / close / reply without `sceneItems`
   at ANY depth fails the whole lookup. Promoting the group refusal to a
   failure would leave every scene holding a group "lookup failed" forever.
-- The #213 facade: `remote_call` answers `ScenePlaylists` only on a
-  successful lookup; a failed one drops the reply, which the facade reads
-  as `lookup_failed` (its own rule).
+- (#221: the facade's own lookup, `ScenePlaylists`, and its
+  `lookup_failed` reason are deleted; only the client's scene detection
+  looks scenes up.)
 - Test: `tests/scene_lookup_failure.rs` — the `FakeObsServer` knobs
   `drop_scene_item_lists` (no answer, still logged in `requests` with
   `"dropped": true`), `omit_scene_items` (success, no list) and
