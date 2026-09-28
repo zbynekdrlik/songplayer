@@ -413,7 +413,8 @@ async fn switch(facade: &Facade, scene: &str, via: Via) -> Reply {
     };
     match switch_scene(&ctx, scene, via).await {
         Switched::Cut => {
-            studio_events::announce_transition(&facade.bus, &facade.events);
+            let max = facade.transition_end_max;
+            studio_events::announce_transition(&facade.bus, &facade.events, max);
             Reply::ok(None)
         }
         Switched::Kept => Reply::ok(None),

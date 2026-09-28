@@ -132,10 +132,15 @@ pub fn transition_name(kind: TransitionKind) -> &'static str {
 }
 
 /// A facade switch cut `SP-program`: emit `SceneTransitionStarted` now and
-/// `SceneTransitionEnded` once the program's transition window is served
-/// (see the module doc). Started is sent before the waiter exists, so every
-/// client gets it before Ended.
-pub fn announce_transition(bus: &Arc<ProgramBus>, events: &broadcast::Sender<FacadeEvent>) {
+/// `SceneTransitionEnded` once the program's transition window is served, at
+/// most `max` later (the facade's [`TRANSITION_END_MAX_WAIT`]; see the module
+/// doc). Started is sent before the waiter exists, so every client gets it
+/// before Ended.
+pub fn announce_transition(
+    bus: &Arc<ProgramBus>,
+    events: &broadcast::Sender<FacadeEvent>,
+    max: Duration,
+) {
     let name = transition_name(bus.status().transition.kind);
     let _ = events.send(FacadeEvent::transition(TRANSITION_STARTED, name));
     tokio::spawn(end_transition(
@@ -143,7 +148,7 @@ pub fn announce_transition(bus: &Arc<ProgramBus>, events: &broadcast::Sender<Fac
         events.clone(),
         name,
         TRANSITION_END_POLL,
-        TRANSITION_END_MAX_WAIT,
+        max,
     ));
 }
 

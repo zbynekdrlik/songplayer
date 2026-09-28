@@ -177,7 +177,7 @@ async fn a_window_nobody_serves_ends_the_wait_after_max() {
 async fn a_switch_announces_started_now_and_ended_once_the_window_is_served() {
     let bus = fading_bus();
     let (tx, mut rx) = broadcast::channel(16);
-    announce_transition(&bus, &tx);
+    announce_transition(&bus, &tx, TRANSITION_END_MAX_WAIT);
     // Started is sent before the waiter exists.
     assert_eq!(
         rx.try_recv(),
@@ -201,7 +201,7 @@ async fn a_window_nobody_serves_is_announced_ended_after_the_max_wait() {
     let bus = fading_bus();
     let (tx, mut rx) = broadcast::channel(16);
     let start = Instant::now();
-    announce_transition(&bus, &tx);
+    announce_transition(&bus, &tx, TRANSITION_END_MAX_WAIT);
     assert_eq!(
         rx.try_recv(),
         Ok(FacadeEvent::transition(TRANSITION_STARTED, "Fade"))

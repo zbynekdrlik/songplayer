@@ -64,7 +64,7 @@ use crate::obs::remote_call::RemoteCall;
 use crate::obs::{ObsCommand, ObsEvent};
 use crate::playback::program_bus::ProgramBus;
 use crate::playback::program_on_air::{OnAir, program_scene_name};
-use studio_events::{FACADE_EVENTS_CAPACITY, FacadeEvent};
+use studio_events::{FACADE_EVENTS_CAPACITY, FacadeEvent, TRANSITION_END_MAX_WAIT};
 
 /// How often the settings task re-reads the settings.
 pub const REMOTE_SETTINGS_POLL: Duration = Duration::from_secs(5);
@@ -473,6 +473,10 @@ pub struct Facade {
     /// #221 L3: the events the facade emits itself (`studio_events`), to
     /// every session of this listener.
     events: broadcast::Sender<FacadeEvent>,
+    /// #221 L3: how long a switch's `SceneTransitionEnded` waits for the
+    /// window at most: [`TRANSITION_END_MAX_WAIT`] (10 minutes in tests, so a
+    /// stalled test runner never ends a fade's wait early — review round 2).
+    transition_end_max: Duration,
 }
 
 impl Facade {
@@ -489,6 +493,7 @@ impl Facade {
             password,
             identify_timeout: IDENTIFY_TIMEOUT,
             events: broadcast::channel(FACADE_EVENTS_CAPACITY).0,
+            transition_end_max: TRANSITION_END_MAX_WAIT,
         })
     }
 
@@ -508,6 +513,7 @@ impl Facade {
             password,
             identify_timeout,
             events: broadcast::channel(FACADE_EVENTS_CAPACITY).0,
+            transition_end_max: Duration::from_secs(600),
         })
     }
 
