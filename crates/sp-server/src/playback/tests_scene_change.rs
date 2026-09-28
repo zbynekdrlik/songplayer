@@ -308,9 +308,9 @@ async fn scene_go_on_refreshes_title_for_already_playing() {
 }
 
 /// Design record 5859883842 item 3: the scene-on re-push applied no title
-/// window, so the wall showed a title outside it. A scene-on before the
-/// song's `Started` (the scene-on itself selected it: no clock yet), in its
-/// first 1.5 s, or in its last 3.5 s shows none.
+/// window, so the wall showed a title outside it. A scene-on of a song
+/// played but not yet `Started` (no clock yet), in its first 1.5 s, or in
+/// its last 3.5 s shows none.
 #[tokio::test]
 async fn scene_go_on_outside_the_title_window_pushes_no_title() {
     for window in [
@@ -330,6 +330,33 @@ async fn scene_go_on_outside_the_title_window_pushes_no_title() {
             "{window:?}: the re-sync names no title, got {cmds:?}"
         );
     }
+}
+
+/// Review round 5 (🔵): a scene-on that SELECTS a song (its playlist was
+/// waiting for its scene) re-syncs twice: the Play's re-sync
+/// (`resync_after_play`), then the scene-on's own. The new song has no
+/// clock yet, so both name no title; the driver does one action for them
+/// (`take_queued` drops the first, or the second is a no-op).
+#[tokio::test]
+async fn a_scene_on_that_selects_a_song_resyncs_no_title_twice() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    sent(&mut rx);
+
+    engine.handle_scene_change(7, true).await;
+
+    let pp = &engine.pipelines[&7];
+    assert_eq!(
+        pp.state,
+        PlayState::Playing { video_id: 42 },
+        "the scene-on selected the song"
+    );
+    assert_eq!(pp.title_clock, None, "no `Started` yet");
+    let cmds = sent(&mut rx);
+    assert_eq!(
+        resyncs(&cmds),
+        [None::<String>, None],
+        "the Play's re-sync, then the scene-on's, got {cmds:?}"
+    );
 }
 
 /// Review round 1 (🟡 3): a scene-off cancels the song's title timers, and
@@ -358,22 +385,28 @@ async fn a_scene_on_rearms_the_song_s_title_timers_for_what_is_ahead() {
 }
 
 /// The timers are armed only for an instant still AHEAD: at the show or
-/// hide instant itself, the recovery's clock already says so. (Review round
-/// 4: the "both ahead" clock hides an hour after its show point, since a
-/// hide point AT the show point is now a clock with no title window.)
+/// hide instant itself, the recovery's clock already says so. Every clock
+/// here has a title window (its hide point after its show point): a hide
+/// point AT the show point is a clock with no window, which arms nothing
+/// before either comparison is reached (review rounds 4-5).
 #[tokio::test]
 async fn title_timers_are_armed_only_for_instants_still_ahead() {
     let (mut engine, _rx) = test_engine(&[(7, 42, "Song")]).await;
     let now = tokio::time::Instant::now();
     let hour = std::time::Duration::from_secs(3600);
-    let pp = engine.pipelines.get_mut(&7).unwrap();
-    pp.title_clock = Some(TitleClock {
+    engine.pipelines.get_mut(&7).unwrap().title_clock = Some(TitleClock {
         video_id: 42,
         show_at: now,
-        hide_at: Some(now),
+        hide_at: Some(now + hour),
     });
     engine.arm_title_timers(7, now);
-    assert_eq!(timers(&engine), (false, false), "at the instants: none");
+    assert_eq!(
+        timers(&engine),
+        (false, true),
+        "at the show instant: hide only"
+    );
+    engine.arm_title_timers(7, now + hour);
+    assert_eq!(timers(&engine), (false, false), "at the hide instant: none");
 
     engine.pipelines.get_mut(&7).unwrap().title_clock = Some(TitleClock {
         video_id: 42,
