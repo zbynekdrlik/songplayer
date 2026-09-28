@@ -497,6 +497,13 @@ the test that kills each one BEFORE CI's mutation gate runs.
   is observable (#217 addendum 2 review round 3).
 - A mutation that cannot compile (`&&`→`||` inside a let-chain) is
   "unviable": it costs a build but cannot fail the gate.
+- **A binary op inside a `const` initializer IS mutated** (#221 review
+  round 5). `Duration::from_secs(2 * DEFAULT_RESPONSE_TIMEOUT.as_secs())`
+  listed `*`→`+` and `*`→`/`; with the 2 s default the `+` mutant is
+  EQUIVALENT (2 + 2 = 2 × 2) and would survive the gate. Write such a
+  constant as a literal (`Duration::from_secs(4)`) and pin the relation in
+  a test (`MIRROR_EXTRA_WAIT == DEFAULT_RESPONSE_TIMEOUT * 2`; a runtime
+  `Duration * u32` is fine there, it is not `const`).
 - `(at - plane) % ds` where `plane` is a multiple of `ds` (a plane or row
   edge): the `-`→`+` mutant gives the SAME remainder, so it is equivalent
   and survives. Subtract ONCE into a local (`let offset = …; (offset / ds,
