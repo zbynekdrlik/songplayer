@@ -13,8 +13,11 @@ use tokio::sync::broadcast::error::TryRecvError;
 use tokio::time::Instant;
 
 use super::*;
+use crate::playback::program_bus::CUT_LEAD_SLOTS;
 use crate::playback::program_bus::ProgramBus;
-use crate::playback::program_transition::{SpecSource, TransitionKind, TransitionSpec};
+use crate::playback::program_transition::{
+    CUE_WAIT_MAX_SLOTS, MAX_TRANSITION_SLOTS, SpecSource, TransitionKind, TransitionSpec,
+};
 use crate::playback::wallclock::utc_now_100ns;
 
 const POLL: Duration = Duration::from_millis(20);
@@ -82,6 +85,11 @@ fn the_events_have_obs_websockets_shapes() {
     // Review round 3: the production Ended bound outlasts the longest window
     // the bus opens (~10.6 s: the 10 s fade cap after the lead + cue wait).
     assert_eq!(TRANSITION_END_MAX_WAIT, Duration::from_secs(15));
+    // Round 4: pin that relation, not only the literal — the lead slot, the
+    // cue gate's wait and the longest fade, plus one slot to be served.
+    let slots = CUT_LEAD_SLOTS as u64 + u64::from(CUE_WAIT_MAX_SLOTS + MAX_TRANSITION_SLOTS) + 1;
+    let longest = Duration::from_millis(slots * 1000 / sp_core::genlock::GENLOCK_GRID_FPS as u64);
+    assert!(TRANSITION_END_MAX_WAIT > longest, "{longest:?}");
     assert_eq!(transition_name(TransitionKind::Cut), "Cut");
     assert_eq!(transition_name(TransitionKind::Fade), "Fade");
 }
