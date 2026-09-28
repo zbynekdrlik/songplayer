@@ -132,6 +132,24 @@ impl Rig {
         while self.events.try_recv().is_ok() {}
     }
 
+    /// Wait (at most 20 s) until the client's state satisfies `done`.
+    async fn until(&self, what: &str, done: impl Fn(&obs::ObsState) -> bool) {
+        let deadline = tokio::time::Instant::now() + TIMEOUT;
+        while !done(&self.state.read().await) {
+            assert!(tokio::time::Instant::now() < deadline, "never: {what}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Wait (at most 20 s) until the fake cg OBS's state satisfies `done`.
+    async fn fake_until(&self, what: &str, done: impl Fn(&FakeObsState) -> bool) {
+        let deadline = tokio::time::Instant::now() + TIMEOUT;
+        while !done(&self.fake.state().await) {
+            assert!(tokio::time::Instant::now() < deadline, "never: {what}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     /// The `GetSceneItemList` requests cg OBS received for `scene`.
     async fn lookups_of(&self, scene: &str) -> usize {
         self.fake
@@ -259,5 +277,72 @@ async fn a_group_on_the_program_scene_is_refused_below_the_top_and_adds_nothing(
         "the group was looked up and refused"
     );
     assert_eq!(rig.state.read().await.lookup_failed, None);
+    rig.stop().await;
+}
+
+/// Review round 2: a poll whose `GetCurrentProgramScene` answered BEFORE an
+/// event overtook it must never outrank that event's apply. Here the poll
+/// reads sp-fast (whose lookup keeps failing, so it looks sp-fast up again),
+/// cg OBS then switches to sp-slow, and sp-slow's lookup answers after the
+/// poll's stale relookup. The client must end on sp-slow from THAT answer.
+/// sp-slow's later lookups stay held, so only the event's answer can get it
+/// there (a reconcile never answers).
+#[tokio::test]
+async fn a_poll_read_an_event_overtook_never_rolls_the_scene_back() {
+    let mut rig = Rig::start().await;
+    // sp-fast's lookups are refused (a sticky failure): the poll relooks it up.
+    rig.fake
+        .update_state(|s| s.groups = vec!["sp-fast".to_string()])
+        .await;
+    rig.fake.push_program_scene_change("sp-fast").await;
+    rig.until("sp-fast's lookup failed", |s| {
+        s.lookup_failed.as_deref() == Some("sp-fast")
+    })
+    .await;
+    // The poll's next read of cg OBS's program answers sp-fast, held.
+    rig.fake.update_state(|s| s.hold_program_scene = true).await;
+    rig.fake_until("a held program read", |s| {
+        s.held
+            .iter()
+            .any(|r| r["d"]["requestType"] == "GetCurrentProgramScene")
+    })
+    .await;
+    // cg OBS switches to sp-slow; its event overtakes that read, and its
+    // lookup is held. sp-fast's lookups answer again from now on.
+    rig.fake
+        .update_state(|s| {
+            s.groups.clear();
+            s.program_scene = Some("sp-slow".to_string());
+            s.hold_lookups_of = Some("sp-slow".to_string());
+        })
+        .await;
+    rig.fake.push_program_scene_change("sp-slow").await;
+    rig.fake_until("sp-slow's held lookup", |s| {
+        s.held
+            .iter()
+            .any(|r| r["d"]["requestType"] == "GetSceneItemList")
+    })
+    .await;
+    // The stale read answers sp-fast: the poll looks sp-fast up again (it
+    // answers now). Then sp-slow's lookup answers. Whichever of the two
+    // lands first, the event's must win. (Every hold here is well under the
+    // client's 2 s response timeout.)
+    let asked = rig.lookups_of("sp-fast").await;
+    rig.fake
+        .update_state(|s| s.hold_program_scene = false)
+        .await;
+    rig.fake.release_held("GetCurrentProgramScene").await;
+    rig.fake_until("the stale relookup of sp-fast", move |s| {
+        s.requests
+            .iter()
+            .filter(|r| {
+                r["requestType"] == "GetSceneItemList" && r["requestData"]["sceneName"] == "sp-fast"
+            })
+            .count()
+            > asked
+    })
+    .await;
+    rig.fake.release_held("GetSceneItemList").await;
+    rig.program_becomes("sp-slow", &[8]).await;
     rig.stop().await;
 }

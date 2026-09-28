@@ -27,6 +27,10 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 
+/// The key of the control message `FakeObsServer::release_held` sends down
+/// the event channel (never forwarded to the client as an event).
+const RELEASE_HELD: &str = "__release_held";
+
 /// Scripted state the fake OBS reveals to its clients.
 #[derive(Clone, Default)]
 pub struct FakeObsState {
@@ -73,6 +77,15 @@ pub struct FakeObsState {
     /// by `GetGroupSceneItemList`). List them in `scene_items` as
     /// `(name, true, "")`.
     pub groups: Vec<String>,
+    /// #218 review round 2: while set, every `GetCurrentProgramScene` answer
+    /// is built at once (the program scene at that moment) but HELD in
+    /// `held` until [`FakeObsServer::release_held`].
+    pub hold_program_scene: bool,
+    /// #218 review round 2: while set, the `GetSceneItemList` answers for this
+    /// scene are held the same way.
+    pub hold_lookups_of: Option<String>,
+    /// The held answers, in request order.
+    pub held: Vec<Value>,
     /// #219: the `responseData` of `GetCurrentSceneTransition`; `None` answers
     /// `{}` (no transition kind: the client reads it as no answer).
     pub scene_transition: Option<Value>,
@@ -151,6 +164,15 @@ impl FakeObsServer {
             }
         });
         let _ = self.event_tx.send(evt).await;
+    }
+
+    /// #218: send the held answers of `request_type` to the client, in order
+    /// (after anything pushed before this call).
+    pub async fn release_held(&self, request_type: &str) {
+        let _ = self
+            .event_tx
+            .send(json!({ RELEASE_HELD: request_type }))
+            .await;
     }
 
     /// #213: push any event (intent 4 = Scenes) to the connected client.
@@ -304,6 +326,21 @@ async fn handle_client(
                                 continue;
                             }
                             let response = handle_request(&val, &state).await;
+                            {
+                                // #218: an answer built NOW (the state at
+                                // processing time), sent only on `release_held`.
+                                let mut s = state.lock().await;
+                                let scene = val["d"]["requestData"]["sceneName"].as_str();
+                                let hold = (req_type == "GetCurrentProgramScene"
+                                    && s.hold_program_scene)
+                                    || (req_type == "GetSceneItemList"
+                                        && s.hold_lookups_of.is_some()
+                                        && s.hold_lookups_of.as_deref() == scene);
+                                if hold {
+                                    s.held.push(response);
+                                    continue;
+                                }
+                            }
                             if write.send(Message::Text(response.to_string().into())).await.is_err() {
                                 return;
                             }
@@ -318,6 +355,24 @@ async fn handle_client(
                 }
             }
             Some(evt) = event_rx_guard.recv() => {
+                // #218: a `release_held` control message, not an OBS event.
+                if let Some(kind) = evt.get(RELEASE_HELD).and_then(Value::as_str) {
+                    let released: Vec<Value> = {
+                        let mut s = state.lock().await;
+                        let (out, keep): (Vec<Value>, Vec<Value>) = s
+                            .held
+                            .drain(..)
+                            .partition(|r| r["d"]["requestType"] == kind);
+                        s.held = keep;
+                        out
+                    };
+                    for response in released {
+                        if write.send(Message::Text(response.to_string().into())).await.is_err() {
+                            return;
+                        }
+                    }
+                    continue;
+                }
                 if write.send(Message::Text(evt.to_string().into())).await.is_err() {
                     return;
                 }
