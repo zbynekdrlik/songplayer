@@ -12,10 +12,11 @@
 //! 2. A PLAYLIST scene is cut FIRST (`persist_and_cut`, published as on air
 //!    with the catalog name), never gated on cg OBS. Then the legacy MIRROR:
 //!    the same `SetCurrentProgramScene` is queued for cg OBS with `try_send`
-//!    and is NOT awaited under the lock. The queue is FIFO up to cg OBS: the
-//!    OBS client writes the facade's calls through ONE forwarder per
-//!    connection (`obs::remote_call::run_calls`), so the mirror never
-//!    overtakes a later press. A spawned waiter (at most the upstream
+//!    and is NOT awaited under the lock. It still never overtakes a later
+//!    press: the OBS client writes the facade's calls through ONE forwarder
+//!    per connection (`obs::remote_call::run_calls`), which waits for a
+//!    scene switch's answer before it writes the next call (cg OBS runs its
+//!    messages on a thread pool). A spawned waiter (at most the upstream
 //!    timeout, 3 s) records cg OBS's answer as `last_remote_cut.cg_forward`.
 //!    The consumers that still take cg OBS's program (Arena, FOH, lv1,
 //!    strih) follow it until B4 step 6 deletes it.

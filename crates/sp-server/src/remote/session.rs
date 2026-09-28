@@ -1,10 +1,10 @@
 //! One remote-control client session (#213): the obs-websocket 5 handshake,
 //! requests + batches, and the re-emitted cg OBS events.
 //!
-//! Requests of one session run strictly in order (Companion correlates by
-//! `requestId`, so this is only a latency choice); scene presses are
-//! additionally serialized across ALL sessions by the program switch
-//! (`playback::program_switch`, the bus's `switch_order`).
+//! Requests of one session run strictly in order — load-bearing since #221:
+//! a transition switches to the preview the same client set just before.
+//! Scene presses are additionally serialized across ALL sessions by the
+//! program switch (`playback::program_switch`, the bus's `switch_order`).
 //!
 //! #221: each session keeps its OWN preview scene (`SetCurrentPreviewScene`;
 //! until it sets one, the preview is the program scene). Companion's

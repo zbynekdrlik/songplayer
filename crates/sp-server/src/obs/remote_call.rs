@@ -10,13 +10,17 @@
 //! switch cg OBS. #221 deleted the scene → playlists lookup: the switch
 //! decides from SongPlayer's own playlists (`playback::scene_catalog`).
 //!
-//! #221: the calls go out IN QUEUE ORDER. The forwarder writes each request
-//! frame before it takes the next call, and only the wait for an answer runs
-//! beside the later calls. A task per call (the #213 shape) could start the
-//! newest first — a multi-thread tokio worker runs the task spawned last from
-//! its LIFO slot — so a playlist press's mirror, which the facade does not
-//! await, could reach cg OBS after a later manual press's forward, leaving cg
-//! OBS on the older scene.
+//! #221: the calls go out IN QUEUE ORDER, and a scene switch RUNS in order.
+//! The forwarder writes each request frame before it takes the next call. A
+//! task per call (the #213 shape) could start the newest first — a
+//! multi-thread tokio worker runs the task spawned last from its LIFO slot.
+//! And cg OBS (obs-websocket) runs every incoming message on a thread pool
+//! with no per-client order, so frames written in order can still run out of
+//! order: the forwarder waits for a scene switch's ANSWER
+//! ([`ORDERED_REQUESTS`]) before it writes the next call. Without both, a
+//! playlist press's mirror, which the facade does not await, could run after
+//! a later press's switch and leave cg OBS on the older scene. Every other
+//! request's answer is awaited beside the later calls.
 //!
 //! The facade waits for a reply only for a bounded time. A call whose requester
 //! already gave up (`reply.is_closed()`, e.g. queued while cg OBS was away) is
@@ -30,6 +34,11 @@ use tracing::{debug, warn};
 
 use crate::obs::SharedWrite;
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
+
+/// The requests whose effect depends on the order cg OBS runs them in: the
+/// forwarder waits for such a request's answer (at most
+/// `DEFAULT_RESPONSE_TIMEOUT`, 2 s) before it writes the next call.
+pub const ORDERED_REQUESTS: [&str; 1] = ["SetCurrentProgramScene"];
 
 /// One call of the remote-control facade to cg OBS.
 #[derive(Debug)]
@@ -56,8 +65,9 @@ pub async fn run_calls(
     }
 }
 
-/// Write one call's request frame (skipped when its requester gave up), and
-/// leave the wait for cg OBS's answer to a task of its own.
+/// Write one call's request frame (skipped when its requester gave up). A
+/// scene switch ([`ORDERED_REQUESTS`]) is answered before this returns; any
+/// other call's answer is awaited by a task of its own.
 async fn send_call(write: &SharedWrite, dispatcher: &Dispatcher, call: RemoteCall) {
     let RemoteCall::Request {
         request_type,
@@ -71,25 +81,40 @@ async fn send_call(write: &SharedWrite, dispatcher: &Dispatcher, call: RemoteCal
     let req_id = uuid::Uuid::new_v4().to_string();
     let msg = forward_request(&request_type, &req_id, request_data);
     let frame = Message::Text(msg.to_string().into());
+    let ordered = ORDERED_REQUESTS.contains(&request_type.as_str());
     match dispatcher.send(write, req_id.clone(), frame).await {
         Ok(rx) => {
-            let dispatcher = dispatcher.clone();
-            tokio::spawn(async move {
-                let d = match dispatcher.wait(&req_id, rx, DEFAULT_RESPONSE_TIMEOUT).await {
-                    Ok(mut response) => response.get_mut("d").map(Value::take),
-                    Err(e) => {
-                        warn!(request_type, %e, "remote: cg OBS did not answer a forwarded request");
-                        None
-                    }
-                };
-                let _ = reply.send(d);
-            });
+            let waiting = answer(dispatcher.clone(), request_type, req_id, rx, reply);
+            if ordered {
+                waiting.await;
+            } else {
+                tokio::spawn(waiting);
+            }
         }
         Err(e) => {
             warn!(request_type, %e, "remote: forwarding a request to cg OBS failed");
             let _ = reply.send(None);
         }
     }
+}
+
+/// Wait (at most `DEFAULT_RESPONSE_TIMEOUT`) for cg OBS's answer to request
+/// `req_id` and hand its op=7 `d` to the requester (`None` without one).
+async fn answer(
+    dispatcher: Dispatcher,
+    request_type: String,
+    req_id: String,
+    rx: oneshot::Receiver<Value>,
+    reply: oneshot::Sender<Option<Value>>,
+) {
+    let d = match dispatcher.wait(&req_id, rx, DEFAULT_RESPONSE_TIMEOUT).await {
+        Ok(mut response) => response.get_mut("d").map(Value::take),
+        Err(e) => {
+            warn!(request_type, %e, "remote: cg OBS did not answer a forwarded request");
+            None
+        }
+    };
+    let _ = reply.send(d);
 }
 
 /// The op=6 request forwarded to cg OBS under SongPlayer's own request id.
