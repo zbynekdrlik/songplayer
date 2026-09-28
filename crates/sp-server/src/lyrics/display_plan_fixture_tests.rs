@@ -16,7 +16,7 @@ use sp_core::lyrics::{LyricsLine, LyricsTrack};
 
 use super::{
     DisplayLine, DisplayPlan, DisplayProfile, GROUP_MAX_SPAN_MS, HOLD_TAIL_MS, LEAD_MAX_MS,
-    LONG_GAP_MS, MAX_CHARS, MIN_VISIBLE_MS, SUSTAIN_MARGIN_MS, build_plan,
+    LONG_GAP_MS, MAX_CHARS, MAX_LATE_MS, MIN_VISIBLE_MS, SUSTAIN_MARGIN_MS, build_plan,
 };
 
 fn parse(raw: &str) -> LyricsTrack {
@@ -265,7 +265,7 @@ fn fixture_lead_is_at_most_800_ms_and_only_into_a_pause() {
             if d.show_ms > start {
                 assert_eq!(
                     d.show_ms,
-                    prev.show_ms + MIN_VISIBLE_MS,
+                    (prev.show_ms + MIN_VISIBLE_MS).min(start + MAX_LATE_MS),
                     "{name}: only the MIN_VISIBLE floor may hold {:?} back",
                     d.en
                 );

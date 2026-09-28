@@ -9,7 +9,8 @@ use sp_core::lyrics::LyricsLine;
 
 use super::{
     DisplayLine, DisplayPlan, DisplayProfile, GROUP_MAX_SPAN_MS, HOLD_TAIL_MS, LEAD_MAX_MS,
-    LONG_GAP_MS, MAX_CHARS, MIN_VISIBLE_MS, SUSTAIN_MARGIN_MS, build_plan, join_sk, join_text,
+    LONG_GAP_MS, MAX_CHARS, MAX_LATE_MS, MIN_VISIBLE_MS, SUSTAIN_MARGIN_MS, build_plan, join_sk,
+    join_text,
 };
 
 fn line(start_ms: u64, end_ms: u64, en: &str, sk: &str) -> LyricsLine {
@@ -72,6 +73,7 @@ fn constants_match_the_design_record() {
     assert_eq!(LEAD_MAX_MS, 800);
     assert_eq!(SUSTAIN_MARGIN_MS, 1_500);
     assert_eq!(MIN_VISIBLE_MS, 1_200);
+    assert_eq!(MAX_LATE_MS, 400);
     assert_eq!(LONG_GAP_MS, 8_000);
     assert_eq!(HOLD_TAIL_MS, 3_000);
     assert_eq!(MAX_CHARS, 72);
@@ -447,7 +449,8 @@ fn in_a_fast_run_of_short_sentences_each_keeps_1200_ms() {
     // Four sentences 1000 ms apart, each sung for 900 ms. The MIN_VISIBLE
     // floor comes after the cap at the sung start (design record
     // 5867952012), so the third and fourth show 200 and 400 ms after they
-    // start being sung. Pinned so that a change of that order is deliberate.
+    // start being sung; 400 ms is also the most the floor may hold a line
+    // back (MAX_LATE_MS). Pinned so that a change of that order is deliberate.
     let lines: Vec<LyricsLine> = (0..4u64)
         .map(|k| {
             let start = 10_000 + 1_000 * k;
@@ -463,6 +466,53 @@ fn in_a_fast_run_of_short_sentences_each_keeps_1200_ms() {
             (13_400, 16_900)
         ]
     );
+}
+
+#[test]
+fn a_chant_of_short_sentences_falls_at_most_400_ms_behind() {
+    // Eight "Hey!" sung 400 ms apart, then a sentence (ROZHODNUTÉ on #217,
+    // Design-question 5868750224). The MIN_VISIBLE floor holds a line back
+    // at most MAX_LATE_MS past its sung start. Unbounded, "We lift your
+    // name." showed 4.8 s late, and before a break the last "Hey!" left the
+    // wall before it ever showed.
+    let chant = |next_start: u64| {
+        let mut lines: Vec<LyricsLine> = (0..8u64)
+            .map(|k| {
+                let start = 10_000 + 400 * k;
+                en(start, start + 400, "Hey!")
+            })
+            .collect();
+        lines.push(en(next_start, next_start + 2_000, "We lift your name."));
+        (song_plan(&lines), lines)
+    };
+    let (plan, _) = chant(14_000);
+    assert_eq!(
+        spans(&plan),
+        [
+            (9_200, 10_400),
+            (10_400, 11_200),
+            (11_200, 11_600),
+            (11_600, 12_000),
+            (12_000, 12_400),
+            (12_400, 12_800),
+            (12_800, 13_200),
+            (13_200, 14_400),
+            (14_400, 19_000)
+        ]
+    );
+    // Before a break over 8 s the last "Hey!" is shown, and the sentence
+    // after the break leads by 800 ms as usual.
+    let (plan, _) = chant(30_000);
+    assert_eq!((plan[7].show_ms, plan[7].hide_ms), (13_200, 16_200));
+    assert_eq!(plan[8].show_ms, 29_200);
+    for next_start in [14_000, 30_000] {
+        let (plan, lines) = chant(next_start);
+        for d in &plan {
+            let start = lines[d.src_range.start].start_ms;
+            assert!(d.show_ms <= start + MAX_LATE_MS, "{:?} is held back", d.en);
+            assert!(d.show_ms < d.hide_ms, "{:?} is never shown", d.en);
+        }
+    }
 }
 
 // ── hold / long break ──────────────────────────────────────────────────────

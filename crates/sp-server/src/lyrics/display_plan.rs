@@ -63,6 +63,11 @@ pub const SUSTAIN_MARGIN_MS: u64 = 1_500;
 /// line waits for it, even past its own sung start.
 pub const MIN_VISIBLE_MS: u64 = 1_200;
 
+/// The most the [`MIN_VISIBLE_MS`] floor may hold a `Song` line back past its
+/// sung start (ROZHODNUTÉ on #217, Design-question 5868750224): text shown
+/// behind the singing is what the owner complained about.
+pub const MAX_LATE_MS: u64 = MIN_VISIBLE_MS - LEAD_MAX_MS;
+
 /// A gap between two sung lines longer than this is an instrumental break, and
 /// the wall goes blank for it. A shorter gap keeps the line on the wall.
 pub const LONG_GAP_MS: u64 = 8_000;
