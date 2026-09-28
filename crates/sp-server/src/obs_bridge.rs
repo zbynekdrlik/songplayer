@@ -1,12 +1,81 @@
-//! OBS → engine scene bridge.
+//! OBS → engine scene bridge, and the server's OBS wiring.
 //!
 //! Translates OBS `SceneChanged` events into per-playlist
 //! `EngineCommand::SceneChanged` messages for the playback engine.
+//! [`start_obs`] (#219) is `lib::start`'s OBS step: the bridge, then the OBS
+//! client (when configured), and what the rest of the server needs from them.
 
-use tokio::sync::{broadcast, mpsc};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use sqlx::SqlitePool;
+use tokio::sync::{RwLock, broadcast, mpsc, watch};
+use tracing::info;
 
 use crate::EngineCommand;
 use crate::obs;
+
+/// What the server needs from its OBS side.
+pub(crate) struct ObsWiring {
+    /// cg OBS's events (the engine's, the #213 facade's).
+    pub(crate) event_tx: broadcast::Sender<obs::ObsEvent>,
+    /// The OBS client's command channel; `None` when OBS is not configured.
+    pub(crate) cmd_tx: Option<mpsc::Sender<obs::ObsCommand>>,
+    /// #196: the OBS-input → playlist-id map; `None` when OBS is not configured.
+    pub(crate) ndi_sources: Option<obs::NdiSourceMap>,
+    /// #219: the OBS client's published state (the program follow's input);
+    /// a closed channel (disconnected, for good) when OBS is not configured.
+    pub(crate) snapshots: watch::Receiver<obs::ObsSnapshot>,
+}
+
+/// Step 7 of `lib::start`: the OBS→engine bridge, then the OBS client.
+///
+/// The bridge subscribes to the event broadcast BEFORE the OBS client spawns.
+/// On a fast LAN the client can connect, authenticate, rebuild the NDI source
+/// map and broadcast the initial `SceneChanged` in under 50 ms — fast enough
+/// to beat a subscription made after the spawn, and that initial scene
+/// detection is what triggers auto-play on startup.
+#[cfg_attr(test, mutants::skip)] // startup wiring; the bridge + client are tested
+pub(crate) async fn start_obs(
+    pool: &SqlitePool,
+    obs_state: &Arc<RwLock<obs::ObsState>>,
+    engine_tx: &mpsc::Sender<EngineCommand>,
+    rebuild_tx: &broadcast::Sender<()>,
+    shutdown_tx: &broadcast::Sender<()>,
+) -> Result<ObsWiring, sqlx::Error> {
+    let (event_tx, _) = broadcast::channel::<obs::ObsEvent>(64);
+    tokio::spawn(run_obs_engine_bridge(
+        event_tx.subscribe(),
+        engine_tx.clone(),
+        shutdown_tx.subscribe(),
+    ));
+    let Some(config) = obs::load_obs_config(pool).await? else {
+        let (_, snapshots) = watch::channel(obs::ObsSnapshot::default());
+        return Ok(ObsWiring {
+            event_tx,
+            cmd_tx: None,
+            ndi_sources: None,
+            snapshots,
+        });
+    };
+    let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
+    let client = obs::ObsClient::spawn(
+        config,
+        pool.clone(),
+        ndi_sources.clone(),
+        obs_state.clone(),
+        event_tx.clone(),
+        rebuild_tx.subscribe(),
+        shutdown_tx.subscribe(),
+    );
+    info!("OBS WebSocket client started");
+    Ok(ObsWiring {
+        event_tx,
+        cmd_tx: Some(client.cmd_sender()),
+        ndi_sources: Some(ndi_sources),
+        snapshots: client.snapshots(),
+    })
+}
 
 /// Pure helper: compute the per-playlist engine commands that should
 /// follow from an OBS `SceneChanged` event, given the previously-active

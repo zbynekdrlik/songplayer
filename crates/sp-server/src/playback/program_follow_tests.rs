@@ -1,7 +1,7 @@
 //! #215: `SP-program` follows cg OBS and keeps the transition spec in step.
-//! The reply parsing, the settings, the telemetry, `apply_spec` and
-//! `follow_scene` over a real pool + `ProgramBus`. The task itself runs in
-//! `program_follow_tests_task.rs` and `FollowLoop`'s steps in
+//! The settings, the telemetry, `apply_spec`, `follow_scene` over a real pool
+//! + `ProgramBus`, and how a snapshot of the OBS client reads (#219). The task
+//! itself runs in `program_follow_tests_task.rs` and `FollowLoop`'s steps in
 //! `program_follow_tests_loop.rs`; both share the helpers here (`pub(super)`).
 //! Wired via `#[cfg(test)] #[path = "program_follow_tests.rs"] mod tests;`.
 
@@ -9,44 +9,16 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::{Value, json};
 use sqlx::SqlitePool;
-use tokio::sync::broadcast;
 
 use super::*;
-use crate::obs::ObsEvent;
+use crate::obs::ObsSnapshot;
 use crate::playback::program_bus::{ProgramBus, SETTING_PROGRAM_SOURCE};
 use crate::playback::program_transition::{
     ObsTransition, SpecSource, TransitionKind, TransitionMode, TransitionSpec,
 };
+use crate::remote::RemoteCut;
 use crate::remote::map::{KeepReason, SceneAction};
-use crate::remote::{RemoteCut, Upstream};
-
-pub(super) const REQUEST: &str = "GetCurrentSceneTransition";
-/// The obs-websocket request that reads cg OBS's current program scene.
-pub(super) const PROGRAM_SCENE: &str = "GetCurrentProgramScene";
-
-/// The op=7 `d` object cg OBS answers `GetCurrentSceneTransition` with.
-pub(super) fn reply(name: &str, kind: &str, duration: Value) -> Value {
-    json!({
-        "requestType": REQUEST,
-        "requestId": "sp-1",
-        "requestStatus": { "result": true, "code": 100 },
-        "responseData": {
-            "transitionName": name,
-            "transitionUuid": "uuid-1",
-            "transitionKind": kind,
-            "transitionFixed": duration.is_null(),
-            "transitionDuration": duration,
-            "transitionConfigurable": true,
-            "transitionSettings": {},
-        },
-    })
-}
-
-pub(super) fn fade(ms: u64) -> Value {
-    reply("Fade", "fade_transition", json!(ms))
-}
 
 pub(super) fn obs(name: &str, kind: &str, duration_ms: Option<u32>) -> ObsTransition {
     ObsTransition {
@@ -56,8 +28,47 @@ pub(super) fn obs(name: &str, kind: &str, duration_ms: Option<u32>) -> ObsTransi
     }
 }
 
+/// cg OBS's transition: a Fade of `ms`.
+pub(super) fn fade(ms: u32) -> ObsTransition {
+    obs("Fade", "fade_transition", Some(ms))
+}
+
+/// cg OBS's transition: a Cut.
+pub(super) fn cut() -> ObsTransition {
+    obs("Cut", "cut_transition", None)
+}
+
 pub(super) fn set(ids: &[i64]) -> HashSet<i64> {
     ids.iter().copied().collect()
+}
+
+/// The OBS client's snapshot: connected, cg OBS on `scene` showing
+/// `playlists`, looked up, transition unknown.
+pub(super) fn on_program(scene: &str, playlists: &[i64]) -> ObsSnapshot {
+    ObsSnapshot {
+        connected: true,
+        current_scene: Some(scene.to_string()),
+        active_playlist_ids: set(playlists),
+        lookup_failed: None,
+        transition: None,
+    }
+}
+
+/// The OBS client's snapshot after `scene`'s playlist lookup failed (#218):
+/// the scene is named, `kept` are the previous scene's playlists.
+pub(super) fn lookup_failed(scene: &str, kept: &[i64]) -> ObsSnapshot {
+    ObsSnapshot {
+        lookup_failed: Some(scene.to_string()),
+        ..on_program(scene, kept)
+    }
+}
+
+/// `snapshot` with cg OBS's `transition`.
+pub(super) fn with(snapshot: ObsSnapshot, transition: ObsTransition) -> ObsSnapshot {
+    ObsSnapshot {
+        transition: Some(transition),
+        ..snapshot
+    }
 }
 
 pub(super) async fn pool() -> SqlitePool {
@@ -87,96 +98,50 @@ pub(super) fn spec_of(bus: &ProgramBus) -> (TransitionKind, u32, u32, SpecSource
 }
 
 #[test]
-fn cg_obs_transition_is_read_from_its_reply() {
+fn a_snapshot_knows_its_scene_only_connected_named_and_looked_up() {
     assert_eq!(
-        obs_transition_from_reply(&fade(300)),
-        Some(obs("Fade", "fade_transition", Some(300)))
+        program_scene(&on_program("sp-fast", &[7])),
+        ProgramScene::Known(SceneView {
+            scene: "sp-fast".to_string(),
+            playlists: set(&[7]),
+        })
     );
     assert_eq!(
-        obs_transition_from_reply(&reply("Cut", "cut_transition", Value::Null)),
-        Some(obs("Cut", "cut_transition", None)),
-        "a fixed transition has no duration"
+        program_scene(&on_program("Slido", &[])),
+        ProgramScene::Known(SceneView {
+            scene: "Slido".to_string(),
+            playlists: set(&[]),
+        }),
+        "a scene with no playlist is known (a manual scene)"
     );
     assert_eq!(
-        obs_transition_from_reply(&fade(5_000_000_000)).and_then(|t| t.duration_ms),
-        Some(u32::MAX),
-        "an absurd duration saturates"
+        program_scene(&lookup_failed("sp-slow", &[7])),
+        ProgramScene::LookupFailed,
+        "#218: the kept playlists belong to an earlier scene"
     );
-    let failed = json!({
-        "requestType": REQUEST,
-        "requestStatus": { "result": false, "code": 600, "comment": "nope" },
-    });
-    assert_eq!(obs_transition_from_reply(&failed), None);
-    assert_eq!(obs_transition_from_reply(&json!({})), None, "no status");
-    let no_kind = json!({
-        "requestStatus": { "result": true, "code": 100 },
-        "responseData": { "transitionName": "Fade", "transitionDuration": 300 },
-    });
-    assert_eq!(obs_transition_from_reply(&no_kind), None, "no kind");
-    let long_name = "x".repeat(100);
-    let t = obs_transition_from_reply(&reply(&long_name, "fade_transition", json!(300)))
-        .expect("a transition");
-    assert_eq!(t.name.chars().count(), 64, "an OBS-chosen name is clipped");
-    let unnamed = json!({
-        "requestStatus": { "result": true, "code": 100 },
-        "responseData": { "transitionKind": "swipe_transition" },
-    });
     assert_eq!(
-        obs_transition_from_reply(&unnamed),
-        Some(obs("", "swipe_transition", None))
+        program_scene(&ObsSnapshot::default()),
+        ProgramScene::Unknown,
+        "disconnected"
     );
-    assert_eq!(GET_CURRENT_SCENE_TRANSITION, REQUEST);
-}
-
-#[test]
-fn cg_obs_program_scene_is_read_from_its_reply() {
-    let ok = json!({
-        "requestStatus": { "result": true, "code": 100 },
-        "responseData": {
-            "currentProgramSceneName": "sp-fast",
-            "currentProgramSceneUuid": "uuid-1",
-        },
-    });
-    assert_eq!(program_scene_from_reply(&ok), Some("sp-fast".to_string()));
-    let failed = json!({ "requestStatus": { "result": false, "code": 207 } });
-    assert_eq!(program_scene_from_reply(&failed), None);
-    let unnamed = json!({
-        "requestStatus": { "result": true, "code": 100 },
-        "responseData": {},
-    });
-    assert_eq!(program_scene_from_reply(&unnamed), None);
-    assert_eq!(GET_CURRENT_PROGRAM_SCENE, PROGRAM_SCENE);
-}
-
-#[tokio::test]
-async fn without_cg_obs_nothing_is_read_and_nothing_is_cut() {
-    let bus = Arc::new(ProgramBus::new());
-    bus.select_initial(3);
-    let follow = Follow::new(pool().await, bus.clone());
-    let (events, _) = broadcast::channel::<ObsEvent>(4);
-    let no_obs = Upstream::new(None, events);
-    assert!(!no_obs.is_configured(), "no OBS client");
-    assert!(!follow.refresh_obs(&no_obs, false).await, "no answer");
-    assert!(!follow.refresh_obs(&no_obs, true).await);
-    assert_eq!(bus.follow().obs_transition(), None);
-    follow.follow_current_scene(&no_obs, None).await;
-    assert_eq!(bus.status().source, Some(3));
-    assert_eq!(bus.status().health.cuts, 0);
+    let unnamed = ObsSnapshot {
+        connected: true,
+        ..ObsSnapshot::default()
+    };
     assert_eq!(
-        bus.follow()
-            .status(&FollowSettings::default())
-            .last_follow_cut,
-        None
+        program_scene(&unnamed),
+        ProgramScene::Unknown,
+        "no scene read yet"
     );
-}
-
-#[test]
-fn only_the_two_transition_events_trigger_a_reread() {
-    assert!(is_transition_event("CurrentSceneTransitionChanged"));
-    assert!(is_transition_event("CurrentSceneTransitionDurationChanged"));
-    assert!(!is_transition_event("SceneTransitionStarted"));
-    assert!(!is_transition_event("CurrentProgramSceneChanged"));
-    assert!(!is_transition_event(""));
+    let stale = ObsSnapshot {
+        connected: false,
+        ..on_program("sp-fast", &[7])
+    };
+    assert_eq!(
+        program_scene(&stale),
+        ProgramScene::Unknown,
+        "not connected"
+    );
     assert_eq!(FOLLOW_SETTINGS_POLL, Duration::from_secs(5));
 }
 

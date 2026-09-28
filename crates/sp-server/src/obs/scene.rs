@@ -8,16 +8,16 @@
 //! scene poll (`scene_poll.rs`) looks the scene up again until it answers.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use serde_json::Value;
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
 
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
+use crate::obs::snapshot::ObsShared;
 use crate::obs::text::get_scene_items_request;
-use crate::obs::{NdiSourceMap, ObsEvent, ObsState, SharedWrite};
+use crate::obs::{NdiSourceMap, ObsEvent, SharedWrite};
 
 /// Why a scene's playlist lookup failed: its playlists are UNKNOWN, never
 /// "none" (#218).
@@ -67,11 +67,11 @@ impl From<DispatcherError> for LookupError {
 /// names the scene, and nothing is broadcast (an empty set would scene-off
 /// the playlist on program). The scene poll looks it up again; a success
 /// clears `lookup_failed` and broadcasts as usual.
-pub async fn apply_scene_change(
+pub(crate) async fn apply_scene_change(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
     ndi_sources: &NdiSourceMap,
-    state: &Arc<RwLock<ObsState>>,
+    obs: &ObsShared,
     event_tx: &broadcast::Sender<ObsEvent>,
     scene_name: String,
 ) {
@@ -82,13 +82,14 @@ pub async fn apply_scene_change(
     let active_ids = match lookup {
         Ok(ids) => ids,
         Err(e) => {
-            let repeated = {
-                let mut s = state.write().await;
-                let repeated = s.lookup_failed.as_deref() == Some(scene_name.as_str());
-                s.current_scene = Some(scene_name.clone());
-                s.lookup_failed = Some(scene_name.clone());
-                repeated
-            };
+            let repeated = obs
+                .update(|s| {
+                    let repeated = s.lookup_failed.as_deref() == Some(scene_name.as_str());
+                    s.current_scene = Some(scene_name.clone());
+                    s.lookup_failed = Some(scene_name.clone());
+                    repeated
+                })
+                .await;
             if repeated {
                 debug!(scene = %scene_name, error = %e, "obs: the scene's playlist lookup failed again");
             } else {
@@ -102,13 +103,14 @@ pub async fn apply_scene_change(
         }
     };
 
-    let repaired = {
-        let mut s = state.write().await;
-        let repaired = s.lookup_failed.take().is_some();
-        s.current_scene = Some(scene_name.clone());
-        s.active_playlist_ids = active_ids.clone();
-        repaired
-    };
+    let repaired = obs
+        .update(|s| {
+            let repaired = s.lookup_failed.take().is_some();
+            s.current_scene = Some(scene_name.clone());
+            s.active_playlist_ids = active_ids.clone();
+            repaired
+        })
+        .await;
     if repaired {
         info!(
             scene = %scene_name,

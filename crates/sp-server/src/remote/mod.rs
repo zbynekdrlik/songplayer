@@ -343,12 +343,6 @@ impl Upstream {
     pub fn subscribe(&self) -> broadcast::Receiver<ObsEvent> {
         self.events.subscribe()
     }
-
-    /// Whether an OBS client exists at all (OBS is configured). Without one
-    /// every call is `None` at once, so a caller never retries it (#215).
-    pub fn is_configured(&self) -> bool {
-        self.cmd_tx.is_some()
-    }
 }
 
 /// Everything a session needs: the pool (input settings, the persisted program

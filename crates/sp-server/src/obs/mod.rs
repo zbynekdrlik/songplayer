@@ -9,7 +9,12 @@ pub(crate) mod output_state;
 pub mod remote_call;
 pub mod scene;
 pub mod scene_poll;
+pub mod snapshot;
 pub mod text;
+pub mod transition;
+
+pub use snapshot::ObsSnapshot;
+pub use transition::ObsTransition;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -21,7 +26,7 @@ use futures::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use tokio::net::TcpStream;
-use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio::sync::{Notify, RwLock, broadcast, mpsc, watch};
 use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -29,6 +34,7 @@ use tracing::{debug, info, warn};
 
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
 use crate::obs::ndi_discovery::rebuild_ndi_source_map;
+use crate::obs::snapshot::ObsShared;
 use crate::obs::text::get_current_scene_request;
 
 /// How often the connection loop polls `GetCurrentProgramScene` to reconcile a
@@ -86,6 +92,25 @@ pub struct ObsState {
     /// `GetRecordStatus` on connect and updated by `RecordStateChanged`
     /// events; reset to `false` on disconnect.
     pub recording: bool,
+    /// #219: cg OBS's current scene transition, `None` while unknown (read by
+    /// the OBS client at connect and on the transition events, `transition.rs`).
+    pub transition: Option<ObsTransition>,
+}
+
+impl ObsState {
+    /// The connection is gone: nothing of cg OBS is known any more.
+    fn reset_disconnected(&mut self) {
+        self.connected = false;
+        self.current_scene = None;
+        self.active_playlist_ids.clear();
+        self.lookup_failed = None;
+        self.transition = None;
+        // #154: OBS is gone — its stream/record state is unknown, so clear it.
+        // The Playing gate still covers SP outputs; a stale `true` here would
+        // gate heavy work forever.
+        self.streaming = false;
+        self.recording = false;
+    }
 }
 
 /// Configuration for connecting to OBS WebSocket.
@@ -187,6 +212,9 @@ enum ReaderMessage {
     /// idle gate defers heavy work while OBS is live. `recording` distinguishes
     /// the two output kinds.
     OutputState { recording: bool, active: bool },
+    /// #219: cg OBS's current transition changed (kind or duration); the main
+    /// loop wakes the connection's transition reader.
+    TransitionChanged,
     /// Stream closed cleanly OR errored. Main loop must exit so the
     /// outer reconnect loop fires.
     Closed,
@@ -196,6 +224,8 @@ enum ReaderMessage {
 pub struct ObsClient {
     state: Arc<RwLock<ObsState>>,
     cmd_tx: mpsc::Sender<ObsCommand>,
+    /// #219: the published program part of `state` (`snapshot.rs`).
+    snapshots: watch::Receiver<ObsSnapshot>,
 }
 
 impl ObsClient {
@@ -218,7 +248,8 @@ impl ObsClient {
         let state = shared_state;
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<ObsCommand>(64);
 
-        let loop_state = Arc::clone(&state);
+        let obs = ObsShared::new(Arc::clone(&state));
+        let snapshots = obs.subscribe();
         let loop_event_tx = event_tx.clone();
 
         tokio::spawn(async move {
@@ -240,7 +271,7 @@ impl ObsClient {
                         &config,
                         &pool,
                         &ndi_sources,
-                        &loop_state,
+                        &obs,
                         &loop_event_tx,
                         &mut cmd_rx,
                         &mut rebuild_rx,
@@ -260,19 +291,8 @@ impl ObsClient {
                     }
                 }
 
-                // Mark disconnected and notify.
-                {
-                    let mut s = loop_state.write().await;
-                    s.connected = false;
-                    s.current_scene = None;
-                    s.active_playlist_ids.clear();
-                    s.lookup_failed = None;
-                    // #154: OBS is gone — its stream/record state is unknown, so
-                    // clear it. The Playing gate still covers SP outputs; a
-                    // stale `true` here would gate heavy work forever.
-                    s.streaming = false;
-                    s.recording = false;
-                }
+                // Mark disconnected (published) and notify.
+                obs.update(ObsState::reset_disconnected).await;
                 let _ = loop_event_tx.send(ObsEvent::Disconnected);
 
                 info!("Reconnecting to OBS in {backoff:?}");
@@ -281,7 +301,16 @@ impl ObsClient {
             }
         });
 
-        Self { state, cmd_tx }
+        Self {
+            state,
+            cmd_tx,
+            snapshots,
+        }
+    }
+
+    /// #219: a receiver of the client's published state (`snapshot.rs`).
+    pub fn snapshots(&self) -> watch::Receiver<ObsSnapshot> {
+        self.snapshots.clone()
     }
 
     /// Get a clone of the command sender for use by other components.
@@ -380,6 +409,9 @@ async fn run_reader_task(
                                     active,
                                 })
                                 .await;
+                        } else if transition::is_transition_event(event_type) {
+                            // #219: re-read cg OBS's transition.
+                            let _ = reader_tx.send(ReaderMessage::TransitionChanged).await;
                         }
                     }
                     7 => {
@@ -416,7 +448,7 @@ async fn connect_and_run(
     config: &ObsConfig,
     pool: &SqlitePool,
     ndi_sources: &NdiSourceMap,
-    state: &Arc<RwLock<ObsState>>,
+    obs: &ObsShared,
     event_tx: &broadcast::Sender<ObsEvent>,
     cmd_rx: &mut mpsc::Receiver<ObsCommand>,
     rebuild_rx: &mut broadcast::Receiver<()>,
@@ -437,7 +469,7 @@ async fn connect_and_run(
     // Outputs delivers StreamStateChanged / RecordStateChanged so the #154 idle
     // gate can defer heavy lyrics work while OBS is live; Transitions delivers
     // CurrentSceneTransitionChanged / CurrentSceneTransitionDurationChanged for
-    // the #215 program transition (`playback::program_follow`).
+    // the #215 program transition (read by this client, `transition.rs`, #219).
     // 84 = Scenes (4) | Transitions (16) | Outputs (64).
     let mut identify_data = serde_json::json!({
         "rpcVersion": 1,
@@ -470,10 +502,7 @@ async fn connect_and_run(
     }
     info!("connected to OBS WebSocket");
 
-    {
-        let mut s = state.write().await;
-        s.connected = true;
-    }
+    obs.update(|s| s.connected = true).await;
     let _ = event_tx.send(ObsEvent::Connected);
 
     // Step 4: build dispatcher + spawn reader task.
@@ -492,6 +521,16 @@ async fn connect_and_run(
     // exit, abort_all() prevents detached tasks from running against a
     // dead write half across reconnects.
     let mut spawned_tasks: JoinSet<()> = JoinSet::new();
+
+    // Step 4b (#219): cg OBS's transition — read now, again on every
+    // transition event (the main loop wakes it), retried until answered.
+    let transition_wake = Arc::new(Notify::new());
+    spawned_tasks.spawn(transition::run_transition_reader(
+        Arc::clone(&write),
+        dispatcher.clone(),
+        obs.clone(),
+        Arc::clone(&transition_wake),
+    ));
 
     // Step 5: initial NDI source map rebuild (same retry-on-empty
     // policy as before — the rebuild now goes via the dispatcher).
@@ -534,7 +573,7 @@ async fn connect_and_run(
                     &write,
                     &dispatcher,
                     ndi_sources,
-                    state,
+                    obs,
                     event_tx,
                     scene_name.to_string(),
                 )
@@ -563,7 +602,7 @@ async fn connect_and_run(
     // Step 6b (#154): seed OBS stream/record state so the idle gate knows about
     // an output already active at connect time (no StreamStateChanged/
     // RecordStateChanged fires for it). Best-effort; see `output_state`.
-    output_state::seed_output_state(&write, &dispatcher, state).await;
+    output_state::seed_output_state(&write, &dispatcher, obs.state()).await;
 
     // Step 6c (#170): reconcile the program scene by polling
     // `GetCurrentProgramScene` on a ~2 s cadence. In Studio Mode OBS can DROP a
@@ -589,23 +628,24 @@ async fn connect_and_run(
                         let write = std::sync::Arc::clone(&write);
                         let dispatcher = dispatcher.clone();
                         let ndi_sources = std::sync::Arc::clone(ndi_sources);
-                        let state = std::sync::Arc::clone(state);
+                        let obs = obs.clone();
                         let event_tx = event_tx.clone();
                         spawned_tasks.spawn(async move {
                             scene::apply_scene_change(
                                 &write,
                                 &dispatcher,
                                 &ndi_sources,
-                                &state,
+                                &obs,
                                 &event_tx,
                                 scene_name,
                             )
                             .await;
                         });
                     }
+                    Some(ReaderMessage::TransitionChanged) => {}
                     Some(ReaderMessage::OutputState { recording, active }) => {
                         // #154: record OBS stream/record state for the idle gate.
-                        let mut s = state.write().await;
+                        let mut s = obs.state().write().await;
                         if recording {
                             s.recording = active;
                         } else {
@@ -729,11 +769,12 @@ async fn connect_and_run(
             _ = scene_poll.tick() => {
                 // #170: reconcile a program-scene change OBS dropped the event
                 // for — read GetCurrentProgramScene and feed the same path the
-                // event does when it differs from the last event-derived scene.
+                // event does when it differs from the last event-derived scene
+                // — or, #218, when that scene's playlist lookup failed.
                 let write = std::sync::Arc::clone(&write);
                 let dispatcher = dispatcher.clone();
                 let ndi_sources = std::sync::Arc::clone(ndi_sources);
-                let state = std::sync::Arc::clone(state);
+                let obs = obs.clone();
                 let event_tx = event_tx.clone();
                 let scene_pending = std::sync::Arc::clone(&scene_pending);
                 spawned_tasks.spawn(async move {
@@ -741,7 +782,7 @@ async fn connect_and_run(
                         &write,
                         &dispatcher,
                         &ndi_sources,
-                        &state,
+                        &obs,
                         &event_tx,
                         &scene_pending,
                     )

@@ -65,6 +65,9 @@ pub struct FakeObsState {
     /// #218: the next N `GetSceneItemList` requests are answered with a
     /// success status but no `sceneItems` list.
     pub omit_scene_items: usize,
+    /// #219: the `responseData` of `GetCurrentSceneTransition`; `None` answers
+    /// `{}` (no transition kind: the client reads it as no answer).
+    pub scene_transition: Option<Value>,
 }
 
 /// A fake OBS WebSocket server listening on a random localhost port.
@@ -408,6 +411,12 @@ async fn handle_request(req: &Value, state: &Arc<Mutex<FakeObsState>>) -> Value 
                 "scenes": scenes,
             })
         }
+        "GetCurrentSceneTransition" => state
+            .lock()
+            .await
+            .scene_transition
+            .clone()
+            .unwrap_or_else(|| json!({})),
         "GetCurrentProgramScene" => match state.lock().await.program_scene.clone() {
             Some(name) => json!({
                 "sceneName": name,

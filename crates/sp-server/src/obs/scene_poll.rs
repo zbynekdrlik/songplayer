@@ -15,17 +15,18 @@
 //! event already came, so there is no fade to wait for — on every tick
 //! until a lookup answers.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info};
 
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
 use crate::obs::scene::apply_scene_change;
+use crate::obs::snapshot::ObsShared;
 use crate::obs::text::get_current_scene_request;
-use crate::obs::{NdiSourceMap, ObsEvent, ObsState, SharedWrite};
+use crate::obs::{NdiSourceMap, ObsEvent, SharedWrite};
 
 /// One poll pass: read `GetCurrentProgramScene` over the existing WS and, when
 /// it differs from the last event-derived scene (a dropped
@@ -34,11 +35,11 @@ use crate::obs::{NdiSourceMap, ObsEvent, ObsState, SharedWrite};
 /// best-effort: a closed/timed-out read is transient (the reconnect loop or the
 /// next tick handles it), so it is silently ignored rather than logged as an
 /// error.
-pub async fn reconcile_program_scene(
+pub(crate) async fn reconcile_program_scene(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
     ndi_sources: &NdiSourceMap,
-    state: &Arc<RwLock<ObsState>>,
+    obs: &ObsShared,
     event_tx: &broadcast::Sender<ObsEvent>,
     pending: &Mutex<Option<(String, Instant)>>,
 ) {
@@ -63,7 +64,7 @@ pub async fn reconcile_program_scene(
     };
 
     let (last, failed) = {
-        let s = state.read().await;
+        let s = obs.state().read().await;
         (s.current_scene.clone(), s.lookup_failed.clone())
     };
     // The mismatch clock lives across ticks: `(polled scene, first seen)`.
@@ -101,7 +102,7 @@ pub async fn reconcile_program_scene(
         }
         PollVerdict::InSync | PollVerdict::Pending => return,
     };
-    apply_scene_change(write, dispatcher, ndi_sources, state, event_tx, scene).await;
+    apply_scene_change(write, dispatcher, ndi_sources, obs, event_tx, scene).await;
 }
 
 /// Decide whether a polled program scene reflects a change the event stream
