@@ -62,7 +62,9 @@ use crate::playback::program_bus::ProgramBus;
 pub const REMOTE_SETTINGS_POLL: Duration = Duration::from_secs(5);
 /// How long a call to cg OBS may take before the client is answered "not
 /// ready" (above the OBS client's own 2 s response timeout), and how long a
-/// mirrored press waits for cg OBS's answer.
+/// mirrored press waits for cg OBS's answer. A call queued behind a scene
+/// switch still in flight first waits for that switch's answer (at most 2 s,
+/// `obs::remote_call`), so its own answer may have only ~1 s of this left.
 pub const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(3);
 /// The pause after a failed `accept` (never a hot loop on e.g. EMFILE).
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);

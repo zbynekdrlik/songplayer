@@ -23,12 +23,17 @@
 //!   waits for a scene switch's ANSWER ([`ORDERED_REQUESTS`], at most
 //!   `DEFAULT_RESPONSE_TIMEOUT`, 2 s) before it writes the next call. Every
 //!   other request's answer is awaited beside the later calls.
+//! - **A superseded switch is never sent.** A switch with a later, still
+//!   wanted switch already queued behind it is answered with nothing and not
+//!   written: while cg OBS is slow, a burst of presses cannot push the newest
+//!   one past its requester's 3 s timeout (a given-up call is skipped).
 //!
 //! The facade waits for a reply only for a bounded time. A call whose requester
 //! already gave up (`reply.is_closed()`, e.g. queued while cg OBS was away) is
 //! dropped unexecuted: a stale `SetCurrentProgramScene` must never switch cg OBS
 //! seconds after the button press was answered as "not ready".
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::time::Duration;
 
@@ -42,19 +47,34 @@ use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
 
 /// The requests whose effect depends on the order cg OBS runs them in: the
 /// forwarder waits for such a request's answer before it writes the next
-/// call.
+/// call, and a later one supersedes an earlier one still queued.
 pub const ORDERED_REQUESTS: [&str; 1] = ["SetCurrentProgramScene"];
 
 /// One call of the remote-control facade to cg OBS.
 #[derive(Debug)]
 pub enum RemoteCall {
     /// Forward `requestType` + `requestData` verbatim. The reply is the op=7
-    /// `d` object, `None` when cg OBS did not answer in time.
+    /// `d` object, `None` when cg OBS did not answer in time (or a later
+    /// switch superseded this one).
     Request {
         request_type: String,
         request_data: Option<Value>,
         reply: oneshot::Sender<Option<Value>>,
     },
+}
+
+impl RemoteCall {
+    /// A scene switch ([`ORDERED_REQUESTS`]).
+    fn ordered(&self) -> bool {
+        let RemoteCall::Request { request_type, .. } = self;
+        ORDERED_REQUESTS.contains(&request_type.as_str())
+    }
+
+    /// Its requester still waits for the answer.
+    fn wanted(&self) -> bool {
+        let RemoteCall::Request { reply, .. } = self;
+        !reply.is_closed()
+    }
 }
 
 /// A new connection's forwarder: the sender the connection loop hands the
@@ -85,9 +105,41 @@ pub async fn run_calls(
     mut calls: mpsc::UnboundedReceiver<RemoteCall>,
     answer_timeout: Duration,
 ) {
-    while let Some(call) = calls.recv().await {
+    let mut queued = VecDeque::new();
+    loop {
+        let call = match queued.pop_front() {
+            Some(call) => call,
+            None => match calls.recv().await {
+                Some(call) => call,
+                None => return,
+            },
+        };
+        // Everything already queued, so a switch a later one supersedes is
+        // never written.
+        while let Ok(next) = calls.try_recv() {
+            queued.push_back(next);
+        }
+        if superseded(&call, &queued) {
+            let RemoteCall::Request {
+                request_type,
+                reply,
+                ..
+            } = call;
+            debug!(
+                request_type,
+                "remote: a later switch is queued — this one is not sent"
+            );
+            let _ = reply.send(None);
+            continue;
+        }
         send_call(&write, &dispatcher, call, answer_timeout).await;
     }
+}
+
+/// `call` is a switch and a later switch whose requester still waits is
+/// already queued behind it.
+fn superseded(call: &RemoteCall, queued: &VecDeque<RemoteCall>) -> bool {
+    call.ordered() && queued.iter().any(|later| later.ordered() && later.wanted())
 }
 
 /// Write one call's request frame (skipped when its requester gave up). A

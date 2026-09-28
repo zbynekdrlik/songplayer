@@ -13,7 +13,10 @@
 //!   catalog scene (`scene_catalog`, whatever ASCII case was pressed), a
 //!   manual press the scene pressed, "OBS manuál" itself none; the startup
 //!   restore and a dashboard cut pass the playlist's catalog scene; the OBS
-//!   follow the cg OBS scene it follows.
+//!   follow the cg OBS scene it follows, but only when it cuts: a followed
+//!   change that keeps the source (manual → manual, both -1) publishes
+//!   nothing, so the published scene stays the earlier one until L5 deletes
+//!   the follow.
 //! - [`program_scene_name`] is the ONE name resolver: the scene, else "OBS
 //!   manuál" for the NDI input, else none. It never asks cg OBS.
 //!
