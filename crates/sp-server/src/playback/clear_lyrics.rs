@@ -1,5 +1,7 @@
 //! `clear_lyrics_display` — extracted from `playback/mod.rs` to keep that
-//! file under the 1000-line cap.  Pure delegate; same method, same behavior.
+//! file under the 1000-line cap. It follows the dispatch gates (a held
+//! playlist clears nothing, an off-program one leaves the shared subtitle
+//! clips alone; release 0.68.0 blockers).
 
 use std::sync::atomic::Ordering;
 

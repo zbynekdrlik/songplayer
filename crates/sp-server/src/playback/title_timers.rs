@@ -123,12 +123,15 @@ impl super::PlaylistPipeline {
     /// song's lyrics and position go too (release 0.68.0 blockers, review
     /// round 1): a recovery before the new `Started` re-pushed the old song's
     /// line, and a pause there recorded the old song's position for the new.
+    /// So does the last pause's resume point (review round 2): a later ▶
+    /// resumed the old song over the new one.
     pub(super) fn begin_play(&mut self, start_ms: u64) {
         self.title_clock = None;
         self.cancel_title_timers();
         self.play_start_ms = start_ms;
         self.lyrics_state = None;
         self.cached_position_ms = start_ms;
+        self.paused_at = None;
     }
 }
 

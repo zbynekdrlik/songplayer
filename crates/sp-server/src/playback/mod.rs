@@ -161,8 +161,9 @@ struct PlaylistPipeline {
     /// `handle_previous`. Bounded to [`PREVIOUS_HISTORY_CAPACITY`].
     history: VecDeque<i64>,
     /// Active lyrics state for karaoke display. Loaded when a video with
-    /// lyrics starts; cleared when the video ends or the pipeline pauses. A
-    /// scene-off keeps it through the #215 hold (design record 5863318980).
+    /// lyrics starts; cleared by every Play (`begin_play`), when the video
+    /// ends and when the pipeline pauses. A scene-off keeps it through the
+    /// #215 hold (design record 5863318980).
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
     /// Presenter-push debounce: last EN text sent, compared each 500ms tick.
     last_presenter_text: Option<String>,
@@ -905,8 +906,16 @@ impl PlaybackEngine {
                     pp.lyrics_state = None;
                     debug!(playlist_id, paused_at = ?pp.paused_at, "paused pipeline");
                 }
-                // On program, a paused song's title is not due: the wall says
-                // so now, as any later re-sync would (review round 1).
+                // On program, a paused song's title and line are not due: the
+                // wall says so now, as any later re-sync would (review rounds
+                // 1-2). Off program (the hold's end) nothing of it is up.
+                let on_program = self
+                    .pipelines
+                    .get(&playlist_id)
+                    .is_some_and(|pp| pp.scene_active.load(Ordering::Acquire));
+                if on_program {
+                    self.clear_lyrics_display(playlist_id);
+                }
                 self.resync_after_play(playlist_id).await;
             }
 

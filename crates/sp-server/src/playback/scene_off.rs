@@ -74,17 +74,20 @@ impl PlaybackEngine {
 
     /// `PipelineEvent::SceneOffDue` of the hold's re-check task `due`:
     /// re-check a held pause; nothing when the scene came back on program (or
-    /// the pipeline is gone), or when a newer hold replaced that task. That
-    /// re-check was already queued (A→B→A→B inside one hold): taken as the
-    /// newer hold's, it skipped that hold's `CUT_SETTLE` (review round 1).
+    /// the pipeline is gone), or when `due` is not the pending re-check. A
+    /// hold registers its re-check before the engine can see the event, so
+    /// any other one is stale: a newer hold replaced it (queued during an
+    /// A→B→A→B, it skipped that hold's `CUT_SETTLE`, review round 1), or the
+    /// hold ended (a pause, a scene-on, an operator's pick, which it held again
+    /// or paused, review round 2).
     pub(super) async fn scene_off_due(&mut self, playlist_id: i64, due: tokio::task::Id) {
-        let superseded = self
+        let stale = self
             .pipelines
             .get(&playlist_id)
             .and_then(|pp| pp.scene_off_due.as_ref())
-            .is_some_and(|pending| pending.id() != due);
-        if superseded {
-            debug!(playlist_id, "a superseded hold's re-check — ignored");
+            .is_none_or(|pending| pending.id() != due);
+        if stale {
+            debug!(playlist_id, "a stale hold re-check — ignored");
             return;
         }
         self.scene_off_recheck(playlist_id, utc_now_100ns()).await;
