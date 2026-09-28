@@ -647,10 +647,10 @@ async fn connect_and_run(
         std::sync::Arc::new(std::sync::Mutex::new(None));
 
     // Step 7: main loop — thin router: each arm spawns a task (a Remote
-    // call goes to the connection's forwarder) to do the work. The write half is shared via Arc<Mutex<>> so helper
-    // tasks lock it briefly for the send and release before awaiting
-    // the op=7 response, preventing the main loop from blocking on
-    // in-flight requests.
+    // call goes to the connection's forwarder) to do the work. The write
+    // half is shared via Arc<Mutex<>> so helper tasks lock it briefly for
+    // the send and release before awaiting the op=7 response, preventing
+    // the main loop from blocking on in-flight requests.
     let result = loop {
         tokio::select! {
             reader_msg = reader_rx.recv() => {

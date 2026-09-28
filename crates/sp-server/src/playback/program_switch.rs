@@ -55,7 +55,8 @@ use crate::remote::{RemoteCut, RemoteShared, Upstream, clip, now_ms};
 pub const CG_PENDING: &str = "pending";
 /// `cg_forward` when cg OBS accepted.
 pub const CG_OK: &str = "ok";
-/// `cg_forward` when cg OBS is not reachable or did not answer in time.
+/// `cg_forward` when cg OBS is not reachable or did not answer in time (or,
+/// for a mirror, a later press's mirror superseded it).
 pub const CG_NOT_READY: &str = "not_ready";
 /// The keep reason of a switch whose playlists could not be read.
 pub const CATALOG_FAILED: &str = "catalog_failed";
@@ -319,15 +320,22 @@ async fn record_mirror(
 ) {
     let answer = upstream.wait(rx).await;
     let label = cg_forward_label(answer.as_ref());
-    log_mirror(&scene, &label);
-    shared.set_cg_forward(cut_id, label);
+    let current = shared.set_cg_forward(cut_id, label.clone());
+    log_mirror(&scene, &label, current);
 }
 
-/// The log line of a mirror's answer. Logging only.
+/// The log line of a mirror's answer (`current`: its cut is still the last
+/// one; a later press replaced — or superseded — it otherwise). Logging only.
 #[cfg_attr(test, mutants::skip)]
-fn log_mirror(scene: &str, label: &str) {
+fn log_mirror(scene: &str, label: &str, current: bool) {
     if label == CG_OK {
         debug!(scene, "program switch: cg OBS followed the mirrored press");
+    } else if !current {
+        debug!(
+            scene,
+            cg_forward = label,
+            "program switch: a later press replaced this mirrored press"
+        );
     } else {
         warn!(
             scene,

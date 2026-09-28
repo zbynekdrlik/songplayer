@@ -10,9 +10,9 @@
 //! switch cg OBS. #221 deleted the scene → playlists lookup: the switch
 //! decides from SongPlayer's own playlists (`playback::scene_catalog`).
 //!
-//! #221: the NEWEST scene switch always wins in cg OBS. A playlist press's
-//! mirror is not awaited by the facade, so without these rules it could run
-//! after a later press's switch and leave cg OBS on the older scene:
+//! #221: the newest press always reaches cg OBS. A playlist press's mirror
+//! is not awaited by the facade, so without these rules it could run after a
+//! later press's switch and leave cg OBS on the older scene:
 //!
 //! - **In queue order.** The forwarder writes each request frame before it
 //!   takes the next call. A task per call (the #213 shape) could start the
@@ -24,9 +24,12 @@
 //!   `DEFAULT_RESPONSE_TIMEOUT`, 2 s) before it writes the next call. Every
 //!   other request's answer is awaited beside the later calls.
 //! - **A superseded switch is never sent.** A switch with a later, still
-//!   wanted switch already queued behind it is answered with nothing and not
+//!   wanted MIRROR already queued behind it is answered with nothing and not
 //!   written: while cg OBS is slow, a burst of presses cannot push the newest
-//!   one past its requester's 3 s timeout (a given-up call is skipped).
+//!   one past its requester's 3 s timeout (a given-up call is skipped). Only a
+//!   mirror supersedes (`supersedes`): its `SP-program` cut already happened.
+//!   A manual press's forward supersedes nothing: its cut depends on cg OBS's
+//!   answer, which may be a refusal (600) or come too late.
 //!
 //! The facade waits for a reply only for a bounded time. A call whose requester
 //! already gave up (`reply.is_closed()`, e.g. queued while cg OBS was away) is
@@ -47,7 +50,7 @@ use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
 
 /// The requests whose effect depends on the order cg OBS runs them in: the
 /// forwarder waits for such a request's answer before it writes the next
-/// call, and a later one supersedes an earlier one still queued.
+/// call, and a later mirror supersedes an earlier one still queued.
 pub const ORDERED_REQUESTS: [&str; 1] = ["SetCurrentProgramScene"];
 
 /// One call of the remote-control facade to cg OBS.
@@ -72,6 +75,12 @@ impl RemoteCall {
     fn ordered(&self) -> bool {
         let RemoteCall::Request { request_type, .. } = self;
         ORDERED_REQUESTS.contains(&request_type.as_str())
+    }
+
+    /// A mirror: it replaces an earlier switch still queued.
+    fn supersedes(&self) -> bool {
+        let RemoteCall::Request { supersedes, .. } = self;
+        *supersedes
     }
 
     /// Its requester still waits for the answer.
@@ -140,10 +149,13 @@ pub async fn run_calls(
     }
 }
 
-/// `call` is a switch and a later switch whose requester still waits is
+/// `call` is a switch and a later mirror whose requester still waits is
 /// already queued behind it.
 fn superseded(call: &RemoteCall, queued: &VecDeque<RemoteCall>) -> bool {
-    call.ordered() && queued.iter().any(|later| later.ordered() && later.wanted())
+    call.ordered()
+        && queued
+            .iter()
+            .any(|later| later.ordered() && later.supersedes() && later.wanted())
 }
 
 /// Write one call's request frame (skipped when its requester gave up). A
