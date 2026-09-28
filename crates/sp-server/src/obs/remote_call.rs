@@ -109,14 +109,14 @@ mod tests {
     use std::net::SocketAddr;
     use std::time::Duration;
 
-    use futures::StreamExt;
-    use tokio::task::JoinHandle;
+    use futures::{SinkExt, StreamExt};
+    use serde_json::json;
 
     use super::*;
 
     #[test]
     fn forward_request_carries_the_type_our_id_and_the_data_verbatim() {
-        let data = serde_json::json!({ "sceneName": "sp-fast" });
+        let data = json!({ "sceneName": "sp-fast" });
         let msg = forward_request("SetCurrentProgramScene", "id-1", Some(data.clone()));
         assert_eq!(msg["op"], 6);
         assert_eq!(msg["d"]["requestType"], "SetCurrentProgramScene");
@@ -131,46 +131,81 @@ mod tests {
         assert!(msg["d"].get("requestData").is_none());
     }
 
-    /// A WebSocket peer standing in for cg OBS: the first `n` request frames
-    /// it receives (it answers none).
-    async fn cg_obs_receiving(n: usize) -> (SocketAddr, JoinHandle<Vec<Value>>) {
+    /// A WebSocket peer standing in for cg OBS: every request frame it
+    /// receives goes to the returned channel as it arrives; with `answer` it
+    /// also answers each one with success (op=7 under the request's id).
+    async fn cg_obs(answer: bool) -> (SocketAddr, mpsc::UnboundedReceiver<Value>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let received = tokio::spawn(async move {
+        let (tx, rx) = mpsc::unbounded_channel();
+        tokio::spawn(async move {
             let (tcp, _) = listener.accept().await.unwrap();
             let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
-            let mut frames = Vec::new();
-            while frames.len() < n {
-                match ws.next().await {
-                    Some(Ok(Message::Text(text))) => {
-                        frames.push(serde_json::from_str::<Value>(&text).unwrap());
-                    }
-                    Some(Ok(_)) => {}
-                    other => panic!("cg OBS got {} of {n} requests: {other:?}", frames.len()),
+            while let Some(Ok(msg)) = ws.next().await {
+                let Message::Text(text) = msg else {
+                    continue;
+                };
+                let request: Value = serde_json::from_str(&text).unwrap();
+                let answered = json!({ "op": 7, "d": {
+                    "requestType": request["d"]["requestType"],
+                    "requestId": request["d"]["requestId"],
+                    "requestStatus": { "result": true, "code": 100 },
+                }});
+                if tx.send(request).is_err() {
+                    break;
+                }
+                if answer {
+                    let _ = ws.send(Message::Text(answered.to_string().into())).await;
                 }
             }
-            frames
         });
-        (addr, received)
+        (addr, rx)
     }
 
-    /// The write half of a client connected to `addr`.
-    async fn write_half(addr: SocketAddr) -> SharedWrite {
+    /// The write half of a client connected to `addr`; its read half hands
+    /// every op=7 answer to `dispatcher`, like the OBS client's reader.
+    async fn connect(addr: SocketAddr, dispatcher: &Dispatcher) -> SharedWrite {
         let (client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
             .await
             .unwrap();
-        let (write, _read) = client.split();
+        let (write, mut read) = client.split();
+        let dispatcher = dispatcher.clone();
+        tokio::spawn(async move {
+            while let Some(Ok(msg)) = read.next().await {
+                if let Message::Text(text) = msg
+                    && let Ok(answer) = serde_json::from_str::<Value>(&text)
+                    && let Some(id) = answer["d"]["requestId"].as_str()
+                {
+                    dispatcher.complete(id, answer.clone());
+                }
+            }
+        });
         std::sync::Arc::new(tokio::sync::Mutex::new(write))
     }
 
-    fn switch_to(scene: &str) -> (RemoteCall, oneshot::Receiver<Option<Value>>) {
+    /// The next request frame cg OBS received (10 s at most).
+    async fn next_frame(frames: &mut mpsc::UnboundedReceiver<Value>) -> Value {
+        tokio::time::timeout(Duration::from_secs(10), frames.recv())
+            .await
+            .expect("cg OBS received no request within 10 s")
+            .expect("the cg OBS peer ended")
+    }
+
+    fn call(
+        request_type: &str,
+        scene: Option<&str>,
+    ) -> (RemoteCall, oneshot::Receiver<Option<Value>>) {
         let (reply, rx) = oneshot::channel();
         let call = RemoteCall::Request {
-            request_type: "SetCurrentProgramScene".to_string(),
-            request_data: Some(serde_json::json!({ "sceneName": scene })),
+            request_type: request_type.to_string(),
+            request_data: scene.map(|s| json!({ "sceneName": s })),
             reply,
         };
         (call, rx)
+    }
+
+    fn switch_to(scene: &str) -> (RemoteCall, oneshot::Receiver<Option<Value>>) {
+        call("SetCurrentProgramScene", Some(scene))
     }
 
     /// #221: calls queued back to back reach cg OBS in queue order — a
@@ -178,8 +213,9 @@ mod tests {
     #[tokio::test]
     async fn the_calls_reach_cg_obs_in_queue_order() {
         let scenes = ["sp-fast", "Blank", "sp-slow", "Trailer", "sp-90s"];
-        let (addr, received) = cg_obs_receiving(scenes.len()).await;
-        let write = write_half(addr).await;
+        let (addr, mut frames) = cg_obs(true).await;
+        let dispatcher = Dispatcher::new();
+        let write = connect(addr, &dispatcher).await;
         let (tx, calls) = mpsc::unbounded_channel();
         let mut replies = Vec::new();
         for scene in scenes {
@@ -188,17 +224,83 @@ mod tests {
             replies.push(rx); // kept: a call whose requester gave up is skipped
         }
         drop(tx);
-        run_calls(write, Dispatcher::new(), calls).await;
-        let frames = tokio::time::timeout(Duration::from_secs(10), received)
-            .await
-            .expect("cg OBS received the requests within 10 s")
-            .unwrap();
-        let order: Vec<&str> = frames
-            .iter()
-            .map(|f| f["d"]["requestData"]["sceneName"].as_str().unwrap())
-            .collect();
+        run_calls(write, dispatcher, calls).await;
+        let mut order = Vec::new();
+        for _ in scenes {
+            let frame = next_frame(&mut frames).await;
+            order.push(
+                frame["d"]["requestData"]["sceneName"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            );
+        }
         assert_eq!(order, scenes);
-        drop(replies);
+        for rx in replies {
+            let answer = rx.await.unwrap().expect("cg OBS answered");
+            assert_eq!(answer["requestStatus"]["code"], 100);
+        }
+    }
+
+    /// #221 review round 2: cg OBS (obs-websocket) runs each incoming message
+    /// on a thread pool, so frames written in order can still RUN out of
+    /// order. A scene switch is answered before the next call goes out. The
+    /// "none yet" window only errs in the safe direction.
+    #[tokio::test]
+    async fn a_scene_switch_is_answered_before_the_next_call_goes_out() {
+        let (addr, mut frames) = cg_obs(false).await;
+        let dispatcher = Dispatcher::new();
+        let write = connect(addr, &dispatcher).await;
+        let (tx, calls) = mpsc::unbounded_channel();
+        let (first, first_rx) = switch_to("sp-fast");
+        let (second, _second_rx) = switch_to("Blank");
+        tx.send(first).unwrap();
+        tx.send(second).unwrap();
+        let forwarder = tokio::spawn(run_calls(write, dispatcher.clone(), calls));
+        let frame = next_frame(&mut frames).await;
+        assert_eq!(frame["d"]["requestData"]["sceneName"], "sp-fast");
+        let early = tokio::time::timeout(Duration::from_millis(200), frames.recv()).await;
+        assert!(
+            early.is_err(),
+            "the next switch went out before cg OBS answered this one: {early:?}"
+        );
+        // cg OBS answers the first switch: the second goes out.
+        let id = frame["d"]["requestId"].as_str().unwrap().to_string();
+        let answered = json!({ "op": 7, "d": {
+            "requestId": id,
+            "requestStatus": { "result": true, "code": 100 },
+        }});
+        dispatcher.complete(&id, answered);
+        let answer = first_rx.await.unwrap().expect("the first switch's answer");
+        assert_eq!(answer["requestStatus"]["code"], 100);
+        let frame = next_frame(&mut frames).await;
+        assert_eq!(frame["d"]["requestData"]["sceneName"], "Blank");
+        drop(tx);
+        forwarder.abort();
+    }
+
+    /// A getter's answer never holds the next call back (only the scene
+    /// switches are ordered by their answers).
+    #[tokio::test]
+    async fn a_getter_never_holds_the_next_call_back() {
+        let (addr, mut frames) = cg_obs(false).await;
+        let dispatcher = Dispatcher::new();
+        let write = connect(addr, &dispatcher).await;
+        let (tx, calls) = mpsc::unbounded_channel();
+        let (getter, _getter_rx) = call("GetSceneList", None);
+        let (switch, _switch_rx) = switch_to("sp-fast");
+        tx.send(getter).unwrap();
+        tx.send(switch).unwrap();
+        let forwarder = tokio::spawn(run_calls(write, dispatcher, calls));
+        assert_eq!(
+            next_frame(&mut frames).await["d"]["requestType"],
+            "GetSceneList"
+        );
+        // cg OBS has not answered the getter; the switch goes out anyway.
+        let frame = next_frame(&mut frames).await;
+        assert_eq!(frame["d"]["requestData"]["sceneName"], "sp-fast");
+        drop(tx);
+        forwarder.abort();
     }
 
     /// A call whose requester already gave up never reaches cg OBS — the
@@ -207,26 +309,19 @@ mod tests {
     /// switch cg OBS late).
     #[tokio::test]
     async fn an_abandoned_call_is_never_sent_and_a_live_one_is() {
-        let (addr, received) = cg_obs_receiving(1).await;
-        let write = write_half(addr).await;
+        let (addr, mut frames) = cg_obs(false).await;
+        let dispatcher = Dispatcher::new();
+        let write = connect(addr, &dispatcher).await;
         let (tx, calls) = mpsc::unbounded_channel();
         let (stale, rx) = switch_to("stale");
         drop(rx);
         tx.send(stale).unwrap();
-        let (reply, _live_rx) = oneshot::channel();
-        tx.send(RemoteCall::Request {
-            request_type: "GetSceneList".to_string(),
-            request_data: None,
-            reply,
-        })
-        .unwrap();
+        let (live, _live_rx) = call("GetSceneList", None);
+        tx.send(live).unwrap();
         drop(tx);
-        run_calls(write, Dispatcher::new(), calls).await;
-        let first = tokio::time::timeout(Duration::from_secs(10), received)
-            .await
-            .expect("cg OBS received nothing within 10 s")
-            .unwrap();
-        assert_eq!(first[0]["op"], 6);
-        assert_eq!(first[0]["d"]["requestType"], "GetSceneList");
+        run_calls(write, dispatcher, calls).await;
+        let first = next_frame(&mut frames).await;
+        assert_eq!(first["op"], 6);
+        assert_eq!(first["d"]["requestType"], "GetSceneList");
     }
 }
