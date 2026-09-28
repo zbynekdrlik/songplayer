@@ -255,6 +255,24 @@ the platform string — round-trip the result through `std::env::split_paths` an
 check `parts[0] == tools_dir`, which holds on both separators. Same rule for any
 `MAIN_SEPARATOR` / line-ending / drive-letter / temp-path assumption in a test.
 
+**An engine test must not count the test pipeline's replies (release 0.68.0
+blockers).** On Linux the stub pipeline (`pipeline_stub.rs`) answers every
+`PipelineCommand::Play` with a `PipelineEvent::Error`; on Windows the real
+pipeline has no NDI backend in CI, sends ONE Error at spawn and then only
+waits for Shutdown. So "no Play was sent" read from `event_rx` passes or fails
+by platform. Read it from engine state every Play resets instead: every Play
+calls `begin_play`, which clears the song's title clock (`tests_hold.rs`).
+
+**Never key a "stale event" check on a tokio task id.** tokio documents that
+an id may be reused once its task has ended, which is exactly the state of a
+stale event's task. Carry your own id from a process-wide `AtomicU64`
+(`scene_off.rs::NEXT_RE_CHECK`, #215 review round 3).
+
+**A "nothing was sent while X" test must use a NEW value.** The dispatch
+paths dedup on the last value sent (`last_*_signature`), so the same line is
+held back with or without the gate under test, and the test passes vacuously
+(#215 review round 1: a held Position on the same line proved nothing).
+
 ## Doc-comment lists: blank `//!`/`///` line before the paragraph that follows
 
 CI clippy runs with `-D warnings`, and `clippy::doc_lazy_continuation` (stable

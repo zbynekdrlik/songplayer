@@ -278,13 +278,15 @@ inside the hold started the next song off program, whose hide timer later
 faded out the on-program title.
 
 - **The hold is a marker.** `PlaylistPipeline::scene_off_due` keeps the
-  abort handle of the pending `SceneOffDue`; `Some` = held. `end_hold`
-  cancels it, and these call it:
+  pending `SceneOffDue`'s id and the abort handle of its sleeping task;
+  `Some` = held. `end_hold` cancels it, and these call it:
   - every `PlayAction::Pause`;
   - a scene back on program (`handle_scene_change(pid, true)`);
   - an operator's pick (`handle_play_video`, which a ▶ resume also runs,
     and `handle_previous`): the song then plays like any song played off
-    program by hand, and its end starts the next;
+    program by hand, and its end starts the next. The fade still mixes out
+    of that playlist, so for the rest of the window its side is the picked
+    song's pre-roll standby, then its start, at a falling weight;
   - a newer hold: a re-check that finds the window not over replaces its
     predecessor.
 - **A re-check names its hold.** `SceneOffDue` carries the hold's re-check

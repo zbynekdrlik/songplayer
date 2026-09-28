@@ -515,7 +515,10 @@ the driver compares it with what it did (above).
 - **`cached_position_ms`** is the subtitle and pause position only. The
   `Started` handler no longer zeroes it: a Pause before the first Position
   report recorded 0 and resumed the song from its start (review round 1).
-  `begin_play` sets it to the Play's start (0, or the resume's position).
+  `begin_play` sets it to the Play's start (0, or the resume's position),
+  and a `Position` before the new song's `Started` (no title clock yet) does
+  not move it: that is the old song's last report, sent before its
+  pipeline read the Play (`Position` names no video; review round 4).
 - Pinned in `tests_scene_change.rs` (`Window::{Due, BeforeShow, AfterHide,
   OtherSong, NotStarted}`, the Play re-sync on and off program, the failed
   reads, the window-less resume), `title_tests.rs` (the clock's instants and
