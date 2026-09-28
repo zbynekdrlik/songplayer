@@ -40,7 +40,8 @@ export function sceneSwitchSettled(
 
 export interface WaitForSceneSwitchOptions {
   /** Give up (throw) after this many ms. Default 8000: covers a program
-   * transition of up to ~7 s plus the cue wait (the box runs 300 ms); a
+   * transition of up to ~7 s plus the cue wait (the box's SP-program read
+   * `fade 300 ms`, source `setting`, on 28.9 — #221 design record); a
    * longer fade (the cap is 10 s, ~10.6 s with the cue wait) needs a larger
    * `timeoutMs`. */
   timeoutMs?: number;
