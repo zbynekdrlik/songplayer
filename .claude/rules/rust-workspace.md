@@ -577,6 +577,14 @@ sees that. What held up across five review rounds:
   `Mutex<bool>` + `Condvar` gate (`set_held`). Require the caller to make N
   more steps within a bounded `wait_for`, then release. Any wait on the
   caller's side stalls and fails the bound.
+- **An awaited `mpsc` send to a queue that drains only while a peer is
+  connected (cg OBS's command queue) is a stall** (#217 addendum 3, review
+  rounds 3–4: it parked the engine loop, then the title timers). Send what
+  matters first, then `try_send` the rest. Test it with a capacity-1
+  channel filled by one `try_send`, the receiver KEPT ALIVE (`_rx`: a
+  dropped receiver makes the send fail at once, so the test passes
+  vacuously), the call under `tokio::time::timeout(5 s)`, then assert the
+  important command arrived.
 - **Use "must NOT happen yet" windows only in the safe direction.** For
   example, `recv_timeout(200 ms).is_err()` while the gate is held. Correct
   code can never fail it; a slow runner only makes it pass vacuously.
