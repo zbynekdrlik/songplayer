@@ -50,6 +50,13 @@ fn ranges(plan: &[DisplayLine]) -> Vec<Range<usize>> {
     plan.iter().map(|d| d.src_range.clone()).collect()
 }
 
+/// The source lines of a plan that must be ONE wall line. (A one-range array
+/// literal would trip `clippy::single_range_in_vec_init`.)
+fn single(plan: &[DisplayLine]) -> Range<usize> {
+    assert_eq!(plan.len(), 1, "one wall line, got {:?}", texts(plan));
+    plan[0].src_range.clone()
+}
+
 fn spans(plan: &[DisplayLine]) -> Vec<(u64, u64)> {
     plan.iter().map(|d| (d.show_ms, d.hide_ms)).collect()
 }
@@ -116,7 +123,8 @@ fn a_display_line_is_one_whole_sentence() {
 
 #[test]
 fn every_sentence_mark_ends_a_display_line() {
-    // `. ! ? …`, also before closing quotes and brackets.
+    // `. ! ? …`, also before closing quotes and brackets, the Slovak „…“ and
+    // »…« included (dub lines group by their SK).
     for text in [
         "Glory to God.",
         "Glory to God!",
@@ -129,6 +137,8 @@ fn every_sentence_mark_ends_a_display_line() {
         "Glory to God.)",
         "Glory to God!]",
         "Glory to God.'",
+        "Sláva Bohu.“",
+        "Sláva Bohu!«",
     ] {
         let plan = song_plan(&[en(0, 1_000, text), en(1_000, 2_000, "we sing")]);
         assert_eq!(ranges(&plan), [0..1, 1..2], "{text:?} ends a sentence");
@@ -149,7 +159,7 @@ fn a_line_without_a_sentence_mark_runs_on_into_the_next() {
         "Glory to God)",
     ] {
         let plan = song_plan(&[en(0, 1_000, text), en(1_000, 2_000, "we sing.")]);
-        assert_eq!(ranges(&plan), [0..2], "{text:?} does not end a sentence");
+        assert_eq!(single(&plan), 0..2, "{text:?} does not end a sentence");
         assert_eq!(plan[0].en, format!("{text} we sing."));
     }
 }
@@ -188,7 +198,7 @@ fn a_long_sentence_with_no_soft_end_splits_before_the_line_that_overflows() {
         en(0, 1_000, &first),
         en(1_000, 2_000, &format!("{}.", "ž".repeat(35))),
     ]);
-    assert_eq!(ranges(&at_72), [0..2]);
+    assert_eq!(single(&at_72), 0..2);
     assert_eq!(at_72[0].en.chars().count(), MAX_CHARS);
     let at_73 = song_plan(&[
         en(0, 1_000, &first),
@@ -208,7 +218,7 @@ fn a_sentence_sung_over_6500_ms_splits_at_its_last_soft_end() {
         ])
     };
     // The last line starts exactly 6500 ms after the first: one wall line.
-    assert_eq!(ranges(&sentence(6_500)), [0..4]);
+    assert_eq!(single(&sentence(6_500)), 0..4);
     // At 6501 ms it splits after "people,", and the rest stays together.
     assert_eq!(ranges(&sentence(6_501)), [0..1, 1..4]);
 }

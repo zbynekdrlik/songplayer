@@ -93,7 +93,7 @@ fn text_of(line: &LyricsLine) -> &str {
 /// skipped).
 fn ends_a_sentence(line: &LyricsLine) -> bool {
     text_of(line)
-        .trim_end_matches(['"', '\'', '”', '’', '»', ')', ']'])
+        .trim_end_matches(['"', '\'', '”', '’', '“', '»', '«', ')', ']'])
         .ends_with(['.', '!', '?', '…'])
 }
 
