@@ -173,6 +173,7 @@ impl PlaybackEngine {
                 scene_active: Arc::new(AtomicBool::new(false)),
                 title_show_abort: None,
                 title_hide_abort: None,
+                scene_off_due: None,
                 cached_song: String::new(),
                 cached_artist: String::new(),
                 cached_duration_ms: 0,

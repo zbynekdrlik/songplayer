@@ -459,3 +459,111 @@ async fn a_scene_back_on_inside_the_hold_keeps_the_lyrics_and_resumes_the_lines(
         "back on program: the line goes to the wall again at the next Position"
     );
 }
+
+// -- the hold marker (`scene_off_due`) itself ------------------------------
+
+/// Wait (bounded) until `task` has finished. The hold's re-check sleeps a
+/// minute, so within the test only an abort finishes it.
+async fn finished(task: &tokio::task::AbortHandle) -> bool {
+    for _ in 0..400 {
+        if task.is_finished() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    false
+}
+
+/// OUT's pending hold re-check (the hold marker).
+fn re_check(engine: &PlaybackEngine) -> tokio::task::AbortHandle {
+    out(engine)
+        .scene_off_due
+        .clone()
+        .expect("OUT is held: its re-check is pending")
+}
+
+/// Item 1b: the pause of a held playlist ends its hold. Its pending re-check
+/// is cancelled, so the playlist is no longer held (a later song of its own
+/// is not paused by a stale marker), and its lyrics go with the pause, as
+/// the scene-off dropped them before the hold existed: a later scene-on
+/// starts a new song and must not re-push the old song's lines before the
+/// new `Started` loads its own.
+#[tokio::test]
+async fn the_pause_of_a_held_playlist_cancels_its_re_check_and_drops_its_lyrics() {
+    let mut rig = rig().await;
+    playing(&mut rig.engine);
+    rig.engine.pipelines.get_mut(&OUT).unwrap().lyrics_state = Some(LyricsState::new(track()));
+    let _bus = hold(&mut rig).await;
+    let due = re_check(&rig.engine);
+
+    rig.engine
+        .handle_pipeline_event(OUT, PipelineEvent::Ended)
+        .await;
+
+    let pp = out(&rig.engine);
+    assert!(pp.scene_off_due.is_none(), "no longer held");
+    assert!(pp.lyrics_state.is_none(), "the pause drops the lyrics");
+    assert!(finished(&due).await, "the pending re-check was cancelled");
+}
+
+/// A scene back on program ends the hold: nothing is pending, and the
+/// playlist is an ordinary on-program one again, so its song's end starts
+/// the next song as always. The scene-off cleared the wall's line and the
+/// stage display moved on, so their dedup keys were reset for the resume.
+#[tokio::test]
+async fn a_scene_back_on_program_ends_the_hold() {
+    let mut rig = rig().await;
+    playing(&mut rig.engine);
+    {
+        let pp = rig.engine.pipelines.get_mut(&OUT).unwrap();
+        pp.last_presenter_text = Some("alpha".into());
+        pp.last_resolume_subtitles_signature = Some("show|alpha".into());
+    }
+    let _bus = hold(&mut rig).await;
+    let pp = out(&rig.engine);
+    assert_eq!(pp.last_presenter_text, None, "the stage display moved on");
+    assert_eq!(
+        pp.last_resolume_subtitles_signature, None,
+        "the scene-off cleared the wall's line"
+    );
+    let due = re_check(&rig.engine);
+
+    rig.engine.handle_scene_change(OUT, true).await;
+
+    assert!(out(&rig.engine).scene_off_due.is_none(), "no longer held");
+    assert!(finished(&due).await, "the pending re-check was cancelled");
+    rig.engine
+        .handle_pipeline_event(OUT, PipelineEvent::Ended)
+        .await;
+    assert!(
+        matches!(out(&rig.engine).state, PlayState::Playing { .. }),
+        "on program again: the next song starts"
+    );
+    assert_eq!(plays_recorded(&rig.engine).await, 1);
+}
+
+/// A hold that asks again (its window is not over at the re-check) replaces
+/// its pending re-check, never leaving a second one behind.
+#[tokio::test]
+async fn a_newer_hold_supersedes_the_pending_re_check() {
+    let mut rig = rig().await;
+    playing(&mut rig.engine);
+    let _bus = hold(&mut rig).await;
+    let first = re_check(&rig.engine);
+
+    rig.engine
+        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue)
+        .await;
+
+    assert_eq!(
+        out(&rig.engine).state,
+        PlayState::Playing { video_id: SONG },
+        "still held: the window is a minute away"
+    );
+    let second = re_check(&rig.engine);
+    assert!(finished(&first).await, "the superseded one was cancelled");
+    assert!(
+        !second.is_finished(),
+        "a new re-check is pending, a minute away"
+    );
+}

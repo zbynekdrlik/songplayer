@@ -151,6 +151,7 @@ fn cancel_title_timers_aborts_pending_handles() {
             scene_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             title_show_abort: Some(task.abort_handle()),
             title_hide_abort: None,
+            scene_off_due: None,
             cached_song: String::new(),
             cached_artist: String::new(),
             cached_duration_ms: 0,

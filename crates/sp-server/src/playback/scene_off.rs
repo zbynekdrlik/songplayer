@@ -24,6 +24,17 @@
 //! The re-check comes back on the engine's own event channel as
 //! `PipelineEvent::SceneOffDue`. If the scene came back on program in the
 //! meantime, it does nothing.
+//!
+//! A HELD playlist (its re-check pending, `PlaylistPipeline::scene_off_due`)
+//! is off program, so it has no side effects (release 0.68.0 blockers,
+//! design record 5863318980): no lyrics line goes out
+//! (`dispatch_lyrics_if_changed`), and its song's end, a failure or a skip
+//! PAUSE it at once (`pause_if_held`) instead of starting a song off program:
+//! that song's `record_play`, its title timers (whose hide took down the
+//! title of the playlist on program) and the ungated song-end clear of the
+//! shared subtitle clips never happen. The program bus then mixes the rest
+//! of the window out of the paused side's standby (its frozen frame or idle
+//! black, and silence).
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -101,10 +112,45 @@ impl PlaybackEngine {
             "scene off program — the playlist keeps playing through the program transition"
         );
         let tx = self.event_tx.clone();
-        tokio::spawn(async move {
+        let due = tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             let _ = tx.send((playlist_id, PipelineEvent::SceneOffDue));
-        });
+        })
+        .abort_handle();
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            pp.end_hold(); // a re-check of an earlier hold is superseded
+            pp.scene_off_due = Some(due);
+        }
+    }
+
+    /// A playlist HELD off program (see the module doc) whose song ended,
+    /// failed or was skipped: pause it now, as the hold's end would (a
+    /// `SceneOff`: the Pause cancels the hold's re-check and the title
+    /// timers), instead of starting a song off program. Returns whether it
+    /// was held; `false` = the caller goes on as usual.
+    pub(super) async fn pause_if_held(&mut self, playlist_id: i64, why: &'static str) -> bool {
+        let held = self
+            .pipelines
+            .get(&playlist_id)
+            .is_some_and(|pp| pp.scene_off_due.is_some());
+        if held {
+            info!(
+                playlist_id,
+                why, "held off program through a transition — paused now, no song starts there"
+            );
+            self.apply_event(playlist_id, PlayEvent::SceneOff).await;
+        }
+        held
+    }
+}
+
+impl super::PlaylistPipeline {
+    /// The hold is over (its pause, a scene back on program, or a newer
+    /// hold): its pending re-check is cancelled.
+    pub(super) fn end_hold(&mut self) {
+        if let Some(due) = self.scene_off_due.take() {
+            due.abort();
+        }
     }
 }
 

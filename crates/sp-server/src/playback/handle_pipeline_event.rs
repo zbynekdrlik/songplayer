@@ -121,6 +121,11 @@ impl PlaybackEngine {
                 self.maybe_broadcast_position_update(playlist_id, *position_ms, *duration_ms);
             }
             PipelineEvent::Ended => {
+                // #215: held off program, it pauses: no song starts there, and
+                // the shared subtitle clips belong to the playlist on program.
+                if self.pause_if_held(playlist_id, "its song ended").await {
+                    return;
+                }
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.cancel_title_timers();
                     pp.lyrics_state = None;
@@ -130,6 +135,9 @@ impl PlaybackEngine {
             }
             PipelineEvent::Error(msg) => {
                 warn!(playlist_id, %msg, "pipeline error");
+                if self.pause_if_held(playlist_id, "its song failed").await {
+                    return;
+                }
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.cancel_title_timers();
                     pp.lyrics_state = None;

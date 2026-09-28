@@ -136,6 +136,13 @@ struct PlaylistPipeline {
     title_show_abort: Option<tokio::task::AbortHandle>,
     /// Abort handle for the title-hide timer (3.5s before end).
     title_hide_abort: Option<tokio::task::AbortHandle>,
+    /// #215: the pending re-check (`SceneOffDue`) of a playlist HELD off
+    /// program through a transition (`scene_off.rs`); `Some` = held. Its
+    /// pause, a scene back on program and a newer hold end it (`end_hold`).
+    /// A held playlist has no side effects: no lyrics line goes out, and its
+    /// song's end, a failure or a skip pause it instead of starting a song
+    /// off program (release 0.68.0 blockers, design record 5863318980).
+    scene_off_due: Option<tokio::task::AbortHandle>,
     /// Cached song/artist/duration so `Position` events can re-broadcast
     /// `NowPlaying` without re-querying the DB.
     cached_song: String,
@@ -154,7 +161,8 @@ struct PlaylistPipeline {
     /// `handle_previous`. Bounded to [`PREVIOUS_HISTORY_CAPACITY`].
     history: VecDeque<i64>,
     /// Active lyrics state for karaoke display. Loaded when a video with
-    /// lyrics starts; cleared when the video ends.
+    /// lyrics starts; cleared when the video ends or the pipeline pauses. A
+    /// scene-off keeps it through the #215 hold (design record 5863318980).
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
     /// Presenter-push debounce: last EN text sent, compared each 500ms tick.
     last_presenter_text: Option<String>,
@@ -450,6 +458,9 @@ impl PlaybackEngine {
         let went_off_program = if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
             // Release pairs with Acquire in the title-show task.
             let prev = pp.scene_active.swap(on_program, Ordering::Release);
+            if on_program {
+                pp.end_hold(); // #215: back on program, no pause is pending
+            }
             prev && !on_program
         } else {
             false
@@ -457,7 +468,12 @@ impl PlaybackEngine {
         if went_off_program {
             if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                 pp.cancel_title_timers();
-                pp.lyrics_state = None;
+                // Design record 5863318980 item 2: the lyrics stay loaded
+                // through the #215 hold (a scene back on program resumes its
+                // lines; the pause drops them). The wall is cleared below and
+                // the stage display moves on, so their dedup keys go too.
+                pp.last_resolume_subtitles_signature = None;
+                pp.last_presenter_text = None;
             }
             let _ = self
                 .resolume_tx
@@ -561,6 +577,10 @@ impl PlaybackEngine {
             if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                 pp.mode = *new_mode;
             }
+        }
+        // #215: a skip of a playlist held off program starts no song there.
+        if matches!(cmd, PlayEvent::Skip) && self.pause_if_held(playlist_id, "skipped").await {
+            return;
         }
         self.apply_event(playlist_id, cmd).await;
     }
@@ -875,6 +895,13 @@ impl PlaybackEngine {
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.paused_at = pp.current_video_id.map(|v| (v, pp.cached_position_ms));
                     pp.pipeline.send(PipelineCommand::Pause);
+                    // A paused song writes nothing more (design record
+                    // 5863318980 items 1c + 2): its title timers and a
+                    // hold's re-check go, and its lyrics, which a scene-off
+                    // kept through the hold. A resume's `Started` reloads them.
+                    pp.cancel_title_timers();
+                    pp.end_hold();
+                    pp.lyrics_state = None;
                     debug!(playlist_id, paused_at = ?pp.paused_at, "paused pipeline");
                 }
             }
