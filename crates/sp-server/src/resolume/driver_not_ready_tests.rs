@@ -951,3 +951,47 @@ async fn a_failed_fetch_opens_an_episode_only_without_songplayer_clips() {
         "no clips: the episode opens on the first failure and keeps its start"
     );
 }
+
+/// Review round 1: a failed attempt never takes the 2 s fast path, so an
+/// episode counted from its failure could be past its 120 s window before
+/// Arena answered at all (three failures 60 s apart). The composition then
+/// answered, still loading, and waited out the 60 s retry instead of the
+/// 2 s ticks. The first ANSWER restarts a failure's episode; after that its
+/// start holds (it is never restamped on each refresh).
+#[tokio::test]
+async fn a_failed_fetch_s_episode_restarts_at_the_first_answer() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(500))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"layers": []})))
+        .mount(&server)
+        .await;
+    let mut driver = HostDriver::new("127.0.0.1".into(), server.address().port());
+    let base = Instant::now();
+    assert!(driver.refresh_mapping(base).await.is_err());
+    assert_eq!(driver.not_ready_since, Some(base));
+
+    driver.refresh_mapping(base + secs(180)).await.unwrap();
+    assert_eq!(
+        driver.not_ready_since,
+        Some(base + secs(180)),
+        "the first answer restarts the episode"
+    );
+    assert_eq!(
+        driver.tick_period(base + secs(182), secs(10)),
+        secs(2),
+        "a fresh fast window: 2 s ticks while Arena loads"
+    );
+    driver.refresh_mapping(base + secs(184)).await.unwrap();
+    assert_eq!(
+        driver.not_ready_since,
+        Some(base + secs(180)),
+        "then its start holds"
+    );
+}
