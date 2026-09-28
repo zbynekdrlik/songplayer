@@ -74,6 +74,12 @@ impl PlaybackEngine {
             }
         }
 
+        // #215: a pick inside a transition hold ends the hold (review rounds
+        // 1 + 3): the song plays like any song played off program by hand,
+        // and the clear below is not skipped as a held playlist's.
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            pp.end_hold();
+        }
         // Clear Resolume `#sp-subs` and Presenter immediately so the previous
         // song's last line doesn't linger during the new song's intro
         // (e.g. song 17 has ~19s before first lyric).
@@ -93,9 +99,6 @@ impl PlaybackEngine {
             pp.last_lyrics_ws_signature = None;
             pp.paused_at = None;
             pp.state = PlayState::Playing { video_id };
-            // #215: a pick inside a transition hold ends the hold: the song
-            // plays like any song played off program by hand (review round 1).
-            pp.end_hold();
             info!(
                 playlist_id,
                 video_id, %video_path, %audio_path,
