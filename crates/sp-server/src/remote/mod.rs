@@ -423,7 +423,8 @@ impl Upstream {
     /// `rx` on a timeout makes the OBS side skip the call if it runs later
     /// (`reply.is_closed()`), and the OBS side writes an awaited switch only
     /// while its whole answer timeout is left of this wait (its `deadline`):
-    /// cg OBS never switches after the requester was told "not ready".
+    /// a switch cg OBS answers within the OBS client's 2 s never lands after
+    /// the requester was told "not ready".
     pub async fn wait(&self, rx: oneshot::Receiver<Option<Value>>) -> Option<Value> {
         tokio::time::timeout(self.timeout, rx).await.ok()?.ok()?
     }

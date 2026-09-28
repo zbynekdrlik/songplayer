@@ -26,18 +26,22 @@
 //!   other request's answer is awaited beside the later calls.
 //! - **A superseded switch is never sent.** A switch with a later, still
 //!   wanted MIRROR already queued behind it is answered with nothing and not
-//!   written: while cg OBS is slow, a burst of presses cannot push the newest
-//!   one past its requester's 3 s timeout (a given-up call is skipped). Only a
-//!   mirror supersedes (`supersedes`): its `SP-program` cut already happened.
+//!   written: while cg OBS is slow, a burst of presses cannot hold the newest
+//!   mirror behind older switches (up to 2 s each) until its waiter gives up
+//!   (`Upstream::wait_mirror`; a given-up call is skipped). Only a mirror
+//!   supersedes (`supersedes`): its `SP-program` cut already happened.
 //!   A manual press's forward supersedes nothing: its cut depends on cg OBS's
 //!   answer, which may be a refusal (600) or come too late.
 //! - **An awaited switch keeps its requester's verdict.** A switch the
 //!   facade awaits (a manual press's forward) is written only while its
 //!   requester still has the whole answer timeout left (`deadline`);
-//!   otherwise it is answered with nothing and never written. So cg OBS
-//!   never switches after its requester was told "not ready". A mirror goes
-//!   out however late (its cut already happened); a getter changes nothing
-//!   in cg OBS, so it is written while its requester still waits.
+//!   otherwise it is answered with nothing and never written. So a switch
+//!   cg OBS answers within `DEFAULT_RESPONSE_TIMEOUT` never lands after its
+//!   requester was told "not ready". (One cg OBS answers later is given up
+//!   by the forwarder at 2 s, yet cg OBS may still carry it out: a frame
+//!   once written cannot be recalled.) A mirror goes out however late (its
+//!   cut already happened); a getter changes nothing in cg OBS, so it is
+//!   written while its requester still waits.
 //!
 //! The facade waits for a reply only for a bounded time. A call whose requester
 //! already gave up (`reply.is_closed()`, e.g. queued while cg OBS was away) is
@@ -76,9 +80,10 @@ pub enum RemoteCall {
         /// happened (a playlist press's mirror): it replaces an earlier switch
         /// still queued. `false` for everything the facade awaits.
         supersedes: bool,
-        /// #221: when the requester stops waiting (`Upstream`'s timeout after
-        /// it enqueued the call). An awaited switch is written only while the
-        /// forwarder's whole answer timeout is left of it.
+        /// #221: when an AWAITED call's requester stops waiting (`Upstream`'s
+        /// timeout after it enqueued the call; a mirror's waiter waits longer,
+        /// `Upstream::wait_mirror`). An awaited switch is written only while
+        /// the forwarder's whole answer timeout is left of it.
         deadline: Instant,
         reply: oneshot::Sender<Option<Value>>,
     },

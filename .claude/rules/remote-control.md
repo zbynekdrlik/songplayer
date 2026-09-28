@@ -133,10 +133,11 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
 
   - **A superseded switch is never sent (round 3, narrowed in round 4).**
     While cg OBS answers slowly (its UI thread busy), each queued switch
-    would hold the forwarder up to 2 s, so the newest could pass its
-    requester's 3 s timeout and be skipped. So a switch with a later, still
-    wanted MIRROR queued behind it (`RemoteCall::Request.supersedes`, set only
-    by `program_switch`'s mirror through `Upstream::enqueue(…, true)`) is
+    would hold the forwarder up to 2 s, so the newest mirror could wait
+    behind them until its waiter gave up (`wait_mirror`) and be skipped. So
+    a switch with a later, still wanted MIRROR queued behind it
+    (`RemoteCall::Request.supersedes`, set only by `program_switch`'s mirror
+    through `Upstream::enqueue(…, true)`) is
     answered with nothing and never written. A manual press's forward
     supersedes NOTHING: its `SP-program` cut depends on cg OBS's answer,
     which may be a refusal (600) or come too late — a mirror it replaced
@@ -146,16 +147,18 @@ SongPlayer; cg OBS is only the NDI input "OBS manuál"; design record comment
     upstream timeout). A manual press's switch (ordered, not a mirror) with
     less than the forwarder's answer timeout left — e.g. queued behind an
     unanswered mirror (2 s) with ~1 s of its 3 s left — is answered with
-    nothing and never written (`RemoteCall::too_late`): cg OBS never
-    switches after the facade answered the press "not ready" (a keep). A
+    nothing and never written (`RemoteCall::too_late`): a switch cg OBS
+    answers within its 2 s never lands after the facade answered the press
+    "not ready" (a keep; for a later answer see Residuals). A
     mirror goes out however late (its cut already happened), and a getter is
     written while its requester still waits (it changes nothing in cg OBS).
     A call whose requester already gave up is skipped (`reply.is_closed()`).
   - **A mirror's waiter outwaits the forwarder.** `record_mirror` waits with
     `Upstream::wait_mirror` = the upstream timeout + `MIRROR_EXTRA_WAIT`
     (4 s = a switch in flight + the mirror's own answer, each ≤ 2 s; pinned
-    to `2 × DEFAULT_RESPONSE_TIMEOUT` by a test), so a mirror cg OBS
-    followed late is still recorded `ok`, never `not_ready`.
+    to `2 × DEFAULT_RESPONSE_TIMEOUT` by a test), so a mirror that waited
+    in the queue and was then answered within the OBS client's 2 s is
+    recorded `ok`, not `not_ready`.
   - The forwarder's answer timeout is a parameter (`run_calls(…,
     answer_timeout)`; `forwarder()` passes the production 2 s): the tests
     pass 10 minutes, so a wait the forwarder must not do fails them, and
@@ -383,6 +386,15 @@ authority and deleting the follow are the later lanes (L3–L6) of #221.
   longer would hold every later press behind a stalled cg OBS; the next
   press (or the operator) corrects it, and `cg_forward` shows the late one
   as `not_ready`.
+- **A switch cg OBS answers after the OBS client's 2 s is reported as not
+  switched although it may have happened.** The deadline rule only decides
+  whether a switch is WRITTEN (`too_late` is checked just before the write,
+  with no margin for the write itself); a written frame cannot be recalled.
+  So a manual press whose switch cg OBS carries out after 2 s is answered
+  "not ready" (207) and the program is kept while cg OBS (and so "OBS
+  manuál") did switch; a mirror cg OBS answers after 2 s is recorded
+  `cg_forward: not_ready` although cg OBS followed. The next press
+  corrects it.
 - In Studio Mode cg OBS can drop a `CurrentProgramSceneChanged` (#170).
   Companion's feedback then misses it exactly as it does when connected to cg
   OBS directly. SongPlayer's own ~2 s poll reconcile emits `SceneChanged`,
