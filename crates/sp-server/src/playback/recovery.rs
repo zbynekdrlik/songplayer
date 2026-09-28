@@ -50,14 +50,26 @@ pub(crate) async fn forward_recovery_events(
     }
 }
 
-/// The Resolume registry with a host driver per `(id, host, port)` (RED:
-/// `lib.rs` still subscribes the recovery forwarder after the startup).
+/// The Resolume registry with a host driver per `(id, host, port)`, its
+/// `RecoveryEvent` forwarder subscribed BEFORE the first driver starts
+/// (release 0.68.0 blocker 4, design record 5863318980).
+/// `ResolumeRegistry::new` keeps no receiver, and a broadcast sent with none
+/// is dropped: when `lib.rs` subscribed after the startup (up to ~55 s after
+/// `add_host` started the drivers), a driver's startup not-ready → ready
+/// re-sync was lost, and Arena's restored stale text stayed on the wall.
+/// The forwarded events queue on `engine_tx` until the engine loop runs.
 pub(crate) fn registry_with_forwarder(
     hosts: Vec<(i64, String, u16)>,
-    _engine_tx: mpsc::Sender<EngineCommand>,
+    engine_tx: mpsc::Sender<EngineCommand>,
     shutdown_tx: &broadcast::Sender<()>,
 ) -> ResolumeRegistry {
     let mut registry = ResolumeRegistry::new();
+    let events = registry.subscribe_recovery();
+    tokio::spawn(forward_recovery_events(
+        events,
+        engine_tx,
+        shutdown_tx.subscribe(),
+    ));
     for (host_id, host, port) in hosts {
         registry.add_host(host_id, host, port, shutdown_tx.subscribe());
     }

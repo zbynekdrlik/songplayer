@@ -280,6 +280,8 @@ pub async fn start(
             (row.get("id"), row.get("host"), port as u16)
         })
         .collect();
+    // Its RecoveryEvent → engine forwarder (the title + line re-sync after a
+    // host comes back) is subscribed before the first host driver starts.
     let resolume_registry = Arc::new(playback::recovery::registry_with_forwarder(
         resolume_hosts,
         engine_tx.clone(),
@@ -772,16 +774,6 @@ pub async fn start(
         }
     }
     engine.start_program(program_bus, &shutdown_tx).await;
-
-    // Forward the Resolume registry's RecoveryEvents to the engine
-    // (EngineCommand::ResolumeRecovered: it re-syncs the title and the line
-    // after a host comes back); it survives a lagged receiver (#217 addendum 3).
-    let recovery_rx = resolume_registry.subscribe_recovery();
-    tokio::spawn(playback::recovery::forward_recovery_events(
-        recovery_rx,
-        engine_tx.clone(),
-        shutdown_tx.subscribe(),
-    ));
 
     // Engine subscribes to the download worker's broadcast so that
     // `processed:<youtube_id>` events can rewake pipelines stuck in

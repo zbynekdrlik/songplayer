@@ -736,6 +736,16 @@ impl HostDriver {
             }
             Err(e) => {
                 self.last_full_attempt_failed = true;
+                // No SongPlayer clip mapped (startup, eviction) = not ready
+                // (release 0.68.0 blocker 3): the first map fires the event.
+                // The #157 retry window still spaces the fetches.
+                if !has_songplayer_clips(&self.clip_mapping) && self.not_ready_since.is_none() {
+                    self.not_ready_since = Some(now);
+                    info!(
+                        host = %self.host,
+                        "Resolume composition fetch failed with no SongPlayer clips mapped — mapping not ready"
+                    );
+                }
                 self.apply_outcome(false);
                 Err(e)
             }

@@ -912,3 +912,42 @@ async fn a_failed_startup_fetch_opens_the_episode_and_the_first_mapping_fires_on
         "the first mapping fires exactly one RecoveryEvent: the engine re-syncs the title"
     );
 }
+
+/// Blocker 3's other side: a failed fetch while SongPlayer's clips ARE
+/// mapped is the plain #157 case (Arena's REST choking), and the map is
+/// still valid, so no episode opens. A second failure inside an episode
+/// keeps the episode's first instant (its fast window never extends).
+#[tokio::test]
+async fn a_failed_fetch_opens_an_episode_only_without_songplayer_clips() {
+    let server = arena().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(composition_with(&[SUBS_TOKEN])))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/composition"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let mut driver = HostDriver::new("127.0.0.1".into(), server.address().port());
+    let base = Instant::now();
+    driver.refresh_mapping(base).await.unwrap();
+
+    assert!(driver.refresh_mapping(base + secs(60)).await.is_err());
+    assert_eq!(
+        driver.not_ready_since, None,
+        "the clips are still mapped: not an episode"
+    );
+
+    driver.clip_mapping.clear();
+    driver.consecutive_failures = 0; // the breaker (3 failures) is another case
+    assert!(driver.refresh_mapping(base + secs(120)).await.is_err());
+    assert!(driver.refresh_mapping(base + secs(180)).await.is_err());
+    assert_eq!(
+        driver.not_ready_since,
+        Some(base + secs(120)),
+        "no clips: the episode opens on the first failure and keeps its start"
+    );
+}
