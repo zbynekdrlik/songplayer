@@ -100,7 +100,9 @@ impl PlaybackEngine {
     /// after its `Started`; if another on-program playlist's title is due,
     /// the Resync names that one. The timers and a `Resync` then never
     /// disagree between the Play and the new `Started`. Off program the
-    /// playlist's title is not on the wall: nothing is sent.
+    /// playlist's title is not on the wall: nothing is sent. A pause calls it
+    /// too: a paused song's title is not due, and its timers are cancelled
+    /// (release 0.68.0 blockers, review round 1).
     pub(super) async fn resync_after_play(&self, playlist_id: i64) {
         let on_program = self
             .pipelines
@@ -117,11 +119,16 @@ impl super::PlaylistPipeline {
     /// A Play command starts a song (#217 addendum 3). The last song's title
     /// clock and timers go: a skipped song's pending show timer must not push
     /// its title before the new `Started`, which fixes the new clock. That
-    /// clock counts from `start_ms`, 0 or a resume's position.
+    /// clock counts from `start_ms`, 0 or a resume's position. The last
+    /// song's lyrics and position go too (release 0.68.0 blockers, review
+    /// round 1): a recovery before the new `Started` re-pushed the old song's
+    /// line, and a pause there recorded the old song's position for the new.
     pub(super) fn begin_play(&mut self, start_ms: u64) {
         self.title_clock = None;
         self.cancel_title_timers();
         self.play_start_ms = start_ms;
+        self.lyrics_state = None;
+        self.cached_position_ms = start_ms;
     }
 }
 

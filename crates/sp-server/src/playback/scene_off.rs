@@ -39,7 +39,7 @@
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use tracing::info;
+use tracing::{debug, info};
 
 use super::PlaybackEngine;
 use super::pipeline::PipelineEvent;
@@ -72,10 +72,21 @@ impl PlaybackEngine {
             .await;
     }
 
-    /// `PipelineEvent::SceneOffDue`: re-check a held pause; nothing when the
-    /// scene came back on program (or the pipeline is gone). (RED: the
-    /// re-check task's id `_due` is not checked yet.)
-    pub(super) async fn scene_off_due(&mut self, playlist_id: i64, _due: tokio::task::Id) {
+    /// `PipelineEvent::SceneOffDue` of the hold's re-check task `due`:
+    /// re-check a held pause; nothing when the scene came back on program (or
+    /// the pipeline is gone), or when a newer hold replaced that task. That
+    /// re-check was already queued (A→B→A→B inside one hold): taken as the
+    /// newer hold's, it skipped that hold's `CUT_SETTLE` (review round 1).
+    pub(super) async fn scene_off_due(&mut self, playlist_id: i64, due: tokio::task::Id) {
+        let superseded = self
+            .pipelines
+            .get(&playlist_id)
+            .and_then(|pp| pp.scene_off_due.as_ref())
+            .is_some_and(|pending| pending.id() != due);
+        if superseded {
+            debug!(playlist_id, "a superseded hold's re-check — ignored");
+            return;
+        }
         self.scene_off_recheck(playlist_id, utc_now_100ns()).await;
     }
 

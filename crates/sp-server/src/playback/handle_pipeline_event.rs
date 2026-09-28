@@ -8,7 +8,7 @@
 use tracing::{debug, info, warn};
 
 use super::pipeline::PipelineEvent;
-use super::state::PlayEvent;
+use super::state::{PlayEvent, PlayState};
 use super::title;
 use super::{PlaybackEngine, lyrics_loader};
 
@@ -28,6 +28,20 @@ impl PlaybackEngine {
                 //    switches from "Nothing playing" immediately.
                 self.broadcast_now_playing_on_start(playlist_id, *duration_ms)
                     .await;
+
+                // A Play that a pause overtook (the #215 hold's end, the
+                // dashboard's Pause): the song is loaded, but paused. None of
+                // it reaches the wall, the stage display or the title timers
+                // (release 0.68.0 blockers, review round 1); its resume's
+                // `Started` does all of that.
+                if self
+                    .pipelines
+                    .get(&playlist_id)
+                    .is_some_and(|pp| pp.state == PlayState::WaitingForScene)
+                {
+                    debug!(playlist_id, "started, but paused — nothing to show");
+                    return;
+                }
 
                 // Load lyrics for karaoke display
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {

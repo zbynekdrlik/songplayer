@@ -93,6 +93,9 @@ impl PlaybackEngine {
             pp.last_lyrics_ws_signature = None;
             pp.paused_at = None;
             pp.state = PlayState::Playing { video_id };
+            // #215: a pick inside a transition hold ends the hold: the song
+            // plays like any song played off program by hand (review round 1).
+            pp.end_hold();
             info!(
                 playlist_id,
                 video_id, %video_path, %audio_path,

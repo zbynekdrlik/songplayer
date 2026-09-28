@@ -613,6 +613,7 @@ impl PlaybackEngine {
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.current_video_id = Some(video_id);
                     pp.state = PlayState::Playing { video_id };
+                    pp.end_hold(); // #215: the operator's pick plays, off program too
                     info!(
                         playlist_id,
                         video_id, %video_path, %audio_path,
@@ -904,6 +905,9 @@ impl PlaybackEngine {
                     pp.lyrics_state = None;
                     debug!(playlist_id, paused_at = ?pp.paused_at, "paused pipeline");
                 }
+                // On program, a paused song's title is not due: the wall says
+                // so now, as any later re-sync would (review round 1).
+                self.resync_after_play(playlist_id).await;
             }
 
             PlayAction::SendBlack => {
