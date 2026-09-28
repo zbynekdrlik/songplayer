@@ -2,15 +2,21 @@
 //! requests + batches, and the re-emitted cg OBS events.
 //!
 //! Requests of one session run strictly in order (Companion correlates by
-//! `requestId`, so this is only a latency choice); remote scene presses are
-//! additionally serialized across ALL sessions by `Facade::cut_order`.
+//! `requestId`, so this is only a latency choice); scene presses are
+//! additionally serialized across ALL sessions by the program switch
+//! (`playback::program_switch`, the bus's `switch_order`).
+//!
+//! #221: each session keeps its OWN preview scene (`SetCurrentPreviewScene`;
+//! until it sets one, the preview is the program scene). Companion's
+//! preview → transition pair and another client (the post-deploy E2E driver)
+//! can never trigger each other's preview.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio::sync::broadcast::error::RecvError;
 use tokio_tungstenite::WebSocketStream;
@@ -22,16 +28,15 @@ use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
 use tokio_tungstenite::tungstenite::{self, Message};
 use tracing::{debug, info, warn};
 
-use super::map::{self, KeepReason};
 use super::protocol::{
-    self, AuthChallenge, ClientMessage, CloseReason, Reply, RequestItem, Route,
-    STATUS_GENERIC_ERROR, STATUS_MISSING_REQUEST_FIELD, STATUS_MISSING_REQUEST_TYPE,
-    STATUS_NOT_READY, STATUS_UNKNOWN_REQUEST_TYPE, Subprotocol,
+    self, AuthChallenge, ClientMessage, CloseReason, EVENT_SCENES, Reply, RequestItem, Route,
+    STATUS_GENERIC_ERROR, STATUS_MISSING_REQUEST_TYPE, STATUS_NOT_READY,
+    STATUS_UNKNOWN_REQUEST_TYPE, Subprotocol,
 };
-use super::{Facade, MAX_MESSAGE_BYTES, RemoteCut, clip, now_ms};
+use super::{Facade, MAX_MESSAGE_BYTES, clip};
 use crate::obs::ObsEvent;
-use crate::playback::ndi_input::load_input_settings;
-use crate::playback::program_bus::persist_and_cut;
+use crate::playback::program_on_air::program_scene_name;
+use crate::playback::program_switch::{SwitchCtx, Switched, Via, switch_scene};
 
 type WsWrite = SplitSink<WebSocketStream<TcpStream>, Message>;
 
@@ -86,6 +91,7 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
         auth: facade.password.as_ref().map(|_| AuthChallenge::random()),
         identified: false,
         subscriptions: 0,
+        preview: None,
     };
     if send(&mut write, &protocol::hello(session.auth.as_ref()))
         .await
@@ -193,6 +199,9 @@ pub(crate) struct Session<'a> {
     /// The `eventSubscriptions` bitmask, 0 until `Identify` — so no event
     /// reaches a client before it identified.
     pub(crate) subscriptions: u64,
+    /// #221: this client's preview scene; `None` until it sets one (the
+    /// preview then reads as the program scene).
+    pub(crate) preview: Option<String>,
 }
 
 impl Session<'_> {
@@ -231,31 +240,118 @@ impl Session<'_> {
                 Step::Send(vec![protocol::identified()])
             }
             ClientMessage::Request(item) => {
-                let reply = execute(self.facade, &item).await;
+                let mut events = Vec::new();
+                let reply = self.execute(&item, &mut events).await;
                 let request_type = item.request_type.as_deref().unwrap_or_default();
                 let request_id = item.request_id.as_deref().unwrap_or_default();
-                Step::Send(vec![protocol::request_response(
-                    request_type,
-                    request_id,
-                    &reply,
-                )])
+                let mut msgs = vec![protocol::request_response(request_type, request_id, &reply)];
+                msgs.append(&mut events);
+                Step::Send(msgs)
             }
             ClientMessage::Batch {
                 request_id,
                 halt_on_failure,
                 requests,
             } => {
+                let mut events = Vec::new();
                 let mut results = Vec::with_capacity(requests.len());
                 for item in &requests {
-                    let reply = execute(self.facade, item).await;
+                    let reply = self.execute(item, &mut events).await;
                     results.push(protocol::batch_result(item, &reply));
                     if halt_on_failure && !reply.succeeded() {
                         break;
                     }
                 }
-                Step::Send(vec![protocol::batch_response(&request_id, results)])
+                let mut msgs = vec![protocol::batch_response(&request_id, results)];
+                msgs.append(&mut events);
+                Step::Send(msgs)
             }
         }
+    }
+
+    /// Answer one request (a single one or a batch entry). The events it
+    /// causes for THIS client (#221: `CurrentPreviewSceneChanged`) go to
+    /// `events`, sent after the response.
+    pub(crate) async fn execute(&mut self, item: &RequestItem, events: &mut Vec<Value>) -> Reply {
+        let facade = self.facade;
+        let Some(request_type) = item.request_type.as_deref() else {
+            return Reply::error(
+                STATUS_MISSING_REQUEST_TYPE,
+                "Your request is missing a `requestType`.",
+            );
+        };
+        facade.shared().record_request(request_type);
+        let data = item.request_data.as_ref();
+        match protocol::route(request_type) {
+            Route::Native(reply) => reply,
+            Route::Forward => forward(facade, request_type, item.request_data.clone()).await,
+            Route::SetProgramScene => match protocol::scene_name(data) {
+                Ok(scene) => switch(facade, &scene, Via::Program).await,
+                Err(reply) => reply,
+            },
+            Route::SetPreviewScene => match protocol::scene_name(data) {
+                Ok(scene) => self.set_preview(scene, events),
+                Err(reply) => reply,
+            },
+            Route::GetPreviewScene => match self.preview_scene() {
+                Some(scene) => Reply::ok(Some(protocol::preview_scene_data(&scene))),
+                None => protocol::no_scene(),
+            },
+            // ALWAYS a switch, also to the scene already on program: a
+            // same-source cut is a bus no-op whose publication still counts.
+            Route::TriggerTransition => match self.preview_scene() {
+                Some(scene) => switch(facade, &scene, Via::Transition).await,
+                None => protocol::no_scene(),
+            },
+            Route::SetTransitionDuration => match protocol::transition_duration(data) {
+                Ok(ms) => {
+                    facade.shared().record_transition_duration(ms);
+                    info!(
+                        ms,
+                        "remote: transition duration received — not applied (the program transition is the Settings value)"
+                    );
+                    Reply::ok(None)
+                }
+                Err(reply) => reply,
+            },
+            Route::Unsupported => {
+                if facade.shared().note_unsupported(request_type) {
+                    info!(
+                        request_type = %clip(request_type),
+                        "remote: a client asked for a request the facade does not serve (logged once per type)"
+                    );
+                }
+                Reply::error(
+                    STATUS_UNKNOWN_REQUEST_TYPE,
+                    &protocol::unsupported_comment(request_type),
+                )
+            }
+        }
+    }
+
+    /// This client's preview scene: the one it set, else the program scene
+    /// (`program_scene_name`), else none.
+    fn preview_scene(&self) -> Option<String> {
+        self.preview
+            .clone()
+            .or_else(|| program_scene_name(&self.facade.bus.on_air_now()))
+    }
+
+    /// `SetCurrentPreviewScene`: store it and, for a client subscribed to
+    /// Scenes, queue `CurrentPreviewSceneChanged`. No validation: a playlist
+    /// scene is known from the catalog, and cg OBS validates a manual one at
+    /// the transition.
+    fn set_preview(&mut self, scene: String, events: &mut Vec<Value>) -> Reply {
+        if protocol::subscribed(self.subscriptions, EVENT_SCENES) {
+            let data = json!({ "sceneName": scene });
+            events.push(protocol::event(
+                "CurrentPreviewSceneChanged",
+                EVENT_SCENES,
+                &data,
+            ));
+        }
+        self.preview = Some(scene);
+        Reply::ok(None)
     }
 
     /// The `Event` for one cg OBS event, when it is re-emitted and this
@@ -267,34 +363,6 @@ impl Session<'_> {
     }
 }
 
-/// Answer one request (a single one or a batch entry).
-pub(crate) async fn execute(facade: &Facade, item: &RequestItem) -> Reply {
-    let Some(request_type) = item.request_type.as_deref() else {
-        return Reply::error(
-            STATUS_MISSING_REQUEST_TYPE,
-            "Your request is missing a `requestType`.",
-        );
-    };
-    facade.shared().record_request(request_type);
-    match protocol::route(request_type) {
-        Route::Native(reply) => reply,
-        Route::Forward => forward(facade, request_type, item.request_data.clone()).await,
-        Route::SetProgramScene => set_program_scene(facade, item.request_data.clone()).await,
-        Route::Unsupported => {
-            if facade.shared().note_unsupported(request_type) {
-                info!(
-                    request_type = %clip(request_type),
-                    "remote: a client asked for a request the facade does not serve (logged once per type)"
-                );
-            }
-            Reply::error(
-                STATUS_UNKNOWN_REQUEST_TYPE,
-                &protocol::unsupported_comment(request_type),
-            )
-        }
-    }
-}
-
 /// Forward one request to cg OBS and pass its answer through.
 async fn forward(facade: &Facade, request_type: &str, data: Option<Value>) -> Reply {
     match facade.upstream.request(request_type, data).await {
@@ -303,94 +371,25 @@ async fn forward(facade: &Facade, request_type: &str, data: Option<Value>) -> Re
     }
 }
 
-/// `SetCurrentProgramScene(X)`: forward the switch to cg OBS, then cut
-/// `SP-program` per `map::scene_action` (the playlist X shows, else "OBS
-/// manuál" while it is a source, else nothing + a WARN). The client gets cg
-/// OBS's own answer, or an error when the cut could not be persisted.
-async fn set_program_scene(facade: &Facade, data: Option<Value>) -> Reply {
-    let scene = data
-        .as_ref()
-        .and_then(|d| d.get("sceneName"))
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let Some(scene) = scene else {
-        return Reply::error(
-            STATUS_MISSING_REQUEST_FIELD,
-            "Your request is missing `sceneName` (the remote control cuts by scene name).",
-        );
+/// A scene press through the ONE switch path (`program_switch`), answered the
+/// obs-websocket way: 100 for a cut or a kept program, cg OBS's own answer
+/// when it refused a manual scene, 207 when it was not reachable, 205 when
+/// the store failed.
+async fn switch(facade: &Facade, scene: &str, via: Via) -> Reply {
+    let ctx = SwitchCtx {
+        pool: &facade.pool,
+        bus: &facade.bus,
+        upstream: &facade.upstream,
     };
-    // Telemetry and logs carry the scene name clipped (a client-chosen string).
-    let shown = clip(&scene);
-    let _order = facade.cut_order.lock().await;
-    let reply = forward(facade, "SetCurrentProgramScene", data).await;
-    // Outer `None`: cg OBS did not switch. Inner `None`: the lookup got no
-    // answer — the scene is then treated as a manual one ("OBS manuál" carries
-    // cg OBS's mix, which already shows it), and the cut says so.
-    let found = if reply.succeeded() {
-        Some(facade.upstream.scene_playlists(&scene).await)
-    } else {
-        None
-    };
-    let lookup_failed = matches!(found, Some(None));
-    if lookup_failed {
-        warn!(scene = %shown, "remote: the scene lookup got no answer — treated as a manual scene");
+    match switch_scene(&ctx, scene, via).await {
+        Switched::Cut(_) | Switched::Kept => Reply::ok(None),
+        Switched::NotSwitched(Some(d)) => Reply::from_upstream(&d),
+        Switched::NotSwitched(None) => Reply::error(STATUS_NOT_READY, NOT_READY_COMMENT),
+        Switched::StoreFailed(e) => Reply::error(
+            STATUS_GENERIC_ERROR,
+            &format!("SP-program was not switched: {e}"),
+        ),
     }
-    let playlists = found.map(Option::unwrap_or_default);
-    let input_active = load_input_settings(&facade.pool)
-        .await
-        .is_ok_and(|s| s.active());
-    let action = map::scene_action(playlists.as_ref(), input_active);
-    let mut cut = RemoteCut {
-        scene: shown,
-        action: action.label(),
-        source: action.source(),
-        // An unanswered lookup is the cause whatever the action (a cut to "OBS
-        // manuál", or keep when the input is not a source).
-        reason: lookup_failed
-            .then_some("lookup_failed")
-            .or(action.keep_reason().map(KeepReason::as_str)),
-        cut_boundary_100ns: None,
-        at_ms: now_ms(),
-        via: None,
-        cg_forward: None,
-    };
-    let reply = match action.source() {
-        None => {
-            warn!(scene = %cut.scene, reason = ?cut.reason, "remote: SP-program unchanged");
-            reply
-        }
-        Some(source) => {
-            match persist_and_cut(&facade.pool, &facade.bus, source, Some(scene.as_str())).await {
-                Ok(status) => {
-                    info!(
-                        scene = %cut.scene,
-                        source,
-                        cut_boundary_100ns = ?status.cut_boundary_100ns,
-                        "remote: program cut"
-                    );
-                    cut.cut_boundary_100ns = status.cut_boundary_100ns;
-                    reply
-                }
-                Err(e) => {
-                    warn!(
-                        scene = %cut.scene,
-                        source,
-                        %e,
-                        "remote: persisting the program source failed — nothing cut"
-                    );
-                    cut.action = "keep";
-                    cut.source = None;
-                    cut.reason = Some("persist_failed");
-                    Reply::error(
-                        STATUS_GENERIC_ERROR,
-                        &format!("cg OBS switched, but SP-program was not cut: {e}"),
-                    )
-                }
-            }
-        }
-    };
-    facade.shared().record_cut(cut);
-    reply
 }
 
 #[cfg(test)]

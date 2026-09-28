@@ -3,29 +3,24 @@
 //! The facade (`crate::remote`) never opens a second connection to cg OBS. It
 //! hands a [`RemoteCall`] to SongPlayer's existing OBS client, whose connection
 //! loop runs it here on its own write half + dispatcher:
-//!
-//! - [`RemoteCall::Request`] forwards one obs-websocket request verbatim and
-//!   replies with the op=7 `d` object (`requestStatus` + `responseData`) —
-//!   the scene list and program scene reach Companion 1:1;
-//! - [`RemoteCall::ScenePlaylists`] asks which playlists a scene shows, with the
-//!   SAME [`check_scene_items`] SongPlayer's own scene detection uses, over the
-//!   same `NdiSourceMap` — so "the scene shows exactly one playlist" means what
-//!   the scene-go-on playback path means by it.
+//! [`RemoteCall::Request`] forwards one obs-websocket request verbatim and
+//! replies with the op=7 `d` object (`requestStatus` + `responseData`) — the
+//! scene list and program scene reach Companion 1:1, a manual scene press and
+//! a playlist press's mirror switch cg OBS. #221 deleted the scene → playlists
+//! lookup: the switch decides from SongPlayer's own playlists
+//! (`playback::scene_catalog`).
 //!
 //! The facade waits for a reply only for a bounded time. A call whose requester
 //! already gave up (`reply.is_closed()`, e.g. queued while cg OBS was away) is
 //! dropped unexecuted: a stale `SetCurrentProgramScene` must never switch cg OBS
 //! seconds after the button press was answered as "not ready".
 
-use std::collections::HashSet;
-
 use tokio::sync::oneshot;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, warn};
 
+use crate::obs::SharedWrite;
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
-use crate::obs::scene::check_scene_items;
-use crate::obs::{NdiSourceMap, SharedWrite};
 
 /// One call of the remote-control facade to cg OBS.
 #[derive(Debug)]
@@ -37,53 +32,22 @@ pub enum RemoteCall {
         request_data: Option<serde_json::Value>,
         reply: oneshot::Sender<Option<serde_json::Value>>,
     },
-    /// The playlist ids whose SongPlayer NDI source is in `scene` (nested
-    /// scenes and groups included). A failed lookup gets no reply (#218).
-    ScenePlaylists {
-        scene: String,
-        reply: oneshot::Sender<HashSet<i64>>,
-    },
 }
 
 /// Run one [`RemoteCall`] on the OBS connection (a task spawned by the
 /// connection loop).
-pub async fn run(
-    write: SharedWrite,
-    dispatcher: Dispatcher,
-    ndi_sources: NdiSourceMap,
-    call: RemoteCall,
-) {
-    match call {
-        RemoteCall::Request {
-            request_type,
-            request_data,
-            reply,
-        } => {
-            if reply.is_closed() {
-                debug!(request_type, "remote: the caller gave up — not forwarded");
-                return;
-            }
-            let d = forward(&write, &dispatcher, &request_type, request_data).await;
-            let _ = reply.send(d);
-        }
-        RemoteCall::ScenePlaylists { scene, reply } => {
-            if reply.is_closed() {
-                debug!(scene, "remote: the caller gave up — scene not looked up");
-                return;
-            }
-            let map = ndi_sources.read().await;
-            let lookup = check_scene_items(&write, &dispatcher, &scene, &map).await;
-            drop(map);
-            match lookup {
-                Ok(ids) => {
-                    let _ = reply.send(ids);
-                }
-                // #218: a failed lookup is not "no playlist". No reply: the
-                // facade reads it as a lookup that got no answer (and WARNs).
-                Err(e) => debug!(scene, error = %e, "remote: the scene's playlist lookup failed"),
-            }
-        }
+pub async fn run(write: SharedWrite, dispatcher: Dispatcher, call: RemoteCall) {
+    let RemoteCall::Request {
+        request_type,
+        request_data,
+        reply,
+    } = call;
+    if reply.is_closed() {
+        debug!(request_type, "remote: the caller gave up — not forwarded");
+        return;
     }
+    let d = forward(&write, &dispatcher, &request_type, request_data).await;
+    let _ = reply.send(d);
 }
 
 /// Send one request to cg OBS and return its op=7 `d` object.
@@ -151,8 +115,8 @@ mod tests {
 
     /// A call whose requester already gave up never reaches cg OBS — the
     /// first request a real WebSocket peer receives is the LIVE call run after
-    /// two abandoned ones (a stale `SetCurrentProgramScene` must never switch
-    /// cg OBS late). Deterministic: the abandoned calls are awaited first.
+    /// an abandoned one (a stale `SetCurrentProgramScene` must never switch
+    /// cg OBS late). Deterministic: the abandoned call is awaited first.
     #[tokio::test]
     async fn an_abandoned_call_is_never_sent_and_a_live_one_is() {
         use futures::StreamExt;
@@ -179,7 +143,6 @@ mod tests {
         let (write, _read) = client.split();
         let write: SharedWrite = std::sync::Arc::new(tokio::sync::Mutex::new(write));
         let dispatcher = Dispatcher::new();
-        let map: NdiSourceMap = Default::default();
 
         let (reply, rx) = oneshot::channel();
         drop(rx);
@@ -188,14 +151,7 @@ mod tests {
             request_data: Some(serde_json::json!({ "sceneName": "stale" })),
             reply,
         };
-        run(write.clone(), dispatcher.clone(), map.clone(), stale).await;
-        let (reply, rx) = oneshot::channel();
-        drop(rx);
-        let lookup = RemoteCall::ScenePlaylists {
-            scene: "stale".to_string(),
-            reply,
-        };
-        run(write.clone(), dispatcher.clone(), map.clone(), lookup).await;
+        run(write.clone(), dispatcher.clone(), stale).await;
 
         let (reply, _rx) = oneshot::channel();
         let live = RemoteCall::Request {
@@ -203,7 +159,7 @@ mod tests {
             request_data: None,
             reply,
         };
-        let live = tokio::spawn(run(write, dispatcher, map, live));
+        let live = tokio::spawn(run(write, dispatcher, live));
         let first = tokio::time::timeout(Duration::from_secs(10), cg_obs)
             .await
             .expect("cg OBS received nothing within 10 s")

@@ -759,12 +759,8 @@ async fn connect_and_run(
                     ObsCommand::Remote(call) => {
                         // #213: forwarded for the remote-control facade.
                         let write = std::sync::Arc::clone(&write);
-                        let ndi_sources = std::sync::Arc::clone(ndi_sources);
                         let dispatcher = dispatcher.clone();
-                        spawn_helper(
-                            &mut spawned_tasks,
-                            remote_call::run(write, dispatcher, ndi_sources, call),
-                        );
+                        spawn_helper(&mut spawned_tasks, remote_call::run(write, dispatcher, call));
                     }
                 }
             }

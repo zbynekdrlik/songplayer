@@ -18,11 +18,12 @@
 //!   (op 8) → `RequestBatchResponse` (op 9, executed serially in order).
 //! - Events: `Event` (op 5) to identified clients subscribed to its intent.
 //!
-//! Which request is answered how is [`route`]: a few natively, the scene/input
-//! list getters forwarded to cg OBS, `SetCurrentProgramScene` forwarded AND
-//! mapped onto the program bus, anything else a well-formed
-//! [`STATUS_UNKNOWN_REQUEST_TYPE`] error (Companion treats a failed request as
-//! "no data" and stays connected — only `GetVersion` and
+//! Which request is answered how is [`route`]: a few natively (studio mode ON
+//! and the per-session preview, #221), the scene/input list getters forwarded
+//! to cg OBS, a scene press (`SetCurrentProgramScene`,
+//! `TriggerStudioModeTransition`) through the program switch, anything else a
+//! well-formed [`STATUS_UNKNOWN_REQUEST_TYPE`] error (Companion treats a failed
+//! request as "no data" and stays connected — only `GetVersion` and
 //! `GetStudioModeEnabled` must succeed, which is why they are native).
 
 use serde_json::{Value, json};
@@ -64,6 +65,13 @@ pub const STATUS_UNKNOWN_REQUEST_TYPE: u16 = 204;
 pub const STATUS_GENERIC_ERROR: u16 = 205;
 pub const STATUS_NOT_READY: u16 = 207;
 pub const STATUS_MISSING_REQUEST_FIELD: u16 = 300;
+pub const STATUS_INVALID_REQUEST_FIELD_TYPE: u16 = 401;
+pub const STATUS_REQUEST_FIELD_OUT_OF_RANGE: u16 = 402;
+pub const STATUS_RESOURCE_NOT_FOUND: u16 = 604;
+
+/// `SetCurrentSceneTransitionDuration`'s bounds, ms (obs-websocket's own).
+pub const TRANSITION_DURATION_MIN_MS: u32 = 50;
+pub const TRANSITION_DURATION_MAX_MS: u32 = 20_000;
 
 /// `EventSubscription::Scenes` (1 << 2).
 pub const EVENT_SCENES: u64 = 4;
@@ -470,8 +478,16 @@ pub enum Route {
     Native(Reply),
     /// Forwarded to cg OBS, its answer passed through.
     Forward,
-    /// Forwarded to cg OBS AND mapped onto `SP-program`.
+    /// A scene press: switch `SP-program` to `sceneName`.
     SetProgramScene,
+    /// #221: set this session's preview scene.
+    SetPreviewScene,
+    /// #221: this session's preview scene (initially the program scene).
+    GetPreviewScene,
+    /// #221: a scene press of this session's preview scene.
+    TriggerTransition,
+    /// #221: validated and acknowledged, never applied.
+    SetTransitionDuration,
     /// A well-formed [`STATUS_UNKNOWN_REQUEST_TYPE`] error.
     Unsupported,
 }
@@ -480,12 +496,17 @@ pub enum Route {
 pub fn route(request_type: &str) -> Route {
     match request_type {
         "GetVersion" => Route::Native(Reply::ok(Some(version_data()))),
-        // Studio mode OFF: Companion then sends `SetCurrentProgramScene` per
-        // button (preview + transition requests are not mapped).
+        // #221: studio mode ON — Companion v3.15.3 sends
+        // `TriggerStudioModeTransition` only while it caches studio mode as
+        // on (read at connect; `StudioModeStateChanged` is never emitted).
         "GetStudioModeEnabled" => {
-            Route::Native(Reply::ok(Some(json!({ "studioModeEnabled": false }))))
+            Route::Native(Reply::ok(Some(json!({ "studioModeEnabled": true }))))
         }
         "SetCurrentProgramScene" => Route::SetProgramScene,
+        "SetCurrentPreviewScene" => Route::SetPreviewScene,
+        "GetCurrentPreviewScene" => Route::GetPreviewScene,
+        "TriggerStudioModeTransition" => Route::TriggerTransition,
+        "SetCurrentSceneTransitionDuration" => Route::SetTransitionDuration,
         // Keep in sync with FORWARDED_REQUESTS (pinned by a test).
         "GetSceneList"
         | "GetCurrentProgramScene"
@@ -502,6 +523,10 @@ pub fn available_requests() -> Vec<&'static str> {
         "GetVersion",
         "GetStudioModeEnabled",
         "SetCurrentProgramScene",
+        "SetCurrentPreviewScene",
+        "GetCurrentPreviewScene",
+        "TriggerStudioModeTransition",
+        "SetCurrentSceneTransitionDuration",
     ];
     all.extend(FORWARDED_REQUESTS);
     all
@@ -519,6 +544,72 @@ pub fn version_data() -> Value {
         "platform": "songplayer",
         "platformDescription": "SongPlayer remote control (obs-websocket 5 subset)",
     })
+}
+
+/// A scene request's `sceneName`, or the [`STATUS_MISSING_REQUEST_FIELD`]
+/// error (a `sceneUuid` alone is not served: the switch is by scene name, and
+/// Companion always sends the name).
+pub fn scene_name(data: Option<&Value>) -> Result<String, Reply> {
+    data.and_then(|d| d.get("sceneName"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            Reply::error(
+                STATUS_MISSING_REQUEST_FIELD,
+                "Your request is missing `sceneName` (the remote control switches by scene name).",
+            )
+        })
+}
+
+/// `GetCurrentPreviewScene`'s response data: the 5.x `sceneName` (what
+/// Companion reads) and the 5.0 `currentPreviewSceneName`.
+pub fn preview_scene_data(scene: &str) -> Value {
+    json!({ "sceneName": scene, "currentPreviewSceneName": scene })
+}
+
+/// The error of a preview or transition request with no preview set and
+/// nothing on `SP-program`.
+pub fn no_scene() -> Reply {
+    Reply::error(
+        STATUS_RESOURCE_NOT_FOUND,
+        "No preview scene is set and nothing is on SP-program.",
+    )
+}
+
+/// `SetCurrentSceneTransitionDuration`'s `transitionDuration`, validated the
+/// way obs-websocket does: missing (or null) → [`STATUS_MISSING_REQUEST_FIELD`],
+/// not a number → [`STATUS_INVALID_REQUEST_FIELD_TYPE`], outside
+/// 50..=20000 ms → [`STATUS_REQUEST_FIELD_OUT_OF_RANGE`]. A fraction is
+/// truncated to whole ms.
+pub fn transition_duration(data: Option<&Value>) -> Result<u32, Reply> {
+    let value = data
+        .and_then(|d| d.get("transitionDuration"))
+        .filter(|v| !v.is_null());
+    let Some(value) = value else {
+        return Err(Reply::error(
+            STATUS_MISSING_REQUEST_FIELD,
+            "Your request is missing `transitionDuration`.",
+        ));
+    };
+    let Some(ms) = value.as_f64() else {
+        return Err(Reply::error(
+            STATUS_INVALID_REQUEST_FIELD_TYPE,
+            "The field value of `transitionDuration` must be a number.",
+        ));
+    };
+    if ms < f64::from(TRANSITION_DURATION_MIN_MS) {
+        return Err(Reply::error(
+            STATUS_REQUEST_FIELD_OUT_OF_RANGE,
+            "The field value of `transitionDuration` is below the minimum of `50`",
+        ));
+    }
+    if ms > f64::from(TRANSITION_DURATION_MAX_MS) {
+        return Err(Reply::error(
+            STATUS_REQUEST_FIELD_OUT_OF_RANGE,
+            "The field value of `transitionDuration` is above the maximum of `20000`",
+        ));
+    }
+    Ok(ms as u32)
 }
 
 /// The comment of an [`Route::Unsupported`] request's error.

@@ -17,10 +17,18 @@
 //!   input list getters are forwarded verbatim, so the button names match cg
 //!   OBS 1:1; `CurrentProgramSceneChanged` / `SceneListChanged` from cg OBS are
 //!   re-emitted to the clients (Companion's button feedback).
-//! - **`SetCurrentProgramScene(X)`** is forwarded to cg OBS (the migration-time
-//!   behaviour) AND cuts `SP-program`: to the one playlist X shows, else to
-//!   "OBS manuál" (#212) while that input is a source, else nothing + a WARN
-//!   (`map.rs`). Presses are applied one at a time, in arrival order.
+//! - **Studio mode (#221 L2).** Studio mode is reported ON, so Companion's
+//!   page-13 buttons (`preview_scene` + `do_transition`) reach SongPlayer:
+//!   `SetCurrentPreviewScene` / `GetCurrentPreviewScene` keep a preview PER
+//!   SESSION (initially the program scene), and `TriggerStudioModeTransition`
+//!   ALWAYS switches to it. `SetCurrentSceneTransitionDuration` is validated
+//!   and acknowledged but not applied (the program transition is the Settings
+//!   value): `remote.last_transition_duration {ms, applied: false}`.
+//! - **A scene press** (`SetCurrentProgramScene`, or the transition) goes
+//!   through the ONE switch path, `playback::program_switch`: a playlist
+//!   scene (from SongPlayer's own catalog) is cut first and mirrored to cg
+//!   OBS, a manual scene goes to cg OBS first, then "OBS manuál" (#212).
+//!   Presses are applied one at a time, in arrival order, across every client.
 //! - **Telemetry** lives on the program bus ([`RemoteShared`],
 //!   `ProgramBus::remote()`) and is served as `remote` on `GET /api/v1/program`.
 
@@ -28,7 +36,7 @@ pub mod map;
 pub mod protocol;
 mod session;
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -53,7 +61,8 @@ use crate::playback::program_bus::ProgramBus;
 /// How often the settings task re-reads the settings.
 pub const REMOTE_SETTINGS_POLL: Duration = Duration::from_secs(5);
 /// How long a call to cg OBS may take before the client is answered "not
-/// ready" (above the OBS client's own 2 s response timeout).
+/// ready" (above the OBS client's own 2 s response timeout), and how long a
+/// mirrored press waits for cg OBS's answer.
 pub const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(3);
 /// The pause after a failed `accept` (never a hot loop on e.g. EMFILE).
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
@@ -135,19 +144,18 @@ pub struct LastRequest {
     pub at_ms: i64,
 }
 
-/// The outcome of the last remote `SetCurrentProgramScene`.
+/// The outcome of the last remote scene press (`program_switch`; the OBS
+/// follow records the same shape as `last_follow_cut`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RemoteCut {
     /// The scene pressed, clipped to 64 characters (a client-chosen string).
     pub scene: String,
-    /// `playlist` / `input` / `keep` (`map::SceneAction::label`).
+    /// `playlist` / `input` / `keep`.
     pub action: &'static str,
     /// The program source cut to (`-1` = "OBS manuál"), `null` when kept.
     pub source: Option<i64>,
-    /// Why nothing was cut (`not_switched`, `input_inactive`,
-    /// `persist_failed`), or `lookup_failed` when the scene lookup got no
-    /// answer (a cut to "OBS manuál", or keep when the input is not a
-    /// source).
+    /// Why nothing was cut: `not_switched` (cg OBS refused or did not answer
+    /// a manual scene), `input_inactive`, `persist_failed`, `catalog_failed`.
     pub reason: Option<&'static str>,
     /// The boundary the cut lands on (`GET /api/v1/program`'s own field).
     pub cut_boundary_100ns: Option<i64>,
@@ -332,7 +340,7 @@ impl Drop for ClientGuard {
 }
 
 /// Unix time in ms.
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
@@ -367,39 +375,40 @@ impl Upstream {
     }
 
     /// Forward one request to cg OBS; its op=7 `d` object, `None` when cg OBS
-    /// is not configured, not connected or did not answer within
-    /// [`UPSTREAM_TIMEOUT`].
+    /// is not configured, not connected or did not answer within the timeout
+    /// ([`UPSTREAM_TIMEOUT`]).
     pub async fn request(&self, request_type: &str, request_data: Option<Value>) -> Option<Value> {
+        let rx = self.enqueue(request_type, request_data)?;
+        self.wait(rx).await
+    }
+
+    /// Hand one request to the OBS client without ever blocking on its queue
+    /// (FIFO: it goes out after every call queued before it); the receiver of
+    /// its op=7 `d`, `None` when there is no OBS client or its queue is full.
+    pub fn enqueue(
+        &self,
+        request_type: &str,
+        request_data: Option<Value>,
+    ) -> Option<oneshot::Receiver<Option<Value>>> {
+        let tx = self.cmd_tx.as_ref()?;
         let (reply, rx) = oneshot::channel();
         let call = RemoteCall::Request {
             request_type: request_type.to_string(),
             request_data,
             reply,
         };
-        self.call(call, rx).await.flatten()
-    }
-
-    /// The playlists `scene` shows (the OBS client's scene → playlist map),
-    /// `None` when cg OBS did not answer.
-    pub async fn scene_playlists(&self, scene: &str) -> Option<HashSet<i64>> {
-        let (reply, rx) = oneshot::channel();
-        let call = RemoteCall::ScenePlaylists {
-            scene: scene.to_string(),
-            reply,
-        };
-        self.call(call, rx).await
-    }
-
-    /// Hand `call` to the OBS client without ever blocking on its queue, then
-    /// wait at most [`UPSTREAM_TIMEOUT`]. Dropping `rx` on a timeout makes the
-    /// OBS side skip the call if it runs later (`reply.is_closed()`).
-    async fn call<T>(&self, call: RemoteCall, rx: oneshot::Receiver<T>) -> Option<T> {
-        let tx = self.cmd_tx.as_ref()?;
         if tx.try_send(ObsCommand::Remote(call)).is_err() {
             warn!("remote: the OBS client's command queue is full or closed");
             return None;
         }
-        tokio::time::timeout(self.timeout, rx).await.ok()?.ok()
+        Some(rx)
+    }
+
+    /// Wait at most the timeout for an enqueued request's op=7 `d`. Dropping
+    /// `rx` on a timeout makes the OBS side skip the call if it runs later
+    /// (`reply.is_closed()`): a late switch never happens.
+    pub async fn wait(&self, rx: oneshot::Receiver<Option<Value>>) -> Option<Value> {
+        tokio::time::timeout(self.timeout, rx).await.ok()?.ok()?
     }
 
     /// A new receiver of cg OBS's events (one per session).
@@ -408,16 +417,14 @@ impl Upstream {
     }
 }
 
-/// Everything a session needs: the pool (input settings, the persisted program
-/// source), the program bus, cg OBS and the password of this listener.
+/// Everything a session needs: the pool (the playlists, input settings, the
+/// persisted program source), the program bus (which also orders the scene
+/// switches), cg OBS and the password of this listener.
 pub struct Facade {
     pool: SqlitePool,
     bus: Arc<ProgramBus>,
     upstream: Upstream,
     password: Option<String>,
-    /// Remote scene presses are applied one at a time, in arrival order,
-    /// across every client — a forward + lookup + cut never interleaves.
-    cut_order: tokio::sync::Mutex<()>,
     /// [`IDENTIFY_TIMEOUT`] (shorter only in tests).
     identify_timeout: Duration,
 }
@@ -434,7 +441,6 @@ impl Facade {
             bus,
             upstream,
             password,
-            cut_order: tokio::sync::Mutex::new(()),
             identify_timeout: IDENTIFY_TIMEOUT,
         })
     }
@@ -453,7 +459,6 @@ impl Facade {
             bus,
             upstream,
             password,
-            cut_order: tokio::sync::Mutex::new(()),
             identify_timeout,
         })
     }

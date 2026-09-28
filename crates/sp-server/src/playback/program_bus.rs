@@ -218,8 +218,8 @@ pub enum Hold {
     /// playing until this stamp, one slot after the window's end.
     Until(i64),
     /// The source is still the selected one. A cut away from it may still be
-    /// on its way: the follow task and the #213 remote control cut only AFTER
-    /// cg OBS switched.
+    /// on its way: the follow task and a #221 manual-scene press cut only
+    /// AFTER cg OBS switched.
     OnProgram,
 }
 

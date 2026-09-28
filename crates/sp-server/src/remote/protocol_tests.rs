@@ -485,3 +485,75 @@ fn reply_ok_and_error_shapes() {
     let v: Value = err.status;
     assert_eq!(v["code"], STATUS_NOT_READY);
 }
+
+// ---- #221: studio mode -----------------------------------------------------
+
+#[test]
+fn the_studio_mode_requests_are_answered_by_the_session() {
+    assert_eq!(route("SetCurrentPreviewScene"), Route::SetPreviewScene);
+    assert_eq!(route("GetCurrentPreviewScene"), Route::GetPreviewScene);
+    assert_eq!(
+        route("TriggerStudioModeTransition"),
+        Route::TriggerTransition
+    );
+    assert_eq!(
+        route("SetCurrentSceneTransitionDuration"),
+        Route::SetTransitionDuration
+    );
+}
+
+#[test]
+fn a_scene_request_needs_its_scene_name() {
+    let data = json!({ "sceneName": "sp-fast", "sceneUuid": "u" });
+    assert_eq!(scene_name(Some(&data)), Ok("sp-fast".to_string()));
+    for data in [
+        None,
+        Some(json!({})),
+        Some(json!({ "sceneUuid": "u-sp-fast" })),
+        Some(json!({ "sceneName": 7 })),
+    ] {
+        let err = scene_name(data.as_ref()).unwrap_err();
+        assert!(!err.succeeded(), "{data:?}");
+        assert_eq!(err.status["code"], STATUS_MISSING_REQUEST_FIELD, "{data:?}");
+    }
+}
+
+#[test]
+fn the_preview_answer_and_the_no_scene_error() {
+    assert_eq!(
+        preview_scene_data("Slido"),
+        json!({ "sceneName": "Slido", "currentPreviewSceneName": "Slido" })
+    );
+    let err = no_scene();
+    assert!(!err.succeeded());
+    assert_eq!(err.status["code"], STATUS_RESOURCE_NOT_FOUND);
+    assert_eq!(STATUS_RESOURCE_NOT_FOUND, 604);
+}
+
+#[test]
+fn a_transition_duration_is_validated_like_obs_websocket() {
+    let data = |v: Value| Some(json!({ "transitionDuration": v }));
+    let ok = |d: Option<Value>| transition_duration(d.as_ref()).unwrap();
+    let code =
+        |d: Option<Value>| transition_duration(d.as_ref()).unwrap_err().status["code"].clone();
+    assert_eq!(ok(data(json!(2000))), 2000);
+    assert_eq!(ok(data(json!(50))), TRANSITION_DURATION_MIN_MS);
+    assert_eq!(ok(data(json!(20_000))), TRANSITION_DURATION_MAX_MS);
+    assert_eq!(ok(data(json!(750.9))), 750, "a fraction is truncated");
+    assert_eq!(code(None), STATUS_MISSING_REQUEST_FIELD);
+    assert_eq!(code(Some(json!({}))), STATUS_MISSING_REQUEST_FIELD);
+    assert_eq!(code(data(Value::Null)), STATUS_MISSING_REQUEST_FIELD);
+    assert_eq!(code(data(json!("2000"))), STATUS_INVALID_REQUEST_FIELD_TYPE);
+    assert_eq!(code(data(json!(49.99))), STATUS_REQUEST_FIELD_OUT_OF_RANGE);
+    assert_eq!(
+        code(data(json!(20_000.01))),
+        STATUS_REQUEST_FIELD_OUT_OF_RANGE
+    );
+    assert_eq!(
+        (
+            STATUS_INVALID_REQUEST_FIELD_TYPE,
+            STATUS_REQUEST_FIELD_OUT_OF_RANGE
+        ),
+        (401, 402)
+    );
+}

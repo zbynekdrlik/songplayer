@@ -1,8 +1,11 @@
-//! Scene → program action for a remote `SetCurrentProgramScene` (#213) — pure.
+//! Scene → program action for the #215 OBS follow — pure. (#221: the Companion
+//! facade no longer uses it; its presses go through `playback::program_switch`,
+//! which decides from SongPlayer's own scene catalog. `KeepReason` names are
+//! shared by both.)
 //!
 //! The scene's playlists come from the SAME scene → playlist map SongPlayer's
 //! own scene detection uses (`obs::scene::check_scene_items` over the
-//! `NdiSourceMap`, run by the OBS client for the facade):
+//! `NdiSourceMap`, read by the OBS client):
 //!
 //! - cg OBS did not switch (unknown scene, cg OBS not reachable) → the program
 //!   stays as it is;
