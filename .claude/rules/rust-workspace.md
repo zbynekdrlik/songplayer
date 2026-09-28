@@ -243,6 +243,22 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   closure body, never the call. `!opt.is_some()` / `!opt.is_none()` are in
   the same table.
 
+## Two compile errors a no-compile review round cannot see (#218/#219 integration)
+
+Six fresh-context review rounds passed both of these, and the first CI run
+failed on them (`36438006665`):
+
+- **`json!(5_000_000_000)` is an `i32` literal → `overflowing_literals`
+  (deny-by-default).** `serde_json::json!` gives an unsuffixed integer
+  literal no type hint, so it defaults to `i32`. Suffix any literal above
+  `i32::MAX`: `json!(5_000_000_000_u64)`.
+- **A guard passed to a generic `impl Fn(&T)` does NOT deref-coerce.**
+  `done(&self.state.read().await)` with `done: impl Fn(&ObsState) -> bool`
+  is E0308 (`expected ObsState, found RwLockReadGuard`). The Fn call's
+  argument is a generic tuple, so no coercion site exists. Write
+  `done(&*guard)`. A plain `fn f(s: &ObsState)` would coerce, which is why
+  it reads as fine.
+
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,
 so EVERY `#[test]` in `crates/` runs on BOTH Linux (the `Test` job) and Windows.
