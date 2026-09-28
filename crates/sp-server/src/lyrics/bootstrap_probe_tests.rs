@@ -38,6 +38,14 @@ fn qwen_asr_missing() -> Readiness {
     )
 }
 
+/// torch's native library failing to load (Windows, under memory pressure).
+fn dll_load_failed() -> Readiness {
+    Readiness::failed(
+        Some(1),
+        "Traceback (most recent call last):\r\n  File \"<string>\", line 1, in <module>\r\nImportError: DLL load failed while importing _C: The paging file is too small for this operation to complete.\r\n",
+    )
+}
+
 /// Run `decide` with `plan` and return its verdict and how long it took.
 async fn run(probe: impl FnMut() -> Ready<Readiness>, plan: RetryPlan) -> (Decision, Duration) {
     let start = Instant::now();
@@ -113,6 +121,19 @@ async fn a_probe_that_keeps_timing_out_never_installs() {
     assert_eq!(took, Duration::from_secs(135));
 }
 
+/// Review round 2: a DLL-load failure right after a restart is retried; one
+/// that passes installs nothing, one that persists installs after the budget.
+#[tokio::test(start_paused = true)]
+async fn a_dll_load_failure_is_retried_before_any_install() {
+    let probe = scripted(vec![dll_load_failed(), Readiness::Ready]);
+    let (verdict, took) = run(probe, RETRY_PLAN).await;
+    assert_eq!(verdict, decision(FastPath::Ready, 2));
+    assert_eq!(took, Duration::from_secs(5));
+    let (verdict, took) = run(always(dll_load_failed()), RETRY_PLAN).await;
+    assert_eq!(verdict, decision(FastPath::Install, 6));
+    assert_eq!(took, Duration::from_secs(135));
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_failure_that_outlives_the_retries_installs() {
     let (verdict, took) = run(always(cuda_unavailable()), RETRY_PLAN).await;
@@ -181,6 +202,8 @@ fn every_answer_maps_to_its_action() {
         Readiness::failed(None, "Access is denied. (os error 5)").action(),
         ProbeAction::Retry
     );
+    // Review round 2: so is a DLL that failed to load.
+    assert_eq!(dll_load_failed().action(), ProbeAction::Retry);
     assert!(Readiness::Ready.is_ready());
     for other in [Readiness::Missing, Readiness::Timeout, cuda_unavailable()] {
         assert!(!other.is_ready(), "{other:?}");
@@ -193,7 +216,14 @@ fn an_import_failure_is_the_last_line_of_the_traceback() {
         "Traceback (most recent call last):\n  File \"<string>\", line 1\nModuleNotFoundError: No module named 'audio_separator'\n"
     ));
     assert!(import_failure(
-        "ImportError: DLL load failed while importing _C\r\n\r\n"
+        "ImportError: Numba needs NumPy 2.4 or less. Got NumPy 2.5.\r\n\r\n"
+    ));
+    // Review round 2: a DLL that fails to LOAD is not a missing package. On
+    // Windows it is the typical transient failure under memory pressure (the
+    // paging file, WinError 1455) — the blocker's own startup case — so it is
+    // retried, and installs only if it outlives the retries.
+    assert!(!import_failure(
+        "Traceback (most recent call last):\r\nImportError: DLL load failed while importing _C: The paging file is too small for this operation to complete.\r\n"
     ));
     // CUDA not available: exit 1 with no traceback, maybe a warning.
     assert!(!import_failure(""));
