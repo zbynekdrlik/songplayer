@@ -151,14 +151,13 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     })
     .await;
 
-    // SongPlayer's remote control on a real program bus.
+    // SongPlayer's remote control on a real program bus. The long upstream
+    // timeout keeps a stalled runner (the coverage job's ptrace) from running
+    // a manual press out of its time (#221: then it is never sent).
     let bus = Arc::new(ProgramBus::new());
-    let facade = Facade::new(
-        pool.clone(),
-        Arc::clone(&bus),
-        Upstream::new(Some(client.cmd_sender()), obs_event_tx.clone()),
-        None,
-    );
+    let upstream =
+        Upstream::new(Some(client.cmd_sender()), obs_event_tx.clone()).with_timeout(TIMEOUT);
+    let facade = Facade::new(pool.clone(), Arc::clone(&bus), upstream, None);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(remote::serve(listener, facade));

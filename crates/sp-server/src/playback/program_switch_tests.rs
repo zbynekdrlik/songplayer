@@ -4,13 +4,15 @@
 //! Wired via `#[cfg(test)] #[path = "program_switch_tests.rs"] mod tests;`.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, oneshot};
+use tokio::time::Instant;
 
 use super::*;
 use crate::playback::program_bus::ProgramBus;
-use crate::remote::{RemoteSettings, RemoteShared, Upstream};
+use crate::remote::{MIRROR_EXTRA_WAIT, RemoteSettings, RemoteShared, UPSTREAM_TIMEOUT, Upstream};
 
 #[test]
 fn cg_obs_answers_read_as_cg_forward() {
@@ -147,4 +149,40 @@ async fn the_mirrors_answer_is_recorded_on_its_cut() {
     .unwrap();
     record_mirror(upstream, rx, Arc::clone(&shared), old, "sp-fast".into()).await;
     assert_eq!(last_forward(&shared).as_deref(), Some("pending"));
+}
+
+/// #221 review round 5: the OBS client writes a mirror however late (its cut
+/// already happened), and may first wait for a switch in flight, so the
+/// mirror's waiter waits longer than the upstream timeout: an answer after it
+/// is still recorded. The wait is still bounded.
+#[tokio::test(start_paused = true)]
+async fn a_mirror_answered_after_the_upstream_timeout_is_still_recorded() {
+    let (events, _) = broadcast::channel(4);
+    let upstream = Upstream::new(None, events);
+    let shared = Arc::new(RemoteShared::default());
+
+    let id = pending_cut(&shared);
+    let (tx, rx) = oneshot::channel();
+    let shared_waiter = Arc::clone(&shared);
+    let waiter = tokio::spawn(record_mirror(
+        upstream.clone(),
+        rx,
+        shared_waiter,
+        id,
+        "sp-fast".into(),
+    ));
+    tokio::time::sleep(UPSTREAM_TIMEOUT + Duration::from_millis(500)).await;
+    let _ = tx.send(Some(
+        json!({ "requestStatus": { "result": true, "code": 100 } }),
+    ));
+    waiter.await.unwrap();
+    assert_eq!(last_forward(&shared).as_deref(), Some("ok"));
+
+    // Never answered: not ready, once the whole mirror wait is over.
+    let id = pending_cut(&shared);
+    let (_tx, rx) = oneshot::channel::<Option<Value>>();
+    let started = Instant::now();
+    record_mirror(upstream, rx, Arc::clone(&shared), id, "sp-fast".into()).await;
+    assert_eq!(started.elapsed(), UPSTREAM_TIMEOUT + MIRROR_EXTRA_WAIT);
+    assert_eq!(last_forward(&shared).as_deref(), Some("not_ready"));
 }

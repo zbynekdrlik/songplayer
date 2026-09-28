@@ -371,15 +371,29 @@ async fn an_unanswered_call_times_out_and_is_left_marked_abandoned() {
     match rx.try_recv() {
         Ok(ObsCommand::Remote(RemoteCall::Request {
             request_type,
+            deadline,
             reply,
             ..
         })) => {
             assert_eq!(request_type, "SetCurrentProgramScene");
+            // #221: the OBS side sees when its requester stops waiting.
+            assert_eq!(deadline, started + UPSTREAM_TIMEOUT);
             // The OBS side skips it: a late switch never happens.
             assert!(reply.is_closed());
         }
         other => panic!("expected the queued request, got {other:?}"),
     }
+}
+
+/// #221: a mirror's waiter outwaits the forwarder's worst case — a switch
+/// in flight, then the mirror's own answer, each at most the OBS client's
+/// answer timeout.
+#[test]
+fn a_mirror_waits_for_two_answers_of_cg_obs_longer() {
+    assert_eq!(
+        MIRROR_EXTRA_WAIT,
+        crate::obs::dispatcher::DEFAULT_RESPONSE_TIMEOUT * 2
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -395,6 +409,7 @@ async fn a_full_obs_queue_is_not_ready_at_once_never_a_blocked_caller() {
             request_type: "filler".to_string(),
             request_data: None,
             supersedes: false,
+            deadline: tokio::time::Instant::now(),
             reply,
         }))
         .unwrap();

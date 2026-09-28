@@ -42,6 +42,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
+use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, warn};
 
@@ -66,6 +67,10 @@ pub enum RemoteCall {
         /// happened (a playlist press's mirror): it replaces an earlier switch
         /// still queued. `false` for everything the facade awaits.
         supersedes: bool,
+        /// #221: when the requester stops waiting (`Upstream`'s timeout after
+        /// it enqueued the call). An awaited switch is written only while the
+        /// forwarder's whole answer timeout is left of it.
+        deadline: Instant,
         reply: oneshot::Sender<Option<Value>>,
     },
 }
@@ -243,6 +248,7 @@ mod tests {
 
     use futures::{SinkExt, StreamExt};
     use serde_json::json;
+    use tokio::time::Instant;
 
     use super::*;
 
@@ -332,6 +338,7 @@ mod tests {
             request_type: request_type.to_string(),
             request_data: scene.map(|s| json!({ "sceneName": s })),
             supersedes: false,
+            deadline: Instant::now() + HELD * 2,
             reply,
         };
         (call, rx)
@@ -349,9 +356,28 @@ mod tests {
             request_type: "SetCurrentProgramScene".to_string(),
             request_data: Some(json!({ "sceneName": scene })),
             supersedes: true,
+            deadline: Instant::now() + HELD * 2,
             reply,
         };
         (call, rx)
+    }
+
+    /// `call`, whose requester has only `left` of its time left.
+    fn with_left(call: RemoteCall, left: Duration) -> RemoteCall {
+        let RemoteCall::Request {
+            request_type,
+            request_data,
+            supersedes,
+            reply,
+            ..
+        } = call;
+        RemoteCall::Request {
+            request_type,
+            request_data,
+            supersedes,
+            deadline: Instant::now() + left,
+            reply,
+        }
     }
 
     /// The answer timeout of every forwarder test: far past any test's 10 s
@@ -465,7 +491,7 @@ mod tests {
     /// press goes out at once however slowly cg OBS answers. A getter between
     /// them is still sent.
     #[tokio::test]
-    async fn a_switch_a_later_one_supersedes_is_never_sent() {
+    async fn a_switch_a_later_mirror_supersedes_is_never_sent() {
         let (addr, mut frames) = cg_obs(false).await;
         let dispatcher = Dispatcher::new();
         let write = connect(addr, &dispatcher).await;
@@ -529,6 +555,49 @@ mod tests {
         let forwarder = tokio::spawn(run_calls(write, dispatcher, calls, HELD));
         let frame = next_frame(&mut frames).await;
         assert_eq!(frame["d"]["requestData"]["sceneName"], "sp-fast");
+        drop(tx);
+        forwarder.abort();
+    }
+
+    /// #221 review round 5: an awaited switch with less than the answer
+    /// timeout of its requester's time left is never written — it is answered
+    /// with nothing, so its requester's "not ready" is never followed by a
+    /// switch in cg OBS. A mirror goes out however late (its cut already
+    /// happened), and so does a getter (it changes nothing in cg OBS).
+    #[tokio::test]
+    async fn an_awaited_switch_with_too_little_time_left_is_never_sent() {
+        let (addr, mut frames) = cg_obs(true).await;
+        let dispatcher = Dispatcher::new();
+        let write = connect(addr, &dispatcher).await;
+        let (tx, calls) = mpsc::unbounded_channel();
+        let left = Duration::from_secs(1); // far below HELD
+        let (late_mirror, late_mirror_rx) = mirror_of("sp-fast");
+        let (late, late_rx) = switch_to("Blank");
+        let (late_getter, late_getter_rx) = call("GetSceneList", None);
+        let (in_time, in_time_rx) = call("GetInputList", None);
+        tx.send(with_left(late_mirror, left)).unwrap();
+        tx.send(with_left(late, left)).unwrap();
+        tx.send(with_left(late_getter, left)).unwrap();
+        tx.send(in_time).unwrap();
+        let forwarder = tokio::spawn(run_calls(write, dispatcher, calls, HELD));
+        let frame = next_frame(&mut frames).await;
+        assert_eq!(
+            frame["d"]["requestData"]["sceneName"], "sp-fast",
+            "the mirror goes out however little time is left"
+        );
+        assert_eq!(
+            next_frame(&mut frames).await["d"]["requestType"],
+            "GetSceneList",
+            "the switch with too little time left is never written; the getter is"
+        );
+        assert_eq!(
+            next_frame(&mut frames).await["d"]["requestType"],
+            "GetInputList"
+        );
+        assert!(late_mirror_rx.await.unwrap().is_some());
+        assert_eq!(late_rx.await.unwrap(), None, "not written: no answer");
+        assert!(late_getter_rx.await.unwrap().is_some());
+        assert!(in_time_rx.await.unwrap().is_some());
         drop(tx);
         forwarder.abort();
     }

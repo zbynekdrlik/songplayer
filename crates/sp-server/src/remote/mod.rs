@@ -61,11 +61,17 @@ use crate::playback::program_bus::ProgramBus;
 /// How often the settings task re-reads the settings.
 pub const REMOTE_SETTINGS_POLL: Duration = Duration::from_secs(5);
 /// How long a call to cg OBS may take before the client is answered "not
-/// ready" (above the OBS client's own 2 s response timeout), and how long a
-/// mirrored press waits for cg OBS's answer. A call queued behind a scene
-/// switch still in flight first waits for that switch's answer (at most 2 s,
-/// `obs::remote_call`), so its own answer may have only ~1 s of this left.
+/// ready" (above the OBS client's own 2 s response timeout). A call queued
+/// behind a scene switch still in flight first waits for that switch's answer
+/// (at most 2 s, `obs::remote_call`); a manual press's switch with less than
+/// the OBS client's 2 s of this left is answered "not ready" and never
+/// written.
 pub const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(3);
+/// #221: how much longer than [`UPSTREAM_TIMEOUT`] a mirror's waiter waits:
+/// the OBS client's forwarder may first wait for a switch in flight, then for
+/// the mirror's own answer, each at most the OBS client's answer timeout
+/// (`obs::dispatcher::DEFAULT_RESPONSE_TIMEOUT`, 2 s; pinned by a test).
+pub const MIRROR_EXTRA_WAIT: Duration = Duration::from_secs(4);
 /// The pause after a failed `accept` (never a hot loop on e.g. EMFILE).
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 /// A client that has not completed the WebSocket handshake AND identified
@@ -353,7 +359,8 @@ pub struct Upstream {
     cmd_tx: Option<mpsc::Sender<ObsCommand>>,
     events: broadcast::Sender<ObsEvent>,
     /// How long a call waits for cg OBS: [`UPSTREAM_TIMEOUT`] (longer only in
-    /// tests, so a "never awaited" test cannot be passed by a timeout).
+    /// tests, so a "never awaited" test cannot be passed by a timeout and a
+    /// stalled test runner never runs a switch out of its time).
     timeout: Duration,
 }
 
@@ -369,9 +376,10 @@ impl Upstream {
         }
     }
 
-    /// This link with another call timeout (tests).
-    #[cfg(test)]
-    pub(crate) fn with_timeout(mut self, timeout: Duration) -> Self {
+    /// This link with another call timeout (tests only, the integration
+    /// tests included: production always uses [`UPSTREAM_TIMEOUT`]).
+    #[doc(hidden)]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
@@ -401,6 +409,7 @@ impl Upstream {
             request_type: request_type.to_string(),
             request_data,
             supersedes,
+            deadline: tokio::time::Instant::now() + self.timeout,
             reply,
         };
         if tx.try_send(ObsCommand::Remote(call)).is_err() {
@@ -412,9 +421,20 @@ impl Upstream {
 
     /// Wait at most the timeout for an enqueued request's op=7 `d`. Dropping
     /// `rx` on a timeout makes the OBS side skip the call if it runs later
-    /// (`reply.is_closed()`): a late switch never happens.
+    /// (`reply.is_closed()`), and the OBS side writes an awaited switch only
+    /// while its whole answer timeout is left of this wait (its `deadline`):
+    /// cg OBS never switches after the requester was told "not ready".
     pub async fn wait(&self, rx: oneshot::Receiver<Option<Value>>) -> Option<Value> {
         tokio::time::timeout(self.timeout, rx).await.ok()?.ok()?
+    }
+
+    /// #221: a mirror's wait for cg OBS's answer — the timeout plus
+    /// [`MIRROR_EXTRA_WAIT`], because the forwarder writes a mirror however
+    /// late (its cut already happened) and may first wait for a switch in
+    /// flight.
+    pub async fn wait_mirror(&self, rx: oneshot::Receiver<Option<Value>>) -> Option<Value> {
+        let wait = self.timeout + MIRROR_EXTRA_WAIT;
+        tokio::time::timeout(wait, rx).await.ok()?.ok()?
     }
 
     /// A new receiver of cg OBS's events (one per session).
