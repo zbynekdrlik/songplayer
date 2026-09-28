@@ -352,6 +352,24 @@ fn the_status_serializes_the_api_field_names() {
     );
 }
 
+/// #221 review round 3: a production facade waits for a switch's
+/// `SceneTransitionEnded` at most the production bound (only `for_test` sets
+/// a longer one).
+#[tokio::test]
+async fn a_production_facade_bounds_the_ended_wait_by_the_production_value() {
+    let (events, _) = broadcast::channel::<ObsEvent>(4);
+    let facade = Facade::new(
+        pool().await,
+        Arc::new(ProgramBus::new()),
+        Upstream::new(None, events),
+        None,
+    );
+    assert_eq!(
+        facade.transition_end_max,
+        studio_events::TRANSITION_END_MAX_WAIT
+    );
+}
+
 /// #221 L3: `program_scene` names what SP-program has on air with the one
 /// resolver: the scene it was cut for, "OBS manuál" for the NDI input with
 /// no scene, `null` while nothing is on air.

@@ -79,6 +79,9 @@ fn the_events_have_obs_websockets_shapes() {
         }
     );
     assert_eq!(TRANSITION_ENDED, "SceneTransitionEnded");
+    // Review round 3: the production Ended bound outlasts the longest window
+    // the bus opens (~10.6 s: the 10 s fade cap after the lead + cue wait).
+    assert_eq!(TRANSITION_END_MAX_WAIT, Duration::from_secs(15));
     assert_eq!(transition_name(TransitionKind::Cut), "Cut");
     assert_eq!(transition_name(TransitionKind::Fade), "Fade");
 }
