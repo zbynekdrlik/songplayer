@@ -914,6 +914,9 @@ mod tests_engine_setters;
 #[path = "tests_history.rs"]
 mod tests_history;
 #[cfg(test)]
+#[path = "tests_hold.rs"]
+mod tests_hold;
+#[cfg(test)]
 #[path = "tests_play_video.rs"]
 mod tests_play_video;
 #[cfg(test)]
