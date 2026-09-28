@@ -343,7 +343,9 @@ async fn a_poll_read_an_event_overtook_never_rolls_the_scene_back() {
     // answers now). Then sp-slow's lookup answers. Whichever of the two
     // lands first, the event's must win. A held answer only counts while the
     // client still waits for it (its 2 s response timeout): a runner that
-    // stalled past that voids the scenario, which is said as such.
+    // stalled past that BEFORE a release voids the scenario, which is said as
+    // such (a stall in the few statements between the check and the fake's
+    // release still ends in the 20 s bound's panic).
     let asked = rig.lookups_of("sp-fast").await;
     rig.fake
         .update_state(|s| s.hold_program_scene = false)

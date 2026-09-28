@@ -184,7 +184,9 @@ impl FakeObsServer {
     }
 
     /// #219: close the connected client's WebSocket (a Close frame) — cg OBS
-    /// going away; the fake keeps accepting, so the client reconnects.
+    /// going away; the fake keeps accepting, so the client reconnects. Only
+    /// an identified client reads the control queue: called while none is,
+    /// it closes the NEXT one to identify.
     pub async fn close_client(&self) {
         let _ = self.event_tx.send(json!({ CLOSE_CLIENT: true })).await;
     }
