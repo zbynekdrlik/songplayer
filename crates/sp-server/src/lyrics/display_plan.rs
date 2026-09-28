@@ -80,6 +80,21 @@ pub const MERGE_MAX_GAP_MS: u64 = 700;
 /// dub subtitle tracks, whose lines often have no English at all.
 pub const MERGE_MAX_CHARS: usize = 64;
 
+/// The sentence plan's lead cap (design record 5867952012). The RED commit
+/// declares it for the tests; the GREEN commit makes the plan use it.
+pub const LEAD_MAX_MS: u64 = 800;
+
+/// The sentence plan's pause before a lead (design record 5867952012).
+pub const SUSTAIN_MARGIN_MS: u64 = 1_500;
+
+/// The sentence plan's char limit per display line (design record
+/// 5867952012).
+pub const MAX_CHARS: usize = 72;
+
+/// The sentence plan's span limit per display line (design record
+/// 5867952012).
+pub const GROUP_MAX_SPAN_MS: u64 = 6_500;
+
 /// How a track is shown on the wall, chosen when the track loads (#217).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayProfile {
@@ -358,3 +373,7 @@ fn schedule(groups: &[Group], lead_ms: u64) -> Vec<(u64, u64)> {
 #[cfg(test)]
 #[path = "display_plan_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "display_plan_fixture_tests.rs"]
+mod fixture_tests;
