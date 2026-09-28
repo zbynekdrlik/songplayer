@@ -299,8 +299,9 @@ follow are the later lanes (L4a–L6) of #221.
   transition.
 - **Order a client sees for its own press:** the RequestResponse first (the
   session is busy answering while the events queue), then Started, the
-  program-scene event and Ended — the program-scene event may come before or
-  after Started (another task emits it), Ended always after Started. Another
+  program-scene event and Ended — the program-scene event may come anywhere
+  relative to Started AND Ended (another task emits it; for a Cut the Ended
+  waiter, spawned last, can run first), Ended always after Started. Another
   client may get them any time, so a test that asks a second client for
   something must skip events (`request_collecting`).
 - `GET /api/v1/program` → `remote.program_scene` = the same resolver

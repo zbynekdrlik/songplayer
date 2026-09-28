@@ -51,8 +51,11 @@ Rules for every post-deploy spec:
   (`ln -s <repo>/e2e/node_modules e2e/node_modules` inside the worktree's
   `e2e/`), run `./node_modules/.bin/playwright test --config=post-deploy.config.ts
   --list --reporter=list` (a syntax error fails the listing; the mock-suite
-  unit specs such as `obs-scene-wait.spec.ts` can even run), and delete the
-  symlink before you finish — it shows as untracked.
+  unit specs such as `obs-scene-wait.spec.ts` can even run). A worktree
+  worker cannot delete the symlink afterwards (the worktree guard resolves
+  it into the main checkout and refuses); `.gitignore` ignores
+  `e2e/node_modules` without a trailing slash, so the link is never
+  committed and goes with the worktree.
 - **#221 L3: the scene driver is SongPlayer's facade** (`FACADE_WS_URL`,
   :4456). Until L4b `/api/v1/status.active_scene` / `active_playlist_ids`
   still come from cg OBS's scene detection, which follows the facade's
