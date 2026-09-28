@@ -209,7 +209,9 @@ output as a fault.
   facade decides from SongPlayer's own playlists, so the forwarder no
   longer takes the `NdiSourceMap`. The facade's calls go through ONE
   forwarder per connection, `remote_call::run_calls`, in queue order (never
-  a task per call: see `remote-control.md`).
+  a task per call), and a scene switch's answer is awaited before the next
+  call is written (cg OBS runs messages on a thread pool): see
+  `remote-control.md`.
 - `ObsCommand` is no longer `Clone`: it holds a oneshot sender.
 - The reader broadcasts EVERY op=5 event as `ObsEvent::Raw { event_type,
   event_data }` on `obs_event_tx`. Any exhaustive `match` on `ObsEvent` needs

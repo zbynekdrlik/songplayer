@@ -258,6 +258,23 @@ failed on them (`36438006665`):
   argument is a generic tuple, so no coercion site exists. Write
   `done(&*guard)`. A plain `fn f(s: &ObsState)` would coerce, which is why
   it reads as fine.
+- **Splitting a fn: a `String` param that becomes `&str` leaves
+  `f(&req_id)` behind → `clippy::needless_borrow`** (#221, caught in
+  review before CI). When a moved body now receives `req_id: &str`, write
+  `self.cancel(req_id)`, not `self.cancel(&req_id)`.
+
+## Spawn order is not execution order — never order work by spawning it (#221)
+
+A multi-thread tokio worker runs the task it spawned LAST first (its LIFO
+slot) and other workers may steal the rest, so two tasks spawned back to
+back can start in either order. The OBS client once spawned a task per
+facade call, so a playlist press's mirror could reach cg OBS after a later
+press. Anything whose ORDER matters goes through ONE task that takes the
+items in order (`obs::remote_call::run_calls`: write each frame, then take
+the next; spawn only the answer wait). A test of such an order must queue
+all items before the consumer runs, so a reordering spot fails
+deterministically (`the_calls_reach_cg_obs_in_queue_order`; its RED sent
+the drained batch newest first).
 
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,
@@ -427,6 +444,23 @@ this:
 - **Copy the saved GREEN back** and commit `fix(#N) … [green]`.
 - **List only the tests that really fail on the old logic in the RED
   message.** Walk each one by hand.
+
+**A RED for a wire-protocol feature runs against the OLD code (#221 L2).**
+Tests that speak the wire (the facade's obs-websocket JSON over a real
+socket) compile against the old implementation, so the RED is the real old
+behaviour, not a wrong spot. Keep them compiling on both sides:
+
+- add only the test SEAMS in RED (a `#[cfg(test)]` constructor such as
+  `Facade::for_test` instead of a struct literal whose fields GREEN changes;
+  a configurable timeout such as `Upstream::with_timeout`) and the new
+  telemetry STRUCTURE (fields the old path fills with `None`);
+- read new telemetry through its serialized JSON
+  (`serde_json::to_value(status)["field"]`), which compiles whether or not
+  the field exists yet;
+- a fake peer matched with `let … else { continue }` on the one variant it
+  serves keeps compiling when GREEN deletes the other variants;
+- tests of functions that only GREEN adds (new pure helpers) go in the GREEN
+  commit, as new tests; no RED test is edited there.
 
 **`cargo mutants --in-diff <range> --list` compiles nothing (#215).** It
 lists the diff's mutants (`file:line` + replacement) so a review can name
