@@ -8,7 +8,7 @@
 use tracing::{debug, info, warn};
 
 use super::pipeline::PipelineEvent;
-use super::state::{PlayEvent, PlayState};
+use super::state::PlayEvent;
 use super::title;
 use super::{PlaybackEngine, lyrics_loader};
 
@@ -16,10 +16,11 @@ impl PlaybackEngine {
     /// Handle an event emitted by a pipeline thread.
     ///
     /// This is the top-level orchestration entry point — it dispatches on
-    /// pipeline events and spawns title-show / title-hide timer tasks. Unit
-    /// testing it requires a full DB + OBS + Resolume harness; the
-    /// individual concerns (timer cancellation, title formatting, get_video_title_info)
-    /// have dedicated unit tests below.
+    /// pipeline events and spawns title-show / title-hide timer tasks. Its
+    /// branches are pinned by behaviour tests on an in-memory DB
+    /// (`tests_hold.rs`, `tests_scene_change.rs`, `tests_play_video.rs`); the
+    /// individual concerns (timer cancellation, title formatting,
+    /// get_video_title_info) have dedicated unit tests.
     #[cfg_attr(test, mutants::skip)]
     pub async fn handle_pipeline_event(&mut self, playlist_id: i64, event: PipelineEvent) {
         match &event {
@@ -33,11 +34,14 @@ impl PlaybackEngine {
                 // dashboard's Pause): the song is loaded, but paused. None of
                 // it reaches the wall, the stage display or the title timers
                 // (release 0.68.0 blockers, review round 1); its resume's
-                // `Started` does all of that.
+                // `Started` does all of that. "Paused since the last Play" is
+                // `paused_at` (every Pause sets it, every Play clears it), not
+                // the state: a failed selection leaves WaitingForScene with
+                // the song still playing (review round 5).
                 if self
                     .pipelines
                     .get(&playlist_id)
-                    .is_some_and(|pp| pp.state == PlayState::WaitingForScene)
+                    .is_some_and(|pp| pp.paused_at.is_some())
                 {
                     debug!(playlist_id, "started, but paused — nothing to show");
                     return;

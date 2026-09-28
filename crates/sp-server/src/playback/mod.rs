@@ -172,10 +172,12 @@ struct PlaylistPipeline {
     last_resolume_subtitles_signature: Option<String>,
     /// Last karaoke ws line text; dedup key for `dispatch_lyrics_if_changed`. Reset on song change.
     last_lyrics_ws_signature: Option<String>,
-    /// Last reported playback position (ms). Updated on every Position event
-    /// (~500 ms throttle); used by handle_resolume_recovery to re-push the
-    /// current subtitle line. The re-push line may be up to one Position
-    /// tick (~500 ms) behind the audio's actual playhead.
+    /// Last reported playback position (ms): the Play's start (`begin_play`,
+    /// 0 or a resume's position), then every Position event once the song's
+    /// `Started` fixed its title clock (an earlier one is the old song's,
+    /// release 0.68.0 review round 4). Read by the Pause snapshot and by
+    /// handle_resolume_recovery to re-push the current subtitle line, which
+    /// may be up to one Position tick (~500 ms) behind the actual playhead.
     cached_position_ms: u64,
     /// The title window of the song whose `Started` the engine last handled:
     /// the instants the title timers sleep until, and that a recovery or a
