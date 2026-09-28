@@ -86,7 +86,8 @@ const SENTENCE_ENDS: [char; 4] = ['.', '!', '?', '…'];
 const SOFT_ENDS: [char; 4] = [',', ';', ':', '—'];
 
 /// Closing quotes and brackets, skipped when reading a line's final mark.
-const CLOSERS: [char; 7] = ['"', '\'', '”', '’', '»', ')', ']'];
+/// `“` and `«` close the Slovak „…“ and »…« (dub lines group by their SK).
+const CLOSERS: [char; 9] = ['"', '\'', '”', '’', '“', '»', '«', ')', ']'];
 
 /// How a track is shown on the wall, chosen when the track loads (#217).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
