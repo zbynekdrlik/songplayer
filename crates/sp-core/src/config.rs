@@ -121,23 +121,21 @@ pub fn dub_voice_label(voice: &str) -> String {
     }
 }
 
-// AI settings (CLIProxyAPI → Claude Opus)
+// AI settings (CLIProxyAPI → Claude Opus 5.5)
 pub const SETTING_AI_API_URL: &str = "ai_api_url";
 pub const SETTING_AI_MODEL: &str = "ai_model";
 pub const DEFAULT_AI_API_URL: &str = "http://localhost:18787/v1";
 /// Claude model used for translation / text cleanup through CLIProxyAPI.
-/// `claude-fable-5-1` is the newest Claude flagship the CLIProxyAPI 7.3.1 build
-/// on win-resolume routes (#145, proxy upgraded 2026-09-13) — verified live:
-/// it is listed by `/v1/models` and a `/v1/chat/completions` call returns
-/// HTTP 200 on the existing OAuth login. Supersedes the `claude-opus-4-6`
-/// #144 stop-gap, which was itself only needed because the retired 6.9.27
-/// proxy build's model registry predated the Claude-5 ids (a request for an
-/// unknown id returned `502 unknown provider`; the still-older
-/// `claude-opus-4-20250514` also 404'd upstream and cooled down the OAuth
-/// auth). Probe a candidate with
+/// `claude-opus-5-5` is the newest Claude flagship (owner, 29.9.2026). It
+/// needs the proxy to present Claude Code 2.1.280 or newer: CLIProxyAPI 7.3.1
+/// presented 2.1.258 and got HTTP 400, 8.0.4 (installed 29.9.2026, #145)
+/// answers HTTP 200 on the existing OAuth login. The post-deploy AI step makes
+/// a real completion with the model SongPlayer sends and fails when the proxy
+/// lists a newer `claude-opus-*`, so a model the proxy cannot serve, or a newer
+/// Opus nobody switched to, fails CI. Probe a candidate with
 /// `python C:\ProgramData\SongPlayer\proxy_probe.py <model>` before changing
 /// this — only ids the proxy's `/v1/models` lists will route.
-pub const DEFAULT_AI_MODEL: &str = "claude-fable-5-1";
+pub const DEFAULT_AI_MODEL: &str = "claude-opus-5-5";
 
 #[cfg(test)]
 mod tests {

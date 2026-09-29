@@ -60,9 +60,13 @@ pub async fn proxy_complete_login(
 }
 
 #[cfg_attr(test, mutants::skip)]
+/// The proxy's status plus `model`: the Claude model SongPlayer sends (the
+/// `ai_model` setting, else `DEFAULT_AI_MODEL`, #145). The post-deploy AI step
+/// makes a real completion with exactly this model.
 pub async fn ai_status(State(state): State<AppState>) -> impl IntoResponse {
-    let status = state.ai_proxy.status().await;
-    Json(serde_json::json!(status))
+    let mut status = serde_json::json!(state.ai_proxy.status().await);
+    status["model"] = serde_json::json!(state.ai_client.settings().model);
+    Json(status)
 }
 
 #[cfg(test)]

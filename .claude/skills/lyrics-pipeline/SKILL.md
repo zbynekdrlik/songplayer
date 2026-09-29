@@ -231,9 +231,9 @@ When Claude refuses via CLIProxyAPI:
   (never a silent "parse returned 0", `translator::classify_zero_translation`) —
   grep the worker log for `refusal`. Prompt-semantics change → bumped
   `LYRICS_TRANSLATION_VERSION` 1→2 (catalog re-translation).
-- Model: `sp_core::config::DEFAULT_AI_MODEL` (`claude-fable-5-1` since
-  2026-09-13, #145 — the newest flagship the upgraded CLIProxyAPI **7.3.1**
-  on win-resolume routes). The proxy binary was upgraded 6.9.27 → 7.3.1
+- Model: `sp_core::config::DEFAULT_AI_MODEL` (`claude-opus-5-5` since
+  2026-09-29, #145 — the owner's flagship, routed by CLIProxyAPI **8.0.4**;
+  `claude-fable-5-1` on 7.3.1 before that). The proxy binary was upgraded 6.9.27 → 7.3.1
   because the old build's model registry predated the Claude-5 ids and
   `502 unknown provider`'d them; `claude-opus-4-6` was the #144 stop-gap it
   forced (and `claude-opus-4-20250514` before that is fully retired — a

@@ -38,7 +38,14 @@ absence. `auth-dir` / `host` / `port` / `request-retry` / `claude-api-key` uncha
   `python C:\ProgramData\SongPlayer\proxy_probe.py <model>` on win-resolume before changing
   it. **Never** probe an unlisted id — a `404` from Anthropic parks the OAuth auth in a
   cooldown until the proxy restarts (#144).
-- Current: `claude-fable-5-1` (CLIProxyAPI 7.3.1, #145). Pinned by the `config.rs` test.
+- Current: `claude-opus-5-5` (CLIProxyAPI 8.0.4, #145, 29.9.2026). Pinned by the `config.rs` test.
+  Opus 5.5 needs the proxy to present Claude Code ≥ 2.1.280 (7.3.1 presented
+  2.1.258 → HTTP 400 while `/v1/models` still LISTED the id: a listed id is not a
+  working id). The E2E step "Verify AI proxy healthy and not churning" makes a real
+  completion with `/api/v1/ai/status.model` (the model SongPlayer sends) and fails
+  when the proxy lists a newer `claude-opus-*` — a newer Opus appearing upstream
+  fails CI until the default follows it (probe it first). Verified 29.9 with the
+  production translator and description-extraction prompts: no refusal.
 - **Refusals are a PROMPT problem, not a model problem (#145, 2026-09-14).** The
   newest flagships (`claude-fable-5-1`, `claude-opus-5`) refuse a "story"-framed
   translation prompt on recognizable content ("…even for a family plaque…"); a
