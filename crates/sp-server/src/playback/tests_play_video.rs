@@ -802,6 +802,18 @@ async fn a_manual_play_off_air_plays_off_program_and_claims_nothing() {
         "the dashboard reads it as playing off program"
     );
 
+    // A second ▶ on the pipeline now playing is a no-op (0.62.0 release
+    // review: after a reload the label can read ▶ Prehrať for a pipeline
+    // that plays off program): no Play (every Play resets the position,
+    // `begin_play`), no program claim, nothing to the wall.
+    engine.pipelines.get_mut(&10).unwrap().cached_position_ms = 12_345;
+    engine.handle_engine_play(10).await;
+    let pp = engine.pipelines.get(&10).unwrap();
+    assert_eq!(pp.state, PlayState::Playing { video_id: 77 });
+    assert_eq!(pp.cached_position_ms, 12_345, "no Play was sent");
+    assert!(!pp.scene_active.load(std::sync::atomic::Ordering::Acquire));
+    assert!(resolume_rx.try_recv().is_err(), "nothing goes to the wall");
+
     // On air (its scene flagged on program), a ▶ of the paused-by-song-end
     // pipeline starts the next song on program.
     let pp = engine.pipelines.get_mut(&10).unwrap();
