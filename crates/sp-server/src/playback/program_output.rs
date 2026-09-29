@@ -462,6 +462,7 @@ impl super::PlaybackEngine {
         tokio::spawn(super::program_authority::run_program_authority(
             bus.clone(),
             self.event_tx.clone(),
+            self.on_air.clone(),
             shutdown.subscribe(),
         ));
         let follow = crate::playback::program_follow::Follow::new(self.pool.clone(), bus.clone());

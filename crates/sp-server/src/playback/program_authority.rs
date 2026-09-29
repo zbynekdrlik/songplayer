@@ -15,17 +15,26 @@
 //! - **The engine drops a stale event** ([`PlaybackEngine::on_program`]).
 //!   The channel is a queue, so an event can arrive after the set changed
 //!   again: ON is applied only while the playlist is on air, OFF only while
-//!   it is not. So the program's own source is never taken off program (the
-//!   old `Hold::OnProgram` wait, for a cg OBS scene event that came before
-//!   SongPlayer's cut, is gone), and an outgoing playlist is held only
-//!   through its transition window (`Hold::Until`, `scene_off.rs`).
+//!   it is not. "On air" here is the set the task last DIFFED
+//!   ([`OnAirPlaylists`], written before that value's events are sent),
+//!   never the live bus: the bus can change and change back between two
+//!   task wakes (the watch coalesces), and the task then sends no newer
+//!   event for a playlist whose older one the live bus made stale. Against
+//!   the diffed set, a dropped event always has a newer one for its
+//!   playlist queued behind it (review round 1). So the program's own
+//!   source is never taken off program (the old `Hold::OnProgram` wait, for
+//!   a cg OBS scene event that came before SongPlayer's cut, is gone), and
+//!   an outgoing playlist is held only through its transition window
+//!   (`Hold::Until`, `scene_off.rs`).
 //! - A pipeline created after its playlist went on air (a runtime
-//!   `EnsurePipeline`) goes on program itself (`runtime_pipeline.rs`).
+//!   `EnsurePipeline`) goes on program itself (`runtime_pipeline.rs`). An ON
+//!   for a playlist with NO pipeline (the #196 startup senders ran out of
+//!   their budget) creates it lazily, and it goes on program the same way.
 //!
 //! A manual ▶ claims nothing (`PlayEvent::Start`, `engine_play.rs`).
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info};
@@ -35,12 +44,34 @@ use super::pipeline::PipelineEvent;
 use super::program_bus::ProgramBus;
 use super::program_on_air::{on_air_changes, on_air_set};
 
+/// The playlists on air as the authority task last diffed them: the task
+/// writes a value's set BEFORE it sends that value's events, and the
+/// engine's stale check reads it (the module doc). Empty until the first
+/// value. Shared by the engine (`PlaybackEngine::on_air`) and the task.
+#[derive(Clone, Debug, Default)]
+pub struct OnAirPlaylists(Arc<Mutex<BTreeSet<i64>>>);
+
+impl OnAirPlaylists {
+    /// The set of the value the task is about to send the events of.
+    pub fn replace(&self, playlists: BTreeSet<i64>) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = playlists;
+    }
+
+    /// Whether `playlist_id` is in the set the task last diffed.
+    pub fn contains(&self, playlist_id: i64) -> bool {
+        let playlists = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        playlists.contains(&playlist_id)
+    }
+}
+
 /// The playback authority task (the module doc). Test:
 /// `program_authority_tests.rs` (the first value, every change, the re-kick,
-/// the union with the cg OBS record, shutdown, a gone engine).
+/// the union with the cg OBS record, the diffed set, shutdown, a gone
+/// engine).
 pub async fn run_program_authority(
     bus: Arc<ProgramBus>,
     events: mpsc::UnboundedSender<(i64, PipelineEvent)>,
+    diffed: OnAirPlaylists,
     mut shutdown: broadcast::Receiver<()>,
 ) {
     let mut on_air = bus.on_air();
@@ -50,6 +81,7 @@ pub async fn run_program_authority(
         let program = on_air.borrow_and_update().clone();
         let cg_shown = *shown.borrow_and_update();
         let current = on_air_set(&program, cg_shown);
+        diffed.replace(current.clone());
         for (pid, on) in on_air_changes(&previous, &current) {
             if events.send((pid, PipelineEvent::OnProgram(on))).is_err() {
                 debug!("program authority: the engine is gone — stopping");
@@ -96,8 +128,9 @@ fn log_on_air(
 impl PlaybackEngine {
     /// `PipelineEvent::OnProgram(on)` of the authority task: `playlist_id`
     /// went on air (`true`) or left it (`false`). A stale event is dropped
-    /// (the module doc): ON only while the playlist is on air now, OFF only
-    /// while it is not.
+    /// (the module doc): ON only while the playlist is on air, OFF only
+    /// while it is not. An ON for a playlist with no pipeline creates the
+    /// pipeline, which then goes on program (`ensure_pipeline_for_playlist`).
     pub(super) async fn on_program(&mut self, playlist_id: i64, on: bool) {
         if self.on_air_contains(playlist_id) != on {
             debug!(
@@ -109,13 +142,14 @@ impl PlaybackEngine {
         self.handle_scene_change(playlist_id, on).await;
     }
 
-    /// Whether `playlist_id` is on air now (`on_air_set` of the program
-    /// bus); `false` while no bus is set (before `start_program`).
+    /// Whether `playlist_id` is on air: in the set the authority task last
+    /// diffed (`OnAirPlaylists`); `false` before its first value.
     pub(super) fn on_air_contains(&self, playlist_id: i64) -> bool {
-        self.program.get().is_some_and(|bus| {
-            let cg_shown = bus.legacy_cg().shown_now();
-            on_air_set(&bus.on_air_now(), cg_shown).contains(&playlist_id)
-        })
+        self.on_air.contains(playlist_id)
+            || self.program.get().is_some_and(|bus| {
+                let cg_shown = bus.legacy_cg().shown_now();
+                on_air_set(&bus.on_air_now(), cg_shown).contains(&playlist_id)
+            })
     }
 }
 

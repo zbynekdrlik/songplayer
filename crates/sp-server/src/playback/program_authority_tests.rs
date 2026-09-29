@@ -3,6 +3,7 @@
 //! in-memory DB. Wired via `#[cfg(test)] #[path =
 //! "program_authority_tests.rs"] mod tests;`.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -20,18 +21,31 @@ use crate::playback::{PlaybackEngine, PlaybackEngineConfig};
 
 type Events = mpsc::UnboundedReceiver<(i64, PipelineEvent)>;
 
-/// The authority task over `bus`, and its events and shutdown.
-fn authority(
-    bus: &Arc<ProgramBus>,
-) -> (Events, broadcast::Sender<()>, tokio::task::JoinHandle<()>) {
-    let (tx, rx) = mpsc::unbounded_channel();
+/// The authority task over `bus`: its events, the set it diffed, its
+/// shutdown and its handle.
+struct Authority {
+    events: Events,
+    diffed: OnAirPlaylists,
+    shutdown: broadcast::Sender<()>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+fn authority(bus: &Arc<ProgramBus>) -> Authority {
+    let (tx, events) = mpsc::unbounded_channel();
     let (shutdown, _) = broadcast::channel(1);
+    let diffed = OnAirPlaylists::default();
     let task = tokio::spawn(run_program_authority(
         Arc::clone(bus),
         tx,
+        diffed.clone(),
         shutdown.subscribe(),
     ));
-    (rx, shutdown, task)
+    Authority {
+        events,
+        diffed,
+        shutdown,
+        task,
+    }
 }
 
 /// The next `n` events (each within 10 s), as `(playlist, on)`.
@@ -65,37 +79,49 @@ fn cg_shows(bus: &ProgramBus, shown: Option<i64>) {
     assert!(legacy.confirmed(ticket, shown));
 }
 
+fn members(diffed: &OnAirPlaylists, pids: &[i64]) -> Vec<bool> {
+    pids.iter().map(|&pid| diffed.contains(pid)).collect()
+}
+
 /// The first value plays the restored program; a press is ON for the new
 /// playlist while cg OBS still shows the old one (both on air until the
 /// mirror's OK), then OFF for the old one; a press of the same scene
-/// re-kicks it.
+/// re-kicks it. The set it diffed is written before its events.
 #[tokio::test]
 async fn the_authority_plays_the_restored_program_and_follows_every_change() {
     let bus = Arc::new(ProgramBus::new());
     bus.select_initial(7, Some("sp-fast"));
     bus.legacy_cg().restored(7);
-    let (mut events, _shutdown, _task) = authority(&bus);
+    let mut a = authority(&bus);
     assert_eq!(
-        next(&mut events, 1).await,
+        members(&a.diffed, &[7]),
+        [false],
+        "nothing before its first value"
+    );
+    assert_eq!(
+        next(&mut a.events, 1).await,
         [(7, true)],
         "the restored program"
     );
-    nothing_more(&mut events).await;
+    assert_eq!(members(&a.diffed, &[4, 7]), [false, true]);
+    nothing_more(&mut a.events).await;
 
     bus.cut(4, utc_now_100ns(), Some("sp-slow"));
     assert_eq!(
-        next(&mut events, 2).await,
+        next(&mut a.events, 2).await,
         [(4, true), (7, true)],
         "cg OBS still shows sp-fast until the mirror is answered"
     );
-    nothing_more(&mut events).await;
+    assert_eq!(members(&a.diffed, &[4, 7]), [true, true]);
+    nothing_more(&mut a.events).await;
     cg_shows(&bus, Some(4));
-    assert_eq!(next(&mut events, 2).await, [(7, false), (4, true)]);
-    nothing_more(&mut events).await;
+    assert_eq!(next(&mut a.events, 2).await, [(7, false), (4, true)]);
+    assert_eq!(members(&a.diffed, &[4, 7]), [true, false]);
+    nothing_more(&mut a.events).await;
 
     bus.cut(4, utc_now_100ns(), Some("sp-slow"));
-    assert_eq!(next(&mut events, 1).await, [(4, true)], "the re-kick");
-    nothing_more(&mut events).await;
+    assert_eq!(next(&mut a.events, 1).await, [(4, true)], "the re-kick");
+    nothing_more(&mut a.events).await;
 }
 
 /// A dashboard cut to "OBS manuál" while cg OBS shows sp-slow keeps sp-slow
@@ -105,32 +131,33 @@ async fn obs_manual_keeps_on_air_what_cg_obs_shows() {
     let bus = Arc::new(ProgramBus::new());
     bus.select_initial(4, Some("sp-slow"));
     bus.legacy_cg().restored(4);
-    let (mut events, _shutdown, _task) = authority(&bus);
-    assert_eq!(next(&mut events, 1).await, [(4, true)]);
+    let mut a = authority(&bus);
+    assert_eq!(next(&mut a.events, 1).await, [(4, true)]);
 
     bus.cut(PROGRAM_INPUT_ID, utc_now_100ns(), None);
-    assert_eq!(next(&mut events, 1).await, [(4, true)], "still on air");
-    nothing_more(&mut events).await;
+    assert_eq!(next(&mut a.events, 1).await, [(4, true)], "still on air");
+    nothing_more(&mut a.events).await;
     cg_shows(&bus, None);
-    assert_eq!(next(&mut events, 1).await, [(4, false)]);
-    nothing_more(&mut events).await;
+    assert_eq!(next(&mut a.events, 1).await, [(4, false)]);
+    assert_eq!(members(&a.diffed, &[4]), [false]);
+    nothing_more(&mut a.events).await;
 }
 
 /// It ends on shutdown, and when the engine's channel is gone.
 #[tokio::test]
 async fn the_authority_ends_on_shutdown_or_without_an_engine() {
     let bus = Arc::new(ProgramBus::new());
-    let (_events, shutdown, task) = authority(&bus);
-    shutdown.send(()).unwrap();
-    tokio::time::timeout(Duration::from_secs(10), task)
+    let a = authority(&bus);
+    a.shutdown.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(10), a.task)
         .await
         .expect("it ends on shutdown")
         .unwrap();
 
-    let (events, _shutdown, task) = authority(&bus);
-    drop(events);
+    let a = authority(&bus);
+    drop(a.events);
     bus.cut(7, utc_now_100ns(), Some("sp-fast"));
-    tokio::time::timeout(Duration::from_secs(10), task)
+    tokio::time::timeout(Duration::from_secs(10), a.task)
         .await
         .expect("it ends once the engine is gone")
         .unwrap();
@@ -196,6 +223,14 @@ fn program(engine: &PlaybackEngine, source: i64) -> Arc<ProgramBus> {
     bus
 }
 
+/// The authority task diffed `pids` as on air (the set it writes before it
+/// sends that value's events).
+fn diffed(engine: &PlaybackEngine, pids: &[i64]) {
+    engine
+        .on_air
+        .replace(pids.iter().copied().collect::<BTreeSet<i64>>());
+}
+
 fn on_program(engine: &PlaybackEngine, pid: i64) -> bool {
     engine.pipelines[&pid].scene_active.load(Ordering::Acquire)
 }
@@ -210,7 +245,7 @@ fn state(engine: &PlaybackEngine, pid: i64) -> PlayState {
 #[tokio::test]
 async fn an_on_is_applied_only_while_the_playlist_is_on_air() {
     let mut engine = engine().await;
-    let _bus = program(&engine, IN);
+    diffed(&engine, &[IN]);
     engine
         .handle_pipeline_event(IN, PipelineEvent::OnProgram(true))
         .await;
@@ -231,6 +266,7 @@ async fn an_on_is_applied_only_while_the_playlist_is_on_air() {
 async fn an_off_is_applied_only_while_the_playlist_is_off_air() {
     let mut engine = engine().await;
     let bus = program(&engine, OUT);
+    diffed(&engine, &[OUT]);
     engine
         .handle_pipeline_event(OUT, PipelineEvent::OnProgram(true))
         .await;
@@ -243,8 +279,8 @@ async fn an_off_is_applied_only_while_the_playlist_is_off_air() {
     assert_eq!(state(&engine, OUT), PlayState::Playing { video_id: SONG });
 
     // IN is cut to; cg OBS still shows OUT: OUT is on air, OFF is stale.
-    cg_shows(&bus, Some(OUT));
     bus.cut(IN, utc_now_100ns(), None);
+    diffed(&engine, &[IN, OUT]);
     engine
         .handle_pipeline_event(OUT, PipelineEvent::OnProgram(false))
         .await;
@@ -252,23 +288,76 @@ async fn an_off_is_applied_only_while_the_playlist_is_off_air() {
     assert_eq!(state(&engine, OUT), PlayState::Playing { video_id: SONG });
 
     // cg OBS shows IN now: the OFF applies.
-    cg_shows(&bus, Some(IN));
+    diffed(&engine, &[IN]);
     engine
         .handle_pipeline_event(OUT, PipelineEvent::OnProgram(false))
         .await;
     assert!(!on_program(&engine, OUT), "off program");
 }
 
-/// Before `start_program` sets the bus, nothing is on air.
+/// Review round 1: the stale check reads the set the authority DIFFED, never
+/// the live bus. The bus can change and change back between two task wakes;
+/// the task then sends no newer event, so an event the live bus made stale
+/// would be lost for good.
 #[tokio::test]
-async fn without_a_program_bus_nothing_is_on_air() {
+async fn the_stale_check_reads_the_set_the_authority_diffed_not_the_live_bus() {
+    let mut engine = engine().await;
+    let _bus = program(&engine, OUT); // the live bus: OUT on air
+    diffed(&engine, &[IN]); // the task has not diffed that value yet
+    engine
+        .handle_pipeline_event(IN, PipelineEvent::OnProgram(true))
+        .await;
+    assert!(on_program(&engine, IN), "IN is in the diffed set");
+    engine
+        .handle_pipeline_event(OUT, PipelineEvent::OnProgram(true))
+        .await;
+    assert!(
+        !on_program(&engine, OUT),
+        "OUT's ON comes when the task diffs the bus's value"
+    );
+}
+
+/// Before the authority's first value, nothing is on air.
+#[tokio::test]
+async fn before_the_authority_s_first_value_nothing_is_on_air() {
     let mut engine = engine().await;
     assert!(!engine.on_air_contains(OUT));
     engine
         .handle_pipeline_event(OUT, PipelineEvent::OnProgram(true))
         .await;
-    assert!(!on_program(&engine, OUT), "no bus: an ON is stale");
-    let _bus = program(&engine, OUT);
+    assert!(!on_program(&engine, OUT), "an ON is stale");
+    diffed(&engine, &[OUT]);
     assert!(engine.on_air_contains(OUT));
     assert!(!engine.on_air_contains(IN));
+}
+
+/// Review round 1: an ON for a playlist with NO pipeline (the #196 startup
+/// senders ran out of their budget) creates it lazily, and it goes on
+/// program.
+#[tokio::test]
+async fn an_on_for_a_playlist_with_no_pipeline_creates_it_on_program() {
+    let mut engine = engine().await;
+    engine.remove_pipeline(IN);
+    diffed(&engine, &[IN]);
+    engine
+        .handle_pipeline_event(IN, PipelineEvent::OnProgram(true))
+        .await;
+    assert!(engine.pipelines.contains_key(&IN), "created");
+    assert!(on_program(&engine, IN));
+    assert_eq!(state(&engine, IN), PlayState::Playing { video_id: 44 });
+}
+
+/// An ON for a pipeline already on program (the re-kick) starts it again
+/// when it waits, e.g. after its song ended in Single mode: SceneOn →
+/// SelectAndPlay, never the lazy-create path.
+#[tokio::test]
+async fn an_on_re_kicks_a_waiting_pipeline_already_on_program() {
+    let mut engine = engine().await;
+    engine.set_scene_active_for_test(IN, true);
+    engine.set_state_for_test(IN, PlayState::WaitingForScene);
+    diffed(&engine, &[IN]);
+    engine
+        .handle_pipeline_event(IN, PipelineEvent::OnProgram(true))
+        .await;
+    assert_eq!(state(&engine, IN), PlayState::Playing { video_id: 44 });
 }

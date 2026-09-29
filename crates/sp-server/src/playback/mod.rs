@@ -277,9 +277,11 @@ pub struct PlaybackEngine {
     /// ladder in that case).
     ndi_source_map: Option<crate::obs::NdiSourceMap>,
     /// #215: the program bus (set by `start_program`), asked whether a playlist
-    /// that left program must keep playing through a transition, and (#221
-    /// L4b) what is on air (`program_authority.rs`).
+    /// that left program must keep playing through a transition.
     program: std::sync::OnceLock<Arc<crate::playback::program_bus::ProgramBus>>,
+    /// #221 L4b: the playlists on air as the playback authority last diffed
+    /// them, read by its stale check (`program_authority.rs`).
+    on_air: program_authority::OnAirPlaylists,
 }
 
 /// Construction-time configuration for [`PlaybackEngine`]. Bundling these
@@ -356,6 +358,7 @@ impl PlaybackEngine {
             preview_registry: std::sync::Arc::new(crate::playback::preview::PreviewRegistry::new()),
             ndi_source_map: None,
             program: std::sync::OnceLock::new(),
+            on_air: Default::default(),
         }
     }
 

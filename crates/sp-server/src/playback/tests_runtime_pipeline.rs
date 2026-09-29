@@ -175,9 +175,9 @@ async fn a_pipeline_created_for_a_playlist_on_air_goes_on_program() {
         .execute(&pool)
         .await
         .unwrap();
-        let bus = std::sync::Arc::new(crate::playback::program_bus::ProgramBus::new());
-        bus.select_initial(on_air, Some("sp-young"));
-        assert!(engine.program.set(bus).is_ok());
+        // The authority diffed `on_air` as on air (its ON came before 515's
+        // pipeline existed).
+        engine.on_air.replace([on_air].into());
 
         engine.ensure_pipeline_for_playlist(515).await;
 
@@ -185,9 +185,9 @@ async fn a_pipeline_created_for_a_playlist_on_air_goes_on_program() {
         assert_eq!(
             pp.scene_active.load(std::sync::atomic::Ordering::Acquire),
             expected,
-            "SP-program shows {on_air}"
+            "{on_air} is on air"
         );
-        assert_eq!(pp.state, state, "SP-program shows {on_air}");
+        assert_eq!(pp.state, state, "{on_air} is on air");
     }
 }
 
