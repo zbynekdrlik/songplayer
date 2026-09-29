@@ -837,3 +837,40 @@ async fn started_fixes_the_song_s_title_clock_and_arms_its_timers() {
     );
     engine.pipelines.get_mut(&7).unwrap().cancel_title_timers();
 }
+
+/// #221 L4b review round 3: the playback authority sends the incoming
+/// playlist's ON at the press and the outgoing one's OFF only when cg OBS
+/// confirms the mirror, so another playlist can already be on program, its
+/// title up, when a playlist goes off. The wall is then re-synced to it (its
+/// due title, never a bare HideTitle), and its line is re-sent on its next
+/// position report (its subtitle dedup cleared); the outgoing line goes.
+#[tokio::test]
+async fn going_off_program_resyncs_the_wall_to_a_playlist_still_on_program() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song"), (9, 44, "Later")]).await;
+    play(&mut engine, 7, 42, Window::Due); // the outgoing playlist
+    play(&mut engine, 9, 44, Window::Due); // on program already, its title due
+    engine
+        .pipelines
+        .get_mut(&9)
+        .unwrap()
+        .last_resolume_subtitles_signature = Some("show|a line of 9".to_string());
+    sent(&mut rx);
+
+    engine.handle_scene_change(7, false).await;
+
+    let cmds = sent(&mut rx);
+    assert!(
+        !cmds.iter().any(|c| matches!(c, ResolumeCommand::HideTitle)),
+        "9's title stays up: {cmds:?}"
+    );
+    assert_eq!(resyncs(&cmds), [Some("Later - Artist".to_string())]);
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, ResolumeCommand::HideSubtitles)),
+        "7's line goes: {cmds:?}"
+    );
+    assert_eq!(
+        engine.pipelines[&9].last_resolume_subtitles_signature, None,
+        "9's line is re-sent on its next position report"
+    );
+}
