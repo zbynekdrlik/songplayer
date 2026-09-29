@@ -1,9 +1,19 @@
-//! Metadata extraction — Gemini AI provider + title regex parser.
+//! Metadata extraction — the provider chain (Claude, Gemini) + title regex parser.
+//!
+//! #136: the ONE production chain is [`chain::provider_chain`], built once in
+//! `lib.rs` and shared by the download worker, the reprocess worker and the
+//! API (`status.metadata`, `POST /api/v1/metadata/probe`).
 
+pub mod chain;
 pub mod claude;
 pub mod gemini;
+pub mod health;
 pub mod parser;
 pub mod sanitize;
+#[cfg(test)]
+pub(crate) mod test_support;
+
+pub use chain::{ProviderChain, provider_chain};
 
 use async_trait::async_trait;
 use sp_core::metadata::VideoMetadata;
@@ -15,8 +25,10 @@ pub enum MetadataError {
     ApiError(String),
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
-    #[error("Rate limited")]
-    RateLimited,
+    /// Every key / the provider is out of quota (429); the reprocess worker
+    /// enters its cooldown. The text names the last status + body excerpt.
+    #[error("rate limited: {0}")]
+    RateLimited(String),
 }
 
 /// A pluggable metadata extraction backend.
@@ -68,7 +80,9 @@ pub async fn get_metadata(
                 return meta;
             }
             Err(e) => {
-                tracing::warn!(
+                // The chain's `Recorded` wrapper already WARNed this failure
+                // with its latency (#136); here only the next step.
+                tracing::debug!(
                     provider = provider.name(),
                     error = %e,
                     video_id,

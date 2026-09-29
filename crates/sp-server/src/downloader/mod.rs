@@ -13,10 +13,11 @@ pub mod normalize;
 pub mod tools;
 pub mod ytdlp_cmd;
 
-use crate::metadata::MetadataProvider;
+use crate::metadata::ProviderChain;
 use sqlx::SqlitePool;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tools::ToolPaths;
 
@@ -161,7 +162,8 @@ pub struct DownloadWorker {
     /// check (#141). Re-checked per download, not cached at startup, so a
     /// cookie file added later takes effect without a restart.
     data_dir: PathBuf,
-    providers: Vec<Box<dyn MetadataProvider>>,
+    /// The ONE production metadata chain (#136), shared with the reprocess worker.
+    metadata: Arc<ProviderChain>,
     event_tx: broadcast::Sender<String>,
 }
 
@@ -171,7 +173,7 @@ impl DownloadWorker {
         tools: ToolPaths,
         cache_dir: PathBuf,
         data_dir: PathBuf,
-        providers: Vec<Box<dyn MetadataProvider>>,
+        metadata: Arc<ProviderChain>,
         event_tx: broadcast::Sender<String>,
         ytdlp_lock: YtdlpLock,
     ) -> Self {
@@ -181,7 +183,7 @@ impl DownloadWorker {
             cache_dir,
             ytdlp_lock,
             data_dir,
-            providers,
+            metadata,
             event_tx,
         }
     }
@@ -279,7 +281,8 @@ impl DownloadWorker {
         };
 
         let meta =
-            crate::metadata::get_metadata(&self.providers, &row.youtube_id, &row.title).await;
+            crate::metadata::get_metadata(self.metadata.providers(), &row.youtube_id, &row.title)
+                .await;
 
         let video_final = self.cache_dir.join(cache::video_filename(
             &meta.song,
