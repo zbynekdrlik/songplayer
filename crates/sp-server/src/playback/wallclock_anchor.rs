@@ -486,9 +486,11 @@ pub struct WallAnchorStats {
     /// `steps_followed`.
     pub holds_followed: u64,
     /// How long (µs) the last followed hold froze the wall from the follow:
-    /// the whole step when the probe follows it (also right after a resample
-    /// armed it with a 1 ms hold, which the follow's hold covers); the step
-    /// minus the elapsed arming 1 ms on the resample path; 0 before any.
+    /// the whole step when the probe follows it at the boundary it lands (also
+    /// in the tick a resample armed it with a 1 ms hold, which the follow's
+    /// hold covers); the step minus the elapsed arming 1 ms when the follow
+    /// comes a boundary or more after that resample (the next resample, or a
+    /// probe after a rejected same-tick probe); 0 before any.
     pub last_hold_us: u64,
 }
 

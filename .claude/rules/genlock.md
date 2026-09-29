@@ -1134,9 +1134,11 @@ Now:
   - `wall_anchor_holds_followed` — the backward ones among them, each
     followed as ONE hold;
   - `wall_anchor_last_hold_us` — how long the last followed hold froze the
-    wall and paused the output (the whole step when the probe followed it,
-    also right after a resample armed it with a 1 ms hold; the step minus the
-    elapsed arming 1 ms on the resample path);
+    wall and paused the output (the whole step when the probe followed it at
+    the boundary it landed, also in the tick a resample armed it with a 1 ms
+    hold; the step minus the elapsed arming 1 ms when the follow comes a
+    boundary or more after that resample — the next resample, or a probe
+    after a rejected same-tick probe);
   - `wall_anchor_probes_rejected` (#224) — probes over 2 ms that were rejected
     (a wide probe, or a confirming sample that was wide or read another step);
   - `wall_anchor_detect_to_follow_us` (#224) — from the FIRST over-2 ms probe
