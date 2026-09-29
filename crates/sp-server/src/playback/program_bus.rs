@@ -61,8 +61,8 @@
 //! unchanged. A fade first waits for the incoming source's first LIVE pair
 //! (the cue gate), with the outgoing source held on program at full level —
 //! the window half lives in the child module `program_bus_window.rs`. The
-//! engine asks [`ProgramCore::hold_for`] whether a source that left its OBS
-//! scene must keep playing through a window ([`Hold`]).
+//! engine asks [`ProgramCore::hold_for`] whether a source that left program
+//! must keep playing through a window ([`Hold`]).
 //!
 //! This file is the PURE, Linux-tested decision layer ([`ProgramCore`]) plus
 //! its `Mutex`/`Condvar` wrapper ([`ProgramBus`]) and the settings persistence
@@ -211,17 +211,15 @@ pub struct ProgramStatus {
     pub transition: TransitionStatus,
 }
 
-/// #215: why the engine keeps a playlist that left its OBS scene playing
-/// ([`ProgramCore::hold_for`]).
+/// #215: why the engine keeps a playlist that left program playing
+/// ([`ProgramCore::hold_for`]). #221 L4b deleted `OnProgram` (the selected
+/// source, whose cut away might follow cg OBS's scene event): the playback
+/// authority never takes the program's own source off program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hold {
     /// The source is the `from` of a window (or a cut) not served yet: keep it
     /// playing until this stamp, one slot after the window's end.
     Until(i64),
-    /// The source is still the selected one. A cut away from it may still be
-    /// on its way: the follow task and a #221 manual-scene press cut only
-    /// AFTER cg OBS switched.
-    OnProgram,
 }
 
 /// The pure program-bus decision layer: ownership, the reorder buffer, the
@@ -299,8 +297,8 @@ impl ProgramCore {
         changed
     }
 
-    /// #215: whether the engine must keep `pid` playing although its OBS scene
-    /// left program (see [`Hold`]). `None` = pause it now, as before. A window
+    /// #215: whether the engine must keep `pid` playing although it left
+    /// program (see [`Hold`]). `None` = pause it now, as before. A window
     /// still waiting for its cue holds its outgoing source to the latest end
     /// the window can reach (the cue gate's wait included).
     pub fn hold_for(&self, pid: i64) -> Option<Hold> {
@@ -309,11 +307,8 @@ impl ProgramCore {
             .iter()
             .filter(|w| w.from == Some(pid))
             .map(|w| w.end_100ns)
-            .max();
-        match end {
-            Some(end) => Some(Hold::Until(strict_next_boundary_100ns(end, self.fps))),
-            None => (self.selected() == Some(pid)).then_some(Hold::OnProgram),
-        }
+            .max()?;
+        Some(Hold::Until(strict_next_boundary_100ns(end, self.fps)))
     }
 
     /// The selected source (the latest cut's target).

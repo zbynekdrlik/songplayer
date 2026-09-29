@@ -4,8 +4,9 @@
 //! While `SP-program` fades from one playlist to another, the outgoing
 //! playlist must keep decoding and emitting until the fade is over: a paused
 //! source is a frozen picture and silence, which is exactly the hard on/off the
-//! transition removes. So when a playlist's OBS scene leaves program, the engine
-//! asks the program bus (`ProgramBus::hold_for`):
+//! transition removes. So when a playlist leaves program (#221 L4b: the
+//! playback authority's OFF, `program_authority.rs`), the engine asks the
+//! program bus (`ProgramBus::hold_for`):
 //!
 //! - `Hold::Until(t)` — it is the `from` of a window (or a cut) that is not
 //!   served yet: re-check at `t`, one slot after the window's end. A fade that
@@ -14,14 +15,11 @@
 //!   `CUE_WAIT_MAX_SLOTS` plus its slots, so the outgoing playlist keeps
 //!   playing through the wait too; the re-check then finds the window over,
 //!   or asks again;
-//! - `Hold::OnProgram` — it is still the program's source, and the cut away
-//!   from it may be on its way: the follow task and the #213 remote control cut
-//!   only AFTER cg OBS switched, and cg OBS's scene event can reach the engine
-//!   before their cut (#219: the follow reads the OBS client's snapshot, so
-//!   either order happens; a cut that came first is a `Hold::Until`).
-//!   Re-check once after [`CUT_SETTLE`];
-//! - no hold — pause now, exactly as before. Every playlist that is not the
-//!   program's source takes this path.
+//! - no hold — pause now, exactly as before.
+//!
+//! The authority never takes the program's own source off program (its OFF
+//! would be stale), so #221 L4b deleted the `Hold::OnProgram` wait (one
+//! `CUT_SETTLE` for a cut that followed cg OBS's scene event).
 //!
 //! The re-check comes back on the engine's own event channel as
 //! `PipelineEvent::SceneOffDue`. If the scene came back on program in the
@@ -54,29 +52,19 @@ use super::wallclock::utc_now_100ns;
 /// is exactly a stale re-check's state (review round 3).
 static NEXT_RE_CHECK: AtomicU64 = AtomicU64::new(1);
 
-/// How long a playlist that is still on program keeps playing after its OBS
-/// scene left, so that the cut following cg OBS lands first (the follow task's
-/// or the remote control's persist + cut, tens of ms).
-pub const CUT_SETTLE: Duration = Duration::from_millis(500);
-
-/// How long to keep a playlist playing after its OBS scene left program;
-/// `None` = pause it now. `settled` = the one [`CUT_SETTLE`] wait was given.
-pub fn scene_off_delay(hold: Option<Hold>, now_100ns: i64, settled: bool) -> Option<Duration> {
-    match hold? {
-        Hold::Until(until_100ns) => {
-            let wait = until_100ns - now_100ns;
-            (wait > 0).then(|| Duration::from_nanos(wait as u64 * 100))
-        }
-        Hold::OnProgram => (!settled).then_some(CUT_SETTLE),
-    }
+/// How long to keep a playlist playing after it left program; `None` =
+/// pause it now.
+pub fn scene_off_delay(hold: Option<Hold>, now_100ns: i64) -> Option<Duration> {
+    let Hold::Until(until_100ns) = hold?;
+    let wait = until_100ns - now_100ns;
+    (wait > 0).then(|| Duration::from_nanos(wait as u64 * 100))
 }
 
 impl PlaybackEngine {
     /// The scene-go-off half of `handle_scene_change`: pause, unless the
     /// program bus holds the playlist through a transition.
     pub(super) async fn scene_off(&mut self, playlist_id: i64) {
-        self.scene_off_step(playlist_id, false, utc_now_100ns())
-            .await;
+        self.scene_off_step(playlist_id, utc_now_100ns()).await;
     }
 
     /// `PipelineEvent::SceneOffDue` of the hold re-check `due`:
@@ -84,7 +72,7 @@ impl PlaybackEngine {
     /// the pipeline is gone), or when `due` is not the pending re-check. A
     /// hold registers its re-check before the engine can see the event, so
     /// any other one is stale: a newer hold replaced it (queued during an
-    /// A→B→A→B, it skipped that hold's `CUT_SETTLE`, review round 1), or the
+    /// A→B→A→B, it re-checked the newer hold early, review round 1), or the
     /// hold ended (a pause, a scene-on, an operator's pick, which it held again
     /// or paused, review round 2).
     pub(super) async fn scene_off_due(&mut self, playlist_id: i64, due: u64) {
@@ -107,13 +95,13 @@ impl PlaybackEngine {
             .get(&playlist_id)
             .is_some_and(|pp| !pp.scene_active.load(Ordering::Acquire));
         if off {
-            self.scene_off_step(playlist_id, true, now_100ns).await;
+            self.scene_off_step(playlist_id, now_100ns).await;
         }
     }
 
     /// Pause `playlist_id` now, or re-check once its hold is over (see the
-    /// module doc). `settled` = the one [`CUT_SETTLE`] wait was given.
-    async fn scene_off_step(&mut self, playlist_id: i64, settled: bool, now_100ns: i64) {
+    /// module doc).
+    async fn scene_off_step(&mut self, playlist_id: i64, now_100ns: i64) {
         let playing = self
             .pipelines
             .get(&playlist_id)
@@ -123,7 +111,7 @@ impl PlaybackEngine {
             .get()
             .filter(|_| playing)
             .and_then(|bus| bus.hold_for(playlist_id));
-        let Some(delay) = scene_off_delay(hold, now_100ns, settled) else {
+        let Some(delay) = scene_off_delay(hold, now_100ns) else {
             self.apply_event(playlist_id, PlayEvent::SceneOff).await;
             return;
         };

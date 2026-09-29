@@ -1,8 +1,8 @@
 //! #215: the deferred scene-go-off pause. The pure [`scene_off_delay`], then
 //! the engine over a real [`ProgramBus`]: the program's outgoing playlist keeps
 //! playing through its transition window and pauses once the window is over,
-//! the on-program playlist waits one [`CUT_SETTLE`] for the cut that follows
-//! cg OBS, every other playlist pauses at once, and a scene back on program
+//! every other playlist pauses at once (#221 L4b: the program's own source
+//! too — the `Hold::OnProgram` settle is gone), and a scene back on program
 //! cancels the pending pause. The bus runs on fixed grid stamps and the engine
 //! steps are driven at chosen instants, so no assertion depends on the wall
 //! clock; the real re-check timer is only ever bounded from below (a sleep
@@ -43,38 +43,26 @@ fn b(k: usize) -> i64 {
 }
 
 #[test]
-fn the_pause_waits_exactly_until_the_hold_ends_and_settles_only_once() {
-    assert_eq!(CUT_SETTLE, Duration::from_millis(500));
-    assert_eq!(scene_off_delay(None, T0, false), None, "no hold: pause now");
-    assert_eq!(scene_off_delay(None, T0, true), None);
+fn the_pause_waits_exactly_until_the_hold_ends() {
+    assert_eq!(scene_off_delay(None, T0), None, "no hold: pause now");
     assert_eq!(
-        scene_off_delay(Some(Hold::Until(T0 + 333_334)), T0, false),
+        scene_off_delay(Some(Hold::Until(T0 + 333_334)), T0),
         Some(Duration::from_nanos(33_333_400)),
         "one slot of 100 ns units"
     );
     assert_eq!(
-        scene_off_delay(Some(Hold::Until(T0 + 1)), T0, true),
-        Some(Duration::from_nanos(100)),
-        "settled or not, a window is waited out"
+        scene_off_delay(Some(Hold::Until(T0 + 1)), T0),
+        Some(Duration::from_nanos(100))
     );
     assert_eq!(
-        scene_off_delay(Some(Hold::Until(T0)), T0, false),
+        scene_off_delay(Some(Hold::Until(T0)), T0),
         None,
         "the hold ends now"
     );
     assert_eq!(
-        scene_off_delay(Some(Hold::Until(T0 - 1)), T0, false),
+        scene_off_delay(Some(Hold::Until(T0 - 1)), T0),
         None,
         "a hold already over"
-    );
-    assert_eq!(
-        scene_off_delay(Some(Hold::OnProgram), T0, false),
-        Some(CUT_SETTLE)
-    );
-    assert_eq!(
-        scene_off_delay(Some(Hold::OnProgram), T0, true),
-        None,
-        "the settle is given once, then the playlist pauses"
     );
 }
 
@@ -168,7 +156,7 @@ async fn the_outgoing_playlist_plays_through_its_window_and_pauses_once_it_is_ov
 
     // The scene leaves program 100 ms before the hold ends.
     let started = Instant::now();
-    engine.scene_off_step(OUT, false, b(32) - 100 * MS).await;
+    engine.scene_off_step(OUT, b(32) - 100 * MS).await;
     assert_eq!(
         state(&engine, OUT),
         PLAYING,
@@ -194,46 +182,6 @@ async fn the_outgoing_playlist_plays_through_its_window_and_pauses_once_it_is_ov
 }
 
 #[tokio::test]
-async fn the_on_program_playlist_settles_once_for_the_cut_that_follows_cg_obs() {
-    // Nobody cuts away (the follow is off): after one settle it pauses.
-    let mut engine = rig().await;
-    playing(&mut engine, OUT);
-    let _bus = program(&engine, OUT);
-    engine.set_scene_active_for_test(OUT, false);
-    let started = Instant::now();
-    engine.scene_off_step(OUT, false, b(5)).await;
-    assert_eq!(state(&engine, OUT), PLAYING, "still the program's source");
-    next_scene_off_due(&mut engine, OUT).await;
-    assert!(started.elapsed() >= CUT_SETTLE, "{:?}", started.elapsed());
-    engine.scene_off_recheck(OUT, b(20)).await;
-    assert_eq!(
-        state(&engine, OUT),
-        PlayState::WaitingForScene,
-        "settled once: it pauses"
-    );
-
-    // The follow task's cut lands during the settle: OUT fades out first.
-    let mut engine = rig().await;
-    playing(&mut engine, OUT);
-    let bus = program(&engine, OUT);
-    engine.set_scene_active_for_test(OUT, false);
-    engine.scene_off_step(OUT, false, b(5)).await;
-    next_scene_off_due(&mut engine, OUT).await;
-    bus.cut(IN, b(5), None); // the cue may wait: held until b(32)
-    let started = Instant::now();
-    engine.scene_off_recheck(OUT, b(32) - 50 * MS).await;
-    assert_eq!(state(&engine, OUT), PLAYING, "now held through the window");
-    next_scene_off_due(&mut engine, OUT).await;
-    assert!(
-        started.elapsed() >= Duration::from_millis(50),
-        "{:?}",
-        started.elapsed()
-    );
-    engine.scene_off_recheck(OUT, b(32)).await;
-    assert_eq!(state(&engine, OUT), PlayState::WaitingForScene);
-}
-
-#[tokio::test]
 async fn every_other_playlist_pauses_at_once_as_before() {
     // No program bus at all (before `start_program`): the plain pause.
     let mut engine = rig().await;
@@ -246,6 +194,15 @@ async fn every_other_playlist_pauses_at_once_as_before() {
     let mut engine = rig().await;
     playing(&mut engine, OUT);
     let _bus = program(&engine, IN);
+    engine.handle_scene_change(OUT, false).await;
+    assert_eq!(state(&engine, OUT), PlayState::WaitingForScene);
+    assert_eq!(paused_at(&engine, OUT), Some((SONG, 0)));
+
+    // #221 L4b: the program's own source is not held either (the authority
+    // never takes it off; no `Hold::OnProgram` settle any more).
+    let mut engine = rig().await;
+    playing(&mut engine, OUT);
+    let _bus = program(&engine, OUT);
     engine.handle_scene_change(OUT, false).await;
     assert_eq!(state(&engine, OUT), PlayState::WaitingForScene);
     assert_eq!(paused_at(&engine, OUT), Some((SONG, 0)));
@@ -274,12 +231,14 @@ async fn a_scene_off_on_the_live_clock_goes_through_the_hold() {
 #[tokio::test]
 async fn a_scene_back_on_program_cancels_the_pending_pause() {
     // A real hold (release 0.68.0 review round 2: a re-check with no hold
-    // pending is stale, so the test no longer injects one): OUT is still the
-    // program's source, so its scene-off waits one `CUT_SETTLE`.
+    // pending is stale, so the test no longer injects one): OUT fades out of
+    // a cut to IN, held until b(32).
     let mut engine = rig().await;
     playing(&mut engine, OUT);
-    let _bus = program(&engine, OUT);
-    engine.handle_scene_change(OUT, false).await;
+    let bus = program(&engine, OUT);
+    bus.cut(IN, b(5), None);
+    engine.set_scene_active_for_test(OUT, false);
+    engine.scene_off_step(OUT, b(32) - 100 * MS).await;
     let due = pending_re_check(&engine, OUT);
     // The scene is back on program when the re-check comes: nothing happens.
     engine.handle_scene_change(OUT, true).await;
@@ -288,12 +247,9 @@ async fn a_scene_back_on_program_cancels_the_pending_pause() {
         .await;
     assert_eq!(state(&engine, OUT), PLAYING);
     assert_eq!(paused_at(&engine, OUT), None);
-    // Off program again: its own re-check pauses it (the settle was given).
-    engine.handle_scene_change(OUT, false).await;
-    let due = pending_re_check(&engine, OUT);
-    engine
-        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(due))
-        .await;
+    // Off program again once the window is over: it pauses at once.
+    engine.set_scene_active_for_test(OUT, false);
+    engine.scene_off_step(OUT, b(32)).await;
     assert_eq!(state(&engine, OUT), PlayState::WaitingForScene);
     // A re-check for a pipeline that is gone is ignored.
     engine

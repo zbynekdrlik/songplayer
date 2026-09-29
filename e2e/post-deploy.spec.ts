@@ -375,7 +375,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
 
     expect(
       active.length,
-      "no playlist registered as on program after parking on the baseline sp-* scene — scene detection did not fire (active_playlist_ids stayed empty)",
+      "no playlist registered as on program after parking on the baseline sp-* scene — the playback authority saw nothing on air (active_playlist_ids stayed empty)",
     ).toBeGreaterThan(0);
     expect(
       unhealthy,
@@ -485,13 +485,11 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    *
    * Strong assertion: after the scene switch, `/api/v1/status` must
    * report `active_playlist_ids` CONTAINING the ytfast playlist's id.
-   * This field is populated from `obs_state.active_playlist_ids`,
-   * which is the exact output of `check_scene_items` against the
-   * rebuilt map — so a stale or empty map is directly observable.
-   *
-   * A weaker assertion using `active_scene` alone would pass even
-   * before the fix, because `obs_state.current_scene` is set from the
-   * raw OBS event regardless of the NDI match.
+   * #221 L4b: that is SongPlayer's own on-air set (SP-program's playlist
+   * ∪ the one cg OBS was told to show), which the playback authority
+   * plays, and `active_scene` is SongPlayer's own program scene name —
+   * both from the facade's switch (the scene catalog), never cg OBS's
+   * scene detection.
    *
    * Required environment: OBS must have an `sp-fast` scene containing
    * an NDI source whose `ndi_source_name` setting is `SP-fast`. If
@@ -568,10 +566,10 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    * 3. Switch OBS program scene to `sp-fast` via obs-websocket-js.
    * 4. Within 15 seconds the ytfast card must transition to `.np-info`.
    *
-   * This exercises the entire chain:
-   *   OBS scene change → SongPlayer OBS client → check_scene_items
-   *   → active_playlist_ids populated → OBS→engine bridge
-   *   → EngineCommand::SceneChanged → state machine
+   * This exercises the entire chain (#221 L4b):
+   *   a scene press on SongPlayer's facade → the SP-program cut
+   *   → the on-air watch → the playback authority
+   *   → PipelineEvent::OnProgram → state machine
    *   → SelectAndPlay → PipelineEvent::Started
    *   → NowPlaying broadcast → dashboard WebSocket → card update.
    *

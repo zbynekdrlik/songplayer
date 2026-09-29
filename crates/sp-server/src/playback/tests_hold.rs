@@ -612,7 +612,7 @@ async fn a_newer_hold_supersedes_the_pending_re_check() {
 
     // Review round 1: the superseded hold's re-check, already queued (an
     // A→B→A→B inside one hold), is stale. Taken as the newer hold's, it
-    // skipped that hold's `CUT_SETTLE`; it is ignored.
+    // re-checked that hold early; it is ignored.
     rig.engine
         .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(first_id))
         .await;
