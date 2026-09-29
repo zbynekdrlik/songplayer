@@ -88,6 +88,9 @@ pub struct AppState {
     /// LAN `sp.local` advertisement status (#51) — written by the mDNS task,
     /// read by `/api/v1/status` so the dashboard shows the offline-LAN URL.
     pub lan_status: mdns::LanStatusHandle,
+    /// #136: the ONE metadata provider chain — the same `Arc` the download and
+    /// reprocess workers use; `status.metadata` + the probe route read it.
+    pub metadata_chain: Arc<metadata::ProviderChain>,
 }
 
 /// Status of external tool availability.
@@ -327,6 +330,7 @@ pub async fn start(
         preview_registry: preview_registry.clone(),
         program_bus: program_bus.clone(),
         lan_status: lan_status.clone(),
+        metadata_chain: metadata_chain.clone(),
     };
 
     // #51: advertise `sp.local` over mDNS so the dashboard stays reachable on

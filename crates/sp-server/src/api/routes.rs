@@ -99,20 +99,13 @@ pub struct StatusResponse {
     /// off Windows or on a read failure — a missing key deserializes to `None`).
     #[serde(default)]
     pub commit: Option<crate::lyrics::host_commit::HostCommitStatus>,
+    /// #136: the metadata provider chain — repair-queue size + per-provider
+    /// health (`api::metadata::status_block`). Missing key → default.
+    #[serde(default)]
+    pub metadata: crate::metadata::health::MetadataStatus,
 }
 
-/// #203: the containment applied to the heavy children, surfaced on `/status` so
-/// the dashboard health + the next box measurement can read the effective cap.
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct HeavyContainmentStatus {
-    /// Job Object CPU hard-cap, percent of TOTAL machine CPU time.
-    pub cap_pct: u8,
-    /// Job Object affinity mask (lowercase hex, no `0x`) — the cores the heavy
-    /// children may run on.
-    pub affinity_mask: String,
-    /// SongPlayer's own scheduling priority class (`high` on the Windows box).
-    pub priority_class: String,
-}
+pub use super::routes_status::HeavyContainmentStatus; // #136: moved for the 1000-line cap
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolsStatusResponse {
@@ -734,6 +727,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
             priority_class: crate::process_start::priority_class_label().to_string(),
         },
         commit: crate::lyrics::host_commit::read_status(),
+        metadata: super::metadata::status_block(&state).await,
     })
 }
 

@@ -71,6 +71,7 @@ fn build_state(pool: SqlitePool, engine_tx: mpsc::Sender<crate::EngineCommand>) 
         preview_registry: Arc::new(crate::playback::preview::PreviewRegistry::new()),
         program_bus: Arc::new(crate::playback::program_bus::ProgramBus::new()),
         lan_status: crate::mdns::new_status_handle(),
+        metadata_chain: std::sync::Arc::new(crate::metadata::ProviderChain::new(vec![])),
     }
 }
 

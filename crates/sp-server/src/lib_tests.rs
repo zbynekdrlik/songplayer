@@ -75,6 +75,7 @@ mod tests {
             preview_registry: Arc::new(playback::preview::PreviewRegistry::new()),
             program_bus: Arc::new(playback::program_bus::ProgramBus::new()),
             lan_status: mdns::new_status_handle(),
+            metadata_chain: std::sync::Arc::new(crate::metadata::ProviderChain::new(vec![])),
         };
 
         // Verify the router can be built.
@@ -116,6 +117,7 @@ mod tests {
             preview_registry: Arc::new(playback::preview::PreviewRegistry::new()),
             program_bus: Arc::new(playback::program_bus::ProgramBus::new()),
             lan_status: mdns::new_status_handle(),
+            metadata_chain: std::sync::Arc::new(crate::metadata::ProviderChain::new(vec![])),
         };
 
         // Verify clone works.
