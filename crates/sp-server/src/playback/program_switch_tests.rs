@@ -11,6 +11,7 @@ use tokio::sync::{broadcast, oneshot};
 use tokio::time::Instant;
 
 use super::*;
+use crate::playback::legacy_cg::LegacyCg;
 use crate::playback::program_bus::ProgramBus;
 use crate::playback::program_on_air::OnAir;
 use crate::remote::{MIRROR_EXTRA_WAIT, RemoteSettings, RemoteShared, UPSTREAM_TIMEOUT, Upstream};
@@ -37,6 +38,7 @@ fn cg_obs_answers_read_as_cg_forward() {
 fn a_switch_names_what_triggered_it() {
     assert_eq!(Via::Program.label(), "program");
     assert_eq!(Via::Transition.label(), "transition");
+    assert_eq!(Via::Dashboard.label(), "dashboard");
 }
 
 #[test]
@@ -186,4 +188,42 @@ async fn a_mirror_answered_after_the_upstream_timeout_is_still_recorded() {
     record_mirror(upstream, rx, Arc::clone(&shared), id, "sp-fast".into()).await;
     assert_eq!(started.elapsed(), UPSTREAM_TIMEOUT + MIRROR_EXTRA_WAIT);
     assert_eq!(last_forward(&shared).as_deref(), Some("not_ready"));
+}
+
+/// #221 L4a: the mirror's waiter says whether cg OBS accepted it — only an
+/// OK answer, never a refusal or no answer.
+#[tokio::test]
+async fn the_mirrors_waiter_says_whether_cg_obs_accepted() {
+    let (events, _) = broadcast::channel(4);
+    let upstream = Upstream::new(None, events);
+    let shared = Arc::new(RemoteShared::default());
+    let ok = json!({ "requestStatus": { "result": true, "code": 100 } });
+    let refused = json!({ "requestStatus": { "result": false, "code": 600 } });
+    for (answer, accepted) in [(Some(ok), true), (Some(refused), false), (None, false)] {
+        let id = pending_cut(&shared);
+        let (tx, rx) = oneshot::channel();
+        tx.send(answer.clone()).unwrap();
+        let shared = Arc::clone(&shared);
+        let got = record_mirror(upstream.clone(), rx, shared, id, "sp-fast".into()).await;
+        assert_eq!(got, accepted, "{answer:?}");
+    }
+}
+
+/// #221 L4a: an accepted mirror is recorded in `legacy_cg` by its ticket; a
+/// refused one changes nothing, and a late answer to an older mirror never
+/// overwrites a newer one's.
+#[tokio::test]
+async fn an_accepted_mirror_is_recorded_as_shown_by_its_ticket() {
+    let legacy = Arc::new(LegacyCg::default());
+    let refused = legacy.ticket();
+    confirm_mirror(async { false }, Arc::clone(&legacy), refused, 7).await;
+    assert_eq!(legacy.shown_now(), None);
+    let accepted = legacy.ticket();
+    confirm_mirror(async { true }, Arc::clone(&legacy), accepted, 7).await;
+    assert_eq!(legacy.shown_now(), Some(7));
+    let older = legacy.ticket();
+    let newer = legacy.ticket();
+    confirm_mirror(async { true }, Arc::clone(&legacy), newer, 3).await;
+    confirm_mirror(async { true }, Arc::clone(&legacy), older, 7).await;
+    assert_eq!(legacy.shown_now(), Some(3));
 }

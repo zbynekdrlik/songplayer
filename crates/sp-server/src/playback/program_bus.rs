@@ -83,6 +83,7 @@ use sqlx::SqlitePool;
 use tokio::sync::watch;
 use tracing::{info, warn};
 
+use crate::playback::legacy_cg::LegacyCg;
 use crate::playback::ndi_input::NdiInputShared;
 use crate::playback::program_follow::FollowShared;
 use crate::playback::program_on_air::OnAir;
@@ -655,6 +656,9 @@ pub struct ProgramBus {
     remote: Arc<RemoteShared>,
     /// #215: the OBS-follow telemetry (`follow` on `GET /api/v1/program`).
     follow: Arc<FollowShared>,
+    /// #221 L4a: what SongPlayer told cg OBS to show (`legacy_cg.rs`, until
+    /// B4 step 6).
+    legacy_cg: Arc<LegacyCg>,
     /// #213: serializes [`persist_and_cut`] — the API and the remote control
     /// can cut concurrently, and the persisted source must be the one cut last.
     cut_serial: tokio::sync::Mutex<()>,
@@ -684,6 +688,7 @@ impl ProgramBus {
             input: Arc::new(NdiInputShared::default()),
             remote: Arc::new(RemoteShared::default()),
             follow: Arc::new(FollowShared::default()),
+            legacy_cg: Arc::new(LegacyCg::default()),
             cut_serial: tokio::sync::Mutex::new(()),
             on_air: watch::channel(OnAir::default()).0,
             switch_order: tokio::sync::Mutex::new(()),
@@ -708,6 +713,11 @@ impl ProgramBus {
     /// #215: the OBS-follow telemetry.
     pub fn follow(&self) -> &Arc<FollowShared> {
         &self.follow
+    }
+
+    /// #221 L4a: what SongPlayer told cg OBS to show.
+    pub fn legacy_cg(&self) -> &Arc<LegacyCg> {
+        &self.legacy_cg
     }
 
     /// See [`ProgramCore::set_transition`].

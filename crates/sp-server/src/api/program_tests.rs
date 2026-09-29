@@ -10,7 +10,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
-async fn add_playlist(pool: &sqlx::SqlitePool, name: &str) -> i64 {
+pub(super) async fn add_playlist(pool: &sqlx::SqlitePool, name: &str) -> i64 {
     sqlx::query("INSERT INTO playlists (name, youtube_url, ndi_output_name) VALUES (?, ?, ?)")
         .bind(name)
         .bind(format!("https://youtube.com/playlist?list={name}"))
@@ -21,7 +21,7 @@ async fn add_playlist(pool: &sqlx::SqlitePool, name: &str) -> i64 {
         .last_insert_rowid()
 }
 
-async fn call(
+pub(super) async fn call(
     state: crate::AppState,
     method: &str,
     uri: &str,
@@ -255,7 +255,7 @@ async fn the_vban_settings_save_through_the_settings_api_and_load_back() {
 
 // --- #212: the NDI input "OBS manuál" -----------------------------------------
 
-async fn enable_input(state: &crate::AppState, source: &str) {
+pub(super) async fn enable_input(state: &crate::AppState, source: &str) {
     let (status, _) = call(
         state.clone(),
         "PATCH",

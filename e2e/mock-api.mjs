@@ -991,8 +991,13 @@ function remoteBody() {
     last_transition_duration: null,
   };
 }
+// #221 L4a: what SongPlayer told cg OBS to show — mirrors `LegacyCgStatus`.
+// The mock has no cg OBS, so a mirror is never accepted and nothing is shown.
+function legacyCgBody() {
+  return { shown: null };
+}
 app.get("/api/v1/program", (_req, res) => {
-  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody() });
+  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody(), legacy_cg: legacyCgBody() });
 });
 app.post("/api/v1/program/cut", (req, res) => {
   const source = Number(req.body?.source);
@@ -1016,7 +1021,7 @@ app.post("/api/v1/program/cut", (req, res) => {
       mixed: programState.mixed + transitionSpec().n_slots,
     };
   }
-  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody() });
+  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody(), legacy_cg: legacyCgBody() });
 });
 // Test-only: the last cut body the dashboard posted (backend-effect check).
 app.get("/__mock/program-last-cut", (_req, res) => {

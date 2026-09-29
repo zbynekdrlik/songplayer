@@ -428,6 +428,13 @@ impl Upstream {
         }
     }
 
+    /// #221 L4a: a link to no cg OBS, whose calls are "not ready" at once —
+    /// the dashboard's link until `start_program` attaches the OBS client's
+    /// (`LegacyCg::link`).
+    pub fn unlinked() -> Self {
+        Self::new(None, broadcast::channel(1).0)
+    }
+
     /// This link with another call timeout (tests only, the integration
     /// tests included: production always uses [`UPSTREAM_TIMEOUT`]).
     #[doc(hidden)]
