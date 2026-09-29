@@ -288,6 +288,12 @@ async fn a_failed_or_partial_clean_pass_keeps_the_first_answer_where_it_has_noth
         // (clean-up answer, expected song, expected artist)
         (ResponseTemplate::new(429), first_song, ARTIST),
         (ResponseTemplate::new(500), first_song, ARTIST),
+        // A refused clean-up is never read, even when its body parses.
+        (
+            ResponseTemplate::new(500).set_body_json(gemini_answer(SONG, "Other Artist")),
+            first_song,
+            ARTIST,
+        ),
         (
             ResponseTemplate::new(200).set_body_json(json!({"candidates": []})),
             first_song,
