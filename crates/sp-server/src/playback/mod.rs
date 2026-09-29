@@ -85,7 +85,6 @@ use crate::playlist::selector::VideoSelector;
 
 use pipeline::{PipelineCommand, PipelineEvent, PlaybackPipeline};
 use state::{PlayAction, PlayEvent, PlayState};
-use transport_state::transport_from_play_state;
 
 /// Minimum gap between `NowPlaying` position re-broadcasts per playlist.
 /// Keeps the WebSocket from flooding the dashboard on high-frequency
@@ -639,20 +638,10 @@ impl PlaybackEngine {
                         start_position_ms: None,
                     });
 
-                    // Broadcast the state change so the dashboard updates.
-                    // #170: gate on scene_active so a Previous on an
-                    // off-program playlist shows WaitingForScene, matching
-                    // the health-label replay. #201: transport reports the raw
-                    // decoding state so the Player label follows the pipeline.
-                    let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
-                        playlist_id,
-                        state: play_state_to_ws(
-                            &PlayState::Playing { video_id },
-                            pp.scene_active.load(Ordering::Acquire),
-                        ),
-                        mode: pp.mode,
-                        transport: transport_from_play_state(&PlayState::Playing { video_id }),
-                    });
+                    // Broadcast the state change so the dashboard updates: an
+                    // off-program Previous shows WaitingForScene (#170), with
+                    // the raw transport (#201).
+                    self.broadcast_state(playlist_id);
                 }
                 self.resync_after_play(playlist_id).await;
             }
@@ -726,21 +715,14 @@ impl PlaybackEngine {
         // After the action (which may itself mutate the state to Playing),
         // broadcast the final state if it differs from the pre-transition state.
         // The pipeline always exists here (`execute_action` never removes one;
-        // the no-pipeline case returned at the top of this method). #170: derive
-        // the wire state from `scene_active` too, so a pipeline the engine holds
-        // as Playing while its scene is off program is broadcast as
-        // WaitingForScene (matching the health-label replay).
-        if let Some(pp) = self.pipelines.get(&playlist_id) {
-            let final_state = pp.state.clone();
-            let scene_active = pp.scene_active.load(Ordering::Acquire);
-            if old_state != final_state {
-                let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
-                    playlist_id,
-                    state: play_state_to_ws(&final_state, scene_active),
-                    mode,
-                    transport: transport_from_play_state(&final_state),
-                });
-            }
+        // the no-pipeline case returned at the top of this method), in its
+        // scene-aware wire state (`broadcast_state`, #170).
+        if self
+            .pipelines
+            .get(&playlist_id)
+            .is_some_and(|pp| pp.state != old_state)
+        {
+            self.broadcast_state(playlist_id);
         }
     }
 
