@@ -463,6 +463,7 @@ async fn the_remote_block_reports_the_stored_settings_and_the_live_state() {
             "listening": false,
             "error": null,
             "clients": 0,
+            "refused_over_cap": 0,
             "requests": 0,
             "last_request": null,
             "last_remote_cut": null,

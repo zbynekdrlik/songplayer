@@ -15,19 +15,26 @@
 use serde::Serialize;
 
 /// Maximum characters per visual line on the Presenter stage display before
-/// we force a line break. Many source lyrics are long narrative lines that
-/// wrap awkwardly on a phone/tablet stage display. Splitting at word
-/// boundaries around this width keeps each visual line readable at a
-/// glance without redesigning the upstream lyrics pipeline.
-pub const PRESENTER_WRAP_WIDTH: usize = 30;
+/// we force a line break: one wall line of the #217 display plan
+/// (`display_plan::MAX_CHARS`), so a wall line is one Presenter line. Only a
+/// single source line longer than that (it cannot be split without word
+/// timings) breaks, at a word boundary. At 30 every longer wall line wrapped
+/// onto two stage lines (owner, 29.9.2026).
+pub const PRESENTER_WRAP_WIDTH: usize = crate::lyrics::display_plan::MAX_CHARS;
 
-/// Wrap `text` so no visual line exceeds `PRESENTER_WRAP_WIDTH` characters,
-/// breaking at the last whitespace before the limit when possible. Existing
-/// newlines in `text` are preserved — each pre-existing line is wrapped
-/// independently. A word longer than the limit is left intact on its own
-/// line (we never split mid-word; the display just renders it slightly
-/// wider than ideal, which is still more readable than a mid-word break).
+/// Wrap `text` so no visual line exceeds `PRESENTER_WRAP_WIDTH` characters
+/// (see [`wrap_to`]).
 pub fn wrap_for_presenter(text: &str) -> String {
+    wrap_to(text, PRESENTER_WRAP_WIDTH)
+}
+
+/// Wrap `text` so no visual line exceeds `max` characters, breaking at the
+/// last whitespace before the limit when possible. Existing newlines in
+/// `text` are preserved — each pre-existing line is wrapped independently.
+/// A word longer than the limit is left intact on its own line (we never
+/// split mid-word; the display just renders it slightly wider than ideal,
+/// which is still more readable than a mid-word break).
+pub(crate) fn wrap_to(text: &str, max: usize) -> String {
     if text.is_empty() {
         return String::new();
     }
@@ -38,7 +45,7 @@ pub fn wrap_for_presenter(text: &str) -> String {
             out.push('\n');
         }
         first_chunk = false;
-        out.push_str(&wrap_single_line(raw_line, PRESENTER_WRAP_WIDTH));
+        out.push_str(&wrap_single_line(raw_line, max));
     }
     out
 }
@@ -109,6 +116,15 @@ impl PresenterPayload {
 mod tests {
     use super::*;
 
+    /// The width the wrapping-algorithm tests below were written for. They
+    /// test `wrap_to` itself; `wrap_for_presenter`'s own width is pinned by
+    /// `presenter_wrap_width_is_one_wall_line`.
+    const W: usize = 30;
+
+    fn wrap(text: &str) -> String {
+        wrap_to(text, W)
+    }
+
     #[test]
     fn serializes_with_camel_case_keys_matching_api_spec() {
         let p = PresenterPayload {
@@ -163,10 +179,32 @@ mod tests {
     // ---- wrap_for_presenter tests -----------------------------------
 
     #[test]
+    fn presenter_wrap_width_is_one_wall_line() {
+        // A wall line of the #217 display plan is ONE Presenter line
+        // (29.9.2026, owner: the texts ran onto two lines on the Presenter
+        // too — at 30 chars every longer wall line wrapped).
+        assert_eq!(PRESENTER_WRAP_WIDTH, crate::lyrics::display_plan::MAX_CHARS);
+        assert_eq!(PRESENTER_WRAP_WIDTH, 52);
+    }
+
+    #[test]
+    fn a_wall_line_is_one_presenter_line() {
+        // 25 + 1 + 26 = 52 chars of words pass unchanged; one char more
+        // breaks once, at the space.
+        let at_52 = format!("{} {}", "a".repeat(25), "b".repeat(26));
+        assert_eq!(wrap_for_presenter(&at_52), at_52);
+        let at_53 = format!("{} {}", "a".repeat(25), "b".repeat(27));
+        assert_eq!(
+            wrap_for_presenter(&at_53),
+            format!("{}\n{}", "a".repeat(25), "b".repeat(27))
+        );
+    }
+
+    #[test]
     fn wrap_passes_through_short_text_unchanged() {
         let s = "Haleluja, haleluja";
         assert_eq!(s.chars().count(), 18);
-        assert_eq!(wrap_for_presenter(s), s);
+        assert_eq!(wrap(s), s);
     }
 
     #[test]
@@ -174,23 +212,20 @@ mod tests {
         // 30 chars exactly — no break.
         let s = "a".repeat(30);
         assert_eq!(s.chars().count(), 30);
-        assert_eq!(wrap_for_presenter(&s), s);
+        assert_eq!(wrap(&s), s);
     }
 
     #[test]
     fn wrap_breaks_at_word_boundary_before_limit() {
         // "I want to hold my breath forever" is 32 chars — must break.
         let input = "I want to hold my breath forever";
-        let wrapped = wrap_for_presenter(input);
+        let wrapped = wrap(input);
         assert!(
             wrapped.contains('\n'),
             "expected a line break in: {wrapped:?}"
         );
         for line in wrapped.split('\n') {
-            assert!(
-                line.chars().count() <= PRESENTER_WRAP_WIDTH,
-                "line `{line}` exceeds {PRESENTER_WRAP_WIDTH} chars"
-            );
+            assert!(line.chars().count() <= W, "line `{line}` exceeds {W} chars");
         }
         // No whitespace should have been dropped; re-joining with a space
         // gives back the normalized original.
@@ -205,7 +240,7 @@ mod tests {
         // so it must pass through untouched.
         let s = "Nedokážem pochopiť tvoju lás"; // 28 chars
         assert_eq!(s.chars().count(), 28);
-        assert_eq!(wrap_for_presenter(s), s);
+        assert_eq!(wrap(s), s);
     }
 
     #[test]
@@ -213,7 +248,7 @@ mod tests {
         // 40-char single word. No whitespace to break at — emit as-is on
         // its own line (readable, just slightly wider than ideal).
         let long = "a".repeat(40);
-        let wrapped = wrap_for_presenter(&long);
+        let wrapped = wrap(&long);
         assert_eq!(wrapped, long, "must not split a lone long word");
     }
 
@@ -222,12 +257,12 @@ mod tests {
         // Source text with explicit line breaks — each is wrapped
         // independently, and the existing break is preserved.
         let input = "short line\nanother short one";
-        assert_eq!(wrap_for_presenter(input), input);
+        assert_eq!(wrap(input), input);
     }
 
     #[test]
     fn wrap_handles_empty_string() {
-        assert_eq!(wrap_for_presenter(""), "");
+        assert_eq!(wrap(""), "");
     }
 
     /// Precise boundary test for the `need > max` comparison. Input is
@@ -244,7 +279,7 @@ mod tests {
         // "aaaaa bbbbb ccccc ddddd eeeee f" = 5×5 + 5×1 + 1 = 31 chars
         let input = "aaaaa bbbbb ccccc ddddd eeeee f";
         assert_eq!(input.chars().count(), 31);
-        let wrapped = wrap_for_presenter(input);
+        let wrapped = wrap(input);
         assert_eq!(
             wrapped.matches('\n').count(),
             1,
@@ -270,11 +305,11 @@ mod tests {
         // "aaaa bbbb cccc dddd eeee fffff g" = 4+1+4+1+4+1+4+1+4+1+5+1+1 = 32 chars
         let input = "aaaa bbbb cccc dddd eeee fffff g";
         assert_eq!(input.chars().count(), 32);
-        let wrapped = wrap_for_presenter(input);
+        let wrapped = wrap(input);
         let first_line = wrapped.split('\n').next().expect("has lines");
         assert_eq!(
             first_line.chars().count(),
-            PRESENTER_WRAP_WIDTH,
+            W,
             "first line must fill to exactly max=30 chars; got {first_line:?}"
         );
         assert_eq!(first_line, "aaaa bbbb cccc dddd eeee fffff");
@@ -294,7 +329,7 @@ mod tests {
         // 10 × "hello" separated by spaces: 5 + 9*(1+5) = 5 + 54 = 59 chars
         let input = "hello hello hello hello hello hello hello hello hello hello";
         assert_eq!(input.chars().count(), 59);
-        let wrapped = wrap_for_presenter(input);
+        let wrapped = wrap(input);
         // Real `+=` trace: break happens after exactly 5 words (cur_len
         // reaches 29, 6th word pushes need to 35 > 30 → break). Words
         // 6-10 fit on the second line (cur_len reaches 29 again but

@@ -394,18 +394,19 @@ fn format_genlock_line_contains_every_key_token() {
     }
 }
 
-/// Structural guard: the once-per-UTC-minute periodic INFO path in
-/// `ndi_health.rs` MUST render the genlock line via `format_genlock_line`,
+/// Structural guard: the once-per-UTC-minute periodic INFO path (in
+/// `ndi_health_log.rs` since #221 L4a moved `handle_health_snapshot`'s logging
+/// there) MUST render the genlock line via `format_genlock_line`,
 /// gated by `should_log_periodic_heartbeat`. Fires red if a refactor drops the
 /// call from that path.
 #[test]
 fn periodic_log_path_calls_format_genlock_line() {
-    let src = include_str!("ndi_health.rs").replace("\r\n", "\n");
+    let src = include_str!("ndi_health_log.rs").replace("\r\n", "\n");
     let guard = src
         .find("should_log_periodic_heartbeat(prev_heartbeat_ts, cur)")
         .expect("periodic heartbeat guard must exist");
     let call = src
-        .find("format_genlock_line(&snapshot)")
+        .find("format_genlock_line(snapshot)")
         .expect("periodic path must render the genlock line");
     assert!(
         call > guard,

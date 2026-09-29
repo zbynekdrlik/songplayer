@@ -370,6 +370,7 @@ fn the_status_serializes_the_api_field_names() {
             "listening": false,
             "error": null,
             "clients": 0,
+            "refused_over_cap": 0,
             "requests": 0,
             "last_request": null,
             "last_remote_cut": null,

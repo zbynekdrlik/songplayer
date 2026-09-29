@@ -17,7 +17,8 @@
 //!    closing quotes or brackets. A line's text is its English, or its Slovak
 //!    when it has none (a dub subtitle line). The display line closes earlier
 //!    when the next line would not fit it:
-//!    - its text would get over [`MAX_CHARS`] chars, or the next line starts
+//!    - its text or its Slovak would get over [`MAX_CHARS`] chars (one wall
+//!      line: the wall shows the Slovak), or the next line starts
 //!      over [`GROUP_MAX_SPAN_MS`] after its first line: it closes after its
 //!      last line ending in `, ; : —` (a soft end), else whole, and the rest
 //!      is checked again;
@@ -78,9 +79,14 @@ pub const LONG_GAP_MS: u64 = 8_000;
 /// long after its sung end.
 pub const HOLD_TAIL_MS: u64 = 3_000;
 
-/// The most chars one display line's text may have (what fits the wall). A
-/// single source line over it is shown whole.
-pub const MAX_CHARS: usize = 72;
+/// The most chars a display line's text, and its Slovak, may have when source
+/// lines are joined: ONE wall line. The Slovak `#sp-subssk` clip (Line Width
+/// 2400 of the 2580 px composition, measured ~39 px a char on 29.9.2026)
+/// holds ~60 chars; 52 leaves room for wide glyphs and the ` ★` marker. At 72
+/// the wall wrapped merged lines onto two lines (owner, song 270). A single
+/// source line over it is shown whole: it cannot be split without word
+/// timings, and those are never synthesized. The Presenter wraps at it too.
+pub const MAX_CHARS: usize = 52;
 
 /// The last source line of a display line starts at most this long after its
 /// first one, so a long sentence never lights its end seconds early.
@@ -276,8 +282,8 @@ fn close_to_fit(
 }
 
 /// Whether consecutive source lines fit one display line: their joined text
-/// is at most [`MAX_CHARS`] chars, and the last starts at most
-/// [`GROUP_MAX_SPAN_MS`] after the first.
+/// and their joined Slovak are each at most [`MAX_CHARS`] chars, and the last
+/// starts at most [`GROUP_MAX_SPAN_MS`] after the first.
 fn fits(members: &[LyricsLine]) -> bool {
     let (Some(first), Some(last)) = (members.first(), members.last()) else {
         return true;
@@ -285,7 +291,11 @@ fn fits(members: &[LyricsLine]) -> bool {
     let joined = members
         .iter()
         .fold(String::new(), |acc, line| join_text(&acc, text(line)));
+    let sk = members.iter().fold(String::new(), |acc, line| {
+        join_text(&acc, line.sk.as_deref().unwrap_or_default())
+    });
     joined.chars().count() <= MAX_CHARS
+        && sk.chars().count() <= MAX_CHARS
         && last.start_ms.saturating_sub(first.start_ms) <= GROUP_MAX_SPAN_MS
 }
 
