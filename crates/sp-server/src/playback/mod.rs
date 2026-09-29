@@ -490,12 +490,7 @@ impl PlaybackEngine {
                 pp.last_resolume_subtitles_signature = None;
                 pp.last_presenter_text = None;
             }
-            let _ = self
-                .resolume_tx
-                .try_send(crate::resolume::ResolumeCommand::HideTitle);
-            let _ = self
-                .resolume_tx
-                .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+            self.wall_after_scene_off().await; // #221 L4b: or re-synced to one on program
         }
 
         if on_program {

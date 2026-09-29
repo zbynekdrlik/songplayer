@@ -46,6 +46,7 @@ use super::pipeline::PipelineEvent;
 use super::program_bus::Hold;
 use super::state::{PlayEvent, PlayState};
 use super::wallclock::utc_now_100ns;
+use crate::resolume::ResolumeCommand;
 
 /// The id of each hold's re-check (`SceneOffDue`), unique in the process.
 /// Not a tokio task id: tokio may reuse one once its task has ended, which
@@ -61,6 +62,36 @@ pub fn scene_off_delay(hold: Option<Hold>, now_100ns: i64) -> Option<Duration> {
 }
 
 impl PlaybackEngine {
+    /// The wall after a playlist went off program (its `scene_active` is
+    /// already false). Its line goes (`HideSubtitles`). Its title goes too,
+    /// unless another playlist is still on program: then the wall is
+    /// re-synced to that one — its due title (`resync_wall_title`), and its
+    /// line re-sent on its next position report (its subtitle dedup key is
+    /// cleared). #221 L4b review round 3: the playback authority sends the
+    /// incoming ON at the press and the outgoing OFF only when cg OBS
+    /// confirms the mirror, so the incoming playlist's title can be up
+    /// already, and a bare `HideTitle` took it down for the rest of its song
+    /// (before L4b the bridge sent the OFF first).
+    pub(super) async fn wall_after_scene_off(&mut self) {
+        let mut others_on_program = false;
+        for pp in self.pipelines.values_mut() {
+            if pp.scene_active.load(Ordering::Acquire) {
+                pp.last_resolume_subtitles_signature = None;
+                others_on_program = true;
+            }
+        }
+        let _ = self.resolume_tx.try_send(ResolumeCommand::HideSubtitles);
+        if others_on_program {
+            let title = self.resync_wall_title().await;
+            debug!(
+                ?title,
+                "scene off program — the wall re-synced to the playlist still on program"
+            );
+        } else {
+            let _ = self.resolume_tx.try_send(ResolumeCommand::HideTitle);
+        }
+    }
+
     /// The scene-go-off half of `handle_scene_change`: pause, unless the
     /// program bus holds the playlist through a transition.
     pub(super) async fn scene_off(&mut self, playlist_id: i64) {
