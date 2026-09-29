@@ -53,9 +53,9 @@ pub enum EngineCommand {
     },
     /// #132: Register a playback pipeline for a playlist created or activated
     /// at runtime via the API, so it can play without a process restart (one
-    /// already on air goes on program at once, #221 L4b). The engine reconciles from the DB (creates only when
-    /// the playlist is active and has a non-empty NDI name); idempotent and
-    /// safe to over-send.
+    /// already on air goes on program at once, #221 L4b). The engine
+    /// reconciles from the DB (creates only when the playlist is active and
+    /// has a non-empty NDI name); idempotent and safe to over-send.
     EnsurePipeline {
         playlist_id: i64,
     },

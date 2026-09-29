@@ -397,7 +397,12 @@ manual scene), so the dashboard -1 case stays (for the main session):
 after a dashboard cut to -1 while cg OBS showed P and a restart, P is NOT
 on air (`shown` `None`); its pipeline, created Idle at startup, never
 starts, while cg OBS (and "OBS manuál") still shows P's output, until the
-next press. Every change is logged (`legacy cg: cg OBS shows what SongPlayer told
+next press. Three more of the same class (review round 2), listed in
+`legacy_cg.rs`: a manual press while "OBS manuál" is inactive (or whose -1
+cut failed to persist) seeds `Some(P)` after a restart and the re-mirror
+moves cg OBS off the operator's manual scene; a cut to a playlist whose
+catalog names no scene leaves an unconfirmed seed. Persisting `shown`
+would close all four — a main-session call. Every change is logged (`legacy cg: cg OBS shows what SongPlayer told
 it` INFO from → to; a dropped late answer DEBUG; the restore INFO). Served as `legacy_cg {shown}` on
 `GET /api/v1/program`; it keys the dark-wall expectation
 (`ndi_health_expect`, `obs-ndi-health.md`) and, from L4b, the playback
@@ -697,7 +702,10 @@ with the mirror and the link.
   the mirror (the union with `legacy_cg.shown`). A failed mirror leaves BOTH
   playing (the legacy consumers keep cg OBS's playlist) until the next press.
 - Hand switches in cg OBS's own UI are invisible to the facade (no cg
-  tracking, by the owner's ruling): the next press decides.
+  tracking, by the owner's ruling): the next press decides. Since L4b the
+  playlist cg OBS was switched to by hand is not on air, so the consumers on
+  cg OBS show its paused (or idle black) output until that press; before
+  L4b cg OBS's scene detection started it.
 - **Until the cutover / L4b the E2E's "scene to restore" is SP-program's,
   not the wall's** (L3 + review round 1, for the main session; since L4b
   `/api/v1/status.active_scene` is SongPlayer's own program, and the box runs

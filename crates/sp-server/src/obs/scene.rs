@@ -55,7 +55,8 @@ impl From<DispatcherError> for LookupError {
 
 /// Apply a program-scene change: query which NDI sources are on program for
 /// `scene_name`, write `current_scene` + `active_playlist_ids` into shared
-/// state, and emit `ObsEvent::SceneChanged` for the engine bridge.
+/// state, and emit `ObsEvent::SceneChanged` (#221 L4b: no engine bridge reads
+/// it any more; L6 deletes the scene detection).
 ///
 /// Shared by BOTH the `CurrentProgramSceneChanged` reader path and the ~2 s
 /// poll-reconcile path (#170) so a dropped OBS event feeds the exact same

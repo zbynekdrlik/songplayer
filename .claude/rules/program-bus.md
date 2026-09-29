@@ -217,8 +217,10 @@ nothing).
   with the union, the outgoing playlist cg OBS still shows, one a dashboard
   cut to -1 keeps on air, and one a manual press keeps a moment would each
   be re-kicked, and a playlist the operator PAUSED would start a new song
-  (its resume point lost). A shown-only change (the mirror's OK) sends only
-  OFFs. It ends on shutdown or when the engine's channel is gone.
+  (its resume point lost). A shown-only change (the mirror's OK) re-kicks
+  nothing: OFFs, and an ON only for a playlist that entered (an older
+  press's OK landing after a newer cut). It ends on shutdown or when the
+  engine's channel is gone.
 - **The engine drops a stale event** (`PlaybackEngine::on_program`): ON
   only while the playlist is on air, OFF only while it is not — "on air"
   being the set the task last DIFFED (`OnAirPlaylists`, the engine's
@@ -228,7 +230,11 @@ nothing).
   nothing, so an event checked against the live bus could be dropped with
   no newer one behind it; against the diffed set a dropped event always
   has one. So the selected source is never taken off program —
-  `Hold::OnProgram` / `CUT_SETTLE` are deleted (`program-transition.md`).
+  `Hold::OnProgram` / `CUT_SETTLE` are deleted (`program-transition.md`) —
+  and a hold's re-check (`scene_off_recheck`) leaves a playlist in the
+  diffed set alone even while its scene is still off: its ON is queued
+  behind the re-check (review round 2: A→B, A pressed again inside B's
+  window). The window left is the task's own wake latency.
 - **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
   whose scene is not flagged runs `handle_scene_change(pid, true)` itself
   (its ON came before it existed). An ON for a playlist with NO pipeline

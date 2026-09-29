@@ -33,7 +33,15 @@
 //! sends nothing, so after a dashboard cut to -1 while cg OBS showed
 //! playlist P and a restart, `shown` is `None` and P is not on air (its
 //! pipeline, Idle since the start, never starts; its dark-wall check is
-//! silent) while cg OBS still shows it, until the next switch.
+//! silent) while cg OBS still shows it, until the next switch. Three more,
+//! for the main session (persisting `shown` would close all four):
+//! - a manual press while "OBS manuál" is inactive keeps SP-program on P
+//!   and records `None`: after a restart the seed is `Some(P)` and the
+//!   re-mirror moves cg OBS off the operator's manual scene back to P;
+//! - the same after a manual press whose -1 cut failed to persist;
+//! - a cut to a playlist Q whose catalog names no scene tells cg OBS
+//!   nothing: after a restart the seed `Some(Q)` is never confirmed, and
+//!   the playlist cg OBS still shows stays off air.
 //!
 //! It also holds the dashboard's way to cg OBS ([`LegacyCg::link`]): the
 //! OBS client's command channel, attached by `start_program`. `AppState` is
@@ -131,7 +139,7 @@ impl LegacyCg {
             self.shown.send_replace(Some(source));
             info!(
                 source,
-                "legacy cg: the restored program source is what cg OBS was last told"
+                "legacy cg: the restored program source — the startup re-mirror tells cg OBS to show it"
             );
         }
     }

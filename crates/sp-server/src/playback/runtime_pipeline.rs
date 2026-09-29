@@ -29,9 +29,10 @@ use super::{
 impl PlaybackEngine {
     /// #132: Ensure a pipeline exists for a playlist created or activated at
     /// runtime (via the API), so it can play without a process restart; one
-    /// already on air goes on program at once (#221 L4b). Reconciles from the DB — a pipeline is (idempotently)
-    /// created only when the playlist is active and has a non-empty NDI output
-    /// name, mirroring the startup pre-create loop in `lib.rs::start`. Delegates
+    /// already on air goes on program at once (#221 L4b). Reconciles from the
+    /// DB — a pipeline is (idempotently) created only when the playlist is
+    /// active and has a non-empty NDI output name, mirroring the startup
+    /// pre-create loop in `lib.rs::start`. Delegates
     /// to the idempotent [`ensure_pipeline`], so a runtime pipeline picks up the
     /// same engine-level `genlock_pacing` / `clock_health` / burn-registry
     /// configuration as a boot pipeline. No-op for a missing row, an inactive
