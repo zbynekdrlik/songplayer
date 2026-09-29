@@ -342,6 +342,10 @@ fn a_move_over_an_existing_file_leaves_only_the_moved_file() {
 /// forcing a chosen step of a unit move to fail on both Linux and Windows.
 #[derive(Default)]
 struct Failing {
+    /// The path whose stat fails.
+    exists_of: Option<PathBuf>,
+    /// Every set-aside name reads as taken.
+    asides_taken: bool,
     /// The one `(from, to)` rename that fails.
     rename: Option<(PathBuf, PathBuf)>,
     /// The `to` whose identity check fails.
@@ -355,6 +359,16 @@ fn injected(what: &str) -> std::io::Error {
 }
 
 impl FileOps for Failing {
+    fn exists(&self, path: &Path) -> std::io::Result<bool> {
+        if self.exists_of.as_deref() == Some(path) {
+            return Err(injected("stat"));
+        }
+        if self.asides_taken && path.extension().is_some_and(|e| e == "replaced") {
+            return Ok(true);
+        }
+        RealFs.exists(path)
+    }
+
     fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
         if self
             .rename
@@ -386,6 +400,69 @@ fn failing_on(from: PathBuf, to: PathBuf) -> Failing {
     Failing {
         rename: Some((from, to)),
         ..Failing::default()
+    }
+}
+
+/// #136 review round 9: a source whose stat fails is not read as "absent" (the
+/// song would be recorded under a name with no file, and the next start would
+/// delete the old one as an orphan): the unit rolls back.
+#[test]
+fn a_source_whose_existence_is_unknown_rolls_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let (a, a2, b, b2) = (d.join("a"), d.join("a2"), d.join("b"), d.join("b2"));
+    fs::write(&a, b"a").unwrap();
+    fs::write(&b, b"b").unwrap();
+
+    let failed = move_as_unit_with(
+        ID,
+        &[(a.clone(), a2.clone()), (b.clone(), b2.clone())],
+        &Failing {
+            exists_of: Some(b.clone()),
+            ..Failing::default()
+        },
+    )
+    .unwrap_err();
+
+    assert!(failed.error.to_string().contains("injected stat"));
+    assert_eq!(fs::read(&a).unwrap(), b"a", "the earlier move is undone");
+    assert_eq!(fs::read(&b).unwrap(), b"b");
+    assert_eq!(fs::read_dir(d).unwrap().count(), 2);
+}
+
+/// A set-aside name whose stat fails, and a set-aside with every name taken,
+/// both roll the unit back: never an unbounded search, never an overwrite.
+#[test]
+fn a_set_aside_without_a_known_free_name_rolls_back() {
+    let stat_fails = |older: &Path| Failing {
+        exists_of: Some(numbered_aside_name(older, 1)),
+        ..Failing::default()
+    };
+    let all_taken = |_: &Path| Failing {
+        asides_taken: true,
+        ..Failing::default()
+    };
+    let cases: [&dyn Fn(&Path) -> Failing; 2] = [&stat_fails, &all_taken];
+    for ops_for in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let (a, a2, fresh, older) = (d.join("a"), d.join("a2"), d.join("fresh"), d.join("older"));
+        fs::write(&a, b"a").unwrap();
+        fs::write(&fresh, b"new").unwrap();
+        fs::write(&older, b"old").unwrap();
+
+        let failed = move_as_unit_with(
+            ID,
+            &[(a.clone(), a2.clone()), (fresh.clone(), older.clone())],
+            &ops_for(&older),
+        )
+        .unwrap_err();
+
+        assert!(failed.stuck.is_empty());
+        assert_eq!(fs::read(&a).unwrap(), b"a");
+        assert_eq!(fs::read(&fresh).unwrap(), b"new");
+        assert_eq!(fs::read(&older).unwrap(), b"old");
+        assert_eq!(fs::read_dir(d).unwrap().count(), 3);
     }
 }
 
@@ -587,7 +664,7 @@ fn a_set_aside_never_overwrites_a_leftover() {
     fs::write(&leftover, b"leftover").unwrap();
 
     assert_eq!(
-        set_aside_name(&older),
+        set_aside_name(&older, &RealFs).unwrap(),
         numbered_aside_name(&older, 2),
         "the next free name"
     );
@@ -642,7 +719,7 @@ fn the_cache_scans_ignore_a_set_aside_file() {
     let dir = tempfile::tempdir().unwrap();
     let set = set_under(dir.path(), &new_base());
     for p in &set {
-        fs::write(set_aside_name(p), b"x").unwrap();
+        fs::write(numbered_aside_name(p, 1), b"x").unwrap();
     }
 
     let scan = scan_cache(dir.path());
@@ -658,7 +735,10 @@ fn set_aside_leftovers_lists_only_the_replaced_files() {
     let d = dir.path();
     let set = set_under(d, &new_base());
     write_all(&set);
-    let (a, b) = (set_aside_name(&set[0]), set_aside_name(&set[4]));
+    let (a, b) = (
+        numbered_aside_name(&set[0], 1),
+        numbered_aside_name(&set[4], 1),
+    );
     fs::write(&a, b"x").unwrap();
     fs::write(&b, b"x").unwrap();
     fs::create_dir(d.join("dir.replaced")).unwrap();

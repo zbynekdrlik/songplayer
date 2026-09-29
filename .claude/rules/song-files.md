@@ -59,8 +59,12 @@ Design record: #136 comment 5894034820.
     `self-heal: a replaced song file is still set aside …`.
   - Tests force a failing step with `move_as_unit_with(…, &Failing{…})`.
     `FileOps` is the seam; production uses `RealFs`. `Failing` fails a chosen
-    rename, identity check or delete (`cache_tests_files.rs`). A non-empty
-    directory at the target also fails the move.
+    stat, rename, identity check or delete, or marks every set-aside name taken
+    (`cache_tests_files.rs`). A non-empty directory at the target also fails
+    the move.
+  - A stat the filesystem cannot answer is an error that rolls the unit back,
+    never "absent". That holds for a source, a set-aside name, and the
+    identity check. Set-aside names stop at `<name>.100.replaced`.
 - **Rename a song only through `cache::rename_song_files(id, &old, &new)`**,
   never a hand-written `fs::rename` of one sidecar.
   - It moves derived → audio → video as ONE unit (`move_as_unit`).

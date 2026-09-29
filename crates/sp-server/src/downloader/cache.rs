@@ -280,10 +280,14 @@ pub fn move_as_unit(youtube_id: &str, moves: &[(PathBuf, PathBuf)]) -> Result<us
     move_as_unit_with(youtube_id, moves, &RealFs)
 }
 
-/// The filesystem operations a unit move makes: `std::fs` in production
-/// ([`RealFs`]); a test fails a chosen one (a set-aside, a move, a give-back,
-/// a move back, the identity check, the delete of a replaced file).
+/// Every filesystem operation a unit move makes: `std::fs` in production
+/// ([`RealFs`]); a test fails a chosen one (a stat, a set-aside, a move, a
+/// give-back, a move back, the identity check, the delete of a replaced file).
+/// An answer the filesystem cannot give (an `Err`) rolls the unit back; it is
+/// never read as "no" or "yes".
 trait FileOps {
+    /// Whether anything is at `path` (a stat error is an `Err`, never `false`).
+    fn exists(&self, path: &Path) -> std::io::Result<bool>;
     fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
     fn is_other_file(&self, from: &Path, to: &Path) -> std::io::Result<bool>;
     fn remove(&self, path: &Path) -> std::io::Result<()>;
@@ -293,6 +297,14 @@ trait FileOps {
 struct RealFs;
 
 impl FileOps for RealFs {
+    fn exists(&self, path: &Path) -> std::io::Result<bool> {
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
     fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
         std::fs::rename(from, to)
     }
@@ -314,8 +326,20 @@ fn move_as_unit_with<O: FileOps>(
 ) -> Result<usize, MoveFailed> {
     let mut done: Vec<Moved> = Vec::new();
     for (from, to) in moves {
-        if from == to || !from.exists() {
+        if from == to {
             continue;
+        }
+        match ops.exists(from) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(error) => {
+                tracing::warn!(
+                    youtube_id,
+                    from = %from.display(),
+                    "cache: cannot tell whether a song file exists: {error}"
+                );
+                return Err(undo(youtube_id, done, error, ops));
+            }
         }
         let other_file = match ops.is_other_file(from, to) {
             Ok(other) => other,
@@ -330,7 +354,18 @@ fn move_as_unit_with<O: FileOps>(
             }
         };
         let set_aside = if other_file {
-            let aside = set_aside_name(to);
+            let aside = match set_aside_name(to, ops) {
+                Ok(aside) => aside,
+                Err(error) => {
+                    tracing::warn!(
+                        youtube_id,
+                        to = %to.display(),
+                        "cache: found no free name to set aside the file under a song file's \
+                         new name: {error}"
+                    );
+                    return Err(undo(youtube_id, done, error, ops));
+                }
+            };
             if let Err(error) = ops.rename(to, &aside) {
                 tracing::warn!(
                     youtube_id,
@@ -393,7 +428,12 @@ fn move_as_unit_with<O: FileOps>(
 /// canonicalized, the answer is unknown: an error, and the unit rolls back
 /// rather than guess (a wrong guess set the song's own file aside).
 fn is_other_file(from: &Path, to: &Path) -> std::io::Result<bool> {
-    if !to.is_file() {
+    let target = match std::fs::metadata(to) {
+        Ok(target) => target,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    if !target.is_file() {
         return Ok(false);
     }
     Ok(std::fs::canonicalize(from)? != std::fs::canonicalize(to)?)
@@ -424,23 +464,25 @@ struct Moved {
     set_aside: Option<PathBuf>,
 }
 
+/// How many set-aside names [`set_aside_name`] tries before it gives up.
+const MAX_SET_ASIDE_NAMES: u32 = 100;
+
 /// The name a replaced file waits under until its unit has moved: the first
-/// free one of `<name>.replaced`, `<name>.2.replaced`, `<name>.3.replaced`, …
+/// free one of `<name>.replaced`, `<name>.2.replaced`, … `<name>.100.replaced`
 /// (no cache scan matches them). A leftover from an earlier move is never
-/// overwritten: it may be the only copy of a file.
-fn set_aside_name(path: &Path) -> PathBuf {
-    let mut n: u32 = 1;
-    loop {
+/// overwritten: it may be the only copy of a file. A stat that fails, or no
+/// free name among them, is an `Err` and the unit rolls back.
+fn set_aside_name<O: FileOps>(path: &Path, ops: &O) -> std::io::Result<PathBuf> {
+    for n in 1..=MAX_SET_ASIDE_NAMES {
         let candidate = numbered_aside_name(path, n);
-        // Free only when NOTHING is there: a name whose stat fails for another
-        // reason may still hold a leftover, so it is skipped too.
-        if std::fs::symlink_metadata(&candidate)
-            .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
-        {
-            return candidate;
+        if !ops.exists(&candidate)? {
+            return Ok(candidate);
         }
-        n += 1;
     }
+    Err(std::io::Error::other(format!(
+        "{MAX_SET_ASIDE_NAMES} set-aside names of {} are all taken",
+        path.display()
+    )))
 }
 
 /// The `n`-th set-aside name of `path`: `<name>.replaced` for 1, else
