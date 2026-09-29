@@ -137,7 +137,14 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     console.log(`FLAC layout check: ${ids.size} normalized videos, each with a complete video+audio pair; no half pairs`);
   });
 
-  test("at least one normalized video has Gemini metadata (not gemini_failed)", async ({
+  // #136: this used to assert "at least ONE normalized video has provider
+  // metadata" — it passed on 29.9.2026 with 108 of 344 rows parser-titled and
+  // the provider chain dead (run 36553367664). "At least one" can never catch
+  // a dead chain. The gate for "the providers work now" is
+  // post-deploy-metadata.spec.ts (a live probe of EVERY provider + the
+  // status.metadata repair-queue count). This test keeps only what it can
+  // check deterministically: the stored metadata is clean.
+  test("stored metadata is clean: a provider-named row has a song, no \"Unknown Artist\", no emoji", async ({
     request,
   }) => {
     const playlistsResp = await request.get("/api/v1/playlists");
@@ -145,7 +152,6 @@ test.describe("FLAC pipeline post-deploy verification", () => {
 
     let geminiOk = 0;
     let geminiFailed = 0;
-    let noArtist = 0;
 
     for (const pl of playlists) {
       const videosResp = await request.get(`/api/v1/playlists/${pl.id}/videos`);
@@ -186,15 +192,11 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       }
     }
 
+    // The parser-titled rows drain through the reprocess worker; their count
+    // is status.metadata.failed_videos, logged by post-deploy-metadata.spec.ts.
     console.log(
-      `Gemini metadata check: ${geminiOk} OK, ${geminiFailed} failed, ${noArtist} no-artist`,
+      `stored metadata check: ${geminiOk} provider-named, ${geminiFailed} parser-titled (gemini_failed)`,
     );
-
-    // At least one video must have been successfully processed by Gemini
-    expect(
-      geminiOk,
-      `expected at least 1 Gemini-processed video, got ${geminiOk} OK / ${geminiFailed} failed`,
-    ).toBeGreaterThan(0);
   });
 
   test("lyrics processing status endpoint responds", async ({ request }) => {

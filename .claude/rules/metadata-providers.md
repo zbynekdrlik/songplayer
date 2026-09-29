@@ -4,6 +4,7 @@ paths:
   - "crates/sp-server/src/reprocess/**"
   - "crates/sp-server/src/api/metadata*.rs"
   - "e2e/post-deploy-metadata.spec.ts"
+  - "e2e/post-deploy-flac.spec.ts"
 ---
 
 # Metadata providers: ONE chain, the Gemini key LIST, a live gate (#136)
@@ -60,6 +61,12 @@ answered correctly), and nothing ever ran the real providers.
   gate green on the box, not just the unit tests.
 - The reprocess worker WARNs a failed row with EVERY provider's error, in
   chain order; the per-video backoff makes that one WARN per stage.
+- Never gate provider health on stored rows ("at least one video has provider
+  metadata"): `post-deploy-flac.spec.ts` had exactly that check and it PASSED
+  on 29.9.2026 with 108 rows parser-titled (run 36553367664). It now checks
+  only that stored metadata is clean; provider health is the live probe.
+  `failed_videos` is logged, not asserted to 0 — right after a deploy the
+  reprocess worker is still draining it.
 
 ## Tests (no live API in CI)
 

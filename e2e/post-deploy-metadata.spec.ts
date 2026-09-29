@@ -16,6 +16,10 @@
  * paid providers once per deploy (Claude through CLIProxyAPI, one grounded
  * Gemini search + its clean-up pass).
  *
+ * It replaces the old "at least one normalized video has Gemini metadata"
+ * assertion of post-deploy-flac.spec.ts, which PASSED on 29.9.2026 with 108
+ * rows parser-titled: a stored-row count can never catch a dead chain.
+ *
  * API-level on purpose: the probe has no dashboard surface; the page-driven
  * specs cover the wall and the dashboard.
  */
