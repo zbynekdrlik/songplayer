@@ -496,7 +496,13 @@ async fn stems_state_reads_the_files_the_consumers_open() {
     std::fs::write(&old_v, b"v").unwrap();
     std::fs::write(&old_i, b"i").unwrap();
     let left_audio = d.join("Song_A_left_normalized_audio.flac");
-    set_done(&pool, left, &left_audio, (Some(&old_v), Some(&old_i))).await;
+    set_done(
+        &pool,
+        left,
+        &left_audio,
+        (Some(old_v.as_path()), Some(old_i.as_path())),
+    )
+    .await;
 
     // B: no recorded path, yet both stems sit where its audio derives them.
     let placed = insert_normalized(&pool, "placed").await;
@@ -510,7 +516,13 @@ async fn stems_state_reads_the_files_the_consumers_open() {
     let half = insert_normalized(&pool, "half").await;
     let half_audio = d.join("Song_A_half_normalized_audio.flac");
     let (hv, hi) = crate::stems::stem_paths(&half_audio);
-    set_done(&pool, half, &half_audio, (Some(&hv), Some(&hi))).await;
+    set_done(
+        &pool,
+        half,
+        &half_audio,
+        (Some(hv.as_path()), Some(hi.as_path())),
+    )
+    .await;
     std::fs::write(&hv, b"v").unwrap();
 
     let map = stems_state_map(&pool, 1, None).await.unwrap();
