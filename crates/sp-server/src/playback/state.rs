@@ -26,6 +26,10 @@ pub enum PlayEvent {
     SceneOn,
     /// The playlist's NDI source left the OBS program output.
     SceneOff,
+    /// #221 L4b: a manual ▶ with no resume point. It starts the playlist
+    /// whether or not it is on program, and claims nothing: off air it plays
+    /// OFF program.
+    Start,
     /// The current video reached its end.
     VideoEnded,
     /// The current video encountered a playback error.
@@ -65,8 +69,8 @@ impl PlayState {
             // Idle + videos available -> waiting for scene
             (PlayState::Idle, PlayEvent::VideosAvailable) => (PlayState::WaitingForScene, None),
 
-            // Waiting + scene on -> select and play
-            (PlayState::WaitingForScene, PlayEvent::SceneOn) => {
+            // Waiting + scene on (or a manual start, #221 L4b) -> select and play
+            (PlayState::WaitingForScene, PlayEvent::SceneOn | PlayEvent::Start) => {
                 // State stays WaitingForScene until the engine sets Playing
                 // after selection succeeds.
                 (PlayState::WaitingForScene, Some(PlayAction::SelectAndPlay))
@@ -128,6 +132,26 @@ mod tests {
         // State stays WaitingForScene; engine will set Playing after selection.
         assert_eq!(next, PlayState::WaitingForScene);
         assert_eq!(action, Some(PlayAction::SelectAndPlay));
+    }
+
+    /// #221 L4b: a manual ▶ starts a waiting playlist, on or off program.
+    #[test]
+    fn waiting_to_select_on_start() {
+        let (next, action) =
+            PlayState::WaitingForScene.transition(PlayEvent::Start, PlaybackMode::Continuous);
+        assert_eq!(next, PlayState::WaitingForScene);
+        assert_eq!(action, Some(PlayAction::SelectAndPlay));
+    }
+
+    #[test]
+    fn start_does_nothing_unless_waiting() {
+        let (next, action) = PlayState::Idle.transition(PlayEvent::Start, PlaybackMode::Continuous);
+        assert_eq!((next, action), (PlayState::Idle, None));
+        let playing = PlayState::Playing { video_id: 5 };
+        let (next, action) = playing
+            .clone()
+            .transition(PlayEvent::Start, PlaybackMode::Continuous);
+        assert_eq!((next, action), (playing, None));
     }
 
     #[test]

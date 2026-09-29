@@ -65,12 +65,9 @@ pub struct StatusResponse {
     pub version: String,
     pub obs_connected: bool,
     pub active_scene: Option<String>,
-    /// Playlists whose NDI source is matched in the current OBS program
-    /// scene by [`scene::check_scene_items`]. Populated only after the
-    /// `ndi_sources` map has been rebuilt from the DB + OBS input
-    /// settings — an empty list here on a known-good scene is the
-    /// symptom of issue #11 and is what the post-deploy tests assert
-    /// against.
+    /// #221 L4b: the playlists on air — SP-program's playlist ∪ the one cg
+    /// OBS was told to show, ascending (`routes_status`). `active_scene` is
+    /// SongPlayer's own program scene name (the one resolver).
     pub active_playlist_ids: Vec<i64>,
     pub tools: ToolsStatusResponse,
     pub playlist_count: i64,
@@ -688,8 +685,8 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         .map(|r| r.get::<i64, _>("c"))
         .unwrap_or(0);
 
-    let mut active_playlist_ids: Vec<i64> = obs.active_playlist_ids.iter().copied().collect();
-    active_playlist_ids.sort_unstable();
+    let (active_scene, active_playlist_ids) =
+        super::routes_status::on_air_fields(&state.program_bus);
 
     let lan = state.lan_status.read().await;
 
@@ -715,7 +712,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
     Json(StatusResponse {
         version: sp_core::config::VERSION.to_string(),
         obs_connected: obs.connected,
-        active_scene: obs.current_scene.clone(),
+        active_scene,
         active_playlist_ids,
         tools: ToolsStatusResponse {
             ytdlp_available: tools.ytdlp_available,

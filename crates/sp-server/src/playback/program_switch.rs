@@ -423,7 +423,7 @@ async fn confirm_mirror(
 pub async fn remirror_on_air(bus: &ProgramBus, upstream: &Upstream) -> bool {
     let _order = bus.switch_order().lock().await;
     let on_air = bus.on_air_now();
-    let playlist = on_air.source.filter(|&source| source == PROGRAM_INPUT_ID);
+    let playlist = on_air.source.filter(|&source| source != PROGRAM_INPUT_ID);
     let (Some(pid), Some(scene)) = (playlist, on_air.scene) else {
         debug!(source = ?on_air.source, "startup re-mirror: no playlist scene on program — cg OBS is not told");
         return false;

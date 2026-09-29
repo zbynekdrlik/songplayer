@@ -73,9 +73,9 @@ pub fn program_scene_name(on_air: &OnAir) -> Option<String> {
 /// lv1, strih) still take cg OBS's program, so a playlist cg OBS still shows
 /// stays on air: after a dashboard cut to "OBS manuál" (the input carries
 /// it), or while a mirror is unanswered or failed.
-pub fn on_air_set(on_air: &OnAir, _cg_shown: Option<i64>) -> BTreeSet<i64> {
+pub fn on_air_set(on_air: &OnAir, cg_shown: Option<i64>) -> BTreeSet<i64> {
     let program = on_air.source.filter(|&source| source != PROGRAM_INPUT_ID);
-    program.into_iter().collect()
+    program.into_iter().chain(cg_shown).collect()
 }
 
 /// #221 L4b: the `(playlist, on)` events of a change from `previous` to

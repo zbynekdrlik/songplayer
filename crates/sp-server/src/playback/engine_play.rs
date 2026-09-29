@@ -7,8 +7,9 @@
 //! `handle_engine_play` (invoked from `lib.rs` on `EngineCommand::Play`)
 //! reads the snapshot — if `Some`, resumes the same video at the recorded
 //! position via `handle_play_video`, whose Play clears it (a failed lookup
-//! keeps it, the pipeline stays paused); otherwise falls back to the prior
-//! scene-on dispatch so fresh starts still pick a new video.
+//! keeps it, the pipeline stays paused); otherwise starts it with
+//! `PlayEvent::Start` so fresh starts still pick a new video (#221 L4b: it
+//! claims no program; off air it plays off program).
 //! `handle_play_video` clears any stale `paused_at` so picking a different
 //! setlist row after pause doesn't keep the old snapshot. `handle_play_video`
 //! itself lives here too (moved out of `mod.rs` for the 1000-line cap, #215).
@@ -19,7 +20,7 @@ use sp_core::ws::ServerMsg;
 use tracing::{info, warn};
 
 use super::pipeline::PipelineCommand;
-use super::state::PlayState;
+use super::state::{PlayEvent, PlayState};
 use super::transport_state::transport_from_play_state;
 use super::{PlaybackEngine, play_state_to_ws};
 
@@ -152,10 +153,13 @@ impl PlaybackEngine {
             .and_then(|pp| pp.paused_at.take())
     }
 
-    /// Manual /play: resume paused video if snapshot present, else scene-on. #88.
+    /// Manual /play: resume paused video if snapshot present, else start it. #88.
     /// A pipeline that is ALREADY Playing (e.g. an off-program dub after a page
-    /// reload showed ▶ Prehrať) is a no-op — the scene-on fallback would flag an
-    /// off-program output as on program and re-push its title to the wall.
+    /// reload showed ▶ Prehrať) is a no-op. #221 L4b: a ▶ claims nothing (the
+    /// playback authority decides what is on program): `PlayEvent::Start`
+    /// leaves `scene_active` and the wall alone, so a playlist that is not on
+    /// air plays OFF program (the Player reads "Hrá mimo programu"), and one
+    /// on air starts as a scene-on would.
     pub async fn handle_engine_play(&mut self, playlist_id: i64) {
         // Read, not take: `handle_play_video` clears the snapshot with its
         // Play. A resume whose song lookup fails sends no Play, so the
@@ -176,7 +180,9 @@ impl PlaybackEngine {
                     tracing::debug!(playlist_id, "engine: /play on a playing pipeline — no-op");
                     return;
                 }
-                self.handle_scene_change(playlist_id, true).await;
+                self.apply_event(playlist_id, PlayEvent::VideosAvailable)
+                    .await;
+                self.apply_event(playlist_id, PlayEvent::Start).await;
             }
         }
     }

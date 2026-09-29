@@ -7,15 +7,17 @@
 //! playlists created / activated / deleted / deactivated at RUNTIME via the
 //! API: `EngineCommand::EnsurePipeline` → [`ensure_pipeline_for_playlist`],
 //! `EngineCommand::RemovePipeline` → [`remove_pipeline`]. Without them a
-//! runtime-created playlist has a scene-map entry but no pipeline, so scene
-//! detection logs `no pipeline for playlist` until a process restart.
+//! runtime-created playlist has no pipeline, so putting it on program logs
+//! `no pipeline for playlist` until a process restart. #221 L4b: a pipeline
+//! created for a playlist already on air goes on program at once (the
+//! playback authority's ON came before it existed).
 //!
 //! [`ensure_pipeline_for_playlist`]: PlaybackEngine::ensure_pipeline_for_playlist
 //! [`remove_pipeline`]: PlaybackEngine::remove_pipeline
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tracing::{debug, info, warn};
 
@@ -26,8 +28,8 @@ use super::{
 
 impl PlaybackEngine {
     /// #132: Ensure a pipeline exists for a playlist created or activated at
-    /// runtime (via the API), so scene detection can start playback without a
-    /// process restart. Reconciles from the DB — a pipeline is (idempotently)
+    /// runtime (via the API), so it can play without a process restart; one
+    /// already on air goes on program at once (#221 L4b). Reconciles from the DB — a pipeline is (idempotently)
     /// created only when the playlist is active and has a non-empty NDI output
     /// name, mirroring the startup pre-create loop in `lib.rs::start`. Delegates
     /// to the idempotent [`ensure_pipeline`], so a runtime pipeline picks up the
@@ -82,6 +84,19 @@ impl PlaybackEngine {
         // #196: record the sender's advertised URL for `/api/v1/ndi/health`
         // (idempotent; a no-op if the pipeline already exists).
         self.create_and_record_sender(playlist_id, &ndi_name).await;
+        // #221 L4b: the playback authority's ON for a playlist already on air
+        // may have come before its pipeline existed; it goes on program now.
+        let on_program = self
+            .pipelines
+            .get(&playlist_id)
+            .is_some_and(|pp| pp.scene_active.load(Ordering::Acquire));
+        if self.on_air_contains(playlist_id) && !on_program {
+            info!(
+                playlist_id,
+                "a pipeline of a playlist already on air — on program now"
+            );
+            self.handle_scene_change(playlist_id, true).await;
+        }
     }
 
     /// #132: Tear down a playlist's pipeline after a runtime delete/deactivate.
