@@ -176,3 +176,19 @@ fn msgpack_nesting_is_bounded_like_serde_json() {
         Err(MSGPACK_UNDECODABLE)
     );
 }
+
+#[test]
+fn serde_jsons_private_raw_value_key_is_an_ordinary_key_in_both_encodings() {
+    // sp-server enables serde_json's `raw_value` feature (`api/preview.rs`),
+    // and with it `Value`'s own `Deserialize` re-parses the string after a
+    // first key `$serde_json::private::RawValue` as JSON, with a FRESH
+    // 128-level budget each time — strings nested that way escape the depth
+    // bound above. This build has that behaviour:
+    let text = r#"{"$serde_json::private::RawValue":"[[1]]"}"#;
+    assert_eq!(serde_json::from_str::<Value>(text).unwrap(), json!([[1]]));
+    // The codec keeps it an ordinary key with a string value, both ways.
+    let plain = json!({ "$serde_json::private::RawValue": "[[1]]" });
+    assert_eq!(Codec::Json.decode_text(text), Ok(plain.clone()));
+    let frame = rmp_serde::to_vec_named(&plain).unwrap();
+    assert_eq!(Codec::MsgPack.decode_binary(&frame), Ok(plain));
+}
