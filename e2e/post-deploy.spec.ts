@@ -1016,15 +1016,19 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // testid player-mixer-idle) when the selected playlist has nothing playing;
     // when a song plays it mounts the karaoke adapter whose state line
     // ("Stemy — <song>: <state>", testid karaoke-now-playing) is the #177
-    // contract. The box may be idle during CI, so accept EITHER surface.
-    const header = page.locator('[data-testid="karaoke-now-playing"]');
-    const mixerIdle = page.locator('[data-testid="player-mixer-idle"]');
+    // contract. The box may be idle during CI, so accept EITHER surface —
+    // in ONE wait, each with its own text. Right after page.goto the Player
+    // shows the idle line until the first NowPlaying arrives (the WS replay
+    // carries no song), so "which surface is visible, then assert on it" is a
+    // race: run 36562133708 saw the idle line, then the playing header
+    // replaced it before the idle text was checked (element not found).
+    const header = page.locator('[data-testid="karaoke-now-playing"]', {
+      hasText: /Stemy — /,
+    });
+    const mixerIdle = page.locator('[data-testid="player-mixer-idle"]', {
+      hasText: "Mixér — nič nehrá",
+    });
     await expect(header.or(mixerIdle).first()).toBeVisible({ timeout: 30_000 });
-    if ((await header.count()) > 0) {
-      await expect(header).toContainText(/Stemy — /);
-    } else {
-      await expect(mixerIdle).toContainText("Mixér — nič nehrá");
-    }
 
     const realConsole = consoleMessages.filter(
       (m) => !allowedConsole.some((r) => r.test(m)),
