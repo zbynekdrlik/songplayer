@@ -338,20 +338,111 @@ fn a_move_over_an_existing_file_leaves_only_the_moved_file() {
     );
 }
 
-/// A rename that fails on the one `(from, to)` pair given, and renames for real
-/// otherwise: the seam for forcing a chosen step of a unit move to fail on both
-/// Linux and Windows.
-fn failing_on(
-    fail_from: PathBuf,
-    fail_to: PathBuf,
-) -> impl Fn(&Path, &Path) -> std::io::Result<()> {
-    move |from: &Path, to: &Path| {
-        if from == fail_from && to == fail_to {
-            Err(std::io::Error::other("injected rename failure"))
-        } else {
-            std::fs::rename(from, to)
+/// Real file operations except the ones named, which fail: the seam for
+/// forcing a chosen step of a unit move to fail on both Linux and Windows.
+#[derive(Default)]
+struct Failing {
+    /// The one `(from, to)` rename that fails.
+    rename: Option<(PathBuf, PathBuf)>,
+    /// The `to` whose identity check fails.
+    identity_of: Option<PathBuf>,
+    /// The path whose delete fails.
+    remove: Option<PathBuf>,
+}
+
+fn injected(what: &str) -> std::io::Error {
+    std::io::Error::other(format!("injected {what} failure"))
+}
+
+impl FileOps for Failing {
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        if self
+            .rename
+            .as_ref()
+            .is_some_and(|(f, t)| f == from && t == to)
+        {
+            return Err(injected("rename"));
         }
+        std::fs::rename(from, to)
     }
+
+    fn is_other_file(&self, from: &Path, to: &Path) -> std::io::Result<bool> {
+        if self.identity_of.as_deref() == Some(to) {
+            return Err(injected("identity"));
+        }
+        RealFs.is_other_file(from, to)
+    }
+
+    fn remove(&self, path: &Path) -> std::io::Result<()> {
+        if self.remove.as_deref() == Some(path) {
+            return Err(injected("remove"));
+        }
+        std::fs::remove_file(path)
+    }
+}
+
+/// A [`Failing`] whose one `(from, to)` rename fails.
+fn failing_on(from: PathBuf, to: PathBuf) -> Failing {
+    Failing {
+        rename: Some((from, to)),
+        ..Failing::default()
+    }
+}
+
+/// #136 review round 8: when the identity check of a step fails, the unit rolls
+/// back rather than guess whether the new name is another file.
+#[test]
+fn a_move_whose_file_identity_is_unknown_rolls_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let (a, a2, fresh, older) = (d.join("a"), d.join("a2"), d.join("fresh"), d.join("older"));
+    fs::write(&a, b"a").unwrap();
+    fs::write(&fresh, b"new").unwrap();
+    fs::write(&older, b"old").unwrap();
+
+    let failed = move_as_unit_with(
+        ID,
+        &[(a.clone(), a2.clone()), (fresh.clone(), older.clone())],
+        &Failing {
+            identity_of: Some(older.clone()),
+            ..Failing::default()
+        },
+    )
+    .unwrap_err();
+
+    assert!(failed.stuck.is_empty());
+    assert!(failed.error.to_string().contains("injected identity"));
+    assert_eq!(fs::read(&a).unwrap(), b"a", "the earlier move is undone");
+    assert_eq!(fs::read(&fresh).unwrap(), b"new");
+    assert_eq!(fs::read(&older).unwrap(), b"old");
+    assert_eq!(fs::read_dir(d).unwrap().count(), 3);
+}
+
+/// A replaced file whose delete fails after its unit moved stays set aside,
+/// where the startup self-heal reports it; the move itself succeeded.
+#[test]
+fn a_replaced_file_that_cannot_be_deleted_stays_set_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let (fresh, older) = (d.join("fresh"), d.join("older"));
+    fs::write(&fresh, b"new").unwrap();
+    fs::write(&older, b"old").unwrap();
+    let aside = numbered_aside_name(&older, 1);
+
+    let moved = move_as_unit_with(
+        ID,
+        &[(fresh.clone(), older.clone())],
+        &Failing {
+            remove: Some(aside.clone()),
+            ..Failing::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(moved, 1);
+    assert_eq!(fs::read(&older).unwrap(), b"new");
+    assert_eq!(fs::read(&aside).unwrap(), b"old");
+    assert_eq!(set_aside_leftovers(d), vec![aside]);
 }
 
 /// #136 review round 6: a move whose OWN rename fails right after it set aside

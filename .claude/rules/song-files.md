@@ -57,9 +57,10 @@ Design record: #136 comment 5894034820.
     never overwritten: the next set-aside of that name takes
     `<name>.2.replaced`, and so on. The startup self-heal WARNs each one:
     `self-heal: a replaced song file is still set aside …`.
-  - Tests force a failing step with `move_as_unit_with(…, rename)` (the
-    `failing_on(from, to)` seam in `cache_tests_files.rs`), or with a
-    non-empty directory at the target.
+  - Tests force a failing step with `move_as_unit_with(…, &Failing{…})`.
+    `FileOps` is the seam; production uses `RealFs`. `Failing` fails a chosen
+    rename, identity check or delete (`cache_tests_files.rs`). A non-empty
+    directory at the target also fails the move.
 - **Rename a song only through `cache::rename_song_files(id, &old, &new)`**,
   never a hand-written `fs::rename` of one sidecar.
   - It moves derived → audio → video as ONE unit (`move_as_unit`).
@@ -140,6 +141,10 @@ Design record: #136 comment 5894034820.
   replaced by a move is logged `cache: setting aside the older file under a song
   file's new name` (INFO). That is normal after a job that finished after a
   rename.
+- A `self-heal: a replaced song file is still set aside … <path>` WARN
+  repeats at every start until someone acts. Compare that `.replaced` file
+  with the file now under the name it was set aside from. Delete it by hand
+  if it is an older copy; restore it if the name is empty.
 - Tripwire WARN: `lyrics: stems are recorded done but the vocals file is
   missing under the audio's name`. After the fix it should never fire; if it
   does, the song's files drifted in a way neither the rename nor the post-job

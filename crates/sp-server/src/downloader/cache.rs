@@ -277,30 +277,47 @@ pub struct MoveFailed {
 /// the whole unit has moved, so a rollback gives it back (#136 review round 5).
 /// A directory under a `to` name is never set aside; the move fails on it.
 pub fn move_as_unit(youtube_id: &str, moves: &[(PathBuf, PathBuf)]) -> Result<usize, MoveFailed> {
-    move_as_unit_with(youtube_id, moves, &fs_rename)
+    move_as_unit_with(youtube_id, moves, &RealFs)
 }
 
-/// `std::fs::rename`, the one rename [`move_as_unit`] uses in production.
-fn fs_rename(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::rename(from, to)
+/// The filesystem operations a unit move makes: `std::fs` in production
+/// ([`RealFs`]); a test fails a chosen one (a set-aside, a move, a give-back,
+/// a move back, the identity check, the delete of a replaced file).
+trait FileOps {
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+    fn is_other_file(&self, from: &Path, to: &Path) -> std::io::Result<bool>;
+    fn remove(&self, path: &Path) -> std::io::Result<()>;
 }
 
-/// [`move_as_unit`] with its rename as a parameter, so a test can fail any
-/// chosen step (a set-aside, a move, a give-back, a move back).
-fn move_as_unit_with<R>(
+/// The real filesystem.
+struct RealFs;
+
+impl FileOps for RealFs {
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        std::fs::rename(from, to)
+    }
+
+    fn is_other_file(&self, from: &Path, to: &Path) -> std::io::Result<bool> {
+        is_other_file(from, to)
+    }
+
+    fn remove(&self, path: &Path) -> std::io::Result<()> {
+        std::fs::remove_file(path)
+    }
+}
+
+/// [`move_as_unit`] on the given [`FileOps`].
+fn move_as_unit_with<O: FileOps>(
     youtube_id: &str,
     moves: &[(PathBuf, PathBuf)],
-    rename: &R,
-) -> Result<usize, MoveFailed>
-where
-    R: Fn(&Path, &Path) -> std::io::Result<()>,
-{
+    ops: &O,
+) -> Result<usize, MoveFailed> {
     let mut done: Vec<Moved> = Vec::new();
     for (from, to) in moves {
         if from == to || !from.exists() {
             continue;
         }
-        let other_file = match is_other_file(from, to) {
+        let other_file = match ops.is_other_file(from, to) {
             Ok(other) => other,
             Err(error) => {
                 tracing::warn!(
@@ -309,18 +326,18 @@ where
                     to = %to.display(),
                     "cache: cannot tell whether a song file's new name is another file: {error}"
                 );
-                return Err(undo(youtube_id, done, error, rename));
+                return Err(undo(youtube_id, done, error, ops));
             }
         };
         let set_aside = if other_file {
             let aside = set_aside_name(to);
-            if let Err(error) = rename(to.as_path(), aside.as_path()) {
+            if let Err(error) = ops.rename(to, &aside) {
                 tracing::warn!(
                     youtube_id,
                     to = %to.display(),
                     "cache: could not set aside the file under a song file's new name: {error}"
                 );
-                return Err(undo(youtube_id, done, error, rename));
+                return Err(undo(youtube_id, done, error, ops));
             }
             tracing::info!(
                 youtube_id,
@@ -336,7 +353,7 @@ where
             to: to.clone(),
             set_aside,
         };
-        if let Err(error) = rename(from.as_path(), to.as_path()) {
+        if let Err(error) = ops.rename(from, to) {
             tracing::warn!(
                 youtube_id,
                 from = %from.display(),
@@ -344,8 +361,8 @@ where
                 "cache: moving a song file failed, moving the {} already moved back: {error}",
                 done.len()
             );
-            give_back(youtube_id, &step, rename);
-            return Err(undo(youtube_id, done, error, rename));
+            give_back(youtube_id, &step, ops);
+            return Err(undo(youtube_id, done, error, ops));
         }
         tracing::info!(
             youtube_id,
@@ -357,7 +374,7 @@ where
     }
     // The unit moved: the set-aside files are the stale copies it replaced.
     for aside in done.iter().filter_map(|step| step.set_aside.as_ref()) {
-        if let Err(e) = std::fs::remove_file(aside) {
+        if let Err(e) = ops.remove(aside) {
             tracing::warn!(
                 youtube_id,
                 aside = %aside.display(),
@@ -415,7 +432,11 @@ fn set_aside_name(path: &Path) -> PathBuf {
     let mut n: u32 = 1;
     loop {
         let candidate = numbered_aside_name(path, n);
-        if !candidate.exists() {
+        // Free only when NOTHING is there: a name whose stat fails for another
+        // reason may still hold a leftover, so it is skipped too.
+        if std::fs::symlink_metadata(&candidate)
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        {
             return candidate;
         }
         n += 1;
@@ -435,12 +456,9 @@ fn numbered_aside_name(path: &Path, n: u32) -> PathBuf {
 
 /// Give a step's set-aside file its name back (its own move never happened or
 /// was just undone).
-fn give_back<R>(youtube_id: &str, step: &Moved, rename: &R)
-where
-    R: Fn(&Path, &Path) -> std::io::Result<()>,
-{
+fn give_back<O: FileOps>(youtube_id: &str, step: &Moved, ops: &O) {
     if let Some(aside) = &step.set_aside
-        && let Err(e) = rename(aside.as_path(), step.to.as_path())
+        && let Err(e) = ops.rename(aside, &step.to)
     {
         tracing::error!(
             youtube_id,
@@ -456,14 +474,16 @@ where
 /// (ERROR: the replaced file stays set aside, its name empty). A file that cannot
 /// move back is `stuck`, and the file it replaced then stays set aside (both
 /// logged). A set-aside file left behind is WARNed at every start.
-fn undo<R>(youtube_id: &str, done: Vec<Moved>, error: std::io::Error, rename: &R) -> MoveFailed
-where
-    R: Fn(&Path, &Path) -> std::io::Result<()>,
-{
+fn undo<O: FileOps>(
+    youtube_id: &str,
+    done: Vec<Moved>,
+    error: std::io::Error,
+    ops: &O,
+) -> MoveFailed {
     let mut stuck = Vec::new();
     for step in done.into_iter().rev() {
-        match rename(step.to.as_path(), step.from.as_path()) {
-            Ok(()) => give_back(youtube_id, &step, rename),
+        match ops.rename(&step.to, &step.from) {
+            Ok(()) => give_back(youtube_id, &step, ops),
             Err(back) => {
                 tracing::error!(
                     youtube_id,
