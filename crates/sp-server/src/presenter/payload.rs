@@ -178,6 +178,28 @@ mod tests {
     // ---- wrap_for_presenter tests -----------------------------------
 
     #[test]
+    fn presenter_wrap_width_is_one_wall_line() {
+        // A wall line of the #217 display plan is ONE Presenter line
+        // (29.9.2026, owner: the texts ran onto two lines on the Presenter
+        // too — at 30 chars every longer wall line wrapped).
+        assert_eq!(PRESENTER_WRAP_WIDTH, crate::lyrics::display_plan::MAX_CHARS);
+        assert_eq!(PRESENTER_WRAP_WIDTH, 52);
+    }
+
+    #[test]
+    fn a_wall_line_is_one_presenter_line() {
+        // 25 + 1 + 26 = 52 chars of words pass unchanged; one char more
+        // breaks once, at the space.
+        let at_52 = format!("{} {}", "a".repeat(25), "b".repeat(26));
+        assert_eq!(wrap_for_presenter(&at_52), at_52);
+        let at_53 = format!("{} {}", "a".repeat(25), "b".repeat(27));
+        assert_eq!(
+            wrap_for_presenter(&at_53),
+            format!("{}\n{}", "a".repeat(25), "b".repeat(27))
+        );
+    }
+
+    #[test]
     fn wrap_passes_through_short_text_unchanged() {
         let s = "Haleluja, haleluja";
         assert_eq!(s.chars().count(), 18);

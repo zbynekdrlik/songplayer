@@ -76,7 +76,7 @@ fn constants_match_the_design_record() {
     assert_eq!(MAX_LATE_MS, 400);
     assert_eq!(LONG_GAP_MS, 8_000);
     assert_eq!(HOLD_TAIL_MS, 3_000);
-    assert_eq!(MAX_CHARS, 72);
+    assert_eq!(MAX_CHARS, 52);
     assert_eq!(GROUP_MAX_SPAN_MS, 6_500);
 }
 
@@ -169,11 +169,11 @@ fn a_line_without_a_sentence_mark_runs_on_into_the_next() {
 
 #[test]
 fn a_long_sentence_splits_after_its_last_soft_end() {
-    // 32 + 1 + 17 + 1 + 45 chars do not fit in 72. When the middle line ends
+    // 32 + 1 + 17 + 1 + 31 chars do not fit in 52. When the middle line ends
     // in a soft end (`, ; : —`), it is the last one, so the split comes after
     // it.
     let first = "Lift up your hands, oh ye gates,";
-    let last = "you everlasting doors, and the king of glory.";
+    let last = "you everlasting doors of glory.";
     let sentence = |middle: &str| {
         song_plan(&[
             en(0, 1_000, first),
@@ -186,7 +186,7 @@ fn a_long_sentence_splits_after_its_last_soft_end() {
         assert_eq!(ranges(&plan), [0..2, 2..3], "{mark:?} is a soft end");
     }
     // Otherwise the last soft end is "gates,", and the middle line joins the
-    // rest of the sentence (17 + 1 + 45 chars fit).
+    // rest of the sentence (17 + 1 + 31 chars fit).
     for mark in ["", "-", "–"] {
         let plan = sentence(format!("and be lifted up{mark}").as_str());
         assert_eq!(ranges(&plan), [0..1, 1..3], "{mark:?} is no soft end");
@@ -195,19 +195,69 @@ fn a_long_sentence_splits_after_its_last_soft_end() {
 
 #[test]
 fn a_long_sentence_with_no_soft_end_splits_before_the_line_that_overflows() {
-    // 35 + 1 + 36 = 72 chars fit; one char more does not. Chars, not bytes.
-    let first = "č".repeat(35);
-    let at_72 = song_plan(&[
+    // 25 + 1 + 26 = 52 chars fit; one char more does not. Chars, not bytes.
+    let first = "č".repeat(25);
+    let at_52 = song_plan(&[
         en(0, 1_000, &first),
-        en(1_000, 2_000, &format!("{}.", "ž".repeat(35))),
+        en(1_000, 2_000, &format!("{}.", "ž".repeat(25))),
     ]);
-    assert_eq!(single(&at_72), 0..2);
-    assert_eq!(at_72[0].en.chars().count(), MAX_CHARS);
-    let at_73 = song_plan(&[
+    assert_eq!(single(&at_52), 0..2);
+    assert_eq!(at_52[0].en.chars().count(), MAX_CHARS);
+    let at_53 = song_plan(&[
         en(0, 1_000, &first),
-        en(1_000, 2_000, &format!("{}.", "ž".repeat(36))),
+        en(1_000, 2_000, &format!("{}.", "ž".repeat(26))),
     ]);
-    assert_eq!(ranges(&at_73), [0..1, 1..2]);
+    assert_eq!(ranges(&at_53), [0..1, 1..2]);
+}
+
+#[test]
+fn an_unpunctuated_verse_merges_only_up_to_one_wall_line() {
+    // Song 270 "Thankful" (29.9.2026, owner: "extrémne dlhé texty, pretečie
+    // do dvoch riadkov"). Its lines carry no sentence marks, so the 72-char
+    // budget merged them into 58–79-char lines the wall wraps. 34 + 1 + 24
+    // = 59 chars are over one wall line: two lines.
+    let plan = song_plan(&[
+        line(
+            22_605,
+            26_805,
+            "Just like the sunrise on a new day",
+            "Tak ako východ slnka v nový deň",
+        ),
+        line(
+            27_237,
+            29_980,
+            "Your mercies too are new",
+            "Aj Tvoje milosrdenstvo je nové",
+        ),
+    ]);
+    assert_eq!(ranges(&plan), [0..1, 1..2]);
+}
+
+#[test]
+fn the_slovak_the_wall_shows_bounds_a_merge_too() {
+    // The wall shows the SLOVAK line. 18 + 1 + 22 = 41 EN chars fit, but
+    // 27 + 1 + 31 = 59 SK chars are over one wall line: two lines.
+    let plan = song_plan(&[
+        line(
+            0,
+            1_000,
+            "Lord, You are good",
+            "Pane, Ty si nekonečne dobrý",
+        ),
+        line(
+            1_000,
+            2_000,
+            "and Your love is true.",
+            "a Tvoja láska je vždy pravdivá.",
+        ),
+    ]);
+    assert_eq!(ranges(&plan), [0..1, 1..2]);
+    // The same English with a short Slovak is one wall line.
+    let plan = song_plan(&[
+        line(0, 1_000, "Lord, You are good", "Pane, si dobrý"),
+        line(1_000, 2_000, "and Your love is true.", "a láska je pravá."),
+    ]);
+    assert_eq!(single(&plan), 0..2);
 }
 
 #[test]
@@ -281,7 +331,7 @@ fn a_line_with_no_english_is_grouped_by_its_slovak() {
     assert_eq!(ranges(&plan), [0..2, 2..3]);
     assert_eq!(plan[0].sk.as_deref(), Some("Áno amen."));
     assert_eq!(plan[0].en, "");
-    // The 72-char limit reads the SK too: 40 + 1 + 42 chars do not fit.
+    // The 52-char limit reads the SK too: 40 + 1 + 42 chars do not fit.
     let text = "Boh nás miluje viac než si predstavíme a";
     let plan = build_plan(
         &[sk(0, 2_000, text), sk(2_000, 4_000, &format!("{text} b"))],

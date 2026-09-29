@@ -97,17 +97,28 @@ fn ends_a_sentence(line: &LyricsLine) -> bool {
         .ends_with(['.', '!', '?', '…'])
 }
 
-/// Oracle: consecutive source lines fit one wall line. Their joined text is
-/// at most `MAX_CHARS` chars, and the last starts at most
-/// `GROUP_MAX_SPAN_MS` after the first.
+/// Oracle: consecutive source lines fit one wall line. Their joined text AND
+/// their joined Slovak (what the wall shows) are each at most `MAX_CHARS`
+/// chars, and the last starts at most `GROUP_MAX_SPAN_MS` after the first.
 fn fits_one_wall_line(members: &[LyricsLine]) -> bool {
-    let texts: Vec<&str> = members
-        .iter()
-        .map(text_of)
-        .filter(|t| !t.is_empty())
-        .collect();
+    let joined = |texts: Vec<&str>| {
+        texts
+            .into_iter()
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .count()
+    };
+    let text = joined(members.iter().map(text_of).collect());
+    let sk = joined(
+        members
+            .iter()
+            .map(|l| l.sk.as_deref().unwrap_or_default().trim())
+            .collect(),
+    );
     let span = members[members.len() - 1].start_ms - members[0].start_ms;
-    texts.join(" ").chars().count() <= MAX_CHARS && span <= GROUP_MAX_SPAN_MS
+    text <= MAX_CHARS && sk <= MAX_CHARS && span <= GROUP_MAX_SPAN_MS
 }
 
 // ── the tracks ─────────────────────────────────────────────────────────────
@@ -163,8 +174,10 @@ fn fixture_335_first_wall_lines() {
     assert_eq!(
         first,
         [
-            (0..3, 16_500, 24_200),
-            (3..7, 24_200, 31_400),
+            (0..2, 16_500, 19_951),
+            (2..3, 19_951, 24_200),
+            (3..5, 24_200, 27_359),
+            (5..7, 27_359, 31_400),
             (7..8, 31_400, 34_988),
             (8..9, 34_988, 39_700),
             (9..12, 39_700, 44_708),
@@ -173,8 +186,6 @@ fn fixture_335_first_wall_lines() {
             (15..17, 54_300, 60_530),
             (17..19, 60_530, 65_682),
             (19..20, 65_682, 68_885),
-            (20..21, 68_885, 73_000),
-            (21..24, 85_100, 92_700),
         ]
     );
 }
@@ -282,7 +293,7 @@ fn fixture_lead_counts() {
     for ((name, track), counts) in
         fixtures()
             .into_iter()
-            .zip([(41, 65, 1), (13, 44, 0), (9, 38, 0)])
+            .zip([(41, 79, 1), (13, 53, 0), (9, 40, 0)])
     {
         let lines = &track.lines;
         let plan = song_plan(lines);
@@ -310,7 +321,7 @@ fn fixture_no_wall_line_is_up_for_less_than_1200_ms() {
     for ((name, track), (count, shortest)) in
         fixtures()
             .into_iter()
-            .zip([(123, 1_200), (59, 1_685), (51, 1_321)])
+            .zip([(137, 1_200), (68, 1_682), (53, 1_253)])
     {
         let plan = song_plan(&track.lines);
         assert_eq!(plan.len(), count, "{name}");
@@ -450,13 +461,19 @@ fn fixture_what_a_god_sentences() {
     assert_eq!(second.en, "What a God, what a God.");
     assert_eq!((first.show_ms, first.hide_ms), (96_200, 97_400));
     assert_eq!((second.show_ms, second.hide_ms), (97_400, 99_200));
-    // Sentences split over three source lines join whole.
+    // A sentence of three source lines that fits one wall line joins whole.
     assert_eq!(
-        by_src(128..131).en,
-        "I searched all over and I still couldn't find nobody no."
+        by_src(131..133).en,
+        "All I have needed thy hand hath provided."
     );
+    // Over one wall line (56 and 53 EN chars; 55 SK each), a sentence with
+    // no soft end splits before the line that overflows (29.9.2026: the
+    // wall wrapped merged lines onto two lines).
     assert_eq!(
-        by_src(6..9).en,
-        "You're nothing like I thought you were you're better."
+        by_src(128..130).en,
+        "I searched all over and I still couldn't"
     );
+    assert_eq!(by_src(130..131).en, "find nobody no.");
+    assert_eq!(by_src(6..8).en, "You're nothing like I thought");
+    assert_eq!(by_src(8..9).en, "you were you're better.");
 }
