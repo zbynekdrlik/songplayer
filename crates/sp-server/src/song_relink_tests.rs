@@ -451,3 +451,70 @@ async fn the_startup_pass_reads_its_rows_only_once_it_holds_the_song_files_lock(
     assert_eq!(counts, RelinkCounts::default(), "the row is no longer done");
     assert!(old_vocals.exists());
 }
+
+/// A song renamed while a dub job ran: the job's output lives under the start
+/// name `Old_A`, the song's audio is now `Song_A`, which already holds an older
+/// dub. Returns `(pool, dir, id, written_for, old_dub_under_the_current_name)`.
+async fn a_dub_job_finished_after_a_rename()
+-> (SqlitePool, tempfile::TempDir, i64, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let pool = pool().await;
+    let id = song(&pool, d, "IYAOosrh7HY", "", "ready").await;
+    let written_for = named(d, "Old_A", "IYAOosrh7HY", "_gf_audio.flac");
+    write(&crate::stems::dub_path(&written_for), "new dub", 1);
+    write(
+        &crate::stems::dub_transcripts_path(&written_for),
+        "new t",
+        1,
+    );
+    let current = named(d, "Song_A", "IYAOosrh7HY", "_audio.flac");
+    let old_dub = crate::stems::dub_path(&current);
+    write(&old_dub, "old dub", 500);
+    (pool, dir, id, written_for, old_dub)
+}
+
+/// #136 review round 5: when the job's output cannot move over the current
+/// names (here the transcripts' target is blocked; on the box a reader holding
+/// it open without share-delete), the move rolls back. The new dub stays
+/// under the start name, nothing is lost, and the row records the older dub
+/// that plays under the current name. The next start does not retry this.
+#[tokio::test]
+async fn a_job_output_that_cannot_follow_the_rename_stays_under_the_start_name() {
+    let (pool, dir, id, written_for, old_dub) = a_dub_job_finished_after_a_rename().await;
+    let current = named(dir.path(), "Song_A", "IYAOosrh7HY", "_audio.flac");
+    let blocked = crate::stems::dub_transcripts_path(&current);
+    fs::create_dir(&blocked).unwrap();
+    fs::write(blocked.join("x"), b"x").unwrap();
+
+    relink_song(&pool, dir.path(), id, &written_for)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(crate::stems::dub_path(&written_for)).unwrap(),
+        "new dub",
+        "the new dub is kept under the start name"
+    );
+    assert_eq!(fs::read_to_string(&old_dub).unwrap(), "old dub");
+    assert_eq!(columns(&pool, id).await.3, Some(text(&old_dub)));
+}
+
+/// A song whose current audio is missing gets no files moved to it: the pass
+/// skips such a row, and so does the move of a job's output (review round 5).
+#[tokio::test]
+async fn a_job_output_does_not_follow_a_rename_to_a_missing_audio() {
+    let (pool, dir, id, written_for, old_dub) = a_dub_job_finished_after_a_rename().await;
+    fs::remove_file(named(dir.path(), "Song_A", "IYAOosrh7HY", "_audio.flac")).unwrap();
+
+    let counts = relink_song(&pool, dir.path(), id, &written_for)
+        .await
+        .unwrap();
+
+    assert_eq!(counts, RelinkCounts::default());
+    assert_eq!(
+        fs::read_to_string(crate::stems::dub_path(&written_for)).unwrap(),
+        "new dub"
+    );
+    assert_eq!(fs::read_to_string(&old_dub).unwrap(), "old dub");
+}

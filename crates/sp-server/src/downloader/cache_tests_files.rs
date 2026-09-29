@@ -270,6 +270,74 @@ fn move_as_unit_counts_the_moves_and_skips_a_file_already_named() {
     assert!(!d.join("x").exists());
 }
 
+/// #136 review round 5: a move may replace a file already under the new name
+/// (a job's fresh output over an older copy, a whole pair over half a pair).
+/// When a LATER move of the unit fails, the rollback must give the replaced
+/// file back, never leave the name empty with the replaced content gone.
+#[test]
+fn a_failed_move_gives_back_a_file_it_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let (fresh, older) = (d.join("fresh_dub"), d.join("current_dub"));
+    fs::write(&fresh, b"new dub").unwrap();
+    fs::write(&older, b"old dub").unwrap();
+    let (t_from, blocked) = (d.join("fresh_t"), d.join("current_t"));
+    fs::write(&t_from, b"new t").unwrap();
+    fs::create_dir(&blocked).unwrap();
+    fs::write(blocked.join("x"), b"x").unwrap();
+
+    let failed = move_as_unit(
+        ID,
+        &[
+            (fresh.clone(), older.clone()),
+            (t_from.clone(), blocked.clone()),
+        ],
+    )
+    .unwrap_err();
+
+    assert!(failed.stuck.is_empty());
+    assert_eq!(
+        fs::read(&older).unwrap(),
+        b"old dub",
+        "the replaced file is back"
+    );
+    assert_eq!(
+        fs::read(&fresh).unwrap(),
+        b"new dub",
+        "the moved file is back"
+    );
+    assert_eq!(fs::read(&t_from).unwrap(), b"new t");
+    assert_eq!(
+        fs::read_dir(d).unwrap().count(),
+        4,
+        "no set-aside copy is left behind"
+    );
+}
+
+/// A successful move over an existing file leaves only the moved file: the
+/// replaced copy is not kept anywhere.
+#[test]
+fn a_move_over_an_existing_file_leaves_only_the_moved_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let (fresh, older) = (d.join("fresh_dub"), d.join("current_dub"));
+    fs::write(&fresh, b"new dub").unwrap();
+    fs::write(&older, b"old dub").unwrap();
+
+    assert_eq!(
+        move_as_unit(ID, &[(fresh.clone(), older.clone())]).unwrap(),
+        1
+    );
+
+    assert_eq!(fs::read(&older).unwrap(), b"new dub");
+    assert!(!fresh.exists());
+    assert_eq!(
+        fs::read_dir(d).unwrap().count(),
+        1,
+        "nothing set aside remains"
+    );
+}
+
 #[test]
 fn a_failed_move_returns_its_error() {
     let dir = tempfile::tempdir().unwrap();
