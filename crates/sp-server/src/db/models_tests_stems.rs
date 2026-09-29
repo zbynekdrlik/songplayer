@@ -31,6 +31,37 @@ async fn insert_normalized(pool: &SqlitePool, youtube_id: &str) -> i64 {
     .unwrap()
 }
 
+/// Give a video REAL stem files: its audio sidecar moves into a temp cache and
+/// both stems [`crate::stems::stem_paths`] derives from it are written there,
+/// then the row is marked `done` with those paths. A stems-ready fixture must
+/// hold the files a consumer opens (#136: a `done` row whose recorded paths name
+/// no file is exactly the regression). Keep the returned dir alive.
+async fn give_real_stems(pool: &SqlitePool, video_id: i64) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let audio = dir
+        .path()
+        .join(format!("S_A_{video_id}_normalized_audio.flac"));
+    std::fs::write(&audio, b"a").unwrap();
+    let (vocals, instrumental) = crate::stems::stem_paths(&audio);
+    std::fs::write(&vocals, b"v").unwrap();
+    std::fs::write(&instrumental, b"i").unwrap();
+    sqlx::query("UPDATE videos SET audio_file_path = ? WHERE id = ?")
+        .bind(audio.to_string_lossy().as_ref())
+        .bind(video_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    mark_stems_done(
+        pool,
+        video_id,
+        &vocals.to_string_lossy(),
+        &instrumental.to_string_lossy(),
+    )
+    .await
+    .unwrap();
+    dir
+}
+
 async fn backdate(pool: &SqlitePool, id: i64) {
     sqlx::query("UPDATE videos SET stem_next_attempt_at = '2000-01-01T00:00:00.000Z' WHERE id = ?")
         .bind(id)
@@ -373,9 +404,7 @@ async fn video_stems_info_resolves_title_and_state() {
     let pool = setup_pool().await;
     let ready = insert_normalized(&pool, "vsi_ready").await;
     let queued = insert_normalized(&pool, "vsi_q").await;
-    mark_stems_done(&pool, ready, "/c/r_v.flac", "/c/r_i.flac")
-        .await
-        .unwrap();
+    let _stems = give_real_stems(&pool, ready).await;
 
     let info = video_stems_info(&pool, ready, false)
         .await
@@ -412,9 +441,7 @@ async fn stems_state_map_marks_each_row() {
     let ready = insert_normalized(&pool, "m_ready").await;
     let queued = insert_normalized(&pool, "m_q").await;
     let unsup = insert_normalized(&pool, "m_u").await;
-    mark_stems_done(&pool, ready, "/c/mr_v.flac", "/c/mr_i.flac")
-        .await
-        .unwrap();
+    let _stems = give_real_stems(&pool, ready).await;
     mark_stems_unsupported(&pool, unsup).await.unwrap();
 
     let map = stems_state_map(&pool, 1, Some(queued)).await.unwrap();

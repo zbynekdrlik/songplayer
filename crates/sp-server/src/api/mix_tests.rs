@@ -42,6 +42,37 @@ async fn insert_video(pool: &sqlx::SqlitePool, playlist_id: i64, youtube_id: &st
     .unwrap()
 }
 
+/// Give a video REAL stem files: its audio sidecar moves into a temp cache and
+/// both stems `stems::stem_paths` derives from it are written there, then the
+/// row is marked `done` with those paths. A stems-ready fixture must hold the
+/// files a consumer opens (#136: a `done` row whose recorded paths name no file
+/// is exactly the regression). Keep the returned dir alive.
+async fn give_real_stems(pool: &sqlx::SqlitePool, video_id: i64) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let audio = dir
+        .path()
+        .join(format!("S_A_{video_id}_normalized_audio.flac"));
+    std::fs::write(&audio, b"a").unwrap();
+    let (vocals, instrumental) = crate::stems::stem_paths(&audio);
+    std::fs::write(&vocals, b"v").unwrap();
+    std::fs::write(&instrumental, b"i").unwrap();
+    sqlx::query("UPDATE videos SET audio_file_path = ? WHERE id = ?")
+        .bind(audio.to_string_lossy().as_ref())
+        .bind(video_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    crate::db::models_stems::mark_stems_done(
+        pool,
+        video_id,
+        &vocals.to_string_lossy(),
+        &instrumental.to_string_lossy(),
+    )
+    .await
+    .unwrap();
+    dir
+}
+
 async fn get_json(app: axum::Router, uri: &str) -> serde_json::Value {
     let resp = app
         .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
@@ -272,9 +303,7 @@ async fn mix_now_playing_carries_per_song_stems_state() {
     // set by a parallel test (the registry is process-global).
     insert_playlist(&pool, 771).await;
     let vid = insert_video(&pool, 771, "np_ready").await;
-    crate::db::models_stems::mark_stems_done(&pool, vid, "/c/v.flac", "/c/i.flac")
-        .await
-        .unwrap();
+    let _stems = give_real_stems(&pool, vid).await;
     crate::now_playing::global().set(771, vid);
 
     let json = get_json(app(state), "/api/v1/mix").await;
@@ -340,9 +369,7 @@ async fn videos_payload_carries_stems_state_marker() {
     let ready = insert_video(&pool, 773, "vl_ready").await;
     let queued = insert_video(&pool, 773, "vl_queued").await;
     let unsup = insert_video(&pool, 773, "vl_unsup").await;
-    crate::db::models_stems::mark_stems_done(&pool, ready, "/c/v.flac", "/c/i.flac")
-        .await
-        .unwrap();
+    let _stems = give_real_stems(&pool, ready).await;
     crate::db::models_stems::mark_stems_unsupported(&pool, unsup)
         .await
         .unwrap();
