@@ -3,6 +3,8 @@
 //! restore). Wired via `#[cfg(test)] #[path = "program_on_air_tests.rs"] mod
 //! tests;`.
 
+use std::collections::BTreeSet;
+
 use sp_core::config::{PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
 use sqlx::SqlitePool;
 
@@ -180,4 +182,66 @@ async fn a_restored_input_is_named_by_the_resolver() {
     let now = bus.on_air_now();
     assert_eq!(now, on_air(1, Some(PROGRAM_INPUT_ID), None));
     assert_eq!(program_scene_name(&now).as_deref(), Some("OBS manuál"));
+}
+
+fn set(pids: &[i64]) -> BTreeSet<i64> {
+    pids.iter().copied().collect()
+}
+
+/// #221 L4b §1e: on air = SP-program's playlist ∪ the playlist SongPlayer
+/// last told cg OBS to show. "OBS manuál" (-1) is no playlist.
+#[test]
+fn on_air_is_the_program_s_playlist_and_what_cg_obs_was_told() {
+    let fast = on_air(2, Some(7), Some("sp-fast"));
+    assert_eq!(on_air_set(&fast, Some(7)), set(&[7]), "they agree");
+    assert_eq!(
+        on_air_set(&fast, Some(4)),
+        set(&[4, 7]),
+        "cg OBS still shows sp-slow (its mirror is unanswered or failed)"
+    );
+    assert_eq!(
+        on_air_set(&fast, None),
+        set(&[7]),
+        "cg OBS shows a manual scene"
+    );
+    let manual = on_air(3, Some(PROGRAM_INPUT_ID), Some("Slido"));
+    assert_eq!(on_air_set(&manual, None), set(&[]));
+    assert_eq!(
+        on_air_set(&manual, Some(7)),
+        set(&[7]),
+        "a dashboard cut to OBS manuál while cg OBS shows sp-fast: the input carries it"
+    );
+    assert_eq!(on_air_set(&OnAir::default(), None), set(&[]), "nothing yet");
+    assert_eq!(on_air_set(&OnAir::default(), Some(4)), set(&[4]));
+}
+
+/// #221 L4b: OFF for every playlist that left, then ON for every member (the
+/// re-kick), each part ascending.
+#[test]
+fn a_change_is_off_for_what_left_then_on_for_every_member() {
+    assert!(on_air_changes(&set(&[]), &set(&[])).is_empty());
+    assert_eq!(
+        on_air_changes(&set(&[]), &set(&[7])),
+        vec![(7, true)],
+        "the restored program"
+    );
+    assert_eq!(
+        on_air_changes(&set(&[7]), &set(&[4, 7])),
+        vec![(4, true), (7, true)]
+    );
+    assert_eq!(
+        on_air_changes(&set(&[4, 7]), &set(&[4])),
+        vec![(7, false), (4, true)],
+        "off first"
+    );
+    assert_eq!(
+        on_air_changes(&set(&[4]), &set(&[4])),
+        vec![(4, true)],
+        "the same set: the re-kick"
+    );
+    assert_eq!(
+        on_air_changes(&set(&[2, 9, 4]), &set(&[5, 3])),
+        vec![(2, false), (4, false), (9, false), (3, true), (5, true)]
+    );
+    assert_eq!(on_air_changes(&set(&[4]), &set(&[])), vec![(4, false)]);
 }

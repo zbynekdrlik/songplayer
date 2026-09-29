@@ -44,6 +44,7 @@ pub(crate) mod pipeline_stub;
 mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
+mod program_authority; // #221 L4b: SP-program (∪ SongPlayer's cg OBS record) drives playback
 pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
 pub mod program_follow; // #215: SP-program follows cg OBS + the transition settings/spec task
 pub mod program_on_air; // #221: what is on air (the bus's watch value) + the one scene-name resolver
@@ -276,7 +277,8 @@ pub struct PlaybackEngine {
     /// ladder in that case).
     ndi_source_map: Option<crate::obs::NdiSourceMap>,
     /// #215: the program bus (set by `start_program`), asked whether a playlist
-    /// that left its OBS scene must keep playing through a transition.
+    /// that left program must keep playing through a transition, and (#221
+    /// L4b) what is on air (`program_authority.rs`).
     program: std::sync::OnceLock<Arc<crate::playback::program_bus::ProgramBus>>,
 }
 
@@ -456,10 +458,11 @@ impl PlaybackEngine {
         }
     }
 
-    /// Handle a scene change from the OBS module. On program, fires
-    /// `VideosAvailable` then `SceneOn` (folded so every caller — OBS
-    /// bridge, API, tests — goes through the same sequence). Off
-    /// program, fires `SceneOff`.
+    /// Put a playlist on or off program (#221 L4b: the playback authority's
+    /// `OnProgram`, `program_authority.rs`). On program, fires
+    /// `VideosAvailable` then `SceneOn` (folded so every caller goes through
+    /// the same sequence). Off program, fires `SceneOff`, or holds it through
+    /// its transition (`scene_off.rs`).
     pub async fn handle_scene_change(&mut self, playlist_id: i64, on_program: bool) {
         // Going off-program cancels title timers and clears Resolume
         // state (prevents last-write-wins bleed between playlists on

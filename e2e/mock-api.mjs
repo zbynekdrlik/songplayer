@@ -373,8 +373,26 @@ function maybeFail(kind, res) {
   return false;
 }
 
-app.post("/api/v1/playback/:id/play", (_req, res) => {
+// #221 L4b: a ▶ claims no program. A playlist that is not on air (not
+// SP-program's source; the mock's cg OBS record is always empty) plays OFF
+// program: the server broadcasts `WaitingForScene` with transport `Playing`,
+// which the Player reads "Hrá mimo programu". On air it plays on program.
+app.post("/api/v1/playback/:id/play", (req, res) => {
   if (maybeFail("play", res)) return;
+  const pid = Number(req.params.id);
+  const onAir = programState.source === pid;
+  const msg = JSON.stringify({
+    type: "PlaybackStateChanged",
+    data: {
+      playlist_id: pid,
+      state: onAir ? "Playing" : "WaitingForScene",
+      mode: "Continuous",
+      transport: "Playing",
+    },
+  });
+  for (const ws of wsClients) {
+    if (ws.readyState === ws.OPEN) ws.send(msg);
+  }
   res.json({ status: "playing" });
 });
 

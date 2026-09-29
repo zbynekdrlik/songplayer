@@ -18,7 +18,8 @@ impl PlaybackEngine {
     /// This is the top-level orchestration entry point — it dispatches on
     /// pipeline events and spawns title-show / title-hide timer tasks. Its
     /// branches are pinned by behaviour tests on an in-memory DB
-    /// (`tests_hold.rs`, `tests_scene_change.rs`, `tests_play_video.rs`); the
+    /// (`tests_hold.rs`, `tests_scene_change.rs`, `tests_play_video.rs`,
+    /// `program_authority_tests.rs`); the
     /// individual concerns (timer cancellation, title formatting,
     /// get_video_title_info) have dedicated unit tests.
     #[cfg_attr(test, mutants::skip)]
@@ -170,6 +171,7 @@ impl PlaybackEngine {
                     .await;
             }
             PipelineEvent::SceneOffDue(due) => self.scene_off_due(playlist_id, *due).await,
+            PipelineEvent::OnProgram(on) => self.on_program(playlist_id, *on).await, // #221 L4b
             ev @ PipelineEvent::HealthSnapshot { .. } => {
                 self.handle_health_snapshot(playlist_id, ev.clone());
                 // #198 item 5: the sync handler only QUEUES a changed receiver

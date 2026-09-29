@@ -45,6 +45,9 @@
 //! Every command to cg OBS takes a ticket of `legacy_cg` under the
 //! `switch_order`, and cg OBS's OK is recorded there: a mirror → the
 //! playlist, a manual scene → none (`playback::legacy_cg`).
+//!
+//! #221 L4b: at startup [`remirror_on_air`] tells cg OBS once, through the
+//! same ticketed mirror, to show the restored playlist's scene.
 
 use std::sync::Arc;
 
@@ -406,6 +409,64 @@ async fn confirm_mirror(
 ) {
     if recorded.await {
         legacy.confirmed(ticket, Some(pid));
+    }
+}
+
+/// #221 L4b (main-session decision 1, comment 5884501960): at startup, tell
+/// cg OBS ONCE, through the same ticketed mirror as a playlist press, to show
+/// the restored program's playlist scene, so `legacy_cg.shown` (which the
+/// restore seeded with that playlist) is what cg OBS was told. Nothing is
+/// sent for the NDI input "OBS manuál" (-1: cg OBS keeps its manual scene),
+/// when nothing was restored, or for a playlist whose catalog names no scene.
+/// Nothing was pressed, so no `last_remote_cut`. Returns whether the mirror
+/// was queued.
+pub async fn remirror_on_air(bus: &ProgramBus, upstream: &Upstream) -> bool {
+    let _order = bus.switch_order().lock().await;
+    let on_air = bus.on_air_now();
+    let playlist = on_air.source.filter(|&source| source == PROGRAM_INPUT_ID);
+    let (Some(pid), Some(scene)) = (playlist, on_air.scene) else {
+        debug!(source = ?on_air.source, "startup re-mirror: no playlist scene on program — cg OBS is not told");
+        return false;
+    };
+    let legacy = Arc::clone(bus.legacy_cg());
+    let ticket = legacy.ticket();
+    let data = json!({ "sceneName": scene });
+    let Some(rx) = upstream.enqueue("SetCurrentProgramScene", Some(data), true) else {
+        warn!(scene = %clip(&scene), "startup re-mirror: cg OBS is not reachable (no OBS client, or its command queue is full)");
+        return false;
+    };
+    info!(pid, scene = %clip(&scene), "startup re-mirror: cg OBS is told to show the restored playlist");
+    let accepted = startup_answer(upstream.clone(), rx, clip(&scene));
+    tokio::spawn(confirm_mirror(accepted, legacy, ticket, pid));
+    true
+}
+
+/// The startup re-mirror's waiter: whether cg OBS accepted it, within the
+/// same wait as a press's mirror (`Upstream::wait_mirror`).
+async fn startup_answer(
+    upstream: Upstream,
+    rx: oneshot::Receiver<Option<Value>>,
+    scene: String,
+) -> bool {
+    let label = cg_forward_label(upstream.wait_mirror(rx).await.as_ref());
+    log_startup_answer(&scene, &label);
+    label == CG_OK
+}
+
+/// The log line of the startup re-mirror's answer. Logging only.
+#[cfg_attr(test, mutants::skip)]
+fn log_startup_answer(scene: &str, label: &str) {
+    if label == CG_OK {
+        info!(
+            scene,
+            "startup re-mirror: cg OBS shows the restored playlist"
+        );
+    } else {
+        warn!(
+            scene,
+            cg_forward = label,
+            "startup re-mirror: cg OBS did not follow — the consumers on cg OBS keep their scene until the next switch"
+        );
     }
 }
 

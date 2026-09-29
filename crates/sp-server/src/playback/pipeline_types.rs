@@ -93,4 +93,8 @@ pub enum PipelineEvent {
     /// due for a re-check (`scene_off.rs`). It carries the hold's re-check
     /// id: only the pending re-check acts, any other is stale.
     SceneOffDue(u64),
+    /// #221 L4b: not from a pipeline thread — the playback authority
+    /// (`program_authority.rs`): the playlist went on air (`true`) or left
+    /// it (`false`). The engine drops it when it is stale.
+    OnProgram(bool),
 }

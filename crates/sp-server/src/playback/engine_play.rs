@@ -171,7 +171,7 @@ impl PlaybackEngine {
                 let already_playing = self
                     .pipelines
                     .get(&playlist_id)
-                    .is_some_and(|pp| !play_should_scene_on(&pp.state));
+                    .is_some_and(|pp| !play_should_start(&pp.state));
                 if already_playing {
                     tracing::debug!(playlist_id, "engine: /play on a playing pipeline — no-op");
                     return;
@@ -182,8 +182,8 @@ impl PlaybackEngine {
     }
 }
 
-/// Whether a manual /play with no pause snapshot may fall through to the
-/// scene-on dispatch: only when the pipeline is NOT already playing. Pure.
-pub(super) fn play_should_scene_on(state: &super::state::PlayState) -> bool {
+/// Whether a manual /play with no pause snapshot may start the pipeline: only
+/// when it is NOT already playing. Pure.
+pub(super) fn play_should_start(state: &super::state::PlayState) -> bool {
     !matches!(state, super::state::PlayState::Playing { .. })
 }

@@ -49,16 +49,27 @@ import {
 const FACADE_WS_URL = process.env.FACADE_WS_URL || "ws://localhost:4456";
 const SONGPLAYER_URL = process.env.SONGPLAYER_URL || "http://localhost:8920";
 
-// #170: read the ENGINE's view of the on-program scene (`obs_state.current_scene`)
-// to prove SongPlayer actually followed a scene switch — not just that OBS
-// reports it. A dropped studio-mode event would leave these disagreeing.
+// #170: read the ENGINE's view of the on-program scene to prove SongPlayer
+// actually followed a scene switch — not just that OBS reports it.
+// #221 L4b: `active_scene` is SongPlayer's own program (the one resolver) and
+// `active_playlist_ids` its on-air set: SP-program's playlist ∪ the one cg OBS
+// was told to show. Right after a switch BOTH are on air until cg OBS answers
+// the mirror, so the engine has settled on a scene only once at most one
+// playlist is on air; until then the read names the set (never a match).
 async function readEngineActiveScene(
   ctx: APIRequestContext,
 ): Promise<string | null> {
   try {
     const resp = await ctx.get("/api/v1/status");
     if (!resp.ok()) return null;
-    const status = (await resp.json()) as { active_scene?: string | null };
+    const status = (await resp.json()) as {
+      active_scene?: string | null;
+      active_playlist_ids?: number[];
+    };
+    const onAir = status.active_playlist_ids ?? [];
+    if (onAir.length > 1) {
+      return `${status.active_scene} (not settled, on air ${JSON.stringify(onAir)})`;
+    }
     return status.active_scene ?? null;
   } catch {
     return null;
@@ -500,10 +511,10 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // transition to sp-fast, not a no-op.
     const baselineScene = pickBaselineScene(scenes);
     await obs!.switchScene(baselineScene);
-    // #221 L3 (review round 2): the driver returns on the facade's own
-    // transition end, while the engine's active_scene (cg OBS's scene
-    // detection until L4b) follows the mirror to cg OBS a moment later, so a
-    // single read here would race it. Wait for the engine first.
+    // #221 L3 (review round 2) + L4b: the driver returns on the facade's own
+    // transition end, while the engine's on-air set keeps the previous scene's
+    // playlist until cg OBS answers the mirror, so a single read here would
+    // race it. Wait for the engine to settle on the baseline first.
     expect(
       await waitEngineActiveScene(request, baselineScene, 8000),
       `the engine's active_scene must reach the baseline scene "${baselineScene}"`,
