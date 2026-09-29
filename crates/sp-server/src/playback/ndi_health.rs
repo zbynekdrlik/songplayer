@@ -23,6 +23,11 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use tracing::warn;
 
+// The log lines of one health snapshot (#221 L4a review: split out of
+// `handle_health_snapshot`, and this file's 1000-line cap).
+#[path = "ndi_health_log.rs"]
+mod health_log;
+
 /// The `degraded_reason` string a Playing-on-program pipeline gets when it has
 /// zero NDI receivers — the "dark wall" state (#127). Single source of truth so
 /// the receiver-recovery trigger and the dashboard read the same string.
@@ -495,7 +500,6 @@ impl Default for NdiHealthRegistry {
 
 use crate::playback::pipeline::PipelineEvent;
 use crate::playback::state::PlayState;
-use tracing::info;
 
 impl crate::playback::PlaybackEngine {
     /// Map an `Instant` from the pipeline thread to a `DateTime<Utc>` using
@@ -664,7 +668,6 @@ impl crate::playback::PlaybackEngine {
             .into_iter()
             .find(|s| s.playlist_id == playlist_id);
         let prev_connections = prev.as_ref().map(|s| s.connections);
-        let prev_degraded = prev.as_ref().and_then(|s| s.degraded_reason.clone());
 
         // #196: persist the current receiver count whenever it changes (incl.
         // the first snapshot) so the NEXT restart's self-check baseline knows
@@ -762,70 +765,13 @@ impl crate::playback::PlaybackEngine {
             sender_url: self.ndi_health_registry.sender_url(playlist_id),
         };
 
-        // Transition logging: connection-count change, degradation, recovery.
-        if let Some(prev) = prev_connections {
-            if prev != connections {
-                info!(
-                    playlist_id,
-                    ndi_name = %ndi_name,
-                    prev = prev,
-                    now = connections,
-                    "ndi: connections changed"
-                );
-            }
-        }
-        if degraded_reason.is_some() && prev_degraded.is_none() {
-            warn!(
-                playlist_id,
-                ndi_name = %ndi_name,
-                reason = degraded_reason.as_deref().unwrap_or(""),
-                "ndi: pipeline degraded"
-            );
-        } else if degraded_reason.is_none() && prev_degraded.is_some() {
-            info!(
-                playlist_id,
-                ndi_name = %ndi_name,
-                "ndi: pipeline recovered"
-            );
-        }
-
-        // Periodic heartbeat log: once per UTC-minute bucket per pipeline.
-        // Guarantees a baseline state record in the log within 60s of any
-        // moment, so a "wall is dark" report can be diagnosed against the
-        // pipeline state SongPlayer believed it had at that minute. Without
-        // this, transition-only logging leaves multi-hour silent windows
-        // (observed: 2026-04-28 sp-fast playing all night with no log
-        // line for ~9h, while OBS distroAV silently received zero frames).
-        let prev_heartbeat_ts = prev.as_ref().and_then(|s| s.last_heartbeat_ts);
-        let cur_heartbeat_ts = snapshot.last_heartbeat_ts;
-        if let Some(cur) = cur_heartbeat_ts {
-            if should_log_periodic_heartbeat(prev_heartbeat_ts, cur) {
-                info!(
-                    playlist_id,
-                    ndi_name = %ndi_name,
-                    state = ?canonical_state,
-                    connections,
-                    frames_total = frames_submitted_total,
-                    frames_5s = frames_submitted_last_5s,
-                    observed_fps = format!("{:.1}", observed_fps),
-                    nominal_fps = format!("{:.1}", nominal_fps),
-                    scene_active,
-                    receiver_expected = expected,
-                    "ndi: heartbeat"
-                );
-                // #149 item 2: a second, grep-stable genlock telemetry line
-                // beside the heartbeat, same once-per-UTC-minute cadence.
-                info!("{}", format_genlock_line(&snapshot));
-                // #192 round 3 + #168 r2: a third grep-stable line — decode/submit/
-                // audio stage maxima (SDK-clocked path only) + the raw
-                // send_video_async call max/p99, populated on BOTH the SDK-clocked
-                // and paced paths, so the A/B / box-test-7 reads name the stall.
-                info!(
-                    "{}",
-                    crate::playback::loop_stats::format_loop_stats_line(&ndi_name, &loop_stats)
-                );
-            }
-        }
+        health_log::log_health_snapshot(
+            &snapshot,
+            prev.as_ref(),
+            scene_active,
+            expected,
+            &loop_stats,
+        );
 
         self.ndi_health_registry.update(snapshot);
 
@@ -833,30 +779,7 @@ impl crate::playback::PlaybackEngine {
         // over the healthy OBS WebSocket (clear+restore → toggle → recreate).
         // The rung was chosen above by `evaluate_recovery`.
         if let Some(step) = recovery_step_fired {
-            match self.obs_cmd_tx.as_ref() {
-                Some(tx) => match tx.try_send(crate::obs::ObsCommand::NudgeNdiReceiver {
-                    ndi_name: ndi_name.clone(),
-                    step,
-                }) {
-                    Ok(()) => warn!(
-                        playlist_id,
-                        ndi_name = %ndi_name,
-                        ?step,
-                        "ndi-recovery: dark wall — running recovery rung over OBS"
-                    ),
-                    Err(e) => warn!(
-                        playlist_id,
-                        ndi_name = %ndi_name,
-                        error = %e,
-                        "ndi-recovery: failed to queue OBS recovery rung"
-                    ),
-                },
-                None => warn!(
-                    playlist_id,
-                    ndi_name = %ndi_name,
-                    "ndi-recovery: dark wall but no OBS command channel wired"
-                ),
-            }
+            self.run_recovery_rung(playlist_id, &ndi_name, step);
         }
     }
 }

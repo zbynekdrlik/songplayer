@@ -62,4 +62,35 @@ impl PlaybackEngine {
             ),
         }
     }
+
+    /// #127 / #173: run the dark-wall ladder's rung `step` for `playlist_id`'s
+    /// NDI output `ndi_name` over the healthy OBS WebSocket — the automatic
+    /// ladder's side of `handle_health_snapshot` (moved here for that
+    /// function's length, #221 L4a review). Never blocks: `try_send`.
+    pub(super) fn run_recovery_rung(&self, playlist_id: i64, ndi_name: &str, step: RecoveryStep) {
+        match self.obs_cmd_tx.as_ref() {
+            Some(tx) => match tx.try_send(ObsCommand::NudgeNdiReceiver {
+                ndi_name: ndi_name.to_string(),
+                step,
+            }) {
+                Ok(()) => warn!(
+                    playlist_id,
+                    ndi_name = %ndi_name,
+                    ?step,
+                    "ndi-recovery: dark wall — running recovery rung over OBS"
+                ),
+                Err(e) => warn!(
+                    playlist_id,
+                    ndi_name = %ndi_name,
+                    error = %e,
+                    "ndi-recovery: failed to queue OBS recovery rung"
+                ),
+            },
+            None => warn!(
+                playlist_id,
+                ndi_name = %ndi_name,
+                "ndi-recovery: dark wall but no OBS command channel wired"
+            ),
+        }
+    }
 }
