@@ -269,7 +269,11 @@ nothing).
   until its pause. The flip itself is broadcast when the raw state did not
   change but the wire state (`play_state_to_ws`) did, so a pause or a new
   song is still broadcast once. The mock models it: a program cut to a
-  playlist its `/play` started off air broadcasts `Playing`.
+  playlist its `/play` started off air broadcasts `Playing`. Every engine
+  `PlaybackStateChanged` goes through `engine_play.rs::broadcast_state`
+  (review round 7): a new broadcast site calls it, never builds the
+  message inline (the WS on-connect replay in `api/websocket.rs` is the
+  one separate builder).
 - **`/api/v1/status`**: `active_scene` = the one resolver,
   `active_playlist_ids` = the on-air set, ascending
   (`api/routes_status.rs::on_air_fields`; `routes.rs` is at the cap). A

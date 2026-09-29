@@ -713,10 +713,10 @@ impl PlaybackEngine {
         }
 
         // After the action (which may itself mutate the state to Playing),
-        // broadcast the final state if it differs from the pre-transition state.
-        // The pipeline always exists here (`execute_action` never removes one;
-        // the no-pipeline case returned at the top of this method), in its
-        // scene-aware wire state (`broadcast_state`, #170).
+        // broadcast the final state, in its scene-aware wire state
+        // (`broadcast_state`, #170), if it differs from the pre-transition
+        // state. The pipeline always exists here (`execute_action` never
+        // removes one; the no-pipeline case returned at the top).
         if self
             .pipelines
             .get(&playlist_id)
