@@ -1,0 +1,78 @@
+---
+paths:
+  - "crates/sp-server/src/metadata/**"
+  - "crates/sp-server/src/reprocess/**"
+  - "crates/sp-server/src/api/metadata*.rs"
+  - "e2e/post-deploy-metadata.spec.ts"
+---
+
+# Metadata providers: ONE chain, the Gemini key LIST, a live gate (#136)
+
+On 29.9.2026 ~110 videos played on the wall and the Presenter under their raw
+YouTube title ("Stand On Your Promise by The Emerging Sound (feat. …)") and CI
+stayed green. Three defects stacked (design record: #136 comment 5887954703):
+the Gemini provider sent the whole comma-separated `gemini_api_key` as ONE
+`x-goog-api-key` (Google refused it in ~40 ms), the reprocess worker had its
+own list with Gemini alone (so it could never repair a row while Claude
+answered correctly), and nothing ever ran the real providers.
+
+## The one chain
+
+- `metadata::provider_chain(ai_client, gemini_csv, gemini_model)` =
+  [Claude (CLIProxyAPI), Gemini]. `lib.rs` builds it ONCE; the same `Arc` goes
+  to `DownloadWorker`, `ReprocessWorker` and `AppState.metadata_chain` (the
+  probe + `status.metadata`). Both workers take `Arc<ProviderChain>`, so an
+  ad-hoc `Vec<Box<dyn MetadataProvider>>` cannot be wired in again. Never
+  build a second provider list anywhere.
+- Gemini is in the chain even with no key: it then fails at once with "no API
+  key configured", visible on the status, instead of silently vanishing.
+- Every chain member is wrapped (`chain::Recorded`): each call's outcome +
+  latency goes to `MetadataHealth` and to the log (INFO answered / WARN
+  failed). `get_metadata` therefore logs a provider failure only at DEBUG.
+
+## Gemini on the key list
+
+- `GeminiProvider::new(keys, model)` takes the SPLIT list — always
+  `lyrics::g35t_client::gemini_keys_from_setting(csv)`, never the raw
+  setting. One key per request; a 429 or a key refusal (403, a 400 whose body
+  names the API key) → next key; any other status stops (it would fail the
+  same on every key). All keys failed → `RateLimited(detail)` when any was
+  429 (the reprocess worker's cooldown), else `ApiError(detail)`. The clean-up
+  pass uses the key that answered.
+- An error text / log line carries the key INDEX (`key 2 of 5`), the status
+  and a ≤ 200-char body excerpt redacted BEFORE the cut — never a key.
+- Request tools: `"tools": [{"google_search": {}}]` is still the grounding
+  tool for `generateContent` on Gemini 3 Pro (ai.google.dev, checked
+  29.9.2026). The answer text is every non-thought part joined.
+
+## Visibility + the gate
+
+- `GET /api/v1/status.metadata {failed_videos, providers: [{name,
+  last_ok_at_ms, last_error}]}`. `failed_videos` counts
+  `health::REPAIR_QUEUE_WHERE` — the SAME predicate the reprocess worker
+  selects by (one constant), `null` (never a false 0) if unreadable.
+- `POST /api/v1/metadata/probe {youtube_id, title}` runs EACH provider on its
+  own (concurrently), returns each outcome, writes nothing.
+- `e2e/post-deploy-metadata.spec.ts` probes `gq-4FVRr_ow` with its YouTube
+  title: the chain must be [claude, gemini] and every provider must answer
+  "Stand On Your Promise" / an artist containing "Emerging Sound" (case-
+  insensitive). A new provider, model or key-format change must keep this
+  gate green on the box, not just the unit tests.
+- The reprocess worker WARNs a failed row with EVERY provider's error, in
+  chain order; the per-video backoff makes that one WARN per stage.
+
+## Tests (no live API in CI)
+
+- `GeminiProvider::with_api_root` / `chain::provider_chain_at` point Gemini at
+  a wiremock server; `metadata::test_support` has the fixed video, the
+  Claude (`/v1/chat/completions`) and Gemini answer shapes, and
+  `received_keys` (the header of every request, in order).
+- wiremock's `header(k, v)` matcher SPLITS a request's header value on
+  commas: a request carrying `k1,k2` does NOT match `header("x-goog-api-key",
+  "k1")`. Assert the raw header through `received_keys` when the test is
+  about what was sent.
+- A Claude mock that fails must answer a 4xx: `AiClient` retries 429/5xx
+  with 1 s / 2 s sleeps.
+- The #136 RED kept the old behaviour in two named spots (the key list joined
+  into one header; `try_providers` keeping only the last error) — the same
+  pattern works for a later change here.
