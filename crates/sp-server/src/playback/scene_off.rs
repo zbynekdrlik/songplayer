@@ -75,8 +75,9 @@ impl PlaybackEngine {
     /// mirror, so the incoming playlist can be on program already, its title
     /// and line up (or overwritten by the outgoing ones on the shared clips).
     /// Then the wall is re-synced to it: its due title (a `Resync`; with none
-    /// due the outgoing title fades, a `Resync(None)` would cut it; nothing
-    /// when the due title's read failed, `decide_wall_title`), and its
+    /// due the outgoing title fades and cg OBS's text is cleared,
+    /// `title::push_hide`, where a `Resync(None)` would cut it; nothing when
+    /// the due title's read failed, `decide_wall_title`), and its
     /// current line re-sent at once (one `HideSubtitles` only when none of
     /// them has a line). "On program" = `scene_active` AND in the
     /// authority's diffed set: a playlist whose OFF is queued too is leaving.

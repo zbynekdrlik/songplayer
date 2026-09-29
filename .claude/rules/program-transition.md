@@ -5,6 +5,7 @@ paths:
   - "crates/sp-server/tests/obs_snapshot_follow.rs"
   - "crates/sp-server/src/playback/scene_off*.rs"
   - "crates/sp-server/src/playback/tests_hold.rs"
+  - "crates/sp-server/src/playback/tests_scene_off_wall.rs"
   - "crates/sp-server/src/playback/handle_pipeline_event.rs"
   - "crates/sp-server/src/playback/clear_lyrics.rs"
   - "crates/sp-server/src/playback/engine_play.rs"
@@ -289,16 +290,19 @@ OFF first). The wall step runs before the pause/hold:
 - None on program: `HideTitle` (a fade) + `HideSubtitles`, as before L4b.
 - One on program: the title from `decide_wall_title` — a due title is a
   `Resync`; none due (the incoming playlist just started its song, the
-  usual press) is a `HideTitle`, so the outgoing title FADES (a
-  `Resync(None)` hides at once, round 4's 🟡); a failed read of the due
-  title sends nothing. Its line is re-sent at once (`on_program_lines`,
+  usual press) is a `HideTitle` through `title::push_hide`, so the outgoing
+  title FADES (a `Resync(None)` hides at once, round 4's 🟡) and cg OBS's
+  `#sp-title` text is cleared (round 5: B's ON came first, so B's Play
+  re-sync still named A's title there); a failed read of the due title
+  sends nothing. Its line is re-sent at once (`on_program_lines`,
   shared with the Resolume recovery, filtered to the diffed set), and ONE
   `HideSubtitles` goes only when none has a line: one playlist never clears
   another's line (the recovery's rule, `resolume-driver.md`).
 - Residual: the title candidates are `scene_active` only
   (`title_candidates`), so a due title of a playlist whose OFF is queued can
   be re-synced until its own OFF re-syncs the wall.
-- Pinned in `tests_scene_change.rs` (`going_off_program_*`).
+- Pinned in `tests_scene_off_wall.rs` (`going_off_program_*`, a child
+  module of `tests_scene_change.rs` that reuses its rig).
 
 ### A held playlist has no side effects (release 0.68.0 blockers)
 

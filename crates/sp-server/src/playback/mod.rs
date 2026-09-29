@@ -111,8 +111,8 @@ fn should_send_position_update(elapsed_ms: u64) -> bool {
 
 /// Map the internal server-side [`PlayState`] to the wire-level dashboard
 /// [`WsPlaybackState`]. #170: a pipeline the engine holds as `Playing` but
-/// whose scene is OFF program (a hold, or #221 L4b a ▶ off air: the Player
-/// tells them apart by transport) must map to
+/// whose scene is OFF program (a hold, or #221 L4b a ▶ off air; the Player
+/// tells both from a paused pipeline by the transport) must map to
 /// `WaitingForScene`, matching the WS replay built from `handle_health_snapshot`'s
 /// `(Playing, Playing, scene_active = false) → Paused` reconciliation. A live
 /// `Playing` for such a pipeline flips a paused selector row to Playing, the

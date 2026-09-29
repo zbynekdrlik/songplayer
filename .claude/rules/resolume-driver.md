@@ -388,8 +388,9 @@ to re-arm the timers in between. It names the title that SHOULD be up, and
 the driver compares it with what it did (above). A scene-off with another
 playlist still on program (#221 L4b, `scene_off.rs::wall_after_scene_off`)
 calls `decide_wall_title` too: a due title is a `Resync`, none due is a
-`HideTitle`, so the outgoing title fades instead of being cut by a
-`Resync(None)`; its lines are the recovery's `on_program_lines`.
+`HideTitle` (`title::push_hide`, which also clears cg OBS's text), so the
+outgoing title fades instead of being cut by a `Resync(None)`; its lines
+are the recovery's `on_program_lines`.
 
 - **One clock: `TitleClock { video_id, show_at, hide_at }`**
   (`playback/title.rs`). The `Started` handler fixes it
