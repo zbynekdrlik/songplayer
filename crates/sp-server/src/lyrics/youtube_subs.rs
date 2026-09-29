@@ -254,21 +254,73 @@ mod tests {
         assert!(result.is_none());
     }
 
+    /// #144: a manual caption event shows up to two SUNG lines at once,
+    /// split by `\n`. They stay separate text lines, so the aligner (mtl)
+    /// times each one from the audio; joined, they made one ~65-char
+    /// double line (#217 had to split it on the wall). This replaces the
+    /// old `parse_json3_replaces_newlines_in_text`, which pinned the join.
+    /// Both lines keep the event's own span: the caption's timing is never
+    /// divided by hand.
     #[test]
-    fn parse_json3_replaces_newlines_in_text() {
+    fn parse_json3_splits_a_caption_into_its_sung_lines() {
         let content = r#"{
             "events": [
                 {
-                    "tStartMs": 0,
-                    "dDurationMs": 1000,
-                    "segs": [{"utf8": "Line one\nLine two"}]
+                    "tStartMs": 52280,
+                    "dDurationMs": 7802,
+                    "segs": [{"utf8": "Lord, I thank You for Your goodness\nAnd for all the things You do"}]
                 }
             ]
         }"#;
 
         let track = parse_json3(content).unwrap().expect("should parse");
-        assert_eq!(track.lines.len(), 1);
-        assert_eq!(track.lines[0].en, "Line one Line two");
+        let got: Vec<(u64, u64, &str)> = track
+            .lines
+            .iter()
+            .map(|l| (l.start_ms, l.end_ms, l.en.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (52_280, 60_082, "Lord, I thank You for Your goodness"),
+                (52_280, 60_082, "And for all the things You do"),
+            ]
+        );
+    }
+
+    /// The `\n` may sit in its own segment or be padded; segments are
+    /// joined first, each line is trimmed, blank lines are dropped.
+    #[test]
+    fn parse_json3_splits_across_segments_and_drops_blank_lines() {
+        let content = r#"{
+            "events": [
+                {
+                    "tStartMs": 1000,
+                    "dDurationMs": 3000,
+                    "segs": [{"utf8": "Line one"}, {"utf8": "\n"}, {"utf8": "  \n Line two "}]
+                },
+                {
+                    "tStartMs": 6000,
+                    "dDurationMs": 2000,
+                    "segs": [{"utf8": "Line three"}]
+                }
+            ]
+        }"#;
+
+        let track = parse_json3(content).unwrap().expect("should parse");
+        let got: Vec<(u64, u64, &str)> = track
+            .lines
+            .iter()
+            .map(|l| (l.start_ms, l.end_ms, l.en.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (1_000, 4_000, "Line one"),
+                (1_000, 4_000, "Line two"),
+                (6_000, 8_000, "Line three"),
+            ]
+        );
     }
 
     #[test]
