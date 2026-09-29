@@ -719,19 +719,6 @@ async fn play_video_off_program_broadcasts_waiting_for_scene() {
     );
 }
 
-/// 0.62.0 release review: after a reload while an off-program pipeline decodes
-/// the label can read ▶ Prehrať (transport replays Paused); a click then POSTs
-/// /play, and `handle_engine_play` fell through to `handle_scene_change(pid,
-/// true)` — flagging an OFF-program output as on program and re-pushing its
-/// title to the wall. A pipeline that is already Playing must be a no-op.
-#[test]
-fn play_should_start_only_when_not_already_playing() {
-    use super::engine_play::play_should_start;
-    assert!(!play_should_start(&PlayState::Playing { video_id: 1 }));
-    assert!(play_should_start(&PlayState::WaitingForScene));
-    assert!(play_should_start(&PlayState::Idle));
-}
-
 /// #221 L4b: a manual ▶ with no resume point claims nothing. Off air it
 /// plays the playlist OFF program: `scene_active` stays false, nothing is
 /// sent to the wall, and the dashboard reads it as playing off program

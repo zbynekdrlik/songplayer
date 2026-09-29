@@ -155,7 +155,9 @@ impl PlaybackEngine {
 
     /// Manual /play: resume paused video if snapshot present, else start it. #88.
     /// A pipeline that is ALREADY Playing (e.g. an off-program dub after a page
-    /// reload showed ▶ Prehrať) is a no-op. #221 L4b: a ▶ claims nothing (the
+    /// reload showed ▶ Prehrať) is a no-op: the state machine ignores
+    /// `VideosAvailable` and `Start` while Playing (the guard the old scene-on
+    /// fallback needed is gone). #221 L4b: a ▶ claims nothing (the
     /// playback authority decides what is on program): `PlayEvent::Start`
     /// leaves `scene_active` and the wall alone, so a playlist that is not on
     /// air plays OFF program (the Player reads "Hrá mimo programu"), and one
@@ -172,24 +174,10 @@ impl PlaybackEngine {
                     .await;
             }
             None => {
-                let already_playing = self
-                    .pipelines
-                    .get(&playlist_id)
-                    .is_some_and(|pp| !play_should_start(&pp.state));
-                if already_playing {
-                    tracing::debug!(playlist_id, "engine: /play on a playing pipeline — no-op");
-                    return;
-                }
                 self.apply_event(playlist_id, PlayEvent::VideosAvailable)
                     .await;
                 self.apply_event(playlist_id, PlayEvent::Start).await;
             }
         }
     }
-}
-
-/// Whether a manual /play with no pause snapshot may start the pipeline: only
-/// when it is NOT already playing. Pure.
-pub(super) fn play_should_start(state: &super::state::PlayState) -> bool {
-    !matches!(state, super::state::PlayState::Playing { .. })
 }
