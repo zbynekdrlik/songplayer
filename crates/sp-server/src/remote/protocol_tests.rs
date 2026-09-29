@@ -160,6 +160,50 @@ fn subprotocol_negotiation_echoes_json_and_refuses_only_foreign_protocols() {
 }
 
 #[test]
+fn subprotocol_negotiation_prefers_json_and_takes_msgpack_without_it() {
+    let pick = |offer: &str| negotiate_subprotocol(Some(offer));
+    // JSON offered: JSON, next to msgpack in either order (the main
+    // session's decision, #221 L2b).
+    assert_eq!(
+        pick("obswebsocket.json,obswebsocket.msgpack"),
+        Subprotocol::Json
+    );
+    // msgpack without JSON: msgpack, also next to an unknown protocol.
+    assert_eq!(pick("obswebsocket.msgpack"), Subprotocol::MsgPack);
+    assert_eq!(pick(" obswebsocket.msgpack "), Subprotocol::MsgPack);
+    assert_eq!(pick("chat, obswebsocket.msgpack"), Subprotocol::MsgPack);
+    // A longer name is not the protocol.
+    assert_eq!(
+        pick("obswebsocket.msgpack2, xobswebsocket.json"),
+        Subprotocol::Unsupported
+    );
+}
+
+#[test]
+fn the_server_echoes_the_subprotocol_it_picked() {
+    assert_eq!(Subprotocol::Json.echo(), Some("obswebsocket.json"));
+    assert_eq!(Subprotocol::MsgPack.echo(), Some("obswebsocket.msgpack"));
+    assert_eq!(Subprotocol::Default.echo(), None);
+    assert_eq!(Subprotocol::Unsupported.echo(), None);
+}
+
+#[test]
+fn a_decoded_message_that_is_not_an_object_is_obs_websockets_4002() {
+    // #221 L2b: the parser sees the DECODED value, so a JSON and a msgpack
+    // frame that are not a message object get the same close.
+    for msg in [json!([1, 2]), json!(7), json!(null), json!("op")] {
+        assert_eq!(parse_client_message(msg), Err(decode_error()));
+    }
+    assert_eq!(
+        decode_error(),
+        CloseReason {
+            code: 4002,
+            reason: "You sent a non-object payload.",
+        }
+    );
+}
+
+#[test]
 fn parse_identify_with_and_without_subscriptions() {
     let m = parse(r#"{"op":1,"d":{"rpcVersion":1,"authentication":"abc","eventSubscriptions":4}}"#)
         .unwrap();

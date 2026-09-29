@@ -11,7 +11,10 @@
 //!   [`REMOTE_SETTINGS_POLL`] and (re)binds or stops the listener; a bind
 //!   failure is retried on every poll and shown as `remote.error`.
 //! - **Sessions** (`session.rs`) — `Hello` / `Identify` / `Identified`,
-//!   requests, batches, events. The wire format is `protocol.rs` (pure).
+//!   requests, batches, events. The message objects are `protocol.rs`
+//!   (pure); their encoding is `codec.rs` (#221 L2b, pure): JSON text frames
+//!   (`obswebsocket.json`) or MessagePack binary frames
+//!   (`obswebsocket.msgpack`, what Companion speaks), one per session.
 //! - **cg OBS** is reached through SongPlayer's EXISTING OBS client
 //!   ([`Upstream`]: its command channel + its event broadcast). The scene and
 //!   input list getters are forwarded verbatim, so the button names match cg
@@ -37,6 +40,7 @@
 //! - **Telemetry** lives on the program bus ([`RemoteShared`],
 //!   `ProgramBus::remote()`) and is served as `remote` on `GET /api/v1/program`.
 
+pub mod codec;
 pub mod map;
 pub mod protocol;
 mod session;
@@ -86,8 +90,9 @@ const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 /// within this is dropped / closed (an idle unauthenticated socket is never
 /// kept).
 pub const IDENTIFY_TIMEOUT: Duration = Duration::from_secs(10);
-/// The largest message / frame a client may send (1 MiB). Companion's biggest
-/// message is a batch of a few KB; tungstenite's default would be 64 MiB.
+/// The largest message / frame a client may send (1 MiB), text (JSON) or
+/// binary (msgpack, #221 L2b) alike. Companion's biggest message is a batch
+/// of a few KB; tungstenite's default would be 64 MiB.
 pub const MAX_MESSAGE_BYTES: usize = 1_048_576;
 /// At most this many unsupported request types are remembered (client-chosen
 /// strings on an open LAN surface must stay bounded).

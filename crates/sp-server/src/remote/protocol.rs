@@ -5,9 +5,12 @@
 //! and the bitfocus `companion-module-obs-studio` source (v3.15.3 + 4.0 beta),
 //! read before this was written (#213 comment 5850492736).
 //!
-//! - Framing: `{"op": n, "d": {...}}` JSON text frames over the
-//!   `obswebsocket.json` subprotocol. obs-websocket-js REQUIRES the server to
-//!   echo it ("Server sent no subprotocol" otherwise), see
+//! - Framing: `{"op": n, "d": {...}}` message objects, as JSON text frames
+//!   over `obswebsocket.json` or (#221 L2b) MessagePack binary frames over
+//!   `obswebsocket.msgpack` — the encoding is `remote::codec`, one per session.
+//!   obs-websocket-js REQUIRES the server to echo the subprotocol it offered
+//!   ("Server sent no subprotocol" / "an invalid subprotocol" otherwise), and
+//!   in Node (Companion) it offers only msgpack, see
 //!   [`negotiate_subprotocol`].
 //! - Handshake: `Hello` (op 0, with `authentication` when a password is set) →
 //!   `Identify` (op 1) → `Identified` (op 2); later `Reidentify` (op 3) →
@@ -39,6 +42,9 @@ use crate::obs::compute_auth;
 pub const RPC_VERSION: u64 = 1;
 /// The JSON subprotocol (`Sec-WebSocket-Protocol`).
 pub const SUBPROTOCOL_JSON: &str = "obswebsocket.json";
+/// #221 L2b: the MessagePack subprotocol — the only one obs-websocket-js
+/// offers in Node, so Companion's.
+pub const SUBPROTOCOL_MSGPACK: &str = "obswebsocket.msgpack";
 /// The obs-websocket protocol level this facade speaks (the rpcVersion-1
 /// subset defined in 5.0.0; scene data is passed through from cg OBS).
 pub const OBS_WEBSOCKET_VERSION: &str = "5.0.0";
@@ -119,21 +125,43 @@ impl CloseReason {
 /// The `Sec-WebSocket-Protocol` answer for a client's offer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Subprotocol {
-    /// `obswebsocket.json` was offered: echo it.
+    /// `obswebsocket.json` was offered (alone or next to msgpack): echo it.
     Json,
+    /// #221 L2b: `obswebsocket.msgpack` was offered and `obswebsocket.json`
+    /// was not: echo it (Companion, obs-websocket-js in Node).
+    MsgPack,
     /// Nothing was offered: JSON by default, no header.
     Default,
-    /// Only other encodings (`obswebsocket.msgpack`) were offered: reject.
+    /// Only protocols other than obs-websocket's two were offered: reject.
     Unsupported,
 }
 
-/// Pick the subprotocol for a comma-separated `Sec-WebSocket-Protocol` offer.
+impl Subprotocol {
+    /// The `Sec-WebSocket-Protocol` the server echoes: the one it picked,
+    /// none when the client offered nothing (or was refused).
+    pub fn echo(self) -> Option<&'static str> {
+        match self {
+            Self::Json => Some(SUBPROTOCOL_JSON),
+            Self::MsgPack => Some(SUBPROTOCOL_MSGPACK),
+            Self::Default | Self::Unsupported => None,
+        }
+    }
+}
+
+/// Pick the subprotocol for a comma-separated `Sec-WebSocket-Protocol` offer:
+/// JSON whenever it is offered (the main session's decision, #221 L2b: a
+/// JSON client stays exactly as before), else msgpack whenever it is offered
+/// (also next to an unknown protocol, as obs-websocket takes the first
+/// encoding it knows), else nothing to agree on.
 pub fn negotiate_subprotocol(offered: Option<&str>) -> Subprotocol {
     let Some(offered) = offered.filter(|o| !o.trim().is_empty()) else {
         return Subprotocol::Default;
     };
-    if offered.split(',').any(|p| p.trim() == SUBPROTOCOL_JSON) {
+    let offers = |name: &str| offered.split(',').any(|p| p.trim() == name);
+    if offers(SUBPROTOCOL_JSON) {
         Subprotocol::Json
+    } else if offers(SUBPROTOCOL_MSGPACK) {
+        Subprotocol::MsgPack
     } else {
         Subprotocol::Unsupported
     }
@@ -251,8 +279,9 @@ fn subscriptions(d: &Value) -> Option<u64> {
     d.get("eventSubscriptions").and_then(Value::as_u64)
 }
 
-/// Parse one DECODED client message (the session decodes the frame first),
-/// or the close obs-websocket answers a malformed one with.
+/// Parse one decoded client message (#221 L2b: JSON or MessagePack, decoded
+/// by the session's `remote::codec`), or the close obs-websocket answers a
+/// malformed one with.
 pub fn parse_client_message(msg: Value) -> Result<ClientMessage, CloseReason> {
     if !msg.is_object() {
         return Err(decode_error());
@@ -323,12 +352,11 @@ const UNKNOWN_OP: CloseReason = CloseReason::new(
     "The `op` is missing or not one a client may send.",
 );
 
-/// The close for a frame that is not a JSON object (or a binary frame).
+/// The close for a decoded message that is not an object (obs-websocket's
+/// wording). #221 L2b: a frame that does not decode at all, or a frame of
+/// the other encoding, is closed by `remote::codec`, also with 4002.
 pub fn decode_error() -> CloseReason {
-    CloseReason::new(
-        CLOSE_MESSAGE_DECODE_ERROR,
-        "The message is not obswebsocket.json text.",
-    )
+    CloseReason::new(CLOSE_MESSAGE_DECODE_ERROR, "You sent a non-object payload.")
 }
 
 /// The close for anything but `Identify` before the session is identified.
