@@ -711,6 +711,12 @@ standby while the rig built 2×4, caught only by a review pass (it would have
 reddened 6 CI tests). Fail loudly when an anchor is missing
 (`if old not in s: sys.exit(...)`), or use the Edit tool, and re-read the result.
 
+In a worktree lane the Bash guard may refuse a long `python3 - <<'EOF' … EOF`
+edit chained with `git` or `cargo` ("too complex to verify that it stays inside
+the worktree"), and not every time (#221 L4a). Write the anchor-asserted edit
+to a script in the lane's scratchpad and run `python3 <script> <path>` as its
+own command, then fmt / commit in separate commands.
+
 ## "Never blocks / never waits" tests: gates and thread names, never wall-time thresholds (#212 follow-up)
 
 The gating Coverage job runs every test under `cargo tarpaulin`'s ptrace, and
