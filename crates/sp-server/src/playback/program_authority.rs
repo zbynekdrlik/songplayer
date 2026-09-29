@@ -139,6 +139,14 @@ impl PlaybackEngine {
             );
             return;
         }
+        if on && !self.pipelines.contains_key(&playlist_id) {
+            info!(
+                playlist_id,
+                "program authority: on air with no pipeline — creating it"
+            );
+            self.ensure_pipeline_for_playlist(playlist_id).await;
+            return;
+        }
         self.handle_scene_change(playlist_id, on).await;
     }
 
@@ -146,10 +154,6 @@ impl PlaybackEngine {
     /// diffed (`OnAirPlaylists`); `false` before its first value.
     pub(super) fn on_air_contains(&self, playlist_id: i64) -> bool {
         self.on_air.contains(playlist_id)
-            || self.program.get().is_some_and(|bus| {
-                let cg_shown = bus.legacy_cg().shown_now();
-                on_air_set(&bus.on_air_now(), cg_shown).contains(&playlist_id)
-            })
     }
 }
 

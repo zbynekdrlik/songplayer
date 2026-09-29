@@ -707,7 +707,7 @@ pub async fn start(
     // deterministically in playlist.id order, after waiting for the previous
     // instance's ports to be released, so a restart yields the SAME name→port
     // map (the dark-wall-after-restart fix). Runs before `start_program` and the
-    // engine loop, so the playback authority's first value finds every pipeline.
+    // engine loop; one missing past the budget is created on its authority ON.
     let active_playlists = db::models::get_active_playlists(&pool)
         .await
         .unwrap_or_default();
