@@ -400,7 +400,7 @@ impl ReprocessWorker {
                 }
                 Err(e) => {
                     rate_limited |= matches!(e, MetadataError::RateLimited(_));
-                    reasons = vec![format!("{}: {e}", provider.name())];
+                    reasons.push(format!("{}: {e}", provider.name()));
                 }
             }
         }

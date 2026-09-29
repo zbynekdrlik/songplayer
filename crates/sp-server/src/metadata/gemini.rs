@@ -243,8 +243,7 @@ impl GeminiProvider {
         let total = self.keys.len();
         let mut any_rate_limited = false;
         let mut last = String::new();
-        let joined = [self.keys.join(",")];
-        for (index, key) in joined.iter().enumerate() {
+        for (index, key) in self.keys.iter().enumerate() {
             let n = index + 1;
             let started = Instant::now();
             let resp = self
