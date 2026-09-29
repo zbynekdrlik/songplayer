@@ -6,6 +6,8 @@ paths:
   - "crates/sp-server/tests/scene_lookup_failure.rs"
   - "crates/sp-server/tests/obs_snapshot_follow.rs"
   - "crates/sp-server/src/playback/ndi_health.rs"
+  - "crates/sp-server/src/playback/ndi_health_expect*.rs"
+  - "crates/sp-server/src/playback/ndi_health_tests*.rs"
   - "e2e/post-deploy.spec.ts"
   - "e2e/ndi-health-gate.ts"
   - "e2e/post-deploy-av-sync.spec.ts"
@@ -197,6 +199,24 @@ program legitimately reports `connections=0`. Only an **on-program** output with
 `compute_degraded_reason` returns `None`) and why E2E test 12 cross-references
 `active_playlist_ids`: do NOT read a bare `connections=0` on an off-program
 output as a fault.
+
+**#221 L4a: a receiver is expected only where cg OBS was told to show the
+playlist** (`playback/ndi_health_expect.rs::receiver_expected` = the
+reconciled label is `Playing` AND `legacy_cg.shown == Some(pid)`, read from
+the engine's program bus, `remote-control.md`). Once "on air" is SongPlayer's
+own program (L4b), a playlist on `SP-program` that cg OBS does not show has 0
+receivers normally, and the #173 ladder would churn cg OBS's inputs. So
+`handle_health_snapshot` computes the WHOLE degraded reason only while a
+receiver is expected (a 0-receiver poll is a bad poll, so the underrun /
+no-frames fall-throughs would misfire too), and passes `receiver_expected`
+(not the label) to `ladder_suppressed_after_restart` and
+`no_receiver_after_restart`. The state label (the badge, the #154/#167 idle
+gates, `transport`) stays keyed on on-air. The heartbeat log line carries
+`receiver_expected`. Tests: a dark-wall test sets its playlist on program
+with `engine.set_on_program_for_test(pid)` (scene on program + cg told to
+show it); `set_cg_shown_for_test(shown)` alone records cg OBS's side
+(`ndi_health_tests_expect.rs`). Until B4 step 6, when the dark-wall check
+moves to SP-program's own receivers.
 
 ## Adding recovery/health state without touching `playback/mod.rs`
 `handle_health_snapshot` runs on the engine but the engine struct lives in `playback/mod.rs` (often owned by a parallel lane). Compose new per-pipeline state into `NdiHealthRegistry` (the `Arc` the engine already holds) instead of adding a `PlaybackEngine` field — the engine reaches it via `self.ndi_health_registry.<method>()`. `handle_health_snapshot` is sync + `mutants::skip`; send `ObsCommand` with `try_send` (channel cap 64).
@@ -451,7 +471,8 @@ reconnect VISIBLE instead:
   baseline; the live counts keep being persisted for the NEXT restart.
 - **Decision (pure, in `sp_core::health::no_receiver_after_restart`,
   exact-boundary + mutation tested):** 30 s after the senders are ready
-  (`mark_senders_ready` → `elapsed_since_ready`), an output that is on program OR
+  (`mark_senders_ready` → `elapsed_since_ready`), an output that is on program
+  (#221 L4a: a receiver expected, `ndi_health_expect`) OR
   had `≥ 1` receiver before the restart, has NOT reconnected since (a one-time
   latch — once it reaches `≥ 1` it is never flagged again this process, so a
   later legitimate off-program drop is not a restart failure), and still has

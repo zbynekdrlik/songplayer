@@ -3,6 +3,7 @@ paths:
   - "crates/sp-server/src/playback/program_bus*.rs"
   - "crates/sp-server/src/playback/program_on_air*.rs"
   - "crates/sp-server/src/playback/scene_catalog*.rs"
+  - "crates/sp-server/src/playback/legacy_cg*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
   - "crates/sp-server/src/playback/paced_output*.rs"
   - "crates/sp-server/src/api/program*.rs"
@@ -119,14 +120,22 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 - `GET /api/v1/program` → `{ndi_name, source, previous, cut_boundary_100ns,
   health{forwarded, filled, late_dropped, resyncs, coalesced, cuts,
   submitted, connections, last_stamp_100ns}, vban{…} (#210), input{…}
-  (#212), remote{…} (#213), transition{…} + follow{…} (#215)}`;
+  (#212), remote{…} (#213), transition{…} + follow{…} (#215),
+  legacy_cg{shown} (#221 L4a)}`;
   `POST /api/v1/program/cut {"source": pid}` → 200 + that body, 404
   unknown playlist. Source `-1` is the #212 NDI input "OBS manuál" (404 unless
   it is enabled with a source) — see `ndi-input.md`.
 - The ONE cut path is `program_bus::persist_and_cut` (persist first, then cut),
   shared by the API and the #213 Companion remote control (`remote-control.md`).
   #221: it takes the scene name the cut is published with ("What is on air"
-  below).
+  below). #221 L4a: the API reaches it through the switch path
+  (`program_switch::switch_source`, `via=dashboard`, under `switch_order`,
+  recorded as `remote.last_remote_cut`, a playlist mirrored to cg OBS) —
+  `remote-control.md` "The dashboard cut on the same path".
+- #221 L4a: `ProgramBus::legacy_cg()` is SongPlayer's record of what it told
+  cg OBS to show (`playback/legacy_cg.rs`, `remote-control.md`), served as
+  `legacy_cg {shown}` on both program answers; `restore_selected_source`
+  records the restored playlist there. Until B4 step 6.
 - `/api/v1/ndi/health` is unchanged (an array of per-pipeline snapshots
   consumed by sp-ui + e2e); where the program's health also belongs there is
   an open question on #209.
@@ -153,9 +162,9 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 - Every publisher names the scene: `persist_and_cut(pool, bus, pid, scene)`
   / `ProgramBus::cut(pid, now, scene)` / `select_initial(pid, scene)`. A
   press passes the scene pressed (a playlist's by its catalog name;
-  "OBS manuál" itself passes none); the restore and the dashboard cut the
-  playlist's catalog scene
-  (`scene_catalog::scene_of_source`, `None` for -1); the OBS follow the cg
+  "OBS manuál" itself passes none); the restore the playlist's catalog scene
+  (`scene_catalog::scene_of_source`, `None` for -1), the dashboard cut the
+  same through `switch_source`'s catalog read (L4a); the OBS follow the cg
   OBS scene it follows — only when it CUTS (`follow_scene` skips a source
   already on program), so a followed manual → manual change publishes
   nothing and the published scene stays the earlier one (matters for L3's

@@ -573,8 +573,9 @@ building a `Value`) or through `remote::codec::Codec::Json.decode_text`
 (its private `PlainValue` visitor keeps every key a plain string; make
 `PlainValue` `pub(crate)` when a second module needs the visitor itself),
 never `serde_json::from_str::<Value>` / `Json<Value>` / `Value::deserialize`.
-Known residuals outside the facade (not fixed by #221 L2b): `api/ai.rs`'s
-`Json<serde_json::Value>` body on the LAN HTTP API.
+An axum body is a typed struct (`api/ai.rs` `CompleteLoginRequest`, #221
+L4a: the last `Json<serde_json::Value>` on the LAN HTTP API; its test first
+shows the key re-parses through `Value`, then that the route ignores it).
 
 ## Binary test fixtures: byte-string literals, not long hex strings (#221 L2b)
 
