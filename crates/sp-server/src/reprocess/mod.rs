@@ -721,12 +721,10 @@ mod tests {
         }
     }
 
-    /// #135 follow-up: `try_providers` bypasses `metadata::get_metadata`
-    /// entirely, so today it has no sanitization of its own. The only wired
-    /// provider (Gemini) happens to sanitize internally, so there is no live
-    /// leak — but the invariant "nothing unsanitized is ever persisted"
-    /// doesn't hold structurally on this path. A provider whose output still
-    /// carries a raw emoji must come back clean regardless.
+    /// #135 / #136: `try_providers` walks the chain through
+    /// `metadata::first_answer`, the shared emoji-sanitizer choke point — a
+    /// provider whose output still carries a raw emoji must come back clean,
+    /// whichever providers are wired.
     #[tokio::test]
     async fn try_providers_sanitizes_emoji_in_returned_metadata() {
         let pool = setup().await;
