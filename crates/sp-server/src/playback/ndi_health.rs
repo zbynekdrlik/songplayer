@@ -8,6 +8,7 @@
 
 use crate::obs::ndi_recovery::{NdiRecoveryTracker, RecoveryStep};
 use crate::playback::clock_health::ClockHealth;
+use crate::playback::ndi_health_expect::receiver_expected;
 use crate::playback::ndi_health_transport::transport_from_reported;
 // `PacingStats` lives in its own file (1000-line cap); re-exported so every
 // `ndi_health::PacingStats` path stays valid.
@@ -578,13 +579,22 @@ impl crate::playback::PlaybackEngine {
         };
 
         let ndi_name = pp.pipeline.ndi_name().to_string();
-        let base_degraded_reason = compute_degraded_reason(
-            &canonical_state,
-            connections,
-            observed_fps,
-            nominal_fps,
-            consecutive_bad_polls,
-        );
+        // #221 L4a: a receiver is expected only while cg OBS was told to show
+        // this playlist (`ndi_health_expect`); else 0 receivers is normal, and
+        // the reason, the self-check and the ladder stay quiet, as off program.
+        let cg_shown = self.program.get().and_then(|b| b.legacy_cg().shown_now());
+        let expected = receiver_expected(&canonical_state, cg_shown, playlist_id);
+        let base_degraded_reason = expected
+            .then(|| {
+                compute_degraded_reason(
+                    &canonical_state,
+                    connections,
+                    observed_fps,
+                    nominal_fps,
+                    consecutive_bad_polls,
+                )
+            })
+            .flatten();
         // #196 item 5: if this output is dark (Playing on program, connections=0)
         // but NO OBS NDI input advertises its stream, the receiver-side recovery
         // ladder is not the tool for it — set a distinct reason and skip the
@@ -603,7 +613,6 @@ impl crate::playback::PlaybackEngine {
         // restart re-rolls it). This is a NON-dark-wall reason, so `is_dark`
         // below stays false. The whole decision is the pure, mutation-scored
         // `sp_core::health::no_receiver_after_restart`.
-        let on_program = matches!(canonical_state, PlaybackStateLabel::Playing);
         if connections >= 1 {
             self.ndi_health_registry.mark_reconnected(playlist_id);
             self.ndi_health_registry
@@ -621,14 +630,14 @@ impl crate::playback::PlaybackEngine {
         let ladder_suppressed = sp_core::health::ladder_suppressed_after_restart(
             elapsed_since_ready,
             reconnected,
-            on_program,
+            expected,
             connections,
         );
         let degraded_reason = if degraded_reason.as_deref() != Some(NO_OBS_INPUT_REASON)
             && sp_core::health::no_receiver_after_restart(
                 elapsed_since_ready,
                 reconnected,
-                on_program,
+                expected,
                 self.ndi_health_registry.pre_restart_count(playlist_id),
                 connections,
             ) {
@@ -802,6 +811,7 @@ impl crate::playback::PlaybackEngine {
                     observed_fps = format!("{:.1}", observed_fps),
                     nominal_fps = format!("{:.1}", nominal_fps),
                     scene_active,
+                    receiver_expected = expected,
                     "ndi: heartbeat"
                 );
                 // #149 item 2: a second, grep-stable genlock telemetry line
@@ -956,3 +966,6 @@ mod lock_state_tests;
 #[cfg(test)]
 #[path = "ndi_health_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "ndi_health_tests_expect.rs"]
+mod tests_expect;

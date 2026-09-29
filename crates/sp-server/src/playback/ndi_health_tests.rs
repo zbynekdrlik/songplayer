@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{broadcast, mpsc};
 
-async fn fresh_engine() -> (PlaybackEngine, Arc<NdiHealthRegistry>) {
+pub(super) async fn fresh_engine() -> (PlaybackEngine, Arc<NdiHealthRegistry>) {
     let pool = SqlitePool::connect(":memory:").await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
     let (obs_tx, _) = broadcast::channel(16);
@@ -30,7 +30,7 @@ async fn fresh_engine() -> (PlaybackEngine, Arc<NdiHealthRegistry>) {
 
 /// Like `fresh_engine`, but wires a real `obs_cmd_tx` so tests can assert
 /// the #127 receiver-recovery nudge command is dispatched.
-async fn fresh_engine_with_obs_cmd() -> (
+pub(super) async fn fresh_engine_with_obs_cmd() -> (
     PlaybackEngine,
     Arc<NdiHealthRegistry>,
     mpsc::Receiver<crate::obs::ObsCommand>,
@@ -57,7 +57,7 @@ async fn fresh_engine_with_obs_cmd() -> (
 
 /// Build a dark-wall HealthSnapshot event (Playing, connections=0) with the
 /// given consecutive-bad-poll count.
-fn dark_wall_event(now: Instant, consecutive_bad_polls: u32) -> PipelineEvent {
+pub(super) fn dark_wall_event(now: Instant, consecutive_bad_polls: u32) -> PipelineEvent {
     PipelineEvent::HealthSnapshot {
         connections: 0,
         frames_submitted_total: 12_000,
@@ -84,7 +84,7 @@ async fn handle_health_snapshot_nudges_obs_on_prolonged_dark_wall() {
     let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
     engine.ensure_pipeline(4, "SP-slow");
     engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
-    engine.set_scene_active_for_test(4, true);
+    engine.set_on_program_for_test(4);
 
     let now = Instant::now();
     engine.handle_health_snapshot(
@@ -120,7 +120,7 @@ async fn handle_health_snapshot_escalates_to_recreate_on_sustained_dark_wall() {
     let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
     engine.ensure_pipeline(7, "SP-fast");
     engine.set_state_for_test(7, PlayState::Playing { video_id: 1 });
-    engine.set_scene_active_for_test(7, true);
+    engine.set_on_program_for_test(7);
 
     let base = crate::obs::ndi_recovery::NUDGE_THRESHOLD_BAD_POLLS;
     // Rung 0 (clear+restore) at the threshold, rung 1 (toggle) +2 dark polls
@@ -160,7 +160,7 @@ async fn handle_health_snapshot_clears_recovery_step_on_recovery() {
     let (mut engine, registry, _obs_rx) = fresh_engine_with_obs_cmd().await;
     engine.ensure_pipeline(4, "SP-slow");
     engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
-    engine.set_scene_active_for_test(4, true);
+    engine.set_on_program_for_test(4);
 
     let now = Instant::now();
     // Dark past threshold → rung 0 fires, recovery_step is Some.
@@ -204,7 +204,7 @@ async fn handle_health_snapshot_does_not_nudge_below_threshold() {
     let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
     engine.ensure_pipeline(4, "SP-slow");
     engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
-    engine.set_scene_active_for_test(4, true);
+    engine.set_on_program_for_test(4);
 
     let now = Instant::now();
     // 2 bad polls: degraded_reason IS set, but below the nudge threshold.
@@ -483,7 +483,7 @@ async fn handle_health_snapshot_fills_degraded_reason_at_2_consecutive_bad_polls
     let (mut engine, registry) = fresh_engine().await;
     engine.ensure_pipeline(8, "SP-fail");
     engine.set_state_for_test(8, PlayState::Playing { video_id: 1 });
-    engine.set_scene_active_for_test(8, true);
+    engine.set_on_program_for_test(8);
     let now = Instant::now();
     engine.handle_health_snapshot(
         8,
@@ -562,7 +562,7 @@ async fn handle_health_snapshot_visibility_only_on_prolonged_dark_wall() {
     let (mut engine, registry) = fresh_engine().await;
     engine.ensure_pipeline(7, "SP-fast");
     engine.set_state_for_test(7, PlayState::Playing { video_id: 1 });
-    engine.set_scene_active_for_test(7, true);
+    engine.set_on_program_for_test(7);
 
     let now = Instant::now();
     // Simulate 100 consecutive bad polls (8+ minutes of dark wall) —
@@ -605,7 +605,7 @@ async fn handle_health_snapshot_clears_degraded_reason_on_clean_poll() {
     let (mut engine, registry) = fresh_engine().await;
     engine.ensure_pipeline(7, "SP-fast");
     engine.set_state_for_test(7, PlayState::Playing { video_id: 1 });
-    engine.set_scene_active_for_test(7, true);
+    engine.set_on_program_for_test(7);
 
     let now = Instant::now();
     // First: degraded.
