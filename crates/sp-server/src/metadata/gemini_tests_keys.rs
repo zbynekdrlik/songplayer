@@ -131,6 +131,65 @@ async fn a_status_that_is_not_about_the_key_stops_at_the_first_key() {
     assert_eq!(received_keys(&server).await, ["k1"], "no second key tried");
 }
 
+/// Short pauses for the same-key 5xx retries (production: 2/4/8/16 s).
+fn quick_retries(server: &MockServer, list: &[&str]) -> GeminiProvider {
+    provider_at(server, list).with_retry_backoffs(vec![
+        std::time::Duration::from_millis(1),
+        std::time::Duration::from_millis(1),
+    ])
+}
+
+#[tokio::test]
+async fn a_server_error_is_retried_on_the_same_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(ENDPOINT))
+        .and(header("x-goog-api-key", "k1"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("model overloaded"))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    key_answers(&server, "k1", 200, gemini_answer(SONG, ARTIST)).await;
+
+    let meta = quick_retries(&server, &["k1", "k2"])
+        .extract(VIDEO, TITLE)
+        .await
+        .expect("the same key answers after a 503");
+
+    assert_eq!(meta.song, SONG);
+    assert_eq!(
+        received_keys(&server).await,
+        ["k1", "k1", "k1"],
+        "503 and its retry on k1, then the clean-up pass — never k2"
+    );
+}
+
+#[tokio::test]
+async fn a_server_error_that_persists_stops_after_the_retries_without_another_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("model overloaded"))
+        .mount(&server)
+        .await;
+
+    let err = quick_retries(&server, &["k1", "k2"])
+        .extract(VIDEO, TITLE)
+        .await
+        .expect_err("the service stays down");
+
+    let text = err.to_string();
+    assert!(matches!(err, MetadataError::ApiError(_)), "{text}");
+    assert!(
+        text.contains("key 1 of 2: HTTP 503: model overloaded"),
+        "{text}"
+    );
+    assert_eq!(
+        received_keys(&server).await,
+        ["k1", "k1", "k1"],
+        "one try + one retry per pause, all on k1"
+    );
+}
+
 #[tokio::test]
 async fn every_key_refused_names_the_last_key_status_and_body_never_a_key() {
     let server = MockServer::start().await;
@@ -328,25 +387,13 @@ async fn a_failed_or_partial_clean_pass_keeps_the_first_answer_where_it_has_noth
 
 // ---- pure helpers --------------------------------------------------------
 
+// The verdict table itself (429 / 403 / 400 naming the key / 5xx / the rest)
+// is the shared `gemini_api::key_verdict`, tested in `gemini_api_tests.rs`.
+
 #[test]
-fn only_a_rate_limit_or_a_key_refusal_moves_to_the_next_key() {
-    assert_eq!(classify(429, ""), KeyOutcome::RateLimited);
-    assert_eq!(classify(403, ""), KeyOutcome::Refused);
-    assert_eq!(
-        classify(400, "reason: API_KEY_INVALID"),
-        KeyOutcome::Refused
-    );
-    assert_eq!(
-        classify(400, "API key expired. Please renew."),
-        KeyOutcome::Refused
-    );
-    assert_eq!(
-        classify(400, "Invalid JSON payload received."),
-        KeyOutcome::Stop
-    );
-    assert_eq!(classify(401, "API key"), KeyOutcome::Stop);
-    assert_eq!(classify(404, "models/x is not found"), KeyOutcome::Stop);
-    assert_eq!(classify(500, "API_KEY"), KeyOutcome::Stop);
+fn a_key_containing_another_key_is_redacted_whole() {
+    let p = GeminiProvider::new(keys(&["abc", "abcdef"]), MODEL.into());
+    assert_eq!(p.excerpt("x abcdef y abc z"), "x <key> y <key> z");
 }
 
 #[test]

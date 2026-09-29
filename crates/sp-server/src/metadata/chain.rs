@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use sp_core::metadata::VideoMetadata;
 
 use super::claude::ClaudeMetadataProvider;
-use super::gemini::{GEMINI_API_ROOT, GeminiProvider};
+use super::gemini::GeminiProvider;
 use super::health::{MetadataHealth, ProviderHealth};
 use super::{MetadataError, MetadataProvider};
 use crate::ai::client::AiClient;
@@ -69,7 +69,12 @@ pub fn provider_chain(
     gemini_csv: &str,
     gemini_model: &str,
 ) -> Arc<ProviderChain> {
-    provider_chain_at(ai_client, gemini_csv, gemini_model, GEMINI_API_ROOT)
+    provider_chain_at(
+        ai_client,
+        gemini_csv,
+        gemini_model,
+        crate::gemini_api::GEMINI_API_ROOT,
+    )
 }
 
 /// [`provider_chain`] with Gemini's API root injected (a mock server in tests).
@@ -79,7 +84,7 @@ pub fn provider_chain_at(
     gemini_model: &str,
     gemini_api_root: &str,
 ) -> Arc<ProviderChain> {
-    let keys = crate::lyrics::g35t_client::gemini_keys_from_setting(gemini_csv);
+    let keys = crate::gemini_api::gemini_keys_from_setting(gemini_csv);
     // The key COUNT only — never a key.
     tracing::info!(
         gemini_keys = keys.len(),
@@ -120,7 +125,7 @@ impl MetadataProvider for Recorded {
                 );
             }
             Err(e) => {
-                self.health.record_error(self.index, e.to_string());
+                self.health.record_error(self.index, &e.to_string());
                 tracing::warn!(provider, video_id, elapsed_ms, error = %e, "metadata provider failed");
             }
         }

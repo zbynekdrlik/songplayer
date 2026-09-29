@@ -9,6 +9,7 @@ pub mod downloader;
 mod engine_command;
 mod engine_dispatch;
 pub use engine_command::EngineCommand;
+pub mod gemini_api; // #136: the Gemini key-list contract every Gemini caller shares
 pub mod lyrics;
 pub mod mdns;
 pub mod metadata;

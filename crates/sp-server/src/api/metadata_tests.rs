@@ -11,7 +11,7 @@ use tower::ServiceExt;
 
 use super::*;
 use crate::api::routes::tests::{app, test_state};
-use crate::metadata::health::ProviderHealth;
+use crate::metadata::health::{MAX_ERROR_CHARS, ProviderHealth};
 use crate::metadata::test_support::{ARTIST, SONG, TITLE, VIDEO};
 use crate::metadata::{MetadataError, ProviderChain, get_metadata};
 
@@ -223,4 +223,58 @@ async fn a_probe_without_a_video_id_or_a_title_is_a_bad_request() {
             "a refused probe asks no provider"
         );
     }
+}
+
+/// Never answers within a probe's bound.
+struct Hangs;
+
+#[async_trait]
+impl MetadataProvider for Hangs {
+    async fn extract(&self, _video_id: &str, _title: &str) -> Result<VideoMetadata, MetadataError> {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        Err(MetadataError::ApiError("too late".into()))
+    }
+
+    fn name(&self) -> &str {
+        "claude"
+    }
+}
+
+/// Fails with a very long error (a proxy echoing its whole reply).
+struct Verbose;
+
+#[async_trait]
+impl MetadataProvider for Verbose {
+    async fn extract(&self, _video_id: &str, _title: &str) -> Result<VideoMetadata, MetadataError> {
+        Err(MetadataError::ApiError("x".repeat(1_000)))
+    }
+
+    fn name(&self) -> &str {
+        "gemini"
+    }
+}
+
+#[tokio::test]
+async fn a_provider_that_does_not_answer_in_time_is_reported_by_name() {
+    let outcome = probe_one(&Hangs, VIDEO, TITLE, Duration::from_millis(20)).await;
+
+    assert_eq!(outcome.name, "claude");
+    assert!(!outcome.ok);
+    assert_eq!(outcome.error.as_deref(), Some("no answer within 0.02 s"));
+    assert_eq!((outcome.song, outcome.artist), (None, None));
+}
+
+#[tokio::test]
+async fn a_long_provider_error_is_cut_in_the_probe_answer() {
+    let outcome = probe_one(&Verbose, VIDEO, TITLE, PROBE_TIMEOUT).await;
+
+    assert!(!outcome.ok);
+    let error = outcome.error.expect("the provider's error");
+    assert_eq!(error.chars().count(), MAX_ERROR_CHARS);
+}
+
+#[test]
+fn the_probe_bound_stays_below_the_post_deploy_request_timeout() {
+    // e2e/post-deploy-metadata.spec.ts waits 220 s for the probe answer.
+    assert_eq!(PROBE_TIMEOUT, Duration::from_secs(180));
 }

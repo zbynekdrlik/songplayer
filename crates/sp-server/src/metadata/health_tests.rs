@@ -32,7 +32,7 @@ fn a_new_record_names_every_provider_in_chain_order_with_nothing_seen() {
 fn each_record_touches_only_its_own_provider() {
     let health = MetadataHealth::new(names());
 
-    health.record_error(1, "gemini: all 5 keys failed".into());
+    health.record_error(1, "gemini: all 5 keys failed");
     health.record_ok(0, 1_000);
 
     let snap = health.snapshot();
@@ -47,7 +47,7 @@ fn each_record_touches_only_its_own_provider() {
     // An answer keeps the time and clears the error; a later error keeps the
     // time of the last answer.
     health.record_ok(1, 2_000);
-    health.record_error(1, "rate limited".into());
+    health.record_error(1, "rate limited");
     let snap = health.snapshot();
     assert_eq!(snap[1].last_ok_at_ms, Some(2_000));
     assert_eq!(snap[1].last_error.as_deref(), Some("rate limited"));
@@ -58,7 +58,7 @@ fn an_index_outside_the_chain_is_ignored() {
     let health = MetadataHealth::new(names());
 
     health.record_ok(2, 5);
-    health.record_error(7, "nobody".into());
+    health.record_error(7, "nobody");
 
     assert!(
         health
@@ -66,6 +66,18 @@ fn an_index_outside_the_chain_is_ignored() {
             .iter()
             .all(|p| p.last_ok_at_ms.is_none() && p.last_error.is_none())
     );
+}
+
+#[test]
+fn a_recorded_error_is_cut_to_the_bound() {
+    let health = MetadataHealth::new(names());
+    let long = "é".repeat(MAX_ERROR_CHARS + 50);
+
+    health.record_error(0, &long);
+
+    let kept = health.snapshot()[0].last_error.clone().unwrap();
+    assert_eq!(kept.chars().count(), MAX_ERROR_CHARS);
+    assert_eq!(bounded_error("short"), "short");
 }
 
 #[tokio::test]

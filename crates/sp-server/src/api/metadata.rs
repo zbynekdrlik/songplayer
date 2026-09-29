@@ -3,14 +3,15 @@
 //! - [`status_block`] → `GET /api/v1/status.metadata`: the size of the repair
 //!   queue and every provider's health (last answer, last error).
 //! - `POST /api/v1/metadata/probe {youtube_id, title}` ([`probe`]) runs EACH
-//!   provider of the production chain on its own, concurrently, and returns
-//!   each outcome. It writes nothing to the DB (a probe call still lands in
-//!   the providers' health record — it is a real call). The post-deploy gate
+//!   provider of the production chain on its own, concurrently, each bounded
+//!   by [`PROBE_TIMEOUT`], and returns each outcome. It writes nothing to the
+//!   DB (a probe call that completes still lands in the providers' health
+//!   record — it is a real call). The post-deploy gate
 //!   (`e2e/post-deploy-metadata.spec.ts`) probes a fixed real video, so a
 //!   broken key format, a retired model or an unauthenticated proxy fails the
 //!   deploy instead of shipping raw YouTube titles to the wall.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::Json;
 use axum::extract::State;
@@ -21,7 +22,12 @@ use tracing::{info, warn};
 
 use crate::AppState;
 use crate::metadata::MetadataProvider;
-use crate::metadata::health::{MetadataStatus, failed_videos};
+use crate::metadata::health::{MetadataStatus, bounded_error, failed_videos};
+
+/// Bound of one provider in a probe: below the post-deploy spec's 220 s
+/// request timeout, so a hung provider fails the gate WITH its name instead
+/// of as a bare Playwright timeout (Claude's own client allows 300 s + retries).
+pub const PROBE_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// `status.metadata` (module doc).
 pub async fn status_block(state: &AppState) -> MetadataStatus {
@@ -62,8 +68,8 @@ pub struct ProbeResponse {
     pub providers: Vec<ProbeOutcome>,
 }
 
-/// `POST /api/v1/metadata/probe` (module doc). 400 without a `youtube_id`
-/// or a `title`.
+/// `POST /api/v1/metadata/probe` (module doc). 400 on an empty `youtube_id`
+/// or `title` (a missing field is axum's 422).
 pub async fn probe(
     State(state): State<AppState>,
     Json(req): Json<ProbeRequest>,
@@ -82,7 +88,7 @@ pub async fn probe(
             .metadata_chain
             .providers()
             .iter()
-            .map(|p| probe_one(p, youtube_id, title)),
+            .map(|p| probe_one(&**p, youtube_id, title, PROBE_TIMEOUT)),
     )
     .await;
     for p in &providers {
@@ -96,28 +102,39 @@ pub async fn probe(
     .into_response()
 }
 
-async fn probe_one(provider: &dyn MetadataProvider, youtube_id: &str, title: &str) -> ProbeOutcome {
+/// One provider's probe, bounded by `limit`. The error is kept to
+/// `health::MAX_ERROR_CHARS`.
+async fn probe_one(
+    provider: &dyn MetadataProvider,
+    youtube_id: &str,
+    title: &str,
+    limit: Duration,
+) -> ProbeOutcome {
     let started = Instant::now();
-    let result = provider.extract(youtube_id, title).await;
+    let result = tokio::time::timeout(limit, provider.extract(youtube_id, title)).await;
     let elapsed_ms = started.elapsed().as_millis() as u64;
     let name = provider.name().to_string();
-    match result {
-        Ok(meta) => ProbeOutcome {
-            name,
-            ok: true,
-            song: Some(meta.song),
-            artist: Some(meta.artist),
-            error: None,
-            elapsed_ms,
-        },
-        Err(e) => ProbeOutcome {
-            name,
-            ok: false,
-            song: None,
-            artist: None,
-            error: Some(e.to_string()),
-            elapsed_ms,
-        },
+    let error = match result {
+        Ok(Ok(meta)) => {
+            return ProbeOutcome {
+                name,
+                ok: true,
+                song: Some(meta.song),
+                artist: Some(meta.artist),
+                error: None,
+                elapsed_ms,
+            };
+        }
+        Ok(Err(e)) => bounded_error(&e.to_string()),
+        Err(_) => format!("no answer within {} s", limit.as_secs_f64()),
+    };
+    ProbeOutcome {
+        name,
+        ok: false,
+        song: None,
+        artist: None,
+        error: Some(error),
+        elapsed_ms,
     }
 }
 

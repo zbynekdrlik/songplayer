@@ -22,11 +22,13 @@
 //!      the file was created, regardless of step 2/3 outcome
 //!
 //! Auth is the `x-goog-api-key` header (never a Bearer token, never a
-//! query param). `api_keys` is tried in order: an HTTP 429, or a 400 whose
-//! body contains "API key not valid", moves to the NEXT key; a 5xx retries
-//! the SAME key with backoff (2/4/8/16s, up to 4 retries). Any other
-//! failure aborts immediately. Never log a header or a key value — only
-//! the key's INDEX; log word count + elapsed time at info on success.
+//! query param). `api_keys` is tried in order by the shared Gemini key-list
+//! contract (`crate::gemini_api`, #136 — the metadata provider rotates by the
+//! same rules): a 429 or a key refusal (a 403, or a 400 naming the API key)
+//! moves to the NEXT key; a 5xx retries the SAME key with backoff (2/4/8/16s,
+//! up to 4 retries). Any other failure aborts immediately. Never log a header
+//! or a key value — only the key's INDEX; log word count + elapsed time at
+//! info on success.
 
 use std::path::Path;
 use std::time::Duration;
@@ -35,7 +37,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde_json::Value;
 use tokio::time::sleep;
 
-const API_ROOT: &str = "https://generativelanguage.googleapis.com";
+use crate::gemini_api::{GEMINI_API_ROOT as API_ROOT, KeyVerdict, RETRY_BACKOFFS, key_verdict};
+
 const MODEL_SLUG: &str = "gemini-3.5-transcribe";
 const AUDIO_MIME_TYPE: &str = "audio/wav";
 
@@ -44,10 +47,6 @@ const FILE_POLL_TIMEOUT: Duration = Duration::from_secs(60);
 
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 const INTERACTIONS_TIMEOUT: Duration = Duration::from_secs(600);
-
-/// Exponential backoff schedule for a 5xx retry on the SAME key: up to 4
-/// retries (5 attempts total) at 2/4/8/16s.
-const RETRY_BACKOFFS_S: [u64; 4] = [2, 4, 8, 16];
 
 /// One ASR word with millisecond timing. Deliberately separate from
 /// `sp_core::lyrics::LyricsWord` / `crate::lyrics::backend::AlignedWord` —
@@ -63,8 +62,8 @@ pub struct AsrWord {
 
 /// Outcome of a single HTTP step against one API key.
 enum StepError {
-    /// 429, or a 400 whose body contains "API key not valid" — the caller
-    /// should try the NEXT key in `api_keys`.
+    /// `KeyVerdict::NextKey` (a 429 or a key refusal) — the caller should try
+    /// the NEXT key in `api_keys`.
     NextKey(anyhow::Error),
     /// Any other failure — abort `transcribe_words` entirely.
     Fatal(anyhow::Error),
@@ -77,12 +76,12 @@ fn truncate(s: &str, max: usize) -> &str {
     }
 }
 
-/// Issue one HTTP call, retrying on a 5xx with the fixed backoff schedule
-/// (same key, same request). A 429 or a "API key not valid" 400 is
-/// classified as `StepError::NextKey` immediately — no retry, since the
-/// same key retrying would fail identically. `build` is invoked fresh on
-/// every attempt because a `reqwest::RequestBuilder` is consumed by
-/// `.send()`.
+/// Issue one HTTP call, retrying on a 5xx with the shared backoff schedule
+/// (same key, same request). A 429 or a key refusal is
+/// `StepError::NextKey` immediately — no retry, since the same key retrying
+/// would fail identically (`gemini_api::key_verdict` decides). `build` is
+/// invoked fresh on every attempt because a `reqwest::RequestBuilder` is
+/// consumed by `.send()`.
 // Network-bound: every branch requires a live HTTP server; covered by the
 // Python prototype's live verification (2026-09-12) referenced above, not
 // a local unit test. See replicate_client.rs / metadata/gemini.rs for the
@@ -107,48 +106,39 @@ async fn send_with_retry(
         if status.is_success() {
             return Ok(resp);
         }
-        if status.as_u16() == 429 {
-            return Err(StepError::NextKey(anyhow!(
-                "g35t_client {what}: HTTP 429 rate-limited"
-            )));
-        }
-        if status.as_u16() == 400 {
-            let body = resp.text().await.unwrap_or_default();
-            if body.contains("API key not valid") {
+        let body = resp.text().await.unwrap_or_default();
+        match key_verdict(status.as_u16(), &body) {
+            KeyVerdict::NextKey { .. } => {
                 return Err(StepError::NextKey(anyhow!(
-                    "g35t_client {what}: HTTP 400 API key not valid"
+                    "g35t_client {what}: key refused status={status} body={}",
+                    truncate(&body, 400)
                 )));
             }
-            return Err(StepError::Fatal(anyhow!(
-                "g35t_client {what}: HTTP 400: {}",
-                truncate(&body, 400)
-            )));
-        }
-        if status.is_server_error() {
-            if attempt >= RETRY_BACKOFFS_S.len() {
-                let body = resp.text().await.unwrap_or_default();
+            KeyVerdict::RetrySameKey if attempt < RETRY_BACKOFFS.len() => {
+                let backoff = RETRY_BACKOFFS[attempt];
+                tracing::warn!(
+                    what,
+                    attempt = attempt + 1,
+                    status = status.as_u16(),
+                    backoff_s = backoff.as_secs(),
+                    "g35t_client: 5xx — retrying same key"
+                );
+                sleep(backoff).await;
+                attempt += 1;
+            }
+            KeyVerdict::RetrySameKey => {
                 return Err(StepError::Fatal(anyhow!(
                     "g35t_client {what}: exhausted retries status={status} body={}",
                     truncate(&body, 400)
                 )));
             }
-            let backoff = Duration::from_secs(RETRY_BACKOFFS_S[attempt]);
-            tracing::warn!(
-                what,
-                attempt = attempt + 1,
-                status = status.as_u16(),
-                backoff_s = backoff.as_secs(),
-                "g35t_client: 5xx — retrying same key"
-            );
-            sleep(backoff).await;
-            attempt += 1;
-            continue;
+            KeyVerdict::Stop => {
+                return Err(StepError::Fatal(anyhow!(
+                    "g35t_client {what}: unexpected status={status} body={}",
+                    truncate(&body, 400)
+                )));
+            }
         }
-        let body = resp.text().await.unwrap_or_default();
-        return Err(StepError::Fatal(anyhow!(
-            "g35t_client {what}: unexpected status={status} body={}",
-            truncate(&body, 400)
-        )));
     }
 }
 
@@ -481,12 +471,6 @@ pub fn words_from_response(v: &Value) -> Vec<AsrWord> {
 
 /// Split a `gemini_api_key` DB setting (comma-separated) into a trimmed,
 /// non-empty key list, in order.
-pub fn gemini_keys_from_setting(csv: &str) -> Vec<String> {
-    csv.split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
 
 #[cfg(test)]
 mod tests {
@@ -552,19 +536,6 @@ mod tests {
     fn words_from_response_empty_on_missing_steps() {
         let response: Value = serde_json::json!({"status": "completed"});
         assert!(words_from_response(&response).is_empty());
-    }
-
-    #[test]
-    fn gemini_keys_from_setting_splits_trims_and_drops_empties() {
-        assert_eq!(
-            gemini_keys_from_setting(" key1 , key2,, key3 "),
-            vec!["key1".to_string(), "key2".to_string(), "key3".to_string()]
-        );
-        assert_eq!(gemini_keys_from_setting(""), Vec::<String>::new());
-        assert_eq!(
-            gemini_keys_from_setting("onlyone"),
-            vec!["onlyone".to_string()]
-        );
     }
 }
 

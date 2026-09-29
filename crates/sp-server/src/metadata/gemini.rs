@@ -3,14 +3,16 @@
 //! #136: the setting `gemini_api_key` is a comma-separated key LIST (the
 //! lyrics and dabing paths rotate over it). The provider takes the split
 //! list (`chain::provider_chain` splits it with
-//! `lyrics::g35t_client::gemini_keys_from_setting`) and sends ONE key per
-//! attempt in the `x-goog-api-key` header. Before #136 it sent the whole CSV
-//! as one key, Google refused every call in ~40 ms, and every new video fell
-//! back to the title parser.
+//! `gemini_api::gemini_keys_from_setting`) and sends ONE key per attempt in
+//! the `x-goog-api-key` header. Before #136 it sent the whole CSV as one key,
+//! Google refused every call in ~40 ms, and every new video fell back to the
+//! title parser.
 //!
-//! Rotation (`GeminiProvider::post_rotating`): a 429 or a key refusal (a
-//! 403, or a 400 whose body names the API key) moves to the NEXT key; any
-//! other status stops at once, since the same request fails the same way on
+//! Rotation (`GeminiProvider::post_rotating`) follows the shared Gemini
+//! key-list contract (`crate::gemini_api::key_verdict`, the same rules as
+//! the lyrics transcription): a 429 or a key refusal moves to the NEXT key;
+//! a 5xx retries the SAME key after each `gemini_api::RETRY_BACKOFFS` pause;
+//! anything else stops at once, since the same request fails the same way on
 //! every key. When every key failed, the error names the last key's INDEX,
 //! its HTTP status and a short body excerpt with every configured key
 //! redacted — never a key. It is [`MetadataError::RateLimited`] when any key
@@ -28,15 +30,13 @@ use std::time::{Duration, Instant};
 use super::parser::shorten_artist;
 use super::sanitize::strip_emoji;
 use super::{MetadataError, MetadataProvider};
+use crate::gemini_api::{GEMINI_API_ROOT, KeyVerdict, RETRY_BACKOFFS, key_verdict};
 
 static JSON_FENCE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"```(?:json)?\s*([\s\S]*?)\s*```").expect("compile"));
 
 static JSON_OBJECT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\{[^{}]*\}").expect("compile"));
-
-/// The Gemini API root the production chain calls.
-pub const GEMINI_API_ROOT: &str = "https://generativelanguage.googleapis.com";
 
 /// Bound of one request. A grounded answer takes seconds; without a bound a
 /// stalled connection would hang the download worker and the probe route.
@@ -53,29 +53,21 @@ pub struct GeminiProvider {
     /// `https://generativelanguage.googleapis.com` in production; a mock
     /// server's URI in tests.
     api_root: String,
+    /// Pauses before each same-key retry of a 5xx: `gemini_api::RETRY_BACKOFFS`
+    /// (milliseconds in tests).
+    retry_backoffs: Vec<Duration>,
     client: reqwest::Client,
 }
 
-/// How one key's non-2xx answer is handled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum KeyOutcome {
-    /// 429: this key is out of quota — try the next key.
-    RateLimited,
-    /// 403, or a 400 naming the API key (`API_KEY_INVALID`, "API key not
-    /// valid", "API key expired") — try the next key.
-    Refused,
-    /// Anything else (a bad request, an unknown model, a 5xx): every key
-    /// would fail the same way — stop.
-    Stop,
-}
-
-fn classify(status: u16, body: &str) -> KeyOutcome {
-    match status {
-        429 => KeyOutcome::RateLimited,
-        403 => KeyOutcome::Refused,
-        400 if body.contains("API_KEY") || body.contains("API key") => KeyOutcome::Refused,
-        _ => KeyOutcome::Stop,
-    }
+/// One key's outcome in `post_rotating`.
+enum KeyAttempt {
+    /// A 2xx answer.
+    Answered(Value),
+    /// `KeyVerdict::NextKey`: `last` describes the refusal (index, status,
+    /// redacted excerpt).
+    NextKey { rate_limited: bool, last: String },
+    /// `Stop`, or a 5xx after every retry: every key would fail the same way.
+    Stop(String),
 }
 
 impl GeminiProvider {
@@ -92,8 +84,16 @@ impl GeminiProvider {
             keys,
             model,
             api_root: api_root.trim_end_matches('/').to_string(),
+            retry_backoffs: RETRY_BACKOFFS.to_vec(),
             client: reqwest::Client::new(),
         }
+    }
+
+    /// Tests: short same-key retry pauses instead of 2 / 4 / 8 / 16 s.
+    #[cfg(test)]
+    fn with_retry_backoffs(mut self, backoffs: Vec<Duration>) -> Self {
+        self.retry_backoffs = backoffs;
+        self
     }
 
     /// The `generateContent` endpoint. The key goes in the `x-goog-api-key`
@@ -245,6 +245,41 @@ impl GeminiProvider {
         let mut last = String::new();
         for (index, key) in self.keys.iter().enumerate() {
             let n = index + 1;
+            match self.attempt_key(what, body, key, n, total).await? {
+                KeyAttempt::Answered(answer) => return Ok((index, answer)),
+                KeyAttempt::NextKey {
+                    rate_limited,
+                    last: refusal,
+                } => {
+                    any_rate_limited |= rate_limited;
+                    last = refusal;
+                }
+                KeyAttempt::Stop(reason) => {
+                    return Err(MetadataError::ApiError(format!("gemini {what}: {reason}")));
+                }
+            }
+        }
+        let detail = format!("gemini {what}: all {total} keys failed; last {last}");
+        Err(if any_rate_limited {
+            MetadataError::RateLimited(detail)
+        } else {
+            MetadataError::ApiError(detail)
+        })
+    }
+
+    /// One key (`n` of `total`): the POST, retried on a 5xx after each
+    /// `retry_backoffs` pause (the iterator makes progress structural). A
+    /// transport failure is not about the key: it ends the whole call.
+    async fn attempt_key(
+        &self,
+        what: &str,
+        body: &Value,
+        key: &str,
+        n: usize,
+        total: usize,
+    ) -> Result<KeyAttempt, MetadataError> {
+        let mut pauses = self.retry_backoffs.iter();
+        loop {
             let started = Instant::now();
             let resp = self
                 .client
@@ -275,30 +310,27 @@ impl GeminiProvider {
                     .json::<Value>()
                     .await
                     .map_err(|e| MetadataError::InvalidResponse(format!("gemini {what}: {e}")))?;
-                return Ok((index, answer));
+                return Ok(KeyAttempt::Answered(answer));
             }
             let text = resp.text().await.unwrap_or_default();
-            let outcome = classify(status, &text);
+            let verdict = key_verdict(status, &text);
             let excerpt = self.excerpt(&text);
             tracing::warn!(
-                what, key = n, keys = total, status, elapsed_ms, ?outcome, body = %excerpt,
+                what, key = n, keys = total, status, elapsed_ms, ?verdict, body = %excerpt,
                 "gemini refused the request"
             );
-            last = format!("key {n} of {total}: HTTP {status}: {excerpt}");
-            match outcome {
-                KeyOutcome::RateLimited => any_rate_limited = true,
-                KeyOutcome::Refused => {}
-                KeyOutcome::Stop => {
-                    return Err(MetadataError::ApiError(format!("gemini {what}: {last}")));
+            let last = format!("key {n} of {total}: HTTP {status}: {excerpt}");
+            match verdict {
+                KeyVerdict::NextKey { rate_limited } => {
+                    return Ok(KeyAttempt::NextKey { rate_limited, last });
                 }
+                KeyVerdict::RetrySameKey => match pauses.next() {
+                    Some(pause) => tokio::time::sleep(*pause).await,
+                    None => return Ok(KeyAttempt::Stop(last)),
+                },
+                KeyVerdict::Stop => return Ok(KeyAttempt::Stop(last)),
             }
         }
-        let detail = format!("gemini {what}: all {total} keys failed; last {last}");
-        Err(if any_rate_limited {
-            MetadataError::RateLimited(detail)
-        } else {
-            MetadataError::ApiError(detail)
-        })
     }
 
     /// Second pass: clean the extracted song/artist for display, on the key
@@ -394,11 +426,18 @@ impl GeminiProvider {
 
     /// `text` with every configured key replaced by `<key>`: an error text
     /// or a log line must never carry a key, whatever the server echoes.
+    /// Longest key first, so a key that contains another one is replaced
+    /// whole.
     fn redact(&self, text: &str) -> String {
-        self.keys
+        let mut keys: Vec<&str> = self
+            .keys
             .iter()
+            .map(String::as_str)
             .filter(|k| !k.is_empty())
-            .fold(text.to_string(), |acc, k| acc.replace(k.as_str(), "<key>"))
+            .collect();
+        keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
+        keys.into_iter()
+            .fold(text.to_string(), |acc, k| acc.replace(k, "<key>"))
     }
 
     /// `body` on one line, redacted, cut to [`BODY_EXCERPT_CHARS`] characters

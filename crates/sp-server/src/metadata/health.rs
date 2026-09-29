@@ -20,6 +20,15 @@ use sqlx::{Row, SqlitePool};
 /// the worker repairs them.
 pub const REPAIR_QUEUE_WHERE: &str = "gemini_failed = 1 AND normalized = 1";
 
+/// Characters of a provider error kept on the status / in a probe answer: a
+/// Claude error carries the proxy's whole reply, an LLM answer can be long.
+pub const MAX_ERROR_CHARS: usize = 300;
+
+/// `error` cut to [`MAX_ERROR_CHARS`] characters.
+pub fn bounded_error(error: &str) -> String {
+    error.chars().take(MAX_ERROR_CHARS).collect()
+}
+
 /// One provider's health, as `status.metadata.providers[]` shows it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderHealth {
@@ -69,12 +78,13 @@ impl MetadataHealth {
         }
     }
 
-    /// Provider `index` failed with `error` (a provider error text never
-    /// carries a key — `gemini::GeminiProvider` redacts them).
-    pub fn record_error(&self, index: usize, error: String) {
+    /// Provider `index` failed with `error`, kept to [`MAX_ERROR_CHARS`] (a
+    /// provider error text never carries a key — `gemini::GeminiProvider`
+    /// redacts them).
+    pub fn record_error(&self, index: usize, error: &str) {
         let mut providers = self.lock();
         if let Some(p) = providers.get_mut(index) {
-            p.last_error = Some(error);
+            p.last_error = Some(bounded_error(error));
         }
     }
 

@@ -3,6 +3,8 @@ paths:
   - "crates/sp-server/src/metadata/**"
   - "crates/sp-server/src/reprocess/**"
   - "crates/sp-server/src/api/metadata*.rs"
+  - "crates/sp-server/src/gemini_api*.rs"
+  - "crates/sp-server/src/lyrics/g35t_client.rs"
   - "e2e/post-deploy-metadata.spec.ts"
   - "e2e/post-deploy-flac.spec.ts"
 ---
@@ -22,9 +24,10 @@ answered correctly), and nothing ever ran the real providers.
 - `metadata::provider_chain(ai_client, gemini_csv, gemini_model)` =
   [Claude (CLIProxyAPI), Gemini]. `lib.rs` builds it ONCE; the same `Arc` goes
   to `DownloadWorker`, `ReprocessWorker` and `AppState.metadata_chain` (the
-  probe + `status.metadata`). Both workers take `Arc<ProviderChain>`, so an
-  ad-hoc `Vec<Box<dyn MetadataProvider>>` cannot be wired in again. Never
-  build a second provider list anywhere.
+  probe + `status.metadata`). Both workers take `Arc<ProviderChain>`; an
+  ad-hoc provider list must not be wired in again (`ProviderChain::new` is
+  `pub` for tests and composition, so this is a rule, not a type guarantee).
+  Never build a second provider list anywhere.
 - Gemini is in the chain even with no key: it then fails at once with "no API
   key configured", visible on the status, instead of silently vanishing.
 - Every chain member is wrapped (`chain::Recorded`): each call's outcome +
@@ -33,15 +36,24 @@ answered correctly), and nothing ever ran the real providers.
 
 ## Gemini on the key list
 
+- ONE Gemini key-list contract for every Gemini caller: `crate::gemini_api`
+  (the API root, `gemini_keys_from_setting`, `key_verdict`, the same-key 5xx
+  `RETRY_BACKOFFS` 2/4/8/16 s). The lyrics transcription
+  (`lyrics::g35t_client`) and `metadata::gemini` both judge a non-2xx answer
+  by `key_verdict` alone — never a local copy of the rules (review round 1
+  found two diverging copies).
 - `GeminiProvider::new(keys, model)` takes the SPLIT list — always
-  `lyrics::g35t_client::gemini_keys_from_setting(csv)`, never the raw
-  setting. One key per request; a 429 or a key refusal (403, a 400 whose body
-  names the API key) → next key; any other status stops (it would fail the
-  same on every key). All keys failed → `RateLimited(detail)` when any was
-  429 (the reprocess worker's cooldown), else `ApiError(detail)`. The clean-up
-  pass uses the key that answered.
+  `gemini_api::gemini_keys_from_setting(csv)`, never the raw setting. One key
+  per request; a 429 or a key refusal (403, a 400 whose body names the API
+  key) → next key; a 5xx → the SAME key again after each pause; anything else
+  stops (it would fail the same on every key). All keys failed →
+  `RateLimited(detail)` when any was 429 (the reprocess worker's cooldown),
+  else `ApiError(detail)`. The clean-up pass uses the key that answered and
+  never retries (it is cosmetic).
 - An error text / log line carries the key INDEX (`key 2 of 5`), the status
-  and a ≤ 200-char body excerpt redacted BEFORE the cut — never a key.
+  and a ≤ 200-char body excerpt redacted (longest key first) BEFORE the cut —
+  never a key. A recorded / probed provider error is cut to 300 chars
+  (`health::bounded_error`): a Claude error carries the proxy's whole reply.
 - Request tools: `"tools": [{"google_search": {}}]` is still the grounding
   tool for `generateContent` on Gemini 3 Pro (ai.google.dev, checked
   29.9.2026). The answer text is every non-thought part joined.
@@ -53,7 +65,10 @@ answered correctly), and nothing ever ran the real providers.
   `health::REPAIR_QUEUE_WHERE` — the SAME predicate the reprocess worker
   selects by (one constant), `null` (never a false 0) if unreadable.
 - `POST /api/v1/metadata/probe {youtube_id, title}` runs EACH provider on its
-  own (concurrently), returns each outcome, writes nothing.
+  own (concurrently, each bounded by `PROBE_TIMEOUT` = 180 s, below the spec's
+  220 s so a hung provider fails the gate WITH its name), returns each
+  outcome, writes nothing. 400 on an empty id / title; a missing field is
+  axum's 422.
 - `e2e/post-deploy-metadata.spec.ts` probes `gq-4FVRr_ow` with its YouTube
   title: the chain must be [claude, gemini] and every provider must answer
   "Stand On Your Promise" / an artist containing "Emerging Sound" (case-
@@ -79,7 +94,10 @@ answered correctly), and nothing ever ran the real providers.
   "k1")`. Assert the raw header through `received_keys` when the test is
   about what was sent.
 - A Claude mock that fails must answer a 4xx: `AiClient` retries 429/5xx
-  with 1 s / 2 s sleeps.
+  with 1 s / 2 s sleeps. A Gemini 5xx test sets millisecond pauses with
+  `GeminiProvider::with_retry_backoffs` (test-only).
+- `.cargo/mutants.toml` no longer excludes `reprocess/` (only its timer loop
+  `ReprocessWorker::run`): a changed line there needs its killing test.
 - The #136 RED kept the old behaviour in two named spots (the key list joined
   into one header; `try_providers` keeping only the last error) — the same
   pattern works for a later change here.

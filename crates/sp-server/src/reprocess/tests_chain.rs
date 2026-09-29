@@ -182,3 +182,66 @@ async fn an_empty_chain_fails_with_a_reason() {
     assert_eq!(failure.reasons, "no providers configured");
     assert!(!failure.rate_limited);
 }
+
+/// Refuses the #136 video, answers every other one.
+struct RefusesTheFirstVideo;
+
+#[async_trait]
+impl MetadataProvider for RefusesTheFirstVideo {
+    async fn extract(&self, video_id: &str, _title: &str) -> Result<VideoMetadata, MetadataError> {
+        if video_id == VIDEO {
+            return Err(MetadataError::ApiError("no answer for this one".into()));
+        }
+        Ok(VideoMetadata {
+            song: SONG.into(),
+            artist: ARTIST.into(),
+            source: sp_core::metadata::MetadataSource::Gemini,
+            gemini_failed: false,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "claude"
+    }
+}
+
+#[tokio::test]
+async fn a_failure_that_is_not_a_rate_limit_does_not_abort_the_batch() {
+    let (pool, first) = pool_with_parser_row().await;
+    let second: i64 = sqlx::query(
+        "INSERT INTO videos (playlist_id, youtube_id, title, song, artist, gemini_failed,
+                             normalized, file_path, metadata_source)
+         VALUES (7, 'second-vid1', 't', 't', '', 1, 1, '', 'regex') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get("id");
+    let chain = Arc::new(ProviderChain::new(vec![Box::new(RefusesTheFirstVideo)]));
+    let mut worker = ReprocessWorker::new(pool.clone(), chain, PathBuf::from("."));
+
+    assert_eq!(worker.process_all().await.unwrap(), 1);
+
+    assert!(
+        !worker.in_global_cooldown(),
+        "a plain failure starts no cooldown"
+    );
+    assert_eq!(row(&pool, first).await, (TITLE.into(), String::new(), 1));
+    assert_eq!(row(&pool, second).await, (SONG.into(), ARTIST.into(), 0));
+    assert_eq!(
+        worker.backoff_of(first),
+        (60, 0),
+        "stage 0 after its first failure"
+    );
+}
+
+#[tokio::test]
+async fn the_failed_row_warn_names_the_next_pause_and_its_stage() {
+    let (pool, _) = pool_with_parser_row().await;
+    let mut worker = ReprocessWorker::new(pool, chain_of(vec![]), PathBuf::from("."));
+
+    assert_eq!(worker.backoff_of(42), (60, 0), "no attempt yet");
+    worker.bump_video_backoff(42);
+    worker.bump_video_backoff(42);
+    assert_eq!(worker.backoff_of(42), (5 * 60, 1));
+}
