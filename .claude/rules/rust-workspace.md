@@ -474,6 +474,12 @@ the test that kills each one BEFORE CI's mutation gate runs.
 - The Tier-0 hook blocks it as a cargo subcommand. Because it only lists,
   the logged `# airuleset:build-ok list-only` bypass is honest here, and
   only here.
+- **In a worktree lane, and after merging origin/dev into it** (#221 L4b):
+  the Bash guard refuses `cd <wt> && cargo mutants … > file`. Run two plain
+  commands instead: `git -C <wt> diff origin/dev..HEAD --output=<scratch>/range.diff`,
+  then `cargo mutants --in-diff <scratch>/range.diff --list --dir <wt>`
+  (no `cd`, no redirect). Diff from the MERGED `origin/dev`, not from the
+  lane's original base: `<base>..HEAD` then also lists dev's own commits.
 - **A NEW file is missing from `git diff <base>` until git tracks it**
   (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
   showed no mutant at all for the new `remote/codec.rs`. `git add -N
