@@ -144,6 +144,15 @@ come from `SP-program`, never from cg OBS.
   1 MiB frame of nested arrays) and refuses bytes after the one value
   (obs-websocket's strict `from_msgpack` does too). A map key must be a
   string; binary / extension data has no JSON value and is refused.
+  **Both encodings decode through `codec::PlainValue`, never through
+  `serde_json::Value`'s own `Deserialize`** (review round 1): sp-server
+  enables serde_json's `raw_value` feature (`api/preview.rs`), and with it
+  `Value` re-parses the string after a first key
+  `$serde_json::private::RawValue` as JSON with a FRESH 128-level budget —
+  strings nested that way took a session's stack ~18 × 127 levels deep
+  before Identify (the JSON path since #213). `PlainValue`'s visitor keeps
+  every key a plain string, so nothing is re-parsed. Never "simplify" it
+  back to `serde_json::from_str::<Value>` / `Value::deserialize`.
 - `remote/studio_events.rs` (#221 L3) holds the facade's OWN events (see
   "Program feedback" below): `FacadeEvent`, `run_program_feedback`,
   `announce_transition`, `wait_transition_end`.
@@ -494,7 +503,10 @@ follow are the later lanes (L4a–L6) of #221.
   secret-staging hook) and the facade's Identified written by hand. Also the
   round trip of every JSON value kind, the 4002s, trailing bytes, a non-string
   key / bin / ext, and the depth bound against serde_json's own (127 nested
-  pass, 128 do not, a 1 MB frame of nesting is refused).
+  pass, 128 do not, a 1 MB frame of nesting is refused), and the
+  `$serde_json::private::RawValue` key staying an ordinary key in both
+  encodings (the test first shows `from_str::<Value>` re-parses it in this
+  build).
 - `e2e/obs-driver-protocol.spec.ts` (ubuntu mock suite, no box): a local
   msgpack-only stub must accept the post-deploy driver; the driver must
   offer only `obswebsocket.msgpack` and send no text frame.
