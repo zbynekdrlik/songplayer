@@ -355,11 +355,15 @@ fn a_genuine_plus_50_ms_utc_step_is_followed_in_one_event_at_the_next_boundary()
     let mut wall = WallClock::new(Box::new(clk.clone()));
     clk.step_utc(50 * MS);
     let (before, after) = tick_once(&mut wall, &clk);
-    assert_eq!(wall.frames_since_resample(), 1, "a plain tick, no resample");
+    assert_eq!(
+        wall.frames_since_resample(),
+        0,
+        "the follow restarts the count"
+    );
     assert_eq!(after - before, 50 * MS, "the whole step in one event");
     assert_eq!(after, clk.truth_100ns(), "on the stepped UTC at once");
-    // The next resample is normal again.
-    for _ in 0..98 {
+    // The next resample, 100 ticks after the follow, is normal again.
+    for _ in 0..99 {
         tick_once(&mut wall, &clk);
     }
     let (before, after) = tick_once(&mut wall, &clk);
@@ -405,8 +409,8 @@ fn a_genuine_minus_50_ms_utc_step_is_one_hold_at_the_next_boundary_never_stepped
         clk.truth_100ns(),
         "then it runs on the line"
     );
-    // The next resample is normal again.
-    for _ in 0..98 {
+    // The next resample, 100 ticks after the follow, is normal again.
+    for _ in 0..99 {
         tick_once(&mut wall, &clk);
     }
     let (before, after) = tick_once(&mut wall, &clk);

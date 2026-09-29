@@ -413,3 +413,68 @@ fn a_quiet_boundary_after_a_rejected_probe_restarts_the_detection() {
     );
     assert_eq!(wall.anchor_stats().steps_followed, 1);
 }
+
+#[test]
+fn a_resample_that_follows_after_every_probe_was_rejected_reports_the_time_since_the_first() {
+    // Review round 1: a follow by the resample path (every probe for 200
+    // boundaries preempted) reports the detect-to-follow time too, and ends
+    // the detection, instead of keeping the previous step's value.
+    let clk = VirtualClock::new(0);
+    let mut wall = WallClock::new(Box::new(clk.clone()));
+    clk.step_utc(90 * MS);
+    // Ticks 1–99: wide probes. Tick 100: a clean resample (1 ms + armed),
+    // then a wide probe. Ticks 101–199: wide probes. Tick 200: a clean
+    // resample confirms the step and follows it; its probe reads clean.
+    let mut script = vec![400_000; 99];
+    script.push(0);
+    script.extend([400_000; 100]);
+    script.push(0);
+    clk.delay_next_reads(&script);
+    for _ in 0..200 {
+        tick(&mut wall, &clk);
+    }
+    assert_eq!(wall.now_100ns(), clk.truth_100ns(), "followed");
+    let st = wall.anchor_stats();
+    assert_eq!(
+        (st.steps_followed, st.last_step_us, st.slewed_us),
+        (1, 90_000, 1_000),
+        "the resample path followed it"
+    );
+    // 199 frames + the 200 µs the first wide probe's midpoint sits back.
+    assert_eq!(
+        wall.probe_stats(),
+        StepProbeStats {
+            rejected: 199,
+            last_detect_to_follow_us: 6_633_526,
+        }
+    );
+}
+
+#[test]
+fn the_part_a_resample_armed_counts_toward_the_2_ms_threshold() {
+    let armed = |delta: i64, applied: i64| {
+        Some(PendingStep {
+            delta_100ns: delta,
+            applied_100ns: applied,
+            direction: StepDirection::of(delta),
+        })
+    };
+    // A 2.5 ms step: the resample applied 1 ms, the probe reads 1.5 ms. The
+    // whole step is over 2 ms: confirmed and followed, the total 2.5 ms.
+    let f = follow_of(probe_then_confirm(armed(25_000, MS), 15_000, 15_000, 0));
+    assert_eq!(f.step.applied_100ns, 15_000);
+    assert_eq!(f.followed.total_100ns, 25_000);
+    // Exactly 2 ms in all (1 ms applied + 1 ms read) is not a step.
+    let b = Instant::now();
+    let probe = read(b, AT, line(AT) + MS, 0);
+    let d = decide_step_probe(anchor(b), armed(2 * MS, MS), probe, || {
+        panic!("2 ms in all is not a step")
+    });
+    assert_eq!(d, ProbeDecision::Quiet);
+    // An armed step the probe does not see again counts for nothing.
+    let probe = read(b, AT, line(AT) + 15_000, 0);
+    let d = decide_step_probe(anchor(b), armed(50 * MS, MS), probe, || {
+        panic!("1.5 ms alone is not a step")
+    });
+    assert_eq!(d, ProbeDecision::Quiet);
+}

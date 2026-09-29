@@ -301,7 +301,8 @@ fn a_minus_1_5_s_step_is_one_hold_from_the_next_boundary_and_the_wall_never_goes
         prev = w;
     }
     assert_eq!(wall.now_100ns(), clk.truth_100ns(), "on the UTC line");
-    // The next resample is normal again (1 + 48 ticks so far).
+    // The next resample is normal again (48 ticks since the follow restarted
+    // the count).
     while wall.frames_since_resample() < 99 {
         clk.advance_ns(FRAME_NS);
         wall.tick();

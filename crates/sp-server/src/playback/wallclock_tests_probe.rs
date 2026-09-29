@@ -57,8 +57,8 @@ fn a_plus_90_ms_and_a_plus_700_ms_step_are_followed_whole_at_the_boundary_they_l
         let (before, after) = tick_once(&mut wall, &clk);
         assert_eq!(
             wall.frames_since_resample(),
-            11,
-            "{step}: a plain tick, no resample"
+            0,
+            "{step}: the follow re-anchored, so the resample counter restarts"
         );
         assert_eq!(after - before, step, "{step}: the whole step in ONE event");
         assert_eq!(
@@ -295,4 +295,68 @@ fn a_2_ms_step_is_slewed_by_the_resample_and_one_just_over_it_is_followed_at_onc
     assert_eq!(after - before, 2 * MS + 1);
     let st = wall.anchor_stats();
     assert_eq!((st.steps_followed, st.slewed_us), (1, 0));
+}
+
+#[test]
+fn a_resample_never_lands_inside_a_hold_the_probe_just_followed() {
+    // Review round 1: a follow on the 99th tick used to leave the resample
+    // due on the very next tick, and a wall that ticks INSIDE its own hold
+    // (the submit consumer ticks per job) then resampled there: it read the
+    // rest of the hold as a new −57 ms step, cut the hold to 1 ms, re-armed
+    // and "followed" it a second time. A follow is a fresh anchor, so it
+    // restarts the resample count.
+    let clk = VirtualClock::new(0);
+    let mut wall = WallClock::new(Box::new(clk.clone()));
+    ticks(&mut wall, &clk, 98);
+    clk.step_utc(-90 * MS);
+    let (before, after) = tick_once(&mut wall, &clk);
+    assert_eq!(after, before, "the 99th tick follows the step: ONE hold");
+    assert_eq!(wall.frames_since_resample(), 0, "a fresh anchor");
+    // One boundary later, still inside the 90 ms hold.
+    let (_, inside) = tick_once(&mut wall, &clk);
+    assert_eq!(inside, before, "still the one hold");
+    assert_eq!(wall.frames_since_resample(), 1, "no resample inside it");
+    ticks(&mut wall, &clk, 2);
+    assert_eq!(wall.now_100ns(), clk.truth_100ns(), "then on the UTC line");
+    assert_eq!(
+        wall.anchor_stats(),
+        WallAnchorStats {
+            max_step_us: 90_000,
+            wide_brackets: 0,
+            slewed_us: 0,
+            steps_followed: 1,
+            last_step_us: -90_000,
+            holds_followed: 1,
+            last_hold_us: 90_000,
+        },
+        "one follow, one hold, nothing slewed"
+    );
+}
+
+#[test]
+fn a_2_5_ms_step_the_resample_sees_first_is_followed_whole_in_the_same_tick() {
+    // Review round 1: the resample applies its bounded 1 ms first, so the
+    // probe right after it reads only the 1.5 ms left — under 2 ms. The armed
+    // 1 ms counts toward the threshold: the whole step is 2.5 ms, a step.
+    let clk = VirtualClock::new(0);
+    let mut wall = WallClock::new(Box::new(clk.clone()));
+    ticks(&mut wall, &clk, 99);
+    clk.step_utc(25_000);
+    let (before, after) = tick_once(&mut wall, &clk);
+    assert_eq!(after - before, 25_000, "the whole 2.5 ms in this tick");
+    assert_eq!(after, clk.truth_100ns());
+    let st = wall.anchor_stats();
+    assert_eq!(
+        (st.steps_followed, st.last_step_us, st.slewed_us),
+        (1, 2_500, 1_000)
+    );
+    // Exactly 2 ms at the resample tick stays a slew: 1 ms now, the rest at
+    // the next resample.
+    let clk = VirtualClock::new(0);
+    let mut wall = WallClock::new(Box::new(clk.clone()));
+    ticks(&mut wall, &clk, 99);
+    clk.step_utc(2 * MS);
+    let (before, after) = tick_once(&mut wall, &clk);
+    assert_eq!(after - before, MS, "the resample's bounded 1 ms only");
+    assert_eq!(wall.anchor_stats().steps_followed, 0);
 }
