@@ -120,51 +120,35 @@ fn find_json3_file(dir: &Path, youtube_id: &str) -> Result<Option<std::path::Pat
 
 /// Parse YouTube json3 subtitle content into a `LyricsTrack`.
 ///
-/// Each event becomes one line. Segments within an event are concatenated.
-/// Newlines in text are replaced with spaces. Empty lines are skipped.
-/// Returns `None` if there are no events or all lines are empty.
-///
-/// The `!e.is_empty()` match guard is skipped from mutation testing: replacing
-/// it with `true` produces an equivalent mutant — an empty events vec still
-/// yields `None` via the `lines.is_empty()` check below, so no test can
-/// distinguish the two branches.
-#[cfg_attr(test, mutants::skip)]
+/// A manual caption event shows up to two SUNG lines at once, separated by
+/// `\n`. Each sung line becomes its own text line (#144): the only consumers
+/// (`gather.rs`'s `yt_subs` candidate, which mtl force-aligns, and the
+/// source probe's line count) take the text, never the caption's timing, so
+/// the aligner times every sung line from the audio. Every line of an event
+/// keeps the event's own span — the caption's timing is never divided by
+/// hand. Segments within an event are concatenated first; lines are trimmed
+/// and blank ones skipped. Returns `None` if no event holds a non-blank line.
 pub fn parse_json3(content: &str) -> Result<Option<LyricsTrack>> {
     let root: Json3Root = serde_json::from_str(content)?;
 
-    let events = match root.events {
-        Some(e) if !e.is_empty() => e,
-        _ => return Ok(None),
-    };
-
     let mut lines: Vec<LyricsLine> = Vec::new();
 
-    for event in events {
-        let segs = match event.segs {
-            Some(s) => s,
-            None => continue,
-        };
-
-        // Concatenate all segment text
-        let text: String = segs.iter().map(|s| s.utf8.as_str()).collect();
-        // Replace newlines with spaces and trim
-        let text = text.replace('\n', " ");
-        let text = text.trim().to_string();
-
-        if text.is_empty() {
+    for event in root.events.unwrap_or_default() {
+        let Some(segs) = event.segs else {
             continue;
-        }
-
+        };
+        let text: String = segs.iter().map(|s| s.utf8.as_str()).collect();
         let start_ms = event.t_start_ms;
         let end_ms = start_ms + event.d_duration_ms;
-
-        lines.push(LyricsLine {
-            start_ms,
-            end_ms,
-            en: text,
-            sk: None,
-            words: None,
-        });
+        for sung in text.split('\n').map(str::trim).filter(|l| !l.is_empty()) {
+            lines.push(LyricsLine {
+                start_ms,
+                end_ms,
+                en: sung.to_string(),
+                sk: None,
+                words: None,
+            });
+        }
     }
 
     if lines.is_empty() {
