@@ -411,6 +411,9 @@ impl super::PlaybackEngine {
     /// reaches cg OBS through the engine's OBS client). #215: also start the
     /// OBS-follow task and keep the bus for the deferred scene-go-off pause;
     /// #219: the follow consumes the OBS client's snapshots (`obs`).
+    /// #221 L4b: also tell cg OBS once what the restored program shows (the
+    /// startup re-mirror) and start the playback authority
+    /// (`program_authority.rs`), whose first value plays the restored program.
     /// Call once, after the #196 startup senders.
     #[cfg_attr(test, mutants::skip)]
     pub async fn start_program(
@@ -453,6 +456,15 @@ impl super::PlaybackEngine {
             crate::remote::Upstream::new(self.obs_cmd_tx.clone(), self.obs_event_tx.clone());
         // #221 L4a: the dashboard's cut mirrors to cg OBS through the same link.
         bus.legacy_cg().attach(upstream.clone());
+        // #221 L4b decision 1: cg OBS is told once what the restored program shows.
+        crate::playback::program_switch::remirror_on_air(&bus, &upstream).await;
+        // #221 L4b: SP-program (∪ SongPlayer's cg OBS record) drives playback.
+        tokio::spawn(super::program_authority::run_program_authority(
+            bus.clone(),
+            self.event_tx.clone(),
+            self.on_air.clone(),
+            shutdown.subscribe(),
+        ));
         let follow = crate::playback::program_follow::Follow::new(self.pool.clone(), bus.clone());
         crate::playback::program_follow::start_follow(follow, obs, shutdown);
         crate::remote::start_remote(self.pool.clone(), bus.clone(), upstream, shutdown);

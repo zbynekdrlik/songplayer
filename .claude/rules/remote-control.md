@@ -254,7 +254,8 @@ come from `SP-program`, never from cg OBS.
     `a_mirror_answered_after_the_upstream_timeout_is_still_recorded`
     (paused clock).
   - Every raw op=5 event cg OBS sends is broadcast as `ObsEvent::Raw` on the
-    existing `obs_event_tx`; the engine bridge ignores it.
+    existing `obs_event_tx` (#221 L4b deleted the engine bridge: nothing in
+    the engine reads cg OBS's events).
 - **Never block the engine's OBS queue.** `Upstream::enqueue` uses
   `try_send` (a full queue returns 207 at once; FIFO, so a call goes out
   after every call queued before it) and `Upstream::wait` waits at most the
@@ -384,10 +385,24 @@ what cg OBS shows only if that source's last mirror was accepted. After a
 dashboard cut to -1 (cg OBS keeps showing playlist P) and a restart,
 `shown` is `None` (P's dark-wall check silent until the next press, fails
 safe); after a cut to Q whose mirror failed (cg OBS still shows P) and a
-restart, `shown` is `Some(Q)` — in L4a only P's dark-wall check stays
-silent (the same fail-safe silence), but in L4b (`shown` joins the on-air
-set) P would read as off air. Persisting `shown` (or seeding
-`None`) is a main-session call BEFORE L4b. Every change is logged (`legacy cg: cg OBS shows what SongPlayer told
+restart, `shown` is `Some(Q)`. #221 L4b (main-session decision 1, comment
+5884501960): `shown` stays unpersisted, and at startup
+`program_switch::remirror_on_air` sends the restored playlist's catalog scene
+to cg OBS ONCE through this ticketed mirror, so the seed is what cg OBS was
+told once cg OBS accepts it — that closes the Q case (a re-mirror that never
+lands within the mirror's wait, 3 + 4 s, e.g. cg OBS still starting, leaves
+the unconfirmed seed: a failed mirror, see `program-bus.md` "The playback
+authority"). A restored -1 sends nothing (the decision: cg OBS keeps its
+manual scene), so the dashboard -1 case stays (for the main session):
+after a dashboard cut to -1 while cg OBS showed P and a restart, P is NOT
+on air (`shown` `None`); its pipeline, created Idle at startup, never
+starts, while cg OBS (and "OBS manuál") still shows P's output, until the
+next press. Three more of the same class (review round 2), listed in
+`legacy_cg.rs`: a manual press while "OBS manuál" is inactive (or whose -1
+cut failed to persist) seeds `Some(P)` after a restart and the re-mirror
+moves cg OBS off the operator's manual scene; a cut to a playlist whose
+catalog names no scene leaves an unconfirmed seed. Persisting `shown`
+would close all four — a main-session call. Every change is logged (`legacy cg: cg OBS shows what SongPlayer told
 it` INFO from → to; a dropped late answer DEBUG; the restore INFO). Served as `legacy_cg {shown}` on
 `GET /api/v1/program`; it keys the dark-wall expectation
 (`ndi_health_expect`, `obs-ndi-health.md`) and, from L4b, the playback
@@ -681,14 +696,20 @@ with the mirror and the link.
   `TriggerStudioModeTransition`: the facade ends a Cut at once, and Node's
   `ws` may hand the response and the Ended frame over in one tick, so a flag
   raised after the call's promise could undo the Ended and stall the wait.
-- Until #221 L4b the PLAYBACK is still driven by cg OBS's scene detection:
-  a playlist press cuts `SP-program` at once, but the playlist starts
-  playing when the mirror has switched cg OBS. A failed mirror leaves the
-  playlist on `SP-program` paused (`cg_forward` says so).
+- #221 L4b: the PLAYBACK follows SongPlayer's own program (`program-bus.md`
+  "The playback authority"): a playlist press cuts `SP-program` and plays the
+  playlist at once; the previous playlist stays on air until cg OBS answers
+  the mirror (the union with `legacy_cg.shown`). A failed mirror leaves BOTH
+  playing (the legacy consumers keep cg OBS's playlist) until the next press.
 - Hand switches in cg OBS's own UI are invisible to the facade (no cg
-  tracking, by the owner's ruling): the next press decides.
+  tracking, by the owner's ruling): the next press decides. Since L4b the
+  playlist cg OBS was switched to by hand is not on air, so the consumers on
+  cg OBS show its paused (or idle black) output until that press; before
+  L4b cg OBS's scene detection started it.
 - **Until the cutover / L4b the E2E's "scene to restore" is SP-program's,
-  not the wall's** (L3 + review round 1, for the main session). The E2E
+  not the wall's** (L3 + review round 1, for the main session; since L4b
+  `/api/v1/status.active_scene` is SongPlayer's own program, and the box runs
+  with the follow off and "OBS manuál" on since the cutover). The E2E
   captures its initial scene from the facade (the dispatch: the cg driver is
   for the recording only), but cg OBS's program — what the wall, FOH, lv1
   and strih take — can differ from SP-program's name:

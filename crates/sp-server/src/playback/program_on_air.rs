@@ -19,10 +19,14 @@
 //!   the follow.
 //! - [`program_scene_name`] is the ONE name resolver: the scene, else "OBS
 //!   manuál" for the NDI input, else none. It never asks cg OBS.
+//! - #221 L4b: [`on_air_set`] is the ONE "which playlists are on air" rule,
+//!   and [`on_air_changes`] the events a change of it becomes
+//!   (`program_authority.rs`, the playback authority).
 //!
-//! The facade's per-session preview falls back to it (#221 L2); the facade's
-//! feedback, `/api/v1/status` and the playback authority arrive in the later
-//! lanes of #221.
+//! The facade's per-session preview and feedback (#221 L2, L3),
+//! `/api/v1/status` and the playback authority (L4b) read them.
+
+use std::collections::BTreeSet;
 
 use sp_core::config::{PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
 
@@ -60,6 +64,39 @@ pub fn program_scene_name(on_air: &OnAir) -> Option<String> {
         (None, Some(PROGRAM_INPUT_ID)) => Some(PROGRAM_INPUT_LABEL.to_string()),
         _ => None,
     }
+}
+
+/// #221 L4b (design record 5873773896 §1e): the playlists on air —
+/// `SP-program`'s source when it is a playlist (the NDI input "OBS manuál"
+/// is none), together with the playlist SongPlayer last told cg OBS to show
+/// (`legacy_cg.shown`). Until B4 step 6 the legacy consumers (Arena, FOH,
+/// lv1, strih) still take cg OBS's program, so a playlist cg OBS still shows
+/// stays on air: after a dashboard cut to "OBS manuál" (the input carries
+/// it), or while a mirror is unanswered or failed.
+pub fn on_air_set(on_air: &OnAir, cg_shown: Option<i64>) -> BTreeSet<i64> {
+    let program = on_air.source.filter(|&source| source != PROGRAM_INPUT_ID);
+    program.into_iter().chain(cg_shown).collect()
+}
+
+/// #221 L4b: the `(playlist, on)` events of a change from `previous` to
+/// `current`: OFF for every playlist that left, then ON for every playlist
+/// that entered and for `cut_to` — the source `SP-program` was just cut to
+/// (a new publication) — even when it was on air already: the re-kick, so
+/// a press of the scene already on air plays a playlist paused out of band.
+/// A member nobody cut to (the outgoing playlist cg OBS still shows, one a
+/// dashboard cut to "OBS manuál" keeps on air) is never re-kicked, so a
+/// paused one stays paused (review round 1). Each part ascending.
+pub fn on_air_changes(
+    previous: &BTreeSet<i64>,
+    current: &BTreeSet<i64>,
+    cut_to: Option<i64>,
+) -> Vec<(i64, bool)> {
+    let off = previous.difference(current).map(|&pid| (pid, false));
+    let on = current
+        .iter()
+        .filter(|&&pid| !previous.contains(&pid) || Some(pid) == cut_to)
+        .map(|&pid| (pid, true));
+    off.chain(on).collect()
 }
 
 #[cfg(test)]

@@ -155,6 +155,42 @@ async fn ensure_is_idempotent() {
     );
 }
 
+/// #221 L4b: a pipeline created for a playlist ALREADY on air (the
+/// authority's ON came before it existed) goes on program itself; one
+/// created off air stays off program.
+#[tokio::test]
+async fn a_pipeline_created_for_a_playlist_on_air_goes_on_program() {
+    // On air it goes through the scene-on: `VideosAvailable` (Idle →
+    // WaitingForScene), then `SceneOn`, which finds no song to start yet.
+    let cases = [
+        (515, true, PlayState::WaitingForScene),
+        (9, false, PlayState::Idle),
+    ];
+    for (on_air, expected, state) in cases {
+        let (mut engine, pool) = engine_with_migrated_pool().await;
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (515, 'ytyoung', 'https://youtube', 'SP-young', 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // The authority diffed `on_air` as on air (its ON came before 515's
+        // pipeline existed).
+        engine.on_air.replace([on_air].into());
+
+        engine.ensure_pipeline_for_playlist(515).await;
+
+        let pp = engine.pipelines.get(&515).expect("the pipeline");
+        assert_eq!(
+            pp.scene_active.load(std::sync::atomic::Ordering::Acquire),
+            expected,
+            "{on_air} is on air"
+        );
+        assert_eq!(pp.state, state, "{on_air} is on air");
+    }
+}
+
 /// `remove_pipeline` on a playlist with no pipeline is a safe no-op.
 #[tokio::test]
 async fn remove_noop_when_absent() {

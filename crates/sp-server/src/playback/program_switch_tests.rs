@@ -7,10 +7,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::sync::{broadcast, oneshot};
+use sp_core::config::PROGRAM_INPUT_ID;
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::*;
+use crate::obs::ObsCommand;
+use crate::obs::remote_call::RemoteCall;
 use crate::playback::legacy_cg::LegacyCg;
 use crate::playback::program_bus::ProgramBus;
 use crate::playback::program_on_air::OnAir;
@@ -226,4 +229,118 @@ async fn an_accepted_mirror_is_recorded_as_shown_by_its_ticket() {
     confirm_mirror(async { true }, Arc::clone(&legacy), newer, 3).await;
     confirm_mirror(async { true }, Arc::clone(&legacy), older, 7).await;
     assert_eq!(legacy.shown_now(), Some(3));
+}
+
+fn ok() -> Option<Value> {
+    Some(json!({ "requestStatus": { "result": true, "code": 100 } }))
+}
+
+/// A link to a cg OBS whose command queue the test reads.
+fn cg_queue() -> (Upstream, mpsc::Receiver<ObsCommand>) {
+    let (tx, rx) = mpsc::channel(4);
+    (Upstream::new(Some(tx), broadcast::channel(4).0), rx)
+}
+
+/// The scene switch on cg OBS's queue, and the reply to answer it with.
+fn queued_switch(rx: &mut mpsc::Receiver<ObsCommand>) -> (Value, oneshot::Sender<Option<Value>>) {
+    let Ok(ObsCommand::Remote(RemoteCall::Request {
+        request_type,
+        request_data,
+        supersedes,
+        reply,
+        ..
+    })) = rx.try_recv()
+    else {
+        panic!("the re-mirror must be on cg OBS's command queue");
+    };
+    assert_eq!(request_type, "SetCurrentProgramScene");
+    assert!(supersedes, "a mirror: its program is already on air");
+    (request_data.expect("a scene name"), reply)
+}
+
+/// #221 L4b, main-session decision 1 (comment 5884501960): at startup cg OBS
+/// is told to show the restored playlist's catalog scene, through the
+/// ticketed mirror: one switch per call (and `start_program`, which is
+/// `mutants::skip` orchestration, calls it once); its OK is recorded in
+/// `legacy_cg` by the ticket taken when it was sent, so a late OK never
+/// overwrites a newer command's answer.
+#[tokio::test]
+async fn the_startup_re_mirror_sends_the_restored_playlist_scene_through_the_ticketed_mirror() {
+    let bus = ProgramBus::new();
+    bus.select_initial(7, Some("sp-fast"));
+    bus.legacy_cg().restored(7);
+    let (upstream, mut rx) = cg_queue();
+    let mut shown = bus.legacy_cg().shown(); // has seen the restored value
+
+    assert!(
+        remirror_on_air(&bus, &upstream).await,
+        "the mirror is queued"
+    );
+    let (data, reply) = queued_switch(&mut rx);
+    assert_eq!(data, json!({ "sceneName": "sp-fast" }));
+    assert!(rx.try_recv().is_err(), "one switch per call");
+    reply.send(ok()).unwrap();
+    tokio::time::timeout(Duration::from_secs(10), shown.changed())
+        .await
+        .expect("cg OBS's OK is recorded")
+        .unwrap();
+    assert_eq!(bus.legacy_cg().shown_now(), Some(7));
+
+    // Its ticket is taken when it is sent: a newer command's answer stays.
+    assert!(remirror_on_air(&bus, &upstream).await);
+    let (_, late) = queued_switch(&mut rx);
+    let newer = bus.legacy_cg().ticket();
+    assert!(bus.legacy_cg().confirmed(newer, Some(3)));
+    late.send(ok()).unwrap();
+    // A "must not change" window, only in the safe direction: correct code
+    // never changes `shown` here, whatever the runner's speed.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        bus.legacy_cg().shown_now(),
+        Some(3),
+        "the late OK is dropped"
+    );
+}
+
+/// Nothing is re-mirrored when no playlist scene is on program: nothing
+/// restored, the NDI input "OBS manuál" (cg OBS keeps its manual scene, even
+/// with a scene name), or a playlist whose catalog names no scene; nor when
+/// cg OBS is not reachable.
+#[tokio::test]
+async fn no_playlist_scene_on_program_nothing_is_re_mirrored() {
+    let cases = [
+        (None, None),
+        (Some(PROGRAM_INPUT_ID), None),
+        (Some(PROGRAM_INPUT_ID), Some("Slido")),
+        (Some(5), None),
+    ];
+    for (source, scene) in cases {
+        let bus = ProgramBus::new();
+        if let Some(source) = source {
+            bus.select_initial(source, scene);
+        }
+        let (upstream, mut rx) = cg_queue();
+        let queued = remirror_on_air(&bus, &upstream).await;
+        assert!(!queued, "{source:?} {scene:?}");
+        assert!(rx.try_recv().is_err(), "{source:?} {scene:?}: nothing sent");
+    }
+    let bus = ProgramBus::new();
+    bus.select_initial(7, Some("sp-fast"));
+    assert!(
+        !remirror_on_air(&bus, &Upstream::unlinked()).await,
+        "no OBS client: nothing queued"
+    );
+}
+
+/// The re-mirror's waiter says whether cg OBS accepted it: only an OK, never
+/// a refusal or no answer.
+#[tokio::test]
+async fn the_startup_answer_says_whether_cg_obs_accepted() {
+    let refused = json!({ "requestStatus": { "result": false, "code": 600 } });
+    for (answer, accepted) in [(ok(), true), (Some(refused), false), (None, false)] {
+        let (tx, rx) = oneshot::channel();
+        tx.send(answer.clone()).unwrap();
+        let got = startup_answer(Upstream::unlinked(), rx, "sp-fast".into()).await;
+        assert_eq!(got, accepted, "{answer:?}");
+    }
 }

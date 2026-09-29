@@ -44,6 +44,7 @@ pub(crate) mod pipeline_stub;
 mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
+mod program_authority; // #221 L4b: SP-program (∪ SongPlayer's cg OBS record) drives playback
 pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
 pub mod program_follow; // #215: SP-program follows cg OBS + the transition settings/spec task
 pub mod program_on_air; // #221: what is on air (the bus's watch value) + the one scene-name resolver
@@ -84,7 +85,6 @@ use crate::playlist::selector::VideoSelector;
 
 use pipeline::{PipelineCommand, PipelineEvent, PlaybackPipeline};
 use state::{PlayAction, PlayEvent, PlayState};
-use transport_state::transport_from_play_state;
 
 /// Minimum gap between `NowPlaying` position re-broadcasts per playlist.
 /// Keeps the WebSocket from flooding the dashboard on high-frequency
@@ -110,7 +110,8 @@ fn should_send_position_update(elapsed_ms: u64) -> bool {
 
 /// Map the internal server-side [`PlayState`] to the wire-level dashboard
 /// [`WsPlaybackState`]. #170: a pipeline the engine holds as `Playing` but
-/// whose scene is OFF program is paused (dark wall) — it must map to
+/// whose scene is OFF program (a hold, or #221 L4b a ▶ off air; the Player
+/// tells both from a paused pipeline by the transport) must map to
 /// `WaitingForScene`, matching the WS replay built from `handle_health_snapshot`'s
 /// `(Playing, Playing, scene_active = false) → Paused` reconciliation. A live
 /// `Playing` for such a pipeline flips a paused selector row to Playing, the
@@ -132,7 +133,7 @@ struct PlaylistPipeline {
     state: PlayState,
     mode: PlaybackMode,
     current_video_id: Option<i64>,
-    /// OBS program scene shows this playlist's NDI output. `Arc<AtomicBool>`
+    /// On program: on air per the playback authority (#221 L4b). `Arc<AtomicBool>`
     /// so the detached title-show task (1.5s delay) reads the CURRENT
     /// value at fire time, not a stale snapshot from spawn time.
     scene_active: Arc<AtomicBool>,
@@ -276,8 +277,11 @@ pub struct PlaybackEngine {
     /// ladder in that case).
     ndi_source_map: Option<crate::obs::NdiSourceMap>,
     /// #215: the program bus (set by `start_program`), asked whether a playlist
-    /// that left its OBS scene must keep playing through a transition.
+    /// that left program must keep playing through a transition.
     program: std::sync::OnceLock<Arc<crate::playback::program_bus::ProgramBus>>,
+    /// #221 L4b: the playlists on air as the playback authority last diffed
+    /// them, read by its stale check (`program_authority.rs`).
+    on_air: program_authority::OnAirPlaylists,
 }
 
 /// Construction-time configuration for [`PlaybackEngine`]. Bundling these
@@ -354,6 +358,7 @@ impl PlaybackEngine {
             preview_registry: std::sync::Arc::new(crate::playback::preview::PreviewRegistry::new()),
             ndi_source_map: None,
             program: std::sync::OnceLock::new(),
+            on_air: Default::default(),
         }
     }
 
@@ -456,11 +461,13 @@ impl PlaybackEngine {
         }
     }
 
-    /// Handle a scene change from the OBS module. On program, fires
-    /// `VideosAvailable` then `SceneOn` (folded so every caller — OBS
-    /// bridge, API, tests — goes through the same sequence). Off
-    /// program, fires `SceneOff`.
+    /// Put a playlist on or off program (#221 L4b: the playback authority's
+    /// `OnProgram`, `program_authority.rs`). On program, fires
+    /// `VideosAvailable` then `SceneOn` (folded so every caller goes through
+    /// the same sequence). Off program, fires `SceneOff`, or holds it through
+    /// its transition (`scene_off.rs`).
     pub async fn handle_scene_change(&mut self, playlist_id: i64, on_program: bool) {
+        let before = self.scene_snapshot(playlist_id); // for `broadcast_scene_flip`
         // Going off-program cancels title timers and clears Resolume
         // state (prevents last-write-wins bleed between playlists on
         // the shared `#sp-title` / `#sp-subs` clips — 2026-04-19 event).
@@ -484,12 +491,7 @@ impl PlaybackEngine {
                 pp.last_resolume_subtitles_signature = None;
                 pp.last_presenter_text = None;
             }
-            let _ = self
-                .resolume_tx
-                .try_send(crate::resolume::ResolumeCommand::HideTitle);
-            let _ = self
-                .resolume_tx
-                .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+            self.wall_after_scene_off().await; // #221 L4b: or re-synced to one on program
         }
 
         if on_program {
@@ -514,6 +516,7 @@ impl PlaybackEngine {
         } else {
             self.scene_off(playlist_id).await; // #215: held through a transition
         }
+        self.broadcast_scene_flip(playlist_id, before); // #221 L4b: the WS state
     }
 
     /// Re-wake pipelines parked in `WaitingForScene` after the download
@@ -635,20 +638,10 @@ impl PlaybackEngine {
                         start_position_ms: None,
                     });
 
-                    // Broadcast the state change so the dashboard updates.
-                    // #170: gate on scene_active so a Previous on an
-                    // off-program playlist shows WaitingForScene, matching
-                    // the health-label replay. #201: transport reports the raw
-                    // decoding state so the Player label follows the pipeline.
-                    let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
-                        playlist_id,
-                        state: play_state_to_ws(
-                            &PlayState::Playing { video_id },
-                            pp.scene_active.load(Ordering::Acquire),
-                        ),
-                        mode: pp.mode,
-                        transport: transport_from_play_state(&PlayState::Playing { video_id }),
-                    });
+                    // Broadcast the state change so the dashboard updates: an
+                    // off-program Previous shows WaitingForScene (#170), with
+                    // the raw transport (#201).
+                    self.broadcast_state(playlist_id);
                 }
                 self.resync_after_play(playlist_id).await;
             }
@@ -720,23 +713,16 @@ impl PlaybackEngine {
         }
 
         // After the action (which may itself mutate the state to Playing),
-        // broadcast the final state if it differs from the pre-transition state.
-        // The pipeline always exists here (`execute_action` never removes one;
-        // the no-pipeline case returned at the top of this method). #170: derive
-        // the wire state from `scene_active` too, so a pipeline the engine holds
-        // as Playing while its scene is off program is broadcast as
-        // WaitingForScene (matching the health-label replay).
-        if let Some(pp) = self.pipelines.get(&playlist_id) {
-            let final_state = pp.state.clone();
-            let scene_active = pp.scene_active.load(Ordering::Acquire);
-            if old_state != final_state {
-                let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
-                    playlist_id,
-                    state: play_state_to_ws(&final_state, scene_active),
-                    mode,
-                    transport: transport_from_play_state(&final_state),
-                });
-            }
+        // broadcast the final state, in its scene-aware wire state
+        // (`broadcast_state`, #170), if it differs from the pre-transition
+        // state. The pipeline always exists here (`execute_action` never
+        // removes one; the no-pipeline case returned at the top).
+        if self
+            .pipelines
+            .get(&playlist_id)
+            .is_some_and(|pp| pp.state != old_state)
+        {
+            self.broadcast_state(playlist_id);
         }
     }
 

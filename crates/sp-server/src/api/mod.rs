@@ -13,6 +13,7 @@ pub mod routes;
 pub mod routes_import; // #180 shared bare-URL import core
 pub mod routes_ndi_recover;
 pub mod routes_seek; // #194 unified seek route
+pub mod routes_status; // #221 L4b: /api/v1/status's program fields from SongPlayer's own program
 pub mod stems;
 pub mod videos;
 pub mod websocket;

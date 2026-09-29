@@ -6,10 +6,6 @@ use sp_core::playback::PlaybackMode;
 /// Commands sent from the API layer to the playback engine.
 #[derive(Debug, Clone)]
 pub enum EngineCommand {
-    SceneChanged {
-        playlist_id: i64,
-        on_program: bool,
-    },
     Play {
         playlist_id: i64,
     },
@@ -56,10 +52,10 @@ pub enum EngineCommand {
         host: String,
     },
     /// #132: Register a playback pipeline for a playlist created or activated
-    /// at runtime via the API, so scene detection can start it without a
-    /// process restart. The engine reconciles from the DB (creates only when
-    /// the playlist is active and has a non-empty NDI name); idempotent and
-    /// safe to over-send.
+    /// at runtime via the API, so it can play without a process restart (one
+    /// already on air goes on program at once, #221 L4b). The engine
+    /// reconciles from the DB (creates only when the playlist is active and
+    /// has a non-empty NDI name); idempotent and safe to over-send.
     EnsurePipeline {
         playlist_id: i64,
     },

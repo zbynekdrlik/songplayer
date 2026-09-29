@@ -333,10 +333,11 @@ async fn health_snapshot_event_persists_the_receiver_count_to_the_db() {
 
 /// #201 (0.62.0 review): a manual /play on a pipeline that is ALREADY Playing
 /// must be a no-op — the scene-on fallback would flag an off-program output as
-/// on program. Engine-level: kills the `delete !` mutant on the call-site guard
-/// (the pure helper's test cannot). Uses `fresh_engine` from this file.
+/// on program. #221 L4b: a ▶ never flags a pipeline on program at all (the
+/// playback authority does): the not-playing branch starts it and leaves it
+/// off program too. Uses `fresh_engine` from this file.
 #[tokio::test]
-async fn engine_play_on_a_playing_pipeline_does_not_scene_on() {
+async fn engine_play_never_flags_a_pipeline_on_program() {
     let (mut engine, _registry) = fresh_engine().await;
     engine.ensure_pipeline(7, "SP-test");
     use std::sync::atomic::Ordering;
@@ -356,18 +357,18 @@ async fn engine_play_on_a_playing_pipeline_does_not_scene_on() {
         "a playing pipeline must not be flagged on program by /play"
     );
 
-    // The opposite branch still reaches the scene-on dispatch.
+    // The opposite branch starts it (no song in this DB) and claims nothing.
     engine.pipelines.get_mut(&7).unwrap().state =
         crate::playback::state::PlayState::WaitingForScene;
     engine.handle_engine_play(7).await;
     assert!(
-        engine
+        !engine
             .pipelines
             .get(&7)
             .unwrap()
             .scene_active
             .load(Ordering::Acquire),
-        "a non-playing pipeline goes through the scene-on dispatch"
+        "a ▶ never flags a pipeline on program (#221 L4b)"
     );
 }
 

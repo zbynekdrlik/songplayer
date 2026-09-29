@@ -89,10 +89,14 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // here as Slovak text and clear on the next successful command.
     let player_error = RwSignal::new(None::<String>);
 
-    let state_label = move || match state() {
-        PlaybackState::Playing => "Hrá",
-        PlaybackState::Idle => "Nehrá",
-        PlaybackState::WaitingForScene => "Čaká na scénu",
+    // #221 L4b: a ▶ claims no program, so a playlist that is not on air plays
+    // OFF program — the scene-aware `state` is WaitingForScene while the
+    // pipeline's own transport is Playing.
+    let state_label = move || match (state(), transport()) {
+        (PlaybackState::Playing, _) => "Hrá",
+        (PlaybackState::Idle, _) => "Nehrá",
+        (PlaybackState::WaitingForScene, TransportState::Playing) => "Hrá mimo programu",
+        (PlaybackState::WaitingForScene, _) => "Čaká na scénu",
     };
 
     // On-program: the honest signal the store already has — the NDI-health

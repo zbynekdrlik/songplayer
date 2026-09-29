@@ -2,6 +2,12 @@
 paths:
   - "crates/sp-server/src/playback/program_bus*.rs"
   - "crates/sp-server/src/playback/program_on_air*.rs"
+  - "crates/sp-server/src/playback/program_authority*.rs"
+  - "crates/sp-server/src/playback/runtime_pipeline.rs"
+  - "crates/sp-server/src/playback/engine_play.rs"
+  - "crates/sp-server/src/api/routes_status.rs"
+  - "sp-ui/src/components/player.rs"
+  - "e2e/player-off-program.spec.ts"
   - "crates/sp-server/src/playback/scene_catalog*.rs"
   - "crates/sp-server/src/playback/legacy_cg*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
@@ -181,6 +187,119 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 - `ProgramBus::switch_order` (a `tokio::sync::Mutex`) orders the scene
   switches of the #221 switch path (`remote-control.md`). It is separate
   from `cut_serial`, which only orders persist + cut.
+
+## The playback authority (#221 L4b, design record 5873773896 §1e)
+
+SongPlayer's own program decides what PLAYS; cg OBS's scene detection starts
+and pauses nothing (the OBS→engine bridge, `scene_change_commands` and
+`EngineCommand::SceneChanged` are deleted; a cg OBS disconnect pauses
+nothing).
+
+- **On air** = `program_on_air::on_air_set(&on_air, legacy_cg.shown)`:
+  SP-program's source when it is a playlist (-1 "OBS manuál" is none) ∪ the
+  playlist SongPlayer last told cg OBS to show. The union exists only until
+  B4 step 6 (the legacy consumers still take cg OBS): a dashboard cut to -1
+  while cg OBS shows sp-fast keeps sp-fast playing (the input carries it),
+  and so does a mirror that failed. Right after every playlist press BOTH
+  playlists are on air until cg OBS answers the mirror (tens of ms); the
+  outgoing one is then held by its window (`Hold::Until`) as before.
+- **The task** `program_authority::run_program_authority` (spawned in
+  `start_program`, after the restore and the startup re-mirror) watches
+  `ProgramBus::on_air()` and `legacy_cg().shown()`. Its first value (the
+  restored program) and every change of either become
+  `PipelineEvent::OnProgram(bool)` on the engine's OWN event channel
+  (`on_air_changes(previous, current, cut_to)`: OFF for every playlist that
+  left, then ON for every playlist that entered and for `cut_to`, the
+  source of a NEW publication (the task tracks `seq`) = the re-kick, so a
+  press of the scene already on air plays a playlist paused out of band).
+  **A member nobody cut to is never re-kicked** (review round 1, F1; it
+  amends the design record's "ON for every member", a main-session call):
+  with the union, the outgoing playlist cg OBS still shows, one a dashboard
+  cut to -1 keeps on air, and one a manual press keeps a moment would each
+  be re-kicked, and a playlist the operator PAUSED would start a new song
+  (its resume point lost). A shown-only change (the mirror's OK) re-kicks
+  nothing: OFFs, and an ON only for a playlist that entered (an older
+  press's OK landing after a newer cut). It ends on shutdown or when the
+  engine's channel is gone.
+- **The engine drops a stale event** (`PlaybackEngine::on_program`): ON
+  only while the playlist is on air, OFF only while it is not — "on air"
+  being the set the task last DIFFED (`OnAirPlaylists`, the engine's
+  `on_air`, written by the task BEFORE it sends that value's events), never
+  the live bus (review round 1, F2). The bus can change and change back
+  between two task wakes (the watch coalesces) and the task then sends
+  nothing, so an event checked against the live bus could be dropped with
+  no newer one behind it; against the diffed set a dropped event always
+  has one. So once the task diffed a cut to it, the selected source is
+  never taken off program — `Hold::OnProgram` / `CUT_SETTLE` are deleted
+  (`program-transition.md`) — and a hold's re-check (`scene_off_recheck`)
+  leaves a playlist in the diffed set alone even while its scene is still
+  off: its ON is queued behind the re-check (review round 2: A→B, A
+  pressed again inside B's window). The window left is the task's own wake
+  latency: an OFF or a re-check handled after a cut back but before the
+  task diffed it pauses the playlist, and the ON then starts a new song.
+- **The wall after an OFF** (`scene_off::wall_after_scene_off`, review
+  rounds 3-4): the incoming ON comes at the press and the outgoing OFF only
+  at the mirror's OK, so another playlist may already be on program with
+  its title and line up. With one on program (in the diffed set) its due
+  title is re-synced, none due fades the outgoing title, and its line is
+  re-sent at once; details in `program-transition.md`, "The wall after an
+  OFF".
+- **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
+  whose scene is not flagged runs `handle_scene_change(pid, true)` itself
+  (its ON came before it existed). An ON for a playlist with NO pipeline
+  creates it (`ensure_pipeline_for_playlist`, then the same guard): the
+  #196 startup senders run before `start_program`, but past their 45 s
+  budget the rest were never created (review round 1, F3).
+- **A manual ▶ claims nothing** (`PlayEvent::Start`: WaitingForScene +
+  Start → SelectAndPlay; `handle_engine_play` fires `VideosAvailable` +
+  `Start`). Off air the playlist plays OFF program: `scene_active` stays
+  false, no title goes to the wall, the WS state is `WaitingForScene` with
+  transport `Playing`, which the Player labels "Hrá mimo programu"
+  (`sp-ui` `player.rs`; "Čaká na scénu" otherwise). The mock's `/play`
+  models it from its program source (`e2e/player-off-program.spec.ts`).
+  An off-air ▶ on a playlist with no normalized video yet parks it in
+  WaitingForScene, and `on_video_processed` wakes only on-program
+  pipelines: the operator presses ▶ again once a video is ready (before
+  L4b the ▶ claimed program, so the download started it).
+- **The WS state follows a scene flip** (`engine_play.rs::broadcast_scene_flip`,
+  called at the end of `handle_scene_change`, review round 6). A ▶'d
+  playlist that then goes on air stays `Playing`, so `apply_event` (which
+  broadcasts only a raw state change) told the dashboard nothing and it
+  kept "Hrá mimo programu" for the rest of the song; a hold stays `Playing`
+  until its pause. The flip itself is broadcast when the raw state did not
+  change but the wire state (`play_state_to_ws`) did, so a pause or a new
+  song is still broadcast once. The mock models it: a program cut to a
+  playlist its `/play` started off air broadcasts `Playing`. Every engine
+  `PlaybackStateChanged` goes through `engine_play.rs::broadcast_state`
+  (review round 7): a new broadcast site calls it, never builds the
+  message inline (the WS on-connect replay in `api/websocket.rs` is the
+  one separate builder).
+- **`/api/v1/status`**: `active_scene` = the one resolver,
+  `active_playlist_ids` = the on-air set, ascending
+  (`api/routes_status.rs::on_air_fields`; `routes.rs` is at the cap). A
+  post-deploy read right after a press must wait for the set to SETTLE (at
+  most one playlist on air): `readEngineActiveScene` /
+  `waitEngineActiveScene` in `post-deploy.spec.ts`, the A/V gate's baseline
+  poll (`length === 1`).
+- **The startup re-mirror** (main-session decision 1, comment 5884501960):
+  `program_switch::remirror_on_air`, in `start_program` once the OBS link
+  is attached, sends the restored playlist's catalog scene to cg OBS ONCE
+  through the ticketed mirror (a ticket under `switch_order`,
+  `Upstream::enqueue(…, supersedes = true)`, `startup_answer` +
+  `confirm_mirror`), so `legacy_cg.shown` (seeded by the restore) is what
+  cg OBS was told. A restored -1, nothing restored, or a playlist whose
+  catalog names no scene sends nothing; no `last_remote_cut` (nothing was
+  pressed). If cg OBS does not connect within the mirror's wait (3 + 4 s)
+  the call is dropped as abandoned and `shown` keeps the seeded value.
+- Tests: `program_on_air_tests.rs` (the set + changes tables),
+  `program_authority_tests.rs` (the task over a real bus: first value,
+  press + confirm, re-kick, -1 keeps cg's playlist, the diffed set,
+  shutdown / gone engine; the engine's stale check against the diffed set
+  on an in-memory DB, the lazy pipeline, and — task + engine together — a
+  paused playlist through cuts that did not press it),
+  `tests_runtime_pipeline.rs`,
+  `tests_play_video.rs` (the off-air ▶), `routes_tests.rs` (status),
+  `program_switch_tests.rs` (the re-mirror).
 
 ## Tests
 

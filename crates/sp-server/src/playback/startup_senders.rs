@@ -45,7 +45,10 @@ const PORT_WAIT_MAX_POLLS: u32 = 40;
 const SENDER_READY_TIMEOUT: Duration = Duration::from_secs(5);
 /// Whole-serializer budget enforced by `lib.rs` (0.60.0 review): a stuck NDI
 /// sender may delay NDI, never the HTTP listener bind — past this the remaining
-/// pipelines are created lazily on their first scene/play event. Worst case
+/// pipelines are created lazily: a playlist on air on the playback authority's
+/// ON (#221 L4b, `program_authority.rs`; it waits for the sender like here,
+/// ≤ 5 s, on the engine loop), any other on a runtime `EnsurePipeline` (a ▶
+/// on a playlist with no pipeline stays a logged no-op). Worst case
 /// with every timeout hit is 10 s (port wait) + 5 s × outputs, so 45 s covers a
 /// healthy 10-output box several times over.
 pub(crate) const STARTUP_SENDERS_BUDGET: Duration = Duration::from_secs(45);

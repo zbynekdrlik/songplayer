@@ -323,10 +323,11 @@ and the driver's own doc:
 - a switch to the scene already on program is ALWAYS sent (the facade's
   re-kick re-mirrors cg OBS); the round-3 skip below is gone (review round
   1 of the L3 lane);
-- until L4b the engine's `active_scene` / `active_playlist_ids` still come
-  from cg OBS's scene detection, which follows the facade's mirror a moment
-  AFTER the driver returns: wait for it (`waitEngineActiveScene`), never
-  read once.
+- since L4b `active_scene` / `active_playlist_ids` are SongPlayer's own
+  program (the resolver + the on-air set); right after a switch the on-air
+  set holds BOTH playlists until cg OBS answers the mirror, a moment AFTER
+  the driver returns: wait for it to settle (`waitEngineActiveScene` treats
+  more than one playlist on air as not settled), never read once.
 
 The rest of this section is the #170 history of the cg OBS driver.
 

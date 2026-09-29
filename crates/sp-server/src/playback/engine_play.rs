@@ -7,11 +7,16 @@
 //! `handle_engine_play` (invoked from `lib.rs` on `EngineCommand::Play`)
 //! reads the snapshot — if `Some`, resumes the same video at the recorded
 //! position via `handle_play_video`, whose Play clears it (a failed lookup
-//! keeps it, the pipeline stays paused); otherwise falls back to the prior
-//! scene-on dispatch so fresh starts still pick a new video.
+//! keeps it, the pipeline stays paused); otherwise starts it with
+//! `PlayEvent::Start` so fresh starts still pick a new video (#221 L4b: it
+//! claims no program; off air it plays off program).
 //! `handle_play_video` clears any stale `paused_at` so picking a different
 //! setlist row after pause doesn't keep the old snapshot. `handle_play_video`
-//! itself lives here too (moved out of `mod.rs` for the 1000-line cap, #215).
+//! itself lives here too (moved out of `mod.rs` for the 1000-line cap, #215),
+//! and so does the dashboard state broadcast (`broadcast_state`, the one
+//! sender of `PlaybackStateChanged`) with its scene-flip half
+//! (`scene_snapshot` + `broadcast_scene_flip`, the end of
+//! `handle_scene_change`, #221 L4b review round 6).
 
 use std::sync::atomic::Ordering;
 
@@ -19,7 +24,7 @@ use sp_core::ws::ServerMsg;
 use tracing::{info, warn};
 
 use super::pipeline::PipelineCommand;
-use super::state::PlayState;
+use super::state::{PlayEvent, PlayState};
 use super::transport_state::transport_from_play_state;
 use super::{PlaybackEngine, play_state_to_ws};
 
@@ -123,19 +128,11 @@ impl PlaybackEngine {
                 warn!(playlist_id, video_id, %e, "PlayVideo: failed to record play");
             }
 
-            // #170: gate on scene_active so a PlayVideo on an off-program
-            // playlist shows WaitingForScene, matching the health-label replay.
-            // #201: transport reports the raw decoding state (Playing here) so
-            // an off-program dub reads `⏸ Pauza` while it plays.
-            let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
-                playlist_id,
-                state: play_state_to_ws(
-                    &PlayState::Playing { video_id },
-                    pp.scene_active.load(Ordering::Acquire),
-                ),
-                mode: pp.mode,
-                transport: transport_from_play_state(&PlayState::Playing { video_id }),
-            });
+            // #170: a PlayVideo on an off-program playlist shows
+            // WaitingForScene, matching the health-label replay; #201: the
+            // transport is the raw decoding state (Playing here), so an
+            // off-program dub reads `⏸ Pauza` while it plays.
+            self.broadcast_state(playlist_id);
         } else {
             warn!(playlist_id, video_id, "PlayVideo: no pipeline for playlist");
         }
@@ -152,10 +149,15 @@ impl PlaybackEngine {
             .and_then(|pp| pp.paused_at.take())
     }
 
-    /// Manual /play: resume paused video if snapshot present, else scene-on. #88.
+    /// Manual /play: resume paused video if snapshot present, else start it. #88.
     /// A pipeline that is ALREADY Playing (e.g. an off-program dub after a page
-    /// reload showed ▶ Prehrať) is a no-op — the scene-on fallback would flag an
-    /// off-program output as on program and re-push its title to the wall.
+    /// reload showed ▶ Prehrať) is a no-op: the state machine ignores
+    /// `VideosAvailable` and `Start` while Playing (the guard the old scene-on
+    /// fallback needed is gone). #221 L4b: a ▶ claims nothing (the
+    /// playback authority decides what is on program): `PlayEvent::Start`
+    /// leaves `scene_active` and the wall alone, so a playlist that is not on
+    /// air plays OFF program (the Player reads "Hrá mimo programu"), and one
+    /// on air starts as a scene-on would.
     pub async fn handle_engine_play(&mut self, playlist_id: i64) {
         // Read, not take: `handle_play_video` clears the snapshot with its
         // Play. A resume whose song lookup fails sends no Play, so the
@@ -168,22 +170,52 @@ impl PlaybackEngine {
                     .await;
             }
             None => {
-                let already_playing = self
-                    .pipelines
-                    .get(&playlist_id)
-                    .is_some_and(|pp| !play_should_scene_on(&pp.state));
-                if already_playing {
-                    tracing::debug!(playlist_id, "engine: /play on a playing pipeline — no-op");
-                    return;
-                }
-                self.handle_scene_change(playlist_id, true).await;
+                self.apply_event(playlist_id, PlayEvent::VideosAvailable)
+                    .await;
+                self.apply_event(playlist_id, PlayEvent::Start).await;
             }
         }
     }
-}
 
-/// Whether a manual /play with no pause snapshot may fall through to the
-/// scene-on dispatch: only when the pipeline is NOT already playing. Pure.
-pub(super) fn play_should_scene_on(state: &super::state::PlayState) -> bool {
-    !matches!(state, super::state::PlayState::Playing { .. })
+    /// `playlist_id`'s raw state and whether it is on program, taken before a
+    /// scene change (`broadcast_scene_flip`).
+    pub(super) fn scene_snapshot(&self, playlist_id: i64) -> Option<(PlayState, bool)> {
+        let pp = self.pipelines.get(&playlist_id)?;
+        Some((pp.state.clone(), pp.scene_active.load(Ordering::Acquire)))
+    }
+
+    /// Tell the dashboard when a scene change moved `playlist_id`'s wire
+    /// state (#170: `Playing` off program is `WaitingForScene`) but not its
+    /// raw state; a raw state change is broadcast by `apply_event`, once.
+    /// #221 L4b review round 6: a ▶'d playlist playing off program that goes
+    /// on air stays `Playing`, and the dashboard read "Hrá mimo programu" for
+    /// the rest of its song; one held through a transition stays `Playing`
+    /// until its pause, and now reads off program at once.
+    pub(super) fn broadcast_scene_flip(&self, playlist_id: i64, before: Option<(PlayState, bool)>) {
+        let (Some((was, was_on)), Some(pp)) = (before, self.pipelines.get(&playlist_id)) else {
+            return;
+        };
+        let state = play_state_to_ws(&pp.state, pp.scene_active.load(Ordering::Acquire));
+        if pp.state != was || state == play_state_to_ws(&was, was_on) {
+            return;
+        }
+        self.broadcast_state(playlist_id);
+    }
+
+    /// Tell the dashboard `playlist_id`'s state (`PlaybackStateChanged`):
+    /// the wire state folds in whether it is on program (#170: `Playing` off
+    /// program is `WaitingForScene`), the transport is the raw decoding
+    /// state (#201). The engine's one sender of it (the WS on-connect replay
+    /// in `api/websocket.rs` builds its own from the health labels).
+    pub(super) fn broadcast_state(&self, playlist_id: i64) {
+        let Some(pp) = self.pipelines.get(&playlist_id) else {
+            return;
+        };
+        let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
+            playlist_id,
+            state: play_state_to_ws(&pp.state, pp.scene_active.load(Ordering::Acquire)),
+            mode: pp.mode,
+            transport: transport_from_play_state(&pp.state),
+        });
+    }
 }

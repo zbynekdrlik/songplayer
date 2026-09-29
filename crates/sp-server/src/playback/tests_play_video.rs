@@ -719,15 +719,158 @@ async fn play_video_off_program_broadcasts_waiting_for_scene() {
     );
 }
 
-/// 0.62.0 release review: after a reload while an off-program pipeline decodes
-/// the label can read ▶ Prehrať (transport replays Paused); a click then POSTs
-/// /play, and `handle_engine_play` fell through to `handle_scene_change(pid,
-/// true)` — flagging an OFF-program output as on program and re-pushing its
-/// title to the wall. A pipeline that is already Playing must be a no-op.
-#[test]
-fn play_should_scene_on_only_when_not_already_playing() {
-    use super::engine_play::play_should_scene_on;
-    assert!(!play_should_scene_on(&PlayState::Playing { video_id: 1 }));
-    assert!(play_should_scene_on(&PlayState::WaitingForScene));
-    assert!(play_should_scene_on(&PlayState::Idle));
+/// Playlist 10 (NDI output `SP-fast`) with one normalized song, 77, and its
+/// pipeline, off program; the Resolume and dashboard WS receivers.
+async fn one_song_engine() -> (
+    PlaybackEngine,
+    mpsc::Receiver<crate::resolume::ResolumeCommand>,
+    broadcast::Receiver<ServerMsg>,
+) {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (10, 'p', 'u', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, audio_file_path) \
+         VALUES (77, 10, 'offair', 1, '/cache/o_video.mp4', '/cache/o_audio.flac')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, resolume_rx) = mpsc::channel(16);
+    let (ws_tx, ws_rx) = broadcast::channel::<ServerMsg>(64);
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
+        pool,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
+        resolume_tx,
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
+    engine.ensure_pipeline(10, "SP-fast");
+    (engine, resolume_rx, ws_rx)
+}
+
+/// Every `(state, transport)` broadcast for `playlist_id` since the last call.
+fn states_of(
+    ws_rx: &mut broadcast::Receiver<ServerMsg>,
+    playlist_id: i64,
+) -> Vec<(
+    sp_core::playback::PlaybackState,
+    sp_core::playback::TransportState,
+)> {
+    let mut states = Vec::new();
+    while let Ok(msg) = ws_rx.try_recv() {
+        if let ServerMsg::PlaybackStateChanged {
+            playlist_id: id,
+            state,
+            transport,
+            ..
+        } = msg
+            && id == playlist_id
+        {
+            states.push((state, transport));
+        }
+    }
+    states
+}
+
+/// #221 L4b: a manual ▶ with no resume point claims nothing. Off air it
+/// plays the playlist OFF program: `scene_active` stays false, nothing is
+/// sent to the wall, and the dashboard reads it as playing off program
+/// (`WaitingForScene` + transport `Playing`: "Hrá mimo programu"). On air
+/// (the authority put it on program) the same ▶ starts it as a scene-on did.
+#[tokio::test]
+async fn a_manual_play_off_air_plays_off_program_and_claims_nothing() {
+    let (mut engine, mut resolume_rx, mut ws_rx) = one_song_engine().await;
+
+    engine.handle_engine_play(10).await;
+
+    let pp = engine.pipelines.get(&10).unwrap();
+    assert_eq!(pp.state, PlayState::Playing { video_id: 77 }, "it plays");
+    assert!(
+        !pp.scene_active.load(std::sync::atomic::Ordering::Acquire),
+        "the ▶ claims no program"
+    );
+    assert!(resolume_rx.try_recv().is_err(), "nothing goes to the wall");
+    let mut last = None;
+    while let Ok(msg) = ws_rx.try_recv() {
+        if let ServerMsg::PlaybackStateChanged {
+            playlist_id: 10,
+            state,
+            transport,
+            ..
+        } = msg
+        {
+            last = Some((state, transport));
+        }
+    }
+    assert_eq!(
+        last,
+        Some((
+            sp_core::playback::PlaybackState::WaitingForScene,
+            sp_core::playback::TransportState::Playing
+        )),
+        "the dashboard reads it as playing off program"
+    );
+
+    // A second ▶ on the pipeline now playing is a no-op (0.62.0 release
+    // review: after a reload the label can read ▶ Prehrať for a pipeline
+    // that plays off program): no Play (every Play resets the position,
+    // `begin_play`), no program claim, nothing to the wall.
+    engine.pipelines.get_mut(&10).unwrap().cached_position_ms = 12_345;
+    engine.handle_engine_play(10).await;
+    let pp = engine.pipelines.get(&10).unwrap();
+    assert_eq!(pp.state, PlayState::Playing { video_id: 77 });
+    assert_eq!(pp.cached_position_ms, 12_345, "no Play was sent");
+    assert!(!pp.scene_active.load(std::sync::atomic::Ordering::Acquire));
+    assert!(resolume_rx.try_recv().is_err(), "nothing goes to the wall");
+
+    // On air (its scene flagged on program), a ▶ of the paused-by-song-end
+    // pipeline starts the next song on program.
+    let pp = engine.pipelines.get_mut(&10).unwrap();
+    pp.state = PlayState::WaitingForScene;
+    pp.scene_active
+        .store(true, std::sync::atomic::Ordering::Release);
+    engine.handle_engine_play(10).await;
+    let pp = engine.pipelines.get(&10).unwrap();
+    assert_eq!(pp.state, PlayState::Playing { video_id: 77 });
+    assert!(pp.scene_active.load(std::sync::atomic::Ordering::Acquire));
+}
+
+/// #221 L4b review round 6: a ▶'d playlist playing off program whose scene
+/// then goes on air (the operator presses it) stays `Playing`, so no state
+/// change told the dashboard: it read "Hrá mimo programu" for the rest of the
+/// song. The scene change tells it, once. A scene change that changes the
+/// state (the pause off program) is broadcast once, by that state change.
+#[tokio::test]
+async fn a_play_off_air_that_goes_on_program_is_broadcast_on_program() {
+    use sp_core::playback::{PlaybackState, TransportState};
+    let (mut engine, _resolume_rx, mut ws_rx) = one_song_engine().await;
+    engine.handle_engine_play(10).await; // off air: plays off program
+    states_of(&mut ws_rx, 10);
+
+    engine.handle_scene_change(10, true).await;
+    assert_eq!(
+        states_of(&mut ws_rx, 10),
+        [(PlaybackState::Playing, TransportState::Playing)],
+        "on program now"
+    );
+
+    engine.handle_scene_change(10, false).await; // no transition: paused
+    assert_eq!(
+        states_of(&mut ws_rx, 10),
+        [(PlaybackState::WaitingForScene, TransportState::Paused)],
+        "once, by the pause"
+    );
 }

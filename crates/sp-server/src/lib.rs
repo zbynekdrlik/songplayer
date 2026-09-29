@@ -102,9 +102,6 @@ pub struct ToolsStatus {
     pub deno_version: Option<String>,
 }
 
-#[cfg(test)]
-pub(crate) use obs_bridge::{run_obs_engine_bridge, scene_change_commands};
-
 // ---------------------------------------------------------------------------
 // Server configuration
 // ---------------------------------------------------------------------------
@@ -631,10 +628,9 @@ pub async fn start(
         }
     });
 
-    // 7. OBS→engine bridge + OBS WebSocket client (bridge subscribed first;
-    // #219: the client's snapshots feed the program follow, `start_program`).
-    let obs_side =
-        obs_bridge::start_obs(&pool, &obs_state, &engine_tx, &obs_rebuild_tx, &shutdown_tx).await?;
+    // 7. OBS WebSocket client (#219: its snapshots feed the program follow,
+    // `start_program`; #221 L4b: its scene detection drives no playback).
+    let obs_side = obs_bridge::start_obs(&pool, &obs_state, &obs_rebuild_tx, &shutdown_tx).await?;
 
     // 8. Reprocess worker (with Gemini provider if API key is configured)
     let mut reprocess_provider_list: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
@@ -710,8 +706,8 @@ pub async fn start(
     // #196: pre-create pipelines (= NDI senders) for all active playlists
     // deterministically in playlist.id order, after waiting for the previous
     // instance's ports to be released, so a restart yields the SAME name→port
-    // map (the dark-wall-after-restart fix). Runs before the engine command
-    // loop drains scene events, so no lazy scene-triggered creation preempts it.
+    // map (the dark-wall-after-restart fix). Runs before `start_program` and the
+    // engine loop; one missing past the budget is created on its authority ON.
     let active_playlists = db::models::get_active_playlists(&pool)
         .await
         .unwrap_or_default();

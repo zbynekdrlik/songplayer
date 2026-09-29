@@ -364,15 +364,17 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       `baseline scene must be an sp-* output, got "${baseline}"`,
     ).toBe(true);
     await driver.switchScene(baseline);
+    // #221 L4b: the on-air set keeps the previous scene's playlist until cg
+    // OBS answers the mirror; the baseline's alone is on air once it did.
     const status = await pollUntil(
-      `engine active_scene=${baseline} with an active playlist`,
+      `engine active_scene=${baseline} with its playlist alone on air`,
       10_000,
       () =>
         getJson<{ active_scene: string | null; active_playlist_ids: number[] }>(
           request,
           "/api/v1/status",
         ),
-      (s) => s.active_scene === baseline && s.active_playlist_ids.length > 0,
+      (s) => s.active_scene === baseline && s.active_playlist_ids.length === 1,
     );
     const active = status.active_playlist_ids;
     const first = await getJson<HealthRow[]>(request, "/api/v1/ndi/health");

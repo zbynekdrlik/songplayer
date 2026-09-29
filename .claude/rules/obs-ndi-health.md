@@ -206,7 +206,7 @@ output as a fault.
 playlist** (`playback/ndi_health_expect.rs::receiver_expected` = the
 reconciled label is `Playing` AND `legacy_cg.shown == Some(pid)`, read from
 the engine's program bus, `remote-control.md`). Once "on air" is SongPlayer's
-own program (L4b), a playlist on `SP-program` that cg OBS does not show has 0
+own program (L4b, done), a playlist on `SP-program` that cg OBS does not show has 0
 receivers normally, and the #173 ladder would churn cg OBS's inputs. So
 `handle_health_snapshot` drops ONLY the dark-wall reason while no receiver
 is expected (`ndi_health_expect::expected_reason`, pure + mutation-scored:
@@ -251,8 +251,10 @@ log lines. Add new per-snapshot logging to `health_log`, not to the handler.
 - `ObsCommand` is no longer `Clone`: it holds a oneshot sender.
 - The reader broadcasts EVERY op=5 event as `ObsEvent::Raw { event_type,
   event_data }` on `obs_event_tx`. Any exhaustive `match` on `ObsEvent` needs
-  a `Raw` arm (the engine bridge ignores it). A test that waits for
-  `SceneChanged` must skip other events.
+  a `Raw` arm. A test that waits for `SceneChanged` must skip other events.
+  #221 L4b deleted the engine bridge: `SceneChanged` / `Disconnected` start
+  or pause nothing any more (SongPlayer's own program drives playback,
+  `program-bus.md` "The playback authority"); L6 deletes the scene detection.
 - The obs-websocket SERVER side (the facade) lives in `crate::remote`; see
   `remote-control.md`.
 
@@ -435,8 +437,8 @@ or a dead sender → `connections=0` on the on-program output = dark wall, and t
   playlist's sender one at a time in `playlist.id` order, waiting for a per-pipeline
   ready one-shot (fired by the pipeline thread right after `send_create`) before the
   next — so `send_create` runs in a fixed order every restart, not OS-scheduler order.
-  Runs before the engine command loop drains scene events, so no lazy scene-triggered
-  creation preempts it.
+  Runs before `start_program` and the engine loop; a pipeline missing past the
+  startup budget is created on the playback authority's ON (#221 L4b).
 - Box-verified 2026-09-20: after a deploy restart, on-program SP-slow
   `connections=2`, every output 2–4, no dark wall.
 - **No dark-wall ladder for an output with no OBS input** (`effective_dark_reason`

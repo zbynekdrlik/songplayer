@@ -45,15 +45,6 @@ pub(crate) async fn dispatch(engine: &mut PlaybackEngine, cmd: EngineCommand) {
                 .handle_play_video(playlist_id, video_id, position_ms)
                 .await;
         }
-        EngineCommand::SceneChanged {
-            playlist_id,
-            on_program,
-        } => {
-            // VideosAvailable + SceneOn (on program) or SceneOff (off program)
-            // are folded into handle_scene_change so every caller goes through the
-            // same sequence.
-            engine.handle_scene_change(playlist_id, on_program).await;
-        }
         EngineCommand::Seek {
             playlist_id,
             position_ms,

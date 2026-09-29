@@ -612,7 +612,7 @@ async fn a_newer_hold_supersedes_the_pending_re_check() {
 
     // Review round 1: the superseded hold's re-check, already queued (an
     // A→B→A→B inside one hold), is stale. Taken as the newer hold's, it
-    // skipped that hold's `CUT_SETTLE`; it is ignored.
+    // re-checked that hold early; it is ignored.
     rig.engine
         .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(first_id))
         .await;
@@ -923,4 +923,34 @@ async fn a_failed_resume_keeps_the_pause_s_resume_point() {
     started(&mut rig.engine).await; // the overtaken Play's Started
     assert_eq!(out(&rig.engine).title_clock, Some(clock), "no new clock");
     assert_eq!(timers(&rig.engine), (false, false), "no timer");
+}
+
+/// #221 L4b review round 6: a playlist held through a transition keeps
+/// playing off program, so the dashboard is told at once (`WaitingForScene`,
+/// transport `Playing`), not only at the hold's pause.
+#[tokio::test]
+async fn a_held_playlist_is_broadcast_off_program_at_once() {
+    use sp_core::playback::{PlaybackState, TransportState};
+    let mut rig = rig().await;
+    playing(&mut rig.engine);
+    while rig.ws.try_recv().is_ok() {}
+
+    let _bus = hold(&mut rig).await;
+
+    let mut states = Vec::new();
+    while let Ok(msg) = rig.ws.try_recv() {
+        if let ServerMsg::PlaybackStateChanged {
+            playlist_id: OUT,
+            state,
+            transport,
+            ..
+        } = msg
+        {
+            states.push((state, transport));
+        }
+    }
+    assert_eq!(
+        states,
+        [(PlaybackState::WaitingForScene, TransportState::Playing)]
+    );
 }

@@ -373,13 +373,39 @@ function maybeFail(kind, res) {
   return false;
 }
 
-app.post("/api/v1/playback/:id/play", (_req, res) => {
+// #221 L4b: a ▶ claims no program. A playlist that is not on air (not
+// SP-program's source; the mock's cg OBS record is always empty) plays OFF
+// program: the server broadcasts `WaitingForScene` with transport `Playing`,
+// which the Player reads "Hrá mimo programu". On air it plays on program.
+app.post("/api/v1/playback/:id/play", (req, res) => {
   if (maybeFail("play", res)) return;
+  const pid = Number(req.params.id);
+  const onAir = programState.source === pid;
+  if (onAir) playingOffAir.delete(pid);
+  else playingOffAir.add(pid);
+  broadcastPlaybackState(pid, onAir ? "Playing" : "WaitingForScene", "Playing");
   res.json({ status: "playing" });
 });
 
-app.post("/api/v1/playback/:id/pause", (_req, res) => {
+// #221 L4b review round 6: the playlists a ▶ started OFF program. A program
+// cut to one of them puts it on program without a state change (it was
+// playing already), and the server then broadcasts its state from the scene
+// change itself (`Playing`): the Player reads "Hrá", not "Hrá mimo programu".
+const playingOffAir = new Set();
+
+function broadcastPlaybackState(pid, state, transport) {
+  const msg = JSON.stringify({
+    type: "PlaybackStateChanged",
+    data: { playlist_id: pid, state, mode: "Continuous", transport },
+  });
+  for (const ws of wsClients) {
+    if (ws.readyState === ws.OPEN) ws.send(msg);
+  }
+}
+
+app.post("/api/v1/playback/:id/pause", (req, res) => {
   if (maybeFail("pause", res)) return;
+  playingOffAir.delete(Number(req.params.id));
   res.json({ status: "paused" });
 });
 
@@ -1041,6 +1067,7 @@ app.post("/api/v1/program/cut", (req, res) => {
       transitions: programState.transitions + 1,
       mixed: programState.mixed + transitionSpec().n_slots,
     };
+    if (playingOffAir.delete(source)) broadcastPlaybackState(source, "Playing", "Playing");
   }
   res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody(), legacy_cg: legacyCgBody() });
 });
@@ -1050,6 +1077,7 @@ app.get("/__mock/program-last-cut", (_req, res) => {
 });
 app.post("/__mock/program-reset", (_req, res) => {
   programState = { source: 1, previous: null, cuts: 0, transitions: 0, mixed: 0 };
+  playingOffAir.clear();
   programLastCut = null;
   programLastRemoteCut = null;
   programObsTransition = null;
