@@ -987,6 +987,8 @@ Now:
   - a step the resample saw first in the same tick (1 ms applied + armed) is
     followed by the probe right after it: the armed 1 ms counts toward the
     2 ms (a 2.5 ms step reads 1.5 ms after the resample) and into the total;
+  - the armed 1 ms keeps counting for every probe until the next resample
+    replaces `pending` (only while the probe reads that same step's rest);
   - a follow restarts the resample count (a fresh anchor), so no resample
     lands inside the hold it starts (review round 1: the submit consumer,
     ticking per job inside its own hold, re-measured the hold as a new step
@@ -1011,6 +1013,11 @@ Now:
     on its boundary). The resample's own confirm tests now script a
     realtime outlier on the RESAMPLE's read (the probe runs after it in the
     same tick and reads the truth).
+  - **`WallClock::settable` pairs the set value with a SYNTHETIC instant on
+    one line** (review round 2): pairing it with the real `Instant::now()` let
+    the probe read a set that outruns real time as a step and follow it,
+    restarting the resample count (`program_output_tests::the_sender_thread_…`
+    counted 2 ticks for 3). A settable wall never re-anchors, holds or follows.
   - **Harness gotcha:** the probe consumes one `VirtualClock` read per tick,
     so a `delay_next_reads` / `outlier_next_reads` meant for a resample must be
     scripted right before the resampling 100th tick (`resample_reading`
@@ -1124,8 +1131,9 @@ Now:
   - `wall_anchor_holds_followed` — the backward ones among them, each
     followed as ONE hold;
   - `wall_anchor_last_hold_us` — how long the last followed hold froze the
-    wall and paused the output (the whole step when the probe followed it;
-    the step minus the arming 1 ms when a resample armed it first);
+    wall and paused the output (the whole step when the probe followed it,
+    also right after a resample armed it with a 1 ms hold; the step minus the
+    elapsed arming 1 ms on the resample path);
   - `wall_anchor_probes_rejected` (#224) — probes over 2 ms that were rejected
     (a wide probe, or a confirming sample that was wide or read another step);
   - `wall_anchor_detect_to_follow_us` (#224) — from the FIRST over-2 ms probe

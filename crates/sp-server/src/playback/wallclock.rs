@@ -312,8 +312,8 @@ impl WallClock {
         self.stats.record_step(delta, &step);
         if let Some(followed) = decision.followed {
             self.stats.record_follow(&followed, &step);
-            // #224: the resample follows only what no probe did (every probe
-            // of the step rejected, or a step of 1–2 ms); it ends a detection.
+            // #224: the resample follows only a step no probe followed (every
+            // probe of it rejected); the follow ends that detection.
             let latency_us = self.record_detect_to_follow(sample.instant, sample.instant);
             info!(
                 delta_us = to_us(delta),
@@ -385,49 +385,79 @@ impl WallClock {
     /// [`fixed`](Self::fixed), it is driven directly (not off the monotonic
     /// clock), so a test can advance the wall clock between two reads inside one
     /// `Pacer::service` call — the scheduling read and the emit read — to prove
-    /// lateness includes decode time (#147). `tick`'s re-anchor is a no-op here
-    /// (`read_100ns` ignores the anchor). Its step probe (#224) measures the
-    /// set value against the real-time line, so it "follows" phantom steps:
-    /// harmless for the reads, but never pin `wall_anchor_*` / probe stats on
-    /// a settable wall — use the `VirtualClock`.
+    /// lateness includes decode time (#147). The anchor, the resample and the
+    /// step probe (#224) read the set value on ONE synthetic line (see
+    /// [`SettableClock`]), so a set never looks like a UTC step: the wall
+    /// never re-anchors, holds or follows here.
     pub fn settable(initial_100ns: i64) -> (Self, SettableClock) {
-        let handle = SettableClock(std::sync::Arc::new(std::sync::atomic::AtomicI64::new(
-            initial_100ns,
-        )));
-        let source = SettableClock(handle.0.clone());
-        (WallClock::new(Box::new(source)), handle)
+        let handle = SettableClock::new(initial_100ns);
+        (WallClock::new(Box::new(handle.clone())), handle)
     }
 }
 
 /// Test-only handle over a settable wall clock (see [`WallClock::settable`]).
-/// Cloneable so a `pull` closure and the test body can both drive it.
+/// Cloneable so a `pull` closure and the test body can both drive it. Its
+/// realtime read pairs the set value with a SYNTHETIC monotonic instant on
+/// one line (`origin` + the value's offset from the start), never with the
+/// real `Instant::now()`: a set that outruns real time would otherwise read as
+/// a UTC step, and the step probe (#224) would follow it (review round 2: it
+/// restarted the resample count of `the_sender_thread_ticks_its_wall_once_per_boundary_passed`).
 #[cfg(test)]
 #[derive(Clone)]
-pub struct SettableClock(std::sync::Arc<std::sync::atomic::AtomicI64>);
+pub struct SettableClock {
+    value: std::sync::Arc<std::sync::atomic::AtomicI64>,
+    /// The instant the start value pairs with: a day ahead of the real clock,
+    /// so a value set back by up to a day still maps to an instant.
+    origin: Instant,
+    start_100ns: i64,
+}
 
 #[cfg(test)]
 impl SettableClock {
+    fn new(start_100ns: i64) -> Self {
+        Self {
+            value: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(start_100ns)),
+            origin: Instant::now() + std::time::Duration::from_secs(86_400),
+            start_100ns,
+        }
+    }
+
     /// Set the wall clock's current 100-ns reading.
     pub fn set(&self, v_100ns: i64) {
-        self.0.store(v_100ns, std::sync::atomic::Ordering::SeqCst);
+        self.value
+            .store(v_100ns, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Advance the wall clock by `delta_100ns` (may be negative to step back).
     pub fn advance(&self, delta_100ns: i64) {
-        self.0
+        self.value
             .fetch_add(delta_100ns, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Current 100-ns reading.
     pub fn get(&self) -> i64 {
-        self.0.load(std::sync::atomic::Ordering::SeqCst)
+        self.value.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The synthetic monotonic instant the reading `v_100ns` pairs with: on
+    /// the line through (`origin`, the start value).
+    fn instant_of(&self, v_100ns: i64) -> Instant {
+        let offset = v_100ns.saturating_sub(self.start_100ns);
+        let d = std::time::Duration::from_nanos(offset.unsigned_abs().saturating_mul(100));
+        let at = if offset >= 0 {
+            self.origin.checked_add(d)
+        } else {
+            self.origin.checked_sub(d)
+        };
+        at.expect("a settable clock moved more than a day back, or out of Instant range")
     }
 }
 
 #[cfg(test)]
 impl ClockSource for SettableClock {
     fn sample(&self) -> (Instant, i64) {
-        (Instant::now(), self.get())
+        let v = self.get();
+        (self.instant_of(v), v)
     }
 
     fn read_100ns(&self, _anchor_instant: Instant, _anchor_utc_100ns: i64) -> i64 {
