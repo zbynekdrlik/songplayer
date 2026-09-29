@@ -12,14 +12,15 @@
 //! (`legacy_cg.shown`, SongPlayer's record of its OWN commands — never cg
 //! OBS tracking).
 //!
-//! The dark-wall reason (the whole degraded reason: a 0-receiver poll counts
-//! as a bad poll, so its underrun / no-frames fall-throughs would misfire
-//! too), the #196 post-restart self-check and its ladder suppression key on
-//! [`receiver_expected`]. The state label (the badge, the idle gates) stays
-//! keyed on on-air. At B4 step 6 the dark-wall check moves to SP-program's
-//! own receivers.
+//! The dark-wall reason ([`expected_reason`]), the #196 post-restart
+//! self-check and its ladder suppression key on [`receiver_expected`]. Every
+//! other degraded reason (an underrun, no frames) stays: those need a poll
+//! with a receiver that is bad on its own, and `SP-program` takes the output
+//! either way. The state label (the badge, the idle gates) stays keyed on
+//! on-air. At B4 step 6 the dark-wall check moves to SP-program's own
+//! receivers.
 
-use crate::playback::ndi_health::PlaybackStateLabel;
+use crate::playback::ndi_health::{DARK_WALL_REASON, PlaybackStateLabel};
 
 /// A receiver is expected on playlist `playlist_id`'s NDI output: it is on
 /// air (the reconciled `label` is `Playing`: playing, its scene on program)
@@ -31,6 +32,16 @@ pub(crate) fn receiver_expected(
     playlist_id: i64,
 ) -> bool {
     matches!(label, PlaybackStateLabel::Playing) && cg_shown == Some(playlist_id)
+}
+
+/// The degraded reason with the dark-wall one dropped where no receiver is
+/// expected (0 receivers is normal there); any other reason passes through.
+pub(crate) fn expected_reason(base: Option<String>, receiver_expected: bool) -> Option<String> {
+    if !receiver_expected && base.as_deref() == Some(DARK_WALL_REASON) {
+        None
+    } else {
+        base
+    }
 }
 
 #[cfg(test)]

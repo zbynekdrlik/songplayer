@@ -8,7 +8,7 @@
 
 use crate::obs::ndi_recovery::{NdiRecoveryTracker, RecoveryStep};
 use crate::playback::clock_health::ClockHealth;
-use crate::playback::ndi_health_expect::receiver_expected;
+use crate::playback::ndi_health_expect::{expected_reason, receiver_expected};
 use crate::playback::ndi_health_transport::transport_from_reported;
 // `PacingStats` lives in its own file (1000-line cap); re-exported so every
 // `ndi_health::PacingStats` path stays valid.
@@ -580,21 +580,20 @@ impl crate::playback::PlaybackEngine {
 
         let ndi_name = pp.pipeline.ndi_name().to_string();
         // #221 L4a: a receiver is expected only while cg OBS was told to show
-        // this playlist (`ndi_health_expect`); else 0 receivers is normal, and
-        // the reason, the self-check and the ladder stay quiet, as off program.
+        // this playlist (`ndi_health_expect`); else 0 receivers is normal: no
+        // dark-wall reason, no self-check, no ladder (an underrun still counts).
         let cg_shown = self.program.get().and_then(|b| b.legacy_cg().shown_now());
         let expected = receiver_expected(&canonical_state, cg_shown, playlist_id);
-        let base_degraded_reason = expected
-            .then(|| {
-                compute_degraded_reason(
-                    &canonical_state,
-                    connections,
-                    observed_fps,
-                    nominal_fps,
-                    consecutive_bad_polls,
-                )
-            })
-            .flatten();
+        let base_degraded_reason = expected_reason(
+            compute_degraded_reason(
+                &canonical_state,
+                connections,
+                observed_fps,
+                nominal_fps,
+                consecutive_bad_polls,
+            ),
+            expected,
+        );
         // #196 item 5: if this output is dark (Playing on program, connections=0)
         // but NO OBS NDI input advertises its stream, the receiver-side recovery
         // ladder is not the tool for it — set a distinct reason and skip the

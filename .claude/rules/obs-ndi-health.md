@@ -206,11 +206,15 @@ reconciled label is `Playing` AND `legacy_cg.shown == Some(pid)`, read from
 the engine's program bus, `remote-control.md`). Once "on air" is SongPlayer's
 own program (L4b), a playlist on `SP-program` that cg OBS does not show has 0
 receivers normally, and the #173 ladder would churn cg OBS's inputs. So
-`handle_health_snapshot` computes the WHOLE degraded reason only while a
-receiver is expected (a 0-receiver poll is a bad poll, so the underrun /
-no-frames fall-throughs would misfire too), and passes `receiver_expected`
-(not the label) to `ladder_suppressed_after_restart` and
-`no_receiver_after_restart`. The state label (the badge, the #154/#167 idle
+`handle_health_snapshot` drops ONLY the dark-wall reason while no receiver
+is expected (`ndi_health_expect::expected_reason`, pure + mutation-scored:
+the handler is `mutants::skip`), and passes `receiver_expected` (not the
+label) to `ladder_suppressed_after_restart` and
+`no_receiver_after_restart`. An underrun / "no frames in 10s" stays: those
+need a poll with a receiver that is bad on its own (`compute_degraded_reason`
+answers the dark-wall reason whenever connections == 0), and SP-program takes
+the output either way (review round 1 — the first cut blanked the whole
+reason on a wrong premise). The state label (the badge, the #154/#167 idle
 gates, `transport`) stays keyed on on-air. The heartbeat log line carries
 `receiver_expected`. Tests: a dark-wall test sets its playlist on program
 with `engine.set_on_program_for_test(pid)` (scene on program + cg told to

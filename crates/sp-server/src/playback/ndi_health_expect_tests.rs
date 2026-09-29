@@ -3,8 +3,8 @@
 //! `ndi_health_tests_expect.rs`.
 //! Wired via `#[cfg(test)] #[path = "ndi_health_expect_tests.rs"] mod tests;`.
 
-use super::receiver_expected;
-use crate::playback::ndi_health::PlaybackStateLabel;
+use super::{expected_reason, receiver_expected};
+use crate::playback::ndi_health::{DARK_WALL_REASON, PlaybackStateLabel};
 
 #[test]
 fn a_receiver_is_expected_only_on_air_and_where_cg_obs_was_told() {
@@ -28,4 +28,18 @@ fn a_receiver_is_expected_only_on_air_and_where_cg_obs_was_told() {
             "{off_air:?} is not on air"
         );
     }
+}
+
+/// Only the dark-wall reason keys on the expectation; any other reason (an
+/// underrun, no frames) passes through either way.
+#[test]
+fn only_the_dark_wall_reason_is_dropped_where_no_receiver_is_expected() {
+    let dark = || Some(DARK_WALL_REASON.to_string());
+    let underrun = || Some("underrunning (10/30 fps)".to_string());
+    assert_eq!(expected_reason(dark(), false), None);
+    assert_eq!(expected_reason(dark(), true), dark());
+    assert_eq!(expected_reason(underrun(), false), underrun());
+    assert_eq!(expected_reason(underrun(), true), underrun());
+    assert_eq!(expected_reason(None, false), None);
+    assert_eq!(expected_reason(None, true), None);
 }
