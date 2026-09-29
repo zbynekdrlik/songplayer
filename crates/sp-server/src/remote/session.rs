@@ -437,5 +437,8 @@ mod tests;
 #[path = "session_tests_feedback.rs"]
 mod tests_feedback;
 #[cfg(test)]
+#[path = "session_tests_msgpack.rs"]
+mod tests_msgpack;
+#[cfg(test)]
 #[path = "session_tests_studio.rs"]
 mod tests_studio;

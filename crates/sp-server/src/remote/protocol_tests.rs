@@ -136,7 +136,7 @@ fn parse(text: &str) -> Result<ClientMessage, CloseReason> {
 }
 
 #[test]
-fn subprotocol_negotiation_echoes_json_and_refuses_msgpack_only() {
+fn subprotocol_negotiation_echoes_json_and_refuses_only_foreign_protocols() {
     assert_eq!(negotiate_subprotocol(None), Subprotocol::Default);
     assert_eq!(negotiate_subprotocol(Some("  ")), Subprotocol::Default);
     assert_eq!(
@@ -147,8 +147,14 @@ fn subprotocol_negotiation_echoes_json_and_refuses_msgpack_only() {
         negotiate_subprotocol(Some("obswebsocket.msgpack, obswebsocket.json")),
         Subprotocol::Json
     );
-    assert_eq!(
+    // #221 L2b: msgpack alone is Companion's offer (obs-websocket-js in
+    // Node) — never refused. Only a protocol that is neither is.
+    assert_ne!(
         negotiate_subprotocol(Some("obswebsocket.msgpack")),
+        Subprotocol::Unsupported
+    );
+    assert_eq!(
+        negotiate_subprotocol(Some("chat")),
         Subprotocol::Unsupported
     );
 }

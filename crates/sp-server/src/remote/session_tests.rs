@@ -29,7 +29,7 @@ use crate::remote::{Facade, IDENTIFY_TIMEOUT, UPSTREAM_TIMEOUT, Upstream, serve}
 
 pub(super) const TIMEOUT: Duration = Duration::from_secs(10);
 /// The obs-websocket spec's example password (the only password in tests).
-const SPEC_PASSWORD: &str = "supersecretpassword";
+pub(super) const SPEC_PASSWORD: &str = "supersecretpassword";
 /// cg OBS's scenes in the fake: two playlist scenes and two manual scenes.
 pub(super) const SCENES: [&str; 4] = ["sp-fast", "sp-slow", "Slido", "Trailer"];
 /// SongPlayer's playlists in the rig: `(id, ndi_output_name)`.
@@ -216,7 +216,7 @@ pub(super) async fn next_json(ws: &mut Client) -> Value {
 }
 
 /// The close frame the server sends next: `(code, reason)`.
-async fn next_close(ws: &mut Client) -> (u16, String) {
+pub(super) async fn next_close(ws: &mut Client) -> (u16, String) {
     let msg = tokio::time::timeout(TIMEOUT, ws.next())
         .await
         .expect("no close within the timeout")
@@ -303,7 +303,7 @@ async fn close_or_message(ws: &mut Client) -> Result<Value, Option<u16>> {
 
 /// Read until the session ends: the close code the server sent, `None` when
 /// the connection just ended (or failed).
-async fn close_code_at_end(ws: &mut Client) -> Option<u16> {
+pub(super) async fn close_code_at_end(ws: &mut Client) -> Option<u16> {
     let deadline = tokio::time::Instant::now() + TIMEOUT;
     loop {
         let next = tokio::time::timeout_at(deadline, ws.next())
@@ -539,33 +539,6 @@ async fn a_message_over_1_mib_ends_the_session_without_being_parsed() {
     let _ = ws.send(Message::Text(big.into())).await;
     assert_ne!(close_code_at_end(&mut ws).await, Some(4002));
     wait_for("the session is gone", || rig.remote().clients == 0).await;
-}
-
-#[tokio::test]
-async fn a_msgpack_only_client_is_refused_and_a_client_without_subprotocol_is_served() {
-    let rig = rig().await;
-    let mut req = format!("ws://{}", rig.addr).into_client_request().unwrap();
-    req.headers_mut().insert(
-        "Sec-WebSocket-Protocol",
-        HeaderValue::from_static("obswebsocket.msgpack"),
-    );
-    match tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(req))
-        .await
-        .unwrap()
-    {
-        Err(Error::Http(resp)) => {
-            assert_eq!(resp.status().as_u16(), 400);
-        }
-        other => panic!(
-            "a msgpack-only client must be refused (connected: {})",
-            other.is_ok()
-        ),
-    }
-    let (mut ws, resp) = tokio_tungstenite::connect_async(format!("ws://{}", rig.addr))
-        .await
-        .unwrap();
-    assert!(resp.headers().get("sec-websocket-protocol").is_none());
-    hello_identify(&mut ws, 0).await;
 }
 
 #[tokio::test]
