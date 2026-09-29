@@ -508,6 +508,22 @@ impl StemWorker {
                         error!(video_id = job.video_id, %e, "stem worker: mark_stems_done failed")
                     }
                 }
+                // #136: the stems carry the name the song had when the job
+                // started; a rename while it ran (the metadata repair) left them
+                // behind. Bring them under the audio's CURRENT name.
+                let cache_dir = Path::new(&job.audio_file_path)
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."));
+                if let Err(e) = crate::song_relink::relink_song(
+                    &self.pool,
+                    cache_dir,
+                    job.video_id,
+                    Path::new(&job.audio_file_path),
+                )
+                .await
+                {
+                    warn!(video_id = job.video_id, %e, "stem worker: stems re-link failed");
+                }
             }
             StemStepResult::Failed(e) => {
                 let prior: i64 =
@@ -810,6 +826,53 @@ mod tests {
             attempts, 1,
             "a real failure increments stem_attempts (backoff)"
         );
+    }
+
+    /// #136 review round 1: the metadata repair renamed the song WHILE its
+    /// separation ran. The stems were written under the name the job started
+    /// with; they must end up where the song's audio now derives them, recorded
+    /// there, never left for a lyrics wait that cannot end.
+    #[tokio::test]
+    async fn stems_of_a_song_renamed_during_the_separation_land_under_its_new_name() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let old_audio = dir
+            .path()
+            .join("Old_A_IYAOosrh7HY_normalized_gf_audio.flac");
+        let new_audio = dir.path().join("Song_A_IYAOosrh7HY_normalized_audio.flac");
+        std::fs::write(&new_audio, b"a").unwrap();
+        seed_pending_stem_row(&pool, 1).await;
+        sqlx::query("UPDATE videos SET youtube_id = 'IYAOosrh7HY', audio_file_path = ?")
+            .bind(new_audio.to_string_lossy().as_ref())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (old_vocals, old_instrumental) = crate::stems::stem_paths(&old_audio);
+        std::fs::write(&old_vocals, b"v").unwrap();
+        std::fs::write(&old_instrumental, b"i").unwrap();
+        let job = crate::db::models_stems::StemJob {
+            youtube_id: "IYAOosrh7HY".into(),
+            audio_file_path: old_audio.to_string_lossy().into_owned(),
+            ..stem_job(1)
+        };
+        let worker = test_worker(pool.clone(), dir.path().to_path_buf());
+
+        worker
+            .record_stem_result(&job, &old_vocals, &old_instrumental, StemStepResult::Done)
+            .await;
+
+        let (vocals, instrumental) = crate::stems::stem_paths(&new_audio);
+        assert_eq!(std::fs::read(&vocals).unwrap(), b"v");
+        assert_eq!(std::fs::read(&instrumental).unwrap(), b"i");
+        assert!(!old_vocals.exists() && !old_instrumental.exists());
+        let (status, recorded): (Option<String>, Option<String>) =
+            sqlx::query_as("SELECT stem_status, vocals_file_path FROM videos WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(status.as_deref(), Some("done"));
+        assert_eq!(recorded, Some(vocals.to_string_lossy().into_owned()));
     }
 
     // ---- duration terminal-skip (2026-09-15) ------------------------------

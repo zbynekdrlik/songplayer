@@ -200,6 +200,24 @@ fn isolation_input_unsupported_is_base_tier_only() {
     );
 }
 
+/// #136 tripwire: only `'done'` with the vocals missing is a wait that can never
+/// end on its own (the stem worker never re-picks a `'done'` row) — every other
+/// wait drains through the stem worker's queue.
+#[test]
+fn stems_left_behind_is_done_with_the_vocals_missing_only() {
+    assert!(stems_left_behind(Some("done"), false));
+    assert!(!stems_left_behind(Some("done"), true), "stems in place");
+    assert!(
+        !stems_left_behind(None, false),
+        "pending: the worker runs it"
+    );
+    assert!(
+        !stems_left_behind(Some("failed"), false),
+        "retried by the worker"
+    );
+    assert!(!stems_left_behind(Some("unsupported"), false));
+}
+
 // ---- isolation_step_timeout — the CPU ×4 scaling reaches the spawn seam ----
 
 #[test]

@@ -11,6 +11,7 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
 use crate::api::routes::tests::{app, test_state};
+use crate::db::models_stems::fixtures::give_real_stems;
 
 /// The process-global `MixControl` is shared across parallel tests, so the two
 /// fader tests serialize on this lock to keep their reads/writes deterministic.
@@ -272,9 +273,7 @@ async fn mix_now_playing_carries_per_song_stems_state() {
     // set by a parallel test (the registry is process-global).
     insert_playlist(&pool, 771).await;
     let vid = insert_video(&pool, 771, "np_ready").await;
-    crate::db::models_stems::mark_stems_done(&pool, vid, "/c/v.flac", "/c/i.flac")
-        .await
-        .unwrap();
+    let _stems = give_real_stems(&pool, vid).await;
     crate::now_playing::global().set(771, vid);
 
     let json = get_json(app(state), "/api/v1/mix").await;
@@ -340,9 +339,7 @@ async fn videos_payload_carries_stems_state_marker() {
     let ready = insert_video(&pool, 773, "vl_ready").await;
     let queued = insert_video(&pool, 773, "vl_queued").await;
     let unsup = insert_video(&pool, 773, "vl_unsup").await;
-    crate::db::models_stems::mark_stems_done(&pool, ready, "/c/v.flac", "/c/i.flac")
-        .await
-        .unwrap();
+    let _stems = give_real_stems(&pool, ready).await;
     crate::db::models_stems::mark_stems_unsupported(&pool, unsup)
         .await
         .unwrap();

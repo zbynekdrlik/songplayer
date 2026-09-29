@@ -15,6 +15,12 @@
 //!   deleted by the self-healing startup scan).
 //! * [`ScanResult::orphans`] — unpaired half-sidecars from a crashed mid
 //!   download (these are deleted by the self-healing startup scan).
+//!
+//! More files are named after the audio sidecar ([`derived_files`]): the
+//! karaoke stems and the dub track with its transcripts. A consumer finds them
+//! only under the name the song's CURRENT audio derives, so a song's files are
+//! renamed as one set ([`rename_song_files`], #136) and the startup self-heal
+//! re-links any left under an old name ([`derived_file_owners`]).
 
 use regex::Regex;
 use std::collections::HashMap;
@@ -82,6 +88,15 @@ static LYRICS_RE: LazyLock<Regex> =
 static VOCALS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^([a-zA-Z0-9_-]{11})_vocals16k\.wav$").unwrap());
 
+/// A file named after an audio sidecar ([`derived_files`]): captures the base
+/// name (`{song}_{artist}_{id}_normalized[_gf]`) and the YouTube id.
+static DERIVED_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(.+_([a-zA-Z0-9_-]{11})_normalized(?:_gf)?)_(?:audio_vocals\.flac|audio_instrumental\.flac|dub\.flac|dub_transcripts\.json)$",
+    )
+    .unwrap()
+});
+
 /// Build the output filename for the video sidecar.
 pub fn video_filename(song: &str, artist: &str, video_id: &str, gemini_failed: bool) -> String {
     let safe_song = sanitize_filename(song);
@@ -96,6 +111,478 @@ pub fn audio_filename(song: &str, artist: &str, video_id: &str, gemini_failed: b
     let safe_artist = sanitize_filename(artist);
     let gf = if gemini_failed { "_gf" } else { "" };
     format!("{safe_song}_{safe_artist}_{video_id}_normalized{gf}_audio.flac")
+}
+
+/// Every file named after a song's audio sidecar, in the order a rename moves
+/// them: the karaoke stems (#148, [`crate::stems::stem_paths`]), then the dub
+/// track and its transcripts (#183, [`crate::stems::dub_path`] /
+/// [`crate::stems::dub_transcripts_path`]). The stem mixer, the dub mixer, the
+/// lyrics isolation and `StemsState` derive these names from the song's CURRENT
+/// audio path; the recorded `*_file_path` columns (which the dub worker's input
+/// choice reads) are kept in sync with every move.
+pub fn derived_files(audio: &Path) -> [PathBuf; 4] {
+    let (vocals, instrumental) = crate::stems::stem_paths(audio);
+    [
+        vocals,
+        instrumental,
+        crate::stems::dub_path(audio),
+        crate::stems::dub_transcripts_path(audio),
+    ]
+}
+
+/// One owner of the song files at a time (#136 review round 2). A rename (the
+/// reprocess worker, [`rename_song_files`]) and a re-link (`song_relink`, at
+/// startup and after every stem / dub job) each read a song's recorded files,
+/// move them and record the result. Run at the same moment on the same song,
+/// one could move files the other just recorded elsewhere. Both hold this lock
+/// from the read to the record.
+pub static SONG_FILES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// A song's complete file set, named by the two sidecars the DB records: every
+/// other file of the song is named after `audio` ([`derived_files`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SongFiles {
+    pub video: Option<PathBuf>,
+    pub audio: Option<PathBuf>,
+}
+
+/// A [`SongFiles`] as the `videos` row records it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SongColumns {
+    /// `file_path` (`""` when the song has no video, as the row stores it).
+    pub video: String,
+    pub audio: Option<String>,
+    /// The stem / dub names the audio derives (`None` without an audio).
+    pub vocals: Option<String>,
+    pub instrumental: Option<String>,
+    pub dub: Option<String>,
+}
+
+impl SongFiles {
+    /// The set a row records: `file_path` (`""` = no video) and `audio_file_path`.
+    pub fn recorded(file_path: &str, audio_file_path: Option<&str>) -> Self {
+        Self {
+            video: (!file_path.is_empty()).then(|| PathBuf::from(file_path)),
+            audio: audio_file_path.map(PathBuf::from),
+        }
+    }
+
+    /// The same set named after `song` / `artist` in `cache_dir` (the names the
+    /// download worker gives a new song, [`video_filename`] / [`audio_filename`]).
+    pub fn named(
+        &self,
+        cache_dir: &Path,
+        song: &str,
+        artist: &str,
+        video_id: &str,
+        gemini_failed: bool,
+    ) -> Self {
+        Self {
+            video: self
+                .video
+                .as_ref()
+                .map(|_| cache_dir.join(video_filename(song, artist, video_id, gemini_failed))),
+            audio: self
+                .audio
+                .as_ref()
+                .map(|_| cache_dir.join(audio_filename(song, artist, video_id, gemini_failed))),
+        }
+    }
+
+    /// The row's path columns for this set.
+    pub fn columns(&self) -> SongColumns {
+        let derived = self.audio.as_deref().map(derived_files);
+        let column = |i: usize| derived.as_ref().map(|d| path_column(&d[i]));
+        SongColumns {
+            video: self.video.as_deref().map(path_column).unwrap_or_default(),
+            audio: self.audio.as_deref().map(path_column),
+            vocals: column(0),
+            instrumental: column(1),
+            dub: column(2),
+        }
+    }
+}
+
+/// A path as the `videos` row stores it.
+fn path_column(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+/// Rename a song's COMPLETE file set from `old` to `new` as one unit (#136):
+/// the files named after the audio ([`derived_files`]) first, then the audio,
+/// then the video. Returns the set now in effect: `new` when every move
+/// succeeded; after a failed move, where each of the two recorded sidecars
+/// really is ([`in_effect_after_failure`]). A failed move first moves back
+/// every file already moved, so a song is never split across two names. Only a
+/// move back that ALSO fails leaves it split (logged at ERROR). A stuck AUDIO is
+/// returned at its new name (the video moves last, so it is never stuck), and
+/// the startup self-heal keeps a half a row records. A stuck stems pair or dub
+/// is re-linked to the recorded audio's name at the next start; a lone stuck
+/// stem resets the row to pending (a pair is never mixed from two names). A file
+/// that does not exist, or that already has its new name, is skipped.
+pub fn rename_song_files(youtube_id: &str, old: &SongFiles, new: &SongFiles) -> SongFiles {
+    let mut moves = Vec::new();
+    if let (Some(from), Some(to)) = (&old.audio, &new.audio) {
+        moves.extend(derived_files(from).into_iter().zip(derived_files(to)));
+        moves.push((from.clone(), to.clone()));
+    }
+    if let (Some(from), Some(to)) = (&old.video, &new.video) {
+        moves.push((from.clone(), to.clone()));
+    }
+    match move_as_unit(youtube_id, &moves) {
+        Ok(_) => new.clone(),
+        Err(failed) => in_effect_after_failure(old, new, &failed.stuck),
+    }
+}
+
+/// Where a song's two recorded sidecars are after a unit move from `old` to
+/// `new` failed: each back at its old name, except one whose move could not
+/// be undone (`stuck`), which is still at its new name. The row must record
+/// where each file IS, or the startup self-heal would take the stuck half for
+/// unrecorded crash debris and delete it (#136 review round 2).
+fn in_effect_after_failure(
+    old: &SongFiles,
+    new: &SongFiles,
+    stuck: &[(PathBuf, PathBuf)],
+) -> SongFiles {
+    let at = |old: &Option<PathBuf>, new: &Option<PathBuf>| match (old, new) {
+        (Some(from), Some(to)) if stuck.iter().any(|(f, t)| f == from && t == to) => {
+            Some(to.clone())
+        }
+        _ => old.clone(),
+    };
+    SongFiles {
+        video: at(&old.video, &new.video),
+        audio: at(&old.audio, &new.audio),
+    }
+}
+
+/// A unit move that failed ([`move_as_unit`]): the error, and every move that
+/// could not be undone, whose file is still at its `to` name.
+#[derive(Debug)]
+pub struct MoveFailed {
+    pub error: std::io::Error,
+    pub stuck: Vec<(PathBuf, PathBuf)>,
+}
+
+/// Move every `(from, to)` whose `from` exists and differs from `to`, in
+/// order, as one unit (a `from` whose stat fails is a failure, never skipped
+/// as absent). Returns how many files moved. On the first failure,
+/// moves the files already moved back in reverse order and returns that
+/// error, with every move it could not undo. Logs every move at INFO, a
+/// failure at WARN, and a move back that fails at ERROR.
+///
+/// A FILE already under a `to` name is replaced: the song's own file wins over
+/// a stale copy (a job's fresh output over an older one, a whole stems pair over
+/// half a pair). It is first set aside ([`set_aside_name`]) and only deleted once
+/// the whole unit has moved, so a rollback gives it back (#136 review round 5).
+/// A directory under a `to` name is never set aside; the move fails on it.
+pub fn move_as_unit(youtube_id: &str, moves: &[(PathBuf, PathBuf)]) -> Result<usize, MoveFailed> {
+    move_as_unit_with(youtube_id, moves, &RealFs)
+}
+
+/// Every filesystem operation a unit move makes: `std::fs` in production
+/// ([`RealFs`]); a test fails a chosen one (a stat, a set-aside, a move, a
+/// give-back, a move back, the identity check, the delete of a replaced file).
+/// An answer the filesystem cannot give (an `Err`) rolls the unit back; it is
+/// never read as "no" or "yes".
+trait FileOps {
+    /// Whether anything is at `path` (a stat error is an `Err`, never `false`).
+    fn exists(&self, path: &Path) -> std::io::Result<bool>;
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+    fn is_other_file(&self, from: &Path, to: &Path) -> std::io::Result<bool>;
+    fn remove(&self, path: &Path) -> std::io::Result<()>;
+}
+
+/// The real filesystem.
+struct RealFs;
+
+impl FileOps for RealFs {
+    fn exists(&self, path: &Path) -> std::io::Result<bool> {
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        std::fs::rename(from, to)
+    }
+
+    fn is_other_file(&self, from: &Path, to: &Path) -> std::io::Result<bool> {
+        is_other_file(from, to)
+    }
+
+    fn remove(&self, path: &Path) -> std::io::Result<()> {
+        std::fs::remove_file(path)
+    }
+}
+
+/// [`move_as_unit`] on the given [`FileOps`].
+fn move_as_unit_with<O: FileOps>(
+    youtube_id: &str,
+    moves: &[(PathBuf, PathBuf)],
+    ops: &O,
+) -> Result<usize, MoveFailed> {
+    let mut done: Vec<Moved> = Vec::new();
+    for (from, to) in moves {
+        if from == to {
+            continue;
+        }
+        match ops.exists(from) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(error) => {
+                tracing::warn!(
+                    youtube_id,
+                    from = %from.display(),
+                    "cache: cannot tell whether a song file exists: {error}"
+                );
+                return Err(undo(youtube_id, done, error, ops));
+            }
+        }
+        let other_file = match ops.is_other_file(from, to) {
+            Ok(other) => other,
+            Err(error) => {
+                tracing::warn!(
+                    youtube_id,
+                    from = %from.display(),
+                    to = %to.display(),
+                    "cache: cannot tell whether a song file's new name is another file: {error}"
+                );
+                return Err(undo(youtube_id, done, error, ops));
+            }
+        };
+        let set_aside = if other_file {
+            let aside = match set_aside_name(to, ops) {
+                Ok(aside) => aside,
+                Err(error) => {
+                    tracing::warn!(
+                        youtube_id,
+                        to = %to.display(),
+                        "cache: could not find a free set-aside name for the file under a song \
+                         file's new name (a stat failed or all of them are taken): {error}"
+                    );
+                    return Err(undo(youtube_id, done, error, ops));
+                }
+            };
+            if let Err(error) = ops.rename(to, &aside) {
+                tracing::warn!(
+                    youtube_id,
+                    to = %to.display(),
+                    "cache: could not set aside the file under a song file's new name: {error}"
+                );
+                return Err(undo(youtube_id, done, error, ops));
+            }
+            tracing::info!(
+                youtube_id,
+                to = %to.display(),
+                "cache: setting aside the older file under a song file's new name"
+            );
+            Some(aside)
+        } else {
+            None
+        };
+        let step = Moved {
+            from: from.clone(),
+            to: to.clone(),
+            set_aside,
+        };
+        if let Err(error) = ops.rename(from, to) {
+            tracing::warn!(
+                youtube_id,
+                from = %from.display(),
+                to = %to.display(),
+                "cache: moving a song file failed, moving the {} already moved back: {error}",
+                done.len()
+            );
+            give_back(youtube_id, &step, ops);
+            return Err(undo(youtube_id, done, error, ops));
+        }
+        tracing::info!(
+            youtube_id,
+            from = %from.display(),
+            to = %to.display(),
+            "cache: moved a song file"
+        );
+        done.push(step);
+    }
+    // The unit moved: the set-aside files are the stale copies it replaced.
+    for aside in done.iter().filter_map(|step| step.set_aside.as_ref()) {
+        if let Err(e) = ops.remove(aside) {
+            tracing::warn!(
+                youtube_id,
+                aside = %aside.display(),
+                "cache: could not delete a replaced song file: {e}"
+            );
+        }
+    }
+    Ok(done.len())
+}
+
+/// Whether `to` names an existing FILE other than `from`, one a move must set
+/// aside before it can take the name. On a case-insensitive filesystem (NTFS,
+/// the box) a `to` that differs from `from` only in letter case names the SAME
+/// file: both canonicalize to it, so it is not set aside and the rename just
+/// changes the case (#136 review round 6). When `to` cannot be stat'ed (any
+/// error but NotFound) or either path cannot be canonicalized, the answer is
+/// unknown: an error, and the unit rolls back rather than guess (a wrong guess
+/// set the song's own file aside, or renamed over a file it could not see).
+fn is_other_file(from: &Path, to: &Path) -> std::io::Result<bool> {
+    let target = match std::fs::metadata(to) {
+        Ok(target) => target,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    if !target.is_file() {
+        return Ok(false);
+    }
+    Ok(std::fs::canonicalize(from)? != std::fs::canonicalize(to)?)
+}
+
+/// Every set-aside `.replaced` file left in `cache_dir` ([`set_aside_name`]).
+/// One is left by a unit move that crashed, could not give a replaced file
+/// back, had a file stuck under its new name, or could not delete the replaced
+/// copy after the unit moved. They are only reported (the startup self-heal
+/// WARNs each), never deleted: one may be the only copy of a file.
+pub fn set_aside_leftovers(cache_dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+        return Vec::new();
+    };
+    let mut leftovers: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|e| e == "replaced") && path.is_file())
+        .collect();
+    leftovers.sort();
+    leftovers
+}
+
+/// One move [`move_as_unit`] made, and where it set aside the file it replaced.
+struct Moved {
+    from: PathBuf,
+    to: PathBuf,
+    set_aside: Option<PathBuf>,
+}
+
+/// How many set-aside names [`set_aside_name`] tries before it gives up.
+const MAX_SET_ASIDE_NAMES: u32 = 100;
+
+/// The name a replaced file waits under until its unit has moved: the first
+/// free one of `<name>.replaced`, `<name>.2.replaced`, … `<name>.100.replaced`
+/// (no cache scan matches them). A leftover from an earlier move is never
+/// overwritten: it may be the only copy of a file. A stat that fails, or no
+/// free name among them, is an `Err` and the unit rolls back.
+fn set_aside_name<O: FileOps>(path: &Path, ops: &O) -> std::io::Result<PathBuf> {
+    for n in 1..=MAX_SET_ASIDE_NAMES {
+        let candidate = numbered_aside_name(path, n);
+        if !ops.exists(&candidate)? {
+            return Ok(candidate);
+        }
+    }
+    Err(std::io::Error::other(format!(
+        "{MAX_SET_ASIDE_NAMES} set-aside names of {} are all taken",
+        path.display()
+    )))
+}
+
+/// The `n`-th set-aside name of `path`: `<name>.replaced` for 1, else
+/// `<name>.<n>.replaced`.
+fn numbered_aside_name(path: &Path, n: u32) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    if n > 1 {
+        name.push(format!(".{n}"));
+    }
+    name.push(".replaced");
+    PathBuf::from(name)
+}
+
+/// Give a step's set-aside file its name back (its own move never happened or
+/// was just undone).
+fn give_back<O: FileOps>(youtube_id: &str, step: &Moved, ops: &O) {
+    if let Some(aside) = &step.set_aside
+        && let Err(e) = ops.rename(aside, &step.to)
+    {
+        tracing::error!(
+            youtube_id,
+            aside = %aside.display(),
+            to = %step.to.display(),
+            "cache: giving back a replaced song file failed, it stays set aside: {e}"
+        );
+    }
+}
+
+/// Undo `done` in reverse order after `error`: every file goes back to its old
+/// name and every replaced file gets its name back, unless that give-back fails
+/// (ERROR: the replaced file stays set aside, its name empty). A file that cannot
+/// move back is `stuck`, and the file it replaced then stays set aside (both
+/// logged). A set-aside file left behind is WARNed at every start.
+fn undo<O: FileOps>(
+    youtube_id: &str,
+    done: Vec<Moved>,
+    error: std::io::Error,
+    ops: &O,
+) -> MoveFailed {
+    let mut stuck = Vec::new();
+    for step in done.into_iter().rev() {
+        match ops.rename(&step.to, &step.from) {
+            Ok(()) => give_back(youtube_id, &step, ops),
+            Err(back) => {
+                tracing::error!(
+                    youtube_id,
+                    from = %step.to.display(),
+                    to = %step.from.display(),
+                    set_aside = %step
+                        .set_aside
+                        .as_deref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
+                    "cache: moving a song file back failed, the file stays under its new \
+                     name (and the file it replaced stays set aside): {back}"
+                );
+                stuck.push((step.from, step.to));
+            }
+        }
+    }
+    MoveFailed { error, stuck }
+}
+
+/// Every name in `cache_dir` that still holds a file named after an audio
+/// sidecar ([`derived_files`]), given as the audio path that name implies (the
+/// audio itself may be gone) and grouped by YouTube id, in path order. A song
+/// whose audio was renamed without its stems (#136) shows up here under its
+/// OLD name. Which name a re-link takes is decided per unit by that unit's own
+/// files (`song_relink`), never by this order.
+pub fn derived_file_owners(cache_dir: &Path) -> HashMap<String, Vec<PathBuf>> {
+    let entries = match std::fs::read_dir(cache_dir) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!("cannot read cache dir {}: {e}", cache_dir.display());
+            return HashMap::new();
+        }
+    };
+    let mut owners: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(caps) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| DERIVED_RE.captures(n))
+        else {
+            continue;
+        };
+        let audio = cache_dir.join(format!("{}_audio.flac", &caps[1]));
+        owners.entry(caps[2].to_string()).or_default().push(audio);
+    }
+    for names in owners.values_mut() {
+        names.sort();
+        names.dedup();
+    }
+    owners
 }
 
 /// Walk the cache directory and categorise every matching file.
@@ -241,8 +728,11 @@ fn modified(path: &Path) -> std::time::SystemTime {
         .unwrap_or(std::time::UNIX_EPOCH)
 }
 
-/// Delete every superseded duplicate pair: its video, its audio and the
-/// karaoke stems derived from that audio.
+/// Delete every superseded duplicate pair: its video, its audio and its stems
+/// (the stem worker separates the kept download again). Its dub track and
+/// transcripts stay: a dub is an operator-requested synthesis nothing re-runs
+/// on its own, and the self-heal re-link adopts it under the kept song's name
+/// (same YouTube id, same audio; #136).
 pub fn remove_duplicates(duplicates: &[CachedSong]) {
     for dup in duplicates {
         let (vocals, instrumental) = crate::stems::stem_paths(&dup.audio_path);
@@ -300,307 +790,9 @@ pub fn is_valid_video_id(s: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashSet;
-    use std::fs;
+#[path = "cache_tests.rs"]
+mod tests;
 
-    #[test]
-    fn sanitize_removes_special_chars() {
-        assert_eq!(sanitize_filename("Hello World!"), "Hello World");
-        assert_eq!(sanitize_filename("AC/DC"), "ACDC");
-        assert_eq!(sanitize_filename("test@#$%^&*()file"), "testfile");
-    }
-
-    #[test]
-    fn sanitize_collapses_whitespace() {
-        assert_eq!(sanitize_filename("  hello   world  "), "hello world");
-    }
-
-    #[test]
-    fn sanitize_limits_length() {
-        let long = "a".repeat(100);
-        let result = sanitize_filename(&long);
-        assert!(result.len() <= 50);
-    }
-
-    #[test]
-    fn sanitize_preserves_hyphens() {
-        assert_eq!(sanitize_filename("hip-hop"), "hip-hop");
-    }
-
-    #[test]
-    fn video_filename_without_gf() {
-        let name = video_filename("Amazing Grace", "Chris Tomlin", "dQw4w9WgXcQ", false);
-        assert_eq!(
-            name,
-            "Amazing Grace_Chris Tomlin_dQw4w9WgXcQ_normalized_video.mp4"
-        );
-    }
-
-    #[test]
-    fn video_filename_with_gf() {
-        let name = video_filename("Song", "Artist", "dQw4w9WgXcQ", true);
-        assert_eq!(name, "Song_Artist_dQw4w9WgXcQ_normalized_gf_video.mp4");
-    }
-
-    #[test]
-    fn audio_filename_without_gf() {
-        let name = audio_filename("Amazing Grace", "Chris Tomlin", "dQw4w9WgXcQ", false);
-        assert_eq!(
-            name,
-            "Amazing Grace_Chris Tomlin_dQw4w9WgXcQ_normalized_audio.flac"
-        );
-    }
-
-    #[test]
-    fn audio_filename_with_gf() {
-        let name = audio_filename("Song", "Artist", "dQw4w9WgXcQ", true);
-        assert_eq!(name, "Song_Artist_dQw4w9WgXcQ_normalized_gf_audio.flac");
-    }
-
-    #[test]
-    fn scan_cache_pairs_video_and_audio() {
-        let dir = tempfile::tempdir().unwrap();
-        let base = dir.path();
-
-        fs::write(
-            base.join("Amazing Grace_Chris Tomlin_dQw4w9WgXcQ_normalized_video.mp4"),
-            "fake video",
-        )
-        .unwrap();
-        fs::write(
-            base.join("Amazing Grace_Chris Tomlin_dQw4w9WgXcQ_normalized_audio.flac"),
-            "fake audio",
-        )
-        .unwrap();
-
-        let result = scan_cache(base);
-        assert_eq!(result.songs.len(), 1);
-        assert!(result.legacy.is_empty());
-        assert!(result.orphans.is_empty());
-
-        let song = &result.songs[0];
-        assert_eq!(song.video_id, "dQw4w9WgXcQ");
-        assert!(!song.gemini_failed);
-        assert_eq!(song.song, "Amazing Grace");
-        assert_eq!(song.artist, "Chris Tomlin");
-    }
-
-    #[test]
-    fn scan_cache_flags_legacy_single_mp4() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(
-            dir.path()
-                .join("Old Song_Old Artist_xxxxxxxxxxx_normalized.mp4"),
-            "legacy",
-        )
-        .unwrap();
-
-        let result = scan_cache(dir.path());
-        assert!(result.songs.is_empty());
-        assert_eq!(result.legacy.len(), 1);
-        assert_eq!(result.legacy[0].video_id, "xxxxxxxxxxx");
-    }
-
-    #[test]
-    fn scan_cache_flags_legacy_gf_single_mp4() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(
-            dir.path().join("Old_Song_xxxxxxxxxxx_normalized_gf.mp4"),
-            "legacy gf",
-        )
-        .unwrap();
-
-        let result = scan_cache(dir.path());
-        assert_eq!(result.legacy.len(), 1);
-        assert!(result.legacy[0].gemini_failed);
-    }
-
-    #[test]
-    fn scan_cache_orphan_video_without_audio() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("S_A_aaaaaaaaaaa_normalized_video.mp4"), "v").unwrap();
-
-        let result = scan_cache(dir.path());
-        assert!(result.songs.is_empty());
-        assert_eq!(result.orphans.len(), 1);
-    }
-
-    #[test]
-    fn scan_cache_orphan_audio_without_video() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(
-            dir.path().join("S_A_bbbbbbbbbbb_normalized_audio.flac"),
-            "a",
-        )
-        .unwrap();
-
-        let result = scan_cache(dir.path());
-        assert!(result.songs.is_empty());
-        assert_eq!(result.orphans.len(), 1);
-    }
-
-    #[test]
-    fn scan_cache_ignores_unrelated_files() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("README.txt"), "ignore me").unwrap();
-        fs::write(dir.path().join("xxxxxxxxxxx_temp.mp4"), "temp").unwrap();
-
-        let result = scan_cache(dir.path());
-        assert!(result.songs.is_empty());
-        assert!(result.legacy.is_empty());
-        assert!(result.orphans.is_empty());
-    }
-
-    #[test]
-    fn is_valid_video_id_accepts_valid() {
-        assert!(is_valid_video_id("dQw4w9WgXcQ"));
-        assert!(is_valid_video_id("xxxxxxxxxxx"));
-        assert!(is_valid_video_id("abc-def_123"));
-    }
-
-    #[test]
-    fn is_valid_video_id_rejects_invalid() {
-        assert!(!is_valid_video_id("short"));
-        assert!(!is_valid_video_id("toolongstring123"));
-        assert!(!is_valid_video_id("hello world"));
-        assert!(!is_valid_video_id("abc!def@123"));
-    }
-
-    #[test]
-    fn scan_cache_detects_lyrics_file() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(
-            dir.path().join("dQw4w9WgXcQ_lyrics.json"),
-            r#"{"lines":[]}"#,
-        )
-        .unwrap();
-
-        let result = scan_cache(dir.path());
-        assert_eq!(result.lyrics_files.len(), 1);
-        assert_eq!(result.lyrics_files[0].0, "dQw4w9WgXcQ");
-        assert!(result.songs.is_empty());
-        assert!(result.legacy.is_empty());
-        assert!(result.orphans.is_empty());
-    }
-
-    #[test]
-    fn scan_cache_ignores_non_matching_json() {
-        let dir = tempfile::tempdir().unwrap();
-        // Wrong suffix
-        fs::write(dir.path().join("dQw4w9WgXcQ_meta.json"), "{}").unwrap();
-        // Too long video id
-        fs::write(dir.path().join("dQw4w9WgXcQXXX_lyrics.json"), "{}").unwrap();
-
-        let result = scan_cache(dir.path());
-        assert!(result.lyrics_files.is_empty());
-    }
-
-    #[test]
-    fn scan_cache_picks_up_vocals_files() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("dQw4w9WgXcQ_vocals16k.wav"), "fake vocals").unwrap();
-        fs::write(dir.path().join("aBcDeFgHiJk_vocals16k.wav"), "fake").unwrap();
-        let result = scan_cache(dir.path());
-        assert_eq!(result.vocals_files.len(), 2);
-        let ids: HashSet<&str> = result
-            .vocals_files
-            .iter()
-            .map(|(id, _)| id.as_str())
-            .collect();
-        assert!(ids.contains("dQw4w9WgXcQ"));
-        assert!(ids.contains("aBcDeFgHiJk"));
-    }
-
-    fn touch_at(path: &Path, secs_ago: u64) {
-        fs::write(path, b"x").unwrap();
-        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(secs_ago);
-        fs::File::options()
-            .write(true)
-            .open(path)
-            .unwrap()
-            .set_modified(t)
-            .unwrap();
-    }
-
-    /// Box, 27.9.2026: `TwzfEwsTfag` had two complete pairs in the cache — an
-    /// April pair under the artist "Indiana Bible College" and an August `_gf`
-    /// pair under "Worthy" (with stems). The scan kept whichever video/audio
-    /// half it met last per id, so it could even pair one base's video with
-    /// the other base's audio, and the stale pair stayed forever (the A/V
-    /// gate refused the ambiguity).
-    #[test]
-    fn two_complete_pairs_for_one_id_keep_the_newest_and_list_the_other() {
-        let dir = tempfile::tempdir().unwrap();
-        let d = dir.path();
-        let old_v =
-            d.join("Never Lost Champion_Indiana Bible College_TwzfEwsTfag_normalized_video.mp4");
-        let old_a =
-            d.join("Never Lost Champion_Indiana Bible College_TwzfEwsTfag_normalized_audio.flac");
-        let new_v = d.join("Never Lost Champion_Worthy_TwzfEwsTfag_normalized_gf_video.mp4");
-        let new_a = d.join("Never Lost Champion_Worthy_TwzfEwsTfag_normalized_gf_audio.flac");
-        touch_at(&old_v, 400_000);
-        touch_at(&old_a, 400_000);
-        touch_at(&new_v, 1_000);
-        touch_at(&new_a, 1_000);
-
-        let r = scan_cache(d);
-        assert_eq!(r.songs.len(), 1, "one keeper per id");
-        assert_eq!(r.songs[0].video_path, new_v, "the newest pair is kept");
-        assert_eq!(r.songs[0].audio_path, new_a, "never a cross-paired half");
-        assert_eq!(r.songs[0].artist, "Worthy");
-        assert!(r.songs[0].gemini_failed);
-        assert_eq!(r.duplicates.len(), 1);
-        assert_eq!(r.duplicates[0].video_path, old_v);
-        assert_eq!(r.duplicates[0].audio_path, old_a);
-        assert_eq!(r.duplicates[0].video_id, "TwzfEwsTfag");
-        assert!(r.orphans.is_empty(), "both pairs are complete: no orphan");
-    }
-
-    #[test]
-    fn a_half_of_another_base_is_an_orphan_not_a_pair_partner() {
-        let dir = tempfile::tempdir().unwrap();
-        let d = dir.path();
-        let v = d.join("Song_ArtistA_dQw4w9WgXcQ_normalized_video.mp4");
-        let a = d.join("Song_ArtistB_dQw4w9WgXcQ_normalized_audio.flac");
-        touch_at(&v, 10);
-        touch_at(&a, 10);
-        let r = scan_cache(d);
-        assert!(r.songs.is_empty(), "different bases never pair");
-        assert_eq!(r.orphans.len(), 2);
-        assert!(r.duplicates.is_empty());
-    }
-
-    #[test]
-    fn remove_duplicates_deletes_the_pair_and_its_stems_only() {
-        let dir = tempfile::tempdir().unwrap();
-        let d = dir.path();
-        let dup_v = d.join("S_Old_TwzfEwsTfag_normalized_video.mp4");
-        let dup_a = d.join("S_Old_TwzfEwsTfag_normalized_audio.flac");
-        let dup_voc = d.join("S_Old_TwzfEwsTfag_normalized_audio_vocals.flac");
-        let dup_ins = d.join("S_Old_TwzfEwsTfag_normalized_audio_instrumental.flac");
-        let keep_v = d.join("S_New_TwzfEwsTfag_normalized_gf_video.mp4");
-        let keep_a = d.join("S_New_TwzfEwsTfag_normalized_gf_audio.flac");
-        let keep_voc = d.join("S_New_TwzfEwsTfag_normalized_gf_audio_vocals.flac");
-        for p in [
-            &dup_v, &dup_a, &dup_voc, &dup_ins, &keep_v, &keep_a, &keep_voc,
-        ] {
-            fs::write(p, b"x").unwrap();
-        }
-        remove_duplicates(&[CachedSong {
-            video_id: "TwzfEwsTfag".into(),
-            song: "S".into(),
-            artist: "Old".into(),
-            gemini_failed: false,
-            video_path: dup_v.clone(),
-            audio_path: dup_a.clone(),
-        }]);
-        for p in [&dup_v, &dup_a, &dup_voc, &dup_ins] {
-            assert!(!p.exists(), "{} removed", p.display());
-        }
-        for p in [&keep_v, &keep_a, &keep_voc] {
-            assert!(p.exists(), "{} kept", p.display());
-        }
-    }
-}
+#[cfg(test)]
+#[path = "cache_tests_files.rs"]
+mod tests_files;
