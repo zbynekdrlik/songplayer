@@ -774,3 +774,7 @@ mod tests {
 #[cfg(test)]
 #[path = "tests_chain.rs"]
 mod tests_chain;
+
+#[cfg(test)]
+#[path = "tests_files.rs"]
+mod tests_files;

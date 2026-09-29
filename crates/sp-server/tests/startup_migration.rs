@@ -2,6 +2,7 @@
 //! all video rows are reset to unnormalized on first boot.
 
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use sp_server::SyncRequest;
 use sp_server::startup::{self_heal_cache, startup_sync_active_playlists};
@@ -193,4 +194,202 @@ async fn startup_sync_is_noop_when_no_active_playlists() {
     drop(tx);
 
     assert!(rx.recv().await.is_none(), "no SyncRequests expected");
+}
+
+// ── #136 reopen: the files a song names after its audio ─────────────────────
+//
+// The metadata repair of 29.9.2026 renamed ~99 songs' video + audio and left
+// their stems under the old `_gf` name (video 326 `IYAOosrh7HY`): the lyrics
+// isolation waited for stems forever and the stem mixer found none. The startup
+// self-heal re-links such files to the name the audio derives, and resets
+// stems no name holds so the stem worker separates them again.
+
+const REPAIRED_ID: &str = "IYAOosrh7HY";
+
+fn named(dir: &Path, base: &str, suffix: &str) -> PathBuf {
+    dir.join(format!("{base}_{REPAIRED_ID}_normalized{suffix}"))
+}
+
+fn text(p: &Path) -> String {
+    p.to_string_lossy().into_owned()
+}
+
+/// A repaired song: video + audio under the NEW name, its row `done` with the
+/// stems (and `ready` with the dub) recorded under the OLD `_gf` name.
+async fn repaired_song(dir: &Path) -> (sqlx::SqlitePool, PathBuf) {
+    let pool = sp_server::db::create_memory_pool().await.unwrap();
+    sp_server::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (name, youtube_url, ndi_output_name) VALUES ('p', 'u', 'n')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let video = named(dir, "Gods Not Dead_Enjoy Worship", "_video.mp4");
+    let audio = named(dir, "Gods Not Dead_Enjoy Worship", "_audio.flac");
+    fs::write(&video, b"v").unwrap();
+    fs::write(&audio, b"a").unwrap();
+    let old = |suffix: &str| text(&named(dir, "Old_Song", suffix));
+    sqlx::query(
+        "INSERT INTO videos (playlist_id, youtube_id, normalized, file_path, audio_file_path,
+                             stem_status, vocals_file_path, instrumental_file_path,
+                             dub_status, dub_file_path)
+         VALUES (1, ?, 1, ?, ?, 'done', ?, ?, 'ready', ?)",
+    )
+    .bind(REPAIRED_ID)
+    .bind(text(&video))
+    .bind(text(&audio))
+    .bind(old("_gf_audio_vocals.flac"))
+    .bind(old("_gf_audio_instrumental.flac"))
+    .bind(old("_gf_dub.flac"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    (pool, audio)
+}
+
+/// The repaired row's stems + dub columns.
+#[derive(Debug, PartialEq)]
+struct StemRow {
+    stem_status: Option<String>,
+    stem_attempts: i64,
+    vocals: Option<String>,
+    instrumental: Option<String>,
+    dub_status: String,
+    dub: Option<String>,
+}
+
+async fn stem_row(pool: &sqlx::SqlitePool) -> StemRow {
+    let r = sqlx::query(
+        "SELECT stem_status, stem_attempts, vocals_file_path, instrumental_file_path,
+                dub_status, dub_file_path
+         FROM videos WHERE youtube_id = ?",
+    )
+    .bind(REPAIRED_ID)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    StemRow {
+        stem_status: r.get("stem_status"),
+        stem_attempts: r.get("stem_attempts"),
+        vocals: r.get("vocals_file_path"),
+        instrumental: r.get("instrumental_file_path"),
+        dub_status: r.get("dub_status"),
+        dub: r.get("dub_file_path"),
+    }
+}
+
+#[tokio::test]
+async fn self_heal_relinks_stems_and_dub_left_under_an_old_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let (pool, audio) = repaired_song(dir).await;
+    let left_behind = [
+        "_gf_audio_vocals.flac",
+        "_gf_audio_instrumental.flac",
+        "_gf_dub.flac",
+        "_gf_dub_transcripts.json",
+    ]
+    .map(|suffix| named(dir, "Old_Song", suffix));
+    for p in &left_behind {
+        fs::write(p, text(p)).unwrap();
+    }
+
+    self_heal_cache(&pool, dir).await.unwrap();
+
+    let (vocals, instrumental) = sp_server::stems::stem_paths(&audio);
+    let current = [
+        vocals.clone(),
+        instrumental.clone(),
+        sp_server::stems::dub_path(&audio),
+        sp_server::stems::dub_transcripts_path(&audio),
+    ];
+    for (from, to) in left_behind.iter().zip(&current) {
+        assert!(!from.exists(), "{} must be moved away", from.display());
+        assert_eq!(
+            fs::read_to_string(to).unwrap(),
+            text(from),
+            "{} must hold the file that was {}",
+            to.display(),
+            from.display()
+        );
+    }
+    assert_eq!(
+        stem_row(&pool).await,
+        StemRow {
+            stem_status: Some("done".into()),
+            stem_attempts: 0,
+            vocals: Some(text(&vocals)),
+            instrumental: Some(text(&instrumental)),
+            dub_status: "ready".into(),
+            dub: Some(text(&current[2])),
+        },
+        "the row keeps its states and records the files under the audio's name"
+    );
+}
+
+/// Stems recorded `done` that no name holds any more: the row goes back to
+/// pending so the stem worker separates the song again, never a `done` the
+/// lyrics isolation waits on forever. A `ready` dub no name holds is left as it
+/// is (a dub is an operator-requested synthesis, never re-run on its own).
+#[tokio::test]
+async fn self_heal_resets_stems_missing_under_every_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let (pool, _audio) = repaired_song(dir).await;
+    sqlx::query("UPDATE videos SET stem_attempts = 2")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    self_heal_cache(&pool, dir).await.unwrap();
+
+    assert_eq!(
+        stem_row(&pool).await,
+        StemRow {
+            stem_status: None,
+            stem_attempts: 0,
+            vocals: None,
+            instrumental: None,
+            dub_status: "ready".into(),
+            dub: Some(text(&named(dir, "Old_Song", "_gf_dub.flac"))),
+        },
+        "the stems row is pending again with no recorded path; the dub row is untouched"
+    );
+}
+
+/// A song whose stems already sit under its audio's name is left alone.
+#[tokio::test]
+async fn self_heal_leaves_stems_in_place_alone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let (pool, audio) = repaired_song(dir).await;
+    let (vocals, instrumental) = sp_server::stems::stem_paths(&audio);
+    fs::write(&vocals, b"v").unwrap();
+    fs::write(&instrumental, b"i").unwrap();
+    sqlx::query(
+        "UPDATE videos SET vocals_file_path = ?, instrumental_file_path = ?,
+                dub_status = 'none', dub_file_path = NULL",
+    )
+    .bind(text(&vocals))
+    .bind(text(&instrumental))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    self_heal_cache(&pool, dir).await.unwrap();
+
+    assert_eq!(fs::read(&vocals).unwrap(), b"v");
+    assert_eq!(fs::read(&instrumental).unwrap(), b"i");
+    assert_eq!(
+        stem_row(&pool).await,
+        StemRow {
+            stem_status: Some("done".into()),
+            stem_attempts: 0,
+            vocals: Some(text(&vocals)),
+            instrumental: Some(text(&instrumental)),
+            dub_status: "none".into(),
+            dub: None,
+        }
+    );
 }
