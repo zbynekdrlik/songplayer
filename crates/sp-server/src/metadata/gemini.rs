@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 use super::parser::shorten_artist;
 use super::sanitize::strip_emoji;
 use super::{MetadataError, MetadataProvider};
-use crate::gemini_api::{GEMINI_API_ROOT, KeyVerdict, RETRY_BACKOFFS, key_verdict};
+use crate::gemini_api::{GEMINI_API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, send_on_key};
 
 static JSON_FENCE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"```(?:json)?\s*([\s\S]*?)\s*```").expect("compile"));
@@ -267,8 +267,8 @@ impl GeminiProvider {
         })
     }
 
-    /// One key (`n` of `total`): the POST, retried on a 5xx after each
-    /// `retry_backoffs` pause (the iterator makes progress structural). A
+    /// One key (`n` of `total`) through the shared `gemini_api::send_on_key`
+    /// (a 5xx retried on the same key after each `retry_backoffs` pause). A
     /// transport failure is not about the key: it ends the whole call.
     async fn attempt_key(
         &self,
@@ -278,26 +278,25 @@ impl GeminiProvider {
         n: usize,
         total: usize,
     ) -> Result<KeyAttempt, MetadataError> {
-        let mut pauses = self.retry_backoffs.iter();
-        loop {
-            let started = Instant::now();
-            let resp = self
-                .client
+        let started = Instant::now();
+        let reply = send_on_key(what, &self.retry_backoffs, || {
+            self.client
                 .post(self.endpoint())
                 .header("x-goog-api-key", key)
                 .timeout(REQUEST_TIMEOUT)
                 .json(body)
-                .send()
-                .await
-                .map_err(|e| {
-                    MetadataError::ApiError(format!(
-                        "gemini {what}: key {n} of {total}: request failed: {}",
-                        self.excerpt(&e.to_string())
-                    ))
-                })?;
-            let status = resp.status().as_u16();
-            let elapsed_ms = started.elapsed().as_millis() as u64;
-            if resp.status().is_success() {
+        })
+        .await
+        .map_err(|e| {
+            MetadataError::ApiError(format!(
+                "gemini {what}: key {n} of {total}: request failed: {}",
+                self.excerpt(&e.to_string())
+            ))
+        })?;
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        let (verdict, status, text) = match reply {
+            KeyReply::Answered(resp) => {
+                let status = resp.status().as_u16();
                 tracing::info!(
                     what,
                     key = n,
@@ -312,25 +311,24 @@ impl GeminiProvider {
                     .map_err(|e| MetadataError::InvalidResponse(format!("gemini {what}: {e}")))?;
                 return Ok(KeyAttempt::Answered(answer));
             }
-            let text = resp.text().await.unwrap_or_default();
-            let verdict = key_verdict(status, &text);
-            let excerpt = self.excerpt(&text);
-            tracing::warn!(
-                what, key = n, keys = total, status, elapsed_ms, ?verdict, body = %excerpt,
-                "gemini refused the request"
-            );
-            let last = format!("key {n} of {total}: HTTP {status}: {excerpt}");
-            match verdict {
-                KeyVerdict::NextKey { rate_limited } => {
-                    return Ok(KeyAttempt::NextKey { rate_limited, last });
-                }
-                KeyVerdict::RetrySameKey => match pauses.next() {
-                    Some(pause) => tokio::time::sleep(*pause).await,
-                    None => return Ok(KeyAttempt::Stop(last)),
-                },
-                KeyVerdict::Stop => return Ok(KeyAttempt::Stop(last)),
-            }
-        }
+            KeyReply::Refused {
+                verdict,
+                status,
+                body,
+            } => (verdict, status, body),
+        };
+        let excerpt = self.excerpt(&text);
+        tracing::warn!(
+            what, key = n, keys = total, status, elapsed_ms, ?verdict, body = %excerpt,
+            "gemini refused the request"
+        );
+        let last = format!("key {n} of {total}: HTTP {status}: {excerpt}");
+        Ok(match verdict {
+            KeyVerdict::NextKey { rate_limited } => KeyAttempt::NextKey { rate_limited, last },
+            // A 5xx after every same-key pause, or anything else: every key
+            // would fail the same way.
+            KeyVerdict::RetrySameKey | KeyVerdict::Stop => KeyAttempt::Stop(last),
+        })
     }
 
     /// Second pass: clean the extracted song/artist for display, on the key

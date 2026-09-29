@@ -126,7 +126,8 @@ impl MetadataProvider for Recorded {
             }
             Err(e) => {
                 self.health.record_error(self.index, &e.to_string());
-                tracing::warn!(provider, video_id, elapsed_ms, error = %e, "metadata provider failed");
+                let error = super::health::bounded_error(&e.to_string());
+                tracing::warn!(provider, video_id, elapsed_ms, %error, "metadata provider failed");
             }
         }
         outcome

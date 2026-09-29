@@ -36,12 +36,17 @@ answered correctly), and nothing ever ran the real providers.
 
 ## Gemini on the key list
 
-- ONE Gemini key-list contract for every Gemini caller: `crate::gemini_api`
-  (the API root, `gemini_keys_from_setting`, `key_verdict`, the same-key 5xx
-  `RETRY_BACKOFFS` 2/4/8/16 s). The lyrics transcription
-  (`lyrics::g35t_client`) and `metadata::gemini` both judge a non-2xx answer
-  by `key_verdict` alone — never a local copy of the rules (review round 1
-  found two diverging copies).
+- ONE Gemini key-list contract: `crate::gemini_api` (the API root,
+  `gemini_keys_from_setting`, `key_verdict`, `send_on_key` = one key's
+  request + its same-key 5xx retries after `RETRY_BACKOFFS` 2/4/8/16 s). The
+  lyrics transcription (`lyrics::g35t_client`) and `metadata::gemini` rotate
+  over every key and both send through `send_on_key` / judge by
+  `key_verdict` — never a local copy of the rules or the loop (review rounds
+  1-2 found two diverging copies). The dub worker (`dabing::worker`) takes
+  the FIRST key only (no rotation).
+- Metadata reads `gemini_api_key` / `gemini_model` ONCE at startup
+  (`lib.rs`): a key change needs a SongPlayer restart (lyrics reads the
+  setting per song).
 - `GeminiProvider::new(keys, model)` takes the SPLIT list — always
   `gemini_api::gemini_keys_from_setting(csv)`, never the raw setting. One key
   per request; a 429 or a key refusal (403, a 400 whose body names the API

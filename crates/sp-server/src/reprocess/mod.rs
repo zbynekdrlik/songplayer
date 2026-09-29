@@ -14,8 +14,8 @@
 //! ## Rate-limit cooldown (issue #12)
 //!
 //! When a provider returns [`MetadataError::RateLimited`], the worker enters
-//! a global cooldown of [`GEMINI_COOLDOWN`] during which all Gemini calls
-//! are skipped. Each rate-limited video also enters a per-video exponential
+//! a global cooldown of [`RATE_LIMIT_COOLDOWN`] during which no provider is
+//! called. Each rate-limited video also enters a per-video exponential
 //! backoff — its entry is skipped until its `next_retry_at` instant passes.
 //! The stages are 1 min, 5 min, 15 min, 1 h, 6 h, 24 h and stay at 24 h once
 //! reached. Successful extraction clears the video's backoff entry.
@@ -33,8 +33,8 @@ use tracing::{debug, info, warn};
 use crate::metadata::health::REPAIR_QUEUE_WHERE;
 use crate::metadata::{MetadataError, ProviderChain};
 
-/// Global cooldown after any Gemini rate-limit response.
-const GEMINI_COOLDOWN: Duration = Duration::from_secs(5 * 60);
+/// Global cooldown after any provider's rate-limit response.
+const RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(300); // 5 min (a literal: no mutable op)
 
 /// Per-video exponential backoff stages. The worker indexes into this slice
 /// by the video's current stage; stages beyond the last pin to the final
@@ -55,8 +55,8 @@ pub struct ReprocessWorker {
     /// The ONE production chain (#136), shared with the download worker.
     chain: Arc<ProviderChain>,
     cache_dir: PathBuf,
-    /// Global Gemini cooldown — while set, all Gemini calls are skipped.
-    gemini_cooldown_until: Option<Instant>,
+    /// Global rate-limit cooldown — while set, no provider is called.
+    cooldown_until: Option<Instant>,
     /// Per-video backoff: `video_id → (next_retry_at, stage_index)`.
     per_video_backoff: HashMap<i64, (Instant, usize)>,
 }
@@ -75,7 +75,7 @@ enum ReprocessOutcome {
     /// Metadata was successfully updated (DB cleared `gemini_failed`).
     Success,
     /// A provider said "rate limited" — the worker should stop the current
-    /// batch and honour [`GEMINI_COOLDOWN`]. Carries every provider's error.
+    /// batch and honour [`RATE_LIMIT_COOLDOWN`]. Carries every provider's error.
     RateLimited(String),
     /// Non-rate-limit failure (transient, API error, or still
     /// `gemini_failed=true` from parser fallback). The batch may continue.
@@ -101,15 +101,15 @@ impl ReprocessWorker {
             pool,
             chain,
             cache_dir,
-            gemini_cooldown_until: None,
+            cooldown_until: None,
             per_video_backoff: HashMap::new(),
         }
     }
 
-    /// Returns `true` if the worker is currently inside the Gemini cooldown
+    /// Returns `true` if the worker is currently inside the rate-limit cooldown
     /// window.
     fn in_global_cooldown(&self) -> bool {
-        self.gemini_cooldown_until
+        self.cooldown_until
             .map(|t| Instant::now() < t)
             .unwrap_or(false)
     }
@@ -182,7 +182,7 @@ impl ReprocessWorker {
         if self.in_global_cooldown() {
             debug!(
                 count = rows.len(),
-                "reprocess skipped: Gemini cooldown active"
+                "reprocess skipped: rate-limit cooldown active"
             );
             return Ok(0);
         }
@@ -201,7 +201,7 @@ impl ReprocessWorker {
                         video_id = %row.youtube_id,
                         %reasons,
                         "metadata provider rate-limited; entering {}s cooldown, aborting batch",
-                        GEMINI_COOLDOWN.as_secs()
+                        RATE_LIMIT_COOLDOWN.as_secs()
                     );
                     break;
                 }
@@ -272,7 +272,7 @@ impl ReprocessWorker {
         let meta = match self.try_providers(&row.youtube_id, &row.title).await {
             Ok(m) => m,
             Err(failure) if failure.rate_limited => {
-                self.gemini_cooldown_until = Some(Instant::now() + GEMINI_COOLDOWN);
+                self.cooldown_until = Some(Instant::now() + RATE_LIMIT_COOLDOWN);
                 self.bump_video_backoff(row.id);
                 return Ok(ReprocessOutcome::RateLimited(failure.reasons));
             }
@@ -400,7 +400,8 @@ impl ReprocessWorker {
                 }
                 Err(e) => {
                     rate_limited |= matches!(e, MetadataError::RateLimited(_));
-                    reasons.push(format!("{}: {e}", provider.name()));
+                    let error = crate::metadata::health::bounded_error(&e.to_string());
+                    reasons.push(format!("{}: {error}", provider.name()));
                 }
             }
         }
@@ -653,7 +654,7 @@ mod tests {
     /// Issue #12: on rate-limit, the worker must abort the current batch
     /// and skip all subsequent calls until the cooldown window expires.
     ///
-    /// Uses direct manipulation of `gemini_cooldown_until` instead of
+    /// Uses direct manipulation of `cooldown_until` instead of
     /// `tokio::time::advance` — the sqlite pool setup relies on real I/O
     /// and doesn't cope with a paused timer.
     #[tokio::test]
@@ -683,13 +684,13 @@ mod tests {
 
         // Second run within cooldown: must be a no-op, still zero success.
         // And no provider should have been called (would be asserted by
-        // the fact that gemini_cooldown_until is still in the future).
+        // the fact that cooldown_until is still in the future).
         let count = worker.process_all().await.unwrap();
         assert_eq!(count, 0);
         assert!(worker.in_global_cooldown(), "still in cooldown");
 
         // Simulate cooldown expiry by setting the instant to the past.
-        worker.gemini_cooldown_until = Some(Instant::now() - Duration::from_secs(1));
+        worker.cooldown_until = Some(Instant::now() - Duration::from_secs(1));
         assert!(
             !worker.in_global_cooldown(),
             "cooldown should report expired once `until` is in the past"

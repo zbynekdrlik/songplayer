@@ -245,3 +245,8 @@ async fn the_failed_row_warn_names_the_next_pause_and_its_stage() {
     worker.bump_video_backoff(42);
     assert_eq!(worker.backoff_of(42), (5 * 60, 1));
 }
+
+#[test]
+fn the_rate_limit_cooldown_is_five_minutes() {
+    assert_eq!(RATE_LIMIT_COOLDOWN, Duration::from_secs(5 * 60));
+}

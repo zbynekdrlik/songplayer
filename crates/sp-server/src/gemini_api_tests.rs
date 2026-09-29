@@ -1,6 +1,8 @@
 //! #136: the shared Gemini key-list contract.
 
 use super::*;
+use wiremock::matchers::method;
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
 fn gemini_keys_from_setting_splits_trims_and_drops_empties() {
@@ -54,4 +56,95 @@ fn anything_else_stops() {
 fn the_same_key_retry_schedule_is_2_4_8_16_seconds() {
     let secs: Vec<u64> = RETRY_BACKOFFS.iter().map(|d| d.as_secs()).collect();
     assert_eq!(secs, [2, 4, 8, 16]);
+}
+
+// ---- send_on_key: the one send + same-key retry loop (lyrics AND metadata) ----
+
+const QUICK: [Duration; 2] = [Duration::from_millis(1), Duration::from_millis(1)];
+
+async fn requests(server: &MockServer) -> usize {
+    server.received_requests().await.unwrap_or_default().len()
+}
+
+#[tokio::test]
+async fn a_5xx_is_sent_again_on_the_same_request_until_it_answers() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("model overloaded"))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&server)
+        .await;
+    let client = reqwest::Client::new();
+
+    let reply = send_on_key("test", &QUICK, || client.post(server.uri()))
+        .await
+        .unwrap();
+
+    assert!(matches!(reply, KeyReply::Answered(_)), "{reply:?}");
+    assert_eq!(requests(&server).await, 2);
+}
+
+#[tokio::test]
+async fn a_5xx_after_every_pause_is_refused_with_its_status_and_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("model overloaded"))
+        .mount(&server)
+        .await;
+    let client = reqwest::Client::new();
+
+    let reply = send_on_key("test", &QUICK, || client.post(server.uri()))
+        .await
+        .unwrap();
+
+    let KeyReply::Refused {
+        verdict,
+        status,
+        body,
+    } = reply
+    else {
+        panic!("a 5xx after every pause is refused");
+    };
+    assert_eq!(
+        (verdict, status, body.as_str()),
+        (KeyVerdict::RetrySameKey, 503, "model overloaded")
+    );
+    assert_eq!(requests(&server).await, 3, "one try + one per pause");
+}
+
+#[tokio::test]
+async fn a_rate_limit_is_refused_at_once_for_the_next_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(429).set_body_string("RESOURCE_EXHAUSTED"))
+        .mount(&server)
+        .await;
+    let client = reqwest::Client::new();
+
+    let reply = send_on_key("test", &QUICK, || client.post(server.uri()))
+        .await
+        .unwrap();
+
+    let KeyReply::Refused { verdict, .. } = reply else {
+        panic!("a 429 is refused");
+    };
+    assert_eq!(verdict, KeyVerdict::NextKey { rate_limited: true });
+    assert_eq!(
+        requests(&server).await,
+        1,
+        "a 429 is never retried on the same key"
+    );
+}
+
+#[tokio::test]
+async fn a_transport_failure_is_returned_as_is() {
+    let client = reqwest::Client::new();
+
+    let reply = send_on_key("test", &QUICK, || client.post("http://127.0.0.1:1/")).await;
+
+    assert!(reply.is_err(), "nothing listens on port 1");
 }
