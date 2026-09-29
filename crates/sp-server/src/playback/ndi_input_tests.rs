@@ -205,8 +205,8 @@ fn assert_one_pair_per_boundary(jobs: &[SubmitJob], n: usize) {
     for (k, job) in jobs.iter().enumerate() {
         assert_eq!(
             job.audio_tc_100ns,
-            b(k + 1) + 2 * MS,
-            "audio stamped at the emit"
+            b(k + 1),
+            "#224: audio stamped on its boundary, never the emit instant"
         );
         assert_eq!(job.audio.len(), 1, "one audio block per boundary");
         assert_eq!(job.audio[0].data.len(), 3200, "1600 stereo samples");

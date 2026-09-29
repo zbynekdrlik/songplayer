@@ -4,7 +4,10 @@
 //! `CLOCK_REALTIME` at once. A lone outlier stays bounded at 1 ms. Pure rule +
 //! a WallClock over the [`VirtualClock`]; exact values, so every comparison in
 //! the rule is pinned. The backward direction (design record 5850063723, ONE
-//! hold) is in `wallclock_tests_confirm_backward.rs`.
+//! hold) is in `wallclock_tests_confirm_backward.rs`. Since #224 the
+//! per-boundary step probe follows a real step at the boundary it lands
+//! (`wallclock_tests_probe.rs`), so the resample's own confirm path is driven
+//! here with a realtime outlier scripted on the resample's read.
 
 use super::*;
 
@@ -24,6 +27,30 @@ fn resample(wall: &mut WallClock, clk: &VirtualClock) -> (i64, i64) {
     let before = wall.now_100ns();
     wall.tick();
     assert_eq!(wall.frames_since_resample(), 0, "the 100th tick resamples");
+    (before, wall.now_100ns())
+}
+
+/// Run one resample interval whose resampling 100th tick reads `outliers`
+/// first (the resample's anchor read); the step probe that follows it in the
+/// same tick (#224) and every other read see the true UTC.
+fn resample_reading(wall: &mut WallClock, clk: &VirtualClock, outliers: &[i64]) -> (i64, i64) {
+    for _ in 0..99 {
+        clk.advance_ns(FRAME_NS);
+        wall.tick();
+    }
+    clk.advance_ns(FRAME_NS);
+    clk.outlier_next_reads(outliers);
+    let before = wall.now_100ns();
+    wall.tick();
+    assert_eq!(wall.frames_since_resample(), 0, "the 100th tick resamples");
+    (before, wall.now_100ns())
+}
+
+/// Advance one frame and tick; the wall just before and just after the tick.
+fn tick_once(wall: &mut WallClock, clk: &VirtualClock) -> (i64, i64) {
+    clk.advance_ns(FRAME_NS);
+    let before = wall.now_100ns();
+    wall.tick();
     (before, wall.now_100ns())
 }
 
@@ -161,11 +188,10 @@ fn a_followed_forward_step_is_recorded_as_its_signed_total_and_is_no_hold() {
 fn a_lone_plus_50_ms_outlier_then_a_normal_read_moves_the_wall_at_most_1_ms() {
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
-    // One narrow sample reads UTC 50 ms ahead, the next reads the true line.
-    clk.step_utc(50 * MS);
-    let (before, after) = resample(&mut wall, &clk);
+    // One narrow resample read sees UTC 50 ms ahead; every other read (the
+    // step probe right after it included, #224) reads the true line.
+    let (before, after) = resample_reading(&mut wall, &clk, &[50 * MS]);
     assert_eq!(after - before, MS, "the outlier moves the wall 1 ms only");
-    clk.step_utc(-50 * MS);
     let (before, after) = resample(&mut wall, &clk);
     assert_eq!(after, before, "the normal read holds the 1 ms back out");
     clk.advance_ns(1_000_000);
@@ -177,23 +203,24 @@ fn a_lone_plus_50_ms_outlier_then_a_normal_read_moves_the_wall_at_most_1_ms() {
 }
 
 #[test]
-fn a_step_preempted_on_its_confirming_resample_slews_on_until_two_clean_reads_agree() {
+fn a_step_whose_first_probe_is_preempted_is_followed_at_the_next_boundary() {
+    // #224: the first read of a +50 ms step is preempted (a wide probe) and
+    // rejected by width. Nothing is armed, so the next boundary's clean probe
+    // follows the step in one event — no longer slewed at 1 ms per resample
+    // until two clean resamples agree (#147).
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
     clk.step_utc(50 * MS);
-    let (before, after) = resample(&mut wall, &clk);
-    assert_eq!(after - before, MS);
-    // Every attempt of the confirming resample is preempted by 400 µs: wide.
-    clk.delay_next_reads(&[400_000; 8]);
-    let (before, after) = resample(&mut wall, &clk);
-    assert_eq!(after - before, MS, "a wide resample only slews");
-    // Two clean resamples in a row: the first re-arms, the second follows.
-    let (before, after) = resample(&mut wall, &clk);
-    assert_eq!(after - before, MS);
-    let (_, after) = resample(&mut wall, &clk);
-    assert_eq!(after, clk.truth_100ns(), "followed at the 4th resample");
+    clk.delay_next_reads(&[400_000]);
+    let (before, after) = tick_once(&mut wall, &clk);
+    assert_eq!(after, before, "a wide probe moves nothing");
+    let (before, after) = tick_once(&mut wall, &clk);
+    assert_eq!(after - before, 50 * MS, "followed at the next boundary");
+    assert_eq!(after, clk.truth_100ns());
     let st = wall.anchor_stats();
     assert_eq!(st.steps_followed, 1);
-    assert_eq!(st.wide_brackets, 1);
+    assert_eq!(st.last_step_us, 50_000);
+    assert_eq!(st.wide_brackets, 0, "a probe read is not an anchor sample");
     assert_eq!(st.holds_followed, 0);
+    assert_eq!(st.slewed_us, 0, "nothing slewed");
 }

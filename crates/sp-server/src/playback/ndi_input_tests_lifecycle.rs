@@ -93,8 +93,8 @@ fn step(rig: &mut Rig, k: usize) -> Step {
     let job = &jobs[0];
     assert_eq!(
         (job.video_tc_100ns, job.audio_tc_100ns),
-        (b(k), b(k) + 2 * MS),
-        "boundary {k}: stamped on its boundary"
+        (b(k), b(k)),
+        "boundary {k}: both stamped on its boundary (#224)"
     );
     if job.width == STANDBY.0 {
         assert_standby(job);

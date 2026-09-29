@@ -299,8 +299,9 @@ fn a_source_that_stalls_at_the_cut_boundary_is_covered_by_the_standby_fill() {
     let sends = sends(&backend);
     assert_eq!(sends.len(), 16, "the fill is a full audio + video pair");
     assert_eq!(sends[10], "send_audio(42,sr=48000,ch=2,spc=1600)");
-    // The fill's audio is stamped at the emit instant (`drain` passes T0).
-    assert_eq!(backend.audio_timecodes()[5], T0);
+    // #224: the fill's audio is stamped on its boundary, never the submit
+    // instant (`drain` passes T0).
+    assert_eq!(backend.audio_timecodes()[5], b(6));
 
     // A's stalled b(6) finally arrives: the boundary was served and A no longer
     // owns anything, so it is not forwarded — no double, no out-of-order send.

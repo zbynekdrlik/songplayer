@@ -22,10 +22,12 @@
 //! Nested under `pacer_tests_av_align.rs` so it reuses its media-encoded frame
 //! helper.
 //!
-//! A confirmed BACKWARD fleet date step (dantesync 1.12.0: once a night, up to
-//! ~−1.5 s) is followed as ONE hold of the pacer's wall (#147, design record
+//! A BACKWARD fleet date step (dantesync 1.12.0: once a night, up to ~−1.5 s)
+//! is followed as ONE hold of the pacer's wall (#147, design record
 //! 5850063723). The pacer then waits through the frozen wall and resumes on
-//! the very next slot.
+//! the very next slot. Since #224 the wall's per-boundary step probe follows a
+//! step (either way) at the boundary it lands, and a forward step's catch-up
+//! burst stamps every audio block on its own boundary.
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -59,6 +61,12 @@ struct StampSink {
     max_service_gap: Duration,
     /// Gaps between two serviced boundaries longer than [`LONG_PAUSE`].
     long_pauses: u64,
+    /// Emits whose audio stamp is not their video stamp (#224: a boundary's
+    /// audio block belongs to that boundary's timeline instant).
+    audio_off_boundary: u64,
+    /// The emit count (= serviced boundaries) of every boundary serviced at
+    /// the same virtual instant as the one before it: a catch-up burst.
+    burst_services: Vec<u64>,
 }
 
 /// A gap between two serviced boundaries this long is a real output pause
@@ -74,6 +82,9 @@ impl StampSink {
             if gap > LONG_PAUSE {
                 self.long_pauses += 1;
             }
+            if gap.is_zero() {
+                self.burst_services.push(self.emits);
+            }
         }
         self.last_service_at = Some(at);
     }
@@ -85,8 +96,11 @@ impl PacedSink for StampSink {
         _video: &PacedFrame,
         _audio: &[AudioFrame],
         video_tc_100ns: i64,
-        _audio_tc_100ns: i64,
+        audio_tc_100ns: i64,
     ) {
+        if audio_tc_100ns != video_tc_100ns {
+            self.audio_off_boundary += 1;
+        }
         let advanced = self.last_video_tc.is_none_or(|prev| video_tc_100ns > prev);
         if !advanced {
             self.non_advancing_stamps += 1;
@@ -190,8 +204,14 @@ fn a_preempted_re_anchor_causes_no_relatch_and_no_av_correction_over_10000_bound
     assert_eq!(s.wall_anchor_wide_brackets, 0);
     assert_eq!(s.wall_anchor_max_step_us, 0);
     assert_eq!(s.wall_anchor_slewed_us, 0);
-    // 1 construction read + 100 resamples, of which 50 needed a second read.
-    assert_eq!(clk.reads(), 1 + 100 + 50);
+    assert_eq!(s.wall_anchor_steps_followed, 0);
+    assert_eq!(
+        sink.audio_off_boundary, 0,
+        "every audio block on its boundary"
+    );
+    // 1 construction read + 100 resamples, of which 50 needed a second read,
+    // + one quiet step-probe read per serviced boundary (#224).
+    assert_eq!(clk.reads(), 1 + 100 + 50 + 10_000);
 }
 
 #[test]
@@ -201,8 +221,8 @@ fn pacing_stats_carry_the_pacer_wall_anchor_telemetry() {
     // an anchor 200 µs ahead of truth.
     clk.delay_next_reads(&[400_000; 8]);
     let mut pacer = Pacer::with_wallclock(30, true, WallClock::new(Box::new(clk.clone())));
-    // A genuine +5 ms UTC step, measured as 4.8 ms at the first resample; 1 ms
-    // is slewed in.
+    // A genuine +5 ms UTC step, 4.8 ms from the wall: the step probe of the
+    // first boundary follows it whole (#224); nothing is slewed.
     clk.step_utc(50_000);
     for _ in 0..100 {
         clk.advance_ns(33_333_300);
@@ -213,16 +233,18 @@ fn pacing_stats_carry_the_pacer_wall_anchor_telemetry() {
         (
             s.wall_anchor_max_step_us,
             s.wall_anchor_wide_brackets,
-            s.wall_anchor_slewed_us
+            s.wall_anchor_slewed_us,
+            s.wall_anchor_steps_followed,
+            s.wall_anchor_last_step_us
         ),
-        (4_800, 1, 1_000)
+        (4_800, 1, 0, 1, 4_800)
     );
 }
 
 #[test]
 fn pacing_stats_carry_a_followed_utc_step() {
-    // #147 (b): a +50 ms fleet date step, confirmed by the second resample, is
-    // followed in one event and reported through the pacer's own stats.
+    // #224: a +50 ms fleet date step is followed in one event by the step
+    // probe of the first boundary and reported through the pacer's own stats.
     let clk = VirtualClock::new(0);
     let mut pacer = Pacer::with_wallclock(30, true, WallClock::new(Box::new(clk.clone())));
     clk.step_utc(500_000);
@@ -234,18 +256,16 @@ fn pacing_stats_carry_a_followed_utc_step() {
     assert_eq!(s.wall_anchor_steps_followed, 1);
     assert_eq!(s.wall_anchor_last_step_us, 50_000);
     assert_eq!(s.wall_anchor_holds_followed, 0, "a forward step is no hold");
-    assert_eq!(
-        s.wall_anchor_slewed_us, 1_000,
-        "only the arming resample slewed"
-    );
+    assert_eq!(s.wall_anchor_slewed_us, 0, "nothing slewed: followed whole");
     assert_eq!(pacer.now_100ns(), clk.truth_100ns(), "on the stepped UTC");
 }
 
 #[test]
 fn a_followed_minus_1_5_s_step_pauses_the_output_once_with_no_relatch_or_av_correction() {
-    // #147 (design record 5850063723): the step lands at tick 150. Resample 2
-    // (tick 200) arms it with a 1 ms hold, and resample 3 (tick 300) follows
-    // the rest as ONE 1.499 s hold of the pacer's wall.
+    // #224: the step lands at tick 150, and the step probe of that very tick
+    // follows it as ONE 1.5 s hold of the pacer's wall (#147, design record
+    // 5850063723) — no longer a 1 ms arming hold at tick 200 and the rest at
+    // tick 300.
     let clk = VirtualClock::new(0);
     let (pacer, sink) = run_paced_with(&clk, 400, |ticks| {
         if ticks == 150 {
@@ -269,9 +289,13 @@ fn a_followed_minus_1_5_s_step_pauses_the_output_once_with_no_relatch_or_av_corr
     let pause_ns = sink.max_service_gap.as_nanos();
     assert!(
         pause_ns
-            .checked_sub(1_499_000_000)
+            .checked_sub(1_500_000_000)
             .is_some_and(|slot| SLOT_NS.contains(&slot)),
-        "the longest gap between two boundaries must be the 1.499 s hold + one slot, got {pause_ns} ns"
+        "the longest gap between two boundaries must be the 1.5 s hold + one slot, got {pause_ns} ns"
+    );
+    assert_eq!(
+        sink.audio_off_boundary, 0,
+        "every audio block on its boundary"
     );
     assert_eq!(
         (
@@ -280,13 +304,51 @@ fn a_followed_minus_1_5_s_step_pauses_the_output_once_with_no_relatch_or_av_corr
             s.wall_anchor_last_step_us,
             s.wall_anchor_last_hold_us
         ),
-        (1, 1, -1_500_000, 1_499_000),
-        "one followed step, and it was one hold"
+        (1, 1, -1_500_000, 1_500_000),
+        "one followed step, and it was one hold of the whole step"
     );
     assert_eq!(s.wall_anchor_max_step_us, 1_500_000);
-    assert_eq!(
-        s.wall_anchor_slewed_us, 1_000,
-        "only the arming hold slewed"
-    );
+    assert_eq!(s.wall_anchor_slewed_us, 0, "nothing slewed");
     assert_eq!(pacer.now_100ns(), clk.truth_100ns(), "on the UTC line");
+}
+
+#[test]
+fn a_plus_90_ms_step_is_followed_at_its_boundary_and_the_catch_up_audio_stays_on_its_boundaries() {
+    // #224: the 02:00Z nightly step (~+90 ms) lands at tick 150. The step
+    // probe of that tick follows it whole, so the very next boundaries are
+    // due at once: the pacer catches up the two slots the step skipped with
+    // back-to-back emits (ticks 151 and 152), then runs on time again. Every
+    // catch-up block is stamped on its OWN boundary, never on the emit
+    // instant, so a receiver places it where it belongs.
+    let clk = VirtualClock::new(0);
+    let (pacer, sink) = run_paced_with(&clk, 400, |ticks| {
+        if ticks == 150 {
+            clk.step_utc(900_000);
+        }
+    });
+    let s = pacer.stats();
+    assert_eq!(sink.emits, 400);
+    assert_eq!(
+        sink.burst_services,
+        vec![151, 152],
+        "the catch-up comes right after the step's own boundary"
+    );
+    assert_eq!(
+        sink.audio_off_boundary, 0,
+        "every audio block on its boundary"
+    );
+    assert_eq!(sink.non_advancing_stamps, 0);
+    assert_eq!(sink.non_contiguous_stamps, 0, "no slot is skipped");
+    assert_eq!((s.relatches, s.resyncs), (0, 0));
+    assert_eq!(
+        (
+            s.wall_anchor_steps_followed,
+            s.wall_anchor_last_step_us,
+            s.wall_anchor_holds_followed,
+            s.wall_anchor_slewed_us
+        ),
+        (1, 90_000, 0, 0),
+        "one forward step, followed whole"
+    );
+    assert_eq!(pacer.now_100ns(), clk.truth_100ns(), "on the stepped UTC");
 }

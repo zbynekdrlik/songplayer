@@ -76,13 +76,16 @@ fn frame_due_with_audio(present_100ns: i64, n: usize) -> PacedFrame {
 }
 
 /// Records per emit the video timecode (the on-grid boundary stamp), the audio
-/// timecode (raw emit-instant wall clock), and the per-channel audio sample count
-/// of the boundary chunk.
+/// timecode (the same boundary since #224), and the per-channel audio sample
+/// count of the boundary chunk.
 #[derive(Default)]
 struct RecordingSink {
     video_tcs: Vec<i64>,
     audio_tcs: Vec<i64>,
     audio_samples: Vec<usize>,
+    /// When set, the settable wall read at each emit (the emit instant).
+    clock: Option<SettableClock>,
+    emit_at: Vec<i64>,
 }
 
 impl PacedSink for RecordingSink {
@@ -95,6 +98,9 @@ impl PacedSink for RecordingSink {
     ) {
         self.video_tcs.push(video_tc_100ns);
         self.audio_tcs.push(audio_tc_100ns);
+        if let Some(clock) = &self.clock {
+            self.emit_at.push(clock.get());
+        }
         let samples: usize = audio
             .iter()
             .map(|a| {
@@ -170,14 +176,15 @@ fn decode_ahead_keeps_emit_on_boundary_with_20ms_decode_cost() {
         "with the decode moved ahead of the boundary NO emit is late"
     );
     // Every emit lands within ~1 ms of its boundary (the 100-ns grid rounding);
-    // before lane 4 this gap was ≈ the 20 ms decode cost on every boundary.
-    for (v, a) in sink.video_tcs.iter().zip(&sink.audio_tcs) {
-        let late_100ns = a - v;
-        assert!(
-            (0..=10_000).contains(&late_100ns),
-            "emit within 1 ms of its boundary: video_tc={v} audio_tc={a} late={late_100ns}"
-        );
-    }
+    // before lane 4 this gap was ≈ the 20 ms decode cost on every boundary. It
+    // is the pacer's own emit − boundary lateness: the audio stamp is the
+    // boundary itself since #224, so it no longer shows the emit instant.
+    assert!(
+        stats.max_late_us <= 1_000,
+        "emit within 1 ms of its boundary: max_late_us={}",
+        stats.max_late_us
+    );
+    assert_eq!(sink.audio_tcs, sink.video_tcs, "audio on its boundary");
     // The pre-decode duration is surfaced (≈ 20 ms per boundary).
     assert!(
         (15_000..=45_000).contains(&stats.prep_p99_us),
@@ -320,7 +327,10 @@ fn decode_cost_over_interval_catches_up_and_reanchors_stamps_le_now() {
         clk2.advance(400_000);
         frames.borrow_mut().pop_front()
     };
-    let mut sink = RecordingSink::default();
+    let mut sink = RecordingSink {
+        clock: Some(clk.clone()),
+        ..Default::default()
+    };
 
     let first = pacer.next_boundary_100ns();
     pacer.prepare(first, || pull(&frames));
@@ -343,9 +353,15 @@ fn decode_cost_over_interval_catches_up_and_reanchors_stamps_le_now() {
         "a persistent over-interval decode must re-anchor at least once, resyncs={}",
         stats.resyncs
     );
-    // Every stamp is never future-dated (≤ the emit-instant wall clock).
+    // Every stamp is never future-dated (≤ the wall at its emit).
+    assert_eq!(sink.emit_at.len(), sink.video_tcs.len());
+    for (v, at) in sink.video_tcs.iter().zip(&sink.emit_at) {
+        assert!(v <= at, "future-dated stamp: video_tc={v} emitted at {at}");
+    }
+    // #224: the late emits of a decoder that cannot keep up still stamp every
+    // audio block on its own boundary, never on the (late) emit instant.
     for (v, a) in sink.video_tcs.iter().zip(&sink.audio_tcs) {
-        assert!(*v <= *a, "future-dated stamp: video_tc={v} audio_tc={a}");
+        assert_eq!(a, v, "audio off its boundary: video_tc={v} audio_tc={a}");
     }
     assert!(
         pacer.iter_p99_us() >= 33_333,

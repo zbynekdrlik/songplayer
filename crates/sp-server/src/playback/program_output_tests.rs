@@ -47,8 +47,8 @@ fn a_standby_pair_is_one_silent_block_then_the_nv12_black_on_its_boundary() {
     assert_eq!(backend.video_timecodes(), vec![stamp]);
     assert_eq!(
         backend.audio_timecodes(),
-        vec![stamp + 123],
-        "audio = emit instant"
+        vec![stamp],
+        "#224: the program's own block is stamped on its boundary, never the submit instant"
     );
     let planar = backend.last_audio_planar();
     assert_eq!(planar.len(), 3200);
@@ -358,8 +358,8 @@ fn a_mix_submits_the_crossfaded_block_then_the_blended_picture_on_its_boundary()
     assert_eq!(backend.video_timecodes(), vec![stamp]);
     assert_eq!(
         backend.audio_timecodes(),
-        vec![stamp + 22],
-        "the incoming source's own audio stamp"
+        vec![stamp],
+        "#224: the program's own mixed block, stamped on the window boundary"
     );
     // Slot 4 of a 9-slot window: samples 6400.. of 14 400 on the one curve.
     assert_block(&backend, |i| {
@@ -438,8 +438,8 @@ fn a_missing_side_mixes_against_the_black_of_the_present_sides_size() {
         "neither side: no mixed picture"
     );
 
-    // Submitted: the missing side is silence, and the audio keeps the stamp of
-    // the side that is there.
+    // Submitted: the missing side is silence, and the mixed block is stamped on
+    // its window boundary like every block the program makes (#224).
     assert_eq!(out.submit(ProgramJob::Mix(from_only), at(0) + 999), at(0));
     assert_block(&backend, |i| {
         let (g_from, g_to) = crossfade_gains(4 * 1600 + i, 9 * 1600);
@@ -458,8 +458,8 @@ fn a_missing_side_mixes_against_the_black_of_the_present_sides_size() {
     assert_eq!(backend.video_timecodes(), vec![at(0), at(1), at(2)]);
     assert_eq!(
         backend.audio_timecodes(),
-        vec![at(0) + 11, at(1) + 22, at(2) + 5],
-        "the outgoing side's stamp, the incoming side's, the emit instant"
+        vec![at(0), at(1), at(2)],
+        "#224: every block the program makes is stamped on its boundary"
     );
     assert_eq!(
         pictures(&backend),

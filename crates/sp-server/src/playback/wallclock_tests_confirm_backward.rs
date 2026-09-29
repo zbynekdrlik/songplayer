@@ -14,7 +14,10 @@
 //!   runs on the corrected UTC line;
 //! - a lone outlier, a wide bracket or a different step stays the 1 ms hold.
 //!
-//! Pure rule + a WallClock over the [`VirtualClock`], with exact values.
+//! Pure rule + a WallClock over the [`VirtualClock`], with exact values. Since
+//! #224 the per-boundary step probe follows a real step at the boundary it
+//! lands, as ONE hold of the WHOLE step; the resample's own confirm path is
+//! driven with realtime outliers scripted on the resample's reads.
 
 use super::*;
 use std::time::{Duration, Instant};
@@ -34,6 +37,28 @@ fn resample(wall: &mut WallClock, clk: &VirtualClock) -> (i64, i64) {
         wall.tick();
     }
     clk.advance_ns(FRAME_NS);
+    let before = wall.now_100ns();
+    wall.tick();
+    assert_eq!(wall.frames_since_resample(), 0, "the 100th tick resamples");
+    (before, wall.now_100ns())
+}
+
+/// Run one resample interval whose resampling 100th tick reads with `delays`
+/// and `outliers` scripted (the resample's anchor reads come first); the step
+/// probe of every tick (#224) and every other read see the true UTC.
+fn resample_reading(
+    wall: &mut WallClock,
+    clk: &VirtualClock,
+    delays: &[u64],
+    outliers: &[i64],
+) -> (i64, i64) {
+    for _ in 0..99 {
+        clk.advance_ns(FRAME_NS);
+        wall.tick();
+    }
+    clk.advance_ns(FRAME_NS);
+    clk.delay_next_reads(delays);
+    clk.outlier_next_reads(outliers);
     let before = wall.now_100ns();
     wall.tick();
     assert_eq!(wall.frames_since_resample(), 0, "the 100th tick resamples");
@@ -235,30 +260,37 @@ fn a_followed_hold_is_recorded_with_its_signed_step_and_its_hold_length() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_confirmed_minus_1_5_s_step_is_followed_as_one_hold_and_the_wall_never_goes_back() {
+fn a_minus_1_5_s_step_is_one_hold_from_the_next_boundary_and_the_wall_never_goes_back() {
+    // #224: the probe of the first boundary after the step follows it as ONE
+    // hold of the whole 1.5 s; no 1 ms arming hold first (#147).
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
     clk.step_utc(STEP);
-    // Resample 1 (frame 100) arms with a 1 ms hold, resample 2 (frame 200)
-    // follows the rest. No tick ever moves the wall: a hold starts at the
-    // reading the wall already shows.
-    let mut prev = wall.now_100ns();
-    for frame in 1..=200u64 {
-        clk.advance_ns(FRAME_NS);
-        let before = wall.now_100ns();
-        assert!(before >= prev, "frame {frame}: the wall went back");
-        wall.tick();
-        assert_eq!(wall.now_100ns(), before, "frame {frame}: a tick moved it");
-        prev = before;
-    }
-    let st = wall.anchor_stats();
-    assert_eq!(st.steps_followed, 1, "followed at the 2nd resample");
-    assert_eq!(st.holds_followed, 1, "exactly one hold event");
-    // The wall freezes for the rest (1.499 s), then runs on the UTC line.
+    clk.advance_ns(FRAME_NS);
     let frozen = wall.now_100ns();
-    assert_eq!(frozen - clk.truth_100ns(), -(STEP + MS), "1.499 s ahead");
+    wall.tick();
+    assert_eq!(
+        wall.now_100ns(),
+        frozen,
+        "a hold starts at the reading shown"
+    );
+    assert_eq!(
+        frozen - clk.truth_100ns(),
+        -STEP,
+        "1.5 s ahead of the new UTC"
+    );
+    let st = wall.anchor_stats();
+    assert_eq!(st.steps_followed, 1, "followed at the first boundary");
+    assert_eq!(st.holds_followed, 1, "exactly one hold event");
+    // The wall freezes for the whole step, then runs on the UTC line. The
+    // boundaries keep ticking through the hold (every ~33 ms, as a submit
+    // consumer does): each probe inside it sees no new step.
+    let mut prev = frozen;
     for ms in 1..=1_600i64 {
         clk.advance_ns(1_000_000);
+        if ms % 33 == 0 {
+            wall.tick();
+        }
         let w = wall.now_100ns();
         assert!(w >= prev, "ms {ms}: the wall went back");
         assert_eq!(
@@ -269,20 +301,27 @@ fn a_confirmed_minus_1_5_s_step_is_followed_as_one_hold_and_the_wall_never_goes_
         prev = w;
     }
     assert_eq!(wall.now_100ns(), clk.truth_100ns(), "on the UTC line");
-    // Later resamples are normal again.
-    let (before, after) = resample(&mut wall, &clk);
-    assert_eq!(after, before);
-    assert_eq!(after, clk.truth_100ns());
+    // The next resample is normal again (1 + 48 ticks so far).
+    while wall.frames_since_resample() < 99 {
+        clk.advance_ns(FRAME_NS);
+        wall.tick();
+    }
+    clk.advance_ns(FRAME_NS);
+    let before = wall.now_100ns();
+    wall.tick();
+    assert_eq!(wall.frames_since_resample(), 0, "the 100th tick resampled");
+    assert_eq!(wall.now_100ns(), before);
+    assert_eq!(wall.now_100ns(), clk.truth_100ns());
     assert_eq!(
         wall.anchor_stats(),
         WallAnchorStats {
             max_step_us: 1_500_000,
             wide_brackets: 0,
-            slewed_us: 1_000,
+            slewed_us: 0,
             steps_followed: 1,
             last_step_us: -1_500_000,
             holds_followed: 1,
-            last_hold_us: 1_499_000,
+            last_hold_us: 1_500_000,
         }
     );
 }
@@ -291,9 +330,9 @@ fn a_confirmed_minus_1_5_s_step_is_followed_as_one_hold_and_the_wall_never_goes_
 fn a_lone_minus_1_5_s_outlier_then_a_normal_read_holds_the_wall_at_most_1_ms() {
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
-    // One narrow sample reads UTC 1.5 s behind, the next reads the true line.
-    clk.step_utc(STEP);
-    let (before, after) = resample(&mut wall, &clk);
+    // One narrow resample read sees UTC 1.5 s behind; every other read (the
+    // step probe right after it included, #224) reads the true line.
+    let (before, after) = resample_reading(&mut wall, &clk, &[], &[STEP]);
     assert_eq!(
         after, before,
         "the outlier starts a hold, never a step back"
@@ -304,7 +343,6 @@ fn a_lone_minus_1_5_s_outlier_then_a_normal_read_holds_the_wall_at_most_1_ms() {
     assert_eq!(wall.now_100ns(), before, "held for exactly 1 ms");
     clk.advance_ns(1_000_000);
     assert_eq!(wall.now_100ns(), before + MS, "then running again");
-    clk.step_utc(-STEP);
     let (before, after) = resample(&mut wall, &clk);
     assert_eq!(
         after - before,
@@ -327,36 +365,33 @@ fn a_lone_minus_1_5_s_outlier_then_a_normal_read_holds_the_wall_at_most_1_ms() {
 }
 
 #[test]
-fn a_wide_backward_resample_never_arms_so_two_clean_reads_are_still_needed() {
+fn a_wide_backward_resample_never_arms_so_the_next_narrow_read_only_arms() {
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
-    clk.step_utc(STEP);
-    // Resample 1: every attempt preempted by 400 µs, a wide bracket. The
-    // 200 µs midpoint pairing error reads the step as −1.4998 s.
-    clk.delay_next_reads(&[400_000; 8]);
-    resample(&mut wall, &clk);
-    // Resample 2 is clean. Had resample 1 armed, it would follow; it only arms.
-    resample(&mut wall, &clk);
+    // Resample 1: every attempt preempted by 400 µs AND reading UTC 1.5 s
+    // behind — a wide bracket. The 200 µs midpoint pairing error reads it as
+    // −1.4998 s. (A hold at a wide bracket's midpoint reads below the
+    // harness's earlier read — the documented harness artifact — so only the
+    // stats are asserted here.)
+    resample_reading(&mut wall, &clk, &[400_000; 8], &[STEP; 8]);
+    // Resample 2 is narrow and reads the same −1.5 s once. Had resample 1
+    // armed, it would follow the rest as a 1.499 s hold; it only arms.
+    let (before, after) = resample_reading(&mut wall, &clk, &[], &[STEP]);
+    assert_eq!(after, before, "a 1 ms hold, never a step back");
+    clk.advance_ns(1_000_000);
+    assert_eq!(wall.now_100ns(), before, "held 1 ms");
+    clk.advance_ns(1_000_000);
+    assert_eq!(wall.now_100ns(), before + MS, "then running: no long hold");
     let st = wall.anchor_stats();
     assert_eq!(
-        (st.wide_brackets, st.steps_followed, st.holds_followed),
-        (1, 0, 0),
+        (
+            st.wide_brackets,
+            st.steps_followed,
+            st.holds_followed,
+            st.slewed_us,
+            st.max_step_us
+        ),
+        (1, 0, 0, 2_000, 1_499_800),
         "a wide read never arms"
-    );
-    // Resample 3 (clean, the same step) follows the rest as one hold.
-    resample(&mut wall, &clk);
-    clk.advance_ns(1_600_000_000);
-    assert_eq!(wall.now_100ns(), clk.truth_100ns(), "on the UTC line");
-    assert_eq!(
-        wall.anchor_stats(),
-        WallAnchorStats {
-            max_step_us: 1_499_800,
-            wide_brackets: 1,
-            slewed_us: 2_000,
-            steps_followed: 1,
-            last_step_us: -1_499_000,
-            holds_followed: 1,
-            last_hold_us: 1_498_000,
-        }
     );
 }

@@ -329,3 +329,7 @@ mod wallclock_tests_confirm;
 #[cfg(test)]
 #[path = "wallclock_tests_confirm_backward.rs"]
 mod wallclock_tests_confirm_backward;
+
+#[cfg(test)]
+#[path = "wallclock_tests_probe.rs"]
+mod wallclock_tests_probe;

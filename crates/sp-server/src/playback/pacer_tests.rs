@@ -71,6 +71,10 @@ struct RecordingSink {
     audio_tcs: Vec<i64>,
     /// Per-channel sample count of the audio batch handed to each emit.
     audio_samples: Vec<usize>,
+    /// When set, the settable wall read at each emit (the emit instant): the
+    /// audio stamp is the boundary since #224, so it no longer carries it.
+    clock: Option<SettableClock>,
+    emit_at: Vec<i64>,
 }
 
 impl PacedSink for RecordingSink {
@@ -83,6 +87,9 @@ impl PacedSink for RecordingSink {
     ) {
         self.video_tcs.push(video_tc_100ns);
         self.audio_tcs.push(audio_tc_100ns);
+        if let Some(clock) = &self.clock {
+            self.emit_at.push(clock.get());
+        }
         let samples: usize = audio
             .iter()
             .map(|a| {
@@ -156,11 +163,11 @@ fn stamp_is_the_serviced_boundary_never_floor_of_now() {
     clk.set(b(1) + 70_000); // 7 ms past b(1)
     pacer.service(|| first.take(), &mut sink);
     assert_eq!(sink.video_tcs, vec![b(1)], "stamp is the boundary");
-    assert!(sink.video_tcs[0] <= sink.audio_tcs[0], "never future-dated");
+    assert!(sink.video_tcs[0] <= clk.get(), "never future-dated");
     assert_eq!(
         sink.audio_tcs,
-        vec![b(1) + 70_000],
-        "audio = raw wall clock"
+        vec![b(1)],
+        "#224: the audio block is stamped on its boundary, not the emit instant"
     );
 }
 
@@ -436,7 +443,10 @@ fn never_future_dated_over_a_mixed_run_with_catchup_and_resync() {
     for m in 1..=25i64 {
         frames.borrow_mut().push_back(frame_due_at(b(m)));
     }
-    let mut sink = RecordingSink::default();
+    let mut sink = RecordingSink {
+        clock: Some(clk.clone()),
+        ..Default::default()
+    };
 
     // Phase A: on-time b(1)..b(15).
     for k in 1..=15i64 {
@@ -469,9 +479,15 @@ fn never_future_dated_over_a_mixed_run_with_catchup_and_resync() {
     );
     assert_eq!(stats.resyncs, 1, "exactly one resync");
 
-    // Invariant 1: every stamp <= the emit-instant wall clock (audio_tc).
+    // Invariant 1: every stamp <= the wall at its emit — never future-dated.
+    assert_eq!(sink.emit_at.len(), sink.video_tcs.len());
+    for (v, at) in sink.video_tcs.iter().zip(&sink.emit_at) {
+        assert!(v <= at, "future-dated stamp: video_tc={v} emitted at {at}");
+    }
+    // Invariant 1b (#224): every audio block, the catch-up burst's included,
+    // is stamped on its own boundary, never on the emit instant.
     for (v, a) in sink.video_tcs.iter().zip(&sink.audio_tcs) {
-        assert!(*v <= *a, "future-dated stamp: video_tc={v} audio_tc={a}");
+        assert_eq!(a, v, "audio off its boundary: video_tc={v} audio_tc={a}");
     }
     // Invariant 2: stamps strictly increase; each step is one grid slot EXCEPT
     // across a resync, and there is exactly one such multi-slot step.
@@ -513,9 +529,9 @@ fn lateness_measured_at_the_submit_instant_includes_decode_time() {
         &mut sink,
     );
 
-    // Stamp is the boundary; audio (emit read) is 5 ms past it.
+    // Stamps are the boundary, the audio's too (#224); the emit is 5 ms late.
     assert_eq!(sink.video_tcs, vec![B1]);
-    assert_eq!(sink.audio_tcs, vec![B1 + 50_000]);
+    assert_eq!(sink.audio_tcs, vec![B1]);
     let stats = pacer.stats();
     assert!(
         stats.max_late_us >= 5_000,
@@ -746,7 +762,7 @@ fn standby_planner_fills_one_boundary_per_interval_with_one_silent_block() {
         );
     }
     for (v, a) in sink.video_tcs.iter().zip(&sink.audio_tcs) {
-        assert!(*v <= *a, "never future-dated: video_tc={v} audio_tc={a}");
+        assert_eq!(a, v, "the audio on its boundary: video_tc={v} audio_tc={a}");
         assert_eq!(
             sp_core::genlock::floor_boundary_100ns(*v, 30),
             *v,
@@ -789,7 +805,7 @@ fn standby_black_fills_boundaries_without_a_last_frame() {
         assert!(w[1] > w[0], "black idle stamps strictly increase");
     }
     for (v, a) in sink.video_tcs.iter().zip(&sink.audio_tcs) {
-        assert!(*v <= *a, "never future-dated");
+        assert_eq!(a, v, "the idle block on its boundary (#224)");
     }
     assert!(
         sink.audio_samples.iter().all(|&n| n == 1600),
