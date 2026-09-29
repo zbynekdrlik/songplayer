@@ -254,20 +254,18 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
 
 ## The outgoing playlist keeps playing (`scene_off.rs`)
 
-`handle_scene_change(pid, false)` no longer pauses at once. It asks
+`handle_scene_change(pid, false)` (#221 L4b: the playback authority's OFF,
+`program-bus.md`) no longer pauses at once. It asks
 `ProgramBus::hold_for(pid)` (only for a Playing pipeline):
 
 - `Hold::Until(t)`: `pid` is the `from` of a window (or a Cut) not served yet.
   `t` = one slot after the window's end. It is re-checked at `t`.
-- `Hold::OnProgram`: `pid` is still the program's source. The follow task and
-  a #221 manual-scene press cut only AFTER cg OBS switched (a playlist press
-  cuts first, then mirrors cg OBS: that is a `Hold::Until`), and cg OBS's scene
-  event usually reaches the engine before their cut — but not always (#219:
-  the follow reads the OBS client's snapshot, published together with the
-  `SceneChanged`, on its own task, so either order happens; a cut that came
-  first is a `Hold::Until`). One `CUT_SETTLE` (500 ms) re-check.
-- `None`: pause now, exactly as before. Every playlist that is not the
-  program's source takes this path.
+- `None`: pause now, exactly as before.
+
+#221 L4b deleted `Hold::OnProgram` + `CUT_SETTLE` (a 500 ms wait for the
+program's own source, whose cut away could follow cg OBS's scene event):
+the authority drops a stale OFF, and the program's selected source is always
+on air, so it is never taken off program. `hold_for(selected)` is `None`.
 
 The re-check is `PipelineEvent::SceneOffDue` on the engine's own channel (a
 spawned sleep). If the scene is back on program by then, it does nothing.
@@ -301,7 +299,7 @@ faded out the on-program title.
   `scene_off_due` acts only on the PENDING one and ignores any other as
   stale:
   - a newer hold replaced it: queued during an A→B→A→B, it was taken as the
-    newer hold's re-check and skipped that hold's `CUT_SETTLE`;
+    newer hold's re-check and re-checked that hold early;
   - the hold ended (a pause, a scene-on, an operator's pick): queued when
     the pick came (the engine's `select!` is unbiased), it held the picked
     song again or paused it. A pick ends the hold BEFORE its PlayVideo clear,
@@ -466,12 +464,9 @@ unanswered-catch-up gap it had is gone by construction.
   the program already shows that source (`Follow::follow_scene`, which also
   records `last_follow_cut`). This replaces the event-night watcher
   `%TEMP%\sp_follow.ps1`, which polled the scene every 200 ms.
-- Order vs the engine: the client sends a scene's `SceneChanged` and
-  publishes its snapshot under one write lock (the broadcast first), but the
-  engine bridge and the follow are separate tasks, so the follow may cut
-  before or after the engine's scene-off of the outgoing playlist.
-  `scene_off.rs` handles both (`Hold::Until` when the cut came first,
-  `Hold::OnProgram` + `CUT_SETTLE` when the scene-off came first).
+- Order vs the engine (#221 L4b): the engine no longer follows cg OBS's
+  scene at all; a follow cut is a program cut like any other, and the
+  playback authority plays what it put on air.
 
 ## API + UI
 

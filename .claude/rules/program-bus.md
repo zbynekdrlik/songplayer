@@ -2,6 +2,12 @@
 paths:
   - "crates/sp-server/src/playback/program_bus*.rs"
   - "crates/sp-server/src/playback/program_on_air*.rs"
+  - "crates/sp-server/src/playback/program_authority*.rs"
+  - "crates/sp-server/src/playback/runtime_pipeline.rs"
+  - "crates/sp-server/src/playback/engine_play.rs"
+  - "crates/sp-server/src/api/routes_status.rs"
+  - "sp-ui/src/components/player.rs"
+  - "e2e/player-off-program.spec.ts"
   - "crates/sp-server/src/playback/scene_catalog*.rs"
   - "crates/sp-server/src/playback/legacy_cg*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
@@ -181,6 +187,71 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 - `ProgramBus::switch_order` (a `tokio::sync::Mutex`) orders the scene
   switches of the #221 switch path (`remote-control.md`). It is separate
   from `cut_serial`, which only orders persist + cut.
+
+## The playback authority (#221 L4b, design record 5873773896 §1e)
+
+SongPlayer's own program decides what PLAYS; cg OBS's scene detection starts
+and pauses nothing (the OBS→engine bridge, `scene_change_commands` and
+`EngineCommand::SceneChanged` are deleted; a cg OBS disconnect pauses
+nothing).
+
+- **On air** = `program_on_air::on_air_set(&on_air, legacy_cg.shown)`:
+  SP-program's source when it is a playlist (-1 "OBS manuál" is none) ∪ the
+  playlist SongPlayer last told cg OBS to show. The union exists only until
+  B4 step 6 (the legacy consumers still take cg OBS): a dashboard cut to -1
+  while cg OBS shows sp-fast keeps sp-fast playing (the input carries it),
+  and so does a mirror that failed. Right after every playlist press BOTH
+  playlists are on air until cg OBS answers the mirror (tens of ms); the
+  outgoing one is then held by its window (`Hold::Until`) as before.
+- **The task** `program_authority::run_program_authority` (spawned in
+  `start_program`, after the restore and the startup re-mirror) watches
+  `ProgramBus::on_air()` and `legacy_cg().shown()`. Its first value (the
+  restored program) and every change of either become
+  `PipelineEvent::OnProgram(bool)` on the engine's OWN event channel
+  (`on_air_changes`: OFF for every playlist that left, then ON for EVERY
+  member = the re-kick, so a same-scene press — a new `seq` — plays a
+  playlist paused out of band). A shown-only change re-kicks too (idempotent:
+  `SceneOn` on Playing is a no-op, the title `Resync` acts only on a
+  difference). It ends on shutdown or when the engine's channel is gone.
+- **The engine drops a stale event** (`PlaybackEngine::on_program`, the
+  same `on_air_set` read from the bus at handling time): ON only while the
+  playlist is on air, OFF only while it is not. So the selected source is
+  never taken off program — `Hold::OnProgram` / `CUT_SETTLE` are deleted
+  (`program-transition.md`).
+- **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
+  whose scene is not flagged runs `handle_scene_change(pid, true)` itself
+  (its ON came before it existed). `start_program` runs after the #196
+  startup senders, so the first value finds every startup pipeline.
+- **A manual ▶ claims nothing** (`PlayEvent::Start`: WaitingForScene +
+  Start → SelectAndPlay; `handle_engine_play` fires `VideosAvailable` +
+  `Start`). Off air the playlist plays OFF program: `scene_active` stays
+  false, no title goes to the wall, the WS state is `WaitingForScene` with
+  transport `Playing`, which the Player labels "Hrá mimo programu"
+  (`sp-ui` `player.rs`; "Čaká na scénu" otherwise). The mock's `/play`
+  models it from its program source (`e2e/player-off-program.spec.ts`).
+- **`/api/v1/status`**: `active_scene` = the one resolver,
+  `active_playlist_ids` = the on-air set, ascending
+  (`api/routes_status.rs::on_air_fields`; `routes.rs` is at the cap). A
+  post-deploy read right after a press must wait for the set to SETTLE (at
+  most one playlist on air): `readEngineActiveScene` /
+  `waitEngineActiveScene` in `post-deploy.spec.ts`, the A/V gate's baseline
+  poll (`length === 1`).
+- **The startup re-mirror** (main-session decision 1, comment 5884501960):
+  `program_switch::remirror_on_air`, in `start_program` once the OBS link
+  is attached, sends the restored playlist's catalog scene to cg OBS ONCE
+  through the ticketed mirror (a ticket under `switch_order`,
+  `Upstream::enqueue(…, supersedes = true)`, `startup_answer` +
+  `confirm_mirror`), so `legacy_cg.shown` (seeded by the restore) is what
+  cg OBS was told. A restored -1, nothing restored, or a playlist whose
+  catalog names no scene sends nothing; no `last_remote_cut` (nothing was
+  pressed). If cg OBS does not connect within the mirror's wait (3 + 4 s)
+  the call is dropped as abandoned and `shown` keeps the seeded value.
+- Tests: `program_on_air_tests.rs` (the set + changes tables),
+  `program_authority_tests.rs` (the task over a real bus: first value,
+  press + confirm, re-kick, -1 keeps cg's playlist, shutdown / gone engine;
+  the engine's stale check on an in-memory DB), `tests_runtime_pipeline.rs`,
+  `tests_play_video.rs` (the off-air ▶), `routes_tests.rs` (status),
+  `program_switch_tests.rs` (the re-mirror).
 
 ## Tests
 

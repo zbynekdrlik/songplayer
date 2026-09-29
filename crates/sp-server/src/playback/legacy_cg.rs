@@ -23,17 +23,16 @@
 //! (`ndi_health_expect`): a receiver is expected on a playlist's NDI output
 //! only while cg OBS was told to show it.
 //!
-//! Residual: `shown` is not persisted; the restore seeds it from
-//! `SP-program`'s saved source, which is what cg OBS shows only if that
-//! source's last mirror was accepted. Two ways it can differ after a
-//! restart, until the next switch:
-//! - a dashboard cut to -1 (cg OBS keeps showing playlist P): `shown` is
-//!   `None`, so P's dark-wall check stays silent (fails safe);
-//! - a cut to Q whose mirror failed (cg OBS still shows P): `shown` is
-//!   `Some(Q)`. In L4a only P's dark-wall check stays silent, the same
-//!   fail-safe silence (cg OBS's scene detection still decides on air);
-//!   from L4b, where `shown` joins the on-air set, P would read as off air.
-//!   Persisting `shown` (or seeding `None`) is a main-session call.
+//! `shown` is not persisted; the restore seeds it from `SP-program`'s saved
+//! source. #221 L4b (main-session decision 1, comment 5884501960): at
+//! startup `program_switch::remirror_on_air` then tells cg OBS to show that
+//! playlist, through the same ticketed mirror, so the seed is what cg OBS
+//! was told (before, a cut to Q whose mirror failed left cg OBS on P with
+//! `shown` `Some(Q)` after a restart). Residual: a restored -1 sends
+//! nothing, so after a dashboard cut to -1 while cg OBS showed playlist P
+//! and a restart, `shown` is `None` and P is not on air (paused, its
+//! dark-wall check silent) while cg OBS still shows it, until the next
+//! switch.
 //!
 //! It also holds the dashboard's way to cg OBS ([`LegacyCg::link`]): the
 //! OBS client's command channel, attached by `start_program`. `AppState` is
@@ -122,9 +121,10 @@ impl LegacyCg {
         true
     }
 
-    /// Startup: the restored program `source` is what cg OBS was last told,
-    /// when it is a playlist (the NDI input "OBS manuál" names no playlist).
-    /// Always published with `send_replace`: nobody subscribed yet.
+    /// Startup: the restored program `source`, when it is a playlist (the
+    /// NDI input "OBS manuál" names no playlist) — what cg OBS is then told
+    /// once (`program_switch::remirror_on_air`, #221 L4b). Always published
+    /// with `send_replace`: nobody subscribed yet.
     pub fn restored(&self, source: i64) {
         if source != PROGRAM_INPUT_ID {
             self.shown.send_replace(Some(source));

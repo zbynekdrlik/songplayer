@@ -57,7 +57,10 @@ Rules for every post-deploy spec:
   `e2e/node_modules` without a trailing slash, so the link is never
   committed and goes with the worktree.
 - **#221 L3: the scene driver is SongPlayer's facade** (`FACADE_WS_URL`,
-  :4456). Until L4b `/api/v1/status.active_scene` / `active_playlist_ids`
-  still come from cg OBS's scene detection, which follows the facade's
-  mirror AFTER `switchScene` returns: wait for the engine
-  (`waitEngineActiveScene`), never read it once.
+  :4456). **#221 L4b:** `/api/v1/status.active_scene` /
+  `active_playlist_ids` are SongPlayer's own program (the resolver, and the
+  on-air set = SP-program's playlist ∪ the one cg OBS was told to show).
+  Right after `switchScene` returns, the previous playlist is still on air
+  until cg OBS answers the mirror: wait for the set to settle (at most one
+  playlist; `waitEngineActiveScene`, the A/V gate's `length === 1` poll),
+  never read it once.
