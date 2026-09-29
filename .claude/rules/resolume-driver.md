@@ -382,10 +382,14 @@ Otherwise a stale text Arena restored from its saved composition stays until
 the next line change, for the whole song, or over the next camera shot.
 
 **The title is ONE `Resync` (#217 addendum 3), sent first.** A recovery and
-a Play send it through `resync_wall_title`; the OBS scene-on
+a Play send it through `resync_wall_title`; the scene-on
 (`push_title_for_playing`) calls `decide_wall_title` + `send_resync` itself,
 to re-arm the timers in between. It names the title that SHOULD be up, and
-the driver compares it with what it did (above).
+the driver compares it with what it did (above). A scene-off with another
+playlist still on program (#221 L4b, `scene_off.rs::wall_after_scene_off`)
+calls `decide_wall_title` too: a due title is a `Resync`, none due is a
+`HideTitle`, so the outgoing title fades instead of being cut by a
+`Resync(None)`; its lines are the recovery's `on_program_lines`.
 
 - **One clock: `TitleClock { video_id, show_at, hide_at }`**
   (`playback/title.rs`). The `Started` handler fixes it
@@ -467,8 +471,8 @@ the driver compares it with what it did (above).
   ~500 ms at each boundary they disagreed. A `Resync(Some)` queued with the
   song-end HideTitle superseded it, and the title stayed into the next song;
   a `Resync(None)` just after the show timer hid the title for the whole song.
-  Every OBS program change re-sends `on_program: true` for every on-program
-  playlist (`obs_bridge.rs`), so a Resync near a boundary is common. The
+  Every program change re-syncs (the playback authority's ON / OFF,
+  `program_authority.rs`, #221 L4b), so a Resync near a boundary is common. The
   timers and the Resync now read the same instants. Only the moment between
   the decision and the enqueue can still race a timer: an await on the
   shared 64-slot engine → Resolume fan-out channel (no DB read), and a

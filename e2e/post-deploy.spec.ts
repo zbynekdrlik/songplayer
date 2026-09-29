@@ -491,9 +491,9 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    * both from the facade's switch (the scene catalog), never cg OBS's
    * scene detection.
    *
-   * Required environment: OBS must have an `sp-fast` scene containing
-   * an NDI source whose `ndi_source_name` setting is `SP-fast`. If
-   * missing, the test fails hard (no skip).
+   * Required environment: the scene catalog must map `sp-fast` to the
+   * ytfast playlist (its NDI output `SP-fast`), so the facade's switch
+   * cuts SP-program to it. If missing, the test fails hard (no skip).
    */
   test("switching OBS to sp-fast scene triggers ytfast playback", async ({ request }) => {
     expect(obs, "OBS WebSocket driver must be connected").not.toBeNull();
@@ -532,9 +532,9 @@ test.describe("SongPlayer post-deploy feature verification", () => {
 
     // Poll the SongPlayer status until active_playlist_ids contains
     // ytfast. This is the strong assertion: it only becomes true when
-    // the rebuild populated the NDI map AND check_scene_items matched
-    // the scene-item source name against it. Before the fix, this
-    // would stay empty forever.
+    // the facade's switch resolved sp-fast through the scene catalog and
+    // cut SP-program to ytfast (#221 L4b: the on-air set the playback
+    // authority plays).
     const deadline = Date.now() + 5_000;
     let matched = false;
     let lastStatus: { active_scene?: string; active_playlist_ids?: number[] } = {};
@@ -606,8 +606,8 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     await obs!.switchScene(FAST_SCENE_NAME);
 
     // The dashboard card must show .np-info within 15s. That proves:
-    //  - Scene detection matched (ndi_sources populated correctly)
-    //  - OBS→engine bridge dispatched SceneChanged to the engine
+    //  - The facade's switch cut SP-program to ytfast (the scene catalog)
+    //  - The playback authority sent ytfast's OnProgram to the engine
     //  - Engine state machine advanced into Playing
     //  - Pipeline started decoding and emitted Started
     //  - NowPlaying reached the dashboard WebSocket

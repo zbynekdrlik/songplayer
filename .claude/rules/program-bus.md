@@ -238,12 +238,12 @@ nothing).
   latency: an OFF or a re-check handled after a cut back but before the
   task diffed it pauses the playlist, and the ON then starts a new song.
 - **The wall after an OFF** (`scene_off::wall_after_scene_off`, review
-  round 3): the incoming ON comes at the press and the outgoing OFF only at
-  the mirror's OK, so another playlist may already be on program with its
-  title up. The outgoing line goes (HideSubtitles); with another playlist
-  on program its subtitle dedup key is cleared (its next position report
-  re-sends its line) and the title is re-synced (`resync_wall_title`),
-  never a bare HideTitle.
+  rounds 3-4): the incoming ON comes at the press and the outgoing OFF only
+  at the mirror's OK, so another playlist may already be on program with
+  its title and line up. With one on program (in the diffed set) its due
+  title is re-synced, none due fades the outgoing title, and its line is
+  re-sent at once; details in `program-transition.md`, "The wall after an
+  OFF".
 - **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
   whose scene is not flagged runs `handle_scene_change(pid, true)` itself
   (its ON came before it existed). An ON for a playlist with NO pipeline

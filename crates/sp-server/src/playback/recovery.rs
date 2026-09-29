@@ -156,9 +156,11 @@ impl super::PlaybackEngine {
     /// Declare the wall's title to the Resolume driver (a `Resync`): the due
     /// title, or none. The driver acts only on a difference, so this is
     /// idempotent: it never re-runs a fade for a title that is up. Used by a
-    /// Resolume recovery and after a Play (`resync_after_play`). The OBS
+    /// Resolume recovery and after a Play (`resync_after_play`). The
     /// scene-on calls `decide_wall_title` itself: it also re-arms the song's
-    /// timers at the decision instant (`push_title_for_playing`).
+    /// timers at the decision instant (`push_title_for_playing`). So does a
+    /// scene-off with another playlist on program (`wall_after_scene_off`):
+    /// none due there fades the outgoing title (`HideTitle`).
     pub(super) async fn resync_wall_title(&self) -> Option<String> {
         let (title, _) = self.decide_wall_title().await?;
         title::send_resync(self.obs_cmd_tx.as_ref(), &self.resolume_tx, title.clone()).await;

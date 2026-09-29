@@ -15,12 +15,14 @@ use sp_core::playback::PlaybackMode;
 use sp_core::ws::ServerMsg;
 use tokio::sync::{broadcast, mpsc};
 
-/// When a playlist transitions off-program (scene_active: true → false),
-/// `handle_scene_change` MUST send `HideTitle` + `HideSubtitles` to the
-/// resolume channel so the now-background playlist doesn't leave its
-/// title/subs on the shared Resolume clips. Without this, the on-program
-/// playlist's text gets clobbered by whatever the off-program playlist
-/// last displayed — the exact bug that made the event unusable.
+/// When a playlist transitions off-program (scene_active: true → false) and
+/// no other playlist is on program, `handle_scene_change` MUST send
+/// `HideTitle` + `HideSubtitles` to the resolume channel so the
+/// now-background playlist doesn't leave its title/subs on the shared
+/// Resolume clips. Without this, the on-program playlist's text gets
+/// clobbered by whatever the off-program playlist last displayed — the
+/// exact bug that made the event unusable. (With another playlist on
+/// program the wall is re-synced to it: the `going_off_program_*` tests.)
 #[tokio::test]
 async fn handle_scene_change_off_sends_hide_title_and_subs() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();

@@ -275,6 +275,31 @@ spawned sleep). If the scene is back on program by then, it does nothing.
 `scene_off_step` / `scene_off_recheck` take `now_100ns`, so the tests drive
 them at chosen stamps; only the wrappers read `utc_now_100ns()`.
 
+### The wall after an OFF (`wall_after_scene_off`, #221 L4b review rounds 3-4)
+
+The authority sends the incoming ON at the press and the outgoing OFF only
+at the mirror's OK, so on almost every playlist press another playlist is
+already on program when the OFF is handled (before L4b the bridge sent the
+OFF first). The wall step runs before the pause/hold:
+
+- "Another playlist on program" = `scene_active` AND in the authority's
+  diffed set (`on_air_contains`). A flagged playlist out of the set has its
+  OFF queued too (two members leaving in one coalesced value): counting it
+  flashed its title.
+- None on program: `HideTitle` (a fade) + `HideSubtitles`, as before L4b.
+- One on program: the title from `decide_wall_title` — a due title is a
+  `Resync`; none due (the incoming playlist just started its song, the
+  usual press) is a `HideTitle`, so the outgoing title FADES (a
+  `Resync(None)` hides at once, round 4's 🟡); a failed read of the due
+  title sends nothing. Its line is re-sent at once (`on_program_lines`,
+  shared with the Resolume recovery, filtered to the diffed set), and ONE
+  `HideSubtitles` goes only when none has a line: one playlist never clears
+  another's line (the recovery's rule, `resolume-driver.md`).
+- Residual: the title candidates are `scene_active` only
+  (`title_candidates`), so a due title of a playlist whose OFF is queued can
+  be re-synced until its own OFF re-syncs the wall.
+- Pinned in `tests_scene_change.rs` (`going_off_program_*`).
+
 ### A held playlist has no side effects (release 0.68.0 blockers)
 
 Design record 5863318980 (the cross-lane review of PR #220), plus its two
@@ -413,8 +438,8 @@ unanswered-catch-up gap it had is gone by construction.
 - **The input is the OBS client's `ObsSnapshot`** (`obs::snapshot`, a
   `tokio::sync::watch`; contract in `obs-ndi-health.md`): `connected`,
   `current_scene`, `active_playlist_ids`, `lookup_failed`, `transition`.
-  `lib.rs` step 7 is `obs_bridge::start_obs` (the engine bridge subscribes
-  first, then the client spawns); its `snapshots` go to
+  `lib.rs` step 7 is `obs_bridge::start_obs` (the client spawns; #221 L4b
+  deleted the engine bridge that subscribed first); its `snapshots` go to
   `PlaybackEngine::start_program(bus, shutdown, snapshots)` →
   `start_follow`. Without OBS configured the follow gets a CLOSED channel
   (the default, disconnected snapshot): `run_follow_task` stops selecting
