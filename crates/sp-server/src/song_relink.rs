@@ -1,39 +1,46 @@
-//! #136 self-heal pass: re-link the files a song names after its audio
-//! sidecar (the karaoke stems, the dub track + transcripts,
-//! [`cache::derived_files`]) that a rename left under an OLD name.
+//! #136: re-link the files a song names after its audio sidecar (the karaoke
+//! stems, the dub track + transcripts, [`cache::derived_files`]) that were left
+//! under an OLD name, so they sit where the song's CURRENT audio derives them.
 //!
-//! Every consumer finds these files only under the name the song's CURRENT
-//! audio derives: the stem mixer, the dub mixer, and the lyrics isolation's
-//! vocals input. The metadata repair of 29.9.2026 renamed ~99 songs' video +
-//! audio and left their stems behind, so the lyrics queue waited for stems
-//! forever and the mixer found none. This pass repairs such drift from any
-//! cause. It runs inside [`crate::startup::self_heal_cache`], after the complete-pair
-//! re-link (the audio paths are current) and the duplicate removal (no
-//! superseded download's files are left to adopt).
+//! Every consumer finds these files only under that name: the stem mixer, the
+//! dub mixer, and the lyrics isolation's vocals input. The metadata repair of
+//! 29.9.2026 renamed ~99 songs' video + audio and left their stems behind, so
+//! the lyrics queue waited for stems forever and the mixer found none. Two
+//! entry points repair such drift from any cause:
+//!
+//! - [`relink_derived_files`]: every song, from
+//!   [`crate::startup::self_heal_cache`], after the complete-pair re-link (the
+//!   audio paths are current) and the duplicate removal.
+//! - [`relink_song`]: one song, run by the stem worker and the dub worker once
+//!   they recorded a finished job. A job writes under the name its song had
+//!   when the job STARTED, so a rename while it ran would leave those files
+//!   behind.
 //!
 //! Per row whose audio exists:
 //!
 //! - **stems** (`stem_status = 'done'`). When the pair is missing under the
-//!   audio's name, the newest old name holding BOTH stems is moved over as one
-//!   unit; stems from two names are never mixed. When no name holds them, the
-//!   row goes back to pending (the `enqueue_stems` reset, recorded paths
-//!   cleared) so the stem worker separates the song again.
+//!   audio's name, the old name with the newest pair holding BOTH stems is
+//!   moved over as one unit; stems from two names are never mixed. When no name
+//!   holds them, the row goes back to pending (the `enqueue_stems` reset,
+//!   recorded paths cleared) so the stem worker separates the song again.
 //! - **dub** (`dub_status = 'ready'`). A missing dub track is moved over, with
-//!   its transcripts, from the newest old name holding one. A dub no name holds
+//!   its transcripts, from the old name with the newest dub. A dub no name holds
 //!   is WARNed and counted but never reset, because a dub is an
 //!   operator-requested synthesis.
 //!
-//! The recorded path columns are then rewritten to the audio's names, so the
-//! dub worker and the dashboard read the same files the mixers open. A move
-//! that fails leaves its row for the next start.
+//! The recorded path columns are then set to the audio's names (only when they
+//! differ), so the dub worker and the dashboard read the same files the mixers
+//! open. A move that fails leaves its row for the next pass.
 
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
+use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 
 use crate::downloader::cache;
 
-/// What one [`relink_derived_files`] pass did (logged at INFO).
+/// What one pass did (logged at INFO).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RelinkCounts {
     /// Songs whose stems moved from an old name to their audio's name.
@@ -46,22 +53,51 @@ pub(crate) struct RelinkCounts {
     pub dubs_missing: usize,
 }
 
-/// Run the pass over every row with stems `'done'` or a dub `'ready'`.
+/// The rows a pass considers: stems `'done'` or a dub `'ready'`.
+const ROWS: &str = "SELECT id, youtube_id, audio_file_path, stem_status, dub_status \
+     FROM videos \
+     WHERE audio_file_path IS NOT NULL \
+       AND (stem_status = 'done' OR dub_status = 'ready')";
+
+/// Re-link every song's stems / dub (the startup self-heal pass).
 pub(crate) async fn relink_derived_files(
     pool: &SqlitePool,
     cache_dir: &Path,
 ) -> Result<RelinkCounts, sqlx::Error> {
+    let rows = sqlx::query(ROWS).fetch_all(pool).await?;
+    let counts = relink_rows(pool, cache_dir, &rows).await?;
+    tracing::info!(
+        stems_relinked = counts.stems_relinked,
+        stems_reset = counts.stems_reset,
+        dubs_relinked = counts.dubs_relinked,
+        dubs_missing = counts.dubs_missing,
+        "self-heal: re-linked the stems / dub left under an old name"
+    );
+    Ok(counts)
+}
+
+/// Re-link ONE song's stems / dub, after a worker recorded a finished job for
+/// it (`video_id`).
+pub(crate) async fn relink_song(
+    pool: &SqlitePool,
+    cache_dir: &Path,
+    video_id: i64,
+) -> Result<RelinkCounts, sqlx::Error> {
+    let rows = sqlx::query(&format!("{ROWS} AND id = ?"))
+        .bind(video_id)
+        .fetch_all(pool)
+        .await?;
+    relink_rows(pool, cache_dir, &rows).await
+}
+
+async fn relink_rows(
+    pool: &SqlitePool,
+    cache_dir: &Path,
+    rows: &[SqliteRow],
+) -> Result<RelinkCounts, sqlx::Error> {
     let owners = cache::derived_file_owners(cache_dir);
-    let rows = sqlx::query(
-        "SELECT id, youtube_id, audio_file_path, stem_status, dub_status \
-         FROM videos \
-         WHERE audio_file_path IS NOT NULL \
-           AND (stem_status = 'done' OR dub_status = 'ready')",
-    )
-    .fetch_all(pool)
-    .await?;
     let mut counts = RelinkCounts::default();
-    for r in &rows {
+    for r in rows {
         let audio = PathBuf::from(r.get::<String, _>("audio_file_path"));
         if !audio.exists() {
             continue;
@@ -82,13 +118,6 @@ pub(crate) async fn relink_derived_files(
             relink_dub(pool, &song, names, &mut counts).await?;
         }
     }
-    tracing::info!(
-        stems_relinked = counts.stems_relinked,
-        stems_reset = counts.stems_reset,
-        dubs_relinked = counts.dubs_relinked,
-        dubs_missing = counts.dubs_missing,
-        "self-heal: re-linked the stems / dub left under an old name"
-    );
     Ok(counts)
 }
 
@@ -108,7 +137,8 @@ async fn relink_stems(
 ) -> Result<(), sqlx::Error> {
     let (vocals, instrumental) = crate::stems::stem_paths(&song.audio);
     if !both_stems_exist(&song.audio) {
-        let Some(old) = names.iter().find(|name| both_stems_exist(name)) else {
+        let holders = names.iter().filter(|name| both_stems_exist(name));
+        let Some(old) = newest(holders, |name| crate::stems::stem_paths(name).0) else {
             tracing::warn!(
                 youtube_id = %song.youtube_id,
                 expected_vocals = %vocals.display(),
@@ -137,12 +167,16 @@ async fn relink_stems(
         }
         counts.stems_relinked += 1;
     }
-    sqlx::query("UPDATE videos SET vocals_file_path = ?, instrumental_file_path = ? WHERE id = ?")
-        .bind(vocals.to_string_lossy().as_ref())
-        .bind(instrumental.to_string_lossy().as_ref())
-        .bind(song.id)
-        .execute(pool)
-        .await?;
+    let (vocals, instrumental) = (vocals.to_string_lossy(), instrumental.to_string_lossy());
+    sqlx::query(
+        "UPDATE videos SET vocals_file_path = ?1, instrumental_file_path = ?2 \
+         WHERE id = ?3 AND (vocals_file_path IS NOT ?1 OR instrumental_file_path IS NOT ?2)",
+    )
+    .bind(vocals.as_ref())
+    .bind(instrumental.as_ref())
+    .bind(song.id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -155,10 +189,10 @@ async fn relink_dub(
 ) -> Result<(), sqlx::Error> {
     let dub = crate::stems::dub_path(&song.audio);
     if !dub.exists() {
-        let Some(old) = names
+        let holders = names
             .iter()
-            .find(|name| crate::stems::dub_path(name).exists())
-        else {
+            .filter(|name| crate::stems::dub_path(name).exists());
+        let Some(old) = newest(holders, crate::stems::dub_path) else {
             tracing::warn!(
                 youtube_id = %song.youtube_id,
                 expected_dub = %dub.display(),
@@ -180,8 +214,9 @@ async fn relink_dub(
         }
         counts.dubs_relinked += 1;
     }
-    sqlx::query("UPDATE videos SET dub_file_path = ? WHERE id = ?")
-        .bind(dub.to_string_lossy().as_ref())
+    let dub = dub.to_string_lossy();
+    sqlx::query("UPDATE videos SET dub_file_path = ?1 WHERE id = ?2 AND dub_file_path IS NOT ?1")
+        .bind(dub.as_ref())
         .bind(song.id)
         .execute(pool)
         .await?;
@@ -192,6 +227,22 @@ async fn relink_dub(
 fn both_stems_exist(audio: &Path) -> bool {
     let (vocals, instrumental) = crate::stems::stem_paths(audio);
     vocals.exists() && instrumental.exists()
+}
+
+/// The name among `names` whose `file` (the unit's own file, derived from the
+/// name) was written last.
+fn newest<'a>(
+    names: impl Iterator<Item = &'a PathBuf>,
+    file: impl Fn(&Path) -> PathBuf,
+) -> Option<&'a PathBuf> {
+    names.max_by_key(|name| written_at(&file(name.as_path())))
+}
+
+/// A file's modification time (the epoch when unreadable, so it loses).
+fn written_at(path: &Path) -> SystemTime {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .unwrap_or(SystemTime::UNIX_EPOCH)
 }
 
 #[cfg(test)]

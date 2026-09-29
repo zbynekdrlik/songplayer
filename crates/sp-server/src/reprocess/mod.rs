@@ -67,8 +67,6 @@ struct ReprocessRow {
     id: i64,
     youtube_id: String,
     title: String,
-    file_path: String,
-    audio_file_path: Option<String>,
 }
 
 /// Outcome of attempting to reprocess a single video.
@@ -225,9 +223,7 @@ impl ReprocessWorker {
     /// `status.metadata.failed_videos` counts too).
     async fn fetch_gemini_failed(&self) -> Result<Vec<ReprocessRow>, sqlx::Error> {
         let sql = format!(
-            "SELECT id, youtube_id, COALESCE(title, '') AS title,
-                    COALESCE(file_path, '') AS file_path,
-                    audio_file_path
+            "SELECT id, youtube_id, COALESCE(title, '') AS title
              FROM videos
              WHERE {REPAIR_QUEUE_WHERE}
              ORDER BY id"
@@ -240,8 +236,6 @@ impl ReprocessWorker {
                 id: r.get("id"),
                 youtube_id: r.get("youtube_id"),
                 title: r.get("title"),
-                file_path: r.get("file_path"),
-                audio_file_path: r.get::<Option<String>, _>("audio_file_path"),
             })
             .collect())
     }
@@ -287,11 +281,17 @@ impl ReprocessWorker {
         // #136: move the song's COMPLETE file set (the video, the audio, and the
         // stems + dub named after the audio) to the upgraded name as ONE unit
         // (`_gf` stripped). A song is never split across two names: when a move
-        // fails, the set stays under the old name and the row records that.
-        let old = crate::downloader::cache::SongFiles::recorded(
-            &row.file_path,
-            row.audio_file_path.as_deref(),
-        );
+        // fails, the set stays under the old name and the rows record that. The
+        // set is read NOW, not from the batch snapshot: an earlier row of this
+        // batch may have moved the same files (the video in another playlist).
+        let (file_path, audio_file_path): (String, Option<String>) = sqlx::query_as(
+            "SELECT COALESCE(file_path, ''), audio_file_path FROM videos WHERE id = ?",
+        )
+        .bind(row.id)
+        .fetch_one(&self.pool)
+        .await?;
+        let old =
+            crate::downloader::cache::SongFiles::recorded(&file_path, audio_file_path.as_deref());
         let new = old.named(
             &self.cache_dir,
             &meta.song,
@@ -302,28 +302,38 @@ impl ReprocessWorker {
         let files =
             crate::downloader::cache::rename_song_files(&row.youtube_id, &old, &new).columns();
 
-        // The stem / dub columns follow the audio's name, and one never
-        // recorded (NULL) stays NULL.
+        // Every row that recorded these files (this video in another playlist
+        // too) records them where they now are. The stem / dub columns follow
+        // the audio's name; one never recorded (NULL) stays NULL.
         sqlx::query(
             "UPDATE videos
-             SET song = ?, artist = ?, metadata_source = ?,
-                 gemini_failed = 0, file_path = ?, audio_file_path = ?,
+             SET file_path = ?, audio_file_path = ?,
                  vocals_file_path = CASE WHEN vocals_file_path IS NULL
                      THEN NULL ELSE COALESCE(?, vocals_file_path) END,
                  instrumental_file_path = CASE WHEN instrumental_file_path IS NULL
                      THEN NULL ELSE COALESCE(?, instrumental_file_path) END,
                  dub_file_path = CASE WHEN dub_file_path IS NULL
                      THEN NULL ELSE COALESCE(?, dub_file_path) END
-             WHERE id = ?",
+             WHERE youtube_id = ? AND COALESCE(file_path, '') = ? AND audio_file_path IS ?",
         )
-        .bind(&meta.song)
-        .bind(&meta.artist)
-        .bind(meta.source.as_str())
         .bind(&files.video)
         .bind(&files.audio)
         .bind(&files.vocals)
         .bind(&files.instrumental)
         .bind(&files.dub)
+        .bind(&row.youtube_id)
+        .bind(&file_path)
+        .bind(&audio_file_path)
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "UPDATE videos
+             SET song = ?, artist = ?, metadata_source = ?, gemini_failed = 0
+             WHERE id = ?",
+        )
+        .bind(&meta.song)
+        .bind(&meta.artist)
+        .bind(meta.source.as_str())
         .bind(row.id)
         .execute(&self.pool)
         .await?;

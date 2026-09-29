@@ -116,8 +116,10 @@ pub fn audio_filename(song: &str, artist: &str, video_id: &str, gemini_failed: b
 /// Every file named after a song's audio sidecar, in the order a rename moves
 /// them: the karaoke stems (#148, [`crate::stems::stem_paths`]), then the dub
 /// track and its transcripts (#183, [`crate::stems::dub_path`] /
-/// [`crate::stems::dub_transcripts_path`]). Each consumer derives these names
-/// from the song's CURRENT audio path, never from a record.
+/// [`crate::stems::dub_transcripts_path`]). The stem mixer, the dub mixer, the
+/// lyrics isolation and `StemsState` derive these names from the song's CURRENT
+/// audio path; the recorded `*_file_path` columns (which the dub worker's input
+/// choice reads) are kept in sync with every move.
 pub fn derived_files(audio: &Path) -> [PathBuf; 4] {
     let (vocals, instrumental) = crate::stems::stem_paths(audio);
     [
@@ -202,9 +204,11 @@ fn path_column(path: &Path) -> String {
 /// the files named after the audio ([`derived_files`]) first, then the audio,
 /// then the video. Returns the set now in effect: `new` when every move
 /// succeeded, `old` when one failed. A failed move first moves back every file
-/// already moved, so a song is never split across two names. A move back that
-/// fails is logged at ERROR, and the startup self-heal re-links such files. A
-/// file that does not exist, or that already has its new name, is skipped.
+/// already moved, so a song is never split across two names. Only a move back
+/// that ALSO fails leaves it split (logged at ERROR); the startup self-heal then
+/// re-links the derived files and keeps a video / audio half the DB records
+/// rather than deleting it as an orphan. A file that does not exist, or that
+/// already has its new name, is skipped.
 pub fn rename_song_files(youtube_id: &str, old: &SongFiles, new: &SongFiles) -> SongFiles {
     let mut moves = Vec::new();
     if let (Some(from), Some(to)) = (&old.audio, &new.audio) {
@@ -224,12 +228,21 @@ pub fn rename_song_files(youtube_id: &str, old: &SongFiles, new: &SongFiles) -> 
 /// order, as one unit. Returns how many files moved. On the first failure,
 /// moves the files already moved back in reverse order and returns that
 /// error. Logs every move at INFO, a failure at WARN, and a move back that
-/// fails at ERROR.
+/// fails at ERROR. A `to` that already exists is replaced (WARNed): the
+/// song's own file wins over a stale one under its new name.
 pub fn move_as_unit(youtube_id: &str, moves: &[(PathBuf, PathBuf)]) -> std::io::Result<usize> {
     let mut moved: Vec<(&PathBuf, &PathBuf)> = Vec::new();
     for (from, to) in moves {
         if from == to || !from.exists() {
             continue;
+        }
+        if to.exists() {
+            tracing::warn!(
+                youtube_id,
+                from = %from.display(),
+                to = %to.display(),
+                "cache: a song file move replaces the file already under its new name"
+            );
         }
         if let Err(e) = std::fs::rename(from, to) {
             tracing::warn!(
@@ -265,9 +278,10 @@ pub fn move_as_unit(youtube_id: &str, moves: &[(PathBuf, PathBuf)]) -> std::io::
 
 /// Every name in `cache_dir` that still holds a file named after an audio
 /// sidecar ([`derived_files`]), given as the audio path that name implies (the
-/// audio itself may be gone) and grouped by YouTube id. Within an id, the name
-/// with the newest such file comes first. A song whose audio was renamed
-/// without its stems (#136) shows up here under its OLD name.
+/// audio itself may be gone) and grouped by YouTube id, in path order. A song
+/// whose audio was renamed without its stems (#136) shows up here under its
+/// OLD name. Which name a re-link takes is decided per unit by that unit's own
+/// files (`song_relink`), never by this order.
 pub fn derived_file_owners(cache_dir: &Path) -> HashMap<String, Vec<PathBuf>> {
     let entries = match std::fs::read_dir(cache_dir) {
         Ok(e) => e,
@@ -276,8 +290,7 @@ pub fn derived_file_owners(cache_dir: &Path) -> HashMap<String, Vec<PathBuf>> {
             return HashMap::new();
         }
     };
-    // implied audio → (youtube id, newest mtime among its files)
-    let mut names: HashMap<PathBuf, (String, std::time::SystemTime)> = HashMap::new();
+    let mut owners: HashMap<String, Vec<PathBuf>> = HashMap::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_file() {
@@ -291,24 +304,13 @@ pub fn derived_file_owners(cache_dir: &Path) -> HashMap<String, Vec<PathBuf>> {
             continue;
         };
         let audio = cache_dir.join(format!("{}_audio.flac", &caps[1]));
-        let mtime = modified(&path);
-        let name = names
-            .entry(audio)
-            .or_insert_with(|| (caps[2].to_string(), mtime));
-        name.1 = name.1.max(mtime);
+        owners.entry(caps[2].to_string()).or_default().push(audio);
     }
-    let mut owners: HashMap<String, Vec<(std::time::SystemTime, PathBuf)>> = HashMap::new();
-    for (audio, (id, mtime)) in names {
-        owners.entry(id).or_default().push((mtime, audio));
+    for names in owners.values_mut() {
+        names.sort();
+        names.dedup();
     }
     owners
-        .into_iter()
-        .map(|(id, mut named)| {
-            named.sort();
-            named.reverse();
-            (id, named.into_iter().map(|(_, audio)| audio).collect())
-        })
-        .collect()
 }
 
 /// Walk the cache directory and categorise every matching file.
@@ -454,25 +456,20 @@ fn modified(path: &Path) -> std::time::SystemTime {
         .unwrap_or(std::time::UNIX_EPOCH)
 }
 
-/// Delete every superseded duplicate pair: its video, its audio and every file
-/// named after that audio ([`derived_files`]: stems, dub track, transcripts),
-/// so no file of an older download is left for the self-heal to adopt.
+/// Delete every superseded duplicate pair: its video, its audio and its stems
+/// (the stem worker separates the kept download again). Its dub track and
+/// transcripts stay: a dub is an operator-requested synthesis nothing re-runs
+/// on its own, and the self-heal re-link adopts it under the kept song's name
+/// (same YouTube id, same audio; #136).
 pub fn remove_duplicates(duplicates: &[CachedSong]) {
     for dup in duplicates {
-        let [vocals, instrumental, dub, transcripts] = derived_files(&dup.audio_path);
+        let (vocals, instrumental) = crate::stems::stem_paths(&dup.audio_path);
         tracing::info!(
             video_id = %dup.video_id,
             video = %dup.video_path.display(),
             "removing superseded duplicate cache pair (a newer pair of this id is kept)"
         );
-        for path in [
-            &dup.video_path,
-            &dup.audio_path,
-            &vocals,
-            &instrumental,
-            &dub,
-            &transcripts,
-        ] {
+        for path in [&dup.video_path, &dup.audio_path, &vocals, &instrumental] {
             match std::fs::remove_file(path) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

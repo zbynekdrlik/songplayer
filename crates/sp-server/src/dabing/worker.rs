@@ -332,6 +332,17 @@ impl DubWorker {
                         warn!(%e, video_id = job.video_id, "dub worker: mark_dub_ready failed")
                     }
                 }
+                // #136: the dub carries the name the song had when the job
+                // started; a rename while it ran (the metadata repair) left it
+                // behind. Bring it under the audio's CURRENT name.
+                let cache_dir = Path::new(&job.audio_file_path)
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."));
+                if let Err(e) =
+                    crate::song_relink::relink_song(&self.pool, cache_dir, job.video_id).await
+                {
+                    warn!(%e, video_id = job.video_id, "dub worker: dub re-link failed");
+                }
             }
             Err(e) => {
                 let msg = format!("{e:#}");

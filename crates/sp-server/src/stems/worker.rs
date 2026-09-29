@@ -508,6 +508,17 @@ impl StemWorker {
                         error!(video_id = job.video_id, %e, "stem worker: mark_stems_done failed")
                     }
                 }
+                // #136: the stems carry the name the song had when the job
+                // started; a rename while it ran (the metadata repair) left them
+                // behind. Bring them under the audio's CURRENT name.
+                let cache_dir = Path::new(&job.audio_file_path)
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."));
+                if let Err(e) =
+                    crate::song_relink::relink_song(&self.pool, cache_dir, job.video_id).await
+                {
+                    warn!(video_id = job.video_id, %e, "stem worker: stems re-link failed");
+                }
             }
             StemStepResult::Failed(e) => {
                 let prior: i64 =

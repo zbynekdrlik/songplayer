@@ -70,8 +70,25 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
     // Delete legacy AAC single-file .mp4s — unusable under the new pipeline.
     cache::cleanup_legacy(&scan.legacy);
 
-    // Delete orphan half-sidecars (mid-download crash debris).
+    // Delete orphan half-sidecars (mid-download crash debris). A half a row
+    // records is NOT debris: it is one half of a song split across two names
+    // (#136: a rename that moved one half and could not move it back), and the
+    // row still plays it.
     for orphan in &scan.orphans {
+        let recorded: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM videos WHERE file_path = ?1 OR audio_file_path = ?1)",
+        )
+        .bind(orphan.path.to_string_lossy().as_ref())
+        .fetch_one(pool)
+        .await?;
+        if recorded {
+            tracing::warn!(
+                "keeping a half-sidecar a row records (a song split across two names) for {}: {}",
+                orphan.video_id,
+                orphan.path.display()
+            );
+            continue;
+        }
         tracing::info!(
             "removing orphan sidecar for {}: {}",
             orphan.video_id,
