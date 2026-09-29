@@ -49,16 +49,19 @@ Design record: #136 comment 5894034820.
   - A failed move (Windows refuses to rename a file another process holds open
     without share-delete) moves every file already moved back and returns the
     OLD set. The exception is a file whose move back ALSO failed
-    (`MoveFailed::stuck`): that video / audio is returned at its NEW name
-    (`in_effect_after_failure`), so the row records where the file IS.
+    (`MoveFailed::stuck`). A stuck audio is returned at its NEW name
+    (`in_effect_after_failure`), so the row records where the file IS. The video
+    moves last, so it is never stuck. A stuck stems pair or dub is re-linked at
+    the next start; a lone stuck stem resets the row.
   - Record `SongFiles::columns()` of the set it RETURNS, on EVERY row that
     recorded the old set: the same video in another playlist is a second row
     pointing at the same files.
   - Read the old set from the DB right before the move, never from a batch
     snapshot (an earlier row may have moved it).
   - Hold `cache::SONG_FILES` (a process-wide async lock) from that read to the
-    DB record. The re-link holds it for its whole pass, so a rename and a
-    re-link never interleave on the same song.
+    DB record. The re-link holds it from reading its rows to its last record,
+    so a rename and a re-link never interleave on the same song. Tests prove it
+    with two tasks: hold the lock, spawn the other side, show it waits.
 - **A job that writes derived files re-links its song when it finishes.** The
   stem worker runs `song_relink::relink_song` after `mark_stems_done`
   (`record_stem_result`), and the dub worker after `mark_dub_ready`

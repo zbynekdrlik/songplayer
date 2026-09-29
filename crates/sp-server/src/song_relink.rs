@@ -31,7 +31,8 @@
 //! The recorded path columns are then set to the audio's names (only when they
 //! differ), so the dub worker and the dashboard read the same files the mixers
 //! open. A move that fails leaves its row for the next pass. A pass holds
-//! [`cache::SONG_FILES`], so it never interleaves with a rename.
+//! [`cache::SONG_FILES`] from reading the rows to the last record, so it never
+//! interleaves with a rename.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -65,6 +66,9 @@ pub(crate) async fn relink_derived_files(
     pool: &SqlitePool,
     cache_dir: &Path,
 ) -> Result<RelinkCounts, sqlx::Error> {
+    // The rows are read under the lock too, so the pass acts on them as a
+    // rename left them, never on a read taken before it.
+    let _files = cache::SONG_FILES.lock().await;
     let rows = sqlx::query(ROWS).fetch_all(pool).await?;
     let counts = relink_rows(pool, cache_dir, &rows).await?;
     tracing::info!(
@@ -84,6 +88,7 @@ pub(crate) async fn relink_song(
     cache_dir: &Path,
     video_id: i64,
 ) -> Result<RelinkCounts, sqlx::Error> {
+    let _files = cache::SONG_FILES.lock().await;
     let rows = sqlx::query(&format!("{ROWS} AND id = ?"))
         .bind(video_id)
         .fetch_all(pool)
@@ -91,12 +96,12 @@ pub(crate) async fn relink_song(
     relink_rows(pool, cache_dir, &rows).await
 }
 
+/// The pass over `rows`; the caller holds [`cache::SONG_FILES`] since it read them.
 async fn relink_rows(
     pool: &SqlitePool,
     cache_dir: &Path,
     rows: &[SqliteRow],
 ) -> Result<RelinkCounts, sqlx::Error> {
-    let _files = cache::SONG_FILES.lock().await;
     let owners = cache::derived_file_owners(cache_dir);
     let mut counts = RelinkCounts::default();
     for r in rows {

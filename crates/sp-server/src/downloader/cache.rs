@@ -214,10 +214,12 @@ fn path_column(path: &Path) -> String {
 /// succeeded; after a failed move, where each of the two recorded sidecars
 /// really is ([`in_effect_after_failure`]). A failed move first moves back
 /// every file already moved, so a song is never split across two names. Only a
-/// move back that ALSO fails leaves it split (logged at ERROR): the set returned
-/// then records the stuck half at its new name, the startup self-heal keeps a
-/// half a row records, and it re-links the derived files to the recorded audio.
-/// A file that does not exist, or that already has its new name, is skipped.
+/// move back that ALSO fails leaves it split (logged at ERROR). A stuck AUDIO is
+/// returned at its new name (the video moves last, so it is never stuck), and
+/// the startup self-heal keeps a half a row records. A stuck stems pair or dub
+/// is re-linked to the recorded audio's name at the next start; a lone stuck
+/// stem resets the row to pending (a pair is never mixed from two names). A file
+/// that does not exist, or that already has its new name, is skipped.
 pub fn rename_song_files(youtube_id: &str, old: &SongFiles, new: &SongFiles) -> SongFiles {
     let mut moves = Vec::new();
     if let (Some(from), Some(to)) = (&old.audio, &new.audio) {

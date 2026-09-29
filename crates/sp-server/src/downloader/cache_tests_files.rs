@@ -240,8 +240,8 @@ fn a_file_whose_move_could_not_be_undone_is_recorded_where_it_is() {
         old,
         "everything moved back"
     );
-    // A stuck DERIVED file never changes the recorded pair: the re-link brings
-    // it under the recorded audio's name.
+    // A stuck DERIVED file never changes the recorded pair (a stuck stems pair
+    // or dub is re-linked at the next start; a lone stuck stem resets the row).
     let stuck_stem = (
         derived_files(&old_audio)[0].clone(),
         derived_files(&new_audio)[0].clone(),
