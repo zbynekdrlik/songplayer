@@ -193,3 +193,47 @@ async fn an_old_kept_transcript_is_not_reused() {
         "a 1970 transcript is past the reuse window"
     );
 }
+
+/// A pass that ended retires its transcript: the next pass (a manual
+/// reprocess of the same vocal, minutes later) transcribes afresh.
+#[tokio::test]
+async fn the_next_pass_transcribes_afresh() {
+    use crate::lyrics::transcript_cache;
+    let dir = tempfile::tempdir().unwrap();
+    let wav = dir.path().join("yt1_vocals16k.wav");
+    std::fs::write(&wav, b"RIFF-vocal").unwrap();
+    let first = TranscribeOnly::answering(Ok(words()));
+    transcribe_vocal(&first, Some(wav.as_path()), &keys(), "yt1", dir.path())
+        .await
+        .unwrap();
+    transcript_cache::retire(dir.path(), "yt1").await;
+
+    let next = TranscribeOnly::answering(Ok(words()));
+    let got = transcribe_vocal(&next, Some(wav.as_path()), &keys(), "yt1", dir.path()).await;
+    assert_eq!(got, Ok(Some(words())));
+    assert_eq!(next.calls(), 1);
+}
+
+fn candidate(source: &str) -> crate::lyrics::tier1::CandidateText {
+    crate::lyrics::tier1::CandidateText {
+        source: source.into(),
+        lines: vec!["a".into()],
+        line_timings: None,
+        has_timing: false,
+    }
+}
+
+/// The title search runs on a non-empty transcript, when no artist+title
+/// lookup found the song and the ★ tier can use its result.
+#[test]
+fn the_title_search_runs_only_when_its_result_can_be_used() {
+    let sung = words();
+    let own = [candidate("description")];
+    assert!(should_title_search(&sung, &own, true));
+    assert!(!should_title_search(&[], &own, true), "empty transcript");
+    assert!(!should_title_search(&sung, &own, false), "no mtl tooling");
+    assert!(
+        !should_title_search(&sung, &[candidate("lrclib")], true),
+        "a lookup found the song"
+    );
+}

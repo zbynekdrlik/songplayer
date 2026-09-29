@@ -4,11 +4,14 @@
 //! The transcript is taken right after isolation, before mtl. A no-penalty
 //! deferral after it — the idle-only wall gate before mtl, the heavy-slot
 //! memory floor, the startup grace, an mtl wall-abort — re-picks the song;
-//! the kept transcript spares that re-pick a second g35t call. It is reused
-//! only for the SAME isolated vocal (its byte length and modification time)
-//! and within `REUSE_WINDOW_MS` of being taken, so a later reprocess
-//! transcribes afresh. The file also keeps the gate's own transcript on disk
-//! for a later threshold measurement (#144 had to measure on the v20
+//! the kept transcript spares that re-pick a second g35t call. It serves
+//! ONE processing pass: when the pass ends (a track, or a quarantine) the
+//! file is retired to `{youtube_id}_g35t_words_used.json` (`retire`), so the
+//! next pass — a manual reprocess included — transcribes afresh. It is also
+//! reused only for the SAME isolated vocal (its byte length and modification
+//! time) and within `REUSE_WINDOW_MS` of being taken (a backstop for a pass
+//! that never ended). The retired file keeps the gate's own transcript on
+//! disk for a later threshold measurement (#144 had to measure on the v20
 //! WhisperX transcripts instead).
 
 use std::path::{Path, PathBuf};
@@ -70,6 +73,23 @@ pub(crate) fn reusable(cached: &CachedTranscript, vocal: (u64, u64), now_ms: u64
 
 pub(crate) fn path(cache_dir: &Path, youtube_id: &str) -> PathBuf {
     cache_dir.join(format!("{youtube_id}_g35t_words.json"))
+}
+
+/// Where a pass's transcript goes once the pass has ended.
+pub(crate) fn used_path(cache_dir: &Path, youtube_id: &str) -> PathBuf {
+    cache_dir.join(format!("{youtube_id}_g35t_words_used.json"))
+}
+
+/// The pass that took the kept transcript has ended: retire it (kept on disk
+/// as `used_path`, never reused). Best-effort; no kept file is fine.
+pub(crate) async fn retire(cache_dir: &Path, youtube_id: &str) {
+    let kept = path(cache_dir, youtube_id);
+    if tokio::fs::try_exists(&kept).await.unwrap_or(false)
+        && let Err(e) = tokio::fs::rename(&kept, used_path(cache_dir, youtube_id)).await
+    {
+        warn!(path = %kept.display(), error = %e, "g35t: retiring the kept transcript failed");
+        let _ = tokio::fs::remove_file(&kept).await;
+    }
 }
 
 /// Milliseconds since the epoch, now.

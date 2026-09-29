@@ -115,3 +115,34 @@ async fn nothing_kept_loads_nothing() {
     std::fs::write(path(dir.path(), "bad"), b"{not json").unwrap();
     assert!(load(&path(dir.path(), "bad")).await.is_none());
 }
+
+#[test]
+fn a_used_transcript_is_named_apart() {
+    assert_eq!(
+        used_path(Path::new("/cache"), "yt1"),
+        Path::new("/cache").join("yt1_g35t_words_used.json")
+    );
+}
+
+/// When the pass ends the kept transcript is retired: it no longer loads as
+/// the kept one, and stays on disk, whole, as the used one.
+#[tokio::test]
+async fn a_retired_transcript_is_kept_apart_and_never_reused() {
+    let dir = tempfile::tempdir().unwrap();
+    let words = cached(0, 0, 0, 2).words();
+    store(&path(dir.path(), "yt1"), (7, 8), T0, &words).await;
+    retire(dir.path(), "yt1").await;
+    assert!(load(&path(dir.path(), "yt1")).await.is_none());
+    let used = load(&used_path(dir.path(), "yt1"))
+        .await
+        .expect("kept as used");
+    assert_eq!(used, cached(7, 8, T0, 2));
+}
+
+/// Nothing kept: retiring is a no-op.
+#[tokio::test]
+async fn retiring_nothing_is_fine() {
+    let dir = tempfile::tempdir().unwrap();
+    retire(dir.path(), "yt1").await;
+    assert!(!used_path(dir.path(), "yt1").exists());
+}

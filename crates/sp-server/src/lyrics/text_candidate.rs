@@ -3,8 +3,10 @@
 //! `title_search.rs`), so both build a candidate the same way.
 //!
 //! A TIMED source (LRCLIB synced lyrics, YouTube captions) is used as is. A
-//! plain scraped text (LRCLIB plain lyrics, a Genius page) first goes through
-//! the Claude cleanup that strips section markers, banners and ad-libs
+//! plain scraped text (LRCLIB plain lyrics, a Genius page — whose section
+//! labels and contributor banner `genius::extract_lyrics_from_html` already
+//! dropped) first goes through the Claude cleanup that drops ad-libs and
+//! hype intros and keeps every sung repeat
 //! (`description_provider::clean_lyrics_via_claude`, `ScrapedLyrics` mode).
 
 use std::path::Path;

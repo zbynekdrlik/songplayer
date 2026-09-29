@@ -70,7 +70,7 @@ async fn a_scraped_text_is_cleaned_into_a_text_candidate() {
         (0, 0, "You never fail"),
         (0, 0, "You never will"),
     ]);
-    let cache = dir.path().join("yt1_title_genius_x_cleaned_v2.json");
+    let cache = dir.path().join("yt1_title_genius_x_cleaned_v3.json");
 
     let c = cleaned_text_candidate(&ai, "Jesus Be the Name", "", "genius", &t, &cache)
         .await
@@ -91,7 +91,7 @@ async fn a_scraped_text_is_cleaned_into_a_text_candidate() {
 #[tokio::test]
 async fn a_text_the_cleanup_rejects_gives_no_candidate() {
     let dir = tempfile::tempdir().unwrap();
-    let cache = dir.path().join("yt1_title_lrclib_7_cleaned_v2.json");
+    let cache = dir.path().join("yt1_title_lrclib_7_cleaned_v3.json");
     tokio::fs::write(&cache, r#"{"lines": null}"#)
         .await
         .unwrap();
@@ -108,7 +108,7 @@ async fn a_text_the_cleanup_rejects_gives_no_candidate() {
 #[tokio::test]
 async fn an_empty_cleanup_gives_no_candidate() {
     let dir = tempfile::tempdir().unwrap();
-    let cache = dir.path().join("yt1_title_lrclib_8_cleaned_v2.json");
+    let cache = dir.path().join("yt1_title_lrclib_8_cleaned_v3.json");
     tokio::fs::write(&cache, r#"{"lines": []}"#).await.unwrap();
     let ai = ai_at("http://127.0.0.1:9/v1".to_string());
     let t = track(&[(0, 0, "Something")]);

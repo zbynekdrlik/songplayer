@@ -153,29 +153,27 @@ fn the_floor_separates_the_measured_scores() {
     }
 }
 
-// ---- choose_reference ----
+// ---- keeps_the_videos_text ----
 
-/// A partial description of the video scores under the found lyric: the
-/// lyric becomes the reference text.
+/// A partial description of the video scores under the found lyric, or the
+/// video has no text of its own: the lyric becomes the reference text.
 #[test]
 fn a_better_matching_title_lyric_becomes_the_reference() {
-    assert_eq!(choose_reference(&[0.45], 0.9), None);
-    assert_eq!(choose_reference(&[], 0.6), None);
+    assert!(!keeps_the_videos_text(Some(0.45), 0.9));
+    assert!(!keeps_the_videos_text(None, 0.6));
 }
 
 /// The video's own complete captions match what is sung better than another
 /// recording's lyric: they stay the reference text.
 #[test]
 fn the_videos_own_better_text_stays_the_reference() {
-    assert_eq!(choose_reference(&[0.95], 0.9), Some(0));
-    assert_eq!(choose_reference(&[0.5, 0.97, 0.96], 0.9), Some(1));
+    assert!(keeps_the_videos_text(Some(0.95), 0.9));
 }
 
-/// A tie keeps the video's own text, and the earlier of equal gathered texts.
+/// A tie keeps the video's own text.
 #[test]
 fn a_tie_keeps_the_videos_own_text() {
-    assert_eq!(choose_reference(&[0.9], 0.9), Some(0));
-    assert_eq!(choose_reference(&[0.92, 0.92], 0.9), Some(0));
+    assert!(keeps_the_videos_text(Some(0.9), 0.9));
 }
 
 // ---- lines_overlap_score / remove_audit ----
@@ -380,7 +378,7 @@ async fn the_sung_words_choose_the_song_over_a_same_title_different_song() {
         audit["reference"],
         serde_json::json!({"source": "lrclib", "from": "title"})
     );
-    assert_eq!(audit["gathered"], serde_json::json!([]));
+    assert_eq!(audit["videos_text"], serde_json::Value::Null);
 }
 
 /// Only Genius holds the song (the 158 case: LRCLIB's records are all 539 s).
@@ -528,7 +526,7 @@ async fn a_plain_lyric_without_a_claude_client_is_not_used() {
     assert!(found.is_none());
 }
 
-/// No title: nothing is searched.
+/// No title: nothing is searched, and a stale audit of an earlier run goes.
 #[tokio::test]
 async fn a_row_without_a_title_searches_nothing() {
     let server = MockServer::start().await;
@@ -538,6 +536,8 @@ async fn a_row_without_a_title_searches_nothing() {
         .mount(&server)
         .await;
     let dir = tempfile::tempdir().unwrap();
+    let stale = dir.path().join("yt158_title_search_audit.json");
+    std::fs::write(&stale, "{}").unwrap();
     let client = reqwest::Client::new();
     let search = TitleSearch {
         client: &client,
@@ -551,6 +551,7 @@ async fn a_row_without_a_title_searches_nothing() {
             .await
             .is_none()
     );
+    assert!(!stale.exists(), "the stale audit must go");
 }
 
 fn gathered(source: &str, has_timing: bool, lines: &[&str]) -> TierCandidate {
@@ -645,8 +646,8 @@ async fn the_found_lyric_replaces_a_partial_description() {
     )
     .unwrap();
     assert_eq!(
-        audit["gathered"],
-        serde_json::json!([{"source": "description", "score": 12.0 / 20.0}])
+        audit["videos_text"],
+        serde_json::json!({"source": "description", "score": 12.0 / 20.0})
     );
     assert_eq!(
         audit["reference"],
@@ -705,6 +706,62 @@ async fn the_videos_own_complete_captions_stay_the_reference() {
     assert_eq!(audit["candidates"][0]["score"], 20.0 / 24.0);
     assert_eq!(
         audit["reference"],
-        serde_json::json!({"source": "yt_subs", "from": "gathered"})
+        serde_json::json!({"source": "yt_subs", "from": "video"})
+    );
+}
+
+/// The found lyric competes with the text the video would use WITHOUT it —
+/// its priority pick (timed captions over a description) — never with a
+/// hand-picked best: here the partial captions (12/20) lose to the lyric
+/// (20/24), and the full description (1.0) is not considered, exactly as it
+/// is not picked when no lyric is found.
+#[tokio::test]
+async fn the_found_lyric_competes_with_the_videos_priority_pick() {
+    let server = MockServer::start().await;
+    mount_lrclib(
+        &server,
+        serde_json::json!([
+            {"id": 5, "trackName": "Jesus Be the Name", "artistName": "Other Recording",
+             "duration": 470.0, "instrumental": false,
+             "syncedLyrics": "[00:01.00] You never fail\n[00:03.00] You never will\n[00:05.00] Jesus be the name"}
+        ]),
+    )
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let client = reqwest::Client::new();
+    let search = TitleSearch {
+        client: &client,
+        ai: None,
+        genius_token: "",
+        cache_dir: dir.path(),
+    };
+    let description = gathered(
+        "description",
+        false,
+        &[
+            "You never fail",
+            "You never will",
+            "Jesus be the name",
+            "Above every other name",
+        ],
+    );
+    let captions = gathered("yt_subs", true, &["You never fail", "You never will"]);
+    let found = search
+        .find(
+            &endpoints(&server),
+            &row("Jesus Be the Name"),
+            &sung(SUNG),
+            &[description, captions],
+        )
+        .await
+        .expect("a lyric was found");
+    assert_eq!(found.source, "lrclib");
+    let audit: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("yt158_title_search_audit.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        audit["videos_text"],
+        serde_json::json!({"source": "yt_subs", "score": 12.0 / 20.0})
     );
 }

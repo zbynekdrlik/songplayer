@@ -845,9 +845,11 @@ mod tests {
     /// #144: the prompt used to DEDUPE consecutive identical lines for the
     /// deleted v20 `text_reference_merge` chorus projection. mtl times exactly
     /// the lines it is given, so a chorus written once leaves its sung repeats
-    /// uncovered — measured on the box: 16 of 60 cleaned Genius texts fail the
-    /// two-way gate on a sung stretch the text holds fewer times. The prompt
-    /// must keep every repeat and never ask for a dedupe.
+    /// uncovered — measured on the box against the v20 WhisperX transcripts:
+    /// of 60 cleaned Genius / LRCLIB texts, 16 fail the two-way gate with a
+    /// longest uncovered run made mostly of words the text holds elsewhere
+    /// (the signature of repeats it holds fewer times). The prompt must keep
+    /// every repeat and never ask for a dedupe.
     #[test]
     fn scraped_lyrics_prompt_mentions_keep_repeats_adlib_intro_rules() {
         let (system, user) = build_scraped_lyrics_cleanup_prompt(

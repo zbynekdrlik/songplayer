@@ -38,11 +38,26 @@ pub(crate) enum TierOutcome {
     Return(SongOutcome),
 }
 
+/// #144: whether the title search runs: the song has a non-empty transcript
+/// to score against, no artist+title lookup found it
+/// (`title_search::needs_title_search`), and the ★ tier can use a found
+/// lyric (the mtl tooling is present).
+pub(crate) fn should_title_search(
+    words: &[AsrWord],
+    candidates: &[crate::lyrics::tier1::CandidateText],
+    mtl_available: bool,
+) -> bool {
+    !words.is_empty()
+        && mtl_available
+        && crate::lyrics::title_search::needs_title_search(candidates)
+}
+
 /// #144: the one g35t transcript of this song's isolated vocal.
 ///
-/// A transcript kept for the same vocal within the reuse window
+/// A transcript kept for the same vocal by this processing pass
 /// (`transcript_cache`) is reused — a no-penalty deferral re-pick does not
-/// pay for it twice; a new one is kept. `Ok(None)` means there is nothing to
+/// pay for it twice; a new one is kept, and `run_text_tiers` retires it when
+/// the pass ends, so the next pass transcribes afresh. `Ok(None)` means there is nothing to
 /// transcribe here: no isolated vocal (the base tier chooses between the #171
 /// full-mix fallback and a deferral) or no Gemini key (the base tier defers
 /// `gemini_key_missing`). `Err` is a failed transcription: the song defers
@@ -162,20 +177,16 @@ impl LyricsWorker {
             }
         };
 
-        // #144: a cover's text by title, chosen by what is sung — only when
-        // no artist+title lookup found the song and the ★ tier can use it.
-        let title_reference = match transcript.as_deref() {
-            Some(words)
-                if crate::lyrics::title_search::needs_title_search(&candidates)
-                    && reference_backend.mtl_cfg.is_available() =>
-            {
+        // #144: a cover's text by title, chosen by what is sung
+        // (`should_title_search`).
+        let words = transcript.as_deref().unwrap_or_default();
+        let title_reference =
+            if should_title_search(words, &candidates, reference_backend.mtl_cfg.is_available()) {
                 self.title_search_reference(row, words, &candidates).await
-            }
-            _ => {
+            } else {
                 crate::lyrics::title_search::remove_audit(&self.cache_dir, youtube_id).await;
                 None
-            }
-        };
+            };
 
         // Tier 1 (★): the reference text — the title search's choice, else the
         // best gathered candidate by source priority — mtl force-aligned and
@@ -211,7 +222,7 @@ impl LyricsWorker {
                 youtube_id,
                 best_candidate.as_ref(),
                 clean_vocal,
-                transcript.as_deref().unwrap_or_default(),
+                words,
                 &reference_backend,
             )
             .await
@@ -224,11 +235,13 @@ impl LyricsWorker {
             Err(d) => return Ok(TierOutcome::Return(self.defer_heavy(d).await)),
         };
         if let Some(track) = mtl_track {
+            // The pass ends here: its kept transcript is retired (#144).
+            crate::lyrics::transcript_cache::retire(&self.cache_dir, youtube_id).await;
             return Ok(TierOutcome::Track(track));
         }
 
         // Tier 2 — the g35t base tier: the transcript grouped into lines.
-        match self
+        let base = self
             .run_g35t_transcript_branch(
                 clean_vocal,
                 // #171: mix FLAC — base-tier last resort when isolation never yields a vocal.
@@ -241,8 +254,12 @@ impl LyricsWorker {
                 &row.artist,
                 started_at_unix_ms,
             )
-            .await?
-        {
+            .await?;
+        if !matches!(base, crate::lyrics::worker_g35t::G35tOutcome::Deferred(_)) {
+            // A track or a quarantine ends the pass: retire its transcript.
+            crate::lyrics::transcript_cache::retire(&self.cache_dir, youtube_id).await;
+        }
+        match base {
             crate::lyrics::worker_g35t::G35tOutcome::Track(track) => Ok(TierOutcome::Track(track)),
             crate::lyrics::worker_g35t::G35tOutcome::Deferred(reason) => {
                 // Vocals WAV intentionally preserved on disk — aligner's
