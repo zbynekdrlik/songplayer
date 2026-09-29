@@ -27,10 +27,10 @@ use crate::playback::ndi_health::PlaybackStateLabel;
 /// OBS accepted — is this playlist.
 pub(crate) fn receiver_expected(
     label: &PlaybackStateLabel,
-    _cg_shown: Option<i64>,
-    _playlist_id: i64,
+    cg_shown: Option<i64>,
+    playlist_id: i64,
 ) -> bool {
-    matches!(label, PlaybackStateLabel::Playing)
+    matches!(label, PlaybackStateLabel::Playing) && cg_shown == Some(playlist_id)
 }
 
 #[cfg(test)]
