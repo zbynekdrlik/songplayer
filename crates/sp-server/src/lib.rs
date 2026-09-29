@@ -25,6 +25,7 @@ pub mod remote; // #213: the Companion remote control (obs-websocket 5 subset â†
 pub mod reprocess;
 pub mod resolume;
 pub mod shutdown;
+mod song_relink; // #136: stems / dub left under an old name â†’ the audio's name
 pub mod startup;
 pub mod stems;
 

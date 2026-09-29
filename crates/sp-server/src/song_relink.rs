@@ -1,4 +1,4 @@
-//! #136 startup self-heal pass: re-link the files a song names after its audio
+//! #136 self-heal pass: re-link the files a song names after its audio
 //! sidecar (the karaoke stems, the dub track + transcripts,
 //! [`cache::derived_files`]) that a rename left under an OLD name.
 //!
@@ -7,7 +7,7 @@
 //! vocals input. The metadata repair of 29.9.2026 renamed ~99 songs' video +
 //! audio and left their stems behind, so the lyrics queue waited for stems
 //! forever and the mixer found none. This pass repairs such drift from any
-//! cause. It runs inside [`super::self_heal_cache`], after the complete-pair
+//! cause. It runs inside [`crate::startup::self_heal_cache`], after the complete-pair
 //! re-link (the audio paths are current) and the duplicate removal (no
 //! superseded download's files are left to adopt).
 //!
@@ -195,5 +195,5 @@ fn both_stems_exist(audio: &Path) -> bool {
 }
 
 #[cfg(test)]
-#[path = "startup_relink_tests.rs"]
+#[path = "song_relink_tests.rs"]
 mod tests;

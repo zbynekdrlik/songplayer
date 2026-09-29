@@ -28,11 +28,6 @@ use crate::downloader::cache;
 mod startup_dabing;
 pub use startup_dabing::ensure_dabing_playlist_exists;
 
-// #136: the self-heal pass for the files a song names after its audio (stems,
-// dub), a sibling module for the 1000-line cap.
-#[path = "startup_relink.rs"]
-mod startup_relink;
-
 /// Ensures the single pre-created `ytlive` custom playlist exists.
 /// Idempotent: a no-op when the row is already present.
 ///
@@ -59,7 +54,7 @@ pub async fn ensure_live_playlist_exists(pool: &SqlitePool) -> Result<(), sqlx::
 /// * delete orphan half-sidecars (debris from a crashed download),
 /// * re-link complete video+audio pairs to their DB row,
 /// * re-link the stems / dub a rename left under an old name, and reset stems
-///   no name holds to pending (#136, `startup_relink`).
+///   no name holds to pending (#136, `crate::song_relink`).
 #[cfg_attr(test, mutants::skip)]
 pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), sqlx::Error> {
     let scan = cache::scan_cache(cache_dir);
@@ -107,7 +102,7 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
 
     // #136: AFTER the pair re-link (the audio paths are current) and the
     // duplicate removal (no superseded download's stems are left to adopt).
-    startup_relink::relink_derived_files(pool, cache_dir).await?;
+    crate::song_relink::relink_derived_files(pool, cache_dir).await?;
 
     // Detect DB/disk mismatch: rows marked has_lyrics=1 but JSON file is gone.
     // This was originally a wholesale delete-all-lyrics-and-reset loop from
