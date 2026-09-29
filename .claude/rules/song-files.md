@@ -49,10 +49,14 @@ Design record: #136 comment 5894034820.
   never set aside, so the move fails on it.
   - A `to` that differs from `from` only in letter case is the SAME file on
     NTFS (`is_other_file` compares canonical paths), so it is never set aside.
-    Doing so once lost the audio at the next start.
-  - A `.replaced` left over (a crash mid-unit, or a failed give-back) is never
-    deleted. The startup self-heal WARNs each: `self-heal: a replaced song file
-    is still set aside …`.
+    Setting it aside would lose the audio at the next start; review round 6
+    found this before it shipped. When a path cannot be canonicalized, the
+    unit rolls back rather than guess.
+  - A `.replaced` is left over by a crash mid-unit, a failed give-back, a stuck
+    move back, or a failed delete after the unit moved. It is never deleted and
+    never overwritten: the next set-aside of that name takes
+    `<name>.2.replaced`, and so on. The startup self-heal WARNs each one:
+    `self-heal: a replaced song file is still set aside …`.
   - Tests force a failing step with `move_as_unit_with(…, rename)` (the
     `failing_on(from, to)` seam in `cache_tests_files.rs`), or with a
     non-empty directory at the target.

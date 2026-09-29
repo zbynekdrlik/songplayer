@@ -401,7 +401,7 @@ fn a_set_aside_that_fails_rolls_the_unit_back() {
     let failed = move_as_unit_with(
         ID,
         &[(a.clone(), a2.clone()), (fresh.clone(), older.clone())],
-        &failing_on(older.clone(), set_aside_name(&older)),
+        &failing_on(older.clone(), numbered_aside_name(&older, 1)),
     )
     .unwrap_err();
 
@@ -444,8 +444,78 @@ fn a_move_back_that_fails_is_stuck_and_keeps_the_replaced_file_set_aside() {
         b"new",
         "stuck under its new name"
     );
-    assert_eq!(fs::read(set_aside_name(&older)).unwrap(), b"old");
+    assert_eq!(fs::read(numbered_aside_name(&older, 1)).unwrap(), b"old");
     assert!(!fresh.exists());
+}
+
+/// #136 review round 7: a give-back that fails after the move back leaves the
+/// song's file under its old name, the target name empty, and the replaced
+/// file set aside, where the startup self-heal reports it.
+#[test]
+fn a_failed_give_back_leaves_the_replaced_file_set_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let (fresh, older, t, blocked) = (
+        d.join("fresh"),
+        d.join("older"),
+        d.join("t"),
+        d.join("blocked"),
+    );
+    fs::write(&fresh, b"new").unwrap();
+    fs::write(&older, b"old").unwrap();
+    fs::write(&t, b"t").unwrap();
+    fs::create_dir(&blocked).unwrap();
+    fs::write(blocked.join("x"), b"x").unwrap();
+    let aside = numbered_aside_name(&older, 1);
+
+    let failed = move_as_unit_with(
+        ID,
+        &[(fresh.clone(), older.clone()), (t.clone(), blocked.clone())],
+        &failing_on(aside.clone(), older.clone()),
+    )
+    .unwrap_err();
+
+    assert!(failed.stuck.is_empty(), "the song's file moved back");
+    assert_eq!(fs::read(&fresh).unwrap(), b"new");
+    assert!(!older.exists(), "the target name is left empty");
+    assert_eq!(fs::read(&aside).unwrap(), b"old");
+    assert_eq!(set_aside_leftovers(d), vec![aside]);
+}
+
+/// A set-aside never overwrites a `.replaced` left by an earlier move (it may
+/// be the only copy of a file): it takes the next free name, and after the
+/// unit has moved only its OWN set-aside file is deleted.
+#[test]
+fn a_set_aside_never_overwrites_a_leftover() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let (fresh, older) = (d.join("fresh"), d.join("older"));
+    fs::write(&fresh, b"new").unwrap();
+    fs::write(&older, b"old").unwrap();
+    let leftover = numbered_aside_name(&older, 1);
+    fs::write(&leftover, b"leftover").unwrap();
+
+    assert_eq!(
+        set_aside_name(&older),
+        numbered_aside_name(&older, 2),
+        "the next free name"
+    );
+    assert_eq!(
+        move_as_unit(ID, &[(fresh.clone(), older.clone())]).unwrap(),
+        1
+    );
+
+    assert_eq!(fs::read(&older).unwrap(), b"new");
+    assert_eq!(
+        fs::read(&leftover).unwrap(),
+        b"leftover",
+        "the leftover is kept"
+    );
+    assert!(
+        !numbered_aside_name(&older, 2).exists(),
+        "its own set-aside is deleted"
+    );
+    assert_eq!(fs::read_dir(d).unwrap().count(), 2);
 }
 
 /// #136 review round 6: a rename that changes only the letter case. On a

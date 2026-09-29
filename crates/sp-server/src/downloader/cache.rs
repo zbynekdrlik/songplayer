@@ -300,7 +300,19 @@ where
         if from == to || !from.exists() {
             continue;
         }
-        let set_aside = if is_other_file(from, to) {
+        let other_file = match is_other_file(from, to) {
+            Ok(other) => other,
+            Err(error) => {
+                tracing::warn!(
+                    youtube_id,
+                    from = %from.display(),
+                    to = %to.display(),
+                    "cache: cannot tell whether a song file's new name is another file: {error}"
+                );
+                return Err(undo(youtube_id, done, error, rename));
+            }
+        };
+        let set_aside = if other_file {
             let aside = set_aside_name(to);
             if let Err(error) = rename(to.as_path(), aside.as_path()) {
                 tracing::warn!(
@@ -360,19 +372,21 @@ where
 /// aside before it can take the name. On a case-insensitive filesystem (NTFS,
 /// the box) a `to` that differs from `from` only in letter case names the SAME
 /// file: both canonicalize to it, so it is not set aside and the rename just
-/// changes the case (#136 review round 6).
-fn is_other_file(from: &Path, to: &Path) -> bool {
-    to.is_file()
-        && match (std::fs::canonicalize(from), std::fs::canonicalize(to)) {
-            (Ok(from), Ok(to)) => from != to,
-            _ => true,
-        }
+/// changes the case (#136 review round 6). When either cannot be
+/// canonicalized, the answer is unknown: an error, and the unit rolls back
+/// rather than guess (a wrong guess set the song's own file aside).
+fn is_other_file(from: &Path, to: &Path) -> std::io::Result<bool> {
+    if !to.is_file() {
+        return Ok(false);
+    }
+    Ok(std::fs::canonicalize(from)? != std::fs::canonicalize(to)?)
 }
 
-/// Every set-aside `.replaced` file left in `cache_dir` ([`set_aside_name`]): a
-/// unit move that crashed, or could not give a replaced file back. They are
-/// only reported (the startup self-heal WARNs each), never deleted: one may be
-/// the only copy of a file.
+/// Every set-aside `.replaced` file left in `cache_dir` ([`set_aside_name`]).
+/// One is left by a unit move that crashed, could not give a replaced file
+/// back, had a file stuck under its new name, or could not delete the replaced
+/// copy after the unit moved. They are only reported (the startup self-heal
+/// WARNs each), never deleted: one may be the only copy of a file.
 pub fn set_aside_leftovers(cache_dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(cache_dir) else {
         return Vec::new();
@@ -380,7 +394,7 @@ pub fn set_aside_leftovers(cache_dir: &Path) -> Vec<PathBuf> {
     let mut leftovers: Vec<PathBuf> = entries
         .flatten()
         .map(|entry| entry.path())
-        .filter(|path| path.is_file() && path.extension().is_some_and(|e| e == "replaced"))
+        .filter(|path| path.extension().is_some_and(|e| e == "replaced") && path.is_file())
         .collect();
     leftovers.sort();
     leftovers
@@ -393,10 +407,28 @@ struct Moved {
     set_aside: Option<PathBuf>,
 }
 
-/// The name a replaced file waits under until its unit has moved: the file's
-/// own name plus `.replaced` (no cache scan matches it).
+/// The name a replaced file waits under until its unit has moved: the first
+/// free one of `<name>.replaced`, `<name>.2.replaced`, `<name>.3.replaced`, …
+/// (no cache scan matches them). A leftover from an earlier move is never
+/// overwritten: it may be the only copy of a file.
 fn set_aside_name(path: &Path) -> PathBuf {
+    let mut n: u32 = 1;
+    loop {
+        let candidate = numbered_aside_name(path, n);
+        if !candidate.exists() {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+/// The `n`-th set-aside name of `path`: `<name>.replaced` for 1, else
+/// `<name>.<n>.replaced`.
+fn numbered_aside_name(path: &Path, n: u32) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
+    if n > 1 {
+        name.push(format!(".{n}"));
+    }
     name.push(".replaced");
     PathBuf::from(name)
 }
@@ -420,8 +452,10 @@ where
 }
 
 /// Undo `done` in reverse order after `error`: every file goes back to its old
-/// name and every replaced file gets its name back. A file that cannot move back
-/// is `stuck`, and the file it replaced then stays set aside (both logged).
+/// name and every replaced file gets its name back, unless that give-back fails
+/// (ERROR: the replaced file stays set aside, its name empty). A file that cannot
+/// move back is `stuck`, and the file it replaced then stays set aside (both
+/// logged). A set-aside file left behind is WARNed at every start.
 fn undo<R>(youtube_id: &str, done: Vec<Moved>, error: std::io::Error, rename: &R) -> MoveFailed
 where
     R: Fn(&Path, &Path) -> std::io::Result<()>,

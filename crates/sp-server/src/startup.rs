@@ -122,8 +122,9 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
     crate::song_relink::relink_derived_files(pool, cache_dir).await?;
     for leftover in cache::set_aside_leftovers(cache_dir) {
         tracing::warn!(
-            "self-heal: a replaced song file is still set aside (a unit move crashed or could \
-             not give it back), kept for inspection: {}",
+            "self-heal: a replaced song file is still set aside (a unit move crashed, could \
+             not give it back or move its file back, or could not delete it after moving), \
+             kept for inspection: {}",
             leftover.display()
         );
     }
