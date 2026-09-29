@@ -169,13 +169,43 @@ async fn going_off_program_clears_the_obs_title_text_when_none_is_due() {
 
     let cmds = sent(&mut rx);
     assert_eq!(count(&cmds, is_hide_title), 1, "{cmds:?}");
+    assert_eq!(
+        obs_texts(&mut obs_rx),
+        [(OBS_TITLE_SOURCE.to_string(), String::new())]
+    );
+}
+
+/// Every `(source, text)` the engine set on cg OBS.
+fn obs_texts(obs_rx: &mut mpsc::Receiver<ObsCommand>) -> Vec<(String, String)> {
     let mut texts = Vec::new();
     while let Ok(cmd) = obs_rx.try_recv() {
         if let ObsCommand::SetTextSource { source_name, text } = cmd {
             texts.push((source_name, text));
         }
     }
-    assert_eq!(texts, [(OBS_TITLE_SOURCE.to_string(), String::new())]);
+    texts
+}
+
+/// Review round 6: with no playlist left on program the outgoing title
+/// fades and cg OBS's `#sp-title` text is cleared too (`title::push_hide`):
+/// the OFF cancelled the song's hide timer, whose own hide clears it.
+#[tokio::test]
+async fn going_off_program_alone_clears_the_obs_title_text_too() {
+    let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    let (obs_tx, mut obs_rx) = mpsc::channel(16);
+    engine.obs_cmd_tx = Some(obs_tx);
+    play(&mut engine, 7, 42, Window::Due);
+    sent(&mut rx);
+
+    engine.handle_scene_change(7, false).await;
+
+    let cmds = sent(&mut rx);
+    assert_eq!(count(&cmds, is_hide_title), 1, "{cmds:?}");
+    assert_eq!(count(&cmds, is_hide_subtitles), 1, "{cmds:?}");
+    assert_eq!(
+        obs_texts(&mut obs_rx),
+        [(OBS_TITLE_SOURCE.to_string(), String::new())]
+    );
 }
 
 /// Review round 5: a failed read of the due title of the playlist still on
