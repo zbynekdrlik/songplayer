@@ -308,10 +308,11 @@ def raw_serve():
 
 
 def test_something_else_on_the_port_is_no_lease(serve, raw_serve):
-    # Review round 2: a non-HTTP listener (`BadStatusLine`) or a truncated
-    # body (`IncompleteRead`) are `http.client.HTTPException`s, not OSErrors;
-    # they must be "no lease" (the next URL is tried; none -> WARN, deploy),
-    # never an uncaught exception that fails the deploy.
+    # Review round 2: a non-HTTP listener (`BadStatusLine`) is an
+    # `http.client.HTTPException`, not an OSError; a body shorter than its
+    # Content-Length does not parse (a ValueError). Both must be "no lease"
+    # (the next URL is tried; none -> WARN, deploy), never an uncaught
+    # exception that fails the deploy.
     banner = raw_serve(b"SSH-2.0-OpenSSH_9.6\r\n")
     truncated = raw_serve(b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{"held": fa')
     held = serve(json.dumps(lease()).encode())
@@ -408,3 +409,22 @@ def test_main_refuses_a_url_with_a_broken_port_or_host():
     ]:
         with pytest.raises(SystemExit):
             main(["--own-repo", OWN_REPO, "--url", url])
+
+
+def test_the_body_bound_is_exact(serve):
+    # 65 536 bytes is still read as a lease; 65 537 is too large.
+    base = json.dumps(lease()).encode()
+    at_bound = serve(base[:-1] + b" " * (gate_mod.MAX_BODY_BYTES - len(base)) + b"}")
+    over = serve(base[:-1] + b" " * (gate_mod.MAX_BODY_BYTES + 1 - len(base)) + b"}")
+    lines: list[str] = []
+    assert fetch_lease([at_bound], lines.append) == lease()
+    assert fetch_lease([over], lines.append) is None
+    assert lines == [lines[0]] and "too large" in lines[0]
+
+
+def test_only_an_http_url_with_a_host_and_a_valid_port_is_one():
+    assert gate_mod.is_http_url("http://10.77.9.200:8890/rig-lease.json")
+    assert gate_mod.is_http_url("https://dev1/rig-lease.json")
+    assert not gate_mod.is_http_url("http://dev1:0/rig-lease.json")
+    assert not gate_mod.is_http_url("http://dev1:65536/rig-lease.json")
+    assert gate_mod.is_http_url("http://dev1:65535/rig-lease.json")

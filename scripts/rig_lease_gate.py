@@ -137,16 +137,17 @@ def fetch_lease(
             doc = json.loads(body)
         except (OSError, ValueError, RecursionError, http.client.HTTPException) as e:
             # URLError / HTTPError / a timeout are OSErrors; bad JSON or bad
-            # UTF-8 is a ValueError; JSON nested past the recursion limit is
-            # a RecursionError; a non-HTTP listener (BadStatusLine) or a
-            # truncated body (IncompleteRead) is an HTTPException. Logged,
+            # UTF-8 is a ValueError (so is a body shorter than its
+            # Content-Length: `read(amt)` returns what came, which does not
+            # parse); JSON nested past the recursion limit is a
+            # RecursionError; a non-HTTP listener (BadStatusLine) or a chunked
+            # body cut short (IncompleteRead) is an HTTPException. Logged,
             # then the next URL is tried.
             log(f"rig lease: {url} did not answer with JSON ({one_line(e)})")
             continue
         if not is_lease(doc):
-            log(
-                f"rig lease: {url} answered something that is not a lease: {str(doc)[:200]}"
-            )
+            what = one_line(str(doc)[:200])
+            log(f"rig lease: {url} answered something that is not a lease: {what}")
             continue
         return doc
     return None
@@ -214,6 +215,20 @@ def gate(
         sleep(pause)
 
 
+def is_http_url(url: str) -> bool:
+    """An http(s) URL with a host and, when given, a valid port (1-65535)."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        port = parts.port  # a non-numeric or out-of-range port raises
+    except ValueError:
+        return False
+    return (
+        parts.scheme in ("http", "https")
+        and bool(parts.hostname)
+        and (port is None or port > 0)
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--own-repo", required=True, help="this repo, OWNER/NAME")
@@ -233,9 +248,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     for url in args.url:
         # A broken --url would look like an outage on every deploy (WARN,
         # deploy, never a lease check): refuse it loudly instead.
-        parts = urllib.parse.urlsplit(url)
-        if parts.scheme not in ("http", "https") or not parts.hostname:
-            parser.error(f"--url {url!r} is not an http(s) URL with a host")
+        if not is_http_url(url):
+            parser.error(
+                f"--url {url!r} is not an http(s) URL with a host and a valid port"
+            )
 
     def log(message: str) -> None:
         print(message, flush=True)

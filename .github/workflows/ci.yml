@@ -488,7 +488,10 @@ jobs:
       - name: Verify deploy job uses always() condition
         run: |
           # Extract the full if: condition block (may span multiple lines with >-)
-          DEPLOY_BLOCK=$(grep -A10 "deploy-resolume:" .github/workflows/ci.yml | head -12)
+          # Anchored to the job key: unanchored, grep matched THIS line first
+          # (its own text holds the job name and "always()"), so the check
+          # never read the real job header (#221 L4a review round 4).
+          DEPLOY_BLOCK=$(grep -A10 '^  deploy-resolume:' .github/workflows/ci.yml | head -12)
           if ! echo "$DEPLOY_BLOCK" | grep -q "always()"; then
             echo "ERROR: deploy-resolume must use always() in its if: condition"
             echo "Found:"
@@ -813,6 +816,10 @@ jobs:
       # an unreachable lease service is a WARN and the deploy goes on.
       - name: Wait for the rig lease (never deploy over another repo's lease)
         shell: powershell
+        # The gate's own bound is 60 min; this step bound makes sure a lease
+        # server that trickles bytes can never push the cut into "Deploy
+        # SongPlayer" (which stops SongPlayer first): it lands HERE.
+        timeout-minutes: 70
         run: |
           $py = "C:\Program Files\Python312\python.exe"
           if (-not (Test-Path $py)) {
