@@ -4,12 +4,14 @@
 //! The setting `gemini_api_key` is a comma-separated list of keys. Every
 //! caller splits it with [`gemini_keys_from_setting`] and sends ONE key per
 //! request in the `x-goog-api-key` header — never the list, never a URL
-//! parameter. A non-2xx answer is judged by [`key_verdict`] alone, and one
-//! key's request (with its same-key 5xx retries) is sent by [`send_on_key`]
-//! alone, so the lyrics transcription (`lyrics::g35t_client`) and the
-//! metadata provider (`metadata::gemini`) rotate over the same list by the
-//! same rules and the same loop. Before #136 they had two diverging copies,
-//! and the metadata one sent the whole list as one key.
+//! parameter. A non-2xx answer is judged by [`key_verdict`] alone, and every
+//! rotating request (one key, with its same-key 5xx retries) is sent by
+//! [`send_on_key`], so the lyrics transcription (`lyrics::g35t_client`) and
+//! the metadata provider (`metadata::gemini`) rotate over the same list by
+//! the same rules and the same loop. Before #136 they had two diverging
+//! copies, and the metadata one sent the whole list as one key. (The
+//! metadata clean-up pass is a single cosmetic request on the key that
+//! already answered: no rotation, no retry.)
 //!
 //! Callers differ only in what they do with the list: lyrics and metadata
 //! rotate over every key; the dub worker (`dabing::worker`) takes the first

@@ -7,13 +7,14 @@
 //! the download worker uses — before #136 this worker had its own list with
 //! Gemini alone, so a broken Gemini left every row broken forever).
 //!
-//! A failed row is logged at WARN with EVERY provider's error, in chain
-//! order. The per-video backoff below allows one attempt per stage, so that
-//! is one WARN per video per backoff stage, never one per 30-min cycle.
+//! A failed row is logged at WARN with EVERY provider's reason, in chain
+//! order, once per attempt. The per-video backoff below allows one attempt
+//! per stage; the stages shorter than the 30-min cycle (1, 5, 15 min) are
+//! retried every cycle, the longer ones (1 h, 6 h, 24 h) wait for theirs.
 //!
 //! ## Rate-limit cooldown (issue #12)
 //!
-//! When a provider returns [`MetadataError::RateLimited`], the worker enters
+//! When a provider returns `MetadataError::RateLimited`, the worker enters
 //! a global cooldown of [`RATE_LIMIT_COOLDOWN`] during which no provider is
 //! called. Each rate-limited video also enters a per-video exponential
 //! backoff — its entry is skipped until its `next_retry_at` instant passes.
@@ -31,7 +32,7 @@ use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
 use crate::metadata::health::REPAIR_QUEUE_WHERE;
-use crate::metadata::{MetadataError, ProviderChain};
+use crate::metadata::{ChainFailure, ProviderChain};
 
 /// Global cooldown after any provider's rate-limit response.
 const RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(300); // 5 min (a literal: no mutable op)
@@ -84,15 +85,6 @@ enum ReprocessOutcome {
     /// The video was skipped because it's in per-video backoff or the
     /// global cooldown window is still active.
     Skipped,
-}
-
-/// Why no provider named a video: every provider's error, in chain order.
-#[derive(Debug)]
-struct ChainFailure {
-    /// A provider was rate-limited: the batch aborts and the cooldown starts.
-    rate_limited: bool,
-    /// `"<provider>: <error>"` per provider, joined with `"; "`.
-    reasons: String,
 }
 
 impl ReprocessWorker {
@@ -206,14 +198,14 @@ impl ReprocessWorker {
                     break;
                 }
                 Ok(ReprocessOutcome::Failed(reasons)) => {
-                    // One attempt per backoff stage (`bump_video_backoff`), so
-                    // this is one WARN per video per stage, not per cycle.
-                    let (next_retry_s, stage) = self.backoff_of(row.id);
+                    // One WARN per attempt; the backoff stage decides the next
+                    // attempt (a stage shorter than the cycle = the next cycle).
+                    let (backoff_s, stage) = self.backoff_of(row.id);
                     warn!(
                         video_id = %row.youtube_id,
                         %reasons,
                         backoff_stage = stage,
-                        next_retry_s,
+                        backoff_s,
                         "metadata still failed: no provider named the video"
                     );
                 }
@@ -372,51 +364,23 @@ impl ReprocessWorker {
         Ok(ReprocessOutcome::Success)
     }
 
-    /// Try each provider of the chain in order. Returns the first successful
-    /// result, or EVERY provider's error in chain order (#136: before, only
-    /// the last one survived, and it was logged nowhere), flagged
-    /// `rate_limited` when any provider was, so the batch-abort path always
-    /// wins over generic failures.
-    ///
-    /// This path bypasses `metadata::get_metadata` (and its
-    /// `sanitize::strip_emoji` choke point, #135) entirely, so it sanitizes
-    /// the returned `song`/`artist` itself — the invariant "nothing
-    /// unsanitized is ever persisted" must hold here too, independent of
-    /// which providers are wired.
+    /// The chain's one walk (`metadata::first_answer`, the same the download
+    /// path uses): the first sanitized answer with a song, or EVERY
+    /// provider's reason in chain order (#136: before, only the last one
+    /// survived, and it was logged nowhere), flagged `rate_limited` when any
+    /// provider was, so the batch-abort path always wins over generic
+    /// failures.
     async fn try_providers(
         &self,
         video_id: &str,
         title: &str,
     ) -> Result<VideoMetadata, ChainFailure> {
-        let mut rate_limited = false;
-        let mut reasons: Vec<String> = Vec::new();
-
-        for provider in self.chain.providers() {
-            match provider.extract(video_id, title).await {
-                Ok(mut meta) => {
-                    meta.song = crate::metadata::sanitize::strip_emoji(&meta.song);
-                    meta.artist = crate::metadata::sanitize::strip_emoji(&meta.artist);
-                    return Ok(meta);
-                }
-                Err(e) => {
-                    rate_limited |= matches!(e, MetadataError::RateLimited(_));
-                    let error = crate::metadata::health::bounded_error(&e.to_string());
-                    reasons.push(format!("{}: {error}", provider.name()));
-                }
-            }
-        }
-
-        if reasons.is_empty() {
-            reasons.push("no providers configured".to_string());
-        }
-        Err(ChainFailure {
-            rate_limited,
-            reasons: reasons.join("; "),
-        })
+        crate::metadata::first_answer(self.chain.providers(), video_id, title).await
     }
 
-    /// `(seconds until the next retry, backoff stage)` of a video — for the
-    /// failed-row WARN.
+    /// `(the backoff stage's wait in seconds, the stage)` of a video — for the
+    /// failed-row WARN. A wait shorter than the 30-min cycle means "the next
+    /// cycle".
     fn backoff_of(&self, video_id: i64) -> (u64, usize) {
         let stage = self
             .per_video_backoff

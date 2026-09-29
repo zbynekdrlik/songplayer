@@ -278,3 +278,29 @@ fn the_probe_bound_stays_below_the_post_deploy_request_timeout() {
     // e2e/post-deploy-metadata.spec.ts waits 220 s for the probe answer.
     assert_eq!(PROBE_TIMEOUT, Duration::from_secs(180));
 }
+
+#[tokio::test]
+async fn a_probe_with_an_over_long_id_or_title_is_a_bad_request() {
+    let long_id = "i".repeat(MAX_PROBE_ID_CHARS + 1);
+    let long_title = "t".repeat(MAX_PROBE_TITLE_CHARS + 1);
+    for (youtube_id, title) in [(long_id.as_str(), TITLE), (VIDEO, long_title.as_str())] {
+        let mut state = test_state().await;
+        state.metadata_chain = refuses_then_answers();
+
+        let (status, _) = send(state, probe_request(youtube_id, title)).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{}", title.len());
+    }
+}
+
+#[tokio::test]
+async fn a_probe_at_the_length_bounds_is_answered() {
+    let id = "i".repeat(MAX_PROBE_ID_CHARS);
+    let title = "t".repeat(MAX_PROBE_TITLE_CHARS);
+    let mut state = test_state().await;
+    state.metadata_chain = refuses_then_answers();
+
+    let (status, _) = send(state, probe_request(&id, &title)).await;
+
+    assert_eq!(status, StatusCode::OK);
+}

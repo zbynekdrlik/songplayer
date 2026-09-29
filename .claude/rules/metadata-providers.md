@@ -33,6 +33,12 @@ answered correctly), and nothing ever ran the real providers.
 - Every chain member is wrapped (`chain::Recorded`): each call's outcome +
   latency goes to `MetadataHealth` and to the log (INFO answered / WARN
   failed). `get_metadata` therefore logs a provider failure only at DEBUG.
+- ONE walk of the chain: `metadata::first_answer` (sanitize; a song the
+  emoji sanitizer reduces to nothing is no answer — ask the NEXT provider;
+  keep every provider's reason, flag a rate limit). The download path
+  (`get_metadata` = first_answer, else the title parser) and the repair path
+  (`ReprocessWorker::try_providers`) both call it — never walk the providers
+  by hand (review round 3 found the repair walk could store `song = ""`).
 
 ## Gemini on the key list
 
@@ -72,15 +78,17 @@ answered correctly), and nothing ever ran the real providers.
 - `POST /api/v1/metadata/probe {youtube_id, title}` runs EACH provider on its
   own (concurrently, each bounded by `PROBE_TIMEOUT` = 180 s, below the spec's
   220 s so a hung provider fails the gate WITH its name), returns each
-  outcome, writes nothing. 400 on an empty id / title; a missing field is
-  axum's 422.
+  outcome, writes nothing. 400 on an empty id / title or one over 64 / 500
+  characters (refused before it is logged or sent to the paid providers); a
+  missing field is axum's 422.
 - `e2e/post-deploy-metadata.spec.ts` probes `gq-4FVRr_ow` with its YouTube
   title: the chain must be [claude, gemini] and every provider must answer
   "Stand On Your Promise" / an artist containing "Emerging Sound" (case-
   insensitive). A new provider, model or key-format change must keep this
   gate green on the box, not just the unit tests.
-- The reprocess worker WARNs a failed row with EVERY provider's error, in
-  chain order; the per-video backoff makes that one WARN per stage.
+- The reprocess worker WARNs a failed row with EVERY provider's reason, in
+  chain order, once per attempt (`backoff_s` = the stage's wait; stages
+  shorter than the 30-min cycle are retried every cycle).
 - Never gate provider health on stored rows ("at least one video has provider
   metadata"): `post-deploy-flac.spec.ts` had exactly that check and it PASSED
   on 29.9.2026 with 108 rows parser-titled (run 36553367664). It now checks

@@ -29,6 +29,12 @@ use crate::metadata::health::{MetadataStatus, bounded_error, failed_videos};
 /// of as a bare Playwright timeout (Claude's own client allows 300 s + retries).
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// Longest `youtube_id` / `title` a probe accepts (characters): a YouTube id
+/// is 11, a title rarely over 150 — anything longer is refused before it is
+/// logged or sent to two paid providers.
+pub const MAX_PROBE_ID_CHARS: usize = 64;
+pub const MAX_PROBE_TITLE_CHARS: usize = 500;
+
 /// `status.metadata` (module doc).
 pub async fn status_block(state: &AppState) -> MetadataStatus {
     let failed_videos = failed_videos(&state.pool)
@@ -68,8 +74,8 @@ pub struct ProbeResponse {
     pub providers: Vec<ProbeOutcome>,
 }
 
-/// `POST /api/v1/metadata/probe` (module doc). 400 on an empty `youtube_id`
-/// or `title` (a missing field is axum's 422).
+/// `POST /api/v1/metadata/probe` (module doc). 400 on an empty or over-long
+/// `youtube_id` / `title` (a missing field is axum's 422).
 pub async fn probe(
     State(state): State<AppState>,
     Json(req): Json<ProbeRequest>,
@@ -78,6 +84,11 @@ pub async fn probe(
     let title = req.title.trim();
     if youtube_id.is_empty() || title.is_empty() {
         return (StatusCode::BAD_REQUEST, "youtube_id and title are required").into_response();
+    }
+    if youtube_id.chars().count() > MAX_PROBE_ID_CHARS
+        || title.chars().count() > MAX_PROBE_TITLE_CHARS
+    {
+        return (StatusCode::BAD_REQUEST, "youtube_id or title too long").into_response();
     }
     info!(
         youtube_id,

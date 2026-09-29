@@ -41,64 +41,91 @@ pub trait MetadataProvider: Send + Sync {
     fn name(&self) -> &str;
 }
 
-/// Try each provider in order; fall back to the title regex parser.
+/// Why no provider of a chain named a video: every provider's reason, in
+/// chain order.
+#[derive(Debug)]
+pub struct ChainFailure {
+    /// A provider was rate-limited (the reprocess worker then cools down).
+    pub rate_limited: bool,
+    /// `"<provider>: <reason>"` per provider (each cut to
+    /// `health::MAX_ERROR_CHARS`), joined with `"; "`.
+    pub reasons: String,
+}
+
+/// THE walk of a provider chain — the download path ([`get_metadata`]) and
+/// the repair path (the reprocess worker) both use it (#136: they had two
+/// walks that differed). Each provider in order; the first answer whose song
+/// is still non-empty after the emoji sanitizer wins, sanitized. This is the
+/// single choke point for emoji sanitization (#135): every provider's output
+/// ships clean text whether or not the provider sanitizes itself. A song the
+/// sanitizer reduces to nothing (an all-emoji answer passes a provider's own
+/// emptiness check on the RAW text) is no answer: the next provider is asked.
+pub async fn first_answer(
+    providers: &[Box<dyn MetadataProvider>],
+    video_id: &str,
+    title: &str,
+) -> Result<VideoMetadata, ChainFailure> {
+    let mut rate_limited = false;
+    let mut reasons: Vec<String> = Vec::new();
+    for provider in providers {
+        let reason = match provider.extract(video_id, title).await {
+            Ok(mut meta) => {
+                meta.song = sanitize::strip_emoji(&meta.song);
+                meta.artist = sanitize::strip_emoji(&meta.artist);
+                if !meta.song.trim().is_empty() {
+                    return Ok(meta);
+                }
+                tracing::warn!(
+                    provider = provider.name(),
+                    video_id,
+                    "provider song sanitized to empty; asking the next provider"
+                );
+                "the song is empty after the emoji sanitizer".to_string()
+            }
+            Err(e) => {
+                // The chain's `Recorded` wrapper already WARNed this failure
+                // with its latency; here only its reason is kept.
+                rate_limited |= matches!(e, MetadataError::RateLimited(_));
+                health::bounded_error(&e.to_string())
+            }
+        };
+        reasons.push(format!("{}: {reason}", provider.name()));
+    }
+    if reasons.is_empty() {
+        reasons.push("no providers configured".to_string());
+    }
+    Err(ChainFailure {
+        rate_limited,
+        reasons: reasons.join("; "),
+    })
+}
+
+/// [`first_answer`], else the title regex parser.
 ///
-/// If providers were available but all failed, the returned metadata has
-/// `gemini_failed = true` so the caller can schedule a retry later.
-///
-/// This is the single choke point for emoji sanitization (#135): both
-/// return paths run `sanitize::strip_emoji` over `song`/`artist` before
-/// returning, so every source — a provider's own output (Gemini, Claude)
-/// and the regex-parser fallback — ships clean text regardless of whether
-/// that source sanitizes itself.
+/// If providers were available but none named the video, the returned
+/// metadata has `gemini_failed = true` so the reprocess worker retries it
+/// later. The parser's output is sanitized too (`fallback_from_title`).
 pub async fn get_metadata(
     providers: &[Box<dyn MetadataProvider>],
     video_id: &str,
     title: &str,
 ) -> VideoMetadata {
-    let has_providers = !providers.is_empty();
-
-    for provider in providers {
-        match provider.extract(video_id, title).await {
-            Ok(mut meta) => {
-                meta.song = sanitize::strip_emoji(&meta.song);
-                meta.artist = sanitize::strip_emoji(&meta.artist);
-                if meta.song.trim().is_empty() {
-                    // A provider's own emptiness check runs on the RAW
-                    // text — it can pass for e.g. an all-emoji song —
-                    // but sanitization just reduced it to nothing.
-                    // Never ship an empty song; fall back to the title
-                    // parser the same way an outright provider failure
-                    // would (#136).
-                    tracing::warn!(
-                        provider = provider.name(),
-                        video_id,
-                        "provider song sanitized to empty; falling back to title parser"
-                    );
-                    return fallback_from_title(title, true);
-                }
-                return meta;
-            }
-            Err(e) => {
-                // The chain's `Recorded` wrapper already WARNed this failure
-                // with its latency (#136); here only the next step.
-                tracing::debug!(
-                    provider = provider.name(),
-                    error = %e,
-                    video_id,
-                    "metadata provider failed, trying next"
-                );
-            }
+    match first_answer(providers, video_id, title).await {
+        Ok(meta) => meta,
+        Err(failure) => {
+            tracing::debug!(
+                video_id,
+                reasons = %failure.reasons,
+                "no provider named the video; title parser"
+            );
+            fallback_from_title(title, !providers.is_empty())
         }
     }
-
-    // All providers failed (or none configured) — use regex parser.
-    fallback_from_title(title, has_providers)
 }
 
-/// Regex-parser fallback shared by both "all providers failed" and "a
-/// provider's song sanitized to empty" — always runs the sanitizer over
-/// its own output too, since a title can itself carry emoji.
+/// Regex-parser fallback when no provider named the video (every one failed,
+/// or answered a song the sanitizer reduced to nothing) — always runs the
+/// sanitizer over its own output too, since a title can itself carry emoji.
 fn fallback_from_title(title: &str, mark_gemini_failed: bool) -> VideoMetadata {
     let mut meta = parser::parse_title(title);
     if mark_gemini_failed {
@@ -265,5 +292,44 @@ mod tests {
             meta.gemini_failed,
             "falling back after a provider's song sanitized to empty must set gemini_failed"
         );
+    }
+
+    /// #136: the download and the repair path walk the chain the same way —
+    /// a song sanitized to nothing is no answer, the NEXT provider is asked.
+    #[tokio::test]
+    async fn a_song_sanitized_to_empty_asks_the_next_provider() {
+        let providers: Vec<Box<dyn MetadataProvider>> = vec![
+            Box::new(EmptyAfterSanitizeProvider),
+            Box::new(SuccessProvider {
+                song: "Stand On Your Promise".into(),
+                artist: "The Emerging Sound".into(),
+            }),
+        ];
+
+        let meta = get_metadata(&providers, "abc123", "ignored").await;
+
+        assert_eq!(meta.song, "Stand On Your Promise");
+        assert_eq!(meta.artist, "The Emerging Sound");
+        assert!(!meta.gemini_failed);
+    }
+
+    #[tokio::test]
+    async fn every_reason_is_kept_when_no_provider_names_the_video() {
+        let providers: Vec<Box<dyn MetadataProvider>> =
+            vec![Box::new(EmptyAfterSanitizeProvider), Box::new(FailProvider)];
+
+        let failure = first_answer(&providers, "abc123", "ignored")
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            failure.reasons,
+            "empty-after-sanitize-mock: the song is empty after the emoji sanitizer; \
+             fail-mock: API request failed: mock failure"
+        );
+        assert!(!failure.rate_limited);
+        let none: Vec<Box<dyn MetadataProvider>> = vec![];
+        let failure = first_answer(&none, "abc123", "ignored").await.unwrap_err();
+        assert_eq!(failure.reasons, "no providers configured");
     }
 }

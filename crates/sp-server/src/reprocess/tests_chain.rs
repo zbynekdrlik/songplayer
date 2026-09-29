@@ -250,3 +250,41 @@ async fn the_failed_row_warn_names_the_next_pause_and_its_stage() {
 fn the_rate_limit_cooldown_is_five_minutes() {
     assert_eq!(RATE_LIMIT_COOLDOWN, Duration::from_secs(5 * 60));
 }
+
+/// Answers every video with an all-emoji song (passes a provider's own
+/// emptiness check on the RAW text).
+struct EmojiOnlySong;
+
+#[async_trait]
+impl MetadataProvider for EmojiOnlySong {
+    async fn extract(&self, _video_id: &str, _title: &str) -> Result<VideoMetadata, MetadataError> {
+        Ok(VideoMetadata {
+            song: "\u{1F525}".into(),
+            artist: ARTIST.into(),
+            source: sp_core::metadata::MetadataSource::Gemini,
+            gemini_failed: false,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "claude"
+    }
+}
+
+/// #136 review round 3: the repair path walks the chain like the download
+/// path, so it never stores a song the sanitizer reduced to nothing.
+#[tokio::test]
+async fn the_repair_never_stores_a_song_sanitized_to_empty() {
+    let (pool, id) = pool_with_parser_row().await;
+    let chain = Arc::new(ProviderChain::new(vec![Box::new(EmojiOnlySong)]));
+    let mut worker = ReprocessWorker::new(pool.clone(), chain, PathBuf::from("."));
+
+    assert_eq!(worker.process_all().await.unwrap(), 0);
+
+    assert_eq!(row(&pool, id).await, (TITLE.into(), String::new(), 1));
+    let failure = worker.try_providers(VIDEO, TITLE).await.unwrap_err();
+    assert_eq!(
+        failure.reasons,
+        "claude: the song is empty after the emoji sanitizer"
+    );
+}

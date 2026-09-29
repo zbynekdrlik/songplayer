@@ -98,16 +98,22 @@ async fn send_with_retry(
     })
     .await
     .map_err(|e| StepError::Fatal(anyhow!("g35t_client {what}: request failed: {e}")))?;
-    let (verdict, status, body) = match reply {
-        KeyReply::Answered(resp) => return Ok(resp),
+    match reply {
+        KeyReply::Answered(resp) => Ok(resp),
         KeyReply::Refused {
             verdict,
             status,
             body,
-        } => (verdict, status, body),
-    };
-    let body = truncate(&body, 400);
-    Err(match verdict {
+        } => Err(step_error(what, verdict, status, &body)),
+    }
+}
+
+/// A refused `send_on_key` reply as this client's `StepError`: a 429 or a
+/// key refusal → `NextKey` (try the next key); a 5xx after every pause or
+/// any other status → `Fatal`.
+fn step_error(what: &str, verdict: KeyVerdict, status: u16, body: &str) -> StepError {
+    let body = truncate(body, 400);
+    match verdict {
         KeyVerdict::NextKey { .. } => StepError::NextKey(anyhow!(
             "g35t_client {what}: key refused status={status} body={body}"
         )),
@@ -117,7 +123,7 @@ async fn send_with_retry(
         KeyVerdict::Stop => StepError::Fatal(anyhow!(
             "g35t_client {what}: unexpected status={status} body={body}"
         )),
-    })
+    }
 }
 
 #[cfg_attr(test, mutants::skip)]
@@ -450,6 +456,36 @@ pub fn words_from_response(v: &Value) -> Vec<AsrWord> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #136: the shared key verdict maps onto this client's two outcomes.
+    #[test]
+    fn a_refused_reply_maps_to_next_key_or_fatal() {
+        let text = |e: StepError| match e {
+            StepError::NextKey(e) => format!("next: {e}"),
+            StepError::Fatal(e) => format!("fatal: {e}"),
+        };
+        let long = "x".repeat(500);
+        assert_eq!(
+            text(step_error(
+                "upload",
+                KeyVerdict::NextKey { rate_limited: true },
+                429,
+                "quota"
+            )),
+            "next: g35t_client upload: key refused status=429 body=quota"
+        );
+        assert_eq!(
+            text(step_error("poll", KeyVerdict::RetrySameKey, 503, "down")),
+            "fatal: g35t_client poll: exhausted retries status=503 body=down"
+        );
+        assert_eq!(
+            text(step_error("interactions", KeyVerdict::Stop, 404, &long)),
+            format!(
+                "fatal: g35t_client interactions: unexpected status=404 body={}",
+                "x".repeat(400)
+            )
+        );
+    }
 
     #[test]
     fn parse_offset_ms_parses_standard_and_bare_seconds() {
