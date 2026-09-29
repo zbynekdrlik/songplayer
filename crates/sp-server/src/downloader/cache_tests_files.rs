@@ -207,6 +207,48 @@ fn missing_files_are_skipped_and_the_new_set_is_in_effect() {
     }
 }
 
+/// #136 review round 2: a move back that fails leaves that file at its NEW
+/// name. The set returned must record it there, or the next start's self-heal
+/// deletes it as unrecorded crash debris (the normalized audio, a re-download).
+#[test]
+fn a_file_whose_move_could_not_be_undone_is_recorded_where_it_is() {
+    let d = Path::new("cache");
+    let (old, new) = (
+        files_of(&set_under(d, &old_base())),
+        files_of(&set_under(d, &new_base())),
+    );
+    let (old_audio, new_audio) = (old.audio.clone().unwrap(), new.audio.clone().unwrap());
+    let (old_video, new_video) = (old.video.clone().unwrap(), new.video.clone().unwrap());
+
+    assert_eq!(
+        in_effect_after_failure(&old, &new, &[(old_audio.clone(), new_audio.clone())]),
+        SongFiles {
+            video: Some(old_video.clone()),
+            audio: Some(new_audio.clone()),
+        },
+        "the stuck audio is recorded at its new name, the video at its old one"
+    );
+    assert_eq!(
+        in_effect_after_failure(&old, &new, &[(old_video.clone(), new_video.clone())]),
+        SongFiles {
+            video: Some(new_video),
+            audio: Some(old_audio.clone()),
+        }
+    );
+    assert_eq!(
+        in_effect_after_failure(&old, &new, &[]),
+        old,
+        "everything moved back"
+    );
+    // A stuck DERIVED file never changes the recorded pair: the re-link brings
+    // it under the recorded audio's name.
+    let stuck_stem = (
+        derived_files(&old_audio)[0].clone(),
+        derived_files(&new_audio)[0].clone(),
+    );
+    assert_eq!(in_effect_after_failure(&old, &new, &[stuck_stem]), old);
+}
+
 #[test]
 fn move_as_unit_counts_the_moves_and_skips_a_file_already_named() {
     let dir = tempfile::tempdir().unwrap();

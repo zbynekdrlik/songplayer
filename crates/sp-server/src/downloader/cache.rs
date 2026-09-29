@@ -203,12 +203,13 @@ fn path_column(path: &Path) -> String {
 /// Rename a song's COMPLETE file set from `old` to `new` as one unit (#136):
 /// the files named after the audio ([`derived_files`]) first, then the audio,
 /// then the video. Returns the set now in effect: `new` when every move
-/// succeeded, `old` when one failed. A failed move first moves back every file
-/// already moved, so a song is never split across two names. Only a move back
-/// that ALSO fails leaves it split (logged at ERROR); the startup self-heal then
-/// re-links the derived files and keeps a video / audio half the DB records
-/// rather than deleting it as an orphan. A file that does not exist, or that
-/// already has its new name, is skipped.
+/// succeeded; after a failed move, where each of the two recorded sidecars
+/// really is ([`in_effect_after_failure`]). A failed move first moves back
+/// every file already moved, so a song is never split across two names. Only a
+/// move back that ALSO fails leaves it split (logged at ERROR): the set returned
+/// then records the stuck half at its new name, the startup self-heal keeps a
+/// half a row records, and it re-links the derived files to the recorded audio.
+/// A file that does not exist, or that already has its new name, is skipped.
 pub fn rename_song_files(youtube_id: &str, old: &SongFiles, new: &SongFiles) -> SongFiles {
     let mut moves = Vec::new();
     if let (Some(from), Some(to)) = (&old.audio, &new.audio) {
@@ -220,17 +221,39 @@ pub fn rename_song_files(youtube_id: &str, old: &SongFiles, new: &SongFiles) -> 
     }
     match move_as_unit(youtube_id, &moves) {
         Ok(_) => new.clone(),
-        Err(_) => old.clone(),
+        Err(failed) => in_effect_after_failure(old, new, &failed.stuck),
     }
+}
+
+/// Where a song's two recorded sidecars are after a unit move from `old` to
+/// `new` failed: each back at its old name, except one whose move could not
+/// be undone (`stuck`), which is still at its new name. The row must record
+/// where each file IS, or the startup self-heal would take the stuck half for
+/// unrecorded crash debris and delete it (#136 review round 2).
+fn in_effect_after_failure(
+    old: &SongFiles,
+    _new: &SongFiles,
+    _stuck: &[(PathBuf, PathBuf)],
+) -> SongFiles {
+    old.clone()
+}
+
+/// A unit move that failed ([`move_as_unit`]): the error, and every move that
+/// could not be undone, whose file is still at its `to` name.
+#[derive(Debug)]
+pub struct MoveFailed {
+    pub error: std::io::Error,
+    pub stuck: Vec<(PathBuf, PathBuf)>,
 }
 
 /// Move every `(from, to)` whose `from` exists and differs from `to`, in
 /// order, as one unit. Returns how many files moved. On the first failure,
 /// moves the files already moved back in reverse order and returns that
-/// error. Logs every move at INFO, a failure at WARN, and a move back that
-/// fails at ERROR. A `to` that already exists is replaced (WARNed): the
-/// song's own file wins over a stale one under its new name.
-pub fn move_as_unit(youtube_id: &str, moves: &[(PathBuf, PathBuf)]) -> std::io::Result<usize> {
+/// error, with every move it could not undo. Logs every move at INFO, a
+/// failure at WARN, and a move back that fails at ERROR. A `to` that already
+/// exists is replaced (WARNed): the song's own file wins over a stale one under
+/// its new name.
+pub fn move_as_unit(youtube_id: &str, moves: &[(PathBuf, PathBuf)]) -> Result<usize, MoveFailed> {
     let mut moved: Vec<(&PathBuf, &PathBuf)> = Vec::new();
     for (from, to) in moves {
         if from == to || !from.exists() {
@@ -244,26 +267,28 @@ pub fn move_as_unit(youtube_id: &str, moves: &[(PathBuf, PathBuf)]) -> std::io::
                 "cache: a song file move replaces the file already under its new name"
             );
         }
-        if let Err(e) = std::fs::rename(from, to) {
+        if let Err(error) = std::fs::rename(from, to) {
             tracing::warn!(
                 youtube_id,
                 from = %from.display(),
                 to = %to.display(),
-                "cache: moving a song file failed, moving the {} already moved back: {e}",
+                "cache: moving a song file failed, moving the {} already moved back: {error}",
                 moved.len()
             );
+            let mut stuck = Vec::new();
             for (from, to) in moved.into_iter().rev() {
                 if let Err(back) = std::fs::rename(to, from) {
                     tracing::error!(
                         youtube_id,
                         from = %to.display(),
                         to = %from.display(),
-                        "cache: moving a song file back failed, the song's files are split \
-                         until the startup self-heal: {back}"
+                        "cache: moving a song file back failed, the file stays under its new \
+                         name: {back}"
                     );
+                    stuck.push((from.clone(), to.clone()));
                 }
             }
-            return Err(e);
+            return Err(MoveFailed { error, stuck });
         }
         tracing::info!(
             youtube_id,
