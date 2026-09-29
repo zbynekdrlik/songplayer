@@ -769,6 +769,8 @@ Access is denied` whenever ANY other handle has the target open, even one opened
 `FILE_SHARE_DELETE`. SongPlayer holds `<base>_dub.flac` open whenever the video is
 loaded in SP-dabing, even paused: `stems/reader.rs` uses Rust std, which shares
 READ|WRITE|DELETE. The reader's path comes from `stems::dub_path(audio)`, so it is fixed.
+(A rename of the song moves the dub + transcripts with its whole file set, and the
+dub worker re-links after `mark_dub_ready`, #136 `.claude/rules/song-files.md`.)
 Box 2026-09-23: the rebuild of 344 failed at exactly that call, and would fail on
 every retry while the video stayed loaded.
 - **The fix.** `scripts/win_replace.py::replace_file` opens the partial with
