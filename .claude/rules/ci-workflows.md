@@ -262,9 +262,18 @@ stops SongPlayer:
   fails with its own message ("never deploy over another repo's lease").
   Free, stale, or held by `${{ github.repository }}`: deploy. A lease
   service that does not answer with a lease (dev1 down, something else on
-  the port): a `::warning::` annotation and the deploy goes on — an outage
-  never blocks a deploy. Any other non-zero exit is the gate's own failure
-  and fails the job.
+  the port; a `holder` that is not an object or null counts as no lease):
+  a `::warning::` annotation and the deploy goes on — an outage never
+  blocks a deploy. Right after another repo's live lease was read, one or
+  two unreachable reads are a blip (a cold mDNS lookup, a lease-server
+  restart) and the lease still counts as held; the third in a row
+  (`OUTAGE_READS`) is the outage (review round 1: one blip used to deploy
+  into the lease just seen held). Any other non-zero exit is the gate's own
+  failure and fails the job.
+- Residual: the gate reads the lease, it does not HOLD it. A lease another
+  repo takes in the ~1 min between the check and "Deploy SongPlayer"
+  (artifact downloads) is not seen; the E2E job after the deploy does not
+  check it either.
 - It runs on the box's `C:\Program Files\Python312\python.exe` (the step
   fails if it is missing; the A/V gate needs the same Python). Stdlib only.
 - The wait is coordination, not a soak (CLAUDE.md "No sleep-based CI

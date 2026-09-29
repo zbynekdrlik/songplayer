@@ -22,7 +22,9 @@ stops SongPlayer:
   by this repo -> exit 0.
 - No URL answers with a lease (dev1 down, the service down, something else
   on the port) -> a WARN, exit 0: an outage of the lease service never
-  blocks a deploy.
+  blocks a deploy. Right after another repo's live lease was read, one or
+  two unreachable reads are a blip and the lease still counts as held; the
+  `OUTAGE_READS`-th (3rd) in a row is the outage (review round 1).
 
 Stdlib only: it runs on win-resolume's `C:\\Program Files\\Python312`.
 Usage:
@@ -52,6 +54,12 @@ STALE = "stale"
 OWN = "own"
 WAIT = "wait"
 
+# Unreachable reads in a row, right after another repo's live lease, that
+# count as an outage (then the deploy goes on with a WARN). Fewer are a blip
+# (a cold mDNS lookup of dev1, a restart of the lease server): the lease is
+# still treated as held. An unreachable FIRST read is an outage at once.
+OUTAGE_READS = 3
+
 # Exit codes.
 EXIT_PROCEED = 0
 EXIT_STILL_HELD = 3
@@ -61,8 +69,13 @@ Log = Callable[[str], None]
 
 
 def is_lease(doc: object) -> bool:
-    """A lease document: a JSON object whose `held` is a boolean."""
-    return isinstance(doc, dict) and isinstance(doc.get("held"), bool)
+    """A lease document: a JSON object whose `held` is a boolean and whose
+    `holder` (when present) is an object or null."""
+    return (
+        isinstance(doc, dict)
+        and isinstance(doc.get("held"), bool)
+        and isinstance(doc.get("holder"), (dict, type(None)))
+    )
 
 
 def decide(lease: Lease, own_repo: str) -> str:
@@ -125,38 +138,54 @@ def gate(
     sleep: Callable[[float], None],
     log: Log,
 ) -> int:
-    """Wait while another repo holds the lease (the module doc); the exit code."""
+    """Wait while another repo holds the lease (the module doc); the exit code.
+
+    A lease seen held stays held through up to `OUTAGE_READS - 1`
+    unreachable reads in a row; the next one is an outage (WARN, deploy).
+    """
     deadline = clock() + max_wait_seconds
+    held: Lease | None = None  # the last live lease of another repo read
+    unreachable = 0  # unreachable reads in a row
     while True:
         lease = fetch()
         if lease is None:
+            unreachable += 1
+            if held is None or unreachable >= OUTAGE_READS:
+                log(
+                    "::warning::rig lease: the lease service is not reachable - deploying"
+                    " without a lease check (an outage never blocks a deploy)"
+                )
+                return EXIT_PROCEED
             log(
-                "::warning::rig lease: the lease service is not reachable - deploying"
-                " without a lease check (an outage never blocks a deploy)"
+                f"rig lease: not reachable ({unreachable} of {OUTAGE_READS} reads in a"
+                " row) right after it was held - still treating it as held"
             )
-            return EXIT_PROCEED
-        verdict = decide(lease, own_repo)
-        if verdict == FREE:
-            log("rig lease: free - deploying")
-            return EXIT_PROCEED
-        if verdict == STALE:
-            log(
-                f"rig lease: stale (its holder stopped beating) - deploying: {describe_holder(lease)}"
-            )
-            return EXIT_PROCEED
-        if verdict == OWN:
-            log(f"rig lease: held by this repo ({own_repo}) - deploying")
-            return EXIT_PROCEED
+        else:
+            unreachable = 0
+            verdict = decide(lease, own_repo)
+            if verdict == FREE:
+                log("rig lease: free - deploying")
+                return EXIT_PROCEED
+            if verdict == STALE:
+                log(
+                    "rig lease: stale (its holder stopped beating) - deploying:"
+                    f" {describe_holder(lease)}"
+                )
+                return EXIT_PROCEED
+            if verdict == OWN:
+                log(f"rig lease: held by this repo ({own_repo}) - deploying")
+                return EXIT_PROCEED
+            held = lease
         remaining = deadline - clock()
         if remaining <= 0:
             log(
                 f"::error::rig lease: still held after {max_wait_seconds / 60:.0f} min by"
-                f" {describe_holder(lease)} - not deploying over another repo's lease"
+                f" {describe_holder(held)} - not deploying over another repo's lease"
             )
             return EXIT_STILL_HELD
         pause = min(poll_seconds, remaining)
         log(
-            f"rig lease: held by {describe_holder(lease)} - waiting; next check in"
+            f"rig lease: held by {describe_holder(held)} - waiting; next check in"
             f" {pause:.0f} s, giving up in {remaining / 60:.1f} min"
         )
         sleep(pause)
