@@ -10,8 +10,11 @@
 //!   value (the program restored at startup) and on every change of either,
 //!   it sends `PipelineEvent::OnProgram` on the engine's own event channel
 //!   (the #215 `SceneOffDue` precedent): OFF for every playlist that left,
-//!   then ON for every member (`program_on_air::on_air_changes`, the
-//!   re-kick). It ends on shutdown, or when the engine's channel is gone.
+//!   then ON for every playlist that entered and for the source of a new
+//!   cut (a new `seq`: the re-kick of a press of the scene already on air;
+//!   `program_on_air::on_air_changes`). A member nobody cut to is never
+//!   re-kicked, so a playlist the operator paused stays paused (review
+//!   round 1). It ends on shutdown, or when the engine's channel is gone.
 //! - **The engine drops a stale event** ([`PlaybackEngine::on_program`]).
 //!   The channel is a queue, so an event can arrive after the set changed
 //!   again: ON is applied only while the playlist is on air, OFF only while
@@ -77,12 +80,17 @@ pub async fn run_program_authority(
     let mut on_air = bus.on_air();
     let mut shown = bus.legacy_cg().shown();
     let mut previous = BTreeSet::new();
+    let mut seen_seq = 0;
     loop {
         let program = on_air.borrow_and_update().clone();
+        // A new publication is a cut (a press, a dashboard cut, the startup
+        // selection): its source is re-kicked.
+        let cut_to = program.source.filter(|_| program.seq != seen_seq);
+        seen_seq = program.seq;
         let cg_shown = *shown.borrow_and_update();
         let current = on_air_set(&program, cg_shown);
         diffed.replace(current.clone());
-        for (pid, on) in on_air_changes(&previous, &current) {
+        for (pid, on) in on_air_changes(&previous, &current, cut_to) {
             if events.send((pid, PipelineEvent::OnProgram(on))).is_err() {
                 debug!("program authority: the engine is gone — stopping");
                 return;

@@ -215,33 +215,60 @@ fn on_air_is_the_program_s_playlist_and_what_cg_obs_was_told() {
     assert_eq!(on_air_set(&OnAir::default(), Some(4)), set(&[4]));
 }
 
-/// #221 L4b: OFF for every playlist that left, then ON for every member (the
-/// re-kick), each part ascending.
+/// #221 L4b: OFF for every playlist that left, then ON for every playlist
+/// that entered and for the source just cut to (the re-kick), each part
+/// ascending. Review round 1: a member nobody cut to is never re-kicked.
 #[test]
-fn a_change_is_off_for_what_left_then_on_for_every_member() {
-    assert!(on_air_changes(&set(&[]), &set(&[])).is_empty());
+fn a_change_is_off_for_what_left_then_on_for_what_entered_and_the_cut_source() {
+    assert!(on_air_changes(&set(&[]), &set(&[]), None).is_empty());
     assert_eq!(
-        on_air_changes(&set(&[]), &set(&[7])),
+        on_air_changes(&set(&[]), &set(&[7]), None),
         vec![(7, true)],
         "the restored program"
     );
     assert_eq!(
-        on_air_changes(&set(&[7]), &set(&[4, 7])),
-        vec![(4, true), (7, true)]
+        on_air_changes(&set(&[7]), &set(&[4, 7]), Some(4)),
+        vec![(4, true)],
+        "a press p→q: q only; p (cg OBS still shows it) is not re-kicked"
     );
     assert_eq!(
-        on_air_changes(&set(&[4, 7]), &set(&[4])),
+        on_air_changes(&set(&[7]), &set(&[4, 7]), None),
+        vec![(4, true)],
+        "a playlist that entered without a cut"
+    );
+    assert_eq!(
+        on_air_changes(&set(&[4, 7]), &set(&[4]), None),
+        vec![(7, false)],
+        "cg OBS confirmed the press: off only"
+    );
+    assert_eq!(
+        on_air_changes(&set(&[4, 7]), &set(&[4]), Some(4)),
         vec![(7, false), (4, true)],
         "off first"
     );
     assert_eq!(
-        on_air_changes(&set(&[4]), &set(&[4])),
+        on_air_changes(&set(&[4]), &set(&[4]), Some(4)),
         vec![(4, true)],
-        "the same set: the re-kick"
+        "a press of the scene already on air: the re-kick"
+    );
+    assert!(
+        on_air_changes(&set(&[4]), &set(&[4]), None).is_empty(),
+        "no cut: nothing re-kicked"
+    );
+    assert!(
+        on_air_changes(&set(&[4]), &set(&[4]), Some(-1)).is_empty(),
+        "a cut to OBS manuál while cg OBS shows 4: 4 is not re-kicked"
+    );
+    assert!(
+        on_air_changes(&set(&[4]), &set(&[4]), Some(9)).is_empty(),
+        "a cut source that is not on air is never ON"
     );
     assert_eq!(
-        on_air_changes(&set(&[2, 9, 4]), &set(&[5, 3])),
+        on_air_changes(&set(&[2, 9, 4]), &set(&[5, 3]), Some(5)),
         vec![(2, false), (4, false), (9, false), (3, true), (5, true)]
     );
-    assert_eq!(on_air_changes(&set(&[4]), &set(&[])), vec![(4, false)]);
+    assert_eq!(
+        on_air_changes(&set(&[4]), &set(&[]), None),
+        vec![(4, false)]
+    );
 }

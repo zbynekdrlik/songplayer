@@ -79,12 +79,21 @@ pub fn on_air_set(on_air: &OnAir, cg_shown: Option<i64>) -> BTreeSet<i64> {
 }
 
 /// #221 L4b: the `(playlist, on)` events of a change from `previous` to
-/// `current`: OFF for every playlist that left, then ON for EVERY member —
-/// the re-kick, so a press of the scene already on air (a new `seq`, the
-/// same set) plays a playlist paused out of band. Each part ascending.
-pub fn on_air_changes(previous: &BTreeSet<i64>, current: &BTreeSet<i64>) -> Vec<(i64, bool)> {
+/// `current`: OFF for every playlist that left, then ON for every playlist
+/// that entered and for `cut_to` — the source `SP-program` was just cut to
+/// (a new publication) — even when it was on air already: the re-kick, so
+/// a press of the scene already on air plays a playlist paused out of band.
+/// A member nobody cut to (the outgoing playlist cg OBS still shows, one a
+/// dashboard cut to "OBS manuál" keeps on air) is never re-kicked, so a
+/// paused one stays paused (review round 1). Each part ascending.
+pub fn on_air_changes(
+    previous: &BTreeSet<i64>,
+    current: &BTreeSet<i64>,
+    _cut_to: Option<i64>,
+) -> Vec<(i64, bool)> {
     let off = previous.difference(current).map(|&pid| (pid, false));
-    off.chain(current.iter().map(|&pid| (pid, true))).collect()
+    let on = current.iter().map(|&pid| (pid, true));
+    off.chain(on).collect()
 }
 
 #[cfg(test)]

@@ -85,8 +85,9 @@ fn members(diffed: &OnAirPlaylists, pids: &[i64]) -> Vec<bool> {
 
 /// The first value plays the restored program; a press is ON for the new
 /// playlist while cg OBS still shows the old one (both on air until the
-/// mirror's OK), then OFF for the old one; a press of the same scene
-/// re-kicks it. The set it diffed is written before its events.
+/// mirror's OK, the old one NOT re-kicked), then OFF for the old one; a
+/// press of the same scene re-kicks it. The set it diffed is written before
+/// its events.
 #[tokio::test]
 async fn the_authority_plays_the_restored_program_and_follows_every_change() {
     let bus = Arc::new(ProgramBus::new());
@@ -107,15 +108,15 @@ async fn the_authority_plays_the_restored_program_and_follows_every_change() {
     nothing_more(&mut a.events).await;
 
     bus.cut(4, utc_now_100ns(), Some("sp-slow"));
+    assert_eq!(next(&mut a.events, 1).await, [(4, true)]);
     assert_eq!(
-        next(&mut a.events, 2).await,
-        [(4, true), (7, true)],
+        members(&a.diffed, &[4, 7]),
+        [true, true],
         "cg OBS still shows sp-fast until the mirror is answered"
     );
-    assert_eq!(members(&a.diffed, &[4, 7]), [true, true]);
     nothing_more(&mut a.events).await;
     cg_shows(&bus, Some(4));
-    assert_eq!(next(&mut a.events, 2).await, [(7, false), (4, true)]);
+    assert_eq!(next(&mut a.events, 1).await, [(7, false)]);
     assert_eq!(members(&a.diffed, &[4, 7]), [true, false]);
     nothing_more(&mut a.events).await;
 
@@ -135,8 +136,8 @@ async fn obs_manual_keeps_on_air_what_cg_obs_shows() {
     assert_eq!(next(&mut a.events, 1).await, [(4, true)]);
 
     bus.cut(PROGRAM_INPUT_ID, utc_now_100ns(), None);
-    assert_eq!(next(&mut a.events, 1).await, [(4, true)], "still on air");
-    nothing_more(&mut a.events).await;
+    nothing_more(&mut a.events).await; // still on air, and not re-kicked
+    assert_eq!(members(&a.diffed, &[4]), [true]);
     cg_shows(&bus, None);
     assert_eq!(next(&mut a.events, 1).await, [(4, false)]);
     assert_eq!(members(&a.diffed, &[4]), [false]);
@@ -360,4 +361,76 @@ async fn an_on_re_kicks_a_waiting_pipeline_already_on_program() {
         .handle_pipeline_event(IN, PipelineEvent::OnProgram(true))
         .await;
     assert_eq!(state(&engine, IN), PlayState::Playing { video_id: 44 });
+}
+
+/// Review round 1 (F1), the task and the engine together: a playlist the
+/// operator PAUSED on the dashboard stays paused — its resume point kept, no
+/// new song — through a dashboard cut to "OBS manuál" (cg OBS still shows
+/// it), a Companion manual press (cg OBS accepts before the cut), and a
+/// press of another playlist (cg OBS shows it until the mirror's OK).
+#[tokio::test]
+async fn a_paused_playlist_stays_paused_through_cuts_that_did_not_press_it() {
+    let mut engine = engine().await;
+    let bus = program(&engine, OUT);
+    bus.legacy_cg().restored(OUT);
+    let (shutdown, _) = broadcast::channel(1);
+    let _task = tokio::spawn(run_program_authority(
+        Arc::clone(&bus),
+        engine.event_tx.clone(),
+        engine.on_air.clone(),
+        shutdown.subscribe(),
+    ));
+    pump(&mut engine).await;
+    assert_eq!(state(&engine, OUT), PlayState::Playing { video_id: SONG });
+    let pause = |engine: &mut PlaybackEngine| {
+        engine.set_state_for_test(OUT, PlayState::WaitingForScene);
+        engine.pipelines.get_mut(&OUT).unwrap().paused_at = Some((SONG, 60_000));
+    };
+    let resume_point = |engine: &PlaybackEngine| engine.pipelines[&OUT].paused_at;
+
+    // (a) A dashboard cut to "OBS manuál"; cg OBS still shows OUT.
+    pause(&mut engine);
+    bus.cut(PROGRAM_INPUT_ID, utc_now_100ns(), None);
+    pump(&mut engine).await;
+    assert_eq!(resume_point(&engine), Some((SONG, 60_000)), "(a) kept");
+    assert_eq!(state(&engine, OUT), PlayState::WaitingForScene);
+
+    // (b) A manual press: cg OBS accepts first (OUT stays SP-program's
+    // source a moment), then the cut to "OBS manuál".
+    bus.cut(OUT, utc_now_100ns(), Some("sp-7"));
+    pump(&mut engine).await; // the press of OUT itself re-kicks it
+    pause(&mut engine);
+    cg_shows(&bus, None);
+    pump(&mut engine).await;
+    assert_eq!(resume_point(&engine), Some((SONG, 60_000)), "(b) kept");
+    bus.cut(PROGRAM_INPUT_ID, utc_now_100ns(), Some("Slido"));
+    pump(&mut engine).await;
+    assert_eq!(resume_point(&engine), Some((SONG, 60_000)), "(b) kept");
+
+    // (c) A press of IN while cg OBS still shows OUT, then cg OBS's OK.
+    bus.cut(OUT, utc_now_100ns(), Some("sp-7"));
+    cg_shows(&bus, Some(OUT));
+    pump(&mut engine).await;
+    pause(&mut engine);
+    bus.cut(IN, utc_now_100ns(), Some("sp-8"));
+    pump(&mut engine).await;
+    assert_eq!(resume_point(&engine), Some((SONG, 60_000)), "(c) kept");
+    assert_eq!(state(&engine, IN), PlayState::Playing { video_id: 44 });
+    cg_shows(&bus, Some(IN));
+    pump(&mut engine).await;
+    assert_eq!(resume_point(&engine), Some((SONG, 60_000)), "(c) kept");
+    assert!(!on_program(&engine, OUT), "OUT left program");
+}
+
+/// Let the authority task run, then apply every `OnProgram` it queued (the
+/// engine loop's job); the stub pipelines' own events are skipped.
+async fn pump(engine: &mut PlaybackEngine) {
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    while let Ok((pid, event)) = engine.event_rx.try_recv() {
+        if let PipelineEvent::OnProgram(_) = event {
+            engine.handle_pipeline_event(pid, event).await;
+        }
+    }
 }
