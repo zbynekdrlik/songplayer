@@ -208,11 +208,17 @@ nothing).
   `ProgramBus::on_air()` and `legacy_cg().shown()`. Its first value (the
   restored program) and every change of either become
   `PipelineEvent::OnProgram(bool)` on the engine's OWN event channel
-  (`on_air_changes`: OFF for every playlist that left, then ON for EVERY
-  member = the re-kick, so a same-scene press — a new `seq` — plays a
-  playlist paused out of band). A shown-only change re-kicks too (idempotent:
-  `SceneOn` on Playing is a no-op, the title `Resync` acts only on a
-  difference). It ends on shutdown or when the engine's channel is gone.
+  (`on_air_changes(previous, current, cut_to)`: OFF for every playlist that
+  left, then ON for every playlist that entered and for `cut_to`, the
+  source of a NEW publication (the task tracks `seq`) = the re-kick, so a
+  press of the scene already on air plays a playlist paused out of band).
+  **A member nobody cut to is never re-kicked** (review round 1, F1; it
+  amends the design record's "ON for every member", a main-session call):
+  with the union, the outgoing playlist cg OBS still shows, one a dashboard
+  cut to -1 keeps on air, and one a manual press keeps a moment would each
+  be re-kicked, and a playlist the operator PAUSED would start a new song
+  (its resume point lost). A shown-only change (the mirror's OK) sends only
+  OFFs. It ends on shutdown or when the engine's channel is gone.
 - **The engine drops a stale event** (`PlaybackEngine::on_program`, the
   same `on_air_set` read from the bus at handling time): ON only while the
   playlist is on air, OFF only while it is not. So the selected source is

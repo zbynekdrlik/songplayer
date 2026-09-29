@@ -89,10 +89,13 @@ pub fn on_air_set(on_air: &OnAir, cg_shown: Option<i64>) -> BTreeSet<i64> {
 pub fn on_air_changes(
     previous: &BTreeSet<i64>,
     current: &BTreeSet<i64>,
-    _cut_to: Option<i64>,
+    cut_to: Option<i64>,
 ) -> Vec<(i64, bool)> {
     let off = previous.difference(current).map(|&pid| (pid, false));
-    let on = current.iter().map(|&pid| (pid, true));
+    let on = current
+        .iter()
+        .filter(|&&pid| !previous.contains(&pid) || Some(pid) == cut_to)
+        .map(|&pid| (pid, true));
     off.chain(on).collect()
 }
 
