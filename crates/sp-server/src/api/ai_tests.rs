@@ -81,3 +81,24 @@ async fn a_callback_url_is_forwarded_to_the_proxy() {
     let error = json["error"].as_str().unwrap();
     assert!(error.contains("must contain query parameters"), "{error}");
 }
+
+/// `GET /api/v1/ai/status` names the Claude model SongPlayer sends (#145):
+/// the post-deploy AI step reads it to make a real completion with exactly
+/// that model and to compare it against the newest `claude-opus-*` the proxy
+/// lists. The test state's client uses `AiSettings::default()`, i.e. the
+/// default model.
+#[tokio::test]
+async fn ai_status_names_the_model_songplayer_sends() {
+    let req = Request::builder()
+        .uri("/api/v1/ai/status")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app(test_state().await).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["model"], json!(sp_core::config::DEFAULT_AI_MODEL));
+    assert_eq!(json["apiUrl"], json!("http://127.0.0.1:18787/v1"));
+}

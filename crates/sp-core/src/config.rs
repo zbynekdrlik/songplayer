@@ -144,24 +144,23 @@ mod tests {
     use super::*;
 
     /// The default translation / cleanup model must be the current Claude
-    /// flagship that the upgraded CLIProxyAPI actually routes (#145) — never
-    /// the `claude-opus-4-6` stop-gap the #144 workaround pinned while the
-    /// installed proxy build didn't know the newer ids, and never the long-
-    /// retired `claude-opus-4-20250514`. `claude-fable-5-1` was verified live on
-    /// win-resolume against CLIProxyAPI 7.3.1 (`/v1/models` lists it and a
-    /// `/v1/chat/completions` call returns HTTP 200 on the existing OAuth
-    /// login).
+    /// flagship that the installed CLIProxyAPI actually routes: Opus 5.5 (the
+    /// owner, 29.9.2026: "mal by sa pouzivat opus 5.5/sonnet 5.5"). Opus 5.5
+    /// needs the proxy to present Claude Code 2.1.280 or newer; CLIProxyAPI
+    /// 7.3.1 presented 2.1.258 and got HTTP 400, 8.0.4 (installed 29.9.2026,
+    /// #145) returns HTTP 200 on the existing OAuth login. Never one of the
+    /// earlier stop-gaps: `claude-fable-5-1` (#145, 13.9.), `claude-opus-4-6`
+    /// (#144) or the retired `claude-opus-4-20250514`.
     #[test]
     fn default_ai_model_is_current_flagship() {
-        assert_eq!(DEFAULT_AI_MODEL, "claude-fable-5-1");
-        assert_ne!(
-            DEFAULT_AI_MODEL, "claude-opus-4-6",
-            "must not remain pinned to the #144 opus-4-6 stop-gap"
-        );
-        assert_ne!(
-            DEFAULT_AI_MODEL, "claude-opus-4-20250514",
-            "must not use the retired opus-4 snapshot"
-        );
+        assert_eq!(DEFAULT_AI_MODEL, "claude-opus-5-5");
+        for superseded in [
+            "claude-fable-5-1",
+            "claude-opus-4-6",
+            "claude-opus-4-20250514",
+        ] {
+            assert_ne!(DEFAULT_AI_MODEL, superseded, "superseded model id");
+        }
     }
 
     #[test]
