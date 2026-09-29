@@ -1028,7 +1028,9 @@ app.post("/api/v1/program/cut", (req, res) => {
     cut_boundary_100ns: null,
     at_ms: Date.now(),
     via: "dashboard",
-    cg_forward: source === -1 ? null : "not_ready",
+    // No scene for the input or a playlist with no catalog scene: nothing
+    // goes to cg OBS (`cg_forward` null), like the server.
+    cg_forward: source === -1 || !playlist ? null : "not_ready",
   };
   if (programState.source !== source) {
     programState = {

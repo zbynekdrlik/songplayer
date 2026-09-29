@@ -7,6 +7,8 @@ paths:
   - "crates/sp-server/tests/obs_snapshot_follow.rs"
   - "crates/sp-server/src/playback/ndi_health.rs"
   - "crates/sp-server/src/playback/ndi_health_expect*.rs"
+  - "crates/sp-server/src/playback/ndi_health_log.rs"
+  - "crates/sp-server/src/playback/ndi_recovery_trigger.rs"
   - "crates/sp-server/src/playback/ndi_health_tests*.rs"
   - "e2e/post-deploy.spec.ts"
   - "e2e/ndi-health-gate.ts"
@@ -221,6 +223,16 @@ with `engine.set_on_program_for_test(pid)` (scene on program + cg told to
 show it); `set_cg_shown_for_test(shown)` alone records cg OBS's side
 (`ndi_health_tests_expect.rs`). Until B4 step 6, when the dark-wall check
 moves to SP-program's own receivers.
+
+**Where `handle_health_snapshot`'s parts live (#221 L4a review: it was over
+the ~300-line budget).** The connection-change / degraded / recovered lines
+and the once-per-minute heartbeat + genlock + loop-stats lines are
+`ndi_health::health_log::log_health_snapshot` (child module
+`ndi_health_log.rs`, logging only, reads the values from the snapshot it
+logs). The automatic ladder's rung is `PlaybackEngine::run_recovery_rung`
+in `ndi_recovery_trigger.rs`, next to the manual trigger; both queue through
+the one `queue_recovery_rung` (try_send, never blocking) and keep their own
+log lines. Add new per-snapshot logging to `health_log`, not to the handler.
 
 ## Adding recovery/health state without touching `playback/mod.rs`
 `handle_health_snapshot` runs on the engine but the engine struct lives in `playback/mod.rs` (often owned by a parallel lane). Compose new per-pipeline state into `NdiHealthRegistry` (the `Arc` the engine already holds) instead of adding a `PlaybackEngine` field — the engine reaches it via `self.ndi_health_registry.<method>()`. `handle_health_snapshot` is sync + `mutants::skip`; send `ObsCommand` with `try_send` (channel cap 64).

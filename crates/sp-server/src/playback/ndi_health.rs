@@ -525,14 +525,16 @@ impl crate::playback::PlaybackEngine {
     /// `PlayState`, fills `degraded_reason` when consecutive_bad_polls >= 2,
     /// and writes the result into the shared `NdiHealthRegistry`.
     ///
-    /// mutants::skip — the lookup and transition-log conditionals (find
-    /// predicate, prev != current guards, &&-vs-||) are visible only as
-    /// log-line presence/absence, not in the persisted snapshot. The
-    /// snapshot's correctness IS exercised by the unit tests below
-    /// (handle_health_snapshot_populates_registry_*, ..._fills_degraded_reason_*,
-    /// engine_overrides_idle_to_waiting_for_scene_*); the log-side effects
-    /// are observable in production trace output but not unit-testable
-    /// without log-capture machinery.
+    /// mutants::skip — the glue here (the pipeline lookup, the label
+    /// match, the registry calls, and the #221 L4a wiring of the
+    /// receiver expectation into the self-check and the ladder suppression)
+    /// is pinned BEHAVIOURALLY by the unit tests
+    /// (`handle_health_snapshot_populates_registry_*`,
+    /// `..._fills_degraded_reason_*`, `engine_overrides_idle_to_waiting_*`,
+    /// `ndi_health_tests_expect.rs`); its DECISIONS are pure and
+    /// mutation-scored elsewhere (`ndi_health_expect`, `effective_dark_reason`,
+    /// `sp_core::health`). The log lines are `health_log::log_health_snapshot`
+    /// and the rung is `run_recovery_rung` (#221 L4a review).
     #[cfg_attr(test, mutants::skip)]
     pub fn handle_health_snapshot(&mut self, playlist_id: i64, event: PipelineEvent) {
         let PipelineEvent::HealthSnapshot {
