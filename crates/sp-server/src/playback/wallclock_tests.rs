@@ -77,10 +77,12 @@ fn anchor_resamples_on_100th_tick_not_before() {
         99,
         "no resample within the first 99 ticks"
     );
+    // #224: every tick takes ONE cheap read, the step probe; a quiet probe
+    // (no UTC step) takes no anchor sample.
     assert_eq!(
         clock.sample_count(),
-        1,
-        "tick must not sample the clock before the 100th"
+        1 + 99,
+        "before the 100th tick, one read per tick: the step probe only"
     );
 
     wall.tick(); // the 100th tick
@@ -91,8 +93,8 @@ fn anchor_resamples_on_100th_tick_not_before() {
     );
     assert_eq!(
         clock.sample_count(),
-        2,
-        "the 100th tick re-samples the anchor exactly once"
+        1 + 99 + 2,
+        "the 100th tick re-samples the anchor once, then probes once"
     );
 }
 
@@ -147,19 +149,28 @@ fn now_100ns_reads_monotonic_only_never_the_realtime_clock() {
         "now_100ns must read the monotonic clock only, never Utc::now()"
     );
 
-    // Only the 100th tick re-anchors — one further realtime sample.
+    // The realtime clock is read in `tick` only: once per tick by the step
+    // probe (#224), plus the anchor sample of the 100th tick's resample.
     for _ in 0..99 {
         wall.tick();
     }
     assert_eq!(
         clock.realtime_samples(),
-        1,
-        "no resample before the 100th tick"
+        1 + 99,
+        "one step-probe read per tick, no resample before the 100th tick"
     );
     wall.tick();
     assert_eq!(
         clock.realtime_samples(),
-        2,
-        "the 100th tick re-samples the realtime clock exactly once"
+        1 + 99 + 2,
+        "the 100th tick re-samples the realtime clock once, then probes once"
+    );
+    for _ in 0..50 {
+        let _ = wall.now_100ns();
+    }
+    assert_eq!(
+        clock.realtime_samples(),
+        1 + 99 + 2,
+        "now_100ns still reads the monotonic clock only"
     );
 }

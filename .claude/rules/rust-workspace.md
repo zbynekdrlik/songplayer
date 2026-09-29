@@ -461,6 +461,30 @@ this:
 - **List only the tests that really fail on the old logic in the RED
   message.** Walk each one by hand.
 
+**When the fix makes a parameter DEAD (it removes, not adds, an input) —
+RED → GREEN → refactor (#224).** `ProgramOutput::submit(job, audio_now)`
+lost its reason to take the emit instant. The RED tests keep the OLD
+signature (they compile against the old code and fail on it); GREEN keeps
+the parameter as `_audio_now_100ns` and edits no test; a separate
+`refactor(#N)` commit then drops it from the signature, the loop and every
+test call site (mechanical, no behaviour change) — and deletes whatever that
+orphans (an unused test `const MS`, a `T0` import: `-D warnings`).
+
+**Changing what a shared counter means (#224 review rounds 1–2).** Round 1
+made a follow restart `WallClock::frames_since_resample`; a test on a
+DIFFERENT harness (`WallClock::settable`, whose realtime read paired with the
+real `Instant::now()`, so the new probe followed phantom steps) counted ticks
+through it and went red — only the next review caught it. Before changing a
+counter's or a stat's semantics, grep EVERY reader of it across all test
+files and harnesses (`frames_since_resample`, `anchor_stats`, `samples()` /
+`reads()` counters), not just the files of the change.
+
+**`cargo fmt` can take minutes on a loaded box.** Two sessions formatting at
+once left rustfmt in `D` state for > 2 min; the default 120 s Bash timeout
+then silently moved the call to the background. Run it as
+`timeout 540 cargo fmt --all` with the tool timeout near 600 s, and revert
+`db/models.rs` in a separate command (the worktree guard refuses the chain).
+
 **A RED for a wire-protocol feature runs against the OLD code (#221 L2).**
 Tests that speak the wire (the facade's obs-websocket JSON over a real
 socket) compile against the old implementation, so the RED is the real old

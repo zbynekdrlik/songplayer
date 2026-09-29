@@ -249,7 +249,7 @@ impl AvFrameOffset {
 }
 
 /// Re-interleave a planar block into one [`AudioFrame`] (no timecode: the
-/// submitter stamps the raw emit-instant wall clock, §6). An empty `planar`
+/// pacer stamps it on its boundary, #224). An empty `planar`
 /// (no channels seen yet) yields no frame, so the sink submits no audio.
 pub(super) fn interleave(planar: Vec<Vec<f32>>) -> Vec<AudioFrame> {
     if planar.is_empty() {

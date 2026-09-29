@@ -8,6 +8,10 @@
 //! descheduled, and reads UTC (and the closing monotonic read) only at `t`. That
 //! is exactly the unbracketed `(Instant::now(), Utc::now())` failure the box
 //! showed. An unscripted read is clean (zero-width bracket).
+//!
+//! A read can also be scripted as a lone realtime OUTLIER (#224): its UTC half
+//! reads that far off the true UTC, the next reads are true again. It models
+//! one wrong realtime read, which the per-boundary step probe must not follow.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
@@ -29,6 +33,7 @@ pub struct VirtualClock {
     utc_offset_100ns: AtomicI64,
     slew_ppm: i64,
     delays_ns: Mutex<VecDeque<u64>>,
+    outliers_100ns: Mutex<VecDeque<i64>>,
     reads: AtomicU64,
 }
 
@@ -42,6 +47,7 @@ impl VirtualClock {
             utc_offset_100ns: AtomicI64::new(0),
             slew_ppm,
             delays_ns: Mutex::new(VecDeque::new()),
+            outliers_100ns: Mutex::new(VecDeque::new()),
             reads: AtomicU64::new(0),
         })
     }
@@ -64,6 +70,15 @@ impl VirtualClock {
             .lock()
             .expect("delay script lock")
             .extend(delays_ns.iter().copied());
+    }
+
+    /// Script the next bracketed reads' UTC halves (#224): each entry reads the
+    /// UTC that far (100 ns units) off the truth, once. 0 = a true read.
+    pub fn outlier_next_reads(&self, offsets_100ns: &[i64]) {
+        self.outliers_100ns
+            .lock()
+            .expect("outlier script lock")
+            .extend(offsets_100ns.iter().copied());
     }
 
     /// Bracketed reads taken so far.
@@ -101,9 +116,15 @@ impl ClockSource for Arc<VirtualClock> {
             .expect("delay script lock")
             .pop_front()
             .unwrap_or(0);
+        let outlier = self
+            .outliers_100ns
+            .lock()
+            .expect("outlier script lock")
+            .pop_front()
+            .unwrap_or(0);
         BracketedRead {
             m1: self.instant_at(t - delay),
-            utc_100ns: self.truth_at(t),
+            utc_100ns: self.truth_at(t) + outlier,
             m2: self.instant_at(t),
         }
     }

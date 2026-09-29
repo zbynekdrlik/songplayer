@@ -33,8 +33,8 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
   NDI submit (each up to ~20 ms p99). An on-time packet gets exactly one wait, so they go out evenly.
   A block that arrives AFTER its first packet is due sends its past-due packets
   back-to-back, each counted in `late_sends`. That happens after a program fill
-  past the 3-slot grace, or for ≤ ~3.3 s after a confirmed fleet date step
-  (walls up to ~1.5 slots apart, see program-bus.md). If the box capture shows
+  past the 3-slot grace, or for ≤ ~one boundary after a fleet date step (the
+  walls follow it at their own next tick since #224, see program-bus.md). If the box capture shows
   `late_sends` climbing there, re-measure the block arrival lead before raising L again.
 - Residual: a program RESYNC (> 8 missed slots) skips stamps. VBAN then has a
   time gap while its counter stays contiguous, and the receiver sees an

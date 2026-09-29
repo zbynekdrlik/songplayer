@@ -87,14 +87,14 @@ struct Step {
 /// program (`drain` panics on a fill), stamped on `b(k)`, a standby pair being
 /// the exact black + one silent block.
 fn step(rig: &mut Rig, k: usize) -> Step {
-    rig.input.service(b(k), b(k) + 2 * MS, &rig.bus);
+    rig.input.service(b(k), &rig.bus);
     let jobs = drain(&rig.bus);
     assert_eq!(jobs.len(), 1, "boundary {k}: exactly one pair");
     let job = &jobs[0];
     assert_eq!(
         (job.video_tc_100ns, job.audio_tc_100ns),
-        (b(k), b(k) + 2 * MS),
-        "boundary {k}: stamped on its boundary"
+        (b(k), b(k)),
+        "boundary {k}: both stamped on its boundary (#224)"
     );
     if job.width == STANDBY.0 {
         assert_standby(job);
@@ -413,7 +413,7 @@ fn a_source_change_closes_the_receiver_and_opens_the_new_one() {
     let mut rig = rig(source_frames(30, 30), vec![Some(0)]);
     rig.run(1);
     rig.shared.set_settings(cam());
-    rig.input.service(b(2), b(2), &rig.bus);
+    rig.input.service(b(2), &rig.bus);
     settle(&mut rig.input, b(2));
     wait_for("the old receiver is closed", || {
         rig.status().last_close_ms.is_some()
@@ -442,7 +442,7 @@ fn a_source_change_closes_the_receiver_and_opens_the_new_one() {
     );
     // Disabling closes it again.
     rig.shared.set_settings(InputSettings::default());
-    rig.input.service(b(3), b(3), &rig.bus);
+    rig.input.service(b(3), &rig.bus);
     wait_for("the new receiver is closed", || {
         rig.mock.calls().last().map(String::as_str) == Some("recv_destroy(3)")
     });
@@ -465,18 +465,18 @@ fn a_failed_receiver_is_retried_exactly_5_s_after_the_attempt() {
     assert_eq!(rig.input.retry_at, b(1) + INPUT_RECONNECT_100NS);
     let mut standby = Vec::new();
     for k in 1..=150 {
-        rig.input.service(b(k), b(k), &rig.bus);
+        rig.input.service(b(k), &rig.bus);
         standby.extend(drain(&rig.bus));
     }
     assert_eq!(rig.calls_matching("recv_create"), 1, "no retry inside 5 s");
     assert_eq!(standby.len(), 150, "standby on every boundary meanwhile");
     standby.iter().for_each(assert_standby);
     rig.mock.set_fail_create(false, false);
-    rig.input.service(b(151), b(151), &rig.bus); // b(1) + 5 s exactly
+    rig.input.service(b(151), &rig.bus); // b(1) + 5 s exactly
     drain(&rig.bus);
     settle(&mut rig.input, b(151));
     assert_eq!(rig.calls_matching("recv_create"), 2, "retried at b(151)");
-    rig.input.service(b(152), b(152), &rig.bus);
+    rig.input.service(b(152), &rig.bus);
     let jobs = drain(&rig.bus);
     assert_eq!(jobs[0].width, 4, "connected: the source's frame");
 }

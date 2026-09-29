@@ -294,8 +294,9 @@ impl<B: NdiBackend> FrameSubmitter<B> {
 
     /// Submit one boundary-paced frame at EXPLICIT genlock timecodes (#147).
     ///
-    /// Audio chunks first (stamped `audio_tc_100ns`, the raw wall clock — §6),
-    /// then the video frame async (stamped `video_tc_100ns`, the floored
+    /// Audio chunks first (stamped `audio_tc_100ns`, the timeline instant of
+    /// the block — every paced caller passes its boundary, #224), then the
+    /// video frame async (stamped `video_tc_100ns`, the floored
     /// boundary — §4). Unlike [`submit_nv12`](Self::submit_nv12) the `Pacer`
     /// owns the wall clock and supplies both stamps, so this bypasses the
     /// internal [`WallClock`]. The borrowed video is copied for the async

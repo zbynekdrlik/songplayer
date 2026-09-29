@@ -459,9 +459,9 @@ impl<B: NdiBackend> PacedConsumer<B> {
     /// audio layout, BOTH stamped exactly on that boundary (design record
     /// 5845527884). The fill leaves a grace after its boundary; a raw-wall
     /// audio stamp (§6) would put that ~8 ms excursion into the receiver's
-    /// audio timeline and A/V pairing for every filled slot, while a pacer's
-    /// silent standby block — stamped at its emit, right on the boundary —
-    /// carries none. The fill is the boundary's own slot of silence, never a
+    /// audio timeline and A/V pairing for every filled slot. Every paced
+    /// sender stamps its audio block on its boundary the same way (#224). The
+    /// fill is the boundary's own slot of silence, never a
     /// live pair (#215 cue gate).
     fn fill_job(&self, stamp_100ns: i64) -> SubmitJob {
         let picture = self.held.as_ref().unwrap_or(&self.black);

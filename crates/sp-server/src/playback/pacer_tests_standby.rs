@@ -130,7 +130,7 @@ fn an_idle_boundary_carries_one_silent_stereo_block_stamped_like_playing_audio()
     let (mut pacer, clk) = anchored_pacer();
     let blk = black();
     let mut rec = Rec::default();
-    // 2 ms late: the audio stamp is the emit instant, the video stamp the boundary.
+    // 2 ms late: both stamps are the boundary; the block belongs to it (#224).
     clk.set(b(1) + 20_000);
     assert_eq!(
         pacer.service_standby(idle(&blk), &mut rec),
@@ -138,7 +138,7 @@ fn an_idle_boundary_carries_one_silent_stereo_block_stamped_like_playing_audio()
     );
     assert_eq!(
         rec.boundaries,
-        vec![(b(1), b(1) + 20_000, Some((2, 1600, true)))],
+        vec![(b(1), b(1), Some((2, 1600, true)))],
         "idle = one silent stereo 1600-sample block + the on-grid video stamp"
     );
 }

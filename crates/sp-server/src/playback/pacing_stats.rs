@@ -91,6 +91,14 @@ pub struct PacingStats {
     /// #147: how long (µs) the last followed hold froze the pacer's wall (and
     /// so paused the output); 0 before any.
     pub wall_anchor_last_hold_us: u64,
+    /// #224: step probes over 2 ms the pacer's wall rejected (a wide probe,
+    /// or a confirming sample that was wide or measured another step),
+    /// cumulative.
+    pub wall_anchor_probes_rejected: u64,
+    /// #224: µs from the first over-2 ms probe of the last followed step to
+    /// its follow; ≈ 0 when the step is followed at the boundary it is first
+    /// seen, one boundary (~33 333) per rejected probe before it.
+    pub wall_anchor_detect_to_follow_us: u64,
     /// #147: grid slots nobody serviced across a song change / stop / idle
     /// transition (the pipeline-lifetime submit consumer). Must read 0.
     pub song_change_unserviced_slots: u64,

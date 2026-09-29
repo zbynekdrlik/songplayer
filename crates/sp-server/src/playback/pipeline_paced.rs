@@ -77,7 +77,7 @@ fn to_paced_frame(
         .into_iter()
         .map(|af| sp_ndi::AudioFrame {
             // 0-based media time (100 ns). Only the pacer reads it; the boundary
-            // chunk it submits is stamped with the raw wall clock (§6).
+            // chunk it submits is stamped on its boundary (#224).
             timecode_100ns: Some((af.timestamp_ms as i64 - pts_offset_ms as i64) * 10_000),
             data: af.data,
             channels: af.channels,

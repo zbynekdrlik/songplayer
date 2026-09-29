@@ -16,18 +16,27 @@
 //! resamples confirm the same step: then it is followed in ONE event, a step
 //! ahead when forward, ONE hold when backward. A backward correction is always
 //! a hold, never a backward step. The pure math is in `wallclock_anchor.rs`.
+//!
+//! Step probe (#224): every tick also takes ONE bracketed read and measures it
+//! against the line the wall runs on. A step over 2 ms, confirmed in the same
+//! tick by a full anchor sample within 1 ms, is followed in that ONE event, so
+//! a dantesync date step reaches the stamps the boundary it lands, as it
+//! reaches every fleet receiver, instead of two resamples (3.3–6.7 s) later.
 
 use std::time::Instant;
+
+use tracing::{debug, info, warn};
 
 use sp_core::genlock::should_resample_mono_to_real_offset;
 
 #[path = "wallclock_anchor.rs"]
 mod wallclock_anchor;
 pub use wallclock_anchor::{
-    ANCHOR_MAX_ATTEMPTS, ANCHOR_MAX_STEP_100NS, ANCHOR_TIGHT_BRACKET, ANCHOR_WIDE_BRACKET,
+    ANCHOR_MAX_ATTEMPTS, ANCHOR_MAX_STEP_100NS, ANCHOR_TIGHT_BRACKET, ANCHOR_WIDE_BRACKET, Anchor,
     AnchorDecision, AnchorSample, AnchorStep, BracketedRead, FollowedStep, PendingStep,
-    StepDirection, WallAnchorStats, apply_anchor_step, bounded_anchor_update,
-    choose_bracketed_sample, decide_anchor_step, to_us, wall_at,
+    ProbeDecision, ProbeFollow, STEP_DETECT_100NS, StepDirection, StepProbeStats, WallAnchorStats,
+    apply_anchor_step, bounded_anchor_update, choose_bracketed_sample, decide_anchor_step,
+    decide_step_probe, to_us, wall_at,
 };
 
 /// Source of paired `(monotonic instant, utc_100ns)` samples. Production reads
@@ -39,8 +48,9 @@ pub trait ClockSource: Send + Sync {
     fn sample(&self) -> (Instant, i64);
 
     /// One bracketed read: monotonic, then realtime, then monotonic again. Called
-    /// only at anchor time (construction + every resample, up to
-    /// [`ANCHOR_MAX_ATTEMPTS`] times), never on the hot read path. The default
+    /// at anchor time (construction, every resample and a step probe's
+    /// confirmation, up to [`ANCHOR_MAX_ATTEMPTS`] times each) and ONCE per
+    /// tick by the step probe (#224), never on the hot read path. The default
     /// wraps [`sample`](ClockSource::sample) as a zero-width bracket.
     /// [`SystemClock`] reads the real clocks, and a test fake overrides it to
     /// inject a preempted (wide) read (#147).
@@ -111,19 +121,25 @@ pub fn utc_now_100ns() -> i64 {
 }
 
 /// A monotonic-to-UTC anchor plus a frame counter. `now_100ns()` reads the
-/// current UTC; `tick()` advances the counter and re-anchors every
+/// current UTC; `tick()` advances the counter, re-anchors every
 /// `OFFSET_RESAMPLE_INTERVAL_FRAMES` frames so long-run drift between the
-/// monotonic and realtime clocks stays bounded (contract §1).
+/// monotonic and realtime clocks stays bounded (contract §1), and probes for
+/// a UTC step every tick (#224).
 ///
 /// One `WallClock` is owned per pipeline thread (by `FrameSubmitter`).
 pub struct WallClock {
     source: Box<dyn ClockSource>,
-    anchor_instant: Instant,
-    anchor_utc_100ns: i64,
+    anchor: Anchor,
     frames_since_resample: u64,
     stats: WallAnchorStats,
     /// A clamped resample (either direction) the next one may confirm (#147).
     pending: Option<PendingStep>,
+    /// The step probe's telemetry (#224).
+    probe_stats: StepProbeStats,
+    /// Where the first over-2 ms probe that is not followed yet was taken
+    /// (#224): the detection instant of `last_detect_to_follow_us`. Cleared by
+    /// a quiet probe and by the follow.
+    suspect_since: Option<Instant>,
 }
 
 /// One anchor sample from `source`: the narrowest of up to
@@ -141,11 +157,15 @@ impl WallClock {
         stats.record_sample(&sample);
         Self {
             source,
-            anchor_instant: sample.instant,
-            anchor_utc_100ns: sample.utc_100ns,
+            anchor: Anchor {
+                instant: sample.instant,
+                utc_100ns: sample.utc_100ns,
+            },
             frames_since_resample: 0,
             stats,
             pending: None,
+            probe_stats: StepProbeStats::default(),
+            suspect_since: None,
         }
     }
 
@@ -159,20 +179,117 @@ impl WallClock {
     ///
     /// Hot read path: it reads the MONOTONIC clock only (`now_monotonic`) —
     /// never `Utc::now()` (#146 follow-up). The realtime clock is sampled only
-    /// at anchor time (construction and every resample in [`tick`](Self::tick)).
+    /// in [`tick`](Self::tick) (every resample and the step probe, #224) and
+    /// at construction.
     pub fn now_100ns(&self) -> i64 {
         self.source
-            .read_100ns(self.anchor_instant, self.anchor_utc_100ns)
+            .read_100ns(self.anchor.instant, self.anchor.utc_100ns)
     }
 
-    /// Advance the frame counter and re-anchor the monotonic-to-UTC mapping
-    /// every `OFFSET_RESAMPLE_INTERVAL_FRAMES` frames.
+    /// Advance the frame counter, re-anchor the monotonic-to-UTC mapping every
+    /// `OFFSET_RESAMPLE_INTERVAL_FRAMES` frames, then probe for a UTC step
+    /// (#224). The probe runs after the resample, so a step the resample saw
+    /// first (1 ms applied and armed) is followed in this same tick.
     pub fn tick(&mut self) {
         self.frames_since_resample = self.frames_since_resample.saturating_add(1);
         if should_resample_mono_to_real_offset(self.frames_since_resample) {
             self.reanchor();
             self.frames_since_resample = 0;
         }
+        self.probe_step();
+    }
+
+    /// The per-boundary step probe (#224, `decide_step_probe`): one bracketed
+    /// read against the line the wall runs on. A step over 2 ms, confirmed by
+    /// a full anchor sample within 1 ms, is followed now in ONE event; a wide
+    /// or unconfirmed probe is rejected and counted, and nothing is armed, so
+    /// the next boundary's probe follows a real step at once.
+    fn probe_step(&mut self) {
+        let probe = self.source.read_bracketed();
+        let source = &*self.source;
+        let confirm = || anchor_sample(source);
+        match decide_step_probe(self.anchor, self.pending, probe, confirm) {
+            ProbeDecision::Quiet => self.suspect_since = None,
+            ProbeDecision::RejectedWide {
+                delta_100ns,
+                bracket,
+            } => {
+                self.reject_probe(probe.midpoint());
+                debug!(
+                    delta_us = to_us(delta_100ns),
+                    bracket_us = bracket.as_micros() as u64,
+                    rejected = self.probe_stats.rejected,
+                    "wallclock: a step probe over 2 ms from a wide bracket — rejected (#224)"
+                );
+            }
+            ProbeDecision::Unconfirmed {
+                delta_100ns,
+                confirm,
+                confirm_delta_100ns,
+            } => {
+                self.stats.record_sample(&confirm);
+                self.reject_probe(probe.midpoint());
+                info!(
+                    delta_us = to_us(delta_100ns),
+                    confirm_delta_us = to_us(confirm_delta_100ns),
+                    confirm_bracket_us = confirm.bracket.as_micros() as u64,
+                    rejected = self.probe_stats.rejected,
+                    "wallclock: a step probe over 2 ms was not confirmed by the anchor sample — rejected (#224)"
+                );
+            }
+            ProbeDecision::Follow(follow) => self.follow_probed_step(probe, &follow),
+        }
+    }
+
+    /// Count a rejected probe and remember where the first unfollowed one was.
+    fn reject_probe(&mut self, at: Instant) {
+        self.probe_stats.rejected += 1;
+        self.suspect_since.get_or_insert(at);
+    }
+
+    /// Record a follow at `followed_at` (#224): the time since the first
+    /// over-2 ms probe not followed yet, else since `detected_at` (the
+    /// follow's own first reading). It ends the detection; returns the µs.
+    fn record_detect_to_follow(&mut self, detected_at: Instant, followed_at: Instant) -> u64 {
+        let detected = self.suspect_since.take().unwrap_or(detected_at);
+        let latency = followed_at.saturating_duration_since(detected);
+        let latency_us = u64::try_from(latency.as_micros()).unwrap_or(u64::MAX);
+        self.probe_stats.last_detect_to_follow_us = latency_us;
+        latency_us
+    }
+
+    /// Apply a step the probe confirmed (#224): the telemetry, one INFO line,
+    /// then the new anchor — a step ahead, or ONE hold, never a step back.
+    fn follow_probed_step(&mut self, probe: BracketedRead, follow: &ProbeFollow) {
+        self.stats.record_sample(&follow.sample);
+        self.stats.record_step(follow.delta_100ns, &follow.step);
+        self.stats.record_follow(&follow.followed, &follow.step);
+        self.pending = None; // the whole step is followed: nothing left to confirm
+        // A fresh anchor: the next resample is 100 ticks away, so it never lands
+        // inside the hold this follow may start (a submit consumer ticks per
+        // job, also inside its own hold) and re-measures it as a new step.
+        self.frames_since_resample = 0;
+        let latency_us = self.record_detect_to_follow(probe.midpoint(), follow.sample.instant);
+        info!(
+            delta_us = to_us(follow.delta_100ns),
+            step_us = to_us(follow.followed.total_100ns),
+            applied_us = to_us(follow.step.applied_100ns),
+            direction = follow.followed.direction.as_str(),
+            probe_delta_us = to_us(follow.probe_delta_100ns),
+            probe_bracket_us = probe.width().as_micros() as u64,
+            bracket_us = follow.sample.bracket.as_micros() as u64,
+            detect_to_follow_us = latency_us,
+            "wallclock: UTC step followed at once by the boundary probe (#224)"
+        );
+        let (instant, utc) = apply_anchor_step(
+            follow.sample.instant,
+            follow.wall_100ns,
+            follow.step.applied_100ns,
+        );
+        self.anchor = Anchor {
+            instant,
+            utc_100ns: utc,
+        };
     }
 
     /// Re-anchor from a fresh bracketed sample (#147). `delta` is what an
@@ -187,7 +304,7 @@ impl WallClock {
     fn reanchor(&mut self) {
         let sample = anchor_sample(&*self.source);
         self.stats.record_sample(&sample);
-        let wall = wall_at(self.anchor_instant, self.anchor_utc_100ns, sample.instant);
+        let wall = self.anchor.wall_at(sample.instant);
         let delta = sample.utc_100ns.saturating_sub(wall);
         let decision = decide_anchor_step(self.pending, delta, !sample.is_wide());
         self.pending = decision.pending;
@@ -195,25 +312,31 @@ impl WallClock {
         self.stats.record_step(delta, &step);
         if let Some(followed) = decision.followed {
             self.stats.record_follow(&followed, &step);
-            tracing::info!(
+            // #224: the resample follows only a step no probe followed (every
+            // probe of it rejected); the follow ends that detection.
+            let latency_us = self.record_detect_to_follow(sample.instant, sample.instant);
+            info!(
                 delta_us = to_us(delta),
                 step_us = to_us(followed.total_100ns),
                 direction = followed.direction.as_str(),
                 bracket_us = sample.bracket.as_micros() as u64,
+                detect_to_follow_us = latency_us,
                 "wallclock: confirmed UTC step followed in one re-anchor (#147)"
             );
         } else if step.is_clamped() {
-            tracing::warn!(
+            warn!(
                 delta_us = to_us(delta),
                 bracket_us = sample.bracket.as_micros() as u64,
                 applied_us = to_us(step.applied_100ns),
                 carry_us = to_us(step.carry_100ns),
-                "wallclock: re-anchor delta over 1 ms — 1 ms applied; the next resample follows the rest once it confirms the step, else slews it (#147)"
+                "wallclock: re-anchor delta over 1 ms — 1 ms applied; the rest is followed once confirmed (by the step probe over 2 ms, else the next resample), else slewed (#147, #224)"
             );
         }
         let (instant, utc) = apply_anchor_step(sample.instant, wall, step.applied_100ns);
-        self.anchor_instant = instant;
-        self.anchor_utc_100ns = utc;
+        self.anchor = Anchor {
+            instant,
+            utc_100ns: utc,
+        };
     }
 
     /// Anchor telemetry (#147): the largest measured re-anchor delta, the
@@ -221,6 +344,12 @@ impl WallClock {
     /// Surfaced on `PacingStats`.
     pub fn anchor_stats(&self) -> WallAnchorStats {
         self.stats
+    }
+
+    /// The step probe's telemetry (#224): rejected probes and the last
+    /// follow's detect-to-follow time. Surfaced on `PacingStats`.
+    pub fn probe_stats(&self) -> StepProbeStats {
+        self.probe_stats
     }
 
     /// Frames elapsed since the last anchor re-sample (0 immediately after a
@@ -256,46 +385,81 @@ impl WallClock {
     /// [`fixed`](Self::fixed), it is driven directly (not off the monotonic
     /// clock), so a test can advance the wall clock between two reads inside one
     /// `Pacer::service` call — the scheduling read and the emit read — to prove
-    /// lateness includes decode time (#147). `tick`'s re-anchor is a no-op here
-    /// (`read_100ns` ignores the anchor).
+    /// lateness includes decode time (#147). The anchor, the resample and the
+    /// step probe (#224) read the set value on ONE synthetic line (see
+    /// [`SettableClock`]), so a set forward never looks like a UTC step. A set
+    /// BACK across a resample still reads as a backward delta against the
+    /// frozen wall (a phantom hold in `wall_anchor_*` only; the reads return
+    /// the set value): never pin the anchor telemetry after a set back.
     pub fn settable(initial_100ns: i64) -> (Self, SettableClock) {
-        let handle = SettableClock(std::sync::Arc::new(std::sync::atomic::AtomicI64::new(
-            initial_100ns,
-        )));
-        let source = SettableClock(handle.0.clone());
-        (WallClock::new(Box::new(source)), handle)
+        let handle = SettableClock::new(initial_100ns);
+        (WallClock::new(Box::new(handle.clone())), handle)
     }
 }
 
 /// Test-only handle over a settable wall clock (see [`WallClock::settable`]).
-/// Cloneable so a `pull` closure and the test body can both drive it.
+/// Cloneable so a `pull` closure and the test body can both drive it. Its
+/// realtime read pairs the set value with a SYNTHETIC monotonic instant on
+/// one line (`origin` + the value's offset from the start), never with the
+/// real `Instant::now()`: a set that outruns real time would otherwise read as
+/// a UTC step, and the step probe (#224) would follow it (review round 2: it
+/// restarted the resample count of `the_sender_thread_ticks_its_wall_once_per_boundary_passed`).
 #[cfg(test)]
 #[derive(Clone)]
-pub struct SettableClock(std::sync::Arc<std::sync::atomic::AtomicI64>);
+pub struct SettableClock {
+    value: std::sync::Arc<std::sync::atomic::AtomicI64>,
+    /// The instant the start value pairs with: a day ahead of the real clock,
+    /// so a value set back by up to a day still maps to an instant.
+    origin: Instant,
+    start_100ns: i64,
+}
 
 #[cfg(test)]
 impl SettableClock {
+    fn new(start_100ns: i64) -> Self {
+        Self {
+            value: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(start_100ns)),
+            origin: Instant::now() + std::time::Duration::from_secs(86_400),
+            start_100ns,
+        }
+    }
+
     /// Set the wall clock's current 100-ns reading.
     pub fn set(&self, v_100ns: i64) {
-        self.0.store(v_100ns, std::sync::atomic::Ordering::SeqCst);
+        self.value
+            .store(v_100ns, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Advance the wall clock by `delta_100ns` (may be negative to step back).
     pub fn advance(&self, delta_100ns: i64) {
-        self.0
+        self.value
             .fetch_add(delta_100ns, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Current 100-ns reading.
     pub fn get(&self) -> i64 {
-        self.0.load(std::sync::atomic::Ordering::SeqCst)
+        self.value.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The synthetic monotonic instant the reading `v_100ns` pairs with: on
+    /// the line through (`origin`, the start value).
+    fn instant_of(&self, v_100ns: i64) -> Instant {
+        let offset = v_100ns.saturating_sub(self.start_100ns);
+        let d = std::time::Duration::from_nanos(offset.unsigned_abs().saturating_mul(100));
+        let at = if offset >= 0 {
+            self.origin.checked_add(d)
+        } else {
+            self.origin.checked_sub(d)
+        };
+        at.expect("a settable clock moved more than a day back, or out of Instant range")
     }
 }
 
 #[cfg(test)]
 impl ClockSource for SettableClock {
     fn sample(&self) -> (Instant, i64) {
-        (Instant::now(), self.get())
+        let v = self.get();
+        (self.instant_of(v), v)
     }
 
     fn read_100ns(&self, _anchor_instant: Instant, _anchor_utc_100ns: i64) -> i64 {
@@ -329,3 +493,11 @@ mod wallclock_tests_confirm;
 #[cfg(test)]
 #[path = "wallclock_tests_confirm_backward.rs"]
 mod wallclock_tests_confirm_backward;
+
+#[cfg(test)]
+#[path = "wallclock_tests_probe.rs"]
+mod wallclock_tests_probe;
+
+#[cfg(test)]
+#[path = "wallclock_tests_probe_rule.rs"]
+mod wallclock_tests_probe_rule;
