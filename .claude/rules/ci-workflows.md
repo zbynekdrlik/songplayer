@@ -274,6 +274,14 @@ stops SongPlayer:
   repo takes in the ~1 min between the check and "Deploy SongPlayer"
   (artifact downloads) is not seen; the E2E job after the deploy does not
   check it either.
+- Hardening (review round 3): a body over 64 KiB (`MAX_BODY_BYTES`; a lease
+  is ~400 B), JSON nested past the recursion limit, bad UTF-8, a non-HTTP
+  listener or a truncated body are all "no lease" from that URL; `main`
+  refuses a `--url` that is not http(s) with a host (a broken one would
+  otherwise read as an outage on every deploy); lease strings are logged on
+  one line (a line break would start a workflow command). A lease server
+  that trickles bytes under the per-read timeout is bounded by the job's
+  `timeout-minutes: 90` (60 min wait + a ~3 min deploy).
 - It runs on the box's `C:\Program Files\Python312\python.exe` (the step
   fails if it is missing; the A/V gate needs the same Python). Stdlib only.
 - The wait is coordination, not a soak (CLAUDE.md "No sleep-based CI

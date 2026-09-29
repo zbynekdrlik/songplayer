@@ -378,3 +378,7 @@ def test_a_holder_field_never_starts_a_new_log_line():
     text = gate_mod.describe_holder(sneaky)
     assert "\n" not in text and "\r" not in text
     assert "::error::" in text, "the text stays readable, only the break goes"
+
+
+def test_the_body_bound_is_64_kib():
+    assert gate_mod.MAX_BODY_BYTES == 65_536

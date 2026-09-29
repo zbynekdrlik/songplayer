@@ -39,6 +39,7 @@ import http.client
 import json
 import sys
 import time
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -48,6 +49,9 @@ DEFAULT_MAX_WAIT_SECONDS = 3600.0
 # One GET may take this long; a cold mDNS lookup of `dev1` on the box took
 # ~3 s (29.9.2026).
 FETCH_TIMEOUT_SECONDS = 10.0
+# The largest body read as a lease (a lease document is ~400 B); a longer
+# one is "no lease" and never parsed.
+MAX_BODY_BYTES = 65_536
 
 # `decide` verdicts.
 FREE = "free"
@@ -96,8 +100,17 @@ def decide(lease: Lease, own_repo: str) -> str:
     return WAIT
 
 
+def one_line(value: object) -> str:
+    """`value` as text on one line: a control character (a line break) would
+    start a new runner output line, which the runner reads as a workflow
+    command, so each becomes a space."""
+    return "".join(
+        " " if ch.isspace() or not ch.isprintable() else ch for ch in str(value)
+    )
+
+
 def describe_holder(lease: Lease) -> str:
-    """The holder and its expected release, for the log."""
+    """The holder and its expected release, for the log (one line)."""
     holder = lease.get("holder") or {}
     repo = holder.get("repo") or "an unknown holder"
     job = holder.get("job") or "?"
@@ -105,7 +118,9 @@ def describe_holder(lease: Lease) -> str:
     eta = lease.get("expected_release_at") or "unknown"
     ttl = lease.get("ttl_s")
     ttl_text = f"{ttl} s" if isinstance(ttl, int) else "unknown"
-    return f"{repo} (job {job}, run {run}), expected release {eta} (in {ttl_text})"
+    return one_line(
+        f"{repo} (job {job}, run {run}), expected release {eta} (in {ttl_text})"
+    )
 
 
 def fetch_lease(
@@ -115,13 +130,18 @@ def fetch_lease(
     for url in urls:
         try:
             with urllib.request.urlopen(url, timeout=timeout) as resp:
-                doc = json.load(resp)
-        except (OSError, ValueError, http.client.HTTPException) as e:
-            # URLError / HTTPError / a timeout are OSErrors; bad JSON is a
-            # ValueError; a non-HTTP listener (BadStatusLine) or a truncated
-            # body (IncompleteRead) is an HTTPException. Logged, then the
-            # next URL is tried.
-            log(f"rig lease: {url} did not answer with JSON ({e})")
+                body = resp.read(MAX_BODY_BYTES + 1)
+            if len(body) > MAX_BODY_BYTES:
+                log(f"rig lease: {url} answered a body too large for a lease")
+                continue
+            doc = json.loads(body)
+        except (OSError, ValueError, RecursionError, http.client.HTTPException) as e:
+            # URLError / HTTPError / a timeout are OSErrors; bad JSON or bad
+            # UTF-8 is a ValueError; JSON nested past the recursion limit is
+            # a RecursionError; a non-HTTP listener (BadStatusLine) or a
+            # truncated body (IncompleteRead) is an HTTPException. Logged,
+            # then the next URL is tried.
+            log(f"rig lease: {url} did not answer with JSON ({one_line(e)})")
             continue
         if not is_lease(doc):
             log(
@@ -210,6 +230,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.poll_seconds <= 0 or args.max_wait_seconds < 0:
         parser.error("--poll-seconds must be > 0 and --max-wait-seconds >= 0")
+    for url in args.url:
+        # A broken --url would look like an outage on every deploy (WARN,
+        # deploy, never a lease check): refuse it loudly instead.
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            parser.error(f"--url {url!r} is not an http(s) URL with a host")
 
     def log(message: str) -> None:
         print(message, flush=True)
