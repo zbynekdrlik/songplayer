@@ -1017,7 +1017,10 @@ Now:
     one line** (review round 2): pairing it with the real `Instant::now()` let
     the probe read a set that outruns real time as a step and follow it,
     restarting the resample count (`program_output_tests::the_sender_thread_…`
-    counted 2 ticks for 3). A settable wall never re-anchors, holds or follows.
+    counted 2 ticks for 3). A set forward never reads as a step; a set BACK
+    across a resample still shows a phantom hold in `wall_anchor_*` (the
+    resample measures against the frozen wall) — never pin the anchor
+    telemetry after a set back, the reads are unaffected.
   - **Harness gotcha:** the probe consumes one `VirtualClock` read per tick,
     so a `delay_next_reads` / `outlier_next_reads` meant for a resample must be
     scripted right before the resampling 100th tick (`resample_reading`

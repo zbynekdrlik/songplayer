@@ -387,8 +387,10 @@ impl WallClock {
     /// `Pacer::service` call — the scheduling read and the emit read — to prove
     /// lateness includes decode time (#147). The anchor, the resample and the
     /// step probe (#224) read the set value on ONE synthetic line (see
-    /// [`SettableClock`]), so a set never looks like a UTC step: the wall
-    /// never re-anchors, holds or follows here.
+    /// [`SettableClock`]), so a set forward never looks like a UTC step. A set
+    /// BACK across a resample still reads as a backward delta against the
+    /// frozen wall (a phantom hold in `wall_anchor_*` only; the reads return
+    /// the set value): never pin the anchor telemetry after a set back.
     pub fn settable(initial_100ns: i64) -> (Self, SettableClock) {
         let handle = SettableClock::new(initial_100ns);
         (WallClock::new(Box::new(handle.clone())), handle)
