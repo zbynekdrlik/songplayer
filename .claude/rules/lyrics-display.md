@@ -88,7 +88,7 @@ catalogue reprocess, and it would not fix songs that are already stored.
 | `MAX_LATE_MS` | 400 | `MIN_VISIBLE_MS − LEAD_MAX_MS`: the most the floor may hold a `Song` line back past its sung start (ROZHODNUTÉ, Design-question 5868750224). |
 | `LONG_GAP_MS` | 8000 | A sung gap longer than this is an instrumental break: the display line closes and the wall blanks. |
 | `HOLD_TAIL_MS` | 3000 | Before a break, and after the last line, the line leaves this long after its end. |
-| `MAX_CHARS` | 72 | The most chars one display line's text may have (a single longer source line is shown whole). |
+| `MAX_CHARS` | 52 | ONE wall line: the most chars a merged display line's text AND its Slovak may have (a single longer source line is shown whole). The Presenter wraps at it too (`PRESENTER_WRAP_WIDTH`). |
 | `GROUP_MAX_SPAN_MS` | 6500 | A display line's last source line starts at most this long after its first. |
 
 `display_plan_tests::constants_match_the_design_record` pins every value. Change
@@ -155,12 +155,28 @@ one only together with the design record on #217.
     100 ms: What A God's doubled 0.3 s "What a God, what a God.".
   - The cap-first order never lags, but gives What A God an 1100 ms display.
   - Changing the order or the bound is a design-record change on #217.
-- **The SK text is not split at 72 chars (ROZHODNUTÉ on Design-question
-  5868750224).** EN drives the grouping. 4 of the 233 fixture wall lines
-  carry a 73–83-char SK translation; the main checks them on the wall
-  after deploy.
-- **Test tracks need sentence marks.** Unpunctuated lines within 6.5 s and 72
-  chars are ONE sentence now, so a test that wants two wall lines must end
+- **A merge is bounded by ONE wall line in BOTH languages (29.9.2026,
+  supersedes the "SK is not split at 72" ruling of Design-question
+  5868750224).** The wall shows the Slovak `#sp-subssk` clip (Line Width
+  2400 of the 2580 px composition). Measured on the box, ~39 px a char, so
+  ~60 chars fit; `MAX_CHARS` = 52 leaves room for wide glyphs and ` ★`. At
+  72 (EN only) song 270 "Thankful" merged its unpunctuated lines into
+  58–79-char wall lines that wrapped onto two lines on the wall and on the
+  Presenter (owner: "extrémne dlhé texty, pretečie do dvoch riadkov").
+  - `fits` checks the joined text and the joined Slovak.
+  - A sentence over 52 chars splits at its last soft end, else before the
+    line that overflows. What A God's 56- and 53-char sentences now split
+    (fixture pins).
+  - **A single SOURCE line over 52 is still shown whole** (e.g. song 270's
+    `yt_subs+mtl` text keeps two sung lines per YouTube caption, 55–71
+    chars). It cannot be split without word timings, and those are never
+    synthesized. That is a lyrics-text question, not the display plan's.
+  - The Presenter wraps at the same width
+    (`PRESENTER_WRAP_WIDTH = MAX_CHARS`), so a wall line is one stage
+    line. `wrap_to(text, max)` is the algorithm, and its tests run at
+    width 30.
+- **Test tracks need sentence marks.** Unpunctuated lines within 6.5 s and 52
+  chars (EN and SK) are ONE sentence now, so a test that wants two wall lines must end
   each line in `.`. Examples: `renderer.rs` `wall_track` / `two_line_track`,
   `dispatch_lyrics_tests.rs` `make_track`, `tests_hold.rs` `track`. The wall
   strips the period (`strip_display_punctuation`), but the karaoke WS sends

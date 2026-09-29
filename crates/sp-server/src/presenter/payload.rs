@@ -15,11 +15,12 @@
 use serde::Serialize;
 
 /// Maximum characters per visual line on the Presenter stage display before
-/// we force a line break. Many source lyrics are long narrative lines that
-/// wrap awkwardly on a phone/tablet stage display. Splitting at word
-/// boundaries around this width keeps each visual line readable at a
-/// glance without redesigning the upstream lyrics pipeline.
-pub const PRESENTER_WRAP_WIDTH: usize = 30;
+/// we force a line break: one wall line of the #217 display plan
+/// (`display_plan::MAX_CHARS`), so a wall line is one Presenter line. Only a
+/// single source line longer than that (it cannot be split without word
+/// timings) breaks, at a word boundary. At 30 every longer wall line wrapped
+/// onto two stage lines (owner, 29.9.2026).
+pub const PRESENTER_WRAP_WIDTH: usize = crate::lyrics::display_plan::MAX_CHARS;
 
 /// Wrap `text` so no visual line exceeds `PRESENTER_WRAP_WIDTH` characters
 /// (see [`wrap_to`]).
