@@ -169,15 +169,17 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 
     /// Submit one program boundary and return its stamp. A forwarded source
-    /// job keeps its own stamps; a standby pair is stamped on its boundary with
-    /// the audio stamped `audio_now_100ns` (the emit instant, like #147
-    /// standby audio).
-    pub fn submit(&mut self, job: ProgramJob, audio_now_100ns: i64) -> i64 {
+    /// job keeps its own stamps. What the program makes itself (a standby
+    /// pair, a mixed block) is stamped on its boundary, the audio too: the
+    /// block belongs to that boundary's timeline instant, never the submit
+    /// instant — a standby pair for a missed boundary goes out up to the
+    /// fill grace (3 slots) late (#224).
+    pub fn submit(&mut self, job: ProgramJob, _audio_now_100ns: i64) -> i64 {
         if !matches!(job, ProgramJob::Mix(_)) {
             self.end_mix_run();
         }
         match job {
-            ProgramJob::Mix(mix) => self.submit_mix(mix, audio_now_100ns),
+            ProgramJob::Mix(mix) => self.submit_mix(mix),
             ProgramJob::Source(job) => {
                 let stamp = job.video_tc_100ns;
                 self.submitter.submit_frame_at_boundary_owned(
@@ -202,7 +204,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
                     black,
                     &self.silence,
                     stamp_100ns,
-                    audio_now_100ns,
+                    stamp_100ns,
                 );
                 self.feed_vban(VbanBlock::silence(stamp_100ns));
                 stamp_100ns
@@ -211,14 +213,14 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 
     /// #215: one window boundary: the crossfaded audio block, then the mixed
-    /// picture, stamped like a source boundary (the audio with `to`'s stamp,
-    /// else `from`'s). A mix with neither side (the bus never queues one) goes
-    /// out as the standby pair.
-    fn submit_mix(&mut self, mix: MixJob, audio_now_100ns: i64) -> i64 {
+    /// picture, both stamped on the window boundary (#224: the program's own
+    /// block). A mix with neither side (the bus never queues one) goes out as
+    /// the standby pair.
+    fn submit_mix(&mut self, mix: MixJob) -> i64 {
         let stamp = mix.stamp_100ns;
         let started = Instant::now();
         let Some((layout, video)) = self.mix_picture(&mix) else {
-            return self.submit(ProgramJob::Standby { stamp_100ns: stamp }, audio_now_100ns);
+            return self.submit(ProgramJob::Standby { stamp_100ns: stamp }, stamp);
         };
         let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
         self.mix_run.boundaries += 1;
@@ -236,11 +238,6 @@ impl<B: NdiBackend> ProgramOutput<B> {
             total,
             format,
         )];
-        let audio_tc = mix
-            .to
-            .as_ref()
-            .or(mix.from.as_ref())
-            .map_or(audio_now_100ns, |j| j.audio_tc_100ns);
         self.submitter.submit_frame_at_boundary_owned(
             layout.width,
             layout.height,
@@ -248,7 +245,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             video,
             &audio,
             stamp,
-            audio_tc,
+            stamp,
         );
         self.feed_vban(VbanBlock::from_frames(stamp, audio));
         stamp

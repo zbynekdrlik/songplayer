@@ -19,6 +19,13 @@
 //!   [`apply_anchor_step`] applies a BACKWARD correction as a hold, never as a
 //!   backward step. A followed backward step is ONE hold of its remaining size.
 //!
+//! A dantesync date step is followed at the boundary it lands (#224, design
+//! record 5890605448): [`decide_step_probe`] judges one cheap bracketed read
+//! per boundary against the line the wall runs on. Over 2 ms
+//! ([`STEP_DETECT_100NS`]) from a narrow bracket it takes a full anchor sample
+//! at once and, when both agree within 1 ms, follows the step in ONE event.
+//! The 100-frame resample above keeps slewing everything smaller.
+//!
 //! Everything here is pure (no clock reads), so the tests inject reads.
 //!
 //! [`WallClock`]: super::WallClock
@@ -41,6 +48,12 @@ pub const ANCHOR_WIDE_BRACKET: Duration = Duration::from_micros(200);
 /// The most one resample may move the wall: 1 ms in 100-ns units. Normal
 /// dantesync slewing is ≤ ~313 µs per ~3.3 s resample (≤ 94 ppm).
 pub const ANCHOR_MAX_STEP_100NS: i64 = 10_000;
+
+/// A UTC offset the per-boundary probe treats as a STEP (#224): 2 ms in
+/// 100-ns units, the fleet receivers' wall-step threshold (camera-box sender
+/// contract, issue 1294). dantesync slewing (≤ 94 ppm) moves ≤ ~313 µs per
+/// 100-frame resample, far below it, and stays on the ±1 ms resample bound.
+pub const STEP_DETECT_100NS: i64 = 20_000;
 
 /// One bracketed read of the realtime clock: `m1` is the monotonic clock read
 /// just before the UTC read, `m2` the one just after.
@@ -231,9 +244,7 @@ pub fn decide_anchor_step(
     let step = bounded_anchor_update(delta_100ns);
     // A clamp either way arms and follows; the tolerance picks the same step.
     let armable = narrow && step.is_clamped();
-    let confirms = |p: &PendingStep| {
-        (delta_100ns + p.applied_100ns - p.delta_100ns).abs() <= ANCHOR_MAX_STEP_100NS
-    };
+    let confirms = |p: &PendingStep| same_step(p.delta_100ns, p.applied_100ns, delta_100ns);
     if armable && let Some(p) = pending.filter(confirms) {
         return AnchorDecision {
             step: AnchorStep {
@@ -257,6 +268,161 @@ pub fn decide_anchor_step(
         followed: None,
         pending,
     }
+}
+
+/// Whether `delta_100ns` sees the same step as an earlier reading
+/// `armed_delta_100ns` of which `applied_100ns` is already applied: the rest
+/// plus what was applied lies within ±1 ms ([`ANCHOR_MAX_STEP_100NS`]) of the
+/// earlier reading. ONE rule for the resample's confirmation
+/// ([`decide_anchor_step`]) and the probe's ([`decide_step_probe`]). Within the
+/// tolerance two readings of a step over 1 ms have the same sign, so the rule
+/// never compares directions.
+fn same_step(armed_delta_100ns: i64, applied_100ns: i64, delta_100ns: i64) -> bool {
+    (delta_100ns + applied_100ns - armed_delta_100ns).abs() <= ANCHOR_MAX_STEP_100NS
+}
+
+/// A monotonic→UTC anchor (#224 names the pair [`WallClock`] reads through):
+/// the wall reads `utc_100ns` at `instant` and runs with the monotonic clock
+/// from there. An `instant` still in the future is a HOLD in progress, and
+/// the wall reads `utc_100ns` until then.
+///
+/// [`WallClock`]: super::WallClock
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Anchor {
+    pub instant: Instant,
+    pub utc_100ns: i64,
+}
+
+impl Anchor {
+    /// What the wall reads at `at`: frozen at `utc_100ns` before `instant`
+    /// ([`wall_at`]).
+    pub fn wall_at(&self, at: Instant) -> i64 {
+        wall_at(self.instant, self.utc_100ns, at)
+    }
+
+    /// The UTC line the wall runs on, also through a hold in progress: before
+    /// `instant` it reads BELOW `utc_100ns` by the time left to `instant`.
+    /// The step probe measures against it, so a hold the wall is still taking
+    /// is never read as a new step.
+    pub fn line_at(&self, at: Instant) -> i64 {
+        match at.checked_duration_since(self.instant) {
+            Some(after) => self.utc_100ns.saturating_add(to_100ns(after)),
+            None => self
+                .utc_100ns
+                .saturating_sub(to_100ns(self.instant.duration_since(at))),
+        }
+    }
+}
+
+/// A duration in 100-ns units (truncating), saturating at `i64::MAX`.
+fn to_100ns(d: Duration) -> i64 {
+    i64::try_from(d.as_nanos() / 100).unwrap_or(i64::MAX)
+}
+
+/// A step the per-boundary probe confirmed (#224), to be applied at the
+/// confirming `sample`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProbeFollow {
+    /// The confirming anchor sample. The new anchor is set at its instant.
+    pub sample: AnchorSample,
+    /// The step the probe measured against the line.
+    pub probe_delta_100ns: i64,
+    /// The step the confirming sample measured against the line.
+    pub delta_100ns: i64,
+    /// What the wall reads at `sample.instant` (frozen during a hold).
+    pub wall_100ns: i64,
+    /// Applied now, whole (`sample.utc − wall`): a step ahead, or ONE hold
+    /// ([`apply_anchor_step`]).
+    pub step: AnchorStep,
+    /// The step followed. Its total includes the 1 ms a resample already
+    /// applied when that resample armed this same step.
+    pub followed: FollowedStep,
+}
+
+/// What the per-boundary step probe decided (#224).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProbeDecision {
+    /// Within ±2 ms of the line: nothing to follow. The 100-frame resample
+    /// slews it (normal dantesync slewing, or what is left of a small step).
+    Quiet,
+    /// Over 2 ms, but the probe's own bracket was wide (a read preempted
+    /// between its monotonic and its UTC half): rejected by width. Nothing is
+    /// armed, so the next boundary's probe follows a real step at once.
+    RejectedWide { delta_100ns: i64, bracket: Duration },
+    /// Over 2 ms from a narrow probe, but the confirming sample was wide or
+    /// measured another step (not within ±1 ms): rejected, nothing armed.
+    Unconfirmed {
+        delta_100ns: i64,
+        confirm: AnchorSample,
+        confirm_delta_100ns: i64,
+    },
+    /// Confirmed: follow the step in ONE event.
+    Follow(ProbeFollow),
+}
+
+/// The per-boundary step probe (#224, design record 5890605448): one
+/// bracketed `probe` read against the line the wall runs on (`anchor`).
+///
+/// - Within ±2 ms ([`STEP_DETECT_100NS`]) it is [`ProbeDecision::Quiet`]:
+///   normal slewing stays on the 100-frame resample and its ±1 ms bound.
+/// - Over 2 ms from a bracket wider than [`ANCHOR_WIDE_BRACKET`] it is
+///   rejected by width. A preempted read only ever errs by half its bracket,
+///   so a narrow probe cannot fake a 2 ms step.
+/// - Over 2 ms from a narrow probe, `confirm` takes a full anchor sample (the
+///   best-of-N bracketed read) in the same tick. It confirms when it is narrow
+///   too and within ±1 ms of the probe (`same_step`): the step is then
+///   followed in ONE event at that sample, a step ahead when forward and ONE
+///   hold when backward, like the resample's confirmed follow. A `pending`
+///   step the resample armed with its bounded 1 ms counts into the total.
+///
+/// `confirm` runs only on that path, so a quiet boundary costs one read.
+pub fn decide_step_probe<F: FnOnce() -> AnchorSample>(
+    anchor: Anchor,
+    pending: Option<PendingStep>,
+    probe: BracketedRead,
+    confirm: F,
+) -> ProbeDecision {
+    let delta = probe
+        .utc_100ns
+        .saturating_sub(anchor.line_at(probe.midpoint()));
+    if delta.abs() <= STEP_DETECT_100NS {
+        return ProbeDecision::Quiet;
+    }
+    if probe.width() > ANCHOR_WIDE_BRACKET {
+        return ProbeDecision::RejectedWide {
+            delta_100ns: delta,
+            bracket: probe.width(),
+        };
+    }
+    let sample = confirm();
+    let confirm_delta = sample
+        .utc_100ns
+        .saturating_sub(anchor.line_at(sample.instant));
+    if sample.is_wide() || !same_step(delta, 0, confirm_delta) {
+        return ProbeDecision::Unconfirmed {
+            delta_100ns: delta,
+            confirm: sample,
+            confirm_delta_100ns: confirm_delta,
+        };
+    }
+    let armed = pending
+        .filter(|p| same_step(p.delta_100ns, p.applied_100ns, confirm_delta))
+        .map_or(0, |p| p.applied_100ns);
+    let wall = anchor.wall_at(sample.instant);
+    ProbeDecision::Follow(ProbeFollow {
+        sample,
+        probe_delta_100ns: delta,
+        delta_100ns: confirm_delta,
+        wall_100ns: wall,
+        step: AnchorStep {
+            applied_100ns: sample.utc_100ns.saturating_sub(wall),
+            carry_100ns: 0,
+        },
+        followed: FollowedStep {
+            total_100ns: armed + confirm_delta,
+            direction: StepDirection::of(confirm_delta),
+        },
+    })
 }
 
 /// The wall reading of an anchor at monotonic instant `at`:
@@ -292,16 +458,20 @@ pub fn apply_anchor_step(at: Instant, wall_100ns: i64, applied_100ns: i64) -> (I
 /// `PacingStats` as `wall_anchor_*` and on the per-minute `ndi: genlock` line.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WallAnchorStats {
-    /// Largest |delta| (µs) a resample MEASURED: the step an unbounded
-    /// re-anchor would have taken. The applied step is capped at 1 ms.
+    /// Largest |delta| (µs) a resample or a confirmed step probe MEASURED:
+    /// the step an unbounded re-anchor would have taken. A resample applies
+    /// at most 1 ms of it.
     pub max_step_us: u64,
-    /// Anchor samples (construction + resamples) whose chosen bracket was wider
-    /// than [`ANCHOR_WIDE_BRACKET`].
+    /// Anchor samples (construction, resamples and the step probe's
+    /// confirming samples) whose chosen bracket was wider than
+    /// [`ANCHOR_WIDE_BRACKET`].
     pub wide_brackets: u64,
     /// Cumulative correction (µs) applied through CLAMPED resamples (|delta| >
     /// 1 ms), i.e. slewed in rather than stepped.
     pub slewed_us: u64,
-    /// Confirmed UTC steps followed in ONE re-anchor, both directions (#147).
+    /// Confirmed UTC steps followed in ONE event, both directions: by the
+    /// step probe at the boundary the step lands (#224), or by a second
+    /// resample (#147).
     pub steps_followed: u64,
     /// The total step (µs) of the last followed step, signed (negative =
     /// backward); 0 before any.
@@ -309,9 +479,25 @@ pub struct WallAnchorStats {
     /// Confirmed BACKWARD steps followed as ONE hold (#147), a subset of
     /// `steps_followed`.
     pub holds_followed: u64,
-    /// How long (µs) the last followed hold froze the wall: the step's rest
-    /// after the arming resample's 1 ms; 0 before any.
+    /// How long (µs) the last followed hold froze the wall: the whole step
+    /// when the probe follows it, the rest after the arming 1 ms when a
+    /// resample armed it first; 0 before any.
     pub last_hold_us: u64,
+}
+
+/// The per-boundary step probe's own telemetry (#224). Surfaced on
+/// `PacingStats` as `wall_anchor_probes_rejected` and
+/// `wall_anchor_detect_to_follow_us`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StepProbeStats {
+    /// Probes over 2 ms that were rejected: a wide probe, or a confirming
+    /// sample that was wide or measured another step. Cumulative.
+    pub rejected: u64,
+    /// Monotonic time (µs) from the first over-2 ms probe of the last
+    /// followed step to its follow. About the width of two clock reads when
+    /// the first probe confirms at once; one boundary per rejected probe
+    /// before it. 0 before any.
+    pub last_detect_to_follow_us: u64,
 }
 
 impl WallAnchorStats {

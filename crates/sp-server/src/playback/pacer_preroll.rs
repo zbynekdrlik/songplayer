@@ -181,12 +181,11 @@ impl Pacer {
         &mut self,
         emit_now: i64,
         stamp_boundary: i64,
-        audio_tc: i64,
         sink: &mut S,
     ) -> ServiceOutcome {
         if let Some(fill) = self.standby_fill.clone() {
             let picture = fill.hold.as_ref().unwrap_or(&fill.black);
-            self.emit_standby_pair(emit_now, stamp_boundary, audio_tc, picture.view(), sink);
+            self.emit_standby_pair(emit_now, stamp_boundary, picture.view(), sink);
         }
         ServiceOutcome::Starved
     }
@@ -194,12 +193,12 @@ impl Pacer {
     /// The standby pair (#147), the ONE path an idle black, a pre-roll black
     /// and a starve fill leave through: one audio block (`standby_block`:
     /// silence, or a held EOS tail) then the picture by shared reference (a
-    /// refcount bump, no pixel copy, #203), stamped like any emit.
+    /// refcount bump, no pixel copy, #203), stamped like any emit: both on the
+    /// boundary (#224).
     pub(super) fn emit_standby_pair<S: PacedSink>(
         &mut self,
         emit_now: i64,
         stamp_boundary: i64,
-        audio_tc: i64,
         picture: StandbyBlack<'_>,
         sink: &mut S,
     ) {
@@ -212,7 +211,7 @@ impl Pacer {
             picture.video.clone(),
             &block,
             stamp_boundary,
-            audio_tc,
+            stamp_boundary,
         );
     }
 }

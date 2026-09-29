@@ -352,3 +352,29 @@ fn a_plus_90_ms_step_is_followed_at_its_boundary_and_the_catch_up_audio_stays_on
     );
     assert_eq!(pacer.now_100ns(), clk.truth_100ns(), "on the stepped UTC");
 }
+
+#[test]
+fn pacing_stats_carry_the_step_probe_telemetry() {
+    // #224: the first probe after a +90 ms step is preempted (a wide read,
+    // rejected), the next boundary's follows it: `/api/v1/ndi/health` and the
+    // `ndi: genlock` line read the rejection and the detect-to-follow time.
+    let clk = VirtualClock::new(0);
+    let mut pacer = Pacer::with_wallclock(30, true, WallClock::new(Box::new(clk.clone())));
+    clk.step_utc(900_000);
+    clk.delay_next_reads(&[400_000]);
+    for _ in 0..2 {
+        clk.advance_ns(33_333_300);
+        pacer.tick_wall();
+    }
+    let s = pacer.stats();
+    assert_eq!(
+        (
+            s.wall_anchor_probes_rejected,
+            s.wall_anchor_detect_to_follow_us,
+            s.wall_anchor_steps_followed,
+            s.wall_anchor_last_step_us
+        ),
+        (1, 33_533, 1, 90_000),
+        "one rejected probe, then the follow one frame + 200 µs after it"
+    );
+}

@@ -413,3 +413,21 @@ fn periodic_log_path_calls_format_genlock_line() {
         "the genlock line must be emitted inside the periodic-heartbeat guard"
     );
 }
+
+#[test]
+fn format_genlock_line_carries_the_step_probe_telemetry() {
+    // #224: the pacer wall's per-boundary step probe — rejected probes and the
+    // last follow's detect-to-follow time — ride the same per-minute line,
+    // right after the anchor tokens.
+    let mut s = sample_snapshot();
+    s.pacing.wall_anchor_probes_rejected = 3;
+    s.pacing.wall_anchor_detect_to_follow_us = 33_533;
+    let line = crate::playback::ndi_health::format_genlock_line(&s);
+    assert!(
+        line.contains(
+            "wall_anchor_last_hold_us=1499000 wall_anchor_probes_rejected=3 \
+             wall_anchor_detect_to_follow_us=33533 song_change_unserviced_slots=6"
+        ),
+        "the probe tokens follow the anchor tokens: {line}"
+    );
+}
