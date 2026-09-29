@@ -128,8 +128,15 @@ fn check_identify_closes_4010_on_another_rpc_version_after_the_auth() {
     assert_eq!(err.code, 4009);
 }
 
+/// One JSON message parsed. `parse_client_message` takes the DECODED value
+/// (#221 L2b: the session decodes the frame first); a frame that does not
+/// decode is a session-level test (`session_tests.rs`).
+fn parse(text: &str) -> Result<ClientMessage, CloseReason> {
+    parse_client_message(serde_json::from_str(text).unwrap())
+}
+
 #[test]
-fn subprotocol_negotiation_echoes_json_and_refuses_msgpack_only() {
+fn subprotocol_negotiation_echoes_json_and_refuses_only_foreign_protocols() {
     assert_eq!(negotiate_subprotocol(None), Subprotocol::Default);
     assert_eq!(negotiate_subprotocol(Some("  ")), Subprotocol::Default);
     assert_eq!(
@@ -140,18 +147,66 @@ fn subprotocol_negotiation_echoes_json_and_refuses_msgpack_only() {
         negotiate_subprotocol(Some("obswebsocket.msgpack, obswebsocket.json")),
         Subprotocol::Json
     );
-    assert_eq!(
+    // #221 L2b: msgpack alone is Companion's offer (obs-websocket-js in
+    // Node) — never refused. Only a protocol that is neither is.
+    assert_ne!(
         negotiate_subprotocol(Some("obswebsocket.msgpack")),
+        Subprotocol::Unsupported
+    );
+    assert_eq!(
+        negotiate_subprotocol(Some("chat")),
         Subprotocol::Unsupported
     );
 }
 
 #[test]
+fn subprotocol_negotiation_prefers_json_and_takes_msgpack_without_it() {
+    let pick = |offer: &str| negotiate_subprotocol(Some(offer));
+    // JSON offered: JSON, next to msgpack in either order (the main
+    // session's decision, #221 L2b).
+    assert_eq!(
+        pick("obswebsocket.json,obswebsocket.msgpack"),
+        Subprotocol::Json
+    );
+    // msgpack without JSON: msgpack, also next to an unknown protocol.
+    assert_eq!(pick("obswebsocket.msgpack"), Subprotocol::MsgPack);
+    assert_eq!(pick(" obswebsocket.msgpack "), Subprotocol::MsgPack);
+    assert_eq!(pick("chat, obswebsocket.msgpack"), Subprotocol::MsgPack);
+    // A longer name is not the protocol.
+    assert_eq!(
+        pick("obswebsocket.msgpack2, xobswebsocket.json"),
+        Subprotocol::Unsupported
+    );
+}
+
+#[test]
+fn the_server_echoes_the_subprotocol_it_picked() {
+    assert_eq!(Subprotocol::Json.echo(), Some("obswebsocket.json"));
+    assert_eq!(Subprotocol::MsgPack.echo(), Some("obswebsocket.msgpack"));
+    assert_eq!(Subprotocol::Default.echo(), None);
+    assert_eq!(Subprotocol::Unsupported.echo(), None);
+}
+
+#[test]
+fn a_decoded_message_that_is_not_an_object_is_obs_websockets_4002() {
+    // #221 L2b: the parser sees the DECODED value, so a JSON and a msgpack
+    // frame that are not a message object get the same close.
+    for msg in [json!([1, 2]), json!(7), json!(null), json!("op")] {
+        assert_eq!(parse_client_message(msg), Err(decode_error()));
+    }
+    assert_eq!(
+        decode_error(),
+        CloseReason {
+            code: 4002,
+            reason: "You sent a non-object payload.",
+        }
+    );
+}
+
+#[test]
 fn parse_identify_with_and_without_subscriptions() {
-    let m = parse_client_message(
-        r#"{"op":1,"d":{"rpcVersion":1,"authentication":"abc","eventSubscriptions":4}}"#,
-    )
-    .unwrap();
+    let m = parse(r#"{"op":1,"d":{"rpcVersion":1,"authentication":"abc","eventSubscriptions":4}}"#)
+        .unwrap();
     assert_eq!(
         m,
         ClientMessage::Identify {
@@ -160,7 +215,7 @@ fn parse_identify_with_and_without_subscriptions() {
             event_subscriptions: 4,
         }
     );
-    let m = parse_client_message(r#"{"op":1,"d":{"rpcVersion":1}}"#).unwrap();
+    let m = parse(r#"{"op":1,"d":{"rpcVersion":1}}"#).unwrap();
     assert_eq!(
         m,
         ClientMessage::Identify {
@@ -174,13 +229,13 @@ fn parse_identify_with_and_without_subscriptions() {
 #[test]
 fn parse_reidentify_keeps_the_subscriptions_when_none_are_named() {
     assert_eq!(
-        parse_client_message(r#"{"op":3,"d":{"eventSubscriptions":65536}}"#).unwrap(),
+        parse(r#"{"op":3,"d":{"eventSubscriptions":65536}}"#).unwrap(),
         ClientMessage::Reidentify {
             event_subscriptions: Some(65536)
         }
     );
     assert_eq!(
-        parse_client_message(r#"{"op":3,"d":{}}"#).unwrap(),
+        parse(r#"{"op":3,"d":{}}"#).unwrap(),
         ClientMessage::Reidentify {
             event_subscriptions: None
         }
@@ -189,7 +244,7 @@ fn parse_reidentify_keeps_the_subscriptions_when_none_are_named() {
 
 #[test]
 fn parse_request_and_batch() {
-    let m = parse_client_message(
+    let m = parse(
         r#"{"op":6,"d":{"requestType":"SetCurrentProgramScene","requestId":"r1","requestData":{"sceneName":"sp-fast"}}}"#,
     )
     .unwrap();
@@ -201,7 +256,7 @@ fn parse_request_and_batch() {
             request_data: Some(json!({ "sceneName": "sp-fast" })),
         })
     );
-    let m = parse_client_message(
+    let m = parse(
         r#"{"op":8,"d":{"requestId":"b1","haltOnFailure":true,"executionType":0,"requests":[{"requestType":"GetVersion"},{"requestId":"x"}]}}"#,
     )
     .unwrap();
@@ -224,7 +279,7 @@ fn parse_request_and_batch() {
             ],
         }
     );
-    let m = parse_client_message(r#"{"op":8,"d":{"requestId":"b2","requests":[]}}"#).unwrap();
+    let m = parse(r#"{"op":8,"d":{"requestId":"b2","requests":[]}}"#).unwrap();
     assert_eq!(
         m,
         ClientMessage::Batch {
@@ -237,8 +292,7 @@ fn parse_request_and_batch() {
 
 #[test]
 fn malformed_messages_map_to_obs_close_codes() {
-    let code = |text: &str| parse_client_message(text).unwrap_err().code;
-    assert_eq!(code("not json"), 4002);
+    let code = |text: &str| parse(text).unwrap_err().code;
     assert_eq!(code("[1,2]"), 4002);
     assert_eq!(code(r#"{"d":{}}"#), 4006);
     assert_eq!(code(r#"{"op":"6","d":{}}"#), 4006);

@@ -474,6 +474,10 @@ the test that kills each one BEFORE CI's mutation gate runs.
 - The Tier-0 hook blocks it as a cargo subcommand. Because it only lists,
   the logged `# airuleset:build-ok list-only` bypass is honest here, and
   only here.
+- **A NEW file is missing from `git diff <base>` until git tracks it**
+  (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
+  showed no mutant at all for the new `remote/codec.rs`. `git add -N
+  <new files>` first (or list the committed range), then re-list.
 - cargo-mutants 27 turns `|=` only into `&=`, not `^=`.
 - It turns a match guard into `true` / `false`, and `==` into `!=`.
 - `a && b && c` parses as `(a && b) && c`, so its two `&&`→`||` mutants
@@ -552,6 +556,35 @@ the test that kills each one BEFORE CI's mutation gate runs.
 block, and the handlers run in the `match output` after it). So a handler may
 take `&mut` of a receiver that a branch future borrowed, e.g.
 `event = events.recv() => … task.resync(&mut events).await`.
+
+## Untrusted input never goes through `serde_json::Value`'s own `Deserialize` (#221 L2b review)
+
+serde_json's `raw_value` feature is ALWAYS on in this workspace (sp-server's
+`api/preview.rs`, axum's `json`, sqlx-core — feature unification). With it,
+`Value`'s `Deserialize` treats a map whose first key is
+`$serde_json::private::RawValue` as a raw value and re-parses its string as
+JSON with a FRESH 128-level recursion budget, so nested strings escape the
+depth limit (~18 × 127 levels in 1 MiB) — a stack exhaustion that aborts the
+whole process. For a frame from an untrusted peer, decode into a typed
+struct with NO `serde_json::Value` anywhere inside it (a `Value` /
+`Option<Value>` / `Vec<Value>` field goes through `Value`'s own
+`Deserialize` again; unknown fields are skipped by serde_json without
+building a `Value`) or through `remote::codec::Codec::Json.decode_text`
+(its private `PlainValue` visitor keeps every key a plain string; make
+`PlainValue` `pub(crate)` when a second module needs the visitor itself),
+never `serde_json::from_str::<Value>` / `Json<Value>` / `Value::deserialize`.
+Known residuals outside the facade (not fixed by #221 L2b): `api/ai.rs`'s
+`Json<serde_json::Value>` body on the LAN HTTP API.
+
+## Binary test fixtures: byte-string literals, not long hex strings (#221 L2b)
+
+The staging hook `block-sensitive-staging.sh` refuses any file with a 40+
+character hex blob ("possible key/token") — a MessagePack / protocol fixture
+written as hex trips it. Write the bytes as a byte-string literal with the
+markers as escapes and the text as text
+(`b"\x82\xa2op\x01\xa1d\x81..."`, `\xHH` takes exactly two hex digits), and
+check it against the reference encoder's hex once in a scratch script. It
+reads better too: the map keys are visible.
 
 ## `-D warnings` rejects `temporary.as_ptr()` in tests — bind the value first (#203 r2b)
 

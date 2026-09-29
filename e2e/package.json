@@ -7,6 +7,7 @@
     "mock-api": "node mock-api.mjs"
   },
   "devDependencies": {
+    "@msgpack/msgpack": "^2.8.0",
     "@playwright/test": "^1.50.0",
     "express": "^4.21.0",
     "obs-websocket-js": "^5.0.6",

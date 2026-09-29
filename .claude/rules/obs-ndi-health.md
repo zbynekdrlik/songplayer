@@ -510,12 +510,16 @@ and the recording actually get.
   transition events), and a second one on cg OBS (`OBS_WS_URL`, :4455) ONLY
   for `GetProfileParameter` / `StartRecord` / `StopRecord` /
   `GetRecordStatus` (the recording is cg OBS's program).
-  **`obs-driver.ts` must import `obs-websocket-js/json`.** In Node the bare
-  `obs-websocket-js` import resolves (package `exports` → `import`) to the
-  MSGPACK build. SongPlayer's facade is JSON-only, like Companion, and
-  answers a msgpack-only offer with HTTP 400. That killed every post-deploy
-  spec's `beforeAll` (run 36497336926). cg OBS accepts msgpack, which hid the
-  problem. `e2e/obs-driver-protocol.spec.ts` pins it.
+  **`obs-driver.ts` keeps the BARE `obs-websocket-js` import (#221 L2b).**
+  In Node it resolves (package `exports` → `import` / `require`) to the
+  MSGPACK build, which offers only `obswebsocket.msgpack` — exactly what
+  Companion (a Node module) speaks. The facade speaks msgpack since L2b and
+  cg OBS always did, so both drivers use it. L3 briefly imported
+  `obs-websocket-js/json` because the facade was then JSON-only (it answered
+  msgpack with HTTP 400 and killed every post-deploy `beforeAll`, run
+  36497336926). That workaround hid the same 400 from the E2E until the
+  Companion cutover hit it (#221 comment 5881650057), so never reintroduce
+  it: `e2e/obs-driver-protocol.spec.ts` pins the msgpack offer.
   It parks the program on the shared baseline scene (`e2e/obs-baseline-scene.ts`:
   sp-slow, never sp-warmup/sp-fast). It proves the output is PLAYING with
   `/api/v1/ndi/health`: `state=Playing` AND `frames_submitted_last_5s > 0`.

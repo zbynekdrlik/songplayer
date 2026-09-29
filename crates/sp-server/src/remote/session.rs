@@ -3,6 +3,11 @@
 //! facade's own events: SongPlayer's program feedback and the transition
 //! events (`studio_events`).
 //!
+//! #221 L2b: the handshake picks the session's encoding (`codec::Codec`: JSON
+//! text or MessagePack binary — Companion speaks msgpack), and EVERY message
+//! of the session goes through it, both ways: Hello, Identified, responses,
+//! batch responses, events. A frame of the other kind closes it with 4002.
+//!
 //! Requests of one session run strictly in order — load-bearing since #221:
 //! a transition switches to the preview the same client set just before.
 //! Scene presses are additionally serialized across ALL sessions by the
@@ -22,18 +27,19 @@ use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio::sync::broadcast::error::RecvError;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
-use tokio_tungstenite::tungstenite::{self, Message};
 use tracing::{debug, info, warn};
 
+use super::codec::Codec;
 use super::protocol::{
     self, AuthChallenge, ClientMessage, CloseReason, EVENT_SCENES, Reply, RequestItem, Route,
     STATUS_GENERIC_ERROR, STATUS_MISSING_REQUEST_TYPE, STATUS_NOT_READY,
-    STATUS_UNKNOWN_REQUEST_TYPE, Subprotocol,
+    STATUS_UNKNOWN_REQUEST_TYPE,
 };
 use super::studio_events::{self, FacadeEvent};
 use super::{Facade, MAX_MESSAGE_BYTES, clip};
@@ -51,6 +57,8 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
     // ONE deadline for the whole unidentified phase — the WebSocket handshake
     // AND the `Identify` — so an idle socket is never kept.
     let identify_deadline = tokio::time::Instant::now() + facade.identify_timeout;
+    // #221 L2b: the session's encoding, set by the handshake below.
+    let mut codec = Codec::Json;
     // tungstenite's `Callback` fixes this `Result<Response, ErrorResponse>`
     // shape (an http `Response`, > 128 B), so the size lint cannot be met here.
     #[allow(clippy::result_large_err)]
@@ -59,15 +67,19 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
             .headers()
             .get(SEC_WEBSOCKET_PROTOCOL)
             .and_then(|v| v.to_str().ok());
-        match protocol::negotiate_subprotocol(offered) {
-            Subprotocol::Json => {
-                let json = HeaderValue::from_static(protocol::SUBPROTOCOL_JSON);
-                resp.headers_mut().insert(SEC_WEBSOCKET_PROTOCOL, json);
-                Ok(resp)
-            }
-            Subprotocol::Default => Ok(resp),
-            Subprotocol::Unsupported => Err(refused()),
+        let negotiated = protocol::negotiate_subprotocol(offered);
+        let Some(chosen) = Codec::for_subprotocol(negotiated) else {
+            // The HTTP error logged below says only "400"; the offer is what a
+            // cutover diagnosis needs (#221 comment 5881650057).
+            info!(%peer, offered = ?offered.map(clip), "remote: neither obs-websocket subprotocol offered");
+            return Err(refused());
+        };
+        codec = chosen;
+        if let Some(name) = negotiated.echo() {
+            let echo = HeaderValue::from_static(name);
+            resp.headers_mut().insert(SEC_WEBSOCKET_PROTOCOL, echo);
         }
+        Ok(resp)
     };
     // A frame or message over 1 MiB is refused before it is buffered.
     let config = WebSocketConfig::default()
@@ -86,7 +98,7 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
         }
     };
     let _client = facade.shared().client_connected();
-    info!(%peer, "remote: client connected");
+    info!(%peer, encoding = ?codec, "remote: client connected");
     let (mut write, mut read) = ws.split();
     let mut events = facade.upstream.subscribe();
     let mut own_events = facade.events.subscribe();
@@ -97,7 +109,7 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
         subscriptions: 0,
         preview: None,
     };
-    if send(&mut write, &protocol::hello(session.auth.as_ref()))
+    if send(&mut write, codec, &protocol::hello(session.auth.as_ref()))
         .await
         .is_err()
     {
@@ -113,7 +125,7 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
             event = events.recv() => match event {
                 Ok(ObsEvent::Raw { event_type, event_data }) => {
                     if let Some(msg) = session.event(&event_type, &event_data)
-                        && send(&mut write, &msg).await.is_err()
+                        && send(&mut write, codec, &msg).await.is_err()
                     {
                         break;
                     }
@@ -126,7 +138,7 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
             event = own_events.recv() => match event {
                 Ok(event) => {
                     if let Some(msg) = session.own_event(&event)
-                        && send(&mut write, &msg).await.is_err()
+                        && send(&mut write, codec, &msg).await.is_err()
                     {
                         break;
                     }
@@ -140,9 +152,11 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
                 break;
             }
             incoming = read.next() => {
-                let step = match incoming {
-                    Some(Ok(Message::Text(text))) => session.on_text(&text).await,
-                    Some(Ok(Message::Binary(_))) => Step::Close(protocol::decode_error()),
+                // #221 L2b: decoded by the session's codec; a frame of the
+                // other encoding, or one that does not decode, is a 4002.
+                let decoded = match incoming {
+                    Some(Ok(Message::Text(text))) => codec.decode_text(&text),
+                    Some(Ok(Message::Binary(bytes))) => codec.decode_binary(&bytes),
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(_)) => continue, // ping / pong / raw frame
                     Some(Err(e)) => {
@@ -150,9 +164,13 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
                         break;
                     }
                 };
+                let step = match decoded {
+                    Ok(msg) => session.on_message(msg).await,
+                    Err(reason) => Step::Close(reason),
+                };
                 match step {
                     Step::Send(msgs) => {
-                        if send_all(&mut write, &msgs).await.is_err() {
+                        if send_all(&mut write, codec, &msgs).await.is_err() {
                             break;
                         }
                     }
@@ -168,26 +186,33 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
     info!(%peer, "remote: client disconnected");
 }
 
-/// The handshake answer to a client offering only non-JSON subprotocols.
+/// The handshake answer to a client that offered subprotocols, but neither of
+/// obs-websocket's two.
 fn refused() -> ErrorResponse {
     let mut refused = ErrorResponse::new(Some(
-        "SongPlayer's remote control speaks obswebsocket.json only".to_string(),
+        "SongPlayer's remote control speaks obswebsocket.json or obswebsocket.msgpack only"
+            .to_string(),
     ));
     *refused.status_mut() = StatusCode::BAD_REQUEST;
     refused
 }
 
-/// Send one JSON message; the (large) tungstenite error is boxed.
-async fn send(write: &mut WsWrite, msg: &Value) -> Result<(), Box<tungstenite::Error>> {
+/// Send one message in the session's encoding (`codec`). `Err` ends the
+/// session: the socket failed, or the codec could not encode the message
+/// (never for a `serde_json::Value`, see `Codec::encode`).
+async fn send(write: &mut WsWrite, codec: Codec, msg: &Value) -> Result<(), ()> {
+    let frame = codec.encode(msg).map_err(|e| {
+        warn!(%e, ?codec, "remote: a message could not be encoded — ending the session");
+    })?;
     write
-        .send(Message::Text(msg.to_string().into()))
+        .send(frame)
         .await
-        .map_err(Box::new)
+        .map_err(|e| debug!(%e, "remote: writing to the client failed"))
 }
 
-async fn send_all(write: &mut WsWrite, msgs: &[Value]) -> Result<(), Box<tungstenite::Error>> {
+async fn send_all(write: &mut WsWrite, codec: Codec, msgs: &[Value]) -> Result<(), ()> {
     for msg in msgs {
-        send(write, msg).await?;
+        send(write, codec, msg).await?;
     }
     Ok(())
 }
@@ -221,9 +246,9 @@ pub(crate) struct Session<'a> {
 }
 
 impl Session<'_> {
-    /// Act on one text frame.
-    pub(crate) async fn on_text(&mut self, text: &str) -> Step {
-        let msg = match protocol::parse_client_message(text) {
+    /// Act on one decoded client message (#221 L2b: JSON or MessagePack).
+    pub(crate) async fn on_message(&mut self, msg: Value) -> Step {
+        let msg = match protocol::parse_client_message(msg) {
             Ok(msg) => msg,
             Err(reason) => return Step::Close(reason),
         };
@@ -433,6 +458,9 @@ mod tests;
 #[cfg(test)]
 #[path = "session_tests_feedback.rs"]
 mod tests_feedback;
+#[cfg(test)]
+#[path = "session_tests_msgpack.rs"]
+mod tests_msgpack;
 #[cfg(test)]
 #[path = "session_tests_studio.rs"]
 mod tests_studio;

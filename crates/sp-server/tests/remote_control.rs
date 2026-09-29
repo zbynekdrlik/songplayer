@@ -1,5 +1,7 @@
-//! #213 end to end: a Companion-like obs-websocket 5 client (real
-//! tokio-tungstenite, `obswebsocket.json` subprotocol) → SongPlayer's remote
+//! #213 end to end: an obs-websocket 5 client doing Companion's requests
+//! (real tokio-tungstenite, over the `obswebsocket.json` subprotocol — Companion
+//! itself speaks msgpack, #221 L2b, pinned by `remote/session_tests_msgpack.rs`)
+//! → SongPlayer's remote
 //! control (`remote::serve`) → SongPlayer's REAL OBS client
 //! (`obs::ObsClient::spawn`, the one the facade reaches cg OBS through) → a
 //! fake cg OBS (`FakeObsServer`). The program is a real `ProgramBus`.
@@ -163,8 +165,9 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     let addr = listener.local_addr().unwrap();
     tokio::spawn(remote::serve(listener, facade));
 
-    // Companion's OBS module: connect with the JSON subprotocol and identify
-    // with its subscriptions (All | InputActiveStateChanged | InputShowStateChanged).
+    // Companion's requests over the JSON subprotocol (Companion itself speaks
+    // msgpack, #221 L2b): identify with its subscriptions
+    // (All | InputActiveStateChanged | InputShowStateChanged).
     let mut req = format!("ws://{addr}").into_client_request().unwrap();
     req.headers_mut().insert(
         "Sec-WebSocket-Protocol",
