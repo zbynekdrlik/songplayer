@@ -364,3 +364,48 @@ async fn relink_song_repairs_only_its_own_song() {
     assert!(named(d, "Old_A", "bbbbbbbbbbb", "_gf_audio_vocals.flac").exists());
     assert_eq!(columns(&pool, other).await.1, Some("old-v".into()));
 }
+
+/// #136 review round 3: a re-link waits for `cache::SONG_FILES` BEFORE it reads
+/// a song's row, so it acts on the row as the lock holder left it, never on a
+/// read taken before (here: the stems were reset to pending meanwhile, so
+/// there is nothing to re-link). The 300 ms window only lets a read that is
+/// NOT behind the lock happen; correct code cannot fail it.
+#[tokio::test]
+async fn a_relink_reads_the_row_only_once_it_holds_the_song_files_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_path_buf();
+    let pool = pool().await;
+    let id = song(&pool, &d, "IYAOosrh7HY", "done", "none").await;
+    let old_vocals = named(&d, "Old_A", "IYAOosrh7HY", "_gf_audio_vocals.flac");
+    write(&old_vocals, "v", 5);
+    write(
+        &named(&d, "Old_A", "IYAOosrh7HY", "_gf_audio_instrumental.flac"),
+        "i",
+        5,
+    );
+
+    let held = cache::SONG_FILES.lock().await;
+    let relink = tokio::spawn({
+        let (pool, d) = (pool.clone(), d.clone());
+        async move { relink_song(&pool, &d, id).await.unwrap() }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!relink.is_finished(), "the re-link waits for the lock");
+    assert!(old_vocals.exists(), "nothing moved while the lock is held");
+    sqlx::query("UPDATE videos SET stem_status = NULL WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    drop(held);
+    let counts = tokio::time::timeout(Duration::from_secs(30), relink)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(counts, RelinkCounts::default(), "the row is no longer done");
+    assert!(
+        old_vocals.exists(),
+        "a pending row's stems are not re-linked"
+    );
+}

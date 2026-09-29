@@ -280,12 +280,19 @@ fn a_failed_move_returns_its_error() {
     fs::create_dir(&blocked).unwrap();
     fs::write(blocked.join("x"), b"x").unwrap();
 
-    let err = move_as_unit(
+    let failed = move_as_unit(
         ID,
         &[(a.clone(), d.join("a2")), (b.clone(), blocked.clone())],
-    );
+    )
+    .unwrap_err();
 
-    assert!(err.is_err());
+    assert!(failed.stuck.is_empty(), "every moved file went back");
+    assert_ne!(
+        failed.error.kind(),
+        std::io::ErrorKind::NotFound,
+        "the failure is the blocked target, not a missing source: {}",
+        failed.error
+    );
     assert_eq!(fs::read(&a).unwrap(), b"a", "a moved back");
     assert!(!d.join("a2").exists());
     assert_eq!(fs::read(&b).unwrap(), b"b");

@@ -365,3 +365,38 @@ async fn a_row_without_audio_keeps_audio_null_and_its_recorded_stem_paths() {
         ]
     );
 }
+
+/// #136 review round 3: the metadata upgrade moves a song's files only while it
+/// holds `cache::SONG_FILES`, so it never interleaves with a stem / dub job's
+/// re-link of the same song. The 300 ms window can only fail code that moves
+/// without the lock; correct code cannot fail it.
+#[tokio::test]
+async fn the_upgrade_moves_the_files_only_while_it_holds_the_song_files_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let (old, new) = (old_set(dir.path()), new_set(dir.path()));
+    old.write_all();
+    let (pool, _id) = pool_with_row(&old).await;
+
+    let held = crate::downloader::cache::SONG_FILES.lock().await;
+    let mut upgrade = worker(&pool, dir.path());
+    let run = tokio::spawn(async move { upgrade.process_all().await.unwrap() });
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!run.is_finished(), "the upgrade waits for the lock");
+    for p in old.all() {
+        assert!(
+            p.exists(),
+            "{} not moved while the lock is held",
+            p.display()
+        );
+    }
+    drop(held);
+    let count = tokio::time::timeout(std::time::Duration::from_secs(30), run)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(count, 1);
+    for p in new.all() {
+        assert!(p.exists(), "{} moved once the lock is free", p.display());
+    }
+}
