@@ -358,6 +358,49 @@ async fn self_heal_resets_stems_missing_under_every_name() {
     );
 }
 
+/// A song whose video and audio sit under two different names (a rename that
+/// moved one half and could not move it back) is still one song the DB
+/// records: the self-heal must not delete its halves as orphans, it keeps
+/// them and the row plays on (#136 review round 1).
+#[tokio::test]
+async fn self_heal_keeps_the_halves_of_a_split_song_the_db_records() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let (pool, audio) = repaired_song(dir).await;
+    let video = named(dir, "Old_Song", "_gf_video.mp4");
+    fs::remove_file(named(dir, "Gods Not Dead_Enjoy Worship", "_video.mp4")).unwrap();
+    fs::write(&video, b"v").unwrap();
+    sqlx::query("UPDATE videos SET file_path = ?")
+        .bind(text(&video))
+        .execute(&pool)
+        .await
+        .unwrap();
+    // A half no row records is still crash debris.
+    let debris = named(dir, "Debris_Song", "_audio.flac");
+    fs::write(&debris, b"x").unwrap();
+
+    self_heal_cache(&pool, dir).await.unwrap();
+
+    assert_eq!(
+        fs::read(&video).unwrap(),
+        b"v",
+        "the recorded video half is kept"
+    );
+    assert_eq!(
+        fs::read(&audio).unwrap(),
+        b"a",
+        "the recorded audio half is kept"
+    );
+    assert!(!debris.exists(), "an unrecorded half is still removed");
+    let r = sqlx::query("SELECT file_path, audio_file_path FROM videos WHERE youtube_id = ?")
+        .bind(REPAIRED_ID)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(r.get::<String, _>("file_path"), text(&video));
+    assert_eq!(r.get::<String, _>("audio_file_path"), text(&audio));
+}
+
 /// A song whose stems already sit under its audio's name is left alone.
 #[tokio::test]
 async fn self_heal_leaves_stems_in_place_alone() {

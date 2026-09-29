@@ -173,6 +173,38 @@ async fn the_newest_old_name_holding_both_stems_wins() {
     );
 }
 
+/// The stems come from the old name with the NEWEST STEMS, whatever else a name
+/// holds: a fresh dub under an old name must not make its older stems pair win
+/// (#136 review round 1).
+#[tokio::test]
+async fn the_stems_come_from_the_name_with_the_newest_stems_not_the_newest_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let pool = pool().await;
+    song(&pool, d, "IYAOosrh7HY", "done", "none").await;
+    for (base, secs_ago) in [("Dubbed_A", 900), ("Fresh_A", 100)] {
+        write(
+            &named(d, base, "IYAOosrh7HY", "_gf_audio_vocals.flac"),
+            base,
+            secs_ago,
+        );
+        write(
+            &named(d, base, "IYAOosrh7HY", "_gf_audio_instrumental.flac"),
+            base,
+            secs_ago,
+        );
+    }
+    write(&named(d, "Dubbed_A", "IYAOosrh7HY", "_gf_dub.flac"), "d", 1);
+
+    let counts = relink_derived_files(&pool, d).await.unwrap();
+
+    assert_eq!(counts.stems_relinked, 1);
+    let audio = named(d, "Song_A", "IYAOosrh7HY", "_audio.flac");
+    let (vocals, instrumental) = crate::stems::stem_paths(&audio);
+    assert_eq!(fs::read_to_string(&vocals).unwrap(), "Fresh_A");
+    assert_eq!(fs::read_to_string(&instrumental).unwrap(), "Fresh_A");
+}
+
 /// Only half a pair anywhere (the vocals under the audio's name, the
 /// instrumental under an old one) is no pair: the row goes back to pending.
 #[tokio::test]

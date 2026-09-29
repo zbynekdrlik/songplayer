@@ -249,27 +249,31 @@ fn a_failed_move_returns_its_error() {
     assert_eq!(fs::read(&b).unwrap(), b"b");
 }
 
+/// The names are listed in path order, never by age: WHICH name's files a
+/// re-link takes is decided per unit by that unit's own files (the stems pair,
+/// the dub), so a fresh dub can never make an older stems pair win (#136
+/// review round 1).
 #[test]
-fn derived_file_owners_groups_the_old_names_by_id_newest_first() {
+fn derived_file_owners_groups_the_names_by_id_in_path_order() {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path();
-    let older = format!("Older_A_{ID}_normalized_gf");
-    let newer = format!("Newer_A_{ID}_normalized");
+    let second = format!("B_Second_{ID}_normalized_gf");
+    let first = format!("A_First_{ID}_normalized");
     let other = "S_A_dQw4w9WgXcQ_normalized";
-    // The older name holds only its dub; the newer name its stems pair.
-    let older_dub = d.join(format!("{older}_dub.flac"));
-    fs::write(&older_dub, b"d").unwrap();
-    set_mtime(&older_dub, 5_000);
+    // "B_Second" holds only a FRESH dub; "A_First" an OLDER stems pair.
+    let second_dub = d.join(format!("{second}_dub.flac"));
+    fs::write(&second_dub, b"d").unwrap();
+    set_mtime(&second_dub, 5);
     for suffix in ["_audio_vocals.flac", "_audio_instrumental.flac"] {
-        let p = d.join(format!("{newer}{suffix}"));
+        let p = d.join(format!("{first}{suffix}"));
         fs::write(&p, b"s").unwrap();
-        set_mtime(&p, 100);
+        set_mtime(&p, 5_000);
     }
     fs::write(d.join(format!("{other}_dub_transcripts.json")), b"t").unwrap();
     // Not derived files: the sidecars themselves, the id-keyed lyrics files,
     // and a directory that looks like a stem.
-    fs::write(d.join(format!("{newer}_audio.flac")), b"a").unwrap();
-    fs::write(d.join(format!("{newer}_video.mp4")), b"v").unwrap();
+    fs::write(d.join(format!("{first}_audio.flac")), b"a").unwrap();
+    fs::write(d.join(format!("{first}_video.mp4")), b"v").unwrap();
     fs::write(d.join(format!("{ID}_lyrics.json")), b"{}").unwrap();
     fs::write(d.join(format!("{ID}_vocals16k.wav")), b"w").unwrap();
     fs::create_dir(d.join(format!("Dir_A_{ID}_normalized_audio_vocals.flac"))).unwrap();
@@ -280,9 +284,10 @@ fn derived_file_owners_groups_the_old_names_by_id_newest_first() {
     assert_eq!(
         owners[ID],
         vec![
-            d.join(format!("{newer}_audio.flac")),
-            d.join(format!("{older}_audio.flac")),
-        ]
+            d.join(format!("{first}_audio.flac")),
+            d.join(format!("{second}_audio.flac")),
+        ],
+        "path order: A_First before B_Second, whatever their files' age"
     );
     assert_eq!(
         owners["dQw4w9WgXcQ"],
@@ -296,8 +301,14 @@ fn derived_file_owners_of_an_unreadable_dir_is_empty() {
     assert!(derived_file_owners(&dir.path().join("missing")).is_empty());
 }
 
+/// A superseded download loses its video, audio and stems (the stem worker
+/// separates the kept download again), but NOT its dub: a dub is an
+/// operator-requested synthesis nothing re-runs on its own, and the self-heal
+/// re-link adopts it under the kept song's name (same YouTube id, same audio).
+/// The round-0 test pinned the deletion; the review showed it lost the dub for
+/// good while `dub_status` stayed `ready`.
 #[test]
-fn remove_duplicates_deletes_the_dub_and_its_transcripts_too() {
+fn remove_duplicates_keeps_the_dub_for_the_relink_to_adopt() {
     let dir = tempfile::tempdir().unwrap();
     let dup = set_under(dir.path(), &old_base());
     let keep = set_under(dir.path(), &new_base());
@@ -313,8 +324,11 @@ fn remove_duplicates_deletes_the_dub_and_its_transcripts_too() {
         audio_path: dup[4].clone(),
     }]);
 
-    for p in &dup {
+    for p in [&dup[0], &dup[1], &dup[4], &dup[5]] {
         assert!(!p.exists(), "{} removed", p.display());
+    }
+    for p in [&dup[2], &dup[3]] {
+        assert!(p.exists(), "{} kept for the re-link", p.display());
     }
     for p in &keep {
         assert!(p.exists(), "{} kept", p.display());

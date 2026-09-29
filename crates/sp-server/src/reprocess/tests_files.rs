@@ -279,3 +279,89 @@ async fn a_song_without_stems_moves_its_video_and_audio_only() {
         ]
     );
 }
+
+/// The same video in a second playlist is a second row recording the SAME
+/// files (the startup pair re-link points every row of an id at one pair). The
+/// move is of those shared files, so both rows must follow it; otherwise the
+/// other row keeps names that no longer exist (#136 review round 1). The
+/// other row's own metadata is never touched.
+#[tokio::test]
+async fn the_same_video_in_another_playlist_follows_the_move() {
+    let dir = tempfile::tempdir().unwrap();
+    let (old, new) = (old_set(dir.path()), new_set(dir.path()));
+    old.write_all();
+    let (pool, id) = pool_with_row(&old).await;
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (2, 'ytworship', 'url')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let other: i64 = sqlx::query(
+        "INSERT INTO videos (playlist_id, youtube_id, title, song, artist, gemini_failed,
+                             normalized, file_path, audio_file_path, metadata_source,
+                             stem_status, vocals_file_path, instrumental_file_path,
+                             dub_status, dub_file_path)
+         SELECT 2, youtube_id, title, 'Kept Song', 'Kept Artist', 0,
+                normalized, file_path, audio_file_path, 'manual',
+                stem_status, vocals_file_path, instrumental_file_path,
+                dub_status, dub_file_path
+         FROM videos WHERE id = ?
+         RETURNING id",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get("id");
+
+    assert_eq!(worker(&pool, dir.path()).process_all().await.unwrap(), 1);
+
+    let moved = [
+        Some(text(&new.video)),
+        Some(text(&new.audio)),
+        Some(text(&new.vocals)),
+        Some(text(&new.instrumental)),
+        Some(text(&new.dub)),
+    ];
+    assert_eq!(recorded(&pool, id).await, moved);
+    assert_eq!(
+        recorded(&pool, other).await,
+        moved,
+        "the other playlist's row records the files where they now are"
+    );
+    assert_eq!(
+        song_and_flag(&pool, other).await,
+        ("Kept Song".into(), "Kept Artist".into(), 0),
+        "only the repaired row's metadata changes"
+    );
+}
+
+/// A row with no audio keeps its audio NULL (it used to become `''`, which the
+/// stem selector's `audio_file_path IS NOT NULL` then treated as a real
+/// path) and keeps whatever stem path it recorded: with no audio there is no
+/// name to derive a new one from.
+#[tokio::test]
+async fn a_row_without_audio_keeps_audio_null_and_its_recorded_stem_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let (old, new) = (old_set(dir.path()), new_set(dir.path()));
+    std::fs::write(&old.video, b"v").unwrap();
+    let (pool, id) = pool_with_row(&old).await;
+    sqlx::query("UPDATE videos SET audio_file_path = NULL WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(worker(&pool, dir.path()).process_all().await.unwrap(), 1);
+
+    assert!(new.video.exists() && !old.video.exists());
+    assert_eq!(
+        recorded(&pool, id).await,
+        [
+            Some(text(&new.video)),
+            None,
+            Some(text(&old.vocals)),
+            Some(text(&old.instrumental)),
+            Some(text(&old.dub)),
+        ]
+    );
+}
