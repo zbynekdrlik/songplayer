@@ -328,3 +328,39 @@ async fn a_dub_moves_with_its_transcripts_and_one_in_place_is_only_recorded() {
         Some(text(&crate::stems::dub_path(&placed_audio)))
     );
 }
+
+/// `relink_song` (what a worker runs after a finished job) repairs that one
+/// song and leaves every other drifted song to its own job or the next start.
+#[tokio::test]
+async fn relink_song_repairs_only_its_own_song() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let pool = pool().await;
+    let mine = song(&pool, d, "aaaaaaaaaaa", "done", "none").await;
+    let other = song(&pool, d, "bbbbbbbbbbb", "done", "none").await;
+    for id in ["aaaaaaaaaaa", "bbbbbbbbbbb"] {
+        write(&named(d, "Old_A", id, "_gf_audio_vocals.flac"), "v", 5);
+        write(
+            &named(d, "Old_A", id, "_gf_audio_instrumental.flac"),
+            "i",
+            5,
+        );
+    }
+
+    let counts = relink_song(&pool, d, mine).await.unwrap();
+
+    assert_eq!(
+        counts,
+        RelinkCounts {
+            stems_relinked: 1,
+            ..RelinkCounts::default()
+        }
+    );
+    let mine_audio = named(d, "Song_A", "aaaaaaaaaaa", "_audio.flac");
+    assert_eq!(
+        columns(&pool, mine).await.1,
+        Some(text(&crate::stems::stem_paths(&mine_audio).0))
+    );
+    assert!(named(d, "Old_A", "bbbbbbbbbbb", "_gf_audio_vocals.flac").exists());
+    assert_eq!(columns(&pool, other).await.1, Some("old-v".into()));
+}

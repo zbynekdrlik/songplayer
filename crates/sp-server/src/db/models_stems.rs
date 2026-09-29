@@ -372,3 +372,7 @@ pub async fn count_stems_progress(pool: &SqlitePool) -> Result<(i64, i64), sqlx:
 #[cfg(test)]
 #[path = "models_tests_stems.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "models_stems_fixtures.rs"]
+pub(crate) mod fixtures;
