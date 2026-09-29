@@ -261,6 +261,15 @@ nothing).
   WaitingForScene, and `on_video_processed` wakes only on-program
   pipelines: the operator presses ▶ again once a video is ready (before
   L4b the ▶ claimed program, so the download started it).
+- **The WS state follows a scene flip** (`engine_play.rs::broadcast_scene_flip`,
+  called at the end of `handle_scene_change`, review round 6). A ▶'d
+  playlist that then goes on air stays `Playing`, so `apply_event` (which
+  broadcasts only a raw state change) told the dashboard nothing and it
+  kept "Hrá mimo programu" for the rest of the song; a hold stays `Playing`
+  until its pause. The flip itself is broadcast when the raw state did not
+  change but the wire state (`play_state_to_ws`) did, so a pause or a new
+  song is still broadcast once. The mock models it: a program cut to a
+  playlist its `/play` started off air broadcasts `Playing`.
 - **`/api/v1/status`**: `active_scene` = the one resolver,
   `active_playlist_ids` = the on-air set, ascending
   (`api/routes_status.rs::on_air_fields`; `routes.rs` is at the cap). A

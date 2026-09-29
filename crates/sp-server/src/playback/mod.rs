@@ -468,6 +468,7 @@ impl PlaybackEngine {
     /// the same sequence). Off program, fires `SceneOff`, or holds it through
     /// its transition (`scene_off.rs`).
     pub async fn handle_scene_change(&mut self, playlist_id: i64, on_program: bool) {
+        let before = self.scene_snapshot(playlist_id); // for `broadcast_scene_flip`
         // Going off-program cancels title timers and clears Resolume
         // state (prevents last-write-wins bleed between playlists on
         // the shared `#sp-title` / `#sp-subs` clips — 2026-04-19 event).
@@ -516,6 +517,7 @@ impl PlaybackEngine {
         } else {
             self.scene_off(playlist_id).await; // #215: held through a transition
         }
+        self.broadcast_scene_flip(playlist_id, before); // #221 L4b: the WS state
     }
 
     /// Re-wake pipelines parked in `WaitingForScene` after the download

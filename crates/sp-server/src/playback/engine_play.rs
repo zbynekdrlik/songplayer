@@ -180,4 +180,34 @@ impl PlaybackEngine {
             }
         }
     }
+
+    /// `playlist_id`'s raw state and whether it is on program, taken before a
+    /// scene change (`broadcast_scene_flip`).
+    pub(super) fn scene_snapshot(&self, playlist_id: i64) -> Option<(PlayState, bool)> {
+        let pp = self.pipelines.get(&playlist_id)?;
+        Some((pp.state.clone(), pp.scene_active.load(Ordering::Acquire)))
+    }
+
+    /// Tell the dashboard when a scene change moved `playlist_id`'s wire
+    /// state (#170: `Playing` off program is `WaitingForScene`) but not its
+    /// raw state; a raw state change is broadcast by `apply_event`, once.
+    /// #221 L4b review round 6: a ▶'d playlist playing off program that goes
+    /// on air stays `Playing`, and the dashboard read "Hrá mimo programu" for
+    /// the rest of its song; one held through a transition stays `Playing`
+    /// until its pause, and now reads off program at once.
+    pub(super) fn broadcast_scene_flip(&self, playlist_id: i64, before: Option<(PlayState, bool)>) {
+        let (Some((was, was_on)), Some(pp)) = (before, self.pipelines.get(&playlist_id)) else {
+            return;
+        };
+        let state = play_state_to_ws(&pp.state, pp.scene_active.load(Ordering::Acquire));
+        if pp.state != was || state == play_state_to_ws(&was, was_on) {
+            return;
+        }
+        let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
+            playlist_id,
+            state,
+            mode: pp.mode,
+            transport: transport_from_play_state(&pp.state),
+        });
+    }
 }
