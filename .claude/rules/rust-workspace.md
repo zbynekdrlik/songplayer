@@ -262,6 +262,17 @@ failed on them (`36438006665`):
   `f(&req_id)` behind → `clippy::needless_borrow`** (#221, caught in
   review before CI). When a moved body now receives `req_id: &str`, write
   `self.cancel(req_id)`, not `self.cancel(&req_id)`.
+- **`&Box<dyn Trait>` passed where `&dyn Trait` is expected is E0277**
+  (#136 review round 1). `probe_one(p, …)` with `p: &Box<dyn
+  MetadataProvider>` does not deref-coerce: rustc commits to the unsize
+  coercion and then needs `Box<dyn MetadataProvider>: MetadataProvider`.
+  Write `&**p` (the repo's shape: `playback/wallclock.rs` `&*source`); a
+  METHOD call on `p` auto-derefs fine.
+- **Moving a fn out of a file can orphan its `///` lines** (#136 round 2):
+  the doc comment left behind documents whatever item follows (there a
+  `#[cfg(test)] mod tests` after a blank line) →
+  `clippy::empty_line_after_doc_comments` under `-D warnings`. Delete the
+  doc with the fn; re-read the cut site.
 
 ## Spawn order is not execution order — never order work by spawning it (#221)
 
@@ -480,6 +491,15 @@ the test that kills each one BEFORE CI's mutation gate runs.
   then `cargo mutants --in-diff <scratch>/range.diff --list --dir <wt>`
   (no `cd`, no redirect). Diff from the MERGED `origin/dev`, not from the
   lane's original base: `<base>..HEAD` then also lists dev's own commits.
+- **Give a review dispatch the merged base SHA, not `origin/dev`** (#136):
+  the `.git` is shared with the main checkout, so another session's fetch
+  can move `origin/dev` mid-review, and `git diff origin/dev..HEAD` (a TREE
+  diff) then shows the other lane's work reversed. Name the SHA the lane
+  merged (`git diff 0e988e5c..HEAD`).
+- **The worktree Bash guard refuses `cd <wt> && python3 - <<EOF` edits**
+  (and loops over computed paths): write the edit script to the scratchpad
+  and run `python3 <scratch>/edit.py` with absolute paths inside it; assert
+  each anchor's count before replacing.
 - **A NEW file is missing from `git diff <base>` until git tracks it**
   (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
   showed no mutant at all for the new `remote/codec.rs`. `git add -N
