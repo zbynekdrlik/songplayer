@@ -192,3 +192,23 @@ fn serde_jsons_private_raw_value_key_is_an_ordinary_key_in_both_encodings() {
     let frame = rmp_serde::to_vec_named(&plain).unwrap();
     assert_eq!(Codec::MsgPack.decode_binary(&frame), Ok(plain));
 }
+
+#[test]
+fn a_json_message_decodes_every_value_kind_like_serde_json() {
+    // The JSON path builds the value itself too (`PlainValue`): every kind,
+    // escapes included, comes out as serde_json's own parser gives it.
+    let text = r#"{"op":7,"d":{"ok":true,"no":false,"code":100,"negative":-3,
+        "fraction":0.5,"large":4294967296,"none":null,"list":[1,"a",[]],
+        "text":"OBS manuál \"q\"","empty":{}}}"#;
+    let expected: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(Codec::Json.decode_text(text), Ok(expected));
+}
+
+#[test]
+fn binary_data_names_what_was_expected() {
+    // `bin` has no JSON value; the error says what the decoder wanted.
+    let err = rmp_serde::from_slice::<PlainValue>(&[0xc4, 0x01, 0xff])
+        .err()
+        .unwrap();
+    assert!(err.to_string().contains("expected a JSON value"), "{err}");
+}

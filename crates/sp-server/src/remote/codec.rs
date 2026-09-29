@@ -19,8 +19,11 @@
 //! The 1 MiB bound (`remote::MAX_MESSAGE_BYTES`) is the WebSocket layer's, so
 //! it holds for both encodings before a frame reaches the codec.
 
+use std::fmt;
+
 use serde::Deserialize;
-use serde_json::Value;
+use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
+use serde_json::{Map, Value};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::protocol::{CLOSE_MESSAGE_DECODE_ERROR, CloseReason, Subprotocol};
@@ -93,7 +96,9 @@ impl Codec {
     /// One incoming TEXT frame, or the close obs-websocket answers it with.
     pub fn decode_text(self, text: &str) -> Result<Value, CloseReason> {
         match self {
-            Self::Json => serde_json::from_str(text).map_err(|_| JSON_UNDECODABLE),
+            Self::Json => serde_json::from_str::<PlainValue>(text)
+                .map(|PlainValue(value)| value)
+                .map_err(|_| JSON_UNDECODABLE),
             Self::MsgPack => Err(TEXT_ON_MSGPACK),
         }
     }
@@ -115,8 +120,81 @@ impl Codec {
 fn decode_msgpack(bytes: &[u8]) -> Option<Value> {
     let mut de = rmp_serde::Deserializer::new(bytes);
     de.set_max_depth(MAX_DEPTH);
-    let value = Value::deserialize(&mut de).ok()?;
+    let PlainValue(value) = PlainValue::deserialize(&mut de).ok()?;
     de.get_ref().is_empty().then_some(value)
+}
+
+/// A decoded message as a `serde_json::Value`, built with EVERY map key as a
+/// plain string. sp-server enables serde_json's `raw_value` feature
+/// (`api/preview.rs`), and with it `Value`'s own `Deserialize` treats a map
+/// whose first key is `$serde_json::private::RawValue` as a raw value and
+/// re-parses its string as JSON with a FRESH 128-level budget, so strings
+/// nested that way would take a session's stack far below [`MAX_DEPTH`]
+/// (#221 review round 1). Here nothing is re-parsed: a frame nests exactly as
+/// deep as its deserializer allows (serde_json's and rmp-serde's limit, 128).
+struct PlainValue(Value);
+
+impl<'de> Deserialize<'de> for PlainValue {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(PlainVisitor).map(PlainValue)
+    }
+}
+
+/// Builds a [`PlainValue`]. Both deserializers reach every JSON value through
+/// these methods (serde forwards the smaller ints / `f32` / borrowed strings);
+/// binary / extension data has no JSON value and is refused.
+struct PlainVisitor;
+
+impl<'de> Visitor<'de> for PlainVisitor {
+    type Value = Value;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a JSON value")
+    }
+
+    fn visit_bool<E: de::Error>(self, v: bool) -> Result<Value, E> {
+        Ok(Value::Bool(v))
+    }
+
+    fn visit_i64<E: de::Error>(self, v: i64) -> Result<Value, E> {
+        Ok(Value::from(v))
+    }
+
+    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Value, E> {
+        Ok(Value::from(v))
+    }
+
+    /// NaN / an infinity is `null`, as in serde_json.
+    fn visit_f64<E: de::Error>(self, v: f64) -> Result<Value, E> {
+        Ok(Value::from(v))
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<Value, E> {
+        Ok(Value::from(v))
+    }
+
+    /// mutants::skip — its only mutant, `Ok(Default::default())`, IS
+    /// `Value::Null` (equivalent); a null is pinned by the round-trip tests.
+    #[cfg_attr(test, mutants::skip)]
+    fn visit_unit<E: de::Error>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        let mut items = Vec::new();
+        while let Some(PlainValue(item)) = seq.next_element()? {
+            items.push(item);
+        }
+        Ok(Value::Array(items))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
+        let mut object = Map::new();
+        while let Some((key, PlainValue(value))) = map.next_entry::<String, PlainValue>()? {
+            object.insert(key, value);
+        }
+        Ok(Value::Object(object))
+    }
 }
 
 #[cfg(test)]
