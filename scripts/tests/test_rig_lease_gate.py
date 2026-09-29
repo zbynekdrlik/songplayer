@@ -382,3 +382,29 @@ def test_a_holder_field_never_starts_a_new_log_line():
 
 def test_the_body_bound_is_64_kib():
     assert gate_mod.MAX_BODY_BYTES == 65_536
+
+
+# ---- review round 4 ------------------------------------------------------------
+
+
+def test_nothing_the_lease_port_answers_breaks_a_log_line(serve, raw_serve):
+    # A top-level JSON string is "not a lease" and was logged raw; a CRLF
+    # banner reaches the log through the exception text. Neither may start
+    # a new runner output line (a workflow command).
+    string = serve(json.dumps("x\n::error::injected").encode())
+    banner = raw_serve(b"SSH-2.0-OpenSSH_9.6\r\n::error::injected\r\n")
+    lines: list[str] = []
+    assert fetch_lease([string, banner], lines.append) is None
+    assert len(lines) == 2
+    for line in lines:
+        assert "\n" not in line and "\r" not in line, repr(line)
+
+
+def test_main_refuses_a_url_with_a_broken_port_or_host():
+    for url in [
+        "http://dev1:abc/rig-lease.json",
+        "http://dev1:88900/rig-lease.json",
+        "http://[::1/rig-lease.json",
+    ]:
+        with pytest.raises(SystemExit):
+            main(["--own-repo", OWN_REPO, "--url", url])
