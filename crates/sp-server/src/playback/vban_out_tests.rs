@@ -474,11 +474,11 @@ fn the_counter_is_contiguous_across_blocks_a_cut_and_standby() {
         .expect("mock sender");
     let mut program = ProgramOutput::new(sender, 4, 2).with_vban(out.clone());
     let s = |j: i64| D + j * 333_333;
-    program.submit(source_job(s(0), 0.5), s(0)); // source A
-    program.submit(source_job(s(1), 0.5), s(1)); // source A
-    program.submit(source_job(s(2), -0.25), s(2)); // the cut: source B
-    program.submit(ProgramJob::Standby { stamp_100ns: s(3) }, s(3)); // standby
-    program.submit(source_job(s(4), -0.25), s(4)); // source B
+    program.submit(source_job(s(0), 0.5)); // source A
+    program.submit(source_job(s(1), 0.5)); // source A
+    program.submit(source_job(s(2), -0.25)); // the cut: source B
+    program.submit(ProgramJob::Standby { stamp_100ns: s(3) }); // standby
+    program.submit(source_job(s(4), -0.25)); // source B
     assert_eq!(out.queued(), 5, "one block per submitted pair");
     out.stop();
 

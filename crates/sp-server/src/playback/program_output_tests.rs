@@ -32,7 +32,7 @@ fn a_standby_pair_is_one_silent_block_then_the_nv12_black_on_its_boundary() {
     let (backend, mut out) = output(4, 2);
     let stamp = floor_boundary_100ns(T0, GENLOCK_GRID_FPS);
     assert_eq!(
-        out.submit(ProgramJob::Standby { stamp_100ns: stamp }, stamp + 123),
+        out.submit(ProgramJob::Standby { stamp_100ns: stamp }),
         stamp
     );
     assert_eq!(
@@ -80,7 +80,7 @@ fn a_forwarded_boundary_keeps_the_sources_frame_audio_and_stamps() {
         audio_tc_100ns: stamp + 77,
         live: true,
     };
-    assert_eq!(out.submit(ProgramJob::Source(job), stamp + 999), stamp);
+    assert_eq!(out.submit(ProgramJob::Source(job)), stamp);
     assert_eq!(backend.video_timecodes(), vec![stamp]);
     assert_eq!(
         backend.audio_timecodes(),
@@ -345,7 +345,7 @@ fn a_mix_submits_the_crossfaded_block_then_the_blended_picture_on_its_boundary()
     let to = pair(4, &TO_4X2, stamp, stamp + 22, 0.5);
     let sources = [from.video.clone(), to.video.clone()];
     let mix = mix_at(stamp, Some(from), Some(to), 4, 9);
-    assert_eq!(out.submit(ProgramJob::Mix(mix), stamp + 999), stamp);
+    assert_eq!(out.submit(ProgramJob::Mix(mix)), stamp);
     assert_eq!(
         backend.calls(),
         vec![
@@ -440,12 +440,12 @@ fn a_missing_side_mixes_against_the_black_of_the_present_sides_size() {
 
     // Submitted: the missing side is silence, and the mixed block is stamped on
     // its window boundary like every block the program makes (#224).
-    assert_eq!(out.submit(ProgramJob::Mix(from_only), at(0) + 999), at(0));
+    assert_eq!(out.submit(ProgramJob::Mix(from_only)), at(0));
     assert_block(&backend, |i| {
         let (g_from, g_to) = crossfade_gains(4 * 1600 + i, 9 * 1600);
         g_from * 0.25 + g_to * 0.0
     });
-    assert_eq!(out.submit(ProgramJob::Mix(to_only), at(1) + 999), at(1));
+    assert_eq!(out.submit(ProgramJob::Mix(to_only)), at(1));
     assert_block(&backend, |i| {
         let (g_from, g_to) = crossfade_gains(i, 9 * 1600);
         g_from * 0.0 + g_to * 0.5
@@ -453,7 +453,7 @@ fn a_missing_side_mixes_against_the_black_of_the_present_sides_size() {
     // A mix with neither side (the bus never queues one) goes out as the
     // program's own standby pair.
     let neither = mix_at(at(2), None, None, 5, 9);
-    assert_eq!(out.submit(ProgramJob::Mix(neither), at(2) + 5), at(2));
+    assert_eq!(out.submit(ProgramJob::Mix(neither)), at(2));
     assert_block(&backend, |_| 0.0);
     assert_eq!(backend.video_timecodes(), vec![at(0), at(1), at(2)]);
     assert_eq!(
@@ -561,8 +561,8 @@ fn different_sizes_fit_the_outgoing_picture_into_the_incoming_layout_then_blend(
         ],
         "slot 4 of 9 (weight ½)"
     );
-    out.submit(ProgramJob::Mix(before), at(0));
-    out.submit(ProgramJob::Mix(after), at(1));
+    out.submit(ProgramJob::Mix(before));
+    out.submit(ProgramJob::Mix(after));
     // The audio crossfades on the window's curve as before.
     assert_block(&backend, |i| {
         let (g_from, g_to) = crossfade_gains(4 * 1600 + i, 9 * 1600);
@@ -659,20 +659,20 @@ fn a_run_of_mixed_boundaries_is_counted_until_the_next_unmixed_boundary() {
     let from = pair(4, &FROM_4X2, at(0), at(0), 0.25);
     let same = pair(4, &TO_4X2, at(0), at(0), 0.5);
     let wide = pair(8, &[7u8; 24], at(0), at(0), 0.5);
-    out.submit(
-        ProgramJob::Mix(mix_at(at(0), Some(from.clone()), Some(same), 0, 9)),
+    out.submit(ProgramJob::Mix(mix_at(
         at(0),
-    );
-    out.submit(
-        ProgramJob::Mix(mix_at(at(1), Some(from), Some(wide), 1, 9)),
-        at(1),
-    );
+        Some(from.clone()),
+        Some(same),
+        0,
+        9,
+    )));
+    out.submit(ProgramJob::Mix(mix_at(at(1), Some(from), Some(wide), 1, 9)));
     assert_eq!(
         (out.mix_run.boundaries, out.mix_run.fitted),
         (2, 1),
         "two mixed boundaries, the second one fitted"
     );
-    out.submit(ProgramJob::Standby { stamp_100ns: at(2) }, at(2));
+    out.submit(ProgramJob::Standby { stamp_100ns: at(2) });
     assert_eq!(
         out.mix_run,
         MixRun::default(),

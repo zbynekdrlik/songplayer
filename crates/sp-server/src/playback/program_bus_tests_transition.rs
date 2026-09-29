@@ -10,8 +10,7 @@
 //! Wired via `#[cfg(test)] #[path = "program_bus_tests_transition.rs"] mod tests_transition;`.
 
 use super::tests::{
-    MS, SRC_A, SRC_B, SRC_C, T0, b, dims, drain, frame, grace, job, program, sends, stamps,
-    video_dims,
+    MS, SRC_A, SRC_B, SRC_C, b, dims, drain, frame, grace, job, program, sends, stamps, video_dims,
 };
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
@@ -192,7 +191,7 @@ fn the_window_audio_is_the_equal_power_crossfade_and_never_dips_below_the_quiete
             core.cut(SRC_B, b(5) + 5 * MS);
         }
         while let Some(job) = core.take() {
-            let stamp = out.submit(job, T0);
+            let stamp = out.submit(job);
             core.record_submitted(stamp);
             blocks.push((stamp, backend.last_audio_planar()));
         }

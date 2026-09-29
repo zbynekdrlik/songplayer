@@ -174,7 +174,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// block belongs to that boundary's timeline instant, never the submit
     /// instant — a standby pair for a missed boundary goes out up to the
     /// fill grace (3 slots) late (#224).
-    pub fn submit(&mut self, job: ProgramJob, _audio_now_100ns: i64) -> i64 {
+    pub fn submit(&mut self, job: ProgramJob) -> i64 {
         if !matches!(job, ProgramJob::Mix(_)) {
             self.end_mix_run();
         }
@@ -220,7 +220,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
         let stamp = mix.stamp_100ns;
         let started = Instant::now();
         let Some((layout, video)) = self.mix_picture(&mix) else {
-            return self.submit(ProgramJob::Standby { stamp_100ns: stamp }, stamp);
+            return self.submit(ProgramJob::Standby { stamp_100ns: stamp });
         };
         let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
         self.mix_run.boundaries += 1;
@@ -378,7 +378,7 @@ pub fn run_program_loop<B: NdiBackend>(
         bus.release_due(now);
         match bus.take_timeout(next_check_wait(now)) {
             Take::Job(job) => {
-                let stamp = out.submit(job, wall.now_100ns());
+                let stamp = out.submit(job);
                 bus.record_submitted(stamp);
                 since_conn_poll += 1;
                 if since_conn_poll >= CONN_POLL_EVERY {

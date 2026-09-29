@@ -530,7 +530,7 @@ impl NdiInput {
     /// audio is stamped on `boundary_100ns` like the video: the block the
     /// FrameSync gives for a boundary belongs to that boundary's timeline
     /// instant, also in a catch-up after missed boundaries (#224).
-    pub fn service(&mut self, boundary_100ns: i64, _audio_now_100ns: i64, bus: &ProgramBus) {
+    pub fn service(&mut self, boundary_100ns: i64, bus: &ProgramBus) {
         self.apply_settings(boundary_100ns);
         let candidate = bus.touch(PROGRAM_INPUT_ID, boundary_100ns);
         let captured = if self.applied.active() {
@@ -738,7 +738,7 @@ pub fn run_input_loop(input: &mut NdiInput, bus: &ProgramBus, clock: &mut dyn Vb
                         "ndi input: > 8 boundaries missed — resync"
                     );
                 }
-                input.service(boundary, clock.now_100ns(), bus);
+                input.service(boundary, bus);
                 last = Some(boundary);
             }
         }

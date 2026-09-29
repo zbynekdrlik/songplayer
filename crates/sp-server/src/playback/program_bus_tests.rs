@@ -78,7 +78,7 @@ pub(super) fn program() -> (Arc<MockNdiBackend>, ProgramOutput<MockNdiBackend>) 
 /// Send every queued program boundary through the mock `SP-program` sender.
 pub(super) fn drain(core: &mut ProgramCore, out: &mut ProgramOutput<MockNdiBackend>) {
     while let Some(job) = core.take() {
-        let stamp = out.submit(job, T0);
+        let stamp = out.submit(job);
         core.record_submitted(stamp);
     }
 }
