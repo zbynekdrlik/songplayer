@@ -35,6 +35,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import sys
 import time
@@ -115,9 +116,11 @@ def fetch_lease(
         try:
             with urllib.request.urlopen(url, timeout=timeout) as resp:
                 doc = json.load(resp)
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, http.client.HTTPException) as e:
             # URLError / HTTPError / a timeout are OSErrors; bad JSON is a
-            # ValueError. Logged, then the next URL is tried.
+            # ValueError; a non-HTTP listener (BadStatusLine) or a truncated
+            # body (IncompleteRead) is an HTTPException. Logged, then the
+            # next URL is tried.
             log(f"rig lease: {url} did not answer with JSON ({e})")
             continue
         if not is_lease(doc):
