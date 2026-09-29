@@ -50,3 +50,7 @@ pub async fn ai_status(State(state): State<AppState>) -> impl IntoResponse {
     let status = state.ai_proxy.status().await;
     Json(serde_json::json!(status))
 }
+
+#[cfg(test)]
+#[path = "ai_tests.rs"]
+mod tests;
