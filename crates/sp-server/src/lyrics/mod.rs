@@ -41,6 +41,7 @@ pub mod text_candidate;
 pub mod tier1;
 pub mod title_search;
 pub mod track_store;
+pub mod transcript_cache;
 pub mod translator;
 pub mod worker;
 pub mod worker_g35t;

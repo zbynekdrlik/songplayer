@@ -8,9 +8,13 @@
 //! when those lookups found nothing, the worker searches by the title alone
 //! (`lrclib_search`, `genius::search_by_title_at`), scores every candidate
 //! against the song's one Gemini 3.5 transcript by word overlap, and takes
-//! the best above a measured floor as the reference text. The normal mtl +
-//! two-way gate then verifies it against the audio again. No LLM guesses the
-//! original artist: the audio decides.
+//! the best above a measured floor. That lyric becomes the reference text
+//! unless the video's own gathered text (its captions or description)
+//! matches what is sung at least as well (`choose_reference`) — a partial
+//! description loses to the full lyric, the video's own complete captions
+//! are not displaced by another recording's lyric. The normal mtl + two-way
+//! gate then verifies the reference against the audio again. No LLM guesses
+//! the original artist: the audio decides.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -21,6 +25,7 @@ use tracing::{info, warn};
 use crate::lyrics::g35t_client::AsrWord;
 use crate::lyrics::provider::CandidateText;
 use crate::lyrics::reference_gate::{normalize_word, normalized_words};
+use crate::lyrics::tier1::CandidateText as TierCandidate;
 
 /// A title candidate's word overlap with the transcript must reach this to
 /// become the reference text. Measured on #144 (issue comment 5899043518):
@@ -113,7 +118,12 @@ fn word_counts(words: impl Iterator<Item = String>) -> HashMap<String, usize> {
 /// of the normalized words — 2 × shared ÷ (text words + sung words). Order
 /// plays no part; a same-title different song shares only common words.
 pub fn overlap_score(lyrics: &LyricsTrack, words: &[AsrWord]) -> f64 {
-    let text = word_counts(lyrics.lines.iter().flat_map(|l| normalized_words(&l.en)));
+    lines_overlap_score(lyrics.lines.iter().map(|l| l.en.as_str()), words)
+}
+
+/// `overlap_score` of any lines of text (a gathered candidate's lines).
+pub fn lines_overlap_score<'a>(lines: impl Iterator<Item = &'a str>, words: &[AsrWord]) -> f64 {
+    let text = word_counts(lines.flat_map(normalized_words));
     let sung = word_counts(
         words
             .iter()
@@ -131,16 +141,50 @@ pub fn overlap_score(lyrics: &LyricsTrack, words: &[AsrWord]) -> f64 {
     2.0 * shared as f64 / total as f64
 }
 
-/// The index of the best score at or above `MIN_TITLE_MATCH_SCORE`; on a tie
-/// the earlier candidate (LRCLIB before Genius, then the search's own order).
-pub fn pick_best(scores: &[f64]) -> Option<usize> {
+/// The indices of the scores at or above `MIN_TITLE_MATCH_SCORE`, best
+/// first; a tie keeps the earlier candidate first (LRCLIB before Genius,
+/// then the search's own order). The caller takes the first one whose lyric
+/// it can use (a plain lyric the Claude cleanup rejects passes to the next).
+pub fn rank_above_floor(scores: &[f64]) -> Vec<usize> {
+    let mut ranked: Vec<usize> = (0..scores.len())
+        .filter(|&i| scores[i] >= MIN_TITLE_MATCH_SCORE)
+        .collect();
+    // `sort_by` is stable: equal scores keep their index order.
+    ranked.sort_by(|&a, &b| scores[b].total_cmp(&scores[a]));
+    ranked
+}
+
+/// Which text goes to mtl once the title search found a lyric scoring
+/// `title_score`: `Some(i)` = the gathered text `i` (the video's own
+/// captions / description) when it matches what is sung at least as well
+/// (a tie keeps the video's own text, and the earlier gathered text);
+/// `None` = the title lyric.
+pub fn choose_reference(gathered_scores: &[f64], title_score: f64) -> Option<usize> {
     let mut best: Option<usize> = None;
-    for (i, &score) in scores.iter().enumerate() {
-        if score >= MIN_TITLE_MATCH_SCORE && best.is_none_or(|b| score > scores[b]) {
+    let mut best_score = title_score;
+    for (i, &score) in gathered_scores.iter().enumerate() {
+        let beats = match best {
+            None => score >= best_score,
+            Some(_) => score > best_score,
+        };
+        if beats {
             best = Some(i);
+            best_score = score;
         }
     }
     best
+}
+
+/// The audit path of the title search.
+fn audit_path(cache_dir: &Path, youtube_id: &str) -> std::path::PathBuf {
+    cache_dir.join(format!("{youtube_id}_title_search_audit.json"))
+}
+
+/// Remove a title-search audit left by an earlier run when this run does not
+/// search (an artist+title lookup found the song now), so the file on disk
+/// always describes the latest run. Best-effort.
+pub async fn remove_audit(cache_dir: &Path, youtube_id: &str) {
+    let _ = tokio::fs::remove_file(audit_path(cache_dir, youtube_id)).await;
 }
 
 /// The cache file of the Claude cleanup of a chosen plain candidate, keyed by
@@ -222,16 +266,20 @@ pub struct TitleSearch<'a> {
 
 impl TitleSearch<'_> {
     /// Search both providers by `row.song`, score every candidate against
-    /// `words`, write the audit, and return the chosen lyric as a candidate
-    /// (`None` when no title, nothing reaches the floor, or the cleanup of
-    /// the chosen plain lyric finds none). Every failure is logged, never
-    /// fatal: the song keeps its gathered candidates.
+    /// `words`, take the best usable one at or above the floor, and return
+    /// the REFERENCE text for mtl: that lyric, or a `gathered` text of the
+    /// video itself that matches what is sung at least as well
+    /// (`choose_reference`). `None` when there is no title or no usable lyric
+    /// reaches the floor — the caller then picks from `gathered` by source
+    /// priority as before. Writes `{yt}_title_search_audit.json`. Every
+    /// failure is logged, never fatal.
     pub async fn find(
         &self,
         endpoints: &TitleSearchEndpoints,
         row: &crate::db::models::VideoLyricsRow,
         words: &[AsrWord],
-    ) -> Option<CandidateText> {
+        gathered: &[TierCandidate],
+    ) -> Option<TierCandidate> {
         let title = row.song.trim();
         if title.is_empty() {
             return None;
@@ -267,30 +315,70 @@ impl TitleSearch<'_> {
             .iter()
             .map(|c| overlap_score(&c.lyrics, words))
             .collect();
-        let chosen = pick_best(&scores);
-        let audit = audit_json(title, duration_s, &cands, &scores, chosen);
-        let audit_path = self
-            .cache_dir
-            .join(format!("{youtube_id}_title_search_audit.json"));
-        if let Err(e) = tokio::fs::write(&audit_path, audit.to_string()).await {
-            warn!(path = %audit_path.display(), %e, "title search: audit write failed");
+        let mut found: Option<(usize, TierCandidate)> = None;
+        for i in rank_above_floor(&scores) {
+            if let Some(c) = self.candidate_from(&cands[i], row).await {
+                found = Some((i, c.into()));
+                break;
+            }
         }
 
-        let Some(i) = chosen else {
-            info!(%youtube_id, title, candidates = cands.len(), "title search: no lyric reaches the floor");
+        // The found lyric (as cleaned) against the video's own texts.
+        let gathered_scores: Vec<f64> = gathered
+            .iter()
+            .map(|c| lines_overlap_score(c.lines.iter().map(String::as_str), words))
+            .collect();
+        let reference = found.as_ref().map(|(_, lyric)| {
+            let lyric_score = lines_overlap_score(lyric.lines.iter().map(String::as_str), words);
+            let pick = choose_reference(&gathered_scores, lyric_score);
+            let chosen = pick.map_or(lyric, |g| &gathered[g]);
+            (chosen.clone(), lyric_score, pick)
+        });
+
+        let mut audit = audit_json(
+            title,
+            duration_s,
+            &cands,
+            &scores,
+            found.as_ref().map(|(i, _)| *i),
+        );
+        audit["gathered"] = serde_json::json!(
+            gathered
+                .iter()
+                .zip(&gathered_scores)
+                .map(|(c, s)| serde_json::json!({"source": c.source, "score": s}))
+                .collect::<Vec<_>>()
+        );
+        audit["reference"] = match &reference {
+            Some((chosen, _, pick)) => serde_json::json!({
+                "source": chosen.source,
+                "from": if pick.is_some() { "gathered" } else { "title" },
+            }),
+            None => serde_json::Value::Null,
+        };
+        let path = audit_path(self.cache_dir, youtube_id);
+        if let Err(e) = tokio::fs::write(&path, audit.to_string()).await {
+            warn!(path = %path.display(), %e, "title search: audit write failed");
+        }
+
+        let Some((i, _)) = found else {
+            info!(%youtube_id, title, candidates = cands.len(), "title search: no usable lyric reaches the floor");
             return None;
         };
-        let cand = &cands[i];
+        let (chosen, lyric_score, pick) = reference?;
         info!(
             %youtube_id,
             title,
-            provider = cand.provider.source(),
-            id = %cand.id,
-            artist = %cand.artist,
+            provider = cands[i].provider.source(),
+            id = %cands[i].id,
+            artist = %cands[i].artist,
             score = scores[i],
-            "title search: chose a lyric (#144)"
+            cleaned_score = lyric_score,
+            reference = %chosen.source,
+            from = if pick.is_some() { "gathered" } else { "title" },
+            "title search: found a lyric (#144)"
         );
-        self.candidate_from(cand, row).await
+        Some(chosen)
     }
 
     /// The chosen lyric as a reference-text candidate: a synced LRCLIB lyric

@@ -52,6 +52,17 @@ pub struct GateStats {
     pub max_uncovered_sung_ms: u64,
 }
 
+impl GateStats {
+    /// The transcript → reference numbers of these stats.
+    pub fn sung(&self) -> crate::lyrics::sung_coverage::SungCoverage {
+        crate::lyrics::sung_coverage::SungCoverage {
+            sung_words: self.sung_words,
+            covered_frac: self.sung_covered_frac,
+            max_uncovered_ms: self.max_uncovered_sung_ms,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GateFailReason {
     Coverage,

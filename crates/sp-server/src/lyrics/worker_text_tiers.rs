@@ -2,13 +2,15 @@
 //! isolated (#144).
 //!
 //! 1. ONE Gemini 3.5 Transcribe transcript of the isolated vocal
-//!    (`transcribe_vocal`), reused by everything below. Before #144 the
+//!    (`transcribe_vocal`), reused by everything below and kept on disk for
+//!    a no-penalty deferral re-pick (`transcript_cache`). Before #144 the
 //!    reference stage transcribed after mtl, and the base tier transcribed the
 //!    same vocal AGAIN whenever the gate failed.
 //! 2. The title search (`title_search`), when no artist+title lookup found the
-//!    song (a cover names the cover artist): candidates by title alone, the
-//!    one the transcript's words match best above a measured floor joins the
-//!    candidates.
+//!    song (a cover names the cover artist) and the ★ tier can run:
+//!    candidates by title alone; the one the transcript's words match best
+//!    above a measured floor becomes the reference text, unless the video's
+//!    own captions / description match what is sung at least as well.
 //! 3. The ★ tier (`run_mtl_reference_stage`): the best text candidate, mtl
 //!    force-aligned and verified by the two-way gate against that transcript.
 //! 4. The base tier (`run_g35t_transcript_branch`): the transcript grouped
@@ -38,21 +40,42 @@ pub(crate) enum TierOutcome {
 
 /// #144: the one g35t transcript of this song's isolated vocal.
 ///
-/// `Ok(None)` means there is nothing to transcribe here: no isolated vocal (the
-/// base tier chooses between the #171 full-mix fallback and a deferral) or no
-/// Gemini key (the base tier defers `gemini_key_missing`). `Err` is a failed
-/// transcription: the song defers (`g35t_error`) and retries after its
-/// backoff — before #144 it spent the mtl run first, then failed again in the
-/// base tier.
+/// A transcript kept for the same vocal within the reuse window
+/// (`transcript_cache`) is reused — a no-penalty deferral re-pick does not
+/// pay for it twice; a new one is kept. `Ok(None)` means there is nothing to
+/// transcribe here: no isolated vocal (the base tier chooses between the #171
+/// full-mix fallback and a deferral) or no Gemini key (the base tier defers
+/// `gemini_key_missing`). `Err` is a failed transcription: the song defers
+/// (`g35t_error`) and retries after its backoff — before #144 it spent the
+/// mtl run first, then failed again in the base tier.
 pub(crate) async fn transcribe_vocal(
     backend: &dyn ReferenceStageBackend,
     clean_vocal: Option<&Path>,
     gemini_keys: &[String],
     youtube_id: &str,
+    cache_dir: &Path,
 ) -> Result<Option<Vec<AsrWord>>, &'static str> {
+    use crate::lyrics::transcript_cache;
+
     let Some(wav) = clean_vocal else {
         return Ok(None);
     };
+    let kept = transcript_cache::path(cache_dir, youtube_id);
+    let vocal = tokio::fs::metadata(wav)
+        .await
+        .ok()
+        .and_then(|m| transcript_cache::vocal_identity(&m));
+    if let Some(vocal) = vocal
+        && let Some(cached) = transcript_cache::load(&kept).await
+        && transcript_cache::reusable(&cached, vocal, transcript_cache::now_ms())
+    {
+        info!(
+            youtube_id = %youtube_id,
+            words = cached.words.len(),
+            "g35t: the song's transcript, kept from this vocal's earlier pick (#144)"
+        );
+        return Ok(Some(cached.words()));
+    }
     if gemini_keys.is_empty() {
         return Ok(None);
     }
@@ -63,6 +86,9 @@ pub(crate) async fn transcribe_vocal(
                 words = words.len(),
                 "g35t: the song's one transcript (#144)"
             );
+            if let Some(vocal) = vocal {
+                transcript_cache::store(&kept, vocal, transcript_cache::now_ms(), &words).await;
+            }
             Ok(Some(words))
         }
         Err(e) => {
@@ -92,7 +118,7 @@ impl LyricsWorker {
     ) -> anyhow::Result<TierOutcome> {
         let video_id = row.id;
         let youtube_id = row.youtube_id.as_str();
-        let mut candidates: Vec<crate::lyrics::tier1::CandidateText> = candidate_texts
+        let candidates: Vec<crate::lyrics::tier1::CandidateText> = candidate_texts
             .into_iter()
             .map(crate::lyrics::tier1::CandidateText::from)
             .collect();
@@ -119,30 +145,46 @@ impl LyricsWorker {
             mode,
         };
 
-        let transcript =
-            match transcribe_vocal(&reference_backend, clean_vocal, &gemini_keys, youtube_id).await
-            {
-                Ok(t) => t,
-                Err(reason) => {
-                    // `process_next` records the backoff (`defer_song`).
-                    self.clear_processing().await;
-                    return Ok(TierOutcome::Return(SongOutcome::Deferred(reason)));
-                }
-            };
-
-        // #144: a cover's text by title, chosen by what is sung.
-        if let Some(words) = transcript.as_deref()
-            && crate::lyrics::title_search::needs_title_search(&candidates)
-            && let Some(found) = self.title_search_candidate(row, words).await
+        let transcript = match transcribe_vocal(
+            &reference_backend,
+            clean_vocal,
+            &gemini_keys,
+            youtube_id,
+            &self.cache_dir,
+        )
+        .await
         {
-            candidates.push(found.into());
-        }
+            Ok(t) => t,
+            Err(reason) => {
+                // `process_next` records the backoff (`defer_song`).
+                self.clear_processing().await;
+                return Ok(TierOutcome::Return(SongOutcome::Deferred(reason)));
+            }
+        };
 
-        // Tier 1 (★): the best text candidate, mtl force-aligned and verified by
-        // the two-way gate against the transcript. On PASS the mtl line timings
-        // ship; otherwise (skip / gate fail / mtl error) the base tier below.
-        let best_candidate =
-            crate::lyrics::claude_merge::best_authoritative_candidate(&candidates).cloned();
+        // #144: a cover's text by title, chosen by what is sung — only when
+        // no artist+title lookup found the song and the ★ tier can use it.
+        let title_reference = match transcript.as_deref() {
+            Some(words)
+                if crate::lyrics::title_search::needs_title_search(&candidates)
+                    && reference_backend.mtl_cfg.is_available() =>
+            {
+                self.title_search_reference(row, words, &candidates).await
+            }
+            _ => {
+                crate::lyrics::title_search::remove_audit(&self.cache_dir, youtube_id).await;
+                None
+            }
+        };
+
+        // Tier 1 (★): the reference text — the title search's choice, else the
+        // best gathered candidate by source priority — mtl force-aligned and
+        // verified by the two-way gate against the transcript. On PASS the mtl
+        // line timings ship; otherwise (skip / gate fail / mtl error) the base
+        // tier below.
+        let best_candidate = title_reference.or_else(|| {
+            crate::lyrics::claude_merge::best_authoritative_candidate(&candidates).cloned()
+        });
 
         // #154 gate #2 (idle-only mode only, #162). Isolation above may have
         // started while the wall was idle and finished after it went busy — a
@@ -216,14 +258,16 @@ impl LyricsWorker {
     }
 
     /// #144: the title search for this song (`title_search::TitleSearch`), on
-    /// the production endpoints. The Genius token is read per song, like the
-    /// artist+title Genius lookup (`gather_sources`); empty = LRCLIB only.
+    /// the production endpoints: the reference text when it found a lyric.
+    /// The Genius token is read per song, like the artist+title Genius lookup
+    /// (`gather_sources`); empty = LRCLIB only.
     #[cfg_attr(test, mutants::skip)] // settings read + wiring; `TitleSearch::find` is tested
-    async fn title_search_candidate(
+    async fn title_search_reference(
         &self,
         row: &crate::db::models::VideoLyricsRow,
         words: &[AsrWord],
-    ) -> Option<crate::lyrics::provider::CandidateText> {
+        gathered: &[crate::lyrics::tier1::CandidateText],
+    ) -> Option<crate::lyrics::tier1::CandidateText> {
         let genius_token = crate::db::models::get_setting(&self.pool, "genius_access_token")
             .await
             .ok()
@@ -240,6 +284,7 @@ impl LyricsWorker {
                 &crate::lyrics::title_search::TitleSearchEndpoints::production(),
                 row,
                 words,
+                gathered,
             )
             .await
     }

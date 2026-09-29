@@ -47,24 +47,31 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
      the event's own span — never divided by hand); every consumer is
      text-only (mtl re-times them), so no ~65-char double lines reach the wall.
    - Timed / Claude-cleaned candidates are built by `text_candidate.rs`
-     (shared with the title search).
+     (shared with the title search). The Claude cleanup of scraped lyrics
+     (`CleanupMode::ScrapedLyrics`) KEEPS every sung repeat (#144; it used to
+     dedupe them for the deleted v20 chorus projection — mtl times exactly
+     the lines it is given); its caches are `_cleaned_v3.json`.
 
 0b. **One g35t transcript per song (#144,
    `worker_text_tiers::run_text_tiers`).** Right after isolation the vocal is
    transcribed ONCE (`transcribe_vocal`) and reused by the title search, the
    gate and the base tier (before: after mtl, and again in the base tier on a
    gate fail). A failed transcription defers the song (`g35t_error`) before
-   any mtl run.
+   any mtl run. The transcript is kept as `{yt}_g35t_words.json`
+   (`transcript_cache.rs`) and reused for the SAME vocal (length + mtime)
+   within 6 h, so a no-penalty deferral re-pick does not pay for it twice.
 
 0c. **Title search for covers (#144, `title_search.rs`).** When no
    artist+title lookup found the song (no `lrclib`/`genius`/`override`/
    `tier1:spotify` candidate — a cover's metadata names the COVER artist),
    LRCLIB `/api/search?track_name=` (±15 s of the song, `lrclib_search.rs`)
    and Genius by the title alone (first 3 song pages) are scored against the
-   transcript by multiset word overlap (Dice); the best ≥ 0.50
+   transcript by multiset word overlap (Dice); the best usable one ≥ 0.50
    (`MIN_TITLE_MATCH_SCORE`, measured: own lyric 0.664–0.951, other songs
-   ≤ 0.379) joins the candidates as `lrclib`/`genius`, then mtl + the gate
-   verify it. Never an LLM guess of the original artist. Record:
+   ≤ 0.379; a plain lyric the cleanup rejects passes to the next) becomes the
+   reference text — unless the video's own captions / description score at
+   least as high against the transcript (`choose_reference`) — and mtl + the
+   gate verify it. Runs only when the ★ tier can (mtl tooling present). Never an LLM guess of the original artist. Record:
    `{yt}_title_search_audit.json` (every candidate, its score, the choice).
    A cover LONGER/SHORTER than the original by > 15 s is found only through
    Genius (158: Elevation's LRCLIB records are 539 s, the cover 484 s).
@@ -102,7 +109,8 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
    → `g35t_transcript::words_to_lines`). The SOLE fallback for every song the
    ★ tier does not ship (no usable text, gate FAIL, mtl skip/error): the
    song's one transcript (it transcribes only a song with no isolated vocal —
-   the #171 full-mix fallback — or no key), and the
+   the #171 full-mix fallback; with no Gemini key it defers
+   `gemini_key_missing`), and the
    words are grouped into LED-wall lines by a deterministic silence-gap split
    (salvaged from the old asr_path, re-typed) + `line_splitter::
    split_lyrics_lines` + the monotonic/min-duration sanitizer. Ships

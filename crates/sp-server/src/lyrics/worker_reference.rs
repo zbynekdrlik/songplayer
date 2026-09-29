@@ -276,7 +276,9 @@ fn gate_fail_reason_str(reason: &crate::lyrics::reference_gate::GateFailReason) 
 /// Builds the `{youtube_id}_alignment_audit.json` payload for a Lever-2
 /// (#143) reference-stage `Pass` / `Fail` (`stats = Some(..)`) or `Error`
 /// (`stats = None`) outcome. #144 adds the transcript → reference numbers
-/// (`sung_words`, `sung_covered_frac`, `max_uncovered_sung_ms`).
+/// (`sung_words`, `sung_covered_frac`, `max_uncovered_sung_ms`) and
+/// `sung_coverage_ok`, which tells a `coverage` failure of the sung direction
+/// from one of the matched lines.
 fn reference_gate_audit_json(
     verdict: &str,
     reason: Option<&str>,
@@ -296,6 +298,7 @@ fn reference_gate_audit_json(
         "sung_words": stats.map(|s| s.sung_words).unwrap_or(0),
         "sung_covered_frac": stats.map(|s| s.sung_covered_frac).unwrap_or(0.0),
         "max_uncovered_sung_ms": stats.map(|s| s.max_uncovered_sung_ms).unwrap_or(0),
+        "sung_coverage_ok": stats.map(|s| crate::lyrics::reference_gate::covers_what_is_sung(&s.sung())),
         "mtl_device": mtl_device,
         "mtl_elapsed_s": mtl_elapsed_s,
         "asr_words": asr_words,

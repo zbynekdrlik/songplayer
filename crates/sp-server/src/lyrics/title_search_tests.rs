@@ -118,27 +118,27 @@ fn no_shared_word_scores_zero() {
     assert_eq!(overlap_score(&lyrics(&["amen"]), &sung("amen —")), 1.0);
 }
 
-// ---- pick_best ----
+// ---- rank_above_floor ----
 
 #[test]
-fn the_best_score_above_the_floor_is_chosen() {
-    assert_eq!(pick_best(&[0.3, 0.7, 0.6]), Some(1));
+fn the_scores_above_the_floor_are_ranked_best_first() {
+    assert_eq!(rank_above_floor(&[0.3, 0.7, 0.6]), vec![1, 2]);
 }
 
 #[test]
-fn nothing_below_the_floor_is_chosen() {
-    assert_eq!(pick_best(&[0.49, 0.2]), None);
-    assert_eq!(pick_best(&[]), None);
+fn nothing_below_the_floor_is_ranked() {
+    assert_eq!(rank_above_floor(&[0.49, 0.2]), Vec::<usize>::new());
+    assert_eq!(rank_above_floor(&[]), Vec::<usize>::new());
 }
 
 #[test]
-fn a_score_exactly_at_the_floor_is_chosen() {
-    assert_eq!(pick_best(&[MIN_TITLE_MATCH_SCORE]), Some(0));
+fn a_score_exactly_at_the_floor_is_ranked() {
+    assert_eq!(rank_above_floor(&[MIN_TITLE_MATCH_SCORE]), vec![0]);
 }
 
 #[test]
-fn a_tie_keeps_the_earlier_candidate() {
-    assert_eq!(pick_best(&[0.2, 0.6, 0.6]), Some(1));
+fn a_tie_keeps_the_earlier_candidate_first() {
+    assert_eq!(rank_above_floor(&[0.2, 0.6, 0.9, 0.6]), vec![2, 1, 3]);
 }
 
 /// The floor separates the measured distribution (#144): every song's own
@@ -146,11 +146,56 @@ fn a_tie_keeps_the_earlier_candidate() {
 #[test]
 fn the_floor_separates_the_measured_scores() {
     for own in [0.664, 0.701, 0.951, 0.657] {
-        assert_eq!(pick_best(&[own]), Some(0), "own lyric {own}");
+        assert_eq!(rank_above_floor(&[own]), vec![0], "own lyric {own}");
     }
     for other in [0.379, 0.366, 0.317, 0.166] {
-        assert_eq!(pick_best(&[other]), None, "other song {other}");
+        assert!(rank_above_floor(&[other]).is_empty(), "other song {other}");
     }
+}
+
+// ---- choose_reference ----
+
+/// A partial description of the video scores under the found lyric: the
+/// lyric becomes the reference text.
+#[test]
+fn a_better_matching_title_lyric_becomes_the_reference() {
+    assert_eq!(choose_reference(&[0.45], 0.9), None);
+    assert_eq!(choose_reference(&[], 0.6), None);
+}
+
+/// The video's own complete captions match what is sung better than another
+/// recording's lyric: they stay the reference text.
+#[test]
+fn the_videos_own_better_text_stays_the_reference() {
+    assert_eq!(choose_reference(&[0.95], 0.9), Some(0));
+    assert_eq!(choose_reference(&[0.5, 0.97, 0.96], 0.9), Some(1));
+}
+
+/// A tie keeps the video's own text, and the earlier of equal gathered texts.
+#[test]
+fn a_tie_keeps_the_videos_own_text() {
+    assert_eq!(choose_reference(&[0.9], 0.9), Some(0));
+    assert_eq!(choose_reference(&[0.92, 0.92], 0.9), Some(0));
+}
+
+// ---- lines_overlap_score / remove_audit ----
+
+#[test]
+fn any_lines_are_scored_like_a_lyric() {
+    let lines = ["You never fail,", "You never will!"];
+    let s = sung("you never fail you never will jesus");
+    assert_eq!(lines_overlap_score(lines.into_iter(), &s), 12.0 / 13.0);
+}
+
+#[tokio::test]
+async fn a_stale_audit_is_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("yt1_title_search_audit.json");
+    std::fs::write(&p, "{}").unwrap();
+    remove_audit(dir.path(), "yt1").await;
+    assert!(!p.exists());
+    // Nothing to remove is fine too.
+    remove_audit(dir.path(), "yt1").await;
 }
 
 // ---- cleanup_cache_name / audit_json ----
@@ -291,7 +336,12 @@ async fn the_sung_words_choose_the_song_over_a_same_title_different_song() {
     };
 
     let found = search
-        .find(&endpoints(&server), &row("Jesus Be the Name"), &sung(SUNG))
+        .find(
+            &endpoints(&server),
+            &row("Jesus Be the Name"),
+            &sung(SUNG),
+            &[],
+        )
         .await
         .expect("the song's lyric reaches the floor");
     assert_eq!(found.source, "lrclib");
@@ -326,6 +376,11 @@ async fn the_sung_words_choose_the_song_over_a_same_title_different_song() {
     assert_eq!(audit["candidates"][1]["id"], "1");
     assert_eq!(audit["candidates"][1]["score"], 1.0);
     assert_eq!(audit["candidates"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        audit["reference"],
+        serde_json::json!({"source": "lrclib", "from": "title"})
+    );
+    assert_eq!(audit["gathered"], serde_json::json!([]));
 }
 
 /// Only Genius holds the song (the 158 case: LRCLIB's records are all 539 s).
@@ -381,9 +436,14 @@ async fn a_genius_page_is_cleaned_into_a_text_candidate() {
     };
 
     let found = search
-        .find(&endpoints(&server), &row("Jesus Be the Name"), &sung(SUNG))
+        .find(
+            &endpoints(&server),
+            &row("Jesus Be the Name"),
+            &sung(SUNG),
+            &[],
+        )
         .await
-        .expect("the Genius page reaches the floor (18/23)");
+        .expect("the Genius page reaches the floor (20/24)");
     assert_eq!(found.source, "genius");
     assert_eq!(
         found.lines,
@@ -419,7 +479,12 @@ async fn a_different_song_of_the_same_title_is_never_chosen() {
         cache_dir: dir.path(),
     };
     let found = search
-        .find(&endpoints(&server), &row("Jesus Be the Name"), &sung(SUNG))
+        .find(
+            &endpoints(&server),
+            &row("Jesus Be the Name"),
+            &sung(SUNG),
+            &[],
+        )
         .await;
     assert!(found.is_none());
     let audit: serde_json::Value = serde_json::from_str(
@@ -453,7 +518,12 @@ async fn a_plain_lyric_without_a_claude_client_is_not_used() {
         cache_dir: dir.path(),
     };
     let found = search
-        .find(&endpoints(&server), &row("Jesus Be the Name"), &sung(SUNG))
+        .find(
+            &endpoints(&server),
+            &row("Jesus Be the Name"),
+            &sung(SUNG),
+            &[],
+        )
         .await;
     assert!(found.is_none());
 }
@@ -477,8 +547,164 @@ async fn a_row_without_a_title_searches_nothing() {
     };
     assert!(
         search
-            .find(&endpoints(&server), &row("  "), &sung(SUNG))
+            .find(&endpoints(&server), &row("  "), &sung(SUNG), &[])
             .await
             .is_none()
+    );
+}
+
+fn gathered(source: &str, has_timing: bool, lines: &[&str]) -> TierCandidate {
+    TierCandidate {
+        source: source.into(),
+        lines: lines.iter().map(|l| l.to_string()).collect(),
+        line_timings: None,
+        has_timing,
+    }
+}
+
+/// The best lyric is a plain one the cleanup cannot use (no Claude client):
+/// the next-best usable lyric above the floor is taken instead.
+#[tokio::test]
+async fn a_lyric_the_cleanup_cannot_use_passes_to_the_next_best() {
+    let server = MockServer::start().await;
+    mount_lrclib(
+        &server,
+        serde_json::json!([
+            {"id": 9, "trackName": "Jesus Be the Name", "artistName": "Plain Records",
+             "duration": 490.0, "instrumental": false,
+             "plainLyrics": "You never fail\nYou never will\nJesus be the name\nAbove every other name"},
+            {"id": 1, "trackName": "Jesus Be The Name", "artistName": "Elevation Worship",
+             "duration": 484.0, "instrumental": false, "syncedLyrics": RIGHT_SONG}
+        ]),
+    )
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let client = reqwest::Client::new();
+    let search = TitleSearch {
+        client: &client,
+        ai: None,
+        genius_token: "",
+        cache_dir: dir.path(),
+    };
+    let found = search
+        .find(
+            &endpoints(&server),
+            &row("Jesus Be the Name"),
+            &sung(SUNG),
+            &[],
+        )
+        .await
+        .expect("the synced next-best lyric is usable");
+    assert_eq!(found.source, "lrclib");
+    assert!(found.has_timing);
+    let audit: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("yt158_title_search_audit.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        audit["chosen"], 1,
+        "the found lyric is the second candidate"
+    );
+}
+
+/// A partial description of the video (6 of the 14 sung words, 12/20)
+/// loses to the full lyric found by title (1.0): the lyric is the reference.
+#[tokio::test]
+async fn the_found_lyric_replaces_a_partial_description() {
+    let server = MockServer::start().await;
+    mount_lrclib(
+        &server,
+        serde_json::json!([
+            {"id": 1, "trackName": "Jesus Be The Name", "artistName": "Elevation Worship",
+             "duration": 484.0, "instrumental": false, "syncedLyrics": RIGHT_SONG}
+        ]),
+    )
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let client = reqwest::Client::new();
+    let search = TitleSearch {
+        client: &client,
+        ai: None,
+        genius_token: "",
+        cache_dir: dir.path(),
+    };
+    let description = gathered("description", false, &["You never fail", "You never will"]);
+    let found = search
+        .find(
+            &endpoints(&server),
+            &row("Jesus Be the Name"),
+            &sung(SUNG),
+            &[description],
+        )
+        .await
+        .expect("a lyric was found");
+    assert_eq!(found.source, "lrclib");
+    assert_eq!(found.lines.len(), 4);
+    let audit: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("yt158_title_search_audit.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        audit["gathered"],
+        serde_json::json!([{"source": "description", "score": 12.0 / 20.0}])
+    );
+    assert_eq!(
+        audit["reference"],
+        serde_json::json!({"source": "lrclib", "from": "title"})
+    );
+}
+
+/// The video's own complete captions (1.0) match what is sung better than
+/// another recording's shorter lyric found by title (20/24): the captions
+/// stay the reference text.
+#[tokio::test]
+async fn the_videos_own_complete_captions_stay_the_reference() {
+    let server = MockServer::start().await;
+    mount_lrclib(
+        &server,
+        serde_json::json!([
+            {"id": 5, "trackName": "Jesus Be the Name", "artistName": "Other Recording",
+             "duration": 470.0, "instrumental": false,
+             "syncedLyrics": "[00:01.00] You never fail\n[00:03.00] You never will\n[00:05.00] Jesus be the name"}
+        ]),
+    )
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let client = reqwest::Client::new();
+    let search = TitleSearch {
+        client: &client,
+        ai: None,
+        genius_token: "",
+        cache_dir: dir.path(),
+    };
+    let captions = gathered(
+        "yt_subs",
+        true,
+        &[
+            "You never fail",
+            "You never will",
+            "Jesus be the name",
+            "Above every other name",
+        ],
+    );
+    let found = search
+        .find(
+            &endpoints(&server),
+            &row("Jesus Be the Name"),
+            &sung(SUNG),
+            &[captions],
+        )
+        .await
+        .expect("a lyric was found");
+    assert_eq!(found.source, "yt_subs");
+    assert_eq!(found.lines.len(), 4);
+    let audit: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("yt158_title_search_audit.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(audit["candidates"][0]["score"], 20.0 / 24.0);
+    assert_eq!(
+        audit["reference"],
+        serde_json::json!({"source": "yt_subs", "from": "gathered"})
     );
 }
