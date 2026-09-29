@@ -257,7 +257,10 @@ failed on them (`36438006665`):
   is E0308 (`expected ObsState, found RwLockReadGuard`). The Fn call's
   argument is a generic tuple, so no coercion site exists. Write
   `done(&*guard)`. A plain `fn f(s: &ObsState)` would coerce, which is why
-  it reads as fine.
+  it reads as fine. The same holds for `&PathBuf` → `&Path` through a
+  generic `R: Fn(&Path, &Path)` seam: write `.as_path()`. A small private
+  trait seam (`downloader::cache::FileOps`, #136) avoids the trap
+  entirely, because trait method calls DO coerce their arguments.
 - **Splitting a fn: a `String` param that becomes `&str` leaves
   `f(&req_id)` behind → `clippy::needless_borrow`** (#221, caught in
   review before CI). When a moved body now receives `req_id: &str`, write

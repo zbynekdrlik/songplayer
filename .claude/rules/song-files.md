@@ -150,9 +150,18 @@ Design record: #136 comment 5894034820.
   with the file now under the name it was set aside from. Delete it by hand
   if it is an older copy; restore it if the name is empty.
 - Tripwire WARN: `lyrics: stems are recorded done but the vocals file is
-  missing under the audio's name`. After the fix it should never fire; if it
-  does, the song's files drifted in a way neither the rename nor the post-job
-  re-link covered. Grep that song's id in the re-link lines.
+  missing under the audio's name`. The rename and the post-job re-link keep
+  it quiet. One known cause remains outside the rename path:
+  - the 48 kHz self-heal (`flip_wrong_sample_rate_rows`) sets
+    `normalized = 0`;
+  - the download worker then asks the metadata providers again and can save
+    the audio under a NEW name;
+  - the `done` stems stay under the old one, and the lyrics wait until the
+    next start.
+
+  The next start's self-heal repairs it: the old pair is removed as a
+  duplicate, the stems are reset to pending, and the dub is adopted. Any other
+  firing means an unknown drift; grep that song's id in the re-link lines.
 
 ## Tests
 
@@ -162,6 +171,10 @@ Design record: #136 comment 5894034820.
   recorded paths IS this bug.
 - A rename that fails on both Linux and Windows: a NON-EMPTY directory at the
   target path.
+- A REAL stat error (not NotFound) is a path "inside" a regular file
+  (`file/x` → ENOTDIR). It works on Unix only; on Windows that path reads as
+  NotFound, so such a test is `#[cfg(unix)]`
+  (`a_real_stat_error_is_never_read_as_absent`).
 - A regex-matched sidecar name needs TWO name components before the id
   (`{song}_{artist}_{id}_normalized…`). A test file named `Debris_{id}_…` is
   not a sidecar at all, so the scan ignores it.

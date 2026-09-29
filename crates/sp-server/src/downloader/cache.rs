@@ -266,7 +266,8 @@ pub struct MoveFailed {
 }
 
 /// Move every `(from, to)` whose `from` exists and differs from `to`, in
-/// order, as one unit. Returns how many files moved. On the first failure,
+/// order, as one unit (a `from` whose stat fails is a failure, never skipped
+/// as absent). Returns how many files moved. On the first failure,
 /// moves the files already moved back in reverse order and returns that
 /// error, with every move it could not undo. Logs every move at INFO, a
 /// failure at WARN, and a move back that fails at ERROR.
