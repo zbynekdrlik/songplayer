@@ -224,6 +224,17 @@ finished leaves that push range without a mutation verdict — re-run its failed
 jobs before trusting the diff, and expect the old commit's already-known
 survivors to fail again there (read only the shard you need).
 
+**Never cancel a run once its `Deploy to win-resolume` job has started**
+(29.9.2026 03:15Z, run `36514244587`). The deploy stops SongPlayer BEFORE
+it installs, and a cancel that lands mid-job leaves the new build installed
+but SongPlayer STOPPED (it was down ~45 s until a manual
+`Start-ScheduledTask -TaskName SongPlayer`). To keep a deploy off the box
+while another repo holds the rig lease, cancel at the latest when the `Gate`
+job appears (it runs ~2 s before the deploy), or push only once the lease is
+free. Later re-run the cancelled jobs with `gh run rerun <id> --failed`
+(cancelled jobs count), which reuses the finished build. If a deploy was cut
+anyway, check `Get-Process SongPlayer` and start the task.
+
 **Two push runs for ONE commit: never cancel either by hand** (28.9.2026,
 `36494106201` + `36494106433`). The concurrency group already cancels the
 older one. `gh run cancel` on the queued survivor still lands, even when the
