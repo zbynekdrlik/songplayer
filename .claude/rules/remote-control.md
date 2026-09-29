@@ -7,6 +7,7 @@ paths:
   - "crates/sp-server/tests/remote_control.rs"
   - "e2e/settings-remote.spec.ts"
   - "e2e/obs-driver.ts"
+  - "e2e/obs-driver-protocol.spec.ts"
 ---
 
 # Companion remote control — obs-websocket 5 subset (#213, C of EPIC #174)
@@ -29,13 +30,45 @@ come from `SP-program`, never from cg OBS.
 
 ## What Companion needs (read from its source — do not "simplify" these away)
 
-- **The `obswebsocket.json` subprotocol MUST be echoed.** obs-websocket-js
-  requests it. Without it the client fails with "Server sent no
-  subprotocol", which the module reports as "Outdated OBS version".
-  `protocol::negotiate_subprotocol`:
-  - offered → echo it;
+- **Companion speaks `obswebsocket.msgpack`, and the facade MUST echo it
+  (#221 L2b).** Companion's obs-studio module (v3.15.3) runs in Node, where
+  `obs-websocket-js` resolves (package `exports`: `import` AND `require`) to
+  its MSGPACK build: it offers ONLY `obswebsocket.msgpack`, sends binary
+  MessagePack frames, and fails unless the server echoes exactly the
+  subprotocol it offered ("Server sent no subprotocol" / "an invalid
+  subprotocol", which the module reports as "Outdated OBS version"). Only the
+  `browser` export is the JSON build. **#213 assumed JSON; that was wrong** —
+  the first cutover (29.9.2026, #221 comment 5881650057) was refused with
+  HTTP 400 every 5 s and rolled back. `protocol::negotiate_subprotocol` (the
+  main session's L2b decision):
+  - `obswebsocket.json` offered, alone or next to msgpack → JSON (echoed);
+  - msgpack offered without JSON → msgpack (echoed), also next to an unknown
+    protocol (obs-websocket itself takes the first encoding it knows);
   - nothing offered → JSON, no header;
-  - msgpack only → HTTP 400.
+  - only foreign protocols → HTTP 400.
+- **One codec per session, both ways (`remote/codec.rs`).** The handshake
+  picks `Codec::{Json, MsgPack}`, and EVERY message of the session goes
+  through it: Hello, Identified, request + batch responses, cg OBS's and the
+  facade's own events. MsgPack = the SAME `serde_json::Value` message
+  objects, `rmp_serde::to_vec_named` (maps keyed by strings, like
+  obs-websocket's nlohmann `json::to_msgpack`), in BINARY frames; incoming
+  binary frames are decoded back to a `Value` and parsed by the same
+  `protocol::parse_client_message`. Closes use obs-websocket's own wording
+  (all 4002 `MessageDecodeError`):
+  - a text frame on a msgpack session → "Your session encoding is set to
+    MsgPack, but a text message was received.";
+  - a binary frame on a JSON session → "… set to Json, but a binary message
+    was received.";
+  - an undecodable frame → "Unable to decode Json." / "Unable to decode
+    MsgPack.";
+  - a decoded non-object → "You sent a non-object payload.".
+- **obs-websocket-js sends an undefined `requestData` as msgpack nil**
+  (`@msgpack/msgpack` encodes `undefined` as nil), so a msgpack request
+  without data arrives as `"requestData": null`. Nothing reads null as data
+  (`scene_name` → 300, `transition_duration` → 300), and a forwarded request
+  passes it to cg OBS as JSON `null`, which obs-websocket treats as "no data"
+  (`Request.cpp` `GetDefaultJsonObject`) — the same thing real OBS receives
+  from Companion today.
 - **`GetVersion` must succeed with a `supportedImageFormats` ARRAY.** v3 runs
   `forEach` on it and v4 runs `map`, both unguarded.
 - **`GetStudioModeEnabled` must succeed.** v3 reads `.studioModeEnabled`
@@ -95,6 +128,16 @@ come from `SP-program`, never from cg OBS.
   GetGroupSceneItemList (L3: `GetCurrentProgramScene` is native now). A test
   pins it in sync with `route`. The studio requests are never forwarded.
   `passthrough_intent` passes only cg OBS's `SceneListChanged`.
+  `parse_client_message` takes the DECODED `Value` (#221 L2b), so both
+  encodings share one parser.
+- `remote/codec.rs` (#221 L2b, pure) is the session's encoding (above):
+  `Codec::for_subprotocol`, `encode`, `decode_text`, `decode_binary`. The
+  msgpack decoder stops below `MAX_DEPTH` = 128 nested arrays / maps
+  (serde_json's own recursion limit, so both encodings refuse the same
+  messages; rmp-serde's default 1024 could exhaust a session's stack on a
+  1 MiB frame of nested arrays) and refuses bytes after the one value
+  (obs-websocket's strict `from_msgpack` does too). A map key must be a
+  string; binary / extension data has no JSON value and is refused.
 - `remote/studio_events.rs` (#221 L3) holds the facade's OWN events (see
   "Program feedback" below): `FacadeEvent`, `run_program_feedback`,
   `announce_transition`, `wait_transition_end`.
@@ -103,8 +146,9 @@ come from `SP-program`, never from cg OBS.
   `input_inactive`) are shared with the switch path.
 - `playback/program_switch.rs` is the ONE switch path of a press (below).
   `playback/scene_catalog.rs` says which scene is a playlist's.
-- `remote/session.rs` runs one client in a `select!` that is `biased` toward
-  events: cg OBS's, then the facade's own (`Facade::events`). An event that
+- `remote/session.rs` runs one client, in the codec its handshake picked, in
+  a `select!` that is `biased` toward events: cg OBS's, then the facade's
+  own (`Facade::events`). An event that
   arrived before a client message is therefore delivered under the
   subscriptions active when it arrived, and before that message's answer.
   - Requests of one session run in order.
@@ -330,8 +374,9 @@ follow are the later lanes (L4a–L6) of #221.
     `GET /api/v1/settings`, so it does not protect against a hostile LAN.
   - `RemoteSettings`' `Debug` never prints the password.
 - The surface is bounded:
-  - a message or frame over `MAX_MESSAGE_BYTES` (1 MiB) ends the session
-    unparsed;
+  - a message or frame over `MAX_MESSAGE_BYTES` (1 MiB), text or binary,
+    ends the session unparsed (the WebSocket layer's bound, before the
+    codec);
   - ONE deadline, `IDENTIFY_TIMEOUT` (10 s), covers the WebSocket
     handshake AND the `Identify`:
     - a socket that never finishes the handshake is dropped;
@@ -372,9 +417,20 @@ follow are the later lanes (L4a–L6) of #221.
   The session breaks, and the unread data turns the close into a reset.
 - The tungstenite CLIENT verifies the subprotocol:
   - requested but not echoed → `NoSubProtocol`;
-  - echoed but not requested → `ServerSentSubProtocolNoneRequested`.
+  - echoed but not requested → `ServerSentSubProtocolNoneRequested`;
+  - echoed but not among the ones it requested (it splits its own header on
+    `,` and trims) → `InvalidSubProtocol`.
 
   That is why the tests prove the echo simply by connecting.
+- `Message::Binary(Bytes)` / `Message::Text(Utf8Bytes)`: a `Vec<u8>` goes in
+  with `.into()` — give the literal its type (`vec![0xc1_u8]`), an
+  unsuffixed `vec![0xc1]` is `Vec<i32>` and has no `Into<Bytes>`. `&Bytes`
+  / `&Utf8Bytes` deref-coerce to `&[u8]` / `&str` at a plain fn call.
+- A handshake callback that PICKS something (the codec) writes it to a
+  local it captures `&mut` (`let mut codec = Codec::Json;`): the closure
+  lives inside the accept future, which is gone once the `.await` returns,
+  so the local is readable right after. A `Cell` would make the session
+  future `!Send` (`&Cell` is not `Send`), and `tokio::spawn` needs it.
 - A handshake the server drops surfaces on the client as
   `Protocol(HandshakeIncomplete)` (EOF) or `Io` (a reset).
 
@@ -389,9 +445,11 @@ follow are the later lanes (L4a–L6) of #221.
 - `session_tests.rs` uses REAL sockets (tokio-tungstenite), a real
   `ProgramBus` and pool (with the playlists sp-fast = 7, sp-slow = 3: the
   switch reads them), and fakes cg OBS at the `ObsCommand::Remote` channel.
-  It is at ~925/1000 lines: its rig (`rig_on`, `connect`, `request`, `press`,
-  `last_cut_json`, …) is `pub(super)`, and new facade tests go to
-  `session_tests_studio.rs` (#221: the switch path and the studio buttons).
+  It is at ~890/1000 lines: its rig (`rig_on`, `connect`, `request`, `press`,
+  `last_cut_json`, `next_close`, `close_code_at_end`, `SPEC_PASSWORD`, …) is
+  `pub(super)`, and new facade tests go to a sibling file
+  (`session_tests_studio.rs` for the switch path and the studio buttons,
+  `session_tests_msgpack.rs` for the encoding).
   - Telemetry fields are read through the API's own JSON
     (`last_cut_json`), so a test never depends on a struct field it only
     wants to see serialized.
@@ -414,6 +472,26 @@ follow are the later lanes (L4a–L6) of #221.
   forwarded). Its `pub(super) request_collecting` answers a request and
   returns the events that came before the response — use it whenever
   another client's press can have queued events.
+- `session_tests_msgpack.rs` (#221 L2b, same rig): the negotiation table
+  over real sockets (json, msgpack, both → JSON, "chat, msgpack" → msgpack,
+  none → JSON with no header, "chat" → 400, each session's Hello / Identified
+  / response in its encoding), Companion's v3 sequence over msgpack (Hello,
+  Identify, GetVersion, studio mode, GetSceneList forwarded, the page-13
+  pair cuts playlist 3, the preview / transition / program-scene /
+  `SceneListChanged` events and a v4 batch all binary), auth + 4009 over
+  msgpack, and the 4002s (text on msgpack, binary on JSON, undecodable,
+  non-object) + the 1 MiB bound for a binary frame. Its client encodes with
+  rmp-serde and sends `requestData: null` like obs-websocket-js.
+- `codec_tests.rs` (#221 L2b, pure) pins bytes that do NOT come from
+  rmp-serde: Companion's Identify / GetVersion as `@msgpack/msgpack` 2.8.0
+  encodes them (byte-string literals — a 40+ char hex fixture trips the
+  secret-staging hook) and the facade's Identified written by hand. Also the
+  round trip of every JSON value kind, the 4002s, trailing bytes, a non-string
+  key / bin / ext, and the depth bound against serde_json's own (127 nested
+  pass, 128 do not, a 1 MB frame of nesting is refused).
+- `e2e/obs-driver-protocol.spec.ts` (ubuntu mock suite, no box): a local
+  msgpack-only stub must accept the post-deploy driver; the driver must
+  offer only `obswebsocket.msgpack` and send no text frame.
 - `studio_events_tests.rs`: `scene_change`, the feedback task over a real
   bus (a same-name publication is checked with `yield_now` rounds on the
   current-thread runtime + `try_recv` Empty), the event shapes, and
@@ -518,9 +596,15 @@ follow are the later lanes (L4a–L6) of #221.
 
 ## Box acceptance (the supervisor's job)
 
-Use a real obs-websocket 5 client (Companion's OBS module, or `obsws-python`)
-against `resolume:4456`, with `remote_ws_enabled=true`. It must:
+Use a real obs-websocket 5 client against `resolume:4456`, with
+`remote_ws_enabled=true` — in the MSGPACK encoding Companion uses:
+Companion's OBS module itself, or `obs-websocket-js` in Node (the bare
+import; the post-deploy scene driver is one). `obsws-python` speaks JSON
+only, so it proves the JSON path, never Companion's. It must:
 
+- (L2b) connect with `obswebsocket.msgpack` echoed and the SongPlayer log
+  line `remote: client connected … encoding=MsgPack` (never `WebSocket
+  handshake refused … 400`);
 - report studio mode ON and list cg OBS's scenes;
 - on `SetCurrentPreviewScene(baseline sp-*)` + `TriggerStudioModeTransition`
   (the page-13 pair), cut `SP-program` to that playlist (program `filled`
@@ -542,3 +626,10 @@ against `resolume:4456`, with `remote_ws_enabled=true`. It must:
 
 Box E2E rules apply: never leave the wall on a disruptive scene, and restore
 the program scene afterwards.
+
+**Cutover (Companion `cg_obs` → the facade).** Attempt 1 (29.9.2026, comment
+5881650057) is the runbook: record the prior state, `ndi_input_enabled=true`,
+`program_follow_obs=false`, repoint `cg_obs` from `cg.lan:4455` to
+`10.77.9.201:4456` in Companion's web UI, then watch the SongPlayer log for
+`remote: client connected peer=10.77.9.205:… encoding=MsgPack`. Rollback =
+`cg_obs` back to `cg.lan:4455` + `program_follow_obs=true`.
