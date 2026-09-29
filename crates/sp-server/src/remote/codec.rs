@@ -42,8 +42,9 @@ pub const JSON_UNDECODABLE: CloseReason = CloseReason {
     reason: "Unable to decode Json.",
 };
 /// A msgpack session's frame that is not ONE MessagePack value with a JSON
-/// equivalent (malformed, nested [`MAX_DEPTH`] deep, a map key that is not a
-/// string, binary / extension data, or bytes after the value).
+/// equivalent (malformed, nested [`MAX_DEPTH`] deep, a map key that is
+/// neither a string nor UTF-8 `bin`, binary / extension data as a value, or
+/// bytes after the value).
 pub const MSGPACK_UNDECODABLE: CloseReason = CloseReason {
     code: CLOSE_MESSAGE_DECODE_ERROR,
     reason: "Unable to decode MsgPack.",

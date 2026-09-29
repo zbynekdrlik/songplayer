@@ -566,9 +566,12 @@ serde_json's `raw_value` feature is ALWAYS on in this workspace (sp-server's
 JSON with a FRESH 128-level recursion budget, so nested strings escape the
 depth limit (~18 × 127 levels in 1 MiB) — a stack exhaustion that aborts the
 whole process. For a frame from an untrusted peer, decode into a typed
-struct (a derived `Deserialize` never re-parses) or through
-`remote::codec::PlainValue` (a visitor that keeps every key a plain string),
-never `serde_json::from_str::<Value>` / `Json<Value>` / `Value::deserialize`.
+struct with NO `serde_json::Value` anywhere inside it (a `Value` /
+`Option<Value>` / `Vec<Value>` field goes through `Value`'s own
+`Deserialize` again; unknown fields are skipped by serde_json without
+building a `Value`) or through `remote::codec::PlainValue` (a visitor that
+keeps every key a plain string), never `serde_json::from_str::<Value>` /
+`Json<Value>` / `Value::deserialize`.
 Known residuals outside the facade (not fixed by #221 L2b): `api/ai.rs`'s
 `Json<serde_json::Value>` body on the LAN HTTP API.
 

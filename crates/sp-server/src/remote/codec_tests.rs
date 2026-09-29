@@ -157,7 +157,7 @@ fn a_frame_that_does_not_decode_is_4002() {
 }
 
 #[test]
-fn msgpack_nesting_is_bounded_like_serde_json() {
+fn both_codecs_nest_as_deep_as_serde_json() {
     // serde_json's parser takes 127 nested arrays and refuses 128.
     let json = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
     assert!(serde_json::from_str::<Value>(&json(MAX_DEPTH - 1)).is_ok());

@@ -505,12 +505,11 @@ follow are the later lanes (L4a–L6) of #221.
   encodes them (byte-string literals — a 40+ char hex fixture trips the
   secret-staging hook) and the facade's Identified written by hand. Also the
   round trip of every JSON value kind, the 4002s, trailing bytes, an integer
-  key / bin / ext, and the depth bound of BOTH codecs against serde_json's
-  own (127 nested pass, 128 do not, a 1 MB frame of nesting is refused), and
-  the
-  `$serde_json::private::RawValue` key staying an ordinary key in both
-  encodings (the test first shows `from_str::<Value>` re-parses it in this
-  build).
+  key / bin / ext, the depth bound of BOTH codecs against serde_json's own
+  (`both_codecs_nest_as_deep_as_serde_json`: 127 nested pass, 128 do not, a
+  1 MB frame of nesting is refused), and the `$serde_json::private::RawValue`
+  key staying an ordinary key in both encodings (the test first shows
+  `from_str::<Value>` re-parses it in this build).
 - `e2e/obs-driver-protocol.spec.ts` (ubuntu mock suite, no box): a local
   msgpack-only stub must accept the post-deploy driver; the driver must
   offer only `obswebsocket.msgpack` and send no text frame.
