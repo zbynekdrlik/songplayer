@@ -13,6 +13,7 @@ use super::tests::{dark_wall_event, fresh_engine_with_obs_cmd};
 use super::{DARK_WALL_REASON, PlaybackStateLabel};
 use crate::obs::ObsCommand;
 use crate::obs::ndi_recovery::{NUDGE_THRESHOLD_BAD_POLLS, RecoveryStep};
+use crate::playback::pipeline::PipelineEvent;
 use crate::playback::state::PlayState;
 
 /// A playlist on air (playing, its scene on program) whose output cg OBS
@@ -56,6 +57,37 @@ async fn only_the_output_cg_obs_was_told_to_show_can_be_a_dark_wall() {
             Err(e) => panic!("expected a NudgeNdiReceiver, got none: {e:?}"),
         }
     }
+}
+
+/// Review round 1: only the DARK-WALL reason keys on the expectation. An
+/// on-air output that underruns is degraded whether or not cg OBS was told
+/// to show it (`SP-program` takes its frames): the underrun is reported, and
+/// it runs no ladder rung (not a dark wall).
+#[tokio::test]
+async fn an_underrun_is_reported_where_cg_obs_was_not_told() {
+    let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
+    engine.ensure_pipeline(4, "SP-slow");
+    engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
+    engine.set_scene_active_for_test(4, true);
+    engine.set_cg_shown_for_test(Some(7));
+    let mut underrun = dark_wall_event(Instant::now(), 2);
+    if let PipelineEvent::HealthSnapshot {
+        connections,
+        observed_fps,
+        ..
+    } = &mut underrun
+    {
+        *connections = 1;
+        *observed_fps = 10.0; // below half of the nominal 30
+    }
+    engine.handle_health_snapshot(4, underrun);
+    let snap = registry.snapshots()[0].clone();
+    assert_eq!(
+        snap.degraded_reason.as_deref(),
+        Some("underrunning (10/30 fps)")
+    );
+    assert_eq!(snap.recovery_step, None);
+    assert!(obs_rx.try_recv().is_err(), "an underrun is no dark wall");
 }
 
 /// #196's post-restart self-check flags an output that is expected to have a
