@@ -360,3 +360,22 @@ fn a_2_5_ms_step_the_resample_sees_first_is_followed_whole_in_the_same_tick() {
     assert_eq!(after - before, MS, "the resample's bounded 1 ms only");
     assert_eq!(wall.anchor_stats().steps_followed, 0);
 }
+
+#[test]
+fn a_settable_wall_never_reads_a_set_as_a_utc_step() {
+    // Review round 2: `WallClock::settable` paired its set value with the
+    // REAL `Instant::now()`, so the step probe read every set that outran real
+    // time as a UTC step and followed it, restarting the resample count
+    // (`the_sender_thread_ticks_its_wall_once_per_boundary_passed` counted 2
+    // ticks for 3 boundaries). A set moves the settable wall's line with it.
+    let (mut wall, clock) = WallClock::settable(0);
+    clock.set(1_000_000); // +100 ms at once, far faster than real time
+    wall.tick();
+    assert_eq!(wall.frames_since_resample(), 1, "a plain tick, no follow");
+    clock.advance(-50_000); // a set back is no step either
+    wall.tick();
+    assert_eq!(wall.frames_since_resample(), 2);
+    assert_eq!(wall.anchor_stats(), WallAnchorStats::default());
+    assert_eq!(wall.probe_stats(), StepProbeStats::default());
+    assert_eq!(wall.now_100ns(), 950_000, "the reads return the set value");
+}
