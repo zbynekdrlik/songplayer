@@ -237,7 +237,8 @@ pub async fn switch_source(ctx: &SwitchCtx<'_>, source: i64, via: Via) -> Result
             .await
             .map(drop);
     };
-    let _cut_id = cut_and_record(ctx, &name, via, source, Some(&name), None).await?;
+    let cut_id = cut_and_record(ctx, &name, via, source, Some(&name), None).await?;
+    mirror(ctx, &name, source, cut_id);
     Ok(())
 }
 
@@ -266,7 +267,7 @@ async fn switch_input(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
 async fn switch_manual(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
     let data = json!({ "sceneName": scene });
     let legacy = ctx.bus.legacy_cg();
-    let _ticket = legacy.ticket();
+    let ticket = legacy.ticket();
     let answer = ctx
         .upstream
         .request("SetCurrentProgramScene", Some(data))
@@ -282,6 +283,8 @@ async fn switch_manual(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
         ctx.bus.remote().record_cut(record);
         return Switched::NotSwitched(answer);
     }
+    // #221 L4a: cg OBS shows a manual scene now, no playlist.
+    legacy.confirmed(ticket, None);
     let input_active = load_input_settings(ctx.pool)
         .await
         .is_ok_and(|s| s.active());

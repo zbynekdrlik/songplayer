@@ -907,6 +907,8 @@ pub async fn restore_selected_source(pool: &SqlitePool, bus: &ProgramBus) -> Opt
     }
     let scene = crate::playback::scene_catalog::scene_of_source(pool, pid).await;
     bus.select_initial(pid, scene.as_deref());
+    // #221 L4a: what cg OBS was last told to show, when it is a playlist.
+    bus.legacy_cg().restored(pid);
     info!(source = pid, scene = ?scene, "program bus: restored the selected source");
     Some(pid)
 }

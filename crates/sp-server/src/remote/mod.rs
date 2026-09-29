@@ -174,11 +174,14 @@ pub struct LastRequest {
     pub at_ms: i64,
 }
 
-/// The outcome of the last remote scene press (`program_switch`; the OBS
-/// follow records the same shape as `last_follow_cut`).
+/// The outcome of the last scene switch (`program_switch`: a facade press or,
+/// #221 L4a, a dashboard cut; the OBS follow records the same shape as
+/// `last_follow_cut`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RemoteCut {
     /// The scene pressed, clipped to 64 characters (a client-chosen string).
+    /// #221 L4a, a dashboard cut: the playlist's catalog scene, "OBS manuál"
+    /// for -1, the playlist id when its catalog names no scene.
     pub scene: String,
     /// `playlist` / `input` / `keep`.
     pub action: &'static str,
@@ -191,8 +194,9 @@ pub struct RemoteCut {
     pub cut_boundary_100ns: Option<i64>,
     /// Unix time, ms.
     pub at_ms: i64,
-    /// #221: what triggered the switch, `program` (`SetCurrentProgramScene`)
-    /// or `transition` (`TriggerStudioModeTransition`); `null` for the follow.
+    /// #221: what triggered the switch, `program` (`SetCurrentProgramScene`),
+    /// `transition` (`TriggerStudioModeTransition`) or (L4a) `dashboard`
+    /// (`POST /api/v1/program/cut`); `null` for the follow.
     pub via: Option<&'static str>,
     /// #221: cg OBS's answer to the forward (a manual scene) or the mirror (a
     /// playlist scene): `ok`, `error <code>`, `not_ready`, or `pending` while

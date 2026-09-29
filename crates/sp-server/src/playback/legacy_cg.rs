@@ -94,7 +94,10 @@ impl LegacyCg {
     /// whether it was.
     pub fn confirmed(&self, ticket: Ticket, shown: Option<i64>) -> bool {
         let mut tickets = self.tickets();
-        tickets.applied = tickets.applied.max(ticket.0);
+        if ticket.0 <= tickets.applied {
+            return false;
+        }
+        tickets.applied = ticket.0;
         self.shown.send_replace(shown);
         true
     }
