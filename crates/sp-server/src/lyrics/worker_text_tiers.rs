@@ -5,9 +5,13 @@
 //!    (`transcribe_vocal`), reused by everything below. Before #144 the
 //!    reference stage transcribed after mtl, and the base tier transcribed the
 //!    same vocal AGAIN whenever the gate failed.
-//! 2. The ★ tier (`run_mtl_reference_stage`): the best text candidate, mtl
+//! 2. The title search (`title_search`), when no artist+title lookup found the
+//!    song (a cover names the cover artist): candidates by title alone, the
+//!    one the transcript's words match best above a measured floor joins the
+//!    candidates.
+//! 3. The ★ tier (`run_mtl_reference_stage`): the best text candidate, mtl
 //!    force-aligned and verified by the two-way gate against that transcript.
-//! 3. The base tier (`run_g35t_transcript_branch`): the transcript grouped
+//! 4. The base tier (`run_g35t_transcript_branch`): the transcript grouped
 //!    into lines, for every song the ★ tier did not ship.
 //!
 //! Extracted from `worker.rs::process_song` to keep that file under the
@@ -88,7 +92,7 @@ impl LyricsWorker {
     ) -> anyhow::Result<TierOutcome> {
         let video_id = row.id;
         let youtube_id = row.youtube_id.as_str();
-        let candidates: Vec<crate::lyrics::tier1::CandidateText> = candidate_texts
+        let mut candidates: Vec<crate::lyrics::tier1::CandidateText> = candidate_texts
             .into_iter()
             .map(crate::lyrics::tier1::CandidateText::from)
             .collect();
@@ -125,6 +129,14 @@ impl LyricsWorker {
                     return Ok(TierOutcome::Return(SongOutcome::Deferred(reason)));
                 }
             };
+
+        // #144: a cover's text by title, chosen by what is sung.
+        if let Some(words) = transcript.as_deref()
+            && crate::lyrics::title_search::needs_title_search(&candidates)
+            && let Some(found) = self.title_search_candidate(row, words).await
+        {
+            candidates.push(found.into());
+        }
 
         // Tier 1 (★): the best text candidate, mtl force-aligned and verified by
         // the two-way gate against the transcript. On PASS the mtl line timings
@@ -201,6 +213,35 @@ impl LyricsWorker {
                 Ok(TierOutcome::Return(SongOutcome::Done))
             }
         }
+    }
+
+    /// #144: the title search for this song (`title_search::TitleSearch`), on
+    /// the production endpoints. The Genius token is read per song, like the
+    /// artist+title Genius lookup (`gather_sources`); empty = LRCLIB only.
+    #[cfg_attr(test, mutants::skip)] // settings read + wiring; `TitleSearch::find` is tested
+    async fn title_search_candidate(
+        &self,
+        row: &crate::db::models::VideoLyricsRow,
+        words: &[AsrWord],
+    ) -> Option<crate::lyrics::provider::CandidateText> {
+        let genius_token = crate::db::models::get_setting(&self.pool, "genius_access_token")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let search = crate::lyrics::title_search::TitleSearch {
+            client: &self.client,
+            ai: self.ai_client.as_deref(),
+            genius_token: &genius_token,
+            cache_dir: &self.cache_dir,
+        };
+        search
+            .find(
+                &crate::lyrics::title_search::TitleSearchEndpoints::production(),
+                row,
+                words,
+            )
+            .await
     }
 }
 

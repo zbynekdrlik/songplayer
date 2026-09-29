@@ -11,7 +11,10 @@ use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
 use crate::lyrics::{
-    genius, lrclib, lyrics_ovh, spotify_proxy::SpotifyLyricsFetcher, youtube_subs,
+    genius, lrclib, lyrics_ovh,
+    spotify_proxy::SpotifyLyricsFetcher,
+    text_candidate::{cleaned_text_candidate, timed_candidate},
+    youtube_subs,
 };
 
 /// Returns `true` if any line in the lrclib track has a non-zero `end_ms`,
@@ -189,13 +192,10 @@ pub(crate) async fn gather_sources_impl(
     if let Some(t) = spotify_track {
         candidate_texts.push(t.into());
     }
+    // #144: one line per SUNG caption line (`parse_json3`), each carrying its
+    // caption event's span; nothing reads these timings — mtl re-times the text.
     if let Some(t) = &yt_subs_track {
-        candidate_texts.push(CandidateText {
-            source: "yt_subs".into(),
-            lines: t.lines.iter().map(|l| l.en.clone()).collect(),
-            has_timing: true,
-            line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
-        });
+        candidate_texts.push(timed_candidate("yt_subs", t));
     }
     if let Some(t) = &lrclib_track {
         // lrclib.rs::parse_plain emits lines with start_ms=0/end_ms=0; only
@@ -203,12 +203,7 @@ pub(crate) async fn gather_sources_impl(
         // logic is unit-testable.
         let real_timing = lrclib_track_has_real_timing(t);
         if real_timing {
-            candidate_texts.push(CandidateText {
-                source: "lrclib".into(),
-                lines: t.lines.iter().map(|l| l.en.clone()).collect(),
-                has_timing: true,
-                line_timings: Some(t.lines.iter().map(|l| (l.start_ms, l.end_ms)).collect()),
-            });
+            candidate_texts.push(timed_candidate("lrclib", t));
         } else {
             let Some(ai) = ai_client else {
                 anyhow::bail!(
@@ -216,40 +211,21 @@ pub(crate) async fn gather_sources_impl(
                      cannot run Claude cleanup"
                 );
             };
-            let raw_blob: String = t
-                .lines
-                .iter()
-                .map(|l| l.en.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
             // _v2 cache filename invalidates pre-2026-05-11 caches written
             // under the description-prompt (no dedup / no ad-lib strip).
             let cache_path = cache_dir.join(format!("{youtube_id}_lrclib_cleaned_v2.json"));
-            match crate::lyrics::description_provider::clean_lyrics_via_claude(
-                ai,
-                &row.song,
-                &row.artist,
-                &raw_blob,
-                &cache_path,
-                crate::lyrics::description_provider::CleanupMode::ScrapedLyrics,
-            )
-            .await
+            match cleaned_text_candidate(ai, &row.song, &row.artist, "lrclib", t, &cache_path).await
             {
-                Ok(Some(cleaned)) if !cleaned.is_empty() => {
+                Ok(Some(cleaned)) => {
                     info!(
                         %youtube_id,
                         raw_count = t.lines.len(),
-                        cleaned_count = cleaned.len(),
+                        cleaned_count = cleaned.lines.len(),
                         "gather: lrclib-plain Claude cleanup complete"
                     );
-                    candidate_texts.push(CandidateText {
-                        source: "lrclib".into(),
-                        lines: cleaned,
-                        has_timing: false,
-                        line_timings: None,
-                    });
+                    candidate_texts.push(cleaned);
                 }
-                Ok(_) => anyhow::bail!(
+                Ok(None) => anyhow::bail!(
                     "gather: lrclib-plain cleanup returned no lyrics for {youtube_id}"
                 ),
                 Err(e) => {
@@ -282,38 +258,18 @@ pub(crate) async fn gather_sources_impl(
                  cannot run Claude cleanup"
             );
         };
-        let raw_blob: String = t
-            .lines
-            .iter()
-            .map(|l| l.en.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
         let cache_path = cache_dir.join(format!("{youtube_id}_genius_cleaned_v2.json"));
-        match crate::lyrics::description_provider::clean_lyrics_via_claude(
-            ai,
-            &row.song,
-            &row.artist,
-            &raw_blob,
-            &cache_path,
-            crate::lyrics::description_provider::CleanupMode::ScrapedLyrics,
-        )
-        .await
-        {
-            Ok(Some(cleaned)) if !cleaned.is_empty() => {
+        match cleaned_text_candidate(ai, &row.song, &row.artist, "genius", t, &cache_path).await {
+            Ok(Some(cleaned)) => {
                 info!(
                     %youtube_id,
                     raw_count = t.lines.len(),
-                    cleaned_count = cleaned.len(),
+                    cleaned_count = cleaned.lines.len(),
                     "gather: genius fallback Claude cleanup complete"
                 );
-                candidate_texts.push(CandidateText {
-                    source: "genius".into(),
-                    lines: cleaned,
-                    has_timing: false,
-                    line_timings: None,
-                });
+                candidate_texts.push(cleaned);
             }
-            Ok(_) => {
+            Ok(None) => {
                 anyhow::bail!("gather: genius fallback cleanup returned no lyrics for {youtube_id}")
             }
             Err(e) => anyhow::bail!("gather: genius fallback cleanup failed for {youtube_id}: {e}"),

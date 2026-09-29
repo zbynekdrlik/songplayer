@@ -24,7 +24,7 @@ use serde::Deserialize;
 use sp_core::lyrics::{LyricsLine, LyricsTrack};
 use tracing::{debug, warn};
 
-const GENIUS_SEARCH_URL: &str = "https://api.genius.com/search";
+pub(crate) const GENIUS_SEARCH_URL: &str = "https://api.genius.com/search";
 const REQUEST_TIMEOUT_SECS: u64 = 10;
 
 /// Genius's Cloudflare layer serves a challenge page to bare `curl/*` and
@@ -132,10 +132,15 @@ pub async fn fetch_lyrics(
         debug!(artist, song, "Genius: no song hit matched");
         return Ok(None);
     };
+    fetch_page_lyrics(client, &hit_url).await
+}
 
-    debug!(%hit_url, "Genius: fetching lyrics page");
+/// Fetch one public Genius song page and extract its lyric. `Ok(None)` for
+/// a non-success status or a page with no lyric container.
+async fn fetch_page_lyrics(client: &Client, url: &str) -> Result<Option<LyricsTrack>> {
+    debug!(%url, "Genius: fetching lyrics page");
     let page_resp = client
-        .get(&hit_url)
+        .get(url)
         .header("User-Agent", user_agent())
         .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .send()
@@ -148,6 +153,91 @@ pub async fn fetch_lyrics(
 
     let html = page_resp.text().await?;
     Ok(extract_lyrics_from_html(&html))
+}
+
+/// Genius song pages fetched per title search (#144): each hit is one page
+/// fetch, and the search ranks the title's best-known songs first.
+pub const MAX_TITLE_HITS: usize = 3;
+
+/// #144: a Genius song page found by TITLE alone.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeniusTitleHit {
+    pub url: String,
+    pub artist: String,
+    pub lyrics: LyricsTrack,
+}
+
+/// Search `search_url` (`GENIUS_SEARCH_URL` in production, via
+/// `title_search::TitleSearchEndpoints`) for `title` alone — no artist: a cover's metadata
+/// names the COVER artist, so the artist-matched lookup (`fetch_lyrics`)
+/// misses the original — and fetch the first `MAX_TITLE_HITS` song pages.
+/// Which of them is the song being sung is decided by the transcript
+/// (`title_search`), not here. Best-effort per page: a page that fails or
+/// holds no lyric is skipped.
+pub(crate) async fn search_by_title_at(
+    client: &Client,
+    search_url: &str,
+    access_token: &str,
+    title: &str,
+) -> Result<Vec<GeniusTitleHit>> {
+    let title = title.trim();
+    if access_token.trim().is_empty() || title.is_empty() {
+        return Ok(Vec::new());
+    }
+    let url = format!("{search_url}?q={}", urlencoding::encode(title));
+    debug!(%url, "Genius title search");
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", access_token.trim()))
+        .header("User-Agent", user_agent())
+        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        warn!(status = %resp.status(), title, "Genius title search non-success");
+        return Ok(Vec::new());
+    }
+    let body: SearchResponse = match resp.json().await {
+        Ok(b) => b,
+        Err(e) => {
+            warn!(error = %e, "Genius title search JSON parse failed");
+            return Ok(Vec::new());
+        }
+    };
+
+    let mut hits = Vec::new();
+    for (url, artist) in title_hit_pages(&body) {
+        match fetch_page_lyrics(client, &url).await {
+            Ok(Some(lyrics)) => hits.push(GeniusTitleHit {
+                url,
+                artist,
+                lyrics,
+            }),
+            Ok(None) => debug!(%url, "Genius: title hit page holds no lyric"),
+            Err(e) => warn!(%url, error = %e, "Genius: title hit page fetch failed"),
+        }
+    }
+    Ok(hits)
+}
+
+/// The first `MAX_TITLE_HITS` song-type hits that are single-song pages
+/// (`GENIUS_NON_SONG_URL_PATTERNS` excluded), as `(url, primary artist)`.
+fn title_hit_pages(resp: &SearchResponse) -> Vec<(String, String)> {
+    resp.response
+        .hits
+        .iter()
+        .filter(|h| h.hit_type == "song" && !genius_url_is_non_song_page(&h.result.url))
+        .take(MAX_TITLE_HITS)
+        .map(|h| {
+            let artist = h
+                .result
+                .primary_artist
+                .as_ref()
+                .and_then(|a| a.name.clone())
+                .unwrap_or_default();
+            (h.result.url.clone(), artist)
+        })
+        .collect()
 }
 
 /// URL-slug substrings that indicate the Genius page is a NOT a single-song
@@ -446,3 +536,7 @@ fn is_genius_banner(line: &str) -> bool {
 #[cfg(test)]
 #[path = "genius_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "genius_title_tests.rs"]
+mod title_tests;
