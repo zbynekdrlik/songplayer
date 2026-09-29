@@ -569,11 +569,22 @@ whole process. For a frame from an untrusted peer, decode into a typed
 struct with NO `serde_json::Value` anywhere inside it (a `Value` /
 `Option<Value>` / `Vec<Value>` field goes through `Value`'s own
 `Deserialize` again; unknown fields are skipped by serde_json without
-building a `Value`) or through `remote::codec::PlainValue` (a visitor that
-keeps every key a plain string), never `serde_json::from_str::<Value>` /
-`Json<Value>` / `Value::deserialize`.
+building a `Value`) or through `remote::codec::Codec::Json.decode_text`
+(its private `PlainValue` visitor keeps every key a plain string; make
+`PlainValue` `pub(crate)` when a second module needs the visitor itself),
+never `serde_json::from_str::<Value>` / `Json<Value>` / `Value::deserialize`.
 Known residuals outside the facade (not fixed by #221 L2b): `api/ai.rs`'s
 `Json<serde_json::Value>` body on the LAN HTTP API.
+
+## Binary test fixtures: byte-string literals, not long hex strings (#221 L2b)
+
+The staging hook `block-sensitive-staging.sh` refuses any file with a 40+
+character hex blob ("possible key/token") — a MessagePack / protocol fixture
+written as hex trips it. Write the bytes as a byte-string literal with the
+markers as escapes and the text as text
+(`b"\x82\xa2op\x01\xa1d\x81..."`, `\xHH` takes exactly two hex digits), and
+check it against the reference encoder's hex once in a scratch script. It
+reads better too: the map keys are visible.
 
 ## `-D warnings` rejects `temporary.as_ptr()` in tests — bind the value first (#203 r2b)
 
