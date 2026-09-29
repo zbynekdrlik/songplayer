@@ -88,12 +88,16 @@ impl PlaybackEngine {
         self.scene_off_recheck(playlist_id, utc_now_100ns()).await;
     }
 
-    /// [`Self::scene_off_due`] at `now_100ns` (the stamps' wall clock).
+    /// [`Self::scene_off_due`] at `now_100ns` (the stamps' wall clock). A
+    /// playlist back ON AIR in the playback authority's diffed set is left
+    /// alone even while its scene is still off: its ON is queued behind this
+    /// re-check, and its scene-on ends the hold (#221 L4b review round 2).
     async fn scene_off_recheck(&mut self, playlist_id: i64, now_100ns: i64) {
         let off = self
             .pipelines
             .get(&playlist_id)
-            .is_some_and(|pp| !pp.scene_active.load(Ordering::Acquire));
+            .is_some_and(|pp| !pp.scene_active.load(Ordering::Acquire))
+            && !self.on_air_contains(playlist_id);
         if off {
             self.scene_off_step(playlist_id, now_100ns).await;
         }
