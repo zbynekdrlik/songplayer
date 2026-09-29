@@ -287,7 +287,9 @@ OFF first). The wall step runs before the pause/hold:
   diffed set (`on_air_contains`). A flagged playlist out of the set has its
   OFF queued too (two members leaving in one coalesced value): counting it
   flashed its title.
-- None on program: `HideTitle` (a fade) + `HideSubtitles`, as before L4b.
+- None on program: `HideTitle` (a fade, through `title::push_hide`, which
+  also clears cg OBS's `#sp-title` text: round 6, the OFF cancelled the
+  song's hide timer) + `HideSubtitles`, as before L4b.
 - One on program: the title from `decide_wall_title` — a due title is a
   `Resync`; none due (the incoming playlist just started its song, the
   usual press) is a `HideTitle` through `title::push_hide`, so the outgoing

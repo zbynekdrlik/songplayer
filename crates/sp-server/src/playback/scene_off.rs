@@ -68,7 +68,9 @@ pub fn scene_off_delay(hold: Option<Hold>, now_100ns: i64) -> Option<Duration> {
 impl PlaybackEngine {
     /// The wall after a playlist went off program (its `scene_active` is
     /// already false). With no other playlist on program, its title fades
-    /// out (`HideTitle`) and its line goes (`HideSubtitles`), as before L4b.
+    /// out (`HideTitle`) and its line goes (`HideSubtitles`), as before L4b;
+    /// cg OBS's title text is cleared too (`title::push_hide`, review round
+    /// 6: the OFF cancelled the song's hide timer, which clears it).
     ///
     /// #221 L4b review rounds 3-4: the playback authority sends the incoming
     /// ON at the press and the outgoing OFF only when cg OBS confirms the
@@ -89,7 +91,7 @@ impl PlaybackEngine {
             .iter()
             .any(|(&id, pp)| pp.scene_active.load(Ordering::Acquire) && self.on_air_contains(id));
         if !others_on_program {
-            let _ = self.resolume_tx.try_send(ResolumeCommand::HideTitle);
+            super::title::push_hide(self.obs_cmd_tx.as_ref(), &self.resolume_tx).await;
             let _ = self.resolume_tx.try_send(ResolumeCommand::HideSubtitles);
             return;
         }
