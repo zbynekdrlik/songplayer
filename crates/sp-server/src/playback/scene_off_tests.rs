@@ -256,3 +256,30 @@ async fn a_scene_back_on_program_cancels_the_pending_pause() {
         .handle_pipeline_event(99, PipelineEvent::SceneOffDue(due))
         .await;
 }
+
+/// Review round 2 (#221 L4b): a hold's re-check never pauses a playlist that
+/// is back ON AIR (pressed again) before the playback authority's ON reached
+/// the engine. That ON is queued behind the re-check (the authority's diffed
+/// set has OUT), and its scene-on ends the hold. Before L4b,
+/// `Hold::OnProgram` held the selected source through the settle; with it
+/// deleted, the re-check paused OUT and the ON then started a new song.
+#[tokio::test]
+async fn a_re_check_never_pauses_a_playlist_that_is_back_on_air() {
+    let mut engine = rig().await;
+    playing(&mut engine, OUT);
+    let bus = program(&engine, OUT);
+    bus.cut(IN, b(5), None);
+    engine.set_scene_active_for_test(OUT, false); // the authority's OFF
+    engine.scene_off_step(OUT, b(32) - 100 * MS).await;
+    let due = pending_re_check(&engine, OUT);
+    // OUT pressed again: the cut back cancels the window, and the authority
+    // diffed OUT on air; its ON is queued, not handled yet.
+    bus.cut(OUT, b(5), None);
+    assert_eq!(bus.hold_for(OUT), None, "no window holds OUT any more");
+    engine.on_air.replace([OUT].into());
+    engine
+        .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(due))
+        .await;
+    assert_eq!(state(&engine, OUT), PLAYING, "not paused");
+    assert_eq!(paused_at(&engine, OUT), None);
+}
