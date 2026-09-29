@@ -99,7 +99,7 @@ impl PlaybackEngine {
                     .await;
             }
             Some((None, _)) => {
-                let _ = self.resolume_tx.try_send(ResolumeCommand::HideTitle);
+                super::title::push_hide(self.obs_cmd_tx.as_ref(), &self.resolume_tx).await;
             }
             None => {} // the due title's read failed: nothing is sent
         }
