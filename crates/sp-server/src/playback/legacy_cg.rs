@@ -33,6 +33,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use serde::Serialize;
 use sp_core::config::PROGRAM_INPUT_ID;
 use tokio::sync::watch;
+use tracing::{debug, info};
 
 use crate::remote::Upstream;
 
@@ -95,10 +96,17 @@ impl LegacyCg {
     pub fn confirmed(&self, ticket: Ticket, shown: Option<i64>) -> bool {
         let mut tickets = self.tickets();
         if ticket.0 <= tickets.applied {
+            debug!(
+                ticket = ticket.0,
+                applied = tickets.applied,
+                ?shown,
+                "legacy cg: a late answer to an older command — dropped"
+            );
             return false;
         }
         tickets.applied = ticket.0;
-        self.shown.send_replace(shown);
+        let before = self.shown.send_replace(shown);
+        log_confirmed(ticket, before, shown);
         true
     }
 
@@ -108,6 +116,10 @@ impl LegacyCg {
     pub fn restored(&self, source: i64) {
         if source != PROGRAM_INPUT_ID {
             self.shown.send_replace(Some(source));
+            info!(
+                source,
+                "legacy cg: the restored program source is what cg OBS was last told"
+            );
         }
     }
 
@@ -138,6 +150,26 @@ impl LegacyCg {
     /// (before `start_program`, and in tests), whose calls never reach cg OBS.
     pub fn link(&self) -> Upstream {
         self.link.get().cloned().unwrap_or_else(Upstream::unlinked)
+    }
+}
+
+/// The log line of an applied answer: INFO when what cg OBS shows changed,
+/// DEBUG when it did not. Logging only.
+#[cfg_attr(test, mutants::skip)]
+fn log_confirmed(ticket: Ticket, before: Option<i64>, shown: Option<i64>) {
+    if before != shown {
+        info!(
+            ticket = ticket.0,
+            from = ?before,
+            to = ?shown,
+            "legacy cg: cg OBS shows what SongPlayer told it"
+        );
+    } else {
+        debug!(
+            ticket = ticket.0,
+            ?shown,
+            "legacy cg: cg OBS confirmed what it shows"
+        );
     }
 }
 

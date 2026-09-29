@@ -225,7 +225,9 @@ pub struct RemoteStatus {
     pub listening: bool,
     /// Why the listener is not bound (e.g. the port is taken).
     pub error: Option<String>,
-    /// Connected clients (WebSocket sessions), at most [`MAX_SESSIONS`].
+    /// Connected clients (WebSocket sessions). A session's slot of
+    /// [`MAX_SESSIONS`] is freed just before it stops counting here, so for
+    /// that instant this may read one over the cap.
     pub clients: usize,
     /// #221: handshakes refused with HTTP 503 because [`MAX_SESSIONS`]
     /// sessions were open, since startup.

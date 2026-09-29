@@ -186,7 +186,7 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
             // cg OBS shows the playlist in.
             let name = catalog.scene_of(pid).unwrap_or(scene).to_string();
             match cut_and_record(ctx, scene, via, pid, Some(&name), None).await {
-                Ok(cut_id) => {
+                Ok((cut_id, _)) => {
                     mirror(ctx, &name, pid, cut_id);
                     Switched::Cut
                 }
@@ -209,14 +209,19 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
 /// - -1 ("OBS manuál") is a cut only: no scene to send, cg OBS keeps what it
 ///   shows.
 ///
-/// `Err` when the playlists could not be read or the source could not be
-/// persisted (then nothing was cut, and it is recorded as a keep).
-pub async fn switch_source(ctx: &SwitchCtx<'_>, source: i64, via: Via) -> Result<(), sqlx::Error> {
+/// Returns the program state of THIS cut (a later switch may already run
+/// when the caller reads the bus). `Err` when the playlists could not be
+/// read or the source could not be persisted (then nothing was cut, and it
+/// is recorded as a keep).
+pub async fn switch_source(
+    ctx: &SwitchCtx<'_>,
+    source: i64,
+    via: Via,
+) -> Result<ProgramStatus, sqlx::Error> {
     let _order = ctx.bus.switch_order().lock().await;
     if source == PROGRAM_INPUT_ID {
-        return cut_and_record(ctx, PROGRAM_INPUT_LABEL, via, source, None, None)
-            .await
-            .map(drop);
+        let (_, status) = cut_and_record(ctx, PROGRAM_INPUT_LABEL, via, source, None, None).await?;
+        return Ok(status);
     }
     let catalog = match load_catalog(ctx.pool).await {
         Ok(catalog) => catalog,
@@ -233,13 +238,12 @@ pub async fn switch_source(ctx: &SwitchCtx<'_>, source: i64, via: Via) -> Result
             "program switch: this playlist names no scene (inactive, or no / a shared NDI output name) — cut without a scene, cg OBS is not told"
         );
         let pressed = source.to_string();
-        return cut_and_record(ctx, &pressed, via, source, None, None)
-            .await
-            .map(drop);
+        let (_, status) = cut_and_record(ctx, &pressed, via, source, None, None).await?;
+        return Ok(status);
     };
-    let cut_id = cut_and_record(ctx, &name, via, source, Some(&name), None).await?;
+    let (cut_id, status) = cut_and_record(ctx, &name, via, source, Some(&name), None).await?;
     mirror(ctx, &name, source, cut_id);
-    Ok(())
+    Ok(status)
 }
 
 /// "OBS manuál" itself: the NDI input, with no scene for cg OBS (module doc,
@@ -316,7 +320,8 @@ async fn switch_manual(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
 
 /// Persist + cut to `source` (published as on air for `name`, the scene cg
 /// OBS shows it in, when there is one) and record it. A failed persist cuts
-/// nothing and is recorded as `persist_failed`. Returns the record's id.
+/// nothing and is recorded as `persist_failed`. Returns the record's id and
+/// the program state of this cut.
 async fn cut_and_record(
     ctx: &SwitchCtx<'_>,
     pressed: &str,
@@ -324,7 +329,7 @@ async fn cut_and_record(
     source: i64,
     name: Option<&str>,
     cg_forward: Option<String>,
-) -> Result<u64, sqlx::Error> {
+) -> Result<(u64, ProgramStatus), sqlx::Error> {
     let shared = ctx.bus.remote();
     match persist_and_cut(ctx.pool, ctx.bus, source, name).await {
         Ok(status) => {
@@ -336,7 +341,7 @@ async fn cut_and_record(
                 "program switch: SP-program cut"
             );
             let cut_id = shared.record_cut(cut_done(pressed, via, source, &status, cg_forward));
-            Ok(cut_id)
+            Ok((cut_id, status))
         }
         Err(e) => {
             warn!(scene = %clip(pressed), source, %e, "program switch: persisting the program source failed — nothing cut");
@@ -367,7 +372,7 @@ fn mirror(ctx: &SwitchCtx<'_>, name: &str, pid: i64, cut_id: u64) {
             tokio::spawn(confirm_mirror(recorded, legacy, ticket, pid));
         }
         None => {
-            warn!(scene = %clip(name), "program switch: cg OBS is not reachable — its program does not follow this press");
+            warn!(scene = %clip(name), "program switch: cg OBS is not reachable (no OBS client, or its command queue is full) — its program does not follow this switch");
             shared.set_cg_forward(cut_id, CG_NOT_READY.to_string());
         }
     }

@@ -148,11 +148,13 @@ pub async fn post_program_cut(
         bus,
         upstream: &upstream,
     };
-    if let Err(e) = switch_source(&ctx, body.source, Via::Dashboard).await {
-        warn!(%e, source = body.source, "program cut: nothing was cut");
-        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-    }
-    let status = bus.status();
+    let status = match switch_source(&ctx, body.source, Via::Dashboard).await {
+        Ok(status) => status,
+        Err(e) => {
+            warn!(%e, source = body.source, "program cut: nothing was cut");
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
     info!(
         source = body.source,
         previous = ?status.previous,

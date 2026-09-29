@@ -652,7 +652,10 @@ with the mirror and the link.
   (one per listener) holds a `MAX_SESSIONS` (16) semaphore; the handshake
   callback takes a permit AFTER the subprotocol check and the session keeps
   it until it ends (declared after its `ClientGuard`, so it is freed first:
-  `remote.clients` never counts a freed slot). No permit → HTTP 503 before
+  once `remote.clients` no longer counts a session, its slot is free — the
+  cap test relies on that; the other way round, a new session can take the
+  slot an instant before the old one stops counting, so `clients` may read
+  one over the cap for that instant). No permit → HTTP 503 before
   the client becomes a session, `remote.refused_over_cap` +1, and one INFO
   line at most per `REFUSAL_LOG_INTERVAL` (10 s, counted from the last
   LOGGED refusal; `RemoteShared::note_refused_over_cap(now)`); the generic
