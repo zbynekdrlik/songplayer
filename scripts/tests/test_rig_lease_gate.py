@@ -342,3 +342,39 @@ def test_main_rejects_a_non_positive_poll():
 def test_the_defaults_are_the_decided_30_s_and_60_min():
     assert gate_mod.DEFAULT_POLL_SECONDS == 30.0
     assert gate_mod.DEFAULT_MAX_WAIT_SECONDS == 3600.0
+
+
+# ---- review round 3 ------------------------------------------------------------
+
+
+def test_a_body_too_deep_or_too_big_is_no_lease(serve):
+    # A JSON body nested past Python's recursion limit raises RecursionError
+    # (not a ValueError); a body over the 64 KiB bound is never parsed (a
+    # lease document is ~400 B). Both are "no lease" from that URL, never a
+    # crash that fails the deploy.
+    deep = serve(b"[" * 30_000 + b"]" * 30_000)
+    padding = b" " * 70_000
+    too_big = serve(b'{"held": false,' + padding + b'"x": 1}')
+    held = serve(json.dumps(lease()).encode())
+    lines: list[str] = []
+    assert fetch_lease([deep, too_big, held], lines.append) == lease()
+    assert len(lines) == 2
+    assert "too large" in lines[1]
+
+
+def test_main_refuses_a_url_that_is_not_http():
+    # A broken --url in ci.yml would otherwise look like an outage forever
+    # (every deploy warns and goes on, never checking the lease).
+    for url in ["dev1:8890/rig-lease.json", "ftp://dev1/rig-lease.json", "http:///x"]:
+        with pytest.raises(SystemExit):
+            main(["--own-repo", OWN_REPO, "--url", url])
+
+
+def test_a_holder_field_never_starts_a_new_log_line():
+    # A newline in a lease string would start a new output line, which the
+    # runner reads as a workflow command (`::error::`, `::add-mask::`).
+    sneaky = lease(repo="x/y\n::error::injected")
+    sneaky["holder"]["job"] = "full-path\r::add-mask::secret"
+    text = gate_mod.describe_holder(sneaky)
+    assert "\n" not in text and "\r" not in text
+    assert "::error::" in text, "the text stays readable, only the break goes"
