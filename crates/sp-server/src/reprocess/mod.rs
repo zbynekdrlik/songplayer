@@ -284,6 +284,8 @@ impl ReprocessWorker {
         // fails, the set stays under the old name and the rows record that. The
         // set is read NOW, not from the batch snapshot: an earlier row of this
         // batch may have moved the same files (the video in another playlist).
+        // The song-files lock keeps a post-job re-link out until it is recorded.
+        let _files = crate::downloader::cache::SONG_FILES.lock().await;
         let (file_path, audio_file_path): (String, Option<String>) = sqlx::query_as(
             "SELECT COALESCE(file_path, ''), audio_file_path FROM videos WHERE id = ?",
         )

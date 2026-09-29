@@ -30,7 +30,8 @@
 //!
 //! The recorded path columns are then set to the audio's names (only when they
 //! differ), so the dub worker and the dashboard read the same files the mixers
-//! open. A move that fails leaves its row for the next pass.
+//! open. A move that fails leaves its row for the next pass. A pass holds
+//! [`cache::SONG_FILES`], so it never interleaves with a rename.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -95,6 +96,7 @@ async fn relink_rows(
     cache_dir: &Path,
     rows: &[SqliteRow],
 ) -> Result<RelinkCounts, sqlx::Error> {
+    let _files = cache::SONG_FILES.lock().await;
     let owners = cache::derived_file_owners(cache_dir);
     let mut counts = RelinkCounts::default();
     for r in rows {
@@ -145,15 +147,7 @@ async fn relink_stems(
                 "self-heal: stems are recorded done but no name holds them, \
                  back to pending so the stem worker separates the song again"
             );
-            sqlx::query(
-                "UPDATE videos \
-                 SET stem_status = NULL, stem_attempts = 0, stem_next_attempt_at = NULL, \
-                     vocals_file_path = NULL, instrumental_file_path = NULL \
-                 WHERE id = ?",
-            )
-            .bind(song.id)
-            .execute(pool)
-            .await?;
+            crate::db::models_stems::requeue_lost_stems(pool, song.id).await?;
             counts.stems_reset += 1;
             return Ok(());
         };

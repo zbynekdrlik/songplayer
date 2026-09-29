@@ -358,10 +358,11 @@ async fn self_heal_resets_stems_missing_under_every_name() {
     );
 }
 
-/// A song whose video and audio sit under two different names (a rename that
-/// moved one half and could not move it back) is still one song the DB
-/// records: the self-heal must not delete its halves as orphans, it keeps
-/// them and the row plays on (#136 review round 1).
+/// A song whose video and audio sit under two different names is still one
+/// song the DB records: the self-heal must not delete its halves as orphans, it
+/// keeps them and the row plays on (#136 review round 1). A rename whose
+/// move-back failed leaves exactly this: `rename_song_files` records the stuck
+/// half at its new name and the other at its old one (review round 2).
 #[tokio::test]
 async fn self_heal_keeps_the_halves_of_a_split_song_the_db_records() {
     let tmp = tempfile::tempdir().unwrap();

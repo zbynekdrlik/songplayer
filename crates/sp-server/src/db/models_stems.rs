@@ -212,6 +212,21 @@ pub async fn enqueue_stems(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx:
     Ok(())
 }
 
+/// #136: stems recorded `'done'` whose files no name holds any more go back to
+/// the [`enqueue_stems`] pending state (the one status vocabulary), and their
+/// recorded paths, which name no file, are cleared. The stem worker then
+/// separates the song again.
+pub async fn requeue_lost_stems(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx::Error> {
+    enqueue_stems(pool, video_id).await?;
+    sqlx::query(
+        "UPDATE videos SET vocals_file_path = NULL, instrumental_file_path = NULL WHERE id = ?",
+    )
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// One-shot boot re-queue (round G0): flip every terminal `'unsupported'` row
 /// whose duration is KNOWN and within `cap_ms` back to the pending/queued state
 /// the worker picks up — the SAME reset [`enqueue_stems`] uses (`stem_status =

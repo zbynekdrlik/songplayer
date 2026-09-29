@@ -6,6 +6,8 @@ paths:
   - "crates/sp-server/src/song_relink*.rs"
   - "crates/sp-server/src/stems/mod.rs"
   - "crates/sp-server/src/stems/worker.rs"
+  - "crates/sp-server/src/dabing/worker.rs"
+  - "crates/sp-server/src/lyrics/idle_gate_abort.rs"
   - "crates/sp-server/src/db/models_stems*.rs"
   - "crates/sp-server/tests/startup_migration.rs"
 ---
@@ -46,15 +48,21 @@ Design record: #136 comment 5894034820.
   - It moves derived → audio → video as ONE unit (`move_as_unit`).
   - A failed move (Windows refuses to rename a file another process holds open
     without share-delete) moves every file already moved back and returns the
-    OLD set.
+    OLD set. The exception is a file whose move back ALSO failed
+    (`MoveFailed::stuck`): that video / audio is returned at its NEW name
+    (`in_effect_after_failure`), so the row records where the file IS.
   - Record `SongFiles::columns()` of the set it RETURNS, on EVERY row that
     recorded the old set: the same video in another playlist is a second row
     pointing at the same files.
   - Read the old set from the DB right before the move, never from a batch
     snapshot (an earlier row may have moved it).
+  - Hold `cache::SONG_FILES` (a process-wide async lock) from that read to the
+    DB record. The re-link holds it for its whole pass, so a rename and a
+    re-link never interleave on the same song.
 - **A job that writes derived files re-links its song when it finishes.** The
-  stem worker runs `song_relink::relink_song` after `mark_stems_done`, and the
-  dub worker after `mark_dub_ready`. A job writes under the name its song had
+  stem worker runs `song_relink::relink_song` after `mark_stems_done`
+  (`record_stem_result`), and the dub worker after `mark_dub_ready`
+  (`record_dub_ready`). A job writes under the name its song had
   when it STARTED, so a rename while it ran would strand the output.
 - **Delete a superseded download through `remove_duplicates`.**
   - It removes the video, the audio and the stems (re-separated on their own).
@@ -69,14 +77,18 @@ Design record: #136 comment 5894034820.
   skips a row whose audio is missing.
   - `done` stems missing under the audio's name come from the old name with the
     NEWEST stems pair holding BOTH stems, never a pair mixed from two names;
-    else the row is reset to pending (the `enqueue_stems` reset, recorded paths
-    cleared).
+    else the row is reset to pending (`models_stems::requeue_lost_stems` = the
+    `enqueue_stems` reset + the recorded paths cleared).
   - A `ready` dub comes from the old name with the newest dub, with its
     transcripts. A dub no name holds is WARNed + counted, never reset.
   - Each unit is ranked by its OWN files' age; `derived_file_owners` only lists
     names, in path order.
   - A failed move leaves the row for the next pass. The columns are written
     only when they differ.
+  - Leftovers are never deleted by inference: an old stems pair not chosen,
+    or a superseded dub the kept row did not adopt, stays on disk. It costs
+    disk space, never correctness, and deleting by name could destroy the only
+    copy of an operator-requested dub.
 
 ## Box verification (after a deploy that runs the self-heal)
 

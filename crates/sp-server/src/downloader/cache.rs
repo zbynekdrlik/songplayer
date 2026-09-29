@@ -130,6 +130,14 @@ pub fn derived_files(audio: &Path) -> [PathBuf; 4] {
     ]
 }
 
+/// One owner of the song files at a time (#136 review round 2). A rename (the
+/// reprocess worker, [`rename_song_files`]) and a re-link (`song_relink`, at
+/// startup and after every stem / dub job) each read a song's recorded files,
+/// move them and record the result. Run at the same moment on the same song,
+/// one could move files the other just recorded elsewhere. Both hold this lock
+/// from the read to the record.
+pub static SONG_FILES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// A song's complete file set, named by the two sidecars the DB records: every
 /// other file of the song is named after `audio` ([`derived_files`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
