@@ -456,6 +456,9 @@ async fn switch(facade: &Facade, scene: &str, via: Via) -> Reply {
 #[path = "session_tests.rs"]
 mod tests;
 #[cfg(test)]
+#[path = "session_tests_cap.rs"]
+mod tests_cap;
+#[cfg(test)]
 #[path = "session_tests_feedback.rs"]
 mod tests_feedback;
 #[cfg(test)]
