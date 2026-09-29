@@ -12,10 +12,13 @@
  * only for the recording and profile requests of the A/V gate.
  */
 
-// The JSON build, explicitly: in Node the bare "obs-websocket-js" import
-// resolves to the msgpack build, which SongPlayer's JSON-only facade (like
-// Companion) answers with HTTP 400 (#221 L3, obs-driver-protocol.spec.ts).
-import OBSWebSocket from "obs-websocket-js/json";
+// The bare import: in Node it resolves to the MSGPACK build, which offers
+// only `obswebsocket.msgpack` — Companion's exact encoding (its obs-studio
+// module runs in Node). SongPlayer's facade speaks it since #221 L2b and cg
+// OBS always did, so both drivers go through it; never import
+// "obs-websocket-js/json" here, it would test a path Companion never takes
+// (obs-driver-protocol.spec.ts).
+import OBSWebSocket from "obs-websocket-js";
 import { waitForPreviewApplied, waitForSceneSwitchApplied } from "./obs-scene-wait";
 
 export class ObsDriver {
