@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::*;
-use crate::remote::protocol;
+use crate::remote::protocol::{self, Subprotocol};
 
 // The markers are escapes, the map keys / strings plain text: `\x82` fixmap(2),
 // `\xa2` fixstr(2), `\x01` positive fixint 1, `\xc0` nil, `\xcd` uint16.
@@ -162,12 +162,18 @@ fn msgpack_nesting_is_bounded_like_serde_json() {
     let json = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
     assert!(serde_json::from_str::<Value>(&json(MAX_DEPTH - 1)).is_ok());
     assert!(serde_json::from_str::<Value>(&json(MAX_DEPTH)).is_err());
-    // The msgpack decoder takes and refuses exactly the same.
+    // Both codecs (their own visitor, `PlainValue`) take and refuse exactly
+    // the same.
     let decoded = Codec::MsgPack.decode_binary(&nested_arrays(MAX_DEPTH - 1));
+    assert!(decoded.is_ok());
     assert_eq!(decoded, Codec::Json.decode_text(&json(MAX_DEPTH - 1)));
     assert_eq!(
         Codec::MsgPack.decode_binary(&nested_arrays(MAX_DEPTH)),
         Err(MSGPACK_UNDECODABLE)
+    );
+    assert_eq!(
+        Codec::Json.decode_text(&json(MAX_DEPTH)),
+        Err(JSON_UNDECODABLE)
     );
     // A frame of nothing but nested arrays (under the 1 MiB bound) is refused,
     // never followed down a million levels.
@@ -179,11 +185,12 @@ fn msgpack_nesting_is_bounded_like_serde_json() {
 
 #[test]
 fn serde_jsons_private_raw_value_key_is_an_ordinary_key_in_both_encodings() {
-    // sp-server enables serde_json's `raw_value` feature (`api/preview.rs`),
-    // and with it `Value`'s own `Deserialize` re-parses the string after a
-    // first key `$serde_json::private::RawValue` as JSON, with a FRESH
-    // 128-level budget each time — strings nested that way escape the depth
-    // bound above. This build has that behaviour:
+    // serde_json's `raw_value` feature is always on here (sp-server's
+    // `api/preview.rs`, axum's `json`, sqlx-core), and with it `Value`'s own
+    // `Deserialize` re-parses the string after a first key
+    // `$serde_json::private::RawValue` as JSON, with a FRESH 128-level budget
+    // each time — strings nested that way escape the depth bound above. This
+    // build has that behaviour:
     let text = r#"{"$serde_json::private::RawValue":"[[1]]"}"#;
     assert_eq!(serde_json::from_str::<Value>(text).unwrap(), json!([[1]]));
     // The codec keeps it an ordinary key with a string value, both ways.

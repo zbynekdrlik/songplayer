@@ -42,8 +42,8 @@ pub const JSON_UNDECODABLE: CloseReason = CloseReason {
     reason: "Unable to decode Json.",
 };
 /// A msgpack session's frame that is not ONE MessagePack value with a JSON
-/// equivalent (malformed, nested [`MAX_DEPTH`] deep, a non-string map key,
-/// binary / extension data, or bytes after the value).
+/// equivalent (malformed, nested [`MAX_DEPTH`] deep, a map key that is not a
+/// string, binary / extension data, or bytes after the value).
 pub const MSGPACK_UNDECODABLE: CloseReason = CloseReason {
     code: CLOSE_MESSAGE_DECODE_ERROR,
     reason: "Unable to decode MsgPack.",
@@ -115,8 +115,10 @@ impl Codec {
 /// ONE MessagePack value as a JSON value: nested less than [`MAX_DEPTH`]
 /// deep (127 arrays / maps pass and 128 do not, exactly like serde_json's
 /// parser), and every byte of the frame belongs to it (obs-websocket's strict
-/// `from_msgpack` refuses trailing bytes too). A map key must be a string and
-/// binary / extension data has no JSON value, so both are refused.
+/// `from_msgpack` refuses trailing bytes too). A map key must be a string (a
+/// `bin` key holding UTF-8 is read as that string — serde's `String` accepts
+/// it, harmlessly; obs-websocket would refuse it), and binary / extension
+/// data as a value has no JSON equivalent, so it is refused.
 fn decode_msgpack(bytes: &[u8]) -> Option<Value> {
     let mut de = rmp_serde::Deserializer::new(bytes);
     de.set_max_depth(MAX_DEPTH);
@@ -125,13 +127,15 @@ fn decode_msgpack(bytes: &[u8]) -> Option<Value> {
 }
 
 /// A decoded message as a `serde_json::Value`, built with EVERY map key as a
-/// plain string. sp-server enables serde_json's `raw_value` feature
-/// (`api/preview.rs`), and with it `Value`'s own `Deserialize` treats a map
-/// whose first key is `$serde_json::private::RawValue` as a raw value and
-/// re-parses its string as JSON with a FRESH 128-level budget, so strings
-/// nested that way would take a session's stack far below [`MAX_DEPTH`]
-/// (#221 review round 1). Here nothing is re-parsed: a frame nests exactly as
-/// deep as its deserializer allows (serde_json's and rmp-serde's limit, 128).
+/// plain string. serde_json's `raw_value` feature is always on in this build
+/// (sp-server's `api/preview.rs` enables it, and so do axum's `json` and
+/// sqlx-core through feature unification), and with it `Value`'s own
+/// `Deserialize` treats a map whose first key is
+/// `$serde_json::private::RawValue` as a raw value and re-parses its string
+/// as JSON with a FRESH 128-level budget, so strings nested that way would
+/// take a session's stack far deeper than [`MAX_DEPTH`] (#221 review round
+/// 1). Here nothing is re-parsed: a frame nests exactly as deep as its
+/// deserializer allows (serde_json's and rmp-serde's limit, 128).
 struct PlainValue(Value);
 
 impl<'de> Deserialize<'de> for PlainValue {
