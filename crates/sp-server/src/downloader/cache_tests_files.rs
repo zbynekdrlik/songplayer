@@ -338,6 +338,157 @@ fn a_move_over_an_existing_file_leaves_only_the_moved_file() {
     );
 }
 
+/// A rename that fails on the one `(from, to)` pair given, and renames for real
+/// otherwise: the seam for forcing a chosen step of a unit move to fail on both
+/// Linux and Windows.
+fn failing_on(
+    fail_from: PathBuf,
+    fail_to: PathBuf,
+) -> impl Fn(&Path, &Path) -> std::io::Result<()> {
+    move |from: &Path, to: &Path| {
+        if from == fail_from && to == fail_to {
+            Err(std::io::Error::other("injected rename failure"))
+        } else {
+            std::fs::rename(from, to)
+        }
+    }
+}
+
+/// #136 review round 6: a move whose OWN rename fails right after it set aside
+/// the file under its new name gives that file back (the round-5 loss left the
+/// name empty and the older file stranded as `.replaced`).
+#[test]
+fn a_move_failing_after_its_set_aside_gives_the_file_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let (a, a2, fresh, older) = (d.join("a"), d.join("a2"), d.join("fresh"), d.join("older"));
+    fs::write(&a, b"a").unwrap();
+    fs::write(&fresh, b"new").unwrap();
+    fs::write(&older, b"old").unwrap();
+
+    let failed = move_as_unit_with(
+        ID,
+        &[(a.clone(), a2.clone()), (fresh.clone(), older.clone())],
+        &failing_on(fresh.clone(), older.clone()),
+    )
+    .unwrap_err();
+
+    assert!(failed.stuck.is_empty());
+    assert_eq!(fs::read(&a).unwrap(), b"a", "the earlier move is undone");
+    assert_eq!(fs::read(&fresh).unwrap(), b"new");
+    assert_eq!(
+        fs::read(&older).unwrap(),
+        b"old",
+        "the set-aside file is back"
+    );
+    assert_eq!(
+        fs::read_dir(d).unwrap().count(),
+        3,
+        "nothing left set aside"
+    );
+}
+
+/// A set-aside that fails rolls the unit back and touches neither file.
+#[test]
+fn a_set_aside_that_fails_rolls_the_unit_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let (a, a2, fresh, older) = (d.join("a"), d.join("a2"), d.join("fresh"), d.join("older"));
+    fs::write(&a, b"a").unwrap();
+    fs::write(&fresh, b"new").unwrap();
+    fs::write(&older, b"old").unwrap();
+
+    let failed = move_as_unit_with(
+        ID,
+        &[(a.clone(), a2.clone()), (fresh.clone(), older.clone())],
+        &failing_on(older.clone(), set_aside_name(&older)),
+    )
+    .unwrap_err();
+
+    assert!(failed.stuck.is_empty());
+    assert_eq!(fs::read(&a).unwrap(), b"a");
+    assert_eq!(fs::read(&fresh).unwrap(), b"new");
+    assert_eq!(fs::read(&older).unwrap(), b"old");
+    assert_eq!(fs::read_dir(d).unwrap().count(), 3);
+}
+
+/// A move back that fails leaves that file stuck under its new name (reported
+/// in `stuck`), and the file it replaced stays set aside: both are kept, never
+/// deleted.
+#[test]
+fn a_move_back_that_fails_is_stuck_and_keeps_the_replaced_file_set_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let (fresh, older, t, blocked) = (
+        d.join("fresh"),
+        d.join("older"),
+        d.join("t"),
+        d.join("blocked"),
+    );
+    fs::write(&fresh, b"new").unwrap();
+    fs::write(&older, b"old").unwrap();
+    fs::write(&t, b"t").unwrap();
+    fs::create_dir(&blocked).unwrap();
+    fs::write(blocked.join("x"), b"x").unwrap();
+
+    let failed = move_as_unit_with(
+        ID,
+        &[(fresh.clone(), older.clone()), (t.clone(), blocked.clone())],
+        &failing_on(older.clone(), fresh.clone()),
+    )
+    .unwrap_err();
+
+    assert_eq!(failed.stuck, vec![(fresh.clone(), older.clone())]);
+    assert_eq!(
+        fs::read(&older).unwrap(),
+        b"new",
+        "stuck under its new name"
+    );
+    assert_eq!(fs::read(set_aside_name(&older)).unwrap(), b"old");
+    assert!(!fresh.exists());
+}
+
+/// #136 review round 6: a rename that changes only the letter case. On a
+/// case-insensitive filesystem (NTFS, the box) the new name already "exists"
+/// as the very same file; the move must not set the song's own file aside
+/// (it then failed, and the next start deleted the audio as an orphan).
+#[test]
+fn a_rename_that_only_changes_letter_case_moves_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let from = d.join(format!("Song_A_{ID}_normalized_audio.flac"));
+    let to = d.join(format!("song_a_{ID}_normalized_audio.flac"));
+    fs::write(&from, b"a").unwrap();
+
+    assert_eq!(move_as_unit(ID, &[(from, to.clone())]).unwrap(), 1);
+
+    let names: Vec<String> = fs::read_dir(d)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        names,
+        vec![format!("song_a_{ID}_normalized_audio.flac")],
+        "exactly the new spelling, nothing set aside"
+    );
+    assert_eq!(fs::read(&to).unwrap(), b"a");
+}
+
+/// A `.replaced` file (a unit move that crashed or could not give a file back)
+/// is never taken for a song file by the cache scans.
+#[test]
+fn the_cache_scans_ignore_a_set_aside_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let set = set_under(dir.path(), &new_base());
+    for p in &set {
+        fs::write(set_aside_name(p), b"x").unwrap();
+    }
+
+    let scan = scan_cache(dir.path());
+    assert!(scan.songs.is_empty() && scan.orphans.is_empty() && scan.legacy.is_empty());
+    assert!(derived_file_owners(dir.path()).is_empty());
+}
+
 #[test]
 fn a_failed_move_returns_its_error() {
     let dir = tempfile::tempdir().unwrap();
