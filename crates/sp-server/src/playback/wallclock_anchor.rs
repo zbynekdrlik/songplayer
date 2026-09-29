@@ -364,7 +364,9 @@ pub enum ProbeDecision {
 /// bracketed `probe` read against the line the wall runs on (`anchor`).
 ///
 /// - Within ±2 ms ([`STEP_DETECT_100NS`]) it is [`ProbeDecision::Quiet`]:
-///   normal slewing stays on the 100-frame resample and its ±1 ms bound.
+///   normal slewing stays on the 100-frame resample and its ±1 ms bound. A
+///   `pending` step the resample armed and the probe sees again counts its
+///   applied 1 ms: the probe reads only the rest, the step is the whole.
 /// - Over 2 ms from a bracket wider than [`ANCHOR_WIDE_BRACKET`] it is
 ///   rejected by width. A preempted read only ever errs by half its bracket,
 ///   so a narrow probe cannot fake a 2 ms step.
@@ -382,10 +384,17 @@ pub fn decide_step_probe<F: FnOnce() -> AnchorSample>(
     probe: BracketedRead,
     confirm: F,
 ) -> ProbeDecision {
+    // The part of this step a resample already applied (it armed it with its
+    // bounded 1 ms), when `delta` reads the same step's rest.
+    let armed = |delta_100ns: i64| {
+        pending
+            .filter(|p| same_step(p.delta_100ns, p.applied_100ns, delta_100ns))
+            .map_or(0, |p| p.applied_100ns)
+    };
     let delta = probe
         .utc_100ns
         .saturating_sub(anchor.line_at(probe.midpoint()));
-    if delta.abs() <= STEP_DETECT_100NS {
+    if (delta + armed(delta)).abs() <= STEP_DETECT_100NS {
         return ProbeDecision::Quiet;
     }
     if probe.width() > ANCHOR_WIDE_BRACKET {
@@ -405,9 +414,6 @@ pub fn decide_step_probe<F: FnOnce() -> AnchorSample>(
             confirm_delta_100ns: confirm_delta,
         };
     }
-    let armed = pending
-        .filter(|p| same_step(p.delta_100ns, p.applied_100ns, confirm_delta))
-        .map_or(0, |p| p.applied_100ns);
     let wall = anchor.wall_at(sample.instant);
     ProbeDecision::Follow(ProbeFollow {
         sample,
@@ -419,7 +425,7 @@ pub fn decide_step_probe<F: FnOnce() -> AnchorSample>(
             carry_100ns: 0,
         },
         followed: FollowedStep {
-            total_100ns: armed + confirm_delta,
+            total_100ns: armed(confirm_delta) + confirm_delta,
             direction: StepDirection::of(confirm_delta),
         },
     })
@@ -494,9 +500,10 @@ pub struct StepProbeStats {
     /// sample that was wide or measured another step. Cumulative.
     pub rejected: u64,
     /// Monotonic time (µs) from the first over-2 ms probe of the last
-    /// followed step to its follow. About the width of two clock reads when
-    /// the first probe confirms at once; one boundary per rejected probe
-    /// before it. 0 before any.
+    /// followed step to its follow (by the probe, or by a resample after every
+    /// probe was rejected). About the width of two clock reads when the first
+    /// probe confirms at once; one boundary per rejected probe before it; 0
+    /// when no over-2 ms probe preceded the follow, and before any.
     pub last_detect_to_follow_us: u64,
 }
 

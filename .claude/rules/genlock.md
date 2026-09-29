@@ -964,7 +964,8 @@ Now:
 - **The step probe follows a date step at the boundary it lands (#224,
   design record 5890605448).** The 2-resample follow above kept every stamp
   3.3–6.7 s behind the fleet after a dantesync step (the receivers see it at
-  once): cg OBS placed ~87 ms of audio late after the 02:00Z 89.7 ms step, and
+  once): cg OBS placed ~87 ms of audio late after the 02:00Z 89.7 ms step
+  (#224 body; camera-box issue 1381 comment 5882384071), and
   the 10:36:30Z 297.7 ms step broke an A/V take. Now `WallClock::tick` takes,
   after the unchanged resample, ONE bracketed read per boundary and judges it
   with the pure `wallclock_anchor.rs::decide_step_probe`:
@@ -984,7 +985,15 @@ Now:
     step; a forward step inside a hold only shortens it). Else rejected,
     nothing armed, so the next boundary follows a real step at once;
   - a step the resample saw first in the same tick (1 ms applied + armed) is
-    followed by the probe right after it, and the total counts the armed 1 ms.
+    followed by the probe right after it: the armed 1 ms counts toward the
+    2 ms (a 2.5 ms step reads 1.5 ms after the resample) and into the total;
+  - a follow restarts the resample count (a fresh anchor), so no resample
+    lands inside the hold it starts (review round 1: the submit consumer,
+    ticking per job inside its own hold, re-measured the hold as a new step
+    and followed it twice);
+  - `last_detect_to_follow_us` is set by every follow, the resample path's
+    too (after every probe was rejected); 0 when no over-2 ms probe preceded
+    it.
   - Cost: one bracketed read (~3 clock reads) per boundary per wall; the
     confirming sample only on a suspected step.
   - Log: INFO `wallclock: UTC step followed at once by the boundary probe
@@ -1024,14 +1033,15 @@ Now:
     boundary). Neither do the `SP-program` sender, VBAN or the NDI input (they
     tick per wall boundary crossed). So no resample lands inside their own
     hold. The submit consumer ticks per job, and its next resample comes ≥ 100
-    jobs (~3.3 s) after the follow, which is longer than a ≤ 1.5 s hold. Its
-    step probe DOES run inside its hold (#224), and reads 0 there: it
-    measures against the line, not the frozen value.
+    jobs (~3.3 s) after the follow (every follow restarts the count, #224),
+    which is longer than a ≤ 1.5 s hold. Its step probe DOES run inside its
+    hold (#224), and reads 0 there: it measures against the line, not the
+    frozen value.
   - If a resample ever DID land inside a hold (a step longer than one
     resample period), it would measure the remaining hold as a new backward
-    delta. It would then cut the hold to a 1 ms hold and re-arm, and the next
-    resample would follow the rest. The wall would still be monotonic and
-    would converge one resample later.
+    delta. It would then cut the hold to a 1 ms hold and re-arm, and the step
+    probe of the same tick follows the rest at once (#224; before, the next
+    resample did). The wall stays monotonic.
   - **The boundary wait through a hold: spin budget, then yield (#147
     follow-up, design record 5852618200).**
     - Why it is needed: `pipeline_paced::sleep_to_boundary` coarse-sleeps to

@@ -247,6 +247,17 @@ impl WallClock {
         self.suspect_since.get_or_insert(at);
     }
 
+    /// Record a follow at `followed_at` (#224): the time since the first
+    /// over-2 ms probe not followed yet, else since `detected_at` (the
+    /// follow's own first reading). It ends the detection; returns the µs.
+    fn record_detect_to_follow(&mut self, detected_at: Instant, followed_at: Instant) -> u64 {
+        let detected = self.suspect_since.take().unwrap_or(detected_at);
+        let latency = followed_at.saturating_duration_since(detected);
+        let latency_us = u64::try_from(latency.as_micros()).unwrap_or(u64::MAX);
+        self.probe_stats.last_detect_to_follow_us = latency_us;
+        latency_us
+    }
+
     /// Apply a step the probe confirmed (#224): the telemetry, one INFO line,
     /// then the new anchor — a step ahead, or ONE hold, never a step back.
     fn follow_probed_step(&mut self, probe: BracketedRead, follow: &ProbeFollow) {
@@ -254,10 +265,11 @@ impl WallClock {
         self.stats.record_step(follow.delta_100ns, &follow.step);
         self.stats.record_follow(&follow.followed, &follow.step);
         self.pending = None; // the whole step is followed: nothing left to confirm
-        let detected = self.suspect_since.take().unwrap_or(probe.midpoint());
-        let latency = follow.sample.instant.saturating_duration_since(detected);
-        let latency_us = u64::try_from(latency.as_micros()).unwrap_or(u64::MAX);
-        self.probe_stats.last_detect_to_follow_us = latency_us;
+        // A fresh anchor: the next resample is 100 ticks away, so it never lands
+        // inside the hold this follow may start (a submit consumer ticks per
+        // job, also inside its own hold) and re-measures it as a new step.
+        self.frames_since_resample = 0;
+        let latency_us = self.record_detect_to_follow(probe.midpoint(), follow.sample.instant);
         info!(
             delta_us = to_us(follow.delta_100ns),
             step_us = to_us(follow.followed.total_100ns),
@@ -300,11 +312,15 @@ impl WallClock {
         self.stats.record_step(delta, &step);
         if let Some(followed) = decision.followed {
             self.stats.record_follow(&followed, &step);
+            // #224: the resample follows only what no probe did (every probe
+            // of the step rejected, or a step of 1–2 ms); it ends a detection.
+            let latency_us = self.record_detect_to_follow(sample.instant, sample.instant);
             info!(
                 delta_us = to_us(delta),
                 step_us = to_us(followed.total_100ns),
                 direction = followed.direction.as_str(),
                 bracket_us = sample.bracket.as_micros() as u64,
+                detect_to_follow_us = latency_us,
                 "wallclock: confirmed UTC step followed in one re-anchor (#147)"
             );
         } else if step.is_clamped() {
@@ -370,7 +386,10 @@ impl WallClock {
     /// clock), so a test can advance the wall clock between two reads inside one
     /// `Pacer::service` call — the scheduling read and the emit read — to prove
     /// lateness includes decode time (#147). `tick`'s re-anchor is a no-op here
-    /// (`read_100ns` ignores the anchor).
+    /// (`read_100ns` ignores the anchor). Its step probe (#224) measures the
+    /// set value against the real-time line, so it "follows" phantom steps:
+    /// harmless for the reads, but never pin `wall_anchor_*` / probe stats on
+    /// a settable wall — use the `VirtualClock`.
     pub fn settable(initial_100ns: i64) -> (Self, SettableClock) {
         let handle = SettableClock(std::sync::Arc::new(std::sync::atomic::AtomicI64::new(
             initial_100ns,
