@@ -233,12 +233,24 @@ but SongPlayer STOPPED (it was down ~45 s until a manual
 `Start-ScheduledTask -TaskName SongPlayer`). Since #221 L4a the deploy job
 waits out another repo's rig lease ITSELF, before anything stops SongPlayer
 (next section), so there is no reason to cancel a run for a lease any more.
-If a run must still be cancelled, do it before the `Gate` job appears (it
-runs ~2 s before the deploy), or while the deploy job is still in its "Wait
-for the rig lease" step (nothing is stopped yet). Later re-run the cancelled
-jobs with `gh run rerun <id> --failed` (cancelled jobs count), which reuses
-the finished build. If a deploy was cut anyway, check
-`Get-Process SongPlayer` and start the task.
+If a run must still be cancelled, do it before the deploy job starts, or
+while it is still in its "Wait for the rig lease" step (nothing is stopped
+yet). Later re-run the cancelled jobs with `gh run rerun <id> --failed`
+(cancelled jobs count), which reuses the finished build. If a deploy was cut
+anyway, check `Get-Process SongPlayer` and start the task.
+
+**The box jobs use `!cancelled()`, never `always()` (29.9.2026, run
+`36553367664`).** `gate`, `deploy-resolume` and `e2e-resolume` need a
+status-check function so a SKIPPED dependency (`version-check` on a push)
+does not skip them. `always()` does that, but it is also TRUE on a cancelled
+run: a run cancelled at 10:21Z with `Gate` queued still ran `Gate`, started
+the deploy, waited in the lease step (a second cancel did not stop it
+either) and deployed at 10:31Z. So "produkcia beží → zruš CI" never stopped
+a deploy or an E2E. `!cancelled()` keeps the skipped-dependency behaviour
+and is false once the run is cancelled; the Test Integrity Check pins it for
+all three jobs and rejects `always()` there. A step-level `if: always()`
+(artifact uploads) is harmless and stays. Never cancel a run for a held rig
+lease: the deploy waits for it itself (above).
 
 ## The deploy waits for the rig lease (#221 L4a, `scripts/rig_lease_gate.py`)
 
