@@ -88,7 +88,12 @@ pub(crate) async fn relink_derived_files(
 /// rename already carried the song's older files to the new name, so the job's
 /// own output is the fresh copy. It moves over them first, as one unit, and then
 /// the normal pass runs (review round 4: a re-dub stranded its new dub while the
-/// old one stayed in place).
+/// old one stayed in place). It moves every file named after `written_for`: a
+/// completed rename leaves nothing under the old name, and a stem job and a dub
+/// job never run at once (one heavy slot), so those files are this job's. Not
+/// when the current audio is missing (the pass skips such a row too). If the
+/// move fails, it rolls back: the output stays under the start name, the older
+/// copy stays in effect, and nothing retries it.
 pub(crate) async fn relink_song(
     pool: &SqlitePool,
     cache_dir: &Path,
@@ -103,6 +108,7 @@ pub(crate) async fn relink_song(
             .await?;
     if let Some((youtube_id, Some(current))) = song
         && Path::new(&current) != written_for
+        && Path::new(&current).exists()
     {
         let moves: Vec<(PathBuf, PathBuf)> = cache::derived_files(written_for)
             .into_iter()
@@ -113,7 +119,9 @@ pub(crate) async fn relink_song(
                 youtube_id = %youtube_id,
                 written_for = %written_for.display(),
                 current = %current,
-                "re-link: a job's output could not follow the song's rename"
+                "re-link: a job's output could not follow the song's rename; it stays under \
+                 the start name (not retried at the next start), the older copy under the \
+                 current name stays in effect"
             );
         }
     }

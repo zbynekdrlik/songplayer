@@ -43,6 +43,11 @@ Design record: #136 comment 5894034820.
 
 ## Rules
 
+- **`move_as_unit` never loses a file it replaces.** A FILE already under a
+  target name is set aside as `<name>.replaced`. It is deleted only once the
+  whole unit has moved; a rollback gives it back. A directory at a target is
+  never set aside, so the move fails on it (that is how the tests force a
+  failure).
 - **Rename a song only through `cache::rename_song_files(id, &old, &new)`**,
   never a hand-written `fs::rename` of one sidecar.
   - It moves derived → audio → video as ONE unit (`move_as_unit`).
@@ -76,6 +81,14 @@ Design record: #136 comment 5894034820.
   so the job's own output is the fresh copy: it moves over them first, as one
   unit, and then the normal pass runs. Without that, a re-dub left its new dub
   stranded while the old one played (review round 4).
+  - It moves EVERY file named after `written_for`. Those are the job's own
+    files: a completed rename leaves nothing under the old name, and a stem
+    job and a dub job never run at once (one heavy slot).
+  - It is skipped when the current audio is missing.
+  - If it fails (a target held open without share-delete), it rolls back and
+    WARNs `re-link: a job's output could not follow the song's rename`. The
+    output stays under the start name, the older copy stays in effect, and
+    NOTHING retries it: re-queue the stems / dub.
 - **Delete a superseded download through `remove_duplicates`.**
   - It removes the video, the audio and the stems (re-separated on their own).
   - It KEEPS the dub + transcripts. The re-link adopts them under the kept
@@ -109,7 +122,10 @@ Design record: #136 comment 5894034820.
 
 - Startup log, one INFO line: `self-heal: re-linked the stems / dub left under
   an old name stems_relinked=N stems_reset=N dubs_relinked=N dubs_missing=N`.
-- Each file moved is logged as `cache: moved a song file from=… to=…`.
+- Each file moved is logged as `cache: moved a song file from=… to=…`. A file
+  replaced by a move is logged `cache: setting aside the older file under a song
+  file's new name` (INFO). That is normal after a job that finished after a
+  rename.
 - Tripwire WARN: `lyrics: stems are recorded done but the vocals file is
   missing under the audio's name`. After the fix it should never fire; if it
   does, the song's files drifted in a way neither the rename nor the post-job

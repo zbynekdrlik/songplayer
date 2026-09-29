@@ -269,45 +269,53 @@ pub struct MoveFailed {
 /// order, as one unit. Returns how many files moved. On the first failure,
 /// moves the files already moved back in reverse order and returns that
 /// error, with every move it could not undo. Logs every move at INFO, a
-/// failure at WARN, and a move back that fails at ERROR. A `to` that already
-/// exists is replaced (WARNed): the song's own file wins over a stale one under
-/// its new name.
+/// failure at WARN, and a move back that fails at ERROR.
+///
+/// A FILE already under a `to` name is replaced: the song's own file wins over
+/// a stale copy (a job's fresh output over an older one, a whole stems pair over
+/// half a pair). It is first set aside ([`set_aside_name`]) and only deleted once
+/// the whole unit has moved, so a rollback gives it back (#136 review round 5).
+/// A directory under a `to` name is never set aside; the move fails on it.
 pub fn move_as_unit(youtube_id: &str, moves: &[(PathBuf, PathBuf)]) -> Result<usize, MoveFailed> {
-    let mut moved: Vec<(&PathBuf, &PathBuf)> = Vec::new();
+    let mut done: Vec<Moved> = Vec::new();
     for (from, to) in moves {
         if from == to || !from.exists() {
             continue;
         }
-        if to.exists() {
-            tracing::warn!(
+        let set_aside = if to.is_file() {
+            let aside = set_aside_name(to);
+            if let Err(error) = std::fs::rename(to, &aside) {
+                tracing::warn!(
+                    youtube_id,
+                    to = %to.display(),
+                    "cache: could not set aside the file under a song file's new name: {error}"
+                );
+                return Err(undo(youtube_id, done, error));
+            }
+            tracing::info!(
                 youtube_id,
-                from = %from.display(),
                 to = %to.display(),
-                "cache: a song file move replaces the file already under its new name"
+                "cache: setting aside the older file under a song file's new name"
             );
-        }
+            Some(aside)
+        } else {
+            None
+        };
+        let step = Moved {
+            from: from.clone(),
+            to: to.clone(),
+            set_aside,
+        };
         if let Err(error) = std::fs::rename(from, to) {
             tracing::warn!(
                 youtube_id,
                 from = %from.display(),
                 to = %to.display(),
                 "cache: moving a song file failed, moving the {} already moved back: {error}",
-                moved.len()
+                done.len()
             );
-            let mut stuck = Vec::new();
-            for (from, to) in moved.into_iter().rev() {
-                if let Err(back) = std::fs::rename(to, from) {
-                    tracing::error!(
-                        youtube_id,
-                        from = %to.display(),
-                        to = %from.display(),
-                        "cache: moving a song file back failed, the file stays under its new \
-                         name: {back}"
-                    );
-                    stuck.push((from.clone(), to.clone()));
-                }
-            }
-            return Err(MoveFailed { error, stuck });
+            give_back(youtube_id, &step);
+            return Err(undo(youtube_id, done, error));
         }
         tracing::info!(
             youtube_id,
@@ -315,9 +323,72 @@ pub fn move_as_unit(youtube_id: &str, moves: &[(PathBuf, PathBuf)]) -> Result<us
             to = %to.display(),
             "cache: moved a song file"
         );
-        moved.push((from, to));
+        done.push(step);
     }
-    Ok(moved.len())
+    // The unit moved: the set-aside files are the stale copies it replaced.
+    for aside in done.iter().filter_map(|step| step.set_aside.as_ref()) {
+        if let Err(e) = std::fs::remove_file(aside) {
+            tracing::warn!(
+                youtube_id,
+                aside = %aside.display(),
+                "cache: could not delete a replaced song file: {e}"
+            );
+        }
+    }
+    Ok(done.len())
+}
+
+/// One move [`move_as_unit`] made, and where it set aside the file it replaced.
+struct Moved {
+    from: PathBuf,
+    to: PathBuf,
+    set_aside: Option<PathBuf>,
+}
+
+/// The name a replaced file waits under until its unit has moved: the file's
+/// own name plus `.replaced` (no cache scan matches it).
+fn set_aside_name(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".replaced");
+    PathBuf::from(name)
+}
+
+/// Give a step's set-aside file its name back (its own move never happened or
+/// was just undone).
+fn give_back(youtube_id: &str, step: &Moved) {
+    if let Some(aside) = &step.set_aside
+        && let Err(e) = std::fs::rename(aside, &step.to)
+    {
+        tracing::error!(
+            youtube_id,
+            aside = %aside.display(),
+            to = %step.to.display(),
+            "cache: giving back a replaced song file failed, it stays set aside: {e}"
+        );
+    }
+}
+
+/// Undo `done` in reverse order after `error`: every file goes back to its old
+/// name and every replaced file gets its name back. A file that cannot move back
+/// is `stuck` (its replaced file then stays set aside, logged).
+fn undo(youtube_id: &str, done: Vec<Moved>, error: std::io::Error) -> MoveFailed {
+    let mut stuck = Vec::new();
+    for step in done.into_iter().rev() {
+        match std::fs::rename(&step.to, &step.from) {
+            Ok(()) => give_back(youtube_id, &step),
+            Err(back) => {
+                tracing::error!(
+                    youtube_id,
+                    from = %step.to.display(),
+                    to = %step.from.display(),
+                    "cache: moving a song file back failed, the file stays under its new \
+                     name: {back}"
+                );
+                stuck.push((step.from, step.to));
+            }
+        }
+    }
+    MoveFailed { error, stuck }
 }
 
 /// Every name in `cache_dir` that still holds a file named after an audio
