@@ -33,7 +33,7 @@ use crate::lyrics::worker_outcome::SongOutcome;
 pub(crate) enum TierOutcome {
     /// An un-translated line-level track — the caller translates + persists it.
     Track(LyricsTrack),
-    /// The song ends here for this pass (deferred, waiting or quarantined);
+    /// The song ends here for this pick (deferred, waiting or quarantined);
     /// the in-flight marker is already handled.
     Return(SongOutcome),
 }
