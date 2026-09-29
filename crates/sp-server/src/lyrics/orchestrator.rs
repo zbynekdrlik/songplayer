@@ -1,8 +1,10 @@
 //! Reference stage (#143, v21) — the forced-alignment ★ tier.
 //!
-//! Runs the mtl-align → Gemini-ASR → gate chain for one song's chosen
-//! candidate text. All I/O is behind the injected `ReferenceStageBackend`;
-//! everything else here is pure decision logic. On gate PASS the caller
+//! Runs the mtl-align → gate chain for one song's chosen candidate text,
+//! against the song's one Gemini 3.5 Transcribe transcript (#144: taken
+//! once by the worker, `worker_text_tiers::transcribe_vocal`, and reused by
+//! the title search and the base tier). All I/O is behind the injected
+//! `ReferenceStageBackend`; everything else here is pure decision logic. On gate PASS the caller
 //! (`worker_reference::run_mtl_reference_stage`) ships the mtl line timings
 //! directly (★); on FAIL/ERROR/skip the song falls through to the v22 g35t
 //! base tier (`worker_g35t`).
@@ -17,10 +19,10 @@ use std::path::{Path, PathBuf};
 // Lever 2 (#143) — forced-alignment reference stage.
 //
 // Aligns the chosen text candidate's lines to the isolated vocal stem with
-// `lyrics-alignment-mtl` (`mtl_aligner::align`), verifies the result against an
-// independent Gemini 3.5 Transcribe word transcript
-// (`g35t_client::transcribe_words` + `reference_gate::evaluate`), and on PASS
-// ships the mtl line timings directly.
+// `lyrics-alignment-mtl` (`mtl_aligner::align`), verifies the result against the
+// song's independent Gemini 3.5 Transcribe word transcript (taken once through
+// `ReferenceStageBackend::asr_transcribe` before this stage, #144, then
+// `reference_gate::evaluate`), and on PASS ships the mtl line timings directly.
 //
 // `ReferenceStageBackend` is the injection seam: production wires
 // `RealReferenceStageBackend` (real subprocess + real HTTP); tests inject a
@@ -184,10 +186,10 @@ impl ReferenceStageBackend for RealReferenceStageBackend {
     }
 }
 
-/// Outcome of `run_reference_stage`. `Error` covers both an `mtl_align` and
-/// an `asr_transcribe` transport failure — the caller treats both
-/// identically (log + write the audit sidecar + fall through to the g35t base
-/// tier); only the message differs.
+/// Outcome of `run_reference_stage`. `Error` is an `mtl_align` failure — the
+/// caller logs it, writes the audit sidecar and falls through to the g35t
+/// base tier. (A transcription failure never reaches this stage since #144:
+/// the one transcript is taken first, and its failure defers the song.)
 pub enum ReferenceStageResult {
     Pass {
         lines: Vec<crate::lyrics::backend::AlignedLine>,
@@ -214,14 +216,16 @@ pub enum ReferenceStageResult {
     WallAborted { detail: String },
 }
 
-/// Runs the mtl-align → Gemini-ASR → gate chain for one song's chosen
-/// candidate text. All I/O is behind the injected `backend`; everything
-/// else here is pure decision logic.
+/// Runs the mtl-align → gate chain for one song's chosen candidate text,
+/// verified against `words` (the song's one g35t transcript, #144). All I/O
+/// is behind the injected `backend`; everything else here is pure decision
+/// logic.
 pub async fn run_reference_stage(
     backend: &dyn ReferenceStageBackend,
     vocals_wav: &Path,
     video_id: &str,
     lines: &[String],
+    words: &[crate::lyrics::g35t_client::AsrWord],
 ) -> ReferenceStageResult {
     let mtl = match backend.mtl_align(vocals_wav, video_id, lines).await {
         Ok(m) => m,
@@ -240,15 +244,6 @@ pub async fn run_reference_stage(
             };
         }
     };
-    let words = match backend.asr_transcribe(vocals_wav).await {
-        Ok(w) => w,
-        Err(e) => {
-            return ReferenceStageResult::Error {
-                stage: "asr_transcribe",
-                message: e.to_string(),
-            };
-        }
-    };
     let asr_word_count = words.len();
     let gate_lines: Vec<crate::lyrics::reference_gate::AlignedLine> = mtl
         .lines
@@ -258,7 +253,7 @@ pub async fn run_reference_stage(
             start_ms: l.start_ms,
         })
         .collect();
-    match crate::lyrics::reference_gate::evaluate(&gate_lines, &words) {
+    match crate::lyrics::reference_gate::evaluate(&gate_lines, words) {
         crate::lyrics::reference_gate::GateVerdict::Pass(stats) => ReferenceStageResult::Pass {
             mtl_device: mtl.device,
             mtl_elapsed_s: mtl.elapsed_s,

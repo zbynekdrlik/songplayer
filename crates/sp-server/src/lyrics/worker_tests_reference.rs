@@ -158,21 +158,28 @@ impl crate::lyrics::orchestrator::ReferenceStageBackend for FakeReferenceStageBa
 }
 
 // Direct `run_reference_stage` transport-error coverage (re-homed from the
-// deleted orchestrator_tests.rs — this is SURVIVING code): an `mtl_align` or
-// `asr_transcribe` failure returns `ReferenceStageResult::Error` naming the
-// failing stage, so the worker falls through to the g35t base tier.
+// deleted orchestrator_tests.rs — this is SURVIVING code): an `mtl_align`
+// failure returns `ReferenceStageResult::Error` naming the stage, so the worker
+// falls through to the g35t base tier. (A transcription failure is
+// `worker_text_tiers::transcribe_vocal`'s since #144, tested there.)
 #[tokio::test]
 async fn run_reference_stage_mtl_align_error_returns_error_stage() {
     let backend = FakeReferenceStageBackend {
         mtl: std::sync::Mutex::new(Some(Err(anyhow::anyhow!("mtl boom")))),
-        asr: std::sync::Mutex::new(None), // asr_transcribe must NOT be reached
+        asr: std::sync::Mutex::new(None), // the stage never transcribes (#144)
     };
     let lines = vec!["a".to_string(), "b".to_string()];
+    let words = vec![crate::lyrics::g35t_client::AsrWord {
+        text: "a".into(),
+        start_ms: 0,
+        end_ms: 300,
+    }];
     let result = crate::lyrics::orchestrator::run_reference_stage(
         &backend,
         Path::new("/x.wav"),
         "yt1",
         &lines,
+        &words,
     )
     .await;
     match result {
@@ -184,38 +191,6 @@ async fn run_reference_stage_mtl_align_error_returns_error_stage() {
     }
 }
 
-#[tokio::test]
-async fn run_reference_stage_asr_transcribe_error_returns_error_stage() {
-    use crate::lyrics::mtl_aligner::{MtlLine, MtlOutput};
-    let backend = FakeReferenceStageBackend {
-        mtl: std::sync::Mutex::new(Some(Ok(MtlOutput {
-            lines: vec![MtlLine {
-                text: "a".into(),
-                start_ms: 0,
-                end_ms: 1000,
-            }],
-            device: "cpu".into(),
-            elapsed_s: 1.0,
-        }))),
-        asr: std::sync::Mutex::new(Some(Err(anyhow::anyhow!("asr boom")))),
-    };
-    let lines = vec!["a".to_string()];
-    let result = crate::lyrics::orchestrator::run_reference_stage(
-        &backend,
-        Path::new("/x.wav"),
-        "yt1",
-        &lines,
-    )
-    .await;
-    match result {
-        crate::lyrics::orchestrator::ReferenceStageResult::Error { stage, message } => {
-            assert_eq!(stage, "asr_transcribe");
-            assert!(message.contains("asr boom"), "message: {message}");
-        }
-        _ => panic!("expected Error stage=asr_transcribe"),
-    }
-}
-
 fn ref_candidate(source: &str, n_lines: usize) -> crate::lyrics::tier1::CandidateText {
     crate::lyrics::tier1::CandidateText {
         source: source.to_string(),
@@ -223,6 +198,16 @@ fn ref_candidate(source: &str, n_lines: usize) -> crate::lyrics::tier1::Candidat
         line_timings: None,
         has_timing: false,
     }
+}
+
+/// A one-word transcript: enough for the stage to reach its other skip
+/// checks (an EMPTY transcript is a skip of its own, #144).
+fn one_word() -> Vec<crate::lyrics::g35t_client::AsrWord> {
+    vec![crate::lyrics::g35t_client::AsrWord {
+        text: "line".into(),
+        start_ms: 0,
+        end_ms: 300,
+    }]
 }
 
 /// A tools dir with all three `MtlConfig::is_available()` paths present, so
@@ -256,6 +241,7 @@ async fn run_mtl_reference_stage_skips_when_tooling_unavailable() {
             "yt1",
             Some(&cand),
             Some(Path::new("/x.wav")),
+            &one_word(),
             &UnreachableBackend,
         )
         .await;
@@ -279,7 +265,14 @@ async fn run_mtl_reference_stage_skips_when_no_vocals_wav() {
     );
     let cand = ref_candidate("description", 6);
     let result = worker
-        .run_mtl_reference_stage(1, "yt1", Some(&cand), None, &UnreachableBackend)
+        .run_mtl_reference_stage(
+            1,
+            "yt1",
+            Some(&cand),
+            None,
+            &one_word(),
+            &UnreachableBackend,
+        )
         .await;
     assert!(result.unwrap().is_none());
     let _ = std::fs::remove_dir_all(&cache_dir);
@@ -305,6 +298,7 @@ async fn run_mtl_reference_stage_skips_when_no_candidate() {
             "yt1",
             None,
             Some(Path::new("/x.wav")),
+            &one_word(),
             &UnreachableBackend,
         )
         .await;
@@ -333,6 +327,39 @@ async fn run_mtl_reference_stage_skips_when_candidate_too_short() {
             "yt1",
             Some(&cand),
             Some(Path::new("/x.wav")),
+            &one_word(),
+            &UnreachableBackend,
+        )
+        .await;
+    assert!(result.unwrap().is_none());
+    let _ = std::fs::remove_dir_all(&cache_dir);
+}
+
+/// #144: an empty transcript can never pass the gate (no line matches), so
+/// the stage skips before spending an mtl run on it; the base tier then
+/// quarantines the song as `asr_gap` from the same empty transcript.
+#[tokio::test]
+async fn run_mtl_reference_stage_skips_when_the_transcript_is_empty() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    let cache_dir = std::env::temp_dir().join("sp_reference_stage_empty_transcript_test");
+    let _ = std::fs::create_dir_all(&cache_dir);
+    let tools = available_mtl_tools_dir();
+    let (events_tx, _rx) = tokio::sync::broadcast::channel::<sp_core::ws::ServerMsg>(16);
+    let worker = crate::lyrics::worker::LyricsWorker::new_for_test_with_tools_dir(
+        pool,
+        cache_dir.clone(),
+        tools.path().to_path_buf(),
+        events_tx,
+    );
+    let cand = ref_candidate("description", 6);
+    let result = worker
+        .run_mtl_reference_stage(
+            1,
+            "yt1",
+            Some(&cand),
+            Some(Path::new("/x.wav")),
+            &[],
             &UnreachableBackend,
         )
         .await;
@@ -476,7 +503,7 @@ async fn run_mtl_reference_stage_pass_stamps_source_and_sets_reference_flag() {
     ];
     let backend = FakeReferenceStageBackend {
         mtl: std::sync::Mutex::new(Some(Ok(mtl_out))),
-        asr: std::sync::Mutex::new(Some(Ok(words))),
+        asr: std::sync::Mutex::new(None), // the stage never transcribes (#144)
     };
 
     let result = worker
@@ -485,6 +512,7 @@ async fn run_mtl_reference_stage_pass_stamps_source_and_sets_reference_flag() {
             "yt_pass",
             Some(&cand),
             Some(Path::new("/x.wav")),
+            &words,
             &backend,
         )
         .await;
@@ -648,7 +676,7 @@ async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
     ];
     let backend = FakeReferenceStageBackend {
         mtl: std::sync::Mutex::new(Some(Ok(mtl_out))),
-        asr: std::sync::Mutex::new(Some(Ok(words))),
+        asr: std::sync::Mutex::new(None), // the stage never transcribes (#144)
     };
 
     let result = worker
@@ -657,6 +685,7 @@ async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
             "yt_fail",
             Some(&cand),
             Some(Path::new("/x.wav")),
+            &words,
             &backend,
         )
         .await;
@@ -767,7 +796,7 @@ async fn run_mtl_reference_stage_pass_writes_the_audit_with_the_sung_coverage() 
     });
     let backend = FakeReferenceStageBackend {
         mtl: std::sync::Mutex::new(Some(Ok(mtl_out))),
-        asr: std::sync::Mutex::new(Some(Ok(words))),
+        asr: std::sync::Mutex::new(None), // the stage never transcribes (#144)
     };
 
     let result = worker
@@ -776,6 +805,7 @@ async fn run_mtl_reference_stage_pass_writes_the_audit_with_the_sung_coverage() 
             "yt_pass_audit",
             Some(&cand),
             Some(Path::new("/x.wav")),
+            &words,
             &backend,
         )
         .await;

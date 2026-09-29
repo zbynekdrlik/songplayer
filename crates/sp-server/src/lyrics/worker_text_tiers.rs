@@ -1,0 +1,209 @@
+//! `LyricsWorker` extension — the text tiers of one song, after its vocal is
+//! isolated (#144).
+//!
+//! 1. ONE Gemini 3.5 Transcribe transcript of the isolated vocal
+//!    (`transcribe_vocal`), reused by everything below. Before #144 the
+//!    reference stage transcribed after mtl, and the base tier transcribed the
+//!    same vocal AGAIN whenever the gate failed.
+//! 2. The ★ tier (`run_mtl_reference_stage`): the best text candidate, mtl
+//!    force-aligned and verified by the two-way gate against that transcript.
+//! 3. The base tier (`run_g35t_transcript_branch`): the transcript grouped
+//!    into lines, for every song the ★ tier did not ship.
+//!
+//! Extracted from `worker.rs::process_song` to keep that file under the
+//! 1000-line CI cap.
+
+use std::path::Path;
+
+use sp_core::lyrics::LyricsTrack;
+use tracing::{info, warn};
+
+use super::worker::LyricsWorker;
+use crate::lyrics::g35t_client::AsrWord;
+use crate::lyrics::orchestrator::ReferenceStageBackend;
+use crate::lyrics::worker_outcome::SongOutcome;
+
+/// What the text tiers hand back to `process_song`.
+pub(crate) enum TierOutcome {
+    /// An un-translated line-level track — the caller translates + persists it.
+    Track(LyricsTrack),
+    /// The song ends here for this pass (deferred, waiting or quarantined);
+    /// the in-flight marker is already handled.
+    Return(SongOutcome),
+}
+
+/// #144: the one g35t transcript of this song's isolated vocal.
+///
+/// `Ok(None)` means there is nothing to transcribe here: no isolated vocal (the
+/// base tier chooses between the #171 full-mix fallback and a deferral) or no
+/// Gemini key (the base tier defers `gemini_key_missing`). `Err` is a failed
+/// transcription: the song defers (`g35t_error`) and retries after its
+/// backoff — before #144 it spent the mtl run first, then failed again in the
+/// base tier.
+pub(crate) async fn transcribe_vocal(
+    backend: &dyn ReferenceStageBackend,
+    clean_vocal: Option<&Path>,
+    gemini_keys: &[String],
+    youtube_id: &str,
+) -> Result<Option<Vec<AsrWord>>, &'static str> {
+    let Some(wav) = clean_vocal else {
+        return Ok(None);
+    };
+    if gemini_keys.is_empty() {
+        return Ok(None);
+    }
+    match backend.asr_transcribe(wav).await {
+        Ok(words) => {
+            info!(
+                youtube_id = %youtube_id,
+                words = words.len(),
+                "g35t: the song's one transcript (#144)"
+            );
+            Ok(Some(words))
+        }
+        Err(e) => {
+            warn!(
+                youtube_id = %youtube_id,
+                error = %e,
+                "g35t: transcription failed — deferring the song for retry"
+            );
+            Err("g35t_error")
+        }
+    }
+}
+
+impl LyricsWorker {
+    /// The text tiers for one song (module doc). `candidate_texts` are what
+    /// `gather_sources` found; `clean_vocal` is the isolated vocal (`None`
+    /// when isolation yielded none).
+    #[cfg_attr(test, mutants::skip)] // I/O glue; each step is tested on its own
+    pub(crate) async fn run_text_tiers(
+        &self,
+        row: &crate::db::models::VideoLyricsRow,
+        candidate_texts: Vec<crate::lyrics::provider::CandidateText>,
+        clean_vocal: Option<&Path>,
+        gpu_mem: Option<String>,
+        mode: crate::lyrics::heavy_plan::ProcessingMode,
+        started_at_unix_ms: i64,
+    ) -> anyhow::Result<TierOutcome> {
+        let video_id = row.id;
+        let youtube_id = row.youtube_id.as_str();
+        let candidates: Vec<crate::lyrics::tier1::CandidateText> = candidate_texts
+            .into_iter()
+            .map(crate::lyrics::tier1::CandidateText::from)
+            .collect();
+
+        // The Gemini key list, parsed once for the transcript and the base tier.
+        let gemini_csv = crate::db::models::get_setting(&self.pool, "gemini_api_key")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let gemini_keys = crate::gemini_api::gemini_keys_from_setting(&gemini_csv);
+
+        let reference_backend = crate::lyrics::orchestrator::RealReferenceStageBackend {
+            mtl_cfg: crate::lyrics::mtl_aligner::MtlConfig::from_tools_dir(&self.tools_dir),
+            work_dir: self.cache_dir.clone(),
+            http_client: self.client.clone(),
+            gemini_keys: gemini_keys.clone(),
+            gpu_mem_setting: gpu_mem,
+            // #161/#162: the backend wraps ONLY the mtl subprocess (never the
+            // g35t HTTP transcription), using these handles + the once-read
+            // processing mode (which selects the mtl plan + abort arming).
+            ndi_health_registry: self.ndi_health_registry.clone(),
+            obs_state: self.obs_state.clone(),
+            mode,
+        };
+
+        let transcript =
+            match transcribe_vocal(&reference_backend, clean_vocal, &gemini_keys, youtube_id).await
+            {
+                Ok(t) => t,
+                Err(reason) => {
+                    // `process_next` records the backoff (`defer_song`).
+                    self.clear_processing().await;
+                    return Ok(TierOutcome::Return(SongOutcome::Deferred(reason)));
+                }
+            };
+
+        // Tier 1 (★): the best text candidate, mtl force-aligned and verified by
+        // the two-way gate against the transcript. On PASS the mtl line timings
+        // ship; otherwise (skip / gate fail / mtl error) the base tier below.
+        let best_candidate =
+            crate::lyrics::claude_merge::best_authoritative_candidate(&candidates).cloned();
+
+        // #154 gate #2 (idle-only mode only, #162). Isolation above may have
+        // started while the wall was idle and finished after it went busy — a
+        // running subprocess is never killed (that would waste ~4 min of GPU
+        // work), so the check goes here, BEFORE the next heavy spawn (mtl). If
+        // the wall is busy now, defer the WHOLE song (WaitingForWall): the
+        // isolated vocal WAV is preserved on disk, so the next idle pick is a
+        // cache-hit isolation + mtl with byte-identical output. We do NOT fall
+        // through to the g35t base tier — that would degrade the ★ mtl tier
+        // (owner's quality-first rule). In LOW-PRIORITY mode there is no gate #2:
+        // mtl runs at reduced priority instead (the backend picks the plan and
+        // re-runs on CPU if a GPU job is aborted).
+        if mode == crate::lyrics::heavy_plan::ProcessingMode::IdleOnly
+            && best_candidate.is_some()
+            && clean_vocal.is_some()
+            && self.defer_before_mtl().await
+        {
+            return Ok(TierOutcome::Return(SongOutcome::WaitingForWall));
+        }
+
+        let mtl_track = match self
+            .run_mtl_reference_stage(
+                video_id,
+                youtube_id,
+                best_candidate.as_ref(),
+                clean_vocal,
+                transcript.as_deref().unwrap_or_default(),
+                &reference_backend,
+            )
+            .await
+        {
+            Ok(t) => t,
+            // #161 wall-abort / #162 low memory during/before mtl → defer the
+            // whole song with NO penalty (defer_heavy). Never fall through to the
+            // g35t base tier (that would degrade the ★ mtl tier, owner's
+            // quality-first rule); the next pick re-runs mtl to byte-identical ★.
+            Err(d) => return Ok(TierOutcome::Return(self.defer_heavy(d).await)),
+        };
+        if let Some(track) = mtl_track {
+            return Ok(TierOutcome::Track(track));
+        }
+
+        // Tier 2 — the g35t base tier: the transcript grouped into lines.
+        match self
+            .run_g35t_transcript_branch(
+                clean_vocal,
+                // #171: mix FLAC — base-tier last resort when isolation never yields a vocal.
+                row.audio_file_path.as_deref().map(Path::new),
+                transcript,
+                &gemini_keys,
+                video_id,
+                youtube_id,
+                &row.song,
+                &row.artist,
+                started_at_unix_ms,
+            )
+            .await?
+        {
+            crate::lyrics::worker_g35t::G35tOutcome::Track(track) => Ok(TierOutcome::Track(track)),
+            crate::lyrics::worker_g35t::G35tOutcome::Deferred(reason) => {
+                // Vocals WAV intentionally preserved on disk — aligner's
+                // cache-hit path reuses it on the next run.
+                self.clear_processing().await;
+                Ok(TierOutcome::Return(SongOutcome::Deferred(reason)))
+            }
+            crate::lyrics::worker_g35t::G35tOutcome::Quarantined => {
+                self.clear_processing().await;
+                Ok(TierOutcome::Return(SongOutcome::Done))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "worker_text_tiers_tests.rs"]
+mod tests;

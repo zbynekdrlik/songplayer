@@ -43,6 +43,7 @@ pub mod worker;
 pub mod worker_g35t;
 pub mod worker_outcome;
 pub mod worker_reference;
+pub mod worker_text_tiers;
 pub mod worker_translation;
 pub mod youtube_subs;
 pub use worker::LyricsWorker;

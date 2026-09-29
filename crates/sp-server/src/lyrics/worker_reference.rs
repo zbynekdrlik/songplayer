@@ -3,8 +3,9 @@
 //!
 //! Extracted from `worker.rs::process_song` to keep that file under the
 //! 1000-line CI limit. `run_mtl_reference_stage` is the FIRST tier: it aligns
-//! the best text candidate via mtl, verifies it against Gemini ASR through the
-//! reference gate (`orchestrator::run_reference_stage`), and on gate PASS ships
+//! the best text candidate via mtl, verifies it against the song's one Gemini
+//! ASR transcript through the two-way reference gate
+//! (`orchestrator::run_reference_stage`), and on gate PASS ships
 //! the mtl line timings directly while stamping `videos.lyrics_reference`.
 //! Every PASS/FAIL/ERROR writes the `{youtube_id}_alignment_audit.json`
 //! sidecar (#144: a PASS too, so the gate's numbers — the sung coverage
@@ -22,8 +23,10 @@ use crate::lyrics::LYRICS_PIPELINE_VERSION;
 
 impl LyricsWorker {
     /// Lever 2 (#143): forced-alignment reference stage. See
-    /// `orchestrator::run_reference_stage` for the mtl-align → Gemini-ASR →
-    /// gate decision; this wraps it with the skip conditions, the
+    /// `orchestrator::run_reference_stage` for the mtl-align → gate decision
+    /// against `words`, the song's one g35t transcript (#144); this wraps it
+    /// with the skip conditions (an empty transcript is one: no gate can pass
+    /// on it, so no mtl is spent), the
     /// `videos.lyrics_reference` flag update, and the
     /// `_alignment_audit.json` sidecar of every gate outcome. `backend` is
     /// the injection seam (`orchestrator::ReferenceStageBackend`) —
@@ -43,6 +46,7 @@ impl LyricsWorker {
         youtube_id: &str,
         best: Option<&crate::lyrics::tier1::CandidateText>,
         clean_vocal: Option<&Path>,
+        words: &[crate::lyrics::g35t_client::AsrWord],
         backend: &dyn crate::lyrics::orchestrator::ReferenceStageBackend,
     ) -> Result<Option<LyricsTrack>, crate::lyrics::heavy_plan::HeavyDefer> {
         const MIN_LINES: usize = 4;
@@ -71,6 +75,10 @@ impl LyricsWorker {
             );
             return Ok(None);
         }
+        if words.is_empty() {
+            info!(youtube_id = %youtube_id, "reference_stage: empty transcript — skipping (#144)");
+            return Ok(None);
+        }
 
         // #167: no heavy step for the first 60 s after engine start — the wall
         // pipelines must come up on a quiet box. No backoff; re-picked next tick.
@@ -94,9 +102,14 @@ impl LyricsWorker {
             Err(_) => return Err(crate::lyrics::heavy_plan::HeavyDefer::Memory),
         };
 
-        let outcome =
-            crate::lyrics::orchestrator::run_reference_stage(backend, wav, youtube_id, &best.lines)
-                .await;
+        let outcome = crate::lyrics::orchestrator::run_reference_stage(
+            backend,
+            wav,
+            youtube_id,
+            &best.lines,
+            words,
+        )
+        .await;
 
         let audit_ctx = crate::lyrics::audit_ctx::AuditContext {
             cache_dir: &self.cache_dir,
