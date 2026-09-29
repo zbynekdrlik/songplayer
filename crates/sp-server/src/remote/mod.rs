@@ -60,7 +60,7 @@ use sp_core::config::{
 };
 use sqlx::SqlitePool;
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
 use tokio::task::{JoinHandle, JoinSet};
 use tracing::{info, warn};
 
@@ -100,6 +100,15 @@ pub const MAX_UNSUPPORTED_LISTED: usize = 64;
 /// Client-chosen strings (request types, scene names) are stored and logged
 /// clipped to this many characters (`clip`).
 pub const MAX_REQUEST_TYPE_CHARS: usize = 64;
+/// #221 (main-session decision 5882671183): at most this many sessions at
+/// once per listener (Companion needs one, the post-deploy E2E two). A
+/// handshake over it is refused with HTTP 503 before it becomes a session:
+/// each session may decode a 1 MiB frame, so their number bounds the memory
+/// an open LAN port can be made to hold.
+pub const MAX_SESSIONS: usize = 16;
+/// #221: a handshake refused over [`MAX_SESSIONS`] is logged (INFO) at most
+/// once per this interval; `remote.refused_over_cap` counts every one.
+pub const REFUSAL_LOG_INTERVAL: Duration = Duration::from_secs(10);
 
 /// The stored remote-control settings.
 #[derive(Clone, PartialEq, Eq)]
@@ -165,11 +174,14 @@ pub struct LastRequest {
     pub at_ms: i64,
 }
 
-/// The outcome of the last remote scene press (`program_switch`; the OBS
-/// follow records the same shape as `last_follow_cut`).
+/// The outcome of the last scene switch (`program_switch`: a facade press or,
+/// #221 L4a, a dashboard cut; the OBS follow records the same shape as
+/// `last_follow_cut`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RemoteCut {
     /// The scene pressed, clipped to 64 characters (a client-chosen string).
+    /// #221 L4a, a dashboard cut: the playlist's catalog scene, "OBS manuál"
+    /// for -1, the playlist id when its catalog names no scene.
     pub scene: String,
     /// `playlist` / `input` / `keep`.
     pub action: &'static str,
@@ -182,8 +194,9 @@ pub struct RemoteCut {
     pub cut_boundary_100ns: Option<i64>,
     /// Unix time, ms.
     pub at_ms: i64,
-    /// #221: what triggered the switch, `program` (`SetCurrentProgramScene`)
-    /// or `transition` (`TriggerStudioModeTransition`); `null` for the follow.
+    /// #221: what triggered the switch, `program` (`SetCurrentProgramScene`),
+    /// `transition` (`TriggerStudioModeTransition`) or (L4a) `dashboard`
+    /// (`POST /api/v1/program/cut`); `null` for the follow.
     pub via: Option<&'static str>,
     /// #221: cg OBS's answer to the forward (a manual scene) or the mirror (a
     /// playlist scene): `ok`, `error <code>`, `not_ready`, or `pending` while
@@ -212,8 +225,13 @@ pub struct RemoteStatus {
     pub listening: bool,
     /// Why the listener is not bound (e.g. the port is taken).
     pub error: Option<String>,
-    /// Connected clients (WebSocket sessions).
+    /// Connected clients (WebSocket sessions). A session's slot of
+    /// [`MAX_SESSIONS`] is freed just before it stops counting here, so for
+    /// that instant this may read one over the cap.
     pub clients: usize,
+    /// #221: handshakes refused with HTTP 503 because [`MAX_SESSIONS`]
+    /// sessions were open, since startup.
+    pub refused_over_cap: u64,
     /// Requests served since startup (batch entries counted one by one).
     pub requests: u64,
     pub last_request: Option<LastRequest>,
@@ -241,6 +259,8 @@ struct RemoteState {
     last_cut_id: u64,
     unsupported: BTreeSet<String>,
     last_transition_duration: Option<TransitionDuration>,
+    /// #221: when a refusal over the session cap was last logged.
+    last_refusal_log: Option<std::time::Instant>,
 }
 
 /// The remote control's telemetry, shared by the settings task, the sessions
@@ -250,6 +270,7 @@ struct RemoteState {
 pub struct RemoteShared {
     clients: AtomicUsize,
     requests: AtomicU64,
+    refused_over_cap: AtomicU64,
     state: Mutex<RemoteState>,
 }
 
@@ -269,6 +290,7 @@ impl RemoteShared {
             listening: st.listening,
             error: st.error.clone(),
             clients: self.clients.load(Ordering::SeqCst),
+            refused_over_cap: self.refused_over_cap.load(Ordering::SeqCst),
             requests: self.requests.load(Ordering::SeqCst),
             last_request: st.last_request.clone(),
             last_remote_cut: st.last_cut.clone(),
@@ -282,6 +304,21 @@ impl RemoteShared {
     pub fn client_connected(self: &Arc<Self>) -> ClientGuard {
         self.clients.fetch_add(1, Ordering::SeqCst);
         ClientGuard(Arc::clone(self))
+    }
+
+    /// #221: count a handshake refused over [`MAX_SESSIONS`] at `now`; the
+    /// count so far, and whether to log this one (at most once per
+    /// [`REFUSAL_LOG_INTERVAL`]).
+    pub fn note_refused_over_cap(&self, now: std::time::Instant) -> (u64, bool) {
+        let refused = self.refused_over_cap.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut st = self.state();
+        let log = st
+            .last_refusal_log
+            .is_none_or(|last| now.saturating_duration_since(last) >= REFUSAL_LOG_INTERVAL);
+        if log {
+            st.last_refusal_log = Some(now);
+        }
+        (refused, log)
     }
 
     /// Count one request and remember it as the last one.
@@ -397,6 +434,13 @@ impl Upstream {
         }
     }
 
+    /// #221 L4a: a link to no cg OBS, whose calls are "not ready" at once —
+    /// the dashboard's link until `start_program` attaches the OBS client's
+    /// (`LegacyCg::link`).
+    pub fn unlinked() -> Self {
+        Self::new(None, broadcast::channel(1).0)
+    }
+
     /// This link with another call timeout (tests only, the integration
     /// tests included: production always uses [`UPSTREAM_TIMEOUT`]).
     #[doc(hidden)]
@@ -483,6 +527,9 @@ pub struct Facade {
     /// window at most: [`TRANSITION_END_MAX_WAIT`] (10 minutes in tests, so a
     /// stalled test runner never ends a fade's wait early — review round 2).
     transition_end_max: Duration,
+    /// #221: one permit per session, [`MAX_SESSIONS`] in all; a handshake
+    /// that gets none is refused with HTTP 503.
+    sessions: Arc<Semaphore>,
 }
 
 impl Facade {
@@ -500,6 +547,7 @@ impl Facade {
             identify_timeout: IDENTIFY_TIMEOUT,
             events: broadcast::channel(FACADE_EVENTS_CAPACITY).0,
             transition_end_max: TRANSITION_END_MAX_WAIT,
+            sessions: Arc::new(Semaphore::new(MAX_SESSIONS)),
         })
     }
 
@@ -520,6 +568,7 @@ impl Facade {
             identify_timeout,
             events: broadcast::channel(FACADE_EVENTS_CAPACITY).0,
             transition_end_max: Duration::from_secs(600),
+            sessions: Arc::new(Semaphore::new(MAX_SESSIONS)),
         })
     }
 

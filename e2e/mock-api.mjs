@@ -826,6 +826,10 @@ app.post("/__mock/ndi-health", (req, res) => {
 // cut at once (the real one lands on the boundary after next).
 let programState = { source: 1, previous: null, cuts: 0, transitions: 0, mixed: 0 };
 let programLastCut = null;
+// #221 L4a: the dashboard cut is recorded as `remote.last_remote_cut` with
+// `via: "dashboard"`, like the server's switch path. The mock has no cg OBS,
+// so a playlist's mirror reads `not_ready` (the server with no OBS link).
+let programLastRemoteCut = null;
 // #215: the mock runs no cg OBS and no program sender, so a spec can inject
 // cg OBS's current scene transition (`/__mock/program-obs-transition`) and a
 // running fade window (`/__mock/program-transition-active`); both are cleared
@@ -983,15 +987,21 @@ function remoteBody() {
     listening: false,
     error: null,
     clients: 0,
+    refused_over_cap: 0,
     requests: 0,
     last_request: null,
-    last_remote_cut: null,
+    last_remote_cut: programLastRemoteCut,
     unsupported_requests: [],
     last_transition_duration: null,
   };
 }
+// #221 L4a: what SongPlayer told cg OBS to show — mirrors `LegacyCgStatus`.
+// The mock has no cg OBS, so a mirror is never accepted and nothing is shown.
+function legacyCgBody() {
+  return { shown: null };
+}
 app.get("/api/v1/program", (_req, res) => {
-  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody() });
+  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody(), legacy_cg: legacyCgBody() });
 });
 app.post("/api/v1/program/cut", (req, res) => {
   const source = Number(req.body?.source);
@@ -1006,6 +1016,23 @@ app.post("/api/v1/program/cut", (req, res) => {
     return;
   }
   programLastCut = req.body;
+  const playlist = activePlaylists().find((p) => p.id === source);
+  programLastRemoteCut = {
+    scene:
+      source === -1
+        ? "OBS manuál"
+        : (playlist?.ndi_output_name || String(source)).toLowerCase(),
+    action: source === -1 ? "input" : "playlist",
+    source,
+    reason: null,
+    cut_boundary_100ns: null,
+    at_ms: Date.now(),
+    via: "dashboard",
+    // The input sends nothing to cg OBS (`cg_forward` null), like the
+    // server. The mock's playlists all name a scene; the server's other
+    // no-scene cases (inactive, empty or shared NDI name) are not modelled.
+    cg_forward: source === -1 || !playlist ? null : "not_ready",
+  };
   if (programState.source !== source) {
     programState = {
       source,
@@ -1015,7 +1042,7 @@ app.post("/api/v1/program/cut", (req, res) => {
       mixed: programState.mixed + transitionSpec().n_slots,
     };
   }
-  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody() });
+  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody(), legacy_cg: legacyCgBody() });
 });
 // Test-only: the last cut body the dashboard posted (backend-effect check).
 app.get("/__mock/program-last-cut", (_req, res) => {
@@ -1024,6 +1051,7 @@ app.get("/__mock/program-last-cut", (_req, res) => {
 app.post("/__mock/program-reset", (_req, res) => {
   programState = { source: 1, previous: null, cuts: 0, transitions: 0, mixed: 0 };
   programLastCut = null;
+  programLastRemoteCut = null;
   programObsTransition = null;
   programActiveWindow = null;
   res.json({ status: "reset" });

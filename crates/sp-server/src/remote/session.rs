@@ -25,6 +25,7 @@ use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
+use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::broadcast::error::RecvError;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
@@ -42,7 +43,7 @@ use super::protocol::{
     STATUS_UNKNOWN_REQUEST_TYPE,
 };
 use super::studio_events::{self, FacadeEvent};
-use super::{Facade, MAX_MESSAGE_BYTES, clip};
+use super::{Facade, MAX_MESSAGE_BYTES, MAX_SESSIONS, clip};
 use crate::obs::ObsEvent;
 use crate::playback::program_on_air::program_scene_name;
 use crate::playback::program_switch::{SwitchCtx, Switched, Via, switch_scene};
@@ -59,6 +60,10 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
     let identify_deadline = tokio::time::Instant::now() + facade.identify_timeout;
     // #221 L2b: the session's encoding, set by the handshake below.
     let mut codec = Codec::Json;
+    // #221: the session's slot of `MAX_SESSIONS`, taken by the handshake below
+    // and held until the session ends; `over_cap`: no slot was free.
+    let mut slot: Option<OwnedSemaphorePermit> = None;
+    let mut over_cap = false;
     // tungstenite's `Callback` fixes this `Result<Response, ErrorResponse>`
     // shape (an http `Response`, > 128 B), so the size lint cannot be met here.
     #[allow(clippy::result_large_err)]
@@ -74,6 +79,11 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
             info!(%peer, offered = ?offered.map(clip), "remote: neither obs-websocket subprotocol offered");
             return Err(refused());
         };
+        let Ok(permit) = Arc::clone(&facade.sessions).try_acquire_owned() else {
+            over_cap = true;
+            return Err(refused_over_cap(&facade, peer));
+        };
+        slot = Some(permit);
         codec = chosen;
         if let Some(name) = negotiated.echo() {
             let echo = HeaderValue::from_static(name);
@@ -89,7 +99,7 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
     let ws = match tokio::time::timeout_at(identify_deadline, accepted).await {
         Ok(Ok(ws)) => ws,
         Ok(Err(e)) => {
-            info!(%peer, %e, "remote: WebSocket handshake refused");
+            log_refused_handshake(peer, &e, over_cap);
             return;
         }
         Err(_) => {
@@ -98,6 +108,9 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
         }
     };
     let _client = facade.shared().client_connected();
+    // Declared after `_client`, so it is dropped first: once `remote.clients`
+    // no longer counts this session, its slot is free.
+    let _slot = slot;
     info!(%peer, encoding = ?codec, "remote: client connected");
     let (mut write, mut read) = ws.split();
     let mut events = facade.upstream.subscribe();
@@ -195,6 +208,42 @@ fn refused() -> ErrorResponse {
     ));
     *refused.status_mut() = StatusCode::BAD_REQUEST;
     refused
+}
+
+/// The log line of a refused handshake. An over-cap refusal (`over_cap`) was
+/// already logged, rate-limited, by [`refused_over_cap`]. Logging only.
+#[cfg_attr(test, mutants::skip)]
+fn log_refused_handshake(
+    peer: SocketAddr,
+    e: &tokio_tungstenite::tungstenite::Error,
+    over_cap: bool,
+) {
+    if !over_cap {
+        info!(%peer, %e, "remote: WebSocket handshake refused");
+    }
+}
+
+/// #221: the handshake answer while `MAX_SESSIONS` sessions are open — HTTP
+/// 503, counted as `remote.refused_over_cap`, logged at most once per
+/// `REFUSAL_LOG_INTERVAL` (a client retrying every few seconds must not flood
+/// the log).
+fn refused_over_cap(facade: &Facade, peer: SocketAddr) -> ErrorResponse {
+    let (refused, log) = facade
+        .shared()
+        .note_refused_over_cap(std::time::Instant::now());
+    if log {
+        info!(
+            %peer,
+            max_sessions = MAX_SESSIONS,
+            refused_total = refused,
+            "remote: handshake refused with 503 — every session slot is taken (logged at most once per 10 s)"
+        );
+    }
+    let mut refusal = ErrorResponse::new(Some(format!(
+        "SongPlayer's remote control serves at most {MAX_SESSIONS} clients at once"
+    )));
+    *refusal.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+    refusal
 }
 
 /// Send one message in the session's encoding (`codec`). `Err` ends the
@@ -456,8 +505,14 @@ async fn switch(facade: &Facade, scene: &str, via: Via) -> Reply {
 #[path = "session_tests.rs"]
 mod tests;
 #[cfg(test)]
+#[path = "session_tests_cap.rs"]
+mod tests_cap;
+#[cfg(test)]
 #[path = "session_tests_feedback.rs"]
 mod tests_feedback;
+#[cfg(test)]
+#[path = "session_tests_legacy.rs"]
+mod tests_legacy;
 #[cfg(test)]
 #[path = "session_tests_msgpack.rs"]
 mod tests_msgpack;

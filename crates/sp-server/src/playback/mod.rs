@@ -13,12 +13,14 @@ mod engine_play;
 pub(crate) mod frame_alloc; // #207: map a decoder FrameAlloc error to a dropped frame (pure classify + rate-limit)
 pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
 mod handle_pipeline_event;
+pub mod legacy_cg; // #221 L4a: what SongPlayer told cg OBS to show (until B4 step 6)
 pub mod lock_state;
 pub mod loop_stats; // #192 round 3: pipeline-loop stage timing + submit-call histogram (pure)
 mod lyrics_loader;
 mod mix; // #184 round G set_mix (impl PlaybackEngine, 1000-line cap split)
 pub mod ndi_burn;
 pub mod ndi_health;
+mod ndi_health_expect; // #221 L4a: whether a receiver is expected on an output (pure)
 mod ndi_health_transport; // #201 round 2: pure reported-label -> TransportState (Linux-tested)
 pub mod ndi_input; // #212: the NDI input "OBS manuál" on the genlock grid → the program bus
 mod ndi_recovery_trigger; // #173 operator recover trigger (impl PlaybackEngine, 1000-line cap split)

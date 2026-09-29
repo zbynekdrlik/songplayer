@@ -2,6 +2,8 @@
 paths:
   - ".github/workflows/**"
   - ".cargo/mutants.toml"
+  - "scripts/rig_lease_gate.py"
+  - "scripts/tests/test_rig_lease_gate.py"
 ---
 
 # CI workflows — self-hosted runner shell traps, mutation gate, event de-dup
@@ -228,12 +230,77 @@ survivors to fail again there (read only the shard you need).
 (29.9.2026 03:15Z, run `36514244587`). The deploy stops SongPlayer BEFORE
 it installs, and a cancel that lands mid-job leaves the new build installed
 but SongPlayer STOPPED (it was down ~45 s until a manual
-`Start-ScheduledTask -TaskName SongPlayer`). To keep a deploy off the box
-while another repo holds the rig lease, cancel at the latest when the `Gate`
-job appears (it runs ~2 s before the deploy), or push only once the lease is
-free. Later re-run the cancelled jobs with `gh run rerun <id> --failed`
-(cancelled jobs count), which reuses the finished build. If a deploy was cut
-anyway, check `Get-Process SongPlayer` and start the task.
+`Start-ScheduledTask -TaskName SongPlayer`). Since #221 L4a the deploy job
+waits out another repo's rig lease ITSELF, before anything stops SongPlayer
+(next section), so there is no reason to cancel a run for a lease any more.
+If a run must still be cancelled, do it before the `Gate` job appears (it
+runs ~2 s before the deploy), or while the deploy job is still in its "Wait
+for the rig lease" step (nothing is stopped yet). Later re-run the cancelled
+jobs with `gh run rerun <id> --failed` (cancelled jobs count), which reuses
+the finished build. If a deploy was cut anyway, check
+`Get-Process SongPlayer` and start the task.
+
+## The deploy waits for the rig lease (#221 L4a, `scripts/rig_lease_gate.py`)
+
+Other repos (camera-box's full-path E2E, the A/V soak) hold a cross-repo rig
+lease on dev1 while they drive the shared rig. "Deploy to win-resolume" runs
+"Wait for the rig lease" right after checkout, before "Deploy SongPlayer"
+stops SongPlayer:
+
+- `GET /rig-lease.json` (camera-box `scripts/rig-lease-server.py`, :8890;
+  `held`, `stale`, `holder.repo`, `expected_release_at`, `ttl_s`), trying
+  `http://10.77.9.200:8890` (dev1's LAN address, 5-15 ms from win-resolume,
+  29.9.2026) and then `http://dev1:8890` (the mDNS name `dev1.local`: it
+  survives a LAN IP change, but one cold lookup from the box's Python failed
+  with `getaddrinfo failed`). win-resolume has NO tailscale, so the
+  tailscale address times out, and camera-box's documented `10.77.9.103` is
+  stale (dev1's LAN IP moved). If dev1's LAN IP moves again, the name keeps
+  the gate working; update the first URL.
+- Held, not stale, by another repo (a held lease with no readable holder
+  counts as another repo's): wait, one line per 30 s poll naming the holder,
+  its run and `expected_release_at`; at most 60 min, then exit 3 and the job
+  fails with its own message ("never deploy over another repo's lease").
+  Free, stale, or held by `${{ github.repository }}`: deploy. A lease
+  service that does not answer with a lease (dev1 down, something else on
+  the port; a `holder` that is not an object or null counts as no lease):
+  a `::warning::` annotation and the deploy goes on — an outage never
+  blocks a deploy. Right after another repo's live lease was read, one or
+  two unreachable reads are a blip (a cold mDNS lookup, a lease-server
+  restart) and the lease still counts as held; the third in a row
+  (`OUTAGE_READS`) is the outage (review round 1: one blip used to deploy
+  into the lease just seen held). Any other non-zero exit is the gate's own
+  failure and fails the job.
+- Residual: the gate reads the lease, it does not HOLD it. A lease another
+  repo takes in the ~1 min between the check and "Deploy SongPlayer"
+  (artifact downloads) is not seen; the E2E job after the deploy does not
+  check it either.
+- Hardening (review rounds 3-4): a body over 64 KiB (`MAX_BODY_BYTES`; a
+  lease is ~400 B; the bound is pinned exactly), JSON nested past the
+  recursion limit, bad UTF-8, a non-HTTP listener, a body shorter than its
+  Content-Length (`read(amt)` returns what came: it does not parse — no
+  `IncompleteRead` there; a chunked body cut short IS one) are all "no
+  lease" from that URL. `main` refuses a `--url` that is not http(s) with a
+  host and a valid port (`is_http_url`; a broken one would otherwise read as
+  an outage on every deploy). Everything the gate logs from the lease port
+  (`describe_holder`, a not-a-lease answer, an exception text) goes through
+  `one_line`: a line break would start a runner workflow command. The
+  "Wait for the rig lease" STEP has `timeout-minutes: 70`, so a lease server
+  that trickles bytes under the per-read timeout is cut in that step, never
+  inside "Deploy SongPlayer" (which stops SongPlayer first); the job keeps
+  `timeout-minutes: 90`.
+- test-integrity's "deploy job uses always()" check greps
+  `'^  deploy-resolume:'` (anchored): unanchored it matched its own line,
+  which holds the job name and "always()", and never read the real header.
+- It runs on the box's `C:\Program Files\Python312\python.exe` (the step
+  fails if it is missing; the A/V gate needs the same Python). Stdlib only.
+- The wait is coordination, not a soak (CLAUDE.md "No sleep-based CI
+  jobs"): a free lease costs one GET. A newer push cancels a waiting deploy
+  via the concurrency group — safe, nothing is stopped yet.
+- Tests: `scripts/tests/test_rig_lease_gate.py` (Eval Checks pytest; the
+  script is in both ruff lists): the decision, the bounded wait on a fake
+  clock (120 × 30 s then exit 3; a last short pause ends exactly at the
+  bound), the fetch over a real local HTTP server. Python runs locally on
+  the Tier-0 box, so its RED/GREEN is really run before the push.
 
 **Two push runs for ONE commit: never cancel either by hand** (28.9.2026,
 `36494106201` + `36494106433`). The concurrency group already cancels the

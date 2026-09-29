@@ -3,6 +3,8 @@ paths:
   - "crates/sp-server/src/remote/**"
   - "crates/sp-server/src/playback/program_switch*.rs"
   - "crates/sp-server/src/playback/scene_catalog*.rs"
+  - "crates/sp-server/src/playback/legacy_cg*.rs"
+  - "crates/sp-server/src/api/program_tests_switch.rs"
   - "crates/sp-server/src/obs/remote_call.rs"
   - "crates/sp-server/tests/remote_control.rs"
   - "e2e/settings-remote.spec.ts"
@@ -324,15 +326,73 @@ whole switch:
    scene name.
 6. `remote.last_remote_cut {scene, action (playlist|input|keep), source,
    reason (not_switched|input_inactive|persist_failed|catalog_failed),
-   cut_boundary_100ns, at_ms, via (program|transition), cg_forward}`. The
-   follow's `last_follow_cut` has the same shape with `via` / `cg_forward`
-   null.
+   cut_boundary_100ns, at_ms, via (program|transition|dashboard),
+   cg_forward}`. The follow's `last_follow_cut` has the same shape with
+   `via` / `cg_forward` null.
 
 A request without `sceneName` (a `sceneUuid` only) is answered `300` and
 nothing is switched. Companion always sends the name.
 
-The dashboard cut on this path, the playback authority and deleting the
-follow are the later lanes (L4a–L6) of #221.
+### The dashboard cut on the same path (#221 L4a, `switch_source`)
+
+`POST /api/v1/program/cut {source}` keeps its 404 checks (unknown playlist;
+-1 while the NDI input is not a source), then calls
+`program_switch::switch_source(ctx, source, Via::Dashboard)` under the SAME
+`switch_order`:
+
+- a playlist whose catalog names a scene: cut FIRST (published with that
+  scene), then mirrored exactly like a playlist press (the record's `scene`
+  is the catalog name, `via: dashboard`);
+- a playlist whose catalog names no scene (inactive, no / a shared NDI
+  output name): cut with no scene, cg OBS is NOT told (WARN; the record's
+  `scene` is the playlist id, `cg_forward` null);
+- -1: a cut only, published with no scene ("OBS manuál" by the resolver);
+  no cg OBS call, `cg_forward` null — cg OBS keeps what it shows;
+- an unreadable catalog or a failed persist: nothing cut, recorded as a
+  keep (`catalog_failed` / `persist_failed`), HTTP 500.
+
+The API reaches cg OBS through `LegacyCg::link()`: `AppState` is built
+before the OBS client exists, so `start_program` attaches the OBS client's
+`Upstream` to `legacy_cg` next to `start_remote`; until then (and in a test
+state) it is `Upstream::unlinked()`, whose mirror is `not_ready` at once. A
+dashboard cut announces no transition events (unchanged from L3); its
+program-scene event comes from the on-air watch.
+
+### SongPlayer's record of what it told cg OBS (#221 L4a, `playback/legacy_cg.rs`)
+
+Until B4 step 6 the legacy consumers take cg OBS's program, which the
+mirror drives. `ProgramBus::legacy_cg()` keeps `shown: watch<Option<i64>>`
+— SongPlayer's record of its OWN commands, never cg OBS tracking:
+
+- a mirror cg OBS answered OK → `Some(pid)` (`confirm_mirror`, after
+  `record_mirror` returns `true` = `cg_forward ok`);
+- a manual scene cg OBS answered OK → `None` (recorded in `switch_manual`
+  before the NDI-input check: cg OBS switched even when SP-program keeps);
+- a refusal, no answer, a superseded mirror, a command never sent →
+  unchanged; "OBS manuál" itself and a dashboard -1 send nothing.
+
+Every command takes a `Ticket` UNDER the `switch_order` (the mirror in
+`mirror`, the manual forward before its request), so tickets follow the
+switch order; `confirmed(ticket, shown)` applies only when the ticket is
+newer than every answer applied before (`<=` the last applied → dropped),
+so the late answer to an older press never overwrites a newer one's. A
+skipped ticket never blocks a newer answer. At startup
+`restore_selected_source` records the restored source when it is a playlist
+(`LegacyCg::restored`). Residual (review rounds 2-3): `shown` is not
+persisted; the restore seeds it from SP-program's saved source, which is
+what cg OBS shows only if that source's last mirror was accepted. After a
+dashboard cut to -1 (cg OBS keeps showing playlist P) and a restart,
+`shown` is `None` (P's dark-wall check silent until the next press, fails
+safe); after a cut to Q whose mirror failed (cg OBS still shows P) and a
+restart, `shown` is `Some(Q)` — in L4a only P's dark-wall check stays
+silent (the same fail-safe silence), but in L4b (`shown` joins the on-air
+set) P would read as off air. Persisting `shown` (or seeding
+`None`) is a main-session call BEFORE L4b. Every change is logged (`legacy cg: cg OBS shows what SongPlayer told
+it` INFO from → to; a dropped late answer DEBUG; the restore INFO). Served as `legacy_cg {shown}` on
+`GET /api/v1/program`; it keys the dark-wall expectation
+(`ndi_health_expect`, `obs-ndi-health.md`) and, from L4b, the playback
+authority (`LegacyCg::shown()` is the receiver for it). Deleted at B4 step 6
+with the mirror and the link.
 
 ## Program feedback + transition events (#221 L3, `remote/studio_events.rs`)
 
@@ -418,8 +478,8 @@ follow are the later lanes (L4a–L6) of #221.
     when the client's Identify was unread) there is correct behaviour under a
     stall, not a failure. Any OTHER handshake error still fails the test.
 - `GET /api/v1/program` → `remote {enabled, port, auth, listening, error,
-  clients, requests, last_request, last_remote_cut, unsupported_requests,
-  last_transition_duration}`.
+  clients, refused_over_cap (L4a), requests, last_request, last_remote_cut,
+  unsupported_requests, last_transition_duration}`.
   `enabled` / `port` / `auth` come from the STORED settings, so a save shows
   at once. #221 L3: `program_scene` (SP-program's scene name, `null` while
   nothing is on program).
@@ -520,7 +580,22 @@ follow are the later lanes (L4a–L6) of #221.
   for a Cut, the served window, the 15 s bound).
 - `playback/program_switch_tests.rs`: `cg_forward_label`, the records, and
   `record_mirror` (its answer lands only on its own cut; an answer after the
-  upstream timeout is still recorded, and the wait is bounded).
+  upstream timeout is still recorded, and the wait is bounded; L4a: it says
+  whether cg OBS accepted, and `confirm_mirror` records by ticket).
+- `playback/legacy_cg_tests.rs` (L4a, pure): the ticket rule, the restore,
+  the watch, the dashboard link (unlinked until attached, the first stays).
+- `session_tests_legacy.rs` (L4a, same rig): an accepted mirror → its
+  playlist, an accepted manual scene → none (with the input off too), a
+  refused mirror (a playlist whose scene cg OBS lacks) / a refused manual
+  scene / an unreachable cg OBS → unchanged, and two held mirrors answered
+  newest first (a "must not change" window, the safe direction).
+- `api/program_tests_switch.rs` (L4a): the dashboard cut through the real
+  router with a fake cg OBS attached to `legacy_cg`: cut first then
+  mirrored (`via: dashboard`, `legacy_cg.shown`), -1 a cut only, a refused
+  mirror, no link (`not_ready`), a playlist that names no scene, a failed
+  persist (500), the `switch_order` wait, and the restore.
+- `session_tests_cap.rs` (L4a): 16 identified sessions, the 17th handshake
+  answered 503 and counted, a freed slot takes a new session.
 - `mod_tests.rs` covers the settings, the telemetry, `Upstream` on a paused
   clock (the time-out leaves the call marked abandoned and its `deadline` is
   the enqueue time + the timeout; a full queue never waits) and the settings
@@ -579,13 +654,25 @@ follow are the later lanes (L4a–L6) of #221.
   scene (a startup restore, a dashboard cut to -1); the next program-scene
   event corrects it. Found in L3, not in the design record — the main
   session decides whether the forwarded answer is patched.
-- **No cap on concurrent sessions (pre-existing; msgpack doubles the
-  amplification).** One 1 MiB frame is decoded before it is closed: a JSON
-  array of `0,` builds ~16× its size in `Value`s, a msgpack array of 1-byte
-  nils ~32× (2^20 × 32 B ≈ 32 MiB, ~48 MiB while the `Vec` grows). Each frame
-  is bounded and freed, but many parallel unidentified sessions multiply
-  it. A session cap in `serve` (Companion uses one connection) is a design
-  decision left to the main session (L2b review round 2).
+- **At most 16 sessions (#221 L4a, main-session decision 5882671183).** One
+  1 MiB frame is decoded before it is closed: a JSON array of `0,` builds
+  ~16× its size in `Value`s, a msgpack array of 1-byte nils ~32× (2^20 ×
+  32 B ≈ 32 MiB, ~48 MiB while the `Vec` grows), so the number of parallel
+  sessions bounds what the open port can be made to hold. Each `Facade`
+  (one per listener) holds a `MAX_SESSIONS` (16) semaphore; the handshake
+  callback takes a permit AFTER the subprotocol check and the session keeps
+  it until it ends (declared after its `ClientGuard`, so it is freed first:
+  once `remote.clients` no longer counts a session, its slot is free — the
+  cap test relies on that; the other way round, a new session can take the
+  slot an instant before the old one stops counting, so `clients` may read
+  one over the cap for that instant). No permit → HTTP 503 before
+  the client becomes a session, `remote.refused_over_cap` +1, and one INFO
+  line at most per `REFUSAL_LOG_INTERVAL` (10 s, counted from the last
+  LOGGED refusal; `RemoteShared::note_refused_over_cap(now)`); the generic
+  "handshake refused" line skips it (`log_refused_handshake`). Residual: an
+  unidentified session holds its slot until `IDENTIFY_TIMEOUT` (10 s), so a
+  hostile LAN client can keep the 16 slots busy and Companion's reconnect
+  answered 503 — the listener is meant for a trusted LAN (as before).
 - When Companion connects while cg OBS is down, its scene list stays empty
   until cg OBS emits a `SceneListChanged` or Companion reconnects. The
   page-13 buttons send their stored names verbatim, so they keep working:

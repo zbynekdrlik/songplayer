@@ -573,8 +573,9 @@ building a `Value`) or through `remote::codec::Codec::Json.decode_text`
 (its private `PlainValue` visitor keeps every key a plain string; make
 `PlainValue` `pub(crate)` when a second module needs the visitor itself),
 never `serde_json::from_str::<Value>` / `Json<Value>` / `Value::deserialize`.
-Known residuals outside the facade (not fixed by #221 L2b): `api/ai.rs`'s
-`Json<serde_json::Value>` body on the LAN HTTP API.
+An axum body is a typed struct (`api/ai.rs` `CompleteLoginRequest`, #221
+L4a: the last `Json<serde_json::Value>` on the LAN HTTP API; its test first
+shows the key re-parses through `Value`, then that the route ignores it).
 
 ## Binary test fixtures: byte-string literals, not long hex strings (#221 L2b)
 
@@ -709,6 +710,12 @@ PRE-fmt text silently does nothing — #212 shipped a test asserting the old 2×
 standby while the rig built 2×4, caught only by a review pass (it would have
 reddened 6 CI tests). Fail loudly when an anchor is missing
 (`if old not in s: sys.exit(...)`), or use the Edit tool, and re-read the result.
+
+In a worktree lane the Bash guard may refuse a long `python3 - <<'EOF' … EOF`
+edit chained with `git` or `cargo` ("too complex to verify that it stays inside
+the worktree"), and not every time (#221 L4a). Write the anchor-asserted edit
+to a script in the lane's scratchpad and run `python3 <script> <path>` as its
+own command, then fmt / commit in separate commands.
 
 ## "Never blocks / never waits" tests: gates and thread names, never wall-time thresholds (#212 follow-up)
 

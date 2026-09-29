@@ -208,6 +208,34 @@ fn the_status_reports_the_stored_settings_and_the_live_counters() {
     );
 }
 
+/// #221 (main-session decision 5882671183): the cap is 16 sessions; every
+/// refusal over it is counted, and logged at most once per 10 s.
+#[test]
+fn every_refusal_over_the_cap_is_counted_and_logged_at_most_once_per_interval() {
+    assert_eq!(MAX_SESSIONS, 16);
+    assert_eq!(REFUSAL_LOG_INTERVAL, Duration::from_secs(10));
+    let shared = RemoteShared::default();
+    let refused =
+        |shared: &RemoteShared| shared.status(&RemoteSettings::disabled(), &OnAir::default());
+    assert_eq!(refused(&shared).refused_over_cap, 0);
+    let t0 = std::time::Instant::now();
+    assert_eq!(
+        shared.note_refused_over_cap(t0),
+        (1, true),
+        "the first is logged"
+    );
+    let just_before = t0 + REFUSAL_LOG_INTERVAL - Duration::from_millis(1);
+    assert_eq!(shared.note_refused_over_cap(just_before), (2, false));
+    let at_interval = t0 + REFUSAL_LOG_INTERVAL;
+    assert_eq!(shared.note_refused_over_cap(at_interval), (3, true));
+    // The interval counts from the last LOGGED refusal, not the last one.
+    let later = at_interval + Duration::from_secs(9);
+    assert_eq!(shared.note_refused_over_cap(later), (4, false));
+    assert_eq!(refused(&shared).refused_over_cap, 4);
+    let json = serde_json::to_value(refused(&shared)).unwrap();
+    assert_eq!(json["refused_over_cap"], 4);
+}
+
 fn cut_of(scene: &str) -> RemoteCut {
     RemoteCut {
         scene: scene.to_string(),

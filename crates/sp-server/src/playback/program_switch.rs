@@ -37,6 +37,14 @@
 //!
 //! Every switch is recorded as `remote.last_remote_cut`, with `via` (what
 //! triggered it) and `cg_forward` (cg OBS's answer).
+//!
+//! #221 L4a: `POST /api/v1/program/cut` switches a SOURCE through the same
+//! path ([`switch_source`], `via=dashboard`): a playlist is cut with its
+//! catalog scene first and then mirrored like a playlist press; -1 ("OBS
+//! manuál") is a cut only (no scene to send, cg OBS keeps what it shows).
+//! Every command to cg OBS takes a ticket of `legacy_cg` under the
+//! `switch_order`, and cg OBS's OK is recorded there: a mirror → the
+//! playlist, a manual scene → none (`playback::legacy_cg`).
 
 use std::sync::Arc;
 
@@ -46,6 +54,7 @@ use sqlx::SqlitePool;
 use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
 
+use crate::playback::legacy_cg::{LegacyCg, Ticket};
 use crate::playback::ndi_input::load_input_settings;
 use crate::playback::program_bus::{ProgramBus, ProgramStatus, persist_and_cut};
 use crate::playback::scene_catalog::{SceneKind, load_catalog};
@@ -71,6 +80,8 @@ pub enum Via {
     Program,
     /// `TriggerStudioModeTransition` (the client's preview scene).
     Transition,
+    /// #221 L4a: `POST /api/v1/program/cut` (the dashboard's Program control).
+    Dashboard,
 }
 
 impl Via {
@@ -79,6 +90,7 @@ impl Via {
         match self {
             Self::Program => "program",
             Self::Transition => "transition",
+            Self::Dashboard => "dashboard",
         }
     }
 }
@@ -174,8 +186,8 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
             // cg OBS shows the playlist in.
             let name = catalog.scene_of(pid).unwrap_or(scene).to_string();
             match cut_and_record(ctx, scene, via, pid, Some(&name), None).await {
-                Ok(cut_id) => {
-                    mirror(ctx, &name, cut_id);
+                Ok((cut_id, _)) => {
+                    mirror(ctx, &name, pid, cut_id);
                     Switched::Cut
                 }
                 Err(e) => Switched::StoreFailed(e),
@@ -184,6 +196,54 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
         SceneKind::Manual if scene == PROGRAM_INPUT_LABEL => switch_input(ctx, scene, via).await,
         SceneKind::Manual => switch_manual(ctx, scene, via).await,
     }
+}
+
+/// #221 L4a: switch `SP-program` to a SOURCE (the dashboard's
+/// `POST /api/v1/program/cut`, which validated it: a known playlist, or the
+/// NDI input while it is a source) through the same path as a press, under
+/// the same `switch_order`, recorded with `via`:
+/// - a playlist is cut first, published with its catalog scene, then
+///   mirrored to cg OBS like a playlist press;
+/// - one whose catalog names no scene (inactive, or no / a shared NDI output
+///   name) is cut with no scene, and cg OBS is not told (WARN);
+/// - -1 ("OBS manuál") is a cut only: no scene to send, cg OBS keeps what it
+///   shows.
+///
+/// Returns the program state of THIS cut (a later switch may already run
+/// when the caller reads the bus). `Err` when the playlists could not be
+/// read or the source could not be persisted (then nothing was cut, and it
+/// is recorded as a keep).
+pub async fn switch_source(
+    ctx: &SwitchCtx<'_>,
+    source: i64,
+    via: Via,
+) -> Result<ProgramStatus, sqlx::Error> {
+    let _order = ctx.bus.switch_order().lock().await;
+    if source == PROGRAM_INPUT_ID {
+        let (_, status) = cut_and_record(ctx, PROGRAM_INPUT_LABEL, via, source, None, None).await?;
+        return Ok(status);
+    }
+    let catalog = match load_catalog(ctx.pool).await {
+        Ok(catalog) => catalog,
+        Err(e) => {
+            warn!(source, %e, "program switch: reading the playlists failed — SP-program unchanged");
+            let record = kept(&source.to_string(), via, CATALOG_FAILED, None);
+            ctx.bus.remote().record_cut(record);
+            return Err(e);
+        }
+    };
+    let Some(name) = catalog.scene_of(source).map(str::to_string) else {
+        warn!(
+            source,
+            "program switch: this playlist names no scene (inactive, or no / a shared NDI output name) — cut without a scene, cg OBS is not told"
+        );
+        let pressed = source.to_string();
+        let (_, status) = cut_and_record(ctx, &pressed, via, source, None, None).await?;
+        return Ok(status);
+    };
+    let (cut_id, status) = cut_and_record(ctx, &name, via, source, Some(&name), None).await?;
+    mirror(ctx, &name, source, cut_id);
+    Ok(status)
 }
 
 /// "OBS manuál" itself: the NDI input, with no scene for cg OBS (module doc,
@@ -210,6 +270,8 @@ async fn switch_input(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
 /// input is a source.
 async fn switch_manual(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
     let data = json!({ "sceneName": scene });
+    let legacy = ctx.bus.legacy_cg();
+    let ticket = legacy.ticket();
     let answer = ctx
         .upstream
         .request("SetCurrentProgramScene", Some(data))
@@ -225,6 +287,8 @@ async fn switch_manual(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
         ctx.bus.remote().record_cut(record);
         return Switched::NotSwitched(answer);
     }
+    // #221 L4a: cg OBS shows a manual scene now, no playlist.
+    legacy.confirmed(ticket, None);
     let input_active = load_input_settings(ctx.pool)
         .await
         .is_ok_and(|s| s.active());
@@ -256,7 +320,8 @@ async fn switch_manual(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
 
 /// Persist + cut to `source` (published as on air for `name`, the scene cg
 /// OBS shows it in, when there is one) and record it. A failed persist cuts
-/// nothing and is recorded as `persist_failed`. Returns the record's id.
+/// nothing and is recorded as `persist_failed`. Returns the record's id and
+/// the program state of this cut.
 async fn cut_and_record(
     ctx: &SwitchCtx<'_>,
     pressed: &str,
@@ -264,7 +329,7 @@ async fn cut_and_record(
     source: i64,
     name: Option<&str>,
     cg_forward: Option<String>,
-) -> Result<u64, sqlx::Error> {
+) -> Result<(u64, ProgramStatus), sqlx::Error> {
     let shared = ctx.bus.remote();
     match persist_and_cut(ctx.pool, ctx.bus, source, name).await {
         Ok(status) => {
@@ -276,7 +341,7 @@ async fn cut_and_record(
                 "program switch: SP-program cut"
             );
             let cut_id = shared.record_cut(cut_done(pressed, via, source, &status, cg_forward));
-            Ok(cut_id)
+            Ok((cut_id, status))
         }
         Err(e) => {
             warn!(scene = %clip(pressed), source, %e, "program switch: persisting the program source failed — nothing cut");
@@ -286,12 +351,15 @@ async fn cut_and_record(
     }
 }
 
-/// The legacy mirror of a playlist press: queue `SetCurrentProgramScene
-/// {name}` for cg OBS (never awaited here) and let a waiter record its
-/// answer as the cut's `cg_forward` (`pending` until then). Deleted at B4
-/// step 6.
-fn mirror(ctx: &SwitchCtx<'_>, name: &str, cut_id: u64) {
+/// The legacy mirror of playlist `pid`'s switch: queue
+/// `SetCurrentProgramScene {name}` for cg OBS (never awaited here) and let a
+/// waiter record its answer as the cut's `cg_forward` (`pending` until then)
+/// and, when cg OBS accepted, as `legacy_cg` showing `pid` (#221 L4a; by the
+/// ticket taken here, under the `switch_order`). Deleted at B4 step 6.
+fn mirror(ctx: &SwitchCtx<'_>, name: &str, pid: i64, cut_id: u64) {
     let shared = Arc::clone(ctx.bus.remote());
+    let legacy = Arc::clone(ctx.bus.legacy_cg());
+    let ticket = legacy.ticket();
     let data = json!({ "sceneName": name });
     match ctx
         .upstream
@@ -300,10 +368,11 @@ fn mirror(ctx: &SwitchCtx<'_>, name: &str, cut_id: u64) {
         Some(rx) => {
             shared.set_cg_forward(cut_id, CG_PENDING.to_string());
             let upstream = ctx.upstream.clone();
-            tokio::spawn(record_mirror(upstream, rx, shared, cut_id, clip(name)));
+            let recorded = record_mirror(upstream, rx, shared, cut_id, clip(name));
+            tokio::spawn(confirm_mirror(recorded, legacy, ticket, pid));
         }
         None => {
-            warn!(scene = %clip(name), "program switch: cg OBS is not reachable — its program does not follow this press");
+            warn!(scene = %clip(name), "program switch: cg OBS is not reachable (no OBS client, or its command queue is full) — its program does not follow this switch");
             shared.set_cg_forward(cut_id, CG_NOT_READY.to_string());
         }
     }
@@ -312,18 +381,32 @@ fn mirror(ctx: &SwitchCtx<'_>, name: &str, cut_id: u64) {
 /// Wait for cg OBS's answer to a mirror (at most the upstream timeout plus
 /// `MIRROR_EXTRA_WAIT`: the forwarder writes a mirror however late) and
 /// record it as cut `cut_id`'s `cg_forward` (only while that cut is still the
-/// last one).
+/// last one). Returns whether cg OBS accepted it.
 async fn record_mirror(
     upstream: Upstream,
     rx: oneshot::Receiver<Option<Value>>,
     shared: Arc<RemoteShared>,
     cut_id: u64,
     scene: String,
-) {
+) -> bool {
     let answer = upstream.wait_mirror(rx).await;
     let label = cg_forward_label(answer.as_ref());
     let current = shared.set_cg_forward(cut_id, label.clone());
     log_mirror(&scene, &label, current);
+    label == CG_OK
+}
+
+/// #221 L4a: once `recorded` (the mirror's waiter) says cg OBS accepted the
+/// mirror of playlist `pid`, record it as shown by `ticket`.
+async fn confirm_mirror(
+    recorded: impl Future<Output = bool>,
+    legacy: Arc<LegacyCg>,
+    ticket: Ticket,
+    pid: i64,
+) {
+    if recorded.await {
+        legacy.confirmed(ticket, Some(pid));
+    }
 }
 
 /// The log line of a mirror's answer (`current`: its cut is still the last

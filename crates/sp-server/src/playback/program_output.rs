@@ -451,6 +451,8 @@ impl super::PlaybackEngine {
         );
         let upstream =
             crate::remote::Upstream::new(self.obs_cmd_tx.clone(), self.obs_event_tx.clone());
+        // #221 L4a: the dashboard's cut mirrors to cg OBS through the same link.
+        bus.legacy_cg().attach(upstream.clone());
         let follow = crate::playback::program_follow::Follow::new(self.pool.clone(), bus.clone());
         crate::playback::program_follow::start_follow(follow, obs, shutdown);
         crate::remote::start_remote(self.pool.clone(), bus.clone(), upstream, shutdown);
