@@ -207,15 +207,15 @@ test.describe("SongPlayer post-deploy feature verification", () => {
         // already on program is the facade's re-kick, which re-mirrors cg
         // OBS) and PROVE the ENGINE ended on the start scene.
         // The generous wait is the honest resilience: it covers the driver's
-        // own transition wait PLUS the ~2 s engine poll-reconcile (part C)
-        // catching a dropped event. An active_scene that never converges fails
-        // loudly with the scene names — the wait, not a re-drive, is what
-        // tolerates a lagging engine.
+        // own transition wait PLUS (#221 L4b) cg OBS answering the facade's
+        // mirror, which settles SongPlayer's on-air set. An active_scene that
+        // never converges fails loudly with the scene names — the wait, not a
+        // re-drive, is what tolerates a lagging engine.
         await driver.switchScene(target);
         const engineScene = await waitEngineActiveScene(ctx, target, 8000);
         expect(
           engineScene,
-          `afterAll must restore the wall to "${target}" (the scene the suite started on); the engine reported active_scene="${engineScene}". A dropped studio-mode scene event left the wall on a different scene — the poll-reconcile / driver studio-transition fix did not hold (#170).`,
+          `afterAll must restore the wall to "${target}" (the scene the suite started on); the engine reported active_scene="${engineScene}". SongPlayer's program did not settle on the start scene: the facade's switch, or cg OBS's answer to its mirror, did not land (#221 L4b; #170 for the driver's studio transition).`,
         ).toBe(target);
       } finally {
         await ctx.dispose();

@@ -229,12 +229,21 @@ nothing).
   between two task wakes (the watch coalesces) and the task then sends
   nothing, so an event checked against the live bus could be dropped with
   no newer one behind it; against the diffed set a dropped event always
-  has one. So the selected source is never taken off program —
-  `Hold::OnProgram` / `CUT_SETTLE` are deleted (`program-transition.md`) —
-  and a hold's re-check (`scene_off_recheck`) leaves a playlist in the
-  diffed set alone even while its scene is still off: its ON is queued
-  behind the re-check (review round 2: A→B, A pressed again inside B's
-  window). The window left is the task's own wake latency.
+  has one. So once the task diffed a cut to it, the selected source is
+  never taken off program — `Hold::OnProgram` / `CUT_SETTLE` are deleted
+  (`program-transition.md`) — and a hold's re-check (`scene_off_recheck`)
+  leaves a playlist in the diffed set alone even while its scene is still
+  off: its ON is queued behind the re-check (review round 2: A→B, A
+  pressed again inside B's window). The window left is the task's own wake
+  latency: an OFF or a re-check handled after a cut back but before the
+  task diffed it pauses the playlist, and the ON then starts a new song.
+- **The wall after an OFF** (`scene_off::wall_after_scene_off`, review
+  round 3): the incoming ON comes at the press and the outgoing OFF only at
+  the mirror's OK, so another playlist may already be on program with its
+  title up. The outgoing line goes (HideSubtitles); with another playlist
+  on program its subtitle dedup key is cleared (its next position report
+  re-sends its line) and the title is re-synced (`resync_wall_title`),
+  never a bare HideTitle.
 - **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
   whose scene is not flagged runs `handle_scene_change(pid, true)` itself
   (its ON came before it existed). An ON for a playlist with NO pipeline
@@ -248,6 +257,10 @@ nothing).
   transport `Playing`, which the Player labels "Hrá mimo programu"
   (`sp-ui` `player.rs`; "Čaká na scénu" otherwise). The mock's `/play`
   models it from its program source (`e2e/player-off-program.spec.ts`).
+  An off-air ▶ on a playlist with no normalized video yet parks it in
+  WaitingForScene, and `on_video_processed` wakes only on-program
+  pipelines: the operator presses ▶ again once a video is ready (before
+  L4b the ▶ claimed program, so the download started it).
 - **`/api/v1/status`**: `active_scene` = the one resolver,
   `active_playlist_ids` = the on-air set, ascending
   (`api/routes_status.rs::on_air_fields`; `routes.rs` is at the cap). A

@@ -22,9 +22,9 @@ pub enum PlayState {
 pub enum PlayEvent {
     /// At least one normalised video is ready to play.
     VideosAvailable,
-    /// The playlist's NDI source appeared on the OBS program output.
+    /// The playlist went on program (#221 L4b: the playback authority's ON).
     SceneOn,
-    /// The playlist's NDI source left the OBS program output.
+    /// The playlist left program (the authority's OFF), or a Pause.
     SceneOff,
     /// #221 L4b: a manual ▶ with no resume point. It starts the playlist
     /// whether or not it is on program, and claims nothing: off air it plays

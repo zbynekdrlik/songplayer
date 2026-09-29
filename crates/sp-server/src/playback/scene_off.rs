@@ -17,9 +17,13 @@
 //!   or asks again;
 //! - no hold — pause now, exactly as before.
 //!
-//! The authority never takes the program's own source off program (its OFF
-//! would be stale), so #221 L4b deleted the `Hold::OnProgram` wait (one
-//! `CUT_SETTLE` for a cut that followed cg OBS's scene event).
+//! Once the authority diffed a cut to it, the program's own source is never
+//! taken off program (its OFF is stale), and a hold's re-check leaves it
+//! alone while it is in the diffed set, so #221 L4b deleted the
+//! `Hold::OnProgram` wait (one `CUT_SETTLE` for a cut that followed cg
+//! OBS's scene event). The window left is the task's own wake latency: an
+//! OFF handled after a cut back to the playlist but before the task diffed
+//! it pauses the playlist, and the ON that follows starts a new song.
 //!
 //! The re-check comes back on the engine's own event channel as
 //! `PipelineEvent::SceneOffDue`. If the scene came back on program in the
