@@ -13,7 +13,8 @@
 //! (`protocol::negotiate_subprotocol` → [`Codec::for_subprotocol`]), and
 //! every message of the session goes through it, both ways. A frame of the
 //! other kind, or one that does not decode, is closed with 4002
-//! (`MessageDecodeError`) and obs-websocket's own wording.
+//! (`MessageDecodeError`) and obs-websocket's wording (for an undecodable
+//! frame, its reason without the parser's error appended).
 //!
 //! The 1 MiB bound (`remote::MAX_MESSAGE_BYTES`) is the WebSocket layer's, so
 //! it holds for both encodings before a frame reaches the codec.
@@ -30,7 +31,9 @@ use super::protocol::{CLOSE_MESSAGE_DECODE_ERROR, CloseReason, Subprotocol};
 /// default is 1024).
 pub const MAX_DEPTH: usize = 128;
 
-/// A JSON session's frame that is not JSON.
+/// A JSON session's frame that is not JSON. obs-websocket's reason starts
+/// the same and appends the parser's error; here the reason is fixed (a
+/// `CloseReason` is `&'static str`), as for [`MSGPACK_UNDECODABLE`].
 pub const JSON_UNDECODABLE: CloseReason = CloseReason {
     code: CLOSE_MESSAGE_DECODE_ERROR,
     reason: "Unable to decode Json.",
@@ -74,10 +77,10 @@ impl Codec {
 
     /// The frame of one outgoing message: its JSON text, or its MessagePack
     /// bytes (`to_vec_named`: maps keyed by strings, like obs-websocket's).
-    /// A `serde_json::Value` always encodes (rmp-serde fails only on a
-    /// sequence of unknown length or a `Serialize` error, and a `Value` has
-    /// neither); the `Result` lets the session end instead of panicking if a
-    /// later rmp-serde ever does.
+    /// A `serde_json::Value` always encodes (rmp-serde 1.3 fails only when a
+    /// `Serialize` impl reports an error or the writer fails, and neither a
+    /// `Value` nor a `Vec` does); the `Result` lets the session end instead
+    /// of panicking if a later rmp-serde ever does.
     pub fn encode(self, msg: &Value) -> Result<Message, rmp_serde::encode::Error> {
         match self {
             Self::Json => Ok(Message::Text(msg.to_string().into())),

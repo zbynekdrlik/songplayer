@@ -42,10 +42,15 @@ come from `SP-program`, never from cg OBS.
   HTTP 400 every 5 s and rolled back. `protocol::negotiate_subprotocol` (the
   main session's L2b decision):
   - `obswebsocket.json` offered, alone or next to msgpack → JSON (echoed);
-  - msgpack offered without JSON → msgpack (echoed), also next to an unknown
-    protocol (obs-websocket itself takes the first encoding it knows);
+  - msgpack offered without JSON → msgpack (echoed);
   - nothing offered → JSON, no header;
-  - only foreign protocols → HTTP 400.
+  - only foreign protocols → HTTP 400, and the offer is logged (`remote:
+    neither obs-websocket subprotocol offered`) — the HTTP error itself says
+    only "400".
+
+  msgpack next to an unknown protocol ("chat, obswebsocket.msgpack") is
+  msgpack too — the lane's reading, the same `.any()` rule JSON has had since
+  #213, and what obs-websocket does (it takes the first encoding it knows).
 - **One codec per session, both ways (`remote/codec.rs`).** The handshake
   picks `Codec::{Json, MsgPack}`, and EVERY message of the session goes
   through it: Hello, Identified, request + batch responses, cg OBS's and the
@@ -53,14 +58,15 @@ come from `SP-program`, never from cg OBS.
   objects, `rmp_serde::to_vec_named` (maps keyed by strings, like
   obs-websocket's nlohmann `json::to_msgpack`), in BINARY frames; incoming
   binary frames are decoded back to a `Value` and parsed by the same
-  `protocol::parse_client_message`. Closes use obs-websocket's own wording
-  (all 4002 `MessageDecodeError`):
+  `protocol::parse_client_message`. Closes use obs-websocket's wording (all
+  4002 `MessageDecodeError`):
   - a text frame on a msgpack session → "Your session encoding is set to
     MsgPack, but a text message was received.";
   - a binary frame on a JSON session → "… set to Json, but a binary message
     was received.";
   - an undecodable frame → "Unable to decode Json." / "Unable to decode
-    MsgPack.";
+    MsgPack." (obs-websocket appends the parser's error; a `CloseReason` is
+    a fixed `&'static str`);
   - a decoded non-object → "You sent a non-object payload.".
 - **obs-websocket-js sends an undefined `requestData` as msgpack nil**
   (`@msgpack/msgpack` encodes `undefined` as nil), so a msgpack request
@@ -423,9 +429,9 @@ follow are the later lanes (L4a–L6) of #221.
 
   That is why the tests prove the echo simply by connecting.
 - `Message::Binary(Bytes)` / `Message::Text(Utf8Bytes)`: a `Vec<u8>` goes in
-  with `.into()` — give the literal its type (`vec![0xc1_u8]`), an
-  unsuffixed `vec![0xc1]` is `Vec<i32>` and has no `Into<Bytes>`. `&Bytes`
-  / `&Utf8Bytes` deref-coerce to `&[u8]` / `&str` at a plain fn call.
+  with `.into()`; the tests suffix the literal (`vec![0xc1_u8]`) for
+  clarity, as the older ones did (`vec![1u8, 2, 3]`). `&Bytes` /
+  `&Utf8Bytes` deref-coerce to `&[u8]` / `&str` at a plain fn call.
 - A handshake callback that PICKS something (the codec) writes it to a
   local it captures `&mut` (`let mut codec = Codec::Json;`): the closure
   lives inside the accept future, which is gone once the `.await` returns,

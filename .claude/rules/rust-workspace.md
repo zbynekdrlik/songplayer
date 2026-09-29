@@ -474,6 +474,10 @@ the test that kills each one BEFORE CI's mutation gate runs.
 - The Tier-0 hook blocks it as a cargo subcommand. Because it only lists,
   the logged `# airuleset:build-ok list-only` bypass is honest here, and
   only here.
+- **A NEW file is missing from `git diff <base>` until git tracks it**
+  (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
+  showed no mutant at all for the new `remote/codec.rs`. `git add -N
+  <new files>` first (or list the committed range), then re-list.
 - cargo-mutants 27 turns `|=` only into `&=`, not `^=`.
 - It turns a match guard into `true` / `false`, and `==` into `!=`.
 - `a && b && c` parses as `(a && b) && c`, so its two `&&`→`||` mutants

@@ -69,6 +69,9 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
             .and_then(|v| v.to_str().ok());
         let negotiated = protocol::negotiate_subprotocol(offered);
         let Some(chosen) = Codec::for_subprotocol(negotiated) else {
+            // The HTTP error logged below says only "400"; the offer is what a
+            // cutover diagnosis needs (#221 comment 5881650057).
+            info!(%peer, offered = ?offered.map(clip), "remote: neither obs-websocket subprotocol offered");
             return Err(refused());
         };
         codec = chosen;
