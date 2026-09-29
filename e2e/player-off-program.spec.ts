@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, Page } from "@playwright/test";
 
 // #221 L4b: SongPlayer's own program (SP-program, plus what it told cg OBS)
 // is the playback authority, so a manual ▶ never claims program. A playlist
@@ -38,10 +38,20 @@ test.afterEach(async ({ request }) => {
   expect(real).toEqual([]);
 });
 
+// The mock broadcasts `/play`'s state over the dashboard WebSocket, so a click
+// must come after the socket is open: the health bar's OBS segment shows the
+// mock's `ObsStatus` (sp-alex) only once the socket delivered it.
+async function socketOpen(page: Page) {
+  await expect(page.getByTestId("health-obs")).toContainText("sp-alex", {
+    timeout: 15000,
+  });
+}
+
 test("▶ on a playlist off air plays it off program — 'Hrá mimo programu'", async ({
   page,
 }) => {
   await page.goto("/live");
+  await socketOpen(page);
   const toggle = page.getByTestId("player-playpause");
   await expect(toggle).toContainText("▶ Prehrať", { timeout: 15000 });
   await expect(page.getByTestId("player-program-badge")).toContainText(
@@ -68,9 +78,14 @@ test("▶ on the playlist on air plays it on program — 'Hrá'", async ({
   page,
   request,
 }) => {
-  await page.goto("/");
+  // `?playlist=1` pins the work area to playlist 1 (Worship): without a pin
+  // the dashboard follows the playing playlist, and once 1 is paused below
+  // it would re-select the first by name (2, Background).
+  await page.goto("/?playlist=1");
+  await socketOpen(page);
   const toggle = page.getByTestId("player-playpause");
-  await expect(toggle).toBeVisible({ timeout: 15000 });
+  // The on-connect replay: playlist 1 plays.
+  await expect(toggle).toContainText("⏸ Pauza", { timeout: 15000 });
   // Playlist 1 (on SP-program) paused: the toggle offers ▶ and the label
   // reads "Čaká na scénu" (paused, not playing anywhere).
   await request.post("/__mock/set-playing", {
