@@ -526,7 +526,9 @@ the test that kills each one BEFORE CI's mutation gate runs.
 - **The worktree Bash guard refuses `cd <wt> && python3 - <<EOF` edits**
   (and loops over computed paths): write the edit script to the scratchpad
   and run `python3 <scratch>/edit.py` with absolute paths inside it; assert
-  each anchor's count before replacing.
+  each anchor's count before replacing. It also refuses a `cat >> file
+  <<'EOF'` append, a `$VAR`-computed script path, and any command whose text
+  contains `github.com` (a curl User-Agent tripped it, #144): same remedy.
 - **A NEW file is missing from `git diff <base>` until git tracks it**
   (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
   showed no mutant at all for the new `remote/codec.rs`. `git add -N

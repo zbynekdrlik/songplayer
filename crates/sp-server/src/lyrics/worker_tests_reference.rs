@@ -158,21 +158,28 @@ impl crate::lyrics::orchestrator::ReferenceStageBackend for FakeReferenceStageBa
 }
 
 // Direct `run_reference_stage` transport-error coverage (re-homed from the
-// deleted orchestrator_tests.rs — this is SURVIVING code): an `mtl_align` or
-// `asr_transcribe` failure returns `ReferenceStageResult::Error` naming the
-// failing stage, so the worker falls through to the g35t base tier.
+// deleted orchestrator_tests.rs — this is SURVIVING code): an `mtl_align`
+// failure returns `ReferenceStageResult::Error` naming the stage, so the worker
+// falls through to the g35t base tier. (A transcription failure is
+// `worker_text_tiers::transcribe_vocal`'s since #144, tested there.)
 #[tokio::test]
 async fn run_reference_stage_mtl_align_error_returns_error_stage() {
     let backend = FakeReferenceStageBackend {
         mtl: std::sync::Mutex::new(Some(Err(anyhow::anyhow!("mtl boom")))),
-        asr: std::sync::Mutex::new(None), // asr_transcribe must NOT be reached
+        asr: std::sync::Mutex::new(None), // the stage never transcribes (#144)
     };
     let lines = vec!["a".to_string(), "b".to_string()];
+    let words = vec![crate::lyrics::g35t_client::AsrWord {
+        text: "a".into(),
+        start_ms: 0,
+        end_ms: 300,
+    }];
     let result = crate::lyrics::orchestrator::run_reference_stage(
         &backend,
         Path::new("/x.wav"),
         "yt1",
         &lines,
+        &words,
     )
     .await;
     match result {
@@ -184,38 +191,6 @@ async fn run_reference_stage_mtl_align_error_returns_error_stage() {
     }
 }
 
-#[tokio::test]
-async fn run_reference_stage_asr_transcribe_error_returns_error_stage() {
-    use crate::lyrics::mtl_aligner::{MtlLine, MtlOutput};
-    let backend = FakeReferenceStageBackend {
-        mtl: std::sync::Mutex::new(Some(Ok(MtlOutput {
-            lines: vec![MtlLine {
-                text: "a".into(),
-                start_ms: 0,
-                end_ms: 1000,
-            }],
-            device: "cpu".into(),
-            elapsed_s: 1.0,
-        }))),
-        asr: std::sync::Mutex::new(Some(Err(anyhow::anyhow!("asr boom")))),
-    };
-    let lines = vec!["a".to_string()];
-    let result = crate::lyrics::orchestrator::run_reference_stage(
-        &backend,
-        Path::new("/x.wav"),
-        "yt1",
-        &lines,
-    )
-    .await;
-    match result {
-        crate::lyrics::orchestrator::ReferenceStageResult::Error { stage, message } => {
-            assert_eq!(stage, "asr_transcribe");
-            assert!(message.contains("asr boom"), "message: {message}");
-        }
-        _ => panic!("expected Error stage=asr_transcribe"),
-    }
-}
-
 fn ref_candidate(source: &str, n_lines: usize) -> crate::lyrics::tier1::CandidateText {
     crate::lyrics::tier1::CandidateText {
         source: source.to_string(),
@@ -223,6 +198,16 @@ fn ref_candidate(source: &str, n_lines: usize) -> crate::lyrics::tier1::Candidat
         line_timings: None,
         has_timing: false,
     }
+}
+
+/// A one-word transcript: enough for the stage to reach its other skip
+/// checks (an EMPTY transcript is a skip of its own, #144).
+fn one_word() -> Vec<crate::lyrics::g35t_client::AsrWord> {
+    vec![crate::lyrics::g35t_client::AsrWord {
+        text: "line".into(),
+        start_ms: 0,
+        end_ms: 300,
+    }]
 }
 
 /// A tools dir with all three `MtlConfig::is_available()` paths present, so
@@ -256,6 +241,7 @@ async fn run_mtl_reference_stage_skips_when_tooling_unavailable() {
             "yt1",
             Some(&cand),
             Some(Path::new("/x.wav")),
+            &one_word(),
             &UnreachableBackend,
         )
         .await;
@@ -279,7 +265,14 @@ async fn run_mtl_reference_stage_skips_when_no_vocals_wav() {
     );
     let cand = ref_candidate("description", 6);
     let result = worker
-        .run_mtl_reference_stage(1, "yt1", Some(&cand), None, &UnreachableBackend)
+        .run_mtl_reference_stage(
+            1,
+            "yt1",
+            Some(&cand),
+            None,
+            &one_word(),
+            &UnreachableBackend,
+        )
         .await;
     assert!(result.unwrap().is_none());
     let _ = std::fs::remove_dir_all(&cache_dir);
@@ -305,6 +298,7 @@ async fn run_mtl_reference_stage_skips_when_no_candidate() {
             "yt1",
             None,
             Some(Path::new("/x.wav")),
+            &one_word(),
             &UnreachableBackend,
         )
         .await;
@@ -333,6 +327,39 @@ async fn run_mtl_reference_stage_skips_when_candidate_too_short() {
             "yt1",
             Some(&cand),
             Some(Path::new("/x.wav")),
+            &one_word(),
+            &UnreachableBackend,
+        )
+        .await;
+    assert!(result.unwrap().is_none());
+    let _ = std::fs::remove_dir_all(&cache_dir);
+}
+
+/// #144: an empty transcript can never pass the gate (no line matches), so
+/// the stage skips before spending an mtl run on it; the base tier then
+/// quarantines the song as `asr_gap` from the same empty transcript.
+#[tokio::test]
+async fn run_mtl_reference_stage_skips_when_the_transcript_is_empty() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    let cache_dir = std::env::temp_dir().join("sp_reference_stage_empty_transcript_test");
+    let _ = std::fs::create_dir_all(&cache_dir);
+    let tools = available_mtl_tools_dir();
+    let (events_tx, _rx) = tokio::sync::broadcast::channel::<sp_core::ws::ServerMsg>(16);
+    let worker = crate::lyrics::worker::LyricsWorker::new_for_test_with_tools_dir(
+        pool,
+        cache_dir.clone(),
+        tools.path().to_path_buf(),
+        events_tx,
+    );
+    let cand = ref_candidate("description", 6);
+    let result = worker
+        .run_mtl_reference_stage(
+            1,
+            "yt1",
+            Some(&cand),
+            Some(Path::new("/x.wav")),
+            &[],
             &UnreachableBackend,
         )
         .await;
@@ -476,7 +503,7 @@ async fn run_mtl_reference_stage_pass_stamps_source_and_sets_reference_flag() {
     ];
     let backend = FakeReferenceStageBackend {
         mtl: std::sync::Mutex::new(Some(Ok(mtl_out))),
-        asr: std::sync::Mutex::new(Some(Ok(words))),
+        asr: std::sync::Mutex::new(None), // the stage never transcribes (#144)
     };
 
     let result = worker
@@ -485,6 +512,7 @@ async fn run_mtl_reference_stage_pass_stamps_source_and_sets_reference_flag() {
             "yt_pass",
             Some(&cand),
             Some(Path::new("/x.wav")),
+            &words,
             &backend,
         )
         .await;
@@ -648,7 +676,7 @@ async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
     ];
     let backend = FakeReferenceStageBackend {
         mtl: std::sync::Mutex::new(Some(Ok(mtl_out))),
-        asr: std::sync::Mutex::new(Some(Ok(words))),
+        asr: std::sync::Mutex::new(None), // the stage never transcribes (#144)
     };
 
     let result = worker
@@ -657,6 +685,7 @@ async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
             "yt_fail",
             Some(&cand),
             Some(Path::new("/x.wav")),
+            &words,
             &backend,
         )
         .await;
@@ -681,6 +710,119 @@ async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
         .expect("_alignment_audit.json sidecar must be written on gate FAIL");
     let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
     assert_eq!(parsed["verdict"], "fail");
+
+    let _ = std::fs::remove_dir_all(&cache_dir);
+}
+
+/// #144: a gate PASS writes the audit sidecar too, carrying the sung
+/// coverage, so every ★ row has its gate numbers on disk (and an older FAIL
+/// audit of the same song is replaced, not left behind).
+#[tokio::test]
+async fn run_mtl_reference_stage_pass_writes_the_audit_with_the_sung_coverage() {
+    use crate::lyrics::g35t_client::AsrWord;
+    use crate::lyrics::mtl_aligner::{MtlLine, MtlOutput};
+
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) VALUES (1, 'p', 'u', 'n')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let video_id: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title, song, artist, normalized) \
+         VALUES (1, 'yt_pass_audit', 'T', 'S', 'A', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let cache_dir = std::env::temp_dir().join("sp_reference_stage_pass_audit_test");
+    let _ = std::fs::remove_dir_all(&cache_dir);
+    std::fs::create_dir_all(&cache_dir).unwrap();
+    // A stale FAIL audit from an earlier run of the same song.
+    std::fs::write(
+        cache_dir.join("yt_pass_audit_alignment_audit.json"),
+        br#"{"verdict":"fail","reason":"coverage"}"#,
+    )
+    .unwrap();
+    let tools = available_mtl_tools_dir();
+    let (events_tx, _rx) = tokio::sync::broadcast::channel::<sp_core::ws::ServerMsg>(16);
+    let worker = crate::lyrics::worker::LyricsWorker::new_for_test_with_tools_dir(
+        pool,
+        cache_dir.clone(),
+        tools.path().to_path_buf(),
+        events_tx,
+    );
+
+    let texts = ["amazing grace", "how sweet", "the sound", "that saved"];
+    let cand = crate::lyrics::tier1::CandidateText {
+        source: "lrclib".to_string(),
+        lines: texts.iter().map(|t| t.to_string()).collect(),
+        line_timings: None,
+        has_timing: false,
+    };
+    let mtl_out = MtlOutput {
+        lines: texts
+            .iter()
+            .enumerate()
+            .map(|(i, t)| MtlLine {
+                text: t.to_string(),
+                start_ms: 1_000 + i as u64 * 2_000,
+                end_ms: 2_500 + i as u64 * 2_000,
+            })
+            .collect(),
+        device: "cuda".into(),
+        elapsed_s: 7.5,
+    };
+    // Every text word sung at its line's start, plus one sung word the text
+    // lacks ("oh", 400 ms): 8 of 9 sung words covered.
+    let mut words = Vec::new();
+    for (i, t) in texts.iter().enumerate() {
+        let start = 1_000 + i as u64 * 2_000;
+        for (k, w) in t.split_whitespace().enumerate() {
+            let s = start + k as u64 * 500;
+            words.push(AsrWord {
+                text: w.to_string(),
+                start_ms: s,
+                end_ms: s + 500,
+            });
+        }
+    }
+    words.push(AsrWord {
+        text: "oh".into(),
+        start_ms: 9_000,
+        end_ms: 9_400,
+    });
+    let backend = FakeReferenceStageBackend {
+        mtl: std::sync::Mutex::new(Some(Ok(mtl_out))),
+        asr: std::sync::Mutex::new(None), // the stage never transcribes (#144)
+    };
+
+    let result = worker
+        .run_mtl_reference_stage(
+            video_id,
+            "yt_pass_audit",
+            Some(&cand),
+            Some(Path::new("/x.wav")),
+            &words,
+            &backend,
+        )
+        .await;
+    assert!(result.unwrap().is_some(), "expected a gate PASS");
+
+    let content = tokio::fs::read_to_string(cache_dir.join("yt_pass_audit_alignment_audit.json"))
+        .await
+        .expect("a PASS must write the audit sidecar");
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert_eq!(parsed["verdict"], "pass");
+    assert_eq!(parsed["reason"], serde_json::Value::Null);
+    assert_eq!(parsed["sung_words"], 9);
+    assert_eq!(parsed["sung_covered_frac"], 8.0 / 9.0);
+    assert_eq!(parsed["max_uncovered_sung_ms"], 400);
+    assert_eq!(parsed["mtl_device"], "cuda");
+    assert_eq!(parsed["mtl_elapsed_s"], 7.5);
+    assert_eq!(parsed["asr_words"], 9);
 
     let _ = std::fs::remove_dir_all(&cache_dir);
 }

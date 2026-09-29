@@ -10,7 +10,10 @@
 //!
 //! Vocal isolation is NOT done here — `process_song` already isolated once (for
 //! the reference stage) and passes the same `clean_vocal` in, so there is no
-//! duplicate Demucs pass. Extracted from `worker.rs::process_song` to keep that
+//! duplicate Demucs pass. Nor is the isolated vocal transcribed twice (#144):
+//! the song's one g35t transcript (`worker_text_tiers::transcribe_vocal`) comes
+//! in as `transcript`; only a song without it (no isolated vocal, or no key)
+//! transcribes here. Extracted from `worker.rs::process_song` to keep that
 //! file under the 1000-line CI limit.
 
 use std::path::Path;
@@ -51,7 +54,9 @@ pub(crate) enum G35tOutcome {
 impl LyricsWorker {
     /// Run the Gemini 3.5 Transcribe base tier for a song the reference stage
     /// did not ship. `clean_vocal` is the already-isolated vocal stem from
-    /// `process_song`; `gemini_keys` is the parsed `gemini_api_key` CSV.
+    /// `process_song`; `transcript` is its one g35t transcript when it was
+    /// taken (#144 — then nothing is transcribed again); `gemini_keys` is the
+    /// parsed `gemini_api_key` CSV.
     ///
     /// Does NOT translate/persist or call `clear_processing` — the caller does
     /// that (Track → shared tail; Deferred/Quarantined → early return).
@@ -63,6 +68,7 @@ impl LyricsWorker {
         &self,
         clean_vocal: Option<&Path>,
         mix_audio: Option<&Path>,
+        transcript: Option<Vec<crate::lyrics::g35t_client::AsrWord>>,
         gemini_keys: &[String],
         video_id: i64,
         youtube_id: &str,
@@ -70,71 +76,24 @@ impl LyricsWorker {
         artist: &str,
         started_at_unix_ms: i64,
     ) -> Result<G35tOutcome> {
-        // Pick the transcription input: the isolated vocal (best) when we have
-        // it, else — only after isolation has had its resumable chance (#171) —
-        // the full normalized mix, so the row still gets lyrics NOW instead of
-        // looping on `vocal_isolation_failed` backoff forever. A fullmix row is
-        // stamped with a distinct source so a later run can upgrade it to ★.
-        let (input_audio, is_fullmix) = match clean_vocal {
-            Some(wav) => (wav, false),
-            None => {
-                let attempts = self.lyrics_attempts(video_id).await;
-                match mix_audio {
-                    Some(mix) if should_transcribe_fullmix(attempts) => {
-                        warn!(
-                            youtube_id = %youtube_id,
-                            attempts,
-                            "g35t base tier: no vocal after isolation's chances — transcribing the full mix"
-                        );
-                        (mix, true)
-                    }
-                    _ => {
-                        warn!(
-                            youtube_id = %youtube_id,
-                            attempts,
-                            "g35t base tier: no preprocessed vocal yet — deferring for resumable isolation"
-                        );
-                        return Ok(G35tOutcome::Deferred("vocal_isolation_failed"));
-                    }
-                }
-            }
-        };
-        if gemini_keys.is_empty() {
-            warn!(
-                youtube_id = %youtube_id,
-                "g35t base tier: gemini_api_key not set — leaving row unprocessed"
-            );
-            return Ok(G35tOutcome::Deferred("gemini_key_missing"));
-        }
-
-        self.broadcast_stage(
-            video_id,
-            youtube_id,
-            song,
-            artist,
-            "aligning",
-            None,
-            started_at_unix_ms,
-        )
-        .await;
-
-        let words = match crate::lyrics::g35t_client::transcribe_words(
-            &self.client,
-            gemini_keys,
-            input_audio,
-            &["en-US".to_string()],
-        )
-        .await
-        {
-            Ok(w) => w,
-            Err(e) => {
-                warn!(
-                    youtube_id = %youtube_id,
-                    error = %e,
-                    "g35t base tier: transcription failed — leaving row unprocessed for retry"
-                );
-                return Ok(G35tOutcome::Deferred("g35t_error"));
-            }
+        let (words, is_fullmix) = match transcript {
+            Some(words) => (words, false),
+            None => match self
+                .transcribe_base_input(
+                    clean_vocal,
+                    mix_audio,
+                    gemini_keys,
+                    video_id,
+                    youtube_id,
+                    song,
+                    artist,
+                    started_at_unix_ms,
+                )
+                .await
+            {
+                Ok(taken) => taken,
+                Err(reason) => return Ok(G35tOutcome::Deferred(reason)),
+            },
         };
 
         // Audit sidecar: dump the word count so operators can inspect coverage
@@ -183,6 +142,93 @@ impl LyricsWorker {
                 Ok(G35tOutcome::Quarantined)
             }
         }
+    }
+
+    /// The base tier's own transcription, for a song that reached it without
+    /// the one transcript (#144): no isolated vocal (the #171 full-mix
+    /// fallback, or a deferral while isolation still has its chances) or no
+    /// Gemini key. Returns the words and whether they come from the full mix;
+    /// `Err` is the reason the song defers.
+    #[cfg_attr(test, mutants::skip)] // network + DB glue, like the caller
+    #[allow(clippy::too_many_arguments)]
+    async fn transcribe_base_input(
+        &self,
+        clean_vocal: Option<&Path>,
+        mix_audio: Option<&Path>,
+        gemini_keys: &[String],
+        video_id: i64,
+        youtube_id: &str,
+        song: &str,
+        artist: &str,
+        started_at_unix_ms: i64,
+    ) -> Result<(Vec<crate::lyrics::g35t_client::AsrWord>, bool), &'static str> {
+        // Pick the transcription input: the isolated vocal (best) when we have
+        // it, else — only after isolation has had its resumable chance (#171) —
+        // the full normalized mix, so the row still gets lyrics NOW instead of
+        // looping on `vocal_isolation_failed` backoff forever. A fullmix row is
+        // stamped with a distinct source so a later run can upgrade it to ★.
+        let (input_audio, is_fullmix) = match clean_vocal {
+            Some(wav) => (wav, false),
+            None => {
+                let attempts = self.lyrics_attempts(video_id).await;
+                match mix_audio {
+                    Some(mix) if should_transcribe_fullmix(attempts) => {
+                        warn!(
+                            youtube_id = %youtube_id,
+                            attempts,
+                            "g35t base tier: no vocal after isolation's chances — transcribing the full mix"
+                        );
+                        (mix, true)
+                    }
+                    _ => {
+                        warn!(
+                            youtube_id = %youtube_id,
+                            attempts,
+                            "g35t base tier: no preprocessed vocal yet — deferring for resumable isolation"
+                        );
+                        return Err("vocal_isolation_failed");
+                    }
+                }
+            }
+        };
+        if gemini_keys.is_empty() {
+            warn!(
+                youtube_id = %youtube_id,
+                "g35t base tier: gemini_api_key not set — leaving row unprocessed"
+            );
+            return Err("gemini_key_missing");
+        }
+
+        self.broadcast_stage(
+            video_id,
+            youtube_id,
+            song,
+            artist,
+            "aligning",
+            None,
+            started_at_unix_ms,
+        )
+        .await;
+
+        let words = match crate::lyrics::g35t_client::transcribe_words(
+            &self.client,
+            gemini_keys,
+            input_audio,
+            &["en-US".to_string()],
+        )
+        .await
+        {
+            Ok(w) => w,
+            Err(e) => {
+                warn!(
+                    youtube_id = %youtube_id,
+                    error = %e,
+                    "g35t base tier: transcription failed — leaving row unprocessed for retry"
+                );
+                return Err("g35t_error");
+            }
+        };
+        Ok((words, is_fullmix))
     }
 
     /// #171: the row's current `lyrics_attempts` (0 if unknown / unreadable) —

@@ -3,6 +3,11 @@
 //! before stamping a song as a ★ reference (issue #143, design settled on
 //! #130's 2026-09-12 comment).
 //!
+//! The gate is two-way (#144). Reference → transcript: is every line found,
+//! on time (`match_lines`, below)? Transcript → reference: does the text
+//! cover what is sung (`sung_coverage.rs`)? A partial lyric passes the
+//! first alone, and mtl then holds its lines over the singing it lacks.
+//!
 //! Matching is a monotonic n-gram anchor search: it borrows the "cursor
 //! only ever moves forward" idea from `eval/lyrics/combine_lines_times.py`
 //! (that file's `difflib`-based whole-stream alignment is NOT ported here
@@ -38,6 +43,24 @@ pub struct GateStats {
     pub matched_frac: f64,
     pub median_signed_ms: i64,
     pub within_400_frac: f64,
+    /// #144, the transcript → reference direction (`sung_coverage.rs`):
+    /// transcript words that carry a word.
+    pub sung_words: usize,
+    /// Share of `sung_words` the reference text covers.
+    pub sung_covered_frac: f64,
+    /// The longest run of sung words the reference text does not cover.
+    pub max_uncovered_sung_ms: u64,
+}
+
+impl GateStats {
+    /// The transcript → reference numbers of these stats.
+    pub fn sung(&self) -> crate::lyrics::sung_coverage::SungCoverage {
+        crate::lyrics::sung_coverage::SungCoverage {
+            sung_words: self.sung_words,
+            covered_frac: self.sung_covered_frac,
+            max_uncovered_ms: self.max_uncovered_sung_ms,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,9 +84,20 @@ pub const MAX_ABS_MEDIAN_OFFSET_MS: i64 = 400;
 pub const MIN_WITHIN_400_FRAC: f64 = 0.70;
 pub const WITHIN_MS: i64 = 400;
 
+/// #144: the reference text must cover at least this share of the sung
+/// words. Measured (issue #144, 2026-09-29): complete texts 0.64–0.97
+/// (18 eval gold texts + 6 ★ rows against real g35t transcripts), partial
+/// texts ≤ 0.42 (the eval gold cut to its first 35 %).
+pub const MIN_SUNG_COVERED_FRAC: f64 = 0.55;
+/// #144: no sung stretch the reference text does not cover may run longer
+/// than this — mtl would stretch a line over it on the wall. Measured:
+/// complete texts ≤ 20.6 s, the ★ rows whose wall held one line over other
+/// singing ≥ 34.9 s (286: 48.2 s, 270: 34.9 s, 77: 41.4 s).
+pub const MAX_UNCOVERED_SUNG_MS: u64 = 25_000;
+
 /// Lowercase + strip everything but letters/digits/apostrophes. Unicode
 /// alphanumeric (not ASCII-only) so accented lyrics normalize correctly.
-fn normalize_word(w: &str) -> String {
+pub(crate) fn normalize_word(w: &str) -> String {
     w.chars()
         .filter(|c| c.is_alphanumeric() || *c == '\'')
         .flat_map(|c| c.to_lowercase())
@@ -73,7 +107,7 @@ fn normalize_word(w: &str) -> String {
 /// Whitespace-split + normalize a line's text, dropping any token that
 /// normalizes to empty (pure punctuation). `split_whitespace` already
 /// collapses runs of whitespace.
-fn normalized_words(text: &str) -> Vec<String> {
+pub(crate) fn normalized_words(text: &str) -> Vec<String> {
     text.split_whitespace()
         .map(normalize_word)
         .filter(|w| !w.is_empty())
@@ -150,10 +184,18 @@ fn median_i64(values: &[i64]) -> i64 {
     }
 }
 
+/// #144: does the reference text cover what is sung? At least
+/// `MIN_SUNG_COVERED_FRAC` of the sung words, and no uncovered sung stretch
+/// longer than `MAX_UNCOVERED_SUNG_MS`.
+pub(crate) fn covers_what_is_sung(sung: &crate::lyrics::sung_coverage::SungCoverage) -> bool {
+    sung.covered_frac >= MIN_SUNG_COVERED_FRAC && sung.max_uncovered_ms <= MAX_UNCOVERED_SUNG_MS
+}
+
 /// Verify `lines` (forced-alignment output) against `words` (independent
 /// ASR). Verdict order: Coverage (`matched_frac < 0.60`, incl. zero
-/// lines) → Offset (`|median_signed_ms| > 400`) → Agreement
-/// (`within_400_frac < 0.70`) → Pass.
+/// lines) → Coverage of what is sung (#144: `sung_covered_frac < 0.55` or
+/// `max_uncovered_sung_ms > 25 000`) → Offset (`|median_signed_ms| > 400`)
+/// → Agreement (`within_400_frac < 0.70`) → Pass.
 pub fn evaluate(lines: &[AlignedLine], words: &[AsrWord]) -> GateVerdict {
     let matches = match_lines(lines, words);
 
@@ -189,15 +231,25 @@ pub fn evaluate(lines: &[AlignedLine], words: &[AsrWord]) -> GateVerdict {
         0.0
     };
 
+    let sung = crate::lyrics::sung_coverage::sung_coverage(lines, words);
     let stats = GateStats {
         lines_total,
         lines_matched,
         matched_frac,
         median_signed_ms,
         within_400_frac,
+        sung_words: sung.sung_words,
+        sung_covered_frac: sung.covered_frac,
+        max_uncovered_sung_ms: sung.max_uncovered_ms,
     };
 
     if lines_total == 0 || matched_frac < MIN_MATCHED_FRAC {
+        return GateVerdict::Fail {
+            reason: GateFailReason::Coverage,
+            stats,
+        };
+    }
+    if !covers_what_is_sung(&sung) {
         return GateVerdict::Fail {
             reason: GateFailReason::Coverage,
             stats,
@@ -482,3 +534,7 @@ mod tests {
 #[cfg(test)]
 #[path = "reference_gate_tests_mutants.rs"]
 mod reference_gate_tests_mutants;
+
+#[cfg(test)]
+#[path = "reference_gate_tests_sung.rs"]
+mod reference_gate_tests_sung;
