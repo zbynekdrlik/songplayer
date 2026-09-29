@@ -278,6 +278,49 @@ def test_no_url_answering_is_unreachable(serve):
     assert len(lines) == 2
 
 
+@pytest.fixture
+def raw_serve():
+    """A TCP server that answers every connection with fixed raw bytes."""
+    socks = []
+
+    def start(payload: bytes) -> str:
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(5)
+        socks.append(sock)
+
+        def run():
+            while True:
+                try:
+                    conn, _ = sock.accept()
+                except OSError:
+                    return  # the fixture closed the socket
+                with conn:
+                    conn.recv(4096)
+                    conn.sendall(payload)
+
+        threading.Thread(target=run, daemon=True).start()
+        return f"http://127.0.0.1:{sock.getsockname()[1]}/rig-lease.json"
+
+    yield start
+    for sock in socks:
+        sock.close()
+
+
+def test_something_else_on_the_port_is_no_lease(serve, raw_serve):
+    # Review round 2: a non-HTTP listener (`BadStatusLine`) or a truncated
+    # body (`IncompleteRead`) are `http.client.HTTPException`s, not OSErrors;
+    # they must be "no lease" (the next URL is tried; none -> WARN, deploy),
+    # never an uncaught exception that fails the deploy.
+    banner = raw_serve(b"SSH-2.0-OpenSSH_9.6\r\n")
+    truncated = raw_serve(b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{"held": fa')
+    held = serve(json.dumps(lease()).encode())
+    lines: list[str] = []
+    assert fetch_lease([banner, truncated, held], lines.append) == lease()
+    assert len(lines) == 2
+    assert fetch_lease([banner, truncated], lines.append) is None
+
+
 def test_main_deploys_on_a_free_lease(serve, capsys):
     url = serve(json.dumps(lease(held=False)).encode())
     assert main(["--own-repo", OWN_REPO, "--url", url]) == EXIT_PROCEED
