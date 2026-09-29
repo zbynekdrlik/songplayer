@@ -22,8 +22,9 @@ use tracing::warn;
 
 use crate::lyrics::g35t_client::AsrWord;
 
-/// How long a kept transcript may be reused: long enough for any no-penalty
-/// deferral re-pick, short of a later reprocess (6 h).
+/// The backstop on reuse (6 h): a pass that ended retired its transcript
+/// already (`retire`); this bounds the reuse by a pass that never ended —
+/// long enough for any no-penalty deferral re-pick.
 pub const REUSE_WINDOW_MS: u64 = 21_600_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

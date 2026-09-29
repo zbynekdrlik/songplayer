@@ -194,8 +194,9 @@ async fn an_old_kept_transcript_is_not_reused() {
     );
 }
 
-/// A pass that ended retires its transcript: the next pass (a manual
-/// reprocess of the same vocal, minutes later) transcribes afresh.
+/// The helper contract: once the transcript is retired (as `run_text_tiers`
+/// does when a pass ends), the next pass — a manual reprocess of the same
+/// vocal, minutes later — transcribes afresh.
 #[tokio::test]
 async fn the_next_pass_transcribes_afresh() {
     use crate::lyrics::transcript_cache;
@@ -236,4 +237,65 @@ fn the_title_search_runs_only_when_its_result_can_be_used() {
         !should_title_search(&sung, &[candidate("lrclib")], true),
         "a lookup found the song"
     );
+}
+
+/// #144: a pass that ends in a track retires its kept transcript inside
+/// `run_text_tiers` itself. Offline: `new_for_test`'s tools dir has no mtl
+/// tooling (no title search, the ★ stage skips) and there is no Gemini key,
+/// so the kept transcript is the only one and the base tier builds the track
+/// from it.
+#[tokio::test]
+async fn a_pass_ending_in_a_track_retires_its_transcript() {
+    use crate::lyrics::transcript_cache;
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (events_tx, _rx) = tokio::sync::broadcast::channel::<sp_core::ws::ServerMsg>(16);
+    let worker = crate::lyrics::worker::LyricsWorker::new_for_test(
+        pool,
+        dir.path().to_path_buf(),
+        events_tx,
+    );
+    let wav = dir.path().join("yt1_vocals16k.wav");
+    std::fs::write(&wav, b"RIFF-vocal").unwrap();
+    let vocal = transcript_cache::vocal_identity(&std::fs::metadata(&wav).unwrap()).unwrap();
+    transcript_cache::store(
+        &transcript_cache::path(dir.path(), "yt1"),
+        vocal,
+        transcript_cache::now_ms(),
+        &words(),
+    )
+    .await;
+    let row = crate::db::models::VideoLyricsRow {
+        id: 1,
+        youtube_id: "yt1".into(),
+        song: "Amazing Grace".into(),
+        artist: "A".into(),
+        duration_ms: Some(200_000),
+        audio_file_path: None,
+        youtube_url: String::new(),
+        lyrics_override_text: None,
+        lyrics_time_offset_ms: 0,
+        spotify_track_id: None,
+        spotify_resolved_at: None,
+    };
+
+    let outcome = worker
+        .run_text_tiers(
+            &row,
+            Vec::new(),
+            Some(wav.as_path()),
+            None,
+            crate::lyrics::heavy_plan::ProcessingMode::LowPriority,
+            0,
+        )
+        .await
+        .unwrap();
+    let TierOutcome::Track(track) = outcome else {
+        panic!("expected the base-tier track from the kept transcript");
+    };
+    assert_eq!(track.source, crate::lyrics::g35t_transcript::SOURCE_G35T);
+    assert_eq!(track.lines[0].en, "amazing grace");
+    assert!(!transcript_cache::path(dir.path(), "yt1").exists());
+    assert!(transcript_cache::used_path(dir.path(), "yt1").exists());
 }

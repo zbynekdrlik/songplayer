@@ -51,6 +51,10 @@ impl LyricsWorker {
     ) -> Result<Option<LyricsTrack>, crate::lyrics::heavy_plan::HeavyDefer> {
         const MIN_LINES: usize = 4;
 
+        // #144: the audit describes THIS pass — a stale one of an earlier pass
+        // (a PASS audit included) goes, and a skip below leaves none.
+        crate::lyrics::audit_ctx::remove_alignment_audit(&self.cache_dir, youtube_id).await;
+
         let mtl_cfg = crate::lyrics::mtl_aligner::MtlConfig::from_tools_dir(&self.tools_dir);
         if !mtl_cfg.is_available() {
             info!(

@@ -178,7 +178,10 @@ impl LyricsWorker {
         };
 
         // #144: a cover's text by title, chosen by what is sung
-        // (`should_title_search`).
+        // (`should_title_search`). Unlike the transcript it is not kept for
+        // the pass: a no-penalty deferral re-pick searches again (the Claude
+        // cleanup of a chosen plain lyric is cached; the LRCLIB / Genius
+        // answers may differ, and the gate verifies whatever is chosen).
         let words = transcript.as_deref().unwrap_or_default();
         let title_reference =
             if should_title_search(words, &candidates, reference_backend.mtl_cfg.is_available()) {
@@ -202,8 +205,10 @@ impl LyricsWorker {
         // running subprocess is never killed (that would waste ~4 min of GPU
         // work), so the check goes here, BEFORE the next heavy spawn (mtl). If
         // the wall is busy now, defer the WHOLE song (WaitingForWall): the
-        // isolated vocal WAV is preserved on disk, so the next idle pick is a
-        // cache-hit isolation + mtl with byte-identical output. We do NOT fall
+        // isolated vocal WAV and the transcript are kept on disk, so the next
+        // idle pick is a cache-hit isolation + mtl (only the title search, if
+        // it runs, asks again). No mtl runs on an empty transcript, so nothing
+        // defers for one. We do NOT fall
         // through to the g35t base tier — that would degrade the ★ mtl tier
         // (owner's quality-first rule). In LOW-PRIORITY mode there is no gate #2:
         // mtl runs at reduced priority instead (the backend picks the plan and
@@ -211,6 +216,7 @@ impl LyricsWorker {
         if mode == crate::lyrics::heavy_plan::ProcessingMode::IdleOnly
             && best_candidate.is_some()
             && clean_vocal.is_some()
+            && !words.is_empty()
             && self.defer_before_mtl().await
         {
             return Ok(TierOutcome::Return(SongOutcome::WaitingForWall));
