@@ -251,10 +251,9 @@ fn subscriptions(d: &Value) -> Option<u64> {
     d.get("eventSubscriptions").and_then(Value::as_u64)
 }
 
-/// Parse one text frame, or the close obs-websocket answers a malformed one
-/// with.
-pub fn parse_client_message(text: &str) -> Result<ClientMessage, CloseReason> {
-    let msg: Value = serde_json::from_str(text).map_err(|_| decode_error())?;
+/// Parse one DECODED client message (the session decodes the frame first),
+/// or the close obs-websocket answers a malformed one with.
+pub fn parse_client_message(msg: Value) -> Result<ClientMessage, CloseReason> {
     if !msg.is_object() {
         return Err(decode_error());
     }

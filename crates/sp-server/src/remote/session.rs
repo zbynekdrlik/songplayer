@@ -141,7 +141,10 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
             }
             incoming = read.next() => {
                 let step = match incoming {
-                    Some(Ok(Message::Text(text))) => session.on_text(&text).await,
+                    Some(Ok(Message::Text(text))) => match serde_json::from_str(&text) {
+                        Ok(msg) => session.on_message(msg).await,
+                        Err(_) => Step::Close(protocol::decode_error()),
+                    },
                     Some(Ok(Message::Binary(_))) => Step::Close(protocol::decode_error()),
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(_)) => continue, // ping / pong / raw frame
@@ -221,9 +224,9 @@ pub(crate) struct Session<'a> {
 }
 
 impl Session<'_> {
-    /// Act on one text frame.
-    pub(crate) async fn on_text(&mut self, text: &str) -> Step {
-        let msg = match protocol::parse_client_message(text) {
+    /// Act on one decoded client message.
+    pub(crate) async fn on_message(&mut self, msg: Value) -> Step {
+        let msg = match protocol::parse_client_message(msg) {
             Ok(msg) => msg,
             Err(reason) => return Step::Close(reason),
         };

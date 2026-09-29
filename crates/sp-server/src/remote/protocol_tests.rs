@@ -128,6 +128,13 @@ fn check_identify_closes_4010_on_another_rpc_version_after_the_auth() {
     assert_eq!(err.code, 4009);
 }
 
+/// One JSON message parsed. `parse_client_message` takes the DECODED value
+/// (#221 L2b: the session decodes the frame first); a frame that does not
+/// decode is a session-level test (`session_tests.rs`).
+fn parse(text: &str) -> Result<ClientMessage, CloseReason> {
+    parse_client_message(serde_json::from_str(text).unwrap())
+}
+
 #[test]
 fn subprotocol_negotiation_echoes_json_and_refuses_msgpack_only() {
     assert_eq!(negotiate_subprotocol(None), Subprotocol::Default);
@@ -148,10 +155,8 @@ fn subprotocol_negotiation_echoes_json_and_refuses_msgpack_only() {
 
 #[test]
 fn parse_identify_with_and_without_subscriptions() {
-    let m = parse_client_message(
-        r#"{"op":1,"d":{"rpcVersion":1,"authentication":"abc","eventSubscriptions":4}}"#,
-    )
-    .unwrap();
+    let m = parse(r#"{"op":1,"d":{"rpcVersion":1,"authentication":"abc","eventSubscriptions":4}}"#)
+        .unwrap();
     assert_eq!(
         m,
         ClientMessage::Identify {
@@ -160,7 +165,7 @@ fn parse_identify_with_and_without_subscriptions() {
             event_subscriptions: 4,
         }
     );
-    let m = parse_client_message(r#"{"op":1,"d":{"rpcVersion":1}}"#).unwrap();
+    let m = parse(r#"{"op":1,"d":{"rpcVersion":1}}"#).unwrap();
     assert_eq!(
         m,
         ClientMessage::Identify {
@@ -174,13 +179,13 @@ fn parse_identify_with_and_without_subscriptions() {
 #[test]
 fn parse_reidentify_keeps_the_subscriptions_when_none_are_named() {
     assert_eq!(
-        parse_client_message(r#"{"op":3,"d":{"eventSubscriptions":65536}}"#).unwrap(),
+        parse(r#"{"op":3,"d":{"eventSubscriptions":65536}}"#).unwrap(),
         ClientMessage::Reidentify {
             event_subscriptions: Some(65536)
         }
     );
     assert_eq!(
-        parse_client_message(r#"{"op":3,"d":{}}"#).unwrap(),
+        parse(r#"{"op":3,"d":{}}"#).unwrap(),
         ClientMessage::Reidentify {
             event_subscriptions: None
         }
@@ -189,7 +194,7 @@ fn parse_reidentify_keeps_the_subscriptions_when_none_are_named() {
 
 #[test]
 fn parse_request_and_batch() {
-    let m = parse_client_message(
+    let m = parse(
         r#"{"op":6,"d":{"requestType":"SetCurrentProgramScene","requestId":"r1","requestData":{"sceneName":"sp-fast"}}}"#,
     )
     .unwrap();
@@ -201,7 +206,7 @@ fn parse_request_and_batch() {
             request_data: Some(json!({ "sceneName": "sp-fast" })),
         })
     );
-    let m = parse_client_message(
+    let m = parse(
         r#"{"op":8,"d":{"requestId":"b1","haltOnFailure":true,"executionType":0,"requests":[{"requestType":"GetVersion"},{"requestId":"x"}]}}"#,
     )
     .unwrap();
@@ -224,7 +229,7 @@ fn parse_request_and_batch() {
             ],
         }
     );
-    let m = parse_client_message(r#"{"op":8,"d":{"requestId":"b2","requests":[]}}"#).unwrap();
+    let m = parse(r#"{"op":8,"d":{"requestId":"b2","requests":[]}}"#).unwrap();
     assert_eq!(
         m,
         ClientMessage::Batch {
@@ -237,8 +242,7 @@ fn parse_request_and_batch() {
 
 #[test]
 fn malformed_messages_map_to_obs_close_codes() {
-    let code = |text: &str| parse_client_message(text).unwrap_err().code;
-    assert_eq!(code("not json"), 4002);
+    let code = |text: &str| parse(text).unwrap_err().code;
     assert_eq!(code("[1,2]"), 4002);
     assert_eq!(code(r#"{"d":{}}"#), 4006);
     assert_eq!(code(r#"{"op":"6","d":{}}"#), 4006);
