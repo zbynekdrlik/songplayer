@@ -836,13 +836,20 @@ mod tests {
         assert_eq!(cache, Some(None));
     }
 
-    /// Sanity-checks the dedup / ad-lib / hype-intro instructions are present
-    /// in the scraped-lyrics prompt. Catches accidental prompt regressions that
-    /// would silently fall back to description-style behavior (which on genius
-    /// input produces no cleanup — confirmed in production on id=233 Saints,
-    /// 2026-05-11).
+    /// Sanity-checks the keep-repeats / ad-lib / hype-intro instructions are
+    /// present in the scraped-lyrics prompt. Catches accidental prompt
+    /// regressions that would silently fall back to description-style behavior
+    /// (which on genius input produces no cleanup — confirmed in production on
+    /// id=233 Saints, 2026-05-11).
+    ///
+    /// #144: the prompt used to DEDUPE consecutive identical lines for the
+    /// deleted v20 `text_reference_merge` chorus projection. mtl times exactly
+    /// the lines it is given, so a chorus written once leaves its sung repeats
+    /// uncovered — measured on the box: 16 of 60 cleaned Genius texts fail the
+    /// two-way gate on a sung stretch the text holds fewer times. The prompt
+    /// must keep every repeat and never ask for a dedupe.
     #[test]
-    fn scraped_lyrics_prompt_mentions_dedup_adlib_intro_rules() {
+    fn scraped_lyrics_prompt_mentions_keep_repeats_adlib_intro_rules() {
         let (system, user) = build_scraped_lyrics_cleanup_prompt(
             "Saints",
             "planetboom",
@@ -852,15 +859,13 @@ mod tests {
             system.is_empty(),
             "soft-framing must use empty system prompt"
         );
-        // Dedup must be explicit; mere "duplicate" is not enough — test for the
-        // distinguishing word "consecutive" so paraphrases that lose the rule fail.
         assert!(
-            user.to_lowercase().contains("dedupe") || user.to_lowercase().contains("dedup"),
-            "scraped-lyrics prompt must instruct dedup of consecutive identical lines"
+            !user.to_lowercase().contains("dedup"),
+            "scraped-lyrics prompt must never ask to dedupe repeated lines (#144)"
         );
         assert!(
-            user.to_lowercase().contains("consecutive"),
-            "scraped-lyrics prompt must mention 'consecutive' (non-consecutive repeats kept)"
+            user.to_lowercase().contains("keep every repeat"),
+            "scraped-lyrics prompt must tell Claude to keep every repeated line (#144)"
         );
         // Ad-libs / vocalizations.
         assert!(

@@ -171,7 +171,7 @@ fn the_cleanup_cache_is_keyed_by_the_candidate() {
     let lrclib = title_cand(TitleProvider::Lrclib, "35094059", false);
     assert_eq!(
         cleanup_cache_name("yt1", &lrclib),
-        "yt1_title_lrclib_35094059_cleaned_v2.json"
+        "yt1_title_lrclib_35094059_cleaned_v3.json"
     );
     let genius = title_cand(
         TitleProvider::Genius,
@@ -180,12 +180,12 @@ fn the_cleanup_cache_is_keyed_by_the_candidate() {
     );
     assert_eq!(
         cleanup_cache_name("yt1", &genius),
-        "yt1_title_genius_Elevation-worship-jesus-be-the-name-lyrics_cleaned_v2.json"
+        "yt1_title_genius_Elevation-worship-jesus-be-the-name-lyrics_cleaned_v3.json"
     );
     let odd = title_cand(TitleProvider::Genius, "https://x/a?b=c&d_e", false);
     assert_eq!(
         cleanup_cache_name("yt1", &odd),
-        "yt1_title_genius_abcde_cleaned_v2.json"
+        "yt1_title_genius_abcde_cleaned_v3.json"
     );
 }
 
@@ -392,7 +392,7 @@ async fn a_genius_page_is_cleaned_into_a_text_candidate() {
     assert!(!found.has_timing);
     assert!(
         dir.path()
-            .join("yt158_title_genius_elevation-lyrics_cleaned_v2.json")
+            .join("yt158_title_genius_elevation-lyrics_cleaned_v3.json")
             .exists()
     );
 }

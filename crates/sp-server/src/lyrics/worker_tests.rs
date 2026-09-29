@@ -726,8 +726,9 @@ fn gather_uses_lyrics_ovh_primary_with_genius_fallback() {
         "text_candidate.rs must call description_provider::clean_lyrics_via_claude"
     );
     assert!(
-        src.contains("_lrclib_cleaned_v2.json"),
-        "gather.rs must write the lrclib cleanup cache to {{youtube_id}}_lrclib_cleaned_v2.json"
+        src.contains("_lrclib_cleaned_v3.json"),
+        "gather.rs must write the lrclib cleanup cache to {{youtube_id}}_lrclib_cleaned_v3.json \
+         (#144: v3 = the prompt that keeps every repeat)"
     );
     assert!(
         helper.contains("CleanupMode::ScrapedLyrics"),
