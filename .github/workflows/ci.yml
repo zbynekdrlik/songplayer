@@ -790,9 +790,10 @@ jobs:
       && needs.gate.result == 'success'
       && needs.build-tauri.result == 'success'
     runs-on: [self-hosted, windows, resolume]
-    # #221 L4a: the rig-lease wait is bounded at 60 min, the deploy takes
-    # ~2-3 min; this bounds the whole job, including a lease server that
-    # answers too slowly for its per-read timeout (the old default was 360).
+    # #221 L4a: the rig-lease wait is bounded at 60 min (and its step at 70,
+    # which cuts a trickling lease server before "Deploy SongPlayer"); the
+    # deploy takes ~2-3 min. This job bound is the backstop (the old default
+    # was 360).
     timeout-minutes: 90
     # #198 item 2: publish the version the running SongPlayer actually reports
     # after this deploy (verified == the checked-out VERSION here), so the E2E
