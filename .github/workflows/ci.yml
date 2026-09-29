@@ -702,7 +702,7 @@ jobs:
   gate:
     name: Gate
     runs-on: ubuntu-latest
-    if: always()
+    if: "!cancelled()"
     needs:
       - version-check
       - dev-version-check
@@ -792,7 +792,7 @@ jobs:
     name: Deploy to win-resolume
     needs: [gate, build-tauri, build-wasm]
     if: >-
-      always()
+      !cancelled()
       && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.gate.result == 'success'
@@ -1078,7 +1078,7 @@ jobs:
   e2e-resolume:
     name: E2E Tests (win-resolume)
     needs: [deploy-resolume]
-    if: always() && needs.deploy-resolume.result == 'success'
+    if: "!cancelled() && needs.deploy-resolume.result == 'success'"
     runs-on: [self-hosted, windows, resolume]
     steps:
       - uses: actions/checkout@v4
