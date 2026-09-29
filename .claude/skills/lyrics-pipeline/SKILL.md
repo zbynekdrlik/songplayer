@@ -33,7 +33,7 @@ chunked-transcription / qwen3 / autosub regimes were already gone. The pipeline
 is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
 (Gemini g35t):
 
-0. **Text gathering** (`gather.rs::gather_sources_impl`) — unchanged, all
+0. **Text gathering** (`gather.rs::gather_sources_impl`) — all
    best-effort: manual **yt_subs** captions → **LRCLIB** → **lyrics.ovh**
    (Genius is the fallback when lyrics.ovh misses, both labelled `"genius"`)
    → **Spotify** (`spotify_track_id`, LINE_SYNCED) → operator
@@ -42,34 +42,67 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
    `claude_merge::best_authoritative_candidate` /
    `priority_with_timing` (override=6; timed spotify/lrclib=5, timed
    yt_subs=4; text description=3, text lrclib=2, text genius=1; else=0).
+   - **Captions keep their sung lines (#144):** `youtube_subs::parse_json3`
+     splits a caption event's `\n` lines into separate text lines (each with
+     the event's own span — never divided by hand); every consumer is
+     text-only (mtl re-times them), so no ~65-char double lines reach the wall.
+   - Timed / Claude-cleaned candidates are built by `text_candidate.rs`
+     (shared with the title search).
+
+0b. **One g35t transcript per song (#144,
+   `worker_text_tiers::run_text_tiers`).** Right after isolation the vocal is
+   transcribed ONCE (`transcribe_vocal`) and reused by the title search, the
+   gate and the base tier (before: after mtl, and again in the base tier on a
+   gate fail). A failed transcription defers the song (`g35t_error`) before
+   any mtl run.
+
+0c. **Title search for covers (#144, `title_search.rs`).** When no
+   artist+title lookup found the song (no `lrclib`/`genius`/`override`/
+   `tier1:spotify` candidate — a cover's metadata names the COVER artist),
+   LRCLIB `/api/search?track_name=` (±15 s of the song, `lrclib_search.rs`)
+   and Genius by the title alone (first 3 song pages) are scored against the
+   transcript by multiset word overlap (Dice); the best ≥ 0.50
+   (`MIN_TITLE_MATCH_SCORE`, measured: own lyric 0.664–0.951, other songs
+   ≤ 0.379) joins the candidates as `lrclib`/`genius`, then mtl + the gate
+   verify it. Never an LLM guess of the original artist. Record:
+   `{yt}_title_search_audit.json` (every candidate, its score, the choice).
+   A cover LONGER/SHORTER than the original by > 15 s is found only through
+   Genius (158: Elevation's LRCLIB records are 539 s, the cover 484 s).
 
 1. **★ tier — v21 reference stage** (`worker_reference::run_mtl_reference_stage`
    → `orchestrator::run_reference_stage`). For any song with vocals + a text
    candidate (≥4 lines): `mtl_aligner::align` (production wrapper around
    `eval/lyrics/aligners/lyrics_alignment_mtl/run.py`, MTL+BDR — 31.6%
    gold-norm, best measured) force-aligns the best candidate's lines to the
-   isolated vocals, verified against an independent `g35t_client::
-   transcribe_words` (Gemini 3.5 Transcribe) transcript through
-   `reference_gate::evaluate` (whole-song sanity `|median signed Δstart| ≤
-   400ms` — catches mtl's wrong-repetition failure mode — AND agreement ≥70%
-   of matched lines within 400ms, ≥60% matched). **PASS** → mtl line timings
+   isolated vocals, verified against the song's one independent Gemini 3.5
+   Transcribe transcript through the TWO-WAY `reference_gate::evaluate`:
+   reference → transcript (≥60% of lines matched, whole-song sanity
+   `|median signed Δstart| ≤ 400ms` — catches mtl's wrong-repetition failure
+   mode — AND agreement ≥70% of matched lines within 400ms) and, since #144,
+   transcript → reference (`sung_coverage.rs`: an order-preserving LCS word
+   alignment; the text must cover ≥ 0.55 of the sung words and leave no sung
+   stretch > 25 s uncovered, else `Fail{Coverage}` — a partial description
+   lyric no longer ships as ★ with lines held 48 s over other singing;
+   thresholds measured on #144 comment 5899043518). **PASS** → mtl line timings
    ship directly (`words: None`), `lyrics_source =
    "<candidate.source>+mtl@rev1/g35t-ok"`, `lyrics_alignment_model =
    ALIGNMENT_MODEL_MTL_REV1`, `videos.lyrics_reference = 1` (wall ★).
-   **FAIL/ERROR** → `videos.lyrics_reference = 0`, the gate decision lands in
-   `{youtube_id}_alignment_audit.json`, and the song falls through to tier 2.
-   Byte-for-byte UNCHANGED from v21 — do NOT degrade this path.
+   **FAIL/ERROR** → `videos.lyrics_reference = 0` and the song falls through
+   to tier 2. Every PASS/FAIL/ERROR writes `{youtube_id}_alignment_audit.json`
+   (with `sung_words` / `sung_covered_frac` / `max_uncovered_sung_ms`, #144).
+   Do NOT degrade this path.
    - Skip conditions (info-logged, fall to tier 2): mtl tooling absent
      (`MtlConfig::is_available()`, WARNed once at worker start), no vocal WAV,
-     no text candidate, or candidate < 4 lines.
+     no text candidate, candidate < 4 lines, or an empty transcript.
    - Injection seam: `orchestrator::ReferenceStageBackend` (`mtl_align` +
      `asr_transcribe`); production wires `RealReferenceStageBackend`, tests
      inject a fake — never a real subprocess/HTTP call in a unit test.
 
 2. **base tier — g35t transcript** (`worker_g35t::run_g35t_transcript_branch`
    → `g35t_transcript::words_to_lines`). The SOLE fallback for every song the
-   ★ tier does not ship (no usable text, gate FAIL, mtl skip/error):
-   `g35t_client::transcribe_words` transcribes the isolated vocals, and the
+   ★ tier does not ship (no usable text, gate FAIL, mtl skip/error): the
+   song's one transcript (it transcribes only a song with no isolated vocal —
+   the #171 full-mix fallback — or no key), and the
    words are grouped into LED-wall lines by a deterministic silence-gap split
    (salvaged from the old asr_path, re-typed) + `line_splitter::
    split_lyrics_lines` + the monotonic/min-duration sanitizer. Ships
