@@ -1,15 +1,36 @@
 //! Gemini AI metadata provider.
+//!
+//! #136: the setting `gemini_api_key` is a comma-separated key LIST (the
+//! lyrics and dabing paths rotate over it). The provider takes the split
+//! list (`chain::provider_chain` splits it with
+//! `gemini_api::gemini_keys_from_setting`) and sends ONE key per attempt in
+//! the `x-goog-api-key` header. Before #136 it sent the whole CSV as one key,
+//! Google refused every call in ~40 ms, and every new video fell back to the
+//! title parser.
+//!
+//! Rotation (`GeminiProvider::post_rotating`) follows the shared Gemini
+//! key-list contract (`crate::gemini_api::key_verdict`, the same rules as
+//! the lyrics transcription): a 429 or a key refusal moves to the NEXT key;
+//! a 5xx retries the SAME key after each `gemini_api::RETRY_BACKOFFS` pause;
+//! anything else stops at once, since the same request fails the same way on
+//! every key. When every key failed, the error names the last key's INDEX,
+//! its HTTP status and a short body excerpt with every configured key
+//! redacted — never a key. It is [`MetadataError::RateLimited`] when any key
+//! was rate-limited (the reprocess worker then cools down), else
+//! [`MetadataError::ApiError`]. Logs carry the key index, the status and the
+//! latency, never a key or a header.
 
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::Value;
 use sp_core::metadata::{MetadataSource, VideoMetadata};
 use std::sync::LazyLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::parser::shorten_artist;
 use super::sanitize::strip_emoji;
 use super::{MetadataError, MetadataProvider};
+use crate::gemini_api::{GEMINI_API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, send_on_key};
 
 static JSON_FENCE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"```(?:json)?\s*([\s\S]*?)\s*```").expect("compile"));
@@ -17,30 +38,70 @@ static JSON_FENCE_RE: LazyLock<Regex> =
 static JSON_OBJECT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\{[^{}]*\}").expect("compile"));
 
+/// Bound of one request. A grounded answer takes seconds; without a bound a
+/// stalled connection would hang the download worker and the probe route.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// Characters of an error body kept in an error text / log line.
+const BODY_EXCERPT_CHARS: usize = 200;
+
 /// Google Gemini API metadata provider.
 pub struct GeminiProvider {
-    api_key: String,
+    /// The `gemini_api_key` list, tried in order. Never logged.
+    keys: Vec<String>,
     model: String,
+    /// `https://generativelanguage.googleapis.com` in production; a mock
+    /// server's URI in tests.
+    api_root: String,
+    /// Pauses before each same-key retry of a 5xx: `gemini_api::RETRY_BACKOFFS`
+    /// (milliseconds in tests).
+    retry_backoffs: Vec<Duration>,
     client: reqwest::Client,
 }
 
+/// One key's outcome in `post_rotating`.
+enum KeyAttempt {
+    /// A 2xx answer.
+    Answered(Value),
+    /// `KeyVerdict::NextKey`: `last` describes the refusal (index, status,
+    /// redacted excerpt).
+    NextKey { rate_limited: bool, last: String },
+    /// `Stop`, or a 5xx after every retry: every key would fail the same way.
+    Stop(String),
+}
+
 impl GeminiProvider {
-    /// Create a new Gemini provider.
-    pub fn new(api_key: String, model: String) -> Self {
+    /// A provider on Google's API root. `keys` is the split `gemini_api_key`
+    /// list (one key per attempt).
+    pub fn new(keys: Vec<String>, model: String) -> Self {
+        Self::with_api_root(keys, model, GEMINI_API_ROOT)
+    }
+
+    /// [`GeminiProvider::new`] with the API root injected (a mock server in
+    /// tests; `chain::provider_chain_at`).
+    pub fn with_api_root(keys: Vec<String>, model: String, api_root: &str) -> Self {
         Self {
-            api_key,
+            keys,
             model,
+            api_root: api_root.trim_end_matches('/').to_string(),
+            retry_backoffs: RETRY_BACKOFFS.to_vec(),
             client: reqwest::Client::new(),
         }
     }
 
-    /// Build the API endpoint URL. The API key is sent via the
-    /// `x-goog-api-key` header, not as a query parameter.
-    #[cfg_attr(test, mutants::skip)]
+    /// Tests: short same-key retry pauses instead of 2 / 4 / 8 / 16 s.
+    #[cfg(test)]
+    fn with_retry_backoffs(mut self, backoffs: Vec<Duration>) -> Self {
+        self.retry_backoffs = backoffs;
+        self
+    }
+
+    /// The `generateContent` endpoint. The key goes in the `x-goog-api-key`
+    /// header, never in the URL.
     fn endpoint(&self) -> String {
         format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            self.model
+            "{}/v1beta/models/{}:generateContent",
+            self.api_root, self.model
         )
     }
 
@@ -166,63 +227,165 @@ impl GeminiProvider {
         })
     }
 
-    /// Second pass: clean the extracted song/artist for display.
-    #[cfg_attr(test, mutants::skip)]
-    async fn clean_for_display(
+    /// POST `body` with one key per attempt until a key gets a 2xx answer
+    /// (module doc: which statuses move to the next key). Returns the index
+    /// of the key that answered and the answer's JSON.
+    async fn post_rotating(
         &self,
-        song: &str,
-        artist: &str,
-    ) -> Result<(String, String), MetadataError> {
-        let body = self.build_clean_body(song, artist);
-        let url = self.endpoint();
-
-        let resp = self
-            .client
-            .post(&url)
-            .header("x-goog-api-key", &self.api_key)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| MetadataError::ApiError(e.to_string()))?;
-
-        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            // If rate-limited on the cleaning pass, just return the uncleaned values
-            tracing::debug!("clean_for_display rate-limited, returning uncleaned");
-            return Ok((song.to_string(), artist.to_string()));
+        what: &str,
+        body: &Value,
+    ) -> Result<(usize, Value), MetadataError> {
+        if self.keys.is_empty() {
+            return Err(MetadataError::ApiError(format!(
+                "gemini {what}: no API key configured (setting gemini_api_key is empty)"
+            )));
         }
-
-        if !resp.status().is_success() {
-            return Ok((song.to_string(), artist.to_string()));
-        }
-
-        let response_body: Value = resp
-            .json()
-            .await
-            .map_err(|e| MetadataError::InvalidResponse(e.to_string()))?;
-
-        let text = response_body
-            .pointer("/candidates/0/content/parts/0/text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        if let Ok(json_str) = extract_json(text) {
-            if let Ok(parsed) = serde_json::from_str::<Value>(&json_str) {
-                let clean_song = parsed
-                    .get("song")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| song.to_string());
-                let clean_artist = parsed
-                    .get("artist")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.trim().to_string())
-                    .unwrap_or_else(|| artist.to_string());
-                return Ok((clean_song, clean_artist));
+        let total = self.keys.len();
+        let mut any_rate_limited = false;
+        let mut last = String::new();
+        for (index, key) in self.keys.iter().enumerate() {
+            let n = index + 1;
+            match self.attempt_key(what, body, key, n, total).await? {
+                KeyAttempt::Answered(answer) => return Ok((index, answer)),
+                KeyAttempt::NextKey {
+                    rate_limited,
+                    last: refusal,
+                } => {
+                    any_rate_limited |= rate_limited;
+                    last = refusal;
+                }
+                KeyAttempt::Stop(reason) => {
+                    return Err(MetadataError::ApiError(format!("gemini {what}: {reason}")));
+                }
             }
         }
+        let detail = format!("gemini {what}: all {total} keys failed; last {last}");
+        Err(if any_rate_limited {
+            MetadataError::RateLimited(detail)
+        } else {
+            MetadataError::ApiError(detail)
+        })
+    }
 
-        Ok((song.to_string(), artist.to_string()))
+    /// One key (`n` of `total`) through the shared `gemini_api::send_on_key`
+    /// (a 5xx retried on the same key after each `retry_backoffs` pause). A
+    /// transport failure is not about the key: it ends the whole call.
+    async fn attempt_key(
+        &self,
+        what: &str,
+        body: &Value,
+        key: &str,
+        n: usize,
+        total: usize,
+    ) -> Result<KeyAttempt, MetadataError> {
+        let started = Instant::now();
+        let reply = send_on_key(what, &self.retry_backoffs, || {
+            self.client
+                .post(self.endpoint())
+                .header("x-goog-api-key", key)
+                .timeout(REQUEST_TIMEOUT)
+                .json(body)
+        })
+        .await
+        .map_err(|e| {
+            MetadataError::ApiError(format!(
+                "gemini {what}: key {n} of {total}: request failed: {}",
+                self.excerpt(&e.to_string())
+            ))
+        })?;
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        let (verdict, status, text) = match reply {
+            KeyReply::Answered(resp) => {
+                let status = resp.status().as_u16();
+                tracing::info!(
+                    what,
+                    key = n,
+                    keys = total,
+                    status,
+                    elapsed_ms,
+                    "gemini answered"
+                );
+                let answer = resp
+                    .json::<Value>()
+                    .await
+                    .map_err(|e| MetadataError::InvalidResponse(format!("gemini {what}: {e}")))?;
+                return Ok(KeyAttempt::Answered(answer));
+            }
+            KeyReply::Refused {
+                verdict,
+                status,
+                body,
+            } => (verdict, status, body),
+        };
+        let excerpt = self.excerpt(&text);
+        tracing::warn!(
+            what, key = n, keys = total, status, elapsed_ms, ?verdict, body = %excerpt,
+            "gemini refused the request"
+        );
+        let last = format!("key {n} of {total}: HTTP {status}: {excerpt}");
+        Ok(match verdict {
+            KeyVerdict::NextKey { rate_limited } => KeyAttempt::NextKey { rate_limited, last },
+            // A 5xx after every same-key pause, or anything else: every key
+            // would fail the same way.
+            KeyVerdict::RetrySameKey | KeyVerdict::Stop => KeyAttempt::Stop(last),
+        })
+    }
+
+    /// Second pass: clean the extracted song/artist for display, on the key
+    /// that answered the first pass. Any failure keeps the first pass's
+    /// values (the clean-up is cosmetic, the first answer already names the
+    /// song).
+    async fn clean_for_display(
+        &self,
+        key_index: usize,
+        song: &str,
+        artist: &str,
+    ) -> (String, String) {
+        let uncleaned = (song.to_string(), artist.to_string());
+        let body = self.build_clean_body(song, artist);
+        let resp = self
+            .client
+            .post(self.endpoint())
+            .header("x-goog-api-key", &self.keys[key_index])
+            .timeout(REQUEST_TIMEOUT)
+            .json(&body)
+            .send()
+            .await;
+        let resp = match resp {
+            Ok(r) if r.status().is_success() => r,
+            Ok(r) => {
+                tracing::debug!(
+                    status = r.status().as_u16(),
+                    "clean_for_display refused, keeping uncleaned"
+                );
+                return uncleaned;
+            }
+            Err(e) => {
+                tracing::debug!(error = %self.excerpt(&e.to_string()), "clean_for_display failed, keeping uncleaned");
+                return uncleaned;
+            }
+        };
+        let Ok(answer) = resp.json::<Value>().await else {
+            return uncleaned;
+        };
+        let Some(parsed) = response_text(&answer)
+            .and_then(|text| extract_json(&text).ok())
+            .and_then(|json| serde_json::from_str::<Value>(&json).ok())
+        else {
+            return uncleaned;
+        };
+        let clean_song = parsed
+            .get("song")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(uncleaned.0);
+        let clean_artist = parsed
+            .get("artist")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .unwrap_or(uncleaned.1);
+        (clean_song, clean_artist)
     }
 
     /// Parse a Gemini API response into `VideoMetadata`.
@@ -258,6 +421,45 @@ impl GeminiProvider {
             gemini_failed: false,
         })
     }
+
+    /// `text` with every configured key replaced by `<key>`: an error text
+    /// or a log line must never carry a key, whatever the server echoes.
+    /// Longest key first, so a key that contains another one is replaced
+    /// whole.
+    fn redact(&self, text: &str) -> String {
+        let mut keys: Vec<&str> = self
+            .keys
+            .iter()
+            .map(String::as_str)
+            .filter(|k| !k.is_empty())
+            .collect();
+        keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
+        keys.into_iter()
+            .fold(text.to_string(), |acc, k| acc.replace(k, "<key>"))
+    }
+
+    /// `body` on one line, redacted, cut to [`BODY_EXCERPT_CHARS`] characters
+    /// (redacted BEFORE the cut, so no key prefix survives at the edge).
+    fn excerpt(&self, body: &str) -> String {
+        let one_line = body.split_whitespace().collect::<Vec<_>>().join(" ");
+        self.redact(&one_line)
+            .chars()
+            .take(BODY_EXCERPT_CHARS)
+            .collect()
+    }
+}
+
+/// The model's answer text: every text part of the first candidate that is
+/// not a thought, joined. A grounded answer may arrive split over several
+/// parts; `None` when there is no text at all.
+fn response_text(answer: &Value) -> Option<String> {
+    let parts = answer.pointer("/candidates/0/content/parts")?.as_array()?;
+    let text: String = parts
+        .iter()
+        .filter(|p| p.get("thought").and_then(Value::as_bool) != Some(true))
+        .filter_map(|p| p.get("text").and_then(Value::as_str))
+        .collect();
+    (!text.trim().is_empty()).then_some(text)
 }
 
 /// Extract JSON from a response that may contain markdown fences or mixed text.
@@ -291,71 +493,22 @@ fn extract_json(text: &str) -> Result<String, MetadataError> {
 
 #[async_trait]
 impl MetadataProvider for GeminiProvider {
-    #[cfg_attr(test, mutants::skip)]
     async fn extract(&self, video_id: &str, title: &str) -> Result<VideoMetadata, MetadataError> {
         let body = self.build_request_body(video_id, title);
-        let url = self.endpoint();
-
-        let mut last_err = MetadataError::ApiError("no attempts made".into());
-
-        // Up to 3 attempts (initial + 2 retries on 429)
-        for attempt in 0..3 {
-            if attempt > 0 {
-                let delay = Duration::from_millis(1000 * 2u64.pow(attempt as u32));
-                tokio::time::sleep(delay).await;
-            }
-
-            let resp = self
-                .client
-                .post(&url)
-                .header("x-goog-api-key", &self.api_key)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| MetadataError::ApiError(e.to_string()))?;
-
-            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                last_err = MetadataError::RateLimited;
-                continue;
-            }
-
-            if !resp.status().is_success() {
-                return Err(MetadataError::ApiError(format!("HTTP {}", resp.status())));
-            }
-
-            let response_body: Value = resp
-                .json()
-                .await
-                .map_err(|e| MetadataError::InvalidResponse(e.to_string()))?;
-
-            let text = response_body
-                .pointer("/candidates/0/content/parts/0/text")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| {
-                    MetadataError::InvalidResponse(
-                        "missing candidates[0].content.parts[0].text".into(),
-                    )
-                })?;
-
-            let mut meta = Self::parse_response(text)?;
-
-            // Second pass: clean for display (strip collabs, subtitles)
-            if !meta.song.is_empty() {
-                match self.clean_for_display(&meta.song, &meta.artist).await {
-                    Ok((clean_song, clean_artist)) => {
-                        meta.song = strip_emoji(&clean_song);
-                        meta.artist = strip_emoji(&clean_artist);
-                    }
-                    Err(e) => {
-                        tracing::debug!("clean_for_display failed, keeping raw: {e}");
-                    }
-                }
-            }
-
-            return Ok(meta);
-        }
-
-        Err(last_err)
+        let (key_index, answer) = self.post_rotating("search", &body).await?;
+        let text = response_text(&answer).ok_or_else(|| {
+            MetadataError::InvalidResponse(
+                "gemini search: no text in candidates[0].content.parts".into(),
+            )
+        })?;
+        let mut meta = Self::parse_response(&text)?;
+        // Second pass: clean for display (strip collabs, subtitles).
+        let (song, artist) = self
+            .clean_for_display(key_index, &meta.song, &meta.artist)
+            .await;
+        meta.song = strip_emoji(&song);
+        meta.artist = strip_emoji(&artist);
+        Ok(meta)
     }
 
     fn name(&self) -> &str {
@@ -452,7 +605,7 @@ mod tests {
 
     #[test]
     fn build_request_body_contains_worship_rules() {
-        let provider = GeminiProvider::new("test-key".into(), "gemini-2.5-flash".into());
+        let provider = GeminiProvider::new(vec!["test-key".into()], "gemini-2.5-flash".into());
         let body = provider.build_request_body("dQw4w9WgXcQ", "Test Title");
         let prompt = body["contents"][0]["parts"][0]["text"].as_str().unwrap();
         assert!(
@@ -493,7 +646,7 @@ mod tests {
 
     #[test]
     fn build_request_body_has_google_search_tool() {
-        let provider = GeminiProvider::new("test-key".into(), "gemini-2.5-flash".into());
+        let provider = GeminiProvider::new(vec!["test-key".into()], "gemini-2.5-flash".into());
         let body = provider.build_request_body("test", "Test");
         assert!(body["tools"][0]["google_search"].is_object());
     }
@@ -553,13 +706,13 @@ mod tests {
 
     #[tokio::test]
     async fn provider_constructs_and_names() {
-        // The retry logic calls the real Gemini endpoint which we cannot
-        // mock without DI for the URL. We verify the critical parse/extract
-        // paths via the unit tests above. A full retry integration test would
-        // need a test HTTP server with the URL injected into GeminiProvider.
-        //
-        // Verify that the provider at least constructs correctly:
-        let _provider = GeminiProvider::new("test-key".into(), "test-model".into());
-        assert_eq!(_provider.name(), "gemini");
+        // The key rotation + HTTP paths run against a mock server in
+        // `gemini_tests_keys.rs` (#136: `GeminiProvider::with_api_root`).
+        let provider = GeminiProvider::new(vec!["test-key".into()], "test-model".into());
+        assert_eq!(provider.name(), "gemini");
     }
 }
+
+#[cfg(test)]
+#[path = "gemini_tests_keys.rs"]
+mod tests_keys;

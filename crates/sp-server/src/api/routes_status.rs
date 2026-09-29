@@ -8,9 +8,27 @@
 //! - `active_playlist_ids`: the playlists on air
 //!   (`program_on_air::on_air_set`: SP-program's playlist ∪ the one cg OBS
 //!   was told to show), ascending — the set the playback authority plays.
+//!
+//! #136: `HeavyContainmentStatus` lives here too (re-exported by `routes`),
+//! which made room in `routes.rs` for `status.metadata`.
+
+use serde::{Deserialize, Serialize};
 
 use crate::playback::program_bus::ProgramBus;
 use crate::playback::program_on_air::{on_air_set, program_scene_name};
+
+/// #203: the containment applied to the heavy children, surfaced on `/status` so
+/// the dashboard health + the next box measurement can read the effective cap.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct HeavyContainmentStatus {
+    /// Job Object CPU hard-cap, percent of TOTAL machine CPU time.
+    pub cap_pct: u8,
+    /// Job Object affinity mask (lowercase hex, no `0x`) — the cores the heavy
+    /// children may run on.
+    pub affinity_mask: String,
+    /// SongPlayer's own scheduling priority class (`high` on the Windows box).
+    pub priority_class: String,
+}
 
 /// `(active_scene, active_playlist_ids)` of `/api/v1/status` (module doc).
 pub fn on_air_fields(bus: &ProgramBus) -> (Option<String>, Vec<i64>) {

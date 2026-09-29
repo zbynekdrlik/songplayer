@@ -5,6 +5,7 @@ pub mod dabing; // #180 dubbing D1
 pub mod live;
 pub mod lyrics;
 pub mod lyrics_catalog;
+pub mod metadata; // #136: status.metadata + POST /api/v1/metadata/probe
 pub mod mix; // #184 round G — the ONE live mixer console
 pub mod mix_apply; // #184 live-first mix apply seam
 pub mod preview;
@@ -122,6 +123,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         )
         // Status
         .route("/api/v1/status", axum::routing::get(routes::status))
+        // #136: run each metadata provider of the production chain on one video
+        .route(
+            "/api/v1/metadata/probe",
+            axum::routing::post(metadata::probe),
+        )
         // Resolume hosts
         .route(
             "/api/v1/resolume/hosts",

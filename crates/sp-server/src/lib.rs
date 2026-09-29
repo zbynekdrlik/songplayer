@@ -9,6 +9,7 @@ pub mod downloader;
 mod engine_command;
 mod engine_dispatch;
 pub use engine_command::EngineCommand;
+pub mod gemini_api; // #136: the Gemini key-list contract every Gemini caller shares
 pub mod lyrics;
 pub mod mdns;
 pub mod metadata;
@@ -88,6 +89,9 @@ pub struct AppState {
     /// LAN `sp.local` advertisement status (#51) — written by the mDNS task,
     /// read by `/api/v1/status` so the dashboard shows the offline-LAN URL.
     pub lan_status: mdns::LanStatusHandle,
+    /// #136: the ONE metadata provider chain — the same `Arc` the download and
+    /// reprocess workers use; `status.metadata` + the probe route read it.
+    pub metadata_chain: Arc<metadata::ProviderChain>,
 }
 
 /// Status of external tool availability.
@@ -136,11 +140,11 @@ impl Default for ServerConfig {
 /// 1. SQLite pool + migrations
 /// 2. Broadcast channels for events
 /// 3. Shared state (incl. tool_paths + sync channel)
-/// 4. Gemini settings (for download + reprocess workers)
+/// 4. The metadata provider chain (download + reprocess workers + API)
 /// 5. Tools manager (yt-dlp + FFmpeg) + download worker
 /// 6. Sync handler (playlist sync worker)
 /// 7. OBS WebSocket client
-/// 8. Reprocess worker (with Gemini provider)
+/// 8. Reprocess worker (on the same metadata chain)
 /// 9. Resolume workers
 /// 10. Playback engine
 /// 11. Axum HTTP server
@@ -283,6 +287,27 @@ pub async fn start(
         &shutdown_tx,
     ));
 
+    // 4. The ONE metadata provider chain (#136): Claude, then Gemini on the
+    // `gemini_api_key` key list. The download worker, the reprocess worker and
+    // the API share this `Arc` — no second, divergent provider list.
+    let gemini_key = db::models::get_setting(&pool, "gemini_api_key")
+        .await?
+        .unwrap_or_default();
+    let gemini_model = db::models::get_setting(&pool, "gemini_model")
+        .await?
+        .unwrap_or_else(|| sp_core::config::DEFAULT_GEMINI_MODEL.to_string());
+
+    // Migrate stale gemini_model setting from old defaults.
+    let gemini_model = if gemini_model == "gemini-2.0-flash" || gemini_model == "gemini-2.5-flash" {
+        let new_model = sp_core::config::DEFAULT_GEMINI_MODEL;
+        tracing::info!("upgrading gemini_model setting from {gemini_model} to {new_model}");
+        db::models::set_setting(&pool, "gemini_model", new_model).await?;
+        new_model.to_string()
+    } else {
+        gemini_model
+    };
+    let metadata_chain = metadata::provider_chain(ai_client.clone(), &gemini_key, &gemini_model);
+
     let state = AppState {
         pool: pool.clone(),
         event_tx: event_tx.clone(),
@@ -306,6 +331,7 @@ pub async fn start(
         preview_registry: preview_registry.clone(),
         program_bus: program_bus.clone(),
         lan_status: lan_status.clone(),
+        metadata_chain: metadata_chain.clone(),
     };
 
     // #51: advertise `sp.local` over mDNS so the dashboard stays reachable on
@@ -338,24 +364,6 @@ pub async fn start(
         info!("ai_proxy: not authenticated, skipping auto-start + watchdog");
     }
 
-    // 4. Read Gemini settings (used by download worker + reprocess worker)
-    let gemini_key = db::models::get_setting(&pool, "gemini_api_key")
-        .await?
-        .unwrap_or_default();
-    let gemini_model = db::models::get_setting(&pool, "gemini_model")
-        .await?
-        .unwrap_or_else(|| sp_core::config::DEFAULT_GEMINI_MODEL.to_string());
-
-    // Migrate stale gemini_model setting from old defaults.
-    let gemini_model = if gemini_model == "gemini-2.0-flash" || gemini_model == "gemini-2.5-flash" {
-        let new_model = sp_core::config::DEFAULT_GEMINI_MODEL;
-        tracing::info!("upgrading gemini_model setting from {gemini_model} to {new_model}");
-        db::models::set_setting(&pool, "gemini_model", new_model).await?;
-        new_model.to_string()
-    } else {
-        gemini_model
-    };
-
     // 5. Tools manager
     let tools_dir = config.cache_dir.join("tools");
     let tools_mgr = downloader::tools::ToolsManager::new(tools_dir.clone());
@@ -381,8 +389,7 @@ pub async fn start(
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     let dl_shutdown_tx = shutdown_tx.clone();
-    let dl_gemini_key = gemini_key.clone();
-    let dl_gemini_model = gemini_model.clone();
+    let dl_metadata_chain = metadata_chain.clone();
     let startup_sync_pool = pool.clone();
     let startup_sync_tx = sync_tx.clone();
     let periodic_sync_pool = pool.clone();
@@ -516,18 +523,6 @@ pub async fn start(
                     "periodic playlist sync worker started"
                 );
 
-                let mut dl_providers: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
-                // Claude first (via CLIProxyAPI), Gemini as fallback
-                dl_providers.push(Box::new(metadata::claude::ClaudeMetadataProvider::new(
-                    ai_client_for_dl.clone(),
-                )));
-                if !dl_gemini_key.is_empty() {
-                    dl_providers.push(Box::new(metadata::gemini::GeminiProvider::new(
-                        dl_gemini_key,
-                        dl_gemini_model,
-                    )));
-                }
-
                 let lyrics_ytdlp = paths.ytdlp.clone();
                 let lyrics_python = paths.python.clone();
                 let dl_worker = downloader::DownloadWorker::new(
@@ -535,7 +530,7 @@ pub async fn start(
                     paths,
                     dl_cache_dir,
                     dl_data_dir,
-                    dl_providers,
+                    dl_metadata_chain,
                     dl_event_tx_for_worker,
                     ytdlp_lock,
                 );
@@ -632,21 +627,10 @@ pub async fn start(
     // `start_program`; #221 L4b: its scene detection drives no playback).
     let obs_side = obs_bridge::start_obs(&pool, &obs_state, &obs_rebuild_tx, &shutdown_tx).await?;
 
-    // 8. Reprocess worker (with Gemini provider if API key is configured)
-    let mut reprocess_provider_list: Vec<Box<dyn metadata::MetadataProvider>> = vec![];
-    if !gemini_key.is_empty() {
-        reprocess_provider_list.push(Box::new(metadata::gemini::GeminiProvider::new(
-            gemini_key,
-            gemini_model,
-        )));
-    }
-    let reprocess_providers: Arc<Vec<Box<dyn metadata::MetadataProvider>>> =
-        Arc::new(reprocess_provider_list);
-    let reprocess_worker = reprocess::ReprocessWorker::new(
-        pool.clone(),
-        reprocess_providers,
-        config.cache_dir.clone(),
-    );
+    // 8. Reprocess worker — on the SAME metadata chain as the download worker
+    // (#136: it used to get Gemini alone, so it could never repair a row).
+    let reprocess_worker =
+        reprocess::ReprocessWorker::new(pool.clone(), metadata_chain, config.cache_dir.clone());
     tokio::spawn(reprocess_worker.run(shutdown_tx.subscribe()));
 
     // 9. Resolume command forwarding (registry was built before AppState above).

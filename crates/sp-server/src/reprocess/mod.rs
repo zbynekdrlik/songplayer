@@ -1,13 +1,22 @@
-//! Reprocess worker — retries metadata extraction for videos where Gemini failed.
+//! Reprocess worker — retries metadata extraction for videos whose metadata
+//! came from the title parser because every provider failed.
 //!
-//! Runs periodically in the background, querying for videos with `gemini_failed = 1`
-//! and re-attempting metadata extraction via the configured providers.
+//! Runs periodically in the background, querying the repair queue
+//! (`metadata::health::REPAIR_QUEUE_WHERE`) and re-attempting metadata
+//! extraction on the ONE production provider chain (#136: the same `Arc`
+//! the download worker uses — before #136 this worker had its own list with
+//! Gemini alone, so a broken Gemini left every row broken forever).
+//!
+//! A failed row is logged at WARN with EVERY provider's reason, in chain
+//! order, once per attempt. The per-video backoff below allows one attempt
+//! per stage; the stages shorter than the 30-min cycle (1, 5, 15 min) are
+//! retried every cycle, the longer ones (1 h, 6 h, 24 h) wait for theirs.
 //!
 //! ## Rate-limit cooldown (issue #12)
 //!
-//! When a provider returns [`MetadataError::RateLimited`], the worker enters
-//! a global cooldown of [`GEMINI_COOLDOWN`] during which all Gemini calls
-//! are skipped. Each rate-limited video also enters a per-video exponential
+//! When a provider returns `MetadataError::RateLimited`, the worker enters
+//! a global cooldown of [`RATE_LIMIT_COOLDOWN`] during which no provider is
+//! called. Each rate-limited video also enters a per-video exponential
 //! backoff — its entry is skipped until its `next_retry_at` instant passes.
 //! The stages are 1 min, 5 min, 15 min, 1 h, 6 h, 24 h and stay at 24 h once
 //! reached. Successful extraction clears the video's backoff entry.
@@ -22,10 +31,11 @@ use sqlx::{Row, SqlitePool};
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
-use crate::metadata::{MetadataError, MetadataProvider};
+use crate::metadata::health::REPAIR_QUEUE_WHERE;
+use crate::metadata::{ChainFailure, ProviderChain};
 
-/// Global cooldown after any Gemini rate-limit response.
-const GEMINI_COOLDOWN: Duration = Duration::from_secs(5 * 60);
+/// Global cooldown after any provider's rate-limit response.
+const RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(300); // 5 min (a literal: no mutable op)
 
 /// Per-video exponential backoff stages. The worker indexes into this slice
 /// by the video's current stage; stages beyond the last pin to the final
@@ -43,10 +53,11 @@ const BACKOFF_STAGES: [Duration; 6] = [
 /// videos where the initial Gemini extraction failed.
 pub struct ReprocessWorker {
     pool: SqlitePool,
-    providers: Arc<Vec<Box<dyn MetadataProvider>>>,
+    /// The ONE production chain (#136), shared with the download worker.
+    chain: Arc<ProviderChain>,
     cache_dir: PathBuf,
-    /// Global Gemini cooldown — while set, all Gemini calls are skipped.
-    gemini_cooldown_until: Option<Instant>,
+    /// Global rate-limit cooldown — while set, no provider is called.
+    cooldown_until: Option<Instant>,
     /// Per-video backoff: `video_id → (next_retry_at, stage_index)`.
     per_video_backoff: HashMap<i64, (Instant, usize)>,
 }
@@ -64,36 +75,33 @@ struct ReprocessRow {
 enum ReprocessOutcome {
     /// Metadata was successfully updated (DB cleared `gemini_failed`).
     Success,
-    /// Gemini said "rate limited" — the worker should stop the current
-    /// batch and honour [`GEMINI_COOLDOWN`].
-    RateLimited,
+    /// A provider said "rate limited" — the worker should stop the current
+    /// batch and honour [`RATE_LIMIT_COOLDOWN`]. Carries every provider's error.
+    RateLimited(String),
     /// Non-rate-limit failure (transient, API error, or still
     /// `gemini_failed=true` from parser fallback). The batch may continue.
-    Failed,
+    /// Carries every provider's error, in chain order.
+    Failed(String),
     /// The video was skipped because it's in per-video backoff or the
     /// global cooldown window is still active.
     Skipped,
 }
 
 impl ReprocessWorker {
-    pub fn new(
-        pool: SqlitePool,
-        providers: Arc<Vec<Box<dyn MetadataProvider>>>,
-        cache_dir: PathBuf,
-    ) -> Self {
+    pub fn new(pool: SqlitePool, chain: Arc<ProviderChain>, cache_dir: PathBuf) -> Self {
         Self {
             pool,
-            providers,
+            chain,
             cache_dir,
-            gemini_cooldown_until: None,
+            cooldown_until: None,
             per_video_backoff: HashMap::new(),
         }
     }
 
-    /// Returns `true` if the worker is currently inside the Gemini cooldown
+    /// Returns `true` if the worker is currently inside the rate-limit cooldown
     /// window.
     fn in_global_cooldown(&self) -> bool {
-        self.gemini_cooldown_until
+        self.cooldown_until
             .map(|t| Instant::now() < t)
             .unwrap_or(false)
     }
@@ -166,7 +174,7 @@ impl ReprocessWorker {
         if self.in_global_cooldown() {
             debug!(
                 count = rows.len(),
-                "reprocess skipped: Gemini cooldown active"
+                "reprocess skipped: rate-limit cooldown active"
             );
             return Ok(0);
         }
@@ -180,16 +188,26 @@ impl ReprocessWorker {
                     info!(video_id = %row.youtube_id, "reprocessed successfully");
                     success_count += 1;
                 }
-                Ok(ReprocessOutcome::RateLimited) => {
+                Ok(ReprocessOutcome::RateLimited(reasons)) => {
                     warn!(
                         video_id = %row.youtube_id,
-                        "Gemini rate-limited; entering {}s cooldown, aborting batch",
-                        GEMINI_COOLDOWN.as_secs()
+                        %reasons,
+                        "metadata provider rate-limited; entering {}s cooldown, aborting batch",
+                        RATE_LIMIT_COOLDOWN.as_secs()
                     );
                     break;
                 }
-                Ok(ReprocessOutcome::Failed) => {
-                    debug!(video_id = %row.youtube_id, "metadata still failed, will retry later");
+                Ok(ReprocessOutcome::Failed(reasons)) => {
+                    // One WARN per attempt; the backoff stage decides the next
+                    // attempt (a stage shorter than the cycle = the next cycle).
+                    let (backoff_s, stage) = self.backoff_of(row.id);
+                    warn!(
+                        video_id = %row.youtube_id,
+                        %reasons,
+                        backoff_stage = stage,
+                        backoff_s,
+                        "metadata still failed: no provider named the video"
+                    );
                 }
                 Ok(ReprocessOutcome::Skipped) => {
                     debug!(video_id = %row.youtube_id, "in per-video backoff, skipped");
@@ -203,18 +221,18 @@ impl ReprocessWorker {
         Ok(success_count)
     }
 
-    /// Query videos with gemini_failed = 1 AND normalized = 1.
+    /// Query the repair queue (`REPAIR_QUEUE_WHERE`, the predicate
+    /// `status.metadata.failed_videos` counts too).
     async fn fetch_gemini_failed(&self) -> Result<Vec<ReprocessRow>, sqlx::Error> {
-        let rows = sqlx::query(
+        let sql = format!(
             "SELECT id, youtube_id, COALESCE(title, '') AS title,
                     COALESCE(file_path, '') AS file_path,
                     audio_file_path
              FROM videos
-             WHERE gemini_failed = 1 AND normalized = 1
-             ORDER BY id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+             WHERE {REPAIR_QUEUE_WHERE}
+             ORDER BY id"
+        );
+        let rows = sqlx::query(&sql).fetch_all(&self.pool).await?;
 
         Ok(rows
             .iter()
@@ -245,20 +263,22 @@ impl ReprocessWorker {
 
         let meta = match self.try_providers(&row.youtube_id, &row.title).await {
             Ok(m) => m,
-            Err(MetadataError::RateLimited) => {
-                self.gemini_cooldown_until = Some(Instant::now() + GEMINI_COOLDOWN);
+            Err(failure) if failure.rate_limited => {
+                self.cooldown_until = Some(Instant::now() + RATE_LIMIT_COOLDOWN);
                 self.bump_video_backoff(row.id);
-                return Ok(ReprocessOutcome::RateLimited);
+                return Ok(ReprocessOutcome::RateLimited(failure.reasons));
             }
-            Err(_) => {
+            Err(failure) => {
                 self.bump_video_backoff(row.id);
-                return Ok(ReprocessOutcome::Failed);
+                return Ok(ReprocessOutcome::Failed(failure.reasons));
             }
         };
 
         if meta.gemini_failed {
             self.bump_video_backoff(row.id);
-            return Ok(ReprocessOutcome::Failed);
+            return Ok(ReprocessOutcome::Failed(
+                "the provider's answer was flagged gemini_failed".into(),
+            ));
         }
         // Success clears this video's per-video backoff so future failures
         // start from stage 0 again.
@@ -344,50 +364,30 @@ impl ReprocessWorker {
         Ok(ReprocessOutcome::Success)
     }
 
-    /// Try each configured metadata provider in order. Returns the first
-    /// successful result, or the last error encountered (prioritising
-    /// `RateLimited` so the batch-abort path always wins over generic
-    /// failures).
-    ///
-    /// This path bypasses `metadata::get_metadata` (and its
-    /// `sanitize::strip_emoji` choke point, #135) entirely, so it sanitizes
-    /// the returned `song`/`artist` itself — the invariant "nothing
-    /// unsanitized is ever persisted" must hold here too, independent of
-    /// which providers are wired.
+    /// The chain's one walk (`metadata::first_answer`, the same the download
+    /// path uses): the first sanitized answer with a song, or EVERY
+    /// provider's reason in chain order (#136: before, only the last one
+    /// survived, and it was logged nowhere), flagged `rate_limited` when any
+    /// provider was, so the batch-abort path always wins over generic
+    /// failures.
     async fn try_providers(
         &self,
         video_id: &str,
         title: &str,
-    ) -> Result<VideoMetadata, MetadataError> {
-        if self.providers.is_empty() {
-            return Err(MetadataError::ApiError("no providers configured".into()));
-        }
+    ) -> Result<VideoMetadata, ChainFailure> {
+        crate::metadata::first_answer(self.chain.providers(), video_id, title).await
+    }
 
-        let mut saw_rate_limit = false;
-        let mut last_err = MetadataError::ApiError("no providers were called".into());
-
-        for provider in self.providers.iter() {
-            match provider.extract(video_id, title).await {
-                Ok(mut meta) => {
-                    meta.song = crate::metadata::sanitize::strip_emoji(&meta.song);
-                    meta.artist = crate::metadata::sanitize::strip_emoji(&meta.artist);
-                    return Ok(meta);
-                }
-                Err(MetadataError::RateLimited) => {
-                    saw_rate_limit = true;
-                    last_err = MetadataError::RateLimited;
-                }
-                Err(e) => {
-                    last_err = e;
-                }
-            }
-        }
-
-        if saw_rate_limit {
-            Err(MetadataError::RateLimited)
-        } else {
-            Err(last_err)
-        }
+    /// `(the backoff stage's wait in seconds, the stage)` of a video — for the
+    /// failed-row WARN. A wait shorter than the 30-min cycle means "the next
+    /// cycle".
+    fn backoff_of(&self, video_id: i64) -> (u64, usize) {
+        let stage = self
+            .per_video_backoff
+            .get(&video_id)
+            .map(|(_, s)| *s)
+            .unwrap_or(0);
+        (BACKOFF_STAGES[stage].as_secs(), stage)
     }
 
     /// Advance the per-video backoff stage and schedule the next retry.
@@ -497,8 +497,8 @@ mod tests {
 
         let video_id = insert_gf_video(&pool, "dQw4w9WgXcQ", gf_path.to_str().unwrap()).await;
 
-        let providers: Arc<Vec<Box<dyn MetadataProvider>>> =
-            Arc::new(vec![Box::new(SuccessProvider)]);
+        let providers: Arc<ProviderChain> =
+            Arc::new(ProviderChain::new(vec![Box::new(SuccessProvider)]));
         let mut worker = ReprocessWorker::new(pool.clone(), providers, tmp.path().to_path_buf());
 
         let count = worker.process_all().await.unwrap();
@@ -540,7 +540,8 @@ mod tests {
 
         insert_gf_video(&pool, "xxxxxxxxxxx", gf_path.to_str().unwrap()).await;
 
-        let providers: Arc<Vec<Box<dyn MetadataProvider>>> = Arc::new(vec![Box::new(FailProvider)]);
+        let providers: Arc<ProviderChain> =
+            Arc::new(ProviderChain::new(vec![Box::new(FailProvider)]));
         let mut worker = ReprocessWorker::new(pool.clone(), providers, tmp.path().to_path_buf());
 
         let count = worker.process_all().await.unwrap();
@@ -563,8 +564,8 @@ mod tests {
         let pool = setup().await;
         let tmp = tempfile::tempdir().unwrap();
 
-        let providers: Arc<Vec<Box<dyn MetadataProvider>>> =
-            Arc::new(vec![Box::new(SuccessProvider)]);
+        let providers: Arc<ProviderChain> =
+            Arc::new(ProviderChain::new(vec![Box::new(SuccessProvider)]));
         let mut worker = ReprocessWorker::new(pool, providers, tmp.path().to_path_buf());
 
         let count = worker.process_all().await.unwrap();
@@ -576,7 +577,7 @@ mod tests {
         let pool = setup().await;
         let tmp = tempfile::tempdir().unwrap();
 
-        let providers: Arc<Vec<Box<dyn MetadataProvider>>> = Arc::new(vec![]);
+        let providers: Arc<ProviderChain> = Arc::new(ProviderChain::new(vec![]));
         let worker = ReprocessWorker::new(pool, providers, tmp.path().to_path_buf());
 
         let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
@@ -607,7 +608,7 @@ mod tests {
             _video_id: &str,
             _title: &str,
         ) -> Result<VideoMetadata, MetadataError> {
-            Err(MetadataError::RateLimited)
+            Err(MetadataError::RateLimited("mock quota exhausted".into()))
         }
         fn name(&self) -> &str {
             "rate-limit-mock"
@@ -617,7 +618,7 @@ mod tests {
     /// Issue #12: on rate-limit, the worker must abort the current batch
     /// and skip all subsequent calls until the cooldown window expires.
     ///
-    /// Uses direct manipulation of `gemini_cooldown_until` instead of
+    /// Uses direct manipulation of `cooldown_until` instead of
     /// `tokio::time::advance` — the sqlite pool setup relies on real I/O
     /// and doesn't cope with a paused timer.
     #[tokio::test]
@@ -633,8 +634,8 @@ mod tests {
         tokio::fs::write(tmp.path().join(gf2), b"x").await.unwrap();
         insert_gf_video(&pool, "bbb7654321", tmp.path().join(gf2).to_str().unwrap()).await;
 
-        let providers: Arc<Vec<Box<dyn MetadataProvider>>> =
-            Arc::new(vec![Box::new(RateLimitProvider)]);
+        let providers: Arc<ProviderChain> =
+            Arc::new(ProviderChain::new(vec![Box::new(RateLimitProvider)]));
         let mut worker = ReprocessWorker::new(pool.clone(), providers, tmp.path().to_path_buf());
 
         // First run: hits rate limit on the first video, aborts batch.
@@ -647,13 +648,13 @@ mod tests {
 
         // Second run within cooldown: must be a no-op, still zero success.
         // And no provider should have been called (would be asserted by
-        // the fact that gemini_cooldown_until is still in the future).
+        // the fact that cooldown_until is still in the future).
         let count = worker.process_all().await.unwrap();
         assert_eq!(count, 0);
         assert!(worker.in_global_cooldown(), "still in cooldown");
 
         // Simulate cooldown expiry by setting the instant to the past.
-        worker.gemini_cooldown_until = Some(Instant::now() - Duration::from_secs(1));
+        worker.cooldown_until = Some(Instant::now() - Duration::from_secs(1));
         assert!(
             !worker.in_global_cooldown(),
             "cooldown should report expired once `until` is in the past"
@@ -671,7 +672,7 @@ mod tests {
     #[tokio::test]
     async fn bump_video_backoff_escalates_and_caps() {
         let pool = setup().await;
-        let providers: Arc<Vec<Box<dyn MetadataProvider>>> = Arc::new(vec![]);
+        let providers: Arc<ProviderChain> = Arc::new(ProviderChain::new(vec![]));
         let mut worker = ReprocessWorker::new(pool, providers, PathBuf::from("."));
 
         // Stage 0: 1 min
@@ -720,17 +721,15 @@ mod tests {
         }
     }
 
-    /// #135 follow-up: `try_providers` bypasses `metadata::get_metadata`
-    /// entirely, so today it has no sanitization of its own. The only wired
-    /// provider (Gemini) happens to sanitize internally, so there is no live
-    /// leak — but the invariant "nothing unsanitized is ever persisted"
-    /// doesn't hold structurally on this path. A provider whose output still
-    /// carries a raw emoji must come back clean regardless.
+    /// #135 / #136: `try_providers` walks the chain through
+    /// `metadata::first_answer`, the shared emoji-sanitizer choke point — a
+    /// provider whose output still carries a raw emoji must come back clean,
+    /// whichever providers are wired.
     #[tokio::test]
     async fn try_providers_sanitizes_emoji_in_returned_metadata() {
         let pool = setup().await;
-        let providers: Arc<Vec<Box<dyn MetadataProvider>>> =
-            Arc::new(vec![Box::new(EmojiProvider)]);
+        let providers: Arc<ProviderChain> =
+            Arc::new(ProviderChain::new(vec![Box::new(EmojiProvider)]));
         let worker = ReprocessWorker::new(pool, providers, PathBuf::from("."));
 
         let meta = worker.try_providers("vid123", "title").await.unwrap();
@@ -754,8 +753,8 @@ mod tests {
         tokio::fs::write(&gf_path, b"x").await.unwrap();
         let video_id = insert_gf_video(&pool, "ccc9999999", gf_path.to_str().unwrap()).await;
 
-        let providers: Arc<Vec<Box<dyn MetadataProvider>>> =
-            Arc::new(vec![Box::new(SuccessProvider)]);
+        let providers: Arc<ProviderChain> =
+            Arc::new(ProviderChain::new(vec![Box::new(SuccessProvider)]));
         let mut worker = ReprocessWorker::new(pool.clone(), providers, tmp.path().to_path_buf());
 
         // Pre-populate a backoff entry to prove it gets cleared.
@@ -771,3 +770,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "tests_chain.rs"]
+mod tests_chain;

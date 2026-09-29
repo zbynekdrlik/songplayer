@@ -651,7 +651,7 @@ impl LyricsWorker {
             .ok()
             .flatten()
             .unwrap_or_default();
-        let gemini_keys = crate::lyrics::g35t_client::gemini_keys_from_setting(&gemini_csv);
+        let gemini_keys = crate::gemini_api::gemini_keys_from_setting(&gemini_csv);
 
         // Tier 1 — v21 (#143) forced-alignment reference stage (★). Aligns the
         // best text candidate via mtl and verifies it against a g35t word

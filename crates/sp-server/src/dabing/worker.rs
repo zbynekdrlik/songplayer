@@ -491,7 +491,7 @@ impl DubWorker {
             .await
             .ok()
             .flatten()?;
-        crate::lyrics::g35t_client::gemini_keys_from_setting(&csv)
+        crate::gemini_api::gemini_keys_from_setting(&csv)
             .into_iter()
             .next()
     }
@@ -657,5 +657,29 @@ mod tests {
             worker.contains("import win_replace"),
             "dub_worker.py does not import the shipped win_replace module"
         );
+    }
+
+    /// #136: the dub worker takes the FIRST key of the `gemini_api_key` list
+    /// (split by the shared `gemini_api::gemini_keys_from_setting`).
+    #[tokio::test]
+    async fn the_dub_worker_uses_the_first_key_of_the_gemini_key_list() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let worker = DubWorker::new(
+            pool.clone(),
+            PathBuf::from("."),
+            Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+            Arc::new(RwLock::new(crate::obs::ObsState::default())),
+        );
+
+        assert_eq!(worker.first_gemini_key().await, None, "setting unset");
+        crate::db::models::set_setting(&pool, "gemini_api_key", " , ")
+            .await
+            .unwrap();
+        assert_eq!(worker.first_gemini_key().await, None, "no key in the list");
+        crate::db::models::set_setting(&pool, "gemini_api_key", " k1 , k2")
+            .await
+            .unwrap();
+        assert_eq!(worker.first_gemini_key().await.as_deref(), Some("k1"));
     }
 }
