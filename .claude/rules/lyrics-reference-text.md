@@ -7,6 +7,10 @@ paths:
   - "crates/sp-server/src/lyrics/text_candidate*.rs"
   - "crates/sp-server/src/lyrics/transcript_cache*.rs"
   - "crates/sp-server/src/lyrics/worker_text_tiers*.rs"
+  - "crates/sp-server/src/lyrics/worker_reference*.rs"
+  - "crates/sp-server/src/lyrics/worker_g35t.rs"
+  - "crates/sp-server/src/lyrics/orchestrator.rs"
+  - "crates/sp-server/src/lyrics/audit_ctx.rs"
   - "crates/sp-server/src/lyrics/gather.rs"
   - "crates/sp-server/src/lyrics/youtube_subs.rs"
   - "crates/sp-server/src/lyrics/genius*.rs"
@@ -22,7 +26,7 @@ paths:
   - transcript → reference: `sung_coverage.rs`, an order-preserving LCS of ALL words.
 - A text must cover ≥ 0.55 of the sung words (`MIN_SUNG_COVERED_FRAC`) and leave no uncovered sung run over 25 s (`MAX_UNCOVERED_SUNG_MS`). Otherwise the result is `Fail{Coverage}`, and the audit's `sung_coverage_ok` tells the two coverage failures apart.
 - The thresholds are MEASURED (#144 comment 5899043518):
-  - complete texts: 0.64–0.97 coverage, runs ≤ 20.6 s;
+  - complete texts: 0.64–0.977 coverage (0.64–0.97 against g35t transcripts), runs ≤ 20.6 s;
   - ★ rows whose wall held one line over other singing: runs ≥ 34.9 s.
 - The LCS is used, not the line-anchor walk. A 1-word fallback anchor that jumps forward orphans every line in between, and gave a complete text a false 32 s run.
 - To re-measure, use the gate's own transcripts: `{yt}_g35t_words.json` (kept) and `{yt}_g35t_words_used.json` (retired) in the box cache. The v20 WhisperX `{yt}_whisperx_track.json` files are a fallback. `eval/lyrics/reports/2026-09-12-raw/` has real g35t transcripts plus the eval gold texts.
@@ -33,7 +37,7 @@ paths:
 - `worker_text_tiers::run_text_tiers` transcribes the isolated vocal ONCE, right after isolation (`transcribe_vocal`). The title search, the gate and the base tier all use that one transcript. The reference stage never transcribes.
 - `transcript_cache.rs` keeps the transcript for the pass's no-penalty deferral re-picks (wall gate, memory floor, startup grace, mtl wall-abort):
   - it is reused only for the same vocal (same length and mtime), within 6 h, and never when empty;
-  - when the pass ends (a track or a quarantine), it is retired to `_used.json`, so a manual reprocess transcribes afresh. `a_pass_ending_in_a_track_retires_its_transcript` drives `run_text_tiers` offline to prove it.
+  - when the pass ends, it is retired to `_used.json`, so a manual reprocess transcribes afresh. `run_text_tiers` does it in ONE place, after the tiers, for every outcome `ends_the_pass` accepts: a ★ or base-tier track, or a quarantine (tested). `a_pass_ending_in_a_track_retires_its_transcript` drives `run_text_tiers` offline to a base-tier track to pin the call itself.
 - `run_mtl_reference_stage` removes an earlier pass's `{yt}_alignment_audit.json` first; every PASS / FAIL / ERROR writes a new one, carrying `sung_*` and `sung_coverage_ok`.
 
 ## The title search (covers)
@@ -53,7 +57,7 @@ paths:
 
 - `parse_json3` gives ONE line per sung caption line. Each line keeps its event's own span, never divided by hand. No production code reads `CandidateText::line_timings`: mtl re-times the text.
 - The scraped-lyrics Claude cleanup (`CleanupMode::ScrapedLyrics`) KEEPS every repeat, because mtl times exactly the lines it is given. When its prompt semantics change, bump the cleanup cache names (`_cleaned_v3.json` today), or the reprocess reuses stale decisions.
-- Build candidates only through `text_candidate::{timed_candidate, cleaned_text_candidate}`. `gather.rs` and the title search share them, and `gather_uses_lyrics_ovh_primary_with_genius_fallback` reads both files.
+- Turn a fetched timed track or a scraped plain lyric into a candidate only through `text_candidate::{timed_candidate, cleaned_text_candidate}`. `gather.rs` and the title search share them, and `gather_uses_lyrics_ovh_primary_with_genius_fallback` reads both files. The override, description, lyrics.ovh and Spotify candidates are built directly.
 
 ## Mutation-safe loops (a hang fails the gate)
 

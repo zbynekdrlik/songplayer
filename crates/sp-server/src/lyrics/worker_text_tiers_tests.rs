@@ -240,10 +240,12 @@ fn the_title_search_runs_only_when_its_result_can_be_used() {
 }
 
 /// #144: a pass that ends in a track retires its kept transcript inside
-/// `run_text_tiers` itself. Offline: `new_for_test`'s tools dir has no mtl
-/// tooling (no title search, the ★ stage skips) and there is no Gemini key,
-/// so the kept transcript is the only one and the base tier builds the track
-/// from it.
+/// `run_text_tiers` itself, and a stale gate / title-search audit of an
+/// earlier pass goes. Offline: `new_for_test`'s tools dir has no mtl tooling
+/// (no title search, the ★ stage skips) and there is no Gemini key, so the
+/// kept transcript is the only one and the base tier builds the track from
+/// it. Which outcomes end a pass (the ★ track included) is
+/// `ends_the_pass`'s test.
 #[tokio::test]
 async fn a_pass_ending_in_a_track_retires_its_transcript() {
     use crate::lyrics::transcript_cache;
@@ -266,6 +268,10 @@ async fn a_pass_ending_in_a_track_retires_its_transcript() {
         &words(),
     )
     .await;
+    let stale_gate = dir.path().join("yt1_alignment_audit.json");
+    let stale_title = dir.path().join("yt1_title_search_audit.json");
+    std::fs::write(&stale_gate, r#"{"verdict":"pass"}"#).unwrap();
+    std::fs::write(&stale_title, "{}").unwrap();
     let row = crate::db::models::VideoLyricsRow {
         id: 1,
         youtube_id: "yt1".into(),
@@ -298,4 +304,38 @@ async fn a_pass_ending_in_a_track_retires_its_transcript() {
     assert_eq!(track.lines[0].en, "amazing grace");
     assert!(!transcript_cache::path(dir.path(), "yt1").exists());
     assert!(transcript_cache::used_path(dir.path(), "yt1").exists());
+    assert!(
+        !stale_gate.exists(),
+        "the skipped ★ stage leaves no stale verdict"
+    );
+    assert!(
+        !stale_title.exists(),
+        "no title search, no stale title audit"
+    );
+}
+
+fn track() -> sp_core::lyrics::LyricsTrack {
+    sp_core::lyrics::LyricsTrack {
+        version: 22,
+        source: "lrclib+mtl@rev1/g35t-ok".into(),
+        language_source: "en".into(),
+        language_translation: String::new(),
+        lines: Vec::new(),
+    }
+}
+
+/// A track (★ or base tier) and a finished song (a quarantine) end the pass;
+/// no deferral does — its re-pick may reuse the kept transcript.
+#[test]
+fn a_track_or_a_finished_song_ends_the_pass_a_deferral_does_not() {
+    assert!(ends_the_pass(&TierOutcome::Track(track())));
+    assert!(ends_the_pass(&TierOutcome::Return(SongOutcome::Done)));
+    for waiting in [
+        SongOutcome::Deferred("g35t_error"),
+        SongOutcome::WaitingForWall,
+        SongOutcome::WaitingForMemory,
+        SongOutcome::WaitingForStems,
+    ] {
+        assert!(!ends_the_pass(&TierOutcome::Return(waiting)), "{waiting:?}");
+    }
 }

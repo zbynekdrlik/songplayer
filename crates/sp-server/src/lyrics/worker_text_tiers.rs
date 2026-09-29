@@ -38,6 +38,17 @@ pub(crate) enum TierOutcome {
     Return(SongOutcome),
 }
 
+/// #144: whether a tier outcome ends the processing pass — a track (★ or
+/// base tier), or the song done for this pass (a quarantine). Its kept
+/// transcript is then retired, so the next pass transcribes afresh. A
+/// deferral (penalized or not) does not end it: a re-pick may reuse it.
+pub(crate) fn ends_the_pass(outcome: &TierOutcome) -> bool {
+    matches!(
+        outcome,
+        TierOutcome::Track(_) | TierOutcome::Return(SongOutcome::Done)
+    )
+}
+
 /// #144: whether the title search runs: the song has a non-empty transcript
 /// to score against, no artist+title lookup found it
 /// (`title_search::needs_title_search`), and the ★ tier can use a found
@@ -120,9 +131,38 @@ pub(crate) async fn transcribe_vocal(
 impl LyricsWorker {
     /// The text tiers for one song (module doc). `candidate_texts` are what
     /// `gather_sources` found; `clean_vocal` is the isolated vocal (`None`
-    /// when isolation yielded none).
-    #[cfg_attr(test, mutants::skip)] // I/O glue; each step is tested on its own
+    /// when isolation yielded none). When the outcome ends the pass
+    /// (`ends_the_pass`), the pass's kept transcript is retired — the ONE
+    /// place that does it, for every ending.
+    #[cfg_attr(test, mutants::skip)] // I/O glue; `ends_the_pass` and each step are tested
     pub(crate) async fn run_text_tiers(
+        &self,
+        row: &crate::db::models::VideoLyricsRow,
+        candidate_texts: Vec<crate::lyrics::provider::CandidateText>,
+        clean_vocal: Option<&Path>,
+        gpu_mem: Option<String>,
+        mode: crate::lyrics::heavy_plan::ProcessingMode,
+        started_at_unix_ms: i64,
+    ) -> anyhow::Result<TierOutcome> {
+        let outcome = self
+            .run_tiers(
+                row,
+                candidate_texts,
+                clean_vocal,
+                gpu_mem,
+                mode,
+                started_at_unix_ms,
+            )
+            .await?;
+        if ends_the_pass(&outcome) {
+            crate::lyrics::transcript_cache::retire(&self.cache_dir, &row.youtube_id).await;
+        }
+        Ok(outcome)
+    }
+
+    /// The tiers themselves (`run_text_tiers` retires the transcript after).
+    #[cfg_attr(test, mutants::skip)] // I/O glue; each step is tested on its own
+    async fn run_tiers(
         &self,
         row: &crate::db::models::VideoLyricsRow,
         candidate_texts: Vec<crate::lyrics::provider::CandidateText>,
@@ -241,13 +281,11 @@ impl LyricsWorker {
             Err(d) => return Ok(TierOutcome::Return(self.defer_heavy(d).await)),
         };
         if let Some(track) = mtl_track {
-            // The pass ends here: its kept transcript is retired (#144).
-            crate::lyrics::transcript_cache::retire(&self.cache_dir, youtube_id).await;
             return Ok(TierOutcome::Track(track));
         }
 
         // Tier 2 — the g35t base tier: the transcript grouped into lines.
-        let base = self
+        match self
             .run_g35t_transcript_branch(
                 clean_vocal,
                 // #171: mix FLAC — base-tier last resort when isolation never yields a vocal.
@@ -260,12 +298,8 @@ impl LyricsWorker {
                 &row.artist,
                 started_at_unix_ms,
             )
-            .await?;
-        if !matches!(base, crate::lyrics::worker_g35t::G35tOutcome::Deferred(_)) {
-            // A track or a quarantine ends the pass: retire its transcript.
-            crate::lyrics::transcript_cache::retire(&self.cache_dir, youtube_id).await;
-        }
-        match base {
+            .await?
+        {
             crate::lyrics::worker_g35t::G35tOutcome::Track(track) => Ok(TierOutcome::Track(track)),
             crate::lyrics::worker_g35t::G35tOutcome::Deferred(reason) => {
                 // Vocals WAV intentionally preserved on disk — aligner's
