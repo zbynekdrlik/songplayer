@@ -1,5 +1,6 @@
-//! #173: operator / box-verification trigger for a single NDI dark-wall recovery
-//! rung on `PlaybackEngine`.
+//! #173: the NDI dark-wall recovery rungs on `PlaybackEngine`: the operator /
+//! box-verification trigger for a single rung, and (#221 L4a review) the
+//! automatic ladder's rung, both queued on the OBS client by ONE helper.
 //!
 //! Extracted from `mod.rs` to keep that file under the 1000-line cap. As a child
 //! module of `playback`, it reaches the engine's private `pool` + `obs_cmd_tx`.
@@ -9,6 +10,14 @@ use tracing::{info, warn};
 use super::PlaybackEngine;
 use crate::obs::ObsCommand;
 use crate::obs::ndi_recovery::RecoveryStep;
+
+/// Why a recovery rung was not queued on the OBS client.
+enum RungNotQueued {
+    /// No OBS command channel is wired (OBS is not configured).
+    NoChannel,
+    /// The OBS client's command queue is full or closed (the error's text).
+    Queue(String),
+}
 
 impl PlaybackEngine {
     /// Fire a single NDI dark-wall recovery rung for `playlist_id` over the
@@ -38,25 +47,20 @@ impl PlaybackEngine {
                 return;
             }
         };
-        match self.obs_cmd_tx.as_ref() {
-            Some(tx) => match tx.try_send(ObsCommand::NudgeNdiReceiver {
-                ndi_name: ndi_name.clone(),
-                step,
-            }) {
-                Ok(()) => info!(
-                    playlist_id,
-                    ndi_name = %ndi_name,
-                    ?step,
-                    "ndi-recovery: manual trigger — queued recovery rung over OBS"
-                ),
-                Err(e) => warn!(
-                    playlist_id,
-                    ndi_name = %ndi_name,
-                    error = %e,
-                    "ndi-recovery: manual trigger — failed to queue OBS recovery rung"
-                ),
-            },
-            None => warn!(
+        match self.queue_recovery_rung(&ndi_name, step) {
+            Ok(()) => info!(
+                playlist_id,
+                ndi_name = %ndi_name,
+                ?step,
+                "ndi-recovery: manual trigger — queued recovery rung over OBS"
+            ),
+            Err(RungNotQueued::Queue(error)) => warn!(
+                playlist_id,
+                ndi_name = %ndi_name,
+                error = %error,
+                "ndi-recovery: manual trigger — failed to queue OBS recovery rung"
+            ),
+            Err(RungNotQueued::NoChannel) => warn!(
                 playlist_id,
                 "ndi-recovery: manual trigger — no OBS command channel wired"
             ),
@@ -66,31 +70,38 @@ impl PlaybackEngine {
     /// #127 / #173: run the dark-wall ladder's rung `step` for `playlist_id`'s
     /// NDI output `ndi_name` over the healthy OBS WebSocket — the automatic
     /// ladder's side of `handle_health_snapshot` (moved here for that
-    /// function's length, #221 L4a review). Never blocks: `try_send`.
+    /// function's length, #221 L4a review).
     pub(super) fn run_recovery_rung(&self, playlist_id: i64, ndi_name: &str, step: RecoveryStep) {
-        match self.obs_cmd_tx.as_ref() {
-            Some(tx) => match tx.try_send(ObsCommand::NudgeNdiReceiver {
-                ndi_name: ndi_name.to_string(),
-                step,
-            }) {
-                Ok(()) => warn!(
-                    playlist_id,
-                    ndi_name = %ndi_name,
-                    ?step,
-                    "ndi-recovery: dark wall — running recovery rung over OBS"
-                ),
-                Err(e) => warn!(
-                    playlist_id,
-                    ndi_name = %ndi_name,
-                    error = %e,
-                    "ndi-recovery: failed to queue OBS recovery rung"
-                ),
-            },
-            None => warn!(
+        match self.queue_recovery_rung(ndi_name, step) {
+            Ok(()) => warn!(
+                playlist_id,
+                ndi_name = %ndi_name,
+                ?step,
+                "ndi-recovery: dark wall — running recovery rung over OBS"
+            ),
+            Err(RungNotQueued::Queue(error)) => warn!(
+                playlist_id,
+                ndi_name = %ndi_name,
+                error = %error,
+                "ndi-recovery: failed to queue OBS recovery rung"
+            ),
+            Err(RungNotQueued::NoChannel) => warn!(
                 playlist_id,
                 ndi_name = %ndi_name,
                 "ndi-recovery: dark wall but no OBS command channel wired"
             ),
         }
+    }
+
+    /// Queue rung `step` for the NDI output `ndi_name` on the OBS client —
+    /// the one send both triggers share. Never blocks: `try_send`.
+    fn queue_recovery_rung(&self, ndi_name: &str, step: RecoveryStep) -> Result<(), RungNotQueued> {
+        let tx = self.obs_cmd_tx.as_ref().ok_or(RungNotQueued::NoChannel)?;
+        let nudge = ObsCommand::NudgeNdiReceiver {
+            ndi_name: ndi_name.to_string(),
+            step,
+        };
+        tx.try_send(nudge)
+            .map_err(|e| RungNotQueued::Queue(e.to_string()))
     }
 }
