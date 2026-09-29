@@ -5,20 +5,20 @@
 //! - [`build_description_extraction_prompt`] for mixed-content YouTube
 //!   description blobs (filters out non-lyric noise).
 //! - [`build_scraped_lyrics_cleanup_prompt`] for already-scraped lyrics
-//!   from genius / lrclib-plain (dedupes consecutive repeats, drops ad-libs).
+//!   from genius / lrclib-plain (keeps every repeat, drops ad-libs).
 
 /// Selects which Claude prompt `clean_lyrics_via_claude` uses.
 ///
 /// Description blobs contain mixed content (lyrics + tour dates + credits +
 /// links); the prompt filters non-lyric noise out. Scraped lyrics blobs
 /// (genius HTML, lrclib plain text) are already pure lyrics but commonly
-/// have literal chorus repetition and ad-libs; the prompt dedupes
-/// consecutive identical lines and drops non-sung vocalizations.
+/// carry ad-libs and hype intros; the prompt drops those and keeps every
+/// sung repeat (#144: mtl times exactly the lines it is given).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CleanupMode {
     /// Mixed-content description blob — filter non-lyric text out.
     Description,
-    /// Already-clean scraped lyrics — dedupe consecutive repeats, drop ad-libs.
+    /// Already-clean scraped lyrics — keep every repeat, drop ad-libs.
     ScrapedLyrics,
 }
 
@@ -70,12 +70,13 @@ pub fn build_description_extraction_prompt(
 /// The input is already pure lyrics — no tour dates, no credits, no links to
 /// filter. The problems we need Claude to fix are different:
 ///
-/// 1. **Literal chorus repetition.** Genius writes the chorus as many lines as
-///    it appears in the song (e.g., 9 consecutive `"It's the power of Jesus"`).
-///    The downstream pipeline (`text_reference_merge::process`, Phase 2 chorus-
-///    repeat) projects ONE reference chorus line onto N ASR occurrences. Feeding
-///    Phase 2 nine literal copies breaks the alignment. Dedupe collapses
-///    consecutive identical lines to one.
+/// 1. **Repeats are kept (#144).** Genius writes a chorus as many times as it
+///    is sung (e.g., 9 consecutive `"It's the power of Jesus"`). The prompt used
+///    to dedupe them for the deleted v20 `text_reference_merge` chorus
+///    projection; mtl times exactly the lines it is given, so a repeat written
+///    once leaves the other sung repeats uncovered (the two-way reference gate
+///    then fails the text, or mtl holds one line over them). Every repeat is
+///    kept, in order.
 /// 2. **Ad-libs / vocalizations.** Lines like `"Hyah"`, `"Yeah"`, `"Whoo"` that
 ///    appear in scraped lyrics but aren't structured sung phrases. They cause
 ///    Phase 1 nw_dp to mis-align because the ASR transcribes them as something
@@ -102,12 +103,9 @@ pub fn build_scraped_lyrics_cleanup_prompt(
            - null, if the text genuinely contains NO lyrics.\n\
          \n\
          Rules:\n\
-         1. **Dedupe consecutive identical lines.** If the same line text appears N times \
-            in a row (e.g., a chorus written out 8 times), keep ONLY the first occurrence. \
-            The downstream alignment system re-expands the chorus to match what the singer \
-            actually sang. KEEP non-consecutive repeats (the same phrase later in the song \
-            counts as a separate line). Compare lines case-insensitively, ignoring trailing \
-            punctuation.\n\
+         1. **Keep every repeat.** When a line or a whole chorus is written out several \
+            times (even back to back), keep EVERY occurrence, in order: the alignment \
+            system times exactly the lines it is given, one per sung line.\n\
          2. **Drop ad-libs / vocalizations.** Lines that are pure non-word vocalizations \
             (`Hyah`, `Yeah`, `Whoo`, `Uh`, `Mmm`) should be removed. KEEP short structured \
             lines that contain real words (`I'm a saint`, `Hallelujah`).\n\
@@ -116,8 +114,8 @@ pub fn build_scraped_lyrics_cleanup_prompt(
             KEEP the line — only drop if it's obviously a hype call rather than sung lyric.\n\
          4. **Preserve sung order.** Do not reorder lines.\n\
          5. **Preserve non-English lyrics as-is.** Do NOT translate.\n\
-         6. **Do not fabricate lines.** Output only what was in the input (minus the dedupe / \
-            ad-lib / hype-intro filters above).\n\
+         6. **Do not fabricate lines.** Output only what was in the input (minus the ad-lib / \
+            hype-intro filters above).\n\
          7. **Output ONLY the JSON object.** No preamble, no markdown fences, no commentary. \
             Start your response with {{ and end with }}.\n\n\
          Video title: {title}\n\

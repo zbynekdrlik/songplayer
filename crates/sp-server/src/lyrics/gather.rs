@@ -211,9 +211,10 @@ pub(crate) async fn gather_sources_impl(
                      cannot run Claude cleanup"
                 );
             };
-            // _v2 cache filename invalidates pre-2026-05-11 caches written
-            // under the description-prompt (no dedup / no ad-lib strip).
-            let cache_path = cache_dir.join(format!("{youtube_id}_lrclib_cleaned_v2.json"));
+            // _v3 (#144): the cleanup keeps every sung repeat; a v2 decision was
+            // made by the prompt that deduped them (v2 itself invalidated the
+            // pre-2026-05-11 description-prompt caches).
+            let cache_path = cache_dir.join(format!("{youtube_id}_lrclib_cleaned_v3.json"));
             match cleaned_text_candidate(ai, &row.song, &row.artist, "lrclib", t, &cache_path).await
             {
                 Ok(Some(cleaned)) => {
@@ -258,7 +259,7 @@ pub(crate) async fn gather_sources_impl(
                  cannot run Claude cleanup"
             );
         };
-        let cache_path = cache_dir.join(format!("{youtube_id}_genius_cleaned_v2.json"));
+        let cache_path = cache_dir.join(format!("{youtube_id}_genius_cleaned_v3.json"));
         match cleaned_text_candidate(ai, &row.song, &row.artist, "genius", t, &cache_path).await {
             Ok(Some(cleaned)) => {
                 info!(

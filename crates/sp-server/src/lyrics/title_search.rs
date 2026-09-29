@@ -145,7 +145,7 @@ pub fn pick_best(scores: &[f64]) -> Option<usize> {
 
 /// The cache file of the Claude cleanup of a chosen plain candidate, keyed by
 /// the candidate itself (a later search may choose another lyric) and kept
-/// apart from the artist+title lookups' `{yt}_lrclib_cleaned_v2.json`.
+/// apart from the artist+title lookups' `{yt}_lrclib_cleaned_v3.json`.
 pub fn cleanup_cache_name(youtube_id: &str, cand: &TitleCandidate) -> String {
     let key: String = cand
         .id
@@ -157,7 +157,7 @@ pub fn cleanup_cache_name(youtube_id: &str, cand: &TitleCandidate) -> String {
         .take(80)
         .collect();
     format!(
-        "{youtube_id}_title_{}_{key}_cleaned_v2.json",
+        "{youtube_id}_title_{}_{key}_cleaned_v3.json",
         cand.provider.source()
     )
 }
