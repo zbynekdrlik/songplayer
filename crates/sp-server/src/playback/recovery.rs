@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 use super::state::PlayState;
 use super::title::{self, TitleClock};
 use crate::EngineCommand;
-use crate::resolume::{RecoveryEvent, ResolumeRegistry};
+use crate::resolume::{RecoveryEvent, ResolumeCommand, ResolumeRegistry};
 
 /// The `host` of the one `ResolumeRecovered` a lagged forwarder sends for the
 /// events it missed. The engine re-pushes every host whatever the host.
@@ -165,6 +165,37 @@ impl super::PlaybackEngine {
         title
     }
 
+    /// The wall's line of every playing, on-program pipeline, at its last
+    /// reported position: `(playlist id, video id, ShowSubtitles)`. A
+    /// pipeline with no line there (no lyrics, a blank plan position) has
+    /// none. Used by a Resolume recovery and when a playlist goes off program
+    /// (`wall_after_scene_off`).
+    pub(super) fn on_program_lines(&self) -> Vec<(i64, i64, ResolumeCommand)> {
+        let mut shows = Vec::new();
+        for (&playlist_id, pp) in &self.pipelines {
+            let PlayState::Playing { video_id } = pp.state else {
+                continue;
+            };
+            if !pp.scene_active.load(Ordering::Acquire) {
+                continue;
+            }
+            let lines = pp.lyrics_state.as_ref().and_then(|state| {
+                state.resolume_lines_with_next(pp.cached_position_ms, pp.cached_lyrics_reference)
+            });
+            if let Some((en, next_en, sk, next_sk)) = lines {
+                let cmd = ResolumeCommand::ShowSubtitles {
+                    en,
+                    next_en,
+                    sk,
+                    next_sk,
+                    suppress_en: pp.cached_suppress_en,
+                };
+                shows.push((playlist_id, video_id, cmd));
+            }
+        }
+        shows
+    }
+
     /// Re-sync a recovered Resolume host: the title as a `Resync` (the song
     /// title inside its window, else none) + the wall's subtitle state
     /// (ShowSubtitles for each on-program line, one HideSubtitles when there
@@ -179,28 +210,7 @@ impl super::PlaybackEngine {
         // outside its window, whatever is queued ahead of this Resync.
         let title = self.resync_wall_title().await;
         info!(host, ?title, "title re-synced on Resolume recovery");
-        let mut shows = Vec::new();
-        for (&playlist_id, pp) in &self.pipelines {
-            let PlayState::Playing { video_id } = pp.state else {
-                continue;
-            };
-            if !pp.scene_active.load(Ordering::Acquire) {
-                continue;
-            }
-            let lines = pp.lyrics_state.as_ref().and_then(|state| {
-                state.resolume_lines_with_next(pp.cached_position_ms, pp.cached_lyrics_reference)
-            });
-            if let Some((en, next_en, sk, next_sk)) = lines {
-                let cmd = crate::resolume::ResolumeCommand::ShowSubtitles {
-                    en,
-                    next_en,
-                    sk,
-                    next_sk,
-                    suppress_en: pp.cached_suppress_en,
-                };
-                shows.push((playlist_id, video_id, cmd));
-            }
-        }
+        let shows = self.on_program_lines();
         // Re-emit the wall's CURRENT subtitle state, a blank one included (a
         // blank plan position, a song without lyrics, or no SongPlayer
         // playlist on program). The engine's own hide for it
@@ -211,10 +221,7 @@ impl super::PlaybackEngine {
         // are shared by every on-program playlist, so the one Hide goes out
         // only when none of them has a line. The clear is instant (#217).
         if shows.is_empty() {
-            let _ = self
-                .resolume_tx
-                .send(crate::resolume::ResolumeCommand::HideSubtitles)
-                .await;
+            let _ = self.resolume_tx.send(ResolumeCommand::HideSubtitles).await;
             info!(
                 host,
                 "subtitles cleared on Resolume recovery — no on-program line"

@@ -953,3 +953,28 @@ async fn going_off_program_ignores_a_playlist_whose_off_is_queued_too() {
     assert!(resyncs(&cmds).is_empty(), "no Resync to 9: {cmds:?}");
     assert_eq!(count(&cmds, is_hide_subtitles), 1, "{cmds:?}");
 }
+
+/// Review round 4: the line of a playlist whose OFF is queued too (out of
+/// the authority's diffed set) is not re-sent: only the lines on program
+/// are, and with none the outgoing line goes.
+#[tokio::test]
+async fn going_off_program_re_sends_only_the_lines_still_on_program() {
+    let songs = [(7, 42, "Song"), (9, 44, "Later"), (11, 46, "Third")];
+    let (mut engine, mut rx) = test_engine(&songs).await;
+    play(&mut engine, 7, 42, Window::Due);
+    play(&mut engine, 9, 44, Window::Due); // on program, its title due, no line
+    play(&mut engine, 11, 46, Window::OtherSong); // leaving too, a line at 60 s
+    engine.pipelines.get_mut(&11).unwrap().lyrics_state = Some(a_line_at_sixty_seconds());
+    engine.on_air.replace([9].into());
+    sent(&mut rx);
+
+    engine.handle_scene_change(7, false).await;
+
+    let cmds = sent(&mut rx);
+    assert_eq!(resyncs(&cmds), [Some("Later - Artist".to_string())]);
+    assert!(
+        subtitle_lines(&cmds).is_empty(),
+        "11's line is not re-sent: {cmds:?}"
+    );
+    assert_eq!(count(&cmds, is_hide_subtitles), 1, "{cmds:?}");
+}

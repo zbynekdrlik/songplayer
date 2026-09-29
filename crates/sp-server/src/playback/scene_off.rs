@@ -67,32 +67,56 @@ pub fn scene_off_delay(hold: Option<Hold>, now_100ns: i64) -> Option<Duration> {
 
 impl PlaybackEngine {
     /// The wall after a playlist went off program (its `scene_active` is
-    /// already false). Its line goes (`HideSubtitles`). Its title goes too,
-    /// unless another playlist is still on program: then the wall is
-    /// re-synced to that one — its due title (`resync_wall_title`), and its
-    /// line re-sent on its next position report (its subtitle dedup key is
-    /// cleared). #221 L4b review round 3: the playback authority sends the
-    /// incoming ON at the press and the outgoing OFF only when cg OBS
-    /// confirms the mirror, so the incoming playlist's title can be up
-    /// already, and a bare `HideTitle` took it down for the rest of its song
-    /// (before L4b the bridge sent the OFF first).
-    pub(super) async fn wall_after_scene_off(&mut self) {
-        let mut others_on_program = false;
-        for pp in self.pipelines.values_mut() {
-            if pp.scene_active.load(Ordering::Acquire) {
-                pp.last_resolume_subtitles_signature = None;
-                others_on_program = true;
-            }
-        }
-        let _ = self.resolume_tx.try_send(ResolumeCommand::HideSubtitles);
-        if others_on_program {
-            let title = self.resync_wall_title().await;
-            debug!(
-                ?title,
-                "scene off program — the wall re-synced to the playlist still on program"
-            );
-        } else {
+    /// already false). With no other playlist on program, its title fades
+    /// out (`HideTitle`) and its line goes (`HideSubtitles`), as before L4b.
+    ///
+    /// #221 L4b review rounds 3-4: the playback authority sends the incoming
+    /// ON at the press and the outgoing OFF only when cg OBS confirms the
+    /// mirror, so the incoming playlist can be on program already, its title
+    /// and line up (or overwritten by the outgoing ones on the shared clips).
+    /// Then the wall is re-synced to it: its due title (a `Resync`; with none
+    /// due the outgoing title fades, a `Resync(None)` would cut it; nothing
+    /// when the due title's read failed, `decide_wall_title`), and its
+    /// current line re-sent at once (one `HideSubtitles` only when none of
+    /// them has a line). "On program" = `scene_active` AND in the
+    /// authority's diffed set: a playlist whose OFF is queued too is leaving.
+    /// Its title is still a candidate (`title_candidates`), so a due one can
+    /// be re-synced for the moment until its own OFF re-syncs the wall.
+    pub(super) async fn wall_after_scene_off(&self) {
+        let others_on_program = self
+            .pipelines
+            .iter()
+            .any(|(&id, pp)| pp.scene_active.load(Ordering::Acquire) && self.on_air_contains(id));
+        if !others_on_program {
             let _ = self.resolume_tx.try_send(ResolumeCommand::HideTitle);
+            let _ = self.resolume_tx.try_send(ResolumeCommand::HideSubtitles);
+            return;
+        }
+        match self.decide_wall_title().await {
+            Some((Some(title), _)) => {
+                debug!(%title, "scene off program — the title of the playlist still on program");
+                super::title::send_resync(self.obs_cmd_tx.as_ref(), &self.resolume_tx, Some(title))
+                    .await;
+            }
+            Some((None, _)) => {
+                let _ = self.resolume_tx.try_send(ResolumeCommand::HideTitle);
+            }
+            None => {} // the due title's read failed: nothing is sent
+        }
+        let lines: Vec<_> = self
+            .on_program_lines()
+            .into_iter()
+            .filter(|&(id, ..)| self.on_air_contains(id))
+            .collect();
+        if lines.is_empty() {
+            let _ = self.resolume_tx.try_send(ResolumeCommand::HideSubtitles);
+        }
+        for (playlist_id, video_id, cmd) in lines {
+            debug!(
+                playlist_id,
+                video_id, "scene off program — the line still on program re-sent"
+            );
+            let _ = self.resolume_tx.try_send(cmd);
         }
     }
 
