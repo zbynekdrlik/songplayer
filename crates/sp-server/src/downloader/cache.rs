@@ -357,9 +357,33 @@ where
 }
 
 /// Whether `to` names an existing FILE other than `from`, one a move must set
-/// aside before it can take the name.
-fn is_other_file(_from: &Path, to: &Path) -> bool {
+/// aside before it can take the name. On a case-insensitive filesystem (NTFS,
+/// the box) a `to` that differs from `from` only in letter case names the SAME
+/// file: both canonicalize to it, so it is not set aside and the rename just
+/// changes the case (#136 review round 6).
+fn is_other_file(from: &Path, to: &Path) -> bool {
     to.is_file()
+        && match (std::fs::canonicalize(from), std::fs::canonicalize(to)) {
+            (Ok(from), Ok(to)) => from != to,
+            _ => true,
+        }
+}
+
+/// Every set-aside `.replaced` file left in `cache_dir` ([`set_aside_name`]): a
+/// unit move that crashed, or could not give a replaced file back. They are
+/// only reported (the startup self-heal WARNs each), never deleted: one may be
+/// the only copy of a file.
+pub fn set_aside_leftovers(cache_dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+        return Vec::new();
+    };
+    let mut leftovers: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && path.extension().is_some_and(|e| e == "replaced"))
+        .collect();
+    leftovers.sort();
+    leftovers
 }
 
 /// One move [`move_as_unit`] made, and where it set aside the file it replaced.

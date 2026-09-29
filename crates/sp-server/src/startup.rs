@@ -120,6 +120,13 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
     // #136: AFTER the pair re-link (the audio paths are current) and the
     // duplicate removal (no superseded download's stems are left to adopt).
     crate::song_relink::relink_derived_files(pool, cache_dir).await?;
+    for leftover in cache::set_aside_leftovers(cache_dir) {
+        tracing::warn!(
+            "self-heal: a replaced song file is still set aside (a unit move crashed or could \
+             not give it back), kept for inspection: {}",
+            leftover.display()
+        );
+    }
 
     // Detect DB/disk mismatch: rows marked has_lyrics=1 but JSON file is gone.
     // This was originally a wholesale delete-all-lyrics-and-reset loop from

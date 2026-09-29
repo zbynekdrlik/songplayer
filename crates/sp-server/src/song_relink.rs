@@ -92,8 +92,10 @@ pub(crate) async fn relink_derived_files(
 /// completed rename leaves nothing under the old name, and a stem job and a dub
 /// job never run at once (one heavy slot), so those files are this job's. Not
 /// when the current audio is missing (the pass skips such a row too). If the
-/// move fails, it rolls back: the output stays under the start name, the older
-/// copy stays in effect, and nothing retries it.
+/// move fails, it rolls back and the output stays under the start name. When an
+/// older copy is under the current name, that copy stays in effect and nothing
+/// retries the move. When there is none, the pass right after, and the next
+/// start, re-link the output like any drifted file.
 pub(crate) async fn relink_song(
     pool: &SqlitePool,
     cache_dir: &Path,
@@ -119,9 +121,9 @@ pub(crate) async fn relink_song(
                 youtube_id = %youtube_id,
                 written_for = %written_for.display(),
                 current = %current,
-                "re-link: a job's output could not follow the song's rename; it stays under \
-                 the start name (not retried at the next start), the older copy under the \
-                 current name stays in effect"
+                "re-link: a job's output could not follow the song's rename and stays under \
+                 the start name; an older copy under the current name stays in effect and is \
+                 not replaced later, with none the pass below and the next start re-link it"
             );
         }
     }

@@ -46,8 +46,16 @@ Design record: #136 comment 5894034820.
 - **`move_as_unit` never loses a file it replaces.** A FILE already under a
   target name is set aside as `<name>.replaced`. It is deleted only once the
   whole unit has moved; a rollback gives it back. A directory at a target is
-  never set aside, so the move fails on it (that is how the tests force a
-  failure).
+  never set aside, so the move fails on it.
+  - A `to` that differs from `from` only in letter case is the SAME file on
+    NTFS (`is_other_file` compares canonical paths), so it is never set aside.
+    Doing so once lost the audio at the next start.
+  - A `.replaced` left over (a crash mid-unit, or a failed give-back) is never
+    deleted. The startup self-heal WARNs each: `self-heal: a replaced song file
+    is still set aside …`.
+  - Tests force a failing step with `move_as_unit_with(…, rename)` (the
+    `failing_on(from, to)` seam in `cache_tests_files.rs`), or with a
+    non-empty directory at the target.
 - **Rename a song only through `cache::rename_song_files(id, &old, &new)`**,
   never a hand-written `fs::rename` of one sidecar.
   - It moves derived → audio → video as ONE unit (`move_as_unit`).
@@ -87,8 +95,10 @@ Design record: #136 comment 5894034820.
   - It is skipped when the current audio is missing.
   - If it fails (a target held open without share-delete), it rolls back and
     WARNs `re-link: a job's output could not follow the song's rename`. The
-    output stays under the start name, the older copy stays in effect, and
-    NOTHING retries it: re-queue the stems / dub.
+    output stays under the start name. When an older copy is under the current
+    name, that copy stays in effect and NOTHING retries: re-queue the stems /
+    dub. When there is none, the normal pass and the next start re-link the
+    output like any drifted file.
 - **Delete a superseded download through `remove_duplicates`.**
   - It removes the video, the audio and the stems (re-separated on their own).
   - It KEEPS the dub + transcripts. The re-link adopts them under the kept

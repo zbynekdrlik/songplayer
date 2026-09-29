@@ -489,6 +489,25 @@ fn the_cache_scans_ignore_a_set_aside_file() {
     assert!(derived_file_owners(dir.path()).is_empty());
 }
 
+/// The startup self-heal reports every `.replaced` file left over, and only
+/// those (it never deletes them).
+#[test]
+fn set_aside_leftovers_lists_only_the_replaced_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let set = set_under(d, &new_base());
+    write_all(&set);
+    let (a, b) = (set_aside_name(&set[0]), set_aside_name(&set[4]));
+    fs::write(&a, b"x").unwrap();
+    fs::write(&b, b"x").unwrap();
+    fs::create_dir(d.join("dir.replaced")).unwrap();
+
+    let mut expected = vec![a, b];
+    expected.sort();
+    assert_eq!(set_aside_leftovers(d), expected);
+    assert!(set_aside_leftovers(&d.join("missing")).is_empty());
+}
+
 #[test]
 fn a_failed_move_returns_its_error() {
     let dir = tempfile::tempdir().unwrap();
