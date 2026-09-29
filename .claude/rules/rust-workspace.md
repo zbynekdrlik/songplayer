@@ -557,6 +557,21 @@ block, and the handlers run in the `match output` after it). So a handler may
 take `&mut` of a receiver that a branch future borrowed, e.g.
 `event = events.recv() => … task.resync(&mut events).await`.
 
+## Untrusted input never goes through `serde_json::Value`'s own `Deserialize` (#221 L2b review)
+
+serde_json's `raw_value` feature is ALWAYS on in this workspace (sp-server's
+`api/preview.rs`, axum's `json`, sqlx-core — feature unification). With it,
+`Value`'s `Deserialize` treats a map whose first key is
+`$serde_json::private::RawValue` as a raw value and re-parses its string as
+JSON with a FRESH 128-level recursion budget, so nested strings escape the
+depth limit (~18 × 127 levels in 1 MiB) — a stack exhaustion that aborts the
+whole process. For a frame from an untrusted peer, decode into a typed
+struct (a derived `Deserialize` never re-parses) or through
+`remote::codec::PlainValue` (a visitor that keeps every key a plain string),
+never `serde_json::from_str::<Value>` / `Json<Value>` / `Value::deserialize`.
+Known residuals outside the facade (not fixed by #221 L2b): `api/ai.rs`'s
+`Json<serde_json::Value>` body on the LAN HTTP API.
+
 ## `-D warnings` rejects `temporary.as_ptr()` in tests — bind the value first (#203 r2b)
 
 `assert_eq!(take(cap).as_ptr(), p, …)` is a compile ERROR under CI's

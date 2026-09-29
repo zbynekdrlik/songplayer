@@ -143,11 +143,14 @@ come from `SP-program`, never from cg OBS.
   messages; rmp-serde's default 1024 could exhaust a session's stack on a
   1 MiB frame of nested arrays) and refuses bytes after the one value
   (obs-websocket's strict `from_msgpack` does too). A map key must be a
-  string; binary / extension data has no JSON value and is refused.
+  string (a `bin` key holding UTF-8 is read as that string — serde's
+  `String` accepts it, harmless; obs-websocket would refuse it); binary /
+  extension data as a value has no JSON equivalent and is refused.
   **Both encodings decode through `codec::PlainValue`, never through
-  `serde_json::Value`'s own `Deserialize`** (review round 1): sp-server
-  enables serde_json's `raw_value` feature (`api/preview.rs`), and with it
-  `Value` re-parses the string after a first key
+  `serde_json::Value`'s own `Deserialize`** (review round 1): serde_json's
+  `raw_value` feature is always on in this build (sp-server's
+  `api/preview.rs`, axum's `json`, sqlx-core), and with it `Value`
+  re-parses the string after a first key
   `$serde_json::private::RawValue` as JSON with a FRESH 128-level budget —
   strings nested that way took a session's stack ~18 × 127 levels deep
   before Identify (the JSON path since #213). `PlainValue`'s visitor keeps
@@ -501,9 +504,10 @@ follow are the later lanes (L4a–L6) of #221.
   rmp-serde: Companion's Identify / GetVersion as `@msgpack/msgpack` 2.8.0
   encodes them (byte-string literals — a 40+ char hex fixture trips the
   secret-staging hook) and the facade's Identified written by hand. Also the
-  round trip of every JSON value kind, the 4002s, trailing bytes, a non-string
-  key / bin / ext, and the depth bound against serde_json's own (127 nested
-  pass, 128 do not, a 1 MB frame of nesting is refused), and the
+  round trip of every JSON value kind, the 4002s, trailing bytes, an integer
+  key / bin / ext, and the depth bound of BOTH codecs against serde_json's
+  own (127 nested pass, 128 do not, a 1 MB frame of nesting is refused), and
+  the
   `$serde_json::private::RawValue` key staying an ordinary key in both
   encodings (the test first shows `from_str::<Value>` re-parses it in this
   build).
@@ -576,6 +580,13 @@ follow are the later lanes (L4a–L6) of #221.
   scene (a startup restore, a dashboard cut to -1); the next program-scene
   event corrects it. Found in L3, not in the design record — the main
   session decides whether the forwarded answer is patched.
+- **No cap on concurrent sessions (pre-existing; msgpack doubles the
+  amplification).** One 1 MiB frame is decoded before it is closed: a JSON
+  array of `0,` builds ~16× its size in `Value`s, a msgpack array of 1-byte
+  nils ~32× (2^20 × 32 B ≈ 32 MiB, ~48 MiB while the `Vec` grows). Each frame
+  is bounded and freed, but many parallel unidentified sessions multiply
+  it. A session cap in `serve` (Companion uses one connection) is a design
+  decision left to the main session (L2b review round 2).
 - When Companion connects while cg OBS is down, its scene list stays empty
   until cg OBS emits a `SceneListChanged` or Companion reconnects. The
   page-13 buttons send their stored names verbatim, so they keep working:
