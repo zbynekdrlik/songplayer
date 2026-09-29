@@ -52,7 +52,11 @@ Design record: #136 comment 5894034820.
     (`MoveFailed::stuck`). A stuck audio is returned at its NEW name
     (`in_effect_after_failure`), so the row records where the file IS. The video
     moves last, so it is never stuck. A stuck stems pair or dub is re-linked at
-    the next start; a lone stuck stem resets the row.
+    the next start; a lone stuck stem resets the row. A lone stuck
+    `dub_transcripts.json`, where the dub moved back and its transcripts did
+    not, is NOT re-linked, because the dub already sits under the audio's name.
+    That dub plays, but it has no subtitles until it is dubbed again. It takes
+    a double failure.
   - Record `SongFiles::columns()` of the set it RETURNS, on EVERY row that
     recorded the old set: the same video in another playlist is a second row
     pointing at the same files.
@@ -67,6 +71,11 @@ Design record: #136 comment 5894034820.
   (`record_stem_result`), and the dub worker after `mark_dub_ready`
   (`record_dub_ready`). A job writes under the name its song had
   when it STARTED, so a rename while it ran would strand the output.
+  `relink_song(…, written_for)` takes that start-time audio. When the song was
+  renamed, the rename already carried the song's OLDER files to the new name,
+  so the job's own output is the fresh copy: it moves over them first, as one
+  unit, and then the normal pass runs. Without that, a re-dub left its new dub
+  stranded while the old one played (review round 4).
 - **Delete a superseded download through `remove_duplicates`.**
   - It removes the video, the audio and the stems (re-separated on their own).
   - It KEEPS the dub + transcripts. The re-link adopts them under the kept
@@ -87,7 +96,10 @@ Design record: #136 comment 5894034820.
   - Each unit is ranked by its OWN files' age; `derived_file_owners` only lists
     names, in path order.
   - A failed move leaves the row for the next pass. The columns are written
-    only when they differ.
+    only when they differ. The cache is scanned (`derived_file_owners`) at
+    most once per pass, and only when a unit is missing.
+  - Its WARNs start with `re-link:`, because it runs after jobs too. The
+    startup pass's INFO count line starts with `self-heal:`.
   - Leftovers are never deleted by inference: an old stems pair not chosen,
     or a superseded dub the kept row did not adopt, stays on disk. It costs
     disk space, never correctness, and deleting by name could destroy the only

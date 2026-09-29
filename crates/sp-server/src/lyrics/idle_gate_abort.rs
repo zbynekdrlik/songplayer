@@ -257,7 +257,8 @@ impl crate::lyrics::worker::LyricsWorker {
                 expected_vocals = %vocals_path.display(),
                 recorded_vocals = recorded.as_deref().unwrap_or("-"),
                 "lyrics: stems are recorded done but the vocals file is missing under the \
-                 audio's name, waiting for stems (the startup self-heal re-links them)"
+                 audio's name, waiting for stems (the next start's self-heal re-links them \
+                 or resets the song to pending)"
             );
         }
         isolation_input(stem_status.as_deref(), &vocals_path, exists)

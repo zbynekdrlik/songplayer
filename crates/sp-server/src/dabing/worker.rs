@@ -353,7 +353,14 @@ impl DubWorker {
         let cache_dir = Path::new(&job.audio_file_path)
             .parent()
             .unwrap_or_else(|| Path::new("."));
-        if let Err(e) = crate::song_relink::relink_song(&self.pool, cache_dir, job.video_id).await {
+        if let Err(e) = crate::song_relink::relink_song(
+            &self.pool,
+            cache_dir,
+            job.video_id,
+            Path::new(&job.audio_file_path),
+        )
+        .await
+        {
             warn!(%e, video_id = job.video_id, "dub worker: dub re-link failed");
         }
     }

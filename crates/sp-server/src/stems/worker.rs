@@ -514,8 +514,13 @@ impl StemWorker {
                 let cache_dir = Path::new(&job.audio_file_path)
                     .parent()
                     .unwrap_or_else(|| Path::new("."));
-                if let Err(e) =
-                    crate::song_relink::relink_song(&self.pool, cache_dir, job.video_id).await
+                if let Err(e) = crate::song_relink::relink_song(
+                    &self.pool,
+                    cache_dir,
+                    job.video_id,
+                    Path::new(&job.audio_file_path),
+                )
+                .await
                 {
                     warn!(video_id = job.video_id, %e, "stem worker: stems re-link failed");
                 }

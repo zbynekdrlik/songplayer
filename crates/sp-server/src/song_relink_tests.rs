@@ -10,6 +10,7 @@ use sqlx::{Row, SqlitePool};
 
 use super::*;
 use crate::db;
+use crate::downloader::cache;
 
 async fn pool() -> SqlitePool {
     let pool = db::create_memory_pool().await.unwrap();
@@ -347,7 +348,8 @@ async fn relink_song_repairs_only_its_own_song() {
         );
     }
 
-    let counts = relink_song(&pool, d, mine).await.unwrap();
+    let mine_audio = named(d, "Song_A", "aaaaaaaaaaa", "_audio.flac");
+    let counts = relink_song(&pool, d, mine, &mine_audio).await.unwrap();
 
     assert_eq!(
         counts,
@@ -356,7 +358,6 @@ async fn relink_song_repairs_only_its_own_song() {
             ..RelinkCounts::default()
         }
     );
-    let mine_audio = named(d, "Song_A", "aaaaaaaaaaa", "_audio.flac");
     assert_eq!(
         columns(&pool, mine).await.1,
         Some(text(&crate::stems::stem_paths(&mine_audio).0))
@@ -387,7 +388,10 @@ async fn a_relink_reads_the_row_only_once_it_holds_the_song_files_lock() {
     let held = cache::SONG_FILES.lock().await;
     let relink = tokio::spawn({
         let (pool, d) = (pool.clone(), d.clone());
-        async move { relink_song(&pool, &d, id).await.unwrap() }
+        async move {
+            let audio = named(&d, "Song_A", "IYAOosrh7HY", "_audio.flac");
+            relink_song(&pool, &d, id, &audio).await.unwrap()
+        }
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(!relink.is_finished(), "the re-link waits for the lock");
@@ -408,4 +412,42 @@ async fn a_relink_reads_the_row_only_once_it_holds_the_song_files_lock() {
         old_vocals.exists(),
         "a pending row's stems are not re-linked"
     );
+}
+
+/// The startup pass reads its rows under `cache::SONG_FILES` too (review round
+/// 4: only `relink_song`'s order had a test). Same shape as above.
+#[tokio::test]
+async fn the_startup_pass_reads_its_rows_only_once_it_holds_the_song_files_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_path_buf();
+    let pool = pool().await;
+    let id = song(&pool, &d, "IYAOosrh7HY", "done", "none").await;
+    let old_vocals = named(&d, "Old_A", "IYAOosrh7HY", "_gf_audio_vocals.flac");
+    write(&old_vocals, "v", 5);
+    write(
+        &named(&d, "Old_A", "IYAOosrh7HY", "_gf_audio_instrumental.flac"),
+        "i",
+        5,
+    );
+
+    let held = cache::SONG_FILES.lock().await;
+    let pass = tokio::spawn({
+        let (pool, d) = (pool.clone(), d.clone());
+        async move { relink_derived_files(&pool, &d).await.unwrap() }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!pass.is_finished(), "the pass waits for the lock");
+    sqlx::query("UPDATE videos SET stem_status = NULL WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    drop(held);
+    let counts = tokio::time::timeout(Duration::from_secs(30), pass)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(counts, RelinkCounts::default(), "the row is no longer done");
+    assert!(old_vocals.exists());
 }

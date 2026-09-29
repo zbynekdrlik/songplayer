@@ -34,6 +34,7 @@
 //! [`cache::SONG_FILES`] from reading the rows to the last record, so it never
 //! interleaves with a rename.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -82,13 +83,40 @@ pub(crate) async fn relink_derived_files(
 }
 
 /// Re-link ONE song's stems / dub, after a worker recorded a finished job for
-/// it (`video_id`).
+/// it (`video_id`). `written_for` is the audio the job's output is named after:
+/// the song's audio when the job STARTED. If the song was renamed meanwhile, the
+/// rename already carried the song's older files to the new name, so the job's
+/// own output is the fresh copy. It moves over them first, as one unit, and then
+/// the normal pass runs (review round 4: a re-dub stranded its new dub while the
+/// old one stayed in place).
 pub(crate) async fn relink_song(
     pool: &SqlitePool,
     cache_dir: &Path,
     video_id: i64,
+    written_for: &Path,
 ) -> Result<RelinkCounts, sqlx::Error> {
     let _files = cache::SONG_FILES.lock().await;
+    let song: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT youtube_id, audio_file_path FROM videos WHERE id = ?")
+            .bind(video_id)
+            .fetch_optional(pool)
+            .await?;
+    if let Some((youtube_id, Some(current))) = song
+        && Path::new(&current) != written_for
+    {
+        let moves: Vec<(PathBuf, PathBuf)> = cache::derived_files(written_for)
+            .into_iter()
+            .zip(cache::derived_files(Path::new(&current)))
+            .collect();
+        if cache::move_as_unit(&youtube_id, &moves).is_err() {
+            tracing::warn!(
+                youtube_id = %youtube_id,
+                written_for = %written_for.display(),
+                current = %current,
+                "re-link: a job's output could not follow the song's rename"
+            );
+        }
+    }
     let rows = sqlx::query(&format!("{ROWS} AND id = ?"))
         .bind(video_id)
         .fetch_all(pool)
@@ -102,7 +130,10 @@ async fn relink_rows(
     cache_dir: &Path,
     rows: &[SqliteRow],
 ) -> Result<RelinkCounts, sqlx::Error> {
-    let owners = cache::derived_file_owners(cache_dir);
+    let mut owners = Owners {
+        cache_dir,
+        scanned: None,
+    };
     let mut counts = RelinkCounts::default();
     for r in rows {
         let audio = PathBuf::from(r.get::<String, _>("audio_file_path"));
@@ -114,18 +145,32 @@ async fn relink_rows(
             youtube_id: r.get("youtube_id"),
             audio,
         };
-        let names = owners
-            .get(&song.youtube_id)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
         if r.get::<Option<String>, _>("stem_status").as_deref() == Some("done") {
-            relink_stems(pool, &song, names, &mut counts).await?;
+            relink_stems(pool, &song, &mut owners, &mut counts).await?;
         }
         if r.get::<String, _>("dub_status") == "ready" {
-            relink_dub(pool, &song, names, &mut counts).await?;
+            relink_dub(pool, &song, &mut owners, &mut counts).await?;
         }
     }
     Ok(counts)
+}
+
+/// The names in the cache holding derived files ([`cache::derived_file_owners`]).
+/// The cache is scanned once per pass, and only when a unit is missing: after a
+/// job whose output is already in place, nothing is scanned.
+struct Owners<'a> {
+    cache_dir: &'a Path,
+    scanned: Option<HashMap<String, Vec<PathBuf>>>,
+}
+
+impl Owners<'_> {
+    fn of(&mut self, youtube_id: &str) -> &[PathBuf] {
+        self.scanned
+            .get_or_insert_with(|| cache::derived_file_owners(self.cache_dir))
+            .get(youtube_id)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
 }
 
 /// One row the pass works on: its audio exists.
@@ -139,17 +184,18 @@ struct Song {
 async fn relink_stems(
     pool: &SqlitePool,
     song: &Song,
-    names: &[PathBuf],
+    owners: &mut Owners<'_>,
     counts: &mut RelinkCounts,
 ) -> Result<(), sqlx::Error> {
     let (vocals, instrumental) = crate::stems::stem_paths(&song.audio);
     if !both_stems_exist(&song.audio) {
+        let names = owners.of(&song.youtube_id);
         let holders = names.iter().filter(|name| both_stems_exist(name));
         let Some(old) = newest(holders, |name| crate::stems::stem_paths(name).0) else {
             tracing::warn!(
                 youtube_id = %song.youtube_id,
                 expected_vocals = %vocals.display(),
-                "self-heal: stems are recorded done but no name holds them, \
+                "re-link: stems are recorded done but no name holds them, \
                  back to pending so the stem worker separates the song again"
             );
             crate::db::models_stems::requeue_lost_stems(pool, song.id).await?;
@@ -183,11 +229,12 @@ async fn relink_stems(
 async fn relink_dub(
     pool: &SqlitePool,
     song: &Song,
-    names: &[PathBuf],
+    owners: &mut Owners<'_>,
     counts: &mut RelinkCounts,
 ) -> Result<(), sqlx::Error> {
     let dub = crate::stems::dub_path(&song.audio);
     if !dub.exists() {
+        let names = owners.of(&song.youtube_id);
         let holders = names
             .iter()
             .filter(|name| crate::stems::dub_path(name).exists());
@@ -195,7 +242,7 @@ async fn relink_dub(
             tracing::warn!(
                 youtube_id = %song.youtube_id,
                 expected_dub = %dub.display(),
-                "self-heal: the dub is recorded ready but no name holds its track \
+                "re-link: the dub is recorded ready but no name holds its track \
                  (left as it is: a dub is only synthesized on request)"
             );
             counts.dubs_missing += 1;
