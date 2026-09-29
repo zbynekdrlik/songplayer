@@ -47,8 +47,9 @@ async function socketOpen(page: Page) {
   });
 }
 
-test("▶ on a playlist off air plays it off program — 'Hrá mimo programu'", async ({
+test("▶ on a playlist off air plays it off program — 'Hrá mimo programu', then 'Hrá' once it goes on program", async ({
   page,
+  request,
 }) => {
   await page.goto("/live");
   await socketOpen(page);
@@ -72,6 +73,19 @@ test("▶ on a playlist off air plays it off program — 'Hrá mimo programu'", 
   await expect(page.getByTestId("player-program-badge")).toContainText(
     "○ Mimo programu",
   );
+
+  // #221 L4b review round 6: the operator puts it on program (a dashboard
+  // cut; a Companion press is the same program change). It was playing
+  // already, so no state change tells the dashboard: the scene change
+  // itself does, and the label reads "Hrá" for the rest of the song.
+  const cut = await request.post("/api/v1/program/cut", {
+    data: { source: 184 },
+  });
+  expect(cut.ok()).toBe(true);
+  await expect(page.getByTestId("player-state")).toHaveText("Hrá", {
+    timeout: 10000,
+  });
+  await expect(toggle).toContainText("⏸ Pauza");
 });
 
 test("▶ on the playlist on air plays it on program — 'Hrá'", async ({
