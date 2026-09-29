@@ -510,6 +510,12 @@ and the recording actually get.
   transition events), and a second one on cg OBS (`OBS_WS_URL`, :4455) ONLY
   for `GetProfileParameter` / `StartRecord` / `StopRecord` /
   `GetRecordStatus` (the recording is cg OBS's program).
+  **`obs-driver.ts` must import `obs-websocket-js/json`.** In Node the bare
+  `obs-websocket-js` import resolves (package `exports` → `import`) to the
+  MSGPACK build. SongPlayer's facade is JSON-only, like Companion, and
+  answers a msgpack-only offer with HTTP 400. That killed every post-deploy
+  spec's `beforeAll` (run 36497336926). cg OBS accepts msgpack, which hid the
+  problem. `e2e/obs-driver-protocol.spec.ts` pins it.
   It parks the program on the shared baseline scene (`e2e/obs-baseline-scene.ts`:
   sp-slow, never sp-warmup/sp-fast). It proves the output is PLAYING with
   `/api/v1/ndi/health`: `state=Playing` AND `frames_submitted_last_5s > 0`.
