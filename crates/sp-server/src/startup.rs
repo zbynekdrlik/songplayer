@@ -5,7 +5,8 @@
 //! directory, deletes any legacy single-file `.mp4` left over from the
 //! pre-FLAC pipeline, deletes any orphan half-sidecars from a crashed
 //! mid-download, and re-links any complete video+audio pairs back to the
-//! DB row that owns them.
+//! DB row that owns them, then re-links the stems / dub a rename left under
+//! an old name (#136).
 //!
 //! [`startup_sync_active_playlists`] replicates the behavior of the
 //! legacy Python `tools.py::trigger_startup_sync` that was missed in the
@@ -26,6 +27,11 @@ use crate::downloader::cache;
 #[path = "startup_dabing.rs"]
 mod startup_dabing;
 pub use startup_dabing::ensure_dabing_playlist_exists;
+
+// #136: the self-heal pass for the files a song names after its audio (stems,
+// dub), a sibling module for the 1000-line cap.
+#[path = "startup_relink.rs"]
+mod startup_relink;
 
 /// Ensures the single pre-created `ytlive` custom playlist exists.
 /// Idempotent: a no-op when the row is already present.
@@ -51,7 +57,9 @@ pub async fn ensure_live_playlist_exists(pool: &SqlitePool) -> Result<(), sqlx::
 ///
 /// * delete legacy single-file `.mp4`s (from before the FLAC migration),
 /// * delete orphan half-sidecars (debris from a crashed download),
-/// * re-link complete video+audio pairs to their DB row.
+/// * re-link complete video+audio pairs to their DB row,
+/// * re-link the stems / dub a rename left under an old name, and reset stems
+///   no name holds to pending (#136, `startup_relink`).
 #[cfg_attr(test, mutants::skip)]
 pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), sqlx::Error> {
     let scan = cache::scan_cache(cache_dir);
@@ -96,6 +104,10 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
         .execute(pool)
         .await?;
     }
+
+    // #136: AFTER the pair re-link (the audio paths are current) and the
+    // duplicate removal (no superseded download's stems are left to adopt).
+    startup_relink::relink_derived_files(pool, cache_dir).await?;
 
     // Detect DB/disk mismatch: rows marked has_lyrics=1 but JSON file is gone.
     // This was originally a wholesale delete-all-lyrics-and-reset loop from
@@ -891,108 +903,8 @@ mod sync_filter_tests {
 }
 
 #[cfg(test)]
-mod emoji_self_heal_tests {
-    use super::*;
-    use crate::db;
-
-    async fn seed_pool() -> SqlitePool {
-        let pool = db::create_memory_pool().await.unwrap();
-        db::run_migrations(&pool).await.unwrap();
-        sqlx::query(
-            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name)
-             VALUES (1, 'p', 'u', 'n')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        pool
-    }
-
-    /// RED: mirrors the live #135 E2E failure — a stored row whose
-    /// `gemini_failed = 1` (every provider keeps failing on this video, so
-    /// it can never be healed by a provider retry) carries an emoji in
-    /// `artist` written before the sanitizer choke point existed. The
-    /// startup self-heal pass must clean it in place.
-    #[tokio::test]
-    async fn heals_dirty_stored_row_with_emoji() {
-        let pool = seed_pool().await;
-        sqlx::query(
-            "INSERT INTO videos
-                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
-             VALUES (1, '0HQOYVf6-Yg', 't', 'Our God + The Blessing',
-                     'Christian Afro House 2025 \u{1F525}', 1, 1)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let healed = self_heal_emoji_metadata(&pool).await.unwrap();
-        assert_eq!(healed, 1, "exactly the dirty row should be healed");
-
-        let row = sqlx::query("SELECT song, artist FROM videos WHERE youtube_id = '0HQOYVf6-Yg'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        let song: String = row.get("song");
-        let artist: String = row.get("artist");
-        assert_eq!(song, "Our God + The Blessing");
-        assert_eq!(
-            artist, "Christian Afro House 2025",
-            "self-heal must strip emoji from the stored artist"
-        );
-    }
-
-    /// A row already clean (no emoji, `gemini_failed = 0`) must be left
-    /// untouched — proves the pass doesn't rewrite every row on every boot.
-    #[tokio::test]
-    async fn skips_already_clean_rows() {
-        let pool = seed_pool().await;
-        sqlx::query(
-            "INSERT INTO videos
-                (playlist_id, youtube_id, title, song, artist, gemini_failed, normalized)
-             VALUES (1, 'clean1', 't', 'The Blessing', 'Elevation Worship', 0, 1)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let healed = self_heal_emoji_metadata(&pool).await.unwrap();
-        assert_eq!(healed, 0, "no row should be touched when already clean");
-
-        let row = sqlx::query("SELECT song, artist FROM videos WHERE youtube_id = 'clean1'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(row.get::<String, _>("song"), "The Blessing");
-        assert_eq!(row.get::<String, _>("artist"), "Elevation Worship");
-    }
-
-    /// A row with NULL song/artist (never processed yet) must stay NULL —
-    /// the sanitizer must never turn an absent value into `""`.
-    #[tokio::test]
-    async fn preserves_null_song_and_artist() {
-        let pool = seed_pool().await;
-        sqlx::query(
-            "INSERT INTO videos (playlist_id, youtube_id, title, gemini_failed, normalized)
-             VALUES (1, 'unprocessed', 't', 0, 0)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let healed = self_heal_emoji_metadata(&pool).await.unwrap();
-        assert_eq!(healed, 0, "a NULL song/artist row is not dirty");
-
-        let row = sqlx::query("SELECT song, artist FROM videos WHERE youtube_id = 'unprocessed'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        let song: Option<String> = row.get("song");
-        let artist: Option<String> = row.get("artist");
-        assert_eq!(song, None, "song must stay NULL, never coerced to \"\"");
-        assert_eq!(artist, None, "artist must stay NULL, never coerced to \"\"");
-    }
-}
+#[path = "startup_emoji_tests.rs"]
+mod emoji_self_heal_tests;
 
 #[cfg(test)]
 #[path = "startup_requeue_tests.rs"]

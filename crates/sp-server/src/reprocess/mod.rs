@@ -284,79 +284,46 @@ impl ReprocessWorker {
         // start from stage 0 again.
         self.per_video_backoff.remove(&row.id);
 
-        // Rename BOTH sidecars on successful metadata upgrade — strip the _gf marker.
-        let cache_dir = &self.cache_dir;
-        let new_video_name = crate::downloader::cache::video_filename(
+        // #136: move the song's COMPLETE file set (the video, the audio, and the
+        // stems + dub named after the audio) to the upgraded name as ONE unit
+        // (`_gf` stripped). A song is never split across two names: when a move
+        // fails, the set stays under the old name and the row records that.
+        let old = crate::downloader::cache::SongFiles::recorded(
+            &row.file_path,
+            row.audio_file_path.as_deref(),
+        );
+        let new = old.named(
+            &self.cache_dir,
             &meta.song,
             &meta.artist,
             &row.youtube_id,
             false,
         );
-        let new_audio_name = crate::downloader::cache::audio_filename(
-            &meta.song,
-            &meta.artist,
-            &row.youtube_id,
-            false,
-        );
-        let new_video_path = cache_dir.join(&new_video_name);
-        let new_audio_path = cache_dir.join(&new_audio_name);
+        let files =
+            crate::downloader::cache::rename_song_files(&row.youtube_id, &old, &new).columns();
 
-        let new_video_str: String = if !row.file_path.is_empty() {
-            let old_v = std::path::Path::new(&row.file_path);
-            if old_v.exists() {
-                match tokio::fs::rename(old_v, &new_video_path).await {
-                    Ok(()) => new_video_path.to_string_lossy().into_owned(),
-                    Err(e) => {
-                        warn!(
-                            video_id = %row.youtube_id,
-                            old = %row.file_path,
-                            new = %new_video_path.display(),
-                            "video rename failed: {e}"
-                        );
-                        row.file_path.clone()
-                    }
-                }
-            } else {
-                new_video_path.to_string_lossy().into_owned()
-            }
-        } else {
-            row.file_path.clone()
-        };
-
-        let new_audio_str: String = if let Some(old_audio_str) = row.audio_file_path.as_ref() {
-            let old_a = std::path::Path::new(old_audio_str);
-            if old_a.exists() {
-                match tokio::fs::rename(old_a, &new_audio_path).await {
-                    Ok(()) => new_audio_path.to_string_lossy().into_owned(),
-                    Err(e) => {
-                        warn!(
-                            video_id = %row.youtube_id,
-                            old = %old_audio_str,
-                            new = %new_audio_path.display(),
-                            "audio rename failed: {e}"
-                        );
-                        old_audio_str.clone()
-                    }
-                }
-            } else {
-                new_audio_path.to_string_lossy().into_owned()
-            }
-        } else {
-            String::new()
-        };
-
-        // Update DB with both paths.
+        // The stem / dub columns follow the audio's name, and one never
+        // recorded (NULL) stays NULL.
         sqlx::query(
             "UPDATE videos
              SET song = ?, artist = ?, metadata_source = ?,
-                 gemini_failed = 0, file_path = ?, audio_file_path = ?
+                 gemini_failed = 0, file_path = ?, audio_file_path = ?,
+                 vocals_file_path = CASE WHEN vocals_file_path IS NULL
+                     THEN NULL ELSE COALESCE(?, vocals_file_path) END,
+                 instrumental_file_path = CASE WHEN instrumental_file_path IS NULL
+                     THEN NULL ELSE COALESCE(?, instrumental_file_path) END,
+                 dub_file_path = CASE WHEN dub_file_path IS NULL
+                     THEN NULL ELSE COALESCE(?, dub_file_path) END
              WHERE id = ?",
         )
         .bind(&meta.song)
         .bind(&meta.artist)
         .bind(meta.source.as_str())
-        .bind(&new_video_str)
-        .bind(&new_audio_str)
+        .bind(&files.video)
+        .bind(&files.audio)
+        .bind(&files.vocals)
+        .bind(&files.instrumental)
+        .bind(&files.dub)
         .bind(row.id)
         .execute(&self.pool)
         .await?;
