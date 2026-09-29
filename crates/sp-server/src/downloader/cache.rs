@@ -360,8 +360,8 @@ fn move_as_unit_with<O: FileOps>(
                     tracing::warn!(
                         youtube_id,
                         to = %to.display(),
-                        "cache: found no free name to set aside the file under a song file's \
-                         new name: {error}"
+                        "cache: could not find a free set-aside name for the file under a song \
+                         file's new name (a stat failed or all of them are taken): {error}"
                     );
                     return Err(undo(youtube_id, done, error, ops));
                 }
@@ -424,9 +424,10 @@ fn move_as_unit_with<O: FileOps>(
 /// aside before it can take the name. On a case-insensitive filesystem (NTFS,
 /// the box) a `to` that differs from `from` only in letter case names the SAME
 /// file: both canonicalize to it, so it is not set aside and the rename just
-/// changes the case (#136 review round 6). When either cannot be
-/// canonicalized, the answer is unknown: an error, and the unit rolls back
-/// rather than guess (a wrong guess set the song's own file aside).
+/// changes the case (#136 review round 6). When `to` cannot be stat'ed (any
+/// error but NotFound) or either path cannot be canonicalized, the answer is
+/// unknown: an error, and the unit rolls back rather than guess (a wrong guess
+/// set the song's own file aside, or renamed over a file it could not see).
 fn is_other_file(from: &Path, to: &Path) -> std::io::Result<bool> {
     let target = match std::fs::metadata(to) {
         Ok(target) => target,

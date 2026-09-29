@@ -403,6 +403,29 @@ fn failing_on(from: PathBuf, to: PathBuf) -> Failing {
     }
 }
 
+/// #136 review round 10: on the REAL filesystem a stat that fails for another
+/// reason than NotFound (here ENOTDIR: a path "inside" a regular file) is an
+/// error, never "absent" or "no file there", and the unit move rolls back on
+/// it. Unix only: on Windows such a path reads as NotFound.
+#[cfg(unix)]
+#[test]
+fn a_real_stat_error_is_never_read_as_absent() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let (a, a2, file) = (d.join("a"), d.join("a2"), d.join("file"));
+    fs::write(&a, b"a").unwrap();
+    fs::write(&file, b"x").unwrap();
+    let inside = file.join("x");
+
+    assert!(RealFs.exists(&inside).is_err());
+    assert!(is_other_file(&a, &inside).is_err());
+    let failed = move_as_unit(ID, &[(a.clone(), a2.clone()), (inside, d.join("y"))]).unwrap_err();
+
+    assert!(failed.stuck.is_empty());
+    assert_eq!(fs::read(&a).unwrap(), b"a", "the earlier move is undone");
+    assert!(!a2.exists());
+}
+
 /// #136 review round 9: a source whose stat fails is not read as "absent" (the
 /// song would be recorded under a name with no file, and the next start would
 /// delete the old one as an orphan): the unit rolls back.
