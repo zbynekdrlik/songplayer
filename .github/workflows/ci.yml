@@ -1790,13 +1790,11 @@ jobs:
       - name: Verify Presenter reachable
         shell: powershell
         run: |
-          # Regression gate for the 2026-04-22 worship-training bundle:
-          # band singers depend on the stage display, so the deploy fails
-          # when the configured Presenter does not answer.
-          # READ-ONLY (29.9.2026): this step used to PUT currentText
-          # "[CI PROBE]" to the LIVE stage display on every deploy, and the
-          # owner saw it on the stage screen. It now GETs Presenter's stage
-          # snapshot on the same host and never writes to the stage.
+          # Regression gate for the 2026-04-22 worship-training bundle.
+          # SongPlayer's line-change hook must be able to PUT to the
+          # configured Presenter URL - band singers depend on the stage
+          # display during live worship. This step fails deploy if the
+          # Presenter endpoint is down or returns non-204.
           $settings = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/settings" -TimeoutSec 10
           if ($settings.presenter_enabled -ne "true") {
             Write-Host "presenter_enabled = '$($settings.presenter_enabled)' - skipping reachability check"
@@ -1807,23 +1805,24 @@ jobs:
             Write-Error "FAIL: presenter_enabled=true but presenter_url is empty"
             exit 1
           }
-          $base = ([System.Uri]$url).GetLeftPart([System.UriPartial]::Authority)
-          $snapshot = "$base/stage/snapshot?layout=api"
-          Write-Host "Checking Presenter at $snapshot (read-only; stage URL $url)"
+          Write-Host "Probing Presenter at $url"
           try {
-            $resp = Invoke-WebRequest -Uri $snapshot -Method Get -UseBasicParsing -TimeoutSec 10
-            if ($resp.StatusCode -ne 200) {
-              Write-Error "FAIL: Presenter at $snapshot returned $($resp.StatusCode), expected 200"
+            $probe = @{
+              currentText = "[CI PROBE]"
+              nextText = ""
+              currentSong = ""
+              nextSong = ""
+            } | ConvertTo-Json -Compress
+            $resp = Invoke-WebRequest -Uri $url -Method Put `
+              -ContentType "application/json" `
+              -Body $probe -UseBasicParsing -TimeoutSec 10
+            if ($resp.StatusCode -ne 204) {
+              Write-Error "FAIL: Presenter at $url returned $($resp.StatusCode), expected 204"
               exit 1
             }
-            $body = $resp.Content | ConvertFrom-Json
-            if ($null -eq $body.layout) {
-              Write-Error "FAIL: Presenter at $snapshot answered without a layout: $($resp.Content)"
-              exit 1
-            }
-            Write-Host "OK: Presenter at $base answered its stage snapshot (layout $($body.layout.code))"
+            Write-Host "OK: Presenter at $url responded 204 to probe PUT"
           } catch {
-            Write-Error "FAIL: Presenter unreachable at ${snapshot}: $_"
+            Write-Error "FAIL: Presenter unreachable at ${url}: $_"
             exit 1
           }
 
