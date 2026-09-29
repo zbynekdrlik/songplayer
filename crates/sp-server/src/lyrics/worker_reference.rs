@@ -5,10 +5,12 @@
 //! 1000-line CI limit. `run_mtl_reference_stage` is the FIRST tier: it aligns
 //! the best text candidate via mtl, verifies it against Gemini ASR through the
 //! reference gate (`orchestrator::run_reference_stage`), and on gate PASS ships
-//! the mtl line timings directly while stamping `videos.lyrics_reference`. Gate
-//! FAIL/ERROR writes the `{youtube_id}_alignment_audit.json` sidecar and
-//! returns `None` so the caller falls through to the v22 g35t base tier
-//! (`worker_g35t`).
+//! the mtl line timings directly while stamping `videos.lyrics_reference`.
+//! Every PASS/FAIL/ERROR writes the `{youtube_id}_alignment_audit.json`
+//! sidecar (#144: a PASS too, so the gate's numbers — the sung coverage
+//! included — are on disk for every ★ row, and a stale FAIL audit of an
+//! earlier run never outlives a later PASS). FAIL/ERROR returns `None` so the
+//! caller falls through to the v22 g35t base tier (`worker_g35t`).
 
 use std::path::Path;
 
@@ -23,7 +25,7 @@ impl LyricsWorker {
     /// `orchestrator::run_reference_stage` for the mtl-align → Gemini-ASR →
     /// gate decision; this wraps it with the skip conditions, the
     /// `videos.lyrics_reference` flag update, and the
-    /// `_alignment_audit.json` sidecar on a non-Pass outcome. `backend` is
+    /// `_alignment_audit.json` sidecar of every gate outcome. `backend` is
     /// the injection seam (`orchestrator::ReferenceStageBackend`) —
     /// production passes `RealReferenceStageBackend`, tests pass a fake.
     ///
@@ -102,13 +104,33 @@ impl LyricsWorker {
         };
 
         match outcome {
-            crate::lyrics::orchestrator::ReferenceStageResult::Pass { lines, stats } => {
+            crate::lyrics::orchestrator::ReferenceStageResult::Pass {
+                lines,
+                stats,
+                mtl_device,
+                mtl_elapsed_s,
+                asr_word_count,
+            } => {
                 info!(
                     youtube_id = %youtube_id,
                     matched_frac = stats.matched_frac,
                     within_400_frac = stats.within_400_frac,
+                    sung_covered_frac = stats.sung_covered_frac,
+                    max_uncovered_sung_ms = stats.max_uncovered_sung_ms,
                     "reference_stage: gate PASS — stamping ★ reference (#143)"
                 );
+                crate::lyrics::audit_ctx::write_alignment_audit(
+                    Some(&audit_ctx),
+                    &reference_gate_audit_json(
+                        "pass",
+                        None,
+                        Some(&stats),
+                        Some(&mtl_device),
+                        Some(mtl_elapsed_s),
+                        asr_word_count,
+                    ),
+                )
+                .await;
                 if let Err(e) =
                     crate::db::models::set_video_lyrics_reference(&self.pool, video_id, true).await
                 {
@@ -136,6 +158,8 @@ impl LyricsWorker {
                     youtube_id = %youtube_id,
                     reason = reason_str,
                     matched_frac = stats.matched_frac,
+                    sung_covered_frac = stats.sung_covered_frac,
+                    max_uncovered_sung_ms = stats.max_uncovered_sung_ms,
                     "reference_stage: gate FAIL — keeping existing route (#143)"
                 );
                 crate::lyrics::audit_ctx::write_alignment_audit(
@@ -237,8 +261,9 @@ fn gate_fail_reason_str(reason: &crate::lyrics::reference_gate::GateFailReason) 
 }
 
 /// Builds the `{youtube_id}_alignment_audit.json` payload for a Lever-2
-/// (#143) reference-stage `Fail` (`stats = Some(..)`) or `Error`
-/// (`stats = None`) outcome.
+/// (#143) reference-stage `Pass` / `Fail` (`stats = Some(..)`) or `Error`
+/// (`stats = None`) outcome. #144 adds the transcript → reference numbers
+/// (`sung_words`, `sung_covered_frac`, `max_uncovered_sung_ms`).
 fn reference_gate_audit_json(
     verdict: &str,
     reason: Option<&str>,
@@ -255,6 +280,9 @@ fn reference_gate_audit_json(
         "matched_frac": stats.map(|s| s.matched_frac).unwrap_or(0.0),
         "median_signed_ms": stats.map(|s| s.median_signed_ms).unwrap_or(0),
         "within_400_frac": stats.map(|s| s.within_400_frac).unwrap_or(0.0),
+        "sung_words": stats.map(|s| s.sung_words).unwrap_or(0),
+        "sung_covered_frac": stats.map(|s| s.sung_covered_frac).unwrap_or(0.0),
+        "max_uncovered_sung_ms": stats.map(|s| s.max_uncovered_sung_ms).unwrap_or(0),
         "mtl_device": mtl_device,
         "mtl_elapsed_s": mtl_elapsed_s,
         "asr_words": asr_words,

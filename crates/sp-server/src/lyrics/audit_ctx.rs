@@ -3,9 +3,11 @@
 //! After #159 the only sidecar still written is the Lever-2 (#143)
 //! reference-gate decision:
 //!
-//! - `{youtube_id}_alignment_audit.json` — the reviewable record for a
-//!   `Fail`/`Error` reference-stage outcome (a `Pass` needs no audit; the
-//!   stamped `+mtl@rev1/g35t-ok` source IS the record).
+//! - `{youtube_id}_alignment_audit.json` — the reviewable record of every
+//!   reference-stage outcome: `Pass`, `Fail` and `Error` (#144: a `Pass`
+//!   too, so every ★ row keeps its gate numbers, the sung coverage
+//!   included, and a stale `Fail` audit of an earlier run never outlives a
+//!   later `Pass`).
 //!
 //! The v20 whisperx-track and description-merge sidecars were removed with
 //! those routes. When `audit` is `None`, the write is skipped — keeps unit

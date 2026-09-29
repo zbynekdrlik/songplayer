@@ -684,3 +684,115 @@ async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
 
     let _ = std::fs::remove_dir_all(&cache_dir);
 }
+
+/// #144: a gate PASS writes the audit sidecar too, carrying the sung
+/// coverage, so every ★ row has its gate numbers on disk (and an older FAIL
+/// audit of the same song is replaced, not left behind).
+#[tokio::test]
+async fn run_mtl_reference_stage_pass_writes_the_audit_with_the_sung_coverage() {
+    use crate::lyrics::g35t_client::AsrWord;
+    use crate::lyrics::mtl_aligner::{MtlLine, MtlOutput};
+
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) VALUES (1, 'p', 'u', 'n')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let video_id: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title, song, artist, normalized) \
+         VALUES (1, 'yt_pass_audit', 'T', 'S', 'A', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let cache_dir = std::env::temp_dir().join("sp_reference_stage_pass_audit_test");
+    let _ = std::fs::remove_dir_all(&cache_dir);
+    std::fs::create_dir_all(&cache_dir).unwrap();
+    // A stale FAIL audit from an earlier run of the same song.
+    std::fs::write(
+        cache_dir.join("yt_pass_audit_alignment_audit.json"),
+        br#"{"verdict":"fail","reason":"coverage"}"#,
+    )
+    .unwrap();
+    let tools = available_mtl_tools_dir();
+    let (events_tx, _rx) = tokio::sync::broadcast::channel::<sp_core::ws::ServerMsg>(16);
+    let worker = crate::lyrics::worker::LyricsWorker::new_for_test_with_tools_dir(
+        pool,
+        cache_dir.clone(),
+        tools.path().to_path_buf(),
+        events_tx,
+    );
+
+    let texts = ["amazing grace", "how sweet", "the sound", "that saved"];
+    let cand = crate::lyrics::tier1::CandidateText {
+        source: "lrclib".to_string(),
+        lines: texts.iter().map(|t| t.to_string()).collect(),
+        line_timings: None,
+        has_timing: false,
+    };
+    let mtl_out = MtlOutput {
+        lines: texts
+            .iter()
+            .enumerate()
+            .map(|(i, t)| MtlLine {
+                text: t.to_string(),
+                start_ms: 1_000 + i as u64 * 2_000,
+                end_ms: 2_500 + i as u64 * 2_000,
+            })
+            .collect(),
+        device: "cuda".into(),
+        elapsed_s: 7.5,
+    };
+    // Every text word sung at its line's start, plus one sung word the text
+    // lacks ("oh", 400 ms): 8 of 9 sung words covered.
+    let mut words = Vec::new();
+    for (i, t) in texts.iter().enumerate() {
+        let start = 1_000 + i as u64 * 2_000;
+        for (k, w) in t.split_whitespace().enumerate() {
+            let s = start + k as u64 * 500;
+            words.push(AsrWord {
+                text: w.to_string(),
+                start_ms: s,
+                end_ms: s + 500,
+            });
+        }
+    }
+    words.push(AsrWord {
+        text: "oh".into(),
+        start_ms: 9_000,
+        end_ms: 9_400,
+    });
+    let backend = FakeReferenceStageBackend {
+        mtl: std::sync::Mutex::new(Some(Ok(mtl_out))),
+        asr: std::sync::Mutex::new(Some(Ok(words))),
+    };
+
+    let result = worker
+        .run_mtl_reference_stage(
+            video_id,
+            "yt_pass_audit",
+            Some(&cand),
+            Some(Path::new("/x.wav")),
+            &backend,
+        )
+        .await;
+    assert!(result.unwrap().is_some(), "expected a gate PASS");
+
+    let content = tokio::fs::read_to_string(cache_dir.join("yt_pass_audit_alignment_audit.json"))
+        .await
+        .expect("a PASS must write the audit sidecar");
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert_eq!(parsed["verdict"], "pass");
+    assert_eq!(parsed["reason"], serde_json::Value::Null);
+    assert_eq!(parsed["sung_words"], 9);
+    assert_eq!(parsed["sung_covered_frac"], 8.0 / 9.0);
+    assert_eq!(parsed["max_uncovered_sung_ms"], 400);
+    assert_eq!(parsed["mtl_device"], "cuda");
+    assert_eq!(parsed["mtl_elapsed_s"], 7.5);
+    assert_eq!(parsed["asr_words"], 9);
+
+    let _ = std::fs::remove_dir_all(&cache_dir);
+}

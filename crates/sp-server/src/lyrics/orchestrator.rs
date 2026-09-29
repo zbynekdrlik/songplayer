@@ -192,6 +192,9 @@ pub enum ReferenceStageResult {
     Pass {
         lines: Vec<crate::lyrics::backend::AlignedLine>,
         stats: crate::lyrics::reference_gate::GateStats,
+        mtl_device: String,
+        mtl_elapsed_s: f64,
+        asr_word_count: usize,
     },
     Fail {
         reason: crate::lyrics::reference_gate::GateFailReason,
@@ -257,6 +260,9 @@ pub async fn run_reference_stage(
         .collect();
     match crate::lyrics::reference_gate::evaluate(&gate_lines, &words) {
         crate::lyrics::reference_gate::GateVerdict::Pass(stats) => ReferenceStageResult::Pass {
+            mtl_device: mtl.device,
+            mtl_elapsed_s: mtl.elapsed_s,
+            asr_word_count,
             lines: mtl
                 .lines
                 .into_iter()

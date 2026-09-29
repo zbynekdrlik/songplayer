@@ -35,6 +35,7 @@ pub mod renderer;
 pub mod reprocess;
 pub mod spotify_proxy;
 pub mod spotify_resolver;
+pub mod sung_coverage;
 pub mod tier1;
 pub mod track_store;
 pub mod translator;

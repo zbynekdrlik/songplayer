@@ -139,3 +139,181 @@ fn real_fixture_first_third_of_the_lyric_fails_coverage() {
         other => panic!("the first third of the lyric must fail Coverage, got {other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// GREEN (#144): the new stats, the boundaries and the measured distribution.
+// ---------------------------------------------------------------------------
+
+/// The five six-word lines of `a_text_missing_a_long_sung_stretch_fails_coverage`
+/// at 1 000 + 5 000·i, followed by `unsung` words at the given spans.
+fn five_lines_then(unsung: &[(&str, u64, u64)]) -> (Vec<AlignedLine>, Vec<AsrWord>) {
+    let texts = [
+        "alpha bravo charlie delta echo foxtrot",
+        "golf hotel india juliet kilo lima",
+        "mike november oscar papa quebec romeo",
+        "sierra tango uniform victor whiskey xray",
+        "yankee zulu amber bronze copper dune",
+    ];
+    let mut lines = Vec::new();
+    let mut words = Vec::new();
+    for (i, t) in texts.iter().enumerate() {
+        let start = 1_000 + i as u64 * 5_000;
+        lines.push(line(t, start));
+        push_phrase(&mut words, t, start);
+    }
+    for &(w, s, e) in unsung {
+        words.push(word(w, s, e));
+    }
+    (lines, words)
+}
+
+#[test]
+fn the_sung_numbers_are_in_the_gate_stats() {
+    let unsung: Vec<(&str, u64, u64)> = [
+        "ember", "flint", "grove", "harbor", "island", "jade", "karst", "lagoon",
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, w)| (*w, 30_000 + i as u64 * 3_600, 30_800 + i as u64 * 3_600))
+    .collect();
+    let (lines, words) = five_lines_then(&unsung);
+    match evaluate(&lines, &words) {
+        GateVerdict::Fail {
+            reason: GateFailReason::Coverage,
+            stats,
+        } => {
+            assert_eq!(stats.lines_matched, 5);
+            assert_eq!(stats.matched_frac, 1.0);
+            assert_eq!(stats.sung_words, 38);
+            assert_eq!(stats.sung_covered_frac, 30.0 / 38.0);
+            assert_eq!(stats.max_uncovered_sung_ms, 26_000);
+        }
+        other => panic!("expected Fail(Coverage), got {other:?}"),
+    }
+}
+
+/// Two uncovered words spanning EXACTLY 25 000 ms pass (the maximum is
+/// inclusive); one millisecond more fails Coverage.
+#[test]
+fn an_uncovered_stretch_exactly_at_the_maximum_passes() {
+    let (lines, words) = five_lines_then(&[("ember", 30_000, 30_800), ("flint", 54_200, 55_000)]);
+    match evaluate(&lines, &words) {
+        GateVerdict::Pass(stats) => {
+            assert_eq!(stats.max_uncovered_sung_ms, MAX_UNCOVERED_SUNG_MS);
+            assert_eq!(stats.sung_covered_frac, 30.0 / 32.0);
+        }
+        other => panic!("a 25 000 ms stretch must pass, got {other:?}"),
+    }
+
+    let (lines, words) = five_lines_then(&[("ember", 30_000, 30_800), ("flint", 54_200, 55_001)]);
+    match evaluate(&lines, &words) {
+        GateVerdict::Fail {
+            reason: GateFailReason::Coverage,
+            stats,
+        } => assert_eq!(stats.max_uncovered_sung_ms, 25_001),
+        other => panic!("a 25 001 ms stretch must fail Coverage, got {other:?}"),
+    }
+}
+
+/// Eleven one-word lines on time, nine short uncovered words between them:
+/// 11 of 20 sung words = EXACTLY the 0.55 floor, which passes.
+#[test]
+fn a_covered_share_exactly_at_the_floor_passes() {
+    let mut lines = Vec::new();
+    let mut words = Vec::new();
+    for i in 0..11u64 {
+        let start = 1_000 + i * 2_000;
+        let covered = format!("sung{i}");
+        lines.push(line(&covered, start));
+        words.push(word(&covered, start, start + 300));
+        if i < 9 {
+            words.push(word(&format!("extra{i}"), start + 500, start + 800));
+        }
+    }
+    assert_eq!(words.len(), 20);
+    match evaluate(&lines, &words) {
+        GateVerdict::Pass(stats) => {
+            assert_eq!(stats.sung_covered_frac, MIN_SUNG_COVERED_FRAC);
+            assert_eq!(stats.max_uncovered_sung_ms, 300);
+        }
+        other => panic!("exactly 0.55 of what is sung must pass, got {other:?}"),
+    }
+}
+
+/// A complete text the ASR partly mishears ("angel" for "hands") and pads
+/// ("oh") still covers what is sung: 20 of 22 words, gaps of 300 ms.
+#[test]
+fn a_complete_text_with_misheard_words_passes() {
+    let texts = [
+        "we raise our hands up",
+        "we give you all the praise",
+        "nothing will stop us singing",
+        "your holy spirit is here",
+    ];
+    let heard = [
+        "we raise our angel up",
+        "we give you all the praise",
+        "nothing will stop us oh singing",
+        "your holy spirit is here",
+    ];
+    let mut lines = Vec::new();
+    let mut words = Vec::new();
+    for (i, (t, h)) in texts.iter().zip(heard.iter()).enumerate() {
+        let start = 1_000 + i as u64 * 4_000;
+        lines.push(line(t, start));
+        push_phrase(&mut words, h, start);
+    }
+    match evaluate(&lines, &words) {
+        GateVerdict::Pass(stats) => {
+            assert_eq!(stats.sung_words, 22);
+            assert_eq!(stats.sung_covered_frac, 20.0 / 22.0);
+            assert_eq!(stats.max_uncovered_sung_ms, 300);
+        }
+        other => panic!("a complete text must pass, got {other:?}"),
+    }
+}
+
+/// The distribution measured on #144 (issue comment 5899043518), as
+/// `(sung_covered_frac, max_uncovered_sung_ms)` of real texts against real
+/// transcripts. Complete texts must pass the thresholds; the texts that held
+/// one line on the wall over other singing must fail.
+#[test]
+fn the_thresholds_separate_the_measured_catalog() {
+    use crate::lyrics::sung_coverage::SungCoverage;
+    let complete = [
+        (0.64, 7_000),   // eval gold jUnyHptnsRo (multi-language), the lowest share
+        (0.73, 20_600),  // eval gold h-A1Tzkjsi4, the longest complete run
+        (0.794, 14_100), // ★ 206 5JW87KKDTcU (lrclib) vs g35t
+        (0.786, 16_300), // ★ 19 8kGxcXOAaCQ (description) vs WhisperX
+        (0.878, 8_700),  // ★ 61 fS61hANi_60 (yt_subs) vs WhisperX
+        (0.977, 800),    // ★ 86 yHO1bEnmjzg (description) vs WhisperX
+    ];
+    let incomplete = [
+        (0.581, 48_200),  // 286 WL1ivzWbQGI: "I believe in the Gospel" held 48.1 s
+        (0.628, 34_900),  // 270 ksxV-G8AB4o: one line held 38.5 s
+        (0.730, 41_400),  // 77 duQLhle37MU: "Still You for me" held 91 s
+        (0.325, 80_600),  // 41 HZLdKRGMGRE
+        (0.333, 168_200), // 54 lfkdhaPeGtQ
+        (0.565, 98_300),  // 43 7qJhOrHps80
+        (0.413, 61_600),  // 49 XaoW1zn1DU0
+        (0.470, 65_100),  // 134 bRkMBiNrAMk
+        (0.42, 208_900),  // eval gold zVpDFHJtc_U cut to its first 35 %
+    ];
+    let cov = |(covered_frac, max_uncovered_ms): (f64, u64)| SungCoverage {
+        sung_words: 300,
+        covered_frac,
+        max_uncovered_ms,
+    };
+    for m in complete {
+        assert!(
+            covers_what_is_sung(&cov(m)),
+            "complete text {m:?} must pass"
+        );
+    }
+    for m in incomplete {
+        assert!(
+            !covers_what_is_sung(&cov(m)),
+            "partial text {m:?} must fail"
+        );
+    }
+}
