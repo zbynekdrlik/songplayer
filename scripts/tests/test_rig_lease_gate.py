@@ -62,7 +62,11 @@ def test_decide():
     # A held lease with no readable holder is another repo's (fail closed).
     no_holder = {"held": True, "stale": False, "holder": None}
     assert decide(no_holder, OWN_REPO) == WAIT
-    # `stale` is null only while free; a held lease without it is live.
+    # camera-box's own fail-closed document (`rig_lease_state.py`: the lock
+    # directory exists, its holder.json could not be read) is held too.
+    fail_closed = {"held": True, "stale": None, "holder": None}
+    assert decide(fail_closed, OWN_REPO) == WAIT
+    # Only `stale: true` releases a held lease; a missing one does not.
     assert decide({"held": True, "holder": {"repo": "x/y"}}, OWN_REPO) == WAIT
 
 
@@ -73,6 +77,11 @@ def test_only_a_json_object_with_a_boolean_held_is_a_lease():
     assert not is_lease({"schema": 1})
     assert not is_lease([{"held": True}])
     assert not is_lease(None)
+    # `holder` is an object or null: anything else is not a lease document
+    # (never an AttributeError that fails the deploy).
+    assert is_lease({"held": True, "holder": None})
+    assert not is_lease({"held": True, "holder": "zbynekdrlik/camera-box"})
+    assert not is_lease({"held": True, "holder": ["x"]})
 
 
 # ---- the wait (fake clock) ---------------------------------------------------
@@ -170,11 +179,37 @@ def test_a_zero_bound_never_waits():
     assert (rig.fetches, rig.sleeps) == (1, [])
 
 
-def test_the_service_going_away_mid_wait_warns_and_deploys():
+def test_a_blip_after_a_held_lease_keeps_waiting():
+    # Review round 1: one or two unreachable reads right after another
+    # repo's live lease are a blip (a cold mDNS lookup, a server restart),
+    # not an outage: the gate keeps treating the lease as held.
+    rig = Rig([lease(), None, None, lease(), lease(held=False)])
+    assert rig.run() == EXIT_PROCEED
+    assert rig.fetches == 5
+    assert rig.sleeps == [30.0] * 4
+    assert not any(line.startswith("::warning::") for line in rig.lines)
+    assert rig.lines[-1] == "rig lease: free - deploying"
+
+
+def test_the_third_unreachable_read_after_a_held_lease_is_an_outage():
+    # The service really went away: the third read in a row deploys with a
+    # WARN, so an outage never blocks a deploy (at most two more polls).
     rig = Rig([lease(), None])
     assert rig.run() == EXIT_PROCEED
-    assert rig.sleeps == [30.0]
+    assert rig.fetches == 4
+    assert rig.sleeps == [30.0] * 3
     assert rig.lines[-1].startswith("::warning::")
+    assert sum(line.startswith("::warning::") for line in rig.lines) == 1
+
+
+def test_the_bound_during_a_blip_fails_as_still_held():
+    # The last lease read was held: at the bound the deploy fails as held.
+    rig = Rig([lease(), None])
+    assert rig.run(poll=30.0, max_wait=45.0) == EXIT_STILL_HELD
+    assert rig.sleeps == [30.0, 15.0]
+    assert rig.fetches == 3
+    assert rig.lines[-1].startswith("::error::")
+    assert "zbynekdrlik/camera-box" in rig.lines[-1]
 
 
 # ---- the fetch (a real local HTTP server) -------------------------------------
