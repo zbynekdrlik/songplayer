@@ -392,3 +392,13 @@ fetch-by-commit).
   grep for the absence of the reopen message and the presence of the feature's
   own `info!` lines. curl to the box HTTP API (`http://10.77.9.201:8920/...`) is
   the sanctioned read path (the post-deploy suite uses the same), not ssh.
+
+## Arena REST: switching a clip's NDI source (#221, 29.9.2026)
+
+The wall's clips were repointed from `RESOLUME-SNV (cg-obs)` to `RESOLUME-SNV (SP-program)` over REST (#221 comment 5890254194). Three traps cost a dark wall for 16 s and a zoomed picture:
+
+- **Percent-encode the source URI.** `POST /api/v1/composition/clips/by-id/<id>/open` takes a text/plain body `source:///video/RESOLUME-SNV%20%28SP-program%29`. The unencoded form (with a space and parentheses) answers HTTP 200 and changes NOTHING. For a batch, use `POST /api/v1/composition/clips/open` with `[{"target": "/composition/clips/by-id/<id>", "source": "<uri>"}]` (HTTP 204). `GET /api/v1/sources` lists the idstrings. Names, effects and params are kept.
+- **Opening a source into a CONNECTED clip DISCONNECTS it** — the layer goes dark on the wall. Record which clips are connected first, then `POST /api/v1/composition/layers/<l>/clips/<c>/connect` for each of them straight after the open.
+- **`resize: Original` draws the source in native pixels.** A new source with a different resolution (SP-program 2560×1440 vs cg-obs 1920×1080) zooms the picture. Put the clip's pre-switch size back: `PUT /api/v1/composition/clips/by-id/<id>` `{"video":{"width":{"value":1920},"height":{"value":1080}}}`.
+
+Save the composition first (`GET /api/v1/composition` > file) so the rollback is exact.
