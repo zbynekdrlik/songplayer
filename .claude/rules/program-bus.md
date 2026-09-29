@@ -58,11 +58,11 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 
 - **One clock domain: the stamps.** The API's realtime clock and a submit
   thread's `WallClock` can both sit off the pacer walls after a UTC step: an
-  unconfirmed step slews in at ≤ 1 ms per resample, and a CONFIRMED forward
-  step (the ~+50 ms dantesync fleet date step) is followed in one event at
-  each wall's second resample after it (#147) — the walls' resample phases
-  differ, so for ≤ ~3.3 s two walls sit up to one step (~1.5 slots) apart,
-  inside the 3-slot fill grace below.
+  unconfirmed step slews in at ≤ 1 ms per resample, and a step over 2 ms
+  (the dantesync fleet date step) is followed in one event by each wall's
+  step probe at its own next tick (#224; before, at each wall's second
+  resample, #147) — so for ≤ ~one boundary two walls sit up to one step
+  apart; a step up to ~3 slots stays inside the 3-slot fill grace below.
   So: a cut is placed from the newest stamp of the program's segment sources,
   the source cut to, or the program itself (`from`; the caller's clock only
   when nothing was seen); a boundary is declared missed BY TIME only in
