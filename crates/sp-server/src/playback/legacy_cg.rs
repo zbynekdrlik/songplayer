@@ -30,9 +30,10 @@
 //! - a dashboard cut to -1 (cg OBS keeps showing playlist P): `shown` is
 //!   `None`, so P's dark-wall check stays silent (fails safe);
 //! - a cut to Q whose mirror failed (cg OBS still shows P): `shown` is
-//!   `Some(Q)`. In L4a harmless (cg OBS's scene detection still decides on
-//!   air); from L4b, where `shown` joins the on-air set, P would read as off
-//!   air. Persisting `shown` (or seeding `None`) is a main-session call.
+//!   `Some(Q)`. In L4a only P's dark-wall check stays silent, the same
+//!   fail-safe silence (cg OBS's scene detection still decides on air);
+//!   from L4b, where `shown` joins the on-air set, P would read as off air.
+//!   Persisting `shown` (or seeding `None`) is a main-session call.
 //!
 //! It also holds the dashboard's way to cg OBS ([`LegacyCg::link`]): the
 //! OBS client's command channel, attached by `start_program`. `AppState` is

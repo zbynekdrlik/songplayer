@@ -274,14 +274,23 @@ stops SongPlayer:
   repo takes in the ~1 min between the check and "Deploy SongPlayer"
   (artifact downloads) is not seen; the E2E job after the deploy does not
   check it either.
-- Hardening (review round 3): a body over 64 KiB (`MAX_BODY_BYTES`; a lease
-  is ~400 B), JSON nested past the recursion limit, bad UTF-8, a non-HTTP
-  listener or a truncated body are all "no lease" from that URL; `main`
-  refuses a `--url` that is not http(s) with a host (a broken one would
-  otherwise read as an outage on every deploy); lease strings are logged on
-  one line (a line break would start a workflow command). A lease server
-  that trickles bytes under the per-read timeout is bounded by the job's
-  `timeout-minutes: 90` (60 min wait + a ~3 min deploy).
+- Hardening (review rounds 3-4): a body over 64 KiB (`MAX_BODY_BYTES`; a
+  lease is ~400 B; the bound is pinned exactly), JSON nested past the
+  recursion limit, bad UTF-8, a non-HTTP listener, a body shorter than its
+  Content-Length (`read(amt)` returns what came: it does not parse — no
+  `IncompleteRead` there; a chunked body cut short IS one) are all "no
+  lease" from that URL. `main` refuses a `--url` that is not http(s) with a
+  host and a valid port (`is_http_url`; a broken one would otherwise read as
+  an outage on every deploy). Everything the gate logs from the lease port
+  (`describe_holder`, a not-a-lease answer, an exception text) goes through
+  `one_line`: a line break would start a runner workflow command. The
+  "Wait for the rig lease" STEP has `timeout-minutes: 70`, so a lease server
+  that trickles bytes under the per-read timeout is cut in that step, never
+  inside "Deploy SongPlayer" (which stops SongPlayer first); the job keeps
+  `timeout-minutes: 90`.
+- test-integrity's "deploy job uses always()" check greps
+  `'^  deploy-resolume:'` (anchored): unanchored it matched its own line,
+  which holds the job name and "always()", and never read the real header.
 - It runs on the box's `C:\Program Files\Python312\python.exe` (the step
   fails if it is missing; the A/V gate needs the same Python). Stdlib only.
 - The wait is coordination, not a soak (CLAUDE.md "No sleep-based CI

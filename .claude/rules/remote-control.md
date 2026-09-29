@@ -384,8 +384,9 @@ what cg OBS shows only if that source's last mirror was accepted. After a
 dashboard cut to -1 (cg OBS keeps showing playlist P) and a restart,
 `shown` is `None` (P's dark-wall check silent until the next press, fails
 safe); after a cut to Q whose mirror failed (cg OBS still shows P) and a
-restart, `shown` is `Some(Q)` — harmless in L4a, but in L4b (`shown` joins
-the on-air set) P would read as off air. Persisting `shown` (or seeding
+restart, `shown` is `Some(Q)` — in L4a only P's dark-wall check stays
+silent (the same fail-safe silence), but in L4b (`shown` joins the on-air
+set) P would read as off air. Persisting `shown` (or seeding
 `None`) is a main-session call BEFORE L4b. Every change is logged (`legacy cg: cg OBS shows what SongPlayer told
 it` INFO from → to; a dropped late answer DEBUG; the restore INFO). Served as `legacy_cg {shown}` on
 `GET /api/v1/program`; it keys the dark-wall expectation
