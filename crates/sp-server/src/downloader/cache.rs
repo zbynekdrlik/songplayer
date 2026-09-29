@@ -232,10 +232,19 @@ pub fn rename_song_files(youtube_id: &str, old: &SongFiles, new: &SongFiles) -> 
 /// unrecorded crash debris and delete it (#136 review round 2).
 fn in_effect_after_failure(
     old: &SongFiles,
-    _new: &SongFiles,
-    _stuck: &[(PathBuf, PathBuf)],
+    new: &SongFiles,
+    stuck: &[(PathBuf, PathBuf)],
 ) -> SongFiles {
-    old.clone()
+    let at = |old: &Option<PathBuf>, new: &Option<PathBuf>| match (old, new) {
+        (Some(from), Some(to)) if stuck.iter().any(|(f, t)| f == from && t == to) => {
+            Some(to.clone())
+        }
+        _ => old.clone(),
+    };
+    SongFiles {
+        video: at(&old.video, &new.video),
+        audio: at(&old.audio, &new.audio),
+    }
 }
 
 /// A unit move that failed ([`move_as_unit`]): the error, and every move that
