@@ -11,12 +11,12 @@ text-cleanup) instead of a metered API key. The worker's
 
 | | |
 |---|---|
-| **Version** | **7.3.1** (Commit `44e62bc8`, built 2026-09-13) — installed 2026-09-13 (#145) |
-| Previous | 6.9.27 (installed 2026-04-15) — kept for rollback |
+| **Version** | **8.0.4** (release 2026-09-29) — installed 2026-09-29 (#145). Presents Claude Code 2.1.280, which `claude-opus-5-5` requires (7.3.1 presented 2.1.258 → HTTP 400) |
+| Previous | 7.3.1 (installed 2026-09-13), 6.9.27 (installed 2026-04-15) — both kept for rollback |
 | Binary | `C:\ProgramData\SongPlayer\cache\tools\CLIProxyAPI.exe` |
 | Config (auto-generated) | `C:\ProgramData\SongPlayer\cache\cli-proxy-api-config.yaml` |
 | Auth / token store | `C:\ProgramData\SongPlayer\cache\.cli-proxy-api\` (per-account `claude-<email>.json`) |
-| Rollback binary | `C:\ProgramData\SongPlayer\cache\tools\CLIProxyAPI-6.9.27.exe` and `C:\ProgramData\SongPlayer\cliproxy-backup-145\` |
+| Rollback binary | `C:\ProgramData\SongPlayer\cache\tools\CLIProxyAPI-7.3.1.exe` (+ `cliproxy-backup-145-v804\`: exe, config, auth store), older `CLIProxyAPI-6.9.27.exe` + `cliproxy-backup-145\` |
 
 ## How it is launched (do NOT set up a service / scheduled task)
 
@@ -68,6 +68,13 @@ Resolume Arena / SongPlayer — only the proxy process.
      `/v1/chat/completions` returns HTTP 200 on the EXISTING OAuth login.
    If the login does NOT carry over (auth error), **roll back and stop** — a
    genuine re-login needs the owner's browser (`claude_pkce_login.py`), never run it yourself.
+   **Keep the isolated instance ONE completion long, then stop it** (29.9.2026, 8.0.4):
+   it refreshes the OAuth tokens of every auth file in its copy at startup, and
+   Anthropic ROTATES refresh tokens — a second proxy that refreshes the SAME
+   account as the live one can invalidate the live proxy's refresh token (the
+   owner's browser re-login then). The 8.0.4 test hit `invalid_grant` on a stale
+   June file and was stopped right after its completion; the live proxy still
+   answered 200.
 5. **Swap:** rename the running `CLIProxyAPI.exe` aside (allowed while its handle
    is open), copy the new binary in as `CLIProxyAPI.exe`, then kill the proxy PID.
    `ai_proxy_watchdog` respawns the new binary from that path within ~30 s (the

@@ -1769,31 +1769,93 @@ jobs:
             Write-Error "FAIL: CLIProxyAPI /v1/models returned $($models.StatusCode)"
             exit 1
           }
+          $ids = @(($models.Content | ConvertFrom-Json).data | ForEach-Object { $_.id })
 
-          # 3. Watchdog must not be logging restart-failed in the last
-          # 2 min (indicates an orphan keeping the port while our spawn
-          # immediately dies). Tail the log and count.
-          $log = "C:\ProgramData\SongPlayer\songplayer.log"
-          if (Test-Path $log) {
-            $cutoff = (Get-Date).AddMinutes(-2)
-            $failures = Get-Content $log -Tail 500 | Where-Object {
-              $_ -match 'ai_proxy watchdog: restart failed'
-            } | ForEach-Object {
-              if ($_ -match '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})') {
-                try {
-                  $ts = [datetime]::ParseExact($matches[1], 'yyyy-MM-ddTHH:mm:ss', $null)
-                  if ($ts -gt $cutoff) { $_ }
-                } catch { $_ }
-              }
-            }
-            if ($failures.Count -gt 0) {
-              Write-Host "Recent 'restart failed' entries:"
-              $failures | ForEach-Object { Write-Host "  $_" }
-              Write-Error "FAIL: ai_proxy watchdog is churning ($($failures.Count) restart failures in last 2 min). Likely an orphan CLIProxyAPI is holding the port."
-              exit 1
-            }
+          # 3. #145: the model SongPlayer sends must really answer, and it
+          # must be the newest claude-opus-* the proxy lists. On 29.9.2026
+          # the proxy listed claude-opus-5-5 but refused every call to it
+          # (CLIProxyAPI 7.3.1 presented Claude Code 2.1.258, HTTP 400) and
+          # nothing noticed: a listed id is not a working id.
+          $model = "$($ai.model)"
+          Write-Host "SongPlayer sends model: $model"
+          if (-not $model) {
+            Write-Error "FAIL: /api/v1/ai/status names no model"
+            exit 1
           }
-          Write-Host "OK: AI proxy healthy, watchdog quiet, /v1/models responding."
+          if ($ids -notcontains $model) {
+            Write-Error "FAIL: the proxy's /v1/models does not list $model"
+            exit 1
+          }
+          $req = @{ model = $model; max_tokens = 16; messages = @(@{ role = "user"; content = "Reply with exactly: OK" }) } | ConvertTo-Json -Depth 4
+          try {
+            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:18787/v1/chat/completions" -Method Post -ContentType "application/json" -Body $req -UseBasicParsing -TimeoutSec 60
+          } catch {
+            $detail = ""
+            if ($_.Exception.Response) {
+              $detail = (New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd()
+            }
+            Write-Error "FAIL: a completion with $model failed: $($_.Exception.Message) $detail"
+            exit 1
+          }
+          $answer = (($resp.Content | ConvertFrom-Json).choices[0].message.content)
+          Write-Host "completion with ${model}: HTTP $($resp.StatusCode) '$answer'"
+          if (-not $answer) {
+            Write-Error "FAIL: the completion with $model returned no text"
+            exit 1
+          }
+          # claude-opus-5-5 -> 5.5, claude-opus-5 -> 5.0, claude-opus-4-1-20250805 -> 4.1
+          # (a segment of 6+ digits is a snapshot date, not a version).
+          function OpusVersion([string]$id) {
+            if ($id -notmatch '^claude-opus-(.+)$') { return $null }
+            $nums = @()
+            foreach ($seg in $matches[1].Split('-')) {
+              if ($seg -notmatch '^[0-9]+$' -or $seg.Length -ge 6) { break }
+              $nums += [int]$seg
+            }
+            if ($nums.Count -eq 0) { return $null }
+            if ($nums.Count -eq 1) { $nums += 0 }
+            return [version]("{0}.{1}" -f $nums[0], $nums[1])
+          }
+          $mine = OpusVersion $model
+          if (-not $mine) {
+            Write-Error "FAIL: SongPlayer sends $model, not a claude-opus model (the flagship rule, #145)"
+            exit 1
+          }
+          $newest = $ids | Where-Object { OpusVersion $_ } | Sort-Object { OpusVersion $_ } -Descending | Select-Object -First 1
+          Write-Host "newest claude-opus the proxy lists: $newest"
+          if ((OpusVersion $newest) -gt $mine) {
+            Write-Error "FAIL: the proxy lists $newest, newer than the $model SongPlayer sends: switch DEFAULT_AI_MODEL (probe it first, scripts/cliproxy/README.md)"
+            exit 1
+          }
+
+          # 4. Watchdog must not be logging restart-failed in the last
+          # 2 min (indicates an orphan keeping the port while our spawn
+          # immediately dies). The log rolls daily (songplayer.<date>.log);
+          # the old fixed name songplayer.log never existed, so this check
+          # never ran until #145.
+          $log = Get-ChildItem "C:\ProgramData\SongPlayer" -Filter "songplayer.*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $log) {
+            Write-Error "FAIL: no songplayer.<date>.log in C:\ProgramData\SongPlayer"
+            exit 1
+          }
+          $cutoff = (Get-Date).ToUniversalTime().AddMinutes(-2)
+          $failures = @(Get-Content $log.FullName -Tail 2000 | Where-Object {
+            $_ -match 'ai_proxy watchdog: restart failed'
+          } | ForEach-Object {
+            if ($_ -match '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})') {
+              try {
+                $ts = [datetime]::ParseExact($matches[1], 'yyyy-MM-ddTHH:mm:ss', $null)
+                if ($ts -gt $cutoff) { $_ }
+              } catch { $_ }
+            }
+          })
+          if ($failures.Count -gt 0) {
+            Write-Host "Recent 'restart failed' entries:"
+            $failures | ForEach-Object { Write-Host "  $_" }
+            Write-Error "FAIL: ai_proxy watchdog is churning ($($failures.Count) restart failures in last 2 min). Likely an orphan CLIProxyAPI is holding the port."
+            exit 1
+          }
+          Write-Host "OK: AI proxy healthy, $model answers and is the newest claude-opus, watchdog quiet in $($log.Name)."
 
       - name: Verify Presenter reachable
         shell: powershell
