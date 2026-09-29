@@ -437,8 +437,8 @@ or a dead sender → `connections=0` on the on-program output = dark wall, and t
   playlist's sender one at a time in `playlist.id` order, waiting for a per-pipeline
   ready one-shot (fired by the pipeline thread right after `send_create`) before the
   next — so `send_create` runs in a fixed order every restart, not OS-scheduler order.
-  Runs before `start_program` and the engine loop, so the playback authority's
-  first value (#221 L4b) finds every startup pipeline.
+  Runs before `start_program` and the engine loop; a pipeline missing past the
+  startup budget is created on the playback authority's ON (#221 L4b).
 - Box-verified 2026-09-20: after a deploy restart, on-program SP-slow
   `connections=2`, every output 2–4, no dark wall.
 - **No dark-wall ladder for an output with no OBS input** (`effective_dark_reason`

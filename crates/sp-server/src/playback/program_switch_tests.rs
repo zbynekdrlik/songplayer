@@ -259,11 +259,13 @@ fn queued_switch(rx: &mut mpsc::Receiver<ObsCommand>) -> (Value, oneshot::Sender
 }
 
 /// #221 L4b, main-session decision 1 (comment 5884501960): at startup cg OBS
-/// is told ONCE to show the restored playlist's catalog scene, through the
-/// ticketed mirror: its OK is recorded in `legacy_cg` by the ticket taken
-/// when it was sent, so a late OK never overwrites a newer command's answer.
+/// is told to show the restored playlist's catalog scene, through the
+/// ticketed mirror: one switch per call (and `start_program`, which is
+/// `mutants::skip` orchestration, calls it once); its OK is recorded in
+/// `legacy_cg` by the ticket taken when it was sent, so a late OK never
+/// overwrites a newer command's answer.
 #[tokio::test]
-async fn the_startup_re_mirror_tells_cg_obs_the_restored_playlist_once() {
+async fn the_startup_re_mirror_sends_the_restored_playlist_scene_through_the_ticketed_mirror() {
     let bus = ProgramBus::new();
     bus.select_initial(7, Some("sp-fast"));
     bus.legacy_cg().restored(7);
@@ -276,7 +278,7 @@ async fn the_startup_re_mirror_tells_cg_obs_the_restored_playlist_once() {
     );
     let (data, reply) = queued_switch(&mut rx);
     assert_eq!(data, json!({ "sceneName": "sp-fast" }));
-    assert!(rx.try_recv().is_err(), "sent once");
+    assert!(rx.try_recv().is_err(), "one switch per call");
     reply.send(ok()).unwrap();
     tokio::time::timeout(Duration::from_secs(10), shown.changed())
         .await

@@ -389,12 +389,15 @@ restart, `shown` is `Some(Q)`. #221 L4b (main-session decision 1, comment
 5884501960): `shown` stays unpersisted, and at startup
 `program_switch::remirror_on_air` sends the restored playlist's catalog scene
 to cg OBS ONCE through this ticketed mirror, so the seed is what cg OBS was
-told — that closes the Q case (a failed re-mirror is a failed mirror, see
-`program-bus.md` "The playback authority"). A restored -1 sends nothing
-(the decision: cg OBS keeps its manual scene), so the dashboard -1 case
-stays: after a dashboard cut to -1 while cg OBS showed P and a restart, P is
-NOT on air (`shown` `None`), so the authority leaves it paused while cg OBS
-(and "OBS manuál") still shows P's output, until the next press. Every change is logged (`legacy cg: cg OBS shows what SongPlayer told
+told once cg OBS accepts it — that closes the Q case (a re-mirror that never
+lands within the mirror's wait, 3 + 4 s, e.g. cg OBS still starting, leaves
+the unconfirmed seed: a failed mirror, see `program-bus.md` "The playback
+authority"). A restored -1 sends nothing (the decision: cg OBS keeps its
+manual scene), so the dashboard -1 case stays (for the main session):
+after a dashboard cut to -1 while cg OBS showed P and a restart, P is NOT
+on air (`shown` `None`); its pipeline, created Idle at startup, never
+starts, while cg OBS (and "OBS manuál") still shows P's output, until the
+next press. Every change is logged (`legacy cg: cg OBS shows what SongPlayer told
 it` INFO from → to; a dropped late answer DEBUG; the restore INFO). Served as `legacy_cg {shown}` on
 `GET /api/v1/program`; it keys the dark-wall expectation
 (`ndi_health_expect`, `obs-ndi-health.md`) and, from L4b, the playback

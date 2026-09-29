@@ -27,12 +27,13 @@
 //! source. #221 L4b (main-session decision 1, comment 5884501960): at
 //! startup `program_switch::remirror_on_air` then tells cg OBS to show that
 //! playlist, through the same ticketed mirror, so the seed is what cg OBS
-//! was told (before, a cut to Q whose mirror failed left cg OBS on P with
-//! `shown` `Some(Q)` after a restart). Residual: a restored -1 sends
-//! nothing, so after a dashboard cut to -1 while cg OBS showed playlist P
-//! and a restart, `shown` is `None` and P is not on air (paused, its
-//! dark-wall check silent) while cg OBS still shows it, until the next
-//! switch.
+//! was told once cg OBS accepts it (before, a cut to Q whose mirror failed
+//! left cg OBS on P with `shown` `Some(Q)` after a restart; a re-mirror
+//! that never lands leaves the seed unconfirmed). Residual: a restored -1
+//! sends nothing, so after a dashboard cut to -1 while cg OBS showed
+//! playlist P and a restart, `shown` is `None` and P is not on air (its
+//! pipeline, Idle since the start, never starts; its dark-wall check is
+//! silent) while cg OBS still shows it, until the next switch.
 //!
 //! It also holds the dashboard's way to cg OBS ([`LegacyCg::link`]): the
 //! OBS client's command channel, attached by `start_program`. `AppState` is

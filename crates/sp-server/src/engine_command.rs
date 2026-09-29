@@ -6,8 +6,6 @@ use sp_core::playback::PlaybackMode;
 /// Commands sent from the API layer to the playback engine.
 #[derive(Debug, Clone)]
 pub enum EngineCommand {
-    // #221 L4b: `SceneChanged` (cg OBS's scene detection) is gone: SongPlayer's
-    // own program drives playback (`playback::program_authority`).
     Play {
         playlist_id: i64,
     },

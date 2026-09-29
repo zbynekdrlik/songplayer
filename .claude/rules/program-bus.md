@@ -219,15 +219,22 @@ nothing).
   be re-kicked, and a playlist the operator PAUSED would start a new song
   (its resume point lost). A shown-only change (the mirror's OK) sends only
   OFFs. It ends on shutdown or when the engine's channel is gone.
-- **The engine drops a stale event** (`PlaybackEngine::on_program`, the
-  same `on_air_set` read from the bus at handling time): ON only while the
-  playlist is on air, OFF only while it is not. So the selected source is
-  never taken off program — `Hold::OnProgram` / `CUT_SETTLE` are deleted
-  (`program-transition.md`).
+- **The engine drops a stale event** (`PlaybackEngine::on_program`): ON
+  only while the playlist is on air, OFF only while it is not — "on air"
+  being the set the task last DIFFED (`OnAirPlaylists`, the engine's
+  `on_air`, written by the task BEFORE it sends that value's events), never
+  the live bus (review round 1, F2). The bus can change and change back
+  between two task wakes (the watch coalesces) and the task then sends
+  nothing, so an event checked against the live bus could be dropped with
+  no newer one behind it; against the diffed set a dropped event always
+  has one. So the selected source is never taken off program —
+  `Hold::OnProgram` / `CUT_SETTLE` are deleted (`program-transition.md`).
 - **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
   whose scene is not flagged runs `handle_scene_change(pid, true)` itself
-  (its ON came before it existed). `start_program` runs after the #196
-  startup senders, so the first value finds every startup pipeline.
+  (its ON came before it existed). An ON for a playlist with NO pipeline
+  creates it (`ensure_pipeline_for_playlist`, then the same guard): the
+  #196 startup senders run before `start_program`, but past their 45 s
+  budget the rest were never created (review round 1, F3).
 - **A manual ▶ claims nothing** (`PlayEvent::Start`: WaitingForScene +
   Start → SelectAndPlay; `handle_engine_play` fires `VideosAvailable` +
   `Start`). Off air the playlist plays OFF program: `scene_active` stays
@@ -254,8 +261,11 @@ nothing).
   the call is dropped as abandoned and `shown` keeps the seeded value.
 - Tests: `program_on_air_tests.rs` (the set + changes tables),
   `program_authority_tests.rs` (the task over a real bus: first value,
-  press + confirm, re-kick, -1 keeps cg's playlist, shutdown / gone engine;
-  the engine's stale check on an in-memory DB), `tests_runtime_pipeline.rs`,
+  press + confirm, re-kick, -1 keeps cg's playlist, the diffed set,
+  shutdown / gone engine; the engine's stale check against the diffed set
+  on an in-memory DB, the lazy pipeline, and — task + engine together — a
+  paused playlist through cuts that did not press it),
+  `tests_runtime_pipeline.rs`,
   `tests_play_video.rs` (the off-air ▶), `routes_tests.rs` (status),
   `program_switch_tests.rs` (the re-mirror).
 

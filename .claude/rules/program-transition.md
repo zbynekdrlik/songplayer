@@ -265,7 +265,9 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
 #221 L4b deleted `Hold::OnProgram` + `CUT_SETTLE` (a 500 ms wait for the
 program's own source, whose cut away could follow cg OBS's scene event):
 the authority drops a stale OFF, and the program's selected source is always
-on air, so it is never taken off program. `hold_for(selected)` is `None`.
+on air, so the engine never asks `hold_for` for it. (`hold_for` of a selected
+source is `None` unless an earlier window still has it as `from`, e.g. after
+A→B→A in a later slot.)
 
 The re-check is `PipelineEvent::SceneOffDue` on the engine's own channel (a
 spawned sleep). If the scene is back on program by then, it does nothing.
