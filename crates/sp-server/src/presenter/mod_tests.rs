@@ -70,9 +70,10 @@ fn a_line_without_a_translation_sends_empty_translations() {
 
 #[test]
 fn every_lyric_field_is_wrapped_for_the_stage_display() {
-    // 38 characters each: over the 30-character wrap width.
-    let en = "When I survey the wondrous cross today";
-    let sk = "Keď hľadím na ten podivuhodný kríž dnes";
+    // 66 and 65 characters: over the wrap width (one wall line, 52 chars),
+    // as a single long source line can be.
+    let en = "When I survey the wondrous cross on which the Prince of glory died";
+    let sk = "Keď hľadím na ten podivuhodný kríž, na ktorom zomrel Knieža slávy";
     let payload = payload_for(None, &lines(en, en, sk, sk), "Song", "").expect("a new line");
     for text in [
         &payload.current_text,
