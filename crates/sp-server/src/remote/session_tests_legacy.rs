@@ -52,7 +52,7 @@ async fn an_accepted_mirror_shows_its_playlist_and_an_accepted_manual_scene_none
 }
 
 #[tokio::test]
-async fn a_press_cg_obs_refuses_or_never_answers_changes_nothing() {
+async fn a_press_cg_obs_refuses_changes_nothing() {
     let rig = rig().await;
     // A playlist whose scene cg OBS does not have: its mirror is refused.
     sqlx::query(

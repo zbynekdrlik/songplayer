@@ -378,11 +378,15 @@ newer than every answer applied before (`<=` the last applied → dropped),
 so the late answer to an older press never overwrites a newer one's. A
 skipped ticket never blocks a newer answer. At startup
 `restore_selected_source` records the restored source when it is a playlist
-(`LegacyCg::restored`). Residual (review round 2): `shown` is not persisted —
-after a dashboard cut to -1 (cg OBS keeps showing playlist P) and a restart,
-`shown` is `None` while cg OBS still shows P, so P's dark-wall check stays
-silent until the next press (fails safe). Persisting it is a main-session
-call. Every change is logged (`legacy cg: cg OBS shows what SongPlayer told
+(`LegacyCg::restored`). Residual (review rounds 2-3): `shown` is not
+persisted; the restore seeds it from SP-program's saved source, which is
+what cg OBS shows only if that source's last mirror was accepted. After a
+dashboard cut to -1 (cg OBS keeps showing playlist P) and a restart,
+`shown` is `None` (P's dark-wall check silent until the next press, fails
+safe); after a cut to Q whose mirror failed (cg OBS still shows P) and a
+restart, `shown` is `Some(Q)` — harmless in L4a, but in L4b (`shown` joins
+the on-air set) P would read as off air. Persisting `shown` (or seeding
+`None`) is a main-session call BEFORE L4b. Every change is logged (`legacy cg: cg OBS shows what SongPlayer told
 it` INFO from → to; a dropped late answer DEBUG; the restore INFO). Served as `legacy_cg {shown}` on
 `GET /api/v1/program`; it keys the dark-wall expectation
 (`ndi_health_expect`, `obs-ndi-health.md`) and, from L4b, the playback

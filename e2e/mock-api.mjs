@@ -1028,8 +1028,9 @@ app.post("/api/v1/program/cut", (req, res) => {
     cut_boundary_100ns: null,
     at_ms: Date.now(),
     via: "dashboard",
-    // No scene for the input or a playlist with no catalog scene: nothing
-    // goes to cg OBS (`cg_forward` null), like the server.
+    // The input sends nothing to cg OBS (`cg_forward` null), like the
+    // server. The mock's playlists all name a scene; the server's other
+    // no-scene cases (inactive, empty or shared NDI name) are not modelled.
     cg_forward: source === -1 || !playlist ? null : "not_ready",
   };
   if (programState.source !== source) {

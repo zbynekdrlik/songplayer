@@ -18,14 +18,21 @@
 //! command never overwrites a newer one's.
 //!
 //! At startup `shown` is the restored program source when it is a playlist
-//! (`restore_selected_source`). Residual: `shown` is not persisted, so after
-//! a dashboard cut to -1 (cg OBS keeps showing playlist P) and a restart,
-//! `shown` is `None` while cg OBS still shows P — P's dark-wall check stays
-//! silent until the next press (fails safe: no false dark wall). It is served
-//! as `legacy_cg.shown` on
+//! (`restore_selected_source`). It is served as `legacy_cg.shown` on
 //! `GET /api/v1/program` and keys the dark-wall expectation
 //! (`ndi_health_expect`): a receiver is expected on a playlist's NDI output
 //! only while cg OBS was told to show it.
+//!
+//! Residual: `shown` is not persisted; the restore seeds it from
+//! `SP-program`'s saved source, which is what cg OBS shows only if that
+//! source's last mirror was accepted. Two ways it can differ after a
+//! restart, until the next switch:
+//! - a dashboard cut to -1 (cg OBS keeps showing playlist P): `shown` is
+//!   `None`, so P's dark-wall check stays silent (fails safe);
+//! - a cut to Q whose mirror failed (cg OBS still shows P): `shown` is
+//!   `Some(Q)`. In L4a harmless (cg OBS's scene detection still decides on
+//!   air); from L4b, where `shown` joins the on-air set, P would read as off
+//!   air. Persisting `shown` (or seeding `None`) is a main-session call.
 //!
 //! It also holds the dashboard's way to cg OBS ([`LegacyCg::link`]): the
 //! OBS client's command channel, attached by `start_program`. `AppState` is
