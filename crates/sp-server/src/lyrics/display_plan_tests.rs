@@ -264,15 +264,17 @@ fn the_slovak_the_wall_shows_bounds_a_merge_too() {
 fn a_sentence_sung_over_6500_ms_splits_at_its_last_soft_end() {
     let sentence = |last_start: u64| {
         song_plan(&[
-            en(0, 1_000, "Shout all ye people,"),
-            en(1_000, 2_000, "shout it out"),
+            // 11 + 1 + 8 + 1 + 9 + 1 + 13 = 44 chars: within one wall line,
+            // so only the span decides.
+            en(0, 1_000, "Shout, all,"),
+            en(1_000, 2_000, "shout it"),
             en(3_000, 4_000, "and dance"),
-            en(last_start, last_start + 1_000, "through the town."),
+            en(last_start, last_start + 1_000, "through town."),
         ])
     };
     // The last line starts exactly 6500 ms after the first: one wall line.
     assert_eq!(single(&sentence(6_500)), 0..4);
-    // At 6501 ms it splits after "people,", and the rest stays together.
+    // At 6501 ms it splits after "all,", and the rest stays together.
     assert_eq!(ranges(&sentence(6_501)), [0..1, 1..4]);
 }
 
