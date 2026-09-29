@@ -79,7 +79,7 @@ def decide(lease: Lease, own_repo: str) -> str:
     holder = lease.get("holder") or {}
     if holder.get("repo") == own_repo:
         return OWN
-    return FREE
+    return WAIT
 
 
 def describe_holder(lease: Lease) -> str:
