@@ -356,7 +356,8 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
     // - lrclib: artist empty, skipped
     // - description: Claude returns empty array, match guard skips push
     // So candidate_texts is empty — the #120 follow-up returns Ok(empty) here
-    // (not a bail) so process_song's gate routes the song to asr_path blind.
+    // (not a bail), so the song goes on to the title search, else the g35t
+    // base tier.
     let result = gather_sources_impl(
         Some(&ai),
         &bogus_ytdlp,
@@ -372,7 +373,7 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
     );
     assert!(
         ctx.candidate_texts.is_empty(),
-        "expected an empty candidate list for the blind asr_path route, got: {:?}",
+        "expected an empty candidate list (title search / g35t base tier), got: {:?}",
         ctx.candidate_texts
     );
 }

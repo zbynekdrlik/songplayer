@@ -123,8 +123,10 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
    `lyrics_alignment_model = ALIGNMENT_MODEL_G35T_REV1`. Measured no-text
    quality: g35t 19.7% gold-norm ≤400ms vs the retired AssemblyAI 3.8%.
    Reuses the vocal WAV already isolated for the ★ tier (no 2nd Demucs).
-   - Empty/blank transcript → quarantine as `asr_gap`. No vocals / no gemini
-     keys / g35t transport error → `Deferred` (row backs off, retries later).
+   - Empty/blank transcript → quarantine as `asr_gap`, unless the song already
+     serves lyrics (then only the attempt is recorded, the lyrics kept). No
+     vocals / no gemini keys / g35t transport error → `Deferred` (row backs
+     off, retries later).
 
 3. **AutoSubProvider** — PERMANENTLY UNREGISTERED. Never register again.
    YouTube autosub produces wrong timing.
@@ -139,9 +141,6 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
   Do NOT switch to a weaker model.
 - Route through direct `generativelanguage.googleapis.com` (not CLIProxyAPI)
   — the OAuth path hits `MODEL_CAPACITY_EXHAUSTED` on 3.x Pro preview models.
-  Override via `GEMINI_PROXY_URL` env var.
-- `thinkingConfig.thinkingBudget = 2048` limits Gemini reasoning to avoid
-  hallucinated-duplicate loops + timeouts on dense chorus audio.
 
 ## Chunking — every chunk must succeed
 
@@ -334,10 +333,12 @@ the queue. The bulk sweeps (`reprocess-all-stale`,
 `reprocess-catalog-with-new-gate`) use the same queue. No reprocess route may
 blank served lyrics: the per-video `POST /api/v1/videos/{id}/lyrics/reprocess`
 set `has_lyrics = 0` and blanked 211 songs on the wall for ~6 h on 30.9.2026,
-so it is deleted. Known gap: a re-run that fails still blanks a served song
-(an error: the worker's `Err` arm marks it `no_source`; an empty transcript:
-the base tier quarantines it and deletes the lyrics file). Detail:
-`.claude/rules/lyrics-reference-text.md` ("Reprocess: ONE per-song path").
+so it is deleted. A re-run that fails (an error, or an empty transcript) on a
+song the wall serves records only the attempt and keeps its lyrics; only an
+unserved row goes `no_source` / `asr_gap` (release 0.69.0 blockers). The #144
+rollout used this targeted path, with no pipeline bump. Detail:
+`.claude/rules/lyrics-reference-text.md` ("Reprocess: ONE per-song path", "A
+failed or empty re-run never darkens a served song").
 
 Also: never suggest, ask about, or include "bump pipeline version" as an option
 in AskUserQuestion. Wait for the user to initiate.

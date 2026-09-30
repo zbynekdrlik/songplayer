@@ -436,8 +436,10 @@ impl LyricsWorker {
 
     /// Gather every available text + timing source for a song.
     /// Returns a `SongContext` ready for orchestrator. Never bails on a single
-    /// source failure — collects what it can and returns; if zero text candidates
-    /// were gathered, bails.
+    /// source failure — collects what it can and returns; zero text candidates
+    /// is an empty list (the title search, else the g35t base tier, takes the
+    /// song). It bails only when a scraped text's Claude cleanup fails
+    /// (`gather.rs`).
     #[cfg_attr(test, mutants::skip)] // orchestrates N I/O calls; covered by worker structural test `gather_sources_call_order_preserves_yt_subs_then_lrclib`
     async fn gather_sources(
         &self,
