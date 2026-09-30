@@ -20,7 +20,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::*;
-use crate::playback::fleet_shift::{FleetShift, shift_100ns};
+use crate::playback::fleet_shift::{FleetShift, STEP_RESIDUE_100NS, shift_100ns};
+use crate::playback::vban_clock::VBAN_SLEW_MAX_100NS;
 use crate::playback::vban_out::{
     RemainderSlew, VBAN_SLEW_PPM, VbanClock, VbanOut, VbanSender, VbanSink, WallVbanClock,
     run_vban_loop,
@@ -224,6 +225,71 @@ fn the_remainder_slew_pays_a_hold_back_toward_zero_never_past_it() {
     slew.owe(269_666, t2 + 269_666);
     assert_eq!(slew.owed_at(t2 + 269_666), -4_990 + 269_666);
     assert_eq!(slew.clock_100ns(t2 + 269_666), v);
+}
+
+#[test]
+fn a_rejoin_and_a_follow_in_one_tick_are_both_owed() {
+    // Review r2: VBAN's thread stalled 11 s (94 ppm) across a +260.3 ms step
+    // the busy wall has not followed yet. VBAN's first tick rejoins the busy
+    // wall's pre-step line (+9 399 of drift), and its probe then follows the
+    // step (r = 270 794): VBAN owes BOTH, so its clock runs on by exactly the
+    // elapsed time. A second step (+50 ms) is owed on top (pins from a
+    // scratch Python model).
+    let clk = VirtualClock::new(94);
+    let fleet = Arc::new(FleetShift::default());
+    let mut busy = WallClock::with_fleet(Box::new(clk.clone()), fleet.clone());
+    let wall = WallClock::with_fleet(Box::new(clk.clone()), fleet.clone());
+    let mut vban = VirtualVban {
+        clock: WallVbanClock::slewing(wall),
+        clk: clk.clone(),
+    };
+    for _ in 0..5 {
+        clk.advance_ns(33_333_300);
+        busy.tick();
+        vban.now_100ns();
+    }
+    let before = vban.now_100ns();
+    let t0 = clk.now_monotonic();
+    for _ in 0..330 {
+        clk.advance_ns(33_333_300);
+        busy.tick();
+    }
+    clk.step_utc(2_603_000);
+    clk.advance_ns(33_333_300);
+    let after = vban.now_100ns();
+    let elapsed = |from: Instant| {
+        i64::try_from(clk.now_monotonic().duration_since(from).as_nanos() / 100).unwrap()
+    };
+    assert_eq!(fleet.slots(), 7);
+    assert_eq!(
+        vban.slew_owed_100ns(),
+        280_193,
+        "the rejoin's + the follow's"
+    );
+    assert_eq!(after - before, elapsed(t0), "neither a jump nor a stop");
+    let t1 = clk.now_monotonic();
+    clk.step_utc(500_000);
+    clk.advance_ns(33_333_300);
+    let again = vban.now_100ns();
+    assert_eq!(fleet.slots(), 8);
+    assert_eq!(vban.slew_owed_100ns(), 446_876, "+ r 166 699, less 16 paid");
+    assert_eq!(again - after, elapsed(t1) + 16, "the 16 paid");
+}
+
+#[test]
+fn a_movement_over_one_slot_is_taken_at_once_never_slewed_for_hours() {
+    assert_eq!(VBAN_SLEW_MAX_100NS, shift_100ns(1) + STEP_RESIDUE_100NS);
+    let t = 17_900_000_000_000_000i64;
+    let mut slew = RemainderSlew::default();
+    assert!(slew.owe(VBAN_SLEW_MAX_100NS, t), "one slot + 3 ms: owed");
+    assert_eq!(slew.owed_at(t), 363_334);
+    let mut slew = RemainderSlew::default();
+    assert!(
+        !slew.owe(-VBAN_SLEW_MAX_100NS - 1, t),
+        "more: taken at once"
+    );
+    assert_eq!(slew.owed_at(t), 0);
+    assert_eq!(slew.clock_100ns(t), t);
 }
 
 #[test]

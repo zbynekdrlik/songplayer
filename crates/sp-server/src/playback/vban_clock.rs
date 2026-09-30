@@ -20,6 +20,8 @@
 
 use std::time::Duration;
 
+use tracing::warn;
+
 use crate::playback::program_output::BoundaryTicker;
 use crate::playback::vban_out::VbanClock;
 use crate::playback::wallclock::WallClock;
@@ -31,6 +33,15 @@ use crate::playback::wallclock::WallClock;
 /// wait, so every packet interval stays within 4.1667 ms ± 100 ppm (VB-Matrix
 /// at FOH runs an ASRC that follows the arrival rate).
 pub const VBAN_SLEW_PPM: i64 = 50;
+
+/// The largest line movement VBAN's clock owes (100 ns): one slot (a single
+/// epoch's remainder) plus the 3 ms residue
+/// ([`STEP_RESIDUE_100NS`](crate::playback::fleet_shift::STEP_RESIDUE_100NS)). A
+/// larger one — only a rejoin after the VBAN thread stalled over 10 s, or a
+/// wall catching up two epochs at once — is taken at once: slewed at 50 ppm
+/// it would keep VBAN's clock off the program for hours (the queue would
+/// drop), and VBAN already missed that gap.
+pub const VBAN_SLEW_MAX_100NS: i64 = 15_000_000;
 
 /// VBAN's clock policy at a fleet date step (#224 part 2): SlewRemainder.
 ///
@@ -64,11 +75,16 @@ impl RemainderSlew {
 
     /// The line moved by `jump_100ns` (signed), reading `t_100ns` after the
     /// movement: owe it on top of what is still owed, so the clock reads the
-    /// same instant as right before it.
-    pub fn owe(&mut self, jump_100ns: i64, t_100ns: i64) {
+    /// same instant as right before it. Over [`VBAN_SLEW_MAX_100NS`] it is
+    /// not owed (the clock takes it at once): returns whether it was owed.
+    pub fn owe(&mut self, jump_100ns: i64, t_100ns: i64) -> bool {
+        if jump_100ns.abs() > VBAN_SLEW_MAX_100NS {
+            return false;
+        }
         let before = self.owed_at(t_100ns - jump_100ns);
         self.owed_100ns = before + jump_100ns;
         self.since_100ns = t_100ns;
+        true
     }
 
     /// VBAN's clock at line reading `t_100ns`.
@@ -85,14 +101,15 @@ pub struct WallVbanClock {
     ticker: BoundaryTicker,
     /// `Some` = SlewRemainder (VBAN).
     slew: Option<RemainderSlew>,
-    /// The wall's regrid count already owed.
-    regrids_seen: u64,
+    /// The wall's summed line movement already owed
+    /// (`WallShift::moved_100ns`).
+    moved_seen: i64,
 }
 
 impl WallVbanClock {
     pub fn new(wall: WallClock) -> Self {
         Self {
-            regrids_seen: wall.shift().regrids,
+            moved_seen: wall.shift().moved_100ns,
             wall,
             ticker: BoundaryTicker::default(),
             slew: None,
@@ -108,17 +125,24 @@ impl WallVbanClock {
         }
     }
 
-    /// After a wall tick: a regrid (or a rejoin) moved the timeline — owe
-    /// the movement.
+    /// After a wall tick: its regrids / rejoins moved the timeline — owe the
+    /// movement since the last look, or take it at once when it is over
+    /// [`VBAN_SLEW_MAX_100NS`] (one WARN).
     fn owe_regrid(&mut self) {
         let shift = self.wall.shift();
-        if shift.regrids == self.regrids_seen {
+        if shift.moved_100ns == self.moved_seen {
             return;
         }
-        self.regrids_seen = shift.regrids;
+        let jump = shift.last_jump_100ns;
+        self.moved_seen = shift.moved_100ns;
         let line = self.wall.line_100ns();
-        if let Some(slew) = self.slew.as_mut() {
-            slew.owe(shift.last_jump_100ns, line);
+        if let Some(slew) = self.slew.as_mut()
+            && !slew.owe(jump, line)
+        {
+            warn!(
+                jump_us = jump / 10,
+                "vban clock: the timeline moved more than a slot at once (a rejoin after a stall, or two date steps) — taken at once, not slewed (#224)"
+            );
         }
     }
 }

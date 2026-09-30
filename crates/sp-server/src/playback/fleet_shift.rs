@@ -356,8 +356,12 @@ pub struct WallShift {
     pub last_remainder_100ns: i64,
     /// How far the last regrid (or rejoin) moved the timeline's LINE at once
     /// (100 ns, signed): a jump ahead, or a hold of that size when negative.
-    /// VBAN's clock owes it ([`crate::playback::vban_clock::RemainderSlew`]).
     pub last_jump_100ns: i64,
+    /// Every regrid's and rejoin's line movement so far, summed (100 ns,
+    /// signed). VBAN's clock owes its change since it last looked
+    /// ([`crate::playback::vban_clock::RemainderSlew`]), so a rejoin and a
+    /// follow in one tick are both owed.
+    pub moved_100ns: i64,
 }
 
 /// The registry every production wall shares (`WallClock::system`).

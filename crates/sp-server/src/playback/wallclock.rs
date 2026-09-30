@@ -295,6 +295,7 @@ impl WallClock {
             regrids: self.shift.regrids + 1,
             last_remainder_100ns: self.shift.last_remainder_100ns,
             last_jump_100ns: moved,
+            moved_100ns: self.shift.moved_100ns + moved,
         };
         self.pending = None; // armed before the gap: nothing left to confirm
         self.suspect_since = None;
@@ -423,6 +424,7 @@ impl WallClock {
             regrids: self.shift.regrids + 1,
             last_remainder_100ns: followed.total_100ns - moved,
             last_jump_100ns: timeline,
+            moved_100ns: self.shift.moved_100ns + timeline,
         };
         self.anchor = Anchor {
             instant,

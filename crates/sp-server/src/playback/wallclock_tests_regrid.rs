@@ -46,6 +46,7 @@ fn a_plus_260_3_ms_step_relabels_7_slots_and_moves_the_timeline_by_r_only() {
             regrids: 1,
             last_remainder_100ns: 269_666,
             last_jump_100ns: 269_666,
+            moved_100ns: 269_666,
         }
     );
     assert_eq!((fleet.slots(), fleet.epochs()), (7, 1), "registered");
@@ -263,6 +264,77 @@ fn a_relabelled_wall_idle_for_20_min_rejoins_on_the_same_k() {
         clk.advance_ns(40_000_000);
         assert_eq!(idle.now_100ns(), busy.now_100ns(), "{ppm}");
     }
+}
+
+#[test]
+fn a_rejoin_on_the_resample_tick_never_reads_its_own_hold_as_a_step() {
+    // Review r2 🔴 B: the idle wall was 99 ticks into its resample count, so
+    // its rejoin tick is the 100th. Measured against the frozen wall, the
+    // resample read the rejoin's own 36 ms hold as a backward step, cut it to
+    // 1 ms and the probe then registered it (N = −2 for everyone). A rejoin
+    // restarts the count (a fresh anchor), and no resample runs inside a hold.
+    let clk = VirtualClock::new(-30);
+    let fleet = Arc::new(FleetShift::default());
+    let mut busy = wall_on(&clk, &fleet);
+    let mut idle = wall_on(&clk, &fleet);
+    for _ in 0..99 {
+        frame(&clk, &mut [&mut busy, &mut idle]);
+    }
+    for _ in 0..36_000 {
+        frame(&clk, &mut [&mut busy]);
+    }
+    frame(&clk, &mut [&mut busy, &mut idle]);
+    assert_eq!(
+        (fleet.slots(), fleet.epochs()),
+        (0, 0),
+        "nothing registered"
+    );
+    assert_eq!(
+        idle.shift().last_jump_100ns,
+        -361_000,
+        "ONE hold of the drift"
+    );
+    assert_eq!(idle.anchor_stats().steps_followed, 0);
+    assert_eq!(
+        idle.frames_since_resample(),
+        1,
+        "the rejoin restarted the resample count"
+    );
+    clk.advance_ns(40_000_000);
+    assert_eq!(idle.now_100ns(), busy.now_100ns());
+}
+
+#[test]
+fn a_resample_waits_out_a_rejoin_hold_longer_than_a_resample_period() {
+    // Alone 12 h at −94 ppm: the rejoin holds ~4.06 s, longer than the
+    // 100-tick resample period. The resample waits for the hold to end (it
+    // would read the rest of the hold as a backward step); the wall reads
+    // monotonic throughout and registers nothing.
+    let clk = VirtualClock::new(-94);
+    let fleet = Arc::new(FleetShift::default());
+    let mut wall = wall_on(&clk, &fleet);
+    frame(&clk, &mut [&mut wall]);
+    clk.advance_ns(12 * 3_600 * 1_000_000_000);
+    let mut prev = wall.now_100ns();
+    for i in 0..200 {
+        frame(&clk, &mut [&mut wall]);
+        let now = wall.now_100ns();
+        assert!(now >= prev, "tick {i}: {now} < {prev}");
+        prev = now;
+    }
+    assert_eq!((fleet.slots(), fleet.epochs()), (0, 0));
+    let shift = wall.shift();
+    assert_eq!(
+        (shift.slots, shift.regrids, shift.last_jump_100ns),
+        (0, 1, -40_608_063),
+        "ONE rejoin hold of the 4.06 s drift"
+    );
+    assert_eq!(wall.anchor_stats().steps_followed, 0);
+    assert_eq!(
+        wall.frames_since_resample(),
+        77,
+        "the resample ran on the first tick after the hold"
+    );
 }
 
 #[test]
