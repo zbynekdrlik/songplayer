@@ -948,9 +948,13 @@ mod tests {
         let body = captured_body.lock().unwrap().clone();
         // SCRAPED-prompt rule text must appear in the outgoing request, NOT
         // the description-prompt's signature phrases.
+        // #144: the scraped prompt keeps every repeat (the two-way gate
+        // measures what is SUNG, so a deduped chorus would read as an
+        // incomplete text). It is identified by its own signature + that rule.
         assert!(
-            body.to_lowercase().contains("dedup"),
-            "ScrapedLyrics mode must send the dedup-rule prompt; body: {body}"
+            body.contains("I scraped these lyrics from a lyrics website")
+                && body.contains("Keep every repeat"),
+            "ScrapedLyrics mode must send the scraped-lyrics prompt with the keep-every-repeat rule; body: {body}"
         );
         assert!(
             !body.contains("from this YouTube video description"),
