@@ -94,8 +94,8 @@ impl OnAirPlaylists {
         self.diffed().playlists.contains(&playlist_id)
     }
 
-    /// Test-only: the wall owner the task last published.
-    #[cfg(test)]
+    /// The wall owner the task last published (`None` before its first
+    /// value, or with nothing on air).
     pub fn owner(&self) -> Option<i64> {
         self.diffed().owner
     }

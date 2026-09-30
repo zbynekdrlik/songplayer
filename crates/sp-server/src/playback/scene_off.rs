@@ -106,6 +106,17 @@ impl PlaybackEngine {
             }
             None => {} // the due title's read failed: nothing is sent
         }
+        self.resync_wall_lines();
+    }
+
+    /// Re-send the wall's line now: the line of every playlist on program in
+    /// the authority's diffed set that may write the wall (`on_program_lines`,
+    /// so only the owner's while there is one), or ONE `HideSubtitles` when
+    /// none has a line. Used after an OFF (`wall_after_scene_off`) and on the
+    /// wall owner's ON (`handle_scene_change`, #221 review round 1: an owner
+    /// that changed by its ON alone must replace the old owner's line at
+    /// once, since the old owner no longer writes).
+    pub(super) fn resync_wall_lines(&self) {
         let lines: Vec<_> = self
             .on_program_lines()
             .into_iter()
@@ -115,10 +126,7 @@ impl PlaybackEngine {
             let _ = self.resolume_tx.try_send(ResolumeCommand::HideSubtitles);
         }
         for (playlist_id, video_id, cmd) in lines {
-            debug!(
-                playlist_id,
-                video_id, "scene off program — the line still on program re-sent"
-            );
+            debug!(playlist_id, video_id, "the wall's line re-sent");
             let _ = self.resolume_tx.try_send(cmd);
         }
     }
