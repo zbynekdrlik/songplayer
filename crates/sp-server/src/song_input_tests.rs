@@ -329,3 +329,36 @@ async fn a_dub_job_whose_audio_is_gone_says_why_on_the_row() {
         "names the recorded path: {error}"
     );
 }
+
+/// #136 review round 3: the audio is back (e.g. re-downloaded) — the dub runs
+/// and its "audio file is missing" note, the only `dub_error` a `synth` row
+/// carries (`mark_dub_synth` cleared any other), no longer holds: the tooltip
+/// must not claim it while the dub is synthesized.
+#[tokio::test]
+async fn a_dub_job_whose_audio_is_back_clears_the_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let audio = dir
+        .path()
+        .join("Talk_Speaker_IYAOosrh7HY_normalized_audio.flac");
+    std::fs::write(&audio, b"a").unwrap();
+    let pool = pool().await;
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, audio_file_path, \
+                             dub_requested, dub_status, dub_attempts, dub_error) \
+         VALUES (12, 1, 'IYAOosrh7HY', 1, ?, 1, 'synth', 1, \
+                 'the song''s audio file is missing: old (the dub waits, re-checked later)')",
+    )
+    .bind(text(&audio))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let input = job_input(&pool, 12, &text(&audio), HeavyJob::Dub).await;
+    assert_eq!(input.map(|i| i.audio_file_path), Some(text(&audio)));
+
+    let error: Option<String> = sqlx::query_scalar("SELECT dub_error FROM videos WHERE id = 12")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(error, None, "the note is gone once the audio is back");
+}

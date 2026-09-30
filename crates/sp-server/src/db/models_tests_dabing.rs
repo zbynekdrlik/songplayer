@@ -606,3 +606,22 @@ async fn rebuild_candidates_are_the_ready_dubs_that_have_the_subtitle_track() {
     assert_eq!(got[0].youtube_id, "yt_subs_a");
     assert_eq!(got[0].audio_file_path, "/c/a_audio.flac");
 }
+
+/// #136 review round 3: the Dabing tooltip shows a non-empty `dub_error` on
+/// any chain, so a (re-)request starts clean — an earlier failure's text must
+/// not ride along on the queued row.
+#[tokio::test]
+async fn requesting_a_dub_clears_an_earlier_error() {
+    let pool = setup().await;
+    let id = insert_video(&pool, "v1", "Testimony").await;
+    sqlx::query("UPDATE videos SET dub_status = 'failed', dub_error = 'old failure' WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    set_dub_requested(&pool, id, true).await.unwrap();
+
+    assert_eq!(col_str(&pool, id, "dub_status").await, "queued");
+    assert_eq!(col_opt_str(&pool, id, "dub_error").await, None);
+}

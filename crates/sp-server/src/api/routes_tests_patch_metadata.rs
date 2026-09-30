@@ -422,3 +422,61 @@ async fn a_correction_made_while_the_repair_batch_runs_survives() {
         assert!(std::path::Path::new(f).exists(), "{f} must not be moved");
     }
 }
+
+/// #136 review round 3: a title correction writes only while it holds
+/// `cache::SONG_FILES`, the lock under which a repair re-checks the queue and
+/// writes, so it can never land between the repair's two UPDATEs. The 300 ms
+/// window can only fail a PATCH that writes without the lock.
+#[tokio::test]
+async fn a_title_patch_waits_for_the_song_files_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state().await;
+    seed_parser_row(&state, 25, dir.path()).await;
+    let pool = state.pool.clone();
+
+    let held = crate::downloader::cache::SONG_FILES.lock().await;
+    let run = tokio::spawn(patch(state, 25, serde_json::json!({ "song": "Break!" })));
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!run.is_finished(), "the correction waits for the lock");
+    let (song, _, gemini_failed, source, _, _) = metadata_row(&pool, 25).await;
+    assert_eq!(
+        (song.as_str(), gemini_failed, source.as_deref()),
+        ("Old Song", 1, Some("regex")),
+        "nothing written while the lock is held"
+    );
+    drop(held);
+    let status = tokio::time::timeout(std::time::Duration::from_secs(30), run)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (song, _, gemini_failed, source, _, _) = metadata_row(&pool, 25).await;
+    assert_eq!(
+        (song.as_str(), gemini_failed, source.as_deref()),
+        ("Break!", 0, Some("manual"))
+    );
+}
+
+/// The lock is a title correction's only: a PATCH of the other fields finishes
+/// while it is held (the `corrects_title` gate).
+#[tokio::test]
+async fn a_patch_of_other_fields_does_not_wait_for_the_song_files_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state().await;
+    seed_parser_row(&state, 26, dir.path()).await;
+
+    let held = crate::downloader::cache::SONG_FILES.lock().await;
+    let status = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        patch(
+            state,
+            26,
+            serde_json::json!({ "suppress_resolume_en": true }),
+        ),
+    )
+    .await
+    .expect("a PATCH of the other fields finishes while the lock is held");
+    drop(held);
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}
