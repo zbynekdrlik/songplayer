@@ -21,7 +21,7 @@
 //!
 //! A fleet date step (#224 part 2): the walls relabel, so the program's
 //! timeline moves only by the remainder r (≤ one slot, or a residue hold
-//! under 3 ms) and VBAN never sees the whole slots N. VBAN has no timecode:
+//! under 4 ms) and VBAN never sees the whole slots N. VBAN has no timecode:
 //! its receiver paces by arrival, so a jump of r would still send r of audio
 //! at once, and a hold would leave a gap. Its clock
 //! ([`WallVbanClock::slewing`], policy [`RemainderSlew`], in `vban_clock.rs`)

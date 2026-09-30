@@ -36,7 +36,7 @@ pub const VBAN_SLEW_PPM: i64 = 50;
 ///
 /// A follow relabels the wall (the whole slots N never reach the timeline)
 /// and moves its timeline by the remainder r: a jump ahead, or a hold of a
-/// residue under 3 ms. VBAN reads `line − owed`, where `owed` takes that
+/// residue under 4 ms. VBAN reads `line − owed`, where `owed` takes that
 /// movement at the follow (signed), so VBAN's clock neither jumps nor stops,
 /// and then shrinks toward 0 at [`VBAN_SLEW_PPM`] of the elapsed line: every
 /// packet goes out on its cadence, r ends up paid over minutes (the queue

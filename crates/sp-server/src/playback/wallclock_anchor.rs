@@ -20,7 +20,7 @@
 //!   backward step. Since #224 part 2 a followed step RELABELS (the wall's
 //!   `regrid`, `fleet_shift.rs`): its whole slots move the labels, and the
 //!   timeline moves only by the remainder — a step ahead, or a hold of a
-//!   residue under 3 ms — never by the step itself, in either direction.
+//!   residue under 4 ms — never by the step itself, in either direction.
 //!
 //! A dantesync date step is followed at the boundary it lands (#224, design
 //! record 5890605448): [`decide_step_probe`] judges one cheap bracketed read
@@ -461,7 +461,7 @@ pub fn wall_at(anchor_instant: Instant, anchor_utc_100ns: i64, at: Instant) -> i
 ///   bounded resample; a followed step's remainder r ≤ one slot, #224 part 2).
 /// * Backward (`applied < 0`): the anchor instant moves `|applied|` into the
 ///   future at the CURRENT wall value. The saturating read then holds the wall
-///   for `|applied|` — ≤ 1 ms for a bounded resample, under 3 ms for a
+///   for `|applied|` — ≤ 1 ms for a bounded resample, under 4 ms for a
 ///   followed step's residue (#224 part 2: a date step itself is never held),
 ///   or the idle drift of a wall rejoining the fleet — after which it runs
 ///   exactly on the corrected line. The wall never goes backward, so the
@@ -500,10 +500,10 @@ pub struct WallAnchorStats {
     /// Followed steps that HELD the wall's timeline (a subset of
     /// `steps_followed`). Since #224 part 2 a followed step relabels: the
     /// timeline moves only by the remainder r ≥ 0 left after the whole slots,
-    /// so a backward step is no hold. A hold is only a residue under 3 ms: a
+    /// so a backward step is no hold. A hold is only a residue under 4 ms: a
     /// resample's armed 1 ms that already moved the wall further than r, a
-    /// wall adopting another wall's slot count for a step it read up to 2 ms
-    /// smaller, or a backward step under 2 ms applied on its own (no epoch).
+    /// wall adopting another wall's slot count for a step it read up to 3 ms
+    /// smaller, or a backward step under 3 ms applied on its own (no epoch).
     pub holds_followed: u64,
     /// How long (µs) the last such hold froze the timeline; 0 before any.
     pub last_hold_us: u64,

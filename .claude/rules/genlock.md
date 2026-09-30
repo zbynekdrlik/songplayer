@@ -1036,9 +1036,9 @@ Now:
   wall for `|applied|`, then it runs exactly on the corrected line. That is
   ≤ 1 ms for a bounded resample. Since #224 part 2 a followed DATE step is
   never a hold (a relabel + a forward remainder); a follow holds only a
-  residue under 3 ms: a resample's armed 1 ms that already moved the wall
+  residue under 4 ms: a resample's armed 1 ms that already moved the wall
   further than r, a wall adopting another wall's N for a step it read up to
-  2 ms smaller, or a backward step under 2 ms applied on its own (no epoch).
+  3 ms smaller, or a backward step under 3 ms applied on its own (no epoch).
   A wall rejoining after an idle gap may hold its own drift (see "A date
   step relabels"). Never "simplify" a hold back to `(instant, wall − |applied|)`:
   that is a backward step, and right after an emit it relatches
@@ -1046,7 +1046,7 @@ Now:
   10 000 boundaries with a preempted resample every other time, and across a
   followed −1.5 s step).
   - **What a hold does to the paced output** (a bounded resample's ≤ 1 ms, or
-    a follow's residue under 3 ms; the whole-step hold below is the
+    a follow's residue under 4 ms; the whole-step hold below is the
     pre-part-2 behaviour, kept for the mechanism): the pacer's wall
     resumes from the value it froze at. So the next boundary is simply the
     NEXT slot, serviced `|hold|` + one slot later: consecutive stamps, 0
@@ -1108,9 +1108,11 @@ Now:
       - Since #224 part 2 a date step of either sign holds nothing (a
         relabel), so a step logs NONE. Before, a backward 04:00 step (~1.5 s
         hold) logged one per paced thread.
-      - Any line means something froze the wall (or the coarse sleep broke
-        its contract): investigate it. A residue hold under 3 ms stays
-        inside the spin budget and logs nothing.
+      - A follow's residue hold (under 4 ms, rare) can outlast the 3 ms
+        spin budget like any hold over ~1 ms: then ONE line for that
+        boundary, next to the follow's INFO line. Any other line means
+        something froze the wall (or the coarse sleep broke its contract):
+        investigate it.
     - `pacer_spin.rs` is cross-platform and mutation-covered. It is NOT named
       `pipeline_paced_*`, because `.cargo/mutants.toml` excludes that
       substring.
@@ -1153,11 +1155,11 @@ Now:
   - `wall_anchor_holds_followed` — follows whose TIMELINE movement was a
     hold. Since #224 part 2 a followed date step moves the timeline forward
     by its remainder r (a backward step too), so this counts only residue
-    holds under 3 ms (a resample's armed 1 ms past r, an adopter reading the
-    step up to 2 ms smaller, a backward step under 2 ms applied alone); it is
+    holds under 4 ms (a resample's armed 1 ms past r, an adopter reading the
+    step up to 3 ms smaller, a backward step under 3 ms applied alone); it is
     NOT "the backward steps" any more;
   - `wall_anchor_last_hold_us` — how long the last such hold froze the
-    timeline (under 3 ms);
+    timeline (under 4 ms);
   - `wall_anchor_probes_rejected` (#224) — probes over 2 ms that were rejected
     (a wide probe, or a confirming sample that was wide or read another step);
   - `wall_anchor_detect_to_follow_us` (#224) — from the FIRST over-2 ms probe
@@ -1172,7 +1174,7 @@ Now:
   announced step is the fleet date step, followed; the INFO log shows
   `direction=`, and since #224 part 2 `shift_slots` / `remainder_us` /
   `timeline_us` (every wall of the box logs the SAME `shift_slots` and a
-  `remainder_us` within ~1 ms of the others). Each wall
+  `remainder_us` within ~1 ms of the others, 3 ms at worst). Each wall
   anchors and follows independently, so every pacer and consumer logs its
   own follow — since #224 the `followed at once by the boundary probe` line,
   within one boundary of the step, `detect_to_follow_us` ≈ 0.
@@ -1585,7 +1587,7 @@ submit consumer, `SP-program`, NDI input, VBAN).
   timeline `UTC − D(K_w)` (it passes the timeline anchor to
   `ClockSource::read_100ns`, so the settable test clock, which ignores the
   anchor, never sees a relabel). The timeline moves by `applied − ΔD` through
-  `apply_anchor_step`: r forward, or a residue HOLD under 3 ms — never
+  `apply_anchor_step`: r forward, or a residue HOLD under 4 ms — never
   backward, never S. Every existing call site keeps working unchanged.
   `WallClock::line_100ns` reads the timeline's LINE through a hold (VBAN's
   clock reads it); a regrid's `last_jump_100ns` is signed.
@@ -1595,16 +1597,17 @@ submit consumer, `SP-program`, NDI input, VBAN).
   global one). The first wall to confirm a step registers an epoch {S, N}
   (ONE INFO line `fleet shift: a date step registered`); a later wall
   adopts the ΣN of the run of its unapplied epochs (none included) whose
-  summed S lies CLOSEST to its own reading, when within the probe's 2 ms
-  step threshold (`fleet_shift::adopt`; a tie keeps the shorter run) — two
-  walls either side of a slot multiple still move by ONE N; a wall two
-  epochs behind adopts both. The difference is the reader's own line error
-  (a lone-outlier resample leaves ~1.3 ms, review round 1): it is NEVER a
-  new epoch, and neither is any step within 2 ms of nothing registered (a
-  1–2 ms step only the resample confirms), so a registered epoch is always
-  over 2 ms. (Registering such a residue, −1.3 ms → N = −1, left every other
-  wall's stamps a slot stale for good.) An adopter's r can leave [0, P] by
-  ≤ 2 ms; a wall that missed a whole epoch and sees two steps as one can
+  summed S lies CLOSEST to its own reading, when within
+  `STEP_RESIDUE_100NS` = 3 ms (`fleet_shift::adopt`; a tie keeps the
+  shorter run) — two walls either side of a slot multiple still move by ONE
+  N; a wall two epochs behind adopts both. The difference is the two walls'
+  line errors, each ≤ 1 ms (a lone-outlier resample, review round 1) +
+  ≤ 0.31 ms slewing lag: it is NEVER a new epoch, and neither is any step
+  within 3 ms of nothing registered (each wall applies it alone, N = 0), so
+  a registered epoch is always over 3 ms. (Registering such a residue,
+  −1.3 ms → N = −1, left every other wall's stamps a slot stale for good; at
+  2 ms the fuzz still split K with two opposite outliers.) An adopter's r
+  can leave [0, P] by ≤ 3 ms; a wall that missed a whole epoch and sees two steps as one can
   jump more than a slot (never in practice: walls follow within a boundary,
   steps are hours apart).
 - **Joining the fleet: the published line** (review round 1). A wall that
