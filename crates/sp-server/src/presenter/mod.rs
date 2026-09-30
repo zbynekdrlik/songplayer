@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use crate::lyrics::renderer::PresenterLines;
 
-/// #222: the current line last pushed, `(EN, SK)` — the push dedup key.
-pub type PushedLine = (String, String);
+/// #222: the lines last pushed (current + next, EN + SK) — the push dedup key.
+pub type PushedLine = PresenterLines;
 
 /// Default Presenter API endpoint when `presenter_url` setting is empty.
 pub const DEFAULT_URL: &str = "http://10.77.9.205/api/stage";
@@ -60,8 +60,9 @@ pub fn payload_for(
     song: &str,
     artist: &str,
 ) -> Option<PresenterPayload> {
-    let pushed =
-        last_seen.is_some_and(|(en, sk)| *en == lines.current_en && *sk == lines.current_sk);
+    let pushed = last_seen.is_some_and(|seen| {
+        seen.current_en == lines.current_en && seen.current_sk == lines.current_sk
+    });
     if pushed {
         return None;
     }
@@ -109,7 +110,7 @@ pub fn maybe_push_line(
             tracing::warn!(?e, "presenter push failed (non-fatal)");
         }
     });
-    Some((lines.current_en, lines.current_sk))
+    Some(lines)
 }
 
 #[cfg(test)]

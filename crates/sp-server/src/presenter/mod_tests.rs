@@ -23,10 +23,6 @@ fn lines(current_en: &str, next_en: &str, current_sk: &str, next_sk: &str) -> Pr
     }
 }
 
-fn pushed(en: &str, sk: &str) -> PushedLine {
-    (en.to_string(), sk.to_string())
-}
-
 #[test]
 fn a_line_is_pushed_in_both_languages() {
     let l = lines(
@@ -90,19 +86,19 @@ fn every_lyric_field_is_wrapped_for_the_stage_display() {
 #[test]
 fn a_line_already_pushed_in_both_languages_is_not_pushed_again() {
     let l = lines("Amazing grace", "How sweet", "Úžasná milosť", "Ako sladko");
-    let seen = pushed("Amazing grace", "Úžasná milosť");
+    let seen: PushedLine = l.clone();
     assert_eq!(payload_for(Some(&seen), &l, "Song", ""), None);
 }
 
 #[test]
 fn a_push_is_made_when_only_the_translation_changed() {
     // The Slovak line arrived later under the same English line.
-    let seen = pushed("Amazing grace", "");
+    let seen = lines("Amazing grace", "How sweet", "", "Ako sladko");
     let l = lines("Amazing grace", "How sweet", "Úžasná milosť", "Ako sladko");
     let payload = payload_for(Some(&seen), &l, "Song", "").expect("the SK changed");
     assert_eq!(payload.current_translation, "Úžasná milosť");
     // And when only the English changed.
-    let seen = pushed("Amazing", "Úžasná milosť");
+    let seen = lines("Amazing", "How sweet", "Úžasná milosť", "Ako sladko");
     assert!(payload_for(Some(&seen), &l, "Song", "").is_some());
 }
 
@@ -146,19 +142,27 @@ async fn maybe_push_line_pushes_a_translation_that_changed_under_the_same_line()
 
     // The English line first, with no translation yet.
     let seen = push(None, lines("Amazing grace", "How sweet", "", ""));
-    assert_eq!(seen, Some(pushed("Amazing grace", "")));
+    assert_eq!(seen, Some(lines("Amazing grace", "How sweet", "", "")));
     let bodies = wait_for_pushes(&mock, 1).await;
     assert_eq!(bodies[0]["currentText"], "Amazing grace");
     assert_eq!(bodies[0]["currentTranslation"], "");
     // The same line again: no push, the key is kept.
     let seen = push(seen, lines("Amazing grace", "How sweet", "", ""));
-    assert_eq!(seen, Some(pushed("Amazing grace", "")));
+    assert_eq!(seen, Some(lines("Amazing grace", "How sweet", "", "")));
     // The Slovak arrives for the same English line: pushed.
     let seen = push(
         seen,
         lines("Amazing grace", "How sweet", "Úžasná milosť", "Ako sladko"),
     );
-    assert_eq!(seen, Some(pushed("Amazing grace", "Úžasná milosť")));
+    assert_eq!(
+        seen,
+        Some(lines(
+            "Amazing grace",
+            "How sweet",
+            "Úžasná milosť",
+            "Ako sladko"
+        ))
+    );
     let bodies = wait_for_pushes(&mock, 2).await;
     assert_eq!(
         bodies[1],
@@ -179,7 +183,7 @@ async fn maybe_push_line_pushes_a_translation_that_changed_under_the_same_line()
 
 #[tokio::test]
 async fn without_a_client_nothing_is_pushed_and_the_key_is_kept() {
-    let seen = Some(pushed("a", "b"));
+    let seen = Some(lines("a", "", "b", ""));
     let l = lines("c", "", "d", "");
     assert_eq!(maybe_push_line(None, seen.clone(), l, "Song", ""), seen);
 }
