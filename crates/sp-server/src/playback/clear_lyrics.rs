@@ -1,7 +1,8 @@
 //! `clear_lyrics_display` — extracted from `playback/mod.rs` to keep that
 //! file under the 1000-line cap. It follows the dispatch gates (a held
 //! playlist clears nothing, an off-program one leaves the shared subtitle
-//! clips alone; release 0.68.0 blockers).
+//! clips alone; release 0.68.0 blockers; a playlist that does not own the
+//! wall clears neither the clips nor the Presenter, release 0.69.0 🟡 2).
 
 use std::sync::atomic::Ordering;
 
@@ -20,8 +21,13 @@ impl super::PlaybackEngine {
     /// transition clears nothing, and one off program leaves the shared
     /// subtitle clips alone. Its song end, a song without lyrics or a
     /// PlayVideo blanked the on-program playlist's `#sp-subs` line.
+    ///
+    /// #221 (release 0.69.0 review 🟡 2): while a playlist owns the wall,
+    /// only its clear reaches the shared subtitle clips and the Presenter
+    /// (`OnAirPlaylists::may_write_wall`).
     #[cfg_attr(test, mutants::skip)]
     pub(super) fn clear_lyrics_display(&self, playlist_id: i64) {
+        let owns_wall = self.on_air.may_write_wall(playlist_id);
         let (on_program, held) = self
             .pipelines
             .get(&playlist_id)
@@ -43,6 +49,9 @@ impl super::PlaybackEngine {
             active_word_index: None,
             word_count: None,
         });
+        if !owns_wall {
+            return;
+        }
         if on_program {
             let _ = self
                 .resolume_tx

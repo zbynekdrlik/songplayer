@@ -22,6 +22,9 @@
 //! - #221 L4b: [`on_air_set`] is the ONE "which playlists are on air" rule,
 //!   and [`on_air_changes`] the events a change of it becomes
 //!   (`program_authority.rs`, the playback authority).
+//! - #221 (release 0.69.0 review 🟡 2): [`wall_owner`] is the ONE playlist
+//!   of that set that writes the shared wall outputs; the authority
+//!   publishes it with the set.
 //!
 //! The facade's per-session preview and feedback (#221 L2, L3),
 //! `/api/v1/status` and the playback authority (L4b) read them.
@@ -76,6 +79,22 @@ pub fn program_scene_name(on_air: &OnAir) -> Option<String> {
 pub fn on_air_set(on_air: &OnAir, cg_shown: Option<i64>) -> BTreeSet<i64> {
     let program = on_air.source.filter(|&source| source != PROGRAM_INPUT_ID);
     program.into_iter().chain(cg_shown).collect()
+}
+
+/// #221 (release 0.69.0 review 🟡 2): the ONE playlist that owns the shared
+/// wall outputs — `#sp-subs*` (`ShowSubtitles`), the `#sp-title` clip (the
+/// title timers, a re-sync's title) and the Presenter stage display.
+/// `SP-program`'s source when it is a playlist (the LED wall takes
+/// SP-program since B4), else the playlist cg OBS was told to show
+/// (`legacy_cg.shown`), else none. Always a member of [`on_air_set`], and
+/// `None` only when that set is empty. The other member of a two-member set
+/// (after a failed or late mirror, or a dashboard cut to "OBS manuál")
+/// keeps playing for the consumers that still take cg OBS, but writes no
+/// shared output: before, both wrote the one wall, and one's hide timer took
+/// the other's title down.
+pub fn wall_owner(on_air: &OnAir, cg_shown: Option<i64>) -> Option<i64> {
+    let program = on_air.source.filter(|&source| source != PROGRAM_INPUT_ID);
+    program.or(cg_shown)
 }
 
 /// #221 L4b: the `(playlist, on)` events of a change from `previous` to

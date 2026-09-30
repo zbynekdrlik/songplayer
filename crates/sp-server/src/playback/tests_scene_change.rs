@@ -844,3 +844,8 @@ async fn started_fixes_the_song_s_title_clock_and_arms_its_timers() {
 /// 3-5), a child module for the 1000-line cap.
 #[path = "tests_scene_off_wall.rs"]
 mod wall;
+
+/// One wall owner (#221, release 0.69.0 review 🟡 2), a child module for
+/// the 1000-line cap.
+#[path = "tests_wall_owner.rs"]
+mod owner;

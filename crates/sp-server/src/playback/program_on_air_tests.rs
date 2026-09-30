@@ -215,6 +215,48 @@ fn on_air_is_the_program_s_playlist_and_what_cg_obs_was_told() {
     assert_eq!(on_air_set(&OnAir::default(), Some(4)), set(&[4]));
 }
 
+/// Release 0.69.0 review 🟡 2: ONE playlist of the on-air set owns the
+/// shared wall outputs — SP-program's playlist, else the one cg OBS was told
+/// to show, else none. It is always a member of the set, and none only when
+/// the set is empty.
+#[test]
+fn the_wall_owner_is_the_program_s_playlist_else_what_cg_obs_was_told() {
+    let fast = on_air(2, Some(7), Some("sp-fast"));
+    let manual = on_air(3, Some(PROGRAM_INPUT_ID), Some("Slido"));
+    let cases = [
+        (&fast, Some(7), Some(7), "they agree"),
+        (
+            &fast,
+            Some(4),
+            Some(7),
+            "a late mirror: the program's playlist",
+        ),
+        (&fast, None, Some(7), "cg OBS shows a manual scene"),
+        (
+            &manual,
+            Some(7),
+            Some(7),
+            "OBS manuál carries cg OBS's sp-fast",
+        ),
+        (&manual, None, None, "no playlist on air"),
+    ];
+    for (program, shown, owner, why) in cases {
+        assert_eq!(wall_owner(program, shown), owner, "{why}");
+        let members = on_air_set(program, shown);
+        assert_eq!(
+            owner.is_none(),
+            members.is_empty(),
+            "{why}: none only for an empty set"
+        );
+        assert!(
+            owner.is_none_or(|o| members.contains(&o)),
+            "{why}: a member"
+        );
+    }
+    assert_eq!(wall_owner(&OnAir::default(), None), None, "nothing yet");
+    assert_eq!(wall_owner(&OnAir::default(), Some(4)), Some(4));
+}
+
 /// #221 L4b: OFF for every playlist that left, then ON for every playlist
 /// that entered and for the source just cut to (the re-kick), each part
 /// ascending. Review round 1: a member nobody cut to is never re-kicked.

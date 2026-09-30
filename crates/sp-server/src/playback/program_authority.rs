@@ -29,6 +29,14 @@
 //!   a cg OBS scene event that came before SongPlayer's cut, is gone), and
 //!   an outgoing playlist is held only through its transition window
 //!   (`Hold::Until`, `scene_off.rs`).
+//! - **One wall owner** (release 0.69.0 review 🟡 2): with each set the task
+//!   publishes its `program_on_air::wall_owner` (SP-program's playlist, else
+//!   the one cg OBS was told to show). While there is one, only it writes
+//!   the shared wall outputs ([`OnAirPlaylists::may_write_wall`]): the
+//!   `ShowSubtitles` dispatch and the Presenter push (`position_update.rs`),
+//!   the song-end clear (`clear_lyrics.rs`), the title timers
+//!   (`title_timers.rs`) and a re-sync's title and lines (`recovery.rs`). The
+//!   other member of a two-member set keeps playing but writes none of them.
 //! - A pipeline created after its playlist went on air (a runtime
 //!   `EnsurePipeline`) goes on program itself (`runtime_pipeline.rs`). An ON
 //!   for a playlist with NO pipeline (the #196 startup senders ran out of
@@ -37,7 +45,7 @@
 //! A manual ▶ claims nothing (`PlayEvent::Start`, `engine_play.rs`).
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info};
@@ -45,25 +53,61 @@ use tracing::{debug, info};
 use super::PlaybackEngine;
 use super::pipeline::PipelineEvent;
 use super::program_bus::ProgramBus;
-use super::program_on_air::{on_air_changes, on_air_set};
+use super::program_on_air::{on_air_changes, on_air_set, wall_owner};
 
-/// The playlists on air as the authority task last diffed them: the task
-/// writes a value's set BEFORE it sends that value's events, and the
-/// engine's stale check reads it (the module doc). Empty until the first
-/// value. Shared by the engine (`PlaybackEngine::on_air`) and the task.
+/// The playlists on air as the authority task last diffed them, and the one
+/// of them that owns the wall (`program_on_air::wall_owner`, release 0.69.0
+/// review 🟡 2): the task writes a value's set and owner BEFORE it sends
+/// that value's events, and the engine's stale check and its wall writers
+/// read them (the module doc). Empty, with no owner, until the first value.
+/// Shared by the engine (`PlaybackEngine::on_air`) and the task.
 #[derive(Clone, Debug, Default)]
-pub struct OnAirPlaylists(Arc<Mutex<BTreeSet<i64>>>);
+pub struct OnAirPlaylists(Arc<Mutex<Diffed>>);
+
+/// What [`OnAirPlaylists`] holds.
+#[derive(Debug, Default)]
+struct Diffed {
+    playlists: BTreeSet<i64>,
+    owner: Option<i64>,
+}
 
 impl OnAirPlaylists {
-    /// The set of the value the task is about to send the events of.
+    fn diffed(&self) -> MutexGuard<'_, Diffed> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The set and the wall owner of the value the task is about to send the
+    /// events of.
+    pub fn publish(&self, playlists: BTreeSet<i64>, owner: Option<i64>) {
+        *self.diffed() = Diffed { playlists, owner };
+    }
+
+    /// Test-only: the diffed set alone, with no owner (every playlist on
+    /// program writes the wall, as before the owner).
+    #[cfg(test)]
     pub fn replace(&self, playlists: BTreeSet<i64>) {
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = playlists;
+        self.publish(playlists, None);
     }
 
     /// Whether `playlist_id` is in the set the task last diffed.
     pub fn contains(&self, playlist_id: i64) -> bool {
-        let playlists = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        playlists.contains(&playlist_id)
+        self.diffed().playlists.contains(&playlist_id)
+    }
+
+    /// Test-only: the wall owner the task last published.
+    #[cfg(test)]
+    pub fn owner(&self) -> Option<i64> {
+        self.diffed().owner
+    }
+
+    /// Whether `playlist_id` may write the shared wall outputs (the lines,
+    /// the title, the Presenter): while a playlist owns the wall, only that
+    /// one. With none (nothing on air, or before the task's first value) this
+    /// restricts nothing: a playlist whose OFF is still queued writes as
+    /// before, and its OFF re-syncs the wall (`wall_after_scene_off`).
+    pub fn may_write_wall(&self, playlist_id: i64) -> bool {
+        let diffed = self.diffed();
+        diffed.owner.is_none() || diffed.playlists.contains(&playlist_id)
     }
 }
 
@@ -89,14 +133,15 @@ pub async fn run_program_authority(
         seen_seq = program.seq;
         let cg_shown = *shown.borrow_and_update();
         let current = on_air_set(&program, cg_shown);
-        diffed.replace(current.clone());
+        let owner = wall_owner(&program, cg_shown);
+        diffed.publish(current.clone(), owner);
         for (pid, on) in on_air_changes(&previous, &current, cut_to) {
             if events.send((pid, PipelineEvent::OnProgram(on))).is_err() {
                 debug!("program authority: the engine is gone — stopping");
                 return;
             }
         }
-        log_on_air(&previous, &current, program.source, cg_shown);
+        log_on_air(&previous, &current, program.source, owner, cg_shown);
         previous = current;
         tokio::select! {
             _ = shutdown.recv() => return,
@@ -113,6 +158,7 @@ fn log_on_air(
     previous: &BTreeSet<i64>,
     current: &BTreeSet<i64>,
     program: Option<i64>,
+    wall_owner: Option<i64>,
     cg_shown: Option<i64>,
 ) {
     if previous != current {
@@ -120,6 +166,7 @@ fn log_on_air(
             ?previous,
             ?current,
             ?program,
+            ?wall_owner,
             ?cg_shown,
             "program authority: the playlists on air changed"
         );
@@ -127,6 +174,7 @@ fn log_on_air(
         debug!(
             ?current,
             ?program,
+            ?wall_owner,
             ?cg_shown,
             "program authority: on air again (a press of the same scene, or cg OBS confirmed it)"
         );
