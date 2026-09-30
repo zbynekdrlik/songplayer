@@ -117,7 +117,8 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   release missed boundaries, and submits every queued job at once.
 - #210: `ProgramOutput::serve` hands each boundary's audio block to VBAN
   FIRST, then does the video side (a mixed boundary's picture, the NDI
-  submit), for every job kind (`vban-out.md` "Data path"; pinned by
+  submit), for every job kind — by structure: `split` (the audio side, no
+  video work) → `feed_vban` → `submit_video` (`vban-out.md` "Data path"; pinned by
   `program_output_tests_order.rs` with a held NDI send). It returns the
   boundary's `BoundaryMarks`, which the loop records
   (`ProgramBus::record_timing` → `health.timing`, the rate-limited WARN of a

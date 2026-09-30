@@ -24,8 +24,14 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
   - a mixed boundary computes its crossfaded block and pushes it FIRST, then
     paints the picture (`paint_mix`) and submits.
 
-  So no video-side cost — a slow NDI send, a mixed picture — ever delays the
-  FOH block. Before the fix the push came after the NDI submit, and a late
+  The order is structural: `serve` = `split` (the audio side, no video work)
+  → `feed_vban` → `submit_video` (a mix's picture, the standby black, the NDI
+  submit), and the run of mixed boundaries ends only after the unmixed
+  boundary went out. So no video-side cost of a boundary — a slow NDI send,
+  a mixed picture — delays that boundary's FOH block. The sender is one
+  thread: a video side longer than a slot still delays the NEXT boundary's
+  take, which shows as `ready_late_us` (below). Before the fix the push came
+  after the NDI submit, and a late
   submit showed on dev1 as a 20–35 ms gap followed by a 6–8 packet burst
   (#210 findings 5907620763 / 5907883948). Pinned by
   `program_output_tests_order.rs`: the NDI backend holds its first send
@@ -144,7 +150,8 @@ What makes a FOH block late is named on the box, per boundary, by the
 - Reading it: a late `vban_feed` with a late `ready_late` is upstream of the
   sender (a late source or release, or the sender still busy with the
   boundary before); `submit_us` alone high is the NDI SDK and, since the fix,
-  no longer reaches FOH.
+  no longer delays its own boundary's FOH block — only a submit longer than
+  a slot still delays the next boundary's take (its `ready_late_us`).
 - Tests: `program_output_timing_tests.rs` (exact pins, the two buckets, the
   5 ms / 10 ms / 5 s edges), `program_output_tests_order.rs` (an NDI send
   that advances a settable wall shows in `submit_us` only; the real loop
@@ -169,9 +176,12 @@ receiver and never at FOH, capture 60 s with tcpdump and check 0 counter gaps,
 an interval p99 < 7 ms, and PCM that cross-correlates with `SP-program`.
 Routing fohabl/lv1 in VB-Matrix is B4, with the owner's go. The #210 stall
 fix adds: a 15 min dev1 capture with 0 inter-arrival gaps over 15 ms and 0
-bursts, and `health.timing.vban_feed_late_us_max` < 5 ms (design record
-5911744233); if a late `ready_late` remains, the next step targets that
-source by the measured cause.
+bursts, and `health.timing` read right before and right after the capture:
+`vban_feed_late_over_5ms` and `vban_feed_late_over_10ms` must not grow, and
+`vban_feed_late_us_max` < 5 ms (design record 5911744233). The `*_max`
+figures cover only the last 60–120 s, so a stall early in a 15 min capture
+shows only in the counter diff. If a late `ready_late` remains, the next
+step targets that source by the measured cause.
 
 ## FOH routing on fohabl (VB-Matrix over VBAN-TEXT)
 
