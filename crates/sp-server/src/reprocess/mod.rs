@@ -116,7 +116,7 @@ impl ReprocessWorker {
     /// Run the reprocess loop until shutdown is signalled.
     ///
     /// Waits 5 seconds on startup, then loops every 30 minutes:
-    /// query videos with `gemini_failed = 1 AND normalized = 1`,
+    /// query the repair queue (`REPAIR_QUEUE_WHERE`),
     /// retry metadata extraction, rename files and update the DB on success.
     pub async fn run(mut self, mut shutdown: broadcast::Receiver<()>) {
         info!("reprocess worker started");

@@ -17,8 +17,11 @@ use sqlx::{Row, SqlitePool};
 /// The reprocess worker's queue: rows whose metadata came from the title
 /// parser because every provider failed. The worker selects exactly these
 /// rows and `failed_videos` counts exactly these, so the count drains to 0 as
-/// the worker repairs them.
-pub const REPAIR_QUEUE_WHERE: &str = "gemini_failed = 1 AND normalized = 1";
+/// the worker repairs them. A row the operator corrected on the dashboard
+/// (`metadata_source = 'manual'`, set by `PATCH /api/v1/videos/{id}`) is
+/// never in it: the repair would write over the correction (#136).
+pub const REPAIR_QUEUE_WHERE: &str =
+    "gemini_failed = 1 AND normalized = 1 AND metadata_source IS NOT 'manual'";
 
 /// Characters of a provider error kept on the status / in a probe answer: a
 /// Claude error carries the proxy's whole reply, an LLM answer can be long.
