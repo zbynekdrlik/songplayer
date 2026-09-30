@@ -319,6 +319,7 @@ mod integration_tests {
     use super::*;
     use crate::ai::AiSettings;
 
+    /// #145: a refused call is retried with no real wait in a test.
     fn ai_client_pointed_at(uri: &str) -> AiClient {
         AiClient::new(AiSettings {
             api_url: format!("{uri}/v1"),
@@ -326,6 +327,7 @@ mod integration_tests {
             model: "stub".into(),
             system_prompt_extra: None,
         })
+        .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT)
     }
 
     #[tokio::test]

@@ -2,6 +2,7 @@
 
 pub mod client;
 pub mod proxy;
+pub mod retry; // #145: the waits of a refused call, against the proxy's cooldown
 
 use serde::{Deserialize, Serialize};
 

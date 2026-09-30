@@ -8,18 +8,32 @@ use serde::de::DeserializeOwned;
 use tracing::{debug, warn};
 
 use super::AiSettings;
+use super::retry::{RetryPolicy, body_excerpt, is_retried};
 
 pub struct AiClient {
     http: reqwest::Client,
     settings: AiSettings,
+    /// #145: the waits between the attempts of a refused call.
+    retry: RetryPolicy,
 }
 
 impl AiClient {
+    /// A client with the production retry policy
+    /// ([`RetryPolicy::SPANNING`], `ai/retry.rs`).
     pub fn new(settings: AiSettings) -> Self {
         Self {
             http: reqwest::Client::new(),
             settings,
+            retry: RetryPolicy::SPANNING,
         }
+    }
+
+    /// The same client with another retry policy: a caller that cannot wait
+    /// out the proxy's cooldown, and the tests (`RetryPolicy::NO_WAIT`, so no
+    /// test sleeps for real).
+    pub fn with_retry_policy(mut self, retry: RetryPolicy) -> Self {
+        self.retry = retry;
+        self
     }
 
     /// Send a chat completion and return the assistant's raw text response.
@@ -59,11 +73,11 @@ impl AiClient {
             "max_tokens": 32000
         });
 
-        // Retry with exponential backoff on 429/5xx
-        let mut attempt = 0;
-        let max_retries = 3;
+        // #145: a 429 / 5xx is retried after its `Retry-After`, else after
+        // the policy's spanning waits (`ai/retry.rs`); `attempt` counts the
+        // retries (0 = the first request).
+        let mut attempt: u32 = 0;
         loop {
-            attempt += 1;
             debug!(attempt, url = %url, "sending chat completion request");
 
             let mut req = self.http.post(&url).json(&body);
@@ -92,13 +106,15 @@ impl AiClient {
                 return Ok(content);
             }
 
-            if attempt >= max_retries || !(status.as_u16() == 429 || status.is_server_error()) {
-                let body_text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("chat completion failed (HTTP {status}): {body_text}");
+            attempt += 1;
+            let delay = self.retry.after_response(status, resp.headers(), attempt);
+            let body_text = resp.text().await.unwrap_or_default();
+            if is_retried(status.as_u16()) {
+                log_refusal(status, attempt, delay, &body_text);
             }
-
-            let delay = std::time::Duration::from_millis(1000 * 2u64.pow(attempt as u32 - 1));
-            warn!(status = %status, ?delay, attempt, "retrying chat completion");
+            let Some(delay) = delay else {
+                anyhow::bail!("chat completion failed (HTTP {status}): {body_text}");
+            };
             tokio::time::sleep(delay).await;
         }
     }
@@ -119,6 +135,34 @@ impl AiClient {
     #[cfg_attr(test, mutants::skip)]
     pub fn settings(&self) -> &AiSettings {
         &self.settings
+    }
+}
+
+/// #145: the WARN of a call the proxy refused with a 429 / 5xx — the status,
+/// which retry comes next (or none), the wait, and the first 300 characters
+/// of the body, so a refusal's reason (`auth_unavailable`, `model_cooldown`,
+/// the upstream's text) is in the log. Logging only.
+#[cfg_attr(test, mutants::skip)]
+fn log_refusal(
+    status: reqwest::StatusCode,
+    retry: u32,
+    delay: Option<std::time::Duration>,
+    body: &str,
+) {
+    match delay {
+        Some(delay) => warn!(
+            status = %status,
+            retry,
+            delay_ms = delay.as_millis() as u64,
+            body = %body_excerpt(body),
+            "chat completion refused — retrying after the wait"
+        ),
+        None => warn!(
+            status = %status,
+            retries = retry - 1,
+            body = %body_excerpt(body),
+            "chat completion refused — no retry left"
+        ),
     }
 }
 
@@ -153,6 +197,7 @@ pub fn strip_markdown_fences(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai::retry::RetryPolicy;
 
     #[test]
     fn parse_openai_response() {
@@ -264,9 +309,44 @@ mod tests {
             api_key: None,
             model: "test".into(),
             system_prompt_extra: None,
-        });
+        })
+        .with_retry_policy(RetryPolicy::NO_WAIT);
         let result = client.chat("", "user").await.unwrap();
         assert_eq!(result, "retry succeeded");
+    }
+
+    /// #145: a proxy that keeps refusing (a 503 inside its cooldown, with a
+    /// `Retry-After`) gets the first request and the policy's 3 retries, then
+    /// the call fails with the refusal's body.
+    #[tokio::test]
+    async fn chat_gives_up_after_its_retries_with_the_refusal_s_body() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(503)
+                    .insert_header("Retry-After", "55")
+                    .set_body_string(
+                        r#"{"error":{"code":"auth_unavailable","message":"no auth available"}}"#,
+                    ),
+            )
+            .expect(4)
+            .mount(&server)
+            .await;
+
+        let client = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: None,
+            model: "test".into(),
+            system_prompt_extra: None,
+        })
+        .with_retry_policy(RetryPolicy::NO_WAIT);
+        let err = client.chat("", "user").await.unwrap_err().to_string();
+        assert!(err.contains("HTTP 503"), "{err}");
+        assert!(err.contains("auth_unavailable"), "{err}");
     }
 
     #[tokio::test]
