@@ -497,6 +497,11 @@ song-lyrics pipeline. `LYRICS_PIPELINE_VERSION` is untouched.
   `stiahnuté → dabing → titulky → pripravené`; a `stemy` step is inserted when
   the video has or is getting stems (`shows_stems_step`: shown unless
   `stem_status = "unsupported"`). `prepis`/`preklad` are GONE.
+- The chain lives in the dub chip's tooltip (`chain_detail`): a failed chain
+  reads `chyba: <dub_error>`; any other chain with a non-empty `dub_error`
+  reads `<path> (teraz: <step>) — <dub_error>` (#136: the dub worker records
+  a missing audio file there and waits at `synth` with no penalty,
+  `song_input.rs`).
 - `sp_core::mixer_model::dub_channel_labels(has_stems)` +
   `components/dub_mixer.rs`: WITHOUT stems only 2 faders (`originál` / `dabing`,
   ambient hidden — the 2-stream over-original mix); WITH stems the full 3-fader
