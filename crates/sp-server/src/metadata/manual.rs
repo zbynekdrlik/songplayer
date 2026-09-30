@@ -189,6 +189,10 @@ async fn manual_title(
 /// downloaded) takes the title and records none. The caller holds
 /// `cache::SONG_FILES` from its own UPDATE to here, so a repair or a
 /// re-link never interleaves. A row that no longer exists is nothing to do.
+///
+/// Review round 1: a patched row with NO song (not downloaded yet, an
+/// artist-only PATCH) spreads no empty song — every row keeps its own song,
+/// and each row's files are named after the row's title as it now is.
 pub async fn apply_to_video(
     pool: &SqlitePool,
     cache_dir: &Path,
@@ -203,7 +207,8 @@ pub async fn apply_to_video(
         return Ok(());
     };
     let spread = sqlx::query(
-        "UPDATE videos SET song = ?, artist = ?, metadata_source = ?, gemini_failed = 0 \
+        "UPDATE videos SET song = COALESCE(NULLIF(?, ''), song), artist = ?, \
+         metadata_source = ?, gemini_failed = 0 \
          WHERE youtube_id = ?",
     )
     .bind(&song)
@@ -218,8 +223,9 @@ pub async fn apply_to_video(
             .fetch_all(pool)
             .await?;
     for id in ids {
-        let (file_path, audio_file_path): (String, Option<String>) = sqlx::query_as(
-            "SELECT COALESCE(file_path, ''), audio_file_path FROM videos WHERE id = ?",
+        let (file_path, audio_file_path, row_song, row_artist): RowFiles = sqlx::query_as(
+            "SELECT COALESCE(file_path, ''), audio_file_path, COALESCE(song, ''), \
+                    COALESCE(artist, '') FROM videos WHERE id = ?",
         )
         .bind(id)
         .fetch_one(pool)
@@ -228,8 +234,7 @@ pub async fn apply_to_video(
         if old.is_empty() {
             continue; // not downloaded yet: no files to name
         }
-        let artist_name = artist.as_deref().unwrap_or("");
-        let new = old.named(cache_dir, &song, artist_name, &youtube_id, false);
+        let new = old.named(cache_dir, &row_song, &row_artist, &youtube_id, false);
         let files = rename_song_files(&youtube_id, &old, &new).columns();
         files
             .record(pool, &youtube_id, &file_path, audio_file_path.as_deref())
@@ -245,6 +250,10 @@ pub async fn apply_to_video(
     );
     Ok(())
 }
+
+/// A row's recorded files and title as `apply_to_video` reads them:
+/// `file_path`, `audio_file_path`, `song`, `artist` (`""` for a NULL text).
+type RowFiles = (String, Option<String>, String, String);
 
 #[cfg(test)]
 #[path = "manual_tests.rs"]
