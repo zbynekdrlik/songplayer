@@ -42,7 +42,7 @@ pub const VBAN_FEED_SLOW_US: u64 = 10_000;
 /// (a test pins the relation). A block handed over later than this reaches
 /// the VBAN thread after its first packet was due: counted in
 /// `vban_feed_late_over_budget` and WARNed (#210 part 2).
-pub const VBAN_FEED_BUDGET_US: u64 = 10_000;
+pub const VBAN_FEED_BUDGET_US: u64 = 66_666;
 
 /// At most one WARN per this much timeline (100 ns; 5 s): a bad minute
 /// writes at most 12 lines. The 10 s grid of the measured stalls is never
