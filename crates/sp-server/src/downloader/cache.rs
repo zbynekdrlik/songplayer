@@ -167,6 +167,11 @@ impl SongFiles {
         }
     }
 
+    /// No file recorded at all (a row not downloaded yet).
+    pub fn is_empty(&self) -> bool {
+        self.video.is_none() && self.audio.is_none()
+    }
+
     /// The same set named after `song` / `artist` in `cache_dir` (the names the
     /// download worker gives a new song, [`video_filename`] / [`audio_filename`]).
     pub fn named(

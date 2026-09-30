@@ -8,6 +8,7 @@ pub mod chain;
 pub mod claude;
 pub mod gemini;
 pub mod health;
+pub mod manual;
 pub mod parser;
 pub mod sanitize;
 #[cfg(test)]

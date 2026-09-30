@@ -428,10 +428,10 @@ pub struct PatchVideoReq {
 
 /// Update mutable per-video flags. Supports `suppress_resolume_en`,
 /// `lyrics_override_text`, and the `song` / `artist` metadata correction
-/// levers (#136 T1; a correction is final: `metadata_source = 'manual'`,
-/// `gemini_failed = 0`). Returns 204 on success, 404 if the video id doesn't
-/// exist, 400 if the request body has no actionable fields or carries a
-/// whitespace-only `song`.
+/// levers (#136 T1; a correction is final and belongs to the video: every row
+/// of it, files renamed, `metadata::manual::apply_to_video`). Returns 204 on
+/// success, 404 if the video id doesn't exist, 400 if the request body has no
+/// actionable fields or carries a whitespace-only `song`.
 pub async fn patch_video(
     State(state): State<AppState>,
     Path(video_id): Path<i64>,
@@ -536,6 +536,14 @@ pub async fn patch_video(
             format!("no video with id {video_id}"),
         )
             .into_response(),
+        Ok(_) if corrects_title => {
+            let spread =
+                crate::metadata::manual::apply_to_video(&state.pool, &state.cache_dir, video_id);
+            match spread.await {
+                Ok(()) => StatusCode::NO_CONTENT.into_response(),
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+            }
+        }
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
