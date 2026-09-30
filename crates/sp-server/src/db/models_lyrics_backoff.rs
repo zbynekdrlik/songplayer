@@ -121,7 +121,7 @@ pub async fn record_served_lyrics_failure(
     Ok(ServedFailure {
         attempts,
         was_manual: manual == 1,
-        left_manual_queue: attempts >= SERVED_RERUN_MAX_ATTEMPTS,
+        left_manual_queue: manual == 1 && attempts >= SERVED_RERUN_MAX_ATTEMPTS,
     })
 }
 
