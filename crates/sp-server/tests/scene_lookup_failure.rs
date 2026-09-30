@@ -143,7 +143,7 @@ impl Rig {
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        self.snapshots.borrow_and_update(); // seen
+        self.snapshots.mark_unchanged(); // what is published now is seen
     }
 
     /// Wait (at most 20 s) until the client's state satisfies `done`. Checks
@@ -192,7 +192,7 @@ impl Rig {
         fault: fn(&mut FakeObsState),
         playlists: &[i64],
     ) {
-        self.snapshots.borrow_and_update(); // seen
+        self.snapshots.mark_unchanged(); // what is published now is seen
         let before = self.lookups_of(scene).await;
         let program = scene.to_string();
         self.fake
