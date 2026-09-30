@@ -49,6 +49,19 @@ named 'numpy.fft'` while pip replaced it (CI run 36475215084).
   (`bootstrap_probe_tests.rs`); the exact-budget boundary is pinned with a
   custom plan (135 vs 134 s), the cap with a one-day budget (12 probes,
   495 s).
+- **The post-install check uses the same policy** (release 0.69.0 review
+  🔵 9): after the pip steps, `ensure_ready` runs
+  `decide(|| is_ready(&venv_python), RETRY_PLAN)` and judges it with
+  `install_worked` — `Ready` and `UseAsIs` (a probe that kept TIMING OUT: a
+  slow GPU / driver) go on, only `Install` (a proven import failure, or a
+  failure that outlived the retries) bails, naming the probe count. Every
+  probe's reason is in its WARN. Before, a five-probe loop counted a timeout
+  as a failed install and logged the reason at debug: five cold CUDA probes
+  disabled isolation for the whole process. The ~3 min retry also covers
+  Windows loading the freshly written `.pyd` files past an antivirus scan
+  (`DLL load failed` is a retry). `ensure_ready` is Windows-only, so the
+  call is pinned by its source
+  (`the_post_install_check_is_decide_and_install_worked`).
 
 ## Reading the box log after a restart
 
@@ -61,6 +74,10 @@ named 'numpy.fft'` while pip replaced it (CI run 36475215084).
 - `the venv needs the install` (INFO) — the install path ran; the WARN just
   before it names the reason. `installing CUDA torch variant` after a restart
   is the event the #221 acceptance counts.
+- After the install: `the post-install venv probe kept timing out — going on
+  with the installed venv` (WARN) is a slow driver, not a failure; `the
+  post-install venv check failed after N probe(s)` (the bail, isolation off
+  for the process) follows the probes' own WARNs, which name the reason.
 
 ## The A/V gate has its own Python
 

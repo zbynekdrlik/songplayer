@@ -55,3 +55,35 @@ absence. `auth-dir` / `host` / `port` / `request-retry` / `claude-api-key` uncha
   now classified + logged `kind="refusal"` with the model id
   (`translator::classify_zero_translation`), so it is never a silent "parse
   returned 0" again.
+
+## A refused call waits out the proxy's credential cooldown (#145, `ai/retry.rs`)
+
+CLIProxyAPI (8.0.4 source, read on #145 comment 5909663225) cools its one
+OAuth credential down after an upstream 5xx — `transientErrorCooldown` = 60 s
+unless `transient-error-cooldown-seconds` is set — and inside that cooldown
+it refuses every request LOCALLY in milliseconds: a 503 `auth_unavailable`
+"no auth available" with `Retry-After` = the cooldown left (a quota cooldown
+is a 429 `model_cooldown`, also with `Retry-After`). The old 1 s / 2 s
+retries all landed inside it (box 30.9.2026: 9 of 63 `clean_lyrics` calls
+failed 502 → 503 in 4 ms → fail).
+
+- `AiClient::chat_with_timeout` asks its `RetryPolicy` for every non-2xx:
+  `retry_delay(status, retry_after, attempt)` (pure) / `after_response`.
+  Only 429 and 5xx are retried. A `Retry-After` of whole seconds wins,
+  capped at 120 s; without one (the upstream's 5xx relayed, an older proxy,
+  cooling off) the waits are 5 s, 20 s, 60 s — 3 retries, 85 s in all,
+  past the default cooldown. Any other `Retry-After` form falls back.
+- Every 429 / 5xx is WARNed with its status, the next wait (or "no retry
+  left") and the first 300 characters of its body (`body_excerpt`), so the
+  refusal's reason is in the log: `auth_unavailable` = the cooldown,
+  `model_cooldown` = quota, anything else = the upstream's own text.
+- The policy is injected: `AiClient::new` uses `RetryPolicy::SPANNING`;
+  `with_retry_policy` sets another — a caller that cannot wait (none today:
+  every call is background lyrics / translation / metadata work; the two
+  diagnostic HTTP probes, metadata and lyrics sources, wait too), and every
+  test that drives a 5xx through the client (`RetryPolicy::NO_WAIT`, the
+  same 3 retries with no real sleep; `#[cfg(test)]`).
+- A failing call now holds its worker up to ~85 s (3 × 120 s with the
+  largest `Retry-After`) before it fails. The metadata probe bounds each
+  provider at 180 s, so a Claude that keeps being refused reports there as
+  a timeout.

@@ -493,7 +493,11 @@ are the recovery's `on_program_lines`.
   re-arms (cheap tasks, the same deadlines).
 - **Both timers write the clip only on program, and a pause cancels them**
   (release 0.68.0 blockers 1a + 1c). The hide timer reads `scene_active`
-  when it fires, like the show timer. Before, a hide timer armed by a song
+  when it fires, like the show timer; since release 0.69.0 (review 🟡 2)
+  both also read whether their playlist may write the wall
+  (`title_timers.rs::WallGate`, `program-bus.md` "One wall owner"), so the
+  other member of a two-member on-air set never shows or hides the owner's
+  title, and a re-sync names only the owner's. Before, a hide timer armed by a song
   that started off program (a playlist held through a #215 transition)
   faded out the on-program playlist's title. `PlayAction::Pause` cancels
   the song's timers: a paused song's hide timer fired at its planned end.

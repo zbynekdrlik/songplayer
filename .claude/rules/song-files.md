@@ -84,7 +84,13 @@ Design record: #136 comment 5894034820.
     a double failure.
   - Record `SongFiles::columns()` of the set it RETURNS, on EVERY row that
     recorded the old set: the same video in another playlist is a second row
-    pointing at the same files.
+    pointing at the same files. The ONE statement for that is
+    `SongColumns::record(pool, youtube_id, old_video, old_audio)`.
+  - Two renamers today, both under `cache::SONG_FILES`: the metadata repair
+    (`reprocess/mod.rs`) and an operator's title correction
+    (`metadata::manual::apply_to_video`, ROZHODNUTÉ 5908227964: every row of
+    the video, each row's set read right before its move; a row with no
+    files, `SongFiles::is_empty`, is skipped).
   - Read the old set from the DB right before the move, never from a batch
     snapshot (an earlier row may have moved it).
   - Hold `cache::SONG_FILES` (a process-wide async lock) from that read to the

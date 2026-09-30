@@ -1,6 +1,6 @@
 //! #221 L4b: the program fields of `GET /api/v1/status` come from
 //! SongPlayer's OWN program, never from cg OBS's scene detection. In its own
-//! file so `api/routes.rs` (1000/1000) does not grow.
+//! file because `api/routes.rs` sits at the 1000-line cap.
 //!
 //! - `active_scene`: the one scene-name resolver
 //!   (`program_on_air::program_scene_name`: the scene the program was cut

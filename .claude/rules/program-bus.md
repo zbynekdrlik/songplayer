@@ -257,6 +257,41 @@ nothing).
   title is re-synced, none due fades the outgoing title, and its line is
   re-sent at once; details in `program-transition.md`, "The wall after an
   OFF".
+- **One wall owner** (release 0.69.0 review 🟡 2, design record 5908252887
+  item 2). The on-air set can hold two playlists (a failed or late mirror, a
+  dashboard cut to "OBS manuál"), and there is ONE LED wall, ONE title clip
+  and ONE stage display. So:
+  - `program_on_air::wall_owner(&on_air, shown)` (pure, next to
+    `on_air_set`) = SP-program's source when it is a playlist, else
+    `legacy_cg.shown`, else none — always a member of the set, none only
+    for an empty set;
+  - the authority publishes it with the set (`OnAirPlaylists::publish`,
+    before that value's events; the log line carries `wall_owner`);
+  - `OnAirPlaylists::may_write_wall(pid)`: while there is an owner, only it
+    writes the shared outputs — the `ShowSubtitles` / `HideSubtitles`
+    dispatch and the Presenter push (`position_update.rs`), the song-end /
+    PlayVideo clear of both (`clear_lyrics.rs`), both title timers
+    (`title_timers.rs::WallGate`, read when they fire), the Play re-sync
+    (`resync_after_play`) and a re-sync's title candidates and lines
+    (`recovery.rs::title_candidates` / `on_program_lines`, so also the
+    Resolume recovery and `wall_after_scene_off`);
+  - the other member keeps playing for the consumers that still take cg OBS
+    (until B4 step 6) and keeps its per-playlist karaoke WS, but writes none
+    of them; its dispatch forgets what it last sent, so the moment it owns
+    the wall its current line goes out;
+  - with NO owner (nothing on air, or before the authority's first value:
+    the engine's unit tests) nothing is restricted, as before: a playlist
+    whose OFF is still queued writes until its OFF re-syncs the wall, and a
+    song played off program by hand feeds the Presenter
+    (`lyrics-display.md` "Who may send a line"). While a playlist owns the
+    wall, a hand-played off-program song no longer does.
+
+  Pinned by `program_on_air_tests.rs` (the owner table),
+  `program_authority_tests.rs::the_authority_publishes_the_wall_owner_with_the_set`
+  and `tests_wall_owner.rs` (a child of `tests_scene_change.rs`: the line +
+  Presenter, a playlist that comes to own the wall, the song-end clear, both
+  title timers, the recovery). A test that only `replace`s the diffed set
+  (`#[cfg(test)]`) publishes no owner.
 - **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
   whose scene is not flagged runs `handle_scene_change(pid, true)` itself
   (its ON came before it existed). An ON for a playlist with NO pipeline
