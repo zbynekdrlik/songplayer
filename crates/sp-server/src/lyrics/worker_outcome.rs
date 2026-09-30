@@ -139,7 +139,7 @@ impl LyricsWorker {
         }
         let backoff = self.next_backoff(video_id).await;
         match crate::db::models::record_served_lyrics_failure(&self.pool, video_id, backoff).await {
-            Ok(attempts) => log_served_failure(video_id, youtube_id, reason, attempts, backoff),
+            Ok(failure) => log_served_failure(video_id, youtube_id, reason, failure, backoff),
             Err(e) => warn!(
                 youtube_id = %youtube_id,
                 reason,
@@ -226,18 +226,22 @@ impl LyricsWorker {
     }
 }
 
-/// The WARN of a served song's failed re-run (`keep_served_lyrics`): it stays
-/// queued for its next attempt, or — at `SERVED_RERUN_MAX_ATTEMPTS` — it left
-/// the manual queue, named with its reason. Logging only.
+/// The WARN of a served song's failed re-run (`keep_served_lyrics`), by
+/// what it recorded: the song left the manual queue (its last allowed
+/// attempt, named with its reason), or it stays queued for its next attempt,
+/// or — a row that was not in the manual queue (the stale / full-mix
+/// buckets) — only the attempt and its backoff. Logging only.
 #[cfg_attr(test, mutants::skip)]
 fn log_served_failure(
     video_id: i64,
     youtube_id: &str,
     reason: &str,
-    attempts: u32,
+    failure: crate::db::models::ServedFailure,
     backoff: std::time::Duration,
 ) {
-    if attempts >= crate::db::models::SERVED_RERUN_MAX_ATTEMPTS {
+    let attempts = failure.attempts;
+    let backoff_secs = backoff.as_secs();
+    if failure.left_manual_queue {
         warn!(
             video_id,
             youtube_id = %youtube_id,
@@ -245,13 +249,21 @@ fn log_served_failure(
             attempts,
             "worker: re-run failed on its last allowed attempt — the served lyrics are kept, and the song leaves the manual queue"
         );
+    } else if failure.was_manual {
+        warn!(
+            youtube_id = %youtube_id,
+            reason,
+            attempts,
+            backoff_secs,
+            "worker: re-run failed — the served lyrics are kept, and the song stays queued for its next attempt after the backoff"
+        );
     } else {
         warn!(
             youtube_id = %youtube_id,
             reason,
             attempts,
-            backoff_secs = backoff.as_secs(),
-            "worker: re-run failed — the served lyrics are kept, and the song stays queued for its next attempt after the backoff"
+            backoff_secs,
+            "worker: re-run failed — the served lyrics are kept, only the attempt is recorded"
         );
     }
 }

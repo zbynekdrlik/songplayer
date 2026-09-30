@@ -95,12 +95,17 @@ pub const SERVED_RERUN_MAX_ATTEMPTS: u32 = 3;
 /// until the [`SERVED_RERUN_MAX_ATTEMPTS`]th failed attempt clears it.
 /// `has_lyrics`, `lyrics_source`, `lyrics_pipeline_version` and the served
 /// `<yt>_lyrics.json` are left as they are: the wall keeps the lyrics until a
-/// successful run replaces them. Returns the new attempt count.
+/// successful run replaces them. Returns what it recorded ([`ServedFailure`]).
 pub async fn record_served_lyrics_failure(
     pool: &SqlitePool,
     video_id: i64,
     backoff: std::time::Duration,
-) -> Result<u32, sqlx::Error> {
+) -> Result<ServedFailure, sqlx::Error> {
+    let manual: i64 =
+        sqlx::query_scalar("SELECT COALESCE(lyrics_manual_priority, 0) FROM videos WHERE id = ?")
+            .bind(video_id)
+            .fetch_one(pool)
+            .await?;
     let attempts = record_lyrics_deferral(pool, video_id, backoff).await?;
     sqlx::query(
         "UPDATE videos SET \
@@ -113,5 +118,21 @@ pub async fn record_served_lyrics_failure(
     .bind(video_id)
     .execute(pool)
     .await?;
-    Ok(attempts)
+    Ok(ServedFailure {
+        attempts,
+        was_manual: manual == 1,
+        left_manual_queue: attempts >= SERVED_RERUN_MAX_ATTEMPTS,
+    })
+}
+
+/// What [`record_served_lyrics_failure`] recorded (#144 review round 1): the
+/// worker's WARN names a clear only when one happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServedFailure {
+    /// `lyrics_attempts` after this one.
+    pub attempts: u32,
+    /// The row was in the manual queue before this attempt.
+    pub was_manual: bool,
+    /// This attempt took it out of the manual queue (its last allowed one).
+    pub left_manual_queue: bool,
 }
