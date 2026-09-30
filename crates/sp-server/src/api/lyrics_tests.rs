@@ -86,30 +86,6 @@ async fn queue_counts_are_correct_across_buckets() {
 }
 
 #[tokio::test]
-async fn reprocess_video_ids_sets_manual_priority() {
-    let pool = setup_pool().await;
-    sqlx::query(
-        "INSERT INTO videos (id, playlist_id, youtube_id, normalized) \
-             VALUES (10, 1, 'a', 1), (11, 1, 'b', 1)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    // Simulate the UPDATE call directly (mirrors the handler's SQL)
-    sqlx::query("UPDATE videos SET lyrics_manual_priority = 1 WHERE id IN (?, ?)")
-        .bind(10_i64)
-        .bind(11_i64)
-        .execute(&pool)
-        .await
-        .unwrap();
-    let total_mp: i64 = sqlx::query_scalar("SELECT SUM(lyrics_manual_priority) FROM videos")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(total_mp, 2);
-}
-
-#[tokio::test]
 async fn reprocess_all_stale_only_flags_stale_rows() {
     let pool = setup_pool().await;
     sqlx::query(

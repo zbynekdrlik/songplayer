@@ -267,7 +267,9 @@ pub struct ReprocessResponse {
     pub blocked_by_asr_gap: i64,
 }
 
-// HTTP handler: validates video_ids/playlist_id shape + dispatches to SQL UPDATE. Covered by reprocess_video_ids_sets_manual_priority + Playwright.
+// HTTP handler: validates video_ids/playlist_id shape + dispatches to SQL UPDATE.
+// Covered by the router tests in lyrics_tests.rs (e.g.
+// the_one_reprocess_path_keeps_the_served_lyrics_and_sets_manual_priority) + Playwright.
 #[cfg_attr(test, mutants::skip)]
 pub async fn post_reprocess(
     State(state): State<AppState>,
