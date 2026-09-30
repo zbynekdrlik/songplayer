@@ -131,6 +131,50 @@ impl PlaybackEngine {
         }
     }
 
+    /// The wall after its owner's ON (#221, review rounds 1-2). The owner can
+    /// change by this ON alone (SP-program cut to it while cg OBS still shows
+    /// the old owner), and the old owner writes nothing any more — its hide
+    /// timer, song-end clear and Presenter pushes included — so the whole
+    /// wall is re-synced to the new owner at once: its title (a `playing`
+    /// owner's scene-on already sent the `Resync`, `push_title_for_playing`;
+    /// one that plays nothing takes the old title down), its line
+    /// (`resync_wall_lines`) and the stage display (`resync_presenter`).
+    pub(super) async fn wall_after_owner_on(&mut self, playlist_id: i64, playing: bool) {
+        if !playing {
+            self.resync_wall_title().await;
+        }
+        self.resync_wall_lines();
+        self.resync_presenter(playlist_id);
+    }
+
+    /// The Presenter's stage display once `playlist_id` owns the wall: its
+    /// line at its last reported position, or cleared when it has none (no
+    /// lyrics, a blank position, nothing playing), so the old owner's last
+    /// line never stays there.
+    fn resync_presenter(&mut self, playlist_id: i64) {
+        let client = self.presenter_client.as_ref();
+        let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
+            return;
+        };
+        let lines = match pp.state {
+            PlayState::Playing { .. } => pp
+                .lyrics_state
+                .as_ref()
+                .and_then(|lyrics| lyrics.presenter_lines(pp.cached_position_ms)),
+            _ => None,
+        };
+        pp.last_presenter_text = match lines {
+            Some(lines) => {
+                let (song, artist) = (&pp.cached_song, &pp.cached_artist);
+                crate::presenter::maybe_push_line(client, None, lines, song, artist)
+            }
+            None => {
+                crate::presenter::push_empty(client, "a new wall owner with no line");
+                None
+            }
+        };
+    }
+
     /// The scene-go-off half of `handle_scene_change`: pause, unless the
     /// program bus holds the playlist through a transition.
     pub(super) async fn scene_off(&mut self, playlist_id: i64) {

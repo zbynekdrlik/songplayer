@@ -57,16 +57,6 @@ impl super::PlaybackEngine {
                 .resolume_tx
                 .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
         }
-        if let Some(client) = &self.presenter_client {
-            let client = client.clone();
-            tokio::spawn(async move {
-                if let Err(e) = client
-                    .push(crate::presenter::PresenterPayload::empty())
-                    .await
-                {
-                    tracing::warn!(?e, "presenter clear on song-end failed (non-fatal)");
-                }
-            });
-        }
+        crate::presenter::push_empty(self.presenter_client.as_ref(), "song end");
     }
 }

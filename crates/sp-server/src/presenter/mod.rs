@@ -111,6 +111,22 @@ pub fn maybe_push_line(
     Some(lines)
 }
 
+/// Clear the stage display (`PresenterPayload::empty`), fire-and-forget like
+/// [`maybe_push_line`]; `why` names the caller in the failure's WARN. No-op
+/// when `client` is None (push disabled).
+#[cfg_attr(test, mutants::skip)] // spawn glue; the engine tests see the push
+pub fn push_empty(client: Option<&Arc<PresenterClient>>, why: &'static str) {
+    let Some(client) = client else {
+        return;
+    };
+    let client = client.clone();
+    tokio::spawn(async move {
+        if let Err(e) = client.push(PresenterPayload::empty()).await {
+            tracing::warn!(?e, why, "presenter clear failed (non-fatal)");
+        }
+    });
+}
+
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
