@@ -93,3 +93,17 @@ One terse line per issue/round: decisions, key commits, verification.
   - An empty transcript: the base tier quarantines the song and deletes `<yt>_lyrics.json`.
   - The choice between deferring and keeping the served lyrics is a design decision.
 - Not local-verifiable (Tier-0): the build and the tests (CI).
+
+## Release 0.69.0 blockers, lane B — #144, #136, #145, #222 (0.69.0-dev.15, lane worktree-agent-a85875f5fac8a8afa)
+
+- Design 5906414112 (issue 222, same on 145), findings 5905727755 (🟡3, 🔵4-8, the #144/#222 items of 🔵11), ROZHODNUTÉ 5905945274 (item 1). STEP 0: 144 c5906592936, 136 c5906593907, 145 c5906594595, 222 c5906595662. Anchors-confirmed: 144 c5906604555, 136 c5906605153, 145 c5906605749, 222 c5906606456.
+- #144 a failed / empty re-run never darkens a served song: refactor f3d856b1 (`fail_song`, `quarantine_empty_transcript`), RED adea2370 → GREEN d93cd502 (`serves_lyrics` = has_lyrics 1 + `<yt>_lyrics.json`; `keep_served_lyrics` → `record_served_lyrics_failure`: attempts + backoff via `record_lyrics_deferral`, manual priority 0; `next_backoff` shared with `defer_song`); docs 87db9b14 (CLAUDE.md bump list = owner approval, else targeted reprocess; skill stale lines; gather.rs log). r1: RED 2c121449 → GREEN eadeb0ee (the failed pass stamps `lyrics_processed_at`, full-mix once a day).
+- #136 🟡 correction final: RED 12837986 → GREEN 4b257e97 (PATCH song/artist → `gemini_failed = 0, metadata_source = 'manual'`; `REPAIR_QUEUE_WHERE` excludes manual). r2: RED 3636fe13 → GREEN 9205bf3c (`reprocess_one` re-checks `REPAIR_QUEUE_WHERE` under `SONG_FILES` → `LeftQueue`; `patch_video` title UPDATE under the same lock). r3: lock pins in 9dbe792b.
+- #136 🔵 FLAC E2E: 193f6c81 (`e2e/cache-layout.ts` + mock-suite spec; a split song = no complete pair + one lone video + one lone audio half).
+- #136 🔵 rename race: RED a42ca156 (structural order pins) → GREEN 94110d67 (`song_input::job_input` after the heavy slot, under `SONG_FILES`; no audio = no-penalty 10-min recheck). r1: RED 52b06bea → GREEN 1d263195 (`Found` enum, WARN names the path, dub `dub_error`). r2: sp-ui `chain_detail` shows a live chain's `dub_error` (e2e/dabing.spec.ts). r3: RED 9dbe792b → GREEN 4623df80 (found audio clears the note; `set_dub_requested(true)` clears `dub_error`).
+- #145 README: 5f981557 (rollback = 8.0.4's own backup only; 6.9.27 502 / 7.3.1 400 cannot serve `claude-opus-5-5`; real backup paths; probe example).
+- #222 Presenter dedup on the whole payload: refactor 9eb197be (key type = `PresenterLines`) → RED 17d1d54b → GREEN 5e14f7e0; docs 656c8363 (lyrics-display.md: SK checked against `MAX_CHARS`; counts 137/68/53, 41/79/1).
+- Reviews (fresh-context, read-only): r1 0🔴0🟡6🔵, r2 0🔴1🟡1🔵, r3 0🔴1🟡1🔵, r4 0🔴0🟡0🔵.
+- Kept per ROZHODNUTÉ, documented (lyrics-reference-text.md): a current-version manual row leaves the queue after one failed attempt; stale rows retried ≤ daily; attempts feed the #171 full-mix fallback; the 30-min cap stays policy.
+- Follow-up candidates (supervisor): a title correction applies to ONE row (the same video in another playlist, and a re-download, still overwrite it; metadata-providers.md).
+- Not local-verifiable (Tier-0): the build, the Rust tests, clippy, the mutation gate, the Playwright suites (the cache-layout rule was run in a node model, 7/7).
