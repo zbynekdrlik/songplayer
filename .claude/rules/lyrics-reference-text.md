@@ -79,7 +79,7 @@ paths:
 - Known gap, NOT fixed by that deletion: a re-run that fails still blanks a served song, on two paths.
   - **An error.** `lyrics/worker.rs`'s `Err` arm calls `mark_video_lyrics(false, Some("no_source"), …)` for a row that had lyrics too, and the manual and null buckets skip `no_source` at the current version. A failed Claude cleanup in `gather.rs` is one such error.
   - **An empty transcript.** The base tier quarantines the song (`worker_g35t.rs` → `quarantine_video_lyrics`: `has_lyrics = 0`, `asr_gap`) and DELETES `<yt>_lyrics.json`.
-  - Either way the song stays dark until a manual reprocess or a version bump re-queues it AND a later run succeeds.
+  - The song stays dark until it is re-queued AND a later run succeeds. A `no_source` row is re-queued by a manual reprocess or a version bump. An `asr_gap` row is re-queued only by a version bump: a manual reprocess reports it under `blocked_by_asr_gap` and the buckets skip it.
   - Both are recorded on #144 (comment 5905749132 and its follow-up) as a follow-up candidate: defer, or keep the served lyrics.
 - Pinned by `api/lyrics_tests.rs`:
   - `a_per_video_reprocess_request_never_blanks_the_served_lyrics`;
