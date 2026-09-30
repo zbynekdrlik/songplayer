@@ -164,3 +164,7 @@ impl LyricsWorker {
         Ok(SongOutcome::Done)
     }
 }
+
+#[cfg(test)]
+#[path = "worker_outcome_tests.rs"]
+mod tests;
