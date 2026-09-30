@@ -278,3 +278,57 @@ async fn stems_wait_removes_row_from_selector_until_due() {
         "row past its recheck must be selected again"
     );
 }
+
+/// #144 review round 1 (ROZHODNUTÉ 5908227646): a served row's failed re-run
+/// reports whether it took the row OUT of the manual queue, so the worker's
+/// WARN names a clear only when one happened. A manual row leaves at its 3rd
+/// failed attempt, once; a row that was never manual (the stale and full-mix
+/// buckets pick those) never "leaves".
+#[tokio::test]
+async fn a_served_failure_reports_whether_the_row_left_the_manual_queue() {
+    let pool = setup_pool().await;
+    let backoff = Duration::from_secs(300);
+    let manual: i64 = sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, normalized, has_lyrics, \
+         lyrics_manual_priority) VALUES (1, 'served_m', 1, 1, 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut outcomes = Vec::new();
+    for _ in 0..4 {
+        let failure = record_served_lyrics_failure(&pool, manual, backoff)
+            .await
+            .unwrap();
+        outcomes.push((
+            failure.attempts,
+            failure.was_manual,
+            failure.left_manual_queue,
+        ));
+    }
+    assert_eq!(
+        outcomes,
+        [
+            (1, true, false),
+            (2, true, false),
+            (3, true, true),
+            (4, false, false)
+        ]
+    );
+
+    let stale = insert_video(&pool, "served_s", 1, 1).await; // never manual
+    let mut last = None;
+    for _ in 0..3 {
+        last = Some(
+            record_served_lyrics_failure(&pool, stale, backoff)
+                .await
+                .unwrap(),
+        );
+    }
+    let last = last.unwrap();
+    assert_eq!(
+        (last.attempts, last.was_manual, last.left_manual_queue),
+        (3, false, false),
+        "a row that was never manual never leaves the manual queue"
+    );
+}

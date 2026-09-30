@@ -2,15 +2,20 @@
  * Deterministic waits for an OBS program-scene switch to actually take effect
  * (#170).
  *
- * OBS on win-resolume runs **Studio Mode** with a **`Fade` transition of
- * 2000ms**. Two consequences the naive "SetCurrentProgramScene then sleep"
- * approach races (round 3):
+ * #221 L3: the driver now talks to SongPlayer's obs-websocket facade, so the
+ * transition is SP-program's — cg OBS's own transition in the default
+ * `program_transition = obs` mode, else the Settings fade, or a Cut that
+ * ends at once — and its Started/Ended events are SongPlayer's. What follows is the #170
+ * history of the cg OBS driver, whose OBS ran **Studio Mode** with a
+ * **`Fade` transition of 2000ms**. Two consequences the naive
+ * "SetCurrentProgramScene then sleep" approach raced (round 3):
  *
  *  1. A SAME-scene `SetCurrentProgramScene` still runs a real 2 s transition,
  *     leaving `preview == program == that scene`. From that state OBS then
  *     DROPS the next `SetCurrentProgramScene`'s `CurrentProgramSceneChanged`
- *     event (reproduced live) — the driver must never issue a same-scene
- *     switch (`shouldSkipSceneSwitch`).
+ *     event (reproduced live). #221 L3: the driver now talks to SongPlayer's
+ *     facade, where a same-scene transition is the designed re-kick (it
+ *     re-mirrors cg OBS), so the old same-scene skip is gone.
  *  2. `GetCurrentProgramScene` reports the target *during* the fade, so a
  *     name-only wait returns before the transition has actually ended and
  *     before SongPlayer's event has fired — the wait must require BOTH the
@@ -21,12 +26,6 @@
  * `ndi-health-gate.ts`) so they are unit-testable in the ubuntu mock suite
  * without a browser or the box.
  */
-
-/** True when the program scene is already the target — issuing the switch
- * would run a pointless same-scene transition, so the driver skips it. */
-export function shouldSkipSceneSwitch(current: string, target: string): boolean {
-  return current === target;
-}
 
 /** True once the switch has fully applied: the program scene equals the target
  * AND no transition is still running. A name-only check is satisfied mid-fade,
@@ -40,7 +39,11 @@ export function sceneSwitchSettled(
 }
 
 export interface WaitForSceneSwitchOptions {
-  /** Give up (throw) after this many ms. Default 8000 (covers the 2 s fade). */
+  /** Give up (throw) after this many ms. Default 8000: covers a program
+   * transition of up to ~7 s plus the cue wait (the box's SP-program read
+   * `fade 300 ms`, source `setting`, on 28.9 — #221 design record); a
+   * longer fade (the cap is 10 s, ~10.6 s with the cue wait) needs a larger
+   * `timeoutMs`. */
   timeoutMs?: number;
   /** Delay between polls. Default 150 ms. */
   pollMs?: number;
@@ -70,8 +73,8 @@ export async function waitForSceneSwitchApplied(
       throw new Error(
         `OBS scene switch to "${target}" did not settle within ${timeoutMs}ms ` +
           `(last program "${current}", transitionActive=${isTransitionActive()}). ` +
-          `On win-resolume OBS runs Studio Mode with a 2000ms Fade — the switch ` +
-          `must reach the target AND the transition must end; a dropped/stuck ` +
+          `The switch must reach the target AND the transition must end ` +
+          `(SongPlayer's facade: SP-program's transition; #221 L3); a dropped/stuck ` +
           `transition or a missing scene surfaces here instead of as a ` +
           `mysterious downstream failure. (#170)`,
       );

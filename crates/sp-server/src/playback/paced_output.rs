@@ -36,6 +36,7 @@ use sp_core::genlock::GENLOCK_GRID_FPS;
 use sp_core::genlock::audio::samples_per_boundary;
 use sp_ndi::{AudioFrame, NdiBackend};
 
+use crate::playback::fleet_shift;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::paced_grid::{GridStep, PacedGrid};
 use crate::playback::pacer::{PacedFrame, PacedSink};
@@ -459,9 +460,9 @@ impl<B: NdiBackend> PacedConsumer<B> {
     /// audio layout, BOTH stamped exactly on that boundary (design record
     /// 5845527884). The fill leaves a grace after its boundary; a raw-wall
     /// audio stamp (§6) would put that ~8 ms excursion into the receiver's
-    /// audio timeline and A/V pairing for every filled slot, while a pacer's
-    /// silent standby block — stamped at its emit, right on the boundary —
-    /// carries none. The fill is the boundary's own slot of silence, never a
+    /// audio timeline and A/V pairing for every filled slot. Every paced
+    /// sender stamps its audio block on its boundary the same way (#224). The
+    /// fill is the boundary's own slot of silence, never a
     /// live pair (#215 cue gate).
     fn fill_job(&self, stamp_100ns: i64) -> SubmitJob {
         let picture = self.held.as_ref().unwrap_or(&self.black);
@@ -567,23 +568,29 @@ pub fn run_paced_consumer<B: NdiBackend>(mut consumer: PacedConsumer<B>, handoff
                 stamp_100ns,
                 skipped,
             } => {
+                // #224 part 2: a log shows the WIRE stamp, the one receivers see.
+                let wire_stamp_100ns = fleet_shift::wire_100ns(*stamp_100ns);
                 if *skipped > 0 {
                     warn!(
                         playlist_id = pid,
                         skipped,
-                        stamp_100ns,
+                        stamp_100ns = wire_stamp_100ns,
                         "paced output: > 8 boundaries went unserviced between two scopes (grid resync)"
                     );
                 }
                 if window_fills == 0 {
                     info!(
                         playlist_id = pid,
-                        stamp_100ns,
+                        stamp_100ns = wire_stamp_100ns,
                         held = consumer.held.is_some(),
                         "paced output: no pacer attached — servicing boundaries (held picture + silence)"
                     );
                 } else {
-                    tracing::debug!(playlist_id = pid, stamp_100ns, "paced output: fill");
+                    tracing::debug!(
+                        playlist_id = pid,
+                        stamp_100ns = wire_stamp_100ns,
+                        "paced output: fill"
+                    );
                 }
                 window_fills += 1;
             }
@@ -592,7 +599,7 @@ pub fn run_paced_consumer<B: NdiBackend>(mut consumer: PacedConsumer<B>, handoff
                     info!(
                         playlist_id = pid,
                         fills = window_fills,
-                        next_stamp_100ns = job.video_tc_100ns,
+                        next_stamp_100ns = fleet_shift::wire_100ns(job.video_tc_100ns),
                         "paced output: a pacer feeds again after the consumer's fills"
                     );
                     window_fills = 0;

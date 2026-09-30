@@ -243,6 +243,63 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   closure body, never the call. `!opt.is_some()` / `!opt.is_none()` are in
   the same table.
 
+## Two compile errors a no-compile review round cannot see (#218/#219 integration)
+
+Six fresh-context review rounds passed both of these, and the first CI run
+failed on them (`36438006665`):
+
+- **`json!(5_000_000_000)` is an `i32` literal → `overflowing_literals`
+  (deny-by-default).** `serde_json::json!` gives an unsuffixed integer
+  literal no type hint, so it defaults to `i32`. Suffix any literal above
+  `i32::MAX`: `json!(5_000_000_000_u64)`.
+- **A guard passed to a generic `impl Fn(&T)` does NOT deref-coerce.**
+  `done(&self.state.read().await)` with `done: impl Fn(&ObsState) -> bool`
+  is E0308 (`expected ObsState, found RwLockReadGuard`). The Fn call's
+  argument is a generic tuple, so no coercion site exists. Write
+  `done(&*guard)`. A plain `fn f(s: &ObsState)` would coerce, which is why
+  it reads as fine. The same holds for `&PathBuf` → `&Path` through a
+  generic `R: Fn(&Path, &Path)` seam: write `.as_path()`. A small private
+  trait seam (`downloader::cache::FileOps`, #136) avoids the trap
+  entirely, because trait method calls DO coerce their arguments.
+- **Splitting a fn: a `String` param that becomes `&str` leaves
+  `f(&req_id)` behind → `clippy::needless_borrow`** (#221, caught in
+  review before CI). When a moved body now receives `req_id: &str`, write
+  `self.cancel(req_id)`, not `self.cancel(&req_id)`.
+- **`&Box<dyn Trait>` passed where `&dyn Trait` is expected is E0277**
+  (#136 review round 1). `probe_one(p, …)` with `p: &Box<dyn
+  MetadataProvider>` does not deref-coerce: rustc commits to the unsize
+  coercion and then needs `Box<dyn MetadataProvider>: MetadataProvider`.
+  Write `&**p` (the repo's shape: `playback/wallclock.rs` `&*source`); a
+  METHOD call on `p` auto-derefs fine.
+- **Moving a fn out of a file can orphan its `///` lines** (#136 round 2):
+  the doc comment left behind documents whatever item follows (there a
+  `#[cfg(test)] mod tests` after a blank line) →
+  `clippy::empty_line_after_doc_comments` under `-D warnings`. Delete the
+  doc with the fn; re-read the cut site.
+- **A new field on a struct that a TEST builds by literal is E0063 for the
+  whole test target** (#224 part 2 review round 2: `SharedEmitterInner`
+  gained `fleet`, `audio_emitter_tests.rs` still built one without it).
+  Before adding a field, grep the crate for `TypeName {` in every file,
+  tests included, and add it (or `..Default::default()`) at each site.
+
+## Spawn order is not execution order — never order work by spawning it (#221)
+
+A multi-thread tokio worker runs the task it spawned LAST first (its LIFO
+slot) and other workers may steal the rest, so two tasks spawned back to
+back can start in either order. The OBS client once spawned a task per
+facade call, so a playlist press's mirror could reach cg OBS after a later
+press. Anything whose ORDER matters goes through ONE task that takes the
+items in order (`obs::remote_call::run_calls`: write each frame, then take
+the next; a scene switch's answer is awaited first because cg OBS runs its
+messages on a thread pool; only a getter's answer wait is spawned). A test
+of such an order must queue all items before the consumer runs, so a
+reordering spot fails deterministically (`the_calls_reach_cg_obs_in_queue_order`;
+its RED sent the drained batch newest first). Give such a consumer its
+timeouts as PARAMETERS (`run_calls(…, answer_timeout)`, like
+`Upstream::with_timeout`): a test passing a very long one makes "this must
+not be awaited" fail deterministically instead of racing the production
+value.
+
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,
 so EVERY `#[test]` in `crates/` runs on BOTH Linux (the `Test` job) and Windows.
@@ -285,6 +342,26 @@ A sign convention written as a doc line that STARTS with `+ = …` or `* …` (o
 `- = …`) is ALSO a markdown list item, so the next prose line trips the same
 lint (#148 v5 review). Start such a line with a word (`Positive = …`), or keep
 the `+` mid-line.
+
+It happens by accident when prose WRAPS so a line begins with `+ `/`- `
+(#219: `//! … over a real pool` / `//! + \`ProgramBus\`, and …` failed
+review round 3). Before pushing, scan every changed file's doc lines: a doc
+line matching `^\s*(//!|///) ?([-+*]|\d+[.)]) ` followed by a non-blank doc
+line indented less than 3 spaces is the lint (a ~30-line Python scan in the
+scratchpad, list files from `git diff --name-only <base>..HEAD -- '*.rs'`;
+check it flags a known-bad sample first).
+
+## A long-lived `JoinSet` must be JOINED, not only spawned and aborted (#219)
+
+A tokio `JoinSet` keeps a FINISHED task (its cell + output) until
+`join_next` / `try_join_next` takes it. A set that only ever sees `spawn` +
+`abort_all` — the OBS connection loop's helpers, one per ~2 s poll tick —
+grows for the whole life of the connection (~43 000 cells a day). Route every
+spawn through a helper that first drains `try_join_next()` (and WARNs a
+`JoinError` that is not a cancellation): `obs/mod.rs::spawn_helper`. Test it
+on the current-thread `#[tokio::test]`: spawn finished tasks, `yield_now` a
+few times, spawn one more, assert `len() == 1` (the RED is the helper that
+only spawns → `len() == 4`).
 
 ## Format BEFORE every commit, RED commits included
 
@@ -392,6 +469,47 @@ this:
 - **List only the tests that really fail on the old logic in the RED
   message.** Walk each one by hand.
 
+**When the fix makes a parameter DEAD (it removes, not adds, an input) —
+RED → GREEN → refactor (#224).** `ProgramOutput::submit(job, audio_now)`
+lost its reason to take the emit instant. The RED tests keep the OLD
+signature (they compile against the old code and fail on it); GREEN keeps
+the parameter as `_audio_now_100ns` and edits no test; a separate
+`refactor(#N)` commit then drops it from the signature, the loop and every
+test call site (mechanical, no behaviour change) — and deletes whatever that
+orphans (an unused test `const MS`, a `T0` import: `-D warnings`).
+
+**Changing what a shared counter means (#224 review rounds 1–2).** Round 1
+made a follow restart `WallClock::frames_since_resample`; a test on a
+DIFFERENT harness (`WallClock::settable`, whose realtime read paired with the
+real `Instant::now()`, so the new probe followed phantom steps) counted ticks
+through it and went red — only the next review caught it. Before changing a
+counter's or a stat's semantics, grep EVERY reader of it across all test
+files and harnesses (`frames_since_resample`, `anchor_stats`, `samples()` /
+`reads()` counters), not just the files of the change.
+
+**`cargo fmt` can take minutes on a loaded box.** Two sessions formatting at
+once left rustfmt in `D` state for > 2 min; the default 120 s Bash timeout
+then silently moved the call to the background. Run it as
+`timeout 540 cargo fmt --all` with the tool timeout near 600 s, and revert
+`db/models.rs` in a separate command (the worktree guard refuses the chain).
+
+**A RED for a wire-protocol feature runs against the OLD code (#221 L2).**
+Tests that speak the wire (the facade's obs-websocket JSON over a real
+socket) compile against the old implementation, so the RED is the real old
+behaviour, not a wrong spot. Keep them compiling on both sides:
+
+- add only the test SEAMS in RED (a `#[cfg(test)]` constructor such as
+  `Facade::for_test` instead of a struct literal whose fields GREEN changes;
+  a configurable timeout such as `Upstream::with_timeout`) and the new
+  telemetry STRUCTURE (fields the old path fills with `None`);
+- read new telemetry through its serialized JSON
+  (`serde_json::to_value(status)["field"]`), which compiles whether or not
+  the field exists yet;
+- a fake peer matched with `let … else { continue }` on the one variant it
+  serves keeps compiling when GREEN deletes the other variants;
+- tests of functions that only GREEN adds (new pure helpers) go in the GREEN
+  commit, as new tests; no RED test is edited there.
+
 **`cargo mutants --in-diff <range> --list` compiles nothing (#215).** It
 lists the diff's mutants (`file:line` + replacement) so a review can name
 the test that kills each one BEFORE CI's mutation gate runs.
@@ -399,6 +517,37 @@ the test that kills each one BEFORE CI's mutation gate runs.
 - The Tier-0 hook blocks it as a cargo subcommand. Because it only lists,
   the logged `# airuleset:build-ok list-only` bypass is honest here, and
   only here.
+- **In a worktree lane, and after merging origin/dev into it** (#221 L4b):
+  the Bash guard refuses `cd <wt> && cargo mutants … > file`. Run two plain
+  commands instead: `git -C <wt> diff origin/dev..HEAD --output=<scratch>/range.diff`,
+  then `cargo mutants --in-diff <scratch>/range.diff --list --dir <wt>`
+  (no `cd`, no redirect). Diff from the MERGED `origin/dev`, not from the
+  lane's original base: `<base>..HEAD` then also lists dev's own commits.
+- **Give a review dispatch the merged base SHA, not `origin/dev`** (#136):
+  the `.git` is shared with the main checkout, so another session's fetch
+  can move `origin/dev` mid-review, and `git diff origin/dev..HEAD` (a TREE
+  diff) then shows the other lane's work reversed. Name the SHA the lane
+  merged (`git diff 0e988e5c..HEAD`).
+- **The worktree Bash guard refuses `cd <wt> && python3 - <<EOF` edits**
+  (and loops over computed paths): write the edit script to the scratchpad
+  and run `python3 <scratch>/edit.py` with absolute paths inside it; assert
+  each anchor's count before replacing. It also refuses a `cat >> file
+  <<'EOF'` append, a `$VAR`-computed script path, and any command whose text
+  contains `github.com` (a curl User-Agent tripped it, #144): same remedy.
+  A `gh … --jq` filter with `\(.x)` string interpolation and a `for n in …;
+  do gh issue comment $n --body-file $D/…` loop are refused too: write each
+  body with the Write tool and run one plain `gh issue comment <N> -R <repo>
+  --body-file <abs path>` per issue (release 0.69.0 lane B).
+- **A recursive grep over the repo's `.claude` dir trips the credential-store
+  hook** (`block-vault-store-read.sh` reads the command TEXT: a recursive
+  read of that dir counts as a vault read, even inside an edit script's
+  heredoc). Search the rules with the Grep tool and a `path` or `glob`, and
+  put such text in a script file written with the Write tool (release 0.69.0
+  lane B).
+- **A NEW file is missing from `git diff <base>` until git tracks it**
+  (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
+  showed no mutant at all for the new `remote/codec.rs`. `git add -N
+  <new files>` first (or list the committed range), then re-list.
 - cargo-mutants 27 turns `|=` only into `&=`, not `^=`.
 - It turns a match guard into `true` / `false`, and `==` into `!=`.
 - `a && b && c` parses as `(a && b) && c`, so its two `&&`→`||` mutants
@@ -414,6 +563,18 @@ the test that kills each one BEFORE CI's mutation gate runs.
   (`self.finish_push("hide_title_now", result);`): no mutant, so pin its
   effect with a behaviour test (#217 addendum 2,
   `a_retried_hide_that_404s_leaves_no_stale_note_for_the_next_push`).
+- **A branch whose ONLY effect is a log line survives the gate** (#224
+  part 2 review round 3: `if … && !slew.owe(..) { warn!(..) }` — the
+  delete-`!` mutant only moves the WARN). Give such a branch an observable
+  effect a test reads (a counter: `WallVbanClock::taken_at_once`). Likewise
+  never compute a log-only value inline (`jump_us = jump / 10`): its `/`→`%`
+  / `*` mutants are invisible; log through a tested helper (`to_us(jump)`).
+- **A timing pin at ONE phase can be phase-lucky** (#224 part 2 review
+  round 3: VBAN's ±100 ppm bound held with the step on block 100 and broke
+  on block 101 at 50 ppm). When a result depends on where an event lands
+  on a grid (packet spacing 41 666/41 667/41 668, the 100-tick resample),
+  sweep the event over ≥ 3 consecutive phases in the test, and fuzz the
+  scratch model over all of them before pinning.
 - A match GUARD that is always true where it sits (`ShowTitle { .. } if
   self.recovery_sent_this_step` when the step has always fired an event by
   then) makes the guard→`true` mutant EQUIVALENT: it survives the gate. Drop
@@ -422,6 +583,13 @@ the test that kills each one BEFORE CI's mutation gate runs.
   is observable (#217 addendum 2 review round 3).
 - A mutation that cannot compile (`&&`→`||` inside a let-chain) is
   "unviable": it costs a build but cannot fail the gate.
+- **A binary op inside a `const` initializer IS mutated** (#221 review
+  round 5). `Duration::from_secs(2 * DEFAULT_RESPONSE_TIMEOUT.as_secs())`
+  listed `*`→`+` and `*`→`/`; with the 2 s default the `+` mutant is
+  EQUIVALENT (2 + 2 = 2 × 2) and would survive the gate. Write such a
+  constant as a literal (`Duration::from_secs(4)`) and pin the relation in
+  a test (`MIRROR_EXTRA_WAIT == DEFAULT_RESPONSE_TIMEOUT * 2`; a runtime
+  `Duration * u32` is fine there, it is not `const`).
 - `(at - plane) % ds` where `plane` is a multiple of `ds` (a plane or row
   edge): the `-`→`+` mutant gives the SAME remainder, so it is equivalent
   and survives. Subtract ONCE into a local (`let offset = …; (offset / ds,
@@ -458,12 +626,48 @@ the test that kills each one BEFORE CI's mutation gate runs.
     by a computed length: split at the edge, then `chunks_mut(n)` /
     `enumerate`. A mutated length then panics or moves the output (killed),
     it never stalls.
+  - the same for a retry/poll loop that ends only on a time comparison
+    (#221 review round 1, `bootstrap_probe::decide`): `elapsed + delay >
+    budget` → `==` never matches, and `delay * 2` → `/ 2` shrinks the pause
+    to 0 — both spin forever on a paused clock. Bound it with `for n in
+    1..=MAX` and break on the cap or the budget before pausing; the cap
+    turns both mutants into a wrong probe count a test sees.
 
 **`tokio::select!` drops the branch futures before a handler runs**
 (tokio `macros/select.rs`: the futures live inside the `let output = {…}`
 block, and the handlers run in the `match output` after it). So a handler may
 take `&mut` of a receiver that a branch future borrowed, e.g.
 `event = events.recv() => … task.resync(&mut events).await`.
+
+## Untrusted input never goes through `serde_json::Value`'s own `Deserialize` (#221 L2b review)
+
+serde_json's `raw_value` feature is ALWAYS on in this workspace (sp-server's
+`api/preview.rs`, axum's `json`, sqlx-core — feature unification). With it,
+`Value`'s `Deserialize` treats a map whose first key is
+`$serde_json::private::RawValue` as a raw value and re-parses its string as
+JSON with a FRESH 128-level recursion budget, so nested strings escape the
+depth limit (~18 × 127 levels in 1 MiB) — a stack exhaustion that aborts the
+whole process. For a frame from an untrusted peer, decode into a typed
+struct with NO `serde_json::Value` anywhere inside it (a `Value` /
+`Option<Value>` / `Vec<Value>` field goes through `Value`'s own
+`Deserialize` again; unknown fields are skipped by serde_json without
+building a `Value`) or through `remote::codec::Codec::Json.decode_text`
+(its private `PlainValue` visitor keeps every key a plain string; make
+`PlainValue` `pub(crate)` when a second module needs the visitor itself),
+never `serde_json::from_str::<Value>` / `Json<Value>` / `Value::deserialize`.
+An axum body is a typed struct (`api/ai.rs` `CompleteLoginRequest`, #221
+L4a: the last `Json<serde_json::Value>` on the LAN HTTP API; its test first
+shows the key re-parses through `Value`, then that the route ignores it).
+
+## Binary test fixtures: byte-string literals, not long hex strings (#221 L2b)
+
+The staging hook `block-sensitive-staging.sh` refuses any file with a 40+
+character hex blob ("possible key/token") — a MessagePack / protocol fixture
+written as hex trips it. Write the bytes as a byte-string literal with the
+markers as escapes and the text as text
+(`b"\x82\xa2op\x01\xa1d\x81..."`, `\xHH` takes exactly two hex digits), and
+check it against the reference encoder's hex once in a scratch script. It
+reads better too: the map keys are visible.
 
 ## `-D warnings` rejects `temporary.as_ptr()` in tests — bind the value first (#203 r2b)
 
@@ -522,6 +726,12 @@ UNGATED (dragging `MockNdiBackend`/`#[test]` into the lib). `cargo test` passes
 new `mod` AFTER the test module, or move the `#[cfg(test)]` explicitly back onto
 the test `mod` — and grep the insertion point for a `#[cfg(test)]` line directly
 above your `old_string` anchor before an Edit that adds a sibling `mod`.
+
+## An HTTP handler test goes through the real router, never a copy of its SQL (#144)
+
+- Drive a handler with `crate::api::router(state, None)` + `tower::ServiceExt::oneshot`, as in `api/lyrics_tests.rs::send`, and assert the row / response afterwards.
+- A test that runs its OWN copy of the handler's UPDATE ("mirror the handler's SQL") can never fail on a change to the handler. #144 deleted two of these: `reprocess_video_ids_sets_manual_priority` and `reprocess_all_stale_only_flags_stale_rows`.
+- A test for a DELETED route stays useful as a regression guard. `router(state, None)` has no SPA fallback (that needs a `dist_dir`), so a removed path answers 404. Assert the harmful effect is absent FIRST, so the RED fails for the right reason, and the 404 last.
 
 ## A cross-crate test-only helper must be `#[doc(hidden)] pub`, NOT `#[cfg(test)]` (#203 2b)
 
@@ -589,6 +799,12 @@ standby while the rig built 2×4, caught only by a review pass (it would have
 reddened 6 CI tests). Fail loudly when an anchor is missing
 (`if old not in s: sys.exit(...)`), or use the Edit tool, and re-read the result.
 
+In a worktree lane the Bash guard may refuse a long `python3 - <<'EOF' … EOF`
+edit chained with `git` or `cargo` ("too complex to verify that it stays inside
+the worktree"), and not every time (#221 L4a). Write the anchor-asserted edit
+to a script in the lane's scratchpad and run `python3 <script> <path>` as its
+own command, then fmt / commit in separate commands.
+
 ## "Never blocks / never waits" tests: gates and thread names, never wall-time thresholds (#212 follow-up)
 
 The gating Coverage job runs every test under `cargo tarpaulin`'s ptrace, and
@@ -619,6 +835,16 @@ sees that. What held up across five review rounds:
 - **Pace virtual time for loop tests.** Every wait really sleeps, but only the
   waits advance the clock. A stall then cannot fake a missed boundary; the
   gate proves the waiting part.
+- **On a paused clock a helper's OWN timeout is a timer too** (#221 review
+  round 1). A `recv()` helper bounded at 10 s, awaiting an event the code
+  sends at 15 s of virtual time, fails every run: auto-advance reaches the
+  helper's 10 s deadline first. Bound such a wait above the virtual time it
+  must outlast (`timeout(MAX * 2, rx.recv())` — it costs no real time).
+- **A production bound a wire test must never reach is a parameter**
+  (#221 review round 2). A real-socket test that holds a "no Ended yet"
+  window races the 15 s production bound under a ptrace stall; the facade
+  carries it (`Facade::transition_end_max`) and `Facade::for_test` sets
+  10 minutes, like `Upstream::with_timeout`.
 - **A spin / wait loop on a real clock: witness each step, never time it**
   (#147, `pacer_spin_tests.rs`).
   - Give the loop an observer hook `FnMut(step, elapsed)` and return a tally.

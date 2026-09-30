@@ -12,7 +12,7 @@ use super::*;
 use crate::presenter::PresenterClient;
 
 /// When a pipeline fires `PipelineEvent::Ended` the engine MUST push an
-/// empty PresenterPayload (all four fields empty strings) so the stage
+/// empty PresenterPayload (all six fields empty strings) so the stage
 /// display clears. Before the fix, the display kept showing the last
 /// line of the previous song until the next song's first line pushed —
 /// band singers got stuck on an old verse.
@@ -26,7 +26,7 @@ async fn presenter_empty_payload_on_song_end() {
         .unwrap();
 
     // Mock server that expects exactly one PUT /api/stage with the empty
-    // payload (all four fields = ""). The expect(1) is the assertion —
+    // payload (all six fields = ""). The expect(1) is the assertion —
     // wiremock verifies it on drop.
     let mock = MockServer::start().await;
     Mock::given(method("PUT"))
@@ -35,7 +35,9 @@ async fn presenter_empty_payload_on_song_end() {
             "currentText": "",
             "nextText": "",
             "currentSong": "",
-            "nextSong": ""
+            "nextSong": "",
+            "currentTranslation": "",
+            "nextTranslation": ""
         })))
         .respond_with(ResponseTemplate::new(204))
         .expect(1)

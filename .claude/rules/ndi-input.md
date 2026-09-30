@@ -104,7 +104,16 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
   - catch up one by one while ≤ 8 behind;
   - above 8 behind, resync on the floor;
   - a boundary more than 2 slots ahead is a backward clock step, so re-latch.
-- `NdiInput::service(B, audio_now, bus)`:
+  - At a fleet date step its wall relabels (#224 part 2, `genlock.md`), so
+    its timeline moves by the remainder r only: the next boundary comes at
+    most ONE early, never a catch-up of the step's slots
+    (`ndi_input_tests_regrid.rs`). Its `WallVbanClock::new` follows the
+    wall; only VBAN's clock slews r. That one early boundary asks FrameSync
+    for its block up to r (≤ 33 ms) sooner: check its audio queue at box
+    acceptance (the input's `input` telemetry across a controlled step: no
+    short or silent block counted).
+- `NdiInput::service(B, bus)` (the pair's audio AND video stamped on `B`,
+  #224 — never the emit instant, also in a catch-up):
   1. apply a settings change, take a finished connect, or request a
      (re)connect / the retry of a failed one exactly 5 s after the boundary
      that requested it. NO SDK call happens here (see "Receiver lifecycle off

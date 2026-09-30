@@ -10,15 +10,18 @@ pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;
 mod engine_play;
+pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the relabel registry)
 pub(crate) mod frame_alloc; // #207: map a decoder FrameAlloc error to a dropped frame (pure classify + rate-limit)
 pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
 mod handle_pipeline_event;
+pub mod legacy_cg; // #221 L4a: what SongPlayer told cg OBS to show (until B4 step 6)
 pub mod lock_state;
 pub mod loop_stats; // #192 round 3: pipeline-loop stage timing + submit-call histogram (pure)
 mod lyrics_loader;
 mod mix; // #184 round G set_mix (impl PlaybackEngine, 1000-line cap split)
 pub mod ndi_burn;
 pub mod ndi_health;
+mod ndi_health_expect; // #221 L4a: whether a receiver is expected on an output (pure)
 mod ndi_health_transport; // #201 round 2: pure reported-label -> TransportState (Linux-tested)
 pub mod ndi_input; // #212: the NDI input "OBS manuál" on the genlock grid → the program bus
 mod ndi_recovery_trigger; // #173 operator recover trigger (impl PlaybackEngine, 1000-line cap split)
@@ -42,12 +45,16 @@ pub(crate) mod pipeline_stub;
 mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
+mod program_authority; // #221 L4b: SP-program (∪ SongPlayer's cg OBS record) drives playback
 pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
 pub mod program_follow; // #215: SP-program follows cg OBS + the transition settings/spec task
+pub mod program_on_air; // #221: what is on air (the bus's watch value) + the one scene-name resolver
 pub mod program_output; // #209: the SP-program sender + its thread
+pub mod program_switch; // #221: the ONE switch path of a scene press (catalog, cut, cg OBS forward/mirror)
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
 pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns
 mod runtime_pipeline;
+pub mod scene_catalog; // #221: which scene is a playlist's, from its NDI output name (no cg OBS lookup)
 mod scene_off; // #215: the deferred scene-go-off pause of the program's outgoing source
 pub mod startup_senders; // #196 deterministic restart-safe NDI sender startup (pure port-wait + order)
 pub mod state;
@@ -57,6 +64,7 @@ mod test_helpers;
 mod title;
 mod title_timers; // #217 addendum 3: title timers armed from the song's TitleClock
 mod transport_state; // #201 pure PlayState->TransportState mapping (Linux-tested)
+pub mod vban_clock; // #224 part 2: VBAN's + the NDI input's wall clock, VBAN's date-step slew
 pub mod vban_out; // #210: the program's VBAN audio output (queue, paced thread, socket, stats)
 pub mod vban_packet; // #210: the pure VBAN packet encoder (header, INT24, 8×200 split)
 pub mod wallclock;
@@ -79,7 +87,6 @@ use crate::playlist::selector::VideoSelector;
 
 use pipeline::{PipelineCommand, PipelineEvent, PlaybackPipeline};
 use state::{PlayAction, PlayEvent, PlayState};
-use transport_state::transport_from_play_state;
 
 /// Minimum gap between `NowPlaying` position re-broadcasts per playlist.
 /// Keeps the WebSocket from flooding the dashboard on high-frequency
@@ -105,7 +112,8 @@ fn should_send_position_update(elapsed_ms: u64) -> bool {
 
 /// Map the internal server-side [`PlayState`] to the wire-level dashboard
 /// [`WsPlaybackState`]. #170: a pipeline the engine holds as `Playing` but
-/// whose scene is OFF program is paused (dark wall) — it must map to
+/// whose scene is OFF program (a hold, or #221 L4b a ▶ off air; the Player
+/// tells both from a paused pipeline by the transport) must map to
 /// `WaitingForScene`, matching the WS replay built from `handle_health_snapshot`'s
 /// `(Playing, Playing, scene_active = false) → Paused` reconciliation. A live
 /// `Playing` for such a pipeline flips a paused selector row to Playing, the
@@ -127,7 +135,7 @@ struct PlaylistPipeline {
     state: PlayState,
     mode: PlaybackMode,
     current_video_id: Option<i64>,
-    /// OBS program scene shows this playlist's NDI output. `Arc<AtomicBool>`
+    /// On program: on air per the playback authority (#221 L4b). `Arc<AtomicBool>`
     /// so the detached title-show task (1.5s delay) reads the CURRENT
     /// value at fire time, not a stale snapshot from spawn time.
     scene_active: Arc<AtomicBool>,
@@ -166,8 +174,8 @@ struct PlaylistPipeline {
     /// ends and when the pipeline pauses. A scene-off keeps it through the
     /// #215 hold (design record 5863318980).
     lyrics_state: Option<crate::lyrics::renderer::LyricsState>,
-    /// Presenter-push debounce: last EN text sent, compared each 500ms tick.
-    last_presenter_text: Option<String>,
+    /// Presenter-push debounce: the lines last sent (#222).
+    last_presenter_text: Option<crate::presenter::PushedLine>,
     /// Last Resolume ShowSubtitles signature; dedup key for `dispatch_lyrics_if_changed`. Reset on song change.
     last_resolume_subtitles_signature: Option<String>,
     /// Last karaoke ws line text; dedup key for `dispatch_lyrics_if_changed`. Reset on song change.
@@ -271,8 +279,11 @@ pub struct PlaybackEngine {
     /// ladder in that case).
     ndi_source_map: Option<crate::obs::NdiSourceMap>,
     /// #215: the program bus (set by `start_program`), asked whether a playlist
-    /// that left its OBS scene must keep playing through a transition.
+    /// that left program must keep playing through a transition.
     program: std::sync::OnceLock<Arc<crate::playback::program_bus::ProgramBus>>,
+    /// #221 L4b: the playlists on air as the playback authority last diffed
+    /// them, read by its stale check (`program_authority.rs`).
+    on_air: program_authority::OnAirPlaylists,
 }
 
 /// Construction-time configuration for [`PlaybackEngine`]. Bundling these
@@ -349,6 +360,7 @@ impl PlaybackEngine {
             preview_registry: std::sync::Arc::new(crate::playback::preview::PreviewRegistry::new()),
             ndi_source_map: None,
             program: std::sync::OnceLock::new(),
+            on_air: Default::default(),
         }
     }
 
@@ -451,11 +463,13 @@ impl PlaybackEngine {
         }
     }
 
-    /// Handle a scene change from the OBS module. On program, fires
-    /// `VideosAvailable` then `SceneOn` (folded so every caller — OBS
-    /// bridge, API, tests — goes through the same sequence). Off
-    /// program, fires `SceneOff`.
+    /// Put a playlist on or off program (#221 L4b: the playback authority's
+    /// `OnProgram`, `program_authority.rs`). On program, fires
+    /// `VideosAvailable` then `SceneOn` (folded so every caller goes through
+    /// the same sequence). Off program, fires `SceneOff`, or holds it through
+    /// its transition (`scene_off.rs`).
     pub async fn handle_scene_change(&mut self, playlist_id: i64, on_program: bool) {
+        let before = self.scene_snapshot(playlist_id); // for `broadcast_scene_flip`
         // Going off-program cancels title timers and clears Resolume
         // state (prevents last-write-wins bleed between playlists on
         // the shared `#sp-title` / `#sp-subs` clips — 2026-04-19 event).
@@ -479,12 +493,7 @@ impl PlaybackEngine {
                 pp.last_resolume_subtitles_signature = None;
                 pp.last_presenter_text = None;
             }
-            let _ = self
-                .resolume_tx
-                .try_send(crate::resolume::ResolumeCommand::HideTitle);
-            let _ = self
-                .resolume_tx
-                .try_send(crate::resolume::ResolumeCommand::HideSubtitles);
+            self.wall_after_scene_off().await; // #221 L4b: or re-synced to one on program
         }
 
         if on_program {
@@ -506,9 +515,16 @@ impl PlaybackEngine {
             if let Some(video_id) = video_id {
                 self.push_title_for_playing(playlist_id, video_id).await;
             }
+            // #221 (review rounds 1-2): the wall owner's ON re-syncs the
+            // whole wall (`scene_off::wall_after_owner_on`).
+            if self.on_air.owner() == Some(playlist_id) {
+                self.wall_after_owner_on(playlist_id, video_id.is_some())
+                    .await;
+            }
         } else {
             self.scene_off(playlist_id).await; // #215: held through a transition
         }
+        self.broadcast_scene_flip(playlist_id, before); // #221 L4b: the WS state
     }
 
     /// Re-wake pipelines parked in `WaitingForScene` after the download
@@ -630,20 +646,10 @@ impl PlaybackEngine {
                         start_position_ms: None,
                     });
 
-                    // Broadcast the state change so the dashboard updates.
-                    // #170: gate on scene_active so a Previous on an
-                    // off-program playlist shows WaitingForScene, matching
-                    // the health-label replay. #201: transport reports the raw
-                    // decoding state so the Player label follows the pipeline.
-                    let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
-                        playlist_id,
-                        state: play_state_to_ws(
-                            &PlayState::Playing { video_id },
-                            pp.scene_active.load(Ordering::Acquire),
-                        ),
-                        mode: pp.mode,
-                        transport: transport_from_play_state(&PlayState::Playing { video_id }),
-                    });
+                    // Broadcast the state change so the dashboard updates: an
+                    // off-program Previous shows WaitingForScene (#170), with
+                    // the raw transport (#201).
+                    self.broadcast_state(playlist_id);
                 }
                 self.resync_after_play(playlist_id).await;
             }
@@ -715,23 +721,16 @@ impl PlaybackEngine {
         }
 
         // After the action (which may itself mutate the state to Playing),
-        // broadcast the final state if it differs from the pre-transition state.
-        // The pipeline always exists here (`execute_action` never removes one;
-        // the no-pipeline case returned at the top of this method). #170: derive
-        // the wire state from `scene_active` too, so a pipeline the engine holds
-        // as Playing while its scene is off program is broadcast as
-        // WaitingForScene (matching the health-label replay).
-        if let Some(pp) = self.pipelines.get(&playlist_id) {
-            let final_state = pp.state.clone();
-            let scene_active = pp.scene_active.load(Ordering::Acquire);
-            if old_state != final_state {
-                let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
-                    playlist_id,
-                    state: play_state_to_ws(&final_state, scene_active),
-                    mode,
-                    transport: transport_from_play_state(&final_state),
-                });
-            }
+        // broadcast the final state, in its scene-aware wire state
+        // (`broadcast_state`, #170), if it differs from the pre-transition
+        // state. The pipeline always exists here (`execute_action` never
+        // removes one; the no-pipeline case returned at the top).
+        if self
+            .pipelines
+            .get(&playlist_id)
+            .is_some_and(|pp| pp.state != old_state)
+        {
+            self.broadcast_state(playlist_id);
         }
     }
 

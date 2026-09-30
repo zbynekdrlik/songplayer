@@ -46,3 +46,30 @@ Rules for every post-deploy spec:
   --config post-deploy.config.ts --list` rewrites the committed
   `e2e/post-deploy-report/index.html` through the html reporter. Pass
   `--reporter=list`, or `git checkout` that file before committing.
+- **Transpile-check a spec edit without the box** (a worktree has no
+  `e2e/node_modules`): symlink the main checkout's
+  (`ln -s <repo>/e2e/node_modules e2e/node_modules` inside the worktree's
+  `e2e/`), run `./node_modules/.bin/playwright test --config=post-deploy.config.ts
+  --list --reporter=list` (a syntax error fails the listing; the mock-suite
+  unit specs such as `obs-scene-wait.spec.ts` can even run). A worktree
+  worker cannot delete the symlink afterwards (the worktree guard resolves
+  it into the main checkout and refuses); `.gitignore` ignores
+  `e2e/node_modules` without a trailing slash, so the link is never
+  committed and goes with the worktree.
+- **A post-deploy check's decision logic is a pure helper with a mock-suite
+  unit spec** (`e2e/cache-layout.ts` for the FLAC layout, #136;
+  `av-sync-gate.ts`, `obs-scene-wait.ts`). The post-deploy spec only reads
+  the box and calls it, so the rule is tested in CI without a box. On the
+  Tier-0 box a pure helper (interfaces / type annotations only, no enums)
+  also runs with plain node and no install: a scratch `check.mts` that
+  imports the helper by its absolute `.ts` path and mirrors the spec's cases
+  with `node:assert/strict`, run as `node --experimental-strip-types
+  check.mts`.
+- **#221 L3: the scene driver is SongPlayer's facade** (`FACADE_WS_URL`,
+  :4456). **#221 L4b:** `/api/v1/status.active_scene` /
+  `active_playlist_ids` are SongPlayer's own program (the resolver, and the
+  on-air set = SP-program's playlist ∪ the one cg OBS was told to show).
+  Right after `switchScene` returns, the previous playlist is still on air
+  until cg OBS answers the mirror: wait for the set to settle (at most one
+  playlist; `waitEngineActiveScene`, the A/V gate's `length === 1` poll),
+  never read it once.

@@ -32,6 +32,8 @@ pub(crate) struct FakeClock {
     pub sleeps: Vec<i64>,
     /// `now_100ns` calls (the production clock ticks on each).
     pub reads: usize,
+    /// What the clock reports it still owes of a date step (#224 part 2).
+    pub owed: i64,
 }
 
 impl FakeClock {
@@ -40,6 +42,7 @@ impl FakeClock {
             now: Arc::new(AtomicI64::new(t)),
             sleeps: Vec::new(),
             reads: 0,
+            owed: 0,
         }
     }
 }
@@ -52,6 +55,9 @@ impl VbanClock for FakeClock {
     fn sleep_100ns(&mut self, d_100ns: i64) {
         self.sleeps.push(d_100ns);
         self.now.fetch_add(d_100ns, Ordering::SeqCst);
+    }
+    fn slew_owed_100ns(&self) -> i64 {
+        self.owed
     }
 }
 
@@ -474,11 +480,11 @@ fn the_counter_is_contiguous_across_blocks_a_cut_and_standby() {
         .expect("mock sender");
     let mut program = ProgramOutput::new(sender, 4, 2).with_vban(out.clone());
     let s = |j: i64| D + j * 333_333;
-    program.submit(source_job(s(0), 0.5), s(0)); // source A
-    program.submit(source_job(s(1), 0.5), s(1)); // source A
-    program.submit(source_job(s(2), -0.25), s(2)); // the cut: source B
-    program.submit(ProgramJob::Standby { stamp_100ns: s(3) }, s(3)); // standby
-    program.submit(source_job(s(4), -0.25), s(4)); // source B
+    program.submit(source_job(s(0), 0.5)); // source A
+    program.submit(source_job(s(1), 0.5)); // source A
+    program.submit(source_job(s(2), -0.25)); // the cut: source B
+    program.submit(ProgramJob::Standby { stamp_100ns: s(3) }); // standby
+    program.submit(source_job(s(4), -0.25)); // source B
     assert_eq!(out.queued(), 5, "one block per submitted pair");
     out.stop();
 
@@ -795,3 +801,7 @@ fn resolve_and_log_cadences() {
     assert!(!should_log(1001));
     assert!(should_log(2000));
 }
+
+// #224 part 2: VBAN at a fleet date step (SlewRemainder).
+#[path = "vban_out_tests_regrid.rs"]
+mod regrid;

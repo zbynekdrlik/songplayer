@@ -541,9 +541,14 @@ async fn apply_event_no_broadcast_when_state_unchanged() {
 /// Fast-firing `Position` events must not flood the broadcast channel:
 /// only one `NowPlaying` should be sent per `POSITION_BROADCAST_INTERVAL_MS`.
 ///
-/// Uses real time (not `tokio::time::pause`) because the sqlite pool
-/// setup before the throttle check relies on real I/O which blocks
-/// indefinitely under a paused timer.
+/// The throttle reads `std::time::Instant`, so a paused tokio clock does not
+/// drive it (and the sqlite setup needs real I/O). The test therefore sets
+/// the pipeline's `last_now_playing_broadcast` itself instead of racing a
+/// 500 ms wall-clock window: under the Coverage job's ptrace, 10 events once
+/// took longer than the window and a correct throttle "leaked" (CI run
+/// 36529642324). A last broadcast in the FUTURE reads as 0 ms ago
+/// (`duration_since` saturates), so nothing may leak however slow the run;
+/// one 600 ms in the past must let exactly one through.
 #[tokio::test]
 async fn position_events_are_throttled() {
     let pool = crate::db::create_memory_pool().await.unwrap();
@@ -596,6 +601,15 @@ async fn position_events_are_throttled() {
     // Drain messages produced by Started (NowPlaying + possibly PlaybackStateChanged).
     while ws_rx.try_recv().is_ok() {}
 
+    // The last broadcast "just happened" for the whole burst below, whatever
+    // the wall clock does meanwhile.
+    engine
+        .pipelines
+        .get_mut(&99)
+        .expect("pipeline 99")
+        .last_now_playing_broadcast =
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(3600));
+
     // Fire 10 Position events in quick succession.
     for i in 1..=10u64 {
         engine
@@ -609,18 +623,21 @@ async fn position_events_are_throttled() {
             .await;
     }
 
-    // Within the 500ms throttle window (10 rapid events fired in a few
-    // microseconds), the only broadcast that should have been produced
-    // is the initial one on Started (already drained). Zero additional
-    // NowPlaying should be visible yet.
+    // Within the throttle window the only broadcast is the one on Started
+    // (already drained): zero additional NowPlaying.
     assert!(
         ws_rx.try_recv().is_err(),
         "no NowPlaying should leak while within the 500ms throttle window"
     );
 
-    // Sleep past the throttle window and fire once more — should
-    // produce exactly one additional broadcast.
-    tokio::time::sleep(std::time::Duration::from_millis(550)).await;
+    // The window has passed (the last broadcast was 600 ms ago): one more
+    // event produces exactly one broadcast.
+    engine
+        .pipelines
+        .get_mut(&99)
+        .expect("pipeline 99")
+        .last_now_playing_broadcast =
+        std::time::Instant::now().checked_sub(std::time::Duration::from_millis(600));
     engine
         .handle_pipeline_event(
             99,

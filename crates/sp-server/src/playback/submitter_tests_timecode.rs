@@ -127,13 +127,14 @@ fn new_with_wallclock_uses_the_injected_clock_directly() {
         "new_with_wallclock must use the injected clock directly"
     );
 
-    // The injected clock is the one that stamps; the hot read path is
-    // monotonic-only, so a submit adds no further realtime sample.
+    // The injected clock is the one that stamps. The hot read path is
+    // monotonic-only; the submit's one wall tick takes the step probe's one
+    // realtime read (#224) and nothing else.
     sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
     assert_eq!(
         clock.samples(),
-        1,
-        "the submit read path must be monotonic-only"
+        1 + 1,
+        "a submit adds exactly the tick's step-probe read"
     );
     assert_eq!(
         backend.video_timecodes(),

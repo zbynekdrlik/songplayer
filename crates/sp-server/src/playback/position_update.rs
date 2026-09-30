@@ -30,7 +30,10 @@ impl super::PlaybackEngine {
     /// regardless of `scene_active`, except for a playlist HELD off program
     /// through a #215 transition: nothing goes out, as when the scene-off
     /// dropped its lyrics (design record 5863318980 item 2); a scene back on
-    /// program resumes at once.
+    /// program resumes at once. #221 (release 0.69.0 review 🟡 2): while a
+    /// playlist owns the wall (`OnAirPlaylists::may_write_wall`), only it
+    /// dispatches Resolume + Presenter; the ws karaoke update is per
+    /// playlist and always goes.
     #[cfg_attr(test, mutants::skip)] // Resolume + Presenter dispatch with signature-based dedup; ShowSubtitles / HideSubtitles call shape is asserted by 6 unit tests in dispatch_lyrics_tests. The `!=` dedup check on the hide signature is a Resolume traffic optimization; flipping it produces extra HideSubtitles calls without changing wall behavior — the dedup is best-effort.
     pub(super) fn dispatch_lyrics_if_changed(&mut self, playlist_id: i64, position_ms: u64) {
         let pp = match self.pipelines.get_mut(&playlist_id) {
@@ -64,6 +67,15 @@ impl super::PlaybackEngine {
             Some(pp) => pp,
             None => return,
         };
+        // #221 (release 0.69.0 review 🟡 2): only the wall owner writes the
+        // shared outputs (the Resolume subtitles, the Presenter). Another
+        // playlist forgets what it last sent, so the moment it owns the wall
+        // its current line goes out.
+        if !self.on_air.may_write_wall(playlist_id) {
+            pp.last_resolume_subtitles_signature = None;
+            pp.last_presenter_text = None;
+            return;
+        }
         let lyrics = match &pp.lyrics_state {
             Some(l) => l,
             None => return,
@@ -126,9 +138,9 @@ impl super::PlaybackEngine {
             }
         }
 
-        // Presenter — fire-and-forget. `maybe_push_line` is idempotent on
-        // identical `current_en` (compares against the `last_seen` arg we
-        // pass, which is the pre-call snapshot).
+        // Presenter — fire-and-forget. `maybe_push_line` is idempotent on an
+        // identical payload (#222: compares the current + next lines, EN + SK,
+        // against the `last_seen` arg we pass, the pre-call snapshot).
         let pp = match self.pipelines.get_mut(&playlist_id) {
             Some(pp) => pp,
             None => return,
@@ -137,12 +149,11 @@ impl super::PlaybackEngine {
             Some(l) => l,
             None => return,
         };
-        if let Some((cur, nxt)) = lyrics.presenter_lines(position_ms) {
+        if let Some(lines) = lyrics.presenter_lines(position_ms) {
             pp.last_presenter_text = crate::presenter::maybe_push_line(
                 self.presenter_client.as_ref(),
                 pp.last_presenter_text.take(),
-                cur,
-                nxt,
+                lines,
                 &pp.cached_song,
                 &pp.cached_artist,
             );

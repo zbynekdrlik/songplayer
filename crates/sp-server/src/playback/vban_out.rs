@@ -9,14 +9,26 @@
 //! and counted. A dedicated thread ([`run_vban_loop`]) encodes each block into
 //! 8 packets of 200 frames (`vban_packet.rs`) and sends packet `k` of the
 //! boundary `B` at `due(B) + L + k/240 s`, where L is two slots
-//! ([`VBAN_SEND_LATENCY_100NS`]). It paces on its own [`WallClock`], ticked
+//! ([`VBAN_SEND_LATENCY_100NS`]). It paces on its own
+//! [`WallClock`](crate::playback::wallclock::WallClock), ticked
 //! once per grid boundary like the program wall ([`WallVbanClock`]) — also
 //! while nothing is sent, so its anchor never goes stale — and the
 //! on-time packets go out one every 4.1667 ms, one wait each, never as a burst.
 //! A block that arrives after its first packet is due (a program fill after
-//! the 3-slot grace, a fleet date step before the walls re-converge) sends its
-//! past-due packets back-to-back and counts each as a late send. The frame
-//! counter grows by exactly 1 per packet across cuts and standby.
+//! the 3-slot grace, a real stall) sends its past-due packets back-to-back and
+//! counts each as a late send. The frame counter grows by exactly 1 per packet
+//! across cuts and standby.
+//!
+//! A fleet date step (#224 part 2): the walls relabel, so the program's
+//! timeline moves only by the remainder r (≤ one slot, or a residue hold of
+//! at most ~4 ms) and VBAN never sees the whole slots N. VBAN has no timecode:
+//! its receiver paces by arrival, so a jump of r would still send r of audio
+//! at once, and a hold would leave a gap. Its clock
+//! ([`WallVbanClock::slewing`], policy [`RemainderSlew`], in `vban_clock.rs`)
+//! therefore neither jumps nor stops at the follow: it owes the movement and
+//! pays it back at [`VBAN_SLEW_PPM`], so every packet interval stays within
+//! 4.1667 ms ± 100 ppm — no burst, no gap, no drop, no crossfade
+//! (`slew_owed_us` on the status, signed).
 //!
 //! One UDP socket sends to every resolved target. The settings (`vban_enabled`,
 //! `vban_stream_name`, `vban_targets`) are re-read every
@@ -43,13 +55,14 @@ use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 use crate::playback::loop_stats::percentile_ceil;
-use crate::playback::program_output::BoundaryTicker;
 use crate::playback::vban_packet::{
     VBAN_BLOCK_SAMPLES, VBAN_CHANNELS, VBAN_SAMPLE_RATE_HZ, VBAN_SEND_LATENCY_100NS,
     VBAN_STREAM_NAME_LEN, VbanBlockPackets, VbanEncoder, empty_block_packets, packet_send_at_100ns,
     stream_name_bytes,
 };
-use crate::playback::wallclock::WallClock;
+// #224 part 2: VBAN's (and the NDI input's) wall clock and VBAN's slew live
+// in `vban_clock.rs` (review round 1: this file neared the 1000-line cap).
+pub use crate::playback::vban_clock::{RemainderSlew, VBAN_SLEW_PPM, WallVbanClock};
 
 /// Queue bound: the program queue's own bound — a full program catch-up (8
 /// slots) plus the block behind it, with one to spare.
@@ -341,6 +354,10 @@ pub struct VbanStatus {
     pub send_interval_p99_us: u64,
     /// `nuFrame` of the last packet sent.
     pub frame_counter: u32,
+    /// #224 part 2: the date-step movement VBAN's clock still owes (µs,
+    /// signed): r right after a follow (negative after a residue hold), then
+    /// toward 0 at [`VBAN_SLEW_PPM`]; 0 otherwise.
+    pub slew_owed_us: i64,
     pub targets: Vec<VbanTargetStatus>,
 }
 
@@ -353,6 +370,7 @@ struct VbanCounters {
     late_sends: u64,
     frame_counter: u32,
     intervals_us: VecDeque<u64>,
+    slew_owed_us: i64,
 }
 
 struct VbanQueue {
@@ -502,6 +520,12 @@ impl VbanOut {
         s.send_errors
     }
 
+    /// Record what VBAN's clock still owes of a date step (100 ns, #224
+    /// part 2), for `slew_owed_us`.
+    fn record_slew(&self, owed_100ns: i64) {
+        lock(&self.stats).slew_owed_us = owed_100ns / 10;
+    }
+
     /// The telemetry for the API.
     pub fn status(&self) -> VbanStatus {
         let cfg = self.config();
@@ -517,6 +541,7 @@ impl VbanOut {
             late_sends: s.late_sends,
             send_interval_p99_us: percentile_ceil(&s.intervals_us, 99),
             frame_counter: s.frame_counter,
+            slew_owed_us: s.slew_owed_us,
             targets: cfg
                 .targets
                 .iter()
@@ -540,10 +565,13 @@ struct SentPacket {
 
 /// The clock the VBAN thread paces on (the program's wall domain).
 pub trait VbanClock {
-    /// Now, 100 ns since the Unix epoch.
+    /// Now, 100 ns (the internal timeline, #224 part 2).
     fn now_100ns(&mut self) -> i64;
     /// Sleep `d_100ns`.
     fn sleep_100ns(&mut self, d_100ns: i64);
+    /// What the clock still owes of a date step's remainder (100 ns, #224
+    /// part 2; 0 for a clock that follows its wall).
+    fn slew_owed_100ns(&self) -> i64;
 }
 
 /// Where packets go (a UDP socket in production).
@@ -554,37 +582,6 @@ pub trait VbanSink {
 impl VbanSink for UdpSocket {
     fn send_packet(&mut self, packet: &[u8], addr: SocketAddr) -> io::Result<usize> {
         self.send_to(packet, addr)
-    }
-}
-
-/// Production clock: a [`WallClock`] ticked once per grid boundary passed
-/// ([`BoundaryTicker`], the program wall's cadence), so it slews a UTC step in
-/// at the same rate as the program and the source walls — one clock domain.
-pub struct WallVbanClock {
-    wall: WallClock,
-    ticker: BoundaryTicker,
-}
-
-impl WallVbanClock {
-    pub fn new(wall: WallClock) -> Self {
-        Self {
-            wall,
-            ticker: BoundaryTicker::default(),
-        }
-    }
-}
-
-impl VbanClock for WallVbanClock {
-    fn now_100ns(&mut self) -> i64 {
-        let now = self.wall.now_100ns();
-        for _ in 0..self.ticker.advance(now) {
-            self.wall.tick();
-        }
-        self.wall.now_100ns()
-    }
-
-    fn sleep_100ns(&mut self, d_100ns: i64) {
-        std::thread::sleep(Duration::from_nanos(d_100ns.max(0) as u64 * 100));
     }
 }
 
@@ -638,7 +635,7 @@ impl VbanSender {
             if should_log(n) {
                 warn!(
                     blocks_substituted = n,
-                    due_100ns = block.due_100ns,
+                    due_100ns = crate::playback::fleet_shift::wire_100ns(block.due_100ns),
                     "vban output: a program pair's audio was not one 48 kHz stereo 1600-frame block — sent silence"
                 );
             }
@@ -698,6 +695,7 @@ pub fn run_vban_loop(
         // (disabled, no target, idle), so its anchor follows UTC like the
         // program wall and the first packets after enabling are on schedule.
         clock.now_100ns();
+        out.record_slew(clock.slew_owed_100ns());
         match take {
             VbanTake::Block(block) => {
                 sender.send_block(out, &block, sink, clock);
@@ -733,7 +731,9 @@ pub fn spawn_vban_thread(out: Arc<VbanOut>) {
                 }
             };
             info!(local = ?socket.local_addr().ok(), "vban output thread started");
-            let mut clock = WallVbanClock::new(WallClock::system());
+            // #224 part 2: SlewRemainder — a date step never bursts VBAN.
+            let wall = crate::playback::wallclock::WallClock::system();
+            let mut clock = WallVbanClock::slewing(wall);
             run_vban_loop(&out, &mut socket, &mut clock);
         });
     if let Err(e) = spawned {

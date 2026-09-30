@@ -3,12 +3,15 @@
 //!
 //! Extracted from `worker.rs::process_song` to keep that file under the
 //! 1000-line CI limit. `run_mtl_reference_stage` is the FIRST tier: it aligns
-//! the best text candidate via mtl, verifies it against Gemini ASR through the
-//! reference gate (`orchestrator::run_reference_stage`), and on gate PASS ships
-//! the mtl line timings directly while stamping `videos.lyrics_reference`. Gate
-//! FAIL/ERROR writes the `{youtube_id}_alignment_audit.json` sidecar and
-//! returns `None` so the caller falls through to the v22 g35t base tier
-//! (`worker_g35t`).
+//! the best text candidate via mtl, verifies it against the song's one Gemini
+//! ASR transcript through the two-way reference gate
+//! (`orchestrator::run_reference_stage`), and on gate PASS ships
+//! the mtl line timings directly while stamping `videos.lyrics_reference`.
+//! Every PASS/FAIL/ERROR writes the `{youtube_id}_alignment_audit.json`
+//! sidecar (#144: a PASS too, so the gate's numbers — the sung coverage
+//! included — are on disk for every ★ row, and a stale FAIL audit of an
+//! earlier run never outlives a later PASS). FAIL/ERROR returns `None` so the
+//! caller falls through to the v22 g35t base tier (`worker_g35t`).
 
 use std::path::Path;
 
@@ -20,10 +23,12 @@ use crate::lyrics::LYRICS_PIPELINE_VERSION;
 
 impl LyricsWorker {
     /// Lever 2 (#143): forced-alignment reference stage. See
-    /// `orchestrator::run_reference_stage` for the mtl-align → Gemini-ASR →
-    /// gate decision; this wraps it with the skip conditions, the
+    /// `orchestrator::run_reference_stage` for the mtl-align → gate decision
+    /// against `words`, the song's one g35t transcript (#144); this wraps it
+    /// with the skip conditions (an empty transcript is one: no gate can pass
+    /// on it, so no mtl is spent), the
     /// `videos.lyrics_reference` flag update, and the
-    /// `_alignment_audit.json` sidecar on a non-Pass outcome. `backend` is
+    /// `_alignment_audit.json` sidecar of every gate outcome. `backend` is
     /// the injection seam (`orchestrator::ReferenceStageBackend`) —
     /// production passes `RealReferenceStageBackend`, tests pass a fake.
     ///
@@ -41,9 +46,14 @@ impl LyricsWorker {
         youtube_id: &str,
         best: Option<&crate::lyrics::tier1::CandidateText>,
         clean_vocal: Option<&Path>,
+        words: &[crate::lyrics::g35t_client::AsrWord],
         backend: &dyn crate::lyrics::orchestrator::ReferenceStageBackend,
     ) -> Result<Option<LyricsTrack>, crate::lyrics::heavy_plan::HeavyDefer> {
         const MIN_LINES: usize = 4;
+
+        // #144: the audit describes THIS pass — a stale one of an earlier pass
+        // (a PASS audit included) goes, and a skip below leaves none.
+        crate::lyrics::audit_ctx::remove_alignment_audit(&self.cache_dir, youtube_id).await;
 
         let mtl_cfg = crate::lyrics::mtl_aligner::MtlConfig::from_tools_dir(&self.tools_dir);
         if !mtl_cfg.is_available() {
@@ -69,6 +79,10 @@ impl LyricsWorker {
             );
             return Ok(None);
         }
+        if words.is_empty() {
+            info!(youtube_id = %youtube_id, "reference_stage: empty transcript — skipping (#144)");
+            return Ok(None);
+        }
 
         // #167: no heavy step for the first 60 s after engine start — the wall
         // pipelines must come up on a quiet box. No backoff; re-picked next tick.
@@ -92,9 +106,14 @@ impl LyricsWorker {
             Err(_) => return Err(crate::lyrics::heavy_plan::HeavyDefer::Memory),
         };
 
-        let outcome =
-            crate::lyrics::orchestrator::run_reference_stage(backend, wav, youtube_id, &best.lines)
-                .await;
+        let outcome = crate::lyrics::orchestrator::run_reference_stage(
+            backend,
+            wav,
+            youtube_id,
+            &best.lines,
+            words,
+        )
+        .await;
 
         let audit_ctx = crate::lyrics::audit_ctx::AuditContext {
             cache_dir: &self.cache_dir,
@@ -102,13 +121,33 @@ impl LyricsWorker {
         };
 
         match outcome {
-            crate::lyrics::orchestrator::ReferenceStageResult::Pass { lines, stats } => {
+            crate::lyrics::orchestrator::ReferenceStageResult::Pass {
+                lines,
+                stats,
+                mtl_device,
+                mtl_elapsed_s,
+                asr_word_count,
+            } => {
                 info!(
                     youtube_id = %youtube_id,
                     matched_frac = stats.matched_frac,
                     within_400_frac = stats.within_400_frac,
+                    sung_covered_frac = stats.sung_covered_frac,
+                    max_uncovered_sung_ms = stats.max_uncovered_sung_ms,
                     "reference_stage: gate PASS — stamping ★ reference (#143)"
                 );
+                crate::lyrics::audit_ctx::write_alignment_audit(
+                    Some(&audit_ctx),
+                    &reference_gate_audit_json(
+                        "pass",
+                        None,
+                        Some(&stats),
+                        Some(&mtl_device),
+                        Some(mtl_elapsed_s),
+                        asr_word_count,
+                    ),
+                )
+                .await;
                 if let Err(e) =
                     crate::db::models::set_video_lyrics_reference(&self.pool, video_id, true).await
                 {
@@ -136,6 +175,8 @@ impl LyricsWorker {
                     youtube_id = %youtube_id,
                     reason = reason_str,
                     matched_frac = stats.matched_frac,
+                    sung_covered_frac = stats.sung_covered_frac,
+                    max_uncovered_sung_ms = stats.max_uncovered_sung_ms,
                     "reference_stage: gate FAIL — keeping existing route (#143)"
                 );
                 crate::lyrics::audit_ctx::write_alignment_audit(
@@ -237,8 +278,11 @@ fn gate_fail_reason_str(reason: &crate::lyrics::reference_gate::GateFailReason) 
 }
 
 /// Builds the `{youtube_id}_alignment_audit.json` payload for a Lever-2
-/// (#143) reference-stage `Fail` (`stats = Some(..)`) or `Error`
-/// (`stats = None`) outcome.
+/// (#143) reference-stage `Pass` / `Fail` (`stats = Some(..)`) or `Error`
+/// (`stats = None`) outcome. #144 adds the transcript → reference numbers
+/// (`sung_words`, `sung_covered_frac`, `max_uncovered_sung_ms`) and
+/// `sung_coverage_ok`, which tells a `coverage` failure of the sung direction
+/// from one of the matched lines.
 fn reference_gate_audit_json(
     verdict: &str,
     reason: Option<&str>,
@@ -255,6 +299,10 @@ fn reference_gate_audit_json(
         "matched_frac": stats.map(|s| s.matched_frac).unwrap_or(0.0),
         "median_signed_ms": stats.map(|s| s.median_signed_ms).unwrap_or(0),
         "within_400_frac": stats.map(|s| s.within_400_frac).unwrap_or(0.0),
+        "sung_words": stats.map(|s| s.sung_words).unwrap_or(0),
+        "sung_covered_frac": stats.map(|s| s.sung_covered_frac).unwrap_or(0.0),
+        "max_uncovered_sung_ms": stats.map(|s| s.max_uncovered_sung_ms).unwrap_or(0),
+        "sung_coverage_ok": stats.map(|s| crate::lyrics::reference_gate::covers_what_is_sung(&s.sung())),
         "mtl_device": mtl_device,
         "mtl_elapsed_s": mtl_elapsed_s,
         "asr_words": asr_words,

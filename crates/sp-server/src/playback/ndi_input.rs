@@ -57,6 +57,7 @@ use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
+use crate::playback::fleet_shift;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::ProgramBus;
 use crate::playback::submit_handoff::SubmitJob;
@@ -527,8 +528,10 @@ impl NdiInput {
     /// to `bus` under [`PROGRAM_INPUT_ID`] while the input can own a program
     /// boundary. An inactive input (disabled, or no source) receives nothing;
     /// if it is still selected on program it offers its standby pair. The
-    /// audio is stamped `audio_now_100ns` (the raw wall clock at the emit, §6).
-    pub fn service(&mut self, boundary_100ns: i64, audio_now_100ns: i64, bus: &ProgramBus) {
+    /// audio is stamped on `boundary_100ns` like the video: the block the
+    /// FrameSync gives for a boundary belongs to that boundary's timeline
+    /// instant, also in a catch-up after missed boundaries (#224).
+    pub fn service(&mut self, boundary_100ns: i64, bus: &ProgramBus) {
         self.apply_settings(boundary_100ns);
         let candidate = bus.touch(PROGRAM_INPUT_ID, boundary_100ns);
         let captured = if self.applied.active() {
@@ -569,7 +572,7 @@ impl NdiInput {
                 timecode_100ns: None,
             }],
             video_tc_100ns: boundary_100ns,
-            audio_tc_100ns: audio_now_100ns,
+            audio_tc_100ns: boundary_100ns,
             live,
         };
         bus.offer(PROGRAM_INPUT_ID, job);
@@ -720,9 +723,10 @@ pub fn run_input_loop(input: &mut NdiInput, bus: &ProgramBus, clock: &mut dyn Vb
             InputGridStep::Wait(d) => clock.sleep_100ns(d),
             InputGridStep::Relatch => {
                 shared.counters().relatches += 1;
+                // #224 part 2: a log shows the fleet labels (wire stamps).
                 warn!(
-                    now_100ns = now,
-                    last_100ns = from,
+                    now_100ns = fleet_shift::label_100ns(now),
+                    last_100ns = fleet_shift::wire_100ns(from),
                     "ndi input: clock stepped back — re-latching the grid"
                 );
                 last = None;
@@ -731,12 +735,12 @@ pub fn run_input_loop(input: &mut NdiInput, bus: &ProgramBus, clock: &mut dyn Vb
                 if resync {
                     shared.counters().resyncs += 1;
                     warn!(
-                        from_100ns = from,
-                        boundary_100ns = boundary,
+                        from_100ns = fleet_shift::wire_100ns(from),
+                        boundary_100ns = fleet_shift::wire_100ns(boundary),
                         "ndi input: > 8 boundaries missed — resync"
                     );
                 }
-                input.service(boundary, clock.now_100ns(), bus);
+                input.service(boundary, bus);
                 last = Some(boundary);
             }
         }

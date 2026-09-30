@@ -1,13 +1,15 @@
 //! A song's title timers (#217 addendum 3). The show timer (`Started` +
 //! 1.5 s) pushes the title; the hide timer (3.5 s before the end) takes it
 //! down, each only while its scene is on program when it fires (release
-//! 0.68.0 blocker 1a). They sleep until the instants of the song's
-//! `TitleClock`, the same instants a recovery or a scene-on reads
-//! (`recovery.rs`), so a `Resync` never contradicts a timer. They used to be
-//! armed inline in the `Started` handler; they live here so a scene-on can
-//! re-arm them after a scene-off cancelled them. A Play drops the old song's
-//! clock and timers (`begin_play`) and re-syncs the wall
-//! (`resync_after_play`); a pause cancels the timers.
+//! 0.68.0 blocker 1a) and its playlist may write the wall (#221, release
+//! 0.69.0 review 🟡 2: while another playlist owns the wall, never). They
+//! sleep until the instants of the song's `TitleClock`, the same instants a
+//! recovery or a scene-on reads (`recovery.rs`), so a `Resync` never
+//! contradicts a timer. They used to be armed inline in the `Started`
+//! handler; they live here so a scene-on can re-arm them after a scene-off
+//! cancelled them. A Play drops the old song's clock and timers
+//! (`begin_play`) and re-syncs the wall (`resync_after_play`); a pause
+//! cancels the timers.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,6 +21,7 @@ use tokio::time::Instant;
 use tracing::{debug, info};
 
 use super::PlaybackEngine;
+use super::program_authority::OnAirPlaylists;
 use super::title::{self, TitleClock};
 use crate::obs::ObsCommand;
 use crate::resolume::ResolumeCommand;
@@ -36,6 +39,7 @@ impl PlaybackEngine {
         let pool = self.pool.clone();
         let obs_cmd = self.obs_cmd_tx.clone();
         let resolume_tx = self.resolume_tx.clone();
+        let on_air = self.on_air.clone();
         let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
             return;
         };
@@ -43,25 +47,23 @@ impl PlaybackEngine {
         let Some(clock) = pp.title_clock.filter(TitleClock::shows) else {
             return;
         };
+        let gate = WallGate {
+            scene_active: pp.scene_active.clone(),
+            on_air,
+            playlist_id,
+        };
         if clock.show_at > now {
             pp.title_show_abort = Some(spawn_show_timer(
                 pool,
                 obs_cmd.clone(),
                 resolume_tx.clone(),
-                pp.scene_active.clone(),
-                playlist_id,
+                gate.clone(),
                 clock.video_id,
                 clock.show_at,
             ));
         }
         if let Some(hide_at) = clock.hide_at.filter(|hide_at| *hide_at > now) {
-            pp.title_hide_abort = Some(spawn_hide_timer(
-                obs_cmd,
-                resolume_tx,
-                pp.scene_active.clone(),
-                playlist_id,
-                hide_at,
-            ));
+            pp.title_hide_abort = Some(spawn_hide_timer(obs_cmd, resolume_tx, gate, hide_at));
         }
         debug!(
             playlist_id,
@@ -99,15 +101,17 @@ impl PlaybackEngine {
     /// (an instant hide), not when the new song's ShowTitle replaces it 1.5 s
     /// after its `Started`; if another on-program playlist's title is due,
     /// the Resync names that one. The timers and a `Resync` then never
-    /// disagree between the Play and the new `Started`. Off program the
-    /// playlist's title is not on the wall: nothing is sent. A pause calls it
+    /// disagree between the Play and the new `Started`. Off program, or on
+    /// air while another playlist owns the wall (#221 🟡 2), the playlist's
+    /// title is not on the wall: nothing is sent. A pause calls it
     /// too: a paused song's title is not due, and its timers are cancelled
     /// (release 0.68.0 blockers, review round 1).
     pub(super) async fn resync_after_play(&self, playlist_id: i64) {
         let on_program = self
             .pipelines
             .get(&playlist_id)
-            .is_some_and(|pp| pp.scene_active.load(Ordering::Acquire));
+            .is_some_and(|pp| pp.scene_active.load(Ordering::Acquire))
+            && self.on_air.may_write_wall(playlist_id);
         if on_program {
             let title = self.resync_wall_title().await;
             debug!(playlist_id, ?title, "title re-synced on play");
@@ -135,22 +139,43 @@ impl super::PlaylistPipeline {
     }
 }
 
+/// What a title timer checks when it fires: its playlist's scene is on
+/// program, and (#221, release 0.69.0 review 🟡 2) the playlist may write the
+/// wall (`OnAirPlaylists::may_write_wall`): while another playlist owns the
+/// wall, this one's timers never show or hide the shared title.
+#[derive(Clone)]
+struct WallGate {
+    scene_active: Arc<AtomicBool>,
+    on_air: OnAirPlaylists,
+    playlist_id: i64,
+}
+
+impl WallGate {
+    /// Whether the timer may write the title now.
+    fn open(&self) -> bool {
+        self.scene_active.load(Ordering::Acquire) && self.on_air.may_write_wall(self.playlist_id)
+    }
+}
+
 /// The show timer: at `show_at`, push `video_id`'s title (Resolume, then the
-/// OBS text) when the scene is still on program (read at fire time).
+/// OBS text) when its gate is open (read at fire time).
 #[cfg_attr(test, mutants::skip)] // spawn glue on the real clock; the deadline is TitleClock's, the arming arm_title_timers's (both unit-tested)
 fn spawn_show_timer(
     pool: SqlitePool,
     obs_cmd: Option<mpsc::Sender<ObsCommand>>,
     resolume_tx: mpsc::Sender<ResolumeCommand>,
-    scene_active: Arc<AtomicBool>,
-    playlist_id: i64,
+    gate: WallGate,
     video_id: i64,
     show_at: Instant,
 ) -> AbortHandle {
     tokio::spawn(async move {
         tokio::time::sleep_until(show_at).await;
-        if !scene_active.load(Ordering::Acquire) {
-            debug!(playlist_id, "title suppressed — off program");
+        let playlist_id = gate.playlist_id;
+        if !gate.open() {
+            debug!(
+                playlist_id,
+                "title suppressed — off program, or another playlist owns the wall"
+            );
             return;
         }
         if title::push_title(&pool, obs_cmd.as_ref(), &resolume_tx, video_id).await {
@@ -161,22 +186,26 @@ fn spawn_show_timer(
 }
 
 /// The hide timer: at `hide_at`, hide the Resolume title and clear the OBS
-/// title text (`title::push_hide`) when the scene is still on program (read
-/// at fire time, like the show timer). A playlist off program, e.g. held
-/// through a #215 transition, must not take down the title of the playlist
-/// on program (design record 5863318980 item 1a, `tests_hold.rs`).
-#[cfg_attr(test, mutants::skip)] // spawn glue on the real clock; push_hide is unit-tested, the scene check by tests_hold.rs
+/// title text (`title::push_hide`) when its gate is open (read at fire time,
+/// like the show timer). A playlist off program, e.g. held through a #215
+/// transition, must not take down the title of the playlist on program
+/// (design record 5863318980 item 1a, `tests_hold.rs`), nor may one on air
+/// that does not own the wall (#221 🟡 2, `tests_wall_owner.rs`).
+#[cfg_attr(test, mutants::skip)] // spawn glue on the real clock; push_hide is unit-tested, the gate by tests_hold.rs + tests_wall_owner.rs
 fn spawn_hide_timer(
     obs_cmd: Option<mpsc::Sender<ObsCommand>>,
     resolume_tx: mpsc::Sender<ResolumeCommand>,
-    scene_active: Arc<AtomicBool>,
-    playlist_id: i64,
+    gate: WallGate,
     hide_at: Instant,
 ) -> AbortHandle {
     tokio::spawn(async move {
         tokio::time::sleep_until(hide_at).await;
-        if !scene_active.load(Ordering::Acquire) {
-            debug!(playlist_id, "title hide suppressed — off program");
+        let playlist_id = gate.playlist_id;
+        if !gate.open() {
+            debug!(
+                playlist_id,
+                "title hide suppressed — off program, or another playlist owns the wall"
+            );
             return;
         }
         title::push_hide(obs_cmd.as_ref(), &resolume_tx).await;

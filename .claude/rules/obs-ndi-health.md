@@ -1,7 +1,15 @@
 ---
 paths:
   - "crates/sp-server/src/obs/**"
+  - "crates/sp-server/src/obs_bridge.rs"
+  - "crates/sp-server/tests/common/mod.rs"
+  - "crates/sp-server/tests/scene_lookup_failure.rs"
+  - "crates/sp-server/tests/obs_snapshot_follow.rs"
   - "crates/sp-server/src/playback/ndi_health.rs"
+  - "crates/sp-server/src/playback/ndi_health_expect*.rs"
+  - "crates/sp-server/src/playback/ndi_health_log.rs"
+  - "crates/sp-server/src/playback/ndi_recovery_trigger.rs"
+  - "crates/sp-server/src/playback/ndi_health_tests*.rs"
   - "e2e/post-deploy.spec.ts"
   - "e2e/ndi-health-gate.ts"
   - "e2e/post-deploy-av-sync.spec.ts"
@@ -194,19 +202,63 @@ program legitimately reports `connections=0`. Only an **on-program** output with
 `active_playlist_ids`: do NOT read a bare `connections=0` on an off-program
 output as a fault.
 
+**#221 L4a: a receiver is expected only where cg OBS was told to show the
+playlist** (`playback/ndi_health_expect.rs::receiver_expected` = the
+reconciled label is `Playing` AND `legacy_cg.shown == Some(pid)`, read from
+the engine's program bus, `remote-control.md`). Once "on air" is SongPlayer's
+own program (L4b, done), a playlist on `SP-program` that cg OBS does not show has 0
+receivers normally, and the #173 ladder would churn cg OBS's inputs. So
+`handle_health_snapshot` drops ONLY the dark-wall reason while no receiver
+is expected (`ndi_health_expect::expected_reason`, pure + mutation-scored:
+the handler is `mutants::skip`), and passes `receiver_expected` (not the
+label) to `ladder_suppressed_after_restart` and
+`no_receiver_after_restart`. An underrun / "no frames in 10s" stays: those
+need a poll with a receiver that is bad on its own (`compute_degraded_reason`
+answers the dark-wall reason whenever connections == 0), and SP-program takes
+the output either way (review round 1 — the first cut blanked the whole
+reason on a wrong premise). The state label (the badge, the #154/#167 idle
+gates, `transport`) stays keyed on on-air. The heartbeat log line carries
+`receiver_expected`. Tests: a dark-wall test sets its playlist on program
+with `engine.set_on_program_for_test(pid)` (scene on program + cg told to
+show it); `set_cg_shown_for_test(shown)` alone records cg OBS's side
+(`ndi_health_tests_expect.rs`). Until B4 step 6, when the dark-wall check
+moves to SP-program's own receivers.
+
+**Where `handle_health_snapshot`'s parts live (#221 L4a review: it was over
+the ~300-line budget).** The connection-change / degraded / recovered lines
+and the once-per-minute heartbeat + genlock + loop-stats lines are
+`ndi_health::health_log::log_health_snapshot` (child module
+`ndi_health_log.rs`, logging only, reads the values from the snapshot it
+logs). The automatic ladder's rung is `PlaybackEngine::run_recovery_rung`
+in `ndi_recovery_trigger.rs`, next to the manual trigger; both queue through
+the one `queue_recovery_rung` (try_send, never blocking) and keep their own
+log lines. Add new per-snapshot logging to `health_log`, not to the handler.
+
 ## Adding recovery/health state without touching `playback/mod.rs`
 `handle_health_snapshot` runs on the engine but the engine struct lives in `playback/mod.rs` (often owned by a parallel lane). Compose new per-pipeline state into `NdiHealthRegistry` (the `Arc` the engine already holds) instead of adding a `PlaybackEngine` field — the engine reaches it via `self.ndi_health_registry.<method>()`. `handle_health_snapshot` is sync + `mutants::skip`; send `ObsCommand` with `try_send` (channel cap 64).
 
 ## The OBS client serves the #213 remote control (`ObsCommand::Remote`, `ObsEvent::Raw`)
-- `ObsCommand::Remote(remote_call::RemoteCall)` runs a forwarded request or
-  a scene → playlists lookup (`check_scene_items`) for the Companion facade,
-  on this ONE connection (`obs/remote_call.rs`). A call whose requester gave
-  up (`reply.is_closed()`) is skipped.
+- `ObsCommand::Remote(remote_call::RemoteCall)` runs a forwarded request
+  for the Companion facade, on this ONE connection (`obs/remote_call.rs`). A
+  call whose requester gave up (`reply.is_closed()`) is skipped. #221
+  deleted the facade's scene → playlists lookup (`ScenePlaylists`): the
+  facade decides from SongPlayer's own playlists, so the forwarder no
+  longer takes the `NdiSourceMap`. The facade's calls go through ONE
+  forwarder per connection, `remote_call::run_calls`, in queue order (never
+  a task per call), and a scene switch's answer is awaited before the next
+  call is written (cg OBS runs messages on a thread pool): see
+  `remote-control.md`.
 - `ObsCommand` is no longer `Clone`: it holds a oneshot sender.
 - The reader broadcasts EVERY op=5 event as `ObsEvent::Raw { event_type,
-  event_data }` on `obs_event_tx`. Any exhaustive `match` on `ObsEvent` needs
-  a `Raw` arm (the engine bridge ignores it). A test that waits for
-  `SceneChanged` must skip other events.
+  event_data }` on `obs_event_tx` — `Raw` is `ObsEvent`'s ONLY variant.
+  #221 L4b deleted the engine bridge, and with it the last reader of
+  `ObsEvent::SceneChanged` / `Connected` / `Disconnected`; release 0.69.0
+  (review 🔵 10) deleted those variants and their sends. The client's own
+  view of cg OBS (connected, the program scene, its playlists) is the
+  published `ObsSnapshot` (below): a test or a consumer that needs a scene
+  change waits for a snapshot that KNOWS the scene (connected, looked up),
+  never for an event (`tests/scene_detection.rs::program_snapshot`,
+  `tests/scene_lookup_failure.rs::known`). L6 deletes the scene detection.
 - The obs-websocket SERVER side (the facade) lives in `crate::remote`; see
   `remote-control.md`.
 
@@ -233,11 +285,141 @@ event-derived `ObsState::current_scene`
 (`scene_poll::scene_poll_detects_change(last, polled) -> Option<scene>`) it feeds
 the SAME `scene::apply_scene_change` path the event does — so the reader arm and
 the poll arm share one scene-apply body (keeps `obs/mod.rs` ≤1000). A duplicate
-same-scene emit is harmless: `(Playing, SceneOn)` is a no-op in `state.rs`. The
+same-scene apply publishes nothing (`ObsShared` publishes only a real change). The
 pure `scene_poll_detects_change` is Linux-unit-tested; `reconcile_program_scene`
 (I/O) is not (`obs/**` is excluded from the mutation gate). INFO log on a
 poll-caught switch: `obs: program scene changed without an event — reconciled by
 poll`.
+
+## A FAILED scene lookup is not an empty scene (#218)
+
+`scene::check_scene_items` returns `Result<HashSet<i64>, LookupError>`
+(`Closed` / `Timeout` / `Refused{code,comment}` / `NoSceneItems`; the pure
+`scene_items_from_reply`). Before #218 a `GetSceneItemList` timeout / close /
+answer without `sceneItems` returned an EMPTY set: `apply_scene_change` wrote
+it and broadcast `SceneChanged{ {} }`, the bridge scene-offed (paused) the
+playlist on program, the follow cut to "OBS manuál", and the poll (names
+only) never repaired it.
+
+- On a failure `apply_scene_change` stores the scene's NAME
+  (`current_scene`), KEEPS `active_playlist_ids`, sets
+  `ObsState::lookup_failed = Some(scene)` and broadcasts NOTHING. WARN on a
+  scene's first failure (`obs: looking up the scene's playlists failed —
+  keeping the previous ones; …`), debug on repeats; INFO `obs: the scene's
+  playlist lookup answered again` on the repair. `lookup_failed` is always
+  `None` or the current scene (the two are written together).
+- **Out-of-order answers (review rounds 1–3).** cg OBS may answer two
+  lookups out of order, the poll's relookups can overlap an event's lookup,
+  and an event can overtake a read. Every apply carries a ticket
+  (`ObsShared::scene_ticket`) taken BEFORE the scene it applies was read:
+  - an event's by the READER, the moment it reads the event off the wire
+    (`ReaderMessage::SceneChange { ticket }`) — round 3: taken at the main
+    loop's dequeue, an event cg OBS sent during the connect (queued while
+    steps 4–6 run) outranked the NEWER initial read and a stale
+    `SceneChanged` went out after the right one;
+  - the poll's and the initial read's BEFORE they send
+    `GetCurrentProgramScene` — round 2: taken after the read, a stale poll
+    answer outranked a newer event and cut back;
+  - the disconnect reset's (a fresh one), so an old connection's apply that
+    still writes after it is dropped.
+
+  It writes through `ObsShared::update_scene(ticket, …)`, which DROPS an
+  answer that arrives after a later ticket's answer was written (debug `a
+  newer scene lookup already answered`). The snapshot is published under
+  that write lock, so a consumer gets the scene changes in write order. A
+  dropped relookup costs one poll tick (the next one asks
+  again). The limit: tickets follow the order the READER sees things, not
+  the order cg OBS did them — an event cg OBS sent before answering a read
+  but that the reader reads after the read's ticket still outranks the read
+  (same or older state); that is stale only if cg OBS then drops the newer
+  event (#170), and the poll's mismatch path repairs it in ~4–6 s (plus one
+  lookup round-trip).
+  Tests: `a_poll_read_an_event_overtook_never_rolls_the_scene_back`
+  (the fake's `hold_program_scene` / `hold_lookups_of` + `release_held`: a
+  held answer must stay under the client's 2 s response timeout) and
+  `an_event_queued_during_the_connect_never_overrides_the_initial_read` (the
+  fake's `event_on_input_list`).
+- **Transition events never go through `reader_rx`:** the reader wakes the
+  transition reader's `Notify` itself (a burst merges into one read and
+  never blocks the reader, whose `reader_rx` is not drained during the
+  connect).
+- **The connection's helper tasks are reaped (review round 4):** every
+  helper goes through `spawn_helper(&mut spawned_tasks, …)`, which first
+  `try_join_next`s the finished ones (a `JoinSet` keeps a finished task until
+  joined, and the ~2 s poll alone spawns ~43 000 a day) and WARNs a helper
+  that panicked. Never call `spawned_tasks.spawn` directly.
+- The ~2 s poll repairs it: `scene_poll_verdict(last, lookup_failed, polled,
+  …)` → `PollVerdict::Relookup(scene)` when cg OBS still shows the stored
+  scene and its lookup failed — looked up again on that tick (no confirm
+  window: the event already came), every tick until it answers. cg OBS moved
+  on → the usual mismatch path (confirm window) for the new scene.
+- **Nested refusals are NOT failures.** obs-websocket 5 refuses
+  `GetSceneItemList` for a GROUP (602 "The specified source is not a scene.
+  (Is group)", `Request::AcquireScene` scene-only filter; groups need
+  `GetGroupSceneItemList`), and a nested SCENE item carries `inputKind: null`
+  (so it is not recursed at all). A refusal below the top level adds
+  nothing, as it always did; a timeout / close / reply without `sceneItems`
+  at ANY depth fails the whole lookup. Promoting the group refusal to a
+  failure would leave every scene holding a group "lookup failed" forever.
+- (#221: the facade's own lookup, `ScenePlaylists`, and its
+  `lookup_failed` reason are deleted; only the client's scene detection
+  looks scenes up.)
+- Test: `tests/scene_lookup_failure.rs` — the `FakeObsServer` knobs
+  `drop_scene_item_lists` (no answer, still logged in `requests` with
+  `"dropped": true`), `omit_scene_items` (success, no list) and
+  `refuse_scene_item_lists` (600), each for the next N lookups, plus `groups`
+  (a name listed there is refused with 602 like a real group). The first
+  published snapshot that knows the scene after the failure must already
+  carry the right set and come from a second lookup; a group on the program
+  scene must not fail it.
+- **Not mutation-scored:** `.cargo/mutants.toml` excludes all of
+  `sp-server/src/obs/`, so the pure `scene_items_from_reply`,
+  `scene_poll_verdict`, `obs_transition_from_reply`, `is_transition_event`
+  and the `depth > 0` refusal guard are guarded ONLY by their unit and
+  integration tests — keep those exact (both directions of each branch).
+
+## The OBS client PUBLISHES its state — `ObsSnapshot` on a `watch` (#219)
+
+ONE view of cg OBS: the OBS client's. `obs/snapshot.rs`: `ObsSnapshot`
+(`connected`, `current_scene`, `active_playlist_ids`, `lookup_failed`,
+`transition`) is the program part of `ObsState`, published on a
+`tokio::sync::watch` (`ObsClient::snapshots()`); `lib.rs` step 7
+(`obs_bridge::start_obs`) hands it to `start_program` → the #215 follow
+(`program-transition.md`). The contract:
+
+- every write of those fields goes through `ObsShared::update(|s| …)` (a
+  scene apply: `update_scene(ticket, …)`, above), which changes `ObsState`
+  and publishes under the ONE write lock (a snapshot never shows a state the
+  lock did not hold; snapshots come in write order) and only on a real change
+  (`send_if_modified`: streaming / recording are not published and wake
+  nobody). Never write them through `state().write()` directly, or a
+  consumer misses the change;
+- `lookup_failed: Some(scene)` → `active_playlist_ids` belong to an EARLIER
+  scene: a consumer must not act on them (the follow ignores the snapshot);
+- `transition` = cg OBS's current scene transition, `None` while unknown;
+- a disconnect resets everything (`ObsState::reset_disconnected`, written
+  through `update_scene` with a fresh ticket, so it is published) — pinned by
+  `a_disconnect_forgets_everything_of_cg_obs` (the fields) and
+  `a_disconnect_is_published_and_the_reconnect_publishes_the_program_again`
+  (the fake's `close_client`); the channel starts at the default
+  (disconnected) snapshot; without OBS configured `start_obs` hands out a
+  CLOSED channel.
+- Functions taking the crate-private `ObsShared` (`apply_scene_change`,
+  `reconcile_program_scene`) are `pub(crate)` — a `pub fn` with it in its
+  signature trips `private_interfaces` under `-D warnings`.
+
+**cg OBS's transition is read by the client** (`obs/transition.rs`,
+`ObsTransition` lives here, re-exported by `playback::program_transition`):
+one reader task per connection (in the connection's `JoinSet`), spawned
+right after the reader task (step 4b, before the NDI map rebuild): it reads
+`GetCurrentSceneTransition` at once, then each time the READER wakes it (its
+`Notify`, on `CurrentSceneTransitionChanged` /
+`CurrentSceneTransitionDurationChanged` — the identify's Transitions (16)
+subscription). A `Notify` wake keeps a change that arrives DURING a read, so
+reads never overlap and the newest answer wins. No answer → `transition =
+None` and a retry every `TRANSITION_RETRY` (2 s) until answered (first
+failure WARN, retries debug). Test: `tests/obs_snapshot_follow.rs` with the
+`FakeObsServer`'s `scene_transition` knob (`None` answers `{}` = no kind).
 
 ## Reading the health snapshot's `state` — `Playing` already means "on program" (#154)
 `handle_health_snapshot` RECONCILES the pipeline-reported state before storing it: a pipeline that is `Playing` but whose scene is NOT on OBS program (`scene_active == false`) is stored as `Paused`, not `Playing`. So a consumer that reads `NdiHealthRegistry::snapshots()` and checks `state == PlaybackStateLabel::Playing` is already getting "an output is playing AND OBS is showing it" — you do NOT need to also cross-reference `active_playlist_ids`. The #154 lyrics idle gate relies on exactly this (`lyrics/idle_gate.rs::any_playing`): "any snapshot Playing" = "the wall is showing an output" = defer heavy GPU work. Read the registry in-process (the engine already holds the `Arc`); never HTTP-loop `/api/v1/ndi/health` back to your own server.
@@ -260,8 +442,8 @@ or a dead sender → `connections=0` on the on-program output = dark wall, and t
   playlist's sender one at a time in `playlist.id` order, waiting for a per-pipeline
   ready one-shot (fired by the pipeline thread right after `send_create`) before the
   next — so `send_create` runs in a fixed order every restart, not OS-scheduler order.
-  Runs before the engine command loop drains scene events, so no lazy scene-triggered
-  creation preempts it.
+  Runs before `start_program` and the engine loop; a pipeline missing past the
+  startup budget is created on the playback authority's ON (#221 L4b).
 - Box-verified 2026-09-20: after a deploy restart, on-program SP-slow
   `connections=2`, every output 2–4, no dark wall.
 - **No dark-wall ladder for an output with no OBS input** (`effective_dark_reason`
@@ -312,7 +494,8 @@ reconnect VISIBLE instead:
   baseline; the live counts keep being persisted for the NEXT restart.
 - **Decision (pure, in `sp_core::health::no_receiver_after_restart`,
   exact-boundary + mutation tested):** 30 s after the senders are ready
-  (`mark_senders_ready` → `elapsed_since_ready`), an output that is on program OR
+  (`mark_senders_ready` → `elapsed_since_ready`), an output that is on program
+  (#221 L4a: a receiver expected, `ndi_health_expect`) OR
   had `≥ 1` receiver before the restart, has NOT reconnected since (a one-time
   latch — once it reaches `≥ 1` it is never flagged again this process, so a
   later legitimate off-program drop is not a restart failure), and still has
@@ -365,7 +548,22 @@ and the recording actually get.
 
 - **Where it runs:** `e2e/post-deploy-av-sync.spec.ts`, inside the E2E job's
   "Feature-level Playwright (post-deploy spec)" step (`post-deploy.config.ts`
-  matches `post-deploy*.spec.ts`). It uses the shared `ObsDriver` (obs-websocket).
+  matches `post-deploy*.spec.ts`). It uses the shared `ObsDriver` (obs-websocket)
+  twice (#221 L3): the SCENE driver on SongPlayer's facade (`FACADE_WS_URL`,
+  :4456 — Companion's studio-mode path, SongPlayer's own program feedback and
+  transition events), and a second one on cg OBS (`OBS_WS_URL`, :4455) ONLY
+  for `GetProfileParameter` / `StartRecord` / `StopRecord` /
+  `GetRecordStatus` (the recording is cg OBS's program).
+  **`obs-driver.ts` keeps the BARE `obs-websocket-js` import (#221 L2b).**
+  In Node it resolves (package `exports` → `import` / `require`) to the
+  MSGPACK build, which offers only `obswebsocket.msgpack` — exactly what
+  Companion (a Node module) speaks. The facade speaks msgpack since L2b and
+  cg OBS always did, so both drivers use it. L3 briefly imported
+  `obs-websocket-js/json` because the facade was then JSON-only (it answered
+  msgpack with HTTP 400 and killed every post-deploy `beforeAll`, run
+  36497336926). That workaround hid the same 400 from the E2E until the
+  Companion cutover hit it (#221 comment 5881650057), so never reintroduce
+  it: `e2e/obs-driver-protocol.spec.ts` pins the msgpack offer.
   It parks the program on the shared baseline scene (`e2e/obs-baseline-scene.ts`:
   sp-slow, never sp-warmup/sp-fast). It proves the output is PLAYING with
   `/api/v1/ndi/health`: `state=Playing` AND `frames_submitted_last_5s > 0`.
@@ -449,10 +647,21 @@ and the recording actually get.
   `*_{youtube_id}_normalized[_gf]_{video.mp4|audio.flac}`
   (`resolveSidecars`). Exactly one complete pair must match, otherwise the gate
   throws.
-- **Analysis:** `scripts/av_sync_check.py` runs under the lyrics venv Python
-  (`SP_AVSYNC_PYTHON`) with the bundled ffmpeg (`SP_FFMPEG`). Only numpy is
-  needed. The box has no ffprobe, so stream start times and frame sizes come
-  from ffmpeg's own `showinfo`/`ashowinfo` pts.
+- **Analysis:** `scripts/av_sync_check.py` runs under the gate's OWN venv
+  (`SP_AVSYNC_PYTHON` = `C:\ProgramData\SongPlayer\e2e\avsync_venv\Scripts\python.exe`)
+  with the bundled ffmpeg (`SP_FFMPEG`). Only numpy is needed. #221: never
+  the lyrics venv — SongPlayer may reinstall its packages at startup, and a
+  numpy replaced mid-analysis failed CI run 36475215084 (`No module named
+  'numpy.fft'`). The E2E step "Prepare the A/V gate's own Python (#221)"
+  creates the venv once and verifies it every run (numpy pinned to the
+  Eval Checks version, 2.1.1; `av_sync_check.py --help` must start and
+  `import numpy, numpy.fft` must succeed: numpy 2 loads `numpy.fft` lazily
+  and the scripts use it only inside functions, so `--help` alone never
+  imports it; `C:\Program Files\Python312` is required, no PATH fallback). A new
+  import in `av_sync_check.py` / `av_sync_drift.py` / `av_sync_warp.py`
+  must be added to that step AND to the Eval Checks pip line. The box has
+  no ffprobe, so stream start times and frame sizes come from ffmpeg's own
+  `showinfo`/`ashowinfo` pts.
   - **audio:** 8 kHz mono FFT cross-correlation, normalized by local energy,
     searched over the whole song. corr must be ≥ 0.9.
   - **video:** 64-wide gray frames, cropped to the content box computed from

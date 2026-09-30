@@ -133,7 +133,8 @@ const DUB_ROW_SELECT: &str = "SELECT id, playlist_id, title, song, dub_status, \
      dub_voice_ref_path FROM videos";
 
 /// Set (or clear) the dub request on a video. Requesting flips `dub_requested`
-/// on, moves `dub_status` to `'queued'`, stamps `dub_requested_at`, and raises
+/// on, moves `dub_status` to `'queued'`, clears an earlier `dub_error` (the
+/// Dabing tooltip shows it on any chain, #136), stamps `dub_requested_at`, and raises
 /// the stems manual-priority bucket (`stem_manual_priority = 1`) so the ambient
 /// stem is separated first. It does NOT raise `lyrics_manual_priority` (#182): a
 /// dubbed talk's EN/SK subtitles come from the Live-session transcript, not the
@@ -148,7 +149,7 @@ pub async fn set_dub_requested(
     let res = if requested {
         sqlx::query(
             "UPDATE videos \
-             SET dub_requested = 1, dub_status = 'queued', \
+             SET dub_requested = 1, dub_status = 'queued', dub_error = NULL, \
                  dub_requested_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
                  stem_manual_priority = 1 \
              WHERE id = ?",

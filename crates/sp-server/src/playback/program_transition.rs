@@ -166,16 +166,9 @@ impl TransitionMode {
     }
 }
 
-/// cg OBS's current scene transition, as `GetCurrentSceneTransition` reports it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ObsTransition {
-    /// The transition's name in cg OBS (e.g. `Fade`).
-    pub name: String,
-    /// Its kind (`fade_transition`, `cut_transition`, `swipe_transition`, …).
-    pub kind: String,
-    /// Its duration; `None` for a fixed-duration transition.
-    pub duration_ms: Option<u32>,
-}
+/// cg OBS's current scene transition — read and kept by the OBS client
+/// (`obs::transition`, #219), re-exported here where the spec uses it.
+pub use crate::obs::ObsTransition;
 
 /// cg OBS's transition as a spec: `cut_transition` → Cut; every other kind
 /// (fade, swipe, stinger, …) → a Fade of its duration, or of `fallback_ms`

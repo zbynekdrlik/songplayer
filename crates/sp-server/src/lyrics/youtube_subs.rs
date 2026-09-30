@@ -120,51 +120,35 @@ fn find_json3_file(dir: &Path, youtube_id: &str) -> Result<Option<std::path::Pat
 
 /// Parse YouTube json3 subtitle content into a `LyricsTrack`.
 ///
-/// Each event becomes one line. Segments within an event are concatenated.
-/// Newlines in text are replaced with spaces. Empty lines are skipped.
-/// Returns `None` if there are no events or all lines are empty.
-///
-/// The `!e.is_empty()` match guard is skipped from mutation testing: replacing
-/// it with `true` produces an equivalent mutant — an empty events vec still
-/// yields `None` via the `lines.is_empty()` check below, so no test can
-/// distinguish the two branches.
-#[cfg_attr(test, mutants::skip)]
+/// A manual caption event shows up to two SUNG lines at once, separated by
+/// `\n`. Each sung line becomes its own text line (#144): the only consumers
+/// (`gather.rs`'s `yt_subs` candidate, which mtl force-aligns, and the
+/// source probe's line count) take the text, never the caption's timing, so
+/// the aligner times every sung line from the audio. Every line of an event
+/// keeps the event's own span — the caption's timing is never divided by
+/// hand. Segments within an event are concatenated first; lines are trimmed
+/// and blank ones skipped. Returns `None` if no event holds a non-blank line.
 pub fn parse_json3(content: &str) -> Result<Option<LyricsTrack>> {
     let root: Json3Root = serde_json::from_str(content)?;
 
-    let events = match root.events {
-        Some(e) if !e.is_empty() => e,
-        _ => return Ok(None),
-    };
-
     let mut lines: Vec<LyricsLine> = Vec::new();
 
-    for event in events {
-        let segs = match event.segs {
-            Some(s) => s,
-            None => continue,
-        };
-
-        // Concatenate all segment text
-        let text: String = segs.iter().map(|s| s.utf8.as_str()).collect();
-        // Replace newlines with spaces and trim
-        let text = text.replace('\n', " ");
-        let text = text.trim().to_string();
-
-        if text.is_empty() {
+    for event in root.events.unwrap_or_default() {
+        let Some(segs) = event.segs else {
             continue;
-        }
-
+        };
+        let text: String = segs.iter().map(|s| s.utf8.as_str()).collect();
         let start_ms = event.t_start_ms;
         let end_ms = start_ms + event.d_duration_ms;
-
-        lines.push(LyricsLine {
-            start_ms,
-            end_ms,
-            en: text,
-            sk: None,
-            words: None,
-        });
+        for sung in text.split('\n').map(str::trim).filter(|l| !l.is_empty()) {
+            lines.push(LyricsLine {
+                start_ms,
+                end_ms,
+                en: sung.to_string(),
+                sk: None,
+                words: None,
+            });
+        }
     }
 
     if lines.is_empty() {
@@ -254,21 +238,73 @@ mod tests {
         assert!(result.is_none());
     }
 
+    /// #144: a manual caption event shows up to two SUNG lines at once,
+    /// split by `\n`. They stay separate text lines, so the aligner (mtl)
+    /// times each one from the audio; joined, they made one ~65-char
+    /// double line (#217 had to split it on the wall). This replaces the
+    /// old `parse_json3_replaces_newlines_in_text`, which pinned the join.
+    /// Both lines keep the event's own span: the caption's timing is never
+    /// divided by hand.
     #[test]
-    fn parse_json3_replaces_newlines_in_text() {
+    fn parse_json3_splits_a_caption_into_its_sung_lines() {
         let content = r#"{
             "events": [
                 {
-                    "tStartMs": 0,
-                    "dDurationMs": 1000,
-                    "segs": [{"utf8": "Line one\nLine two"}]
+                    "tStartMs": 52280,
+                    "dDurationMs": 7802,
+                    "segs": [{"utf8": "Lord, I thank You for Your goodness\nAnd for all the things You do"}]
                 }
             ]
         }"#;
 
         let track = parse_json3(content).unwrap().expect("should parse");
-        assert_eq!(track.lines.len(), 1);
-        assert_eq!(track.lines[0].en, "Line one Line two");
+        let got: Vec<(u64, u64, &str)> = track
+            .lines
+            .iter()
+            .map(|l| (l.start_ms, l.end_ms, l.en.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (52_280, 60_082, "Lord, I thank You for Your goodness"),
+                (52_280, 60_082, "And for all the things You do"),
+            ]
+        );
+    }
+
+    /// The `\n` may sit in its own segment or be padded; segments are
+    /// joined first, each line is trimmed, blank lines are dropped.
+    #[test]
+    fn parse_json3_splits_across_segments_and_drops_blank_lines() {
+        let content = r#"{
+            "events": [
+                {
+                    "tStartMs": 1000,
+                    "dDurationMs": 3000,
+                    "segs": [{"utf8": "Line one"}, {"utf8": "\n"}, {"utf8": "  \n Line two "}]
+                },
+                {
+                    "tStartMs": 6000,
+                    "dDurationMs": 2000,
+                    "segs": [{"utf8": "Line three"}]
+                }
+            ]
+        }"#;
+
+        let track = parse_json3(content).unwrap().expect("should parse");
+        let got: Vec<(u64, u64, &str)> = track
+            .lines
+            .iter()
+            .map(|l| (l.start_ms, l.end_ms, l.en.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (1_000, 4_000, "Line one"),
+                (1_000, 4_000, "Line two"),
+                (6_000, 8_000, "Line three"),
+            ]
+        );
     }
 
     #[test]

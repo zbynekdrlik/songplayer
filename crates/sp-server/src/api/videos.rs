@@ -3,8 +3,8 @@
 //! Split out of `routes.rs` (1000-line cap) so the videos payload can carry the
 //! additive per-song `stems_state` marker the dashboard's song list renders. The
 //! base rows come from `models::get_videos_for_playlist`; the stems state is
-//! merged from `models_stems::stems_state_map` (read from the same DB the stem
-//! worker writes — never re-derived).
+//! merged from `models_stems::stems_state_map` (the stem worker's status in the
+//! DB, and `ready` only when the stem files a consumer opens exist, #136).
 
 use axum::Json;
 use axum::extract::{Path, State};

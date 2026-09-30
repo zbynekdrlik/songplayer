@@ -36,7 +36,13 @@ exclude_re = [
   'sp-server/src/engine_dispatch\.rs',    # orchestration glue (the lib.rs match, relocated)
   'sp-server/src/obs/',                   # requires live OBS WebSocket
   'sp-server/src/downloader/',            # shells out to yt-dlp
-  'sp-server/src/reprocess/',             # requires live Gemini API
+  # reprocess/mod.rs is NOT excluded any more (#136): its provider calls go
+  #   through the metadata chain, which the tests drive with mock providers and
+  #   wiremock (reprocess/tests_chain.rs). Only the timer loop stays out:
+  # ReprocessWorker::run: 5 s start delay + a 30-min sleep loop around
+  #   process_all (the decisions, unit-tested); `run -> ()` passes the one
+  #   shutdown test, which is all a terminating test can observe of it.
+  'reprocess/mod\.rs:[0-9]+:[0-9]+:.*ReprocessWorker::run',
   'sp-server/src/api/websocket',          # WS upgrade flow, integration-tested
   'sp-server/src/playlist/',              # shells out to yt-dlp
   # dabing/worker.rs::process_next: the dub worker's per-tick orchestrator —

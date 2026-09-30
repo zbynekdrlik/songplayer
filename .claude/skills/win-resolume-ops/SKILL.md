@@ -163,6 +163,18 @@ Exception: when user has explicitly stated win-resolume is dedicated for dev
 (no event running), restart-class actions can proceed without per-call approval.
 Force-kill and machine reboot still always require approval.
 
+## Resolume Arena — quit, crash and relaunch (2026-09-27/28)
+
+- **Crash cause (7.27.1).** Arena 7.27.1 aborted about daily (`ucrtbase` 0xc0000409, fast-fail 7): an uncaught C++ exception in `WireLib.dll`, with an identical stack in 5 minidumps. It was upgraded to **7.28.0 rev 24303** on 27.9. The backup is `C:\Users\Resolume\ArenaBackup-20260927-pre-7.28.0` (#217).
+- **Graceful quit.** Post `WM_CLOSE` to the main window titled `Resolume Arena - <composition>` (not the `Display` output windows), then click **Save & Quit** in the "Quit!" dialog.
+  - 7.27.1 then crashed in teardown (BugSplat "Crash Report": close it with `WM_CLOSE`, never send).
+  - 7.28.0 can hang in "Clean up Compositon". Once `Bridge.avc` is saved, kill it and run `SP-ArenaLaunch`.
+- **After a relaunch:**
+  - Arena's REST answers before its composition loads, and every param gets a new id. SongPlayer handles this (see `.claude/rules/resolume-driver.md`).
+  - An Arena launch triggers Process Lasso's gaming mode, which once flipped the power plan to Balanced. camera-box fixed prolasso.ini, but tell camera-box the relaunch time.
+- **DMX/ArtNet** is bound to `Localhost`. The old `ethernet_32775` adapter does not exist and made Arena retry every 1.5 s.
+- **Screenshots.** MCP `Snapshot` shows the black output monitors. For the UI, use a PowerShell `CopyFromScreen` of the region (0,0 is the 3840×2160 UI screen), served via a fresh temp dir + `python -m http.server --bind 10.77.9.201`.
+
 ## Resolume Arena — overnight hang pattern
 
 Resolume Arena on win-resolume frequently becomes unresponsive after a night of
@@ -380,3 +392,13 @@ fetch-by-commit).
   grep for the absence of the reopen message and the presence of the feature's
   own `info!` lines. curl to the box HTTP API (`http://10.77.9.201:8920/...`) is
   the sanctioned read path (the post-deploy suite uses the same), not ssh.
+
+## Arena REST: switching a clip's NDI source (#221, 29.9.2026)
+
+The wall's clips were repointed from `RESOLUME-SNV (cg-obs)` to `RESOLUME-SNV (SP-program)` over REST (#221 comment 5890254194). Three traps cost a dark wall for 16 s and a zoomed picture:
+
+- **Percent-encode the source URI.** `POST /api/v1/composition/clips/by-id/<id>/open` takes a text/plain body `source:///video/RESOLUME-SNV%20%28SP-program%29`. The unencoded form (with a space and parentheses) answers HTTP 200 and changes NOTHING. For a batch, use `POST /api/v1/composition/clips/open` with `[{"target": "/composition/clips/by-id/<id>", "source": "<uri>"}]` (HTTP 204). `GET /api/v1/sources` lists the idstrings. Names, effects and params are kept.
+- **Opening a source into a CONNECTED clip DISCONNECTS it** — the layer goes dark on the wall. Record which clips are connected first, then `POST /api/v1/composition/layers/<l>/clips/<c>/connect` for each of them straight after the open.
+- **`resize: Original` draws the source in native pixels.** A new source with a different resolution (SP-program 2560×1440 vs cg-obs 1920×1080) zooms the picture. Put the clip's pre-switch size back: `PUT /api/v1/composition/clips/by-id/<id>` `{"video":{"width":{"value":1920},"height":{"value":1080}}}`.
+
+Save the composition first (`GET /api/v1/composition` > file) so the rollback is exact.

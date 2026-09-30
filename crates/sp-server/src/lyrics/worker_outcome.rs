@@ -10,7 +10,7 @@
 //! row with an exponential backoff (mirroring the downloader, #140) so the
 //! selector skips it until due.
 
-use tracing::warn;
+use tracing::{debug, warn};
 
 use super::worker::LyricsWorker;
 
@@ -32,7 +32,8 @@ pub(crate) const STEMS_WAIT_RECHECK: std::time::Duration = std::time::Duration::
 /// The result of `LyricsWorker::process_song` for a single row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SongOutcome {
-    /// Terminal this pass — persisted, quarantined, or marked no_source.
+    /// Terminal this pass — persisted, quarantined, or marked no_source (or,
+    /// for a song the wall serves, its failed attempt recorded, #144).
     /// Nothing more to do for this row now.
     Done,
     /// Could not be processed now; retry after a durable backoff. The `&str`
@@ -68,12 +69,7 @@ impl LyricsWorker {
     /// re-picking this unprocessable row every 5 s tick.
     #[cfg_attr(test, mutants::skip)]
     pub(crate) async fn defer_song(&self, video_id: i64, youtube_id: &str, reason: &'static str) {
-        let prior: i64 = sqlx::query_scalar("SELECT lyrics_attempts FROM videos WHERE id = ?")
-            .bind(video_id)
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or(0);
-        let backoff = crate::downloader::retry_backoff(prior as u32 + 1);
+        let backoff = self.next_backoff(video_id).await;
         let attempts = crate::db::models::record_lyrics_deferral(&self.pool, video_id, backoff)
             .await
             .unwrap_or(0);
@@ -98,6 +94,108 @@ impl LyricsWorker {
             crate::db::models::record_lyrics_wait(&self.pool, video_id, STEMS_WAIT_RECHECK).await
         {
             warn!("worker: record_lyrics_wait failed for {video_id}: {e}");
+        }
+    }
+
+    /// The backoff of the row's next attempt: `downloader::retry_backoff` of
+    /// its current `lyrics_attempts` + 1 (`5 min · 2^(n-1)`, cap 24 h).
+    async fn next_backoff(&self, video_id: i64) -> std::time::Duration {
+        let prior: i64 = sqlx::query_scalar("SELECT lyrics_attempts FROM videos WHERE id = ?")
+            .bind(video_id)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+        crate::downloader::retry_backoff(prior as u32 + 1)
+    }
+
+    /// #144: whether the row serves lyrics on the wall now: `has_lyrics = 1`
+    /// AND its `<yt>_lyrics.json` exists (what `playback/lyrics_loader.rs`
+    /// loads). A row that cannot be read counts as not served.
+    async fn serves_lyrics(&self, video_id: i64, youtube_id: &str) -> bool {
+        let has_lyrics: Option<i64> =
+            sqlx::query_scalar("SELECT COALESCE(has_lyrics, 0) FROM videos WHERE id = ?")
+                .bind(video_id)
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
+        let file = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
+        has_lyrics == Some(1) && tokio::fs::try_exists(&file).await.unwrap_or(false)
+    }
+
+    /// #144 (ROZHODNUTÉ 5905945274, refined by 5908227646): a failed or empty
+    /// re-run never darkens a song the wall already serves. When the row
+    /// serves lyrics ([`Self::serves_lyrics`]), record ONLY the attempt:
+    /// `lyrics_attempts` and the `lyrics_next_attempt_at` backoff (the manual
+    /// bucket waits it out, so a queued song does not loop). It stays in the
+    /// manual queue until its `SERVED_RERUN_MAX_ATTEMPTS`th failed attempt
+    /// clears `lyrics_manual_priority`, WARNed with the song and the reason.
+    /// `has_lyrics`, `lyrics_source` and the file stay until a successful run
+    /// replaces them. Returns whether it did; `false` means the caller takes
+    /// the row's terminal state.
+    async fn keep_served_lyrics(&self, video_id: i64, youtube_id: &str, reason: &str) -> bool {
+        if !self.serves_lyrics(video_id, youtube_id).await {
+            return false;
+        }
+        let backoff = self.next_backoff(video_id).await;
+        match crate::db::models::record_served_lyrics_failure(&self.pool, video_id, backoff).await {
+            Ok(failure) => log_served_failure(video_id, youtube_id, reason, failure, backoff),
+            Err(e) => warn!(
+                youtube_id = %youtube_id,
+                reason,
+                %e,
+                "worker: re-run failed — the served lyrics are kept, recording the attempt failed"
+            ),
+        }
+        true
+    }
+
+    /// The `Err` exit of `process_next`: `process_song` failed for this row
+    /// (e.g. a failed Claude cleanup in `gather.rs`). A row the wall serves
+    /// keeps its lyrics and records the attempt ([`Self::keep_served_lyrics`]);
+    /// any other row is marked `no_source` at the current pipeline version.
+    /// Clears the in-flight marker either way.
+    pub(crate) async fn fail_song(&self, video_id: i64, youtube_id: &str, error: &anyhow::Error) {
+        debug!("worker: processing failed for {youtube_id}: {error}");
+        let reason = format!("process_error: {error}");
+        if !self.keep_served_lyrics(video_id, youtube_id, &reason).await {
+            let _ = crate::db::models::mark_video_lyrics(
+                &self.pool,
+                video_id,
+                false,
+                Some("no_source"),
+                crate::lyrics::LYRICS_PIPELINE_VERSION,
+            )
+            .await;
+        }
+        self.clear_processing().await;
+    }
+
+    /// The g35t base tier's empty-transcript exit. A row the wall serves keeps
+    /// its lyrics and records the attempt ([`Self::keep_served_lyrics`]); any
+    /// other row is quarantined as `asr_gap` (`quarantine_video_lyrics`, which
+    /// also removes its `<yt>_lyrics.json`).
+    pub(crate) async fn quarantine_empty_transcript(&self, video_id: i64, youtube_id: &str) {
+        if self
+            .keep_served_lyrics(video_id, youtube_id, "empty_transcript")
+            .await
+        {
+            return;
+        }
+        warn!(
+            youtube_id = %youtube_id,
+            "g35t base tier: empty transcript — quarantining as asr_gap"
+        );
+        if let Err(e) = crate::db::models::quarantine_video_lyrics(
+            &self.pool,
+            video_id,
+            &self.cache_dir,
+            "empty_transcript",
+            crate::lyrics::LYRICS_PIPELINE_VERSION,
+        )
+        .await
+        {
+            warn!(youtube_id = %youtube_id, %e, "g35t base tier: quarantine failed");
         }
     }
 
@@ -127,3 +225,49 @@ impl LyricsWorker {
         Ok(SongOutcome::Done)
     }
 }
+
+/// The WARN of a served song's failed re-run (`keep_served_lyrics`), by
+/// what it recorded: the song left the manual queue (its last allowed
+/// attempt, named with its reason), or it stays queued for its next attempt,
+/// or — a row that was not in the manual queue (the stale / full-mix
+/// buckets) — only the attempt and its backoff. Logging only.
+#[cfg_attr(test, mutants::skip)]
+fn log_served_failure(
+    video_id: i64,
+    youtube_id: &str,
+    reason: &str,
+    failure: crate::db::models::ServedFailure,
+    backoff: std::time::Duration,
+) {
+    let attempts = failure.attempts;
+    let backoff_secs = backoff.as_secs();
+    if failure.left_manual_queue {
+        warn!(
+            video_id,
+            youtube_id = %youtube_id,
+            reason,
+            attempts,
+            "worker: re-run failed on its last allowed attempt — the served lyrics are kept, and the song leaves the manual queue"
+        );
+    } else if failure.was_manual {
+        warn!(
+            youtube_id = %youtube_id,
+            reason,
+            attempts,
+            backoff_secs,
+            "worker: re-run failed — the served lyrics are kept, and the song stays queued for its next attempt after the backoff"
+        );
+    } else {
+        warn!(
+            youtube_id = %youtube_id,
+            reason,
+            attempts,
+            backoff_secs,
+            "worker: re-run failed — the served lyrics are kept, only the attempt is recorded"
+        );
+    }
+}
+
+#[cfg(test)]
+#[path = "worker_outcome_tests.rs"]
+mod tests;

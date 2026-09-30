@@ -3,6 +3,7 @@
 
 #![allow(unused_imports)]
 
+use super::fixtures::give_real_stems;
 use super::*;
 use crate::db;
 use std::time::Duration;
@@ -373,9 +374,7 @@ async fn video_stems_info_resolves_title_and_state() {
     let pool = setup_pool().await;
     let ready = insert_normalized(&pool, "vsi_ready").await;
     let queued = insert_normalized(&pool, "vsi_q").await;
-    mark_stems_done(&pool, ready, "/c/r_v.flac", "/c/r_i.flac")
-        .await
-        .unwrap();
+    let _stems = give_real_stems(&pool, ready).await;
 
     let info = video_stems_info(&pool, ready, false)
         .await
@@ -412,9 +411,7 @@ async fn stems_state_map_marks_each_row() {
     let ready = insert_normalized(&pool, "m_ready").await;
     let queued = insert_normalized(&pool, "m_q").await;
     let unsup = insert_normalized(&pool, "m_u").await;
-    mark_stems_done(&pool, ready, "/c/mr_v.flac", "/c/mr_i.flac")
-        .await
-        .unwrap();
+    let _stems = give_real_stems(&pool, ready).await;
     mark_stems_unsupported(&pool, unsup).await.unwrap();
 
     let map = stems_state_map(&pool, 1, Some(queued)).await.unwrap();
@@ -426,6 +423,92 @@ async fn stems_state_map_marks_each_row() {
     // No in-flight id → the pending row is plain queued.
     let map = stems_state_map(&pool, 1, None).await.unwrap();
     assert_eq!(map.get(&queued).map(String::as_str), Some("queued"));
+}
+
+/// Point a row at `audio` (written to disk) with `stem_status = 'done'` and the
+/// given recorded stem paths.
+async fn set_done(
+    pool: &SqlitePool,
+    id: i64,
+    audio: &std::path::Path,
+    recorded: (Option<&std::path::Path>, Option<&std::path::Path>),
+) {
+    std::fs::write(audio, b"a").unwrap();
+    sqlx::query(
+        "UPDATE videos SET audio_file_path = ?, stem_status = 'done', \
+                vocals_file_path = ?, instrumental_file_path = ? WHERE id = ?",
+    )
+    .bind(audio.to_string_lossy().as_ref())
+    .bind(recorded.0.map(|p| p.to_string_lossy().into_owned()))
+    .bind(recorded.1.map(|p| p.to_string_lossy().into_owned()))
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// #136 reopen: `ready` is decided by the two files a consumer opens: the
+/// pair `stems::stem_paths(audio_file_path)` derives, which the stem mixer and
+/// the lyrics isolation read. It is never decided by the recorded
+/// `vocals_file_path` columns. On the box the metadata repair renamed ~99
+/// songs' audio and left their stems (and those columns) under the old `_gf`
+/// name, and every one of the 344 songs read `ready`.
+#[tokio::test]
+async fn stems_state_reads_the_files_the_consumers_open() {
+    let pool = setup_pool().await;
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+
+    // A: its recorded stems exist, but under the OLD name; the renamed audio
+    // derives another pair, which is missing.
+    let left = insert_normalized(&pool, "left").await;
+    let (old_v, old_i) = crate::stems::stem_paths(&d.join("Old_A_left_normalized_gf_audio.flac"));
+    std::fs::write(&old_v, b"v").unwrap();
+    std::fs::write(&old_i, b"i").unwrap();
+    let left_audio = d.join("Song_A_left_normalized_audio.flac");
+    set_done(
+        &pool,
+        left,
+        &left_audio,
+        (Some(old_v.as_path()), Some(old_i.as_path())),
+    )
+    .await;
+
+    // B: no recorded path, yet both stems sit where its audio derives them.
+    let placed = insert_normalized(&pool, "placed").await;
+    let placed_audio = d.join("Song_A_placed_normalized_audio.flac");
+    set_done(&pool, placed, &placed_audio, (None, None)).await;
+    let (v, i) = crate::stems::stem_paths(&placed_audio);
+    std::fs::write(&v, b"v").unwrap();
+    std::fs::write(&i, b"i").unwrap();
+
+    // C: both paths recorded, but only the vocals exist where the audio derives them.
+    let half = insert_normalized(&pool, "half").await;
+    let half_audio = d.join("Song_A_half_normalized_audio.flac");
+    let (hv, hi) = crate::stems::stem_paths(&half_audio);
+    set_done(
+        &pool,
+        half,
+        &half_audio,
+        (Some(hv.as_path()), Some(hi.as_path())),
+    )
+    .await;
+    std::fs::write(&hv, b"v").unwrap();
+
+    let map = stems_state_map(&pool, 1, None).await.unwrap();
+    for (id, want) in [
+        (left, StemsState::Queued),
+        (placed, StemsState::Ready),
+        (half, StemsState::Queued),
+    ] {
+        let info = video_stems_info(&pool, id, false).await.unwrap().unwrap();
+        assert_eq!(info.state, want, "video_stems_info of row {id}");
+        assert_eq!(
+            map.get(&id).map(String::as_str),
+            Some(want.as_str()),
+            "stems_state_map of row {id}"
+        );
+    }
 }
 
 #[tokio::test]

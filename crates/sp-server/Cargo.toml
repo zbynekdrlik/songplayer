@@ -23,6 +23,12 @@ serde = { workspace = true }
 # #184 round G: `raw_value` lets `api/preview.rs::pong_frame` echo the ping number
 # byte-for-byte (default float parsing is best-effort, not round-trip exact).
 serde_json = { workspace = true, features = ["raw_value"] }
+# #221 L2b: the remote control speaks obs-websocket's `obswebsocket.msgpack`
+# too — Companion's obs-studio module (Node) offers only that. A session's
+# messages are the same `serde_json::Value` objects, MessagePack-encoded
+# (`remote/codec.rs`). 1.3.1 + rmp 0.8.15 need only serde + num-traits, both
+# already locked.
+rmp-serde = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

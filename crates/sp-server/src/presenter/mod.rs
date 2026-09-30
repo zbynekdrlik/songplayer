@@ -14,6 +14,11 @@ pub use payload::PresenterPayload;
 
 use std::sync::Arc;
 
+use crate::lyrics::renderer::PresenterLines;
+
+/// #222: the lines last pushed (current + next, EN + SK) — the push dedup key.
+pub type PushedLine = PresenterLines;
+
 /// Default Presenter API endpoint when `presenter_url` setting is empty.
 pub const DEFAULT_URL: &str = "http://10.77.9.205/api/stage";
 
@@ -44,39 +49,58 @@ pub async fn build_from_settings(
     }
 }
 
-/// Line-change push helper used by the playback engine hot path. Spawns a
-/// fire-and-forget `tokio::spawn(client.push(...))` when `current_en`
-/// differs from `last_seen`, and returns the new `last_seen` for the caller
-/// to persist. No-op when `client` is None (push disabled).
-#[cfg_attr(test, mutants::skip)]
-pub fn maybe_push_line(
-    client: Option<&Arc<PresenterClient>>,
-    last_seen: Option<String>,
-    current_en: String,
-    next_en: String,
+/// #222: the payload to push for `lines`, or `None` when exactly these lines
+/// were pushed last (`last_seen`): the dedup key is the WHOLE payload,
+/// current + next, EN + SK. A Slovak line that arrives later under the same
+/// English one is pushed, and so is a repeated sentence whose next line
+/// changed ("What a God, what a God." ×4: the 4th repeat carries the line
+/// after the repeats). Both languages always go out (Presenter's stage
+/// layout picks what to show); a line with no translation sends "".
+pub fn payload_for(
+    last_seen: Option<&PushedLine>,
+    lines: &PresenterLines,
     song: &str,
     artist: &str,
-) -> Option<String> {
-    let Some(client) = client else {
-        return last_seen;
-    };
-    if last_seen.as_deref() == Some(current_en.as_str()) {
-        return last_seen;
+) -> Option<PresenterPayload> {
+    if last_seen == Some(lines) {
+        return None;
     }
     let current_song = if artist.is_empty() {
         song.to_string()
     } else {
         format!("{song} - {artist}")
     };
-    let payload = PresenterPayload {
+    Some(PresenterPayload {
         // Wrap long lyric lines so they don't overflow the stage display;
         // many source lines are 40-60 chars and become unreadable on a
         // phone/tablet without breaks. Only the live-lyric fields are
         // wrapped — `currentSong` stays one line on purpose.
-        current_text: payload::wrap_for_presenter(&current_en),
-        next_text: payload::wrap_for_presenter(&next_en),
+        current_text: payload::wrap_for_presenter(&lines.current_en),
+        next_text: payload::wrap_for_presenter(&lines.next_en),
         current_song,
         next_song: String::new(),
+        current_translation: payload::wrap_for_presenter(&lines.current_sk),
+        next_translation: payload::wrap_for_presenter(&lines.next_sk),
+    })
+}
+
+/// Line-change push helper used by the playback engine hot path. Spawns a
+/// fire-and-forget `tokio::spawn(client.push(...))` when `payload_for` has a
+/// payload (any of the four lines changed), and returns the new `last_seen`
+/// for the caller to persist. No-op when `client` is None (push disabled).
+#[cfg_attr(test, mutants::skip)] // spawn glue; `payload_for` is the tested decision
+pub fn maybe_push_line(
+    client: Option<&Arc<PresenterClient>>,
+    last_seen: Option<PushedLine>,
+    lines: PresenterLines,
+    song: &str,
+    artist: &str,
+) -> Option<PushedLine> {
+    let Some(client) = client else {
+        return last_seen;
+    };
+    let Some(payload) = payload_for(last_seen.as_ref(), &lines, song, artist) else {
+        return last_seen;
     };
     let client = client.clone();
     tokio::spawn(async move {
@@ -84,5 +108,25 @@ pub fn maybe_push_line(
             tracing::warn!(?e, "presenter push failed (non-fatal)");
         }
     });
-    Some(current_en)
+    Some(lines)
 }
+
+/// Clear the stage display (`PresenterPayload::empty`), fire-and-forget like
+/// [`maybe_push_line`]; `why` names the caller in the failure's WARN. No-op
+/// when `client` is None (push disabled).
+#[cfg_attr(test, mutants::skip)] // spawn glue; the engine tests see the push
+pub fn push_empty(client: Option<&Arc<PresenterClient>>, why: &'static str) {
+    let Some(client) = client else {
+        return;
+    };
+    let client = client.clone();
+    tokio::spawn(async move {
+        if let Err(e) = client.push(PresenterPayload::empty()).await {
+            tracing::warn!(?e, why, "presenter clear failed (non-fatal)");
+        }
+    });
+}
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

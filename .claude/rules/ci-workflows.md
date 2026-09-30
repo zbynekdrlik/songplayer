@@ -2,6 +2,8 @@
 paths:
   - ".github/workflows/**"
   - ".cargo/mutants.toml"
+  - "scripts/rig_lease_gate.py"
+  - "scripts/tests/test_rig_lease_gate.py"
 ---
 
 # CI workflows — self-hosted runner shell traps, mutation gate, event de-dup
@@ -224,7 +226,122 @@ finished leaves that push range without a mutation verdict — re-run its failed
 jobs before trusting the diff, and expect the old commit's already-known
 survivors to fail again there (read only the shard you need).
 
+**Never cancel a run once its `Deploy to win-resolume` job has started**
+(29.9.2026 03:15Z, run `36514244587`). The deploy stops SongPlayer BEFORE
+it installs, and a cancel that lands mid-job leaves the new build installed
+but SongPlayer STOPPED (it was down ~45 s until a manual
+`Start-ScheduledTask -TaskName SongPlayer`). Since #221 L4a the deploy job
+waits out another repo's rig lease ITSELF, before anything stops SongPlayer
+(next section), so there is no reason to cancel a run for a lease any more.
+If a run must still be cancelled, do it before the deploy job starts, or
+while it is still in its "Wait for the rig lease" step (nothing is stopped
+yet). Later re-run the cancelled jobs with `gh run rerun <id> --failed`
+(cancelled jobs count), which reuses the finished build. If a deploy was cut
+anyway, check `Get-Process SongPlayer` and start the task.
+
+**The box jobs use `!cancelled()`, never `always()` (29.9.2026, run
+`36553367664`).** `gate`, `deploy-resolume` and `e2e-resolume` need a
+status-check function so a SKIPPED dependency (`version-check` on a push)
+does not skip them. `always()` does that, but it is also TRUE on a cancelled
+run: a run cancelled at 10:21Z with `Gate` queued still ran `Gate`, started
+the deploy, waited in the lease step (a second cancel did not stop it
+either) and deployed at 10:31Z. So "produkcia beží → zruš CI" never stopped
+a deploy or an E2E. `!cancelled()` keeps the skipped-dependency behaviour
+and is false once the run is cancelled; the Test Integrity Check pins it for
+all three jobs and rejects `always()` there. A step-level `if: always()`
+(artifact uploads) is harmless and stays. Never cancel a run for a held rig
+lease: the deploy waits for it itself (above).
+
+## The deploy waits for the rig lease (#221 L4a, `scripts/rig_lease_gate.py`)
+
+Other repos (camera-box's full-path E2E, the A/V soak) hold a cross-repo rig
+lease on dev1 while they drive the shared rig. "Deploy to win-resolume" runs
+"Wait for the rig lease" right after checkout, before "Deploy SongPlayer"
+stops SongPlayer:
+
+- `GET /rig-lease.json` (camera-box `scripts/rig-lease-server.py`, :8890;
+  `held`, `stale`, `holder.repo`, `expected_release_at`, `ttl_s`), trying
+  `http://10.77.9.200:8890` (dev1's LAN address, 5-15 ms from win-resolume,
+  29.9.2026) and then `http://dev1:8890` (the mDNS name `dev1.local`: it
+  survives a LAN IP change, but one cold lookup from the box's Python failed
+  with `getaddrinfo failed`). win-resolume has NO tailscale, so the
+  tailscale address times out, and camera-box's documented `10.77.9.103` is
+  stale (dev1's LAN IP moved). If dev1's LAN IP moves again, the name keeps
+  the gate working; update the first URL.
+- Held, not stale, by another repo (a held lease with no readable holder
+  counts as another repo's): wait, one line per 30 s poll naming the holder,
+  its run and `expected_release_at`; at most 60 min, then exit 3 and the job
+  fails with its own message ("never deploy over another repo's lease").
+  Free, stale, or held by `${{ github.repository }}`: deploy. A lease
+  service that does not answer with a lease (dev1 down, something else on
+  the port; a `holder` that is not an object or null counts as no lease):
+  a `::warning::` annotation and the deploy goes on — an outage never
+  blocks a deploy. Right after another repo's live lease was read, one or
+  two unreachable reads are a blip (a cold mDNS lookup, a lease-server
+  restart) and the lease still counts as held; the third in a row
+  (`OUTAGE_READS`) is the outage (review round 1: one blip used to deploy
+  into the lease just seen held). Any other non-zero exit is the gate's own
+  failure and fails the job.
+- Residual: the gate reads the lease, it does not HOLD it. A lease another
+  repo takes in the ~1 min between the check and "Deploy SongPlayer"
+  (artifact downloads) is not seen; the E2E job after the deploy does not
+  check it either.
+- Hardening (review rounds 3-4): a body over 64 KiB (`MAX_BODY_BYTES`; a
+  lease is ~400 B; the bound is pinned exactly), JSON nested past the
+  recursion limit, bad UTF-8, a non-HTTP listener, a body shorter than its
+  Content-Length (`read(amt)` returns what came: it does not parse — no
+  `IncompleteRead` there; a chunked body cut short IS one) are all "no
+  lease" from that URL. `main` refuses a `--url` that is not http(s) with a
+  host and a valid port (`is_http_url`; a broken one would otherwise read as
+  an outage on every deploy). Everything the gate logs from the lease port
+  (`describe_holder`, a not-a-lease answer, an exception text) goes through
+  `one_line`: a line break would start a runner workflow command. The
+  "Wait for the rig lease" STEP has `timeout-minutes: 70`, so a lease server
+  that trickles bytes under the per-read timeout is cut in that step, never
+  inside "Deploy SongPlayer" (which stops SongPlayer first); the job keeps
+  `timeout-minutes: 90`.
+- test-integrity's "deploy job uses always()" check greps
+  `'^  deploy-resolume:'` (anchored): unanchored it matched its own line,
+  which holds the job name and "always()", and never read the real header.
+- It runs on the box's `C:\Program Files\Python312\python.exe` (the step
+  fails if it is missing; the A/V gate needs the same Python). Stdlib only.
+- The wait is coordination, not a soak (CLAUDE.md "No sleep-based CI
+  jobs"): a free lease costs one GET. A newer push cancels a waiting deploy
+  via the concurrency group — safe, nothing is stopped yet.
+- Tests: `scripts/tests/test_rig_lease_gate.py` (Eval Checks pytest; the
+  script is in both ruff lists): the decision, the bounded wait on a fake
+  clock (120 × 30 s then exit 3; a last short pause ends exactly at the
+  bound), the fetch over a real local HTTP server. Python runs locally on
+  the Tier-0 box, so its RED/GREEN is really run before the push.
+
+**Two push runs for ONE commit: never cancel either by hand** (28.9.2026,
+`36494106201` + `36494106433`). The concurrency group already cancels the
+older one. `gh run cancel` on the queued survivor still lands, even when the
+run keeps showing `queued` for a minute, and then NO run is left for the
+commit. Leave a duplicate alone. If both end cancelled, re-run the survivor
+in full (`gh run rerun <id>`, not `--failed`).
+
 ## Post-deploy E2E: OBS is in Studio Mode with a 2000ms Fade — never blind-sleep after a scene switch (#170)
+
+**#221 L3 (read this first).** The E2E scene driver no longer talks to cg
+OBS: `ObsDriver` connects to SongPlayer's obs-websocket facade
+(`FACADE_WS_URL`, :4456; cg OBS :4455 only for the A/V gate's recording and
+profile read). The contract is in `remote-control.md` ("Program feedback")
+and the driver's own doc:
+- the transition is SP-program's (the Settings fade, e.g. 300 ms, or a Cut
+  that ends at once), announced by SongPlayer's `SceneTransitionStarted` /
+  `SceneTransitionEnded`, not cg OBS's 2 s fade; the driver raises its
+  transition flag BEFORE the trigger;
+- a switch to the scene already on program is ALWAYS sent (the facade's
+  re-kick re-mirrors cg OBS); the round-3 skip below is gone (review round
+  1 of the L3 lane);
+- since L4b `active_scene` / `active_playlist_ids` are SongPlayer's own
+  program (the resolver + the on-air set); right after a switch the on-air
+  set holds BOTH playlists until cg OBS answers the mirror, a moment AFTER
+  the driver returns: wait for it to settle (`waitEngineActiveScene` treats
+  more than one playlist on air as not settled), never read once.
+
+The rest of this section is the #170 history of the cg OBS driver.
 
 The `E2E Tests (win-resolume)` job restarts SongPlayer (`taskkill` + `schtasks
 /run /tn SongPlayer` + `Wait-SongPlayerUp`), then the Playwright post-deploy
@@ -262,9 +379,9 @@ behaviours defeat that (reproduced live 3×, 17.9 02:06–02:09 UTC):
    source. A real transition to another scene first (so preview becomes the
    *previous* program) restores normal behaviour.
 
-**Contract (round 3):** `ObsDriver.switchScene`
-(1) **skips when `program == target`** (`shouldSkipSceneSwitch` — never issue a
-same-scene switch); (2) in Studio Mode drives the transition the studio way —
+**Contract (round 3, superseded by #221 L3 above for (1)):** `ObsDriver.switchScene`
+(1) skipped when `program == target` (removed: on the facade a same-scene
+switch is the designed re-kick); (2) in Studio Mode drives the transition the studio way —
 `SetCurrentPreviewScene(target)` + `TriggerStudioModeTransition` (which DOES emit
 the program-scene-changed event), else `SetCurrentProgramScene` (read
 `GetStudioModeEnabled` once); (3) waits until `GetCurrentProgramScene == target`

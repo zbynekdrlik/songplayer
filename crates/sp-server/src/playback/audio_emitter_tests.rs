@@ -431,6 +431,7 @@ fn emitter_stats_reads_the_telemetry_and_sets_the_mode_when_enabled() {
         space: std::sync::Condvar::new(),
         telemetry: EmitterTelemetry::default(),
         shutdown: std::sync::atomic::AtomicBool::new(false),
+        fleet: Arc::default(),
     };
     let ds = emitter_stats(&Arc::new(disabled));
     assert!(!ds.enabled);

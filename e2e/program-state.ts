@@ -29,9 +29,11 @@ export interface PlaylistRow {
 
 /** The on-program state of the box. */
 export interface ProgramState {
-  /** OBS program scene name (`/api/v1/status.active_scene`). */
+  /** SongPlayer's own program scene name (`/api/v1/status.active_scene`,
+   *  #221 L4b: the scene catalog's name for SP-program's source). */
   activeScene: string | null;
-  /** Playlist ids whose NDI output the program scene shows. */
+  /** SongPlayer's on-air set (`/api/v1/status.active_playlist_ids`):
+   *  SP-program's playlist plus the one cg OBS was told to show. */
   activePlaylistIds: number[];
   /** True when the Dabing playlist (`kind == "dabing"`) is on program. */
   dabingOnProgram: boolean;

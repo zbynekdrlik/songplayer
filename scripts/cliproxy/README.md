@@ -11,12 +11,12 @@ text-cleanup) instead of a metered API key. The worker's
 
 | | |
 |---|---|
-| **Version** | **7.3.1** (Commit `44e62bc8`, built 2026-09-13) — installed 2026-09-13 (#145) |
-| Previous | 6.9.27 (installed 2026-04-15) — kept for rollback |
+| **Version** | **8.0.4** (release 2026-09-29) — installed 2026-09-29 (#145). Presents Claude Code 2.1.280, which `claude-opus-5-5` requires (7.3.1 presented 2.1.258 → HTTP 400) |
+| Previous | 7.3.1 (installed 2026-09-13), 6.9.27 (installed 2026-04-15) — kept on disk for the record only, **never a rollback target**: neither serves `claude-opus-5-5` (6.9.27 does not list it → 502 `unknown provider`; 7.3.1 presents Claude Code 2.1.258 → HTTP 400), so restoring either breaks every Claude call |
 | Binary | `C:\ProgramData\SongPlayer\cache\tools\CLIProxyAPI.exe` |
 | Config (auto-generated) | `C:\ProgramData\SongPlayer\cache\cli-proxy-api-config.yaml` |
 | Auth / token store | `C:\ProgramData\SongPlayer\cache\.cli-proxy-api\` (per-account `claude-<email>.json`) |
-| Rollback binary | `C:\ProgramData\SongPlayer\cache\tools\CLIProxyAPI-6.9.27.exe` and `C:\ProgramData\SongPlayer\cliproxy-backup-145\` |
+| Rollback binary | **8.0.4's own backup only** — the copy of the running `CLIProxyAPI.exe` that step 2 of the NEXT upgrade takes as `C:\ProgramData\SongPlayer\cliproxy-backup-<ticket>\CLIProxyAPI-8.0.4.exe`. No separate 8.0.4 copy exists before that. The older backups `C:\ProgramData\SongPlayer\cliproxy-backup-145\` (6.9.27 exe + config) and `…\cliproxy-backup-145-v804\` (7.3.1 exe + config, taken before 8.0.4 went in) hold builds that cannot serve the current model |
 
 ## How it is launched (do NOT set up a service / scheduled task)
 
@@ -36,7 +36,7 @@ binary swapped in ahead of a SongPlayer deploy must accept the config that
 
 ```powershell
 python C:\ProgramData\SongPlayer\proxy_probe.py                 # lists Claude ids + tries the default candidates
-python C:\ProgramData\SongPlayer\proxy_probe.py claude-fable-5-1   # probe a specific id
+python C:\ProgramData\SongPlayer\proxy_probe.py claude-opus-5-5    # probe a specific id (the current default)
 ```
 
 Only ids the proxy's `GET /v1/models` lists will route — an unknown id returns
@@ -52,13 +52,15 @@ Invoke-WebRequest http://127.0.0.1:18787/v1/models -UseBasicParsing | Select -Ex
 
 ## Upgrade procedure (side-by-side, verify-then-swap)
 
-Done for 7.3.1 under #145; repeat for the next version. **Never** kill OBS /
+Done for 7.3.1 and 8.0.4 under #145; repeat for the next version. **Never** kill OBS /
 Resolume Arena / SongPlayer — only the proxy process.
 
 1. **Read the release notes / `config.example.yaml`** for the target version for
    config-schema, auth-store, and model-registry changes vs the installed build.
-2. **Back up (copy, never delete):** the exe, `cli-proxy-api-config.yaml`, and the
-   whole `.cli-proxy-api\` auth store into a backup dir (e.g. `cliproxy-backup-<ticket>\`).
+2. **Back up (copy, never delete):** the exe (as `CLIProxyAPI-<its version>.exe`,
+   today `CLIProxyAPI-8.0.4.exe` — this copy is the ONLY rollback target, see
+   "Rollback"), `cli-proxy-api-config.yaml`, and the whole `.cli-proxy-api\` auth
+   store into a backup dir `C:\ProgramData\SongPlayer\cliproxy-backup-<ticket>\`.
 3. **Download + checksum-verify** the `*_windows_amd64.zip` and compare its sha256
    against the release `checksums.txt`. Extract side-by-side.
 4. **Verify on an ISOLATED instance first** — a second port (e.g. 18788) with a
@@ -68,6 +70,13 @@ Resolume Arena / SongPlayer — only the proxy process.
      `/v1/chat/completions` returns HTTP 200 on the EXISTING OAuth login.
    If the login does NOT carry over (auth error), **roll back and stop** — a
    genuine re-login needs the owner's browser (`claude_pkce_login.py`), never run it yourself.
+   **Keep the isolated instance ONE completion long, then stop it** (29.9.2026, 8.0.4):
+   it refreshes the OAuth tokens of every auth file in its copy at startup, and
+   Anthropic ROTATES refresh tokens — a second proxy that refreshes the SAME
+   account as the live one can invalidate the live proxy's refresh token (the
+   owner's browser re-login then). The 8.0.4 test hit `invalid_grant` on a stale
+   June file and was stopped right after its completion; the live proxy still
+   answered 200.
 5. **Swap:** rename the running `CLIProxyAPI.exe` aside (allowed while its handle
    is open), copy the new binary in as `CLIProxyAPI.exe`, then kill the proxy PID.
    `ai_proxy_watchdog` respawns the new binary from that path within ~30 s (the
@@ -83,13 +92,26 @@ Resolume Arena / SongPlayer — only the proxy process.
 
 ## Rollback
 
+The ONLY rollback target is **8.0.4's own backup**: the copy of the 8.0.4
+binary that step 2 of an upgrade takes before swapping in the next version.
+Roll back to it when that next version fails. Never restore 7.3.1 or 6.9.27:
+the deployed `DEFAULT_AI_MODEL` is `claude-opus-5-5`, which 6.9.27 does not
+list (502 `unknown provider`) and 7.3.1 refuses (HTTP 400: it presents Claude
+Code 2.1.258, and Opus 5.5 needs ≥ 2.1.280). Either would break every
+translation and cleanup call.
+
 ```powershell
-# stop the proxy, restore the old binary, let the watchdog respawn it
+# stop the proxy, restore 8.0.4 from the upgrade's backup, let the watchdog respawn it
+$b = 'C:\ProgramData\SongPlayer\cliproxy-backup-<ticket>'   # the upgrade's step-2 backup of 8.0.4
 $c = Get-NetTCPConnection -LocalPort 18787 -State Listen; Stop-Process -Id $c.OwningProcess -Force
 Move-Item C:\ProgramData\SongPlayer\cache\tools\CLIProxyAPI.exe C:\ProgramData\SongPlayer\cache\tools\CLIProxyAPI-broken.exe -Force
-Copy-Item C:\ProgramData\SongPlayer\cache\tools\CLIProxyAPI-6.9.27.exe C:\ProgramData\SongPlayer\cache\tools\CLIProxyAPI.exe -Force
-# ai_proxy_watchdog respawns 6.9.27 within ~30 s; verify /v1/models + a completion.
+Copy-Item "$b\CLIProxyAPI-8.0.4.exe" C:\ProgramData\SongPlayer\cache\tools\CLIProxyAPI.exe -Force
+# ai_proxy_watchdog respawns 8.0.4 within ~30 s; verify /v1/models + a claude-opus-5-5 completion.
 ```
+
+If 8.0.4 ITSELF breaks, there is nothing older to roll back to. Re-install
+8.0.4 from its release zip (checksum-verified, steps 3–5), or go forward to a
+newer release that lists and completes `claude-opus-5-5`.
 
 ## Config schema (6.9.x → 7.x)
 
@@ -98,10 +120,10 @@ Copy-Item C:\ProgramData\SongPlayer\cache\tools\CLIProxyAPI-6.9.27.exe C:\Progra
 `disable-claude-cloak-mode`), which is the safer mode for Claude OAuth (requests
 look like Claude Code). `write_config` no longer emits the block. 7.x **ignores**
 the now-unknown key (verified live — completions returned 200 while the old
-binary was still feeding it the block). A rollback to a 6.9.x build parses the
-block-less config fine too, but would fall back to that build's *default* cloak
-rather than the old explicit `never` — the rollback procedure above re-checks a
-completion so any resulting difference surfaces immediately. `auth-dir`, `host`,
+binary was still feeding it the block). A 6.9.x build would parse the
+block-less config too (with that build's *default* cloak rather than the old
+explicit `never`), but 6.9.x is no rollback target: it cannot serve the current
+model (see "Rollback"). `auth-dir`, `host`,
 `port`, `request-retry`, `debug`, `logging-to-file`, and `claude-api-key` are
 unchanged. 7.x also fetches a **live remote model catalog** on startup, so
 `/v1/models` tracks current ids without a binary rebuild.

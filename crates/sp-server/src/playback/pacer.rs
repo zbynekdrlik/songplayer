@@ -84,7 +84,8 @@ impl PacedFrame {
 /// tests use a recording fake.
 pub trait PacedSink {
     /// Emit one boundary: submit each chunk in `audio` (stamped `audio_tc_100ns`,
-    /// the raw wall clock at submission — §6) IN ORDER first, then the `video`
+    /// the timeline instant of its first sample — the pacer passes the boundary
+    /// it belongs to, #224) IN ORDER first, then the `video`
     /// frame (stamped `video_tc_100ns`, the on-grid serviced boundary — §4).
     /// `audio` is the boundary block the pacer took from its `AudioGridBuffer`,
     /// aligned to the picture by media time (0 or 1 frame of exactly
@@ -341,8 +342,9 @@ impl Pacer {
         }
     }
 
-    /// Current wall clock as 100-ns units since the Unix epoch (production read
-    /// path — MediaFoundation decode + wall grid share this).
+    /// The wall's internal TIMELINE now, 100-ns units: UTC since the Unix epoch
+    /// less the fleet relabel D(K) (#224 part 2; production read path —
+    /// MediaFoundation decode + wall grid share this).
     pub fn now_100ns(&self) -> i64 {
         self.wall.now_100ns()
     }
@@ -413,7 +415,8 @@ impl Pacer {
     /// read decides Wait-vs-emit, and — when a boundary is due — a fresh emit
     /// read taken right before the send makes lateness include decode time
     /// (#147 change 5). The serviced boundary is the video stamp (on-grid,
-    /// never future-dated); audio carries the raw emit-instant wall clock (§6).
+    /// never future-dated), and so is the boundary's audio block: it belongs
+    /// to that boundary's timeline instant, never the emit instant (#224).
     pub fn service<F, S>(&mut self, mut pull: F, sink: &mut S) -> ServiceOutcome
     where
         F: FnMut() -> Option<PacedFrame>,
@@ -536,14 +539,15 @@ impl Pacer {
             };
         }
 
-        // Audio carries the raw emit-instant wall clock (§6). Resolve the stamp
-        // boundary + the advance via the exact-grid gate BEFORE emitting, so a
-        // resync stamps at the resync SERVICE boundary (the grid boundary
-        // at/before now) rather than the stale pending boundary (§5.5).
+        // The audio block is stamped on the boundary it belongs to (#224), like
+        // the video: a catch-up burst after a stall or a date step then keeps
+        // its audio on the timeline instead of bunching it at the emit instant.
+        // Resolve the stamp boundary + the advance via the exact-grid gate
+        // BEFORE emitting, so a resync stamps at the resync SERVICE boundary
+        // (the grid boundary at/before now), not the stale pending one (§5.5).
         // `queue_had_frame` = a real frame is buffered (just consumed, or
         // parked) so a large lag catches up rather than resyncing past buffered
         // content (#1131).
-        let audio_tc = emit_now;
         let had_frame = due.is_some();
         let queue_had_frame = had_frame || self.pending.is_some();
         let (stamp_boundary, next) =
@@ -562,17 +566,17 @@ impl Pacer {
 
         let outcome = if let Some(frame) = due {
             self.on_emit(emit_now, stamp_boundary);
-            sink.emit(&frame, &audio_frames, stamp_boundary, audio_tc);
+            sink.emit(&frame, &audio_frames, stamp_boundary, stamp_boundary);
             self.last_frame = Some(frame);
             ServiceOutcome::Emitted
         } else if let Some(lf) = self.last_frame.take() {
             self.on_emit(emit_now, stamp_boundary);
             self.repeats += 1;
-            sink.emit(&lf, &audio_frames, stamp_boundary, audio_tc);
+            sink.emit(&lf, &audio_frames, stamp_boundary, stamp_boundary);
             self.last_frame = Some(lf);
             ServiceOutcome::Repeated
         } else {
-            self.fill_starved(emit_now, stamp_boundary, audio_tc, sink)
+            self.fill_starved(emit_now, stamp_boundary, sink)
         };
 
         // Telemetry for a productive boundary (#147 lane 3, change 3): the lag
@@ -689,22 +693,21 @@ impl Pacer {
         // stall resyncs and the stamp lands on the resync service boundary,
         // exactly like the active underrun path.
         let (stamp_boundary, next) = self.resolve_emit_boundary(emit_now, boundary, false);
-        let audio_tc = emit_now;
 
         // #147: an emitting standby boundary is the SAME audio-then-video pair as
         // a playing one — one block (silence, or a held EOS tail), stamped with
-        // the emit instant like playing audio (§6); a starve takes the fill's.
+        // its boundary like playing audio (#224); a starve takes the fill's.
         let outcome = match standby {
             Standby::FrozenLast => {
                 if let Some(lf) = self.last_frame.take() {
                     self.on_emit(emit_now, stamp_boundary);
                     self.repeats += 1;
                     let block = self.standby_block();
-                    sink.emit_standby(&lf, &block, stamp_boundary, audio_tc);
+                    sink.emit_standby(&lf, &block, stamp_boundary, stamp_boundary);
                     self.last_frame = Some(lf);
                     ServiceOutcome::Repeated
                 } else {
-                    self.fill_starved(emit_now, stamp_boundary, audio_tc, sink)
+                    self.fill_starved(emit_now, stamp_boundary, sink)
                 }
             }
             Standby::Black {
@@ -721,7 +724,7 @@ impl Pacer {
                     stride,
                     video,
                 };
-                self.emit_standby_pair(emit_now, stamp_boundary, audio_tc, picture, sink);
+                self.emit_standby_pair(emit_now, stamp_boundary, picture, sink);
                 ServiceOutcome::Emitted
             }
         };
@@ -804,7 +807,7 @@ impl Pacer {
 
     /// Snapshot the counters for the health document.
     pub fn stats(&self) -> PacingStats {
-        let anchor = self.wall.anchor_stats();
+        let (anchor, probe) = (self.wall.anchor_stats(), self.wall.probe_stats());
         let offset = self.av.frame_offset.report(self.now_100ns());
         PacingStats {
             enabled: self.enabled,
@@ -834,6 +837,12 @@ impl Pacer {
             wall_anchor_last_step_us: anchor.last_step_us,
             wall_anchor_holds_followed: anchor.holds_followed,
             wall_anchor_last_hold_us: anchor.last_hold_us,
+            // #224: the per-boundary step probe of the same wall.
+            wall_anchor_probes_rejected: probe.rejected,
+            wall_anchor_detect_to_follow_us: probe.last_detect_to_follow_us,
+            // #224 part 2: the same wall's relabel and its last remainder.
+            fleet_shift_slots: self.wall.shift().slots,
+            last_regrid_remainder_us: self.wall.shift().last_remainder_100ns / 10,
             // #168 r2: the pacer does not submit — the paced submit thread fills
             // `submit_call_us_max`/`_p99` via `merge_pacing_stats`; 0 here.
             ..Default::default()
@@ -865,8 +874,8 @@ impl Pacer {
     }
 
     /// Drain exactly `samples_per_boundary` samples (no correction) and
-    /// re-interleave into one [`AudioFrame`] stamped later with the raw wall
-    /// clock (§6). Empty when no audio has been buffered yet.
+    /// re-interleave into one [`AudioFrame`], stamped later on its boundary
+    /// (#224). Empty when no audio has been buffered yet.
     fn take_boundary_audio(&mut self) -> Vec<AudioFrame> {
         let planar = self
             .audio_buf

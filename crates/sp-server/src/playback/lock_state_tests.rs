@@ -328,6 +328,8 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             wall_anchor_last_step_us: -1_500_000,
             wall_anchor_holds_followed: 1,
             wall_anchor_last_hold_us: 1_499_000,
+            fleet_shift_slots: -45,
+            last_regrid_remainder_us: 26_966,
             song_change_unserviced_slots: 6,
             consumer_fill_pairs: 17,
             ..Default::default()
@@ -383,6 +385,9 @@ fn format_genlock_line_contains_every_key_token() {
         "wall_anchor_last_step_us=-1500000",
         "wall_anchor_holds_followed=1",
         "wall_anchor_last_hold_us=1499000",
+        // #224 part 2: the relabel of the date steps followed + the last r.
+        "fleet_shift_slots=-45",
+        "last_regrid_remainder_us=26966",
         "song_change_unserviced_slots=6",
         "consumer_fill_pairs=17",
         "underruns=9",
@@ -394,21 +399,45 @@ fn format_genlock_line_contains_every_key_token() {
     }
 }
 
-/// Structural guard: the once-per-UTC-minute periodic INFO path in
-/// `ndi_health.rs` MUST render the genlock line via `format_genlock_line`,
+/// Structural guard: the once-per-UTC-minute periodic INFO path (in
+/// `ndi_health_log.rs` since #221 L4a moved `handle_health_snapshot`'s logging
+/// there) MUST render the genlock line via `format_genlock_line`,
 /// gated by `should_log_periodic_heartbeat`. Fires red if a refactor drops the
 /// call from that path.
 #[test]
 fn periodic_log_path_calls_format_genlock_line() {
-    let src = include_str!("ndi_health.rs").replace("\r\n", "\n");
+    let src = include_str!("ndi_health_log.rs").replace("\r\n", "\n");
     let guard = src
         .find("should_log_periodic_heartbeat(prev_heartbeat_ts, cur)")
         .expect("periodic heartbeat guard must exist");
     let call = src
-        .find("format_genlock_line(&snapshot)")
+        .find("format_genlock_line(snapshot)")
         .expect("periodic path must render the genlock line");
     assert!(
         call > guard,
         "the genlock line must be emitted inside the periodic-heartbeat guard"
+    );
+}
+
+#[test]
+fn format_genlock_line_carries_the_step_probe_telemetry() {
+    // #224: the pacer wall's per-boundary step probe — rejected probes and the
+    // last follow's detect-to-follow time — ride the same per-minute line,
+    // right after the anchor tokens; #224 part 2's re-grid tokens (the fleet
+    // shift in slots and the last remainder) follow them.
+    let mut s = sample_snapshot();
+    s.pacing.wall_anchor_probes_rejected = 3;
+    s.pacing.wall_anchor_detect_to_follow_us = 33_533;
+    let line = crate::playback::ndi_health::format_genlock_line(&s);
+    let shift = format!(
+        "fleet_shift_slots={} last_regrid_remainder_us={}",
+        s.pacing.fleet_shift_slots, s.pacing.last_regrid_remainder_us
+    );
+    assert!(
+        line.contains(&format!(
+            "wall_anchor_last_hold_us=1499000 wall_anchor_probes_rejected=3 \
+             wall_anchor_detect_to_follow_us=33533 {shift} song_change_unserviced_slots=6"
+        )),
+        "the probe tokens follow the anchor tokens, then the re-grid tokens: {line}"
     );
 }

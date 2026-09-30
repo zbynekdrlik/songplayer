@@ -26,10 +26,11 @@ use sp_ndi::test_util::{MockNdiReceiveBackend, MockVideoFrame};
 mod lifecycle;
 #[path = "ndi_input_tests_pool.rs"]
 mod pool;
+#[path = "ndi_input_tests_regrid.rs"]
+mod regrid;
 
 /// 2026-09 in 100 ns since the epoch.
 const T0: i64 = 17_900_000_000_000_000;
-const MS: i64 = 10_000;
 const SOURCE: &str = "CG-OBS (manual)";
 
 /// The k-th grid boundary after `floor(T0)` (`b(0)` = `floor(T0)`).
@@ -105,7 +106,7 @@ fn raw_rig(frames: Vec<MockVideoFrame>, schedule: Vec<Option<usize>>) -> Rig {
         INPUT_AUDIO_SAMPLES * 4,
     );
     let bus = Arc::new(ProgramBus::new());
-    bus.select_initial(PROGRAM_INPUT_ID);
+    bus.select_initial(PROGRAM_INPUT_ID, None);
     let shared = bus.input().clone();
     shared.set_settings(enabled());
     let input = NdiInput::new(
@@ -160,7 +161,7 @@ impl Rig {
     fn run(&mut self, n: usize) -> Vec<SubmitJob> {
         let mut jobs = Vec::new();
         for k in 1..=n {
-            self.input.service(b(k), b(k) + 2 * MS, &self.bus);
+            self.input.service(b(k), &self.bus);
             jobs.extend(drain(&self.bus));
         }
         jobs
@@ -205,8 +206,8 @@ fn assert_one_pair_per_boundary(jobs: &[SubmitJob], n: usize) {
     for (k, job) in jobs.iter().enumerate() {
         assert_eq!(
             job.audio_tc_100ns,
-            b(k + 1) + 2 * MS,
-            "audio stamped at the emit"
+            b(k + 1),
+            "#224: audio stamped on its boundary, never the emit instant"
         );
         assert_eq!(job.audio.len(), 1, "one audio block per boundary");
         assert_eq!(job.audio[0].data.len(), 3200, "1600 stereo samples");
@@ -324,13 +325,13 @@ fn a_source_that_drops_out_mid_stream_turns_to_standby_and_back() {
     assert!(rig.status().connected);
     rig.mock.set_connections(0);
     for k in 4..=6 {
-        rig.input.service(b(k), b(k) + 2 * MS, &rig.bus);
+        rig.input.service(b(k), &rig.bus);
         jobs.extend(drain(&rig.bus));
     }
     assert!(!rig.status().connected);
     rig.mock.set_connections(1);
     for k in 7..=8 {
-        rig.input.service(b(k), b(k) + 2 * MS, &rig.bus);
+        rig.input.service(b(k), &rig.bus);
         jobs.extend(drain(&rig.bus));
     }
     assert!(rig.status().connected);
@@ -409,11 +410,11 @@ fn the_bus_hands_out_one_shared_input_state() {
 #[test]
 fn without_an_ndi_sdk_the_enabled_input_still_owns_its_boundaries() {
     let bus = ProgramBus::new();
-    bus.select_initial(PROGRAM_INPUT_ID);
+    bus.select_initial(PROGRAM_INPUT_ID, None);
     bus.input().set_settings(enabled());
     let mut input = NdiInput::new(None, bus.input().clone(), 2, 4);
     for k in 1..=3 {
-        input.service(b(k), b(k), &bus);
+        input.service(b(k), &bus);
     }
     let jobs = drain(&bus);
     assert_eq!(jobs.len(), 3);
@@ -455,8 +456,8 @@ fn off_program_the_input_captures_and_counts_but_offers_and_converts_nothing() {
     );
     assert_eq!(rig.calls_matching("framesync_capture_video"), 2);
     // Cut to the input: the next boundary converts the frame it still holds.
-    rig.bus.select_initial(PROGRAM_INPUT_ID);
-    rig.input.service(b(3), b(3), &rig.bus);
+    rig.bus.select_initial(PROGRAM_INPUT_ID, None);
+    rig.input.service(b(3), &rig.bus);
     let jobs = drain(&rig.bus);
     assert_eq!(jobs.len(), 1);
     assert_eq!(&jobs[0].video[..], &[0u8; 12][..]);
@@ -534,9 +535,9 @@ fn a_reconnect_does_not_count_the_outage_as_dropped_frames() {
     let mut rig = rig(source_frames(30, 30), vec![Some(0), Some(1), Some(10)]);
     rig.run(2);
     rig.mock.set_connections(0);
-    rig.input.service(b(3), b(3), &rig.bus);
+    rig.input.service(b(3), &rig.bus);
     rig.mock.set_connections(1);
-    rig.input.service(b(4), b(4), &rig.bus);
+    rig.input.service(b(4), &rig.bus);
     let st = rig.status();
     assert_eq!((st.frames_received, st.video_drops), (3, 0));
     assert!(rig.shared.is_connected());
@@ -823,6 +824,10 @@ struct FakeClock {
 impl VbanClock for FakeClock {
     fn now_100ns(&mut self) -> i64 {
         self.now
+    }
+
+    fn slew_owed_100ns(&self) -> i64 {
+        0
     }
 
     fn sleep_100ns(&mut self, d_100ns: i64) {

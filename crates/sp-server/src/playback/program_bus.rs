@@ -61,8 +61,8 @@
 //! unchanged. A fade first waits for the incoming source's first LIVE pair
 //! (the cue gate), with the outgoing source held on program at full level —
 //! the window half lives in the child module `program_bus_window.rs`. The
-//! engine asks [`ProgramCore::hold_for`] whether a source that left its OBS
-//! scene must keep playing through a window ([`Hold`]).
+//! engine asks [`ProgramCore::hold_for`] whether a source that left program
+//! must keep playing through a window ([`Hold`]).
 //!
 //! This file is the PURE, Linux-tested decision layer ([`ProgramCore`]) plus
 //! its `Mutex`/`Condvar` wrapper ([`ProgramBus`]) and the settings persistence
@@ -80,17 +80,20 @@ use sp_core::genlock::{
     interval_100ns, lag_slots_100ns, strict_next_boundary_100ns,
 };
 use sqlx::SqlitePool;
+use tokio::sync::watch;
 use tracing::{info, warn};
 
+use crate::playback::fleet_shift::{self, FleetShift, timeline_now_100ns};
+use crate::playback::legacy_cg::LegacyCg;
 use crate::playback::ndi_input::NdiInputShared;
 use crate::playback::program_follow::FollowShared;
+use crate::playback::program_on_air::OnAir;
 use crate::playback::program_transition::{
     ActiveWindow, Cue, MixJob, SpecSource, TransitionCounters, TransitionSpec, TransitionStatus,
     Window,
 };
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 use crate::playback::vban_out::VbanOut;
-use crate::playback::wallclock::utc_now_100ns;
 use crate::remote::RemoteShared;
 
 /// The program output's NDI source name.
@@ -208,17 +211,32 @@ pub struct ProgramStatus {
     pub transition: TransitionStatus,
 }
 
-/// #215: why the engine keeps a playlist that left its OBS scene playing
-/// ([`ProgramCore::hold_for`]).
+impl ProgramStatus {
+    /// The same status with every stamp it shows on the NDI wire under
+    /// `fleet`'s K (#224 part 2: the bus decides on internal stamps; an API
+    /// field or a log line shows the stamp a receiver sees). 0 = none stays 0.
+    pub fn on_wire(mut self, fleet: &FleetShift) -> Self {
+        self.cut_boundary_100ns = self.cut_boundary_100ns.map(|b| fleet.wire_100ns(b));
+        let last = &mut self.health.last_stamp_100ns;
+        if *last != 0 {
+            *last = fleet.wire_100ns(*last);
+        }
+        if let Some(w) = self.transition.active.as_mut() {
+            w.start_boundary_100ns = fleet.wire_100ns(w.start_boundary_100ns);
+        }
+        self
+    }
+}
+
+/// #215: why the engine keeps a playlist that left program playing
+/// ([`ProgramCore::hold_for`]). #221 L4b deleted `OnProgram` (the selected
+/// source, whose cut away might follow cg OBS's scene event): the playback
+/// authority never takes the program's own source off program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hold {
     /// The source is the `from` of a window (or a cut) not served yet: keep it
     /// playing until this stamp, one slot after the window's end.
     Until(i64),
-    /// The source is still the selected one. A cut away from it may still be
-    /// on its way: the follow task and the #213 remote control cut only AFTER
-    /// cg OBS switched.
-    OnProgram,
 }
 
 /// The pure program-bus decision layer: ownership, the reorder buffer, the
@@ -296,8 +314,8 @@ impl ProgramCore {
         changed
     }
 
-    /// #215: whether the engine must keep `pid` playing although its OBS scene
-    /// left program (see [`Hold`]). `None` = pause it now, as before. A window
+    /// #215: whether the engine must keep `pid` playing although it left
+    /// program (see [`Hold`]). `None` = pause it now, as before. A window
     /// still waiting for its cue holds its outgoing source to the latest end
     /// the window can reach (the cue gate's wait included).
     pub fn hold_for(&self, pid: i64) -> Option<Hold> {
@@ -306,11 +324,8 @@ impl ProgramCore {
             .iter()
             .filter(|w| w.from == Some(pid))
             .map(|w| w.end_100ns)
-            .max();
-        match end {
-            Some(end) => Some(Hold::Until(strict_next_boundary_100ns(end, self.fps))),
-            None => (self.selected() == Some(pid)).then_some(Hold::OnProgram),
-        }
+            .max()?;
+        Some(Hold::Until(strict_next_boundary_100ns(end, self.fps)))
     }
 
     /// The selected source (the latest cut's target).
@@ -653,9 +668,18 @@ pub struct ProgramBus {
     remote: Arc<RemoteShared>,
     /// #215: the OBS-follow telemetry (`follow` on `GET /api/v1/program`).
     follow: Arc<FollowShared>,
+    /// #221 L4a: what SongPlayer told cg OBS to show (`legacy_cg.rs`, until
+    /// B4 step 6).
+    legacy_cg: Arc<LegacyCg>,
     /// #213: serializes [`persist_and_cut`] — the API and the remote control
     /// can cut concurrently, and the persisted source must be the one cut last.
     cut_serial: tokio::sync::Mutex<()>,
+    /// #221: what is on air, published on every cut and on the startup
+    /// selection (`program_on_air.rs`).
+    on_air: watch::Sender<OnAir>,
+    /// #221: one scene switch at a time, in arrival order, across every
+    /// client (`program_switch::switch_scene`).
+    switch_order: tokio::sync::Mutex<()>,
 }
 
 impl Default for ProgramBus {
@@ -676,7 +700,10 @@ impl ProgramBus {
             input: Arc::new(NdiInputShared::default()),
             remote: Arc::new(RemoteShared::default()),
             follow: Arc::new(FollowShared::default()),
+            legacy_cg: Arc::new(LegacyCg::default()),
             cut_serial: tokio::sync::Mutex::new(()),
+            on_air: watch::channel(OnAir::default()).0,
+            switch_order: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -698,6 +725,11 @@ impl ProgramBus {
     /// #215: the OBS-follow telemetry.
     pub fn follow(&self) -> &Arc<FollowShared> {
         &self.follow
+    }
+
+    /// #221 L4a: what SongPlayer told cg OBS to show.
+    pub fn legacy_cg(&self) -> &Arc<LegacyCg> {
+        &self.legacy_cg
     }
 
     /// See [`ProgramCore::set_transition`].
@@ -737,21 +769,49 @@ impl ProgramBus {
         self.ready.notify_one();
     }
 
-    /// Cut the program to `pid` (see [`ProgramCore::cut`]) and return the new
-    /// state.
-    pub fn cut(&self, pid: i64, now_100ns: i64) -> ProgramStatus {
+    /// Cut the program to `pid` (see [`ProgramCore::cut`]), publish it as on
+    /// air for `scene`, and return the new state. #221: EVERY cut is
+    /// published, a cut to the source already on air too, under the state
+    /// lock (so in cut order).
+    pub fn cut(&self, pid: i64, now_100ns: i64, scene: Option<&str>) -> ProgramStatus {
         let mut st = self.lock();
         st.core.cut(pid, now_100ns);
-        st.core.status()
+        self.publish(pid, scene);
+        st.core.status().on_wire(fleet_shift::global())
     }
 
-    /// See [`ProgramCore::select_initial`].
-    pub fn select_initial(&self, pid: i64) {
-        self.lock().core.select_initial(pid);
+    /// See [`ProgramCore::select_initial`]; published as on air for `scene`.
+    pub fn select_initial(&self, pid: i64, scene: Option<&str>) {
+        let mut st = self.lock();
+        st.core.select_initial(pid);
+        self.publish(pid, scene);
+    }
+
+    /// #221: publish `source` as on air for `scene` (`seq` + 1). Always
+    /// `send_modify`: `send` drops the value while nobody subscribed yet.
+    fn publish(&self, source: i64, scene: Option<&str>) {
+        self.on_air
+            .send_modify(|on_air| *on_air = on_air.next(source, scene));
+    }
+
+    /// #221: a receiver of what is on air; it has seen the current value, so
+    /// `changed` waits for the next publication.
+    pub fn on_air(&self) -> watch::Receiver<OnAir> {
+        self.on_air.subscribe()
+    }
+
+    /// #221: what is on air now.
+    pub fn on_air_now(&self) -> OnAir {
+        self.on_air.borrow().clone()
+    }
+
+    /// #221: the order of the scene switches (`program_switch`).
+    pub fn switch_order(&self) -> &tokio::sync::Mutex<()> {
+        &self.switch_order
     }
 
     pub fn status(&self) -> ProgramStatus {
-        self.lock().core.status()
+        self.lock().core.status().on_wire(fleet_shift::global())
     }
 
     /// Sender thread: the next queued boundary, waiting at most `wait` for one.
@@ -814,23 +874,27 @@ pub async fn persist_selected_source(pool: &SqlitePool, pid: i64) -> Result<(), 
 }
 
 /// Persist `pid` as the selected source FIRST, then cut the program to it (a
-/// failed write cuts nothing). The one cut path of `POST /api/v1/program/cut`
-/// and the #213 remote control; two cuts never interleave, so the persisted
-/// source is always the one on program.
+/// failed write cuts nothing) and publish it as on air for `scene` (#221). The
+/// one cut path of `POST /api/v1/program/cut` and the #213 remote control; two
+/// cuts never interleave, so the persisted source is always the one on
+/// program.
 pub async fn persist_and_cut(
     pool: &SqlitePool,
     bus: &ProgramBus,
     pid: i64,
+    scene: Option<&str>,
 ) -> Result<ProgramStatus, sqlx::Error> {
     let _serial = bus.cut_serial.lock().await;
     persist_selected_source(pool, pid).await?;
-    Ok(bus.cut(pid, utc_now_100ns()))
+    Ok(bus.cut(pid, timeline_now_100ns(), scene)) // #224 part 2: the stamps' timeline
 }
 
 /// Restore the persisted program source into `bus` (startup). Returns the
 /// restored source id; a missing or unreadable setting leaves the program on
 /// its standby pair. The #212 NDI input (`PROGRAM_INPUT_ID`) is restored only
 /// while it is active (enabled with a source) — otherwise it is not a source.
+/// #221: published as on air with the playlist's catalog scene
+/// (`scene_catalog::scene_of_source`; none for the input).
 pub async fn restore_selected_source(pool: &SqlitePool, bus: &ProgramBus) -> Option<i64> {
     let raw = match crate::db::models::get_setting(pool, SETTING_PROGRAM_SOURCE).await {
         Ok(v) => v?,
@@ -853,8 +917,11 @@ pub async fn restore_selected_source(pool: &SqlitePool, bus: &ProgramBus) -> Opt
         );
         return None;
     }
-    bus.select_initial(pid);
-    info!(source = pid, "program bus: restored the selected source");
+    let scene = crate::playback::scene_catalog::scene_of_source(pool, pid).await;
+    bus.select_initial(pid, scene.as_deref());
+    // #221 L4a: what cg OBS was last told to show, when it is a playlist.
+    bus.legacy_cg().restored(pid);
+    info!(source = pid, scene = ?scene, "program bus: restored the selected source");
     Some(pid)
 }
 
@@ -872,6 +939,9 @@ mod tests;
 #[cfg(test)]
 #[path = "program_bus_tests_cue.rs"]
 mod tests_cue;
+#[cfg(test)]
+#[path = "program_bus_tests_regrid.rs"]
+mod tests_regrid;
 #[cfg(test)]
 #[path = "program_bus_tests_transition.rs"]
 mod tests_transition;

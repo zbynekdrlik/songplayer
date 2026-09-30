@@ -141,6 +141,36 @@ test("the chain tooltip shows stemy + titulky and drops prepis/preklad with stem
   await expect(dubChip).not.toHaveAttribute("title", /preklad/);
 });
 
+test("a dub waiting on a problem shows it in the tooltip, not only on failure (#136)", async ({
+  page,
+  request,
+}) => {
+  // #136 review: the dub worker found the song's audio file missing after the
+  // heavy slot. It waits with no penalty (still `synth`) and records why in
+  // `dub_error`; the tooltip must say so, not just "(teraz: dabing)".
+  const why = "the song's audio file is missing: C:\\cache\\Talk_Speaker_x_normalized_audio.flac";
+  await request.post("/__mock/dabing-add", {
+    data: {
+      video_id: 351,
+      title: "Kazen bez zvuku",
+      dub_status: "synth",
+      chain_state: "synth",
+      stem_status: "done",
+      dub_error: why,
+    },
+  });
+  await page.goto("/dabing");
+  await expect(page.locator(".dabing-page h2")).toBeVisible({ timeout: 10000 });
+
+  const dubChip = page
+    .locator('[data-testid="dabing-list"] [data-testid="song-row"]')
+    .first()
+    .locator('[data-testid="chip-dub"]');
+  await expect(dubChip).toBeVisible({ timeout: 5000 });
+  await expect(dubChip).toHaveAttribute("title", /teraz: dabing/);
+  await expect(dubChip).toHaveAttribute("title", /audio file is missing/);
+});
+
 test("an over-cap dub (unsupported stems) shows no stemy step in the tooltip (#182/#194)", async ({
   page,
   request,

@@ -382,10 +382,15 @@ Otherwise a stale text Arena restored from its saved composition stays until
 the next line change, for the whole song, or over the next camera shot.
 
 **The title is ONE `Resync` (#217 addendum 3), sent first.** A recovery and
-a Play send it through `resync_wall_title`; the OBS scene-on
+a Play send it through `resync_wall_title`; the scene-on
 (`push_title_for_playing`) calls `decide_wall_title` + `send_resync` itself,
 to re-arm the timers in between. It names the title that SHOULD be up, and
-the driver compares it with what it did (above).
+the driver compares it with what it did (above). A scene-off with another
+playlist still on program (#221 L4b, `scene_off.rs::wall_after_scene_off`)
+calls `decide_wall_title` too: a due title is a `Resync`, none due is a
+`HideTitle` (`title::push_hide`, which also clears cg OBS's text), so the
+outgoing title fades instead of being cut by a `Resync(None)`; its lines
+are the recovery's `on_program_lines`.
 
 - **One clock: `TitleClock { video_id, show_at, hide_at }`**
   (`playback/title.rs`). The `Started` handler fixes it
@@ -467,8 +472,8 @@ the driver compares it with what it did (above).
   ~500 ms at each boundary they disagreed. A `Resync(Some)` queued with the
   song-end HideTitle superseded it, and the title stayed into the next song;
   a `Resync(None)` just after the show timer hid the title for the whole song.
-  Every OBS program change re-sends `on_program: true` for every on-program
-  playlist (`obs_bridge.rs`), so a Resync near a boundary is common. The
+  Every program change re-syncs (the playback authority's ON / OFF,
+  `program_authority.rs`, #221 L4b), so a Resync near a boundary is common. The
   timers and the Resync now read the same instants. Only the moment between
   the decision and the enqueue can still race a timer: an await on the
   shared 64-slot engine → Resolume fan-out channel (no DB read), and a
@@ -488,7 +493,14 @@ the driver compares it with what it did (above).
   re-arms (cheap tasks, the same deadlines).
 - **Both timers write the clip only on program, and a pause cancels them**
   (release 0.68.0 blockers 1a + 1c). The hide timer reads `scene_active`
-  when it fires, like the show timer. Before, a hide timer armed by a song
+  when it fires, like the show timer; since release 0.69.0 (review 🟡 2)
+  both also read whether their playlist may write the wall
+  (`title_timers.rs::WallGate`, `program-bus.md` "One wall owner"), so the
+  other member of a two-member on-air set never shows or hides the owner's
+  title, and a re-sync names only the owner's. So the new owner's ON
+  re-syncs the title even when it plays nothing (a `Resync` naming none,
+  `scene_off::wall_after_owner_on`, review round 2): the old owner's hide
+  timer no longer takes its title down. Before, a hide timer armed by a song
   that started off program (a playlist held through a #215 transition)
   faded out the on-program playlist's title. `PlayAction::Pause` cancels
   the song's timers: a paused song's hide timer fired at its planned end.

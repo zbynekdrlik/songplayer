@@ -173,6 +173,15 @@ pub(crate) fn isolation_input(
     }
 }
 
+/// #136 tripwire: the stems are recorded `'done'` but the vocals file is missing
+/// under the name the song's audio derives. That `WaitForStems` can never end on
+/// its own (the stem worker never re-picks a `'done'` row), so it is WARNed.
+/// The repair is the startup self-heal, which re-links stems left under an old
+/// name or resets the row to pending.
+pub(crate) fn stems_left_behind(stem_status: Option<&str>, vocals_exists: bool) -> bool {
+    stem_status == Some("done") && !vocals_exists
+}
+
 // ---------------------------------------------------------------------------
 // Live-handle seam for the lyrics worker — reads its in-process wall handles to
 // drive the abort watcher, and surfaces the abort to the dashboard. I/O only;
@@ -227,18 +236,31 @@ impl crate::lyrics::worker::LyricsWorker {
         };
         let vocals_path = crate::stems::stem_paths(std::path::Path::new(audio)).0;
         // Raw stem_status vocabulary (`crate::db::models_stems`): NULL = pending,
-        // 'done', 'failed', 'unsupported'.
-        let stem_status: Option<String> = match sqlx::query_scalar::<_, Option<String>>(
-            "SELECT stem_status FROM videos WHERE id = ?",
-        )
-        .bind(row.id)
-        .fetch_optional(&self.pool)
-        .await
-        {
-            Ok(Some(s)) => s,
-            _ => None,
-        };
+        // 'done', 'failed', 'unsupported'. The recorded vocals path is read only
+        // for the #136 tripwire below.
+        let (stem_status, recorded): (Option<String>, Option<String>) =
+            match sqlx::query_as::<_, (Option<String>, Option<String>)>(
+                "SELECT stem_status, vocals_file_path FROM videos WHERE id = ?",
+            )
+            .bind(row.id)
+            .fetch_optional(&self.pool)
+            .await
+            {
+                Ok(Some(r)) => r,
+                _ => (None, None),
+            };
         let exists = vocals_path.exists();
+        if stems_left_behind(stem_status.as_deref(), exists) {
+            tracing::warn!(
+                video_id = row.id,
+                audio = %audio,
+                expected_vocals = %vocals_path.display(),
+                recorded_vocals = recorded.as_deref().unwrap_or("-"),
+                "lyrics: stems are recorded done but the vocals file is missing under the \
+                 audio's name, waiting for stems (the next start's self-heal re-links them \
+                 or resets the song to pending)"
+            );
+        }
         isolation_input(stem_status.as_deref(), &vocals_path, exists)
     }
 

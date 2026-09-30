@@ -169,15 +169,17 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 
     /// Submit one program boundary and return its stamp. A forwarded source
-    /// job keeps its own stamps; a standby pair is stamped on its boundary with
-    /// the audio stamped `audio_now_100ns` (the emit instant, like #147
-    /// standby audio).
-    pub fn submit(&mut self, job: ProgramJob, audio_now_100ns: i64) -> i64 {
+    /// job keeps its own stamps. What the program makes itself (a standby
+    /// pair, a mixed block) is stamped on its boundary, the audio too: the
+    /// block belongs to that boundary's timeline instant, never the submit
+    /// instant — a standby pair for a missed boundary goes out up to the
+    /// fill grace (3 slots) late (#224).
+    pub fn submit(&mut self, job: ProgramJob) -> i64 {
         if !matches!(job, ProgramJob::Mix(_)) {
             self.end_mix_run();
         }
         match job {
-            ProgramJob::Mix(mix) => self.submit_mix(mix, audio_now_100ns),
+            ProgramJob::Mix(mix) => self.submit_mix(mix),
             ProgramJob::Source(job) => {
                 let stamp = job.video_tc_100ns;
                 self.submitter.submit_frame_at_boundary_owned(
@@ -202,7 +204,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
                     black,
                     &self.silence,
                     stamp_100ns,
-                    audio_now_100ns,
+                    stamp_100ns,
                 );
                 self.feed_vban(VbanBlock::silence(stamp_100ns));
                 stamp_100ns
@@ -211,14 +213,14 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 
     /// #215: one window boundary: the crossfaded audio block, then the mixed
-    /// picture, stamped like a source boundary (the audio with `to`'s stamp,
-    /// else `from`'s). A mix with neither side (the bus never queues one) goes
-    /// out as the standby pair.
-    fn submit_mix(&mut self, mix: MixJob, audio_now_100ns: i64) -> i64 {
+    /// picture, both stamped on the window boundary (#224: the program's own
+    /// block). A mix with neither side (the bus never queues one) goes out as
+    /// the standby pair.
+    fn submit_mix(&mut self, mix: MixJob) -> i64 {
         let stamp = mix.stamp_100ns;
         let started = Instant::now();
         let Some((layout, video)) = self.mix_picture(&mix) else {
-            return self.submit(ProgramJob::Standby { stamp_100ns: stamp }, audio_now_100ns);
+            return self.submit(ProgramJob::Standby { stamp_100ns: stamp });
         };
         let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
         self.mix_run.boundaries += 1;
@@ -236,11 +238,6 @@ impl<B: NdiBackend> ProgramOutput<B> {
             total,
             format,
         )];
-        let audio_tc = mix
-            .to
-            .as_ref()
-            .or(mix.from.as_ref())
-            .map_or(audio_now_100ns, |j| j.audio_tc_100ns);
         self.submitter.submit_frame_at_boundary_owned(
             layout.width,
             layout.height,
@@ -248,7 +245,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             video,
             &audio,
             stamp,
-            audio_tc,
+            stamp,
         );
         self.feed_vban(VbanBlock::from_frames(stamp, audio));
         stamp
@@ -381,7 +378,7 @@ pub fn run_program_loop<B: NdiBackend>(
         bus.release_due(now);
         match bus.take_timeout(next_check_wait(now)) {
             Take::Job(job) => {
-                let stamp = out.submit(job, wall.now_100ns());
+                let stamp = out.submit(job);
                 bus.record_submitted(stamp);
                 since_conn_poll += 1;
                 if since_conn_poll >= CONN_POLL_EVERY {
@@ -409,10 +406,19 @@ impl super::PlaybackEngine {
     /// Windows its grid thread on the engine's NDI SDK). #213: also start the
     /// Companion remote control's settings task (its listener cuts this bus and
     /// reaches cg OBS through the engine's OBS client). #215: also start the
-    /// OBS-follow task and keep the bus for the deferred scene-go-off pause.
+    /// OBS-follow task and keep the bus for the deferred scene-go-off pause;
+    /// #219: the follow consumes the OBS client's snapshots (`obs`).
+    /// #221 L4b: also tell cg OBS once what the restored program shows (the
+    /// startup re-mirror) and start the playback authority
+    /// (`program_authority.rs`), whose first value plays the restored program.
     /// Call once, after the #196 startup senders.
     #[cfg_attr(test, mutants::skip)]
-    pub async fn start_program(&self, bus: Arc<ProgramBus>, shutdown: &broadcast::Sender<()>) {
+    pub async fn start_program(
+        &self,
+        bus: Arc<ProgramBus>,
+        shutdown: &broadcast::Sender<()>,
+        obs: tokio::sync::watch::Receiver<crate::obs::ObsSnapshot>,
+    ) {
         let _ = self.program.set(bus.clone()); // #215: the deferred scene-go-off pause
         let vban = bus.vban().clone();
         tokio::spawn(run_vban_config_task(
@@ -445,8 +451,19 @@ impl super::PlaybackEngine {
         );
         let upstream =
             crate::remote::Upstream::new(self.obs_cmd_tx.clone(), self.obs_event_tx.clone());
+        // #221 L4a: the dashboard's cut mirrors to cg OBS through the same link.
+        bus.legacy_cg().attach(upstream.clone());
+        // #221 L4b decision 1: cg OBS is told once what the restored program shows.
+        crate::playback::program_switch::remirror_on_air(&bus, &upstream).await;
+        // #221 L4b: SP-program (∪ SongPlayer's cg OBS record) drives playback.
+        tokio::spawn(super::program_authority::run_program_authority(
+            bus.clone(),
+            self.event_tx.clone(),
+            self.on_air.clone(),
+            shutdown.subscribe(),
+        ));
         let follow = crate::playback::program_follow::Follow::new(self.pool.clone(), bus.clone());
-        crate::playback::program_follow::start_follow(follow, upstream.clone(), shutdown);
+        crate::playback::program_follow::start_follow(follow, obs, shutdown);
         crate::remote::start_remote(self.pool.clone(), bus.clone(), upstream, shutdown);
         tokio::spawn(async move {
             let _ = shutdown_rx.recv().await;

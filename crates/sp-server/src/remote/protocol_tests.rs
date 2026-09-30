@@ -128,8 +128,15 @@ fn check_identify_closes_4010_on_another_rpc_version_after_the_auth() {
     assert_eq!(err.code, 4009);
 }
 
+/// One JSON message parsed. `parse_client_message` takes the DECODED value
+/// (#221 L2b: the session decodes the frame first); a frame that does not
+/// decode is a session-level test (`session_tests.rs`).
+fn parse(text: &str) -> Result<ClientMessage, CloseReason> {
+    parse_client_message(serde_json::from_str(text).unwrap())
+}
+
 #[test]
-fn subprotocol_negotiation_echoes_json_and_refuses_msgpack_only() {
+fn subprotocol_negotiation_echoes_json_and_refuses_only_foreign_protocols() {
     assert_eq!(negotiate_subprotocol(None), Subprotocol::Default);
     assert_eq!(negotiate_subprotocol(Some("  ")), Subprotocol::Default);
     assert_eq!(
@@ -140,18 +147,66 @@ fn subprotocol_negotiation_echoes_json_and_refuses_msgpack_only() {
         negotiate_subprotocol(Some("obswebsocket.msgpack, obswebsocket.json")),
         Subprotocol::Json
     );
-    assert_eq!(
+    // #221 L2b: msgpack alone is Companion's offer (obs-websocket-js in
+    // Node) — never refused. Only a protocol that is neither is.
+    assert_ne!(
         negotiate_subprotocol(Some("obswebsocket.msgpack")),
+        Subprotocol::Unsupported
+    );
+    assert_eq!(
+        negotiate_subprotocol(Some("chat")),
         Subprotocol::Unsupported
     );
 }
 
 #[test]
+fn subprotocol_negotiation_prefers_json_and_takes_msgpack_without_it() {
+    let pick = |offer: &str| negotiate_subprotocol(Some(offer));
+    // JSON offered: JSON, next to msgpack in either order (the main
+    // session's decision, #221 L2b).
+    assert_eq!(
+        pick("obswebsocket.json,obswebsocket.msgpack"),
+        Subprotocol::Json
+    );
+    // msgpack without JSON: msgpack, also next to an unknown protocol.
+    assert_eq!(pick("obswebsocket.msgpack"), Subprotocol::MsgPack);
+    assert_eq!(pick(" obswebsocket.msgpack "), Subprotocol::MsgPack);
+    assert_eq!(pick("chat, obswebsocket.msgpack"), Subprotocol::MsgPack);
+    // A longer name is not the protocol.
+    assert_eq!(
+        pick("obswebsocket.msgpack2, xobswebsocket.json"),
+        Subprotocol::Unsupported
+    );
+}
+
+#[test]
+fn the_server_echoes_the_subprotocol_it_picked() {
+    assert_eq!(Subprotocol::Json.echo(), Some("obswebsocket.json"));
+    assert_eq!(Subprotocol::MsgPack.echo(), Some("obswebsocket.msgpack"));
+    assert_eq!(Subprotocol::Default.echo(), None);
+    assert_eq!(Subprotocol::Unsupported.echo(), None);
+}
+
+#[test]
+fn a_decoded_message_that_is_not_an_object_is_obs_websockets_4002() {
+    // #221 L2b: the parser sees the DECODED value, so a JSON and a msgpack
+    // frame that are not a message object get the same close.
+    for msg in [json!([1, 2]), json!(7), json!(null), json!("op")] {
+        assert_eq!(parse_client_message(msg), Err(decode_error()));
+    }
+    assert_eq!(
+        decode_error(),
+        CloseReason {
+            code: 4002,
+            reason: "You sent a non-object payload.",
+        }
+    );
+}
+
+#[test]
 fn parse_identify_with_and_without_subscriptions() {
-    let m = parse_client_message(
-        r#"{"op":1,"d":{"rpcVersion":1,"authentication":"abc","eventSubscriptions":4}}"#,
-    )
-    .unwrap();
+    let m = parse(r#"{"op":1,"d":{"rpcVersion":1,"authentication":"abc","eventSubscriptions":4}}"#)
+        .unwrap();
     assert_eq!(
         m,
         ClientMessage::Identify {
@@ -160,7 +215,7 @@ fn parse_identify_with_and_without_subscriptions() {
             event_subscriptions: 4,
         }
     );
-    let m = parse_client_message(r#"{"op":1,"d":{"rpcVersion":1}}"#).unwrap();
+    let m = parse(r#"{"op":1,"d":{"rpcVersion":1}}"#).unwrap();
     assert_eq!(
         m,
         ClientMessage::Identify {
@@ -174,13 +229,13 @@ fn parse_identify_with_and_without_subscriptions() {
 #[test]
 fn parse_reidentify_keeps_the_subscriptions_when_none_are_named() {
     assert_eq!(
-        parse_client_message(r#"{"op":3,"d":{"eventSubscriptions":65536}}"#).unwrap(),
+        parse(r#"{"op":3,"d":{"eventSubscriptions":65536}}"#).unwrap(),
         ClientMessage::Reidentify {
             event_subscriptions: Some(65536)
         }
     );
     assert_eq!(
-        parse_client_message(r#"{"op":3,"d":{}}"#).unwrap(),
+        parse(r#"{"op":3,"d":{}}"#).unwrap(),
         ClientMessage::Reidentify {
             event_subscriptions: None
         }
@@ -189,7 +244,7 @@ fn parse_reidentify_keeps_the_subscriptions_when_none_are_named() {
 
 #[test]
 fn parse_request_and_batch() {
-    let m = parse_client_message(
+    let m = parse(
         r#"{"op":6,"d":{"requestType":"SetCurrentProgramScene","requestId":"r1","requestData":{"sceneName":"sp-fast"}}}"#,
     )
     .unwrap();
@@ -201,7 +256,7 @@ fn parse_request_and_batch() {
             request_data: Some(json!({ "sceneName": "sp-fast" })),
         })
     );
-    let m = parse_client_message(
+    let m = parse(
         r#"{"op":8,"d":{"requestId":"b1","haltOnFailure":true,"executionType":0,"requests":[{"requestType":"GetVersion"},{"requestId":"x"}]}}"#,
     )
     .unwrap();
@@ -224,7 +279,7 @@ fn parse_request_and_batch() {
             ],
         }
     );
-    let m = parse_client_message(r#"{"op":8,"d":{"requestId":"b2","requests":[]}}"#).unwrap();
+    let m = parse(r#"{"op":8,"d":{"requestId":"b2","requests":[]}}"#).unwrap();
     assert_eq!(
         m,
         ClientMessage::Batch {
@@ -237,8 +292,7 @@ fn parse_request_and_batch() {
 
 #[test]
 fn malformed_messages_map_to_obs_close_codes() {
-    let code = |text: &str| parse_client_message(text).unwrap_err().code;
-    assert_eq!(code("not json"), 4002);
+    let code = |text: &str| parse(text).unwrap_err().code;
     assert_eq!(code("[1,2]"), 4002);
     assert_eq!(code(r#"{"d":{}}"#), 4006);
     assert_eq!(code(r#"{"op":"6","d":{}}"#), 4006);
@@ -371,12 +425,17 @@ fn event_carries_type_intent_and_data() {
 }
 
 #[test]
-fn only_the_scene_events_pass_through_on_the_scenes_intent() {
-    assert_eq!(passthrough_intent("CurrentProgramSceneChanged"), Some(4));
+fn only_cg_obs_scene_list_passes_through_on_the_scenes_intent() {
     assert_eq!(passthrough_intent("SceneListChanged"), Some(4));
+    // #221 L3: cg OBS's program scene never — the program feedback is
+    // SongPlayer's own (`studio_events`).
+    assert_eq!(passthrough_intent("CurrentProgramSceneChanged"), None);
     assert_eq!(passthrough_intent("CurrentPreviewSceneChanged"), None);
     assert_eq!(passthrough_intent("StreamStateChanged"), None);
     assert_eq!(passthrough_intent(""), None);
+    // #221: never cg OBS's studio-mode event — Companion would cache studio
+    // mode OFF and every page-13 button would go silently dead.
+    assert_eq!(passthrough_intent("StudioModeStateChanged"), None);
 }
 
 #[test]
@@ -397,18 +456,42 @@ fn routes_of_the_companion_subset() {
         }
         other => panic!("GetVersion must be native, got {other:?}"),
     }
+    // #221: studio mode ON, so Companion's `do_transition` sends its request.
     assert_eq!(
         route("GetStudioModeEnabled"),
-        Route::Native(Reply::ok(Some(json!({ "studioModeEnabled": false }))))
+        Route::Native(Reply::ok(Some(json!({ "studioModeEnabled": true }))))
     );
     assert_eq!(route("SetCurrentProgramScene"), Route::SetProgramScene);
+    // Only the scene/input list getters go to cg OBS.
+    assert_eq!(
+        FORWARDED_REQUESTS.as_slice(),
+        [
+            "GetSceneList",
+            "GetInputList",
+            "GetSceneItemList",
+            "GetGroupSceneItemList",
+        ]
+        .as_slice()
+    );
     for t in FORWARDED_REQUESTS {
         assert_eq!(route(t), Route::Forward, "{t}");
+    }
+    // #221: the studio-mode requests of the page-13 buttons are served, and
+    // (L3) the program scene is SP-program's own.
+    for t in [
+        "GetCurrentProgramScene",
+        "SetCurrentPreviewScene",
+        "GetCurrentPreviewScene",
+        "TriggerStudioModeTransition",
+        "SetCurrentSceneTransitionDuration",
+    ] {
+        assert_ne!(route(t), Route::Unsupported, "{t}");
+        assert_ne!(route(t), Route::Forward, "{t} is never forwarded");
     }
     for t in [
         "GetStats",
         "GetHotkeyList",
-        "SetCurrentPreviewScene",
+        "SetStudioModeEnabled",
         "Sleep",
         "",
     ] {
@@ -439,8 +522,12 @@ fn version_data_has_what_companion_reads_unguarded() {
             "GetVersion",
             "GetStudioModeEnabled",
             "SetCurrentProgramScene",
-            "GetSceneList",
             "GetCurrentProgramScene",
+            "SetCurrentPreviewScene",
+            "GetCurrentPreviewScene",
+            "TriggerStudioModeTransition",
+            "SetCurrentSceneTransitionDuration",
+            "GetSceneList",
             "GetInputList",
             "GetSceneItemList",
             "GetGroupSceneItemList",
@@ -469,4 +556,96 @@ fn reply_ok_and_error_shapes() {
     );
     let v: Value = err.status;
     assert_eq!(v["code"], STATUS_NOT_READY);
+}
+
+// ---- #221: studio mode -----------------------------------------------------
+
+#[test]
+fn the_studio_mode_requests_are_answered_by_the_session() {
+    assert_eq!(route("SetCurrentPreviewScene"), Route::SetPreviewScene);
+    assert_eq!(route("GetCurrentPreviewScene"), Route::GetPreviewScene);
+    assert_eq!(
+        route("TriggerStudioModeTransition"),
+        Route::TriggerTransition
+    );
+    assert_eq!(
+        route("SetCurrentSceneTransitionDuration"),
+        Route::SetTransitionDuration
+    );
+}
+
+#[test]
+fn a_scene_request_needs_its_scene_name() {
+    let data = json!({ "sceneName": "sp-fast", "sceneUuid": "u" });
+    assert_eq!(scene_name(Some(&data)), Ok("sp-fast".to_string()));
+    for data in [
+        None,
+        Some(json!({})),
+        Some(json!({ "sceneUuid": "u-sp-fast" })),
+        Some(json!({ "sceneName": 7 })),
+    ] {
+        let err = scene_name(data.as_ref()).unwrap_err();
+        assert!(!err.succeeded(), "{data:?}");
+        assert_eq!(err.status["code"], STATUS_MISSING_REQUEST_FIELD, "{data:?}");
+    }
+}
+
+#[test]
+fn the_preview_answer_and_the_no_scene_error() {
+    assert_eq!(
+        preview_scene_data("Slido"),
+        json!({ "sceneName": "Slido", "currentPreviewSceneName": "Slido" })
+    );
+    let err = no_scene();
+    assert!(!err.succeeded());
+    assert_eq!(err.status["code"], STATUS_INVALID_RESOURCE_STATE);
+    assert_eq!(STATUS_INVALID_RESOURCE_STATE, 604);
+}
+
+#[test]
+fn a_transition_duration_is_validated_like_obs_websocket() {
+    let data = |v: Value| Some(json!({ "transitionDuration": v }));
+    let ok = |d: Option<Value>| transition_duration(d.as_ref()).unwrap();
+    let code =
+        |d: Option<Value>| transition_duration(d.as_ref()).unwrap_err().status["code"].clone();
+    assert_eq!(ok(data(json!(2000))), 2000);
+    assert_eq!(ok(data(json!(50))), TRANSITION_DURATION_MIN_MS);
+    assert_eq!(ok(data(json!(20_000))), TRANSITION_DURATION_MAX_MS);
+    assert_eq!(ok(data(json!(750.9))), 750, "a fraction is truncated");
+    assert_eq!(code(None), STATUS_MISSING_REQUEST_FIELD);
+    assert_eq!(code(Some(json!({}))), STATUS_MISSING_REQUEST_FIELD);
+    assert_eq!(code(data(Value::Null)), STATUS_MISSING_REQUEST_FIELD);
+    assert_eq!(code(data(json!("2000"))), STATUS_INVALID_REQUEST_FIELD_TYPE);
+    assert_eq!(code(data(json!(49.99))), STATUS_REQUEST_FIELD_OUT_OF_RANGE);
+    assert_eq!(
+        code(data(json!(20_000.01))),
+        STATUS_REQUEST_FIELD_OUT_OF_RANGE
+    );
+    assert_eq!(
+        (
+            STATUS_INVALID_REQUEST_FIELD_TYPE,
+            STATUS_REQUEST_FIELD_OUT_OF_RANGE
+        ),
+        (401, 402)
+    );
+}
+
+// ---- #221 L3: SP-program's own program scene -------------------------------
+
+#[test]
+fn get_current_program_scene_is_answered_from_sp_program() {
+    assert_eq!(route("GetCurrentProgramScene"), Route::GetProgramScene);
+    assert_eq!(
+        program_scene_data("sp-fast"),
+        json!({ "sceneName": "sp-fast", "currentProgramSceneName": "sp-fast" })
+    );
+    let nothing = nothing_on_program();
+    assert!(!nothing.succeeded());
+    assert_eq!(
+        nothing.status,
+        json!({ "result": false, "code": 604, "comment": "Nothing is on SP-program." })
+    );
+    assert_eq!(nothing.data, None);
+    // `EventSubscription::Transitions` (bit 4).
+    assert_eq!(EVENT_TRANSITIONS, 16);
 }

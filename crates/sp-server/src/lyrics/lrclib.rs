@@ -7,7 +7,7 @@ use sp_core::lyrics::{LyricsLine, LyricsTrack};
 use tracing::debug;
 
 #[cfg_attr(test, mutants::skip)]
-fn user_agent() -> String {
+pub(crate) fn user_agent() -> String {
     format!(
         "SongPlayer/{} (github.com/zbynekdrlik/songplayer)",
         env!("CARGO_PKG_VERSION")
@@ -31,7 +31,11 @@ const LRCLIB_DURATION_TOLERANCE_SECS: u32 = 10;
 /// unit-tested at exact boundary values without standing up a wiremock
 /// server.
 #[inline]
-fn is_duration_acceptable(lrclib_dur_s: f32, requested_dur_s: u32, tolerance_s: u32) -> bool {
+pub(crate) fn is_duration_acceptable(
+    lrclib_dur_s: f32,
+    requested_dur_s: u32,
+    tolerance_s: u32,
+) -> bool {
     let delta = (lrclib_dur_s - requested_dur_s as f32).abs();
     delta <= tolerance_s as f32
 }

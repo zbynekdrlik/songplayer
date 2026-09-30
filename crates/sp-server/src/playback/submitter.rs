@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns};
 use sp_ndi::{AudioFrame, NdiBackend, NdiSender, PixelFormat, VideoFrame};
 
+use crate::playback::fleet_shift::{shift_100ns, wire_stamp_100ns as wire};
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::wallclock::WallClock;
 
@@ -194,11 +195,12 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         // Genlock (#146): advance the wall clock once per submit, take ONE
         // wall reading, and stamp both streams from it. Audio carries the raw
         // wall clock (no snap, §6); video carries the floored grid boundary
-        // (§4, FLOOR never ceil).
+        // (§4, FLOOR never ceil). #224 part 2: the reading is the timeline,
+        // put back on the fleet labels with K_F.
         self.wall.tick();
-        let now_100ns = self.wall.now_100ns();
-        let audio_tc = Some(now_100ns);
-        let video_tc = Some(floor_boundary_100ns(now_100ns, GENLOCK_GRID_FPS));
+        let fleet_100ns = self.wall.now_100ns() + shift_100ns(self.wall.fleet().slots());
+        let audio_tc = Some(fleet_100ns);
+        let video_tc = Some(floor_boundary_100ns(fleet_100ns, GENLOCK_GRID_FPS));
 
         // 1. Audio first — fast, non-blocking, goes straight into NDI's queue.
         for af in audio {
@@ -294,11 +296,15 @@ impl<B: NdiBackend> FrameSubmitter<B> {
 
     /// Submit one boundary-paced frame at EXPLICIT genlock timecodes (#147).
     ///
-    /// Audio chunks first (stamped `audio_tc_100ns`, the raw wall clock — §6),
-    /// then the video frame async (stamped `video_tc_100ns`, the floored
+    /// Audio chunks first (stamped `audio_tc_100ns`, the timeline instant of
+    /// the block — every paced caller passes its boundary, #224), then the
+    /// video frame async (stamped `video_tc_100ns`, the floored
     /// boundary — §4). Unlike [`submit_nv12`](Self::submit_nv12) the `Pacer`
-    /// owns the wall clock and supplies both stamps, so this bypasses the
-    /// internal [`WallClock`]. The borrowed video is copied for the async
+    /// owns the wall clock and supplies both stamps, so this does not tick
+    /// the internal [`WallClock`]; both stamps are on the internal timeline
+    /// and go on the fleet labels here (#224 part 2: `floor_boundary(b +
+    /// D(K_F))`, K_F read from the wall's relabel registry once per pair).
+    /// The borrowed video is copied for the async
     /// double-buffer holdover, into a RECYCLED pool buffer
     /// ([`SharedFrame::copy_from_slice`], #147 round 10) — never a fresh alloc.
     #[allow(clippy::too_many_arguments)]
@@ -348,6 +354,15 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         self.frames_submitted_total += 1;
         self.frames_in_window += 1;
         self.last_submit_ts = Some(std::time::Instant::now());
+        // #224 part 2: the ONE edge where the fleet labels go on. The video
+        // stamp is an internal boundary b: on the wire it is b's boundary
+        // K_F slots later, floored — never future-dated. K_F is read once and
+        // the audio stamp moves by the SAME relabel, so a source's own audio
+        // offset survives (0 on the paced paths; the program forwards a
+        // source's stamps).
+        let video_wire = wire(video_tc_100ns, self.wall.fleet().slots());
+        let audio_tc_100ns = audio_tc_100ns + (video_wire - video_tc_100ns);
+        let video_tc_100ns = video_wire;
 
         // 1. Audio first — the boundary's chunks go into NDI's queue before
         //    the video frame (the audio-first invariant, submitter.rs top).
@@ -366,8 +381,9 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         // every boundary. Paced path
         // only; read the shared flag fresh so a toggle-off clears within one
         // frame. `frame_id` = the pacing `seq` (== `frames_submitted_total`,
-        // bumped above); `gen_ts_ns` = the serviced boundary wall time in ns
-        // (`video_tc_100ns` is in 100-ns units).
+        // bumped above); `gen_ts_ns` = the WIRE stamp in ns, the relabelled
+        // boundary the receiver sees (#224 part 2; `video_tc_100ns` is in 100-ns
+        // units).
         let mut video = video;
         if self.burn_on.load(Ordering::Relaxed) {
             crate::playback::burn_overlay::paint_burn(
@@ -959,3 +975,7 @@ mod submitter_tests_standby;
 #[cfg(test)]
 #[path = "submitter_tests_mutants.rs"]
 mod submitter_tests_mutants;
+
+#[cfg(test)]
+#[path = "submitter_tests_regrid.rs"]
+mod submitter_tests_regrid;

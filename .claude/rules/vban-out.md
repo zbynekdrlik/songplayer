@@ -33,8 +33,8 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
   NDI submit (each up to ~20 ms p99). An on-time packet gets exactly one wait, so they go out evenly.
   A block that arrives AFTER its first packet is due sends its past-due packets
   back-to-back, each counted in `late_sends`. That happens after a program fill
-  past the 3-slot grace, or for ≤ ~3.3 s after a confirmed fleet date step
-  (walls up to ~1.5 slots apart, see program-bus.md). If the box capture shows
+  past the 3-slot grace or a real stall — never at a fleet date step since
+  #224 part 2 (below). If the box capture shows
   `late_sends` climbing there, re-measure the block arrival lead before raising L again.
 - Residual: a program RESYNC (> 8 missed slots) skips stamps. VBAN then has a
   time gap while its counter stays contiguous, and the receiver sees an
@@ -43,7 +43,8 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
   (`pipeline_audio::raise_thread_priority`, shared with the NDI audio emitter)
   with the 1 ms multimedia timer.
 - Clock: its own `WallClock`, ticked through `program_output::BoundaryTicker`
-  once per boundary passed (`WallVbanClock`). `run_vban_loop` reads the clock on
+  once per boundary passed (`WallVbanClock::slewing`; the NDI input uses
+  `WallVbanClock::new`, which follows its wall). `run_vban_loop` reads the clock on
   EVERY pass, also for a block it does not send (disabled, no target) and on an
   idle wake every 100 ms (`VBAN_IDLE_WAIT`, under the 8-tick cap). If it did
   not, the wall would go stale while the output is off, and the first packets
@@ -117,3 +118,67 @@ Box acceptance is the supervisor's job: point `vban_targets` at a dev1 LAN
 receiver and never at FOH, capture 60 s with tcpdump and check 0 counter gaps,
 an interval p99 < 7 ms, and PCM that cross-correlates with `SP-program`.
 Routing fohabl/lv1 in VB-Matrix is B4, with the owner's go.
+
+## FOH routing on fohabl (VB-Matrix over VBAN-TEXT)
+
+On 28.9.2026 FOH "CG L/R" (`VASIO32.OUT[27..28]`) was switched back to the cg OBS VBAN (`VBAN2`). SongPlayer's `sp-program` (`VBAN6`) points stay present but muted (#210 comment 5864647147).
+
+- **Switch with `Mute` only.** VB-Matrix silently ignores `dBGain=-inf`: it sends no reply and applies no change. A revert that relied on it summed cg and SongPlayer on FOH for ~16 s.
+  - SongPlayer → FOH: `Point(VBAN2.IN[1],VASIO32.OUT[27]).Mute = 1;Point(VBAN2.IN[2],VASIO32.OUT[28]).Mute = 1;Point(VBAN6.IN[1],VASIO32.OUT[27]).Mute = 0;Point(VBAN6.IN[2],VASIO32.OUT[28]).Mute = 0;`
+  - cg → FOH: the same four points with the Mute values swapped.
+- **Read back every point after each write.** Record the prior values first (fohabl is critical production).
+- **FOH follows cg now.** Before a SongPlayer deploy or restart, or an Arena kill/relaunch, on win-resolume, message the camera-box session: it watches the cg audio path.
+
+## A fleet date step: SlewRemainder (#224 part 2)
+
+The walls relabel a date step (`genlock.md` "A date step relabels"): the whole
+slots N never reach any timeline, the timeline moves only by the remainder r
+(< one slot). VBAN has no timecode and VB-Matrix paces by arrival, so even a
+jump of r would send r of audio at once (the 20:58Z +260 ms step sent ~80
+packets back to back before part 2).
+
+- `WallVbanClock::slewing` (the VBAN thread's clock, `vban_clock.rs` since
+  review round 1; `vban_out` re-exports it) reads `line − owed`
+  (`RemainderSlew`, pure): when its wall's summed line movement
+  (`WallClock::shift().moved_100ns`: the LINE's net movement, measured at
+  the tick's instant, in every tick that followed a step or rejoined after
+  an idle gap — a resample's armed 1 ms and a rejoin hold a follow
+  re-anchors through included, review round 3) changed, it OWES the change
+  (SIGNED: r ahead, or a residue hold of at most ~4 ms), so its own reading
+  neither jumps nor stops; the owed amount then shrinks toward 0 at
+  `VBAN_SLEW_PPM` = 40 ppm of the elapsed line (100 ns per 2.5 ms: a whole
+  slot is paid in ~14 min). It reads the timeline's LINE
+  (`WallClock::line_100ns`), which runs on through a hold. The queue holds
+  up to r more meanwhile (about one block at most, far under the bound); a
+  hold's packets go out up to its size early, inside the 2-slot send
+  latency. A movement over `VBAN_SLEW_MAX_100NS` (one slot + the 3 ms
+  residue: only a rejoin after a > 10 s VBAN stall, or two epochs at once)
+  is taken at once with one WARN (`vban clock: the timeline moved more than
+  a slot at once`) and counted (`WallVbanClock::taken_at_once`): slewed at
+  40 ppm it would keep VBAN off the program for hours. The cap applies to a
+  tick's NET movement: a > 10 s VBAN stall whose rejoin drifted over 3 ms
+  AND a follow in the same tick is taken at once whole (rare; known).
+- 40, not 100: the packet spacing is already 41 666 / 41 667 / 41 668 × 100 ns
+  and each wait rounds to 100 ns, so one interval can pay ⌈41 668 × ppm /
+  10⁶⌉ × 100 ns; up to 47 ppm that is at most 2, keeping EVERY packet
+  interval within 4.1667 ms ± 100 ppm. At 50 ppm a 41 668 interval paid 3
+  and reached +104 ppm at one step phase in three (review round 3). Pinned
+  for +260.3 ms, −19.8 ms and a residue hold at three consecutive step
+  phases, `late_sends` 0, none under 1 ms: `vban_out_tests_regrid.rs`.
+- A residue hold IS owed (review round 1 🟡 G): read off the frozen wall,
+  one packet interval stretched by the hold (4.67 ms for 500 µs;
+  `a_residue_hold_at_a_follow_is_slewed_too_never_a_gap`). A bounded
+  resample's ≤ 1 ms correction in a tick that followed nothing is NOT owed:
+  VBAN follows it at once, as before #224 (#210). That is the drift since
+  the last resample (~100 µs at ±30 ppm, up to ~313 µs at 94 ppm: one
+  interval of ~4.07 / 4.27 ms), or up to 1 ms when a resample arms a step
+  whose follow comes in a LATER tick: a 1–2 ms step only the next resample
+  confirms, or a step over 2 ms landing on the resample tick whose probe is
+  rejected (a wide or unconfirmed read; 1 tick in 100 plus a preempted
+  read). The ±100 ppm guarantee covers date steps only.
+- Telemetry: `vban.slew_owed_us` on `GET /api/v1/program`, signed — r
+  right after a follow (negative after a residue hold), then toward 0; 0 in
+  steady state. `run_vban_loop` publishes it every pass.
+- Box acceptance at a controlled step: a dev1 capture with 0 bursts and 0
+  gaps over ~5.2 ms across the step, `late_sends` +0, `slew_owed_us` ≈ r
+  after it.

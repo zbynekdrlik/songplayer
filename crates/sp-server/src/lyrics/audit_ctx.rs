@@ -3,9 +3,11 @@
 //! After #159 the only sidecar still written is the Lever-2 (#143)
 //! reference-gate decision:
 //!
-//! - `{youtube_id}_alignment_audit.json` — the reviewable record for a
-//!   `Fail`/`Error` reference-stage outcome (a `Pass` needs no audit; the
-//!   stamped `+mtl@rev1/g35t-ok` source IS the record).
+//! - `{youtube_id}_alignment_audit.json` — the reviewable record of every
+//!   reference-stage outcome: `Pass`, `Fail` and `Error` (#144: a `Pass`
+//!   too, so every ★ row keeps its gate numbers, the sung coverage
+//!   included, and a stale `Fail` audit of an earlier run never outlives a
+//!   later `Pass`).
 //!
 //! The v20 whisperx-track and description-merge sidecars were removed with
 //! those routes. When `audit` is `None`, the write is skipped — keeps unit
@@ -28,6 +30,17 @@ impl AuditContext<'_> {
         self.cache_dir
             .join(format!("{}_alignment_audit.json", self.youtube_id))
     }
+}
+
+/// Remove the `{youtube_id}_alignment_audit.json` of an earlier pass, so a
+/// pass that skips the reference stage leaves no stale verdict next to its
+/// row (#144). Best-effort; nothing to remove is fine.
+pub async fn remove_alignment_audit(cache_dir: &Path, youtube_id: &str) {
+    let ctx = AuditContext {
+        cache_dir,
+        youtube_id,
+    };
+    let _ = tokio::fs::remove_file(ctx.alignment_audit_path()).await;
 }
 
 /// Write the Lever-2 (#143) reference-gate decision to
@@ -85,6 +98,18 @@ mod tests {
             .expect("file must exist");
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(parsed["verdict"], "fail");
+    }
+
+    #[tokio::test]
+    async fn remove_alignment_audit_removes_the_earlier_pass_audit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let audit_ctx = ctx(tmp.path(), "ref-old");
+        write_alignment_audit(Some(&audit_ctx), &serde_json::json!({"verdict": "pass"})).await;
+        assert!(audit_ctx.alignment_audit_path().exists());
+        remove_alignment_audit(tmp.path(), "ref-old").await;
+        assert!(!audit_ctx.alignment_audit_path().exists());
+        // Nothing left to remove is fine.
+        remove_alignment_audit(tmp.path(), "ref-old").await;
     }
 
     #[tokio::test]

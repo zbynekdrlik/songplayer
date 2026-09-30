@@ -5,6 +5,7 @@ pub mod dabing; // #180 dubbing D1
 pub mod live;
 pub mod lyrics;
 pub mod lyrics_catalog;
+pub mod metadata; // #136: status.metadata + POST /api/v1/metadata/probe
 pub mod mix; // #184 round G — the ONE live mixer console
 pub mod mix_apply; // #184 live-first mix apply seam
 pub mod preview;
@@ -13,6 +14,7 @@ pub mod routes;
 pub mod routes_import; // #180 shared bare-URL import core
 pub mod routes_ndi_recover;
 pub mod routes_seek; // #194 unified seek route
+pub mod routes_status; // #221 L4b: /api/v1/status's program fields from SongPlayer's own program
 pub mod stems;
 pub mod videos;
 pub mod websocket;
@@ -121,6 +123,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         )
         // Status
         .route("/api/v1/status", axum::routing::get(routes::status))
+        // #136: run each metadata provider of the production chain on one video
+        .route(
+            "/api/v1/metadata/probe",
+            axum::routing::post(metadata::probe),
+        )
         // Resolume hosts
         .route(
             "/api/v1/resolume/hosts",
@@ -157,10 +164,6 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/videos/{id}/lyrics",
             axum::routing::get(routes::get_video_lyrics),
-        )
-        .route(
-            "/api/v1/videos/{id}/lyrics/reprocess",
-            axum::routing::post(routes::reprocess_video_lyrics),
         )
         .route(
             "/api/v1/lyrics/status",

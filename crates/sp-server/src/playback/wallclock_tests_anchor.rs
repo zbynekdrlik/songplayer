@@ -10,6 +10,7 @@
 //! `wallclock.rs`.
 
 use super::*;
+use crate::playback::fleet_shift::shift_100ns;
 use std::time::{Duration, Instant};
 
 /// One 30-fps frame of virtual monotonic time (a multiple of 100 ns).
@@ -30,6 +31,30 @@ fn resample(wall: &mut WallClock, clk: &VirtualClock) -> (i64, i64) {
     let before = wall.now_100ns();
     wall.tick();
     assert_eq!(wall.frames_since_resample(), 0, "the 100th tick resamples");
+    (before, wall.now_100ns())
+}
+
+/// Run one resample interval whose resampling 100th tick reads with
+/// `delays` scripted: the step probe of every tick takes one read too (#224),
+/// so a preemption meant for the resample is scripted right before its tick.
+fn resample_reading(wall: &mut WallClock, clk: &VirtualClock, delays: &[u64]) -> (i64, i64) {
+    for _ in 0..99 {
+        clk.advance_ns(FRAME_NS);
+        wall.tick();
+    }
+    clk.advance_ns(FRAME_NS);
+    clk.delay_next_reads(delays);
+    let before = wall.now_100ns();
+    wall.tick();
+    assert_eq!(wall.frames_since_resample(), 0, "the 100th tick resamples");
+    (before, wall.now_100ns())
+}
+
+/// Advance one frame and tick; the wall just before and just after the tick.
+fn tick_once(wall: &mut WallClock, clk: &VirtualClock) -> (i64, i64) {
+    clk.advance_ns(FRAME_NS);
+    let before = wall.now_100ns();
+    wall.tick();
     (before, wall.now_100ns())
 }
 
@@ -322,35 +347,42 @@ fn every_attempt_preempted_still_moves_at_most_1_ms_and_never_back() {
 }
 
 #[test]
-fn a_genuine_plus_50_ms_utc_step_is_followed_in_one_event_once_confirmed() {
-    // #147 (design record 5845527884, Approach 1 (b)): a dantesync fleet date
-    // step (+50 ms, forward) is followed like every other fleet sender follows
-    // it. The first resample applies the bounded 1 ms and arms the step; the
-    // second, also narrow and measuring the same step (49 ms left + the 1 ms
-    // applied = 50 ms, within ±1 ms), follows the whole rest in ONE event.
+fn a_genuine_plus_50_ms_utc_step_is_followed_in_one_event_at_the_next_boundary() {
+    // #224 (design record 5890605448): a dantesync fleet date step (+50 ms,
+    // forward) is followed at the boundary the step probe first sees it, in
+    // ONE event, as every fleet receiver sees it at once — no longer 1 ms,
+    // then the rest two resamples (3.3–6.7 s) later (#147).
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
     clk.step_utc(50 * MS);
-    let (before, after) = resample(&mut wall, &clk);
-    assert_eq!(after - before, MS, "resample 1: the bounded 1 ms");
-    assert_eq!(clk.truth_100ns() - after, 49 * MS);
-    let (before, after) = resample(&mut wall, &clk);
+    let (before, after) = tick_once(&mut wall, &clk);
     assert_eq!(
-        after - before,
-        49 * MS,
-        "resample 2 confirms the step and follows the rest in one event"
+        wall.frames_since_resample(),
+        0,
+        "the follow restarts the count"
     );
-    assert_eq!(after, clk.truth_100ns(), "on the stepped UTC at once");
-    // Later resamples are normal again.
-    let (before, after) = resample(&mut wall, &clk);
+    // #224 part 2: 1 whole slot relabelled, the timeline moves r = 16.67 ms.
+    assert_eq!(after - before, 166_666, "r of the step, in one event");
+    let relabelled = || clk.truth_100ns() - shift_100ns(1);
+    assert_eq!(
+        after,
+        relabelled(),
+        "on the stepped UTC less 1 slot at once"
+    );
+    // The next resample, 100 ticks after the follow, is normal again.
+    for _ in 0..99 {
+        tick_once(&mut wall, &clk);
+    }
+    let (before, after) = tick_once(&mut wall, &clk);
+    assert_eq!(wall.frames_since_resample(), 0, "the 100th tick resampled");
     assert_eq!(after, before);
-    assert_eq!(after, clk.truth_100ns());
+    assert_eq!(after, relabelled());
     assert_eq!(
         wall.anchor_stats(),
         WallAnchorStats {
             max_step_us: 50_000,
             wide_brackets: 0,
-            slewed_us: 1_000,
+            slewed_us: 0,
             steps_followed: 1,
             last_step_us: 50_000,
             holds_followed: 0,
@@ -360,61 +392,39 @@ fn a_genuine_plus_50_ms_utc_step_is_followed_in_one_event_once_confirmed() {
 }
 
 #[test]
-fn a_genuine_minus_50_ms_utc_step_is_held_in_one_event_once_confirmed_never_stepped_back() {
-    // #147 (design record 5850063723): a backward date step is confirmed like
-    // a forward one, and then followed as ONE hold. The wall freezes for the
-    // rest of the step, then runs on the UTC line. It is never stepped back.
+fn a_genuine_minus_50_ms_utc_step_is_relabelled_at_the_next_boundary_never_held() {
+    // #224 part 2: a backward date step is followed at the boundary the probe
+    // first sees it: −2 whole slots relabelled (D(−2) = −66.67 ms), and the
+    // timeline moves FORWARD by r = 16.67 ms — no hold, never a step back.
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
     clk.step_utc(-50 * MS);
-    let (before, after) = resample(&mut wall, &clk);
-    assert_eq!(after, before, "resample 1: a 1 ms hold, never a step back");
+    let (before, after) = tick_once(&mut wall, &clk);
+    assert_eq!(after - before, 166_666, "r forward, never a hold");
+    let relabelled = || clk.truth_100ns() - shift_100ns(-2);
+    assert_eq!(after, relabelled(), "on the relabelled line at once");
+    clk.advance_ns(25_000_000);
+    assert_eq!(wall.now_100ns(), after + 25 * MS, "running, not held");
     clk.advance_ns(1_000_000);
-    assert_eq!(
-        wall.now_100ns(),
-        before,
-        "resample 1: held for exactly 1 ms"
-    );
-    assert_eq!(wall.now_100ns() - clk.truth_100ns(), 49 * MS);
-    let (before, after) = resample(&mut wall, &clk);
-    assert_eq!(after, before, "resample 2: the rest is ONE hold");
-    clk.advance_ns(24_500_000);
-    assert_eq!(
-        wall.now_100ns(),
-        before,
-        "resample 2: still holding half-way"
-    );
-    clk.advance_ns(24_500_000);
-    assert_eq!(
-        wall.now_100ns(),
-        before,
-        "resample 2: held for exactly 49 ms"
-    );
-    assert_eq!(
-        wall.now_100ns(),
-        clk.truth_100ns(),
-        "the UTC line reached it"
-    );
-    clk.advance_ns(1_000_000);
-    assert_eq!(
-        wall.now_100ns(),
-        clk.truth_100ns(),
-        "then it runs on the line"
-    );
-    // Later resamples are normal again.
-    let (before, after) = resample(&mut wall, &clk);
+    assert_eq!(wall.now_100ns(), relabelled(), "on the line");
+    // The next resample, 100 ticks after the follow, is normal again.
+    for _ in 0..99 {
+        tick_once(&mut wall, &clk);
+    }
+    let (before, after) = tick_once(&mut wall, &clk);
+    assert_eq!(wall.frames_since_resample(), 0, "the 100th tick resampled");
     assert_eq!(after, before);
-    assert_eq!(after, clk.truth_100ns());
+    assert_eq!(after, relabelled());
     assert_eq!(
         wall.anchor_stats(),
         WallAnchorStats {
             max_step_us: 50_000,
             wide_brackets: 0,
-            slewed_us: 1_000,
+            slewed_us: 0,
             steps_followed: 1,
             last_step_us: -50_000,
-            holds_followed: 1,
-            last_hold_us: 49_000,
+            holds_followed: 0,
+            last_hold_us: 0,
         }
     );
 }
@@ -469,24 +479,27 @@ fn the_counters_report_max_step_wide_brackets_and_slewed_total() {
     clk.advance_ns(FRAME_NS);
     assert_eq!(wall.now_100ns(), clk.truth_100ns());
 
-    // Eight 200 µs brackets: not wide (strictly wider only), the 100 µs
-    // midpoint error applies as-is.
-    clk.delay_next_reads(&[200_000; 8]);
-    resample(&mut wall, &clk);
+    // Eight 200 µs brackets on the RESAMPLE's reads: not wide (strictly wider
+    // only), the 100 µs midpoint error applies as-is.
+    resample_reading(&mut wall, &clk, &[200_000; 8]);
     assert_eq!(wall.anchor_stats().wide_brackets, 1);
     assert_eq!(wall.now_100ns() - clk.truth_100ns(), 1_000);
 
-    // A genuine +5 ms UTC step: delta 4.9 ms, 1 ms slewed.
-    clk.step_utc(5 * MS);
-    resample(&mut wall, &clk);
-    // A wide RESAMPLE counts too: 400 µs brackets, delta 4.1 ms, 1 ms more slewed.
-    clk.delay_next_reads(&[400_000; 8]);
-    resample(&mut wall, &clk);
-    assert_eq!(clk.reads(), 8 + 1 + 8 + 1 + 8);
+    // A +2 ms UTC step, 1.9 ms from the wall: within the step probe's 2 ms
+    // (#224), so the resample slews it — 1 ms applied.
+    clk.step_utc(2 * MS);
+    let (before, after) = resample(&mut wall, &clk);
+    assert_eq!(after - before, MS);
+    // A wide RESAMPLE counts too: 400 µs brackets, delta 1.1 ms, 1 ms more
+    // slewed, the 100 µs midpoint error left.
+    resample_reading(&mut wall, &clk, &[400_000; 8]);
+    assert_eq!(wall.now_100ns() - clk.truth_100ns(), 1_000);
+    // The anchor reads (8 + 1 + 8 + 1 + 8), plus one step-probe read per tick.
+    assert_eq!(clk.reads(), 8 + 1 + 8 + 1 + 8 + 4 * 100);
     assert_eq!(
         wall.anchor_stats(),
         WallAnchorStats {
-            max_step_us: 4_900,
+            max_step_us: 1_900,
             wide_brackets: 2,
             slewed_us: 2_000,
             steps_followed: 0,

@@ -356,7 +356,8 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
     // - lrclib: artist empty, skipped
     // - description: Claude returns empty array, match guard skips push
     // So candidate_texts is empty — the #120 follow-up returns Ok(empty) here
-    // (not a bail) so process_song's gate routes the song to asr_path blind.
+    // (not a bail), so the song goes on to the title search, else the g35t
+    // base tier.
     let result = gather_sources_impl(
         Some(&ai),
         &bogus_ytdlp,
@@ -372,7 +373,7 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
     );
     assert!(
         ctx.candidate_texts.is_empty(),
-        "expected an empty candidate list for the blind asr_path route, got: {:?}",
+        "expected an empty candidate list (title search / g35t base tier), got: {:?}",
         ctx.candidate_texts
     );
 }
@@ -711,18 +712,28 @@ fn gather_uses_lyrics_ovh_primary_with_genius_fallback() {
         "community-lyrics candidate must keep source: \"genius\" for priority_with_timing compat"
     );
 
-    // The lrclib-plain branch still uses the shared cleanup helper.
+    // The lrclib-plain branch still uses the shared cleanup helper — since
+    // #144 through `text_candidate::cleaned_text_candidate`, which the title
+    // search shares (the Claude call itself lives in text_candidate.rs).
+    let helper = include_str!("text_candidate.rs");
     assert!(
-        src.contains("description_provider::clean_lyrics_via_claude"),
-        "gather.rs must call description_provider::clean_lyrics_via_claude"
+        src.contains(
+            "cleaned_text_candidate(ai, &row.song, &row.artist, \"lrclib\", t, &cache_path)"
+        ),
+        "gather.rs must clean lrclib-plain through text_candidate::cleaned_text_candidate"
     );
     assert!(
-        src.contains("_lrclib_cleaned_v2.json"),
-        "gather.rs must write the lrclib cleanup cache to {{youtube_id}}_lrclib_cleaned_v2.json"
+        helper.contains("description_provider::clean_lyrics_via_claude"),
+        "text_candidate.rs must call description_provider::clean_lyrics_via_claude"
     );
     assert!(
-        src.contains("CleanupMode::ScrapedLyrics"),
-        "gather.rs lrclib-plain branch must pass CleanupMode::ScrapedLyrics"
+        src.contains("_lrclib_cleaned_v3.json"),
+        "gather.rs must write the lrclib cleanup cache to {{youtube_id}}_lrclib_cleaned_v3.json \
+         (#144: v3 = the prompt that keeps every repeat)"
+    );
+    assert!(
+        helper.contains("CleanupMode::ScrapedLyrics"),
+        "the lrclib-plain cleanup (text_candidate.rs) must pass CleanupMode::ScrapedLyrics"
     );
     assert!(
         src.contains("lrclib-plain cleanup returned no lyrics"),
@@ -742,13 +753,18 @@ fn gather_uses_lyrics_ovh_primary_with_genius_fallback() {
         src.contains("if real_timing {"),
         "gather.rs lrclib branch must split via `if real_timing {{` so synced bypasses Claude cleanup"
     );
-    // Synced-lrclib arm: must preserve `has_timing: true` inside the synced block.
+    // Synced-lrclib arm: must push a TIMED candidate inside the synced block
+    // (`text_candidate::timed_candidate` sets `has_timing: true`, #144).
     let (_, after_if) = src
         .split_once("if real_timing {")
         .expect("split_once on `if real_timing {` should succeed (validated above)");
     assert!(
-        after_if.contains("has_timing: true,"),
-        "synced-lrclib arm must push CandidateText with has_timing: true"
+        after_if.contains("timed_candidate(\"lrclib\", t)"),
+        "synced-lrclib arm must push text_candidate::timed_candidate"
+    );
+    assert!(
+        helper.contains("has_timing: true,"),
+        "text_candidate::timed_candidate must set has_timing: true"
     );
     // lrclib_track_has_real_timing must be defined as pub(crate) at the top of the file.
     assert!(

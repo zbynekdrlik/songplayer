@@ -57,6 +57,9 @@ impl StemsState {
 /// Precedence: Processing (live) → Ready (both stems on disk, presets work
 /// regardless of the recorded status) → Unavailable (`'unsupported'`, terminal)
 /// → Failed (`'failed'`, retryable) → Queued (pending / NULL / anything else).
+///
+/// "On disk" means the two files a consumer opens ([`stems_on_disk`]), never the
+/// recorded path columns (#136).
 pub fn stems_state_of(
     stem_status: Option<&str>,
     vocals_exists: bool,
@@ -74,6 +77,20 @@ pub fn stems_state_of(
         Some("failed") => StemsState::Failed,
         _ => StemsState::Queued,
     }
+}
+
+/// Whether the two stems a consumer opens exist: the pair
+/// [`crate::stems::stem_paths`] derives from the song's CURRENT audio sidecar,
+/// which the stem mixer (`stems::reader`) and the lyrics isolation read. The
+/// recorded `vocals_file_path` / `instrumental_file_path` never decide it: after
+/// a rename that left the stems behind they named files no consumer opens, and
+/// every song read `ready` (#136). `(vocals, instrumental)`; no audio → neither.
+pub fn stems_on_disk(audio_file_path: Option<&str>) -> (bool, bool) {
+    let Some(audio) = audio_file_path else {
+        return (false, false);
+    };
+    let (vocals, instrumental) = crate::stems::stem_paths(std::path::Path::new(audio));
+    (vocals.exists(), instrumental.exists())
 }
 
 /// 1-based position of `video_id` in the stem worker's queue, or `None` when the
@@ -110,8 +127,7 @@ pub async fn video_stems_info(
     is_processing: bool,
 ) -> Result<Option<VideoStemsInfo>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT title, song, stem_status, stem_attempts, \
-                vocals_file_path, instrumental_file_path \
+        "SELECT title, song, stem_status, stem_attempts, audio_file_path \
          FROM videos WHERE id = ?",
     )
     .bind(video_id)
@@ -121,16 +137,11 @@ pub async fn video_stems_info(
         let title: Option<String> = r.get("title");
         let song: Option<String> = r.get("song");
         let stem_status: Option<String> = r.get("stem_status");
-        let vocals: Option<String> = r.get("vocals_file_path");
-        let instrumental: Option<String> = r.get("instrumental_file_path");
+        let audio: Option<String> = r.get("audio_file_path");
+        let (vocals, instrumental) = stems_on_disk(audio.as_deref());
         VideoStemsInfo {
             title: song.filter(|s| !s.is_empty()).or(title).unwrap_or_default(),
-            state: stems_state_of(
-                stem_status.as_deref(),
-                vocals.is_some(),
-                instrumental.is_some(),
-                is_processing,
-            ),
+            state: stems_state_of(stem_status.as_deref(), vocals, instrumental, is_processing),
             attempts: r.get("stem_attempts"),
         }
     }))
@@ -161,7 +172,8 @@ pub async fn stems_state_map(
         .filter_map(|r| {
             let id: i64 = r.get("id");
             let normalized: bool = r.get::<i64, _>("normalized") != 0;
-            let has_audio: bool = r.get::<Option<String>, _>("audio_file_path").is_some();
+            let audio: Option<String> = r.get("audio_file_path");
+            let has_audio = audio.is_some();
             let vocals: Option<String> = r.get("vocals_file_path");
             let instrumental: Option<String> = r.get("instrumental_file_path");
             let has_stem = vocals.is_some() || instrumental.is_some();
@@ -170,10 +182,11 @@ pub async fn stems_state_map(
                 return None;
             }
             let stem_status: Option<String> = r.get("stem_status");
+            let (vocals_exist, instrumental_exist) = stems_on_disk(audio.as_deref());
             let state = stems_state_of(
                 stem_status.as_deref(),
-                vocals.is_some(),
-                instrumental.is_some(),
+                vocals_exist,
+                instrumental_exist,
                 processing_video_id == Some(id),
             );
             Some((id, state.as_str().to_string()))
@@ -192,6 +205,21 @@ pub async fn enqueue_stems(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx:
         "UPDATE videos \
          SET stem_status = NULL, stem_attempts = 0, stem_next_attempt_at = NULL \
          WHERE id = ?",
+    )
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// #136: stems recorded `'done'` whose files no name holds any more go back to
+/// the [`enqueue_stems`] pending state (the one status vocabulary), and their
+/// recorded paths, which name no file, are cleared. The stem worker then
+/// separates the song again.
+pub async fn requeue_lost_stems(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx::Error> {
+    enqueue_stems(pool, video_id).await?;
+    sqlx::query(
+        "UPDATE videos SET vocals_file_path = NULL, instrumental_file_path = NULL WHERE id = ?",
     )
     .bind(video_id)
     .execute(pool)
@@ -359,3 +387,7 @@ pub async fn count_stems_progress(pool: &SqlitePool) -> Result<(i64, i64), sqlx:
 #[cfg(test)]
 #[path = "models_tests_stems.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "models_stems_fixtures.rs"]
+pub(crate) mod fixtures;

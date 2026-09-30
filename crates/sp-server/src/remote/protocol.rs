@@ -5,9 +5,12 @@
 //! and the bitfocus `companion-module-obs-studio` source (v3.15.3 + 4.0 beta),
 //! read before this was written (#213 comment 5850492736).
 //!
-//! - Framing: `{"op": n, "d": {...}}` JSON text frames over the
-//!   `obswebsocket.json` subprotocol. obs-websocket-js REQUIRES the server to
-//!   echo it ("Server sent no subprotocol" otherwise), see
+//! - Framing: `{"op": n, "d": {...}}` message objects, as JSON text frames
+//!   over `obswebsocket.json` or (#221 L2b) MessagePack binary frames over
+//!   `obswebsocket.msgpack` — the encoding is `remote::codec`, one per session.
+//!   obs-websocket-js REQUIRES the server to echo the subprotocol it offered
+//!   ("Server sent no subprotocol" / "an invalid subprotocol" otherwise), and
+//!   in Node (Companion) it offers only msgpack, see
 //!   [`negotiate_subprotocol`].
 //! - Handshake: `Hello` (op 0, with `authentication` when a password is set) →
 //!   `Identify` (op 1) → `Identified` (op 2); later `Reidentify` (op 3) →
@@ -18,12 +21,18 @@
 //!   (op 8) → `RequestBatchResponse` (op 9, executed serially in order).
 //! - Events: `Event` (op 5) to identified clients subscribed to its intent.
 //!
-//! Which request is answered how is [`route`]: a few natively, the scene/input
-//! list getters forwarded to cg OBS, `SetCurrentProgramScene` forwarded AND
-//! mapped onto the program bus, anything else a well-formed
+//! Which request is answered how is [`route`]: a few natively (studio mode ON,
+//! the per-session preview and, #221 L3, `GetCurrentProgramScene` from
+//! SongPlayer's own program), the scene/input list getters forwarded to cg
+//! OBS, a scene press (`SetCurrentProgramScene`, `TriggerStudioModeTransition`)
+//! through the program switch, anything else a well-formed
 //! [`STATUS_UNKNOWN_REQUEST_TYPE`] error (Companion treats a failed request as
 //! "no data" and stays connected — only `GetVersion` and
 //! `GetStudioModeEnabled` must succeed, which is why they are native).
+//!
+//! Of cg OBS's events only `SceneListChanged` is passed through
+//! ([`passthrough_intent`]); the program feedback and the transition events
+//! are SongPlayer's own (#221 L3, `remote::studio_events`).
 
 use serde_json::{Value, json};
 
@@ -33,6 +42,9 @@ use crate::obs::compute_auth;
 pub const RPC_VERSION: u64 = 1;
 /// The JSON subprotocol (`Sec-WebSocket-Protocol`).
 pub const SUBPROTOCOL_JSON: &str = "obswebsocket.json";
+/// #221 L2b: the MessagePack subprotocol — the only one obs-websocket-js
+/// offers in Node, so Companion's.
+pub const SUBPROTOCOL_MSGPACK: &str = "obswebsocket.msgpack";
 /// The obs-websocket protocol level this facade speaks (the rpcVersion-1
 /// subset defined in 5.0.0; scene data is passed through from cg OBS).
 pub const OBS_WEBSOCKET_VERSION: &str = "5.0.0";
@@ -64,9 +76,19 @@ pub const STATUS_UNKNOWN_REQUEST_TYPE: u16 = 204;
 pub const STATUS_GENERIC_ERROR: u16 = 205;
 pub const STATUS_NOT_READY: u16 = 207;
 pub const STATUS_MISSING_REQUEST_FIELD: u16 = 300;
+pub const STATUS_INVALID_REQUEST_FIELD_TYPE: u16 = 401;
+pub const STATUS_REQUEST_FIELD_OUT_OF_RANGE: u16 = 402;
+pub const STATUS_INVALID_RESOURCE_STATE: u16 = 604;
+
+/// `SetCurrentSceneTransitionDuration`'s bounds, ms (obs-websocket's own).
+pub const TRANSITION_DURATION_MIN_MS: u32 = 50;
+pub const TRANSITION_DURATION_MAX_MS: u32 = 20_000;
 
 /// `EventSubscription::Scenes` (1 << 2).
 pub const EVENT_SCENES: u64 = 4;
+/// `EventSubscription::Transitions` (1 << 4): `SceneTransitionStarted` /
+/// `SceneTransitionEnded` (#221 L3).
+pub const EVENT_TRANSITIONS: u64 = 16;
 /// `EventSubscription::All` of rpcVersion 1 before Canvases (bits 0..=10) —
 /// a session's subscriptions when its `Identify` names none.
 pub const EVENT_ALL: u64 = 0x7FF;
@@ -78,9 +100,10 @@ pub const REASON_AUTH_MISSING: &str = "Your payload's data is missing an `authen
 pub const REASON_AUTH_FAILED: &str = "Authentication failed.";
 
 /// The requests forwarded to cg OBS verbatim (the scene/input list getters).
-pub const FORWARDED_REQUESTS: [&str; 5] = [
+/// #221 L3: `GetCurrentProgramScene` is no longer one — SP-program's scene is
+/// SongPlayer's own.
+pub const FORWARDED_REQUESTS: [&str; 4] = [
     "GetSceneList",
-    "GetCurrentProgramScene",
     "GetInputList",
     "GetSceneItemList",
     "GetGroupSceneItemList",
@@ -102,21 +125,43 @@ impl CloseReason {
 /// The `Sec-WebSocket-Protocol` answer for a client's offer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Subprotocol {
-    /// `obswebsocket.json` was offered: echo it.
+    /// `obswebsocket.json` was offered (alone or next to msgpack): echo it.
     Json,
+    /// #221 L2b: `obswebsocket.msgpack` was offered and `obswebsocket.json`
+    /// was not: echo it (Companion, obs-websocket-js in Node).
+    MsgPack,
     /// Nothing was offered: JSON by default, no header.
     Default,
-    /// Only other encodings (`obswebsocket.msgpack`) were offered: reject.
+    /// Only protocols other than obs-websocket's two were offered: reject.
     Unsupported,
 }
 
-/// Pick the subprotocol for a comma-separated `Sec-WebSocket-Protocol` offer.
+impl Subprotocol {
+    /// The `Sec-WebSocket-Protocol` the server echoes: the one it picked,
+    /// none when the client offered nothing (or was refused).
+    pub fn echo(self) -> Option<&'static str> {
+        match self {
+            Self::Json => Some(SUBPROTOCOL_JSON),
+            Self::MsgPack => Some(SUBPROTOCOL_MSGPACK),
+            Self::Default | Self::Unsupported => None,
+        }
+    }
+}
+
+/// Pick the subprotocol for a comma-separated `Sec-WebSocket-Protocol` offer:
+/// JSON whenever it is offered (the main session's decision, #221 L2b: a
+/// JSON client stays exactly as before), else msgpack whenever it is offered
+/// (also next to an unknown protocol, as obs-websocket takes the first
+/// encoding it knows), else nothing to agree on.
 pub fn negotiate_subprotocol(offered: Option<&str>) -> Subprotocol {
     let Some(offered) = offered.filter(|o| !o.trim().is_empty()) else {
         return Subprotocol::Default;
     };
-    if offered.split(',').any(|p| p.trim() == SUBPROTOCOL_JSON) {
+    let offers = |name: &str| offered.split(',').any(|p| p.trim() == name);
+    if offers(SUBPROTOCOL_JSON) {
         Subprotocol::Json
+    } else if offers(SUBPROTOCOL_MSGPACK) {
+        Subprotocol::MsgPack
     } else {
         Subprotocol::Unsupported
     }
@@ -234,10 +279,10 @@ fn subscriptions(d: &Value) -> Option<u64> {
     d.get("eventSubscriptions").and_then(Value::as_u64)
 }
 
-/// Parse one text frame, or the close obs-websocket answers a malformed one
-/// with.
-pub fn parse_client_message(text: &str) -> Result<ClientMessage, CloseReason> {
-    let msg: Value = serde_json::from_str(text).map_err(|_| decode_error())?;
+/// Parse one decoded client message (#221 L2b: JSON or MessagePack, decoded
+/// by the session's `remote::codec`), or the close obs-websocket answers a
+/// malformed one with.
+pub fn parse_client_message(msg: Value) -> Result<ClientMessage, CloseReason> {
     if !msg.is_object() {
         return Err(decode_error());
     }
@@ -307,12 +352,11 @@ const UNKNOWN_OP: CloseReason = CloseReason::new(
     "The `op` is missing or not one a client may send.",
 );
 
-/// The close for a frame that is not a JSON object (or a binary frame).
+/// The close for a decoded message that is not an object (obs-websocket's
+/// wording). #221 L2b: a frame that does not decode at all, or a frame of
+/// the other encoding, is closed by `remote::codec`, also with 4002.
 pub fn decode_error() -> CloseReason {
-    CloseReason::new(
-        CLOSE_MESSAGE_DECODE_ERROR,
-        "The message is not obswebsocket.json text.",
-    )
+    CloseReason::new(CLOSE_MESSAGE_DECODE_ERROR, "You sent a non-object payload.")
 }
 
 /// The close for anything but `Identify` before the session is identified.
@@ -450,10 +494,12 @@ pub fn event(event_type: &str, intent: u64, data: &Value) -> Value {
 }
 
 /// The cg OBS events the facade re-emits, with the intent a client must be
-/// subscribed to (Companion's scene feedback + scene list).
+/// subscribed to: only the scene list. #221 L3: cg OBS's
+/// `CurrentProgramSceneChanged` is NOT passed through — Companion's program
+/// feedback is SongPlayer's own program (`remote::studio_events`).
 pub fn passthrough_intent(event_type: &str) -> Option<u64> {
     match event_type {
-        "CurrentProgramSceneChanged" | "SceneListChanged" => Some(EVENT_SCENES),
+        "SceneListChanged" => Some(EVENT_SCENES),
         _ => None,
     }
 }
@@ -470,8 +516,18 @@ pub enum Route {
     Native(Reply),
     /// Forwarded to cg OBS, its answer passed through.
     Forward,
-    /// Forwarded to cg OBS AND mapped onto `SP-program`.
+    /// A scene press: switch `SP-program` to `sceneName`.
     SetProgramScene,
+    /// #221 L3: SP-program's scene (the one resolver), never cg OBS's.
+    GetProgramScene,
+    /// #221: set this session's preview scene.
+    SetPreviewScene,
+    /// #221: this session's preview scene (initially the program scene).
+    GetPreviewScene,
+    /// #221: a scene press of this session's preview scene.
+    TriggerTransition,
+    /// #221: validated and acknowledged, never applied.
+    SetTransitionDuration,
     /// A well-formed [`STATUS_UNKNOWN_REQUEST_TYPE`] error.
     Unsupported,
 }
@@ -480,18 +536,22 @@ pub enum Route {
 pub fn route(request_type: &str) -> Route {
     match request_type {
         "GetVersion" => Route::Native(Reply::ok(Some(version_data()))),
-        // Studio mode OFF: Companion then sends `SetCurrentProgramScene` per
-        // button (preview + transition requests are not mapped).
+        // #221: studio mode ON — Companion v3.15.3 sends
+        // `TriggerStudioModeTransition` only while it caches studio mode as
+        // on (read at connect; `StudioModeStateChanged` is never emitted).
         "GetStudioModeEnabled" => {
-            Route::Native(Reply::ok(Some(json!({ "studioModeEnabled": false }))))
+            Route::Native(Reply::ok(Some(json!({ "studioModeEnabled": true }))))
         }
         "SetCurrentProgramScene" => Route::SetProgramScene,
+        "GetCurrentProgramScene" => Route::GetProgramScene,
+        "SetCurrentPreviewScene" => Route::SetPreviewScene,
+        "GetCurrentPreviewScene" => Route::GetPreviewScene,
+        "TriggerStudioModeTransition" => Route::TriggerTransition,
+        "SetCurrentSceneTransitionDuration" => Route::SetTransitionDuration,
         // Keep in sync with FORWARDED_REQUESTS (pinned by a test).
-        "GetSceneList"
-        | "GetCurrentProgramScene"
-        | "GetInputList"
-        | "GetSceneItemList"
-        | "GetGroupSceneItemList" => Route::Forward,
+        "GetSceneList" | "GetInputList" | "GetSceneItemList" | "GetGroupSceneItemList" => {
+            Route::Forward
+        }
         _ => Route::Unsupported,
     }
 }
@@ -502,6 +562,11 @@ pub fn available_requests() -> Vec<&'static str> {
         "GetVersion",
         "GetStudioModeEnabled",
         "SetCurrentProgramScene",
+        "GetCurrentProgramScene",
+        "SetCurrentPreviewScene",
+        "GetCurrentPreviewScene",
+        "TriggerStudioModeTransition",
+        "SetCurrentSceneTransitionDuration",
     ];
     all.extend(FORWARDED_REQUESTS);
     all
@@ -519,6 +584,88 @@ pub fn version_data() -> Value {
         "platform": "songplayer",
         "platformDescription": "SongPlayer remote control (obs-websocket 5 subset)",
     })
+}
+
+/// A scene request's `sceneName`, or the [`STATUS_MISSING_REQUEST_FIELD`]
+/// error (a `sceneUuid` alone is not served: the switch is by scene name, and
+/// Companion always sends the name).
+pub fn scene_name(data: Option<&Value>) -> Result<String, Reply> {
+    data.and_then(|d| d.get("sceneName"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            Reply::error(
+                STATUS_MISSING_REQUEST_FIELD,
+                "Your request is missing `sceneName` (the remote control switches by scene name).",
+            )
+        })
+}
+
+/// `GetCurrentPreviewScene`'s response data: the 5.x `sceneName` (what
+/// Companion reads) and the 5.0 `currentPreviewSceneName`.
+pub fn preview_scene_data(scene: &str) -> Value {
+    json!({ "sceneName": scene, "currentPreviewSceneName": scene })
+}
+
+/// #221 L3: `GetCurrentProgramScene`'s response data, SP-program's scene: the
+/// 5.x `sceneName` and the 5.0 `currentProgramSceneName` (what the post-deploy
+/// E2E driver reads).
+pub fn program_scene_data(scene: &str) -> Value {
+    json!({ "sceneName": scene, "currentProgramSceneName": scene })
+}
+
+/// #221 L3: the error of `GetCurrentProgramScene` while SP-program has no
+/// scene name: nothing is on it, or a playlist whose catalog names no scene
+/// (604 `InvalidResourceState`, like [`no_scene`]).
+pub fn nothing_on_program() -> Reply {
+    Reply::error(STATUS_INVALID_RESOURCE_STATE, "Nothing is on SP-program.")
+}
+
+/// The error of a preview or transition request with no preview set and
+/// nothing on `SP-program` (obs-websocket's 604 `InvalidResourceState`).
+pub fn no_scene() -> Reply {
+    Reply::error(
+        STATUS_INVALID_RESOURCE_STATE,
+        "No preview scene is set and nothing is on SP-program.",
+    )
+}
+
+/// `SetCurrentSceneTransitionDuration`'s `transitionDuration`, validated
+/// like obs-websocket: missing (or null) → [`STATUS_MISSING_REQUEST_FIELD`],
+/// not a number → [`STATUS_INVALID_REQUEST_FIELD_TYPE`], outside
+/// 50..=20000 ms → [`STATUS_REQUEST_FIELD_OUT_OF_RANGE`]. A fraction is
+/// truncated to whole ms. One difference, as the design record specifies: a
+/// request with no `requestData` at all is also 300 (obs-websocket answers
+/// 301 `MissingRequestData`; Companion always sends the data).
+pub fn transition_duration(data: Option<&Value>) -> Result<u32, Reply> {
+    let value = data
+        .and_then(|d| d.get("transitionDuration"))
+        .filter(|v| !v.is_null());
+    let Some(value) = value else {
+        return Err(Reply::error(
+            STATUS_MISSING_REQUEST_FIELD,
+            "Your request is missing `transitionDuration`.",
+        ));
+    };
+    let Some(ms) = value.as_f64() else {
+        return Err(Reply::error(
+            STATUS_INVALID_REQUEST_FIELD_TYPE,
+            "The field value of `transitionDuration` must be a number.",
+        ));
+    };
+    if ms < f64::from(TRANSITION_DURATION_MIN_MS) {
+        return Err(Reply::error(
+            STATUS_REQUEST_FIELD_OUT_OF_RANGE,
+            "The field value of `transitionDuration` is below the minimum of `50`",
+        ));
+    }
+    if ms > f64::from(TRANSITION_DURATION_MAX_MS) {
+        return Err(Reply::error(
+            STATUS_REQUEST_FIELD_OUT_OF_RANGE,
+            "The field value of `transitionDuration` is above the maximum of `20000`",
+        ));
+    }
+    Ok(ms as u32)
 }
 
 /// The comment of an [`Route::Unsupported`] request's error.

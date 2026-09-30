@@ -587,24 +587,6 @@ pub async fn get_next_video_missing_translation(
     Ok(None)
 }
 
-/// Reset lyrics fields for a video so it will be re-processed.
-///
-/// Also clears `lyrics_processed_at` and `lyrics_alignment_model` because
-/// "reset" means "forget when/how this was processed" — leaving the old
-/// timestamp/model would make audit queries misleading.
-#[cfg_attr(test, mutants::skip)]
-pub async fn reset_video_lyrics(pool: &SqlitePool, video_id: i64) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE videos SET has_lyrics = 0, lyrics_source = NULL, \
-         lyrics_processed_at = NULL, lyrics_alignment_model = NULL \
-         WHERE id = ?",
-    )
-    .bind(video_id)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // Custom playlist items
 // ---------------------------------------------------------------------------

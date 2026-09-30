@@ -129,9 +129,9 @@ jobs:
       - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy + soundfile)
         run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1 soundfile==0.12.1
       - name: Lint with ruff
-        run: ruff check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py
+        run: ruff check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py
       - name: Format check with ruff
-        run: ruff format --check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py
+        run: ruff format --check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
       - name: Run scripts pytest (#171 segment stitch / additivity, #156 minidump helpers)
@@ -485,17 +485,28 @@ jobs:
           fi
           echo "OK: no retired symbols found."
 
-      - name: Verify deploy job uses always() condition
+      - name: Verify the box jobs honour a cancelled run (!cancelled(), never always())
         run: |
-          # Extract the full if: condition block (may span multiple lines with >-)
-          DEPLOY_BLOCK=$(grep -A10 "deploy-resolume:" .github/workflows/ci.yml | head -12)
-          if ! echo "$DEPLOY_BLOCK" | grep -q "always()"; then
-            echo "ERROR: deploy-resolume must use always() in its if: condition"
-            echo "Found:"
-            echo "$DEPLOY_BLOCK"
-            exit 1
-          fi
-          echo "OK: deploy-resolume uses always() condition."
+          # gate, deploy-resolume and e2e-resolume must use !cancelled(): like
+          # always() it keeps a job whose dependency was SKIPPED (version-check
+          # on a push), but it is false on a cancelled run. always() is true
+          # even then, so cancelling a run never stopped the deploy or the
+          # post-deploy E2E on the live box (29.9.2026, run 36553367664).
+          # Each block is anchored to the job key (an unanchored grep matched
+          # this step's own text first, #221 L4a review round 4).
+          FAIL=0
+          for job in gate deploy-resolume e2e-resolume; do
+            BLOCK=$(grep -A10 "^  ${job}:" .github/workflows/ci.yml | head -12)
+            if ! echo "$BLOCK" | grep -q '!cancelled()'; then
+              echo "ERROR: ${job} must use !cancelled() in its if: condition"; FAIL=1
+            fi
+            if echo "$BLOCK" | grep -q 'always()'; then
+              echo "ERROR: ${job} must not use always() (true on a cancelled run)"; FAIL=1
+            fi
+            if [ "$FAIL" -ne 0 ]; then echo "Found:"; echo "$BLOCK"; fi
+          done
+          if [ "$FAIL" -ne 0 ]; then exit 1; fi
+          echo "OK: gate, deploy-resolume and e2e-resolume honour a cancelled run."
 
   file-size:
     name: File Size Check
@@ -691,7 +702,7 @@ jobs:
   gate:
     name: Gate
     runs-on: ubuntu-latest
-    if: always()
+    if: "!cancelled()"
     needs:
       - version-check
       - dev-version-check
@@ -781,12 +792,17 @@ jobs:
     name: Deploy to win-resolume
     needs: [gate, build-tauri, build-wasm]
     if: >-
-      always()
+      !cancelled()
       && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.gate.result == 'success'
       && needs.build-tauri.result == 'success'
     runs-on: [self-hosted, windows, resolume]
+    # #221 L4a: the rig-lease wait is bounded at 60 min (and its step at 70,
+    # which cuts a trickling lease server before "Deploy SongPlayer"); the
+    # deploy takes ~2-3 min. This job bound is the backstop (the old default
+    # was 360).
+    timeout-minutes: 90
     # #198 item 2: publish the version the running SongPlayer actually reports
     # after this deploy (verified == the checked-out VERSION here), so the E2E
     # job's restart-skip compares against THIS run's deployed version rather than
@@ -796,6 +812,39 @@ jobs:
       deployed_version: ${{ steps.healthcheck.outputs.deployed_version }}
     steps:
       - uses: actions/checkout@v4
+
+      # #221 L4a: never deploy over another repo's rig lease. "Deploy
+      # SongPlayer" below STOPS SongPlayer before it installs, and cancelling
+      # a run mid-deploy left it stopped (29.9.2026 03:15Z, ci-workflows.md),
+      # so the wait happens HERE, before anything touches SongPlayer. The
+      # lease lives on dev1 (camera-box scripts/rig-lease-server.py, :8890).
+      # win-resolume has no tailscale, so dev1's LAN address comes first,
+      # then its mDNS name (a cold lookup of it failed once, 29.9.2026).
+      # scripts/rig_lease_gate.py: wait while another repo holds it live,
+      # polling every 30 s, at most 60 min (then exit 3, the job fails);
+      # an unreachable lease service is a WARN and the deploy goes on.
+      - name: Wait for the rig lease (never deploy over another repo's lease)
+        shell: powershell
+        # The gate's own bound is 60 min; this step bound makes sure a lease
+        # server that trickles bytes can never push the cut into "Deploy
+        # SongPlayer" (which stops SongPlayer first): it lands HERE.
+        timeout-minutes: 70
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          if (-not (Test-Path $py)) {
+            Write-Error "FAIL: $py not found - the rig-lease gate needs the box's Python 3.12"
+            exit 1
+          }
+          & $py scripts\rig_lease_gate.py --own-repo "${{ github.repository }}" --url "http://10.77.9.200:8890/rig-lease.json" --url "http://dev1:8890/rig-lease.json" --poll-seconds 30 --max-wait-seconds 3600
+          $code = $LASTEXITCODE
+          if ($code -eq 3) {
+            Write-Error "FAIL: another repo still holds the rig lease after 60 min - not deploying over it"
+            exit 1
+          }
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig-lease gate itself failed (exit $code)"
+            exit 1
+          }
 
       - name: Clean old artifacts
         shell: powershell
@@ -1029,7 +1078,7 @@ jobs:
   e2e-resolume:
     name: E2E Tests (win-resolume)
     needs: [deploy-resolume]
-    if: always() && needs.deploy-resolume.result == 'success'
+    if: "!cancelled() && needs.deploy-resolume.result == 'success'"
     runs-on: [self-hosted, windows, resolume]
     steps:
       - uses: actions/checkout@v4
@@ -1223,6 +1272,9 @@ jobs:
           $seed = @{
             obs_websocket_url = "ws://localhost:4455"
             cache_dir = "C:\ProgramData\SongPlayer\cache"
+            # #221 L3: the post-deploy E2E switches scenes through SongPlayer's
+            # obs-websocket facade (Companion's path), so it is always on.
+            remote_ws_enabled = "true"
           }
           if ([string]::IsNullOrEmpty($current.gemini_api_key)) {
             $seed.gemini_api_key = $env:GEMINI_API_KEY
@@ -1258,6 +1310,32 @@ jobs:
             Write-Error "FAIL: obs_websocket_url not set"
             exit 1
           }
+          if ($current.remote_ws_enabled -ne "true") {
+            Write-Error "FAIL: remote_ws_enabled not set"
+            exit 1
+          }
+          # The settings task applies the setting within its 5 s poll; the
+          # E2E scene driver connects to the facade, so wait until it listens.
+          $listening = $false
+          for ($i = 1; $i -le 15; $i++) {
+            $program = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program" -TimeoutSec 10
+            if ($program.remote.listening) {
+              $listening = $true
+              break
+            }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $listening) {
+            Write-Error "FAIL: the remote-control facade is not listening on port $($program.remote.port) (error: $($program.remote.error))"
+            exit 1
+          }
+          # The E2E scene driver connects to ws://localhost:4456 with no
+          # password (FACADE_WS_URL); say so here, not far away in the suite.
+          if ($program.remote.port -ne 4456 -or $program.remote.auth) {
+            Write-Error "FAIL: the E2E needs the facade on port 4456 without a password (port $($program.remote.port), auth $($program.remote.auth))"
+            exit 1
+          }
+          Write-Host "OK: the remote-control facade listens on port $($program.remote.port)"
 
       - name: Seed Resolume host
         shell: powershell
@@ -1691,31 +1769,93 @@ jobs:
             Write-Error "FAIL: CLIProxyAPI /v1/models returned $($models.StatusCode)"
             exit 1
           }
+          $ids = @(($models.Content | ConvertFrom-Json).data | ForEach-Object { $_.id })
 
-          # 3. Watchdog must not be logging restart-failed in the last
-          # 2 min (indicates an orphan keeping the port while our spawn
-          # immediately dies). Tail the log and count.
-          $log = "C:\ProgramData\SongPlayer\songplayer.log"
-          if (Test-Path $log) {
-            $cutoff = (Get-Date).AddMinutes(-2)
-            $failures = Get-Content $log -Tail 500 | Where-Object {
-              $_ -match 'ai_proxy watchdog: restart failed'
-            } | ForEach-Object {
-              if ($_ -match '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})') {
-                try {
-                  $ts = [datetime]::ParseExact($matches[1], 'yyyy-MM-ddTHH:mm:ss', $null)
-                  if ($ts -gt $cutoff) { $_ }
-                } catch { $_ }
-              }
-            }
-            if ($failures.Count -gt 0) {
-              Write-Host "Recent 'restart failed' entries:"
-              $failures | ForEach-Object { Write-Host "  $_" }
-              Write-Error "FAIL: ai_proxy watchdog is churning ($($failures.Count) restart failures in last 2 min). Likely an orphan CLIProxyAPI is holding the port."
-              exit 1
-            }
+          # 3. #145: the model SongPlayer sends must really answer, and it
+          # must be the newest claude-opus-* the proxy lists. On 29.9.2026
+          # the proxy listed claude-opus-5-5 but refused every call to it
+          # (CLIProxyAPI 7.3.1 presented Claude Code 2.1.258, HTTP 400) and
+          # nothing noticed: a listed id is not a working id.
+          $model = "$($ai.model)"
+          Write-Host "SongPlayer sends model: $model"
+          if (-not $model) {
+            Write-Error "FAIL: /api/v1/ai/status names no model"
+            exit 1
           }
-          Write-Host "OK: AI proxy healthy, watchdog quiet, /v1/models responding."
+          if ($ids -notcontains $model) {
+            Write-Error "FAIL: the proxy's /v1/models does not list $model"
+            exit 1
+          }
+          $req = @{ model = $model; max_tokens = 16; messages = @(@{ role = "user"; content = "Reply with exactly: OK" }) } | ConvertTo-Json -Depth 4
+          try {
+            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:18787/v1/chat/completions" -Method Post -ContentType "application/json" -Body $req -UseBasicParsing -TimeoutSec 60
+          } catch {
+            $detail = ""
+            if ($_.Exception.Response) {
+              $detail = (New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd()
+            }
+            Write-Error "FAIL: a completion with $model failed: $($_.Exception.Message) $detail"
+            exit 1
+          }
+          $answer = (($resp.Content | ConvertFrom-Json).choices[0].message.content)
+          Write-Host "completion with ${model}: HTTP $($resp.StatusCode) '$answer'"
+          if (-not $answer) {
+            Write-Error "FAIL: the completion with $model returned no text"
+            exit 1
+          }
+          # claude-opus-5-5 -> 5.5, claude-opus-5 -> 5.0, claude-opus-4-1-20250805 -> 4.1
+          # (a segment of 6+ digits is a snapshot date, not a version).
+          function OpusVersion([string]$id) {
+            if ($id -notmatch '^claude-opus-(.+)$') { return $null }
+            $nums = @()
+            foreach ($seg in $matches[1].Split('-')) {
+              if ($seg -notmatch '^[0-9]+$' -or $seg.Length -ge 6) { break }
+              $nums += [int]$seg
+            }
+            if ($nums.Count -eq 0) { return $null }
+            if ($nums.Count -eq 1) { $nums += 0 }
+            return [version]("{0}.{1}" -f $nums[0], $nums[1])
+          }
+          $mine = OpusVersion $model
+          if (-not $mine) {
+            Write-Error "FAIL: SongPlayer sends $model, not a claude-opus model (the flagship rule, #145)"
+            exit 1
+          }
+          $newest = $ids | Where-Object { OpusVersion $_ } | Sort-Object { OpusVersion $_ } -Descending | Select-Object -First 1
+          Write-Host "newest claude-opus the proxy lists: $newest"
+          if ((OpusVersion $newest) -gt $mine) {
+            Write-Error "FAIL: the proxy lists $newest, newer than the $model SongPlayer sends: switch DEFAULT_AI_MODEL (probe it first, scripts/cliproxy/README.md)"
+            exit 1
+          }
+
+          # 4. Watchdog must not be logging restart-failed in the last
+          # 2 min (indicates an orphan keeping the port while our spawn
+          # immediately dies). The log rolls daily (songplayer.<date>.log);
+          # the old fixed name songplayer.log never existed, so this check
+          # never ran until #145.
+          $log = Get-ChildItem "C:\ProgramData\SongPlayer" -Filter "songplayer.*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $log) {
+            Write-Error "FAIL: no songplayer.<date>.log in C:\ProgramData\SongPlayer"
+            exit 1
+          }
+          $cutoff = (Get-Date).ToUniversalTime().AddMinutes(-2)
+          $failures = @(Get-Content $log.FullName -Tail 2000 | Where-Object {
+            $_ -match 'ai_proxy watchdog: restart failed'
+          } | ForEach-Object {
+            if ($_ -match '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})') {
+              try {
+                $ts = [datetime]::ParseExact($matches[1], 'yyyy-MM-ddTHH:mm:ss', $null)
+                if ($ts -gt $cutoff) { $_ }
+              } catch { $_ }
+            }
+          })
+          if ($failures.Count -gt 0) {
+            Write-Host "Recent 'restart failed' entries:"
+            $failures | ForEach-Object { Write-Host "  $_" }
+            Write-Error "FAIL: ai_proxy watchdog is churning ($($failures.Count) restart failures in last 2 min). Likely an orphan CLIProxyAPI is holding the port."
+            exit 1
+          }
+          Write-Host "OK: AI proxy healthy, $model answers and is the newest claude-opus, watchdog quiet in $($log.Name)."
 
       - name: Verify Presenter reachable
         shell: powershell
@@ -1849,15 +1989,77 @@ jobs:
           }
           Write-Host "OK: Dashboard verified via Playwright"
 
+      - name: Prepare the A/V gate's own Python (#221)
+        shell: powershell
+        run: |
+          # #221: the A/V gate (scripts/av_sync_check.py) must never share
+          # SongPlayer's lyrics venv: SongPlayer may reinstall its packages at
+          # startup (numpy replaced mid-analysis failed CI run 36475215084 with
+          # "No module named 'numpy.fft'"). It gets its OWN small venv, created
+          # once and verified on every run. numpy is pinned to the version the
+          # Eval Checks job tests av_sync_check.py with; av_sync_check.py and
+          # its sibling av_sync_drift / av_sync_warp import nothing else.
+          # Continue (NOT Stop): pip may print notices on stderr; every native
+          # call below is judged by its own exit code instead.
+          $ErrorActionPreference = "Continue"
+          $venv = "C:\ProgramData\SongPlayer\e2e\avsync_venv"
+          $py = Join-Path $venv "Scripts\python.exe"
+          $numpy = "2.1.1"
+          if (-not (Test-Path $py)) {
+            # The box's system Python (the lyrics venv's base too). numpy
+            # 2.1.1 ships wheels for CPython 3.10-3.13 only, so never fall
+            # back to whatever `python` is on PATH: fail clearly instead.
+            $sys = "C:\Program Files\Python312\python.exe"
+            if (-not (Test-Path $sys)) {
+              Write-Error "FAIL: $sys not found - the A/V gate venv needs the box's Python 3.12"
+              exit 1
+            }
+            Write-Host "Creating the A/V gate venv at $venv with $sys"
+            & $sys -m venv $venv
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "FAIL: python -m venv $venv exited $LASTEXITCODE"
+              exit 1
+            }
+          }
+          # Exit 3 (no traceback) when numpy is missing or another version.
+          & $py -c "import sys, importlib.util as u; sys.exit(3) if u.find_spec('numpy') is None else None; import numpy; sys.exit(0 if numpy.__version__ == '$numpy' else 3)"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Installing numpy==$numpy into the A/V gate venv"
+            & $py -m pip install --disable-pip-version-check --no-input "numpy==$numpy"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "FAIL: pip install numpy==$numpy exited $LASTEXITCODE"
+              exit 1
+            }
+          }
+          # Verify: the script and its siblings start (their top-level
+          # imports), and numpy.fft - which numpy 2 loads lazily and the
+          # scripts use only inside functions - really imports (the module CI
+          # run 36475215084 lost mid-analysis).
+          & $py "$env:GITHUB_WORKSPACE\scripts\av_sync_check.py" --help | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: av_sync_check.py does not start under $py (exit $LASTEXITCODE)"
+            exit 1
+          }
+          $version = & $py -c "import numpy, numpy.fft; print(numpy.__version__)"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: numpy.fft does not import under $py (exit $LASTEXITCODE)"
+            exit 1
+          }
+          Write-Host "OK: the A/V gate venv at $venv has numpy $version with numpy.fft"
+
       - name: Feature-level Playwright (post-deploy spec)
         shell: powershell
         env:
           SONGPLAYER_URL: http://localhost:8920
+          # #221 L3: the scene driver talks to SongPlayer's obs-websocket
+          # facade (Companion's path); cg OBS only records for the A/V gate.
+          FACADE_WS_URL: ws://localhost:4456
           OBS_WS_URL: ws://localhost:4455
           # #147 A/V sync + dropout gate (e2e/post-deploy-av-sync.spec.ts):
-          # the Python that runs scripts/av_sync_check.py (numpy) and the
-          # app's bundled ffmpeg (the box has no ffprobe; none is needed).
-          SP_AVSYNC_PYTHON: C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe
+          # the Python that runs scripts/av_sync_check.py (#221: its OWN venv,
+          # prepared by the step above, never the lyrics venv) and the app's
+          # bundled ffmpeg (the box has no ffprobe; none is needed).
+          SP_AVSYNC_PYTHON: C:\ProgramData\SongPlayer\e2e\avsync_venv\Scripts\python.exe
           SP_FFMPEG: C:\ProgramData\SongPlayer\cache\tools\ffmpeg.exe
         run: |
           # Runs the committed e2e/post-deploy*.spec.ts against the

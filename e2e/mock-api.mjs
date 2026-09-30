@@ -373,13 +373,39 @@ function maybeFail(kind, res) {
   return false;
 }
 
-app.post("/api/v1/playback/:id/play", (_req, res) => {
+// #221 L4b: a ▶ claims no program. A playlist that is not on air (not
+// SP-program's source; the mock's cg OBS record is always empty) plays OFF
+// program: the server broadcasts `WaitingForScene` with transport `Playing`,
+// which the Player reads "Hrá mimo programu". On air it plays on program.
+app.post("/api/v1/playback/:id/play", (req, res) => {
   if (maybeFail("play", res)) return;
+  const pid = Number(req.params.id);
+  const onAir = programState.source === pid;
+  if (onAir) playingOffAir.delete(pid);
+  else playingOffAir.add(pid);
+  broadcastPlaybackState(pid, onAir ? "Playing" : "WaitingForScene", "Playing");
   res.json({ status: "playing" });
 });
 
-app.post("/api/v1/playback/:id/pause", (_req, res) => {
+// #221 L4b review round 6: the playlists a ▶ started OFF program. A program
+// cut to one of them puts it on program without a state change (it was
+// playing already), and the server then broadcasts its state from the scene
+// change itself (`Playing`): the Player reads "Hrá", not "Hrá mimo programu".
+const playingOffAir = new Set();
+
+function broadcastPlaybackState(pid, state, transport) {
+  const msg = JSON.stringify({
+    type: "PlaybackStateChanged",
+    data: { playlist_id: pid, state, mode: "Continuous", transport },
+  });
+  for (const ws of wsClients) {
+    if (ws.readyState === ws.OPEN) ws.send(msg);
+  }
+}
+
+app.post("/api/v1/playback/:id/pause", (req, res) => {
   if (maybeFail("pause", res)) return;
+  playingOffAir.delete(Number(req.params.id));
   res.json({ status: "paused" });
 });
 
@@ -826,6 +852,10 @@ app.post("/__mock/ndi-health", (req, res) => {
 // cut at once (the real one lands on the boundary after next).
 let programState = { source: 1, previous: null, cuts: 0, transitions: 0, mixed: 0 };
 let programLastCut = null;
+// #221 L4a: the dashboard cut is recorded as `remote.last_remote_cut` with
+// `via: "dashboard"`, like the server's switch path. The mock has no cg OBS,
+// so a playlist's mirror reads `not_ready` (the server with no OBS link).
+let programLastRemoteCut = null;
 // #215: the mock runs no cg OBS and no program sender, so a spec can inject
 // cg OBS's current scene transition (`/__mock/program-obs-transition`) and a
 // running fade window (`/__mock/program-transition-active`); both are cleared
@@ -983,14 +1013,21 @@ function remoteBody() {
     listening: false,
     error: null,
     clients: 0,
+    refused_over_cap: 0,
     requests: 0,
     last_request: null,
-    last_remote_cut: null,
+    last_remote_cut: programLastRemoteCut,
     unsupported_requests: [],
+    last_transition_duration: null,
   };
 }
+// #221 L4a: what SongPlayer told cg OBS to show — mirrors `LegacyCgStatus`.
+// The mock has no cg OBS, so a mirror is never accepted and nothing is shown.
+function legacyCgBody() {
+  return { shown: null };
+}
 app.get("/api/v1/program", (_req, res) => {
-  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody() });
+  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody(), legacy_cg: legacyCgBody() });
 });
 app.post("/api/v1/program/cut", (req, res) => {
   const source = Number(req.body?.source);
@@ -1005,6 +1042,23 @@ app.post("/api/v1/program/cut", (req, res) => {
     return;
   }
   programLastCut = req.body;
+  const playlist = activePlaylists().find((p) => p.id === source);
+  programLastRemoteCut = {
+    scene:
+      source === -1
+        ? "OBS manuál"
+        : (playlist?.ndi_output_name || String(source)).toLowerCase(),
+    action: source === -1 ? "input" : "playlist",
+    source,
+    reason: null,
+    cut_boundary_100ns: null,
+    at_ms: Date.now(),
+    via: "dashboard",
+    // The input sends nothing to cg OBS (`cg_forward` null), like the
+    // server. The mock's playlists all name a scene; the server's other
+    // no-scene cases (inactive, empty or shared NDI name) are not modelled.
+    cg_forward: source === -1 || !playlist ? null : "not_ready",
+  };
   if (programState.source !== source) {
     programState = {
       source,
@@ -1013,8 +1067,9 @@ app.post("/api/v1/program/cut", (req, res) => {
       transitions: programState.transitions + 1,
       mixed: programState.mixed + transitionSpec().n_slots,
     };
+    if (playingOffAir.delete(source)) broadcastPlaybackState(source, "Playing", "Playing");
   }
-  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody() });
+  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody(), legacy_cg: legacyCgBody() });
 });
 // Test-only: the last cut body the dashboard posted (backend-effect check).
 app.get("/__mock/program-last-cut", (_req, res) => {
@@ -1022,7 +1077,9 @@ app.get("/__mock/program-last-cut", (_req, res) => {
 });
 app.post("/__mock/program-reset", (_req, res) => {
   programState = { source: 1, previous: null, cuts: 0, transitions: 0, mixed: 0 };
+  playingOffAir.clear();
   programLastCut = null;
+  programLastRemoteCut = null;
   programObsTransition = null;
   programActiveWindow = null;
   res.json({ status: "reset" });

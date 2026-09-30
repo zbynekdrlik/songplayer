@@ -1,13 +1,18 @@
-//! #213 end to end: a Companion-like obs-websocket 5 client (real
-//! tokio-tungstenite, `obswebsocket.json` subprotocol) → SongPlayer's remote
+//! #213 end to end: an obs-websocket 5 client doing Companion's requests
+//! (real tokio-tungstenite, over the `obswebsocket.json` subprotocol — Companion
+//! itself speaks msgpack, #221 L2b, pinned by `remote/session_tests_msgpack.rs`)
+//! → SongPlayer's remote
 //! control (`remote::serve`) → SongPlayer's REAL OBS client
 //! (`obs::ObsClient::spawn`, the one the facade reaches cg OBS through) → a
 //! fake cg OBS (`FakeObsServer`). The program is a real `ProgramBus`.
 //!
-//! connect → Identify → GetSceneList (cg OBS's scenes 1:1) →
-//! SetCurrentProgramScene(playlist scene) → cg OBS switched + `SP-program`
-//! cut to the playlist → cg OBS's CurrentProgramSceneChanged re-emitted →
-//! SetCurrentProgramScene(manual scene) → cut to "OBS manuál".
+//! connect → Identify → studio mode ON (#221) → GetSceneList (cg OBS's scenes
+//! 1:1) → a page-13 button, `SetCurrentPreviewScene(playlist scene)` +
+//! `TriggerStudioModeTransition` → `SP-program` cut to the playlist from
+//! SongPlayer's own playlists, cg OBS mirrored → Companion's feedback is
+//! SongPlayer's OWN `CurrentProgramSceneChanged` (#221 L3), and cg OBS's is
+//! never passed through → SetCurrentProgramScene(manual scene) → cg OBS
+//! switched, then a cut to "OBS manuál".
 //! Every wait is bounded; no sleep is used as synchronization.
 
 mod common;
@@ -149,20 +154,20 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     })
     .await;
 
-    // SongPlayer's remote control on a real program bus.
+    // SongPlayer's remote control on a real program bus. The long upstream
+    // timeout keeps a stalled runner (the coverage job's ptrace) from running
+    // a manual press out of its time (#221: then it is never sent).
     let bus = Arc::new(ProgramBus::new());
-    let facade = Facade::new(
-        pool.clone(),
-        Arc::clone(&bus),
-        Upstream::new(Some(client.cmd_sender()), obs_event_tx.clone()),
-        None,
-    );
+    let upstream =
+        Upstream::new(Some(client.cmd_sender()), obs_event_tx.clone()).with_timeout(TIMEOUT);
+    let facade = Facade::new(pool.clone(), Arc::clone(&bus), upstream, None);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(remote::serve(listener, facade));
 
-    // Companion's OBS module: connect with the JSON subprotocol and identify
-    // with its subscriptions (All | InputActiveStateChanged | InputShowStateChanged).
+    // Companion's requests over the JSON subprotocol (Companion itself speaks
+    // msgpack, #221 L2b): identify with its subscriptions
+    // (All | InputActiveStateChanged | InputShowStateChanged).
     let mut req = format!("ws://{addr}").into_client_request().unwrap();
     req.headers_mut().insert(
         "Sec-WebSocket-Protocol",
@@ -183,8 +188,10 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     let version = request(&mut ws, "GetVersion", None).await;
     assert_eq!(version["requestStatus"]["code"], 100);
     assert!(version["responseData"]["supportedImageFormats"].is_array());
+    // #221: studio mode ON — Companion's `do_transition` sends its request
+    // only while it caches studio mode as on.
     let studio = request(&mut ws, "GetStudioModeEnabled", None).await;
-    assert_eq!(studio["responseData"]["studioModeEnabled"], false);
+    assert_eq!(studio["responseData"]["studioModeEnabled"], true);
 
     // The scene list is cg OBS's, 1:1.
     let list = request(&mut ws, "GetSceneList", None).await;
@@ -198,18 +205,26 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     assert_eq!(names, vec!["sp-fast", "sp-slow", "Slido"]);
     assert_eq!(list["responseData"]["currentProgramSceneName"], "sp-slow");
 
-    // A playlist scene button: cg OBS switches AND SP-program cuts to ytfast.
-    let pressed = request(
+    // A page-13 playlist button: preview, then transition. SP-program cuts to
+    // ytfast from SongPlayer's own playlists; cg OBS is mirrored after it.
+    let previewed = request(
         &mut ws,
-        "SetCurrentProgramScene",
+        "SetCurrentPreviewScene",
         Some(json!({ "sceneName": "sp-fast" })),
     )
     .await;
+    assert_eq!(previewed["requestStatus"]["result"], true);
+    assert_eq!(bus.status().source, None, "a preview cuts nothing");
+    let pressed = request(&mut ws, "TriggerStudioModeTransition", None).await;
     assert_eq!(pressed["requestStatus"]["result"], true);
     assert_eq!(bus.status().source, Some(7));
     assert!(bus.status().cut_boundary_100ns.is_some_and(|b| b > 0));
+    wait_until("cg OBS is mirrored to sp-fast", || {
+        let fake = &fake;
+        async move { fake.state().await.program_scene.as_deref() == Some("sp-fast") }
+    })
+    .await;
     let cg_now = fake.state().await;
-    assert_eq!(cg_now.program_scene.as_deref(), Some("sp-fast"));
     assert!(
         cg_now
             .requests
@@ -227,25 +242,54 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         Some("7")
     );
 
-    // cg OBS's program-scene event reaches Companion (the button feedback).
-    fake.push_event(
-        "CurrentProgramSceneChanged",
-        json!({ "sceneName": "sp-fast", "sceneUuid": "uuid-sp-fast" }),
-    )
-    .await;
-    let event = loop {
+    // #221 L3: Companion's button feedback is SongPlayer's OWN program (the
+    // fake cg OBS emits no event for the mirrored switch).
+    let feedback = loop {
         let msg = next_json(&mut ws).await;
-        if msg["op"] == 5 {
+        if msg["op"] == 5 && msg["d"]["eventType"] == "CurrentProgramSceneChanged" {
             break msg;
         }
     };
     assert_eq!(
-        event,
+        feedback,
         json!({ "op": 5, "d": {
             "eventType": "CurrentProgramSceneChanged",
             "eventIntent": 4,
-            "eventData": { "sceneName": "sp-fast", "sceneUuid": "uuid-sp-fast" },
+            "eventData": { "sceneName": "sp-fast" },
         }})
+    );
+    // cg OBS's own program-scene event (a hand switch in its UI) is never
+    // passed through; its scene list is, and it is the witness: pushed
+    // after it on the same connection, it arrives after it.
+    fake.push_event(
+        "CurrentProgramSceneChanged",
+        json!({ "sceneName": "Slido", "sceneUuid": "uuid-Slido" }),
+    )
+    .await;
+    fake.push_event(
+        "SceneListChanged",
+        json!({ "scenes": [{ "sceneName": "sp-fast" }] }),
+    )
+    .await;
+    let mut before = Vec::new();
+    loop {
+        let msg = next_json(&mut ws).await;
+        if msg["op"] == 5 && msg["d"]["eventType"] == "SceneListChanged" {
+            break;
+        }
+        before.push(msg);
+    }
+    assert!(
+        before
+            .iter()
+            .all(|m| m["d"]["eventType"] != "CurrentProgramSceneChanged"),
+        "cg OBS's program scene reached Companion: {before:?}"
+    );
+    // SongPlayer's program scene, never cg OBS's.
+    let program = request(&mut ws, "GetCurrentProgramScene", None).await;
+    assert_eq!(
+        program["responseData"]["currentProgramSceneName"],
+        "sp-fast"
     );
 
     // A manual cg OBS scene: cg OBS switches, SP-program cuts to "OBS manuál".
@@ -269,7 +313,11 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     assert_eq!(pressed["requestStatus"]["code"], 600);
     assert_eq!(bus.status().source, Some(-1));
 
-    let remote = bus.remote().status(&remote::RemoteSettings::disabled());
+    let settings = remote::RemoteSettings::disabled();
+    let remote = bus.remote().status(&settings, &bus.on_air_now());
+    // #221 L3: the manual press put Slido on "OBS manuál"; the refused one
+    // kept it.
+    assert_eq!(remote.program_scene.as_deref(), Some("Slido"));
     assert_eq!(remote.clients, 1);
     let cut = remote.last_remote_cut.unwrap();
     assert_eq!((cut.scene.as_str(), cut.action), ("Nope", "keep"));

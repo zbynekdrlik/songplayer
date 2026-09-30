@@ -11,6 +11,7 @@ use tracing::warn;
 
 use sp_core::playback::PlaybackMode;
 
+use crate::metadata::manual::refused_title;
 use crate::{AppState, EngineCommand, SyncRequest};
 
 // ---------------------------------------------------------------------------
@@ -65,12 +66,9 @@ pub struct StatusResponse {
     pub version: String,
     pub obs_connected: bool,
     pub active_scene: Option<String>,
-    /// Playlists whose NDI source is matched in the current OBS program
-    /// scene by [`scene::check_scene_items`]. Populated only after the
-    /// `ndi_sources` map has been rebuilt from the DB + OBS input
-    /// settings — an empty list here on a known-good scene is the
-    /// symptom of issue #11 and is what the post-deploy tests assert
-    /// against.
+    /// #221 L4b: the playlists on air — SP-program's playlist ∪ the one cg
+    /// OBS was told to show, ascending (`routes_status`). `active_scene` is
+    /// SongPlayer's own program scene name (the one resolver).
     pub active_playlist_ids: Vec<i64>,
     pub tools: ToolsStatusResponse,
     pub playlist_count: i64,
@@ -102,20 +100,13 @@ pub struct StatusResponse {
     /// off Windows or on a read failure — a missing key deserializes to `None`).
     #[serde(default)]
     pub commit: Option<crate::lyrics::host_commit::HostCommitStatus>,
+    /// #136: the metadata provider chain — repair-queue size + per-provider
+    /// health (`api::metadata::status_block`). Missing key → default.
+    #[serde(default)]
+    pub metadata: crate::metadata::health::MetadataStatus,
 }
 
-/// #203: the containment applied to the heavy children, surfaced on `/status` so
-/// the dashboard health + the next box measurement can read the effective cap.
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct HeavyContainmentStatus {
-    /// Job Object CPU hard-cap, percent of TOTAL machine CPU time.
-    pub cap_pct: u8,
-    /// Job Object affinity mask (lowercase hex, no `0x`) — the cores the heavy
-    /// children may run on.
-    pub affinity_mask: String,
-    /// SongPlayer's own scheduling priority class (`high` on the Windows box).
-    pub priority_class: String,
-}
+pub use super::routes_status::HeavyContainmentStatus; // #136: moved for the 1000-line cap
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolsStatusResponse {
@@ -438,9 +429,11 @@ pub struct PatchVideoReq {
 
 /// Update mutable per-video flags. Supports `suppress_resolume_en`,
 /// `lyrics_override_text`, and the `song` / `artist` metadata correction
-/// levers (#136 T1). Returns 204 on success, 404 if the video id doesn't
-/// exist, 400 if the request body has no actionable fields or carries a
-/// whitespace-only `song`.
+/// levers (#136 T1; a correction is final and belongs to the video: every row
+/// of it, files renamed, `metadata::manual::apply_to_video`). Returns 204 on
+/// success, 404 if the video id doesn't exist, 400 if the request body has no
+/// actionable fields, a whitespace-only `song`, or an `artist` alone for a
+/// video with no song yet (`metadata::manual::refused_title`).
 pub async fn patch_video(
     State(state): State<AppState>,
     Path(video_id): Path<i64>,
@@ -461,12 +454,12 @@ pub async fn patch_video(
         .as_ref()
         .map(|a| crate::metadata::sanitize::strip_emoji(a));
 
-    // A whitespace-only (empty-after-sanitize) song is a clear operator
-    // error — a blank title has nothing to show on the wall.
-    if let Some(s) = &song {
-        if s.is_empty() {
-            return (StatusCode::BAD_REQUEST, "song must not be whitespace-only").into_response();
-        }
+    // A blank song; an artist alone for a video with no song (#136 review 2).
+    let refused = refused_title(&state.pool, video_id, song.as_deref(), artist.is_some());
+    match refused.await {
+        Ok(None) => {}
+        Ok(Some(why)) => return (StatusCode::BAD_REQUEST, why).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 
     // Require at least one field so empty-body PATCHes are a clear error.
@@ -497,6 +490,12 @@ pub async fn patch_video(
     if artist.is_some() {
         sets.push("artist = ?");
     }
+    // #136: a title correction is final — the row leaves the metadata repair
+    // queue (`metadata::health::REPAIR_QUEUE_WHERE`), which would write over it.
+    let corrects_title = song.is_some() || artist.is_some();
+    if corrects_title {
+        sets.push("gemini_failed = 0, metadata_source = 'manual'");
+    }
     let sql = format!("UPDATE videos SET {} WHERE id = ?", sets.join(", "));
 
     let mut q = sqlx::query(&sql);
@@ -526,12 +525,27 @@ pub async fn patch_video(
     }
     q = q.bind(video_id);
 
+    // #136: a repair in flight re-checks the queue and writes under the
+    // song-files lock, so a correction waits for it and is never overwritten.
+    let _files = if corrects_title {
+        Some(crate::downloader::cache::SONG_FILES.lock().await)
+    } else {
+        None
+    };
     match q.execute(&state.pool).await {
         Ok(res) if res.rows_affected() == 0 => (
             StatusCode::NOT_FOUND,
             format!("no video with id {video_id}"),
         )
             .into_response(),
+        Ok(_) if corrects_title => {
+            let spread =
+                crate::metadata::manual::apply_to_video(&state.pool, &state.cache_dir, video_id);
+            match spread.await {
+                Ok(()) => StatusCode::NO_CONTENT.into_response(),
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+            }
+        }
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -688,8 +702,8 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         .map(|r| r.get::<i64, _>("c"))
         .unwrap_or(0);
 
-    let mut active_playlist_ids: Vec<i64> = obs.active_playlist_ids.iter().copied().collect();
-    active_playlist_ids.sort_unstable();
+    let (active_scene, active_playlist_ids) =
+        super::routes_status::on_air_fields(&state.program_bus);
 
     let lan = state.lan_status.read().await;
 
@@ -715,7 +729,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
     Json(StatusResponse {
         version: sp_core::config::VERSION.to_string(),
         obs_connected: obs.connected,
-        active_scene: obs.current_scene.clone(),
+        active_scene,
         active_playlist_ids,
         tools: ToolsStatusResponse {
             ytdlp_available: tools.ytdlp_available,
@@ -737,6 +751,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
             priority_class: crate::process_start::priority_class_label().to_string(),
         },
         commit: crate::lyrics::host_commit::read_status(),
+        metadata: super::metadata::status_block(&state).await,
     })
 }
 
@@ -921,22 +936,6 @@ pub async fn get_video_lyrics(
         Err(e) => {
             warn!("get_video_lyrics read error for {youtube_id}: {e}");
             StatusCode::NOT_FOUND.into_response()
-        }
-    }
-}
-
-/// POST /api/v1/videos/:id/lyrics/reprocess
-///
-/// Re-queues a video for lyrics processing.
-pub async fn reprocess_video_lyrics(
-    State(state): State<AppState>,
-    Path(video_id): Path<i64>,
-) -> impl IntoResponse {
-    match crate::db::models::reset_video_lyrics(&state.pool, video_id).await {
-        Ok(()) => Json(serde_json::json!({"status": "queued"})).into_response(),
-        Err(e) => {
-            warn!("reprocess_video_lyrics error for video {video_id}: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
 }

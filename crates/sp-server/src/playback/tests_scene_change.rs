@@ -15,12 +15,14 @@ use sp_core::playback::PlaybackMode;
 use sp_core::ws::ServerMsg;
 use tokio::sync::{broadcast, mpsc};
 
-/// When a playlist transitions off-program (scene_active: true → false),
-/// `handle_scene_change` MUST send `HideTitle` + `HideSubtitles` to the
-/// resolume channel so the now-background playlist doesn't leave its
-/// title/subs on the shared Resolume clips. Without this, the on-program
-/// playlist's text gets clobbered by whatever the off-program playlist
-/// last displayed — the exact bug that made the event unusable.
+/// When a playlist transitions off-program (scene_active: true → false) and
+/// no other playlist is on program, `handle_scene_change` MUST send
+/// `HideTitle` + `HideSubtitles` to the resolume channel so the
+/// now-background playlist doesn't leave its title/subs on the shared
+/// Resolume clips. Without this, the on-program playlist's text gets
+/// clobbered by whatever the off-program playlist last displayed — the
+/// exact bug that made the event unusable. (With another playlist on
+/// program the wall is re-synced to it: the `going_off_program_*` tests.)
 #[tokio::test]
 async fn handle_scene_change_off_sends_hide_title_and_subs() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -837,3 +839,13 @@ async fn started_fixes_the_song_s_title_clock_and_arms_its_timers() {
     );
     engine.pipelines.get_mut(&7).unwrap().cancel_title_timers();
 }
+
+/// The wall after a playlist goes off program (#221 L4b review rounds
+/// 3-5), a child module for the 1000-line cap.
+#[path = "tests_scene_off_wall.rs"]
+mod wall;
+
+/// One wall owner (#221, release 0.69.0 review 🟡 2), a child module for
+/// the 1000-line cap.
+#[path = "tests_wall_owner.rs"]
+mod owner;

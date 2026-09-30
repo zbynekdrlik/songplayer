@@ -11,24 +11,42 @@
 //!   [`REMOTE_SETTINGS_POLL`] and (re)binds or stops the listener; a bind
 //!   failure is retried on every poll and shown as `remote.error`.
 //! - **Sessions** (`session.rs`) — `Hello` / `Identify` / `Identified`,
-//!   requests, batches, events. The wire format is `protocol.rs` (pure).
+//!   requests, batches, events. The message objects are `protocol.rs`
+//!   (pure); their encoding is `codec.rs` (#221 L2b, pure): JSON text frames
+//!   (`obswebsocket.json`) or MessagePack binary frames
+//!   (`obswebsocket.msgpack`, what Companion speaks), one per session.
 //! - **cg OBS** is reached through SongPlayer's EXISTING OBS client
 //!   ([`Upstream`]: its command channel + its event broadcast). The scene and
 //!   input list getters are forwarded verbatim, so the button names match cg
-//!   OBS 1:1; `CurrentProgramSceneChanged` / `SceneListChanged` from cg OBS are
-//!   re-emitted to the clients (Companion's button feedback).
-//! - **`SetCurrentProgramScene(X)`** is forwarded to cg OBS (the migration-time
-//!   behaviour) AND cuts `SP-program`: to the one playlist X shows, else to
-//!   "OBS manuál" (#212) while that input is a source, else nothing + a WARN
-//!   (`map.rs`). Presses are applied one at a time, in arrival order.
+//!   OBS 1:1; cg OBS's `SceneListChanged` is re-emitted to the clients.
+//! - **Program feedback (#221 L3)** is SongPlayer's own (`studio_events`):
+//!   `CurrentProgramSceneChanged` whenever the scene name of what `SP-program`
+//!   has on air changes (a press, a dashboard cut, anything that cuts), and
+//!   `SceneTransitionStarted` / `SceneTransitionEnded` around every facade
+//!   switch that cut. `GetCurrentProgramScene` answers SP-program's scene.
+//!   cg OBS's own `CurrentProgramSceneChanged` is never passed through.
+//! - **Studio mode (#221 L2).** Studio mode is reported ON, so Companion's
+//!   page-13 buttons (`preview_scene` + `do_transition`) reach SongPlayer:
+//!   `SetCurrentPreviewScene` / `GetCurrentPreviewScene` keep a preview PER
+//!   SESSION (initially the program scene), and `TriggerStudioModeTransition`
+//!   ALWAYS switches to it. `SetCurrentSceneTransitionDuration` is validated
+//!   and acknowledged but not applied (the program transition is the Settings
+//!   value): `remote.last_transition_duration {ms, applied: false}`.
+//! - **A scene press** (`SetCurrentProgramScene`, or the transition) goes
+//!   through the ONE switch path, `playback::program_switch`: a playlist
+//!   scene (from SongPlayer's own catalog) is cut first and mirrored to cg
+//!   OBS, a manual scene goes to cg OBS first, then "OBS manuál" (#212).
+//!   Presses are applied one at a time, in arrival order, across every client.
 //! - **Telemetry** lives on the program bus ([`RemoteShared`],
 //!   `ProgramBus::remote()`) and is served as `remote` on `GET /api/v1/program`.
 
+pub mod codec;
 pub mod map;
 pub mod protocol;
 mod session;
+pub mod studio_events;
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -42,27 +60,39 @@ use sp_core::config::{
 };
 use sqlx::SqlitePool;
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
 use tokio::task::{JoinHandle, JoinSet};
 use tracing::{info, warn};
 
 use crate::obs::remote_call::RemoteCall;
 use crate::obs::{ObsCommand, ObsEvent};
 use crate::playback::program_bus::ProgramBus;
+use crate::playback::program_on_air::{OnAir, program_scene_name};
+use studio_events::{FACADE_EVENTS_CAPACITY, FacadeEvent, TRANSITION_END_MAX_WAIT};
 
 /// How often the settings task re-reads the settings.
 pub const REMOTE_SETTINGS_POLL: Duration = Duration::from_secs(5);
 /// How long a call to cg OBS may take before the client is answered "not
-/// ready" (above the OBS client's own 2 s response timeout).
+/// ready" (above the OBS client's own 2 s response timeout). A call queued
+/// behind a scene switch still in flight first waits for that switch's answer
+/// (at most 2 s, `obs::remote_call`); a manual press's switch with less than
+/// the OBS client's 2 s of this left is answered "not ready" and never
+/// written.
 pub const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(3);
+/// #221: how much longer than [`UPSTREAM_TIMEOUT`] a mirror's waiter waits:
+/// the OBS client's forwarder may first wait for a switch in flight, then for
+/// the mirror's own answer, each at most the OBS client's answer timeout
+/// (`obs::dispatcher::DEFAULT_RESPONSE_TIMEOUT`, 2 s; pinned by a test).
+pub const MIRROR_EXTRA_WAIT: Duration = Duration::from_secs(4);
 /// The pause after a failed `accept` (never a hot loop on e.g. EMFILE).
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 /// A client that has not completed the WebSocket handshake AND identified
 /// within this is dropped / closed (an idle unauthenticated socket is never
 /// kept).
 pub const IDENTIFY_TIMEOUT: Duration = Duration::from_secs(10);
-/// The largest message / frame a client may send (1 MiB). Companion's biggest
-/// message is a batch of a few KB; tungstenite's default would be 64 MiB.
+/// The largest message / frame a client may send (1 MiB), text (JSON) or
+/// binary (msgpack, #221 L2b) alike. Companion's biggest message is a batch
+/// of a few KB; tungstenite's default would be 64 MiB.
 pub const MAX_MESSAGE_BYTES: usize = 1_048_576;
 /// At most this many unsupported request types are remembered (client-chosen
 /// strings on an open LAN surface must stay bounded).
@@ -70,6 +100,15 @@ pub const MAX_UNSUPPORTED_LISTED: usize = 64;
 /// Client-chosen strings (request types, scene names) are stored and logged
 /// clipped to this many characters (`clip`).
 pub const MAX_REQUEST_TYPE_CHARS: usize = 64;
+/// #221 (main-session decision 5882671183): at most this many sessions at
+/// once per listener (Companion needs one, the post-deploy E2E two). A
+/// handshake over it is refused with HTTP 503 before it becomes a session:
+/// each session may decode a 1 MiB frame, so their number bounds the memory
+/// an open LAN port can be made to hold.
+pub const MAX_SESSIONS: usize = 16;
+/// #221: a handshake refused over [`MAX_SESSIONS`] is logged (INFO) at most
+/// once per this interval; `remote.refused_over_cap` counts every one.
+pub const REFUSAL_LOG_INTERVAL: Duration = Duration::from_secs(10);
 
 /// The stored remote-control settings.
 #[derive(Clone, PartialEq, Eq)]
@@ -135,24 +174,43 @@ pub struct LastRequest {
     pub at_ms: i64,
 }
 
-/// The outcome of the last remote `SetCurrentProgramScene`.
+/// The outcome of the last scene switch (`program_switch`: a facade press or,
+/// #221 L4a, a dashboard cut; the OBS follow records the same shape as
+/// `last_follow_cut`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RemoteCut {
     /// The scene pressed, clipped to 64 characters (a client-chosen string).
+    /// #221 L4a, a dashboard cut: the playlist's catalog scene, "OBS manuál"
+    /// for -1, the playlist id when its catalog names no scene.
     pub scene: String,
-    /// `playlist` / `input` / `keep` (`map::SceneAction::label`).
+    /// `playlist` / `input` / `keep`.
     pub action: &'static str,
     /// The program source cut to (`-1` = "OBS manuál"), `null` when kept.
     pub source: Option<i64>,
-    /// Why nothing was cut (`not_switched`, `input_inactive`,
-    /// `persist_failed`), or `lookup_failed` when the scene lookup got no
-    /// answer (a cut to "OBS manuál", or keep when the input is not a
-    /// source).
+    /// Why nothing was cut: `not_switched` (cg OBS refused or did not answer
+    /// a manual scene), `input_inactive`, `persist_failed`, `catalog_failed`.
     pub reason: Option<&'static str>,
     /// The boundary the cut lands on (`GET /api/v1/program`'s own field).
     pub cut_boundary_100ns: Option<i64>,
     /// Unix time, ms.
     pub at_ms: i64,
+    /// #221: what triggered the switch, `program` (`SetCurrentProgramScene`),
+    /// `transition` (`TriggerStudioModeTransition`) or (L4a) `dashboard`
+    /// (`POST /api/v1/program/cut`); `null` for the follow.
+    pub via: Option<&'static str>,
+    /// #221: cg OBS's answer to the forward (a manual scene) or the mirror (a
+    /// playlist scene): `ok`, `error <code>`, `not_ready`, or `pending` while
+    /// the mirror's answer is due; `null` when nothing went to cg OBS.
+    pub cg_forward: Option<String>,
+}
+
+/// #221: the last `SetCurrentSceneTransitionDuration` a client sent. It is
+/// acknowledged, never applied: the program transition is the Settings value
+/// (cg OBS runs a Cut, so the button's duration never had a visible effect).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct TransitionDuration {
+    pub ms: u32,
+    pub applied: bool,
 }
 
 /// The `remote` block of `GET /api/v1/program`.
@@ -167,14 +225,27 @@ pub struct RemoteStatus {
     pub listening: bool,
     /// Why the listener is not bound (e.g. the port is taken).
     pub error: Option<String>,
-    /// Connected clients (WebSocket sessions).
+    /// Connected clients (WebSocket sessions). A session's slot of
+    /// [`MAX_SESSIONS`] is freed just before it stops counting here, so for
+    /// that instant this may read one over the cap.
     pub clients: usize,
+    /// #221: handshakes refused with HTTP 503 because [`MAX_SESSIONS`]
+    /// sessions were open, since startup.
+    pub refused_over_cap: u64,
     /// Requests served since startup (batch entries counted one by one).
     pub requests: u64,
     pub last_request: Option<LastRequest>,
     pub last_remote_cut: Option<RemoteCut>,
     /// Request types clients asked for that the facade does not serve.
     pub unsupported_requests: Vec<String>,
+    /// #221: the last transition duration a client sent (not applied).
+    pub last_transition_duration: Option<TransitionDuration>,
+    /// #221 L3: SP-program's scene name (the one resolver,
+    /// `program_scene_name`): what `GetCurrentProgramScene` answers and
+    /// `CurrentProgramSceneChanged` announced last; `null` while nothing is on
+    /// program, and also while a playlist whose catalog names no scene (an
+    /// empty or duplicate NDI output name) is on it.
+    pub program_scene: Option<String>,
 }
 
 #[derive(Default)]
@@ -183,7 +254,13 @@ struct RemoteState {
     error: Option<String>,
     last_request: Option<LastRequest>,
     last_cut: Option<RemoteCut>,
+    /// The id of `last_cut` (`record_cut`), so a late mirror answer updates
+    /// only its own cut.
+    last_cut_id: u64,
     unsupported: BTreeSet<String>,
+    last_transition_duration: Option<TransitionDuration>,
+    /// #221: when a refusal over the session cap was last logged.
+    last_refusal_log: Option<std::time::Instant>,
 }
 
 /// The remote control's telemetry, shared by the settings task, the sessions
@@ -193,6 +270,7 @@ struct RemoteState {
 pub struct RemoteShared {
     clients: AtomicUsize,
     requests: AtomicU64,
+    refused_over_cap: AtomicU64,
     state: Mutex<RemoteState>,
 }
 
@@ -201,8 +279,9 @@ impl RemoteShared {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The `remote` block for the stored `settings`.
-    pub fn status(&self, settings: &RemoteSettings) -> RemoteStatus {
+    /// The `remote` block for the stored `settings`, with `on_air` (what
+    /// `SP-program` has on air) named as `program_scene`.
+    pub fn status(&self, settings: &RemoteSettings, on_air: &OnAir) -> RemoteStatus {
         let st = self.state();
         RemoteStatus {
             enabled: settings.enabled,
@@ -211,10 +290,13 @@ impl RemoteShared {
             listening: st.listening,
             error: st.error.clone(),
             clients: self.clients.load(Ordering::SeqCst),
+            refused_over_cap: self.refused_over_cap.load(Ordering::SeqCst),
             requests: self.requests.load(Ordering::SeqCst),
             last_request: st.last_request.clone(),
             last_remote_cut: st.last_cut.clone(),
             unsupported_requests: st.unsupported.iter().cloned().collect(),
+            last_transition_duration: st.last_transition_duration,
+            program_scene: program_scene_name(on_air),
         }
     }
 
@@ -222,6 +304,21 @@ impl RemoteShared {
     pub fn client_connected(self: &Arc<Self>) -> ClientGuard {
         self.clients.fetch_add(1, Ordering::SeqCst);
         ClientGuard(Arc::clone(self))
+    }
+
+    /// #221: count a handshake refused over [`MAX_SESSIONS`] at `now`; the
+    /// count so far, and whether to log this one (at most once per
+    /// [`REFUSAL_LOG_INTERVAL`]).
+    pub fn note_refused_over_cap(&self, now: std::time::Instant) -> (u64, bool) {
+        let refused = self.refused_over_cap.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut st = self.state();
+        let log = st
+            .last_refusal_log
+            .is_none_or(|last| now.saturating_duration_since(last) >= REFUSAL_LOG_INTERVAL);
+        if log {
+            st.last_refusal_log = Some(now);
+        }
+        (refused, log)
     }
 
     /// Count one request and remember it as the last one.
@@ -243,9 +340,35 @@ impl RemoteShared {
         st.unsupported.insert(clip(request_type))
     }
 
-    /// Remember the outcome of a remote scene press.
-    pub fn record_cut(&self, cut: RemoteCut) {
-        self.state().last_cut = Some(cut);
+    /// Remember the outcome of a remote scene press; returns its id (for
+    /// [`Self::set_cg_forward`]).
+    pub fn record_cut(&self, cut: RemoteCut) -> u64 {
+        let mut st = self.state();
+        st.last_cut_id += 1;
+        st.last_cut = Some(cut);
+        st.last_cut_id
+    }
+
+    /// #221: set cut `id`'s `cg_forward` (the mirror's answer) while it is
+    /// still the last cut; `false` when a later press replaced it.
+    pub fn set_cg_forward(&self, id: u64, cg_forward: String) -> bool {
+        let mut st = self.state();
+        if st.last_cut_id != id {
+            return false;
+        }
+        match st.last_cut.as_mut() {
+            Some(cut) => {
+                cut.cg_forward = Some(cg_forward);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// #221: remember a client's transition duration (acknowledged, not
+    /// applied).
+    pub fn record_transition_duration(&self, ms: u32) {
+        self.state().last_transition_duration = Some(TransitionDuration { ms, applied: false });
     }
 
     fn set_listening(&self, listening: bool) {
@@ -283,7 +406,7 @@ impl Drop for ClientGuard {
 }
 
 /// Unix time in ms.
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
@@ -293,6 +416,10 @@ fn now_ms() -> i64 {
 pub struct Upstream {
     cmd_tx: Option<mpsc::Sender<ObsCommand>>,
     events: broadcast::Sender<ObsEvent>,
+    /// How long a call waits for cg OBS: [`UPSTREAM_TIMEOUT`] (longer only in
+    /// tests, so a "never awaited" test cannot be passed by a timeout and a
+    /// stalled test runner never runs a switch out of its time).
+    timeout: Duration,
 }
 
 impl Upstream {
@@ -300,69 +427,109 @@ impl Upstream {
         cmd_tx: Option<mpsc::Sender<ObsCommand>>,
         events: broadcast::Sender<ObsEvent>,
     ) -> Self {
-        Self { cmd_tx, events }
+        Self {
+            cmd_tx,
+            events,
+            timeout: UPSTREAM_TIMEOUT,
+        }
+    }
+
+    /// #221 L4a: a link to no cg OBS, whose calls are "not ready" at once —
+    /// the dashboard's link until `start_program` attaches the OBS client's
+    /// (`LegacyCg::link`).
+    pub fn unlinked() -> Self {
+        Self::new(None, broadcast::channel(1).0)
+    }
+
+    /// This link with another call timeout (tests only, the integration
+    /// tests included: production always uses [`UPSTREAM_TIMEOUT`]).
+    #[doc(hidden)]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     /// Forward one request to cg OBS; its op=7 `d` object, `None` when cg OBS
-    /// is not configured, not connected or did not answer within
-    /// [`UPSTREAM_TIMEOUT`].
+    /// is not configured, not connected or did not answer within the timeout
+    /// ([`UPSTREAM_TIMEOUT`]).
     pub async fn request(&self, request_type: &str, request_data: Option<Value>) -> Option<Value> {
+        let rx = self.enqueue(request_type, request_data, false)?;
+        self.wait(rx).await
+    }
+
+    /// Hand one request to the OBS client without ever blocking on its queue
+    /// (FIFO: it goes out after every call queued before it); the receiver of
+    /// its op=7 `d`, `None` when there is no OBS client or its queue is full.
+    /// `supersedes`: a fire-and-forget switch (the #221 mirror) that replaces
+    /// an earlier switch still queued (`obs::remote_call`).
+    pub fn enqueue(
+        &self,
+        request_type: &str,
+        request_data: Option<Value>,
+        supersedes: bool,
+    ) -> Option<oneshot::Receiver<Option<Value>>> {
+        let tx = self.cmd_tx.as_ref()?;
         let (reply, rx) = oneshot::channel();
         let call = RemoteCall::Request {
             request_type: request_type.to_string(),
             request_data,
+            supersedes,
+            deadline: tokio::time::Instant::now() + self.timeout,
             reply,
         };
-        self.call(call, rx).await.flatten()
-    }
-
-    /// The playlists `scene` shows (the OBS client's scene → playlist map),
-    /// `None` when cg OBS did not answer.
-    pub async fn scene_playlists(&self, scene: &str) -> Option<HashSet<i64>> {
-        let (reply, rx) = oneshot::channel();
-        let call = RemoteCall::ScenePlaylists {
-            scene: scene.to_string(),
-            reply,
-        };
-        self.call(call, rx).await
-    }
-
-    /// Hand `call` to the OBS client without ever blocking on its queue, then
-    /// wait at most [`UPSTREAM_TIMEOUT`]. Dropping `rx` on a timeout makes the
-    /// OBS side skip the call if it runs later (`reply.is_closed()`).
-    async fn call<T>(&self, call: RemoteCall, rx: oneshot::Receiver<T>) -> Option<T> {
-        let tx = self.cmd_tx.as_ref()?;
         if tx.try_send(ObsCommand::Remote(call)).is_err() {
             warn!("remote: the OBS client's command queue is full or closed");
             return None;
         }
-        tokio::time::timeout(UPSTREAM_TIMEOUT, rx).await.ok()?.ok()
+        Some(rx)
+    }
+
+    /// Wait at most the timeout for an enqueued request's op=7 `d`. Dropping
+    /// `rx` on a timeout makes the OBS side skip the call if it runs later
+    /// (`reply.is_closed()`), and the OBS side writes an awaited switch only
+    /// while its whole answer timeout is left of this wait (its `deadline`):
+    /// a switch cg OBS answers within the OBS client's 2 s never lands after
+    /// the requester was told "not ready".
+    pub async fn wait(&self, rx: oneshot::Receiver<Option<Value>>) -> Option<Value> {
+        tokio::time::timeout(self.timeout, rx).await.ok()?.ok()?
+    }
+
+    /// #221: a mirror's wait for cg OBS's answer — the timeout plus
+    /// [`MIRROR_EXTRA_WAIT`], because the forwarder writes a mirror however
+    /// late (its cut already happened) and may first wait for a switch in
+    /// flight.
+    pub async fn wait_mirror(&self, rx: oneshot::Receiver<Option<Value>>) -> Option<Value> {
+        let wait = self.timeout + MIRROR_EXTRA_WAIT;
+        tokio::time::timeout(wait, rx).await.ok()?.ok()?
     }
 
     /// A new receiver of cg OBS's events (one per session).
     pub fn subscribe(&self) -> broadcast::Receiver<ObsEvent> {
         self.events.subscribe()
     }
-
-    /// Whether an OBS client exists at all (OBS is configured). Without one
-    /// every call is `None` at once, so a caller never retries it (#215).
-    pub fn is_configured(&self) -> bool {
-        self.cmd_tx.is_some()
-    }
 }
 
-/// Everything a session needs: the pool (input settings, the persisted program
-/// source), the program bus, cg OBS and the password of this listener.
+/// Everything a session needs: the pool (the playlists, input settings, the
+/// persisted program source), the program bus (which also orders the scene
+/// switches), cg OBS, the password of this listener and (#221 L3) the
+/// facade's own events.
 pub struct Facade {
     pool: SqlitePool,
     bus: Arc<ProgramBus>,
     upstream: Upstream,
     password: Option<String>,
-    /// Remote scene presses are applied one at a time, in arrival order,
-    /// across every client — a forward + lookup + cut never interleaves.
-    cut_order: tokio::sync::Mutex<()>,
     /// [`IDENTIFY_TIMEOUT`] (shorter only in tests).
     identify_timeout: Duration,
+    /// #221 L3: the events the facade emits itself (`studio_events`), to
+    /// every session of this listener.
+    events: broadcast::Sender<FacadeEvent>,
+    /// #221 L3: how long a switch's `SceneTransitionEnded` waits for the
+    /// window at most: [`TRANSITION_END_MAX_WAIT`] (10 minutes in tests, so a
+    /// stalled test runner never ends a fade's wait early — review round 2).
+    transition_end_max: Duration,
+    /// #221: one permit per session, [`MAX_SESSIONS`] in all; a handshake
+    /// that gets none is refused with HTTP 503.
+    sessions: Arc<Semaphore>,
 }
 
 impl Facade {
@@ -377,8 +544,31 @@ impl Facade {
             bus,
             upstream,
             password,
-            cut_order: tokio::sync::Mutex::new(()),
             identify_timeout: IDENTIFY_TIMEOUT,
+            events: broadcast::channel(FACADE_EVENTS_CAPACITY).0,
+            transition_end_max: TRANSITION_END_MAX_WAIT,
+            sessions: Arc::new(Semaphore::new(MAX_SESSIONS)),
+        })
+    }
+
+    /// A facade with its own identify timeout (tests).
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        pool: SqlitePool,
+        bus: Arc<ProgramBus>,
+        upstream: Upstream,
+        password: Option<String>,
+        identify_timeout: Duration,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            pool,
+            bus,
+            upstream,
+            password,
+            identify_timeout,
+            events: broadcast::channel(FACADE_EVENTS_CAPACITY).0,
+            transition_end_max: Duration::from_secs(600),
+            sessions: Arc::new(Semaphore::new(MAX_SESSIONS)),
         })
     }
 
@@ -388,9 +578,14 @@ impl Facade {
 }
 
 /// Accept clients until this future is dropped (the listener task is
-/// aborted); every session lives in the `JoinSet` and is dropped with it.
+/// aborted); every session lives in the `JoinSet` and is dropped with it, and
+/// so does this listener's program feedback (#221 L3,
+/// `studio_events::run_program_feedback`).
 pub async fn serve(listener: TcpListener, facade: Arc<Facade>) {
     let mut sessions = JoinSet::new();
+    let (on_air, last) = studio_events::subscribe_program(&facade.bus);
+    let feedback = studio_events::run_program_feedback(on_air, last, facade.events.clone());
+    sessions.spawn(feedback);
     loop {
         tokio::select! {
             accepted = listener.accept() => match accepted {

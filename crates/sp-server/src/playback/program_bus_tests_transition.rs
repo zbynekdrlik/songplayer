@@ -10,8 +10,7 @@
 //! Wired via `#[cfg(test)] #[path = "program_bus_tests_transition.rs"] mod tests_transition;`.
 
 use super::tests::{
-    MS, SRC_A, SRC_B, SRC_C, T0, b, dims, drain, frame, grace, job, program, sends, stamps,
-    video_dims,
+    MS, SRC_A, SRC_B, SRC_C, b, dims, drain, frame, grace, job, program, sends, stamps, video_dims,
 };
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
@@ -192,7 +191,7 @@ fn the_window_audio_is_the_equal_power_crossfade_and_never_dips_below_the_quiete
             core.cut(SRC_B, b(5) + 5 * MS);
         }
         while let Some(job) = core.take() {
-            let stamp = out.submit(job, T0);
+            let stamp = out.submit(job);
             core.record_submitted(stamp);
             blocks.push((stamp, backend.last_audio_planar()));
         }
@@ -428,7 +427,11 @@ fn a_fade_up_from_nothing_mixes_the_new_source_against_the_standby() {
             .map(|w| (w.from, w.to, w.start_boundary_100ns)),
         Some((None, SRC_B, b(7)))
     );
-    assert_eq!(core.hold_for(SRC_B), Some(Hold::OnProgram));
+    assert_eq!(
+        core.hold_for(SRC_B),
+        None,
+        "the selected source is never held"
+    );
     let mut sent = Vec::new();
     for k in 6..=17 {
         core.offer(SRC_B, job(8, &fb, b(k), LEVEL_B));
@@ -505,8 +508,8 @@ fn hold_for_keeps_the_outgoing_source_until_one_slot_after_its_window() {
     let mut core = fade_core();
     assert_eq!(
         core.hold_for(SRC_A),
-        Some(Hold::OnProgram),
-        "the selected source: a cut away from it may be on its way"
+        None,
+        "#221 L4b: the selected source is never held (the authority never takes it off)"
     );
     assert_eq!(core.hold_for(SRC_B), None);
     let (fa, fb) = (frame(4, 2), frame(8, 2));
@@ -521,7 +524,7 @@ fn hold_for_keeps_the_outgoing_source_until_one_slot_after_its_window() {
         Some(Hold::Until(b(17))),
         "the window ends at b(16) (exclusive), plus one slot"
     );
-    assert_eq!(core.hold_for(SRC_B), Some(Hold::OnProgram));
+    assert_eq!(core.hold_for(SRC_B), None);
     assert_eq!(core.hold_for(SRC_C), None);
     offer_both(&mut core, &fa, &fb, 15..=15);
     assert_eq!(
@@ -532,11 +535,11 @@ fn hold_for_keeps_the_outgoing_source_until_one_slot_after_its_window() {
 
     // The same through the thread-safe bus.
     let bus = ProgramBus::new();
-    bus.select_initial(SRC_A);
-    assert_eq!(bus.hold_for(SRC_A), Some(Hold::OnProgram));
+    bus.select_initial(SRC_A, None);
+    assert_eq!(bus.hold_for(SRC_A), None);
     assert!(bus.set_transition(fade_300()));
     assert!(!bus.set_transition(fade_300()), "the same spec again");
-    let st = bus.cut(SRC_B, b(5));
+    let st = bus.cut(SRC_B, b(5), None);
     assert_eq!(st.cut_boundary_100ns, Some(b(7)));
     assert_eq!(
         (
@@ -580,7 +583,7 @@ fn a_second_cut_inside_a_window_truncates_it_and_opens_the_next_window() {
                 "C has sent no pair for b(11) yet: B's fade-out may wait up to 15 \
                  boundaries, so it may end as late as b(35)"
             );
-            assert_eq!(core.hold_for(SRC_C), Some(Hold::OnProgram));
+            assert_eq!(core.hold_for(SRC_C), None);
             assert_eq!(core.status().transition.counters.transitions_done, 0);
         }
         if k == 10 {
@@ -654,7 +657,7 @@ fn cutting_back_inside_the_same_slot_cancels_the_window() {
     let st = core.status();
     assert_eq!(st.transition.active, None, "no window is left");
     assert_eq!(st.health.cuts, 2);
-    assert_eq!(core.hold_for(SRC_A), Some(Hold::OnProgram));
+    assert_eq!(core.hold_for(SRC_A), None);
     assert_eq!(core.hold_for(SRC_B), None);
     assert!(!core.is_candidate(SRC_B));
     let mut sent = Vec::new();

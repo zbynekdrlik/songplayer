@@ -9,14 +9,20 @@
 //!   `{"source": -1}` (`PROGRAM_INPUT_ID`) cuts to the #212 NDI input "OBS
 //!   manuál" — accepted only while it is a source (`ndi_input_enabled` with a
 //!   non-empty `ndi_input_source`), else `404`.
+//!   #221 L4a: the cut goes through the ONE switch path
+//!   (`program_switch::switch_source`, `via=dashboard`): under the bus's
+//!   `switch_order`, recorded as `remote.last_remote_cut`, a playlist cut
+//!   first and then mirrored to cg OBS (until B4 step 6), -1 a cut only.
 //!
 //! Both answer the program state plus `vban`, the #210 VBAN audio output's
 //! telemetry (`playback::vban_out::VbanStatus`), `input`, the #212 NDI
 //! input's (`playback::ndi_input::NdiInputStatus`), `remote`, the #213
-//! Companion remote control's (`remote::RemoteStatus`), and `follow`, the #215
+//! Companion remote control's (`remote::RemoteStatus`, #221 L3: with
+//! `program_scene`, SP-program's scene name), and `follow`, the #215
 //! OBS follow (`playback::program_follow::FollowStatus`). The program state
 //! itself carries `transition` (#215): the transition the next cut uses, the
-//! running window and the transition counters.
+//! running window and the transition counters. #221 L4a: `legacy_cg`, what
+//! SongPlayer told cg OBS to show (`playback::legacy_cg::LegacyCgStatus`).
 
 use axum::Json;
 use axum::extract::State;
@@ -28,9 +34,11 @@ use tracing::{info, warn};
 use sp_core::config::PROGRAM_INPUT_ID;
 
 use crate::AppState;
+use crate::playback::legacy_cg::LegacyCgStatus;
 use crate::playback::ndi_input::{InputSettings, NdiInputStatus, load_input_settings};
-use crate::playback::program_bus::{ProgramBus, ProgramStatus, persist_and_cut};
+use crate::playback::program_bus::{ProgramBus, ProgramStatus};
 use crate::playback::program_follow::{FollowSettings, FollowStatus, load_follow_settings};
+use crate::playback::program_switch::{SwitchCtx, Via, switch_source};
 use crate::playback::vban_out::VbanStatus;
 use crate::remote::{RemoteSettings, RemoteStatus, load_remote_settings};
 
@@ -51,6 +59,7 @@ pub struct ProgramResponse {
     pub input: NdiInputStatus,
     pub remote: RemoteStatus,
     pub follow: FollowStatus,
+    pub legacy_cg: LegacyCgStatus,
 }
 
 /// The STORED settings the telemetry blocks report next to their live state.
@@ -66,8 +75,9 @@ impl ProgramResponse {
             program,
             vban: bus.vban().status(),
             input: bus.input().status(&stored.input),
-            remote: bus.remote().status(&stored.remote),
+            remote: bus.remote().status(&stored.remote, &bus.on_air_now()),
             follow: bus.follow().status(&stored.follow),
+            legacy_cg: bus.legacy_cg().status(),
         }
     }
 }
@@ -104,7 +114,9 @@ pub async fn get_program(State(state): State<AppState>) -> Json<ProgramResponse>
 
 /// `POST /api/v1/program/cut` — `200` + the new program state, `404` for an
 /// unknown playlist or an NDI input that is disabled or has no source, `500`
-/// when the selection cannot be persisted (then nothing is cut).
+/// when the playlists cannot be read or the selection cannot be persisted
+/// (then nothing is cut). #221 L4a: through the one switch path
+/// (`switch_source`, `via=dashboard`), which mirrors a playlist to cg OBS.
 pub async fn post_program_cut(
     State(state): State<AppState>,
     Json(body): Json<CutRequest>,
@@ -129,10 +141,17 @@ pub async fn post_program_cut(
             Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }
     }
-    let status = match persist_and_cut(&state.pool, &state.program_bus, body.source).await {
+    let bus = &state.program_bus;
+    let upstream = bus.legacy_cg().link();
+    let ctx = SwitchCtx {
+        pool: &state.pool,
+        bus,
+        upstream: &upstream,
+    };
+    let status = match switch_source(&ctx, body.source, Via::Dashboard).await {
         Ok(status) => status,
         Err(e) => {
-            warn!(%e, source = body.source, "program cut: persisting the source failed");
+            warn!(%e, source = body.source, "program cut: nothing was cut");
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
@@ -148,3 +167,6 @@ pub async fn post_program_cut(
 #[cfg(test)]
 #[path = "program_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "program_tests_switch.rs"]
+mod tests_switch;

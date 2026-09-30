@@ -26,4 +26,24 @@ impl PlaybackEngine {
                 .store(active, std::sync::atomic::Ordering::Release);
         }
     }
+
+    /// Test-only (#221 L4a): put a pipeline on program the way the dark-wall
+    /// check expects a receiver on it (`ndi_health_expect`): its scene is on
+    /// program AND cg OBS was told to show it (`legacy_cg` on the engine's
+    /// program bus; a fresh bus when none is set yet).
+    pub(crate) fn set_on_program_for_test(&mut self, playlist_id: i64) {
+        self.set_scene_active_for_test(playlist_id, true);
+        self.set_cg_shown_for_test(Some(playlist_id));
+    }
+
+    /// Test-only (#221 L4a): record that cg OBS was told to show `shown` (a
+    /// playlist, or `None` for a manual scene) on the engine's program bus.
+    pub(crate) fn set_cg_shown_for_test(&self, shown: Option<i64>) {
+        let bus = self
+            .program
+            .get_or_init(|| std::sync::Arc::new(super::program_bus::ProgramBus::new()));
+        let legacy = bus.legacy_cg();
+        let ticket = legacy.ticket();
+        legacy.confirmed(ticket, shown);
+    }
 }

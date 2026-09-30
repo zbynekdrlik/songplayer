@@ -33,7 +33,7 @@ chunked-transcription / qwen3 / autosub regimes were already gone. The pipeline
 is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
 (Gemini g35t):
 
-0. **Text gathering** (`gather.rs::gather_sources_impl`) — unchanged, all
+0. **Text gathering** (`gather.rs::gather_sources_impl`) — all
    best-effort: manual **yt_subs** captions → **LRCLIB** → **lyrics.ovh**
    (Genius is the fallback when lyrics.ovh misses, both labelled `"genius"`)
    → **Spotify** (`spotify_track_id`, LINE_SYNCED) → operator
@@ -42,34 +42,80 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
    `claude_merge::best_authoritative_candidate` /
    `priority_with_timing` (override=6; timed spotify/lrclib=5, timed
    yt_subs=4; text description=3, text lrclib=2, text genius=1; else=0).
+   - **Captions keep their sung lines (#144):** `youtube_subs::parse_json3`
+     splits a caption event's `\n` lines into separate text lines (each with
+     the event's own span — never divided by hand); every consumer is
+     text-only (mtl re-times them), so no ~65-char double lines reach the wall.
+   - Timed / Claude-cleaned candidates are built by `text_candidate.rs`
+     (shared with the title search). The Claude cleanup of scraped lyrics
+     (`CleanupMode::ScrapedLyrics`) KEEPS every sung repeat (#144; it used to
+     dedupe them for the deleted v20 chorus projection — mtl times exactly
+     the lines it is given); its caches are `_cleaned_v3.json`.
+
+0b. **One g35t transcript per song (#144,
+   `worker_text_tiers::run_text_tiers`).** Right after isolation the vocal is
+   transcribed ONCE (`transcribe_vocal`) and reused by the title search, the
+   gate and the base tier (before: after mtl, and again in the base tier on a
+   gate fail). A failed transcription defers the song (`g35t_error`) before
+   any mtl run. The transcript is kept as `{yt}_g35t_words.json`
+   (`transcript_cache.rs`) for ONE processing pass: a no-penalty deferral
+   re-pick of the SAME vocal (length + mtime, within 6 h) reuses it; when the
+   pass ends (a track or a quarantine) it is retired to
+   `{yt}_g35t_words_used.json`, so the next pass — a manual reprocess
+   included — transcribes afresh.
+
+0c. **Title search for covers (#144, `title_search.rs`).** When no
+   artist+title lookup found the song (no `lrclib`/`genius`/`override`/
+   `tier1:spotify` candidate — a cover's metadata names the COVER artist),
+   LRCLIB `/api/search?track_name=` (±15 s of the song, `lrclib_search.rs`)
+   and Genius by the title alone (first 3 song pages) are scored against the
+   transcript by multiset word overlap (Dice); the best usable one ≥ 0.50
+   (`MIN_TITLE_MATCH_SCORE`, measured: own lyric 0.664–0.951, other songs
+   ≤ 0.379; a plain lyric the cleanup rejects passes to the next) becomes the
+   reference text — unless the text the video would use without it (its
+   captions / description priority pick) scores at least as high against the
+   transcript (`keeps_the_videos_text`) — and mtl + the gate verify it. Runs
+   only on a non-empty transcript and when the ★ tier can use it (mtl
+   tooling present), `should_title_search`. Never an LLM guess of the original artist. Record:
+   `{yt}_title_search_audit.json` (every candidate, its score, the choice).
+   A cover LONGER/SHORTER than the original by > 15 s is found only through
+   Genius (158: Elevation's LRCLIB records are 539 s, the cover 484 s).
 
 1. **★ tier — v21 reference stage** (`worker_reference::run_mtl_reference_stage`
    → `orchestrator::run_reference_stage`). For any song with vocals + a text
    candidate (≥4 lines): `mtl_aligner::align` (production wrapper around
    `eval/lyrics/aligners/lyrics_alignment_mtl/run.py`, MTL+BDR — 31.6%
    gold-norm, best measured) force-aligns the best candidate's lines to the
-   isolated vocals, verified against an independent `g35t_client::
-   transcribe_words` (Gemini 3.5 Transcribe) transcript through
-   `reference_gate::evaluate` (whole-song sanity `|median signed Δstart| ≤
-   400ms` — catches mtl's wrong-repetition failure mode — AND agreement ≥70%
-   of matched lines within 400ms, ≥60% matched). **PASS** → mtl line timings
+   isolated vocals, verified against the song's one independent Gemini 3.5
+   Transcribe transcript through the TWO-WAY `reference_gate::evaluate`:
+   reference → transcript (≥60% of lines matched, whole-song sanity
+   `|median signed Δstart| ≤ 400ms` — catches mtl's wrong-repetition failure
+   mode — AND agreement ≥70% of matched lines within 400ms) and, since #144,
+   transcript → reference (`sung_coverage.rs`: an order-preserving LCS word
+   alignment; the text must cover ≥ 0.55 of the sung words and leave no sung
+   stretch > 25 s uncovered, else `Fail{Coverage}` — a partial description
+   lyric no longer ships as ★ with lines held 48 s over other singing;
+   thresholds measured on #144 comment 5899043518). **PASS** → mtl line timings
    ship directly (`words: None`), `lyrics_source =
    "<candidate.source>+mtl@rev1/g35t-ok"`, `lyrics_alignment_model =
    ALIGNMENT_MODEL_MTL_REV1`, `videos.lyrics_reference = 1` (wall ★).
-   **FAIL/ERROR** → `videos.lyrics_reference = 0`, the gate decision lands in
-   `{youtube_id}_alignment_audit.json`, and the song falls through to tier 2.
-   Byte-for-byte UNCHANGED from v21 — do NOT degrade this path.
+   **FAIL/ERROR** → `videos.lyrics_reference = 0` and the song falls through
+   to tier 2. Every PASS/FAIL/ERROR writes `{youtube_id}_alignment_audit.json`
+   (with `sung_words` / `sung_covered_frac` / `max_uncovered_sung_ms`, #144).
+   Do NOT degrade this path.
    - Skip conditions (info-logged, fall to tier 2): mtl tooling absent
      (`MtlConfig::is_available()`, WARNed once at worker start), no vocal WAV,
-     no text candidate, or candidate < 4 lines.
+     no text candidate, candidate < 4 lines, or an empty transcript.
    - Injection seam: `orchestrator::ReferenceStageBackend` (`mtl_align` +
      `asr_transcribe`); production wires `RealReferenceStageBackend`, tests
      inject a fake — never a real subprocess/HTTP call in a unit test.
 
 2. **base tier — g35t transcript** (`worker_g35t::run_g35t_transcript_branch`
    → `g35t_transcript::words_to_lines`). The SOLE fallback for every song the
-   ★ tier does not ship (no usable text, gate FAIL, mtl skip/error):
-   `g35t_client::transcribe_words` transcribes the isolated vocals, and the
+   ★ tier does not ship (no usable text, gate FAIL, mtl skip/error): the
+   song's one transcript (it transcribes only a song with no isolated vocal —
+   the #171 full-mix fallback; with no Gemini key and no kept transcript it
+   defers `gemini_key_missing`), and the
    words are grouped into LED-wall lines by a deterministic silence-gap split
    (salvaged from the old asr_path, re-typed) + `line_splitter::
    split_lyrics_lines` + the monotonic/min-duration sanitizer. Ships
@@ -77,8 +123,10 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
    `lyrics_alignment_model = ALIGNMENT_MODEL_G35T_REV1`. Measured no-text
    quality: g35t 19.7% gold-norm ≤400ms vs the retired AssemblyAI 3.8%.
    Reuses the vocal WAV already isolated for the ★ tier (no 2nd Demucs).
-   - Empty/blank transcript → quarantine as `asr_gap`. No vocals / no gemini
-     keys / g35t transport error → `Deferred` (row backs off, retries later).
+   - Empty/blank transcript → quarantine as `asr_gap`, unless the song already
+     serves lyrics (then only the attempt is recorded, the lyrics kept). No
+     vocals / no gemini keys / g35t transport error → `Deferred` (row backs
+     off, retries later).
 
 3. **AutoSubProvider** — PERMANENTLY UNREGISTERED. Never register again.
    YouTube autosub produces wrong timing.
@@ -93,9 +141,6 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
   Do NOT switch to a weaker model.
 - Route through direct `generativelanguage.googleapis.com` (not CLIProxyAPI)
   — the OAuth path hits `MODEL_CAPACITY_EXHAUSTED` on 3.x Pro preview models.
-  Override via `GEMINI_PROXY_URL` env var.
-- `thinkingConfig.thinkingBudget = 2048` limits Gemini reasoning to avoid
-  hallucinated-duplicate loops + timeouts on dense chorus audio.
 
 ## Chunking — every chunk must succeed
 
@@ -231,9 +276,9 @@ When Claude refuses via CLIProxyAPI:
   (never a silent "parse returned 0", `translator::classify_zero_translation`) —
   grep the worker log for `refusal`. Prompt-semantics change → bumped
   `LYRICS_TRANSLATION_VERSION` 1→2 (catalog re-translation).
-- Model: `sp_core::config::DEFAULT_AI_MODEL` (`claude-fable-5-1` since
-  2026-09-13, #145 — the newest flagship the upgraded CLIProxyAPI **7.3.1**
-  on win-resolume routes). The proxy binary was upgraded 6.9.27 → 7.3.1
+- Model: `sp_core::config::DEFAULT_AI_MODEL` (`claude-opus-5-5` since
+  2026-09-29, #145 — the owner's flagship, routed by CLIProxyAPI **8.0.4**;
+  `claude-fable-5-1` on 7.3.1 before that). The proxy binary was upgraded 6.9.27 → 7.3.1
   because the old build's model registry predated the Claude-5 ids and
   `502 unknown provider`'d them; `claude-opus-4-6` was the #144 stop-gap it
   forced (and `claude-opus-4-20250514` before that is fully retired — a
@@ -279,6 +324,21 @@ When Claude refuses via CLIProxyAPI:
 Catalog-wide reprocess is expensive and can break songs that somehow worked.
 Use `manual_priority` for targeted per-song reprocessing until the user says
 "bump it".
+
+**The ONE per-song reprocess path (#144):** `POST /api/v1/lyrics/reprocess`
+with `{"video_ids":[…]}` (or `{"playlist_id":N}`), the dashboard's Reprocess.
+It sets `lyrics_manual_priority = 1` and keeps `has_lyrics` and the served
+`<yt>_lyrics.json`, so the wall shows the old lyrics while the song waits in
+the queue. The bulk sweeps (`reprocess-all-stale`,
+`reprocess-catalog-with-new-gate`) use the same queue. No reprocess route may
+blank served lyrics: the per-video `POST /api/v1/videos/{id}/lyrics/reprocess`
+set `has_lyrics = 0` and blanked 211 songs on the wall for ~6 h on 30.9.2026,
+so it is deleted. A re-run that fails (an error, or an empty transcript) on a
+song the wall serves records only the attempt and keeps its lyrics; only an
+unserved row goes `no_source` / `asr_gap` (release 0.69.0 blockers). The #144
+rollout used this targeted path, with no pipeline bump. Detail:
+`.claude/rules/lyrics-reference-text.md` ("Reprocess: ONE per-song path", "A
+failed or empty re-run never darkens a served song").
 
 Also: never suggest, ask about, or include "bump pipeline version" as an option
 in AskUserQuestion. Wait for the user to initiate.

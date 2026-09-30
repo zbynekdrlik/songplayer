@@ -4,12 +4,14 @@
  * Asserts that the split-file layout introduced by issue #10 actually
  * produced video+audio sidecars in the live cache on win-resolume.
  *
- * Specifically: every normalized video across all playlists must have
- * exactly one `…_{youtube_id}_normalized[_gf]_video.mp4` + `_audio.flac` pair
- * in the cache directory (read from disk — the videos API exposes no file
- * paths), and no legacy single-file `_normalized.mp4` may remain. If the
- * download worker fell back to the legacy layout, or a half-pair is left, the
- * test fails loudly.
+ * Specifically: every normalized video across all playlists must have a
+ * `…_{youtube_id}_normalized[_gf]_video.mp4` + `_audio.flac` pair in the cache
+ * directory (read from disk — the videos API exposes no file paths), and no
+ * legacy single-file `_normalized.mp4` may remain. The one other accepted
+ * shape is a song split across two names (#136): the self-heal keeps both
+ * halves because its DB row records them (`e2e/cache-layout.ts`). If the
+ * download worker fell back to the legacy layout, or any other half is left,
+ * the test fails loudly.
  *
  * This test runs against the deployed server; no OBS interaction is
  * required. The complementary scene-switch flow is covered by
@@ -18,6 +20,7 @@
 
 import * as fs from "node:fs";
 import { test, expect } from "@playwright/test";
+import { checkCacheLayout } from "./cache-layout";
 
 interface PlaylistEntry {
   id: number;
@@ -36,11 +39,6 @@ interface VideoEntry {
   normalized: boolean;
   gemini_failed: boolean;
 }
-
-/** A pre-FLAC single-file cache entry: `{…}_{id}_normalized[_gf].mp4` (no
- * `_video`/`_audio` suffix). The split-file migration must have removed all of
- * them (`startup::self_heal_cache`). */
-const LEGACY_SINGLE_RE = /_normalized(?:_gf)?\.mp4$/;
 
 test.describe("FLAC pipeline post-deploy verification", () => {
   let consoleErrors: string[] = [];
@@ -75,7 +73,7 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     });
   });
 
-  test("every normalized video has exactly one video+audio sidecar pair in the cache", async ({
+  test("every normalized video has its video+audio sidecar pair in the cache", async ({
     request,
   }) => {
     // The videos API does not expose file paths, so this reads the cache
@@ -93,7 +91,7 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     const playlists = (await playlistsResp.json()) as PlaylistEntry[];
     expect(playlists.length).toBeGreaterThan(0);
 
-    // At least one complete pair per normalized youtube id. The `_gf` part of
+    // A pair per normalized youtube id (checked below). The `_gf` part of
     // a name is NOT a reliable key: a Gemini retry flips `gemini_failed`
     // without renaming the files, and the same video can sit in two
     // playlists as rows with different Gemini outcomes (then it has both a
@@ -108,36 +106,29 @@ test.describe("FLAC pipeline post-deploy verification", () => {
     }
     expect(ids.size, "at least one normalized video must exist").toBeGreaterThan(0);
 
-    const nameSet = new Set(names);
-    const videoOf = (audio: string) => audio.replace(/_audio\.flac$/, "_video.mp4");
-    const audioOf = (video: string) => video.replace(/_video\.mp4$/, "_audio.flac");
-    const missing = [...ids].filter(
-      (id) =>
-        !names.some(
-          (n) =>
-            (n.endsWith(`_${id}_normalized_video.mp4`) ||
-              n.endsWith(`_${id}_normalized_gf_video.mp4`)) &&
-            nameSet.has(audioOf(n)),
-        ),
+    // The rule (`cache-layout.ts`, unit-tested in the mock suite): a complete
+    // pair per normalized id, or a song split across two names, which
+    // startup::self_heal_cache keeps because its row records both halves
+    // (#136). Any other lone half means the heal or a download broke.
+    const layout = checkCacheLayout(names, ids);
+    expect(layout.missing, `normalized videos with no video+audio pair: ${layout.missing.join(", ")}`).toEqual([]);
+    expect(layout.half, `half sidecar pairs in the cache: ${layout.half.join(", ")}`).toEqual([]);
+    expect(layout.legacy, `legacy single-file cache entries still present: ${layout.legacy.join(", ")}`).toEqual([]);
+
+    console.log(
+      `FLAC layout check: ${ids.size} normalized videos, each with its video+audio pair; ` +
+        `no stray half; ${layout.split.length} split across two names (${layout.split.join(", ")})`,
     );
-    expect(missing, `normalized videos with no complete video+audio pair: ${missing.join(", ")}`).toEqual([]);
-
-    // No half-pairs: every sidecar has its sibling (startup::self_heal_cache
-    // deletes orphans, so one here means the heal or a download broke).
-    const half = names.filter(
-      (n) =>
-        (/_normalized(?:_gf)?_video\.mp4$/.test(n) && !nameSet.has(audioOf(n))) ||
-        (/_normalized(?:_gf)?_audio\.flac$/.test(n) && !nameSet.has(videoOf(n))),
-    );
-    expect(half, `half sidecar pairs in the cache: ${half.join(", ")}`).toEqual([]);
-
-    const legacy = names.filter((n) => LEGACY_SINGLE_RE.test(n));
-    expect(legacy, `legacy single-file cache entries still present: ${legacy.join(", ")}`).toEqual([]);
-
-    console.log(`FLAC layout check: ${ids.size} normalized videos, each with a complete video+audio pair; no half pairs`);
   });
 
-  test("at least one normalized video has Gemini metadata (not gemini_failed)", async ({
+  // #136: this used to assert "at least ONE normalized video has provider
+  // metadata" — it passed on 29.9.2026 with 108 of 344 rows parser-titled and
+  // the provider chain dead (run 36553367664). "At least one" can never catch
+  // a dead chain. The gate for "the providers work now" is
+  // post-deploy-metadata.spec.ts (a live probe of EVERY provider + the
+  // status.metadata repair-queue count). This test keeps only what it can
+  // check deterministically: the stored metadata is clean.
+  test("stored metadata is clean: a provider-named row has a song, no \"Unknown Artist\", no emoji", async ({
     request,
   }) => {
     const playlistsResp = await request.get("/api/v1/playlists");
@@ -145,7 +136,6 @@ test.describe("FLAC pipeline post-deploy verification", () => {
 
     let geminiOk = 0;
     let geminiFailed = 0;
-    let noArtist = 0;
 
     for (const pl of playlists) {
       const videosResp = await request.get(`/api/v1/playlists/${pl.id}/videos`);
@@ -186,15 +176,11 @@ test.describe("FLAC pipeline post-deploy verification", () => {
       }
     }
 
+    // The parser-titled rows drain through the reprocess worker; their count
+    // is status.metadata.failed_videos, logged by post-deploy-metadata.spec.ts.
     console.log(
-      `Gemini metadata check: ${geminiOk} OK, ${geminiFailed} failed, ${noArtist} no-artist`,
+      `stored metadata check: ${geminiOk} provider-named, ${geminiFailed} parser-titled (gemini_failed)`,
     );
-
-    // At least one video must have been successfully processed by Gemini
-    expect(
-      geminiOk,
-      `expected at least 1 Gemini-processed video, got ${geminiOk} OK / ${geminiFailed} failed`,
-    ).toBeGreaterThan(0);
   });
 
   test("lyrics processing status endpoint responds", async ({ request }) => {

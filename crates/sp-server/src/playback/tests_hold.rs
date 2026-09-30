@@ -124,10 +124,10 @@ fn playing(engine: &mut PlaybackEngine) -> TitleClock {
 /// test) and OUT's scene leaves program, held through the transition.
 async fn hold(rig: &mut Rig) -> Arc<ProgramBus> {
     let bus = Arc::new(ProgramBus::new());
-    bus.select_initial(OUT);
+    bus.select_initial(OUT, None);
     assert!(bus.set_transition(TransitionSpec::fade(300, SpecSource::Obs)));
     assert!(rig.engine.program.set(bus.clone()).is_ok());
-    let status = bus.cut(IN, utc_now_100ns() + 60 * 10_000_000);
+    let status = bus.cut(IN, utc_now_100ns() + 60 * 10_000_000, None);
     assert!(status.cut_boundary_100ns.is_some(), "the cut is recorded");
     rig.engine.handle_scene_change(OUT, false).await;
     assert_eq!(
@@ -417,7 +417,8 @@ async fn a_hide_timer_writes_the_wall_only_on_program() {
     );
 }
 
-/// Three lines: "alpha" 1–3 s, "beta" 4–6 s, "gamma" 7–9 s.
+/// Three sentences: "alpha." 1–3 s, "beta." 4–6 s, "gamma." 7–9 s. The #217
+/// display plan groups lines into sentences; the wall strips the period.
 fn track() -> LyricsTrack {
     let line = |start_ms, end_ms, en: &str| LyricsLine {
         start_ms,
@@ -432,9 +433,9 @@ fn track() -> LyricsTrack {
         language_source: "en".into(),
         language_translation: "sk".into(),
         lines: vec![
-            line(1000, 3000, "alpha"),
-            line(4000, 6000, "beta"),
-            line(7000, 9000, "gamma"),
+            line(1000, 3000, "alpha."),
+            line(4000, 6000, "beta."),
+            line(7000, 9000, "gamma."),
         ],
     }
 }
@@ -470,7 +471,7 @@ async fn a_scene_back_on_inside_the_hold_keeps_the_lyrics_and_resumes_the_lines(
         ["alpha"],
         "on program the line goes to the wall"
     );
-    assert_eq!(lyrics_updates(&mut rig.ws), [Some("alpha".to_string())]);
+    assert_eq!(lyrics_updates(&mut rig.ws), [Some("alpha.".to_string())]);
 
     let _bus = hold(&mut rig).await;
     assert!(
@@ -497,7 +498,7 @@ async fn a_scene_back_on_inside_the_hold_keeps_the_lyrics_and_resumes_the_lines(
         ["beta"],
         "back on program: the line goes to the wall at the next Position"
     );
-    assert_eq!(lyrics_updates(&mut rig.ws), [Some("beta".to_string())]);
+    assert_eq!(lyrics_updates(&mut rig.ws), [Some("beta.".to_string())]);
 }
 
 // -- the hold marker (`scene_off_due`) itself ------------------------------
@@ -557,7 +558,11 @@ async fn a_scene_back_on_program_ends_the_hold() {
     playing(&mut rig.engine);
     {
         let pp = rig.engine.pipelines.get_mut(&OUT).unwrap();
-        pp.last_presenter_text = Some("alpha".into());
+        pp.last_presenter_text = Some(crate::lyrics::renderer::PresenterLines {
+            current_en: "alpha".into(),
+            current_sk: "alfa".into(),
+            ..Default::default()
+        });
         pp.last_resolume_subtitles_signature = Some("show|alpha".into());
     }
     let _bus = hold(&mut rig).await;
@@ -611,7 +616,7 @@ async fn a_newer_hold_supersedes_the_pending_re_check() {
 
     // Review round 1: the superseded hold's re-check, already queued (an
     // A→B→A→B inside one hold), is stale. Taken as the newer hold's, it
-    // skipped that hold's `CUT_SETTLE`; it is ignored.
+    // re-checked that hold early; it is ignored.
     rig.engine
         .handle_pipeline_event(OUT, PipelineEvent::SceneOffDue(first_id))
         .await;
@@ -922,4 +927,34 @@ async fn a_failed_resume_keeps_the_pause_s_resume_point() {
     started(&mut rig.engine).await; // the overtaken Play's Started
     assert_eq!(out(&rig.engine).title_clock, Some(clock), "no new clock");
     assert_eq!(timers(&rig.engine), (false, false), "no timer");
+}
+
+/// #221 L4b review round 6: a playlist held through a transition keeps
+/// playing off program, so the dashboard is told at once (`WaitingForScene`,
+/// transport `Playing`), not only at the hold's pause.
+#[tokio::test]
+async fn a_held_playlist_is_broadcast_off_program_at_once() {
+    use sp_core::playback::{PlaybackState, TransportState};
+    let mut rig = rig().await;
+    playing(&mut rig.engine);
+    while rig.ws.try_recv().is_ok() {}
+
+    let _bus = hold(&mut rig).await;
+
+    let mut states = Vec::new();
+    while let Ok(msg) = rig.ws.try_recv() {
+        if let ServerMsg::PlaybackStateChanged {
+            playlist_id: OUT,
+            state,
+            transport,
+            ..
+        } = msg
+        {
+            states.push((state, transport));
+        }
+    }
+    assert_eq!(
+        states,
+        [(PlaybackState::WaitingForScene, TransportState::Playing)]
+    );
 }

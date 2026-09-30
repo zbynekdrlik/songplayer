@@ -312,27 +312,24 @@ impl DubWorker {
                 Err(_) => return,
             };
 
+        // #136: synthesize on the input the row records NOW (the audio, and the
+        // vocals stem `dub_input_audio` may pick) — a rename (the metadata
+        // repair) while this job waited for the slot moved them. No audio on
+        // disk = a no-penalty re-pick later (`song_input::job_input`).
+        let Some(input) = crate::song_input::job_input(
+            &self.pool,
+            job.video_id,
+            &job.audio_file_path,
+            crate::song_input::HeavyJob::Dub,
+        )
+        .await
+        else {
+            return;
+        };
+        let job = input.dub_job(job);
         let outcome = self.synthesize(&python, &script_path, &key, &job).await;
         match outcome {
-            Ok(out_path) => {
-                match models_dabing::mark_dub_ready(
-                    &self.pool,
-                    job.video_id,
-                    &out_path.to_string_lossy(),
-                    crate::dabing::DUB_ENGINE,
-                )
-                .await
-                {
-                    Ok(()) => info!(
-                        video_id = job.video_id,
-                        dub = %out_path.display(),
-                        "dub worker: ready"
-                    ),
-                    Err(e) => {
-                        warn!(%e, video_id = job.video_id, "dub worker: mark_dub_ready failed")
-                    }
-                }
-            }
+            Ok(out_path) => self.record_dub_ready(&job, &out_path).await,
             Err(e) => {
                 let msg = format!("{e:#}");
                 warn!(
@@ -343,6 +340,43 @@ impl DubWorker {
                     models_dabing::record_dub_deferral(&self.pool, job.video_id, &msg, DUB_BACKOFF)
                         .await;
             }
+        }
+    }
+
+    /// Record a finished dub (`out_path`, named after the audio the job started
+    /// with) as `ready`, then re-link the song (#136): a rename while the job ran
+    /// (the metadata repair) left the dub + transcripts under the old name, and
+    /// the dub mixer looks for them under the audio's CURRENT name.
+    async fn record_dub_ready(&self, job: &models_dabing::DubJob, out_path: &Path) {
+        match models_dabing::mark_dub_ready(
+            &self.pool,
+            job.video_id,
+            &out_path.to_string_lossy(),
+            crate::dabing::DUB_ENGINE,
+        )
+        .await
+        {
+            Ok(()) => info!(
+                video_id = job.video_id,
+                dub = %out_path.display(),
+                "dub worker: ready"
+            ),
+            Err(e) => {
+                warn!(%e, video_id = job.video_id, "dub worker: mark_dub_ready failed")
+            }
+        }
+        let cache_dir = Path::new(&job.audio_file_path)
+            .parent()
+            .unwrap_or_else(|| Path::new("."));
+        if let Err(e) = crate::song_relink::relink_song(
+            &self.pool,
+            cache_dir,
+            job.video_id,
+            Path::new(&job.audio_file_path),
+        )
+        .await
+        {
+            warn!(%e, video_id = job.video_id, "dub worker: dub re-link failed");
         }
     }
 
@@ -491,7 +525,7 @@ impl DubWorker {
             .await
             .ok()
             .flatten()?;
-        crate::lyrics::g35t_client::gemini_keys_from_setting(&csv)
+        crate::gemini_api::gemini_keys_from_setting(&csv)
             .into_iter()
             .next()
     }
@@ -657,5 +691,164 @@ mod tests {
             worker.contains("import win_replace"),
             "dub_worker.py does not import the shipped win_replace module"
         );
+    }
+
+    /// #136: the dub worker takes the FIRST key of the `gemini_api_key` list
+    /// (split by the shared `gemini_api::gemini_keys_from_setting`).
+    #[tokio::test]
+    async fn the_dub_worker_uses_the_first_key_of_the_gemini_key_list() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let worker = DubWorker::new(
+            pool.clone(),
+            PathBuf::from("."),
+            Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+            Arc::new(RwLock::new(crate::obs::ObsState::default())),
+        );
+
+        assert_eq!(worker.first_gemini_key().await, None, "setting unset");
+        crate::db::models::set_setting(&pool, "gemini_api_key", " , ")
+            .await
+            .unwrap();
+        assert_eq!(worker.first_gemini_key().await, None, "no key in the list");
+        crate::db::models::set_setting(&pool, "gemini_api_key", " k1 , k2")
+            .await
+            .unwrap();
+        assert_eq!(worker.first_gemini_key().await.as_deref(), Some("k1"));
+    }
+
+    /// #136 review round 2: the metadata repair renamed the song WHILE its dub
+    /// was synthesized. The dub + transcripts were written under the name the
+    /// job started with; recording the finished dub brings them under the name
+    /// the song's audio now derives, and records the dub there.
+    #[tokio::test]
+    async fn a_dub_of_a_song_renamed_during_the_synthesis_lands_under_its_new_name() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let old_audio = dir
+            .path()
+            .join("Old_A_IYAOosrh7HY_normalized_gf_audio.flac");
+        let new_audio = dir.path().join("Song_A_IYAOosrh7HY_normalized_audio.flac");
+        std::fs::write(&new_audio, b"a").unwrap();
+        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, audio_file_path, \
+                                 dub_status) \
+             VALUES (1, 1, 'IYAOosrh7HY', 1, ?, 'synth')",
+        )
+        .bind(new_audio.to_string_lossy().as_ref())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let old_dub = crate::stems::dub_path(&old_audio);
+        std::fs::write(&old_dub, b"d").unwrap();
+        std::fs::write(crate::stems::dub_transcripts_path(&old_audio), b"t").unwrap();
+        let job = models_dabing::DubJob {
+            video_id: 1,
+            youtube_id: "IYAOosrh7HY".into(),
+            audio_file_path: old_audio.to_string_lossy().into_owned(),
+            duration_ms: Some(180_000),
+            dub_status: "synth".into(),
+            vocals_file_path: None,
+            instrumental_file_path: None,
+            stem_status: None,
+            dub_attempts: 0,
+        };
+        let worker = DubWorker::new(
+            pool.clone(),
+            dir.path().to_path_buf(),
+            Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+            Arc::new(RwLock::new(crate::obs::ObsState::default())),
+        );
+
+        worker.record_dub_ready(&job, &old_dub).await;
+
+        let dub = crate::stems::dub_path(&new_audio);
+        assert_eq!(std::fs::read(&dub).unwrap(), b"d");
+        assert_eq!(
+            std::fs::read(crate::stems::dub_transcripts_path(&new_audio)).unwrap(),
+            b"t"
+        );
+        assert!(!old_dub.exists());
+        let (status, recorded): (String, Option<String>) =
+            sqlx::query_as("SELECT dub_status, dub_file_path FROM videos WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(status, "ready");
+        assert_eq!(recorded, Some(dub.to_string_lossy().into_owned()));
+    }
+
+    /// #136 review round 4: a song with a dub is dubbed AGAIN, and the metadata
+    /// repair renames it meanwhile. The rename carries the OLD dub to the new
+    /// name, then the job writes the NEW dub under the name it started with.
+    /// The job's own output is the fresh copy: it must end up under the new
+    /// name, replacing the old dub, never stranded under the old name.
+    #[tokio::test]
+    async fn a_re_dub_finished_after_a_rename_replaces_the_old_dub_under_the_new_name() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let old_audio = dir
+            .path()
+            .join("Old_A_IYAOosrh7HY_normalized_gf_audio.flac");
+        let new_audio = dir.path().join("Song_A_IYAOosrh7HY_normalized_audio.flac");
+        std::fs::write(&new_audio, b"a").unwrap();
+        let (dub, transcripts) = (
+            crate::stems::dub_path(&new_audio),
+            crate::stems::dub_transcripts_path(&new_audio),
+        );
+        std::fs::write(&dub, b"old dub").unwrap();
+        std::fs::write(&transcripts, b"old t").unwrap();
+        let fresh = crate::stems::dub_path(&old_audio);
+        std::fs::write(&fresh, b"new dub").unwrap();
+        std::fs::write(crate::stems::dub_transcripts_path(&old_audio), b"new t").unwrap();
+        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, audio_file_path, \
+                                 dub_status, dub_file_path) \
+             VALUES (1, 1, 'IYAOosrh7HY', 1, ?, 'synth', ?)",
+        )
+        .bind(new_audio.to_string_lossy().as_ref())
+        .bind(dub.to_string_lossy().as_ref())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let job = models_dabing::DubJob {
+            video_id: 1,
+            youtube_id: "IYAOosrh7HY".into(),
+            audio_file_path: old_audio.to_string_lossy().into_owned(),
+            duration_ms: Some(180_000),
+            dub_status: "synth".into(),
+            vocals_file_path: None,
+            instrumental_file_path: None,
+            stem_status: None,
+            dub_attempts: 0,
+        };
+        let worker = DubWorker::new(
+            pool.clone(),
+            dir.path().to_path_buf(),
+            Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+            Arc::new(RwLock::new(crate::obs::ObsState::default())),
+        );
+
+        worker.record_dub_ready(&job, &fresh).await;
+
+        assert_eq!(std::fs::read(&dub).unwrap(), b"new dub");
+        assert_eq!(std::fs::read(&transcripts).unwrap(), b"new t");
+        assert!(!fresh.exists(), "nothing stranded under the old name");
+        let recorded: Option<String> =
+            sqlx::query_scalar("SELECT dub_file_path FROM videos WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(recorded, Some(dub.to_string_lossy().into_owned()));
     }
 }

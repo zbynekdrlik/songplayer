@@ -465,7 +465,10 @@ component's visuals but MUST preserve this state contract.
 - **State enum (`db::models_stems::StemsState`, pure `stems_state_of`):**
   `Ready | Queued | Processing | Unavailable | Failed`, wire strings
   `ready/queued/processing/unavailable/failed`. Precedence: **Processing**
-  (live) → **Ready** (both stem files on disk, regardless of recorded status) →
+  (live) → **Ready** (both stem files on disk, regardless of recorded status;
+  "on disk" = `models_stems::stems_on_disk(audio_file_path)`, the pair
+  `stem_paths` derives from the CURRENT audio, never the recorded
+  `vocals_file_path` columns, #136, `.claude/rules/song-files.md`) →
   **Unavailable** (`stem_status='unsupported'`) → **Failed** (`'failed'`) →
   **Queued** (NULL/pending). `stems_state_of` takes `is_processing` — NOT
   `stem_next_attempt_at`: there is deliberately no DB `'processing'` status (a
