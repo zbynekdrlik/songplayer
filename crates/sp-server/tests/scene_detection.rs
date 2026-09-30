@@ -1,9 +1,12 @@
 //! Integration test for scene-driven playback trigger (issue #11).
 //!
 //! Exercises the **real** production wire-up from `ObsClient::spawn` through
-//! the NDI-source map rebuild and into the `ObsEvent::SceneChanged`
-//! broadcast. This is the test that would have caught the `HashMap::new()`
-//! bug where the NDI source map was created empty and never populated.
+//! the NDI-source map rebuild and into the client's published program
+//! (`ObsClient::snapshots`, #219 — the one view of cg OBS its consumers
+//! read; the unread `ObsEvent::SceneChanged` broadcast is deleted, release
+//! 0.69.0 review 🔵 10). This is the test that would have caught the
+//! `HashMap::new()` bug where the NDI source map was created empty and never
+//! populated.
 //!
 //! Previous unit tests exercised `check_scene_items` against a
 //! hand-built HashMap. Those passed while production was broken. This
@@ -11,14 +14,40 @@
 
 mod common;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use common::{FakeObsServer, FakeObsState};
 use sp_server::db;
 use sp_server::obs;
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{RwLock, broadcast, watch};
+
+/// Wait (at most `within`) until the client publishes cg OBS's program as
+/// `scene`, connected and looked up (no failed lookup); its playlists. Every
+/// published snapshot is seen (`changed`), and the current one first.
+async fn program_snapshot(
+    snapshots: &mut watch::Receiver<obs::ObsSnapshot>,
+    scene: &str,
+    within: Duration,
+) -> HashSet<i64> {
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        {
+            let s = snapshots.borrow_and_update();
+            if s.connected && s.lookup_failed.is_none() && s.current_scene.as_deref() == Some(scene)
+            {
+                return s.active_playlist_ids.clone();
+            }
+        }
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(left, snapshots.changed()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => panic!("the OBS client's snapshots closed: {e}"),
+            Err(_) => panic!("the client did not publish {scene} within {within:?}"),
+        }
+    }
+}
 
 #[tokio::test]
 async fn scene_change_to_sp_fast_marks_playlist_7_active() {
@@ -59,11 +88,11 @@ async fn scene_change_to_sp_fast_marks_playlist_7_active() {
     // 3. Spawn the real ObsClient pointing at the fake OBS.
     let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
     let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
-    let (obs_event_tx, mut obs_event_rx) = broadcast::channel::<obs::ObsEvent>(16);
+    let (obs_event_tx, _) = broadcast::channel::<obs::ObsEvent>(16);
     let (_obs_rebuild_tx, obs_rebuild_rx) = broadcast::channel::<()>(4);
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
-    let _client = obs::ObsClient::spawn(
+    let client = obs::ObsClient::spawn(
         obs::ObsConfig {
             url: fake_obs.url(),
             password: None,
@@ -75,6 +104,7 @@ async fn scene_change_to_sp_fast_marks_playlist_7_active() {
         obs_rebuild_rx,
         shutdown_rx,
     );
+    let mut snapshots = client.snapshots();
 
     // 4. Wait for the client to connect, complete the handshake, and run the
     //    initial rebuild. The rebuild hits GetInputList + GetInputSettings
@@ -103,31 +133,15 @@ async fn scene_change_to_sp_fast_marks_playlist_7_active() {
         );
     }
 
-    // Drain any scene-change events from the initial GetCurrentProgramScene
-    // response (the fake server does not default a current scene, so these
-    // are probably just Connected). We want to observe the NEXT scene change.
-    while let Ok(evt) = obs_event_rx.try_recv() {
-        // Connected / SceneChanged(empty) discarded.
-        let _ = evt;
-    }
+    // The fake server does not default a current scene, so the client
+    // knows none yet. We want to observe the NEXT scene change.
+    assert_eq!(snapshots.borrow_and_update().current_scene, None);
 
     // 6. Push a CurrentProgramSceneChanged event for `sp-fast` and wait for
-    //    the ObsClient to propagate a SceneChanged event upstream.
+    //    the ObsClient to publish it.
     fake_obs.push_program_scene_change("sp-fast").await;
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-    let active_ids = loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        match tokio::time::timeout(remaining, obs_event_rx.recv()).await {
-            Ok(Ok(obs::ObsEvent::SceneChanged {
-                scene_name,
-                active_playlist_ids,
-            })) if scene_name == "sp-fast" => break active_playlist_ids,
-            Ok(Ok(_other)) => continue,
-            Ok(Err(e)) => panic!("event channel error: {e}"),
-            Err(_) => panic!("did not receive SceneChanged for sp-fast within 3s"),
-        }
-    };
+    let active_ids = program_snapshot(&mut snapshots, "sp-fast", Duration::from_secs(3)).await;
 
     assert!(
         active_ids.contains(&7),
@@ -179,11 +193,11 @@ async fn scene_change_to_scene_without_ndi_source_yields_empty_active() {
 
     let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
     let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
-    let (obs_event_tx, mut obs_event_rx) = broadcast::channel::<obs::ObsEvent>(16);
+    let (obs_event_tx, _) = broadcast::channel::<obs::ObsEvent>(16);
     let (_obs_rebuild_tx, obs_rebuild_rx) = broadcast::channel::<()>(4);
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
-    let _client = obs::ObsClient::spawn(
+    let client = obs::ObsClient::spawn(
         obs::ObsConfig {
             url: fake_obs.url(),
             password: None,
@@ -195,6 +209,7 @@ async fn scene_change_to_scene_without_ndi_source_yields_empty_active() {
         obs_rebuild_rx,
         shutdown_rx,
     );
+    let mut snapshots = client.snapshots();
 
     // Wait for connect.
     let connect_deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -209,23 +224,9 @@ async fn scene_change_to_scene_without_ndi_source_yields_empty_active() {
     }
     tokio::time::sleep(Duration::from_millis(250)).await;
 
-    while let Ok(_evt) = obs_event_rx.try_recv() {}
-
     fake_obs.push_program_scene_change("Break").await;
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-    let active_ids = loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        match tokio::time::timeout(remaining, obs_event_rx.recv()).await {
-            Ok(Ok(obs::ObsEvent::SceneChanged {
-                scene_name,
-                active_playlist_ids,
-            })) if scene_name == "Break" => break active_playlist_ids,
-            Ok(Ok(_)) => continue,
-            Ok(Err(e)) => panic!("event channel error: {e}"),
-            Err(_) => panic!("did not receive SceneChanged for Break within 3s"),
-        }
-    };
+    let active_ids = program_snapshot(&mut snapshots, "Break", Duration::from_secs(3)).await;
 
     assert!(
         active_ids.is_empty(),
@@ -248,8 +249,8 @@ async fn scene_change_to_scene_without_ndi_source_yields_empty_active() {
 /// 2. Flips `suppress_get_input_list = true` on the fake OBS.
 /// 3. Fires a rebuild signal.
 /// 4. Asserts the map still contains the original entry AND a
-///    subsequent `CurrentProgramSceneChanged` still propagates to
-///    `ObsEvent::SceneChanged` with the correct active playlist.
+///    subsequent `CurrentProgramSceneChanged` is still published
+///    (`ObsSnapshot`) with the correct active playlist.
 #[tokio::test]
 async fn rebuild_failure_does_not_wipe_ndi_source_map() {
     let pool = db::create_memory_pool().await.unwrap();
@@ -280,11 +281,11 @@ async fn rebuild_failure_does_not_wipe_ndi_source_map() {
 
     let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
     let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
-    let (obs_event_tx, mut obs_event_rx) = broadcast::channel::<obs::ObsEvent>(16);
+    let (obs_event_tx, _) = broadcast::channel::<obs::ObsEvent>(16);
     let (obs_rebuild_tx, obs_rebuild_rx) = broadcast::channel::<()>(4);
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
-    let _client = obs::ObsClient::spawn(
+    let client = obs::ObsClient::spawn(
         obs::ObsConfig {
             url: fake_obs.url(),
             password: None,
@@ -296,6 +297,7 @@ async fn rebuild_failure_does_not_wipe_ndi_source_map() {
         obs_rebuild_rx,
         shutdown_rx,
     );
+    let mut snapshots = client.snapshots();
 
     // Wait for the initial (successful) rebuild to populate the map.
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -350,29 +352,12 @@ async fn rebuild_failure_does_not_wipe_ndi_source_map() {
         );
     }
 
-    // Drain any prior events.
-    while obs_event_rx.try_recv().is_ok() {}
-
     // Follow-up assertion: scene detection still WORKS after the
-    // failed rebuild. Fire a scene change and confirm the correct
-    // active playlist is reported.
+    // failed rebuild (the map is stale-but-valid). Fire a scene change and
+    // confirm the correct active playlist is published.
+    assert_eq!(snapshots.borrow_and_update().current_scene, None);
     fake_obs.push_program_scene_change("sp-fast").await;
-    let scene_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-    let active_ids = loop {
-        let remaining = scene_deadline.saturating_duration_since(tokio::time::Instant::now());
-        match tokio::time::timeout(remaining, obs_event_rx.recv()).await {
-            Ok(Ok(obs::ObsEvent::SceneChanged {
-                scene_name,
-                active_playlist_ids,
-            })) if scene_name == "sp-fast" => break active_playlist_ids,
-            Ok(Ok(_)) => continue,
-            Ok(Err(e)) => panic!("event channel error: {e}"),
-            Err(_) => panic!(
-                "did not receive SceneChanged within 3s after failed rebuild — \
-                 scene detection is broken even though the map should be stale-but-valid"
-            ),
-        }
-    };
+    let active_ids = program_snapshot(&mut snapshots, "sp-fast", Duration::from_secs(3)).await;
     assert!(
         active_ids.contains(&7),
         "active playlists must still match after failed rebuild, got {active_ids:?}"
@@ -395,12 +380,12 @@ async fn rebuild_failure_does_not_wipe_ndi_source_map() {
 /// 4. Assert that `ndi_sources` contains the expected entry (precondition).
 /// 5. Flip suppression ON via `update_state` — future GetInputList
 ///    requests will now hang without a reply.
-/// 6. Drain any pre-existing events from the channel.
+/// 6. Check the client knows no scene yet.
 /// 7. Fire a rebuild signal to open a fresh `wait_for_response` window.
 /// 8. Wait 100 ms so the rebuild has started its `wait_for_response`
 ///    loop, but well before the 2 s timeout.
 /// 9. Push a `CurrentProgramSceneChanged` event into that window.
-/// 10. Assert that `ObsEvent::SceneChanged` arrives within 500 ms.
+/// 10. Assert that the client publishes the scene within 500 ms.
 ///
 /// Against the buggy code the event is consumed by `wait_for_response`
 /// and the assertion fails (500 ms timeout). After the fix it arrives
@@ -438,11 +423,11 @@ async fn event_during_pending_request_must_be_delivered_fast() {
 
     let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
     let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
-    let (obs_event_tx, mut obs_event_rx) = broadcast::channel::<obs::ObsEvent>(16);
+    let (obs_event_tx, _) = broadcast::channel::<obs::ObsEvent>(16);
     let (obs_rebuild_tx, obs_rebuild_rx) = broadcast::channel::<()>(4);
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
-    let _client = obs::ObsClient::spawn(
+    let client = obs::ObsClient::spawn(
         obs::ObsConfig {
             url: fake_obs.url(),
             password: None,
@@ -454,6 +439,7 @@ async fn event_during_pending_request_must_be_delivered_fast() {
         obs_rebuild_rx,
         shutdown_rx,
     );
+    let mut snapshots = client.snapshots();
 
     // Wait for the initial (successful) rebuild to populate the map.
     let connect_deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -484,8 +470,8 @@ async fn event_during_pending_request_must_be_delivered_fast() {
         .update_state(|s| s.suppress_get_input_list = true)
         .await;
 
-    // Drain any startup events so the assertion below is unambiguous.
-    while obs_event_rx.try_recv().is_ok() {}
+    // No scene yet, so the assertion below is unambiguous.
+    assert_eq!(snapshots.borrow_and_update().current_scene, None);
 
     // Open a fresh wait_for_response window by firing a rebuild signal.
     // The fake OBS will not respond, so wait_for_response sits on
@@ -500,26 +486,11 @@ async fn event_during_pending_request_must_be_delivered_fast() {
     // code this gets consumed and dropped by wait_for_response.
     fake_obs.push_program_scene_change("sp-fast").await;
 
-    // The event MUST arrive within 500 ms — far less than the 2 s
-    // wait window. After the fix the reader task delivers it
-    // immediately.
-    let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
-    let active_ids = loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        match tokio::time::timeout(remaining, obs_event_rx.recv()).await {
-            Ok(Ok(obs::ObsEvent::SceneChanged {
-                scene_name,
-                active_playlist_ids,
-            })) if scene_name == "sp-fast" => break active_playlist_ids,
-            Ok(Ok(_other)) => continue,
-            Ok(Err(e)) => panic!("event channel error: {e}"),
-            Err(_) => panic!(
-                "SceneChanged for sp-fast NOT delivered within 500ms — \
-                 event was eaten by in-flight wait_for_response. \
-                 This is the #43 regression."
-            ),
-        }
-    };
+    // The scene MUST be published within 500 ms — far less than the 2 s
+    // wait window. After the fix the reader task delivers the event
+    // immediately; an event eaten by the in-flight wait_for_response (the
+    // #43 regression) panics here.
+    let active_ids = program_snapshot(&mut snapshots, "sp-fast", Duration::from_millis(500)).await;
 
     assert!(
         active_ids.contains(&7),
