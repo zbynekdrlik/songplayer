@@ -50,6 +50,7 @@ pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI
 pub mod program_follow; // #215: SP-program follows cg OBS + the transition settings/spec task
 pub mod program_on_air; // #221: what is on air (the bus's watch value) + the one scene-name resolver
 pub mod program_output; // #209: the SP-program sender + its thread
+pub mod program_output_timing; // #210: the sender's per-boundary timing window (pure, health.timing)
 pub mod program_switch; // #221: the ONE switch path of a scene press (catalog, cut, cg OBS forward/mirror)
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
 pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns

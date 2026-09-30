@@ -115,6 +115,16 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 - `program_output.rs::run_program_loop` (Windows thread `program-output`,
   `mutants::skip`) wakes 1 ms after every grid boundary (`next_check_wait`) to
   release missed boundaries, and submits every queued job at once.
+- #210: `ProgramOutput::serve` hands each boundary's audio block to VBAN
+  FIRST, then does the video side (a mixed boundary's picture, the NDI
+  submit), for every job kind — by structure: `split` (the audio side, no
+  video work) → `feed_vban` → `submit_video` (`vban-out.md` "Data path"; pinned by
+  `program_output_tests_order.rs` with a held NDI send). It returns the
+  boundary's `BoundaryMarks`, which the loop records
+  (`ProgramBus::record_timing` → `health.timing`, the rate-limited WARN of a
+  VBAN hand-off over 10 ms late; `vban-out.md` "The program boundary's
+  timing"). `ProgramOutput::submit` is only the tests' shorthand
+  (`#[cfg(test)]`, no clock, returns the stamp).
 - `start_program` runs in `lib.rs::start` AFTER the #196 startup senders, so
   `SP-program` is created after every playlist sender and the per-playlist
   name→port order does not change across restarts. Exception: when the
@@ -132,7 +142,8 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 
 - `GET /api/v1/program` → `{ndi_name, source, previous, cut_boundary_100ns,
   health{forwarded, filled, late_dropped, resyncs, coalesced, cuts,
-  submitted, connections, last_stamp_100ns}, vban{…} (#210), input{…}
+  submitted, connections, last_stamp_100ns, timing{…} (#210, the sender's
+  per-boundary stage timing, `vban-out.md`)}, vban{…} (#210), input{…}
   (#212), remote{…} (#213), transition{…} + follow{…} (#215),
   legacy_cg{shown} (#221 L4a)}`;
   `POST /api/v1/program/cut {"source": pid}` → 200 + that body, 404
@@ -385,6 +396,12 @@ each boundary. Keep that pattern for any new case. Its rig helpers (`b`,
 `job`, `frame`, `program`, `drain`, `video_dims`, …) are `pub(super)` and
 reused by the #215 sibling `program_bus_tests_transition.rs`.
 
+- **A held or slow `SP-program` NDI submit (#210):** `program_output_tests_order.rs`
+  `HookedNdi` wraps `MockNdiBackend` and runs a hook inside every `send_audio`
+  (the pair's first NDI call): a gate that holds the submit, or
+  `SettableClock::advance` for a submit that costs N on a wall the test holds.
+  Reuse it rather than adding a hold to sp-ndi's mock (a new `test_util`
+  accessor needs its own sp-ndi test, `rust-workspace.md`).
 - **Mock call-log gotcha (CI fail 26.9.):** a test that asserts the mock sender's LAST
   call (e.g. `send_video_flush`) must keep the owning output alive past the assertion —
   a thread closure that drops it appends `send_destroy` after the flush. Return the output

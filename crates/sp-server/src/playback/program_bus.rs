@@ -88,6 +88,9 @@ use crate::playback::legacy_cg::LegacyCg;
 use crate::playback::ndi_input::NdiInputShared;
 use crate::playback::program_follow::FollowShared;
 use crate::playback::program_on_air::OnAir;
+use crate::playback::program_output_timing::{
+    BoundaryMarks, BoundaryTiming, BoundaryTimingStatus, LateBoundary,
+};
 use crate::playback::program_transition::{
     ActiveWindow, Cue, MixJob, SpecSource, TransitionCounters, TransitionSpec, TransitionStatus,
     Window,
@@ -191,6 +194,8 @@ pub struct ProgramHealth {
     pub connections: i32,
     /// Boundary of the last submitted pair (100 ns); 0 = none yet.
     pub last_stamp_100ns: i64,
+    /// #210: how late the sender served its boundaries, per stage.
+    pub timing: BoundaryTimingStatus,
 }
 
 /// The program state served by `GET /api/v1/program`.
@@ -263,6 +268,8 @@ pub struct ProgramCore {
     last_offer: HashMap<i64, i64>,
     queue: SubmitQueue<ProgramJob>,
     health: ProgramHealth,
+    /// #210: the sender's per-boundary timing window (`health.timing`).
+    timing: BoundaryTiming,
 }
 
 impl Default for ProgramCore {
@@ -286,6 +293,7 @@ impl ProgramCore {
             last_offer: HashMap::new(),
             queue: SubmitQueue::new(PROGRAM_QUEUE_BOUND),
             health: ProgramHealth::default(),
+            timing: BoundaryTiming::default(),
         }
     }
 
@@ -609,6 +617,12 @@ impl ProgramCore {
         self.health.connections = n;
     }
 
+    /// #210: the sender served one boundary at `marks`; the boundary to
+    /// WARN about, if any ([`BoundaryTiming::observe`]).
+    pub fn record_timing(&mut self, marks: &BoundaryMarks) -> Option<LateBoundary> {
+        self.timing.observe(marks)
+    }
+
     /// The program state for the API.
     pub fn status(&self) -> ProgramStatus {
         ProgramStatus {
@@ -620,7 +634,10 @@ impl ProgramCore {
                 .last()
                 .map(|&(first, _)| first)
                 .filter(|&first| first != i64::MIN),
-            health: self.health,
+            health: ProgramHealth {
+                timing: self.timing.status(),
+                ..self.health
+            },
             transition: TransitionStatus {
                 kind: self.spec.kind,
                 duration_ms: self.spec.duration_ms,
@@ -836,6 +853,11 @@ impl ProgramBus {
     /// See [`ProgramCore::set_connections`].
     pub fn set_connections(&self, n: i32) {
         self.lock().core.set_connections(n);
+    }
+
+    /// See [`ProgramCore::record_timing`].
+    pub fn record_timing(&self, marks: &BoundaryMarks) -> Option<LateBoundary> {
+        self.lock().core.record_timing(marks)
     }
 
     /// Stop the sender thread once the queue is drained (process shutdown).

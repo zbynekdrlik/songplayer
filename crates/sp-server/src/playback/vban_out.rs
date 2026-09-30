@@ -3,10 +3,11 @@
 //!
 //! FOH (VB-Matrix on fohabl) and lv1 take the program audio as VBAN. The
 //! `SP-program` sender thread (`program_output.rs`) hands each submitted
-//! pair's audio block (a forwarded source block or the standby silence) to
-//! [`VbanOut::push`] right after its NDI submit. The hand-off is a bounded,
-//! never-blocking queue: over [`VBAN_QUEUE_BOUND`] the OLDEST block is dropped
-//! and counted. A dedicated thread ([`run_vban_loop`]) encodes each block into
+//! pair's audio block (a forwarded source block, a mixed block or the
+//! standby silence) to [`VbanOut::push`] right BEFORE its NDI submit, so the
+//! video side of its own boundary never delays it (#210). The hand-off is a
+//! bounded, never-blocking queue: over [`VBAN_QUEUE_BOUND`] the OLDEST block
+//! is dropped and counted. A dedicated thread ([`run_vban_loop`]) encodes each block into
 //! 8 packets of 200 frames (`vban_packet.rs`) and sends packet `k` of the
 //! boundary `B` at `due(B) + L + k/240 s`, where L is two slots
 //! ([`VBAN_SEND_LATENCY_100NS`]). It paces on its own
@@ -122,12 +123,13 @@ impl VbanBlock {
         }
     }
 
-    /// A forwarded pair's audio: exactly one 48 kHz stereo 1600-frame frame
-    /// is moved in as is (no copy); anything else becomes silence, marked
-    /// `substituted`.
-    pub fn from_frames(due_100ns: i64, mut frames: Vec<AudioFrame>) -> Self {
-        let samples = match (frames.len(), frames.pop()) {
-            (1, Some(frame)) if is_program_block(&frame) => Some(frame.data),
+    /// A pair's audio, COPIED: the program hands it over BEFORE the pair's
+    /// NDI submit, which still borrows the frames (#210). Exactly one 48 kHz
+    /// stereo 1600-frame frame is kept; anything else becomes silence,
+    /// marked `substituted`.
+    pub fn copied(due_100ns: i64, frames: &[AudioFrame]) -> Self {
+        let samples = match frames {
+            [frame] if is_program_block(frame) => Some(frame.data.clone()),
             _ => None,
         };
         Self {
