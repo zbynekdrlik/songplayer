@@ -11,13 +11,96 @@
 //! one rename path (`.claude/rules/song-files.md`). A `'manual'` row is out
 //! of the metadata repair's queue (`health::REPAIR_QUEUE_WHERE`), so nothing
 //! renames it back.
+//!
+//! A re-download keeps it too ([`download_title`], item 2): the download
+//! worker names a `'manual'` row's files after its corrected title and never
+//! asks the provider chain over it (a row goes back to `normalized = 0` on
+//! the startup 48 kHz reset, `startup.rs`).
 
 use std::path::Path;
 
 use sqlx::SqlitePool;
-use tracing::info;
+use tracing::{info, warn};
 
+use super::ProviderChain;
 use crate::downloader::cache::{SongFiles, rename_song_files};
+
+/// The `metadata_source` of an operator's correction.
+pub const MANUAL_SOURCE: &str = "manual";
+
+/// The title a download of a row names its files after and records
+/// (`DownloadWorker::process_next` → `mark_video_processed_pair`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadTitle {
+    pub song: String,
+    pub artist: String,
+    /// `metadata_source`: [`MANUAL_SOURCE`], or the chain's `MetadataSource`.
+    pub source: &'static str,
+    pub gemini_failed: bool,
+}
+
+/// #136 (ROZHODNUTÉ 5908227964 item 2): the title a download of row
+/// `video_db_id` names the video after. An operator's correction
+/// (`metadata_source = 'manual'` with a song) is final: it is kept, and the
+/// provider chain is never asked over it. Any other row asks the chain
+/// (`get_metadata`: the first provider that answers, else the title parser).
+/// A row whose title cannot be read asks the chain too (WARN).
+pub async fn download_title(
+    pool: &SqlitePool,
+    chain: &ProviderChain,
+    video_db_id: i64,
+    youtube_id: &str,
+    title: &str,
+) -> DownloadTitle {
+    match manual_title(pool, video_db_id).await {
+        Ok(Some((song, artist))) => {
+            info!(
+                video_db_id,
+                youtube_id,
+                song = %song,
+                artist = %artist,
+                "metadata: a re-download keeps the operator's title correction"
+            );
+            return DownloadTitle {
+                song,
+                artist,
+                source: MANUAL_SOURCE,
+                gemini_failed: false,
+            };
+        }
+        Ok(None) => {}
+        Err(e) => warn!(
+            video_db_id,
+            youtube_id,
+            %e,
+            "metadata: reading the row's title failed — asking the providers"
+        ),
+    }
+    let meta = super::get_metadata(chain.providers(), youtube_id, title).await;
+    DownloadTitle {
+        song: meta.song,
+        artist: meta.artist,
+        source: meta.source.as_str(),
+        gemini_failed: meta.gemini_failed,
+    }
+}
+
+/// Row `video_db_id`'s `(song, artist)` when it is an operator's correction
+/// with a song (`mark_video_processed_pair` refuses an empty one); `artist`
+/// `""` when it has none.
+async fn manual_title(
+    pool: &SqlitePool,
+    video_db_id: i64,
+) -> Result<Option<(String, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT song, COALESCE(artist, '') FROM videos \
+         WHERE id = ? AND metadata_source = ? AND TRIM(COALESCE(song, '')) != ''",
+    )
+    .bind(video_db_id)
+    .bind(MANUAL_SOURCE)
+    .fetch_optional(pool)
+    .await
+}
 
 /// Spread row `video_db_id`'s title (the correction its PATCH just wrote) to
 /// every row of its YouTube video, and rename each row's files after it in
@@ -42,11 +125,12 @@ pub async fn apply_to_video(
         return Ok(());
     };
     let spread = sqlx::query(
-        "UPDATE videos SET song = ?, artist = ?, metadata_source = 'manual', gemini_failed = 0 \
+        "UPDATE videos SET song = ?, artist = ?, metadata_source = ?, gemini_failed = 0 \
          WHERE youtube_id = ?",
     )
     .bind(&song)
     .bind(&artist)
+    .bind(MANUAL_SOURCE)
     .bind(&youtube_id)
     .execute(pool)
     .await?;
@@ -83,3 +167,7 @@ pub async fn apply_to_video(
     );
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "manual_tests.rs"]
+mod tests;
