@@ -423,16 +423,21 @@ fn periodic_log_path_calls_format_genlock_line() {
 fn format_genlock_line_carries_the_step_probe_telemetry() {
     // #224: the pacer wall's per-boundary step probe — rejected probes and the
     // last follow's detect-to-follow time — ride the same per-minute line,
-    // right after the anchor tokens.
+    // right after the anchor tokens; #224 part 2's re-grid tokens (the fleet
+    // shift in slots and the last remainder) follow them.
     let mut s = sample_snapshot();
     s.pacing.wall_anchor_probes_rejected = 3;
     s.pacing.wall_anchor_detect_to_follow_us = 33_533;
     let line = crate::playback::ndi_health::format_genlock_line(&s);
+    let shift = format!(
+        "fleet_shift_slots={} last_regrid_remainder_us={}",
+        s.pacing.fleet_shift_slots, s.pacing.last_regrid_remainder_us
+    );
     assert!(
-        line.contains(
+        line.contains(&format!(
             "wall_anchor_last_hold_us=1499000 wall_anchor_probes_rejected=3 \
-             wall_anchor_detect_to_follow_us=33533 song_change_unserviced_slots=6"
-        ),
-        "the probe tokens follow the anchor tokens: {line}"
+             wall_anchor_detect_to_follow_us=33533 {shift} song_change_unserviced_slots=6"
+        )),
+        "the probe tokens follow the anchor tokens, then the re-grid tokens: {line}"
     );
 }
