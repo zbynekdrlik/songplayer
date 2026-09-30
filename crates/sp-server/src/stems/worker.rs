@@ -327,14 +327,6 @@ impl StemWorker {
             return;
         }
 
-        let audio_path = PathBuf::from(&job.audio_file_path);
-        let (vocals_out, instrumental_out) = crate::stems::stem_paths(&audio_path);
-        // #171: resumable per-segment scratch dir beside the cached audio,
-        // preserved across a stall/kill so the next pick resumes.
-        let stem_work_dir = audio_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join(format!("{}_stemsep", job.youtube_id));
         let gpu_mem = crate::db::models::get_setting(&self.pool, "lyrics_gpu_mem_fraction")
             .await
             .ok()
@@ -372,6 +364,28 @@ impl StemWorker {
             Ok(g) => g,
             Err(_) => return,
         };
+        // #136: separate the audio the row records NOW — a rename (the metadata
+        // repair) while this job waited for the slot moved it. No audio on disk
+        // = a no-penalty re-pick later (`song_input::job_input`).
+        let Some(input) = crate::song_input::job_input(
+            &self.pool,
+            job.video_id,
+            &job.audio_file_path,
+            crate::song_input::HeavyJob::Stems,
+        )
+        .await
+        else {
+            return;
+        };
+        let job = input.stem_job(job);
+        let audio_path = PathBuf::from(&job.audio_file_path);
+        let (vocals_out, instrumental_out) = crate::stems::stem_paths(&audio_path);
+        // #171: resumable per-segment scratch dir beside the cached audio,
+        // preserved across a stall/kill so the next pick resumes.
+        let stem_work_dir = audio_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join(format!("{}_stemsep", job.youtube_id));
 
         // #177: publish the live in-flight signal for the karaoke panel's ⚙
         // "spracúvam" state; the guard clears it when this scope ends (success,
