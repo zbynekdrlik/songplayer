@@ -696,11 +696,14 @@ async fn get_program_reports_the_senders_boundary_timing() {
             .record_timing(&crate::playback::program_output_timing::BoundaryMarks {
                 stamp_100ns: b,
                 taken_100ns: b + 60_000,
-                fed_100ns: b + 120_000,
-                submit_start_100ns: b + 120_000,
-                submitted_100ns: b + 190_000,
+                fed_100ns: b + 700_000,
+                submit_start_100ns: b + 700_000,
+                submitted_100ns: b + 770_000,
             });
-    assert!(late.is_some(), "12 ms late: WARNed");
+    assert!(
+        late.is_some(),
+        "70 ms late: after its first packet was due (L = 66.7 ms), WARNed"
+    );
     let (status, json) = call(state, "GET", "/api/v1/program", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
@@ -708,12 +711,13 @@ async fn get_program_reports_the_senders_boundary_timing() {
         serde_json::json!({
             "boundaries": 1,
             "ready_late_us_max": 6000,
-            "vban_feed_late_us_max": 12000,
+            "vban_feed_late_us_max": 70000,
             "submit_us_max": 7000,
             "ready_late_over_5ms": 1,
             "vban_feed_late_over_5ms": 1,
             "submit_over_5ms": 1,
             "vban_feed_late_over_10ms": 1,
+            "vban_feed_late_over_budget": 1,
             "warned": 1
         })
     );

@@ -17,11 +17,15 @@
 //! [`BoundaryTiming`] (pure, Linux-tested, the `loop_stats.rs` pattern)
 //! keeps each figure's worst over the last 60–120 s (two buckets of
 //! [`TIMING_BUCKET_BOUNDARIES`]), counts per figure the boundaries over
-//! [`STAGE_SLOW_US`] since start, and decides the ONE WARN for a boundary
-//! whose VBAN hand-off was over [`VBAN_FEED_WARN_US`] late: at most one per
-//! [`TIMING_WARN_EVERY_100NS`] of timeline, the next one carrying how many it
-//! skipped. Served as `health.timing` on `GET /api/v1/program`
-//! ([`BoundaryTimingStatus`]).
+//! [`STAGE_SLOW_US`] since start (and the hand-offs over
+//! [`VBAN_FEED_SLOW_US`]), and decides the ONE WARN for a boundary whose
+//! VBAN hand-off came after its block's first packet was due — over
+//! [`VBAN_FEED_BUDGET_US`], VBAN's send latency L (#210 part 2): only then
+//! do its packets go out late, back to back. A hand-off inside L costs FOH
+//! nothing, and 10–33 ms is the program's normal state on the box (finding
+//! 5915907311). At most one WARN per [`TIMING_WARN_EVERY_100NS`] of
+//! timeline, the next one carrying how many it skipped. Served as
+//! `health.timing` on `GET /api/v1/program` ([`BoundaryTimingStatus`]).
 
 use serde::Serialize;
 use sp_core::genlock::UNITS_PER_SECOND;
@@ -29,8 +33,16 @@ use sp_core::genlock::UNITS_PER_SECOND;
 /// A figure over this (µs) is counted in its `*_over_5ms` total.
 pub const STAGE_SLOW_US: u64 = 5_000;
 
-/// A boundary whose VBAN hand-off is later than this (µs) is WARNed.
-pub const VBAN_FEED_WARN_US: u64 = 10_000;
+/// A VBAN hand-off later than this (µs) is counted in
+/// `vban_feed_late_over_10ms` (a trend figure, never WARNed).
+pub const VBAN_FEED_SLOW_US: u64 = 10_000;
+
+/// VBAN's budget for a hand-off (µs): its send latency L, whole µs of
+/// [`VBAN_SEND_LATENCY_100NS`](crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS)
+/// (a test pins the relation). A block handed over later than this reaches
+/// the VBAN thread after its first packet was due: counted in
+/// `vban_feed_late_over_budget` and WARNed (#210 part 2).
+pub const VBAN_FEED_BUDGET_US: u64 = 10_000;
 
 /// At most one WARN per this much timeline (100 ns; 5 s): a bad minute
 /// writes at most 12 lines. The 10 s grid of the measured stalls is never
@@ -90,13 +102,13 @@ pub fn us_after(from_100ns: i64, to_100ns: i64) -> u64 {
 }
 
 /// A boundary to WARN about: its VBAN hand-off was over
-/// [`VBAN_FEED_WARN_US`] late.
+/// [`VBAN_FEED_BUDGET_US`] late.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LateBoundary {
     /// The boundary (timeline, 100 ns).
     pub stamp_100ns: i64,
     pub sample: BoundarySample,
-    /// Boundaries over [`VBAN_FEED_WARN_US`] the rate limit skipped since
+    /// Boundaries over [`VBAN_FEED_BUDGET_US`] the rate limit skipped since
     /// the WARN before this one.
     pub suppressed: u64,
 }
@@ -116,6 +128,9 @@ pub struct BoundaryTimingStatus {
     pub submit_over_5ms: u64,
     /// Boundaries whose VBAN hand-off was over 10 ms late, since start.
     pub vban_feed_late_over_10ms: u64,
+    /// Boundaries whose VBAN hand-off came after their block's first packet
+    /// was due (over [`VBAN_FEED_BUDGET_US`]), since start.
+    pub vban_feed_late_over_budget: u64,
     /// WARN lines written for them (the rest were rate-limited).
     pub warned: u64,
 }
@@ -133,17 +148,20 @@ pub struct BoundaryTiming {
     vban_feed_late_over_5ms: u64,
     submit_over_5ms: u64,
     vban_feed_late_over_10ms: u64,
+    vban_feed_late_over_budget: u64,
     warned: u64,
     /// The boundary of the last WARN; `None` before the first.
     last_warn_100ns: Option<i64>,
-    /// Boundaries over 10 ms skipped by the rate limit since the last WARN.
+    /// Boundaries over the budget skipped by the rate limit since the last
+    /// WARN.
     suppressed: u64,
 }
 
 impl BoundaryTiming {
     /// Fold in one boundary served at `marks`. Returns it when it is to be
-    /// WARNed: its VBAN hand-off was over [`VBAN_FEED_WARN_US`] late and no
-    /// WARN went out in the [`TIMING_WARN_EVERY_100NS`] before it.
+    /// WARNed: its VBAN hand-off was over [`VBAN_FEED_BUDGET_US`] late (its
+    /// block's first packet was already due) and no WARN went out in the
+    /// [`TIMING_WARN_EVERY_100NS`] before it.
     pub fn observe(&mut self, marks: &BoundaryMarks) -> Option<LateBoundary> {
         let sample = BoundarySample::of(marks);
         self.boundaries += 1;
@@ -156,10 +174,11 @@ impl BoundaryTiming {
         self.ready_late_over_5ms += u64::from(sample.ready_late_us > STAGE_SLOW_US);
         self.vban_feed_late_over_5ms += u64::from(sample.vban_feed_late_us > STAGE_SLOW_US);
         self.submit_over_5ms += u64::from(sample.submit_us > STAGE_SLOW_US);
-        if sample.vban_feed_late_us <= VBAN_FEED_WARN_US {
+        self.vban_feed_late_over_10ms += u64::from(sample.vban_feed_late_us > VBAN_FEED_SLOW_US);
+        if sample.vban_feed_late_us <= VBAN_FEED_BUDGET_US {
             return None;
         }
-        self.vban_feed_late_over_10ms += 1;
+        self.vban_feed_late_over_budget += 1;
         let stamp_100ns = marks.stamp_100ns;
         let quiet = self
             .last_warn_100ns
@@ -189,6 +208,7 @@ impl BoundaryTiming {
             vban_feed_late_over_5ms: self.vban_feed_late_over_5ms,
             submit_over_5ms: self.submit_over_5ms,
             vban_feed_late_over_10ms: self.vban_feed_late_over_10ms,
+            vban_feed_late_over_budget: self.vban_feed_late_over_budget,
             warned: self.warned,
         }
     }

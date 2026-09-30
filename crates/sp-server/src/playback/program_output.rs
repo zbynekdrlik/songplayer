@@ -417,11 +417,12 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 }
 
-/// #210: the WARN of a boundary whose VBAN hand-off came over 10 ms late:
-/// its three figures, the boundary as its wire stamp and in UTC (to line up
-/// with a dev1 capture), and how many such boundaries the rate limit skipped
-/// since the WARN before it. The decision is `BoundaryTiming::observe`'s
-/// (tested); logging only.
+/// #210: the WARN of a boundary whose VBAN hand-off came after its block's
+/// first packet was due (over VBAN's send latency L, part 2): its three
+/// figures, the boundary as its wire stamp and in UTC (to line up with a
+/// dev1 capture), and how many such boundaries the rate limit skipped since
+/// the WARN before it. The decision is `BoundaryTiming::observe`'s (tested);
+/// logging only.
 #[cfg_attr(test, mutants::skip)]
 fn warn_late_boundary(late: &LateBoundary) {
     let wire = crate::playback::fleet_shift::wire_100ns(late.stamp_100ns);
@@ -432,7 +433,7 @@ fn warn_late_boundary(late: &LateBoundary) {
         vban_feed_late_us = late.sample.vban_feed_late_us,
         submit_us = late.sample.submit_us,
         suppressed = late.suppressed,
-        "program output: a boundary's VBAN audio was handed over more than 10 ms late"
+        "program output: a boundary's VBAN audio was handed over after its first packet was due (over VBAN's send latency) — its packets go out late, back to back"
     );
 }
 
@@ -481,8 +482,9 @@ pub fn next_check_wait(now_100ns: i64) -> Duration {
 /// The `SP-program` sender thread: release missed boundaries once per
 /// boundary, submit every queued boundary, poll the receiver count ~1/s. Exits
 /// (after a flush) once the bus is stopped and drained. #210: every boundary's
-/// timing goes to the bus (`health.timing`), and a VBAN hand-off over 10 ms
-/// late is WARNed (rate-limited by `BoundaryTiming::observe`).
+/// timing goes to the bus (`health.timing`), and a VBAN hand-off after its
+/// block's first packet was due is WARNed (rate-limited by
+/// `BoundaryTiming::observe`).
 #[cfg_attr(test, mutants::skip)]
 pub fn run_program_loop<B: NdiBackend>(
     out: &mut ProgramOutput<B>,

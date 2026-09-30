@@ -937,6 +937,7 @@ function programBody() {
         vban_feed_late_over_5ms: 0,
         submit_over_5ms: 0,
         vban_feed_late_over_10ms: 0,
+        vban_feed_late_over_budget: 0,
         warned: 0,
       },
     },

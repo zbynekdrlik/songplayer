@@ -482,8 +482,9 @@ fn the_sender_thread_puts_each_boundarys_timing_on_the_bus() {
             vban_feed_late_over_5ms: 1,
             submit_over_5ms: 1,
             vban_feed_late_over_10ms: 1,
-            warned: 1,
+            vban_feed_late_over_budget: 0,
+            warned: 0,
         },
-        "15 ms late: counted and WARNed once"
+        "15 ms late: counted, but inside VBAN's send latency — not WARNed (#210 part 2)"
     );
 }
