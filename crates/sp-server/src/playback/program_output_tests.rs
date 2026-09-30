@@ -679,3 +679,25 @@ fn a_run_of_mixed_boundaries_is_counted_until_the_next_unmixed_boundary() {
         "the run ended and was logged"
     );
 }
+
+#[test]
+fn a_mix_with_neither_side_ends_the_run_like_the_standby_pair_it_becomes() {
+    // #210 review round 1: the neither-side mix (the bus never queues one)
+    // goes out as the standby pair, and like every unmixed boundary it ends
+    // the run of mixed boundaries once it went out.
+    let (backend, mut out) = output(2, 2);
+    let from = pair(4, &FROM_4X2, at(0), at(0), 0.25);
+    let to = pair(4, &TO_4X2, at(0), at(0), 0.5);
+    out.submit(ProgramJob::Mix(mix_at(at(0), Some(from), Some(to), 0, 9)));
+    assert_eq!(out.mix_run.boundaries, 1, "one mixed boundary");
+    assert_eq!(
+        out.submit(ProgramJob::Mix(mix_at(at(1), None, None, 1, 9))),
+        at(1)
+    );
+    assert_eq!(out.mix_run, MixRun::default(), "the run ended");
+    assert_eq!(
+        pictures(&backend).last().map(String::as_str),
+        Some("send_video_async(42,NV12,2x2,stride=2,30/1)"),
+        "the program's standby black"
+    );
+}

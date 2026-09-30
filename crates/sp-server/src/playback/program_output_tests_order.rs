@@ -338,9 +338,11 @@ fn the_standby_silence_reaches_vban_while_its_ndi_submit_is_held() {
 }
 
 #[test]
-fn a_mixed_boundarys_block_reaches_vban_before_its_picture_and_ndi_submit() {
-    // The two pictures differ in size, so the NDI side also fits and blends
-    // the outgoing picture: none of that may come before the VBAN hand-off.
+fn a_mixed_boundarys_block_reaches_vban_while_its_ndi_submit_is_held() {
+    // The two pictures differ in size, so the video side also fits and
+    // blends the outgoing picture. This test sees only the held NDI send;
+    // that the picture comes after the hand-off too is `serve`'s structure
+    // (`split` has no video work, `submit_video` runs after the feed).
     let stamp = at(2);
     let mix = MixJob {
         stamp_100ns: stamp,
@@ -352,7 +354,7 @@ fn a_mixed_boundarys_block_reaches_vban_before_its_picture_and_ndi_submit() {
     let seen = submit_with_ndi_held(ProgramJob::Mix(mix));
     assert_eq!(
         seen.queued_while_held, 1,
-        "VBAN has the crossfaded block before the mixed picture goes to NDI"
+        "VBAN has the crossfaded block before its NDI submit returns"
     );
     assert_eq!(
         (seen.block.due_100ns, seen.block.substituted),
@@ -434,7 +436,7 @@ fn a_slow_ndi_submit_is_timed_and_never_in_the_vban_hand_off() {
     assert_eq!(
         out.serve(ProgramJob::Mix(mix), now),
         marks(at(2), 30_000),
-        "a mixed boundary: VBAN before the picture, the NDI call timed alone"
+        "a mixed boundary: the NDI call is timed alone"
     );
     assert_eq!(vban.queued(), 3, "one block per boundary");
 }

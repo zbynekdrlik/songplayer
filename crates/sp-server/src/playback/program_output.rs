@@ -20,7 +20,9 @@
 //! #210: every submitted pair's audio block (forwarded, mixed, or the standby
 //! silence) is handed to the program's VBAN output (`vban_out.rs`) BEFORE its
 //! NDI submit — a copy, the NDI submit still borrows the pair — so FOH audio
-//! never waits for the video side (a slow NDI send, a mixed picture), and
+//! never waits for the video side of its own boundary (a slow NDI send, a
+//! mixed picture; a video side longer than a slot still delays the NEXT
+//! boundary's take, which `health.timing` shows as `ready_late_us`), and
 //! `start_program` also starts the VBAN thread + its settings task.
 //!
 //! #215: a [`ProgramJob::Mix`] (one boundary inside a transition window) is
@@ -54,6 +56,7 @@ use crate::playback::program_transition::{
     AudioFormat, FitPlan, Layout, MixJob, Outgoing, black_nv12_into, mix_audio_block, mix_bands,
     mix_nv12_into,
 };
+use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::submitter::FrameSubmitter;
 use crate::playback::vban_out::{VbanBlock, VbanOut, run_vban_config_task};
 use crate::playback::wallclock::WallClock;
@@ -136,6 +139,36 @@ fn present_layout(mix: &MixJob) -> Option<Layout> {
     Some(Layout::of(mix.to.as_ref().or(mix.from.as_ref())?))
 }
 
+/// #210: one program boundary split at the VBAN hand-off
+/// ([`ProgramOutput::split`]): its audio is decided, its video work is
+/// still to do ([`ProgramOutput::submit_video`]).
+enum Pair {
+    /// A forwarded source pair, as it came.
+    Source(SubmitJob),
+    /// The program's own standby pair (the black + one silent block).
+    Standby,
+    /// #215: a window boundary: its crossfaded block, and the mix whose
+    /// picture is painted in `present`.
+    Mix {
+        mix: MixJob,
+        present: Layout,
+        audio: Vec<AudioFrame>,
+    },
+}
+
+impl Pair {
+    /// What VBAN gets for the boundary on `stamp_100ns`: the pair's own
+    /// block, COPIED (its NDI submit still borrows it), or the standby
+    /// silence.
+    fn vban_block(&self, stamp_100ns: i64) -> VbanBlock {
+        match self {
+            Pair::Source(job) => VbanBlock::copied(stamp_100ns, &job.audio),
+            Pair::Standby => VbanBlock::silence(stamp_100ns),
+            Pair::Mix { audio, .. } => VbanBlock::copied(stamp_100ns, audio),
+        }
+    }
+}
+
 impl<B: NdiBackend> ProgramOutput<B> {
     /// Wrap the program's NDI sender. The standby black is `standby_w` ×
     /// `standby_h` NV12 ([`PROGRAM_STANDBY_W`] × [`PROGRAM_STANDBY_H`] in
@@ -179,26 +212,86 @@ impl<B: NdiBackend> ProgramOutput<B> {
         now()
     }
 
-    /// Serve one program boundary. Its audio block goes to VBAN FIRST, then
-    /// the NDI pair (#210): FOH audio never waits for the video side (the
-    /// NDI submit, a mixed picture). A forwarded source job keeps its own
-    /// stamps. What the program makes itself (a standby pair, a mixed block)
-    /// is stamped on its boundary, the audio too: the block belongs to that
-    /// boundary's timeline instant, never the submit instant — a standby
-    /// pair for a missed boundary goes out up to the fill grace (3 slots)
-    /// late (#224). Returns the instants the boundary was served at, read
-    /// off `now` (the sender's wall: the stamps' timeline), for
-    /// `health.timing` (`program_output_timing.rs`).
+    /// Serve one program boundary: its audio side ([`split`](Self::split),
+    /// no video work) goes to VBAN FIRST, then the video side and the NDI
+    /// pair ([`submit_video`](Self::submit_video)) — #210: FOH audio never
+    /// waits for the video side of its own boundary (the NDI submit, a mixed
+    /// picture). A forwarded source job keeps its own stamps. What the
+    /// program makes itself (a standby pair, a mixed block) is stamped on
+    /// its boundary, the audio too: the block belongs to that boundary's
+    /// timeline instant, never the submit instant — a standby pair for a
+    /// missed boundary goes out up to the fill grace (3 slots) late (#224).
+    /// An unmixed boundary ends the run of mixed boundaries once it went
+    /// out. Returns the instants the boundary was served at, read off `now`
+    /// (the sender's wall: the stamps' timeline), for `health.timing`
+    /// (`program_output_timing.rs`).
     pub fn serve(&mut self, job: ProgramJob, now: impl Fn() -> i64) -> BoundaryMarks {
         let taken_100ns = now();
         let stamp_100ns = job.stamp_100ns();
-        if !matches!(job, ProgramJob::Mix(_)) {
+        let pair = self.split(job);
+        let fed_100ns = self.feed_vban(pair.vban_block(stamp_100ns), &now);
+        let ends_run = !matches!(pair, Pair::Mix { .. });
+        let submit_start_100ns = self.submit_video(pair, stamp_100ns, &now);
+        let submitted_100ns = now();
+        if ends_run {
             self.end_mix_run();
         }
-        let (fed_100ns, submit_start_100ns) = match job {
-            ProgramJob::Mix(mix) => self.serve_mix(mix, &now),
-            ProgramJob::Source(job) => {
-                let fed = self.feed_vban(VbanBlock::copied(stamp_100ns, &job.audio), &now);
+        BoundaryMarks {
+            stamp_100ns,
+            taken_100ns,
+            fed_100ns,
+            submit_start_100ns,
+            submitted_100ns,
+        }
+    }
+
+    /// The tests' shorthand: [`serve`](Self::serve) with no clock; the stamp.
+    #[cfg(test)]
+    pub fn submit(&mut self, job: ProgramJob) -> i64 {
+        self.serve(job, || 0).stamp_100ns
+    }
+
+    /// #210: the audio side of `job`, with no video work: a window
+    /// boundary's crossfaded block is computed here (#215; a mix with
+    /// neither side — the bus never queues one — is the standby pair).
+    fn split(&self, job: ProgramJob) -> Pair {
+        match job {
+            ProgramJob::Source(job) => Pair::Source(job),
+            ProgramJob::Standby { .. } => Pair::Standby,
+            ProgramJob::Mix(mix) => match present_layout(&mix) {
+                None => Pair::Standby,
+                Some(present) => {
+                    let (first, total) = mix.sample_span(self.spc);
+                    let format = AudioFormat {
+                        frames: self.spc,
+                        channels: PROGRAM_AUDIO_CHANNELS,
+                        sample_rate: PROGRAM_AUDIO_RATE_HZ,
+                    };
+                    let audio = vec![mix_audio_block(
+                        mix.from.as_ref().and_then(|j| j.audio.first()),
+                        mix.to.as_ref().and_then(|j| j.audio.first()),
+                        first,
+                        total,
+                        format,
+                    )];
+                    Pair::Mix {
+                        mix,
+                        present,
+                        audio,
+                    }
+                }
+            },
+        }
+    }
+
+    /// #210: the video side of a boundary VBAN already has, then its NDI
+    /// pair: a forwarded pair as it is, the standby black + silence, or a
+    /// window boundary's mixed picture (#215) + its crossfaded block, both
+    /// stamped on the window boundary (#224: the program's own block).
+    /// Returns when the NDI submit started, read off `now`.
+    fn submit_video(&mut self, pair: Pair, stamp_100ns: i64, now: &impl Fn() -> i64) -> i64 {
+        match pair {
+            Pair::Source(job) => {
                 let start = now();
                 self.submitter.submit_frame_at_boundary_owned(
                     job.width,
@@ -209,87 +302,46 @@ impl<B: NdiBackend> ProgramOutput<B> {
                     stamp_100ns,
                     job.audio_tc_100ns,
                 );
-                (fed, start)
+                start
             }
-            ProgramJob::Standby { .. } => self.serve_standby(stamp_100ns, &now),
-        };
-        BoundaryMarks {
-            stamp_100ns,
-            taken_100ns,
-            fed_100ns,
-            submit_start_100ns,
-            submitted_100ns: now(),
+            Pair::Standby => {
+                let (w, h) = (self.standby_w, self.standby_h);
+                let black = self.submitter.standby_black_nv12(w, h);
+                let start = now();
+                self.submitter.submit_frame_at_boundary_owned(
+                    w,
+                    h,
+                    w,
+                    black,
+                    &self.silence,
+                    stamp_100ns,
+                    stamp_100ns,
+                );
+                start
+            }
+            Pair::Mix {
+                mix,
+                present,
+                audio,
+            } => {
+                let started = Instant::now();
+                let (layout, video) = self.paint_mix(&mix, present);
+                let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+                self.mix_run.boundaries += 1;
+                self.mix_run.max_picture_us = self.mix_run.max_picture_us.max(picture_us);
+                let start = now();
+                self.submitter.submit_frame_at_boundary_owned(
+                    layout.width,
+                    layout.height,
+                    layout.stride,
+                    video,
+                    &audio,
+                    stamp_100ns,
+                    stamp_100ns,
+                );
+                start
+            }
         }
-    }
-
-    /// The tests' shorthand: [`serve`](Self::serve) with no clock; the stamp.
-    #[cfg(test)]
-    pub fn submit(&mut self, job: ProgramJob) -> i64 {
-        self.serve(job, || 0).stamp_100ns
-    }
-
-    /// The program's standby pair on `stamp_100ns`: the silence to VBAN,
-    /// then the NDI black + silence. Returns when VBAN got it and when the
-    /// NDI submit started.
-    fn serve_standby(&mut self, stamp_100ns: i64, now: &impl Fn() -> i64) -> (i64, i64) {
-        let fed = self.feed_vban(VbanBlock::silence(stamp_100ns), now);
-        let (w, h) = (self.standby_w, self.standby_h);
-        let black = self.submitter.standby_black_nv12(w, h);
-        let start = now();
-        self.submitter.submit_frame_at_boundary_owned(
-            w,
-            h,
-            w,
-            black,
-            &self.silence,
-            stamp_100ns,
-            stamp_100ns,
-        );
-        (fed, start)
-    }
-
-    /// #215: one window boundary: the crossfaded audio block, to VBAN first
-    /// (#210), then the mixed picture and the NDI pair, both stamped on the
-    /// window boundary (#224: the program's own block). A mix with neither
-    /// side (the bus never queues one) goes out as the standby pair, ending
-    /// the run of mixed boundaries like any unmixed one. Returns when VBAN
-    /// got the block and when the NDI submit started.
-    fn serve_mix(&mut self, mix: MixJob, now: &impl Fn() -> i64) -> (i64, i64) {
-        let stamp = mix.stamp_100ns;
-        let Some(present) = present_layout(&mix) else {
-            self.end_mix_run();
-            return self.serve_standby(stamp, now);
-        };
-        let (first, total) = mix.sample_span(self.spc);
-        let format = AudioFormat {
-            frames: self.spc,
-            channels: PROGRAM_AUDIO_CHANNELS,
-            sample_rate: PROGRAM_AUDIO_RATE_HZ,
-        };
-        let audio = vec![mix_audio_block(
-            mix.from.as_ref().and_then(|j| j.audio.first()),
-            mix.to.as_ref().and_then(|j| j.audio.first()),
-            first,
-            total,
-            format,
-        )];
-        let fed = self.feed_vban(VbanBlock::copied(stamp, &audio), now);
-        let started = Instant::now();
-        let (layout, video) = self.paint_mix(&mix, present);
-        let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        self.mix_run.boundaries += 1;
-        self.mix_run.max_picture_us = self.mix_run.max_picture_us.max(picture_us);
-        let start = now();
-        self.submitter.submit_frame_at_boundary_owned(
-            layout.width,
-            layout.height,
-            layout.stride,
-            video,
-            &audio,
-            stamp,
-            stamp,
-        );
-        (fed, start)
     }
 
     /// #215: the picture of a window boundary ([`paint_mix`](Self::paint_mix)),

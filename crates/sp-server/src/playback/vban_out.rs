@@ -5,7 +5,8 @@
 //! `SP-program` sender thread (`program_output.rs`) hands each submitted
 //! pair's audio block (a forwarded source block, a mixed block or the
 //! standby silence) to [`VbanOut::push`] right BEFORE its NDI submit, so the
-//! video side never delays it (#210). The hand-off is a bounded,
+//! video side of its own boundary never delays it (#210). The hand-off is a
+//! bounded,
 //! never-blocking queue: over [`VBAN_QUEUE_BOUND`] the OLDEST block is dropped
 //! and counted. A dedicated thread ([`run_vban_loop`]) encodes each block into
 //! 8 packets of 200 frames (`vban_packet.rs`) and sends packet `k` of the
