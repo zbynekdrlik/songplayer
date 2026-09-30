@@ -237,7 +237,7 @@ fn after_retries(outcome: &Readiness) -> FastPath {
 /// failure that outlived the retries — did not. Each probe's reason is in
 /// its WARN (`log_probe`).
 pub fn install_worked(path: FastPath) -> bool {
-    path == FastPath::Ready
+    path != FastPath::Install
 }
 
 /// One probe's log line. Logging only.
