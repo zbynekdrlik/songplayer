@@ -123,26 +123,23 @@ impl LyricsWorker {
         has_lyrics == Some(1) && tokio::fs::try_exists(&file).await.unwrap_or(false)
     }
 
-    /// #144 (ROZHODNUTÉ 5905945274): a failed or empty re-run never darkens a
-    /// song the wall already serves. When the row serves lyrics
-    /// ([`Self::serves_lyrics`]), record ONLY the attempt: `lyrics_attempts`,
-    /// the `lyrics_next_attempt_at` backoff, and `lyrics_manual_priority = 0`
-    /// so a manual re-queue does not loop. `has_lyrics`, `lyrics_source` and
-    /// the file stay until a successful run replaces them. Returns whether it
-    /// did; `false` means the caller takes the row's terminal state.
+    /// #144 (ROZHODNUTÉ 5905945274, refined by 5908227646): a failed or empty
+    /// re-run never darkens a song the wall already serves. When the row
+    /// serves lyrics ([`Self::serves_lyrics`]), record ONLY the attempt:
+    /// `lyrics_attempts` and the `lyrics_next_attempt_at` backoff (the manual
+    /// bucket waits it out, so a queued song does not loop). It stays in the
+    /// manual queue until its `SERVED_RERUN_MAX_ATTEMPTS`th failed attempt
+    /// clears `lyrics_manual_priority`, WARNed with the song and the reason.
+    /// `has_lyrics`, `lyrics_source` and the file stay until a successful run
+    /// replaces them. Returns whether it did; `false` means the caller takes
+    /// the row's terminal state.
     async fn keep_served_lyrics(&self, video_id: i64, youtube_id: &str, reason: &str) -> bool {
         if !self.serves_lyrics(video_id, youtube_id).await {
             return false;
         }
         let backoff = self.next_backoff(video_id).await;
         match crate::db::models::record_served_lyrics_failure(&self.pool, video_id, backoff).await {
-            Ok(attempts) => warn!(
-                youtube_id = %youtube_id,
-                reason,
-                attempts,
-                backoff_secs = backoff.as_secs(),
-                "worker: re-run failed — the served lyrics are kept, only the attempt is recorded"
-            ),
+            Ok(attempts) => log_served_failure(video_id, youtube_id, reason, attempts, backoff),
             Err(e) => warn!(
                 youtube_id = %youtube_id,
                 reason,
@@ -226,6 +223,36 @@ impl LyricsWorker {
         );
         self.clear_processing().await;
         Ok(SongOutcome::Done)
+    }
+}
+
+/// The WARN of a served song's failed re-run (`keep_served_lyrics`): it stays
+/// queued for its next attempt, or — at `SERVED_RERUN_MAX_ATTEMPTS` — it left
+/// the manual queue, named with its reason. Logging only.
+#[cfg_attr(test, mutants::skip)]
+fn log_served_failure(
+    video_id: i64,
+    youtube_id: &str,
+    reason: &str,
+    attempts: u32,
+    backoff: std::time::Duration,
+) {
+    if attempts >= crate::db::models::SERVED_RERUN_MAX_ATTEMPTS {
+        warn!(
+            video_id,
+            youtube_id = %youtube_id,
+            reason,
+            attempts,
+            "worker: re-run failed on its last allowed attempt — the served lyrics are kept, and the song leaves the manual queue"
+        );
+    } else {
+        warn!(
+            youtube_id = %youtube_id,
+            reason,
+            attempts,
+            backoff_secs = backoff.as_secs(),
+            "worker: re-run failed — the served lyrics are kept, and the song stays queued for its next attempt after the backoff"
+        );
     }
 }
 

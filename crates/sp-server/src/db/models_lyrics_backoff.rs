@@ -77,15 +77,25 @@ pub async fn record_lyrics_wait(
     Ok(())
 }
 
-/// #144 (ROZHODNUTÉ 5905945274): a failed or empty re-run of a song the wall
-/// already serves records ONLY the attempt: [`record_lyrics_deferral`]
-/// (`lyrics_attempts` + the `lyrics_next_attempt_at` backoff),
-/// `lyrics_manual_priority = 0`, so a manual re-queue is not re-picked every
-/// tick, and `lyrics_processed_at = now`, as every other ended pass stamps it
-/// (the #171 full-mix upgrade bucket re-attempts a row at most once a day by
-/// it). `has_lyrics`, `lyrics_source`, `lyrics_pipeline_version` and the
-/// served `<yt>_lyrics.json` are left as they are: the wall keeps the lyrics
-/// until a successful run replaces them. Returns the new attempt count.
+/// #144 (ROZHODNUTÉ 5908227646): how many failed attempts a song the wall
+/// serves gets in the manual queue. Its re-run failing this many times
+/// (`lyrics_attempts`, reset to 0 when the song is queued) clears its
+/// `lyrics_manual_priority`; fewer keep it queued for the next attempt after
+/// its backoff.
+pub const SERVED_RERUN_MAX_ATTEMPTS: u32 = 1;
+
+/// #144 (ROZHODNUTÉ 5905945274, refined by 5908227646): a failed or empty
+/// re-run of a song the wall already serves records ONLY the attempt:
+/// [`record_lyrics_deferral`] (`lyrics_attempts` + the
+/// `lyrics_next_attempt_at` backoff, which the manual bucket honours, so it
+/// is not re-picked every tick) and `lyrics_processed_at = now`, as every
+/// other ended pass stamps it (the #171 full-mix upgrade bucket re-attempts a
+/// row at most once a day by it). A transient provider error must not drop
+/// the song out of the manual rollout, so `lyrics_manual_priority` stays
+/// until the [`SERVED_RERUN_MAX_ATTEMPTS`]th failed attempt clears it.
+/// `has_lyrics`, `lyrics_source`, `lyrics_pipeline_version` and the served
+/// `<yt>_lyrics.json` are left as they are: the wall keeps the lyrics until a
+/// successful run replaces them. Returns the new attempt count.
 pub async fn record_served_lyrics_failure(
     pool: &SqlitePool,
     video_id: i64,
@@ -93,10 +103,13 @@ pub async fn record_served_lyrics_failure(
 ) -> Result<u32, sqlx::Error> {
     let attempts = record_lyrics_deferral(pool, video_id, backoff).await?;
     sqlx::query(
-        "UPDATE videos SET lyrics_manual_priority = 0, \
+        "UPDATE videos SET \
+         lyrics_manual_priority = CASE WHEN lyrics_attempts >= ? THEN 0 \
+             ELSE lyrics_manual_priority END, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
          WHERE id = ?",
     )
+    .bind(i64::from(SERVED_RERUN_MAX_ATTEMPTS))
     .bind(video_id)
     .execute(pool)
     .await?;
