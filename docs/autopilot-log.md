@@ -85,5 +85,7 @@ One terse line per issue/round: decisions, key commits, verification.
 
 - Cause: `POST /api/v1/videos/{id}/lyrics/reprocess` → `reset_video_lyrics` set `has_lyrics = 0, lyrics_source = NULL`, and the loader serves nothing for `has_lyrics = 0`. The #144 rollout queued 280 songs through it, and 211 songs showed no lyrics on the wall for ~6 h (comment 5905405307).
 - Fix: route, handler `reprocess_video_lyrics`, `reset_video_lyrics` and its own test deleted. `POST /api/v1/lyrics/reprocess {video_ids}` (manual priority, keeps the served lyrics) is the one path.
-- Commits: bump 62c92a2c; RED 7c7c094d (`a_per_video_reprocess_request_never_blanks_the_served_lyrics` fails: has_lyrics 0; pin `the_one_reprocess_path_keeps_the_served_lyrics_and_sets_manual_priority`) → GREEN 38711fdc.
+- Commits: bump 62c92a2c; RED 7c7c094d (`a_per_video_reprocess_request_never_blanks_the_served_lyrics` fails: has_lyrics 0, by code walk; pin `the_one_reprocess_path_keeps_the_served_lyrics_and_sets_manual_priority`) → GREEN 38711fdc; docs c4400c8a.
+- Review r1 (0🔴 2🟡 3🔵): docs 99e08626 (one PER-SONG path; the bulk sweeps `reprocess-all-stale` / `reprocess-catalog-with-new-gate` share its queue; the rule also loads on `lyrics/worker.rs` + `playback/lyrics_loader.rs`); 534969cb drops the tautological `reprocess_video_ids_sets_manual_priority`.
+- Known gap, not in this lane (follow-up candidate for the supervisor): a re-run that ERRORS still blanks a served song. `lyrics/worker.rs`'s `Err` arm calls `mark_video_lyrics(false, Some("no_source"), …)`, and the buckets skip `no_source` at the current version. The choice between deferring and keeping the served lyrics is a design decision.
 - Not local-verifiable (Tier-0): the build and the tests (CI).
