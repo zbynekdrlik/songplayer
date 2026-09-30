@@ -27,9 +27,9 @@
 //! and the NDI input's, must move by the SAME N, or two outputs' stamps would
 //! differ by a slot. [`FleetShift`] is that one process-wide registry: the
 //! first wall to confirm a step registers an EPOCH {S, N}; a later wall whose
-//! own reading of the step lies within the probe's 2 ms step threshold of
-//! its unapplied epochs adopts their N ([`adopt`]) — the difference is its
-//! own line's error, never a new epoch. The production walls share
+//! own reading of the step lies within [`STEP_RESIDUE_100NS`] (3 ms) of its
+//! unapplied epochs adopts their N ([`adopt`]) — the difference is the two
+//! walls' line errors, never a new epoch. The production walls share
 //! [`global`]; a test builds its own registry, never the global one.
 //!
 //! A wall that was not watching the clock cannot tell its own drift from a
@@ -52,9 +52,16 @@ use std::time::Instant;
 use sp_core::genlock::{GENLOCK_GRID_FPS, UNITS_PER_SECOND, floor_boundary_100ns};
 use tracing::info;
 
-use crate::playback::wallclock::{
-    Anchor, AnchorSample, STEP_DETECT_100NS, WALL_REJOIN_IDLE, to_us, utc_now_100ns,
-};
+use crate::playback::wallclock::{Anchor, AnchorSample, WALL_REJOIN_IDLE, to_us, utc_now_100ns};
+
+/// How far two walls' readings of ONE date step can differ (100 ns): twice a
+/// wall's own line error, each at most the bounded resample's 1 ms (a lone
+/// outlier) plus ≤ ~0.31 ms of slewing lag (94 ppm over a 3.33 s resample
+/// period) — under 3 ms. A reading within it of a run of registered epochs is
+/// that run ([`adopt`]); a step within it of nothing registered is never an
+/// epoch (the fuzz after review round 1: at the probe's 2 ms two walls with
+/// opposite outliers split K).
+pub const STEP_RESIDUE_100NS: i64 = 20_000;
 
 /// D(K) = ⌈K·P⌉ in 100 ns: how far a timeline K slots behind its labels sits
 /// behind them (P = 10⁷/30, one grid slot). Rounded UP, so an on-grid boundary
@@ -129,16 +136,16 @@ pub struct Adoption {
 ///
 /// - The run of its unapplied epochs (the first j, none included) whose
 ///   summed step lies CLOSEST to `step_100ns` is the step it saw, when it
-///   lies within the probe's 2 ms step threshold (`STEP_DETECT_100NS`): it
-///   adopts their summed N, and the difference is its own line's error (a
-///   lone-outlier resample, slewing lag) that only its own timeline takes.
-///   On a tie the shorter run wins. So two walls reading one step either
-///   side of a slot multiple still move by ONE N, a wall two epochs behind
-///   adopts both, and a step within 2 ms of nothing registered (a 1–2 ms
-///   step only the resample confirms) is never an epoch.
+///   lies within [`STEP_RESIDUE_100NS`] (3 ms): it adopts their summed N,
+///   and the difference is the walls' line errors (a lone-outlier resample,
+///   slewing lag), which only its own timeline takes. On a tie the shorter
+///   run wins. So two walls reading one step either side of a slot multiple
+///   still move by ONE N, a wall two epochs behind adopts both, and a step
+///   within 3 ms of nothing registered is never an epoch: every wall applies
+///   it on its own (N = 0).
 /// - Otherwise the step is new (beyond every unapplied epoch): the wall
 ///   adopts them all and registers the rest as a new epoch. A registered
-///   epoch is therefore always over 2 ms.
+///   epoch is therefore always over 3 ms.
 pub fn adopt(unapplied: &[Epoch], step_100ns: i64) -> Adoption {
     let (mut step_sum, mut slots) = (0, 0);
     // (distance, consumed, slots) of the closest run so far: none adopted.
@@ -151,7 +158,7 @@ pub fn adopt(unapplied: &[Epoch], step_100ns: i64) -> Adoption {
             closest = (distance, i + 1, slots);
         }
     }
-    if closest.0 <= STEP_DETECT_100NS {
+    if closest.0 <= STEP_RESIDUE_100NS {
         return Adoption {
             slots: closest.2,
             consumed: closest.1,
@@ -343,9 +350,9 @@ pub struct WallShift {
     pub regrids: u64,
     /// r of the last regrid: the step minus its relabel (100 ns). For the
     /// wall that registered the step 0 ≤ r ≤ one slot; a wall that adopted
-    /// another wall's N for a reading up to 2 ms off, or applied a step
-    /// under 2 ms on its own, shows that residue too (−2 ms … one slot +
-    /// 2 ms).
+    /// another wall's N for a reading up to 3 ms off, or applied a step
+    /// under 3 ms on its own, shows that residue too (−3 ms … one slot +
+    /// 3 ms).
     pub last_remainder_100ns: i64,
     /// How far the last regrid (or rejoin) moved the timeline's LINE at once
     /// (100 ns, signed): a jump ahead, or a hold of that size when negative.

@@ -171,20 +171,22 @@ fn a_step_no_epoch_covers_is_registered_with_its_own_split() {
 }
 
 #[test]
-fn a_wall_reading_the_same_step_within_2_ms_adopts_its_n_even_across_a_slot_multiple() {
+fn a_wall_reading_the_same_step_within_3_ms_adopts_its_n_even_across_a_slot_multiple() {
     // The first wall read 2 333 334 (N = 7, r = 0); a second wall reads the
     // same step one unit smaller, on the other side of the 7-slot multiple:
-    // alone it would split N = 6, but it adopts 7. Up to the probe's 2 ms
-    // step threshold the difference is the reader's own line error (review
-    // r1 🟡 D: a lone-outlier resample leaves a line ~1.3 ms off).
+    // alone it would split N = 6, but it adopts 7. Up to 3 ms the difference
+    // is the two walls' line errors (review r1 🟡 D: a lone-outlier resample
+    // leaves a line ~1.3 ms off; two walls with opposite ones, 2.6 ms).
+    assert_eq!(STEP_RESIDUE_100NS, 3 * MS);
     let first = [epoch(2_333_334, 7)];
     for step in [
         2_333_333,
         2_333_334 - MS,
         2_333_334 + MS,
         2_333_334 - 13_000,
-        2_333_334 - 2 * MS,
-        2_333_334 + 2 * MS,
+        2_333_334 - 26_000,
+        2_333_334 - 3 * MS,
+        2_333_334 + 3 * MS,
     ] {
         assert_eq!(
             adopt(&first, step),
@@ -196,52 +198,52 @@ fn a_wall_reading_the_same_step_within_2_ms_adopts_its_n_even_across_a_slot_mult
             "S = {step}"
         );
     }
-    // Just over 2 ms away: another step, registered on top.
+    // Just over 3 ms away: another step, registered on top.
     assert_eq!(
-        adopt(&first, 2_333_334 + 2 * MS + 1),
+        adopt(&first, 2_333_334 + 3 * MS + 1),
         Adoption {
             slots: 7,
             consumed: 1,
-            new_epoch: Some(epoch(2 * MS + 1, 0))
+            new_epoch: Some(epoch(3 * MS + 1, 0))
         }
     );
     assert_eq!(
-        adopt(&first, 2_333_334 - 2 * MS - 1),
+        adopt(&first, 2_333_334 - 3 * MS - 1),
         Adoption {
             slots: 6,
             consumed: 1,
-            new_epoch: Some(epoch(-2 * MS - 1, -1))
+            new_epoch: Some(epoch(-3 * MS - 1, -1))
         }
     );
 }
 
 #[test]
-fn a_step_within_2_ms_of_the_closest_run_is_a_walls_own_residue_never_an_epoch() {
+fn a_step_within_3_ms_of_the_closest_run_is_a_walls_own_residue_never_an_epoch() {
     let none = Adoption {
         slots: 0,
         consumed: 0,
         new_epoch: None,
     };
-    // Nothing registered: a step of at most 2 ms (only the resample confirms
-    // one over 1 ms) is applied by the wall alone. Registered, −2 ms would
-    // be N = −1 and move every wall's labels a slot back.
-    assert_eq!(adopt(&[], 2 * MS), none);
-    assert_eq!(adopt(&[], -2 * MS), none);
-    assert_eq!(adopt(&[], 15_000), none);
+    // Nothing registered: a step of at most 3 ms is applied by each wall on
+    // its own (N = 0). Registered, −2.5 ms would be N = −1 and move every
+    // wall's labels a slot back.
+    assert_eq!(adopt(&[], 3 * MS), none);
+    assert_eq!(adopt(&[], -3 * MS), none);
+    assert_eq!(adopt(&[], -25_000), none);
     assert_eq!(
-        adopt(&[], 2 * MS + 1),
+        adopt(&[], 3 * MS + 1),
         Adoption {
             slots: 0,
             consumed: 0,
-            new_epoch: Some(epoch(2 * MS + 1, 0))
+            new_epoch: Some(epoch(3 * MS + 1, 0))
         }
     );
     assert_eq!(
-        adopt(&[], -2 * MS - 1),
+        adopt(&[], -3 * MS - 1),
         Adoption {
             slots: -1,
             consumed: 0,
-            new_epoch: Some(epoch(-2 * MS - 1, -1))
+            new_epoch: Some(epoch(-3 * MS - 1, -1))
         }
     );
     // Behind two epochs, the CLOSEST run wins: 1.3 ms under the first.
@@ -332,14 +334,18 @@ fn the_registry_registers_once_and_every_other_wall_adopts_the_same_n() {
         }
     );
     assert_eq!((fleet.slots(), fleet.epochs()), (7, 1));
-    // Wall C reads it 1.3 ms smaller (its line ~1.3 ms off): it adopts too.
-    assert_eq!(
-        fleet.follow(0, 2_590_000),
-        Relabel {
-            slots: 7,
-            epochs: 1
-        }
-    );
+    // Wall C reads it 1.3 ms smaller (its line ~1.3 ms off), wall D 2.6 ms
+    // smaller (its line off the other way from A's): both adopt.
+    for reading in [2_590_000, 2_577_000] {
+        assert_eq!(
+            fleet.follow(0, reading),
+            Relabel {
+                slots: 7,
+                epochs: 1
+            },
+            "{reading}"
+        );
+    }
     assert_eq!((fleet.slots(), fleet.epochs()), (7, 1));
     // A wall built now starts at K = 7 with the epoch applied.
     assert_eq!(
