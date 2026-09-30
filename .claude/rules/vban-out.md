@@ -244,10 +244,11 @@ time (finding 5915907311, the stem worker ruled out). That is the
 - **Its own late packets** (`playback/vban_stall.rs`, pure `VbanStallLog`,
   inside `VbanOut`'s counters: ONE lock per packet on the real-time thread,
   review round 1; `status()` only COPIES the counters under that lock and
-  sorts / builds after it, so an API poll never holds the thread's lock
-  for more than a memcpy, review round 2). `send_block` times every packet
-  it sends against its
-  planned instant, `due + L + k/240 s`:
+  sorts / builds after it, so an API poll holds the thread's lock only for
+  that copy: two small allocations (the 1200 intervals, 9.6 KB, and the
+  ring of at most 32 events) plus their memcpy, review rounds 2–3).
+  `send_block` times every packet it sends against its planned instant,
+  `due + L + k/240 s`:
   - over 5 ms late = an event `{utc_ms, late_us}` in a ring of the last
     32, served oldest first as `vban.late_events`. `utc_ms` is the fleet
     label of the send reading (`VbanClock::label_100ns`, defaulted to the
