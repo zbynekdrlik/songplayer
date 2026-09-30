@@ -13,9 +13,10 @@
 //! is a BRACKETED sample (the narrowest of up to 8 `m1 / utc / m2` reads, paired
 //! at the midpoint), and one resample moves the wall by at most 1 ms. A larger
 //! correction slews in over the following resamples, unless two narrow
-//! resamples confirm the same step: then it is followed in ONE event, a step
-//! ahead when forward, ONE hold when backward. A backward correction is always
-//! a hold, never a backward step. The pure math is in `wallclock_anchor.rs`.
+//! resamples confirm the same step: then it is followed in ONE event (a
+//! relabel plus its remainder, #224 part 2, below). A backward correction is
+//! always a hold, never a backward step. The pure math is in
+//! `wallclock_anchor.rs`.
 //!
 //! Step probe (#224): every tick also takes ONE bracketed read and measures it
 //! against the line the wall runs on. A step over 2 ms, confirmed in the same
@@ -27,8 +28,11 @@
 //! takes the whole step S, but [`WallClock::now_100ns`] reads the internal
 //! TIMELINE `UTC − D(K_w)`, and the follow moves K_w by the fleet's N = ⌊S/P⌋
 //! whole slots. So the timeline moves only by the remainder r (0 ≤ r ≤ one
-//! slot, forward): a date step never holds it and never jumps it by S. The
-//! wire stamps get the labels back at the submit edge (`FrameSubmitter`).
+//! slot, forward; a residue hold under 3 ms at worst): a date step never
+//! holds it by S and never jumps it by S. The wire stamps get the labels back
+//! at the submit edge (`FrameSubmitter`). A wall built now, or ticking again
+//! after more than 10 s idle, JOINS the fleet's line instead of reading its
+//! own drift as a step (`WALL_REJOIN_IDLE`, `FleetShift::join`).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -135,7 +139,8 @@ pub fn utc_now_100ns() -> i64 {
 }
 
 /// A monotonic-to-UTC anchor plus a frame counter. `now_100ns()` reads the
-/// current UTC; `tick()` advances the counter, re-anchors every
+/// internal timeline (UTC less the fleet relabel D(K_w), #224 part 2);
+/// `tick()` advances the counter, re-anchors every
 /// `OFFSET_RESAMPLE_INTERVAL_FRAMES` frames so long-run drift between the
 /// monotonic and realtime clocks stays bounded (contract §1), and probes for
 /// a UTC step every tick (#224).

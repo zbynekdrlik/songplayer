@@ -85,11 +85,12 @@ pub struct PacingStats {
     /// #147: the total step (µs) of the last followed UTC step, signed
     /// (negative = backward); 0 before any.
     pub wall_anchor_last_step_us: i64,
-    /// #147: confirmed BACKWARD steps the pacer's wall followed as ONE hold
-    /// (a subset of `wall_anchor_steps_followed`), cumulative.
+    /// #147: followed steps whose TIMELINE movement was a hold (a subset of
+    /// `wall_anchor_steps_followed`), cumulative. Since #224 part 2 a date
+    /// step relabels and never holds; this counts only residues under 3 ms.
     pub wall_anchor_holds_followed: u64,
-    /// #147: how long (µs) the last followed hold froze the pacer's wall (and
-    /// so paused the output); 0 before any.
+    /// #147: how long (µs) the last such hold froze the pacer's wall (and so
+    /// paused the output); 0 before any.
     pub wall_anchor_last_hold_us: u64,
     /// #224: step probes over 2 ms the pacer's wall rejected (a wide probe,
     /// or a confirming sample that was wide or measured another step),
@@ -104,8 +105,10 @@ pub struct PacingStats {
     /// N = ⌊S/slot⌋). Every wall reads the same value once it followed.
     pub fleet_shift_slots: i64,
     /// #224 part 2: the remainder r (µs) of the last date step the pacer
-    /// wall followed, the step minus its whole slots: the only part its
-    /// timeline moved (0 ≤ r ≤ one slot, forward).
+    /// wall followed, the step minus its whole slots (0 ≤ r ≤ one slot for
+    /// the wall that registered it; a wall that adopted another wall's N for
+    /// a reading up to 2 ms off, or applied a step under 2 ms on its own,
+    /// shows that residue too: −2 ms … one slot + 2 ms).
     pub last_regrid_remainder_us: i64,
     /// #147: grid slots nobody serviced across a song change / stop / idle
     /// transition (the pipeline-lifetime submit consumer). Must read 0.

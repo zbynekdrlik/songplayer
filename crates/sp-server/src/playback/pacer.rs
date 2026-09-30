@@ -342,8 +342,9 @@ impl Pacer {
         }
     }
 
-    /// Current wall clock as 100-ns units since the Unix epoch (production read
-    /// path — MediaFoundation decode + wall grid share this).
+    /// The wall's internal TIMELINE now, 100-ns units: UTC since the Unix epoch
+    /// less the fleet relabel D(K) (#224 part 2; production read path —
+    /// MediaFoundation decode + wall grid share this).
     pub fn now_100ns(&self) -> i64 {
         self.wall.now_100ns()
     }

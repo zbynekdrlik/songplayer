@@ -137,22 +137,29 @@ slots N never reach any timeline, the timeline moves only by the remainder r
 jump of r would send r of audio at once (the 20:58Z +260 ms step sent ~80
 packets back to back before part 2).
 
-- `WallVbanClock::slewing` (the VBAN thread's clock) reads
-  `timeline − owed` (`RemainderSlew`, pure): at a follow of its wall
-  (`WallClock::shift().regrids` moved) it OWES the timeline's forward jump
-  (`last_jump_100ns`), so its own reading does not jump; the owed amount then
-  shrinks at `VBAN_SLEW_PPM` = 50 ppm of the elapsed timeline (100 ns per
-  2 ms: a whole slot is paid in ~11 min). The queue holds up to r more
-  meanwhile (under one block, far under the bound).
+- `WallVbanClock::slewing` (the VBAN thread's clock, `vban_clock.rs` since
+  review round 1; `vban_out` re-exports it) reads `line − owed`
+  (`RemainderSlew`, pure): at a regrid of its wall (`WallClock::shift().regrids`
+  moved — a follow, or a rejoin after an idle gap) it OWES the timeline's
+  movement (`last_jump_100ns`, SIGNED: r ahead, or a residue hold under
+  3 ms), so its own reading neither jumps nor stops; the owed amount then
+  shrinks toward 0 at `VBAN_SLEW_PPM` = 50 ppm of the elapsed line (100 ns
+  per 2 ms: a whole slot is paid in ~11 min). It reads the timeline's LINE
+  (`WallClock::line_100ns`), which runs on through a hold. The queue holds
+  up to r more meanwhile (under one block, far under the bound); a hold's
+  packets go out up to its size early, inside the 2-slot send latency.
 - 50, not 100: the packet spacing is already 41 666 / 41 667 / 41 668 × 100 ns
   and each wait rounds to 100 ns, so 50 ppm keeps EVERY packet interval
   within 4.1667 ms ± 100 ppm (pinned for +260.3 ms and −19.8 ms, `late_sends`
   0, none under 1 ms: `vban_out_tests_regrid.rs`).
-- A ≤ 1 ms residue hold of a follow is not owed (the timeline only paused,
-  as at a bounded resample).
-- Telemetry: `vban.slew_owed_us` on `GET /api/v1/program` — r right after a
-  follow, then down; 0 in steady state. `run_vban_loop` publishes it every
-  pass.
+- A residue hold IS owed (review round 1 🟡 G): read off the frozen wall,
+  one packet interval stretched by the hold (4.67 ms for 500 µs;
+  `a_residue_hold_at_a_follow_is_slewed_too_never_a_gap`). A bounded
+  resample's ≤ 1 ms correction is NOT a regrid and is not owed (VBAN
+  follows it as before, typically tens of µs).
+- Telemetry: `vban.slew_owed_us` on `GET /api/v1/program`, signed — r
+  right after a follow (negative after a residue hold), then toward 0; 0 in
+  steady state. `run_vban_loop` publishes it every pass.
 - Box acceptance at a controlled step: a dev1 capture with 0 bursts and 0
   gaps over ~5.2 ms across the step, `late_sends` +0, `slew_owed_us` ≈ r
   after it.

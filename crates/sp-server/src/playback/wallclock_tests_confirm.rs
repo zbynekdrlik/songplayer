@@ -3,8 +3,9 @@
 //! every 47 min) in ONE re-anchor, like every camera-box sender follows
 //! `CLOCK_REALTIME` at once. A lone outlier stays bounded at 1 ms. Pure rule +
 //! a WallClock over the [`VirtualClock`]; exact values, so every comparison in
-//! the rule is pinned. The backward direction (design record 5850063723, ONE
-//! hold) is in `wallclock_tests_confirm_backward.rs`. Since #224 the
+//! the rule is pinned. The backward direction (design record 5850063723) is in
+//! `wallclock_tests_confirm_backward.rs`; since #224 part 2 a followed step of
+//! either sign relabels (`WallClock::regrid`). Since #224 the
 //! per-boundary step probe follows a real step at the boundary it lands
 //! (`wallclock_tests_probe.rs`), so the resample's own confirm path is driven
 //! here with a realtime outlier scripted on the resample's read.

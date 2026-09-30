@@ -1,5 +1,8 @@
 //! #147 (design record 5850063723, Approach 1): a CONFIRMED backward UTC step
-//! is followed as ONE hold, never a backward step.
+//! is followed in ONE event, never as a backward step. Since #224 part 2 the
+//! follow RELABELS (the pure rule below still reports the UTC rest as a
+//! negative `applied`; the wall's regrid turns it into a relabel plus a
+//! forward remainder, `a_minus_1_5_s_step_keeps_the_timeline_monotonic…`).
 //!
 //! dantesync 1.12.0 makes one coordinated fleet date step per night (04:00
 //! local) of up to ~±1.5 s, in either direction. Held at 1 ms per ~3.3 s
@@ -10,14 +13,15 @@
 //! same ±1 ms tolerance and the same bracket bound:
 //! - a narrow resample over 1 ms backward applies a 1 ms hold and ARMS;
 //! - the next narrow resample that sees the same step (±1 ms) FOLLOWS the rest
-//!   as ONE hold `(instant + |rest|, wall(instant))`: the wall freezes, then
-//!   runs on the corrected UTC line;
+//!   in ONE event (the pure `apply_anchor_step` of a negative rest is still
+//!   ONE hold `(instant + |rest|, wall(instant))`, pinned below);
 //! - a lone outlier, a wide bracket or a different step stays the 1 ms hold.
 //!
 //! Pure rule + a WallClock over the [`VirtualClock`], with exact values. Since
 //! #224 the per-boundary step probe follows a real step at the boundary it
-//! lands, as ONE hold of the WHOLE step; the resample's own confirm path is
-//! driven with realtime outliers scripted on the resample's reads.
+//! lands (since part 2 as a relabel, the timeline never held); the
+//! resample's own confirm path is driven with realtime outliers scripted on
+//! the resample's reads.
 
 use super::*;
 use std::time::{Duration, Instant};
@@ -75,7 +79,7 @@ fn armed(delta_100ns: i64, applied_100ns: i64, direction: StepDirection) -> Opti
     })
 }
 
-/// A followed backward step (one hold) of `total_100ns`.
+/// A followed backward step of `total_100ns`.
 fn backward(total_100ns: i64) -> Option<FollowedStep> {
     Some(FollowedStep {
         total_100ns,
