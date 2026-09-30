@@ -24,7 +24,7 @@ use tracing::warn;
 
 use crate::playback::program_output::BoundaryTicker;
 use crate::playback::vban_out::VbanClock;
-use crate::playback::wallclock::WallClock;
+use crate::playback::wallclock::{WallClock, to_us};
 
 /// How fast VBAN's clock pays back a date step's movement (#224 part 2):
 /// 50 ppm of its timeline, 100 ns per 2 ms, so a whole slot (33.3 ms) is paid
@@ -141,7 +141,7 @@ impl WallVbanClock {
             && !slew.owe(jump, line)
         {
             warn!(
-                jump_us = jump / 10,
+                jump_us = to_us(jump),
                 "vban clock: the timeline moved more than a slot at once (a rejoin after a stall, or two date steps) — taken at once, not slewed (#224)"
             );
         }
