@@ -256,7 +256,11 @@ impl WallClock {
             self.rejoin(idle);
         }
         self.frames_since_resample = self.frames_since_resample.saturating_add(1);
-        if should_resample_mono_to_real_offset(self.frames_since_resample) {
+        // A resample waits out a hold in progress (#224 part 2): measured
+        // against the frozen wall it would read the rest of the hold as a new
+        // backward step (a rejoin's hold can outlast the 100 ticks).
+        let holding = self.anchor.instant > now;
+        if should_resample_mono_to_real_offset(self.frames_since_resample) && !holding {
             self.reanchor();
             self.frames_since_resample = 0;
         }
@@ -299,6 +303,9 @@ impl WallClock {
         };
         self.pending = None; // armed before the gap: nothing left to confirm
         self.suspect_since = None;
+        // A fresh anchor, like a follow's: the next resample is 100 ticks
+        // away (and waits out the hold this rejoin may start).
+        self.frames_since_resample = 0;
         info!(
             idle_ms = u64::try_from(idle.as_millis()).unwrap_or(u64::MAX),
             moved_us = to_us(moved),

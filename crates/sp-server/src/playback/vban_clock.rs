@@ -41,7 +41,7 @@ pub const VBAN_SLEW_PPM: i64 = 50;
 /// wall catching up two epochs at once — is taken at once: slewed at 50 ppm
 /// it would keep VBAN's clock off the program for hours (the queue would
 /// drop), and VBAN already missed that gap.
-pub const VBAN_SLEW_MAX_100NS: i64 = 15_000_000;
+pub const VBAN_SLEW_MAX_100NS: i64 = 363_334;
 
 /// VBAN's clock policy at a fleet date step (#224 part 2): SlewRemainder.
 ///
@@ -133,7 +133,7 @@ impl WallVbanClock {
         if shift.moved_100ns == self.moved_seen {
             return;
         }
-        let jump = shift.last_jump_100ns;
+        let jump = shift.moved_100ns - self.moved_seen;
         self.moved_seen = shift.moved_100ns;
         let line = self.wall.line_100ns();
         if let Some(slew) = self.slew.as_mut()
