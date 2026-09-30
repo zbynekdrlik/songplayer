@@ -279,7 +279,11 @@ async fn the_new_owner_s_on_re_syncs_the_wall_s_line() {
     );
     assert!(subtitle_lines(&cmds).is_empty(), "{cmds:?}");
     let later = Some("Later - Artist".to_string());
-    assert_eq!(resyncs(&cmds), [later.clone()], "9's title: {cmds:?}");
+    assert_eq!(
+        resyncs(&cmds),
+        std::slice::from_ref(&later),
+        "9's title: {cmds:?}"
+    );
     let bodies = pushes(&stage, 2).await;
     assert!(
         is_cleared(&bodies[1]),
