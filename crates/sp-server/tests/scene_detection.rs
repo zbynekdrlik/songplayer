@@ -23,6 +23,20 @@ use sp_server::db;
 use sp_server::obs;
 use tokio::sync::{RwLock, broadcast, watch};
 
+/// Wait (at most 10 s) until the client's initial rebuild maps
+/// `sp-fast_video` → playlist 7. A fixed 250 ms sleep raced that rebuild
+/// under tarpaulin's ptrace (Coverage job, run 36739313323: three tests saw
+/// an empty map). On timeout it returns and the caller's assertion reports
+/// the map it found.
+async fn wait_for_initial_map(ndi_sources: &obs::NdiSourceMap) {
+    for _ in 0..200 {
+        if ndi_sources.read().await.get("sp-fast_video") == Some(&7) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// Wait (at most `within`) until the client publishes cg OBS's program as
 /// `scene`, connected and looked up (no failed lookup); its playlists. Every
 /// published snapshot is seen (`changed`), and the current one first.
@@ -120,8 +134,8 @@ async fn scene_change_to_sp_fast_marks_playlist_7_active() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    // Give the rebuild + initial GetCurrentProgramScene a moment to run.
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    // Wait for the initial rebuild (bounded; a fixed sleep raced it).
+    wait_for_initial_map(&ndi_sources).await;
 
     // 5. Verify the NDI source map was populated from the DB + OBS inputs.
     {
@@ -310,7 +324,7 @@ async fn rebuild_failure_does_not_wipe_ndi_source_map() {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    wait_for_initial_map(&ndi_sources).await;
 
     // Precondition: map is populated by the initial rebuild.
     {
@@ -452,7 +466,7 @@ async fn event_during_pending_request_must_be_delivered_fast() {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    wait_for_initial_map(&ndi_sources).await;
 
     // Precondition: ndi_sources must be populated by the initial rebuild.
     {
