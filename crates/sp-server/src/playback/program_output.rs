@@ -514,3 +514,6 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
 #[cfg(test)]
 #[path = "program_output_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "program_output_tests_order.rs"]
+mod tests_order;
