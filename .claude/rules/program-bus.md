@@ -279,6 +279,12 @@ nothing).
     (until B4 step 6) and keeps its per-playlist karaoke WS, but writes none
     of them; its dispatch forgets what it last sent, so the moment it owns
     the wall its current line goes out;
+  - the owner can change through the new owner's ON alone (a cut to B
+    while cg OBS still shows A): the ON of the playlist that owns the wall
+    (`OnAirPlaylists::owner`) re-syncs the wall's line at once
+    (`scene_off::resync_wall_lines`, the line step `wall_after_scene_off`
+    also runs: the owner's line, or one `HideSubtitles`), so the old owner's
+    last line never stays frozen (review round 1);
   - with NO owner (nothing on air, or before the authority's first value:
     the engine's unit tests) nothing is restricted, as before: a playlist
     whose OFF is still queued writes until its OFF re-syncs the wall, and a

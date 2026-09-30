@@ -113,10 +113,14 @@ answered correctly), and nothing ever ran the real providers.
     its move and recorded on every row that recorded it
     (`SongColumns::record`, the repair's statement). A row not downloaded
     yet takes the title and records no files. A song-only or artist-only
-    PATCH spreads the patched row's WHOLE title. Pinned by
+    PATCH spreads the patched row's WHOLE title — but never an EMPTY song
+    (review round 1: `song = COALESCE(NULLIF(?, ''), song)`): an
+    artist-only PATCH of a row not downloaded yet leaves every row's song,
+    and each row's files are named after that row's own title. Pinned by
     `a_title_correction_applies_to_every_row_of_the_video` (the real
     router: two rows sharing files, a row not downloaded, another video
-    untouched, the stem following the audio).
+    untouched, the stem following the audio) and
+    `an_artist_only_correction_of_a_row_with_no_song_keeps_the_songs`.
   - **A download keeps it** (item 2): `DownloadWorker::process_next` takes
     the title from `metadata::manual::download_title`, which keeps a
     corrected video's title (a row of that `youtube_id` with `'manual'` and
@@ -124,7 +128,13 @@ answered correctly), and nothing ever ran the real providers.
     row records `'manual'` again. That covers a re-download (a row reset to
     `normalized = 0` by the startup 48 kHz reset, `startup.rs`) and the
     first download of the same video added to another playlist later.
-    `process_next` needs yt-dlp, so its call is pinned by its source
+    The title is read before the download and the loudnorm (about a
+    minute), so a correction can land in between (review round 1): the
+    worker records through `metadata::manual::record_download`, which
+    reads the video's correction again under `cache::SONG_FILES` and, when
+    there is one, renames the fresh pair after it and records it
+    (`a_correction_made_during_the_download_names_the_fresh_pair`).
+    `process_next` needs yt-dlp, so its calls are pinned by its source
     (`manual_tests.rs::the_download_worker_takes_the_title_from_download_title`).
 - `POST /api/v1/metadata/probe {youtube_id, title}` runs EACH provider on its
   own (concurrently, each bounded by `PROBE_TIMEOUT` = 180 s, below the spec's
