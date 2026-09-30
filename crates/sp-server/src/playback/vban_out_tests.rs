@@ -167,6 +167,54 @@ fn a_program_frame_moves_in_and_anything_else_is_substituted_silence() {
 }
 
 #[test]
+fn a_program_frame_is_copied_for_vban_and_anything_else_is_substituted_silence() {
+    // #210: the block goes to VBAN before the pair's NDI submit, which still
+    // borrows the frames, so VBAN gets a copy of the same samples.
+    let data: Vec<f32> = (0..3200).map(|i| i as f32 / 3200.0).collect();
+    let frames = vec![frame(data.clone(), 2, 48_000)];
+    let b = VbanBlock::copied(7, &frames);
+    assert_eq!(
+        b,
+        VbanBlock {
+            due_100ns: 7,
+            samples: Some(data),
+            substituted: false,
+        },
+        "one program block is kept, on its boundary"
+    );
+    assert_ne!(
+        b.samples.as_ref().map(|s| s.as_ptr()),
+        Some(frames[0].data.as_ptr()),
+        "a copy: the pair keeps its own block for the NDI submit"
+    );
+
+    let cases = [
+        (vec![], "no frame"),
+        (
+            vec![
+                frame(vec![0.5; 3200], 2, 48_000),
+                frame(vec![0.5; 3200], 2, 48_000),
+            ],
+            "two frames",
+        ),
+        (vec![frame(vec![0.5; 3200], 1, 48_000)], "mono"),
+        (vec![frame(vec![0.5; 3200], 2, 44_100)], "44.1 kHz"),
+        (vec![frame(vec![0.5; 3198], 2, 48_000)], "short"),
+    ];
+    for (frames, what) in cases {
+        assert_eq!(
+            VbanBlock::copied(9, &frames),
+            VbanBlock {
+                due_100ns: 9,
+                samples: None,
+                substituted: true,
+            },
+            "{what}"
+        );
+    }
+}
+
+#[test]
 fn an_overflow_drops_the_oldest_block_and_counts_it() {
     let out = VbanOut::new();
     for due in 1..=10 {

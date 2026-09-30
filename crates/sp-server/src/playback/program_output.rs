@@ -17,9 +17,11 @@
 //! runs AFTER the #196 startup senders, so the per-playlist name→port order is
 //! unchanged.
 //!
-//! #210: every submitted pair's audio block (forwarded or the standby silence)
-//! is handed to the program's VBAN output (`vban_out.rs`) right after its NDI
-//! submit, and `start_program` also starts the VBAN thread + its settings task.
+//! #210: every submitted pair's audio block (forwarded, mixed, or the standby
+//! silence) is handed to the program's VBAN output (`vban_out.rs`) BEFORE its
+//! NDI submit — a copy, the NDI submit still borrows the pair — so FOH audio
+//! never waits for the video side (a slow NDI send, a mixed picture), and
+//! `start_program` also starts the VBAN thread + its settings task.
 //!
 //! #215: a [`ProgramJob::Mix`] (one boundary inside a transition window) is
 //! crossfaded here, on the sender thread: the audio per sample with the
@@ -127,6 +129,12 @@ fn log_mix_run(run: &MixRun) {
     }
 }
 
+/// #215: the layout a window boundary's picture is painted in: the incoming
+/// side's, else the outgoing side's; `None` when neither side is here.
+fn present_layout(mix: &MixJob) -> Option<Layout> {
+    Some(Layout::of(mix.to.as_ref().or(mix.from.as_ref())?))
+}
+
 impl<B: NdiBackend> ProgramOutput<B> {
     /// Wrap the program's NDI sender. The standby black is `standby_w` ×
     /// `standby_h` NV12 ([`PROGRAM_STANDBY_W`] × [`PROGRAM_STANDBY_H`] in
@@ -168,7 +176,9 @@ impl<B: NdiBackend> ProgramOutput<B> {
         }
     }
 
-    /// Submit one program boundary and return its stamp. A forwarded source
+    /// Submit one program boundary and return its stamp. Its audio block goes
+    /// to VBAN FIRST, then the NDI pair (#210): FOH audio never waits for
+    /// the video side (the NDI submit, a mixed picture). A forwarded source
     /// job keeps its own stamps. What the program makes itself (a standby
     /// pair, a mixed block) is stamped on its boundary, the audio too: the
     /// block belongs to that boundary's timeline instant, never the submit
@@ -182,6 +192,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             ProgramJob::Mix(mix) => self.submit_mix(mix),
             ProgramJob::Source(job) => {
                 let stamp = job.video_tc_100ns;
+                self.feed_vban(VbanBlock::copied(stamp, &job.audio));
                 self.submitter.submit_frame_at_boundary_owned(
                     job.width,
                     job.height,
@@ -191,10 +202,10 @@ impl<B: NdiBackend> ProgramOutput<B> {
                     stamp,
                     job.audio_tc_100ns,
                 );
-                self.feed_vban(VbanBlock::from_frames(stamp, job.audio));
                 stamp
             }
             ProgramJob::Standby { stamp_100ns } => {
+                self.feed_vban(VbanBlock::silence(stamp_100ns));
                 let (w, h) = (self.standby_w, self.standby_h);
                 let black = self.submitter.standby_black_nv12(w, h);
                 self.submitter.submit_frame_at_boundary_owned(
@@ -206,25 +217,20 @@ impl<B: NdiBackend> ProgramOutput<B> {
                     stamp_100ns,
                     stamp_100ns,
                 );
-                self.feed_vban(VbanBlock::silence(stamp_100ns));
                 stamp_100ns
             }
         }
     }
 
-    /// #215: one window boundary: the crossfaded audio block, then the mixed
-    /// picture, both stamped on the window boundary (#224: the program's own
-    /// block). A mix with neither side (the bus never queues one) goes out as
-    /// the standby pair.
+    /// #215: one window boundary: the crossfaded audio block, to VBAN first
+    /// (#210), then the mixed picture and the NDI pair, both stamped on the
+    /// window boundary (#224: the program's own block). A mix with neither
+    /// side (the bus never queues one) goes out as the standby pair.
     fn submit_mix(&mut self, mix: MixJob) -> i64 {
         let stamp = mix.stamp_100ns;
-        let started = Instant::now();
-        let Some((layout, video)) = self.mix_picture(&mix) else {
+        let Some(present) = present_layout(&mix) else {
             return self.submit(ProgramJob::Standby { stamp_100ns: stamp });
         };
-        let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        self.mix_run.boundaries += 1;
-        self.mix_run.max_picture_us = self.mix_run.max_picture_us.max(picture_us);
         let (first, total) = mix.sample_span(self.spc);
         let format = AudioFormat {
             frames: self.spc,
@@ -238,6 +244,12 @@ impl<B: NdiBackend> ProgramOutput<B> {
             total,
             format,
         )];
+        self.feed_vban(VbanBlock::copied(stamp, &audio));
+        let started = Instant::now();
+        let (layout, video) = self.paint_mix(&mix, present);
+        let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        self.mix_run.boundaries += 1;
+        self.mix_run.max_picture_us = self.mix_run.max_picture_us.max(picture_us);
         self.submitter.submit_frame_at_boundary_owned(
             layout.width,
             layout.height,
@@ -247,19 +259,25 @@ impl<B: NdiBackend> ProgramOutput<B> {
             stamp,
             stamp,
         );
-        self.feed_vban(VbanBlock::from_frames(stamp, audio));
         stamp
     }
 
-    /// #215: the picture of a window boundary, in the incoming side's layout:
-    /// both pictures blended into a pooled buffer, the outgoing one fitted
-    /// into that layout as it is blended when the two differ ([`FitPlan`]).
-    /// One pass, in `mix_bands` row bands, straight into the pooled buffer
-    /// (`mix_nv12_into`, #215 addendum 3: no fitted scratch). A missing side
-    /// is the NV12 black in the present side's exact layout
-    /// (`black_nv12_into`). `None` when neither side is here.
+    /// #215: the picture of a window boundary ([`paint_mix`](Self::paint_mix)),
+    /// `None` when neither side is here — the tests' view of it.
+    #[cfg(test)]
     pub(crate) fn mix_picture(&mut self, mix: &MixJob) -> Option<(Layout, SharedFrame)> {
-        let present = Layout::of(mix.to.as_ref().or(mix.from.as_ref())?);
+        let present = present_layout(mix)?;
+        Some(self.paint_mix(mix, present))
+    }
+
+    /// #215: the picture of a window boundary, in the incoming side's layout
+    /// (`present`, [`present_layout`]): both pictures blended into a pooled
+    /// buffer, the outgoing one fitted into that layout as it is blended
+    /// when the two differ ([`FitPlan`]). One pass, in `mix_bands` row
+    /// bands, straight into the pooled buffer (`mix_nv12_into`, #215
+    /// addendum 3: no fitted scratch). A missing side is the NV12 black in
+    /// the present side's exact layout (`black_nv12_into`).
+    fn paint_mix(&mut self, mix: &MixJob, present: Layout) -> (Layout, SharedFrame) {
         let standby = || {
             let mut black = sp_decoder::frame_pool::take(present.len);
             black_nv12_into(present, &mut black);
@@ -298,7 +316,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             self.fit = Some(plan);
             self.mix_run.fitted += 1;
         }
-        Some((to.0, SharedFrame::new(out)))
+        (to.0, SharedFrame::new(out))
     }
 
     /// End a run of mixed boundaries: log it once and start the next.
