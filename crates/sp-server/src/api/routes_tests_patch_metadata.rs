@@ -187,3 +187,171 @@ async fn patch_video_song_only_leaves_artist_untouched() {
         "artist must survive a song-only PATCH"
     );
 }
+
+// ── #136: an operator's title correction is final ──────────────────────────
+
+/// A provider that would name the video differently — what the metadata repair
+/// would write over a correction it is allowed to reach.
+struct NamesAnotherSong;
+
+#[async_trait::async_trait]
+impl crate::metadata::MetadataProvider for NamesAnotherSong {
+    async fn extract(
+        &self,
+        _video_id: &str,
+        _title: &str,
+    ) -> Result<sp_core::metadata::VideoMetadata, crate::metadata::MetadataError> {
+        Ok(sp_core::metadata::VideoMetadata {
+            song: "Another Song".into(),
+            artist: "Another Artist".into(),
+            source: sp_core::metadata::MetadataSource::Gemini,
+            gemini_failed: false,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "claude"
+    }
+}
+
+/// A parser-named row (`gemini_failed = 1`, `metadata_source = 'regex'`) with
+/// its video + audio under the parser's `_gf` name in `dir`. Returns the two
+/// file paths.
+async fn seed_parser_row(state: &crate::AppState, id: i64, dir: &std::path::Path) -> [String; 2] {
+    let base = format!("Old Song_Old Artist_PATCHED{id:04}_normalized_gf");
+    let video = dir.join(format!("{base}_video.mp4"));
+    let audio = dir.join(format!("{base}_audio.flac"));
+    std::fs::write(&video, b"v").unwrap();
+    std::fs::write(&audio, b"a").unwrap();
+    let files = [
+        video.to_string_lossy().into_owned(),
+        audio.to_string_lossy().into_owned(),
+    ];
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+        .execute(&state.pool)
+        .await
+        .ok();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, title, song, artist, gemini_failed, \
+                             normalized, metadata_source, file_path, audio_file_path) \
+         VALUES (?, 1, ?, 'Break! - planetboom (Live)', 'Old Song', 'Old Artist', 1, 1, \
+                 'regex', ?, ?)",
+    )
+    .bind(id)
+    .bind(format!("PATCHED{id:04}"))
+    .bind(&files[0])
+    .bind(&files[1])
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    files
+}
+
+/// `(song, artist, gemini_failed, metadata_source, file_path, audio_file_path)`.
+async fn metadata_row(
+    pool: &sqlx::SqlitePool,
+    id: i64,
+) -> (String, String, i64, Option<String>, String, String) {
+    sqlx::query_as(
+        "SELECT song, artist, gemini_failed, metadata_source, file_path, audio_file_path \
+         FROM videos WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// #136 (release 0.69.0 review 🟡 3): the operator corrects a parser title
+/// on the dashboard, then the metadata repair runs (5 s after start, then
+/// every 30 min). The correction, and the files it names, must survive: the
+/// row left the repair queue when it was patched.
+#[tokio::test]
+async fn a_patched_title_survives_the_metadata_repair() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state().await;
+    let files = seed_parser_row(&state, 21, dir.path()).await;
+    let pool = state.pool.clone();
+
+    let status = patch(
+        state,
+        21,
+        serde_json::json!({ "song": "Break!", "artist": "planetboom" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let chain = std::sync::Arc::new(crate::metadata::ProviderChain::new(vec![Box::new(
+        NamesAnotherSong,
+    )]));
+    let mut repair =
+        crate::reprocess::ReprocessWorker::new(pool.clone(), chain, dir.path().to_path_buf());
+    assert_eq!(
+        repair.process_all().await.unwrap(),
+        0,
+        "the repair must not touch a row the operator corrected"
+    );
+
+    let (song, artist, gemini_failed, source, file_path, audio_file_path) =
+        metadata_row(&pool, 21).await;
+    assert_eq!((song.as_str(), artist.as_str()), ("Break!", "planetboom"));
+    assert_eq!(
+        gemini_failed, 0,
+        "a corrected row is no longer parser-named"
+    );
+    assert_eq!(source.as_deref(), Some("manual"));
+    assert_eq!(
+        [file_path, audio_file_path],
+        files,
+        "the files keep their names"
+    );
+    for f in &files {
+        assert!(std::path::Path::new(f).exists(), "{f} must not be moved");
+    }
+    assert_eq!(
+        crate::metadata::health::failed_videos(&pool).await.unwrap(),
+        0,
+        "status.metadata no longer counts the corrected row"
+    );
+}
+
+/// An artist-only correction is a correction too.
+#[tokio::test]
+async fn an_artist_only_patch_marks_the_metadata_manual() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state().await;
+    seed_parser_row(&state, 22, dir.path()).await;
+    let pool = state.pool.clone();
+
+    let status = patch(state, 22, serde_json::json!({ "artist": "planetboom" })).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (song, artist, gemini_failed, source, _, _) = metadata_row(&pool, 22).await;
+    assert_eq!((song.as_str(), artist.as_str()), ("Old Song", "planetboom"));
+    assert_eq!((gemini_failed, source.as_deref()), (0, Some("manual")));
+}
+
+/// Pin: a PATCH of only the other fields (the EN suppress flag, the lyrics
+/// override) is no title correction — the row stays in the repair queue.
+#[tokio::test]
+async fn a_patch_without_song_or_artist_leaves_the_repair_queue_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state().await;
+    seed_parser_row(&state, 23, dir.path()).await;
+    let pool = state.pool.clone();
+
+    let status = patch(
+        state,
+        23,
+        serde_json::json!({ "suppress_resolume_en": true, "lyrics_override_text": "a\nb" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (_, _, gemini_failed, source, _, _) = metadata_row(&pool, 23).await;
+    assert_eq!((gemini_failed, source.as_deref()), (1, Some("regex")));
+    assert_eq!(
+        crate::metadata::health::failed_videos(&pool).await.unwrap(),
+        1
+    );
+}

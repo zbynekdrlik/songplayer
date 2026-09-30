@@ -105,3 +105,31 @@ async fn failed_videos_counts_exactly_the_repair_queue() {
 
     assert_eq!(failed_videos(&pool).await.unwrap(), 2);
 }
+
+/// #136: a row whose title the operator corrected (`metadata_source =
+/// 'manual'`) is never in the repair queue, even with `gemini_failed = 1`
+/// left over: the repair would write over the correction.
+#[tokio::test]
+async fn a_manual_row_is_not_in_the_repair_queue() {
+    let pool = db::create_memory_pool().await.unwrap();
+    db::run_migrations(&pool).await.unwrap();
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'P', 'url')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    // (youtube_id, metadata_source): parser-named, never named, and corrected.
+    for (yt, source) in [("b1", Some("regex")), ("b2", None), ("b3", Some("manual"))] {
+        sqlx::query(
+            "INSERT INTO videos (playlist_id, youtube_id, title, gemini_failed, normalized, \
+                                 metadata_source)
+             VALUES (1, ?, 't', 1, 1, ?)",
+        )
+        .bind(yt)
+        .bind(source)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(failed_videos(&pool).await.unwrap(), 2);
+}
