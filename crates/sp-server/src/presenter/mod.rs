@@ -49,21 +49,20 @@ pub async fn build_from_settings(
     }
 }
 
-/// #222: the payload to push for `lines`, or `None` when its current line
-/// was already pushed in BOTH languages (`last_seen` = its EN and SK). A
-/// Slovak line that arrives later under the same English one is pushed.
-/// Both languages always go out (Presenter's stage layout picks what to
-/// show); a line with no translation sends "".
+/// #222: the payload to push for `lines`, or `None` when exactly these lines
+/// were pushed last (`last_seen`): the dedup key is the WHOLE payload,
+/// current + next, EN + SK. A Slovak line that arrives later under the same
+/// English one is pushed, and so is a repeated sentence whose next line
+/// changed ("What a God, what a God." ×4: the 4th repeat carries the line
+/// after the repeats). Both languages always go out (Presenter's stage
+/// layout picks what to show); a line with no translation sends "".
 pub fn payload_for(
     last_seen: Option<&PushedLine>,
     lines: &PresenterLines,
     song: &str,
     artist: &str,
 ) -> Option<PresenterPayload> {
-    let pushed = last_seen.is_some_and(|seen| {
-        seen.current_en == lines.current_en && seen.current_sk == lines.current_sk
-    });
-    if pushed {
+    if last_seen == Some(lines) {
         return None;
     }
     let current_song = if artist.is_empty() {
@@ -87,9 +86,8 @@ pub fn payload_for(
 
 /// Line-change push helper used by the playback engine hot path. Spawns a
 /// fire-and-forget `tokio::spawn(client.push(...))` when `payload_for` has a
-/// payload (the current line changed in EN or SK), and returns the new
-/// `last_seen` for the caller to persist. No-op when `client` is None (push
-/// disabled).
+/// payload (any of the four lines changed), and returns the new `last_seen`
+/// for the caller to persist. No-op when `client` is None (push disabled).
 #[cfg_attr(test, mutants::skip)] // spawn glue; `payload_for` is the tested decision
 pub fn maybe_push_line(
     client: Option<&Arc<PresenterClient>>,
