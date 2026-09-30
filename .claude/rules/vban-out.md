@@ -31,9 +31,9 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
   a mixed picture — delays that boundary's FOH block. The sender is one
   thread: a video side longer than a slot still delays the NEXT boundary's
   take, which shows as `ready_late_us` (below). Before the fix the push came
-  after the NDI submit, and a late
-  submit showed on dev1 as a 20–35 ms gap followed by a 6–8 packet burst
-  (#210 findings 5907620763 / 5907883948). Pinned by
+  after the NDI submit, and a late submit showed on dev1 as a 20–35 ms gap
+  followed by a 6–8 packet burst (#210 findings 5907620763 / 5907883948).
+  Pinned by
   `program_output_tests_order.rs`: the NDI backend holds its first send
   behind a gate, and VBAN must already have the block (all three kinds).
   Keep that order in any new submit path.

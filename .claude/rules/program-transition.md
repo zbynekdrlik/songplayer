@@ -251,8 +251,9 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     under the loader lock (NDI, Media Foundation, WebView2). If the target is
     missed, time the spawns separately before touching the kernel (review
     round 2).
-  - `max_picture_us` is unchanged: the wall time of `mix_picture` (all
-    bands) on the `SP-program` thread. Box run 3 target: ≤ 15 000 at
+  - `max_picture_us` is unchanged: the wall time of `paint_mix` (all
+    bands) on the `SP-program` thread (#210: `mix_picture` is only the
+    tests' `Option` view of it now). Box run 3 target: ≤ 15 000 at
     2560×1440 with `fitted=9` and 0 late drops, for a 300 ms fade and a 1 s
     fade (30 boundaries).
 - `mix_audio_block` collects its samples instead of pre-sizing the `Vec`: a
