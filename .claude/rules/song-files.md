@@ -109,7 +109,9 @@ Design record: #136 comment 5894034820.
     The WARN names the recorded path, and a dub also records it in
     `dub_error`: the Dabing tooltip (sp-ui `dabing_list.rs::chain_detail`)
     shows a non-empty `dub_error` after the chain path for a chain that is
-    not failed too (e2e/dabing.spec.ts), and `mark_dub_ready` clears it.
+    not failed too (e2e/dabing.spec.ts). The next re-read that finds the audio
+    clears the note (`clear_missing_note`), and a (re-)request starts with
+    `dub_error = NULL` (`set_dub_requested`).
     Nothing re-downloads a lost audio file (a row stays `normalized = 1`).
   - A rename can still land WHILE the job runs; the re-link below covers it.
   - Pinned by `song_input_tests.rs` (structural: slot → re-read → job →

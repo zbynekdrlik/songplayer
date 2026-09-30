@@ -94,7 +94,10 @@ answered correctly), and nothing ever ran the real providers.
     `a_patched_title_survives_the_metadata_repair` (the real router, then
     `ReprocessWorker::process_all`) and
     `a_correction_made_while_the_repair_batch_runs_survives` (the provider
-    mock makes the real PATCH during its call); and
+    mock makes the real PATCH during its call),
+    `a_title_patch_waits_for_the_song_files_lock` and
+    `a_patch_of_other_fields_does_not_wait_for_the_song_files_lock` (the
+    lock and its `corrects_title` gate); and
     `health_tests.rs::a_manual_row_is_not_in_the_repair_queue`. Nothing reads
   `metadata_source` back into `MetadataSource`, so `'manual'` needs no enum
   variant. Its limits (review round 1):

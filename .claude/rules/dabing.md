@@ -501,7 +501,9 @@ song-lyrics pipeline. `LYRICS_PIPELINE_VERSION` is untouched.
   reads `chyba: <dub_error>`; any other chain with a non-empty `dub_error`
   reads `<path> (teraz: <step>) — <dub_error>` (#136: the dub worker records
   a missing audio file there and waits at `synth` with no penalty,
-  `song_input.rs`).
+  `song_input.rs`). So nothing may leave a stale `dub_error` on a live chain:
+  the re-read that finds the audio clears that note, `set_dub_requested(true)`
+  clears any earlier one, and `mark_dub_synth` / `mark_dub_ready` clear it.
 - `sp_core::mixer_model::dub_channel_labels(has_stems)` +
   `components/dub_mixer.rs`: WITHOUT stems only 2 faders (`originál` / `dabing`,
   ambient hidden — the 2-stream over-original mix); WITH stems the full 3-fader
