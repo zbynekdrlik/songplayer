@@ -238,8 +238,12 @@ impl WallClock {
     ///
     /// [`now_100ns`]: Self::now_100ns
     pub fn line_100ns(&self) -> i64 {
-        let line = self.anchor.line_at(self.source.now_monotonic());
-        line - shift_100ns(self.shift.slots)
+        self.line_at(self.source.now_monotonic())
+    }
+
+    /// The timeline's line at `at` ([`line_100ns`](Self::line_100ns)).
+    fn line_at(&self, at: Instant) -> i64 {
+        self.anchor.line_at(at) - shift_100ns(self.shift.slots)
     }
 
     /// Advance the frame counter, re-anchor the monotonic-to-UTC mapping every
@@ -254,6 +258,10 @@ impl WallClock {
         let now = self.source.now_monotonic();
         let idle = now.saturating_duration_since(self.last_tick);
         self.last_tick = now;
+        // What a regrid or a rejoin in this tick moves is the LINE's net
+        // movement at `now` (review r3): a resample's armed 1 ms and a
+        // rejoin's hold that a follow then re-anchors through included.
+        let (regrids, line_before) = (self.shift.regrids, self.line_at(now));
         if idle > WALL_REJOIN_IDLE {
             self.rejoin(idle);
         }
@@ -267,6 +275,9 @@ impl WallClock {
             self.frames_since_resample = 0;
         }
         self.probe_step();
+        if self.shift.regrids != regrids {
+            self.shift.moved_100ns += self.line_at(now) - line_before;
+        }
         self.fleet.publish(FleetLine {
             at: now,
             anchor: self.anchor,
@@ -301,7 +312,7 @@ impl WallClock {
             regrids: self.shift.regrids + 1,
             last_remainder_100ns: self.shift.last_remainder_100ns,
             last_jump_100ns: moved,
-            moved_100ns: self.shift.moved_100ns + moved,
+            moved_100ns: self.shift.moved_100ns,
         };
         self.pending = None; // armed before the gap: nothing left to confirm
         self.suspect_since = None;
@@ -434,7 +445,7 @@ impl WallClock {
             regrids: self.shift.regrids + 1,
             last_remainder_100ns: followed.total_100ns - moved,
             last_jump_100ns: timeline,
-            moved_100ns: self.shift.moved_100ns + timeline,
+            moved_100ns: self.shift.moved_100ns,
         };
         self.anchor = Anchor {
             instant,

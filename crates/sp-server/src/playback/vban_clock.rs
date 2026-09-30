@@ -32,7 +32,7 @@ use crate::playback::wallclock::{WallClock, to_us};
 /// 41 667 / 41 668 × 100 ns packet spacing and the 100-ns rounding of each
 /// wait, so every packet interval stays within 4.1667 ms ± 100 ppm (VB-Matrix
 /// at FOH runs an ASRC that follows the arrival rate).
-pub const VBAN_SLEW_PPM: i64 = 50;
+pub const VBAN_SLEW_PPM: i64 = 40;
 
 /// The largest line movement VBAN's clock owes (100 ns): one slot (a single
 /// epoch's remainder) plus the 3 ms residue
@@ -80,6 +80,7 @@ impl RemainderSlew {
     /// not owed (the clock takes it at once): returns whether it was owed.
     pub fn owe(&mut self, jump_100ns: i64, t_100ns: i64) -> bool {
         if jump_100ns.abs() > VBAN_SLEW_MAX_100NS {
+            self.since_100ns += jump_100ns;
             return false;
         }
         let before = self.owed_at(t_100ns - jump_100ns);
@@ -149,6 +150,7 @@ impl WallVbanClock {
         if let Some(slew) = self.slew.as_mut()
             && !slew.owe(jump, line)
         {
+            self.taken_at_once += 1;
             warn!(
                 jump_us = to_us(jump),
                 "vban clock: the timeline moved more than a slot at once (a rejoin after a stall, or two date steps) — taken at once, not slewed (#224)"
