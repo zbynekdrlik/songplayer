@@ -21,7 +21,7 @@
 use std::path::Path;
 
 use sqlx::SqlitePool;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::ProviderChain;
 use crate::downloader::cache::{SongFiles, rename_song_files};
@@ -82,6 +82,45 @@ pub async fn download_title(
         source: meta.source.as_str(),
         gemini_failed: meta.gemini_failed,
     }
+}
+
+/// #136 (review round 1): record a finished download of row `video_db_id` of
+/// video `youtube_id` — the `title` it was named after and its fresh pair
+/// `video` / `audio` in `cache_dir` — through `mark_video_processed_pair`,
+/// under `cache::SONG_FILES` (no rename or re-link interleaves).
+pub async fn record_download(
+    pool: &SqlitePool,
+    cache_dir: &Path,
+    video_db_id: i64,
+    youtube_id: &str,
+    title: &DownloadTitle,
+    video: &Path,
+    audio: &Path,
+) -> Result<(), sqlx::Error> {
+    let _files = crate::downloader::cache::SONG_FILES.lock().await;
+    let fresh = SongFiles {
+        video: Some(video.to_path_buf()),
+        audio: Some(audio.to_path_buf()),
+    };
+    debug!(
+        video_db_id,
+        youtube_id,
+        cache_dir = %cache_dir.display(),
+        "metadata: recording a download under the title it was named after"
+    );
+    let (title, files) = (title.clone(), fresh);
+    let columns = files.columns();
+    crate::db::models::mark_video_processed_pair(
+        pool,
+        video_db_id,
+        &title.song,
+        &title.artist,
+        title.source,
+        title.gemini_failed,
+        &columns.video,
+        columns.audio.as_deref().unwrap_or_default(),
+    )
+    .await
 }
 
 /// Video `youtube_id`'s `(song, artist)` when a row of it is an operator's

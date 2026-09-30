@@ -322,15 +322,14 @@ impl DownloadWorker {
         // Drop the audio temp.
         let _ = tokio::fs::remove_file(&audio_temp).await;
 
-        if let Err(e) = crate::db::models::mark_video_processed_pair(
+        if let Err(e) = crate::metadata::manual::record_download(
             &self.pool,
+            &self.cache_dir,
             row.id,
-            &meta.song,
-            &meta.artist,
-            meta.source,
-            meta.gemini_failed,
-            video_final.to_string_lossy().as_ref(),
-            audio_final.to_string_lossy().as_ref(),
+            &row.youtube_id,
+            &meta,
+            &video_final,
+            &audio_final,
         )
         .await
         {
