@@ -60,7 +60,11 @@ use crate::playback::wallclock::{Anchor, AnchorSample, WALL_REJOIN_IDLE, to_us, 
 /// period) — under 3 ms. A reading within it of a run of registered epochs is
 /// that run ([`adopt`]); a step within it of nothing registered is never an
 /// epoch (the fuzz after review round 1: at the probe's 2 ms two walls with
-/// opposite outliers split K).
+/// opposite outliers split K). Not covered: a wall anchored on its OWN wide
+/// sample (no fresh line to join: the first wall of the process, or a rejoin
+/// with every wall idle) whose 8 attempts were all preempted over 6 ms. Its
+/// first probe then registers the anchor error as an epoch, which every
+/// other wall (joining its line) adopts, so K stays one fleet-wide value.
 pub const STEP_RESIDUE_100NS: i64 = 30_000;
 
 /// D(K) = ⌈K·P⌉ in 100 ns: how far a timeline K slots behind its labels sits
@@ -238,7 +242,11 @@ impl FleetShift {
     /// registration moves K_F): where a wall with no fresh line to join
     /// starts ([`join`](Self::join)).
     pub fn current(&self) -> WallShift {
-        let registry = self.lock();
+        self.current_of(&self.lock())
+    }
+
+    /// [`current`](Self::current) with the lock already held.
+    fn current_of(&self, registry: &Registry) -> WallShift {
         WallShift {
             slots: self.slots(),
             epochs: registry.epochs.len(),
@@ -275,11 +283,7 @@ impl FleetShift {
                     instant: sample.instant,
                     utc_100ns: sample.utc_100ns,
                 },
-                WallShift {
-                    slots: self.slots(),
-                    epochs: registry.epochs.len(),
-                    ..WallShift::default()
-                },
+                self.current_of(&registry),
             ),
         }
     }
@@ -351,8 +355,9 @@ pub struct WallShift {
     /// r of the last regrid: the step minus its relabel (100 ns). For the
     /// wall that registered the step 0 ≤ r ≤ one slot; a wall that adopted
     /// another wall's N for a reading up to 3 ms off, or applied a step
-    /// under 3 ms on its own, shows that residue too (−3 ms … one slot +
-    /// 3 ms).
+    /// under 3 ms on its own, shows that residue too. A wall adopting several
+    /// epochs at once keeps up to one slot of each: −3 ms … (epochs applied)
+    /// slots + 3 ms.
     pub last_remainder_100ns: i64,
     /// How far the last regrid (or rejoin) moved the timeline's LINE at once
     /// (100 ns, signed): a jump ahead, or a hold of that size when negative.

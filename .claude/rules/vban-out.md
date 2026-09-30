@@ -139,15 +139,21 @@ packets back to back before part 2).
 
 - `WallVbanClock::slewing` (the VBAN thread's clock, `vban_clock.rs` since
   review round 1; `vban_out` re-exports it) reads `line − owed`
-  (`RemainderSlew`, pure): at a regrid of its wall (`WallClock::shift().regrids`
-  moved — a follow, or a rejoin after an idle gap) it OWES the timeline's
-  movement (`last_jump_100ns`, SIGNED: r ahead, or a residue hold under
-  3 ms), so its own reading neither jumps nor stops; the owed amount then
+  (`RemainderSlew`, pure): when its wall's summed line movement
+  (`WallClock::shift().moved_100ns`: every follow and every rejoin after an
+  idle gap) changed, it OWES the change (SIGNED: r ahead, or a residue hold
+  of at most ~4 ms; a rejoin and a follow in ONE tick are both owed, review
+  round 2), so its own reading neither jumps nor stops; the owed amount then
   shrinks toward 0 at `VBAN_SLEW_PPM` = 50 ppm of the elapsed line (100 ns
   per 2 ms: a whole slot is paid in ~11 min). It reads the timeline's LINE
   (`WallClock::line_100ns`), which runs on through a hold. The queue holds
-  up to r more meanwhile (under one block, far under the bound); a hold's
-  packets go out up to its size early, inside the 2-slot send latency.
+  up to r more meanwhile (about one block at most, far under the bound); a
+  hold's packets go out up to its size early, inside the 2-slot send
+  latency. A movement over `VBAN_SLEW_MAX_100NS` (one slot + the 3 ms
+  residue: only a rejoin after a > 10 s VBAN stall, or two epochs at once)
+  is taken at once with one WARN (`vban clock: the timeline moved more than
+  a slot at once`): slewed at 50 ppm it would keep VBAN off the program for
+  hours.
 - 50, not 100: the packet spacing is already 41 666 / 41 667 / 41 668 × 100 ns
   and each wait rounds to 100 ns, so 50 ppm keeps EVERY packet interval
   within 4.1667 ms ± 100 ppm (pinned for +260.3 ms and −19.8 ms, `late_sends`

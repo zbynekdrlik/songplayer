@@ -1036,7 +1036,7 @@ Now:
   wall for `|applied|`, then it runs exactly on the corrected line. That is
   ≤ 1 ms for a bounded resample. Since #224 part 2 a followed DATE step is
   never a hold (a relabel + a forward remainder); a follow holds only a
-  residue under 4 ms: a resample's armed 1 ms that already moved the wall
+  residue of at most ~4 ms: a resample's armed 1 ms that already moved the wall
   further than r, a wall adopting another wall's N for a step it read up to
   3 ms smaller, or a backward step under 3 ms applied on its own (no epoch).
   A wall rejoining after an idle gap may hold its own drift (see "A date
@@ -1046,7 +1046,7 @@ Now:
   10 000 boundaries with a preempted resample every other time, and across a
   followed −1.5 s step).
   - **What a hold does to the paced output** (a bounded resample's ≤ 1 ms, or
-    a follow's residue under 4 ms; the whole-step hold below is the
+    a follow's residue of at most ~4 ms; the whole-step hold below is the
     pre-part-2 behaviour, kept for the mechanism): the pacer's wall
     resumes from the value it froze at. So the next boundary is simply the
     NEXT slot, serviced `|hold|` + one slot later: consecutive stamps, 0
@@ -1059,11 +1059,14 @@ Now:
     which is longer than a ≤ 1.5 s hold. Its step probe DOES run inside its
     hold (#224), and reads 0 there: it measures against the line, not the
     frozen value.
-  - If a resample ever DID land inside a hold (a step longer than one
-    resample period), it would measure the remaining hold as a new backward
-    delta. It would then cut the hold to a 1 ms hold and re-arm, and the step
-    probe of the same tick follows the rest at once (#224; before, the next
-    resample did). The wall stays monotonic.
+  - A resample NEVER runs inside a hold (#224 part 2 review round 2):
+    `WallClock::tick` defers a due resample while `anchor.instant > now`, and
+    it runs on the first tick after the hold (`frames_since_resample` keeps
+    counting past 100). Measured against the frozen wall it would read the
+    rest of the hold as a new backward step, cut it to 1 ms, and the probe
+    would follow — and REGISTER — the rest as a fleet epoch (a rejoin's hold
+    after a long idle gap can outlast the 100 ticks: 12 h at −94 ppm holds
+    4.06 s; `a_resample_waits_out_a_rejoin_hold_longer_than_a_resample_period`).
   - **The boundary wait through a hold: spin budget, then yield (#147
     follow-up, design record 5852618200).**
     - Why it is needed: `pipeline_paced::sleep_to_boundary` coarse-sleeps to
@@ -1108,7 +1111,7 @@ Now:
       - Since #224 part 2 a date step of either sign holds nothing (a
         relabel), so a step logs NONE. Before, a backward 04:00 step (~1.5 s
         hold) logged one per paced thread.
-      - A follow's residue hold (under 4 ms, rare) can outlast the 3 ms
+      - A follow's residue hold (of at most ~4 ms, rare) can outlast the 3 ms
         spin budget like any hold over ~1 ms: then ONE line for that
         boundary, next to the follow's INFO line. Any other line means
         something froze the wall (or the coarse sleep broke its contract):
@@ -1155,11 +1158,11 @@ Now:
   - `wall_anchor_holds_followed` — follows whose TIMELINE movement was a
     hold. Since #224 part 2 a followed date step moves the timeline forward
     by its remainder r (a backward step too), so this counts only residue
-    holds under 4 ms (a resample's armed 1 ms past r, an adopter reading the
+    holds of at most ~4 ms (a resample's armed 1 ms past r, an adopter reading the
     step up to 3 ms smaller, a backward step under 3 ms applied alone); it is
     NOT "the backward steps" any more;
   - `wall_anchor_last_hold_us` — how long the last such hold froze the
-    timeline (under 4 ms);
+    timeline (of at most ~4 ms);
   - `wall_anchor_probes_rejected` (#224) — probes over 2 ms that were rejected
     (a wide probe, or a confirming sample that was wide or read another step);
   - `wall_anchor_detect_to_follow_us` (#224) — from the FIRST over-2 ms probe
@@ -1587,7 +1590,7 @@ submit consumer, `SP-program`, NDI input, VBAN).
   timeline `UTC − D(K_w)` (it passes the timeline anchor to
   `ClockSource::read_100ns`, so the settable test clock, which ignores the
   anchor, never sees a relabel). The timeline moves by `applied − ΔD` through
-  `apply_anchor_step`: r forward, or a residue HOLD under 4 ms — never
+  `apply_anchor_step`: r forward, or a residue HOLD of at most ~4 ms — never
   backward, never S. Every existing call site keeps working unchanged.
   `WallClock::line_100ns` reads the timeline's LINE through a hold (VBAN's
   clock reads it); a regrid's `last_jump_100ns` is signed.
@@ -1620,14 +1623,20 @@ submit consumer, `SP-program`, NDI input, VBAN).
   step itself — else its own sample at the current K (`FleetShift::current`).
   A wall that ticks again more than 10 s after its last tick REJOINS the
   same way (`WallClock::rejoin`: a jump ahead or ONE hold onto the joined
-  line, `regrids` +1 so VBAN owes it, nothing registered, INFO `wallclock:
+  line, `regrids` +1 and `moved_100ns` += it so VBAN owes it, the resample
+  count restarted like a follow's, nothing registered, INFO `wallclock:
   ticked again after over 10 s idle — rejoined the fleet's line`). That is
   the legacy per-frame submit wall between songs: idle 20 min at ±30 ppm it
   drifted ±36 ms, and registering that relabelled every paced sender (33 ms
   future-dated stamps). At ≤ 94 ppm a wall ticking within 10 s drifts under
   1 ms, below the 2 ms threshold; every loop wall ticks at least every
   ~100 ms. The pacers, the submit consumers, the program and VBAN walls
-  always keep a fresh line published.
+  always keep a fresh line published. Known bound (review round 2): a wall
+  anchored on its OWN wide sample (no fresh line — the first wall of the
+  process, or a rejoin with every wall idle — and all 8 attempts preempted
+  over 6 ms) registers that anchor error as an epoch at its first probe;
+  every other wall joins its line and adopts it, so K stays one fleet-wide
+  value (the stamps stay right, the timeline moves once by the remainder).
 - **The wire edge** is `FrameSubmitter::submit_frame_at_boundary_owned`: the
   pair's internal boundary b becomes `floor_boundary(b + D(K_F))`
   (`fleet_shift::wire_stamp_100ns`), K_F read ONCE per pair from the

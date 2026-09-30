@@ -47,13 +47,14 @@ pub const VBAN_SLEW_MAX_100NS: i64 = 363_334;
 ///
 /// A follow relabels the wall (the whole slots N never reach the timeline)
 /// and moves its timeline by the remainder r: a jump ahead, or a hold of a
-/// residue under 4 ms. VBAN reads `line − owed`, where `owed` takes that
-/// movement at the follow (signed), so VBAN's clock neither jumps nor stops,
-/// and then shrinks toward 0 at [`VBAN_SLEW_PPM`] of the elapsed line: every
-/// packet goes out on its cadence, r ends up paid over minutes (the queue
-/// holds up to r more meanwhile, under one block; a hold is sent up to its
-/// size early, inside the 2-slot send latency). Pure: the caller passes the
-/// line readings.
+/// residue of at most ~4 ms. VBAN reads `line − owed`, where `owed` takes
+/// that movement at the follow (signed), so VBAN's clock neither jumps nor
+/// stops, and then shrinks toward 0 at [`VBAN_SLEW_PPM`] of the elapsed line:
+/// every packet goes out on its cadence, r ends up paid over minutes (the
+/// queue holds up to r more meanwhile, at most about one block; a hold is
+/// sent up to its size early, inside the 2-slot send latency). A movement
+/// over [`VBAN_SLEW_MAX_100NS`] is taken at once. Pure: the caller passes
+/// the line readings.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RemainderSlew {
     /// What was owed at `since_100ns` (100 ns, signed: negative = VBAN's

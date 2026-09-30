@@ -87,7 +87,8 @@ pub struct PacingStats {
     pub wall_anchor_last_step_us: i64,
     /// #147: followed steps whose TIMELINE movement was a hold (a subset of
     /// `wall_anchor_steps_followed`), cumulative. Since #224 part 2 a date
-    /// step relabels and never holds; this counts only residues under 4 ms.
+    /// step relabels and never holds; this counts only residues of at most
+    /// ~4 ms.
     pub wall_anchor_holds_followed: u64,
     /// #147: how long (µs) the last such hold froze the pacer's wall (and so
     /// paused the output); 0 before any.
@@ -108,7 +109,8 @@ pub struct PacingStats {
     /// wall followed, the step minus its whole slots (0 ≤ r ≤ one slot for
     /// the wall that registered it; a wall that adopted another wall's N for
     /// a reading up to 3 ms off, or applied a step under 3 ms on its own,
-    /// shows that residue too: −3 ms … one slot + 3 ms).
+    /// shows that residue too; adopting several epochs at once keeps up to
+    /// one slot of each: −3 ms … (epochs applied) slots + 3 ms).
     pub last_regrid_remainder_us: i64,
     /// #147: grid slots nobody serviced across a song change / stop / idle
     /// transition (the pipeline-lifetime submit consumer). Must read 0.

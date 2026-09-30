@@ -28,7 +28,8 @@
 //! takes the whole step S, but [`WallClock::now_100ns`] reads the internal
 //! TIMELINE `UTC − D(K_w)`, and the follow moves K_w by the fleet's N = ⌊S/P⌋
 //! whole slots. So the timeline moves only by the remainder r (0 ≤ r ≤ one
-//! slot, forward; a residue hold under 4 ms at worst): a date step never
+//! slot per epoch applied, forward; a residue hold of at most ~4 ms): a
+//! date step never
 //! holds it by S and never jumps it by S. The wire stamps get the labels back
 //! at the submit edge (`FrameSubmitter`). A wall built now, or ticking again
 //! after more than 10 s idle, JOINS the fleet's line instead of reading its
@@ -246,8 +247,9 @@ impl WallClock {
     /// (#224). The probe runs after the resample, so a step the resample saw
     /// first (1 ms applied and armed) is followed in this same tick. A tick
     /// more than [`WALL_REJOIN_IDLE`] after the last one first rejoins the
-    /// fleet's line ([`rejoin`](Self::rejoin)); every tick then publishes
-    /// this wall's line for the next wall to join (#224 part 2).
+    /// fleet's line ([`rejoin`](Self::rejoin)); a due resample waits out a
+    /// hold in progress; every tick then publishes this wall's line for the
+    /// next wall to join (#224 part 2).
     pub fn tick(&mut self) {
         let now = self.source.now_monotonic();
         let idle = now.saturating_duration_since(self.last_tick);
@@ -408,7 +410,8 @@ impl WallClock {
     /// anchor takes the whole step (`applied_utc` against `wall_utc`, what
     /// the wall reads at `at`); the registry says how many whole slots N the
     /// labels move; the timeline moves only by the rest. That is a step ahead
-    /// of the remainder r, or ONE hold of a residue under 4 ms: when a
+    /// of the remainder r (up to one slot per epoch applied), or ONE hold of
+    /// a residue of at most ~4 ms: when a
     /// resample's armed 1 ms already moved the wall further than r, when the
     /// wall adopted another wall's N for a step it read up to 3 ms smaller,
     /// or when it applied a backward step under 3 ms on its own (no epoch).

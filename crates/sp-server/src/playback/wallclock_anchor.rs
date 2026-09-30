@@ -20,7 +20,7 @@
 //!   backward step. Since #224 part 2 a followed step RELABELS (the wall's
 //!   `regrid`, `fleet_shift.rs`): its whole slots move the labels, and the
 //!   timeline moves only by the remainder — a step ahead, or a hold of a
-//!   residue under 4 ms — never by the step itself, in either direction.
+//!   residue of at most ~4 ms — never by the step itself, in either direction.
 //!
 //! A dantesync date step is followed at the boundary it lands (#224, design
 //! record 5890605448): [`decide_step_probe`] judges one cheap bracketed read
@@ -58,8 +58,9 @@ pub const ANCHOR_MAX_STEP_100NS: i64 = 10_000;
 /// 100-frame resample, far below it, and stays on the ±1 ms resample bound.
 pub const STEP_DETECT_100NS: i64 = 20_000;
 
-/// A wall that ticks again after more than this REJOINS the fleet's line
-/// instead of probing (#224 part 2, `fleet_shift.rs`). At dantesync's ≤ 94 ppm
+/// A wall that ticks again after more than this first REJOINS the fleet's
+/// line (#224 part 2, `fleet_shift.rs`; its probe then runs against the
+/// joined line). At dantesync's ≤ 94 ppm
 /// a wall that ticked within it drifted under 1 ms, below the 2 ms step
 /// threshold; after a longer gap (the legacy submit wall ticks only per
 /// submitted frame) its drift may read as a date step, and registering that
@@ -458,10 +459,10 @@ pub fn wall_at(anchor_instant: Instant, anchor_utc_100ns: i64, at: Instant) -> i
 /// at monotonic instant `at`, where the current wall reads `wall_100ns`.
 ///
 /// * Forward (`applied ≥ 0`): the wall steps ahead by `applied` (≤ 1 ms for a
-///   bounded resample; a followed step's remainder r ≤ one slot, #224 part 2).
+///   bounded resample; a followed step's remainder r, #224 part 2).
 /// * Backward (`applied < 0`): the anchor instant moves `|applied|` into the
 ///   future at the CURRENT wall value. The saturating read then holds the wall
-///   for `|applied|` — ≤ 1 ms for a bounded resample, under 4 ms for a
+///   for `|applied|` — ≤ 1 ms for a bounded resample, at most ~4 ms for a
 ///   followed step's residue (#224 part 2: a date step itself is never held),
 ///   or the idle drift of a wall rejoining the fleet — after which it runs
 ///   exactly on the corrected line. The wall never goes backward, so the
@@ -500,7 +501,8 @@ pub struct WallAnchorStats {
     /// Followed steps that HELD the wall's timeline (a subset of
     /// `steps_followed`). Since #224 part 2 a followed step relabels: the
     /// timeline moves only by the remainder r ≥ 0 left after the whole slots,
-    /// so a backward step is no hold. A hold is only a residue under 4 ms: a
+    /// so a backward step is no hold. A hold is only a residue of at most
+    /// ~4 ms (the 3 ms residue plus an armed 1 ms, and 100 ns of rounding): a
     /// resample's armed 1 ms that already moved the wall further than r, a
     /// wall adopting another wall's slot count for a step it read up to 3 ms
     /// smaller, or a backward step under 3 ms applied on its own (no epoch).
