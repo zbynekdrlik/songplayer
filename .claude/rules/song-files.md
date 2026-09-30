@@ -10,6 +10,8 @@ paths:
   - "crates/sp-server/src/lyrics/idle_gate_abort.rs"
   - "crates/sp-server/src/db/models_stems*.rs"
   - "crates/sp-server/tests/startup_migration.rs"
+  - "e2e/cache-layout*.ts"
+  - "e2e/post-deploy-flac.spec.ts"
 ---
 
 # A song's files are ONE set, named after its audio (#136)
@@ -115,7 +117,11 @@ Design record: #136 comment 5894034820.
     nothing re-runs it.
 - **`startup::self_heal_cache` never deletes an orphan half-sidecar a row
   records.** That half belongs to a song split across two names (a move-back
-  that failed); it is kept and WARNed.
+  that failed); it is kept and WARNed. The post-deploy FLAC check accepts
+  exactly that shape (`e2e/cache-layout.ts`, unit-tested by
+  `e2e/cache-layout.spec.ts`): one youtube id with no complete pair, one lone
+  video half and one lone audio half. The videos API has no file paths, so it
+  reads the shape from disk; any other lone half still fails it.
 - **Re-link (`song_relink`: `relink_derived_files` at startup, `relink_song`
   after a job)** runs after the pair re-link and the duplicate removal. It
   skips a row whose audio is missing.
