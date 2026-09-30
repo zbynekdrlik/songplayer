@@ -4,8 +4,10 @@
 //! and a hold would leave a gap. The walls relabel the whole slots N, VBAN's
 //! clock owes the timeline's movement (r ahead, or a residue hold, review
 //! r1 🟡 G) and pays it back at `VBAN_SLEW_PPM`: every packet interval stays
-//! within 4.1667 ms ± 100 ppm, in both directions. Before: +260 ms sent ~80
-//! packets back to back (FINDING 5898834252), −19.8 ms left a gap.
+//! within 4.1667 ms ± 100 ppm, in both directions, whatever the step's phase
+//! against the packet grid (three consecutive blocks, review r3). Before:
+//! +260 ms sent ~80 packets back to back (FINDING 5898834252), −19.8 ms left
+//! a gap.
 //!
 //! VBAN's production clock (`WallVbanClock::slewing`) over a wall on a
 //! [`VirtualClock`]; a sleep advances the virtual clock (no real wait), and
@@ -78,14 +80,14 @@ struct Run {
 
 /// Send 400 program blocks (contiguous boundaries, 8 packets each) as the
 /// VBAN thread does — one clock read, then the block — with the fleet date
-/// step `step_100ns` landing before block 100.
-fn run(step_100ns: i64) -> Run {
-    run_after(None, step_100ns)
+/// step `step_100ns` landing before block `at`.
+fn run(step_100ns: i64, at: usize) -> Run {
+    run_after(None, step_100ns, at)
 }
 
 /// [`run`], with another wall's reading `registered` of the step (when
 /// `Some`) registered right before it lands.
-fn run_after(registered: Option<i64>, step_100ns: i64) -> Run {
+fn run_after(registered: Option<i64>, step_100ns: i64, at: usize) -> Run {
     let clk = VirtualClock::new(0);
     let fleet = Arc::new(FleetShift::default());
     let wall = WallClock::with_fleet(Box::new(clk.clone()), fleet.clone());
@@ -102,7 +104,7 @@ fn run_after(registered: Option<i64>, step_100ns: i64) -> Run {
     let mut due = strict_next_boundary_100ns(clock.now_100ns(), 30);
     let mut owed_us = Vec::new();
     for i in 0..400 {
-        if i == 100 {
+        if i == at {
             if let Some(other) = registered {
                 let _ = fleet.follow(0, other);
             }
@@ -130,10 +132,14 @@ fn run_after(registered: Option<i64>, step_100ns: i64) -> Run {
 #[test]
 fn a_date_step_either_way_keeps_every_packet_interval_within_100_ppm() {
     // (step, r in µs): +260.3 ms → 7 slots + 26.966 ms; −19.8 ms → −1 slot
-    // + 13.533 ms. VBAN owes r at the follow and pays it at 50 ppm: ~499 µs
-    // over the 299 blocks (~10 s) after it.
-    for (step, r_us) in [(2_603_000i64, 26_966i64), (-198_000, 13_533)] {
-        let run = run(step);
+    // + 13.533 ms. VBAN owes r at the follow and pays it at 40 ppm: ~399 µs
+    // over the ~299 blocks (~10 s) after it. Three phases of the step
+    // against the packet grid.
+    for (step, r_us, at) in [(2_603_000i64, 26_966i64), (-198_000, 13_533)]
+        .into_iter()
+        .flat_map(|(s, r)| (100..=102).map(move |at| (s, r, at)))
+    {
+        let run = run(step, at);
         assert_eq!(run.intervals_ns.len(), 400 * 8 - 1);
         let bad: Vec<_> = run
             .intervals_ns
@@ -143,29 +149,29 @@ fn a_date_step_either_way_keeps_every_packet_interval_within_100_ppm() {
             .collect();
         assert!(
             bad.is_empty(),
-            "{step}: intervals off 4.1667 ms ± 100 ppm: {bad:?}"
+            "{step} at {at}: intervals off 4.1667 ms ± 100 ppm: {bad:?}"
         );
         assert!(
             run.intervals_ns.iter().all(|&ns| ns >= 1_000_000),
-            "{step}: no burst"
+            "{step} at {at}: no burst"
         );
-        assert_eq!(run.late_sends, 0, "{step}: no late send");
+        assert_eq!(run.late_sends, 0, "{step} at {at}: no late send");
         // Nothing owed before the step; r owed right after its follow
-        // (block 100 paid at most a block's worth), then less and less.
-        assert!(run.owed_us[..99].iter().all(|&o| o == 0), "{step}");
-        let after = run.owed_us[100];
+        // (its block paid at most a block's worth), then less and less.
+        assert!(run.owed_us[..at].iter().all(|&o| o == 0), "{step} at {at}");
+        let after = run.owed_us[at];
         assert!(
             (r_us - 5..=r_us).contains(&after),
-            "{step}: owed right after the follow {after} vs r {r_us}"
+            "{step} at {at}: owed right after the follow {after} vs r {r_us}"
         );
         assert!(
-            run.owed_us[100..].windows(2).all(|w| w[1] <= w[0]),
-            "{step}: paid down, never owed more"
+            run.owed_us[at..].windows(2).all(|w| w[1] <= w[0]),
+            "{step} at {at}: paid down, never owed more"
         );
         let paid = after - run.owed_us[399];
         assert!(
-            (490..=505).contains(&paid),
-            "{step}: 50 ppm of ~10 s ≈ 499 µs paid, got {paid}"
+            (393..=402).contains(&paid),
+            "{step} at {at}: 40 ppm of ~10 s ≈ 399 µs paid, got {paid}"
         );
     }
 }
@@ -175,29 +181,36 @@ fn a_residue_hold_at_a_follow_is_slewed_too_never_a_gap() {
     // Review r1 🟡 G: VBAN's wall reads the step 1 ms smaller than the wall
     // that registered it (D(7) − 500 µs vs D(7) + 500 µs): it adopts N = 7
     // and its timeline is 500 µs short — ONE hold. VBAN's clock reads the
-    // line through it and owes −500 µs, paid back at 50 ppm over ~10 s: no
-    // interval off 100 ppm (the plain wall reading stopped one interval for
-    // the whole hold: 4.667 ms).
-    let run = run_after(Some(shift_100ns(7) + 5_000), shift_100ns(7) - 5_000);
-    let bad: Vec<_> = run
-        .intervals_ns
-        .iter()
-        .enumerate()
-        .filter(|(_, ns)| !(INTERVAL_MIN_NS..=INTERVAL_MAX_NS).contains(*ns))
-        .collect();
-    assert!(bad.is_empty(), "intervals off 4.1667 ms ± 100 ppm: {bad:?}");
-    assert_eq!(run.late_sends, 0);
-    assert!(run.owed_us[..99].iter().all(|&o| o == 0));
-    let after = run.owed_us[100];
-    assert!(
-        (-500..=-495).contains(&after),
-        "owed right after the follow {after}: the hold, negative"
-    );
-    assert!(
-        run.owed_us[100..].windows(2).all(|w| w[1] >= w[0]),
-        "paid toward 0, never owed more"
-    );
-    assert!(run.owed_us[399] > -5, "~10 s at 50 ppm pays 500 µs");
+    // line through it and owes −500 µs, paid back at 40 ppm: no interval off
+    // 100 ppm (the plain wall reading stopped one interval for the whole
+    // hold: 4.667 ms). At 50 ppm a 41 668-unit interval could pay 3 × 100 ns
+    // back and stretch to 4 167 100 ns (+104 ppm) at one step phase in three
+    // (review r3 🟡 C).
+    for at in 100..=102 {
+        let run = run_after(Some(shift_100ns(7) + 5_000), shift_100ns(7) - 5_000, at);
+        let bad: Vec<_> = run
+            .intervals_ns
+            .iter()
+            .enumerate()
+            .filter(|(_, ns)| !(INTERVAL_MIN_NS..=INTERVAL_MAX_NS).contains(*ns))
+            .collect();
+        assert!(bad.is_empty(), "at {at}: intervals off ± 100 ppm: {bad:?}");
+        assert_eq!(run.late_sends, 0, "at {at}");
+        assert!(run.owed_us[..at].iter().all(|&o| o == 0), "at {at}");
+        let after = run.owed_us[at];
+        assert!(
+            (-500..=-495).contains(&after),
+            "at {at}: owed right after the follow {after}: the hold, negative"
+        );
+        assert!(
+            run.owed_us[at..].windows(2).all(|w| w[1] >= w[0]),
+            "at {at}: paid toward 0, never owed more"
+        );
+        assert!(
+            (-110..=-90).contains(&run.owed_us[399]),
+            "at {at}: ~10 s at 40 ppm pays ~400 of the 500 µs"
+        );
+    }
 }
 
 #[test]
@@ -212,30 +225,38 @@ fn the_remainder_slew_pays_a_hold_back_toward_zero_never_past_it() {
         t + 5_000,
         "VBAN's clock reads the instant before the movement"
     );
-    assert_eq!(slew.owed_at(t + 19_999), -5_000);
-    assert_eq!(slew.owed_at(t + 20_000), -4_999);
+    assert_eq!(slew.owed_at(t + 24_999), -5_000);
+    assert_eq!(slew.owed_at(t + 25_000), -4_999);
     assert_eq!(slew.owed_at(t - 5), -5_000, "never more than owed");
-    let all_paid = 5_000 * 20_000;
-    assert_eq!(slew.owed_at(t + all_paid - 20_000), -1);
+    let all_paid = 5_000 * 25_000;
+    assert_eq!(slew.owed_at(t + all_paid - 25_000), -1);
     assert_eq!(slew.owed_at(t + all_paid), 0);
     assert_eq!(slew.owed_at(t + 2 * all_paid), 0, "never past 0");
     // A jump ahead while a hold is still owed: they net out.
     let t2 = t + 200_000;
     let v = slew.clock_100ns(t2);
     slew.owe(269_666, t2 + 269_666);
-    assert_eq!(slew.owed_at(t2 + 269_666), -4_990 + 269_666);
+    assert_eq!(slew.owed_at(t2 + 269_666), -4_992 + 269_666);
     assert_eq!(slew.clock_100ns(t2 + 269_666), v);
 }
 
 #[test]
 fn a_rejoin_and_a_follow_in_one_tick_are_both_owed() {
-    // Review r2: VBAN's thread stalled 11 s (94 ppm) across a +260.3 ms step
-    // the busy wall has not followed yet. VBAN's first tick rejoins the busy
-    // wall's pre-step line (+9 399 of drift), and its probe then follows the
-    // step (r = 270 794): VBAN owes BOTH, so its clock runs on by exactly the
-    // elapsed time. A second step (+50 ms) is owed on top (pins from a
-    // scratch Python model).
-    let clk = VirtualClock::new(94);
+    // Review r2: VBAN's thread stalled 11 s across a +260.3 ms step the busy
+    // wall has not followed yet. VBAN's first tick rejoins the busy wall's
+    // pre-step line (at +94 ppm a 9 399 jump, at −94 ppm a 9 400 HOLD that
+    // the follow then re-anchors through, review r3 🟡 A), and its probe
+    // follows the step: VBAN owes the LINE's whole movement in that tick,
+    // so its clock runs on by exactly the elapsed time. A second step
+    // (+50 ms) is owed on top, less 13 paid over the frame at 40 ppm (pins
+    // from a scratch Python model).
+    for (ppm, owed, owed_again) in [(94, 280_193, 446_879), (-94, 259_138, 425_760)] {
+        rejoin_and_follow(ppm, owed, owed_again);
+    }
+}
+
+fn rejoin_and_follow(ppm: i64, owed: i64, owed_again: i64) {
+    let clk = VirtualClock::new(ppm);
     let fleet = Arc::new(FleetShift::default());
     let mut busy = WallClock::with_fleet(Box::new(clk.clone()), fleet.clone());
     let wall = WallClock::with_fleet(Box::new(clk.clone()), fleet.clone());
@@ -260,20 +281,87 @@ fn a_rejoin_and_a_follow_in_one_tick_are_both_owed() {
     let elapsed = |from: Instant| {
         i64::try_from(clk.now_monotonic().duration_since(from).as_nanos() / 100).unwrap()
     };
-    assert_eq!(fleet.slots(), 7);
+    assert_eq!(fleet.slots(), 7, "{ppm}");
+    assert_eq!(vban.slew_owed_100ns(), owed, "{ppm}: the line's movement");
     assert_eq!(
-        vban.slew_owed_100ns(),
-        280_193,
-        "the rejoin's + the follow's"
+        after - before,
+        elapsed(t0),
+        "{ppm}: neither a jump nor a stop"
     );
-    assert_eq!(after - before, elapsed(t0), "neither a jump nor a stop");
     let t1 = clk.now_monotonic();
     clk.step_utc(500_000);
     clk.advance_ns(33_333_300);
     let again = vban.now_100ns();
-    assert_eq!(fleet.slots(), 8);
-    assert_eq!(vban.slew_owed_100ns(), 446_876, "+ r 166 699, less 16 paid");
-    assert_eq!(again - after, elapsed(t1) + 16, "the 16 paid");
+    assert_eq!(fleet.slots(), 8, "{ppm}");
+    assert_eq!(
+        vban.slew_owed_100ns(),
+        owed_again,
+        "{ppm}: + r, less 13 paid"
+    );
+    assert_eq!(again - after, elapsed(t1) + 13, "{ppm}: the 13 paid");
+}
+
+#[test]
+fn a_step_the_resample_reads_first_is_owed_whole() {
+    // Review r3 🟡 A: the step lands on the wall's 100th tick. The resample
+    // applies (and arms) the bounded 1 ms, the probe follows the rest in the
+    // same tick. VBAN owes the line's whole movement r = 269 666, so its
+    // clock neither jumps 1 ms (a 3.17 ms packet interval) nor stops.
+    let clk = VirtualClock::new(0);
+    let wall = WallClock::with_fleet(Box::new(clk.clone()), Arc::new(FleetShift::default()));
+    let mut vban = VirtualVban {
+        clock: WallVbanClock::slewing(wall),
+        clk: clk.clone(),
+    };
+    vban.now_100ns();
+    for _ in 0..100 {
+        clk.advance_ns(33_333_300);
+        vban.now_100ns();
+    }
+    let before = vban.now_100ns();
+    let t0 = clk.now_monotonic();
+    clk.step_utc(2_603_000);
+    clk.advance_ns(33_333_300);
+    let after = vban.now_100ns();
+    let elapsed = clk.now_monotonic().duration_since(t0).as_nanos() / 100;
+    assert_eq!(vban.slew_owed_100ns(), 269_666, "r, not r − 1 ms");
+    assert_eq!(after - before, i64::try_from(elapsed).unwrap());
+}
+
+#[test]
+fn a_movement_over_the_cap_is_taken_at_once_and_counted() {
+    // Review r3 🟡 B: VBAN's thread stalled 12 h, alone, at −94 ppm: its
+    // rejoin moves the line by −4.06 s. That is taken at once (counted,
+    // one WARN), never owed.
+    let clk = VirtualClock::new(-94);
+    let wall = WallClock::with_fleet(Box::new(clk.clone()), Arc::new(FleetShift::default()));
+    let mut vban = VirtualVban {
+        clock: WallVbanClock::slewing(wall),
+        clk: clk.clone(),
+    };
+    vban.now_100ns();
+    clk.advance_ns(33_333_300);
+    vban.now_100ns();
+    assert_eq!(vban.clock.taken_at_once(), 0);
+    clk.advance_ns(12 * 3_600 * 1_000_000_000);
+    vban.now_100ns();
+    assert_eq!(vban.clock.taken_at_once(), 1);
+    assert_eq!(vban.slew_owed_100ns(), 0);
+}
+
+#[test]
+fn a_movement_taken_at_once_leaves_the_debt_paying_where_it_was() {
+    // Review r3: the line jumps with the movement taken at once, so the
+    // debt's elapsed line moves with it — never paid or re-owed at once.
+    let t = 17_900_000_000_000_000i64;
+    let mut slew = RemainderSlew::default();
+    assert!(slew.owe(269_666, t));
+    let t2 = t + 200_000;
+    let owed = slew.owed_at(t2);
+    assert_eq!(owed, 269_658, "40 ppm: 8 paid over 20 ms");
+    assert!(!slew.owe(-40_000_000, t2 - 40_000_000), "a 4 s jump back");
+    assert_eq!(slew.owed_at(t2 - 40_000_000), owed);
+    assert_eq!(slew.owed_at(t2 - 40_000_000 + 25_000), owed - 1);
 }
 
 #[test]
@@ -293,7 +381,7 @@ fn a_movement_over_one_slot_is_taken_at_once_never_slewed_for_hours() {
 }
 
 #[test]
-fn the_remainder_slew_owes_a_jump_and_pays_it_back_at_50_ppm() {
+fn the_remainder_slew_owes_a_jump_and_pays_it_back_at_40_ppm() {
     let t = 17_900_000_000_000_000i64;
     let mut slew = RemainderSlew::default();
     assert_eq!(slew.owed_at(t), 0);
@@ -306,13 +394,13 @@ fn the_remainder_slew_owes_a_jump_and_pays_it_back_at_50_ppm() {
         t - 269_666,
         "VBAN's clock reads the instant before the jump"
     );
-    // 50 ppm: 100 ns paid per 2 ms (20 000 × 100 ns) of timeline.
-    assert_eq!(slew.owed_at(t + 19_999), 269_666);
-    assert_eq!(slew.owed_at(t + 20_000), 269_665);
-    assert_eq!(slew.owed_at(t + 200_000), 269_656);
+    // 40 ppm: 100 ns paid per 2.5 ms (25 000 × 100 ns) of timeline.
+    assert_eq!(slew.owed_at(t + 24_999), 269_666);
+    assert_eq!(slew.owed_at(t + 25_000), 269_665);
+    assert_eq!(slew.owed_at(t + 200_000), 269_658);
     assert_eq!(slew.owed_at(t - 5), 269_666, "never more than owed");
-    let all_paid = 269_666 * 20_000;
-    assert_eq!(slew.owed_at(t + all_paid - 20_000), 1);
+    let all_paid = 269_666 * 25_000;
+    assert_eq!(slew.owed_at(t + all_paid - 25_000), 1);
     assert_eq!(slew.owed_at(t + all_paid), 0);
     assert_eq!(slew.owed_at(t + 2 * all_paid), 0, "never negative");
     // A second jump while still owing: owed on top of the rest, and the
@@ -320,9 +408,9 @@ fn the_remainder_slew_owes_a_jump_and_pays_it_back_at_50_ppm() {
     let t2 = t + 200_000;
     let v = slew.clock_100ns(t2);
     slew.owe(135_333, t2 + 135_333);
-    assert_eq!(slew.owed_at(t2 + 135_333), 269_656 + 135_333);
+    assert_eq!(slew.owed_at(t2 + 135_333), 269_658 + 135_333);
     assert_eq!(slew.clock_100ns(t2 + 135_333), v);
-    assert_eq!(VBAN_SLEW_PPM, 50);
+    assert_eq!(VBAN_SLEW_PPM, 40);
 }
 
 #[test]

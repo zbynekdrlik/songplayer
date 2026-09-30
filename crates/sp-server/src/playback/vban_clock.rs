@@ -105,6 +105,8 @@ pub struct WallVbanClock {
     /// The wall's summed line movement already owed
     /// (`WallShift::moved_100ns`).
     moved_seen: i64,
+    /// Movements over [`VBAN_SLEW_MAX_100NS`] taken at once so far.
+    taken_at_once: u64,
 }
 
 impl WallVbanClock {
@@ -114,7 +116,14 @@ impl WallVbanClock {
             wall,
             ticker: BoundaryTicker::default(),
             slew: None,
+            taken_at_once: 0,
         }
+    }
+
+    /// Movements over [`VBAN_SLEW_MAX_100NS`] this clock took at once (each
+    /// with one WARN) instead of owing them.
+    pub fn taken_at_once(&self) -> u64 {
+        self.taken_at_once
     }
 
     /// VBAN's clock: `wall`'s timeline line minus the date-step movement it
