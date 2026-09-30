@@ -4,6 +4,7 @@ paths:
   - "crates/sp-server/src/reprocess/**"
   - "crates/sp-server/src/startup.rs"
   - "crates/sp-server/src/song_relink*.rs"
+  - "crates/sp-server/src/song_input*.rs"
   - "crates/sp-server/src/stems/mod.rs"
   - "crates/sp-server/src/stems/worker.rs"
   - "crates/sp-server/src/dabing/worker.rs"
@@ -90,6 +91,23 @@ Design record: #136 comment 5894034820.
     DB record. The re-link holds it from reading its rows to its last record,
     so a rename and a re-link never interleave on the same song. Tests prove it
     with two tasks: hold the lock, spawn the other side, show it waits.
+- **A stem / dub job reads its input AFTER it holds the heavy slot
+  (`song_input::job_input`, release 0.69.0 blockers).** A job is picked, then
+  queues for the slot for minutes; a rename in between used to leave it on a
+  path that no longer existed, and it took a penalised failure. Right after
+  the slot, both workers re-read the row's audio (and, for the dub, the vocals
+  stem + the stems status) under `cache::SONG_FILES`, then run on it
+  (`SongInput::stem_job` / `dub_job`): the stem paths, the work dir and the
+  re-link below follow the current audio.
+  - No audio on disk after that read = a re-pick with NO penalty: no attempt,
+    the status untouched, only `stem_next_attempt_at` / `dub_next_attempt_at`
+    set `INPUT_MISSING_RECHECK` (10 min) ahead. Without that wait a song whose
+    audio is gone for good would be re-picked every tick ahead of the rest of
+    the queue (the selectors order by id / request time).
+  - A rename can still land WHILE the job runs; the re-link below covers it.
+  - Pinned by `song_input_tests.rs` (structural: slot → re-read → job →
+    separation / synthesis in each `process_next`; the rename and the
+    missing-audio cases on a real DB).
 - **A job that writes derived files re-links its song when it finishes.** The
   stem worker runs `song_relink::relink_song` after `mark_stems_done`
   (`record_stem_result`), and the dub worker after `mark_dub_ready`
