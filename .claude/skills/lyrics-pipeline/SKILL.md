@@ -334,8 +334,9 @@ the queue. The bulk sweeps (`reprocess-all-stale`,
 `reprocess-catalog-with-new-gate`) use the same queue. No reprocess route may
 blank served lyrics: the per-video `POST /api/v1/videos/{id}/lyrics/reprocess`
 set `has_lyrics = 0` and blanked 211 songs on the wall for ~6 h on 30.9.2026,
-so it is deleted. Known gap: a re-run that ERRORS still blanks the song (the
-worker's `Err` arm marks it `no_source`). Detail:
+so it is deleted. Known gap: a re-run that fails still blanks a served song
+(an error: the worker's `Err` arm marks it `no_source`; an empty transcript:
+the base tier quarantines it and deletes the lyrics file). Detail:
 `.claude/rules/lyrics-reference-text.md` ("Reprocess: ONE per-song path").
 
 Also: never suggest, ask about, or include "bump pipeline version" as an option

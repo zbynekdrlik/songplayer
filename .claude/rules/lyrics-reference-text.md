@@ -71,12 +71,16 @@ paths:
   - NULLs `lyrics_source` only for the no-lyrics sentinels (`failed`, `empty`, `no_source`, `unsupported_source`).
 - It never touches `has_lyrics` or the `<yt>_lyrics.json`. The wall keeps the old lyrics while the song waits in the queue, and a successful run replaces them.
 - The bulk sweeps use the same manual-priority queue and never reset `has_lyrics` either:
-  - `POST /api/v1/lyrics/reprocess-all-stale` (the dashboard's "Reprocess all stale");
+  - `POST /api/v1/lyrics/reprocess-all-stale` (the dashboard's "Spracovať všetky zastarané");
   - `POST /api/v1/lyrics/reprocess-catalog-with-new-gate` (`api/lyrics_catalog.rs`).
 - **No reprocess route may blank served lyrics.** `playback/lyrics_loader.rs` and `GET /api/v1/videos/{id}/lyrics` serve nothing for `has_lyrics = 0`, even with the file on disk.
 - The deleted per-video `POST /api/v1/videos/{id}/lyrics/reprocess` (`reset_video_lyrics`: `has_lyrics = 0, lyrics_source = NULL`) did exactly that. Queueing the #144 rollout through it blanked 211 songs on the wall for ~6 h on 30.9.2026 (comment 5905405307).
 - Never add a second per-song reprocess route, and never re-queue a row by resetting it.
-- Known gap, NOT fixed by that deletion: a re-run that ERRORS still blanks the song. `lyrics/worker.rs`'s `Err` arm calls `mark_video_lyrics(false, Some("no_source"), …)`, and it does so for a row that had lyrics too. The manual and null buckets then skip `no_source` at the current version. A served song whose re-run hits, for example, a failed Claude cleanup goes dark until the next manual reprocess or version bump. It is recorded on #144 as a follow-up candidate.
+- Known gap, NOT fixed by that deletion: a re-run that fails still blanks a served song, on two paths.
+  - **An error.** `lyrics/worker.rs`'s `Err` arm calls `mark_video_lyrics(false, Some("no_source"), …)` for a row that had lyrics too, and the manual and null buckets skip `no_source` at the current version. A failed Claude cleanup in `gather.rs` is one such error.
+  - **An empty transcript.** The base tier quarantines the song (`worker_g35t.rs` → `quarantine_video_lyrics`: `has_lyrics = 0`, `asr_gap`) and DELETES `<yt>_lyrics.json`.
+  - Either way the song stays dark until a manual reprocess or a version bump re-queues it AND a later run succeeds.
+  - Both are recorded on #144 (comment 5905749132 and its follow-up) as a follow-up candidate: defer, or keep the served lyrics.
 - Pinned by `api/lyrics_tests.rs`:
   - `a_per_video_reprocess_request_never_blanks_the_served_lyrics`;
   - `the_one_reprocess_path_keeps_the_served_lyrics_and_sets_manual_priority`.
