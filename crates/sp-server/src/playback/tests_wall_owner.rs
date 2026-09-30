@@ -243,6 +243,45 @@ async fn only_the_wall_owner_s_title_timers_show_or_hide_the_title() {
     assert_eq!(count(&cmds, is_show_title), 1, "9's show timer: {cmds:?}");
 }
 
+/// Review round 1: the owner can change through the new owner's ON alone —
+/// SP-program cut to 9 while cg OBS still shows 7 ({7, 9}, 9 owns). 7 writes
+/// nothing any more, so 9's ON re-syncs the wall's line at once: one
+/// `HideSubtitles` when 9 has no line (it was played off program by hand,
+/// with no lyrics), or 9's line — never 7's line frozen on `#sp-subs`.
+#[tokio::test]
+async fn the_new_owner_s_on_re_syncs_the_wall_s_line() {
+    let (mut engine, mut rx) = two_on_air(7).await;
+    engine.dispatch_lyrics_if_changed(7, 60_000);
+    assert_eq!(subtitle_lines(&sent(&mut rx)), ["gamma"], "7's line is up");
+    let nine = engine.pipelines.get_mut(&9).unwrap();
+    nine.lyrics_state = None;
+    nine.scene_active
+        .store(false, std::sync::atomic::Ordering::Release);
+    engine.on_air.publish(on_air(&[7, 9]), Some(9));
+
+    engine.handle_scene_change(9, true).await;
+    let cmds = sent(&mut rx);
+    assert_eq!(
+        count(&cmds, is_hide_subtitles),
+        1,
+        "7's line leaves: {cmds:?}"
+    );
+    assert!(subtitle_lines(&cmds).is_empty(), "{cmds:?}");
+
+    // The same ON with a line (a re-kick of 9): 9's line goes up at once.
+    engine.pipelines.get_mut(&9).unwrap().lyrics_state = Some(one_line("delta."));
+    engine.handle_scene_change(9, true).await;
+    let cmds = sent(&mut rx);
+    assert_eq!(subtitle_lines(&cmds), ["delta"], "{cmds:?}");
+    assert_eq!(count(&cmds, is_hide_subtitles), 0, "{cmds:?}");
+
+    // An ON of a member that does not own the wall touches no line.
+    engine.handle_scene_change(7, true).await;
+    let cmds = sent(&mut rx);
+    assert!(subtitle_lines(&cmds).is_empty(), "{cmds:?}");
+    assert_eq!(count(&cmds, is_hide_subtitles), 0, "{cmds:?}");
+}
+
 /// A Resolume recovery re-syncs the owner's title and re-sends only its
 /// line, whatever the playlist ids (before: the highest id's title, both
 /// lines).
