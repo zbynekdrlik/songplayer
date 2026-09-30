@@ -2,6 +2,8 @@
 //! Wired via `#[cfg(test)] #[path = "program_output_timing_tests.rs"] mod tests;`.
 
 use super::*;
+use crate::playback::stat_window::Worst;
+use crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS;
 use sp_core::genlock::{GENLOCK_GRID_FPS, UNITS_PER_SECOND};
 
 /// A grid boundary (100 ns).
@@ -33,7 +35,16 @@ fn figures(ready_us: i64, feed_us: i64, submit_us: i64) -> BoundaryMarks {
 #[test]
 fn the_limits_are_the_designed_ones() {
     assert_eq!(STAGE_SLOW_US, 5_000, "5 ms");
-    assert_eq!(VBAN_FEED_WARN_US, 10_000, "10 ms");
+    assert_eq!(VBAN_FEED_SLOW_US, 10_000, "10 ms");
+    assert_eq!(
+        VBAN_FEED_BUDGET_US, 66_666,
+        "#210 part 2: VBAN's send latency L — a block's first packet is due 66.7 ms after its boundary"
+    );
+    assert_eq!(
+        VBAN_FEED_BUDGET_US as i64,
+        VBAN_SEND_LATENCY_100NS / 10,
+        "the budget is L in whole µs"
+    );
     assert_eq!(TIMING_WARN_EVERY_100NS, 5 * UNITS_PER_SECOND, "5 s");
     assert_eq!(
         i64::from(TIMING_BUCKET_BOUNDARIES),
@@ -156,6 +167,7 @@ fn the_maxima_cover_the_bucket_being_filled_and_the_last_full_one() {
             vban_feed_late_over_5ms: 1,
             submit_over_5ms: 1,
             vban_feed_late_over_10ms: 0,
+            vban_feed_late_over_budget: 0,
             warned: 0,
         },
         "the counts are since start"
@@ -195,39 +207,75 @@ fn a_figure_is_slow_strictly_over_5_ms_and_counts_on_its_own() {
 }
 
 #[test]
-fn a_hand_off_over_10_ms_is_warned_at_most_once_per_5_s_with_the_skipped_count() {
+fn a_hand_off_inside_vbans_send_latency_is_counted_but_never_warned() {
+    // #210 part 2, box 30.9.2026: hand-offs 10–33 ms late are the program's
+    // normal state (41 % of the boundaries over 10 ms in the 15 min capture of
+    // finding 5915907311, 67 834 of 105 105 since start in the lane's read,
+    // comment 5916271682), and each one still reaches VBAN before its block's
+    // first packet is due, L = 66.7 ms after the boundary. The part 1 WARN
+    // over 10 ms fired every 5 s for nothing.
+    let mut t = BoundaryTiming::default();
+    for (k, feed_us) in [10_000, 10_001, 27_578, 66_666].into_iter().enumerate() {
+        // 6 s apart: the rate limit never holds one back.
+        let stamp = B + k as i64 * 6 * UNITS_PER_SECOND;
+        assert_eq!(
+            t.observe(&fed_late(stamp, feed_us)),
+            None,
+            "{feed_us} µs: inside VBAN's budget"
+        );
+    }
+    let s = t.status();
+    assert_eq!(
+        (
+            s.vban_feed_late_over_5ms,
+            s.vban_feed_late_over_10ms,
+            s.vban_feed_late_over_budget,
+            s.warned
+        ),
+        (4, 3, 0, 0),
+        "exactly 10 ms is not over 10 ms; exactly L is not over the budget"
+    );
+}
+
+#[test]
+fn a_hand_off_after_its_first_packet_was_due_is_warned_at_most_once_per_5_s_with_the_skipped_count()
+{
     let mut t = BoundaryTiming::default();
     let b2 = B + 333_333;
-    assert_eq!(t.observe(&fed_late(B, 10_000)), None, "exactly 10 ms");
-    assert_eq!(t.status().vban_feed_late_over_10ms, 0);
     assert_eq!(
-        t.observe(&fed_late(b2, 10_001)),
+        t.observe(&fed_late(B, 66_666)),
+        None,
+        "exactly L: the first packet is not late yet"
+    );
+    assert_eq!(t.status().vban_feed_late_over_budget, 0);
+    assert_eq!(
+        t.observe(&fed_late(b2, 66_667)),
         Some(LateBoundary {
             stamp_100ns: b2,
             sample: BoundarySample {
                 ready_late_us: 0,
-                vban_feed_late_us: 10_001,
+                vban_feed_late_us: 66_667,
                 submit_us: 0,
             },
             suppressed: 0,
         }),
-        "the first one over 10 ms"
+        "the first one handed over after its first packet was due"
     );
     let second = b2 + UNITS_PER_SECOND;
-    assert_eq!(t.observe(&fed_late(second, 30_000)), None, "1 s later");
+    assert_eq!(t.observe(&fed_late(second, 100_000)), None, "1 s later");
     assert_eq!(
-        t.observe(&fed_late(b2 + TIMING_WARN_EVERY_100NS - 1, 12_000)),
+        t.observe(&fed_late(b2 + TIMING_WARN_EVERY_100NS - 1, 70_000)),
         None,
         "just under 5 s later"
     );
     let third = b2 + TIMING_WARN_EVERY_100NS;
     assert_eq!(
-        t.observe(&fed_late(third, 15_000)),
+        t.observe(&fed_late(third, 80_000)),
         Some(LateBoundary {
             stamp_100ns: third,
             sample: BoundarySample {
                 ready_late_us: 0,
-                vban_feed_late_us: 15_000,
+                vban_feed_late_us: 80_000,
                 submit_us: 0,
             },
             suppressed: 2,
@@ -235,18 +283,18 @@ fn a_hand_off_over_10_ms_is_warned_at_most_once_per_5_s_with_the_skipped_count()
         "5 s after the last WARN: warned, with the two it skipped"
     );
     assert_eq!(
-        t.observe(&fed_late(third + UNITS_PER_SECOND, 9_000)),
+        t.observe(&fed_late(third + UNITS_PER_SECOND, 30_000)),
         None,
-        "under 10 ms: neither warned nor skipped"
+        "inside the budget: neither warned nor skipped"
     );
     let fourth = third + 6 * UNITS_PER_SECOND;
     assert_eq!(
-        t.observe(&fed_late(fourth, 11_000)),
+        t.observe(&fed_late(fourth, 67_000)),
         Some(LateBoundary {
             stamp_100ns: fourth,
             sample: BoundarySample {
                 ready_late_us: 0,
-                vban_feed_late_us: 11_000,
+                vban_feed_late_us: 67_000,
                 submit_us: 0,
             },
             suppressed: 0,
@@ -258,12 +306,13 @@ fn a_hand_off_over_10_ms_is_warned_at_most_once_per_5_s_with_the_skipped_count()
         BoundaryTimingStatus {
             boundaries: 7,
             ready_late_us_max: 0,
-            vban_feed_late_us_max: 30_000,
+            vban_feed_late_us_max: 100_000,
             submit_us_max: 0,
             ready_late_over_5ms: 0,
             vban_feed_late_over_5ms: 7,
             submit_over_5ms: 0,
-            vban_feed_late_over_10ms: 5,
+            vban_feed_late_over_10ms: 7,
+            vban_feed_late_over_budget: 5,
             warned: 3,
         }
     );

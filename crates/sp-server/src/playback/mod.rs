@@ -19,6 +19,7 @@ pub mod lock_state;
 pub mod loop_stats; // #192 round 3: pipeline-loop stage timing + submit-call histogram (pure)
 mod lyrics_loader;
 mod mix; // #184 round G set_mix (impl PlaybackEngine, 1000-line cap split)
+pub mod mmcss; // #210 part 2: a real-time sender thread as an MMCSS "Pro Audio" thread
 pub mod ndi_burn;
 pub mod ndi_health;
 mod ndi_health_expect; // #221 L4a: whether a receiver is expected on an output (pure)
@@ -58,6 +59,7 @@ mod runtime_pipeline;
 pub mod scene_catalog; // #221: which scene is a playlist's, from its NDI output name (no cg OBS lookup)
 mod scene_off; // #215: the deferred scene-go-off pause of the program's outgoing source
 pub mod startup_senders; // #196 deterministic restart-safe NDI sender startup (pure port-wait + order)
+pub mod stat_window; // #210 part 2: shared pure two-bucket worst + WARN rate limit
 pub mod state;
 pub mod submit_handoff; // #168 output-side split: pure emit->submit handoff decisions
 pub mod submitter;
@@ -68,6 +70,7 @@ mod transport_state; // #201 pure PlayState->TransportState mapping (Linux-teste
 pub mod vban_clock; // #224 part 2: VBAN's + the NDI input's wall clock, VBAN's date-step slew
 pub mod vban_out; // #210: the program's VBAN audio output (queue, paced thread, socket, stats)
 pub mod vban_packet; // #210: the pure VBAN packet encoder (header, INT24, 8×200 split)
+pub mod vban_stall; // #210 part 2: the VBAN thread's late packets (ring, window max, WARN)
 pub mod wallclock;
 
 use std::collections::{HashMap, VecDeque};

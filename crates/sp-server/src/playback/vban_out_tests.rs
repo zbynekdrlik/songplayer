@@ -448,7 +448,9 @@ fn the_p99_covers_the_last_1200_intervals() {
     let out = VbanOut::new();
     let record = |us| {
         out.record_packet(SentPacket {
-            late: false,
+            planned_100ns: 0,
+            sent_100ns: 0,
+            sent_label_100ns: 0,
             interval_us: Some(us),
             errors: 0,
             counter: 0,

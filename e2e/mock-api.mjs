@@ -937,6 +937,7 @@ function programBody() {
         vban_feed_late_over_5ms: 0,
         submit_over_5ms: 0,
         vban_feed_late_over_10ms: 0,
+        vban_feed_late_over_budget: 0,
         warned: 0,
       },
     },
@@ -963,8 +964,13 @@ function programBody() {
       blocks_dropped: 0,
       blocks_substituted: 0,
       late_sends: 0,
+      // #210 part 2: the VBAN thread's late packets (`vban_stall.rs`); the
+      // mock sends nothing.
+      late_max_us: 0,
+      late_events: [],
       send_interval_p99_us: 0,
       frame_counter: 0,
+      slew_owed_us: 0, // #224 part 2 (was missing from the mock)
       targets: (settings.vban_targets || "")
         .split(",")
         .map((t) => t.trim())

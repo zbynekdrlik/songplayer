@@ -785,7 +785,8 @@ fn spawn_input_thread(receive: Option<Arc<dyn NdiReceiveBackend>>, bus: Arc<Prog
         .spawn(move || {
             crate::playback::pipeline_paced::request_high_res_timer();
             // The input owns every program boundary while it is cut: guaranteed
-            // priority, like the VBAN sender and the paced audio threads.
+            // priority, like the paced audio threads (the VBAN sender is an
+            // MMCSS "Pro Audio" thread since #210 part 2, `mmcss.rs`).
             crate::playback::pipeline::pipeline_audio::raise_thread_priority("ndi-input");
             info!(has_sdk = receive.is_some(), "ndi input thread started");
             let shared = bus.input().clone();

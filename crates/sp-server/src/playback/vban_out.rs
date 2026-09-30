@@ -56,11 +56,13 @@ use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 use crate::playback::loop_stats::percentile_ceil;
+use crate::playback::program_output_timing::utc_label;
 use crate::playback::vban_packet::{
     VBAN_BLOCK_SAMPLES, VBAN_CHANNELS, VBAN_SAMPLE_RATE_HZ, VBAN_SEND_LATENCY_100NS,
     VBAN_STREAM_NAME_LEN, VbanBlockPackets, VbanEncoder, empty_block_packets, packet_send_at_100ns,
     stream_name_bytes,
 };
+use crate::playback::vban_stall::{VbanLateEvent, VbanStallLog, VbanStallWarn};
 // #224 part 2: VBAN's (and the NDI input's) wall clock and VBAN's slew live
 // in `vban_clock.rs` (review round 1: this file neared the 1000-line cap).
 pub use crate::playback::vban_clock::{RemainderSlew, VBAN_SLEW_PPM, WallVbanClock};
@@ -352,6 +354,13 @@ pub struct VbanStatus {
     pub blocks_substituted: u64,
     /// Packets sent more than 2 ms after their due time.
     pub late_sends: u64,
+    /// #210 part 2: the worst packet's lateness (µs, `vban_stall.rs`) over
+    /// the last 14 400–28 800 packets sent: 60–120 s of sending. It does not
+    /// age while nothing is sent.
+    pub late_max_us: u64,
+    /// #210 part 2: the last 32 packets sent more than 5 ms late, oldest
+    /// first: `{utc_ms, late_us}`.
+    pub late_events: Vec<VbanLateEvent>,
     /// p99 of the last [`VBAN_INTERVAL_WINDOW`] packet-to-packet intervals.
     pub send_interval_p99_us: u64,
     /// `nuFrame` of the last packet sent.
@@ -363,7 +372,7 @@ pub struct VbanStatus {
     pub targets: Vec<VbanTargetStatus>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct VbanCounters {
     packets_sent: u64,
     send_errors: u64,
@@ -373,6 +382,10 @@ struct VbanCounters {
     frame_counter: u32,
     intervals_us: VecDeque<u64>,
     slew_owed_us: i64,
+    /// #210 part 2: every sent packet's lateness (the ring, the window, the
+    /// WARN's rate limit), under the same lock as the counters: one lock
+    /// per packet on the real-time thread.
+    stalls: VbanStallLog,
 }
 
 struct VbanQueue {
@@ -504,12 +517,14 @@ impl VbanOut {
         s.blocks_substituted
     }
 
-    /// Count one sent packet; returns the total send errors.
-    fn record_packet(&self, sent: SentPacket) -> u64 {
+    /// Count one sent packet and fold its lateness into the stall log
+    /// (#210 part 2), under ONE lock. Returns the total send errors and the
+    /// packet's WARN, if it is to be written.
+    fn record_packet(&self, sent: SentPacket) -> (u64, Option<VbanStallWarn>) {
         let mut s = lock(&self.stats);
         s.packets_sent += 1;
         s.send_errors += sent.errors;
-        if sent.late {
+        if sent.sent_100ns - sent.planned_100ns > VBAN_LATE_100NS {
             s.late_sends += 1;
         }
         if let Some(us) = sent.interval_us {
@@ -519,7 +534,10 @@ impl VbanOut {
             s.intervals_us.push_back(us);
         }
         s.frame_counter = sent.counter;
-        s.send_errors
+        let stall = s
+            .stalls
+            .observe(sent.planned_100ns, sent.sent_100ns, sent.sent_label_100ns);
+        (s.send_errors, stall)
     }
 
     /// Record what VBAN's clock still owes of a date step (100 ns, #224
@@ -528,10 +546,14 @@ impl VbanOut {
         lock(&self.stats).slew_owed_us = owed_100ns / 10;
     }
 
-    /// The telemetry for the API.
+    /// The telemetry for the API. #210 part 2 (review round 2): the
+    /// counters are COPIED under the lock and everything else (the p99's
+    /// sort, the ring, the targets) is computed after it: the real-time VBAN
+    /// thread takes that lock on every packet, and a normal-priority API
+    /// worker preempted while holding it would stall the thread.
     pub fn status(&self) -> VbanStatus {
         let cfg = self.config();
-        let s = lock(&self.stats);
+        let s = lock(&self.stats).clone();
         VbanStatus {
             enabled: cfg.enabled,
             running: self.is_running(),
@@ -541,6 +563,8 @@ impl VbanOut {
             blocks_dropped: s.blocks_dropped,
             blocks_substituted: s.blocks_substituted,
             late_sends: s.late_sends,
+            late_max_us: s.stalls.late_max_us(),
+            late_events: s.stalls.late_events(),
             send_interval_p99_us: percentile_ceil(&s.intervals_us, 99),
             frame_counter: s.frame_counter,
             slew_owed_us: s.slew_owed_us,
@@ -557,9 +581,13 @@ impl VbanOut {
     }
 }
 
-/// One sent packet, for the counters.
+/// One sent packet, for the counters and the stall log.
 struct SentPacket {
-    late: bool,
+    /// Its planned instant and when it went out (VBAN's timeline, 100 ns).
+    planned_100ns: i64,
+    sent_100ns: i64,
+    /// The send reading's fleet label (UTC, #210 part 2).
+    sent_label_100ns: i64,
     interval_us: Option<u64>,
     errors: u64,
     counter: u32,
@@ -574,6 +602,15 @@ pub trait VbanClock {
     /// What the clock still owes of a date step's remainder (100 ns, #224
     /// part 2; 0 for a clock that follows its wall).
     fn slew_owed_100ns(&self) -> i64;
+    /// The fleet label of this clock's reading `t_100ns` (`t + D(K_F)`,
+    /// i.e. UTC), for the instant of a late packet (#210 part 2). A clock
+    /// with no fleet shift (the tests') is its own label. VBAN's slewing
+    /// clock reads `slew_owed` off its line, so for ~14 min after a date
+    /// step the label is off UTC by that much: before it after a forward
+    /// follow (≤ one slot), after it after a residue hold (≤ ~4 ms).
+    fn label_100ns(&self, t_100ns: i64) -> i64 {
+        t_100ns
+    }
 }
 
 /// Where packets go (a UDP socket in production).
@@ -665,8 +702,10 @@ impl VbanSender {
                     last_error = Some((addr, e));
                 }
             }
-            let total_errors = out.record_packet(SentPacket {
-                late: sent_at - at > VBAN_LATE_100NS,
+            let (total_errors, stall) = out.record_packet(SentPacket {
+                planned_100ns: at,
+                sent_100ns: sent_at,
+                sent_label_100ns: clock.label_100ns(sent_at),
                 interval_us: self.last_send_100ns.map(|prev| interval_us(prev, sent_at)),
                 errors,
                 counter: first.wrapping_add(k as u32),
@@ -677,9 +716,32 @@ impl VbanSender {
             {
                 warn!(%e, %addr, send_errors = total_errors, "vban output: UDP send failed");
             }
+            if let Some(stall) = stall {
+                warn_late_packet(&stall, k, wait);
+            }
         }
         self.packets.len()
     }
+}
+
+/// #210 part 2: the WARN of a packet sent more than 10 ms after its planned
+/// instant: when (UTC, to line up with a dev1 capture), how late, which
+/// packet of its block, the wait before it and how many such packets the
+/// rate limit skipped since the WARN before it. `waited_us` > 0: the thread
+/// overslept that wait. 0: it came to the packet already late — a stall
+/// before it (taking the block, or right after the packet before), a block
+/// handed over late, or the packet before sent late. The decision is
+/// `VbanStallLog::observe`'s (tested); logging only.
+#[cfg_attr(test, mutants::skip)]
+fn warn_late_packet(stall: &VbanStallWarn, packet: usize, wait_100ns: i64) {
+    warn!(
+        utc = %utc_label(stall.event.utc_ms * 10_000),
+        late_us = stall.event.late_us,
+        packet,
+        waited_us = crate::playback::wallclock::to_us(wait_100ns),
+        suppressed = stall.suppressed,
+        "vban output: a packet went out more than 10 ms after its planned instant"
+    );
 }
 
 /// The VBAN thread body: send every queued block on its schedule until the
@@ -716,7 +778,9 @@ pub fn run_vban_loop(
 }
 
 /// Windows: bind one UDP socket and run [`run_vban_loop`] on its own thread
-/// (`vban-output`), paced on a [`WallVbanClock`].
+/// (`vban-output`), paced on a [`WallVbanClock`]. #210 part 2: the thread is
+/// an MMCSS "Pro Audio" thread at `AVRT_PRIORITY_HIGH` for its whole life
+/// (`mmcss::join_pro_audio`; `THREAD_PRIORITY_TIME_CRITICAL` if refused).
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 pub fn spawn_vban_thread(out: Arc<VbanOut>) {
@@ -724,7 +788,7 @@ pub fn spawn_vban_thread(out: Arc<VbanOut>) {
         .name("vban-output".into())
         .spawn(move || {
             crate::playback::pipeline_paced::request_high_res_timer();
-            crate::playback::pipeline::pipeline_audio::raise_thread_priority("vban-output");
+            let _mmcss = crate::playback::mmcss::join_pro_audio("vban-output");
             let mut socket = match UdpSocket::bind(("0.0.0.0", 0)) {
                 Ok(s) => s,
                 Err(e) => {

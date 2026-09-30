@@ -183,4 +183,10 @@ impl VbanClock for WallVbanClock {
         self.slew
             .map_or(0, |slew| slew.owed_at(self.wall.line_100ns()))
     }
+
+    /// The wall's relabel registry labels the reading (#210 part 2: the
+    /// UTC instant of a late packet).
+    fn label_100ns(&self, t_100ns: i64) -> i64 {
+        self.wall.fleet().label_100ns(t_100ns)
+    }
 }
