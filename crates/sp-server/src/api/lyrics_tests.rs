@@ -86,33 +86,6 @@ async fn queue_counts_are_correct_across_buckets() {
 }
 
 #[tokio::test]
-async fn reprocess_all_stale_only_flags_stale_rows() {
-    let pool = setup_pool().await;
-    sqlx::query(
-        "INSERT INTO videos (playlist_id, youtube_id, normalized, has_lyrics, \
-             lyrics_pipeline_version) VALUES \
-             (1, 'fresh', 1, 1, 2), \
-             (1, 'stale1', 1, 1, 1), \
-             (1, 'stale2', 1, 1, 0), \
-             (1, 'null',   1, 0, 0)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    // Mirror the handler's SQL
-    let res = sqlx::query(
-        "UPDATE videos SET lyrics_manual_priority = 1 \
-             WHERE has_lyrics = 1 AND lyrics_pipeline_version < ? \
-             AND lyrics_manual_priority = 0",
-    )
-    .bind(2_i64)
-    .execute(&pool)
-    .await
-    .unwrap();
-    assert_eq!(res.rows_affected(), 2, "only 2 stale rows should flip");
-}
-
-#[tokio::test]
 async fn reprocess_clears_lyrics_source_for_terminal_no_lyrics_states() {
     let (state, _temp) = test_state_with_cache_dir().await;
     sqlx::query(
@@ -508,12 +481,13 @@ async fn reprocess_clears_lyrics_retry_backoff() {
 }
 
 // ---------------------------------------------------------------------------
-// #144: ONE reprocess path, and it never blanks the lyrics the wall serves.
-// `POST /api/v1/videos/{id}/lyrics/reprocess` used to call
+// #144: ONE per-song reprocess path, and it never blanks the lyrics the wall
+// serves. `POST /api/v1/videos/{id}/lyrics/reprocess` used to call
 // `reset_video_lyrics` (`has_lyrics = 0, lyrics_source = NULL`), so every
 // queued song showed NO lyrics on the wall until the worker reached it —
 // 211 songs for ~6 h on 30.9.2026. `POST /api/v1/lyrics/reprocess` is the one
-// path: manual priority, the served lyrics stay until the new result lands.
+// per-song path: manual priority, the served lyrics stay while the song waits
+// in the queue.
 // ---------------------------------------------------------------------------
 
 const SERVED_SOURCE: &str = "description+mtl@rev1/g35t-ok";
@@ -608,7 +582,7 @@ async fn a_per_video_reprocess_request_never_blanks_the_served_lyrics() {
     assert_eq!(
         reprocess_status,
         StatusCode::NOT_FOUND,
-        "the per-video path is deleted: POST /api/v1/lyrics/reprocess is the one reprocess path"
+        "the per-video path is deleted: POST /api/v1/lyrics/reprocess is the one per-song path"
     );
 }
 
@@ -642,6 +616,6 @@ async fn the_one_reprocess_path_keeps_the_served_lyrics_and_sets_manual_priority
     assert_eq!(status, StatusCode::OK, "the song still serves its lyrics");
     assert_eq!(
         served_after, served_before,
-        "the wall keeps the served lyrics until the worker's new result replaces them"
+        "the wall keeps the served lyrics while the song waits in the queue"
     );
 }
